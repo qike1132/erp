@@ -1,0 +1,48 @@
+---
+description: BUG修复标准操作程序：查日志→修复→请求验证的强制闭环流程
+alwaysApply: true
+---
+
+# BUG 修复标准操作程序 (SOP)
+
+修复任何 BUG 时，**必须**严格按以下三步闭环执行，禁止跳过任何步骤。
+
+## 步骤 1：日志优先诊断
+
+在编写任何修复代码前，**必须**先查阅 `logs/fastapi.log` 中的完整异常堆栈。
+
+```powershell
+# 查看最近的错误
+Get-Content d:\erp_system\logs\fastapi.log -Tail 60
+
+# 搜索特定端点的错误
+Select-String -Path logs\fastapi.log -Pattern "500|Error|Exception" | Select-Object -Last 20
+```
+
+**禁止**：凭理论推测、经验猜测或代码静态分析代替日志诊断。日志中有真实异常类型和堆栈，是唯一可靠的问题定位依据。
+
+## 步骤 2：最小化修复
+
+基于日志确认的真实原因，做最小化代码改动。
+
+## 步骤 3：运行时验证
+
+修复后，**必须**向运行中的服务器发送实际 HTTP 请求验证返回状态码。
+
+```python
+# 示例：直接测试 FastAPI 端点
+import requests
+r = requests.get("http://127.0.0.1:5002/api/v1/...", cookies={...}, timeout=15)
+print(f"Status: {r.status_code}")
+```
+
+```powershell
+# 验证后检查日志确认无新错误
+Get-Content d:\erp_system\logs\fastapi.log -Tail 10
+```
+
+**禁止**：仅依赖代码语法检查或 `python -c "import ..."` 作为验证手段。必须发送 HTTP 请求确认端点返回预期状态码。
+
+## 逐层迭代规则
+
+遇到多个问题时，**必须**按"修复一个 → 验证一个"的顺序逐个处理。每修完一个问题后，必须通过日志和请求确认结果无误，方可进行下一个问题的修复。**禁止**批量修复多个问题后再统一验证，避免问题叠加导致无法定位。
