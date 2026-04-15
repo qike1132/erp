@@ -1,0 +1,108 @@
+{% extends 'base.html' %}
+
+{% block content %}
+    <h2>出货管理</h2>
+    <div class="card mt-3">
+        <div class="card-header">
+            添加出货记录
+        </div>
+        <div class="card-body">
+            <form method="POST">
+                <div class="mb-3">
+                    <label for="stockout_no" class="form-label">出货编号</label>
+                    <input type="text" class="form-control" id="stockout_no" name="stockout_no" required placeholder="例如：STK-OUT-2025001">
+                </div>
+                <div class="mb-3">
+                    <label for="order_id" class="form-label">关联订单</label>
+                    <select class="form-select" id="order_id" name="order_id" required onchange="loadOrderStockins(this.value)">
+                        <option value="">请选择订单</option>
+                        {% for order in orders %}
+                            {% set shipped = order.stockouts | sum(attribute='quantity') %}
+                            <option value="{{ order.id }}">{{ order.order_no }} - {{ order.customer }} - {{ order.product.name }} - 订单数量：{{ order.quantity }} - 已出货：{{ shipped }} - 剩余：{{ order.quantity - shipped }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label for="stockin_id" class="form-label">关联备货（可选）</label>
+                    <select class="form-select" id="stockin_id" name="stockin_id">
+                        <option value="">不关联备货（直接出库）</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label for="quantity" class="form-label">出货数量</label>
+                    <input type="number" class="form-control" id="quantity" name="quantity" value="1" min="1" required>
+                </div>
+                <div class="mb-3">
+                    <label for="stockout_date" class="form-label">出货时间</label>
+                    <input type="date" class="form-control" id="stockout_date" name="stockout_date" value="{{ datetime.now().strftime('%Y-%m-%d') }}">
+                </div>
+                <div class="mb-3">
+                    <label for="note" class="form-label">备注</label>
+                    <textarea class="form-control" id="note" name="note" rows="2" placeholder="例如：物流发货"></textarea>
+                </div>
+                <button type="submit" class="btn btn-primary">添加出货</button>
+            </form>
+        </div>
+    </div>
+    <div class="card mt-4">
+        <div class="card-header">
+            出货记录列表
+        </div>
+        <div class="card-body">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>出货编号</th>
+                        <th>关联订单</th>
+                        <th>产品</th>
+                        <th>出货数量</th>
+                        <th>关联备货</th>
+                        <th>出货时间</th>
+                        <th>备注</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for stockout in stockouts %}
+                        <tr>
+                            <td>{{ stockout.stockout_no }}</td>
+                            <td>{{ stockout.order.order_no }}</td>
+                            <td>{{ stockout.product.name }} ({{ stockout.product.code }})</td>
+                            <td>{{ stockout.quantity }}</td>
+                            <td>{{ stockout.stockin.stockin_no if stockout.stockin else '无' }}</td>
+                            <td>{{ stockout.stockout_date.strftime('%Y-%m-%d') }}</td>
+                            <td>{{ stockout.note or '-' }}</td>
+                        </tr>
+                    {% else %}
+                        <tr>
+                            <td colspan="7" class="text-center">暂无出货记录，请先添加</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <script>
+        // 加载订单对应的备货记录
+        function loadOrderStockins(orderId) {
+            const stockinSelect = document.getElementById('stockin_id');
+            // 清空现有选项
+            stockinSelect.innerHTML = '<option value="">不关联备货（直接出库）</option>';
+            if (!orderId) return;
+            // 获取订单对应的备货记录
+            const stockins = {{ order_stockins | tojson }};
+            if (stockins[orderId]) {
+                stockins[orderId].forEach(stockin => {
+                    // 计算该备货已出货的数量
+                    const shipped = stockin.stockouts.reduce((sum, s) => sum + s.quantity, 0);
+                    const remaining = stockin.quantity - shipped;
+                    if (remaining > 0) {
+                        const option = document.createElement('option');
+                        option.value = stockin.id;
+                        option.textContent = `${stockin.stockin_no} - 备货数量：${stockin.quantity} - 已出货：${shipped} - 剩余：${remaining}`;
+                        stockinSelect.appendChild(option);
+                    }
+                });
+            }
+        }
+    </script>
+{% endblock %}

@@ -1,0 +1,77 @@
+{% extends 'base.html' %}
+
+{% block content %}
+    <h2>库存查询</h2>
+    <div class="card mt-3">
+        <div class="card-header">
+            当前库存状态
+        </div>
+        <div class="card-body">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>产品编号</th>
+                        <th>产品名称</th>
+                        <th>规格</th>
+                        <th>当前库存</th>
+                        <th>库存流水</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for product in products %}
+                        <tr>
+                            <td>{{ product.code }}</td>
+                            <td>{{ product.name }}</td>
+                            <td>{{ product.spec or '-' }}</td>
+                            <td>{{ product.current_stock }}</td>
+                            <td>
+                                <button class="btn btn-sm btn-info" type="button" data-bs-toggle="collapse" data-bs-target="#log-{{ product.id }}" aria-expanded="false" aria-controls="log-{{ product.id }}">
+                                    查看流水
+                                </button>
+                            </td>
+                        </tr>
+                        <tr class="collapse" id="log-{{ product.id }}">
+                            <td colspan="5">
+                                <div class="card card-body mt-2">
+                                    <h6>{{ product.name }} 库存流水</h6>
+                                    <table class="table table-sm table-bordered">
+                                        <thead>
+                                            <tr>
+                                                <th>时间</th>
+                                                <th>类型</th>
+                                                <th>数量变化</th>
+                                                <th>关联单据</th>
+                                                <th>备注</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for log in product_logs[product.id] %}
+                                                <tr>
+                                                    <td>{{ log.change_date.strftime('%Y-%m-%d %H:%M') }}</td>
+                                                    <td>{{ log.change_type }}</td>
+                                                    <td class="{{ 'text-success' if log.change_quantity > 0 else 'text-danger' }}">
+                                                        {{ '+' if log.change_quantity > 0 else '' }}{{ log.change_quantity }}
+                                                    </td>
+                                                    <td>{{ log.related_id or '-' }}</td>
+                                                    <td>{{ log.note or '-' }}</td>
+                                                </tr>
+                                            {% else %}
+                                                <tr>
+                                                    <td colspan="5" class="text-center">暂无流水记录</td>
+                                                </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </td>
+                        </tr>
+                    {% else %}
+                        <tr>
+                            <td colspan="5" class="text-center">暂无产品，请先添加</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+{% endblock %}

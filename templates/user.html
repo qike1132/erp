@@ -1,0 +1,69 @@
+{% extends 'base.html' %}
+
+{% block content %}
+    <h2>用户管理</h2>
+    <div class="card mt-3">
+        <div class="card-header">
+            添加新用户
+        </div>
+        <div class="card-body">
+            <form method="POST">
+                <div class="mb-3">
+                    <label for="username" class="form-label">用户名</label>
+                    <input type="text" class="form-control" id="username" name="username" required placeholder="请输入用户名">
+                </div>
+                <div class="mb-3">
+                    <label for="password" class="form-label">密码</label>
+                    <input type="password" class="form-control" id="password" name="password" required placeholder="请输入密码">
+                </div>
+                <div class="mb-3 form-check">
+                    <input type="checkbox" class="form-check-input" id="is_super" name="is_super">
+                    <label class="form-check-label" for="is_super">超级用户</label>
+                </div>
+                <button type="submit" class="btn btn-primary">添加用户</button>
+            </form>
+        </div>
+    </div>
+    <div class="card mt-4">
+        <div class="card-header">
+            用户列表
+        </div>
+        <div class="card-body">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>用户名</th>
+                        <th>是否超级用户</th>
+                        <th>状态</th>
+                        <th>创建时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for user in users %}
+                        <tr>
+                            <td>{{ user.username }}</td>
+                            <td>{{ '是' if user.is_super else '否' }}</td>
+                            <td>{{ '启用' if user.status else '禁用' }}</td>
+                            <td>{{ user.create_time.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td>
+                                <a href="{{ url_for('edit_user', id=user.id) }}" class="btn btn-sm btn-warning">编辑</a>
+                                <a href="{{ url_for('user_permission', user_id=user.id) }}" class="btn btn-sm btn-info">权限设置</a>
+                                <a href="{{ url_for('toggle_user_status', id=user.id) }}" class="btn btn-sm btn-{{ 'danger' if user.status else 'success' }}">
+                                    {{ '禁用' if user.status else '启用' }}
+                                </a>
+                                {% if not user.is_super %}
+                                    <a href="{{ url_for('delete_user', id=user.id) }}" class="btn btn-sm btn-danger" onclick="return confirm('确定要删除该用户吗？')">删除</a>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% else %}
+                        <tr>
+                            <td colspan="5" class="text-center">暂无用户</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+{% endblock %}

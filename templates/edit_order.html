@@ -1,0 +1,75 @@
+{% extends 'base.html' %}
+{% block content %}
+    <h2><i class="fas fa-edit me-2"></i>编辑订单</h2>
+    <div class="card mt-3">
+        <div class="card-body">
+            <form method="POST">
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label for="order_no" class="form-label">订单编号</label>
+                            <input type="text" class="form-control" id="order_no" name="order_no" value="{{ order.order_no }}" disabled>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label for="customer" class="form-label">客户名称</label>
+                            <input type="text" class="form-control" id="customer" name="customer" value="{{ order.customer }}" required>
+                        </div>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label for="product_id" class="form-label">产品</label>
+                            <select class="form-select" id="product_id" name="product_id" required>
+                                {% for product in products %}
+                                    <option value="{{ product.id }}" {{ 'selected' if product.id == order.product_id else '' }}>
+                                        {{ product.name }} - {{ product.barcode or '无条码' }} - 产地：{{ product.origin or '无' }}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label for="quantity" class="form-label">订单数量</label>
+                            <input type="number" class="form-control" id="quantity" name="quantity" value="{{ order.quantity }}" min="1" required {% if order.status in ['已备货', '已出货'] %}disabled{% endif %}>
+                            {% if order.status in ['已备货', '已出货'] %}
+                                <small class="text-muted">已备货/已出货订单不能修改数量</small>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label for="order_date" class="form-label">下单时间</label>
+                            <input type="date" class="form-control" id="order_date" name="order_date" value="{{ order.order_date.strftime('%Y-%m-%d') }}">
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label for="note" class="form-label">备注</label>
+                            <textarea class="form-control" id="note" name="note" rows="2">{{ order.note }}</textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">当前产品信息</label>
+                    <div class="border p-3 rounded">
+                        {% if order.product.image %}
+                            <img src="{{ order.product.image }}" style="width: 100px; height: 100px; object-fit: cover; margin-bottom: 10px;">
+                        {% endif %}
+                        <div><strong>产品名称：</strong>{{ order.product.name }}</div>
+                        <div><strong>69码：</strong>{{ order.product.barcode or '-' }}</div>
+                        <div><strong>产地：</strong>{{ order.product.origin or '-' }}</div>
+                        <div><strong>当前库存：</strong><span class="badge bg-{{ 'success' if order.product.current_stock > 0 else 'danger' }}">{{ order.product.current_stock }}</span></div>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary"><i class="fas fa-save me-1"></i>保存修改</button>
+                <a href="{{ url_for('orders') }}" class="btn btn-secondary"><i class="fas fa-times me-1"></i>取消</a>
+            </form>
+        </div>
+    </div>
+{% endblock %}

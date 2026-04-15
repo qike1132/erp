@@ -1,0 +1,107 @@
+{% extends 'base.html' %}
+{% block content %}
+    <h2>编辑产品</h2>
+    <div class="card mt-3">
+        <div class="card-body">
+            <form method="POST">
+                <div class="mb-3">
+                    <label for="code" class="form-label">产品编号</label>
+                    <input type="text" class="form-control" id="code" name="code" value="{{ product.code }}" disabled>
+                </div>
+                <div class="mb-3">
+                    <label for="name" class="form-label">产品名称</label>
+                    <input type="text" class="form-control" id="name" name="name" value="{{ product.name }}" required>
+                </div>
+                <div class="mb-3">
+                    <label for="spec" class="form-label">产品规格</label>
+                    <input type="text" class="form-control" id="spec" name="spec" value="{{ product.spec }}">
+                </div>
+                <div class="mb-3">
+                    <label for="barcode" class="form-label">69码/商品条码</label>
+                    <input type="text" class="form-control" id="barcode" name="barcode" value="{{ product.barcode or '' }}" placeholder="例如：6958085574210">
+                </div>
+                <div class="mb-3">
+                    <label for="origin" class="form-label">产地</label>
+                    <select class="form-select" id="origin" name="origin">
+                        <option value="东莞" {% if product.origin == '东莞' %}selected{% endif %}>东莞</option>
+                        <option value="湖北" {% if product.origin == '湖北' %}selected{% endif %}>湖北</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">产品图片</label>
+                    <div id="image-upload-area" class="border border-dashed p-4 text-center" style="min-height: 100px;">
+                        <p>拖拽图片到这里，或者点击选择图片</p>
+                        <input type="file" id="image-input" style="display: none;" accept="image/*">
+                        <input type="hidden" id="image-url" name="image" value="{{ product.image or '' }}">
+                        <div id="image-preview" class="mt-2">
+                            {% if product.image %}
+                                <img src="{{ product.image }}" style="max-width: 200px; max-height: 200px;">
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label for="initial_stock" class="form-label">初始库存</label>
+                    <input type="number" class="form-control" id="initial_stock" name="initial_stock" value="{{ product.initial_stock }}" min="0" required>
+                </div>
+                <button type="submit" class="btn btn-primary">保存修改</button>
+                <a href="{{ url_for('products') }}" class="btn btn-secondary">取消</a>
+            </form>
+        </div>
+    </div>
+    <script>
+    // 图片上传区域
+    const uploadArea = document.getElementById('image-upload-area');
+    const imageInput = document.getElementById('image-input');
+    const imagePreview = document.getElementById('image-preview');
+    const imageUrlInput = document.getElementById('image-url');
+    // 点击上传区域选择图片
+    uploadArea.addEventListener('click', () => {
+        imageInput.click();
+    });
+    // 拖拽上传
+    uploadArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadArea.classList.add('border-primary');
+    });
+    uploadArea.addEventListener('dragleave', () => {
+        uploadArea.classList.remove('border-primary');
+    });
+    uploadArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadArea.classList.remove('border-primary');
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            uploadImage(files[0]);
+        }
+    });
+    // 选择图片
+    imageInput.addEventListener('change', (e) => {
+        const files = e.target.files;
+        if (files.length > 0) {
+            uploadImage(files[0]);
+        }
+    });
+    // 上传图片
+    function uploadImage(file) {
+        const formData = new FormData();
+        formData.append('file', file);
+        fetch('/upload', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.url) {
+                imageUrlInput.value = data.url;
+                imagePreview.innerHTML = `<img src="${data.url}" style="max-width: 200px; max-height: 200px;">`;
+            } else {
+                alert(data.error || '上传失败');
+            }
+        })
+        .catch(error => {
+            alert('上传失败：' + error);
+        });
+    }
+    </script>
+{% endblock %}

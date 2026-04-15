@@ -1,0 +1,155 @@
+{% extends 'base.html' %}
+{% block content %}
+    <h2>产品管理</h2>
+    <div class="card mt-3">
+        <div class="card-header">
+            添加新产品
+        </div>
+        <div class="card-body">
+            <form method="POST">
+                <div class="mb-3">
+                    <label for="code" class="form-label">产品编号</label>
+                    <input type="text" class="form-control" id="code" name="code" required placeholder="例如：TOY-001">
+                </div>
+                <div class="mb-3">
+                    <label for="name" class="form-label">产品名称</label>
+                    <input type="text" class="form-control" id="name" name="name" required placeholder="例如：小熊毛绒玩具">
+                </div>
+                <div class="mb-3">
+                    <label for="spec" class="form-label">产品规格</label>
+                    <input type="text" class="form-control" id="spec" name="spec" placeholder="例如：30cm 棕色">
+                </div>
+                <div class="mb-3">
+                    <label for="barcode" class="form-label">69码/商品条码</label>
+                    <input type="text" class="form-control" id="barcode" name="barcode" placeholder="例如：6958085574210">
+                </div>
+                <div class="mb-3">
+                    <label for="origin" class="form-label">产地</label>
+                    <select class="form-select" id="origin" name="origin">
+                        <option value="东莞">东莞</option>
+                        <option value="湖北">湖北</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">产品图片</label>
+                    <div id="image-upload-area" class="border border-dashed p-4 text-center" style="min-height: 100px;">
+                        <p>拖拽图片到这里，或者点击选择图片</p>
+                        <input type="file" id="image-input" style="display: none;" accept="image/*">
+                        <input type="hidden" id="image-url" name="image" value="">
+                        <div id="image-preview" class="mt-2"></div>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label for="initial_stock" class="form-label">初始库存</label>
+                    <input type="number" class="form-control" id="initial_stock" name="initial_stock" value="0" min="0" required>
+                </div>
+                <button type="submit" class="btn btn-primary">添加产品</button>
+            </form>
+        </div>
+    </div>
+    <div class="card mt-4">
+        <div class="card-header">
+            产品列表
+        </div>
+        <div class="card-body">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>产品图片</th>
+                        <th>产品名称</th>
+                        <th>69码</th>
+                        <th>产地</th>
+                        <th>产品编号</th>
+                        <th>规格</th>
+                        <th>初始库存</th>
+                        <th>当前库存</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for product in products %}
+                        <tr>
+                            <td>
+                                {% if product.image %}
+                                    <img src="{{ product.image }}" style="width: 50px; height: 50px; object-fit: cover;">
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </td>
+                            <td>{{ product.name }}</td>
+                            <td>{{ product.barcode or '-' }}</td>
+                            <td>{{ product.origin or '-' }}</td>
+                            <td>{{ product.code }}</td>
+                            <td>{{ product.spec or '-' }}</td>
+                            <td>{{ product.initial_stock }}</td>
+                            <td>{{ product.current_stock }}</td>
+                            <td>
+                                <a href="{{ url_for('edit_product', id=product.id) }}" class="btn btn-sm btn-warning">编辑</a>
+                                <a href="{{ url_for('delete_product', id=product.id) }}" class="btn btn-sm btn-danger" onclick="return confirm('确定要删除该产品吗？')">删除</a>
+                            </td>
+                        </tr>
+                    {% else %}
+                        <tr>
+                            <td colspan="9" class="text-center">暂无产品，请先添加</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <script>
+    // 图片上传区域
+    const uploadArea = document.getElementById('image-upload-area');
+    const imageInput = document.getElementById('image-input');
+    const imagePreview = document.getElementById('image-preview');
+    const imageUrlInput = document.getElementById('image-url');
+    // 点击上传区域选择图片
+    uploadArea.addEventListener('click', () => {
+        imageInput.click();
+    });
+    // 拖拽上传
+    uploadArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadArea.classList.add('border-primary');
+    });
+    uploadArea.addEventListener('dragleave', () => {
+        uploadArea.classList.remove('border-primary');
+    });
+    uploadArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadArea.classList.remove('border-primary');
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            uploadImage(files[0]);
+        }
+    });
+    // 选择图片
+    imageInput.addEventListener('change', (e) => {
+        const files = e.target.files;
+        if (files.length > 0) {
+            uploadImage(files[0]);
+        }
+    });
+    // 上传图片
+    function uploadImage(file) {
+        const formData = new FormData();
+        formData.append('file', file);
+        fetch('/upload', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.url) {
+                imageUrlInput.value = data.url;
+                imagePreview.innerHTML = `<img src="${data.url}" style="max-width: 200px; max-height: 200px;">`;
+            } else {
+                alert(data.error || '上传失败');
+            }
+        })
+        .catch(error => {
+            alert('上传失败：' + error);
+        });
+    }
+    </script>
+{% endblock %}

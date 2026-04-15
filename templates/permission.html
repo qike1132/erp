@@ -1,0 +1,24 @@
+{% extends 'base.html' %}
+
+{% block content %}
+    <h2>权限设置 - {{ user.username }}</h2>
+    <div class="card mt-3">
+        <div class="card-body">
+            <form method="POST">
+                <div class="mb-3">
+                    <h5>权限列表</h5>
+                    <div class="list-group">
+                        {% for permission in permissions %}
+                            <div class="list-group-item">
+                                <input type="checkbox" id="permission-{{ permission.id }}" name="permission_ids" value="{{ permission.id }}" {{ 'checked' if permission.id in user_permission_ids else '' }}>
+                                <label for="permission-{{ permission.id }}">{{ permission.name }}</label>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary">保存权限</button>
+                <a href="{{ url_for('users') }}" class="btn btn-secondary">取消</a>
+            </form>
+        </div>
+    </div>
+{% endblock %}

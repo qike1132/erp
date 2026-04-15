@@ -1,0 +1,99 @@
+{% extends 'base.html' %}
+
+{% block content %}
+    <h2>报表统计</h2>
+    <div class="row mt-3">
+        <div class="col-md-3">
+            <div class="card text-white bg-primary mb-3">
+                <div class="card-header">总订单数</div>
+                <div class="card-body">
+                    <h5 class="card-title">{{ total_orders }}</h5>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-white bg-success mb-3">
+                <div class="card-header">已完成订单</div>
+                <div class="card-body">
+                    <h5 class="card-title">{{ shipped_orders }}</h5>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-white bg-warning mb-3">
+                <div class="card-header">待处理订单</div>
+                <div class="card-body">
+                    <h5 class="card-title">{{ pending_orders }}</h5>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-white bg-info mb-3">
+                <div class="card-header">总库存</div>
+                <div class="card-body">
+                    <h5 class="card-title">{{ total_stock }}</h5>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="row mt-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">备货与出货统计</div>
+                <div class="card-body">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>类型</th>
+                                <th>总数量</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>总备货量</td>
+                                <td>{{ total_stockin }}</td>
+                            </tr>
+                            <tr>
+                                <td>总出货量</td>
+                                <td>{{ total_stockout }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">产品销售与库存统计</div>
+                <div class="card-body">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>产品名称</th>
+                                <th>订单数量</th>
+                                <th>备货数量</th>
+                                <th>出货数量</th>
+                                <th>当前库存</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for stat in product_stats %}
+                                <tr>
+                                    <td>{{ stat.name }} ({{ stat.code }})</td>
+                                    <td>{{ stat.order_quantity }}</td>
+                                    <td>{{ stat.stockin_quantity }}</td>
+                                    <td>{{ stat.stockout_quantity }}</td>
+                                    <td>{{ stat.current_stock }}</td>
+                                </tr>
+                            {% else %}
+                                <tr>
+                                    <td colspan="5" class="text-center">暂无产品统计数据</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}
