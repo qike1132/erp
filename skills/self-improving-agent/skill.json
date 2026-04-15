@@ -1,0 +1,17 @@
+{
+  "name": "self-improvement",
+  "description": "Captures learnings, errors, and corrections to enable continuous improvement. Use when: (1) A command or operation fails unexpectedly, (2) User corrects Claude, (3) User requests a capability that doesn't exist, (4) An external API or tool fails, (5) Knowledge is outdated or incorrect, (6) A better approach is discovered for a recurring task.",
+  "version": "3.0.1",
+  "author": "peterskoett",
+  "tags": ["productivity", "learning", "improvement", "documentation"],
+  "triggers": [
+    "error detected",
+    "user correction",
+    "feature request",
+    "knowledge gap",
+    "best practice discovered",
+    "recurring pattern"
+  ],
+  "instructions": "Log learnings and errors to markdown files for continuous improvement. When an error occurs or user provides correction:\n\n1. Log to .learnings/ERRORS.md for command failures\n2. Log to .learnings/LEARNINGS.md for corrections and knowledge gaps\n3. Log to .learnings/FEATURE_REQUESTS.md for missing capabilities\n4. Review existing learnings before starting major tasks\n5. Promote broadly applicable learnings to CLAUDE.md, AGENTS.md, or .github/copilot-instructions.md\n\nUse the self-improvement skill format with ID (LRN-YYYYMMDD-XXX, ERR-YYYYMMDD-XXX, or FEAT-YYYYMMDD-XXX), priority, status, area, summary, details, and metadata.",
+  "enabled": true
+}

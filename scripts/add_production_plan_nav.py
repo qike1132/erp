@@ -1,0 +1,68 @@
+"""
+添加排产计划导航项和权限到 Permission 表
+
+运行方式（在项目根目录）:
+    python scripts/add_production_plan_nav.py
+"""
+import sys
+import os
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+from app import create_app, db
+from app.models import Permission
+
+
+def main():
+    app = create_app()
+    with app.app_context():
+        # 检查是否已存在
+        existing = Permission.query.filter_by(code='production_plan_view').first()
+        if existing:
+            print(f"[SKIP] 排产计划导航项已存在 (id={existing.id})")
+            return
+
+        # 找到 core section 的最大 sort_order
+        core_items = Permission.query.filter_by(
+            section='core', is_nav=True
+        ).order_by(Permission.sort_order.desc()).first()
+        next_sort = (core_items.sort_order + 10) if core_items else 10
+
+        # 添加导航项（查看权限）
+        nav = Permission(
+            name='排产计划',
+            code='production_plan_view',
+            icon='fa-calendar-alt',
+            url='production_plan.plan_list',
+            section='core',
+            section_name='核心业务',
+            sort_order=next_sort,
+            is_nav=True,
+        )
+        db.session.add(nav)
+
+        # 添加管理权限（子权限，不在导航显示）
+        manage_perm = Permission(
+            name='管理排产计划',
+            code='production_plan_manage',
+            parent_id=None,
+            is_nav=False,
+        )
+        db.session.add(manage_perm)
+
+        db.session.commit()
+
+        # 清除 Redis 导航缓存
+        try:
+            from utils.redis_cache import redis_cache
+            redis_cache.delete('nav_sections')
+            print("[OK] 已清除导航缓存")
+        except Exception:
+            print("[WARN] 清除导航缓存失败，请手动重启或等待缓存过期")
+
+        print(f"[OK] 排产计划导航项已添加 (id={nav.id}, sort_order={next_sort})")
+        print(f"[OK] 排产计划管理权限已添加 (code=production_plan_manage)")
+
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,81 @@
+{
+  "version": "2.0.0",
+  "name": "Query Guard Configuration",
+  "description": "Security and validation layer for Agent queries",
+  
+  "enabled": true,
+  
+  "rateLimiting": {
+    "enabled": true,
+    "global": {
+      "maxRequestsPerMinute": 120,
+      "maxRequestsPerHour": 2000,
+      "burstLimit": 20
+    },
+    "perAgent": {
+      "frontend-developer": { "maxRequestsPerMinute": 30, "burstLimit": 5 },
+      "backend-architect": { "maxRequestsPerMinute": 40, "burstLimit": 8 },
+      "code-reviewer": { "maxRequestsPerMinute": 15, "burstLimit": 3 },
+      "default": { "maxRequestsPerMinute": 10, "burstLimit": 2 }
+    },
+    "whitelistAgents": ["agents-orchestrator", "incident-response-commander"]
+  },
+  
+  "inputValidation": {
+    "enabled": true,
+    "maxLength": 100000,
+    "allowedTypes": ["string", "object", "array", "number", "boolean"],
+    "blockedPatterns": [
+      "<script",
+      "eval(",
+      "require(",
+      "import(",
+      "__proto__",
+      "constructor",
+      "prototype"
+    ],
+    "sanitizationRules": {
+      "removeNullBytes": true,
+      "normalizeUnicode": true,
+      "trimWhitespace": true,
+      "escapeHtml": false
+    }
+  },
+  
+  "malwareDetection": {
+    "enabled": true,
+    "checkPatterns": ["injection", "xss", "path_traversal", "command_injection"],
+    "blockOnDetection": true,
+    "logOnly": false,
+    "quarantineDuration": 3600000
+  },
+  
+  "permissionValidation": {
+    "enabled": true,
+    "strictMode": true,
+    "allowedActions": [
+      "read_file",
+      "write_file",
+      "execute_command",
+      "search_codebase",
+      "run_tests",
+      "install_package"
+    ],
+    "restrictedActions": [
+      "delete_file",
+      "modify_config",
+      "access_secrets",
+      "network_request",
+      "system_command"
+    ],
+    "requireExplicitPermission": true
+  },
+  
+  "auditLogging": {
+    "enabled": true,
+    "logLevel": "info",
+    "includeRequestDetails": true,
+    "includeResponseSummary": true,
+    "retentionDays": 90
+  }
+}

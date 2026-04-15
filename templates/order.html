@@ -1,188 +1,171 @@
 {% extends 'base.html' %}
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='order.css') }}">
+{% endblock %}
+
 {% block content %}
     <h2>订单管理</h2>
-    <!-- 标签页 -->
-    <ul class="nav nav-tabs mt-3" id="orderTabs" role="tablist">
-        <li class="nav-item" role="presentation">
-            <button class="nav-link active" id="main-data-tab" data-bs-toggle="tab" data-bs-target="#main-data" type="button" role="tab" aria-controls="main-data" aria-selected="true">主数据</button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="inspect-data-tab" data-bs-toggle="tab" data-bs-target="#inspect-data" type="button" role="tab" aria-controls="inspect-data" aria-selected="false">验货数据</button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="design-tab" data-bs-toggle="tab" data-bs-target="#design" type="button" role="tab" aria-controls="design" aria-selected="false">设计稿</button>
-        </li>
-    </ul>
-    <div class="tab-content" id="orderTabsContent">
-        <!-- 主数据标签页 -->
-        <div class="tab-pane fade show active" id="main-data" role="tabpanel" aria-labelledby="main-data-tab">
-            <!-- 添加新订单 -->
+    
+    <div class="row">
+        <div class="col-lg-6">
             <div class="card mt-3">
                 <div class="card-header d-flex justify-content-between align-items-center">
-                    <span>添加新订单</span>
-                    <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#stockinDeductionSection">
-                        <i class="fas fa-plus-circle"></i> 自定义抵扣备货
-                    </button>
+                    <span>订单信息录入</span>
+                    <span class="badge bg-light text-dark" id="stagedCountBadge" style="display: none;">已暂存: 0</span>
                 </div>
                 <div class="card-body">
-                    <form method="POST" id="orderForm">
-                        <div class="row">
+                    <form id="orderForm">
+                        <input type="hidden" id="deduct_stock" name="deduct_stock" value="off">
+                        <input type="hidden" id="deduct_stockins" name="deduct_stockins" value="">
+                        
+                        <div class="row mb-3">
                             <div class="col-md-6">
-                                <div class="mb-3">
-                                    <label for="order_no" class="form-label">订单编号</label>
-                                    <input type="text" class="form-control" id="order_no" name="order_no" required placeholder="例如：ORD-2025001">
-                                </div>
+                                <label for="order_date" class="form-label">订单时间</label>
+                                <input type="date" class="form-control" id="order_date" name="order_date" value="{{ datetime.now().strftime('%Y-%m-%d') if datetime else '' }}" required>
                             </div>
                             <div class="col-md-6">
-                                <div class="mb-3">
-                                    <label for="customer" class="form-label">客户名称</label>
-                                    <input type="text" class="form-control" id="customer" name="customer" required placeholder="例如：XX玩具店">
-                                </div>
-                            </div>
-                        </div>
-                        <div class="row">
-                            <div class="col-md-6">
-                                <div class="mb-3">
-                                    <label for="product_id" class="form-label">产品</label>
-                                    <select class="form-select" id="product_id" name="product_id" required>
-                                        <option value="">请选择产品</option>
-                                        {% for product in products %}
-                                            <option value="{{ product.id }}">
-                                                {{ product.name }} - {{ product.barcode or '无条码' }} - 产地：{{ product.origin or '无' }}
-                                            </option>
-                                        {% endfor %}
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="mb-3">
-                                    <label for="quantity" class="form-label">订单数量</label>
-                                    <input type="number" class="form-control" id="quantity" name="quantity" value="1" min="1" required>
-                                </div>
+                                <label for="customer" class="form-label">客户名称</label>
+                                <select class="form-select" id="customer" name="customer" required>
+                                    <option value="">请选择客户</option>
+                                    {% for c in customers %}
+                                    <option value="{{ c.name }}">{{ c.name }}</option>
+                                    {% endfor %}
+                                </select>
                             </div>
                         </div>
-                        <div class="row">
-                            <div class="col-md-6">
-                                <div class="mb-3">
-                                    <label for="order_date" class="form-label">下单时间</label>
-                                    <input type="date" class="form-control" id="order_date" name="order_date" value="{{ datetime.now().strftime('%Y-%m-%d') }}">
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="mb-3">
-                                    <label for="note" class="form-label">备注</label>
-                                    <textarea class="form-control" id="note" name="note" rows="2" placeholder="例如：加急订单"></textarea>
-                                </div>
-                            </div>
+                        
+                        <div class="mb-3" style="position: relative;">
+                            <label for="product_search" class="form-label">产品名称</label>
+                            <input type="text" class="form-control" id="product_search" name="product_search" placeholder="输入产品名称或69码搜索" autocomplete="off" required>
+                            <input type="hidden" id="product_id" name="product_id">
+                            <div id="product_autocomplete" class="autocomplete-dropdown" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: white; border: 2px solid var(--plush-blue-light); border-radius: var(--radius-input); box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 1000; max-height: 200px; overflow-y: auto;"></div>
                         </div>
-                        <!-- 备货抵扣区域 -->
-                        <div class="collapse mt-3" id="stockinDeductionSection">
-                            <div class="card bg-light">
-                                <div class="card-body">
-                                    <h6 class="card-title"><i class="fas fa-warehouse me-2"></i>备货抵扣</h6>
-                                    <div class="mb-3">
-                                        <label for="stockin_product_id" class="form-label">选择备货SKU</label>
-                                        <select class="form-select" id="stockin_product_id">
-                                            <option value="">请选择备货SKU</option>
-                                        </select>
-                                    </div>
-                                    <div class="row">
-                                        <div class="col-md-6">
-                                            <div class="mb-3">
-                                                <label for="stockin_quantity" class="form-label">抵扣数量</label>
-                                                <input type="number" class="form-control" id="stockin_quantity" min="1" value="1">
-                                                <div class="form-text">当前SKU剩余备货数量：<span id="remaining_stock" class="fw-bold text-primary">0</span></div>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-6 d-flex align-items-end">
-                                            <div class="mb-3">
-                                                <button type="button" class="btn btn-primary" onclick="addStockinToSelection()">添加到抵扣列表</button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="mb-3">
-                                        <label class="form-label">已选抵扣备货</label>
-                                        <div id="selected_stockins" class="table-responsive">
-                                            <table class="table table-bordered table-sm">
-                                                <thead class="table-light">
-                                                    <tr>
-                                                        <th>备货编号</th>
-                                                        <th>产品</th>
-                                                        <th>抵扣数量</th>
-                                                        <th>操作</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody id="selected_stockins_body">
-                                                </tbody>
-                                            </table>
-                                        </div>
+                        
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="quantity" class="form-label">订单数量</label>
+                                <input type="number" class="form-control" id="quantity" name="quantity" value="1" min="1" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">抵扣备货数量</label>
+                                <div class="d-flex align-items-center">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="deductPreviewBtn">
+                                        抵扣备货
+                                    </button>
+                                    <div id="deductible_quantity_container" style="display: inline-block;">
+                                        <small id="deductible_quantity_display" class="text-muted deductible-display" style="cursor: pointer; padding: 8px 14px; border-radius: 12px; border: 2px dashed #adb5bd; background-color: #f8f9fa;">
+                                            <i class="fas fa-edit me-1" style="font-size: 11px;"></i>抵扣: <span id="deductible_value">0</span>
+                                        </small>
                                     </div>
                                 </div>
+                                <div id="stockin_info_display" class="mt-2" style="display: none;">
+                                    <small class="text-muted">
+                                        <i class="fas fa-info-circle me-1"></i>
+                                        <span id="stockin_info_text"></span>
+                                    </small>
+                                </div>
                             </div>
                         </div>
-                        <input type="hidden" id="stockins_data" name="stockins_data" value="">
-                        <button type="submit" class="btn btn-primary">添加订单</button>
+                        
+                        <div class="mb-3">
+                            <label for="note" class="form-label">备注</label>
+                            <textarea class="form-control" id="note" name="note" rows="2" placeholder="例如：加急订单"></textarea>
+                        </div>
+                        
+                        <div class="d-flex gap-2">
+                            <button type="button" class="btn btn-secondary" id="addNewOrderBtn" disabled>
+                                <i class="fas fa-plus-circle me-1"></i>新增订单
+                            </button>
+                        </div>
                     </form>
                 </div>
             </div>
-            <!-- 订单列表 -->
-            <div class="card mt-4">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <span><i class="fas fa-list me-2"></i>订单列表</span>
-                    <span class="badge bg-secondary">{{ orders|length }} 条记录</span>
+        </div>
+        
+        <div class="col-lg-6">
+            <div class="card mt-3">
+                <div class="card-header">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span>暂存订单列表</span>
+                        <span class="badge bg-light text-dark" id="totalStagedCount">共 0 个</span>
+                    </div>
                 </div>
                 <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table table-striped table-hover">
-                            <thead class="table-light">
-                                <tr>
-                                    <th>订单编号</th>
-                                    <th>客户</th>
-                                    <th>产品图片</th>
-                                    <th>产品名称</th>
-                                    <th>69码</th>
-                                    <th>产地</th>
-                                    <th>数量</th>
-                                    <th>下单时间</th>
-                                    <th>状态</th>
-                                    <th>操作</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for order in orders %}
-                                    <tr>
-                                        <td><strong>{{ order.order_no }}</strong></td>
-                                        <td>{{ order.customer }}</td>
-                                        <td>
-                                            {% if order.product.image %}
-                                                <img src="{{ order.product.image }}" style="width: 50px; height: 50px; object-fit: cover;">
-                                            {% else %}
-                                                <span class="text-muted">-</span>
-                                            {% endif %}
-                                        </td>
-                                        <td>{{ order.product.name }}</td>
-                                        <td>{{ order.product.barcode or '-' }}</td>
-                                        <td>{{ order.product.origin or '-' }}</td>
-                                        <td><span class="badge bg-primary">{{ order.quantity }}</span></td>
-                                        <td>{{ order.order_date.strftime('%Y-%m-%d') }}</td>
-                                        <td>
-                                            <span class="badge bg-{{ 'success' if order.status == '已出货' else 'warning' if order.status == '已备货' else 'info' if order.status == '部分备货' else 'primary' if order.status == '待备货' else 'secondary' }}">
-                                                {{ order.status }}
-                                            </span>
-                                        </td>
-                                        <td>
-                                            <a href="{{ url_for('edit_order', id=order.id) }}" class="btn btn-sm btn-warning"><i class="fas fa-edit"></i> 编辑</a>
-                                            <a href="{{ url_for('delete_order', id=order.id) }}" class="btn btn-sm btn-danger" onclick="return confirm('确定要删除该订单吗？')"><i class="fas fa-trash"></i> 删除</a>
-                                        </td>
-                                    </tr>
-                                {% else %}
-                                    <tr>
-                                        <td colspan="10" class="text-center text-muted">暂无订单，请先添加</td>
-                                    </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
+                    <div id="stagedOrdersList" style="max-height: 400px; overflow-y: auto;">
+                        <div class="text-center text-muted py-4">
+                            <i class="fas fa-box-open fa-3x mb-3" style="opacity: 0.3;"></i>
+                            <p>暂无暂存订单</p>
+                        </div>
                     </div>
+                </div>
+            </div>
+            
+            <div class="card mt-3">
+                <div class="card-header d-flex justify-content-between align-items-center collapse-trigger" style="cursor: pointer;" id="batchUploadHeader">
+                    <h6 class="mb-0 fw-bold">批量导入订单</h6>
+                    <i class="fas fa-chevron-down collapse-arrow"></i>
+                </div>
+                <div class="collapse-content" id="collapseBatchUpload">
+                    <div class="card-body">
+                        <div id="excel-upload-area" class="border border-dashed p-4 text-center rounded" 
+                             style="min-height: 120px; cursor: pointer; background: #fafafa; border-color: #dee2e6 !important;">
+                            <div class="d-flex flex-column align-items-center justify-content-center" style="min-height: 80px;">
+                                <i class="fas fa-file-excel fa-2x text-success mb-2" style="opacity: 0.8;"></i>
+                                <p class="text-muted mb-1 small">拖拽或点击选择 Excel 文件</p>
+                                <p class="text-muted mb-0" style="font-size: 11px; color: #adb5bd;">支持 .xlsx / .xls 格式</p>
+                            </div>
+                            <input type="file" id="excel-input" style="display: none;" accept=".xlsx,.xls">
+                            <div id="excel-preview" class="mt-3"></div>
+                            <div id="upload-status" class="mt-3"></div>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center mt-3">
+                            <a id="download-template" class="btn btn-outline-secondary btn-sm" href="/api/v1/batch/download-template" download>
+                                <i class="fas fa-download me-2"></i>订单模板
+                            </a>
+                            <button id="batch-import" class="btn btn-success btn-sm" disabled>
+                                <i class="fas fa-file-import me-2"></i>确认导入
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="card mt-4">
+        <div class="card-body text-center py-4">
+            <button type="button" class="btn btn-primary btn-lg" id="submitAllOrdersBtn" disabled style="min-width: 200px;">
+                <i class="fas fa-paper-plane me-2"></i>
+                <span id="submitBtnText">添加订单</span>
+                <span id="submitBtnSpinner" class="spinner-border spinner-border-sm" style="display: none;"></span>
+            </button>
+        </div>
+    </div>
+    
+    <div class="card mt-4">
+        <div class="card-header">
+            订单列表
+        </div>
+        <div class="card-body">
+            <div id="orderListGrouped">
+                <!-- 订单列表将通过JavaScript动态生成 -->
+            </div>
+        </div>
+    </div>
+    
+    <div class="modal fade" id="editStagedOrderModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">编辑暂存订单</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="editStagedOrderContent"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" id="saveEditStagedOrderBtn">保存</button>
                 </div>
             </div>
         </div>
@@ -190,105 +173,38 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='order.js') }}"></script>
 <script>
-let selectedStockins = [];
+// ========== 从模板注入全局数据 ==========
+window.__ordersData = {{ orders_json | safe }};
+window.__customers = [{% for c in customers %}{"name":"{{ c.name | replace('"', '\\"') }}"}{% if not loop.last %},{% endif %}{% endfor %}];
 
-document.addEventListener('DOMContentLoaded', function() {
-    loadAvailableStockins();
-    
-    document.getElementById('orderForm').addEventListener('submit', function(e) {
-        document.getElementById('stockins_data').value = JSON.stringify(selectedStockins);
-    });
-    
-    document.getElementById('stockin_product_id').addEventListener('change', updateStockinInfo);
+// ========== 产品搜索自动补全 - 内联注册，参照备货管理模块 ==========
+document.getElementById('product_search').addEventListener('input', function(e) {
+    const query = e.target.value.trim();
+    if (!query) {
+        document.getElementById('product_autocomplete').style.display = 'none';
+        document.getElementById('product_id').value = '';
+        updateAddNewOrderButtonState();
+        return;
+    }
+    searchProducts(query);
+    updateAddNewOrderButtonState();
 });
 
-function loadAvailableStockins() {
-    fetch('/api/available-stockins')
-        .then(response => response.json())
-        .then(data => {
-            const select = document.getElementById('stockin_product_id');
-            select.innerHTML = '<option value="">请选择备货SKU</option>';
-            data.forEach(stockin => {
-                const option = document.createElement('option');
-                option.value = stockin.id;
-                option.textContent = `${stockin.stockin_no} - ${stockin.product_name} (剩余: ${stockin.remaining_quantity})`;
-                select.appendChild(option);
-            });
-        });
-}
+document.getElementById('product_search').addEventListener('blur', function() {
+    setTimeout(function() {
+        document.getElementById('product_autocomplete').style.display = 'none';
+    }, 200);
+});
 
-function updateStockinInfo() {
-    const stockinId = document.getElementById('stockin_product_id').value;
-    if (!stockinId) {
-        document.getElementById('remaining_stock').textContent = '0';
-        return;
+document.getElementById('product_search').addEventListener('focus', function(e) {
+    if (e.target.value.trim()) {
+        searchProducts(e.target.value);
     }
-    
-    fetch(`/api/stockin-info/${stockinId}`)
-        .then(response => response.json())
-        .then(data => {
-            document.getElementById('remaining_stock').textContent = data.remaining_quantity;
-        });
-}
+});
 
-function addStockinToSelection() {
-    const stockinId = document.getElementById('stockin_product_id').value;
-    const quantity = parseInt(document.getElementById('stockin_quantity').value);
-    
-    if (!stockinId || !quantity || quantity <= 0) {
-        alert('请选择备货SKU并输入有效数量');
-        return;
-    }
-    
-    fetch(`/api/stockin-info/${stockinId}`)
-        .then(response => response.json())
-        .then(data => {
-            if (quantity > data.remaining_quantity) {
-                alert('抵扣数量不能超过剩余备货数量');
-                return;
-            }
-            
-            const existing = selectedStockins.find(s => s.id == stockinId);
-            if (existing) {
-                if (existing.quantity + quantity > data.remaining_quantity) {
-                    alert('该备货的总抵扣数量不能超过剩余备货数量');
-                    return;
-                }
-                existing.quantity += quantity;
-            } else {
-                selectedStockins.push({
-                    id: stockinId,
-                    stockin_no: data.stockin_no,
-                    product_name: data.product_name,
-                    quantity: quantity
-                });
-            }
-            
-            renderSelectedStockins();
-            document.getElementById('stockin_quantity').value = 1;
-            updateStockinInfo();
-        });
-}
-
-function removeStockinFromSelection(stockinId) {
-    selectedStockins = selectedStockins.filter(s => s.id != stockinId);
-    renderSelectedStockins();
-}
-
-function renderSelectedStockins() {
-    const tbody = document.getElementById('selected_stockins_body');
-    tbody.innerHTML = '';
-    selectedStockins.forEach(stockin => {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td>${stockin.stockin_no}</td>
-            <td>${stockin.product_name}</td>
-            <td>${stockin.quantity}</td>
-            <td><button class="btn btn-danger btn-sm" onclick="removeStockinFromSelection(${stockin.id})">删除</button></td>
-        `;
-        tbody.appendChild(row);
-    });
-}
+// ========== 批量上传初始化 - 内联调用，确保下载模板按钮可用 ==========
+initBatchUpload();
 </script>
 {% endblock %}

@@ -1,0 +1,157 @@
+{
+  "test_time": "2026-04-06T09:47:39.267914",
+  "environment": {
+    "python_version": "3.13.12 (tags/v3.13.12:1cbe481, Feb  3 2026, 18:22:25) [MSC v.1944 64 bit (AMD64)]",
+    "platform": "win32"
+  },
+  "tests": {
+    "cache": {
+      "baseline": {
+        "time_ms": 4.88,
+        "ops_per_sec": 1024569,
+        "hit_rate": 98.99,
+        "memory_entries": 100
+      },
+      "optimized": {
+        "time_ms": 7.76,
+        "ops_per_sec": 643948,
+        "hit_rate": 98.0,
+        "memory_entries": 100,
+        "layer": "unknown"
+      },
+      "improvement": {
+        "speedup": 0.63,
+        "time_saved_ms": -2.88,
+        "time_saved_pct": -59.11,
+        "hit_rate_improvement": -0.99
+      }
+    },
+    "permission": {
+      "baseline": {
+        "time_ms": 3.11,
+        "ops_per_sec": 321368,
+        "approved_count": 710,
+        "denied_count": 290,
+        "features": [
+          "简单模式匹配"
+        ]
+      },
+      "optimized": {
+        "time_ms": 23.62,
+        "ops_per_sec": 42334,
+        "approved_count": 710,
+        "denied_count": 290,
+        "features": [
+          "7步评估管道",
+          "Transcript学习",
+          "危险度分级",
+          "审计日志",
+          "自动审批"
+        ],
+        "audit_entries": 0
+      },
+      "improvement": {
+        "features_added": 4,
+        "audit_trail": true,
+        "ml_learning": true,
+        "auto_approval": true
+      }
+    },
+    "execution": {
+      "baseline": {
+        "time_ms": 852.05,
+        "ops_per_sec": 587,
+        "actual_calls": 500,
+        "cache_hit_rate": 0,
+        "retry_count": 0
+      },
+      "optimized": {
+        "time_ms": 84.37,
+        "ops_per_sec": 5927,
+        "actual_calls": 50,
+        "cache_hit_rate": 90.0,
+        "cost_usd": 0.165,
+        "token_count": 15000
+      },
+      "improvement": {
+        "speedup": 10.1,
+        "time_saved_ms": 767.69,
+        "time_saved_pct": 90.1,
+        "call_reduction_pct": 90.0,
+        "calls_saved": 450
+      }
+    },
+    "api": {
+      "baseline": {
+        "features": [
+          "基础路由",
+          "简单缓存(dict)",
+          "无速率限制",
+          "无统计端点"
+        ],
+        "cache_type": "dict",
+        "rate_limiting": false,
+        "stats_endpoint": false,
+        "health_detail": "basic"
+      },
+      "optimized": {
+        "features": [
+          "基础路由",
+          "SmartCache缓存",
+          "@rate_limited装饰器",
+          "/system/stats端点",
+          "增强/health端点",
+          "缓存统计集成",
+          "成本追踪集成"
+        ],
+        "cache_type": "SmartCache",
+        "rate_limiting": true,
+        "stats_endpoint": true,
+        "health_detail": "enhanced",
+        "cache_count": 7,
+        "enhanced_available": true
+      },
+      "improvement": {
+        "features_added": 3,
+        "cache_upgrade": "dict → SmartCache",
+        "new_endpoints": [
+          "/system/stats"
+        ],
+        "rate_limiting_added": true
+      }
+    },
+    "ui": {
+      "baseline": {
+        "features": [
+          "基础HTML渲染",
+          "简单表单提交",
+          "无快捷键系统",
+          "无状态指示器",
+          "无Toast通知"
+        ],
+        "shortcuts": 0,
+        "components": 0,
+        "file_size": 0
+      },
+      "optimized": {
+        "features": [
+          "KeyboardShortcutManager",
+          "StatusIndicator",
+          "ToastNotification",
+          "InlineDiffViewer",
+          "UndoManager",
+          "ProgressTracker"
+        ],
+        "shortcuts": 7,
+        "components": 5,
+        "file_size": 20469,
+        "file_size_kb": 19.99
+      },
+      "improvement": {
+        "components_added": 5,
+        "shortcuts_added": 7,
+        "features_added": 1
+      }
+    }
+  }
+}

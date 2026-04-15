@@ -1,0 +1,553 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container-fluid">
+    <div class="page-header-wrapper">
+        <h2 class="page-title">客户管理</h2>
+        <p class="page-subtitle">管理客户信息，支持添加、编辑、禁用客户</p>
+    </div>
+    
+    <form method="POST">
+        <div class="row g-5">
+            <div class="col-xl-3 col-lg-4">
+                <div class="sidebar-panel">
+                    <div class="card" id="collapseBasicContainer">
+                        <div class="card-header d-flex justify-content-between align-items-center collapse-trigger" style="cursor: pointer;" role="button" tabindex="0" aria-expanded="true" aria-controls="collapseBasic">
+                            <h6 class="mb-0 fw-bold">
+                                <i class="fas fa-user-plus me-2" style="color: var(--plush-blue-text);"></i>添加新客户
+                            </h6>
+                            <i class="fas fa-chevron-down collapse-arrow"></i>
+                        </div>
+                        <div class="collapse-content show" id="collapseBasic">
+                            <div class="card-body">
+                                <div class="form-group-enhanced">
+                                    <label for="name" class="form-label">
+                                        <i class="fas fa-building me-1" style="color: var(--plush-blue-text);"></i>客户名称 <span class="text-danger">*</span>
+                                    </label>
+                                    <input type="text" class="form-control" id="name" name="name" required placeholder="例如：MINISO 国际">
+                                </div>
+                                <div class="form-group-enhanced">
+                                    <label for="contact" class="form-label">
+                                        <i class="fas fa-user me-1" style="color: var(--plush-blue-text);"></i>联系人
+                                    </label>
+                                    <input type="text" class="form-control" id="contact" name="contact" placeholder="例如：张三">
+                                </div>
+                                <div class="form-group-enhanced">
+                                    <label for="phone" class="form-label">
+                                        <i class="fas fa-phone me-1" style="color: var(--plush-blue-text);"></i>联系电话
+                                    </label>
+                                    <input type="text" class="form-control" id="phone" name="phone" placeholder="例如：13800138000">
+                                </div>
+                                <div class="form-group-enhanced">
+                                    <label for="address" class="form-label">
+                                        <i class="fas fa-map-marker-alt me-1" style="color: var(--plush-blue-text);"></i>地址
+                                    </label>
+                                    <input type="text" class="form-control" id="address" name="address" placeholder="例如：北京市朝阳区">
+                                </div>
+                                <div class="form-group-enhanced">
+                                    <label for="note" class="form-label">
+                                        <i class="fas fa-sticky-note me-1" style="color: var(--plush-blue-text);"></i>备注
+                                    </label>
+                                    <textarea class="form-control" id="note" name="note" rows="2" placeholder="例如：重要客户"></textarea>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary btn-lg w-100 mt-4 btn-submit-enhanced">
+                        <i class="fas fa-plus me-2"></i>添加客户
+                    </button>
+                </div>
+            </div>
+            
+            <div class="col-xl-9 col-lg-8">
+                <div class="card main-content-card">
+                    <div class="card-header">
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+                            <h6 class="mb-0 fw-bold">
+                                <i class="fas fa-list me-2" style="color: var(--plush-blue-text);"></i>客户列表
+                            </h6>
+                            <div class="toolbar-wrapper d-flex gap-2 flex-wrap">
+                                <div class="search-box">
+                                    <i class="fas fa-search search-icon"></i>
+                                    <input type="text" id="searchInput" class="form-control search-input" placeholder="搜索客户名称..." aria-label="搜索客户">
+                                </div>
+                                <select id="statusFilter" class="form-select sort-select" aria-label="客户状态筛选">
+                                    <option value="all">全部状态</option>
+                                    <option value="active">已启用</option>
+                                    <option value="inactive">已禁用</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive" style="max-height: calc(100vh - 280px); overflow-y: auto;">
+                            <table class="table table-hover mb-0" id="customerTable">
+                                <thead class="sticky-top">
+                                    <tr>
+                                        <th style="width: 180px;">客户名称</th>
+                                        <th style="width: 120px;">联系人</th>
+                                        <th style="width: 140px;">联系电话</th>
+                                        <th>地址</th>
+                                        <th style="width: 100px;">状态</th>
+                                        <th style="width: 160px;">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="customerTableBody">
+                                    {% for customer in customers %}
+                                    <tr data-name="{{ customer.name|lower }}" data-status="{{ 'active' if customer.status else 'inactive' }}">
+                                        <td>
+                                            <span class="customer-name">
+                                                <i class="fas fa-building me-1" style="color: var(--plush-blue-text);"></i>{{ customer.name }}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <span class="contact-text">{{ customer.contact or '-' }}</span>
+                                        </td>
+                                        <td>
+                                            <span class="phone-text">{{ customer.phone or '-' }}</span>
+                                        </td>
+                                        <td>
+                                            <span class="address-text">{{ customer.address or '-' }}</span>
+                                        </td>
+                                        <td>
+                                            {% if customer.status %}
+                                            <span class="badge bg-success">已启用</span>
+                                            {% else %}
+                                            <span class="badge bg-secondary">已禁用</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <div class="action-buttons">
+                                                <a href="{{ url_for('customer.edit_customer', id=customer.id) }}" class="btn btn-sm btn-outline-primary" title="编辑">
+                                                    <i class="fas fa-edit"></i>
+                                                </a>
+                                                <button type="button" class="btn btn-sm btn-outline-{{ 'warning' if customer.status else 'success' }}"
+                                                        onclick="toggleStatus({{ customer.id }})"
+                                                        title="{{ '禁用' if customer.status else '启用' }}">
+                                                    <i class="fas fa-{{ 'ban' if customer.status else 'check' }}"></i>
+                                                </button>
+                                                <button type="button" class="btn btn-sm btn-outline-danger"
+                                                        onclick="deleteCustomer({{ customer.id }})"
+                                                        title="删除">
+                                                    <i class="fas fa-trash"></i>
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% else %}
+                                    <tr>
+                                        <td colspan="6" class="text-center py-5">
+                                            <div class="empty-state">
+                                                <i class="fas fa-users fa-3x text-muted mb-3"></i>
+                                                <p class="text-muted mb-0">暂无客户，请先添加</p>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+
+<style>
+.page-header-wrapper {
+    margin-bottom: 32px;
+    padding-bottom: 24px;
+    border-bottom: 3px solid var(--plush-blue-light);
+}
+
+.page-title {
+    color: var(--plush-text);
+    font-size: 24px;
+    font-weight: 400;
+    margin-bottom: 8px;
+    letter-spacing: -0.5px;
+    line-height: 1.5;
+}
+
+.page-subtitle {
+    color: var(--plush-text-light);
+    font-size: 18px;
+    font-weight: 400;
+    margin: 0;
+    line-height: 1.5;
+}
+
+.sidebar-panel {
+    position: sticky;
+    top: 120px;
+}
+
+.form-group-enhanced {
+    margin-bottom: 24px;
+}
+
+.form-group-enhanced .form-label {
+    display: flex;
+    align-items: center;
+    font-weight: 400;
+    color: var(--plush-text);
+    font-size: 14px;
+    margin-bottom: 8px;
+    letter-spacing: 0.2px;
+    line-height: 1.5;
+}
+
+.btn-submit-enhanced {
+    font-size: 16px;
+    padding: 16px 32px;
+    border-radius: 16px;
+    box-shadow: 0 4px 16px var(--plush-shadow-soft);
+    min-height: 48px;
+}
+
+.btn-submit-enhanced:hover, .btn-submit-enhanced:focus-visible {
+    transform: translateY(-3px) scale(1.02);
+    box-shadow: 0 8px 24px var(--plush-shadow-medium);
+}
+
+.main-content-card {
+    min-height: calc(100vh - 200px);
+}
+
+.toolbar-wrapper {
+    flex: 1;
+    max-width: 500px;
+}
+
+.search-box {
+    position: relative;
+    flex: 1;
+    min-width: 200px;
+}
+
+.search-icon {
+    position: absolute;
+    left: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--plush-text-light);
+    font-size: 14px;
+}
+
+.search-input {
+    padding-left: 40px !important;
+    border-radius: var(--radius-button) !important;
+    min-height: 44px;
+}
+
+.sort-select {
+    width: auto;
+    min-width: 136px;
+    border-radius: var(--radius-button) !important;
+    min-height: 44px;
+}
+
+.customer-name {
+    font-weight: 500;
+    color: var(--plush-text);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.contact-text, .phone-text, .address-text {
+    font-size: 14px;
+    color: var(--plush-text-light);
+    line-height: 1.5;
+}
+
+.action-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+.action-buttons .btn {
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 12px;
+    min-height: 44px;
+    min-width: 44px;
+}
+
+.action-buttons .btn:focus-visible {
+    outline: 2px solid var(--plush-blue-text);
+    outline-offset: 2px;
+}
+
+.empty-state {
+    padding: 64px 40px;
+}
+
+.table {
+    margin-bottom: 0;
+}
+
+.table thead th {
+    padding: 16px 24px;
+    font-weight: 400;
+    font-size: 14px;
+    letter-spacing: 0.3px;
+    border-bottom: 2px solid var(--plush-blue-light);
+    line-height: 1.5;
+    background: var(--plush-white);
+}
+
+.table tbody tr {
+    animation: fadeIn 0.3s ease forwards;
+    transition: all 0.2s ease;
+}
+
+.table tbody tr:hover, .table tbody tr:focus-within {
+    background: linear-gradient(135deg, rgba(176, 224, 230, 0.1) 0%, rgba(212, 241, 244, 0.15) 100%);
+}
+
+.table tbody td {
+    padding: 16px 24px;
+    vertical-align: middle;
+    border-bottom: 1px solid var(--plush-blue-light);
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 1.5;
+}
+
+.table tbody tr:nth-child(1) { animation-delay: 0.05s; }
+.table tbody tr:nth-child(2) { animation-delay: 0.1s; }
+.table tbody tr:nth-child(3) { animation-delay: 0.15s; }
+.table tbody tr:nth-child(4) { animation-delay: 0.2s; }
+.table tbody tr:nth-child(5) { animation-delay: 0.25s; }
+
+.card-header {
+    padding: 24px;
+}
+
+.card-body {
+    padding: 24px;
+}
+
+.form-control {
+    padding: 8px 16px;
+    border-radius: var(--radius-input);
+    border: 2px solid var(--plush-blue-light);
+    font-size: 14px;
+    transition: all 0.3s ease;
+    min-height: 44px;
+    line-height: 1.5;
+}
+
+.form-control:focus {
+    border-color: var(--plush-blue-text);
+    box-shadow: 0 0 0 0.2rem rgba(135, 206, 235, 0.25);
+    outline: none;
+}
+
+.btn-sm {
+    padding: 8px 16px;
+    font-size: 14px;
+    border-radius: 12px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.btn-outline-success {
+    background: transparent;
+    color: #198754;
+    border: 2px solid #198754;
+}
+
+.btn-outline-success:hover {
+    background: #198754;
+    color: white;
+}
+
+.btn-outline-warning {
+    background: transparent;
+    color: #ffc107;
+    border: 2px solid #ffc107;
+}
+
+.btn-outline-warning:hover {
+    background: #ffc107;
+    color: #212529;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@media (max-width: 1200px) {
+    .sidebar-panel {
+        position: static;
+    }
+}
+
+@media (max-width: 992px) {
+    .page-title {
+        font-size: 24px;
+    }
+    
+    .toolbar-wrapper {
+        max-width: 100%;
+        width: 100%;
+    }
+    
+    .search-box {
+        min-width: 152px;
+    }
+}
+
+@media (max-width: 768px) {
+    .page-header-wrapper {
+        margin-bottom: 16px;
+        padding-bottom: 16px;
+    }
+    
+    .page-title {
+        font-size: 20px;
+    }
+    
+    .card-header {
+        padding: 16px;
+    }
+    
+    .toolbar-wrapper {
+        flex-direction: column;
+    }
+    
+    .search-box {
+        width: 100%;
+    }
+    
+    .sort-select {
+        width: 100%;
+    }
+    
+    .action-buttons .btn {
+        width: 44px;
+        height: 44px;
+        font-size: 12px;
+    }
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const searchInput = document.getElementById('searchInput');
+    const statusFilter = document.getElementById('statusFilter');
+    const customerTableBody = document.getElementById('customerTableBody');
+    
+    let allRows = Array.from(customerTableBody.querySelectorAll('tr[data-name]'));
+    
+    function filterAndSort() {
+        const searchTerm = searchInput.value.toLowerCase().trim();
+        const statusValue = statusFilter.value;
+        
+        allRows.forEach(row => {
+            const name = row.dataset.name || '';
+            const status = row.dataset.status || '';
+            
+            const matchesSearch = name.includes(searchTerm);
+            const matchesStatus = statusValue === 'all' || status === statusValue;
+            
+            row.style.display = (matchesSearch && matchesStatus) ? '' : 'none';
+        });
+    }
+    
+    if (searchInput) {
+        searchInput.addEventListener('input', debounce(filterAndSort, 300));
+    }
+    
+    if (statusFilter) {
+        statusFilter.addEventListener('change', filterAndSort);
+    }
+    
+    function debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+            const later = () => {
+                clearTimeout(timeout);
+                func(...args);
+            };
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
+    }
+});
+
+function toggleStatus(customerId) {
+    if (!confirm('确定要切换该客户的状态吗？')) {
+        return;
+    }
+    
+    fetch(`/api/v1/customers/toggle-status/${customerId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            if (window.GlobalNotification) {
+                window.GlobalNotification.success(data.message);
+            } else {
+                alert(data.message);
+            }
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000);
+        } else {
+            if (window.GlobalNotification) {
+                window.GlobalNotification.error(data.error || '操作失败');
+            } else {
+                alert(data.error || '操作失败');
+            }
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        if (window.GlobalNotification) {
+            window.GlobalNotification.error('网络错误，请稍后重试');
+        } else {
+            alert('网络错误，请稍后重试');
+        }
+    });
+}
+
+async function deleteCustomer(id) {
+    if (!confirm('确定要删除该客户吗？')) return;
+
+    try {
+        const response = await fetch(`/api/v1/aux/customer/${id}`, { method: 'DELETE' });
+        const result = await response.json();
+
+        if (result.success) {
+            alert('删除成功！');
+            window.location.reload();
+        } else {
+            alert(result.error || '删除失败！');
+        }
+    } catch (error) {
+        alert('删除失败：' + error.message);
+    }
+}
+</script>
+{% endblock %}

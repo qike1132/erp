@@ -1,0 +1,86 @@
+{
+  "timestamp": "2026-04-08T12:52:00.038326",
+  "intent_recognition": {
+    "accuracy": 0.125,
+    "avg_response_time_ms": 0.020362500436021946,
+    "total_tests": 8,
+    "correct_predictions": 1,
+    "details": [
+      {
+        "input": "创建一个新的API端点用于用户认证",
+        "expected": "backend_development",
+        "duration_ms": 0.08269998943433166,
+        "success": true
+      },
+      {
+        "input": "构建一个React组件用于显示用户列表",
+        "expected": "frontend_development",
+        "duration_ms": 0.018400009139440954,
+        "success": true
+      },
+      {
+        "input": "审查auth.ts文件的安全性",
+        "expected": "code_review",
+        "duration_ms": 0.006800008122809231,
+        "success": true
+      },
+      {
+        "input": "优化数据库查询性能",
+        "expected": "database_optimization",
+        "duration_ms": 0.008600007276982069,
+        "success": true
+      },
+      {
+        "input": "修复登录页面的bug",
+        "expected": "debugging",
+        "duration_ms": 0.008700008038431406,
+        "success": true
+      },
+      {
+        "input": "为用户模块编写单元测试",
+        "expected": "testing",
+        "duration_ms": 0.00960000033956021,
+        "success": true
+      },
+      {
+        "input": "检查系统是否存在SQL注入漏洞",
+        "expected": "security_audit",
+        "duration_ms": 0.021599989850074053,
+        "success": true
+      },
+      {
+        "input": "重构订单处理逻辑",
+        "expected": "refactoring",
+        "duration_ms": 0.006499991286545992,
+        "success": true
+      }
+    ]
+  },
+  "context_handling": {
+    "total_turns": 20,
+    "total_time_ms": 39.408299984643236,
+    "avg_time_per_turn_ms": 1.9704149992321618,
+    "memory_operations": 7,
+    "context_size_estimate": 531
+  },
+  "multi_task": {
+    "total_tasks": 10,
+    "successful_tasks": 10,
+    "total_time_ms": 105.36950000096112,
+    "avg_time_per_task_ms": 10.536950000096112,
+    "throughput_tasks_per_sec": 94.90412310876283
+  },
+  "cache_performance": {
+    "total_operations": 200,
+    "cache_hits": 170,
+    "cache_misses": 30,
+    "hit_rate": 0.85,
+    "avg_access_time_ms": 0.0002569999924162403
+  },
+  "error_handling": {
+    "total_scenarios": 15,
+    "handled_scenarios": 15,
+    "handling_rate": 1.0,
+    "avg_handling_time_ms": 2.729253333139544
+  }
+}

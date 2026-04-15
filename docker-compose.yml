@@ -1,0 +1,209 @@
+version: '3.8'
+
+services:
+  erp-app:
+    build: .
+    container_name: erp-system-app
+    restart: unless-stopped
+    # 不再直接暴露应用端口到宿主机，由 Nginx 统一代理
+    expose:
+      - "5003"
+      - "5002"
+    env_file:
+      - .env.production
+    environment:
+      - DB_TYPE=mysql
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_USER=${DB_USER:-root}
+      - DB_PASSWORD=${DB_PASSWORD:-password}
+      - DB_NAME=erp_system
+      - REDIS_HOST=redis
+      - REDIS_PASSWORD=ERP_Redis_2026_Secure_Password
+      - LIMITER_STORAGE_URI=redis://:ERP_Redis_2026_Secure_Password@redis:6379/0
+      - NGINX_PROXY=1
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./static/uploads:/app/static/uploads
+      - ./logs:/app/logs
+      - app-static:/app/static
+    networks:
+      - erp-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5003/')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: erp-system-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./config/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - app-static:/app/static:ro
+    depends_on:
+      erp-app:
+        condition: service_healthy
+    networks:
+      - erp-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost/nginx-health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  db:
+    image: mysql:8.0
+    container_name: erp-system-db
+    restart: unless-stopped
+    environment:
+      - MYSQL_DATABASE=erp_system
+      - MYSQL_ROOT_PASSWORD=${DB_PASSWORD:-password}
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - erp-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: erp-system-redis
+    restart: unless-stopped
+    command: redis-server --requirepass ERP_Redis_2026_Secure_Password --bind 0.0.0.0 --appendonly yes
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - erp-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "ERP_Redis_2026_Secure_Password", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==================== 监控服务 ====================
+
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: erp-system-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - erp-network
+    depends_on:
+      - erp-app
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: erp-system-grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin123}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost/grafana
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+    volumes:
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    networks:
+      - erp-network
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.61.0
+    container_name: erp-system-redis-exporter
+    restart: unless-stopped
+    environment:
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=ERP_Redis_2026_Secure_Password
+    networks:
+      - erp-network
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  mysql-exporter:
+    image: prom/mysqld-exporter:v0.15.1
+    container_name: erp-system-mysql-exporter
+    restart: unless-stopped
+    environment:
+      - DATA_SOURCE_NAME=root:${DB_PASSWORD:-password}@(db:3306)/erp_system
+    networks:
+      - erp-network
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # ==================== Celery Worker ====================
+
+  celery-worker:
+    build: .
+    container_name: erp-system-celery-worker
+    restart: unless-stopped
+    entrypoint: []
+    command: celery -A fastapi_app.core.celery_app:celery_app worker --loglevel=info --queues=batch,reports,celery --concurrency=2
+    env_file:
+      - .env.production
+    environment:
+      - DB_TYPE=mysql
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_USER=${DB_USER:-root}
+      - DB_PASSWORD=${DB_PASSWORD:-password}
+      - DB_NAME=erp_system
+      - REDIS_HOST=redis
+      - REDIS_PASSWORD=ERP_Redis_2026_Secure_Password
+      - CELERY_BROKER_URL=redis://:ERP_Redis_2026_Secure_Password@redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://:ERP_Redis_2026_Secure_Password@redis:6379/2
+      - NGINX_PROXY=1
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - erp-network
+
+networks:
+  erp-network:
+    driver: bridge
+
+volumes:
+  mysql_data:
+  redis_data:
+  app-static:
+  prometheus_data:
+  grafana_data:

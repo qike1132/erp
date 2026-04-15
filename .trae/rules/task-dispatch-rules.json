@@ -1,0 +1,797 @@
+{
+  "version": "2.0.0",
+  "name": "Agent Task Dispatch Rules",
+  "description": "Complete task dispatch and processing rules for Agent orchestration system",
+  
+  "taskStates": {
+    "CREATED": {
+      "description": "Task created, pending skill check",
+      "transitions": ["QUEUED", "CANCELLED"],
+      "timeout": 5000
+    },
+    "QUEUED": {
+      "description": "Queued for agent matching",
+      "transitions": ["ASSIGNED", "ESCALATED", "CANCELLED"],
+      "timeout": 10000
+    },
+    "ASSIGNED": {
+      "description": "Agent assigned, preparing execution",
+      "transitions": ["RUNNING", "FAILED", "CANCELLED"],
+      "timeout": 5000
+    },
+    "RUNNING": {
+      "description": "Task executing",
+      "transitions": ["COMPLETED", "FAILED", "TIMEOUT", "CANCELLED"],
+      "timeout": 300000
+    },
+    "COMPLETED": {
+      "description": "Task completed successfully",
+      "transitions": ["REVIEWING"],
+      "final": false,
+      "timeout": 10000
+    },
+    "REVIEWING": {
+      "description": "Under code review",
+      "transitions": ["APPROVED", "REVISION_REQUIRED"],
+      "timeout": 60000
+    },
+    "APPROVED": {
+      "description": "Review approved",
+      "transitions": ["DELIVERED"],
+      "final": false,
+      "timeout": 5000
+    },
+    "REVISION_REQUIRED": {
+      "description": "Revision required",
+      "transitions": ["RUNNING"],
+      "timeout": 300000
+    },
+    "DELIVERED": {
+      "description": "Delivered to user",
+      "final": true
+    },
+    "FAILED": {
+      "description": "Execution failed",
+      "transitions": ["RETRY", "FALLBACK", "ESCALATED"],
+      "timeout": 5000
+    },
+    "RETRY": {
+      "description": "Retrying execution",
+      "transitions": ["RUNNING", "FALLBACK"],
+      "maxAttempts": 3,
+      "timeout": 30000
+    },
+    "FALLBACK": {
+      "description": "Using fallback agent",
+      "transitions": ["RUNNING", "ESCALATED"],
+      "timeout": 5000
+    },
+    "TIMEOUT": {
+      "description": "Execution timeout",
+      "transitions": ["RETRY", "FALLBACK", "ESCALATED"],
+      "timeout": 5000
+    },
+    "ESCALATED": {
+      "description": "Escalated to Solo Coder",
+      "transitions": ["RUNNING", "DELIVERED"],
+      "timeout": 600000
+    },
+    "CANCELLED": {
+      "description": "Task cancelled",
+      "final": true
+    }
+  },
+  
+  "confidenceThresholds": {
+    "fineGrainedTask": {
+      "min": 95,
+      "action": "fine_grained_decomposition",
+      "description": "任务可精细拆解（仅影响拆分粒度，不影响是否调度Agent）"
+    },
+    "promptExecute": {
+      "min": 85,
+      "max": 94,
+      "action": "show_suggestion",
+      "description": "Show suggestion and execute"
+    },
+    "userConfirm": {
+      "min": 70,
+      "max": 84,
+      "action": "require_confirmation",
+      "description": "Require user confirmation"
+    },
+    "askUser": {
+      "max": 69,
+      "action": "ask_for_info",
+      "description": "Ask user for more information"
+    }
+  },
+  
+  "priorityLevels": {
+    "P0_CRITICAL": {
+      "value": 0,
+      "description": "Production incidents, security vulnerabilities",
+      "agents": ["incident-response-commander", "security-engineer"],
+      "responseTime": "immediate",
+      "escalation": "auto"
+    },
+    "P1_HIGH": {
+      "value": 1,
+      "description": "Core features, security-related tasks",
+      "agents": ["backend-architect", "frontend-developer", "security-engineer"],
+      "responseTime": "1h",
+      "escalation": "manual"
+    },
+    "P2_MEDIUM": {
+      "value": 2,
+      "description": "Performance optimization, UX improvements",
+      "agents": ["database-optimizer", "ui-designer", "ux-researcher"],
+      "responseTime": "4h",
+      "escalation": "manual"
+    },
+    "P3_LOW": {
+      "value": 3,
+      "description": "Code review, documentation, testing",
+      "agents": ["code-reviewer", "api-tester", "test-results-analyzer"],
+      "responseTime": "24h",
+      "escalation": "none"
+    }
+  },
+  
+  "dispatchAlgorithm": {
+    "steps": [
+      {
+        "order": 1,
+        "name": "skill_check",
+        "description": "Check for relevant skills",
+        "required": true,
+        "timeout": 2000
+      },
+      {
+        "order": 2,
+        "name": "confidence_scoring",
+        "description": "Calculate match confidence",
+        "required": true,
+        "timeout": 1000
+      },
+      {
+        "order": 3,
+        "name": "checklist_verification",
+        "description": "强制执行前检查清单验证：任务类型、Agent匹配、调度决策必须逐项确认",
+        "required": true,
+        "enforcement": "strict",
+        "mandatory_fields": [
+          "task_type_identification",
+          "matched_agent",
+          "dispatch_decision",
+          "user_task_match",
+          "code_review_required",
+          "solo_coder_approval"
+        ],
+        "forbidden_shortcuts": [
+          "任务简单",
+          "技术难度低",
+          "置信度高",
+          "Solo Coder自我授权"
+        ],
+        "timeout": 500
+      },
+      {
+        "order": 4,
+        "name": "threshold_evaluation",
+        "description": "Evaluate against confidence thresholds",
+        "required": true,
+        "timeout": 500
+      },
+      {
+        "order": 5,
+        "name": "agent_matching",
+        "description": "Match specialized agents",
+        "required": true,
+        "timeout": 2000
+      },
+      {
+        "order": 6,
+        "name": "fallback_check",
+        "description": "Check fallback availability (仅当无匹配Agent时)",
+        "required": false,
+        "timeout": 500
+      },
+      {
+        "order": 7,
+        "name": "task_dispatch",
+        "description": "Dispatch task to agent",
+        "required": true,
+        "timeout": 1000
+      }
+    ],
+    "maxConcurrentTasks": 10,
+    "queueSize": 100
+  },
+  
+  "dispatchPrinciples": {
+    "precise_match": {
+      "description": "Task must 100% match agent responsibility",
+      "enforcement": "strict"
+    },
+    "absolute_control": {
+      "description": "Sub-agents cannot modify requirements",
+      "enforcement": "strict"
+    },
+    "responsibility_isolation": {
+      "description": "Agents only execute within their scope",
+      "enforcement": "strict"
+    },
+    "specialized_first": {
+      "description": "Prefer specialized agents over general",
+      "enforcement": "strict"
+    },
+    "single_decision": {
+      "description": "All decisions belong to Solo Coder (决策权归总指挥，但不包括跳过Agent调度的自我授权)",
+      "enforcement": "strict"
+    },
+    "checklist_enforcement": {
+      "description": "强制执行前检查清单：每次任务必须逐项确认Agent调度决策后方可执行",
+      "enforcement": "strict"
+    },
+    "fault_tolerance_first": {
+      "description": "Auto-enable circuit breaker and fallback",
+      "enforcement": "auto"
+    },
+    "security_first": {
+      "description": "All requests through QueryGuard",
+      "enforcement": "strict"
+    }
+  },
+  
+  "fallbackRules": {
+    "noMatch": {
+      "action": "solo_coder_execute",
+      "description": "无匹配Agent时：Solo Coder总指挥直接执行"
+    },
+    "executionFailure": {
+      "action": "replace_or_fallback",
+      "description": "Agent执行失败：更换Agent或使用兜底方案"
+    },
+    "crossDepartment": {
+      "threshold": 10,
+      "action": "orchestrator_assist",
+      "description": "Orchestrator assists for >10 agents"
+    },
+    "circuitOpen": {
+      "action": "auto_fallback",
+      "description": "Auto fallback when circuit breaker open"
+    },
+    "securityViolation": {
+      "action": "terminate_and_log",
+      "description": "Terminate immediately and log audit"
+    }
+  },
+  
+  "multiAgentCoordination": {
+    "strategies": {
+      "sequential": {
+        "description": "Execute agents in priority order",
+        "maxAgents": 3,
+        "delayBetween": 1000
+      },
+      "parallel": {
+        "description": "Execute multiple agents simultaneously",
+        "maxAgents": 3,
+        "aggregateResults": true
+      },
+      "collaborative": {
+        "description": "Agents collaborate on shared task",
+        "maxAgents": 3,
+        "shareContext": true,
+        "mergeResults": true
+      }
+    },
+    "conflictResolution": {
+      "strategy": "priority",
+      "allowOverride": true
+    }
+  },
+  
+  "retryPolicy": {
+    "maxRetries": 3,
+    "initialDelay": 1000,
+    "maxDelay": 10000,
+    "backoffMultiplier": 2.0,
+    "jitterEnabled": true,
+    "retryableErrors": [
+      "ECONNRESET", "ETIMEDOUT", "ECONNREFUSED",
+      "503", "504", "429",
+      "network_error", "timeout_error", "rate_limit_exceeded"
+    ],
+    "nonRetryableErrors": [
+      "400", "401", "403", "404",
+      "validation_error", "authentication_error", "permission_denied"
+    ]
+  },
+  
+  "timeoutHandling": {
+    "taskTimeout": 300000,
+    "agentResponseTimeout": 30000,
+    "hookExecutionTimeout": 5000,
+    "fallbackTriggerTimeout": 5000,
+    "onTimeout": {
+      "action": "trigger_fallback",
+      "preserveContext": true,
+      "cleanupResources": true
+    }
+  },
+  
+  "taskCancellation": {
+    "allowedStates": ["CREATED", "QUEUED", "ASSIGNED", "RUNNING"],
+    "cleanupRequired": true,
+    "notificationRequired": true,
+    "resourceRelease": {
+      "memory": true,
+      "connections": true,
+      "locks": true
+    }
+  },
+  
+  "performanceMetrics": {
+    "collectMetrics": [
+      "execution_time",
+      "queue_depth",
+      "throughput",
+      "error_rate",
+      "latency_p50",
+      "latency_p95",
+      "latency_p99",
+      "agent_utilization",
+      "retry_count"
+    ],
+    "targets": {
+      "responseTime": "< 200ms (P99)",
+      "availability": "> 99.95%",
+      "errorRate": "< 0.01%",
+      "resourceUtilization": "> 85%"
+    }
+  },
+  
+  "userFeedback": {
+    "collection": {
+      "enabled": true,
+      "methods": ["rating", "comment", "correction"]
+    },
+    "learning": {
+      "enabled": true,
+      "influence": "future_activations",
+      "storage": "local"
+    }
+  },
+  
+  "taskDataFormat": {
+    "required": {
+      "taskId": "string",
+      "type": "string",
+      "priority": "number",
+      "status": "string",
+      "created": "ISO8601"
+    },
+    "optional": {
+      "context": "object",
+      "assignedAgent": "object",
+      "execution": "object",
+      "review": "object",
+      "metrics": "object"
+    }
+  },
+  
+  "taskTypes": {
+    "STANDARD": {
+      "description": "Standard task with normal processing",
+      "defaultPriority": 2,
+      "timeout": 300000
+    },
+    "BATCH": {
+      "description": "Batch processing task",
+      "defaultPriority": 3,
+      "timeout": 600000,
+      "maxBatchSize": 100,
+      "parallelism": 5
+    },
+    "SCHEDULED": {
+      "description": "Scheduled task for future execution",
+      "defaultPriority": 3,
+      "requiresSchedule": true,
+      "allowOverlap": false
+    },
+    "INTERRUPT": {
+      "description": "Emergency interrupt task",
+      "defaultPriority": 0,
+      "preemptive": true,
+      "timeout": 60000
+    },
+    "ROLLBACK": {
+      "description": "Rollback task to undo previous operation",
+      "defaultPriority": 1,
+      "requiresTransactionId": true,
+      "timeout": 300000
+    },
+    "DEPENDENT": {
+      "description": "Task with dependencies on other tasks",
+      "defaultPriority": 2,
+      "requiresDependencies": true,
+      "maxDependencyDepth": 5
+    }
+  },
+  
+  "agentSelectionStrategy": {
+    "default": "priority",
+    "strategies": {
+      "priority": {
+        "description": "Select agent with highest priority",
+        "tieBreaker": "confidence"
+      },
+      "confidence": {
+        "description": "Select agent with highest confidence score",
+        "minThreshold": 70
+      },
+      "hybrid": {
+        "description": "Combine priority and confidence",
+        "priorityWeight": 0.6,
+        "confidenceWeight": 0.4
+      }
+    }
+  },
+  
+  "agentUnavailableHandling": {
+    "strategy": "fallback",
+    "actions": {
+      "retry": {
+        "maxAttempts": 3,
+        "delay": 5000
+      },
+      "fallback": {
+        "useFallbackAgent": true,
+        "escalateOnNoFallback": true
+      },
+      "queue": {
+        "enabled": true,
+        "maxQueueTime": 300000
+      }
+    }
+  },
+  
+  "revisionLoopPrevention": {
+    "maxRevisionCycles": 5,
+    "onLimitReached": "escalate",
+    "resetOnSuccess": true,
+    "trackRevisionHistory": true
+  },
+  
+  "contextPreservation": {
+    "enabled": true,
+    "preserveOnTransition": {
+      "FAILED_TO_RETRY": true,
+      "REVISION_REQUIRED_TO_RUNNING": true,
+      "TIMEOUT_TO_RETRY": true,
+      "FALLBACK_TO_RUNNING": true
+    },
+    "fieldsToPreserve": [
+      "taskId",
+      "originalRequest",
+      "userContext",
+      "fileContext",
+      "dependencyInfo"
+    ]
+  },
+  
+  "resourceExhaustionHandling": {
+    "enabled": true,
+    "thresholds": {
+      "memoryUsage": 0.85,
+      "cpuUsage": 0.90,
+      "queueDepth": 80
+    },
+    "actions": {
+      "throttle": {
+        "enabled": true,
+        "rate": 0.5
+      },
+      "reject": {
+        "enabled": true,
+        "message": "System overloaded, please retry later"
+      },
+      "escalate": {
+        "enabled": true,
+        "notifyAdmin": true
+      }
+    }
+  },
+  
+  "stateTransitionLogging": {
+    "enabled": true,
+    "level": "info",
+    "includeFields": [
+      "taskId",
+      "fromState",
+      "toState",
+      "timestamp",
+      "agentId",
+      "duration",
+      "reason"
+    ],
+    "auditTrail": {
+      "enabled": true,
+      "retentionDays": 90,
+      "storage": "database"
+    },
+    "transitionsToLog": {
+      "all": true,
+      "critical": ["FAILED", "TIMEOUT", "ESCALATED", "CANCELLED"],
+      "success": ["COMPLETED", "APPROVED", "DELIVERED"]
+    }
+  },
+  
+  "subAgentExceptionPropagation": {
+    "enabled": true,
+    "strategy": "bubble_up",
+    "maxPropagationDepth": 5,
+    "exceptionTypes": {
+      "critical": {
+        "propagate": true,
+        "stopExecution": true,
+        "notifyUser": true
+      },
+      "recoverable": {
+        "propagate": false,
+        "retryLocally": true,
+        "maxRetries": 3
+      },
+      "warning": {
+        "propagate": false,
+        "logOnly": true
+      }
+    },
+    "onPropagationFailure": {
+      "action": "escalate_to_solo_coder",
+      "preserveStackTrace": true,
+      "includeContext": true
+    }
+  },
+  
+  "networkPartitionHandling": {
+    "enabled": true,
+    "detection": {
+      "heartbeatInterval": 5000,
+      "missedHeartbeatsThreshold": 3,
+      "timeout": 10000
+    },
+    "partitions": {
+      "agentIsolation": {
+        "action": "queue_requests",
+        "maxQueueSize": 1000,
+        "queueTimeout": 300000
+      },
+      "databaseIsolation": {
+        "action": "use_cache",
+        "cacheTTL": 300,
+        "fallbackToReadonly": true
+      },
+      "externalServiceIsolation": {
+        "action": "circuit_breaker",
+        "fallbackResponse": "cached"
+      }
+    },
+    "recovery": {
+      "autoReconnect": true,
+      "syncOnReconnect": true,
+      "notifyOnRecovery": true
+    }
+  },
+  
+  "configLoadFailureHandling": {
+    "enabled": true,
+    "strategy": "graceful_degradation",
+    "fallbacks": {
+      "useDefaultConfig": true,
+      "defaultConfigPath": ".trae/config/defaults/",
+      "cacheLastKnownGood": true,
+      "cacheTTL": 86400
+    },
+    "validation": {
+      "strictMode": false,
+      "allowPartialLoad": true,
+      "requiredModules": ["queryEngine", "transport"]
+    },
+    "onFailure": {
+      "logError": true,
+      "notifyAdmin": true,
+      "continueWithDefaults": true,
+      "maxRetries": 3
+    }
+  },
+  
+  "logWriteFailureHandling": {
+    "enabled": true,
+    "strategy": "fallback_and_continue",
+    "fallbacks": {
+      "primaryFailure": {
+        "action": "switch_to_secondary",
+        "secondaryPath": ".trae/logs/backup/"
+      },
+      "secondaryFailure": {
+        "action": "memory_buffer",
+        "maxBufferSize": 10000,
+        "flushOnRecovery": true
+      },
+      "completeFailure": {
+        "action": "console_output",
+        "continueExecution": true
+      }
+    },
+    "recovery": {
+      "autoRetry": true,
+      "retryInterval": 30000,
+      "notifyOnRecovery": true
+    }
+  },
+  
+  "taskCancellationResourceRelease": {
+    "enabled": true,
+    "releaseOrder": [
+      {
+        "order": 1,
+        "resource": "locks",
+        "timeout": 5000,
+        "forceRelease": true
+      },
+      {
+        "order": 2,
+        "resource": "connections",
+        "timeout": 10000,
+        "gracefulClose": true
+      },
+      {
+        "order": 3,
+        "resource": "memory",
+        "timeout": 5000,
+        "clearCache": true
+      },
+      {
+        "order": 4,
+        "resource": "temp_files",
+        "timeout": 3000,
+        "cleanupPattern": "*.tmp"
+      },
+      {
+        "order": 5,
+        "resource": "subprocesses",
+        "timeout": 15000,
+        "terminateOnTimeout": true
+      }
+    ],
+    "onReleaseFailure": {
+      "action": "log_and_continue",
+      "escalateAfter": 3,
+      "notifyAdmin": true
+    }
+  },
+  
+  "agentDependencyGraph": {
+    "enabled": true,
+    "dependencies": {
+      "frontend-developer": {
+        "dependsOn": [],
+        "providesTo": ["ui-designer", "ux-researcher"]
+      },
+      "backend-architect": {
+        "dependsOn": [],
+        "providesTo": ["database-optimizer", "api-tester"]
+      },
+      "database-optimizer": {
+        "dependsOn": ["backend-architect"],
+        "providesTo": []
+      },
+      "security-engineer": {
+        "dependsOn": [],
+        "providesTo": ["backend-architect", "frontend-developer"]
+      },
+      "code-reviewer": {
+        "dependsOn": ["frontend-developer", "backend-architect"],
+        "providesTo": []
+      },
+      "agents-orchestrator": {
+        "dependsOn": [],
+        "providesTo": ["*"]
+      }
+    },
+    "executionOrder": {
+      "parallel": true,
+      "maxParallel": 3,
+      "waitForDependencies": true,
+      "timeoutPerDependency": 60000
+    },
+    "deadlockPrevention": {
+      "enabled": true,
+      "detectionInterval": 10000,
+      "resolutionStrategy": "abort_youngest"
+    }
+  },
+  
+  "confidenceThresholdBoundaries": {
+    "fineGrainedTask": {
+      "min": 95,
+      "max": 100,
+      "inclusive": "both",
+      "description": "95 ≤ score ≤ 100: 任务可精细拆解（仅影响拆分粒度，不影响是否调度Agent）"
+    },
+    "promptExecute": {
+      "min": 85,
+      "max": 94,
+      "inclusive": "both",
+      "description": "85 ≤ score ≤ 94: 提示执行"
+    },
+    "userConfirm": {
+      "min": 70,
+      "max": 84,
+      "inclusive": "both",
+      "description": "70 ≤ score ≤ 84: 用户确认"
+    },
+    "askUser": {
+      "min": 0,
+      "max": 69,
+      "inclusive": "both",
+      "description": "0 ≤ score ≤ 69: 询问用户"
+    },
+    "boundaryHandling": {
+      "tieBreaker": "prefer_higher",
+      "rounding": "nearest"
+    },
+    "mandatoryConstraints": {
+      "description": "强制约束：置信度阈值不能绕过三阶段流程",
+      "forbiddenOverrides": [
+        {
+          "reason": "置信度高",
+          "action": "禁止跳过Agent调度"
+        },
+        {
+          "reason": "任务简单",
+          "action": "禁止跳过Agent调度"
+        },
+        {
+          "reason": "技术难度低",
+          "action": "禁止跳过Agent调度"
+        },
+        {
+          "reason": "Solo Coder自我授权",
+          "action": "禁止直接执行，必须经过三阶段流程"
+        }
+      ]
+    }
+  },
+  
+  "priorityLevelDocumentation": {
+    "P0_CRITICAL": {
+      "value": 0,
+      "name": "紧急",
+      "description": "数值越小优先级越高，P0为最高优先级",
+      "examples": ["生产事故", "安全漏洞", "系统崩溃"]
+    },
+    "P1_HIGH": {
+      "value": 1,
+      "name": "高",
+      "description": "数值越小优先级越高，P1为高优先级",
+      "examples": ["核心功能开发", "安全相关任务"]
+    },
+    "P2_MEDIUM": {
+      "value": 2,
+      "name": "中",
+      "description": "数值越小优先级越高，P2为中优先级",
+      "examples": ["性能优化", "用户体验改进"]
+    },
+    "P3_LOW": {
+      "value": 3,
+      "name": "低",
+      "description": "数值越小优先级越高，P3为最低优先级",
+      "examples": ["代码审查", "文档编写", "测试"]
+    },
+    "comparisonRule": "数值越小优先级越高: P0(0) > P1(1) > P2(2) > P3(3)"
+  }
+}

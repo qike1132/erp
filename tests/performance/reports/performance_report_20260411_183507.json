@@ -1,0 +1,30 @@
+{
+  "test_name": "APIPerformanceTest",
+  "test_time": "2026-04-11 18:35:07",
+  "slow_threshold_ms": 500.0,
+  "metrics": [
+    {
+      "operation_name": "健康检查API",
+      "module_name": "API",
+      "avg_time_ms": 7.946,
+      "min_time_ms": 5.521,
+      "max_time_ms": 12.15,
+      "std_dev_ms": 1.987,
+      "avg_memory_kb": 104.65,
+      "peak_memory_kb": 184.71,
+      "sample_count": 50,
+      "is_slow": false,
+      "threshold_ms": 500.0
+    }
+  ],
+  "slow_operations": [],
+  "summary": {
+    "total_operations": 1,
+    "slow_operations_count": 0,
+    "avg_response_time_ms": 7.946,
+    "max_response_time_ms": 12.15,
+    "modules_tested": [
+      "API"
+    ]
+  }
+}

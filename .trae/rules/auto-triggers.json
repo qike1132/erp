@@ -1,0 +1,404 @@
+{
+  "version": "2.0.0",
+  "name": "ERP System Auto-Triggers",
+  "description": "自动化触发器配置 - 定义代理自动激活和执行的条件",
+
+  "triggers": {
+    "onFileSave": {
+      "enabled": true,
+      "debounce": 500,
+      "maxBatchSize": 10,
+      "conditions": {
+        "fileSize": { "max": "1MB" },
+        "fileTypes": {
+          "include": [".py", ".js", ".jsx", ".ts", ".tsx", ".vue", ".html", ".css", ".scss", ".sql"],
+          "exclude": [".min.js", ".min.css", ".bundle.js"]
+        },
+        "paths": {
+          "include": ["app/", "static/", "templates/", "tests/"],
+          "exclude": ["node_modules/", "venv/", "__pycache__/", ".git/"]
+        }
+      },
+      "actions": {
+        "immediate": [
+          {
+            "name": "syntaxCheck",
+            "timeout": 5000,
+            "onFailure": "warn"
+          },
+          {
+            "name": "formatCode",
+            "timeout": 3000,
+            "onFailure": "ignore"
+          }
+        ],
+        "delayed": [
+          {
+            "name": "activateAgent",
+            "delay": 1000,
+            "params": {
+              "autoDetect": true,
+              "showNotification": true
+            }
+          }
+        ]
+      }
+    },
+
+    "onFileCreate": {
+      "enabled": true,
+      "conditions": {
+        "fileTypes": {
+          "include": [".py", ".js", ".jsx", ".ts", ".tsx", ".vue", ".html", ".css", ".sql"]
+        }
+      },
+      "actions": {
+        "immediate": [
+          {
+            "name": "applyTemplate",
+            "params": {
+              "autoDetect": true,
+              "preserveStructure": true
+            }
+          },
+          {
+            "name": "activateAgent",
+            "params": {
+              "mode": "creation",
+              "showNotification": true
+            }
+          }
+        ]
+      }
+    },
+
+    "onPreCommit": {
+      "enabled": true,
+      "blocking": true,
+      "conditions": {
+        "stagedFiles": { "min": 1 },
+        "commitMessage": {
+          "pattern": "^(feat|fix|docs|style|refactor|test|chore)(\\(.+\\))?: .{1,}",
+          "required": true
+        }
+      },
+      "actions": {
+        "sequential": [
+          {
+            "name": "codeReview",
+            "agent": "code-reviewer",
+            "timeout": 60000,
+            "onFailure": "block",
+            "params": {
+              "scope": "staged",
+              "checkSecurity": true,
+              "checkPerformance": true,
+              "checkQuality": true
+            }
+          },
+          {
+            "name": "securityScan",
+            "agent": "security-engineer",
+            "timeout": 30000,
+            "onFailure": "warn",
+            "params": {
+              "checkOWASP": true,
+              "checkSecrets": true,
+              "checkVulnerabilities": true
+            }
+          },
+          {
+            "name": "runTests",
+            "timeout": 120000,
+            "onFailure": "warn",
+            "params": {
+              "coverage": { "min": 70 },
+              "failFast": false
+            }
+          }
+        ]
+      }
+    },
+
+    "onPostCommit": {
+      "enabled": true,
+      "actions": {
+        "immediate": [
+          {
+            "name": "updateMetrics",
+            "params": {
+              "trackQuality": true,
+              "trackPerformance": true
+            }
+          },
+          {
+            "name": "notifyAgent",
+            "params": {
+              "event": "commit",
+              "updateMemory": true
+            }
+          }
+        ]
+      }
+    },
+
+    "onBranchSwitch": {
+      "enabled": true,
+      "actions": {
+        "immediate": [
+          {
+            "name": "loadBranchContext",
+            "params": {
+              "restoreAgentState": true,
+              "loadBranchRules": true
+            }
+          }
+        ]
+      }
+    },
+
+    "onMergeRequest": {
+      "enabled": true,
+      "blocking": true,
+      "actions": {
+        "sequential": [
+          {
+            "name": "fullCodeReview",
+            "agent": "code-reviewer",
+            "timeout": 120000,
+            "params": {
+              "scope": "diff",
+              "checkAll": true
+            }
+          },
+          {
+            "name": "integrationTest",
+            "timeout": 180000,
+            "onFailure": "block"
+          }
+        ]
+      }
+    },
+
+    "onDeployment": {
+      "enabled": true,
+      "actions": {
+        "sequential": [
+          {
+            "name": "securityAudit",
+            "agent": "security-engineer",
+            "timeout": 60000,
+            "onFailure": "block"
+          },
+          {
+            "name": "performanceTest",
+            "agent": "performance-benchmarker",
+            "timeout": 180000,
+            "onFailure": "warn"
+          }
+        ]
+      }
+    }
+  },
+
+  "fileTypeTriggers": {
+    ".py": {
+      "primaryAgent": "backend-architect",
+      "secondaryAgents": ["security-engineer", "code-reviewer"],
+      "onSave": {
+        "lint": { "tool": "pylint", "config": ".pylintrc" },
+        "format": { "tool": "black", "lineLength": 100 },
+        "typeCheck": { "tool": "mypy", "strict": false }
+      },
+      "onCommit": {
+        "review": { "checkSecurity": true, "checkPerformance": true },
+        "test": { "run": true, "coverage": true }
+      }
+    },
+
+    ".js": {
+      "primaryAgent": "frontend-developer",
+      "secondaryAgents": ["code-reviewer"],
+      "onSave": {
+        "lint": { "tool": "eslint", "config": ".eslintrc.js" },
+        "format": { "tool": "prettier" }
+      },
+      "onCommit": {
+        "review": { "checkQuality": true },
+        "test": { "run": true }
+      }
+    },
+
+    ".jsx": {
+      "primaryAgent": "frontend-developer",
+      "secondaryAgents": ["ui-designer", "code-reviewer"],
+      "onSave": {
+        "lint": { "tool": "eslint", "config": ".eslintrc.js" },
+        "format": { "tool": "prettier" },
+        "accessibility": { "tool": "jsx-a11y" }
+      },
+      "onCommit": {
+        "review": { "checkAccessibility": true, "checkPerformance": true }
+      }
+    },
+
+    ".ts": {
+      "primaryAgent": "frontend-developer",
+      "secondaryAgents": ["code-reviewer"],
+      "onSave": {
+        "lint": { "tool": "eslint", "config": ".eslintrc.js" },
+        "format": { "tool": "prettier" },
+        "typeCheck": { "tool": "tsc", "strict": true }
+      }
+    },
+
+    ".tsx": {
+      "primaryAgent": "frontend-developer",
+      "secondaryAgents": ["ui-designer", "code-reviewer"],
+      "onSave": {
+        "lint": { "tool": "eslint", "config": ".eslintrc.js" },
+        "format": { "tool": "prettier" },
+        "typeCheck": { "tool": "tsc", "strict": true },
+        "accessibility": { "tool": "jsx-a11y" }
+      }
+    },
+
+    ".vue": {
+      "primaryAgent": "frontend-developer",
+      "secondaryAgents": ["ui-designer", "code-reviewer"],
+      "onSave": {
+        "lint": { "tool": "eslint", "plugin": "vue" },
+        "format": { "tool": "prettier" }
+      }
+    },
+
+    ".css": {
+      "primaryAgent": "ui-designer",
+      "secondaryAgents": ["frontend-developer"],
+      "onSave": {
+        "lint": { "tool": "stylelint", "config": ".stylelintrc" },
+        "accessibility": { "checkContrast": true }
+      }
+    },
+
+    ".scss": {
+      "primaryAgent": "ui-designer",
+      "secondaryAgents": ["frontend-developer"],
+      "onSave": {
+        "lint": { "tool": "stylelint", "config": ".stylelintrc" },
+        "accessibility": { "checkContrast": true }
+      }
+    },
+
+    ".sql": {
+      "primaryAgent": "database-optimizer",
+      "secondaryAgents": ["backend-architect", "security-engineer"],
+      "onSave": {
+        "syntax": { "validate": true },
+        "performance": { "analyze": true }
+      },
+      "onCommit": {
+        "review": { "checkInjection": true, "checkPerformance": true }
+      }
+    },
+
+    ".html": {
+      "primaryAgent": "frontend-developer",
+      "secondaryAgents": ["ui-designer"],
+      "onSave": {
+        "lint": { "tool": "htmlhint" },
+        "accessibility": { "tool": "html-validate" }
+      }
+    }
+  },
+
+  "keywordTriggers": {
+    "security": {
+      "keywords": ["password", "token", "secret", "api_key", "auth", "login", "session"],
+      "agents": ["security-engineer"],
+      "autoActivate": true,
+      "priority": "high"
+    },
+    "performance": {
+      "keywords": ["optimize", "slow", "performance", "query", "cache", "index"],
+      "agents": ["database-optimizer", "performance-benchmarker"],
+      "autoActivate": true,
+      "priority": "medium"
+    },
+    "api": {
+      "keywords": ["api", "endpoint", "route", "controller", "rest", "graphql"],
+      "agents": ["backend-architect"],
+      "autoActivate": true,
+      "priority": "medium"
+    },
+    "ui": {
+      "keywords": ["ui", "design", "style", "css", "layout", "responsive", "theme"],
+      "agents": ["ui-designer"],
+      "autoActivate": true,
+      "priority": "medium"
+    },
+    "test": {
+      "keywords": ["test", "spec", "coverage", "unit", "integration"],
+      "agents": ["code-reviewer"],
+      "autoActivate": true,
+      "priority": "low"
+    }
+  },
+
+  "eventPriority": {
+    "blocking": 100,
+    "high": 75,
+    "medium": 50,
+    "low": 25,
+    "background": 10
+  },
+
+  "failureHandling": {
+    "onAgentFailure": {
+      "retry": { "count": 2, "delay": 1000 },
+      "fallback": "notify",
+      "log": true
+    },
+    "onTimeout": {
+      "action": "skip",
+      "notify": true,
+      "log": true
+    },
+    "onError": {
+      "action": "stop",
+      "notify": true,
+      "log": true,
+      "saveState": true
+    }
+  },
+
+  "notifications": {
+    "enabled": true,
+    "channels": {
+      "ide": {
+        "enabled": true,
+        "types": ["info", "warning", "error", "success"],
+        "position": "bottom-right",
+        "duration": 5000
+      },
+      "console": {
+        "enabled": true,
+        "types": ["info", "warning", "error"],
+        "timestamp": true
+      },
+      "statusBar": {
+        "enabled": true,
+        "showAgentStatus": true,
+        "showRuleCount": true
+      }
+    },
+    "events": {
+      "onAgentActivate": { "show": true, "type": "info" },
+      "onRuleExecute": { "show": false },
+      "onRulePass": { "show": false },
+      "onRuleFail": { "show": true, "type": "warning" },
+      "onReviewComplete": { "show": true, "type": "success" },
+      "onCommitBlocked": { "show": true, "type": "error" }
+    }
+  }
+}

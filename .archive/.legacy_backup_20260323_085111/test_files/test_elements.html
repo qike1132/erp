@@ -1,0 +1,33 @@
+
+<!DOCTYPE html>
+<html>
+<body>
+    <div id="excel-upload-area">Upload Area</div>
+    <input type="file" id="excel-input" />
+    <button id="download-template">Download</button>
+    
+    <script>
+        const excelUploadArea = document.getElementById('excel-upload-area');
+        const excelInput = document.getElementById('excel-input');
+        const downloadTemplate = document.getElementById('download-template');
+        
+        console.log('excelUploadArea:', excelUploadArea);
+        console.log('excelInput:', excelInput);
+        console.log('downloadTemplate:', downloadTemplate);
+        
+        if (!excelUploadArea || !excelInput) {
+            console.warn('批量上传元素不存在，跳过初始化');
+        } else {
+            console.log('Elements found, continuing initialization');
+            
+            if (downloadTemplate) {
+                console.log('Binding downloadTemplate click event');
+                downloadTemplate.addEventListener('click', function(e) {
+                    console.log('downloadTemplate clicked!');
+                    e.preventDefault();
+                });
+            }
+        }
+    </script>
+</body>
+</html>

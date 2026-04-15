@@ -1,192 +1,731 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>滨发玩具协同系统 - 登录</title>
-    <!-- 引入Bootstrap 5 -->
     <link href="{{ url_for('static', filename='bootstrap.min.css') }}" rel="stylesheet">
-    <!-- 引入Font Awesome图标 -->
-    <link href="{{ url_for('static', filename='all.min.css') }}" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='all.min.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        /* 全局样式 */
+        :root {
+            --white: #FFFFFF;
+            --off-white: #FAFBFC;
+            --light-gray: #F0F2F5;
+            --border-light: #E8ECF0;
+            --text-primary: #2D3748;
+            --text-secondary: #718096;
+            --text-muted: #A0AEC0;
+            --accent: #B0E0E6;
+            --accent-light: #D4F1F4;
+            --accent-dark: #87CEEB;
+            --accent-gradient: linear-gradient(135deg, #87CEEB 0%, #B0E0E6 100%);
+            --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
+            --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.06);
+            --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.08);
+            --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.1);
+            --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.12);
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 20px;
+            --radius-xl: 28px;
+            --transition-fast: 0.2s ease;
+            --transition-normal: 0.3s ease;
+            --transition-slow: 0.4s ease;
+        }
+
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
+
         body {
-            font-family: 'Microsoft YaHei', sans-serif;
-            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-            height: 100vh;
+            font-family: 'Noto Sans SC', 'Microsoft YaHei', -apple-system, BlinkMacSystemFont, sans-serif;
+            min-height: 100vh;
             display: flex;
-            align-items: center;
-            justify-content: center;
+            background: var(--off-white);
+            overflow-x: hidden;
         }
-        /* 登录容器 */
+
         .login-container {
-            background: #fff;
-            border-radius: 15px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-            overflow: hidden;
-            width: 900px;
-            max-width: 100%;
             display: flex;
-            flex-direction: row;
+            width: 100%;
+            min-height: 100vh;
         }
-        /* 左侧品牌区域 */
+
         .brand-section {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: #fff;
-            padding: 40px;
+            flex: 1.1;
+            background: var(--white);
             display: flex;
             flex-direction: column;
-            align-items: center;
             justify-content: center;
-            flex: 1;
+            align-items: center;
+            padding: 78px;
             position: relative;
             overflow: hidden;
         }
+
         .brand-section::before {
             content: '';
             position: absolute;
-            top: 0;
-            left: 0;
+            top: -195px;
+            right: -195px;
+            width: 520px;
+            height: 520px;
+            background: radial-gradient(circle, var(--accent-light) 0%, transparent 70%);
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        .brand-section::after {
+            content: '';
+            position: absolute;
+            bottom: -130px;
+            left: -130px;
+            width: 390px;
+            height: 390px;
+            background: radial-gradient(circle, var(--accent) 0%, transparent 70%);
+            opacity: 0.4;
+            pointer-events: none;
+        }
+
+        .brand-content {
+            position: relative;
+            z-index: 1;
+            text-align: center;
+            max-width: 546px;
+        }
+
+        .logo-wrapper {
+            margin-bottom: 62px;
+            animation: fadeInDown 0.8s ease;
+        }
+
+        @keyframes fadeInDown {
+            from {
+                opacity: 0;
+                transform: translateY(-30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .logo-frame {
+            width: 182px;
+            height: 182px;
+            margin: 0 auto;
+            background: var(--white);
+            border-radius: 50%;
+            padding: 21px;
+            box-shadow: var(--shadow-lg);
+            border: 5px solid var(--accent-light);
+            transition: transform var(--transition-slow), box-shadow var(--transition-slow);
+        }
+
+        .logo-frame:hover {
+            transform: scale(1.05);
+            box-shadow: var(--shadow-xl);
+        }
+
+        .logo-frame img {
             width: 100%;
             height: 100%;
-            background: url('{{ url_for('static', filename='brand-icon.png') }}') no-repeat center center;
-            background-size: 200px;
-            opacity: 0.1;
-            z-index: 1;
+            object-fit: contain;
+            border-radius: 50%;
         }
+
+        .brand-info {
+            animation: fadeInUp 0.8s ease 0.2s both;
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
         .brand-title {
-            font-size: 32px;
-            font-weight: bold;
-            margin-bottom: 10px;
-            z-index: 2;
+            font-size: 42px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 16px;
+            letter-spacing: -0.5px;
         }
-        .brand-subtitle {
+
+        .brand-tagline {
+            font-size: 20px;
+            color: var(--text-secondary);
+            line-height: 1.7;
+            margin-bottom: 62px;
+        }
+
+        .feature-cards {
+            display: flex;
+            flex-direction: column;
+            gap: 21px;
+            animation: fadeInUp 0.8s ease 0.4s both;
+        }
+
+        .feature-card {
+            display: flex;
+            align-items: center;
+            gap: 21px;
+            padding: 26px 31px;
+            background: var(--off-white);
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border-light);
+            transition: all var(--transition-normal);
+        }
+
+        .feature-card:hover {
+            background: var(--white);
+            border-color: var(--accent);
+            box-shadow: var(--shadow-md);
+            transform: translateX(10px);
+        }
+
+        .feature-icon-wrap {
+            width: 62px;
+            height: 62px;
+            background: var(--accent-gradient);
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--white);
+            font-size: 23px;
+            box-shadow: var(--shadow-sm);
+            flex-shrink: 0;
+        }
+
+        .feature-text {
+            flex: 1;
+        }
+
+        .feature-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 3px;
+        }
+
+        .feature-desc {
             font-size: 16px;
-            opacity: 0.9;
-            z-index: 2;
+            color: var(--text-muted);
         }
-        /* 右侧登录区域 */
+
         .login-section {
-            padding: 40px;
             flex: 1;
             display: flex;
             flex-direction: column;
             justify-content: center;
+            align-items: center;
+            padding: 78px;
+            background: var(--off-white);
         }
-        .login-title {
-            font-size: 24px;
-            font-weight: bold;
-            color: #333;
-            margin-bottom: 30px;
-            text-align: center;
-        }
-        /* 表单样式 */
-        .form-group {
-            margin-bottom: 20px;
-        }
-        .form-label {
-            font-weight: 500;
-            color: #555;
-            margin-bottom: 5px;
-        }
-        .form-control {
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            padding: 12px 15px;
-            font-size: 16px;
-            transition: border-color 0.3s ease;
-        }
-        .form-control:focus {
-            border-color: #667eea;
-            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
-            outline: none;
-        }
-        /* 按钮样式 */
-        .btn-login {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: #fff;
-            border: none;
-            border-radius: 8px;
-            padding: 12px;
-            font-size: 16px;
-            font-weight: 500;
+
+        .login-card {
             width: 100%;
-            transition: background 0.3s ease;
+            max-width: 546px;
+            background: var(--white);
+            border-radius: var(--radius-xl);
+            padding: 62px 57px;
+            box-shadow: var(--shadow-lg);
+            animation: fadeInUp 0.8s ease;
         }
-        .btn-login:hover {
-            background: linear-gradient(135deg, #5a67d8 0%, #6b46c1 100%);
+
+        .login-card-header {
+            text-align: center;
+            margin-bottom: 52px;
         }
-        /* 辅助链接 */
-        .helper-links {
+
+        .login-heading {
+            font-size: 34px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 10px;
+        }
+
+        .login-subheading {
+            font-size: 18px;
+            color: var(--text-secondary);
+        }
+
+        .form-group {
+            margin-bottom: 31px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 17px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 13px;
+        }
+
+        .input-wrapper {
+            position: relative;
+        }
+
+        .input-prefix {
+            position: absolute;
+            left: 21px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--accent-dark);
+            font-size: 21px;
+            z-index: 2;
+            transition: color var(--transition-fast);
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 21px 23px 21px 65px;
+            font-size: 18px;
+            font-family: inherit;
+            color: var(--text-primary);
+            background: var(--off-white);
+            border: 2px solid var(--border-light);
+            border-radius: var(--radius-md);
+            outline: none;
+            transition: all var(--transition-fast);
+        }
+
+        .form-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .form-input:focus {
+            border-color: var(--accent-dark);
+            background: var(--white);
+            box-shadow: 0 0 0 4px rgba(176, 224, 230, 0.2);
+        }
+
+        .form-input:focus + .input-prefix,
+        .input-wrapper:focus-within .input-prefix {
+            color: var(--accent-dark);
+        }
+
+        .remember-row {
             display: flex;
             justify-content: space-between;
-            margin-top: 15px;
+            align-items: center;
+            margin-bottom: 36px;
+        }
+
+        .custom-checkbox {
+            display: flex;
+            align-items: center;
+            gap: 13px;
+            cursor: pointer;
+        }
+
+        .custom-checkbox input {
+            display: none;
+        }
+
+        .checkbox-mark {
+            width: 29px;
+            height: 29px;
+            border: 2px solid var(--border-light);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all var(--transition-fast);
+            background: var(--white);
+        }
+
+        .custom-checkbox input:checked + .checkbox-mark {
+            background: var(--accent-gradient);
+            border-color: var(--accent-dark);
+        }
+
+        .checkbox-mark i {
+            color: var(--white);
             font-size: 14px;
+            opacity: 0;
+            transform: scale(0.5);
+            transition: all var(--transition-fast);
         }
-        .helper-links a {
-            color: #667eea;
-            text-decoration: none;
+
+        .custom-checkbox input:checked + .checkbox-mark i {
+            opacity: 1;
+            transform: scale(1);
         }
-        .helper-links a:hover {
-            text-decoration: underline;
+
+        .checkbox-label {
+            font-size: 17px;
+            color: var(--text-secondary);
         }
-        /* 响应式设计 */
+
+        .btn-login {
+            width: 100%;
+            padding: 21px 31px;
+            font-size: 20px;
+            font-weight: 600;
+            font-family: inherit;
+            color: var(--white);
+            background: var(--accent-gradient);
+            border: none;
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: all var(--transition-normal);
+            box-shadow: var(--shadow-md);
+            position: relative;
+            overflow: hidden;
+            letter-spacing: 0.5px;
+        }
+
+        .btn-login::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+            transition: left 0.6s ease;
+        }
+
+        .btn-login:hover {
+            transform: translateY(-3px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .btn-login:hover::before {
+            left: 100%;
+        }
+
+        .btn-login:active {
+            transform: translateY(0);
+        }
+
+        .btn-login i {
+            margin-right: 10px;
+        }
+
+        .alert-box {
+            padding: 18px 21px;
+            border-radius: var(--radius-md);
+            margin-bottom: 31px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            font-size: 17px;
+            animation: slideIn 0.4s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-12px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .alert-error {
+            background: #FEF2F2;
+            color: #C53030;
+            border: 1px solid #FCA5A5;
+        }
+
+        .alert-success {
+            background: #F0FFF4;
+            color: #276749;
+            border: 1px solid #9AE6B4;
+        }
+
+        .alert-box i {
+            font-size: 21px;
+        }
+
+        .login-footer {
+            text-align: center;
+            margin-top: 47px;
+            padding-top: 36px;
+            border-top: 1px solid var(--border-light);
+        }
+
+        .footer-text {
+            font-size: 16px;
+            color: var(--text-muted);
+        }
+
+        .footer-version {
+            font-size: 14px;
+            color: var(--text-muted);
+            margin-top: 5px;
+        }
+
+        @media (max-width: 1024px) {
+            .brand-section {
+                padding: 48px;
+            }
+
+            .logo-frame {
+                width: 120px;
+                height: 120px;
+            }
+
+            .brand-title {
+                font-size: 28px;
+            }
+
+            .login-section {
+                padding: 48px;
+            }
+
+            .login-card {
+                padding: 40px 36px;
+            }
+        }
+
         @media (max-width: 768px) {
             .login-container {
                 flex-direction: column;
-                width: 95%;
             }
+
             .brand-section {
-                padding: 30px;
+                padding: 40px 32px;
+                min-height: auto;
             }
+
+            .brand-content {
+                max-width: 100%;
+            }
+
+            .logo-frame {
+                width: 100px;
+                height: 100px;
+            }
+
+            .brand-tagline {
+                margin-bottom: 32px;
+            }
+
+            .feature-cards {
+                display: none;
+            }
+
+            .login-section {
+                padding: 40px 24px;
+                flex: 1;
+            }
+
+            .login-card {
+                padding: 36px 28px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .brand-section {
+                padding: 32px 24px;
+            }
+
+            .logo-frame {
+                width: 90px;
+                height: 90px;
+            }
+
             .brand-title {
                 font-size: 24px;
             }
-            .login-section {
-                padding: 30px;
+
+            .login-card {
+                padding: 32px 24px;
+                border-radius: var(--radius-lg);
+            }
+
+            .login-heading {
+                font-size: 22px;
             }
         }
     </style>
 </head>
 <body>
     <div class="login-container">
-        <!-- 左侧品牌区域 -->
         <div class="brand-section">
-            <h1 class="brand-title">滨发玩具协同系统</h1>
-            <p class="brand-subtitle">专业的毛绒玩具企业管理平台</p>
+            <div class="brand-content">
+                <div class="logo-wrapper">
+                    <div class="logo-frame">
+                        <img src="{{ url_for('static', filename='logo_plush.png') }}" alt="滨发玩具">
+                    </div>
+                </div>
+
+                <div class="brand-info">
+                    <h1 class="brand-title">滨发玩具协同系统</h1>
+                    <p class="brand-tagline">专业的毛绒玩具企业供应链管理平台<br>智能、高效、可靠的数字化管理解决方案</p>
+                </div>
+
+                <div class="feature-cards">
+                    <div class="feature-card">
+                        <div class="feature-icon-wrap">
+                            <i class="fas fa-boxes-stacked"></i>
+                        </div>
+                        <div class="feature-text">
+                            <div class="feature-title">智能库存管理</div>
+                            <div class="feature-desc">实时追踪库存动态，精准预测需求</div>
+                        </div>
+                    </div>
+
+                    <div class="feature-card">
+                        <div class="feature-icon-wrap">
+                            <i class="fas fa-file-invoice"></i>
+                        </div>
+                        <div class="feature-text">
+                            <div class="feature-title">高效订单处理</div>
+                            <div class="feature-desc">自动化流程，提升运营效率</div>
+                        </div>
+                    </div>
+
+                    <div class="feature-card">
+                        <div class="feature-icon-wrap">
+                            <i class="fas fa-chart-line"></i>
+                        </div>
+                        <div class="feature-text">
+                            <div class="feature-title">实时数据分析</div>
+                            <div class="feature-desc">可视化报表，洞察业务趋势</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
-        <!-- 右侧登录区域 -->
+
         <div class="login-section">
-            <h2 class="login-title">用户登录</h2>
-            <form method="POST">
-                <div class="form-group">
-                    <label for="username" class="form-label">
-                        <i class="fas fa-user"></i> 用户名
-                    </label>
-                    <input type="text" class="form-control" id="username" name="username" required placeholder="请输入用户名">
+            <div class="login-card">
+                <div class="login-card-header">
+                    <h2 class="login-heading">欢迎登录</h2>
+                    <p class="login-subheading">请输入您的账号信息以访问系统</p>
                 </div>
-                <div class="form-group">
-                    <label for="password" class="form-label">
-                        <i class="fas fa-lock"></i> 密码
-                    </label>
-                    <input type="password" class="form-control" id="password" name="password" required placeholder="请输入密码">
+
+                <form method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                    {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                        <div class="alert-box alert-{{ 'error' if category == 'error' or category == 'danger' else 'success' }}">
+                            <i class="fas fa-{{ 'circle-exclamation' if category == 'error' or category == 'danger' else 'circle-check' }}"></i>
+                            <span>{{ message }}</span>
+                        </div>
+                        {% endfor %}
+                    {% endif %}
+                    {% endwith %}
+
+                    <div class="form-group">
+                        <label for="username" class="form-label">用户名</label>
+                        <div class="input-wrapper">
+                            <input type="text" class="form-input" id="username" name="username" required placeholder="请输入用户名" autocomplete="username">
+                            <i class="fas fa-user input-prefix"></i>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="password" class="form-label">密码</label>
+                        <div class="input-wrapper">
+                            <input type="password" class="form-input" id="password" name="password" required placeholder="请输入密码" autocomplete="current-password">
+                            <i class="fas fa-lock input-prefix"></i>
+                        </div>
+                    </div>
+
+                    <div class="remember-row">
+                        <label class="custom-checkbox">
+                            <input type="checkbox" id="remember" name="remember">
+                            <span class="checkbox-mark">
+                                <i class="fas fa-check"></i>
+                            </span>
+                            <span class="checkbox-label">记住我</span>
+                        </label>
+                    </div>
+
+                    <button type="submit" class="btn-login">
+                        <i class="fas fa-right-to-bracket"></i>安全登录
+                    </button>
+                </form>
+
+                <div class="login-footer">
+                    <p class="footer-text">滨发玩具供应链管理系统</p>
+                    <p class="footer-version">v2.0</p>
                 </div>
-                <div class="form-group form-check">
-                    <input type="checkbox" class="form-check-input" id="remember" name="remember">
-                    <label class="form-check-label" for="remember">记住我</label>
-                </div>
-                <button type="submit" class="btn btn-login">登录</button>
-                <div class="helper-links">
-                </div>
-            </form>
+            </div>
         </div>
     </div>
-    <!-- 引入Bootstrap JS -->
+
     <script src="{{ url_for('static', filename='bootstrap.bundle.min.js') }}"></script>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        var loginForm = document.querySelector('form');
+
+        loginForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            var username = document.getElementById('username').value.trim();
+            var password = document.getElementById('password').value;
+            var remember = document.getElementById('remember').checked;
+
+            var existingAlert = loginForm.querySelector('.alert-box');
+            if (existingAlert) {
+                existingAlert.remove();
+            }
+
+            var btn = loginForm.querySelector('.btn-login');
+            var originalText = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>登录中...';
+            btn.disabled = true;
+
+            fetch('/api/login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    username: username,
+                    password: password,
+                    remember: remember
+                })
+            })
+            .then(function(response) {
+                return response.json();
+            })
+            .then(function(data) {
+                if (data.success) {
+                    setTimeout(function() {
+                        window.dispatchEvent(new CustomEvent('loginSuccess'));
+                        window.location.href = '/';
+                    }, 100);
+                } else {
+                    var alertBox = document.createElement('div');
+                    alertBox.className = 'alert-box alert-error';
+                    alertBox.innerHTML = '<i class="fas fa-circle-exclamation"></i><span>' + data.error + '</span>';
+                    loginForm.insertBefore(alertBox, loginForm.firstChild);
+
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+                }
+            })
+            .catch(function(error) {
+                var alertBox = document.createElement('div');
+                alertBox.className = 'alert-box alert-error';
+                alertBox.innerHTML = '<i class="fas fa-circle-exclamation"></i><span>网络错误，请稍后重试</span>';
+                loginForm.insertBefore(alertBox, loginForm.firstChild);
+
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            });
+        });
+    });
+    </script>
 </body>
 </html>

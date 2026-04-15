@@ -1,0 +1,112 @@
+pipeline {
+    agent any
+    
+    environment {
+        APP_NAME = "erp_system"
+        DOCKER_REGISTRY = "registry.example.com"
+        KUBECONFIG_DEV = credentials('kubeconfig-dev')
+        KUBECONFIG_PROD = credentials('kubeconfig-prod')
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Code Quality & Security Scan') {
+            parallel {
+                stage('Static Analysis (SonarQube)') {
+                    steps {
+                        withSonarQubeEnv('SonarQube') {
+                            sh 'sonar-scanner -Dsonar.projectKey=erp_system -Dsonar.sources=app'
+                        }
+                    }
+                }
+                stage('Dependency Check') {
+                    steps {
+                        sh 'pip-audit -r requirements.txt'
+                        // Alternatively use dependency-check plugin
+                    }
+                }
+                stage('Code Style (Flake8/Black)') {
+                    steps {
+                        sh 'flake8 app/'
+                        sh 'black --check app/'
+                    }
+                }
+            }
+        }
+
+        stage('Unit & Integration Testing') {
+            steps {
+                sh '''
+                python -m venv venv
+                . venv/bin/activate
+                pip install -r requirements.txt
+                pytest tests/ --cov=app --cov-report=xml
+                '''
+            }
+            post {
+                always {
+                    junit 'test-results/*.xml'
+                    cobertura coberturaReportFile: 'coverage.xml'
+                }
+            }
+        }
+
+        stage('Build & Push Docker Image') {
+            steps {
+                script {
+                    def image = docker.build("${DOCKER_REGISTRY}/${APP_NAME}:${env.BUILD_ID}")
+                    docker.withRegistry("https://${DOCKER_REGISTRY}", 'docker-credentials-id') {
+                        image.push()
+                        image.push("latest")
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to Staging') {
+            steps {
+                withCredentials([file(credentialsId: 'kubeconfig-stg', variable: 'KUBECONFIG')]) {
+                    sh 'helm upgrade --install erp-system-stg ./helm/erp-system -n staging --set image.tag=${BUILD_ID}'
+                }
+            }
+        }
+
+        stage('Performance & E2E Tests') {
+            steps {
+                sh 'jmeter -n -t tests/performance/erp_load_test.jmx -l results.jtl'
+                // Add verification steps for response times and error rates
+            }
+        }
+
+        stage('Deploy to Production') {
+            when {
+                branch 'main'
+            }
+            input {
+                message "Approve Production Deployment?"
+            }
+            steps {
+                withCredentials([file(credentialsId: 'kubeconfig-prod', variable: 'KUBECONFIG')]) {
+                    // Blue-Green or Canary Deployment Strategy
+                    sh 'helm upgrade --install erp-system-prod ./helm/erp-system -n production --set image.tag=${BUILD_ID}'
+                }
+            }
+        }
+    }
+
+    post {
+        failure {
+            // Trigger Rollback Script if needed
+            echo "Pipeline failed! Sending notification to Slack/Feishu..."
+            // sh 'helm rollback erp-system-prod -n production'
+        }
+        success {
+            echo "Deployment successful! Triggering Data consistency checks..."
+        }
+    }
+}

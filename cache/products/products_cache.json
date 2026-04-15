@@ -1,0 +1,1011 @@
+{
+  "1": {
+    "id": 1,
+    "name": "23cm企鹅公仔(粉色)",
+    "barcode": "",
+    "sku": "",
+    "image": "/static/uploads/20260403_f3f2398d.png",
+    "initial_stock": 0,
+    "current_stock": 219650,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "2": {
+    "id": 2,
+    "name": "23cm企鹅公仔(灰色)",
+    "barcode": "",
+    "sku": "",
+    "image": "/static/uploads/20260403_097ae66e.png",
+    "initial_stock": 0,
+    "current_stock": 107050,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "3": {
+    "id": 3,
+    "name": "23cm企鹅公仔(芭比粉色)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 105700,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "4": {
+    "id": 4,
+    "name": "23cm企鹅公仔(蓝色)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 101350,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "5": {
+    "id": 5,
+    "name": "19寸企鹅(蓝色)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 88864,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "6": {
+    "id": 6,
+    "name": "CITYPEN巡游世界系列-9寸企鹅公仔（墨西哥）(男款)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 80050,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "7": {
+    "id": 7,
+    "name": "MINI PEN团子系列搪胶毛绒",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 72976,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "8": {
+    "id": 8,
+    "name": "史努比夏日游记系列 - 14寸坐姿史努比",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 78016,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "9": {
+    "id": 9,
+    "name": "奈小咪多巴胺系列-4.5寸运动狗狗挂件(柯基、泰迪混2款)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 47680,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "10": {
+    "id": 10,
+    "name": "奈小咪多巴胺系列-4.5寸运动狗狗挂件(雪纳瑞、腊肠狗混2款)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 49840,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "11": {
+    "id": 11,
+    "name": "哈利波特个装绒绒头箍（海德薇)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 52600,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "12": {
+    "id": 12,
+    "name": "MINI FAMILY暖暖系列-4寸动物毛绒挂件(大象、考拉、熊猫混3款)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 66920,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "13": {
+    "id": 13,
+    "name": "8寸坐姿企鹅毛绒公仔(蓝色)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 110470,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "14": {
+    "id": 14,
+    "name": "19寸企鹅(灰色)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 57728,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "15": {
+    "id": 15,
+    "name": "10寸企鹅公仔(粉色)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 118552,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "16": {
+    "id": 16,
+    "name": "10寸仓鼠毛绒公仔(灰色)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 110964,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": {
+        "id": 1,
+        "product_id": 16,
+        "product_name": "10寸仓鼠毛绒公仔(灰色)",
+        "cotton_usage": 200.0,
+        "create_time": "2026-04-06 14:55:47",
+        "update_time": "2026-04-06 14:56:45"
+      },
+      "fabrics": [
+        {
+          "id": 2,
+          "product_id": 16,
+          "fabric_name": "氨纶",
+          "quantity": 1.0,
+          "supplier": "",
+          "unit": "码",
+          "create_time": "2026-04-06 14:56:45"
+        },
+        {
+          "id": 1,
+          "product_id": 16,
+          "fabric_name": "超柔",
+          "quantity": 1.0,
+          "supplier": "",
+          "unit": "码",
+          "create_time": "2026-04-06 14:56:45"
+        }
+      ],
+      "accessories": []
+    },
+    "has_material": true,
+    "has_fabric": true,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "17": {
+    "id": 17,
+    "name": "10寸仓鼠毛绒公仔(米色)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 120948,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": {
+        "id": 2,
+        "product_id": 17,
+        "product_name": "10寸仓鼠毛绒公仔(米色)",
+        "cotton_usage": 10.0,
+        "create_time": "2026-04-06 14:56:05",
+        "update_time": "2026-04-06 14:56:05"
+      },
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": true,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "18": {
+    "id": 18,
+    "name": "咱们裸熊系列趣味趴姿公仔（白熊）",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 8820,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "19": {
+    "id": 19,
+    "name": "5寸鲨鱼毛绒挂件(深蓝)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 18000,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "20": {
+    "id": 20,
+    "name": "CITYPEN巡游世界系列-8寸枫叶企鹅公仔",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 2400,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "21": {
+    "id": 21,
+    "name": "17cm小号MINI PEN公仔(黑色)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 50940,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "22": {
+    "id": 22,
+    "name": "8寸坐姿企鹅毛绒公仔(灰色)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 65908,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "23": {
+    "id": 23,
+    "name": "裸熊公仔抱枕-白熊",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 8579,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "24": {
+    "id": 24,
+    "name": "裸熊公仔抱枕-熊猫",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 9246,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "25": {
+    "id": 25,
+    "name": "裸熊公仔抱枕-棕熊",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 6049,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "26": {
+    "id": 26,
+    "name": "海洋系列-22寸鲨鱼公仔",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 30528,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "27": {
+    "id": 27,
+    "name": "17cm小号MINI PEN公仔(青色)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 37440,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "28": {
+    "id": 28,
+    "name": "17cm小号MINI PEN公仔(深粉色)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 32580,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "29": {
+    "id": 29,
+    "name": "百变墩DUN系列-3.5寸公仔挂件（混2款）(鸡腿/法棍)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 2880,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "30": {
+    "id": 30,
+    "name": "咱们裸熊-5寸站姿创意挂件（混3款）",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 8880,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "31": {
+    "id": 31,
+    "name": "CITYPEN巡游世界系列-9寸企鹅公仔（意大利厨师）",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 6750,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "32": {
+    "id": 32,
+    "name": "墩墩鸡系列-6号椰子鸡公仔（PDQ）",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 4680,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "33": {
+    "id": 33,
+    "name": "CITYPEN巡游世界系列-9寸女神像企鹅公仔",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 5400,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "34": {
+    "id": 34,
+    "name": "史努比夏日游记系列 - 19寸趴姿史努比",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 39636,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "35": {
+    "id": 35,
+    "name": "咱们裸熊-可爱坐姿毛绒公仔(熊猫)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 12096,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "36": {
+    "id": 36,
+    "name": "百变墩DUN系列-3.5寸公仔挂件（混2款）(奶茶/牛奶)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 1920,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "37": {
+    "id": 37,
+    "name": "百变墩DUN系列-3.5寸公仔挂件（混2款）(三明治/披萨)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 1920,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "38": {
+    "id": 38,
+    "name": "百变墩DUN系列-3.5寸公仔挂件（混2款）(菜花/玉米)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 1920,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "39": {
+    "id": 39,
+    "name": "墩墩疯狂假期系列-2.5寸毛绒挂件(小强墩)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 1536,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "40": {
+    "id": 40,
+    "name": "墩墩疯狂假期系列-猫头鹰墩毛绒公仔(粉色)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 240,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "41": {
+    "id": 41,
+    "name": "墩墩疯狂假期系列-猫头鹰墩毛绒公仔(棕色)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 480,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "42": {
+    "id": 42,
+    "name": "CITYPEN巡游世界系列-9寸企鹅公仔（中东）",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 23100,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "43": {
+    "id": 43,
+    "name": "CITYPEN巡游世界系列-10寸企鹅公仔(黑色刺绣长袍款)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 30420,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "44": {
+    "id": 44,
+    "name": "MINI FAMILY奇妙万圣节系列毛绒挂件(蜘蛛MINI PEN、巫师墩混3款)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 960,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "45": {
+    "id": 45,
+    "name": "MINI FAMILY奇妙万圣节系列-5寸毛绒挂件(蝙蝠斗牛犬、巫师帽柯基混2款)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 960,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "46": {
+    "id": 46,
+    "name": "MINI FAMILY奇妙万圣节系列-5寸毛绒挂件(套头PENDY、巫师PENDY混2款)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 960,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "47": {
+    "id": 47,
+    "name": "CITYPEN巡游世界系列-4寸企鹅挂饰(中东)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 24960,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "48": {
+    "id": 48,
+    "name": "CITYPEN巡游世界系列-9寸乌拉圭企鹅公仔",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 7800,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "49": {
+    "id": 49,
+    "name": "咱们裸熊系列趣味趴姿公仔（棕熊）",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 2160,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "50": {
+    "id": 50,
+    "name": "墩椰毛绒挂件",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 2880,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": null,
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": false,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  },
+  "51": {
+    "id": 51,
+    "name": "10寸仓鼠毛绒公仔(粉色)",
+    "barcode": "",
+    "sku": "",
+    "image": null,
+    "initial_stock": 0,
+    "current_stock": 15336,
+    "create_time": "2026-04-03 09:27:01",
+    "bom_history": {
+      "material": {
+        "id": 3,
+        "product_id": 51,
+        "product_name": "10寸仓鼠毛绒公仔(粉色)",
+        "cotton_usage": 1.0,
+        "create_time": "2026-04-06 14:56:10",
+        "update_time": "2026-04-06 14:56:10"
+      },
+      "fabrics": [],
+      "accessories": []
+    },
+    "has_material": true,
+    "has_fabric": false,
+    "has_accessory": false,
+    "cached_at": "2026-04-06 15:24:03"
+  }
+}

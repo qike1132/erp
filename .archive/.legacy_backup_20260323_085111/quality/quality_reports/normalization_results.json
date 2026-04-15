@@ -1,0 +1,18 @@
+{
+  "directories": [
+    {
+      "error": "目录不存在: utils"
+    },
+    {
+      "error": "目录不存在: tests"
+    },
+    {
+      "error": "目录不存在: quality"
+    }
+  ],
+  "stats": {
+    "files_processed": 0,
+    "files_modified": 0,
+    "issues_fixed": 0
+  }
+}

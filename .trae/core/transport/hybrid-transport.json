@@ -1,0 +1,124 @@
+{
+  "version": "2.0.0",
+  "name": "Hybrid Transport Configuration",
+  "description": "Multi-protocol transport with automatic failover and health monitoring",
+  
+  "enabled": true,
+  
+  "transports": {
+    "websocket": {
+      "enabled": true,
+      "priority": 1,
+      "endpoint": "/ws",
+      "reconnect": {
+        "enabled": true,
+        "maxAttempts": 5,
+        "initialDelay": 1000,
+        "maxDelay": 30000,
+        "backoffMultiplier": 2.0
+      },
+      "heartbeat": {
+        "enabled": true,
+        "interval": 30000,
+        "timeout": 10000
+      },
+      "options": {
+        "compression": true,
+        "binaryType": "arraybuffer",
+        "maxPayloadSize": 1048576
+      }
+    },
+    "http": {
+      "enabled": true,
+      "priority": 2,
+      "baseUrl": "/api",
+      "timeout": 30000,
+      "headers": {
+        "Content-Type": "application/json",
+        "X-Agent-Version": "2.0.0"
+      },
+      "retry": {
+        "enabled": true,
+        "maxRetries": 3,
+        "retryDelay": 1000
+      }
+    },
+    "sse": {
+      "enabled": true,
+      "priority": 3,
+      "endpoint": "/events",
+      "reconnect": {
+        "enabled": true,
+        "maxAttempts": 10,
+        "delay": 3000
+      },
+      "options": {
+        "withCredentials": false,
+        "heartbeatInterval": 45000
+      }
+    },
+    "mcp": {
+      "enabled": true,
+      "priority": 4,
+      "endpoint": "/mcp",
+      "protocol": "mcp-1.0",
+      "capabilities": {
+        "streaming": true,
+        "batching": true,
+        "compression": true
+      },
+      "reconnect": {
+        "enabled": true,
+        "maxAttempts": 5,
+        "initialDelay": 2000,
+        "maxDelay": 30000
+      }
+    }
+  },
+  
+  "failover": {
+    "enabled": true,
+    "strategy": "priority",
+    "autoSwitch": true,
+    "switchThreshold": {
+      "failureRate": 0.3,
+      "latencyIncrease": 2.0,
+      "consecutiveFailures": 3,
+      "errorPatterns": ["ECONNREFUSED", "ETIMEDOUT", "503"]
+    },
+    "fallbackOrder": ["websocket", "http", "sse", "mcp"],
+    "cooldownPeriod": 60000,
+    "healthCheckOnSwitch": true
+  },
+  
+  "healthCheck": {
+    "enabled": true,
+    "interval": 30000,
+    "timeout": 5000,
+    "endpoint": "/health",
+    "expectedStatus": 200,
+    "unhealthyThreshold": 3,
+    "healthyThreshold": 2
+  },
+  
+  "loadBalancing": {
+    "enabled": false,
+    "strategy": "round-robin",
+    "weightedDistribution": {
+      "websocket": 50,
+      "http": 30,
+      "sse": 15,
+      "mcp": 5
+    }
+  },
+  
+  "monitoring": {
+    "enabled": true,
+    "collectMetrics": true,
+    "metricsInterval": 10000,
+    "logLevel": "info",
+    "trackLatency": true,
+    "trackThroughput": true,
+    "trackErrors": true
+  }
+}

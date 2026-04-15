@@ -1,0 +1,58 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'erp-system'
+    env: 'production'
+
+rule_files:
+  - /etc/prometheus/alert_rules.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+scrape_configs:
+  # FastAPI 应用指标（主指标源）
+  - job_name: 'fastapi'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['erp-app:5002']
+        labels:
+          service: 'fastapi'
+
+  # Flask 应用指标
+  - job_name: 'flask'
+    metrics_path: /api/metrics
+    static_configs:
+      - targets: ['erp-app:5003']
+        labels:
+          service: 'flask'
+
+  # Nginx 指标（需 nginx-prometheus-exporter，暂用stub状态监控）
+  - job_name: 'nginx'
+    metrics_path: /nginx-health
+    static_configs:
+      - targets: ['nginx:80']
+        labels:
+          service: 'nginx'
+
+  # MySQL 指标
+  - job_name: 'mysql'
+    static_configs:
+      - targets: ['mysql-exporter:9104']
+        labels:
+          service: 'mysql'
+
+  # Redis 指标
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+        labels:
+          service: 'redis'
+
+  # Prometheus 自身指标
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']

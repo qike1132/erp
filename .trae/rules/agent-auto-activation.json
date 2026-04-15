@@ -1,0 +1,486 @@
+{
+  "version": "3.0.0",
+  "name": "ERP System Agent Auto-Activation",
+  "description": "Complete agent auto-activation configuration with triggers, conditions, and coordination rules",
+
+  "activationModes": {
+    "automatic": {
+      "enabled": true,
+      "description": "Fully automatic - no manual trigger required",
+      "triggers": ["fileSave", "fileCreate", "fileModify"],
+      "showNotification": true,
+      "allowManualOverride": true
+    },
+    "semiAutomatic": {
+      "enabled": true,
+      "description": "Semi-automatic - prompt user confirmation on detection",
+      "triggers": ["preCommit", "mergeRequest"],
+      "requireConfirmation": true,
+      "showPreview": true
+    },
+    "manual": {
+      "enabled": true,
+      "description": "Manual mode - activate only on explicit user request",
+      "triggers": [],
+      "keywordActivation": true
+    }
+  },
+
+  "agentActivationRules": {
+    "agents-orchestrator": {
+      "autoActivate": true,
+      "defaultEnabled": true,
+      "globalDefault": true,
+      "priority": 0,
+      "conditions": {
+        "keywords": ["orchestrate", "pipeline", "coordinate", "run pipeline", "full workflow"],
+        "events": ["onProjectInit", "onComplexFeature", "onSystemStartup", "onSessionStart"],
+        "autoStart": true
+      },
+      "coordination": {
+        "sequential": true,
+        "qualityGates": true,
+        "evidenceRequired": true,
+        "maxRetries": 3,
+        "autoInitialize": true
+      },
+      "initialization": {
+        "loadOnStartup": true,
+        "preloadAgents": true,
+        "warmUpCache": true
+      },
+      "notificationMessage": "Agents Orchestrator activated (DEFAULT) - managing complete development pipeline"
+    },
+
+    "frontend-developer": {
+      "autoActivate": true,
+      "priority": 1,
+      "conditions": {
+        "fileTypes": [".js", ".jsx", ".ts", ".tsx", ".vue", ".html"],
+        "directories": ["static/", "templates/", "frontend/", "src/"],
+        "events": ["onFileSave", "onFileCreate"],
+        "keywords": ["frontend", "UI", "component", "React", "Vue", "page"]
+      },
+      "activationDelay": 500,
+      "cooldown": 3000,
+      "maxConcurrent": 1,
+      "fallbackAgent": null,
+      "notificationMessage": "Frontend Developer agent activated"
+    },
+
+    "backend-architect": {
+      "autoActivate": true,
+      "priority": 1,
+      "conditions": {
+        "fileTypes": [".py", ".java", ".go", ".rb", ".php"],
+        "directories": ["app/", "api/", "backend/", "server/"],
+        "events": ["onFileSave", "onFileCreate", "onAPIChange"],
+        "keywords": ["backend", "API", "service", "database"]
+      },
+      "activationDelay": 500,
+      "cooldown": 3000,
+      "maxConcurrent": 1,
+      "fallbackAgent": null,
+      "notificationMessage": "Backend Architect agent activated"
+    },
+
+    "senior-developer": {
+      "autoActivate": true,
+      "priority": 1,
+      "conditions": {
+        "fileTypes": [".php", ".blade.php"],
+        "events": ["onFileSave", "onFileCreate"],
+        "keywords": ["premium", "luxury", "Laravel", "Livewire", "FluxUI"]
+      },
+      "activationDelay": 300,
+      "cooldown": 2000,
+      "notificationMessage": "Senior Developer agent activated for premium implementation"
+    },
+
+    "autonomous-optimization-architect": {
+      "autoActivate": true,
+      "priority": 2,
+      "conditions": {
+        "fileTypes": [".ts", ".js", ".py"],
+        "events": ["onAPIChange", "onPerformanceAnalysis"],
+        "keywords": ["optimize", "LLM", "AI cost", "shadow test", "circuit breaker", "A/B test"]
+      },
+      "guardrails": {
+        "maxCostPerRun": 0.05,
+        "maxRetries": 3,
+        "circuitBreakerThreshold": 5
+      },
+      "notificationMessage": "Autonomous Optimization Architect activated - managing AI costs and performance"
+    },
+
+    "security-engineer": {
+      "autoActivate": true,
+      "priority": 1,
+      "conditions": {
+        "fileTypes": [".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".go", ".sql"],
+        "directories": [],
+        "events": ["onPreCommit", "onSecuritySensitiveChange"],
+        "keywords": ["security", "auth", "permission", "encrypt", "vulnerability"]
+      },
+      "activationDelay": 0,
+      "cooldown": 5000,
+      "maxConcurrent": 1,
+      "fallbackAgent": null,
+      "notificationMessage": "Security Engineer agent activated"
+    },
+
+    "incident-response-commander": {
+      "autoActivate": true,
+      "priority": 0,
+      "conditions": {
+        "keywords": ["incident", "outage", "SEV", "post-mortem", "on-call", "SLO", "SLA"],
+        "events": ["onProductionIncident", "onDeploymentFailure"]
+      },
+      "responseConfig": {
+        "autoEscalation": true,
+        "communicationCadence": true,
+        "runbookRequired": true
+      },
+      "notificationMessage": "Incident Response Commander activated - managing incident response"
+    },
+
+    "code-reviewer": {
+      "autoActivate": true,
+      "priority": 3,
+      "conditions": {
+        "fileTypes": [".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".go"],
+        "directories": [],
+        "events": ["onPreCommit", "onPullRequest", "onManualTrigger"],
+        "keywords": ["review", "check", "optimize", "refactor"]
+      },
+      "activationDelay": 0,
+      "cooldown": 5000,
+      "maxConcurrent": 1,
+      "fallbackAgent": null,
+      "notificationMessage": "Code Reviewer agent activated"
+    },
+
+    "database-optimizer": {
+      "autoActivate": true,
+      "priority": 2,
+      "conditions": {
+        "fileTypes": [".sql", ".prisma", ".schema"],
+        "directories": ["migrations/", "database/", "db/"],
+        "events": ["onFileSave", "onQueryChange", "onSchemaChange"],
+        "keywords": ["database", "SQL", "query", "index", "optimize"]
+      },
+      "activationDelay": 300,
+      "cooldown": 3000,
+      "maxConcurrent": 1,
+      "fallbackAgent": "backend-architect",
+      "notificationMessage": "Database Optimizer agent activated"
+    },
+
+    "sre": {
+      "autoActivate": true,
+      "priority": 1,
+      "conditions": {
+        "fileTypes": [".yaml", ".yml", ".tf"],
+        "keywords": ["SLO", "error budget", "observability", "reliability", "toil", "chaos"],
+        "events": ["onDeployment", "onCapacityPlanning"]
+      },
+      "sloConfig": {
+        "availabilityTarget": 99.95,
+        "latencyTarget": "200ms",
+        "errorBudgetPolicy": true
+      },
+      "notificationMessage": "SRE agent activated - managing reliability and observability"
+    },
+
+    "software-architect": {
+      "autoActivate": true,
+      "priority": 1,
+      "conditions": {
+        "events": ["onArchitectureReview", "onSystemDesign"],
+        "keywords": ["architecture", "design", "pattern", "ADR", "domain"]
+      },
+      "notificationMessage": "Software Architect agent activated"
+    },
+
+    "ui-designer": {
+      "autoActivate": true,
+      "priority": 2,
+      "conditions": {
+        "fileTypes": [".css", ".scss", ".less", ".sass"],
+        "directories": ["static/", "styles/", "css/", "scss/"],
+        "events": ["onFileSave", "onStyleChange"],
+        "keywords": ["design", "style", "CSS", "theme", "layout"]
+      },
+      "activationDelay": 300,
+      "cooldown": 2000,
+      "maxConcurrent": 1,
+      "fallbackAgent": "frontend-developer",
+      "notificationMessage": "UI Designer agent activated"
+    },
+
+    "ux-researcher": {
+      "autoActivate": true,
+      "priority": 2,
+      "conditions": {
+        "keywords": ["user research", "usability", "persona", "user journey", "A/B test", "user feedback"],
+        "events": ["onFeatureDesign", "onUIChange", "onUserFeedback"]
+      },
+      "researchConfig": {
+        "minSampleSize": 5,
+        "statisticalSignificance": 0.95,
+        "includeAccessibility": true
+      },
+      "notificationMessage": "UX Researcher agent activated"
+    },
+
+    "ux-architect": {
+      "autoActivate": true,
+      "priority": 2,
+      "conditions": {
+        "events": ["onProjectInit", "onArchitectureDesign"],
+        "keywords": ["UX architecture", "CSS system", "foundation", "layout"]
+      },
+      "notificationMessage": "UX Architect agent activated"
+    },
+
+    "image-prompt-engineer": {
+      "autoActivate": true,
+      "priority": 3,
+      "conditions": {
+        "keywords": ["image prompt", "AI image", "generate image", "photo prompt", "Midjourney", "DALL-E"],
+        "events": ["onImageGenerationRequest"]
+      },
+      "notificationMessage": "Image Prompt Engineer agent activated"
+    },
+
+    "senior-project-manager": {
+      "autoActivate": true,
+      "priority": 1,
+      "conditions": {
+        "keywords": ["task list", "project plan", "breakdown", "scope", "milestone"],
+        "events": ["onProjectInit", "onSpecReview"]
+      },
+      "taskConfig": {
+        "taskDuration": "30-60 minutes",
+        "includeAcceptanceCriteria": true,
+        "preventScopeCreep": true
+      },
+      "notificationMessage": "Senior Project Manager agent activated"
+    },
+
+    "test-results-analyzer": {
+      "autoActivate": true,
+      "priority": 2,
+      "conditions": {
+        "keywords": ["test results", "test analysis", "quality metrics", "coverage", "defect"],
+        "events": ["onTestComplete", "onQualityReview", "onReleaseReadiness"],
+        "fileTypes": [".json", ".xml", ".html"]
+      },
+      "analysisConfig": {
+        "minCoverage": 80,
+        "statisticalConfidence": 0.95,
+        "predictiveModeling": true
+      },
+      "notificationMessage": "Test Results Analyzer agent activated"
+    },
+
+    "performance-benchmarker": {
+      "autoActivate": true,
+      "priority": 2,
+      "conditions": {
+        "keywords": ["performance", "benchmark", "load test", "stress test", "latency", "throughput"],
+        "events": ["onPerformanceTest", "onCapacityPlanning", "onOptimizationRequest"],
+        "fileTypes": [".js", ".ts", ".py"]
+      },
+      "performanceConfig": {
+        "responseTimeTarget": "200ms",
+        "throughputTarget": "1000 rps",
+        "loadTestDuration": "5m"
+      },
+      "notificationMessage": "Performance Benchmarker agent activated"
+    },
+
+    "api-tester": {
+      "autoActivate": true,
+      "priority": 2,
+      "conditions": {
+        "keywords": ["API test", "endpoint", "REST", "GraphQL", "integration test"],
+        "events": ["onAPIDevelop", "onIntegrationTest", "onReleaseValidation"],
+        "fileTypes": [".ts", ".js", ".py", ".json"]
+      },
+      "testConfig": {
+        "coverageTarget": 95,
+        "responseTimeTarget": "200ms",
+        "errorRateTarget": 0.001,
+        "securityScanEnabled": true
+      },
+      "notificationMessage": "API Tester agent activated"
+    },
+
+    "workflow-optimizer": {
+      "autoActivate": true,
+      "priority": 2,
+      "conditions": {
+        "keywords": ["workflow", "process", "automation", "efficiency", "bottleneck", "optimize"],
+        "events": ["onProcessReview", "onAutomationRequest"]
+      },
+      "optimizationConfig": {
+        "targetImprovement": "40%",
+        "automationTarget": "60%",
+        "errorReduction": "75%"
+      },
+      "notificationMessage": "Workflow Optimizer agent activated"
+    },
+
+    "workflow-architect": {
+      "autoActivate": true,
+      "priority": 1,
+      "conditions": {
+        "keywords": ["workflow spec", "flow design", "state machine", "process spec", "handoff"],
+        "events": ["onSystemDesign", "onFeaturePlanning", "onArchitectureReview"]
+      },
+      "specConfig": {
+        "requireEvidence": true,
+        "coverAllBranches": true,
+        "defineTimeouts": true,
+        "cleanupInventory": true
+      },
+      "notificationMessage": "Workflow Architect agent activated"
+    }
+  },
+
+  "multiAgentCoordination": {
+    "enabled": true,
+    "strategies": {
+      "sequential": {
+        "description": "Activate agents in priority order",
+        "maxAgents": 3,
+        "delayBetween": 1000
+      },
+      "parallel": {
+        "description": "Activate multiple agents simultaneously",
+        "maxAgents": 3,
+        "aggregateResults": true
+      },
+      "collaborative": {
+        "description": "Agents collaborate to complete tasks",
+        "maxAgents": 3,
+        "shareContext": true,
+        "mergeResults": true
+      }
+    },
+    "conflictResolution": {
+      "strategy": "priority",
+      "allowOverride": true
+    }
+  },
+
+  "contextAwareness": {
+    "enabled": true,
+    "factors": {
+      "projectType": {
+        "weight": 0.3,
+        "detection": "auto",
+        "influence": "agentSelection"
+      },
+      "fileHistory": {
+        "weight": 0.2,
+        "lookback": 10,
+        "influence": "agentPriority"
+      },
+      "userPreferences": {
+        "weight": 0.3,
+        "storage": "local",
+        "influence": "agentActivation"
+      },
+      "timeOfDay": {
+        "weight": 0.1,
+        "influence": "agentBehavior"
+      },
+      "taskComplexity": {
+        "weight": 0.1,
+        "detection": "auto",
+        "influence": "agentCount"
+      }
+    }
+  },
+
+  "learningAndAdaptation": {
+    "enabled": true,
+    "mechanisms": {
+      "userFeedback": {
+        "enabled": true,
+        "storage": "local",
+        "influence": "futureActivations"
+      },
+      "successRate": {
+        "enabled": true,
+        "tracking": "perAgent",
+        "threshold": 0.8,
+        "action": "adjustPriority"
+      },
+      "usagePatterns": {
+        "enabled": true,
+        "analysis": "weekly",
+        "action": "optimizeRules"
+      }
+    }
+  },
+
+  "performanceOptimization": {
+    "caching": {
+      "enabled": true,
+      "ttl": 300,
+      "maxSize": "100MB"
+    },
+    "lazyLoading": {
+      "enabled": true,
+      "threshold": 3
+    },
+    "batching": {
+      "enabled": true,
+      "maxBatch": 10,
+      "delay": 500
+    }
+  },
+
+  "errorHandling": {
+    "onActivationFailure": {
+      "retry": 2,
+      "delay": 1000,
+      "fallback": "notify",
+      "log": true
+    },
+    "onTimeout": {
+      "duration": 30000,
+      "action": "skip",
+      "notify": true
+    },
+    "onConflict": {
+      "strategy": "priority",
+      "notify": true
+    }
+  },
+
+  "notifications": {
+    "onActivation": {
+      "enabled": true,
+      "type": "info",
+      "duration": 3000,
+      "position": "bottom-right"
+    },
+    "onDeactivation": {
+      "enabled": false
+    },
+    "onError": {
+      "enabled": true,
+      "type": "error",
+      "duration": 5000
+    },
+    "onSuccess": {
+      "enabled": true,
+      "type": "success",
+      "duration": 2000
+    }
+  }
+}

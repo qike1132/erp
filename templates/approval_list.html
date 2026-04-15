@@ -1,0 +1,464 @@
+{% extends 'base.html' %}
+{% block content %}
+    <h2>审批管理</h2>
+    
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card mt-3" style="border-left: 4px solid #f59e0b;">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="text-muted mb-1">待审批</h6>
+                            <h3 class="mb-0 text-warning">{{ pending_count }}</h3>
+                        </div>
+                        <div class="bg-warning bg-opacity-10 rounded-circle p-3">
+                            <i class="fas fa-clock text-warning fa-lg"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card mt-3" style="border-left: 4px solid #10b981;">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="text-muted mb-1">已同意</h6>
+                            <h3 class="mb-0 text-success">{{ approved_count }}</h3>
+                        </div>
+                        <div class="bg-success bg-opacity-10 rounded-circle p-3">
+                            <i class="fas fa-check text-success fa-lg"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card mt-3" style="border-left: 4px solid #ef4444;">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="text-muted mb-1">已拒绝</h6>
+                            <h3 class="mb-0 text-danger">{{ rejected_count }}</h3>
+                        </div>
+                        <div class="bg-danger bg-opacity-10 rounded-circle p-3">
+                            <i class="fas fa-times text-danger fa-lg"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card mt-3" style="border-left: 4px solid #6b7280;">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="text-muted mb-1">总计</h6>
+                            <h3 class="mb-0">{{ pending_count + approved_count + rejected_count }}</h3>
+                        </div>
+                        <div class="bg-secondary bg-opacity-10 rounded-circle p-3">
+                            <i class="fas fa-list text-secondary fa-lg"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="card mt-3">
+        <div class="card-header">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div class="d-flex align-items-center gap-2">
+                    <span>审批列表</span>
+                    <!-- 搜索框 -->
+                    <form class="d-flex" method="GET" action="{{ url_for('approval.approval_list') }}">
+                        <input type="hidden" name="status" value="{{ status_filter }}">
+                        <div class="input-group input-group-sm" style="width: 250px;">
+                            <input type="text" class="form-control" name="search" 
+                                   value="{{ search }}" placeholder="搜索订单号/申请人...">
+                            <button class="btn btn-outline-secondary" type="submit">
+                                <i class="fas fa-search"></i>
+                            </button>
+                            {% if search %}
+                            <a href="{{ url_for('approval.approval_list', status=status_filter) }}" 
+                               class="btn btn-outline-danger" title="清除搜索">
+                                <i class="fas fa-times"></i>
+                            </a>
+                            {% endif %}
+                        </div>
+                    </form>
+                </div>
+                <div class="btn-group" role="group">
+                    <a href="{{ url_for('approval.approval_list', status='pending', search=search) }}" 
+                       class="btn btn-sm {% if status_filter == 'pending' %}btn-warning{% else %}btn-outline-warning{% endif %}">
+                        待审批
+                    </a>
+                    <a href="{{ url_for('approval.approval_list', status='approved', search=search) }}" 
+                       class="btn btn-sm {% if status_filter == 'approved' %}btn-success{% else %}btn-outline-success{% endif %}">
+                        已同意
+                    </a>
+                    <a href="{{ url_for('approval.approval_list', status='rejected', search=search) }}" 
+                       class="btn btn-sm {% if status_filter == 'rejected' %}btn-danger{% else %}btn-outline-danger{% endif %}">
+                        已拒绝
+                    </a>
+                    <a href="{{ url_for('approval.approval_list', status='all', search=search) }}" 
+                       class="btn btn-sm {% if status_filter == 'all' %}btn-secondary{% else %}btn-outline-secondary{% endif %}">
+                        全部
+                    </a>
+                </div>
+            </div>
+        </div>
+        <div class="card-body">
+            {% if approvals %}
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>审批ID</th>
+                            <th>订单编号</th>
+                            <th>操作类型</th>
+                            <th>申请人</th>
+                            <th>申请时间</th>
+                            <th>状态</th>
+                            <th>审批人</th>
+                            <th>审批时间</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for approval in approvals %}
+                        <tr>
+                            <td>#{{ approval.id }}</td>
+                            <td>
+                                {% if approval.order %}
+                                    <a href="{{ url_for('order.orders') }}" class="text-decoration-none">
+                                        {{ approval.order.order_no }}
+                                    </a>
+                                {% else %}
+                                    <span class="text-muted">订单已删除</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if approval.operation_type == 'edit' %}
+                                    <span class="badge bg-primary">
+                                        <i class="fas fa-edit me-1"></i>编辑
+                                    </span>
+                                {% else %}
+                                    <span class="badge bg-danger">
+                                        <i class="fas fa-trash me-1"></i>删除
+                                    </span>
+                                {% endif %}
+                            </td>
+                            <td>{{ approval.requester.username if approval.requester else '-' }}</td>
+                            <td>{{ approval.request_time.strftime('%Y-%m-%d %H:%M') if approval.request_time else '-' }}</td>
+                            <td>
+                                {% if approval.status == 'pending' %}
+                                    <span class="badge bg-warning text-dark">待审批</span>
+                                {% elif approval.status == 'approved' %}
+                                    <span class="badge bg-success">已同意</span>
+                                {% elif approval.status == 'rejected' %}
+                                    <span class="badge bg-danger">已拒绝</span>
+                                {% else %}
+                                    <span class="badge bg-secondary">已取消</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ approval.approver.username if approval.approver else '-' }}</td>
+                            <td>{{ approval.approval_time.strftime('%Y-%m-%d %H:%M') if approval.approval_time else '-' }}</td>
+                            <td>
+                                <a href="{{ url_for('approval.approval_detail', id=approval.id) }}" 
+                                   class="btn btn-sm btn-outline-primary">
+                                    <i class="fas fa-eye me-1"></i>详情
+                                </a>
+                                {% if approval.status == 'pending' %}
+                                <button class="btn btn-sm btn-outline-success ms-1" 
+                                        onclick="quickApprove({{ approval.id }})">
+                                    <i class="fas fa-check"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger ms-1" 
+                                        onclick="quickReject({{ approval.id }})">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- 分页控件 -->
+            {% if pagination and pagination.pages > 1 %}
+            <div class="d-flex justify-content-between align-items-center mt-3">
+                <div class="text-muted small">
+                    显示 {{ pagination.items|length }} 条，共 {{ pagination.total }} 条记录
+                </div>
+                <nav aria-label="审批列表分页">
+                    <ul class="pagination pagination-sm mb-0">
+                        <!-- 首页 -->
+                        <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
+                            <a class="page-link" href="{{ url_for('approval.approval_list', status=status_filter, search=search, page=1) }}">
+                                <i class="fas fa-angle-double-left"></i>
+                            </a>
+                        </li>
+                        <!-- 上一页 -->
+                        <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
+                            <a class="page-link" href="{{ url_for('approval.approval_list', status=status_filter, search=search, page=pagination.prev_num) }}">
+                                <i class="fas fa-angle-left"></i>
+                            </a>
+                        </li>
+                        
+                        <!-- 页码 -->
+                        {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                            {% if p %}
+                                <li class="page-item {% if p == pagination.page %}active{% endif %}">
+                                    <a class="page-link" href="{{ url_for('approval.approval_list', status=status_filter, search=search, page=p) }}">{{ p }}</a>
+                                </li>
+                            {% else %}
+                                <li class="page-item disabled">
+                                    <span class="page-link">...</span>
+                                </li>
+                            {% endif %}
+                        {% endfor %}
+                        
+                        <!-- 下一页 -->
+                        <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
+                            <a class="page-link" href="{{ url_for('approval.approval_list', status=status_filter, search=search, page=pagination.next_num) }}">
+                                <i class="fas fa-angle-right"></i>
+                            </a>
+                        </li>
+                        <!-- 末页 -->
+                        <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
+                            <a class="page-link" href="{{ url_for('approval.approval_list', status=status_filter, search=search, page=pagination.pages) }}">
+                                <i class="fas fa-angle-double-right"></i>
+                            </a>
+                        </li>
+                    </ul>
+                </nav>
+            </div>
+            {% endif %}
+            
+            {% else %}
+            <div class="text-center text-muted py-5">
+                <i class="fas fa-inbox fa-3x mb-3" style="opacity: 0.3;"></i>
+                <p>{% if search %}未找到匹配"{{ search }}"的审批记录{% else %}暂无审批记录{% endif %}</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <div class="modal fade" id="rejectModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">拒绝原因</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="rejectApprovalId">
+                    <div class="mb-3">
+                        <label for="rejectReason" class="form-label">请输入拒绝原因</label>
+                        <textarea class="form-control" id="rejectReason" rows="3" 
+                                  placeholder="请说明拒绝原因（可选）"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-danger" onclick="confirmReject()">
+                        确认拒绝
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const csrfToken = '{{ csrf_token() }}';
+
+// 优化：使用Bootstrap Modal替代原生confirm
+function showConfirmModal(title, message, onConfirm) {
+    const modalHtml = `
+        <div class="modal fade" id="confirmModal" tabindex="-1">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header bg-warning text-dark">
+                        <h5 class="modal-title">
+                            <i class="fas fa-exclamation-triangle me-2"></i>${title}
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="mb-0">${message}</p>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                            <i class="fas fa-times me-1"></i>取消
+                        </button>
+                        <button type="button" class="btn btn-warning" id="confirmBtn">
+                            <i class="fas fa-check me-1"></i>确定
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    const modal = new bootstrap.Modal(document.getElementById('confirmModal'));
+    
+    document.getElementById('confirmBtn').onclick = function() {
+        modal.hide();
+        onConfirm();
+    };
+    
+    document.getElementById('confirmModal').addEventListener('hidden.bs.modal', function() {
+        this.remove();
+    });
+    
+    modal.show();
+}
+
+function quickApprove(approvalId) {
+    showConfirmModal('确认审批', '确定要同意该审批请求吗？此操作将执行原订单操作。', function() {
+        // 显示加载状态
+        const btn = event.target;
+        const originalHtml = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 处理中...';
+        btn.disabled = true;
+        
+        fetch(`/api/v1/approvals/approve/${approvalId}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRFToken': csrfToken
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                if (window.GlobalNotification) {
+                    GlobalNotification.success(data.message);
+                } else {
+                    showToast('success', data.message);
+                }
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1000);
+            } else {
+                btn.innerHTML = originalHtml;
+                btn.disabled = false;
+                if (window.GlobalNotification) {
+                    GlobalNotification.error(data.error || '操作失败');
+                } else {
+                    showToast('error', data.error || '操作失败');
+                }
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            btn.innerHTML = originalHtml;
+            btn.disabled = false;
+            if (window.GlobalNotification) {
+                GlobalNotification.error('网络错误，请重试');
+            } else {
+                showToast('error', '网络错误，请重试');
+            }
+        });
+    });
+}
+
+function quickReject(approvalId) {
+    document.getElementById('rejectApprovalId').value = approvalId;
+    document.getElementById('rejectReason').value = '';
+    const modal = new bootstrap.Modal(document.getElementById('rejectModal'));
+    modal.show();
+}
+
+function confirmReject() {
+    const approvalId = document.getElementById('rejectApprovalId').value;
+    const reason = document.getElementById('rejectReason').value;
+    
+    // 显示加载状态
+    const btn = event.target;
+    const originalHtml = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 处理中...';
+    btn.disabled = true;
+    
+    fetch(`/api/v1/approvals/reject/${approvalId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+            'X-CSRFToken': csrfToken
+        },
+        body: JSON.stringify({ reason: reason })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('rejectModal')).hide();
+            if (window.GlobalNotification) {
+                GlobalNotification.success(data.message);
+            } else {
+                showToast('success', data.message);
+            }
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000);
+        } else {
+            btn.innerHTML = originalHtml;
+            btn.disabled = false;
+            if (window.GlobalNotification) {
+                GlobalNotification.error(data.error || '操作失败');
+            } else {
+                showToast('error', data.error || '操作失败');
+            }
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        btn.innerHTML = originalHtml;
+        btn.disabled = false;
+        if (window.GlobalNotification) {
+            GlobalNotification.error('网络错误，请重试');
+        } else {
+            showToast('error', '网络错误，请重试');
+        }
+    });
+}
+
+// Toast通知函数
+function showToast(type, message) {
+    const toastHtml = `
+        <div class="toast align-items-center text-white bg-${type === 'success' ? 'success' : 'danger'} border-0" role="alert">
+            <div class="d-flex">
+                <div class="toast-body">
+                    <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'} me-2"></i>
+                    ${message}
+                </div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+            </div>
+        </div>
+    `;
+    
+    let container = document.getElementById('toastContainer');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toastContainer';
+        container.className = 'toast-container position-fixed top-0 end-0 p-3';
+        container.style.zIndex = '9999';
+        document.body.appendChild(container);
+    }
+    
+    container.insertAdjacentHTML('beforeend', toastHtml);
+    const toast = new bootstrap.Toast(container.lastElementChild, { delay: 3000 });
+    toast.show();
+    
+    container.lastElementChild.addEventListener('hidden.bs.toast', function() {
+        this.remove();
+    });
+}
+</script>
+{% endblock %}

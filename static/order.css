@@ -1,0 +1,95 @@
+/* 展开按钮图标旋转动画 */
+.toggle-icon {
+    transition: transform 0.3s ease;
+}
+
+/* 订单列表展开/收起 - 直接显示隐藏 */
+.order-collapse-content {
+    display: none;
+}
+
+.order-collapse-content.expanded {
+    display: block;
+}
+
+.order-date-group .card {
+    border: 1px solid #e9ecef;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    transition: all 0.2s ease;
+}
+
+.order-date-group .card:hover {
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+}
+
+.order-date-group .card-header {
+    border-radius: 0 !important;
+    padding: 12px 16px;
+    transition: all 0.2s ease;
+    font-weight: 500;
+    position: relative;
+    z-index: 10;
+}
+
+.order-date-group .card-header:hover {
+    background-color: #f8f9fa !important;
+}
+
+.order-date-group .table {
+    margin-bottom: 0;
+}
+
+.order-date-group .table th {
+    background-color: #f8f9fa;
+    font-weight: 600;
+    border-top: none;
+    font-size: 0.9em;
+}
+
+.order-date-group .table td {
+    vertical-align: middle;
+}
+
+.order-date-group .badge {
+    font-size: 0.8em;
+    padding: 4px 8px;
+}
+
+.order-date-group .btn-sm {
+    padding: 4px 8px;
+    font-size: 0.85em;
+}
+
+.order-date-group img {
+    transition: transform 0.2s ease;
+}
+
+.order-date-group img:hover {
+    transform: scale(1.1);
+}
+
+.autocomplete-dropdown {
+    background: white;
+    border: 2px solid var(--plush-blue-light);
+    border-radius: var(--radius-input);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    z-index: 1000;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.autocomplete-item {
+    padding: 10px 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.autocomplete-item:last-child {
+    border-bottom: none;
+}
+
+.autocomplete-item:hover {
+    background-color: var(--plush-blue-light);
+    transform: translateX(5px);
+}

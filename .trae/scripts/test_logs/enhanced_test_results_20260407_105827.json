@@ -1,0 +1,1063 @@
+{
+  "test_metadata": {
+    "timestamp": "2026-04-07T10:58:27.228655",
+    "total_tests": 43,
+    "passed": 43,
+    "failed": 0,
+    "skipped": 0,
+    "pass_rate": "100.0%",
+    "total_duration_ms": 906.5909385681152
+  },
+  "test_results": [
+    {
+      "id": "CP-001",
+      "name": "正确调度-前端任务",
+      "category": "checkpoint",
+      "severity": "CRITICAL",
+      "status": "PASSED",
+      "inputs": {
+        "task_type": "frontend",
+        "has_specialized_agent": true,
+        "agent_dispatched": true
+      },
+      "expected_result": 0,
+      "actual_result": 0,
+      "error_message": "",
+      "execution_time_ms": 71.60067558288574,
+      "logs": [
+        "[10:58:26.322] 开始执行测试: 正确调度-前端任务",
+        "[10:58:26.322] 输入参数: task_type=frontend, has_agent=True, dispatched=True",
+        "[10:58:26.393] 执行结果: exit_code=0",
+        "[10:58:26.393] STDOUT: \n== Agent调度检查点 v1.0.0 ==\n   任务类型: frontend -> 分类为: frontend\n   可用Agent: frontend-developer, ui-designer, ux-architect\n\n============================================================\nAgent调度检查点 - 检查结果\n==",
+        "[10:58:26.393] 结果判定: PASSED",
+        "[10:58:26.394] 执行耗时: 71.60ms"
+      ]
+    },
+    {
+      "id": "CP-002",
+      "name": "违规未调度-前端任务",
+      "category": "checkpoint",
+      "severity": "CRITICAL",
+      "status": "PASSED",
+      "inputs": {
+        "task_type": "frontend",
+        "has_specialized_agent": true,
+        "agent_dispatched": false
+      },
+      "expected_result": 1,
+      "actual_result": 1,
+      "error_message": "",
+      "execution_time_ms": 71.2432861328125,
+      "logs": [
+        "[10:58:26.394] 开始执行测试: 违规未调度-前端任务",
+        "[10:58:26.394] 输入参数: task_type=frontend, has_agent=True, dispatched=False",
+        "[10:58:26.464] 执行结果: exit_code=1",
+        "[10:58:26.464] STDOUT: \n== Agent调度检查点 v1.0.0 ==\n   任务类型: frontend -> 分类为: frontend\n   可用Agent: frontend-developer, ui-designer, ux-architect\n\n============================================================\nAgent调度检查点 - 检查结果\n==",
+        "[10:58:26.465] 结果判定: PASSED",
+        "[10:58:26.465] 执行耗时: 71.24ms"
+      ]
+    },
+    {
+      "id": "CP-003",
+      "name": "正确调度-后端任务",
+      "category": "checkpoint",
+      "severity": "CRITICAL",
+      "status": "PASSED",
+      "inputs": {
+        "task_type": "backend",
+        "has_specialized_agent": true,
+        "agent_dispatched": true
+      },
+      "expected_result": 0,
+      "actual_result": 0,
+      "error_message": "",
+      "execution_time_ms": 85.24656295776367,
+      "logs": [
+        "[10:58:26.465] 开始执行测试: 正确调度-后端任务",
+        "[10:58:26.465] 输入参数: task_type=backend, has_agent=True, dispatched=True",
+        "[10:58:26.550] 执行结果: exit_code=0",
+        "[10:58:26.550] STDOUT: \n== Agent调度检查点 v1.0.0 ==\n   任务类型: backend -> 分类为: backend\n   可用Agent: backend-architect, database-optimizer, security-engineer\n\n============================================================\nAgent调度检查点 ",
+        "[10:58:26.550] 结果判定: PASSED",
+        "[10:58:26.550] 执行耗时: 85.25ms"
+      ]
+    },
+    {
+      "id": "CP-004",
+      "name": "违规未调度-后端任务",
+      "category": "checkpoint",
+      "severity": "CRITICAL",
+      "status": "PASSED",
+      "inputs": {
+        "task_type": "backend",
+        "has_specialized_agent": true,
+        "agent_dispatched": false
+      },
+      "expected_result": 1,
+      "actual_result": 1,
+      "error_message": "",
+      "execution_time_ms": 74.21755790710449,
+      "logs": [
+        "[10:58:26.550] 开始执行测试: 违规未调度-后端任务",
+        "[10:58:26.550] 输入参数: task_type=backend, has_agent=True, dispatched=False",
+        "[10:58:26.624] 执行结果: exit_code=1",
+        "[10:58:26.624] STDOUT: \n== Agent调度检查点 v1.0.0 ==\n   任务类型: backend -> 分类为: backend\n   可用Agent: backend-architect, database-optimizer, security-engineer\n\n============================================================\nAgent调度检查点 ",
+        "[10:58:26.624] 结果判定: PASSED",
+        "[10:58:26.624] 执行耗时: 74.22ms"
+      ]
+    },
+    {
+      "id": "CP-005",
+      "name": "违规未调度-安全任务",
+      "category": "checkpoint",
+      "severity": "CRITICAL",
+      "status": "PASSED",
+      "inputs": {
+        "task_type": "security",
+        "has_specialized_agent": true,
+        "agent_dispatched": false
+      },
+      "expected_result": 1,
+      "actual_result": 1,
+      "error_message": "",
+      "execution_time_ms": 72.11065292358398,
+      "logs": [
+        "[10:58:26.624] 开始执行测试: 违规未调度-安全任务",
+        "[10:58:26.625] 输入参数: task_type=security, has_agent=True, dispatched=False",
+        "[10:58:26.696] 执行结果: exit_code=1",
+        "[10:58:26.696] STDOUT: \n== Agent调度检查点 v1.0.0 ==\n   任务类型: security -> 分类为: security\n   可用Agent: security-engineer\n\n============================================================\nAgent调度检查点 - 检查结果\n==============================",
+        "[10:58:26.697] 结果判定: PASSED",
+        "[10:58:26.697] 执行耗时: 72.11ms"
+      ]
+    },
+    {
+      "id": "CP-006",
+      "name": "SoloCoder执行-未知任务",
+      "category": "checkpoint",
+      "severity": "MEDIUM",
+      "status": "PASSED",
+      "inputs": {
+        "task_type": "unknown",
+        "has_specialized_agent": false,
+        "agent_dispatched": false
+      },
+      "expected_result": 0,
+      "actual_result": 0,
+      "error_message": "",
+      "execution_time_ms": 71.28548622131348,
+      "logs": [
+        "[10:58:26.697] 开始执行测试: SoloCoder执行-未知任务",
+        "[10:58:26.697] 输入参数: task_type=unknown, has_agent=False, dispatched=False",
+        "[10:58:26.767] 执行结果: exit_code=0",
+        "[10:58:26.768] STDOUT: \n== Agent调度检查点 v1.0.0 ==\n   任务类型: unknown -> 分类为: unknown\n   可用Agent: 无\n\n============================================================\nAgent调度检查点 - 检查结果\n================================================",
+        "[10:58:26.768] 结果判定: PASSED",
+        "[10:58:26.768] 执行耗时: 71.29ms"
+      ]
+    },
+    {
+      "id": "CP-007",
+      "name": "正确调度-全栈任务",
+      "category": "checkpoint",
+      "severity": "HIGH",
+      "status": "PASSED",
+      "inputs": {
+        "task_type": "fullstack",
+        "has_specialized_agent": true,
+        "agent_dispatched": true
+      },
+      "expected_result": 0,
+      "actual_result": 0,
+      "error_message": "",
+      "execution_time_ms": 70.7998275756836,
+      "logs": [
+        "[10:58:26.768] 开始执行测试: 正确调度-全栈任务",
+        "[10:58:26.768] 输入参数: task_type=fullstack, has_agent=True, dispatched=True",
+        "[10:58:26.838] 执行结果: exit_code=0",
+        "[10:58:26.838] STDOUT: \n== Agent调度检查点 v1.0.0 ==\n   任务类型: fullstack -> 分类为: fullstack\n   可用Agent: frontend-developer, backend-architect\n\n============================================================\nAgent调度检查点 - 检查结果\n========",
+        "[10:58:26.839] 结果判定: PASSED",
+        "[10:58:26.839] 执行耗时: 70.80ms"
+      ]
+    },
+    {
+      "id": "CP-008",
+      "name": "正确调度-测试任务",
+      "category": "checkpoint",
+      "severity": "HIGH",
+      "status": "PASSED",
+      "inputs": {
+        "task_type": "testing",
+        "has_specialized_agent": true,
+        "agent_dispatched": true
+      },
+      "expected_result": 0,
+      "actual_result": 0,
+      "error_message": "",
+      "execution_time_ms": 72.41654396057129,
+      "logs": [
+        "[10:58:26.839] 开始执行测试: 正确调度-测试任务",
+        "[10:58:26.839] 输入参数: task_type=testing, has_agent=True, dispatched=True",
+        "[10:58:26.910] 执行结果: exit_code=0",
+        "[10:58:26.911] STDOUT: \n== Agent调度检查点 v1.0.0 ==\n   任务类型: testing -> 分类为: testing\n   可用Agent: api-tester, test-results-analyzer\n\n============================================================\nAgent调度检查点 - 检查结果\n================",
+        "[10:58:26.911] 结果判定: PASSED",
+        "[10:58:26.911] 执行耗时: 72.42ms"
+      ]
+    },
+    {
+      "id": "CP-009",
+      "name": "强制继续执行（无force参数）",
+      "category": "checkpoint",
+      "severity": "MEDIUM",
+      "status": "PASSED",
+      "inputs": {
+        "task_type": "frontend",
+        "has_specialized_agent": true,
+        "agent_dispatched": false
+      },
+      "expected_result": 1,
+      "actual_result": 1,
+      "error_message": "",
+      "execution_time_ms": 72.2954273223877,
+      "logs": [
+        "[10:58:26.911] 开始执行测试: 强制继续执行（无force参数）",
+        "[10:58:26.912] 输入参数: task_type=frontend, has_agent=True, dispatched=False",
+        "[10:58:26.983] 执行结果: exit_code=1",
+        "[10:58:26.983] STDOUT: \n== Agent调度检查点 v1.0.0 ==\n   任务类型: frontend -> 分类为: frontend\n   可用Agent: frontend-developer, ui-designer, ux-architect\n\n============================================================\nAgent调度检查点 - 检查结果\n==",
+        "[10:58:26.984] 结果判定: PASSED",
+        "[10:58:26.984] 执行耗时: 72.30ms"
+      ]
+    },
+    {
+      "id": "CFG-001",
+      "name": "版本号验证",
+      "category": "config",
+      "severity": "INFO",
+      "status": "PASSED",
+      "inputs": {
+        "key_path": "version",
+        "expected": "2.0.0"
+      },
+      "expected_result": "2.0.0",
+      "actual_result": "2.0.0",
+      "error_message": "",
+      "execution_time_ms": 0.32448768615722656,
+      "logs": [
+        "[10:58:26.984] 开始执行测试: 版本号验证",
+        "[10:58:26.984] 配置路径: version",
+        "[10:58:26.984] 期望值: 2.0.0",
+        "[10:58:26.984] 实际值类型: str",
+        "[10:58:26.984] 结果判定: PASSED",
+        "[10:58:26.985] 执行耗时: 0.32ms"
+      ]
+    },
+    {
+      "id": "CFG-002",
+      "name": "任务状态数量验证",
+      "category": "config",
+      "severity": "HIGH",
+      "status": "PASSED",
+      "inputs": {
+        "key_path": "taskStates",
+        "expected": 15
+      },
+      "expected_result": 15,
+      "actual_result": 15,
+      "error_message": "",
+      "execution_time_ms": 0.4222393035888672,
+      "logs": [
+        "[10:58:26.985] 开始执行测试: 任务状态数量验证",
+        "[10:58:26.985] 配置路径: taskStates",
+        "[10:58:26.985] 期望值: 15",
+        "[10:58:26.985] 实际值类型: dict",
+        "[10:58:26.985] 实际值(计数): 15",
+        "[10:58:26.985] 结果判定: PASSED",
+        "[10:58:26.985] 执行耗时: 0.42ms"
+      ]
+    },
+    {
+      "id": "CFG-003",
+      "name": "优先级级别数量",
+      "category": "config",
+      "severity": "HIGH",
+      "status": "PASSED",
+      "inputs": {
+        "key_path": "priorityLevels",
+        "expected": 4
+      },
+      "expected_result": 4,
+      "actual_result": 4,
+      "error_message": "",
+      "execution_time_ms": 0.3733634948730469,
+      "logs": [
+        "[10:58:26.985] 开始执行测试: 优先级级别数量",
+        "[10:58:26.985] 配置路径: priorityLevels",
+        "[10:58:26.985] 期望值: 4",
+        "[10:58:26.985] 实际值类型: dict",
+        "[10:58:26.985] 实际值(计数): 4",
+        "[10:58:26.985] 结果判定: PASSED",
+        "[10:58:26.985] 执行耗时: 0.37ms"
+      ]
+    },
+    {
+      "id": "CFG-004",
+      "name": "调度步骤数量",
+      "category": "config",
+      "severity": "CRITICAL",
+      "status": "PASSED",
+      "inputs": {
+        "key_path": "dispatchAlgorithm.steps",
+        "expected": 6
+      },
+      "expected_result": 6,
+      "actual_result": 6,
+      "error_message": "",
+      "execution_time_ms": 0.3819465637207031,
+      "logs": [
+        "[10:58:26.986] 开始执行测试: 调度步骤数量",
+        "[10:58:26.986] 配置路径: dispatchAlgorithm.steps",
+        "[10:58:26.986] 期望值: 6",
+        "[10:58:26.986] 实际值类型: list",
+        "[10:58:26.986] 实际值(计数): 6",
+        "[10:58:26.986] 结果判定: PASSED",
+        "[10:58:26.986] 执行耗时: 0.38ms"
+      ]
+    },
+    {
+      "id": "CFG-005",
+      "name": "置信度-直接执行阈值",
+      "category": "config",
+      "severity": "HIGH",
+      "status": "PASSED",
+      "inputs": {
+        "key_path": "confidenceThresholds.directExecute.min",
+        "expected": 95
+      },
+      "expected_result": 95,
+      "actual_result": 95,
+      "error_message": "",
+      "execution_time_ms": 0.3085136413574219,
+      "logs": [
+        "[10:58:26.986] 开始执行测试: 置信度-直接执行阈值",
+        "[10:58:26.986] 配置路径: confidenceThresholds.directExecute.min",
+        "[10:58:26.986] 期望值: 95",
+        "[10:58:26.986] 实际值类型: int",
+        "[10:58:26.986] 结果判定: PASSED",
+        "[10:58:26.986] 执行耗时: 0.31ms"
+      ]
+    },
+    {
+      "id": "CFG-006",
+      "name": "置信度-提示执行阈值",
+      "category": "config",
+      "severity": "HIGH",
+      "status": "PASSED",
+      "inputs": {
+        "key_path": "confidenceThresholds.promptExecute.min",
+        "expected": 85
+      },
+      "expected_result": 85,
+      "actual_result": 85,
+      "error_message": "",
+      "execution_time_ms": 0.33926963806152344,
+      "logs": [
+        "[10:58:26.986] 开始执行测试: 置信度-提示执行阈值",
+        "[10:58:26.986] 配置路径: confidenceThresholds.promptExecute.min",
+        "[10:58:26.986] 期望值: 85",
+        "[10:58:26.987] 实际值类型: int",
+        "[10:58:26.987] 结果判定: PASSED",
+        "[10:58:26.987] 执行耗时: 0.34ms"
+      ]
+    },
+    {
+      "id": "CFG-007",
+      "name": "重试策略-最大重试次数",
+      "category": "config",
+      "severity": "HIGH",
+      "status": "PASSED",
+      "inputs": {
+        "key_path": "retryPolicy.maxRetries",
+        "expected": 3
+      },
+      "expected_result": 3,
+      "actual_result": 3,
+      "error_message": "",
+      "execution_time_ms": 0.3685951232910156,
+      "logs": [
+        "[10:58:26.987] 开始执行测试: 重试策略-最大重试次数",
+        "[10:58:26.987] 配置路径: retryPolicy.maxRetries",
+        "[10:58:26.987] 期望值: 3",
+        "[10:58:26.987] 实际值类型: int",
+        "[10:58:26.987] 结果判定: PASSED",
+        "[10:58:26.987] 执行耗时: 0.37ms"
+      ]
+    },
+    {
+      "id": "CFG-008",
+      "name": "超时配置-任务超时",
+      "category": "config",
+      "severity": "HIGH",
+      "status": "PASSED",
+      "inputs": {
+        "key_path": "timeoutHandling.taskTimeout",
+        "expected": 300000
+      },
+      "expected_result": 300000,
+      "actual_result": 300000,
+      "error_message": "",
+      "execution_time_ms": 0.33855438232421875,
+      "logs": [
+        "[10:58:26.987] 开始执行测试: 超时配置-任务超时",
+        "[10:58:26.987] 配置路径: timeoutHandling.taskTimeout",
+        "[10:58:26.987] 期望值: 300000",
+        "[10:58:26.987] 实际值类型: int",
+        "[10:58:26.987] 结果判定: PASSED",
+        "[10:58:26.988] 执行耗时: 0.34ms"
+      ]
+    },
+    {
+      "id": "ST-000",
+      "name": "状态转换: CREATED -> QUEUED",
+      "category": "state_transition",
+      "severity": "MEDIUM",
+      "status": "PASSED",
+      "inputs": {
+        "from_state": "CREATED",
+        "to_state": "QUEUED"
+      },
+      "expected_result": true,
+      "actual_result": [
+        "QUEUED",
+        "CANCELLED"
+      ],
+      "error_message": "",
+      "execution_time_ms": 0.2887248992919922,
+      "logs": [
+        "[10:58:26.988] 开始执行测试: 状态转换: CREATED -> QUEUED",
+        "[10:58:26.988] 状态转换: CREATED -> QUEUED",
+        "[10:58:26.988] 有效转换: ['QUEUED', 'CANCELLED']",
+        "[10:58:26.988] 结果判定: PASSED",
+        "[10:58:26.988] 执行耗时: 0.29ms"
+      ]
+    },
+    {
+      "id": "ST-001",
+      "name": "状态转换: CREATED -> CANCELLED",
+      "category": "state_transition",
+      "severity": "MEDIUM",
+      "status": "PASSED",
+      "inputs": {
+        "from_state": "CREATED",
+        "to_state": "CANCELLED"
+      },
+      "expected_result": true,
+      "actual_result": [
+        "QUEUED",
+        "CANCELLED"
+      ],
+      "error_message": "",
+      "execution_time_ms": 0.3833770751953125,
+      "logs": [
+        "[10:58:26.989] 开始执行测试: 状态转换: CREATED -> CANCELLED",
+        "[10:58:26.989] 状态转换: CREATED -> CANCELLED",
+        "[10:58:26.989] 有效转换: ['QUEUED', 'CANCELLED']",
+        "[10:58:26.989] 结果判定: PASSED",
+        "[10:58:26.989] 执行耗时: 0.38ms"
+      ]
+    },
+    {
+      "id": "ST-002",
+      "name": "状态转换: QUEUED -> ASSIGNED",
+      "category": "state_transition",
+      "severity": "MEDIUM",
+      "status": "PASSED",
+      "inputs": {
+        "from_state": "QUEUED",
+        "to_state": "ASSIGNED"
+      },
+      "expected_result": true,
+      "actual_result": [
+        "ASSIGNED",
+        "ESCALATED",
+        "CANCELLED"
+      ],
+      "error_message": "",
+      "execution_time_ms": 0.3426074981689453,
+      "logs": [
+        "[10:58:26.989] 开始执行测试: 状态转换: QUEUED -> ASSIGNED",
+        "[10:58:26.989] 状态转换: QUEUED -> ASSIGNED",
+        "[10:58:26.989] 有效转换: ['ASSIGNED', 'ESCALATED', 'CANCELLED']",
+        "[10:58:26.989] 结果判定: PASSED",
+        "[10:58:26.989] 执行耗时: 0.34ms"
+      ]
+    },
+    {
+      "id": "ST-003",
+      "name": "状态转换: QUEUED -> ESCALATED",
+      "category": "state_transition",
+      "severity": "MEDIUM",
+      "status": "PASSED",
+      "inputs": {
+        "from_state": "QUEUED",
+        "to_state": "ESCALATED"
+      },
+      "expected_result": true,
+      "actual_result": [
+        "ASSIGNED",
+        "ESCALATED",
+        "CANCELLED"
+      ],
+      "error_message": "",
+      "execution_time_ms": 0.30493736267089844,
+      "logs": [
+        "[10:58:26.989] 开始执行测试: 状态转换: QUEUED -> ESCALATED",
+        "[10:58:26.989] 状态转换: QUEUED -> ESCALATED",
+        "[10:58:26.990] 有效转换: ['ASSIGNED', 'ESCALATED', 'CANCELLED']",
+        "[10:58:26.990] 结果判定: PASSED",
+        "[10:58:26.990] 执行耗时: 0.30ms"
+      ]
+    },
+    {
+      "id": "ST-004",
+      "name": "状态转换: ASSIGNED -> RUNNING",
+      "category": "state_transition",
+      "severity": "MEDIUM",
+      "status": "PASSED",
+      "inputs": {
+        "from_state": "ASSIGNED",
+        "to_state": "RUNNING"
+      },
+      "expected_result": true,
+      "actual_result": [
+        "RUNNING",
+        "FAILED",
+        "CANCELLED"
+      ],
+      "error_message": "",
+      "execution_time_ms": 0.2808570861816406,
+      "logs": [
+        "[10:58:26.990] 开始执行测试: 状态转换: ASSIGNED -> RUNNING",
+        "[10:58:26.990] 状态转换: ASSIGNED -> RUNNING",
+        "[10:58:26.990] 有效转换: ['RUNNING', 'FAILED', 'CANCELLED']",
+        "[10:58:26.990] 结果判定: PASSED",
+        "[10:58:26.990] 执行耗时: 0.28ms"
+      ]
+    },
+    {
+      "id": "ST-005",
+      "name": "状态转换: ASSIGNED -> FAILED",
+      "category": "state_transition",
+      "severity": "MEDIUM",
+      "status": "PASSED",
+      "inputs": {
+        "from_state": "ASSIGNED",
+        "to_state": "FAILED"
+      },
+      "expected_result": true,
+      "actual_result": [
+        "RUNNING",
+        "FAILED",
+        "CANCELLED"
+      ],
+      "error_message": "",
+      "execution_time_ms": 0.29659271240234375,
+      "logs": [
+        "[10:58:26.990] 开始执行测试: 状态转换: ASSIGNED -> FAILED",
+        "[10:58:26.990] 状态转换: ASSIGNED -> FAILED",
+        "[10:58:26.990] 有效转换: ['RUNNING', 'FAILED', 'CANCELLED']",
+        "[10:58:26.990] 结果判定: PASSED",
+        "[10:58:26.990] 执行耗时: 0.30ms"
+      ]
+    },
+    {
+      "id": "ST-006",
+      "name": "状态转换: RUNNING -> COMPLETED",
+      "category": "state_transition",
+      "severity": "MEDIUM",
+      "status": "PASSED",
+      "inputs": {
+        "from_state": "RUNNING",
+        "to_state": "COMPLETED"
+      },
+      "expected_result": true,
+      "actual_result": [
+        "COMPLETED",
+        "FAILED",
+        "TIMEOUT",
+        "CANCELLED"
+      ],
+      "error_message": "",
+      "execution_time_ms": 0.3101825714111328,
+      "logs": [
+        "[10:58:26.990] 开始执行测试: 状态转换: RUNNING -> COMPLETED",
+        "[10:58:26.991] 状态转换: RUNNING -> COMPLETED",
+        "[10:58:26.991] 有效转换: ['COMPLETED', 'FAILED', 'TIMEOUT', 'CANCELLED']",
+        "[10:58:26.991] 结果判定: PASSED",
+        "[10:58:26.991] 执行耗时: 0.31ms"
+      ]
+    },
+    {
+      "id": "ST-007",
+      "name": "状态转换: RUNNING -> FAILED",
+      "category": "state_transition",
+      "severity": "MEDIUM",
+      "status": "PASSED",
+      "inputs": {
+        "from_state": "RUNNING",
+        "to_state": "FAILED"
+      },
+      "expected_result": true,
+      "actual_result": [
+        "COMPLETED",
+        "FAILED",
+        "TIMEOUT",
+        "CANCELLED"
+      ],
+      "error_message": "",
+      "execution_time_ms": 0.2846717834472656,
+      "logs": [
+        "[10:58:26.991] 开始执行测试: 状态转换: RUNNING -> FAILED",
+        "[10:58:26.991] 状态转换: RUNNING -> FAILED",
+        "[10:58:26.991] 有效转换: ['COMPLETED', 'FAILED', 'TIMEOUT', 'CANCELLED']",
+        "[10:58:26.991] 结果判定: PASSED",
+        "[10:58:26.991] 执行耗时: 0.28ms"
+      ]
+    },
+    {
+      "id": "ST-008",
+      "name": "状态转换: RUNNING -> TIMEOUT",
+      "category": "state_transition",
+      "severity": "MEDIUM",
+      "status": "PASSED",
+      "inputs": {
+        "from_state": "RUNNING",
+        "to_state": "TIMEOUT"
+      },
+      "expected_result": true,
+      "actual_result": [
+        "COMPLETED",
+        "FAILED",
+        "TIMEOUT",
+        "CANCELLED"
+      ],
+      "error_message": "",
+      "execution_time_ms": 0.3185272216796875,
+      "logs": [
+        "[10:58:26.991] 开始执行测试: 状态转换: RUNNING -> TIMEOUT",
+        "[10:58:26.991] 状态转换: RUNNING -> TIMEOUT",
+        "[10:58:26.991] 有效转换: ['COMPLETED', 'FAILED', 'TIMEOUT', 'CANCELLED']",
+        "[10:58:26.991] 结果判定: PASSED",
+        "[10:58:26.992] 执行耗时: 0.32ms"
+      ]
+    },
+    {
+      "id": "ST-009",
+      "name": "状态转换: COMPLETED -> REVIEWING",
+      "category": "state_transition",
+      "severity": "MEDIUM",
+      "status": "PASSED",
+      "inputs": {
+        "from_state": "COMPLETED",
+        "to_state": "REVIEWING"
+      },
+      "expected_result": true,
+      "actual_result": [
+        "REVIEWING"
+      ],
+      "error_message": "",
+      "execution_time_ms": 0.4017353057861328,
+      "logs": [
+        "[10:58:26.992] 开始执行测试: 状态转换: COMPLETED -> REVIEWING",
+        "[10:58:26.992] 状态转换: COMPLETED -> REVIEWING",
+        "[10:58:26.992] 有效转换: ['REVIEWING']",
+        "[10:58:26.992] 结果判定: PASSED",
+        "[10:58:26.992] 执行耗时: 0.40ms"
+      ]
+    },
+    {
+      "id": "ST-010",
+      "name": "状态转换: REVIEWING -> APPROVED",
+      "category": "state_transition",
+      "severity": "MEDIUM",
+      "status": "PASSED",
+      "inputs": {
+        "from_state": "REVIEWING",
+        "to_state": "APPROVED"
+      },
+      "expected_result": true,
+      "actual_result": [
+        "APPROVED",
+        "REVISION_REQUIRED"
+      ],
+      "error_message": "",
+      "execution_time_ms": 0.48089027404785156,
+      "logs": [
+        "[10:58:26.992] 开始执行测试: 状态转换: REVIEWING -> APPROVED",
+        "[10:58:26.992] 状态转换: REVIEWING -> APPROVED",
+        "[10:58:26.992] 有效转换: ['APPROVED', 'REVISION_REQUIRED']",
+        "[10:58:26.992] 结果判定: PASSED",
+        "[10:58:26.993] 执行耗时: 0.48ms"
+      ]
+    },
+    {
+      "id": "ST-011",
+      "name": "状态转换: REVIEWING -> REVISION_REQUIRED",
+      "category": "state_transition",
+      "severity": "MEDIUM",
+      "status": "PASSED",
+      "inputs": {
+        "from_state": "REVIEWING",
+        "to_state": "REVISION_REQUIRED"
+      },
+      "expected_result": true,
+      "actual_result": [
+        "APPROVED",
+        "REVISION_REQUIRED"
+      ],
+      "error_message": "",
+      "execution_time_ms": 0.31495094299316406,
+      "logs": [
+        "[10:58:26.993] 开始执行测试: 状态转换: REVIEWING -> REVISION_REQUIRED",
+        "[10:58:26.993] 状态转换: REVIEWING -> REVISION_REQUIRED",
+        "[10:58:26.993] 有效转换: ['APPROVED', 'REVISION_REQUIRED']",
+        "[10:58:26.993] 结果判定: PASSED",
+        "[10:58:26.993] 执行耗时: 0.31ms"
+      ]
+    },
+    {
+      "id": "ST-012",
+      "name": "状态转换: APPROVED -> DELIVERED",
+      "category": "state_transition",
+      "severity": "MEDIUM",
+      "status": "PASSED",
+      "inputs": {
+        "from_state": "APPROVED",
+        "to_state": "DELIVERED"
+      },
+      "expected_result": true,
+      "actual_result": [
+        "DELIVERED"
+      ],
+      "error_message": "",
+      "execution_time_ms": 0.2579689025878906,
+      "logs": [
+        "[10:58:26.993] 开始执行测试: 状态转换: APPROVED -> DELIVERED",
+        "[10:58:26.993] 状态转换: APPROVED -> DELIVERED",
+        "[10:58:26.993] 有效转换: ['DELIVERED']",
+        "[10:58:26.993] 结果判定: PASSED",
+        "[10:58:26.993] 执行耗时: 0.26ms"
+      ]
+    },
+    {
+      "id": "ST-013",
+      "name": "状态转换: REVISION_REQUIRED -> RUNNING",
+      "category": "state_transition",
+      "severity": "MEDIUM",
+      "status": "PASSED",
+      "inputs": {
+        "from_state": "REVISION_REQUIRED",
+        "to_state": "RUNNING"
+      },
+      "expected_result": true,
+      "actual_result": [
+        "RUNNING"
+      ],
+      "error_message": "",
+      "execution_time_ms": 0.27298927307128906,
+      "logs": [
+        "[10:58:26.993] 开始执行测试: 状态转换: REVISION_REQUIRED -> RUNNING",
+        "[10:58:26.993] 状态转换: REVISION_REQUIRED -> RUNNING",
+        "[10:58:26.994] 有效转换: ['RUNNING']",
+        "[10:58:26.994] 结果判定: PASSED",
+        "[10:58:26.994] 执行耗时: 0.27ms"
+      ]
+    },
+    {
+      "id": "ST-014",
+      "name": "状态转换: FAILED -> RETRY",
+      "category": "state_transition",
+      "severity": "MEDIUM",
+      "status": "PASSED",
+      "inputs": {
+        "from_state": "FAILED",
+        "to_state": "RETRY"
+      },
+      "expected_result": true,
+      "actual_result": [
+        "RETRY",
+        "FALLBACK",
+        "ESCALATED"
+      ],
+      "error_message": "",
+      "execution_time_ms": 0.27871131896972656,
+      "logs": [
+        "[10:58:26.994] 开始执行测试: 状态转换: FAILED -> RETRY",
+        "[10:58:26.994] 状态转换: FAILED -> RETRY",
+        "[10:58:26.994] 有效转换: ['RETRY', 'FALLBACK', 'ESCALATED']",
+        "[10:58:26.994] 结果判定: PASSED",
+        "[10:58:26.994] 执行耗时: 0.28ms"
+      ]
+    },
+    {
+      "id": "ST-015",
+      "name": "状态转换: FAILED -> FALLBACK",
+      "category": "state_transition",
+      "severity": "MEDIUM",
+      "status": "PASSED",
+      "inputs": {
+        "from_state": "FAILED",
+        "to_state": "FALLBACK"
+      },
+      "expected_result": true,
+      "actual_result": [
+        "RETRY",
+        "FALLBACK",
+        "ESCALATED"
+      ],
+      "error_message": "",
+      "execution_time_ms": 0.26106834411621094,
+      "logs": [
+        "[10:58:26.994] 开始执行测试: 状态转换: FAILED -> FALLBACK",
+        "[10:58:26.994] 状态转换: FAILED -> FALLBACK",
+        "[10:58:26.994] 有效转换: ['RETRY', 'FALLBACK', 'ESCALATED']",
+        "[10:58:26.994] 结果判定: PASSED",
+        "[10:58:26.994] 执行耗时: 0.26ms"
+      ]
+    },
+    {
+      "id": "ST-016",
+      "name": "状态转换: FAILED -> ESCALATED",
+      "category": "state_transition",
+      "severity": "MEDIUM",
+      "status": "PASSED",
+      "inputs": {
+        "from_state": "FAILED",
+        "to_state": "ESCALATED"
+      },
+      "expected_result": true,
+      "actual_result": [
+        "RETRY",
+        "FALLBACK",
+        "ESCALATED"
+      ],
+      "error_message": "",
+      "execution_time_ms": 0.5991458892822266,
+      "logs": [
+        "[10:58:26.994] 开始执行测试: 状态转换: FAILED -> ESCALATED",
+        "[10:58:26.994] 状态转换: FAILED -> ESCALATED",
+        "[10:58:26.994] 有效转换: ['RETRY', 'FALLBACK', 'ESCALATED']",
+        "[10:58:26.995] 结果判定: PASSED",
+        "[10:58:26.995] 执行耗时: 0.60ms"
+      ]
+    },
+    {
+      "id": "BD-001",
+      "name": "空任务类型",
+      "category": "checkpoint",
+      "severity": "HIGH",
+      "status": "PASSED",
+      "inputs": {
+        "task_type": "",
+        "has_specialized_agent": false,
+        "agent_dispatched": false
+      },
+      "expected_result": 0,
+      "actual_result": 0,
+      "error_message": "",
+      "execution_time_ms": 73.9898681640625,
+      "logs": [
+        "[10:58:27.001] 开始执行测试: 空任务类型",
+        "[10:58:27.001] 输入参数: task_type=, has_agent=False, dispatched=False",
+        "[10:58:27.074] 执行结果: exit_code=0",
+        "[10:58:27.075] STDOUT: \n== Agent调度检查点 v1.0.0 ==\n   任务类型:  -> 分类为: unknown\n   可用Agent: 无\n\n============================================================\nAgent调度检查点 - 检查结果\n=======================================================",
+        "[10:58:27.075] 结果判定: PASSED",
+        "[10:58:27.075] 执行耗时: 73.99ms"
+      ]
+    },
+    {
+      "id": "BD-002",
+      "name": "超长任务类型名",
+      "category": "checkpoint",
+      "severity": "LOW",
+      "status": "PASSED",
+      "inputs": {
+        "task_type": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "has_specialized_agent": false,
+        "agent_dispatched": false
+      },
+      "expected_result": 0,
+      "actual_result": 0,
+      "error_message": "",
+      "execution_time_ms": 74.97334480285645,
+      "logs": [
+        "[10:58:27.075] 开始执行测试: 超长任务类型名",
+        "[10:58:27.075] 输入参数: task_type=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, has_agent=False, dispatched=False",
+        "[10:58:27.150] 执行结果: exit_code=0",
+        "[10:58:27.150] STDOUT: \n== Agent调度检查点 v1.0.0 ==\n   任务类型: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "[10:58:27.150] 结果判定: PASSED",
+        "[10:58:27.150] 执行耗时: 74.97ms"
+      ]
+    },
+    {
+      "id": "BD-003",
+      "name": "特殊字符任务类型",
+      "category": "checkpoint",
+      "severity": "MEDIUM",
+      "status": "PASSED",
+      "inputs": {
+        "task_type": "test@#$%^&*()",
+        "has_specialized_agent": false,
+        "agent_dispatched": false
+      },
+      "expected_result": 0,
+      "actual_result": 0,
+      "error_message": "",
+      "execution_time_ms": 74.70154762268066,
+      "logs": [
+        "[10:58:27.151] 开始执行测试: 特殊字符任务类型",
+        "[10:58:27.151] 输入参数: task_type=test@#$%^&*(), has_agent=False, dispatched=False",
+        "[10:58:27.225] 执行结果: exit_code=0",
+        "[10:58:27.225] STDOUT: \n== Agent调度检查点 v1.0.0 ==\n   任务类型: test@#$%^&*() -> 分类为: unknown\n   可用Agent: 无\n\n============================================================\nAgent调度检查点 - 检查结果\n==========================================",
+        "[10:58:27.225] 结果判定: PASSED",
+        "[10:58:27.225] 执行耗时: 74.70ms"
+      ]
+    },
+    {
+      "id": "BD-004",
+      "name": "置信度边界值95",
+      "category": "config",
+      "severity": "HIGH",
+      "status": "PASSED",
+      "inputs": {
+        "key_path": "confidenceThresholds.directExecute.min",
+        "expected": 95
+      },
+      "expected_result": 95,
+      "actual_result": 95,
+      "error_message": "",
+      "execution_time_ms": 0.34046173095703125,
+      "logs": [
+        "[10:58:27.225] 开始执行测试: 置信度边界值95",
+        "[10:58:27.225] 配置路径: confidenceThresholds.directExecute.min",
+        "[10:58:27.225] 期望值: 95",
+        "[10:58:27.226] 实际值类型: int",
+        "[10:58:27.226] 结果判定: PASSED",
+        "[10:58:27.226] 执行耗时: 0.34ms"
+      ]
+    },
+    {
+      "id": "BD-005",
+      "name": "置信度边界值85",
+      "category": "config",
+      "severity": "HIGH",
+      "status": "PASSED",
+      "inputs": {
+        "key_path": "confidenceThresholds.promptExecute.min",
+        "expected": 85
+      },
+      "expected_result": 85,
+      "actual_result": 85,
+      "error_message": "",
+      "execution_time_ms": 0.32639503479003906,
+      "logs": [
+        "[10:58:27.226] 开始执行测试: 置信度边界值85",
+        "[10:58:27.226] 配置路径: confidenceThresholds.promptExecute.min",
+        "[10:58:27.226] 期望值: 85",
+        "[10:58:27.226] 实际值类型: int",
+        "[10:58:27.226] 结果判定: PASSED",
+        "[10:58:27.226] 执行耗时: 0.33ms"
+      ]
+    },
+    {
+      "id": "BD-006",
+      "name": "置信度边界值70",
+      "category": "config",
+      "severity": "HIGH",
+      "status": "PASSED",
+      "inputs": {
+        "key_path": "confidenceThresholds.userConfirm.min",
+        "expected": 70
+      },
+      "expected_result": 70,
+      "actual_result": 70,
+      "error_message": "",
+      "execution_time_ms": 0.3275871276855469,
+      "logs": [
+        "[10:58:27.226] 开始执行测试: 置信度边界值70",
+        "[10:58:27.226] 配置路径: confidenceThresholds.userConfirm.min",
+        "[10:58:27.226] 期望值: 70",
+        "[10:58:27.226] 实际值类型: int",
+        "[10:58:27.226] 结果判定: PASSED",
+        "[10:58:27.226] 执行耗时: 0.33ms"
+      ]
+    },
+    {
+      "id": "EX-001",
+      "name": "缺失配置文件",
+      "category": "config",
+      "severity": "CRITICAL",
+      "status": "PASSED",
+      "inputs": {
+        "key_path": "non_existent_key",
+        "expected": null
+      },
+      "expected_result": null,
+      "actual_result": null,
+      "error_message": "",
+      "execution_time_ms": 0.3135204315185547,
+      "logs": [
+        "[10:58:27.227] 开始执行测试: 缺失配置文件",
+        "[10:58:27.227] 配置路径: non_existent_key",
+        "[10:58:27.227] 期望值: None",
+        "[10:58:27.227] 实际值类型: NoneType",
+        "[10:58:27.227] 结果判定: PASSED",
+        "[10:58:27.227] 执行耗时: 0.31ms"
+      ]
+    },
+    {
+      "id": "EX-002",
+      "name": "无效状态转换",
+      "category": "state_transition",
+      "severity": "MEDIUM",
+      "status": "PASSED",
+      "inputs": {
+        "from_state": "DELIVERED",
+        "to_state": "RUNNING",
+        "expect_reject": true
+      },
+      "expected_result": true,
+      "actual_result": [],
+      "error_message": "",
+      "execution_time_ms": 0.3376007080078125,
+      "logs": [
+        "[10:58:27.227] 开始执行测试: 无效状态转换",
+        "[10:58:27.227] 状态转换: DELIVERED -> RUNNING",
+        "[10:58:27.227] 预期: 系统应拒绝此转换",
+        "[10:58:27.227] 有效转换: []",
+        "[10:58:27.228] 结果判定: PASSED (系统正确拒绝)",
+        "[10:58:27.228] 执行耗时: 0.34ms"
+      ]
+    },
+    {
+      "id": "EX-003",
+      "name": "违反final状态转换",
+      "category": "state_transition",
+      "severity": "HIGH",
+      "status": "PASSED",
+      "inputs": {
+        "from_state": "DELIVERED",
+        "to_state": "CREATED",
+        "expect_reject": true
+      },
+      "expected_result": true,
+      "actual_result": [],
+      "error_message": "",
+      "execution_time_ms": 0.331878662109375,
+      "logs": [
+        "[10:58:27.228] 开始执行测试: 违反final状态转换",
+        "[10:58:27.228] 状态转换: DELIVERED -> CREATED",
+        "[10:58:27.228] 预期: 系统应拒绝此转换",
+        "[10:58:27.228] 有效转换: []",
+        "[10:58:27.228] 结果判定: PASSED (系统正确拒绝)",
+        "[10:58:27.228] 执行耗时: 0.33ms"
+      ]
+    }
+  ]
+}

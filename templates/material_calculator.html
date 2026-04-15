@@ -1,0 +1,1685 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="mc-container">
+    <div class="mc-header">
+        <div class="mc-header-left">
+            <h1 class="mc-title">
+                <i class="fas fa-calculator"></i>
+                物料用量计算器
+            </h1>
+            <p class="mc-subtitle">选择SKU → 输入数量 → 自动计算物料用量</p>
+        </div>
+    </div>
+
+    <div class="mc-body">
+        <div class="mc-main-grid">
+            <div class="mc-section mc-sku-section">
+                <div class="mc-card">
+                    <div class="mc-card-header">
+                        <div class="mc-card-title-group">
+                            <div class="mc-icon-box mc-icon-blue">
+                                <i class="fas fa-boxes-stacked"></i>
+                            </div>
+                            <div>
+                                <h3>产品选择</h3>
+                                <small>选择需要计算的SKU</small>
+                            </div>
+                        </div>
+                        <span class="mc-badge" id="selectedCount">已选 0 个</span>
+                    </div>
+
+                    <div class="mc-search-wrapper">
+                        <div class="mc-search-input-group">
+                            <i class="fas fa-search mc-search-icon"></i>
+                            <input type="text" 
+                                   class="mc-search-input" 
+                                   id="skuSearch"
+                                   placeholder="搜索产品名称或69码..."
+                                   autocomplete="off">
+                            <button class="mc-search-clear" id="clearSearch" style="display:none;" onclick="clearSearch()">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                        <div class="mc-search-dropdown" id="searchDropdown" style="display:none;">
+                            <div class="mc-dropdown-loading" id="dropdownLoading">
+                                <i class="fas fa-spinner fa-spin"></i>
+                                <span>搜索中...</span>
+                            </div>
+                            <div class="mc-dropdown-list" id="dropdownList"></div>
+                            <div class="mc-dropdown-empty" id="dropdownEmpty" style="display:none;">
+                                <i class="fas fa-inbox"></i>
+                                <span>未找到匹配的产品</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mc-filter-bar">
+                        <button class="mc-filter-btn active" data-filter="all" onclick="setFilter('all', this)">
+                            <i class="fas fa-layer-group"></i>
+                            全部
+                        </button>
+                        <button class="mc-filter-btn" data-filter="has-bom" onclick="setFilter('has-bom', this)">
+                            <i class="fas fa-check-circle"></i>
+                            有BOM
+                        </button>
+                        <button class="mc-filter-btn" data-filter="no-bom" onclick="setFilter('no-bom', this)">
+                            <i class="fas fa-times-circle"></i>
+                            无BOM
+                        </button>
+                    </div>
+
+                    <div class="mc-product-list" id="productList">
+                        <div class="mc-loading-state">
+                            <div class="mc-spinner"></div>
+                            <span>加载产品列表...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mc-section mc-input-section">
+                <div class="mc-card">
+                    <div class="mc-card-header">
+                        <div class="mc-card-title-group">
+                            <div class="mc-icon-box mc-icon-green">
+                                <i class="fas fa-clipboard-check"></i>
+                            </div>
+                            <div>
+                                <h3>订单数量录入</h3>
+                                <small>输入订单数量</small>
+                            </div>
+                        </div>
+                        <div class="mc-header-actions">
+                            <button class="mc-btn-sm mc-btn-outline" onclick="openBatchModal()">
+                                <i class="fas fa-edit"></i>
+                                批量录入
+                            </button>
+                            <button class="mc-btn-sm mc-btn-danger-outline" onclick="handleClearAll()">
+                                <i class="fas fa-trash-alt"></i>
+                                清空
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="mc-order-list" id="orderList">
+                        <div class="mc-empty-state">
+                            <i class="fas fa-hand-pointer"></i>
+                            <p>请从左侧选择产品</p>
+                            <span>选择后会自动添加到订单列表</span>
+                        </div>
+                    </div>
+
+                    <div class="mc-summary-panel" id="summaryPanel" style="display:none;">
+                        <div class="mc-summary-row">
+                            <div class="mc-summary-item">
+                                <label>订单总数</label>
+                                <div class="mc-summary-value">
+                                    <strong id="totalFormal">0</strong>
+                                    <span>件</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mc-card mc-result-card">
+                    <div class="mc-card-header">
+                        <div class="mc-card-title-group">
+                            <div class="mc-icon-box mc-icon-purple">
+                                <i class="fas fa-chart-pie"></i>
+                            </div>
+                            <div>
+                                <h3>物料用量计算结果</h3>
+                                <small>实时计算物料需求</small>
+                            </div>
+                        </div>
+                        <div class="mc-calc-status" id="calcStatus"></div>
+                    </div>
+
+                    <div class="mc-result-content" id="calculationResult">
+                        <div class="mc-empty-state">
+                            <i class="fas fa-calculator"></i>
+                            <p>输入数量后自动计算</p>
+                            <span>计算结果将实时显示在这里</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="batchModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content mc-modal-content">
+            <div class="modal-header mc-modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-edit me-2"></i>
+                    批量录入数量
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-4">
+                    <label class="form-label fw-semibold">订单数量</label>
+                    <input type="number" class="form-control form-control-lg"
+                           id="batchFormalQty" min="0" value="0"
+                           oninput="validateBatchInput(this)">
+                    <small class="text-muted">应用于所有已选产品的订单数量</small>
+            </div>
+            <div class="modal-footer mc-modal-footer">
+                <button type="button" class="btn btn-secondary btn-lg" data-bs-dismiss="modal">
+                    取消
+                </button>
+                <button type="button" class="btn btn-primary btn-lg" onclick="applyBatchInput()">
+                    应用到全部
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+:root {
+    --mc-blue-50: #E6F7FA;
+    --mc-blue-100: #CCEFF5;
+    --mc-blue-200: #99D9E8;
+    --mc-blue-300: #66C2DB;
+    --mc-blue-400: #33ABCD;
+    --mc-blue-500: #0094BF;
+    --mc-blue-600: #007A9F;
+    --mc-blue-700: #00617F;
+    
+    --mc-green-50: #E8F5E9;
+    --mc-green-100: #C8E6C9;
+    --mc-green-200: #A5D6A7;
+    --mc-green-300: #81C784;
+    --mc-green-400: #4CAF50;
+    
+    --mc-red-50: #FFEBEE;
+    --mc-red-100: #FFCDD2;
+    --mc-red-200: #EF9A9A;
+    --mc-red-300: #E57373;
+    
+    --mc-purple-50: #F3E5F5;
+    --mc-purple-100: #E1BEE7;
+    --mc-purple-200: #CE93D8;
+    --mc-purple-300: #BA68C8;
+    
+    --mc-gray-50: #F8FAFC;
+    --mc-gray-100: #F1F5F9;
+    --mc-gray-200: #E2E8F0;
+    --mc-gray-300: #CBD5E1;
+    --mc-gray-400: #94A3B8;
+    --mc-gray-500: #64748B;
+    --mc-gray-600: #475569;
+    --mc-gray-700: #334155;
+    --mc-gray-800: #1E293B;
+}
+
+.mc-container {
+    padding: 24px;
+    max-width: 1600px;
+    margin: 0 auto;
+    font-family: 'Microsoft YaHei', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.mc-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 28px;
+    padding: 28px 32px;
+    background: linear-gradient(135deg, var(--mc-blue-50) 0%, #FFFFFF 100%);
+    border-radius: 20px;
+    border: 2px solid var(--mc-blue-100);
+    box-shadow: 0 4px 24px rgba(0, 148, 191, 0.08);
+}
+
+.mc-title {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    font-size: 30px;
+    font-weight: 700;
+    color: var(--mc-gray-800);
+    margin: 0;
+}
+
+.mc-title i {
+    color: var(--mc-blue-500);
+    font-size: 28px;
+}
+
+.mc-subtitle {
+    font-size: 14px;
+    color: var(--mc-gray-500);
+    margin: 6px 0 0 42px;
+    letter-spacing: 0.5px;
+}
+
+.mc-main-grid {
+    display: grid;
+    grid-template-columns: 420px 1fr;
+    gap: 24px;
+}
+
+@media (max-width: 1200px) {
+    .mc-main-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.mc-section {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.mc-card {
+    background: white;
+    border-radius: 18px;
+    border: 2px solid var(--mc-gray-200);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+    overflow: hidden;
+    transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.mc-card:hover {
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.06);
+}
+
+.mc-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px;
+    background: linear-gradient(to bottom, #FAFBFC, #FFFFFF);
+    border-bottom: 1px solid var(--mc-gray-200);
+}
+
+.mc-card-title-group {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.mc-card-title-group h3 {
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--mc-gray-800);
+    margin: 0;
+}
+
+.mc-card-title-group small {
+    font-size: 12px;
+    color: var(--mc-gray-500);
+    display: block;
+    margin-top: 2px;
+}
+
+.mc-icon-box {
+    width: 46px;
+    height: 46px;
+    border-radius: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 19px;
+}
+
+.mc-icon-blue {
+    background: linear-gradient(135deg, var(--mc-blue-100), var(--mc-blue-200));
+    color: var(--mc-blue-600);
+}
+
+.mc-icon-green {
+    background: linear-gradient(135deg, var(--mc-green-100), var(--mc-green-200));
+    color: #2E7D32;
+}
+
+.mc-icon-purple {
+    background: linear-gradient(135deg, var(--mc-purple-100), var(--mc-purple-200));
+    color: #6A1B9A;
+}
+
+.mc-badge {
+    padding: 6px 14px;
+    background: linear-gradient(135deg, var(--mc-blue-500), var(--mc-blue-600));
+    color: white;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+/* Search Styles */
+.mc-search-wrapper {
+    position: relative;
+    padding: 0 24px 16px;
+}
+
+.mc-search-input-group {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.mc-search-icon {
+    position: absolute;
+    left: 14px;
+    color: var(--mc-gray-400);
+    font-size: 14px;
+    z-index: 2;
+}
+
+.mc-search-input {
+    width: 100%;
+    padding: 12px 40px 12px 42px;
+    border: 2px solid var(--mc-gray-200);
+    border-radius: 11px;
+    font-size: 14px;
+    outline: none;
+    transition: all 0.3s ease;
+    background: var(--mc-gray-50);
+}
+
+.mc-search-input:focus {
+    border-color: var(--mc-blue-400);
+    background: white;
+    box-shadow: 0 0 0 4px rgba(0, 148, 191, 0.1);
+}
+
+.mc-search-clear {
+    position: absolute;
+    right: 10px;
+    background: none;
+    border: none;
+    color: var(--mc-gray-400);
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 50%;
+    transition: all 0.2s ease;
+}
+
+.mc-search-clear:hover {
+    background: var(--mc-gray-100);
+    color: var(--mc-gray-600);
+}
+
+.mc-search-dropdown {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 24px;
+    right: 24px;
+    background: white;
+    border: 2px solid var(--mc-blue-200);
+    border-radius: 12px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.12);
+    z-index: 1000;
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+.mc-dropdown-loading,
+.mc-dropdown-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 30px 20px;
+    color: var(--mc-gray-500);
+    font-size: 14px;
+}
+
+.mc-dropdown-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border-bottom: 1px solid var(--mc-gray-100);
+}
+
+.mc-dropdown-item:last-child {
+    border-bottom: none;
+}
+
+.mc-dropdown-item:hover {
+    background: var(--mc-blue-50);
+}
+
+.mc-dropdown-item-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.mc-dropdown-item-name {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--mc-gray-800);
+}
+
+.mc-dropdown-item-meta {
+    font-size: 12px;
+    color: var(--mc-gray-500);
+}
+
+.mc-bom-tag-mini {
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.mc-bom-tag-mini.has-bom {
+    background: var(--mc-green-100);
+    color: #2E7D32;
+}
+
+.mc-bom-tag-mini.no-bom {
+    background: var(--mc-red-100);
+    color: #C62828;
+}
+
+/* Filter Bar */
+.mc-filter-bar {
+    display: flex;
+    gap: 8px;
+    padding: 0 24px 16px;
+}
+
+.mc-filter-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 9px 14px;
+    background: var(--mc-gray-50);
+    border: 2px solid var(--mc-gray-200);
+    border-radius: 9px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--mc-gray-600);
+    cursor: pointer;
+    transition: all 0.25s ease;
+}
+
+.mc-filter-btn:hover {
+    background: var(--mc-gray-100);
+    border-color: var(--mc-gray-300);
+}
+
+.mc-filter-btn.active {
+    background: var(--mc-blue-50);
+    border-color: var(--mc-blue-400);
+    color: var(--mc-blue-600);
+}
+
+/* Product List */
+.mc-product-list {
+    padding: 0 24px 24px;
+    max-height: 480px;
+    overflow-y: auto;
+}
+
+.mc-product-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    border: 2px solid var(--mc-gray-200);
+    border-radius: 12px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    background: white;
+}
+
+.mc-product-item:hover {
+    border-color: var(--mc-blue-300);
+    background: var(--mc-blue-50);
+    transform: translateX(4px);
+    box-shadow: 0 2px 12px rgba(0, 148, 191, 0.08);
+}
+
+.mc-product-item.selected {
+    border-color: var(--mc-blue-500);
+    background: var(--mc-blue-50);
+    box-shadow: 0 3px 16px rgba(0, 148, 191, 0.15);
+}
+
+.mc-product-checkbox {
+    width: 22px;
+    height: 22px;
+    cursor: pointer;
+    accent-color: var(--mc-blue-500);
+    flex-shrink: 0;
+}
+
+.mc-product-details {
+    flex: 1;
+    min-width: 0;
+}
+
+.mc-product-name {
+    font-weight: 650;
+    font-size: 14px;
+    color: var(--mc-gray-800);
+    margin-bottom: 3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.mc-product-code {
+    font-size: 12px;
+    color: var(--mc-gray-500);
+}
+
+.mc-bom-badge {
+    padding: 5px 10px;
+    border-radius: 7px;
+    font-size: 11px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.mc-bom-badge.has-bom {
+    background: var(--mc-green-100);
+    color: #2E7D32;
+}
+
+.mc-bom-badge.no-bom {
+    background: var(--mc-red-100);
+    color: #C62828;
+}
+
+/* Order List */
+.mc-order-list {
+    padding: 24px;
+    min-height: 180px;
+    max-height: 340px;
+    overflow-y: auto;
+}
+
+.mc-order-item {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 18px 20px;
+    border: 2px solid var(--mc-gray-200);
+    border-radius: 13px;
+    margin-bottom: 12px;
+    background: white;
+    transition: all 0.3s ease;
+}
+
+.mc-order-item:hover {
+    border-color: var(--mc-blue-300);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05);
+}
+
+.mc-order-name {
+    flex: 1;
+    font-weight: 650;
+    font-size: 14px;
+    color: var(--mc-gray-800);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mc-order-inputs {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.mc-field-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.mc-field-label {
+    font-size: 11px;
+    color: var(--mc-gray-500);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.mc-field-input {
+    width: 90px;
+    padding: 9px 12px;
+    border: 2px solid var(--mc-gray-200);
+    border-radius: 9px;
+    font-size: 14px;
+    font-weight: 600;
+    text-align: center;
+    outline: none;
+    transition: all 0.25s ease;
+}
+
+.mc-field-input:focus {
+    border-color: var(--mc-blue-400);
+    box-shadow: 0 0 0 4px rgba(0, 148, 191, 0.1);
+}
+
+.mc-field-input::-webkit-inner-spin-button,
+.mc-field-input::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.mc-delete-btn {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--mc-red-50);
+    color: var(--mc-red-300);
+    border: none;
+    border-radius: 9px;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    flex-shrink: 0;
+}
+
+.mc-delete-btn:hover {
+    background: var(--mc-red-200);
+    color: #C62828;
+    transform: scale(1.05);
+}
+
+/* Summary Panel */
+.mc-summary-panel {
+    padding: 0 24px 24px;
+}
+
+.mc-summary-row {
+    display: flex;
+    align-items: stretch;
+    background: linear-gradient(135deg, var(--mc-gray-50), white);
+    border: 2px solid var(--mc-blue-100);
+    border-radius: 13px;
+    overflow: hidden;
+}
+
+.mc-summary-item {
+    flex: 1;
+    padding: 18px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.mc-summary-item label {
+    font-size: 13px;
+    color: var(--mc-gray-500);
+    font-weight: 600;
+}
+
+.mc-summary-value {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+}
+
+.mc-summary-value strong {
+    font-size: 26px;
+    font-weight: 800;
+    color: var(--mc-blue-600);
+}
+
+.mc-summary-value span {
+    font-size: 14px;
+    color: var(--mc-gray-500);
+}
+
+.mc-summary-divider {
+    width: 1px;
+    background: var(--mc-blue-100);
+}
+
+/* Result Card */
+.mc-result-card {
+    flex-shrink: 0;
+}
+
+.mc-calc-status {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 5px 12px;
+    border-radius: 8px;
+}
+
+.mc-calc-status.calculating {
+    background: #FFF3CD;
+    color: #856404;
+}
+
+.mc-calc-status.done {
+    background: var(--mc-green-100);
+    color: #2E7D32;
+}
+
+.mc-result-content {
+    padding: 24px;
+    max-height: 450px;
+    overflow-y: auto;
+}
+
+/* Category Section */
+.mc-category-block {
+    margin-bottom: 22px;
+    animation: fadeInUp 0.4s ease forwards;
+}
+
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(12px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.mc-category-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 18px;
+    background: linear-gradient(135deg, var(--mc-blue-50), white);
+    border: 2px solid var(--mc-blue-100);
+    border-radius: 12px;
+    margin-bottom: 12px;
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.25s ease;
+}
+
+.mc-category-head:hover {
+    background: linear-gradient(135deg, var(--mc-blue-100), var(--mc-blue-50));
+    border-color: var(--mc-blue-200);
+}
+
+.mc-category-head-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.mc-category-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+}
+
+.mc-cat-icon-filling {
+    background: linear-gradient(135deg, #BBDEFB, #90CAF9);
+    color: #1565C0;
+}
+
+.mc-cat-icon-fabric {
+    background: linear-gradient(135deg, #C8E6C9, #A5D6A7);
+    color: #2E7D32;
+}
+
+.mc-cat-icon-accessory {
+    background: linear-gradient(135deg, #FFE0B2, #FFCC80);
+    color: #EF6C00;
+}
+
+.mc-cat-icon-packaging {
+    background: linear-gradient(135deg, #F3E5F5, #E1BEE7);
+    color: #7B1FA2;
+}
+
+.mc-category-name {
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--mc-gray-800);
+}
+
+.mc-category-count {
+    padding: 5px 12px;
+    background: var(--mc-blue-500);
+    color: white;
+    border-radius: 16px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.mc-material-table {
+    border: 1px solid var(--mc-gray-200);
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.mc-mat-header-row {
+    display: grid;
+    grid-template-columns: 1.5fr 1.2fr 1.2fr 1fr 1.1fr;
+    gap: 12px;
+    padding: 16px 20px;
+    background: var(--mc-gray-100);
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--mc-gray-700);
+    border-bottom: 2px solid var(--mc-gray-300);
+}
+
+.mc-mat-header-right {
+    text-align: right;
+}
+
+.mc-mat-row {
+    display: grid;
+    grid-template-columns: 1.5fr 1.2fr 1.2fr 1fr 1.1fr;
+    gap: 12px;
+    padding: 18px 20px;
+    font-size: 15px;
+    border-bottom: 1px solid var(--mc-gray-100);
+    transition: all 0.2s ease;
+    align-items: center;
+}
+
+.mc-mat-row:last-child {
+    border-bottom: none;
+}
+
+.mc-mat-row:hover {
+    background: var(--mc-blue-50);
+}
+
+.mc-mat-name-cell {
+    font-weight: 700;
+    color: var(--mc-gray-800);
+    font-size: 15px;
+}
+
+.mc-mat-spec-cell {
+    color: var(--mc-gray-600);
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.mc-mat-supplier-cell {
+    color: var(--mc-gray-600);
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.mc-mat-val-cell {
+    text-align: right;
+    color: var(--mc-gray-600);
+    font-weight: 500;
+}
+
+.mc-mat-total-cell {
+    text-align: right;
+    font-weight: 800;
+    color: var(--mc-blue-600);
+    font-size: 16px;
+}
+
+/* Empty State */
+.mc-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 50px 20px;
+    color: var(--mc-gray-400);
+}
+
+.mc-empty-state > i {
+    font-size: 48px;
+    margin-bottom: 16px;
+    opacity: 0.25;
+}
+
+.mc-empty-state p {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: var(--mc-gray-500);
+}
+
+.mc-empty-state span {
+    font-size: 13px;
+}
+
+.mc-loading-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+    color: var(--mc-gray-500);
+    gap: 14px;
+}
+
+.mc-spinner {
+    width: 38px;
+    height: 38px;
+    border: 4px solid var(--mc-gray-200);
+    border-top-color: var(--mc-blue-500);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Header Actions */
+.mc-header-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.mc-btn-sm {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    border: 2px solid transparent;
+}
+
+.mc-btn-outline {
+    background: white;
+    border-color: var(--mc-blue-300);
+    color: var(--mc-blue-600);
+}
+
+.mc-btn-outline:hover {
+    background: var(--mc-blue-50);
+}
+
+.mc-btn-danger-outline {
+    background: white;
+    border-color: var(--mc-red-200);
+    color: #DC3545;
+}
+
+.mc-btn-danger-outline:hover {
+    background: var(--mc-red-50);
+}
+
+/* Modal Customization */
+.mc-modal-content {
+    border-radius: 18px;
+    border: none;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+}
+
+.mc-modal-header {
+    border-bottom: 1px solid var(--mc-gray-200);
+    padding: 20px 24px;
+}
+
+.mc-modal-footer {
+    border-top: 1px solid var(--mc-gray-200);
+    padding: 16px 24px;
+}
+
+/* Warning Banner for No BOM */
+.mc-warning-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    background: #FFF8E1;
+    border: 1px solid #FFD54F;
+    border-radius: 10px;
+    margin: 0 24px 16px;
+    color: #F57F17;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.mc-warning-banner i {
+    font-size: 16px;
+}
+</style>
+
+<script>
+let allProducts = [];
+let selectedProducts = new Set();
+let orderItems = [];
+let calculationResults = null;
+let calculateTimer = null;
+let currentFilter = 'all';
+let searchTimer = null;
+
+document.addEventListener('DOMContentLoaded', async function() {
+    await loadProducts();
+    
+    const searchInput = document.getElementById('skuSearch');
+    searchInput.addEventListener('focus', () => {
+        if (searchInput.value.length >= 1) showDropdown();
+    });
+    
+    document.addEventListener('click', (e) => {
+        const dropdown = document.getElementById('searchDropdown');
+        const searchWrapper = document.querySelector('.mc-search-wrapper');
+        if (!searchWrapper.contains(e.target)) hideDropdown();
+    });
+});
+
+async function loadProducts() {
+    try {
+        const response = await fetch('/api/v1/purchase-center/api/products?per_page=200');
+        
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            allProducts = result.products;
+            renderProductList();
+        } else {
+            showErrorState('加载失败', result.error || '无法加载产品数据');
+        }
+    } catch (error) {
+        console.error('Load products error:', error);
+        showErrorState('网络错误', '无法连接服务器，请检查网络连接');
+    }
+}
+
+function showErrorState(title, message) {
+    document.getElementById('productList').innerHTML = `
+        <div class="mc-empty-state">
+            <i class="fas fa-exclamation-triangle" style="color: var(--mc-red-300);"></i>
+            <p>${title}</p>
+            <span>${message}</span>
+        </div>
+    `;
+}
+
+function renderProductList() {
+    const container = document.getElementById('productList');
+    
+    let filtered = [...allProducts];
+    
+    if (currentFilter === 'has-bom') {
+        filtered = filtered.filter(p => p.has_bom);
+    } else if (currentFilter === 'no-bom') {
+        filtered = filtered.filter(p => !p.has_bom);
+    }
+    
+    if (filtered.length === 0) {
+        container.innerHTML = `
+            <div class="mc-empty-state">
+                <i class="fas fa-inbox"></i>
+                <p>没有找到产品</p>
+                <span>请调整筛选条件</span>
+            </div>
+        `;
+        return;
+    }
+    
+    let html = '';
+    filtered.forEach(product => {
+        const isSelected = selectedProducts.has(product.id);
+        const bomClass = product.has_bom ? 'has-bom' : 'no-bom';
+        const bomText = product.has_bom ? '有BOM' : '无BOM';
+        
+        html += `
+            <div class="mc-product-item ${isSelected ? 'selected' : ''}" 
+                 onclick="toggleProduct(${product.id})"
+                 data-id="${product.id}">
+                <input type="checkbox" 
+                       class="mc-product-checkbox" 
+                       ${isSelected ? 'checked' : ''}
+                       onclick="event.stopPropagation(); toggleProduct(${product.id})">
+                <div class="mc-product-details">
+                    <div class="mc-product-name">${escapeHtml(product.name)}</div>
+                    <div class="mc-product-code">${product.barcode ? `69码: ${product.barcode}` : ''}</div>
+                </div>
+                <span class="mc-bom-badge ${bomClass}">${bomText}</span>
+            </div>
+        `;
+    });
+    
+    container.innerHTML = html;
+}
+
+function setFilter(filter, btnElement) {
+    currentFilter = filter;
+    
+    document.querySelectorAll('.mc-filter-btn').forEach(btn => btn.classList.remove('active'));
+    if (btnElement) btnElement.classList.add('active');
+    
+    renderProductList();
+}
+
+function handleSearch(value) {
+    const clearBtn = document.getElementById('clearSearch');
+    clearBtn.style.display = value.length > 0 ? 'flex' : 'none';
+    
+    if (value.trim().length === 0) {
+        hideDropdown();
+        return;
+    }
+    
+    if (searchTimer) clearTimeout(searchTimer);
+    
+    searchTimer = setTimeout(() => performSearch(value.trim()), 250);
+}
+
+async function performSearch(query) {
+    showDropdownLoading();
+    
+    try {
+        const response = await fetch(`/api/v1/purchase-center/api/products/search-suggestions?q=${encodeURIComponent(query)}&limit=15`);
+        const result = await response.json();
+        
+        if (result.success && result.suggestions && result.suggestions.length > 0) {
+            renderSearchResults(result.suggestions);
+        } else {
+            showDropdownEmpty();
+        }
+    } catch (error) {
+        console.error('Search error:', error);
+        showDropdownEmpty();
+    }
+}
+
+function renderSearchResults(suggestions) {
+    const listEl = document.getElementById('dropdownList');
+    
+    let html = '';
+    suggestions.forEach(item => {
+        const hasBomClass = item.has_bom !== false ? 'has-bom' : 'no-bom';
+        const hasBomText = item.has_bom !== false ? '有BOM' : '无BOM';
+        
+        html += `
+            <div class="mc-dropdown-item" onclick="selectFromSearch(${item.id}, '${escapeHtml(item.name)}')">
+                <div class="mc-dropdown-item-info">
+                    <div class="mc-dropdown-item-name">${escapeHtml(item.name)}</div>
+                    <div class="mc-dropdown-item-meta">${item.barcode || ''}</div>
+                </div>
+                <span class="mc-bom-tag-mini ${hasBomClass}">${hasBomText}</span>
+            </div>
+        `;
+    });
+    
+    listEl.innerHTML = html;
+    document.getElementById('dropdownLoading').style.display = 'none';
+    listEl.style.display = 'block';
+    document.getElementById('dropdownEmpty').style.display = 'none';
+}
+
+function selectFromSearch(productId, productName) {
+    const product = allProducts.find(p => p.id === productId);
+    
+    if (!product) {
+        alert('未找到该产品信息，请刷新页面重试');
+        return;
+    }
+    
+    if (!product.has_bom) {
+        showToast('该产品未配置BOM表', 'warning', '请在产品管理中配置BOM后再使用此功能');
+        return;
+    }
+    
+    toggleProduct(productId);
+    hideDropdown();
+    document.getElementById('skuSearch').value = '';
+    document.getElementById('clearSearch').style.display = 'none';
+}
+
+function clearSearch() {
+    document.getElementById('skuSearch').value = '';
+    document.getElementById('clearSearch').style.display = 'none';
+    hideDropdown();
+}
+
+function showDropdown() {
+    document.getElementById('searchDropdown').style.display = 'block';
+}
+
+function hideDropdown() {
+    document.getElementById('searchDropdown').style.display = 'none';
+}
+
+function showDropdownLoading() {
+    showDropdown();
+    document.getElementById('dropdownLoading').style.display = 'flex';
+    document.getElementById('dropdownList').style.display = 'none';
+    document.getElementById('dropdownEmpty').style.display = 'none';
+}
+
+function showDropdownEmpty() {
+    showDropdown();
+    document.getElementById('dropdownLoading').style.display = 'none';
+    document.getElementById('dropdownList').style.display = 'none';
+    document.getElementById('dropdownEmpty').style.display = 'flex';
+}
+
+function toggleProduct(productId) {
+    const product = allProducts.find(p => p.id === productId);
+    
+    if (!product) {
+        alert('产品信息错误，请刷新页面重试');
+        return;
+    }
+    
+    if (!product.has_bom) {
+        showToast('BOM配置不完整', 'error', `"${product.name}" 未配置BOM表，无法参与物料计算`);
+        return;
+    }
+    
+    if (selectedProducts.has(productId)) {
+        selectedProducts.delete(productId);
+        orderItems = orderItems.filter(item => item.productId !== productId);
+    } else {
+        selectedProducts.add(productId);
+        orderItems.push({
+            productId: productId,
+            productName: product.name,
+            formalQty: 0
+        });
+    }
+    
+    updateSelectedCount();
+    renderOrderList();
+    renderProductList();
+    triggerCalculation();
+}
+
+function updateSelectedCount() {
+    document.getElementById('selectedCount').textContent = `已选 ${selectedProducts.size} 个`;
+}
+
+function renderOrderList() {
+    const container = document.getElementById('orderList');
+    const summaryPanel = document.getElementById('summaryPanel');
+    
+    if (orderItems.length === 0) {
+        container.innerHTML = `
+            <div class="mc-empty-state">
+                <i class="fas fa-hand-pointer"></i>
+                <p>请从左侧选择产品</p>
+                <span>选择有BOM的产品会自动添加到这里</span>
+            </div>
+        `;
+        summaryPanel.style.display = 'none';
+        return;
+    }
+    
+    let html = '';
+    orderItems.forEach((item, index) => {
+        html += `
+            <div class="mc-order-item" data-index="${index}">
+                <div class="mc-order-name" title="${escapeHtml(item.productName)}">${escapeHtml(item.productName)}</div>
+                <div class="mc-order-inputs">
+                    <div class="mc-field-group">
+                        <span class="mc-field-label">订单</span>
+                        <input type="number" 
+                               class="mc-field-input" 
+                               value="${item.formalQty}"
+                               data-type="formal"
+                               data-index="${index}"
+                               onchange="updateQuantity(${index}, 'formalQty', this.value)"
+                               oninput="debounceCalc()"
+                               min="0"
+                               step="1">
+                    </div>
+                </div>
+                <button class="mc-delete-btn" onclick="removeItem(${index})" title="移除此产品">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        `;
+    });
+    
+    container.innerHTML = html;
+    updateSummary();
+}
+
+function updateQuantity(index, field, value) {
+    const numVal = parseInt(value);
+    
+    if (isNaN(numVal) || numVal < 0) {
+        showToast('输入错误', 'warning', '数量必须为非负整数');
+        return;
+    }
+    
+    orderItems[index][field] = numVal;
+    updateSummary();
+    triggerCalculation();
+}
+
+function removeItem(index) {
+    const productId = orderItems[index].productId;
+    selectedProducts.delete(productId);
+    orderItems.splice(index, 1);
+    
+    updateSelectedCount();
+    renderOrderList();
+    renderProductList();
+    triggerCalculation();
+}
+
+function updateSummary() {
+    const totalFormal = orderItems.reduce((sum, item) => sum + (item.formalQty || 0), 0);
+    
+    document.getElementById('totalFormal').textContent = totalFormal.toLocaleString();
+    document.getElementById('summaryPanel').style.display = 'flex';
+}
+
+function debounceCalc() {
+    if (calculateTimer) clearTimeout(calculateTimer);
+    calculateTimer = setTimeout(triggerCalculation, 350);
+}
+
+function triggerCalculation() {
+    if (calculateTimer) clearTimeout(calculateTimer);
+    
+    const validItems = orderItems.filter(item => (item.formalQty || 0) > 0);
+    
+    if (validItems.length === 0) {
+        calculationResults = null;
+        renderResults();
+        updateCalcStatus('');
+        return;
+    }
+    
+    showCalculating();
+    
+    calculateTimer = setTimeout(() => executeCalculation(validItems), 480);
+}
+
+async function executeCalculation(items) {
+    const payload = items.map(item => ({
+        product_id: item.productId,
+        quantity: item.formalQty || 0
+    }));
+    
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+        
+        const response = await fetch('/api/v1/purchase-center/api/calculate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ orders: payload }),
+            signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+            throw new Error(`服务器错误 (${response.status})`);
+        }
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            calculationResults = result.result;
+            renderResults();
+            updateCalcStatus('done', `${Object.values(calculationResults).flat().length} 种物料`);
+        } else {
+            calculationResults = null;
+            showErrorResult(result.error || '计算服务异常');
+            updateCalcStatus('', '');
+        }
+    } catch (error) {
+        calculationResults = null;
+        if (error.name === 'AbortError') {
+            showErrorResult('计算超时，请稍后重试');
+        } else {
+            showErrorResult('网络错误：' + error.message);
+        }
+        updateCalcStatus('', '');
+    }
+}
+
+function renderResults() {
+    const container = document.getElementById('calculationResult');
+    
+    if (!calculationResults || Object.keys(calculationResults).length === 0) {
+        container.innerHTML = `
+            <div class="mc-empty-state">
+                <i class="fas fa-calculator"></i>
+                <p>输入数量后自动计算</p>
+                <span>计算结果将实时显示在这里</span>
+            </div>
+        `;
+        return;
+    }
+    
+    const categoryConfig = {
+        filling: { name: '填充类', icon: 'cloud', class: 'filling' },
+        fabric: { name: '面料类', icon: 'scroll', class: 'fabric' },
+        accessory: { name: '辅料类', icon: 'puzzle-piece', class: 'accessory' },
+        packaging: { name: '包装类', icon: 'box', class: 'packaging' }
+    };
+    
+    let html = '';
+    let delay = 0;
+    
+    for (const [categoryKey, materials] of Object.entries(calculationResults)) {
+        if (!materials || materials.length === 0) continue;
+        
+        const config = categoryConfig[categoryKey] || { name: categoryKey, icon: 'cube', class: 'default' };
+        
+        html += `
+            <div class="mc-category-block" style="animation-delay: ${delay}ms;">
+                <div class="mc-category-head" onclick="toggleCategory(this)">
+                    <div class="mc-category-head-info">
+                        <div class="mc-category-icon mc-cat-icon-${config.class}">
+                            <i class="fas fa-${config.icon}"></i>
+                        </div>
+                        <span class="mc-category-name">${config.name}</span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <span class="mc-category-count">${materials.length} 种</span>
+                        <i class="fas fa-chevron-down mc-chevron" style="transition:transform 0.3s;"></i>
+                    </div>
+                </div>
+                <div class="mc-category-body">
+                    <div class="mc-material-table">
+                        <div class="mc-mat-header-row">
+                            <div>供应商</div>
+                            <div>物料名称</div>
+                            <div>物料型号</div>
+                            <div class="mc-mat-header-right">总采购量</div>
+                        </div>
+                        ${materials.map(mat => `
+                            <div class="mc-mat-row">
+                                <div class="mc-mat-supplier-cell">${escapeHtml(mat.supplier_name || '')}</div>
+                                <div class="mc-mat-name-cell">${escapeHtml(mat.material_name)}</div>
+                                <div class="mc-mat-spec-cell">${escapeHtml(mat.specification || '')}</div>
+                                <div class="mc-mat-total-cell">${Number(mat.total_quantity).toFixed(2)} <small>${mat.unit || ''}</small></div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        delay += 80;
+    }
+    
+    container.innerHTML = html;
+}
+
+function toggleCategory(headerEl) {
+    const body = headerEl.nextElementSibling;
+    const chevron = headerEl.querySelector('.mc-chevron');
+    const isHidden = body.style.display === 'none';
+    
+    body.style.display = isHidden ? 'block' : 'none';
+    chevron.style.transform = isHidden ? 'rotate(0deg)' : 'rotate(-90deg)';
+}
+
+function showCalculating() {
+    const container = document.getElementById('calculationResult');
+    container.innerHTML = `
+        <div class="mc-loading-state">
+            <div class="mc-spinner"></div>
+            <span>正在计算物料用量...</span>
+        </div>
+    `;
+    updateCalcStatus('calculating', '计算中...');
+}
+
+function showErrorResult(message) {
+    const container = document.getElementById('calculationResult');
+    container.innerHTML = `
+        <div class="mc-empty-state">
+            <i class="fas fa-exclamation-triangle" style="color:var(--mc-red-300);"></i>
+            <p>计算失败</p>
+            <span>${message || '请检查输入或稍后重试'}</span>
+        </div>
+    `;
+}
+
+function updateCalcStatus(status, text) {
+    const el = document.getElementById('calcStatus');
+    
+    if (!status) {
+        el.textContent = '';
+        el.className = 'mc-calc-status';
+        return;
+    }
+    
+    el.textContent = text;
+    el.className = `mc-calc-status ${status}`;
+}
+
+function openBatchModal() {
+    if (orderItems.length === 0) {
+        showToast('提示', 'info', '请先添加产品到订单列表');
+        return;
+    }
+    
+    const modal = new bootstrap.Modal(document.getElementById('batchModal'));
+    modal.show();
+}
+
+function validateBatchInput(input) {
+    const val = parseInt(input.value);
+    if (isNaN(val) || val < 0) {
+        input.value = 0;
+    } else if (val > 999999) {
+        input.value = 999999;
+    }
+}
+
+function applyBatchInput() {
+    const formalQty = parseInt(document.getElementById('batchFormalQty').value) || 0;
+    
+    if (formalQty === 0) {
+        showToast('提示', 'warning', '请输入有效数量');
+        return;
+    }
+    
+    orderItems.forEach(item => {
+        item.formalQty = formalQty;
+    });
+    
+    bootstrap.Modal.getInstance(document.getElementById('batchModal')).hide();
+    renderOrderList();
+    triggerCalculation();
+    
+    showToast('成功', 'success', `已应用批量设置：订单 ${formalQty}`);
+}
+
+function handleClearAll() {
+    if (orderItems.length === 0) return;
+    
+    if (!confirm('确定要清空所有已选产品和数量吗？')) return;
+    
+    selectedProducts.clear();
+    orderItems = [];
+    calculationResults = null;
+    
+    updateSelectedCount();
+    renderOrderList();
+    renderProductList();
+    renderResults();
+    updateCalcStatus('');
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function showToast(title, type, message) {
+    const colors = {
+        success: { bg: '#D4EDDA', border: '#28A745', color: '#155724', icon: 'check-circle' },
+        error: { bg: '#F8D7DA', border: '#DC3545', color: '#721C24', icon: 'exclamation-circle' },
+        warning: { bg: '#FFF3CD', border: '#FFC107', color: '#856404', icon: 'exclamation-triangle' },
+        info: { bg: '#D1ECF1', border: '#17A2B8', color: '#0C5460', icon: 'info-circle' }
+    };
+    
+    const c = colors[type] || colors.info;
+    
+    const toast = document.createElement('div');
+    toast.style.cssText = `
+        position: fixed; top: 24px; right: 24px; z-index: 9999;
+        display: flex; align-items: flex-start; gap: 12px;
+        padding: 16px 20px; border-radius: 12px;
+        background: ${c.bg}; border: 2px solid ${c.border};
+        color: ${c.color}; font-family: inherit;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+        max-width: 380px; animation: slideInRight 0.35s ease;
+    `;
+    toast.innerHTML = `
+        <i class="fas fa-${c.icon}" style="font-size: 20px; margin-top: 2px; flex-shrink: 0;"></i>
+        <div style="flex: 1;">
+            <div style="font-weight: 700; font-size: 14px; margin-bottom: 4px;">${title}</div>
+            <div style="font-size: 13px; line-height: 1.4;">${message}</div>
+        </div>
+        <button onclick="this.parentElement.remove()" style="
+            background:none;border:none;color:${c.color};cursor:pointer;
+            font-size:16px;padding:4px;margin:-4px -8px 0 0;line-height:1;
+        ">×</button>
+    `;
+    
+    document.body.appendChild(toast);
+    
+    setTimeout(() => {
+        toast.style.animation = 'slideOutRight 0.3s ease forwards';
+        setTimeout(() => toast.remove(), 300);
+    }, 4000);
+}
+
+const styleSheet = document.createElement('style');
+styleSheet.textContent = `
+    @keyframes slideInRight {
+        from { opacity: 0; transform: translateX(40px); }
+        to { opacity: 1; transform: translateX(0); }
+    }
+    @keyframes slideOutRight {
+        from { opacity: 1; transform: translateX(0); }
+        to { opacity: 0; transform: translateX(40px); }
+    }
+`;
+document.head.appendChild(styleSheet);
+</script>
+{% endblock %}

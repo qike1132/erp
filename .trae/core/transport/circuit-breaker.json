@@ -1,0 +1,58 @@
+{
+  "version": "2.0.0",
+  "name": "Circuit Breaker Configuration",
+  "description": "Fault tolerance mechanism for Agent communication",
+  
+  "global": {
+    "enabled": true,
+    "failureThreshold": 5,
+    "successThreshold": 3,
+    "timeout": 30000,
+    "monitoringWindow": 60000,
+    "halfOpenMaxCalls": 3
+  },
+  
+  "perTransport": {
+    "websocket": {
+      "failureThreshold": 3,
+      "timeout": 15000,
+      "monitoringWindow": 30000
+    },
+    "http": {
+      "failureThreshold": 5,
+      "timeout": 30000,
+      "monitoringWindow": 60000
+    },
+    "sse": {
+      "failureThreshold": 7,
+      "timeout": 45000,
+      "monitoringWindow": 90000
+    },
+    "mcp": {
+      "failureThreshold": 4,
+      "timeout": 20000,
+      "monitoringWindow": 40000
+    }
+  },
+  
+  "perAgent": {
+    "critical": {
+      "failureThreshold": 3,
+      "timeout": 15000
+    },
+    "normal": {
+      "failureThreshold": 5,
+      "timeout": 30000
+    },
+    "background": {
+      "failureThreshold": 8,
+      "timeout": 60000
+    }
+  },
+  
+  "notifications": {
+    "onStateChange": true,
+    "onRecovery": true,
+    "channels": ["console", "log"]
+  }
+}

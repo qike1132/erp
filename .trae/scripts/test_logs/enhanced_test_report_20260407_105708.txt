@@ -1,0 +1,295 @@
+================================================================================
+Agent协同体系 - 系统执行流程加强测试报告
+================================================================================
+
+报告生成时间: 2026-04-07T10:57:08.492860
+测试版本: v2.0.0 (增强版)
+
+--------------------------------------------------------------------------------
+一、测试执行概要
+--------------------------------------------------------------------------------
+总测试数: 43
+通过: 40 | 失败: 3 | 跳过: 0
+通过率: 93.0%
+总执行时间: 904.36ms
+
+--------------------------------------------------------------------------------
+二、详细测试步骤与结果
+--------------------------------------------------------------------------------
+
+【CHECKPOINT】
+[OK] CP-001 正确调度-前端任务
+    输入: {'task_type': 'frontend', 'has_specialized_agent': True, 'agent_dispatched': True}
+    预期: 0
+    实际: 0
+    耗时: 71.26ms
+[OK] CP-002 违规未调度-前端任务
+    输入: {'task_type': 'frontend', 'has_specialized_agent': True, 'agent_dispatched': False}
+    预期: 1
+    实际: 1
+    耗时: 71.92ms
+[OK] CP-003 正确调度-后端任务
+    输入: {'task_type': 'backend', 'has_specialized_agent': True, 'agent_dispatched': True}
+    预期: 0
+    实际: 0
+    耗时: 71.33ms
+[OK] CP-004 违规未调度-后端任务
+    输入: {'task_type': 'backend', 'has_specialized_agent': True, 'agent_dispatched': False}
+    预期: 1
+    实际: 1
+    耗时: 70.91ms
+[OK] CP-005 违规未调度-安全任务
+    输入: {'task_type': 'security', 'has_specialized_agent': True, 'agent_dispatched': False}
+    预期: 1
+    实际: 1
+    耗时: 72.12ms
+[OK] CP-006 SoloCoder执行-未知任务
+    输入: {'task_type': 'unknown', 'has_specialized_agent': False, 'agent_dispatched': False}
+    预期: 0
+    实际: 0
+    耗时: 72.05ms
+[OK] CP-007 正确调度-全栈任务
+    输入: {'task_type': 'fullstack', 'has_specialized_agent': True, 'agent_dispatched': True}
+    预期: 0
+    实际: 0
+    耗时: 71.20ms
+[OK] CP-008 正确调度-测试任务
+    输入: {'task_type': 'testing', 'has_specialized_agent': True, 'agent_dispatched': True}
+    预期: 0
+    实际: 0
+    耗时: 74.43ms
+[OK] CP-009 强制继续执行（无force参数）
+    输入: {'task_type': 'frontend', 'has_specialized_agent': True, 'agent_dispatched': False}
+    预期: 1
+    实际: 1
+    耗时: 72.25ms
+
+【CONFIG】
+[OK] CFG-001 版本号验证
+    输入: {'key_path': 'version', 'expected': '2.0.0'}
+    预期: 2.0.0
+    实际: 2.0.0
+    耗时: 0.63ms
+[OK] CFG-002 任务状态数量验证
+    输入: {'key_path': 'taskStates', 'expected': 15}
+    预期: 15
+    实际: 15
+    耗时: 0.78ms
+[OK] CFG-003 优先级级别数量
+    输入: {'key_path': 'priorityLevels', 'expected': 4}
+    预期: 4
+    实际: 4
+    耗时: 0.74ms
+[FAIL] CFG-004 调度步骤数量
+    输入: {'key_path': 'dispatchAlgorithm.steps', 'expected': 6}
+    预期: 6
+    实际: [{'order': 1, 'name': 'skill_check', 'description': 'Check for relevant skills', 'required': True, 'timeout': 2000}, {'order': 2, 'name': 'confidence_scoring', 'description': 'Calculate match confidence', 'required': True, 'timeout': 1000}, {'order': 3, 'name': 'threshold_evaluation', 'description': 'Evaluate against confidence thresholds', 'required': True, 'timeout': 500}, {'order': 4, 'name': 'agent_matching', 'description': 'Match specialized agents', 'required': True, 'timeout': 2000}, {'order': 5, 'name': 'fallback_check', 'description': 'Check fallback availability', 'required': False, 'timeout': 500}, {'order': 6, 'name': 'task_dispatch', 'description': 'Dispatch task to agent', 'required': True, 'timeout': 1000}]
+    错误: 期望6, 实际[{'order': 1, 'name': 'skill_check', 'description': 'Check for relevant skills', 'required': True, 'timeout': 2000}, {'order': 2, 'name': 'confidence_scoring', 'description': 'Calculate match confidence', 'required': True, 'timeout': 1000}, {'order': 3, 'name': 'threshold_evaluation', 'description': 'Evaluate against confidence thresholds', 'required': True, 'timeout': 500}, {'order': 4, 'name': 'agent_matching', 'description': 'Match specialized agents', 'required': True, 'timeout': 2000}, {'order': 5, 'name': 'fallback_check', 'description': 'Check fallback availability', 'required': False, 'timeout': 500}, {'order': 6, 'name': 'task_dispatch', 'description': 'Dispatch task to agent', 'required': True, 'timeout': 1000}]
+    耗时: 1.01ms
+[OK] CFG-005 置信度-直接执行阈值
+    输入: {'key_path': 'confidenceThresholds.directExecute.min', 'expected': 95}
+    预期: 95
+    实际: 95
+    耗时: 0.82ms
+[OK] CFG-006 置信度-提示执行阈值
+    输入: {'key_path': 'confidenceThresholds.promptExecute.min', 'expected': 85}
+    预期: 85
+    实际: 85
+    耗时: 9.11ms
+[OK] CFG-007 重试策略-最大重试次数
+    输入: {'key_path': 'retryPolicy.maxRetries', 'expected': 3}
+    预期: 3
+    实际: 3
+    耗时: 1.73ms
+[OK] CFG-008 超时配置-任务超时
+    输入: {'key_path': 'timeoutHandling.taskTimeout', 'expected': 300000}
+    预期: 300000
+    实际: 300000
+    耗时: 0.66ms
+
+【STATE_TRANSITION】
+[OK] ST-000 状态转换: CREATED -> QUEUED
+    输入: {'from_state': 'CREATED', 'to_state': 'QUEUED'}
+    预期: True
+    实际: ['QUEUED', 'CANCELLED']
+    耗时: 0.54ms
+[OK] ST-001 状态转换: CREATED -> CANCELLED
+    输入: {'from_state': 'CREATED', 'to_state': 'CANCELLED'}
+    预期: True
+    实际: ['QUEUED', 'CANCELLED']
+    耗时: 0.76ms
+[OK] ST-002 状态转换: QUEUED -> ASSIGNED
+    输入: {'from_state': 'QUEUED', 'to_state': 'ASSIGNED'}
+    预期: True
+    实际: ['ASSIGNED', 'ESCALATED', 'CANCELLED']
+    耗时: 0.57ms
+[OK] ST-003 状态转换: QUEUED -> ESCALATED
+    输入: {'from_state': 'QUEUED', 'to_state': 'ESCALATED'}
+    预期: True
+    实际: ['ASSIGNED', 'ESCALATED', 'CANCELLED']
+    耗时: 0.49ms
+[OK] ST-004 状态转换: ASSIGNED -> RUNNING
+    输入: {'from_state': 'ASSIGNED', 'to_state': 'RUNNING'}
+    预期: True
+    实际: ['RUNNING', 'FAILED', 'CANCELLED']
+    耗时: 0.58ms
+[OK] ST-005 状态转换: ASSIGNED -> FAILED
+    输入: {'from_state': 'ASSIGNED', 'to_state': 'FAILED'}
+    预期: True
+    实际: ['RUNNING', 'FAILED', 'CANCELLED']
+    耗时: 1.20ms
+[OK] ST-006 状态转换: RUNNING -> COMPLETED
+    输入: {'from_state': 'RUNNING', 'to_state': 'COMPLETED'}
+    预期: True
+    实际: ['COMPLETED', 'FAILED', 'TIMEOUT', 'CANCELLED']
+    耗时: 0.52ms
+[OK] ST-007 状态转换: RUNNING -> FAILED
+    输入: {'from_state': 'RUNNING', 'to_state': 'FAILED'}
+    预期: True
+    实际: ['COMPLETED', 'FAILED', 'TIMEOUT', 'CANCELLED']
+    耗时: 0.66ms
+[OK] ST-008 状态转换: RUNNING -> TIMEOUT
+    输入: {'from_state': 'RUNNING', 'to_state': 'TIMEOUT'}
+    预期: True
+    实际: ['COMPLETED', 'FAILED', 'TIMEOUT', 'CANCELLED']
+    耗时: 0.62ms
+[OK] ST-009 状态转换: COMPLETED -> REVIEWING
+    输入: {'from_state': 'COMPLETED', 'to_state': 'REVIEWING'}
+    预期: True
+    实际: ['REVIEWING']
+    耗时: 0.49ms
+[OK] ST-010 状态转换: REVIEWING -> APPROVED
+    输入: {'from_state': 'REVIEWING', 'to_state': 'APPROVED'}
+    预期: True
+    实际: ['APPROVED', 'REVISION_REQUIRED']
+    耗时: 0.50ms
+[OK] ST-011 状态转换: REVIEWING -> REVISION_REQUIRED
+    输入: {'from_state': 'REVIEWING', 'to_state': 'REVISION_REQUIRED'}
+    预期: True
+    实际: ['APPROVED', 'REVISION_REQUIRED']
+    耗时: 0.55ms
+[OK] ST-012 状态转换: APPROVED -> DELIVERED
+    输入: {'from_state': 'APPROVED', 'to_state': 'DELIVERED'}
+    预期: True
+    实际: ['DELIVERED']
+    耗时: 0.50ms
+[OK] ST-013 状态转换: REVISION_REQUIRED -> RUNNING
+    输入: {'from_state': 'REVISION_REQUIRED', 'to_state': 'RUNNING'}
+    预期: True
+    实际: ['RUNNING']
+    耗时: 0.50ms
+[OK] ST-014 状态转换: FAILED -> RETRY
+    输入: {'from_state': 'FAILED', 'to_state': 'RETRY'}
+    预期: True
+    实际: ['RETRY', 'FALLBACK', 'ESCALATED']
+    耗时: 0.54ms
+[OK] ST-015 状态转换: FAILED -> FALLBACK
+    输入: {'from_state': 'FAILED', 'to_state': 'FALLBACK'}
+    预期: True
+    实际: ['RETRY', 'FALLBACK', 'ESCALATED']
+    耗时: 0.51ms
+[OK] ST-016 状态转换: FAILED -> ESCALATED
+    输入: {'from_state': 'FAILED', 'to_state': 'ESCALATED'}
+    预期: True
+    实际: ['RETRY', 'FALLBACK', 'ESCALATED']
+    耗时: 0.49ms
+
+【CHECKPOINT】
+[OK] BD-001 空任务类型
+    输入: {'task_type': '', 'has_specialized_agent': False, 'agent_dispatched': False}
+    预期: 0
+    实际: 0
+    耗时: 72.75ms
+[OK] BD-002 超长任务类型名
+    输入: {'task_type': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'has_specialized_agent': False, 'agent_dispatched': False}
+    预期: 0
+    实际: 0
+    耗时: 72.00ms
+[OK] BD-003 特殊字符任务类型
+    输入: {'task_type': 'test@#$%^&*()', 'has_specialized_agent': False, 'agent_dispatched': False}
+    预期: 0
+    实际: 0
+    耗时: 70.49ms
+
+【CONFIG】
+[OK] BD-004 置信度边界值95
+    输入: {'key_path': 'confidenceThresholds.directExecute.min', 'expected': 95}
+    预期: 95
+    实际: 95
+    耗时: 0.57ms
+[OK] BD-005 置信度边界值85
+    输入: {'key_path': 'confidenceThresholds.promptExecute.min', 'expected': 85}
+    预期: 85
+    实际: 85
+    耗时: 0.55ms
+[OK] BD-006 置信度边界值70
+    输入: {'key_path': 'confidenceThresholds.userConfirm.min', 'expected': 70}
+    预期: 70
+    实际: 70
+    耗时: 1.60ms
+[OK] EX-001 缺失配置文件
+    输入: {'key_path': 'non_existent_key', 'expected': None}
+    预期: None
+    实际: None
+    耗时: 0.64ms
+
+【STATE_TRANSITION】
+[FAIL] EX-002 无效状态转换
+    输入: {'from_state': 'DELIVERED', 'to_state': 'RUNNING'}
+    预期: False
+    实际: []
+    错误: DELIVERED不能转换到RUNNING
+    耗时: 0.50ms
+[FAIL] EX-003 违反final状态转换
+    输入: {'from_state': 'DELIVERED', 'to_state': 'CREATED'}
+    预期: False
+    实际: []
+    错误: DELIVERED不能转换到CREATED
+    耗时: 0.58ms
+
+--------------------------------------------------------------------------------
+三、流程符合度量化评估
+--------------------------------------------------------------------------------
+checkpoint: 12/12 (100.0%)
+config: 11/12 (91.7%)
+state_transition: 17/19 (89.5%)
+
+总体符合度评分: 93.7/100
+
+--------------------------------------------------------------------------------
+四、异常情况记录
+--------------------------------------------------------------------------------
+异常ID: CFG-004
+异常名称: 调度步骤数量
+错误类型: config
+触发条件: {'key_path': 'dispatchAlgorithm.steps', 'expected': 6}
+错误消息: 期望6, 实际[{'order': 1, 'name': 'skill_check', 'description': 'Check for relevant skills', 'required': True, 'timeout': 2000}, {'order': 2, 'name': 'confidence_scoring', 'description': 'Calculate match confidence', 'required': True, 'timeout': 1000}, {'order': 3, 'name': 'threshold_evaluation', 'description': 'Evaluate against confidence thresholds', 'required': True, 'timeout': 500}, {'order': 4, 'name': 'agent_matching', 'description': 'Match specialized agents', 'required': True, 'timeout': 2000}, {'order': 5, 'name': 'fallback_check', 'description': 'Check fallback availability', 'required': False, 'timeout': 500}, {'order': 6, 'name': 'task_dispatch', 'description': 'Dispatch task to agent', 'required': True, 'timeout': 1000}]
+----------------------------------------
+异常ID: EX-002
+异常名称: 无效状态转换
+错误类型: state_transition
+触发条件: {'from_state': 'DELIVERED', 'to_state': 'RUNNING'}
+错误消息: DELIVERED不能转换到RUNNING
+----------------------------------------
+异常ID: EX-003
+异常名称: 违反final状态转换
+错误类型: state_transition
+触发条件: {'from_state': 'DELIVERED', 'to_state': 'CREATED'}
+错误消息: DELIVERED不能转换到CREATED
+----------------------------------------
+
+--------------------------------------------------------------------------------
+五、改进建议
+--------------------------------------------------------------------------------
+[P1] 边界条件增强
+    建议对空字符串和超长输入增加更严格的校验
+[P2] 日志规范化
+    建议统一日志格式，增加结构化日志输出
+[P2] 性能监控
+    建议增加P99延迟等性能指标的实时采集
+[P3] 测试覆盖
+    建议增加并发测试和安全测试用例
+
+================================================================================
+报告结束
+================================================================================

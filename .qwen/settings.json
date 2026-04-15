@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python *)",
+      "Read(C:\\Users\\Administrator\\Desktop/**)"
+    ]
+  },
+  "$version": 3
+}

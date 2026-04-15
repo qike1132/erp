@@ -1,0 +1,45 @@
+"""
+客户模型 - 纯 SQLAlchemy 2.0 声明式
+
+映射到与 Flask-SQLAlchemy Customer 相同的 'customer' 表。
+"""
+from sqlalchemy import String, Integer, Boolean, Text, DateTime, Index
+from sqlalchemy.orm import Mapped, mapped_column
+from datetime import datetime
+
+from fastapi_app.shared_models import Base
+
+
+class Customer(Base):
+    """客户模型"""
+    __tablename__ = 'customer'
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    customer_code: Mapped[str | None] = mapped_column(String(50), unique=True, index=True, comment='客户编码')
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True, comment='客户名称')
+    contact: Mapped[str | None] = mapped_column(String(50), comment='联系人')
+    phone: Mapped[str | None] = mapped_column(String(20), comment='联系电话')
+    address: Mapped[str | None] = mapped_column(String(200), comment='地址')
+    note: Mapped[str | None] = mapped_column(Text, comment='备注')
+    icon_url: Mapped[str | None] = mapped_column(String(200), comment='客户图标URL')
+    status: Mapped[bool] = mapped_column(Boolean, default=True, comment='是否启用')
+    create_time: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, comment='创建时间')
+    update_time: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+
+    def __repr__(self):
+        return f'<Customer {self.name}>'
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'customer_code': self.customer_code,
+            'name': self.name,
+            'contact': self.contact,
+            'phone': self.phone,
+            'address': self.address,
+            'note': self.note,
+            'icon_url': self.icon_url,
+            'status': self.status,
+            'create_time': self.create_time.isoformat() if self.create_time else None,
+            'update_time': self.update_time.isoformat() if self.update_time else None,
+        }

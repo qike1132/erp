@@ -1,0 +1,199 @@
+{
+  "version": "2.0.0",
+  "name": "Hook System Configuration",
+  "description": "Lifecycle hooks for Agent execution pipeline",
+  
+  "enabled": true,
+  
+  "hooks": {
+    "preExecute": [
+      {
+        "name": "permission-check",
+        "priority": 100,
+        "required": true,
+        "timeout": 5000,
+        "description": "Verify agent has permission to execute the requested action",
+        "handler": "PermissionCheckHandler",
+        "config": {
+          "strictMode": true,
+          "cachePermissions": true,
+          "cacheTTL": 300000
+        }
+      },
+      {
+        "name": "input-validation",
+        "priority": 90,
+        "required": false,
+        "timeout": 3000,
+        "description": "Validate and sanitize input parameters",
+        "handler": "InputValidationHandler",
+        "config": {
+          "maxLength": 100000,
+          "sanitizeHtml": true,
+          "removeNullBytes": true
+        }
+      },
+      {
+        "name": "rate-limit-check",
+        "priority": 80,
+        "required": true,
+        "timeout": 2000,
+        "description": "Check if request is within rate limits",
+        "handler": "RateLimitHandler",
+        "config": {
+          "useSlidingWindow": true,
+          "windowSize": 60000
+        }
+      },
+      {
+        "name": "circuit-breaker-check",
+        "priority": 70,
+        "required": false,
+        "timeout": 1000,
+        "description": "Check circuit breaker state before execution",
+        "handler": "CircuitBreakerHandler",
+        "config": {
+          "failFast": true,
+          "recordAttempt": true
+        }
+      }
+    ],
+    
+    "postExecute": [
+      {
+        "name": "metrics-recording",
+        "priority": 100,
+        "required": false,
+        "timeout": 5000,
+        "description": "Record execution metrics for monitoring",
+        "handler": "MetricsRecordingHandler",
+        "config": {
+          "recordLatency": true,
+          "recordThroughput": true,
+          "recordErrors": true
+        }
+      },
+      {
+        "name": "audit-log",
+        "priority": 90,
+        "required": false,
+        "timeout": 3000,
+        "description": "Log execution details for audit trail",
+        "handler": "AuditLogHandler",
+        "config": {
+          "logLevel": "info",
+          "includeRequest": true,
+          "includeResponse": true,
+          "redactSecrets": true
+        }
+      },
+      {
+        "name": "cache-update",
+        "priority": 80,
+        "required": false,
+        "timeout": 2000,
+        "description": "Update relevant caches after execution",
+        "handler": "CacheUpdateHandler",
+        "config": {
+          "invalidateRelated": true,
+          "propagateChanges": false
+        }
+      }
+    ],
+    
+    "onError": [
+      {
+        "name": "error-classification",
+        "priority": 100,
+        "required": true,
+        "timeout": 3000,
+        "description": "Classify error type and severity",
+        "handler": "ErrorClassificationHandler",
+        "config": {
+          "categorizeErrors": true,
+          "includeStackTrace": true,
+          "maxStackTraceDepth": 10
+        }
+      },
+      {
+        "name": "error-logging",
+        "priority": 90,
+        "required": true,
+        "timeout": 2000,
+        "description": "Log error details for debugging",
+        "handler": "ErrorLoggingHandler",
+        "config": {
+          "logLevel": "error",
+          "includeContext": true,
+          "alertOnCritical": true
+        }
+      },
+      {
+        "name": "circuit-breaker-update",
+        "priority": 80,
+        "required": false,
+        "timeout": 1000,
+        "description": "Update circuit breaker state on error",
+        "handler": "CircuitBreakerUpdateHandler",
+        "config": {
+          "recordFailure": true,
+          "checkThreshold": true
+        }
+      },
+      {
+        "name": "retry-evaluation",
+        "priority": 70,
+        "required": false,
+        "timeout": 1000,
+        "description": "Evaluate if error is retryable",
+        "handler": "RetryEvaluationHandler",
+        "config": {
+          "maxRetries": 3,
+          "checkRetryableErrors": true
+        }
+      }
+    ],
+    
+    "onTimeout": [
+      {
+        "name": "timeout-handler",
+        "priority": 100,
+        "required": true,
+        "timeout": 1000,
+        "description": "Handle execution timeout",
+        "handler": "TimeoutHandler",
+        "config": {
+          "forceTerminate": false,
+          "cleanupResources": true
+        }
+      },
+      {
+        "name": "fallback-trigger",
+        "priority": 90,
+        "required": false,
+        "timeout": 5000,
+        "description": "Trigger fallback agent on timeout",
+        "handler": "FallbackTriggerHandler",
+        "config": {
+          "useFallbackAgent": true,
+          "preserveContext": true
+        }
+      }
+    ]
+  },
+  
+  "globalConfig": {
+    "maxConcurrentHooks": 10,
+    "defaultTimeout": 5000,
+    "continueOnFailure": false,
+    "logAllHooks": true,
+    "measureHookLatency": true
+  },
+  
+  "errorHandling": {
+    "strategy": "fail-fast",
+    "maxRetries": 3,
+    "fallbackBehavior": "skip",
+    "logErrors": true
+  }
+}

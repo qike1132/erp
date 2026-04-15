@@ -3,55 +3,614 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>滨发协同系统</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='brand-icon.png') }}">
     <link href="{{ url_for('static', filename='bootstrap.min.css') }}" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='all.min.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='collapse-animated.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='tab-system.css') }}">
+    {% block extra_css %}{% endblock %}
+    <style>
+        /* 全局通知系统样式 */
+        .global-notification-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-width: 400px;
+            width: calc(100% - 40px);
+        }
+        
+        @media (max-width: 576px) {
+            .global-notification-container {
+                top: 10px;
+                right: 10px;
+                left: 10px;
+                max-width: none;
+                width: auto;
+            }
+        }
+        
+        .global-notification {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            padding: 16px 20px;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            animation: notificationSlideIn 0.3s ease-out;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .global-notification::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+        }
+        
+        .global-notification.success::before {
+            background: #10b981;
+        }
+        
+        .global-notification.error::before {
+            background: #ef4444;
+        }
+        
+        .global-notification.warning::before {
+            background: #f59e0b;
+        }
+        
+        .global-notification.info::before {
+            background: #3b82f6;
+        }
+        
+        .global-notification.closing {
+            animation: notificationSlideOut 0.3s ease-in forwards;
+        }
+        
+        @keyframes notificationSlideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        @keyframes notificationSlideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+        }
+        
+        .notification-icon {
+            flex-shrink: 0;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            font-size: 14px;
+        }
+        
+        .global-notification.success .notification-icon {
+            background: #d1fae5;
+            color: #059669;
+        }
+        
+        .global-notification.error .notification-icon {
+            background: #fee2e2;
+            color: #dc2626;
+        }
+        
+        .global-notification.warning .notification-icon {
+            background: #fef3c7;
+            color: #d97706;
+        }
+        
+        .global-notification.info .notification-icon {
+            background: #dbeafe;
+            color: #2563eb;
+        }
+        
+        .notification-content {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .notification-title {
+            font-weight: 600;
+            font-size: 14px;
+            color: #1f2937;
+            margin-bottom: 4px;
+        }
+        
+        .notification-message {
+            font-size: 13px;
+            color: #6b7280;
+            line-height: 1.5;
+            word-wrap: break-word;
+        }
+        
+        .notification-close {
+            flex-shrink: 0;
+            width: 20px;
+            height: 20px;
+            border: none;
+            background: none;
+            cursor: pointer;
+            color: #9ca3af;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+        
+        .notification-close:hover {
+            background: #f3f4f6;
+            color: #4b5563;
+        }
+        
+        .notification-progress {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: #e5e7eb;
+            overflow: hidden;
+        }
+        
+        .notification-progress-bar {
+            height: 100%;
+            background: #3b82f6;
+            width: 100%;
+            animation: progressShrink 2s linear forwards;
+        }
+        
+        .global-notification.success .notification-progress-bar {
+            background: #10b981;
+        }
+        
+        .global-notification.error .notification-progress-bar {
+            background: #ef4444;
+        }
+        
+        .global-notification.warning .notification-progress-bar {
+            background: #f59e0b;
+        }
+        
+        @keyframes progressShrink {
+            from {
+                width: 100%;
+            }
+            to {
+                width: 0%;
+            }
+        }
+    </style>
 </head>
 <body>
+    <!-- 全局通知容器 -->
+    <div class="global-notification-container" id="globalNotificationContainer"></div>
+    
+    <!-- 移动端侧边栏遮罩层 -->
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+    
     <div class="wrapper">
+        <!-- 左侧导航栏 -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-logo">
+                    <img src="{{ url_for('static', filename='logo.jpg') }}" alt="LOGO">
+                    <div>
+                        <div class="sidebar-title">滨发协同系统</div>
+                        <div class="sidebar-subtitle">毛绒玩具全流程管理</div>
+                    </div>
+                </div>
+            </div>
+            
+            <nav class="sidebar-nav">
+                {% if nav_sections %}
+                    {% for section_key, section in nav_sections.items() %}
+                        <div class="nav-section">
+                            <div class="nav-section-title">{{ section.name }}</div>
+                            
+                            {% for item in section['items'] %}
+                                {% set show_item = false %}
+                                {% if session.get('is_super') %}
+                                    {% set show_item = true %}
+                                {% else %}
+                                    {% for perm_code in item.permission_codes %}
+                                        {% if perm_code in session.get('permissions', []) %}
+                                            {% set show_item = true %}
+                                        {% endif %}
+                                    {% endfor %}
+                                {% endif %}
+                                
+                                {% if show_item %}
+                                    {% if item.code == 'approval_manage' and not session.get('is_super') %}
+                                        {% if 'order_manage' in session.get('permissions', []) %}
+                                        <a href="{{ url_for('order.my_approvals') }}" class="nav-item {% if request.endpoint == 'order.my_approvals' %}active{% endif %}">
+                                            <i class="fas fa-file-alt"></i>
+                                            <span>我的审批</span>
+                                        </a>
+                                        {% endif %}
+                                    {% elif item.code == 'user_manage' and not session.get('is_super') %}
+                                    {% elif item.code == 'permission_manage' and not session.get('is_super') %}
+                                    {% else %}
+                                    <a href="{{ url_for(item.url) }}" class="nav-item {% if request.endpoint and item.url in request.endpoint %}active{% endif %}">
+                                        <i class="fas {{ item.icon }}"></i>
+                                        <span>{{ item.name.replace('(全部)', '') }}</span>
+                                    </a>
+                                    {% endif %}
+                                {% endif %}
+                            {% endfor %}
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="nav-section">
+                        <div class="nav-section-title">导航加载中...</div>
+                    </div>
+                {% endif %}
+            </nav>
+            
+            <div class="sidebar-footer">
+                <div style="text-align: center; padding: 16px; color: var(--plush-text-light); font-size: 11px; opacity: 0.7;">
+                    <i class="fas fa-heart" style="color: #EF9A9A; margin-right: 4px;"></i>
+                    滨发协同系统 v2.0
+                </div>
+            </div>
+        </aside>
+        
         <!-- 主内容区 -->
         <main class="main-content">
             <!-- 顶部栏 -->
             <header class="top-header">
-                <div class="user-info">
+                <div class="header-left">
+                    <button class="menu-toggle-btn" onclick="toggleSidebar()" title="切换菜单">
+                        <i class="fas fa-bars"></i>
+                    </button>
+                    {% if not is_home %}
+                    <a href="{{ url_for('main.index') }}" class="home-btn" title="返回首页">
+                        <i class="fas fa-home me-1"></i>返回首页
+                    </a>
+                    {% endif %}
+                </div>
+                
+                <div class="header-right">
+                    <!-- 时间显示 -->
+                    <span style="display: flex; align-items: center; gap: 6px; color: var(--plush-text-light); font-size: 13px; font-weight: 500;">
+                        <i class="fas fa-clock"></i>
+                        <span id="currentTime"></span>
+                    </span>
+                    
                     {% if session.get('user_id') %}
-                        <span><i class="fas fa-user-circle me-1"></i>欢迎，{{ session['username'] }}</span>
-                        <a href="{{ url_for('logout') }}" class="logout-btn"><i class="fas fa-sign-out-alt me-1"></i>退出登录</a>
+                    <!-- 用户信息卡片 -->
+                    <div class="user-info-header">
+                        <div class="user-avatar-header">{{ session['username'][0] | upper }}</div>
+                        <div class="user-info-details">
+                            <div class="user-name-header">{{ session['username'] }}</div>
+                            <div class="user-role-header">{% if session.get('is_super') %}超级管理员{% else %}普通用户{% endif %}</div>
+                        </div>
+                    </div>
+                    
+                    <!-- 退出登录按钮 -->
+                    <a href="{{ url_for('main.logout') }}" class="logout-btn-header" title="退出登录">
+                        <i class="fas fa-sign-out-alt"></i>
+                        <span>退出</span>
+                    </a>
+                    
                     {% else %}
-                        <a href="{{ url_for('login') }}" class="login-btn"><i class="fas fa-sign-in-alt me-1"></i>登录</a>
+                    <!-- 登录按钮 -->
+                    <a href="{{ url_for('main.login') }}" class="logout-btn-header" style="border-color: var(--plush-blue); background: linear-gradient(135deg, #E3F2FD 0%, #BBDEFB 100%); color: #1565C0;" title="登录系统">
+                        <i class="fas fa-sign-in-alt"></i>
+                        <span>登录</span>
+                    </a>
                     {% endif %}
                 </div>
             </header>
             <div class="content-container">
-                {% with messages = get_flashed_messages(with_categories=true) %}
-                    {% if messages %}
-                        {% for category, message in messages %}
-                            <div class="alert alert-{{ 'danger' if category == 'error' else 'success' }} alert-dismissible fade show" role="alert">
-                                {{ message }}
-                                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                            </div>
-                        {% endfor %}
-                    {% endif %}
-                {% endwith %}
+                <!-- Flash消息（隐藏用于转换为全局通知） -->
+                <div style="display: none;" id="flash-messages-container">
+                    {% with messages = get_flashed_messages(with_categories=true) %}
+                        {% if messages %}
+                            {% for category, message in messages %}
+                                <div class="flash-message" data-category="{{ category }}" data-message="{{ message }}"></div>
+                            {% endfor %}
+                        {% endif %}
+                    {% endwith %}
+                </div>
                 {% block content %}{% endblock %}
             </div>
         </main>
     </div>
     <script src="{{ url_for('static', filename='bootstrap.bundle.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='collapse-animated.js') }}"></script>
+    <script src="{{ url_for('static', filename='tab-system.js') }}"></script>
+    <!-- 全局工具函数 + CSRF Token配置 -->
     <script>
-    // 自动关闭提示框
-    window.addEventListener('load', function() {
-        const alerts = document.querySelectorAll('.alert');
-        alerts.forEach(alert => {
+        /**
+         * 全局HTML转义函数 - 防止XSS攻击
+         * 所有innerHTML赋值中使用用户数据时必须调用此函数
+         */
+        function escapeHtml(text) {
+            if (text === null || text === undefined) return '';
+            const div = document.createElement('div');
+            div.textContent = String(text);
+            return div.innerHTML;
+        }
+
+        // 为所有POST表单自动添加CSRF token
+        document.addEventListener('DOMContentLoaded', function() {
+            const forms = document.querySelectorAll('form[method="POST"]');
+            forms.forEach(function(form) {
+                const existingToken = form.querySelector('input[name="csrf_token"]');
+                if (!existingToken) {
+                    const csrfInput = document.createElement('input');
+                    csrfInput.type = 'hidden';
+                    csrfInput.name = 'csrf_token';
+                    csrfInput.value = '{{ csrf_token() }}';
+                    form.appendChild(csrfInput);
+                }
+            });
+        });
+
+        // 全局fetch拦截器：自动为非GET请求添加X-CSRFToken头
+        (function() {
+            const originalFetch = window.fetch;
+            window.fetch = function(url, options) {
+                options = options || {};
+                if (options.method && options.method.toUpperCase() !== 'GET') {
+                    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
+                    if (csrfToken) {
+                        options.headers = options.headers || {};
+                        if (!options.headers['X-CSRFToken']) {
+                            options.headers['X-CSRFToken'] = csrfToken;
+                        }
+                    }
+                }
+                return originalFetch(url, options);
+            };
+        })();
+    </script>
+    <script>
+    // 侧边栏切换功能
+    function toggleSidebar() {
+        const sidebar = document.getElementById('sidebar');
+        const overlay = document.getElementById('sidebarOverlay');
+        
+        sidebar.classList.toggle('active');
+        overlay.classList.toggle('active');
+        
+        if (sidebar.classList.contains('active')) {
+            document.body.style.overflow = 'hidden';
+        } else {
+            document.body.style.overflow = '';
+        }
+    }
+
+    // 更新当前时间
+    function updateTime() {
+        const now = new Date();
+        const timeStr = now.getFullYear() + '-' + 
+                       String(now.getMonth() + 1).padStart(2, '0') + '-' + 
+                       String(now.getDate()).padStart(2, '0') + ' ' + 
+                       String(now.getHours()).padStart(2, '0') + ':' + 
+                       String(now.getMinutes()).padStart(2, '0');
+        const timeElement = document.getElementById('currentTime');
+        if (timeElement) {
+            timeElement.textContent = timeStr;
+        }
+    }
+
+    // 点击导航项后关闭侧边栏（移动端）
+    document.addEventListener('DOMContentLoaded', function() {
+        // 初始化时间显示
+        updateTime();
+        setInterval(updateTime, 60000); // 每分钟更新一次
+        
+        const navItems = document.querySelectorAll('.nav-item');
+        navItems.forEach(item => {
+            item.addEventListener('click', function() {
+                if (window.innerWidth <= 992) {
+                    const sidebar = document.getElementById('sidebar');
+                    const overlay = document.getElementById('sidebarOverlay');
+                    
+                    if (sidebar && sidebar.classList.contains('active')) {
+                        setTimeout(() => {
+                            toggleSidebar();
+                        }, 150);
+                    }
+                }
+            });
+        });
+
+        window.addEventListener('resize', function() {
+            if (window.innerWidth > 992) {
+                const sidebar = document.getElementById('sidebar');
+                const overlay = document.getElementById('sidebarOverlay');
+                
+                if (sidebar) sidebar.classList.remove('active');
+                if (overlay) overlay.classList.remove('active');
+                document.body.style.overflow = '';
+            }
+        });
+    });
+
+    // 全局通知系统
+    const GlobalNotification = {
+        container: null,
+        notificationId: 0,
+        defaultDuration: 2000,
+        
+        icons: {
+            success: 'fa-check',
+            error: 'fa-times',
+            warning: 'fa-exclamation',
+            info: 'fa-info'
+        },
+        
+        titles: {
+            success: '成功',
+            error: '错误',
+            warning: '警告',
+            info: '提示'
+        },
+        
+        init: function() {
+            this.container = document.getElementById('globalNotificationContainer');
+            if (!this.container) {
+                this.container = document.createElement('div');
+                this.container.id = 'globalNotificationContainer';
+                this.container.className = 'global-notification-container';
+                document.body.appendChild(this.container);
+            }
+        },
+        
+        show: function(type, message, title, duration) {
+            if (!this.container) {
+                this.init();
+            }
+            
+            const id = ++this.notificationId;
+            const notificationDuration = duration || this.defaultDuration;
+            const notificationTitle = title || this.titles[type] || '提示';
+            
+            const notification = document.createElement('div');
+            notification.className = `global-notification ${type}`;
+            notification.id = `notification-${id}`;
+            
+            notification.innerHTML = `
+                <div class="notification-icon">
+                    <i class="fas ${this.icons[type]}"></i>
+                </div>
+                <div class="notification-content">
+                    <div class="notification-title">${this.escapeHtml(notificationTitle)}</div>
+                    <div class="notification-message">${this.escapeHtml(message)}</div>
+                </div>
+                <button class="notification-close" onclick="GlobalNotification.close(${id})">
+                    <i class="fas fa-times"></i>
+                </button>
+                <div class="notification-progress">
+                    <div class="notification-progress-bar"></div>
+                </div>
+            `;
+            
+            this.container.appendChild(notification);
+            
+            const timeoutId = setTimeout(() => {
+                this.close(id);
+            }, notificationDuration);
+            
+            notification.dataset.timeoutId = timeoutId;
+            
+            return id;
+        },
+        
+        close: function(id) {
+            const notification = document.getElementById(`notification-${id}`);
+            if (!notification) return;
+            
+            const timeoutId = notification.dataset.timeoutId;
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+            
+            notification.classList.add('closing');
+            
             setTimeout(() => {
-                alert.classList.remove('show');
-                setTimeout(() => {
-                    alert.remove();
-                }, 500);
-            }, 2000);
+                if (notification.parentNode) {
+                    notification.parentNode.removeChild(notification);
+                }
+            }, 300);
+        },
+        
+        success: function(message, title, duration) {
+            return this.show('success', message, title, duration);
+        },
+        
+        error: function(message, title, duration) {
+            return this.show('error', message, title, duration);
+        },
+        
+        warning: function(message, title, duration) {
+            return this.show('warning', message, title, duration);
+        },
+        
+        info: function(message, title, duration) {
+            return this.show('info', message, title, duration);
+        },
+        
+        escapeHtml: function(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    };
+    
+    // 初始化全局通知系统
+    document.addEventListener('DOMContentLoaded', function() {
+        GlobalNotification.init();
+        
+        // 将Flash消息转换为全局通知
+        const flashMessages = document.querySelectorAll('.flash-message');
+        flashMessages.forEach(flashMsg => {
+            const category = flashMsg.dataset.category;
+            const message = flashMsg.dataset.message;
+            
+            // 映射flash类别到通知类型
+            const typeMapping = {
+                'success': 'success',
+                'error': 'error',
+                'warning': 'warning',
+                'info': 'info',
+                'danger': 'error'
+            };
+            
+            const type = typeMapping[category] || 'info';
+            
+            // 根据消息内容生成合适的标题
+            let title = '提示';
+            if (message.includes('登录成功') || message.includes('登录成功')) {
+                title = '登录成功';
+            } else if (message.includes('退出登录') || message.includes('已退出')) {
+                title = '退出登录';
+            } else if (message.includes('成功')) {
+                title = '操作成功';
+            } else if (message.includes('错误') || message.includes('失败')) {
+                title = '错误提示';
+            } else if (message.includes('警告') || message.includes('注意')) {
+                title = '警告';
+            }
+            
+            // 延迟显示，确保DOM完全加载
+            setTimeout(() => {
+                GlobalNotification.show(type, message, title);
+            }, 100);
         });
     });
     </script>
+    {% block scripts %}{% endblock %}
 </body>
 </html>

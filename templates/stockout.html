@@ -1,108 +1,1771 @@
 {% extends 'base.html' %}
-
 {% block content %}
     <h2>出货管理</h2>
-    <div class="card mt-3">
-        <div class="card-header">
-            添加出货记录
+    
+    <div class="row">
+        <div class="col-lg-6">
+            <div class="card mt-3">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span>出货信息录入</span>
+                    <span class="badge bg-light text-dark" id="stagedCountBadge" style="display: none;">已暂存：0</span>
+                </div>
+                <div class="card-body">
+                    <form id="stockoutForm">
+                        <input type="hidden" id="stockout_no" name="stockout_no" value="{{ preview_stockout_no }}" readonly>
+                        <input type="hidden" id="product_id" name="product_id">
+                        
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="customer" class="form-label">客户名称</label>
+                                <select class="form-select" id="customer" name="customer" required>
+                                    <option value="">请选择客户</option>
+                                    {% for c in customers %}
+                                    <option value="{{ c.name }}">{{ c.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="stockout_date" class="form-label">出货时间</label>
+                                <input type="date" class="form-control" id="stockout_date" name="stockout_date" value="{{ current_date }}">
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3" style="position: relative;">
+                            <label for="product_search" class="form-label">产品名称</label>
+                            <input type="text" class="form-control" id="product_search" name="product_search" placeholder="输入产品名称搜索" autocomplete="off" required>
+                            <input type="hidden" id="product_id" name="product_id">
+                            <div id="product_autocomplete" class="autocomplete-dropdown" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: white; border: 2px solid var(--plush-blue-light); border-radius: var(--radius-input); box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 1000; max-height: 200px; overflow-y: auto;"></div>
+                        </div>
+                        
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="quantity" class="form-label">出货数量</label>
+                                <input type="number" class="form-control" id="quantity" name="quantity" value="1" min="1" required>
+                                <div id="shipmentInfo" class="mt-1"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="note" class="form-label">备注</label>
+                            <textarea class="form-control" id="note" name="note" rows="2" placeholder="例如：物流发货"></textarea>
+                        </div>
+                        
+                        <div class="d-flex gap-2">
+                            <button type="button" class="btn btn-secondary" id="addNewStockoutBtn" disabled>
+                                <i class="fas fa-plus-circle me-1"></i>新增出货
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
         </div>
-        <div class="card-body">
-            <form method="POST">
-                <div class="mb-3">
-                    <label for="stockout_no" class="form-label">出货编号</label>
-                    <input type="text" class="form-control" id="stockout_no" name="stockout_no" required placeholder="例如：STK-OUT-2025001">
+        
+        <div class="col-lg-6">
+            <div class="card mt-3">
+                <div class="card-header">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span>暂存出货列表</span>
+                        <span class="badge bg-light text-dark" id="totalStagedCount">共 0 个</span>
+                    </div>
                 </div>
-                <div class="mb-3">
-                    <label for="order_id" class="form-label">关联订单</label>
-                    <select class="form-select" id="order_id" name="order_id" required onchange="loadOrderStockins(this.value)">
-                        <option value="">请选择订单</option>
-                        {% for order in orders %}
-                            {% set shipped = order.stockouts | sum(attribute='quantity') %}
-                            <option value="{{ order.id }}">{{ order.order_no }} - {{ order.customer }} - {{ order.product.name }} - 订单数量：{{ order.quantity }} - 已出货：{{ shipped }} - 剩余：{{ order.quantity - shipped }}</option>
-                        {% endfor %}
-                    </select>
+                <div class="card-body">
+                    <div id="stagedStockoutsList" style="max-height: 400px; overflow-y: auto;">
+                        <div class="text-center text-muted py-4">
+                            <i class="fas fa-box-open fa-3x mb-3" style="opacity: 0.3;"></i>
+                            <p>暂无暂存出货</p>
+                        </div>
+                    </div>
                 </div>
-                <div class="mb-3">
-                    <label for="stockin_id" class="form-label">关联备货（可选）</label>
-                    <select class="form-select" id="stockin_id" name="stockin_id">
-                        <option value="">不关联备货（直接出库）</option>
-                    </select>
+            </div>
+            
+            <div class="card mt-3">
+                <div class="card-header d-flex justify-content-between align-items-center collapse-trigger" style="cursor: pointer;" id="batchUploadHeader">
+                    <h6 class="mb-0 fw-bold">批量导入出货</h6>
+                    <i class="fas fa-chevron-down collapse-arrow"></i>
                 </div>
-                <div class="mb-3">
-                    <label for="quantity" class="form-label">出货数量</label>
-                    <input type="number" class="form-control" id="quantity" name="quantity" value="1" min="1" required>
+                <div class="collapse-content" id="collapseBatchUpload">
+                    <div class="card-body">
+                        <div id="excel-upload-area" class="border border-dashed p-4 text-center rounded" 
+                             style="min-height: 120px; cursor: pointer; background: #fafafa; border-color: #dee2e6 !important;">
+                            <div class="d-flex flex-column align-items-center justify-content-center" style="min-height: 80px;">
+                                <i class="fas fa-file-excel fa-2x text-success mb-2" style="opacity: 0.8;"></i>
+                                <p class="text-muted mb-1 small">拖拽或点击选择 Excel 文件</p>
+                                <p class="text-muted mb-0" style="font-size: 11px; color: #adb5bd;">支持 .xlsx / .xls 格式</p>
+                            </div>
+                            <input type="file" id="excel-input" style="display: none;" accept=".xlsx,.xls">
+                            <div id="excel-preview" class="mt-3"></div>
+                            <div id="upload-status" class="mt-3"></div>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center mt-3">
+                            <button id="download-template" class="btn btn-outline-secondary btn-sm">
+                                <i class="fas fa-download me-2"></i>出货模板
+                            </button>
+                            <button id="batch-import" class="btn btn-success btn-sm" disabled>
+                                <i class="fas fa-file-import me-2"></i>确认导入
+                            </button>
+                        </div>
+                    </div>
                 </div>
-                <div class="mb-3">
-                    <label for="stockout_date" class="form-label">出货时间</label>
-                    <input type="date" class="form-control" id="stockout_date" name="stockout_date" value="{{ datetime.now().strftime('%Y-%m-%d') }}">
+            </div>
+
+            <div class="card mt-3">
+                <div class="card-header d-flex justify-content-between align-items-center collapse-trigger" style="cursor: pointer;" id="pdfUploadHeader">
+                    <h6 class="mb-0 fw-bold"><i class="fas fa-file-pdf me-2" style="color: #e74c3c;"></i>PDF/图片 出货单识别导入</h6>
+                    <i class="fas fa-chevron-down collapse-arrow"></i>
                 </div>
-                <div class="mb-3">
-                    <label for="note" class="form-label">备注</label>
-                    <textarea class="form-control" id="note" name="note" rows="2" placeholder="例如：物流发货"></textarea>
+                <div class="collapse-content" id="collapsePdfUpload">
+                    <div class="card-body">
+                        <div id="pdf-upload-area" class="border border-dashed p-4 text-center rounded"
+                             style="min-height: 120px; cursor: pointer; background: #fef9f9; border-color: #f5c6cb !important;">
+                            <div class="d-flex flex-column align-items-center justify-content-center" style="min-height: 80px;">
+                                <i class="fas fa-file-image fa-2x mb-2" style="opacity: 0.8; color: #e74c3c;"></i>
+                                <p class="text-muted mb-1 small">拖拽或点击选择出货单文件</p>
+                                <p class="text-muted mb-0" style="font-size: 11px; color: #adb5bd;">支持 PDF / PNG / JPG / BMP / TIFF，可多选</p>
+                            </div>
+                            <input type="file" id="pdf-input" style="display: none;" accept=".pdf,.png,.jpg,.jpeg,.bmp,.tiff,.tif,.webp" multiple>
+                            <div id="pdf-file-list" class="mt-3"></div>
+                            <div id="pdf-upload-status" class="mt-3"></div>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center mt-3">
+                            <button id="pdf-preview-btn" class="btn btn-outline-info btn-sm" disabled>
+                                <i class="fas fa-eye me-2"></i>预览识别
+                            </button>
+                            <button id="pdf-import-btn" class="btn btn-danger btn-sm" disabled>
+                                <i class="fas fa-magic me-2"></i>OCR 识别导入
+                            </button>
+                        </div>
+                        <div id="pdf-progress-area" class="mt-3" style="display: none;">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <small id="pdf-progress-msg" class="text-muted">准备中...</small>
+                                <small id="pdf-progress-pct" class="fw-bold" style="color: #e74c3c;">0%</small>
+                            </div>
+                            <div class="progress" style="height: 8px; border-radius: 4px; background: #fde8e8;">
+                                <div id="pdf-progress-bar" class="progress-bar" role="progressbar"
+                                     style="width: 0%; background: linear-gradient(90deg, #e74c3c, #c0392b); transition: width 0.2s ease-out;">
+                                </div>
+                            </div>
+                        </div>
+                        <div id="pdf-preview-result" class="mt-3" style="display: none;"></div>
+                    </div>
                 </div>
-                <button type="submit" class="btn btn-primary">添加出货</button>
-            </form>
+            </div>
         </div>
     </div>
+
+    <div class="card mt-4">
+        <div class="card-body text-center py-4">
+            <button type="button" class="btn btn-primary btn-lg" id="submitAllStockoutsBtn" disabled style="min-width: 200px;">
+                <i class="fas fa-paper-plane me-2"></i>
+                <span id="submitBtnText">添加出货</span>
+                <span id="submitBtnSpinner" class="spinner-border spinner-border-sm" style="display: none;"></span>
+            </button>
+        </div>
+    </div>
+    
     <div class="card mt-4">
         <div class="card-header">
             出货记录列表
         </div>
         <div class="card-body">
-            <table class="table table-striped">
-                <thead>
-                    <tr>
-                        <th>出货编号</th>
-                        <th>关联订单</th>
-                        <th>产品</th>
-                        <th>出货数量</th>
-                        <th>关联备货</th>
-                        <th>出货时间</th>
-                        <th>备注</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for stockout in stockouts %}
-                        <tr>
-                            <td>{{ stockout.stockout_no }}</td>
-                            <td>{{ stockout.order.order_no }}</td>
-                            <td>{{ stockout.product.name }} ({{ stockout.product.code }})</td>
-                            <td>{{ stockout.quantity }}</td>
-                            <td>{{ stockout.stockin.stockin_no if stockout.stockin else '无' }}</td>
-                            <td>{{ stockout.stockout_date.strftime('%Y-%m-%d') }}</td>
-                            <td>{{ stockout.note or '-' }}</td>
-                        </tr>
-                    {% else %}
-                        <tr>
-                            <td colspan="7" class="text-center">暂无出货记录，请先添加</td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+            <div id="stockoutListGrouped">
+                <!-- 出货列表将通过JavaScript动态生成 -->
+            </div>
         </div>
     </div>
-    <script>
-        // 加载订单对应的备货记录
-        function loadOrderStockins(orderId) {
-            const stockinSelect = document.getElementById('stockin_id');
-            // 清空现有选项
-            stockinSelect.innerHTML = '<option value="">不关联备货（直接出库）</option>';
-            if (!orderId) return;
-            // 获取订单对应的备货记录
-            const stockins = {{ order_stockins | tojson }};
-            if (stockins[orderId]) {
-                stockins[orderId].forEach(stockin => {
-                    // 计算该备货已出货的数量
-                    const shipped = stockin.stockouts.reduce((sum, s) => sum + s.quantity, 0);
-                    const remaining = stockin.quantity - shipped;
-                    if (remaining > 0) {
-                        const option = document.createElement('option');
-                        option.value = stockin.id;
-                        option.textContent = `${stockin.stockin_no} - 备货数量：${stockin.quantity} - 已出货：${shipped} - 剩余：${remaining}`;
-                        stockinSelect.appendChild(option);
-                    }
+    
+    <div class="modal fade" id="editStagedStockoutModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">编辑暂存出货</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="editStagedStockoutContent"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" id="saveEditStagedStockoutBtn">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block scripts %}
+<style>
+/* 展开按钮图标旋转动画 */
+.toggle-icon {
+    transition: transform 0.3s ease;
+}
+
+/* 出货列表展开/收起 - 直接显示隐藏 */
+.stockout-collapse-content {
+    display: none;
+}
+
+.stockout-collapse-content.expanded {
+    display: block;
+}
+
+.stockout-date-group .card {
+    border: 1px solid #e9ecef;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    transition: all 0.2s ease;
+}
+
+.stockout-date-group .card:hover {
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+}
+
+.stockout-date-group .card-header {
+    border-radius: 0 !important;
+    padding: 12px 16px;
+    transition: all 0.2s ease;
+    font-weight: 500;
+    position: relative;
+    z-index: 10;
+}
+
+.stockout-date-group .card-header:hover {
+    background-color: #f8f9fa !important;
+}
+
+.stockout-date-group .table {
+    margin-bottom: 0;
+}
+
+.stockout-date-group .table th {
+    background-color: #f8f9fa;
+    font-weight: 600;
+    border-top: none;
+    font-size: 0.9em;
+}
+
+.stockout-date-group .table td {
+    vertical-align: middle;
+}
+
+.stockout-date-group .badge {
+    font-size: 0.8em;
+    padding: 4px 8px;
+}
+
+.stockout-date-group .btn-sm {
+    padding: 4px 8px;
+    font-size: 0.85em;
+}
+
+.stockout-date-group img {
+    transition: transform 0.2s ease;
+}
+
+.stockout-date-group img:hover {
+    transform: scale(1.1);
+}
+
+.autocomplete-dropdown {
+    background: white;
+    border: 2px solid var(--plush-blue-light);
+    border-radius: var(--radius-input);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    z-index: 1000;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.autocomplete-item {
+    padding: 10px 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.autocomplete-item:last-child {
+    border-bottom: none;
+}
+
+.autocomplete-item:hover {
+    background-color: var(--plush-blue-light);
+    transform: translateX(5px);
+}
+</style>
+<script>
+let stagedStockouts = [];
+let productsCache = [];
+let productDialogTimeout = null;
+let editingStagedIndex = -1;
+let serverStagingMode = false;
+let stagingSessionId = '';
+
+function getStagingSessionId() {
+    if (!stagingSessionId) {
+        const stockoutNo = document.getElementById('stockout_no');
+        stagingSessionId = (stockoutNo && stockoutNo.value)
+            ? stockoutNo.value
+            : 'stg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    }
+    return stagingSessionId;
+}
+
+async function loadStagingStockoutsFromServer() {
+    try {
+        const sid = getStagingSessionId();
+        const response = await fetch(`/api/v1/staging-stockouts?session_id=${encodeURIComponent(sid)}`);
+        const result = await response.json();
+        
+        if (result.success && result.data && result.data.length > 0) {
+            serverStagingMode = true;
+            stagedStockouts = result.data.map(item => ({
+                id: item.id,
+                stockoutNo: '',
+                stockoutDate: item.stockout_date,
+                customer: item.customer,
+                productId: item.product_id,
+                productName: item.product_name,
+                quantity: item.quantity,
+                note: item.note,
+                isValidated: item.is_validated,
+                validationError: item.validation_error,
+                stockCheckPassed: item.stock_check_passed,
+                stockCheckMessage: item.stock_check_message,
+                status: item.status
+            }));
+            updateStagedStockoutsList();
+        }
+    } catch (error) {
+        console.error('加载暂存出货失败:', error);
+    }
+}
+
+function searchProducts(query) {
+    console.log('searchProducts called with:', query);
+    const autocomplete = document.getElementById('product_autocomplete');
+    if (!query) {
+        console.log('Query is empty, hiding autocomplete');
+        autocomplete.style.display = 'none';
+        return;
+    }
+    console.log('Fetching products for query:', query);
+    fetch(`/api/v1/aux/product-search?q=${encodeURIComponent(query)}`)
+        .then(response => {
+            console.log('Response status:', response.status);
+            return response.json();
+        })
+        .then(data => {
+            console.log('Received data:', data);
+            autocomplete.innerHTML = '';
+            if (data.length === 0) {
+                console.log('No products found, hiding autocomplete');
+                autocomplete.style.display = 'none';
+                return;
+            }
+            data.forEach(product => {
+                const item = document.createElement('div');
+                item.className = 'autocomplete-item';
+                item.textContent = product.name;
+                item.setAttribute('data-id', product.id);
+                item.setAttribute('data-barcode', product.barcode || '');
+                item.setAttribute('data-stock', product.current_stock);
+                item.addEventListener('click', function() {
+                    selectProduct(product.name, product.id, product.barcode, product.current_stock);
                 });
+                autocomplete.appendChild(item);
+            });
+            console.log('Showing autocomplete with', data.length, 'items');
+            autocomplete.style.display = 'block';
+        })
+        .catch(error => {
+            console.error('Error fetching products:', error);
+        });
+}
+
+function selectProduct(name, id, barcode, stock) {
+    const searchInput = document.getElementById('product_search');
+    searchInput.value = name;
+    document.getElementById('product_id').value = id;
+    document.getElementById('product_autocomplete').style.display = 'none';
+    fetchAvailableShipment();
+    updateAddNewStockoutButtonState();
+}
+
+document.getElementById('product_search').addEventListener('input', function(e) {
+    console.log('Input event fired, value:', e.target.value);
+    searchProducts(e.target.value);
+    updateAddNewStockoutButtonState();
+});
+
+document.getElementById('product_search').addEventListener('blur', function(e) {
+    console.log('Blur event fired');
+    setTimeout(function() {
+        const autocomplete = document.getElementById('product_autocomplete');
+        console.log('Hiding autocomplete on blur');
+        autocomplete.style.display = 'none';
+    }, 200);
+});
+
+document.getElementById('product_search').addEventListener('focus', function(e) {
+    console.log('Focus event fired, value:', e.target.value);
+    if (e.target.value.trim()) {
+        searchProducts(e.target.value);
+    }
+});
+
+document.getElementById('customer').addEventListener('change', function() {
+    updateAddNewStockoutButtonState();
+    fetchAvailableShipment();
+});
+document.getElementById('quantity').addEventListener('input', updateAddNewStockoutButtonState);
+document.getElementById('stockout_date').addEventListener('change', updateAddNewStockoutButtonState);
+
+let currentAvailableShipment = 0;
+
+async function fetchAvailableShipment() {
+    const customer = document.getElementById('customer').value;
+    const productId = document.getElementById('product_id').value;
+    const quantityInput = document.getElementById('quantity');
+    const infoElement = document.getElementById('shipmentInfo');
+    
+    if (!customer || !productId) {
+        currentAvailableShipment = 0;
+        if (infoElement) {
+            infoElement.innerHTML = '';
+        }
+        quantityInput.max = '';
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/v1/aux/available-shipment?product_id=${productId}&customer=${encodeURIComponent(customer)}`);
+        if (!response.ok) throw new Error('获取可出货量失败');
+        
+        const data = await response.json();
+        currentAvailableShipment = data.available_quantity;
+        
+        if (infoElement) {
+            infoElement.innerHTML = `
+                <small class="text-muted">
+                    <i class="fas fa-info-circle me-1"></i>
+                    订单量: ${data.order_quantity} | 已出货: ${data.shipped_quantity} | 可出货: <strong class="text-primary">${data.available_quantity}</strong>
+                </small>
+            `;
+        }
+        
+        quantityInput.max = data.available_quantity;
+        
+        const currentQuantity = parseInt(quantityInput.value) || 0;
+        if (currentQuantity > data.available_quantity && data.available_quantity > 0) {
+            quantityInput.value = data.available_quantity;
+        }
+    } catch (error) {
+        console.error('获取可出货量失败:', error);
+        currentAvailableShipment = 0;
+    }
+}
+
+function updateAddNewStockoutButtonState() {
+    const customer = document.getElementById('customer').value;
+    const productId = document.getElementById('product_id').value;
+    const quantity = parseInt(document.getElementById('quantity').value) || 0;
+    const stockoutDate = document.getElementById('stockout_date').value;
+    const addBtn = document.getElementById('addNewStockoutBtn');
+    
+    if (customer && productId && quantity > 0 && stockoutDate) {
+        addBtn.disabled = false;
+        addBtn.classList.add('btn-primary');
+        addBtn.classList.remove('btn-secondary');
+    } else {
+        addBtn.disabled = true;
+        addBtn.classList.remove('btn-primary');
+        addBtn.classList.add('btn-secondary');
+    }
+}
+
+document.getElementById('addNewStockoutBtn').addEventListener('click', async function() {
+    const stockoutNo = document.getElementById('stockout_no').value;
+    const stockoutDate = document.getElementById('stockout_date').value;
+    const customer = document.getElementById('customer').value;
+    const productId = document.getElementById('product_id').value;
+    const productName = document.getElementById('product_search').value;
+    const quantity = parseInt(document.getElementById('quantity').value) || 0;
+    const note = document.getElementById('note').value;
+    
+    if (customer && productId) {
+        try {
+            const response = await fetch(`/api/v1/aux/available-shipment?product_id=${productId}&customer=${encodeURIComponent(customer)}`);
+            if (!response.ok) throw new Error('获取可出货量失败');
+            
+            const data = await response.json();
+            if (quantity > data.available_quantity) {
+                alert(`出货数量超过可出货量！\n订单量: ${data.order_quantity}\n已出货: ${data.shipped_quantity}\n可出货: ${data.available_quantity}\n请调整出货数量。`);
+                return;
+            }
+        } catch (error) {
+            console.error('验证可出货量失败:', error);
+        }
+    }
+    
+    const stockout = {
+        stockoutNo,
+        stockoutDate,
+        customer,
+        productId,
+        productName,
+        quantity,
+        note,
+        id: Date.now()
+    };
+    
+    stagedStockouts.push(stockout);
+    updateStagedStockoutsList();
+    clearForm();
+});
+
+function updateStagedStockoutsList() {
+    const listContainer = document.getElementById('stagedStockoutsList');
+    const countBadge = document.getElementById('stagedCountBadge');
+    const totalCount = document.getElementById('totalStagedCount');
+    const submitBtn = document.getElementById('submitAllStockoutsBtn');
+    
+    if (stagedStockouts.length === 0) {
+        listContainer.innerHTML = `
+            <div class="text-center text-muted py-4">
+                <i class="fas fa-box-open fa-3x mb-3" style="opacity: 0.3;"></i>
+                <p>暂无暂存出货</p>
+            </div>
+        `;
+        countBadge.style.display = 'none';
+        totalCount.textContent = '共 0 个，合计 0';
+        submitBtn.disabled = true;
+    } else {
+        countBadge.style.display = 'inline-block';
+        countBadge.textContent = `已暂存：${stagedStockouts.length}`;
+        
+        const totalQuantity = stagedStockouts.reduce((sum, s) => sum + (s.quantity || 0), 0);
+        totalCount.textContent = `共 ${stagedStockouts.length} 个，合计 ${totalQuantity}`;
+        
+        const validCount = stagedStockouts.filter(s => s.isValidated !== false && s.stockCheckPassed !== false).length;
+        submitBtn.disabled = validCount === 0;
+        
+        listContainer.innerHTML = stagedStockouts.map((stockout, index) => {
+            const hasError = stockout.isValidated === false || stockout.stockCheckPassed === false;
+            const borderColor = hasError ? '#dc3545' : 'var(--plush-blue-light)';
+            
+            let statusBadge = '';
+            if (stockout.isValidated === false) {
+                statusBadge = '<span class="badge bg-danger ms-1">验证失败</span>';
+            } else if (stockout.stockCheckPassed === false) {
+                statusBadge = '<span class="badge bg-warning text-dark ms-1">库存不足</span>';
+            } else {
+                statusBadge = '<span class="badge bg-success ms-1">已验证</span>';
+            }
+            
+            return `
+            <div class="card mb-2" style="border: 2px solid ${borderColor};">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div class="d-flex align-items-center gap-3 flex-wrap">
+                            <span class="text-muted small">
+                                <i class="fas fa-user me-1"></i>${stockout.customer || '无客户'}
+                            </span>
+                            <span class="text-muted small">
+                                <i class="fas fa-calendar-alt me-1"></i>${stockout.stockoutDate}
+                            </span>
+                            <span>
+                                <i class="fas fa-shipping-fast text-primary me-1"></i>${stockout.productName}
+                                ${statusBadge}
+                            </span>
+                            <span class="badge bg-light text-dark">数量：${stockout.quantity}</span>
+                            ${stockout.note ? `<span class="badge bg-light text-dark">备注：${stockout.note}</span>` : ''}
+                            ${stockout.validationError ? `<span class="small text-danger"><i class="fas fa-exclamation-triangle me-1"></i>${stockout.validationError}</span>` : ''}
+                            ${stockout.stockCheckMessage && !stockout.stockCheckPassed ? `<span class="small text-warning"><i class="fas fa-exclamation-circle me-1"></i>${stockout.stockCheckMessage}</span>` : ''}
+                        </div>
+                        <div class="d-flex gap-1 ms-2">
+                            <button class="btn btn-sm btn-outline-warning" onclick="editStagedStockout(${index})">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="deleteStagedStockout(${index})">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `}).join('');
+    }
+}
+
+function viewStagedStockout(index) {
+    const stockout = stagedStockouts[index];
+}
+
+function editStagedStockout(index) {
+    editingStagedIndex = index;
+    const stockout = stagedStockouts[index];
+    
+    const content = `
+        <div class="mb-3">
+            <label class="form-label">客户名称</label>
+            <select class="form-select" id="editCustomer">
+                {% for c in customers %}
+                <option value="{{ c.name }}" ${stockout.customer === '{{ c.name }}' ? 'selected' : ''}>{{ c.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">出货时间</label>
+            <input type="date" class="form-control" id="editStockoutDate" value="${stockout.stockoutDate}">
+        </div>
+        <div class="mb-3">
+            <label class="form-label">产品名称</label>
+            <input type="text" class="form-control" id="editProductName" value="${stockout.productName}" readonly>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">出货数量</label>
+            <input type="number" class="form-control" id="editQuantity" value="${stockout.quantity}" min="1">
+        </div>
+        <div class="mb-3">
+            <label class="form-label">备注</label>
+            <textarea class="form-control" id="editNote" rows="2">${stockout.note || ''}</textarea>
+        </div>
+    `;
+    
+    document.getElementById('editStagedStockoutContent').innerHTML = content;
+    const modal = new bootstrap.Modal(document.getElementById('editStagedStockoutModal'));
+    modal.show();
+}
+
+document.getElementById('saveEditStagedStockoutBtn').addEventListener('click', function() {
+    if (editingStagedIndex !== -1) {
+        stagedStockouts[editingStagedIndex].customer = document.getElementById('editCustomer').value;
+        stagedStockouts[editingStagedIndex].stockoutDate = document.getElementById('editStockoutDate').value;
+        stagedStockouts[editingStagedIndex].quantity = parseInt(document.getElementById('editQuantity').value) || 1;
+        stagedStockouts[editingStagedIndex].note = document.getElementById('editNote').value;
+        
+        updateStagedStockoutsList();
+        bootstrap.Modal.getInstance(document.getElementById('editStagedStockoutModal')).hide();
+        editingStagedIndex = -1;
+    }
+});
+
+async function deleteStagedStockout(index) {
+    if (!confirm('确定要删除这个暂存出货吗？')) {
+        return;
+    }
+    
+    const stockout = stagedStockouts[index];
+    
+    if (serverStagingMode && stockout.id) {
+        try {
+            const response = await fetch(`/api/v1/staging-stockouts/${stockout.id}`, {
+                method: 'DELETE'
+            });
+            const result = await response.json();
+            
+            if (result.success) {
+                stagedStockouts.splice(index, 1);
+                updateStagedStockoutsList();
+            } else {
+                alert('删除失败: ' + (result.message || '未知错误'));
+            }
+        } catch (error) {
+            console.error('删除失败:', error);
+            alert('删除失败: ' + error.message);
+        }
+    } else {
+        stagedStockouts.splice(index, 1);
+        updateStagedStockoutsList();
+    }
+}
+
+function clearForm() {
+    document.getElementById('customer').value = '';
+    document.getElementById('stockout_date').value = '{{ current_date }}';
+    document.getElementById('product_search').value = '';
+    document.getElementById('product_id').value = '';
+    document.getElementById('quantity').value = '1';
+    document.getElementById('note').value = '';
+    
+    const infoElement = document.getElementById('shipmentInfo');
+    if (infoElement) {
+        infoElement.innerHTML = '';
+    }
+    currentAvailableShipment = 0;
+    
+    updateAddNewStockoutButtonState();
+}
+
+document.getElementById('submitAllStockoutsBtn').addEventListener('click', async function() {
+    if (stagedStockouts.length === 0) {
+        return;
+    }
+    
+    const validStockouts = stagedStockouts.filter(s => s.isValidated !== false && s.stockCheckPassed !== false);
+    if (validStockouts.length === 0) {
+        alert('没有可提交的有效出货，请检查验证状态和库存状态');
+        return;
+    }
+    
+    const btn = this;
+    const btnText = document.getElementById('submitBtnText');
+    const btnSpinner = document.getElementById('submitBtnSpinner');
+    
+    btn.disabled = true;
+    btnText.textContent = '提交中...';
+    btnSpinner.style.display = 'inline-block';
+    
+    try {
+        if (serverStagingMode) {
+            const response = await fetch(`/api/v1/staging-stockouts/confirm?session_id=${encodeURIComponent(getStagingSessionId())}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            const result = await response.json();
+            btnSpinner.style.display = 'none';
+            
+            if (result.success) {
+                btnText.textContent = '提交成功!';
+                
+                if (result.errors && result.errors.length > 0) {
+                    console.warn('部分出货确认失败:', result.errors);
+                }
+                
+                stagedStockouts = [];
+                serverStagingMode = false;
+                updateStagedStockoutsList();
+                
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1500);
+            } else {
+                alert('提交失败: ' + (result.message || '未知错误'));
+                btn.disabled = false;
+                btnText.textContent = '添加出货';
+            }
+        } else {
+            btnText.textContent = '验证出货量...';
+            
+            const stockoutsWithCustomer = stagedStockouts.filter(s => s.customer);
+            if (stockoutsWithCustomer.length > 0) {
+                const uniqueKeys = {};
+                stockoutsWithCustomer.forEach(stockout => {
+                    const key = `${stockout.productId}-${stockout.customer}`;
+                    if (!uniqueKeys[key]) {
+                        uniqueKeys[key] = { productId: stockout.productId, customer: stockout.customer, stockouts: [] };
+                    }
+                    uniqueKeys[key].stockouts.push(stockout);
+                });
+
+                for (const key in uniqueKeys) {
+                    const { productId, customer, stockouts } = uniqueKeys[key];
+                    try {
+                        const response = await fetch(`/api/v1/aux/available-shipment?product_id=${productId}&customer=${encodeURIComponent(customer)}`);
+                        if (!response.ok) throw new Error('API request failed');
+
+                        const data = await response.json();
+                        const totalQuantity = stockouts.reduce((sum, s) => sum + s.quantity, 0);
+                        
+                        if (totalQuantity > data.available_quantity) {
+                            alert(`出货验证失败！\n客户: ${customer}\n产品ID: ${productId}\n订单量: ${data.order_quantity}\n已出货: ${data.shipped_quantity}\n可出货: ${data.available_quantity}\n本次出货总量: ${totalQuantity}\n\n请调整出货数量。`);
+                            btn.disabled = false;
+                            btnText.textContent = '添加出货';
+                            btnSpinner.style.display = 'none';
+                            return;
+                        }
+                    } catch (error) {
+                        console.error('验证可出货量失败:', error);
+                    }
+                }
+            }
+
+            btnText.textContent = '提交中...';
+            
+            const stockoutsForApi = stagedStockouts.map(stockout => ({
+                product_id: stockout.productId,
+                customer: stockout.customer,
+                quantity: stockout.quantity,
+                stockout_date: stockout.stockoutDate,
+                note: stockout.note
+            }));
+            
+            console.log('Sending request to /api/batch-submit-stockouts');
+            console.log('Stockouts for API:', stockoutsForApi);
+            
+            const response = await fetch('/api/batch-submit-stockouts', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    stockouts: stockoutsForApi
+                })
+            });
+            
+            const result = await response.json();
+            btnSpinner.style.display = 'none';
+            
+            if (result.success) {
+                btnText.textContent = '提交成功!';
+                
+                if (result.results) {
+                    const failedStockouts = result.results.filter(r => !r.success);
+                    if (failedStockouts.length > 0) {
+                        console.error('失败的出货:', failedStockouts);
+                        alert(`${failedStockouts.length} 个出货提交失败，请查看控制台了解详情`);
+                    }
+                }
+                
+                stagedStockouts = [];
+                updateStagedStockoutsList();
+                
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1500);
+            } else {
+                alert('提交失败: ' + (result.error || '未知错误'));
+                btn.disabled = false;
+                btnText.textContent = '添加出货';
             }
         }
-    </script>
+    } catch (error) {
+        console.error('批量提交失败:', error);
+        btnSpinner.style.display = 'none';
+        btn.disabled = false;
+        btnText.textContent = '添加出货';
+    }
+});
+
+document.addEventListener('DOMContentLoaded', async function() {
+    if (performance.navigation.type === 1) {
+        try {
+            await fetch(`/api/v1/staging-stockouts/clear?session_id=${encodeURIComponent(getStagingSessionId())}`, { method: 'DELETE' });
+        } catch (e) {
+            console.log('Clear staging on refresh failed:', e);
+        }
+    }
+    updateAddNewStockoutButtonState();
+    initBatchUpload();
+    initPdfUpload();
+    renderGroupedStockoutList();
+    loadStagingStockoutsFromServer();
+});
+
+window.addEventListener('beforeunload', function() {
+    if (stagedStockouts.length > 0 || serverStagingMode) {
+        fetch(`/api/v1/staging-stockouts/clear?session_id=${encodeURIComponent(getStagingSessionId())}`, { method: 'DELETE', keepalive: true });
+    }
+    stagedStockouts = [];
+    serverStagingMode = false;
+});
+
+// 出货列表分组和折叠功能 - 全局函数
+window.toggleStockoutGroup = function(contentId) {
+    const content = document.getElementById(contentId);
+    if (!content) return;
+    
+    const isExpanded = content.classList.contains('expanded');
+    const icon = document.querySelector(`[data-toggle-icon-for="${contentId}"]`);
+    
+    if (isExpanded) {
+        content.classList.remove('expanded');
+        if (icon) icon.style.transform = 'rotate(0deg)';
+    } else {
+        content.classList.add('expanded');
+        if (icon) icon.style.transform = 'rotate(180deg)';
+    }
+};
+
+// 全局出货数据存储
+let globalStockoutsData = [];
+
+function renderGroupedStockoutList() {
+    const stockoutsData = {{ stockouts_json | safe }};
+    // 存储到全局变量，供删除后局部更新使用
+    globalStockoutsData = stockoutsData;
+    const container = document.getElementById('stockoutListGrouped');
+    
+    if (!stockoutsData || stockoutsData.length === 0) {
+        container.innerHTML = `
+            <div class="text-center text-muted py-4">
+                <i class="fas fa-box-open fa-3x mb-3" style="opacity: 0.3;"></i>
+                <p>暂无出货记录，请先添加</p>
+            </div>
+        `;
+        return;
+    }
+    
+    // 按出货日期分组
+    const groupedStockouts = {};
+    stockoutsData.forEach(stockout => {
+        const dateKey = stockout.stockout_date || '未知日期';
+        
+        if (!groupedStockouts[dateKey]) {
+            groupedStockouts[dateKey] = [];
+        }
+        groupedStockouts[dateKey].push(stockout);
+    });
+    
+    // 按日期降序排序
+    const sortedDates = Object.keys(groupedStockouts).sort((a, b) => b.localeCompare(a));
+    
+    // 生成HTML
+    let html = '';
+    sortedDates.forEach((date, index) => {
+        const stockouts = groupedStockouts[date];
+        
+        // 对同一天内的数据按(客户+产品ID)进行汇总
+        const summaryMap = {};
+        stockouts.forEach(stockout => {
+            const key = `${stockout.customer || '未知客户'}|||${stockout.product.id}`;
+            
+            if (!summaryMap[key]) {
+                summaryMap[key] = {
+                    customer: stockout.customer || '未知客户',
+                    product: stockout.product,
+                    quantity: 0,
+                    notes: [],
+                    ids: []
+                };
+            }
+            
+            summaryMap[key].quantity += stockout.quantity;
+            if (stockout.note && !summaryMap[key].notes.includes(stockout.note)) {
+                summaryMap[key].notes.push(stockout.note);
+            }
+            summaryMap[key].ids.push(stockout.id);
+        });
+        
+        const summaryList = Object.values(summaryMap);
+        const totalCount = summaryList.reduce((sum, item) => sum + item.quantity, 0);
+        const totalRecords = stockouts.length;
+        const contentId = `content-stockout-${date.replace(/-/g, '')}`;
+        
+        html += `
+            <div class="stockout-date-group mb-3">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center" 
+                         style="background: white; border-bottom: 2px solid #e9ecef; cursor: pointer;"
+                         onclick="window.toggleStockoutGroup('${contentId}')">
+                        <div class="d-flex align-items-center flex-grow-1">
+                            <i class="fas fa-calendar-alt text-primary me-2"></i>
+                            <strong>${date}</strong>
+                            <span class="badge ms-2">${totalRecords} 条记录</span>
+                            <span class="badge ms-1">共 ${totalCount} 件</span>
+                        </div>
+                        <div class="ms-2">
+                            <i class="fas fa-chevron-down text-muted toggle-icon" data-toggle-icon-for="${contentId}"></i>
+                        </div>
+                    </div>
+                    <div class="stockout-collapse-content" id="${contentId}">
+                        <div class="card-body p-0">
+                            <table class="table table-hover mb-0">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 12%;">客户</th>
+                                        <th style="width: 10%;">产品图片</th>
+                                        <th style="width: 22%;">产品名称</th>
+                                        <th style="width: 13%;">69 码</th>
+                                        <th style="width: 10%;">数量</th>
+                                        <th style="width: 10%;">备注</th>
+                                        <th style="width: 13%;">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${summaryList.map(item => {
+                                        const isSummary = item.ids.length > 1;
+                                        const notesDisplay = item.notes.length > 0 ? item.notes.join('; ') : '-';
+                                        return `
+                                        <tr>
+                                            <td>${item.customer}</td>
+                                            <td>
+                                                ${item.product.image
+                                                    ? `<img src="${item.product.image}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 8px;">`
+                                                    : '-'}
+                                            </td>
+                                            <td>${item.product.name}</td>
+                                            <td>${item.product.barcode || '-'}</td>
+                                            <td><strong>${item.quantity}</strong></td>
+                                            <td><small>${notesDisplay}</small></td>
+                                            <td>
+                                                ${isSummary ? `
+                                                    <a href="/stock/out/edit/${item.ids[0]}" class="btn btn-sm btn-warning">
+                                                        <i class="fas fa-edit"></i> 编辑
+                                                    </a>
+                                                    <button class="btn btn-sm btn-danger" onclick="deleteStockout(${item.ids[0]})">
+                                                        <i class="fas fa-trash"></i> 删除
+                                                    </button>
+                                                ` : `
+                                                    <a href="/stock/out/edit/${item.ids[0]}" class="btn btn-sm btn-warning">
+                                                        <i class="fas fa-edit"></i> 编辑
+                                                    </a>
+                                                    <button class="btn btn-sm btn-danger" onclick="deleteStockout(${item.ids[0]})">
+                                                        <i class="fas fa-trash"></i> 删除
+                                                    </button>
+                                                `}
+                                            </td>
+                                        </tr>
+                                    `}).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    
+    container.innerHTML = html;
+}
+
+async function deleteStockout(id) {
+    if (!confirm('确定要删除该出货记录吗？')) return;
+
+    try {
+        const response = await fetch(`/api/v1/aux/stockout/${id}`, { method: 'DELETE' });
+        const result = await response.json();
+
+        if (result.success) {
+            // 从全局出货数据中移除被删除的记录
+            globalStockoutsData = globalStockoutsData.filter(stockout => stockout.id !== id);
+            
+            // 重新渲染出货列表，实现无刷新更新
+            renderGroupedStockoutListLocal();
+            
+            // 显示成功提示
+            showToast('删除成功！', 'success');
+        } else {
+            alert(result.error || '删除失败！');
+        }
+    } catch (error) {
+        alert('删除失败：' + error.message);
+    }
+}
+
+// 本地渲染出货列表函数（不重新加载页面）
+function renderGroupedStockoutListLocal() {
+    const stockoutsData = globalStockoutsData;
+    const container = document.getElementById('stockoutListGrouped');
+    
+    if (!stockoutsData || stockoutsData.length === 0) {
+        container.innerHTML = `
+            <div class="text-center text-muted py-4">
+                <i class="fas fa-box-open fa-3x mb-3" style="opacity: 0.3;"></i>
+                <p>暂无出货记录，请先添加</p>
+            </div>
+        `;
+        return;
+    }
+    
+    // 按出货日期分组
+    const groupedStockouts = {};
+    stockoutsData.forEach(stockout => {
+        const dateKey = stockout.stockout_date || '未知日期';
+        
+        if (!groupedStockouts[dateKey]) {
+            groupedStockouts[dateKey] = [];
+        }
+        groupedStockouts[dateKey].push(stockout);
+    });
+    
+    // 按日期降序排序
+    const sortedDates = Object.keys(groupedStockouts).sort((a, b) => b.localeCompare(a));
+    
+    let html = '';
+    sortedDates.forEach((date, index) => {
+        const stockouts = groupedStockouts[date];
+        
+        // 对同一天内的数据按(客户+产品ID)进行汇总
+        const summaryMap = {};
+        stockouts.forEach(stockout => {
+            const key = `${stockout.customer}|||${stockout.product.id}`;
+            
+            if (!summaryMap[key]) {
+                summaryMap[key] = {
+                    customer: stockout.customer,
+                    product: stockout.product,
+                    quantity: 0,
+                    deduct_quantity: 0,
+                    notes: [],
+                    ids: []
+                };
+            }
+            
+            summaryMap[key].quantity += stockout.quantity;
+            summaryMap[key].deduct_quantity += (stockout.deduct_quantity || 0);
+            if (stockout.note && !summaryMap[key].notes.includes(stockout.note)) {
+                summaryMap[key].notes.push(stockout.note);
+            }
+            summaryMap[key].ids.push(stockout.id);
+        });
+        
+        const summaryList = Object.values(summaryMap);
+        const totalCount = summaryList.reduce((sum, item) => sum + item.quantity, 0);
+        const totalRecords = stockouts.length;
+        const contentId = `content-stockout-${date.replace(/-/g, '')}`;
+        
+        html += `
+            <div class="stockout-date-group mb-3">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center"
+                         style="background: white; border-bottom: 2px solid #e9ecef; cursor: pointer;"
+                         onclick="window.toggleStockoutGroup('${contentId}')">
+                        <div class="d-flex align-items-center flex-grow-1">
+                            <i class="fas fa-calendar-alt text-danger me-2"></i>
+                            <strong>${date}</strong>
+                            <span class="badge ms-2">${totalRecords} 条记录</span>
+                            <span class="badge ms-1">共 ${totalCount} 件</span>
+                        </div>
+                        <div class="ms-2">
+                            <i class="fas fa-chevron-down text-muted toggle-icon" data-toggle-icon-for="${contentId}"></i>
+                        </div>
+                    </div>
+                    <div class="collapse-content" id="${contentId}">
+                        <div class="table-responsive">
+                            <table class="table table-hover mb-0">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 12%;">客户</th>
+                                        <th style="width: 8%;">产品图片</th>
+                                        <th style="width: 20%;">产品名称</th>
+                                        <th style="width: 10%;">69码</th>
+                                        <th style="width: 10%;">数量</th>
+                                        <th style="width: 10%;">抵扣备货</th>
+                                        <th style="width: 10%;">备注</th>
+                                        <th style="width: 10%;">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${summaryList.map(item => {
+                                        const notesDisplay = item.notes.length > 0 ? item.notes.join('; ') : '-';
+                                        const deductDisplay = item.deduct_quantity > 0 
+                                            ? `<span class="badge bg-success">抵扣: ${item.deduct_quantity}</span>` 
+                                            : '<span class="badge bg-secondary">否</span>';
+                                        return `
+                                        <tr>
+                                            <td>${item.customer}</td>
+                                            <td>
+                                                ${item.product.image
+                                                    ? `<img src="${item.product.image}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 8px;">`
+                                                    : '-'}
+                                            </td>
+                                            <td>${item.product.name}</td>
+                                            <td>${item.product.barcode || '-'}</td>
+                                            <td><strong>${item.quantity}</strong></td>
+                                            <td>${deductDisplay}</td>
+                                            <td><small>${notesDisplay}</small></td>
+                                            <td>
+                                                <button class="btn btn-sm btn-danger" onclick="deleteStockout(${item.ids[0]})">
+                                                    <i class="fas fa-trash"></i> 删除
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    `}).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    
+    container.innerHTML = html;
+    
+    // 初始化折叠状态
+    initStockoutCollapse();
+}
+
+// Toast提示函数
+function showToast(message, type = 'info') {
+    const toastContainer = document.getElementById('toastContainer') || createToastContainer();
+    
+    const toastId = `toast-${Date.now()}`;
+    const toastHtml = `
+        <div id="${toastId}" class="toast align-items-center text-white bg-${type === 'success' ? 'success' : type === 'error' ? 'danger' : 'info'}" role="alert" aria-live="assertive" aria-atomic="true" data-bs-autohide="true" data-bs-delay="3000">
+            <div class="d-flex">
+                <div class="toast-body">
+                    ${message}
+                </div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+            </div>
+        </div>
+    `;
+    
+    toastContainer.insertAdjacentHTML('beforeend', toastHtml);
+    
+    const toastElement = document.getElementById(toastId);
+    const toast = new bootstrap.Toast(toastElement);
+    toast.show();
+    
+    toastElement.addEventListener('hidden.bs.toast', () => {
+        toastElement.remove();
+    });
+}
+
+function createToastContainer() {
+    const container = document.createElement('div');
+    container.id = 'toastContainer';
+    container.className = 'toast-container position-fixed top-0 end-0 p-3';
+    container.style.zIndex = '9999';
+    document.body.appendChild(container);
+    return container;
+}
+
+// 初始化折叠功能
+function initStockoutCollapse() {
+    document.querySelectorAll('.stockout-collapse-content').forEach(content => {
+        content.classList.add('expanded');
+    });
+}
+
+function initBatchUpload() {
+    console.log('=== initBatchUpload called ===');
+
+    const excelUploadArea = document.getElementById('excel-upload-area');
+    const excelInput = document.getElementById('excel-input');
+    const excelPreview = document.getElementById('excel-preview');
+    const uploadStatus = document.getElementById('upload-status');
+    const downloadTemplate = document.getElementById('download-template');
+    const batchImport = document.getElementById('batch-import');
+    let excelFile = null;
+
+    console.log('excelUploadArea:', excelUploadArea);
+    console.log('excelInput:', excelInput);
+    console.log('downloadTemplate:', downloadTemplate);
+    console.log('batchImport:', batchImport);
+
+    if (!excelUploadArea || !excelInput) {
+        console.warn('批量上传元素不存在，跳过初始化');
+        return;
+    }
+
+    console.log('Elements found, continuing initialization');
+    
+    function showStatus(message, type = 'info') {
+        const types = {
+            info: 'alert-info',
+            success: 'alert-success',
+            error: 'alert-danger',
+            warning: 'alert-warning'
+        };
+        
+        if (window.GlobalNotification) {
+            window.GlobalNotification[type](message);
+        } else if (uploadStatus) {
+            uploadStatus.innerHTML = `
+                <div class="alert ${types[type]} alert-dismissible fade show" role="alert">
+                    ${message}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="关闭"></button>
+                </div>
+            `;
+        }
+    }
+    
+    function handleExcelFile(file) {
+        const fileName = file.name.toLowerCase();
+        if (!fileName.endsWith('.xlsx') && !fileName.endsWith('.xls')) {
+            showStatus('错误：请上传 Excel 文件（.xlsx 或.xls 格式）', 'error');
+            return;
+        }
+        
+        excelFile = file;
+        showStatus(`已选择文件：${file.name}`, 'info');
+        
+        if (batchImport) {
+            batchImport.disabled = false;
+        }
+    }
+    
+    excelUploadArea.addEventListener('click', (e) => {
+        e.stopPropagation();
+        // 检查点击的目标是否是按钮或按钮内部的元素
+        const targetElement = e.target.closest('#download-template, #batch-import');
+        if (e.target.tagName !== 'IMG' && !targetElement) {
+            excelInput.click();
+        }
+    });
+    
+    excelUploadArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('dragover event fired');
+        excelUploadArea.classList.add('border-success', 'bg-success', 'bg-opacity-10');
+    });
+
+    excelUploadArea.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('dragleave event fired');
+        excelUploadArea.classList.remove('border-success', 'bg-success', 'bg-opacity-10');
+    });
+
+    excelUploadArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('drop event fired, files:', e.dataTransfer.files);
+        excelUploadArea.classList.remove('border-success', 'bg-success', 'bg-opacity-10');
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            handleExcelFile(files[0]);
+        }
+    });
+    
+    excelInput.addEventListener('change', (e) => {
+        const files = e.target.files;
+        if (files.length > 0) {
+            handleExcelFile(files[0]);
+        }
+    });
+    
+    if (downloadTemplate) {
+        console.log('Binding downloadTemplate click event');
+        downloadTemplate.addEventListener('click', async (e) => {
+            console.log('downloadTemplate clicked!');
+            e.preventDefault();
+            e.stopPropagation();
+            
+            downloadTemplate.disabled = true;
+            downloadTemplate.innerHTML = '<i class="fas fa-hourglass-half me-2"></i>下载中...';
+            
+            try {
+                // 使用fetch下载文件，然后创建Blob URL触发下载
+                const response = await fetch('/api/v1/batch/download-template');
+                
+                if (!response.ok) {
+                    throw new Error('下载失败');
+                }
+                
+                // 获取文件名
+                const disposition = response.headers.get('Content-Disposition');
+                let filename = '统一导入模板.xlsx';
+                if (disposition) {
+                    const filenameMatch = disposition.match(/filename\*=UTF-8''(.+)/);
+                    if (filenameMatch) {
+                        filename = decodeURIComponent(filenameMatch[1]);
+                    }
+                }
+                
+                // 创建Blob
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                
+                // 创建隐藏的a标签触发下载
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = filename;
+                link.style.display = 'none';
+                document.body.appendChild(link);
+                link.click();
+                
+                // 清理
+                setTimeout(() => {
+                    document.body.removeChild(link);
+                    window.URL.revokeObjectURL(url);
+                }, 100);
+                
+                showStatus('✓ 模板下载已开始，请查看浏览器下载', 'success');
+                
+            } catch (error) {
+                console.error('下载错误:', error);
+                showStatus('✗ 下载失败：' + error.message, 'error');
+            } finally {
+                downloadTemplate.disabled = false;
+                downloadTemplate.innerHTML = '<i class="fas fa-file-excel me-2"></i>出货模板';
+            }
+        });
+    }
+    
+    if (batchImport) {
+        batchImport.addEventListener('click', async () => {
+            if (!excelFile) {
+                showStatus('请先选择 Excel 文件', 'error');
+                return;
+            }
+            
+            showStatus('正在导入出货数据到暂存区...', 'info');
+            
+            const formData = new FormData();
+            formData.append('file', excelFile);
+            
+            try {
+                const response = await fetch(`/api/v1/staging-stockouts/import?session_id=${encodeURIComponent(getStagingSessionId())}`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    let message = `导入成功！共导入 ${data.imported} 个出货到暂存区`;
+                    showStatus(message, 'success');
+                    
+                    loadStagingStockoutsFromServer();
+                    
+                    if (excelPreview) {
+                        excelPreview.innerHTML = '';
+                    }
+                    excelFile = null;
+                    if (batchImport) {
+                        batchImport.disabled = true;
+                    }
+                } else {
+                    showStatus(`导入失败：${data.error || data.message || '未知错误'}`, 'error');
+                }
+            } catch (error) {
+                console.error('导入错误:', error);
+                showStatus('导入失败：' + error.message, 'error');
+            }
+        });
+    }
+}
+
+function initPdfUpload() {
+    const pdfUploadArea = document.getElementById('pdf-upload-area');
+    const pdfInput = document.getElementById('pdf-input');
+    const pdfFileList = document.getElementById('pdf-file-list');
+    const pdfUploadStatus = document.getElementById('pdf-upload-status');
+    const pdfPreviewBtn = document.getElementById('pdf-preview-btn');
+    const pdfImportBtn = document.getElementById('pdf-import-btn');
+    const pdfPreviewResult = document.getElementById('pdf-preview-result');
+
+    let pdfFiles = [];
+
+    // 支持的文件扩展名
+    const supportedExts = ['.pdf', '.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp'];
+
+    if (!pdfUploadArea || !pdfInput) return;
+
+    function showPdfStatus(message, type = 'info') {
+        const types = {
+            info: 'alert-info',
+            success: 'alert-success',
+            error: 'alert-danger',
+            warning: 'alert-warning'
+        };
+        if (window.GlobalNotification) {
+            window.GlobalNotification[type](message);
+        } else if (pdfUploadStatus) {
+            pdfUploadStatus.innerHTML = `
+                <div class="alert ${types[type]} alert-dismissible fade show" role="alert" style="font-size: 13px;">
+                    ${message}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="关闭"></button>
+                </div>
+            `;
+        }
+    }
+
+    function updateFileList() {
+        if (pdfFiles.length === 0) {
+            pdfFileList.innerHTML = '';
+            pdfPreviewBtn.disabled = true;
+            pdfImportBtn.disabled = true;
+            return;
+        }
+
+        pdfFileList.innerHTML = pdfFiles.map((f, i) => {
+            const ext = f.name.split('.').pop().toLowerCase();
+            const isPdf = ext === 'pdf';
+            const icon = isPdf ? 'fa-file-pdf' : 'fa-file-image';
+            return `
+            <div class="d-flex justify-content-between align-items-center p-2 mb-1 rounded" style="background: #fff5f5; font-size: 13px;">
+                <span><i class="fas ${icon} me-1" style="color: ${isPdf ? '#e74c3c' : '#17a2b8'};"></i>${f.name}</span>
+                <button class="btn btn-sm btn-link text-danger p-0" onclick="removePdfFile(${i})" title="移除">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        `}).join('');
+
+        pdfPreviewBtn.disabled = false;
+        pdfImportBtn.disabled = false;
+    }
+
+    // 全局函数供删除按钮调用
+    window.removePdfFile = function(index) {
+        pdfFiles.splice(index, 1);
+        updateFileList();
+    };
+
+    function addFiles(fileList) {
+        for (const file of fileList) {
+            const ext = '.' + file.name.split('.').pop().toLowerCase();
+            if (!supportedExts.includes(ext)) {
+                showPdfStatus(`${file.name} 不是支持的格式（PDF/图片），已跳过`, 'warning');
+                continue;
+            }
+            // 避免重复添加
+            if (!pdfFiles.some(f => f.name === file.name && f.size === file.size)) {
+                pdfFiles.push(file);
+            }
+        }
+        updateFileList();
+        if (pdfFiles.length > 0) {
+            showPdfStatus(`已选择 ${pdfFiles.length} 个 PDF 文件`, 'info');
+        }
+    }
+
+    // 点击上传
+    pdfUploadArea.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const targetElement = e.target.closest('#pdf-preview-btn, #pdf-import-btn');
+        if (e.target.tagName !== 'IMG' && !targetElement) {
+            pdfInput.click();
+        }
+    });
+
+    // 拖拽
+    pdfUploadArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        pdfUploadArea.classList.add('border-danger', 'bg-danger', 'bg-opacity-10');
+    });
+
+    pdfUploadArea.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        pdfUploadArea.classList.remove('border-danger', 'bg-danger', 'bg-opacity-10');
+    });
+
+    pdfUploadArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        pdfUploadArea.classList.remove('border-danger', 'bg-danger', 'bg-opacity-10');
+        if (e.dataTransfer.files.length > 0) {
+            addFiles(e.dataTransfer.files);
+        }
+    });
+
+    pdfInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+            addFiles(e.target.files);
+            pdfInput.value = '';
+        }
+    });
+
+    // 预览按钮
+    pdfPreviewBtn.addEventListener('click', async () => {
+        if (pdfFiles.length === 0) return;
+
+        // 仅预览第一个文件
+        const file = pdfFiles[0];
+        showPdfStatus('正在识别 PDF 内容，请稍候...', 'info');
+        pdfPreviewBtn.disabled = true;
+        pdfPreviewBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>识别中...';
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            const response = await fetch('/api/v1/ocr-import/preview', {
+                method: 'POST',
+                body: formData,
+            });
+            const data = await response.json();
+
+            if (data.success) {
+                let html = `
+                    <div class="alert alert-success py-2" style="font-size: 13px;">
+                        <strong>${data.message}</strong>
+                    </div>
+                `;
+
+                if (data.parsed_items && data.parsed_items.length > 0) {
+                    html += `
+                        <div class="table-responsive">
+                            <table class="table table-sm table-bordered" style="font-size: 12px;">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>客户</th>
+                                        <th>产品名称</th>
+                                        <th>数量</th>
+                                        <th>备注</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${data.parsed_items.map(item => `
+                                        <tr>
+                                            <td>${item.customer || '-'}</td>
+                                            <td>${item.product_name || '-'}</td>
+                                            <td>${item.quantity || '-'}</td>
+                                            <td>${item.note || '-'}</td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    `;
+                } else {
+                    html += `
+                        <div class="alert alert-warning py-2" style="font-size: 13px;">
+                            未识别到出货项，可能是文件格式不符或图片质量过低
+                        </div>
+                    `;
+                }
+
+                // 显示部分原始文本供参考
+                if (data.pages && data.pages.length > 0) {
+                    const textPreview = data.pages.map(p => p.text).join('\n').substring(0, 500);
+                    html += `
+                        <details class="mt-2">
+                            <summary style="font-size: 12px; cursor: pointer; color: #6c757d;">
+                                查看原始识别文本
+                            </summary>
+                            <pre style="font-size: 11px; max-height: 200px; overflow-y: auto; background: #f8f9fa; padding: 8px; border-radius: 4px; margin-top: 4px;">${textPreview}</pre>
+                        </details>
+                    `;
+                }
+
+                pdfPreviewResult.innerHTML = html;
+                pdfPreviewResult.style.display = 'block';
+            } else {
+                showPdfStatus(data.message || '识别失败', 'error');
+            }
+        } catch (error) {
+            console.error('PDF 预览错误:', error);
+            showPdfStatus('识别失败：' + error.message, 'error');
+        } finally {
+            pdfPreviewBtn.disabled = pdfFiles.length === 0;
+            pdfPreviewBtn.innerHTML = '<i class="fas fa-eye me-2"></i>预览识别';
+        }
+    });
+
+    // 导入按钮
+    pdfImportBtn.addEventListener('click', async () => {
+        if (pdfFiles.length === 0) return;
+
+        const sessionId = getStagingSessionId();
+
+        // 显示进度条
+        const progressArea = document.getElementById('pdf-progress-area');
+        const progressBar = document.getElementById('pdf-progress-bar');
+        const progressMsg = document.getElementById('pdf-progress-msg');
+        const progressPct = document.getElementById('pdf-progress-pct');
+        if (progressArea) {
+            progressArea.style.display = 'block';
+            progressBar.style.width = '0%';
+            progressMsg.textContent = '正在准备识别任务...';
+            progressPct.textContent = '0%';
+        }
+
+        showPdfStatus('正在 OCR 识别并导入暂存区，请稍候...', 'info');
+        pdfImportBtn.disabled = true;
+        pdfImportBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>识别导入中...';
+
+        let pollTimer = null;
+
+        try {
+            // 1. 先创建任务，获取 task_id（这样可以在上传过程中轮询进度）
+            let taskId = null;
+            try {
+                const taskResp = await fetch('/api/v1/ocr-import/create-task', { method: 'POST' });
+                const taskData = await taskResp.json();
+                taskId = taskData.task_id || null;
+            } catch (e) {
+                console.warn('创建进度任务失败，将无实时进度:', e);
+            }
+
+            // 2. 立即开始轮询进度（如果有 task_id）
+            if (taskId) {
+                pollTimer = setTimeout(async function pollProgress() {
+                    try {
+                        const resp = await fetch(`/api/v1/ocr-import/progress/${taskId}`);
+                        const prog = await resp.json();
+                        if (progressBar && prog.percent !== undefined) {
+                            progressBar.style.width = prog.percent + '%';
+                            progressPct.textContent = prog.percent + '%';
+                            progressMsg.textContent = prog.message || '处理中...';
+                        }
+                        if (prog.status === 'done' || prog.status === 'error') {
+                            return; // 停止轮询
+                        }
+                    } catch (e) { /* 忽略轮询错误 */ }
+                    pollTimer = setTimeout(pollProgress, 400);
+                }, 300);
+            }
+
+            // 3. 发起上传请求（带 task_id）
+            const formData = new FormData();
+            pdfFiles.forEach(f => formData.append('files', f));
+
+            let uploadUrl = `/api/v1/ocr-import/upload?session_id=${encodeURIComponent(sessionId)}`;
+            if (taskId) {
+                uploadUrl += `&task_id=${encodeURIComponent(taskId)}`;
+            }
+
+            const response = await fetch(uploadUrl, {
+                method: 'POST',
+                body: formData,
+            });
+            const data = await response.json();
+
+            // 4. 停止轮询
+            if (pollTimer) clearTimeout(pollTimer);
+
+            // 5. 最终查一次进度确保 UI 准确
+            if (taskId) {
+                try {
+                    const finalResp = await fetch(`/api/v1/ocr-import/progress/${taskId}`);
+                    const finalProg = await finalResp.json();
+                    if (progressBar && finalProg.percent !== undefined) {
+                        progressBar.style.width = finalProg.percent + '%';
+                        progressPct.textContent = finalProg.percent + '%';
+                        if (finalProg.message) progressMsg.textContent = finalProg.message;
+                    }
+                } catch (e) { /* 忽略 */ }
+            }
+
+            if (data.success) {
+                let msg = `OCR 识别导入完成！共处理 ${data.file_count} 个文件，导入 ${data.total_imported} 个出货到暂存区`;
+                showPdfStatus(msg, 'success');
+                if (progressBar) {
+                    progressBar.style.width = '100%';
+                    progressPct.textContent = '100%';
+                    progressMsg.textContent = '导入完成';
+                }
+
+                // 刷新暂存列表
+                if (typeof loadStagingStockoutsFromServer === 'function') {
+                    loadStagingStockoutsFromServer();
+                }
+
+                // 清空文件列表
+                pdfFiles = [];
+                updateFileList();
+                pdfPreviewResult.style.display = 'none';
+                pdfPreviewResult.innerHTML = '';
+
+                // 3秒后隐藏进度条
+                setTimeout(() => {
+                    if (progressArea) progressArea.style.display = 'none';
+                }, 3000);
+            } else {
+                showPdfStatus(`导入失败：${data.message}`, 'error');
+                if (progressBar) {
+                    progressBar.style.width = '0%';
+                    progressPct.textContent = '0%';
+                    progressMsg.textContent = '导入失败';
+                }
+            }
+
+            if (data.errors && data.errors.length > 0) {
+                console.warn('OCR 导入警告:', data.errors);
+            }
+        } catch (error) {
+            if (pollTimer) clearTimeout(pollTimer);
+            console.error('PDF 导入错误:', error);
+            showPdfStatus('导入失败：' + error.message, 'error');
+            if (progressBar) {
+                progressBar.style.width = '0%';
+                progressPct.textContent = '0%';
+                progressMsg.textContent = '导入失败';
+            }
+        } finally {
+            pdfImportBtn.disabled = pdfFiles.length === 0;
+            pdfImportBtn.innerHTML = '<i class="fas fa-magic me-2"></i>OCR 识别导入';
+        }
+    });
+}
+</script>
 {% endblock %}

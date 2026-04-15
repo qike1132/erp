@@ -1,0 +1,412 @@
+{
+  "version": "2.0.0",
+  "name": "ERP System Status Feedback",
+  "description": "状态反馈机制 - 实时监控和报告代理执行状态",
+
+  "feedbackChannels": {
+    "ide": {
+      "enabled": true,
+      "types": {
+        "notification": {
+          "enabled": true,
+          "position": "bottom-right",
+          "duration": {
+            "info": 3000,
+            "success": 2000,
+            "warning": 5000,
+            "error": 0
+          },
+          "actions": {
+            "clickable": true,
+            "dismissible": true,
+            "stackable": true,
+            "maxStack": 5
+          }
+        },
+        "statusBar": {
+          "enabled": true,
+          "position": "right",
+          "show": {
+            "activeAgent": true,
+            "ruleCount": true,
+            "lastCheckTime": true,
+            "errorCount": true
+          },
+          "refreshInterval": 1000
+        },
+        "progressIndicator": {
+          "enabled": true,
+          "position": "center",
+          "showPercentage": true,
+          "showETA": true,
+          "cancellable": true
+        }
+      }
+    },
+    
+    "console": {
+      "enabled": true,
+      "format": {
+        "timestamp": true,
+        "colorize": true,
+        "indentation": 2
+      },
+      "levels": {
+        "debug": false,
+        "info": true,
+        "warning": true,
+        "error": true,
+        "success": true
+      },
+      "output": {
+        "file": true,
+        "filePath": ".trae/logs/feedback.log",
+        "maxSize": "10MB",
+        "rotation": "daily"
+      }
+    },
+    
+    "dashboard": {
+      "enabled": true,
+      "url": "/trae-dashboard",
+      "refreshInterval": 2000,
+      "widgets": {
+        "agentStatus": true,
+        "ruleExecution": true,
+        "errorTracking": true,
+        "performanceMetrics": true
+      }
+    }
+  },
+
+  "statusTypes": {
+    "agentActivation": {
+      "icon": "🤖",
+      "color": "blue",
+      "priority": "medium",
+      "notification": {
+        "title": "代理激活",
+        "message": "{agentName} 已激活",
+        "type": "info"
+      },
+      "log": {
+        "level": "info",
+        "format": "[{timestamp}] AGENT_ACTIVATED: {agentName}"
+      }
+    },
+    
+    "agentDeactivation": {
+      "icon": "💤",
+      "color": "gray",
+      "priority": "low",
+      "notification": {
+        "enabled": false
+      },
+      "log": {
+        "level": "debug",
+        "format": "[{timestamp}] AGENT_DEACTIVATED: {agentName}"
+      }
+    },
+    
+    "ruleExecution": {
+      "icon": "⚡",
+      "color": "yellow",
+      "priority": "medium",
+      "notification": {
+        "enabled": false
+      },
+      "log": {
+        "level": "debug",
+        "format": "[{timestamp}] RULE_EXECUTED: {ruleName} on {fileName}"
+      }
+    },
+    
+    "rulePass": {
+      "icon": "✓",
+      "color": "green",
+      "priority": "low",
+      "notification": {
+        "enabled": false
+      },
+      "log": {
+        "level": "debug",
+        "format": "[{timestamp}] RULE_PASS: {ruleName}"
+      }
+    },
+    
+    "ruleFail": {
+      "icon": "✗",
+      "color": "red",
+      "priority": "high",
+      "notification": {
+        "title": "规则检查失败",
+        "message": "{ruleName} 检查未通过",
+        "type": "warning",
+        "actions": [
+          {
+            "label": "查看详情",
+            "action": "showDetails"
+          },
+          {
+            "label": "自动修复",
+            "action": "autoFix"
+          }
+        ]
+      },
+      "log": {
+        "level": "warning",
+        "format": "[{timestamp}] RULE_FAIL: {ruleName} - {errorMessage}"
+      }
+    },
+    
+    "reviewComplete": {
+      "icon": "📋",
+      "color": "green",
+      "priority": "high",
+      "notification": {
+        "title": "代码审查完成",
+        "message": "发现 {issueCount} 个问题",
+        "type": "success",
+        "actions": [
+          {
+            "label": "查看报告",
+            "action": "showReport"
+          },
+          {
+            "label": "应用修复",
+            "action": "applyFixes"
+          }
+        ]
+      },
+      "log": {
+        "level": "info",
+        "format": "[{timestamp}] REVIEW_COMPLETE: {filesReviewed} files, {issueCount} issues"
+      }
+    },
+    
+    "securityAlert": {
+      "icon": "🔒",
+      "color": "red",
+      "priority": "critical",
+      "notification": {
+        "title": "安全警告",
+        "message": "{alertType}: {description}",
+        "type": "error",
+        "persistent": true,
+        "actions": [
+          {
+            "label": "立即修复",
+            "action": "fixNow"
+          },
+          {
+            "label": "查看详情",
+            "action": "showDetails"
+          },
+          {
+            "label": "忽略",
+            "action": "dismiss"
+          }
+        ]
+      },
+      "log": {
+        "level": "error",
+        "format": "[{timestamp}] SECURITY_ALERT: {alertType} - {description}"
+      }
+    },
+    
+    "commitBlocked": {
+      "icon": "🚫",
+      "color": "red",
+      "priority": "critical",
+      "notification": {
+        "title": "提交被阻止",
+        "message": "存在 {errorCount} 个错误需要修复",
+        "type": "error",
+        "persistent": true,
+        "actions": [
+          {
+            "label": "查看错误",
+            "action": "showErrors"
+          },
+          {
+            "label": "强制提交",
+            "action": "forceCommit",
+            "confirmation": true
+          }
+        ]
+      },
+      "log": {
+        "level": "error",
+        "format": "[{timestamp}] COMMIT_BLOCKED: {errorCount} errors, {warningCount} warnings"
+      }
+    },
+    
+    "autoFixApplied": {
+      "icon": "🔧",
+      "color": "green",
+      "priority": "medium",
+      "notification": {
+        "title": "自动修复已应用",
+        "message": "已修复 {fixCount} 个问题",
+        "type": "success",
+        "actions": [
+          {
+            "label": "查看更改",
+            "action": "showChanges"
+          },
+          {
+            "label": "撤销",
+            "action": "undo"
+          }
+        ]
+      },
+      "log": {
+        "level": "info",
+        "format": "[{timestamp}] AUTO_FIX: {fixCount} fixes applied"
+      }
+    }
+  },
+
+  "metrics": {
+    "enabled": true,
+    "collection": {
+      "interval": 60000,
+      "storage": ".trae/metrics/",
+      "retention": "30d"
+    },
+    "tracked": {
+      "agentActivations": {
+        "enabled": true,
+        "granularity": "hourly"
+      },
+      "ruleExecutions": {
+        "enabled": true,
+        "granularity": "hourly"
+      },
+      "errorRates": {
+        "enabled": true,
+        "granularity": "hourly"
+      },
+      "responseTimes": {
+        "enabled": true,
+        "granularity": "minute"
+      },
+      "userInteractions": {
+        "enabled": true,
+        "granularity": "daily"
+      }
+    },
+    "reporting": {
+      "daily": {
+        "enabled": true,
+        "time": "23:00",
+        "output": ".trae/reports/daily/"
+      },
+      "weekly": {
+        "enabled": true,
+        "day": "sunday",
+        "time": "23:00",
+        "output": ".trae/reports/weekly/"
+      },
+      "monthly": {
+        "enabled": true,
+        "day": 1,
+        "time": "23:00",
+        "output": ".trae/reports/monthly/"
+      }
+    }
+  },
+
+  "alerts": {
+    "enabled": true,
+    "thresholds": {
+      "errorRate": {
+        "warning": 0.05,
+        "critical": 0.1,
+        "action": "notify"
+      },
+      "responseTime": {
+        "warning": 5000,
+        "critical": 10000,
+        "action": "notify"
+      },
+      "consecutiveFailures": {
+        "warning": 3,
+        "critical": 5,
+        "action": "disableAgent"
+      }
+    },
+    "escalation": {
+      "enabled": true,
+      "levels": [
+        {
+          "level": 1,
+          "delay": 300000,
+          "action": "notify"
+        },
+        {
+          "level": 2,
+          "delay": 900000,
+          "action": "notifyAdmin"
+        },
+        {
+          "level": 3,
+          "delay": 1800000,
+          "action": "disableFeature"
+        }
+      ]
+    }
+  },
+
+  "userPreferences": {
+    "notificationLevel": {
+      "default": "normal",
+      "options": ["minimal", "normal", "verbose"],
+      "storage": "local"
+    },
+    "quietHours": {
+      "enabled": false,
+      "start": "22:00",
+      "end": "08:00",
+      "timezone": "local"
+    },
+    "soundEnabled": {
+      "default": false,
+      "types": {
+        "success": false,
+        "warning": false,
+        "error": true
+      }
+    },
+    "autoDismiss": {
+      "enabled": true,
+      "successDelay": 2000,
+      "infoDelay": 3000,
+      "warningDelay": 5000
+    }
+  },
+
+  "integration": {
+    "git": {
+      "enabled": true,
+      "hooks": {
+        "preCommit": true,
+        "postCommit": true,
+        "prePush": true
+      }
+    },
+    "ci": {
+      "enabled": true,
+      "platforms": ["jenkins", "github-actions", "gitlab-ci"],
+      "reportTo": "dashboard"
+    },
+    "issueTracker": {
+      "enabled": true,
+      "platforms": ["jira", "github", "gitlab"],
+      "autoCreate": {
+        "onSecurityAlert": true,
+        "onCriticalError": true
+      }
+    }
+  }
+}

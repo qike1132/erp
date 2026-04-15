@@ -1,0 +1,204 @@
+{% extends 'base.html' %}
+{% block content %}
+    <h2>我的审批请求</h2>
+    
+    <div class="card mt-3">
+        <div class="card-header">
+            <div class="d-flex justify-content-between align-items-center">
+                <span>审批请求列表</span>
+                <span class="badge">共 {{ approvals|length }} 条</span>
+            </div>
+        </div>
+        <div class="card-body">
+            {% if approvals %}
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>审批ID</th>
+                            <th>订单编号</th>
+                            <th>操作类型</th>
+                            <th>申请时间</th>
+                            <th>状态</th>
+                            <th>审批人</th>
+                            <th>审批时间</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for approval in approvals %}
+                        <tr>
+                            <td>#{{ approval.id }}</td>
+                            <td>
+                                {% if approval.order %}
+                                    {{ approval.order.order_no }}
+                                {% else %}
+                                    <span class="text-muted">
+                                        {% if approval.operation_type == 'delete' %}
+                                            已删除
+                                        {% else %}
+                                            订单不存在
+                                        {% endif %}
+                                    </span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if approval.operation_type == 'edit' %}
+                                    <span class="badge">
+                                        <i class="fas fa-edit me-1"></i>编辑
+                                    </span>
+                                {% else %}
+                                    <span class="badge">
+                                        <i class="fas fa-trash me-1"></i>删除
+                                    </span>
+                                {% endif %}
+                            </td>
+                            <td>{{ approval.request_time.strftime('%Y-%m-%d %H:%M') if approval.request_time else '-' }}</td>
+                            <td>
+                                {% if approval.status == 'pending' %}
+                                    <span class="badge">
+                                        <i class="fas fa-clock me-1"></i>待审批
+                                    </span>
+                                {% elif approval.status == 'approved' %}
+                                    <span class="badge">
+                                        <i class="fas fa-check me-1"></i>已同意
+                                    </span>
+                                {% elif approval.status == 'rejected' %}
+                                    <span class="badge">
+                                        <i class="fas fa-times me-1"></i>已拒绝
+                                    </span>
+                                {% else %}
+                                    <span class="badge">
+                                        <i class="fas fa-minus me-1"></i>已取消
+                                    </span>
+                                {% endif %}
+                            </td>
+                            <td>{{ approval.approver.username if approval.approver else '-' }}</td>
+                            <td>{{ approval.approval_time.strftime('%Y-%m-%d %H:%M') if approval.approval_time else '-' }}</td>
+                            <td>
+                                {% if approval.status == 'pending' %}
+                                <button class="btn btn-sm btn-outline-secondary" 
+                                        onclick="cancelApproval({{ approval.id }})">
+                                    <i class="fas fa-times me-1"></i>取消
+                                </button>
+                                {% elif approval.status == 'rejected' and approval.rejection_reason %}
+                                <button class="btn btn-sm btn-outline-secondary" 
+                                        onclick="showRejectReason('{{ approval.rejection_reason | escapejs }}')">
+                                    <i class="fas fa-info-circle me-1"></i>原因
+                                </button>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="text-center text-muted py-5">
+                <i class="fas fa-inbox fa-3x mb-3" style="opacity: 0.3;"></i>
+                <p>暂无审批请求</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <div class="card mt-4">
+        <div class="card-header">
+            <i class="fas fa-info-circle me-2"></i>审批流程说明
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-6">
+                    <h6><i class="fas fa-edit me-2"></i>编辑订单</h6>
+                    <p class="text-muted small">
+                        非管理员用户编辑订单时，系统会自动创建审批请求并锁定订单。
+                        管理员审批通过后，修改才会生效。
+                    </p>
+                </div>
+                <div class="col-md-6">
+                    <h6><i class="fas fa-trash me-2"></i>删除订单</h6>
+                    <p class="text-muted small">
+                        非管理员用户删除订单时，系统会自动创建审批请求并锁定订单。
+                        管理员审批通过后，订单才会被删除。
+                    </p>
+                </div>
+            </div>
+            <div class="alert alert-info mt-3 mb-0">
+                <i class="fas fa-lightbulb me-2"></i>
+                <strong>提示：</strong>在审批期间，相关订单会被锁定，其他用户无法进行操作。
+                如需取消审批，请点击"取消"按钮。
+            </div>
+        </div>
+    </div>
+    
+    <div class="modal fade" id="rejectReasonModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">拒绝原因</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p id="rejectReasonText" class="mb-0"></p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const csrfToken = '{{ csrf_token() }}';
+
+function cancelApproval(approvalId) {
+    if (!confirm('确定要取消该审批请求吗？取消后订单将解锁。')) {
+        return;
+    }
+    
+    fetch(`/api/v1/orders/cancel-approval/${approvalId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+            'X-CSRFToken': csrfToken
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            if (window.GlobalNotification) {
+                GlobalNotification.success(data.message);
+            } else {
+                alert(data.message);
+            }
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000);
+        } else {
+            if (window.GlobalNotification) {
+                GlobalNotification.error(data.error || '操作失败');
+            } else {
+                alert(data.error || '操作失败');
+            }
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        if (window.GlobalNotification) {
+            GlobalNotification.error('网络错误，请重试');
+        } else {
+            alert('网络错误，请重试');
+        }
+    });
+}
+
+function showRejectReason(reason) {
+    document.getElementById('rejectReasonText').textContent = reason || '未提供原因';
+    const modal = new bootstrap.Modal(document.getElementById('rejectReasonModal'));
+    modal.show();
+}
+</script>
+{% endblock %}

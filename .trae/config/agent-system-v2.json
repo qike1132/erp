@@ -1,0 +1,125 @@
+{
+  "version": "2.0.0",
+  "name": "Trae AI Agent System v2.0",
+  "description": "Enhanced Agent system with Claude CLI-inspired architecture",
+  "lastUpdated": "2026-04-07T14:30:00Z",
+  
+  "queryEngine": {
+    "enabled": true,
+    "queryGuard": {
+      "configPath": ".trae/core/query-engine/query-guard.json",
+      "enabled": true
+    },
+    "hooks": {
+      "configPath": ".trae/core/query-engine/hooks.json",
+      "enabled": true
+    }
+  },
+  
+  "transport": {
+    "enabled": true,
+    "circuitBreaker": {
+      "configPath": ".trae/core/transport/circuit-breaker.json",
+      "enabled": true
+    },
+    "retryPolicy": {
+      "configPath": ".trae/core/transport/retry-policy.json",
+      "enabled": true
+    },
+    "hybridTransport": {
+      "configPath": ".trae/core/transport/hybrid-transport.json",
+      "enabled": true
+    },
+    "fallbackManager": {
+      "enabled": true,
+      "globalFallback": "solo-coder",
+      "agentFallbacks": {
+        "frontend-developer": ["ui-designer", "frontend-design"],
+        "backend-architect": ["senior-developer", "software-architect"],
+        "database-optimizer": ["data-engineer", "backend-architect"],
+        "code-reviewer": ["senior-developer"]
+      }
+    }
+  },
+  
+  "skills": {
+    "hotReload": {
+      "configPath": ".trae/core/skills/hot-reloader.json",
+      "enabled": true
+    },
+    "skillRegistry": {
+      "autoIndex": true,
+      "cacheEnabled": true,
+      "validationRequired": true
+    },
+    "skillWatcher": {
+      "watchDirectories": [".trae/", "skills/"],
+      "debounceMs": 500
+    }
+  },
+  
+  "monitoring": {
+    "performance": {
+      "configPath": ".trae/monitoring/performance.json",
+      "enabled": true
+    },
+    "alerts": {
+      "enabled": true,
+      "channels": ["console", "log"],
+      "rules": [
+        {
+          "name": "high_error_rate",
+          "condition": "error_rate > 0.05",
+          "severity": "warning",
+          "cooldown": 300000
+        },
+        {
+          "name": "slow_response",
+          "condition": "latency_p99 > 5000",
+          "severity": "warning",
+          "cooldown": 300000
+        },
+        {
+          "name": "circuit_breaker_open",
+          "condition": "circuit_state == 'open'",
+          "severity": "critical",
+          "cooldown": 60000
+        }
+      ]
+    },
+    "dashboard": {
+      "enabled": true,
+      "refreshInterval": 5000,
+      "defaultTimeRange": "1h",
+      "availableRanges": ["15m", "1h", "6h", "24h", "7d", "30d"]
+    }
+  },
+  
+  "security": {
+    "queryGuard": {
+      "strictMode": true,
+      "blockOnViolation": true,
+      "quarantineSuspicious": true
+    },
+    "encryption": {
+      "inTransit": true,
+      "atRest": false,
+      "keyRotationDays": 90
+    },
+    "accessControl": {
+      "rbacEnabled": false,
+      "auditLogEnabled": true
+    }
+  },
+  
+  "compatibility": {
+    "v1Support": {
+      "enabled": true,
+      "migrationMode": "gradual",
+      "fallbackToV1": true,
+      "deprecationWarnings": true
+    },
+    "apiVersion": "v2",
+    "backwardCompatible": true
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "skills": {
+    "self-improving-agent": {
+      "name": "self-improving-agent",
+      "zip_url": "http://lightmake.site/api/v1/download?slug=self-improving-agent",
+      "source": "skillhub",
+      "version": "1.0.11"
+    },
+    "skill-vetter": {
+      "name": "Skill Vetter",
+      "zip_url": "http://lightmake.site/api/v1/download?slug=skill-vetter",
+      "source": "skillhub",
+      "version": "1.0.0"
+    },
+    "find-skills": {
+      "name": "Find Skills",
+      "zip_url": "http://lightmake.site/api/v1/download?slug=find-skills",
+      "source": "skillhub",
+      "version": "0.1.0"
+    },
+    "elite-longterm-memory": {
+      "name": "Elite Longterm Memory",
+      "zip_url": "http://lightmake.site/api/v1/download?slug=elite-longterm-memory",
+      "source": "skillhub",
+      "version": "1.2.3"
+    },
+    "frontend-design": {
+      "name": "Frontend Design",
+      "zip_url": "http://lightmake.site/api/v1/download?slug=frontend-design",
+      "source": "skillhub",
+      "version": "1.0.0"
+    },
+    "tavily-search": {
+      "name": "Tavily Web Search",
+      "zip_url": "http://lightmake.site/api/v1/download?slug=tavily-search",
+      "source": "skillhub",
+      "version": "1.0.0"
+    }
+  }
+}

@@ -5,27 +5,16 @@
         <div class="card-body">
             <form method="POST">
                 <div class="mb-3">
-                    <label for="code" class="form-label">产品编号</label>
-                    <input type="text" class="form-control" id="code" name="code" value="{{ product.code }}" disabled>
-                </div>
-                <div class="mb-3">
                     <label for="name" class="form-label">产品名称</label>
                     <input type="text" class="form-control" id="name" name="name" value="{{ product.name }}" required>
-                </div>
-                <div class="mb-3">
-                    <label for="spec" class="form-label">产品规格</label>
-                    <input type="text" class="form-control" id="spec" name="spec" value="{{ product.spec }}">
                 </div>
                 <div class="mb-3">
                     <label for="barcode" class="form-label">69码/商品条码</label>
                     <input type="text" class="form-control" id="barcode" name="barcode" value="{{ product.barcode or '' }}" placeholder="例如：6958085574210">
                 </div>
                 <div class="mb-3">
-                    <label for="origin" class="form-label">产地</label>
-                    <select class="form-select" id="origin" name="origin">
-                        <option value="东莞" {% if product.origin == '东莞' %}selected{% endif %}>东莞</option>
-                        <option value="湖北" {% if product.origin == '湖北' %}selected{% endif %}>湖北</option>
-                    </select>
+                    <label for="price" class="form-label">产品价格</label>
+                    <input type="number" class="form-control" id="price" name="price" value="{{ product.price or 0 }}" step="0.01" min="0" placeholder="请输入产品价格">
                 </div>
                 <div class="mb-3">
                     <label class="form-label">产品图片</label>
@@ -35,46 +24,93 @@
                         <input type="hidden" id="image-url" name="image" value="{{ product.image or '' }}">
                         <div id="image-preview" class="mt-2">
                             {% if product.image %}
-                                <img src="{{ product.image }}" style="max-width: 200px; max-height: 200px;">
+                                <img src="{{ product.image }}" class="product-thumbnail" data-src="{{ product.image }}" style="max-width: 250px; max-height: 250px; object-fit: contain; cursor: pointer; border-radius: 4px;">
                             {% endif %}
                         </div>
                     </div>
                 </div>
-                <div class="mb-3">
-                    <label for="initial_stock" class="form-label">初始库存</label>
-                    <input type="number" class="form-control" id="initial_stock" name="initial_stock" value="{{ product.initial_stock }}" min="0" required>
-                </div>
                 <button type="submit" class="btn btn-primary">保存修改</button>
-                <a href="{{ url_for('products') }}" class="btn btn-secondary">取消</a>
+                <a href="{{ url_for('product.products') }}" class="btn btn-secondary">取消</a>
             </form>
         </div>
     </div>
+    
+    <!-- 图片查看模态框 -->
+    <div class="modal fade" id="imageModal" tabindex="-1" aria-labelledby="imageModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="imageModalLabel">产品图片</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body text-center">
+                    <img id="modalImage" src="" style="max-width: 100%; max-height: 80vh;" class="img-fluid">
+                </div>
+            </div>
+        </div>
+    </div>
+    
     <script>
     // 图片上传区域
     const uploadArea = document.getElementById('image-upload-area');
     const imageInput = document.getElementById('image-input');
     const imagePreview = document.getElementById('image-preview');
     const imageUrlInput = document.getElementById('image-url');
+    let uploadProgress;
+    
+    // 创建上传进度元素
+    function createProgressElement() {
+        uploadProgress = document.createElement('div');
+        uploadProgress.className = 'mt-2';
+        uploadProgress.innerHTML = `
+            <div class="progress" style="height: 20px;">
+                <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+            </div>
+            <p class="mt-1 text-muted small">上传中...</p>
+        `;
+        uploadArea.appendChild(uploadProgress);
+    }
+    
+    function removeProgressElement() {
+        if (uploadProgress) {
+            uploadProgress.remove();
+            uploadProgress = null;
+        }
+    }
+    
+    function updateProgress(percent, message) {
+        if (uploadProgress) {
+            const progressBar = uploadProgress.querySelector('.progress-bar');
+            const progressText = uploadProgress.querySelector('p');
+            if (progressBar) progressBar.style.width = percent + '%';
+            if (progressText) progressText.textContent = message;
+        }
+    }
+    
     // 点击上传区域选择图片
     uploadArea.addEventListener('click', () => {
         imageInput.click();
     });
+    
     // 拖拽上传
     uploadArea.addEventListener('dragover', (e) => {
         e.preventDefault();
-        uploadArea.classList.add('border-primary');
+        uploadArea.classList.add('border-primary', 'bg-primary', 'bg-opacity-10');
     });
+    
     uploadArea.addEventListener('dragleave', () => {
-        uploadArea.classList.remove('border-primary');
+        uploadArea.classList.remove('border-primary', 'bg-primary', 'bg-opacity-10');
     });
+    
     uploadArea.addEventListener('drop', (e) => {
         e.preventDefault();
-        uploadArea.classList.remove('border-primary');
+        uploadArea.classList.remove('border-primary', 'bg-primary', 'bg-opacity-10');
         const files = e.dataTransfer.files;
         if (files.length > 0) {
             uploadImage(files[0]);
         }
     });
+    
     // 选择图片
     imageInput.addEventListener('change', (e) => {
         const files = e.target.files;
@@ -82,26 +118,91 @@
             uploadImage(files[0]);
         }
     });
+    
     // 上传图片
-    function uploadImage(file) {
-        const formData = new FormData();
-        formData.append('file', file);
-        fetch('/upload', {
-            method: 'POST',
-            body: formData
-        })
-        .then(response => response.json())
-        .then(data => {
+    async function uploadImage(file) {
+        // 检查文件类型
+        const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif'];
+        if (!allowedTypes.includes(file.type)) {
+            alert('只支持 JPG、PNG、GIF 格式的图片');
+            return;
+        }
+        
+        // 检查文件大小（2MB）
+        const maxSize = 2 * 1024 * 1024;
+        if (file.size > maxSize) {
+            alert('文件大小不能超过 2MB');
+            return;
+        }
+        
+        createProgressElement();
+        updateProgress(0, '准备上传...');
+        
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            updateProgress(30, '上传中...');
+            
+            const response = await fetch('/upload', {
+                method: 'POST',
+                body: formData
+            });
+            
+            updateProgress(80, '处理中...');
+            
+            const data = await response.json();
+            
             if (data.url) {
                 imageUrlInput.value = data.url;
-                imagePreview.innerHTML = `<img src="${data.url}" style="max-width: 200px; max-height: 200px;">`;
+                imagePreview.innerHTML = `<img src="${data.url}" style="max-width: 250px; max-height: 250px; object-fit: contain; border-radius: 4px;">`;
+                updateProgress(100, '上传成功！');
+                setTimeout(() => {
+                    removeProgressElement();
+                }, 1500);
             } else {
                 alert(data.error || '上传失败');
+                removeProgressElement();
             }
-        })
-        .catch(error => {
-            alert('上传失败：' + error);
-        });
+        } catch (error) {
+            console.error('上传错误:', error);
+            alert('上传失败：' + error.message);
+            removeProgressElement();
+        }
     }
+    
+    // 图片查看功能
+    document.addEventListener('DOMContentLoaded', function() {
+        const imageModal = new bootstrap.Modal(document.getElementById('imageModal'));
+        const modalImage = document.getElementById('modalImage');
+        
+        // 点击缩略图打开大图
+        document.querySelectorAll('.product-thumbnail').forEach(thumbnail => {
+            thumbnail.addEventListener('click', function() {
+                const imageSrc = this.getAttribute('data-src');
+                modalImage.src = imageSrc;
+                imageModal.show();
+            });
+        });
+        
+        // 上传预览中的图片也支持点击查看
+        const previewObserver = new MutationObserver(function(mutations) {
+            mutations.forEach(function(mutation) {
+                mutation.addedNodes.forEach(function(node) {
+                    if (node.tagName === 'IMG') {
+                        node.style.cursor = 'pointer';
+                        node.addEventListener('click', function() {
+                            modalImage.src = this.src;
+                            imageModal.show();
+                        });
+                    }
+                });
+            });
+        });
+        
+        if (imagePreview) {
+            previewObserver.observe(imagePreview, { childList: true });
+        }
+    });
     </script>
 {% endblock %}

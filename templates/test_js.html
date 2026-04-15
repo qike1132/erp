@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JavaScript测试</title>
+</head>
+<body>
+    <h1>JavaScript测试页面</h1>
+    
+    <div style="margin: 20px;">
+        <button id="testBtn1" style="padding: 10px 20px; margin: 10px;">测试按钮1</button>
+        <button id="testBtn2" style="padding: 10px 20px; margin: 10px;">测试按钮2</button>
+    </div>
+    
+    <div id="result" style="margin: 20px; padding: 10px; border: 1px solid #ccc;">
+        结果将显示在这里
+    </div>
+    
+    <script>
+        console.log('=== 测试页面脚本加载 ===');
+        console.log('=== 时间: ' + new Date().toISOString() + ' ===');
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('=== DOMContentLoaded 事件触发 ===');
+            
+            const result = document.getElementById('result');
+            result.innerHTML = '<p style="color: green;">JavaScript已加载，DOMContentLoaded事件已触发</p>';
+            
+            const testBtn1 = document.getElementById('testBtn1');
+            const testBtn2 = document.getElementById('testBtn2');
+            
+            console.log('testBtn1:', testBtn1);
+            console.log('testBtn2:', testBtn2);
+            
+            if (testBtn1) {
+                console.log('绑定testBtn1点击事件');
+                testBtn1.addEventListener('click', function() {
+                    console.log('testBtn1被点击');
+                    result.innerHTML = '<p style="color: blue;">按钮1被点击！时间: ' + new Date().toLocaleTimeString() + '</p>';
+                    alert('按钮1被点击！');
+                });
+            }
+            
+            if (testBtn2) {
+                console.log('绑定testBtn2点击事件');
+                testBtn2.addEventListener('click', function() {
+                    console.log('testBtn2被点击');
+                    result.innerHTML = '<p style="color: red;">按钮2被点击！时间: ' + new Date().toLocaleTimeString() + '</p>';
+                    alert('按钮2被点击！');
+                });
+            }
+            
+            console.log('=== 所有事件绑定完成 ===');
+        });
+    </script>
+</body>
+</html>

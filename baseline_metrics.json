@@ -1,0 +1,9 @@
+{
+  "intent_recognition_accuracy": 0.125,
+  "intent_recognition_avg_response_time_ms": 0.014125000234344043,
+  "context_handling_avg_time_per_turn_ms": 1.7774800006009173,
+  "multi_task_throughput_tasks_per_sec": 93.19456041379252,
+  "cache_performance_hit_rate": 0.85,
+  "cache_performance_avg_access_time_ms": 0.0003119998291367665,
+  "error_handling_handling_rate": 1.0
+}

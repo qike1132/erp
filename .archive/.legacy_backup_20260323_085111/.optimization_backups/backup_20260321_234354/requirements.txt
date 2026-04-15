@@ -1,0 +1,36 @@
+Flask==2.3.3
+Flask-SQLAlchemy==3.1.1
+Flask-WTF==1.2.1
+Flask-Limiter==3.5.0
+Flask-RESTful==0.3.10
+Flask-Caching==2.3.0
+flasgger==0.9.7.1
+python-dotenv==1.0.0
+pymysql==1.1.0
+cryptography==41.0.7
+pandas==2.1.4
+openpyxl==3.1.2
+redis==5.0.1
+
+# 测试依赖
+pytest==7.4.3
+pytest-cov==4.1.0
+pytest-html==3.2.0
+pytest-xdist==3.5.0
+pytest-mock==3.12.0
+pytest-asyncio==0.21.1
+pytest-flask==1.3.0
+pytest-sugar==0.9.7
+
+# 代码质量分析工具
+pylint==3.0.3
+flake8==7.0.0
+radon==6.0.1
+bandit==1.7.6
+black==23.12.1
+isort==5.13.2
+mypy==1.7.1
+
+# 性能分析工具
+memory-profiler==0.61.0
+py-spy==0.3.14

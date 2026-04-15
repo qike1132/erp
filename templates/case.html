@@ -1,0 +1,525 @@
+{% extends 'base.html' %}
+{% block content %}
+    <h2><i class="fas fa-box-open text-success me-2"></i>皮套管理</h2>
+    
+    <ul class="nav nav-tabs mt-3" id="caseTab" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="stockin-tab" data-bs-toggle="tab" data-bs-target="#stockin-panel" type="button" role="tab">
+                <i class="fas fa-truck-loading me-1"></i>入库管理
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="stockout-tab" data-bs-toggle="tab" data-bs-target="#stockout-panel" type="button" role="tab">
+                <i class="fas fa-shipping-fast me-1"></i>出库管理
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="inventory-tab" data-bs-toggle="tab" data-bs-target="#inventory-panel" type="button" role="tab">
+                <i class="fas fa-warehouse me-1"></i>库存查询
+            </button>
+        </li>
+    </ul>
+    
+    <div class="tab-content" id="caseTabContent">
+        <!-- 入库管理面板 -->
+        <div class="tab-pane fade show active" id="stockin-panel" role="tabpanel">
+            <div class="row mt-3">
+                <div class="col-lg-6">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span>皮套入库信息录入</span>
+                            <span class="badge bg-info" id="stagedCountBadge" style="display: none;">已暂存: 0</span>
+                        </div>
+                        <div class="card-body">
+                            <form id="stockinForm">
+                                <input type="hidden" id="stockin_product_id" name="product_id">
+                                
+                                <div class="row mb-3">
+                                    <div class="col-md-6">
+                                        <label for="stockin_customer" class="form-label">客户名称</label>
+                                        <select class="form-select" id="stockin_customer" name="customer" required>
+                                            <option value="">请选择客户</option>
+                                            {% for c in customers %}
+                                            <option value="{{ c }}">{{ c }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="stockin_date" class="form-label">入库时间</label>
+                                        <input type="date" class="form-control" id="stockin_date" name="stockin_date">
+                                    </div>
+                                </div>
+                                
+                                <div class="row mb-3">
+                                    <div class="col-md-8">
+                                        <label for="stockin_product_search" class="form-label">产品名称</label>
+                                        <input type="text" class="form-control" id="stockin_product_search" name="product_search" placeholder="输入产品名称或69码搜索" autocomplete="off" list="stockin_product_list" required>
+                                        <datalist id="stockin_product_list"></datalist>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="stockin_quantity" class="form-label">入库数量</label>
+                                        <input type="number" class="form-control" id="stockin_quantity" name="quantity" value="1" min="1" required>
+                                    </div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="stockin_note" class="form-label">备注</label>
+                                    <textarea class="form-control" id="stockin_note" name="note" rows="2" placeholder="例如：批量入库"></textarea>
+                                </div>
+                                
+                                <div class="d-flex gap-2">
+                                    <button type="button" class="btn btn-secondary" id="addStockinBtn" disabled>
+                                        <i class="fas fa-plus-circle me-1"></i>新增入库
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-lg-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span>暂存入库列表</span>
+                                <span id="stockinTotalCount">共 0 个</span>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div id="stagedStockinsList" style="max-height: 350px; overflow-y: auto;">
+                                <div class="text-center text-muted py-4">
+                                    <i class="fas fa-box-open fa-3x mb-3" style="opacity: 0.3;"></i>
+                                    <p>暂无暂存入库</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card mt-3">
+                        <div class="card-header d-flex justify-content-between align-items-center" style="cursor: pointer;" data-bs-toggle="collapse" data-bs-target="#stockinBatchUploadCollapse">
+                            <h6 class="mb-0 fw-bold"><i class="fas fa-file-import me-2 text-primary"></i>批量导入入库</h6>
+                            <i class="fas fa-chevron-down"></i>
+                        </div>
+                        <div class="collapse" id="stockinBatchUploadCollapse">
+                            <div class="card-body">
+                                <div id="stockin-excel-upload-area" class="border border-dashed p-4 text-center rounded"
+                                     style="min-height: 120px; cursor: pointer; background: #f8f9fa; border-color: #dee2e6 !important;">
+                                    <div class="d-flex flex-column align-items-center justify-content-center" style="min-height: 80px;">
+                                        <i class="fas fa-file-excel fa-2x text-success mb-2" style="opacity: 0.8;"></i>
+                                        <p class="text-muted mb-0 small">拖拽 Excel 文件到这里，或点击选择文件</p>
+                                        <p class="text-muted mb-0 small" style="font-size: 11px;">支持 .xlsx / .xls</p>
+                                    </div>
+                                    <input type="file" id="stockin-excel-input" style="display: none;" accept=".xlsx,.xls">
+                                    <div id="stockin-excel-preview" class="mt-3"></div>
+                                </div>
+                                <div class="d-flex justify-content-between align-items-center mt-3">
+                                    <button id="stockin-download-template" class="btn btn-outline-secondary btn-sm">
+                                        <i class="fas fa-file-excel me-1"></i>下载模板
+                                    </button>
+                                    <button id="stockin-batch-import" class="btn btn-primary btn-sm" disabled>
+                                        <i class="fas fa-upload me-1"></i>开始导入
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card mt-3">
+                <div class="card-body text-center py-3">
+                    <button type="button" class="btn btn-primary btn-lg" id="submitAllStockinsBtn" disabled style="min-width: 200px;">
+                        <i class="fas fa-paper-plane me-2"></i>
+                        <span id="submitStockinBtnText">提交入库</span>
+                        <span id="submitStockinBtnSpinner" class="spinner-border spinner-border-sm" style="display: none;"></span>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="card mt-3">
+                <div class="card-header">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span>入库记录列表</span>
+                        <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#stockinSearchPanel">
+                            <i class="fas fa-filter me-1"></i>筛选
+                        </button>
+                    </div>
+                </div>
+                <div class="collapse" id="stockinSearchPanel">
+                    <div class="card-body border-bottom">
+                        <form id="stockinSearchForm" class="row g-3">
+                            <div class="col-md-3">
+                                <label class="form-label">客户</label>
+                                <select class="form-select" id="searchStockinCustomer">
+                                    <option value="">全部</option>
+                                    {% for c in customers %}
+                                    <option value="{{ c }}">{{ c }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">开始日期</label>
+                                <input type="date" class="form-control" id="searchStockinStartDate">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">结束日期</label>
+                                <input type="date" class="form-control" id="searchStockinEndDate">
+                            </div>
+                            <div class="col-md-2 d-flex align-items-end">
+                                <button type="submit" class="btn btn-primary w-100">
+                                    <i class="fas fa-search me-1"></i>查询
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div id="stockinListTable">
+                        <div class="text-center text-muted py-4">
+                            <i class="fas fa-spinner fa-spin fa-2x mb-3"></i>
+                            <p>加载中...</p>
+                        </div>
+                    </div>
+                    <nav id="stockinPagination" class="mt-3">
+                        <ul class="pagination justify-content-center"></ul>
+                    </nav>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 出库管理面板 -->
+        <div class="tab-pane fade" id="stockout-panel" role="tabpanel">
+            <div class="row mt-3">
+                <div class="col-lg-6">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span>皮套出库信息录入</span>
+                            <span class="badge bg-info" id="stockoutStagedCountBadge" style="display: none;">已暂存: 0</span>
+                        </div>
+                        <div class="card-body">
+                            <form id="stockoutForm">
+                                <input type="hidden" id="stockout_product_id" name="product_id">
+                                
+                                <div class="row mb-3">
+                                    <div class="col-md-6">
+                                        <label for="stockout_customer" class="form-label">客户名称</label>
+                                        <select class="form-select" id="stockout_customer" name="customer">
+                                            <option value="">请选择客户</option>
+                                            {% for c in customers %}
+                                            <option value="{{ c }}">{{ c }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="stockout_date" class="form-label">出库时间</label>
+                                        <input type="date" class="form-control" id="stockout_date" name="stockout_date">
+                                    </div>
+                                </div>
+                                
+                                <div class="row mb-3">
+                                    <div class="col-md-8">
+                                        <label for="stockout_product_search" class="form-label">产品名称</label>
+                                        <input type="text" class="form-control" id="stockout_product_search" name="product_search" placeholder="输入产品名称或69码搜索" autocomplete="off" list="stockout_product_list" required>
+                                        <datalist id="stockout_product_list"></datalist>
+                                        <small class="text-muted" id="stockoutCurrentStock">当前库存: -</small>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="stockout_quantity" class="form-label">出库数量</label>
+                                        <input type="number" class="form-control" id="stockout_quantity" name="quantity" value="1" min="1" required>
+                                    </div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="stockout_note" class="form-label">备注</label>
+                                    <textarea class="form-control" id="stockout_note" name="note" rows="2" placeholder="例如：批量出库"></textarea>
+                                </div>
+                                
+                                <div class="d-flex gap-2">
+                                    <button type="button" class="btn btn-secondary" id="addStockoutBtn" disabled>
+                                        <i class="fas fa-plus-circle me-1"></i>新增出库
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-lg-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span>暂存出库列表</span>
+                                <span id="stockoutTotalCount">共 0 个</span>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div id="stagedStockoutsList" style="max-height: 350px; overflow-y: auto;">
+                                <div class="text-center text-muted py-4">
+                                    <i class="fas fa-shipping-fast fa-3x mb-3" style="opacity: 0.3;"></i>
+                                    <p>暂无暂存出库</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card mt-3">
+                        <div class="card-header d-flex justify-content-between align-items-center" style="cursor: pointer;" data-bs-toggle="collapse" data-bs-target="#stockoutBatchUploadCollapse">
+                            <h6 class="mb-0 fw-bold"><i class="fas fa-file-export me-2 text-danger"></i>批量导出出库</h6>
+                            <i class="fas fa-chevron-down"></i>
+                        </div>
+                        <div class="collapse" id="stockoutBatchUploadCollapse">
+                            <div class="card-body">
+                                <div id="stockout-excel-upload-area" class="border border-dashed p-4 text-center rounded"
+                                     style="min-height: 120px; cursor: pointer; background: #f8f9fa; border-color: #dee2e6 !important;">
+                                    <div class="d-flex flex-column align-items-center justify-content-center" style="min-height: 80px;">
+                                        <i class="fas fa-file-excel fa-2x text-success mb-2" style="opacity: 0.8;"></i>
+                                        <p class="text-muted mb-0 small">拖拽 Excel 文件到这里，或点击选择文件</p>
+                                        <p class="text-muted mb-0 small" style="font-size: 11px;">支持 .xlsx / .xls</p>
+                                    </div>
+                                    <input type="file" id="stockout-excel-input" style="display: none;" accept=".xlsx,.xls">
+                                    <div id="stockout-excel-preview" class="mt-3"></div>
+                                </div>
+                                <div class="d-flex justify-content-between align-items-center mt-3">
+                                    <button id="stockout-download-template" class="btn btn-outline-secondary btn-sm">
+                                        <i class="fas fa-file-excel me-1"></i>下载模板
+                                    </button>
+                                    <button id="stockout-batch-import" class="btn btn-danger btn-sm" disabled>
+                                        <i class="fas fa-upload me-1"></i>开始导入
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card mt-3">
+                <div class="card-body text-center py-3">
+                    <button type="button" class="btn btn-danger btn-lg" id="submitAllStockoutsBtn" disabled style="min-width: 200px;">
+                        <i class="fas fa-paper-plane me-2"></i>
+                        <span id="submitStockoutBtnText">提交出库</span>
+                        <span id="submitStockoutBtnSpinner" class="spinner-border spinner-border-sm" style="display: none;"></span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="card mt-3">
+                <div class="card-header">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span>出库记录列表</span>
+                        <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#stockoutSearchPanel">
+                            <i class="fas fa-filter me-1"></i>筛选
+                        </button>
+                    </div>
+                </div>
+                <div class="collapse" id="stockoutSearchPanel">
+                    <div class="card-body border-bottom">
+                        <form id="stockoutSearchForm" class="row g-3">
+                            <div class="col-md-3">
+                                <label class="form-label">客户</label>
+                                <select class="form-select" id="searchStockoutCustomer">
+                                    <option value="">全部</option>
+                                    {% for c in customers %}
+                                    <option value="{{ c }}">{{ c }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">开始日期</label>
+                                <input type="date" class="form-control" id="searchStockoutStartDate">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">结束日期</label>
+                                <input type="date" class="form-control" id="searchStockoutEndDate">
+                            </div>
+                            <div class="col-md-2 d-flex align-items-end">
+                                <button type="submit" class="btn btn-primary w-100">
+                                    <i class="fas fa-search me-1"></i>查询
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div id="stockoutListTable">
+                        <div class="text-center text-muted py-4">
+                            <i class="fas fa-spinner fa-spin fa-2x mb-3"></i>
+                            <p>加载中...</p>
+                        </div>
+                    </div>
+                    <nav id="stockoutPagination" class="mt-3">
+                        <ul class="pagination justify-content-center"></ul>
+                    </nav>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 库存查询面板 -->
+        <div class="tab-pane fade" id="inventory-panel" role="tabpanel">
+            <div class="card mt-3">
+                <div class="card-header">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span>皮套库存汇总</span>
+                        <div class="d-flex gap-2">
+                            <input type="text" class="form-control form-control-sm" id="inventorySearchKeyword" placeholder="搜索产品名称或69码..." style="width: 200px;">
+                            <button class="btn btn-sm btn-primary" id="refreshInventoryBtn">
+                                <i class="fas fa-sync-alt me-1"></i>刷新
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div id="inventoryTable">
+                        <div class="text-center text-muted py-4">
+                            <i class="fas fa-spinner fa-spin fa-2x mb-3"></i>
+                            <p>加载中...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card mt-3">
+                <div class="card-header">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span>库存流水记录 <small class="text-muted" id="selectedCaseName"></small></span>
+                        <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#logFilterPanel">
+                            <i class="fas fa-filter me-1"></i>筛选
+                        </button>
+                    </div>
+                </div>
+                <div class="collapse" id="logFilterPanel">
+                    <div class="card-body border-bottom">
+                        <form id="logFilterForm" class="row g-3">
+                            <input type="hidden" id="filterCaseId">
+                            <div class="col-md-3">
+                                <label class="form-label">操作类型</label>
+                                <select class="form-select" id="filterLogType">
+                                    <option value="">全部</option>
+                                    <option value="入库">入库</option>
+                                    <option value="出库">出库</option>
+                                    <option value="入库调整">入库调整</option>
+                                    <option value="出库调整">出库调整</option>
+                                    <option value="删除入库">删除入库</option>
+                                    <option value="删除出库">删除出库</option>
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">开始日期</label>
+                                <input type="date" class="form-control" id="filterStartDate">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">结束日期</label>
+                                <input type="date" class="form-control" id="filterEndDate">
+                            </div>
+                            <div class="col-md-2 d-flex align-items-end">
+                                <button type="submit" class="btn btn-primary me-2">
+                                    <i class="fas fa-search me-1"></i>查询
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary" id="clearFilterBtn">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div id="logTable">
+                        <div class="text-center text-muted py-4">
+                            <i class="fas fa-info-circle fa-2x mb-3" style="opacity: 0.3;"></i>
+                            <p>请点击上方库存表格中的产品查看流水记录</p>
+                        </div>
+                    </div>
+                    <nav id="logPagination" class="mt-3" style="display: none;">
+                        <ul class="pagination justify-content-center"></ul>
+                    </nav>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 编辑入库模态框 -->
+    <div class="modal fade" id="editStockinModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">编辑入库记录</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="editStockinId">
+                    <div class="mb-3">
+                        <label class="form-label">客户名称</label>
+                        <select class="form-select" id="editStockinCustomer">
+                            {% for c in customers %}
+                            <option value="{{ c }}">{{ c }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">入库日期</label>
+                        <input type="date" class="form-control" id="editStockinDate">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">产品名称</label>
+                        <input type="text" class="form-control" id="editStockinProductName" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">入库数量</label>
+                        <input type="number" class="form-control" id="editStockinQuantity" min="1">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">备注</label>
+                        <textarea class="form-control" id="editStockinNote" rows="2"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" id="saveEditStockinBtn">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 编辑出库模态框 -->
+    <div class="modal fade" id="editStockoutModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">编辑出库记录</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="editStockoutId">
+                    <div class="mb-3">
+                        <label class="form-label">客户名称</label>
+                        <select class="form-select" id="editStockoutCustomer">
+                            <option value="">无</option>
+                            {% for c in customers %}
+                            <option value="{{ c }}">{{ c }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">出库日期</label>
+                        <input type="date" class="form-control" id="editStockoutDate">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">产品名称</label>
+                        <input type="text" class="form-control" id="editStockoutProductName" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">出库数量</label>
+                        <input type="number" class="form-control" id="editStockoutQuantity" min="1">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">备注</label>
+                        <textarea class="form-control" id="editStockoutNote" rows="2"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" id="saveEditStockoutBtn">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+<script src="{{ url_for('static', filename='case.js') }}"></script>
+{% endblock %}

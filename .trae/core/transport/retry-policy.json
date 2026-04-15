@@ -1,0 +1,68 @@
+{
+  "version": "2.0.0",
+  "name": "Retry Policy Configuration",
+  "description": "Intelligent retry strategies for resilient communication",
+  
+  "global": {
+    "enabled": true,
+    "maxRetries": 3,
+    "initialDelay": 1000,
+    "maxDelay": 10000,
+    "backoffMultiplier": 2.0,
+    "jitterEnabled": true,
+    "jitterRange": 0.1
+  },
+  
+  "retryableErrors": [
+    "ECONNRESET",
+    "ETIMEDOUT",
+    "ECONNREFUSED",
+    "503 Service Unavailable",
+    "504 Gateway Timeout",
+    "429 Too Many Requests",
+    "network_error",
+    "timeout_error",
+    "rate_limit_exceeded"
+  ],
+  
+  "nonRetryableErrors": [
+    "400 Bad Request",
+    "401 Unauthorized",
+    "403 Forbidden",
+    "404 Not Found",
+    "validation_error",
+    "authentication_error",
+    "permission_denied"
+  ],
+  
+  "perOperation": {
+    "read": {
+      "maxRetries": 2,
+      "initialDelay": 500,
+      "backoffMultiplier": 1.5
+    },
+    "write": {
+      "maxRetries": 3,
+      "initialDelay": 1000,
+      "backoffMultiplier": 2.0
+    },
+    "delete": {
+      "maxRetries": 1,
+      "initialDelay": 2000,
+      "backoffMultiplier": 1.0
+    },
+    "critical": {
+      "maxRetries": 5,
+      "initialDelay": 500,
+      "maxDelay": 30000,
+      "backoffMultiplier": 1.5
+    }
+  },
+  
+  "adaptiveRetry": {
+    "enabled": true,
+    "learnFromFailures": true,
+    "adjustBasedOnLoad": true,
+    "maxAdaptationFactor": 2.0
+  }
+}

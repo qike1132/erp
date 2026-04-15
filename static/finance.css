@@ -1,0 +1,134 @@
+/* 财务统计页面样式 - 对齐毛绒主题设计系统 */
+
+/* 统计卡片 - 使用全局 stat-card 组件 */
+.stat-card {
+    border: none;
+    border-radius: var(--radius-card);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    background: var(--plush-white);
+    box-shadow: 0 4px 16px var(--plush-shadow-soft);
+    position: relative;
+    overflow: hidden;
+}
+
+.stat-card::after {
+    content: '';
+    position: absolute;
+    top: -30px;
+    right: -30px;
+    width: 90px;
+    height: 90px;
+    border-radius: 50%;
+    opacity: 0.08;
+    transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
+.stat-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 28px var(--plush-shadow-medium);
+}
+
+.stat-card:hover::after {
+    transform: scale(1.2);
+    opacity: 0.12;
+}
+
+.stat-card .stat-value {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: var(--plush-text);
+    line-height: 1.2;
+    font-variant-numeric: tabular-nums;
+}
+
+.stat-card .stat-label {
+    font-size: 0.85rem;
+    color: var(--plush-text-light);
+    margin-top: 6px;
+    font-weight: 500;
+}
+
+.stat-card-primary {
+    border-left: 4px solid var(--plush-blue-deep);
+}
+
+.stat-card-primary::after {
+    background: var(--plush-blue-deep);
+}
+
+.stat-card-primary .stat-value {
+    color: var(--plush-blue-text);
+}
+
+.stat-card-success {
+    border-left: 4px solid var(--plush-green-text);
+}
+
+.stat-card-success::after {
+    background: var(--plush-green-text);
+}
+
+.stat-card-success .stat-value {
+    color: var(--plush-green-text);
+}
+
+.stat-card-warning {
+    border-left: 4px solid #F57C00;
+}
+
+.stat-card-warning::after {
+    background: #F57C00;
+}
+
+.stat-card-warning .stat-value {
+    color: #E65100;
+}
+
+/* 表格金额列 */
+.table .text-end.fw-bold {
+    font-variant-numeric: tabular-nums;
+}
+
+/* 图表容器 */
+#dailyChartContainer {
+    min-height: 300px;
+    padding: 8px;
+}
+
+#dailyChartContainer canvas {
+    max-width: 100%;
+}
+
+/* 搜索表单 */
+#financeTabs .nav-link {
+    color: var(--plush-text-light);
+    font-weight: 600;
+}
+
+#financeTabs .nav-link.active {
+    color: var(--plush-blue-text);
+    font-weight: 700;
+}
+
+/* 筛选卡片 */
+.filter-card .form-label {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--plush-text-light);
+}
+
+/* 响应式 */
+@media (max-width: 768px) {
+    .stat-card .stat-value {
+        font-size: 1.4rem;
+    }
+
+    .stat-card .stat-label {
+        font-size: 0.78rem;
+    }
+
+    #dailyChartContainer {
+        min-height: 220px;
+    }
+}

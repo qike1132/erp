@@ -1,0 +1,1 @@
+ = @('d:\erp_system\app\routes\*.py','d:\erp_system\fastapi_app\api\v1\endpoints\*.py','d:\erp_system\fastapi_app\services\*.py','d:\erp_system\app\models\*.py','d:\erp_system\fastapi_app\shared_models\*.py','d:\erp_system\templates\*','d:\erp_system\app\utils\*.py','d:\erp_system\fastapi_app\utils\*.py','d:\erp_system\fastapi_app\schemas\*.py') 

@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [{
+      "matcher": "",
+      "hooks": [{
+        "type": "command",
+        "command": "python C:/Users/Administrator/Desktop/erp_system/skills/self-improving-agent/scripts/activator.py"
+      }]
+    }],
+    "PostToolUse": [{
+      "matcher": "Bash",
+      "hooks": [{
+        "type": "command",
+        "command": "python C:/Users/Administrator/Desktop/erp_system/skills/self-improving-agent/scripts/error-detector.py"
+      }]
+    }]
+  }
+}

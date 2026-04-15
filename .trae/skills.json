@@ -1,0 +1,459 @@
+{
+  "version": "3.0.0",
+  "name": "ERP System Skills Configuration",
+  "lastUpdated": "2026-03-28T10:00:00Z",
+  "description": "Complete agent skills configuration with auto-activation triggers",
+  
+  "automation": {
+    "enabled": true,
+    "configPath": ".trae/rules/",
+    "autoActivate": true,
+    "triggerOnSave": true,
+    "triggerOnCommit": true,
+    "triggerOnFileCreate": true
+  },
+
+  "skills": [
+    {
+      "name": "agents-orchestrator",
+      "path": "./agents-orchestrator",
+      "enabled": true,
+      "autoActivate": true,
+      "priority": 0,
+      "defaultEnabled": true,
+      "globalDefault": true,
+      "description": "Autonomous pipeline manager that orchestrates the entire development workflow from specification to production-ready implementation - DEFAULT ENABLED. Use @agents-orchestrator to invoke directly.",
+      "triggers": {
+        "keywords": ["orchestrate", "pipeline", "coordinate", "workflow", "run pipeline", "full workflow"],
+        "events": ["onProjectInit", "onComplexFeature", "onSystemStartup", "onSessionStart"],
+        "autoStart": true,
+        "directCall": "@agents-orchestrator"
+      },
+      "directInvocation": {
+        "enabled": true,
+        "callPattern": "@agents-orchestrator",
+        "alternativePatterns": ["@orchestrator", "@pipeline-manager"],
+        "immediateResponse": true,
+        "responseTimeout": 5000
+      },
+      "coordination": {
+        "sequential": true,
+        "qualityGates": true,
+        "evidenceRequired": true,
+        "autoInitialize": true
+      },
+      "initialization": {
+        "loadOnStartup": true,
+        "preloadAgents": true,
+        "warmUpCache": true
+      }
+    },
+    {
+      "name": "frontend-developer",
+      "path": "./skills/frontend-developer",
+      "enabled": true,
+      "autoActivate": true,
+      "priority": 1,
+      "description": "Expert frontend developer specializing in modern web technologies, React/Vue/Angular frameworks, UI implementation, and performance optimization",
+      "triggers": {
+        "fileTypes": [".js", ".jsx", ".ts", ".tsx", ".vue", ".html"],
+        "events": ["onFileSave", "onFileCreate"],
+        "keywords": ["frontend", "UI", "component", "React", "Vue", "page"]
+      },
+      "autoActions": {
+        "onSave": ["lint", "format", "typeCheck"],
+        "onCommit": ["review", "test"]
+      }
+    },
+    {
+      "name": "backend-architect",
+      "path": "./skills/backend-architect",
+      "enabled": true,
+      "autoActivate": true,
+      "priority": 1,
+      "description": "Senior backend architect specializing in scalable system design, database architecture, API development, and cloud infrastructure",
+      "triggers": {
+        "fileTypes": [".py", ".java", ".go", ".rb", ".php", ".cs", ".rs"],
+        "events": ["onFileSave", "onFileCreate", "onAPIChange"],
+        "keywords": ["backend", "API", "service", "database", "architecture"]
+      },
+      "autoActions": {
+        "onSave": ["lint", "typeCheck", "securityScan"],
+        "onCommit": ["review", "test", "securityAudit"]
+      }
+    },
+    {
+      "name": "senior-developer",
+      "path": "./skills/senior-developer",
+      "enabled": true,
+      "autoActivate": true,
+      "priority": 1,
+      "description": "Premium implementation specialist - Masters Laravel/Livewire/FluxUI, advanced CSS, Three.js integration",
+      "triggers": {
+        "fileTypes": [".php", ".blade.php"],
+        "events": ["onFileSave", "onFileCreate"],
+        "keywords": ["premium", "luxury", "Laravel", "Livewire", "FluxUI"]
+      }
+    },
+    {
+      "name": "autonomous-optimization-architect",
+      "path": "./autonomous-optimization-architect",
+      "enabled": true,
+      "autoActivate": true,
+      "priority": 2,
+      "description": "Intelligent system governor that continuously shadow-tests APIs for performance while enforcing strict financial and security guardrails",
+      "triggers": {
+        "fileTypes": [".ts", ".js", ".py"],
+        "keywords": ["optimize", "LLM", "AI cost", "shadow test", "circuit breaker", "A/B test"],
+        "events": ["onAPIChange", "onPerformanceAnalysis"]
+      },
+      "guardrails": {
+        "maxCostPerRun": 0.05,
+        "maxRetries": 3,
+        "circuitBreakerThreshold": 5
+      }
+    },
+    {
+      "name": "security-engineer",
+      "path": "./skills/security-engineer",
+      "enabled": true,
+      "autoActivate": true,
+      "priority": 1,
+      "description": "Expert application security engineer specializing in threat modeling, vulnerability assessment, secure code review, and security architecture design",
+      "triggers": {
+        "fileTypes": [".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".go", ".sql"],
+        "events": ["onPreCommit", "onSecuritySensitiveChange"],
+        "keywords": ["security", "auth", "permission", "encrypt", "vulnerability", "OWASP"]
+      },
+      "autoActions": {
+        "onPreCommit": ["securityScan"],
+        "onSecuritySensitiveChange": ["fullSecurityAudit"]
+      }
+    },
+    {
+      "name": "incident-response-commander",
+      "path": "./incident-response-commander",
+      "enabled": true,
+      "autoActivate": true,
+      "priority": 0,
+      "description": "Expert incident commander specializing in production incident management, structured response coordination, post-mortem facilitation, SLO/SLI tracking",
+      "triggers": {
+        "keywords": ["incident", "outage", "SEV", "post-mortem", "on-call", "SLO", "SLA"],
+        "events": ["onProductionIncident", "onDeploymentFailure"]
+      },
+      "responseConfig": {
+        "autoEscalation": true,
+        "communicationCadence": true,
+        "runbookRequired": true
+      }
+    },
+    {
+      "name": "code-reviewer",
+      "path": "./skills/code-reviewer",
+      "enabled": true,
+      "autoActivate": true,
+      "priority": 3,
+      "description": "Expert code reviewer who provides constructive, actionable feedback focused on correctness, maintainability, security, and performance",
+      "triggers": {
+        "fileTypes": [".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".go", ".rb", ".php"],
+        "events": ["onPreCommit", "onPullRequest", "onManualTrigger"],
+        "keywords": ["review", "check", "optimize", "refactor"]
+      },
+      "autoActions": {
+        "onPreCommit": ["fullReview"],
+        "onPullRequest": ["fullReview", "securityAudit"]
+      }
+    },
+    {
+      "name": "database-optimizer",
+      "path": "./skills/database-optimizer",
+      "enabled": true,
+      "autoActivate": true,
+      "priority": 2,
+      "description": "Expert database specialist focusing on schema design, query optimization, indexing strategies, and performance tuning for PostgreSQL, MySQL",
+      "triggers": {
+        "fileTypes": [".sql", ".prisma", ".schema"],
+        "events": ["onFileSave", "onQueryChange", "onSchemaChange"],
+        "keywords": ["database", "SQL", "query", "index", "optimize"]
+      },
+      "autoActions": {
+        "onSave": ["queryAnalysis"],
+        "onCommit": ["schemaReview"]
+      }
+    },
+    {
+      "name": "sre",
+      "path": "./sre",
+      "enabled": true,
+      "autoActivate": true,
+      "priority": 1,
+      "description": "Expert site reliability engineer specializing in SLOs, error budgets, observability, chaos engineering, and toil reduction for production systems",
+      "triggers": {
+        "fileTypes": [".yaml", ".yml", ".tf"],
+        "keywords": ["SLO", "error budget", "observability", "reliability", "toil", "chaos"],
+        "events": ["onDeployment", "onCapacityPlanning"]
+      },
+      "sloConfig": {
+        "availabilityTarget": 99.95,
+        "latencyTarget": "200ms",
+        "errorBudgetPolicy": true
+      }
+    },
+    {
+      "name": "software-architect",
+      "path": "./skills/software-architect",
+      "enabled": true,
+      "autoActivate": true,
+      "priority": 1,
+      "description": "Expert software architect specializing in system design, domain-driven design, architectural patterns, and technical decision-making",
+      "triggers": {
+        "events": ["onArchitectureReview", "onSystemDesign"],
+        "keywords": ["architecture", "design", "pattern", "ADR", "domain"]
+      }
+    },
+    {
+      "name": "ui-designer",
+      "path": "./skills/ui-designer",
+      "enabled": true,
+      "autoActivate": true,
+      "priority": 2,
+      "description": "Expert UI designer specializing in visual design systems, component libraries, and pixel-perfect interface creation",
+      "triggers": {
+        "fileTypes": [".css", ".scss", ".less", ".sass"],
+        "events": ["onFileSave", "onStyleChange"],
+        "keywords": ["design", "style", "CSS", "theme", "layout"]
+      },
+      "autoActions": {
+        "onSave": ["stylelint", "accessibilityCheck"],
+        "onCommit": ["designReview"]
+      }
+    },
+    {
+      "name": "ux-researcher",
+      "path": "./ux-researcher",
+      "enabled": true,
+      "autoActivate": true,
+      "priority": 2,
+      "description": "Expert user experience researcher specializing in user behavior analysis, usability testing, and data-driven design insights",
+      "triggers": {
+        "keywords": ["user research", "usability", "persona", "user journey", "A/B test", "user feedback"],
+        "events": ["onFeatureDesign", "onUIChange", "onUserFeedback"]
+      },
+      "researchConfig": {
+        "minSampleSize": 5,
+        "statisticalSignificance": 0.95,
+        "includeAccessibility": true
+      }
+    },
+    {
+      "name": "ux-architect",
+      "path": "./skills/ux-architect",
+      "enabled": true,
+      "autoActivate": true,
+      "priority": 2,
+      "description": "Technical architecture and UX specialist who provides developers with solid foundations, CSS systems, and clear implementation guidance",
+      "triggers": {
+        "events": ["onProjectInit", "onArchitectureDesign"],
+        "keywords": ["UX architecture", "CSS system", "foundation", "layout"]
+      }
+    },
+    {
+      "name": "image-prompt-engineer",
+      "path": "./image-prompt-engineer",
+      "enabled": true,
+      "autoActivate": true,
+      "priority": 3,
+      "description": "Expert photography prompt engineer specializing in crafting detailed, evocative prompts for AI image generation",
+      "triggers": {
+        "keywords": ["image prompt", "AI image", "generate image", "photo prompt", "Midjourney", "DALL-E"],
+        "events": ["onImageGenerationRequest"]
+      }
+    },
+    {
+      "name": "senior-project-manager",
+      "path": "./senior-project-manager",
+      "enabled": true,
+      "autoActivate": true,
+      "priority": 1,
+      "description": "Converts specs to tasks with realistic scope - no gold-plating, no fantasy. Focused on exact spec requirements",
+      "triggers": {
+        "keywords": ["task list", "project plan", "breakdown", "scope", "milestone"],
+        "events": ["onProjectInit", "onSpecReview"]
+      },
+      "taskConfig": {
+        "taskDuration": "30-60 minutes",
+        "includeAcceptanceCriteria": true,
+        "preventScopeCreep": true
+      }
+    },
+    {
+      "name": "test-results-analyzer",
+      "path": "./test-results-analyzer",
+      "enabled": true,
+      "autoActivate": true,
+      "priority": 2,
+      "description": "Expert test analysis specialist focused on comprehensive test result evaluation, quality metrics analysis, and actionable insight generation",
+      "triggers": {
+        "keywords": ["test results", "test analysis", "quality metrics", "coverage", "defect"],
+        "events": ["onTestComplete", "onQualityReview", "onReleaseReadiness"],
+        "fileTypes": [".json", ".xml", ".html"]
+      },
+      "analysisConfig": {
+        "minCoverage": 80,
+        "statisticalConfidence": 0.95,
+        "predictiveModeling": true
+      }
+    },
+    {
+      "name": "performance-benchmarker",
+      "path": "./performance-benchmarker",
+      "enabled": true,
+      "autoActivate": true,
+      "priority": 2,
+      "description": "Expert performance testing and optimization specialist focused on measuring, analyzing, and improving system performance",
+      "triggers": {
+        "keywords": ["performance", "benchmark", "load test", "stress test", "latency", "throughput"],
+        "events": ["onPerformanceTest", "onCapacityPlanning", "onOptimizationRequest"],
+        "fileTypes": [".js", ".ts", ".py"]
+      },
+      "performanceConfig": {
+        "responseTimeTarget": "200ms",
+        "throughputTarget": "1000 rps",
+        "loadTestDuration": "5m"
+      }
+    },
+    {
+      "name": "api-tester",
+      "path": "./api-tester",
+      "enabled": true,
+      "autoActivate": true,
+      "priority": 2,
+      "description": "Expert API testing specialist focused on comprehensive API validation, performance testing, and quality assurance",
+      "triggers": {
+        "keywords": ["API test", "endpoint", "REST", "GraphQL", "integration test"],
+        "events": ["onAPIDevelop", "onIntegrationTest", "onReleaseValidation"],
+        "fileTypes": [".ts", ".js", ".py", ".json"]
+      },
+      "testConfig": {
+        "coverageTarget": 95,
+        "responseTimeTarget": "200ms",
+        "errorRateTarget": 0.001,
+        "securityScanEnabled": true
+      }
+    },
+    {
+      "name": "workflow-optimizer",
+      "path": "./workflow-optimizer",
+      "enabled": true,
+      "autoActivate": true,
+      "priority": 2,
+      "description": "Expert process improvement specialist focused on analyzing, optimizing, and automating workflows for maximum productivity",
+      "triggers": {
+        "keywords": ["workflow", "process", "automation", "efficiency", "bottleneck", "optimize"],
+        "events": ["onProcessReview", "onAutomationRequest"]
+      },
+      "optimizationConfig": {
+        "targetImprovement": "40%",
+        "automationTarget": "60%",
+        "errorReduction": "75%"
+      }
+    },
+    {
+      "name": "workflow-architect",
+      "path": "./workflow-architect",
+      "enabled": true,
+      "autoActivate": true,
+      "priority": 1,
+      "description": "Workflow design specialist who maps complete workflow trees for every system, user journey, and agent interaction",
+      "triggers": {
+        "keywords": ["workflow spec", "flow design", "state machine", "process spec", "handoff"],
+        "events": ["onSystemDesign", "onFeaturePlanning", "onArchitectureReview"]
+      },
+      "specConfig": {
+        "requireEvidence": true,
+        "coverAllBranches": true,
+        "defineTimeouts": true,
+        "cleanupInventory": true
+      }
+    },
+    {
+      "name": "self-improvement",
+      "path": "./skills/self-improvement",
+      "enabled": true,
+      "autoActivate": true,
+      "description": "Captures learnings, errors, and corrections for continuous improvement",
+      "triggers": ["error", "correction", "learning", "feature request"]
+    },
+    {
+      "name": "elite-longterm-memory",
+      "path": "./skills/elite-longterm-memory",
+      "enabled": true,
+      "description": "Ultimate AI agent memory system. WAL protocol + vector search + git-notes + cloud backup."
+    },
+    {
+      "name": "erp-ui-design",
+      "path": "./skills/erp-ui-design",
+      "enabled": true,
+      "description": "ERP system UI design specifications including color scheme, typography, components, and interaction patterns."
+    },
+    {
+      "name": "find-skills",
+      "path": "./skills/find-skills",
+      "enabled": true,
+      "description": "Helps users discover and install agent skills from the open ecosystem."
+    },
+    {
+      "name": "frontend-code-review",
+      "path": "./skills/frontend-code-review",
+      "enabled": true,
+      "description": "Comprehensive frontend code review with category-specific checklists and urgency-based reporting."
+    },
+    {
+      "name": "frontend-design",
+      "path": "./skills/frontend-design",
+      "enabled": true,
+      "description": "Create distinctive, production-grade frontend interfaces with high design quality."
+    },
+    {
+      "name": "skill-vetter",
+      "path": "./skills/skill-vetter",
+      "enabled": true,
+      "description": "Security-first skill vetting protocol. Checks for red flags, permission scope, and suspicious patterns."
+    },
+    {
+      "name": "data-engineer",
+      "path": "./skills/data-engineer",
+      "enabled": true,
+      "description": "Data engineer specializing in building reliable data pipelines, lakehouse architectures, and scalable data infrastructure"
+    }
+  ],
+
+  "automationRules": {
+    "configFile": ".trae/rules/auto-triggers.json",
+    "statusFeedback": ".trae/rules/status-feedback.json",
+    "devRules": ".trae/rules/dev-rules.json",
+    "agentAutoActivation": ".trae/rules/agent-auto-activation.json"
+  },
+
+  "hooks": {
+    "preCommit": {
+      "enabled": true,
+      "script": ".git/hooks/pre-commit",
+      "blocking": true
+    }
+  },
+
+  "agentPriority": {
+    "critical": 0,
+    "high": 1,
+    "medium": 2,
+    "low": 3
+  },
+
+  "coordination": {
+    "maxConcurrent": 3,
+    "timeout": 30000,
+    "retryLimit": 3,
+    "qualityGates": true
+  }
+}

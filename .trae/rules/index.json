@@ -1,0 +1,160 @@
+{
+  "version": "v4.0.0",
+  "updated_date": "2026-04-07",
+  "description": "Agent协同体系规则索引",
+
+  "core_rules": {
+    "priority": 1,
+    "files": [
+      {
+        "name": "agent-orchestration-core.md",
+        "path": "agent-orchestration-core.md",
+        "type": "core",
+        "size_chars": 913,
+        "status": "active",
+        "description": "核心指令精简版（必须始终加载）"
+      }
+    ]
+  },
+
+  "module_rules": {
+    "priority": 2,
+    "path": "core/",
+    "description": "核心模块规则（按需加载）",
+    "files": [
+      {
+        "name": "priority-rules.md",
+        "size_chars": 521,
+        "description": "优先级体系"
+      },
+      {
+        "name": "dispatch-rules.md",
+        "size_chars": 885,
+        "description": "调度规则与检查清单"
+      },
+      {
+        "name": "execution-rules.md",
+        "size_chars": 853,
+        "description": "执行机制规则"
+      },
+      {
+        "name": "error-handling-rules.md",
+        "size_chars": 782,
+        "description": "错误处理规则"
+      },
+      {
+        "name": "feedback-rules.md",
+        "size_chars": 816,
+        "description": "反馈闭环规则"
+      },
+      {
+        "name": "middleware-rules.md",
+        "size_chars": 1200,
+        "description": "14层有序Middleware链规则"
+      }
+    ],
+    "total_chars": 5057
+  },
+
+  "main_rules": {
+    "description": "主规则文件（精简版）",
+    "files": [
+      {
+        "name": "agent-orchestration-supreme-directive.md",
+        "size_chars": 1846,
+        "description": "最高执行指令（精简版）"
+      },
+      {
+        "name": "project-rules.md",
+        "size_chars": 1607,
+        "description": "项目规则（精简版）"
+      }
+    ]
+  },
+
+  "extensions": {
+    "priority": 3,
+    "path": "extensions/",
+    "description": "扩展文档（按需加载）",
+    "files": [
+      {
+        "name": "SYSTEM_OPTIMIZATION_PLAN.md",
+        "size_chars": 22416,
+        "load_strategy": "on_demand",
+        "description": "系统优化计划"
+      },
+      {
+        "name": "RULES_OPTIMIZATION_REPORT.md",
+        "size_chars": 6271,
+        "load_strategy": "on_demand",
+        "description": "规则优化报告"
+      }
+    ]
+  },
+
+  "reference_rules": {
+    "description": "参考规则（不直接加载）",
+    "files": [
+      {
+        "name": "agent-orchestration-detailed.md",
+        "path": "agent-orchestration-detailed.md",
+        "size_chars": 8032,
+        "description": "详细文档（完整版）"
+      }
+    ]
+  },
+
+  "load_strategy": {
+    "mode": "layered",
+    "layers": [
+      {
+        "name": "core",
+        "files": ["agent-orchestration-core.md"],
+        "required": true,
+        "max_chars": 1000
+      },
+      {
+        "name": "modules",
+        "path": "core/",
+        "required": false,
+        "load_all": true,
+        "max_chars_per_file": 1000
+      },
+      {
+        "name": "main_rules",
+        "required": false,
+        "load_all": true,
+        "max_chars_per_file": 2000
+      },
+      {
+        "name": "extensions",
+        "path": "extensions/",
+        "required": false,
+        "load_all": false,
+        "load_strategy": "on_demand"
+      }
+    ]
+  },
+
+  "size_limits": {
+    "core_file_max_chars": 1000,
+    "module_file_max_chars": 1000,
+    "main_file_max_chars": 2000,
+    "recommended_total_chars": 5000
+  },
+
+  "optimization_summary": {
+    "before": {
+      "total_chars": 60000,
+      "main_files": 5,
+      "problem": "多个文件超过1000字符限制"
+    },
+    "after": {
+      "core_chars": 913,
+      "module_total_chars": 3857,
+      "main_rules_chars": 3453,
+      "recommended_load_chars": 4500,
+      "improvement": "核心文件精简至<1KB，详细内容拆分至模块"
+    }
+  }
+}

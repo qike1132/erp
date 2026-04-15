@@ -1,0 +1,110 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Flask
+instance/
+.webassets-cache
+
+# Environment
+.env
+.env.local
+.env.production
+.env.development
+.env.backup
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+debug-*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
+
+# Windows system files
+nul
+*.lnk
+
+# Database files (except if needed for version control)
+*.db
+!instance/
+instance/*.db
+
+# Agent configuration files
+.codearts/
+.arts/
+
+# Coverage files
+.coverage
+coverage.xml
+htmlcov/
+
+# Analysis & benchmark artifacts
+baseline_metrics.json
+sourcemap_analysis.json
+dependency_audit.json
+security_scan.json
+claude_cli_analysis.json
+upgrade_test_report.json
+
+# Captured output
+output.txt
+clear_output.txt
+
+# MySQL client artifacts
+query
+queryex
+qc
+
+# Windows artifacts
+nul_
+
+# Root-level test xlsx
+_test_*.xlsx
+
+# Archive files
+*.tar.gz
+*.rar
+*.zip
+
+# Logs directory
+logs/
+
+# Test reports
+test_reports/
+*.log

@@ -7,7 +7,7 @@
             添加新用户
         </div>
         <div class="card-body">
-            <form method="POST">
+            <form method="POST" action="{{ url_for('user.add_user') }}">
                 <div class="mb-3">
                     <label for="username" class="form-label">用户名</label>
                     <input type="text" class="form-control" id="username" name="username" required placeholder="请输入用户名">
@@ -29,7 +29,7 @@
             用户列表
         </div>
         <div class="card-body">
-            <table class="table table-striped">
+            <table class="table table">
                 <thead>
                     <tr>
                         <th>用户名</th>
@@ -40,20 +40,26 @@
                     </tr>
                 </thead>
                 <tbody>
-                    {% for user in users %}
+                    {% for u in users %}
                         <tr>
-                            <td>{{ user.username }}</td>
-                            <td>{{ '是' if user.is_super else '否' }}</td>
-                            <td>{{ '启用' if user.status else '禁用' }}</td>
-                            <td>{{ user.create_time.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td>{{ u.username }}</td>
+                            <td>{{ '是' if u.is_super else '否' }}</td>
+                            <td>{{ '启用' if u.status else '禁用' }}</td>
+                            <td>{{ u.create_time.strftime('%Y-%m-%d %H:%M') }}</td>
                             <td>
-                                <a href="{{ url_for('edit_user', id=user.id) }}" class="btn btn-sm btn-warning">编辑</a>
-                                <a href="{{ url_for('user_permission', user_id=user.id) }}" class="btn btn-sm btn-info">权限设置</a>
-                                <a href="{{ url_for('toggle_user_status', id=user.id) }}" class="btn btn-sm btn-{{ 'danger' if user.status else 'success' }}">
-                                    {{ '禁用' if user.status else '启用' }}
+                                <a href="{{ url_for('user.edit_user', id=u.id) }}" class="btn btn-sm btn-outline-primary" title="编辑">
+                                    <i class="fas fa-edit"></i>
                                 </a>
-                                {% if not user.is_super %}
-                                    <a href="{{ url_for('delete_user', id=user.id) }}" class="btn btn-sm btn-danger" onclick="return confirm('确定要删除该用户吗？')">删除</a>
+                                <a href="{{ url_for('user.user_permission', user_id=u.id) }}" class="btn btn-sm btn-outline-info" title="权限设置">
+                                    <i class="fas fa-key"></i>
+                                </a>
+                                <a href="{{ url_for('user.toggle_user_status', id=u.id) }}" class="btn btn-sm btn-outline-{{ 'danger' if u.status else 'success' }}" title="{{ '禁用' if u.status else '启用' }}">
+                                    <i class="fas fa-{{ 'ban' if u.status else 'check' }}"></i>
+                                </a>
+                                {% if not u.is_super %}
+                                    <a href="{{ url_for('user.delete_user', id=u.id) }}" class="btn btn-sm btn-outline-danger" onclick="return confirm('确定要删除该用户吗？')" title="删除">
+                                        <i class="fas fa-trash"></i>
+                                    </a>
                                 {% endif %}
                             </td>
                         </tr>

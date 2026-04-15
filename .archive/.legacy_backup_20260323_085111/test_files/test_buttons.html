@@ -1,0 +1,55 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test</title>
+</head>
+<body>
+    <div id="excel-upload-area" style="padding: 20px; border: 1px solid black;">
+        <p>Upload Area</p>
+    </div>
+    <button id="download-template">Download Template</button>
+    <button id="deductPreviewBtn">Deduct Preview</button>
+    
+    <script>
+        console.log('Script loaded');
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOMContentLoaded');
+            
+            const deductPreviewBtn = document.getElementById('deductPreviewBtn');
+            if (deductPreviewBtn) {
+                console.log('deductPreviewBtn found');
+                deductPreviewBtn.addEventListener('click', function() {
+                    console.log('deductPreviewBtn clicked');
+                    alert('Deduct Preview Button Clicked!');
+                });
+            } else {
+                console.log('deductPreviewBtn NOT found');
+            }
+            
+            const downloadTemplate = document.getElementById('download-template');
+            if (downloadTemplate) {
+                console.log('downloadTemplate found');
+                downloadTemplate.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log('downloadTemplate clicked');
+                    alert('Download Template Button Clicked!');
+                });
+            } else {
+                console.log('downloadTemplate NOT found');
+            }
+            
+            const excelUploadArea = document.getElementById('excel-upload-area');
+            excelUploadArea.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const targetElement = e.target.closest('#download-template, #batch-import');
+                if (e.target.tagName !== 'IMG' && !targetElement) {
+                    console.log('excelUploadArea clicked');
+                }
+            });
+        });
+    </script>
+</body>
+</html>

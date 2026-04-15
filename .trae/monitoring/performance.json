@@ -1,0 +1,172 @@
+{
+  "version": "2.0.0",
+  "name": "Performance Monitoring Configuration",
+  "description": "Real-time performance monitoring and analytics for Agent system",
+  
+  "enabled": true,
+  
+  "metrics": {
+    "collectInterval": 10000,
+    "retentionDays": 30,
+    "aggregationIntervals": ["1m", "5m", "15m", "1h", "6h", "24h"],
+    
+    "agentMetrics": {
+      "enabled": true,
+      "collect": [
+        "execution_time",
+        "memory_usage",
+        "cpu_usage",
+        "error_count",
+        "success_count",
+        "queue_depth",
+        "throughput"
+      ],
+      "percentiles": [50, 90, 95, 99],
+      "histogramBuckets": [10, 50, 100, 200, 500, 1000, 2000, 5000, 10000]
+    },
+    
+    "transportMetrics": {
+      "enabled": true,
+      "collect": [
+        "latency_p50",
+        "latency_p95",
+        "latency_p99",
+        "connection_count",
+        "message_rate",
+        "error_rate",
+        "retry_count"
+      ]
+    },
+    
+    "systemMetrics": {
+      "enabled": true,
+      "collect": [
+        "total_memory",
+        "used_memory",
+        "cpu_cores",
+        "cpu_usage",
+        "disk_io",
+        "network_io"
+      ]
+    }
+  },
+  
+  "alerts": {
+    "enabled": true,
+    "channels": ["console", "log"],
+    "cooldown": 300000,
+    
+    "rules": [
+      {
+        "name": "high_error_rate",
+        "condition": "error_rate > 0.05",
+        "severity": "warning",
+        "message": "Error rate exceeded 5% threshold",
+        "cooldown": 300000
+      },
+      {
+        "name": "critical_error_rate",
+        "condition": "error_rate > 0.15",
+        "severity": "critical",
+        "message": "Critical: Error rate exceeded 15% threshold",
+        "cooldown": 60000
+      },
+      {
+        "name": "slow_response",
+        "condition": "latency_p99 > 5000",
+        "severity": "warning",
+        "message": "P99 latency exceeded 5 seconds",
+        "cooldown": 300000
+      },
+      {
+        "name": "very_slow_response",
+        "condition": "latency_p99 > 10000",
+        "severity": "critical",
+        "message": "Critical: P99 latency exceeded 10 seconds",
+        "cooldown": 120000
+      },
+      {
+        "name": "circuit_breaker_open",
+        "condition": "circuit_state == 'open'",
+        "severity": "critical",
+        "message": "Circuit breaker is open - service degraded",
+        "cooldown": 60000
+      },
+      {
+        "name": "high_memory_usage",
+        "condition": "memory_usage_percent > 85",
+        "severity": "warning",
+        "message": "Memory usage exceeded 85%",
+        "cooldown": 600000
+      },
+      {
+        "name": "low_throughput",
+        "condition": "throughput < 10",
+        "severity": "warning",
+        "message": "Throughput dropped below 10 requests/second",
+        "cooldown": 300000
+      }
+    ]
+  },
+  
+  "dashboard": {
+    "enabled": true,
+    "refreshInterval": 5000,
+    "defaultTimeRange": "1h",
+    "availableRanges": ["15m", "1h", "6h", "24h", "7d", "30d"],
+    
+    "widgets": [
+      {
+        "id": "agent-health",
+        "type": "status-grid",
+        "title": "Agent Health Status",
+        "metrics": ["status", "error_rate", "latency_p99"]
+      },
+      {
+        "id": "throughput-chart",
+        "type": "line-chart",
+        "title": "Request Throughput",
+        "metrics": ["throughput"],
+        "timeRange": "1h"
+      },
+      {
+        "id": "latency-distribution",
+        "type": "histogram",
+        "title": "Latency Distribution",
+        "metrics": ["latency_p50", "latency_p95", "latency_p99"]
+      },
+      {
+        "id": "error-breakdown",
+        "type": "pie-chart",
+        "title": "Error Breakdown",
+        "metrics": ["error_types"]
+      },
+      {
+        "id": "circuit-breaker-status",
+        "type": "status-indicator",
+        "title": "Circuit Breaker State",
+        "metrics": ["circuit_state"]
+      }
+    ]
+  },
+  
+  "export": {
+    "enabled": true,
+    "formats": ["json", "csv"],
+    "maxRecords": 100000,
+    "includeMetadata": true
+  },
+  
+  "performance": {
+    "samplingRate": 0.1,
+    "asyncCollection": true,
+    "batchSize": 100,
+    "flushInterval": 5000,
+    "adaptiveSampling": {
+      "enabled": true,
+      "minRate": 0.01,
+      "maxRate": 1.0,
+      "loadThreshold": 1000
+    }
+  }
+}
