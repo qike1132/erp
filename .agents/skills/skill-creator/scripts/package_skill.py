@@ -14,7 +14,7 @@ import sys
 import zipfile
 from pathlib import Path
 
-from quick_validate import validate_skill
+from .quick_validate import validate_skill
 
 
 def _is_within(path: Path, root: Path) -> bool:
