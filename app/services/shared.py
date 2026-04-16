@@ -7,6 +7,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def escape_like(value: str) -> str:
+    """转义 SQL LIKE 通配符，防止 LIKE 注入"""
+    return value.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+
+
 def validate_quantity(quantity_str, max_value=100000):
     """验证数量参数，返回 (quantity, error_msg)"""
     try:

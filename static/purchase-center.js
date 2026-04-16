@@ -80,15 +80,6 @@ async function loadOrdersSilently(page = 1) {
     }
 }
 
-function showToast(msg, type='info') {
-    const t = document.createElement('div');
-    t.className = `pc-toast pc-toast-${type}`;
-    const icons = {success:'fa-check-circle',error:'fa-times-circle',warning:'fa-exclamation-circle',info:'fa-info-circle'};
-    t.innerHTML = `<i class="fas ${icons[type]||icons.info}"></i> ${escapeHtml(msg)}`;
-    document.body.appendChild(t);
-    setTimeout(() => { t.style.opacity='0'; t.style.transition='opacity 0.3s'; setTimeout(()=>t.remove(),300); }, 3000);
-}
-
 function showConfirm(text, sub, type='danger') {
     return new Promise(resolve => {
         confirmCallback = resolve;
@@ -133,7 +124,7 @@ function switchTab(tab) {
 
 function _handleAuthError(status) {
     if (status === 401) {
-        showToast('登录已过期，请重新登录', 'error');
+        showToast('未登录，请先登录', 'error');
         setTimeout(() => { window.location.href = '/login'; }, 1500);
         return true;
     }
@@ -143,7 +134,7 @@ function _handleAuthError(status) {
 async function apiGet(url) {
     try {
         const r = await fetch(API_BASE + url, {credentials: 'same-origin'});
-        if (_handleAuthError(r.status)) return {success:false, message:'登录已过期'};
+        if (_handleAuthError(r.status)) return {success:false, message:'未登录'};
         if (!r.ok) {
             return {success:false, message: `请求失败: ${r.status} ${r.statusText}`};
         }
@@ -165,7 +156,7 @@ async function apiPost(url, data) {
             credentials: 'same-origin',
             body: JSON.stringify(data)
         });
-        if (_handleAuthError(r.status)) return {success:false, message:'登录已过期'};
+        if (_handleAuthError(r.status)) return {success:false, message:'未登录'};
         if (!r.ok) {
             return {success:false, message: `请求失败: ${r.status} ${r.statusText}`};
         }
@@ -185,7 +176,7 @@ async function apiPut(url, data) {
             credentials: 'same-origin',
             body: JSON.stringify(data)
         });
-        if (_handleAuthError(r.status)) return {success:false, message:'登录已过期'};
+        if (_handleAuthError(r.status)) return {success:false, message:'未登录'};
         if (!r.ok) {
             return {success:false, message: `请求失败: ${r.status} ${r.statusText}`};
         }
@@ -341,15 +332,20 @@ function updatePurchaseSelectionUI() {
         selectAllHeaderCheckbox.checked = totalVisible > 0 && selectedCount >= totalVisible;
     }
     
-    document.getElementById('selectedPurchaseCount').textContent = selectedCount;
+    const selectedCountEl = document.getElementById('selectedPurchaseCount');
+    if (selectedCountEl) selectedCountEl.textContent = selectedCount;
 }
 
 function updateBatchButtons() {
     const count = orderSelectedIds.size;
-    document.getElementById('summaryOrderCount').textContent = `(${count})`;
-    document.getElementById('batchCompleteCount').textContent = `(${count})`;
-    document.getElementById('btnSummaryOrder').disabled = count === 0;
-    document.getElementById('btnBatchComplete').disabled = count === 0;
+    const summaryEl = document.getElementById('summaryOrderCount');
+    const batchEl = document.getElementById('batchCompleteCount');
+    const btnSummary = document.getElementById('btnSummaryOrder');
+    const btnBatch = document.getElementById('btnBatchComplete');
+    if (summaryEl) summaryEl.textContent = `(${count})`;
+    if (batchEl) batchEl.textContent = `(${count})`;
+    if (btnSummary) btnSummary.disabled = count === 0;
+    if (btnBatch) btnBatch.disabled = count === 0;
 }
 
 function openModal(modalId) {

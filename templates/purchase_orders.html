@@ -1133,20 +1133,20 @@ async function deleteSingleOrder(orderId) {
         const result = await response.json();
         
         if (result.success) {
-            showToast('删除成功', 'success', result.message || '订单已删除');
+            showToast(result.message || '订单已删除', 'success');
             await loadOrders();
         } else {
-            showToast('删除失败', 'error', result.error || '删除订单时发生错误');
+            showToast(result.error || '删除订单时发生错误', 'error');
         }
     } catch (error) {
         console.error('Delete order error:', error);
-        showToast('删除失败', 'error', '网络错误，请检查连接后重试');
+        showToast('网络错误，请检查连接后重试', 'error');
     }
 }
 
 async function batchDeleteOrders() {
     if (selectedOrders.size === 0) {
-        showToast('提示', 'warning', '请先选择要删除的订单');
+        showToast('请先选择要删除的订单', 'warning');
         return;
     }
     
@@ -1169,15 +1169,15 @@ async function batchDeleteOrders() {
         const result = await response.json();
         
         if (result.success) {
-            showToast('删除成功', 'success', result.message || `成功删除 ${count} 个订单`);
+            showToast(result.message || `成功删除 ${count} 个订单`, 'success');
             selectedOrders.clear();
             await loadOrders();
         } else {
-            showToast('删除失败', 'error', result.error || '批量删除订单时发生错误');
+            showToast(result.error || '批量删除订单时发生错误', 'error');
         }
     } catch (error) {
         console.error('Batch delete orders error:', error);
-        showToast('删除失败', 'error', '网络错误，请检查连接后重试');
+        showToast('网络错误，请检查连接后重试', 'error');
     }
 }
 
@@ -1353,57 +1353,5 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-function showToast(title, type, message) {
-    const colors = {
-        success: { bg: '#D4EDDA', border: '#28A745', color: '#155724', icon: 'check-circle' },
-        error: { bg: '#F8D7DA', border: '#DC3545', color: '#721C24', icon: 'exclamation-circle' },
-        warning: { bg: '#FFF3CD', border: '#FFC107', color: '#856404', icon: 'exclamation-triangle' },
-        info: { bg: '#D1ECF1', border: '#17A2B8', color: '#0C5460', icon: 'info-circle' }
-    };
-    
-    const c = colors[type] || colors.info;
-    
-    const toast = document.createElement('div');
-    toast.style.cssText = `
-        position: fixed; top: 24px; right: 24px; z-index: 9999;
-        display: flex; align-items: flex-start; gap: 12px;
-        padding: 16px 20px; border-radius: 12px;
-        background: ${c.bg}; border: 2px solid ${c.border};
-        color: ${c.color}; font-family: inherit;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.12);
-        max-width: 380px; animation: slideInRight 0.35s ease;
-    `;
-    toast.innerHTML = `
-        <i class="fas fa-${c.icon}" style="font-size: 20px; margin-top: 2px; flex-shrink: 0;"></i>
-        <div style="flex: 1;">
-            <div style="font-weight: 700; font-size: 14px; margin-bottom: 4px;">${title}</div>
-            <div style="font-size: 13px; line-height: 1.4;">${message}</div>
-        </div>
-        <button onclick="this.parentElement.remove()" style="
-            background:none;border:none;color:${c.color};cursor:pointer;
-            font-size:16px;padding:4px;margin:-4px -8px 0 0;line-height:1;
-        ">×</button>
-    `;
-    
-    document.body.appendChild(toast);
-    
-    setTimeout(() => {
-        toast.style.animation = 'slideOutRight 0.3s ease forwards';
-        setTimeout(() => toast.remove(), 300);
-    }, 4000);
-}
-
-const polStyleSheet = document.createElement('style');
-polStyleSheet.textContent = `
-    @keyframes slideInRight {
-        from { opacity: 0; transform: translateX(40px); }
-        to { opacity: 1; transform: translateX(0); }
-    }
-    @keyframes slideOutRight {
-        from { opacity: 1; transform: translateX(0); }
-        to { opacity: 0; transform: translateX(40px); }
-    }
-`;
-document.head.appendChild(polStyleSheet);
 </script>
 {% endblock %}

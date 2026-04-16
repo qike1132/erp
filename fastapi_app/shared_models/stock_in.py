@@ -3,7 +3,7 @@
 
 映射到与 Flask-SQLAlchemy StockIn 相同的 'stock_in' 表。
 """
-from sqlalchemy import String, Integer, Text, DateTime, ForeignKey
+from sqlalchemy import String, Integer, Text, DateTime, ForeignKey, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
 
@@ -24,6 +24,13 @@ class StockIn(Base):
 
     product: Mapped["Product"] = relationship('Product', backref='stockins')
     stockin_stockouts: Mapped[list["StockOut"]] = relationship('StockOut', backref='stockin')
+
+    __table_args__ = (
+        Index('idx_stockin_customer_product', 'customer', 'product_id'),
+        Index('idx_stockin_product_date', 'product_id', 'stockin_date'),
+        Index('idx_stockin_customer_date', 'customer', 'stockin_date'),
+        Index('idx_stockin_customer_product_date', 'customer', 'product_id', 'stockin_date'),
+    )
 
     def __repr__(self):
         return f'<StockIn {self.stockin_no}>'

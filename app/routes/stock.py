@@ -14,7 +14,7 @@ from app.services.stock_service import (
     update_stockout as svc_update_stockout,
     delete_stockout as svc_delete_stockout,
 )
-from app.services.shared import validate_quantity, validate_customer, validate_note, parse_date, build_datetime_with_time
+from app.services.shared import validate_quantity, validate_customer, validate_note, parse_date, build_datetime_with_time, escape_like
 from fastapi_app.services.stock_concurrency import get_product_for_update_sync
 from datetime import datetime
 from utils.number_generator import generate_stockin_number, generate_stockout_number
@@ -635,7 +635,7 @@ def inventory():
 
     # 应用产品名称筛选
     if search_product:
-        products_query = products_query.filter(Product.name.like(f'%{search_product}%'))
+        products_query = products_query.filter(Product.name.like(f'%{escape_like(search_product)}%'))
 
     products = products_query.all()
 
@@ -774,109 +774,110 @@ def export_inventory():
     try:
         from app.models import Order, StockIn
         from utils.report_exporter import ReportExporter, generate_filename
-        
+
         search_customer = request.args.get('customer', '').strip()
         search_product = request.args.get('product', '').strip()
-        
+
         products_query = Product.query.options(
             selectinload(Product.orders),
             selectinload(Product.stockins).selectinload(StockIn.stockin_stockouts)
         )
-        
+
         if search_product:
-            products_query = products_query.filter(Product.name.like(f'%{search_product}%'))
-        
+            products_query = products_query.filter(Product.name.like(f'%{escape_like(search_product)}%'))
+
         products = products_query.all()
-        
+
+        # 预加载：批量聚合查询，避免 N+1
+        product_ids = [p.id for p in products]
+
+        # StockOut 聚合：按 (product_id, customer, order_id IS NULL) 分组
+        stockout_rows = db.session.query(
+            StockOut.product_id,
+            StockOut.customer,
+            StockOut.order_id.is_(None).label('is_direct'),
+            db.func.sum(StockOut.quantity).label('total_qty')
+        ).filter(
+            StockOut.product_id.in_(product_ids),
+            StockOut.stockin_id.is_(None)
+        ).group_by(
+            StockOut.product_id, StockOut.customer, StockOut.order_id.is_(None)
+        ).all()
+
+        # 构建查找字典: (product_id, customer) → {direct_qty, order_qty}
+        stockout_map = {}
+        stockout_customers = {}  # product_id → set of customers
+        for row in stockout_rows:
+            key = (row.product_id, row.customer)
+            if key not in stockout_map:
+                stockout_map[key] = {'direct_qty': 0, 'order_qty': 0}
+            if row.is_direct:
+                stockout_map[key]['direct_qty'] = row.total_qty
+            else:
+                stockout_map[key]['order_qty'] = row.total_qty
+            if row.customer:
+                stockout_customers.setdefault(row.product_id, set()).add(row.customer)
+
+        # Order 聚合：按 (product_id, customer) 分组
+        order_rows = db.session.query(
+            Order.product_id,
+            Order.customer,
+            db.func.sum(Order.quantity).label('total_qty')
+        ).filter(
+            Order.product_id.in_(product_ids)
+        ).group_by(
+            Order.product_id, Order.customer
+        ).all()
+
+        order_map = {(r.product_id, r.customer): r.total_qty for r in order_rows}
+        order_customers_map = {}  # product_id → set of customers
+        for row in order_rows:
+            if row.customer:
+                order_customers_map.setdefault(row.product_id, set()).add(row.customer)
+
         inventory_data = []
         total_order_qty = 0
         total_stockin_qty = 0
         total_total_qty = 0
-        
+
         for product in products:
             stockins = product.stockins
             if search_customer:
                 stockins = [s for s in stockins if s.customer == search_customer]
-            
+
             customers = set()
-            
+
             for s in stockins:
                 if s.customer:
                     customers.add(s.customer)
-            
-            all_stockouts = StockOut.query.filter_by(
-                product_id=product.id,
-                stockin_id=None
-            ).all()
-            if search_customer:
-                all_stockouts = [so for so in all_stockouts if so.customer == search_customer]
-            
-            for so in all_stockouts:
-                if so.customer:
-                    customers.add(so.customer)
-            
-            orders = Order.query.filter_by(product_id=product.id).all()
-            if search_customer:
-                orders = [o for o in orders if o.customer == search_customer]
-            
-            order_customers = set(o.customer for o in orders)
-            customers.update(order_customers)
-            
+
+            for c in stockout_customers.get(product.id, set()):
+                if not search_customer or c == search_customer:
+                    customers.add(c)
+
+            for c in order_customers_map.get(product.id, set()):
+                if not search_customer or c == search_customer:
+                    customers.add(c)
+
             for customer in customers:
                 cust_stockin_qty = sum(
                     s.quantity - sum(so.quantity for so in s.stockin_stockouts)
                     for s in product.stockins if s.customer == customer
                 )
-                
-                cust_stockout_qty = sum(
-                    so.quantity for so in StockOut.query.filter_by(
-                        product_id=product.id,
-                        customer=customer,
-                        stockin_id=None
-                    ).all()
-                )
-                
-                customer_orders = [o for o in Order.query.filter_by(
-                    product_id=product.id,
-                    customer=customer
-                ).all()]
-                cust_order_total = sum(o.quantity for o in customer_orders)
 
-                # 计算该客户对该产品的实际出货数量
-                # 注意：备货抵扣（stockin_id IS NOT NULL）不算出货，只是库存转移
-                # 只有直接出货和订单出货才算出货
-                
-                # 方式1：直接出货 (stockin_id IS NULL, order_id IS NULL) - 独立出货
-                direct_shipped = db.session.query(
-                    db.func.sum(StockOut.quantity)
-                ).filter(
-                    StockOut.product_id == product.id,
-                    StockOut.customer == customer,
-                    StockOut.stockin_id.is_(None),
-                    StockOut.order_id.is_(None)
-                ).scalar() or 0
-
-                # 方式2：订单出货 (stockin_id IS NULL, order_id IS NOT NULL) - 订单出货，不是抵扣备货
-                order_shipped = db.session.query(
-                    db.func.sum(StockOut.quantity)
-                ).filter(
-                    StockOut.product_id == product.id,
-                    StockOut.customer == customer,
-                    StockOut.stockin_id.is_(None),
-                    StockOut.order_id.isnot(None)
-                ).scalar() or 0
-
-                # 实际出货总量 = 直接出货 + 订单出货（不包括备货抵扣）
+                so_data = stockout_map.get((product.id, customer), {'direct_qty': 0, 'order_qty': 0})
+                direct_shipped = so_data['direct_qty']
+                order_shipped = so_data['order_qty']
                 total_shipped = direct_shipped + order_shipped
+
+                cust_order_total = order_map.get((product.id, customer), 0)
 
                 available_order_qty = max(0, cust_order_total - total_shipped)
                 total_stock = max(0, cust_stockin_qty + available_order_qty)
-                
-                # 检查是否有业务记录且数量大于0
-                has_stockin_record = any(s.customer == customer for s in product.stockins)
-                has_order_record = len(customer_orders) > 0
 
-                # 只有当数量大于0时才导出
+                has_stockin_record = any(s.customer == customer for s in product.stockins)
+                has_order_record = (product.id, customer) in order_map
+
                 has_positive_stock = (available_order_qty > 0 or
                                        cust_stockin_qty > 0 or
                                        total_stock > 0)
@@ -890,7 +891,7 @@ def export_inventory():
                         'stockin_quantity': cust_stockin_qty if cust_stockin_qty > 0 else '',
                         'total_stock': total_stock if total_stock > 0 else ''
                     })
-                    
+
                     total_stockin_qty += cust_stockin_qty
                     total_order_qty += available_order_qty
                     total_total_qty += total_stock

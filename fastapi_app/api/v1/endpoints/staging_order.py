@@ -26,6 +26,7 @@ router = APIRouter()
 async def get_staging_orders(
     session_id: str = Query("default", description="会话ID"),
     db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(require_permission("batch_import")),
 ):
     """获取指定会话的暂存订单列表"""
     data = await svc.get_staging_orders(db, session_id)
@@ -36,6 +37,7 @@ async def get_staging_orders(
 async def clear_staging_orders_by_session(
     session_id: str,
     db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(require_permission("batch_import")),
 ):
     """清空指定批次的暂存订单"""
     deleted = await svc.clear_staging_orders_by_session(db, session_id)
@@ -74,6 +76,7 @@ async def update_staging_order(
     order_id: int,
     data: StagingOrderUpdate,
     db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(require_permission("batch_import")),
 ):
     """更新暂存订单"""
     try:
@@ -87,6 +90,7 @@ async def update_staging_order(
 async def clear_staging_orders(
     session_id: str = Query("default", description="会话ID"),
     db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(require_permission("batch_import")),
 ):
     """清空当前会话的暂存订单"""
     await svc.clear_staging_orders(db, session_id)
@@ -97,6 +101,7 @@ async def clear_staging_orders(
 async def delete_staging_order(
     order_id: int,
     db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(require_permission("batch_import")),
 ):
     """删除暂存订单"""
     try:

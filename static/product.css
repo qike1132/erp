@@ -300,6 +300,7 @@
 .table-elegant {
     width: 100%;
     margin-bottom: 0;
+    table-layout: fixed;
 }
 
 .thead-elegant {
@@ -321,23 +322,23 @@
 }
 
 .th-image {
-    width: 120px;
+    width: 10%;
 }
 
 .th-name {
-    width: auto;
+    width: 35%;
 }
 
 .th-actions {
-    width: 160px;
+    width: 20%;
 }
 
 .th-barcode {
-    width: 140px;
+    width: 20%;
 }
 
 .th-price {
-    width: 110px;
+    width: 15%;
 }
 
 .tr-elegant {
@@ -394,6 +395,10 @@
     font-weight: 500;
     color: #1e293b;
     line-height: 1.5;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
 }
 
 .product-barcode-text {
@@ -401,12 +406,14 @@
     color: #64748b;
     font-family: 'Consolas', 'Monaco', monospace;
     letter-spacing: 0.02em;
+    white-space: nowrap;
 }
 
 .product-price-text {
     font-size: 0.9375rem;
     font-weight: 600;
     color: #dc2626;
+    white-space: nowrap;
 }
 
 .action-buttons-elegant {

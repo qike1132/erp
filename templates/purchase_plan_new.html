@@ -1,215 +1,328 @@
 {% extends 'base.html' %}
 {% block extra_css %}
 <style>
-    /* ===== 布局 ===== */
-    .plan-page { max-width: 1400px; margin: 0 auto; }
+    /* ===== Page Layout ===== */
+    .plan-page { max-width: 1440px; margin: 0 auto; }
 
-    /* ===== 客户筛选栏 ===== */
-    .customer-bar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; padding: 0.75rem 1rem; }
+    /* ===== Top Header ===== */
+    .plan-header {
+        position: sticky; top: 0; z-index: 30;
+        background: #fff; border-bottom: 1px solid #e5e7eb;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    .plan-header-inner {
+        max-width: 1440px; margin: 0 auto; padding: 0 1.5rem;
+        display: flex; align-items: center; justify-content: space-between; height: 56px;
+    }
+    .breadcrumb { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #6b7280; margin-bottom: 2px; }
+    .breadcrumb .current { color: #2563eb; font-weight: 500; }
+    .plan-title { font-size: 18px; font-weight: 700; color: #111827; }
+
+    /* ===== Filter Bar ===== */
+    .filter-card {
+        background: #fff; border-radius: 12px; border: 1px solid #e5e7eb;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 1rem 1.25rem;
+    }
+    .filter-row { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+    .filter-row label { font-size: 14px; color: #6b7280; font-weight: 500; white-space: nowrap; margin: 0; }
+    .filter-row input[type="month"],
+    .filter-row input[type="text"] {
+        border: 1px solid #e5e7eb; border-radius: 8px; padding: 6px 12px;
+        font-size: 14px; color: #111827; background: #fff; outline: none;
+        line-height: 1.5; margin: 0;
+    }
+    .filter-row input:focus { box-shadow: 0 0 0 2px rgba(37,99,235,0.3); border-color: #93c5fd; }
+    .search-box { position: relative; flex: 1; min-width: 200px; max-width: 320px; display: flex; align-items: stretch; }
+    .search-box .search-icon { position: absolute; left: 10px; top: 0; bottom: 0; margin: auto; color: #9ca3af; display: flex; align-items: center; font-size: 14px; }
+    .search-box input { padding-left: 32px !important; width: 100%; }
+    .filter-row .btn { display: inline-flex; align-items: center; vertical-align: middle; }
+    .plan-count { font-size: 13px; color: #6b7280; margin-left: auto; }
+    .plan-count strong { color: #111827; }
+
+    /* ===== Customer Chips ===== */
+    .customer-bar {
+        display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+        padding: 0.625rem 0.75rem; background: #f9fafb; border-radius: 8px;
+        border: 1px solid #e5e7eb; margin-top: 0.75rem;
+    }
+    .customer-bar .bar-label { font-size: 13px; color: #6b7280; font-weight: 500; flex-shrink: 0; }
     .customer-chip {
-        display: inline-flex; align-items: center; gap: 0.4rem;
-        padding: 0.35rem 0.75rem; border-radius: 20px; font-size: 0.85rem;
-        cursor: pointer; transition: all 0.2s; border: 2px solid #dee2e6;
-        background: white; color: #495057; white-space: nowrap;
+        display: inline-flex; align-items: center; gap: 5px;
+        padding: 6px 14px; border-radius: 20px; font-size: 14px; font-weight: 500;
+        cursor: pointer; transition: all 0.15s; border: 1px solid #e5e7eb;
+        background: #fff; color: #374151;
     }
-    .customer-chip:hover { border-color: #0d6efd; color: #0d6efd; transform: translateY(-1px); }
-    .customer-chip.active { background: #0d6efd; color: white; border-color: #0d6efd; }
-    .customer-chip img { width: 24px; height: 24px; border-radius: 50%; object-fit: cover; }
-    .customer-chip .chip-icon { font-size: 1.1rem; }
+    .customer-chip:hover { border-color: #2563eb; color: #2563eb; }
+    .customer-chip.active { background: #2563eb; color: #fff; border-color: #2563eb; }
+    .customer-chip img { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; }
+    .chip-icon { font-size: 0.9rem; }
+    .clear-filter {
+        font-size: 12px; color: #6b7280; text-decoration: underline;
+        cursor: pointer; border: none; background: none; padding: 4px 8px;
+    }
+    .clear-filter:hover { color: #dc2626; }
 
-    /* ===== 汇总卡片 ===== */
+    /* ===== Stats Cards ===== */
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
     .stat-card {
-        background: var(--plush-white, #fff); padding: 1rem; border-radius: 8px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.06); text-align: center;
+        background: #fff; border-radius: 12px; padding: 1.25rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08); border: 1px solid #e5e7eb;
+        display: flex; align-items: flex-start; gap: 1rem;
     }
-    .stat-card h3 { font-size: 1.4rem; font-weight: 700; color: var(--plush-text, #333); margin-bottom: 0.15rem; }
-    .stat-card small { color: #6c757d; }
-
-    /* ===== 日历网格 ===== */
-    .calendar-grid {
-        display: grid;
-        grid-template-columns: repeat(7, 1fr);
-        gap: 4px;
+    .stat-icon {
+        width: 52px; height: 52px; border-radius: 14px;
+        display: flex; align-items: center; justify-content: center; flex-shrink: 0;
     }
-    .calendar-header {
-        text-align: center; font-weight: 600; padding: 0.5rem 0;
-        background: #f8f9fa; border-radius: 4px; font-size: 0.85rem; color: #6c757d;
+    .stat-icon.blue { background: #eff6ff; color: #2563eb; }
+    .stat-icon.green { background: #dcfce7; color: #15803d; }
+    .stat-icon.amber { background: #fef3c7; color: #92400e; }
+    .stat-icon.purple { background: #f3e8ff; color: #7c3aed; }
+    .stat-info { min-width: 0; }
+    .stat-info .stat-title { font-size: 13px; color: #6b7280; margin-bottom: 4px; }
+    .stat-info .stat-value { font-size: 24px; font-weight: 700; color: #111827; line-height: 1; }
+    .stat-info .stat-unit { font-size: 12px; color: #6b7280; margin-left: 2px; }
+    .stat-info .stat-trend { font-size: 12px; margin-top: 4px; }
+    .stat-trend.up { color: #15803d; }
+    .stat-trend.down { color: #dc2626; }
+    .stat-trend.neutral { color: #6b7280; }
+
+    /* ===== Day Panel (Accordion) ===== */
+    .day-panel {
+        background: #fff; border-radius: 12px; border: 1px solid #e5e7eb;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08); overflow: hidden;
     }
-    .calendar-cell {
-        min-height: 90px; padding: 0.4rem; border: 1px solid #e9ecef;
-        border-radius: 6px; font-size: 0.78rem; overflow: hidden; position: relative;
-        cursor: pointer; transition: box-shadow 0.15s;
+    .day-panel.today { border-color: #2563eb; }
+    .day-panel-header {
+        display: flex; align-items: center; gap: 0.75rem;
+        padding: 0.75rem 1.25rem; cursor: pointer; transition: background 0.15s;
+        border: none; width: 100%; text-align: left; background: #f9fafb;
     }
-    .calendar-cell:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-    .calendar-cell.empty { background: #fafafa; cursor: default; }
-    .calendar-cell .cell-date { font-weight: 700; font-size: 0.9rem; color: #495057; margin-bottom: 2px; }
-    .calendar-cell .cell-item { padding: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .calendar-cell .cell-more { color: #0d6efd; font-weight: 500; cursor: pointer; }
-    .calendar-cell.today { border: 2px solid #0d6efd; }
-    .calendar-cell.has-warning { background: #fff8e1; }
+    .day-panel-header:hover { background: #eff6ff; }
+    .day-panel.today .day-panel-header { background: #eff6ff; }
+    .day-panel-header .chevron { color: #2563eb; transition: transform 0.2s; }
+    .day-panel-header .chevron.collapsed { transform: rotate(-90deg); }
+    .day-panel-header .date-label { font-weight: 600; font-size: 15px; color: #111827; }
+    .day-panel-header .today-badge {
+        font-size: 12px; font-weight: 600; padding: 3px 10px;
+        border-radius: 12px; background: #2563eb; color: #fff;
+    }
+    .day-panel-header .plan-count-badge {
+        font-size: 12px; padding: 4px 12px; border-radius: 12px; font-weight: 500;
+        background: #dbeafe; color: #1e40af;
+    }
+    .day-panel-header .total-badge {
+        font-size: 12px; padding: 4px 12px; border-radius: 12px; font-weight: 500;
+        background: #dcfce7; color: #15803d;
+    }
+    .day-panel-header .expand-hint { font-size: 12px; color: #9ca3af; margin-left: auto; }
+    .day-panel-body { padding: 0; }
+    .day-panel-body.collapsed { display: none; }
 
-    /* 库存状态小标记 */
-    .stock-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 3px; vertical-align: middle; }
-    .stock-dot.sufficient { background: #198754; }
-    .stock-dot.shortage { background: #ffc107; }
-    .stock-dot.no_stock { background: #dc3545; }
+    /* ===== Plan Table ===== */
+    .plan-table { width: 100%; font-size: 14px; min-width: 900px; }
+    .plan-table thead th {
+        background: #1e3a8a; color: #dbeafe; font-weight: 600;
+        padding: 12px 14px; white-space: nowrap; font-size: 13px;
+    }
+    .plan-table tbody tr { border-bottom: 1px solid #e5e7eb; transition: background 0.1s; }
+    .plan-table tbody tr:hover { background: #eff6ff; }
+    .plan-table tbody tr:nth-child(even) { background: #f9fafb; }
+    .plan-table tbody tr:nth-child(even):hover { background: #eff6ff; }
+    .plan-table tbody tr.voided { opacity: 0.5; }
+    .plan-table td { padding: 12px 14px; }
+    .product-code { font-family: monospace; font-size: 13px; font-weight: 600; color: #2563eb; }
+    .product-name { font-size: 13px; color: #6b7280; }
 
-    /* ===== 计划明细表 ===== */
-    .table-row-warning { background-color: #fff3cd !important; border-left: 3px solid #dc3545; }
-    .table-row-completed { background-color: #d1e7dd !important; border-left: 3px solid #198754; }
+    /* ===== Stock Badge ===== */
+    .stock-badge {
+        display: inline-flex; align-items: center; gap: 4px;
+        padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600;
+    }
+    .stock-badge.sufficient { background: #dcfce7; color: #15803d; border: 1px solid #86efac; }
+    .stock-badge.shortage { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+    .stock-badge.no_stock { background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; }
 
-    /* 库存状态 badge */
-    .badge-sufficient { background-color: #198754; }
-    .badge-shortage { background-color: #ffc107; color: #212529; }
-    .badge-no_stock { background-color: #dc3545; }
+    /* ===== Progress Bar ===== */
+    .progress-wrap { min-width: 140px; }
+    .progress-bar-track {
+        height: 10px; background: #e5e7eb; border-radius: 5px; overflow: hidden;
+    }
+    .progress-bar-fill { height: 100%; border-radius: 5px; transition: width 0.5s; }
+    .progress-bar-fill.low { background: #ef4444; }
+    .progress-bar-fill.mid { background: #f59e0b; }
+    .progress-bar-fill.high { background: #10b981; }
+    .progress-bar-fill.over { background: #dc2626; animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.7; } }
+    .progress-info { display: flex; justify-content: space-between; font-size: 12px; margin-top: 2px; }
+    .progress-info .pct { font-weight: 600; }
+    .progress-info .pct.low { color: #ef4444; }
+    .progress-info .pct.mid { color: #f59e0b; }
+    .progress-info .pct.high { color: #10b981; }
+    .progress-info .pct.over { color: #dc2626; }
+    .progress-info .remaining { color: #9ca3af; }
+    .over-warning { font-size: 12px; color: #dc2626; font-weight: 600; margin-top: 2px; }
 
-    /* ===== 进度条 ===== */
-    .progress { height: 6px; border-radius: 3px; }
-    .progress-bar-completed { background-color: #198754; }
-    .progress-bar-partial { background-color: #0d6efd; }
-    .progress-bar-pending { background-color: #6c757d; }
+    /* ===== Action Buttons ===== */
+    .action-btn {
+        display: inline-flex; align-items: center; gap: 3px;
+        padding: 5px 10px; border-radius: 6px; font-size: 12px; font-weight: 500;
+        border: none; cursor: pointer; transition: all 0.15s;
+    }
+    .action-btn.view { background: #eff6ff; color: #2563eb; }
+    .action-btn.view:hover { background: #2563eb; color: #fff; }
+    .action-btn.edit { background: #fef3c7; color: #92400e; }
+    .action-btn.edit:hover { background: #f59e0b; color: #fff; }
+    .action-btn.void { background: #fee2e2; color: #b91c1c; border: 1px solid rgba(220,38,38,0.3); }
+    .action-btn.void:hover { background: #dc2626; color: #fff; }
+    .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-    /* ===== 上传弹窗 ===== */
+    /* ===== Empty State ===== */
+    .empty-state {
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        padding: 3rem; color: #9ca3af;
+    }
+    .empty-state .empty-icon { font-size: 2.5rem; opacity: 0.3; margin-bottom: 0.75rem; }
+    .empty-state p { font-size: 14px; margin: 0; }
+    .empty-state .clear-link { font-size: 13px; color: #2563eb; text-decoration: underline; cursor: pointer; margin-top: 0.5rem; }
+
+    /* ===== Upload Modal ===== */
     .upload-zone {
         border: 2px dashed #ced4da; border-radius: 8px; padding: 2rem;
         text-align: center; cursor: pointer; transition: border-color 0.2s;
     }
     .upload-zone:hover, .upload-zone.dragover { border-color: #0d6efd; background: #f8f9fa; }
+    .staging-invalid { background-color: #fff5f5; }
 
-    .autocomplete-dropdown {
-        position: absolute; top: 100%; left: 0; right: 0; background: white;
-        border: 1px solid #ced4da; border-radius: 0 0 0.375rem 0.375rem;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1); max-height: 200px; overflow-y: auto;
-        z-index: 1000; margin-top: -1px;
-    }
-    .autocomplete-item { padding: 0.5rem 1rem; cursor: pointer; }
-    .autocomplete-item:hover { background-color: #f8f9fa; }
-
-    .barcode-valid { color: #198754; }
-    .barcode-invalid { color: #dc3545; }
-    .barcode-checking { color: #6c757d; }
-
-    .staging-valid { color: #198754; }
-    .staging-invalid { color: #dc3545; background-color: #fff5f5; }
-
-    /* ===== Popover 扩展 ===== */
-    .popover { max-width: 350px; }
-    .popover-body { font-size: 0.82rem; max-height: 300px; overflow-y: auto; }
-
-    /* ===== 内联编辑 ===== */
+    /* ===== Inline Edit ===== */
     [contenteditable="true"] {
-        outline: 1px dashed #0d6efd; padding: 0 4px; border-radius: 3px; min-width: 40px;
+        outline: 1px dashed #2563eb; padding: 0 4px; border-radius: 3px; min-width: 40px;
     }
-    [contenteditable="true"]:focus { outline: 2px solid #0d6efd; background: #f0f7ff; }
+    [contenteditable="true"]:focus { outline: 2px solid #2563eb; background: #f0f7ff; }
+
+    /* ===== Icon Sizes ===== */
+    .breadcrumb .fas { font-size: 11px; }
+    .search-icon { font-size: 14px; }
+    .action-btn .fas { font-size: 12px; }
+    .stock-badge .fas { font-size: 12px; }
+    .over-warning .fas { font-size: 12px; }
+    .timeline-title { font-size: 15px; font-weight: 600; color: #111827; margin: 0; }
+    .timeline-subtitle { font-size: 13px; color: #9ca3af; }
+
+    /* ===== Responsive ===== */
+    @media (max-width: 992px) {
+        .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    /* ===== Product Search Dropdown ===== */
+    .product-search-dropdown {
+        position: absolute; top: 100%; left: 0; right: 0;
+        background: #fff; border: 1px solid #d1d5db; border-radius: 6px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.12); max-height: 200px;
+        overflow-y: auto; z-index: 1050; margin-top: 2px;
+    }
+    .product-search-item {
+        padding: 8px 12px; cursor: pointer; display: flex;
+        justify-content: space-between; align-items: center; font-size: 13px;
+    }
+    .product-search-item:hover { background: #eff6ff; }
+    .product-search-item .item-name { font-weight: 500; color: #111827; }
+    .product-search-item .item-barcode { font-size: 12px; color: #9ca3af; }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="plan-page">
-    <h2>采购计划管理</h2>
-
-    <!-- 顶部操作栏 -->
-    <div class="d-flex justify-content-between align-items-center mt-3 flex-wrap gap-2">
-        <div class="d-flex align-items-center gap-2">
-            <label class="form-label mb-0 me-1">月份:</label>
-            <input type="number" class="form-control form-control-sm" id="filterYear" min="2020" max="2099" style="width:90px;">
-            <span class="fw-bold">年</span>
-            <input type="number" class="form-control form-control-sm" id="filterMonth" min="1" max="12" style="width:70px;">
-            <span class="fw-bold">月</span>
-            <button type="button" class="btn btn-primary btn-sm" id="searchBtn">
-                <i class="fas fa-search me-1"></i>查询
-            </button>
-        </div>
-        <div class="d-flex gap-2">
-            <button type="button" class="btn btn-outline-secondary btn-sm" id="downloadTemplateBtn">
-                <i class="fas fa-download me-1"></i>下载模板
-            </button>
-            <button type="button" class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#uploadModal">
-                <i class="fas fa-file-excel me-1"></i>批量上传
-            </button>
-            <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addModal">
-                <i class="fas fa-plus me-1"></i>手动添加
-            </button>
-        </div>
-    </div>
-
-    <!-- 客户筛选栏 -->
-    <div class="card mt-3">
-        <div class="card-body py-2">
-            <div id="customerFilter" class="customer-bar">
-                <span class="customer-chip active" data-customer-id="0">
-                    <i class="fas fa-globe chip-icon"></i>全部
-                </span>
+    <!-- Top Header Bar -->
+    <div class="plan-header">
+        <div class="plan-header-inner">
+            <div>
+                <h1 class="plan-title">月度采购计划总览</h1>
+            </div>
+            <div style="display:flex;gap:0.5rem;">
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="downloadTemplateBtn">
+                    <i class="fas fa-download me-1"></i>下载模板
+                </button>
+                <button type="button" class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#uploadModal">
+                    <i class="fas fa-file-excel me-1"></i>批量上传
+                </button>
+                <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addModal">
+                    <i class="fas fa-plus me-1"></i>新增计划
+                </button>
             </div>
         </div>
     </div>
 
-    <!-- 月度汇总面板 -->
-    <div id="summaryPanel" class="mt-3" style="display:none;">
-        <div class="card">
-            <div class="card-body">
-                <div class="row text-center">
-                    <div class="col"><div class="stat-card"><h3 class="mb-0" id="totalPlanQty">0</h3><small class="text-muted">计划总量</small></div></div>
-                    <div class="col"><div class="stat-card"><h3 class="mb-0" id="totalInventoryQty">0</h3><small class="text-muted">库存总量</small></div></div>
-                    <div class="col"><div class="stat-card"><h3 class="mb-0" id="totalShippedQty">0</h3><small class="text-muted">出货总量</small></div></div>
-                    <div class="col"><div class="stat-card"><h3 class="mb-0" id="totalRemainingQty">0</h3><small class="text-muted">剩余计划</small></div></div>
-                    <div class="col"><div class="stat-card"><h3 class="mb-0 text-warning" id="warningCount">0</h3><small class="text-muted">库存不足</small></div></div>
+    <div style="padding:1rem 1.5rem;">
+        <!-- Filter Area -->
+        <div class="filter-card mb-3">
+            <div class="filter-row">
+                <label>计划月份：</label>
+                <input type="month" id="filterMonthInput">
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="refreshBtn">
+                    <i class="fas fa-sync-alt me-1" id="refreshIcon"></i>刷新
+                </button>
+                <div class="search-box">
+                    <i class="fas fa-search search-icon"></i>
+                    <input type="text" id="searchInput" placeholder="搜索产品/客户...">
+                </div>
+                <span class="plan-count">
+                    共 <strong id="activePlanCount">0</strong> 条有效计划 / <strong id="activeDateCount">0</strong> 个交付日期
+                </span>
+            </div>
+            <div class="customer-bar" id="customerFilter">
+                <span class="bar-label">客户筛选：</span>
+                <button class="customer-chip active" data-customer-id="0">
+                    <i class="fas fa-globe chip-icon"></i>全选
+                </button>
+            </div>
+        </div>
+
+        <!-- Stats Cards -->
+        <div class="stats-grid mb-3">
+            <div class="stat-card">
+                <div class="stat-icon blue"><i class="fas fa-clipboard-list fa-lg"></i></div>
+                <div class="stat-info">
+                    <div class="stat-title">当月计划总数量</div>
+                    <div><span class="stat-value" id="totalPlanQty">0</span><span class="stat-unit">件</span></div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon green"><i class="fas fa-truck fa-lg"></i></div>
+                <div class="stat-info">
+                    <div class="stat-title">累计出货总数量</div>
+                    <div><span class="stat-value" id="totalShippedQty">0</span><span class="stat-unit">件</span></div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon amber"><i class="fas fa-box fa-lg"></i></div>
+                <div class="stat-info">
+                    <div class="stat-title">剩余计划总数量</div>
+                    <div><span class="stat-value" id="totalRemainingQty">0</span><span class="stat-unit">件</span></div>
+                </div>
+            </div>
+            <div class="stat-card" style="border-left:4px solid #2563eb;">
+                <div class="stat-icon purple"><i class="fas fa-shield-alt fa-lg"></i></div>
+                <div class="stat-info">
+                    <div class="stat-title">库存充足率</div>
+                    <div><span class="stat-value" id="stockRate">0</span><span class="stat-unit">%</span></div>
                 </div>
             </div>
         </div>
-    </div>
 
-    <!-- 日历网格 -->
-    <div class="card mt-3">
-        <div class="card-header d-flex justify-content-between align-items-center">
-            <span><i class="fas fa-calendar-alt me-1"></i>计划日历</span>
-            <small class="text-muted" id="calendarHint">点击日期查看当日计划</small>
-        </div>
-        <div class="card-body">
-            <div id="calendarGrid" class="calendar-grid">
-                <div class="calendar-header">一</div>
-                <div class="calendar-header">二</div>
-                <div class="calendar-header">三</div>
-                <div class="calendar-header">四</div>
-                <div class="calendar-header">五</div>
-                <div class="calendar-header">六</div>
-                <div class="calendar-header">日</div>
+        <!-- Timeline Plan Area -->
+        <div class="filter-card">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:0.75rem 1.25rem;border-bottom:1px solid #e5e7eb;">
+                <h2 class="timeline-title">计划时序展示 — <span id="monthDisplay"></span></h2>
+                <span class="timeline-subtitle">
+                    当月共 <strong id="daysInMonthCount" style="color:#111827;">0</strong> 天 · 有计划 <strong id="planDateCount" style="color:#111827;">0</strong> 天
+                </span>
             </div>
-        </div>
-    </div>
-
-    <!-- 计划明细表 -->
-    <div class="card mt-3">
-        <div class="card-header d-flex justify-content-between align-items-center">
-            <span><i class="fas fa-list me-1"></i>计划明细</span>
-            <span id="recordCount" class="text-muted">共 0 条记录</span>
-        </div>
-        <div class="card-body table-responsive">
-            <table class="table table-hover table-sm">
-                <thead>
-                    <tr>
-                        <th>计划编号</th>
-                        <th>客户</th>
-                        <th>产品名称</th>
-                        <th>69码</th>
-                        <th class="text-center">计划量</th>
-                        <th class="text-center">库存量</th>
-                        <th class="text-center">已出货</th>
-                        <th class="text-center">剩余</th>
-                        <th>库存状态</th>
-                        <th>出货进度</th>
-                        <th>操作</th>
-                    </tr>
-                </thead>
-                <tbody id="planTableBody">
-                    <tr>
-                        <td colspan="11" class="text-center py-4">
-                            <i class="fas fa-inbox fa-3x mb-3 text-muted" style="opacity:0.3;"></i>
-                            <p class="text-muted mb-0">请选择月份查询采购计划</p>
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+            <div id="timelinePanels" style="padding:1rem 1.25rem;">
+                <div class="empty-state">
+                    <i class="fas fa-chart-bar empty-icon"></i>
+                    <p>请选择月份查询采购计划</p>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -252,7 +365,10 @@
                             <div class="row g-2">
                                 <div class="col-6">
                                     <label class="form-label mb-1 small">产品名称</label>
-                                    <input type="text" class="form-control form-control-sm add-product-name" required placeholder="自动填充" readonly>
+                                    <div class="position-relative">
+                                        <input type="text" class="form-control form-control-sm add-product-name" required placeholder="输入关键字搜索产品" autocomplete="off">
+                                        <div class="product-search-dropdown" style="display:none;"></div>
+                                    </div>
                                 </div>
                                 <div class="col-3">
                                     <label class="form-label mb-1 small">数量</label>
@@ -373,6 +489,6 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/api-client.js') }}"></script>
-<script src="{{ url_for('static', filename='purchase-plan-new.js') }}"></script>
+<script src="{{ url_for('static', filename='js/api-client.js') }}?v={{ config.get('ASSET_VERSION', '1') }}"></script>
+<script src="{{ url_for('static', filename='purchase-plan-new.js') }}?v={{ config.get('ASSET_VERSION', '1') }}"></script>
 {% endblock %}

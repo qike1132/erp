@@ -3,8 +3,9 @@
 
 从 Flask order.py 迁移的 REST API。
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Optional
 
 from fastapi_app.core.database import get_async_db
 from fastapi_app.core.deps import require_permission
@@ -20,12 +21,18 @@ router = APIRouter()
 
 @router.get("/list", response_model=OrderListResponse)
 async def list_orders(
+    page: int = Query(1, ge=1, description="页码"),
+    per_page: int = Query(50, ge=1, le=5000, description="每页数量"),
+    customer: Optional[str] = Query(None, description="客户名筛选"),
+    product_id: Optional[int] = Query(None, description="产品ID筛选"),
+    status: Optional[str] = Query(None, description="状态筛选"),
     db: AsyncSession = Depends(get_async_db),
     _user: User = Depends(require_permission("order_manage")),
 ):
-    """订单列表"""
-    orders = await order_service.get_orders(db)
-    return OrderListResponse(data=orders, total=len(orders))
+    """订单列表（支持分页和筛选）"""
+    result = await order_service.get_orders(db, page=page, per_page=per_page,
+                                            customer=customer, product_id=product_id, status=status)
+    return OrderListResponse(data=result['items'], total=result['total'])
 
 
 @router.post("/create", response_model=OrderActionResponse)

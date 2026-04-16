@@ -22,16 +22,37 @@ from fastapi_app.services.stock_concurrency import get_product_for_update
 logger = logging.getLogger(__name__)
 
 
-async def get_orders(db: AsyncSession) -> list[dict]:
-    """获取订单列表（含关联数据）"""
+async def get_orders(db: AsyncSession, page: int = 1, per_page: int = 5000,
+                     customer: Optional[str] = None, product_id: Optional[int] = None,
+                     status: Optional[str] = None) -> dict:
+    """获取订单列表（含关联数据，支持分页和筛选）"""
+    # 基础查询
+    query = select(Order).options(
+        joinedload(Order.product),
+        selectinload(Order.order_stockouts),
+        joinedload(Order.locked_by)
+    )
+    count_query = select(func.count(Order.id))
+
+    # 筛选条件
+    if customer:
+        query = query.where(Order.customer.contains(customer))
+        count_query = count_query.where(Order.customer.contains(customer))
+    if product_id:
+        query = query.where(Order.product_id == product_id)
+        count_query = count_query.where(Order.product_id == product_id)
+    if status:
+        query = query.where(Order.status == status)
+        count_query = count_query.where(Order.status == status)
+
+    # 总数
+    total = (await db.execute(count_query)).scalar() or 0
+
+    # 分页查询
     result = await db.execute(
-        select(Order)
-        .options(
-            joinedload(Order.product),
-            selectinload(Order.order_stockouts),
-            joinedload(Order.locked_by)
-        )
-        .order_by(Order.order_date.desc())
+        query.order_by(Order.order_date.desc())
+        .offset((page - 1) * per_page)
+        .limit(per_page)
     )
     orders = result.scalars().unique().all()
 
@@ -56,7 +77,7 @@ async def get_orders(db: AsyncSession) -> list[dict]:
             'is_locked': o.is_locked,
             'locked_by_name': o.locked_by.username if o.locked_by else None,
         })
-    return orders_data
+    return {'items': orders_data, 'total': total, 'page': page, 'per_page': per_page}
 
 
 async def create_order(db: AsyncSession, product_id: int, quantity: int,

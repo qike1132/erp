@@ -17,14 +17,16 @@ from fastapi_app.shared_models import (
 )
 from fastapi_app.services.stock_concurrency import get_product_for_update
 from fastapi_app.services.notification_service import publish_stock_event, StockEvent
+from fastapi_app.services import escape_like
 
 logger = logging.getLogger(__name__)
 
 
 # ==================== 入库管理 ====================
 
-async def get_stockins(db: AsyncSession) -> list[dict]:
-    """获取入库列表（含关联数据）"""
+async def get_stockins(db: AsyncSession, page: int = 1, per_page: int = 5000) -> dict:
+    """获取入库列表（含关联数据，支持分页）"""
+    total = (await db.execute(select(func.count(StockIn.id)))).scalar() or 0
     result = await db.execute(
         select(StockIn)
         .options(
@@ -32,6 +34,8 @@ async def get_stockins(db: AsyncSession) -> list[dict]:
             selectinload(StockIn.stockin_stockouts)
         )
         .order_by(StockIn.stockin_date.desc())
+        .offset((page - 1) * per_page)
+        .limit(per_page)
     )
     stockins = result.scalars().unique().all()
 
@@ -53,7 +57,7 @@ async def get_stockins(db: AsyncSession) -> list[dict]:
             'deducted': deducted,
             'note': s.note or '',
         })
-    return data
+    return {'items': data, 'total': total, 'page': page, 'per_page': per_page}
 
 
 async def create_stockin(db: AsyncSession, product_id: int, quantity: int,
@@ -164,13 +168,16 @@ async def delete_stockin(db: AsyncSession, stockin_id: int) -> None:
 
 # ==================== 出库管理 ====================
 
-async def get_stockouts(db: AsyncSession) -> list[dict]:
-    """获取出库列表（仅独立出库，非抵扣）"""
+async def get_stockouts(db: AsyncSession, page: int = 1, per_page: int = 5000) -> dict:
+    """获取出库列表（仅独立出库，非抵扣，支持分页）"""
+    base_query = select(StockOut).where(StockOut.stockin_id.is_(None))
+    total = (await db.execute(select(func.count(StockOut.id)).where(StockOut.stockin_id.is_(None)))).scalar() or 0
     result = await db.execute(
-        select(StockOut)
+        base_query
         .options(joinedload(StockOut.product))
-        .where(StockOut.stockin_id.is_(None))
         .order_by(StockOut.stockout_date.desc())
+        .offset((page - 1) * per_page)
+        .limit(per_page)
     )
     stockouts = result.scalars().unique().all()
 
@@ -190,7 +197,7 @@ async def get_stockouts(db: AsyncSession) -> list[dict]:
             'quantity': s.quantity,
             'note': s.note or '',
         })
-    return data
+    return {'items': data, 'total': total, 'page': page, 'per_page': per_page}
 
 
 async def create_stockout(db: AsyncSession, product_id: int, quantity: int,
@@ -359,7 +366,7 @@ async def get_inventory(db: AsyncSession, search_customer: str = '',
 
     if search_product:
         products_query = products_query.where(
-            Product.name.like(f'%{search_product}%') | Product.barcode.like(f'%{search_product}%')
+            Product.name.like(f'%{escape_like(search_product)}%') | Product.barcode.like(f'%{escape_like(search_product)}%')
         )
 
     result = await db.execute(products_query)

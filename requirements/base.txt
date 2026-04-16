@@ -12,16 +12,16 @@ Flask-Limiter==3.5.0
 flasgger==0.9.7.1
 
 # ----- Web 框架 (FastAPI) -----
-fastapi>=0.104.1
-uvicorn[standard]>=0.24.0
+fastapi>=0.135
+uvicorn[standard]>=0.44
 pydantic-settings>=2.1.0
-python-multipart>=0.0.6
+python-multipart>=0.0.22
 
 # ----- 数据库 -----
 pymysql==1.1.0
 aiomysql>=0.2.0
 sqlalchemy>=2.0.23
-cryptography>=41.0.7
+cryptography>=46.0.0
 # Flask-Migrate (含 alembic) 用于数据库迁移
 Flask-Migrate>=4.0.0
 
@@ -34,7 +34,7 @@ python-dotenv==1.0.0
 
 # ----- 数据处理与 Excel -----
 pandas==2.1.4
-openpyxl==3.1.2
+openpyxl==3.1.5
 XlsxWriter==3.1.9
 xlrd==1.2.0
 
@@ -52,7 +52,7 @@ waitress>=2.1.2
 gunicorn>=21.2.0
 
 # ----- 文本处理与搜索 -----
-chardet==5.2.0
+charset-normalizer>=3.4
 pypinyin==0.51.0
 fuzzywuzzy==0.18.0
 rapidfuzz>=3.8.0
@@ -61,3 +61,6 @@ bleach>=6.1.0
 # ----- 日期时间 -----
 arrow==1.3.0
 python-dateutil>=2.9.0
+
+# ----- HTTP 客户端 -----
+requests>=2.33.0

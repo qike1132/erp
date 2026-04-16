@@ -19,7 +19,7 @@ def _get_pool_config() -> dict:
     """从环境变量读取连接池配置，提供合理默认值"""
     return {
         "pool_size": int(os.getenv("DB_POOL_SIZE", "10")),
-        "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", "3600")),
+        "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", "1800")),
         "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT", "30")),
         "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", "5")),
         "pool_pre_ping": True,  # 自动检测断开的连接

@@ -12,6 +12,8 @@ import shutil
 import logging
 
 from fastapi_app.core.logger import logger
+from fastapi_app.core.deps import require_permission
+from fastapi_app.shared_models import User
 
 # Celery 懒加载：避免顶层导入导致缺失 celery 包时整个应用无法启动
 _celery_app = None
@@ -60,7 +62,10 @@ class ReportExportRequest(BaseModel):
 # ==================== 任务状态查询 ====================
 
 @router.get("/status/{task_id}", response_model=TaskStatusResponse)
-async def get_task_status(task_id: str):
+async def get_task_status(
+    task_id: str,
+    current_user: User = Depends(require_permission("batch_import")),
+):
     """查询异步任务状态"""
     celery_app = _require_celery()
     result = celery_app.AsyncResult(task_id)
@@ -82,7 +87,10 @@ async def get_task_status(task_id: str):
 # ==================== 批量导入（异步） ====================
 
 @router.post("/import-orders")
-async def async_import_orders(file: UploadFile = File(...)):
+async def async_import_orders(
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_permission("batch_import")),
+):
     """异步批量导入订单（提交后台任务）"""
     if not file.filename.endswith(('.xlsx', '.xls', '.csv')):
         raise HTTPException(status_code=400, detail="仅支持 Excel (.xlsx/.xls) 或 CSV 文件")
@@ -95,7 +103,7 @@ async def async_import_orders(file: UploadFile = File(...)):
 
     # 提交 Celery 任务
     from fastapi_app.tasks.batch_tasks import batch_import_orders_task
-    task = batch_import_orders_task.delay(tmp_path, file.filename, user_id=0)
+    task = batch_import_orders_task.delay(tmp_path, file.filename, user_id=current_user.id)
 
     return {
         "success": True,
@@ -106,7 +114,10 @@ async def async_import_orders(file: UploadFile = File(...)):
 
 
 @router.post("/import-stockins")
-async def async_import_stockins(file: UploadFile = File(...)):
+async def async_import_stockins(
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_permission("batch_import")),
+):
     """异步批量导入备货（提交后台任务）"""
     if not file.filename.endswith(('.xlsx', '.xls', '.csv')):
         raise HTTPException(status_code=400, detail="仅支持 Excel (.xlsx/.xls) 或 CSV 文件")
@@ -117,7 +128,7 @@ async def async_import_stockins(file: UploadFile = File(...)):
         tmp_path = tmp.name
 
     from fastapi_app.tasks.batch_tasks import batch_import_stockins_task
-    task = batch_import_stockins_task.delay(tmp_path, file.filename, user_id=0)
+    task = batch_import_stockins_task.delay(tmp_path, file.filename, user_id=current_user.id)
 
     return {
         "success": True,
@@ -130,7 +141,10 @@ async def async_import_stockins(file: UploadFile = File(...)):
 # ==================== 报表导出（异步） ====================
 
 @router.post("/export-report")
-async def async_export_report(request: ReportExportRequest):
+async def async_export_report(
+    request: ReportExportRequest,
+    current_user: User = Depends(require_permission("batch_import")),
+):
     """异步导出报表（提交后台任务）"""
     if request.report_type not in ("order", "stockin", "stockout", "deduction"):
         raise HTTPException(status_code=400, detail=f"不支持的报表类型: {request.report_type}")
@@ -145,7 +159,7 @@ async def async_export_report(request: ReportExportRequest):
         "end_date": request.end_date,
     }
 
-    task = export_report_task.delay(request.report_type, filters, user_id=0)
+    task = export_report_task.delay(request.report_type, filters, user_id=current_user.id)
 
     return {
         "success": True,
@@ -158,7 +172,10 @@ async def async_export_report(request: ReportExportRequest):
 # ==================== 导出文件下载 ====================
 
 @router.get("/download/{task_id}")
-async def download_task_result(task_id: str):
+async def download_task_result(
+    task_id: str,
+    current_user: User = Depends(require_permission("batch_import")),
+):
     """下载异步任务生成的文件"""
     celery_app = _require_celery()
     result = celery_app.AsyncResult(task_id)

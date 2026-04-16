@@ -9,8 +9,6 @@ FastAPI 依赖注入
 浏览器会自动携带 Flask 设置的 session cookie。
 """
 
-from datetime import datetime, timedelta
-
 from fastapi import Depends, HTTPException, status, Request
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload, selectinload
@@ -19,29 +17,26 @@ from fastapi_app.core.config import settings
 from fastapi_app.core.database import SyncSessionLocal
 from fastapi_app.shared_models import User, Permission
 
+# 缓存 Flask session 签名序列化器，避免每请求创建 Flask 实例
+_flask_session_serializer = None
 
-def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
+
+def create_access_token(data: dict, expires_delta=None) -> str:
     """生成JWT Token"""
     from jose import jwt
 
     to_encode = data.copy()
-    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
-    to_encode.update({"exp": expire})
+    # 不设置 exp 字段，Token永不过期
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
 def _decode_jwt_token(token: str) -> dict:
     """解码并验证JWT Token，返回payload或抛出异常"""
-    from jose import jwt, JWTError, ExpiredSignatureError
+    from jose import jwt, JWTError
 
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         return payload
-    except ExpiredSignatureError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="JWT Token已过期，请重新登录",
-        )
     except JWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -79,20 +74,25 @@ def _get_user_id_from_session(request: Request) -> int | None:
     Flask 的 session 是签名 cookie，使用 itsdangerous 库解析。
     使用 settings.SECRET_KEY（由 pydantic_settings 从 .env 读取）。
     """
-    from flask.sessions import SecureCookieSessionInterface
-    from flask import Flask as _Flask
+    global _flask_session_serializer
 
     session_cookie = request.cookies.get("session")
     if not session_cookie:
         return None
 
     try:
-        _app = _Flask(__name__)
-        _app.config["SECRET_KEY"] = settings.SECRET_KEY
-        si = SecureCookieSessionInterface()
-        s = si.get_signing_serializer(_app)
-        # max_age=3600: session cookie 有效期为1小时，防止会话固定攻击
-        session_data = s.loads(session_cookie, max_age=3600)
+        # 缓存签名序列化器，避免每请求创建 Flask 实例
+        if _flask_session_serializer is None:
+            from flask.sessions import SecureCookieSessionInterface
+            from flask import Flask as _Flask
+
+            _app = _Flask(__name__)
+            _app.config["SECRET_KEY"] = settings.SECRET_KEY
+            si = SecureCookieSessionInterface()
+            _flask_session_serializer = si.get_signing_serializer(_app)
+
+        # 不设置 max_age，session cookie永不过期
+        session_data = _flask_session_serializer.loads(session_cookie)
     except Exception:
         return None
 

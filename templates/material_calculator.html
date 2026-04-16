@@ -1237,7 +1237,7 @@ function selectFromSearch(productId, productName) {
     }
     
     if (!product.has_bom) {
-        showToast('该产品未配置BOM表', 'warning', '请在产品管理中配置BOM后再使用此功能');
+        showToast('请在产品管理中配置BOM后再使用此功能', 'warning');
         return;
     }
     
@@ -1284,7 +1284,7 @@ function toggleProduct(productId) {
     }
     
     if (!product.has_bom) {
-        showToast('BOM配置不完整', 'error', `"${product.name}" 未配置BOM表，无法参与物料计算`);
+        showToast(`"${product.name}" 未配置BOM表，无法参与物料计算`, 'error');
         return;
     }
     
@@ -1360,7 +1360,7 @@ function updateQuantity(index, field, value) {
     const numVal = parseInt(value);
     
     if (isNaN(numVal) || numVal < 0) {
-        showToast('输入错误', 'warning', '数量必须为非负整数');
+        showToast('数量必须为非负整数', 'warning');
         return;
     }
     
@@ -1570,7 +1570,7 @@ function updateCalcStatus(status, text) {
 
 function openBatchModal() {
     if (orderItems.length === 0) {
-        showToast('提示', 'info', '请先添加产品到订单列表');
+        showToast('请先添加产品到订单列表', 'info');
         return;
     }
     
@@ -1591,7 +1591,7 @@ function applyBatchInput() {
     const formalQty = parseInt(document.getElementById('batchFormalQty').value) || 0;
     
     if (formalQty === 0) {
-        showToast('提示', 'warning', '请输入有效数量');
+        showToast('请输入有效数量', 'warning');
         return;
     }
     
@@ -1603,7 +1603,7 @@ function applyBatchInput() {
     renderOrderList();
     triggerCalculation();
     
-    showToast('成功', 'success', `已应用批量设置：订单 ${formalQty}`);
+    showToast(`已应用批量设置：订单 ${formalQty}`, 'success');
 }
 
 function handleClearAll() {
@@ -1629,57 +1629,5 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-function showToast(title, type, message) {
-    const colors = {
-        success: { bg: '#D4EDDA', border: '#28A745', color: '#155724', icon: 'check-circle' },
-        error: { bg: '#F8D7DA', border: '#DC3545', color: '#721C24', icon: 'exclamation-circle' },
-        warning: { bg: '#FFF3CD', border: '#FFC107', color: '#856404', icon: 'exclamation-triangle' },
-        info: { bg: '#D1ECF1', border: '#17A2B8', color: '#0C5460', icon: 'info-circle' }
-    };
-    
-    const c = colors[type] || colors.info;
-    
-    const toast = document.createElement('div');
-    toast.style.cssText = `
-        position: fixed; top: 24px; right: 24px; z-index: 9999;
-        display: flex; align-items: flex-start; gap: 12px;
-        padding: 16px 20px; border-radius: 12px;
-        background: ${c.bg}; border: 2px solid ${c.border};
-        color: ${c.color}; font-family: inherit;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.12);
-        max-width: 380px; animation: slideInRight 0.35s ease;
-    `;
-    toast.innerHTML = `
-        <i class="fas fa-${c.icon}" style="font-size: 20px; margin-top: 2px; flex-shrink: 0;"></i>
-        <div style="flex: 1;">
-            <div style="font-weight: 700; font-size: 14px; margin-bottom: 4px;">${title}</div>
-            <div style="font-size: 13px; line-height: 1.4;">${message}</div>
-        </div>
-        <button onclick="this.parentElement.remove()" style="
-            background:none;border:none;color:${c.color};cursor:pointer;
-            font-size:16px;padding:4px;margin:-4px -8px 0 0;line-height:1;
-        ">×</button>
-    `;
-    
-    document.body.appendChild(toast);
-    
-    setTimeout(() => {
-        toast.style.animation = 'slideOutRight 0.3s ease forwards';
-        setTimeout(() => toast.remove(), 300);
-    }, 4000);
-}
-
-const styleSheet = document.createElement('style');
-styleSheet.textContent = `
-    @keyframes slideInRight {
-        from { opacity: 0; transform: translateX(40px); }
-        to { opacity: 1; transform: translateX(0); }
-    }
-    @keyframes slideOutRight {
-        from { opacity: 1; transform: translateX(0); }
-        to { opacity: 0; transform: translateX(40px); }
-    }
-`;
-document.head.appendChild(styleSheet);
 </script>
 {% endblock %}

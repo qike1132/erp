@@ -57,13 +57,10 @@ class ApiClient {
     }
 
     /**
-     * 初始化登录状态定时检查
+     * 初始化登录状态检查（已禁用：登录永不过期）
      */
     _initLoginStatusCheck() {
-        // 每5分钟检查一次登录状态
-        this._loginCheckInterval = setInterval(() => {
-            this._checkLoginStatus();
-        }, 5 * 60 * 1000);
+        // 不再定时检查登录过期
     }
 
     /**
@@ -129,15 +126,15 @@ class ApiClient {
                     <div class="modal-content">
                         <div class="modal-header" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
                             <h5 class="modal-title">
-                                <i class="fas fa-user-lock me-2"></i>登录已过期
+                                <i class="fas fa-user-lock me-2"></i>未登录
                             </h5>
                         </div>
                         <div class="modal-body text-center py-4">
                             <div class="mb-4">
                                 <i class="fas fa-clock fa-4x text-warning"></i>
                             </div>
-                            <h5 class="mb-2">您的登录状态已过期</h5>
-                            <p class="text-muted mb-4">为了继续使用系统功能，请重新登录</p>
+                            <h5 class="mb-2">您尚未登录</h5>
+                            <p class="text-muted mb-4">为了继续使用系统功能，请先登录</p>
                             <div class="d-grid gap-2">
                                 <button id="api-client-login-btn" class="btn btn-primary btn-lg">
                                     <i class="fas fa-sign-in-alt me-2"></i>立即登录
@@ -181,7 +178,7 @@ class ApiClient {
      */
     _handleUnauthorized(requestInfo = null) {
         // 记录错误
-        this._logError(new Error('未登录或登录已过期'), {
+        this._logError(new Error('未登录'), {
             type: 'unauthorized',
             requestInfo: requestInfo
         });
@@ -198,7 +195,7 @@ class ApiClient {
 
         // 显示友好提示
         if (typeof GlobalNotification !== 'undefined') {
-            GlobalNotification.warning('登录状态已过期，请重新登录', '提示', 5000);
+            GlobalNotification.warning('未登录，请先登录', '提示', 5000);
         }
 
         // 显示登录模态框
@@ -233,8 +230,6 @@ class ApiClient {
         const requests = [...this._pendingRequests];
         this._pendingRequests = [];
         
-        console.log(`[ApiClient] 开始重试 ${requests.length} 个请求`);
-        
         for (const requestInfo of requests) {
             try {
                 await this._request(
@@ -244,7 +239,6 @@ class ApiClient {
                     requestInfo.options,
                     true // 跳过未授权处理，避免循环
                 );
-                console.log(`[ApiClient] 请求重试成功: ${requestInfo.method} ${requestInfo.path}`);
             } catch (err) {
                 console.error(`[ApiClient] 请求重试失败: ${requestInfo.method} ${requestInfo.path}`, err);
             }
@@ -280,7 +274,7 @@ class ApiClient {
                         this._addPendingRequest(requestInfo);
                         this._handleUnauthorized(requestInfo);
                     }
-                    const errMsg = '未登录或登录已过期';
+                    const errMsg = '未登录';
                     throw new Error(errMsg);
                 }
 
@@ -361,22 +355,22 @@ class ApiClient {
         if (this._loginCheckInterval) {
             clearInterval(this._loginCheckInterval);
         }
+        if (this._loginSuccessListener) {
+            window.removeEventListener('loginSuccess', this._loginSuccessListener);
+        }
         this._clearPendingRequests();
     }
 }
 
-// 单例导出
-const api = new ApiClient();
-export default api;
-
-// 兼容非模块页面（全局挂载）
-if (typeof window !== 'undefined') {
+// 单例导出（IIFE 模式，兼容普通 script 标签加载）
+(function() {
+    const api = new ApiClient();
     window.ApiClient = ApiClient;
     window.api = api;
-    
+
     // 监听登录成功事件（如果登录页有这个事件）
-    window.addEventListener('loginSuccess', () => {
-        console.log('[ApiClient] 检测到登录成功，重试待处理请求');
+    api._loginSuccessListener = () => {
         api._retryPendingRequests();
-    });
-}
+    };
+    window.addEventListener('loginSuccess', api._loginSuccessListener);
+})();

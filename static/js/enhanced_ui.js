@@ -4,11 +4,16 @@
  * 包含:
  *   1. KeyboardShortcutManager - 全局键盘快捷键系统 (Y/N/Esc/Tab)
  *   2. StatusIndicator - 工具执行状态实时指示器
- *   3. ToastNotification - 反馈通知系统
- *   4. InlineDiffViewer - 内联差异展示组件
- *   5. ProgressTracker - 细粒度进度追踪
- *   6. UndoManager - 操作撤销管理
+ *   3. InlineDiffViewer - 内联差异展示组件
+ *   4. UndoManager - 操作撤销管理
  */
+
+/* HTML转义 - 防止XSS注入 */
+function _escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
 
 class KeyboardShortcutManager {
     constructor() {
@@ -19,7 +24,12 @@ class KeyboardShortcutManager {
     }
 
     _init() {
-        document.addEventListener('keydown', (e) => this._handleKeyDown(e));
+        this._boundHandleKeyDown = (e) => this._handleKeyDown(e);
+        document.addEventListener('keydown', this._boundHandleKeyDown);
+    }
+
+    destroy() {
+        document.removeEventListener('keydown', this._boundHandleKeyDown);
     }
 
     register(key, handler, description = '', context = 'global') {
@@ -230,10 +240,10 @@ class StatusIndicator {
             <i class="fas ${config.icon}" style="color:${config.color};font-size:14px;"></i>
             <div style="flex:1;min-width:0;">
                 <div style="display:flex;justify-content:space-between;align-items:center;">
-                    <span style="font-weight:600;color:var(--text-primary,#fff);">${toolName}</span>
-                    <span style="font-size:11px;color:var(--text-secondary,#8b9cb5);">${status.toUpperCase()}</span>
+                    <span style="font-weight:600;color:var(--text-primary,#fff);">${_escapeHtml(toolName)}</span>
+                    <span style="font-size:11px;color:var(--text-secondary,#8b9cb5);">${_escapeHtml(status.toUpperCase())}</span>
                 </div>
-                ${message ? `<div style="color:var(--text-secondary,#8b9cb5);font-size:12px;margin-top:2px;">${message}</div>` : ''}
+                ${message ? `<div style="color:var(--text-secondary,#8b9cb5);font-size:12px;margin-top:2px;">${_escapeHtml(message)}</div>` : ''}
                 ${progressBar}
             </div>
             <button onclick="document.getElementById('${id}').remove()" 
@@ -276,124 +286,6 @@ class StatusIndicator {
 }
 
 const statusIndicator = new StatusIndicator();
-
-const toastStyles = document.createElement('style');
-toastStyles.textContent = `
-    @keyframes slideInRight { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-    @keyframes slideOutRight { from { transform: translateX(0); opacity: 1; } to { transform: translateX(100%); opacity: 0; } }
-    
-    .toast-container {
-        position: fixed; top: 24px; right: 24px; z-index: 10000;
-        display: flex; flex-direction: column; gap: 10px; max-width: 400px;
-        pointer-events: none;
-    }
-    
-    .toast-notification {
-        display: flex; align-items: flex-start; gap: 12px;
-        padding: 14px 18px; border-radius: 10px;
-        font-family: inherit; font-size: 13.5px; line-height: 1.5;
-        box-shadow: 0 8px 30px rgba(0,0,0,0.35);
-        animation: slideInRight 0.35s cubic-bezier(0.22, 1, 0.36, 1);
-        pointer-events: auto; cursor: default;
-        border-left: 4px solid;
-    }
-    
-    .toast-success { background: linear-gradient(135deg, rgba(0,212,170,0.95), rgba(0,184,148,0.95)); border-color: #00b894; color: #0a1628; }
-    .toast-error { background: linear-gradient(135deg, rgba(255,107,107,0.95), rgba(255,82,82,0.95)); border-color: #ff5252; color: #0a1628; }
-    .toast-warning { background: linear-gradient(135deg, rgba(255,217,61,0.95), rgba(255,193,7,0.95)); border-color: #ffc107; color: #0a1628; }
-    .toast-info { background: linear-gradient(135deg, rgba(52,152,219,0.95), rgba(41,128,185,0.95)); border-color: #2980b9; color: #fff; }
-    
-    .toast-icon { font-size: 18px; margin-top: 1px; flex-shrink: 0; }
-    .toast-content { flex: 1; min-width: 0; }
-    .toast-title { font-weight: 700; font-size: 14px; margin-bottom: 3px; }
-    .toast-message { opacity: 0.9; word-break: break-word; }
-    .toast-close { background: none; border: none; cursor: pointer; font-size: 18px; padding: 0 2px; opacity: 0.7; transition: opacity 0.2s; flex-shrink: 0; }
-    .toast-close:hover { opacity: 1; }
-    .toast-progress { height: 3px; border-radius: 2px; margin-top: 8px; overflow: hidden; background: rgba(255,255,255,0.3); }
-    .toast-progress-bar { height: 100%; border-radius: 2px; background: rgba(255,255,255,0.8); transition: width linear; }
-`;
-document.head.appendChild(toastStyles);
-
-class ToastNotification {
-    constructor() {
-        this.container = null;
-        this.queue = [];
-        this.maxVisible = 5;
-        this.visibleCount = 0;
-        this._ensureContainer();
-    }
-
-    _ensureContainer() {
-        this.container = document.querySelector('.toast-container');
-        if (!this.container) {
-            this.container = document.createElement('div');
-            this.container.className = 'toast-container';
-            document.body.appendChild(this.container);
-        }
-    }
-
-    show(message, type = 'success', title = '', duration = 4000, options = {}) {
-        const icons = {
-            success: 'fa-check-circle',
-            error: 'fa-times-circle',
-            warning: 'fa-exclamation-triangle',
-            info: 'fa-info-circle'
-        };
-
-        const toast = document.createElement('div');
-        toast.className = `toast-notification toast-${type}`;
-
-        const progressDuration = duration > 0 ? duration + 300 : 0;
-
-        toast.innerHTML = `
-            <i class="fas ${icons[type] || icons.info} toast-icon"></i>
-            <div class="toast-content">
-                ${title ? `<div class="toast-title">${title}</div>` : ''}
-                <div class="toast-message">${message}</div>
-                ${duration > 0 ? `<div class="toast-progress"><div class="toast-progress-bar" style="width:100%;animation:shrink ${duration}ms linear forwards;"></div></div>` : ''}
-            </div>
-            <button class="toast-close" aria-label="关闭">&times;</button>
-        `;
-
-        const closeBtn = toast.querySelector('.toast-close');
-        closeBtn.onclick = () => this._dismiss(toast);
-
-        this.container.appendChild(toast);
-        this.visibleCount++;
-
-        if (duration > 0) {
-            setTimeout(() => this._dismiss(toast), duration);
-        }
-
-        return toast;
-    }
-
-    _dismiss(toast) {
-        if (!toast.parentNode) return;
-        toast.style.animation = 'slideOutRight 0.3s ease forwards';
-        setTimeout(() => {
-            if (toast.parentNode) {
-                toast.remove();
-                this.visibleCount--;
-            }
-        }, 300);
-    }
-
-    success(message, title = '') { return this.show(message, 'success', title); }
-    error(message, title = '') { return this.show(message, 'error', title, 6000); }
-    warning(message, title = '') { return this.show(message, 'warning', title, 5000); }
-    info(message, title = '') { return this.show(message, 'info', title); }
-}
-
-const toast = new ToastNotification();
-
-function showToast(msg, type = 'success') {
-    if (typeof window !== 'undefined' && window.toastNotification) {
-        window.toastNotification.show(msg, type);
-    } else {
-        toast.show(msg, type);
-    }
-}
 
 class InlineDiffViewer {
     static render(oldText, newText, container) {
@@ -507,9 +399,6 @@ if (typeof module !== 'undefined' && module.exports) {
         keyboardManager,
         StatusIndicator,
         statusIndicator,
-        ToastNotification,
-        toast,
-        showToast,
         InlineDiffViewer,
         UndoManager,
         undoManager
@@ -519,9 +408,6 @@ if (typeof module !== 'undefined' && module.exports) {
     window.keyboardManager = keyboardManager;
     window.StatusIndicator = StatusIndicator;
     window.statusIndicator = statusIndicator;
-    window.ToastNotification = ToastNotification;
-    window.toast = toast;
-    window.showToast = showToast;
     window.InlineDiffViewer = InlineDiffViewer;
     window.UndoManager = UndoManager;
     window.undoManager = undoManager;

@@ -56,17 +56,6 @@ class Settings(BaseSettings):
     REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        # 安全验证已在上方 SECRET_KEY 检查中完成
-        if not self.REDIS_PASSWORD and os.getenv("FLASK_ENV") == "production":
-            import warnings
-            warnings.warn(
-                "REDIS_PASSWORD 未设置，生产环境建议启用 Redis 认证",
-                UserWarning,
-                stacklevel=2,
-            )
-
     # Celery配置
     CELERY_BROKER_URL: str = os.getenv(
         "CELERY_BROKER_URL",
@@ -97,6 +86,13 @@ class Settings(BaseSettings):
             raise RuntimeError(
                 f"SECRET_KEY 不能使用不安全的默认值 '{self.SECRET_KEY}'，"
                 "请生成新的密钥: python -c \"import secrets; print(secrets.token_hex(32))\""
+            )
+        if not self.REDIS_PASSWORD and os.getenv("FLASK_ENV") == "production":
+            import warnings
+            warnings.warn(
+                "REDIS_PASSWORD 未设置，生产环境建议启用 Redis 认证",
+                UserWarning,
+                stacklevel=2,
             )
 
     # 分页配置

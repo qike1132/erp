@@ -11,11 +11,11 @@ import json
 import logging
 import uuid
 from datetime import datetime, date, timedelta
-from typing import Optional
 
 import openpyxl
 from sqlalchemy import select, func, delete, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from fastapi_app.shared_models import (
     PurchasePlan, PurchasePlanDetail, ShipmentRecord,
@@ -73,9 +73,7 @@ async def _generate_plan_no(db: AsyncSession) -> str:
 
 async def get_plan_list(db: AsyncSession, year: int, month: int,
                         customer_id: int = 0, status: str = '') -> dict:
-    """
-    获取指定月份的采购计划主单列表（含明细统计）
-    """
+    """获取指定月份的采购计划主单列表（含明细统计），单次 JOIN 查询"""
     plan_month = f'{year}-{month:02d}'
     conditions = [PurchasePlan.plan_month == plan_month]
     if customer_id:
@@ -83,31 +81,29 @@ async def get_plan_list(db: AsyncSession, year: int, month: int,
     if status:
         conditions.append(PurchasePlan.status == status)
 
+    # 单次查询：主表 LEFT JOIN 明细表 + GROUP BY
     result = await db.execute(
-        select(PurchasePlan)
+        select(
+            PurchasePlan,
+            func.count(PurchasePlanDetail.id).label('detail_count'),
+            func.coalesce(func.sum(PurchasePlanDetail.quantity), 0).label('total_quantity'),
+            func.coalesce(func.sum(PurchasePlanDetail.shipped_qty), 0).label('total_shipped'),
+        )
+        .outerjoin(PurchasePlanDetail, PurchasePlanDetail.plan_id == PurchasePlan.id)
         .where(*conditions)
+        .group_by(PurchasePlan.id)
         .order_by(PurchasePlan.create_time.desc())
     )
-    plans = result.scalars().all()
+    rows = result.all()
 
     plan_list = []
-    for plan in plans:
-        # 查询明细统计
-        detail_stats = await db.execute(
-            select(
-                func.count(PurchasePlanDetail.id).label('detail_count'),
-                func.coalesce(func.sum(PurchasePlanDetail.quantity), 0).label('total_quantity'),
-                func.coalesce(func.sum(PurchasePlanDetail.shipped_qty), 0).label('total_shipped'),
-            ).where(PurchasePlanDetail.plan_id == plan.id)
-        )
-        stats = detail_stats.one()
-
+    for plan, detail_count, total_quantity, total_shipped in rows:
         plan_list.append({
             **plan.to_dict(),
-            'detail_count': stats.detail_count,
-            'total_quantity': stats.total_quantity,
-            'total_shipped': stats.total_shipped,
-            'total_remaining': stats.total_quantity - stats.total_shipped,
+            'detail_count': detail_count,
+            'total_quantity': total_quantity,
+            'total_shipped': total_shipped,
+            'total_remaining': total_quantity - total_shipped,
         })
 
     return {
@@ -254,7 +250,6 @@ async def update_plan(db: AsyncSession, plan_id: int, *, created_by: str = '', *
         if field in kwargs and kwargs[field] is not None:
             setattr(plan, field, kwargs[field])
 
-    plan.update_time = datetime.now()
     await db.flush()
 
     await _log_action(db, plan.id, 'update', old_data, plan.to_dict(), created_by)
@@ -510,7 +505,7 @@ async def get_shipment_progress(db: AsyncSession, plan_id: int) -> dict:
 async def get_monthly_calendar(db: AsyncSession, year: int, month: int,
                                 customer_id: int = 0) -> dict:
     """
-    月度日历数据：按日期聚合计划，供前端 CSS Grid 日历渲染
+    月度日历数据：按日期聚合计划，供前端时序面板渲染
 
     返回:
       plans_by_date: {"2026-04-01": [{...}, ...], ...}
@@ -521,8 +516,11 @@ async def get_monthly_calendar(db: AsyncSession, year: int, month: int,
     if customer_id:
         conditions.append(PurchasePlan.customer_id == customer_id)
 
+    # 一次性加载主表+明细（eager loading）
     result = await db.execute(
-        select(PurchasePlan).where(*conditions)
+        select(PurchasePlan)
+        .options(selectinload(PurchasePlan.details))
+        .where(*conditions)
     )
     plans = result.scalars().all()
 
@@ -540,15 +538,7 @@ async def get_monthly_calendar(db: AsyncSession, year: int, month: int,
         plans_by_date[d.isoformat()] = []
 
     for plan in plans:
-        # 获取明细
-        detail_result = await db.execute(
-            select(PurchasePlanDetail)
-            .where(PurchasePlanDetail.plan_id == plan.id)
-            .order_by(PurchasePlanDetail.plan_date, PurchasePlanDetail.product_name)
-        )
-        details = detail_result.scalars().all()
-
-        for d in details:
+        for d in plan.details:
             key = (plan.customer_name, d.product_name)
             inv_qty = inventory_map.get(key, 0)
             shp_qty = shipped_map.get(key, 0)
@@ -576,7 +566,7 @@ async def get_monthly_calendar(db: AsyncSession, year: int, month: int,
                 customer_set[plan.customer_id] = {
                     'id': plan.customer_id,
                     'name': plan.customer_name,
-                    'icon_url': None,  # 将在API层补充
+                    'icon_url': None,
                 }
 
     return {
@@ -591,11 +581,13 @@ async def get_monthly_calendar(db: AsyncSession, year: int, month: int,
 # ==================== 客户汇总 ====================
 
 async def get_customer_summary(db: AsyncSession, year: int, month: int) -> dict:
-    """客户维度汇总统计"""
+    """客户维度汇总统计，单次 eager loading 查询"""
     plan_month = f'{year}-{month:02d}'
 
     result = await db.execute(
-        select(PurchasePlan).where(PurchasePlan.plan_month == plan_month)
+        select(PurchasePlan)
+        .options(selectinload(PurchasePlan.details))
+        .where(PurchasePlan.plan_month == plan_month)
     )
     plans = result.scalars().all()
 
@@ -604,13 +596,7 @@ async def get_customer_summary(db: AsyncSession, year: int, month: int) -> dict:
 
     summary = {}
     for plan in plans:
-        detail_result = await db.execute(
-            select(PurchasePlanDetail)
-            .where(PurchasePlanDetail.plan_id == plan.id)
-        )
-        details = detail_result.scalars().all()
-
-        for d in details:
+        for d in plan.details:
             key = (plan.customer_name, d.product_name)
             inv_qty = inventory_map.get(key, 0)
             shp_qty = shipped_map.get(key, 0)
@@ -649,14 +635,16 @@ async def get_customer_summary(db: AsyncSession, year: int, month: int) -> dict:
 
 async def get_inventory_compare(db: AsyncSession, year: int, month: int,
                                  customer_id: int = 0) -> dict:
-    """库存对比数据：每个计划明细的库存状态"""
+    """库存对比数据：每个计划明细的库存状态，单次 eager loading 查询"""
     plan_month = f'{year}-{month:02d}'
     conditions = [PurchasePlan.plan_month == plan_month]
     if customer_id:
         conditions.append(PurchasePlan.customer_id == customer_id)
 
     result = await db.execute(
-        select(PurchasePlan).where(*conditions)
+        select(PurchasePlan)
+        .options(selectinload(PurchasePlan.details))
+        .where(*conditions)
     )
     plans = result.scalars().all()
 
@@ -664,13 +652,7 @@ async def get_inventory_compare(db: AsyncSession, year: int, month: int,
 
     compare_list = []
     for plan in plans:
-        detail_result = await db.execute(
-            select(PurchasePlanDetail)
-            .where(PurchasePlanDetail.plan_id == plan.id)
-        )
-        details = detail_result.scalars().all()
-
-        for d in details:
+        for d in plan.details:
             key = (plan.customer_name, d.product_name)
             inv_qty = inventory_map.get(key, 0)
             compare_list.append({
@@ -890,6 +872,13 @@ async def confirm_staging(db: AsyncSession, session_id: str,
     all_customers = await customer_service.get_customers(db)
     customer_id_map = {c.name: c.id for c in all_customers}
 
+    # 批量获取产品映射（一次性查询所有 barcode）
+    barcodes = list({r.barcode for r in valid_records if r.barcode})
+    product_result = await db.execute(
+        select(Product).where(Product.barcode.in_(barcodes))
+    )
+    barcode_to_product = {p.barcode: p for p in product_result.scalars().all()}
+
     created_plans = []
     created_details = 0
 
@@ -930,9 +919,10 @@ async def confirm_staging(db: AsyncSession, session_id: str,
 
         # 创建明细
         for r in group_records:
+            product = barcode_to_product.get(r.barcode)
             detail = PurchasePlanDetail(
                 plan_id=plan.id,
-                product_id=0,  # 将在下面补充
+                product_id=product.id if product else 0,
                 product_name=r.product_name,
                 barcode=r.barcode,
                 plan_date=r.plan_date,
@@ -940,14 +930,6 @@ async def confirm_staging(db: AsyncSession, session_id: str,
                 shipped_qty=0,
                 remark=r.remark or '',
             )
-            # 补充 product_id
-            product_result = await db.execute(
-                select(Product).where(Product.barcode == r.barcode)
-            )
-            product = product_result.scalar_one_or_none()
-            if product:
-                detail.product_id = product.id
-
             db.add(detail)
             created_details += 1
 

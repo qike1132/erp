@@ -17,7 +17,7 @@ class TestProductRoutes:
         """测试产品列表页面访问成功"""
         response = logged_in_client.get('/product/list')
         assert response.status_code == 200
-        assert b'product' in response.data or b'产品' in response.data
+        assert b'product' in response.data or '产品'.encode('utf-8') in response.data
 
     def test_product_list_post_create_success(self, logged_in_client):
         """测试创建产品成功"""
@@ -123,7 +123,7 @@ class TestProductRoutes:
         
         response = logged_in_client.get(f'/product/delete/{test_product.id}', follow_redirects=True)
         assert response.status_code == 200
-        assert b'error' in response.data or b'无法删除' in response.data
+        assert b'error' in response.data or '无法删除'.encode('utf-8') in response.data
 
     def test_product_delete_with_stockins(self, logged_in_client, test_product, test_customer, db_session):
         """测试删除有关联入库的产品"""
@@ -140,7 +140,7 @@ class TestProductRoutes:
         
         response = logged_in_client.get(f'/product/delete/{test_product.id}', follow_redirects=True)
         assert response.status_code == 200
-        assert b'error' in response.data or b'无法删除' in response.data
+        assert b'error' in response.data or '无法删除'.encode('utf-8') in response.data
 
     def test_product_delete_not_found(self, logged_in_client):
         """测试删除不存在的产品"""

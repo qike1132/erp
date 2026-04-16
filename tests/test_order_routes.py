@@ -17,7 +17,7 @@ class TestOrderRoutes:
         """测试订单列表页面访问成功"""
         response = logged_in_client.get('/order/list')
         assert response.status_code == 200
-        assert b'order' in response.data or b'订单' in response.data
+        assert b'order' in response.data or '订单'.encode('utf-8') in response.data
 
     def test_order_list_post_create_success(self, logged_in_client, test_product, test_customer):
         """测试创建订单成功"""
@@ -43,7 +43,7 @@ class TestOrderRoutes:
         }
         response = logged_in_client.post('/order/list', data=data, follow_redirects=True)
         assert response.status_code == 200
-        assert b'error' in response.data or b'错误' in response.data
+        assert b'error' in response.data or '错误'.encode('utf-8') in response.data
 
     def test_order_list_post_invalid_quantity(self, logged_in_client, test_product, test_customer):
         """测试创建订单无效数量"""

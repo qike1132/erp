@@ -183,5 +183,5 @@ class MonthlyCalendarResponse(BaseModel):
     year: int
     month: int
     days_in_month: int
-    plans_by_date: dict = {}
-    customers: list = []
+    plans_by_date: dict[str, list] = {}
+    customers: list[dict] = []

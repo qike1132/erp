@@ -17,7 +17,7 @@ class TestStockInRoutes:
         """测试入库列表页面访问成功"""
         response = logged_in_client.get('/stock/in/list')
         assert response.status_code == 200
-        assert b'stockin' in response.data or b'入库' in response.data
+        assert b'stockin' in response.data or '入库'.encode('utf-8') in response.data
 
     def test_stockin_list_post_create_success(self, logged_in_client, test_product, test_customer):
         """测试创建入库记录成功"""
@@ -137,7 +137,7 @@ class TestStockInRoutes:
         response = logged_in_client.get(f'/stock/in/delete/{test_stockin.id}', follow_redirects=True)
         assert response.status_code == 200
         # 应该提示无法删除
-        assert b'error' in response.data or b'无法删除' in response.data
+        assert b'error' in response.data or '无法删除'.encode('utf-8') in response.data
 
 
 class TestStockOutRoutes:
@@ -147,7 +147,7 @@ class TestStockOutRoutes:
         """测试出库列表页面访问成功"""
         response = logged_in_client.get('/stock/out/list')
         assert response.status_code == 200
-        assert b'stockout' in response.data or b'出库' in response.data
+        assert b'stockout' in response.data or '出库'.encode('utf-8') in response.data
 
     def test_stockout_list_post_create_success(self, logged_in_client, test_product):
         """测试创建出库记录成功"""
@@ -180,7 +180,7 @@ class TestStockOutRoutes:
         }
         response = logged_in_client.post('/stock/out/list', data=data, follow_redirects=True)
         assert response.status_code == 200
-        assert b'error' in response.data or b'库存不足' in response.data
+        assert b'error' in response.data or '库存不足'.encode('utf-8') in response.data
 
     def test_stockout_list_post_nonexistent_product(self, logged_in_client):
         """测试创建出库记录产品不存在"""
@@ -259,7 +259,7 @@ class TestInventoryRoutes:
         """测试库存查看页面访问成功"""
         response = logged_in_client.get('/stock/inventory')
         assert response.status_code == 200
-        assert b'inventory' in response.data or b'库存' in response.data
+        assert b'inventory' in response.data or '库存'.encode('utf-8') in response.data
 
     def test_inventory_with_products(self, logged_in_client, test_product, test_customer, db_session):
         """测试有产品时的库存查看"""

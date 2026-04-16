@@ -9,6 +9,7 @@ from fastapi_app.shared_models import (
     MaterialRegistration, MaterialRegistrationItem,
     PurchaseOrder, PurchaseOrderItem, User
 )
+from fastapi_app.services import escape_like
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +23,9 @@ async def get_registrations(db, page: int = 1, per_page: int = 20,
     if status:
         query = query.where(MaterialRegistration.status == status)
     if order_no:
-        query = query.where(MaterialRegistration.purchase_order_no.ilike(f'%{order_no}%'))
+        query = query.where(MaterialRegistration.purchase_order_no.ilike(f'%{escape_like(order_no)}%'))
     if supplier:
-        query = query.where(MaterialRegistration.supplier_name.ilike(f'%{supplier}%'))
+        query = query.where(MaterialRegistration.supplier_name.ilike(f'%{escape_like(supplier)}%'))
     if start_date:
         try:
             sd = datetime.strptime(start_date, '%Y-%m-%d').date()
@@ -288,9 +289,9 @@ async def export_registrations(db, order_no: str = '', supplier: str = '',
     """导出来料登记数据（返回HTML用于Excel打开）"""
     query = select(MaterialRegistration).options(joinedload(MaterialRegistration.items))
     if order_no:
-        query = query.where(MaterialRegistration.purchase_order_no.ilike(f'%{order_no}%'))
+        query = query.where(MaterialRegistration.purchase_order_no.ilike(f'%{escape_like(order_no)}%'))
     if supplier:
-        query = query.where(MaterialRegistration.supplier_name.ilike(f'%{supplier}%'))
+        query = query.where(MaterialRegistration.supplier_name.ilike(f'%{escape_like(supplier)}%'))
     if start_date:
         try:
             sd = datetime.strptime(start_date, '%Y-%m-%d').date()
@@ -361,11 +362,11 @@ async def get_history(db, page: int = 1, per_page: int = 20,
     ).options(joinedload(MaterialRegistration.items))
 
     if order_no:
-        query = query.where(MaterialRegistration.purchase_order_no.ilike(f'%{order_no}%'))
+        query = query.where(MaterialRegistration.purchase_order_no.ilike(f'%{escape_like(order_no)}%'))
     if supplier:
-        query = query.where(MaterialRegistration.supplier_name.ilike(f'%{supplier}%'))
+        query = query.where(MaterialRegistration.supplier_name.ilike(f'%{escape_like(supplier)}%'))
     if customer_name:
-        query = query.where(PurchaseOrder.customer_name.ilike(f'%{customer_name}%'))
+        query = query.where(PurchaseOrder.customer_name.ilike(f'%{escape_like(customer_name)}%'))
     if start_date:
         try:
             sd = datetime.strptime(start_date, '%Y-%m-%d').date()
@@ -410,21 +411,21 @@ async def get_suggestions(db, field: str, keyword: str, limit: int = 10) -> dict
         if field == 'order_no':
             result = await db.execute(
                 select(MaterialRegistration.purchase_order_no)
-                .where(MaterialRegistration.purchase_order_no.ilike(f'%{keyword}%'))
+                .where(MaterialRegistration.purchase_order_no.ilike(f'%{escape_like(keyword)}%'))
                 .distinct().limit(limit)
             )
             suggestions = [r[0] for r in result.all() if r[0]]
         elif field == 'supplier':
             result = await db.execute(
                 select(MaterialRegistration.supplier_name)
-                .where(MaterialRegistration.supplier_name.ilike(f'%{keyword}%'))
+                .where(MaterialRegistration.supplier_name.ilike(f'%{escape_like(keyword)}%'))
                 .distinct().limit(limit)
             )
             suggestions = [r[0] for r in result.all() if r[0]]
         elif field == 'material_name':
             result = await db.execute(
                 select(MaterialRegistrationItem.material_name)
-                .where(MaterialRegistrationItem.material_name.ilike(f'%{keyword}%'))
+                .where(MaterialRegistrationItem.material_name.ilike(f'%{escape_like(keyword)}%'))
                 .distinct().limit(limit)
             )
             suggestions = [r[0] for r in result.all() if r[0]]

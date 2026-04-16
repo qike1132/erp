@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 
 from fastapi_app.shared_models import SkuBatch
+from fastapi_app.services import escape_like
 
 # 允许排序的字段白名单，防止任意属性访问
 SORTABLE_COLUMNS = {
@@ -34,11 +35,11 @@ async def get_sku_batches(
 
     # 筛选条件
     if batch_no:
-        query = query.where(SkuBatch.batch_no.like(f'%{batch_no}%'))
-        count_query = count_query.where(SkuBatch.batch_no.like(f'%{batch_no}%'))
+        query = query.where(SkuBatch.batch_no.like(f'%{escape_like(batch_no)}%'))
+        count_query = count_query.where(SkuBatch.batch_no.like(f'%{escape_like(batch_no)}%'))
     if sku_code:
-        query = query.where(SkuBatch.sku_code.like(f'%{sku_code}%'))
-        count_query = count_query.where(SkuBatch.sku_code.like(f'%{sku_code}%'))
+        query = query.where(SkuBatch.sku_code.like(f'%{escape_like(sku_code)}%'))
+        count_query = count_query.where(SkuBatch.sku_code.like(f'%{escape_like(sku_code)}%'))
     if status:
         query = query.where(SkuBatch.status == status)
         count_query = count_query.where(SkuBatch.status == status)

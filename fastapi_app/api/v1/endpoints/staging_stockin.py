@@ -25,6 +25,7 @@ router = APIRouter()
 async def get_staging_stockins(
     session_id: str = Query("default", description="会话ID"),
     db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(require_permission("batch_import")),
 ):
     """获取指定会话的暂存备货列表"""
     data = await svc.get_staging_stockins(db, session_id)
@@ -58,6 +59,7 @@ async def update_staging_stockin(
     stockin_id: int,
     data: StagingStockInUpdate,
     db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(require_permission("batch_import")),
 ):
     """更新暂存备货"""
     try:
@@ -71,6 +73,7 @@ async def update_staging_stockin(
 async def clear_staging_stockins(
     session_id: str = Query("default", description="会话ID"),
     db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(require_permission("batch_import")),
 ):
     """清空当前会话的暂存备货"""
     await svc.clear_staging_stockins(db, session_id)
@@ -81,6 +84,7 @@ async def clear_staging_stockins(
 async def delete_staging_stockin(
     stockin_id: int,
     db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(require_permission("batch_import")),
 ):
     """删除暂存备货"""
     try:

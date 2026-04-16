@@ -2,6 +2,22 @@
 {% block extra_css %}
 <style>
     /* 排产计划页面专用样式 */
+
+    /* ===== 横向宽度放大10%：收缩侧边栏释放空间 ===== */
+    :root { --sidebar-width: 150px !important; }
+    .sidebar { width: 150px !important; }
+    .sidebar-header { padding: 16px 10px 12px !important; }
+    .sidebar-logo img { width: 36px !important; height: 36px !important; border-radius: 12px !important; }
+    .sidebar-logo { gap: 8px !important; margin-bottom: 8px !important; }
+    .sidebar-title { font-size: 13px !important; line-height: 1.2 !important; }
+    .sidebar-subtitle { display: none !important; }
+    .sidebar-nav { padding: 12px 8px !important; }
+    .nav-section-title { font-size: 9px !important; padding: 0 8px 4px !important; margin-bottom: 4px !important; }
+    .nav-item { padding: 9px 10px !important; font-size: 12px !important; gap: 8px !important; margin-bottom: 4px !important; border-radius: 10px !important; }
+    .nav-item i { font-size: 15px !important; width: 18px !important; }
+    .main-content { margin-left: 150px !important; }
+    .content-container { padding: 24px 16px !important; }
+
     .table th:nth-child(1), .table td:nth-child(1) { width: 10%; }
     .table th:nth-child(2), .table td:nth-child(2) { width: 12%; }
     .table th:nth-child(3), .table td:nth-child(3) { width: 8%; }

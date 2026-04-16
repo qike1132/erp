@@ -10,6 +10,8 @@ from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db
+from fastapi_app.core.deps import require_permission
+from fastapi_app.shared_models import User
 from fastapi_app.schemas.ocr_import import (
     OcrPdfImportResult,
     OcrPdfPreviewResult,
@@ -25,7 +27,9 @@ SUPPORTED_EXTENSIONS = {'.pdf'} | IMAGE_EXTENSIONS
 
 
 @router.post("/create-task", summary="创建 OCR 识别任务（获取进度追踪ID）")
-async def create_ocr_task():
+async def create_ocr_task(
+    current_user: User = Depends(require_permission("batch_import")),
+):
     """
     创建 OCR 识别任务，返回 task_id。
 
@@ -42,6 +46,7 @@ async def upload_shipping_docs(
     session_id: str = Query(..., description="会话ID"),
     task_id: str = Query("", description="进度追踪ID（由 /create-task 返回）"),
     db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(require_permission("batch_import")),
 ):
     """
     批量上传出货单（PDF/图片），通过离线 OCR 识别后导入暂存区。
@@ -120,7 +125,10 @@ async def upload_shipping_docs(
 
 
 @router.get("/progress/{task_id}", summary="查询 OCR 识别进度")
-async def get_ocr_progress(task_id: str):
+async def get_ocr_progress(
+    task_id: str,
+    current_user: User = Depends(require_permission("batch_import")),
+):
     """
     查询 OCR 识别任务的进度。
 
@@ -133,6 +141,7 @@ async def get_ocr_progress(task_id: str):
 @router.post("/preview", response_model=OcrPdfPreviewResult, summary="预览 OCR 识别结果（不写入暂存区）")
 async def preview_shipping_doc(
     file: UploadFile = File(..., description="PDF 或图片文件"),
+    current_user: User = Depends(require_permission("batch_import")),
 ):
     """
     预览单个文件的 OCR 识别结果，不写入暂存区。

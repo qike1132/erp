@@ -1,18 +1,18 @@
 """
 ERP系统启动脚本 (修复版 - 热重载稳定性增强)
 
-架构说明：
-  - Flask (端口5003): 主进程，使用 Werkzeug stat reloader 做自身热重载
-  - FastAPI/uvicorn (端口5002): 子进程，使用 uvicorn --reload 做自身热重载
-  - 两者独立管理各自的热重载，互不干扰
+架构说明（单一重载器）：
+  - Flask (端口5003): 主进程，唯一热重载器（Werkzeug stat reloader）
+  - FastAPI/uvicorn (端口5002): 子进程，不启用 uvicorn --reload
+  - 所有后端代码改动统一由 Flask reloader 触发重启，避免双重重载冲突
 
 关键设计：
   1. Windows 上使用 CREATE_NO_WINDOW + 输出重定向让 uvicorn 在后台运行
      → 避免 uvicorn 创建额外的控制台窗口，实现单窗口启动
-  2. Flask 使用 stat reloader + exclude_patterns 排除 fastapi_app 目录
-     → 避免 Flask 重新加载时误杀 FastAPI 子进程
-  3. FastAPI 日志通过 --log-config 写入文件，不依赖 stdout/stderr
-     → 保证 uvicorn reloader 能正常 spawn 新 worker 进程
+  2. FastAPI 关闭 --reload，避免与 Flask reloader 叠加
+  3. Flask 通过 extra_files 显式监控 fastapi_app/*.py
+     → FastAPI 代码改动同样触发统一重载
+  4. FastAPI 日志通过 --log-config 写入文件，不依赖 stdout/stderr
   4. atexit 和信号处理器确保干净退出
 """
 import os
@@ -23,6 +23,7 @@ import atexit
 import time
 import signal
 import logging
+from importlib.metadata import version as _pkg_version, PackageNotFoundError
 
 # 在启动任何子进程之前加载 .env，确保 FastAPI 子进程继承到 DB_PASSWORD 等变量
 from dotenv import load_dotenv
@@ -35,6 +36,43 @@ _fastapi_proc = None
 _fastapi_monitor_running = False
 _logger = logging.getLogger(__name__)
 _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+
+def _single_reloader_enabled() -> bool:
+    """是否启用单一重载器架构（默认启用）。"""
+    return os.getenv("SINGLE_RELOADER_MODE", "1").lower() in ("1", "true", "yes")
+
+
+def _should_manage_fastapi_in_this_process() -> bool:
+    """仅在 Werkzeug worker 进程中管理 FastAPI 子进程。"""
+    run_main = os.environ.get("WERKZEUG_RUN_MAIN")
+    return run_main == "true"
+
+
+def _collect_fastapi_reload_files():
+    """收集 Flask reloader 需额外监控的 FastAPI 源文件。"""
+    fastapi_root = os.path.join(_PROJECT_ROOT, "fastapi_app")
+    watched_files = []
+    if not os.path.isdir(fastapi_root):
+        return watched_files
+
+    for root, dirs, files in os.walk(fastapi_root):
+        # 排除缓存目录，减少无意义重载
+        dirs[:] = [d for d in dirs if d != "__pycache__"]
+        for filename in files:
+            if filename.endswith(".py"):
+                watched_files.append(os.path.join(root, filename))
+    return watched_files
+
+
+def _check_reload_dependency_versions():
+    """启动前检查热重载关键依赖版本，提前暴露不兼容组合。"""
+    try:
+        uvicorn_ver = _pkg_version("uvicorn")
+        watchfiles_ver = _pkg_version("watchfiles")
+        print(f"[INFO] 热重载依赖版本: uvicorn={uvicorn_ver}, watchfiles={watchfiles_ver}")
+    except PackageNotFoundError as e:
+        print(f"[WARN] 热重载依赖缺失: {e}. 建议执行: pip install \"uvicorn[standard]\" watchfiles")
 
 
 def _kill_port_5002():
@@ -67,7 +105,10 @@ def _start_fastapi():
         # 先清理端口残留进程
         _kill_port_5002()
 
-        fastapi_debug = os.getenv('FASTAPI_DEBUG', 'true').lower() in ('true', '1', 'yes')
+        fastapi_debug = (
+            os.getenv('FASTAPI_DEBUG', 'true').lower() in ('true', '1', 'yes')
+            and not _single_reloader_enabled()
+        )
         uvicorn_args = [
             sys.executable, '-m', 'uvicorn',
             'fastapi_app.main:app',
@@ -79,6 +120,18 @@ def _start_fastapi():
             uvicorn_args.extend([
                 '--reload',
                 '--reload-dir', reload_dir,
+                # 仅监控 Python 源文件，避免日志/缓存等噪音触发重载风暴
+                '--reload-include', '*.py',
+                # 明确排除非 FastAPI 代码目录（兼容部分版本在 Windows 下 reload-dir 过宽的问题）
+                '--reload-exclude', '.git/*',
+                '--reload-exclude', '.archive/*',
+                '--reload-exclude', '.agents/*',
+                '--reload-exclude', '.trae/*',
+                '--reload-exclude', 'tests/*',
+                '--reload-exclude', 'scripts/*',
+                '--reload-exclude', 'logs/*',
+                '--reload-exclude', 'app/*',
+                '--reload-exclude', 'migrations/*',
             ])
 
         # uvicorn 日志通过 --log-config 写入文件，不再重定向 stdout/stderr
@@ -101,8 +154,15 @@ def _start_fastapi():
             popen_kwargs['stdout'] = subprocess.DEVNULL
             popen_kwargs['stderr'] = subprocess.DEVNULL
 
+        # Windows + watchfiles 在部分环境下需要强制轮询，避免漏检/误检导致的异常退出
+        # 仅在启用 uvicorn reload 时需要
+        child_env = os.environ.copy()
+        if sys.platform == 'win32' and fastapi_debug:
+            child_env.setdefault('WATCHFILES_FORCE_POLLING', 'true')
+
         _fastapi_proc = subprocess.Popen(
             uvicorn_args,
+            env=child_env,
             **popen_kwargs,
         )
         print(f"[OK] FastAPI 服务已启动 (PID: {_fastapi_proc.pid})，日志: logs/fastapi.log")
@@ -167,29 +227,17 @@ def _monitor_fastapi():
             consecutive_failures = 0
 
 
-# ============================================================
-# 关键修复：正确检测 Werkzeug reloader 主进程
-# ============================================================
-def _is_reloader_parent():
-    """检测当前进程是否是 Werkzeug reloader 的父进程
-
-    返回 True：首次启动或 reloader 主进程 → 应启动 FastAPI 子进程
-    返回 False：Werkzeug worker 子进程 → 不应启动 FastAPI（父进程已管理）
-    """
-    run_main = os.environ.get('WERKZEUG_RUN_MAIN')
-    if run_main == 'true':
-        return False
-    return True
-
-
-if _is_reloader_parent():
+if _should_manage_fastapi_in_this_process():
     print("=" * 60)
     print("ERP系统启动中...")
     print("=" * 60)
 
-    # 启动 FastAPI 监控线程（守护线程，随主进程退出）
-    _monitor_thread = threading.Thread(target=_monitor_fastapi, daemon=True)
-    _monitor_thread.start()
+    # 单一重载器模式下由 Flask 统一拉起/重启，不启用 FastAPI 崩溃自动重启线程，避免重启竞态
+    if not _single_reloader_enabled():
+        _monitor_thread = threading.Thread(target=_monitor_fastapi, daemon=True)
+        _monitor_thread.start()
+
+    _check_reload_dependency_versions()
 
     # 启动 FastAPI 服务
     _start_fastapi()
@@ -198,7 +246,6 @@ if _is_reloader_parent():
     atexit.register(_stop_fastapi)
 
     # 注册信号处理器
-    # 注意：仅在 reloader 主进程中注册，worker 子进程由 Werkzeug 管理
     def _signal_handler(signum, frame):
         print(f"\n[INFO] 收到信号 {signum}，正在关闭服务...")
         _stop_fastapi()
@@ -207,13 +254,7 @@ if _is_reloader_parent():
         sys.exit(0)
 
     try:
-        # SIGINT: 在 Windows 上 Werkzeug reloader 会向旧 worker 发送 SIGINT
-        # 我们只在主进程中处理，worker 子进程的 SIGINT 由 Werkzeug 管理
-        # 使用 SIG_IGN 忽略 SIGINT 可以防止意外的信号中断
-        if sys.platform == 'win32':
-            signal.signal(signal.SIGINT, signal.SIG_IGN)
-        else:
-            signal.signal(signal.SIGINT, _signal_handler)
+        signal.signal(signal.SIGINT, _signal_handler)
         signal.signal(signal.SIGTERM, _signal_handler)
     except (ValueError, OSError):
         pass
@@ -248,16 +289,17 @@ if __name__ == '__main__':
     # 而 watchdog 的 ignore_patterns 只对文件名生效，无法排除目录
     reloader_type = 'stat'
     flask_exclude_patterns = [
-        '*fastapi_app*',
         '*\\logs\\*',
         '*/logs/*',
         '*.git*',
         '*\\scripts\\*',
         '*/scripts/*',
     ]
+    flask_extra_files = _collect_fastapi_reload_files()
 
     print(f"[INFO] 热重载监控器类型: {reloader_type}")
     print(f"[INFO] Flask 排除监控路径: {len(flask_exclude_patterns)} 个模式")
+    print(f"[INFO] Flask 额外监控 FastAPI 文件: {len(flask_extra_files)} 个")
 
     try:
         app.run(
@@ -267,7 +309,7 @@ if __name__ == '__main__':
             use_reloader=True,
             reloader_type=reloader_type,
             exclude_patterns=flask_exclude_patterns,
-            extra_files=[],
+            extra_files=flask_extra_files,
         )
     except OSError as e:
         if 'Address already in use' in str(e) or '10048' in str(e):

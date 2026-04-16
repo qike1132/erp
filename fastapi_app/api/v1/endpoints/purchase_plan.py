@@ -3,12 +3,11 @@
 
 主从表结构路由，前缀 /api/v1/plans
 """
-import io
+import calendar
 import logging
-from datetime import date
+from datetime import date as date_type
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
-from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db
@@ -265,9 +264,7 @@ async def shipment_sync(
 ):
     """手动触发出货数据同步"""
     try:
-        from datetime import date as date_type
         start = date_type(data.year, data.month, 1)
-        import calendar
         end = date_type(data.year, data.month, calendar.monthrange(data.year, data.month)[1])
 
         # 同步整个月
@@ -380,30 +377,5 @@ async def validate_barcode(
 async def download_template(
     _user: User = Depends(require_permission("production_plan_manage")),
 ):
-    """下载Excel上传模板"""
-    import openpyxl
-
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "采购计划模板"
-
-    # 标题行
-    headers = ["客户名称", "产品名称", "69码", "数量", "计划日期", "备注"]
-    ws.append(headers)
-
-    # 示例行
-    ws.append(["示例客户", "示例产品", "6901234567890", 100, "2026-04-15", "备注信息"])
-
-    # 列宽
-    for col in range(1, 7):
-        ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = 18
-
-    output = io.BytesIO()
-    wb.save(output)
-    output.seek(0)
-
-    return StreamingResponse(
-        output,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=purchase_plan_template.xlsx"},
-    )
+    """下载Excel上传模板（重定向到Flask路由）"""
+    raise HTTPException(status_code=307, detail="使用 /plans/template 下载模板")

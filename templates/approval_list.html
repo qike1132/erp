@@ -341,7 +341,7 @@ function quickApprove(approvalId) {
                 if (window.GlobalNotification) {
                     GlobalNotification.success(data.message);
                 } else {
-                    showToast('success', data.message);
+                    showToast(data.message, 'success');
                 }
                 setTimeout(() => {
                     window.location.reload();
@@ -352,7 +352,7 @@ function quickApprove(approvalId) {
                 if (window.GlobalNotification) {
                     GlobalNotification.error(data.error || '操作失败');
                 } else {
-                    showToast('error', data.error || '操作失败');
+                    showToast(data.error || '操作失败', 'error');
                 }
             }
         })
@@ -363,7 +363,7 @@ function quickApprove(approvalId) {
             if (window.GlobalNotification) {
                 GlobalNotification.error('网络错误，请重试');
             } else {
-                showToast('error', '网络错误，请重试');
+                showToast('网络错误，请重试', 'error');
             }
         });
     });
@@ -402,7 +402,7 @@ function confirmReject() {
             if (window.GlobalNotification) {
                 GlobalNotification.success(data.message);
             } else {
-                showToast('success', data.message);
+                showToast(data.message, 'success');
             }
             setTimeout(() => {
                 window.location.reload();
@@ -413,7 +413,7 @@ function confirmReject() {
             if (window.GlobalNotification) {
                 GlobalNotification.error(data.error || '操作失败');
             } else {
-                showToast('error', data.error || '操作失败');
+                showToast(data.error || '操作失败', 'error');
             }
         }
     })
@@ -424,40 +424,8 @@ function confirmReject() {
         if (window.GlobalNotification) {
             GlobalNotification.error('网络错误，请重试');
         } else {
-            showToast('error', '网络错误，请重试');
+            showToast('网络错误，请重试', 'error');
         }
-    });
-}
-
-// Toast通知函数
-function showToast(type, message) {
-    const toastHtml = `
-        <div class="toast align-items-center text-white bg-${type === 'success' ? 'success' : 'danger'} border-0" role="alert">
-            <div class="d-flex">
-                <div class="toast-body">
-                    <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'} me-2"></i>
-                    ${message}
-                </div>
-                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
-            </div>
-        </div>
-    `;
-    
-    let container = document.getElementById('toastContainer');
-    if (!container) {
-        container = document.createElement('div');
-        container.id = 'toastContainer';
-        container.className = 'toast-container position-fixed top-0 end-0 p-3';
-        container.style.zIndex = '9999';
-        document.body.appendChild(container);
-    }
-    
-    container.insertAdjacentHTML('beforeend', toastHtml);
-    const toast = new bootstrap.Toast(container.lastElementChild, { delay: 3000 });
-    toast.show();
-    
-    container.lastElementChild.addEventListener('hidden.bs.toast', function() {
-        this.remove();
     });
 }
 </script>

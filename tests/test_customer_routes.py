@@ -17,7 +17,7 @@ class TestCustomerRoutes:
         """测试客户列表页面访问成功"""
         response = logged_in_client.get('/customer/list')
         assert response.status_code == 200
-        assert b'customer' in response.data or b'客户' in response.data
+        assert b'customer' in response.data or '客户'.encode('utf-8') in response.data
 
     def test_customer_list_post_create_success(self, logged_in_client):
         """测试创建客户成功"""
@@ -44,7 +44,7 @@ class TestCustomerRoutes:
         }
         response = logged_in_client.post('/customer/list', data=data, follow_redirects=True)
         assert response.status_code == 200
-        assert b'error' in response.data or b'不能为空' in response.data
+        assert b'error' in response.data or '不能为空'.encode('utf-8') in response.data
 
     def test_customer_list_post_duplicate_name(self, logged_in_client, test_customer):
         """测试创建重复名称客户"""
@@ -55,7 +55,7 @@ class TestCustomerRoutes:
         }
         response = logged_in_client.post('/customer/list', data=data, follow_redirects=True)
         assert response.status_code == 200
-        assert b'error' in response.data or b'已存在' in response.data
+        assert b'error' in response.data or '已存在'.encode('utf-8') in response.data
 
     def test_customer_edit_get_success(self, logged_in_client, test_customer):
         """测试客户编辑页面访问成功"""
@@ -137,7 +137,7 @@ class TestCustomerRoutes:
         
         response = logged_in_client.get(f'/customer/delete/{test_customer.id}', follow_redirects=True)
         assert response.status_code == 200
-        assert b'error' in response.data or b'无法删除' in response.data
+        assert b'error' in response.data or '无法删除'.encode('utf-8') in response.data
 
     def test_customer_delete_not_found(self, logged_in_client):
         """测试删除不存在的客户"""

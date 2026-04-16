@@ -51,19 +51,31 @@ def _register_fastapi_proxy(app, csrf):
     @app.route('/api/v1/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
     @csrf.exempt
     def proxy_to_fastapi(path):
+        # SSRF防护：拒绝路径遍历
+        if '..' in path.split('/'):
+            return jsonify({'success': False, 'message': '非法请求路径'}), 400
+
         # 构建完整的目标 URL（包含查询参数）
         query_string = request.query_string.decode('utf-8') if request.query_string else ''
         target_url = f"{FASTAPI_URL}/api/v1/{path}"
         if query_string:
             target_url += f"?{query_string}"
+
+        # SSRF防护：验证解析后的URL仍指向目标FastAPI主机
+        from urllib.parse import urlparse
+        parsed = urlparse(target_url)
+        expected = urlparse(FASTAPI_URL)
+        if parsed.scheme not in ('http', 'https') or parsed.netloc != expected.netloc:
+            return jsonify({'success': False, 'message': '非法请求目标'}), 400
+
         try:
             req = urllib.request.Request(
                 target_url,
                 data=request.get_data(),
                 method=request.method,
             )
-            # 转发 Content-Type 等关键请求头
-            for header in ['Content-Type', 'Authorization', 'Cookie']:
+            # 转发关键请求头（含 Origin/Referer/Host，供 FastAPI CSRF 中间件校验）
+            for header in ['Content-Type', 'Authorization', 'Cookie', 'Origin', 'Referer', 'Host']:
                 val = request.headers.get(header)
                 if val:
                     req.add_header(header, val)
@@ -84,7 +96,8 @@ def _register_fastapi_proxy(app, csrf):
         except urllib.error.URLError:
             return jsonify({'success': False, 'message': 'FastAPI 服务未启动，请检查服务状态'}), 503
         except Exception as e:
-            return jsonify({'success': False, 'message': f'代理请求失败: {str(e)}'}), 500
+            _logger.error(f'代理请求失败: {str(e)}')
+            return jsonify({'success': False, 'message': '代理请求失败'}), 500
 
 
 def create_app(config_name='default'):
@@ -243,9 +256,10 @@ def get_config(config_name):
             'SQLALCHEMY_DATABASE_URI': get_database_uri(),
             'SQLALCHEMY_TRACK_MODIFICATIONS': False,
             'SQLALCHEMY_POOL_SIZE': int(os.environ.get('DB_POOL_SIZE', 10)),
-            'SQLALCHEMY_POOL_RECYCLE': int(os.environ.get('DB_POOL_RECYCLE', 3600)),
+            'SQLALCHEMY_POOL_RECYCLE': int(os.environ.get('DB_POOL_RECYCLE', 1800)),
             'SQLALCHEMY_POOL_TIMEOUT': int(os.environ.get('DB_POOL_TIMEOUT', 30)),
             'SQLALCHEMY_MAX_OVERFLOW': int(os.environ.get('DB_MAX_OVERFLOW', 5)),
+            'SQLALCHEMY_POOL_PRE_PING': True,
             'SQLALCHEMY_ECHO': os.environ.get('SQL_ECHO', 'false').lower() == 'true',
             'WTF_CSRF_ENABLED': True,
             'UPLOAD_FOLDER': os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'uploads'),
@@ -254,6 +268,7 @@ def get_config(config_name):
             'SESSION_COOKIE_HTTPONLY': True,
             'SESSION_COOKIE_SAMESITE': 'Lax',
             'SEND_FILE_MAX_AGE_DEFAULT': 0,
+            'ASSET_VERSION': '2.5',  # CSS/JS缓存清除版本号，更新静态文件时递增此值
             'TEMPLATES_AUTO_RELOAD': True,
         },
         'testing': {
@@ -356,4 +371,7 @@ app = create_app()
 
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5003)
+    debug_mode = os.getenv('FLASK_DEBUG', '0') == '1'
+    host = os.getenv('FLASK_HOST', '127.0.0.1')
+    port = int(os.getenv('FLASK_PORT', '5003'))
+    app.run(debug=debug_mode, host=host, port=port)

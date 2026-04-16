@@ -24,6 +24,7 @@ from fastapi_app.shared_models import (
     MaterialRegistration, MaterialRegistrationItem,
     MATERIAL_CATEGORIES,
 )
+from fastapi_app.services import escape_like
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +53,8 @@ def get_products(db: Session, *, page: int = 1, per_page: int = 50,
     if search:
         query = query.filter(
             or_(
-                Product.name.ilike(f'%{search}%'),
-                Product.barcode.ilike(f'%{search}%')
+                Product.name.ilike(f'%{escape_like(search)}%'),
+                Product.barcode.ilike(f'%{escape_like(search)}%')
             )
         )
 
@@ -143,8 +144,8 @@ def get_search_suggestions(db: Session, keyword: str) -> list:
 
     products = db.query(Product).filter(
         or_(
-            Product.name.ilike(f'%{keyword}%'),
-            Product.barcode.ilike(f'%{keyword}%')
+            Product.name.ilike(f'%{escape_like(keyword)}%'),
+            Product.barcode.ilike(f'%{escape_like(keyword)}%')
         )
     ).limit(10).all()
 
@@ -550,10 +551,10 @@ def get_customers(db: Session, *, page: int = 1, per_page: int = 20,
     if keyword:
         query = query.filter(
             or_(
-                Customer.name.ilike(f'%{keyword}%'),
-                Customer.customer_code.ilike(f'%{keyword}%'),
-                Customer.contact.ilike(f'%{keyword}%'),
-                Customer.phone.ilike(f'%{keyword}%'),
+                Customer.name.ilike(f'%{escape_like(keyword)}%'),
+                Customer.customer_code.ilike(f'%{escape_like(keyword)}%'),
+                Customer.contact.ilike(f'%{escape_like(keyword)}%'),
+                Customer.phone.ilike(f'%{escape_like(keyword)}%'),
             )
         )
 
@@ -769,16 +770,17 @@ def one_click_generate_order(db: Session, order_ids: list, user_id: int, usernam
                     'supplier_name': mat.get('supplier_name', ''),
                 })
 
-            # 按供应商分组
+            # 按供应商分组（仅按 supplier_id 分组；无 supplier_id 的物料合并为一组）
             supplier_groups = {}
             for item in order_items:
                 sid = item.get('supplier_id') or 0
                 sname = item.get('supplier_name', '未指定供应商')
-                group_key = (sid, sname) if sid == 0 else sid
+                # 未关联正式供应商(supplier_id为空)的物料统一归入同一组，避免按文本名称拆分
+                group_key = sid if sid else 0
                 if group_key not in supplier_groups:
                     supplier_groups[group_key] = {
                         'supplier_id': sid,
-                        'supplier_name': sname,
+                        'supplier_name': sname if sid else '未指定供应商',
                         'items': [],
                     }
                 supplier_groups[group_key]['items'].append(item)
@@ -849,7 +851,7 @@ def get_purchase_orders(db: Session, *, page: int = 1, per_page: int = 20,
     if status:
         query = query.filter(PurchaseOrder.status == status)
     if customer:
-        query = query.filter(PurchaseOrder.customer_name.ilike(f'%{customer}%'))
+        query = query.filter(PurchaseOrder.customer_name.ilike(f'%{escape_like(customer)}%'))
     if start_date:
         try:
             sd = datetime.strptime(start_date, '%Y-%m-%d').date()
@@ -863,12 +865,12 @@ def get_purchase_orders(db: Session, *, page: int = 1, per_page: int = 20,
         except ValueError:
             pass
     if order_no:
-        query = query.filter(PurchaseOrder.order_no.ilike(f'%{order_no}%'))
+        query = query.filter(PurchaseOrder.order_no.ilike(f'%{escape_like(order_no)}%'))
     if supplier:
-        query = query.filter(PurchaseOrder.supplier_name.ilike(f'%{supplier}%'))
+        query = query.filter(PurchaseOrder.supplier_name.ilike(f'%{escape_like(supplier)}%'))
     if product_name:
         query = query.filter(
-            PurchaseOrder.items.any(PurchaseOrderItem.material_name.ilike(f'%{product_name}%'))
+            PurchaseOrder.items.any(PurchaseOrderItem.material_name.ilike(f'%{escape_like(product_name)}%'))
         )
 
     query = query.order_by(PurchaseOrder.create_time.desc())
@@ -1024,21 +1026,21 @@ def get_completed_purchase_orders(db: Session, *, page: int = 1, per_page: int =
     query = db.query(PurchaseOrder).filter(PurchaseOrder.status == '已完成').options(selectinload(PurchaseOrder.items))
 
     if order_no:
-        query = query.filter(PurchaseOrder.order_no.ilike(f'%{order_no}%'))
+        query = query.filter(PurchaseOrder.order_no.ilike(f'%{escape_like(order_no)}%'))
     if customer_name:
-        query = query.filter(PurchaseOrder.customer_name.ilike(f'%{customer_name}%'))
+        query = query.filter(PurchaseOrder.customer_name.ilike(f'%{escape_like(customer_name)}%'))
     if product_name:
         query = query.filter(
             or_(
-                PurchaseOrder.product_name.ilike(f'%{product_name}%'),
-                PurchaseOrder.items.any(PurchaseOrderItem.material_name.ilike(f'%{product_name}%'))
+                PurchaseOrder.product_name.ilike(f'%{escape_like(product_name)}%'),
+                PurchaseOrder.items.any(PurchaseOrderItem.material_name.ilike(f'%{escape_like(product_name)}%'))
             )
         )
     if supplier_name:
-        query = query.filter(PurchaseOrder.supplier_name.ilike(f'%{supplier_name}%'))
+        query = query.filter(PurchaseOrder.supplier_name.ilike(f'%{escape_like(supplier_name)}%'))
     if barcode:
         # 通过69码查找对应产品，再匹配采购订单的产品名称
-        barcode_products = db.query(Product.name).filter(Product.barcode.ilike(f'%{barcode}%')).all()
+        barcode_products = db.query(Product.name).filter(Product.barcode.ilike(f'%{escape_like(barcode)}%')).all()
         barcode_product_names = [p.name for p in barcode_products]
         if barcode_product_names:
             conditions = [PurchaseOrder.product_name.ilike(f'%{name}%') for name in barcode_product_names]
@@ -1060,7 +1062,7 @@ def get_completed_purchase_orders(db: Session, *, page: int = 1, per_page: int =
             pass
     if material_name:
         query = query.filter(
-            PurchaseOrder.items.any(PurchaseOrderItem.material_name.ilike(f'%{material_name}%'))
+            PurchaseOrder.items.any(PurchaseOrderItem.material_name.ilike(f'%{escape_like(material_name)}%'))
         )
 
     query = query.order_by(PurchaseOrder.completed_at.desc())
@@ -1087,11 +1089,11 @@ def export_completed_orders(db: Session, data: dict) -> str:
     query = db.query(PurchaseOrder).filter(PurchaseOrder.status == '已完成')
 
     if data.get('order_no'):
-        query = query.filter(PurchaseOrder.order_no.like(f'%{data["order_no"]}%'))
+        query = query.filter(PurchaseOrder.order_no.like(f'%{escape_like(data["order_no"])}%'))
     if data.get('customer_name'):
-        query = query.filter(PurchaseOrder.customer_name.like(f'%{data["customer_name"]}%'))
+        query = query.filter(PurchaseOrder.customer_name.like(f'%{escape_like(data["customer_name"])}%'))
     if data.get('product_name'):
-        query = query.filter(PurchaseOrder.product_name.like(f'%{data["product_name"]}%'))
+        query = query.filter(PurchaseOrder.product_name.like(f'%{escape_like(data["product_name"])}%'))
     if data.get('start_date'):
         query = query.filter(PurchaseOrder.order_date >= data['start_date'])
     if data.get('end_date'):
@@ -1134,23 +1136,24 @@ def get_unprocessed_orders(db: Session, *, customer: str = '',
     query = query.filter(Order.status == '待备货')
 
     if customer:
-        query = query.filter(Order.customer.ilike(f'%{customer}%'))
+        query = query.filter(Order.customer.ilike(f'%{escape_like(customer)}%'))
 
     query = query.order_by(Order.order_date.desc())
     total = query.count()
     orders = query.offset((page - 1) * per_page).limit(per_page).all()
 
+    # 预加载BOM数据，避免 N+1 查询
+    product_ids = [o.product.id for o in orders if o.product]
+    bom_product_ids = set()
+    if product_ids:
+        for Model in (ProductMaterial, ProductFabric, ProductAccessory, ProductPackaging):
+            rows = db.query(Model.product_id).filter(Model.product_id.in_(product_ids)).distinct().all()
+            bom_product_ids.update(r[0] for r in rows)
+
     orders_data = []
     no_bom_count = 0
     for o in orders:
-        has_bom = False
-        if o.product:
-            has_bom = (
-                db.query(ProductMaterial).filter_by(product_id=o.product.id).first() is not None or
-                db.query(ProductFabric).filter_by(product_id=o.product.id).first() is not None or
-                db.query(ProductAccessory).filter_by(product_id=o.product.id).first() is not None or
-                db.query(ProductPackaging).filter_by(product_id=o.product.id).first() is not None
-            )
+        has_bom = o.product and o.product.id in bom_product_ids
         if not has_bom:
             no_bom_count += 1
             continue
@@ -1249,7 +1252,7 @@ def get_status_logs(db: Session, *, target_type: str = '', target_id: int = 0,
     if target_id:
         query = query.filter(OrderStatusLog.target_id == target_id)
     if order_no:
-        query = query.filter(OrderStatusLog.order_no.ilike(f'%{order_no}%'))
+        query = query.filter(OrderStatusLog.order_no.ilike(f'%{escape_like(order_no)}%'))
     query = query.order_by(OrderStatusLog.action_time.desc())
     total = query.count()
     logs = query.offset((page - 1) * per_page).limit(per_page).all()
@@ -1561,7 +1564,7 @@ def get_completed_order_suggestions(db: Session, field: str, keyword: str, limit
             orders = db.query(PurchaseOrder).filter(
                 and_(
                     PurchaseOrder.status == '已完成',
-                    PurchaseOrder.order_no.ilike(f'%{keyword}%')
+                    PurchaseOrder.order_no.ilike(f'%{escape_like(keyword)}%')
                 )
             ).limit(limit).all()
             suggestions = [{'value': o.order_no} for o in orders]
@@ -1571,7 +1574,7 @@ def get_completed_order_suggestions(db: Session, field: str, keyword: str, limit
                     PurchaseOrder.status == '已完成',
                     PurchaseOrder.customer_name.isnot(None),
                     PurchaseOrder.customer_name != '',
-                    PurchaseOrder.customer_name.ilike(f'%{keyword}%')
+                    PurchaseOrder.customer_name.ilike(f'%{escape_like(keyword)}%')
                 )
             ).distinct(PurchaseOrder.customer_name).limit(limit).all()
             suggestions = [{'value': c.customer_name} for c in customers if c.customer_name]
@@ -1581,7 +1584,7 @@ def get_completed_order_suggestions(db: Session, field: str, keyword: str, limit
                     PurchaseOrder.status == '已完成',
                     PurchaseOrder.product_name.isnot(None),
                     PurchaseOrder.product_name != '',
-                    PurchaseOrder.product_name.ilike(f'%{keyword}%')
+                    PurchaseOrder.product_name.ilike(f'%{escape_like(keyword)}%')
                 )
             ).distinct(PurchaseOrder.product_name).limit(limit).all()
             suggestions = [{'value': p.product_name} for p in products if p.product_name]
@@ -1591,13 +1594,13 @@ def get_completed_order_suggestions(db: Session, field: str, keyword: str, limit
                     PurchaseOrder.status == '已完成',
                     PurchaseOrder.supplier_name.isnot(None),
                     PurchaseOrder.supplier_name != '',
-                    PurchaseOrder.supplier_name.ilike(f'%{keyword}%')
+                    PurchaseOrder.supplier_name.ilike(f'%{escape_like(keyword)}%')
                 )
             ).distinct(PurchaseOrder.supplier_name).limit(limit).all()
             suggestions = [{'value': s.supplier_name} for s in suppliers if s.supplier_name]
         elif field == 'material_name':
             materials = db.query(PurchaseOrderItem).filter(
-                PurchaseOrderItem.material_name.ilike(f'%{keyword}%')
+                PurchaseOrderItem.material_name.ilike(f'%{escape_like(keyword)}%')
             ).distinct(PurchaseOrderItem.material_name).limit(limit).all()
             suggestions = [{'value': m.material_name} for m in materials if m.material_name]
     except Exception as e:
@@ -1636,8 +1639,8 @@ def search_products_for_bom_copy(db: Session, keyword: str) -> list:
 
     query = db.query(Product).filter(
         or_(
-            Product.name.ilike(f'%{keyword}%'),
-            Product.barcode.ilike(f'%{keyword}%')
+            Product.name.ilike(f'%{escape_like(keyword)}%'),
+            Product.barcode.ilike(f'%{escape_like(keyword)}%')
         )
     )
 
@@ -1847,7 +1850,7 @@ def copy_bom_to_product(db: Session, target_product_id: int, data: dict, usernam
         db.add(new_packaging)
         copied_count += 1
 
-    db.flush()
+    db.commit()
 
     logger.info(
         f'BOM复制成功 | 操作人: {username} | '
@@ -1890,7 +1893,7 @@ def batch_delete_purchase_orders(db: Session, order_ids: list, username: str = '
         })
         db.delete(order)
 
-    db.flush()
+    db.commit()
 
     logger.warning(
         f'批量删除采购订单 | 操作人: {username} | '

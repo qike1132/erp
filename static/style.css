@@ -2,6 +2,7 @@
 
 /* CSS变量 - 统一配色方案 */
 :root {
+  font-size: 16px; /* 浏览器默认值；整体放大由 body zoom:1.1 控制，勿在此增大以免rem与px缩放不一致 */
   --plush-blue: #B0E0E6;
   --plush-blue-light: #D4F1F4;
   --plush-blue-deep: #87CEEB;
@@ -33,6 +34,7 @@ body {
   color: var(--plush-text);
   position: relative;
   overflow-x: hidden;
+  zoom: 1.1; /* 整体UI放大10%：rem、px、边距、图标等全部统一缩放 */
 }
 
 body::before {

@@ -145,13 +145,13 @@ async def api_login(
 
     if not user:
         logger.warning(f"[Login] 登录失败: 用户不存在, IP={key}, username={username}")
-        raise HTTPException(status_code=401, detail="用户名不存在")
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
     if not user.status:
         logger.warning(f"[Login] 登录失败: 账号已禁用, IP={key}, username={username}")
-        raise HTTPException(status_code=401, detail="账号已被禁用，请联系管理员")
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
     if not check_password_hash(user.password, password):
         logger.warning(f"[Login] 登录失败: 密码错误, IP={key}, username={username}")
-        raise HTTPException(status_code=401, detail="密码错误，请重新输入")
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
 
     # 生成JWT Token
     from fastapi_app.core.config import settings

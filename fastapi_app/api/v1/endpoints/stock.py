@@ -23,12 +23,14 @@ router = APIRouter()
 
 @router.get("/in/list", response_model=StockListResponse)
 async def list_stockins(
+    page: int = Query(1, ge=1, description="页码"),
+    per_page: int = Query(50, ge=1, le=5000, description="每页数量"),
     db: AsyncSession = Depends(get_async_db),
     _user: User = Depends(require_permission("stockin_manage")),
 ):
-    """入库列表"""
-    stockins = await stock_service.get_stockins(db)
-    return StockListResponse(data=stockins, total=len(stockins))
+    """入库列表（支持分页）"""
+    result = await stock_service.get_stockins(db, page=page, per_page=per_page)
+    return StockListResponse(data=result['items'], total=result['total'])
 
 
 @router.post("/in/create", response_model=StockActionResponse)
@@ -96,12 +98,14 @@ async def delete_stockin(
 
 @router.get("/out/list", response_model=StockListResponse)
 async def list_stockouts(
+    page: int = Query(1, ge=1, description="页码"),
+    per_page: int = Query(50, ge=1, le=5000, description="每页数量"),
     db: AsyncSession = Depends(get_async_db),
     _user: User = Depends(require_permission("stockout_manage")),
 ):
-    """出库列表（仅独立出库）"""
-    stockouts = await stock_service.get_stockouts(db)
-    return StockListResponse(data=stockouts, total=len(stockouts))
+    """出库列表（仅独立出库，支持分页）"""
+    result = await stock_service.get_stockouts(db, page=page, per_page=per_page)
+    return StockListResponse(data=result['items'], total=result['total'])
 
 
 @router.post("/out/create", response_model=StockActionResponse)

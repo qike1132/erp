@@ -18,9 +18,8 @@ def add_cache_headers(response):
         response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
         response.headers['Pragma'] = 'no-cache'
         response.headers['Expires'] = '0'
-    # 对静态资源（CSS, JS, 图片等）添加强缓存 (30天)
-    elif request.path.startswith('/static/'):
-        response.headers['Cache-Control'] = 'public, max-age=2592000'
+    # 静态资源由 Flask SEND_FILE_MAX_AGE_DEFAULT 控制（开发环境=0，不缓存）
+    # 不再对此处设置长缓存，避免代码更新后浏览器仍使用旧版本
         
     # 添加 Permissions-Policy 头部，禁用所有敏感功能
     response.headers['Permissions-Policy'] = 'geolocation=(), microphone=(), camera=()'
@@ -49,15 +48,23 @@ def login():
     from werkzeug.security import check_password_hash
 
     if not session.get('user_id'):
-        user_id = request.cookies.get('user_id')
-        if user_id:
-            user = db.session.get(User, int(user_id))
-            if user and user.status:
-                session['user_id'] = user.id
-                session['username'] = user.username
-                session['is_super'] = user.is_super
-                session['permissions'] = [p.code for p in user.permissions]
-                return redirect(url_for('main.index'))
+        remember_token = request.cookies.get('remember_token')
+        if remember_token:
+            try:
+                from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
+                serializer = URLSafeTimedSerializer(current_app.config['SECRET_KEY'], salt='remember')
+                data = serializer.loads(remember_token)
+                user_id = data.get('user_id')
+                if user_id:
+                    user = db.session.get(User, int(user_id))
+                    if user and user.status:
+                        session['user_id'] = user.id
+                        session['username'] = user.username
+                        session['is_super'] = user.is_super
+                        session['permissions'] = [p.code for p in user.permissions]
+                        return redirect(url_for('main.index'))
+            except (BadSignature, SignatureExpired):
+                pass
 
     if session.get('user_id'):
         return redirect(url_for('main.index'))
@@ -76,14 +83,8 @@ def login():
         remember = request.form.get('remember') == 'on'
 
         user = User.query.filter_by(username=username).first()
-        if not user:
-            flash('用户名不存在', 'error')
-            return render_template('login.html')
-        if not user.status:
-            flash('账号已被禁用，请联系管理员', 'error')
-            return render_template('login.html')
-        if not check_password_hash(user.password, password):
-            flash('密码错误，请重新输入', 'error')
+        if not user or not user.status or not check_password_hash(user.password, password):
+            flash('用户名或密码错误', 'error')
             return render_template('login.html')
 
         session['user_id'] = user.id
@@ -92,8 +93,12 @@ def login():
         session['permissions'] = [p.code for p in user.permissions]
         flash('登录成功', 'success')
         if remember:
+            from itsdangerous import URLSafeTimedSerializer
+            serializer = URLSafeTimedSerializer(current_app.config['SECRET_KEY'], salt='remember')
+            token = serializer.dumps({'user_id': user.id})
             resp = make_response(redirect(url_for('main.index')))
-            resp.set_cookie('user_id', str(user.id), max_age=30*24*60*60)
+            resp.set_cookie('remember_token', token,
+                          httponly=True, secure=request.is_secure, samesite='Lax')
             return resp
         return redirect(url_for('main.index'))
 
@@ -105,7 +110,7 @@ def logout():
     """退出登录"""
     session.clear()
     resp = make_response(redirect(url_for('main.login')))
-    resp.set_cookie('user_id', '', max_age=0)
+    resp.set_cookie('remember_token', '', max_age=0)
     return resp
 
 
@@ -133,12 +138,8 @@ def api_login():
             return jsonify({'success': False, 'error': '密码长度不能超过128位'}), 400
 
         user = User.query.filter_by(username=username).first()
-        if not user:
-            return jsonify({'success': False, 'error': '用户名不存在'}), 401
-        if not user.status:
-            return jsonify({'success': False, 'error': '账号已被禁用，请联系管理员'}), 401
-        if not check_password_hash(user.password, password):
-            return jsonify({'success': False, 'error': '密码错误，请重新输入'}), 401
+        if not user or not user.status or not check_password_hash(user.password, password):
+            return jsonify({'success': False, 'error': '用户名或密码错误'}), 401
 
         session['user_id'] = user.id
         session['username'] = user.username
@@ -149,7 +150,11 @@ def api_login():
         resp = make_response(jsonify(response_data))
 
         if remember:
-            resp.set_cookie('user_id', str(user.id), max_age=30*24*60*60)
+            from itsdangerous import URLSafeTimedSerializer
+            serializer = URLSafeTimedSerializer(current_app.config['SECRET_KEY'], salt='remember')
+            token = serializer.dumps({'user_id': user.id})
+            resp.set_cookie('remember_token', token,
+                          httponly=True, secure=request.is_secure, samesite='Lax')
 
         return resp, 200
 

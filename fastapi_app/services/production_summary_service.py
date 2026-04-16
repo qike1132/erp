@@ -18,6 +18,7 @@ from fastapi_app.shared_models import (
     CraftWork, PackagingRecord,
     CaseStockOut, Case,
 )
+from fastapi_app.services import escape_like
 
 logger = logging.getLogger(__name__)
 
@@ -206,7 +207,7 @@ async def get_packaging_records(db: AsyncSession, year: int, month: int,
             func.month(PackagingRecord.pack_date) == month,
         ])
     if customer:
-        conditions.append(PackagingRecord.customer.like(f'%{customer}%'))
+        conditions.append(PackagingRecord.customer.like(f'%{escape_like(customer)}%'))
     if start_date:
         conditions.append(PackagingRecord.pack_date >= _parse_date(start_date))
     if end_date:
