@@ -3,6 +3,8 @@ import logging
 from datetime import datetime, timedelta
 from sqlalchemy import text
 
+from fastapi_app.services import escape_like
+
 logger = logging.getLogger(__name__)
 
 
@@ -18,7 +20,7 @@ async def get_customer_summary(db, customer: str = '', start_date: str = '',
 
     if customer:
         where_clauses.append("COALESCE(so.customer, '') LIKE :customer")
-        params['customer'] = f'%{customer}%'
+        params['customer'] = f'%{escape_like(customer)}%'
     if start_date:
         try:
             params['start_date'] = datetime.strptime(start_date, '%Y-%m-%d')
@@ -105,7 +107,7 @@ async def get_daily_amount(db, customer: str = '', start_date: str = '',
 
     if customer:
         where_clauses.append("COALESCE(so.customer, '') LIKE :customer")
-        params['customer'] = f'%{customer}%'
+        params['customer'] = f'%{escape_like(customer)}%'
     if start_date:
         try:
             params['start_date'] = datetime.strptime(start_date, '%Y-%m-%d')
@@ -192,7 +194,7 @@ async def get_daily_amount_chart(db, customer: str = '', start_date: str = '',
 
     if customer:
         where_clauses.append("COALESCE(so.customer, '') LIKE :customer")
-        params['customer'] = f'%{customer}%'
+        params['customer'] = f'%{escape_like(customer)}%'
     if start_date:
         try:
             params['start_date'] = datetime.strptime(start_date, '%Y-%m-%d')

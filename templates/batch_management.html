@@ -1,0 +1,689 @@
+{% extends 'base.html' %}
+
+{% block extra_css %}
+<style>
+/* 批次管理页面样式 */
+.batch-page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+}
+
+.batch-page-header h2 {
+    font-size: 22px;
+    color: var(--plush-text);
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.batch-connection-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    transition: background 0.3s;
+}
+.batch-connection-dot.connected { background: #4CAF50; }
+.batch-connection-dot.disconnected { background: #f44336; }
+
+.batch-stats {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.batch-stat-card {
+    flex: 1;
+    background: var(--plush-white);
+    border-radius: var(--radius-card);
+    padding: 16px 20px;
+    box-shadow: 0 2px 12px var(--plush-shadow-soft);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.batch-stat-card .stat-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+}
+
+.batch-stat-card .stat-icon.total { background: #E3F2FD; color: #1565C0; }
+.batch-stat-card .stat-icon.filled { background: #E8F5E9; color: #2E7D32; }
+.batch-stat-card .stat-icon.unfilled { background: #FFEBEE; color: #C62828; }
+.batch-stat-card .stat-icon.custom { background: var(--custom-orange-light); color: var(--custom-orange-deep); }
+
+.batch-stat-card .stat-info { flex: 1; }
+.batch-stat-card .stat-value { font-size: 24px; font-weight: 700; color: var(--plush-text); }
+.batch-stat-card .stat-label { font-size: 13px; color: var(--plush-text-light); }
+
+/* 过滤栏 */
+.batch-filter-bar {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+
+.batch-filter-bar select,
+.batch-filter-bar input {
+    border: 2px solid var(--plush-blue-light);
+    border-radius: var(--radius-input);
+    padding: 8px 14px;
+    font-size: 14px;
+    color: var(--plush-text);
+    background: var(--plush-white);
+    transition: border-color 0.2s;
+}
+
+.batch-filter-bar select:focus,
+.batch-filter-bar input:focus {
+    outline: none;
+    border-color: var(--plush-blue-deep);
+}
+
+.batch-filter-bar .btn-refresh {
+    background: linear-gradient(135deg, var(--plush-blue-light), var(--plush-blue));
+    border: none;
+    border-radius: var(--radius-button);
+    padding: 8px 18px;
+    color: var(--plush-blue-text);
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.batch-filter-bar .btn-refresh:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px var(--plush-shadow-medium);
+}
+
+/* 批次表格 */
+.batch-table-wrapper {
+    background: var(--plush-white);
+    border-radius: var(--radius-card);
+    box-shadow: 0 2px 16px var(--plush-shadow-soft);
+    overflow: hidden;
+}
+
+.batch-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.batch-table thead th {
+    background: linear-gradient(135deg, var(--plush-blue-light), var(--plush-blue));
+    color: var(--plush-blue-text);
+    font-weight: 600;
+    font-size: 14px;
+    padding: 14px 16px;
+    text-align: left;
+    white-space: nowrap;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.batch-table tbody tr {
+    transition: background 0.15s;
+    border-bottom: 1px solid #F0F0F0;
+}
+
+.batch-table tbody tr:hover {
+    background: var(--plush-blue-light);
+}
+
+.batch-table tbody td {
+    padding: 12px 16px;
+    font-size: 14px;
+    color: var(--plush-text);
+    vertical-align: middle;
+}
+
+/* 订单类型标签 */
+.order-type-tag {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    margin-left: 8px;
+    vertical-align: middle;
+}
+
+.order-type-tag.regular {
+    background: #E3F2FD;
+    color: #1565C0;
+}
+
+.order-type-tag.custom {
+    background: var(--custom-orange-light);
+    color: var(--custom-orange-deep);
+}
+
+/* 批次号输入框 */
+.batch-no-input {
+    width: 100%;
+    max-width: 200px;
+    border: 2px solid #ef5350;
+    border-radius: var(--radius-input);
+    padding: 6px 12px;
+    font-size: 14px;
+    color: var(--plush-text);
+    background: #FFF5F5;
+    transition: all 0.25s;
+}
+
+.batch-no-input.filled {
+    border-color: #4CAF50;
+    background: #F1F8E9;
+}
+
+.batch-no-input:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(176, 224, 230, 0.5);
+}
+
+.batch-no-input.saving {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+/* 状态指示 */
+.batch-status {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+
+.batch-status.unfilled { background: #ef5350; }
+.batch-status.filled { background: #4CAF50; }
+
+/* 产品名称列 */
+.product-name-cell {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.product-name-cell .product-name {
+    font-weight: 600;
+}
+
+/* 空状态 */
+.batch-empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--plush-text-light);
+}
+
+.batch-empty-state i {
+    font-size: 48px;
+    color: var(--plush-blue);
+    margin-bottom: 16px;
+}
+
+/* 加载中 */
+.batch-loading {
+    text-align: center;
+    padding: 40px;
+    color: var(--plush-text-light);
+}
+
+/* 实时更新动画 */
+@keyframes row-flash {
+    0% { background-color: #E8F5E9; }
+    100% { background-color: transparent; }
+}
+
+.batch-table tbody tr.new-row {
+    animation: row-flash 1.5s ease-out;
+}
+
+/* 分页 */
+.batch-pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    padding: 16px;
+}
+
+.batch-pagination button {
+    border: 2px solid var(--plush-blue-light);
+    background: var(--plush-white);
+    border-radius: var(--radius-sm);
+    padding: 6px 14px;
+    cursor: pointer;
+    color: var(--plush-blue-text);
+    font-size: 14px;
+    transition: all 0.15s;
+}
+
+.batch-pagination button:hover:not(:disabled) {
+    background: var(--plush-blue-light);
+}
+
+.batch-pagination button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.batch-pagination .page-info {
+    font-size: 14px;
+    color: var(--plush-text-light);
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="batch-page-header">
+    <h2>
+        <i class="fas fa-layer-group"></i>
+        批次管理
+        <span class="batch-connection-dot disconnected" id="wsStatus" title="WebSocket 未连接"></span>
+    </h2>
+</div>
+
+<!-- 统计卡片 -->
+<div class="batch-stats">
+    <div class="batch-stat-card">
+        <div class="stat-icon total"><i class="fas fa-list-ol"></i></div>
+        <div class="stat-info">
+            <div class="stat-value" id="statTotal">0</div>
+            <div class="stat-label">总订单数</div>
+        </div>
+    </div>
+    <div class="batch-stat-card">
+        <div class="stat-icon filled"><i class="fas fa-check-circle"></i></div>
+        <div class="stat-info">
+            <div class="stat-value" id="statFilled">0</div>
+            <div class="stat-label">已填批次号</div>
+        </div>
+    </div>
+    <div class="batch-stat-card">
+        <div class="stat-icon unfilled"><i class="fas fa-exclamation-circle"></i></div>
+        <div class="stat-info">
+            <div class="stat-value" id="statUnfilled">0</div>
+            <div class="stat-label">未填批次号</div>
+        </div>
+    </div>
+    <div class="batch-stat-card">
+        <div class="stat-icon custom"><i class="fas fa-star"></i></div>
+        <div class="stat-info">
+            <div class="stat-value" id="statCustom">0</div>
+            <div class="stat-label">定制订单</div>
+        </div>
+    </div>
+</div>
+
+<!-- 过滤栏 -->
+<div class="batch-filter-bar">
+    <select id="filterOrderType">
+        <option value="">全部类型</option>
+        <option value="regular">常规订单</option>
+        <option value="custom">定制订单</option>
+    </select>
+    <select id="filterBatchStatus">
+        <option value="">全部状态</option>
+        <option value="unfilled">未填批次号</option>
+        <option value="filled">已填批次号</option>
+    </select>
+    <input type="text" id="filterProduct" placeholder="搜索产品名称..." />
+    <button class="btn-refresh" onclick="loadOrders()">
+        <i class="fas fa-sync-alt"></i> 刷新
+    </button>
+</div>
+
+<!-- 数据表格 -->
+<div class="batch-table-wrapper">
+    <table class="batch-table">
+        <thead>
+            <tr>
+                <th style="width: 50px;">#</th>
+                <th style="width: 120px;">订单编号</th>
+                <th style="width: 100px;">客户</th>
+                <th>产品名称</th>
+                <th style="width: 80px;">数量</th>
+                <th style="width: 220px;">批次号</th>
+                <th style="width: 100px;">订单状态</th>
+                <th style="width: 140px;">下单时间</th>
+            </tr>
+        </thead>
+        <tbody id="batchTableBody">
+            <tr>
+                <td colspan="8" class="batch-loading">
+                    <i class="fas fa-spinner fa-spin"></i> 加载中...
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+<!-- 分页 -->
+<div class="batch-pagination" id="pagination"></div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+    'use strict';
+
+    // ==================== 状态 ====================
+    let allOrders = [];
+    let filteredOrders = [];
+    let currentPage = 1;
+    const perPage = 50;
+    let ws = null;
+    let wsReconnectTimer = null;
+
+    // ==================== API 调用 ====================
+    async function apiCall(url, options = {}) {
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
+        const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+        if (csrfToken && options.method && options.method !== 'GET') {
+            headers['X-CSRFToken'] = csrfToken;
+        }
+        const resp = await fetch(url, { ...options, headers });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+            throw new Error(err.detail || '请求失败');
+        }
+        return resp.json();
+    }
+
+    // ==================== 加载订单 ====================
+    async function loadOrders() {
+        try {
+            const data = await apiCall('/api/v1/orders/list?per_page=5000');
+            allOrders = (data.data || []).filter(o => !o.is_deleted);
+            applyFilters();
+        } catch (e) {
+            console.error('加载订单失败:', e);
+            document.getElementById('batchTableBody').innerHTML =
+                '<tr><td colspan="8" class="batch-empty-state"><i class="fas fa-exclamation-triangle"></i><br>加载失败: ' + escapeHtml(e.message) + '</td></tr>';
+        }
+    }
+
+    // ==================== 过滤 ====================
+    function applyFilters() {
+        const typeFilter = document.getElementById('filterOrderType').value;
+        const statusFilter = document.getElementById('filterBatchStatus').value;
+        const productFilter = document.getElementById('filterProduct').value.trim().toLowerCase();
+
+        filteredOrders = allOrders.filter(o => {
+            if (typeFilter && o.order_type !== typeFilter) return false;
+            if (statusFilter === 'filled' && !o.batch_no) return false;
+            if (statusFilter === 'unfilled' && o.batch_no) return false;
+            if (productFilter) {
+                const name = (o.product?.name || '').toLowerCase();
+                if (!name.includes(productFilter)) return false;
+            }
+            return true;
+        });
+
+        currentPage = 1;
+        renderTable();
+        updateStats();
+    }
+
+    // ==================== 渲染表格 ====================
+    function renderTable() {
+        const tbody = document.getElementById('batchTableBody');
+
+        if (filteredOrders.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" class="batch-empty-state"><i class="fas fa-inbox"></i><br>暂无订单数据</td></tr>';
+            renderPagination();
+            return;
+        }
+
+        const start = (currentPage - 1) * perPage;
+        const pageOrders = filteredOrders.slice(start, start + perPage);
+
+        tbody.innerHTML = pageOrders.map((o, i) => {
+            const isFilled = !!o.batch_no;
+            const isCustom = o.order_type === 'custom';
+            const typeLabel = isCustom ? '定制' : '常规';
+            const typeClass = isCustom ? 'custom' : 'regular';
+            const productName = escapeHtml(o.product?.name || '未知产品');
+            const statusDot = isFilled
+                ? '<span class="batch-status filled"></span>'
+                : '<span class="batch-status unfilled"></span>';
+
+            return `<tr data-order-id="${o.id}" id="row-${o.id}">
+                <td>${start + i + 1}</td>
+                <td>${escapeHtml(o.order_no)}</td>
+                <td>${escapeHtml(o.customer)}</td>
+                <td>
+                    <div class="product-name-cell">
+                        <span class="product-name">${productName}</span>
+                        <span class="order-type-tag ${typeClass}">${typeLabel}</span>
+                    </div>
+                </td>
+                <td>${o.quantity}</td>
+                <td>
+                    ${statusDot}
+                    <input type="text"
+                           class="batch-no-input ${isFilled ? 'filled' : ''}"
+                           value="${escapeHtml(o.batch_no || '')}"
+                           placeholder="输入批次号"
+                           data-order-id="${o.id}"
+                           onblur="window._handleBatchBlur(this)"
+                           onkeydown="if(event.key==='Enter')this.blur()"
+                    />
+                </td>
+                <td>${escapeHtml(o.status || '')}</td>
+                <td>${escapeHtml(o.order_date || '')}</td>
+            </tr>`;
+        }).join('');
+
+        renderPagination();
+    }
+
+    // ==================== 更新统计 ====================
+    function updateStats() {
+        const total = filteredOrders.length;
+        const filled = filteredOrders.filter(o => !!o.batch_no).length;
+        const unfilled = total - filled;
+        const custom = filteredOrders.filter(o => o.order_type === 'custom').length;
+
+        document.getElementById('statTotal').textContent = total;
+        document.getElementById('statFilled').textContent = filled;
+        document.getElementById('statUnfilled').textContent = unfilled;
+        document.getElementById('statCustom').textContent = custom;
+    }
+
+    // ==================== 保存批次号 ====================
+    window._handleBatchBlur = async function(input) {
+        const orderId = input.dataset.orderId;
+        const batchNo = input.value.trim();
+
+        input.classList.add('saving');
+        try {
+            await apiCall(`/api/v1/orders/batch-no/${orderId}`, {
+                method: 'PUT',
+                body: JSON.stringify({ batch_no: batchNo })
+            });
+
+            // 更新本地数据
+            const order = allOrders.find(o => o.id === parseInt(orderId));
+            if (order) order.batch_no = batchNo;
+
+            // 更新视觉状态
+            if (batchNo) {
+                input.classList.add('filled');
+                input.classList.remove('batch-no-input:not(.filled)');
+            } else {
+                input.classList.remove('filled');
+            }
+
+            // 更新状态点
+            const row = document.getElementById(`row-${orderId}`);
+            if (row) {
+                const dot = row.querySelector('.batch-status');
+                if (dot) {
+                    dot.className = 'batch-status ' + (batchNo ? 'filled' : 'unfilled');
+                }
+            }
+
+            updateStats();
+            if (window.showToast) {
+                showToast(batchNo ? '批次号已保存' : '批次号已清除', 'success');
+            }
+        } catch (e) {
+            console.error('保存批次号失败:', e);
+            if (window.showToast) {
+                showToast('保存失败: ' + e.message, 'error');
+            }
+            // 恢复原值
+            const order = allOrders.find(o => o.id === parseInt(orderId));
+            if (order) input.value = order.batch_no || '';
+        } finally {
+            input.classList.remove('saving');
+        }
+    };
+
+    // ==================== 分页 ====================
+    function renderPagination() {
+        const totalPages = Math.ceil(filteredOrders.length / perPage);
+        const container = document.getElementById('pagination');
+
+        if (totalPages <= 1) {
+            container.innerHTML = '';
+            return;
+        }
+
+        container.innerHTML = `
+            <button onclick="window._goPage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}>
+                <i class="fas fa-chevron-left"></i>
+            </button>
+            <span class="page-info">第 ${currentPage} / ${totalPages} 页</span>
+            <button onclick="window._goPage(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''}>
+                <i class="fas fa-chevron-right"></i>
+            </button>
+        `;
+    }
+
+    window._goPage = function(page) {
+        const totalPages = Math.ceil(filteredOrders.length / perPage);
+        if (page < 1 || page > totalPages) return;
+        currentPage = page;
+        renderTable();
+    };
+
+    // ==================== WebSocket 实时更新 ====================
+    function connectWebSocket() {
+        const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${wsProto}//${location.host}/ws/notifications`;
+
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = function() {
+            console.log('WebSocket 已连接');
+            updateWsStatus(true);
+            // 启动心跳
+            ws._heartbeat = setInterval(() => {
+                if (ws.readyState === WebSocket.OPEN) ws.send('ping');
+            }, 30000);
+        };
+
+        ws.onmessage = function(event) {
+            try {
+                const msg = JSON.parse(event.data);
+                handleWsMessage(msg);
+            } catch(e) {
+                // pong or non-JSON
+            }
+        };
+
+        ws.onclose = function() {
+            console.log('WebSocket 已断开');
+            updateWsStatus(false);
+            clearInterval(ws?._heartbeat);
+            // 自动重连
+            wsReconnectTimer = setTimeout(connectWebSocket, 5000);
+        };
+
+        ws.onerror = function() {
+            updateWsStatus(false);
+        };
+    }
+
+    function updateWsStatus(connected) {
+        const dot = document.getElementById('wsStatus');
+        dot.className = 'batch-connection-dot ' + (connected ? 'connected' : 'disconnected');
+        dot.title = connected ? 'WebSocket 已连接' : 'WebSocket 未连接';
+    }
+
+    function handleWsMessage(msg) {
+        if (msg.type === 'order_created') {
+            const data = msg.data;
+            // 新增订单到列表顶部
+            const newOrder = {
+                id: data.id,
+                order_no: data.order_no,
+                customer: data.customer,
+                product: { id: data.product_id, name: data.product_name },
+                quantity: data.quantity,
+                order_type: data.order_type,
+                batch_no: data.batch_no || '',
+                status: data.status || '待备货',
+                order_date: new Date().toLocaleString('zh-CN'),
+                is_deleted: false,
+            };
+            allOrders.unshift(newOrder);
+            applyFilters();
+
+            // 高亮新行
+            setTimeout(() => {
+                const row = document.getElementById(`row-${data.id}`);
+                if (row) row.classList.add('new-row');
+            }, 50);
+
+            if (window.showToast) {
+                showToast(`新订单: ${data.product_name} x${data.quantity}`, 'info');
+            }
+        } else if (msg.type === 'order_updated') {
+            const data = msg.data;
+            const order = allOrders.find(o => o.id === data.id);
+            if (order && data.batch_no !== undefined) {
+                order.batch_no = data.batch_no;
+                applyFilters();
+            }
+        }
+    }
+
+    // ==================== 过滤器事件绑定 ====================
+    document.getElementById('filterOrderType').addEventListener('change', applyFilters);
+    document.getElementById('filterBatchStatus').addEventListener('change', applyFilters);
+    document.getElementById('filterProduct').addEventListener('input', debounce(applyFilters, 300));
+
+    function debounce(fn, delay) {
+        let timer;
+        return function(...args) {
+            clearTimeout(timer);
+            timer = setTimeout(() => fn.apply(this, args), delay);
+        };
+    }
+
+    // ==================== 初始化 ====================
+    document.addEventListener('DOMContentLoaded', function() {
+        loadOrders();
+        connectWebSocket();
+    });
+
+})();
+</script>
+{% endblock %}

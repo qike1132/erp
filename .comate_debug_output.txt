@@ -1,0 +1,78 @@
+﻿python : [2026-04-16 12:33:34,743] INFO in __init__: 蓝图注册成功: main_bp
+所在位置 行:1 字符: 19
++ cd d:\erp_system; python run.py 2>&1 | Out-File -FilePath "d:\erp_sys ...
++                   ~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([2026-04-16 12:...蓝图注册成功: main_bp:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[2026-04-16 12:33:34,964] INFO in __init__: 蓝图注册成功: product_bp
+[2026-04-16 12:33:34,968] INFO in __init__: 蓝图注册成功: order_bp
+[2026-04-16 12:33:35,166] INFO in __init__: 蓝图注册成功: stock_bp
+[2026-04-16 12:33:35,172] INFO in __init__: 蓝图注册成功: api_bp
+[2026-04-16 12:33:35,177] INFO in __init__: 蓝图注册成功: user_bp
+[2026-04-16 12:33:35,184] INFO in __init__: 蓝图注册成功: report_bp
+[2026-04-16 12:33:35,186] INFO in __init__: 蓝图注册成功: case_page_bp
+[2026-04-16 12:33:35,194] INFO in __init__: 蓝图注册成功: case_api_bp
+[2026-04-16 12:33:35,200] INFO in __init__: 蓝图注册成功: approval_bp
+[2026-04-16 12:33:35,204] INFO in __init__: 蓝图注册成功: customer_bp
+[2026-04-16 12:33:35,207] INFO in __init__: 蓝图注册成功: supplier_bp
+[2026-04-16 12:33:35,208] INFO in __init__: 蓝图注册成功: staging_order_bp
+[2026-04-16 12:33:35,209] INFO in __init__: 蓝图注册成功: batch_bp
+[2026-04-16 12:33:35,211] INFO in __init__: 蓝图注册成功: staging_stockin_bp
+[2026-04-16 12:33:35,214] INFO in __init__: 蓝图注册成功: staging_stockout_bp
+[2026-04-16 12:33:35,218] INFO in __init__: 蓝图注册成功: material_bp
+[2026-04-16 12:33:35,220] INFO in __init__: 蓝图注册成功: purchase_center_bp
+[2026-04-16 12:33:35,232] INFO in __init__: 蓝图注册成功: material_registration_bp
+[2026-04-16 12:33:35,233] INFO in __init__: 蓝图注册成功: customer_order_bp
+[2026-04-16 12:33:35,235] INFO in __init__: 蓝图注册成功: sku_batch_bp
+[2026-04-16 12:33:35,236] INFO in __init__: 蓝图注册成功: finance_bp
+[2026-04-16 12:33:35,237] INFO in __init__: 蓝图注册成功: production_plan_bp
+[2026-04-16 12:33:35,239] INFO in __init__: 蓝图注册成功: purchase_plan_bp
+[2026-04-16 12:33:35,240] INFO in __init__: 蓝图注册成功: production_summary_bp
+数据库: mysql+pymysql://root:110110@localhost:3306/erp_system?charset=utf8mb4
+密钥状态: 已设置
+调试模式: True
+模板自动重载: True
+============================================================
+Flask 访问地址: http://127.0.0.1:5003
+Flask 访问地址: http://192.168.0.95:5003
+FastAPI 访问地址: http://127.0.0.1:5002
+============================================================
+[INFO] 热重载监控器类型: stat
+[INFO] Flask 排除监控路径: 5 个模式
+[INFO] Flask 额外监控 FastAPI 文件: 126 个
+ * Serving Flask app 'app'
+ * Debug mode: on
+WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5003
+ * Running on http://192.168.0.95:5003
+Press CTRL+C to quit
+ * Restarting with stat
+[2026-04-16 12:33:41,188] INFO in __init__: 蓝图注册成功: main_bp
+[2026-04-16 12:33:41,355] INFO in __init__: 蓝图注册成功: product_bp
+[2026-04-16 12:33:41,358] INFO in __init__: 蓝图注册成功: order_bp
+[2026-04-16 12:33:41,568] INFO in __init__: 蓝图注册成功: stock_bp
+[2026-04-16 12:33:41,574] INFO in __init__: 蓝图注册成功: api_bp
+[2026-04-16 12:33:41,582] INFO in __init__: 蓝图注册成功: user_bp
+[2026-04-16 12:33:41,585] INFO in __init__: 蓝图注册成功: report_bp
+[2026-04-16 12:33:41,587] INFO in __init__: 蓝图注册成功: case_page_bp
+[2026-04-16 12:33:41,597] INFO in __init__: 蓝图注册成功: case_api_bp
+[2026-04-16 12:33:41,600] INFO in __init__: 蓝图注册成功: approval_bp
+[2026-04-16 12:33:41,603] INFO in __init__: 蓝图注册成功: customer_bp
+[2026-04-16 12:33:41,605] INFO in __init__: 蓝图注册成功: supplier_bp
+[2026-04-16 12:33:41,606] INFO in __init__: 蓝图注册成功: staging_order_bp
+[2026-04-16 12:33:41,607] INFO in __init__: 蓝图注册成功: batch_bp
+[2026-04-16 12:33:41,607] INFO in __init__: 蓝图注册成功: staging_stockin_bp
+[2026-04-16 12:33:41,608] INFO in __init__: 蓝图注册成功: staging_stockout_bp
+[2026-04-16 12:33:41,610] INFO in __init__: 蓝图注册成功: material_bp
+[2026-04-16 12:33:41,615] INFO in __init__: 蓝图注册成功: purchase_center_bp
+[2026-04-16 12:33:41,625] INFO in __init__: 蓝图注册成功: material_registration_bp
+[2026-04-16 12:33:41,626] INFO in __init__: 蓝图注册成功: customer_order_bp
+[2026-04-16 12:33:41,629] INFO in __init__: 蓝图注册成功: sku_batch_bp
+[2026-04-16 12:33:41,632] INFO in __init__: 蓝图注册成功: finance_bp
+[2026-04-16 12:33:41,634] INFO in __init__: 蓝图注册成功: production_plan_bp
+[2026-04-16 12:33:41,635] INFO in __init__: 蓝图注册成功: purchase_plan_bp
+[2026-04-16 12:33:41,636] INFO in __init__: 蓝图注册成功: production_summary_bp
+ * Debugger is active!
+ * Debugger PIN: 405-532-475

@@ -68,14 +68,6 @@ class DatabaseManager:
         except Exception as e:
             print(f"[WARN] 无法写入日志文件: {e}")
 
-    def get_db_type(self) -> str:
-        """获取数据库类型"""
-        return os.getenv('DB_TYPE', 'sqlite')
-
-    def get_sqlite_path(self) -> Path:
-        """获取SQLite数据库路径"""
-        return PROJECT_ROOT / 'erp.db'
-
     def get_mysql_config(self) -> Dict[str, str]:
         """获取MySQL配置"""
         return {
@@ -118,7 +110,7 @@ class DatabaseManager:
         manifest = {
             'timestamp': self.timestamp,
             'backup_type': backup_type,
-            'db_type': self.get_db_type(),
+            'db_type': 'mysql',
             'created_at': datetime.now().isoformat(),
             'files': []
         }
@@ -140,36 +132,15 @@ class DatabaseManager:
 
         return manifest
 
-    def backup_sqlite(self, backup_dir: Path, compress: bool = True) -> Tuple[bool, str, Optional[Path]]:
-        """备份SQLite数据库"""
-        db_path = self.get_sqlite_path()
-
-        if not db_path.exists():
-            return False, "SQLite数据库文件不存在", None
-
-        backup_file = backup_dir / f'erp_backup_{self.timestamp}.db'
-        try:
-            shutil.copy(db_path, backup_file)
-            self.log(f"SQLite数据库已复制到: {backup_file}")
-
-            if compress:
-                compressed_file = self.compress_file(backup_file)
-                backup_file.unlink()  # 删除未压缩文件
-                backup_file = compressed_file
-                self.log(f"备份文件已压缩: {backup_file}")
-
-            self.create_manifest(backup_file, 'sqlite', db_path)
-            return True, f"SQLite备份成功: {backup_file}", backup_file
-        except Exception as e:
-            return False, f"SQLite备份失败: {str(e)}", None
-
     def backup_mysql(self, backup_dir: Path, compress: bool = True) -> Tuple[bool, str, Optional[Path]]:
         """备份MySQL数据库"""
         config = self.get_mysql_config()
         backup_file = backup_dir / f'erp_system_backup_{self.timestamp}.sql'
 
+        mysqldump_path = r'C:\Program Files\MySQL\MySQL Server 8.4\bin\mysqldump.exe'
+
         cmd = [
-            'mysqldump',
+            mysqldump_path,
             f'-h{config["host"]}',
             f'-P{config["port"]}',
             f'-u{config["user"]}',
@@ -179,10 +150,10 @@ class DatabaseManager:
         cmd.extend(['--single-transaction', '--routines', '--triggers', config['database']])
 
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            with open(backup_file, 'wb') as f:
+                result = subprocess.run(cmd, stdout=f, stderr=subprocess.PIPE)
+
             if result.returncode == 0:
-                with open(backup_file, 'w', encoding='utf-8') as f:
-                    f.write(result.stdout)
                 self.log(f"MySQL数据库已导出到: {backup_file}")
 
                 if compress:
@@ -194,11 +165,10 @@ class DatabaseManager:
                 self.create_manifest(backup_file, 'mysql')
                 return True, f"MySQL备份成功: {backup_file}", backup_file
             else:
-                return False, f"MySQL备份失败: {result.stderr}", None
+                stderr_text = result.stderr.decode('utf-8', errors='replace')
+                return False, f"MySQL备份失败: {stderr_text}", None
         except FileNotFoundError:
-            return False, "mysqldump命令未找到，请确保MySQL已安装并添加到PATH", None
-        except subprocess.TimeoutExpired:
-            return False, "MySQL备份超时", None
+            return False, "mysqldump命令未找到，请确保MySQL已安装", None
         except Exception as e:
             return False, f"MySQL备份失败: {str(e)}", None
 
@@ -217,14 +187,7 @@ class DatabaseManager:
         }
         backup_dir = backup_dir_map.get(backup_type, MANUAL_DIR)
 
-        db_type = self.get_db_type()
-
-        if db_type == 'sqlite':
-            success, message, _ = self.backup_sqlite(backup_dir, compress)
-        elif db_type == 'mysql':
-            success, message, _ = self.backup_mysql(backup_dir, compress)
-        else:
-            success, message = False, f"不支持的数据库类型: {db_type}"
+        success, message, _ = self.backup_mysql(backup_dir, compress)
 
         if success:
             self.log("=" * 60)
@@ -234,49 +197,6 @@ class DatabaseManager:
             self.log(message, 'ERROR')
 
         return success, message
-
-    def verify_sqlite(self, backup_file: Path) -> Tuple[bool, str]:
-        """验证SQLite备份"""
-        try:
-            import sqlite3
-            conn = sqlite3.connect(str(backup_file))
-            cursor = conn.cursor()
-
-            # 检查是否有表
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-            tables = cursor.fetchall()
-
-            if not tables:
-                conn.close()
-                return False, "备份文件中没有找到任何表"
-
-            # 检查关键表是否存在
-            expected_tables = ['user', 'product', 'order', 'customer']
-            found_tables = [t[0] for t in tables]
-            missing_tables = [t for t in expected_tables if t not in found_tables]
-
-            if missing_tables:
-                self.log(f"警告: 缺少预期的表: {missing_tables}", 'WARNING')
-
-            # 获取记录数统计
-            stats = {}
-            for table in found_tables:
-                try:
-                    cursor.execute(f"SELECT COUNT(*) FROM `{table}`;")
-                    count = cursor.fetchone()[0]
-                    stats[table] = count
-                except Exception:
-                    pass
-
-            conn.close()
-
-            self.log(f"验证成功 - 找到 {len(tables)} 个表")
-            for table, count in sorted(stats.items(), key=lambda x: x[1], reverse=True)[:10]:
-                self.log(f"  - {table}: {count} 条记录")
-
-            return True, f"SQLite备份验证成功，包含 {len(tables)} 个表"
-        except Exception as e:
-            return False, f"SQLite备份验证失败: {str(e)}"
 
     def verify_mysql(self, backup_file: Path) -> Tuple[bool, str]:
         """验证MySQL备份（基本检查）"""
@@ -314,9 +234,7 @@ class DatabaseManager:
             file_path = self.decompress_file(file_path)
 
         # 根据文件扩展名判断数据库类型
-        if str(file_path).endswith('.db'):
-            success, message = self.verify_sqlite(file_path)
-        elif str(file_path).endswith('.sql'):
+        if str(file_path).endswith('.sql'):
             success, message = self.verify_mysql(file_path)
         else:
             success, message = False, f"无法识别的备份文件类型: {file_path}"
@@ -327,38 +245,18 @@ class DatabaseManager:
 
         return success, message
 
-    def restore_sqlite(self, backup_file: Path) -> Tuple[bool, str]:
-        """恢复SQLite数据库"""
-        db_path = self.get_sqlite_path()
-
-        # 先备份当前数据库
-        if db_path.exists():
-            pre_restore_backup = BACKUP_DIR / f'erp_pre_restore_{self.timestamp}.db'
-            shutil.copy(db_path, pre_restore_backup)
-            self.log(f"已备份当前数据库到: {pre_restore_backup}")
-
-        try:
-            shutil.copy(backup_file, db_path)
-            self.log(f"已将备份文件复制到: {db_path}")
-
-            # 验证恢复结果
-            success, message = self.verify_sqlite(db_path)
-            if success:
-                return True, "SQLite数据库恢复成功"
-            else:
-                return False, f"恢复验证失败: {message}"
-        except Exception as e:
-            return False, f"SQLite恢复失败: {str(e)}"
-
     def restore_mysql(self, backup_file: Path) -> Tuple[bool, str]:
         """恢复MySQL数据库"""
         config = self.get_mysql_config()
+
+        mysqldump_path = r'C:\Program Files\MySQL\MySQL Server 8.4\bin\mysqldump.exe'
+        mysql_path = r'C:\Program Files\MySQL\MySQL Server 8.4\bin\mysql.exe'
 
         # 先备份当前数据库
         self.log("正在备份当前MySQL数据库...")
         pre_restore_backup = BACKUP_DIR / f'erp_system_pre_restore_{self.timestamp}.sql'
         cmd = [
-            'mysqldump',
+            mysqldump_path,
             f'-h{config["host"]}',
             f'-P{config["port"]}',
             f'-u{config["user"]}',
@@ -379,7 +277,7 @@ class DatabaseManager:
         # 恢复备份
         self.log("正在恢复MySQL数据库...")
         cmd = [
-            'mysql',
+            mysql_path,
             f'-h{config["host"]}',
             f'-P{config["port"]}',
             f'-u{config["user"]}',
@@ -397,7 +295,7 @@ class DatabaseManager:
             else:
                 return False, f"MySQL恢复失败: {result.stderr}"
         except FileNotFoundError:
-            return False, "mysql命令未找到，请确保MySQL已安装并添加到PATH", None
+            return False, "mysql命令未找到，请确保MySQL已安装并添加到PATH"
         except Exception as e:
             return False, f"MySQL恢复失败: {str(e)}"
 
@@ -419,9 +317,7 @@ class DatabaseManager:
             file_path = self.decompress_file(file_path)
 
         # 根据文件扩展名判断数据库类型
-        if str(file_path).endswith('.db'):
-            success, message = self.restore_sqlite(file_path)
-        elif str(file_path).endswith('.sql'):
+        if str(file_path).endswith('.sql'):
             success, message = self.restore_mysql(file_path)
         else:
             success, message = False, f"无法识别的备份文件类型: {file_path}"
@@ -449,7 +345,7 @@ class DatabaseManager:
 
             for file_path in backup_dir.iterdir():
                 if file_path.is_file() and not file_path.name.startswith('manifest_'):
-                    if file_path.name.endswith(('.db', '.sql', '.db.gz', '.sql.gz')):
+                    if file_path.name.endswith(('.sql', '.sql.gz')):
                         stat = file_path.stat()
                         backups.append({
                             'path': str(file_path),

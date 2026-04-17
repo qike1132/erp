@@ -26,13 +26,16 @@ async def list_orders(
     customer: Optional[str] = Query(None, description="客户名筛选"),
     product_id: Optional[int] = Query(None, description="产品ID筛选"),
     status: Optional[str] = Query(None, description="状态筛选"),
+    order_type: Optional[str] = Query(None, description="订单类型筛选：regular/custom"),
     db: AsyncSession = Depends(get_async_db),
     _user: User = Depends(require_permission("order_manage")),
 ):
     """订单列表（支持分页和筛选）"""
     result = await order_service.get_orders(db, page=page, per_page=per_page,
-                                            customer=customer, product_id=product_id, status=status)
-    return OrderListResponse(data=result['items'], total=result['total'])
+                                            customer=customer, product_id=product_id,
+                                            status=status, order_type=order_type)
+    return OrderListResponse(data=result['items'], total=result['total'],
+                             page=result['page'], per_page=result['per_page'])
 
 
 @router.post("/create", response_model=OrderActionResponse)
@@ -45,7 +48,8 @@ async def create_order(
     try:
         await order_service.create_order(
             db, product_id=data.product_id, quantity=data.quantity,
-            customer=data.customer, note=data.note or '', current_user=user
+            customer=data.customer, note=data.note or '', current_user=user,
+            order_type=data.order_type, country=data.country
         )
         return OrderActionResponse(success=True, message="订单添加成功！")
     except ValueError as e:
@@ -70,10 +74,13 @@ async def edit_order(
         quantity = data.quantity if data.quantity is not None else order.quantity
         customer = data.customer if data.customer is not None else order.customer
         note = data.note if data.note is not None else (order.note or '')
+        order_type = data.order_type if data.order_type is not None else order.order_type
+        country = data.country if data.country is not None else order.country
 
         result = await order_service.update_order(
             db, order_id=order_id, quantity=quantity,
-            customer=customer, note=note, current_user=user
+            customer=customer, note=note, current_user=user,
+            order_type=order_type, country=country
         )
         return OrderActionResponse(success=result['success'], message=result['message'])
     except ValueError as e:

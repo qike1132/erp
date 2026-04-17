@@ -263,6 +263,12 @@ def edit_order(id):
         if len(note) > 500:
             flash('备注过长（最大500字符）！', 'error')
             return redirect(url_for('order.orders'))
+
+        order_type = request.form.get('order_type', 'regular')
+        country = request.form.get('country', '').strip() if order_type == 'custom' else ''
+        if order_type == 'custom' and not country:
+            flash('定制订单必须填写国家名称！', 'error')
+            return redirect(url_for('order.orders'))
         
         try:
             if is_admin(current_user):
@@ -271,6 +277,8 @@ def edit_order(id):
                 order.customer = customer
                 order.quantity = new_quantity
                 order.note = note
+                order.order_type = order_type
+                order.country = country if order_type == 'custom' else None
 
                 if new_quantity != old_quantity:
                     product = db.session.get(Product, order.product_id)
@@ -309,9 +317,13 @@ def edit_order(id):
                     'customer': customer,
                     'quantity': new_quantity,
                     'note': note,
+                    'order_type': order_type,
+                    'country': country,
                     'original_customer': order.customer,
                     'original_quantity': order.quantity,
-                    'original_note': order.note or ''
+                    'original_note': order.note or '',
+                    'original_order_type': getattr(order, 'order_type', 'regular') or 'regular',
+                    'original_country': getattr(order, 'country', '') or ''
                 }
                 
                 approval_request = ApprovalRequest(
@@ -351,9 +363,13 @@ def edit_order(id):
     products = Product.query.all()
     customers = Customer.query.filter_by(status=True).order_by(Customer.name).all()
     
+    # 获取已有国家列表（用于定制订单的国家补全）
+    from sqlalchemy import distinct
+    existing_countries = [row[0] for row in db.session.query(distinct(Order.country)).filter(Order.country.isnot(None), Order.country != '').all()]
+    
     deducted_quantity = sum(stockout.quantity for stockout in order.order_stockouts) if order.order_stockouts else 0
     
-    return render_template('edit_order.html', order=order, products=products, customers=customers, current_user=current_user, deducted_quantity=deducted_quantity)
+    return render_template('edit_order.html', order=order, products=products, customers=customers, countries=existing_countries, current_user=current_user, deducted_quantity=deducted_quantity)
 
 
 @order_bp.route('/delete/<int:id>')

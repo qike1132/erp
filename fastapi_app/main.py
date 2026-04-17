@@ -2,7 +2,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi import Request, Response
+from fastapi import Request, Response, Depends
 from contextlib import asynccontextmanager
 import time
 import json
@@ -15,6 +15,7 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from fastapi_app.core.config import settings
 from fastapi_app.core.logger import setup_logging, logger
+from fastapi_app.core.deps import get_current_user
 from fastapi_app.api.v1.router import api_router
 from fastapi_app.core.database import async_engine, sync_engine, dispose_async_engines
 from fastapi_app.core.db_health import db_health_checker
@@ -68,10 +69,17 @@ app = FastAPI(
 )
 
 # 速率限制配置
-# 注意: 设置 enabled=False 初始化后在 SlowAPIMiddleware 中启用，
-# 避免 slowapi 自动读取 .env（Windows下GBK编码问题）
-os.environ.pop("LIMITER_ENABLED", None)  # 清理可能残留的环境变量
-limiter = Limiter(key_func=get_remote_address, default_limits=["60/minute"], enabled=True)
+# 传入 config_filename=os.devnull 阻止 slowapi 通过 starlette.config 读取 .env，
+# 避免 Windows GBK 编码下 UnicodeDecodeError（python-dotenv 已在 config.py 中正确加载 .env）
+import warnings
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", message="Config file .* not found")
+    limiter = Limiter(
+        key_func=get_remote_address,
+        default_limits=["60/minute"],
+        enabled=True,
+        config_filename=os.devnull,
+    )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
@@ -135,6 +143,11 @@ async def csrf_protection(request: Request, call_next):
         if request.url.path in csrf_exempt_paths or request.url.path.startswith("/api/docs"):
             return await call_next(request)
 
+        # 携带Bearer Token的请求不受CSRF保护限制（JWT不易受CSRF攻击）
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            return await call_next(request)
+
         # 如果有Origin头，验证它与host匹配
         if origin:
             from urllib.parse import urlparse
@@ -189,12 +202,20 @@ async def limit_request_body_size(request: Request, call_next):
     """限制请求体大小，防止超大请求导致内存溢出"""
     if request.method in ("POST", "PUT", "PATCH"):
         content_length = request.headers.get("content-length")
-        if content_length and int(content_length) > MAX_REQUEST_BODY_SIZE:
-            return Response(
-                content='{"detail":"请求体过大，最大允许10MB"}',
-                status_code=413,
-                media_type="application/json",
-            )
+        if content_length:
+            try:
+                if int(content_length) > MAX_REQUEST_BODY_SIZE:
+                    return Response(
+                        content='{"detail":"请求体过大，最大允许10MB"}',
+                        status_code=413,
+                        media_type="application/json",
+                    )
+            except ValueError:
+                return Response(
+                    content='{"detail":"无效的Content-Length"}',
+                    status_code=400,
+                    media_type="application/json",
+                )
     response = await call_next(request)
     # HIGH-015: API版本信息响应头
     response.headers["X-API-Version"] = "v1"
@@ -261,16 +282,12 @@ async def websocket_notifications(websocket: WebSocket):
     session_cookie = websocket.cookies.get("session")
     if session_cookie:
         try:
-            from flask.sessions import SecureCookieSessionInterface
-            from flask import Flask as _Flask
-            _app = _Flask(__name__)
-            _app.config["SECRET_KEY"] = settings.SECRET_KEY
-            si = SecureCookieSessionInterface()
-            s = si.get_signing_serializer(_app)
-            session_data = s.loads(session_cookie, max_age=3600)
+            from fastapi_app.core.deps import _flask_session_serializer, _ensure_session_serializer
+            _ensure_session_serializer()
+            session_data = _flask_session_serializer.loads(session_cookie, max_age=3600)
             user_id = session_data.get("user_id")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("WebSocket认证失败: %s", e)
 
     if not user_id:
         await websocket.close(code=4001, reason="未认证")
@@ -289,47 +306,42 @@ async def websocket_notifications(websocket: WebSocket):
         manager.disconnect(websocket, int(user_id))
 
 
+def _get_optional_user(request: Request) -> int | None:
+    """可选认证：已认证返回user_id，未认证返回None（不拒绝请求）"""
+    try:
+        return get_current_user(request)
+    except Exception:
+        return None
+
+
 @app.get("/api/health", tags=["健康检查"])
-async def health_check():
-    """健康检查接口 - 包含数据库和Redis连通性检测"""
+async def health_check(user_id: int | None = Depends(_get_optional_user)):
+    """健康检查接口 - 包含数据库和Redis连通性检测（未认证时隐藏敏感详情）"""
     health_data = {
         "status": "healthy",
-        "version": settings.APP_VERSION,
         "app": settings.APP_NAME,
-        "checks": {},
     }
     overall_healthy = True
 
-    # 数据库连通性检查
+    # 数据库连通性检查（所有用户都执行，但仅已认证用户返回详情）
     try:
         if async_engine is not None:
             async with async_engine.connect() as conn:
                 await conn.execute(text('SELECT 1'))
-            health_data["checks"]["database"] = {"status": "ok", "type": "async"}
         else:
             from fastapi_app.core.database import sync_engine
             from fastapi.concurrency import run_in_threadpool
 
             def _sync_db_check():
                 with sync_engine.connect() as conn:
-                    conn.execute(text('SELECT 1'))
+                    conn.execute(text("SELECT 1"))
 
             await run_in_threadpool(_sync_db_check)
-            health_data["checks"]["database"] = {"status": "ok", "type": "sync"}
-    except Exception as e:
-        health_data["checks"]["database"] = {"status": "error", "detail": str(e)[:100]}
+    except Exception:
         overall_healthy = False
 
-    # 数据库连接池与健康检查统计
-    try:
-        pool_status = db_health_checker.get_pool_status()
-        health_stats = db_health_checker.get_stats()
-        health_data["checks"]["db_pool"] = pool_status
-        health_data["checks"]["db_health_stats"] = health_stats
-    except Exception as e:
-        health_data["checks"]["db_pool"] = {"error": str(e)[:100]}
-
     # Redis连通性检查
+    redis_ok = True
     try:
         from fastapi.concurrency import run_in_threadpool
 
@@ -344,9 +356,23 @@ async def health_check():
             return True
 
         await run_in_threadpool(_sync_redis_check)
-        health_data["checks"]["redis"] = {"status": "ok"}
-    except Exception as e:
-        health_data["checks"]["redis"] = {"status": "warning", "detail": str(e)[:100]}
+    except Exception:
+        redis_ok = False
+
+    # 仅对已认证用户暴露版本和详细检查结果
+    if user_id is not None:
+        health_data["version"] = settings.APP_VERSION
+        health_data["checks"] = {
+            "database": {"status": "ok"} if overall_healthy else {"status": "error"},
+            "redis": {"status": "ok"} if redis_ok else {"status": "warning"},
+        }
+        try:
+            pool_status = db_health_checker.get_pool_status()
+            health_stats = db_health_checker.get_stats()
+            health_data["checks"]["db_pool"] = pool_status
+            health_data["checks"]["db_health_stats"] = health_stats
+        except Exception as e:
+            health_data["checks"]["db_pool"] = {"error": str(e)[:100]}
 
     if not overall_healthy:
         health_data["status"] = "unhealthy"
@@ -360,7 +386,7 @@ async def health_check():
 
 
 @app.get("/api/health/db", tags=["健康检查"])
-async def db_health_detail():
+async def db_health_detail(user_id: int | None = Depends(_get_optional_user)):
     """数据库连接详细状态 - 连接池、健康检查统计、MySQL服务器变量"""
     result = {
         "pool_status": db_health_checker.get_pool_status(),
@@ -400,7 +426,7 @@ async def db_health_detail():
 
 
 @app.get("/metrics", tags=["监控"])
-async def metrics():
+async def metrics(user_id: int | None = Depends(_get_optional_user)):
     """Prometheus 指标端点"""
     return Response(content=get_metrics(), media_type=get_content_type())
 

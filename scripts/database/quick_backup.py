@@ -1,13 +1,18 @@
 import os
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 
 db_host = 'localhost'
 db_port = '3306'
 db_user = os.getenv('DB_USER', 'root')
-db_password = os.getenv('DB_PASSWORD', '110110')
+db_password = os.getenv('DB_PASSWORD', '')
 db_name = os.getenv('DB_NAME', 'erp_system')
+
+if not db_password:
+    print('错误: 请设置环境变量 DB_PASSWORD')
+    sys.exit(1)
 
 backup_dir = Path('d:/erp_system/backups/manual')
 backup_dir.mkdir(parents=True, exist_ok=True)

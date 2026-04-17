@@ -14,7 +14,7 @@
 
 ## 功能特性
 
-- ✅ 支持SQLite和MySQL两种数据库
+- ✅ 支持 MySQL 数据库
 - ✅ 自动压缩备份文件（gzip格式）
 - ✅ 备份文件完整性验证
 - ✅ SHA-256校验和生成
@@ -103,12 +103,6 @@ backups/
 ```
 
 ## 备份文件命名规则
-
-**SQLite备份**：
-```
-erp_backup_YYYYMMDD_HHmmss.db
-erp_backup_YYYYMMDD_HHmmss.db.gz (压缩后)
-```
 
 **MySQL备份**：
 ```

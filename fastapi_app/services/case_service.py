@@ -374,8 +374,8 @@ async def batch_create_case_stockins(db, stockins_data: list) -> dict:
                 continue
 
             # 生成入库单号
-            from fastapi_app.services.batch_service import AsyncNumberGenerator
-            stockin_no = await AsyncNumberGenerator.generate('CS', CaseStockIn, 'stockin_date', 'stockin_no', db)
+            from fastapi_app.services.batch_service import generate_case_stockin_number
+            stockin_no = await generate_case_stockin_number(db)
 
             await create_case_stockin(db, product_id, quantity, stockin_date, customer, note, stockin_no)
             success_count += 1
@@ -401,8 +401,8 @@ async def batch_create_case_stockouts(db, stockouts_data: list) -> dict:
                 results.append({'success': False, 'error': '产品ID或数量无效', 'id': item.get('id', '未知')})
                 continue
 
-            from fastapi_app.services.batch_service import AsyncNumberGenerator
-            stockout_no = await AsyncNumberGenerator.generate('CO', CaseStockOut, 'stockout_date', 'stockout_no', db)
+            from fastapi_app.services.batch_service import generate_case_stockout_number
+            stockout_no = await generate_case_stockout_number(db)
 
             result = await create_case_stockout(db, product_id, quantity, stockout_date, customer, note, stockout_no)
             results.append({**result, 'id': item.get('id', '未知')})

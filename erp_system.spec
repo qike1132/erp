@@ -65,7 +65,6 @@ hiddenimports = [
     
     # SQLAlchemy 驱动
     'sqlalchemy.dialects.mysql',
-    'sqlalchemy.dialects.sqlite',
 ]
 
 # 排除不必要的模块

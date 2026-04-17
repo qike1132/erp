@@ -2,8 +2,7 @@
 CDN配置模块
 实现静态文件CDN支持
 """
-from flask import Flask, url_for
-from werkzeug.urls import url_parse
+from flask import url_for
 import os
 
 

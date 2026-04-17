@@ -14,6 +14,13 @@ from fastapi_app.schemas.product import (
     ProductListResponse, ProductStockInfo,
 )
 from fastapi_app.services import product_service
+from fastapi_app.services.product_service import (
+    ProductDeleteError,
+    ProductNotFoundError,
+    ProductHasRelatedOrdersError,
+    ProductHasRelatedStockInsError,
+    ProductHasRelatedStockOutsError,
+)
 
 router = APIRouter()
 
@@ -70,10 +77,26 @@ async def delete_product(
     db: AsyncSession = Depends(get_async_db),
     _user: User = Depends(require_permission("product_manage")),
 ):
-    """删除产品"""
+    """删除产品
+
+    错误响应：
+    - 400: 产品不存在或有关联单据（订单/备货/出货）
+    - 401: 未登录
+    - 403: 权限不足
+    """
     try:
         await product_service.delete_product(db, product_id)
         return ProductActionResponse(success=True, message="产品删除成功！")
+    except ProductNotFoundError as e:
+        raise HTTPException(status_code=400, detail=e.message)
+    except ProductHasRelatedOrdersError as e:
+        raise HTTPException(status_code=400, detail=e.message)
+    except ProductHasRelatedStockInsError as e:
+        raise HTTPException(status_code=400, detail=e.message)
+    except ProductHasRelatedStockOutsError as e:
+        raise HTTPException(status_code=400, detail=e.message)
+    except ProductDeleteError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

@@ -21,7 +21,6 @@ from fastapi_app.api.v1.endpoints.material_registration import router as materia
 from fastapi_app.api.v1.endpoints.auxiliary import router as auxiliary_router
 from fastapi_app.api.v1.endpoints.tasks import router as tasks_router
 from fastapi_app.api.v1.endpoints.auth import router as auth_router
-from fastapi_app.api.v1.endpoints.sku_batch import router as sku_batch_router
 from fastapi_app.api.v1.endpoints.ocr_import import router as ocr_import_router
 from fastapi_app.api.v1.endpoints.finance import router as finance_router
 from fastapi_app.api.v1.endpoints.production_plan import router as production_plan_router
@@ -146,13 +145,6 @@ api_router.include_router(
     auth_router,
     prefix="/auth",
     tags=["认证与上传"],
-)
-
-# SKU批次管理路由 - 前缀 /api/v1/sku-batches
-api_router.include_router(
-    sku_batch_router,
-    prefix="/sku-batches",
-    tags=["批次管理"],
 )
 
 # OCR PDF出货单识别路由 - 前缀 /api/v1/ocr-import

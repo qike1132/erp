@@ -39,7 +39,6 @@ from fastapi_app.shared_models.product_material import (
 from fastapi_app.shared_models.purchase_center import ModificationLog, SavedQuery
 from fastapi_app.shared_models.order_status_log import OrderStatusLog
 from fastapi_app.shared_models.customer_access_log import CustomerAccessLog
-from fastapi_app.shared_models.sku_batch import SkuBatch
 from fastapi_app.shared_models.production_plan import ProductionPlan, ProductionPlanLog, StagingPurchasePlan
 from fastapi_app.shared_models.purchase_plan import PurchasePlan, PurchasePlanDetail, ShipmentRecord
 from fastapi_app.shared_models.craft_work import CraftWork
@@ -82,7 +81,6 @@ __all__ = [
     'SavedQuery',
     'OrderStatusLog',
     'CustomerAccessLog',
-    'SkuBatch',
     'ProductionPlan',
     'ProductionPlanLog',
     'StagingPurchasePlan',

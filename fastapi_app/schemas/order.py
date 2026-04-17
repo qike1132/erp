@@ -13,6 +13,8 @@ class OrderCreate(BaseModel):
     quantity: int = Field(..., gt=0, le=100000, description="订单数量")
     customer: str = Field(..., min_length=1, max_length=100, description="客户名称")
     note: Optional[str] = Field(None, max_length=500, description="备注")
+    order_type: str = Field("regular", pattern="^(regular|custom)$", description="订单类型")
+    country: Optional[str] = Field(None, max_length=100, description="国家名称（定制订单必填）")
 
 
 class OrderUpdate(BaseModel):
@@ -21,6 +23,8 @@ class OrderUpdate(BaseModel):
     quantity: Optional[int] = Field(None, gt=0, le=100000, description="订单数量")
     customer: Optional[str] = Field(None, min_length=1, max_length=100, description="客户名称")
     note: Optional[str] = Field(None, max_length=500, description="备注")
+    order_type: Optional[str] = Field(None, pattern="^(regular|custom)$", description="订单类型")
+    country: Optional[str] = Field(None, max_length=100, description="国家名称")
 
 
 class OrderListResponse(BaseModel):
@@ -28,6 +32,8 @@ class OrderListResponse(BaseModel):
     success: bool = True
     data: List[dict]
     total: int = 0
+    page: int = 1
+    per_page: int = 50
 
 
 class OrderActionResponse(BaseModel):

@@ -12,21 +12,39 @@ FastAPI 依赖注入
 from fastapi import Depends, HTTPException, status, Request
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload, selectinload
+import logging
 
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import SyncSessionLocal
 from fastapi_app.shared_models import User, Permission
 
+logger = logging.getLogger(__name__)
+
 # 缓存 Flask session 签名序列化器，避免每请求创建 Flask 实例
 _flask_session_serializer = None
 
 
+def _ensure_session_serializer():
+    """确保 Flask session 序列化器已初始化（线程安全）"""
+    global _flask_session_serializer
+    if _flask_session_serializer is None:
+        from flask.sessions import SecureCookieSessionInterface
+        from flask import Flask as _Flask
+
+        _app = _Flask(__name__)
+        _app.config["SECRET_KEY"] = settings.SECRET_KEY
+        si = SecureCookieSessionInterface()
+        _flask_session_serializer = si.get_signing_serializer(_app)
+
+
 def create_access_token(data: dict, expires_delta=None) -> str:
     """生成JWT Token"""
+    from datetime import datetime, timedelta
     from jose import jwt
 
     to_encode = data.copy()
-    # 不设置 exp 字段，Token永不过期
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
+    to_encode["exp"] = expire
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
@@ -82,18 +100,12 @@ def _get_user_id_from_session(request: Request) -> int | None:
 
     try:
         # 缓存签名序列化器，避免每请求创建 Flask 实例
-        if _flask_session_serializer is None:
-            from flask.sessions import SecureCookieSessionInterface
-            from flask import Flask as _Flask
+        _ensure_session_serializer()
 
-            _app = _Flask(__name__)
-            _app.config["SECRET_KEY"] = settings.SECRET_KEY
-            si = SecureCookieSessionInterface()
-            _flask_session_serializer = si.get_signing_serializer(_app)
-
-        # 不设置 max_age，session cookie永不过期
-        session_data = _flask_session_serializer.loads(session_cookie)
-    except Exception:
+        # 设置 max_age，与 Flask PERMANENT_SESSION_LIFETIME 对齐（默认31天）
+        session_data = _flask_session_serializer.loads(session_cookie, max_age=settings.SESSION_COOKIE_MAX_AGE)
+    except Exception as e:
+        logger.warning(f"Session cookie验证失败: {type(e).__name__}: {e}")
         return None
 
     user_id = session_data.get("user_id")

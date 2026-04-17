@@ -10,17 +10,13 @@ from typing import List
 
 
 def _build_database_uri() -> str:
-    """与 Flask 的 get_database_uri() 使用相同逻辑构建数据库 URI"""
-    db_type = os.getenv("DB_TYPE", "mysql")
-    if db_type == "mysql":
-        db_host = os.getenv("DB_HOST", "localhost")
-        db_port = os.getenv("DB_PORT", "3306")
-        db_user = os.getenv("DB_USER", "root")
-        db_password = os.getenv("DB_PASSWORD", "")
-        db_name = os.getenv("DB_NAME", "erp_system")
-        return f"mysql+pymysql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}?charset=utf8mb4"
-    # sqlite fallback
-    return "sqlite:///:memory:"
+    """构建MySQL数据库URI"""
+    db_host = os.getenv("DB_HOST", "localhost")
+    db_port = os.getenv("DB_PORT", "3306")
+    db_user = os.getenv("DB_USER", "root")
+    db_password = os.getenv("DB_PASSWORD", "")
+    db_name = os.getenv("DB_NAME", "erp_system")
+    return f"mysql+pymysql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}?charset=utf8mb4"
 
 
 class Settings(BaseSettings):
@@ -52,8 +48,8 @@ class Settings(BaseSettings):
     # Redis配置
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
     REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
-    REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
-    REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
+    REDIS_PORT: int = int(os.getenv("REDIS_PORT") or "6379")
+    REDIS_DB: int = int(os.getenv("REDIS_DB") or "0")
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
 
     # Celery配置
@@ -74,6 +70,8 @@ class Settings(BaseSettings):
     SECRET_KEY: str = os.getenv("SECRET_KEY", "")
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    # Flask session cookie 最大有效期（秒），与 Flask PERMANENT_SESSION_LIFETIME 对齐（默认31天）
+    SESSION_COOKIE_MAX_AGE: int = int(os.getenv("SESSION_COOKIE_MAX_AGE", 2678400))
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

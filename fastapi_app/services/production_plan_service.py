@@ -414,12 +414,14 @@ async def upload_excel(db: AsyncSession, file_content: bytes,
 
     try:
         wb = openpyxl.load_workbook(io.BytesIO(file_content), read_only=True)
-        ws = wb.active
     except Exception as e:
         raise ValueError(f"Excel文件解析失败: {e}")
 
-    rows = list(ws.iter_rows(min_row=2, values_only=True))  # 跳过标题行
-    wb.close()
+    try:
+        ws = wb.active
+        rows = list(ws.iter_rows(min_row=2, values_only=True))  # 跳过标题行
+    finally:
+        wb.close()
 
     if not rows:
         raise ValueError("Excel文件无数据行")

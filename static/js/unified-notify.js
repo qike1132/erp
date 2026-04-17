@@ -93,7 +93,12 @@
     // 挂载到全局
     window.GlobalNotification = notify;
     window.showToast = function(message, type) {
-        notify[type || 'info'](message);
+        var fn = notify[type || 'info'];
+        if (typeof fn === 'function') {
+            fn(message);
+        } else {
+            notify.info(message);
+        }
     };
     window.ToastNotification = notify;
 })();

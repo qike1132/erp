@@ -9,6 +9,7 @@ from app.utils.permission_decorators import page_permission_required
 from utils.number_generator import generate_stockin_number
 from datetime import datetime
 from sqlalchemy.orm import joinedload, selectinload, load_only
+from sqlalchemy import distinct
 import json
 import logging
 
@@ -48,6 +49,8 @@ def index():
         'deduct_quantity': sum(so.quantity for so in o.order_stockouts) if o.order_stockouts else 0,
         'status': o.status,
         'note': o.note or '',
+        'order_type': getattr(o, 'order_type', 'regular') or 'regular',
+        'country': getattr(o, 'country', '') or '',
         'is_locked': o.is_locked,
         'locked_by_name': o.locked_by.username if o.locked_by else None
     } for o in orders])
@@ -79,6 +82,9 @@ def index():
     preview_stockin_no = generate_stockin_number(db, StockIn)
     current_date = datetime.now().strftime('%Y-%m-%d')
 
+    # 获取已有国家列表（用于定制订单的国家补全）
+    existing_countries = [row[0] for row in db.session.query(distinct(Order.country)).filter(Order.country.isnot(None), Order.country != '').all()]
+
     return render_template(
         'customer_order.html',
         # 订单管理数据
@@ -91,5 +97,6 @@ def index():
         current_date=current_date,
         # 共享数据
         customers=customers,
+        countries=existing_countries,
         datetime=datetime
     )

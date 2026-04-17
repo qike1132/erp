@@ -7,7 +7,31 @@
                 <div class="row">
                     <div class="col-md-6">
                         <div class="mb-3">
-                            <label for="order_no" class="form-label">订单时间</label>
+                            <label for="order_type" class="form-label">订单类型</label>
+                            <select class="form-select" id="order_type" name="order_type">
+                                <option value="regular" {{ 'selected' if order.order_type != 'custom' else '' }}>常规订单</option>
+                                <option value="custom" {{ 'selected' if order.order_type == 'custom' else '' }}>定制订单</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-md-6" id="country_field_group" style="{{ '' if order.order_type == 'custom' else 'display: none;' }}">
+                        <div class="mb-3">
+                            <label for="country" class="form-label">国家名称 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="country" name="country"
+                                   list="country_list_edit" value="{{ order.country or '' }}" maxlength="100"
+                                   placeholder="输入或选择国家">
+                            <datalist id="country_list_edit">
+                                {% for c in countries %}
+                                <option value="{{ c }}">
+                                {% endfor %}
+                            </datalist>
+                        </div>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label for="order_no" class="form-label">订单编号</label>
                             <input type="text" class="form-control" id="order_no" name="order_no" value="{{ order.order_no }}" readonly>
                         </div>
                     </div>
@@ -84,12 +108,18 @@
 
 {% block scripts %}
 <script>
+// API fetch 封装 - 确保请求携带 session cookie
+function apiFetch(url, options = {}) {
+    options.credentials = 'include';
+    return fetch(url, options);
+}
+
 function searchProductsEdit(query) {
     if (!query) {
         document.getElementById('product_list_edit').innerHTML = '';
         return;
     }
-    fetch(`/api/v1/aux/product-search?q=${encodeURIComponent(query)}`)
+    apiFetch(`/api/v1/aux/product-search?q=${encodeURIComponent(query)}`)
         .then(response => {
             if (!response.ok) {
                 console.error('API error:', response.status, response.statusText);
@@ -123,6 +153,19 @@ document.getElementById('product_search').addEventListener('change', function(e)
     const selectedOption = Array.from(datalist.options).find(opt => opt.value === e.target.value);
     if (selectedOption) {
         document.getElementById('product_id').value = selectedOption.getAttribute('data-id');
+    }
+});
+
+document.getElementById('order_type').addEventListener('change', function() {
+    const countryGroup = document.getElementById('country_field_group');
+    const countryInput = document.getElementById('country');
+    if (this.value === 'custom') {
+        countryGroup.style.display = '';
+        countryInput.setAttribute('required', '');
+    } else {
+        countryGroup.style.display = 'none';
+        countryInput.removeAttribute('required');
+        countryInput.value = '';
     }
 });
 </script>

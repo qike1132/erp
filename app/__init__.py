@@ -198,7 +198,7 @@ def create_app(config_name='default'):
             'material_registration': 'product_manage',
             'supplier_manage': 'product_manage',
             'stock_view': ['stock_view', 'stockin_manage', 'stockout_manage'],
-            'sku_batch_manage': 'sku_batch_view',
+
             'order_manage': ['order_manage', 'stockin_manage'],
             'production_plan_view': ['production_plan_view', 'production_plan_manage'],
             'production_summary_view': ['production_summary_view', 'production_summary_manage'],
@@ -227,7 +227,7 @@ def create_app(config_name='default'):
             }
             sections[section_key]['items'].append(item_dict)
 
-        section_order = ['purchase', 'purchase_tools', 'core', 'finance', 'data', 'sku_batch', 'system']
+        section_order = ['purchase', 'purchase_tools', 'core', 'finance', 'data', 'system']
         ordered_sections = {}
         for key in section_order:
             if key in sections:
@@ -294,28 +294,21 @@ def get_config(config_name):
 
 
 def get_database_uri():
-    """获取数据库URI"""
-    db_type = os.getenv('DB_TYPE', 'sqlite')
-    
-    if db_type == 'mysql':
-        db_host = os.getenv('DB_HOST', 'localhost')
-        db_port = os.getenv('DB_PORT', '3306')
-        db_user = os.getenv('DB_USER')
-        db_password = os.getenv('DB_PASSWORD')
-        db_name = os.getenv('DB_NAME', 'erp_system')
-        
-        # 生产环境下必须提供数据库凭证
-        if os.environ.get('FLASK_ENV') == 'production':
-            if not db_user or not db_password:
-                raise RuntimeError("PRODUCTION ERROR: DB_USER and DB_PASSWORD must be set for MySQL!")
-        
-        # 非生产环境下的兜底
-        db_user = db_user or 'root'
-        db_password = db_password or ''
-        
-        return f'mysql+pymysql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}?charset=utf8mb4'
-    else:
-        return 'sqlite:///erp.db'
+    """获取数据库URI - 仅支持MySQL"""
+    db_host = os.getenv('DB_HOST', 'localhost')
+    db_port = os.getenv('DB_PORT', '3306')
+    db_user = os.getenv('DB_USER')
+    db_password = os.getenv('DB_PASSWORD')
+    db_name = os.getenv('DB_NAME', 'erp_system')
+
+    if os.environ.get('FLASK_ENV') == 'production':
+        if not db_user or not db_password:
+            raise RuntimeError("PRODUCTION ERROR: DB_USER and DB_PASSWORD must be set for MySQL!")
+
+    db_user = db_user or 'root'
+    db_password = db_password or ''
+
+    return f'mysql+pymysql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}?charset=utf8mb4'
 
 
 def register_blueprints(app):
@@ -355,7 +348,6 @@ def register_blueprints(app):
     _register('app.routes.purchase_center', 'purchase_center_bp', csrf_exempt=True)
     _register('app.routes.material_registration', 'material_registration_bp', csrf_exempt=True)
     _register('app.routes.customer_order', 'customer_order_bp')
-    _register('app.routes.sku_batch', 'sku_batch_bp', csrf_exempt=True)
     _register('app.routes.finance', 'finance_bp')
     _register('app.routes.production_plan', 'production_plan_bp')
     _register('app.routes.purchase_plan', 'purchase_plan_bp')

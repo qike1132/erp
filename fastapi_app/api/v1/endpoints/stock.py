@@ -15,6 +15,7 @@ from fastapi_app.schemas.stock import (
     StockListResponse, StockActionResponse, InventoryResponse,
 )
 from fastapi_app.services import stock_service
+from fastapi_app.services import escape_like
 
 router = APIRouter()
 
@@ -30,7 +31,8 @@ async def list_stockins(
 ):
     """入库列表（支持分页）"""
     result = await stock_service.get_stockins(db, page=page, per_page=per_page)
-    return StockListResponse(data=result['items'], total=result['total'])
+    return StockListResponse(data=result['items'], total=result['total'],
+                             page=result['page'], per_page=result['per_page'])
 
 
 @router.post("/in/create", response_model=StockActionResponse)
@@ -105,7 +107,8 @@ async def list_stockouts(
 ):
     """出库列表（仅独立出库，支持分页）"""
     result = await stock_service.get_stockouts(db, page=page, per_page=per_page)
-    return StockListResponse(data=result['items'], total=result['total'])
+    return StockListResponse(data=result['items'], total=result['total'],
+                             page=result['page'], per_page=result['per_page'])
 
 
 @router.post("/out/create", response_model=StockActionResponse)
@@ -212,7 +215,7 @@ async def export_inventory(
             )
 
             if product:
-                products_query = products_query.filter(FlaskProduct.name.like(f'%{product}%'))
+                products_query = products_query.filter(FlaskProduct.name.like(f'%{escape_like(product)}%'))
 
             products = products_query.all()
 
@@ -321,7 +324,7 @@ async def export_inventory(
             filename = generate_filename('inventory')
             return excel_data, filename
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(None, _sync_export)
 
     if result[0] is None:

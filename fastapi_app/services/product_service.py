@@ -8,11 +8,56 @@ from typing import Optional
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import SQLAlchemyError
 
 from fastapi_app.shared_models import Product, InventoryLog
 
 logger = logging.getLogger(__name__)
+
+
+class ProductDeleteError(Exception):
+    """产品删除错误基类"""
+    def __init__(self, message: str, error_code: str):
+        self.message = message
+        self.error_code = error_code
+        super().__init__(self.message)
+
+
+class ProductNotFoundError(ProductDeleteError):
+    """产品不存在错误"""
+    def __init__(self, product_id: int):
+        super().__init__(
+            message=f"产品不存在（ID: {product_id}）",
+            error_code="PRODUCT_NOT_FOUND"
+        )
+
+
+class ProductHasRelatedOrdersError(ProductDeleteError):
+    """产品有关联订单错误"""
+    def __init__(self, product_name: str, order_count: int):
+        super().__init__(
+            message=f"产品「{product_name}」已关联 {order_count} 个订单，无法删除",
+            error_code="HAS_RELATED_ORDERS"
+        )
+
+
+class ProductHasRelatedStockInsError(ProductDeleteError):
+    """产品有关联入库单错误"""
+    def __init__(self, product_name: str, stockin_count: int):
+        super().__init__(
+            message=f"产品「{product_name}」已关联 {stockin_count} 条备货记录，无法删除",
+            error_code="HAS_RELATED_STOCK_INS"
+        )
+
+
+class ProductHasRelatedStockOutsError(ProductDeleteError):
+    """产品有关联出库单错误"""
+    def __init__(self, product_name: str, stockout_count: int):
+        super().__init__(
+            message=f"产品「{product_name}」已关联 {stockout_count} 条出货记录，无法删除",
+            error_code="HAS_RELATED_STOCK_OUTS"
+        )
 
 
 async def get_products(db: AsyncSession) -> list[dict]:
@@ -131,16 +176,37 @@ async def delete_product(db: AsyncSession, product_id: int) -> None:
     业务规则（与Flask一致）：
     - 有关联单据（订单/入库/出库）时拒绝删除
     - 删除时级联删除库存日志
+
+    错误代码：
+    - PRODUCT_NOT_FOUND: 产品不存在
+    - HAS_RELATED_ORDERS: 有关联订单
+    - HAS_RELATED_STOCK_INS: 有关联备货记录
+    - HAS_RELATED_STOCK_OUTS: 有关联出货记录
     """
-    product = await db.get(Product, product_id)
+    result = await db.execute(
+        select(Product)
+        .options(
+            selectinload(Product.orders),
+            selectinload(Product.stockins),
+            selectinload(Product.stockouts),
+            selectinload(Product.inventory_logs)
+        )
+        .where(Product.id == product_id)
+    )
+    product = result.scalar_one_or_none()
+
     if not product:
-        raise ValueError('产品不存在')
+        raise ProductNotFoundError(product_id)
 
-    # 检查关联单据（使用product上的backref）
-    if product.orders or product.stockins or product.stockouts:
-        raise ValueError('该产品已有相关单据，无法删除！')
+    if product.orders:
+        raise ProductHasRelatedOrdersError(product.name, len(product.orders))
 
-    # 删除关联的库存日志
+    if product.stockins:
+        raise ProductHasRelatedStockInsError(product.name, len(product.stockins))
+
+    if product.stockouts:
+        raise ProductHasRelatedStockOutsError(product.name, len(product.stockouts))
+
     for log in product.inventory_logs:
         await db.delete(log)
 

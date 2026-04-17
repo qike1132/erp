@@ -15,6 +15,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 import openpyxl
 from openpyxl import Workbook, load_workbook
 from sqlalchemy.orm import Session, selectinload
@@ -28,12 +29,109 @@ router = APIRouter()
 
 
 # ============================================================
-# Pydantic 请求/响应模型
+# Pydantic 请求模型
 # ============================================================
 
-class SupplierSummaryExportRequest:
-    """供应商汇总导出请求 - 使用 dict 接收"""
-    pass
+class OrderIdsRequest(BaseModel):
+    """订单ID列表请求"""
+    ids: List[int] = Field(..., min_length=1, description="订单ID列表")
+
+class OrderIdRequest(BaseModel):
+    """单个订单ID请求"""
+    order_id: int = Field(..., description="订单ID")
+
+class OrderIdsAltRequest(BaseModel):
+    """订单ID列表请求(备用字段名)"""
+    order_ids: List[int] = Field(..., min_length=1, description="订单ID列表")
+
+class SupplierCreateRequest(BaseModel):
+    """创建供应商请求"""
+    name: str = Field(..., min_length=1, max_length=100, description="供应商名称")
+    contact_person: str = Field('', max_length=50, description="联系人")
+    phone: str = Field('', max_length=50, description="电话")
+    address: str = Field('', max_length=200, description="地址")
+    remark: str = Field('', max_length=500, description="备注")
+
+class SupplierUpdateRequest(BaseModel):
+    """更新供应商请求"""
+    name: str = Field(..., min_length=1, max_length=100, description="供应商名称")
+    contact_person: str = Field('', max_length=50, description="联系人")
+    phone: str = Field('', max_length=50, description="电话")
+    address: str = Field('', max_length=200, description="地址")
+    remark: str = Field('', max_length=500, description="备注")
+
+class CustomerSyncRequest(BaseModel):
+    """客户同步请求"""
+    customer_ids: Optional[List[int]] = None
+    force: bool = False
+
+class CustomerBatchRequest(BaseModel):
+    """客户批量查询请求"""
+    ids: List[int] = Field(..., min_length=1, description="客户ID列表")
+
+class BomSaveRequest(BaseModel):
+    """保存BOM请求"""
+    filling: Optional[dict] = None
+    fabrics: List[dict] = []
+    accessories: List[dict] = []
+    packagings: List[dict] = []
+
+class BomCopyRequest(BaseModel):
+    """复制BOM请求"""
+    source_product_id: int = Field(..., description="源产品ID")
+    overwrite: bool = False
+
+class CalculateMaterialRequest(BaseModel):
+    """物料计算请求"""
+    orders: List[dict] = Field(..., min_length=1, description="订单物料列表")
+
+class PurchaseOrderCreateRequest(BaseModel):
+    """创建采购订单请求"""
+    materials: List[dict] = Field(..., min_length=1, description="物料列表")
+    customer_id: Optional[int] = None
+    customer_name: str = ''
+    customer_code: str = ''
+    remark: str = ''
+    unprocessed_order_id: Optional[int] = None
+
+class PurchaseOrderUpdateRequest(BaseModel):
+    """更新采购订单请求"""
+    status: Optional[str] = None
+    remark: Optional[str] = None
+    supplier_name: Optional[str] = None
+    customer_name: Optional[str] = None
+    modify_reason: str = ''
+
+class BatchCompleteRequest(BaseModel):
+    """批量完成订单请求"""
+    ids: List[int] = Field(..., min_length=1, description="订单ID列表")
+
+class OneClickGenerateRequest(BaseModel):
+    """一键生成采购订单请求"""
+    order_ids: List[int] = Field(..., min_length=1, description="订单ID列表")
+
+class ExportCompletedRequest(BaseModel):
+    """导出已完成订单请求"""
+    order_no: Optional[str] = None
+    customer_name: Optional[str] = None
+    product_name: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+
+class FactorySummarySaveRequest(BaseModel):
+    """保存工厂订单编辑请求"""
+    edits: List[dict] = Field(..., min_length=1, description="编辑列表")
+
+class SummaryPrintRequest(BaseModel):
+    """汇总打印请求"""
+    ids: List[int] = Field(..., min_length=1, description="订单ID列表")
+    format: str = 'print'
+
+class SaveQueryRequest(BaseModel):
+    """保存查询请求"""
+    name: str = Field(..., min_length=1, description="查询名称")
+    query_type: str = 'purchase_order'
+    conditions: dict = Field(..., description="查询条件")
 
 
 # ============================================================
@@ -41,7 +139,7 @@ class SupplierSummaryExportRequest:
 # ============================================================
 
 @router.get("/api/products")
-async def api_get_products(
+def api_get_products(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=500),
     search: str = Query('', max_length=100),
@@ -60,7 +158,7 @@ async def api_get_products(
 
 
 @router.get("/api/products/batch-bom")
-async def api_get_products_batch_bom(
+def api_get_products_batch_bom(
     ids: str = Query(''),
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
@@ -70,7 +168,7 @@ async def api_get_products_batch_bom(
 
 
 @router.get("/api/products/search-suggestions")
-async def api_get_search_suggestions(
+def api_get_search_suggestions(
     q: str = Query(''),
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
@@ -80,7 +178,7 @@ async def api_get_search_suggestions(
 
 
 @router.get("/api/products/statistics")
-async def api_get_products_statistics(
+def api_get_products_statistics(
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
 ):
@@ -89,7 +187,7 @@ async def api_get_products_statistics(
 
 
 @router.get("/api/product/{product_id}/bom")
-async def api_get_product_bom(
+def api_get_product_bom(
     product_id: int,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
@@ -101,14 +199,14 @@ async def api_get_product_bom(
 
 
 @router.post("/api/product/{product_id}/bom")
-async def api_save_product_bom(
+def api_save_product_bom(
     product_id: int,
-    data: dict,
+    data: BomSaveRequest,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
 ):
     try:
-        msg = svc.save_product_bom(db, product_id, data, _user.username)
+        msg = svc.save_product_bom(db, product_id, data.model_dump(), _user.username)
         return {'success': True, 'message': msg}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -119,18 +217,13 @@ async def api_save_product_bom(
 
 
 @router.post("/api/calculate")
-async def api_calculate_material(
-    data: dict,
+def api_calculate_material(
+    data: CalculateMaterialRequest,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
 ):
-    if not data or 'orders' not in data:
-        raise HTTPException(status_code=400, detail="无效的请求数据")
-    orders_data = data.get('orders', [])
-    if not orders_data:
-        raise HTTPException(status_code=400, detail="请选择至少一个产品")
     try:
-        result = svc.calculate_material(db, orders_data)
+        result = svc.calculate_material(db, data.orders)
         return {'success': True, **result}
     except Exception as e:
         logger.error(f"物料计算失败: {e}")
@@ -142,7 +235,7 @@ async def api_calculate_material(
 # ============================================================
 
 @router.get("/api/suppliers")
-async def api_get_suppliers(
+def api_get_suppliers(
     with_stats: str = Query('0'),
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
@@ -156,15 +249,13 @@ async def api_get_suppliers(
 
 
 @router.post("/api/suppliers")
-async def api_create_supplier(
-    data: dict,
+def api_create_supplier(
+    data: SupplierCreateRequest,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
 ):
-    if not data or not data.get('name'):
-        raise HTTPException(status_code=400, detail="供应商名称不能为空")
     try:
-        result = svc.create_supplier(db, data)
+        result = svc.create_supplier(db, data.model_dump())
         return {'success': True, 'supplier': result}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -174,16 +265,14 @@ async def api_create_supplier(
 
 
 @router.put("/api/suppliers/{supplier_id}")
-async def api_update_supplier(
+def api_update_supplier(
     supplier_id: int,
-    data: dict,
+    data: SupplierUpdateRequest,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
 ):
-    if not data or not data.get('name'):
-        raise HTTPException(status_code=400, detail="供应商名称不能为空")
     try:
-        result = svc.update_supplier(db, supplier_id, data)
+        result = svc.update_supplier(db, supplier_id, data.model_dump())
         return {'success': True, 'supplier': result}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -193,7 +282,7 @@ async def api_update_supplier(
 
 
 @router.get("/api/suppliers/{supplier_id}/materials")
-async def api_get_supplier_materials(
+def api_get_supplier_materials(
     supplier_id: int,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
@@ -211,7 +300,7 @@ async def api_get_supplier_materials(
 # ============================================================
 
 @router.get("/api/customers")
-async def api_get_customers(
+def api_get_customers(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     status: str = Query('all'),
@@ -229,14 +318,13 @@ async def api_get_customers(
 
 
 @router.post("/api/customers/sync")
-async def api_sync_customers(
-    data: dict,
+def api_sync_customers(
+    data: CustomerSyncRequest,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
 ):
-    from datetime import datetime
-    customer_ids = data.get('customer_ids') if data else None
-    force = data.get('force', False) if data else False
+    customer_ids = data.customer_ids
+    force = data.force
 
     from fastapi_app.shared_models import Customer
     customers = db.query(Customer)
@@ -272,19 +360,17 @@ async def api_sync_customers(
 
 
 @router.post("/api/customers/batch")
-async def api_batch_get_customers(
-    data: dict,
+def api_batch_get_customers(
+    data: CustomerBatchRequest,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
 ):
-    if not data or not isinstance(data.get('ids'), list):
-        raise HTTPException(status_code=400, detail="请提供客户ID列表")
-    customers = svc.batch_get_customers(db, data.get('ids', []))
+    customers = svc.batch_get_customers(db, data.ids)
     return {'success': True, 'customers': customers}
 
 
 @router.get("/api/customers/statistics")
-async def api_get_customers_statistics(
+def api_get_customers_statistics(
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
 ):
@@ -293,7 +379,7 @@ async def api_get_customers_statistics(
 
 
 @router.get("/api/customers/{customer_id}")
-async def api_get_customer_detail(
+def api_get_customer_detail(
     customer_id: int,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
@@ -328,15 +414,13 @@ async def api_clear_cache(
 # ============================================================
 
 @router.post("/api/orders")
-async def api_create_purchase_order(
-    data: dict,
+def api_create_purchase_order(
+    data: PurchaseOrderCreateRequest,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
 ):
-    if not data:
-        raise HTTPException(status_code=400, detail="无效的请求数据")
     try:
-        result = svc.create_purchase_order(db, data, _user.id, _user.username)
+        result = svc.create_purchase_order(db, data.model_dump(), _user.id, _user.username)
         return {'success': True, **result}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -347,16 +431,13 @@ async def api_create_purchase_order(
 
 
 @router.post("/api/orders/one-click-generate")
-async def api_one_click_generate_order(
-    data: dict,
+def api_one_click_generate_order(
+    data: OneClickGenerateRequest,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
 ):
-    order_ids = data.get('order_ids', []) if data else []
-    if not order_ids:
-        raise HTTPException(status_code=400, detail="请选择至少一个订单")
     try:
-        result = svc.one_click_generate_order(db, order_ids, _user.id, _user.username)
+        result = svc.one_click_generate_order(db, data.order_ids, _user.id, _user.username)
         return {'success': True, **result}
     except Exception as e:
         db.rollback()
@@ -365,7 +446,7 @@ async def api_one_click_generate_order(
 
 
 @router.get("/api/orders")
-async def api_get_purchase_orders(
+def api_get_purchase_orders(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1),
     status: str = Query('', max_length=50),
@@ -390,7 +471,7 @@ async def api_get_purchase_orders(
 # 已完成订单相关路由（必须在 /api/orders/{order_id} 之前，避免路径冲突）
 
 @router.get("/api/orders/completed")
-async def api_get_completed_purchase_orders(
+def api_get_completed_purchase_orders(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1),
     order_no: str = Query('', max_length=50),
@@ -415,17 +496,17 @@ async def api_get_completed_purchase_orders(
 
 
 @router.post("/api/orders/completed/export")
-async def api_export_completed_orders(
-    data: dict,
+def api_export_completed_orders(
+    data: ExportCompletedRequest,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
 ):
-    html = svc.export_completed_orders(db, data or {})
+    html = svc.export_completed_orders(db, data.model_dump(exclude_none=True))
     return {'success': True, 'html': html}
 
 
 @router.get("/api/orders/completed/suggestions")
-async def api_get_completed_order_suggestions(
+def api_get_completed_order_suggestions(
     field: str = Query(''),
     q: str = Query(''),
     limit: int = Query(10, ge=1, le=50),
@@ -445,7 +526,7 @@ async def api_get_completed_order_quick_filters(
 
 
 @router.get("/api/orders/{order_id}")
-async def api_get_purchase_order(
+def api_get_purchase_order(
     order_id: int,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
@@ -457,22 +538,20 @@ async def api_get_purchase_order(
 
 
 @router.put("/api/orders/{order_id}")
-async def api_update_purchase_order(
+def api_update_purchase_order(
     order_id: int,
-    data: dict,
+    data: PurchaseOrderUpdateRequest,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
 ):
-    if not data:
-        raise HTTPException(status_code=400, detail="无效的请求数据")
-    result = svc.update_purchase_order(db, order_id, data, _user.username)
+    result = svc.update_purchase_order(db, order_id, data.model_dump(exclude_unset=True), _user.username)
     if not result:
         raise HTTPException(status_code=404, detail="订单不存在")
     return {'success': True, 'order': result}
 
 
 @router.delete("/api/orders/{order_id}")
-async def api_delete_purchase_order(
+def api_delete_purchase_order(
     order_id: int,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
@@ -484,16 +563,13 @@ async def api_delete_purchase_order(
 
 
 @router.post("/api/orders/complete")
-async def api_complete_purchase_order(
-    data: dict,
+def api_complete_purchase_order(
+    data: OrderIdRequest,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
 ):
-    order_id = data.get('order_id') if data else None
-    if not order_id:
-        raise HTTPException(status_code=400, detail="缺少订单ID")
     try:
-        result = svc.complete_purchase_order(db, order_id, _user.id, _user.username)
+        result = svc.complete_purchase_order(db, data.order_id, _user.id, _user.username)
         return {'success': True, **result}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -504,16 +580,13 @@ async def api_complete_purchase_order(
 
 
 @router.post("/api/orders/batch-complete")
-async def api_batch_complete_purchase_orders(
-    data: dict,
+def api_batch_complete_purchase_orders(
+    data: BatchCompleteRequest,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
 ):
-    ids = data.get('ids', []) if data else []
-    if not ids:
-        raise HTTPException(status_code=400, detail="请选择要完成的订单")
     try:
-        result = svc.batch_complete_purchase_orders(db, ids, _user.id, _user.username)
+        result = svc.batch_complete_purchase_orders(db, data.ids, _user.id, _user.username)
         return {'success': True, **result}
     except Exception as e:
         db.rollback()
@@ -521,7 +594,7 @@ async def api_batch_complete_purchase_orders(
 
 
 @router.get("/api/orders/{order_id}/print")
-async def api_get_order_print_data(
+def api_get_order_print_data(
     order_id: int,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
@@ -533,16 +606,13 @@ async def api_get_order_print_data(
 
 
 @router.post("/api/orders/batch-print")
-async def api_get_orders_batch_print_data(
-    data: dict,
+def api_get_orders_batch_print_data(
+    data: OrderIdsRequest,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
 ):
-    ids = data.get('ids', []) if data else []
-    if not ids:
-        raise HTTPException(status_code=400, detail="请选择要打印的订单")
     from fastapi_app.shared_models import PurchaseOrder
-    orders = db.query(PurchaseOrder).filter(PurchaseOrder.id.in_(ids)).all()
+    orders = db.query(PurchaseOrder).filter(PurchaseOrder.id.in_(data.ids)).all()
     return {'success': True, 'orders': [o.to_dict() for o in orders]}
 
 
@@ -551,7 +621,7 @@ async def api_get_orders_batch_print_data(
 # ============================================================
 
 @router.get("/api/unprocessed-orders")
-async def api_get_unprocessed_orders(
+def api_get_unprocessed_orders(
     customer: str = Query(''),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1),
@@ -567,7 +637,7 @@ async def api_get_unprocessed_orders(
 # ============================================================
 
 @router.get("/api/modification-logs")
-async def api_get_modification_logs(
+def api_get_modification_logs(
     target_type: str = Query(''),
     target_id: int = Query(0),
     page: int = Query(1, ge=1),
@@ -587,7 +657,7 @@ async def api_get_modification_logs(
 # ============================================================
 
 @router.get("/api/saved-queries")
-async def api_get_saved_queries(
+def api_get_saved_queries(
     query_type: str = Query('purchase_order'),
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
@@ -597,15 +667,13 @@ async def api_get_saved_queries(
 
 
 @router.post("/api/saved-queries")
-async def api_save_query(
-    data: dict,
+def api_save_query(
+    data: SaveQueryRequest,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
 ):
-    if not data or not data.get('name') or not data.get('conditions'):
-        raise HTTPException(status_code=400, detail="查询名称和条件不能为空")
     try:
-        result = svc.save_query(db, data, _user.id, _user.username)
+        result = svc.save_query(db, data.model_dump(), _user.id, _user.username)
         return {'success': True, 'query': result}
     except Exception:
         db.rollback()
@@ -613,7 +681,7 @@ async def api_save_query(
 
 
 @router.delete("/api/saved-queries/{query_id}")
-async def api_delete_saved_query(
+def api_delete_saved_query(
     query_id: int,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
@@ -625,7 +693,7 @@ async def api_delete_saved_query(
 
 
 @router.post("/api/saved-queries/{query_id}/use")
-async def api_use_saved_query(
+def api_use_saved_query(
     query_id: int,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
@@ -641,7 +709,7 @@ async def api_use_saved_query(
 # ============================================================
 
 @router.get("/api/status-logs")
-async def api_get_status_logs(
+def api_get_status_logs(
     target_type: str = Query(''),
     target_id: int = Query(0),
     order_no: str = Query(''),
@@ -662,16 +730,13 @@ async def api_get_status_logs(
 # ============================================================
 
 @router.post("/api/orders/factory-summary")
-async def api_get_factory_order_summary(
-    data: dict,
+def api_get_factory_order_summary(
+    data: OrderIdsRequest,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
 ):
-    ids = data.get('ids', []) if data else []
-    if not ids:
-        raise HTTPException(status_code=400, detail="请选择订单")
     try:
-        result = svc.get_factory_order_summary(db, ids)
+        result = svc.get_factory_order_summary(db, data.ids)
         return {'success': True, **result}
     except Exception as e:
         logger.exception(f"获取工厂订单汇总失败: {str(e)}")
@@ -687,16 +752,13 @@ async def api_generate_factory_order(
 
 
 @router.post("/api/orders/factory-summary/save")
-async def api_save_factory_summary_edits(
-    data: dict,
+def api_save_factory_summary_edits(
+    data: FactorySummarySaveRequest,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
 ):
-    edits = data.get('edits', []) if data else []
-    if not edits:
-        raise HTTPException(status_code=400, detail="没有需要保存的修改")
     try:
-        result = svc.save_factory_summary_edits(db, edits)
+        result = svc.save_factory_summary_edits(db, data.edits)
         return {'success': True, **result}
     except Exception as e:
         db.rollback()
@@ -709,16 +771,13 @@ async def api_save_factory_summary_edits(
 # ============================================================
 
 @router.post("/api/orders/supplier-summary")
-async def api_get_supplier_order_summary(
-    data: dict,
+def api_get_supplier_order_summary(
+    data: OrderIdsRequest,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
 ):
-    ids = data.get('ids', []) if data else []
-    if not ids:
-        raise HTTPException(status_code=400, detail="请选择订单")
     try:
-        result = svc.get_supplier_order_summary(db, ids)
+        result = svc.get_supplier_order_summary(db, data.ids)
         return {'success': True, **result}
     except Exception as e:
         logger.exception(f"获取供应商订单汇总失败: {str(e)}")
@@ -726,26 +785,23 @@ async def api_get_supplier_order_summary(
 
 
 @router.post("/api/orders/supplier-summary-by-vendor")
-async def api_get_supplier_summary_by_vendor(
-    data: dict,
+def api_get_supplier_summary_by_vendor(
+    data: OrderIdsRequest,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
 ):
     """按供应商维度汇总采购订单"""
-    ids = data.get('ids', []) if data else []
-    if not ids:
-        raise HTTPException(status_code=400, detail="请选择订单")
     try:
-        sorted_suppliers = svc.query_supplier_groups(db, ids)
+        sorted_suppliers = svc.query_supplier_groups(db, data.ids)
         return {
             'success': True,
             'suppliers': sorted_suppliers,
             'supplier_count': len(sorted_suppliers),
-            'order_count': len(ids),
+            'order_count': len(data.ids),
         }
     except Exception as e:
         logger.exception(f"按供应商汇总失败: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="操作失败，请稍后重试")
 
 
 @router.post("/api/orders/generate-supplier")
@@ -763,15 +819,13 @@ async def api_generate_supplier_order(
 # ============================================================
 
 @router.post("/api/orders/summary-print")
-async def api_summary_print(
-    data: dict,
+def api_summary_print(
+    data: SummaryPrintRequest,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
 ):
-    ids = data.get('ids', []) if data else []
-    format_type = data.get('format', 'print') if data else 'print'
-    if not ids:
-        raise HTTPException(status_code=400, detail="请选择订单")
+    ids = data.ids
+    format_type = data.format
     try:
         from fastapi_app.shared_models import PurchaseOrder, PurchaseOrderItem, Order
 
@@ -1225,15 +1279,13 @@ def create_supplier_workbook(supplier: dict) -> Workbook:
 
 
 @router.post("/orders/supplier-summary-export")
-async def export_supplier_summary_excel(
-    data: dict,
+def export_supplier_summary_excel(
+    data: OrderIdsRequest,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
 ):
     """按供应商维度导出采购订单汇总 Excel，单文件直接下载，多文件 ZIP 打包"""
-    order_ids = data.get('ids', []) if data else []
-    if not order_ids:
-        raise HTTPException(status_code=400, detail="请选择订单")
+    order_ids = data.ids
 
     try:
         sorted_suppliers = svc.query_supplier_groups(db, order_ids)
@@ -1248,6 +1300,7 @@ async def export_supplier_summary_excel(
             wb = create_supplier_workbook(supplier)
             excel_buffer = io.BytesIO()
             wb.save(excel_buffer)
+            wb.close()
             excel_buffer.seek(0)
 
             filename = f"{date_prefix}-{supplier['supplier_name']}_采购订单汇总.xlsx"
@@ -1266,6 +1319,7 @@ async def export_supplier_summary_excel(
                 wb = create_supplier_workbook(supplier)
                 excel_buffer = io.BytesIO()
                 wb.save(excel_buffer)
+                wb.close()
                 excel_buffer.seek(0)
                 filename = f"{supplier['supplier_name']}_采购订单汇总.xlsx"
                 zf.writestr(filename, excel_buffer.read())
@@ -1292,7 +1346,7 @@ async def export_supplier_summary_excel(
 
 
 @router.get("/api/products/search")
-async def api_search_products_for_bom_copy(
+def api_search_products_for_bom_copy(
     keyword: str = Query('', min_length=1),
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
@@ -1306,7 +1360,7 @@ async def api_search_products_for_bom_copy(
 
 
 @router.get("/api/products/{source_product_id}/bom-preview")
-async def api_get_bom_preview(
+def api_get_bom_preview(
     source_product_id: int,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
@@ -1320,15 +1374,15 @@ async def api_get_bom_preview(
 
 
 @router.post("/api/products/{target_product_id}/copy-bom")
-async def api_copy_bom_to_product(
+def api_copy_bom_to_product(
     target_product_id: int,
-    data: dict,
+    data: BomCopyRequest,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
 ):
     """复制BOM到目标产品"""
     try:
-        result = svc.copy_bom_to_product(db, target_product_id, data)
+        result = svc.copy_bom_to_product(db, target_product_id, data.model_dump())
         return {'success': True, **result}
     except ValueError as e:
         error_msg = str(e)
@@ -1338,15 +1392,14 @@ async def api_copy_bom_to_product(
 
 
 @router.post("/api/orders/batch-delete")
-async def api_batch_delete_purchase_orders(
-    data: dict,
+def api_batch_delete_purchase_orders(
+    data: OrderIdsAltRequest,
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
 ):
     """批量删除采购订单"""
     try:
-        order_ids = data.get('order_ids', []) if data else []
-        result = svc.batch_delete_purchase_orders(db, order_ids)
+        result = svc.batch_delete_purchase_orders(db, data.order_ids)
         return {'success': True, **result}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

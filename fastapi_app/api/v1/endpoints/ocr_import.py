@@ -165,11 +165,35 @@ async def preview_shipping_doc(
     import asyncio
 
     try:
-        # OCR 提取文本（自动识别文件类型）
-        loop = asyncio.get_event_loop()
-        pages = await loop.run_in_executor(None, svc.extract_text, content, filename)
+        # 优先尝试 RapidTable 表格结构识别
+        loop = asyncio.get_running_loop()
 
-        if not pages:
+        # 尝试表格结构识别
+        table_pages = await loop.run_in_executor(
+            None, svc.extract_table_structure, content, filename
+        )
+
+        if table_pages:
+            parsed_items = svc.parse_html_shipping_tables(table_pages)
+
+            # 如果表格识别无结果，回退到文本模式
+            if not parsed_items:
+                pages = await loop.run_in_executor(None, svc.extract_text, content, filename)
+                if pages:
+                    parsed_items = svc.parse_shipping_document(pages)
+            else:
+                # 从 table_pages 构造 pages 格式（用于预览显示）
+                pages = [{"page": p["page"], "text": p.get("text", "")[:500]} for p in table_pages]
+        else:
+            # 回退到原有文本模式
+            pages = await loop.run_in_executor(None, svc.extract_text, content, filename)
+            if pages:
+                parsed_items = svc.parse_shipping_document(pages)
+            else:
+                pages = []
+                parsed_items = []
+
+        if not pages and not parsed_items:
             return OcrPdfPreviewResult(
                 success=False,
                 message='无法提取文本内容',
@@ -179,15 +203,12 @@ async def preview_shipping_doc(
                 parsed_items=[],
             )
 
-        # 解析出货单字段
-        parsed_items = svc.parse_shipping_document(pages)
-
         return OcrPdfPreviewResult(
             success=True,
             message=f'识别完成，共 {len(pages)} 页，识别到 {len(parsed_items)} 个出货项',
             filename=filename,
             page_count=len(pages),
-            pages=[{"page": p["page"], "text": p["text"][:500]} for p in pages],
+            pages=[{"page": p.get("page", 0), "text": p.get("text", "")[:500]} for p in pages],
             parsed_items=parsed_items,
         )
 

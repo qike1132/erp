@@ -56,17 +56,25 @@ def _normalize_plan_date(date_str: str) -> date:
 async def _generate_plan_no(db: AsyncSession) -> str:
     """
     生成计划编号：PP-YYYYMMDD-NNNN
-    NNNN 为当天递增序号
+    NNNN 为当天递增序号，使用 max 而非 count 避免竞态条件
     """
     today_str = date.today().strftime('%Y%m%d')
     prefix = f'PP-{today_str}-'
 
+    # 查询当天最大编号而非count，避免并发时重复
     result = await db.execute(
-        select(func.count(PurchasePlan.id))
+        select(func.max(PurchasePlan.plan_no))
         .where(PurchasePlan.plan_no.like(f'{prefix}%'))
     )
-    count = result.scalar() or 0
-    return f'{prefix}{count + 1:04d}'
+    max_no = result.scalar()
+    if max_no:
+        try:
+            next_seq = int(max_no.split('-')[-1]) + 1
+        except (ValueError, IndexError):
+            next_seq = 1
+    else:
+        next_seq = 1
+    return f'{prefix}{next_seq:04d}'
 
 
 # ==================== 主表 CRUD ====================
@@ -354,11 +362,12 @@ async def _get_inventory_map(db: AsyncSession) -> dict:
     """
     try:
         from utils.redis_cache import redis_cache
-        cached = redis_cache.get(f'{INVENTORY_CACHE_PREFIX}:map')
+        from fastapi.concurrency import run_in_threadpool
+        cached = await run_in_threadpool(redis_cache.get, f'{INVENTORY_CACHE_PREFIX}:map')
         if cached is not None:
             return cached
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f'Redis缓存读取失败: {e}')
 
     try:
         inventory_result = await stock_service.get_inventory(db)
@@ -370,9 +379,10 @@ async def _get_inventory_map(db: AsyncSession) -> dict:
     # 写入 Redis 缓存
     try:
         from utils.redis_cache import redis_cache
-        redis_cache.set(f'{INVENTORY_CACHE_PREFIX}:map', mapping, timeout=INVENTORY_CACHE_TTL)
-    except Exception:
-        pass
+        from fastapi.concurrency import run_in_threadpool
+        await run_in_threadpool(redis_cache.set, f'{INVENTORY_CACHE_PREFIX}:map', mapping, timeout=INVENTORY_CACHE_TTL)
+    except Exception as e:
+        logger.warning(f'Redis缓存写入失败: {e}')
 
     return mapping
 
@@ -679,12 +689,14 @@ async def upload_excel(db: AsyncSession, file_content: bytes,
 
     try:
         wb = openpyxl.load_workbook(io.BytesIO(file_content), read_only=True)
-        ws = wb.active
     except Exception as e:
         raise ValueError(f"Excel文件解析失败: {e}")
 
-    rows = list(ws.iter_rows(min_row=2, values_only=True))
-    wb.close()
+    try:
+        ws = wb.active
+        rows = list(ws.iter_rows(min_row=2, values_only=True))
+    finally:
+        wb.close()
 
     if not rows:
         raise ValueError("Excel文件无数据行")

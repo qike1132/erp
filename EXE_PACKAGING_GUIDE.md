@@ -191,7 +191,7 @@ datas = [
 **解决方案**:
 1. 将 `.env` 文件复制到 `dist` 目录
 2. 或修改配置使用相对路径
-3. 确保目标机器有数据库（MySQL 或 SQLite）
+3. 确保目标机器有 MySQL 数据库
 
 ### 问题 4: EXE 文件体积过大
 
@@ -248,7 +248,6 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 - Windows 10/11 (64位)
 - 无需安装 Python
 - 如使用 MySQL，需要安装 MySQL 服务
-- 如使用 SQLite，无需额外配置
 
 ### 3. 部署步骤
 

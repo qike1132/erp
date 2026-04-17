@@ -132,14 +132,6 @@ PERMISSIONS_CONFIG = {
             {'code': 'purchase_center_unprocessed', 'name': '未处理订单'},
         ]
     },
-    'sku_batch': {
-        'module_name': '批次管理',
-        'icon': 'fa-layer-group',
-        'parent': {'code': 'sku_batch_manage', 'name': '批次管理(全部)'},
-        'children': [
-            {'code': 'sku_batch_view', 'name': '批次查看'},
-        ]
-    },
     'production_summary': {
         'module_name': '生产报表',
         'icon': 'fa-industry',

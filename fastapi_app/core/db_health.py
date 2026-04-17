@@ -90,10 +90,11 @@ class DBHealthChecker:
         if async_engine is not None:
             async_ok = await self._check_async_engine(async_engine)
 
-        # 同步引擎检查(作为备用)
+        # 同步引擎检查(作为备用) - 使用run_in_threadpool避免阻塞事件循环
         sync_ok = False
         if not async_ok:
-            sync_ok = self._check_sync_engine(sync_engine)
+            from fastapi.concurrency import run_in_threadpool
+            sync_ok = await run_in_threadpool(self._check_sync_engine, sync_engine)
 
         is_healthy = async_ok or sync_ok
 

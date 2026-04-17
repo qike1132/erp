@@ -28,11 +28,25 @@ class AsyncNumberGenerator:
     _instance = None
     _counters = {}
     _initialized = {}
+    _lock = asyncio.Lock()
+    _last_cleanup_date = None
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
+
+    @classmethod
+    def _cleanup_old_entries(cls):
+        """清理非当日的计数器条目，防止内存泄漏"""
+        today_str = datetime.now().strftime('%Y%m%d')
+        if cls._last_cleanup_date == today_str:
+            return
+        expired_keys = [k for k in cls._counters if not k.endswith(today_str)]
+        for k in expired_keys:
+            cls._counters.pop(k, None)
+            cls._initialized.pop(k, None)
+        cls._last_cleanup_date = today_str
 
     def is_initialized(self, prefix, date_str):
         key = f"{prefix}:{date_str}"
@@ -79,27 +93,30 @@ async def generate_number_async(prefix: str, model, date_field: str, number_fiel
     today = datetime.now()
     date_str = today.strftime('%Y%m%d')
 
-    if not _async_number_generator.is_initialized(prefix, date_str):
-        result = await db.execute(
-            select(model)
-            .where(func.date(getattr(model, date_field)) == today.date())
-            .order_by(getattr(model, number_field).desc())
-            .limit(1)
-        )
-        record = result.scalar_one_or_none()
+    async with _async_number_generator._lock:
+        _async_number_generator._cleanup_old_entries()
 
-        db_max = 0
-        if record:
-            last_number = getattr(record, number_field)
-            try:
-                db_max = int(last_number.split('-')[-1])
-            except (ValueError, IndexError):
-                pass
+        if not _async_number_generator.is_initialized(prefix, date_str):
+            result = await db.execute(
+                select(model)
+                .where(func.date(getattr(model, date_field)) == today.date())
+                .order_by(getattr(model, number_field).desc())
+                .limit(1)
+            )
+            record = result.scalar_one_or_none()
 
-        _async_number_generator.get_next_seq(prefix, date_str, db_max)
+            db_max = 0
+            if record:
+                last_number = getattr(record, number_field)
+                try:
+                    db_max = int(last_number.split('-')[-1])
+                except (ValueError, IndexError):
+                    pass
 
-    current_seq = _async_number_generator.get_next_seq(prefix, date_str, 0)
-    return f"{prefix}-{date_str}-{str(current_seq).zfill(4)}"
+            _async_number_generator.get_next_seq(prefix, date_str, db_max)
+
+        current_seq = _async_number_generator.get_next_seq(prefix, date_str, 0)
+        return f"{prefix}-{date_str}-{str(current_seq).zfill(4)}"
 
 
 async def generate_order_number(db: AsyncSession) -> str:
@@ -287,20 +304,32 @@ async def calculate_available_shipment_quantity(db: AsyncSession, product_id: in
     )
     orders = result.scalars().all()
 
+    if not orders:
+        return {
+            'order_quantity': 0,
+            'shipped_quantity': 0,
+            'available_quantity': 0,
+            'orders': []
+        }
+
+    # 单次查询获取所有订单的已出货量，替代N+1循环查询
+    order_ids = [o.id for o in orders]
+    shipped_result = await db.execute(
+        select(StockOut.order_id, func.sum(StockOut.quantity))
+        .where(
+            StockOut.order_id.in_(order_ids),
+            StockOut.stockin_id.is_(None)
+        )
+        .group_by(StockOut.order_id)
+    )
+    shipped_map = dict(shipped_result.all())
+
     total_order_quantity = 0
     order_details = []
 
     for order in orders:
         total_order_quantity += order.quantity
-
-        shipped_result = await db.execute(
-            select(func.sum(StockOut.quantity))
-            .where(
-                StockOut.order_id == order.id,
-                StockOut.stockin_id.is_(None)
-            )
-        )
-        non_deduction_shipped = shipped_result.scalar() or 0
+        non_deduction_shipped = shipped_map.get(order.id, 0)
 
         order_details.append({
             'order_id': order.id,
@@ -310,16 +339,8 @@ async def calculate_available_shipment_quantity(db: AsyncSession, product_id: in
             'available': order.quantity - non_deduction_shipped
         })
 
-    total_shipped_result = await db.execute(
-        select(func.sum(StockOut.quantity))
-        .join(Order, StockOut.order_id == Order.id)
-        .where(
-            Order.product_id == product_id,
-            Order.customer == customer,
-            StockOut.stockin_id.is_(None)
-        )
-    )
-    total_shipped = total_shipped_result.scalar() or 0
+    total_shipped = sum(shipped_map.values())
+
     available_quantity = max(0, total_order_quantity - total_shipped)
 
     return {
@@ -336,7 +357,7 @@ async def parse_excel_file_async(file_path: str, sheet_name: str = None) -> Tupl
     """
     异步解析 Excel 文件（使用 run_in_executor 避免 CPU 密集操作阻塞事件循环）
     """
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     def _sync_parse():
         try:
@@ -345,8 +366,8 @@ async def parse_excel_file_async(file_path: str, sheet_name: str = None) -> Tupl
                 df = pd.read_excel(file_path, sheet_name=sheet_name)
             else:
                 excel_file = pd.ExcelFile(file_path)
-                sheet_name = excel_file.sheet_names[0]
-                df = pd.read_excel(file_path, sheet_name=sheet_name)
+                first_sheet = excel_file.sheet_names[0]
+                df = pd.read_excel(file_path, sheet_name=first_sheet)
 
             data_list = df.to_dict(orient='records')
             for row in data_list:
@@ -364,7 +385,7 @@ async def parse_excel_file_async(file_path: str, sheet_name: str = None) -> Tupl
 
 async def read_excel_sheets_async(file_path: str) -> Tuple[bool, list, str]:
     """读取 Excel 文件的所有 Sheet 名称"""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     def _sync_read():
         try:
@@ -378,9 +399,9 @@ async def read_excel_sheets_async(file_path: str) -> Tuple[bool, list, str]:
 
 
 def parse_date_value(date_value) -> Optional[datetime]:
-    """解析日期值（支持多种格式）"""
+    """解析日期值（支持多种格式），解析失败返回None"""
     if date_value is None:
-        return datetime.now()
+        return None
     if isinstance(date_value, datetime):
         return date_value
     if isinstance(date_value, (int, float)):
@@ -389,7 +410,7 @@ def parse_date_value(date_value) -> Optional[datetime]:
             base_date = datetime(1899, 12, 30)
             return base_date + timedelta(days=date_value)
         except Exception:
-            return datetime.now()
+            return None
     try:
         date_str = str(date_value).strip()
         for fmt in ["%Y-%m-%d", "%Y/%m/%d", "%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"]:
@@ -399,7 +420,7 @@ def parse_date_value(date_value) -> Optional[datetime]:
                 continue
     except Exception:
         pass
-    return datetime.now()
+    return None
 
 
 # ==================== 综合导入子函数 ====================
@@ -411,6 +432,7 @@ async def import_products_from_data(db: AsyncSession, data_list: list) -> int:
         try:
             name = row_data.get('产品名称') or row_data.get('产品名') or row_data.get('名称')
             barcode = row_data.get('69码') or row_data.get('条码') or row_data.get('条形码')
+            price = row_data.get('产品价格') or row_data.get('价格')
             initial_stock = row_data.get('初始库存') or row_data.get('库存') or 0
 
             if not name:
@@ -431,9 +453,15 @@ async def import_products_from_data(db: AsyncSession, data_list: list) -> int:
             except ValueError:
                 stock = 0
 
+            try:
+                price_val = float(price) if price else 0
+            except (ValueError, TypeError):
+                price_val = 0
+
             product = Product(
                 name=name,
                 barcode=str(barcode).strip() if barcode else '',
+                price=price_val,
                 initial_stock=stock,
                 current_stock=stock
             )
@@ -586,7 +614,7 @@ async def import_stockins_from_data(db: AsyncSession, data_list: list) -> Tuple[
             except ValueError:
                 continue
 
-            stockin_date = parse_date_value(stockin_date_val)
+            stockin_date = parse_date_value(stockin_date_val) or datetime.now()
             stockin_no = await generate_stockin_number(db)
             stockin = StockIn(
                 stockin_no=stockin_no,
@@ -668,7 +696,7 @@ async def import_stockouts_from_data(db: AsyncSession, data_list: list) -> Tuple
             if qty > shipment_info['available_quantity']:
                 continue
 
-            stockout_date = parse_date_value(stockout_date_val)
+            stockout_date = parse_date_value(stockout_date_val) or datetime.now()
 
             remaining_qty = qty
             for order_detail in shipment_info['orders']:

@@ -25,9 +25,9 @@ logger = logging.getLogger(__name__)
 # ==================== 工具函数 ====================
 
 def _parse_date_value(date_value) -> Optional[datetime]:
-    """解析日期值（支持多种格式）- 同步纯函数"""
+    """解析日期值（支持多种格式），解析失败返回None - 与batch_service.parse_date_value保持一致"""
     if date_value is None:
-        return datetime.now()
+        return None
     if isinstance(date_value, datetime):
         return date_value
     if isinstance(date_value, (int, float)):
@@ -36,7 +36,7 @@ def _parse_date_value(date_value) -> Optional[datetime]:
             base_date = datetime(1899, 12, 30)
             return base_date + timedelta(days=date_value)
         except Exception:
-            return datetime.now()
+            return None
     try:
         date_str = str(date_value).strip()
         for fmt in ["%Y-%m-%d", "%Y/%m/%d", "%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"]:
@@ -46,7 +46,7 @@ def _parse_date_value(date_value) -> Optional[datetime]:
                 continue
     except Exception:
         pass
-    return datetime.now()
+    return None
 
 
 async def _find_product_by_name_or_barcode(db: AsyncSession, name_or_barcode: str):
@@ -597,7 +597,7 @@ async def import_staging_stockins_from_excel(
                 except (ValueError, TypeError):
                     qty = 0
 
-                stockin_date = _parse_date_value(stockin_date_val)
+                stockin_date = _parse_date_value(stockin_date_val) or datetime.now()
 
                 staging_stockin = StagingStockIn(
                     session_id=session_id,
@@ -910,7 +910,7 @@ async def import_staging_stockouts_from_excel(
                 except (ValueError, TypeError):
                     qty = 0
 
-                stockout_date = _parse_date_value(stockout_date_val)
+                stockout_date = _parse_date_value(stockout_date_val) or datetime.now()
 
                 staging_stockout = StagingStockOut(
                     session_id=session_id,

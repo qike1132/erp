@@ -17,6 +17,8 @@ class Order(db.Model):
     quantity = db.Column(db.Integer, nullable=False, comment='订单数量')
     status = db.Column(db.String(20), default='待备货', index=True, comment='订单状态：待备货、部分备货、已备货、待出货、已出货、已取消')
     note = db.Column(db.Text, comment='备注')
+    order_type = db.Column(db.String(20), default='regular', nullable=False, comment='订单类型：regular=常规订单, custom=定制订单')
+    country = db.Column(db.String(100), comment='国家名称（仅定制订单使用）')
     is_locked = db.Column(db.Boolean, default=False, comment='是否被审批锁定')
     locked_by_id = db.Column(db.Integer, db.ForeignKey('user.id'), comment='锁定人ID')
     lock_time = db.Column(db.DateTime, comment='锁定时间')
@@ -42,6 +44,7 @@ class Order(db.Model):
         db.Index('idx_order_customer_product', 'customer', 'product_id'),
         # 按锁定状态查询
         db.Index('idx_order_locked', 'is_locked'),
+        db.Index('idx_order_type', 'order_type'),
     )
 
     def __repr__(self):
@@ -71,6 +74,8 @@ class Order(db.Model):
             'quantity': self.quantity,
             'status': self.status,
             'note': self.note,
+            'order_type': self.order_type,
+            'country': self.country or '',
             'is_locked': self.is_locked,
             'is_deleted': self.is_deleted,
             'created_at': self.order_date.isoformat() if self.order_date else None,

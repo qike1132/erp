@@ -23,7 +23,7 @@ DB_USER=root
 DB_PASSWORD=your_password
 DB_NAME=erp_system
 
-如使用 SQLite（默认），无需配置。
+如使用 MySQL，需配置数据库连接信息。
 
 文件说明
 ========

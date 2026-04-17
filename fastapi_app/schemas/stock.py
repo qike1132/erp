@@ -3,8 +3,16 @@
 
 用于入库、出库、库存查看的请求/响应模型。
 """
-from pydantic import BaseModel, Field
+from datetime import datetime
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
+
+
+def _validate_date_format(v: str) -> str:
+    """验证日期格式为 YYYY-MM-DD"""
+    if v is not None:
+        datetime.strptime(v, '%Y-%m-%d')
+    return v
 
 
 # ==================== 入库 ====================
@@ -17,6 +25,11 @@ class StockInCreate(BaseModel):
     stockin_date: str = Field(..., description="入库日期 (YYYY-MM-DD)")
     note: Optional[str] = Field(None, max_length=500, description="备注")
 
+    @field_validator('stockin_date')
+    @classmethod
+    def validate_stockin_date(cls, v):
+        return _validate_date_format(v)
+
 
 class StockInUpdate(BaseModel):
     """更新入库请求"""
@@ -24,6 +37,11 @@ class StockInUpdate(BaseModel):
     customer: Optional[str] = Field(None, min_length=1, max_length=100, description="客户名称")
     stockin_date: Optional[str] = Field(None, description="入库日期 (YYYY-MM-DD)")
     note: Optional[str] = Field(None, max_length=500, description="备注")
+
+    @field_validator('stockin_date')
+    @classmethod
+    def validate_stockin_date(cls, v):
+        return _validate_date_format(v)
 
 
 # ==================== 出库 ====================
@@ -36,13 +54,23 @@ class StockOutCreate(BaseModel):
     stockout_date: str = Field(..., description="出库日期 (YYYY-MM-DD)")
     note: Optional[str] = Field(None, max_length=500, description="备注")
 
+    @field_validator('stockout_date')
+    @classmethod
+    def validate_stockout_date(cls, v):
+        return _validate_date_format(v)
+
 
 class StockOutUpdate(BaseModel):
     """更新出库请求"""
     quantity: Optional[int] = Field(None, gt=0, le=100000, description="出库数量")
-    customer: Optional[str] = Field(None, max_length=100, description="客户名称")
+    customer: Optional[str] = Field(None, min_length=1, max_length=100, description="客户名称")
     stockout_date: Optional[str] = Field(None, description="出库日期 (YYYY-MM-DD)")
     note: Optional[str] = Field(None, max_length=500, description="备注")
+
+    @field_validator('stockout_date')
+    @classmethod
+    def validate_stockout_date(cls, v):
+        return _validate_date_format(v)
 
 
 # ==================== 通用响应 ====================
@@ -52,6 +80,8 @@ class StockListResponse(BaseModel):
     success: bool = True
     data: List[dict]
     total: int = 0
+    page: int = 1
+    per_page: int = 50
 
 
 class StockActionResponse(BaseModel):

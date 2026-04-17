@@ -58,7 +58,7 @@ async def download_template(
         raise HTTPException(status_code=404, detail="模板文件不存在")
 
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _read_file():
             with open(template_path, 'rb') as f:
@@ -341,7 +341,7 @@ async def batch_import_case_stockouts(
                     skipped += 1
                     continue
 
-                stockout_date = parse_date_value(stockout_date_val)
+                stockout_date = parse_date_value(stockout_date_val) or datetime.now()
 
                 stockout_no = await generate_case_stockout_number(db)
                 stockout = CaseStockOut(
@@ -497,7 +497,7 @@ async def batch_import_case_stockins(
                     skipped += 1
                     continue
 
-                stockin_date = parse_date_value(stockin_date_val)
+                stockin_date = parse_date_value(stockin_date_val) or datetime.now()
 
                 stockin_no = await generate_case_stockin_number(db)
                 stockin = CaseStockIn(
@@ -638,7 +638,7 @@ async def batch_import_stockins(
                     skipped += 1
                     continue
 
-                stockin_date = parse_date_value(stockin_date_val)
+                stockin_date = parse_date_value(stockin_date_val) or datetime.now()
                 stockin_no = await generate_stockin_number(db)
 
                 stockin = StockIn(
@@ -795,7 +795,7 @@ async def batch_import_stockouts(
                     skipped += 1
                     continue
 
-                stockout_date = parse_date_value(stockout_date_val)
+                stockout_date = parse_date_value(stockout_date_val) or datetime.now()
 
                 remaining_qty = qty
                 for order_detail in shipment_info['orders']:
@@ -905,6 +905,7 @@ async def batch_import_products(
             try:
                 name = row_data.get('产品名称') or row_data.get('名称')
                 barcode = row_data.get('69码') or row_data.get('条码')
+                price = row_data.get('产品价格') or row_data.get('价格')
                 initial_stock = row_data.get('初始库存') or 0
 
                 if not name:
@@ -927,9 +928,15 @@ async def batch_import_products(
                 except ValueError:
                     stock = 0
 
+                try:
+                    price_val = float(price) if price else 0
+                except (ValueError, TypeError):
+                    price_val = 0
+
                 product = Product(
                     name=name,
                     barcode=str(barcode).strip() if barcode else '',
+                    price=price_val,
                     initial_stock=stock,
                     current_stock=stock
                 )

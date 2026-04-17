@@ -22,6 +22,8 @@ class Order(Base):
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, comment='订单数量')
     status: Mapped[str | None] = mapped_column(String(20), default='待备货', index=True, comment='订单状态')
     note: Mapped[str | None] = mapped_column(Text, comment='备注')
+    order_type: Mapped[str] = mapped_column(String(20), default='regular', nullable=False, comment='订单类型：regular=常规订单, custom=定制订单')
+    country: Mapped[str | None] = mapped_column(String(100), comment='国家名称（仅定制订单使用）')
     is_locked: Mapped[bool | None] = mapped_column(Boolean, default=False, comment='是否被审批锁定')
     locked_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id'), comment='锁定人ID')
     lock_time: Mapped[datetime | None] = mapped_column(DateTime, comment='锁定时间')
@@ -41,6 +43,7 @@ class Order(Base):
         Index('idx_order_status_date', 'status', 'order_date'),
         Index('idx_order_customer_product', 'customer', 'product_id'),
         Index('idx_order_locked', 'is_locked'),
+        Index('idx_order_type', 'order_type'),
     )
 
     def __repr__(self):
@@ -57,6 +60,8 @@ class Order(Base):
             'quantity': self.quantity,
             'status': self.status,
             'note': self.note,
+            'order_type': self.order_type,
+            'country': self.country or '',
             'is_locked': self.is_locked,
             'is_deleted': self.is_deleted,
             'created_at': self.order_date.isoformat() if self.order_date else None,

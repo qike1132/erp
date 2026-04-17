@@ -3,16 +3,24 @@
 <style>
     /* 库存查询页面专用样式 */
     .table th:nth-child(1), .table td:nth-child(1) {
-        width: 15%;
+        width: 12%;
     }
     .table th:nth-child(2), .table td:nth-child(2) {
-        width: 25%;
+        width: 18%;
     }
-    .table th:nth-child(3), .table td:nth-child(3),
-    .table th:nth-child(4), .table td:nth-child(4),
-    .table th:nth-child(5), .table td:nth-child(5) {
-        width: 20%;
+    .table th:nth-child(3), .table td:nth-child(3) {
+        width: 10%;
         white-space: nowrap;
+    }
+    /* 国家细分列：动态数量，等分剩余空间 */
+    .country-col {
+        width: 8%;
+        white-space: nowrap;
+        font-size: 0.85rem;
+    }
+    .country-col-header {
+        white-space: nowrap;
+        font-size: 0.85rem;
     }
 
     .stat-card {
@@ -149,6 +157,9 @@
                         <th>客户</th>
                         <th>产品名称</th>
                         <th class="text-center">订单数量</th>
+                        {% for country in all_countries %}
+                        <th class="text-center country-col-header">{{ country }}</th>
+                        {% endfor %}
                         <th class="text-center">备货数量</th>
                         <th class="text-center">总库存</th>
                     </tr>

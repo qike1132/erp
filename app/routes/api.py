@@ -164,7 +164,9 @@ def batch_submit_orders():
                     quantity=int(quantity),
                     order_date=datetime.now(),
                     status='待备货',
-                    note=order_data.get('note', '')
+                    note=order_data.get('note', ''),
+                    order_type=order_data.get('order_type', 'regular'),
+                    country=order_data.get('country') if order_data.get('order_type') == 'custom' else None
                 )
                 db.session.add(order)
                 db.session.flush()

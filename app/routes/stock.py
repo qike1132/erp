@@ -643,6 +643,7 @@ def inventory():
     total_order_qty = 0
     total_stockin_qty = 0
     total_total_qty = 0
+    all_countries = set()  # 收集所有出现过的国家名称
 
     # 批量预加载所有产品的出库记录（避免N+1查询）
     product_ids = [p.id for p in products]
@@ -717,6 +718,16 @@ def inventory():
             customer_orders = [o for o in orders if o.customer == customer]
             cust_order_total = sum(o.quantity for o in customer_orders)
 
+            # 按订单类型/国家细分订单数量
+            country_orders = {}
+            for o in customer_orders:
+                if getattr(o, 'order_type', 'regular') == 'custom' and o.country:
+                    label = o.country
+                    all_countries.add(label)
+                else:
+                    label = '常规'
+                country_orders[label] = country_orders.get(label, 0) + o.quantity
+
             # 使用预计算的出货数据
             direct_shipped = so_data['direct']
             order_shipped = so_data['order']
@@ -744,6 +755,7 @@ def inventory():
                     'product_name': product.name,
                     'product_barcode': product.barcode or '',
                     'order_quantity': available_order_qty if available_order_qty > 0 else '',
+                    'country_orders': country_orders,
                     'stockin_quantity': cust_stockin_qty if cust_stockin_qty > 0 else '',
                     'stockout_quantity': cust_stockout_qty if cust_stockout_qty > 0 else '',
                     'total_stock': total_stock if total_stock > 0 else ''
@@ -759,6 +771,7 @@ def inventory():
                           total_order_qty=total_order_qty,
                           total_stockin_qty=total_stockin_qty,
                           total_total_qty=total_total_qty,
+                          all_countries=sorted(all_countries),
                           search_customer=search_customer,
                           search_product=search_product,
                           customers=customers)

@@ -8,6 +8,7 @@ import logging
 from datetime import date as date_type
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db
@@ -378,4 +379,4 @@ async def download_template(
     _user: User = Depends(require_permission("production_plan_manage")),
 ):
     """下载Excel上传模板（重定向到Flask路由）"""
-    raise HTTPException(status_code=307, detail="使用 /plans/template 下载模板")
+    return RedirectResponse(url="/plans/template", status_code=307)

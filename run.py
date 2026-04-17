@@ -17,6 +17,26 @@ ERP系统启动脚本 (修复版 - 热重载稳定性增强)
 """
 import os
 import sys
+
+# Windows UTF-8 输出：防止中文在管道/重定向场景下产生 GBK 乱码
+if sys.platform == 'win32':
+    import io
+    if sys.stdout and hasattr(sys.stdout, 'buffer'):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    if sys.stderr and hasattr(sys.stderr, 'buffer'):
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
+# ============================================================
+# 虚拟环境自动检测：若当前 Python 不在 .venv313 内，则用 .venv313 重启
+# ============================================================
+_VENV_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.venv313')
+_VENV_PYTHON = os.path.join(_VENV_DIR, 'Scripts', 'python.exe')
+if sys.platform != 'win32':
+    _VENV_PYTHON = os.path.join(_VENV_DIR, 'bin', 'python')
+
+if os.path.isfile(_VENV_PYTHON) and os.path.normpath(sys.executable) != os.path.normpath(_VENV_PYTHON):
+    # 保留原始命令行参数，重新以 .venv313 的 Python 启动本脚本
+    os.execv(_VENV_PYTHON, [_VENV_PYTHON] + sys.argv)
 import threading
 import subprocess
 import atexit
@@ -273,7 +293,10 @@ if __name__ == '__main__':
     app.config['TEMPLATES_AUTO_RELOAD'] = True
     app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
-    print(f"数据库: {app.config.get('SQLALCHEMY_DATABASE_URI')}")
+    db_uri = app.config.get('SQLALCHEMY_DATABASE_URI', '')
+    # 仅显示主机部分，避免泄露密码
+    db_host = db_uri.split('@')[-1] if db_uri and '@' in db_uri else '未配置'
+    print(f"数据库: {db_host}")
     print(f"密钥状态: {'已设置' if app.secret_key else '未设置'}")
     print(f"调试模式: {app.debug}")
     print(f"模板自动重载: {app.config['TEMPLATES_AUTO_RELOAD']}")

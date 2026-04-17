@@ -1115,9 +1115,9 @@ def export_completed_orders(db: Session, data: dict) -> str:
     for order in orders:
         html_parts.append(f'<tr>')
         html_parts.append(f'<td>{order.order_date or "-"}</td>')
-        html_parts.append(f'<td>{order.order_no}</td>')
-        html_parts.append(f'<td>{order.customer_name or "-"}</td>')
-        html_parts.append(f'<td>{order.product_name or "-"}</td>')
+        html_parts.append(f'<td>{order.order_no or "-"}</td>')
+        html_parts.append(f'<td>{(order.customer_name or "-").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")}</td>')
+        html_parts.append(f'<td>{(order.product_name or "-").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")}</td>')
         html_parts.append(f'<td>{order.quantity or 0}</td>')
         html_parts.append(f'<td>{order.completed_at.strftime("%Y-%m-%d %H:%M") if order.completed_at else "-"}</td>')
         html_parts.append(f'</tr>')

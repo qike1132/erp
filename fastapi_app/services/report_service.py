@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import select, func, text, or_
 from sqlalchemy.orm import joinedload
 
+from fastapi_app.services import escape_like
 from fastapi_app.shared_models import StockOut, StockIn, Order, Product
 
 logger = logging.getLogger(__name__)
@@ -22,10 +23,10 @@ async def get_order_logs(db, customer: str = '', product: str = '', status: str 
 
     if customer:
         where_clauses.append("o.customer LIKE :customer")
-        params['customer'] = f'%{customer}%'
+        params['customer'] = f'%{escape_like(customer)}%'
     if product:
         where_clauses.append("(p.name LIKE :product OR p.barcode LIKE :product)")
-        params['product'] = f'%{product}%'
+        params['product'] = f'%{escape_like(product)}%'
     if status:
         valid = ['待备货', '部分备货', '已备货', '待出货', '已出货', '已取消']
         if status in valid:
@@ -86,6 +87,7 @@ async def get_order_logs(db, customer: str = '', product: str = '', status: str 
     total_qty = (await db.execute(text("SELECT SUM(quantity) FROM `order`"))).scalar() or 0
 
     return {
+        'success': True,
         'logs': logs,
         'stats': {'total_count': total, 'total_quantity': total_qty},
         'pagination': {'page': page, 'per_page': per_page, 'total': total, 'pages': (total + per_page - 1) // per_page if per_page else 0},
@@ -133,7 +135,7 @@ async def export_report_to_excel(db, report_type: str, customer: str = '', produ
             return output.getvalue()
 
     # 在线程池中执行同步的 Flask 操作
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     content = await loop.run_in_executor(None, _sync_export)
     return content
 
@@ -151,10 +153,10 @@ async def get_stockin_logs(db, customer: str = '', product: str = '',
 
     if customer:
         where_clauses.append("COALESCE(s.customer, '') LIKE :customer")
-        params['customer'] = f'%{customer}%'
+        params['customer'] = f'%{escape_like(customer)}%'
     if product:
         where_clauses.append("(COALESCE(p.name, '') LIKE :product OR COALESCE(p.barcode, '') LIKE :product)")
-        params['product'] = f'%{product}%'
+        params['product'] = f'%{escape_like(product)}%'
     if start_date:
         try:
             params['start_date'] = datetime.strptime(start_date, '%Y-%m-%d')
@@ -207,56 +209,11 @@ async def get_stockin_logs(db, customer: str = '', product: str = '',
     total_qty = (await db.execute(text("SELECT SUM(quantity) FROM stock_in"))).scalar() or 0
 
     return {
+        'success': True,
         'logs': logs,
         'stats': {'total_count': total, 'total_quantity': total_qty},
         'pagination': {'page': page, 'per_page': per_page, 'total': total, 'pages': (total + per_page - 1) // per_page if per_page else 0},
     }
-
-
-async def export_report_to_excel(db, report_type: str, customer: str = '', product: str = '',
-                                  status: str = '', start_date: str = '', end_date: str = '') -> bytes:
-    """导出报表为 Excel（内存缓冲区）
-
-    复用 Flask 侧的 ReportExporter 工具类生成 Excel，
-    通过同步线程执行避免阻塞事件循环。
-    """
-    import asyncio
-    from app import create_app
-
-    def _sync_export():
-        app = create_app()
-        with app.app_context():
-            from app.routes.report import get_all_logs_data
-            from utils.report_exporter import ReportExporter
-
-            logs, stats = get_all_logs_data(
-                report_type,
-                customer=customer, product=product, status=status,
-                start_date=start_date, end_date=end_date
-            )
-
-            if len(logs) > 10000:
-                logs = logs[:10000]
-
-            exporter = ReportExporter()
-            export_methods = {
-                "order": exporter.export_order_logs,
-                "stockin": exporter.export_stockin_logs,
-                "stockout": exporter.export_stockout_logs,
-                "deduction": exporter.export_deduction_logs,
-            }
-
-            export_func = export_methods.get(report_type)
-            if not export_func:
-                raise ValueError(f"不支持的报表类型: {report_type}")
-
-            output = export_func(logs, stats)
-            return output.getvalue()
-
-    # 在线程池中执行同步的 Flask 操作
-    loop = asyncio.get_event_loop()
-    content = await loop.run_in_executor(None, _sync_export)
-    return content
 
 
 async def get_stockout_logs(db, customer: str = '', product: str = '',
@@ -272,10 +229,10 @@ async def get_stockout_logs(db, customer: str = '', product: str = '',
 
     if customer:
         where_clauses.append("COALESCE(so.customer, '') LIKE :customer")
-        params['customer'] = f'%{customer}%'
+        params['customer'] = f'%{escape_like(customer)}%'
     if product:
         where_clauses.append("(COALESCE(p.name, '') LIKE :product OR COALESCE(p.barcode, '') LIKE :product)")
-        params['product'] = f'%{product}%'
+        params['product'] = f'%{escape_like(product)}%'
     if start_date:
         try:
             params['start_date'] = datetime.strptime(start_date, '%Y-%m-%d')
@@ -330,56 +287,11 @@ async def get_stockout_logs(db, customer: str = '', product: str = '',
     ))).scalar() or 0
 
     return {
+        'success': True,
         'logs': logs,
         'stats': {'total_count': total, 'total_quantity': total_qty},
         'pagination': {'page': page, 'per_page': per_page, 'total': total, 'pages': (total + per_page - 1) // per_page if per_page else 0},
     }
-
-
-async def export_report_to_excel(db, report_type: str, customer: str = '', product: str = '',
-                                  status: str = '', start_date: str = '', end_date: str = '') -> bytes:
-    """导出报表为 Excel（内存缓冲区）
-
-    复用 Flask 侧的 ReportExporter 工具类生成 Excel，
-    通过同步线程执行避免阻塞事件循环。
-    """
-    import asyncio
-    from app import create_app
-
-    def _sync_export():
-        app = create_app()
-        with app.app_context():
-            from app.routes.report import get_all_logs_data
-            from utils.report_exporter import ReportExporter
-
-            logs, stats = get_all_logs_data(
-                report_type,
-                customer=customer, product=product, status=status,
-                start_date=start_date, end_date=end_date
-            )
-
-            if len(logs) > 10000:
-                logs = logs[:10000]
-
-            exporter = ReportExporter()
-            export_methods = {
-                "order": exporter.export_order_logs,
-                "stockin": exporter.export_stockin_logs,
-                "stockout": exporter.export_stockout_logs,
-                "deduction": exporter.export_deduction_logs,
-            }
-
-            export_func = export_methods.get(report_type)
-            if not export_func:
-                raise ValueError(f"不支持的报表类型: {report_type}")
-
-            output = export_func(logs, stats)
-            return output.getvalue()
-
-    # 在线程池中执行同步的 Flask 操作
-    loop = asyncio.get_event_loop()
-    content = await loop.run_in_executor(None, _sync_export)
-    return content
 
 
 async def get_deduction_logs(db, customer: str = '', product: str = '',
@@ -395,10 +307,10 @@ async def get_deduction_logs(db, customer: str = '', product: str = '',
 
     if customer:
         where_clauses.append("COALESCE(so.customer, '') LIKE :customer")
-        params['customer'] = f'%{customer}%'
+        params['customer'] = f'%{escape_like(customer)}%'
     if product:
         where_clauses.append("(COALESCE(p.name, '') LIKE :product OR COALESCE(p.barcode, '') LIKE :product)")
-        params['product'] = f'%{product}%'
+        params['product'] = f'%{escape_like(product)}%'
     if start_date:
         try:
             params['start_date'] = datetime.strptime(start_date, '%Y-%m-%d')
@@ -454,53 +366,8 @@ async def get_deduction_logs(db, customer: str = '', product: str = '',
     ))).scalar() or 0
 
     return {
+        'success': True,
         'logs': logs,
         'stats': {'total_count': total, 'total_quantity': total_qty},
         'pagination': {'page': page, 'per_page': per_page, 'total': total, 'pages': (total + per_page - 1) // per_page if per_page else 0},
     }
-
-
-async def export_report_to_excel(db, report_type: str, customer: str = '', product: str = '',
-                                  status: str = '', start_date: str = '', end_date: str = '') -> bytes:
-    """导出报表为 Excel（内存缓冲区）
-
-    复用 Flask 侧的 ReportExporter 工具类生成 Excel，
-    通过同步线程执行避免阻塞事件循环。
-    """
-    import asyncio
-    from app import create_app
-
-    def _sync_export():
-        app = create_app()
-        with app.app_context():
-            from app.routes.report import get_all_logs_data
-            from utils.report_exporter import ReportExporter
-
-            logs, stats = get_all_logs_data(
-                report_type,
-                customer=customer, product=product, status=status,
-                start_date=start_date, end_date=end_date
-            )
-
-            if len(logs) > 10000:
-                logs = logs[:10000]
-
-            exporter = ReportExporter()
-            export_methods = {
-                "order": exporter.export_order_logs,
-                "stockin": exporter.export_stockin_logs,
-                "stockout": exporter.export_stockout_logs,
-                "deduction": exporter.export_deduction_logs,
-            }
-
-            export_func = export_methods.get(report_type)
-            if not export_func:
-                raise ValueError(f"不支持的报表类型: {report_type}")
-
-            output = export_func(logs, stats)
-            return output.getvalue()
-
-    # 在线程池中执行同步的 Flask 操作
-    loop = asyncio.get_event_loop()
-    content = await loop.run_in_executor(None, _sync_export)
-    return content

@@ -25,16 +25,32 @@ logger = logging.getLogger(__name__)
 
 # ============ 进度追踪 ============
 _progress_store: Dict[str, dict] = {}
+_PROGRESS_MAX_AGE = 3600  # 进度记录最大保留时间（秒）
+
+
+def _cleanup_progress_store():
+    """清理过期的进度记录"""
+    import time
+    now = time.time()
+    expired_keys = [
+        k for k, v in _progress_store.items()
+        if now - v.get('_created_at', 0) > _PROGRESS_MAX_AGE
+    ]
+    for k in expired_keys:
+        del _progress_store[k]
 
 
 def create_progress() -> str:
     """创建新的进度追踪 ID，返回 task_id"""
-    task_id = str(uuid.uuid4())[:8]
+    import time
+    _cleanup_progress_store()
+    task_id = str(uuid.uuid4())
     _progress_store[task_id] = {
         'status': 'pending',       # pending / processing / done / error
         'percent': 0,
         'message': '等待处理...',
         'filename': '',
+        '_created_at': time.time(),
     }
     return task_id
 
@@ -58,6 +74,7 @@ def _update_progress(task_id: str, **kwargs):
 # OCR 提取器单例（延迟初始化）
 _pdf_extracter = None
 _img_extracter = None
+_table_extracter = None  # RapidTable 表格结构识别器
 
 # 支持的图片扩展名
 IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp'}
@@ -353,6 +370,21 @@ def _get_img_extracter():
     return _img_extracter
 
 
+def _get_table_extracter():
+    """延迟初始化 RapidTable 表格结构识别器"""
+    global _table_extracter
+    if _table_extracter is None:
+        try:
+            from rapid_table import RapidTable, RapidTableInput, ModelType
+            input_args = RapidTableInput(model_type=ModelType.SLANETPLUS)
+            _table_extracter = RapidTable(input_args)
+            logger.info("RapidTable (SLANet-plus) 表格识别器初始化成功")
+        except ImportError:
+            raise RuntimeError(
+                "rapid_table 未安装，请执行: pip install rapid-table"
+            )
+    return _table_extracter
+
 def extract_text_from_pdf(pdf_content: bytes) -> List[Dict]:
     """
     从 PDF 文件提取文本内容
@@ -457,6 +489,202 @@ def extract_text(file_content: bytes, filename: str = "") -> List[Dict]:
         except Exception:
             return extract_text_from_image(file_content)
 
+
+
+# ============ RapidTable 表格结构识别 ============
+
+def extract_table_structure(file_content: bytes, filename: str = "") -> List[Dict]:
+    """
+    使用 RapidTable 提取文档中的表格结构
+
+    与 extract_text 不同，本函数直接输出 HTML 表格结构，
+    保留了行列对应关系，无需后置正则猜测。
+    """
+    import numpy as np
+    import cv2
+
+    ext = os.path.splitext(filename or "")[1].lower()
+    is_pdf = ext == '.pdf'
+
+    page_images = []
+    if is_pdf:
+        page_images = _pdf_to_images(file_content)
+    else:
+        img_array = np.frombuffer(file_content, dtype=np.uint8)
+        img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+        if img is not None:
+            page_images = [img]
+
+    if not page_images:
+        return []
+
+    table_engine = _get_table_extracter()
+    ocr_engine = _get_img_extracter()
+
+    results = []
+    for page_idx, img in enumerate(page_images):
+        try:
+            ocr_res = ocr_engine(img)
+            ocr_results = [ocr_res.boxes, ocr_res.txts, ocr_res.scores]
+
+            table_res = table_engine(img, ocr_results)
+            html_table = table_res.pred_html or ""
+
+            text = "\n".join(ocr_res.txts) if ocr_res.txts else ""
+
+            results.append({
+                "page": page_idx,
+                "html": html_table,
+                "text": text,
+            })
+        except Exception as e:
+            logger.warning(f"RapidTable 第{page_idx}页识别失败: {e}")
+            continue
+
+    return results
+
+
+def _pdf_to_images(pdf_content: bytes) -> List:
+    """将 PDF 每一页转为 numpy 图片数组"""
+    import fitz
+    import numpy as np
+    import cv2
+
+    doc = fitz.open(stream=pdf_content, filetype="pdf")
+    images = []
+    try:
+        for page in doc:
+            pix = page.get_pixmap(dpi=200)
+            img_data = pix.tobytes("png")
+            img_array = np.frombuffer(img_data, dtype=np.uint8)
+            img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+            if img is not None:
+                images.append(img)
+    finally:
+        doc.close()
+    return images
+
+
+# ============ HTML 表格解析（RapidTable 输出） ============
+
+def parse_html_shipping_tables(table_pages: List[Dict]) -> List[Dict]:
+    """
+    解析 RapidTable 输出的 HTML 表格，提取出货项
+
+    与 parse_shipping_document 不同，本函数直接解析 HTML 表格结构，
+    无需猜测行列关系，准确率远高于正则方案。
+    """
+    all_items = []
+
+    for page in table_pages:
+        html = page.get("html", "")
+        if not html or "<td" not in html:
+            continue
+
+        rows = _html_table_to_rows(html)
+        if len(rows) < 2:
+            continue
+
+        col_map = _detect_column_mapping(rows[0])
+        if 'product_name' not in col_map and 'quantity' not in col_map:
+            continue
+
+        customer = _extract_customer_from_header_text(page.get("text", ""))
+
+        for row in rows[1:]:
+            item = _extract_item_from_row(row, col_map, customer)
+            if item:
+                all_items.append(item)
+
+    return all_items
+
+
+def _html_table_to_rows(html: str) -> List[List[str]]:
+    """将 HTML 表格解析为二维列表"""
+    rows = []
+    tr_pat = re.compile(r'<tr[^>]*>(.*?)</tr>', re.DOTALL | re.IGNORECASE)
+    td_pat = re.compile(r'<t[dh][^>]*>(.*?)</t[dh]>', re.DOTALL | re.IGNORECASE)
+
+    for tr_match in tr_pat.finditer(html):
+        cells = []
+        for td_match in td_pat.finditer(tr_match.group(1)):
+            cell_text = td_match.group(1).strip()
+            cell_text = re.sub(r'<[^>]+>', '', cell_text)
+            cell_text = cell_text.replace('&nbsp;', ' ').replace('&amp;', '&')
+            cell_text = cell_text.strip()
+            cells.append(cell_text)
+        if cells:
+            rows.append(cells)
+
+    return rows
+
+
+def _detect_column_mapping(header_row: List[str]) -> Dict[str, int]:
+    """根据表头关键词检测列名到列索引的映射"""
+    col_map = {}
+    header_keywords = {
+        'product_name': ['产品名称', '产品', '品名', '商品', '物料名称', '物料', '货品'],
+        'quantity': ['出货数量', '数量', '数', 'qty', 'QTY', '出库数量'],
+        'customer': ['客户名称', '客户', '收货单位', '买方', '收货'],
+        'note': ['备注', '说明', '摘要', 'Remark', '备注说明'],
+    }
+
+    for col_idx, cell in enumerate(header_row):
+        for col_name, keywords in header_keywords.items():
+            if col_name in col_map:
+                continue
+            for kw in keywords:
+                if kw in cell:
+                    col_map[col_name] = col_idx
+                    break
+
+    return col_map
+
+
+def _extract_item_from_row(
+    row: List[str], col_map: Dict[str, int], default_customer: str = ""
+) -> Optional[Dict]:
+    """从一行数据中提取出货项"""
+    def _get_col(name: str) -> str:
+        idx = col_map.get(name)
+        if idx is not None and idx < len(row):
+            return row[idx].strip()
+        return ""
+
+    product_name = _get_col('product_name')
+    quantity_str = _get_col('quantity')
+
+    if not product_name or not quantity_str:
+        return None
+
+    # 产品名不应是纯数字
+    if re.match(r'^\d+\.?\d*$', product_name):
+        return None
+
+    quantity = _parse_quantity(quantity_str)
+    if quantity <= 0:
+        return None
+
+    customer = _get_col('customer') or default_customer
+    note = _get_col('note')
+
+    return {
+        'customer': customer,
+        'product_name': product_name,
+        'quantity': quantity,
+        'note': note,
+    }
+
+
+def _extract_customer_from_header_text(text: str) -> str:
+    """从文档文本的前部提取客户名"""
+    match = re.search(r'客\s*户[：:]\s*([^\n,，\s]+)', text[:500])
+    if match:
+        return match.group(1).strip()
+    match2 = re.search(r'([\u4e00-\u9fa5]{2,}(公司|集团|科技|有限))', text[:500])
+    if match2:
+        return match2.group(1).strip()
+    return ""
 
 def parse_shipping_document(pages: List[Dict]) -> List[Dict]:
     """
@@ -1031,7 +1259,7 @@ async def import_staging_stockouts_from_file(
         _prog(status='processing', message=f'正在识别 {filename}...', filename=filename, percent=5)
         await asyncio.sleep(0)
 
-        # 1. OCR 提取文本（在线程池中执行，避免阻塞事件循环）
+        # 1. OCR + 表格结构识别（优先使用 RapidTable）
         ext = os.path.splitext(filename or "")[1].lower()
         is_pdf = ext == ".pdf"
         file_type = "PDF" if is_pdf else "图片"
@@ -1042,63 +1270,77 @@ async def import_staging_stockouts_from_file(
             _prog(message=f'正在读取图片 {filename}...', percent=8)
         await asyncio.sleep(0)
 
-        # 启动 OCR 提取（后台线程）
-        loop = asyncio.get_event_loop()
-        ocr_future = loop.run_in_executor(None, extract_text, file_content, filename)
+        loop = asyncio.get_running_loop()
+        parsed_items = []
+        table_pages = []
+        text_pages = []
 
-        # OCR 期间模拟渐进进度（8% → 70%），每 0.4 秒推进一步
-        # OCR 是最耗时阶段（2-10秒），分配最大进度区间
-        _ocr_simulated_pct = 8
-        _ocr_simulated_msgs = [
-            (12, f'正在初始化 OCR 引擎...'),
-            (18, f'正在预处理图像...'),
-            (25, f'正在识别文字...'),
-            (32, f'正在提取文本内容...'),
-            (40, f'正在进行文字识别...'),
-            (48, f'正在分析版面布局...'),
-            (55, f'正在整理识别结果...'),
-            (62, f'正在校验文本质量...'),
-            (68, f'即将完成文本提取...'),
-        ]
-
-        async def _simulate_ocr_progress():
-            nonlocal _ocr_simulated_pct
-            for pct, msg in _ocr_simulated_msgs:
-                await asyncio.sleep(0.4)
-                _ocr_simulated_pct = pct
-                _prog(message=msg, percent=pct)
-
-        sim_task = asyncio.create_task(_simulate_ocr_progress())
-
+        # 优先尝试 RapidTable 表格结构识别
         try:
-            pages = await ocr_future
-        finally:
-            sim_task.cancel()
+            _prog(message=f'正在识别表格结构...', percent=12)
+            table_pages = await loop.run_in_executor(
+                None, extract_table_structure, file_content, filename
+            )
+            if table_pages:
+                parsed_items = parse_html_shipping_tables(table_pages)
+                logger.info(
+                    f"RapidTable 表格识别: {filename}, "
+                    f"识别到 {len(table_pages)} 页表格, "
+                    f"解析出 {len(parsed_items)} 个出货项"
+                )
+        except Exception as e:
+            logger.warning(f"RapidTable 表格识别失败，将回退到文本模式: {e}")
+
+        # 如果 RapidTable 未识别到结果，回退到原有 OCR 文本 + 4策略解析
+        if not parsed_items:
+            _prog(message=f'正在使用文本识别模式...', percent=30)
+            ocr_future = loop.run_in_executor(None, extract_text, file_content, filename)
+
+            _ocr_simulated_pct = 30
+            _ocr_simulated_msgs = [
+                (35, f'正在识别文字...'),
+                (42, f'正在提取文本内容...'),
+                (50, f'正在进行文字识别...'),
+                (58, f'正在整理识别结果...'),
+                (65, f'即将完成文本提取...'),
+            ]
+
+            async def _simulate_ocr_progress():
+                nonlocal _ocr_simulated_pct
+                for pct, msg in _ocr_simulated_msgs:
+                    await asyncio.sleep(0.4)
+                    _ocr_simulated_pct = pct
+                    _prog(message=msg, percent=pct)
+
+            sim_task = asyncio.create_task(_simulate_ocr_progress())
             try:
-                await sim_task
-            except asyncio.CancelledError:
-                pass
+                text_pages = await ocr_future
+            finally:
+                sim_task.cancel()
+                try:
+                    await sim_task
+                except asyncio.CancelledError:
+                    pass
 
-        if not pages:
-            _prog(status='error', message='文件无法提取文本内容', percent=0)
-            return 0, '文件无法提取文本内容，可能是空白文件或图片质量过低', []
+            if not text_pages:
+                _prog(status='error', message='文件无法提取文本内容', percent=0)
+                return 0, '文件无法提取文本内容，可能是空白文件或图片质量过低', []
 
-        # OCR 完成，跳到 70%（确保不低于模拟进度）
-        final_ocr_pct = max(70, _ocr_simulated_pct)
-        _prog(message=f'{file_type}文本提取完成，共 {len(pages)} 页', percent=final_ocr_pct)
-        await asyncio.sleep(0.05)
-        logger.info(
-            f"{file_type} OCR 提取完成: {filename}, 共 {len(pages)} 页, "
-            f"文本长度: {sum(len(p['text']) for p in pages)}"
-        )
+            final_ocr_pct = max(70, _ocr_simulated_pct)
+            _prog(message=f'{file_type}文本提取完成，共 {len(text_pages)} 页', percent=final_ocr_pct)
+            await asyncio.sleep(0.05)
+            logger.info(
+                f"{file_type} OCR 提取完成: {filename}, 共 {len(text_pages)} 页, "
+                f"文本长度: {sum(len(p['text']) for p in text_pages)}"
+            )
 
-        # 2. 解析出货单字段
-        _prog(message=f'正在解析出货单字段...', percent=75)
-        await asyncio.sleep(0.05)
-        parsed_items = parse_shipping_document(pages)
+            _prog(message=f'正在解析出货单字段...', percent=75)
+            await asyncio.sleep(0.05)
+            parsed_items = parse_shipping_document(text_pages)
 
         if not parsed_items:
-            raw_text_preview = "\n".join(p["text"][:200] for p in pages[:3])
+            preview_pages = table_pages or text_pages
+            raw_text_preview = "\n".join(p.get("text", "")[:200] for p in preview_pages[:3])
             logger.warning(f"{file_type} 解析未识别到出货项: {filename}\n原始文本:\n{raw_text_preview}")
             _prog(status='error', message='无法识别出货信息', percent=0)
             return 0, '无法从文件中识别出货信息，请确认文件格式是否正确', []

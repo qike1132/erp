@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 # ==================== 入库管理 ====================
 
-async def get_stockins(db: AsyncSession, page: int = 1, per_page: int = 5000) -> dict:
+async def get_stockins(db: AsyncSession, page: int = 1, per_page: int = 50) -> dict:
     """获取入库列表（含关联数据，支持分页）"""
     total = (await db.execute(select(func.count(StockIn.id)))).scalar() or 0
     result = await db.execute(
@@ -168,10 +168,11 @@ async def delete_stockin(db: AsyncSession, stockin_id: int) -> None:
 
 # ==================== 出库管理 ====================
 
-async def get_stockouts(db: AsyncSession, page: int = 1, per_page: int = 5000) -> dict:
+async def get_stockouts(db: AsyncSession, page: int = 1, per_page: int = 50) -> dict:
     """获取出库列表（仅独立出库，非抵扣，支持分页）"""
-    base_query = select(StockOut).where(StockOut.stockin_id.is_(None))
-    total = (await db.execute(select(func.count(StockOut.id)).where(StockOut.stockin_id.is_(None)))).scalar() or 0
+    base_condition = StockOut.stockin_id.is_(None)
+    base_query = select(StockOut).where(base_condition)
+    total = (await db.execute(select(func.count(StockOut.id)).where(base_condition))).scalar() or 0
     result = await db.execute(
         base_query
         .options(joinedload(StockOut.product))
@@ -498,7 +499,7 @@ def _parse_stockin_date(date_str: str, old_time: datetime | None = None) -> date
 
 async def batch_create_stockins(db: AsyncSession, stockins_data: list) -> dict:
     """批量创建入库记录"""
-    from fastapi_app.services.batch_service import AsyncNumberGenerator
+    from fastapi_app.services.batch_service import generate_stockin_number
 
     results = []
     for item in stockins_data:
@@ -513,7 +514,7 @@ async def batch_create_stockins(db: AsyncSession, stockins_data: list) -> dict:
 
             product = await get_product_for_update(db, product_id)
 
-            stockin_no = await AsyncNumberGenerator.generate('SI', StockIn, 'stockin_date', 'stockin_no', db)
+            stockin_no = await generate_stockin_number(db)
             stockin = StockIn(
                 stockin_no=stockin_no, product_id=product_id, customer=customer,
                 quantity=int(quantity), stockin_date=datetime.now(), note=item.get('note', '')
@@ -538,7 +539,7 @@ async def batch_create_stockins(db: AsyncSession, stockins_data: list) -> dict:
 
 async def batch_create_stockouts(db: AsyncSession, stockouts_data: list) -> dict:
     """批量创建出库记录"""
-    from fastapi_app.services.batch_service import AsyncNumberGenerator
+    from fastapi_app.services.batch_service import generate_stockout_number
 
     results = []
     for item in stockouts_data:
@@ -593,7 +594,7 @@ async def batch_create_stockouts(db: AsyncSession, stockouts_data: list) -> dict
                 if remaining <= 0:
                     break
                 ship_qty = min(remaining, order.quantity)
-                stockout_no = await AsyncNumberGenerator.generate('SO', StockOut, 'stockout_date', 'stockout_no', db)
+                stockout_no = await generate_stockout_number(db)
                 stockout = StockOut(
                     stockout_no=stockout_no, product_id=product_id, quantity=ship_qty,
                     stockout_date=datetime.now(), customer=customer, order_id=order.id,

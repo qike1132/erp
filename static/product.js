@@ -623,16 +623,36 @@ async function deleteProduct(id) {
 
     try {
         const response = await fetch(`/api/v1/products/delete/${id}`, { method: 'DELETE' });
-        const result = await response.json();
+        const contentType = response.headers.get('content-type');
+        let result;
 
-        if (result.success) {
+        if (contentType && contentType.includes('application/json')) {
+            result = await response.json();
+        } else {
+            result = await response.text();
+        }
+
+        if (response.ok && result.success) {
             alert('删除成功！');
             window.location.reload();
         } else {
-            alert(result.error || '删除失败！');
+            let errorMessage = '删除失败！';
+            if (typeof result === 'object' && result !== null) {
+                if (result.detail) {
+                    errorMessage = result.detail;
+                } else if (result.error) {
+                    errorMessage = result.error;
+                } else if (result.message) {
+                    errorMessage = result.message;
+                }
+            } else if (typeof result === 'string' && result) {
+                errorMessage = result;
+            }
+            alert(errorMessage);
         }
     } catch (error) {
-        alert('删除失败：' + error.message);
+        console.error('删除产品失败:', error);
+        alert('删除失败：网络错误或服务器无响应，请稍后重试');
     }
 }
 
@@ -805,36 +825,88 @@ function updateBomItem(index, field, value) {
 }
 
 async function saveBom() {
+    // 前端校验：使用原始 bomData 格式
     const allItems = [
         ...bomData.fabric.map(item => ({...item, category: 'fabric'})),
         ...bomData.filling.map(item => ({...item, category: 'filling'})),
         ...bomData.accessory.map(item => ({...item, category: 'accessory'}))
     ];
-    
-    const invalidItems = allItems.filter(item => 
+
+    const invalidItems = allItems.filter(item =>
         !item.name || !item.specification || !item.unit || !item.supplier_name
     );
-    
+
     if (invalidItems.length > 0) {
         alert('请填写所有必填项（物料名称、规格型号、计量单位、默认供应商）');
         return;
     }
-    
+
+    // 将包装类物料从辅料类中分离出来（前端加载时将 packaging 合并到 accessory）
+    const realAccessories = [];
+    const packagings = [];
+    bomData.accessory.forEach(item => {
+        if (item.category === 'packaging' || item.material_category === 'packaging') {
+            packagings.push(item);
+        } else {
+            realAccessories.push(item);
+        }
+    });
+
+    // 构造后端期望的请求体格式（与 BomSaveRequest schema 对齐）
+    const fillingItem = bomData.filling.length > 0 ? bomData.filling[0] : null;
+    const requestBody = {
+        filling: fillingItem ? {
+            cotton_usage: fillingItem.cotton_usage || fillingItem.usage || 0,
+            supplier_id: fillingItem.supplier_id || null,
+            supplier_name: fillingItem.supplier_name || '',
+            specification: fillingItem.specification || '',
+            remark: fillingItem.remark || ''
+        } : null,
+        fabrics: bomData.fabric.map(item => ({
+            id: item.id || null,
+            fabric_name: item.fabric_name || item.name || '',
+            quantity: item.quantity || item.usage || 0,
+            supplier_id: item.supplier_id || null,
+            supplier_name: item.supplier_name || '',
+            specification: item.specification || '',
+            remark: item.remark || ''
+        })),
+        accessories: realAccessories.map(item => ({
+            id: item.id || null,
+            accessory_name: item.accessory_name || item.name || '',
+            quantity: item.quantity || item.usage || 1,
+            supplier_id: item.supplier_id || null,
+            supplier_name: item.supplier_name || '',
+            specification: item.specification || '',
+            material_category: item.material_category || 'accessory',
+            remark: item.remark || ''
+        })),
+        packagings: packagings.map(item => ({
+            id: item.id || null,
+            packaging_name: item.packaging_name || item.name || '',
+            quantity: item.quantity || item.usage || 1,
+            supplier_id: item.supplier_id || null,
+            supplier_name: item.supplier_name || '',
+            specification: item.specification || '',
+            remark: item.remark || ''
+        }))
+    };
+
     try {
         const response = await fetch(`/api/v1/purchase-center/api/product/${currentProductId}/bom`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ bom_data: bomData })
+            body: JSON.stringify(requestBody)
         });
-        
+
         const result = await response.json();
-        
+
         if (result.success) {
             bootstrap.Modal.getInstance(document.getElementById('bomModal')).hide();
         } else {
-            alert('保存失败：' + result.error);
+            alert('保存失败：' + (result.detail || result.error || '未知错误'));
         }
     } catch (error) {
         console.error('保存BOM失败:', error);
@@ -898,7 +970,7 @@ function renderCopyBomProductList(products) {
         const statusText = product.has_bom ? '有BOM' : '无BOM';
         
         html += `
-            <div class="copy-bom-product-item" data-id="${product.id}" data-has-bom="${product.has_bom}" onclick="selectCopyBomProduct(${product.id}, ${product.has_bom}, '${escapeHtml(product.name)}', '${escapeHtml(product.barcode || '')}')">
+            <div class="copy-bom-product-item" data-id="${product.id}" data-has-bom="${product.has_bom}" onclick="selectCopyBomProduct(${product.id}, ${product.has_bom}, this.dataset.name, this.dataset.barcode)" data-name="${escapeHtml(product.name)}" data-barcode="${escapeHtml(product.barcode || '')}">
                 <div>
                     <div class="product-name">${escapeHtml(product.name)}</div>
                     <div class="product-barcode">${product.barcode ? '条码: ' + escapeHtml(product.barcode) : ''}</div>

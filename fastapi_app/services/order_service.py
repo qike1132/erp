@@ -22,28 +22,31 @@ from fastapi_app.services.stock_concurrency import get_product_for_update
 logger = logging.getLogger(__name__)
 
 
-async def get_orders(db: AsyncSession, page: int = 1, per_page: int = 5000,
+async def get_orders(db: AsyncSession, page: int = 1, per_page: int = 50,
                      customer: Optional[str] = None, product_id: Optional[int] = None,
-                     status: Optional[str] = None) -> dict:
+                     status: Optional[str] = None, order_type: Optional[str] = None) -> dict:
     """获取订单列表（含关联数据，支持分页和筛选）"""
     # 基础查询
     query = select(Order).options(
         joinedload(Order.product),
         selectinload(Order.order_stockouts),
         joinedload(Order.locked_by)
-    )
-    count_query = select(func.count(Order.id))
+    ).where(Order.is_deleted == False)
+    count_query = select(func.count(Order.id)).where(Order.is_deleted == False)
 
-    # 筛选条件
+    # 筛选条件（共用，避免 DRY 违反）
+    conditions = []
     if customer:
-        query = query.where(Order.customer.contains(customer))
-        count_query = count_query.where(Order.customer.contains(customer))
+        conditions.append(Order.customer.contains(customer))
     if product_id:
-        query = query.where(Order.product_id == product_id)
-        count_query = count_query.where(Order.product_id == product_id)
+        conditions.append(Order.product_id == product_id)
     if status:
-        query = query.where(Order.status == status)
-        count_query = count_query.where(Order.status == status)
+        conditions.append(Order.status == status)
+    if order_type:
+        conditions.append(Order.order_type == order_type)
+    for c in conditions:
+        query = query.where(c)
+        count_query = count_query.where(c)
 
     # 总数
     total = (await db.execute(count_query)).scalar() or 0
@@ -74,6 +77,8 @@ async def get_orders(db: AsyncSession, page: int = 1, per_page: int = 5000,
             'deduct_quantity': deduct_quantity,
             'status': o.status,
             'note': o.note or '',
+            'order_type': o.order_type,
+            'country': o.country or '',
             'is_locked': o.is_locked,
             'locked_by_name': o.locked_by.username if o.locked_by else None,
         })
@@ -81,7 +86,8 @@ async def get_orders(db: AsyncSession, page: int = 1, per_page: int = 5000,
 
 
 async def create_order(db: AsyncSession, product_id: int, quantity: int,
-                       customer: str, note: str, current_user: User) -> dict:
+                       customer: str, note: str, current_user: User,
+                       order_type: str = 'regular', country: str = None) -> dict:
     """
     创建订单
 
@@ -90,7 +96,11 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
     - 数量 > 0 且 <= 100000
     - 客户名称不能为空
     - 创建后增加产品库存
+    - 定制订单必须填写国家名称
     """
+    if order_type == 'custom' and not country:
+        raise ValueError('定制订单必须填写国家名称')
+
     product = await get_product_for_update(db, product_id)
 
     order_no = await _generate_order_number(db)
@@ -102,6 +112,8 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
         product_id=product_id,
         quantity=quantity,
         note=note,
+        order_type=order_type,
+        country=country if order_type == 'custom' else None,
         status='待备货'
     )
     db.add(order)
@@ -125,7 +137,8 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
 
 
 async def update_order(db: AsyncSession, order_id: int, quantity: int,
-                       customer: str, note: str, current_user: User) -> dict:
+                       customer: str, note: str, current_user: User,
+                       order_type: str = None, country: str = None) -> dict:
     """
     更新订单
 
@@ -157,6 +170,12 @@ async def update_order(db: AsyncSession, order_id: int, quantity: int,
         order.customer = customer
         order.quantity = quantity
         order.note = note
+        if order_type is not None:
+            order.order_type = order_type
+        if country is not None:
+            order.country = country if order_type != 'regular' else None
+        elif order.order_type == 'custom' and not order.country and not country:
+            pass  # 保持原状
 
         if quantity != old_quantity:
             product = await get_product_for_update(db, order.product_id)
@@ -399,7 +418,7 @@ def _create_approval_log_obj(approval_request, action, actor, details=None):
 
 async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
     """批量创建订单"""
-    from fastapi_app.services.batch_service import AsyncNumberGenerator
+    from fastapi_app.services.batch_service import generate_order_number
 
     results = []
     for order_data in orders_data:
@@ -417,9 +436,7 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
 
             product = await get_product_for_update(db, product_id)
 
-            order_no = await AsyncNumberGenerator.generate(
-                'PO', Order, 'order_date', 'order_no', db
-            )
+            order_no = await generate_order_number(db)
 
             order = Order(
                 order_no=order_no,
@@ -429,6 +446,8 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                 order_date=datetime.now(),
                 status='待备货',
                 note=order_data.get('note', ''),
+                order_type=order_data.get('order_type', 'regular'),
+                country=order_data.get('country') if order_data.get('order_type') == 'custom' else None,
             )
             db.add(order)
             await db.flush()

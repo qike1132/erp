@@ -25,7 +25,6 @@ from .purchase_order import PurchaseOrder, PurchaseOrderItem
 from .purchase_center import ModificationLog, SavedQuery
 from .order_sync import OrderSyncRecord, OrderStatusLog, SyncRetryQueue, OrderSyncConfig, ORDER_STATUS_FLOW, validate_status_transition, get_action_for_transition
 from .material_registration import MaterialRegistration, MaterialRegistrationItem
-from .sku_batch import SkuBatch
 from .production_plan import ProductionPlan, ProductionPlanLog, StagingPurchasePlan
 from .purchase_plan import PurchasePlan, PurchasePlanDetail, ShipmentRecord
 from .craft_work import CraftWork
@@ -69,7 +68,6 @@ __all__ = [
     'get_action_for_transition',
     'MaterialRegistration',
     'MaterialRegistrationItem',
-    'SkuBatch',
     'ProductionPlan',
     'ProductionPlanLog',
     'StagingPurchasePlan',

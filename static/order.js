@@ -9,9 +9,14 @@ let productDialogTimeout = null;
 let editingStagedIndex = -1;
 let pendingStockinFetch = null;
 
+function apiFetch(url, options = {}) {
+    options.credentials = 'include';
+    return fetch(url, options);
+}
+
 async function loadStagedOrders() {
     try {
-        const response = await fetch('/api/v1/staging-orders');
+        const response = await apiFetch('/api/v1/staging-orders');
         const result = await response.json();
         
         if (result.success && result.data) {
@@ -23,6 +28,8 @@ async function loadStagedOrders() {
                 quantity: order.quantity,
                 orderDate: order.order_date,
                 note: order.note || '',
+                order_type: order.order_type || 'regular',
+                country: order.country || '',
                 deduct_stock: order.deduct_stock,
                 deduct_quantity: order.deduct_quantity || 0,
                 is_validated: order.is_validated,
@@ -42,7 +49,7 @@ async function searchProducts(query) {
         return;
     }
     try {
-        const response = await fetch(`/api/v1/aux/product-search?q=${encodeURIComponent(query)}`);
+        const response = await apiFetch(`/api/v1/aux/product-search?q=${encodeURIComponent(query)}`);
         if (!response.ok) {
             throw new Error(`搜索请求失败 (${response.status})`);
         }
@@ -82,6 +89,19 @@ function selectProduct(name, id, barcode, stock) {
 }
 
 document.getElementById('customer').addEventListener('change', updateAddNewOrderButtonState);
+document.getElementById('order_type').addEventListener('change', function() {
+    const countryGroup = document.getElementById('country_field_group');
+    const countryInput = document.getElementById('country');
+    if (this.value === 'custom') {
+        countryGroup.style.display = '';
+        countryInput.setAttribute('required', '');
+    } else {
+        countryGroup.style.display = 'none';
+        countryInput.removeAttribute('required');
+        countryInput.value = '';
+    }
+    updateAddNewOrderButtonState();
+});
 document.getElementById('quantity').addEventListener('input', function() {
     calculateDeductibleQuantity();
     updateAddNewOrderButtonState();
@@ -143,7 +163,7 @@ async function calculateDeductibleQuantity() {
     deductibleInfoElement.innerHTML = '<i class="fas fa-edit me-1" style="font-size: 11px;"></i>抵扣: <span id="deductible_value">计算中...</span>';
     
     try {
-        const response = await fetch(`/api/v1/aux/available-stockins?product_id=${productId}&order_quantity=${orderQuantity}`);
+        const response = await apiFetch(`/api/v1/aux/available-stockins?product_id=${productId}&order_quantity=${orderQuantity}`);
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -173,8 +193,15 @@ document.getElementById('addNewOrderBtn').addEventListener('click', function() {
     const orderDate = document.getElementById('order_date').value;
     const note = document.getElementById('note').value;
     const deductStock = document.getElementById('deduct_stock').value;
+    const orderType = document.getElementById('order_type').value;
+    const country = orderType === 'custom' ? (document.getElementById('country').value.trim() || '') : '';
 
-    console.log('Collected values:', { customer, productId, productName, quantity, orderDate });
+    if (orderType === 'custom' && !country) {
+        alert('定制订单必须填写国家名称！');
+        return;
+    }
+
+    console.log('Collected values:', { customer, productId, productName, quantity, orderDate, orderType, country });
 
     let deductibleQuantity = 0;
     const deductibleValueElement = document.getElementById('deductible_value');
@@ -193,6 +220,8 @@ document.getElementById('addNewOrderBtn').addEventListener('click', function() {
         quantity,
         orderDate,
         note,
+        order_type: orderType,
+        country,
         deduct_stock: deductStock === 'on',
         deduct_quantity: deductibleQuantity,
         id: Date.now()
@@ -245,6 +274,8 @@ function updateStagedOrdersList() {
                             </span>
                             <span class="badge bg-light text-dark">数量: ${order.quantity}</span>
                             ${order.deduct_quantity > 0 ? `<span class="badge bg-light text-dark">抵扣: ${order.deduct_quantity}</span>` : ''}
+                            ${order.order_type === 'custom' ? `<span class="badge bg-info text-dark">定制</span>` : `<span class="badge bg-light text-dark">常规</span>`}
+                            ${order.order_type === 'custom' && order.country ? `<span class="badge bg-warning text-dark">${escapeHtml(order.country)}</span>` : ''}
                             ${order.note ? `<span class="badge bg-light text-dark">备注: ${escapeHtml(order.note)}</span>` : ''}
                         </div>
                         <div class="d-flex gap-1 ms-2">
@@ -272,7 +303,7 @@ let isEditModalOpen = false;
 
 async function fetchAvailableStockins(productId, customer) {
     try {
-        const response = await fetch(`/api/v1/aux/available-stockins?product_id=${productId}&customer=${encodeURIComponent(customer)}`);
+        const response = await apiFetch(`/api/v1/aux/available-stockins?product_id=${productId}&customer=${encodeURIComponent(customer)}`);
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -293,6 +324,17 @@ async function editStagedOrder(index) {
     currentEditOrder = order;
     
     const content = `
+        <div class="mb-3">
+            <label class="form-label">订单类型</label>
+            <select class="form-select" id="editOrderType" onchange="toggleEditCountryField()">
+                <option value="regular" ${order.order_type !== 'custom' ? 'selected' : ''}>常规订单</option>
+                <option value="custom" ${order.order_type === 'custom' ? 'selected' : ''}>定制订单</option>
+            </select>
+        </div>
+        <div class="mb-3" id="editCountryGroup" style="${order.order_type === 'custom' ? '' : 'display:none;'}">
+            <label class="form-label">国家名称 <span class="text-danger">*</span></label>
+            <input type="text" class="form-control" id="editCountry" value="${escapeHtml(order.country || '')}" maxlength="100" placeholder="输入或选择国家">
+        </div>
         <div class="mb-3">
             <label class="form-label">客户名称</label>
             <select class="form-select" id="editCustomer" onchange="updateEditAvailableStockins()">
@@ -332,6 +374,20 @@ async function editStagedOrder(index) {
     modal.show();
     
     await updateEditAvailableStockins();
+}
+
+function toggleEditCountryField() {
+    const orderType = document.getElementById('editOrderType').value;
+    const countryGroup = document.getElementById('editCountryGroup');
+    const countryInput = document.getElementById('editCountry');
+    if (orderType === 'custom') {
+        countryGroup.style.display = '';
+        countryInput.setAttribute('required', '');
+    } else {
+        countryGroup.style.display = 'none';
+        countryInput.removeAttribute('required');
+        countryInput.value = '';
+    }
 }
 
 async function updateEditAvailableStockins() {
@@ -446,6 +502,13 @@ document.getElementById('saveEditStagedOrderBtn').addEventListener('click', asyn
 
         const currentAvailableStock = await fetchAvailableStockins(productId, newCustomer);
 
+        const newOrderType = document.getElementById('editOrderType').value;
+        const newCountry = newOrderType === 'custom' ? (document.getElementById('editCountry').value.trim() || '') : '';
+        if (newOrderType === 'custom' && !newCountry) {
+            alert('定制订单必须填写国家名称！');
+            return;
+        }
+
         if (newDeductibleQuantity > newQuantity) {
             alert('抵扣备货数量不能超过订单数量！');
             return;
@@ -460,6 +523,8 @@ document.getElementById('saveEditStagedOrderBtn').addEventListener('click', asyn
         stagedOrders[editingStagedIndex].quantity = newQuantity;
         stagedOrders[editingStagedIndex].deduct_quantity = newDeductibleQuantity;
         stagedOrders[editingStagedIndex].note = document.getElementById('editNote').value;
+        stagedOrders[editingStagedIndex].order_type = newOrderType;
+        stagedOrders[editingStagedIndex].country = newCountry;
 
         if (stagedOrders[editingStagedIndex].deduct_quantity > 0) {
             stagedOrders[editingStagedIndex].deduct_stock = true;
@@ -491,6 +556,10 @@ function clearForm() {
     document.getElementById('product_id').value = '';
     document.getElementById('quantity').value = '1';
     document.getElementById('note').value = '';
+    document.getElementById('order_type').value = 'regular';
+    document.getElementById('country').value = '';
+    document.getElementById('country_field_group').style.display = 'none';
+    document.getElementById('country').removeAttribute('required');
     document.getElementById('deduct_stock').value = 'off';
     document.getElementById('deductible_quantity_display').innerHTML = '<i class="fas fa-edit me-1" style="font-size: 11px;"></i>抵扣: <span id="deductible_value">0</span>';
     
@@ -632,7 +701,7 @@ function bindDeductibleInputEvent() {
                 }
 
                 try {
-                    const response = await fetch(`/api/v1/aux/available-stockins?product_id=${productId}&customer=${encodeURIComponent(customer)}`, {
+                    const response = await apiFetch(`/api/v1/aux/available-stockins?product_id=${productId}&customer=${encodeURIComponent(customer)}`, {
                         signal: controller.signal
                     });
                     if (!response.ok) throw new Error('获取备货信息失败');
@@ -698,7 +767,7 @@ function bindDeductibleInputEvent() {
                 let finalValue = newValue;
                 if (productId && customer) {
                     try {
-                        const response = await fetch(`/api/v1/aux/available-stockins?product_id=${productId}&customer=${encodeURIComponent(customer)}`);
+                        const response = await apiFetch(`/api/v1/aux/available-stockins?product_id=${productId}&customer=${encodeURIComponent(customer)}`);
                         if (response.ok) {
                             const data = await response.json();
                             if (data && Array.isArray(data)) {
@@ -780,7 +849,7 @@ document.getElementById('submitAllOrdersBtn').addEventListener('click', async fu
             for (const key in uniqueKeys) {
                 const { productId, customer, orders } = uniqueKeys[key];
                 try {
-                    const response = await fetch(`/api/v1/aux/available-stockins?product_id=${productId}&customer=${encodeURIComponent(customer)}`);
+                    const response = await apiFetch(`/api/v1/aux/available-stockins?product_id=${productId}&customer=${encodeURIComponent(customer)}`);
                     if (!response.ok) throw new Error('API request failed');
 
                     const data = await response.json();
@@ -818,13 +887,15 @@ document.getElementById('submitAllOrdersBtn').addEventListener('click', async fu
             quantity: order.quantity,
             order_date: order.orderDate,
             note: order.note,
+            order_type: order.order_type || 'regular',
+            country: order.country || '',
             deduct_stock: order.deduct_stock,
             deduct_quantity: order.deduct_quantity
         }));
         
         console.log('Sending request to /api/batch-submit-orders');
         console.log('Orders for API:', ordersForApi);
-        const response = await fetch('/api/batch-submit-orders', {
+        const response = await apiFetch('/api/batch-submit-orders', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -877,7 +948,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     if (performance.navigation.type === 1) {
         try {
-            await fetch('/api/v1/staging-orders/clear', { method: 'DELETE' });
+            await apiFetch('/api/v1/staging-orders/clear', { method: 'DELETE' });
         } catch (e) {
             console.log('Clear staging on refresh failed:', e);
         }
@@ -942,7 +1013,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 document.getElementById('deduct_stock').value = 'on';
                 
                 try {
-                    const response = await fetch(`/api/v1/aux/available-stockins?product_id=${productId}&customer=${encodeURIComponent(customer)}`);
+                    const response = await apiFetch(`/api/v1/aux/available-stockins?product_id=${productId}&customer=${encodeURIComponent(customer)}`);
                     if (!response.ok) {
                         throw new Error(`HTTP error! status: ${response.status}`);
                     }
@@ -1015,7 +1086,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
 window.addEventListener('beforeunload', function() {
     if (stagedOrders.length > 0) {
-        fetch('/api/v1/staging-orders/clear', { method: 'DELETE', keepalive: true });
+        apiFetch('/api/v1/staging-orders/clear', { method: 'DELETE', keepalive: true });
     }
     stagedOrders = [];
 });
@@ -1083,12 +1154,14 @@ function renderGroupedOrderList() {
         // 对同一天内的数据按(客户+产品ID)进行汇总
         const summaryMap = {};
         orders.forEach(order => {
-            const key = `${order.customer}|||${order.product.id}`;
+            const key = `${order.customer}|||${order.product.id}|||${order.order_type || 'regular'}`;
             
             if (!summaryMap[key]) {
                 summaryMap[key] = {
                     customer: order.customer,
                     product: order.product,
+                    order_type: order.order_type || 'regular',
+                    country: order.country || '',
                     quantity: 0,
                     deduct_quantity: 0,
                     notes: [],
@@ -1140,6 +1213,7 @@ function renderGroupedOrderList() {
                                         <th style="width: 8%;">产品图片</th>
                                         <th style="width: 18%;">产品名称</th>
                                         <th style="width: 10%;">69 码</th>
+                                        <th style="width: 7%;">类型</th>
                                         <th style="width: 8%;">数量</th>
                                         <th style="width: 10%;">抵扣备货</th>
                                         <th style="width: 8%;">备注</th>
@@ -1165,6 +1239,11 @@ function renderGroupedOrderList() {
                                             </td>
                                             <td>${escapeHtml(item.product.name)}</td>
                                             <td>${escapeHtml(item.product.barcode || '-')}</td>
+                                            <td>
+                                                ${item.order_type === 'custom'
+                                                    ? `<span class="badge bg-info text-dark">定制</span><br><small>${escapeHtml(item.country || '')}</small>`
+                                                    : `<span class="badge bg-secondary">常规</span>`}
+                                            </td>
                                             <td><strong>${item.quantity}</strong></td>
                                             <td>${deductDisplay}</td>
                                             <td><small>${escapeHtml(notesDisplay)}</small></td>
@@ -1207,7 +1286,7 @@ async function deleteOrder(id) {
     if (!confirm('确定要删除该订单吗？')) return;
 
     try {
-        const response = await fetch(`/api/v1/orders/delete/${id}`, { method: 'DELETE' });
+        const response = await apiFetch(`/api/v1/orders/delete/${id}`, { method: 'DELETE' });
         const result = await response.json();
 
         if (result.success) {
@@ -1267,12 +1346,14 @@ function renderGroupedOrderListLocal() {
         // 对同一天内的数据按(客户+产品ID)进行汇总
         const summaryMap = {};
         orders.forEach(order => {
-            const key = `${order.customer}|||${order.product.id}`;
+            const key = `${order.customer}|||${order.product.id}|||${order.order_type || 'regular'}`;
             
             if (!summaryMap[key]) {
                 summaryMap[key] = {
                     customer: order.customer,
                     product: order.product,
+                    order_type: order.order_type || 'regular',
+                    country: order.country || '',
                     quantity: 0,
                     deduct_quantity: 0,
                     notes: [],
@@ -1326,6 +1407,7 @@ function renderGroupedOrderListLocal() {
                                     <th style="width: 8%;">产品图片</th>
                                     <th style="width: 18%;">产品名称</th>
                                     <th style="width: 10%;">69 码</th>
+                                    <th style="width: 7%;">类型</th>
                                     <th style="width: 8%;">数量</th>
                                     <th style="width: 10%;">抵扣备货</th>
                                     <th style="width: 8%;">备注</th>
@@ -1546,7 +1628,7 @@ function initBatchUpload() {
             formData.append('file', excelFile);
             
             try {
-                const response = await fetch('/api/v1/staging-orders/import', {
+                const response = await apiFetch('/api/v1/staging-orders/import', {
                     method: 'POST',
                     body: formData
                 });

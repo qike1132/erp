@@ -6,90 +6,34 @@ ERP 服务器管理器 PyInstaller 打包配置文件
 
 import os
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_all
 
-# 获取项目根目录
-project_root = Path(__file__).parent.absolute()
+# 获取项目根目录（spec 文件中 __file__ 不可用，使用 SPECPATH）
+project_root = Path(SPECPATH).absolute()
 
-# 收集数据文件
-datas = [
-    # 模板文件
-    (str(project_root / 'templates'), 'templates'),
-    # 静态文件
-    (str(project_root / 'static'), 'static'),
-    # FastAPI应用代码
-    (str(project_root / 'fastapi_app'), 'fastapi_app'),
-    # Flask应用代码
-    (str(project_root / 'app'), 'app'),
-]
+# 强制收集 pystray 及其子模块（hiddenimports 对 pystray 不够）
+pystray_datas, pystray_binaries, pystray_hiddenimports = collect_all('pystray')
+
+# 收集数据文件 — 管理器 EXE 仅需运行时资源，不含 ERP 应用代码
+datas = pystray_datas
 
 # 如果有 .env 文件，也包含进去
-if (project_root / '.env').exists():
-    datas.append((str(project_root / '.env'), '.'))
+# if (project_root / '.env').exists():
+#     datas.append((str(project_root / '.env'), '.'))
 
-# 收集隐藏导入
+# 收集隐藏导入 — 仅包含管理器实际运行所需的模块
 hiddenimports = [
-    # Flask 相关
-    'flask',
-    'flask_sqlalchemy',
-    'flask_wtf',
-    'flask_limiter',
-    'flask_migrate',
-    'flasgger',
-
-    # FastAPI 相关
-    'fastapi',
-    'uvicorn',
-    'starlette',
-    'slowapi',
-    'pydantic',
-    'pydantic_settings',
-
-    # 数据库
-    'pymysql',
-    'sqlalchemy',
-    'aiomysql',
-    'cryptography',
-
-    # Excel 处理
-    'pandas',
-    'openpyxl',
-    'xlsxwriter',
-    'xlrd',
-
-    # WSGI 服务器
-    'waitress',
-
     # GUI
     'tkinter',
 
-    # 进程管理
-    'psutil',
-
-    # 其他依赖
-    'dotenv',
-    'redis',
-    'arrow',
-    'dateutil',
-    'chardet',
-    'pypinyin',
-    'fuzzywuzzy',
-    'rapidfuzz',
-    'bleach',
-
-    # 应用模块
-    'app',
-    'app.models',
-    'app.routes',
-    'app.utils',
-    'fastapi_app',
-    'fastapi_app.main',
-    'fastapi_app.core',
-    'fastapi_app.api',
-
-    # SQLAlchemy 驱动
-    'sqlalchemy.dialects.mysql',
-    'sqlalchemy.dialects.sqlite',
-]
+    # 系统托盘
+    'pystray',
+    'pystray._win32',     # Windows 平台托盘后端
+    'PIL',
+    'PIL.Image',
+    'PIL.ImageDraw',
+    'PIL.ImageTk',        # 窗口图标
+] + pystray_hiddenimports
 
 # 排除不必要的模块
 excludes = [
@@ -100,6 +44,20 @@ excludes = [
     'jupyter',
     'pytest',
     'unittest',
+    'pandas',
+    'sqlalchemy',
+    'django',
+    'fastapi',
+    'uvicorn',
+    'waitress',
+    'celery',
+    'redis',
+    'openpyxl',
+    'xlrd',
+    'fuzzywuzzy',
+    'rapidfuzz',
+    'arrow',
+    'gunicorn',
 ]
 
 block_cipher = None
@@ -107,7 +65,7 @@ block_cipher = None
 a = Analysis(
     ['server_manager.py'],
     pathex=[str(project_root)],
-    binaries=[],
+    binaries=pystray_binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
@@ -129,14 +87,14 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='ERP服务器管理器',
+    name='ERP服务器管理器_v3.4',
     debug=False,
     bootloader_ignore_signals=False,
-    strip=False,
+    strip=True,
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,  # 关键: 设置为False,不显示控制台窗口
+    console=False,  # GUI 应用不显示控制台
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

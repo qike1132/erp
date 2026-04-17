@@ -168,6 +168,26 @@
 
                             <div class="row mb-3">
                                 <div class="col-md-6">
+                                    <label for="order_type" class="form-label">订单类型</label>
+                                    <select class="form-select" id="order_type" name="order_type">
+                                        <option value="regular" selected>常规订单</option>
+                                        <option value="custom">定制订单</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-6" id="country_field_group" style="display: none;">
+                                    <label for="country" class="form-label">国家名称 <span class="text-danger">*</span></label>
+                                    <input type="text" class="form-control" id="country" name="country"
+                                           list="country_list" placeholder="输入或选择国家" maxlength="100">
+                                    <datalist id="country_list">
+                                        {% for c in countries %}
+                                        <option value="{{ c }}">
+                                        {% endfor %}
+                                    </datalist>
+                                </div>
+                            </div>
+
+                            <div class="row mb-3">
+                                <div class="col-md-6">
                                     <label for="order_date" class="form-label">订单时间</label>
                                     <input type="date" class="form-control" id="order_date" name="order_date" value="{{ datetime.now().strftime('%Y-%m-%d') if datetime else '' }}" required>
                                 </div>
@@ -511,6 +531,12 @@ initBatchUpload();
 
 <!-- ========== 备货管理模块 JS（内联，所有ID和函数使用si_前缀避免冲突） ========== -->
 <script>
+// API fetch 封装 - 确保请求携带 session cookie（credentials: 'include'）
+function si_apiFetch(url, options = {}) {
+    options.credentials = 'include';
+    return fetch(url, options);
+}
+
 // ========== 备货管理 - 全局变量 ==========
 let si_stagedStockins = [];
 let si_productsCache = [];
@@ -521,7 +547,7 @@ let si_serverStagingMode = false;
 // ========== 备货管理 - 暂存加载 ==========
 async function si_loadStagingStockinsFromServer() {
     try {
-        const response = await fetch('/api/v1/staging-stockins');
+        const response = await si_apiFetch('/api/v1/staging-stockins');
         const result = await response.json();
 
         if (result.success && result.data && result.data.length > 0) {
@@ -553,7 +579,7 @@ function si_searchProducts(query) {
         autocomplete.style.display = 'none';
         return;
     }
-    fetch(`/api/v1/aux/product-search?q=${encodeURIComponent(query)}`)
+    si_apiFetch(`/api/v1/aux/product-search?q=${encodeURIComponent(query)}`)
         .then(response => response.json())
         .then(data => {
             autocomplete.innerHTML = '';
@@ -774,7 +800,7 @@ async function si_deleteStagedStockin(index) {
 
     if (si_serverStagingMode && stockin.id) {
         try {
-            const response = await fetch(`/api/v1/staging-stockins/${stockin.id}`, {
+            const response = await si_apiFetch(`/api/v1/staging-stockins/${stockin.id}`, {
                 method: 'DELETE'
             });
             const result = await response.json();
@@ -829,7 +855,7 @@ document.getElementById('submitAllStockinsBtn').addEventListener('click', async 
 
     try {
         if (si_serverStagingMode) {
-            const response = await fetch('/api/v1/staging-stockins/confirm', {
+            const response = await si_apiFetch('/api/v1/staging-stockins/confirm', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -867,7 +893,7 @@ document.getElementById('submitAllStockinsBtn').addEventListener('click', async 
                 note: stockin.note
             }));
 
-            const response = await fetch('/api/batch-submit-stockins', {
+            const response = await si_apiFetch('/api/batch-submit-stockins', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -915,7 +941,7 @@ document.getElementById('submitAllStockinsBtn').addEventListener('click', async 
 document.addEventListener('DOMContentLoaded', async function() {
     if (performance.navigation.type === 1) {
         try {
-            await fetch('/api/v1/staging-stockins/clear', { method: 'DELETE' });
+            await si_apiFetch('/api/v1/staging-stockins/clear', { method: 'DELETE' });
         } catch (e) {
             console.log('Clear staging on refresh failed:', e);
         }
@@ -928,7 +954,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
 window.addEventListener('beforeunload', function() {
     if (si_stagedStockins.length > 0 || si_serverStagingMode) {
-        fetch('/api/v1/staging-stockins/clear', { method: 'DELETE', keepalive: true });
+        si_apiFetch('/api/v1/staging-stockins/clear', { method: 'DELETE', keepalive: true });
     }
     si_stagedStockins = [];
     si_serverStagingMode = false;
@@ -1088,7 +1114,7 @@ async function si_deleteStockin(id) {
     if (!confirm('确定要删除该备货记录吗？')) return;
 
     try {
-        const response = await fetch(`/api/v1/aux/stockin/${id}`, { method: 'DELETE' });
+         const response = await si_apiFetch(`/api/v1/aux/stockin/${id}`, { method: 'DELETE' });
         const result = await response.json();
 
         if (result.success) {
@@ -1328,7 +1354,7 @@ function si_initBatchUpload() {
             downloadTemplate.innerHTML = '<i class="fas fa-hourglass-half me-2"></i>下载中...';
 
             try {
-                const response = await fetch('/api/v1/batch/download-template');
+                const response = await si_apiFetch('/api/v1/batch/download-template');
 
                 if (!response.ok) {
                     throw new Error('下载失败');
@@ -1382,7 +1408,7 @@ function si_initBatchUpload() {
             formData.append('file', excelFile);
 
             try {
-                const response = await fetch('/api/v1/staging-stockins/import', {
+                const response = await si_apiFetch('/api/v1/staging-stockins/import', {
                     method: 'POST',
                     body: formData
                 });

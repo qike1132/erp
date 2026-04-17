@@ -11,6 +11,7 @@
 import os
 import subprocess
 import re
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -20,12 +21,17 @@ MYSQLDUMP_PATH = os.path.join(MYSQL_BIN, 'mysqldump.exe')
 
 DB_HOST = 'localhost'
 DB_PORT = '3306'
-DB_USER = 'root'
-DB_PASSWORD = '110110'
-DB_NAME = 'erp_system'
+DB_USER = os.getenv('DB_USER', 'root')
+DB_PASSWORD = os.getenv('DB_PASSWORD', '')
+DB_NAME = os.getenv('DB_NAME', 'erp_system')
 TEST_DB_NAME = 'erp_system_test'
 
-BACKUP_FILE = r'd:\erp_system\backups\manual\erp_system_backup_20260416_091519.sql'
+BACKUP_FILE = sys.argv[1] if len(sys.argv) > 1 else ''
+
+if not DB_PASSWORD:
+    print('错误: 请设置环境变量 DB_PASSWORD')
+    print('用法: set DB_PASSWORD=your_password && python restore_test.py <备份文件路径>')
+    sys.exit(1)
 
 class DatabaseRestoreTest:
     def __init__(self):
