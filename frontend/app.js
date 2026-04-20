@@ -6,6 +6,14 @@ class ERPApp {
         this.init();
     }
 
+    /** HTML 转义，防止 XSS 注入 */
+    esc(str) {
+        if (str == null) return '';
+        const d = document.createElement('div');
+        d.textContent = String(str);
+        return d.innerHTML;
+    }
+
     async init() {
         this.setupWindowControls();
         await this.loadVersion();
@@ -236,14 +244,14 @@ class ERPApp {
             tbody.innerHTML = products.map(p => `
                 <tr>
                     <td>
-                        ${p.image ? `<img src="${p.image}" class="rounded" style="width:50px;height:50px;object-fit:cover">` : '<i class="fas fa-box text-muted"></i>'}
+                        ${p.image ? `<img src="${this.esc(p.image)}" class="rounded" style="width:50px;height:50px;object-fit:cover">` : '<i class="fas fa-box text-muted"></i>'}
                     </td>
-                    <td>${p.name}</td>
-                    <td>${p.barcode || '-'}</td>
-                    <td>${p.current_stock}</td>
+                    <td>${this.esc(p.name)}</td>
+                    <td>${this.esc(p.barcode) || '-'}</td>
+                    <td>${this.esc(p.current_stock)}</td>
                     <td>
                         <span class="badge ${p.status ? (p.status === '启用' ? 'bg-success' : 'bg-danger') : 'bg-secondary'}">
-                            ${p.status || '启用'}
+                            ${this.esc(p.status) || '启用'}
                         </span>
                     </td>
                     <td>
@@ -301,16 +309,16 @@ class ERPApp {
         if (orders && orders.length > 0) {
             tbody.innerHTML = orders.map(o => `
                 <tr>
-                    <td>${o.order_no || '-'}</td>
-                    <td>${o.customer || '-'}</td>
-                    <td>${o.product_name || '-'}</td>
-                    <td>${o.quantity || 0}</td>
+                    <td>${this.esc(o.order_no) || '-'}</td>
+                    <td>${this.esc(o.customer) || '-'}</td>
+                    <td>${this.esc(o.product_name) || '-'}</td>
+                    <td>${this.esc(o.quantity) || 0}</td>
                     <td>
                         <span class="badge bg-${this.getStatusColor(o.status)}">
-                            ${o.status || '待备货'}
+                            ${this.esc(o.status) || '待备货'}
                         </span>
                     </td>
-                    <td>${o.order_date || '-'}</td>
+                    <td>${this.esc(o.order_date) || '-'}</td>
                     <td>
                         <button class="btn btn-sm btn-info" onclick="alert('查看订单功能待实现')">
                             <i class="fas fa-eye"></i>
@@ -365,12 +373,12 @@ class ERPApp {
         if (stock && stock.inventory_data && stock.inventory_data.length > 0) {
             tbody.innerHTML = stock.inventory_data.map(item => `
                 <tr>
-                    <td>${item.customer || '-'}</td>
-                    <td>${item.product_name || '-'}</td>
-                    <td>${item.product_barcode || '-'}</td>
-                    <td>${item.order_quantity || 0}</td>
-                    <td>${item.stockin_quantity || 0}</td>
-                    <td class="fw-bold text-primary">${item.total_stock || 0}</td>
+                    <td>${this.esc(item.customer) || '-'}</td>
+                    <td>${this.esc(item.product_name) || '-'}</td>
+                    <td>${this.esc(item.product_barcode) || '-'}</td>
+                    <td>${this.esc(item.order_quantity) || 0}</td>
+                    <td>${this.esc(item.stockin_quantity) || 0}</td>
+                    <td class="fw-bold text-primary">${this.esc(item.total_stock) || 0}</td>
                 </tr>
             `).join('');
         } else {
@@ -462,16 +470,16 @@ class ERPApp {
             document.getElementById('reportTotalOrders').textContent = orders.length;
             tbody.innerHTML = orders.slice(0, 10).map(o => `
                 <tr>
-                    <td>${o.order_no || '-'}</td>
-                    <td>${o.customer || '-'}</td>
-                    <td>${o.product_name || '-'}</td>
-                    <td>${o.quantity || 0}</td>
+                    <td>${this.esc(o.order_no) || '-'}</td>
+                    <td>${this.esc(o.customer) || '-'}</td>
+                    <td>${this.esc(o.product_name) || '-'}</td>
+                    <td>${this.esc(o.quantity) || 0}</td>
                     <td>
                         <span class="badge bg-${this.getStatusColor(o.status)}">
-                            ${o.status || '待备货'}
+                            ${this.esc(o.status) || '待备货'}
                         </span>
                     </td>
-                    <td>${o.order_date || '-'}</td>
+                    <td>${this.esc(o.order_date) || '-'}</td>
                 </tr>
             `).join('');
         } else {

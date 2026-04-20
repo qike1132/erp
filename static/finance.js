@@ -10,6 +10,9 @@ const requestLocks = {
 
 let dailyChart = null;
 
+// DOM 元素获取辅助函数
+const el = (id) => document.getElementById(id);
+
 // ==================== 通用工具函数 ====================
 
 function buildPagination(totalPages, currentPage, onPageClick) {
@@ -38,7 +41,9 @@ function buildPagination(totalPages, currentPage, onPageClick) {
 }
 
 function showLoading(tbodyId, colspan) {
-    document.getElementById(tbodyId).innerHTML = `
+    const tbody = document.getElementById(tbodyId);
+    if (!tbody) return;
+    tbody.innerHTML = `
         <tr>
             <td colspan="${colspan}" class="text-center py-4">
                 <div class="spinner-border text-primary" role="status">
@@ -51,7 +56,9 @@ function showLoading(tbodyId, colspan) {
 }
 
 function showEmpty(tbodyId, colspan, message = '暂无数据') {
-    document.getElementById(tbodyId).innerHTML = `
+    const tbody = document.getElementById(tbodyId);
+    if (!tbody) return;
+    tbody.innerHTML = `
         <tr>
             <td colspan="${colspan}" class="text-center py-4">
                 <i class="fas fa-inbox fa-3x mb-3 text-muted" style="opacity: 0.3;"></i>
@@ -106,9 +113,12 @@ function searchCustomerSummary(page = 1) {
     if (requestLocks.customer) return;
     requestLocks.customer = true;
 
-    const customer = document.getElementById('customer_filter').value;
-    const startDate = document.getElementById('customer_start_date').value;
-    const endDate = document.getElementById('customer_end_date').value;
+    const filterEl = el('customer_filter');
+    const startEl = el('customer_start_date');
+    const endEl = el('customer_end_date');
+    const customer = filterEl ? filterEl.value : '';
+    const startDate = startEl ? startEl.value : '';
+    const endDate = endEl ? endEl.value : '';
 
     const params = new URLSearchParams();
     params.append('page', page);
@@ -144,20 +154,22 @@ function searchCustomerSummary(page = 1) {
 
 function renderCustomerSummary(logs, pagination, stats) {
     // 更新统计卡片
-    document.getElementById('customer-total-count').textContent = stats.total_count || 0;
-    document.getElementById('customer-total-quantity').textContent = (stats.total_quantity || 0).toLocaleString();
-    document.getElementById('customer-total-amount').textContent = formatAmount(stats.total_amount || 0);
+    if (el('customer-total-count')) el('customer-total-count').textContent = stats.total_count || 0;
+    if (el('customer-total-quantity')) el('customer-total-quantity').textContent = (stats.total_quantity || 0).toLocaleString();
+    if (el('customer-total-amount')) el('customer-total-amount').textContent = formatAmount(stats.total_amount || 0);
 
-    document.getElementById('customer-count').textContent = `共 ${pagination.total} 条记录`;
+    const countEl = el('customer-count');
+    if (countEl) countEl.textContent = `共 ${pagination.total} 条记录`;
 
-    const paginationEl = document.getElementById('customer-pagination');
+    const paginationEl = el('customer-pagination');
     if (logs.length === 0) {
         showEmpty('customer-tbody', 4);
-        paginationEl.style.display = 'none';
+        if (paginationEl) paginationEl.style.display = 'none';
         return;
     }
 
-    const tbody = document.getElementById('customer-tbody');
+    const tbody = el('customer-tbody');
+    if (!tbody) return;
     tbody.innerHTML = logs.map(log => `
         <tr>
             <td><i class="fas fa-building me-1"></i>${log.customer || '未知客户'}</td>
@@ -168,23 +180,26 @@ function renderCustomerSummary(logs, pagination, stats) {
     `).join('');
 
     if (pagination.pages > 1) {
-        paginationEl.style.display = 'block';
-        paginationEl.querySelector('ul').innerHTML = buildPagination(pagination.pages, pagination.page, 'searchCustomerSummary');
+        if (paginationEl) {
+            paginationEl.style.display = 'block';
+            const ul = paginationEl.querySelector('ul');
+            if (ul) ul.innerHTML = buildPagination(pagination.pages, pagination.page, 'searchCustomerSummary');
+        }
     } else {
-        paginationEl.style.display = 'none';
+        if (paginationEl) paginationEl.style.display = 'none';
     }
 }
 
 function resetCustomerSearch() {
-    document.getElementById('customer_filter').value = '';
-    document.getElementById('customer_start_date').value = '';
-    document.getElementById('customer_end_date').value = '';
-    document.getElementById('customer-pagination').style.display = 'none';
+    if (el('customer_filter')) el('customer_filter').value = '';
+    if (el('customer_start_date')) el('customer_start_date').value = '';
+    if (el('customer_end_date')) el('customer_end_date').value = '';
+    if (el('customer-pagination')) el('customer-pagination').style.display = 'none';
     showEmpty('customer-tbody', 4, '请点击查询按钮获取数据');
-    document.getElementById('customer-count').textContent = '共 0 条记录';
-    document.getElementById('customer-total-count').textContent = '0';
-    document.getElementById('customer-total-quantity').textContent = '0';
-    document.getElementById('customer-total-amount').textContent = '¥0.00';
+    if (el('customer-count')) el('customer-count').textContent = '共 0 条记录';
+    if (el('customer-total-count')) el('customer-total-count').textContent = '0';
+    if (el('customer-total-quantity')) el('customer-total-quantity').textContent = '0';
+    if (el('customer-total-amount')) el('customer-total-amount').textContent = '¥0.00';
 }
 
 // ==================== 每日出货金额 ====================
@@ -193,9 +208,12 @@ function searchDailyAmount(page = 1) {
     if (requestLocks.daily) return;
     requestLocks.daily = true;
 
-    const customer = document.getElementById('daily_customer').value;
-    const startDate = document.getElementById('daily_start_date').value;
-    const endDate = document.getElementById('daily_end_date').value;
+    const dailyCustomerEl = el('daily_customer');
+    const dailyStartEl = el('daily_start_date');
+    const dailyEndEl = el('daily_end_date');
+    const customer = dailyCustomerEl ? dailyCustomerEl.value : '';
+    const startDate = dailyStartEl ? dailyStartEl.value : '';
+    const endDate = dailyEndEl ? dailyEndEl.value : '';
 
     const params = new URLSearchParams();
     params.append('page', page);
@@ -234,20 +252,22 @@ function searchDailyAmount(page = 1) {
 
 function renderDailyAmount(logs, pagination, stats) {
     // 更新统计卡片
-    document.getElementById('daily-total-days').textContent = stats.total_count || 0;
-    document.getElementById('daily-total-quantity').textContent = (stats.total_quantity || 0).toLocaleString();
-    document.getElementById('daily-total-amount').textContent = formatAmount(stats.total_amount || 0);
+    if (el('daily-total-days')) el('daily-total-days').textContent = stats.total_count || 0;
+    if (el('daily-total-quantity')) el('daily-total-quantity').textContent = (stats.total_quantity || 0).toLocaleString();
+    if (el('daily-total-amount')) el('daily-total-amount').textContent = formatAmount(stats.total_amount || 0);
 
-    document.getElementById('daily-count').textContent = `共 ${pagination.total} 条记录`;
+    const countEl = el('daily-count');
+    if (countEl) countEl.textContent = `共 ${pagination.total} 条记录`;
 
-    const paginationEl = document.getElementById('daily-pagination');
+    const paginationEl = el('daily-pagination');
     if (logs.length === 0) {
         showEmpty('daily-tbody', 5);
-        paginationEl.style.display = 'none';
+        if (paginationEl) paginationEl.style.display = 'none';
         return;
     }
 
-    const tbody = document.getElementById('daily-tbody');
+    const tbody = el('daily-tbody');
+    if (!tbody) return;
     tbody.innerHTML = logs.map(log => `
         <tr>
             <td><i class="fas fa-calendar me-1"></i>${log.date}</td>
@@ -259,10 +279,13 @@ function renderDailyAmount(logs, pagination, stats) {
     `).join('');
 
     if (pagination.pages > 1) {
-        paginationEl.style.display = 'block';
-        paginationEl.querySelector('ul').innerHTML = buildPagination(pagination.pages, pagination.page, 'searchDailyAmount');
+        if (paginationEl) {
+            paginationEl.style.display = 'block';
+            const ul = paginationEl.querySelector('ul');
+            if (ul) ul.innerHTML = buildPagination(pagination.pages, pagination.page, 'searchDailyAmount');
+        }
     } else {
-        paginationEl.style.display = 'none';
+        if (paginationEl) paginationEl.style.display = 'none';
     }
 }
 
@@ -290,8 +313,8 @@ function renderDailyChart(chartData) {
     const canvas = document.getElementById('dailyAmountChart');
 
     if (!chartData.dates || chartData.dates.length === 0) {
-        container.style.display = 'none';
-        emptyEl.style.display = 'block';
+        if (container) container.style.display = 'none';
+        if (emptyEl) emptyEl.style.display = 'block';
         if (dailyChart) {
             dailyChart.destroy();
             dailyChart = null;
@@ -299,13 +322,14 @@ function renderDailyChart(chartData) {
         return;
     }
 
-    container.style.display = 'block';
-    emptyEl.style.display = 'none';
+    if (container) container.style.display = 'block';
+    if (emptyEl) emptyEl.style.display = 'none';
 
     if (dailyChart) {
         dailyChart.destroy();
     }
 
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
     dailyChart = new Chart(ctx, {
         type: 'line',
@@ -415,22 +439,22 @@ function renderDailyChart(chartData) {
 }
 
 function resetDailySearch() {
-    document.getElementById('daily_customer').value = '';
-    document.getElementById('daily_start_date').value = '';
-    document.getElementById('daily_end_date').value = '';
-    document.getElementById('daily-pagination').style.display = 'none';
+    if (el('daily_customer')) el('daily_customer').value = '';
+    if (el('daily_start_date')) el('daily_start_date').value = '';
+    if (el('daily_end_date')) el('daily_end_date').value = '';
+    if (el('daily-pagination')) el('daily-pagination').style.display = 'none';
     showEmpty('daily-tbody', 5, '请点击查询按钮获取数据');
-    document.getElementById('daily-count').textContent = '共 0 条记录';
-    document.getElementById('daily-total-days').textContent = '0';
-    document.getElementById('daily-total-quantity').textContent = '0';
-    document.getElementById('daily-total-amount').textContent = '¥0.00';
+    if (el('daily-count')) el('daily-count').textContent = '共 0 条记录';
+    if (el('daily-total-days')) el('daily-total-days').textContent = '0';
+    if (el('daily-total-quantity')) el('daily-total-quantity').textContent = '0';
+    if (el('daily-total-amount')) el('daily-total-amount').textContent = '¥0.00';
     // 清除图表
     if (dailyChart) {
         dailyChart.destroy();
         dailyChart = null;
     }
-    document.getElementById('dailyChartContainer').style.display = 'none';
-    document.getElementById('dailyChartEmpty').style.display = 'block';
+    if (el('dailyChartContainer')) el('dailyChartContainer').style.display = 'none';
+    if (el('dailyChartEmpty')) el('dailyChartEmpty').style.display = 'block';
 }
 
 // ==================== 页面初始化 ====================

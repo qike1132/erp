@@ -16,6 +16,24 @@
                         
                         <div class="row mb-3">
                             <div class="col-md-6">
+                                <label for="order_type" class="form-label">订单类型</label>
+                                <select class="form-select" id="order_type" name="order_type">
+                                    <option value="regular" selected>常规订单</option>
+                                    <option value="custom">定制订单</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6" id="country_field_group" style="display: none;">
+                                <label for="shipment_country" class="form-label">国家名称 <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="shipment_country" name="country" placeholder="输入国家名称" maxlength="100">
+                            </div>
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="stockout_date" class="form-label">出货时间</label>
+                                <input type="date" class="form-control" id="stockout_date" name="stockout_date" value="{{ current_date }}">
+                            </div>
+                            <div class="col-md-6">
                                 <label for="customer" class="form-label">客户名称</label>
                                 <select class="form-select" id="customer" name="customer" required>
                                     <option value="">请选择客户</option>
@@ -23,10 +41,6 @@
                                     <option value="{{ c.name }}">{{ c.name }}</option>
                                     {% endfor %}
                                 </select>
-                            </div>
-                            <div class="col-md-6">
-                                <label for="stockout_date" class="form-label">出货时间</label>
-                                <input type="date" class="form-control" id="stockout_date" name="stockout_date" value="{{ current_date }}">
                             </div>
                         </div>
                         
@@ -170,6 +184,7 @@
             <div id="stockoutListGrouped">
                 <!-- 出货列表将通过JavaScript动态生成 -->
             </div>
+            <div id="stockout-pagination" class="d-flex align-items-center mt-3"></div>
         </div>
     </div>
     
@@ -193,6 +208,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='pagination.js') }}"></script>
 <style>
 /* 展开按钮图标旋转动画 */
 .toggle-icon {
@@ -326,6 +342,8 @@ async function loadStagingStockoutsFromServer() {
                 productName: item.product_name,
                 quantity: item.quantity,
                 note: item.note,
+                orderType: item.order_type || 'regular',
+                country: item.country || '',
                 isValidated: item.is_validated,
                 validationError: item.validation_error,
                 stockCheckPassed: item.stock_check_passed,
@@ -419,11 +437,29 @@ document.getElementById('customer').addEventListener('change', function() {
 document.getElementById('quantity').addEventListener('input', updateAddNewStockoutButtonState);
 document.getElementById('stockout_date').addEventListener('change', updateAddNewStockoutButtonState);
 
+// 订单类型切换：显示/隐藏国家字段，刷新可出货量
+document.getElementById('order_type').addEventListener('change', function() {
+    const countryGroup = document.getElementById('country_field_group');
+    if (this.value === 'custom') {
+        countryGroup.style.display = '';
+    } else {
+        countryGroup.style.display = 'none';
+        document.getElementById('shipment_country').value = '';
+    }
+    fetchAvailableShipment();
+});
+document.getElementById('shipment_country').addEventListener('input', function() {
+    updateAddNewStockoutButtonState();
+    fetchAvailableShipment();
+});
+
 let currentAvailableShipment = 0;
 
 async function fetchAvailableShipment() {
     const customer = document.getElementById('customer').value;
     const productId = document.getElementById('product_id').value;
+    const orderType = document.getElementById('order_type').value;
+    const country = document.getElementById('shipment_country').value.trim();
     const quantityInput = document.getElementById('quantity');
     const infoElement = document.getElementById('shipmentInfo');
     
@@ -437,17 +473,22 @@ async function fetchAvailableShipment() {
     }
     
     try {
-        const response = await fetch(`/api/v1/aux/available-shipment?product_id=${productId}&customer=${encodeURIComponent(customer)}`);
+        let url = `/api/v1/aux/available-shipment?product_id=${productId}&customer=${encodeURIComponent(customer)}`;
+        if (orderType) url += `&order_type=${encodeURIComponent(orderType)}`;
+        if (orderType === 'custom' && country) url += `&country=${encodeURIComponent(country)}`;
+        const response = await fetch(url);
         if (!response.ok) throw new Error('获取可出货量失败');
         
         const data = await response.json();
         currentAvailableShipment = data.available_quantity;
         
         if (infoElement) {
+            const typeLabel = orderType === 'custom' ? '定制订单' : '常规订单';
+            const countryHint = (orderType === 'custom' && country) ? ` (${country})` : '';
             infoElement.innerHTML = `
                 <small class="text-muted">
                     <i class="fas fa-info-circle me-1"></i>
-                    订单量: ${data.order_quantity} | 已出货: ${data.shipped_quantity} | 可出货: <strong class="text-primary">${data.available_quantity}</strong>
+                    ${typeLabel}${countryHint} — 订单量: ${data.order_quantity} | 已出货: ${data.shipped_quantity} | 可出货: <strong class="text-primary">${data.available_quantity}</strong>
                 </small>
             `;
         }
@@ -469,9 +510,13 @@ function updateAddNewStockoutButtonState() {
     const productId = document.getElementById('product_id').value;
     const quantity = parseInt(document.getElementById('quantity').value) || 0;
     const stockoutDate = document.getElementById('stockout_date').value;
+    const orderType = document.getElementById('order_type').value;
+    const country = document.getElementById('shipment_country').value.trim();
     const addBtn = document.getElementById('addNewStockoutBtn');
     
-    if (customer && productId && quantity > 0 && stockoutDate) {
+    // 定制订单必须填写国家
+    const countryOk = orderType !== 'custom' || country;
+    if (customer && productId && quantity > 0 && stockoutDate && countryOk) {
         addBtn.disabled = false;
         addBtn.classList.add('btn-primary');
         addBtn.classList.remove('btn-secondary');
@@ -490,15 +535,26 @@ document.getElementById('addNewStockoutBtn').addEventListener('click', async fun
     const productName = document.getElementById('product_search').value;
     const quantity = parseInt(document.getElementById('quantity').value) || 0;
     const note = document.getElementById('note').value;
-    
+    const orderType = document.getElementById('order_type').value;
+    const country = document.getElementById('shipment_country').value.trim();
+
+    // 定制订单必须填写国家
+    if (orderType === 'custom' && !country) {
+        alert('定制订单必须填写国家名称！');
+        return;
+    }
+
     if (customer && productId) {
         try {
-            const response = await fetch(`/api/v1/aux/available-shipment?product_id=${productId}&customer=${encodeURIComponent(customer)}`);
+            let url = `/api/v1/aux/available-shipment?product_id=${productId}&customer=${encodeURIComponent(customer)}&order_type=${encodeURIComponent(orderType)}`;
+            if (orderType === 'custom' && country) url += `&country=${encodeURIComponent(country)}`;
+            const response = await fetch(url);
             if (!response.ok) throw new Error('获取可出货量失败');
             
             const data = await response.json();
             if (quantity > data.available_quantity) {
-                alert(`出货数量超过可出货量！\n订单量: ${data.order_quantity}\n已出货: ${data.shipped_quantity}\n可出货: ${data.available_quantity}\n请调整出货数量。`);
+                const typeLabel = orderType === 'custom' ? '定制订单' : '常规订单';
+                alert(`出货数量超过可出货量！\n${typeLabel}订单量: ${data.order_quantity}\n已出货: ${data.shipped_quantity}\n可出货: ${data.available_quantity}\n请调整出货数量。`);
                 return;
             }
         } catch (error) {
@@ -514,6 +570,8 @@ document.getElementById('addNewStockoutBtn').addEventListener('click', async fun
         productName,
         quantity,
         note,
+        orderType,
+        country,
         id: Date.now()
     };
     
@@ -577,6 +635,7 @@ function updateStagedStockoutsList() {
                                 ${statusBadge}
                             </span>
                             <span class="badge bg-light text-dark">数量：${stockout.quantity}</span>
+                            ${stockout.orderType === 'custom' ? `<span class="badge bg-warning text-dark">定制${stockout.country ? ' · ' + stockout.country : ''}</span>` : '<span class="badge bg-success">常规</span>'}
                             ${stockout.note ? `<span class="badge bg-light text-dark">备注：${stockout.note}</span>` : ''}
                             ${stockout.validationError ? `<span class="small text-danger"><i class="fas fa-exclamation-triangle me-1"></i>${stockout.validationError}</span>` : ''}
                             ${stockout.stockCheckMessage && !stockout.stockCheckPassed ? `<span class="small text-warning"><i class="fas fa-exclamation-circle me-1"></i>${stockout.stockCheckMessage}</span>` : ''}
@@ -621,6 +680,19 @@ function editStagedStockout(index) {
             <label class="form-label">产品名称</label>
             <input type="text" class="form-control" id="editProductName" value="${stockout.productName}" readonly>
         </div>
+        <div class="row mb-3">
+            <div class="col-md-6">
+                <label class="form-label">订单类型</label>
+                <select class="form-select" id="editOrderType">
+                    <option value="regular" ${stockout.orderType !== 'custom' ? 'selected' : ''}>常规订单</option>
+                    <option value="custom" ${stockout.orderType === 'custom' ? 'selected' : ''}>定制订单</option>
+                </select>
+            </div>
+            <div class="col-md-6" id="editCountryGroup" style="${stockout.orderType === 'custom' ? '' : 'display:none;'}">
+                <label class="form-label">国家名称</label>
+                <input type="text" class="form-control" id="editCountry" value="${stockout.country || ''}" maxlength="100">
+            </div>
+        </div>
         <div class="mb-3">
             <label class="form-label">出货数量</label>
             <input type="number" class="form-control" id="editQuantity" value="${stockout.quantity}" min="1">
@@ -632,6 +704,10 @@ function editStagedStockout(index) {
     `;
     
     document.getElementById('editStagedStockoutContent').innerHTML = content;
+    // 动态显示/隐藏编辑国家字段
+    document.getElementById('editOrderType').addEventListener('change', function() {
+        document.getElementById('editCountryGroup').style.display = this.value === 'custom' ? '' : 'none';
+    });
     const modal = new bootstrap.Modal(document.getElementById('editStagedStockoutModal'));
     modal.show();
 }
@@ -640,6 +716,8 @@ document.getElementById('saveEditStagedStockoutBtn').addEventListener('click', f
     if (editingStagedIndex !== -1) {
         stagedStockouts[editingStagedIndex].customer = document.getElementById('editCustomer').value;
         stagedStockouts[editingStagedIndex].stockoutDate = document.getElementById('editStockoutDate').value;
+        stagedStockouts[editingStagedIndex].orderType = document.getElementById('editOrderType').value;
+        stagedStockouts[editingStagedIndex].country = document.getElementById('editCountry').value.trim();
         stagedStockouts[editingStagedIndex].quantity = parseInt(document.getElementById('editQuantity').value) || 1;
         stagedStockouts[editingStagedIndex].note = document.getElementById('editNote').value;
         
@@ -686,6 +764,9 @@ function clearForm() {
     document.getElementById('product_id').value = '';
     document.getElementById('quantity').value = '1';
     document.getElementById('note').value = '';
+    document.getElementById('order_type').value = 'regular';
+    document.getElementById('shipment_country').value = '';
+    document.getElementById('country_field_group').style.display = 'none';
     
     const infoElement = document.getElementById('shipmentInfo');
     if (infoElement) {
@@ -753,24 +834,29 @@ document.getElementById('submitAllStockoutsBtn').addEventListener('click', async
             if (stockoutsWithCustomer.length > 0) {
                 const uniqueKeys = {};
                 stockoutsWithCustomer.forEach(stockout => {
-                    const key = `${stockout.productId}-${stockout.customer}`;
+                    const ot = stockout.orderType || 'regular';
+                    const cn = stockout.country || '';
+                    const key = `${stockout.productId}-${stockout.customer}-${ot}-${cn}`;
                     if (!uniqueKeys[key]) {
-                        uniqueKeys[key] = { productId: stockout.productId, customer: stockout.customer, stockouts: [] };
+                        uniqueKeys[key] = { productId: stockout.productId, customer: stockout.customer, orderType: ot, country: cn, stockouts: [] };
                     }
                     uniqueKeys[key].stockouts.push(stockout);
                 });
 
                 for (const key in uniqueKeys) {
-                    const { productId, customer, stockouts } = uniqueKeys[key];
+                    const { productId, customer, orderType, country, stockouts } = uniqueKeys[key];
                     try {
-                        const response = await fetch(`/api/v1/aux/available-shipment?product_id=${productId}&customer=${encodeURIComponent(customer)}`);
+                        let url = `/api/v1/aux/available-shipment?product_id=${productId}&customer=${encodeURIComponent(customer)}&order_type=${encodeURIComponent(orderType)}`;
+                        if (orderType === 'custom' && country) url += `&country=${encodeURIComponent(country)}`;
+                        const response = await fetch(url);
                         if (!response.ok) throw new Error('API request failed');
 
                         const data = await response.json();
                         const totalQuantity = stockouts.reduce((sum, s) => sum + s.quantity, 0);
                         
                         if (totalQuantity > data.available_quantity) {
-                            alert(`出货验证失败！\n客户: ${customer}\n产品ID: ${productId}\n订单量: ${data.order_quantity}\n已出货: ${data.shipped_quantity}\n可出货: ${data.available_quantity}\n本次出货总量: ${totalQuantity}\n\n请调整出货数量。`);
+                            const typeLabel = orderType === 'custom' ? '定制订单' : '常规订单';
+                            alert(`出货验证失败！\n客户: ${customer}\n${typeLabel}订单量: ${data.order_quantity}\n已出货: ${data.shipped_quantity}\n可出货: ${data.available_quantity}\n本次出货总量: ${totalQuantity}\n\n请调整出货数量。`);
                             btn.disabled = false;
                             btnText.textContent = '添加出货';
                             btnSpinner.style.display = 'none';
@@ -789,7 +875,9 @@ document.getElementById('submitAllStockoutsBtn').addEventListener('click', async
                 customer: stockout.customer,
                 quantity: stockout.quantity,
                 stockout_date: stockout.stockoutDate,
-                note: stockout.note
+                note: stockout.note,
+                order_type: stockout.orderType || 'regular',
+                country: stockout.country || ''
             }));
             
             console.log('Sending request to /api/batch-submit-stockouts');
@@ -851,6 +939,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     initBatchUpload();
     initPdfUpload();
     renderGroupedStockoutList();
+    loadStockouts(1);
     loadStagingStockoutsFromServer();
 });
 
@@ -881,6 +970,24 @@ window.toggleStockoutGroup = function(contentId) {
 
 // 全局出货数据存储
 let globalStockoutsData = [];
+
+// ========== AJAX 分页加载 ==========
+let stockoutCurrentPage = 1;
+const stockoutPerPage = 50;
+
+function loadStockouts(page) {
+    fetch(`/stock/api/stockouts?page=${page}&per_page=${stockoutPerPage}`, { credentials: 'include' })
+        .then(r => r.json())
+        .then(data => {
+            globalStockoutsData = data.items || [];
+            if (typeof renderGroupedStockoutListLocal === 'function') {
+                renderGroupedStockoutListLocal();
+            }
+            renderPagination(data, 'stockout-pagination', loadStockouts);
+            stockoutCurrentPage = page;
+        })
+        .catch(err => console.error('加载出货列表失败:', err));
+}
 
 function renderGroupedStockoutList() {
     const stockoutsData = {{ stockouts_json | safe }};
@@ -917,16 +1024,21 @@ function renderGroupedStockoutList() {
     sortedDates.forEach((date, index) => {
         const stockouts = groupedStockouts[date];
         
-        // 对同一天内的数据按(客户+产品ID)进行汇总
+        // 对同一天内的数据按(客户+产品ID+订单类型)进行汇总
         const summaryMap = {};
         stockouts.forEach(stockout => {
-            const key = `${stockout.customer || '未知客户'}|||${stockout.product.id}`;
+            const orderType = (stockout.order_type === 'custom') ? 'custom' : 'regular';
+            const country = stockout.country || '';
+            const typeKey = orderType === 'custom' && country ? `${orderType}_${country}` : orderType;
+            const key = `${stockout.customer || '未知客户'}|||${stockout.product.id}|||${typeKey}`;
             
             if (!summaryMap[key]) {
                 summaryMap[key] = {
                     customer: stockout.customer || '未知客户',
                     product: stockout.product,
                     quantity: 0,
+                    order_type: orderType,
+                    country: country,
                     notes: [],
                     ids: []
                 };
@@ -965,19 +1077,23 @@ function renderGroupedStockoutList() {
                             <table class="table table-hover mb-0">
                                 <thead>
                                     <tr>
-                                        <th style="width: 12%;">客户</th>
-                                        <th style="width: 10%;">产品图片</th>
-                                        <th style="width: 22%;">产品名称</th>
-                                        <th style="width: 13%;">69 码</th>
-                                        <th style="width: 10%;">数量</th>
+                                        <th style="width: 11%;">客户</th>
+                                        <th style="width: 8%;">产品图片</th>
+                                        <th style="width: 20%;">产品名称</th>
+                                        <th style="width: 12%;">69 码</th>
+                                        <th style="width: 8%;">订单类型</th>
+                                        <th style="width: 9%;">数量</th>
                                         <th style="width: 10%;">备注</th>
-                                        <th style="width: 13%;">操作</th>
+                                        <th style="width: 12%;">操作</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     ${summaryList.map(item => {
                                         const isSummary = item.ids.length > 1;
                                         const notesDisplay = item.notes.length > 0 ? item.notes.join('; ') : '-';
+                                        const typeLabel = item.order_type === 'custom'
+                                            ? `<span class="badge bg-warning text-dark">定制</span>${item.country ? `<small class="ms-1">${item.country}</small>` : ''}`
+                                            : `<span class="badge bg-success">常规</span>`;
                                         return `
                                         <tr>
                                             <td>${item.customer}</td>
@@ -988,6 +1104,7 @@ function renderGroupedStockoutList() {
                                             </td>
                                             <td>${item.product.name}</td>
                                             <td>${item.product.barcode || '-'}</td>
+                                            <td>${typeLabel}</td>
                                             <td><strong>${item.quantity}</strong></td>
                                             <td><small>${notesDisplay}</small></td>
                                             <td>
@@ -1078,10 +1195,13 @@ function renderGroupedStockoutListLocal() {
     sortedDates.forEach((date, index) => {
         const stockouts = groupedStockouts[date];
         
-        // 对同一天内的数据按(客户+产品ID)进行汇总
+        // 对同一天内的数据按(客户+产品ID+订单类型)进行汇总
         const summaryMap = {};
         stockouts.forEach(stockout => {
-            const key = `${stockout.customer}|||${stockout.product.id}`;
+            const orderType = (stockout.order_type === 'custom') ? 'custom' : 'regular';
+            const country = stockout.country || '';
+            const typeKey = orderType === 'custom' && country ? `${orderType}_${country}` : orderType;
+            const key = `${stockout.customer}|||${stockout.product.id}|||${typeKey}`;
             
             if (!summaryMap[key]) {
                 summaryMap[key] = {
@@ -1089,6 +1209,8 @@ function renderGroupedStockoutListLocal() {
                     product: stockout.product,
                     quantity: 0,
                     deduct_quantity: 0,
+                    order_type: orderType,
+                    country: country,
                     notes: [],
                     ids: []
                 };
@@ -1128,14 +1250,15 @@ function renderGroupedStockoutListLocal() {
                             <table class="table table-hover mb-0">
                                 <thead>
                                     <tr>
-                                        <th style="width: 12%;">客户</th>
+                                        <th style="width: 11%;">客户</th>
                                         <th style="width: 8%;">产品图片</th>
                                         <th style="width: 20%;">产品名称</th>
-                                        <th style="width: 10%;">69码</th>
-                                        <th style="width: 10%;">数量</th>
+                                        <th style="width: 12%;">69码</th>
+                                        <th style="width: 8%;">订单类型</th>
+                                        <th style="width: 9%;">数量</th>
                                         <th style="width: 10%;">抵扣备货</th>
                                         <th style="width: 10%;">备注</th>
-                                        <th style="width: 10%;">操作</th>
+                                        <th style="width: 12%;">操作</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -1144,6 +1267,9 @@ function renderGroupedStockoutListLocal() {
                                         const deductDisplay = item.deduct_quantity > 0 
                                             ? `<span class="badge bg-success">抵扣: ${item.deduct_quantity}</span>` 
                                             : '<span class="badge bg-secondary">否</span>';
+                                        const typeLabel = item.order_type === 'custom'
+                                            ? `<span class="badge bg-warning text-dark">定制</span>${item.country ? `<small class="ms-1">${item.country}</small>` : ''}`
+                                            : `<span class="badge bg-success">常规</span>`;
                                         return `
                                         <tr>
                                             <td>${item.customer}</td>
@@ -1154,6 +1280,7 @@ function renderGroupedStockoutListLocal() {
                                             </td>
                                             <td>${item.product.name}</td>
                                             <td>${item.product.barcode || '-'}</td>
+                                            <td>${typeLabel}</td>
                                             <td><strong>${item.quantity}</strong></td>
                                             <td>${deductDisplay}</td>
                                             <td><small>${notesDisplay}</small></td>

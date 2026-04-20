@@ -11,7 +11,7 @@ def get_current_user():
     """获取当前登录用户"""
     if 'user_id' not in session:
         return None
-    return User.query.get(session['user_id'])
+    return db.session.get(User, session['user_id'])
 
 
 def create_approval_log(approval_request, action, actor, details=None):

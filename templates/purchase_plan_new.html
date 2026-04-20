@@ -1,242 +1,348 @@
 {% extends 'base.html' %}
 {% block extra_css %}
 <style>
+    :root {
+        --plush-blue: #B0E0E6;
+        --plush-blue-light: #D4F1F4;
+        --plush-blue-deep: #87CEEB;
+        --plush-white: #FFFFFF;
+        --plush-cream: #F8F9FA;
+        --plush-text: #5A4A4A;
+        --plush-text-light: #8B7B7B;
+        --plush-shadow-soft: rgba(176, 224, 230, 0.25);
+        --plush-shadow-medium: rgba(135, 206, 235, 0.35);
+        --plush-radius-card: 24px;
+        --plush-radius-button: 14px;
+        --plush-radius-input: 12px;
+        --plush-transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
     /* ===== Page Layout ===== */
-    .plan-page { max-width: 1440px; margin: 0 auto; }
+    .plan-page {
+        max-width: 1440px; margin: 0 auto;
+        background: var(--plush-cream); min-height: 100vh;
+        font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
+        color: var(--plush-text);
+    }
 
     /* ===== Top Header ===== */
     .plan-header {
         position: sticky; top: 0; z-index: 30;
-        background: #fff; border-bottom: 1px solid #e5e7eb;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        background: var(--plush-white);
+        border-bottom: 2px solid var(--plush-blue-light);
+        box-shadow: 0 4px 20px var(--plush-shadow-soft);
     }
     .plan-header-inner {
         max-width: 1440px; margin: 0 auto; padding: 0 1.5rem;
-        display: flex; align-items: center; justify-content: space-between; height: 56px;
+        display: flex; align-items: center; justify-content: space-between; height: 60px;
     }
-    .breadcrumb { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #6b7280; margin-bottom: 2px; }
-    .breadcrumb .current { color: #2563eb; font-weight: 500; }
-    .plan-title { font-size: 18px; font-weight: 700; color: #111827; }
-
-    /* ===== Filter Bar ===== */
-    .filter-card {
-        background: #fff; border-radius: 12px; border: 1px solid #e5e7eb;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 1rem 1.25rem;
+    .plan-title {
+        font-size: 20px; font-weight: 600; color: var(--plush-text);
+        margin: 0;
     }
-    .filter-row { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
-    .filter-row label { font-size: 14px; color: #6b7280; font-weight: 500; white-space: nowrap; margin: 0; }
-    .filter-row input[type="month"],
-    .filter-row input[type="text"] {
-        border: 1px solid #e5e7eb; border-radius: 8px; padding: 6px 12px;
-        font-size: 14px; color: #111827; background: #fff; outline: none;
-        line-height: 1.5; margin: 0;
+    .plan-header input[type="month"],
+    .plan-header input[type="text"] {
+        border: 1px solid var(--plush-blue-light); border-radius: var(--plush-radius-input);
+        padding: 6px 14px; font-size: 14px; color: var(--plush-text); background: var(--plush-white);
+        outline: none; font-family: inherit;
     }
-    .filter-row input:focus { box-shadow: 0 0 0 2px rgba(37,99,235,0.3); border-color: #93c5fd; }
+    .plan-header input:focus {
+        border-color: var(--plush-blue-deep);
+        box-shadow: 0 0 0 0.2rem rgba(135, 206, 235, 0.25);
+    }
+    .plan-count { font-size: 13px; color: var(--plush-text-light); margin-left: auto; }
+    .plan-count strong { color: var(--plush-text); }
     .search-box { position: relative; flex: 1; min-width: 200px; max-width: 320px; display: flex; align-items: stretch; }
-    .search-box .search-icon { position: absolute; left: 10px; top: 0; bottom: 0; margin: auto; color: #9ca3af; display: flex; align-items: center; font-size: 14px; }
+    .search-box .search-icon { position: absolute; left: 10px; top: 0; bottom: 0; margin: auto; color: var(--plush-text-light); display: flex; align-items: center; font-size: 14px; }
     .search-box input { padding-left: 32px !important; width: 100%; }
-    .filter-row .btn { display: inline-flex; align-items: center; vertical-align: middle; }
-    .plan-count { font-size: 13px; color: #6b7280; margin-left: auto; }
-    .plan-count strong { color: #111827; }
+
+    /* ===== Buttons ===== */
+    .plan-page .btn { border-radius: var(--plush-radius-button); font-weight: 600; transition: var(--plush-transition); }
+    .plan-page .btn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px var(--plush-shadow-medium); }
+    .plan-page .btn-primary { background: var(--plush-blue-deep); border-color: var(--plush-blue-deep); color: #fff; }
+    .plan-page .btn-primary:hover { background: #6BB8D6; border-color: #6BB8D6; }
+    .plan-page .btn-success { background: #7BC9A0; border-color: #7BC9A0; color: #fff; }
+    .plan-page .btn-success:hover { background: #5FB885; border-color: #5FB885; }
+    .plan-page .btn-outline-secondary { border-color: var(--plush-blue); color: var(--plush-text); }
+    .plan-page .btn-outline-secondary:hover { background: var(--plush-blue-light); border-color: var(--plush-blue-deep); color: var(--plush-text); }
+    .plan-page .btn-outline-primary { border-color: var(--plush-blue-deep); color: var(--plush-blue-deep); }
+    .plan-page .btn-outline-primary:hover { background: var(--plush-blue-light); border-color: var(--plush-blue-deep); color: var(--plush-text); }
+
+    /* ===== Insight Strip ===== */
+    .insight-card {
+        background: var(--plush-white); border-radius: var(--plush-radius-card);
+        padding: 0.875rem 1.25rem; box-shadow: 0 4px 20px var(--plush-shadow-soft);
+        display: flex; align-items: center; gap: 0.75rem; flex: 1; min-width: 160px;
+        transition: var(--plush-transition); border: 2px solid transparent;
+    }
+    .insight-card:hover {
+        transform: translateY(-1px) scale(1.01);
+        box-shadow: 0 8px 25px var(--plush-shadow-medium);
+        border-color: var(--plush-blue-light);
+    }
+    .insight-card .insight-icon {
+        width: 42px; height: 42px; border-radius: 14px;
+        display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+        font-size: 18px;
+    }
+    .insight-icon.blue { background: var(--plush-blue-light); color: #4A9BB5; }
+    .insight-icon.green { background: #D4EDDA; color: #4A8C5C; }
+    .insight-icon.amber { background: #FFF3CD; color: #8B6914; }
+    .insight-icon.purple { background: #E8D5F5; color: #7B4FA0; }
+    .insight-label { font-size: 11px; color: var(--plush-text-light); margin-bottom: 2px; }
+    .insight-value { font-size: 20px; font-weight: 700; color: var(--plush-text); line-height: 1; }
+    .insight-unit { font-size: 11px; color: var(--plush-text-light); margin-left: 2px; font-weight: 400; }
 
     /* ===== Customer Chips ===== */
     .customer-bar {
         display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
-        padding: 0.625rem 0.75rem; background: #f9fafb; border-radius: 8px;
-        border: 1px solid #e5e7eb; margin-top: 0.75rem;
+        padding: 0.5rem 1rem; background: var(--plush-white);
+        border-radius: var(--plush-radius-card); border: 2px solid var(--plush-blue-light);
+        box-shadow: 0 4px 20px var(--plush-shadow-soft);
     }
-    .customer-bar .bar-label { font-size: 13px; color: #6b7280; font-weight: 500; flex-shrink: 0; }
+    .customer-bar .bar-label { font-size: 13px; color: var(--plush-text-light); font-weight: 500; flex-shrink: 0; }
     .customer-chip {
         display: inline-flex; align-items: center; gap: 5px;
-        padding: 6px 14px; border-radius: 20px; font-size: 14px; font-weight: 500;
-        cursor: pointer; transition: all 0.15s; border: 1px solid #e5e7eb;
-        background: #fff; color: #374151;
+        padding: 6px 16px; border-radius: 20px; font-size: 13px; font-weight: 500;
+        cursor: pointer; transition: var(--plush-transition);
+        border: 1px solid var(--plush-blue-light); background: var(--plush-white); color: var(--plush-text);
     }
-    .customer-chip:hover { border-color: #2563eb; color: #2563eb; }
-    .customer-chip.active { background: #2563eb; color: #fff; border-color: #2563eb; }
+    .customer-chip:hover { border-color: var(--plush-blue-deep); color: var(--plush-blue-deep); background: var(--plush-blue-light); }
+    .customer-chip.active { background: var(--plush-blue-deep); color: #fff; border-color: var(--plush-blue-deep); }
     .customer-chip img { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; }
     .chip-icon { font-size: 0.9rem; }
     .clear-filter {
-        font-size: 12px; color: #6b7280; text-decoration: underline;
+        font-size: 12px; color: var(--plush-text-light); text-decoration: underline;
         cursor: pointer; border: none; background: none; padding: 4px 8px;
     }
-    .clear-filter:hover { color: #dc2626; }
+    .clear-filter:hover { color: #DC3545; }
 
-    /* ===== Stats Cards ===== */
-    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
-    .stat-card {
-        background: #fff; border-radius: 12px; padding: 1.25rem;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.08); border: 1px solid #e5e7eb;
-        display: flex; align-items: flex-start; gap: 1rem;
+    /* ===== Filter Card / Timeline Container ===== */
+    .filter-card {
+        background: var(--plush-white); border-radius: var(--plush-radius-card);
+        border: 2px solid var(--plush-blue-light);
+        box-shadow: 0 4px 20px var(--plush-shadow-soft); overflow: hidden;
     }
-    .stat-icon {
-        width: 52px; height: 52px; border-radius: 14px;
-        display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-    }
-    .stat-icon.blue { background: #eff6ff; color: #2563eb; }
-    .stat-icon.green { background: #dcfce7; color: #15803d; }
-    .stat-icon.amber { background: #fef3c7; color: #92400e; }
-    .stat-icon.purple { background: #f3e8ff; color: #7c3aed; }
-    .stat-info { min-width: 0; }
-    .stat-info .stat-title { font-size: 13px; color: #6b7280; margin-bottom: 4px; }
-    .stat-info .stat-value { font-size: 24px; font-weight: 700; color: #111827; line-height: 1; }
-    .stat-info .stat-unit { font-size: 12px; color: #6b7280; margin-left: 2px; }
-    .stat-info .stat-trend { font-size: 12px; margin-top: 4px; }
-    .stat-trend.up { color: #15803d; }
-    .stat-trend.down { color: #dc2626; }
-    .stat-trend.neutral { color: #6b7280; }
 
     /* ===== Day Panel (Accordion) ===== */
     .day-panel {
-        background: #fff; border-radius: 12px; border: 1px solid #e5e7eb;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.08); overflow: hidden;
+        background: var(--plush-white); border-radius: 20px;
+        border: 2px solid var(--plush-blue-light);
+        box-shadow: 0 4px 20px var(--plush-shadow-soft);
+        overflow: hidden; transition: var(--plush-transition);
     }
-    .day-panel.today { border-color: #2563eb; }
+    .day-panel:hover {
+        box-shadow: 0 8px 25px var(--plush-shadow-medium);
+    }
+    .day-panel.today { border-color: var(--plush-blue-deep); }
     .day-panel-header {
         display: flex; align-items: center; gap: 0.75rem;
-        padding: 0.75rem 1.25rem; cursor: pointer; transition: background 0.15s;
-        border: none; width: 100%; text-align: left; background: #f9fafb;
+        padding: 0.75rem 1.25rem; cursor: pointer; transition: background 0.3s;
+        border: none; width: 100%; text-align: left; background: var(--plush-cream);
     }
-    .day-panel-header:hover { background: #eff6ff; }
-    .day-panel.today .day-panel-header { background: #eff6ff; }
-    .day-panel-header .chevron { color: #2563eb; transition: transform 0.2s; }
+    .day-panel-header:hover { background: var(--plush-blue-light); }
+    .day-panel.today .day-panel-header { background: var(--plush-blue-light); }
+    .day-panel-header .chevron { color: var(--plush-blue-deep); transition: transform 0.2s; }
     .day-panel-header .chevron.collapsed { transform: rotate(-90deg); }
-    .day-panel-header .date-label { font-weight: 600; font-size: 15px; color: #111827; }
+    .day-panel-header .date-label { font-weight: 600; font-size: 15px; color: var(--plush-text); }
     .day-panel-header .today-badge {
-        font-size: 12px; font-weight: 600; padding: 3px 10px;
-        border-radius: 12px; background: #2563eb; color: #fff;
+        font-size: 12px; font-weight: 600; padding: 3px 12px;
+        border-radius: 12px; background: var(--plush-blue-deep); color: #fff;
     }
     .day-panel-header .plan-count-badge {
         font-size: 12px; padding: 4px 12px; border-radius: 12px; font-weight: 500;
-        background: #dbeafe; color: #1e40af;
+        background: var(--plush-blue-light); color: #4A9BB5;
     }
     .day-panel-header .total-badge {
         font-size: 12px; padding: 4px 12px; border-radius: 12px; font-weight: 500;
-        background: #dcfce7; color: #15803d;
+        background: #D4EDDA; color: #4A8C5C;
     }
-    .day-panel-header .expand-hint { font-size: 12px; color: #9ca3af; margin-left: auto; }
+    .day-panel-header .expand-hint { font-size: 12px; color: var(--plush-text-light); margin-left: auto; }
     .day-panel-body { padding: 0; }
     .day-panel-body.collapsed { display: none; }
 
     /* ===== Plan Table ===== */
-    .plan-table { width: 100%; font-size: 14px; min-width: 900px; }
+    .plan-table { width: 100%; font-size: 14px; font-family: inherit; }
     .plan-table thead th {
-        background: #1e3a8a; color: #dbeafe; font-weight: 600;
-        padding: 12px 14px; white-space: nowrap; font-size: 13px;
+        background: var(--plush-blue-light); color: var(--plush-text); font-weight: 600;
+        padding: 10px 14px; white-space: nowrap; font-size: 13px;
+        border-bottom: 2px solid var(--plush-blue);
     }
-    .plan-table tbody tr { border-bottom: 1px solid #e5e7eb; transition: background 0.1s; }
-    .plan-table tbody tr:hover { background: #eff6ff; }
-    .plan-table tbody tr:nth-child(even) { background: #f9fafb; }
-    .plan-table tbody tr:nth-child(even):hover { background: #eff6ff; }
+    .plan-table tbody tr { border-bottom: 1px solid var(--plush-blue-light); transition: background 0.2s; }
+    .plan-table tbody tr:hover { background: var(--plush-blue-light); }
+    .plan-table tbody tr:nth-child(even) { background: var(--plush-cream); }
+    .plan-table tbody tr:nth-child(even):hover { background: var(--plush-blue-light); }
     .plan-table tbody tr.voided { opacity: 0.5; }
-    .plan-table td { padding: 12px 14px; }
-    .product-code { font-family: monospace; font-size: 13px; font-weight: 600; color: #2563eb; }
-    .product-name { font-size: 13px; color: #6b7280; }
-
-    /* ===== Stock Badge ===== */
-    .stock-badge {
-        display: inline-flex; align-items: center; gap: 4px;
-        padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600;
-    }
-    .stock-badge.sufficient { background: #dcfce7; color: #15803d; border: 1px solid #86efac; }
-    .stock-badge.shortage { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
-    .stock-badge.no_stock { background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; }
-
-    /* ===== Progress Bar ===== */
-    .progress-wrap { min-width: 140px; }
-    .progress-bar-track {
-        height: 10px; background: #e5e7eb; border-radius: 5px; overflow: hidden;
-    }
-    .progress-bar-fill { height: 100%; border-radius: 5px; transition: width 0.5s; }
-    .progress-bar-fill.low { background: #ef4444; }
-    .progress-bar-fill.mid { background: #f59e0b; }
-    .progress-bar-fill.high { background: #10b981; }
-    .progress-bar-fill.over { background: #dc2626; animation: pulse 1.5s infinite; }
-    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.7; } }
-    .progress-info { display: flex; justify-content: space-between; font-size: 12px; margin-top: 2px; }
-    .progress-info .pct { font-weight: 600; }
-    .progress-info .pct.low { color: #ef4444; }
-    .progress-info .pct.mid { color: #f59e0b; }
-    .progress-info .pct.high { color: #10b981; }
-    .progress-info .pct.over { color: #dc2626; }
-    .progress-info .remaining { color: #9ca3af; }
-    .over-warning { font-size: 12px; color: #dc2626; font-weight: 600; margin-top: 2px; }
+    .product-code { font-family: monospace; font-size: 13px; font-weight: 600; color: #4A9BB5; }
+    .product-name { font-size: 13px; font-weight: 600; color: var(--plush-text); }
 
     /* ===== Action Buttons ===== */
     .action-btn {
-        display: inline-flex; align-items: center; gap: 3px;
-        padding: 5px 10px; border-radius: 6px; font-size: 12px; font-weight: 500;
-        border: none; cursor: pointer; transition: all 0.15s;
+        display: inline-flex; align-items: center; gap: 4px;
+        padding: 6px 14px; border-radius: var(--plush-radius-button); font-size: 12px; font-weight: 600;
+        border: none; cursor: pointer; transition: var(--plush-transition); font-family: inherit;
     }
-    .action-btn.view { background: #eff6ff; color: #2563eb; }
-    .action-btn.view:hover { background: #2563eb; color: #fff; }
-    .action-btn.edit { background: #fef3c7; color: #92400e; }
-    .action-btn.edit:hover { background: #f59e0b; color: #fff; }
-    .action-btn.void { background: #fee2e2; color: #b91c1c; border: 1px solid rgba(220,38,38,0.3); }
-    .action-btn.void:hover { background: #dc2626; color: #fff; }
+    .action-btn.view { background: var(--plush-blue-light); color: #4A9BB5; }
+    .action-btn.view:hover { background: var(--plush-blue-deep); color: #fff; transform: translateY(-1px); box-shadow: 0 4px 12px var(--plush-shadow-medium); }
     .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ===== Detail Modal ===== */
+    #detailModal .modal-content { border-radius: 20px; border: 2px solid var(--plush-blue-light); }
+    #detailModal .detail-info-row { display:flex; gap:1.5rem; flex-wrap:wrap; margin-bottom:0.5rem; font-size:13px; }
+    #detailModal .detail-info-row .info-item { white-space:nowrap; }
+    #detailModal .detail-info-row .info-label { color:var(--plush-text-light); margin-right:4px; }
+    #detailModal .detail-info-row .info-value { font-weight:600; color:var(--plush-text); }
+    #detailModal .detail-table { width:100%; border-collapse:collapse; font-size:12px; }
+    #detailModal .detail-table th { background:var(--plush-blue-light); padding:8px 10px; text-align:left; font-weight:600; color:var(--plush-text); border-bottom:2px solid var(--plush-blue); white-space:nowrap; }
+    #detailModal .detail-table td { padding:8px 10px; border-bottom:1px solid var(--plush-blue-light); color:var(--plush-text); }
+    #detailModal .detail-table tbody tr:hover { background:var(--plush-blue-light); }
 
     /* ===== Empty State ===== */
     .empty-state {
         display: flex; flex-direction: column; align-items: center; justify-content: center;
-        padding: 3rem; color: #9ca3af;
+        padding: 3rem; color: var(--plush-text-light);
     }
     .empty-state .empty-icon { font-size: 2.5rem; opacity: 0.3; margin-bottom: 0.75rem; }
     .empty-state p { font-size: 14px; margin: 0; }
-    .empty-state .clear-link { font-size: 13px; color: #2563eb; text-decoration: underline; cursor: pointer; margin-top: 0.5rem; }
+    .empty-state .clear-link { font-size: 13px; color: var(--plush-blue-deep); text-decoration: underline; cursor: pointer; margin-top: 0.5rem; }
 
     /* ===== Upload Modal ===== */
     .upload-zone {
-        border: 2px dashed #ced4da; border-radius: 8px; padding: 2rem;
-        text-align: center; cursor: pointer; transition: border-color 0.2s;
+        border: 2px dashed var(--plush-blue); border-radius: var(--plush-radius-card); padding: 2rem;
+        text-align: center; cursor: pointer; transition: var(--plush-transition);
+        background: var(--plush-cream);
     }
-    .upload-zone:hover, .upload-zone.dragover { border-color: #0d6efd; background: #f8f9fa; }
-    .staging-invalid { background-color: #fff5f5; }
+    .upload-zone:hover, .upload-zone.dragover { border-color: var(--plush-blue-deep); background: var(--plush-blue-light); }
+    .staging-invalid { background-color: #FFF5F5; }
 
     /* ===== Inline Edit ===== */
     [contenteditable="true"] {
-        outline: 1px dashed #2563eb; padding: 0 4px; border-radius: 3px; min-width: 40px;
+        outline: 1px dashed var(--plush-blue-deep); padding: 0 4px; border-radius: 6px; min-width: 40px;
     }
-    [contenteditable="true"]:focus { outline: 2px solid #2563eb; background: #f0f7ff; }
+    [contenteditable="true"]:focus { outline: 2px solid var(--plush-blue-deep); background: var(--plush-blue-light); }
 
-    /* ===== Icon Sizes ===== */
-    .breadcrumb .fas { font-size: 11px; }
-    .search-icon { font-size: 14px; }
-    .action-btn .fas { font-size: 12px; }
-    .stock-badge .fas { font-size: 12px; }
-    .over-warning .fas { font-size: 12px; }
-    .timeline-title { font-size: 15px; font-weight: 600; color: #111827; margin: 0; }
-    .timeline-subtitle { font-size: 13px; color: #9ca3af; }
-
-    /* ===== Responsive ===== */
-    @media (max-width: 992px) {
-        .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    /* ===== Add Modal ===== */
+    #addModal .modal-dialog { max-width: 1200px; width: 90%; }
+    #addModal .modal-content { border-radius: 20px; border: 2px solid var(--plush-blue-light); }
+    #addModal .form-control, #addModal .form-select { border-radius: var(--plush-radius-input); border-color: var(--plush-blue-light); }
+    #addModal .form-control:focus, #addModal .form-select:focus {
+        border-color: var(--plush-blue-deep); box-shadow: 0 0 0 0.2rem rgba(135,206,235,0.25);
     }
 
     /* ===== Product Search Dropdown ===== */
     .product-search-dropdown {
-        position: absolute; top: 100%; left: 0; right: 0;
-        background: #fff; border: 1px solid #d1d5db; border-radius: 6px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.12); max-height: 200px;
-        overflow-y: auto; z-index: 1050; margin-top: 2px;
+        position: absolute; top: 100%; left: 0;
+        min-width: 280px; right: auto;
+        background: var(--plush-white); border: 2px solid var(--plush-blue-light); border-radius: 14px;
+        box-shadow: 0 8px 25px var(--plush-shadow-medium); max-height: 240px;
+        overflow-y: auto; z-index: 1050; margin-top: 4px;
     }
     .product-search-item {
-        padding: 8px 12px; cursor: pointer; display: flex;
-        justify-content: space-between; align-items: center; font-size: 13px;
+        padding: 10px 14px; cursor: pointer; display: flex;
+        justify-content: space-between; align-items: center; font-size: 14px;
+        line-height: 1.5; gap: 12px; transition: background 0.2s;
     }
-    .product-search-item:hover { background: #eff6ff; }
-    .product-search-item .item-name { font-weight: 500; color: #111827; }
-    .product-search-item .item-barcode { font-size: 12px; color: #9ca3af; }
+    .product-search-item:hover { background: var(--plush-blue-light); }
+    .product-search-item .item-name { font-weight: 500; color: var(--plush-text); white-space: nowrap; }
+    .product-search-item .item-barcode { font-size: 13px; color: var(--plush-text-light); white-space: nowrap; flex-shrink: 0; }
+
+    /* ===== Date Input ===== */
+    .add-date::-webkit-calendar-picker-indicator {
+        position: absolute; left: 0; top: 0; width: 100%; height: 100%;
+        margin: 0; padding: 0; opacity: 0; cursor: pointer;
+    }
+    .add-date { position: relative; cursor: pointer; }
+
+    /* ===== Report Table (merged cells) ===== */
+    .report-table { border-collapse: collapse; }
+    .report-table thead th {
+        position: sticky; top: 0; z-index: 2;
+        border-bottom: 2px solid var(--plush-blue);
+    }
+    .report-table .col-customer { min-width: 100px; }
+    .report-table .col-date { min-width: 120px; text-align: center; }
+    /* Override plan-table striping — not compatible with rowspan */
+    .report-table tbody tr:nth-child(even) { background: transparent; }
+    .report-table tbody tr:nth-child(even):hover { background: var(--plush-blue-light); }
+    /* All data cells vertically centered */
+    .report-table tbody td { vertical-align: middle; }
+    .report-table .cell-customer {
+        vertical-align: middle; text-align: center;
+        font-weight: 600; white-space: nowrap;
+        background: var(--plush-cream);
+        border-right: 2px solid var(--plush-blue-light);
+        border-left: 3px solid var(--plush-blue-deep);
+        padding: 12px 14px;
+    }
+    .report-table .cell-customer .customer-name-text {
+        display: block; font-size: 14px; color: var(--plush-text);
+    }
+    .report-table .cell-customer .customer-count-badge {
+        display: inline-block; margin-top: 4px;
+        font-size: 11px; font-weight: 500; padding: 2px 8px;
+        border-radius: 8px; background: var(--plush-blue-light); color: #4A9BB5;
+    }
+    .report-table .cell-customer-clickable { cursor: pointer; }
+    .report-table .cell-customer-clickable:hover { background: var(--plush-blue-light); }
+    .report-table .cell-date {
+        vertical-align: middle; text-align: center;
+        white-space: nowrap;
+        background: #FAFCFD;
+        border-right: 1px solid var(--plush-blue-light);
+        padding: 10px 12px;
+    }
+    .report-table .cell-date .date-text {
+        display: block; font-size: 13px; font-weight: 600; color: var(--plush-text);
+    }
+    .report-table .cell-date .date-today-tag {
+        display: inline-block; margin-top: 3px;
+        font-size: 11px; font-weight: 600; padding: 2px 8px;
+        border-radius: 8px; background: var(--plush-blue-deep); color: #fff;
+    }
+
+    /* ===== Misc ===== */
+    .timeline-title { font-size: 15px; font-weight: 600; color: var(--plush-text); margin: 0; }
+    .timeline-subtitle { font-size: 13px; color: var(--plush-text-light); }
+    .stock-badge .fas, .over-warning .fas { font-size: 12px; }
+
+    /* ===== View Tabs ===== */
+    .view-tabs { display: flex; gap: 0; }
+    .view-tab {
+        padding: 0.625rem 1.25rem;
+        font-size: 14px; font-weight: 600; font-family: inherit;
+        border: none; background: transparent;
+        color: var(--plush-text-light); cursor: pointer;
+        border-bottom: 3px solid transparent;
+        transition: color 0.2s, border-color 0.2s;
+    }
+    .view-tab:hover { color: var(--plush-blue-deep); }
+    .view-tab.active {
+        color: var(--plush-blue-deep);
+        border-bottom-color: var(--plush-blue-deep);
+        background: var(--plush-blue-light);
+        border-radius: 10px 10px 0 0;
+    }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="plan-page">
-    <!-- Top Header Bar -->
+<div class="plan-page" style="background:#f8fafc;min-height:100vh;">
+    <!-- Compact Header -->
     <div class="plan-header">
         <div class="plan-header-inner">
-            <div>
-                <h1 class="plan-title">月度采购计划总览</h1>
+            <div style="display:flex;align-items:center;gap:1rem;">
+                <h1 class="plan-title">出货计划</h1>
+                <input type="month" id="filterMonthInput" style="border:1px solid #e5e7eb;border-radius:8px;padding:4px 10px;font-size:14px;outline:none;">
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="refreshBtn">
+                    <i class="fas fa-sync-alt" id="refreshIcon"></i>
+                </button>
+                <div class="search-box">
+                    <i class="fas fa-search search-icon"></i>
+                    <input type="text" id="searchInput" placeholder="搜索产品/客户...">
+                </div>
+                <span class="plan-count">
+                    共 <strong id="activePlanCount">0</strong> 条 / <strong id="activeDateCount">0</strong> 个交付日
+                </span>
             </div>
             <div style="display:flex;gap:0.5rem;">
                 <button type="button" class="btn btn-outline-secondary btn-sm" id="downloadTemplateBtn">
@@ -246,81 +352,56 @@
                     <i class="fas fa-file-excel me-1"></i>批量上传
                 </button>
                 <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addModal">
-                    <i class="fas fa-plus me-1"></i>新增计划
+                    <i class="fas fa-plus me-1"></i>新增出货计划
                 </button>
             </div>
         </div>
     </div>
 
-    <div style="padding:1rem 1.5rem;">
-        <!-- Filter Area -->
-        <div class="filter-card mb-3">
-            <div class="filter-row">
-                <label>计划月份：</label>
-                <input type="month" id="filterMonthInput">
-                <button type="button" class="btn btn-sm btn-outline-secondary" id="refreshBtn">
-                    <i class="fas fa-sync-alt me-1" id="refreshIcon"></i>刷新
-                </button>
-                <div class="search-box">
-                    <i class="fas fa-search search-icon"></i>
-                    <input type="text" id="searchInput" placeholder="搜索产品/客户...">
-                </div>
-                <span class="plan-count">
-                    共 <strong id="activePlanCount">0</strong> 条有效计划 / <strong id="activeDateCount">0</strong> 个交付日期
-                </span>
+    <div style="padding:0.75rem 1.5rem;">
+        <!-- Insight Strip -->
+        <div style="display:flex;gap:0.75rem;margin-bottom:0.75rem;flex-wrap:wrap;">
+            <div style="background:#fff;border-radius:8px;padding:0.625rem 1rem;box-shadow:0 1px 2px rgba(0,0,0,0.06);display:flex;align-items:center;gap:0.5rem;flex:1;min-width:160px;">
+                <i class="fas fa-clipboard-list" style="color:#2563eb;font-size:16px;"></i>
+                <div><div style="font-size:11px;color:#6b7280;">计划总量</div><div><span id="totalPlanQty" style="font-size:18px;font-weight:700;color:#111827;">0</span><span style="font-size:11px;color:#6b7280;margin-left:2px;">件</span></div></div>
             </div>
-            <div class="customer-bar" id="customerFilter">
-                <span class="bar-label">客户筛选：</span>
-                <button class="customer-chip active" data-customer-id="0">
-                    <i class="fas fa-globe chip-icon"></i>全选
-                </button>
+            <div style="background:#fff;border-radius:8px;padding:0.625rem 1rem;box-shadow:0 1px 2px rgba(0,0,0,0.06);display:flex;align-items:center;gap:0.5rem;flex:1;min-width:160px;">
+                <i class="fas fa-truck" style="color:#15803d;font-size:16px;"></i>
+                <div><div style="font-size:11px;color:#6b7280;">累计出货</div><div><span id="totalShippedQty" style="font-size:18px;font-weight:700;color:#111827;">0</span><span style="font-size:11px;color:#6b7280;margin-left:2px;">件</span></div></div>
+            </div>
+            <div style="background:#fff;border-radius:8px;padding:0.625rem 1rem;box-shadow:0 1px 2px rgba(0,0,0,0.06);display:flex;align-items:center;gap:0.5rem;flex:1;min-width:160px;">
+                <i class="fas fa-box" style="color:#92400e;font-size:16px;"></i>
+                <div><div style="font-size:11px;color:#6b7280;">剩余待出</div><div><span id="totalRemainingQty" style="font-size:18px;font-weight:700;color:#111827;">0</span><span style="font-size:11px;color:#6b7280;margin-left:2px;">件</span></div></div>
+            </div>
+            <div style="background:#fff;border-radius:8px;padding:0.625rem 1rem;box-shadow:0 1px 2px rgba(0,0,0,0.06);display:flex;align-items:center;gap:0.5rem;flex:1;min-width:160px;border-left:3px solid #2563eb;">
+                <i class="fas fa-shield-alt" style="color:#7c3aed;font-size:16px;"></i>
+                <div><div style="font-size:11px;color:#6b7280;">库存充足率</div><div><span id="stockRate" style="font-size:18px;font-weight:700;color:#111827;">0</span><span style="font-size:11px;color:#6b7280;margin-left:2px;">%</span></div></div>
             </div>
         </div>
 
-        <!-- Stats Cards -->
-        <div class="stats-grid mb-3">
-            <div class="stat-card">
-                <div class="stat-icon blue"><i class="fas fa-clipboard-list fa-lg"></i></div>
-                <div class="stat-info">
-                    <div class="stat-title">当月计划总数量</div>
-                    <div><span class="stat-value" id="totalPlanQty">0</span><span class="stat-unit">件</span></div>
-                </div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon green"><i class="fas fa-truck fa-lg"></i></div>
-                <div class="stat-info">
-                    <div class="stat-title">累计出货总数量</div>
-                    <div><span class="stat-value" id="totalShippedQty">0</span><span class="stat-unit">件</span></div>
-                </div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon amber"><i class="fas fa-box fa-lg"></i></div>
-                <div class="stat-info">
-                    <div class="stat-title">剩余计划总数量</div>
-                    <div><span class="stat-value" id="totalRemainingQty">0</span><span class="stat-unit">件</span></div>
-                </div>
-            </div>
-            <div class="stat-card" style="border-left:4px solid #2563eb;">
-                <div class="stat-icon purple"><i class="fas fa-shield-alt fa-lg"></i></div>
-                <div class="stat-info">
-                    <div class="stat-title">库存充足率</div>
-                    <div><span class="stat-value" id="stockRate">0</span><span class="stat-unit">%</span></div>
-                </div>
-            </div>
+        <!-- Customer Filter -->
+        <div class="customer-bar" id="customerFilter" style="margin-bottom:0.75rem;">
+            <span class="bar-label">客户：</span>
+            <button class="customer-chip active" data-customer-id="0">
+                <i class="fas fa-globe chip-icon"></i>全选
+            </button>
         </div>
 
         <!-- Timeline Plan Area -->
         <div class="filter-card">
-            <div style="display:flex;justify-content:space-between;align-items:center;padding:0.75rem 1.25rem;border-bottom:1px solid #e5e7eb;">
-                <h2 class="timeline-title">计划时序展示 — <span id="monthDisplay"></span></h2>
+            <div class="filter-card-header" style="display:flex;justify-content:space-between;align-items:center;padding:0 1.25rem 0 0;border-bottom:1px solid #e5e7eb;">
+                <div class="view-tabs">
+                    <button class="view-tab" data-tab="summary"><i class="fas fa-layer-group me-1"></i>月度汇总</button>
+                    <button class="view-tab active" data-tab="timeline"><i class="fas fa-stream me-1"></i>出货时序</button>
+                </div>
                 <span class="timeline-subtitle">
-                    当月共 <strong id="daysInMonthCount" style="color:#111827;">0</strong> 天 · 有计划 <strong id="planDateCount" style="color:#111827;">0</strong> 天
+                    <span id="monthDisplay"></span> · <strong id="daysInMonthCount" style="color:#111827;">0</strong> 天 · 有计划 <strong id="planDateCount" style="color:#111827;">0</strong> 天
                 </span>
             </div>
-            <div id="timelinePanels" style="padding:1rem 1.25rem;">
+            <div id="timelinePanels" style="padding:0.75rem 1rem;">
                 <div class="empty-state">
                     <i class="fas fa-chart-bar empty-icon"></i>
-                    <p>请选择月份查询采购计划</p>
+                    <p>请选择月份查询出货计划</p>
                 </div>
             </div>
         </div>
@@ -329,71 +410,58 @@
 
 <!-- 手动添加弹窗 -->
 <div class="modal fade" id="addModal" tabindex="-1">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">新增采购计划</h5>
+                <h5 class="modal-title">新增出货计划</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
                 <form id="addForm">
-                    <div class="mb-3">
-                        <label class="form-label">客户 <span class="text-danger">*</span></label>
-                        <select class="form-select" id="addCustomer" required>
-                            <option value="">请选择客户</option>
-                            {% for c in customers %}
-                            <option value="{{ c.id }}" data-name="{{ c.name }}">{{ c.name }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">计划月份 <span class="text-danger">*</span></label>
-                        <input type="month" class="form-control" id="addPlanMonth" required>
-                    </div>
-                    <hr>
-                    <h6>计划明细</h6>
+                    <h6>出货明细</h6>
                     <div id="addDetailRows">
                         <div class="detail-row border rounded p-2 mb-2">
-                            <div class="mb-2">
-                                <label class="form-label mb-1 small">69码 <span class="text-danger">*</span></label>
-                                <div class="position-relative">
-                                    <input type="text" class="form-control form-control-sm add-barcode" required placeholder="输入69码" autocomplete="off">
-                                    <div class="autocomplete-dropdown" style="display:none;"></div>
-                                </div>
-                                <small class="form-text barcode-hint"></small>
-                            </div>
                             <div class="row g-2">
-                                <div class="col-6">
-                                    <label class="form-label mb-1 small">产品名称</label>
+                                <div class="col-3">
+                                    <label class="form-label mb-1 small">客户名称 <span class="text-danger">*</span></label>
+                                    <select class="form-select form-select-sm add-customer" required>
+                                        <option value="">请选择客户</option>
+                                        {% for c in customers %}
+                                        <option value="{{ c.id }}" data-name="{{ c.name }}">{{ c.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-3">
+                                    <label class="form-label mb-1 small">出货时间 <span class="text-danger">*</span></label>
+                                    <input type="date" class="form-control form-control-sm add-date" required>
+                                </div>
+                                <div class="col-3">
+                                    <label class="form-label mb-1 small">产品名称 <span class="text-danger">*</span></label>
                                     <div class="position-relative">
-                                        <input type="text" class="form-control form-control-sm add-product-name" required placeholder="输入关键字搜索产品" autocomplete="off">
+                                        <input type="text" class="form-control form-control-sm add-product-name" required placeholder="输入关键字搜索" autocomplete="off">
                                         <div class="product-search-dropdown" style="display:none;"></div>
                                     </div>
                                 </div>
                                 <div class="col-3">
-                                    <label class="form-label mb-1 small">数量</label>
+                                    <label class="form-label mb-1 small">数量 <span class="text-danger">*</span></label>
                                     <input type="number" class="form-control form-control-sm add-quantity" required min="1" max="999999">
-                                </div>
-                                <div class="col-3">
-                                    <label class="form-label mb-1 small">日期</label>
-                                    <input type="date" class="form-control form-control-sm add-date" required>
                                 </div>
                             </div>
                             <input type="hidden" class="add-product-id" value="0">
+                            <input type="hidden" class="add-barcode" value="">
                         </div>
                     </div>
                     <button type="button" class="btn btn-sm btn-outline-primary" id="addDetailRowBtn">
                         <i class="fas fa-plus me-1"></i>添加明细行
                     </button>
-                    <div class="mb-3 mt-2">
-                        <label class="form-label">备注</label>
-                        <input type="text" class="form-control" id="addRemark" maxlength="500">
-                    </div>
                 </form>
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                <button type="button" class="btn btn-primary" id="addSubmitBtn">创建计划</button>
+            <div class="modal-footer d-block">
+                <div id="addFormFeedback" style="display:none;font-size:13px;"></div>
+                <div class="mt-2 text-end">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" id="addSubmitBtn">创建出货计划</button>
+                </div>
             </div>
         </div>
     </div>
@@ -404,7 +472,7 @@
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title"><i class="fas fa-file-excel me-2"></i>批量上传采购计划</h5>
+                <h5 class="modal-title"><i class="fas fa-file-excel me-2"></i>批量上传出货计划</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
@@ -441,7 +509,7 @@
                 </div>
                 <div class="mt-3 p-2 bg-light rounded">
                     <small class="text-muted"><i class="fas fa-info-circle me-1"></i>
-                    Excel格式：第1行标题（客户名称、产品名称、69码、数量、计划日期、备注），从第2行起为数据。所有行必须属于同一月份。</small>
+                    Excel格式：第1行标题（客户名称、产品名称、69码、数量、出货日期、备注），从第2行起为数据。所有行必须属于同一月份。</small>
                 </div>
             </div>
             <div class="modal-footer">
@@ -457,35 +525,31 @@
     </div>
 </div>
 
-<!-- 编辑弹窗 -->
-<div class="modal fade" id="editModal" tabindex="-1">
-    <div class="modal-dialog">
+<!-- 详情弹窗 -->
+<div class="modal fade" id="detailModal" tabindex="-1">
+    <div class="modal-dialog modal-lg" style="max-width:900px;">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">编辑采购计划</h5>
+                <h5 class="modal-title">计划详情</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <form id="editForm">
-                    <input type="hidden" id="editId">
-                    <div class="mb-3"><label class="form-label">状态</label>
-                        <select class="form-select" id="editStatus">
-                            <option value="pending">待确认</option>
-                            <option value="confirmed">已确认</option>
-                            <option value="completed">已完成</option>
-                            <option value="cancelled">已取消</option>
-                        </select>
-                    </div>
-                    <div class="mb-3"><label class="form-label">备注</label><input type="text" class="form-control" id="editRemark" maxlength="500"></div>
-                </form>
+                <!-- 计划基本信息 -->
+                <div id="detailPlanInfo" class="mb-3"></div>
+                <!-- 计划明细表 -->
+                <h6 class="fw-bold mb-2">计划明细</h6>
+                <div id="detailPlanDetails" class="mb-3" style="max-height:220px;overflow-y:auto;"></div>
+                <!-- 出货流水 -->
+                <h6 class="fw-bold mb-2">出货流水</h6>
+                <div id="detailShipmentRecords" style="max-height:260px;overflow-y:auto;"></div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                <button type="button" class="btn btn-primary" id="saveEditBtn">保存</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
             </div>
         </div>
     </div>
 </div>
+
 {% endblock %}
 
 {% block scripts %}

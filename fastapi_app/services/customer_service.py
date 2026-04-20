@@ -3,6 +3,7 @@ import logging
 from sqlalchemy import select, func
 
 from fastapi_app.shared_models import Customer, Order, StockIn, StockOut
+from fastapi_app.services import escape_like
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +25,9 @@ async def search_customers(db, query_str: str) -> list[Customer]:
     result = await db.execute(
         select(Customer).where(
             Customer.status == True,
-            (Customer.name.contains(query_str)) |
-            (Customer.contact.contains(query_str)) |
-            (Customer.phone.contains(query_str))
+            (Customer.name.like(f'%{escape_like(query_str)}%')) |
+            (Customer.contact.like(f'%{escape_like(query_str)}%')) |
+            (Customer.phone.like(f'%{escape_like(query_str)}%'))
         ).limit(20)
     )
     return list(result.scalars().all())

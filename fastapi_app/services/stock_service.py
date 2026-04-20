@@ -1,23 +1,33 @@
 """
 库存管理业务逻辑服务
 
-从 Flask stock.py 提取的核心业务逻辑，适配异步 SQLAlchemy。
+核心 CRUD 和库存计算已统一至 fastapi_app.shared.stock_crud_service。
+本服务负责异步适配层：将同步 shared 函数包装为异步调用，
+并处理事件发布等 FastAPI 特有逻辑。
 """
+import asyncio
 import logging
 from datetime import datetime
-from typing import Optional
 
-from sqlalchemy import select, func, delete, or_
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
-from sqlalchemy.exc import SQLAlchemyError
 
 from fastapi_app.shared_models import (
-    Product, StockIn, StockOut, InventoryLog, Order, Customer
+    Product, StockIn, StockOut
 )
-from fastapi_app.services.stock_concurrency import get_product_for_update
+from fastapi_app.shared.stock_concurrency import get_product_for_update
+from fastapi_app.shared.stock_crud_service import (
+    create_stockin as _sync_create_stockin,
+    update_stockin as _sync_update_stockin,
+    delete_stockin as _sync_delete_stockin,
+    create_stockout as _sync_create_stockout,
+    update_stockout as _sync_update_stockout,
+    delete_stockout as _sync_delete_stockout,
+    get_inventory as _sync_get_inventory,
+)
+from fastapi_app.core.database import SyncSessionLocal
 from fastapi_app.services.notification_service import publish_stock_event, StockEvent
-from fastapi_app.services import escape_like
 
 logger = logging.getLogger(__name__)
 
@@ -63,107 +73,99 @@ async def get_stockins(db: AsyncSession, page: int = 1, per_page: int = 50) -> d
 async def create_stockin(db: AsyncSession, product_id: int, quantity: int,
                          customer: str, stockin_date_str: str,
                          note: str) -> dict:
-    """创建入库记录"""
-    product = await get_product_for_update(db, product_id)
+    """创建入库记录 - 委托至共享同步服务"""
+    stockin_date = _parse_date_preserve_time(stockin_date_str)
 
-    stockin_date = _parse_stockin_date(stockin_date_str)
+    loop = asyncio.get_running_loop()
+    session = SyncSessionLocal()
+    try:
+        stockin = await loop.run_in_executor(
+            None, _sync_create_stockin, session, product_id, quantity,
+            customer, stockin_date, note
+        )
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
-    from fastapi_app.services.batch_service import generate_stockin_number
-    stockin_no = await generate_stockin_number(db)
+    # 发布库存变更事件（数据已提交，事件丢失不影响一致性）
+    try:
+        product = await get_product_for_update(db, product_id)
+        publish_stock_event(StockEvent.STOCK_CHANGED, {
+            'product_id': product_id, 'product_name': product.name,
+            'change_type': '入库', 'quantity': quantity,
+            'current_stock': product.current_stock,
+        })
+    except Exception as e:
+        logger.warning(f'入库事件发布失败（不影响数据）: {e}')
+    logger.info(f'入库添加成功：{stockin.stockin_no}，客户：{customer}，产品ID：{product_id}，数量：{quantity}')
 
-    stockin = StockIn(
-        stockin_no=stockin_no,
-        product_id=product_id,
-        quantity=quantity,
-        customer=customer,
-        stockin_date=stockin_date,
-        note=note
-    )
-    db.add(stockin)
-    await db.flush()
-
-    product.current_stock += quantity
-
-    log = InventoryLog(
-        product_id=product_id,
-        change_type='入库',
-        change_quantity=quantity,
-        related_id=str(stockin.id),
-        note=f'入库ID：{stockin.id}'
-    )
-    db.add(log)
-
-    await db.commit()
-    await db.refresh(stockin)
-    logger.info(f'入库添加成功：{stockin_no}，客户：{customer}，产品：{product.name}，数量：{quantity}')
-
-    # 发布库存变更事件
-    publish_stock_event(StockEvent.STOCK_CHANGED, {
-        'product_id': product_id, 'product_name': product.name,
-        'change_type': '入库', 'quantity': quantity,
-        'current_stock': product.current_stock,
-    })
-
-    return {'id': stockin.id, 'stockin_no': stockin_no}
+    return {'id': stockin.id, 'stockin_no': stockin.stockin_no}
 
 
 async def update_stockin(db: AsyncSession, stockin_id: int, quantity: int,
                          customer: str, stockin_date_str: str,
                          note: str) -> None:
-    """更新入库记录"""
-    stockin = await db.get(StockIn, stockin_id)
-    if not stockin:
+    """更新入库记录 - 委托至共享同步服务"""
+    # 先从异步会话获取 stockin 以解析时间
+    stockin_obj = await db.get(StockIn, stockin_id)
+    if not stockin_obj:
         raise ValueError('入库记录不存在')
+    stockin_date = _parse_date_preserve_time(stockin_date_str, stockin_obj.stockin_date)
+    old_quantity = stockin_obj.quantity
+    old_stockin_no = stockin_obj.stockin_no
 
-    stockin_date = _parse_stockin_date(stockin_date_str, stockin.stockin_date)
-
-    old_quantity = stockin.quantity
-    stockin.quantity = quantity
-    stockin.customer = customer
-    stockin.note = note
-    stockin.stockin_date = stockin_date
-
-    if quantity != old_quantity:
-        product = await get_product_for_update(db, stockin.product_id)
-        product.current_stock += (quantity - old_quantity)
-        log = InventoryLog(
-            product_id=stockin.product_id,
-            change_type='入库修改',
-            change_quantity=quantity - old_quantity,
-            related_id=str(stockin.id),
-            note=f'入库修改ID：{stockin.id}'
+    loop = asyncio.get_running_loop()
+    session = SyncSessionLocal()
+    try:
+        # 从同步会话重新获取 stockin 对象
+        sync_stockin = session.execute(
+            select(StockIn).where(StockIn.id == stockin_id)
+        ).scalar_one_or_none()
+        if not sync_stockin:
+            raise ValueError('入库记录不存在')
+        await loop.run_in_executor(
+            None, _sync_update_stockin, session, sync_stockin, quantity,
+            customer, stockin_date, note
         )
-        db.add(log)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
-    await db.commit()
-    logger.info(f'入库编辑成功：{stockin.stockin_no}，数量变更：{old_quantity} -> {quantity}')
+    logger.info(f'入库编辑成功：{old_stockin_no}，数量变更：{old_quantity} -> {quantity}')
 
 
 async def delete_stockin(db: AsyncSession, stockin_id: int) -> None:
-    """删除入库记录"""
-    stockin = await db.get(StockIn, stockin_id)
-    if not stockin:
+    """删除入库记录 - 委托至共享同步服务"""
+    stockin_obj = await db.get(StockIn, stockin_id)
+    if not stockin_obj:
         raise ValueError('入库记录不存在')
+    stockin_no = stockin_obj.stockin_no
 
-    # 检查关联出货
-    if stockin.stockin_stockouts:
-        raise ValueError('该入库记录已有出库关联，无法删除！')
+    loop = asyncio.get_running_loop()
+    session = SyncSessionLocal()
+    try:
+        sync_stockin = session.execute(
+            select(StockIn).where(StockIn.id == stockin_id)
+        ).scalar_one_or_none()
+        if not sync_stockin:
+            raise ValueError('入库记录不存在')
+        await loop.run_in_executor(
+            None, _sync_delete_stockin, session, sync_stockin
+        )
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
-    product = await get_product_for_update(db, stockin.product_id)
-    product.current_stock -= stockin.quantity
-
-    log = InventoryLog(
-        product_id=stockin.product_id,
-        change_type='入库删除',
-        change_quantity=-stockin.quantity,
-        related_id=str(stockin.id),
-        note=f'入库删除ID：{stockin.id}'
-    )
-    db.add(log)
-
-    await db.delete(stockin)
-    await db.commit()
-    logger.info(f'入库删除成功：{stockin.stockin_no}，数量：{stockin.quantity}')
+    logger.info(f'入库删除成功：{stockin_no}，数量：{stockin_obj.quantity}')
 
 
 # ==================== 出库管理 ====================
@@ -175,7 +177,7 @@ async def get_stockouts(db: AsyncSession, page: int = 1, per_page: int = 50) -> 
     total = (await db.execute(select(func.count(StockOut.id)).where(base_condition))).scalar() or 0
     result = await db.execute(
         base_query
-        .options(joinedload(StockOut.product))
+        .options(joinedload(StockOut.product), joinedload(StockOut.order))
         .order_by(StockOut.stockout_date.desc())
         .offset((page - 1) * per_page)
         .limit(per_page)
@@ -197,73 +199,44 @@ async def get_stockouts(db: AsyncSession, page: int = 1, per_page: int = 50) -> 
             } if s.product else None,
             'quantity': s.quantity,
             'note': s.note or '',
+            'order_type': s.order.order_type if s.order else 'regular',
+            'country': s.order.country if s.order and s.order.country else '',
         })
     return {'items': data, 'total': total, 'page': page, 'per_page': per_page}
 
 
 async def create_stockout(db: AsyncSession, product_id: int, quantity: int,
                           customer: str, stockout_date_str: str,
-                          note: str) -> dict:
-    """创建出库记录"""
-    product = await get_product_for_update(db, product_id)
+                          note: str, order_type: str = 'regular',
+                          country: str | None = None) -> dict:
+    """创建出库记录 - 委托至共享同步服务"""
+    stockout_date = _parse_date_preserve_time(stockout_date_str)
 
-    if product.current_stock < quantity:
-        raise ValueError('库存不足！')
-
-    stockout_date = datetime.strptime(stockout_date_str, '%Y-%m-%d')
-
-    from fastapi_app.services.batch_service import calculate_available_shipment_quantity
-    shipment_info = await calculate_available_shipment_quantity(db, product_id, customer)
-    if shipment_info['available_quantity'] <= 0:
-        raise ValueError('该客户没有可用的订单支持出货！请先创建订单。')
-
-    if quantity > shipment_info['available_quantity']:
-        raise ValueError(
-            f'出货数量超过可出货量！订单总量：{shipment_info["order_quantity"]}，'
-            f'已出货：{shipment_info["shipped_quantity"]}，'
-            f'可出货：{shipment_info["available_quantity"]}'
+    loop = asyncio.get_running_loop()
+    session = SyncSessionLocal()
+    try:
+        created = await loop.run_in_executor(
+            None, _sync_create_stockout, session, product_id, quantity,
+            customer, stockout_date, note, order_type, country
         )
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
-    from fastapi_app.services.batch_service import generate_stockout_number
-    remaining_qty = quantity
-    for order_detail in shipment_info['orders']:
-        if remaining_qty <= 0:
-            break
-        if order_detail['available'] > 0:
-            ship_qty = min(remaining_qty, order_detail['available'])
-            stockout_no = await generate_stockout_number(db)
-            stockout = StockOut(
-                stockout_no=stockout_no,
-                product_id=product_id,
-                quantity=ship_qty,
-                stockout_date=stockout_date,
-                customer=customer,
-                order_id=order_detail['order_id'],
-                note=note
-            )
-            db.add(stockout)
-            remaining_qty -= ship_qty
-
-    product.current_stock -= quantity
-
-    log = InventoryLog(
-        product_id=product_id,
-        change_type='出库',
-        change_quantity=-quantity,
-        related_id='',
-        note=f'出库数量：{quantity}'
-    )
-    db.add(log)
-
-    await db.commit()
-    logger.info(f'出库添加成功：产品{product.name}，数量：{quantity}，客户：{customer}')
-
-    # 发布库存变更事件
-    publish_stock_event(StockEvent.STOCK_CHANGED, {
-        'product_id': product_id, 'product_name': product.name,
-        'change_type': '出库', 'quantity': quantity,
-        'current_stock': product.current_stock,
-    })
+    # 发布库存变更事件（数据已提交，事件丢失不影响一致性）
+    try:
+        product = await get_product_for_update(db, product_id)
+        publish_stock_event(StockEvent.STOCK_CHANGED, {
+            'product_id': product_id, 'product_name': product.name,
+            'change_type': '出库', 'quantity': quantity,
+            'current_stock': product.current_stock,
+        })
+    except Exception as e:
+        logger.warning(f'出库事件发布失败（不影响数据）: {e}')
+    logger.info(f'出库添加成功：产品ID：{product_id}，数量：{quantity}，客户：{customer}')
 
     return {'quantity': quantity}
 
@@ -271,77 +244,63 @@ async def create_stockout(db: AsyncSession, product_id: int, quantity: int,
 async def update_stockout(db: AsyncSession, stockout_id: int, new_quantity: int,
                           customer: str, stockout_date_str: str,
                           note: str) -> None:
-    """更新出库记录"""
-    stockout = await db.get(StockOut, stockout_id)
-    if not stockout:
+    """更新出库记录 - 委托至共享同步服务"""
+    stockout_obj = await db.get(StockOut, stockout_id)
+    if not stockout_obj:
         raise ValueError('出库记录不存在')
 
-    if stockout.stockin_id is not None:
-        raise ValueError('订单抵扣的出货记录不能直接编辑！请通过订单管理进行修改。')
+    stockout_date = _parse_date_preserve_time(stockout_date_str)
+    old_quantity = stockout_obj.quantity
+    old_stockout_no = stockout_obj.stockout_no
 
-    stockout_date = datetime.strptime(stockout_date_str, '%Y-%m-%d')
-
-    old_quantity = stockout.quantity
-
-    product = await get_product_for_update(db, stockout.product_id)
-
-    if product.current_stock + old_quantity < new_quantity:
-        raise ValueError('库存不足！')
-
-    if customer:
-        from fastapi_app.services.batch_service import calculate_available_shipment_quantity
-        shipment_info = await calculate_available_shipment_quantity(db, stockout.product_id, customer)
-        available_with_current = shipment_info['available_quantity'] + old_quantity
-        if new_quantity > available_with_current:
-            raise ValueError(
-                f'出货数量超过可出货量！订单总量：{shipment_info["order_quantity"]}，'
-                f'可出货（含当前记录）：{available_with_current}'
-            )
-
-    stockout.quantity = new_quantity
-    stockout.stockout_date = stockout_date
-    stockout.customer = customer
-    stockout.note = note
-
-    if new_quantity != old_quantity:
-        product.current_stock -= (new_quantity - old_quantity)
-        log = InventoryLog(
-            product_id=stockout.product_id,
-            change_type='出库修改',
-            change_quantity=-(new_quantity - old_quantity),
-            related_id=str(stockout.id),
-            note=f'出库修改ID：{stockout.id}'
+    loop = asyncio.get_running_loop()
+    session = SyncSessionLocal()
+    try:
+        sync_stockout = session.execute(
+            select(StockOut).where(StockOut.id == stockout_id)
+        ).scalar_one_or_none()
+        if not sync_stockout:
+            raise ValueError('出库记录不存在')
+        await loop.run_in_executor(
+            None, _sync_update_stockout, session, sync_stockout, new_quantity,
+            customer, stockout_date, note
         )
-        db.add(log)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
-    await db.commit()
-    logger.info(f'出库编辑成功：{stockout.stockout_no}，数量变更：{old_quantity} -> {new_quantity}')
+    logger.info(f'出库编辑成功：{old_stockout_no}，数量变更：{old_quantity} -> {new_quantity}')
 
 
 async def delete_stockout(db: AsyncSession, stockout_id: int) -> None:
-    """删除出库记录"""
-    stockout = await db.get(StockOut, stockout_id)
-    if not stockout:
+    """删除出库记录 - 委托至共享同步服务"""
+    stockout_obj = await db.get(StockOut, stockout_id)
+    if not stockout_obj:
         raise ValueError('出库记录不存在')
+    stockout_no = stockout_obj.stockout_no
 
-    if stockout.stockin_id is not None:
-        raise ValueError('订单抵扣的出货记录不能直接删除！请通过订单管理进行修改。')
+    loop = asyncio.get_running_loop()
+    session = SyncSessionLocal()
+    try:
+        sync_stockout = session.execute(
+            select(StockOut).where(StockOut.id == stockout_id)
+        ).scalar_one_or_none()
+        if not sync_stockout:
+            raise ValueError('出库记录不存在')
+        await loop.run_in_executor(
+            None, _sync_delete_stockout, session, sync_stockout
+        )
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
-    product = await get_product_for_update(db, stockout.product_id)
-    product.current_stock += stockout.quantity
-
-    log = InventoryLog(
-        product_id=stockout.product_id,
-        change_type='出库删除',
-        change_quantity=stockout.quantity,
-        related_id=str(stockout.id),
-        note=f'出库删除ID：{stockout.id}'
-    )
-    db.add(log)
-
-    await db.delete(stockout)
-    await db.commit()
-    logger.info(f'出库删除成功：{stockout.stockout_no}，数量：{stockout.quantity}')
+    logger.info(f'出库删除成功：{stockout_no}，数量：{stockout_obj.quantity}')
 
 
 # ==================== 库存查看 ====================
@@ -349,139 +308,22 @@ async def delete_stockout(db: AsyncSession, stockout_id: int) -> None:
 async def get_inventory(db: AsyncSession, search_customer: str = '',
                         search_product: str = '') -> dict:
     """
-    获取库存数据
-
-    业务规则（与Flask一致）：
-    - 按产品+客户维度汇总
-    - 备货剩余 = 该客户该产品的入库量 - 已被订单抵扣的量
-    - 订单可用 = 该客户该产品的订单总量 - 已出货量（非抵扣）
-    - 总库存 = 备货剩余 + 订单可用
+    获取库存数据 - 委托至共享同步服务
     """
-    products_query = (
-        select(Product)
-        .options(
-            selectinload(Product.orders),
-            selectinload(Product.stockins).selectinload(StockIn.stockin_stockouts)
+    loop = asyncio.get_running_loop()
+    session = SyncSessionLocal()
+    try:
+        result = await loop.run_in_executor(
+            None, _sync_get_inventory, session, search_customer, search_product
         )
-    )
-
-    if search_product:
-        products_query = products_query.where(
-            Product.name.like(f'%{escape_like(search_product)}%') | Product.barcode.like(f'%{escape_like(search_product)}%')
-        )
-
-    result = await db.execute(products_query)
-    products = result.scalars().unique().all()
-
-    if not products:
-        return {
-            'inventory_data': [],
-            'total_order_qty': 0,
-            'total_stockin_qty': 0,
-            'total_stock': 0,
-        }
-
-    product_ids = [p.id for p in products]
-
-    # 批量预加载出库记录
-    stockout_result = await db.execute(
-        select(StockOut).where(
-            StockOut.product_id.in_(product_ids),
-            StockOut.stockin_id.is_(None)
-        )
-    )
-    all_stockouts = stockout_result.scalars().all()
-
-    # 按 product_id + customer 分组
-    stockout_map = {}
-    for so in all_stockouts:
-        key = (so.product_id, so.customer or '')
-        if key not in stockout_map:
-            stockout_map[key] = {'direct': 0, 'order': 0, 'total': 0}
-        stockout_map[key]['total'] += so.quantity
-        if so.order_id:
-            stockout_map[key]['order'] += so.quantity
-        else:
-            stockout_map[key]['direct'] += so.quantity
-
-    inventory_data = []
-    total_order_qty = 0
-    total_stockin_qty = 0
-    total_stock = 0
-
-    for product in products:
-        stockins = product.stockins
-        if search_customer:
-            stockins = [s for s in stockins if s.customer == search_customer]
-
-        product_customers = set()
-        for s in stockins:
-            if s.customer:
-                product_customers.add(s.customer)
-
-        all_stockouts_for_product = [so for so in all_stockouts if so.product_id == product.id]
-        if search_customer:
-            all_stockouts_for_product = [so for so in all_stockouts_for_product if so.customer == search_customer]
-        for so in all_stockouts_for_product:
-            if so.customer:
-                product_customers.add(so.customer)
-
-        orders = product.orders
-        if search_customer:
-            orders = [o for o in orders if o.customer == search_customer]
-        order_customers = set(o.customer for o in orders)
-        product_customers.update(order_customers)
-
-        for customer in product_customers:
-            cust_stockin_qty = sum(
-                s.quantity - sum(so.quantity for so in s.stockin_stockouts)
-                for s in product.stockins if s.customer == customer
-            )
-
-            so_key = (product.id, customer)
-            so_data = stockout_map.get(so_key, {'direct': 0, 'order': 0, 'total': 0})
-            cust_stockout_qty = so_data['total']
-
-            customer_orders = [o for o in orders if o.customer == customer]
-            cust_order_total = sum(o.quantity for o in customer_orders)
-
-            direct_shipped = so_data['direct']
-            order_shipped = so_data['order']
-            total_shipped = direct_shipped + order_shipped
-            available_order_qty = max(0, cust_order_total - total_shipped)
-            total_qty = max(0, cust_stockin_qty + available_order_qty)
-
-            has_stockin_record = any(s.customer == customer for s in product.stockins)
-            has_order_record = len(customer_orders) > 0
-            has_positive_stock = (available_order_qty > 0 or
-                                   cust_stockin_qty > 0 or
-                                   total_qty > 0)
-
-            if (has_stockin_record or has_order_record) and has_positive_stock:
-                inventory_data.append({
-                    'customer': customer,
-                    'product_name': product.name,
-                    'product_barcode': product.barcode or '',
-                    'order_quantity': available_order_qty if available_order_qty > 0 else '',
-                    'stockin_quantity': cust_stockin_qty if cust_stockin_qty > 0 else '',
-                    'stockout_quantity': cust_stockout_qty if cust_stockout_qty > 0 else '',
-                    'total_stock': total_qty if total_qty > 0 else '',
-                })
-                total_stockin_qty += cust_stockin_qty
-                total_order_qty += available_order_qty
-                total_stock += total_qty
-
-    return {
-        'inventory_data': inventory_data,
-        'total_order_qty': total_order_qty,
-        'total_stockin_qty': total_stockin_qty,
-        'total_stock': total_stock,
-    }
+        return result
+    finally:
+        session.close()
 
 
 # ==================== 内部辅助 ====================
 
-def _parse_stockin_date(date_str: str, old_time: datetime | None = None) -> datetime:
+def _parse_date_preserve_time(date_str: str, old_time: datetime | None = None) -> datetime:
     """解析入库日期（保留原始时间部分）"""
     try:
         base = datetime.strptime(date_str, '%Y-%m-%d')
@@ -498,122 +340,120 @@ def _parse_stockin_date(date_str: str, old_time: datetime | None = None) -> date
 
 
 async def batch_create_stockins(db: AsyncSession, stockins_data: list) -> dict:
-    """批量创建入库记录"""
-    from fastapi_app.services.batch_service import generate_stockin_number
+    """批量创建入库记录 - 委托至共享同步服务"""
 
-    results = []
-    for item in stockins_data:
+    # 前置校验（与 batch_create_stockouts 统一使用 errors_map + indexed results 模式）
+    validated = []
+    errors_map = {}
+    for idx, item in enumerate(stockins_data):
+        product_id = item.get('product_id')
+        customer = str(item.get('customer', '')).strip()
+        quantity = item.get('quantity', 0)
+        if not all([product_id, customer, quantity]):
+            errors_map[idx] = '缺少必填字段或数量无效'
+            continue
+        if int(quantity) <= 0:
+            errors_map[idx] = '入库数量必须大于0'
+            continue
+        validated.append((idx, item))
+
+    results = [None] * len(stockins_data)
+    for idx, err in errors_map.items():
+        results[idx] = {'success': False, 'error': err, 'id': stockins_data[idx].get('id', '未知')}
+
+    if validated:
+        loop = asyncio.get_running_loop()
+        session = SyncSessionLocal()
         try:
-            product_id = item.get('product_id')
-            customer = item.get('customer', '')
-            quantity = item.get('quantity', 0)
+            for orig_idx, item in validated:
+                product_id = item.get('product_id')
+                customer = str(item.get('customer', '')).strip()
+                quantity = int(item.get('quantity', 0))
+                note = item.get('note', '')
+                try:
+                    stockin = await loop.run_in_executor(
+                        None, _sync_create_stockin, session, product_id, quantity,
+                        customer, datetime.now(), note
+                    )
+                    results[orig_idx] = {'success': True, 'stockin_no': stockin.stockin_no, 'id': stockin.id}
+                except ValueError as e:
+                    results[orig_idx] = {'success': False, 'error': str(e), 'id': item.get('id', '未知')}
+                except Exception as e:
+                    session.rollback()  # 重置 Session 状态，防止后续项级联失败
+                    logger.error(f"批量入库单项失败: {e}")
+                    results[orig_idx] = {'success': False, 'error': '入库处理失败，请稍后重试', 'id': item.get('id', '未知')}
 
-            if not all([product_id, customer, quantity]):
-                results.append({'success': False, 'error': '缺少必填字段', 'id': item.get('id', '未知')})
-                continue
-
-            product = await get_product_for_update(db, product_id)
-
-            stockin_no = await generate_stockin_number(db)
-            stockin = StockIn(
-                stockin_no=stockin_no, product_id=product_id, customer=customer,
-                quantity=int(quantity), stockin_date=datetime.now(), note=item.get('note', '')
-            )
-            db.add(stockin)
-            await db.flush()
-            product.current_stock += int(quantity)
-
-            log = InventoryLog(
-                product_id=product_id, change_type='备货入库', change_quantity=int(quantity),
-                change_date=datetime.now(), customer=customer, related_id=str(stockin.id),
-                note=f'批量创建备货 {stockin.stockin_no}'
-            )
-            db.add(log)
-            results.append({'success': True, 'stockin_no': stockin.stockin_no, 'id': stockin.id})
-        except Exception as e:
-            logger.error(f"批量入库单项失败: {e}")
-            results.append({'success': False, 'error': str(e), 'id': item.get('id', '未知')})
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
 
     return {'success': True, 'results': results}
 
 
 async def batch_create_stockouts(db: AsyncSession, stockouts_data: list) -> dict:
-    """批量创建出库记录"""
-    from fastapi_app.services.batch_service import generate_stockout_number
+    """批量创建出库记录 - 委托至共享同步服务"""
 
-    results = []
-    for item in stockouts_data:
+    # 前置校验
+    validated = []
+    errors_map = {}
+    for idx, item in enumerate(stockouts_data):
+        product_id = item.get('product_id')
+        customer = str(item.get('customer', '')).strip()
+        quantity = item.get('quantity', 0)
+        order_type = item.get('order_type', 'regular') or 'regular'
+        country = item.get('country', '') or ''
+
+        if not all([product_id, quantity]):
+            errors_map[idx] = '缺少必填字段'
+            continue
+        if not customer:
+            errors_map[idx] = '出货必须选择客户'
+            continue
+        if order_type == 'custom' and not country:
+            errors_map[idx] = '定制订单必须填写国家名称'
+            continue
+        if int(quantity) <= 0:
+            errors_map[idx] = '出货数量必须大于0'
+            continue
+        validated.append((idx, item))
+
+    results = [None] * len(stockouts_data)
+    for idx, err in errors_map.items():
+        results[idx] = {'success': False, 'error': err, 'id': stockouts_data[idx].get('id', '未知')}
+
+    if validated:
+        loop = asyncio.get_running_loop()
+        session = SyncSessionLocal()
         try:
-            product_id = item.get('product_id')
-            customer = str(item.get('customer', '')).strip()
-            quantity = item.get('quantity', 0)
+            for orig_idx, item in validated:
+                product_id = item.get('product_id')
+                customer = str(item.get('customer', '')).strip()
+                quantity = int(item.get('quantity', 0))
+                order_type = item.get('order_type', 'regular') or 'regular'
+                country = item.get('country', '') or None
+                note = item.get('note', '')
+                try:
+                    created = await loop.run_in_executor(
+                        None, _sync_create_stockout, session, product_id, quantity,
+                        customer, datetime.now(), note, order_type, country
+                    )
+                    stockout_nos = [s.stockout_no for s in created] if created else []
+                    results[orig_idx] = {'success': True, 'stockout_no': stockout_nos[0] if stockout_nos else '', 'id': item.get('id', '未知')}
+                except ValueError as e:
+                    results[orig_idx] = {'success': False, 'error': str(e), 'id': item.get('id', '未知')}
+                except Exception as e:
+                    session.rollback()  # 重置 Session 状态，防止后续项级联失败
+                    logger.error(f"批量出库单项失败: {e}")
+                    results[orig_idx] = {'success': False, 'error': '出库处理失败，请稍后重试', 'id': item.get('id', '未知')}
 
-            if not all([product_id, quantity]):
-                results.append({'success': False, 'error': '缺少必填字段', 'id': item.get('id', '未知')})
-                continue
-
-            if not customer:
-                results.append({'success': False, 'error': '出货必须选择客户', 'id': item.get('id', '未知')})
-                continue
-
-            product = await get_product_for_update(db, product_id)
-
-            qty = int(quantity)
-            if product.current_stock < qty:
-                results.append({'success': False, 'error': f'库存不足，当前库存: {product.current_stock}', 'id': item.get('id', '未知')})
-                continue
-
-            # 查找可用订单
-            available_orders = (await db.execute(
-                select(Order).where(Order.product_id == product_id, Order.customer == customer)
-                .order_by(Order.order_date.asc())
-            )).scalars().all()
-
-            total_order_qty = sum(o.quantity for o in available_orders)
-            # 修复 shipped_qty = 0 的Bug：查询已出货数量
-            shipped_result = await db.execute(
-                select(func.coalesce(func.sum(StockOut.quantity), 0)).where(
-                    StockOut.order_id.in_([o.id for o in available_orders]),
-                    StockOut.stockin_id.is_(None)
-                )
-            )
-            shipped_qty = shipped_result.scalar() or 0
-            available_qty = max(0, total_order_qty - shipped_qty)
-
-            if available_qty <= 0:
-                results.append({'success': False, 'error': f'客户{customer}没有可用订单支持出货', 'id': item.get('id', '未知')})
-                continue
-
-            if qty > available_qty:
-                results.append({'success': False, 'error': f'出货数量{qty}超过可出货量{available_qty}', 'id': item.get('id', '未知')})
-                continue
-
-            # 按FIFO分配订单
-            remaining = qty
-            for order in available_orders:
-                if remaining <= 0:
-                    break
-                ship_qty = min(remaining, order.quantity)
-                stockout_no = await generate_stockout_number(db)
-                stockout = StockOut(
-                    stockout_no=stockout_no, product_id=product_id, quantity=ship_qty,
-                    stockout_date=datetime.now(), customer=customer, order_id=order.id,
-                    note=item.get('note', '')
-                )
-                db.add(stockout)
-                await db.flush()
-                remaining -= ship_qty
-
-            product.current_stock -= qty
-            log = InventoryLog(
-                product_id=product_id, change_type='出货', change_quantity=-qty,
-                change_date=datetime.now(), customer=customer, related_id='',
-                note=f'批量出货：客户{customer}，数量{qty}'
-            )
-            db.add(log)
-            results.append({'success': True, 'id': item.get('id', '未知')})
-        except Exception as e:
-            logger.error(f"批量出库单项失败: {e}")
-            results.append({'success': False, 'error': str(e), 'id': item.get('id', '未知')})
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
 
     return {'success': True, 'results': results}

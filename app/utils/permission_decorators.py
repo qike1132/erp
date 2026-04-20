@@ -5,6 +5,7 @@
 from functools import wraps
 from flask import session, jsonify, redirect, url_for, flash, request
 from app.models import User
+from app import db
 import logging
 
 logger = logging.getLogger(__name__)
@@ -34,14 +35,14 @@ def api_permission_required(permission_name):
                 )
                 return jsonify({'error': '未登录', 'success': False}), 401
             
-            user = User.query.get(session['user_id'])
-            if not user:
+            user = db.session.get(User, session['user_id'])
+            if not user or not user.status:
                 logger.warning(
-                    f"[Auth] API权限检查失败: 用户不存在, IP={client_ip}, "
+                    f"[Auth] API权限检查失败: 用户不存在或已被禁用, IP={client_ip}, "
                     f"user_id={session.get('user_id')}, path={request_path}"
                 )
                 session.clear()
-                return jsonify({'error': '用户不存在', 'success': False}), 401
+                return jsonify({'error': '用户不存在或已被禁用', 'success': False}), 401
             
             if not user.has_permission(permission_name):
                 logger.warning(
@@ -85,14 +86,14 @@ def page_permission_required(permission_name):
                 flash('请先登录', 'error')
                 return redirect(url_for('main.login'))
             
-            user = User.query.get(session['user_id'])
-            if not user:
+            user = db.session.get(User, session['user_id'])
+            if not user or not user.status:
                 logger.warning(
-                    f"[Auth] 页面权限检查失败: 用户不存在, IP={client_ip}, "
+                    f"[Auth] 页面权限检查失败: 用户不存在或已被禁用, IP={client_ip}, "
                     f"user_id={session.get('user_id')}, path={request_path}"
                 )
                 session.clear()
-                flash('用户不存在，请重新登录', 'error')
+                flash('用户不存在或已被禁用，请重新登录', 'error')
                 return redirect(url_for('main.login'))
             
             if not user.has_permission(permission_name):
@@ -143,19 +144,21 @@ def admin_required(f):
             flash('请先登录！', 'error')
             return redirect(url_for('main.login'))
         
-        user = User.query.get(session['user_id'])
-        if not user:
+        user = db.session.get(User, session['user_id'])
+        if not user or not user.status:
             if is_api:
                 logger.warning(
-                    f"[Auth] 管理员权限检查失败: 用户不存在, "
+                    f"[Auth] 管理员权限检查失败: 用户不存在或已被禁用, "
                     f"IP={client_ip}, user_id={session.get('user_id')}, path={request_path}"
                 )
-                return jsonify({'error': '用户不存在', 'success': False}), 401
+                session.clear()
+                return jsonify({'error': '用户不存在或已被禁用', 'success': False}), 401
             logger.warning(
-                f"[Auth] 管理员权限检查失败: 用户不存在, "
+                f"[Auth] 管理员权限检查失败: 用户不存在或已被禁用, "
                 f"IP={client_ip}, user_id={session.get('user_id')}, path={request_path}"
             )
-            flash('用户不存在！', 'error')
+            session.clear()
+            flash('用户不存在或已被禁用！', 'error')
             return redirect(url_for('main.login'))
         
         if not user.is_super:
@@ -189,7 +192,10 @@ def get_current_user():
     """
     if 'user_id' not in session:
         return None
-    return User.query.get(session['user_id'])
+    user = db.session.get(User, session['user_id'])
+    if not user or not user.status:
+        return None
+    return user
 
 
 def is_admin(user):

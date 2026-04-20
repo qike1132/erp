@@ -88,24 +88,3 @@ def edit_customer(id):
         return redirect(url_for('customer.customers'))
 
     return render_template('edit_customer.html', customer=customer)
-
-
-@customer_bp.route('/delete/<int:id>')
-@page_permission_required('customer_manage')
-def delete_customer(id):
-    """删除客户"""
-    customer = Customer.query.get_or_404(id)
-
-    from app.models import Order, StockIn, StockOut
-    has_orders = Order.query.filter_by(customer=customer.name).first()
-    has_stockins = StockIn.query.filter_by(customer=customer.name).first()
-    has_stockouts = StockOut.query.filter_by(customer=customer.name).first()
-
-    if has_orders or has_stockins or has_stockouts:
-        flash('该客户已有相关单据，无法删除！建议禁用该客户。', 'error')
-        return redirect(url_for('customer.customers'))
-
-    db.session.delete(customer)
-    db.session.commit()
-    flash('客户删除成功！', 'success')
-    return redirect(url_for('customer.customers'))

@@ -59,7 +59,7 @@
                                     {% elif item.code == 'user_manage' and not session.get('is_super') %}
                                     {% elif item.code == 'permission_manage' and not session.get('is_super') %}
                                     {% else %}
-                                    <a href="{{ url_for(item.url) }}" class="nav-item {% if request.endpoint and item.url in request.endpoint %}active{% endif %}">
+                                    <a href="{{ item.url|safe_url_for }}" class="nav-item {% if request.endpoint and item.url in request.endpoint %}active{% endif %}">
                                         <i class="fas {{ item.icon }}"></i>
                                         <span>{{ item.name.replace('(全部)', '') }}</span>
                                     </a>
@@ -116,10 +116,13 @@
                     </div>
                     
                     <!-- 退出登录按钮 -->
-                    <a href="{{ url_for('main.logout') }}" class="logout-btn-header" title="退出登录">
-                        <i class="fas fa-sign-out-alt"></i>
-                        <span>退出</span>
-                    </a>
+                    <form method="POST" action="{{ url_for('main.logout') }}" style="display:inline">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="logout-btn-header" title="退出登录" style="border:none;background:none;cursor:pointer;font:inherit;padding:0;">
+                            <i class="fas fa-sign-out-alt"></i>
+                            <span>退出</span>
+                        </button>
+                    </form>
                     
                     {% else %}
                     <!-- 登录按钮 -->
@@ -271,6 +274,15 @@
                 GlobalNotification.show(type, message);
             }, 100);
         });
+    });
+    </script>
+    <!-- 日期/月份输入框：点击任意位置弹出日历选择器 -->
+    <script>
+    document.addEventListener('click', function(e) {
+        var t = e.target;
+        if (t.tagName === 'INPUT' && (t.type === 'date' || t.type === 'month')) {
+            try { t.showPicker(); } catch(_) {}
+        }
     });
     </script>
     {% block scripts %}{% endblock %}

@@ -7,6 +7,7 @@ import os
 import sys
 import gc
 import time
+import atexit
 import logging
 import subprocess
 import threading
@@ -22,13 +23,14 @@ os.environ['USE_NEW_ARCH'] = 'true'
 from waitress import serve
 from app import app
 
-# FastAPI 子进程引用
+# FastAPI 子进程引用及日志文件句柄
 _fastapi_process = None
+_fastapi_log_file = None
 
 
 def start_fastapi_subprocess():
     """在后台启动 FastAPI 服务"""
-    global _fastapi_process
+    global _fastapi_process, _fastapi_log_file
 
     log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
     os.makedirs(log_dir, exist_ok=True)
@@ -37,23 +39,26 @@ def start_fastapi_subprocess():
     try:
         print("[INFO] 正在启动 FastAPI 服务 (端口 5002)...")
         # 二进制模式写入，避免子进程 GBK 输出与 UTF-8 文本模式冲突导致日志乱码
-        log_file = open(log_path, 'ab')
+        _fastapi_log_file = open(log_path, 'ab')
         _fastapi_process = subprocess.Popen(
             [sys.executable, '-m', 'uvicorn',
              'fastapi_app.main:app',
              '--host', '0.0.0.0',
              '--port', '5002'],
-            stdout=log_file,
-            stderr=log_file,
+            stdout=_fastapi_log_file,
+            stderr=_fastapi_log_file,
         )
         print(f"[OK] FastAPI 服务已启动 (PID: {_fastapi_process.pid})，日志: {log_path}")
     except Exception as e:
         print(f"[WARN] FastAPI 服务启动失败: {e}")
+        if _fastapi_log_file:
+            _fastapi_log_file.close()
+            _fastapi_log_file = None
 
 
 def stop_fastapi_subprocess():
-    """停止 FastAPI 子进程"""
-    global _fastapi_process
+    """停止 FastAPI 子进程并关闭日志文件句柄"""
+    global _fastapi_process, _fastapi_log_file
     if _fastapi_process and _fastapi_process.poll() is None:
         print("[INFO] 正在停止 FastAPI 服务...")
         _fastapi_process.terminate()
@@ -62,6 +67,9 @@ def stop_fastapi_subprocess():
         except subprocess.TimeoutExpired:
             _fastapi_process.kill()
         print("[OK] FastAPI 服务已停止")
+    if _fastapi_log_file:
+        _fastapi_log_file.close()
+        _fastapi_log_file = None
 
 class ServerConfig:
     """服务器配置类"""
@@ -74,7 +82,7 @@ class ServerConfig:
     CHANNEL_TIMEOUT = 60
     SOCKET_TIMEOUT = 30
     
-    SEND_BYTES = 18000
+    SEND_BYTES = 65536
     INBUF_OVERFLOW = 524288
     OUTBUF_OVERFLOW = 1048576
     
@@ -181,6 +189,9 @@ def main():
     setup_gc()
     logger = setup_logging()
     print_banner()
+
+    # 注册 atexit 清理，确保进程异常退出时也能关闭文件句柄和子进程
+    atexit.register(stop_fastapi_subprocess)
 
     # 启动 FastAPI 子进程
     start_fastapi_subprocess()

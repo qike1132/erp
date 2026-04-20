@@ -13,6 +13,13 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 logger = logging.getLogger(__name__)
 
 
+def _sanitize_excel_value(value):
+    """清洗Excel公式注入：以=+-@\t\r开头的字符串添加制表符前缀阻止公式解析"""
+    if isinstance(value, str) and value and value[0] in '=-+@\t\r':
+        return '\t' + value
+    return value
+
+
 class ReportExporter:
     """报表导出器"""
 
@@ -160,13 +167,51 @@ class ReportExporter:
         ws = wb.active
         ws.title = '库存汇总'
 
-        headers = [
-            '客户', '产品名称', '订单数量', '备货数量', '总库存'
-        ]
+        # 动态构建表头：客户、产品名称、订单数量、[国家列...]、备货数量、总库存
+        all_countries = stats.get('all_countries', [])
+        headers = ['客户', '产品名称', '订单数量'] + all_countries + ['备货数量', '总库存']
 
-        self._write_sheet(ws, headers, inventory_data, self._format_inventory_row)
+        self._write_inventory_sheet(ws, headers, inventory_data, all_countries)
 
         return self._save_workbook(wb)
+
+    def _write_inventory_sheet(self, ws, headers, inventory_data, all_countries):
+        """写入库存汇总工作表（含动态国家列）"""
+        for col_idx, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_idx, value=header)
+            cell.font = self.header_font
+            cell.fill = self.header_fill
+            cell.alignment = self.header_alignment
+            cell.border = self.thin_border
+
+        for row_idx, item in enumerate(inventory_data, 2):
+            row_data = [item.get('customer', ''), item.get('product_name', ''), item.get('order_quantity', 0)]
+            # 国家细分列
+            country_orders = item.get('country_orders', {})
+            for country in all_countries:
+                row_data.append(country_orders.get(country, ''))
+            row_data.extend([item.get('stockin_quantity', 0), item.get('total_stock', 0)])
+
+            for col_idx, value in enumerate(row_data, 1):
+                cell = ws.cell(row=row_idx, column=col_idx, value=_sanitize_excel_value(value))
+                cell.alignment = self.cell_alignment
+                cell.border = self.thin_border
+
+        # 设置默认行高
+        for row_idx in range(1, ws.max_row + 1):
+            ws.row_dimensions[row_idx].height = 28.35
+
+        # 设置列宽
+        for col_idx in range(1, len(headers) + 1):
+            col_letter = chr(64 + col_idx) if col_idx <= 26 else chr(64 + (col_idx - 1) // 26) + chr(65 + (col_idx - 1) % 26)
+            if col_idx == 2:  # B列 产品名称
+                ws.column_dimensions[col_letter].width = 75
+            elif headers[col_idx - 1] in ('备货数量', '总库存', '订单数量'):
+                ws.column_dimensions[col_letter].width = 12.5
+            elif headers[col_idx - 1] in all_countries:
+                ws.column_dimensions[col_letter].width = 10
+            else:
+                ws.column_dimensions[col_letter].width = 18
 
     def _format_inventory_row(self, log: Dict) -> List:
         """格式化库存行数据"""
@@ -198,7 +243,7 @@ class ReportExporter:
         for row_idx, log in enumerate(logs, 2):
             row_data = row_formatter(log)
             for col_idx, value in enumerate(row_data, 1):
-                cell = ws.cell(row=row_idx, column=col_idx, value=value)
+                cell = ws.cell(row=row_idx, column=col_idx, value=_sanitize_excel_value(value))
                 cell.alignment = self.cell_alignment
                 cell.border = self.thin_border
 

@@ -12,6 +12,8 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import SQLAlchemyError
 
 from fastapi_app.shared_models import Product, InventoryLog
+from fastapi_app.shared.stock_concurrency import get_product_for_update
+from fastapi_app.services import escape_like
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +128,7 @@ async def update_product(db: AsyncSession, product_id: int, name: Optional[str],
     - 名称唯一性检查（排除自身）
     - 初始库存变更时调整 current_stock 并记录 InventoryLog
     """
-    product = await db.get(Product, product_id)
+    product = await get_product_for_update(db, product_id)
     if not product:
         raise ValueError('产品不存在')
 
@@ -219,7 +221,7 @@ async def search_products(db: AsyncSession, query: str) -> list[dict]:
     """搜索产品（按名称或条码模糊匹配）"""
     result = await db.execute(
         select(Product).where(
-            Product.name.contains(query) | Product.barcode.contains(query)
+            Product.name.like(f'%{escape_like(query)}%') | Product.barcode.like(f'%{escape_like(query)}%')
         )
     )
     products = result.scalars().all()

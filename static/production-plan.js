@@ -360,7 +360,11 @@
     // ==================== 通知（复用全局通知系统）====================
 
     function showNotification(message, type) {
-        // 优先使用全局通知系统（base.html中定义）
+        // 优先使用全局通知系统
+        if (typeof GlobalNotification !== 'undefined' && GlobalNotification.show) {
+            GlobalNotification.show(type || 'info', message);
+            return;
+        }
         if (typeof window.showGlobalNotification === 'function') {
             window.showGlobalNotification(message, type);
             return;

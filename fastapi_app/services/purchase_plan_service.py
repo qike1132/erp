@@ -14,6 +14,7 @@ from datetime import datetime, date, timedelta
 
 import openpyxl
 from sqlalchemy import select, func, delete, and_, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -56,12 +57,11 @@ def _normalize_plan_date(date_str: str) -> date:
 async def _generate_plan_no(db: AsyncSession) -> str:
     """
     生成计划编号：PP-YYYYMMDD-NNNN
-    NNNN 为当天递增序号，使用 max 而非 count 避免竞态条件
+    查询当天最大编号递增，并发安全由调用方的重试机制保障
     """
     today_str = date.today().strftime('%Y%m%d')
     prefix = f'PP-{today_str}-'
 
-    # 查询当天最大编号而非count，避免并发时重复
     result = await db.execute(
         select(func.max(PurchasePlan.plan_no))
         .where(PurchasePlan.plan_no.like(f'{prefix}%'))
@@ -204,22 +204,43 @@ async def create_plan(db: AsyncSession, *, customer_id: int, customer_name: str,
         if not products:
             raise ValueError(f"69码 '{barcode}' 未找到对应产品")
 
-    # 生成计划编号
-    plan_no = await _generate_plan_no(db)
+    # 库存实时校验
+    insufficient = await _check_inventory_realtime(db, [
+        {'barcode': d.get('barcode', ''), 'product_name': d.get('product_name', ''), 'quantity': d['quantity']}
+        for d in details
+    ])
+    if insufficient:
+        errors = '; '.join(
+            f"产品 {it['barcode']}({it['product_name']}) 当前库存 {it['current_stock']} 库存不足 {it['total_quantity'] - it['current_stock']}"
+            for it in insufficient
+        )
+        raise ValueError(f"库存不足，无法添加出货计划：{errors}")
 
-    # 创建主单
-    plan = PurchasePlan(
-        plan_no=plan_no,
-        plan_month=plan_month,
-        customer_id=customer_id,
-        customer_name=customer_name,
-        status='pending',
-        remark=remark,
-        upload_batch=upload_batch,
-        created_by=created_by,
-    )
-    db.add(plan)
-    await db.flush()
+    # 生成计划编号并创建主单（含重试防 IntegrityError）
+    plan = None
+    for _attempt in range(3):
+        plan_no = await _generate_plan_no(db)
+        try:
+            async with db.begin_nested():
+                plan = PurchasePlan(
+                    plan_no=plan_no,
+                    plan_month=plan_month,
+                    customer_id=customer_id,
+                    customer_name=customer_name,
+                    status='pending',
+                    remark=remark,
+                    upload_batch=upload_batch,
+                    created_by=created_by,
+                )
+                db.add(plan)
+                await db.flush()
+            break
+        except IntegrityError:
+            # begin_nested 自动回滚 SAVEPOINT，不影响外层事务
+            if _attempt == 2:
+                raise ValueError('单号生成冲突，请勿重复提交')
+            logger.warning(f'plan_no {plan_no} 冲突，重试({_attempt + 1}/3)')
+            continue
 
     # 创建明细
     for d in details:
@@ -411,6 +432,56 @@ def _calc_stock_status(plan_qty: int, inventory_qty: int) -> str:
     return 'shortage'
 
 
+async def _check_inventory_realtime(db: AsyncSession, items: list[dict]) -> list[dict]:
+    """
+    实时库存校验（直接查数据库，不经过缓存）
+    同一 barcode 多条记录会汇总需求量后与库存比较
+
+    参数:
+        items: [{'barcode': str, 'product_name': str, 'quantity': int}, ...]
+    返回:
+        库存不足项列表 [{'barcode': str, 'product_name': str, 'total_quantity': int, 'current_stock': int}, ...]
+    """
+    if not items:
+        return []
+
+    barcodes = list({it['barcode'] for it in items if it.get('barcode')})
+    if not barcodes:
+        return []
+
+    result = await db.execute(
+        select(Product.id, Product.barcode, Product.name, Product.current_stock)
+        .where(Product.barcode.in_(barcodes))
+    )
+    product_stock_map = {row.barcode: {'name': row.name, 'current_stock': row.current_stock or 0} for row in result.all()}
+
+    # 按 barcode 汇总需求量和产品名称
+    demand_map: dict[str, dict] = {}
+    for it in items:
+        barcode = it.get('barcode', '')
+        if not barcode:
+            continue
+        if barcode not in demand_map:
+            info = product_stock_map.get(barcode)
+            demand_map[barcode] = {
+                'product_name': it.get('product_name', '') or (info['name'] if info else ''),
+                'total_quantity': 0,
+                'current_stock': info['current_stock'] if info else 0,
+            }
+        demand_map[barcode]['total_quantity'] += it['quantity']
+
+    insufficient = []
+    for barcode, demand in demand_map.items():
+        if demand['current_stock'] < demand['total_quantity']:
+            insufficient.append({
+                'barcode': barcode,
+                'product_name': demand['product_name'],
+                'total_quantity': demand['total_quantity'],
+                'current_stock': demand['current_stock'],
+            })
+    return insufficient
+
+
 def _calc_shipment_status(plan_qty: int, shipped_qty: int) -> str:
     """出货状态: completed/partial/pending"""
     if shipped_qty >= plan_qty:
@@ -510,7 +581,72 @@ async def get_shipment_progress(db: AsyncSession, plan_id: int) -> dict:
     return {'details': progress_list}
 
 
-# ==================== 月度日历数据 ====================
+async def get_shipment_records(db: AsyncSession, plan_id: int) -> list[dict]:
+    """获取指定计划关联的出货流水记录"""
+    result = await db.execute(
+        select(PurchasePlan).where(PurchasePlan.id == plan_id)
+    )
+    plan = result.scalar_one_or_none()
+    if not plan:
+        raise ValueError('采购计划不存在')
+
+    year, month = map(int, plan.plan_month.split('-'))
+    start = date(year, month, 1)
+    end = _last_day_of_month(year, month)
+
+    # 获取计划明细中的 (customer_name, product_name) 对
+    detail_result = await db.execute(
+        select(PurchasePlanDetail.product_name)
+        .where(PurchasePlanDetail.plan_id == plan_id)
+        .distinct()
+    )
+    product_names = [row.product_name for row in detail_result.all()]
+
+    if not product_names:
+        return []
+
+    # 优先从 shipment_records 查询
+    result = await db.execute(
+        select(ShipmentRecord)
+        .where(and_(
+            ShipmentRecord.customer_name == plan.customer_name,
+            ShipmentRecord.product_name.in_(product_names),
+            ShipmentRecord.shipment_date >= start,
+            ShipmentRecord.shipment_date <= end,
+        ))
+        .order_by(ShipmentRecord.shipment_date.desc(), ShipmentRecord.id.desc())
+    )
+    records = result.scalars().all()
+
+    if records:
+        return [r.to_dict() for r in records]
+
+    # 降级：从 stock_out 查询
+    result = await db.execute(
+        select(StockOut.stockout_no, StockOut.stockout_date, StockOut.quantity,
+               StockOut.customer, StockOut.note, Product.name.label('product_name'))
+        .join(Product, StockOut.product_id == Product.id)
+        .where(and_(
+            StockOut.customer == plan.customer_name,
+            Product.name.in_(product_names),
+            func.date(StockOut.stockout_date) >= start,
+            func.date(StockOut.stockout_date) <= end,
+        ))
+        .order_by(StockOut.stockout_date.desc(), StockOut.id.desc())
+    )
+    rows = result.all()
+    return [
+        {
+            'shipment_no': row.stockout_no,
+            'customer_name': row.customer or '',
+            'product_name': row.product_name,
+            'quantity': row.quantity,
+            'shipment_date': row.stockout_date.strftime('%Y-%m-%d') if row.stockout_date else '',
+            'source_type': 'stockout',
+            'note': row.note or '',
+        }
+        for row in rows
+    ]
 
 async def get_monthly_calendar(db: AsyncSession, year: int, month: int,
                                 customer_id: int = 0) -> dict:
@@ -762,6 +898,7 @@ async def upload_excel(db: AsyncSession, file_content: bytes,
             success_count += 1
 
     await db.flush()
+    await db.commit()
 
     # 返回结果（行数>500时标记需走 Celery）
     is_async = len(staging_records) > 500
@@ -801,8 +938,8 @@ async def validate_staging(db: AsyncSession, session_id: str) -> dict:
     customer_map = {c.name: c for c in all_customers}
 
     all_products = await product_service.get_products(db)
-    barcode_set = {p.barcode for p in all_products if p.barcode}
-    product_map = {p.barcode: p for p in all_products if p.barcode}
+    barcode_set = {p['barcode'] for p in all_products if p.get('barcode')}
+    product_map = {p['barcode']: p for p in all_products if p.get('barcode')}
 
     valid_count = 0
     error_count = 0
@@ -823,7 +960,7 @@ async def validate_staging(db: AsyncSession, session_id: str) -> dict:
         if record.barcode not in barcode_set:
             errors_list.append(f"69码 '{record.barcode}' 未找到产品")
         elif not record.product_name and record.barcode in product_map:
-            record.product_name = product_map[record.barcode].name
+            record.product_name = product_map[record.barcode]['name']
 
         if errors_list:
             record.is_validated = 0
@@ -834,7 +971,26 @@ async def validate_staging(db: AsyncSession, session_id: str) -> dict:
             record.validation_error = None
             valid_count += 1
 
+    # 库存实时校验（基础验证通过后批量检查）
+    records_to_check = [
+        r for r in records if r.is_validated and r.barcode in barcode_set
+    ]
+    if records_to_check:
+        insufficient = await _check_inventory_realtime(db, [
+            {'barcode': r.barcode, 'product_name': r.product_name, 'quantity': r.quantity}
+            for r in records_to_check
+        ])
+        insufficient_map = {it['barcode']: it for it in insufficient}
+        for r in records_to_check:
+            if r.barcode in insufficient_map:
+                it = insufficient_map[r.barcode]
+                r.is_validated = 0
+                r.validation_error = f"库存不足：当前库存 {it['current_stock']}，库存不足 {it['total_quantity'] - it['current_stock']}"
+                valid_count -= 1
+                error_count += 1
+
     await db.flush()
+    await db.commit()
 
     return {
         'total': len(records),
@@ -871,6 +1027,18 @@ async def confirm_staging(db: AsyncSession, session_id: str,
     valid_records = [r for r in records if r.is_validated]
     if not valid_records:
         raise ValueError('所有数据验证未通过，无法保存')
+
+    # 库存实时校验（确认前最终校验，防止验证后库存变化）
+    insufficient = await _check_inventory_realtime(db, [
+        {'barcode': r.barcode, 'product_name': r.product_name, 'quantity': r.quantity}
+        for r in valid_records
+    ])
+    if insufficient:
+        errors = '; '.join(
+            f"产品 {it['barcode']}({it['product_name']}) 当前库存 {it['current_stock']} 库存不足 {it['total_quantity'] - it['current_stock']}"
+            for it in insufficient
+        )
+        raise ValueError(f"库存不足，无法确认：{errors}")
 
     # 按客户+月份分组
     groups = {}
@@ -915,19 +1083,30 @@ async def confirm_staging(db: AsyncSession, session_id: str,
             # 追加明细到已有主单
             plan = existing_plan
         else:
-            # 创建新主单
-            plan_no = await _generate_plan_no(db)
-            plan = PurchasePlan(
-                plan_no=plan_no,
-                plan_month=plan_month,
-                customer_id=customer_id,
-                customer_name=customer_name,
-                status='pending',
-                upload_batch=batch_id,
-                created_by=created_by,
-            )
-            db.add(plan)
-            await db.flush()
+            # 创建新主单（含重试防 IntegrityError，使用 SAVEPOINT 避免回滚其他组数据）
+            plan = None
+            for _attempt in range(3):
+                plan_no = await _generate_plan_no(db)
+                try:
+                    async with db.begin_nested():
+                        plan = PurchasePlan(
+                            plan_no=plan_no,
+                            plan_month=plan_month,
+                            customer_id=customer_id,
+                            customer_name=customer_name,
+                            status='pending',
+                            upload_batch=batch_id,
+                            created_by=created_by,
+                        )
+                        db.add(plan)
+                        await db.flush()
+                    break
+                except IntegrityError:
+                    # begin_nested 自动回滚 SAVEPOINT，不影响外层事务和其他组数据
+                    if _attempt == 2:
+                        raise ValueError('单号生成冲突，请勿重复提交')
+                    logger.warning(f'confirm_staging: plan_no {plan_no} 冲突，重试({_attempt + 1}/3)')
+                    continue
 
         # 创建明细
         for r in group_records:

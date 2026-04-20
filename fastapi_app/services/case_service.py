@@ -5,6 +5,7 @@ from sqlalchemy import select, func, or_
 from sqlalchemy.orm import joinedload
 
 from fastapi_app.shared_models import Case, CaseStockIn, CaseStockOut, CaseInventoryLog, Product
+from fastapi_app.services import escape_like
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +16,7 @@ async def search_cases(db, query: str = '') -> list[dict]:
         joinedload(Product.cases)
     )
     if query:
-        q = q.where(Product.name.contains(query) | Product.barcode.contains(query))
+        q = q.where(Product.name.like(f'%{escape_like(query)}%') | Product.barcode.like(f'%{escape_like(query)}%'))
     else:
         q = q.limit(20)
 
@@ -37,7 +38,7 @@ async def get_case_stockins(db, page: int = 1, per_page: int = 20, customer: str
     query = select(CaseStockIn).options(joinedload(CaseStockIn.case).joinedload(Case.product))
 
     if customer:
-        query = query.where(CaseStockIn.customer.contains(customer))
+        query = query.where(CaseStockIn.customer.like(f'%{escape_like(customer)}%'))
     if start_date:
         query = query.where(CaseStockIn.stockin_date >= datetime.strptime(start_date, '%Y-%m-%d'))
     if end_date:
@@ -79,7 +80,7 @@ async def get_case_stockout_list(db, page: int = 1, per_page: int = 20, customer
     query = select(CaseStockOut).options(joinedload(CaseStockOut.case).joinedload(Case.product))
 
     if customer:
-        query = query.where(CaseStockOut.customer.contains(customer))
+        query = query.where(CaseStockOut.customer.like(f'%{escape_like(customer)}%'))
     if start_date:
         query = query.where(CaseStockOut.stockout_date >= datetime.strptime(start_date, '%Y-%m-%d'))
     if end_date:

@@ -150,6 +150,7 @@
             <div id="orderListGrouped">
                 <!-- 订单列表将通过JavaScript动态生成 -->
             </div>
+            <div id="order-pagination" class="d-flex align-items-center mt-3"></div>
         </div>
     </div>
     
@@ -173,11 +174,46 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='pagination.js') }}"></script>
 <script src="{{ url_for('static', filename='order.js') }}"></script>
 <script>
-// ========== 从模板注入全局数据 ==========
+// ========== AJAX 分页加载订单数据 ==========
+let orderCurrentPage = 1;
+const orderPerPage = 50;
+
+function loadOrders(page) {
+    fetch(`/order/api/orders?page=${page}&per_page=${orderPerPage}`, { credentials: 'include' })
+        .then(r => r.json())
+        .then(data => {
+            window.__ordersData = data.items || [];
+            globalOrdersData = window.__ordersData;
+            if (typeof renderGroupedOrderListLocal === 'function') {
+                renderGroupedOrderListLocal();
+            }
+            renderPagination(data, 'order-pagination', loadOrders);
+            orderCurrentPage = page;
+        })
+        .catch(err => {
+            console.error('加载订单失败:', err);
+            // 降级：使用模板注入的初始数据
+            if (window.__ordersData && window.__ordersData.length > 0 && typeof renderGroupedOrderList === 'function') {
+                renderGroupedOrderList();
+            }
+        });
+}
+
+// 初始化：尝试 AJAX 加载，降级到模板数据
 window.__ordersData = {{ orders_json | safe }};
 window.__customers = [{% for c in customers %}{"name":"{{ c.name | replace('"', '\\"') }}"}{% if not loop.last %},{% endif %}{% endfor %}];
+
+if (window.__ordersData && window.__ordersData.length > 0) {
+    // 有模板数据时直接渲染（首屏优化）
+    if (typeof renderGroupedOrderList === 'function') {
+        renderGroupedOrderList();
+    }
+}
+// AJAX 加载第一页（含分页信息）
+loadOrders(1);
 
 // ========== 产品搜索自动补全 - 内联注册，参照备货管理模块 ==========
 document.getElementById('product_search').addEventListener('input', function(e) {

@@ -15,6 +15,7 @@ from fastapi_app.schemas.order import (
     OrderListResponse, ApprovalCancelResponse, ApprovalListResponse,
 )
 from fastapi_app.services import order_service
+from fastapi_app.services.order_service import PermissionDeniedError
 
 router = APIRouter()
 
@@ -111,9 +112,10 @@ async def cancel_approval(
     try:
         await order_service.cancel_approval(db, approval_id, user)
         return ApprovalCancelResponse(success=True, message="审批请求已取消")
+    except PermissionDeniedError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
-        status_code = 403 if '权限' in str(e) else 400
-        raise HTTPException(status_code=status_code, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/my-approvals", response_model=ApprovalListResponse)

@@ -239,7 +239,7 @@ class ExcelReader:
                 if isinstance(val, float) and val == int(val):
                     return int(val)
                 return val
-            except:
+            except Exception:
                 return None
     
     def validate_headers(self, expected_headers, start_col=1):
@@ -364,7 +364,7 @@ class ExcelReader:
                 os.close(self.temp_fd)
             if self.temp_path and os.path.exists(self.temp_path):
                 os.unlink(self.temp_path)
-        except:
+        except Exception:
             pass
     
     @staticmethod

@@ -21,7 +21,7 @@ MYSQLDUMP_PATH = os.path.join(MYSQL_BIN, 'mysqldump.exe')
 
 DB_HOST = 'localhost'
 DB_PORT = '3306'
-DB_USER = os.getenv('DB_USER', 'root')
+DB_USER = os.getenv('DB_USER', 'erp_app')
 DB_PASSWORD = os.getenv('DB_PASSWORD', '')
 DB_NAME = os.getenv('DB_NAME', 'erp_system')
 TEST_DB_NAME = 'erp_system_test'

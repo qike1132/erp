@@ -3,7 +3,7 @@ import subprocess
 import sys
 
 MYSQL_PATH = r'C:\Program Files\MySQL\MySQL Server 8.4\bin\mysql.exe'
-DB_USER = os.getenv('DB_USER', 'root')
+DB_USER = os.getenv('DB_USER', 'erp_app')
 DB_PASSWORD = os.getenv('DB_PASSWORD', '')
 DB_NAME = os.getenv('DB_NAME', 'erp_system')
 BACKUP_FILE = sys.argv[1] if len(sys.argv) > 1 else ''

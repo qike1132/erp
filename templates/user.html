@@ -53,13 +53,19 @@
                                 <a href="{{ url_for('user.user_permission', user_id=u.id) }}" class="btn btn-sm btn-outline-info" title="权限设置">
                                     <i class="fas fa-key"></i>
                                 </a>
-                                <a href="{{ url_for('user.toggle_user_status', id=u.id) }}" class="btn btn-sm btn-outline-{{ 'danger' if u.status else 'success' }}" title="{{ '禁用' if u.status else '启用' }}">
-                                    <i class="fas fa-{{ 'ban' if u.status else 'check' }}"></i>
-                                </a>
+                                <form method="POST" action="{{ url_for('user.toggle_user_status', id=u.id) }}" style="display:inline">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-{{ 'danger' if u.status else 'success' }}" title="{{ '禁用' if u.status else '启用' }}">
+                                        <i class="fas fa-{{ 'ban' if u.status else 'check' }}"></i>
+                                    </button>
+                                </form>
                                 {% if not u.is_super %}
-                                    <a href="{{ url_for('user.delete_user', id=u.id) }}" class="btn btn-sm btn-outline-danger" onclick="return confirm('确定要删除该用户吗？')" title="删除">
-                                        <i class="fas fa-trash"></i>
-                                    </a>
+                                    <form method="POST" action="{{ url_for('user.delete_user', id=u.id) }}" style="display:inline" onsubmit="return confirm('确定要删除该用户吗？')">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger" title="删除">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </form>
                                 {% endif %}
                             </td>
                         </tr>

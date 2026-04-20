@@ -73,7 +73,7 @@ class DatabaseManager:
         return {
             'host': os.getenv('DB_HOST', 'localhost'),
             'port': os.getenv('DB_PORT', '3306'),
-            'user': os.getenv('DB_USER', 'root'),
+            'user': os.getenv('DB_USER', 'erp_app'),
             'password': os.getenv('DB_PASSWORD', ''),
             'database': os.getenv('DB_NAME', 'erp_system')
         }

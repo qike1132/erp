@@ -353,7 +353,7 @@ def common_batch_validator(required_fields):
                     return None, f'{error_name}不能为空'
                 try:
                     validated_data[field_name] = parse_date(date_str)
-                except:
+                except (ValueError, TypeError):
                     return None, f'{error_name}格式错误'
         
         return validated_data, None

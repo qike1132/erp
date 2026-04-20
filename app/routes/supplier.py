@@ -98,30 +98,6 @@ def edit_supplier(id):
     return render_template('edit_supplier.html', supplier=supplier)
 
 
-@supplier_bp.route('/delete/<int:id>')
-@page_permission_required('product_manage')
-def delete_supplier(id):
-    """删除供应商"""
-    supplier = Supplier.query.get_or_404(id)
-
-    # 检查是否有关联数据
-    has_bom = (
-        ProductMaterial.query.filter_by(supplier_id=id).first() or
-        ProductFabric.query.filter_by(supplier_id=id).first() or
-        ProductAccessory.query.filter_by(supplier_id=id).first() or
-        ProductPackaging.query.filter_by(supplier_id=id).first()
-    )
-    has_orders = PurchaseOrder.query.filter_by(supplier_id=id).first()
-
-    if has_bom or has_orders:
-        flash('该供应商已有相关BOM或采购订单数据，无法删除！', 'error')
-        return redirect(url_for('supplier.suppliers'))
-
-    db.session.delete(supplier)
-    db.session.commit()
-    flash('供应商删除成功！', 'success')
-    return redirect(url_for('supplier.suppliers'))
-
 
 def _sync_supplier_info(supplier, old_name):
     """供应商信息变更后，同步所有冗余的供应商字段到关联表

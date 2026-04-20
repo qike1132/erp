@@ -53,6 +53,8 @@ class StockOutCreate(BaseModel):
     customer: str = Field(..., min_length=1, max_length=100, description="客户名称")
     stockout_date: str = Field(..., description="出库日期 (YYYY-MM-DD)")
     note: Optional[str] = Field(None, max_length=500, description="备注")
+    order_type: str = Field('regular', max_length=20, description="订单类型: regular=常规, custom=定制")
+    country: Optional[str] = Field(None, max_length=100, description="国家名称（仅定制订单使用）")
 
     @field_validator('stockout_date')
     @classmethod
@@ -97,3 +99,4 @@ class InventoryResponse(BaseModel):
     total_order_quantity: int = 0
     total_stockin_quantity: int = 0
     total_stock: int = 0
+    all_countries: List[str] = []

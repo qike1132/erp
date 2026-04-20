@@ -11,7 +11,7 @@ from flask_limiter.util import get_remote_address
 from dotenv import load_dotenv
 import os
 import uuid
-from flask import request, g, jsonify
+from flask import request, g, jsonify, url_for
 import logging
 
 _logger = logging.getLogger(__name__)
@@ -45,8 +45,12 @@ def _register_fastapi_proxy(app, csrf):
         _logger.info("Nginx 代理模式已启用，跳过 Flask 内置 /api/v1/ 代理路由")
         return
 
-    import urllib.request
-    import urllib.error
+    # 使用 requests.Session 复用 TCP 连接，避免每次请求新建连接的开销
+    import requests as _requests
+    from urllib.parse import urlparse
+    _proxy_session = _requests.Session()
+    _proxy_session.trust_env = False  # 禁用系统代理，避免回环
+    _expected_netloc = urlparse(FASTAPI_URL).netloc
 
     @app.route('/api/v1/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
     @csrf.exempt
@@ -62,42 +66,87 @@ def _register_fastapi_proxy(app, csrf):
             target_url += f"?{query_string}"
 
         # SSRF防护：验证解析后的URL仍指向目标FastAPI主机
-        from urllib.parse import urlparse
         parsed = urlparse(target_url)
-        expected = urlparse(FASTAPI_URL)
-        if parsed.scheme not in ('http', 'https') or parsed.netloc != expected.netloc:
+        if parsed.scheme not in ('http', 'https') or parsed.netloc != _expected_netloc:
             return jsonify({'success': False, 'message': '非法请求目标'}), 400
 
         try:
-            req = urllib.request.Request(
-                target_url,
-                data=request.get_data(),
-                method=request.method,
-            )
-            # 转发关键请求头（含 Origin/Referer/Host，供 FastAPI CSRF 中间件校验）
-            for header in ['Content-Type', 'Authorization', 'Cookie', 'Origin', 'Referer', 'Host']:
+            # 仅转发认证相关请求头（避免内部Cookie泄露）
+            headers = {}
+            for header in ['Content-Type', 'Authorization', 'Origin', 'Referer', 'Host']:
                 val = request.headers.get(header)
                 if val:
-                    req.add_header(header, val)
+                    headers[header] = val
+            # 仅转发 Flask session cookie
+            session_cookie = request.cookies.get('session')
+            if session_cookie:
+                headers['Cookie'] = f'session={session_cookie}'
 
-            resp = urllib.request.urlopen(req, timeout=60)
-            content = resp.read()
-            status_code = resp.getcode()
+            resp = _proxy_session.request(
+                method=request.method,
+                url=target_url,
+                data=request.get_data(),
+                headers=headers,
+                timeout=30,
+                allow_redirects=False,
+            )
             # 透传响应头
-            headers = []
-            for name, value in resp.getheaders():
+            resp_headers = []
+            for name, value in resp.headers.items():
                 if name.lower() not in ('content-encoding', 'content-length', 'transfer-encoding', 'connection'):
-                    headers.append((name, value))
-            return app.response_class(content, status=status_code, headers=headers)
+                    resp_headers.append((name, value))
+            return app.response_class(resp.content, status=resp.status_code, headers=resp_headers)
 
-        except urllib.error.HTTPError as e:
-            content = e.read()
-            return app.response_class(content, status=e.code)
-        except urllib.error.URLError:
+        except _requests.exceptions.ConnectionError:
             return jsonify({'success': False, 'message': 'FastAPI 服务未启动，请检查服务状态'}), 503
+        except _requests.exceptions.Timeout:
+            return jsonify({'success': False, 'message': 'FastAPI 服务响应超时'}), 504
         except Exception as e:
             _logger.error(f'代理请求失败: {str(e)}')
             return jsonify({'success': False, 'message': '代理请求失败'}), 500
+
+
+def check_orphan_nav_endpoints(app):
+    """启动时检测导航端点缺失：仅记录警告，不修改数据库。
+
+    历史教训：当蓝图因导入错误等临时原因未能注册时，直接修改数据库会导致
+    is_nav/url 被清空，即使后续修复代码也无法自动恢复。
+    正确做法：只告警，由人工判断是"蓝图被刻意删除"还是"临时注册失败"。
+    """
+    failed_blueprints = getattr(app, '_failed_blueprints', [])
+
+    with app.app_context():
+        try:
+            from app.models import Permission
+            valid_endpoints = {rule.endpoint for rule in app.url_map.iter_rules()}
+            nav_perms = Permission.query.filter(Permission.is_nav == True, Permission.url.isnot(None)).all()
+            orphaned = 0
+            for perm in nav_perms:
+                if '.' in (perm.url or '') and perm.url not in valid_endpoints:
+                    # 关联失败蓝图信息，提升排障效率
+                    bp_hint = ''
+                    if failed_blueprints:
+                        bp_hint = ' [本次启动失败的蓝图: %s]' % ', '.join(failed_blueprints)
+                    _logger.warning(
+                        '导航端点缺失: id=%s, name=%s, url=%s — '
+                        '可能是蓝图注册失败（临时错误）或蓝图已被删除（需人工清理）%s',
+                        perm.id, perm.name, perm.url, bp_hint
+                    )
+                    orphaned += 1
+            if orphaned > 0:
+                _logger.warning(
+                    '发现 %d 条导航端点缺失记录，未自动清理。'
+                    '如确认蓝图已废弃，请手动执行: '
+                    'Permission.query.get(id).is_nav=False; db.session.commit()',
+                    orphaned
+                )
+        except Exception as e:
+            # 区分 DB 连接错误与一般异常：DB不可用需 ERROR 级别
+            from sqlalchemy.exc import OperationalError, InterfaceError, ProgrammingError
+            if isinstance(e, (OperationalError, InterfaceError, ProgrammingError)):
+                _logger.error('检测导航端点缺失时数据库不可用: %s', e)
+            else:
+                _logger.warning('检测导航端点缺失时出错(非致命): %s [%s]', e, type(e).__name__)
 
 
 def create_app(config_name='default'):
@@ -176,21 +225,32 @@ def create_app(config_name='default'):
     _nav_cache_ttl = 300  # 5分钟缓存
 
     # 注入导航权限数据（需在蓝图注册后）
+    _nav_local_cache = {"data": None, "cached_at": 0.0}
+
     @app.context_processor
     def inject_nav_permissions():
         import time
         from utils.redis_cache import redis_cache
 
-        # 优先从Redis读取
+        # 第一层：进程内缓存（避免每次请求都访问 Redis）
+        _nav_local_ttl = 60  # 进程内缓存 60 秒，远短于 Redis TTL
+        now = time.time()
+        if _nav_local_cache["data"] is not None and (now - _nav_local_cache["cached_at"]) < _nav_local_ttl:
+            return {'nav_sections': _nav_local_cache["data"]}
+
+        # 第二层：Redis 缓存
         cached = redis_cache.get('nav_sections')
         if cached is not None:
+            _nav_local_cache["data"] = cached
+            _nav_local_cache["cached_at"] = now
             return {'nav_sections': cached}
 
         from app.models import Permission
 
         nav_items = Permission.query.filter(
             Permission.parent_id.is_(None),
-            Permission.is_nav == True
+            Permission.is_nav == True,
+            Permission.url.isnot(None)
         ).order_by(Permission.section, Permission.sort_order).all()
 
         SPECIAL_PERMISSION_MAP = {
@@ -204,8 +264,16 @@ def create_app(config_name='default'):
             'production_summary_view': ['production_summary_view', 'production_summary_manage'],
         }
 
+        # 构建有效端点集合，过滤蓝图注册失败导致的无效导航项
+        from flask import current_app
+        valid_endpoints = {rule.endpoint for rule in current_app.url_map.iter_rules()}
+
         sections = {}
         for item in nav_items:
+            # 跳过端点缺失的导航项（蓝图注册失败时不向用户显示无效链接）
+            if item.url and '.' in item.url and item.url not in valid_endpoints:
+                continue
+
             section_key = item.section or 'other'
             if section_key not in sections:
                 sections[section_key] = {
@@ -236,11 +304,32 @@ def create_app(config_name='default'):
             if key not in ordered_sections:
                 ordered_sections[key] = sections[key]
 
-        # 写入Redis缓存
+        # 写入Redis缓存 + 更新进程内缓存
         redis_cache.set('nav_sections', ordered_sections, timeout=_nav_cache_ttl)
+        _nav_local_cache["data"] = ordered_sections
+        _nav_local_cache["cached_at"] = time.time()
 
         return {'nav_sections': ordered_sections}
     
+    # 安全 url_for 模板过滤器：遇到无效端点时返回 '#' 而不是抛出 BuildError
+    _safe_url_warned = set()  # 已告警端点集合，避免每次请求重复输出 WARNING
+
+    @app.template_filter('safe_url_for')
+    def safe_url_for(endpoint):
+        from werkzeug.routing.exceptions import BuildError
+        if not endpoint or not isinstance(endpoint, str):
+            return '#'
+        try:
+            return url_for(endpoint)
+        except (BuildError, TypeError):
+            if endpoint not in _safe_url_warned:
+                _safe_url_warned.add(endpoint)
+                _logger.warning('导航端点不存在: %s (可能蓝图已删除但数据库 permission 表未清理)', endpoint)
+            return '#'
+
+    # 启动时检测导航端点缺失：仅记录警告，不修改数据库
+    check_orphan_nav_endpoints(app)
+
     # 请注意：引入 Flask-Migrate 后，不再使用 db.create_all()，改为由 Alembic 脚本控制
     # with app.app_context():
     #     db.create_all()
@@ -252,7 +341,7 @@ def get_config(config_name):
     """获取配置"""
     configs = {
         'default': {
-            'SECRET_KEY': os.environ.get('SECRET_KEY') or (None if os.environ.get('FLASK_ENV') == 'production' else 'dev-key-for-local-only'),
+            'SECRET_KEY': os.environ.get('SECRET_KEY') or (None if os.environ.get('FLASK_ENV') == 'production' else os.urandom(24).hex()),
             'SQLALCHEMY_DATABASE_URI': get_database_uri(),
             'SQLALCHEMY_TRACK_MODIFICATIONS': False,
             'SQLALCHEMY_POOL_SIZE': int(os.environ.get('DB_POOL_SIZE', 10)),
@@ -267,9 +356,9 @@ def get_config(config_name):
             'SESSION_COOKIE_SECURE': os.environ.get('FLASK_ENV') == 'production',
             'SESSION_COOKIE_HTTPONLY': True,
             'SESSION_COOKIE_SAMESITE': 'Lax',
-            'SEND_FILE_MAX_AGE_DEFAULT': 0,
+            'SEND_FILE_MAX_AGE_DEFAULT': int(os.environ.get('SEND_FILE_MAX_AGE_DEFAULT', 3600)),
             'ASSET_VERSION': '2.5',  # CSS/JS缓存清除版本号，更新静态文件时递增此值
-            'TEMPLATES_AUTO_RELOAD': True,
+            'TEMPLATES_AUTO_RELOAD': os.environ.get('FLASK_ENV') != 'production',
         },
         'testing': {
             'SECRET_KEY': os.environ.get('TEST_SECRET_KEY', 'test-secret-key-for-testing-only'),
@@ -288,13 +377,18 @@ def get_config(config_name):
         _logger.warning("Running in PRODUCTION mode. Ensure you are using HTTPS!")
         _logger.warning("SESSION_COOKIE_SECURE is enabled - session cookies require HTTPS")
     else:
-        _logger.info("Running in %s mode", flask_env.upper())
+        if configs['default']['SECRET_KEY'] == 'dev-key-for-local-only':
+            _logger.warning(
+                "WARNING: Using default SECRET_KEY in development mode. "
+                "Never use this in production! Set SECRET_KEY environment variable."
+            )
     
     return configs.get(config_name, configs['default'])
 
 
 def get_database_uri():
     """获取数据库URI - 仅支持MySQL"""
+    from urllib.parse import quote_plus
     db_host = os.getenv('DB_HOST', 'localhost')
     db_port = os.getenv('DB_PORT', '3306')
     db_user = os.getenv('DB_USER')
@@ -305,14 +399,16 @@ def get_database_uri():
         if not db_user or not db_password:
             raise RuntimeError("PRODUCTION ERROR: DB_USER and DB_PASSWORD must be set for MySQL!")
 
-    db_user = db_user or 'root'
+    db_user = db_user or 'erp_app'
     db_password = db_password or ''
 
-    return f'mysql+pymysql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}?charset=utf8mb4'
+    return f'mysql+pymysql://{quote_plus(db_user)}:{quote_plus(db_password)}@{db_host}:{db_port}/{db_name}?charset=utf8mb4'
 
 
 def register_blueprints(app):
     """注册蓝图"""
+    _failed_blueprints = []
+
     def _register(bp_import_path, bp_name, csrf_exempt=False, url_prefix=None):
         """统一蓝图注册辅助函数"""
         try:
@@ -325,13 +421,19 @@ def register_blueprints(app):
             else:
                 app.register_blueprint(bp)
             _logger.info("蓝图注册成功: %s", bp_name)
-        except ImportError as e:
+        except (ImportError, AttributeError) as e:
             _logger.error("蓝图注册失败 %s: %s", bp_name, e)
+            _failed_blueprints.append(bp_name)
+        except Exception as e:
+            _logger.error("蓝图注册异常 %s [%s]: %s", bp_name, type(e).__name__, e)
+            _failed_blueprints.append(bp_name)
 
     _register('app.routes.main', 'main_bp')
     _register('app.routes.product', 'product_bp')
     _register('app.routes.order', 'order_bp')
+    _register('app.routes.order', 'order_api_bp', csrf_exempt=True)
     _register('app.routes.stock', 'stock_bp')
+    _register('app.routes.stock', 'stock_api_bp', csrf_exempt=True)
     _register('app.routes.api', 'api_bp')
     _register('app.routes.user', 'user_bp')
     _register('app.routes.report', 'report_bp')
@@ -348,6 +450,7 @@ def register_blueprints(app):
     _register('app.routes.purchase_center', 'purchase_center_bp', csrf_exempt=True)
     _register('app.routes.material_registration', 'material_registration_bp', csrf_exempt=True)
     _register('app.routes.customer_order', 'customer_order_bp')
+    _register('app.routes.customer_order', 'customer_order_api_bp', csrf_exempt=True)
     _register('app.routes.finance', 'finance_bp')
     _register('app.routes.production_plan', 'production_plan_bp')
     _register('app.routes.purchase_plan', 'purchase_plan_bp')
@@ -355,6 +458,10 @@ def register_blueprints(app):
 
     # FastAPI 反向代理 - 将 /api/v1/ 请求转发到 FastAPI 服务（豁免CSRF）
     _register_fastapi_proxy(app, csrf)
+
+    # 将失败蓝图列表存储到 app 实例，供启动检测代码关联日志
+    if _failed_blueprints:
+        app._failed_blueprints = _failed_blueprints
 
 
 

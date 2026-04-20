@@ -6,7 +6,7 @@ from pathlib import Path
 
 db_host = 'localhost'
 db_port = '3306'
-db_user = os.getenv('DB_USER', 'root')
+db_user = os.getenv('DB_USER', 'erp_app')
 db_password = os.getenv('DB_PASSWORD', '')
 db_name = os.getenv('DB_NAME', 'erp_system')
 

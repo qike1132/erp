@@ -35,6 +35,11 @@ import json
 
 from decimal import Decimal
 
+
+def _escape_like(value: str) -> str:
+    """转义 SQL LIKE 通配符，防止 LIKE 注入"""
+    return value.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+
 logger = logging.getLogger(__name__)
 
 material_registration_bp = Blueprint('material_registration', __name__, url_prefix='/material-registration')
@@ -81,9 +86,9 @@ def get_registrations():
     if status:
         query = query.filter(MaterialRegistration.status == status)
     if order_no:
-        query = query.filter(MaterialRegistration.purchase_order_no.ilike(f'%{order_no}%'))
+        query = query.filter(MaterialRegistration.purchase_order_no.ilike(f'%{_escape_like(order_no)}%'))
     if supplier:
-        query = query.filter(MaterialRegistration.supplier_name.ilike(f'%{supplier}%'))
+        query = query.filter(MaterialRegistration.supplier_name.ilike(f'%{_escape_like(supplier)}%'))
     if start_date:
         try:
             sd = datetime.strptime(start_date, '%Y-%m-%d').date()
@@ -98,7 +103,7 @@ def get_registrations():
             pass
     if material_name:
         query = query.filter(
-            MaterialRegistration.items.any(MaterialRegistrationItem.material_name.ilike(f'%{material_name}%'))
+            MaterialRegistration.items.any(MaterialRegistrationItem.material_name.ilike(f'%{_escape_like(material_name)}%'))
         )
     if material_category:
         query = query.filter(
@@ -173,15 +178,15 @@ def create_registration():
     """创建来料登记"""
     data = request.get_json()
     if not data:
-        return jsonify({'success': False, 'message': '无效的请求数据'}), 400
+        return jsonify({'success': False, 'error': '无效的请求数据'}), 400
 
     purchase_order_id = data.get('purchase_order_id')
     if not purchase_order_id:
-        return jsonify({'success': False, 'message': '请选择采购订单'}), 400
+        return jsonify({'success': False, 'error': '请选择采购订单'}), 400
     # 获取采购订单
     purchase_order = db.session.get(PurchaseOrder, purchase_order_id)
     if not purchase_order:
-        return jsonify({'success': False, 'message': '采购订单不存在'}), 404
+        return jsonify({'success': False, 'error': '采购订单不存在'}), 404
     user_id = session.get('user_id')
     username = session.get('username', '未知')
     try:
@@ -219,7 +224,7 @@ def create_registration():
     except Exception as e:
         db.session.rollback()
         logger.error(f"创建来料登记失败: {e}")
-        return jsonify({'success': False, 'message': '创建失败，请稍后重试'}), 500
+        return jsonify({'success': False, 'error': '创建失败，请稍后重试'}), 500
 
 
 @material_registration_bp.route('/api/registrations/<int:reg_id>', methods=['PUT'])
@@ -229,7 +234,7 @@ def update_registration(reg_id):
     registration = MaterialRegistration.query.get_or_404(reg_id)
     data = request.get_json()
     if not data:
-        return jsonify({'success': False, 'message': '无效的请求数据'}), 400
+        return jsonify({'success': False, 'error': '无效的请求数据'}), 400
     try:
         # 更新主记录
         if 'status' in data:
@@ -261,7 +266,7 @@ def update_registration(reg_id):
     except Exception as e:
         db.session.rollback()
         logger.error(f"更新来料登记失败: {e}")
-        return jsonify({'success': False, 'message': '更新失败，请稍后重试'}), 500
+        return jsonify({'success': False, 'error': '更新失败，请稍后重试'}), 500
 
 
 @material_registration_bp.route('/api/registrations/<int:reg_id>', methods=['DELETE'])
@@ -276,7 +281,7 @@ def delete_registration(reg_id):
     except Exception as e:
         db.session.rollback()
         logger.error(f"删除来料登记失败: {e}")
-        return jsonify({'success': False, 'message': '删除失败，请稍后重试'}), 500
+        return jsonify({'success': False, 'error': '删除失败，请稍后重试'}), 500
 
 
 @material_registration_bp.route('/api/purchase-orders/<order_no>/preview', methods=['GET'])
@@ -285,7 +290,7 @@ def preview_purchase_order(order_no):
     """采购订单快速预览 - 弹窗用"""
     order = PurchaseOrder.query.filter_by(order_no=order_no).first()
     if not order:
-        return jsonify({'success': False, 'message': '订单不存在'}), 404
+        return jsonify({'success': False, 'error': '订单不存在'}), 404
     return jsonify({'success': True, 'order': order.to_dict()})
 
 
@@ -333,11 +338,11 @@ def receive_material(item_id):
     item = MaterialRegistrationItem.query.get_or_404(item_id)
     data = request.get_json()
     if not data:
-        return jsonify({'success': False, 'message': '无效的请求数据'}), 400
+        return jsonify({'success': False, 'error': '无效的请求数据'}), 400
     try:
         received_qty = Decimal(str(data.get('received_quantity', 0)))
         if received_qty < 0:
-            return jsonify({'success': False, 'message': '收货数量必须大于0'}), 400
+            return jsonify({'success': False, 'error': '收货数量必须大于0'}), 400
         item.received_quantity = received_qty
         if data.get('remark'):
             item.remark = data['remark']
@@ -355,7 +360,7 @@ def receive_material(item_id):
     except Exception as e:
         db.session.rollback()
         logger.error(f"物料收货登记失败: {e}")
-        return jsonify({'success': False, 'message': '登记失败，请稍后重试'}), 500
+        return jsonify({'success': False, 'error': '登记失败，请稍后重试'}), 500
 
 
 @material_registration_bp.route('/api/stats/overview', methods=['GET'])
@@ -363,7 +368,7 @@ def receive_material(item_id):
 def get_stats_overview():
     """获取来料登记统计概览"""
     try:
-        all_registrations = MaterialRegistration.query.all()
+        all_registrations = MaterialRegistration.query.limit(5000).all()
         pending = sum(1 for r in all_registrations if r.computed_status == 'pending')
         partial = sum(1 for r in all_registrations if r.computed_status == 'partial')
         completed = sum(1 for r in all_registrations if r.computed_status == 'completed')
@@ -428,7 +433,7 @@ def get_stats_overview():
         })
     except Exception as e:
         logger.error(f"获取统计概览失败: {e}")
-        return jsonify({'success': False, 'message': '获取统计概览失败，请稍后重试'}), 500
+        return jsonify({'success': False, 'error': '获取统计概览失败，请稍后重试'}), 500
 
 
 @material_registration_bp.route('/api/stats/distribution', methods=['GET'])
@@ -436,7 +441,7 @@ def get_stats_overview():
 def get_stats_distribution():
     """获取来料登记状态分布"""
     try:
-        all_registrations = MaterialRegistration.query.all()
+        all_registrations = MaterialRegistration.query.limit(5000).all()
         pending = sum(1 for r in all_registrations if r.computed_status == 'pending')
         partial = sum(1 for r in all_registrations if r.computed_status == 'partial')
         completed = sum(1 for r in all_registrations if r.computed_status == 'completed')
@@ -459,7 +464,7 @@ def get_stats_distribution():
         })
     except Exception as e:
         logger.error(f"获取状态分布失败: {e}")
-        return jsonify({'success': False, 'message': '获取状态分布失败，请稍后重试'}), 500
+        return jsonify({'success': False, 'error': '获取状态分布失败，请稍后重试'}), 500
 
 
 @material_registration_bp.route('/api/stats/trend', methods=['GET'])
@@ -474,7 +479,7 @@ def get_stats_trend():
         registrations = MaterialRegistration.query.filter(
             MaterialRegistration.registration_date >= start_date,
             MaterialRegistration.registration_date <= end_date
-        ).all()
+        ).limit(5000).all()
 
         date_map = {}
         current = start_date
@@ -509,7 +514,7 @@ def get_stats_trend():
         })
     except Exception as e:
         logger.error(f"获取趋势数据失败: {e}")
-        return jsonify({'success': False, 'message': '获取趋势数据失败，请稍后重试'}), 500
+        return jsonify({'success': False, 'error': '获取趋势数据失败，请稍后重试'}), 500
 
 
 @material_registration_bp.route('/api/export', methods=['POST'])
@@ -522,10 +527,10 @@ def export_registrations():
 
         order_no = data.get('order_no', '')
         if order_no:
-            query = query.filter(MaterialRegistration.purchase_order_no.ilike(f'%{order_no}%'))
+            query = query.filter(MaterialRegistration.purchase_order_no.ilike(f'%{_escape_like(order_no)}%'))
         supplier = data.get('supplier', '')
         if supplier:
-            query = query.filter(MaterialRegistration.supplier_name.ilike(f'%{supplier}%'))
+            query = query.filter(MaterialRegistration.supplier_name.ilike(f'%{_escape_like(supplier)}%'))
         start_date = data.get('start_date', '')
         if start_date:
             query = query.filter(MaterialRegistration.registration_date >= start_date)
@@ -579,7 +584,7 @@ th { background: #E6E6E6; font-weight: bold; }
         return jsonify({'success': True, 'html': ''.join(html_parts)})
     except Exception as e:
         logger.error(f"导出来料登记失败: {e}")
-        return jsonify({'success': False, 'message': '导出来料登记失败，请稍后重试'}), 500
+        return jsonify({'success': False, 'error': '导出来料登记失败，请稍后重试'}), 500
 
 
 @material_registration_bp.route('/api/history', methods=['GET'])
@@ -600,11 +605,11 @@ def get_history():
     )
 
     if order_no:
-        query = query.filter(MaterialRegistration.purchase_order_no.ilike(f'%{order_no}%'))
+        query = query.filter(MaterialRegistration.purchase_order_no.ilike(f'%{_escape_like(order_no)}%'))
     if supplier:
-        query = query.filter(MaterialRegistration.supplier_name.ilike(f'%{supplier}%'))
+        query = query.filter(MaterialRegistration.supplier_name.ilike(f'%{_escape_like(supplier)}%'))
     if customer_name:
-        query = query.filter(PurchaseOrder.customer_name.ilike(f'%{customer_name}%'))
+        query = query.filter(PurchaseOrder.customer_name.ilike(f'%{_escape_like(customer_name)}%'))
     if start_date:
         try:
             sd = datetime.strptime(start_date, '%Y-%m-%d').date()
@@ -651,17 +656,17 @@ def get_suggestions():
     try:
         if field == 'order_no':
             results = db.session.query(MaterialRegistration.purchase_order_no).filter(
-                MaterialRegistration.purchase_order_no.ilike(f'%{keyword}%')
+                MaterialRegistration.purchase_order_no.ilike(f'%{_escape_like(keyword)}%')
             ).distinct().limit(limit).all()
             suggestions = [r[0] for r in results if r[0]]
         elif field == 'supplier':
             results = db.session.query(MaterialRegistration.supplier_name).filter(
-                MaterialRegistration.supplier_name.ilike(f'%{keyword}%')
+                MaterialRegistration.supplier_name.ilike(f'%{_escape_like(keyword)}%')
             ).distinct().limit(limit).all()
             suggestions = [r[0] for r in results if r[0]]
         elif field == 'material_name':
             results = db.session.query(MaterialRegistrationItem.material_name).filter(
-                MaterialRegistrationItem.material_name.ilike(f'%{keyword}%')
+                MaterialRegistrationItem.material_name.ilike(f'%{_escape_like(keyword)}%')
             ).distinct().limit(limit).all()
             suggestions = [r[0] for r in results if r[0]]
     except Exception as e:

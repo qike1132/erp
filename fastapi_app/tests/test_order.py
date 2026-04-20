@@ -9,6 +9,7 @@ from httpx import AsyncClient
 from fastapi_app.main import app
 from fastapi_app.schemas.order import OrderCreate, OrderUpdate
 from fastapi_app.services import order_service
+from fastapi_app.services.order_service import PermissionDeniedError
 
 
 # ==================== Schema 验证 ====================
@@ -157,7 +158,7 @@ class TestOrderService:
         user = MagicMock()
         user.id = 1
         user.is_super = False
-        with pytest.raises(ValueError, match="权限"):
+        with pytest.raises(PermissionDeniedError, match="权限"):
             await order_service.cancel_approval(mock_db, 1, user)
 
     async def test_cancel_approval_success(self, mock_db):

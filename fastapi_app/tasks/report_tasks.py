@@ -27,13 +27,12 @@ def export_report_task(self, report_type: str, filters: dict, user_id: int):
         dict: 导出结果 {success, file_path, filename, row_count, task_id}
     """
     try:
-        from app import create_app
+        from fastapi_app.core.database import SyncSessionLocal
+        from fastapi_app.shared.report_data_service import get_all_logs_data
+        from utils.report_exporter import ReportExporter
 
-        app = create_app()
-        with app.app_context():
-            from app.routes.report import get_all_logs_data
-            from utils.report_exporter import ReportExporter
-
+        session = SyncSessionLocal()
+        try:
             customer = filters.get("customer", "")
             product = filters.get("product", "")
             status = filters.get("status", "")
@@ -41,7 +40,7 @@ def export_report_task(self, report_type: str, filters: dict, user_id: int):
             end_date = filters.get("end_date", "")
 
             logs, stats = get_all_logs_data(
-                report_type,
+                session, report_type,
                 customer=customer,
                 product=product,
                 status=status,
@@ -83,6 +82,8 @@ def export_report_task(self, report_type: str, filters: dict, user_id: int):
                 "row_count": len(logs),
                 "task_id": self.request.id,
             }
+        finally:
+            session.close()
 
     except Exception as exc:
         logger.error(f"报表导出任务失败: {exc}", exc_info=True)

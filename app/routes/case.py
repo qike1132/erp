@@ -8,7 +8,8 @@ from app.models import Case, CaseStockIn, CaseStockOut, CaseInventoryLog, Produc
 from utils.number_generator import generate_case_stockin_number, generate_case_stockout_number
 from datetime import datetime, timedelta
 from sqlalchemy.orm import joinedload, contains_eager
-from app.utils.permission_decorators import api_permission_required
+from app.utils.permission_decorators import api_permission_required, page_permission_required
+from app.services.shared import escape_like
 
 case_page_bp = Blueprint('case', __name__, url_prefix='/case')
 case_api_bp = Blueprint('case_api', __name__)
@@ -20,9 +21,10 @@ csrf.exempt(case_api_bp)
 
 @case_page_bp.route('/')
 @case_page_bp.route('/stockins')
+@page_permission_required('case_manage')
 def case_management_page():
     """皮套管理主页面（包含入库、出库、库存三个标签页）"""
-    customers = Customer.query.filter_by(status=True).order_by(Customer.name).all()
+    customers = Customer.query.filter_by(status=True).order_by(Customer.name).limit(2000).all()
     customers_list = [c.name for c in customers]
     return render_template('case.html', customers=customers_list, is_home=False)
 
@@ -37,12 +39,12 @@ def case_search():
     
     if query:
         products = Product.query.filter(
-            Product.name.contains(query) | Product.barcode.contains(query)
+            Product.name.like(f'%{escape_like(query)}%') | Product.barcode.like(f'%{escape_like(query)}%')
         ).outerjoin(
             Case, Product.id == Case.product_id
         ).options(
             contains_eager(Product.cases)
-        ).all()
+        ).limit(500).all()
     else:
         products = Product.query.outerjoin(
             Case, Product.id == Case.product_id
@@ -74,7 +76,7 @@ def batch_submit_case_stockins():
         stockins_data = data.get('stockins', [])
 
         if not stockins_data:
-            return jsonify({'success': False, 'message': '没有入库数据'})
+            return jsonify({'success': False, 'error': '没有入库数据'}), 400
 
         success_count = 0
         failed_stockins = []
@@ -155,6 +157,7 @@ def batch_submit_case_stockins():
 
                 success_count += 1
             except Exception as e:
+                current_app.logger.error(f'皮套入库处理失败: {e}', exc_info=True)
                 failed_stockins.append({'stockin': stockin_data, 'error': '入库处理失败'})
 
         db.session.commit()
@@ -166,121 +169,10 @@ def batch_submit_case_stockins():
         })
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'message': '提交失败，请稍后重试'}), 500
+        current_app.logger.error(f'皮套入库批量提交失败: {e}', exc_info=True)
+        return jsonify({'success': False, 'error': '更新失败，请稍后重试'}), 500
 
 
-@csrf.exempt
-@case_api_bp.route('/api/case-stockins')
-@api_permission_required('case_manage')
-def api_case_stockins():
-    """获取皮套入库列表 API（支持搜索）"""
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 20, type=int)
-    customer = request.args.get('customer', '')
-    start_date = request.args.get('start_date', '')
-    end_date = request.args.get('end_date', '')
-    quantity_min = request.args.get('quantity_min', type=int)
-    quantity_max = request.args.get('quantity_max', type=int)
-
-    query = CaseStockIn.query
-
-    if customer:
-        query = query.filter(CaseStockIn.customer.contains(customer))
-
-    if start_date:
-        start = datetime.strptime(start_date, '%Y-%m-%d')
-        query = query.filter(CaseStockIn.stockin_date >= start)
-
-    if end_date:
-        end = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
-        query = query.filter(CaseStockIn.stockin_date < end)
-
-    if quantity_min:
-        query = query.filter(CaseStockIn.quantity >= quantity_min)
-
-    if quantity_max:
-        query = query.filter(CaseStockIn.quantity <= quantity_max)
-
-    query = query.order_by(CaseStockIn.stockin_date.desc())
-    query = query.options(joinedload(CaseStockIn.case).joinedload(Case.product))
-    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
-
-    result = []
-    for stockin in pagination.items:
-        result.append({
-            'id': stockin.id,
-            'stockin_no': stockin.stockin_no,
-            'stockin_date': stockin.stockin_date.strftime('%Y-%m-%d'),
-            'customer': stockin.customer,
-            'case_id': stockin.case_id,
-            'case_name': stockin.case.sync_name,
-            'case_barcode': stockin.case.sync_barcode or '',
-            'quantity': stockin.quantity,
-            'note': stockin.note or ''
-        })
-
-    return jsonify({
-        'stockins': result,
-        'total': pagination.total,
-        'pages': pagination.pages,
-        'current_page': page
-    })
-
-
-@csrf.exempt
-@case_api_bp.route('/api/case-stockin/<int:stockin_id>', methods=['GET'])
-@api_permission_required('case_manage')
-def get_case_stockin(stockin_id):
-    """获取单个皮套入库记录"""
-    stockin = CaseStockIn.query.get_or_404(stockin_id)
-    return jsonify({
-        'id': stockin.id,
-        'stockin_no': stockin.stockin_no,
-        'stockin_date': stockin.stockin_date.strftime('%Y-%m-%d'),
-        'customer': stockin.customer,
-        'case_id': stockin.case_id,
-        'case_name': stockin.case.sync_name,
-        'quantity': stockin.quantity,
-        'note': stockin.note or ''
-    })
-
-
-@case_api_bp.route('/api/case-stockin/<int:stockin_id>', methods=['PUT'])
-@api_permission_required('case_manage')
-def update_case_stockin(stockin_id):
-    """更新皮套入库记录"""
-    try:
-        data = request.get_json()
-        stockin = CaseStockIn.query.get_or_404(stockin_id)
-
-        old_quantity = stockin.quantity
-        new_quantity = data.get('quantity', old_quantity)
-        quantity_change = new_quantity - old_quantity
-
-        stockin.customer = data.get('customer', stockin.customer)
-        stockin.stockin_date = datetime.strptime(data.get('stockin_date', stockin.stockin_date.strftime('%Y-%m-%d')), '%Y-%m-%d')
-        stockin.quantity = new_quantity
-        stockin.note = data.get('note', stockin.note)
-
-        case_obj = Case.query.with_for_update().get(stockin.case_id)
-        if case_obj:
-            case_obj.current_stock += quantity_change
-
-            log = CaseInventoryLog(
-                case_id=stockin.case_id,
-                change_type='入库调整',
-                change_quantity=quantity_change,
-                related_id=stockin.stockin_no,
-                note=f'入库调整：{stockin.stockin_no}'
-            )
-            db.session.add(log)
-
-        db.session.commit()
-
-        return jsonify({'success': True, 'message': '更新成功'})
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'success': False, 'message': '更新失败，请稍后重试'})
 
 
 @case_api_bp.route('/api/case-stockin/<int:stockin_id>', methods=['DELETE'])
@@ -291,7 +183,7 @@ def delete_case_stockin(stockin_id):
         stockin = CaseStockIn.query.get_or_404(stockin_id)
 
         if CaseStockOut.query.filter_by(case_id=stockin.case_id).first():
-            return jsonify({'success': False, 'message': '该入库记录已有出库，无法删除'})
+            return jsonify({'success': False, 'error': '该入库记录已有出库，无法删除'}), 400
 
         case_obj = Case.query.with_for_update().get(stockin.case_id)
         if case_obj:
@@ -312,7 +204,8 @@ def delete_case_stockin(stockin_id):
         return jsonify({'success': True, 'message': '删除成功'})
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'message': '删除失败，请稍后重试'})
+        current_app.logger.error(f'皮套入库删除失败: {e}', exc_info=True)
+        return jsonify({'success': False, 'error': '删除失败，请稍后重试'}), 500
 
 
 @csrf.exempt
@@ -331,7 +224,7 @@ def api_case_stockouts():
     query = CaseStockOut.query
 
     if customer:
-        query = query.filter(CaseStockOut.customer.contains(customer))
+        query = query.filter(CaseStockOut.customer.like(f'%{escape_like(customer)}%'))
 
     if start_date:
         start = datetime.strptime(start_date, '%Y-%m-%d')
@@ -410,6 +303,8 @@ def update_case_stockout(stockout_id):
         case_obj = Case.query.with_for_update().get(stockout.case_id)
         if case_obj:
             case_obj.current_stock -= quantity_change
+            if case_obj.current_stock < 0:
+                current_app.logger.warning(f'皮套库存出现负数：{case_obj.name}(ID:{case_obj.id})，当前库存{case_obj.current_stock}')
 
             log = CaseInventoryLog(
                 case_id=stockout.case_id,
@@ -425,7 +320,10 @@ def update_case_stockout(stockout_id):
         return jsonify({'success': True, 'message': '更新成功'})
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'message': '更新失败，请稍后重试'})
+        current_app.logger.error(f'皮套出库更新失败: {e}', exc_info=True)
+        return jsonify({'success': False, 'error': '更新失败，请稍后重试'}), 500
+
+
 
 
 @case_api_bp.route('/api/case-stockout/<int:stockout_id>', methods=['DELETE'])
@@ -454,7 +352,8 @@ def delete_case_stockout(stockout_id):
         return jsonify({'success': True, 'message': '删除成功'})
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'message': '删除失败，请稍后重试'})
+        current_app.logger.error(f'皮套出库删除失败: {e}', exc_info=True)
+        return jsonify({'success': False, 'error': '删除失败，请稍后重试'}), 500
 
 
 @case_api_bp.route('/api/case-inventory-summary')
@@ -481,7 +380,7 @@ def case_inventory_summary():
         total_in_subquery, Case.id == total_in_subquery.c.case_id
     ).outerjoin(
         total_out_subquery, Case.id == total_out_subquery.c.case_id
-    ).all()
+    ).limit(5000).all()
     
     data = []
     for case, total_in, total_out in results:
@@ -649,13 +548,14 @@ def delete_case_product(case_id):
     try:
         case_obj = Case.query.get_or_404(case_id)
         if case_obj.current_stock != 0:
-            return jsonify({'success': False, 'message': '只能删除库存为0的皮套'}), 400
+            return jsonify({'success': False, 'error': '只能删除库存为0的皮套'}), 400
         db.session.delete(case_obj)
         db.session.commit()
         return jsonify({'success': True, 'message': '删除成功'})
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'message': '删除失败，请稍后重试'}), 500
+        current_app.logger.error(f'皮套产品删除失败: {e}', exc_info=True)
+        return jsonify({'success': False, 'error': '删除失败，请稍后重试'}), 500
 
 
 @case_api_bp.route('/api/case-products', methods=['GET', 'POST'])
@@ -669,7 +569,7 @@ def case_products():
         product_id = request.form.get('product_id')
 
         if not name and not product_id:
-            return jsonify({'success': False, 'message': '皮套名称或关联产品不能为空'}), 400
+            return jsonify({'success': False, 'error': '皮套名称或关联产品不能为空'}), 400
 
         if product_id and not name:
             linked_product = db.session.get(Product, product_id)
@@ -685,7 +585,7 @@ def case_products():
 
     cases = Case.query.options(
         joinedload(Case.product)
-    ).order_by(Case.create_time.desc()).all()
+    ).order_by(Case.create_time.desc()).limit(2000).all()
     return jsonify({'cases': [{
         'id': c.id,
         'name': c.sync_name,

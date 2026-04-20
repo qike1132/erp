@@ -3,8 +3,7 @@
 包含首页、登录、登出等基础路由
 """
 from flask import Blueprint, render_template, redirect, url_for, session, make_response, request, flash, jsonify, current_app
-from app import db, csrf
-from functools import wraps
+from app import db, csrf, limiter
 from utils.sanitizer import sanitize_plain_text
 
 main_bp = Blueprint('main', __name__)
@@ -32,16 +31,74 @@ def index():
     """首页"""
     if not session.get('user_id'):
         return redirect(url_for('main.login'))
-    return render_template('index.html', is_home=True)
 
+    from app.models import Order, StockIn, StockOut, ApprovalRequest, Product, PurchaseOrder, MaterialRegistration
+    from datetime import date, datetime
 
-@main_bp.route('/test-js')
-def test_js():
-    """JavaScript测试页面"""
-    return render_template('test_js.html')
+    today = date.today()
+    today_start = datetime.combine(today, datetime.min.time())
+    today_end = datetime.combine(today, datetime.max.time())
+
+    # KPI 统计
+    order_today = Order.query.filter(Order.order_date.between(today_start, today_end)).count()
+    stockin_today = StockIn.query.filter(StockIn.stockin_date.between(today_start, today_end)).count()
+    stockout_today = StockOut.query.filter(StockOut.stockout_date.between(today_start, today_end)).count()
+    pending_approvals = ApprovalRequest.query.filter_by(status='pending').count()
+
+    # 昨日对比
+    from datetime import timedelta
+    yesterday = today - timedelta(days=1)
+    yesterday_start = datetime.combine(yesterday, datetime.min.time())
+    yesterday_end = datetime.combine(yesterday, datetime.max.time())
+    order_yesterday = Order.query.filter(Order.order_date.between(yesterday_start, yesterday_end)).count()
+    stockin_yesterday = StockIn.query.filter(StockIn.stockin_date.between(yesterday_start, yesterday_end)).count()
+    stockout_yesterday = StockOut.query.filter(StockOut.stockout_date.between(yesterday_start, yesterday_end)).count()
+
+    # 待办事项
+    low_stock_count = Product.query.filter(Product.current_stock <= 10, Product.current_stock >= 0).count()
+    pending_purchases = PurchaseOrder.query.filter_by(status='pending').count()
+    pending_materials = MaterialRegistration.query.filter(
+        MaterialRegistration.status.in_(['pending', 'partial'])
+    ).count()
+
+    # 最近动态：合并最近 8 条记录
+    recent_orders = [
+        {'type': 'order', 'time': o.order_date, 'title': f'订单 {o.order_no}', 'status': o.status,
+         'desc': f'{o.customer or ""}', 'id': o.id}
+        for o in Order.query.order_by(Order.order_date.desc()).limit(4).all()
+    ]
+    recent_stockins = [
+        {'type': 'stockin', 'time': s.stockin_date, 'title': f'备货 {s.stockin_no}', 'status': '备货完成',
+         'desc': f'{s.customer or ""}', 'id': s.id}
+        for s in StockIn.query.order_by(StockIn.stockin_date.desc()).limit(3).all()
+    ]
+    recent_stockouts = [
+        {'type': 'stockout', 'time': s.stockout_date, 'title': f'出货 {s.stockout_no}', 'status': '出货完成',
+         'desc': f'{s.customer or ""}', 'id': s.id}
+        for s in StockOut.query.order_by(StockOut.stockout_date.desc()).limit(3).all()
+    ]
+    recent_approvals = [
+        {'type': 'approval', 'time': a.request_time, 'title': f'审批 {a.id}',
+         'status': '已同意' if a.status == 'approved' else '已拒绝' if a.status == 'rejected' else '待审批',
+         'desc': a.operation_type or '', 'id': a.id}
+        for a in ApprovalRequest.query.order_by(ApprovalRequest.request_time.desc()).limit(3).all()
+    ]
+
+    activities = recent_orders + recent_stockins + recent_stockouts + recent_approvals
+    activities.sort(key=lambda x: x['time'] or datetime.min, reverse=True)
+    activities = activities[:8]
+
+    return render_template('index.html', is_home=True,
+        order_today=order_today, stockin_today=stockin_today,
+        stockout_today=stockout_today, pending_approvals=pending_approvals,
+        order_yesterday=order_yesterday, stockin_yesterday=stockin_yesterday,
+        stockout_yesterday=stockout_yesterday,
+        low_stock_count=low_stock_count, pending_purchases=pending_purchases,
+        pending_materials=pending_materials, activities=activities)
 
 
 @main_bp.route('/login', methods=['GET', 'POST'])
+@limiter.limit("5/minute")
 def login():
     """登录"""
     from app.models import User
@@ -53,15 +110,16 @@ def login():
             try:
                 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
                 serializer = URLSafeTimedSerializer(current_app.config['SECRET_KEY'], salt='remember')
-                data = serializer.loads(remember_token)
+                data = serializer.loads(remember_token, max_age=2592000)  # 30天过期
                 user_id = data.get('user_id')
                 if user_id:
                     user = db.session.get(User, int(user_id))
                     if user and user.status:
+                        # Session Fixation 防护：自动登录也需重新生成 Session ID
+                        session.clear()
                         session['user_id'] = user.id
                         session['username'] = user.username
                         session['is_super'] = user.is_super
-                        session['permissions'] = [p.code for p in user.permissions]
                         return redirect(url_for('main.index'))
             except (BadSignature, SignatureExpired):
                 pass
@@ -87,10 +145,13 @@ def login():
             flash('用户名或密码错误', 'error')
             return render_template('login.html')
 
+        # Session Fixation 防护：登录成功后重新生成 Session ID
+        old_session_data = dict(session)
+        session.clear()
+        session.update(old_session_data)
         session['user_id'] = user.id
         session['username'] = user.username
         session['is_super'] = user.is_super
-        session['permissions'] = [p.code for p in user.permissions]
         flash('登录成功', 'success')
         if remember:
             from itsdangerous import URLSafeTimedSerializer
@@ -98,14 +159,15 @@ def login():
             token = serializer.dumps({'user_id': user.id})
             resp = make_response(redirect(url_for('main.index')))
             resp.set_cookie('remember_token', token,
-                          httponly=True, secure=request.is_secure, samesite='Lax')
+                          httponly=True, secure=request.is_secure, samesite='Lax',
+                          max_age=2592000)  # 30天过期
             return resp
         return redirect(url_for('main.index'))
 
     return render_template('login.html')
 
 
-@main_bp.route('/logout')
+@main_bp.route('/logout', methods=['POST'])
 def logout():
     """退出登录"""
     session.clear()
@@ -116,6 +178,7 @@ def logout():
 
 @csrf.exempt
 @main_bp.route('/api/login', methods=['POST'])
+@limiter.limit("5/minute")
 def api_login():
     """AJAX登录API
 
@@ -141,10 +204,13 @@ def api_login():
         if not user or not user.status or not check_password_hash(user.password, password):
             return jsonify({'success': False, 'error': '用户名或密码错误'}), 401
 
+        # Session Fixation 防护：登录成功后重新生成 Session ID
+        old_session_data = dict(session)
+        session.clear()
+        session.update(old_session_data)
         session['user_id'] = user.id
         session['username'] = user.username
         session['is_super'] = user.is_super
-        session['permissions'] = [p.code for p in user.permissions]
 
         response_data = {'success': True, 'message': '登录成功'}
         resp = make_response(jsonify(response_data))
@@ -154,7 +220,8 @@ def api_login():
             serializer = URLSafeTimedSerializer(current_app.config['SECRET_KEY'], salt='remember')
             token = serializer.dumps({'user_id': user.id})
             resp.set_cookie('remember_token', token,
-                          httponly=True, secure=request.is_secure, samesite='Lax')
+                          httponly=True, secure=request.is_secure, samesite='Lax',
+                          max_age=2592000)  # 30天过期
 
         return resp, 200
 
@@ -229,6 +296,8 @@ def upload_file():
 
     [已迁移至 FastAPI] 新代码请使用 POST /api/v1/auth/upload
     """
+    if 'user_id' not in session:
+        return jsonify({'success': False, 'error': '未登录'}), 401
     import os
     from werkzeug.utils import secure_filename
     from flask import jsonify

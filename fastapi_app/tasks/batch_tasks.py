@@ -1,12 +1,15 @@
 """
 批量导入异步任务
-将 Excel 批量导入等耗时操作放入 Celery Worker 执行
+
+将 Excel 批量导入等耗时操作放入 Celery Worker 执行。
+已去除 Flask create_app 依赖，使用 SyncSessionLocal + shared_models。
 """
 import os
 import tempfile
 from celery import shared_task
 from fastapi_app.core.celery_app import celery_app
 from fastapi_app.core.logger import logger
+from fastapi_app.core.database import SyncSessionLocal
 
 
 @shared_task(
@@ -27,22 +30,33 @@ def batch_import_orders_task(self, file_path: str, original_filename: str, user_
     Returns:
         dict: 导入结果 {success, imported_count, errors, task_id}
     """
+    # 安全校验：文件路径必须在临时目录内，防止路径遍历
+    allowed_dirs = [tempfile.gettempdir(), os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'static', 'uploads')]
+    real_path = os.path.realpath(file_path)
+    if not any(os.path.commonpath([real_path, d]) == d for d in allowed_dirs if os.path.exists(d)):
+        logger.error(f"批量导入订单任务拒绝非法文件路径: {file_path}")
+        return {"success": False, "error": "非法文件路径", "imported_count": 0, "task_id": self.request.id}
+
     try:
-        from utils.batch_upload_utils import parse_excel_file, batch_save_with_transaction
-        from app import db
-        from app.models import Product, Order, InventoryLog
-        from app import create_app
+        from utils.batch_upload_utils import parse_excel_file
+        from fastapi_app.shared_models import Product, Order, InventoryLog
+        from fastapi_app.shared.stock_crud_service import (
+            generate_order_number_sync,
+            get_product_for_update_sync,
+        )
+        from datetime import datetime
+        from sqlalchemy import or_, select as sa_select
 
-        # 在 Worker 进程中创建 Flask 应用上下文（用于同步DB操作）
-        app = create_app()
-        with app.app_context():
-            success, data_list, error = parse_excel_file(file_path)
-            if not success:
-                return {"success": False, "error": error, "imported_count": 0, "task_id": self.request.id}
+        success, data_list, error = parse_excel_file(file_path)
+        if not success:
+            return {"success": False, "error": error, "imported_count": 0, "task_id": self.request.id}
 
+        session = SyncSessionLocal()
+        try:
             results = []
             imported_count = 0
             errors = []
+            BATCH_COMMIT_SIZE = 50  # 每50行提交一次，释放行级锁
 
             for i, row in enumerate(data_list, start=2):
                 try:
@@ -54,19 +68,18 @@ def batch_import_orders_task(self, file_path: str, original_filename: str, user_
                         errors.append({"row": i, "error": "缺少必填字段"})
                         continue
 
-                    from utils.number_generator import generate_order_number
-                    from datetime import datetime
-
-                    product = Product.query.filter(
-                        (Product.name == product_identifier) | (Product.barcode == product_identifier)
-                    ).first()
+                    product = session.execute(
+                        sa_select(Product).where(
+                            or_(Product.name == product_identifier, Product.barcode == product_identifier)
+                        ).with_for_update()
+                    ).scalar_one_or_none()
 
                     if not product:
                         errors.append({"row": i, "error": f"产品 '{product_identifier}' 不存在"})
                         continue
 
                     order = Order(
-                        order_no=generate_order_number(db, Order),
+                        order_no=generate_order_number_sync(session),
                         product_id=product.id,
                         customer=customer,
                         quantity=int(quantity),
@@ -74,8 +87,8 @@ def batch_import_orders_task(self, file_path: str, original_filename: str, user_
                         status="待备货",
                         note=row.get("备注", ""),
                     )
-                    db.session.add(order)
-                    db.session.flush()
+                    session.add(order)
+                    session.flush()
                     product.current_stock += int(quantity)
 
                     log = InventoryLog(
@@ -87,14 +100,19 @@ def batch_import_orders_task(self, file_path: str, original_filename: str, user_
                         related_id=str(order.id),
                         note=f"批量导入订单 {order.order_no}",
                     )
-                    db.session.add(log)
+                    session.add(log)
                     imported_count += 1
 
+                    # 分批提交，避免大量行级锁同时持有
+                    if imported_count % BATCH_COMMIT_SIZE == 0:
+                        session.commit()
+
                 except Exception as e:
+                    session.rollback()
                     errors.append({"row": i, "error": str(e)})
                     logger.error(f"批量导入订单行{i}失败: {e}")
 
-            db.session.commit()
+            session.commit()
 
             return {
                 "success": True,
@@ -103,14 +121,28 @@ def batch_import_orders_task(self, file_path: str, original_filename: str, user_
                 "task_id": self.request.id,
             }
 
+        finally:
+            session.close()
+
     except Exception as exc:
         logger.error(f"批量导入订单任务失败: {exc}", exc_info=True)
-        raise self.retry(exc=exc)
-
-    finally:
-        # 清理临时文件
+        if self.request.retries < self.max_retries:
+            # 仍有重试机会，保留文件供下次使用
+            raise self.retry(exc=exc)
+        # 重试已耗尽，清理临时文件防止永久泄漏
         if file_path and os.path.exists(file_path):
+            try:
+                os.unlink(file_path)
+            except OSError:
+                pass
+        raise
+
+    # 仅在任务最终成功时清理临时文件（Retry异常不会到达此处）
+    if file_path and os.path.exists(file_path):
+        try:
             os.unlink(file_path)
+        except OSError:
+            pass
 
 
 @shared_task(
@@ -122,20 +154,32 @@ def batch_import_orders_task(self, file_path: str, original_filename: str, user_
 )
 def batch_import_stockins_task(self, file_path: str, original_filename: str, user_id: int):
     """异步批量导入备货"""
+    # 安全校验：文件路径必须在临时目录内
+    allowed_dirs = [tempfile.gettempdir(), os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'static', 'uploads')]
+    real_path = os.path.realpath(file_path)
+    if not any(os.path.commonpath([real_path, d]) == d for d in allowed_dirs if os.path.exists(d)):
+        logger.error(f"批量导入备货任务拒绝非法文件路径: {file_path}")
+        return {"success": False, "error": "非法文件路径", "imported_count": 0, "task_id": self.request.id}
+
     try:
         from utils.batch_upload_utils import parse_excel_file
-        from app import db
-        from app.models import Product, StockIn, InventoryLog
-        from app import create_app
+        from fastapi_app.shared_models import Product, StockIn, InventoryLog
+        from fastapi_app.shared.stock_crud_service import (
+            generate_stockin_number_sync,
+            get_product_for_update_sync,
+        )
+        from datetime import datetime
+        from sqlalchemy import or_, select as sa_select
 
-        app = create_app()
-        with app.app_context():
-            success, data_list, error = parse_excel_file(file_path)
-            if not success:
-                return {"success": False, "error": error, "imported_count": 0, "task_id": self.request.id}
+        success, data_list, error = parse_excel_file(file_path)
+        if not success:
+            return {"success": False, "error": error, "imported_count": 0, "task_id": self.request.id}
 
+        session = SyncSessionLocal()
+        try:
             imported_count = 0
             errors = []
+            BATCH_COMMIT_SIZE = 50  # 每50行提交一次，释放行级锁
 
             for i, row in enumerate(data_list, start=2):
                 try:
@@ -147,27 +191,26 @@ def batch_import_stockins_task(self, file_path: str, original_filename: str, use
                         errors.append({"row": i, "error": "缺少必填字段"})
                         continue
 
-                    from utils.number_generator import generate_stockin_number
-                    from datetime import datetime
-
-                    product = Product.query.filter(
-                        (Product.name == product_identifier) | (Product.barcode == product_identifier)
-                    ).first()
+                    product = session.execute(
+                        sa_select(Product).where(
+                            or_(Product.name == product_identifier, Product.barcode == product_identifier)
+                        ).with_for_update()
+                    ).scalar_one_or_none()
 
                     if not product:
                         errors.append({"row": i, "error": f"产品 '{product_identifier}' 不存在"})
                         continue
 
                     stockin = StockIn(
-                        stockin_no=generate_stockin_number(db, StockIn),
+                        stockin_no=generate_stockin_number_sync(session),
                         product_id=product.id,
                         customer=customer,
                         quantity=int(quantity),
                         stockin_date=datetime.now(),
                         note=row.get("备注", ""),
                     )
-                    db.session.add(stockin)
-                    db.session.flush()
+                    session.add(stockin)
+                    session.flush()
                     product.current_stock += int(quantity)
 
                     log = InventoryLog(
@@ -179,13 +222,18 @@ def batch_import_stockins_task(self, file_path: str, original_filename: str, use
                         related_id=str(stockin.id),
                         note=f"批量导入备货 {stockin.stockin_no}",
                     )
-                    db.session.add(log)
+                    session.add(log)
                     imported_count += 1
 
+                    # 分批提交，避免大量行级锁同时持有
+                    if imported_count % BATCH_COMMIT_SIZE == 0:
+                        session.commit()
+
                 except Exception as e:
+                    session.rollback()
                     errors.append({"row": i, "error": str(e)})
 
-            db.session.commit()
+            session.commit()
 
             return {
                 "success": True,
@@ -194,10 +242,23 @@ def batch_import_stockins_task(self, file_path: str, original_filename: str, use
                 "task_id": self.request.id,
             }
 
+        finally:
+            session.close()
+
     except Exception as exc:
         logger.error(f"批量导入备货任务失败: {exc}", exc_info=True)
-        raise self.retry(exc=exc)
-
-    finally:
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=exc)
         if file_path and os.path.exists(file_path):
+            try:
+                os.unlink(file_path)
+            except OSError:
+                pass
+        raise
+
+    # 仅在任务最终成功时清理临时文件（Retry异常不会到达此处）
+    if file_path and os.path.exists(file_path):
+        try:
             os.unlink(file_path)
+        except OSError:
+            pass

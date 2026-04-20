@@ -15,12 +15,12 @@ services:
       - DB_TYPE=mysql
       - DB_HOST=db
       - DB_PORT=3306
-      - DB_USER=${DB_USER:-root}
-      - DB_PASSWORD=${DB_PASSWORD:-password}
+      - DB_USER=${DB_USER:?DB_USER must be set in .env.production}
+      - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD must be set in .env.production}
       - DB_NAME=erp_system
       - REDIS_HOST=redis
-      - REDIS_PASSWORD=ERP_Redis_2026_Secure_Password
-      - LIMITER_STORAGE_URI=redis://:ERP_Redis_2026_Secure_Password@redis:6379/0
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env.production}
+      - LIMITER_STORAGE_URI=redis://:${REDIS_PASSWORD}@redis:6379/0
       - NGINX_PROXY=1
     depends_on:
       db:
@@ -33,6 +33,20 @@ services:
       - app-static:/app/static
     networks:
       - erp-network
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 256M
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5003/')"]
       interval: 30s
@@ -54,6 +68,20 @@ services:
         condition: service_healthy
     networks:
       - erp-network
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+      - NET_BIND_SERVICE
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost/nginx-health"]
       interval: 15s
@@ -66,11 +94,12 @@ services:
     restart: unless-stopped
     environment:
       - MYSQL_DATABASE=erp_system
-      - MYSQL_ROOT_PASSWORD=${DB_PASSWORD:-password}
+      - MYSQL_ROOT_PASSWORD=${DB_PASSWORD:?DB_PASSWORD must be set in .env.production}
     ports:
       - "127.0.0.1:3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
+      - ./scripts/database/create_app_user.sh:/docker-entrypoint-initdb.d/01-create-app-user.sh:ro
     networks:
       - erp-network
     healthcheck:
@@ -83,7 +112,7 @@ services:
     image: redis:7.2-alpine
     container_name: erp-system-redis
     restart: unless-stopped
-    command: redis-server --requirepass ERP_Redis_2026_Secure_Password --bind 0.0.0.0 --appendonly yes
+    command: redis-server --requirepass ${REDIS_PASSWORD} --bind 0.0.0.0 --appendonly yes
     ports:
       - "127.0.0.1:6379:6379"
     volumes:
@@ -91,7 +120,7 @@ services:
     networks:
       - erp-network
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "ERP_Redis_2026_Secure_Password", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -122,7 +151,7 @@ services:
     restart: unless-stopped
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin123}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set}
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_SERVER_ROOT_URL=http://localhost/grafana
       - GF_SERVER_SERVE_FROM_SUB_PATH=true
@@ -146,7 +175,7 @@ services:
     restart: unless-stopped
     environment:
       - REDIS_ADDR=redis:6379
-      - REDIS_PASSWORD=ERP_Redis_2026_Secure_Password
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
     networks:
       - erp-network
     depends_on:
@@ -158,11 +187,24 @@ services:
     container_name: erp-system-mysql-exporter
     restart: unless-stopped
     environment:
-      - DATA_SOURCE_NAME=root:${DB_PASSWORD:-password}@(db:3306)/erp_system
+      - DATA_SOURCE_NAME=${DB_MONITOR_USER:-erp_monitor}:${DB_PASSWORD:-password}@(db:3306)/erp_system
     networks:
       - erp-network
     depends_on:
       db:
+        condition: service_healthy
+
+  # ==================== Cloudflare Tunnel ====================
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: erp-system-cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:-REPLACE_WITH_YOUR_TOKEN}
+    networks:
+      - erp-network
+    depends_on:
+      nginx:
         condition: service_healthy
 
   # ==================== Celery Worker ====================
@@ -179,13 +221,13 @@ services:
       - DB_TYPE=mysql
       - DB_HOST=db
       - DB_PORT=3306
-      - DB_USER=${DB_USER:-root}
-      - DB_PASSWORD=${DB_PASSWORD:-password}
+      - DB_USER=${DB_USER:?DB_USER must be set in .env.production}
+      - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD must be set in .env.production}
       - DB_NAME=erp_system
       - REDIS_HOST=redis
-      - REDIS_PASSWORD=ERP_Redis_2026_Secure_Password
-      - CELERY_BROKER_URL=redis://:ERP_Redis_2026_Secure_Password@redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://:ERP_Redis_2026_Secure_Password@redis:6379/2
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/2
       - NGINX_PROXY=1
     depends_on:
       db:
@@ -196,6 +238,18 @@ services:
       - ./logs:/app/logs
     networks:
       - erp-network
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
 
 networks:
   erp-network:

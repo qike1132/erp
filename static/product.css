@@ -13,9 +13,135 @@
     margin: 0;
 }
 
-.sticky-panel {
-    position: sticky;
-    top: 100px;
+/* ========== Tab Navigation ========== */
+.product-tab-nav {
+    display: flex;
+    gap: 8px;
+    background: #f8fafc;
+    padding: 6px;
+    border-radius: 16px;
+    border: 1px solid #e2e8f0;
+}
+
+.product-tab-btn {
+    padding: 12px 28px;
+    border: 2px solid transparent;
+    background: transparent;
+    border-radius: 12px;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: #64748b;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.product-tab-btn:hover {
+    color: #1e293b;
+    background: #ffffff;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.product-tab-btn.active {
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+    color: #ffffff;
+    border-color: transparent;
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.product-tab-btn.active:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(59, 130, 246, 0.4);
+}
+
+.product-tab-btn i {
+    transition: transform 0.3s ease;
+}
+
+.product-tab-btn:hover i {
+    transform: scale(1.1);
+}
+
+.product-tab-btn.active i {
+    color: #ffffff;
+}
+
+/* ========== Tab Content ========== */
+.product-tab-content {
+    display: none;
+    animation: tabFadeIn 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.product-tab-content.active {
+    display: block;
+}
+
+@keyframes tabFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ========== Collapsible Upload Sections ========== */
+.collapse-animated-container {
+    overflow: hidden;
+}
+
+.collapse-animated-container .collapse-trigger {
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+}
+
+.collapse-animated-container .collapse-arrow {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.3s ease-in-out;
+    color: #94a3b8;
+    font-size: 0.875rem;
+}
+
+.collapse-animated-container.expanded .collapse-arrow {
+    transform: rotate(0deg);
+}
+
+.collapse-animated-container.collapsed .collapse-arrow {
+    transform: rotate(-90deg);
+}
+
+.collapse-animated-container .collapse-content {
+    overflow: hidden;
+    transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.collapse-animated-container.expanded .collapse-content {
+    max-height: 600px;
+    opacity: 1;
+}
+
+.collapse-animated-container.collapsed .collapse-content {
+    max-height: 0;
+    opacity: 0;
+}
+
+.page-title {
+    font-size: 2rem;
+    font-weight: 600;
+    color: #1a1a2e;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
 }
 
 .card-elegant {
@@ -293,7 +419,7 @@
 }
 
 .table-container-elegant {
-    max-height: calc(100vh - 320px);
+    max-height: calc(100vh - 260px);
     overflow-y: auto;
 }
 
@@ -599,10 +725,13 @@
 }
 
 @media (max-width: 1199.98px) {
-    .sticky-panel {
-        position: static;
+    .product-tab-nav {
+        flex-wrap: wrap;
     }
-}
+    .product-tab-btn {
+        padding: 10px 20px;
+        font-size: 0.875rem;
+    }
     .page-title {
         font-size: 1.75rem;
     }

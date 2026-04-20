@@ -88,6 +88,8 @@ class StagingStockOutUpdate(BaseModel):
     quantity: Optional[int] = Field(None, gt=0, description="出货数量")
     stockout_date: Optional[str] = Field(None, description="出货时间")
     note: Optional[str] = Field(None, description="备注")
+    order_type: Optional[str] = Field(None, max_length=20, description="订单类型: regular/custom")
+    country: Optional[str] = Field(None, max_length=100, description="国家名称")
 
 
 class StagingStockOutConfirmResult(BaseModel):

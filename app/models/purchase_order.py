@@ -42,7 +42,8 @@ class PurchaseOrder(db.Model):
                 source_order = source_orders[self.source_order_id]
             else:
                 from app.models.order import Order
-                source_order = Order.query.get(self.source_order_id)
+                from app import db as _db
+                source_order = _db.session.get(Order, self.source_order_id)
             if source_order:
                 if not product_name and source_order.product:
                     product_name = source_order.product.name

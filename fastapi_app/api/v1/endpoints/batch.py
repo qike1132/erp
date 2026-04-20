@@ -5,7 +5,6 @@
 """
 import os
 import tempfile
-import shutil
 import logging
 import asyncio
 from datetime import datetime
@@ -13,6 +12,9 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
+
+# 批量导入文件大小上限（5MB），防止OOM攻击
+MAX_BATCH_UPLOAD_SIZE = 5 * 1024 * 1024
 
 from fastapi_app.core.database import get_async_db
 from fastapi_app.core.deps import require_permission
@@ -36,6 +38,7 @@ from fastapi_app.services.batch_service import (
     parse_excel_file_async,
     read_excel_sheets_async,
 )
+from fastapi_app.shared.stock_concurrency import get_product_for_update
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -104,7 +107,12 @@ async def batch_import_orders(
         temp_fd, temp_path = tempfile.mkstemp(suffix='.xlsx')
         os.close(temp_fd)
 
-        content = await file.read()
+        # 文件大小检查，防止OOM
+        content = await file.read(MAX_BATCH_UPLOAD_SIZE + 1)
+        if len(content) > MAX_BATCH_UPLOAD_SIZE:
+            return ComprehensiveImportResult(success=False, message="文件大小超过5MB限制，请拆分后重新上传")
+
+
         with open(temp_path, 'wb') as f:
             f.write(content)
 
@@ -188,8 +196,9 @@ async def batch_import_orders(
                 db.add(order)
                 await db.flush()
 
-                # 更新产品库存
-                product.current_stock += qty
+                # 使用悲观锁更新产品库存，防止并发修改
+                locked_product = await get_product_for_update(db, product_id)
+                locked_product.current_stock += qty
 
                 log = InventoryLog(
                     product_id=product_id,
@@ -201,7 +210,7 @@ async def batch_import_orders(
                 db.add(log)
 
                 if deduct_flag and str(deduct_flag).strip() == '是':
-                    await process_order_deduction(db, order, product_id, qty, deduct_stock=True, product=product)
+                    await process_order_deduction(db, order, product_id, qty, deduct_stock=True, product=locked_product)
 
                 imported += 1
 
@@ -252,7 +261,12 @@ async def batch_import_case_stockouts(
         temp_fd, temp_path = tempfile.mkstemp(suffix='.xlsx')
         os.close(temp_fd)
 
-        content = await file.read()
+        # 文件大小检查，防止OOM
+        content = await file.read(MAX_BATCH_UPLOAD_SIZE + 1)
+        if len(content) > MAX_BATCH_UPLOAD_SIZE:
+            return ComprehensiveImportResult(success=False, message="文件大小超过5MB限制，请拆分后重新上传")
+
+
         with open(temp_path, 'wb') as f:
             f.write(content)
 
@@ -336,6 +350,16 @@ async def batch_import_case_stockouts(
                     skipped += 1
                     continue
 
+                # 使用悲观锁重新获取 Case，防止并发修改库存
+                result = await db.execute(
+                    select(Case).where(Case.id == case.id).with_for_update()
+                )
+                case = result.scalar_one_or_none()
+                if not case:
+                    errors.append(f'皮套 {product_identifier} 加锁失败')
+                    skipped += 1
+                    continue
+
                 if case.current_stock < qty:
                     errors.append(f'库存不足，当前库存: {case.current_stock}')
                     skipped += 1
@@ -415,7 +439,12 @@ async def batch_import_case_stockins(
         temp_fd, temp_path = tempfile.mkstemp(suffix='.xlsx')
         os.close(temp_fd)
 
-        content = await file.read()
+        # 文件大小检查，防止OOM
+        content = await file.read(MAX_BATCH_UPLOAD_SIZE + 1)
+        if len(content) > MAX_BATCH_UPLOAD_SIZE:
+            return ComprehensiveImportResult(success=False, message="文件大小超过5MB限制，请拆分后重新上传")
+
+
         with open(temp_path, 'wb') as f:
             f.write(content)
 
@@ -497,6 +526,16 @@ async def batch_import_case_stockins(
                     skipped += 1
                     continue
 
+                # 使用悲观锁重新获取 Case，防止并发修改库存
+                result = await db.execute(
+                    select(Case).where(Case.id == case.id).with_for_update()
+                )
+                case = result.scalar_one_or_none()
+                if not case:
+                    errors.append(f'皮套 {product_identifier} 加锁失败')
+                    skipped += 1
+                    continue
+
                 stockin_date = parse_date_value(stockin_date_val) or datetime.now()
 
                 stockin_no = await generate_case_stockin_number(db)
@@ -571,7 +610,12 @@ async def batch_import_stockins(
         temp_fd, temp_path = tempfile.mkstemp(suffix='.xlsx')
         os.close(temp_fd)
 
-        content = await file.read()
+        # 文件大小检查，防止OOM
+        content = await file.read(MAX_BATCH_UPLOAD_SIZE + 1)
+        if len(content) > MAX_BATCH_UPLOAD_SIZE:
+            return ComprehensiveImportResult(success=False, message="文件大小超过5MB限制，请拆分后重新上传")
+
+
         with open(temp_path, 'wb') as f:
             f.write(content)
 
@@ -651,7 +695,9 @@ async def batch_import_stockins(
                 )
                 db.add(stockin)
 
-                product.current_stock += qty
+                # 使用悲观锁更新产品库存，防止并发修改
+                locked_product = await get_product_for_update(db, product_id)
+                locked_product.current_stock += qty
 
                 log = InventoryLog(
                     product_id=product_id,
@@ -711,7 +757,12 @@ async def batch_import_stockouts(
         temp_fd, temp_path = tempfile.mkstemp(suffix='.xlsx')
         os.close(temp_fd)
 
-        content = await file.read()
+        # 文件大小检查，防止OOM
+        content = await file.read(MAX_BATCH_UPLOAD_SIZE + 1)
+        if len(content) > MAX_BATCH_UPLOAD_SIZE:
+            return ComprehensiveImportResult(success=False, message="文件大小超过5MB限制，请拆分后重新上传")
+
+
         with open(temp_path, 'wb') as f:
             f.write(content)
 
@@ -743,6 +794,12 @@ async def batch_import_stockouts(
                 customer = row_data.get('客户名称') or row_data.get('客户')
                 stockout_date_val = row_data.get('时间') or row_data.get('出货时间')
                 note = row_data.get('备注')
+                country_val = row_data.get('国家') or row_data.get('国家名称')
+                if not country_val or (isinstance(country_val, float) and country_val != country_val):
+                    country_parsed = ''
+                else:
+                    country_parsed = str(country_val).strip()
+                order_type_parsed = 'custom' if country_parsed else 'regular'
 
                 if not product_identifier or not quantity:
                     skipped += 1
@@ -768,6 +825,9 @@ async def batch_import_stockouts(
                     skipped += 1
                     continue
 
+                # 使用悲观锁重新获取产品，防止并发修改库存
+                product = await get_product_for_update(db, product.id)
+
                 try:
                     qty = int(quantity)
                     if qty <= 0:
@@ -784,7 +844,10 @@ async def batch_import_stockouts(
                     skipped += 1
                     continue
 
-                shipment_info = await calculate_available_shipment_quantity(db, product.id, customer)
+                shipment_info = await calculate_available_shipment_quantity(
+                    db, product.id, customer,
+                    order_type=order_type_parsed, country=country_parsed or None
+                )
                 if shipment_info['available_quantity'] <= 0:
                     errors.append(f'客户{customer}没有可用的订单支持出货')
                     skipped += 1
@@ -876,7 +939,12 @@ async def batch_import_products(
         temp_fd, temp_path = tempfile.mkstemp(suffix='.xlsx')
         os.close(temp_fd)
 
-        content = await file.read()
+        # 文件大小检查，防止OOM
+        content = await file.read(MAX_BATCH_UPLOAD_SIZE + 1)
+        if len(content) > MAX_BATCH_UPLOAD_SIZE:
+            return ComprehensiveImportResult(success=False, message="文件大小超过5MB限制，请拆分后重新上传")
+
+
         with open(temp_path, 'wb') as f:
             f.write(content)
 
@@ -993,7 +1061,12 @@ async def batch_import_comprehensive(
         temp_fd, temp_path = tempfile.mkstemp(suffix='.xlsx')
         os.close(temp_fd)
 
-        content = await file.read()
+        # 文件大小检查，防止OOM
+        content = await file.read(MAX_BATCH_UPLOAD_SIZE + 1)
+        if len(content) > MAX_BATCH_UPLOAD_SIZE:
+            return ComprehensiveImportResult(success=False, message="文件大小超过5MB限制，请拆分后重新上传")
+
+
         with open(temp_path, 'wb') as f:
             f.write(content)
 
@@ -1008,6 +1081,12 @@ async def batch_import_comprehensive(
             '备货管理': 'stockin',
             '出货管理': 'stockout'
         }
+
+        # 使用嵌套事务(Savepoint)确保综合导入的原子性：
+        # 每个 sheet 的 import_*_from_data 内部会 commit，
+        # 但在嵌套事务中 commit 仅释放 savepoint，不真正提交。
+        # 全部成功后才由外层 commit 真正提交。
+        nested = await db.begin_nested()
 
         for sheet_name in sheets:
             sheet_type = None
@@ -1037,6 +1116,7 @@ async def batch_import_comprehensive(
                         results.imported['orders'] += count
                     except Exception as order_e:
                         await db.rollback()
+                        nested = await db.begin_nested()
                         logger.error(f"综合导入 - 订单Sheet {sheet_name} 导入失败: {order_e}", exc_info=True)
                         results.errors.append(f'Sheet {sheet_name} 导入失败')
                 elif sheet_type == 'stockin':
@@ -1045,6 +1125,7 @@ async def batch_import_comprehensive(
                         results.imported['stockins'] += count
                     except Exception as stockin_e:
                         await db.rollback()
+                        nested = await db.begin_nested()
                         logger.error(f"综合导入 - 备货Sheet {sheet_name} 导入失败: {stockin_e}", exc_info=True)
                         results.errors.append(f'Sheet {sheet_name} 导入失败')
                 elif sheet_type == 'stockout':
@@ -1053,14 +1134,20 @@ async def batch_import_comprehensive(
                         results.imported['stockouts'] += count
                     except Exception as stockout_e:
                         await db.rollback()
+                        nested = await db.begin_nested()
                         logger.error(f"综合导入 - 出货Sheet {sheet_name} 导入失败: {stockout_e}", exc_info=True)
                         results.errors.append(f'Sheet {sheet_name} 导入失败')
             except Exception as e:
                 await db.rollback()
+                nested = await db.begin_nested()
                 logger.error(f"综合导入 - Sheet {sheet_name} 处理失败: {e}", exc_info=True)
                 results.errors.append(f'Sheet {sheet_name} 导入失败')
 
         results.message = '导入完成！'
+
+        # 所有 sheet 处理完毕，真正提交整个事务
+        await db.commit()
+
         return results
 
     except Exception as e:

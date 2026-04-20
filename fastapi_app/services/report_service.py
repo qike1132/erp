@@ -84,7 +84,8 @@ async def get_order_logs(db, customer: str = '', product: str = '', status: str 
             'order_nos': row.order_nos or '', 'note': row.notes or '',
         })
 
-    total_qty = (await db.execute(text("SELECT SUM(quantity) FROM `order`"))).scalar() or 0
+    qty_sql = f"SELECT SUM(o.quantity) FROM `order` o JOIN product p ON o.product_id = p.id WHERE 1=1 {where_sql}"
+    total_qty = (await db.execute(text(qty_sql), params)).scalar() or 0
 
     return {
         'success': True,
@@ -98,20 +99,19 @@ async def export_report_to_excel(db, report_type: str, customer: str = '', produ
                                   status: str = '', start_date: str = '', end_date: str = '') -> bytes:
     """导出报表为 Excel（内存缓冲区）
 
-    复用 Flask 侧的 ReportExporter 工具类生成 Excel，
-    通过同步线程执行避免阻塞事件循环。
+    使用框架无关的 report_data_service 查询数据，通过 ReportExporter 生成 Excel，
+    在同步线程中执行以避免阻塞事件循环。
     """
     import asyncio
-    from app import create_app
+    from fastapi_app.core.database import SyncSessionLocal
+    from fastapi_app.shared.report_data_service import get_all_logs_data
+    from utils.report_exporter import ReportExporter
 
     def _sync_export():
-        app = create_app()
-        with app.app_context():
-            from app.routes.report import get_all_logs_data
-            from utils.report_exporter import ReportExporter
-
+        session = SyncSessionLocal()
+        try:
             logs, stats = get_all_logs_data(
-                report_type,
+                session, report_type,
                 customer=customer, product=product, status=status,
                 start_date=start_date, end_date=end_date
             )
@@ -133,8 +133,10 @@ async def export_report_to_excel(db, report_type: str, customer: str = '', produ
 
             output = export_func(logs, stats)
             return output.getvalue()
+        finally:
+            session.close()
 
-    # 在线程池中执行同步的 Flask 操作
+    # 在线程池中执行同步操作
     loop = asyncio.get_running_loop()
     content = await loop.run_in_executor(None, _sync_export)
     return content

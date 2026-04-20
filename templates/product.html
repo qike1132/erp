@@ -12,23 +12,36 @@
             </div>
         </div>
     </div>
-    
-    <div class="row g-6">
-        <div class="col-xl-4 col-lg-5">
-            <div class="sticky-top sticky-panel">
-                <div class="card card-elegant mb-5">
-                    <div class="card-header-elegant">
-                        <div class="d-flex align-items-center gap-3">
-                            <div class="icon-circle icon-circle-blue">
-                                <i class="fas fa-box"></i>
-                            </div>
-                            <div>
-                                <h3 class="card-title-elegant mb-0">产品基本信息</h3>
-                            </div>
-                        </div>
+
+    <!-- Tab Navigation -->
+    <div class="product-tab-nav mb-6">
+        <button class="product-tab-btn active" data-tab="product-info">
+            <i class="fas fa-box me-2"></i>产品基本信息
+        </button>
+        <button class="product-tab-btn" data-tab="product-list">
+            <i class="fas fa-list me-2"></i>产品列表
+        </button>
+    </div>
+
+    <!-- Tab 1: 产品基本信息 -->
+    <div class="product-tab-content active" id="tab-product-info">
+        <div class="card card-elegant">
+            <div class="card-header-elegant">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="icon-circle icon-circle-blue">
+                        <i class="fas fa-box"></i>
                     </div>
-                    <div class="card-body-elegant pt-5">
-                        <form id="productForm" method="POST">
+                    <div>
+                        <h3 class="card-title-elegant mb-0">产品信息与上传管理</h3>
+                        <p class="card-subtitle-elegant mb-0">添加产品、批量导入和图片上传</p>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body-elegant pt-5">
+                <form id="productForm" method="POST">
+                    <div class="row g-5">
+                        <!-- Left: Form fields -->
+                        <div class="col-lg-5">
                             <div class="form-group-spacious">
                                 <label for="name" class="form-label-elegant">产品名称</label>
                                 <div class="input-wrapper">
@@ -51,198 +64,228 @@
                                 </div>
                             </div>
                             <div class="pt-2">
-                                <button type="submit" class="btn btn-primary btn-elegant w-100 btn-lg" style="padding: 1rem 1.5rem; font-size: 1rem;">
+                                <button type="submit" class="btn btn-primary btn-elegant w-100 btn-lg" style="padding: 1rem 1.5rem; font-size: 1rem;" form="productForm">
                                     <i class="fas fa-plus me-2"></i>添加产品
                                 </button>
                             </div>
-                        </form>
-                    </div>
-                </div>
-                
-                <div class="card card-elegant">
-                    <div class="card-header-elegant">
-                        <div class="d-flex align-items-center gap-3">
-                            <div class="icon-circle icon-circle-green">
-                                <i class="fas fa-cloud-upload-alt"></i>
-                            </div>
-                            <div class="flex-grow-1">
-                                <h3 class="card-title-elegant mb-0">产品上传管理</h3>
-                                <p class="card-subtitle-elegant mb-0">批量上传和图片上传</p>
-                            </div>
                         </div>
-                    </div>
-                    <div class="card-body-elegant pt-5">
-                        <div class="upload-section-spacious">
-                            <div class="row g-4">
-                                <div class="col-12">
-                                    <div class="upload-card upload-card-excel">
-                                        <div class="upload-card-header">
-                                            <i class="fas fa-file-excel upload-card-icon"></i>
-                                            <h4 class="upload-card-title mb-0">产品批量上传</h4>
-                                        </div>
-                                        <div class="upload-zone-elegant" id="excel-upload-area" tabindex="0" role="button" aria-label="上传 Excel 文件">
-                                            <div class="upload-zone-content-elegant">
-                                                <i class="fas fa-cloud-upload-alt upload-icon-big mb-3"></i>
-                                                <p class="upload-text mb-1">拖拽 Excel 文件到这里</p>
-                                                <p class="upload-subtext mb-0">或点击选择文件</p>
+                        <!-- Right: Upload sections -->
+                        <div class="col-lg-7">
+                            <div class="upload-section-spacious">
+                                <!-- 产品批量上传 (collapsible) -->
+                                <div class="upload-card upload-card-excel collapse-animated-container" id="excel-collapse">
+                                    <div class="upload-card-header collapse-trigger" data-collapse-target="excel-collapse">
+                                        <i class="fas fa-file-excel upload-card-icon"></i>
+                                        <h4 class="upload-card-title mb-0">产品批量上传</h4>
+                                        <span class="collapse-arrow ms-auto">
+                                            <i class="fas fa-chevron-down"></i>
+                                        </span>
+                                    </div>
+                                    <div class="collapse-content">
+                                        <div class="collapse-inner">
+                                            <div class="upload-zone-elegant" id="excel-upload-area" tabindex="0" role="button" aria-label="上传 Excel 文件">
+                                                <div class="upload-zone-content-elegant">
+                                                    <i class="fas fa-cloud-upload-alt upload-icon-big mb-3"></i>
+                                                    <p class="upload-text mb-1">拖拽 Excel 文件到这里</p>
+                                                    <p class="upload-subtext mb-0">或点击选择文件</p>
+                                                </div>
+                                                <input type="file" id="excel-input" style="display: none;" accept=".xlsx,.xls">
                                             </div>
-                                            <input type="file" id="excel-input" style="display: none;" accept=".xlsx,.xls">
-                                        </div>
-                                        <div id="excel-preview" class="mt-3"></div>
-                                        <div id="upload-status" class="mt-3"></div>
-                                        <div class="upload-actions mt-4">
-                                            <button id="download-template" class="btn btn-outline-secondary btn-elegant btn-sm">
-                                                <i class="fas fa-download me-2"></i>下载模板
-                                            </button>
-                                            <button id="batch-import" class="btn btn-success btn-elegant btn-sm" disabled>
-                                                <i class="fas fa-upload me-2"></i>开始导入
-                                            </button>
+                                            <div id="excel-preview" class="mt-3"></div>
+                                            <div id="upload-status" class="mt-3"></div>
+                                            <div class="upload-actions mt-4">
+                                                <button id="download-template" class="btn btn-outline-secondary btn-elegant btn-sm">
+                                                    <i class="fas fa-download me-2"></i>下载模板
+                                                </button>
+                                                <button id="batch-import" class="btn btn-success btn-elegant btn-sm" disabled>
+                                                    <i class="fas fa-upload me-2"></i>开始导入
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
-                                <div class="col-12">
-                                    <div class="upload-card upload-card-image">
-                                        <div class="upload-card-header">
-                                            <i class="fas fa-image upload-card-icon"></i>
-                                            <h4 class="upload-card-title mb-0">产品图片上传</h4>
-                                        </div>
-                                        <div class="upload-zone-elegant" id="image-upload-area" tabindex="0" role="button" aria-label="上传产品图片">
-                                            <div class="upload-zone-content-elegant">
-                                                <i class="fas fa-plus upload-icon-big mb-3"></i>
-                                                <p class="upload-text mb-1">拖拽图片到这里</p>
-                                                <p class="upload-subtext mb-0">或点击选择图片</p>
+
+                                <!-- 产品图片上传 (collapsible) -->
+                                <div class="upload-card upload-card-image collapse-animated-container mt-4" id="image-collapse">
+                                    <div class="upload-card-header collapse-trigger" data-collapse-target="image-collapse">
+                                        <i class="fas fa-image upload-card-icon"></i>
+                                        <h4 class="upload-card-title mb-0">产品图片上传</h4>
+                                        <span class="collapse-arrow ms-auto">
+                                            <i class="fas fa-chevron-down"></i>
+                                        </span>
+                                    </div>
+                                    <div class="collapse-content">
+                                        <div class="collapse-inner">
+                                            <div class="upload-zone-elegant" id="image-upload-area" tabindex="0" role="button" aria-label="上传产品图片">
+                                                <div class="upload-zone-content-elegant">
+                                                    <i class="fas fa-plus upload-icon-big mb-3"></i>
+                                                    <p class="upload-text mb-1">拖拽图片到这里</p>
+                                                    <p class="upload-subtext mb-0">或点击选择图片</p>
+                                                </div>
+                                                <input type="file" id="image-input" style="display: none;" accept="image/*">
+                                                <input type="hidden" id="image-url" name="image" value="" form="productForm">
                                             </div>
-                                            <input type="file" id="image-input" style="display: none;" accept="image/*">
-                                            <input type="hidden" id="image-url" name="image" value="" form="productForm">
+                                            <div id="image-preview" class="mt-4"></div>
                                         </div>
-                                        <div id="image-preview" class="mt-4"></div>
                                     </div>
                                 </div>
                             </div>
                         </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tab 2: 产品列表 -->
+    <div class="product-tab-content" id="tab-product-list">
+        <div class="card card-elegant">
+            <div class="card-header-elegant">
+                <div class="d-flex align-items-center justify-content-between flex-wrap gap-4">
+                    <div class="d-flex align-items-center gap-3">
+                        <div class="icon-circle icon-circle-blue">
+                            <i class="fas fa-list"></i>
+                        </div>
+                        <div>
+                            <h3 class="card-title-elegant mb-0">产品列表</h3>
+                        </div>
+                    </div>
+                    <div class="d-flex gap-3 flex-wrap">
+                        <div class="search-box-elegant">
+                            <i class="fas fa-search search-icon-elegant"></i>
+                            <input type="text" id="searchInput" class="form-control search-input-elegant" placeholder="搜索产品名称或69码..." aria-label="搜索产品">
+                        </div>
+                        <select id="sortSelect" class="form-select sort-select-elegant" aria-label="产品排序方式">
+                            <option value="">默认排序</option>
+                            <option value="name-asc">名称 A-Z</option>
+                            <option value="name-desc">名称 Z-A</option>
+                        </select>
+                        <small class="text-muted ms-1" style="font-size:0.75rem;">仅当前页</small>
                     </div>
                 </div>
             </div>
-        </div>
-        
-        <div class="col-xl-8 col-lg-7">
-            <div class="card card-elegant">
-                <div class="card-header-elegant">
-                    <div class="d-flex align-items-center justify-content-between flex-wrap gap-4">
-                        <div class="d-flex align-items-center gap-3">
-                            <div class="icon-circle icon-circle-blue">
-                                <i class="fas fa-list"></i>
-                            </div>
-                            <div>
-                                <h3 class="card-title-elegant mb-0">产品列表</h3>
-                            </div>
-                        </div>
-                        <div class="d-flex gap-3 flex-wrap">
-                            <div class="search-box-elegant">
-                                <i class="fas fa-search search-icon-elegant"></i>
-                                <input type="text" id="searchInput" class="form-control search-input-elegant" placeholder="搜索产品名称或69码..." aria-label="搜索产品">
-                            </div>
-                            <select id="sortSelect" class="form-select sort-select-elegant" aria-label="产品排序方式">
-                                <option value="name-asc">名称 A-Z</option>
-                                <option value="name-desc">名称 Z-A</option>
-                            </select>
-                        </div>
-                    </div>
+            <div class="card-body-elegant p-0">
+                <div class="table-container-elegant">
+                    <table class="table table-elegant" id="productTable">
+                        <thead class="thead-elegant">
+                            <tr>
+                                <th class="th-image">产品图片</th>
+                                <th class="th-name">产品名称</th>
+                                <th class="th-barcode">69码</th>
+                                <th class="th-price">产品价格</th>
+                                <th class="th-actions">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="productTableBody">
+                            {% for product in products %}
+                            <tr data-name="{{ product.name|lower }}" data-barcode="{{ (product.barcode or '')|lower }}" class="tr-elegant">
+                                <td>
+                                    {% if product.image %}
+                                    <div class="product-image-container" role="button" tabindex="0" data-bs-toggle="modal" data-bs-target="#imageModal" aria-label="查看产品图片">
+                                        <img src="{{ product.image }}"
+                                             class="product-thumbnail-elegant"
+                                             data-src="{{ product.image }}"
+                                             alt="{{ product.name }}"
+                                             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                                        <div class="no-image-elegant" style="display:none;">
+                                            <i class="fas fa-image"></i>
+                                        </div>
+                                    </div>
+                                    {% else %}
+                                    <div class="product-image-container">
+                                        <div class="no-image-elegant">
+                                            <i class="fas fa-image"></i>
+                                        </div>
+                                    </div>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <span class="product-name-elegant">{{ product.name }}</span>
+                                </td>
+                                <td>
+                                    <span class="product-barcode-text">{{ product.barcode or '-' }}</span>
+                                </td>
+                                <td>
+                                    <span class="product-price-text">{{ '¥%.2f'|format(product.price or 0) }}</span>
+                                </td>
+                                <td>
+                                    <div class="action-buttons-elegant">
+                                        <button type="button" class="btn-action btn-action-view view-image-btn"
+                                                data-image-src="{{ product.image or '' }}"
+                                                data-product-name="{{ product.name }}"
+                                                title="查看图片">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                        <button type="button" class="btn-action btn-action-bom"
+                                                onclick="openBomModal({{ product.id }}, '{{ product.name | e }}')"
+                                                title="配置BOM表">
+                                            <i class="fas fa-cogs"></i>
+                                        </button>
+                                        <a href="{{ url_for('product.edit_product', id=product.id, page=pagination.page) }}" class="btn-action btn-action-edit" title="编辑">
+                                            <i class="fas fa-edit"></i>
+                                        </a>
+                                        <button type="button" class="btn-action btn-action-delete"
+                                                onclick="deleteProduct({{ product.id }})"
+                                                title="删除">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="5" class="text-center py-8">
+                                    <div class="empty-state-elegant">
+                                        <i class="fas fa-inbox empty-icon-elegant mb-4"></i>
+                                        <p class="empty-text-elegant mb-0">暂无产品，请先添加</p>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
                 </div>
-                <div class="card-body-elegant p-0">
-                    <div class="table-container-elegant">
-                        <table class="table table-elegant" id="productTable">
-                            <thead class="thead-elegant">
-                                <tr>
-                                    <th class="th-image">产品图片</th>
-                                    <th class="th-name">产品名称</th>
-                                    <th class="th-barcode">69码</th>
-                                    <th class="th-price">产品价格</th>
-                                    <th class="th-actions">操作</th>
-                                </tr>
-                            </thead>
-                            <tbody id="productTableBody">
-                                {% for product in products %}
-                                <tr data-name="{{ product.name|lower }}" data-barcode="{{ (product.barcode or '')|lower }}" class="tr-elegant">
-                                    <td>
-                                        {% if product.image %}
-                                        <div class="product-image-container" role="button" tabindex="0" data-bs-toggle="modal" data-bs-target="#imageModal" aria-label="查看产品图片">
-                                            <img src="{{ product.image }}"
-                                                 class="product-thumbnail-elegant"
-                                                 data-src="{{ product.image }}"
-                                                 alt="{{ product.name }}"
-                                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                                            <div class="no-image-elegant" style="display:none;">
-                                                <i class="fas fa-image"></i>
-                                            </div>
-                                        </div>
-                                        {% else %}
-                                        <div class="product-image-container">
-                                            <div class="no-image-elegant">
-                                                <i class="fas fa-image"></i>
-                                            </div>
-                                        </div>
-                                        {% endif %}
-                                    </td>
-                                    <td>
-                                        <span class="product-name-elegant">{{ product.name }}</span>
-                                    </td>
-                                    <td>
-                                        <span class="product-barcode-text">{{ product.barcode or '-' }}</span>
-                                    </td>
-                                    <td>
-                                        <span class="product-price-text">{{ '¥%.2f'|format(product.price or 0) }}</span>
-                                    </td>
-                                    <td>
-                                        <div class="action-buttons-elegant">
-                                            <button type="button" class="btn-action btn-action-view view-image-btn"
-                                                    data-image-src="{{ product.image or '' }}"
-                                                    data-product-name="{{ product.name }}"
-                                                    title="查看图片">
-                                                <i class="fas fa-eye"></i>
-                                            </button>
-                                            <button type="button" class="btn-action btn-action-bom"
-                                                    onclick="openBomModal({{ product.id }}, '{{ product.name | e }}')"
-                                                    title="配置BOM表">
-                                                <i class="fas fa-cogs"></i>
-                                            </button>
-                                            <a href="{{ url_for('product.edit_product', id=product.id) }}" class="btn-action btn-action-edit" title="编辑">
-                                                <i class="fas fa-edit"></i>
-                                            </a>
-                                            <button type="button" class="btn-action btn-action-delete"
-                                                    onclick="deleteProduct({{ product.id }})"
-                                                    title="删除">
-                                                <i class="fas fa-trash"></i>
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-                                {% else %}
-                                <tr>
-                                    <td colspan="5" class="text-center py-8">
-                                        <div class="empty-state-elegant">
-                                            <i class="fas fa-inbox empty-icon-elegant mb-4"></i>
-                                            <p class="empty-text-elegant mb-0">暂无产品，请先添加</p>
-                                        </div>
-                                    </td>
-                                </tr>
+                
+                {% if pagination and pagination.pages > 1 %}
+                <div class="pagination-wrapper-elegant">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-4 px-6 py-5">
+                        <div class="pagination-info-elegant">
+                            <span id="paginationInfo">显示 {{ pagination.per_page * (pagination.page - 1) + 1 }}-{{ pagination.per_page * (pagination.page - 1) + pagination.items|length }} 条，共 {{ pagination.total }} 条</span>
+                        </div>
+                        <nav aria-label="产品分页">
+                            <ul class="pagination pagination-elegant mb-0">
+                                <li class="page-item {{ 'disabled' if not pagination.has_prev else '' }}">
+                                    <a class="page-link" href="{{ url_for('product.products', page=pagination.prev_num) if pagination.has_prev else '#' }}">&laquo;</a>
+                                </li>
+                                {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                                    {% if p %}
+                                    <li class="page-item {{ 'active' if p == pagination.page else '' }}">
+                                        <a class="page-link" href="{{ url_for('product.products', page=p) }}">{{ p }}</a>
+                                    </li>
+                                    {% else %}
+                                    <li class="page-item disabled"><span class="page-link">&hellip;</span></li>
+                                    {% endif %}
                                 {% endfor %}
-                            </tbody>
-                        </table>
+                                <li class="page-item {{ 'disabled' if not pagination.has_next else '' }}">
+                                    <a class="page-link" href="{{ url_for('product.products', page=pagination.next_num) if pagination.has_next else '#' }}">&raquo;</a>
+                                </li>
+                            </ul>
+                        </nav>
                     </div>
-                    
-                    <div class="pagination-wrapper-elegant" id="paginationWrapper" style="display: none;">
-                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-4 px-6 py-5">
-                            <div class="pagination-info-elegant">
-                                <span id="paginationInfo">显示 1-10 条，共 0 条</span>
-                            </div>
-                            <nav aria-label="产品分页">
-                                <ul class="pagination pagination-elegant mb-0" id="paginationList">
-                                </ul>
-                            </nav>
+                </div>
+                {% elif pagination %}
+                <div class="pagination-wrapper-elegant">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-4 px-6 py-5">
+                        <div class="pagination-info-elegant">
+                            <span id="paginationInfo">共 {{ pagination.total }} 条</span>
                         </div>
                     </div>
                 </div>
+                {% else %}
+                <div class="pagination-wrapper-elegant" style="display:none;">
+                    <span id="paginationInfo" aria-hidden="true"></span>
+                </div>
+                {% endif %}
             </div>
         </div>
     </div>

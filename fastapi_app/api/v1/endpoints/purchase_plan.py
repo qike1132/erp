@@ -10,6 +10,7 @@ from datetime import date as date_type
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 
 from fastapi_app.core.database import get_async_db
 from fastapi_app.core.deps import require_permission
@@ -88,6 +89,9 @@ async def create_plan(
         return {"success": True, "data": result}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except IntegrityError as e:
+        logger.error(f"创建计划单号冲突: {e}")
+        raise HTTPException(status_code=409, detail='单号已存在，请勿重复提交')
     except Exception as e:
         logger.error(f"创建计划失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"创建计划失败: {str(e)}")
@@ -257,7 +261,21 @@ async def shipment_progress(
         raise HTTPException(status_code=500, detail=f"获取出货进度失败: {str(e)}")
 
 
-@router.post("/shipment/sync")
+@router.get("/shipment/records")
+async def shipment_records(
+    plan_id: int = Query(..., description="计划主单ID"),
+    db: AsyncSession = Depends(get_async_db),
+    _user: User = Depends(require_permission("production_plan_view")),
+):
+    """获取指定计划的出货流水记录"""
+    try:
+        records = await purchase_plan_service.get_shipment_records(db, plan_id)
+        return {'records': records}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"获取出货流水失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取出货流水失败: {str(e)}")
 async def shipment_sync(
     data: SyncShipmentRequest,
     db: AsyncSession = Depends(get_async_db),
@@ -348,6 +366,9 @@ async def staging_confirm(
         return {"success": True, **result}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except IntegrityError as e:
+        logger.error(f"确认计划单号冲突: {e}")
+        raise HTTPException(status_code=409, detail='单号已存在，请勿重复提交')
 
 
 @router.delete("/staging/clear")

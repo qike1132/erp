@@ -11,6 +11,7 @@ from sqlalchemy.orm import joinedload
 from fastapi_app.core.deps import require_permission
 from fastapi_app.core.database import get_async_db
 from fastapi_app.shared_models import User, Product, StockIn, StockOut, InventoryLog, Order, Customer
+from fastapi_app.services import escape_like
 
 router = APIRouter()
 
@@ -39,7 +40,7 @@ async def product_search(
     query_str = q.strip()
     result = await db.execute(
         select(Product).where(
-            or_(Product.name.contains(query_str), Product.barcode.contains(query_str))
+            or_(Product.name.like(f'%{escape_like(query_str)}%'), Product.barcode.like(f'%{escape_like(query_str)}%'))
         ).limit(50)
     )
     products = list(result.scalars().all())
@@ -146,23 +147,30 @@ async def stockin_info(
 async def available_shipment(
     product_id: int | None = Query(None),
     customer: str = Query('', max_length=100),
+    order_type: str | None = Query(None, max_length=20),
+    country: str | None = Query(None, max_length=100),
     user: User = Depends(require_permission("stock_view")),
     db: AsyncSession = Depends(get_async_db),
 ):
-    """获取可出货量（按客户+产品维度）
+    """获取可出货量（按客户+产品维度，支持按订单类型隔离）
 
     复用 batch_service 的完整实现，消除内联重复逻辑。
+    order_type 参数用于逻辑隔离：指定后仅计算该类型的订单可出货量。
     """
     if not product_id or not customer.strip():
-        return {'order_quantity': 0, 'shipped_quantity': 0, 'available_quantity': 0}
+        return {'order_quantity': 0, 'shipped_quantity': 0, 'available_quantity': 0, 'regular_available': 0, 'custom_available': 0}
 
     from fastapi_app.services.batch_service import calculate_available_shipment_quantity
-    shipment_info = await calculate_available_shipment_quantity(db, product_id, customer)
+    shipment_info = await calculate_available_shipment_quantity(
+        db, product_id, customer, order_type=order_type, country=country
+    )
 
     return {
         'order_quantity': shipment_info['order_quantity'],
         'shipped_quantity': shipment_info['shipped_quantity'],
         'available_quantity': shipment_info['available_quantity'],
+        'regular_available': shipment_info.get('regular_available', 0),
+        'custom_available': shipment_info.get('custom_available', 0),
     }
 
 
@@ -276,6 +284,8 @@ class BatchStockOutItem(BaseModel):
     customer: str
     quantity: int
     note: str = ""
+    order_type: str = "regular"
+    country: str = ""
 
 class BatchOrderRequest(BaseModel):
     orders: List[BatchOrderItem]

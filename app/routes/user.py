@@ -2,56 +2,32 @@
 用户管理路由蓝图
 包含用户CRUD和权限设置功能
 """
+from functools import wraps
 from flask import Blueprint, render_template, request, redirect, url_for, flash, session
 from app import db
 from app.models import User, Permission
 from werkzeug.security import generate_password_hash
 from utils.password_validator import PasswordValidator
 from utils.sanitizer import sanitize_plain_text
+from app.utils.permission_decorators import page_permission_required
 
 user_bp = Blueprint('user', __name__, url_prefix='/user')
 
 
-def user_permission_required(permission_code):
-    """用户权限验证装饰器"""
-    def decorator(f):
-        def decorated_function(*args, **kwargs):
-            if not session.get('user_id'):
-                return redirect(url_for('main.login'))
-            user = db.session.get(User, session['user_id'])
-            if not user:
-                session.clear()
-                return redirect(url_for('main.login'))
-            if user.is_super:
-                return f(*args, **kwargs)
-            has_permission = False
-            for p in user.permissions:
-                if p.code == permission_code:
-                    has_permission = True
-                    break
-            if not has_permission:
-                flash('无权限访问该页面', 'error')
-                return redirect(url_for('main.index'))
-            return f(*args, **kwargs)
-        decorated_function.__name__ = f.__name__
-        return decorated_function
-    return decorator
-
-
 @user_bp.route('/users')
-@user_permission_required('user_manage')
+@page_permission_required('user_manage')
 def users():
     """用户列表页面"""
     current_user = db.session.get(User, session['user_id'])
     if not current_user.is_super:
         flash('无权限访问', 'error')
         return redirect(url_for('main.index'))
-    users = User.query.all()
+    users = User.query.order_by(User.id).limit(500).all()
     return render_template('user.html', users=users)
 
 
 @user_bp.route('/add', methods=['POST'])
-@user_permission_required('user_manage')
+@page_permission_required('user_manage')
 def add_user():
     """添加用户"""
     current_user = db.session.get(User, session['user_id'])
@@ -89,7 +65,7 @@ def add_user():
 
 
 @user_bp.route('/edit/<int:id>', methods=['GET', 'POST'])
-@user_permission_required('user_manage')
+@page_permission_required('user_manage')
 def edit_user(id):
     """编辑用户"""
     current_user = db.session.get(User, session['user_id'])
@@ -113,8 +89,8 @@ def edit_user(id):
     return render_template('edit_user.html', user=user)
 
 
-@user_bp.route('/toggle/<int:id>')
-@user_permission_required('user_manage')
+@user_bp.route('/toggle/<int:id>', methods=['POST'])
+@page_permission_required('user_manage')
 def toggle_user_status(id):
     """切换用户状态"""
     current_user = db.session.get(User, session['user_id'])
@@ -133,8 +109,8 @@ def toggle_user_status(id):
     return redirect(url_for('user.users'))
 
 
-@user_bp.route('/delete/<int:id>')
-@user_permission_required('user_manage')
+@user_bp.route('/delete/<int:id>', methods=['POST'])
+@page_permission_required('user_manage')
 def delete_user(id):
     """删除用户"""
     current_user = db.session.get(User, session['user_id'])
@@ -154,7 +130,7 @@ def delete_user(id):
 
 
 @user_bp.route('/permission/<int:user_id>', methods=['GET', 'POST'])
-@user_permission_required('user_manage')
+@page_permission_required('user_manage')
 def user_permission(user_id):
     """用户权限设置"""
     current_user = db.session.get(User, session['user_id'])
@@ -183,7 +159,7 @@ def user_permission(user_id):
         flash('权限设置成功', 'success')
         return redirect(url_for('user.users'))
 
-    permissions = Permission.query.all()
+    permissions = Permission.query.order_by(Permission.id).limit(200).all()
 
     parent_permissions = [p for p in permissions if p.parent_id is None]
 

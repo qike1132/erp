@@ -16,6 +16,10 @@
                         
                         <div class="row mb-3">
                             <div class="col-md-6">
+                                <label for="stockin_date" class="form-label">备货时间</label>
+                                <input type="date" class="form-control" id="stockin_date" name="stockin_date" value="{{ current_date }}">
+                            </div>
+                            <div class="col-md-6">
                                 <label for="customer" class="form-label">客户名称</label>
                                 <select class="form-select" id="customer" name="customer" required>
                                     <option value="">请选择客户</option>
@@ -23,10 +27,6 @@
                                     <option value="{{ c.name }}">{{ c.name }}</option>
                                     {% endfor %}
                                 </select>
-                            </div>
-                            <div class="col-md-6">
-                                <label for="stockin_date" class="form-label">备货时间</label>
-                                <input type="date" class="form-control" id="stockin_date" name="stockin_date" value="{{ current_date }}">
                             </div>
                         </div>
                         
@@ -127,6 +127,7 @@
             <div id="stockinListGrouped">
                 <!-- 备货列表将通过JavaScript动态生成 -->
             </div>
+            <div id="stockin-pagination" class="d-flex align-items-center mt-3"></div>
         </div>
     </div>
     
@@ -150,6 +151,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='pagination.js') }}"></script>
 <style>
 /* 展开按钮图标旋转动画 */
 .toggle-icon {
@@ -673,6 +675,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     updateAddNewStockinButtonState();
     initBatchUpload();
     renderGroupedStockinList();
+    loadStockins(1);
     loadStagingStockinsFromServer();
 });
 
@@ -703,6 +706,24 @@ window.toggleStockinGroup = function(contentId) {
 
 // 全局备货数据存储
 let globalStockinsData = [];
+
+// ========== AJAX 分页加载 ==========
+let stockinCurrentPage = 1;
+const stockinPerPage = 50;
+
+function loadStockins(page) {
+    fetch(`/stock/api/stockins?page=${page}&per_page=${stockinPerPage}`, { credentials: 'include' })
+        .then(r => r.json())
+        .then(data => {
+            globalStockinsData = data.items || [];
+            if (typeof renderGroupedStockinListLocal === 'function') {
+                renderGroupedStockinListLocal();
+            }
+            renderPagination(data, 'stockin-pagination', loadStockins);
+            stockinCurrentPage = page;
+        })
+        .catch(err => console.error('加载备货列表失败:', err));
+}
 
 function renderGroupedStockinList() {
     const stockinsData = {{ stockins_json | safe }};

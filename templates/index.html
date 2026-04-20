@@ -1,4 +1,250 @@
 {% extends 'base.html' %}
 
 {% block content %}
+<!-- SECTION 1: 欢迎横幅 + KPI -->
+<div class="home-hero">
+    <div class="hero-welcome">
+        <div class="hero-logo">
+            <img src="{{ url_for('static', filename='logo.jpg') }}" alt="LOGO" width="72" height="72" style="border-radius:20px;box-shadow:0 6px 20px var(--plush-shadow-soft),inset 0 2px 4px rgba(255,255,255,0.9);animation:floatLogo 3s ease-in-out infinite;">
+        </div>
+        <h1>欢迎回来，{{ session.get('username', '用户') }}</h1>
+    </div>
+    <p class="hero-greeting" id="heroGreeting"></p>
+
+    <div class="kpi-grid">
+        <a href="{{ url_for('order.orders') }}" class="kpi-card kpi-order" role="status" aria-label="今日订单">
+            <div class="kpi-header">
+                <div class="kpi-icon kpi-order-icon"><i class="fas fa-shopping-cart"></i></div>
+                <span class="kpi-arrow"><i class="fas fa-arrow-right"></i></span>
+            </div>
+            <div class="kpi-value">{{ order_today }}</div>
+            <div class="kpi-label">今日订单</div>
+            {% set diff = order_today - order_yesterday %}
+            <div class="kpi-trend {% if diff >= 0 %}trend-up{% else %}trend-warn{% endif %}">
+                <i class="fas fa-arrow-{% if diff >= 0 %}up{% else %}down{% endif %}"></i>
+                较昨日 {% if diff >= 0 %}+{% endif %}{{ diff }}
+            </div>
+        </a>
+
+        <a href="{{ url_for('stock.stockins') }}" class="kpi-card kpi-stockin" role="status" aria-label="今日备货">
+            <div class="kpi-header">
+                <div class="kpi-icon kpi-stockin-icon"><i class="fas fa-truck-loading"></i></div>
+                <span class="kpi-arrow"><i class="fas fa-arrow-right"></i></span>
+            </div>
+            <div class="kpi-value">{{ stockin_today }}</div>
+            <div class="kpi-label">今日备货</div>
+            {% set diff = stockin_today - stockin_yesterday %}
+            <div class="kpi-trend {% if diff >= 0 %}trend-up{% else %}trend-warn{% endif %}">
+                <i class="fas fa-arrow-{% if diff >= 0 %}up{% else %}down{% endif %}"></i>
+                较昨日 {% if diff >= 0 %}+{% endif %}{{ diff }}
+            </div>
+        </a>
+
+        <a href="{{ url_for('stock.stockouts') }}" class="kpi-card kpi-stockout" role="status" aria-label="今日出货">
+            <div class="kpi-header">
+                <div class="kpi-icon kpi-stockout-icon"><i class="fas fa-shipping-fast"></i></div>
+                <span class="kpi-arrow"><i class="fas fa-arrow-right"></i></span>
+            </div>
+            <div class="kpi-value">{{ stockout_today }}</div>
+            <div class="kpi-label">今日出货</div>
+            {% set diff = stockout_today - stockout_yesterday %}
+            <div class="kpi-trend {% if diff >= 0 %}trend-up{% else %}trend-warn{% endif %}">
+                <i class="fas fa-arrow-{% if diff >= 0 %}up{% else %}down{% endif %}"></i>
+                较昨日 {% if diff >= 0 %}+{% endif %}{{ diff }}
+            </div>
+        </a>
+
+        <a href="{{ url_for('order.my_approvals') }}" class="kpi-card kpi-approval" role="status" aria-label="待审批">
+            <div class="kpi-header">
+                <div class="kpi-icon kpi-approval-icon"><i class="fas fa-clipboard-check"></i></div>
+                <span class="kpi-arrow"><i class="fas fa-arrow-right"></i></span>
+            </div>
+            <div class="kpi-value">{{ pending_approvals }}</div>
+            <div class="kpi-label">待审批</div>
+            {% if pending_approvals > 0 %}
+            <div class="kpi-trend trend-warn"><i class="fas fa-exclamation-circle"></i> 需处理</div>
+            {% else %}
+            <div class="kpi-trend trend-up"><i class="fas fa-check-circle"></i> 无待办</div>
+            {% endif %}
+        </a>
+    </div>
+</div>
+
+<!-- SECTION 3 + 4: 待办 + 动态 -->
+<div class="dashboard-row">
+
+    <!-- 待办事项 -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-header-title">
+                <i class="fas fa-bell"></i> 待办事项
+            </div>
+            {% set todo_count = (pending_approvals + low_stock_count + pending_purchases + pending_materials) %}
+            <span class="todo-badge">{{ todo_count }}</span>
+        </div>
+        <div class="card-body">
+            <div class="todo-list" role="list">
+                {% if todo_count == 0 %}
+                <div class="todo-empty">
+                    <i class="fas fa-inbox"></i>
+                    <p>暂无待办，一切正常</p>
+                </div>
+                {% else %}
+                    {% if pending_approvals > 0 %}
+                    <a href="{{ url_for('order.my_approvals') }}" class="todo-item todo-urgent" role="listitem" tabindex="0">
+                        <div class="todo-dot"></div>
+                        <div class="todo-content">
+                            <div class="todo-title">{{ pending_approvals }} 笔订单待审批</div>
+                            <div class="todo-meta">
+                                <span class="todo-priority">紧急</span>
+                                <span>· 采购中心</span>
+                            </div>
+                        </div>
+                        <div class="todo-action"><span>去审批</span> <i class="fas fa-chevron-right"></i></div>
+                    </a>
+                    {% endif %}
+
+                    {% if low_stock_count > 0 %}
+                    <a href="{{ url_for('stock.inventory') }}" class="todo-item todo-warning" role="listitem" tabindex="0">
+                        <div class="todo-dot"></div>
+                        <div class="todo-content">
+                            <div class="todo-title">{{ low_stock_count }} 个产品低库存预警</div>
+                            <div class="todo-meta">
+                                <span class="todo-priority">注意</span>
+                                <span>· 库存管理</span>
+                            </div>
+                        </div>
+                        <div class="todo-action"><span>查看库存</span> <i class="fas fa-chevron-right"></i></div>
+                    </a>
+                    {% endif %}
+
+                    {% if pending_purchases > 0 %}
+                    <a href="{{ url_for('purchase_center.index') }}" class="todo-item todo-info" role="listitem" tabindex="0">
+                        <div class="todo-dot"></div>
+                        <div class="todo-content">
+                            <div class="todo-title">{{ pending_purchases }} 笔采购单待确认</div>
+                            <div class="todo-meta">
+                                <span class="todo-priority">一般</span>
+                                <span>· 采购管理</span>
+                            </div>
+                        </div>
+                        <div class="todo-action"><span>去处理</span> <i class="fas fa-chevron-right"></i></div>
+                    </a>
+                    {% endif %}
+
+                    {% if pending_materials > 0 %}
+                    <a href="{{ url_for('material_registration.index') }}" class="todo-item todo-secondary" role="listitem" tabindex="0">
+                        <div class="todo-dot"></div>
+                        <div class="todo-content">
+                            <div class="todo-title">{{ pending_materials }} 笔来料待接收</div>
+                            <div class="todo-meta">
+                                <span class="todo-priority">提示</span>
+                                <span>· 来料登记</span>
+                            </div>
+                        </div>
+                        <div class="todo-action"><span>查看详情</span> <i class="fas fa-chevron-right"></i></div>
+                    </a>
+                    {% endif %}
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 最近动态 -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-header-title">
+                <i class="fas fa-stream"></i> 最近动态
+            </div>
+            <a href="{{ url_for('report.reports') }}" class="view-all-btn">查看全部 <i class="fas fa-arrow-right"></i></a>
+        </div>
+        <div class="card-body">
+            {% if activities %}
+            <div class="timeline">
+                {% set ns = namespace(current_date='', last_type='') %}
+                {% for act in activities %}
+                    {% if act.time %}
+                    {% set act_date = act.time.strftime('%Y-%m-%d') %}
+                    {% else %}
+                    {% set act_date = '' %}
+                    {% endif %}
+
+                    {% if act_date != ns.current_date %}
+                    <div class="timeline-date-group">
+                        <div class="timeline-date">
+                            {% if act_date == today|string %}
+                                今天
+                            {% elif act_date == (today - timedelta(days=1))|string %}
+                                昨天
+                            {% else %}
+                                {{ act_date }}
+                            {% endif %}
+                        </div>
+                    {% set ns.current_date = act_date %}
+                    {% endif %}
+
+                    <div class="timeline-item" tabindex="0">
+                        <div class="timeline-line">
+                            <div class="timeline-dot {% if act.type == 'stockin' %}dot-stockin{% elif act.type == 'stockout' %}dot-stockout{% elif act.type == 'order' %}dot-order{% elif act.type == 'approval' %}dot-approval{% elif act.type == 'material' %}dot-material{% endif %}"></div>
+                            <div class="timeline-connector"></div>
+                        </div>
+                        <div class="timeline-content">
+                            {% if act.time %}
+                            <div class="timeline-time">{{ act.time.strftime('%H:%M') }}</div>
+                            {% endif %}
+                            <div class="timeline-title">
+                                <span class="timeline-tag {% if act.type == 'stockin' %}tag-stockin{% elif act.type == 'stockout' %}tag-stockout{% elif act.type == 'order' %}tag-order{% elif act.type == 'approval' %}tag-approval{% elif act.type == 'material' %}tag-material{% endif %}">
+                                    {{ act.status }}
+                                </span>
+                                {{ act.title }}
+                            </div>
+                            {% if act.desc %}
+                            <div class="timeline-desc">{{ act.desc }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    {% if act_date != ns.current_date or loop.last %}
+                    </div>
+                    {% endif %}
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="todo-empty">
+                <i class="fas fa-stream"></i>
+                <p>暂无动态</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    // 动态问候语
+    var hour = new Date().getHours();
+    var greeting = '晚上好';
+    if (hour < 6) greeting = '凌晨好';
+    else if (hour < 12) greeting = '上午好';
+    else if (hour < 14) greeting = '中午好';
+    else if (hour < 18) greeting = '下午好';
+
+    var weekDays = ['日', '一', '二', '三', '四', '五', '六'];
+    var now = new Date();
+    var dateStr = now.getFullYear() + '年' + (now.getMonth()+1) + '月' + now.getDate() + '日 星期' + weekDays[now.getDay()];
+
+    var el = document.getElementById('heroGreeting');
+    if (el) el.textContent = greeting + '，今天是 ' + dateStr + '。系统运行正常，以下是今日业务概览。';
+
+    // 键盘无障碍
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && (e.target.classList.contains('todo-item') || e.target.classList.contains('timeline-item'))) {
+            e.target.click();
+        }
+    });
+})();
+</script>
 {% endblock %}

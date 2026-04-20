@@ -318,8 +318,7 @@
                 <div id="orderListGrouped">
                     <!-- 订单列表将通过JavaScript动态生成 -->
                 </div>
-            </div>
-        </div>
+                <div id="co-order-pagination" class="d-flex align-items-center mt-3"></div>
 
         <div class="modal fade" id="editStagedOrderModal" tabindex="-1">
             <div class="modal-dialog">
@@ -356,6 +355,10 @@
 
                             <div class="row mb-3">
                                 <div class="col-md-6">
+                                    <label for="si_stockin_date" class="form-label">备货时间</label>
+                                    <input type="date" class="form-control" id="si_stockin_date" name="stockin_date" value="{{ current_date }}">
+                                </div>
+                                <div class="col-md-6">
                                     <label for="si_customer" class="form-label">客户名称</label>
                                     <select class="form-select" id="si_customer" name="customer" required>
                                         <option value="">请选择客户</option>
@@ -363,10 +366,6 @@
                                         <option value="{{ c.name }}">{{ c.name }}</option>
                                         {% endfor %}
                                     </select>
-                                </div>
-                                <div class="col-md-6">
-                                    <label for="si_stockin_date" class="form-label">备货时间</label>
-                                    <input type="date" class="form-control" id="si_stockin_date" name="stockin_date" value="{{ current_date }}">
                                 </div>
                             </div>
 
@@ -466,6 +465,7 @@
                 <div id="stockinListGrouped">
                     <!-- 备货列表将通过JavaScript动态生成 -->
                 </div>
+                <div id="co-stockin-pagination" class="d-flex align-items-center mt-3"></div>
             </div>
         </div>
 
@@ -494,9 +494,47 @@
 
 {% block scripts %}
 <!-- ========== 订单管理模块 JS（使用 order.js + 内联初始化） ========== -->
+<script src="{{ url_for('static', filename='pagination.js') }}"></script>
 <script src="{{ url_for('static', filename='order.js') }}"></script>
 <script>
-// ========== 从模板注入全局数据 ==========
+// ========== AJAX 分页加载订单数据 ==========
+let coOrderCurrentPage = 1;
+const coOrderPerPage = 50;
+
+function loadCoOrders(page) {
+    fetch(`/customer-order/api/orders?page=${page}&per_page=${coOrderPerPage}`, { credentials: 'include' })
+        .then(r => r.json())
+        .then(data => {
+            window.__ordersData = data.items || [];
+            globalOrdersData = window.__ordersData;
+            if (typeof renderGroupedOrderListLocal === 'function') {
+                renderGroupedOrderListLocal();
+            }
+            renderPagination(data, 'co-order-pagination', loadCoOrders);
+            coOrderCurrentPage = page;
+        })
+        .catch(err => console.error('加载订单失败:', err));
+}
+
+// ========== AJAX 分页加载备货数据 ==========
+let coStockinCurrentPage = 1;
+const coStockinPerPage = 50;
+
+function loadCoStockins(page) {
+    fetch(`/customer-order/api/stockins?page=${page}&per_page=${coStockinPerPage}`, { credentials: 'include' })
+        .then(r => r.json())
+        .then(data => {
+            si_globalStockinsData = data.items || [];
+            if (typeof si_renderGroupedStockinListLocal === 'function') {
+                si_renderGroupedStockinListLocal();
+            }
+            renderPagination(data, 'co-stockin-pagination', loadCoStockins);
+            coStockinCurrentPage = page;
+        })
+        .catch(err => console.error('加载备货失败:', err));
+}
+
+// ========== 从模板注入全局数据（降级） ==========
 window.__ordersData = {{ orders_json | safe }};
 window.__customers = [{% for c in customers %}{"name":"{{ c.name | replace('"', '\\"') }}"}{% if not loop.last %},{% endif %}{% endfor %}];
 
@@ -948,8 +986,14 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
     si_updateAddNewStockinButtonState();
     si_initBatchUpload();
-    si_renderGroupedStockinList();
+    // 跳过 si_renderGroupedStockinList()——初始数据为空，由 AJAX 分页加载
     si_loadStagingStockinsFromServer();
+
+    // AJAX 分页加载 - 显示加载状态后拉取数据
+    document.getElementById('orderListGrouped').innerHTML = '<div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm me-2" role="status"></div>加载中...</div>';
+    document.getElementById('stockinListGrouped').innerHTML = '<div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm me-2" role="status"></div>加载中...</div>';
+    loadCoOrders(1);
+    loadCoStockins(1);
 });
 
 window.addEventListener('beforeunload', function() {

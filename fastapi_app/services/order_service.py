@@ -15,11 +15,18 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from fastapi_app.shared_models import (
     Order, Product, InventoryLog, User,
-    ApprovalRequest, ApprovalLog, StockOut, OrderSyncRecord
+    ApprovalRequest, ApprovalLog, StockOut, OrderSyncRecord,
+    CustomerOrder
 )
-from fastapi_app.services.stock_concurrency import get_product_for_update
+from fastapi_app.shared.stock_concurrency import get_product_for_update
+from fastapi_app.services import escape_like
 
 logger = logging.getLogger(__name__)
+
+
+class PermissionDeniedError(Exception):
+    """用户无权限执行此操作"""
+    pass
 
 
 async def get_orders(db: AsyncSession, page: int = 1, per_page: int = 50,
@@ -37,7 +44,7 @@ async def get_orders(db: AsyncSession, page: int = 1, per_page: int = 50,
     # 筛选条件（共用，避免 DRY 违反）
     conditions = []
     if customer:
-        conditions.append(Order.customer.contains(customer))
+        conditions.append(Order.customer.like(f'%{escape_like(customer)}%'))
     if product_id:
         conditions.append(Order.product_id == product_id)
     if status:
@@ -100,6 +107,9 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
     """
     if order_type == 'custom' and not country:
         raise ValueError('定制订单必须填写国家名称')
+
+    if quantity <= 0 or quantity > 100000:
+        raise ValueError('订单数量必须在1-100000之间')
 
     product = await get_product_for_update(db, product_id)
 
@@ -282,6 +292,8 @@ async def delete_order(db: AsyncSession, order_id: int, current_user: User) -> d
             db.add(stockout_log)
 
         product.current_stock -= order.quantity
+        if product.current_stock < 0:
+            logger.warning(f'库存出现负数：产品{product.name}(ID:{product.id})，当前库存{product.current_stock}')
         if total_deducted > 0:
             product.current_stock += total_deducted
 
@@ -361,7 +373,7 @@ async def cancel_approval(db: AsyncSession, approval_id: int, current_user: User
         raise ValueError('审批请求不存在')
 
     if approval_request.requester_id != current_user.id and not current_user.is_super:
-        raise ValueError('您没有权限取消此审批请求')
+        raise PermissionDeniedError('您没有权限取消此审批请求')
 
     if approval_request.status != 'pending':
         raise ValueError('该审批请求已处理，无法取消')
@@ -434,6 +446,13 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                 })
                 continue
 
+            if int(quantity) <= 0 or int(quantity) > 100000:
+                results.append({
+                    'success': False, 'error': '订单数量必须在1-100000之间',
+                    'order_no': order_data.get('order_no', '未知')
+                })
+                continue
+
             product = await get_product_for_update(db, product_id)
 
             order_no = await generate_order_number(db)
@@ -471,7 +490,7 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
         except Exception as e:
             logger.error(f"批量订单单项失败: {e}")
             results.append({
-                'success': False, 'error': str(e),
+                'success': False, 'error': '订单处理失败，请稍后重试',
                 'order_no': order_data.get('order_no', '未知')
             })
 

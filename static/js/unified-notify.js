@@ -50,6 +50,14 @@
         var container = _ensureContainer();
         var config = TYPE_CONFIG[type] || TYPE_CONFIG.info;
 
+        // 去重：如果相同消息已在显示中，不重复创建
+        var msgKey = type + ':' + message;
+        for (var i = 0; i < container.children.length; i++) {
+            if (container.children[i].getAttribute('data-notify-key') === msgKey) {
+                return;
+            }
+        }
+
         // 限制最大数量
         while (container.children.length >= NOTIFY_MAX) {
             container.removeChild(container.firstChild);
@@ -58,6 +66,7 @@
         var toast = document.createElement('div');
         toast.className = 'alert ' + config.bgClass + ' ' + config.textClass + ' d-flex align-items-center shadow-sm';
         toast.style.cssText = 'margin:0;padding:10px 16px;border-radius:6px;font-size:14px;opacity:0;transition:opacity 0.3s ease;';
+        toast.setAttribute('data-notify-key', msgKey);
         toast.innerHTML = '<i class="fas ' + config.icon + ' me-2"></i><span>' + _escapeHtml(message) + '</span>';
 
         container.appendChild(toast);
@@ -101,4 +110,14 @@
         }
     };
     window.ToastNotification = notify;
+    // 兼容 showGlobalNotification(message, type) 调用方式
+    window.showGlobalNotification = function(message, type) {
+        var t = type || 'info';
+        var fn = notify[t];
+        if (typeof fn === 'function') {
+            fn(message);
+        } else {
+            notify.info(message);
+        }
+    };
 })();

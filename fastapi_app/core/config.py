@@ -1,5 +1,6 @@
 import os
 from dotenv import load_dotenv
+from urllib.parse import quote_plus
 
 # 在类定义之前加载 .env，确保 os.getenv("DB_PASSWORD") 等能读到值
 # pydantic_settings 的 env_file 仅为其自身字段服务，不会注入 os.environ
@@ -13,10 +14,10 @@ def _build_database_uri() -> str:
     """构建MySQL数据库URI"""
     db_host = os.getenv("DB_HOST", "localhost")
     db_port = os.getenv("DB_PORT", "3306")
-    db_user = os.getenv("DB_USER", "root")
+    db_user = os.getenv("DB_USER", "erp_app")
     db_password = os.getenv("DB_PASSWORD", "")
     db_name = os.getenv("DB_NAME", "erp_system")
-    return f"mysql+pymysql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}?charset=utf8mb4"
+    return f"mysql+pymysql://{quote_plus(db_user)}:{quote_plus(db_password)}@{db_host}:{db_port}/{db_name}?charset=utf8mb4"
 
 
 class Settings(BaseSettings):
@@ -52,14 +53,14 @@ class Settings(BaseSettings):
     REDIS_DB: int = int(os.getenv("REDIS_DB") or "0")
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
 
-    # Celery配置
+    # Celery配置 - Redis密码使用quote_plus编码，防止含特殊字符(@:/)时破坏URI
     CELERY_BROKER_URL: str = os.getenv(
         "CELERY_BROKER_URL",
-        f"redis://:{os.getenv('REDIS_PASSWORD', '')}@{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', '6379')}/1"
+        f"redis://:{quote_plus(os.getenv('REDIS_PASSWORD', ''))}@{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', '6379')}/1"
     )
     CELERY_RESULT_BACKEND: str = os.getenv(
         "CELERY_RESULT_BACKEND",
-        f"redis://:{os.getenv('REDIS_PASSWORD', '')}@{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', '6379')}/2"
+        f"redis://:{quote_plus(os.getenv('REDIS_PASSWORD', ''))}@{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', '6379')}/2"
     )
 
     # CORS配置 - 从环境变量读取允许的源，默认仅允许本地访问

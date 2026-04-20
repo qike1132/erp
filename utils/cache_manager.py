@@ -2,9 +2,12 @@
 缓存管理模块
 提供缓存清理和防缓存措施
 """
+import logging
 from functools import wraps
 from flask import request, make_response
 from app import db
+
+_logger = logging.getLogger(__name__)
 
 
 def no_cache(view_func):
@@ -42,10 +45,10 @@ def clear_cache_after_change():
                 redis_cache.delete_pattern('report:*')
                 redis_cache.delete_pattern('customer:*')
 
-                db.session.expire_all()
+                # 不再调用 db.session.expire_all()，原因同 invalidate_cache_on_write
 
             except Exception as e:
-                print(f"清除缓存时出错: {e}")
+                _logger.warning("清除缓存时出错: %s", e)
 
             return result
         return decorated_function
@@ -88,12 +91,14 @@ def invalidate_cache_on_write(response):
         for pattern in patterns_to_clear:
             redis_cache.delete_pattern(pattern)
 
-        # 有任何数据变更时刷新DB session
-        if patterns_to_clear:
-            db.session.expire_all()
+        # 不再调用 db.session.expire_all()
+        # 原因：expire_all() 会使 SQLAlchemy Identity Map 中所有对象过期，
+        # 导致后续请求访问时触发逐条 lazy-load (N+1 问题)。
+        # Redis 缓存已清除，scoped_session 在请求结束后自动清理，
+        # 写操作本身已 commit/flush，数据一致性无需额外 expire。
 
-    except Exception:
-        pass  # 缓存失效失败不应影响正常响应
+    except Exception as e:
+        _logger.warning("缓存失效处理失败(path=%s): %s", request.path, e)
 
     return response
 
@@ -101,12 +106,11 @@ def invalidate_cache_on_write(response):
 def clear_database_session_cache():
     """
     清除数据库session缓存
-    确保每次查询都从数据库获取最新数据
+    注：Flask scoped_session 在每个请求结束后通过 db.session.remove() 自动清理，
+    新请求获取全新 session，无需手动 expire_all()。
+    此函数保留为空以维持调用兼容性。
     """
-    try:
-        db.session.expire_all()
-    except Exception as e:
-        print(f"清除数据库session缓存时出错: {e}")
+    pass
 
 
 def add_random_param_to_url(url):
@@ -120,12 +124,12 @@ def add_random_param_to_url(url):
     return f"{url}{separator}_t={int(time.time())}&_r={random.randint(1, 1000000)}"
 
 
-def force_refresh_db():
+def ensure_session_committed():
     """
-    强制刷新数据库查询
+    确保数据库 session 已提交
+    注：移除 expire_all()，原因同 clear_database_session_cache()。
     """
     try:
         db.session.commit()
-        db.session.expire_all()
-    except Exception:
-        pass
+    except Exception as e:
+        _logger.warning("ensure_session_committed 出错: %s", e)

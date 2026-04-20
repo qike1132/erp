@@ -30,7 +30,7 @@
                     </div>
                 </div>
                 <button type="submit" class="btn btn-primary">保存修改</button>
-                <a href="{{ url_for('product.products') }}" class="btn btn-secondary">取消</a>
+                <a href="{{ url_for('product.products', page=request.args.get('page', 1)) }}" class="btn btn-secondary">取消</a>
             </form>
         </div>
     </div>

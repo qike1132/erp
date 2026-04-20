@@ -5,7 +5,6 @@
 """
 import os
 import tempfile
-import shutil
 import logging
 import asyncio
 from datetime import datetime
@@ -18,36 +17,18 @@ from fastapi_app.shared_models import (
     Product, Order, StockIn, StockOut, InventoryLog,
     StagingOrder, StagingStockIn, StagingStockOut,
 )
+from fastapi_app.utils import parse_date_value, validate_customer_name
+from fastapi_app.services.batch_service import (
+    generate_order_number, process_order_deduction,
+    generate_stockin_number, generate_stockout_number,
+    calculate_available_shipment_quantity,
+    parse_excel_file_async, read_excel_sheets_async,
+)
 
 logger = logging.getLogger(__name__)
 
 
 # ==================== 工具函数 ====================
-
-def _parse_date_value(date_value) -> Optional[datetime]:
-    """解析日期值（支持多种格式），解析失败返回None - 与batch_service.parse_date_value保持一致"""
-    if date_value is None:
-        return None
-    if isinstance(date_value, datetime):
-        return date_value
-    if isinstance(date_value, (int, float)):
-        try:
-            from datetime import timedelta
-            base_date = datetime(1899, 12, 30)
-            return base_date + timedelta(days=date_value)
-        except Exception:
-            return None
-    try:
-        date_str = str(date_value).strip()
-        for fmt in ["%Y-%m-%d", "%Y/%m/%d", "%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"]:
-            try:
-                return datetime.strptime(date_str, fmt)
-            except ValueError:
-                continue
-    except Exception:
-        pass
-    return None
-
 
 async def _find_product_by_name_or_barcode(db: AsyncSession, name_or_barcode: str):
     """通过名称或条码查找产品"""
@@ -58,21 +39,6 @@ async def _find_product_by_name_or_barcode(db: AsyncSession, name_or_barcode: st
     )
     return result.scalar_one_or_none()
 
-
-def _validate_customer_name(customer_name: str) -> Tuple[bool, str]:
-    """验证客户名称"""
-    import re
-    if not customer_name or not customer_name.strip():
-        return False, "客户名称不能为空"
-    customer_name = customer_name.strip()
-    if len(customer_name) < 2:
-        return False, "客户名称至少需要 2 个字符"
-    if len(customer_name) > 100:
-        return False, "客户名称不能超过 100 个字符"
-    pattern = r'^[\u4e00-\u9fa5a-zA-Z0-9\s\-\_\.\,\(\)\（\）]+$'
-    if not re.match(pattern, customer_name):
-        return False, "客户名称包含非法字符"
-    return True, ""
 
 
 # ==================== 暂存订单服务 ====================
@@ -133,12 +99,18 @@ async def update_staging_order(db: AsyncSession, order_id: int, data: dict) -> d
             order.product_id = None
             order.validation_error = f'产品"{data["product_name"]}"不存在'
     if 'quantity' in data:
-        order.quantity = int(data['quantity'])
+        qty = int(data['quantity'])
+        if qty <= 0 or qty > 100000:
+            raise ValueError('数量必须在1-100000之间')
+        order.quantity = qty
     if 'deduct_stock' in data:
         order.deduct_stock = bool(data['deduct_stock'])
     if 'deduct_quantity' in data:
-        order.deduct_quantity = int(data['deduct_quantity'])
-        order.deduct_stock = order.deduct_quantity > 0
+        deduct_qty = int(data['deduct_quantity'])
+        if deduct_qty < 0:
+            raise ValueError('抵扣数量不能为负数')
+        order.deduct_quantity = deduct_qty
+        order.deduct_stock = deduct_qty > 0
     if 'note' in data:
         order.note = data['note']
 
@@ -156,9 +128,7 @@ async def confirm_staging_orders(
     Returns:
         (confirmed_count, error_list)
     """
-    from fastapi_app.services.batch_service import (
-        generate_order_number, process_order_deduction,
-    )
+    from fastapi_app.shared.stock_concurrency import get_product_for_update
 
     result = await db.execute(
         select(StagingOrder).where(
@@ -178,6 +148,12 @@ async def confirm_staging_orders(
     try:
         for staging in staging_orders:
             try:
+                # 数量校验
+                if staging.quantity <= 0 or staging.quantity > 100000:
+                    errors.append(f'订单{staging.customer}-{staging.product_name}数量无效: {staging.quantity}')
+                    staging.status = 'rejected'
+                    continue
+
                 order_no = await generate_order_number(db)
 
                 order = Order(
@@ -192,10 +168,13 @@ async def confirm_staging_orders(
                 db.add(order)
                 await db.flush()
 
-                # 更新产品库存
-                product = await db.get(Product, staging.product_id)
-                if product:
-                    product.current_stock += staging.quantity
+                # 使用悲观锁更新产品库存，防止并发修改
+                product = await get_product_for_update(db, staging.product_id)
+                if not product:
+                    errors.append(f'订单{staging.customer}-{staging.product_name}产品不存在(ID:{staging.product_id})')
+                    staging.status = 'rejected'
+                    continue
+                product.current_stock += staging.quantity
 
                 log = InventoryLog(
                     product_id=staging.product_id,
@@ -260,8 +239,6 @@ async def import_staging_orders_from_excel(
     Returns:
         (imported_count, message, errors)
     """
-    from fastapi_app.services.batch_service import parse_excel_file_async, read_excel_sheets_async
-
     # 清空当前会话暂存
     await db.execute(
         delete(StagingOrder).where(StagingOrder.session_id == session_id)
@@ -440,7 +417,7 @@ async def update_staging_stockin(db: AsyncSession, stockin_id: int, data: dict) 
     if 'quantity' in data:
         stockin.quantity = int(data['quantity'])
     if 'stockin_date' in data:
-        stockin.stockin_date = _parse_date_value(data['stockin_date']) or datetime.now()
+        stockin.stockin_date = parse_date_value(data['stockin_date']) or datetime.now()
     if 'note' in data:
         stockin.note = data['note']
 
@@ -453,7 +430,7 @@ async def confirm_staging_stockins(
     db: AsyncSession, session_id: str
 ) -> Tuple[int, List[str]]:
     """确认暂存备货 - 转移到正式备货表"""
-    from fastapi_app.services.batch_service import generate_stockin_number
+    from fastapi_app.shared.stock_concurrency import get_product_for_update
 
     result = await db.execute(
         select(StagingStockIn).where(
@@ -472,6 +449,11 @@ async def confirm_staging_stockins(
 
     for staging in staging_stockins:
         try:
+            if staging.quantity <= 0:
+                errors.append(f'备货{staging.customer}-{staging.product_name}数量无效: {staging.quantity}')
+                staging.status = 'rejected'
+                continue
+
             stockin_no = await generate_stockin_number(db)
 
             stockin = StockIn(
@@ -484,18 +466,22 @@ async def confirm_staging_stockins(
             )
             db.add(stockin)
 
-            product = await db.get(Product, staging.product_id)
-            if product:
-                product.current_stock += staging.quantity
+            # 使用悲观锁更新产品库存
+            product = await get_product_for_update(db, staging.product_id)
+            if not product:
+                errors.append(f'备货{staging.customer}-{staging.product_name}产品不存在(ID:{staging.product_id})')
+                staging.status = 'rejected'
+                continue
+            product.current_stock += staging.quantity
 
-                log = InventoryLog(
-                    product_id=staging.product_id,
-                    change_type='备货',
-                    change_quantity=staging.quantity,
-                    related_id=stockin_no,
-                    note=f'批量导入备货：{stockin_no}',
-                )
-                db.add(log)
+            log = InventoryLog(
+                product_id=staging.product_id,
+                change_type='备货',
+                change_quantity=staging.quantity,
+                related_id=stockin_no,
+                note=f'批量导入备货：{stockin_no}',
+            )
+            db.add(log)
 
             staging.status = 'approved'
             confirmed += 1
@@ -519,8 +505,6 @@ async def import_staging_stockins_from_excel(
     db: AsyncSession, file_content: bytes, session_id: str
 ) -> Tuple[int, str, List[str]]:
     """从 Excel 文件导入备货到暂存区"""
-    from fastapi_app.services.batch_service import parse_excel_file_async, read_excel_sheets_async
-
     # 清空当前会话暂存
     await db.execute(
         delete(StagingStockIn).where(StagingStockIn.session_id == session_id)
@@ -575,7 +559,7 @@ async def import_staging_stockins_from_excel(
                 product_name = str(product_name).strip()
 
                 # 客户名称验证
-                is_valid, error_msg = _validate_customer_name(customer)
+                is_valid, error_msg = validate_customer_name(customer)
                 if not is_valid:
                     errors.append(f'第{idx}行：{error_msg}')
                     continue
@@ -597,7 +581,7 @@ async def import_staging_stockins_from_excel(
                 except (ValueError, TypeError):
                     qty = 0
 
-                stockin_date = _parse_date_value(stockin_date_val) or datetime.now()
+                stockin_date = parse_date_value(stockin_date_val) or datetime.now()
 
                 staging_stockin = StagingStockIn(
                     session_id=session_id,
@@ -701,7 +685,7 @@ async def update_staging_stockout(db: AsyncSession, stockout_id: int, data: dict
                     stockout.stock_check_passed = False
                     stockout.stock_check_message = f'库存不足，当前库存: {product.current_stock}'
     if 'stockout_date' in data:
-        stockout.stockout_date = _parse_date_value(data['stockout_date']) or datetime.now()
+        stockout.stockout_date = parse_date_value(data['stockout_date']) or datetime.now()
     if 'note' in data:
         stockout.note = data['note']
 
@@ -714,9 +698,7 @@ async def confirm_staging_stockouts(
     db: AsyncSession, session_id: str
 ) -> Tuple[int, List[str]]:
     """确认暂存出货 - 转移到正式出货表"""
-    from fastapi_app.services.batch_service import (
-        generate_stockout_number, calculate_available_shipment_quantity,
-    )
+    from fastapi_app.shared.stock_concurrency import get_product_for_update
 
     result = await db.execute(
         select(StagingStockOut).where(
@@ -741,7 +723,7 @@ async def confirm_staging_stockouts(
                 staging.status = 'rejected'
                 continue
 
-            product = await db.get(Product, staging.product_id)
+            product = await get_product_for_update(db, staging.product_id)
             if not product:
                 errors.append(f'出货{staging.customer}-{staging.product_name}确认失败: 产品不存在')
                 staging.status = 'rejected'
@@ -753,7 +735,9 @@ async def confirm_staging_stockouts(
                 continue
 
             shipment_info = await calculate_available_shipment_quantity(
-                db, staging.product_id, staging.customer
+                db, staging.product_id, staging.customer,
+                order_type=staging.order_type or 'regular',
+                country=staging.country or None
             )
             if shipment_info['available_quantity'] <= 0:
                 errors.append(f'出货{staging.customer}-{staging.product_name}确认失败: 没有可用的订单支持出货')
@@ -821,8 +805,6 @@ async def import_staging_stockouts_from_excel(
     db: AsyncSession, file_content: bytes, session_id: str
 ) -> Tuple[int, str, List[str]]:
     """从 Excel 文件导入出货到暂存区"""
-    from fastapi_app.services.batch_service import parse_excel_file_async, read_excel_sheets_async
-
     # 清空当前会话暂存
     await db.execute(
         delete(StagingStockOut).where(StagingStockOut.session_id == session_id)
@@ -869,6 +851,14 @@ async def import_staging_stockouts_from_excel(
                 customer = row_data.get('客户名称') or row_data.get('客户')
                 stockout_date_val = row_data.get('时间') or row_data.get('出货时间')
                 note = row_data.get('备注')
+                country_val = row_data.get('国家') or row_data.get('国家名称')
+
+                # 国家列有值=定制订单，空值/NaN=常规订单
+                if not country_val or (isinstance(country_val, float) and country_val != country_val):
+                    country_parsed = ''
+                else:
+                    country_parsed = str(country_val).strip()
+                order_type_parsed = 'custom' if country_parsed else 'regular'
 
                 if not product_identifier or not quantity:
                     continue
@@ -910,7 +900,9 @@ async def import_staging_stockouts_from_excel(
                 except (ValueError, TypeError):
                     qty = 0
 
-                stockout_date = _parse_date_value(stockout_date_val) or datetime.now()
+                stockout_date = parse_date_value(stockout_date_val) or datetime.now()
+
+                # order_type 已由 country 列决定
 
                 staging_stockout = StagingStockOut(
                     session_id=session_id,
@@ -921,6 +913,8 @@ async def import_staging_stockouts_from_excel(
                     product_id=product_id,
                     quantity=qty,
                     note=str(note).strip() if note else '',
+                    order_type=order_type_parsed,
+                    country=country_parsed,
                     is_validated=is_validated,
                     validation_error=validation_error,
                     stock_check_passed=stock_check_passed,

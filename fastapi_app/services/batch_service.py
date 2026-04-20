@@ -5,7 +5,6 @@
 """
 import os
 import tempfile
-import shutil
 import logging
 import asyncio
 from datetime import datetime
@@ -17,6 +16,8 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import SQLAlchemyError
 
 from fastapi_app.shared_models import Product, Order, StockIn, StockOut, InventoryLog
+from fastapi_app.utils import parse_date_value as _shared_parse_date_value, validate_customer_name as _shared_validate_customer_name
+from fastapi_app.shared.stock_concurrency import get_product_for_update
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,7 @@ class AsyncNumberGenerator:
         self._initialized[key] = False
 
     def get_next_seq(self, prefix, date_str, current_max):
+        """获取下一个序号（调用方必须已持有 _lock）"""
         key = f"{prefix}:{date_str}"
         if key not in self._counters:
             self._counters[key] = current_max
@@ -78,7 +80,12 @@ _async_number_generator = AsyncNumberGenerator()
 
 async def generate_number_async(prefix: str, model, date_field: str, number_field: str, db: AsyncSession) -> str:
     """
-    异步编号生成器
+    异步编号生成器（跨进程安全）
+
+    生成策略：
+    1. 协程内用 asyncio.Lock 保证同进程内串行
+    2. 从数据库查询当日最大编号作为起点，避免多进程重复
+    3. commit 后如遇唯一约束冲突，重新查询最大编号并重试
 
     Args:
         prefix: 编号前缀 (如 'PO', 'SI', 'SO')
@@ -96,26 +103,28 @@ async def generate_number_async(prefix: str, model, date_field: str, number_fiel
     async with _async_number_generator._lock:
         _async_number_generator._cleanup_old_entries()
 
-        if not _async_number_generator.is_initialized(prefix, date_str):
-            result = await db.execute(
-                select(model)
-                .where(func.date(getattr(model, date_field)) == today.date())
-                .order_by(getattr(model, number_field).desc())
-                .limit(1)
-            )
-            record = result.scalar_one_or_none()
+        # 每次都从数据库查询当日最大编号，确保跨进程安全
+        result = await db.execute(
+            select(model)
+            .where(func.date(getattr(model, date_field)) == today.date())
+            .order_by(getattr(model, number_field).desc())
+            .limit(1)
+        )
+        record = result.scalar_one_or_none()
 
-            db_max = 0
-            if record:
-                last_number = getattr(record, number_field)
-                try:
-                    db_max = int(last_number.split('-')[-1])
-                except (ValueError, IndexError):
-                    pass
+        db_max = 0
+        if record:
+            last_number = getattr(record, number_field)
+            try:
+                db_max = int(last_number.split('-')[-1])
+            except (ValueError, IndexError):
+                pass
 
-            _async_number_generator.get_next_seq(prefix, date_str, db_max)
+        # 同时考虑内存计数器（同进程内连续生成时比DB快）
+        current_seq = max(db_max, _async_number_generator._counters.get(f"{prefix}:{date_str}", 0)) + 1
+        _async_number_generator._counters[f"{prefix}:{date_str}"] = current_seq
+        _async_number_generator._initialized[f"{prefix}:{date_str}"] = True
 
-        current_seq = _async_number_generator.get_next_seq(prefix, date_str, 0)
         return f"{prefix}-{date_str}-{str(current_seq).zfill(4)}"
 
 
@@ -148,24 +157,8 @@ async def generate_case_stockin_number(db: AsyncSession) -> str:
 
 # ==================== 数据验证 ====================
 
-import re
-
-
-def validate_customer_name(customer_name: str) -> Tuple[bool, str]:
-    """验证客户名称"""
-    if not customer_name or not customer_name.strip():
-        return False, "客户名称不能为空"
-
-    customer_name = customer_name.strip()
-    if len(customer_name) < 2:
-        return False, "客户名称至少需要 2 个字符"
-    if len(customer_name) > 100:
-        return False, "客户名称不能超过 100 个字符"
-
-    pattern = r'^[\u4e00-\u9fa5a-zA-Z0-9\s\-\_\.\,\(\)\（\）]+$'
-    if not re.match(pattern, customer_name):
-        return False, "客户名称包含非法字符"
-    return True, ""
+# 使用 fastapi_app.utils 中的统一验证函数
+validate_customer_name = _shared_validate_customer_name
 
 
 # ==================== 核心业务逻辑 ====================
@@ -264,8 +257,7 @@ async def process_order_deduction(
 
         # 更新产品库存
         if product is None:
-            result = await db.execute(select(Product).where(Product.id == product_id))
-            product = result.scalar_one_or_none()
+            product = await get_product_for_update(db, product_id)
         if product and deduct_amount > 0:
             product.current_stock -= deduct_amount
 
@@ -288,7 +280,10 @@ async def process_order_deduction(
         raise
 
 
-async def calculate_available_shipment_quantity(db: AsyncSession, product_id: int, customer: str) -> dict:
+async def calculate_available_shipment_quantity(
+    db: AsyncSession, product_id: int, customer: str,
+    order_type: str | None = None, country: str | None = None
+) -> dict:
     """
     计算指定客户和产品的可出货量
 
@@ -296,10 +291,20 @@ async def calculate_available_shipment_quantity(db: AsyncSession, product_id: in
     1. 出货量严格受限于订单量
     2. 备货量只能通过订单抵扣使用，不能直接出货
     3. 可出货量 = 订单总量 - 已出货量（非抵扣出货）
+    4. 当指定 order_type 时，仅计算该类型订单（逻辑隔离）
     """
+    where_clause = [Order.product_id == product_id, Order.customer == customer]
+    if order_type:
+        if order_type in ('regular', 'normal'):
+            where_clause.append(Order.order_type.in_(['regular', 'normal']))
+        else:
+            where_clause.append(Order.order_type == order_type)
+            if country:
+                where_clause.append(Order.country == country)
+
     result = await db.execute(
         select(Order)
-        .where(Order.product_id == product_id, Order.customer == customer)
+        .where(*where_clause)
         .order_by(Order.order_date.asc())
     )
     orders = result.scalars().all()
@@ -309,10 +314,13 @@ async def calculate_available_shipment_quantity(db: AsyncSession, product_id: in
             'order_quantity': 0,
             'shipped_quantity': 0,
             'available_quantity': 0,
+            'regular_available': 0,
+            'custom_available': 0,
             'orders': []
         }
 
     # 单次查询获取所有订单的已出货量，替代N+1循环查询
+    # 加 FOR UPDATE 行锁防止并发事务读到相同的可用量后各自创建出库导致超发
     order_ids = [o.id for o in orders]
     shipped_result = await db.execute(
         select(StockOut.order_id, func.sum(StockOut.quantity))
@@ -321,22 +329,38 @@ async def calculate_available_shipment_quantity(db: AsyncSession, product_id: in
             StockOut.stockin_id.is_(None)
         )
         .group_by(StockOut.order_id)
+        .with_for_update()
     )
     shipped_map = dict(shipped_result.all())
 
     total_order_quantity = 0
+    regular_order_quantity = 0
+    custom_order_quantity = 0
+    regular_shipped = 0
+    custom_shipped = 0
     order_details = []
 
     for order in orders:
         total_order_quantity += order.quantity
+        _order_type = order.order_type or 'regular'
+        _country = order.country or ''
         non_deduction_shipped = shipped_map.get(order.id, 0)
+
+        if _order_type in ('regular', 'normal'):
+            regular_order_quantity += order.quantity
+            regular_shipped += non_deduction_shipped
+        else:
+            custom_order_quantity += order.quantity
+            custom_shipped += non_deduction_shipped
 
         order_details.append({
             'order_id': order.id,
             'order_no': order.order_no,
             'quantity': order.quantity,
             'shipped': non_deduction_shipped,
-            'available': order.quantity - non_deduction_shipped
+            'available': order.quantity - non_deduction_shipped,
+            'order_type': _order_type,
+            'country': _country
         })
 
     total_shipped = sum(shipped_map.values())
@@ -347,6 +371,8 @@ async def calculate_available_shipment_quantity(db: AsyncSession, product_id: in
         'order_quantity': total_order_quantity,
         'shipped_quantity': total_shipped,
         'available_quantity': available_quantity,
+        'regular_available': max(0, regular_order_quantity - regular_shipped),
+        'custom_available': max(0, custom_order_quantity - custom_shipped),
         'orders': order_details
     }
 
@@ -399,28 +425,8 @@ async def read_excel_sheets_async(file_path: str) -> Tuple[bool, list, str]:
 
 
 def parse_date_value(date_value) -> Optional[datetime]:
-    """解析日期值（支持多种格式），解析失败返回None"""
-    if date_value is None:
-        return None
-    if isinstance(date_value, datetime):
-        return date_value
-    if isinstance(date_value, (int, float)):
-        try:
-            from datetime import timedelta
-            base_date = datetime(1899, 12, 30)
-            return base_date + timedelta(days=date_value)
-        except Exception:
-            return None
-    try:
-        date_str = str(date_value).strip()
-        for fmt in ["%Y-%m-%d", "%Y/%m/%d", "%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"]:
-            try:
-                return datetime.strptime(date_str, fmt)
-            except ValueError:
-                continue
-    except Exception:
-        pass
-    return None
+    """解析日期值（支持多种格式），解析失败返回None - 委托给共享工具函数"""
+    return _shared_parse_date_value(date_value)
 
 
 # ==================== 综合导入子函数 ====================
@@ -535,8 +541,9 @@ async def import_orders_from_data(db: AsyncSession, data_list: list) -> Tuple[in
             db.add(order)
             await db.flush()
 
-            # 更新产品库存
-            product.current_stock += qty
+            # 使用悲观锁更新产品库存，防止并发修改
+            locked_product = await get_product_for_update(db, product_id)
+            locked_product.current_stock += qty
 
             log = InventoryLog(
                 product_id=product_id,
@@ -564,6 +571,8 @@ async def import_orders_from_data(db: AsyncSession, data_list: list) -> Tuple[in
 
             count += 1
         except Exception as e:
+            # 回滚当前事务中的脏数据，避免提交半成品
+            await db.rollback()
             logger.error(f"订单导入 - 行{idx}: 处理异常: {e}", exc_info=True)
             continue
 
@@ -626,7 +635,9 @@ async def import_stockins_from_data(db: AsyncSession, data_list: list) -> Tuple[
             )
             db.add(stockin)
 
-            product.current_stock += qty
+            # 使用悲观锁更新产品库存，防止并发修改
+            locked_product = await get_product_for_update(db, product_id)
+            locked_product.current_stock += qty
 
             log = InventoryLog(
                 product_id=product_id,
@@ -639,6 +650,7 @@ async def import_stockins_from_data(db: AsyncSession, data_list: list) -> Tuple[
 
             count += 1
         except Exception as e:
+            await db.rollback()
             debug_messages.append(f"行{idx}: 异常 - {str(e)}")
             continue
 
@@ -659,6 +671,12 @@ async def import_stockouts_from_data(db: AsyncSession, data_list: list) -> Tuple
             customer = row_data.get('客户名称') or row_data.get('客户')
             stockout_date_val = row_data.get('时间') or row_data.get('出货时间')
             note = row_data.get('备注') or ''
+            country_val = row_data.get('国家') or row_data.get('国家名称')
+            if not country_val or (isinstance(country_val, float) and country_val != country_val):
+                country_parsed = ''
+            else:
+                country_parsed = str(country_val).strip()
+            order_type_parsed = 'custom' if country_parsed else 'regular'
 
             if not product_identifier or not quantity:
                 continue
@@ -689,7 +707,10 @@ async def import_stockouts_from_data(db: AsyncSession, data_list: list) -> Tuple
             if product.current_stock < qty:
                 continue
 
-            shipment_info = await calculate_available_shipment_quantity(db, product.id, customer)
+            shipment_info = await calculate_available_shipment_quantity(
+                db, product.id, customer,
+                order_type=order_type_parsed, country=country_parsed or None
+            )
             if shipment_info['available_quantity'] <= 0:
                 continue
 
@@ -717,7 +738,9 @@ async def import_stockouts_from_data(db: AsyncSession, data_list: list) -> Tuple
                     db.add(stockout)
                     remaining_qty -= ship_qty
 
-            product.current_stock -= qty
+            # 使用悲观锁更新产品库存，防止并发修改
+            locked_product = await get_product_for_update(db, product.id)
+            locked_product.current_stock -= qty
 
             log = InventoryLog(
                 product_id=product.id,
@@ -730,6 +753,7 @@ async def import_stockouts_from_data(db: AsyncSession, data_list: list) -> Tuple
 
             count += 1
         except Exception as e:
+            await db.rollback()
             debug_messages.append(f"行{idx}: 异常 - {str(e)}")
             continue
 

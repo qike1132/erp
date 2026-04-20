@@ -43,7 +43,8 @@ class RedisCacheManager:
                     decode_responses=True,
                     socket_connect_timeout=5,
                     socket_timeout=5,
-                    retry_on_timeout=True
+                    retry_on_timeout=True,
+                    max_connections=100
                 )
                 self.redis_client.ping()
                 app.logger.info(f"Redis连接成功: {redis_url}")
@@ -65,7 +66,8 @@ class RedisCacheManager:
                     decode_responses=True,
                     socket_connect_timeout=5,
                     socket_timeout=5,
-                    retry_on_timeout=True
+                    retry_on_timeout=True,
+                    max_connections=100
                 )
                 self.redis_client.ping()
                 app.logger.info(f"Redis连接成功: {redis_host}:{redis_port}")
@@ -152,15 +154,26 @@ class RedisCacheManager:
         return True
 
     def delete_pattern(self, pattern: str) -> int:
-        """删除匹配模式的所有键"""
+        """删除匹配模式的所有键（使用 SCAN 替代 KEYS，避免阻塞 Redis）"""
         full_pattern = self._make_key(pattern)
         deleted_count = 0
 
         if self.redis_client:
             try:
-                keys = self.redis_client.keys(full_pattern)
-                if keys:
-                    deleted_count = self.redis_client.delete(*keys)
+                cursor = 0
+                max_iterations = 1000  # 安全上限，防止 key 空间异常时无限扫描
+                iterations = 0
+                while True:
+                    cursor, keys = self.redis_client.scan(
+                        cursor=cursor, match=full_pattern, count=100
+                    )
+                    if keys:
+                        deleted_count += self.redis_client.delete(*keys)
+                    iterations += 1
+                    if cursor == 0 or iterations >= max_iterations:
+                        break
+                if iterations >= max_iterations:
+                    logger.warning(f"delete_pattern 达到迭代上限 {max_iterations}，模式: {full_pattern}")
             except Exception as e:
                 logger.warning(f"Redis delete_pattern error: {e}")
 
@@ -291,7 +304,10 @@ def _hash_args(args: tuple, kwargs: dict) -> str:
         args_json = json.dumps({'args': args, 'kwargs': kwargs}, sort_keys=True)
         return hashlib.sha256(args_json.encode()).hexdigest()[:16]
     except Exception:
-        return str(hash(str(args) + str(kwargs)))[:16]
+        # fallback: 使用 md5 替代内置 hash()，因为 hash() 跨进程不一致(PYTHONHASHSEED)
+        import hashlib as _hl
+        raw = str(args) + str(kwargs)
+        return _hl.md5(raw.encode()).hexdigest()[:16]
 
 
 class CacheConfig:

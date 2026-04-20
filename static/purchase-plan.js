@@ -24,7 +24,9 @@
     }
 
     function notify(msg, type) {
-        if (typeof window.showGlobalNotification === 'function') {
+        if (typeof GlobalNotification !== 'undefined' && GlobalNotification.show) {
+            GlobalNotification.show(type || 'info', msg);
+        } else if (typeof window.showGlobalNotification === 'function') {
             window.showGlobalNotification(msg, type);
         } else {
             alert(msg);

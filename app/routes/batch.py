@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import SQLAlchemyError
 from utils.number_generator import generate_stockout_number
 import logging
+from fastapi_app.shared.stock_concurrency import get_product_for_update_sync
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +112,7 @@ def process_order_deduction(order, product_id, order_quantity, deduct_stock=True
         })
 
         if product is None:
-            product = db.session.get(Product, product_id)
+            product = get_product_for_update_sync(db.session, product_id)
         if product and deduct_amount > 0:
             product.current_stock -= deduct_amount
 

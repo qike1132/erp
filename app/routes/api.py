@@ -125,6 +125,7 @@ def batch_submit_orders():
     from utils.number_generator import generate_order_number
     from datetime import datetime
     from app.routes.batch import process_order_deduction
+    from fastapi_app.shared.stock_concurrency import get_product_for_update_sync
 
     try:
         data = request.get_json()
@@ -145,8 +146,9 @@ def batch_submit_orders():
                     })
                     continue
 
-                product = db.session.get(Product, product_id)
-                if not product:
+                try:
+                    product = get_product_for_update_sync(db.session, product_id)
+                except ValueError:
                     results.append({
                         'success': False,
                         'error': f'产品 ID {product_id} 不存在',
@@ -156,6 +158,8 @@ def batch_submit_orders():
 
                 deduct_stock = order_data.get('deduct_stock', False)
                 deduct_quantity = int(order_data.get('deduct_quantity', order_data.get('deductible_quantity', 0)))
+
+                sp = db.session.begin_nested()  # savepoint: 抵扣失败时仅回滚此订单
 
                 order = Order(
                     order_no=generate_order_number(db, Order),
@@ -184,7 +188,7 @@ def batch_submit_orders():
                 )
                 db.session.add(log)
 
-                if deduct_stock and (deduct_stock == 'on' or deduct_stock is True) and deduct_quantity > 0:
+                if deduct_stock and deduct_quantity > 0:
                     try:
                         process_order_deduction(
                             order,
@@ -195,13 +199,16 @@ def batch_submit_orders():
                             product=product
                         )
                     except Exception as ded_err:
+                        sp.rollback()  # 回滚到 savepoint，撤销此订单及库存变更
                         current_app.logger.error(f"订单抵扣处理失败: {ded_err}", exc_info=True)
                         results.append({
                             'success': False,
                             'error': '抵扣处理失败，请稍后重试',
-                            'order_no': order.order_no
+                            'order_no': order_data.get('order_no', '未知')
                         })
                         continue
+
+                sp.commit()  # 释放 savepoint，防止嵌套堆积
 
                 results.append({
                     'success': True,
@@ -230,6 +237,7 @@ def batch_submit_stockins():
     """批量提交入库"""
     from utils.number_generator import generate_stockin_number
     from datetime import datetime
+    from fastapi_app.shared.stock_concurrency import get_product_for_update_sync
 
     try:
         data = request.get_json()
@@ -250,8 +258,9 @@ def batch_submit_stockins():
                     })
                     continue
 
-                product = db.session.get(Product, product_id)
-                if not product:
+                try:
+                    product = get_product_for_update_sync(db.session, product_id)
+                except ValueError:
                     results.append({
                         'success': False,
                         'error': f'产品ID {product_id} 不存在',
@@ -314,6 +323,7 @@ def batch_submit_stockouts():
     from utils.number_generator import generate_stockout_number
     from datetime import datetime
     from app.models import Order
+    from fastapi_app.shared.stock_concurrency import get_product_for_update_sync
 
     try:
         data = request.get_json()
@@ -343,8 +353,21 @@ def batch_submit_stockouts():
                     })
                     continue
 
-                product = db.session.get(Product, product_id)
-                if not product:
+                order_type = stockout_data.get('order_type', 'regular') or 'regular'
+                country = stockout_data.get('country', '') or ''
+
+                # 定制订单必须填写国家
+                if order_type == 'custom' and not country:
+                    results.append({
+                        'success': False,
+                        'error': '定制订单必须填写国家名称',
+                        'id': stockout_data.get('id', '未知')
+                    })
+                    continue
+
+                try:
+                    product = get_product_for_update_sync(db.session, product_id)
+                except ValueError:
                     results.append({
                         'success': False,
                         'error': f'产品ID {product_id} 不存在',
@@ -361,7 +384,7 @@ def batch_submit_stockouts():
                     })
                     continue
 
-                shipment_info = calculate_available_shipment_quantity_api(product_id, customer)
+                shipment_info = calculate_available_shipment_quantity_api(product_id, customer, order_type=order_type, country=country or None)
                 if shipment_info['available_quantity'] <= 0:
                     results.append({
                         'success': False,
@@ -433,14 +456,3 @@ def batch_submit_stockouts():
 
 
 # ==================== 其他API (无FastAPI等效) ====================
-
-@api_bp.route('/log-operation', methods=['POST'])
-def log_operation():
-    """记录操作日志"""
-    try:
-        data = request.get_json()
-        # TODO: 实现操作日志记录
-        return jsonify({'success': True})
-    except Exception as e:
-        current_app.logger.error(f"操作日志记录失败: {e}", exc_info=True)
-        return jsonify({'success': False, 'error': '操作日志记录失败，请稍后重试'}), 500

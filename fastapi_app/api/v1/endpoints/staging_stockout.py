@@ -46,6 +46,15 @@ async def import_staging_stockouts(
     content = await file.read()
     imported, message, errors = await svc.import_staging_stockouts_from_excel(db, content, session_id)
 
+    # 发布出货计划上传事件
+    if imported > 0:
+        from fastapi_app.services.notification_service import publish_stock_event
+        publish_stock_event("shipment_plan_uploaded", {
+            "message": f"新的出货计划已上传，共 {imported} 条",
+            "imported": imported,
+            "session_id": session_id,
+        })
+
     return StagingStockOutImportResult(
         success=imported > 0 or len(errors) == 0,
         message=message,
@@ -102,6 +111,12 @@ async def confirm_staging_stockouts(
 ):
     """确认暂存出货 - 转移到正式出货表"""
     confirmed, errors = await svc.confirm_staging_stockouts(db, session_id)
+    if confirmed > 0:
+        from fastapi_app.services.notification_service import publish_stock_event
+        publish_stock_event("stock_changed", {
+            "message": f"已确认 {confirmed} 条出货记录",
+            "confirmed": confirmed,
+        })
     if confirmed == 0 and errors:
         return StagingStockOutConfirmResult(
             success=False, message=errors[0], confirmed=0, errors=errors

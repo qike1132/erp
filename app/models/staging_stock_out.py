@@ -18,6 +18,8 @@ class StagingStockOut(db.Model):
     product_id = db.Column(db.Integer, db.ForeignKey('product.id'), comment='产品ID（确认后填充）')
     quantity = db.Column(db.Integer, nullable=False, comment='出货数量')
     note = db.Column(db.Text, comment='备注')
+    order_type = db.Column(db.String(20), default='regular', comment='订单类型：regular=常规订单, custom=定制订单')
+    country = db.Column(db.String(100), comment='国家名称（仅定制订单使用）')
     status = db.Column(db.String(20), default='pending', comment='状态：pending=待审核, approved=已确认, rejected=已拒绝')
     is_validated = db.Column(db.Boolean, default=False, comment='是否已验证产品存在')
     validation_error = db.Column(db.String(500), comment='验证错误信息')
@@ -48,6 +50,8 @@ class StagingStockOut(db.Model):
             'product_id': self.product_id,
             'quantity': self.quantity,
             'note': self.note or '',
+            'order_type': self.order_type or 'regular',
+            'country': self.country or '',
             'status': self.status,
             'is_validated': self.is_validated,
             'validation_error': self.validation_error or '',

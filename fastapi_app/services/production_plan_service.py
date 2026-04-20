@@ -515,8 +515,8 @@ async def validate_staging(db: AsyncSession, session_id: str) -> dict:
     customer_names = {c.name for c in all_customers}
 
     all_products = await product_service.get_products(db)
-    barcode_set = {p.barcode for p in all_products if p.barcode}
-    product_name_map = {p.barcode: p.name for p in all_products if p.barcode}
+    barcode_set = {p['barcode'] for p in all_products if p.get('barcode')}
+    product_name_map = {p['barcode']: p['name'] for p in all_products if p.get('barcode')}
 
     valid_count = 0
     error_count = 0

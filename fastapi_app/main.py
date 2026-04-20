@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 import time
 import json
 import os
+import asyncio
 
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -33,7 +34,7 @@ async def lifespan(app: FastAPI):
     setup_logging()
     logger.info(f"{settings.APP_NAME} v{settings.APP_VERSION} 启动中...")
 
-    # 验证数据库连接
+    # 验证数据库连接并预热连接池
     if async_engine is not None:
         try:
             async with async_engine.connect() as conn:
@@ -44,16 +45,54 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("异步数据库引擎未初始化（aiomysql 未安装），跳过异步连接验证")
 
+    # 预热同步数据库连接池（避免首次请求延迟）
+    try:
+        from fastapi_app.core.database import sync_engine
+        from fastapi.concurrency import run_in_threadpool
+
+        def _warmup_sync_db():
+            with sync_engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+
+        await run_in_threadpool(_warmup_sync_db)
+        logger.info("同步数据库连接池预热成功")
+    except Exception as e:
+        logger.warning(f"同步数据库连接池预热失败: {e}")
+
     # 启动数据库连接健康检查后台任务
     await db_health_checker.start()
+
+    # 预热同步 Redis 客户端（避免首次请求延迟）
+    from fastapi_app.services.notification_service import _warmup_sync_redis
+    await run_in_threadpool(_warmup_sync_redis)
+
+    # 启动 Redis Pub/Sub → WebSocket 桥梁
+    from fastapi_app.services.notification_service import manager
+    await manager.start_redis_listener()
 
     yield
 
     # 关闭时执行
     logger.info(f"{settings.APP_NAME} 正在关闭...")
+    await manager.stop_redis_listener()
     await db_health_checker.stop()
     await dispose_async_engines()
     sync_engine.dispose()
+    # 释放同步 Redis 客户端连接
+    from fastapi_app.services.notification_service import _get_sync_redis_client
+    _notif_redis = _get_sync_redis_client()
+    if _notif_redis:
+        try:
+            _notif_redis.close()
+        except Exception:
+            pass
+    # 释放缓存管理器 Redis 连接
+    from utils.redis_cache import redis_cache
+    if redis_cache.redis_client:
+        try:
+            redis_cache.redis_client.close()
+        except Exception:
+            pass
     logger.info("数据库连接池已关闭")
 
 
@@ -118,7 +157,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     """统一未处理异常响应格式 - 避免泄露内部错误详情"""
-    logger.error(f"未处理异常: {type(exc).__name__}: {str(exc)}")
+    logger.error(f"未处理异常: {type(exc).__name__}", exc_info=True)
     return Response(
         content=json.dumps({
             "success": False,
@@ -130,6 +169,16 @@ async def general_exception_handler(request: Request, exc: Exception):
     )
 
 # CSRF保护中间件 - 验证POST/PUT/DELETE请求的Origin/Referer
+from urllib.parse import urlparse as _urlparse
+
+# CSRF豁免路径配置：文档/健康检查/登录等无需CSRF验证的路径
+CSRF_EXACT_EXEMPT_PATHS = frozenset({
+    "/api/docs", "/api/redoc", "/api/openapi.json",
+    "/api/health", "/metrics", "/",
+})
+CSRF_PREFIX_EXEMPT_PATHS = ("/api/docs/",)
+CSRF_LOGIN_PATH = "/api/v1/auth/login"
+
 @app.middleware("http")
 async def csrf_protection(request: Request, call_next):
     """CSRF保护：验证修改请求的Origin头与目标一致"""
@@ -138,9 +187,11 @@ async def csrf_protection(request: Request, call_next):
         referer = request.headers.get("referer", "")
         host = request.headers.get("host", "")
 
-        # 允许API文档和健康检查路径跳过CSRF检查
-        csrf_exempt_paths = ("/api/docs", "/api/redoc", "/api/openapi.json", "/api/health", "/metrics", "/")
-        if request.url.path in csrf_exempt_paths or request.url.path.startswith("/api/docs"):
+        # 允许API文档和健康检查路径跳过CSRF检查，登录接口豁免（移动端无Origin/Referer）
+        path = request.url.path
+        if (path in CSRF_EXACT_EXEMPT_PATHS or
+                any(path.startswith(p) for p in CSRF_PREFIX_EXEMPT_PATHS) or
+                path == CSRF_LOGIN_PATH):
             return await call_next(request)
 
         # 携带Bearer Token的请求不受CSRF保护限制（JWT不易受CSRF攻击）
@@ -150,8 +201,7 @@ async def csrf_protection(request: Request, call_next):
 
         # 如果有Origin头，验证它与host匹配
         if origin:
-            from urllib.parse import urlparse
-            parsed_origin = urlparse(origin)
+            parsed_origin = _urlparse(origin)
             origin_host = parsed_origin.netloc
             if host and origin_host != host:
                 return Response(
@@ -161,8 +211,7 @@ async def csrf_protection(request: Request, call_next):
                 )
         # 如果没有Origin但有Referer，验证它
         elif referer:
-            from urllib.parse import urlparse
-            parsed_referer = urlparse(referer)
+            parsed_referer = _urlparse(referer)
             referer_host = parsed_referer.netloc
             if host and referer_host != host:
                 return Response(
@@ -230,6 +279,11 @@ async def prometheus_middleware(request: Request, call_next):
     if not METRICS_AVAILABLE:
         return await call_next(request)
 
+    # 跳过不需要追踪的轻量级端点，避免无意义的标签基数
+    skip_paths = {"/api/health", "/api/health/db", "/metrics", "/", "/nginx-health"}
+    if request.url.path in skip_paths:
+        return await call_next(request)
+
     method = request.method
     # 简化 endpoint 路径，避免高基数标签（如 /api/v1/orders/123 → /api/v1/orders/{id}）
     path = request.url.path
@@ -270,39 +324,102 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 
 @app.websocket("/ws/notifications")
-async def websocket_notifications(websocket: WebSocket):
+async def websocket_notifications(websocket: WebSocket, token: str = ""):
     """
     WebSocket 实时通知端点。
 
-    连接时需携带认证信息（通过 query parameter 或 cookie）。
-    降级方案：前端可继续使用轮询，WebSocket 是可选增强。
+    认证方式（按优先级）：
+    1. Flask Session Cookie（浏览器端，最快，无需等待消息）
+    2. JWT Token：首条消息发送 {"type":"auth","token":"xxx"}（移动端，推荐）
+    3. JWT Token：query parameter ?token=xxx（向后兼容，不推荐）
     """
-    # 从 cookie 中提取用户身份（复用 session 认证机制）
+    await websocket.accept()
     user_id = None
+    pending_message = None  # 首条非auth消息，需传递给主循环
+
+    # 1. 优先 Session Cookie 认证（浏览器端，零延迟）
     session_cookie = websocket.cookies.get("session")
     if session_cookie:
         try:
-            from fastapi_app.core.deps import _flask_session_serializer, _ensure_session_serializer
+            from fastapi_app.core.deps import _flask_session_serializer, _ensure_session_serializer, settings
             _ensure_session_serializer()
-            session_data = _flask_session_serializer.loads(session_cookie, max_age=3600)
+            session_data = _flask_session_serializer.loads(session_cookie, max_age=settings.SESSION_COOKIE_MAX_AGE)
             user_id = session_data.get("user_id")
+            if user_id:
+                user_id = int(user_id)
         except Exception as e:
-            logger.warning("WebSocket认证失败: %s", e)
+            logger.warning("WebSocket Cookie认证失败: %s", e)
+
+    # 2. 从首条消息认证（移动端）
+    if not user_id:
+        try:
+            import json as _json
+            initial_data = await asyncio.wait_for(websocket.receive_text(), timeout=5)
+            try:
+                msg = _json.loads(initial_data)
+                if msg.get("type") == "auth" and msg.get("token"):
+                    from fastapi_app.core.deps import _decode_jwt_token
+                    payload = _decode_jwt_token(msg["token"])
+                    user_id = payload.get("sub")
+                    if user_id:
+                        user_id = int(user_id)
+                else:
+                    pending_message = initial_data  # 非auth消息，传递给主循环
+            except Exception as e:
+                logger.warning("WebSocket首条消息认证失败: %s", e)
+                pending_message = initial_data  # JSON解析失败，仍可能是有效消息
+        except asyncio.TimeoutError:
+            logger.warning("WebSocket等待认证消息超时")
+
+    # 3. 向后兼容：query parameter 认证（不推荐）
+    if not user_id and token:
+        try:
+            from fastapi_app.core.deps import _decode_jwt_token
+            payload = _decode_jwt_token(token)
+            user_id = payload.get("sub")
+            if user_id:
+                user_id = int(user_id)
+        except (ValueError, KeyError) as e:
+            logger.warning("WebSocket JWT(query)解码失败: %s", e)
+        except Exception as e:
+            logger.warning("WebSocket JWT(query)认证失败: %s", e)
 
     if not user_id:
         await websocket.close(code=4001, reason="未认证")
         return
 
+    # 验证用户仍存在且处于启用状态
+    from fastapi_app.core.database import SyncSessionLocal
+    from fastapi_app.shared_models import User as _WSUser
+    from sqlalchemy import select as _ws_select
+    _ws_db = SyncSessionLocal()
+    try:
+        _ws_user = _ws_db.execute(
+            _ws_select(_WSUser.id, _WSUser.status).where(_WSUser.id == user_id)
+        ).first()
+        if not _ws_user or not _ws_user.status:
+            await websocket.close(code=4001, reason="用户不存在或已被禁用")
+            return
+    finally:
+        _ws_db.close()
+
     from fastapi_app.services.notification_service import manager
-    await manager.connect(websocket, int(user_id))
+    manager.connect_existing(websocket, int(user_id))
 
     try:
+        # 处理认证阶段被暂存的首条消息
+        if pending_message:
+            if pending_message == "ping":
+                await websocket.send_text("pong")
+
         while True:
-            # 保持连接，接收客户端心跳
             data = await websocket.receive_text()
             if data == "ping":
                 await websocket.send_text("pong")
     except WebSocketDisconnect:
+        manager.disconnect(websocket, int(user_id))
+    except Exception:
+        logger.warning("WebSocket 连接异常断开: user_id=%s", user_id, exc_info=False)
         manager.disconnect(websocket, int(user_id))
 
 
@@ -314,9 +431,66 @@ def _get_optional_user(request: Request) -> int | None:
         return None
 
 
+# 健康检查结果缓存：避免每次请求都执行 DB SELECT 1 + Redis ping，
+# 缓存 TTL 内直接返回上次结果，大幅降低 health 端点延迟。
+_health_cache = {"public_data": None, "internal_data": None, "cached_at": 0.0, "ttl": 10}
+
+
+def _get_cached_health() -> dict | None:
+    """返回缓存的健康数据（public 版本），过期则返回 None"""
+    if _health_cache["public_data"] is not None and (time.time() - _health_cache["cached_at"]) < _health_cache["ttl"]:
+        return _health_cache["public_data"]
+    return None
+
+
+def _set_cached_health(public_data: dict, internal_data: dict):
+    """写入健康数据缓存，分别存储公开版和内部版"""
+    _health_cache["public_data"] = public_data
+    _health_cache["internal_data"] = internal_data
+    _health_cache["cached_at"] = time.time()
+
+
 @app.get("/api/health", tags=["健康检查"])
 async def health_check(user_id: int | None = Depends(_get_optional_user)):
-    """健康检查接口 - 包含数据库和Redis连通性检测（未认证时隐藏敏感详情）"""
+    """健康检查接口 - 包含数据库和Redis连通性检测（未认证时隐藏敏感详情）
+
+    优化：健康检查结果缓存 10 秒，避免每次请求都执行 DB + Redis 探测。
+    仅在缓存过期时才实际执行连通性检测。
+    """
+    # 尝试使用缓存
+    cached_public = _get_cached_health()
+    if cached_public is not None:
+        # 未认证用户：直接返回预计算的公开版本（零拷贝）
+        if user_id is None:
+            if cached_public.get("status") == "unhealthy":
+                return Response(
+                    content=json.dumps(cached_public, ensure_ascii=False),
+                    status_code=503,
+                    media_type="application/json",
+                )
+            return cached_public
+
+        # 已认证用户：基于公开版本补充实时详情
+        health_data = dict(cached_public)
+        health_data["version"] = settings.APP_VERSION
+        health_data["checks"] = dict(_health_cache["internal_data"])
+        try:
+            pool_status = db_health_checker.get_pool_status()
+            health_stats = db_health_checker.get_stats()
+            health_data["checks"]["db_pool"] = pool_status
+            health_data["checks"]["db_health_stats"] = health_stats
+        except Exception as e:
+            health_data["checks"]["db_pool"] = {"error": str(e)[:100]}
+
+        if cached_public.get("status") == "unhealthy":
+            return Response(
+                content=json.dumps(health_data, ensure_ascii=False),
+                status_code=503,
+                media_type="application/json",
+            )
+        return health_data
+
+    # 缓存未命中：执行实际检查
     health_data = {
         "status": "healthy",
         "app": settings.APP_NAME,
@@ -340,32 +514,39 @@ async def health_check(user_id: int | None = Depends(_get_optional_user)):
     except Exception:
         overall_healthy = False
 
-    # Redis连通性检查
+    # Redis连通性检查（复用共享连接池，仅一次ping）
     redis_ok = True
     try:
+        from fastapi_app.services.notification_service import _get_sync_redis_client
         from fastapi.concurrency import run_in_threadpool
 
         def _sync_redis_check():
-            import redis as redis_lib
-            r = redis_lib.from_url(
-                settings.REDIS_URL,
-                socket_connect_timeout=3,
-            )
-            r.ping()
-            r.close()
-            return True
+            client = _get_sync_redis_client()
+            if client:
+                try:
+                    client.ping()
+                except Exception:
+                    return False
+                return True
+            return False
 
         await run_in_threadpool(_sync_redis_check)
     except Exception:
         redis_ok = False
 
+    # 写入缓存：分别存储公开版（不含内部详情）和内部版（含 checks 详情）
+    internal_checks = {
+        "database": {"status": "ok"} if overall_healthy else {"status": "error"},
+        "redis": {"status": "ok"} if redis_ok else {"status": "warning"},
+    }
+    if not overall_healthy:
+        health_data["status"] = "unhealthy"
+    _set_cached_health(public_data=dict(health_data), internal_data=internal_checks)
+
     # 仅对已认证用户暴露版本和详细检查结果
     if user_id is not None:
         health_data["version"] = settings.APP_VERSION
-        health_data["checks"] = {
-            "database": {"status": "ok"} if overall_healthy else {"status": "error"},
-            "redis": {"status": "ok"} if redis_ok else {"status": "warning"},
-        }
+        health_data["checks"] = dict(internal_checks)
         try:
             pool_status = db_health_checker.get_pool_status()
             health_stats = db_health_checker.get_stats()
@@ -386,8 +567,8 @@ async def health_check(user_id: int | None = Depends(_get_optional_user)):
 
 
 @app.get("/api/health/db", tags=["健康检查"])
-async def db_health_detail(user_id: int | None = Depends(_get_optional_user)):
-    """数据库连接详细状态 - 连接池、健康检查统计、MySQL服务器变量"""
+async def db_health_detail(user_id: int = Depends(get_current_user)):
+    """数据库连接详细状态 - 连接池、健康检查统计、MySQL服务器变量（需认证）"""
     result = {
         "pool_status": db_health_checker.get_pool_status(),
         "health_stats": db_health_checker.get_stats(),
@@ -426,7 +607,7 @@ async def db_health_detail(user_id: int | None = Depends(_get_optional_user)):
 
 
 @app.get("/metrics", tags=["监控"])
-async def metrics(user_id: int | None = Depends(_get_optional_user)):
+async def metrics():
     """Prometheus 指标端点"""
     return Response(content=get_metrics(), media_type=get_content_type())
 

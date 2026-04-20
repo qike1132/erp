@@ -13,37 +13,41 @@ from fastapi import Depends, HTTPException, status, Request
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload, selectinload
 import logging
+import threading
 
 from fastapi_app.core.config import settings
-from fastapi_app.core.database import SyncSessionLocal
 from fastapi_app.shared_models import User, Permission
 
 logger = logging.getLogger(__name__)
 
 # 缓存 Flask session 签名序列化器，避免每请求创建 Flask 实例
 _flask_session_serializer = None
+_serializer_lock = threading.Lock()
 
 
 def _ensure_session_serializer():
     """确保 Flask session 序列化器已初始化（线程安全）"""
     global _flask_session_serializer
     if _flask_session_serializer is None:
-        from flask.sessions import SecureCookieSessionInterface
-        from flask import Flask as _Flask
+        with _serializer_lock:
+            # 双重检查锁定
+            if _flask_session_serializer is None:
+                from flask.sessions import SecureCookieSessionInterface
+                from flask import Flask as _Flask
 
-        _app = _Flask(__name__)
-        _app.config["SECRET_KEY"] = settings.SECRET_KEY
-        si = SecureCookieSessionInterface()
-        _flask_session_serializer = si.get_signing_serializer(_app)
+                _app = _Flask(__name__)
+                _app.config["SECRET_KEY"] = settings.SECRET_KEY
+                si = SecureCookieSessionInterface()
+                _flask_session_serializer = si.get_signing_serializer(_app)
 
 
 def create_access_token(data: dict, expires_delta=None) -> str:
     """生成JWT Token"""
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
     from jose import jwt
 
     to_encode = data.copy()
-    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode["exp"] = expire
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
@@ -121,6 +125,8 @@ def get_current_user(request: Request):
     优先级：
     1. Authorization: Bearer <token>（JWT方式，适用于API客户端）
     2. Flask session cookie（浏览器Web端兼容模式）
+
+    验证用户仍存在且处于启用状态，防止已禁用/删除用户的token继续有效。
     """
     # 优先尝试 JWT Bearer Token
     user_id = _get_user_id_from_jwt(request)
@@ -135,18 +141,36 @@ def get_current_user(request: Request):
             detail="未登录",
         )
 
+    # 验证用户仍存在且处于启用状态
+    from fastapi_app.core.database import SyncSessionLocal
+    from sqlalchemy import select as sa_select
+
+    db = SyncSessionLocal()
+    try:
+        user = db.execute(
+            sa_select(User.id, User.status).where(User.id == user_id)
+        ).first()
+        if not user or not user.status:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="用户不存在或已被禁用",
+            )
+    finally:
+        db.close()
+
     return user_id
 
 
 def _get_user_with_permissions(request: Request) -> User:
     """
-    解析 session cookie 并从数据库查询用户，同时预加载权限列表。
+    解析认证信息并从数据库查询用户，同时预加载权限列表。
 
-    自管理 session 生命周期：创建 → 查询（joinedload 预加载 permissions + selectinload 预加载 children）
-    → expunge（脱离 session 但保留已加载数据）→ 关闭。
-    这样返回的 User 对象可在任何上下文安全使用，无需担心 lazy-load 或 session 脱离问题。
+    使用 SyncSessionLocal 直接创建 session，避免手动管理 generator 生命周期。
+    expunge 使 User 对象可在任何上下文安全使用。
     """
     user_id = get_current_user(request)
+
+    from fastapi_app.core.database import SyncSessionLocal
 
     db = SyncSessionLocal()
     try:

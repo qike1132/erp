@@ -8,6 +8,8 @@ from sqlalchemy.orm import joinedload
 from fastapi_app.shared_models import (
     ApprovalRequest, ApprovalLog, Order, Product, InventoryLog, StockOut, User
 )
+from fastapi_app.shared.stock_concurrency import get_product_for_update
+from fastapi_app.services import escape_like
 
 logger = logging.getLogger(__name__)
 
@@ -29,9 +31,9 @@ async def get_approval_list(db, status_filter: str = 'pending', search: str = ''
                      .join(User, ApprovalRequest.requester_id == User.id) \
                      .where(
                          or_(
-                             Order.order_no.contains(search),
-                             User.username.contains(search),
-                             ApprovalRequest.operation_type.contains(search),
+                             Order.order_no.like(f'%{escape_like(search)}%'),
+                             User.username.like(f'%{escape_like(search)}%'),
+                             ApprovalRequest.operation_type.like(f'%{escape_like(search)}%'),
                          )
                      )
 
@@ -107,21 +109,20 @@ async def approve_request(db, approval_id: int, current_user: User) -> str:
         new_quantity = operation_data.get('quantity', old_quantity)
 
         if new_quantity != old_quantity:
-            product = await db.get(Product, order.product_id)
-            if product:
-                stock_change = new_quantity - old_quantity
-                if product.current_stock + stock_change < 0:
-                    raise ValueError(f"库存不足，当前库存：{product.current_stock}")
-                product.current_stock += stock_change
+            product = await get_product_for_update(db, order.product_id)
+            stock_change = new_quantity - old_quantity
+            if product.current_stock + stock_change < 0:
+                raise ValueError(f"库存不足，当前库存：{product.current_stock}")
+            product.current_stock += stock_change
 
-                log = InventoryLog(
-                    product_id=order.product_id,
-                    change_type='订单修改(审批)',
-                    change_quantity=stock_change,
-                    related_id=order.order_no,
-                    note=f'审批通过修改订单：{order.order_no}',
-                )
-                db.add(log)
+            log = InventoryLog(
+                product_id=order.product_id,
+                change_type='订单修改(审批)',
+                change_quantity=stock_change,
+                related_id=order.order_no,
+                note=f'审批通过修改订单：{order.order_no}',
+            )
+            db.add(log)
 
         order.customer = operation_data.get('customer', order.customer)
         order.quantity = new_quantity
@@ -130,7 +131,7 @@ async def approve_request(db, approval_id: int, current_user: User) -> str:
         order.locked_by_id = None
 
     elif approval.operation_type == 'delete':
-        product = await db.get(Product, order.product_id)
+        product = await get_product_for_update(db, order.product_id)
 
         # 回滚抵扣
         result = await db.execute(
@@ -149,10 +150,9 @@ async def approve_request(db, approval_id: int, current_user: User) -> str:
             )
             db.add(rollback_log)
 
-        if product:
-            product.current_stock -= order.quantity
-            if total_deducted > 0:
-                product.current_stock += total_deducted
+        product.current_stock -= order.quantity
+        if total_deducted > 0:
+            product.current_stock += total_deducted
 
         # 删除关联的 StockOut
         for stockout in order_stockouts:

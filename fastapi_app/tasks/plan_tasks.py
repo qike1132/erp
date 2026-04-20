@@ -3,6 +3,8 @@
 
 - 出货数据每日同步（Celery Beat 定时任务）
 - 批量计划导入（>500行时异步处理）
+
+已去除 Flask create_app 依赖，使用 SyncSessionLocal + shared_models。
 """
 import os
 import tempfile
@@ -11,6 +13,7 @@ from datetime import date, timedelta
 from celery import shared_task
 from fastapi_app.core.celery_app import celery_app
 from fastapi_app.core.logger import logger
+from fastapi_app.core.database import SyncSessionLocal
 
 
 @shared_task(
@@ -28,16 +31,14 @@ def sync_shipment_records_task(self):
     并刷新 purchase_plan_details.shipped_qty 缓存。
     """
     try:
-        from app import create_app, db as flask_db
         from sqlalchemy import text
 
-        app = create_app()
-        with app.app_context():
+        session = SyncSessionLocal()
+        try:
             target_date = date.today() - timedelta(days=1)
 
-            # 使用 Flask-SQLAlchemy 同步操作
             # 1. 查询昨日 stock_out
-            rows = flask_db.session.execute(text("""
+            rows = session.execute(text("""
                 SELECT so.id, so.stockout_no, so.customer, so.product_id,
                        so.quantity, DATE(so.stockout_date) as stockout_date,
                        p.name as product_name
@@ -48,7 +49,7 @@ def sync_shipment_records_task(self):
             """), {'target_date': target_date}).fetchall()
 
             # 2. 获取客户ID映射
-            customers = flask_db.session.execute(text(
+            customers = session.execute(text(
                 "SELECT id, name FROM customer"
             )).fetchall()
             customer_id_map = {c.name: c.id for c in customers}
@@ -60,19 +61,18 @@ def sync_shipment_records_task(self):
                 if not customer_id:
                     continue
 
-                # 检查是否已存在
-                existing = flask_db.session.execute(text(
+                existing = session.execute(text(
                     "SELECT id FROM shipment_records WHERE shipment_no = :no"
                 ), {'no': row.stockout_no}).fetchone()
 
                 if existing:
-                    flask_db.session.execute(text("""
+                    session.execute(text("""
                         UPDATE shipment_records
                         SET quantity = :qty, synced_at = NOW()
                         WHERE shipment_no = :no
                     """), {'qty': row.quantity, 'no': row.stockout_no})
                 else:
-                    flask_db.session.execute(text("""
+                    session.execute(text("""
                         INSERT INTO shipment_records
                             (shipment_no, customer_id, customer_name, product_id,
                              product_name, quantity, shipment_date, source_type,
@@ -91,7 +91,7 @@ def sync_shipment_records_task(self):
                     })
                 synced_count += 1
 
-            flask_db.session.commit()
+            session.commit()
             logger.info(f"出货记录同步完成：{target_date}，{synced_count}条")
 
             return {
@@ -99,6 +99,9 @@ def sync_shipment_records_task(self):
                 "synced_count": synced_count,
                 "target_date": target_date.isoformat(),
             }
+
+        finally:
+            session.close()
 
     except Exception as exc:
         logger.error(f"出货同步任务失败: {exc}", exc_info=True)
@@ -119,15 +122,19 @@ def batch_import_plans_task(self, file_path: str, original_filename: str, user_i
     输入：临时文件路径、原始文件名、用户ID
     处理：解析 Excel → 写入 staging → 返回 batch_id
     """
+    allowed_dirs = [tempfile.gettempdir(), os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'static', 'uploads')]
+    real_path = os.path.realpath(file_path)
+    if not any(os.path.commonpath([real_path, d]) == d for d in allowed_dirs if os.path.exists(d)):
+        logger.error(f"批量计划导入任务拒绝非法文件路径: {file_path}")
+        return {"success": False, "error": "非法文件路径", "imported_count": 0}
+
     try:
-        from app import create_app
+        from fastapi_app.shared_models import StagingPurchasePlan
+        import openpyxl
+        import uuid
 
-        app = create_app()
-        with app.app_context():
-            import openpyxl
-            import uuid
-            from app.models import StagingPurchasePlan as FlaskStaging, db as flask_db
-
+        session = SyncSessionLocal()
+        try:
             batch_id = str(uuid.uuid4())[:8]
             session_id = str(user_id)
 
@@ -155,7 +162,6 @@ def batch_import_plans_task(self, file_path: str, original_filename: str, user_i
                         errors.append(f"第{i}行: 必填字段缺失或数量无效")
                         continue
 
-                    # 日期校准
                     import calendar
                     from datetime import datetime
                     try:
@@ -173,7 +179,7 @@ def batch_import_plans_task(self, file_path: str, original_filename: str, user_i
                         errors.append(f"第{i}行: 月份不一致")
                         continue
 
-                    record = FlaskStaging(
+                    record = StagingPurchasePlan(
                         session_id=session_id,
                         customer_name=customer_name,
                         product_name=product_name,
@@ -185,13 +191,14 @@ def batch_import_plans_task(self, file_path: str, original_filename: str, user_i
                         is_validated=False,
                         upload_batch_id=batch_id,
                     )
-                    flask_db.session.add(record)
+                    session.add(record)
                     success_count += 1
 
                 except Exception as e:
+                    session.rollback()
                     errors.append(f"第{i}行: {str(e)}")
 
-            flask_db.session.commit()
+            session.commit()
 
             return {
                 "success": True,
@@ -203,10 +210,23 @@ def batch_import_plans_task(self, file_path: str, original_filename: str, user_i
                 "task_id": self.request.id,
             }
 
+        finally:
+            session.close()
+
     except Exception as exc:
         logger.error(f"批量计划导入任务失败: {exc}", exc_info=True)
-        raise self.retry(exc=exc)
-
-    finally:
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=exc)
         if file_path and os.path.exists(file_path):
+            try:
+                os.unlink(file_path)
+            except OSError:
+                pass
+        raise
+
+    # 仅在任务最终成功时清理临时文件（Retry异常不会到达此处）
+    if file_path and os.path.exists(file_path):
+        try:
             os.unlink(file_path)
+        except OSError:
+            pass

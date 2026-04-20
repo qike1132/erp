@@ -9,6 +9,7 @@ from app.models import Order, User, ApprovalRequest
 from functools import wraps
 from sqlalchemy.orm import joinedload
 from sqlalchemy import func
+from app.services.shared import escape_like
 
 approval_bp = Blueprint('approval', __name__, url_prefix='/approval')
 
@@ -74,9 +75,9 @@ def approval_list():
                      .join(User, ApprovalRequest.requester_id == User.id)\
                      .filter(
                          db.or_(
-                             Order.order_no.contains(search),
-                             User.username.contains(search),
-                             ApprovalRequest.operation_type.contains(search)
+                             Order.order_no.like(f'%{escape_like(search)}%'),
+                             User.username.like(f'%{escape_like(search)}%'),
+                             ApprovalRequest.operation_type.like(f'%{escape_like(search)}%')
                          )
                      )
 

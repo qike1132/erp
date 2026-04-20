@@ -57,7 +57,7 @@ async def create_registration(
         await db.commit()
         return RegistrationDetailResponse(registration=result['registration'])
     except ValueError as e:
-        raise HTTPException(status_code=400 if "不存在" in str(e) else 500, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.put("/registrations/{reg_id}", response_model=RegistrationDetailResponse)

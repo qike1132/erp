@@ -1,7 +1,53 @@
 "use strict";
 document.addEventListener('DOMContentLoaded', function() {
     console.log('产品管理页面加载完成');
-    
+
+    // ========== Tab Navigation ==========
+    const tabBtns = document.querySelectorAll('.product-tab-btn');
+    const tabContents = document.querySelectorAll('.product-tab-content');
+
+    tabBtns.forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var targetTab = this.getAttribute('data-tab');
+
+            tabBtns.forEach(function(b) { b.classList.remove('active'); });
+            tabContents.forEach(function(c) { c.classList.remove('active'); });
+
+            this.classList.add('active');
+            var targetContent = document.getElementById('tab-' + targetTab);
+            if (targetContent) {
+                targetContent.classList.add('active');
+            }
+        });
+    });
+
+    // ========== Collapse Animation for Upload Sections ==========
+    function initCollapseAnimations() {
+        var containers = document.querySelectorAll('.collapse-animated-container');
+        containers.forEach(function(container) {
+            // Initialize as expanded
+            container.classList.add('expanded');
+
+            var trigger = container.querySelector('.collapse-trigger');
+            if (trigger) {
+                trigger.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    var isExpanded = container.classList.contains('expanded');
+
+                    if (isExpanded) {
+                        container.classList.remove('expanded');
+                        container.classList.add('collapsed');
+                    } else {
+                        container.classList.remove('collapsed');
+                        container.classList.add('expanded');
+                    }
+                });
+            }
+        });
+    }
+
+    initCollapseAnimations();
+
     function handleImageError(img) {
         console.log('图片加载失败:', img.src);
         img.style.display = 'none';
@@ -416,14 +462,9 @@ document.addEventListener('DOMContentLoaded', function() {
     const searchInput = document.getElementById('searchInput');
     const sortSelect = document.getElementById('sortSelect');
     const productTableBody = document.getElementById('productTableBody');
-    const paginationWrapper = document.getElementById('paginationWrapper');
-    const paginationList = document.getElementById('paginationList');
-    const paginationInfo = document.getElementById('paginationInfo');
     
     let allRows = Array.from(productTableBody.querySelectorAll('tr[data-name]'));
     let filteredRows = [...allRows];
-    let currentPage = 1;
-    const itemsPerPage = 10;
     
     function filterAndSort() {
         const searchTerm = searchInput.value.toLowerCase().trim();
@@ -449,7 +490,6 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
         
-        currentPage = 1;
         renderTable();
     }
     
@@ -467,114 +507,13 @@ document.addEventListener('DOMContentLoaded', function() {
                     </td>
                 </tr>
             `;
-            paginationWrapper.style.display = 'none';
             return;
         }
-        
-        const startIndex = (currentPage - 1) * itemsPerPage;
-        const endIndex = Math.min(startIndex + itemsPerPage, filteredRows.length);
-        const pageRows = filteredRows.slice(startIndex, endIndex);
-        
-        pageRows.forEach((row, index) => {
+
+        filteredRows.forEach((row, index) => {
             row.style.animationDelay = `${index * 0.05}s`;
             productTableBody.appendChild(row);
         });
-        
-        if (filteredRows.length > itemsPerPage) {
-            paginationWrapper.style.display = 'block';
-            renderPagination();
-        } else {
-            paginationWrapper.style.display = 'none';
-        }
-        
-        paginationInfo.textContent = `显示 ${startIndex + 1}-${endIndex} 条，共 ${filteredRows.length} 条`;
-    }
-    
-    function renderPagination() {
-        const totalPages = Math.ceil(filteredRows.length / itemsPerPage);
-        paginationList.innerHTML = '';
-        
-        const prevLi = document.createElement('li');
-        prevLi.className = `page-item ${currentPage === 1 ? 'disabled' : ''}`;
-        prevLi.innerHTML = `<a class="page-link" href="#" aria-label="上一页"><i class="fas fa-chevron-left"></i></a>`;
-        prevLi.addEventListener('click', (e) => {
-            e.preventDefault();
-            if (currentPage > 1) {
-                currentPage--;
-                renderTable();
-            }
-        });
-        paginationList.appendChild(prevLi);
-        
-        const maxVisiblePages = 5;
-        let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
-        let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
-        
-        if (endPage - startPage < maxVisiblePages - 1) {
-            startPage = Math.max(1, endPage - maxVisiblePages + 1);
-        }
-        
-        if (startPage > 1) {
-            const firstLi = document.createElement('li');
-            firstLi.className = 'page-item';
-            firstLi.innerHTML = `<a class="page-link" href="#" aria-label="第 1 页">1</a>`;
-            firstLi.addEventListener('click', (e) => {
-                e.preventDefault();
-                currentPage = 1;
-                renderTable();
-            });
-            paginationList.appendChild(firstLi);
-            
-            if (startPage > 2) {
-                const dotsLi = document.createElement('li');
-                dotsLi.className = 'page-item disabled';
-                dotsLi.innerHTML = `<span class="page-link" aria-hidden="true">...</span>`;
-                paginationList.appendChild(dotsLi);
-            }
-        }
-        
-        for (let i = startPage; i <= endPage; i++) {
-            const li = document.createElement('li');
-            li.className = `page-item ${i === currentPage ? 'active' : ''}`;
-            li.innerHTML = `<a class="page-link" href="#" aria-label="第 ${i} 页"${i === currentPage ? ' aria-current="page"' : ''}>${i}</a>`;
-            li.addEventListener('click', (e) => {
-                e.preventDefault();
-                currentPage = i;
-                renderTable();
-            });
-            paginationList.appendChild(li);
-        }
-        
-        if (endPage < totalPages) {
-            if (endPage < totalPages - 1) {
-                const dotsLi = document.createElement('li');
-                dotsLi.className = 'page-item disabled';
-                dotsLi.innerHTML = `<span class="page-link" aria-hidden="true">...</span>`;
-                paginationList.appendChild(dotsLi);
-            }
-            
-            const lastLi = document.createElement('li');
-            lastLi.className = 'page-item';
-            lastLi.innerHTML = `<a class="page-link" href="#" aria-label="第 ${totalPages} 页">${totalPages}</a>`;
-            lastLi.addEventListener('click', (e) => {
-                e.preventDefault();
-                currentPage = totalPages;
-                renderTable();
-            });
-            paginationList.appendChild(lastLi);
-        }
-        
-        const nextLi = document.createElement('li');
-        nextLi.className = `page-item ${currentPage === totalPages ? 'disabled' : ''}`;
-        nextLi.innerHTML = `<a class="page-link" href="#" aria-label="下一页"><i class="fas fa-chevron-right"></i></a>`;
-        nextLi.addEventListener('click', (e) => {
-            e.preventDefault();
-            if (currentPage < totalPages) {
-                currentPage++;
-                renderTable();
-            }
-        });
-        paginationList.appendChild(nextLi);
     }
     
     function debounce(func, wait) {
@@ -595,12 +534,6 @@ document.addEventListener('DOMContentLoaded', function() {
     
     if (sortSelect) {
         sortSelect.addEventListener('change', filterAndSort);
-    }
-    
-    if (allRows.length > itemsPerPage) {
-        paginationWrapper.style.display = 'block';
-        renderPagination();
-        paginationInfo.textContent = `显示 1-${Math.min(itemsPerPage, allRows.length)} 条，共 ${allRows.length} 条`;
     }
     
     const productForm = document.getElementById('productForm');

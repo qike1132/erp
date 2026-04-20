@@ -67,9 +67,10 @@ async def check_login_status(
 async def log_frontend_error(
     data: FrontendErrorLogRequest,
     request: Request,
+    user_id: int = Depends(get_current_user),
 ):
-    """记录前端错误日志
-    
+    """记录前端错误日志（需登录，防止日志洪泛攻击）
+
     前端在发生错误时调用此接口记录错误信息，
     便于后续分析和优化。
     """
@@ -183,8 +184,9 @@ MAX_UPLOAD_SIZE = 5 * 1024 * 1024  # 5MB
 @router.post("/upload")
 async def upload_file(
     file: UploadFile = File(...),
+    user_id: int = Depends(get_current_user),
 ):
-    """图片上传API（限制5MB）"""
+    """图片上传API（限制5MB，需登录）"""
     if not file.filename:
         raise HTTPException(status_code=400, detail="没有选择文件")
 
