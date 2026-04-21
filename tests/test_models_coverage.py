@@ -9,11 +9,19 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from flask import Flask
-from flask_sqlalchemy import SQLAlchemy
-from werkzeug.security import generate_password_hash, check_password_hash
+try:
+    from flask import Flask
+    from flask_sqlalchemy import SQLAlchemy
+    HAS_FLASK = True
+except ImportError:
+    HAS_FLASK = False
+    Flask = None
+    SQLAlchemy = None
+
+from fastapi_app.core.security import hash_password, verify_password
 
 
+@unittest.skipIf(not HAS_FLASK, "Flask dependencies not available")
 class ModelsCoverageTestCase(unittest.TestCase):
     """数据模型覆盖率测试用例集"""
     
@@ -49,11 +57,11 @@ class ModelsCoverageTestCase(unittest.TestCase):
             
             def set_password(self, password):
                 """设置密码"""
-                self.password = generate_password_hash(password)
+                self.password = hash_password(password)
             
             def check_password(self, password):
                 """验证密码"""
-                return check_password_hash(self.password, password)
+                return verify_password(password, self.password)
             
             def to_dict(self):
                 """转换为字典"""
@@ -150,7 +158,7 @@ class ModelsCoverageTestCase(unittest.TestCase):
         """测试用户创建"""
         user = self.User(
             username='testuser',
-            password=generate_password_hash('password123'),
+            password=hash_password('password123'),
             is_super=False,
             status=True
         )

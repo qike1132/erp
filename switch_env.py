@@ -48,15 +48,15 @@ def switch_environment(env_type):
         
         # 显示关键配置
         print(f"\n📋 当前环境配置:")
-        print(f"   FLASK_ENV: {env_type}")
-        print(f"   FLASK_DEBUG: {'1' if env_type == 'development' else '0'}")
-        
+        print(f"   APP_ENV: {env_type}")
+        print(f"   APP_DEBUG: {'1' if env_type == 'development' else '0'}")
+
         # 启动建议
-        print(f"\n🚀 启动命令:")
+        print(f"\n启动命令:")
         if env_type == 'development':
             print(f"   python run.py")
         else:
-            print(f"   python start_production.py")
+            print(f"   uvicorn fastapi_app.main:app --host 0.0.0.0 --port 5002")
         
         return True
         
@@ -82,8 +82,8 @@ def show_current_env():
     
     # 显示关键配置
     key_configs = [
-        'FLASK_ENV',
-        'FLASK_DEBUG',
+        'APP_ENV',
+        'APP_DEBUG',
         'DB_HOST',
         'DB_NAME',
         'REDIS_HOST',

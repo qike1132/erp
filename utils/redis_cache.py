@@ -32,9 +32,30 @@ class RedisCacheManager:
         self._fallback_timestamps = {}
         self._lock = threading.Lock()
 
-    def init_app(self, app):
-        """初始化Redis连接"""
-        redis_url = app.config.get('REDIS_URL') or os.getenv('REDIS_URL')
+    def init_app(self, app=None, redis_url: str = None, redis_host: str = 'localhost',
+                 redis_port: int = 6379, redis_db: int = 0, redis_password: str = None,
+                 default_timeout: int = 300, key_prefix: str = 'erp:'):
+        """
+        初始化Redis连接 - 支持 Flask app 或直接参数配置
+
+        Args:
+            app: Flask 应用实例（可选）
+            redis_url: Redis URL（可选，直接配置时使用）
+            redis_host: Redis 主机
+            redis_port: Redis 端口
+            redis_db: Redis 数据库编号
+            redis_password: Redis 密码
+            default_timeout: 默认缓存超时时间（秒）
+            key_prefix: 缓存键前缀
+        """
+        if app is not None:
+            redis_url = redis_url or app.config.get('REDIS_URL') or os.getenv('REDIS_URL')
+            redis_host = app.config.get('REDIS_HOST', os.getenv('REDIS_HOST', 'localhost'))
+            redis_port = int(app.config.get('REDIS_PORT', os.getenv('REDIS_PORT', 6379)))
+            redis_db = int(app.config.get('REDIS_DB', os.getenv('REDIS_DB', 0)))
+            redis_password = app.config.get('REDIS_PASSWORD', os.getenv('REDIS_PASSWORD'))
+            default_timeout = app.config.get('CACHE_DEFAULT_TIMEOUT', 300)
+            key_prefix = app.config.get('CACHE_KEY_PREFIX', 'erp:')
 
         if redis_url:
             try:
@@ -47,16 +68,11 @@ class RedisCacheManager:
                     max_connections=100
                 )
                 self.redis_client.ping()
-                app.logger.info(f"Redis连接成功: {redis_url}")
+                logger.info(f"Redis连接成功: {redis_url}")
             except (redis.ConnectionError, Exception) as e:
-                app.logger.warning(f"Redis连接失败，将使用内存缓存: {e}")
+                logger.warning(f"Redis连接失败，将使用内存缓存: {e}")
                 self.redis_client = None
         else:
-            redis_host = app.config.get('REDIS_HOST', os.getenv('REDIS_HOST', 'localhost'))
-            redis_port = int(app.config.get('REDIS_PORT', os.getenv('REDIS_PORT', 6379)))
-            redis_db = int(app.config.get('REDIS_DB', os.getenv('REDIS_DB', 0)))
-            redis_password = app.config.get('REDIS_PASSWORD', os.getenv('REDIS_PASSWORD'))
-
             try:
                 self.redis_client = redis.Redis(
                     host=redis_host,
@@ -70,13 +86,13 @@ class RedisCacheManager:
                     max_connections=100
                 )
                 self.redis_client.ping()
-                app.logger.info(f"Redis连接成功: {redis_host}:{redis_port}")
+                logger.info(f"Redis连接成功: {redis_host}:{redis_port}")
             except (redis.ConnectionError, Exception) as e:
-                app.logger.warning(f"Redis连接失败，将使用内存缓存: {e}")
+                logger.warning(f"Redis连接失败，将使用内存缓存: {e}")
                 self.redis_client = None
 
-        self.default_timeout = app.config.get('CACHE_DEFAULT_TIMEOUT', 300)
-        self.key_prefix = app.config.get('CACHE_KEY_PREFIX', 'erp:')
+        self.default_timeout = default_timeout
+        self.key_prefix = key_prefix
 
     def _make_key(self, key: str) -> str:
         """生成完整的缓存键"""

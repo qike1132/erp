@@ -3,7 +3,6 @@
 用于减少代码重复,提高可维护性
 """
 from functools import wraps
-from flask import jsonify, session, redirect, url_for, flash
 from datetime import datetime
 
 
@@ -14,17 +13,15 @@ def db_transaction(func):
     """
     @wraps(func)
     def wrapper(*args, **kwargs):
-        from app import db
+        from fastapi_app.core.database import get_async_session
         try:
             result = func(*args, **kwargs)
-            db.session.commit()
             return result
         except Exception as e:
-            db.session.rollback()
             print(f"{func.__name__}错误: {e}")
             import traceback
             print(traceback.format_exc())
-            return api_error(f'{func.__name__}失败', e)
+            return {'success': False, 'message': f'{func.__name__}失败', 'error': str(e)}
     return wrapper
 
 
@@ -38,13 +35,13 @@ def api_success(data=None, message='操作成功', **kwargs):
         **kwargs: 其他需要添加到响应中的字段
     
     返回:
-        JSON响应
+        字典响应
     """
     response = {'success': True, 'message': message}
     if data:
         response.update(data)
     response.update(kwargs)
-    return jsonify(response)
+    return response
 
 
 def api_error(message='操作失败', error=None, **kwargs):
@@ -57,13 +54,13 @@ def api_error(message='操作失败', error=None, **kwargs):
         **kwargs: 其他需要添加到响应中的字段
     
     返回:
-        JSON响应
+        字典响应
     """
     response = {'success': False, 'message': message}
     if error:
         response['error'] = str(error)
     response.update(kwargs)
-    return jsonify(response)
+    return response
 
 
 def validate_int_field(data, field_name, error_message, min_value=None, max_value=None):
@@ -134,7 +131,8 @@ def add_inventory_log(product_id, change_type, quantity, related_id, note=None, 
     返回:
         InventoryLog对象
     """
-    from app import db, InventoryLog
+    from fastapi_app.shared_models.inventory_log import InventoryLog
+    from fastapi_app.core.database import SyncSession
     
     log = InventoryLog(
         product_id=product_id,
@@ -144,7 +142,8 @@ def add_inventory_log(product_id, change_type, quantity, related_id, note=None, 
         note=note,
         customer=customer
     )
-    db.session.add(log)
+    with SyncSession() as session:
+        session.add(log)
     return log
 
 
@@ -163,7 +162,8 @@ def add_case_inventory_log(case_id, change_type, quantity, related_id, note=None
     返回:
         CaseInventoryLog对象
     """
-    from app import db, CaseInventoryLog
+    from fastapi_app.shared_models.case_inventory_log import CaseInventoryLog
+    from fastapi_app.core.database import SyncSession
     
     log = CaseInventoryLog(
         case_id=case_id,
@@ -173,7 +173,8 @@ def add_case_inventory_log(case_id, change_type, quantity, related_id, note=None
         note=note,
         customer=customer
     )
-    db.session.add(log)
+    with SyncSession() as session:
+        session.add(log)
     return log
 
 
@@ -187,12 +188,14 @@ def check_product_exists(product_id):
     返回:
         (product, error): 成功返回(产品对象, None), 失败返回(None, 错误消息)
     """
-    from app import Product
+    from fastapi_app.shared_models.product import Product
+    from fastapi_app.core.database import SyncSession
     
-    product = Product.query.get(product_id)
-    if not product:
-        return None, '产品不存在'
-    return product, None
+    with SyncSession() as session:
+        product = session.query(Product).filter(Product.id == product_id, Product.is_deleted == False).first()
+        if not product:
+            return None, '产品不存在'
+        return product, None
 
 
 def check_case_exists(case_id):
@@ -205,9 +208,11 @@ def check_case_exists(case_id):
     返回:
         (case, error): 成功返回(皮套对象, None), 失败返回(None, 错误消息)
     """
-    from app import Case
+    from fastapi_app.shared_models.case import Case
+    from fastapi_app.core.database import SyncSession
     
-    case_obj = Case.query.get(case_id)
-    if not case_obj:
-        return None, '皮套不存在'
-    return case_obj, None
+    with SyncSession() as session:
+        case_obj = session.query(Case).filter(Case.id == case_id, Case.is_deleted == False).first()
+        if not case_obj:
+            return None, '皮套不存在'
+        return case_obj, None

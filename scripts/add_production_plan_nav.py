@@ -9,21 +9,21 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from app import create_app, db
-from app.models import Permission
+from fastapi_app.core.database import SyncSessionLocal
+from fastapi_app.shared_models import Permission
 
 
 def main():
-    app = create_app()
-    with app.app_context():
+    session = SyncSessionLocal()
+    try:
         # 检查是否已存在
-        existing = Permission.query.filter_by(code='production_plan_view').first()
+        existing = session.query(Permission).filter_by(code='production_plan_view').first()
         if existing:
             print(f"[SKIP] 排产计划导航项已存在 (id={existing.id})")
             return
 
         # 找到 core section 的最大 sort_order
-        core_items = Permission.query.filter_by(
+        core_items = session.query(Permission).filter_by(
             section='core', is_nav=True
         ).order_by(Permission.sort_order.desc()).first()
         next_sort = (core_items.sort_order + 10) if core_items else 10
@@ -39,7 +39,7 @@ def main():
             sort_order=next_sort,
             is_nav=True,
         )
-        db.session.add(nav)
+        session.add(nav)
 
         # 添加管理权限（子权限，不在导航显示）
         manage_perm = Permission(
@@ -48,9 +48,9 @@ def main():
             parent_id=None,
             is_nav=False,
         )
-        db.session.add(manage_perm)
+        session.add(manage_perm)
 
-        db.session.commit()
+        session.commit()
 
         # 清除 Redis 导航缓存
         try:
@@ -62,6 +62,8 @@ def main():
 
         print(f"[OK] 排产计划导航项已添加 (id={nav.id}, sort_order={next_sort})")
         print(f"[OK] 排产计划管理权限已添加 (code=production_plan_manage)")
+    finally:
+        session.close()
 
 
 if __name__ == '__main__':

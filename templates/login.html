@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>滨发玩具协同系统 - 登录</title>
-    <link href="{{ url_for('static', filename='bootstrap.min.css') }}" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='all.min.css') }}">
+    <link href="/static/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -560,7 +560,7 @@
             <div class="brand-content">
                 <div class="logo-wrapper">
                     <div class="logo-frame">
-                        <img src="{{ url_for('static', filename='logo_plush.png') }}" alt="滨发玩具">
+                        <img src="/static/logo_plush.png" alt="滨发玩具">
                     </div>
                 </div>
 
@@ -611,18 +611,14 @@
                 </div>
 
                 <form method="POST">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="csrf_token" value="">
 
-                    {% with messages = get_flashed_messages(with_categories=true) %}
-                    {% if messages %}
-                        {% for category, message in messages %}
-                        <div class="alert-box alert-{{ 'error' if category == 'error' or category == 'danger' else 'success' }}">
-                            <i class="fas fa-{{ 'circle-exclamation' if category == 'error' or category == 'danger' else 'circle-check' }}"></i>
-                            <span>{{ message }}</span>
-                        </div>
-                        {% endfor %}
+                    {% if error_message %}
+                    <div class="alert-box alert-error">
+                        <i class="fas fa-circle-exclamation"></i>
+                        <span>{{ error_message }}</span>
+                    </div>
                     {% endif %}
-                    {% endwith %}
 
                     <div class="form-group">
                         <label for="username" class="form-label">用户名</label>
@@ -663,7 +659,7 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='bootstrap.bundle.min.js') }}"></script>
+    <script src="/static/bootstrap.bundle.min.js"></script>
     <script>
     document.addEventListener('DOMContentLoaded', function() {
         var loginForm = document.querySelector('form');
@@ -685,7 +681,7 @@
             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>登录中...';
             btn.disabled = true;
 
-            fetch('/api/login', {
+            fetch('/api/v1/auth/login', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'

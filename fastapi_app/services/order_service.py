@@ -16,7 +16,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from fastapi_app.shared_models import (
     Order, Product, InventoryLog, User,
     ApprovalRequest, ApprovalLog, StockOut, OrderSyncRecord,
-    CustomerOrder
 )
 from fastapi_app.shared.stock_concurrency import get_product_for_update
 from fastapi_app.services import escape_like
@@ -136,6 +135,7 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
         change_type='订单',
         change_quantity=quantity,
         related_id=order_no,
+        customer=customer,
         note=f'订单：{order_no}'
     )
     db.add(log)

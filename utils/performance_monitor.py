@@ -1,104 +1,82 @@
 """
 性能监控模块
-提供请求性能监控、慢查询日志、错误追踪功能
+提供请求性能监控、慢查询日志、错误追踪功能 (FastAPI 兼容版本)
 """
 import time
 import functools
 import logging
-from flask import request, g, jsonify
 from datetime import datetime
 import traceback
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
 
 logger = logging.getLogger(__name__)
 
 
-class PerformanceMonitor:
-    """性能监控器"""
+class PerformanceMiddleware(BaseHTTPMiddleware):
+    """FastAPI 性能监控中间件"""
     
-    def __init__(self, app=None):
-        self.app = app
-        self.slow_query_threshold = 1.0  # 慢查询阈值(秒)
-        self.slow_request_threshold = 2.0  # 慢请求阈值(秒)
+    def __init__(self, app, slow_query_threshold: float = 1.0,
+                 slow_request_threshold: float = 2.0):
+        super().__init__(app)
+        self.slow_query_threshold = slow_query_threshold
+        self.slow_request_threshold = slow_request_threshold
         self.stats = {
             'total_requests': 0,
             'slow_requests': 0,
             'errors': 0,
             'avg_response_time': 0.0
         }
-        
-        if app:
-            self.init_app(app)
     
-    def init_app(self, app):
-        """初始化性能监控"""
-        self.app = app
+    async def dispatch(self, request: Request, call_next) -> Response:
+        start_time = time.time()
+        request_id = request.headers.get('X-Request-ID', str(time.time()))
         
-        # 从配置读取阈值
-        self.slow_query_threshold = app.config.get('SLOW_QUERY_THRESHOLD', 1.0)
-        self.slow_request_threshold = app.config.get('SLOW_REQUEST_THRESHOLD', 2.0)
-        
-        # 注册请求钩子
-        @app.before_request
-        def before_request():
-            g.start_time = time.time()
-            g.request_id = request.headers.get('X-Request-ID', str(time.time()))
-        
-        @app.after_request
-        def after_request(response):
-            if hasattr(g, 'start_time'):
-                elapsed = time.time() - g.start_time
-                
-                # 记录慢请求
-                if elapsed > self.slow_request_threshold:
-                    self._log_slow_request(request, response, elapsed)
-                
-                # 更新统计
-                self._update_stats(elapsed)
-                
-                # 添加性能头
-                response.headers['X-Response-Time'] = f"{elapsed:.3f}s"
-                response.headers['X-Request-ID'] = getattr(g, 'request_id', 'unknown')
+        try:
+            response = await call_next(request)
+            elapsed = time.time() - start_time
+            
+            response.headers['X-Response-Time'] = f"{elapsed:.3f}s"
+            response.headers['X-Request-ID'] = request_id
+            
+            if elapsed > self.slow_request_threshold:
+                self._log_slow_request(request, response, elapsed)
+            
+            self._update_stats(elapsed)
             
             return response
-        
-        # 注册错误处理器
-        @app.errorhandler(Exception)
-        def handle_exception(e):
-            self._track_error(e)
-            raise e
+            
+        except Exception as e:
+            elapsed = time.time() - start_time
+            self.stats['errors'] += 1
+            logger.error(
+                f"应用错误: {type(e).__name__} - {str(e)} - "
+                f"路径: {request.url.path} - "
+                f"方法: {request.method} - "
+                f"IP: {request.client.host if request.client else 'unknown'}",
+                exc_info=True
+            )
+            raise
     
-    def _log_slow_request(self, request, response, elapsed):
+    def _log_slow_request(self, request: Request, response: Response, elapsed: float):
         """记录慢请求"""
         logger.warning(
-            f"慢请求: {request.method} {request.path} - "
+            f"慢请求: {request.method} {request.url.path} - "
             f"耗时: {elapsed:.3f}s - "
             f"状态码: {response.status_code} - "
-            f"IP: {request.remote_addr}"
+            f"IP: {request.client.host if request.client else 'unknown'}"
         )
-        
         self.stats['slow_requests'] += 1
     
-    def _update_stats(self, elapsed):
+    def _update_stats(self, elapsed: float):
         """更新性能统计"""
         self.stats['total_requests'] += 1
         
-        # 计算平均响应时间
         total = self.stats['total_requests']
         current_avg = self.stats['avg_response_time']
         self.stats['avg_response_time'] = (
             (current_avg * (total - 1) + elapsed) / total
-        )
-    
-    def _track_error(self, error):
-        """追踪错误"""
-        self.stats['errors'] += 1
-        
-        logger.error(
-            f"应用错误: {type(error).__name__} - {str(error)} - "
-            f"路径: {request.path} - "
-            f"方法: {request.method} - "
-            f"IP: {request.remote_addr}",
-            exc_info=True
         )
     
     def get_stats(self):
@@ -120,8 +98,7 @@ class PerformanceMonitor:
         }
 
 
-# 全局性能监控实例
-performance_monitor = PerformanceMonitor()
+performance_monitor = PerformanceMiddleware.__new__(PerformanceMiddleware)
 
 
 def monitor_performance(f):
@@ -137,8 +114,7 @@ def monitor_performance(f):
             result = f(*args, **kwargs)
             elapsed = time.time() - start_time
             
-            # 记录执行时间
-            if elapsed > performance_monitor.slow_query_threshold:
+            if elapsed > 1.0:
                 logger.warning(
                     f"慢函数执行: {f.__name__} - 耗时: {elapsed:.3f}s"
                 )
@@ -176,7 +152,6 @@ class QueryPerformanceTracker:
         
         self.queries.append(query_info)
         
-        # 记录慢查询
         if elapsed and elapsed > self.threshold:
             self.slow_queries.append(query_info)
             logger.warning(
@@ -202,14 +177,11 @@ class QueryPerformanceTracker:
         self.slow_queries.clear()
 
 
-# 全局查询追踪器
 query_tracker = QueryPerformanceTracker()
 
 
 def track_db_query(f):
-    """
-    数据库查询追踪装饰器
-    """
+    """数据库查询追踪装饰器"""
     @functools.wraps(f)
     def decorated_function(*args, **kwargs):
         start_time = time.time()
@@ -218,7 +190,6 @@ def track_db_query(f):
             result = f(*args, **kwargs)
             elapsed = time.time() - start_time
             
-            # 追踪查询
             query_tracker.track_query(
                 query=f.__name__,
                 params={'args': args, 'kwargs': kwargs},
@@ -289,14 +260,4 @@ class CachePerformanceMonitor:
         }
 
 
-# 全局缓存监控实例
 cache_monitor = CachePerformanceMonitor()
-
-
-if __name__ == '__main__':
-    print("性能监控模块")
-    print("\n功能:")
-    print("1. 请求性能监控")
-    print("2. 慢查询日志")
-    print("3. 错误追踪")
-    print("4. 缓存性能监控")

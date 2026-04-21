@@ -122,7 +122,6 @@ class DependencyAnalyzer:
             'redis': {'redis'},
             'pandas': {'pandas'},
             'openpyxl': {'openpyxl'},
-            'xlrd': {'xlrd'},
             'waitress': {'waitress'},
             'chardet': {'chardet'},
             'pypinyin': {'pypinyin'},

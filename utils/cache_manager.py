@@ -4,8 +4,7 @@
 """
 import logging
 from functools import wraps
-from flask import request, make_response
-from app import db
+from starlette.responses import Response
 
 _logger = logging.getLogger(__name__)
 
@@ -17,12 +16,17 @@ def no_cache(view_func):
     """
     @wraps(view_func)
     def decorated_function(*args, **kwargs):
-        response = make_response(view_func(*args, **kwargs))
-        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
-        response.headers['Pragma'] = 'no-cache'
-        response.headers['Expires'] = '0'
-        response.headers['Last-Modified'] = 'Mon, 26 Jul 1997 05:00:00 GMT'
-        return response
+        result = view_func(*args, **kwargs)
+        if isinstance(result, dict):
+            from fastapi.responses import JSONResponse
+            result = JSONResponse(content=result)
+        
+        if hasattr(result, 'headers'):
+            result.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
+            result.headers['Pragma'] = 'no-cache'
+            result.headers['Expires'] = '0'
+            result.headers['Last-Modified'] = 'Mon, 26 Jul 1997 05:00:00 GMT'
+        return result
     return decorated_function
 
 
@@ -55,11 +59,14 @@ def clear_cache_after_change():
     return decorator
 
 
-def invalidate_cache_on_write(response):
+def invalidate_cache_on_write(request, response):
     """
     响应后缓存失效处理
     对 POST/PUT/DELETE/PATCH 且成功的请求, 按URL路径清除对应缓存
-    在 create_app() 的 after_request 中调用
+    
+    Args:
+        request: Starlette Request 对象
+        response: Starlette Response 对象
     """
     if request.method not in ('POST', 'PUT', 'DELETE', 'PATCH'):
         return response
@@ -71,7 +78,7 @@ def invalidate_cache_on_write(response):
     try:
         from utils.redis_cache import redis_cache
 
-        path = request.path.lower()
+        path = request.url.path.lower()
 
         # 根据URL路径匹配缓存模式
         patterns_to_clear = []
@@ -98,7 +105,7 @@ def invalidate_cache_on_write(response):
         # 写操作本身已 commit/flush，数据一致性无需额外 expire。
 
     except Exception as e:
-        _logger.warning("缓存失效处理失败(path=%s): %s", request.path, e)
+        _logger.warning("缓存失效处理失败(path=%s): %s", request.url.path, e)
 
     return response
 
@@ -106,7 +113,7 @@ def invalidate_cache_on_write(response):
 def clear_database_session_cache():
     """
     清除数据库session缓存
-    注：Flask scoped_session 在每个请求结束后通过 db.session.remove() 自动清理，
+    注：FastAPI 依赖注入在每个请求结束后通过依赖自动清理 session，
     新请求获取全新 session，无需手动 expire_all()。
     此函数保留为空以维持调用兼容性。
     """
@@ -127,9 +134,11 @@ def add_random_param_to_url(url):
 def ensure_session_committed():
     """
     确保数据库 session 已提交
-    注：移除 expire_all()，原因同 clear_database_session_cache()。
+    注：FastAPI 依赖注入自动管理 session 生命周期。
     """
     try:
-        db.session.commit()
+        from fastapi_app.core.database import SyncSession
+        with SyncSession() as session:
+            session.commit()
     except Exception as e:
         _logger.warning("ensure_session_committed 出错: %s", e)

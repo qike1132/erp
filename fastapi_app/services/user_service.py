@@ -34,10 +34,10 @@ async def create_user(db, username: str, password: str, is_super: bool) -> User:
     if existing:
         raise ValueError("用户名已存在")
 
-    from werkzeug.security import generate_password_hash
+    from fastapi_app.core.security import hash_password
     new_user = User(
         username=username,
-        password=generate_password_hash(password),
+        password=hash_password(password),
         is_super=is_super,
         status=True,
     )
@@ -58,8 +58,8 @@ async def update_user(db, user_id: int, password: str | None, is_super: bool | N
         is_valid, error_msg = PasswordValidator.validate(password)
         if not is_valid:
             raise ValueError(error_msg)
-        from werkzeug.security import generate_password_hash
-        user.password = generate_password_hash(password)
+        from fastapi_app.core.security import hash_password
+        user.password = hash_password(password)
 
     if is_super is not None:
         user.is_super = is_super
@@ -127,6 +127,8 @@ async def update_user_permissions(db, user_id: int, permission_ids: list[int]) -
             # 自动添加子权限
             if permission.children:
                 for child in permission.children:
+                    if child.code in SENSITIVE_PERMISSIONS:
+                        continue
                     if child not in user.permissions:
                         user.permissions.append(child)
 

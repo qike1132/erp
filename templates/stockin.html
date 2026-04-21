@@ -151,7 +151,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='pagination.js') }}"></script>
+<script src="/static/pagination.js"></script>
 <style>
 /* 展开按钮图标旋转动画 */
 .toggle-icon {
@@ -617,10 +617,10 @@ document.getElementById('submitAllStockinsBtn').addEventListener('click', async 
                 note: stockin.note
             }));
             
-            console.log('Sending request to /api/batch-submit-stockins');
+            console.log('Sending request to /api/v1/aux/batch-submit-stockins');
             console.log('Stockins for API:', stockinsForApi);
             
-            const response = await fetch('/api/batch-submit-stockins', {
+            const response = await fetch('/api/v1/aux/batch-submit-stockins', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -712,10 +712,10 @@ let stockinCurrentPage = 1;
 const stockinPerPage = 50;
 
 function loadStockins(page) {
-    fetch(`/stock/api/stockins?page=${page}&per_page=${stockinPerPage}`, { credentials: 'include' })
+    fetch(`/api/v1/stock/in/list?page=${page}&per_page=${stockinPerPage}`, { credentials: 'include' })
         .then(r => r.json())
         .then(data => {
-            globalStockinsData = data.items || [];
+            globalStockinsData = data.data || [];
             if (typeof renderGroupedStockinListLocal === 'function') {
                 renderGroupedStockinListLocal();
             }

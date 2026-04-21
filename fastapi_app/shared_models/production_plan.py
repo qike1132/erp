@@ -3,7 +3,7 @@
 
 映射到与 Flask-SQLAlchemy ProductionPlan 相同的 'production_plan' 表。
 """
-from sqlalchemy import String, Integer, Text, DateTime, Date, Index
+from sqlalchemy import String, Integer, Text, DateTime, Date, Boolean, Index
 from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime
 
@@ -87,7 +87,7 @@ class StagingPurchasePlan(Base):
     plan_date: Mapped[datetime] = mapped_column(Date, nullable=False, comment='计划日期')
     plan_month: Mapped[str | None] = mapped_column(String(7), nullable=True, comment='计划月份 YYYY-MM')
     remark: Mapped[str | None] = mapped_column(Text, nullable=True, comment='备注')
-    is_validated: Mapped[bool] = mapped_column(Integer, default=0, comment='是否已验证')
+    is_validated: Mapped[bool] = mapped_column(Boolean, default=False, comment='是否已验证')
     validation_error: Mapped[str | None] = mapped_column(String(500), nullable=True, comment='验证错误信息')
     upload_batch_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True, comment='上传批次ID')
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, comment='创建时间')

@@ -98,8 +98,8 @@ async def batch_import_orders(
     current_user: User = Depends(require_permission("batch_import")),
 ):
     """批量导入订单 - 支持统一模板格式"""
-    if not file.filename or not (file.filename.endswith('.xlsx') or file.filename.endswith('.xls')):
-        return BatchImportResult(success=False, message="只支持 Excel 文件格式 (.xlsx 或 .xls)")
+    if not file.filename or not (file.filename.endswith('.xlsx')):
+        return BatchImportResult(success=False, message="只支持 Excel 文件格式 (.xlsx)，.xls 已不再支持")
 
     temp_path = None
     try:
@@ -253,8 +253,8 @@ async def batch_import_case_stockouts(
     current_user: User = Depends(require_permission("case_manage")),
 ):
     """批量导入皮套出库"""
-    if not file.filename or not (file.filename.endswith('.xlsx') or file.filename.endswith('.xls')):
-        return BatchImportResult(success=False, message="只支持 Excel 文件格式 (.xlsx 或 .xls)")
+    if not file.filename or not (file.filename.endswith('.xlsx')):
+        return BatchImportResult(success=False, message="只支持 Excel 文件格式 (.xlsx)，.xls 已不再支持")
 
     temp_path = None
     try:
@@ -431,8 +431,8 @@ async def batch_import_case_stockins(
     current_user: User = Depends(require_permission("case_manage")),
 ):
     """批量导入皮套入库"""
-    if not file.filename or not (file.filename.endswith('.xlsx') or file.filename.endswith('.xls')):
-        return BatchImportResult(success=False, message="只支持 Excel 文件格式 (.xlsx 或 .xls)")
+    if not file.filename or not (file.filename.endswith('.xlsx')):
+        return BatchImportResult(success=False, message="只支持 Excel 文件格式 (.xlsx)，.xls 已不再支持")
 
     temp_path = None
     try:
@@ -602,8 +602,8 @@ async def batch_import_stockins(
     current_user: User = Depends(require_permission("batch_import")),
 ):
     """批量导入备货 - 支持统一导入模板"""
-    if not file.filename or not (file.filename.endswith('.xlsx') or file.filename.endswith('.xls')):
-        return BatchImportResult(success=False, message="只支持 Excel 文件格式 (.xlsx 或 .xls)")
+    if not file.filename or not (file.filename.endswith('.xlsx')):
+        return BatchImportResult(success=False, message="只支持 Excel 文件格式 (.xlsx)，.xls 已不再支持")
 
     temp_path = None
     try:
@@ -749,8 +749,8 @@ async def batch_import_stockouts(
     current_user: User = Depends(require_permission("batch_import")),
 ):
     """批量导入出库"""
-    if not file.filename or not (file.filename.endswith('.xlsx') or file.filename.endswith('.xls')):
-        return BatchImportResult(success=False, message="只支持 Excel 文件格式 (.xlsx 或 .xls)")
+    if not file.filename or not (file.filename.endswith('.xlsx')):
+        return BatchImportResult(success=False, message="只支持 Excel 文件格式 (.xlsx)，.xls 已不再支持")
 
     temp_path = None
     try:
@@ -931,8 +931,8 @@ async def batch_import_products(
     current_user: User = Depends(require_permission("batch_import")),
 ):
     """批量导入产品 - 支持统一模板格式"""
-    if not file.filename or not (file.filename.endswith('.xlsx') or file.filename.endswith('.xls')):
-        return BatchImportResult(success=False, message="只支持 Excel 文件格式 (.xlsx 或 .xls)")
+    if not file.filename or not (file.filename.endswith('.xlsx')):
+        return BatchImportResult(success=False, message="只支持 Excel 文件格式 (.xlsx)，.xls 已不再支持")
 
     temp_path = None
     try:
@@ -1053,8 +1053,8 @@ async def batch_import_comprehensive(
     综合批量导入 - 支持4个Sheet自动识别
     产品管理、订单管理、备货管理、出货管理
     """
-    if not file.filename or not (file.filename.endswith('.xlsx') or file.filename.endswith('.xls')):
-        return ComprehensiveImportResult(success=False, message="只支持 Excel 文件格式 (.xlsx 或 .xls)")
+    if not file.filename or not (file.filename.endswith('.xlsx')):
+        return ComprehensiveImportResult(success=False, message="只支持 Excel 文件格式 (.xlsx)，.xls 已不再支持")
 
     temp_path = None
     try:

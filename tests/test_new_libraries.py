@@ -6,7 +6,7 @@
 - pypinyin: 拼音转换
 - arrow: 日期处理
 - bleach: XSS防护
-- fuzzywuzzy: 模糊搜索
+- rapidfuzz: 模糊搜索（替代 fuzzywuzzy）
 - XlsxWriter: Excel生成
 
 注意: phonenumbers不在本次升级范围内，不做任何修改
@@ -18,7 +18,7 @@ from pypinyin import lazy_pinyin, pinyin, Style
 import arrow
 from datetime import datetime, timedelta
 import bleach
-from fuzzywuzzy import fuzz, process
+from rapidfuzz import fuzz, process
 
 
 class TestChardet:
@@ -212,8 +212,8 @@ class TestBleach:
         assert "<p>" in result
 
 
-class TestFuzzywuzzy:
-    """fuzzywuzzy库测试"""
+class TestRapidfuzz:
+    """rapidfuzz库测试（替代 fuzzywuzzy）"""
     
     def test_exact_match(self):
         """测试精确匹配"""
@@ -253,7 +253,7 @@ class TestFuzzywuzzy:
         """测试加权比率"""
         score = fuzz.WRatio("apple phone", "apple iPhone phone")
         assert score > 60
-
+    
     def test_token_sort(self):
         """测试词序排序匹配"""
         score = fuzz.token_sort_ratio("apple phone", "phone apple")

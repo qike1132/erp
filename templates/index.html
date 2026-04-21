@@ -5,14 +5,14 @@
 <div class="home-hero">
     <div class="hero-welcome">
         <div class="hero-logo">
-            <img src="{{ url_for('static', filename='logo.jpg') }}" alt="LOGO" width="72" height="72" style="border-radius:20px;box-shadow:0 6px 20px var(--plush-shadow-soft),inset 0 2px 4px rgba(255,255,255,0.9);animation:floatLogo 3s ease-in-out infinite;">
+            <img src="/static/logo.jpg" alt="LOGO" width="72" height="72" style="border-radius:20px;box-shadow:0 6px 20px var(--plush-shadow-soft),inset 0 2px 4px rgba(255,255,255,0.9);animation:floatLogo 3s ease-in-out infinite;">
         </div>
-        <h1>欢迎回来，{{ session.get('username', '用户') }}</h1>
+        <h1>欢迎回来，{{ username or '用户' }}</h1>
     </div>
     <p class="hero-greeting" id="heroGreeting"></p>
 
     <div class="kpi-grid">
-        <a href="{{ url_for('order.orders') }}" class="kpi-card kpi-order" role="status" aria-label="今日订单">
+        <a href="/order/list" class="kpi-card kpi-order" role="status" aria-label="今日订单">
             <div class="kpi-header">
                 <div class="kpi-icon kpi-order-icon"><i class="fas fa-shopping-cart"></i></div>
                 <span class="kpi-arrow"><i class="fas fa-arrow-right"></i></span>
@@ -26,7 +26,7 @@
             </div>
         </a>
 
-        <a href="{{ url_for('stock.stockins') }}" class="kpi-card kpi-stockin" role="status" aria-label="今日备货">
+        <a href="/stock/stockins" class="kpi-card kpi-stockin" role="status" aria-label="今日备货">
             <div class="kpi-header">
                 <div class="kpi-icon kpi-stockin-icon"><i class="fas fa-truck-loading"></i></div>
                 <span class="kpi-arrow"><i class="fas fa-arrow-right"></i></span>
@@ -40,7 +40,7 @@
             </div>
         </a>
 
-        <a href="{{ url_for('stock.stockouts') }}" class="kpi-card kpi-stockout" role="status" aria-label="今日出货">
+        <a href="/stock/stockouts" class="kpi-card kpi-stockout" role="status" aria-label="今日出货">
             <div class="kpi-header">
                 <div class="kpi-icon kpi-stockout-icon"><i class="fas fa-shipping-fast"></i></div>
                 <span class="kpi-arrow"><i class="fas fa-arrow-right"></i></span>
@@ -54,7 +54,7 @@
             </div>
         </a>
 
-        <a href="{{ url_for('order.my_approvals') }}" class="kpi-card kpi-approval" role="status" aria-label="待审批">
+        <a href="/order/my-approvals" class="kpi-card kpi-approval" role="status" aria-label="待审批">
             <div class="kpi-header">
                 <div class="kpi-icon kpi-approval-icon"><i class="fas fa-clipboard-check"></i></div>
                 <span class="kpi-arrow"><i class="fas fa-arrow-right"></i></span>
@@ -91,7 +91,7 @@
                 </div>
                 {% else %}
                     {% if pending_approvals > 0 %}
-                    <a href="{{ url_for('order.my_approvals') }}" class="todo-item todo-urgent" role="listitem" tabindex="0">
+                    <a href="/order/my-approvals" class="todo-item todo-urgent" role="listitem" tabindex="0">
                         <div class="todo-dot"></div>
                         <div class="todo-content">
                             <div class="todo-title">{{ pending_approvals }} 笔订单待审批</div>
@@ -105,7 +105,7 @@
                     {% endif %}
 
                     {% if low_stock_count > 0 %}
-                    <a href="{{ url_for('stock.inventory') }}" class="todo-item todo-warning" role="listitem" tabindex="0">
+                    <a href="/stock/inventory" class="todo-item todo-warning" role="listitem" tabindex="0">
                         <div class="todo-dot"></div>
                         <div class="todo-content">
                             <div class="todo-title">{{ low_stock_count }} 个产品低库存预警</div>
@@ -119,7 +119,7 @@
                     {% endif %}
 
                     {% if pending_purchases > 0 %}
-                    <a href="{{ url_for('purchase_center.index') }}" class="todo-item todo-info" role="listitem" tabindex="0">
+                    <a href="/purchase-center/" class="todo-item todo-info" role="listitem" tabindex="0">
                         <div class="todo-dot"></div>
                         <div class="todo-content">
                             <div class="todo-title">{{ pending_purchases }} 笔采购单待确认</div>
@@ -133,7 +133,7 @@
                     {% endif %}
 
                     {% if pending_materials > 0 %}
-                    <a href="{{ url_for('material_registration.index') }}" class="todo-item todo-secondary" role="listitem" tabindex="0">
+                    <a href="/material-registration/page" class="todo-item todo-secondary" role="listitem" tabindex="0">
                         <div class="todo-dot"></div>
                         <div class="todo-content">
                             <div class="todo-title">{{ pending_materials }} 笔来料待接收</div>
@@ -156,7 +156,7 @@
             <div class="card-header-title">
                 <i class="fas fa-stream"></i> 最近动态
             </div>
-            <a href="{{ url_for('report.reports') }}" class="view-all-btn">查看全部 <i class="fas fa-arrow-right"></i></a>
+            <a href="/report/reports" class="view-all-btn">查看全部 <i class="fas fa-arrow-right"></i></a>
         </div>
         <div class="card-body">
             {% if activities %}
@@ -164,7 +164,7 @@
                 {% set ns = namespace(current_date='', last_type='') %}
                 {% for act in activities %}
                     {% if act.time %}
-                    {% set act_date = act.time.strftime('%Y-%m-%d') %}
+                    {% set act_date = act.time[:10] %}
                     {% else %}
                     {% set act_date = '' %}
                     {% endif %}
@@ -190,7 +190,7 @@
                         </div>
                         <div class="timeline-content">
                             {% if act.time %}
-                            <div class="timeline-time">{{ act.time.strftime('%H:%M') }}</div>
+                            <div class="timeline-time">{{ act.time[11:16] }}</div>
                             {% endif %}
                             <div class="timeline-title">
                                 <span class="timeline-tag {% if act.type == 'stockin' %}tag-stockin{% elif act.type == 'stockout' %}tag-stockout{% elif act.type == 'order' %}tag-order{% elif act.type == 'approval' %}tag-approval{% elif act.type == 'material' %}tag-material{% endif %}">

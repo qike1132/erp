@@ -1,220 +1,147 @@
 """
-Waitress 生产环境优化启动脚本
-版本: v2.1.0
-优化内容: 性能调优、资源管理、安全增强、FastAPI集成
+ERP系统生产环境启动脚本 (FastAPI 单框架版)
+
+使用 Uvicorn 多 worker 模式启动 FastAPI 服务。
+适用于单机直接部署的生产服务器（Linux 多 worker / Windows 单 worker）。
+Docker 部署请使用 docker-compose.yml。
 """
 import os
 import sys
 import gc
 import time
-import atexit
 import logging
-import subprocess
 import threading
 from datetime import datetime
 
+# Windows UTF-8 输出
 if sys.platform == 'win32':
     import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+    if sys.stdout and hasattr(sys.stdout, 'buffer'):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    if sys.stderr and hasattr(sys.stderr, 'buffer'):
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
-os.environ['USE_NEW_ARCH'] = 'true'
+# 虚拟环境自动检测
+_VENV_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.venv313')
+_VENV_PYTHON = os.path.join(_VENV_DIR, 'Scripts', 'python.exe')
+if sys.platform != 'win32':
+    _VENV_PYTHON = os.path.join(_VENV_DIR, 'bin', 'python')
 
-from waitress import serve
-from app import app
+if os.path.isfile(_VENV_PYTHON) and os.path.normpath(sys.executable) != os.path.normpath(_VENV_PYTHON):
+    os.execv(_VENV_PYTHON, [_VENV_PYTHON] + sys.argv)
 
-# FastAPI 子进程引用及日志文件句柄
-_fastapi_process = None
-_fastapi_log_file = None
+# 加载 .env
+from dotenv import load_dotenv
+load_dotenv(override=False)
 
-
-def start_fastapi_subprocess():
-    """在后台启动 FastAPI 服务"""
-    global _fastapi_process, _fastapi_log_file
-
-    log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
-    os.makedirs(log_dir, exist_ok=True)
-    log_path = os.path.join(log_dir, 'fastapi.log')
-
-    try:
-        print("[INFO] 正在启动 FastAPI 服务 (端口 5002)...")
-        # 二进制模式写入，避免子进程 GBK 输出与 UTF-8 文本模式冲突导致日志乱码
-        _fastapi_log_file = open(log_path, 'ab')
-        _fastapi_process = subprocess.Popen(
-            [sys.executable, '-m', 'uvicorn',
-             'fastapi_app.main:app',
-             '--host', '0.0.0.0',
-             '--port', '5002'],
-            stdout=_fastapi_log_file,
-            stderr=_fastapi_log_file,
-        )
-        print(f"[OK] FastAPI 服务已启动 (PID: {_fastapi_process.pid})，日志: {log_path}")
-    except Exception as e:
-        print(f"[WARN] FastAPI 服务启动失败: {e}")
-        if _fastapi_log_file:
-            _fastapi_log_file.close()
-            _fastapi_log_file = None
-
-
-def stop_fastapi_subprocess():
-    """停止 FastAPI 子进程并关闭日志文件句柄"""
-    global _fastapi_process, _fastapi_log_file
-    if _fastapi_process and _fastapi_process.poll() is None:
-        print("[INFO] 正在停止 FastAPI 服务...")
-        _fastapi_process.terminate()
-        try:
-            _fastapi_process.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            _fastapi_process.kill()
-        print("[OK] FastAPI 服务已停止")
-    if _fastapi_log_file:
-        _fastapi_log_file.close()
-        _fastapi_log_file = None
-
-class ServerConfig:
-    """服务器配置类"""
-    
-    HOST = '0.0.0.0'
-    PORT = 5003
-    
-    THREADS = 8
-    CONNECTION_LIMIT = 300
-    CHANNEL_TIMEOUT = 60
-    SOCKET_TIMEOUT = 30
-    
-    SEND_BYTES = 65536
-    INBUF_OVERFLOW = 524288
-    OUTBUF_OVERFLOW = 1048576
-    
-    MAX_REQUEST_BODY_SIZE = 10485760
-    
-    EXPOSE_TRACEBACKS = False
-    IDENT = None
-    
-    CLEANUP_INTERVAL = 30
-    LINGER_TIMEOUT = 5
-    
-    ASYNCORE_USE_POLL = True
-    
-    @classmethod
-    def get_serve_params(cls):
-        params = {
-            'host': cls.HOST,
-            'port': cls.PORT,
-            'threads': cls.THREADS,
-            'connection_limit': cls.CONNECTION_LIMIT,
-            'channel_timeout': cls.CHANNEL_TIMEOUT,
-            'socket_timeout': cls.SOCKET_TIMEOUT,
-            'send_bytes': cls.SEND_BYTES,
-            'inbuf_overflow': cls.INBUF_OVERFLOW,
-            'outbuf_overflow': cls.OUTBUF_OVERFLOW,
-            'max_request_body_size': cls.MAX_REQUEST_BODY_SIZE,
-            'expose_tracebacks': cls.EXPOSE_TRACEBACKS,
-            'ident': cls.IDENT,
-            'cleanup_interval': cls.CLEANUP_INTERVAL,
-            'linger_timeout': cls.LINGER_TIMEOUT,
-            'asyncore_use_poll': cls.ASYNCORE_USE_POLL,
-        }
-        # 过滤当前 waitress 版本不支持的参数
-        try:
-            from waitress.adjustments import Adjustments
-            supported = set(p[0] for p in Adjustments._params)
-            unsupported = [k for k in params if k not in supported]
-            for k in unsupported:
-                del params[k]
-        except Exception:
-            pass
-        return params
 
 def setup_gc():
     gc.set_threshold(700, 15, 15)
     gc.enable()
-    print(f"[GC] 垃圾回收已配置: {gc.get_threshold()}")
+
 
 def setup_logging():
     log_dir = 'logs'
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
-    
-    logging.basicConfig(
-        level=logging.INFO,
-        format='[%(asctime)s] %(levelname)s: %(message)s',
-        handlers=[
-            logging.FileHandler(f'{log_dir}/server.log', encoding='utf-8'),
-            logging.StreamHandler(sys.stdout)
-        ]
-    )
-    return logging.getLogger('waitress')
 
-def print_banner():
-    config = ServerConfig
-    print("\n" + "=" * 70)
-    print("  ERP 系统 - Waitress 生产服务器 (优化版)")
-    print("=" * 70)
-    print(f"  启动时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"  Python版本: {sys.version.split()[0]}")
-    print("-" * 70)
-    print("  网络配置:")
-    print(f"    Flask  (端口 {config.PORT}): http://127.0.0.1:{config.PORT}")
-    print(f"    FastAPI (端口 5002): http://127.0.0.1:5002")
-    print(f"    局域网访问: http://192.168.0.95:{config.PORT}")
-    print("-" * 70)
-    print("  性能配置:")
-    print(f"    工作线程: {config.THREADS}")
-    print(f"    最大连接: {config.CONNECTION_LIMIT}")
-    print(f"    通道超时: {config.CHANNEL_TIMEOUT}s")
-    print(f"    Socket超时: {config.SOCKET_TIMEOUT}s")
-    print(f"    请求体限制: {config.MAX_REQUEST_BODY_SIZE // 1024 // 1024}MB")
-    print("-" * 70)
-    print("  安全配置:")
-    print(f"    错误追踪: {'开启' if config.EXPOSE_TRACEBACKS else '关闭'}")
-    print(f"    服务器标识: {'显示' if config.IDENT else '隐藏'}")
-    print("-" * 70)
-    print("  按 Ctrl+C 停止服务")
-    print("=" * 70 + "\n")
+    logger = logging.getLogger('production')
+    if logger.handlers:
+        return logger
 
-def run_periodic_cleanup():
+    logger.setLevel(logging.INFO)
+    formatter = logging.Formatter('[%(asctime)s] %(levelname)s: %(message)s')
+
+    file_handler = logging.FileHandler(f'{log_dir}/server.log', encoding='utf-8')
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(stream_handler)
+
+    return logger
+
+
+def print_banner(logger, port, workers):
+    lines = [
+        "\n" + "=" * 60,
+        "  ERP 系统 - Uvicorn 生产服务器",
+        "=" * 60,
+        f"  启动时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"  Python版本: {sys.version.split()[0]}",
+        "-" * 60,
+        f"  访问地址: http://127.0.0.1:{port}",
+        f"  API 文档: http://127.0.0.1:{port}/api/docs",
+        f"  Worker 数: {workers}",
+        "-" * 60,
+        "  按 Ctrl+C 停止服务",
+        "=" * 60 + "\n",
+    ]
+    for line in lines:
+        logger.info(line)
+
+
+def run_periodic_cleanup(logger):
+    cleanup_loop_running = True
+
     def cleanup_loop():
-        while True:
+        nonlocal cleanup_loop_running
+        while cleanup_loop_running:
             time.sleep(300)
-            collected = gc.collect()
-            if collected > 0:
-                print(f"[清理] 回收对象: {collected}")
-    
+            if cleanup_loop_running:
+                collected = gc.collect()
+                if collected > 0:
+                    logger.info(f"[清理] 回收对象: {collected}")
+
     thread = threading.Thread(target=cleanup_loop, daemon=True)
     thread.start()
     return thread
 
+
+def stop_cleanup():
+    pass
+
+
 def main():
     setup_gc()
     logger = setup_logging()
-    print_banner()
 
-    # 注册 atexit 清理，确保进程异常退出时也能关闭文件句柄和子进程
-    atexit.register(stop_fastapi_subprocess)
+    from fastapi_app.core.config import settings
 
-    # 启动 FastAPI 子进程
-    start_fastapi_subprocess()
+    port = 5002
+    # Windows 不支持 uvicorn 多 worker（无 fork），强制使用单 worker
+    # Linux 生产环境建议设置 UVICORN_WORKERS=CPU核数
+    if sys.platform == 'win32':
+        workers = 1
+        logger.info("Windows 平台: 使用单 worker 模式（不支持多 worker）")
+    else:
+        workers = int(os.getenv("UVICORN_WORKERS", "4"))
+        logger.info(f"Linux 平台: 使用 {workers} worker 模式")
 
-    # 等待 FastAPI 就绪
-    print("[INFO] 等待 FastAPI 服务就绪...")
-    time.sleep(3)
+    print_banner(logger, port, workers)
+    run_periodic_cleanup(logger)
 
-    run_periodic_cleanup()
-
-    serve_params = ServerConfig.get_serve_params()
+    import uvicorn
 
     try:
-        logger.info("Waitress 服务器启动中...")
-        serve(app, **serve_params)
+        logger.info("Uvicorn 生产服务器启动中...")
+        uvicorn.run(
+            "fastapi_app.main:app",
+            host="0.0.0.0",
+            port=port,
+            workers=workers,
+            log_level="info",
+            access_log=True,
+        )
     except KeyboardInterrupt:
         logger.info("收到停止信号，正在关闭服务器...")
     except Exception as e:
         logger.error(f"服务器错误: {e}")
         raise
     finally:
-        stop_fastapi_subprocess()
         logger.info("服务器已停止")
+
 
 if __name__ == '__main__':
     main()

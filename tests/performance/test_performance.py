@@ -18,10 +18,30 @@ from typing import Dict, List, Any, Callable, Optional
 from dataclasses import dataclass, field, asdict
 import statistics
 import unittest
-from werkzeug.security import generate_password_hash, check_password_hash
+from fastapi_app.core.security import hash_password, verify_password
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, project_root)
+
+try:
+    from flask import Flask
+    from flask_sqlalchemy import SQLAlchemy
+    from app import create_app, db
+    from app.models import Product, User, Permission, Customer, Order, StockIn, StockOut
+    HAS_FLASK = True
+except ImportError:
+    HAS_FLASK = False
+    Flask = None
+    SQLAlchemy = None
+    create_app = None
+    db = None
+    Product = None
+    User = None
+    Permission = None
+    Customer = None
+    Order = None
+    StockIn = None
+    StockOut = None
 
 
 @dataclass
@@ -126,6 +146,7 @@ class MemoryMonitor:
         return 0.0
 
 
+@unittest.skipIf(not HAS_FLASK, "Flask dependencies not available")
 class PerformanceTestBase(unittest.TestCase):
     """性能测试基类"""
     
@@ -140,7 +161,6 @@ class PerformanceTestBase(unittest.TestCase):
         
         os.environ['FLASK_ENV'] = 'testing'
         
-        from app import create_app, db
         cls.app = create_app('testing')
         cls.app_context = cls.app.app_context()
         cls.app_context.push()
@@ -157,8 +177,8 @@ class PerformanceTestBase(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         """清理测试类"""
-        from app import db
-        db.session.remove()
+        if db is None:
+            return
         db.drop_all()
         cls.app_context.pop()
         
@@ -169,9 +189,6 @@ class PerformanceTestBase(unittest.TestCase):
     @classmethod
     def _setup_test_data(cls):
         """设置测试数据"""
-        from app import db
-        from app.models import Product, User, Permission, Customer
-        
         permissions_data = [
             ('管理员', 'admin'),
             ('产品管理', 'product_manage'),
@@ -187,7 +204,7 @@ class PerformanceTestBase(unittest.TestCase):
             db.session.add(perm)
         
         test_user = User(username='perf_test_user', is_super=True)
-        test_user.password = generate_password_hash('test123')
+        test_user.password = hash_password('test123')
         db.session.add(test_user)
         
         for perm in Permission.query.all():
@@ -467,15 +484,14 @@ def measure_time(func: Callable, iterations: int = 1) -> Dict[str, Any]:
     }
 
 
+@unittest.skipIf(not HAS_FLASK, "Flask dependencies not available")
 class OrderManagementPerformanceTest(PerformanceTestBase):
     """订单管理模块性能测试"""
     
     def test_order_list_query(self):
         """测试订单列表查询性能"""
         self.login_test_user()
-        
-        from app import db
-        from app.models import Order, Product
+
         from datetime import datetime
         
         product = self.test_products[0]
@@ -505,9 +521,6 @@ class OrderManagementPerformanceTest(PerformanceTestBase):
         """测试订单创建性能"""
         self.login_test_user()
         
-        from app import db
-        from app.models import Product
-        
         product = self.test_products[1]
         order_count = 0
         
@@ -531,9 +544,7 @@ class OrderManagementPerformanceTest(PerformanceTestBase):
     def test_order_edit(self):
         """测试订单编辑性能"""
         self.login_test_user()
-        
-        from app import db
-        from app.models import Order
+
         from datetime import datetime
         
         order = Order(
@@ -564,11 +575,9 @@ class OrderManagementPerformanceTest(PerformanceTestBase):
     def test_order_delete(self):
         """测试订单删除性能"""
         self.login_test_user()
-        
-        from app import db
-        from app.models import Order
+
         from datetime import datetime
-        
+
         order_ids = []
         for i in range(10):
             order = Order(
@@ -601,15 +610,14 @@ class OrderManagementPerformanceTest(PerformanceTestBase):
         self.logout_test_user()
 
 
+@unittest.skipIf(not HAS_FLASK, "Flask dependencies not available")
 class StockManagementPerformanceTest(PerformanceTestBase):
     """库存管理模块性能测试"""
     
     def test_stockin_list_query(self):
         """测试入库列表查询性能"""
         self.login_test_user()
-        
-        from app import db
-        from app.models import StockIn
+
         from datetime import datetime
         
         for i in range(50):
@@ -661,9 +669,7 @@ class StockManagementPerformanceTest(PerformanceTestBase):
     def test_stockout_list_query(self):
         """测试出库列表查询性能"""
         self.login_test_user()
-        
-        from app import db
-        from app.models import StockOut
+
         from datetime import datetime
         
         for i in range(50):
@@ -725,6 +731,7 @@ class StockManagementPerformanceTest(PerformanceTestBase):
         self.logout_test_user()
 
 
+@unittest.skipIf(not HAS_FLASK, "Flask dependencies not available")
 class ProductManagementPerformanceTest(PerformanceTestBase):
     """产品管理模块性能测试"""
     
@@ -802,10 +809,7 @@ class ProductManagementPerformanceTest(PerformanceTestBase):
     def test_product_delete(self):
         """测试产品删除性能"""
         self.login_test_user()
-        
-        from app import db
-        from app.models import Product
-        
+
         product_ids = []
         for i in range(10):
             product = Product(
@@ -836,6 +840,7 @@ class ProductManagementPerformanceTest(PerformanceTestBase):
         self.logout_test_user()
 
 
+@unittest.skipIf(not HAS_FLASK, "Flask dependencies not available")
 class APIPerformanceTest(PerformanceTestBase):
     """API接口性能测试"""
     

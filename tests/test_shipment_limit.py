@@ -9,8 +9,10 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from flask import Flask
-from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, func
+from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+
+Base = declarative_base()
 
 
 class ShipmentLimitTestCase(unittest.TestCase):
@@ -19,72 +21,66 @@ class ShipmentLimitTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """测试类初始化"""
-        cls.app = Flask(__name__)
-        cls.app.config['TESTING'] = True
-        cls.app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
-        cls.app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-        cls.app.config['SECRET_KEY'] = 'test-secret-key'
-        
-        cls.db = SQLAlchemy(cls.app)
+        cls.engine = create_engine('sqlite:///:memory:')
         cls._define_models()
         
-        with cls.app.app_context():
-            cls.db.create_all()
-            cls._init_test_data()
+        Base.metadata.create_all(cls.engine)
+        Session = sessionmaker(bind=cls.engine)
+        cls.db_session = Session()
+        cls._init_test_data()
     
     @classmethod
     def _define_models(cls):
         """定义数据模型"""
-        db = cls.db
         
-        class Product(db.Model):
+        class Product(Base):
             __tablename__ = 'product'
-            id = db.Column(db.Integer, primary_key=True)
-            name = db.Column(db.String(100), nullable=False)
-            barcode = db.Column(db.String(50), unique=True)
-            current_stock = db.Column(db.Integer, default=0)
+            id = Column(Integer, primary_key=True)
+            name = Column(String(100), nullable=False)
+            barcode = Column(String(50), unique=True)
+            current_stock = Column(Integer, default=0)
         
-        class Customer(db.Model):
+        class Customer(Base):
             __tablename__ = 'customer'
-            id = db.Column(db.Integer, primary_key=True)
-            name = db.Column(db.String(100), nullable=False, unique=True)
+            id = Column(Integer, primary_key=True)
+            name = Column(String(100), nullable=False, unique=True)
         
-        class Order(db.Model):
+        class Order(Base):
             __tablename__ = 'order'
-            id = db.Column(db.Integer, primary_key=True)
-            order_no = db.Column(db.String(20), unique=True, nullable=False)
-            customer = db.Column(db.String(100), nullable=False)
-            product_id = db.Column(db.Integer, db.ForeignKey('product.id'))
-            quantity = db.Column(db.Integer, nullable=False)
-            status = db.Column(db.String(20), default='待备货')
+            id = Column(Integer, primary_key=True)
+            order_no = Column(String(20), unique=True, nullable=False)
+            customer = Column(String(100), nullable=False)
+            product_id = Column(Integer, ForeignKey('product.id'))
+            quantity = Column(Integer, nullable=False)
+            status = Column(String(20), default='待备货')
             
-            product = db.relationship('Product', backref='orders')
+            product = relationship('Product', backref='orders')
         
-        class StockIn(db.Model):
+        class StockIn(Base):
             __tablename__ = 'stock_in'
-            id = db.Column(db.Integer, primary_key=True)
-            stockin_no = db.Column(db.String(20), unique=True)
-            product_id = db.Column(db.Integer, db.ForeignKey('product.id'))
-            customer = db.Column(db.String(100))
-            quantity = db.Column(db.Integer, nullable=False)
-            stockin_date = db.Column(db.DateTime, default=datetime.now)
+            id = Column(Integer, primary_key=True)
+            stockin_no = Column(String(20), unique=True)
+            product_id = Column(Integer, ForeignKey('product.id'))
+            customer = Column(String(100))
+            quantity = Column(Integer, nullable=False)
+            stockin_date = Column(DateTime, default=datetime.now)
             
-            product = db.relationship('Product', backref='stockins')
+            product = relationship('Product', backref='stockins')
         
-        class StockOut(db.Model):
+        class StockOut(Base):
             __tablename__ = 'stock_out'
-            id = db.Column(db.Integer, primary_key=True)
-            stockout_no = db.Column(db.String(20), unique=True)
-            product_id = db.Column(db.Integer, db.ForeignKey('product.id'))
-            customer = db.Column(db.String(100))
-            quantity = db.Column(db.Integer, nullable=False)
-            order_id = db.Column(db.Integer, db.ForeignKey('order.id'), nullable=True)
-            stockin_id = db.Column(db.Integer, db.ForeignKey('stock_in.id'), nullable=True)
-            stockout_date = db.Column(db.DateTime, default=datetime.now)
+            id = Column(Integer, primary_key=True)
+            stockout_no = Column(String(20), unique=True)
+            product_id = Column(Integer, ForeignKey('product.id'))
+            customer = Column(String(100))
+            quantity = Column(Integer, nullable=False)
+            order_id = Column(Integer, ForeignKey('order.id'), nullable=True)
+            stockin_id = Column(Integer, ForeignKey('stock_in.id'), nullable=True)
+            stockout_date = Column(DateTime, default=datetime.now)
             
-            product = db.relationship('Product', backref='stockouts')
-            order = db.relationship('Order', backref='stockouts')
-            stockin = db.relationship('StockIn', backref='stockouts')
+            product = relationship('Product', backref='stockouts')
+            order = relationship('Order', backref='stockouts')
+            stockin = relationship('StockIn', backref='stockouts')
         
         cls.Product = Product
         cls.Customer = Customer
@@ -97,15 +93,14 @@ class ShipmentLimitTestCase(unittest.TestCase):
         """初始化测试数据"""
         product = cls.Product(name='测试产品', barcode='TEST001', current_stock=0)
         customer = cls.Customer(name='测试客户')
-        cls.db.session.add_all([product, customer])
-        cls.db.session.commit()
+        cls.db_session.add_all([product, customer])
+        cls.db_session.commit()
     
     def setUp(self):
-        self.app_context = self.app.app_context()
-        self.app_context.push()
+        pass
     
     def tearDown(self):
-        self.app_context.pop()
+        pass
     
     def test_01_available_shipment_calculation(self):
         """
@@ -122,8 +117,8 @@ class ShipmentLimitTestCase(unittest.TestCase):
         """
         print("\n[测试用例01] 可出货量计算")
         
-        product = self.Product.query.first()
-        customer = self.Customer.query.first()
+        product = self.db_session.query(self.Product).first()
+        customer = self.db_session.query(self.Customer).first()
         
         order = self.Order(
             order_no='ORD001',
@@ -132,7 +127,7 @@ class ShipmentLimitTestCase(unittest.TestCase):
             quantity=5000,
             status='待备货'
         )
-        self.db.session.add(order)
+        self.db_session.add(order)
         product.current_stock += 5000
         
         stockin = self.StockIn(
@@ -141,21 +136,21 @@ class ShipmentLimitTestCase(unittest.TestCase):
             customer=customer.name,
             quantity=5000
         )
-        self.db.session.add(stockin)
+        self.db_session.add(stockin)
         product.current_stock += 5000
         
-        self.db.session.commit()
+        self.db_session.commit()
         
         self.assertEqual(product.current_stock, 10000, "总库存应为10000")
         
-        orders = self.Order.query.filter_by(
+        orders = self.db_session.query(self.Order).filter_by(
             product_id=product.id,
             customer=customer.name
         ).all()
         total_order_quantity = sum(o.quantity for o in orders)
         
-        total_shipped = self.db.session.query(
-            self.db.func.sum(self.StockOut.quantity)
+        total_shipped = self.db_session.query(
+            func.sum(self.StockOut.quantity)
         ).join(self.Order, self.StockOut.order_id == self.Order.id).filter(
             self.Order.product_id == product.id,
             self.Order.customer == customer.name,
@@ -172,28 +167,20 @@ class ShipmentLimitTestCase(unittest.TestCase):
     def test_02_shipment_exceeds_order_should_fail(self):
         """
         测试用例02: 出货量超过订单量应失败
-        
-        场景：
-        - 订单量：5000
-        - 备货量：5000
-        - 尝试出货：10000
-        
-        预期结果：
-        - 出货应被拒绝，因为超过订单量
         """
         print("\n[测试用例02] 出货量超过订单量应失败")
         
-        product = self.Product.query.first()
-        customer = self.Customer.query.first()
+        product = self.db_session.query(self.Product).first()
+        customer = self.db_session.query(self.Customer).first()
         
-        orders = self.Order.query.filter_by(
+        orders = self.db_session.query(self.Order).filter_by(
             product_id=product.id,
             customer=customer.name
         ).all()
         total_order_quantity = sum(o.quantity for o in orders)
         
-        total_shipped = self.db.session.query(
-            self.db.func.sum(self.StockOut.quantity)
+        total_shipped = self.db_session.query(
+            func.sum(self.StockOut.quantity)
         ).join(self.Order, self.StockOut.order_id == self.Order.id).filter(
             self.Order.product_id == product.id,
             self.Order.customer == customer.name,
@@ -213,22 +200,13 @@ class ShipmentLimitTestCase(unittest.TestCase):
     def test_03_partial_shipment_within_order(self):
         """
         测试用例03: 部分出货在订单量范围内应成功
-        
-        场景：
-        - 订单量：5000
-        - 第一次出货：3000
-        - 第二次出货：2000
-        
-        预期结果：
-        - 两次出货都应成功
-        - 总出货量 = 5000
         """
         print("\n[测试用例03] 部分出货在订单量范围内应成功")
         
-        product = self.Product.query.first()
-        customer = self.Customer.query.first()
+        product = self.db_session.query(self.Product).first()
+        customer = self.db_session.query(self.Customer).first()
         
-        order = self.Order.query.filter_by(
+        order = self.db_session.query(self.Order).filter_by(
             product_id=product.id,
             customer=customer.name
         ).first()
@@ -241,12 +219,12 @@ class ShipmentLimitTestCase(unittest.TestCase):
             order_id=order.id,
             stockin_id=None
         )
-        self.db.session.add(stockout1)
+        self.db_session.add(stockout1)
         product.current_stock -= 3000
-        self.db.session.commit()
+        self.db_session.commit()
         
-        total_shipped = self.db.session.query(
-            self.db.func.sum(self.StockOut.quantity)
+        total_shipped = self.db_session.query(
+            func.sum(self.StockOut.quantity)
         ).join(self.Order, self.StockOut.order_id == self.Order.id).filter(
             self.Order.product_id == product.id,
             self.Order.customer == customer.name,
@@ -265,12 +243,12 @@ class ShipmentLimitTestCase(unittest.TestCase):
             order_id=order.id,
             stockin_id=None
         )
-        self.db.session.add(stockout2)
+        self.db_session.add(stockout2)
         product.current_stock -= 2000
-        self.db.session.commit()
+        self.db_session.commit()
         
-        total_shipped = self.db.session.query(
-            self.db.func.sum(self.StockOut.quantity)
+        total_shipped = self.db_session.query(
+            func.sum(self.StockOut.quantity)
         ).join(self.Order, self.StockOut.order_id == self.Order.id).filter(
             self.Order.product_id == product.id,
             self.Order.customer == customer.name,
@@ -285,28 +263,18 @@ class ShipmentLimitTestCase(unittest.TestCase):
     def test_04_deduction_shipment_separate_from_regular(self):
         """
         测试用例04: 订单抵扣出货与普通出货分开计算
-        
-        场景：
-        - 订单量：5000
-        - 备货量：5000
-        - 订单抵扣出货：3000（通过备货抵扣）
-        - 普通出货：2000
-        
-        预期结果：
-        - 普通出货量计算不包含抵扣出货
-        - 可出货量 = 订单量 - 普通出货量
         """
         print("\n[测试用例04] 订单抵扣出货与普通出货分开计算")
         
-        product = self.Product.query.first()
-        customer = self.Customer.query.first()
+        product = self.db_session.query(self.Product).first()
+        customer = self.db_session.query(self.Customer).first()
         
-        order = self.Order.query.filter_by(
+        order = self.db_session.query(self.Order).filter_by(
             product_id=product.id,
             customer=customer.name
         ).first()
         
-        stockin = self.StockIn.query.filter_by(
+        stockin = self.db_session.query(self.StockIn).filter_by(
             product_id=product.id,
             customer=customer.name
         ).first()
@@ -319,12 +287,12 @@ class ShipmentLimitTestCase(unittest.TestCase):
             order_id=order.id,
             stockin_id=stockin.id
         )
-        self.db.session.add(deduction_stockout)
+        self.db_session.add(deduction_stockout)
         product.current_stock -= 3000
-        self.db.session.commit()
+        self.db_session.commit()
         
-        total_non_deduction_shipped = self.db.session.query(
-            self.db.func.sum(self.StockOut.quantity)
+        total_non_deduction_shipped = self.db_session.query(
+            func.sum(self.StockOut.quantity)
         ).join(self.Order, self.StockOut.order_id == self.Order.id).filter(
             self.Order.product_id == product.id,
             self.Order.customer == customer.name,
@@ -344,20 +312,13 @@ class ShipmentLimitTestCase(unittest.TestCase):
     def test_05_no_order_no_shipment(self):
         """
         测试用例05: 无订单时不能出货
-        
-        场景：
-        - 新客户，无订单
-        - 尝试出货
-        
-        预期结果：
-        - 可出货量 = 0
         """
         print("\n[测试用例05] 无订单时不能出货")
         
-        product = self.Product.query.first()
+        product = self.db_session.query(self.Product).first()
         new_customer = '新客户'
         
-        orders = self.Order.query.filter_by(
+        orders = self.db_session.query(self.Order).filter_by(
             product_id=product.id,
             customer=new_customer
         ).all()
@@ -373,22 +334,13 @@ class ShipmentLimitTestCase(unittest.TestCase):
     def test_06_multiple_orders_aggregation(self):
         """
         测试用例06: 多订单聚合计算
-        
-        场景：
-        - 同一客户同一产品有多个订单
-        - 订单1：3000
-        - 订单2：2000
-        - 总订单量：5000
-        
-        预期结果：
-        - 可出货量 = 所有订单量之和
         """
         print("\n[测试用例06] 多订单聚合计算")
         
-        product = self.Product.query.first()
-        customer = self.Customer.query.first()
+        product = self.db_session.query(self.Product).first()
+        customer = self.db_session.query(self.Customer).first()
         
-        self.db.session.query(self.Order).filter(
+        self.db_session.query(self.Order).filter(
             self.Order.product_id == product.id,
             self.Order.customer == customer.name
         ).delete()
@@ -405,11 +357,11 @@ class ShipmentLimitTestCase(unittest.TestCase):
             product_id=product.id,
             quantity=2000
         )
-        self.db.session.add_all([order1, order2])
+        self.db_session.add_all([order1, order2])
         product.current_stock += 5000
-        self.db.session.commit()
+        self.db_session.commit()
         
-        orders = self.Order.query.filter_by(
+        orders = self.db_session.query(self.Order).filter_by(
             product_id=product.id,
             customer=customer.name
         ).all()
@@ -427,63 +379,57 @@ class ShipmentLimitBusinessRuleTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """测试类初始化"""
-        cls.app = Flask(__name__)
-        cls.app.config['TESTING'] = True
-        cls.app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
-        cls.app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-        cls.app.config['SECRET_KEY'] = 'test-secret-key'
-        
-        cls.db = SQLAlchemy(cls.app)
+        cls.engine = create_engine('sqlite:///:memory:')
         cls._define_models()
         
-        with cls.app.app_context():
-            cls.db.create_all()
+        Base.metadata.create_all(cls.engine)
+        Session = sessionmaker(bind=cls.engine)
+        cls.db_session = Session()
     
     @classmethod
     def _define_models(cls):
         """定义数据模型"""
-        db = cls.db
         
-        class Product(db.Model):
+        class Product(Base):
             __tablename__ = 'product'
-            id = db.Column(db.Integer, primary_key=True)
-            name = db.Column(db.String(100), nullable=False)
-            current_stock = db.Column(db.Integer, default=0)
+            id = Column(Integer, primary_key=True)
+            name = Column(String(100), nullable=False)
+            current_stock = Column(Integer, default=0)
         
-        class Order(db.Model):
+        class Order(Base):
             __tablename__ = 'order'
-            id = db.Column(db.Integer, primary_key=True)
-            order_no = db.Column(db.String(20), unique=True)
-            customer = db.Column(db.String(100))
-            product_id = db.Column(db.Integer, db.ForeignKey('product.id'))
-            quantity = db.Column(db.Integer)
-            status = db.Column(db.String(20), default='待备货')
+            id = Column(Integer, primary_key=True)
+            order_no = Column(String(20), unique=True)
+            customer = Column(String(100))
+            product_id = Column(Integer, ForeignKey('product.id'))
+            quantity = Column(Integer)
+            status = Column(String(20), default='待备货')
             
-            product = db.relationship('Product', backref='orders')
+            product = relationship('Product', backref='orders')
         
-        class StockIn(db.Model):
+        class StockIn(Base):
             __tablename__ = 'stock_in'
-            id = db.Column(db.Integer, primary_key=True)
-            stockin_no = db.Column(db.String(20), unique=True)
-            product_id = db.Column(db.Integer, db.ForeignKey('product.id'))
-            customer = db.Column(db.String(100))
-            quantity = db.Column(db.Integer)
+            id = Column(Integer, primary_key=True)
+            stockin_no = Column(String(20), unique=True)
+            product_id = Column(Integer, ForeignKey('product.id'))
+            customer = Column(String(100))
+            quantity = Column(Integer)
             
-            product = db.relationship('Product', backref='stockins')
+            product = relationship('Product', backref='stockins')
         
-        class StockOut(db.Model):
+        class StockOut(Base):
             __tablename__ = 'stock_out'
-            id = db.Column(db.Integer, primary_key=True)
-            stockout_no = db.Column(db.String(20), unique=True)
-            product_id = db.Column(db.Integer, db.ForeignKey('product.id'))
-            customer = db.Column(db.String(100))
-            quantity = db.Column(db.Integer)
-            order_id = db.Column(db.Integer, db.ForeignKey('order.id'))
-            stockin_id = db.Column(db.Integer, db.ForeignKey('stock_in.id'))
+            id = Column(Integer, primary_key=True)
+            stockout_no = Column(String(20), unique=True)
+            product_id = Column(Integer, ForeignKey('product.id'))
+            customer = Column(String(100))
+            quantity = Column(Integer)
+            order_id = Column(Integer, ForeignKey('order.id'))
+            stockin_id = Column(Integer, ForeignKey('stock_in.id'))
             
-            product = db.relationship('Product', backref='stockouts')
-            order = db.relationship('Order', backref='stockouts')
-            stockin = db.relationship('StockIn', backref='stockouts')
+            product = relationship('Product', backref='stockouts')
+            order = relationship('Order', backref='stockouts')
+            stockin = relationship('StockIn', backref='stockouts')
         
         cls.Product = Product
         cls.Order = Order
@@ -491,16 +437,12 @@ class ShipmentLimitBusinessRuleTestCase(unittest.TestCase):
         cls.StockOut = StockOut
     
     def setUp(self):
-        self.app_context = self.app.app_context()
-        self.app_context.push()
-        
         self.product = self.Product(name='测试产品', current_stock=0)
-        self.db.session.add(self.product)
-        self.db.session.commit()
+        self.db_session.add(self.product)
+        self.db_session.commit()
     
     def tearDown(self):
-        self.db.session.rollback()
-        self.app_context.pop()
+        self.db_session.rollback()
     
     def test_bug_scenario_5000_order_5000_stockin(self):
         """
@@ -521,7 +463,7 @@ class ShipmentLimitBusinessRuleTestCase(unittest.TestCase):
             product_id=self.product.id,
             quantity=5000
         )
-        self.db.session.add(order)
+        self.db_session.add(order)
         self.product.current_stock += 5000
         
         stockin = self.StockIn(
@@ -530,20 +472,20 @@ class ShipmentLimitBusinessRuleTestCase(unittest.TestCase):
             customer='客户A',
             quantity=5000
         )
-        self.db.session.add(stockin)
+        self.db_session.add(stockin)
         self.product.current_stock += 5000
-        self.db.session.commit()
+        self.db_session.commit()
         
         self.assertEqual(self.product.current_stock, 10000, "总库存应为10000")
         
-        orders = self.Order.query.filter_by(
+        orders = self.db_session.query(self.Order).filter_by(
             product_id=self.product.id,
             customer='客户A'
         ).all()
         total_order_quantity = sum(o.quantity for o in orders)
         
-        total_shipped = self.db.session.query(
-            self.db.func.sum(self.StockOut.quantity)
+        total_shipped = self.db_session.query(
+            func.sum(self.StockOut.quantity)
         ).join(self.Order, self.StockOut.order_id == self.Order.id).filter(
             self.Order.product_id == self.product.id,
             self.Order.customer == '客户A',
@@ -561,13 +503,13 @@ class ShipmentLimitBusinessRuleTestCase(unittest.TestCase):
         self.assertFalse(can_ship, 
             "出货10000应被拒绝！这是原始BUG：系统错误地允许出货超过订单量")
         
-        print(f"  ✓ 订单量: {total_order_quantity}")
-        print(f"  ✓ 备货量: 5000")
-        print(f"  ✓ 总库存: {self.product.current_stock}")
-        print(f"  ✓ 可出货量: {available_quantity}")
-        print(f"  ✓ 请求出货: {requested_quantity}")
-        print(f"  ✓ 出货被正确拒绝: {not can_ship}")
-        print("  ✓ BUG已修复：出货量严格受限于订单量")
+        print(f"  订单量: {total_order_quantity}")
+        print(f"  备货量: 5000")
+        print(f"  总库存: {self.product.current_stock}")
+        print(f"  可出货量: {available_quantity}")
+        print(f"  请求出货: {requested_quantity}")
+        print(f"  出货被正确拒绝: {not can_ship}")
+        print("  BUG已修复：出货量严格受限于订单量")
 
 
 if __name__ == '__main__':

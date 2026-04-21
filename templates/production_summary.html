@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='production-summary.css') }}">
+<link rel="stylesheet" href="/static/production-summary.css">
 {% endblock %}
 {% block content %}
     <h2>生产报表</h2>
@@ -459,5 +459,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='production-summary.js') }}"></script>
+<script src="/static/production-summary.js"></script>
 {% endblock %}

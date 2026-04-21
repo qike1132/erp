@@ -7,10 +7,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from app import create_app, db
-from app.models import Permission
-
-app = create_app()
+from fastapi_app.core.database import SyncSessionLocal
+from fastapi_app.shared_models import Permission
+from sqlalchemy import text
 
 PERMISSIONS_CONFIG = {
     'user': {
@@ -146,25 +145,26 @@ PERMISSIONS_CONFIG = {
 
 def init_permissions():
     """初始化权限数据"""
-    with app.app_context():
+    session = SyncSessionLocal()
+    try:
         print("=" * 70)
         print("权限体系初始化 - 大类全选模式")
         print("=" * 70)
 
-        existing_count = Permission.query.count()
+        existing_count = session.query(Permission).count()
         if existing_count > 0:
             print(f"\n权限表中已存在 {existing_count} 条数据")
             response = input("是否要重新初始化？这将清除现有权限数据。(y/n): ")
             if response.lower() != 'y':
                 print("操作已取消")
                 return
-            db.session.execute(db.text("DELETE FROM user_permission"))
-            db.session.commit()
+            session.execute(text("DELETE FROM user_permission"))
+            session.commit()
             print("已清除用户权限关联")
-            Permission.query.filter(Permission.parent_id.isnot(None)).delete(synchronize_session=False)
-            db.session.commit()
-            Permission.query.filter(Permission.parent_id.is_(None)).delete(synchronize_session=False)
-            db.session.commit()
+            session.query(Permission).filter(Permission.parent_id.isnot(None)).delete(synchronize_session=False)
+            session.commit()
+            session.query(Permission).filter(Permission.parent_id.is_(None)).delete(synchronize_session=False)
+            session.commit()
             print("已清除现有权限数据")
 
         print("\n开始创建权限数据...")
@@ -181,10 +181,10 @@ def init_permissions():
                 name=parent_data['name'],
                 code=parent_data['code']
             )
-            db.session.add(parent_perm)
-            db.session.flush()
+            session.add(parent_perm)
+            session.flush()
             permission_map[parent_data['code']] = parent_perm.id
-            print(f"  ✓ 父权限: {parent_data['name']} ({parent_data['code']})")
+            print(f"  + 父权限: {parent_data['name']} ({parent_data['code']})")
 
             for child_data in children:
                 child_perm = Permission(
@@ -192,16 +192,16 @@ def init_permissions():
                     code=child_data['code'],
                     parent_id=parent_perm.id
                 )
-                db.session.add(child_perm)
-                db.session.flush()
+                session.add(child_perm)
+                session.flush()
                 permission_map[child_data['code']] = child_perm.id
                 print(f"    - 子权限: {child_data['name']} ({child_data['code']})")
 
-        db.session.commit()
+        session.commit()
 
         print("\n" + "-" * 70)
         print("验证结果:")
-        all_permissions = Permission.query.order_by(Permission.id).all()
+        all_permissions = session.query(Permission).order_by(Permission.id).all()
         print(f"\n权限总数: {len(all_permissions)}")
 
         parent_perms = [p for p in all_permissions if p.parent_id is None]
@@ -218,6 +218,8 @@ def init_permissions():
         print("\n" + "=" * 70)
         print("权限数据初始化完成！")
         print("=" * 70)
+    finally:
+        session.close()
 
 
 if __name__ == '__main__':

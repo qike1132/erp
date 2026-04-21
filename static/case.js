@@ -22,8 +22,8 @@ const stockinCfg = {
     getPage: () => stockinCurrentPage, setPage: v => stockinCurrentPage = v,
     getFilters: () => stockinFilters, setFilters: v => stockinFilters = v,
     // API
-    listApi: '/api/v1/cases/in/list', detailApi: '/api/case-stockin/',
-    submitApi: '/api/batch-submit-case-stockins', submitKey: 'stockins', listKey: 'stockins',
+    listApi: '/api/v1/cases/in/list', detailApi: '/api/v1/cases/in/',
+    submitApi: '/api/v1/cases/in/batch', submitKey: 'stockins', listKey: 'stockins',
     // 行为
     requiresCustomer: true, lazyLoad: false,
     // 元素 ID 映射
@@ -120,8 +120,8 @@ const stockoutCfg = {
     getStaged: () => stagedStockouts, setStaged: v => stagedStockouts = v,
     getPage: () => stockoutCurrentPage, setPage: v => stockoutCurrentPage = v,
     getFilters: () => stockoutFilters, setFilters: v => stockoutFilters = v,
-    listApi: '/api/v1/cases/out/list', detailApi: '/api/case-stockout/',
-    submitApi: '/api/batch-submit-case-stockouts', submitKey: 'stockouts', listKey: 'stockouts',
+    listApi: '/api/v1/cases/out/list', detailApi: '/api/v1/cases/out/',
+    submitApi: '/api/v1/cases/out/batch', submitKey: 'stockouts', listKey: 'stockouts',
     requiresCustomer: false, lazyLoad: true,
     el: {
         search: 'stockout_product_search', datalist: 'stockout_product_list',
@@ -239,7 +239,7 @@ function initHandlers(cfg) {
                 }
                 const currentRequestId = ++requestId;
                 try {
-                    const res = await fetch(`/api/case-search?q=${encodeURIComponent(query)}`);
+                    const res = await fetch(`/api/v1/cases/search?q=${encodeURIComponent(query)}`);
                     if (currentRequestId !== requestId) return;
                     const data = await res.json();
                     if (currentRequestId !== requestId) return;

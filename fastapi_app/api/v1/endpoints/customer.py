@@ -10,8 +10,13 @@ from fastapi_app.schemas.customer import (
 )
 from fastapi_app.services import customer_service
 from sqlalchemy.ext.asyncio import AsyncSession
+from utils.redis_cache import redis_cache
+from fastapi.concurrency import run_in_threadpool
 
 router = APIRouter()
+
+CUSTOMER_LIST_CACHE_KEY = "customer:list:all"
+CUSTOMER_LIST_CACHE_TTL = 300
 
 
 def _customer_to_resp(c) -> CustomerResponse:
@@ -34,8 +39,21 @@ async def list_customers(
     user: User = Depends(require_permission("customer_manage")),
     db: AsyncSession = Depends(get_async_db),
 ):
-    """客户列表"""
+    """客户列表（带缓存）"""
+    cache_key = f"{CUSTOMER_LIST_CACHE_KEY}:{status or 'all'}"
+
+    cached = await run_in_threadpool(redis_cache.get, cache_key)
+    if cached is not None:
+        return CustomerListResponse(
+            customers=[CustomerResponse(**c) for c in cached],
+            total=len(cached),
+        )
+
     customers = await customer_service.get_customers(db, status)
+    customer_dicts = [_customer_to_resp(c).model_dump() for c in customers]
+
+    await run_in_threadpool(redis_cache.set, cache_key, customer_dicts, CUSTOMER_LIST_CACHE_TTL)
+
     return CustomerListResponse(
         customers=[_customer_to_resp(c) for c in customers],
         total=len(customers),
@@ -54,6 +72,7 @@ async def create_customer(
             db, data.name, data.contact, data.phone, data.address, data.note
         )
         await db.commit()
+        await run_in_threadpool(redis_cache.delete_pattern, CUSTOMER_LIST_CACHE_KEY)
         return CustomerActionResponse(message="客户添加成功")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

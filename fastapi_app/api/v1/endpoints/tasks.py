@@ -92,8 +92,8 @@ async def async_import_orders(
     current_user: User = Depends(require_permission("batch_import")),
 ):
     """异步批量导入订单（提交后台任务）"""
-    if not file.filename.endswith(('.xlsx', '.xls', '.csv')):
-        raise HTTPException(status_code=400, detail="仅支持 Excel (.xlsx/.xls) 或 CSV 文件")
+    if not file.filename.endswith(('.xlsx', '.csv')):
+        raise HTTPException(status_code=400, detail="仅支持 Excel (.xlsx) 或 CSV 文件，.xls 已不再支持")
 
     # 保存上传文件到临时位置
     suffix = os.path.splitext(file.filename)[1]
@@ -119,8 +119,8 @@ async def async_import_stockins(
     current_user: User = Depends(require_permission("batch_import")),
 ):
     """异步批量导入备货（提交后台任务）"""
-    if not file.filename.endswith(('.xlsx', '.xls', '.csv')):
-        raise HTTPException(status_code=400, detail="仅支持 Excel (.xlsx/.xls) 或 CSV 文件")
+    if not file.filename.endswith(('.xlsx', '.csv')):
+        raise HTTPException(status_code=400, detail="仅支持 Excel (.xlsx) 或 CSV 文件，.xls 已不再支持")
 
     suffix = os.path.splitext(file.filename)[1]
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:

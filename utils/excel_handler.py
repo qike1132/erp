@@ -7,8 +7,8 @@ import os
 from datetime import datetime, timedelta
 from contextlib import contextmanager
 
-# 允许的Excel文件扩展名
-ALLOWED_EXCEL_EXTENSIONS = {'.xlsx', '.xls'}
+# 允许的Excel文件扩展名（.xls 已弃用：CVE-2019-19276）
+ALLOWED_EXCEL_EXTENSIONS = {'.xlsx'}
 
 
 def validate_excel_filename(filename: str) -> tuple[bool, str]:
@@ -25,7 +25,9 @@ def validate_excel_filename(filename: str) -> tuple[bool, str]:
 
     ext = os.path.splitext(filename)[1].lower()
     if ext not in ALLOWED_EXCEL_EXTENSIONS:
-        return False, '只支持 Excel 文件格式 (.xlsx 或 .xls)'
+        if ext == '.xls':
+            return False, '.xls 格式已不再支持（安全原因），请将文件另存为 .xlsx 格式'
+        return False, '只支持 Excel 文件格式 (.xlsx)'
 
     return True, ''
 
@@ -81,25 +83,24 @@ class ExcelReader:
             self.error = '没有选择文件'
             return
         
-        # 检查文件扩展名
+        # 检查文件扩展名（.xls 已弃用，存在安全漏洞 CVE-2019-19276）
         filename_lower = self.file.filename.lower()
-        if not (filename_lower.endswith('.xlsx') or filename_lower.endswith('.xls')):
-            self.error = '只支持 Excel 文件格式 (.xlsx 或 .xls)'
+        if filename_lower.endswith('.xls'):
+            self.error = '.xls 格式已不再支持（安全原因），请将文件另存为 .xlsx 格式后重新上传'
+            return
+        if not filename_lower.endswith('.xlsx'):
+            self.error = '只支持 Excel 文件格式 (.xlsx)'
             return
         
         # 创建临时文件
-        suffix = '.xlsx' if filename_lower.endswith('.xlsx') else '.xls'
-        self.temp_fd, self.temp_path = tempfile.mkstemp(suffix=suffix)
+        self.temp_fd, self.temp_path = tempfile.mkstemp(suffix='.xlsx')
         
         try:
             # 保存文件
             self.file.save(self.temp_path)
             
-            # 根据文件类型打开
-            if filename_lower.endswith('.xlsx'):
-                self._open_xlsx()
-            else:
-                self._open_xls()
+            # 仅支持 .xlsx（使用 openpyxl）
+            self._open_xlsx()
                 
         except Exception as e:
             self.error = self._handle_excel_error(e)
@@ -181,37 +182,8 @@ class ExcelReader:
                 data.append(row_data)
         
         return True, data, None
-    
-    # xls文件最大允许大小 (50MB) - 防止恶意大文件导致资源耗尽
-    XLS_MAX_FILE_SIZE = 50 * 1024 * 1024
 
-    def _open_xls(self):
-        """打开xls格式文件
 
-        注意: xlrd 1.2.0 存在 XXE 漏洞 (CVE-2019-19276)。
-        此处通过限制文件大小和校验路径来缓解风险。
-        仅应处理受信任来源的 .xls 文件。
-        """
-        try:
-            import xlrd
-
-            # 安全检查: 限制文件大小以缓解XXE攻击面
-            if self.temp_path and os.path.exists(self.temp_path):
-                file_size = os.path.getsize(self.temp_path)
-                if file_size > self.XLS_MAX_FILE_SIZE:
-                    self.error = f'xls文件过大({file_size // (1024*1024)}MB)，最大允许50MB'
-                    return
-
-            self.wb = xlrd.open_workbook(self.temp_path, on_demand=True)
-            self.ws = self.wb.sheet_by_index(0)
-            self.max_row = self.ws.nrows
-            self.max_col = self.ws.ncols
-
-        except ImportError:
-            self.error = '系统缺少 xlrd 库,请安装: pip install xlrd==1.2.0'
-        except Exception as e:
-            self.error = self._handle_excel_error(e)
-    
     def get_cell_value(self, row, col):
         """
         获取单元格值
@@ -227,20 +199,9 @@ class ExcelReader:
             return None
         
         filename_lower = self.file.filename.lower()
-        
-        if filename_lower.endswith('.xlsx'):
-            # openpyxl方式
-            return self.ws.cell(row=row, column=col).value
-        else:
-            # xlrd方式(行列从0开始)
-            try:
-                val = self.ws.cell_value(row - 1, col - 1)
-                # 处理数字类型
-                if isinstance(val, float) and val == int(val):
-                    return int(val)
-                return val
-            except Exception:
-                return None
+
+        # 仅支持 .xlsx（使用 openpyxl）
+        return self.ws.cell(row=row, column=col).value
     
     def validate_headers(self, expected_headers, start_col=1):
         """

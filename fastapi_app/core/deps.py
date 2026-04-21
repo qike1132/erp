@@ -3,48 +3,25 @@ FastAPI 依赖注入
 
 认证和权限检查：支持两种认证方式（优先级从高到低）：
 1. JWT Bearer Token（Authorization: Bearer <token>）— 用于API客户端/移动端
-2. Flask session cookie — 用于浏览器Web端（兼容模式）
-
-由于 FastAPI 和 Flask 运行在同一域名下（Flask 作为反向代理转发 /api/v1 到 FastAPI），
-浏览器会自动携带 Flask 设置的 session cookie。
+2. Cookie-based JWT（httpOnly cookie）— 用于浏览器Web端
 """
 
 from fastapi import Depends, HTTPException, status, Request
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload, selectinload
 import logging
-import threading
 
 from fastapi_app.core.config import settings
 from fastapi_app.shared_models import User, Permission
 
 logger = logging.getLogger(__name__)
 
-# 缓存 Flask session 签名序列化器，避免每请求创建 Flask 实例
-_flask_session_serializer = None
-_serializer_lock = threading.Lock()
-
-
-def _ensure_session_serializer():
-    """确保 Flask session 序列化器已初始化（线程安全）"""
-    global _flask_session_serializer
-    if _flask_session_serializer is None:
-        with _serializer_lock:
-            # 双重检查锁定
-            if _flask_session_serializer is None:
-                from flask.sessions import SecureCookieSessionInterface
-                from flask import Flask as _Flask
-
-                _app = _Flask(__name__)
-                _app.config["SECRET_KEY"] = settings.SECRET_KEY
-                si = SecureCookieSessionInterface()
-                _flask_session_serializer = si.get_signing_serializer(_app)
-
 
 def create_access_token(data: dict, expires_delta=None) -> str:
     """生成JWT Token"""
     from datetime import datetime, timedelta, timezone
-    from jose import jwt
+    import jwt
 
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
@@ -54,12 +31,17 @@ def create_access_token(data: dict, expires_delta=None) -> str:
 
 def _decode_jwt_token(token: str) -> dict:
     """解码并验证JWT Token，返回payload或抛出异常"""
-    from jose import jwt, JWTError
+    import jwt
 
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         return payload
-    except JWTError:
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="JWT Token已过期",
+        )
+    except jwt.InvalidTokenError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="JWT Token无效",
@@ -69,7 +51,7 @@ def _decode_jwt_token(token: str) -> dict:
 def _get_user_id_from_jwt(request: Request) -> int | None:
     """
     尝试从 Authorization: Bearer <token> 中获取用户ID。
-    如果没有Bearer Token或解码失败，返回None（不抛异常，降级到session方式）。
+    如果没有Bearer Token或解码失败，返回None（不抛异常，降级到cookie方式）。
     """
     auth_header = request.headers.get("authorization", "")
     if not auth_header.startswith("Bearer "):
@@ -89,51 +71,64 @@ def _get_user_id_from_jwt(request: Request) -> int | None:
     return None
 
 
-def _get_user_id_from_session(request: Request) -> int | None:
+def _get_user_id_from_cookie(request: Request) -> int | None:
     """
-    从 Flask session cookie 中获取当前登录用户 ID。
+    从 httpOnly cookie 中获取当前登录用户 ID（cookie-based JWT）。
 
-    Flask 的 session 是签名 cookie，使用 itsdangerous 库解析。
-    使用 settings.SECRET_KEY（由 pydantic_settings 从 .env 读取）。
+    浏览器登录后，FastAPI 在 httpOnly cookie 中设置 JWT token，
+    此函数解码该 cookie 中的 JWT 获取用户信息。
     """
-    global _flask_session_serializer
-
-    session_cookie = request.cookies.get("session")
-    if not session_cookie:
+    cookie_token = request.cookies.get("access_token")
+    if not cookie_token:
         return None
 
     try:
-        # 缓存签名序列化器，避免每请求创建 Flask 实例
-        _ensure_session_serializer()
-
-        # 设置 max_age，与 Flask PERMANENT_SESSION_LIFETIME 对齐（默认31天）
-        session_data = _flask_session_serializer.loads(session_cookie, max_age=settings.SESSION_COOKIE_MAX_AGE)
-    except Exception as e:
-        logger.warning(f"Session cookie验证失败: {type(e).__name__}: {e}")
-        return None
-
-    user_id = session_data.get("user_id")
-    if user_id:
-        return int(user_id)
+        payload = _decode_jwt_token(cookie_token)
+        user_id = payload.get("sub")
+        if user_id:
+            return int(user_id)
+    except (HTTPException, ValueError):
+        pass
     return None
 
 
-def get_current_user(request: Request):
+def _resolve_user_id(request: Request) -> int | None:
+    """从 JWT Bearer 或 Cookie JWT 中提取用户ID（纯内存操作，无DB查询）"""
+    user_id = _get_user_id_from_jwt(request)
+    if user_id is None:
+        user_id = _get_user_id_from_cookie(request)
+    return user_id
+
+
+async def _verify_user_active(user_id: int) -> bool:
+    """验证用户仍存在且处于启用状态（在线程池中执行同步DB查询，不阻塞事件循环）"""
+    from fastapi_app.core.database import SyncSessionLocal
+
+    def _check():
+        db = SyncSessionLocal()
+        try:
+            user = db.execute(
+                select(User.id, User.status).where(User.id == user_id)
+            ).first()
+            return user is not None and bool(user.status)
+        finally:
+            db.close()
+
+    return await run_in_threadpool(_check)
+
+
+async def get_current_user_id(request: Request) -> int:
     """
     获取当前用户ID（双认证模式）。
 
     优先级：
     1. Authorization: Bearer <token>（JWT方式，适用于API客户端）
-    2. Flask session cookie（浏览器Web端兼容模式）
+    2. httpOnly cookie 中的 access_token（浏览器Web端）
 
     验证用户仍存在且处于启用状态，防止已禁用/删除用户的token继续有效。
+    返回 user_id: int。
     """
-    # 优先尝试 JWT Bearer Token
-    user_id = _get_user_id_from_jwt(request)
-
-    # 降级到 Flask session cookie
-    if user_id is None:
-        user_id = _get_user_id_from_session(request)
+    user_id = _resolve_user_id(request)
 
     if user_id is None:
         raise HTTPException(
@@ -141,55 +136,48 @@ def get_current_user(request: Request):
             detail="未登录",
         )
 
-    # 验证用户仍存在且处于启用状态
-    from fastapi_app.core.database import SyncSessionLocal
-    from sqlalchemy import select as sa_select
-
-    db = SyncSessionLocal()
-    try:
-        user = db.execute(
-            sa_select(User.id, User.status).where(User.id == user_id)
-        ).first()
-        if not user or not user.status:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="用户不存在或已被禁用",
-            )
-    finally:
-        db.close()
+    if not await _verify_user_active(user_id):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="用户不存在或已被禁用",
+        )
 
     return user_id
 
 
-def _get_user_with_permissions(request: Request) -> User:
+async def _get_user_with_permissions(request: Request) -> User:
     """
     解析认证信息并从数据库查询用户，同时预加载权限列表。
 
-    使用 SyncSessionLocal 直接创建 session，避免手动管理 generator 生命周期。
+    使用 run_in_threadpool 包装同步 DB 查询，避免阻塞事件循环。
     expunge 使 User 对象可在任何上下文安全使用。
     """
-    user_id = get_current_user(request)
+    user_id = await get_current_user_id(request)
 
     from fastapi_app.core.database import SyncSessionLocal
 
-    db = SyncSessionLocal()
-    try:
-        result = db.execute(
-            select(User)
-            .options(joinedload(User.permissions).selectinload(Permission.children))
-            .where(User.id == user_id)
-        )
-        user = result.unique().scalar_one_or_none()
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="用户不存在",
+    def _fetch():
+        db = SyncSessionLocal()
+        try:
+            result = db.execute(
+                select(User)
+                .options(joinedload(User.permissions).selectinload(Permission.children))
+                .where(User.id == user_id)
             )
-        # 预加载 permissions 后脱离 session，使 User 对象不再依赖数据库连接
-        db.expunge(user)
-        return user
-    finally:
-        db.close()
+            user = result.unique().scalar_one_or_none()
+            if user:
+                db.expunge(user)
+            return user
+        finally:
+            db.close()
+
+    user = await run_in_threadpool(_fetch)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="用户不存在",
+        )
+    return user
 
 
 def require_permission(permission_name: str):
@@ -201,7 +189,7 @@ def require_permission(permission_name: str):
         async def endpoint(user: User = Depends(require_permission("batch_import"))):
             ...
     """
-    def permission_checker(
+    async def permission_checker(
         current_user: User = Depends(_get_user_with_permissions),
     ) -> User:
         if not current_user.has_permission(permission_name):

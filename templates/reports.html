@@ -866,7 +866,7 @@ function testExport() {
 
     console.log('发送测试导出请求...');
     
-    fetch('/report/api/test-export')
+    fetch('/api/v1/reports/test-export')
         .then(response => {
             console.log('收到响应，状态码:', response.status);
             console.log('响应头:', response.headers);
@@ -965,7 +965,7 @@ function exportReport(reportType) {
     exportInProgress = true;
     showExportProgress();
 
-    const url = `/report/api/export?${params.toString()}`;
+    const url = `/api/v1/reports/export?${params.toString()}`;
     console.log('请求URL:', url);
 
     fetch(url)

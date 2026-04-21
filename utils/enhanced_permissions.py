@@ -378,11 +378,9 @@ class EnhancedPermissionSystem:
         def decorator(func):
             @wraps(func)
             def wrapper(*args, **kwargs):
-                from flask import request, session, g
-
-                user_id = session.get('user_id', 'anonymous')
-                ip_addr = request.remote_addr if request else '127.0.0.1'
-                session_id = session.get('session_id', '')
+                user_id = 'anonymous'
+                ip_addr = '127.0.0.1'
+                session_id = ''
 
                 result = self.evaluate(
                     tool_name=f"{resource_type}.{func.__name__}",
@@ -427,12 +425,12 @@ class EnhancedPermissionSystem:
                         approved=False, danger_level=result.danger_level
                     )
 
-                    from flask import jsonify
-                    return jsonify({
+                    from starlette.responses import JSONResponse
+                    return JSONResponse(status_code=403, content={
                         'success': False,
                         'error': f'Permission denied: {result.reason}',
                         'danger_level': result.danger_level.value
-                    }), 403
+                    })
             return wrapper
         return decorator
 

@@ -139,7 +139,7 @@ document.addEventListener('DOMContentLoaded', function() {
             
             updateProgress(30, '上传中...');
             
-            const response = await fetch('/upload', {
+            const response = await fetch('/api/v1/auth/upload', {
                 method: 'POST',
                 body: formData
             });
@@ -609,7 +609,7 @@ async function openBomModal(productId, productName) {
 
 async function loadBomData(productId) {
     try {
-        const response = await fetch(`/api/v1/purchase-center/api/product/${productId}/bom`);
+        const response = await fetch(`/api/v1/purchase-center/product/${productId}/bom`);
         const result = await response.json();
         
         if (result.success) {
@@ -826,7 +826,7 @@ async function saveBom() {
     };
 
     try {
-        const response = await fetch(`/api/v1/purchase-center/api/product/${currentProductId}/bom`, {
+        const response = await fetch(`/api/v1/purchase-center/product/${currentProductId}/bom`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -877,7 +877,7 @@ async function searchProductForCopy() {
     }
     
     try {
-        const response = await fetch(`/api/v1/purchase-center/api/products/search?keyword=${encodeURIComponent(keyword)}`);
+        const response = await fetch(`/api/v1/purchase-center/products/search?keyword=${encodeURIComponent(keyword)}`);
         const result = await response.json();
         
         if (result.success && result.products.length > 0) {
@@ -935,7 +935,7 @@ function selectCopyBomProduct(productId, hasBom, productName, barcode) {
 
 async function loadCopyBomPreview(productId, productName, barcode) {
     try {
-        const response = await fetch(`/api/v1/purchase-center/api/products/${productId}/bom-preview`);
+        const response = await fetch(`/api/v1/purchase-center/products/${productId}/bom-preview`);
         const result = await response.json();
         
         if (result.success) {
@@ -976,7 +976,7 @@ async function confirmCopyBom() {
     try {
         showCopyBomProgress('正在复制BOM表...', 30);
         
-        const response = await fetch(`/api/v1/purchase-center/api/products/${currentProductId}/copy-bom`, {
+        const response = await fetch(`/api/v1/purchase-center/products/${currentProductId}/copy-bom`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -1075,7 +1075,7 @@ async function quickCopyBom() {
         showQuickCopyProgress('搜索产品中...', 10);
         
         try {
-            const searchResponse = await fetch(`/api/v1/purchase-center/api/products/search?keyword=${encodeURIComponent(keyword)}`);
+            const searchResponse = await fetch(`/api/v1/purchase-center/products/search?keyword=${encodeURIComponent(keyword)}`);
             const searchResult = await searchResponse.json();
             
             if (!searchResult.success || !searchResult.products || searchResult.products.length === 0) {
@@ -1134,7 +1134,7 @@ async function quickCopyBom() {
     showQuickCopyProgress(`正在从 "${sourceProductName}" 复制BOM...`, 40);
     
     try {
-        const previewResponse = await fetch(`/api/v1/purchase-center/api/products/${sourceProductId}/bom-preview`);
+        const previewResponse = await fetch(`/api/v1/purchase-center/products/${sourceProductId}/bom-preview`);
         const previewResult = await previewResponse.json();
         
         if (!previewResult.success) {
@@ -1146,7 +1146,7 @@ async function quickCopyBom() {
         
         showQuickCopyProgress('执行复制...', 70);
         
-        const copyResponse = await fetch(`/api/v1/purchase-center/api/products/${currentProductId}/copy-bom`, {
+        const copyResponse = await fetch(`/api/v1/purchase-center/products/${currentProductId}/copy-bom`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -1176,7 +1176,7 @@ async function quickCopyBom() {
             
             if (copyResponse.status === 409 && copyResult.has_existing_bom) {
                 if (confirm('目标产品已有BOM表，是否覆盖？')) {
-                    const overwriteCopyResponse = await fetch(`/api/v1/purchase-center/api/products/${currentProductId}/copy-bom`, {
+                    const overwriteCopyResponse = await fetch(`/api/v1/purchase-center/products/${currentProductId}/copy-bom`, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
@@ -1336,7 +1336,7 @@ document.addEventListener('click', function(e) {
 
 async function searchAutocompleteProducts(keyword) {
     try {
-        const response = await fetch(`/api/v1/purchase-center/api/products/search?keyword=${encodeURIComponent(keyword)}`);
+        const response = await fetch(`/api/v1/purchase-center/products/search?keyword=${encodeURIComponent(keyword)}`);
         const result = await response.json();
         autocompleteSelectedIndex = -1;
 

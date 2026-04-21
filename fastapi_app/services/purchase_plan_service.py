@@ -386,7 +386,8 @@ async def _get_inventory_map(db: AsyncSession) -> dict:
         from fastapi.concurrency import run_in_threadpool
         cached = await run_in_threadpool(redis_cache.get, f'{INVENTORY_CACHE_PREFIX}:map')
         if cached is not None:
-            return cached
+            # Redis 反序列化后 key 为字符串，需转回元组以保持内部接口一致
+            return {tuple(k.split('||')): v for k, v in cached.items()}
     except Exception as e:
         logger.warning(f'Redis缓存读取失败: {e}')
 
@@ -397,11 +398,12 @@ async def _get_inventory_map(db: AsyncSession) -> dict:
         logger.warning(f'获取库存数据失败: {e}')
         return {}
 
-    # 写入 Redis 缓存
+    # 写入 Redis 缓存（tuple key 不可 JSON 序列化，转为 "customer||product" 字符串 key）
     try:
         from utils.redis_cache import redis_cache
         from fastapi.concurrency import run_in_threadpool
-        await run_in_threadpool(redis_cache.set, f'{INVENTORY_CACHE_PREFIX}:map', mapping, timeout=INVENTORY_CACHE_TTL)
+        cacheable = {f'{k[0]}||{k[1]}': v for k, v in mapping.items()}
+        await run_in_threadpool(redis_cache.set, f'{INVENTORY_CACHE_PREFIX}:map', cacheable, timeout=INVENTORY_CACHE_TTL)
     except Exception as e:
         logger.warning(f'Redis缓存写入失败: {e}')
 

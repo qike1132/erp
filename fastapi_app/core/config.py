@@ -7,7 +7,6 @@ from urllib.parse import quote_plus
 load_dotenv(override=False)
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import List
 
 
 def _build_database_uri() -> str:
@@ -34,15 +33,15 @@ class Settings(BaseSettings):
     REDOC_URL: str = "/api/redoc"
     OPENAPI_URL: str = "/api/openapi.json"
 
-    # 数据库配置 - 与 Flask 共享相同的构建逻辑
+    # 数据库配置
     # 优先使用 DATABASE_URL 环境变量，否则从 DB_* 变量构建
     DATABASE_URL: str = os.getenv("DATABASE_URL") or _build_database_uri()
 
-    # 异步数据库URL - 用于 FastAPI 主要业务逻辑
+    # 异步数据库URL - 用于 FastAPI 主要业务逻辑（asyncmy 驱动）
     ASYNC_DATABASE_URL: str = os.getenv(
         "ASYNC_DATABASE_URL",
         (os.getenv("DATABASE_URL") or _build_database_uri()).replace(
-            "mysql+pymysql", "mysql+aiomysql"
+            "mysql+pymysql", "mysql+asyncmy"
         )
     )
 
@@ -64,15 +63,23 @@ class Settings(BaseSettings):
     )
 
     # CORS配置 - 从环境变量读取允许的源，默认仅允许本地访问
-    # 包含 Nginx 统一入口（端口80）以及直接访问模式（端口5002/5003）
-    BACKEND_CORS_ORIGINS: List[str] = os.getenv("CORS_ORIGINS", "http://localhost,http://localhost:5003,http://localhost:5002").split(",")
+    # 包含 Nginx 统一入口（端口80）以及直接访问模式（端口5002）
+    BACKEND_CORS_ORIGINS: list[str] = os.getenv("CORS_ORIGINS", "http://localhost,http://localhost:5002").split(",")
 
     # 安全配置 - 从环境变量读取，生产环境必须显式设置
     SECRET_KEY: str = os.getenv("SECRET_KEY", "")
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
-    # Flask session cookie 最大有效期（秒），与 Flask PERMANENT_SESSION_LIFETIME 对齐（默认31天）
-    SESSION_COOKIE_MAX_AGE: int = int(os.getenv("SESSION_COOKIE_MAX_AGE", 2678400))
+    # httpOnly JWT Cookie 最大有效期（秒），默认31天
+    COOKIE_MAX_AGE: int = int(os.getenv("COOKIE_MAX_AGE", 2678400))
+
+    # 允许的主机名 - 用于 TrustedHostMiddleware 和 CSRF Origin/Referer 校验
+    # 生产环境必须通过 ALLOWED_HOSTS 环境变量显式设置（如 "erp.example.com,erp.example.cn"）
+    # 开发环境默认允许所有主机（"*"），生产环境必须限制为具体域名
+    ALLOWED_HOSTS: list[str] = os.getenv(
+        "ALLOWED_HOSTS",
+        "*"  # 开发环境允许所有主机；生产环境必须设置具体域名
+    ).split(",")
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -86,7 +93,7 @@ class Settings(BaseSettings):
                 f"SECRET_KEY 不能使用不安全的默认值 '{self.SECRET_KEY}'，"
                 "请生成新的密钥: python -c \"import secrets; print(secrets.token_hex(32))\""
             )
-        if not self.REDIS_PASSWORD and os.getenv("FLASK_ENV") == "production":
+        if not self.REDIS_PASSWORD and os.getenv("APP_ENV") == "production":
             import warnings
             warnings.warn(
                 "REDIS_PASSWORD 未设置，生产环境建议启用 Redis 认证",

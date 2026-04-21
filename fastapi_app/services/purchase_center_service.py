@@ -13,7 +13,7 @@
 
 import json
 import logging
-import math
+import html as html_module
 import re
 from datetime import datetime, timedelta, date
 from decimal import Decimal
@@ -172,38 +172,49 @@ def create_purchase_order(db: Session, data: dict, user_id: int, username: str) 
     supplier_id = data.get('supplier_id')
     remark = data.get('remark', '')
 
-    total_amount = Decimal('0')
     order_items = []
 
     for item_data in items_data:
         item = PurchaseOrderItem(
-            order_no=order_no,
-            product_id=item_data.get('product_id'),
             product_name=item_data.get('product_name', ''),
             barcode=item_data.get('barcode', ''),
             customer_name=item_data.get('customer_name', ''),
+            material_code=item_data.get('material_code', ''),
             material_name=item_data.get('material_name', ''),
             material_category=item_data.get('material_category', ''),
             quantity=Decimal(str(item_data.get('quantity', 0))),
             unit=item_data.get('unit', ''),
+            unit_usage=Decimal(str(item_data.get('unit_usage', 0))),
             unit_price=Decimal(str(item_data.get('unit_price', 0))),
             supplier_name=item_data.get('supplier_name', supplier_name),
             remark=item_data.get('remark', ''),
         )
         item.total_price = item.quantity * item.unit_price
-        total_amount += item.total_price
         order_items.append(item)
+
+    # 从 items_data 中提取关联信息
+    source_order_id = None
+    product_name = ''
+    product_quantity = Decimal('0')
+    customer_name = data.get('customer_name', '')
+    for item_data in items_data:
+        if item_data.get('source_order_id'):
+            source_order_id = item_data['source_order_id']
+        if item_data.get('product_name'):
+            product_name = item_data['product_name']
+        product_quantity += Decimal(str(item_data.get('quantity', 0)))
 
     order = PurchaseOrder(
         order_no=order_no,
         supplier_id=supplier_id,
         supplier_name=supplier_name,
-        customer_name=data.get('customer_name', ''),
-        total_amount=total_amount,
+        customer_name=customer_name,
+        source_order_id=source_order_id,
+        product_name=product_name,
+        product_quantity=product_quantity,
         status='待处理',
         remark=remark,
-        creator_id=user_id,
-        creator_name=username,
+        created_by=user_id,
     )
     db.add(order)
     db.flush()
@@ -237,6 +248,7 @@ def one_click_generate_order(db: Session, order_ids: list, user_id: int, usernam
         raise ValueError('未找到订单')
 
     supplier_items = {}
+    processed_order_ids = set()
 
     for order in orders:
         product = db.query(Product).options(
@@ -248,6 +260,8 @@ def one_click_generate_order(db: Session, order_ids: list, user_id: int, usernam
 
         if not product or not product.has_bom():
             continue
+
+        processed_order_ids.add(order.id)
 
         all_materials = product.get_all_materials()
         for mat in all_materials:
@@ -275,9 +289,9 @@ def one_click_generate_order(db: Session, order_ids: list, user_id: int, usernam
         }, user_id, username)
         created_orders.append(result)
 
-    # 更新原始订单状态
+    # 更新原始订单状态（仅更新成功生成采购项的订单）
     for order in orders:
-        if order.status == '待备货':
+        if order.id in processed_order_ids and order.status == '待备货':
             order.status = '已备货'
     db.commit()
 
@@ -333,7 +347,7 @@ def get_purchase_orders(db: Session, *, page: int = 1, per_page: int = 50,
                 'supplier_name': o.supplier_name,
                 'customer_name': o.customer_name,
                 'status': o.status,
-                'total_amount': float(o.total_amount) if o.total_amount else 0,
+                'total_amount': sum(float(item.total_price) if item.total_price else 0 for item in o.items),
                 'item_count': len(o.items),
                 'create_time': o.create_time.strftime('%Y-%m-%d %H:%M') if o.create_time else '',
                 'remark': o.remark or '',
@@ -361,7 +375,7 @@ def get_purchase_order(db: Session, order_id: int) -> dict:
         'supplier_address': getattr(order, 'supplier_address', ''),
         'customer_name': order.customer_name,
         'status': order.status,
-        'total_amount': float(order.total_amount) if order.total_amount else 0,
+        'total_amount': sum(float(item.total_price) if item.total_price else 0 for item in order.items),
         'remark': order.remark or '',
         'create_time': order.create_time.strftime('%Y-%m-%d %H:%M') if order.create_time else '',
         'items': [
@@ -415,25 +429,23 @@ def delete_purchase_order(db: Session, order_id: int) -> dict:
     if not order:
         raise ValueError('采购订单不存在')
 
-    # 回滚关联订单状态
+    # 回滚关联订单状态（通过 source_order_id 和 source_order_ids）
     source_order_ids = set()
-    items = db.query(PurchaseOrderItem).filter_by(order_id=order_id).all()
-    for item in items:
-        source_order = db.query(Order).filter(
-            Order.customer == item.customer_name,
-            Order.product_id == item.product_id,
-            Order.status.in_(['部分备货', '已备货']),
-        ).first()
-        if source_order:
-            source_order_ids.add(source_order.id)
+    if order.source_order_id:
+        source_order_ids.add(order.source_order_id)
+    if order.source_order_ids:
+        try:
+            for oid in json.loads(order.source_order_ids):
+                if isinstance(oid, int):
+                    source_order_ids.add(oid)
+        except (json.JSONDecodeError, TypeError):
+            pass
 
     for oid in source_order_ids:
         source_order = db.get(Order, oid)
         if source_order:
             source_order.status = '待备货'
 
-    for item in items:
-        db.delete(item)
     db.delete(order)
     db.commit()
     return {'id': order_id}
@@ -447,10 +459,12 @@ def _sync_order_to_material_registration(db: Session, order, user_id: int):
 
     registration = MaterialRegistration(
         registration_no=f'MR{datetime.now().strftime("%Y%m%d")}{order.id:04d}',
+        purchase_order_id=order.id,
+        purchase_order_no=order.order_no,
         supplier_id=order.supplier_id,
         supplier_name=order.supplier_name,
         status='pending',
-        creator_id=user_id,
+        created_by=user_id,
     )
     db.add(registration)
     db.flush()
@@ -544,7 +558,7 @@ def get_completed_purchase_orders(db: Session, *, page: int = 1, per_page: int =
                 'order_no': o.order_no,
                 'supplier_name': o.supplier_name,
                 'customer_name': o.customer_name,
-                'total_amount': float(o.total_amount) if o.total_amount else 0,
+                'total_amount': sum(float(item.total_price) if item.total_price else 0 for item in o.items),
                 'create_time': o.create_time.strftime('%Y-%m-%d %H:%M') if o.create_time else '',
                 'items': [
                     {
@@ -575,7 +589,7 @@ def export_completed_orders(db: Session, data: dict) -> str:
     html = '<table border="1" cellpadding="5"><tr><th>订单号</th><th>供应商</th><th>客户</th><th>产品</th><th>物料</th><th>数量</th><th>单位</th></tr>'
     for order in orders_data['orders']:
         for item in order.get('items', []):
-            html += f'<tr><td>{order["order_no"]}</td><td>{order["supplier_name"]}</td><td>{order["customer_name"]}</td><td>{item["product_name"]}</td><td>{item["material_name"]}</td><td>{item["quantity"]}</td><td>{item["unit"]}</td></tr>'
+            html += f'<tr><td>{html_module.escape(order["order_no"] or "")}</td><td>{html_module.escape(order["supplier_name"] or "")}</td><td>{html_module.escape(order["customer_name"] or "")}</td><td>{html_module.escape(item["product_name"] or "")}</td><td>{html_module.escape(item["material_name"] or "")}</td><td>{item["quantity"]}</td><td>{html_module.escape(item["unit"] or "")}</td></tr>'
     html += '</table>'
     return html
 
@@ -615,7 +629,7 @@ def get_unprocessed_orders(db: Session, *, customer: str = '', page: int = 1, pe
 
     return {
         'orders': result,
-        'total': total,
+        'total': len(result),
         'pages': (total + per_page - 1) // per_page if per_page > 0 else 0,
         'current_page': page,
     }

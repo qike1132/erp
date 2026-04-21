@@ -12,16 +12,16 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from app import create_app, db
-from app.models import Permission
+from fastapi_app.core.database import SyncSessionLocal
+from fastapi_app.shared_models import Permission
 
 
 def main():
-    app = create_app()
-    with app.app_context():
+    session = SyncSessionLocal()
+    try:
 
         # ========== 1. 恢复"排产计划"导航项 ==========
-        pp_view = Permission.query.filter_by(code='production_plan_view').first()
+        pp_view = session.query(Permission).filter_by(code='production_plan_view').first()
         if pp_view:
             pp_view.name = '排产计划'
             pp_view.icon = 'fa-calendar-alt'
@@ -33,18 +33,18 @@ def main():
         else:
             print("[WARN] 未找到 production_plan_view 权限记录，跳过恢复")
 
-        pp_manage = Permission.query.filter_by(code='production_plan_manage').first()
+        pp_manage = session.query(Permission).filter_by(code='production_plan_manage').first()
         if pp_manage:
             pp_manage.name = '管理排产计划'
             print(f"[OK] 恢复排产计划管理权限名称 (id={pp_manage.id})")
 
         # ========== 2. 新增独立的"生产计划"导航项 ==========
-        ps_view = Permission.query.filter_by(code='production_summary_view').first()
+        ps_view = session.query(Permission).filter_by(code='production_summary_view').first()
         if ps_view:
             print(f"[SKIP] 生产计划导航项已存在 (id={ps_view.id})")
         else:
             # 找到 core section 的最大 sort_order
-            core_items = Permission.query.filter_by(
+            core_items = session.query(Permission).filter_by(
                 section='core', is_nav=True
             ).order_by(Permission.sort_order.desc()).first()
             next_sort = (core_items.sort_order + 10) if core_items else 10
@@ -59,7 +59,7 @@ def main():
                 sort_order=next_sort,
                 is_nav=True,
             )
-            db.session.add(nav)
+            session.add(nav)
 
             # 添加管理权限（不在导航显示）
             manage_perm = Permission(
@@ -68,12 +68,12 @@ def main():
                 parent_id=None,
                 is_nav=False,
             )
-            db.session.add(manage_perm)
+            session.add(manage_perm)
 
             print(f"[OK] 新增生产计划导航项 (sort_order={next_sort})")
             print(f"[OK] 新增生产计划管理权限 (code=production_summary_manage)")
 
-        db.session.commit()
+        session.commit()
 
         # ========== 3. 清除导航缓存 ==========
         try:
@@ -87,12 +87,14 @@ def main():
         print("\n--- 验证结果 ---")
         for code in ['production_plan_view', 'production_plan_manage',
                       'production_summary_view', 'production_summary_manage']:
-            p = Permission.query.filter_by(code=code).first()
+            p = session.query(Permission).filter_by(code=code).first()
             if p:
                 nav_flag = '[NAV]' if p.is_nav else '[HIDDEN]'
                 print(f"  {nav_flag} id={p.id}, name={p.name}, code={p.code}, url={p.url or '-'}")
             else:
                 print(f"  [MISSING] code={code}")
+    finally:
+        session.close()
 
 
 if __name__ == '__main__':

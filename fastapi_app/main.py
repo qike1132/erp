@@ -3,6 +3,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi import Request, Response, Depends
+from fastapi.responses import ORJSONResponse
+from fastapi.concurrency import run_in_threadpool
 from contextlib import asynccontextmanager
 import time
 import json
@@ -16,7 +18,7 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from fastapi_app.core.config import settings
 from fastapi_app.core.logger import setup_logging, logger
-from fastapi_app.core.deps import get_current_user
+from fastapi_app.core.deps import get_current_user_id
 from fastapi_app.api.v1.router import api_router
 from fastapi_app.core.database import async_engine, sync_engine, dispose_async_engines
 from fastapi_app.core.db_health import db_health_checker
@@ -43,7 +45,7 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"异步数据库连接验证失败: {e}")
     else:
-        logger.warning("异步数据库引擎未初始化（aiomysql 未安装），跳过异步连接验证")
+        logger.warning("异步数据库引擎未初始化（asyncmy 未安装），跳过异步连接验证")
 
     # 预热同步数据库连接池（避免首次请求延迟）
     try:
@@ -65,6 +67,30 @@ async def lifespan(app: FastAPI):
     # 预热同步 Redis 客户端（避免首次请求延迟）
     from fastapi_app.services.notification_service import _warmup_sync_redis
     await run_in_threadpool(_warmup_sync_redis)
+
+    # 初始化 Redis 缓存管理器
+    from utils.redis_cache import redis_cache
+    try:
+        redis_host = os.getenv('REDIS_HOST', 'localhost')
+        redis_port = int(os.getenv('REDIS_PORT', 6379))
+        redis_db = int(os.getenv('REDIS_DB', 0))
+        redis_password = os.getenv('REDIS_PASSWORD')
+        redis_cache.init_app(
+            redis_host=redis_host,
+            redis_port=redis_port,
+            redis_db=redis_db,
+            redis_password=redis_password
+        )
+        logger.info(f"Redis缓存管理器初始化完成，后端: {redis_cache.get_stats().get('backend', 'unknown')}")
+    except Exception as e:
+        logger.warning(f"Redis缓存初始化失败，将使用内存缓存: {e}")
+
+    # 清除导航缓存（确保 Flask→FastAPI URL 映射生效）
+    try:
+        from fastapi_app.core.nav_context import invalidate_nav_cache
+        await run_in_threadpool(invalidate_nav_cache)
+    except Exception as e:
+        logger.warning(f"导航缓存清除失败: {e}")
 
     # 启动 Redis Pub/Sub → WebSocket 桥梁
     from fastapi_app.services.notification_service import manager
@@ -104,6 +130,7 @@ app = FastAPI(
     docs_url=settings.DOCS_URL,
     redoc_url=settings.REDOC_URL,
     openapi_url=settings.OPENAPI_URL,
+    default_response_class=ORJSONResponse,
     lifespan=lifespan
 )
 
@@ -126,10 +153,14 @@ app.add_middleware(SlowAPIMiddleware)
 # 统一异常处理 - 确保所有错误返回一致的JSON格式
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import RedirectResponse
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    """统一HTTP异常响应格式"""
+    """统一HTTP异常响应格式（3xx 重定向直接透传，不转为 JSON）"""
+    if 300 <= exc.status_code < 400 and exc.headers and "location" in {k.lower(): v for k, v in exc.headers.items()}:
+        location = {k.lower(): v for k, v in exc.headers.items()}["location"]
+        return RedirectResponse(url=location, status_code=exc.status_code)
     return Response(
         content=json.dumps({
             "success": False,
@@ -168,67 +199,25 @@ async def general_exception_handler(request: Request, exc: Exception):
         media_type="application/json",
     )
 
-# CSRF保护中间件 - 验证POST/PUT/DELETE请求的Origin/Referer
-from urllib.parse import urlparse as _urlparse
-
-# CSRF豁免路径配置：文档/健康检查/登录等无需CSRF验证的路径
-CSRF_EXACT_EXEMPT_PATHS = frozenset({
-    "/api/docs", "/api/redoc", "/api/openapi.json",
-    "/api/health", "/metrics", "/",
-})
-CSRF_PREFIX_EXEMPT_PATHS = ("/api/docs/",)
-CSRF_LOGIN_PATH = "/api/v1/auth/login"
-
-@app.middleware("http")
-async def csrf_protection(request: Request, call_next):
-    """CSRF保护：验证修改请求的Origin头与目标一致"""
-    if request.method in ("POST", "PUT", "DELETE", "PATCH"):
-        origin = request.headers.get("origin", "")
-        referer = request.headers.get("referer", "")
-        host = request.headers.get("host", "")
-
-        # 允许API文档和健康检查路径跳过CSRF检查，登录接口豁免（移动端无Origin/Referer）
-        path = request.url.path
-        if (path in CSRF_EXACT_EXEMPT_PATHS or
-                any(path.startswith(p) for p in CSRF_PREFIX_EXEMPT_PATHS) or
-                path == CSRF_LOGIN_PATH):
-            return await call_next(request)
-
-        # 携带Bearer Token的请求不受CSRF保护限制（JWT不易受CSRF攻击）
-        auth_header = request.headers.get("authorization", "")
-        if auth_header.startswith("Bearer "):
-            return await call_next(request)
-
-        # 如果有Origin头，验证它与host匹配
-        if origin:
-            parsed_origin = _urlparse(origin)
-            origin_host = parsed_origin.netloc
-            if host and origin_host != host:
-                return Response(
-                    content='{"detail":"CSRF验证失败：Origin不匹配"}',
-                    status_code=403,
-                    media_type="application/json",
-                )
-        # 如果没有Origin但有Referer，验证它
-        elif referer:
-            parsed_referer = _urlparse(referer)
-            referer_host = parsed_referer.netloc
-            if host and referer_host != host:
-                return Response(
-                    content='{"detail":"CSRF验证失败：Referer不匹配"}',
-                    status_code=403,
-                    media_type="application/json",
-                )
-        # 既无Origin也无Referer的状态变更请求应被拒绝（防止CSRF绕过）
-        # 同源浏览器请求通常会携带Origin或Referer，缺少两者可能是CSRF攻击
-        else:
-            return Response(
-                content='{"detail":"CSRF验证失败：缺少Origin/Referer头"}',
-                status_code=403,
-                media_type="application/json",
-            )
-
-    return await call_next(request)
+# CSRF Cookie 中间件（Double Submit Cookie 模式）
+# 替代 Flask-WTF CSRF，为浏览器端提供 CSRF 保护
+# 单层 CSRF：仅使用 starlette-csrf，不叠加自定义 Origin/Referer 校验
+try:
+    from starlette_csrf import CSRFMiddleware
+    _csrf_secure = os.getenv("CSRF_COOKIE_SECURE", "").lower() in ("true", "1", "yes")
+    app.add_middleware(
+        CSRFMiddleware,
+        secret=settings.SECRET_KEY,
+        cookie_name="fastapi_csrf_token",
+        header_name="X-CSRFToken",
+        cookie_path="/",
+        cookie_secure=_csrf_secure,
+        cookie_httponly=False,  # JS 需读取 cookie 值设置 header
+        cookie_samesite="lax",
+        safe_methods=("GET", "HEAD", "OPTIONS"),
+    )
+except ImportError:
+    logger.warning("starlette-csrf 未安装，CSRF cookie 保护未启用")
 
 # CORS中间件 - 限制允许的源和方法
 app.add_middleware(
@@ -237,6 +226,14 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-CSRFToken"],
+)
+
+# TrustedHost 中间件 - 拒绝 Host 头不在 ALLOWED_HOSTS 中的请求
+# 防止 Host Header Injection 攻击（如密码重置投毒、缓存投毒、CSRF 绕过）
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=settings.ALLOWED_HOSTS,
 )
 
 # GZip压缩中间件
@@ -317,6 +314,17 @@ async def prometheus_middleware(request: Request, call_next):
 # 注册API路由
 app.include_router(api_router, prefix=settings.API_PREFIX)
 
+# 注册页面路由（不使用 API 前缀，直接挂载到根路径）
+from fastapi_app.api.v1.endpoints.pages import router as pages_router
+app.include_router(pages_router, tags=["页面"])
+
+# 静态文件挂载（开发模式 / Nginx 未代理时使用）
+from fastapi.staticfiles import StaticFiles
+import pathlib
+_static_dir = pathlib.Path(__file__).resolve().parent.parent / "static"
+if _static_dir.is_dir():
+    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+
 
 # ==================== WebSocket 实时通知 ====================
 
@@ -329,7 +337,7 @@ async def websocket_notifications(websocket: WebSocket, token: str = ""):
     WebSocket 实时通知端点。
 
     认证方式（按优先级）：
-    1. Flask Session Cookie（浏览器端，最快，无需等待消息）
+    1. Cookie-based JWT（浏览器端，httpOnly cookie，零延迟）
     2. JWT Token：首条消息发送 {"type":"auth","token":"xxx"}（移动端，推荐）
     3. JWT Token：query parameter ?token=xxx（向后兼容，不推荐）
     """
@@ -337,14 +345,13 @@ async def websocket_notifications(websocket: WebSocket, token: str = ""):
     user_id = None
     pending_message = None  # 首条非auth消息，需传递给主循环
 
-    # 1. 优先 Session Cookie 认证（浏览器端，零延迟）
-    session_cookie = websocket.cookies.get("session")
-    if session_cookie:
+    # 1. 优先 Cookie JWT 认证（浏览器端，零延迟）
+    cookie_token = websocket.cookies.get("access_token")
+    if cookie_token:
         try:
-            from fastapi_app.core.deps import _flask_session_serializer, _ensure_session_serializer, settings
-            _ensure_session_serializer()
-            session_data = _flask_session_serializer.loads(session_cookie, max_age=settings.SESSION_COOKIE_MAX_AGE)
-            user_id = session_data.get("user_id")
+            from fastapi_app.core.deps import _decode_jwt_token
+            payload = _decode_jwt_token(cookie_token)
+            user_id = payload.get("sub")
             if user_id:
                 user_id = int(user_id)
         except Exception as e:
@@ -379,29 +386,29 @@ async def websocket_notifications(websocket: WebSocket, token: str = ""):
             user_id = payload.get("sub")
             if user_id:
                 user_id = int(user_id)
-        except (ValueError, KeyError) as e:
-            logger.warning("WebSocket JWT(query)解码失败: %s", e)
-        except Exception as e:
+        except (ValueError, KeyError, HTTPException) as e:
             logger.warning("WebSocket JWT(query)认证失败: %s", e)
 
     if not user_id:
         await websocket.close(code=4001, reason="未认证")
         return
 
-    # 验证用户仍存在且处于启用状态
+    # 验证用户仍存在且处于启用状态（在线程池中执行，避免阻塞事件循环）
     from fastapi_app.core.database import SyncSessionLocal
     from fastapi_app.shared_models import User as _WSUser
     from sqlalchemy import select as _ws_select
-    _ws_db = SyncSessionLocal()
-    try:
-        _ws_user = _ws_db.execute(
-            _ws_select(_WSUser.id, _WSUser.status).where(_WSUser.id == user_id)
-        ).first()
-        if not _ws_user or not _ws_user.status:
-            await websocket.close(code=4001, reason="用户不存在或已被禁用")
-            return
-    finally:
-        _ws_db.close()
+
+    def _check_ws_user():
+        _ws_db = SyncSessionLocal()
+        try:
+            _ws_user = _ws_db.execute(
+                _ws_select(_WSUser.id, _WSUser.status).where(_WSUser.id == user_id)
+            ).first()
+            return _ws_user
+        finally:
+            _ws_db.close()
+
+    _ws_user = await run_in_threadpool(_check_ws_user)
 
     from fastapi_app.services.notification_service import manager
     manager.connect_existing(websocket, int(user_id))
@@ -423,10 +430,10 @@ async def websocket_notifications(websocket: WebSocket, token: str = ""):
         manager.disconnect(websocket, int(user_id))
 
 
-def _get_optional_user(request: Request) -> int | None:
+async def _get_optional_user(request: Request) -> int | None:
     """可选认证：已认证返回user_id，未认证返回None（不拒绝请求）"""
     try:
-        return get_current_user(request)
+        return await get_current_user_id(request)
     except Exception:
         return None
 
@@ -567,7 +574,7 @@ async def health_check(user_id: int | None = Depends(_get_optional_user)):
 
 
 @app.get("/api/health/db", tags=["健康检查"])
-async def db_health_detail(user_id: int = Depends(get_current_user)):
+async def db_health_detail(user_id: int = Depends(get_current_user_id)):
     """数据库连接详细状态 - 连接池、健康检查统计、MySQL服务器变量（需认证）"""
     result = {
         "pool_status": db_health_checker.get_pool_status(),

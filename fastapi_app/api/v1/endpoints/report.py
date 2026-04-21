@@ -107,3 +107,19 @@ async def export_report(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
+
+
+@router.get("/test-export")
+async def test_export(
+    user: User = Depends(require_permission("report_view")),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """测试导出功能（导出订单报表）"""
+    buffer = await report_service.export_report_to_excel(
+        db, "order", "", "", "", "", ""
+    )
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=test_report.xlsx"}
+    )

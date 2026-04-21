@@ -126,3 +126,22 @@ async def my_approvals(
     """查看我的审批请求"""
     approvals = await order_service.get_my_approvals(db, user)
     return ApprovalListResponse(data=approvals, total=len(approvals))
+
+
+@router.put("/batch-no/{order_id}")
+async def update_batch_no(
+    order_id: int,
+    body: dict,
+    db: AsyncSession = Depends(get_async_db),
+    user: User = Depends(require_permission("order_manage")),
+):
+    """更新订单批次号"""
+    from fastapi_app.shared_models import Order as OrderModel
+    from sqlalchemy import select
+    result = await db.execute(select(OrderModel).where(OrderModel.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    order.batch_no = body.get("batch_no", "")
+    await db.commit()
+    return {"success": True, "message": "批次号已更新"}

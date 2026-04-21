@@ -9,21 +9,21 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from app import create_app, db
-from app.models import Permission
+from fastapi_app.core.database import SyncSessionLocal
+from fastapi_app.shared_models import Permission
 
 
 def main():
-    app = create_app()
-    with app.app_context():
+    session = SyncSessionLocal()
+    try:
         # 检查是否已存在
-        existing = Permission.query.filter_by(code='finance_view').first()
+        existing = session.query(Permission).filter_by(code='finance_view').first()
         if existing:
             print(f"[SKIP] 财务统计导航项已存在 (id={existing.id})")
             return
 
         # 找到合适的 sort_order（放在 finance section 的第一个位置）
-        finance_items = Permission.query.filter_by(
+        finance_items = session.query(Permission).filter_by(
             section='finance', is_nav=True
         ).order_by(Permission.sort_order.desc()).first()
         next_sort = (finance_items.sort_order + 10) if finance_items else 10
@@ -39,7 +39,7 @@ def main():
             sort_order=next_sort,
             is_nav=True,
         )
-        db.session.add(nav)
+        session.add(nav)
 
         # 同时添加子权限（用于细粒度控制，预留）
         view_perm = Permission(
@@ -50,7 +50,7 @@ def main():
         )
         # 不重复添加相同code的权限，导航项已包含finance_view权限
 
-        db.session.commit()
+        session.commit()
 
         # 清除 Redis 导航缓存
         try:
@@ -61,6 +61,8 @@ def main():
             print("[WARN] 清除导航缓存失败，请手动重启或等待缓存过期")
 
         print(f"[OK] 财务统计导航项已添加 (id={nav.id}, sort_order={next_sort})")
+    finally:
+        session.close()
 
 
 if __name__ == '__main__':

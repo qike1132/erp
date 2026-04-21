@@ -893,9 +893,9 @@ document.getElementById('submitAllOrdersBtn').addEventListener('click', async fu
             deduct_quantity: order.deduct_quantity
         }));
         
-        console.log('Sending request to /api/batch-submit-orders');
+        console.log('Sending request to /api/v1/aux/batch-submit-orders');
         console.log('Orders for API:', ordersForApi);
-        const response = await apiFetch('/api/batch-submit-orders', {
+        const response = await apiFetch('/api/v1/aux/batch-submit-orders', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'

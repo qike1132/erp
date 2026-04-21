@@ -1,26 +1,28 @@
 """
 通知系统
-提供消息通知和提醒功能
+提供消息通知和提醒功能 (FastAPI 兼容版本)
 """
 from datetime import datetime
 from typing import Dict, List, Any, Optional
-from app import db
+from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey
+from fastapi_app.core.database import SyncSessionLocal
+from fastapi_app.shared_models import Base
 
 
 # 通知数据模型
-class Notification(db.Model):
+class Notification(Base):
     """通知模型"""
     __tablename__ = 'notification'
     
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
-    title = db.Column(db.String(100), nullable=False)
-    content = db.Column(db.Text, nullable=False)
-    type = db.Column(db.String(20), default='info')  # info, warning, error, success
-    category = db.Column(db.String(50))  # order, stock, system
-    is_read = db.Column(db.Boolean, default=False)
-    link = db.Column(db.String(200))  # 相关链接
-    create_time = db.Column(db.DateTime, default=datetime.now)
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('user.id'), nullable=True)
+    title = Column(String(100), nullable=False)
+    content = Column(Text, nullable=False)
+    type = Column(String(20), default='info')  # info, warning, error, success
+    category = Column(String(50))  # order, stock, system
+    is_read = Column(Boolean, default=False)
+    link = Column(String(200))  # 相关链接
+    create_time = Column(DateTime, default=datetime.now)
     
     def to_dict(self) -> Dict:
         return {
@@ -56,18 +58,24 @@ class NotificationService:
             user_id: 用户ID(可选,为空则通知所有用户)
             link: 相关链接
         """
-        notification = Notification(
-            user_id=user_id,
-            title=title,
-            content=content,
-            type=notification_type,
-            category=category,
-            link=link
-        )
-        db.session.add(notification)
-        db.session.commit()
-        
-        return notification
+        session = SyncSessionLocal()
+        try:
+            notification = Notification(
+                user_id=user_id,
+                title=title,
+                content=content,
+                type=notification_type,
+                category=category,
+                link=link
+            )
+            session.add(notification)
+            session.commit()
+            return notification
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
     
     @staticmethod
     def get_user_notifications(user_id: int, 
@@ -81,42 +89,64 @@ class NotificationService:
             unread_only: 是否只获取未读通知
             limit: 限制数量
         """
-        query = Notification.query.filter(
-            (Notification.user_id == user_id) | (Notification.user_id.is_(None))
-        )
-        
-        if unread_only:
-            query = query.filter(Notification.is_read == False)
-        
-        return query.order_by(Notification.create_time.desc()).limit(limit).all()
+        session = SyncSessionLocal()
+        try:
+            query = session.query(Notification).filter(
+                (Notification.user_id == user_id) | (Notification.user_id.is_(None))
+            )
+            
+            if unread_only:
+                query = query.filter(Notification.is_read == False)
+            
+            return query.order_by(Notification.create_time.desc()).limit(limit).all()
+        finally:
+            session.close()
     
     @staticmethod
     def mark_as_read(notification_id: int) -> bool:
         """标记通知为已读"""
-        notification = Notification.query.get(notification_id)
-        if notification:
-            notification.is_read = True
-            db.session.commit()
-            return True
-        return False
+        session = SyncSessionLocal()
+        try:
+            notification = session.query(Notification).get(notification_id)
+            if notification:
+                notification.is_read = True
+                session.commit()
+                return True
+            return False
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
     
     @staticmethod
     def mark_all_as_read(user_id: int) -> int:
         """标记所有通知为已读"""
-        count = Notification.query.filter(
-            (Notification.user_id == user_id) | (Notification.user_id.is_(None)),
-            Notification.is_read == False
-        ).update({'is_read': True})
-        db.session.commit()
-        return count
+        session = SyncSessionLocal()
+        try:
+            count = session.query(Notification).filter(
+                (Notification.user_id == user_id) | (Notification.user_id.is_(None)),
+                Notification.is_read == False
+            ).update({'is_read': True})
+            session.commit()
+            return count
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
     
     @staticmethod
     def get_unread_count(user_id: int) -> int:
         """获取未读通知数量"""
-        return Notification.query.filter(
-            (Notification.user_id == user_id) | (Notification.user_id.is_(None)),
-            Notification.is_read == False
-        ).count()
+        session = SyncSessionLocal()
+        try:
+            return session.query(Notification).filter(
+                (Notification.user_id == user_id) | (Notification.user_id.is_(None)),
+                Notification.is_read == False
+            ).count()
+        finally:
+            session.close()
 
 
 # 预定义的通知类型

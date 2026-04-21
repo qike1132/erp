@@ -3,6 +3,13 @@
  */
 const PER_PAGE = 20;
 
+function escapeHtml(text) {
+    if (text == null) return '';
+    const div = document.createElement('div');
+    div.textContent = String(text);
+    return div.innerHTML;
+}
+
 const requestLocks = {
     customer: false,
     daily: false
@@ -172,7 +179,7 @@ function renderCustomerSummary(logs, pagination, stats) {
     if (!tbody) return;
     tbody.innerHTML = logs.map(log => `
         <tr>
-            <td><i class="fas fa-building me-1"></i>${log.customer || '未知客户'}</td>
+            <td><i class="fas fa-building me-1"></i>${escapeHtml(log.customer || '未知客户')}</td>
             <td class="text-center">${log.stockout_count}</td>
             <td class="text-center">${log.total_quantity.toLocaleString()}</td>
             <td class="text-end fw-bold">${formatAmount(log.total_amount)}</td>
@@ -270,8 +277,8 @@ function renderDailyAmount(logs, pagination, stats) {
     if (!tbody) return;
     tbody.innerHTML = logs.map(log => `
         <tr>
-            <td><i class="fas fa-calendar me-1"></i>${log.date}</td>
-            <td><i class="fas fa-building me-1"></i>${log.customer_names || '-'}</td>
+            <td><i class="fas fa-calendar me-1"></i>${escapeHtml(log.date)}</td>
+            <td><i class="fas fa-building me-1"></i>${escapeHtml(log.customer_names || '-')}</td>
             <td class="text-center">${log.stockout_count}</td>
             <td class="text-center">${log.total_quantity.toLocaleString()}</td>
             <td class="text-end fw-bold">${formatAmount(log.total_amount)}</td>

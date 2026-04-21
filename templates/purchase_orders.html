@@ -858,7 +858,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
 async function loadCustomers() {
     try {
-        const response = await fetch('/api/v1/purchase-center/api/customers');
+        const response = await fetch('/api/v1/purchase-center/customers');
         
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         
@@ -888,7 +888,7 @@ async function loadOrders() {
         const startDate = document.getElementById('filterStartDate').value;
         const endDate = document.getElementById('filterEndDate').value;
 
-        let url = '/api/v1/purchase-center/api/orders?per_page=100';
+        let url = '/api/v1/purchase-center/orders?per_page=100';
         if (status) url += `&status=${status}`;
         if (customerId) url += `&customer_id=${customerId}`;
         if (productName) url += `&product_name=${encodeURIComponent(productName)}`;
@@ -932,7 +932,7 @@ function handleProductSearchInput(value) {
 
 async function searchProducts(keyword) {
     try {
-        const response = await fetch(`/api/v1/purchase-center/api/products?search=${encodeURIComponent(keyword)}&per_page=10`);
+        const response = await fetch(`/api/v1/purchase-center/products?search=${encodeURIComponent(keyword)}&per_page=10`);
 
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
@@ -1122,7 +1122,7 @@ async function deleteSingleOrder(orderId) {
     }
     
     try {
-        const response = await fetch(`/api/v1/purchase-center/api/orders/${orderId}`, {
+        const response = await fetch(`/api/v1/purchase-center/orders/${orderId}`, {
             method: 'DELETE'
         });
         
@@ -1156,7 +1156,7 @@ async function batchDeleteOrders() {
     }
     
     try {
-        const response = await fetch('/api/v1/purchase-center/api/orders/batch-delete', {
+        const response = await fetch('/api/v1/purchase-center/orders/batch-delete', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ order_ids: Array.from(selectedOrders) })
@@ -1183,7 +1183,7 @@ async function batchDeleteOrders() {
 
 async function printSingleOrder(orderId) {
     try {
-        const response = await fetch(`/api/v1/purchase-center/api/orders/${orderId}/print`);
+        const response = await fetch(`/api/v1/purchase-center/orders/${orderId}/print`);
         
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
@@ -1211,7 +1211,7 @@ async function batchPrint() {
     
     try {
         const orderIds = Array.from(selectedOrders);
-        const response = await fetch('/api/v1/purchase-center/api/orders/batch-print', {
+        const response = await fetch('/api/v1/purchase-center/orders/batch-print', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ order_ids: orderIds })

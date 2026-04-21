@@ -210,8 +210,8 @@ async def upload_packaging_excel(
     user: User = Depends(require_permission("production_summary_manage")),
 ):
     """批量导入包装部记录（Excel上传）"""
-    if not file.filename.endswith(('.xlsx', '.xls')):
-        raise HTTPException(status_code=400, detail="仅支持 .xlsx / .xls 格式文件")
+    if not file.filename.endswith('.xlsx'):
+        raise HTTPException(status_code=400, detail="仅支持 .xlsx 格式文件，.xls 已不再支持")
 
     try:
         content = await file.read()

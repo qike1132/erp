@@ -471,7 +471,7 @@ async def upload_excel(db: AsyncSession, file_content: bytes,
             quantity=quantity,
             plan_date=_normalize_plan_date(plan_date_str) if not validation_error else date.today(),
             remark=remark,
-            is_validated=0 if validation_error else 0,  # 深度验证在validate阶段
+            is_validated=0 if validation_error else 1,  # 基础验证通过则为1，深度验证在validate阶段
             validation_error=validation_error,
             upload_batch_id=batch_id,
         )

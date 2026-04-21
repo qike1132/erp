@@ -19,12 +19,35 @@ router = APIRouter()
 @router.get("/health")
 async def health_check():
     """应用健康检查"""
+    from utils.redis_cache import redis_cache
+    cache_stats = redis_cache.get_stats()
+
     return {
         "status": "ok",
         "db": "connected",
         "timestamp": time.time(),
-        "enhanced_cache": False,
+        "enhanced_cache": True,
+        "cache_backend": cache_stats.get('backend', 'unknown'),
+        "cache_connected": cache_stats.get('connected', False),
     }
+
+
+@router.get("/cache/stats")
+async def cache_stats():
+    """获取缓存统计信息"""
+    from utils.redis_cache import redis_cache
+    return redis_cache.get_stats()
+
+
+@router.post("/cache/clear")
+async def clear_cache(
+    pattern: str = Query("*", description="清除匹配的缓存键"),
+    user: User = Depends(require_permission("admin")),
+):
+    """清除缓存（需管理员权限）"""
+    from utils.redis_cache import redis_cache
+    deleted = redis_cache.delete_pattern(pattern)
+    return {"success": True, "deleted": deleted, "pattern": pattern}
 
 
 @router.get("/product-search")
@@ -348,8 +371,6 @@ async def system_stats(
     """系统统计信息（缓存命中率/性能数据）"""
     try:
         from utils.performance_monitor import performance_monitor, query_tracker
-        from utils.flask_metrics import update_flask_metrics
-        update_flask_metrics()
 
         stats = {
             'cache': {},

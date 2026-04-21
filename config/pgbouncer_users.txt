@@ -1,0 +1,9 @@
+# ==========================================
+# PgBouncer 用户认证文件
+# 格式: "username" "password"
+# 生成密码: SELECT md5('password' || 'username');
+# ==========================================
+
+"erp_app" "md5xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+"pgbouncer_admin" "md5xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+"pgbouncer_stats" "md5xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"

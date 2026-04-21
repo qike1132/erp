@@ -5,7 +5,10 @@
 import pandas as pd
 import os
 from datetime import datetime
-from werkzeug.utils import secure_filename
+try:
+    from werkzeug.utils import secure_filename
+except ImportError:
+    secure_filename = None
 
 
 class BatchImportHandler:
@@ -48,8 +51,8 @@ class BatchImportHandler:
             return False, '未选择文件'
         
         # 检查文件扩展名
-        if not file.filename.endswith(('.xlsx', '.xls')):
-            return False, '只支持Excel文件(.xlsx, .xls)'
+        if not file.filename.endswith('.xlsx'):
+            return False, '只支持 Excel 文件 (.xlsx)，.xls 已不再支持'
         
         # 保存文件
         filename = secure_filename(file.filename)

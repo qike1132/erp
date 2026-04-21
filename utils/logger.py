@@ -8,7 +8,10 @@ import shutil
 import sys
 from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
 from datetime import datetime
-from flask import g, has_app_context
+import contextvars
+
+# 使用 contextvars 替代 Flask g 对象存储 trace_id
+trace_id_var = contextvars.ContextVar('trace_id', default='system')
 
 
 class WindowsSafeTimedRotatingFileHandler(TimedRotatingFileHandler):
@@ -32,28 +35,28 @@ class WindowsSafeTimedRotatingFileHandler(TimedRotatingFileHandler):
 class RequestFormatter(logging.Formatter):
     """自定义日志格式化器，注入 trace_id"""
     def format(self, record):
-        if has_app_context():
-            record.trace_id = getattr(g, 'trace_id', 'no-trace')
-        else:
-            record.trace_id = 'system'
+        record.trace_id = trace_id_var.get()
         return super().format(record)
 
-def setup_logging(app):
+def setup_logging(app=None):
     """
     配置日志系统
     
     Args:
-        app: Flask应用实例
+        debug: 是否开启调试模式
     """
+    debug = app if isinstance(app, bool) else (getattr(app, 'debug', False) if app else False)
+    
     # 创建日志目录
     log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
     os.makedirs(log_dir, exist_ok=True)
     
     # 设置日志级别
-    log_level = logging.DEBUG if app.debug else logging.INFO
+    log_level = logging.DEBUG if debug else logging.INFO
     
     # 配置根日志记录器
-    app.logger.setLevel(log_level)
+    target_logger = logging.getLogger()
+    target_logger.setLevel(log_level)
     
     # 1. 文件日志处理器 - 按大小轮转
     file_handler = RotatingFileHandler(
@@ -93,15 +96,15 @@ def setup_logging(app):
     ))
     
     # 添加处理器
-    app.logger.addHandler(file_handler)
-    app.logger.addHandler(error_handler)
+    target_logger.addHandler(file_handler)
+    target_logger.addHandler(error_handler)
     
     # 返回访问日志记录器
     access_logger = logging.getLogger('access')
     access_logger.addHandler(access_handler)
     access_logger.setLevel(logging.INFO)
     
-    return app.logger, access_logger
+    return target_logger, access_logger
 
 
 class Logger:
@@ -142,9 +145,14 @@ class Logger:
     def access(self, request, response):
         """记录访问日志"""
         if self.access_logger:
+            remote_addr = getattr(request, 'client_host', '127.0.0.1')
+            method = getattr(request, 'method', 'GET')
+            path = getattr(request, 'path', '/')
+            status_code = getattr(response, 'status_code', 200)
+            content_length = getattr(response, 'content_length', 0) or 0
             self.access_logger.info(
-                f'{request.remote_addr} - "{request.method} {request.path}" '
-                f'{response.status_code} - {response.content_length or 0} bytes'
+                f'{remote_addr} - "{method} {path}" '
+                f'{status_code} - {content_length} bytes'
             )
 
 
@@ -153,7 +161,6 @@ logger = Logger()
 
 
 def log_request(response):
-    """请求日志装饰器"""
-    from flask import request
-    logger.access(request, response)
+    """请求日志装饰器 (FastAPI 兼容版本)"""
+    # 在 FastAPI 中，请求日志由中间件处理，此装饰器保留为兼容
     return response

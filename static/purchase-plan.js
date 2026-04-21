@@ -4,6 +4,13 @@
  * 功能：客户筛选、ECharts时间轴热力图、库存对比+出货进度渲染、
  *       批量上传预览、69码联动验证、CRUD操作
  */
+
+function escapeHtml(text) {
+    if (text == null) return '';
+    var div = document.createElement('div');
+    div.textContent = String(text);
+    return div.innerHTML;
+}
 (function () {
     'use strict';
 
@@ -196,8 +203,8 @@
         customers.forEach(function (name) {
             var colors = ['#0d6efd', '#198754', '#dc3545', '#ffc107', '#6610f2', '#fd7e14', '#20c997', '#6f42c1'];
             var color = colors[name.charCodeAt(0) % colors.length];
-            html += '<span class="customer-tag' + (currentCustomer === name ? ' active' : '') + '" data-customer="' + name + '" style="' + (currentCustomer === name ? 'background:' + color + ';border-color:' + color + ';color:white' : '') + '">' +
-                '<i class="fas fa-user me-1" style="color:' + color + '"></i>' + name + '</span>';
+            html += '<span class="customer-tag' + (currentCustomer === name ? ' active' : '') + '" data-customer="' + escapeHtml(name) + '" style="' + (currentCustomer === name ? 'background:' + color + ';border-color:' + color + ';color:white' : '') + '">' +
+                '<i class="fas fa-user me-1" style="color:' + color + '"></i>' + escapeHtml(name) + '</span>';
         });
         container.innerHTML = html;
 
@@ -306,19 +313,39 @@
             var remainingClass = p.remaining_qty <= 0 ? 'text-success' : 'text-primary';
 
             return '<tr class="' + rowClass + '">' +
-                '<td><span class="fw-semibold"><i class="fas fa-building text-primary me-1"></i>' + p.customer_name + '</span></td>' +
-                '<td><i class="fas fa-cube text-secondary me-1"></i>' + p.product_name + '</td>' +
-                '<td><code>' + p.barcode + '</code></td>' +
+                '<td><span class="fw-semibold"><i class="fas fa-building text-primary me-1"></i>' + escapeHtml(p.customer_name) + '</span></td>' +
+                '<td><i class="fas fa-cube text-secondary me-1"></i>' + escapeHtml(p.product_name) + '</td>' +
+                '<td><code>' + escapeHtml(p.barcode) + '</code></td>' +
                 '<td class="text-center fw-bold">' + formatNumber(p.quantity) + '</td>' +
                 '<td class="text-center ' + (isStockWarning ? 'text-danger fw-bold' : 'text-success') + '">' + formatNumber(p.inventory_qty) + '</td>' +
                 '<td class="text-center">' + progressBar + '</td>' +
                 '<td class="text-center ' + remainingClass + ' fw-bold">' + formatNumber(p.remaining_qty) + '</td>' +
                 '<td>' + stockBadge + '</td>' +
                 '<td>' +
-                    '<button onclick="window._editPlan(' + p.id + ',\'' + p.customer_name.replace(/\'/g, "\\'") + '\',\'' + p.product_name.replace(/\'/g, "\\'") + '\',\'' + p.barcode + '\',' + p.quantity + ',\'' + p.plan_date + '\',\'' + p.status + '\',\'' + (p.remark || '').replace(/\'/g, "\\'") + '\')" class="btn btn-sm btn-outline-primary me-1"><i class="fas fa-edit"></i></button>' +
-                    '<button onclick="window._deletePlan(' + p.id + ')" class="btn btn-sm btn-outline-danger"><i class="fas fa-trash"></i></button>' +
+                    '<button class="btn btn-sm btn-outline-primary me-1 btn-edit-plan" data-id="' + p.id + '" data-customer="' + escapeHtml(p.customer_name) + '" data-product="' + escapeHtml(p.product_name) + '" data-barcode="' + escapeHtml(p.barcode) + '" data-quantity="' + p.quantity + '" data-date="' + escapeHtml(p.plan_date) + '" data-status="' + escapeHtml(p.status) + '" data-remark="' + escapeHtml(p.remark || '') + '"><i class="fas fa-edit"></i></button>' +
+                    '<button class="btn btn-sm btn-outline-danger btn-delete-plan" data-id="' + p.id + '"><i class="fas fa-trash"></i></button>' +
                 '</td></tr>';
         }).join('');
+
+        tbody.querySelectorAll('.btn-edit-plan').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                window._editPlan(
+                    parseInt(this.dataset.id),
+                    this.dataset.customer,
+                    this.dataset.product,
+                    this.dataset.barcode,
+                    parseInt(this.dataset.quantity),
+                    this.dataset.date,
+                    this.dataset.status,
+                    this.dataset.remark
+                );
+            });
+        });
+        tbody.querySelectorAll('.btn-delete-plan').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                window._deletePlan(parseInt(this.dataset.id));
+            });
+        });
     }
 
     // ==================== CRUD ====================

@@ -9,9 +9,12 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from flask import Flask
-from flask_sqlalchemy import SQLAlchemy
-from werkzeug.security import generate_password_hash, check_password_hash
+from fastapi_app.core.security import hash_password, verify_password
+
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, ForeignKey, Table
+from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+
+Base = declarative_base()
 
 
 class UserManagementTestCase(unittest.TestCase):
@@ -20,50 +23,44 @@ class UserManagementTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """测试类初始化"""
-        cls.app = Flask(__name__)
-        cls.app.config['TESTING'] = True
-        cls.app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
-        cls.app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-        cls.app.config['SECRET_KEY'] = 'test-secret-key'
-        
-        cls.db = SQLAlchemy(cls.app)
+        cls.engine = create_engine('sqlite:///:memory:')
         cls._define_models()
         
-        with cls.app.app_context():
-            cls.db.create_all()
-            cls._init_test_data()
+        Base.metadata.create_all(cls.engine)
+        Session = sessionmaker(bind=cls.engine)
+        cls.db_session = Session()
+        cls._init_test_data()
     
     @classmethod
     def _define_models(cls):
         """定义数据模型"""
-        db = cls.db
-        
-        # 权限模型
-        class Permission(db.Model):
-            __tablename__ = 'permission'
-            id = db.Column(db.Integer, primary_key=True)
-            name = db.Column(db.String(50), nullable=False)
-            code = db.Column(db.String(50), unique=True, nullable=False)
         
         # 用户权限关联表
-        user_permission = db.Table('user_permission',
-            db.Column('user_id', db.Integer, db.ForeignKey('user.id'), primary_key=True),
-            db.Column('permission_id', db.Integer, db.ForeignKey('permission.id'), primary_key=True)
+        user_permission = Table('user_permission', Base.metadata,
+            Column('user_id', Integer, ForeignKey('user.id'), primary_key=True),
+            Column('permission_id', Integer, ForeignKey('permission.id'), primary_key=True)
         )
         
+        # 权限模型
+        class Permission(Base):
+            __tablename__ = 'permission'
+            id = Column(Integer, primary_key=True)
+            name = Column(String(50), nullable=False)
+            code = Column(String(50), unique=True, nullable=False)
+        
         # 用户模型
-        class User(db.Model):
+        class User(Base):
             __tablename__ = 'user'
-            id = db.Column(db.Integer, primary_key=True)
-            username = db.Column(db.String(50), unique=True, nullable=False)
-            password = db.Column(db.String(200), nullable=False)
-            phone = db.Column(db.String(20))
-            email = db.Column(db.String(100))
-            is_super = db.Column(db.Boolean, default=False)
-            status = db.Column(db.Boolean, default=True)
-            create_time = db.Column(db.DateTime, default=datetime.now)
-            update_time = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
-            permissions = db.relationship('Permission', secondary='user_permission', backref=db.backref('users', lazy=True))
+            id = Column(Integer, primary_key=True)
+            username = Column(String(50), unique=True, nullable=False)
+            password = Column(String(200), nullable=False)
+            phone = Column(String(20))
+            email = Column(String(100))
+            is_super = Column(Boolean, default=False)
+            status = Column(Boolean, default=True)
+            create_time = Column(DateTime, default=datetime.now)
+            update_time = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+            permissions = relationship('Permission', secondary='user_permission', backref='users')
             
             def has_permission(self, permission_code):
                 if self.is_super:
@@ -74,10 +71,10 @@ class UserManagementTestCase(unittest.TestCase):
                 return False
             
             def set_password(self, password):
-                self.password = generate_password_hash(password)
+                self.password = hash_password(password)
             
             def check_password(self, password):
-                return check_password_hash(self.password, password)
+                return verify_password(password, self.password)
         
         cls.Permission = Permission
         cls.User = User
@@ -93,29 +90,27 @@ class UserManagementTestCase(unittest.TestCase):
             cls.Permission(name='用户管理', code='user_manage'),
             cls.Permission(name='审批管理', code='approval_manage'),
         ]
-        cls.db.session.add_all(permissions)
+        cls.db_session.add_all(permissions)
         
         # 创建管理员
-        admin = cls.User(username='admin', password=generate_password_hash('admin123'), is_super=True)
+        admin = cls.User(username='admin', password=hash_password('admin123'), is_super=True)
         
         # 创建普通用户
-        user1 = cls.User(username='user1', password=generate_password_hash('user123'), is_super=False)
+        user1 = cls.User(username='user1', password=hash_password('user123'), is_super=False)
         user1.permissions.append(permissions[0])  # 订单管理权限
         user1.permissions.append(permissions[1])  # 产品管理权限
         
-        user2 = cls.User(username='user2', password=generate_password_hash('user123'), is_super=False)
+        user2 = cls.User(username='user2', password=hash_password('user123'), is_super=False)
         user2.permissions.append(permissions[2])  # 库存管理权限
         
-        cls.db.session.add_all([admin, user1, user2])
-        cls.db.session.commit()
+        cls.db_session.add_all([admin, user1, user2])
+        cls.db_session.commit()
     
     def setUp(self):
-        self.client = self.app.test_client()
-        self.app_context = self.app.app_context()
-        self.app_context.push()
+        pass
     
     def tearDown(self):
-        self.app_context.pop()
+        pass
     
     # ==================== 用户CRUD测试 ====================
     
@@ -123,11 +118,11 @@ class UserManagementTestCase(unittest.TestCase):
         """测试用例01: 成功创建用户"""
         print("\n[测试用例01] 成功创建用户")
         
-        user = self.User(username='newuser', password=generate_password_hash('pass123'))
-        self.db.session.add(user)
-        self.db.session.commit()
+        user = self.User(username='newuser', password=hash_password('pass123'))
+        self.db_session.add(user)
+        self.db_session.commit()
         
-        saved = self.User.query.filter_by(username='newuser').first()
+        saved = self.db_session.query(self.User).filter_by(username='newuser').first()
         self.assertIsNotNone(saved)
         self.assertEqual(saved.username, 'newuser')
     
@@ -135,34 +130,34 @@ class UserManagementTestCase(unittest.TestCase):
         """测试用例02: 创建重复用户名"""
         print("\n[测试用例02] 创建重复用户名")
         
-        user = self.User(username='admin', password=generate_password_hash('pass123'))
-        self.db.session.add(user)
+        user = self.User(username='admin', password=hash_password('pass123'))
+        self.db_session.add(user)
         
         with self.assertRaises(Exception):
-            self.db.session.commit()
+            self.db_session.commit()
         
-        self.db.session.rollback()
+        self.db_session.rollback()
     
     def test_03_update_user_phone(self):
         """测试用例03: 更新用户手机号"""
         print("\n[测试用例03] 更新用户手机号")
         
-        user = self.User.query.filter_by(username='user1').first()
+        user = self.db_session.query(self.User).filter_by(username='user1').first()
         user.phone = '13800138000'
-        self.db.session.commit()
+        self.db_session.commit()
         
-        updated = self.User.query.filter_by(username='user1').first()
+        updated = self.db_session.query(self.User).filter_by(username='user1').first()
         self.assertEqual(updated.phone, '13800138000')
     
     def test_04_update_user_email(self):
         """测试用例04: 更新用户邮箱"""
         print("\n[测试用例04] 更新用户邮箱")
         
-        user = self.User.query.filter_by(username='user1').first()
+        user = self.db_session.query(self.User).filter_by(username='user1').first()
         user.email = 'user1@example.com'
-        self.db.session.commit()
+        self.db_session.commit()
         
-        updated = self.User.query.filter_by(username='user1').first()
+        updated = self.db_session.query(self.User).filter_by(username='user1').first()
         self.assertEqual(updated.email, 'user1@example.com')
     
     def test_05_delete_user(self):
@@ -170,25 +165,25 @@ class UserManagementTestCase(unittest.TestCase):
         print("\n[测试用例05] 删除用户")
         
         # 创建临时用户
-        user = self.User(username='tempuser', password=generate_password_hash('pass123'))
-        self.db.session.add(user)
-        self.db.session.commit()
+        user = self.User(username='tempuser', password=hash_password('pass123'))
+        self.db_session.add(user)
+        self.db_session.commit()
         
         user_id = user.id
         
         # 删除用户
-        self.db.session.delete(user)
-        self.db.session.commit()
+        self.db_session.delete(user)
+        self.db_session.commit()
         
         # 验证删除
-        deleted = self.User.query.get(user_id)
+        deleted = self.db_session.query(self.User).get(user_id)
         self.assertIsNone(deleted)
     
     def test_06_query_user_by_username(self):
         """测试用例06: 按用户名查询"""
         print("\n[测试用例06] 按用户名查询")
         
-        user = self.User.query.filter_by(username='admin').first()
+        user = self.db_session.query(self.User).filter_by(username='admin').first()
         self.assertIsNotNone(user)
         self.assertTrue(user.is_super)
     
@@ -196,18 +191,18 @@ class UserManagementTestCase(unittest.TestCase):
         """测试用例07: 查询活跃用户"""
         print("\n[测试用例07] 查询活跃用户")
         
-        users = self.User.query.filter_by(status=True).all()
+        users = self.db_session.query(self.User).filter_by(status=True).all()
         self.assertGreater(len(users), 0)
     
     def test_08_disable_user(self):
         """测试用例08: 禁用用户"""
         print("\n[测试用例08] 禁用用户")
         
-        user = self.User.query.filter_by(username='user2').first()
+        user = self.db_session.query(self.User).filter_by(username='user2').first()
         user.status = False
-        self.db.session.commit()
+        self.db_session.commit()
         
-        updated = self.User.query.filter_by(username='user2').first()
+        updated = self.db_session.query(self.User).filter_by(username='user2').first()
         self.assertFalse(updated.status)
     
     # ==================== 密码管理测试 ====================
@@ -216,7 +211,7 @@ class UserManagementTestCase(unittest.TestCase):
         """测试用例09: 密码哈希验证"""
         print("\n[测试用例09] 密码哈希验证")
         
-        user = self.User.query.filter_by(username='admin').first()
+        user = self.db_session.query(self.User).filter_by(username='admin').first()
         self.assertTrue(user.check_password('admin123'))
         self.assertFalse(user.check_password('wrongpassword'))
     
@@ -224,13 +219,13 @@ class UserManagementTestCase(unittest.TestCase):
         """测试用例10: 设置新密码"""
         print("\n[测试用例10] 设置新密码")
         
-        user = self.User.query.filter_by(username='user1').first()
+        user = self.db_session.query(self.User).filter_by(username='user1').first()
         old_password = user.password
         
         user.set_password('newpassword123')
-        self.db.session.commit()
+        self.db_session.commit()
         
-        updated = self.User.query.filter_by(username='user1').first()
+        updated = self.db_session.query(self.User).filter_by(username='user1').first()
         self.assertNotEqual(updated.password, old_password)
         self.assertTrue(updated.check_password('newpassword123'))
     
@@ -242,13 +237,13 @@ class UserManagementTestCase(unittest.TestCase):
         
         superuser = self.User(
             username='superadmin',
-            password=generate_password_hash('super123'),
+            password=hash_password('super123'),
             is_super=True
         )
-        self.db.session.add(superuser)
-        self.db.session.commit()
+        self.db_session.add(superuser)
+        self.db_session.commit()
         
-        saved = self.User.query.filter_by(username='superadmin').first()
+        saved = self.db_session.query(self.User).filter_by(username='superadmin').first()
         self.assertTrue(saved.is_super)
     
     def test_12_create_normal_user(self):
@@ -257,29 +252,29 @@ class UserManagementTestCase(unittest.TestCase):
         
         normal_user = self.User(
             username='normaluser',
-            password=generate_password_hash('normal123'),
+            password=hash_password('normal123'),
             is_super=False
         )
-        self.db.session.add(normal_user)
-        self.db.session.commit()
+        self.db_session.add(normal_user)
+        self.db_session.commit()
         
-        saved = self.User.query.filter_by(username='normaluser').first()
+        saved = self.db_session.query(self.User).filter_by(username='normaluser').first()
         self.assertFalse(saved.is_super)
     
     def test_13_change_user_role(self):
         """测试用例13: 更改用户角色"""
         print("\n[测试用例13] 更改用户角色")
         
-        user = self.User.query.filter_by(username='user1').first()
+        user = self.db_session.query(self.User).filter_by(username='user1').first()
         user.is_super = True
-        self.db.session.commit()
+        self.db_session.commit()
         
-        updated = self.User.query.filter_by(username='user1').first()
+        updated = self.db_session.query(self.User).filter_by(username='user1').first()
         self.assertTrue(updated.is_super)
         
         # 恢复
         updated.is_super = False
-        self.db.session.commit()
+        self.db_session.commit()
     
     # ==================== 权限验证测试 ====================
     
@@ -287,7 +282,7 @@ class UserManagementTestCase(unittest.TestCase):
         """测试用例14: 超级用户拥有所有权限"""
         print("\n[测试用例14] 超级用户拥有所有权限")
         
-        admin = self.User.query.filter_by(username='admin').first()
+        admin = self.db_session.query(self.User).filter_by(username='admin').first()
         
         # 超级用户应该拥有所有权限
         self.assertTrue(admin.has_permission('order_manage'))
@@ -301,7 +296,7 @@ class UserManagementTestCase(unittest.TestCase):
         """测试用例15: 普通用户拥有分配的权限"""
         print("\n[测试用例15] 普通用户拥有分配的权限")
         
-        user1 = self.User.query.filter_by(username='user1').first()
+        user1 = self.db_session.query(self.User).filter_by(username='user1').first()
         
         # user1应该有订单管理和产品管理权限
         self.assertTrue(user1.has_permission('order_manage'))
@@ -315,36 +310,36 @@ class UserManagementTestCase(unittest.TestCase):
         """测试用例16: 给用户分配权限"""
         print("\n[测试用例16] 给用户分配权限")
         
-        user = self.User.query.filter_by(username='user2').first()
-        permission = self.Permission.query.filter_by(code='user_manage').first()
+        user = self.db_session.query(self.User).filter_by(username='user2').first()
+        permission = self.db_session.query(self.Permission).filter_by(code='user_manage').first()
         
         # 分配权限前
         self.assertFalse(user.has_permission('user_manage'))
         
         # 分配权限
         user.permissions.append(permission)
-        self.db.session.commit()
+        self.db_session.commit()
         
         # 验证权限
-        updated = self.User.query.filter_by(username='user2').first()
+        updated = self.db_session.query(self.User).filter_by(username='user2').first()
         self.assertTrue(updated.has_permission('user_manage'))
     
     def test_17_remove_permission_from_user(self):
         """测试用例17: 移除用户权限"""
         print("\n[测试用例17] 移除用户权限")
         
-        user = self.User.query.filter_by(username='user1').first()
-        permission = self.Permission.query.filter_by(code='product_manage').first()
+        user = self.db_session.query(self.User).filter_by(username='user1').first()
+        permission = self.db_session.query(self.Permission).filter_by(code='product_manage').first()
         
         # 移除权限前
         self.assertTrue(user.has_permission('product_manage'))
         
         # 移除权限
         user.permissions.remove(permission)
-        self.db.session.commit()
+        self.db_session.commit()
         
         # 验证权限
-        updated = self.User.query.filter_by(username='user1').first()
+        updated = self.db_session.query(self.User).filter_by(username='user1').first()
         self.assertFalse(updated.has_permission('product_manage'))
     
     def test_18_user_without_permissions(self):
@@ -352,11 +347,11 @@ class UserManagementTestCase(unittest.TestCase):
         print("\n[测试用例18] 无权限用户")
         
         # 创建无权限用户
-        user = self.User(username='noperm', password=generate_password_hash('pass123'), is_super=False)
-        self.db.session.add(user)
-        self.db.session.commit()
+        user = self.User(username='noperm', password=hash_password('pass123'), is_super=False)
+        self.db_session.add(user)
+        self.db_session.commit()
         
-        saved = self.User.query.filter_by(username='noperm').first()
+        saved = self.db_session.query(self.User).filter_by(username='noperm').first()
         self.assertFalse(saved.has_permission('order_manage'))
         self.assertFalse(saved.has_permission('product_manage'))
     
@@ -366,7 +361,7 @@ class UserManagementTestCase(unittest.TestCase):
         """测试用例19: 正确凭据登录"""
         print("\n[测试用例19] 正确凭据登录")
         
-        user = self.User.query.filter_by(username='admin').first()
+        user = self.db_session.query(self.User).filter_by(username='admin').first()
         self.assertTrue(user.check_password('admin123'))
         self.assertTrue(user.status)  # 用户状态应为活跃
     
@@ -374,7 +369,7 @@ class UserManagementTestCase(unittest.TestCase):
         """测试用例20: 错误密码登录"""
         print("\n[测试用例20] 错误密码登录")
         
-        user = self.User.query.filter_by(username='admin').first()
+        user = self.db_session.query(self.User).filter_by(username='admin').first()
         self.assertFalse(user.check_password('wrongpassword'))
     
     def test_21_login_with_disabled_user(self):
@@ -382,12 +377,12 @@ class UserManagementTestCase(unittest.TestCase):
         print("\n[测试用例21] 禁用用户登录")
         
         # 禁用用户
-        user = self.User.query.filter_by(username='user2').first()
+        user = self.db_session.query(self.User).filter_by(username='user2').first()
         user.status = False
-        self.db.session.commit()
+        self.db_session.commit()
         
         # 验证用户状态
-        updated = self.User.query.filter_by(username='user2').first()
+        updated = self.db_session.query(self.User).filter_by(username='user2').first()
         self.assertFalse(updated.status)
         # 即使密码正确，也不应允许登录（业务逻辑）
     
@@ -409,11 +404,11 @@ class UserManagementTestCase(unittest.TestCase):
         print("\n[测试用例23] 长用户名")
         
         long_username = 'A' * 50
-        user = self.User(username=long_username, password=generate_password_hash('pass123'))
-        self.db.session.add(user)
-        self.db.session.commit()
+        user = self.User(username=long_username, password=hash_password('pass123'))
+        self.db_session.add(user)
+        self.db_session.commit()
         
-        saved = self.User.query.filter_by(username=long_username).first()
+        saved = self.db_session.query(self.User).filter_by(username=long_username).first()
         self.assertIsNotNone(saved)
     
     def test_24_user_with_special_characters_username(self):
@@ -421,11 +416,11 @@ class UserManagementTestCase(unittest.TestCase):
         print("\n[测试用例24] 特殊字符用户名")
         
         special_username = 'user@#$%'
-        user = self.User(username=special_username, password=generate_password_hash('pass123'))
-        self.db.session.add(user)
-        self.db.session.commit()
+        user = self.User(username=special_username, password=hash_password('pass123'))
+        self.db_session.add(user)
+        self.db_session.commit()
         
-        saved = self.User.query.filter_by(username=special_username).first()
+        saved = self.db_session.query(self.User).filter_by(username=special_username).first()
         self.assertIsNotNone(saved)
     
     def test_25_user_batch_create(self):
@@ -436,13 +431,13 @@ class UserManagementTestCase(unittest.TestCase):
         for i in range(10):
             users.append(self.User(
                 username=f'batchuser{i}',
-                password=generate_password_hash('pass123')
+                password=hash_password('pass123')
             ))
         
-        self.db.session.add_all(users)
-        self.db.session.commit()
+        self.db_session.add_all(users)
+        self.db_session.commit()
         
-        count = self.User.query.filter(self.User.username.like('batchuser%')).count()
+        count = self.db_session.query(self.User).filter(self.User.username.like('batchuser%')).count()
         self.assertEqual(count, 10)
 
 

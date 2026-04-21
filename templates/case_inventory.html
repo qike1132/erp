@@ -133,7 +133,7 @@ async function loadInventorySummary() {
     container.innerHTML = '<div class="text-center text-muted py-4"><i class="fas fa-spinner fa-spin fa-2x mb-3"></i><p>加载中...</p></div>';
     
     try {
-        const response = await fetch('/api/v1/case/inventory-summary');
+        const response = await fetch('/api/v1/cases/inventory-summary');
         inventoryData = await response.json();
         renderInventoryTable(inventoryData);
     } catch (error) {
@@ -254,7 +254,7 @@ async function loadInventoryLogs(caseId, page = 1) {
     if (endDate) params.append('end_date', endDate);
     
     try {
-        const response = await fetch(`/api/v1/case/inventory-logs/${caseId}?${params}`);
+        const response = await fetch(`/api/v1/cases/inventory-logs/${caseId}?${params}`);
         const data = await response.json();
         
         if (data.success && data.logs && data.logs.length > 0) {

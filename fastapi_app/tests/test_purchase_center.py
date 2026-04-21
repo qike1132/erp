@@ -180,7 +180,7 @@ class TestPurchaseCenterEndpoints:
     async def test_get_products_statistics(self, client):
         with patch('fastapi_app.services.purchase_center_service.get_products_statistics') as mock_svc:
             mock_svc.return_value = {'total': 50, 'has_bom': 30, 'no_bom': 20}
-            resp = await client.get("/api/v1/purchase-center/api/products/statistics")
+            resp = await client.get("/api/v1/purchase-center/products/statistics")
             assert resp.status_code == 200
             data = resp.json()
             assert data['success'] is True
@@ -188,7 +188,7 @@ class TestPurchaseCenterEndpoints:
 
     @pytest.mark.asyncio
     async def test_get_categories(self, client):
-        resp = await client.get("/api/v1/purchase-center/api/categories")
+        resp = await client.get("/api/v1/purchase-center/categories")
         assert resp.status_code == 200
         data = resp.json()
         assert data['success'] is True
@@ -196,14 +196,14 @@ class TestPurchaseCenterEndpoints:
 
     @pytest.mark.asyncio
     async def test_cache_clear(self, client):
-        resp = await client.post("/api/v1/purchase-center/api/cache/clear")
+        resp = await client.post("/api/v1/purchase-center/cache/clear")
         assert resp.status_code == 200
         data = resp.json()
         assert data['success'] is True
 
     @pytest.mark.asyncio
     async def test_get_search_suggestions_empty(self, client):
-        resp = await client.get("/api/v1/purchase-center/api/products/search-suggestions?q=")
+        resp = await client.get("/api/v1/purchase-center/products/search-suggestions?q=")
         assert resp.status_code == 200
         data = resp.json()
         assert data['suggestions'] == []
@@ -212,7 +212,7 @@ class TestPurchaseCenterEndpoints:
     async def test_get_suppliers(self, client):
         with patch('fastapi_app.services.purchase_center_service.get_suppliers') as mock_svc:
             mock_svc.return_value = [{'id': 1, 'name': '供应商A', 'contact_person': '张三', 'phone': '123', 'address': ''}]
-            resp = await client.get("/api/v1/purchase-center/api/suppliers")
+            resp = await client.get("/api/v1/purchase-center/suppliers")
             assert resp.status_code == 200
             data = resp.json()
             assert data['success'] is True
@@ -222,19 +222,19 @@ class TestPurchaseCenterEndpoints:
     async def test_create_supplier(self, client):
         with patch('fastapi_app.services.purchase_center_service.create_supplier') as mock_svc:
             mock_svc.return_value = {'id': 1, 'name': '新供应商'}
-            resp = await client.post("/api/v1/purchase-center/api/suppliers", json={'name': '新供应商'})
+            resp = await client.post("/api/v1/purchase-center/suppliers", json={'name': '新供应商'})
             assert resp.status_code == 200
             data = resp.json()
             assert data['success'] is True
 
     @pytest.mark.asyncio
     async def test_create_supplier_empty_name(self, client):
-        resp = await client.post("/api/v1/purchase-center/api/suppliers", json={})
+        resp = await client.post("/api/v1/purchase-center/suppliers", json={})
         assert resp.status_code == 400
 
     @pytest.mark.asyncio
     async def test_get_quick_filters(self, client):
-        resp = await client.get("/api/v1/purchase-center/api/orders/completed/quick-filters")
+        resp = await client.get("/api/v1/purchase-center/orders/completed/quick-filters")
         assert resp.status_code == 200
         data = resp.json()
         assert data['success'] is True
@@ -244,7 +244,7 @@ class TestPurchaseCenterEndpoints:
     async def test_get_modification_logs(self, client):
         with patch('fastapi_app.services.purchase_center_service.get_modification_logs') as mock_svc:
             mock_svc.return_value = {'logs': [{'id': 1, 'field_name': 'status'}], 'total': 1}
-            resp = await client.get("/api/v1/purchase-center/api/modification-logs")
+            resp = await client.get("/api/v1/purchase-center/modification-logs")
             assert resp.status_code == 200
             data = resp.json()
             assert data['success'] is True
@@ -253,7 +253,7 @@ class TestPurchaseCenterEndpoints:
     async def test_get_saved_queries(self, client):
         with patch('fastapi_app.services.purchase_center_service.get_saved_queries') as mock_svc:
             mock_svc.return_value = [{'id': 1, 'name': '测试'}]
-            resp = await client.get("/api/v1/purchase-center/api/saved-queries")
+            resp = await client.get("/api/v1/purchase-center/saved-queries")
             assert resp.status_code == 200
             data = resp.json()
             assert len(data['queries']) == 1
@@ -262,14 +262,14 @@ class TestPurchaseCenterEndpoints:
     async def test_get_status_logs(self, client):
         with patch('fastapi_app.services.purchase_center_service.get_status_logs') as mock_svc:
             mock_svc.return_value = {'logs': [{'id': 1}], 'total': 1}
-            resp = await client.get("/api/v1/purchase-center/api/status-logs")
+            resp = await client.get("/api/v1/purchase-center/status-logs")
             assert resp.status_code == 200
 
     @pytest.mark.asyncio
     async def test_get_unprocessed_orders(self, client):
         with patch('fastapi_app.services.purchase_center_service.get_unprocessed_orders') as mock_svc:
             mock_svc.return_value = {'orders': [], 'total': 0, 'latest_sync_time': None}
-            resp = await client.get("/api/v1/purchase-center/api/unprocessed-orders")
+            resp = await client.get("/api/v1/purchase-center/unprocessed-orders")
             assert resp.status_code == 200
             data = resp.json()
             assert data['success'] is True
@@ -277,107 +277,107 @@ class TestPurchaseCenterEndpoints:
 
     @pytest.mark.asyncio
     async def test_get_completed_suggestions_empty(self, client):
-        resp = await client.get("/api/v1/purchase-center/api/orders/completed/suggestions?field=&q=")
+        resp = await client.get("/api/v1/purchase-center/orders/completed/suggestions?field=&q=")
         assert resp.status_code == 200
         data = resp.json()
         assert data['suggestions'] == []
 
     @pytest.mark.asyncio
     async def test_save_saved_query_missing_name(self, client):
-        resp = await client.post("/api/v1/purchase-center/api/saved-queries", json={})
+        resp = await client.post("/api/v1/purchase-center/saved-queries", json={})
         assert resp.status_code == 400
 
     @pytest.mark.asyncio
     async def test_delete_saved_query(self, client):
         with patch('fastapi_app.services.purchase_center_service.delete_saved_query') as mock_svc:
             mock_svc.return_value = '已删除'
-            resp = await client.delete("/api/v1/purchase-center/api/saved-queries/1")
+            resp = await client.delete("/api/v1/purchase-center/saved-queries/1")
             assert resp.status_code == 200
 
     @pytest.mark.asyncio
     async def test_delete_saved_query_not_found(self, client):
         with patch('fastapi_app.services.purchase_center_service.delete_saved_query') as mock_svc:
             mock_svc.return_value = None
-            resp = await client.delete("/api/v1/purchase-center/api/saved-queries/999")
+            resp = await client.delete("/api/v1/purchase-center/saved-queries/999")
             assert resp.status_code == 404
 
     @pytest.mark.asyncio
     async def test_use_saved_query(self, client):
         with patch('fastapi_app.services.purchase_center_service.use_saved_query') as mock_svc:
             mock_svc.return_value = {'id': 1, 'use_count': 1}
-            resp = await client.post("/api/v1/purchase-center/api/saved-queries/1/use")
+            resp = await client.post("/api/v1/purchase-center/saved-queries/1/use")
             assert resp.status_code == 200
             data = resp.json()
             assert data['success'] is True
 
     @pytest.mark.asyncio
     async def test_generate_factory_order(self, client):
-        resp = await client.post("/api/v1/purchase-center/api/orders/generate-factory", json={'ids': [1, 2]})
+        resp = await client.post("/api/v1/purchase-center/orders/generate-factory", json={'ids': [1, 2]})
         assert resp.status_code == 200
         data = resp.json()
         assert data['success'] is True
 
     @pytest.mark.asyncio
     async def test_generate_supplier_order(self, client):
-        resp = await client.post("/api/v1/purchase-center/api/orders/generate-supplier", json={'supplier_id': 1})
+        resp = await client.post("/api/v1/purchase-center/orders/generate-supplier", json={'supplier_id': 1})
         assert resp.status_code == 200
 
     @pytest.mark.asyncio
     async def test_create_purchase_order_no_data(self, client):
-        resp = await client.post("/api/v1/purchase-center/api/orders", json=None)
+        resp = await client.post("/api/v1/purchase-center/orders", json=None)
         # Will be 400 or 422 depending on how the data is parsed
         assert resp.status_code in [400, 422]
 
     @pytest.mark.asyncio
     async def test_one_click_generate_empty(self, client):
-        resp = await client.post("/api/v1/purchase-center/api/orders/one-click-generate", json={})
+        resp = await client.post("/api/v1/purchase-center/orders/one-click-generate", json={})
         assert resp.status_code == 400
 
     @pytest.mark.asyncio
     async def test_complete_order_missing_id(self, client):
-        resp = await client.post("/api/v1/purchase-center/api/orders/complete", json={})
+        resp = await client.post("/api/v1/purchase-center/orders/complete", json={})
         assert resp.status_code == 400
 
     @pytest.mark.asyncio
     async def test_batch_complete_empty(self, client):
-        resp = await client.post("/api/v1/purchase-center/api/orders/batch-complete", json={})
+        resp = await client.post("/api/v1/purchase-center/orders/batch-complete", json={})
         assert resp.status_code == 400
 
     @pytest.mark.asyncio
     async def test_batch_print_empty(self, client):
-        resp = await client.post("/api/v1/purchase-center/api/orders/batch-print", json={})
+        resp = await client.post("/api/v1/purchase-center/orders/batch-print", json={})
         assert resp.status_code == 400
 
     @pytest.mark.asyncio
     async def test_factory_summary_empty(self, client):
-        resp = await client.post("/api/v1/purchase-center/api/orders/factory-summary", json={})
+        resp = await client.post("/api/v1/purchase-center/orders/factory-summary", json={})
         assert resp.status_code == 400
 
     @pytest.mark.asyncio
     async def test_factory_summary_save_empty(self, client):
-        resp = await client.post("/api/v1/purchase-center/api/orders/factory-summary/save", json={})
+        resp = await client.post("/api/v1/purchase-center/orders/factory-summary/save", json={})
         assert resp.status_code == 400
 
     @pytest.mark.asyncio
     async def test_supplier_summary_empty(self, client):
-        resp = await client.post("/api/v1/purchase-center/api/orders/supplier-summary", json={})
+        resp = await client.post("/api/v1/purchase-center/orders/supplier-summary", json={})
         assert resp.status_code == 400
 
     @pytest.mark.asyncio
     async def test_supplier_summary_by_vendor_empty(self, client):
-        resp = await client.post("/api/v1/purchase-center/api/orders/supplier-summary-by-vendor", json={})
+        resp = await client.post("/api/v1/purchase-center/orders/supplier-summary-by-vendor", json={})
         assert resp.status_code == 400
 
     @pytest.mark.asyncio
     async def test_summary_print_empty(self, client):
-        resp = await client.post("/api/v1/purchase-center/api/orders/summary-print", json={})
+        resp = await client.post("/api/v1/purchase-center/orders/summary-print", json={})
         assert resp.status_code == 400
 
     @pytest.mark.asyncio
     async def test_get_purchase_orders_default(self, client):
         with patch('fastapi_app.services.purchase_center_service.get_purchase_orders') as mock_svc:
             mock_svc.return_value = {'orders': [], 'total': 0, 'pages': 0, 'current_page': 1}
-            resp = await client.get("/api/v1/purchase-center/api/orders")
+            resp = await client.get("/api/v1/purchase-center/orders")
             assert resp.status_code == 200
             data = resp.json()
             assert data['success'] is True
@@ -386,14 +386,14 @@ class TestPurchaseCenterEndpoints:
     async def test_get_completed_orders(self, client):
         with patch('fastapi_app.services.purchase_center_service.get_completed_purchase_orders') as mock_svc:
             mock_svc.return_value = {'orders': [], 'total': 0, 'page': 1, 'per_page': 20, 'total_pages': 0}
-            resp = await client.get("/api/v1/purchase-center/api/orders/completed")
+            resp = await client.get("/api/v1/purchase-center/orders/completed")
             assert resp.status_code == 200
 
     @pytest.mark.asyncio
     async def test_export_completed_orders(self, client):
         with patch('fastapi_app.services.purchase_center_service.export_completed_orders') as mock_svc:
             mock_svc.return_value = '<html></html>'
-            resp = await client.post("/api/v1/purchase-center/api/orders/completed/export", json={})
+            resp = await client.post("/api/v1/purchase-center/orders/completed/export", json={})
             assert resp.status_code == 200
             data = resp.json()
             assert data['success'] is True
@@ -402,35 +402,35 @@ class TestPurchaseCenterEndpoints:
     async def test_get_order_not_found(self, client):
         with patch('fastapi_app.services.purchase_center_service.get_purchase_order') as mock_svc:
             mock_svc.return_value = None
-            resp = await client.get("/api/v1/purchase-center/api/orders/999")
+            resp = await client.get("/api/v1/purchase-center/orders/999")
             assert resp.status_code == 404
 
     @pytest.mark.asyncio
     async def test_delete_order_not_found(self, client):
         with patch('fastapi_app.services.purchase_center_service.delete_purchase_order') as mock_svc:
             mock_svc.return_value = None
-            resp = await client.delete("/api/v1/purchase-center/api/orders/999")
+            resp = await client.delete("/api/v1/purchase-center/orders/999")
             assert resp.status_code == 404
 
     @pytest.mark.asyncio
     async def test_get_order_print_not_found(self, client):
         with patch('fastapi_app.services.purchase_center_service.get_purchase_order') as mock_svc:
             mock_svc.return_value = None
-            resp = await client.get("/api/v1/purchase-center/api/orders/999/print")
+            resp = await client.get("/api/v1/purchase-center/orders/999/print")
             assert resp.status_code == 404
 
     @pytest.mark.asyncio
     async def test_get_customer_detail_not_found(self, client):
         with patch('fastapi_app.services.purchase_center_service.get_customer_detail') as mock_svc:
             mock_svc.return_value = None
-            resp = await client.get("/api/v1/purchase-center/api/customers/999")
+            resp = await client.get("/api/v1/purchase-center/customers/999")
             assert resp.status_code == 404
 
     @pytest.mark.asyncio
     async def test_get_customers_statistics(self, client):
         with patch('fastapi_app.services.purchase_center_service.get_customers_statistics') as mock_svc:
             mock_svc.return_value = {'total': 50, 'active': 40, 'inactive': 10, 'recent_updated': 5}
-            resp = await client.get("/api/v1/purchase-center/api/customers/statistics")
+            resp = await client.get("/api/v1/purchase-center/customers/statistics")
             assert resp.status_code == 200
             data = resp.json()
             assert data['statistics']['total'] == 50
@@ -510,7 +510,7 @@ class TestBomCopyAndBatchDelete:
     @pytest.mark.asyncio
     async def test_search_products_empty_keyword(self, client):
         """空关键词返回422（FastAPI参数校验）"""
-        resp = await client.get("/api/v1/purchase-center/api/products/search?keyword=")
+        resp = await client.get("/api/v1/purchase-center/products/search?keyword=")
         assert resp.status_code == 422
 
     @pytest.mark.asyncio
@@ -520,7 +520,7 @@ class TestBomCopyAndBatchDelete:
             mock_svc.return_value = [
                 {'id': 1, 'name': '测试产品', 'barcode': '123456', 'has_bom': False, 'material_count': 0}
             ]
-            resp = await client.get("/api/v1/purchase-center/api/products/search?keyword=测试")
+            resp = await client.get("/api/v1/purchase-center/products/search?keyword=测试")
             assert resp.status_code == 200
             data = resp.json()
             assert data['success'] is True
@@ -534,7 +534,7 @@ class TestBomCopyAndBatchDelete:
         """产品不存在时返回400"""
         with patch('fastapi_app.services.purchase_center_service.get_bom_preview') as mock_svc:
             mock_svc.side_effect = ValueError('产品ID 999 不存在')
-            resp = await client.get("/api/v1/purchase-center/api/products/999/bom-preview")
+            resp = await client.get("/api/v1/purchase-center/products/999/bom-preview")
             assert resp.status_code == 400
             assert '不存在' in resp.json()['detail']
 
@@ -543,7 +543,7 @@ class TestBomCopyAndBatchDelete:
         """产品无BOM时返回400"""
         with patch('fastapi_app.services.purchase_center_service.get_bom_preview') as mock_svc:
             mock_svc.side_effect = ValueError('该产品没有配置BOM表，无法复制')
-            resp = await client.get("/api/v1/purchase-center/api/products/1/bom-preview")
+            resp = await client.get("/api/v1/purchase-center/products/1/bom-preview")
             assert resp.status_code == 400
             assert '没有配置BOM' in resp.json()['detail']
 
@@ -562,7 +562,7 @@ class TestBomCopyAndBatchDelete:
         }
         with patch('fastapi_app.services.purchase_center_service.get_bom_preview') as mock_svc:
             mock_svc.return_value = preview_data
-            resp = await client.get("/api/v1/purchase-center/api/products/1/bom-preview")
+            resp = await client.get("/api/v1/purchase-center/products/1/bom-preview")
             assert resp.status_code == 200
             data = resp.json()
             assert data['success'] is True
@@ -578,7 +578,7 @@ class TestBomCopyAndBatchDelete:
         """复制到同一产品返回400"""
         with patch('fastapi_app.services.purchase_center_service.copy_bom_to_product') as mock_svc:
             mock_svc.side_effect = ValueError('不能复制到同一产品')
-            resp = await client.post("/api/v1/purchase-center/api/products/1/copy-bom", json={'source_product_id': 1})
+            resp = await client.post("/api/v1/purchase-center/products/1/copy-bom", json={'source_product_id': 1})
             assert resp.status_code == 400
             assert '不能复制到同一产品' in resp.json()['detail']
 
@@ -587,7 +587,7 @@ class TestBomCopyAndBatchDelete:
         """未选择源产品返回400"""
         with patch('fastapi_app.services.purchase_center_service.copy_bom_to_product') as mock_svc:
             mock_svc.side_effect = ValueError('请选择源产品')
-            resp = await client.post("/api/v1/purchase-center/api/products/2/copy-bom", json={})
+            resp = await client.post("/api/v1/purchase-center/products/2/copy-bom", json={})
             assert resp.status_code == 400
 
     @pytest.mark.asyncio
@@ -595,7 +595,7 @@ class TestBomCopyAndBatchDelete:
         """目标产品已有BOM且未覆盖时返回409"""
         with patch('fastapi_app.services.purchase_center_service.copy_bom_to_product') as mock_svc:
             mock_svc.side_effect = ValueError('目标产品已有BOM表，请确认是否覆盖')
-            resp = await client.post("/api/v1/purchase-center/api/products/2/copy-bom", json={'source_product_id': 1, 'overwrite': False})
+            resp = await client.post("/api/v1/purchase-center/products/2/copy-bom", json={'source_product_id': 1, 'overwrite': False})
             assert resp.status_code == 409
 
     @pytest.mark.asyncio
@@ -603,7 +603,7 @@ class TestBomCopyAndBatchDelete:
         """源产品无BOM返回400"""
         with patch('fastapi_app.services.purchase_center_service.copy_bom_to_product') as mock_svc:
             mock_svc.side_effect = ValueError('源产品没有配置BOM表')
-            resp = await client.post("/api/v1/purchase-center/api/products/2/copy-bom", json={'source_product_id': 1, 'overwrite': True})
+            resp = await client.post("/api/v1/purchase-center/products/2/copy-bom", json={'source_product_id': 1, 'overwrite': True})
             assert resp.status_code == 400
 
     @pytest.mark.asyncio
@@ -617,7 +617,7 @@ class TestBomCopyAndBatchDelete:
         }
         with patch('fastapi_app.services.purchase_center_service.copy_bom_to_product') as mock_svc:
             mock_svc.return_value = copy_result
-            resp = await client.post("/api/v1/purchase-center/api/products/2/copy-bom", json={
+            resp = await client.post("/api/v1/purchase-center/products/2/copy-bom", json={
                 'source_product_id': 1,
                 'overwrite': True,
             })
@@ -635,7 +635,7 @@ class TestBomCopyAndBatchDelete:
         """空订单列表返回400"""
         with patch('fastapi_app.services.purchase_center_service.batch_delete_purchase_orders') as mock_svc:
             mock_svc.side_effect = ValueError('请选择要删除的订单')
-            resp = await client.post("/api/v1/purchase-center/api/orders/batch-delete", json={'order_ids': []})
+            resp = await client.post("/api/v1/purchase-center/orders/batch-delete", json={'order_ids': []})
             assert resp.status_code == 400
 
     @pytest.mark.asyncio
@@ -643,7 +643,7 @@ class TestBomCopyAndBatchDelete:
         """未找到订单返回400"""
         with patch('fastapi_app.services.purchase_center_service.batch_delete_purchase_orders') as mock_svc:
             mock_svc.side_effect = ValueError('未找到要删除的订单')
-            resp = await client.post("/api/v1/purchase-center/api/orders/batch-delete", json={'order_ids': [999, 1000]})
+            resp = await client.post("/api/v1/purchase-center/orders/batch-delete", json={'order_ids': [999, 1000]})
             assert resp.status_code == 400
 
     @pytest.mark.asyncio
@@ -655,7 +655,7 @@ class TestBomCopyAndBatchDelete:
         }
         with patch('fastapi_app.services.purchase_center_service.batch_delete_purchase_orders') as mock_svc:
             mock_svc.return_value = delete_result
-            resp = await client.post("/api/v1/purchase-center/api/orders/batch-delete", json={'order_ids': [1, 2]})
+            resp = await client.post("/api/v1/purchase-center/orders/batch-delete", json={'order_ids': [1, 2]})
             assert resp.status_code == 200
             data = resp.json()
             assert data['success'] is True

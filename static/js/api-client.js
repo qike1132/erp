@@ -31,14 +31,15 @@ class ApiClient {
     }
 
     /**
-     * 获取 CSRF Token（从 meta 标签或 cookie）
+     * 获取 CSRF Token（从 starlette-csrf cookie）
      */
     _getCSRFToken() {
+        const match = document.cookie.match(/fastapi_csrf_token=([^;]+)/);
+        if (match) return decodeURIComponent(match[1]);
+        // 降级：从 meta 标签读取
         const meta = document.querySelector('meta[name="csrf-token"]');
         if (meta) return meta.getAttribute('content');
-        // 降级：从 cookie 读取
-        const match = document.cookie.match(/csrf_token=([^;]+)/);
-        return match ? match[1] : '';
+        return '';
     }
 
     /**

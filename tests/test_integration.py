@@ -9,11 +9,19 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from flask import Flask
-from flask_sqlalchemy import SQLAlchemy
-from werkzeug.security import generate_password_hash
+try:
+    from flask import Flask
+    from flask_sqlalchemy import SQLAlchemy
+    HAS_FLASK = True
+except ImportError:
+    HAS_FLASK = False
+    Flask = None
+    SQLAlchemy = None
+
+from fastapi_app.core.security import hash_password
 
 
+@unittest.skipIf(not HAS_FLASK, "Flask dependencies not available")
 class IntegrationTestCase(unittest.TestCase):
     """集成测试用例集"""
     
@@ -105,8 +113,8 @@ class IntegrationTestCase(unittest.TestCase):
     def _init_test_data(cls):
         """初始化测试数据"""
         # 创建用户
-        admin = cls.User(username='admin', password=generate_password_hash('admin123'), is_super=True)
-        user = cls.User(username='user1', password=generate_password_hash('user123'))
+        admin = cls.User(username='admin', password=hash_password('admin123'), is_super=True)
+        user = cls.User(username='user1', password=hash_password('user123'))
         
         # 创建产品
         product = cls.Product(name='产品A', barcode='P001', current_stock=100, price=10.0)

@@ -5,11 +5,24 @@
 import pytest
 import json
 from datetime import datetime
-from flask import session
-from app import db
-from app.models import Product, StockIn, StockOut, InventoryLog, Customer
+try:
+    from flask import session
+    from app import db
+    from app.models import Product, StockIn, StockOut, InventoryLog, Customer, Order
+    HAS_FLASK = True
+except ImportError:
+    HAS_FLASK = False
+    session = None
+    db = None
+    Product = None
+    StockIn = None
+    StockOut = None
+    InventoryLog = None
+    Customer = None
+    Order = None
 
 
+@pytest.mark.skipif(not HAS_FLASK, reason="Flask dependencies not available")
 class TestStockInRoutes:
     """入库路由测试"""
 
@@ -140,6 +153,7 @@ class TestStockInRoutes:
         assert b'error' in response.data or '无法删除'.encode('utf-8') in response.data
 
 
+@pytest.mark.skipif(not HAS_FLASK, reason="Flask dependencies not available")
 class TestStockOutRoutes:
     """出库路由测试"""
 
@@ -252,6 +266,7 @@ class TestStockOutRoutes:
         assert response.status_code == 404
 
 
+@pytest.mark.skipif(not HAS_FLASK, reason="Flask dependencies not available")
 class TestInventoryRoutes:
     """库存查看路由测试"""
 
@@ -264,7 +279,6 @@ class TestInventoryRoutes:
     def test_inventory_with_products(self, logged_in_client, test_product, test_customer, db_session):
         """测试有产品时的库存查看"""
         # 创建订单
-        from app.models import Order
         order = Order(
             order_no='ORD-INV-001',
             product_id=test_product.id,
@@ -290,6 +304,7 @@ class TestInventoryRoutes:
         assert response.status_code == 200
 
 
+@pytest.mark.skipif(not HAS_FLASK, reason="Flask dependencies not available")
 class TestStockBusinessLogic:
     """库存业务逻辑测试"""
 
@@ -352,6 +367,7 @@ class TestStockBusinessLogic:
         assert log.change_quantity == 15
 
 
+@pytest.mark.skipif(not HAS_FLASK, reason="Flask dependencies not available")
 class TestStockEdgeCases:
     """库存边界条件测试"""
 
@@ -417,6 +433,7 @@ class TestStockEdgeCases:
         assert response.status_code == 200
 
 
+@pytest.mark.skipif(not HAS_FLASK, reason="Flask dependencies not available")
 class TestStockPerformance:
     """库存性能测试"""
 

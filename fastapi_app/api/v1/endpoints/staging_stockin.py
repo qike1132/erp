@@ -40,8 +40,8 @@ async def import_staging_stockins(
     current_user: User = Depends(require_permission("batch_import")),
 ):
     """批量导入备货到暂存区"""
-    if not file.filename or not (file.filename.endswith('.xlsx') or file.filename.endswith('.xls')):
-        return StagingStockInImportResult(success=False, message="只支持 Excel 文件格式")
+    if not file.filename or not file.filename.endswith('.xlsx'):
+        return StagingStockInImportResult(success=False, message="只支持 .xlsx 格式，.xls 已不再支持")
 
     content = await file.read()
     imported, message, errors = await svc.import_staging_stockins_from_excel(db, content, session_id)

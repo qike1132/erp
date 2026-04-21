@@ -96,7 +96,7 @@ class TestUserService:
         mock_result.scalar_one_or_none.return_value = None
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        with patch('werkzeug.security.generate_password_hash', return_value='hashed'):
+        with patch('fastapi_app.core.security.hash_password', return_value='hashed'):
             user = await create_user(mock_db, "newuser", "Test123!@", False)
         assert mock_db.add.called
         assert mock_db.flush.called
@@ -124,7 +124,7 @@ class TestUserService:
         from fastapi_app.services.user_service import update_user
         mock_db.get = AsyncMock(return_value=mock_user)
 
-        with patch('werkzeug.security.generate_password_hash', return_value='new_hashed'):
+        with patch('fastapi_app.core.security.hash_password', return_value='new_hashed'):
             await update_user(mock_db, 1, "Test123!@", None)
         assert mock_user.password == 'new_hashed'
         assert mock_db.flush.called
@@ -254,7 +254,7 @@ class TestUserEndpoints:
         mock_result.scalar_one_or_none.return_value = None
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        with patch('werkzeug.security.generate_password_hash', return_value='hashed'):
+        with patch('fastapi_app.core.security.hash_password', return_value='hashed'):
             response = await client.post("/api/v1/users/create", json={
                 "username": "newuser", "password": "Test123!@", "is_super": False
             })
@@ -269,7 +269,7 @@ class TestUserEndpoints:
         mock_result.scalar_one_or_none.return_value = mock_user
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        with patch('werkzeug.security.generate_password_hash', return_value='hashed'):
+        with patch('fastapi_app.core.security.hash_password', return_value='hashed'):
             response = await client.post("/api/v1/users/create", json={
                 "username": "testuser", "password": "Test123!@", "is_super": False
             })

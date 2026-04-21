@@ -36,11 +36,7 @@ class User(Base):
 
     def has_permission(self, permission_code: str) -> bool:
         """检查用户是否拥有指定权限（与 Flask 端逻辑一致）"""
-        SENSITIVE_PERMISSIONS = ['user_manage']
         SENSITIVE_PREFIXES = ['user_']
-
-        if permission_code in SENSITIVE_PERMISSIONS:
-            return self.is_super
 
         for prefix in SENSITIVE_PREFIXES:
             if permission_code.startswith(prefix):

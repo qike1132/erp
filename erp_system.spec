@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-ERP 系统 PyInstaller 打包配置文件
+ERP 系统 PyInstaller 打包配置文件（FastAPI 版）
 使用方法: pyinstaller erp_system.spec
 """
 
@@ -16,55 +16,100 @@ datas = [
     (str(project_root / 'templates'), 'templates'),
     # 静态文件
     (str(project_root / 'static'), 'static'),
-    # 配置文件（如果有）
+    # 日志配置
+    (str(project_root / 'fastapi_app' / 'log_config.json'), 'fastapi_app'),
 ]
 
 # 如果有 .env 文件，也包含进去
 if (project_root / '.env').exists():
     datas.append((str(project_root / '.env'), '.'))
 
-# 收集隐藏导入
+# 收集隐藏导入（FastAPI 栈）
 hiddenimports = [
-    # Flask 相关
-    'flask',
-    'flask_sqlalchemy',
-    'flask_wtf',
-    'flask_limiter',
-    'flask_migrate',
-    'flasgger',
-    
+    # FastAPI 核心
+    'fastapi',
+    'uvicorn',
+    'uvicorn.logging',
+    'uvicorn.loops',
+    'uvicorn.loops.auto',
+    'uvicorn.protocols',
+    'uvicorn.protocols.http',
+    'uvicorn.protocols.http.auto',
+    'uvicorn.protocols.websockets',
+    'uvicorn.protocols.websockets.auto',
+    'uvicorn.lifespan',
+    'uvicorn.lifespan.on',
+    'starlette',
+    'starlette.responses',
+    'starlette.routing',
+    'starlette.middleware',
+    'starlette_csrf',
+
     # 数据库
     'pymysql',
+    'asyncmy',
     'cryptography',
-    
+    'sqlalchemy',
+    'sqlalchemy.dialects.mysql',
+    'sqlalchemy.ext.asyncio',
+    'alembic',
+
+    # 数据验证
+    'pydantic',
+    'pydantic_settings',
+
+    # 安全
+    'jwt',
+    'bcrypt',
+
+    # 序列化
+    'orjson',
+
+    # 限流
+    'slowapi',
+
+    # 模板
+    'jinja2',
+
     # Excel 处理
     'pandas',
     'openpyxl',
     'xlsxwriter',
-    'xlrd',
-    
-    # WSGI 服务器
-    'waitress',
-    
+
+    # 异步任务
+    'celery',
+    'celery.app',
+
     # 其他依赖
     'dotenv',
     'redis',
     'arrow',
     'dateutil',
-    'chardet',
+    'charset_normalizer',
     'pypinyin',
-    'fuzzywuzzy',
     'rapidfuzz',
     'bleach',
-    
-    # 应用模块
-    'app',
-    'app.models',
-    'app.routes',
-    'app.utils',
-    
-    # SQLAlchemy 驱动
-    'sqlalchemy.dialects.mysql',
+    'httpx',
+
+    # OCR
+    'rapidocr',
+    'rapidocr_pdf',
+
+    # FastAPI 应用模块
+    'fastapi_app',
+    'fastapi_app.main',
+    'fastapi_app.core',
+    'fastapi_app.core.config',
+    'fastapi_app.core.database',
+    'fastapi_app.core.deps',
+    'fastapi_app.core.security',
+    'fastapi_app.core.templates',
+    'fastapi_app.core.nav_context',
+    'fastapi_app.core.celery_app',
+    'fastapi_app.shared_models',
+    'fastapi_app.api',
+    'fastapi_app.api.v1',
+    'fastapi_app.api.v1.router',
 ]
 
 # 排除不必要的模块
@@ -72,19 +117,28 @@ excludes = [
     'tkinter',
     'matplotlib',
     'scipy',
-    'numpy',
     'IPython',
     'jupyter',
     'pytest',
     'unittest',
-    'email',
     'http.server',
+    # 已移除的 Flask 栈
+    'flask',
+    'flask_sqlalchemy',
+    'flask_wtf',
+    'flask_limiter',
+    'flask_migrate',
+    'flasgger',
+    'waitress',
+    'gunicorn',
+    'fuzzywuzzy',
+    'jose',
 ]
 
 block_cipher = None
 
 a = Analysis(
-    ['run_production_exe.py'],
+    ['run.py'],
     pathex=[str(project_root)],
     binaries=[],
     datas=datas,

@@ -309,8 +309,8 @@ async def upload_excel(
     _user: User = Depends(require_permission("production_plan_manage")),
 ):
     """上传Excel文件，解析到暂存表"""
-    if not file.filename.endswith(('.xlsx', '.xls')):
-        raise HTTPException(status_code=400, detail="仅支持 .xlsx / .xls 格式文件")
+    if not file.filename.endswith('.xlsx'):
+        raise HTTPException(status_code=400, detail="仅支持 .xlsx 格式文件，.xls 已不再支持")
 
     # 文件大小检查（10MB）
     content = await file.read()

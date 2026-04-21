@@ -9,18 +9,18 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from app import create_app, db
-from sqlalchemy import text
+from fastapi_app.core.database import SyncSessionLocal, sync_engine
+from sqlalchemy import text, inspect
 
-app = create_app()
+session = SyncSessionLocal()
 
-with app.app_context():
-    inspector = db.inspect(db.engine)
+try:
+    inspector = inspect(sync_engine)
     existing_tables = inspector.get_table_names()
 
     # 1. 创建 purchase_plans 表
     if 'purchase_plans' not in existing_tables:
-        db.session.execute(text("""
+        session.execute(text("""
             CREATE TABLE purchase_plans (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 plan_no VARCHAR(32) NOT NULL UNIQUE COMMENT '计划编号',
@@ -40,14 +40,14 @@ with app.app_context():
                 CONSTRAINT fk_ppl_customer FOREIGN KEY (customer_id) REFERENCES customer(id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='采购计划主表'
         """))
-        db.session.commit()
+        session.commit()
         print("[OK] 创建表 purchase_plans")
     else:
         print("[SKIP] 表 purchase_plans 已存在")
 
     # 2. 创建 purchase_plan_details 表
     if 'purchase_plan_details' not in existing_tables:
-        db.session.execute(text("""
+        session.execute(text("""
             CREATE TABLE purchase_plan_details (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 plan_id INT NOT NULL COMMENT '关联主单ID',
@@ -65,14 +65,14 @@ with app.app_context():
                 CONSTRAINT fk_ppd_product FOREIGN KEY (product_id) REFERENCES product(id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='采购计划明细表'
         """))
-        db.session.commit()
+        session.commit()
         print("[OK] 创建表 purchase_plan_details")
     else:
         print("[SKIP] 表 purchase_plan_details 已存在")
 
     # 3. 创建 shipment_records 表
     if 'shipment_records' not in existing_tables:
-        db.session.execute(text("""
+        session.execute(text("""
             CREATE TABLE shipment_records (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 shipment_no VARCHAR(64) NOT NULL UNIQUE COMMENT '原始出货单号',
@@ -90,7 +90,7 @@ with app.app_context():
                 INDEX idx_sr_shipment_date (shipment_date)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='出货记录同步表'
         """))
-        db.session.commit()
+        session.commit()
         print("[OK] 创建表 shipment_records")
     else:
         print("[SKIP] 表 shipment_records 已存在")
@@ -98,10 +98,10 @@ with app.app_context():
     # 4. customer 表增加 icon_url 字段
     customer_columns = [c['name'] for c in inspector.get_columns('customer')]
     if 'icon_url' not in customer_columns:
-        db.session.execute(text("""
+        session.execute(text("""
             ALTER TABLE customer ADD COLUMN icon_url VARCHAR(200) NULL COMMENT '客户图标URL' AFTER note
         """))
-        db.session.commit()
+        session.commit()
         print("[OK] customer 表新增 icon_url 字段")
     else:
         print("[SKIP] customer 表 icon_url 字段已存在")
@@ -109,12 +109,14 @@ with app.app_context():
     # 5. staging_purchase_plan 表增加 plan_month 字段
     spp_columns = [c['name'] for c in inspector.get_columns('staging_purchase_plan')]
     if 'plan_month' not in spp_columns:
-        db.session.execute(text("""
+        session.execute(text("""
             ALTER TABLE staging_purchase_plan ADD COLUMN plan_month VARCHAR(7) NULL COMMENT '计划月份 YYYY-MM' AFTER plan_date
         """))
-        db.session.commit()
+        session.commit()
         print("[OK] staging_purchase_plan 表新增 plan_month 字段")
     else:
         print("[SKIP] staging_purchase_plan 表 plan_month 字段已存在")
 
     print("\n迁移完成！")
+finally:
+    session.close()

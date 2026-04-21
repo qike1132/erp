@@ -1,53 +1,81 @@
-# 阶段1: 构建依赖
-FROM python:3.13-slim AS builder
+# ==========================================
+# 滨发协同系统 - Dockerfile 多阶段构建
+# 版本: v1.0
+# 目标镜像大小: ≤350MB
+# ==========================================
+
+# ------------------------------------------
+# Stage 1: 前端构建 (Node.js)
+# ------------------------------------------
+FROM node:18-alpine AS frontend-builder
+
+WORKDIR /app/frontend
+
+# 复制依赖文件
+COPY frontend/package*.json ./
+RUN npm ci --only=production
+
+# 复制前端源码并构建
+COPY frontend/ ./
+RUN npm run build
+
+# ------------------------------------------
+# Stage 2: Python 依赖安装
+# ------------------------------------------
+FROM python:3.11-slim AS python-builder
 
 WORKDIR /app
 
 # 安装系统依赖
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
-    libmariadb-dev \
-    pkg-config \
+    libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装Python依赖（仅生产依赖）
-COPY requirements/base.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+# 复制依赖文件
+COPY requirements/ ./requirements/
+RUN pip install --no-cache-dir --user -r requirements/base.txt
 
-# 阶段2: 运行时镜像
-FROM python:3.13-slim
+# ------------------------------------------
+# Stage 3: 生产镜像
+# ------------------------------------------
+FROM python:3.11-slim AS production
+
+# 安全：创建非 root 用户
+RUN groupadd -r appgroup && useradd -r -g appgroup appuser
 
 WORKDIR /app
 
-# 仅安装运行时系统依赖（无需编译工具）
-RUN apt-get update && apt-get install -y \
-    libmariadb3 \
-    && rm -rf /var/lib/apt/lists/* \
-    && useradd -r -s /bin/false appuser
+# 安装运行时依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    && rm -rf /var/lib/apt/lists/*
 
-# 从构建阶段复制Python包
-COPY --from=builder /usr/local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
+# 从 builder 阶段复制 Python 依赖
+COPY --from=python-builder /root/.local /home/appuser/.local
+ENV PATH=/home/appuser/.local/bin:$PATH
 
-# 复制项目代码
-COPY . .
+# 复制应用代码
+COPY fastapi_app/ ./fastapi_app/
+COPY app/ ./app/
+COPY templates/ ./templates/
+COPY static/ ./static/
+COPY utils/ ./utils/
+COPY run.py ./
 
-# 确保 entrypoint.sh 使用 LF 行尾并有执行权限（防止 Windows CRLF 问题）
-RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+# 从前端构建阶段复制构建产物
+COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
-# 创建日志目录
-RUN mkdir -p /app/logs && chown -R appuser:appuser /app
-
-# 安全：以非root用户运行
+# 设置权限
+RUN chown -R appuser:appgroup /app
 USER appuser
 
-# 暴露端口 (Flask:5003, FastAPI:5002)
-EXPOSE 5003 5002
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5002/api/health')" || exit 1
 
-# 设置环境变量
-ENV FLASK_APP=run.py
-ENV FLASK_ENV=production
-ENV PYTHONUNBUFFERED=1
+# 暴露端口
+EXPOSE 5002 5003
 
-# 使用 entrypoint 脚本同时启动 FastAPI 和 Flask
-CMD ["/app/entrypoint.sh"]
+# 启动命令
+CMD ["python", "run.py"]

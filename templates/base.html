@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <meta name="csrf-token" content="">
     <title>滨发协同系统</title>
-    <link rel="icon" type="image/png" href="{{ url_for('static', filename='brand-icon.png') }}">
-    <link href="{{ url_for('static', filename='bootstrap.min.css') }}?v={{ config.get('ASSET_VERSION', '1') }}" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='all.min.css') }}?v={{ config.get('ASSET_VERSION', '1') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ config.get('ASSET_VERSION', '1') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='collapse-animated.css') }}?v={{ config.get('ASSET_VERSION', '1') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='tab-system.css') }}?v={{ config.get('ASSET_VERSION', '1') }}">
+    <link rel="icon" type="image/png" href="/static/brand-icon.png">
+    <link href="/static/bootstrap.min.css?v={{ ASSET_VERSION }}" rel="stylesheet">
+    <link rel="stylesheet" href="/static/all.min.css?v={{ ASSET_VERSION }}">
+    <link rel="stylesheet" href="/static/style.css?v={{ ASSET_VERSION }}">
+    <link rel="stylesheet" href="/static/collapse-animated.css?v={{ ASSET_VERSION }}">
+    <link rel="stylesheet" href="/static/tab-system.css?v={{ ASSET_VERSION }}">
     {% block extra_css %}{% endblock %}
 </head>
 <body>
@@ -22,7 +22,7 @@
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <div class="sidebar-logo">
-                    <img src="{{ url_for('static', filename='logo.jpg') }}" alt="LOGO">
+                    <img src="/static/logo.jpg" alt="LOGO">
                     <div>
                         <div class="sidebar-title">滨发协同系统</div>
                         <div class="sidebar-subtitle">毛绒玩具全流程管理</div>
@@ -38,28 +38,28 @@
                             
                             {% for item in section['items'] %}
                                 {% set show_item = false %}
-                                {% if session.get('is_super') %}
+                                {% if is_super %}
                                     {% set show_item = true %}
                                 {% else %}
                                     {% for perm_code in item.permission_codes %}
-                                        {% if perm_code in session.get('permissions', []) %}
+                                        {% if perm_code in permissions %}
                                             {% set show_item = true %}
                                         {% endif %}
                                     {% endfor %}
                                 {% endif %}
                                 
                                 {% if show_item %}
-                                    {% if item.code == 'approval_manage' and not session.get('is_super') %}
-                                        {% if 'order_manage' in session.get('permissions', []) %}
-                                        <a href="{{ url_for('order.my_approvals') }}" class="nav-item {% if request.endpoint == 'order.my_approvals' %}active{% endif %}">
+                                    {% if item.code == 'approval_manage' and not is_super %}
+                                        {% if 'order_manage' in permissions %}
+                                        <a href="/order/my-approvals" class="nav-item {% if '/order/my-approvals' in current_path %}active{% endif %}">
                                             <i class="fas fa-file-alt"></i>
                                             <span>我的审批</span>
                                         </a>
                                         {% endif %}
-                                    {% elif item.code == 'user_manage' and not session.get('is_super') %}
-                                    {% elif item.code == 'permission_manage' and not session.get('is_super') %}
+                                    {% elif item.code == 'user_manage' and not is_super %}
+                                    {% elif item.code == 'permission_manage' and not is_super %}
                                     {% else %}
-                                    <a href="{{ item.url|safe_url_for }}" class="nav-item {% if request.endpoint and item.url in request.endpoint %}active{% endif %}">
+                                    <a href="{{ item.url }}" class="nav-item {% if item.url in current_path %}active{% endif %}">
                                         <i class="fas {{ item.icon }}"></i>
                                         <span>{{ item.name.replace('(全部)', '') }}</span>
                                     </a>
@@ -92,7 +92,7 @@
                         <i class="fas fa-bars"></i>
                     </button>
                     {% if not is_home %}
-                    <a href="{{ url_for('main.index') }}" class="home-btn" title="返回首页">
+                    <a href="/" class="home-btn" title="返回首页">
                         <i class="fas fa-home me-1"></i>返回首页
                     </a>
                     {% endif %}
@@ -105,19 +105,19 @@
                         <span id="currentTime"></span>
                     </span>
                     
-                    {% if session.get('user_id') %}
+                    {% if user_id %}
                     <!-- 用户信息卡片 -->
                     <div class="user-info-header">
-                        <div class="user-avatar-header">{{ session['username'][0] | upper }}</div>
+                        <div class="user-avatar-header">{{ username[0] | upper }}</div>
                         <div class="user-info-details">
-                            <div class="user-name-header">{{ session['username'] }}</div>
-                            <div class="user-role-header">{% if session.get('is_super') %}超级管理员{% else %}普通用户{% endif %}</div>
+                            <div class="user-name-header">{{ username }}</div>
+                            <div class="user-role-header">{% if is_super %}超级管理员{% else %}普通用户{% endif %}</div>
                         </div>
                     </div>
                     
                     <!-- 退出登录按钮 -->
-                    <form method="POST" action="{{ url_for('main.logout') }}" style="display:inline">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <form method="POST" action="/api/v1/auth/logout" style="display:inline">
+                        <input type="hidden" name="csrf_token" value="">
                         <button type="submit" class="logout-btn-header" title="退出登录" style="border:none;background:none;cursor:pointer;font:inherit;padding:0;">
                             <i class="fas fa-sign-out-alt"></i>
                             <span>退出</span>
@@ -126,7 +126,7 @@
                     
                     {% else %}
                     <!-- 登录按钮 -->
-                    <a href="{{ url_for('main.login') }}" class="logout-btn-header" style="border-color: var(--plush-blue); background: linear-gradient(135deg, #E3F2FD 0%, #BBDEFB 100%); color: #1565C0;" title="登录系统">
+                    <a href="/login" class="logout-btn-header" style="border-color: var(--plush-blue); background: linear-gradient(135deg, #E3F2FD 0%, #BBDEFB 100%); color: #1565C0;" title="登录系统">
                         <i class="fas fa-sign-in-alt"></i>
                         <span>登录</span>
                     </a>
@@ -134,24 +134,14 @@
                 </div>
             </header>
             <div class="content-container">
-                <!-- Flash消息（隐藏用于转换为全局通知） -->
-                <div style="display: none;" id="flash-messages-container">
-                    {% with messages = get_flashed_messages(with_categories=true) %}
-                        {% if messages %}
-                            {% for category, message in messages %}
-                                <div class="flash-message" data-category="{{ category }}" data-message="{{ message }}"></div>
-                            {% endfor %}
-                        {% endif %}
-                    {% endwith %}
-                </div>
                 {% block content %}{% endblock %}
             </div>
         </main>
     </div>
-    <script src="{{ url_for('static', filename='bootstrap.bundle.min.js') }}?v={{ config.get('ASSET_VERSION', '1') }}"></script>
-    <script src="{{ url_for('static', filename='js/unified-notify.js') }}?v={{ config.get('ASSET_VERSION', '1') }}"></script>
-    <script src="{{ url_for('static', filename='collapse-animated.js') }}?v={{ config.get('ASSET_VERSION', '1') }}"></script>
-    <script src="{{ url_for('static', filename='tab-system.js') }}?v={{ config.get('ASSET_VERSION', '1') }}"></script>
+    <script src="/static/bootstrap.bundle.min.js?v={{ ASSET_VERSION }}"></script>
+    <script src="/static/js/unified-notify.js?v={{ ASSET_VERSION }}"></script>
+    <script src="/static/collapse-animated.js?v={{ ASSET_VERSION }}"></script>
+    <script src="/static/tab-system.js?v={{ ASSET_VERSION }}"></script>
     <!-- 全局工具函数 + CSRF Token配置 -->
     <script>
         /**
@@ -165,8 +155,21 @@
             return div.innerHTML;
         }
 
+        // 从 cookie 获取 CSRF Token（starlette-csrf Double Submit Cookie 模式）
+        function _getCSRFCookie() {
+            const match = document.cookie.match(/fastapi_csrf_token=([^;]+)/);
+            return match ? decodeURIComponent(match[1]) : '';
+        }
+
         // 为所有POST表单自动添加CSRF token
         document.addEventListener('DOMContentLoaded', function() {
+            const csrfToken = _getCSRFCookie();
+            // 设置 meta 标签
+            const metaTag = document.querySelector('meta[name="csrf-token"]');
+            if (metaTag && csrfToken) {
+                metaTag.setAttribute('content', csrfToken);
+            }
+
             const forms = document.querySelectorAll('form[method="POST"]');
             forms.forEach(function(form) {
                 const existingToken = form.querySelector('input[name="csrf_token"]');
@@ -174,8 +177,10 @@
                     const csrfInput = document.createElement('input');
                     csrfInput.type = 'hidden';
                     csrfInput.name = 'csrf_token';
-                    csrfInput.value = '{{ csrf_token() }}';
+                    csrfInput.value = csrfToken;
                     form.appendChild(csrfInput);
+                } else {
+                    existingToken.value = csrfToken;
                 }
             });
         });
@@ -186,7 +191,7 @@
             window.fetch = function(url, options) {
                 options = options || {};
                 if (options.method && options.method.toUpperCase() !== 'GET') {
-                    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
+                    const csrfToken = _getCSRFCookie();
                     if (csrfToken) {
                         options.headers = options.headers || {};
                         if (!options.headers['X-CSRFToken']) {
@@ -259,20 +264,6 @@
                 if (overlay) overlay.classList.remove('active');
                 document.body.style.overflow = '';
             }
-        });
-    });
-
-    // Flash消息转换为全局通知
-    document.addEventListener('DOMContentLoaded', function() {
-        var flashMessages = document.querySelectorAll('.flash-message');
-        flashMessages.forEach(function(flashMsg) {
-            var category = flashMsg.dataset.category;
-            var message = flashMsg.dataset.message;
-            var typeMapping = { success: 'success', error: 'error', warning: 'warning', info: 'info', danger: 'error' };
-            var type = typeMapping[category] || 'info';
-            setTimeout(function() {
-                GlobalNotification.show(type, message);
-            }, 100);
         });
     });
     </script>

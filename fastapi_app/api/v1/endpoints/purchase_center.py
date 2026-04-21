@@ -138,7 +138,8 @@ class SaveQueryRequest(BaseModel):
 # 产品/BOM API
 # ============================================================
 
-@router.get("/api/products")
+
+@router.get("/products")
 def api_get_products(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=500),
@@ -157,7 +158,7 @@ def api_get_products(
     return {'success': True, **result}
 
 
-@router.get("/api/products/batch-bom")
+@router.get("/products/batch-bom")
 def api_get_products_batch_bom(
     ids: str = Query(''),
     db: Session = Depends(get_db),
@@ -167,7 +168,7 @@ def api_get_products_batch_bom(
     return {'success': True, **result}
 
 
-@router.get("/api/products/search-suggestions")
+@router.get("/products/search-suggestions")
 def api_get_search_suggestions(
     q: str = Query(''),
     db: Session = Depends(get_db),
@@ -177,7 +178,7 @@ def api_get_search_suggestions(
     return {'success': True, 'suggestions': suggestions}
 
 
-@router.get("/api/products/statistics")
+@router.get("/products/statistics")
 def api_get_products_statistics(
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
@@ -186,7 +187,7 @@ def api_get_products_statistics(
     return {'success': True, 'statistics': stats}
 
 
-@router.get("/api/product/{product_id}/bom")
+@router.get("/product/{product_id}/bom")
 def api_get_product_bom(
     product_id: int,
     db: Session = Depends(get_db),
@@ -198,7 +199,7 @@ def api_get_product_bom(
     return {'success': True, 'product': result, 'materials': result.pop('materials')}
 
 
-@router.post("/api/product/{product_id}/bom")
+@router.post("/product/{product_id}/bom")
 def api_save_product_bom(
     product_id: int,
     data: BomSaveRequest,
@@ -216,7 +217,7 @@ def api_save_product_bom(
         raise HTTPException(status_code=500, detail="保存失败，请稍后重试")
 
 
-@router.post("/api/calculate")
+@router.post("/calculate")
 def api_calculate_material(
     data: CalculateMaterialRequest,
     db: Session = Depends(get_db),
@@ -234,7 +235,7 @@ def api_calculate_material(
 # 供应商 API
 # ============================================================
 
-@router.get("/api/suppliers")
+@router.get("/suppliers")
 def api_get_suppliers(
     with_stats: str = Query('0'),
     db: Session = Depends(get_db),
@@ -248,7 +249,7 @@ def api_get_suppliers(
         raise HTTPException(status_code=500, detail="操作失败，请稍后重试")
 
 
-@router.post("/api/suppliers")
+@router.post("/suppliers")
 def api_create_supplier(
     data: SupplierCreateRequest,
     db: Session = Depends(get_db),
@@ -264,7 +265,7 @@ def api_create_supplier(
         raise HTTPException(status_code=500, detail="操作失败，请稍后重试")
 
 
-@router.put("/api/suppliers/{supplier_id}")
+@router.put("/suppliers/{supplier_id}")
 def api_update_supplier(
     supplier_id: int,
     data: SupplierUpdateRequest,
@@ -281,7 +282,7 @@ def api_update_supplier(
         raise HTTPException(status_code=500, detail="操作失败，请稍后重试")
 
 
-@router.get("/api/suppliers/{supplier_id}/materials")
+@router.get("/suppliers/{supplier_id}/materials")
 def api_get_supplier_materials(
     supplier_id: int,
     db: Session = Depends(get_db),
@@ -299,7 +300,7 @@ def api_get_supplier_materials(
 # 客户管理 API
 # ============================================================
 
-@router.get("/api/customers")
+@router.get("/customers")
 def api_get_customers(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
@@ -317,7 +318,7 @@ def api_get_customers(
     return {'success': True, **result}
 
 
-@router.post("/api/customers/sync")
+@router.post("/customers/sync")
 def api_sync_customers(
     data: CustomerSyncRequest,
     db: Session = Depends(get_db),
@@ -359,7 +360,7 @@ def api_sync_customers(
     }
 
 
-@router.post("/api/customers/batch")
+@router.post("/customers/batch")
 def api_batch_get_customers(
     data: CustomerBatchRequest,
     db: Session = Depends(get_db),
@@ -369,7 +370,7 @@ def api_batch_get_customers(
     return {'success': True, 'customers': customers}
 
 
-@router.get("/api/customers/statistics")
+@router.get("/customers/statistics")
 def api_get_customers_statistics(
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
@@ -378,7 +379,7 @@ def api_get_customers_statistics(
     return {'success': True, 'statistics': stats}
 
 
-@router.get("/api/customers/{customer_id}")
+@router.get("/customers/{customer_id}")
 def api_get_customer_detail(
     customer_id: int,
     db: Session = Depends(get_db),
@@ -394,7 +395,7 @@ def api_get_customer_detail(
 # 物料分类 & 缓存
 # ============================================================
 
-@router.get("/api/categories")
+@router.get("/categories")
 async def api_get_material_categories(
     _user=Depends(require_permission("product_manage")),
 ):
@@ -402,7 +403,7 @@ async def api_get_material_categories(
     return {'success': True, 'categories': MATERIAL_CATEGORIES}
 
 
-@router.post("/api/cache/clear")
+@router.post("/cache/clear")
 async def api_clear_cache(
     _user=Depends(require_permission("product_manage")),
 ):
@@ -413,7 +414,7 @@ async def api_clear_cache(
 # 采购订单 API
 # ============================================================
 
-@router.post("/api/orders")
+@router.post("/orders")
 def api_create_purchase_order(
     data: PurchaseOrderCreateRequest,
     db: Session = Depends(get_db),
@@ -430,7 +431,7 @@ def api_create_purchase_order(
         raise HTTPException(status_code=500, detail="创建订单失败，请稍后重试")
 
 
-@router.post("/api/orders/one-click-generate")
+@router.post("/orders/one-click-generate")
 def api_one_click_generate_order(
     data: OneClickGenerateRequest,
     db: Session = Depends(get_db),
@@ -445,7 +446,7 @@ def api_one_click_generate_order(
         raise HTTPException(status_code=500, detail="生成采购订单失败，请稍后重试")
 
 
-@router.get("/api/orders")
+@router.get("/orders")
 def api_get_purchase_orders(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1),
@@ -470,7 +471,7 @@ def api_get_purchase_orders(
 
 # 已完成订单相关路由（必须在 /api/orders/{order_id} 之前，避免路径冲突）
 
-@router.get("/api/orders/completed")
+@router.get("/orders/completed")
 def api_get_completed_purchase_orders(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1),
@@ -495,7 +496,7 @@ def api_get_completed_purchase_orders(
     return {'success': True, **result}
 
 
-@router.post("/api/orders/completed/export")
+@router.post("/orders/completed/export")
 def api_export_completed_orders(
     data: ExportCompletedRequest,
     db: Session = Depends(get_db),
@@ -505,7 +506,7 @@ def api_export_completed_orders(
     return {'success': True, 'html': html}
 
 
-@router.get("/api/orders/completed/suggestions")
+@router.get("/orders/completed/suggestions")
 def api_get_completed_order_suggestions(
     field: str = Query(''),
     q: str = Query(''),
@@ -517,7 +518,7 @@ def api_get_completed_order_suggestions(
     return {'success': True, 'suggestions': suggestions}
 
 
-@router.get("/api/orders/completed/quick-filters")
+@router.get("/orders/completed/quick-filters")
 async def api_get_completed_order_quick_filters(
     _user=Depends(require_permission("product_manage")),
 ):
@@ -525,7 +526,7 @@ async def api_get_completed_order_quick_filters(
     return {'success': True, 'quick_filters': quick_filters}
 
 
-@router.get("/api/orders/{order_id}")
+@router.get("/orders/{order_id}")
 def api_get_purchase_order(
     order_id: int,
     db: Session = Depends(get_db),
@@ -537,7 +538,7 @@ def api_get_purchase_order(
     return {'success': True, 'order': result}
 
 
-@router.put("/api/orders/{order_id}")
+@router.put("/orders/{order_id}")
 def api_update_purchase_order(
     order_id: int,
     data: PurchaseOrderUpdateRequest,
@@ -550,7 +551,7 @@ def api_update_purchase_order(
     return {'success': True, 'order': result}
 
 
-@router.delete("/api/orders/{order_id}")
+@router.delete("/orders/{order_id}")
 def api_delete_purchase_order(
     order_id: int,
     db: Session = Depends(get_db),
@@ -562,7 +563,7 @@ def api_delete_purchase_order(
     return {'success': True, 'message': result}
 
 
-@router.post("/api/orders/complete")
+@router.post("/orders/complete")
 def api_complete_purchase_order(
     data: OrderIdRequest,
     db: Session = Depends(get_db),
@@ -579,7 +580,7 @@ def api_complete_purchase_order(
         raise HTTPException(status_code=500, detail="完成订单失败，请稍后重试")
 
 
-@router.post("/api/orders/batch-complete")
+@router.post("/orders/batch-complete")
 def api_batch_complete_purchase_orders(
     data: BatchCompleteRequest,
     db: Session = Depends(get_db),
@@ -593,7 +594,7 @@ def api_batch_complete_purchase_orders(
         raise HTTPException(status_code=500, detail="完成订单失败，请稍后重试")
 
 
-@router.get("/api/orders/{order_id}/print")
+@router.get("/orders/{order_id}/print")
 def api_get_order_print_data(
     order_id: int,
     db: Session = Depends(get_db),
@@ -605,7 +606,7 @@ def api_get_order_print_data(
     return {'success': True, 'order': result}
 
 
-@router.post("/api/orders/batch-print")
+@router.post("/orders/batch-print")
 def api_get_orders_batch_print_data(
     data: OrderIdsRequest,
     db: Session = Depends(get_db),
@@ -620,7 +621,7 @@ def api_get_orders_batch_print_data(
 # 未处理订单 API
 # ============================================================
 
-@router.get("/api/unprocessed-orders")
+@router.get("/unprocessed-orders")
 def api_get_unprocessed_orders(
     customer: str = Query(''),
     page: int = Query(1, ge=1),
@@ -636,7 +637,7 @@ def api_get_unprocessed_orders(
 # 修改历史 API
 # ============================================================
 
-@router.get("/api/modification-logs")
+@router.get("/modification-logs")
 def api_get_modification_logs(
     target_type: str = Query(''),
     target_id: int = Query(0),
@@ -656,7 +657,7 @@ def api_get_modification_logs(
 # 保存查询 API
 # ============================================================
 
-@router.get("/api/saved-queries")
+@router.get("/saved-queries")
 def api_get_saved_queries(
     query_type: str = Query('purchase_order'),
     db: Session = Depends(get_db),
@@ -666,7 +667,7 @@ def api_get_saved_queries(
     return {'success': True, 'queries': queries}
 
 
-@router.post("/api/saved-queries")
+@router.post("/saved-queries")
 def api_save_query(
     data: SaveQueryRequest,
     db: Session = Depends(get_db),
@@ -680,7 +681,7 @@ def api_save_query(
         raise HTTPException(status_code=500, detail="操作失败，请稍后重试")
 
 
-@router.delete("/api/saved-queries/{query_id}")
+@router.delete("/saved-queries/{query_id}")
 def api_delete_saved_query(
     query_id: int,
     db: Session = Depends(get_db),
@@ -692,7 +693,7 @@ def api_delete_saved_query(
     return {'success': True, 'message': result}
 
 
-@router.post("/api/saved-queries/{query_id}/use")
+@router.post("/saved-queries/{query_id}/use")
 def api_use_saved_query(
     query_id: int,
     db: Session = Depends(get_db),
@@ -708,7 +709,7 @@ def api_use_saved_query(
 # 订单状态日志 API
 # ============================================================
 
-@router.get("/api/status-logs")
+@router.get("/status-logs")
 def api_get_status_logs(
     target_type: str = Query(''),
     target_id: int = Query(0),
@@ -729,7 +730,7 @@ def api_get_status_logs(
 # 工厂内部采购订单 API
 # ============================================================
 
-@router.post("/api/orders/factory-summary")
+@router.post("/orders/factory-summary")
 def api_get_factory_order_summary(
     data: OrderIdsRequest,
     db: Session = Depends(get_db),
@@ -743,7 +744,7 @@ def api_get_factory_order_summary(
         raise HTTPException(status_code=500, detail="操作失败，请稍后重试")
 
 
-@router.post("/api/orders/generate-factory")
+@router.post("/orders/generate-factory")
 async def api_generate_factory_order(
     data: dict,
     _user=Depends(require_permission("product_manage")),
@@ -751,7 +752,7 @@ async def api_generate_factory_order(
     return {'success': True, 'message': '工厂内部采购订单生成成功（演示版本）'}
 
 
-@router.post("/api/orders/factory-summary/save")
+@router.post("/orders/factory-summary/save")
 def api_save_factory_summary_edits(
     data: FactorySummarySaveRequest,
     db: Session = Depends(get_db),
@@ -770,7 +771,7 @@ def api_save_factory_summary_edits(
 # 供应商采购订单汇总 API
 # ============================================================
 
-@router.post("/api/orders/supplier-summary")
+@router.post("/orders/supplier-summary")
 def api_get_supplier_order_summary(
     data: OrderIdsRequest,
     db: Session = Depends(get_db),
@@ -784,7 +785,7 @@ def api_get_supplier_order_summary(
         raise HTTPException(status_code=500, detail="操作失败，请稍后重试")
 
 
-@router.post("/api/orders/supplier-summary-by-vendor")
+@router.post("/orders/supplier-summary-by-vendor")
 def api_get_supplier_summary_by_vendor(
     data: OrderIdsRequest,
     db: Session = Depends(get_db),
@@ -804,7 +805,7 @@ def api_get_supplier_summary_by_vendor(
         raise HTTPException(status_code=500, detail="操作失败，请稍后重试")
 
 
-@router.post("/api/orders/generate-supplier")
+@router.post("/orders/generate-supplier")
 async def api_generate_supplier_order(
     data: dict,
     _user=Depends(require_permission("product_manage")),
@@ -818,7 +819,7 @@ async def api_generate_supplier_order(
 # 汇总打印 API
 # ============================================================
 
-@router.post("/api/orders/summary-print")
+@router.post("/orders/summary-print")
 def api_summary_print(
     data: SummaryPrintRequest,
     db: Session = Depends(get_db),
@@ -1345,7 +1346,7 @@ def export_supplier_summary_excel(
 # ============================================================
 
 
-@router.get("/api/products/search")
+@router.get("/products/search")
 def api_search_products_for_bom_copy(
     keyword: str = Query('', min_length=1),
     db: Session = Depends(get_db),
@@ -1359,7 +1360,7 @@ def api_search_products_for_bom_copy(
     return {'success': True, 'products': products}
 
 
-@router.get("/api/products/{source_product_id}/bom-preview")
+@router.get("/products/{source_product_id}/bom-preview")
 def api_get_bom_preview(
     source_product_id: int,
     db: Session = Depends(get_db),
@@ -1373,7 +1374,7 @@ def api_get_bom_preview(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/api/products/{target_product_id}/copy-bom")
+@router.post("/products/{target_product_id}/copy-bom")
 def api_copy_bom_to_product(
     target_product_id: int,
     data: BomCopyRequest,
@@ -1391,7 +1392,7 @@ def api_copy_bom_to_product(
         raise HTTPException(status_code=400, detail=error_msg)
 
 
-@router.post("/api/orders/batch-delete")
+@router.post("/orders/batch-delete")
 def api_batch_delete_purchase_orders(
     data: OrderIdsAltRequest,
     db: Session = Depends(get_db),

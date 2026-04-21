@@ -21,8 +21,13 @@ from fastapi_app.services.product_service import (
     ProductHasRelatedStockInsError,
     ProductHasRelatedStockOutsError,
 )
+from utils.redis_cache import redis_cache
+from fastapi.concurrency import run_in_threadpool
 
 router = APIRouter()
+
+PRODUCT_LIST_CACHE_KEY = "product:list:all"
+PRODUCT_LIST_CACHE_TTL = 300
 
 
 @router.get("/list", response_model=ProductListResponse)
@@ -30,8 +35,15 @@ async def list_products(
     db: AsyncSession = Depends(get_async_db),
     _user: User = Depends(require_permission("product_manage")),
 ):
-    """产品列表"""
+    """产品列表（带缓存）"""
+    cached = await run_in_threadpool(redis_cache.get, PRODUCT_LIST_CACHE_KEY)
+    if cached is not None:
+        return ProductListResponse(data=cached, total=len(cached))
+
     products = await product_service.get_products(db)
+
+    await run_in_threadpool(redis_cache.set, PRODUCT_LIST_CACHE_KEY, products, PRODUCT_LIST_CACHE_TTL)
+
     return ProductListResponse(data=products, total=len(products))
 
 
@@ -47,6 +59,7 @@ async def create_product(
             db, name=data.name, barcode=data.barcode,
             price=data.price, image=data.image, initial_stock=data.initial_stock
         )
+        await run_in_threadpool(redis_cache.delete, PRODUCT_LIST_CACHE_KEY)
         return ProductActionResponse(success=True, message="产品添加成功！")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -66,6 +79,7 @@ async def edit_product(
             barcode=data.barcode, price=data.price, image=data.image,
             initial_stock=data.initial_stock
         )
+        await run_in_threadpool(redis_cache.delete, PRODUCT_LIST_CACHE_KEY)
         return ProductActionResponse(success=True, message="产品编辑成功！")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -86,6 +100,7 @@ async def delete_product(
     """
     try:
         await product_service.delete_product(db, product_id)
+        await run_in_threadpool(redis_cache.delete, PRODUCT_LIST_CACHE_KEY)
         return ProductActionResponse(success=True, message="产品删除成功！")
     except ProductNotFoundError as e:
         raise HTTPException(status_code=400, detail=e.message)

@@ -49,15 +49,11 @@ excludes = [
     'django',
     'fastapi',
     'uvicorn',
-    'waitress',
     'celery',
     'redis',
     'openpyxl',
-    'xlrd',
-    'fuzzywuzzy',
     'rapidfuzz',
     'arrow',
-    'gunicorn',
 ]
 
 block_cipher = None
@@ -87,7 +83,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='ERP服务器管理器_v3.4',
+    name='ERP服务器管理器_v3.5',
     debug=False,
     bootloader_ignore_signals=False,
     strip=True,

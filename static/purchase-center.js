@@ -1,4 +1,4 @@
-const API_BASE = '/api/v1/purchase-center/api';
+const API_BASE = '/api/v1/purchase-center';
 const FASTAPI_BASE = '/api/v1/purchase-center';
 let confirmCallback = null;
 let orderCurrentPage = 1;
@@ -1048,10 +1048,15 @@ async function fetchAutocomplete(field, keyword) {
         const res = await apiGet(`/orders/completed/suggestions?field=${field}&q=${encodeURIComponent(keyword)}`);
         if (res.success && res.suggestions && res.suggestions.length > 0) {
             dropdown.innerHTML = res.suggestions.map(s => `
-                <div class="autocomplete-item" onclick="selectAutocomplete('${escapeHtml(field)}', '${escapeHtml(s.value)}')">
+                <div class="autocomplete-item" data-field="${escapeHtml(field)}" data-value="${escapeHtml(s.value)}">
                     ${escapeHtml(s.value)}
                 </div>
             `).join('');
+            dropdown.querySelectorAll('.autocomplete-item').forEach(el => {
+                el.addEventListener('click', function() {
+                    selectAutocomplete(this.dataset.field, this.dataset.value);
+                });
+            });
             dropdown.style.display = 'block';
         } else {
             dropdown.style.display = 'none';

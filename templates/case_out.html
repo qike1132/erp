@@ -256,7 +256,7 @@ function initProductSearch() {
         searchTimeout = setTimeout(() => {
             const query = e.target.value.trim();
             if (query.length >= 1) {
-                fetch(`/api/v1/case/search?q=${encodeURIComponent(query)}`)
+                fetch(`/api/v1/cases/search?q=${encodeURIComponent(query)}`)
                     .then(res => res.json())
                     .then(data => {
                         const datalist = document.getElementById('product_list');
@@ -478,7 +478,7 @@ async function submitAllStockouts() {
     btnSpinner.style.display = 'inline-block';
     
     try {
-        const response = await fetch('/api/batch-submit-case-stockouts', {
+        const response = await fetch('/api/v1/cases/out/batch', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -523,7 +523,7 @@ async function loadStockoutList(page = 1) {
     const params = new URLSearchParams({ page, per_page: 10, ...currentFilters });
     
     try {
-        const response = await fetch(`/api/v1/case/out/list?${params}`);
+        const response = await fetch(`/api/v1/cases/out/list?${params}`);
         const data = await response.json();
         
         if (data.stockouts && data.stockouts.length > 0) {
@@ -609,7 +609,7 @@ function renderPagination(current, total) {
 
 async function openEditStockoutModal(id) {
     try {
-        const response = await fetch(`/api/case-stockout/${id}`);
+        const response = await fetch(`/api/v1/cases/out/${id}`);
         const data = await response.json();
         
         document.getElementById('editStockoutId').value = id;
@@ -635,7 +635,7 @@ async function saveEditStockout() {
     };
     
     try {
-        const response = await fetch(`/api/case-stockout/${id}`, {
+        const response = await fetch(`/api/v1/cases/out/${id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
@@ -659,7 +659,7 @@ async function deleteStockout(id) {
     if (!confirm('确定要删除这条出库记录吗？')) return;
     
     try {
-        const response = await fetch(`/api/case-stockout/${id}`, { method: 'DELETE' });
+        const response = await fetch(`/api/v1/cases/out/${id}`, { method: 'DELETE' });
         const result = await response.json();
         
         if (result.success) {

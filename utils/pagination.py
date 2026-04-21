@@ -2,18 +2,20 @@
 分页查询工具
 提供统一的分页查询功能
 """
-from flask import request
 
 
-def get_pagination_params():
+def parse_pagination_params(request_args: dict):
     """
     从请求参数中获取分页参数
+    
+    Args:
+        request_args: 请求参数字典 (如 request.args 或 query_params)
     
     Returns:
         tuple: (page, per_page)
     """
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 20, type=int)
+    page = int(request_args.get('page', 1))
+    per_page = int(request_args.get('per_page', 20))
     
     # 限制每页最大数量
     if per_page > 100:
@@ -28,15 +30,17 @@ def paginate_query(query, page=None, per_page=None, error_out=False):
     
     Args:
         query: SQLAlchemy查询对象
-        page: 页码,默认从请求参数获取
-        per_page: 每页数量,默认从请求参数获取
+        page: 页码,默认1
+        per_page: 每页数量,默认20
         error_out: 是否在超出范围时报错
     
     Returns:
         Pagination: SQLAlchemy分页对象
     """
-    if page is None or per_page is None:
-        page, per_page = get_pagination_params()
+    if page is None:
+        page = 1
+    if per_page is None:
+        per_page = 20
     
     return query.paginate(
         page=page,

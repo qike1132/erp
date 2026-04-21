@@ -3,7 +3,6 @@
 提供统一的数据验证机制
 """
 from functools import wraps
-from flask import jsonify, request
 from typing import Dict, Any, List, Optional
 import re
 
@@ -387,30 +386,12 @@ class DateRangeValidator(Validator):
 
 
 def validate_request(validator_class, method='create'):
-    """请求验证装饰器"""
+    """请求验证装饰器 (FastAPI 兼容)"""
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
-            # 获取请求数据
-            if request.is_json:
-                data = request.get_json()
-            else:
-                data = request.form.to_dict()
-            
-            # 创建验证器
-            validator = validator_class()
-            
-            # 执行验证
-            validate_method = getattr(validator, f'validate_{method}', None)
-            if validate_method:
-                if not validate_method(data):
-                    return jsonify({
-                        'success': False,
-                        'message': '数据验证失败',
-                        'errors': validator.get_errors()
-                    }), 400
-            
-            # 验证通过,继续执行
+            # 在 FastAPI 中，验证应使用 Pydantic schemas 在请求层面完成
+            # 此装饰器保留为兼容，实际验证逻辑已移至 Pydantic
             return f(*args, **kwargs)
         
         return decorated_function

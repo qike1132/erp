@@ -18,36 +18,10 @@ for i in $(seq 1 30); do
     sleep 2
 done
 
-# 启动 FastAPI 服务 (后台)
+# 启动 FastAPI 服务 (前台主进程)
 echo "[INFO] 正在启动 FastAPI 服务 (端口 5002)..."
-uvicorn fastapi_app.main:app \
+exec uvicorn fastapi_app.main:app \
     --host 0.0.0.0 \
     --port 5002 \
     --workers 1 \
-    --log-level info \
-    >> /app/logs/fastapi.log 2>&1 &
-FASTAPI_PID=$!
-echo "[OK] FastAPI 服务已启动 (PID: $FASTAPI_PID)"
-
-# 等待 FastAPI 就绪
-echo "[INFO] 等待 FastAPI 服务就绪..."
-for i in $(seq 1 15); do
-    if python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5002/api/health')" 2>/dev/null; then
-        echo "[OK] FastAPI 服务就绪"
-        break
-    fi
-    if [ "$i" -eq 15 ]; then
-        echo "[WARN] FastAPI 服务就绪检查超时，继续启动 Flask..."
-    fi
-    sleep 2
-done
-
-# 启动 Flask 服务 (前台，作为主进程)
-echo "[INFO] 正在启动 Flask 服务 (端口 5003)..."
-exec gunicorn \
-    --bind 0.0.0.0:5003 \
-    --workers 4 \
-    --timeout 120 \
-    --access-logfile /app/logs/access.log \
-    --error-logfile /app/logs/error.log \
-    run:app
+    --log-level info

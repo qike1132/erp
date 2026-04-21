@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, date, timedelta
 from decimal import Decimal
 from sqlalchemy import select, func, or_
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 
 from fastapi_app.shared_models import (
     MaterialRegistration, MaterialRegistrationItem,
@@ -18,7 +18,10 @@ async def get_registrations(db, page: int = 1, per_page: int = 20,
                            status: str = '', order_no: str = '', supplier: str = '',
                            start_date: str = '', end_date: str = '') -> dict:
     """获取来料登记列表"""
-    query = select(MaterialRegistration)
+    query = select(MaterialRegistration).options(
+        selectinload(MaterialRegistration.items),
+        selectinload(MaterialRegistration.purchase_order),
+    )
 
     if status:
         query = query.where(MaterialRegistration.status == status)
@@ -86,7 +89,13 @@ async def get_registrations(db, page: int = 1, per_page: int = 20,
 
 async def get_registration(db, reg_id: int) -> dict:
     """获取来料登记详情"""
-    reg = await db.get(MaterialRegistration, reg_id)
+    result = await db.execute(
+        select(MaterialRegistration).options(
+            selectinload(MaterialRegistration.items),
+            selectinload(MaterialRegistration.purchase_order),
+        ).where(MaterialRegistration.id == reg_id)
+    )
+    reg = result.scalar_one_or_none()
     if not reg:
         raise ValueError("来料登记不存在")
     return {'success': True, 'registration': reg.to_dict()}
@@ -227,7 +236,9 @@ async def receive_material(db, item_id: int, received_qty: float,
 
 async def get_stats_overview(db) -> dict:
     """统计概览"""
-    all_regs = (await db.execute(select(MaterialRegistration))).scalars().all()
+    all_regs = (await db.execute(
+        select(MaterialRegistration).options(selectinload(MaterialRegistration.items))
+    )).scalars().all()
     pending = sum(1 for r in all_regs if r.computed_status == 'pending')
     partial = sum(1 for r in all_regs if r.computed_status == 'partial')
     completed = sum(1 for r in all_regs if r.computed_status == 'completed')
@@ -287,7 +298,10 @@ async def preview_purchase_order(db, order_no: str) -> dict:
 async def export_registrations(db, order_no: str = '', supplier: str = '',
                                start_date: str = '', end_date: str = '') -> dict:
     """导出来料登记数据（返回HTML用于Excel打开）"""
-    query = select(MaterialRegistration).options(joinedload(MaterialRegistration.items))
+    query = select(MaterialRegistration).options(
+        selectinload(MaterialRegistration.items),
+        selectinload(MaterialRegistration.purchase_order),
+    ).options(joinedload(MaterialRegistration.items))
     if order_no:
         query = query.where(MaterialRegistration.purchase_order_no.ilike(f'%{escape_like(order_no)}%'))
     if supplier:
@@ -357,7 +371,10 @@ async def get_history(db, page: int = 1, per_page: int = 20,
                       customer_name: str = '', material_category: str = '',
                       start_date: str = '', end_date: str = '') -> dict:
     """获取来料登记历史记录 - 仅显示已完成的订单"""
-    query = select(MaterialRegistration).join(
+    query = select(MaterialRegistration).options(
+        selectinload(MaterialRegistration.items),
+        selectinload(MaterialRegistration.purchase_order),
+    ).join(
         PurchaseOrder, MaterialRegistration.purchase_order_id == PurchaseOrder.id, isouter=True
     ).options(joinedload(MaterialRegistration.items))
 
@@ -437,7 +454,9 @@ async def get_suggestions(db, field: str, keyword: str, limit: int = 10) -> dict
 
 async def get_stats_distribution(db) -> dict:
     """获取来料登记状态分布"""
-    all_regs = (await db.execute(select(MaterialRegistration))).scalars().all()
+    all_regs = (await db.execute(
+        select(MaterialRegistration).options(selectinload(MaterialRegistration.items))
+    )).scalars().all()
     pending = sum(1 for r in all_regs if r.computed_status == 'pending')
     partial = sum(1 for r in all_regs if r.computed_status == 'partial')
     completed = sum(1 for r in all_regs if r.computed_status == 'completed')

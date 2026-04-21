@@ -22,14 +22,6 @@ scrape_configs:
         labels:
           service: 'fastapi'
 
-  # Flask 应用指标
-  - job_name: 'flask'
-    metrics_path: /api/metrics
-    static_configs:
-      - targets: ['erp-app:5003']
-        labels:
-          service: 'flask'
-
   # Nginx 指标（需 nginx-prometheus-exporter，暂用stub状态监控）
   - job_name: 'nginx'
     metrics_path: /nginx-health

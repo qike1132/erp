@@ -3,6 +3,14 @@
  *
  * 功能：69码联动验证、库存对比状态渲染、CRUD操作
  */
+
+function escapeHtml(text) {
+    if (text == null) return '';
+    const div = document.createElement('div');
+    div.textContent = String(text);
+    return div.innerHTML;
+}
+
 (function () {
     'use strict';
 
@@ -282,23 +290,43 @@
             const statusLabel = { pending: '待确认', confirmed: '已确认', completed: '已完成' };
 
             return `<tr class="${rowClass}">
-                <td><span class="fw-semibold"><i class="fas fa-building text-primary me-1"></i>${p.customer_name}</span></td>
-                <td><div class="d-flex align-items-center"><i class="fas fa-cube text-secondary me-2"></i><div class="fw-semibold">${p.product_name}</div></div></td>
-                <td><code>${p.barcode}</code></td>
+                <td><span class="fw-semibold"><i class="fas fa-building text-primary me-1"></i>${escapeHtml(p.customer_name)}</span></td>
+                <td><div class="d-flex align-items-center"><i class="fas fa-cube text-secondary me-2"></i><div class="fw-semibold">${escapeHtml(p.product_name)}</div></div></td>
+                <td><code>${escapeHtml(p.barcode)}</code></td>
                 <td class="text-center fw-bold">${formatNumber(p.quantity)}</td>
                 <td class="text-center">${formatNumber(p.inventory_qty)}</td>
                 <td class="text-center ${diffClass}">${diffStr}</td>
-                <td>${statusBadge}<br><small class="text-muted">${statusLabel[p.status] || p.status}</small></td>
+                <td>${statusBadge}<br><small class="text-muted">${escapeHtml(statusLabel[p.status] || p.status)}</small></td>
                 <td>
-                    <button onclick="window._editPlan(${p.id}, '${p.customer_name.replace(/'/g, "\\'")}', '${p.product_name.replace(/'/g, "\\'")}', '${p.barcode}', ${p.quantity}, '${p.plan_date}', '${p.status}', '${(p.remark || '').replace(/'/g, "\\'")}')" class="btn btn-sm btn-outline-primary me-1">
+                    <button class="btn btn-sm btn-outline-primary me-1 btn-edit-plan" data-id="${p.id}" data-customer="${escapeHtml(p.customer_name)}" data-product="${escapeHtml(p.product_name)}" data-barcode="${escapeHtml(p.barcode)}" data-quantity="${p.quantity}" data-date="${escapeHtml(p.plan_date)}" data-status="${escapeHtml(p.status)}" data-remark="${escapeHtml(p.remark || '')}">
                         <i class="fas fa-edit"></i>
                     </button>
-                    <button onclick="window._deletePlan(${p.id})" class="btn btn-sm btn-outline-danger">
+                    <button class="btn btn-sm btn-outline-danger btn-delete-plan" data-id="${p.id}">
                         <i class="fas fa-trash"></i>
                     </button>
                 </td>
             </tr>`;
         }).join('');
+
+        tbody.querySelectorAll('.btn-edit-plan').forEach(btn => {
+            btn.addEventListener('click', function() {
+                window._editPlan(
+                    parseInt(this.dataset.id),
+                    this.dataset.customer,
+                    this.dataset.product,
+                    this.dataset.barcode,
+                    parseInt(this.dataset.quantity),
+                    this.dataset.date,
+                    this.dataset.status,
+                    this.dataset.remark
+                );
+            });
+        });
+        tbody.querySelectorAll('.btn-delete-plan').forEach(btn => {
+            btn.addEventListener('click', function() {
+                window._deletePlan(parseInt(this.dataset.id));
+            });
+        });
     }
 
     // ==================== 编辑 ====================

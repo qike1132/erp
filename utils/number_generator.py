@@ -60,13 +60,13 @@ def generate_number(prefix, model, date_field, number_field, db):
         model: 数据模型类
         date_field: 日期字段名称
         number_field: 编号字段名称
-        db: SQLAlchemy实例
+        db: SQLAlchemy Session 实例 (支持 sqlalchemy.orm.Session)
 
     Returns:
         str: 生成的编号,格式为 PREFIX-YYYYMMDD-XXXX (4位序号，支持到9999)
 
     Example:
-        >>> generate_number('PO', Order, 'order_date', 'order_no', db)
+        >>> generate_number('PO', Order, 'order_date', 'order_no', session)
         'PO-20260321-0001'
     """
     today = datetime.now()
@@ -74,8 +74,10 @@ def generate_number(prefix, model, date_field, number_field, db):
 
     # 如果计数器还没有初始化，从数据库查询最大序号
     if not _number_generator.is_initialized(prefix, date_str):
-        with db.session.no_autoflush:
-            records = model.query.filter(
+        # 兼容 sqlalchemy.orm.Session 和 Flask-SQLAlchemy db 对象
+        session = getattr(db, 'session', db)
+        with session.no_autoflush:
+            records = session.query(model).filter(
                 func.date(getattr(model, date_field)) == today.date()
             ).order_by(getattr(model, number_field).desc()).all()
 
@@ -104,14 +106,14 @@ def generate_order_number(db, Order):
     生成订单编号
 
     Args:
-        db: SQLAlchemy实例
+        db: SQLAlchemy Session 实例
         Order: Order模型类
 
     Returns:
         str: 订单编号,格式为 PO-YYYYMMDD-XXXX
 
     Example:
-        >>> generate_order_number(db, Order)
+        >>> generate_order_number(session, Order)
         'PO-20260321-0001'
     """
     return generate_number('PO', Order, 'order_date', 'order_no', db)
@@ -122,14 +124,14 @@ def generate_stockin_number(db, StockIn):
     生成备货编号
 
     Args:
-        db: SQLAlchemy实例
+        db: SQLAlchemy Session 实例
         StockIn: StockIn模型类
 
     Returns:
         str: 备货编号,格式为 SI-YYYYMMDD-XXXX
 
     Example:
-        >>> generate_stockin_number(db, StockIn)
+        >>> generate_stockin_number(session, StockIn)
         'SI-20260321-0001'
     """
     return generate_number('SI', StockIn, 'stockin_date', 'stockin_no', db)
@@ -140,14 +142,14 @@ def generate_stockout_number(db, StockOut):
     生成出货编号
 
     Args:
-        db: SQLAlchemy实例
+        db: SQLAlchemy Session 实例
         StockOut: StockOut模型类
 
     Returns:
         str: 出货编号,格式为 SO-YYYYMMDD-XXXX
 
     Example:
-        >>> generate_stockout_number(db, StockOut)
+        >>> generate_stockout_number(session, StockOut)
         'SO-20260321-0001'
     """
     return generate_number('SO', StockOut, 'stockout_date', 'stockout_no', db)
@@ -158,7 +160,7 @@ def generate_case_stockin_number(db, CaseStockIn):
     生成皮套入库编号
 
     Args:
-        db: SQLAlchemy实例
+        db: SQLAlchemy Session 实例
         CaseStockIn: CaseStockIn模型类
 
     Returns:
@@ -172,7 +174,7 @@ def generate_case_stockout_number(db, CaseStockOut):
     生成皮套出库编号
 
     Args:
-        db: SQLAlchemy实例
+        db: SQLAlchemy Session 实例
         CaseStockOut: CaseStockOut模型类
 
     Returns:

@@ -217,7 +217,10 @@ async def get_pending_count(db) -> int:
 
 async def _get_pending_approval(db, approval_id: int, current_user: User) -> ApprovalRequest | None:
     """获取待处理的审批请求"""
-    return await db.get(ApprovalRequest, approval_id)
+    approval = await db.get(ApprovalRequest, approval_id)
+    if approval and approval.status != 'pending':
+        raise ValueError("审批请求已处理，不能重复操作")
+    return approval
 
 
 async def _create_approval_log(db, approval_request: ApprovalRequest, action: str,

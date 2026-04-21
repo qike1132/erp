@@ -1,6 +1,6 @@
 """
 批量提交订单数据验证和修复
-防止Data too long错误
+防止Data too long错误 (FastAPI 兼容版本)
 """
 
 
@@ -48,7 +48,8 @@ def safe_batch_submit_orders(orders_data):
     Returns:
         dict: 处理结果
     """
-    from app import db, Order, Product, InventoryLog
+    from fastapi_app.core.database import SyncSessionLocal
+    from fastapi_app.shared_models import Order, Product, InventoryLog
     from utils.number_generator import generate_order_number
     from datetime import datetime
     
@@ -56,80 +57,83 @@ def safe_batch_submit_orders(orders_data):
     failed_orders = []
     warnings = []
     
-    for order_data in orders_data:
-        try:
-            # 验证并截断数据
-            validated_data, data_warnings = validate_and_truncate_order_data(order_data)
-            warnings.extend(data_warnings)
-            
-            # 生成订单编号
-            order_no = generate_order_number(db, Order)
-            
-            # 验证订单编号长度
-            if len(order_no) > 20:
-                raise ValueError(f"订单编号过长: {order_no} ({len(order_no)} 字符)")
-            
-            # 提取数据
-            product_id_str = str(validated_data.get('productId', '')).strip()
-            quantity_str = str(validated_data.get('quantity', '')).strip()
-            note = validated_data.get('note', '')
-            customer = validated_data.get('customer', '')
-            
-            # 验证必填字段
-            if not product_id_str:
-                raise ValueError('请选择产品')
-            
-            if not quantity_str or quantity_str == '0':
-                raise ValueError('请输入有效的数量')
-            
-            product_id = int(product_id_str)
-            quantity = int(quantity_str)
-            
-            # 验证产品存在
-            product = Product.query.get(product_id)
-            if not product:
-                raise ValueError('产品不存在')
-            
-            # 创建订单
-            order = Order(
-                order_no=order_no,
-                customer=customer,
-                order_date=datetime.now(),
-                product_id=product_id,
-                quantity=quantity,
-                note=note,
-                status='待备货'
-            )
-            db.session.add(order)
-            db.session.flush()
-            
-            # 更新库存
-            product.current_stock += quantity
-            
-            # 记录库存日志
-            log_order = InventoryLog(
-                product_id=product_id,
-                change_type='订单',
-                change_quantity=quantity,
-                related_id=order_no,
-                note=f'订单：{order_no}'
-            )
-            db.session.add(log_order)
-            
-            success_count += 1
-            
-        except Exception as e:
-            failed_orders.append({
-                'order': order_data,
-                'error': str(e)
-            })
-    
-    # 提交事务
+    session = SyncSessionLocal()
     try:
-        db.session.commit()
+        for order_data in orders_data:
+            try:
+                # 验证并截断数据
+                validated_data, data_warnings = validate_and_truncate_order_data(order_data)
+                warnings.extend(data_warnings)
+                
+                # 生成订单编号
+                order_no = generate_order_number(session, Order)
+                
+                # 验证订单编号长度
+                if len(order_no) > 20:
+                    raise ValueError(f"订单编号过长: {order_no} ({len(order_no)} 字符)")
+                
+                # 提取数据
+                product_id_str = str(validated_data.get('productId', '')).strip()
+                quantity_str = str(validated_data.get('quantity', '')).strip()
+                note = validated_data.get('note', '')
+                customer = validated_data.get('customer', '')
+                
+                # 验证必填字段
+                if not product_id_str:
+                    raise ValueError('请选择产品')
+                
+                if not quantity_str or quantity_str == '0':
+                    raise ValueError('请输入有效的数量')
+                
+                product_id = int(product_id_str)
+                quantity = int(quantity_str)
+                
+                # 验证产品存在
+                product = session.query(Product).get(product_id)
+                if not product:
+                    raise ValueError('产品不存在')
+                
+                # 创建订单
+                order = Order(
+                    order_no=order_no,
+                    customer=customer,
+                    order_date=datetime.now(),
+                    product_id=product_id,
+                    quantity=quantity,
+                    note=note,
+                    status='待备货'
+                )
+                session.add(order)
+                session.flush()
+                
+                # 更新库存
+                product.current_stock += quantity
+                
+                # 记录库存日志
+                log_order = InventoryLog(
+                    product_id=product_id,
+                    change_type='订单',
+                    change_quantity=quantity,
+                    related_id=order_no,
+                    note=f'订单：{order_no}'
+                )
+                session.add(log_order)
+                
+                success_count += 1
+                
+            except Exception as e:
+                failed_orders.append({
+                    'order': order_data,
+                    'error': str(e)
+                })
+        
+        # 提交事务
+        session.commit()
     except Exception as e:
-        db.session.rollback()
+        session.rollback()
         raise e
+    finally:
+        session.close()
     
     return {
         'success_count': success_count,

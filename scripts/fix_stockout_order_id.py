@@ -7,14 +7,16 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import create_app, db
-from app.models import StockOut, Order
+from fastapi_app.core.database import SyncSessionLocal
+from fastapi_app.shared_models import StockOut, Order
+from sqlalchemy import func
+
 
 def fix_stockout_order_ids():
     """修复出货记录的订单ID关联"""
-    app = create_app()
-    with app.app_context():
-        stockouts = StockOut.query.filter(
+    session = SyncSessionLocal()
+    try:
+        stockouts = session.query(StockOut).filter(
             StockOut.order_id.is_(None),
             StockOut.stockin_id.is_(None),
             StockOut.customer.isnot(None),
@@ -25,7 +27,7 @@ def fix_stockout_order_ids():
 
         fixed_count = 0
         for stockout in stockouts:
-            orders = Order.query.filter_by(
+            orders = session.query(Order).filter_by(
                 product_id=stockout.product_id,
                 customer=stockout.customer
             ).order_by(Order.order_date.asc()).all()
@@ -39,8 +41,8 @@ def fix_stockout_order_ids():
                 if remaining_qty <= 0:
                     break
 
-                already_shipped = db.session.query(
-                    db.func.sum(StockOut.quantity)
+                already_shipped = session.query(
+                    func.sum(StockOut.quantity)
                 ).filter(
                     StockOut.order_id == order.id,
                     StockOut.stockin_id.is_(None),
@@ -55,10 +57,13 @@ def fix_stockout_order_ids():
                     break
 
         if fixed_count > 0:
-            db.session.commit()
+            session.commit()
             print(f"\n成功修复 {fixed_count} 条出货记录")
         else:
             print("\n没有需要修复的记录")
+    finally:
+        session.close()
+
 
 if __name__ == '__main__':
     fix_stockout_order_ids()

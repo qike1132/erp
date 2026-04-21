@@ -681,7 +681,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
 async function loadOrderDetail() {
     try {
-        const response = await fetch(`/api/v1/purchase-center/api/orders/${currentOrderId}`);
+        const response = await fetch(`/api/v1/purchase-center/orders/${currentOrderId}`);
         
         if (!response.ok) {
             if (response.status === 404) {

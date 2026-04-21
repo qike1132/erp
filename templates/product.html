@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='product.css') }}">
+<link rel="stylesheet" href="/static/product.css">
 {% endblock %}
 {% block content %}
 <div class="container-fluid px-4 py-6">
@@ -221,7 +221,7 @@
                                                 title="配置BOM表">
                                             <i class="fas fa-cogs"></i>
                                         </button>
-                                        <a href="{{ url_for('product.edit_product', id=product.id, page=pagination.page) }}" class="btn-action btn-action-edit" title="编辑">
+                                        <a href="/product/edit/{{ product.id }}?page={{ pagination.page }}" class="btn-action btn-action-edit" title="编辑">
                                             <i class="fas fa-edit"></i>
                                         </a>
                                         <button type="button" class="btn-action btn-action-delete"
@@ -255,19 +255,19 @@
                         <nav aria-label="产品分页">
                             <ul class="pagination pagination-elegant mb-0">
                                 <li class="page-item {{ 'disabled' if not pagination.has_prev else '' }}">
-                                    <a class="page-link" href="{{ url_for('product.products', page=pagination.prev_num) if pagination.has_prev else '#' }}">&laquo;</a>
+                                    <a class="page-link" href="/product/list?page={{ pagination.prev_num if pagination.has_prev else '#' }}">&laquo;</a>
                                 </li>
                                 {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
                                     {% if p %}
                                     <li class="page-item {{ 'active' if p == pagination.page else '' }}">
-                                        <a class="page-link" href="{{ url_for('product.products', page=p) }}">{{ p }}</a>
+                                        <a class="page-link" href="/product/list?page={{ p }}">{{ p }}</a>
                                     </li>
                                     {% else %}
                                     <li class="page-item disabled"><span class="page-link">&hellip;</span></li>
                                     {% endif %}
                                 {% endfor %}
                                 <li class="page-item {{ 'disabled' if not pagination.has_next else '' }}">
-                                    <a class="page-link" href="{{ url_for('product.products', page=pagination.next_num) if pagination.has_next else '#' }}">&raquo;</a>
+                                    <a class="page-link" href="/product/list?page={{ pagination.next_num if pagination.has_next else '#' }}">&raquo;</a>
                                 </li>
                             </ul>
                         </nav>
@@ -541,5 +541,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='product.js') }}"></script>
+<script src="/static/product.js"></script>
 {% endblock %}

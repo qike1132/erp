@@ -5,22 +5,40 @@
 import pytest
 import os
 import sys
-from flask import Flask
-from werkzeug.security import generate_password_hash
 
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import create_app, db
-from app.models import (
-    User, Product, Order, StockIn, StockOut, 
-    InventoryLog, Customer, Permission, ApprovalRequest
-)
+try:
+    from flask import Flask
+    from app import create_app, db
+    from app.models import (
+        User, Product, Order, StockIn, StockOut,
+        InventoryLog, Customer, Permission, ApprovalRequest
+    )
+    HAS_FLASK = True
+except ImportError:
+    HAS_FLASK = False
+    create_app = None
+    db = None
+    User = None
+    Product = None
+    Order = None
+    StockIn = None
+    StockOut = None
+    InventoryLog = None
+    Customer = None
+    Permission = None
+    ApprovalRequest = None
+
+from fastapi_app.core.security import hash_password
 
 
 @pytest.fixture(scope='session')
 def app():
     """创建测试应用"""
+    if not HAS_FLASK:
+        pytest.skip("Flask dependencies not available")
     test_app = create_app('testing')
     
     with test_app.app_context():
@@ -59,7 +77,7 @@ def admin_user(db_session):
     if not admin:
         admin = User(
             username='admin',
-            password=generate_password_hash('admin123'),
+            password=hash_password('admin123'),
             is_super=True,
             status=True
         )
@@ -76,7 +94,7 @@ def normal_user(db_session):
     if not user:
         user = User(
             username='testuser',
-            password=generate_password_hash('test123'),
+            password=hash_password('test123'),
             is_super=False,
             status=True
         )
@@ -217,7 +235,7 @@ def create_test_data(db_session):
     # 创建用户
     admin = User(
         username='admin',
-        password=generate_password_hash('admin123'),
+        password=hash_password('admin123'),
         is_super=True,
         status=True
     )

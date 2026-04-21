@@ -208,7 +208,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='pagination.js') }}"></script>
+<script src="/static/pagination.js"></script>
 <style>
 /* 展开按钮图标旋转动画 */
 .toggle-icon {
@@ -880,10 +880,10 @@ document.getElementById('submitAllStockoutsBtn').addEventListener('click', async
                 country: stockout.country || ''
             }));
             
-            console.log('Sending request to /api/batch-submit-stockouts');
+            console.log('Sending request to /api/v1/aux/batch-submit-stockouts');
             console.log('Stockouts for API:', stockoutsForApi);
             
-            const response = await fetch('/api/batch-submit-stockouts', {
+            const response = await fetch('/api/v1/aux/batch-submit-stockouts', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -976,10 +976,10 @@ let stockoutCurrentPage = 1;
 const stockoutPerPage = 50;
 
 function loadStockouts(page) {
-    fetch(`/stock/api/stockouts?page=${page}&per_page=${stockoutPerPage}`, { credentials: 'include' })
+    fetch(`/api/v1/stock/out/list?page=${page}&per_page=${stockoutPerPage}`, { credentials: 'include' })
         .then(r => r.json())
         .then(data => {
-            globalStockoutsData = data.items || [];
+            globalStockoutsData = data.data || [];
             if (typeof renderGroupedStockoutListLocal === 'function') {
                 renderGroupedStockoutListLocal();
             }

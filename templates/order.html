@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='order.css') }}">
+<link rel="stylesheet" href="/static/order.css">
 {% endblock %}
 
 {% block content %}
@@ -174,18 +174,18 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='pagination.js') }}"></script>
-<script src="{{ url_for('static', filename='order.js') }}"></script>
+<script src="/static/pagination.js"></script>
+<script src="/static/order.js"></script>
 <script>
 // ========== AJAX 分页加载订单数据 ==========
 let orderCurrentPage = 1;
 const orderPerPage = 50;
 
 function loadOrders(page) {
-    fetch(`/order/api/orders?page=${page}&per_page=${orderPerPage}`, { credentials: 'include' })
+    fetch(`/api/v1/orders/list?page=${page}&per_page=${orderPerPage}`, { credentials: 'include' })
         .then(r => r.json())
         .then(data => {
-            window.__ordersData = data.items || [];
+            window.__ordersData = data.data || [];
             globalOrdersData = window.__ordersData;
             if (typeof renderGroupedOrderListLocal === 'function') {
                 renderGroupedOrderListLocal();

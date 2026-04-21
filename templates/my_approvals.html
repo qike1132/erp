@@ -151,7 +151,7 @@
 
 {% block scripts %}
 <script>
-const csrfToken = '{{ csrf_token() }}';
+const csrfToken = '';
 
 function cancelApproval(approvalId) {
     if (!confirm('确定要取消该审批请求吗？取消后订单将解锁。')) {

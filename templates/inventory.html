@@ -173,7 +173,7 @@
         </div>
         <div id="searchPanel">
             <div class="card-body">
-                <form id="searchForm" method="GET" action="{{ url_for('stock.inventory') }}">
+                <form id="searchForm" method="GET" action="/stock/inventory">
                     <div class="row g-3">
                         <div class="col-md-6">
                             <label for="customer" class="form-label">客户名称</label>
@@ -194,7 +194,7 @@
                                 <button type="submit" class="btn btn-primary flex-grow-1">
                                     <i class="fas fa-search me-1"></i>查询
                                 </button>
-                                <a href="{{ url_for('stock.inventory') }}" class="btn btn-outline-secondary">
+                                <a href="/stock/inventory" class="btn btn-outline-secondary">
                                     <i class="fas fa-redo"></i>
                                 </a>
                             </div>
@@ -362,7 +362,7 @@ function exportInventory() {
         var params = new URLSearchParams();
         if (customer) params.append('customer', customer);
         if (product) params.append('product', product);
-        var url = '/stock/api/export-inventory?' + params.toString();
+        var url = '/api/v1/stock/export-inventory?' + params.toString();
 
         fetch(url)
             .then(function(response) {

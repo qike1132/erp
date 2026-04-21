@@ -56,8 +56,8 @@ async def import_staging_orders(
     current_user: User = Depends(require_permission("batch_import")),
 ):
     """批量导入订单到暂存区"""
-    if not file.filename or not (file.filename.endswith('.xlsx') or file.filename.endswith('.xls')):
-        return StagingOrderImportResult(success=False, message="只支持 Excel 文件格式")
+    if not file.filename or not file.filename.endswith('.xlsx'):
+        return StagingOrderImportResult(success=False, message="只支持 .xlsx 格式，.xls 已不再支持")
 
     content = await file.read()
     imported, message, errors = await svc.import_staging_orders_from_excel(db, content, session_id)

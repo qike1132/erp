@@ -1,12 +1,11 @@
 """
 数据库会话管理
 
-FastAPI 与 Flask 共享同一数据库，使用独立的 SQLAlchemy 引擎和会话。
-同步引擎始终可用；异步引擎在 aiomysql 已安装时启用。
-连接池参数从环境变量/Settings读取，与Flask侧保持一致。
+同步引擎始终可用；异步引擎在 asyncmy 已安装时启用。
 """
 
 import os
+import logging
 from typing import Generator
 
 from sqlalchemy import create_engine
@@ -15,14 +14,16 @@ from sqlalchemy.orm import sessionmaker, Session
 from fastapi_app.core.config import settings
 
 
+logger = logging.getLogger(__name__)
+
 def _get_pool_config() -> dict:
     """从环境变量读取连接池配置，提供合理默认值"""
     return {
-        "pool_size": int(os.getenv("DB_POOL_SIZE", "10")),
+        "pool_size": int(os.getenv("DB_POOL_SIZE", "20")),
         "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", "1800")),
         "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT", "30")),
-        "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", "5")),
-        "pool_pre_ping": True,  # 自动检测断开的连接
+        "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", "30")),
+        "pool_pre_ping": True,
     }
 
 
@@ -55,7 +56,7 @@ async_engine = None
 
 
 def _init_async_engine():
-    """初始化异步引擎（仅在 aiomysql 可用时）
+    """初始化异步引擎（仅在 asyncmy 可用时）
 
     同时设置模块级 async_engine，确保 lifespan / health_check
     和 get_async_db() 共用同一个引擎实例。
@@ -96,7 +97,7 @@ async def get_async_db():
     """FastAPI 依赖：获取异步数据库会话"""
     _init_async_engine()
     if _AsyncSessionLocal is None:
-        raise RuntimeError("异步数据库引擎未初始化（aiomysql 未安装），请使用 get_sync_db")
+        raise RuntimeError("异步数据库引擎未初始化（asyncmy 未安装），请使用 get_sync_db")
     async with _AsyncSessionLocal() as session:
         try:
             yield session
@@ -108,7 +109,7 @@ async def dispose_async_engines():
     """释放所有异步引擎的连接池，供 lifespan shutdown 调用
 
     解决原先只释放 async_engine 而遗漏 _async_engine 导致
-    aiomysql 连接在 Event loop 关闭后才触发 __del__ 报
+    asyncmy 连接在 Event loop 关闭后才触发 __del__ 报
     RuntimeError: Event loop is closed 的问题。
     """
     global _async_engine, _AsyncSessionLocal, async_engine
@@ -121,8 +122,8 @@ async def dispose_async_engines():
     for eng in engines:
         try:
             await eng.dispose()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("异步引擎释放异常（可能已关闭）: %s", e)
     _async_engine = None
     _AsyncSessionLocal = None
     async_engine = None

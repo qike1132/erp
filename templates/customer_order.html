@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='order.css') }}">
+<link rel="stylesheet" href="/static/order.css">
 <style>
 /* 客户订单 Tab 页面样式 */
 .customer-order-tabs {
@@ -494,18 +494,18 @@
 
 {% block scripts %}
 <!-- ========== 订单管理模块 JS（使用 order.js + 内联初始化） ========== -->
-<script src="{{ url_for('static', filename='pagination.js') }}"></script>
-<script src="{{ url_for('static', filename='order.js') }}"></script>
+<script src="/static/pagination.js"></script>
+<script src="/static/order.js"></script>
 <script>
 // ========== AJAX 分页加载订单数据 ==========
 let coOrderCurrentPage = 1;
 const coOrderPerPage = 50;
 
 function loadCoOrders(page) {
-    fetch(`/customer-order/api/orders?page=${page}&per_page=${coOrderPerPage}`, { credentials: 'include' })
+    fetch(`/api/v1/orders/list?page=${page}&per_page=${coOrderPerPage}`, { credentials: 'include' })
         .then(r => r.json())
         .then(data => {
-            window.__ordersData = data.items || [];
+            window.__ordersData = data.data || [];
             globalOrdersData = window.__ordersData;
             if (typeof renderGroupedOrderListLocal === 'function') {
                 renderGroupedOrderListLocal();
@@ -521,10 +521,10 @@ let coStockinCurrentPage = 1;
 const coStockinPerPage = 50;
 
 function loadCoStockins(page) {
-    fetch(`/customer-order/api/stockins?page=${page}&per_page=${coStockinPerPage}`, { credentials: 'include' })
+    fetch(`/api/v1/stock/in/list?page=${page}&per_page=${coStockinPerPage}`, { credentials: 'include' })
         .then(r => r.json())
         .then(data => {
-            si_globalStockinsData = data.items || [];
+            si_globalStockinsData = data.data || [];
             if (typeof si_renderGroupedStockinListLocal === 'function') {
                 si_renderGroupedStockinListLocal();
             }
@@ -931,7 +931,7 @@ document.getElementById('submitAllStockinsBtn').addEventListener('click', async 
                 note: stockin.note
             }));
 
-            const response = await si_apiFetch('/api/batch-submit-stockins', {
+            const response = await si_apiFetch('/api/v1/aux/batch-submit-stockins', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'

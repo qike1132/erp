@@ -1086,7 +1086,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
 async function loadProducts() {
     try {
-        const response = await fetch('/api/v1/purchase-center/api/products?per_page=200');
+        const response = await fetch('/api/v1/purchase-center/products?per_page=200');
         
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         
@@ -1189,7 +1189,7 @@ async function performSearch(query) {
     showDropdownLoading();
     
     try {
-        const response = await fetch(`/api/v1/purchase-center/api/products/search-suggestions?q=${encodeURIComponent(query)}&limit=15`);
+        const response = await fetch(`/api/v1/purchase-center/products/search-suggestions?q=${encodeURIComponent(query)}&limit=15`);
         const result = await response.json();
         
         if (result.success && result.suggestions && result.suggestions.length > 0) {
@@ -1419,7 +1419,7 @@ async function executeCalculation(items) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 8000);
         
-        const response = await fetch('/api/v1/purchase-center/api/calculate', {
+        const response = await fetch('/api/v1/purchase-center/calculate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ orders: payload }),

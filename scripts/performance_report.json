@@ -1,0 +1,29 @@
+{
+  "test_time": "2026-04-20T22:07:35.428063",
+  "configuration": {
+    "base_url": "http://127.0.0.1:5002",
+    "endpoint": "/api/v1/aux/health",
+    "concurrent_users": 100,
+    "duration_seconds": 20
+  },
+  "results": {
+    "total_requests": 3389,
+    "successful_requests": 60,
+    "failed_requests": 3329,
+    "success_rate_percent": 1.77,
+    "rps": 58.4,
+    "response_time_ms": {
+      "average": 722.79,
+      "min": 2.64,
+      "max": 37941.12,
+      "p50": 160.74,
+      "p95": 276.76,
+      "p99": 25725.17
+    },
+    "memory_mb": {
+      "initial": 37.25,
+      "peak": 119.81,
+      "growth": 82.56
+    }
+  }
+}

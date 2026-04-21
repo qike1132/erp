@@ -275,7 +275,7 @@ const operationData = {{ approval.operation_data | safe }};
 {% else %}
 const operationData = null;
 {% endif %}
-const csrfToken = '{{ csrf_token() }}';
+const csrfToken = '';
 
 document.addEventListener('DOMContentLoaded', function() {
     console.log('operationType:', operationType);
@@ -410,7 +410,7 @@ function approveRequest() {
                 alert(data.message);
             }
             setTimeout(() => {
-                window.location.href = '{{ url_for("approval.approval_list") }}';
+                window.location.href = '/approval/list';
             }, 1000);
         } else {
             if (window.GlobalNotification) {
@@ -438,7 +438,7 @@ function showRejectModal() {
 
 function rejectRequest() {
     const reason = document.getElementById('rejectReason').value;
-    
+
     fetch(`/api/v1/approvals/reject/${approvalId}`, {
         method: 'POST',
         headers: {
@@ -458,7 +458,7 @@ function rejectRequest() {
                 alert(data.message);
             }
             setTimeout(() => {
-                window.location.href = '{{ url_for("approval.approval_list") }}';
+                window.location.href = '/approval/list';
             }, 1000);
         } else {
             if (window.GlobalNotification) {

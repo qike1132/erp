@@ -1,5 +1,5 @@
 """
-ERP 服务器管理器 GUI v3.4
+ERP 服务器管理器 GUI v3.5
 功能:
   - 图形化管理调试模式 (run.py) 和生产模式 (start_production_optimized.py)
   - 单实例限制 — 同一时间只能运行一个管理器
@@ -36,7 +36,7 @@ from tkinter import ttk, messagebox
 # ============================================================
 # 全局常量
 # ============================================================
-_VERSION = 'v3.4'
+_VERSION = 'v3.5'
 _WINDOW_TITLE = f'ERP 服务器管理器 {_VERSION}'
 
 
@@ -519,7 +519,7 @@ class ServerManagerApp:
     # ── 进程管理 ──────────────────────────────────────────
 
     def _stop_process(self):
-        """安全终止当前管理的子进程（含进程树），不影响其他 Python 程序。
+        """安全终止当前管理的子进程（含进程树），并确保端口释放。
         注意: 不设置 _mode，由调用者决定模式状态。"""
         proc = self._process
         if proc and proc.poll() is None:
@@ -527,12 +527,17 @@ class ServerManagerApp:
             self.log_message(f"正在终止进程 (PID: {pid})...")
             try:
                 if sys.platform == 'win32':
+                    # 先尝试优雅终止整个进程树
                     result = subprocess.run(
                         ['taskkill', '/F', '/T', '/PID', str(pid)],
                         creationflags=subprocess.CREATE_NO_WINDOW,
                         capture_output=True, timeout=10)
                     if result.returncode != 0:
                         self.log_message(f"taskkill 返回码: {result.returncode}", 'WARNING')
+                    # 等待端口释放（taskkill /F 后操作系统释放端口通常 <1s）
+                    time.sleep(1)
+                    # 扫残留：检查 5002 端口是否仍被占用，若有则强制终止占用进程
+                    self._kill_port_occupants(5002)
                 else:
                     proc.terminate()
                     proc.wait(timeout=5)
@@ -543,6 +548,43 @@ class ServerManagerApp:
                 self.log_message(f"终止进程异常: {str(e)}", 'ERROR')
         self._process = None
         self._msg_queue.put(('ui_update', {}))
+
+    def _kill_port_occupants(self, port):
+        """扫描指定端口，强制终止占用该端口的残留 Python 进程"""
+        try:
+            output = subprocess.run(
+                ['netstat', '-ano'],
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                capture_output=True, text=True, timeout=10)
+            for line in output.stdout.splitlines():
+                # 匹配 LISTENING 状态的指定端口
+                if 'LISTENING' not in line:
+                    continue
+                parts = line.split()
+                if len(parts) < 5:
+                    continue
+                local_addr = parts[1]
+                # 解析端口
+                if ':' in local_addr and local_addr.rsplit(':', 1)[-1] == str(port):
+                    occupant_pid = parts[-1]
+                    if occupant_pid.isdigit():
+                        # 确认是 Python 进程再终止，避免误杀
+                        try:
+                            proc_check = subprocess.run(
+                                ['tasklist', '/FI', f'PID eq {occupant_pid}', '/FO', 'CSV', '/NH'],
+                                creationflags=subprocess.CREATE_NO_WINDOW,
+                                capture_output=True, text=True, timeout=5)
+                            if 'python' in proc_check.stdout.lower():
+                                self.log_message(f"发现残留 Python 进程占用端口 {port} (PID: {occupant_pid})，正在终止...")
+                                subprocess.run(
+                                    ['taskkill', '/F', '/PID', occupant_pid],
+                                    creationflags=subprocess.CREATE_NO_WINDOW,
+                                    capture_output=True, timeout=5)
+                                time.sleep(0.5)
+                        except Exception as e:
+                            self.log_message(f"清理端口占用异常: {e}", 'WARNING')
+        except Exception as e:
+            self.log_message(f"端口扫描异常: {e}", 'WARNING')
 
     def _start_server(self, script_name, mode_label):
         if self._mode != 'none':
@@ -570,6 +612,8 @@ class ServerManagerApp:
             env['PYTHONUNBUFFERED'] = '1'
             env['PYTHONIOENCODING'] = 'utf-8'
             env['PYTHONUTF8'] = '1'
+            # 确保 PYTHONPATH 包含项目目录，解决 EXE 环境下 ModuleNotFoundError
+            env['PYTHONPATH'] = str(_PROJECT_DIR)
             creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
             self._process = subprocess.Popen(
                 [_PYTHON_EXE, script],
@@ -590,9 +634,11 @@ class ServerManagerApp:
             if alive:
                 self._msg_queue.put(('started', {'label': mode_label}))
             else:
+                self._process = None
                 self._msg_queue.put(('log', {'text': f"{mode_label}进程启动后立即退出", 'level': 'ERROR'}))
                 self._msg_queue.put(('status', {'text': f"{mode_label}启动失败"}))
         except Exception as e:
+            self._process = None
             self._msg_queue.put(('log', {'text': f"启动异常: {str(e)}", 'level': 'ERROR'}))
             self._msg_queue.put(('status', {'text': f"{mode_label}启动失败"}))
 
@@ -619,7 +665,7 @@ class ServerManagerApp:
         self._mode = 'debug' if '调试' in mode_label else 'production'
         self._update_all_ui()
         self.status_bar_label.config(text=f"{mode_label}运行中")
-        self.log_message(f"{mode_label}启动成功 — http://localhost:5002  http://localhost:5003")
+        self.log_message(f"{mode_label}启动成功 — http://localhost:5002")
 
     def _poll_queue(self):
         processed = 0
@@ -772,7 +818,7 @@ class ServerManagerApp:
                  bg=self._PALETTE['bg_header']).pack(side=tk.LEFT, padx=(10, 0))
 
         tk.Label(hdr_inner,
-                 text='FastAPI :5002  ·  Flask :5003',
+                 text='FastAPI :5002',
                  font=('Microsoft YaHei UI', 9),
                  fg=self._PALETTE['text_dim'],
                  bg=self._PALETTE['bg_header']).pack(side=tk.RIGHT)
@@ -792,10 +838,10 @@ class ServerManagerApp:
         content.rowconfigure(2, weight=1)
 
         self._build_server_card(content, 0, 0, '调试模式', 'run.py',
-            'FastAPI + Flask (热重载) · 端口 5002 + 5003',
+            'FastAPI (热重载) · 端口 5002',
             'debug', self.start_debug, self.stop_debug, self.restart_debug)
         self._build_server_card(content, 0, 1, '生产模式', 'production',
-            'FastAPI + Waitress (8线程) · 端口 5002 + 5003',
+            'FastAPI + Uvicorn (多Worker) · 端口 5002',
             'production', self.start_production, self.stop_production, self.restart_production)
         self._build_global_stop(content)
         self._build_log_section(content)
@@ -963,7 +1009,7 @@ class ServerManagerApp:
             fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_surface'])
         self.status_bar_label.pack(side=tk.LEFT, padx=20, pady=7)
 
-        tk.Label(bar, text='localhost:5002  ·  localhost:5003',
+        tk.Label(bar, text='localhost:5002',
                  font=('Microsoft YaHei UI', 8),
                  fg=self._PALETTE['text_dim'],
                  bg=self._PALETTE['bg_surface']).pack(side=tk.RIGHT, padx=20, pady=7)
