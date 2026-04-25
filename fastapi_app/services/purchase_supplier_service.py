@@ -6,6 +6,7 @@
 import logging
 
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from fastapi_app.shared_models import (
     Product, ProductMaterial, ProductFabric, ProductAccessory, ProductPackaging,
@@ -18,6 +19,15 @@ logger = logging.getLogger(__name__)
 
 def get_suppliers(db: Session, with_stats: bool = False) -> list:
     suppliers = db.query(Supplier).order_by(Supplier.name).all()
+    # Batch-fetch material counts to avoid N+1 when with_stats=True
+    material_counts: dict[int, int] = {}
+    if with_stats:
+        rows = db.query(
+            ProductMaterial.supplier_id,
+            func.count(ProductMaterial.id)
+        ).group_by(ProductMaterial.supplier_id).all()
+        material_counts = dict(rows)
+
     supplier_list = []
     for supplier in suppliers:
         s_dict = {
@@ -28,10 +38,7 @@ def get_suppliers(db: Session, with_stats: bool = False) -> list:
             'address': getattr(supplier, 'address', None),
         }
         if with_stats:
-            material_count = db.query(ProductMaterial).filter(
-                ProductMaterial.supplier_id == supplier.id
-            ).count()
-            s_dict['material_count'] = material_count
+            s_dict['material_count'] = material_counts.get(supplier.id, 0)
         supplier_list.append(s_dict)
     return supplier_list
 

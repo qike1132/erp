@@ -1,6 +1,8 @@
 # 滨发协同系统 - 系统整改方案
 
-**版本**: v4.0 (最终版)
+> **已废弃**: 本文档(v4.0)经审核发现 3 项事实性错误(P0)、7 项技术缺陷(P1)，已被 [`remediation-plan-v5-final.md`](remediation-plan-v5-final.md) 替代。请参阅 [`audit-report-remediation-plan.md`](audit-report-remediation-plan.md) 了解完整审核发现。v5.0 的核心修正：(1) 移除所有 Flask 遗留组件相关章节（Flask 已从代码库中完全移除）；(2) 驱动替换策略改为保持 asyncmy 直至 PG 迁移（原方案 asyncmy->pymysql 将导致 171 个异步路由完全中断）；(3) 双写方案改为 ORM 层双写（原方案 SQL 层双写在 MySQL/PG 方言不兼容时必然失败）。
+
+**版本**: v4.0 (已废弃 - 请使用 v5.0)
 **编制日期**: 2026-04-21
 **更新说明**: 基于全面评估报告，整合 12 项改进建议（P0: 3 项，P1: 5 项，P2: 4 项）
 **适用范围**: 后端、前端、部署运维（不含 CI/CD 流水线）

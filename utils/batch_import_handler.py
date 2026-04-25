@@ -5,10 +5,24 @@
 import pandas as pd
 import os
 from datetime import datetime
-try:
-    from werkzeug.utils import secure_filename
-except ImportError:
-    secure_filename = None
+import re
+
+
+def secure_filename(filename: str) -> str:
+    """安全文件名处理
+
+    移除路径分隔符和危险字符，保留ASCII字母、数字、下划线、点号和连字符。
+    """
+    if not filename:
+        return ""
+    # 分离文件名和扩展名
+    name, ext = os.path.splitext(filename)
+    # 保留安全字符
+    name = re.sub(r'[^\w\-]', '_', name)
+    ext = re.sub(r'[^\w\-]', '_', ext)
+    # 限制长度
+    name = name[:128]
+    return name + ext
 
 
 class BatchImportHandler:

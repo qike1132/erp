@@ -1,7 +1,8 @@
 """
-WebSocket 实时通知服务
+WebSocket 实时通知服务 - 全异步版本
 
 基于 FastAPI WebSocket + Redis Pub/Sub 实现实时库存变更通知和操作冲突预警。
+所有 Redis 操作均使用 redis.asyncio，消除事件循环阻塞。
 """
 import asyncio
 import json
@@ -12,10 +13,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
-# ==================== Redis Pub/Sub 事件定义 ====================
-
 class StockEvent:
-    """库存事件类型常量"""
     STOCK_CHANGED = "stock_changed"
     SHIPMENT_PLAN_UPLOADED = "shipment_plan_uploaded"
     ORDER_LOCKED = "order_locked"
@@ -29,47 +27,46 @@ EVENT_DISPLAY_MESSAGES = {
     "shipment_plan_uploaded": "新的出货计划已上传",
 }
 
-# 模块级共享同步 Redis 客户端（供 publish_stock_event 使用，避免每次创建新连接）
-_sync_redis_client = None
+_async_redis_client = None
 
 
-def _get_sync_redis_client():
-    """获取或创建模块级共享同步 Redis 客户端（延迟初始化，不主动ping）"""
-    global _sync_redis_client
-    if _sync_redis_client is not None:
-        return _sync_redis_client
+async def _get_async_redis_client():
+    """获取或创建模块级共享异步 Redis 客户端"""
+    global _async_redis_client
+    if _async_redis_client is not None:
+        return _async_redis_client
 
     try:
-        import redis as sync_redis
+        import redis.asyncio as aioredis
         from fastapi_app.core.config import settings
         url = settings.REDIS_URL
         if settings.REDIS_PASSWORD and settings.REDIS_PASSWORD not in url:
             url = url.replace("redis://", f"redis://:{settings.REDIS_PASSWORD}@")
-        _sync_redis_client = sync_redis.from_url(url)
-        return _sync_redis_client
+        _async_redis_client = aioredis.from_url(url)
+        return _async_redis_client
     except Exception as e:
-        logger.warning("同步 Redis 客户端初始化失败: %s", e)
+        logger.warning("异步 Redis 客户端初始化失败: %s", e)
         return None
 
 
-def _warmup_sync_redis():
-    """预热同步 Redis 客户端（在启动时调用，建立连接避免首次请求延迟）"""
-    global _sync_redis_client
+async def _warmup_async_redis():
+    """预热异步 Redis 客户端"""
+    global _async_redis_client
     try:
-        client = _get_sync_redis_client()
+        client = await _get_async_redis_client()
         if client:
-            client.ping()  # 强制建立TCP连接
-            logger.info("同步 Redis 客户端预热成功")
+            await client.ping()
+            logger.info("异步 Redis 客户端预热成功")
     except Exception as e:
-        logger.warning(f"同步 Redis 客户端预热失败: {e}")
-        _sync_redis_client = None
+        logger.warning("异步 Redis 客户端预热失败: %s", e)
+        _async_redis_client = None
 
 
-def publish_stock_event(event_type: str, data: dict, redis_client=None):
-    """发布库存事件到 Redis Pub/Sub 频道。"""
+async def publish_stock_event(event_type: str, data: dict, redis_client=None):
+    """发布库存事件到 Redis Pub/Sub 频道（异步）"""
     try:
         if redis_client is None:
-            redis_client = _get_sync_redis_client()
+            redis_client = await _get_async_redis_client()
 
         if redis_client is None:
             logger.debug("Redis 不可用，跳过事件发布")
@@ -80,13 +77,11 @@ def publish_stock_event(event_type: str, data: dict, redis_client=None):
             "data": data,
             "timestamp": datetime.now().isoformat(),
         }
-        redis_client.publish("erp:stock_events", json.dumps(event, ensure_ascii=False))
-        logger.debug(f"事件已发布: {event_type}")
+        await redis_client.publish("erp:stock_events", json.dumps(event, ensure_ascii=False))
+        logger.debug("事件已发布: %s", event_type)
     except Exception as e:
-        logger.warning(f"事件发布失败: {e}")
+        logger.warning("事件发布失败: %s", e)
 
-
-# ==================== WebSocket 连接管理 ====================
 
 class ConnectionManager:
     """WebSocket 连接管理器 + Redis Pub/Sub 桥梁"""
@@ -103,24 +98,22 @@ class ConnectionManager:
         self._register(websocket, user_id)
 
     def connect_existing(self, websocket, user_id: int):
-        """注册已 accept 的 WebSocket 连接（用于消息优先认证流程）"""
         self._register(websocket, user_id)
 
     def _register(self, websocket, user_id: int):
         if user_id not in self.active_connections:
             self.active_connections[user_id] = []
         self.active_connections[user_id].append(websocket)
-        logger.info(f"WebSocket 连接: user_id={user_id}, 当前连接数={len(self.active_connections)}")
+        logger.info("WebSocket 连接: user_id=%s, 当前连接数=%s", user_id, len(self.active_connections))
 
     def disconnect(self, websocket, user_id: int):
         if user_id in self.active_connections:
             self.active_connections[user_id].remove(websocket)
             if not self.active_connections[user_id]:
                 del self.active_connections[user_id]
-        logger.info(f"WebSocket 断开: user_id={user_id}, 当前连接数={len(self.active_connections)}")
+        logger.info("WebSocket 断开: user_id=%s, 当前连接数=%s", user_id, len(self.active_connections))
 
     async def broadcast_event(self, event: dict):
-        # 快照当前连接，避免 await 期间其他协程修改字典导致 RuntimeError
         snapshot = list(self.active_connections.items())
         disconnected = []
         for user_id, connections in snapshot:
@@ -143,7 +136,6 @@ class ConnectionManager:
                 self.disconnect(ws, user_id)
 
     def _build_redis_url(self):
-        """构建带密码的 Redis URL"""
         from fastapi_app.core.config import settings
         url = settings.REDIS_URL
         if settings.REDIS_PASSWORD and settings.REDIS_PASSWORD not in url:
@@ -151,18 +143,12 @@ class ConnectionManager:
         return url
 
     async def start_redis_listener(self):
-        """启动 Redis Pub/Sub 订阅，带自动重连"""
-        try:
-            import redis.asyncio as aioredis
-        except ImportError:
-            logger.warning("redis.asyncio 不可用，跳过 Pub/Sub 订阅")
-            return
+        import redis.asyncio as aioredis
 
         self._redis_url = self._build_redis_url()
         self._redis_task = asyncio.create_task(self._listen_loop())
 
     async def _listen_loop(self):
-        """Redis 监听循环，断线自动重连"""
         import redis.asyncio as aioredis
 
         while True:
@@ -190,9 +176,8 @@ class ConnectionManager:
                 logger.info("Redis Pub/Sub 监听任务已取消")
                 break
             except Exception as e:
-                logger.error(f"Redis Pub/Sub 监听异常: {e}，5s 后重连")
+                logger.error("Redis Pub/Sub 监听异常: %s，5s 后重连", e)
 
-            # 清理旧连接
             await self._cleanup_connections()
 
             if not self._redis_task or self._redis_task.done():
@@ -227,5 +212,4 @@ class ConnectionManager:
         logger.info("Redis Pub/Sub 订阅已停止")
 
 
-# 全局连接管理器实例
 manager = ConnectionManager()

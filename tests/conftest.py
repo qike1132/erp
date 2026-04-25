@@ -1,6 +1,9 @@
 """
 测试配置文件
-提供测试fixtures和通用配置
+提供测试 fixtures 和通用配置。
+
+FastAPI 异步测试采用 httpx AsyncClient；
+Flask 遗留 fixtures 仅在 Flask 依赖可用时加载。
 """
 import pytest
 import os
@@ -8,6 +11,44 @@ import sys
 
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from unittest.mock import AsyncMock, MagicMock
+
+# ============================================================
+# FastAPI fixtures（始终可用）
+# ============================================================
+
+@pytest.fixture
+def mock_async_db():
+    """Mock 异步数据库会话（适用于服务层单测）"""
+    session = AsyncMock()
+    session.commit = AsyncMock()
+    session.rollback = AsyncMock()
+    session.close = AsyncMock()
+    session.flush = AsyncMock()
+    session.delete = AsyncMock()
+    session.refresh = AsyncMock()
+    session.execute = AsyncMock()
+    session.get = AsyncMock()
+    session.add = MagicMock()
+    session.begin_nested = MagicMock(return_value=AsyncMock())
+    return session
+
+
+@pytest.fixture
+def mock_user():
+    """Mock 当前用户"""
+    user = MagicMock()
+    user.id = 1
+    user.username = "admin"
+    user.is_super = True
+    user.has_permission = MagicMock(return_value=True)
+    return user
+
+
+# ============================================================
+# Flask 遗留 fixtures（仅在 Flask 可用时加载）
+# ============================================================
 
 try:
     from flask import Flask
@@ -21,26 +62,19 @@ except ImportError:
     HAS_FLASK = False
     create_app = None
     db = None
-    User = None
-    Product = None
-    Order = None
-    StockIn = None
-    StockOut = None
-    InventoryLog = None
-    Customer = None
-    Permission = None
-    ApprovalRequest = None
+    User = Product = Order = StockIn = StockOut = None
+    InventoryLog = Customer = Permission = ApprovalRequest = None
 
 from fastapi_app.core.security import hash_password
 
 
 @pytest.fixture(scope='session')
 def app():
-    """创建测试应用"""
+    """创建 Flask 测试应用"""
     if not HAS_FLASK:
         pytest.skip("Flask dependencies not available")
     test_app = create_app('testing')
-    
+
     with test_app.app_context():
         db.create_all()
         yield test_app
@@ -50,20 +84,19 @@ def app():
 
 @pytest.fixture(scope='function')
 def client(app):
-    """创建测试客户端"""
+    """Flask 测试客户端"""
     return app.test_client()
 
 
 @pytest.fixture(scope='function')
 def db_session(app):
-    """数据库会话"""
+    """Flask 数据库会话"""
     with app.app_context():
         connection = db.engine.connect()
         transaction = connection.begin()
-        
+
         yield db.session
-        
-        # 回滚事务
+
         transaction.rollback()
         connection.close()
         db.session.remove()
@@ -72,7 +105,6 @@ def db_session(app):
 @pytest.fixture(scope='function')
 def admin_user(db_session):
     """创建管理员用户"""
-    # 检查是否已存在
     admin = User.query.filter_by(username='admin').first()
     if not admin:
         admin = User(
@@ -89,7 +121,6 @@ def admin_user(db_session):
 @pytest.fixture(scope='function')
 def normal_user(db_session):
     """创建普通用户"""
-    # 检查是否已存在
     user = User.query.filter_by(username='testuser').first()
     if not user:
         user = User(
@@ -213,7 +244,7 @@ def test_permission(db_session):
 
 @pytest.fixture(scope='function')
 def logged_in_client(client, admin_user):
-    """已登录的测试客户端"""
+    """已登录的 Flask 测试客户端"""
     with client.session_transaction() as sess:
         sess['user_id'] = admin_user.id
         sess['username'] = admin_user.username
@@ -223,42 +254,8 @@ def logged_in_client(client, admin_user):
 
 @pytest.fixture(scope='function')
 def auth_headers(admin_user):
-    """认证头"""
+    """Flask 认证头"""
     return {
         'Content-Type': 'application/json',
         'X-User-Id': str(admin_user.id)
     }
-
-
-def create_test_data(db_session):
-    """创建完整测试数据集"""
-    # 创建用户
-    admin = User(
-        username='admin',
-        password=hash_password('admin123'),
-        is_super=True,
-        status=True
-    )
-    db_session.add(admin)
-    
-    # 创建客户
-    customer = Customer(
-        name='测试客户A',
-        contact='张三',
-        phone='13800138000',
-        status=True
-    )
-    db_session.add(customer)
-    
-    # 创建产品
-    for i in range(1, 11):
-        product = Product(
-            name=f'产品{i}',
-            barcode=f'BC{i:04d}',
-            current_stock=100,
-            price=10.0 * i
-        )
-        db_session.add(product)
-    
-    db_session.commit()
-    return admin, customer

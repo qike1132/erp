@@ -3,7 +3,8 @@ import json
 import logging
 from datetime import datetime
 from sqlalchemy import select, func, or_
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.shared_models import (
     ApprovalRequest, ApprovalLog, Order, Product, InventoryLog, StockOut, User
@@ -14,7 +15,7 @@ from fastapi_app.services import escape_like
 logger = logging.getLogger(__name__)
 
 
-async def get_approval_list(db, status_filter: str = 'pending', search: str = '',
+async def get_approval_list(db: AsyncSession, status_filter: str = 'pending', search: str = '',
                             page: int = 1, per_page: int = 20) -> dict:
     """获取审批列表（分页+搜索）"""
     query = select(ApprovalRequest).options(
@@ -65,9 +66,18 @@ async def get_approval_list(db, status_filter: str = 'pending', search: str = ''
     }
 
 
-async def get_approval_detail(db, approval_id: int) -> dict:
+async def get_approval_detail(db: AsyncSession, approval_id: int) -> dict:
     """获取审批详情"""
-    approval = await db.get(ApprovalRequest, approval_id)
+    result = await db.execute(
+        select(ApprovalRequest)
+        .options(
+            selectinload(ApprovalRequest.logs),
+            joinedload(ApprovalRequest.order).joinedload(Order.product),
+            joinedload(ApprovalRequest.requester),
+        )
+        .where(ApprovalRequest.id == approval_id)
+    )
+    approval = result.unique().scalar_one_or_none()
     if not approval:
         raise ValueError("审批请求不存在")
 
@@ -90,7 +100,7 @@ async def get_approval_detail(db, approval_id: int) -> dict:
     return data
 
 
-async def approve_request(db, approval_id: int, current_user: User) -> str:
+async def approve_request(db: AsyncSession, approval_id: int, current_user: User) -> str:
     """同意审批"""
     approval = await _get_pending_approval(db, approval_id, current_user)
     if not approval:
@@ -179,10 +189,11 @@ async def approve_request(db, approval_id: int, current_user: User) -> str:
     await _create_approval_log(db, approval, 'execute', current_user,
                                 {'operation': approval.operation_type})
 
+    await db.flush()
     return f'已同意{approval.operation_type_display}请求'
 
 
-async def reject_request(db, approval_id: int, current_user: User,
+async def reject_request(db: AsyncSession, approval_id: int, current_user: User,
                          reason: str = '') -> str:
     """拒绝审批"""
     approval = await _get_pending_approval(db, approval_id, current_user)
@@ -204,6 +215,7 @@ async def reject_request(db, approval_id: int, current_user: User,
 
     await _create_approval_log(db, approval, 'reject', current_user, {'reason': reason})
 
+    await db.flush()
     return f'已拒绝{approval.operation_type_display}请求'
 
 
@@ -215,7 +227,7 @@ async def get_pending_count(db) -> int:
     return result.scalar() or 0
 
 
-async def _get_pending_approval(db, approval_id: int, current_user: User) -> ApprovalRequest | None:
+async def _get_pending_approval(db: AsyncSession, approval_id: int, current_user: User) -> ApprovalRequest | None:
     """获取待处理的审批请求"""
     approval = await db.get(ApprovalRequest, approval_id)
     if approval and approval.status != 'pending':
@@ -223,7 +235,7 @@ async def _get_pending_approval(db, approval_id: int, current_user: User) -> App
     return approval
 
 
-async def _create_approval_log(db, approval_request: ApprovalRequest, action: str,
+async def _create_approval_log(db: AsyncSession, approval_request: ApprovalRequest, action: str,
                                 actor: User, details: dict = None):
     """创建审批日志"""
     log = ApprovalLog(

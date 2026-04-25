@@ -49,15 +49,18 @@ class TestOrderService:
     """订单 Service 测试"""
 
     async def test_get_orders_empty(self, mock_db):
-        mock_result = MagicMock()
+        mock_count_result = MagicMock()
+        mock_count_result.scalar.return_value = 0
+        mock_data_result = MagicMock()
         mock_scalars = MagicMock()
         mock_unique = MagicMock()
         mock_unique.all.return_value = []
         mock_scalars.unique.return_value = mock_unique
-        mock_result.scalars.return_value = mock_scalars
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_data_result.scalars.return_value = mock_scalars
+        mock_db.execute = AsyncMock(side_effect=[mock_count_result, mock_data_result])
         result = await order_service.get_orders(mock_db)
-        assert result == []
+        assert result['items'] == []
+        assert result['total'] == 0
 
     async def test_create_order_product_not_found(self, mock_db):
         with patch('fastapi_app.services.order_service.get_product_for_update', new_callable=AsyncMock, side_effect=ValueError('产品ID 999 不存在')):
@@ -284,6 +287,7 @@ class TestOrderEndpoints:
         order.order_no = "PO-001"
         order.product_id = 1
         order.quantity = 10
+        order.status = "待备货"
 
         product = MagicMock()
         product.id = 1

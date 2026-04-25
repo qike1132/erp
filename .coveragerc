@@ -1,5 +1,5 @@
 [run]
-source = .
+source = fastapi_app
 omit = 
     */tests/*
     */migrations/*
@@ -8,6 +8,9 @@ omit =
     */dist-packages/*
     */venv/*
     */env/*
+    */.trae/*
+    */scripts/*
+    */frontend/*
 
 [report]
 exclude_lines =

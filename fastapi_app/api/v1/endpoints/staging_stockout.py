@@ -49,7 +49,7 @@ async def import_staging_stockouts(
     # 发布出货计划上传事件
     if imported > 0:
         from fastapi_app.services.notification_service import publish_stock_event
-        publish_stock_event("shipment_plan_uploaded", {
+        await publish_stock_event("shipment_plan_uploaded", {
             "message": f"新的出货计划已上传，共 {imported} 条",
             "imported": imported,
             "session_id": session_id,
@@ -113,7 +113,7 @@ async def confirm_staging_stockouts(
     confirmed, errors = await svc.confirm_staging_stockouts(db, session_id)
     if confirmed > 0:
         from fastapi_app.services.notification_service import publish_stock_event
-        publish_stock_event("stock_changed", {
+        await publish_stock_event("stock_changed", {
             "message": f"已确认 {confirmed} 条出货记录",
             "confirmed": confirmed,
         })

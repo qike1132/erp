@@ -6,57 +6,24 @@
 import logging
 from decimal import Decimal
 
-from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from fastapi_app.shared_models import (
     Product, ProductMaterial, ProductFabric, ProductAccessory, ProductPackaging,
     PurchaseOrder, PurchaseOrderItem,
 )
-from fastapi_app.services import escape_like
 from fastapi_app.services.purchase_product_service import _product_has_bom
 
 logger = logging.getLogger(__name__)
 
 
 def search_products_for_bom_copy(db: Session, keyword: str) -> list:
-    """搜索产品用于复制BOM"""
-    if not keyword:
-        return []
+    """搜索产品用于复制BOM
 
-    query = db.query(Product).filter(
-        or_(
-            Product.name.ilike(f'%{escape_like(keyword)}%'),
-            Product.barcode.ilike(f'%{escape_like(keyword)}%')
-        )
-    )
-
-    products = query.limit(20).all()
-
-    result = []
-    for product in products:
-        p = db.query(Product).options(
-            joinedload(Product.material),
-            joinedload(Product.fabrics),
-            joinedload(Product.accessories),
-            joinedload(Product.packagings),
-        ).get(product.id)
-
-        has_bom = _product_has_bom(p)
-        material_count = (
-            len(p.fabrics) + len(p.accessories) + len(p.packagings) +
-            (1 if p.material and getattr(p.material, 'cotton_usage', Decimal('0')) > 0 else 0)
-        )
-        result.append({
-            'id': p.id,
-            'name': p.name,
-            'barcode': p.barcode,
-            'price': float(p.price) if p.price else 0,
-            'has_bom': has_bom,
-            'material_count': material_count,
-        })
-
-    return result
+    委托至 product_search_service 统一实现，保持原有返回格式。
+    """
+    from fastapi_app.services.product_search_service import product_search_service
+    return product_search_service.search_for_bom_copy_sync(db, keyword)
 
 
 def get_bom_preview(db: Session, source_product_id: int) -> dict:

@@ -6,18 +6,30 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
+import json
+import hashlib
+import logging
 
 from fastapi_app.core.database import get_async_db
 from fastapi_app.core.deps import require_permission
+from fastapi_app.core.cache import cache_result, invalidate_cache
 from fastapi_app.shared_models import User
 from fastapi_app.schemas.order import (
     OrderCreate, OrderUpdate, OrderActionResponse,
-    OrderListResponse, ApprovalCancelResponse, ApprovalListResponse,
+    OrderListResponse, OrderDetailResponse, ApprovalCancelResponse, ApprovalListResponse,
 )
 from fastapi_app.services import order_service
 from fastapi_app.services.order_service import PermissionDeniedError
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
+
+async def _get_order_list_cache_key(page, per_page, customer, product_id, status, order_type) -> str:
+    """生成订单列表缓存键"""
+    params = {'page': page, 'per_page': per_page, 'customer': customer,
+              'product_id': product_id, 'status': status, 'order_type': order_type}
+    hash_val = hashlib.md5(json.dumps(params, sort_keys=True, default=str).encode(), usedforsecurity=False).hexdigest()[:12]
+    return f"orders:list:{hash_val}"
 
 
 @router.get("/list", response_model=OrderListResponse)
@@ -31,12 +43,49 @@ async def list_orders(
     db: AsyncSession = Depends(get_async_db),
     _user: User = Depends(require_permission("order_manage")),
 ):
-    """订单列表（支持分页和筛选）"""
+    """订单列表（支持分页和筛选，带缓存）"""
+    import json
+    try:
+        from utils.redis_cache import redis_cache
+    except Exception:
+        redis_cache = None
+    
+    cache_key = f"orders:list:{page}:{per_page}:{hash(str(customer) + str(product_id) + str(status) + str(order_type))}"
+    try:
+        if redis_cache:
+            cached_data = await redis_cache.get(cache_key)
+            if cached_data:
+                cached = json.loads(cached_data)
+                return OrderListResponse(data=cached['items'], total=cached['total'],
+                                         page=cached['page'], per_page=cached['per_page'])
+    except Exception:
+        pass
+
     result = await order_service.get_orders(db, page=page, per_page=per_page,
                                             customer=customer, product_id=product_id,
                                             status=status, order_type=order_type)
+
+    try:
+        if redis_cache:
+            await redis_cache.set(cache_key, json.dumps(result, ensure_ascii=False, default=str), ex=60)
+    except Exception:
+        pass
+
     return OrderListResponse(data=result['items'], total=result['total'],
                              page=result['page'], per_page=result['per_page'])
+
+
+@router.get("/{order_id}", response_model=OrderDetailResponse)
+async def get_order(
+    order_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    _user: User = Depends(require_permission("order_manage")),
+):
+    """获取单个订单详情"""
+    result = await order_service.get_order_by_id(db, order_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    return result
 
 
 @router.post("/create", response_model=OrderActionResponse)

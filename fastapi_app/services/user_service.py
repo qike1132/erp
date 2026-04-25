@@ -2,6 +2,7 @@
 import logging
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.shared_models import User, Permission
 
@@ -10,7 +11,7 @@ logger = logging.getLogger(__name__)
 SENSITIVE_PERMISSIONS = ['user_manage']
 
 
-async def get_users(db) -> list[User]:
+async def get_users(db: AsyncSession) -> list[User]:
     """获取所有用户列表"""
     result = await db.execute(
         select(User).options(joinedload(User.permissions)).order_by(User.id)
@@ -18,7 +19,7 @@ async def get_users(db) -> list[User]:
     return list(result.unique().scalars().all())
 
 
-async def create_user(db, username: str, password: str, is_super: bool) -> User:
+async def create_user(db: AsyncSession, username: str, password: str, is_super: bool) -> User:
     """创建用户"""
     # 验证密码复杂度
     from utils.password_validator import PasswordValidator
@@ -47,7 +48,7 @@ async def create_user(db, username: str, password: str, is_super: bool) -> User:
     return new_user
 
 
-async def update_user(db, user_id: int, password: str | None, is_super: bool | None) -> User:
+async def update_user(db: AsyncSession, user_id: int, password: str | None, is_super: bool | None) -> User:
     """更新用户"""
     user = await db.get(User, user_id)
     if not user:
@@ -69,7 +70,7 @@ async def update_user(db, user_id: int, password: str | None, is_super: bool | N
     return user
 
 
-async def toggle_user_status(db, user_id: int) -> User:
+async def toggle_user_status(db: AsyncSession, user_id: int) -> User:
     """切换用户状态"""
     user = await db.get(User, user_id)
     if not user:
@@ -84,7 +85,7 @@ async def toggle_user_status(db, user_id: int) -> User:
     return user
 
 
-async def delete_user(db, user_id: int) -> None:
+async def delete_user(db: AsyncSession, user_id: int) -> None:
     """删除用户"""
     user = await db.get(User, user_id)
     if not user:
@@ -108,7 +109,7 @@ async def get_permissions(db) -> list[Permission]:
     return list(result.unique().scalars().all())
 
 
-async def update_user_permissions(db, user_id: int, permission_ids: list[int]) -> User:
+async def update_user_permissions(db: AsyncSession, user_id: int, permission_ids: list[int]) -> User:
     """更新用户权限"""
     user = await db.get(User, user_id)
     if not user:

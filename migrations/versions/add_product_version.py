@@ -7,6 +7,12 @@ Create Date: 2026-04-12
 from alembic import op
 import sqlalchemy as sa
 
+# revision identifiers, used by Alembic.
+revision = 'add_product_version'
+down_revision = 'add_product_price'
+branch_labels = None
+depends_on = None
+
 
 def upgrade():
     op.add_column('product', sa.Column('version', sa.Integer(), nullable=False, server_default='0'))

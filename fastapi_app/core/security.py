@@ -1,54 +1,135 @@
 """密码哈希与验证工具
 
-使用 bcrypt 作为主哈希方案，兼容旧 werkzeug pbkdf2/scrypt 哈希。
-旧格式哈希验证成功后，调用方可通过 needs_rehash() 检测并触发自动迁移。
+使用 Argon2id 作为唯一哈希方案（OWASP 2026 推荐）。
+支持旧格式哈希的向后兼容验证（bcrypt/pbkdf2/scrypt）。
 """
 
+import hashlib
+import hmac
 import logging
+from typing import Optional
 
-import bcrypt as _bcrypt
+import argon2
+
+_argon2_hasher = argon2.PasswordHasher(
+    type=argon2.Type.ID,
+    memory_cost=65536,
+    time_cost=3,
+    parallelism=4,
+    hash_len=32,
+    salt_len=16,
+)
 
 logger = logging.getLogger(__name__)
 
 
 def hash_password(password: str) -> str:
-    """使用 bcrypt 哈希密码
+    """使用 Argon2id 哈希密码
 
-    bcrypt 自动处理 salt 生成，rounds=12 提供 ~250ms 延迟（兼顾安全与性能）。
+    Argon2id 是 OWASP 2026 推荐的密码哈希算法，
+    内存硬特性使其对 GPU/ASIC 暴力破解具有更强抵抗力。
     """
-    return _bcrypt.hashpw(password.encode("utf-8"), _bcrypt.gensalt(rounds=12)).decode("utf-8")
+    return _argon2_hasher.hash(password)
 
 
-def needs_rehash(password_hash: str) -> bool:
-    """检查哈希是否需要升级到 bcrypt（用于旧 werkzeug 哈希自动迁移）"""
-    return not password_hash.startswith(("$2b$", "$2a$", "$2y$"))
+def _verify_bcrypt(password: str, password_hash: str) -> bool:
+    """验证 bcrypt 哈希密码"""
+    try:
+        import bcrypt
+        return bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8'))
+    except ImportError:
+        logger.warning("bcrypt 未安装，无法验证 bcrypt 哈希")
+        return False
+    except Exception as e:
+        logger.debug(f"bcrypt 验证失败: {e}")
+        return False
+
+
+def _verify_legacy_pbkdf2(password: str, password_hash: str) -> bool:
+    try:
+        method, salt, expected = password_hash.split("$", 2)
+        _, digest_name, iterations_text = method.split(":", 2)
+        iterations = int(iterations_text)
+        derived = hashlib.pbkdf2_hmac(
+            digest_name,
+            password.encode("utf-8"),
+            salt.encode("utf-8"),
+            iterations,
+        ).hex()
+        return hmac.compare_digest(derived, expected)
+    except Exception as e:
+        logger.debug(f"pbkdf2 验证失败: {e}")
+        return False
+
+
+def _verify_legacy_scrypt(password: str, password_hash: str) -> bool:
+    try:
+        method, salt, expected = password_hash.split("$", 2)
+        _, n_text, r_text, p_text = method.split(":", 3)
+        n = int(n_text)
+        r = int(r_text)
+        p = int(p_text)
+        derived = hashlib.scrypt(
+            password.encode("utf-8"),
+            salt=salt.encode("utf-8"),
+            n=n,
+            r=r,
+            p=p,
+            maxmem=max(0, 128 * n * r * p * 2),
+        ).hex()
+        return hmac.compare_digest(derived, expected)
+    except Exception as e:
+        logger.debug(f"scrypt 验证失败: {e}")
+        return False
+
+
+def _verify_werkzeug(password: str, password_hash: str) -> bool:
+    """验证旧 werkzeug pbkdf2/scrypt 哈希密码"""
+    if password_hash.startswith("pbkdf2:"):
+        return _verify_legacy_pbkdf2(password, password_hash)
+    if password_hash.startswith("scrypt:"):
+        return _verify_legacy_scrypt(password, password_hash)
+    return False
 
 
 def verify_password(password: str, password_hash: str) -> bool:
-    """验证密码
+    """验证密码哈希（支持多种格式）
 
-    支持 bcrypt 哈希（$2b$/$2a$/$2y$）和旧 werkzeug 哈希（pbkdf2/scrypt）。
-    旧格式哈希验证成功后，调用方应通过 needs_rehash() 检测并触发自动迁移。
+    支持的哈希格式：
+    - Argon2id: $argon2id$...
+    - bcrypt: $2b$, $2a$, $2y$
+    - pbkdf2: pbkdf2:...（向后兼容）
+    - scrypt: scrypt:...（向后兼容）
 
-    注意: werkzeug 的 scrypt/pbkdf2 哈希使用自定义 ab64 编码，
-    直接用 base64 解码会失败，因此回退到 werkzeug.check_password_hash。
+    返回：
+        bool: 验证成功返回 True，失败返回 False
     """
-    # bcrypt 哈希（当前格式）
+    if not password_hash:
+        return False
+
+    if password_hash.startswith("$argon2id$"):
+        try:
+            return _argon2_hasher.verify(password_hash, password)
+        except argon2.exceptions.VerifyMismatchError:
+            return False
+        except argon2.exceptions.VerificationError:
+            return False
+        except argon2.exceptions.InvalidHashError:
+            logger.warning("Argon2 哈希格式无效")
+            return False
+
     if password_hash.startswith(("$2b$", "$2a$", "$2y$")):
-        try:
-            return _bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
-        except Exception:
-            return False
+        return _verify_bcrypt(password, password_hash)
 
-    # werkzeug 哈希（旧格式，使用 werkzeug 原生验证以保证兼容性）
     if password_hash.startswith(("pbkdf2:", "scrypt:")):
-        try:
-            from werkzeug.security import check_password_hash
-            result = check_password_hash(password_hash, password)
-            if result:
-                logger.info("werkzeug 哈希验证成功，建议迁移到 bcrypt")
-            return result
-        except Exception:
-            return False
+        return _verify_legacy_werkzeug(password, password_hash)
 
+    logger.warning(f"未知的密码哈希格式: {password_hash[:20]}...")
     return False
+
+
+def needs_migration(password_hash: str) -> bool:
+    """检查密码哈希是否需要迁移到 Argon2id"""
+    if not password_hash:
+        return False
+    return not password_hash.startswith("$argon2id$")

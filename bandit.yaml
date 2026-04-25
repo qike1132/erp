@@ -1,0 +1,4 @@
+# Bandit configuration
+skips:
+  - B101  # assert used in tests
+  - B608  # SQL injection false positives on parameterized queries

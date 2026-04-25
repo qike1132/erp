@@ -3,6 +3,7 @@ import logging
 from datetime import datetime, timedelta
 from sqlalchemy import select, func, or_
 from sqlalchemy.orm import joinedload
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.shared_models import Case, CaseStockIn, CaseStockOut, CaseInventoryLog, Product
 from fastapi_app.services import escape_like
@@ -10,7 +11,7 @@ from fastapi_app.services import escape_like
 logger = logging.getLogger(__name__)
 
 
-async def search_cases(db, query: str = '') -> list[dict]:
+async def search_cases(db: AsyncSession, query: str = '') -> list[dict]:
     """搜索皮套（附库存信息）"""
     q = select(Product).outerjoin(Case, Product.id == Case.product_id).options(
         joinedload(Product.cases)
@@ -31,10 +32,12 @@ async def search_cases(db, query: str = '') -> list[dict]:
     } for p in products]
 
 
-async def get_case_stockins(db, page: int = 1, per_page: int = 20, customer: str = '',
+async def get_case_stockins(db: AsyncSession, page: int = 1, per_page: int = 20, customer: str = '',
                              start_date: str = '', end_date: str = '',
                              quantity_min: int | None = None, quantity_max: int | None = None) -> dict:
     """获取皮套入库列表"""
+    page = max(1, page)
+    per_page = max(1, min(per_page, 100))
     query = select(CaseStockIn).options(joinedload(CaseStockIn.case).joinedload(Case.product))
 
     if customer:
@@ -73,10 +76,12 @@ async def get_case_stockins(db, page: int = 1, per_page: int = 20, customer: str
     }
 
 
-async def get_case_stockout_list(db, page: int = 1, per_page: int = 20, customer: str = '',
+async def get_case_stockout_list(db: AsyncSession, page: int = 1, per_page: int = 20, customer: str = '',
                                  start_date: str = '', end_date: str = '',
                                  quantity_min: int | None = None, quantity_max: int | None = None) -> dict:
     """获取皮套出库列表"""
+    page = max(1, page)
+    per_page = max(1, min(per_page, 100))
     query = select(CaseStockOut).options(joinedload(CaseStockOut.case).joinedload(Case.product))
 
     if customer:
@@ -138,9 +143,11 @@ async def get_case_inventory_summary(db) -> list[dict]:
     return data
 
 
-async def get_case_inventory_logs(db, case_id: int, page: int = 1, per_page: int = 20,
+async def get_case_inventory_logs(db: AsyncSession, case_id: int, page: int = 1, per_page: int = 20,
                                    log_type: str = '', start_date: str = '', end_date: str = '') -> dict:
     """获取皮套库存流水"""
+    page = max(1, page)
+    per_page = max(1, min(per_page, 100))
     query = select(CaseInventoryLog).where(CaseInventoryLog.case_id == case_id)
 
     if log_type:
@@ -173,7 +180,7 @@ async def get_case_inventory_logs(db, case_id: int, page: int = 1, per_page: int
     }
 
 
-async def create_case_stockin(db, product_id: int, quantity: int, stockin_date: str,
+async def create_case_stockin(db: AsyncSession, product_id: int, quantity: int, stockin_date: str,
                                customer: str = '', note: str = '', stockin_no: str = '') -> dict:
     """创建皮套入库记录"""
     case_obj = await db.execute(select(Case).where(Case.product_id == product_id).with_for_update())
@@ -200,7 +207,7 @@ async def create_case_stockin(db, product_id: int, quantity: int, stockin_date: 
     return {'success': True, 'stockin_no': stockin_no, 'id': stockin.id}
 
 
-async def create_case_stockout(db, case_id_or_product_id: int, quantity: int,
+async def create_case_stockout(db: AsyncSession, case_id_or_product_id: int, quantity: int,
                                 stockout_date: str, customer: str = '',
                                 note: str = '', stockout_no: str = '') -> dict:
     """创建皮套出库记录"""
@@ -227,7 +234,7 @@ async def create_case_stockout(db, case_id_or_product_id: int, quantity: int,
     return {'success': True, 'stockout_no': stockout_no, 'id': stockout.id}
 
 
-async def delete_case_product(db, case_id: int) -> None:
+async def delete_case_product(db: AsyncSession, case_id: int) -> None:
     """删除皮套产品"""
     case_obj = await db.get(Case, case_id)
     if not case_obj:
@@ -238,7 +245,7 @@ async def delete_case_product(db, case_id: int) -> None:
     await db.flush()
 
 
-async def update_case_stockin(db, stockin_id: int, update_data: dict) -> dict:
+async def update_case_stockin(db: AsyncSession, stockin_id: int, update_data: dict) -> dict:
     """更新皮套入库记录"""
     stockin = await db.get(CaseStockIn, stockin_id)
     if not stockin:
@@ -272,7 +279,7 @@ async def update_case_stockin(db, stockin_id: int, update_data: dict) -> dict:
     return {'success': True, 'message': '更新成功'}
 
 
-async def delete_case_stockin(db, stockin_id: int) -> dict:
+async def delete_case_stockin(db: AsyncSession, stockin_id: int) -> dict:
     """删除皮套入库记录"""
     stockin = await db.get(CaseStockIn, stockin_id)
     if not stockin:
@@ -301,7 +308,7 @@ async def delete_case_stockin(db, stockin_id: int) -> dict:
     return {'success': True, 'message': '删除成功'}
 
 
-async def update_case_stockout(db, stockout_id: int, update_data: dict) -> dict:
+async def update_case_stockout(db: AsyncSession, stockout_id: int, update_data: dict) -> dict:
     """更新皮套出库记录"""
     stockout = await db.get(CaseStockOut, stockout_id)
     if not stockout:
@@ -335,7 +342,7 @@ async def update_case_stockout(db, stockout_id: int, update_data: dict) -> dict:
     return {'success': True, 'message': '更新成功'}
 
 
-async def delete_case_stockout(db, stockout_id: int) -> dict:
+async def delete_case_stockout(db: AsyncSession, stockout_id: int) -> dict:
     """删除皮套出库记录"""
     stockout = await db.get(CaseStockOut, stockout_id)
     if not stockout:
@@ -357,7 +364,7 @@ async def delete_case_stockout(db, stockout_id: int) -> dict:
     return {'success': True, 'message': '删除成功'}
 
 
-async def batch_create_case_stockins(db, stockins_data: list) -> dict:
+async def batch_create_case_stockins(db: AsyncSession, stockins_data: list) -> dict:
     """批量提交皮套入库"""
     success_count = 0
     failed = []
@@ -386,7 +393,7 @@ async def batch_create_case_stockins(db, stockins_data: list) -> dict:
     return {'success': True, 'message': f'成功提交 {success_count} 条入库记录', 'failed': failed}
 
 
-async def batch_create_case_stockouts(db, stockouts_data: list) -> dict:
+async def batch_create_case_stockouts(db: AsyncSession, stockouts_data: list) -> dict:
     """批量提交皮套出库"""
     results = []
 
@@ -413,7 +420,7 @@ async def batch_create_case_stockouts(db, stockouts_data: list) -> dict:
     return {'success': True, 'results': results}
 
 
-async def create_case_product(db, name: str = None, barcode: str = None,
+async def create_case_product(db: AsyncSession, name: str = None, barcode: str = None,
                                image: str = None, product_id: int = None) -> dict:
     """创建皮套产品"""
     if not name and not product_id:

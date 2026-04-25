@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 revision = 'add_supplier_purchase_order'
-down_revision = '9b7b1ead6c4a'
+down_revision = 'add_product_version'
 branch_labels = None
 depends_on = None
 

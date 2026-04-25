@@ -100,7 +100,10 @@ class DatabaseConnectionTester:
                 self.log(f"SQLAlchemy连接成功!")
                 self.log(f"MySQL版本: {version}")
 
-                result = conn.execute(text(f"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '{self.db_config['database']}'"))
+                result = conn.execute(
+                    text("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = :db_name"),
+                    {"db_name": self.db_config['database']}
+                )
                 table_count = result.scalar()
                 self.log(f"数据库表数量: {table_count}")
 
@@ -125,11 +128,15 @@ class DatabaseConnectionTester:
             )
 
             with engine.connect() as conn:
-                tables_to_check = ['user', 'product', 'order', 'customer', 'permission']
+                # 白名单校验防止 SQL 注入（table 来自硬编码列表，添加防御层）
+                allowed_tables = frozenset(['user', 'product', 'order', 'customer', 'permission'])
+                tables_to_check = [t for t in ['user', 'product', 'order', 'customer', 'permission'] if t in allowed_tables]
 
                 for table in tables_to_check:
                     try:
-                        result = conn.execute(text(f"SELECT COUNT(*) FROM `{table}`"))
+                        result = conn.execute(
+                            text(f"SELECT COUNT(*) FROM `{table}`")
+                        )
                         count = result.fetchone()[0]
                         self.log(f"  - {table}: {count} 条记录")
                         self.results['connection_info'][f'{table}_count'] = count

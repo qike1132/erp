@@ -46,11 +46,11 @@ hiddenimports = [
     'starlette_csrf',
 
     # 数据库
-    'pymysql',
-    'asyncmy',
+    'psycopg2',
+    'asyncpg',
     'cryptography',
     'sqlalchemy',
-    'sqlalchemy.dialects.mysql',
+    'sqlalchemy.dialects.postgresql',
     'sqlalchemy.ext.asyncio',
     'alembic',
 

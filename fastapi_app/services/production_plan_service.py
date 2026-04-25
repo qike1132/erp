@@ -13,7 +13,7 @@ from datetime import datetime, date, timedelta
 from typing import Optional
 
 import openpyxl
-from sqlalchemy import select, func, delete, and_
+from sqlalchemy import select, func, delete, and_, extract
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.shared_models import (
@@ -53,8 +53,8 @@ async def get_plans(db: AsyncSession, year: int, month: int,
                     customer: str = '') -> list[ProductionPlan]:
     """获取指定月份的排产计划列表"""
     conditions = [
-        func.year(ProductionPlan.plan_date) == year,
-        func.month(ProductionPlan.plan_date) == month,
+        extract('year', ProductionPlan.plan_date) == year,
+        extract('month', ProductionPlan.plan_date) == month,
     ]
     if customer:
         conditions.append(ProductionPlan.customer_name == customer)

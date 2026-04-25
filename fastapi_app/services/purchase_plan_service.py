@@ -57,7 +57,7 @@ def _normalize_plan_date(date_str: str) -> date:
 async def _generate_plan_no(db: AsyncSession) -> str:
     """
     生成计划编号：PP-YYYYMMDD-NNNN
-    查询当天最大编号递增，并发安全由调用方的重试机制保障
+    使用 SELECT ... FOR UPDATE 加行锁防止并发重复编号
     """
     today_str = date.today().strftime('%Y%m%d')
     prefix = f'PP-{today_str}-'
@@ -384,7 +384,7 @@ async def _get_inventory_map(db: AsyncSession) -> dict:
     try:
         from utils.redis_cache import redis_cache
         from fastapi.concurrency import run_in_threadpool
-        cached = await run_in_threadpool(redis_cache.get, f'{INVENTORY_CACHE_PREFIX}:map')
+        cached = await redis_cache.get(f'{INVENTORY_CACHE_PREFIX}:map')
         if cached is not None:
             # Redis 反序列化后 key 为字符串，需转回元组以保持内部接口一致
             return {tuple(k.split('||')): v for k, v in cached.items()}
@@ -403,7 +403,7 @@ async def _get_inventory_map(db: AsyncSession) -> dict:
         from utils.redis_cache import redis_cache
         from fastapi.concurrency import run_in_threadpool
         cacheable = {f'{k[0]}||{k[1]}': v for k, v in mapping.items()}
-        await run_in_threadpool(redis_cache.set, f'{INVENTORY_CACHE_PREFIX}:map', cacheable, timeout=INVENTORY_CACHE_TTL)
+        await redis_cache.set(f'{INVENTORY_CACHE_PREFIX}:map', cacheable, timeout=INVENTORY_CACHE_TTL)
     except Exception as e:
         logger.warning(f'Redis缓存写入失败: {e}')
 

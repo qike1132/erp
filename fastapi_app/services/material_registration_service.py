@@ -145,7 +145,15 @@ async def create_registration(db, purchase_order_id: int, user_id: int | None = 
 async def update_registration(db, reg_id: int, status: str | None = None,
                               remark: str | None = None, items: list[dict] | None = None) -> dict:
     """更新来料登记"""
-    reg = await db.get(MaterialRegistration, reg_id)
+    result = await db.execute(
+        select(MaterialRegistration)
+        .options(
+            selectinload(MaterialRegistration.items),
+            joinedload(MaterialRegistration.purchase_order),
+        )
+        .where(MaterialRegistration.id == reg_id)
+    )
+    reg = result.unique().scalar_one_or_none()
     if not reg:
         raise ValueError("来料登记不存在")
 
@@ -166,14 +174,7 @@ async def update_registration(db, reg_id: int, status: str | None = None,
                         item.remark = item_data['remark']
 
     # 自动更新状态
-    total_ordered = sum(float(item.ordered_quantity or 0) for item in reg.items)
-    total_received = sum(float(item.received_quantity or 0) for item in reg.items)
-    if total_received >= total_ordered:
-        reg.status = 'completed'
-    elif total_received > 0:
-        reg.status = 'partial'
-    else:
-        reg.status = 'pending'
+    reg.update_status()
 
     return {'success': True, 'message': '更新成功', 'registration': reg.to_dict()}
 
@@ -209,17 +210,29 @@ async def get_available_purchase_orders(db, status: str = 'pending') -> dict:
     }
 
 
-async def receive_material(db, item_id: int, received_qty: float,
+async def receive_material(db, item_id: int, received_quantity: float,
                            remark: str | None = None) -> dict:
     """物料收货登记"""
-    item = await db.get(MaterialRegistrationItem, item_id)
+    result = await db.execute(
+        select(MaterialRegistrationItem)
+        .options(
+            joinedload(MaterialRegistrationItem.registration).selectinload(MaterialRegistration.items),
+            joinedload(MaterialRegistrationItem.registration).joinedload(MaterialRegistration.purchase_order),
+        )
+        .where(MaterialRegistrationItem.id == item_id)
+    )
+    item = result.unique().scalar_one_or_none()
     if not item:
         raise ValueError("物料明细不存在")
 
-    if received_qty < 0:
+    if received_quantity <= 0:
         raise ValueError("收货数量必须大于0")
 
-    item.received_quantity = Decimal(str(received_qty))
+    old_qty = item.received_quantity or Decimal('0')
+    new_qty = old_qty + Decimal(str(received_quantity))
+    if new_qty > (item.ordered_quantity or Decimal('0')):
+        raise ValueError("收货数量不能超过采购数量")
+    item.received_quantity = new_qty
     if remark:
         item.remark = remark
 
@@ -228,9 +241,12 @@ async def receive_material(db, item_id: int, received_qty: float,
     reg.update_status()
     await db.flush()
 
+    logger.info("收货登记成功 item_id=%s, %s→%s (+%s), 状态=%s",
+                item_id, old_qty, item.received_quantity, received_quantity, reg.status)
+
     return {
         'success': True, 'message': '收货登记成功',
-        'item': item.to_dict(), 'registration_status': reg.computed_status,
+        'registration': reg.to_dict(),
     }
 
 

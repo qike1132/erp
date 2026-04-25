@@ -1,26 +1,53 @@
+"""
+结构化日志配置 - 使用 structlog
+
+提供 JSON 格式日志输出，适配 Loki/Promtail 日志聚合。
+支持动态日志级别调整、correlation ID 追踪。
+"""
 
 import logging
 import sys
+import os
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
+
+import structlog
+from structlog.processors import JSONRenderer, TimeStamper, add_log_level
 
 
 def setup_logging():
-    """配置日志系统（幂等：重复调用不会累积处理器）"""
-    log_format = (
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    )
-    date_format = "%Y-%m-%d %H:%M:%S"
+    """配置结构化日志系统（幂等：重复调用不会累积处理器）"""
     
     # 创建日志目录
     log_dir = Path("logs")
     log_dir.mkdir(exist_ok=True)
     
-    # 配置根日志记录器
+    # 配置 structlog
+    structlog.configure(
+        processors=[
+            structlog.contextvars.merge_contextvars,  # 合并 contextvars 中的上下文
+            structlog.stdlib.filter_by_level,  # 按日志级别过滤
+            structlog.stdlib.add_logger_name,  # 添加 logger 名称
+            structlog.stdlib.add_log_level,  # 添加日志级别
+            structlog.stdlib.PositionalArgumentsFormatter(),  # 处理位置参数
+            TimeStamper(fmt="iso"),  # ISO 8601 时间戳
+            structlog.processors.StackInfoRenderer(),  # 堆栈信息
+            structlog.processors.format_exc_info,  # 异常信息
+            structlog.processors.UnicodeDecoder(),  # Unicode 解码
+            # 根据环境选择渲染器
+            _get_renderer(),
+        ],
+        wrapper_class=structlog.stdlib.BoundLogger,
+        context_class=dict,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
+    
+    # 配置标准库 logging
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
-
-    # 幂等处理：移除旧处理器，避免热重载后日志重复输出
+    
+    # 幂等处理：移除旧处理器
     for handler in root_logger.handlers[:]:
         handler.close()
         root_logger.removeHandler(handler)
@@ -28,16 +55,17 @@ def setup_logging():
     # 控制台处理器
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(logging.INFO)
-    console_formatter = logging.Formatter(log_format, date_format)
-    console_handler.setFormatter(console_formatter)
+    console_handler.setFormatter(logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
     root_logger.addHandler(console_handler)
     
-    # 文件处理器
+    # 文件处理器（JSON 格式）
     log_file = log_dir / f"fastapi_{datetime.now().strftime('%Y%m%d')}.log"
-    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    file_handler = logging.FileHandler(log_file, encoding="utf-8")
     file_handler.setLevel(logging.INFO)
-    file_formatter = logging.Formatter(log_format, date_format)
-    file_handler.setFormatter(file_formatter)
+    file_handler.setFormatter(logging.Formatter("%(message)s"))  # structlog 已格式化
     root_logger.addHandler(file_handler)
     
     # 设置特定模块的日志级别
@@ -47,4 +75,22 @@ def setup_logging():
     return root_logger
 
 
-logger = setup_logging()
+def _get_renderer():
+    """根据环境选择日志渲染器"""
+    env = os.getenv("APP_ENV", "development")
+    if env == "production":
+        return JSONRenderer(ensure_ascii=False)
+    else:
+        return structlog.dev.ConsoleRenderer(colors=True)
+
+
+def get_logger(name: str = None) -> structlog.stdlib.BoundLogger:
+    """获取结构化 logger"""
+    return structlog.get_logger(name)
+
+
+# 初始化日志系统
+setup_logging()
+
+# 默认 logger
+logger = get_logger("fastapi_app")

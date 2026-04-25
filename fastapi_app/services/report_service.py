@@ -1,8 +1,14 @@
-"""报表统计服务层"""
+"""报表统计服务层
+
+SECURITY NOTE: where_clauses 列表仅包含硬编码的 SQL 片段，
+禁止将用户输入直接拼接到 where_clauses 中，所有用户输入
+必须通过 :param 参数绑定传递，以防止 SQL 注入。
+"""
 import logging
 from datetime import datetime, timedelta
 from sqlalchemy import select, func, text, or_
 from sqlalchemy.orm import joinedload
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.services import escape_like
 from fastapi_app.shared_models import StockOut, StockIn, Order, Product
@@ -10,7 +16,36 @@ from fastapi_app.shared_models import StockOut, StockIn, Order, Product
 logger = logging.getLogger(__name__)
 
 
-async def get_order_logs(db, customer: str = '', product: str = '', status: str = '',
+def _get_dialect_name() -> str:
+    """获取当前数据库方言名称（postgresql 或 mysql）"""
+    from fastapi_app.core.database import async_engine
+    return async_engine.dialect.name
+
+
+def _quote_identifier(name: str) -> str:
+    """根据数据库方言引用标识符（PG 用双引号，MySQL 用反引号）"""
+    dialect = _get_dialect_name()
+    if dialect == "postgresql":
+        return f'"{name}"'
+    else:
+        return f"`{name}`"
+
+
+def _string_agg(expr: str, separator: str, distinct: bool = True) -> str:
+    """根据数据库方言返回聚合字符串函数
+
+    PostgreSQL: STRING_AGG(DISTINCT expr, separator)
+    MySQL: GROUP_CONCAT(DISTINCT expr ORDER BY expr SEPARATOR separator)
+    """
+    dialect = _get_dialect_name()
+    distinct_kw = "DISTINCT " if distinct else ""
+    if dialect == "postgresql":
+        return f"STRING_AGG({distinct_kw}{expr}, '{separator}')"
+    else:
+        return f"GROUP_CONCAT({distinct_kw}{expr} ORDER BY {expr} SEPARATOR '{separator}')"
+
+
+async def get_order_logs(db: AsyncSession, customer: str = '', product: str = '', status: str = '',
                          start_date: str = '', end_date: str = '',
                          page: int = 1, per_page: int = 20) -> dict:
     """订单流水（分页+分组聚合）"""
@@ -48,9 +83,10 @@ async def get_order_logs(db, customer: str = '', product: str = '', status: str 
     where_sql = " AND " + " AND ".join(where_clauses) if where_clauses else ""
 
     # 总数
+    order_tbl = _quote_identifier("order")
     count_sql = f"""SELECT COUNT(*) FROM (
         SELECT DATE(o.order_date), o.customer, p.name, p.barcode, o.status
-        FROM `order` o JOIN product p ON o.product_id = p.id
+        FROM {order_tbl} o JOIN product p ON o.product_id = p.id
         WHERE 1=1 {where_sql}
         GROUP BY DATE(o.order_date), o.customer, p.name, p.barcode, o.status
     ) AS grouped"""
@@ -61,9 +97,9 @@ async def get_order_logs(db, customer: str = '', product: str = '', status: str 
         DATE(o.order_date) as order_date_only, o.customer, p.name as product_name,
         p.barcode as product_barcode, o.status,
         SUM(o.quantity) as total_quantity, COUNT(o.id) as order_count,
-        GROUP_CONCAT(DISTINCT o.order_no ORDER BY o.order_no SEPARATOR ', ') as order_nos,
-        GROUP_CONCAT(DISTINCT o.note ORDER BY o.id SEPARATOR '; ') as notes
-        FROM `order` o JOIN product p ON o.product_id = p.id
+        {_string_agg('o.order_no', ', ')} as order_nos,
+        {_string_agg('o.note', '; ')} as notes
+        FROM {order_tbl} o JOIN product p ON o.product_id = p.id
         WHERE 1=1 {where_sql}
         GROUP BY DATE(o.order_date), o.customer, p.name, p.barcode, o.status
         ORDER BY DATE(o.order_date) DESC
@@ -84,7 +120,7 @@ async def get_order_logs(db, customer: str = '', product: str = '', status: str 
             'order_nos': row.order_nos or '', 'note': row.notes or '',
         })
 
-    qty_sql = f"SELECT SUM(o.quantity) FROM `order` o JOIN product p ON o.product_id = p.id WHERE 1=1 {where_sql}"
+    qty_sql = f"SELECT SUM(o.quantity) FROM {order_tbl} o JOIN product p ON o.product_id = p.id WHERE 1=1 {where_sql}"
     total_qty = (await db.execute(text(qty_sql), params)).scalar() or 0
 
     return {
@@ -144,7 +180,7 @@ async def export_report_to_excel(db, report_type: str, customer: str = '', produ
     return content
 
 
-async def get_stockin_logs(db, customer: str = '', product: str = '',
+async def get_stockin_logs(db: AsyncSession, customer: str = '', product: str = '',
                            start_date: str = '', end_date: str = '',
                            page: int = 1, per_page: int = 20) -> dict:
     """备货流水（分页+分组聚合）"""
@@ -188,8 +224,8 @@ async def get_stockin_logs(db, customer: str = '', product: str = '',
         DATE(s.stockin_date) as stockin_date_only, s.customer, p.name as product_name,
         p.barcode as product_barcode,
         SUM(s.quantity) as total_quantity, COUNT(s.id) as stockin_count,
-        GROUP_CONCAT(DISTINCT s.stockin_no ORDER BY s.stockin_no SEPARATOR ', ') as stockin_nos,
-        GROUP_CONCAT(DISTINCT s.note ORDER BY s.id SEPARATOR '; ') as notes
+        {_string_agg('s.stockin_no', ', ')} as stockin_nos,
+        {_string_agg('s.note', '; ')} as notes
         FROM stock_in s JOIN product p ON s.product_id = p.id
         WHERE 1=1 {where_sql}
         GROUP BY DATE(s.stockin_date), s.customer, p.name, p.barcode
@@ -210,7 +246,8 @@ async def get_stockin_logs(db, customer: str = '', product: str = '',
             'stockin_nos': row.stockin_nos or '', 'note': row.notes or '',
         })
 
-    total_qty = (await db.execute(text("SELECT SUM(quantity) FROM stock_in"))).scalar() or 0
+    qty_sql = f"SELECT SUM(s.quantity) FROM stock_in s JOIN product p ON s.product_id = p.id WHERE 1=1 {where_sql}"
+    total_qty = (await db.execute(text(qty_sql), params)).scalar() or 0
 
     return {
         'success': True,
@@ -220,7 +257,7 @@ async def get_stockin_logs(db, customer: str = '', product: str = '',
     }
 
 
-async def get_stockout_logs(db, customer: str = '', product: str = '',
+async def get_stockout_logs(db: AsyncSession, customer: str = '', product: str = '',
                             start_date: str = '', end_date: str = '',
                             page: int = 1, per_page: int = 20) -> dict:
     """出货流水（仅手动出货，stockin_id IS NULL）"""
@@ -264,8 +301,8 @@ async def get_stockout_logs(db, customer: str = '', product: str = '',
         DATE(so.stockout_date) as stockout_date_only, so.customer, p.name as product_name,
         p.barcode as product_barcode,
         SUM(so.quantity) as total_quantity, COUNT(so.id) as stockout_count,
-        GROUP_CONCAT(DISTINCT so.stockout_no ORDER BY so.stockout_no SEPARATOR ', ') as stockout_nos,
-        GROUP_CONCAT(DISTINCT so.note ORDER BY so.id SEPARATOR '; ') as notes
+        {_string_agg('so.stockout_no', ', ')} as stockout_nos,
+        {_string_agg('so.note', '; ')} as notes
         FROM stock_out so JOIN product p ON so.product_id = p.id
         WHERE 1=1 {where_sql}
         GROUP BY DATE(so.stockout_date), so.customer, p.name, p.barcode
@@ -286,9 +323,8 @@ async def get_stockout_logs(db, customer: str = '', product: str = '',
             'stockout_nos': row.stockout_nos or '', 'note': row.notes or '',
         })
 
-    total_qty = (await db.execute(text(
-        "SELECT SUM(quantity) FROM stock_out WHERE quantity > 0 AND stockin_id IS NULL"
-    ))).scalar() or 0
+    qty_sql = f"SELECT SUM(so.quantity) FROM stock_out so JOIN product p ON so.product_id = p.id WHERE 1=1 {where_sql}"
+    total_qty = (await db.execute(text(qty_sql), params)).scalar() or 0
 
     return {
         'success': True,
@@ -298,7 +334,7 @@ async def get_stockout_logs(db, customer: str = '', product: str = '',
     }
 
 
-async def get_deduction_logs(db, customer: str = '', product: str = '',
+async def get_deduction_logs(db: AsyncSession, customer: str = '', product: str = '',
                               start_date: str = '', end_date: str = '',
                               page: int = 1, per_page: int = 20) -> dict:
     """备货抵扣流水（stockin_id IS NOT NULL）"""
@@ -342,10 +378,10 @@ async def get_deduction_logs(db, customer: str = '', product: str = '',
         DATE(so.stockout_date) as deduction_date_only, so.customer, p.name as product_name,
         p.barcode as sku,
         SUM(so.quantity) as total_quantity, COUNT(so.id) as deduction_count,
-        GROUP_CONCAT(DISTINCT o.order_no ORDER BY o.order_no SEPARATOR ', ') as order_nos,
-        GROUP_CONCAT(DISTINCT o.note ORDER BY o.id SEPARATOR '; ') as order_notes
+        {_string_agg('o.order_no', ', ')} as order_nos,
+        {_string_agg('o.note', '; ')} as order_notes
         FROM stock_out so JOIN product p ON so.product_id = p.id
-        LEFT JOIN `order` o ON so.order_id = o.id
+        LEFT JOIN {_quote_identifier('order')} o ON so.order_id = o.id
         WHERE 1=1 {where_sql}
         GROUP BY DATE(so.stockout_date), so.customer, p.name, p.barcode
         ORDER BY DATE(so.stockout_date) DESC
@@ -365,9 +401,8 @@ async def get_deduction_logs(db, customer: str = '', product: str = '',
             'order_nos': row.order_nos or '', 'order_note': row.order_notes or '',
         })
 
-    total_qty = (await db.execute(text(
-        "SELECT SUM(quantity) FROM stock_out WHERE stockin_id IS NOT NULL"
-    ))).scalar() or 0
+    qty_sql = f"SELECT SUM(so.quantity) FROM stock_out so JOIN product p ON so.product_id = p.id WHERE 1=1 {where_sql}"
+    total_qty = (await db.execute(text(qty_sql), params)).scalar() or 0
 
     return {
         'success': True,

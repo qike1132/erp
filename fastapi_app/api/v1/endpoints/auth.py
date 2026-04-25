@@ -46,6 +46,12 @@ class FrontendErrorLogRequest(BaseModel):
     url: str = ""
     userAgent: str = ""
 
+class UserInfoResponse(BaseModel):
+    user_id: int
+    username: str
+    is_super: bool
+    permissions: list[str]
+
 
 # ==================== 登录状态检查 ====================
 
@@ -63,6 +69,31 @@ async def check_login_status(
         "message": "登录状态有效",
         "user_id": user_id
     }
+
+
+@router.get("/me", response_model=UserInfoResponse)
+async def get_current_user_info(
+    user_id: int = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """获取当前登录用户信息（含权限列表）
+
+    Next.js前端在初始化时调用此接口获取用户详情和权限，
+    用于前端路由守卫和导航菜单渲染。
+    """
+    result = await db.execute(
+        select(User).options(selectinload(User.permissions)).where(User.id == user_id)
+    )
+    user = result.scalar_one_or_none()
+    if not user or not user.status:
+        raise HTTPException(status_code=401, detail="用户不存在或已禁用")
+
+    return UserInfoResponse(
+        user_id=user.id,
+        username=user.username,
+        is_super=user.is_super,
+        permissions=[p.code for p in user.permissions] if user.permissions else [],
+    )
 
 
 # ==================== 前端错误日志 ====================
@@ -118,7 +149,7 @@ async def api_login(
     # 手动限速检查：登录接口5次/分钟
     from limits import parse
     from slowapi.util import get_remote_address
-
+    
     limiter = request.app.state.limiter
     key = get_remote_address(request)
     item = parse("5/minute")
@@ -129,7 +160,7 @@ async def api_login(
             detail="登录尝试过于频繁，请稍后再试"
         )
 
-    from fastapi_app.core.security import verify_password
+    from fastapi_app.core.security import verify_password, hash_password, needs_migration
     from fastapi_app.core.config import settings
 
     username = data.username.strip()
@@ -151,25 +182,24 @@ async def api_login(
     user = result.scalar_one_or_none()
 
     if not user:
-        logger.warning(f"[Login] 登录失败: 用户不存在, IP={key}, username={username}")
+        logger.warning(f"[Login] 登录失败: IP={key}")
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     if not user.status:
-        logger.warning(f"[Login] 登录失败: 账号已禁用, IP={key}, username={username}")
+        logger.warning(f"[Login] 登录失败: IP={key}")
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     if not verify_password(password, user.password):
-        logger.warning(f"[Login] 登录失败: 密码错误, IP={key}, username={username}")
+        logger.warning(f"[Login] 登录失败: IP={key}")
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
-    # 旧哈希自动迁移：werkzeug pbkdf2/scrypt → bcrypt
-    from fastapi_app.core.security import needs_rehash, hash_password as _hash_password
-    if needs_rehash(user.password):
+    if needs_migration(user.password):
         try:
-            new_hash = _hash_password(password)
+            new_hash = hash_password(password)
             user.password = new_hash
-            await db.flush()
-            logger.info(f"[Login] 哈希自动迁移: username={username}, user_id={user.id}")
+            await db.commit()
+            logger.info(f"[Login] 密码哈希已迁移到 Argon2id: user_id={user.id}")
         except Exception as e:
-            logger.warning(f"[Login] 哈希自动迁移失败(不影响登录): {e}")
+            logger.warning(f"[Login] 密码哈希迁移失败（不影响登录）: {e}")
+            await db.rollback()
 
     # 生成JWT Token（仅存储最小必要信息，权限通过数据库实时查询）
     token_data = {
@@ -231,6 +261,23 @@ async def api_logout(request: Request):
 
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
 MAX_UPLOAD_SIZE = 5 * 1024 * 1024  # 5MB
+IMAGE_SIGNATURES = {
+    b'\x89PNG\r\n\x1a\n': 'png',
+    b'\xff\xd8\xff': 'jpg',
+    b'GIF87a': 'gif',
+    b'GIF89a': 'gif',
+    b'RIFF': 'webp',
+}
+
+
+def _validate_image_content(content: bytes, ext: str) -> bool:
+    for sig, sig_ext in IMAGE_SIGNATURES.items():
+        if content[:len(sig)] == sig:
+            if sig_ext == 'jpg' and ext in ('jpg', 'jpeg'):
+                return True
+            if sig_ext == ext:
+                return True
+    return False
 
 
 @router.post("/upload")
@@ -250,7 +297,10 @@ async def upload_file(
     # 读取文件内容并检查大小
     content = await file.read()
     if len(content) > MAX_UPLOAD_SIZE:
-        raise HTTPException(status_code=400, detail="文件大小超过5MB限制")
+        raise HTTPException(status_code=400, detail=f"文件大小超过{MAX_UPLOAD_SIZE // 1024 // 1024}MB限制")
+
+    if not _validate_image_content(content, ext):
+        raise HTTPException(status_code=400, detail="文件内容与扩展名不匹配，可能不是有效的图片文件")
 
     # 生成唯一文件名
     new_filename = f"{datetime.now().strftime('%Y%m%d')}_{uuid.uuid4().hex[:8]}.{ext}"

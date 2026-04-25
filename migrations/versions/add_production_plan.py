@@ -7,6 +7,12 @@ Create Date: 2026-04-14
 from alembic import op
 import sqlalchemy as sa
 
+# revision identifiers, used by Alembic.
+revision = 'add_production_plan'
+down_revision = 'add_supplier_purchase_order'
+branch_labels = None
+depends_on = None
+
 
 def upgrade():
     # 排产计划主表

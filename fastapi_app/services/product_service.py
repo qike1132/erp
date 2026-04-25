@@ -13,7 +13,6 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from fastapi_app.shared_models import Product, InventoryLog
 from fastapi_app.shared.stock_concurrency import get_product_for_update
-from fastapi_app.services import escape_like
 
 logger = logging.getLogger(__name__)
 
@@ -218,20 +217,12 @@ async def delete_product(db: AsyncSession, product_id: int) -> None:
 
 
 async def search_products(db: AsyncSession, query: str) -> list[dict]:
-    """搜索产品（按名称或条码模糊匹配）"""
-    result = await db.execute(
-        select(Product).where(
-            Product.name.like(f'%{escape_like(query)}%') | Product.barcode.like(f'%{escape_like(query)}%')
-        )
-    )
-    products = result.scalars().all()
-    return [{
-        'id': p.id,
-        'name': p.name,
-        'barcode': p.barcode,
-        'price': float(p.price) if p.price else 0,
-        'current_stock': p.current_stock
-    } for p in products]
+    """搜索产品（按名称或条码模糊匹配，大小写不敏感）
+
+    委托至 product_search_service 统一实现，保持原有返回格式。
+    """
+    from fastapi_app.services.product_search_service import product_search_service
+    return await product_search_service.search_async_with_cache(db, query, limit=20)
 
 
 async def get_product_stock(db: AsyncSession, product_id: int) -> dict:

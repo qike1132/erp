@@ -1,14 +1,14 @@
 """
-模板上下文：导航权限注入
+模板上下文：导航权限注入 - 全异步模式
 
 替代 Flask 的 inject_nav_permissions 上下文处理器。
-提供 get_nav_sections() 函数，支持两级缓存（进程内 + Redis），
-供 FastAPI Jinja2 模板渲染时使用。
+提供 get_nav_sections() 函数，支持两级缓存（进程内 + Redis）。
 """
 
 import time
 import logging
 import os
+import asyncio
 
 from fastapi_app.core.config import settings
 
@@ -26,29 +26,27 @@ SPECIAL_PERMISSION_MAP = {
 }
 
 # Flask 端点名 → FastAPI 路由路径映射
-# 数据库 permission.url 存储的是 Flask url_for 端点名（如 product.products），
-# 但 FastAPI 不识别这些路径，需要映射为实际的路由路径。
 FLASK_TO_FASTAPI_URL_MAP = {
-    'product.products': '/product/list',
-    'customer_order.index': '/customer-order/',
-    'stock.stockins': '/stock/stockins',
-    'stock.stockouts': '/stock/stockouts',
-    'stock.inventory': '/stock/inventory',
-    'case.case_management_page': '/case/',
-    'report.reports': '/report/reports',
-    'approval.approval_list': '/order/my-approvals',
-    'user.users': '/user/list',
-    'customer.customers': '/customer/list',
-    'purchase_center.index': '/purchase-center/',
-    'material.calculator': '/material/calculator',
-    'material_registration.material_registration_page': '/material-registration/page',
-    'material_registration.index': '/material-registration/page',
-    'supplier.suppliers': '/supplier/list',
-    'sku_batch.sku_batch_page': '/batch/management',
-    'finance.statistics': '/finance/statistics',
-    'production_plan.plan_list': '/production-plan/list',
-    'production_summary.index': '/production-summary/list',
-    'purchase_plan.plan_list': '/plans/list',
+    'product.products': '/product',
+    'customer_order.index': '/customer-order',
+    'stock.stockins': '/stock',
+    'stock.stockouts': '/stock',
+    'stock.inventory': '/stock',
+    'case.case_management_page': '/case',
+    'report.reports': '/report',
+    'approval.approval_list': '/approval',
+    'user.users': '/user',
+    'customer.customers': '/customer',
+    'purchase_center.index': '/purchase',
+    'material.calculator': '/material-calculator',
+    'material_registration.material_registration_page': '/material',
+    'material_registration.index': '/material',
+    'supplier.suppliers': '/supplier',
+    'sku_batch.sku_batch_page': '/batch',
+    'finance.statistics': '/finance',
+    'production_plan.plan_list': '/production',
+    'production_summary.index': '/production',
+    'purchase_plan.plan_list': '/purchase-plan',
 }
 
 # 分区显示顺序
@@ -60,21 +58,21 @@ _nav_local_ttl = 60  # 进程内缓存 60 秒
 _nav_redis_ttl = 300  # Redis 缓存 5 分钟
 
 
-def invalidate_nav_cache():
-    """清除导航缓存，使下次请求重新从数据库加载并应用 URL 映射。"""
+async def invalidate_nav_cache():
+    """清除导航缓存"""
     _nav_local_cache["data"] = None
     _nav_local_cache["cached_at"] = 0.0
     try:
         from utils.redis_cache import redis_cache
-        redis_cache.delete('nav_sections')
+        await redis_cache.delete('nav_sections')
         logger.info("导航缓存已清除")
     except Exception:
-        pass
+        logger.warning("导航缓存清除失败", exc_info=True)
 
 
-def get_nav_sections() -> dict:
+async def get_nav_sections_async() -> dict:
     """
-    获取导航分区数据（带两级缓存）。
+    获取导航分区数据（带两级缓存）- 异步版本。
 
     返回格式：{section_key: {name: str, items: [{id, name, code, icon, url, permission_codes}]}}
     """
@@ -86,23 +84,22 @@ def get_nav_sections() -> dict:
     # Level 2: Redis 缓存
     try:
         from utils.redis_cache import redis_cache
-        cached = redis_cache.get('nav_sections')
+        cached = await redis_cache.get('nav_sections')
         if cached is not None:
             _nav_local_cache["data"] = cached
             _nav_local_cache["cached_at"] = now
             return cached
     except Exception:
-        pass
+        logger.warning("导航Redis缓存读取失败", exc_info=True)
 
-    # Level 3: 数据库查询
+    # Level 3: 数据库查询（异步）
     try:
-        from fastapi_app.core.database import SyncSessionLocal
+        from fastapi_app.core.database import _AsyncSessionLocal
         from fastapi_app.shared_models import Permission
         from sqlalchemy import select
 
-        db = SyncSessionLocal()
-        try:
-            result = db.execute(
+        async with _AsyncSessionLocal() as session:
+            result = await session.execute(
                 select(Permission)
                 .where(
                     Permission.parent_id.is_(None),
@@ -112,8 +109,6 @@ def get_nav_sections() -> dict:
                 .order_by(Permission.section, Permission.sort_order)
             )
             nav_items = result.scalars().all()
-        finally:
-            db.close()
 
         sections = {}
         for item in nav_items:
@@ -128,12 +123,20 @@ def get_nav_sections() -> dict:
             if not isinstance(perm_codes, list):
                 perm_codes = [perm_codes]
 
+            mapped_url = FLASK_TO_FASTAPI_URL_MAP.get(item.url)
+            if mapped_url is None:
+                if item.url and not item.url.startswith('/'):
+                    logger.warning("Unmapped Flask endpoint in permission.url: %s (code=%s)", item.url, item.code)
+                url = item.url if item.url.startswith('/') else f'/{item.url}'
+            else:
+                url = mapped_url
+
             sections[section_key]['items'].append({
                 'id': item.id,
                 'name': item.name,
                 'code': item.code,
                 'icon': item.icon,
-                'url': FLASK_TO_FASTAPI_URL_MAP.get(item.url, item.url if item.url.startswith('/') else f'/{item.url}'),
+                'url': url,
                 'permission_codes': perm_codes,
             })
 
@@ -149,9 +152,9 @@ def get_nav_sections() -> dict:
         # 写入缓存
         try:
             from utils.redis_cache import redis_cache
-            redis_cache.set('nav_sections', ordered_sections, timeout=_nav_redis_ttl)
+            await redis_cache.set('nav_sections', ordered_sections, timeout=_nav_redis_ttl)
         except Exception:
-            pass
+            logger.warning("导航Redis缓存写入失败", exc_info=True)
         _nav_local_cache["data"] = ordered_sections
         _nav_local_cache["cached_at"] = time.time()
 
@@ -159,3 +162,43 @@ def get_nav_sections() -> dict:
     except Exception as e:
         logger.warning("获取导航权限数据失败: %s [%s]", e, type(e).__name__)
         return _nav_local_cache["data"] or {}
+
+
+def get_nav_sections() -> dict:
+    """
+    获取导航分区数据 - 同步包装器（已废弃，保留向后兼容）。
+    
+    注意：此函数已废弃，请使用 get_nav_sections_async()。
+    """
+    import warnings
+    warnings.warn(
+        "get_nav_sections() 已废弃，请使用 get_nav_sections_async()",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    
+    # 尝试从缓存获取
+    now = time.time()
+    if _nav_local_cache["data"] is not None and (now - _nav_local_cache["cached_at"]) < _nav_local_ttl:
+        return _nav_local_cache["data"]
+    
+    try:
+        from utils.redis_cache import redis_cache
+        import asyncio as _aio
+        try:
+            loop = _aio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop and loop.is_running():
+            cached = _aio.run_coroutine_threadsafe(redis_cache.get('nav_sections'), loop).result(timeout=5)
+        else:
+            cached = _aio.run(redis_cache.get('nav_sections'))
+        if cached is not None:
+            _nav_local_cache["data"] = cached
+            _nav_local_cache["cached_at"] = now
+            return cached
+    except Exception:
+        logger.warning("导航同步缓存读取失败", exc_info=True)
+    
+    # 返回空数据，让异步版本填充
+    return _nav_local_cache["data"] or {}

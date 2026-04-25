@@ -1,192 +1,97 @@
 # 故障排查手册
 
-## 登录后首页 500 — Jinja2 UndefinedError / AttributeError
+## BUG-HTTP-405-Form-Submit | 2026-04-22
+- **现象**: 供应商管理添加表单及其他多个模块编辑表单提交时返回 HTTP 405 (Method Not Allowed)
+- **根因**: HTML模板使用 `<form method="POST">` 原生提交到页面路由，但页面路由仅有GET处理器
+- **解决**: 添加 `onsubmit="return false;"` + JavaScript fetch() 提交到JSON API端点
+- **参考**: [docs/bugs/BUG-HTTP-405-Form-Submit.md](../docs/bugs/BUG-HTTP-405-Form-Submit.md)
 
-### 症状
-- 登录成功但访问首页返回 500
-- 日志显示 `UndefinedError: 'pending_materials' is undefined` 或 `AttributeError: 'Order' has no attribute 'create_time'`
+## BUG-customer-order-blank-page | 2026-04-22
+- **现象**: "客户订单"模块"备货管理"页面空白或不显示
+- **根因**: FastAPI 页面路由函数使用 `_shell_page()` 但未传递模板所需的业务数据变量（customers、orders_json等），导致 Jinja2 渲染失败或 JS 语法错误
+- **解决**: 修改 `pages.py` 中 `customer_order_page`、`stockin_page`、`stockout_page` 路由函数，显式查询并传递完整模板上下文
+- **参考**: [docs/bugs/BUG-customer-order-blank-page.md](../docs/bugs/BUG-customer-order-blank-page.md)
 
-### 根因
-- 模型字段名迁移错误：Order 用 `order_date`（非 `create_time`），StockIn 用 `stockin_date`，StockOut 用 `stockout_date`
-- 模板变量未在路由上下文中提供
+## 通用排查模式：页面空白/不显示
 
-### 解决
-- 参考 `docs/bugs/BUG-CASCADE-20260420.md`
+当任何页面出现空白或不显示时，按以下步骤排查：
 
-## 登录返回 401 — werkzeug scrypt 哈希验证失败
+1. **检查路由函数是否传递了模板所需的变量**
+   - 对比模板中 `{{ variable }}` 和 `{% for x in variable %}` 的使用
+   - 确认路由函数通过 `_shell_page(extra_ctx=...)` 或直接 `ctx.update({...})` 传递了所有变量
 
-### 症状
-- 正确密码登录返回 401 "未登录"
-- 数据库中密码哈希以 `scrypt:` 开头
+2. **检查 Jinja2 UndefinedError**
+   - 模板中 `{% for x in undefined_var %}` 会导致渲染失败
+   - 查看服务端日志确认是否有 500 错误
 
-### 根因
-- werkzeug 使用自定义 ab64 编码（非标准 base64），自行实现的 `_verify_scrypt` 用 `base64.b64decode` 解码错误
+3. **检查 JS 语法错误**
+   - `{{ json_var | safe }}` 若变量为空，会渲染为 `= ;` 导致 JS 错误
+   - 传入默认值如 `'[]'` 或 `'{}'` 避免
 
-### 解决
-- 使用 `werkzeug.security.check_password_hash` 作为回退
+4. **检查 Tab 系统**
+   - 确认 `data-tab-container`、`data-tab`、`data-tab-panel` 属性正确配对
+   - 默认显示的 Tab 面板需要有 `active` class
 
-## 服务器启动报 Invalid host header
+## 通用排查模式：表单提交405错误
 
-### 症状
-- 浏览器访问显示 "Invalid host header"
+1. **检查HTML表单提交方式**
+   - `<form method="POST">` 原生提交会发送POST到当前页面URL
+   - 页面路由通常只有 `@router.get()`，导致405
 
-### 根因
-- TrustedHostMiddleware 的 ALLOWED_HOSTS 默认值不包含当前访问主机名
+2. **修复方法**
+   - 添加 `onsubmit="return false;"` 阻止原生提交
+   - 使用JavaScript `fetch()` 提交到JSON API端点
 
-### 解决
-- 设置 `ALLOWED_HOSTS` 环境变量，或开发环境默认 `"*"` 允许所有主机
+3. **检查Flask/FastAPI兼容性**
+   - `request.args` 是Flask特有属性，FastAPI/Starlette中使用 `request.query_params`
 
-## 采购订单接口 500 AttributeError: 'PurchaseOrder' has no attribute 'total_amount'
+4. **检查编辑页数据加载**
+   - 页面路由需查询实体数据并传递给模板，仅传ID不够
+## BUG-PURCHASE-SUMMARY-500 | 2026-04-23
+- **鐜拌薄**: 閲囪喘涓績姹囨€讳笅鍗?500 Internal Server Error (factory-summary + supplier-summary)
+- **鏍瑰洜**: 鏈嶅姟鍑芥暟杩斿洖 list锛岀鐐圭敤 `**` 瑙ｅ寘 dict 瀵艰嚧 TypeError
+- **瑙ｅ喅**: 閲嶆瀯鏈嶅姟杩斿洖 dict 缁撴瀯锛屽尮閰嶅墠绔湡鏈涚殑 groups/suppliers/fabrics 鍜?materials 鏍煎紡
+- **鍙傝€?*: docs/bugs/BUG-PURCHASE-SUMMARY-500.md
 
-### 症状
-- 采购订单列表/详情/已完成列表接口返回 500
-- 日志显示 `AttributeError: 'PurchaseOrder' object has no attribute 'total_amount'`
+## BUG-PURCHASE-SUMMARY-500 瀹℃牳杩藉姞淇 | 2026-04-23
+- **鐜拌薄**: 鍒濇淇鍚庡鏍稿彂鐜?product_quantity 瀵规墍鏈?group 閲嶅绱姞鍏ㄩ儴璁㈠崟鏁伴噺
+- **鏍瑰洜**: group 閬嶅巻鏃朵娇鐢ㄥ叏閲?order_ids 鑰岄潪璇?group 鍏宠仈鐨?order_ids 瀛愰泦
+- **瑙ｅ喅**: 鍦ㄥ垎缁勬椂鐢?set 杩借釜姣忎釜 group 鐨?order_ids锛屾眹鎬绘椂浠呭彇瀛愰泦
+- **鍙傝€?*: docs/bugs/BUG-PURCHASE-SUMMARY-500.md
 
-### 根因
-PurchaseOrder 模型无 `total_amount` 列，service 层错误访问了不存在的属性
+## BUG-PURCHASE-ORDER-FIELDS-MISSING | 2026-04-23
+- **鐜拌薄**: 閲囪喘涓績璁㈠崟鍒楄〃鐨勫鎴峰悕绉?浜у搧鍚嶇О/璁㈠崟鏁伴噺鍒椾负绌?- **鏍瑰洜**: 鏈嶅姟鍑芥暟鎵嬪姩鏋勯€犲搷搴?dict 鏃堕仐婕?product_name/quantity/order_date 瀛楁
+- **瑙ｅ喅**: 琛ュ厖缂哄け瀛楁鑷?get_purchase_orders 鍜?get_purchase_order 鍝嶅簲 dict
+- **鍙傝€?*: docs/bugs/BUG-PURCHASE-ORDER-FIELDS-MISSING.md
 
-### 解决
-使用 `sum(item.total_price for item in order.items)` 动态计算总金额
-- 参考: docs/bugs/BUG-REGRESSION-20260421.md
+## BUG-ORDER-SYNC-TO-PURCHASE | 2026-04-23
+- **鐜拌薄**: 瀹㈡埛璁㈠崟鏂板鍚庨噰璐腑蹇冩棤瀵瑰簲閲囪喘璁㈠崟
+- **鏍瑰洜**: create_order 鏈Е鍙戦噰璐鍗曞悓姝ワ紝闇€鎵嬪姩涓€閿敓鎴?- **瑙ｅ喅**: 鍦ㄨ鍗曞垱寤哄悗鑷姩璋冪敤 one_click_generate_order锛宐est-effort 闅旂
+- **鍙傝€?*: docs/bugs/BUG-ORDER-SYNC-TO-PURCHASE.md
 
-## 采购单创建后 created_by 为 NULL
+## BUG-MATERIAL-CALC-UNDEFINED | 2026-04-23
+- **现象**: 物料用量计算页面报错 "Cannot convert undefined or null to object"
+- **根因**: 前端 JS 访问 result.result 但 API 返回扁平结构（无 result 嵌套键）；后端字段名 name/quantity_per_unit 与 to_dict() 返回的 material_name/unit_usage 不匹配
+- **解决**: 参考 [docs/bugs/BUG-MATERIAL-CALC-UNDEFINED.md](../docs/bugs/BUG-MATERIAL-CALC-UNDEFINED.md)
 
-### 症状
-- 创建采购单后数据库 created_by 字段为 NULL
+## BUG-UI-STOP-STATE | 2026-04-23
+- **现象**: 点击停止按钮后，UI 状态标签仍显示"运行中"，不更新为"已停止"
+- **根因**: `_stop_mode()` 和 `stop_all()` 设置 `self._mode='none'` 后未立即调用 `_update_all_ui()`，UI 更新依赖后台 `_kill_worker` 线程完成后的异步队列消息，延迟可达数秒
+- **解决**: 在 `self._mode='none'` 赋值后立即调用 `self._update_all_ui()`
+- **参考**: [docs/bugs/BUG-UI-STOP-STATE.md](../docs/bugs/BUG-UI-STOP-STATE.md)
 
-### 根因
-Service 层使用了不存在的 `creator_id` 而非模型定义的 `created_by`
+## 通用排查模式：GUI 状态不同步
 
-### 解决
-将 `creator_id=user_id` 改为 `created_by=user_id`
-- 参考: docs/bugs/BUG-REGRESSION-20260421.md
+当 GUI 操作后 UI 状态未更新时，按以下步骤排查：
 
-## JavaScript TypeError: Cannot read properties of null
+1. **检查状态变更后是否调用了 UI 刷新方法**
+   - 状态变量赋值（如 `self._mode = 'none'`）不会自动触发 UI 更新
+   - 必须显式调用 `_update_all_ui()` 或等效刷新方法
 
-### 症状
-- 浏览器控制台报 `TypeError: Cannot read properties of null (reading 'style'/'textContent'/'querySelector')`
-- 页面功能局部失效（搜索/分页/筛选不工作）
-- 通常在模板修改后出现
+2. **检查异步操作的 UI 更新时机**
+   - 后台线程中的 UI 更新必须通过 `queue + root.after()` 调度到主线程
+   - 主线程中可以直接调用 UI 更新方法，无需经过队列
 
-### 排查步骤
-1. 打开浏览器 DevTools → Console，定位报错行号
-2. 找到 `document.getElementById('xxx')` 调用，确认目标 HTML 元素是否存在
-3. 检查最近是否修改/删除/重命名了模板中的对应 `id` 属性
-
-### 解决方案
-所有 `getElementById` 结果在使用前必须做 null 检查：
-```javascript
-// 错误写法
-document.getElementById('myEl').style.display = 'none';
-
-// 正确写法 1：辅助函数
-const el = (id) => document.getElementById(id);
-if (el('myEl')) el('myEl').style.display = 'none';
-
-// 正确写法 2：变量 + null guard
-const myEl = document.getElementById('myEl');
-if (myEl) myEl.style.display = 'none';
-```
-
-### 通用规则
-- `getElementById` 返回 `null` 时，后续的 `.style`/`.textContent`/`.querySelector` 等属性访问会导致 TypeError
-- HTML `id` 在文档中必须唯一，互斥 Jinja2 分支中的重复 id 虽然运行时不冲突，但仍违反规范
-- 服务端分页替换客户端分页时，必须同步清理 JS 中的客户端分页代码，否则产生死代码和 null 引用
-
----
-
-## API 响应缓慢 - N+1 查询问题
-
-### 症状
-- 页面加载数秒，API 返回 200 但响应慢
-- 数据库连接池快速耗尽
-- SQLAlchemy 日志显示大量 SELECT 语句
-
-### 排查步骤
-1. 启用 SQLAlchemy echo 日志：在 `.env` 设置 `SQL_ECHO=true`
-2. 观察 SQL 输出：如果同一类型 SELECT 大量重复，确认 N+1 问题
-3. 定位触发 lazy load 的代码：检查循环内访问 relationship 属性
-
-### 解决方案
-在查询时使用 `selectinload` 或 `joinedload` 预加载关联关系：
-```python
-query = db.query(Product).options(
-    selectinload(Product.material),
-    selectinload(Product.fabrics),
-)
-```
-
-### 通用规则
-- 任何在循环中访问 ORM relationship 的场景，必须使用 eager loading
-- `selectinload` 适用于集合关系（一对多），`joinedload` 适用于标量关系（多对一）
-- 优先使用 `selectinload` 避免 JOIN 导致的笛卡尔积
-
-## .xls 文件上传被拒绝
-
-### 症状
-- 上传 .xls 文件时返回错误：".xls 格式已不再支持（安全原因），请将文件另存为 .xlsx 格式后重新上传"
-
-### 根因
-- xlrd 1.2.0 存在 CVE-2019-19276 (XXE 漏洞)，已在本次修复中移除
-- 系统仅支持 .xlsx 格式（使用 openpyxl）
-
-### 解决
-- 将 .xls 文件在 Excel 中另存为 .xlsx 格式后重新上传
-
-## Host Header 导致 400 Bad Request
-
-### 症状
-- 访问系统时返回 400 错误，提示 Host 不合法
-
-### 根因
-- FastAPI TrustedHostMiddleware 拒绝 Host 不在 ALLOWED_HOSTS 中的请求
-- Nginx default_server 拒绝未知 Host (返回 444 断开连接)
-
-### 解决
-- 在 .env 或环境变量中设置 `ALLOWED_HOSTS=your-domain.com,www.your-domain.com`
-- 确保 Nginx 代理时 Host 头正确传递
-
-## 旧密码无法验证（bcrypt 迁移后）
-
-### 症状
-- 迁移后旧用户的密码验证失败
-
-### 根因
-- 旧密码使用 werkzeug (pbkdf2/scrypt) 哈希，新密码使用 bcrypt
-- fastapi_app/core/security.py 的 verify_password 同时兼容两种格式
-
-### 解决
-- 正常情况下旧密码仍可验证（兼容逻辑）
-- 用户修改密码后将自动升级为 bcrypt 哈希
-
-## 服务器启动失败 - 端口 5002 被占用
-
-### 症状
-- 启动调试/生产模式时报 `[Errno 10048] 通常每个套接字地址只允许使用一次`
-- 或报 `[WinError 10013] 以一种访问权限不允许的方式做了一个访问套接字的尝试`
-
-### 根因
-- 旧 Python 进程仍在占用 5002 端口（未正常退出）
-- Windows 上 Uvicorn `workers > 1` 不支持（无 fork），导致权限错误
-
-### 解决
-1. 查找占用端口的进程: `netstat -ano | findstr :5002`
-2. 终止旧进程: `Stop-Process -Id <PID> -Force`
-3. 重新启动服务器
-4. Windows 环境下生产模式自动使用单 Worker（已内置检测）
-
-## 导航链接 404 — Flask 端点名未映射为 FastAPI 路径
-
-### 症状
-- 首页侧边栏导航点击后返回 404
-- 浏览器地址栏显示 `material.calculator`、`product.products`、`supplier.suppliers` 等 Flask 端点名格式
-
-### 根因
-- 数据库 `permission.url` 列存储的是 Flask `url_for` 端点名（如 `product.products`）
-- `nav_context.py` 将 `item.url` 直接传给模板作为 `href`
-- FastAPI 没有注册这些 dot-notation 路径，导致 404
-
-### 解决
-- `nav_context.py` 已添加 `FLASK_TO_FASTAPI_URL_MAP` 映射表，在构建导航数据时自动转换
-- 服务启动时自动清除旧缓存（`invalidate_nav_cache()`），确保映射立即生效
-- 若映射缺失新端点，在 `FLASK_TO_FASTAPI_URL_MAP` 字典中添加对应条目即可
+3. **避免仅依赖异步回调刷新 UI**
+   - 即使后台操作会触发 UI 刷新，主线程中也应立即刷新一次
+   - 异步回调作为二次确认，而非唯一刷新途径

@@ -33,9 +33,9 @@ class TestE2EOrderFlow:
         driver.quit()
     
     @pytest.fixture(scope='class')
-    def base_url(self, app):
+    def base_url(self, e2e_base_url):
         """获取测试服务器URL"""
-        return 'http://localhost:5000'
+        return e2e_base_url
     
     def test_login_flow(self, driver, base_url):
         """测试登录流程"""

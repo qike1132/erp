@@ -178,8 +178,37 @@ async def inventory(
     db: AsyncSession = Depends(get_async_db),
     _user: User = Depends(require_permission("stockin_manage")),
 ):
-    """库存查看"""
+    """库存查看（带缓存）"""
+    import json
+    try:
+        from utils.redis_cache import redis_cache as redis_client
+    except Exception:
+        redis_client = None
+    
+    cache_key = f"inventory:overview:{customer}:{product}"
+    try:
+        if redis_client:
+            cached_data = await redis_client.get(cache_key)
+            if cached_data:
+                result = json.loads(cached_data)
+                return InventoryResponse(
+                    data=result['inventory_data'],
+                    total_order_quantity=result['total_order_qty'],
+                    total_stockin_quantity=result['total_stockin_qty'],
+                    total_stock=result['total_stock'],
+                    all_countries=result['all_countries'],
+                )
+    except Exception:
+        pass
+    
     result = await stock_service.get_inventory(db, search_customer=customer, search_product=product)
+    
+    try:
+        if redis_client:
+            await redis_client.set(cache_key, json.dumps(result, ensure_ascii=False, default=str), ex=30)
+    except Exception:
+        pass
+    
     return InventoryResponse(
         data=result['inventory_data'],
         total_order_quantity=result['total_order_qty'],

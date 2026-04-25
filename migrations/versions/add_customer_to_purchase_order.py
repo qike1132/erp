@@ -6,7 +6,7 @@ import sqlalchemy as sa
 
 
 revision = 'add_customer_to_purchase_order'
-down_revision = '659467a97350_add_approval_system_and_order_lock_'
+down_revision = 'add_production_plan'
 branch_labels = None
 depends_on = None
 

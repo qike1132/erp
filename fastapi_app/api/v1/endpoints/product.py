@@ -11,7 +11,7 @@ from fastapi_app.core.deps import require_permission
 from fastapi_app.shared_models import User
 from fastapi_app.schemas.product import (
     ProductCreate, ProductUpdate, ProductActionResponse,
-    ProductListResponse, ProductStockInfo,
+    ProductListResponse, ProductResponse, ProductStockInfo,
 )
 from fastapi_app.services import product_service
 from fastapi_app.services.product_service import (
@@ -22,7 +22,6 @@ from fastapi_app.services.product_service import (
     ProductHasRelatedStockOutsError,
 )
 from utils.redis_cache import redis_cache
-from fastapi.concurrency import run_in_threadpool
 
 router = APIRouter()
 
@@ -36,15 +35,29 @@ async def list_products(
     _user: User = Depends(require_permission("product_manage")),
 ):
     """产品列表（带缓存）"""
-    cached = await run_in_threadpool(redis_cache.get, PRODUCT_LIST_CACHE_KEY)
+    cached = await redis_cache.get(PRODUCT_LIST_CACHE_KEY)
     if cached is not None:
         return ProductListResponse(data=cached, total=len(cached))
 
     products = await product_service.get_products(db)
 
-    await run_in_threadpool(redis_cache.set, PRODUCT_LIST_CACHE_KEY, products, PRODUCT_LIST_CACHE_TTL)
+    await redis_cache.set(PRODUCT_LIST_CACHE_KEY, products, PRODUCT_LIST_CACHE_TTL)
 
     return ProductListResponse(data=products, total=len(products))
+
+
+@router.get("/{product_id}", response_model=ProductResponse)
+async def get_product(
+    product_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    _user: User = Depends(require_permission("product_manage")),
+):
+    """获取单个产品详情"""
+    from fastapi_app.shared_models import Product
+    product = await db.get(Product, product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="产品不存在")
+    return product
 
 
 @router.post("/create", response_model=ProductActionResponse)
@@ -59,7 +72,7 @@ async def create_product(
             db, name=data.name, barcode=data.barcode,
             price=data.price, image=data.image, initial_stock=data.initial_stock
         )
-        await run_in_threadpool(redis_cache.delete, PRODUCT_LIST_CACHE_KEY)
+        await redis_cache.delete(PRODUCT_LIST_CACHE_KEY)
         return ProductActionResponse(success=True, message="产品添加成功！")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -79,7 +92,7 @@ async def edit_product(
             barcode=data.barcode, price=data.price, image=data.image,
             initial_stock=data.initial_stock
         )
-        await run_in_threadpool(redis_cache.delete, PRODUCT_LIST_CACHE_KEY)
+        await redis_cache.delete(PRODUCT_LIST_CACHE_KEY)
         return ProductActionResponse(success=True, message="产品编辑成功！")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -100,7 +113,7 @@ async def delete_product(
     """
     try:
         await product_service.delete_product(db, product_id)
-        await run_in_threadpool(redis_cache.delete, PRODUCT_LIST_CACHE_KEY)
+        await redis_cache.delete(PRODUCT_LIST_CACHE_KEY)
         return ProductActionResponse(success=True, message="产品删除成功！")
     except ProductNotFoundError as e:
         raise HTTPException(status_code=400, detail=e.message)

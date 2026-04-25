@@ -1,8 +1,7 @@
 """
-数据库连接健康检查与自动重连模块
+数据库连接健康检查与自动重连模块 - 全异步模式
 
-定期检查连接池中的连接有效性，主动替换不健康连接，
-记录连接中断、恢复的详细日志，保障数据库服务高可用。
+定期检查连接池中的连接有效性，主动替换不健康连接。
 """
 
 import asyncio
@@ -17,20 +16,9 @@ logger = logging.getLogger(__name__)
 
 
 class DBHealthChecker:
-    """数据库连接健康检查器
-
-    功能:
-    - 定期执行轻量级探测 (SELECT 1) 检查连接有效性
-    - 检测到失效连接时记录日志并通过 pool_pre_ping 自动重建
-    - 统计健康检查次数、失败次数、恢复次数
-    - 记录最近一次连接中断/恢复的时间和上下文
-    """
+    """数据库连接健康检查器 - 全异步模式"""
 
     def __init__(self, check_interval: int = 30):
-        """
-        Args:
-            check_interval: 健康检查间隔(秒)，默认30秒
-        """
         self.check_interval = check_interval
         self._task: Optional[asyncio.Task] = None
         self._running = False
@@ -80,44 +68,30 @@ class DBHealthChecker:
 
     async def _perform_check(self):
         """执行一次健康检查"""
-        from fastapi_app.core.database import async_engine, sync_engine
+        from fastapi_app.core.database import async_engine
 
         self.last_check_time = datetime.now()
         self.total_checks += 1
 
-        # 异步引擎检查
-        async_ok = False
+        is_healthy = False
         if async_engine is not None:
-            async_ok = await self._check_async_engine(async_engine)
-
-        # 同步引擎检查(作为备用) - 使用run_in_threadpool避免阻塞事件循环
-        sync_ok = False
-        if not async_ok:
-            from fastapi.concurrency import run_in_threadpool
-            sync_ok = await run_in_threadpool(self._check_sync_engine, sync_engine)
-
-        is_healthy = async_ok or sync_ok
+            is_healthy = await self._check_async_engine(async_engine)
 
         if not is_healthy:
             self.failed_checks += 1
             self.last_failure_time = datetime.now()
             if not self._was_unhealthy:
                 self._was_unhealthy = True
-                logger.warning(
-                    "数据库连接异常: 异步引擎=%s, 同步引擎=%s",
-                    async_ok, sync_ok,
-                )
+                logger.warning("数据库连接异常")
         else:
             if self._was_unhealthy:
                 self._was_unhealthy = False
                 self.recoveries += 1
                 self.last_recovery_time = datetime.now()
                 logger.info(
-                    "数据库连接已恢复 (恢复次数: %d，上次故障: %s)",
+                    "数据库连接已恢复 (恢复次数: %d)",
                     self.recoveries,
-                    self.last_failure_detail or "未知",
                 )
-            # 重置故障详情
             self.last_failure_detail = None
 
     async def _check_async_engine(self, engine) -> bool:
@@ -135,40 +109,12 @@ class DBHealthChecker:
             logger.error("异步引擎连接检查异常: %s", self.last_failure_detail)
             return False
 
-    def _check_sync_engine(self, engine) -> bool:
-        """检查同步引擎连接"""
-        try:
-            with engine.connect() as conn:
-                conn.execute(text("SELECT 1"))
-            return True
-        except (OperationalError, DisconnectionError) as e:
-            self.last_failure_detail = f"同步引擎: {e.__class__.__name__}: {str(e)[:200]}"
-            logger.warning("同步引擎连接检查失败: %s", self.last_failure_detail)
-            return False
-        except Exception as e:
-            self.last_failure_detail = f"同步引擎未知错误: {e.__class__.__name__}: {str(e)[:200]}"
-            logger.error("同步引擎连接检查异常: %s", self.last_failure_detail)
-            return False
-
     def get_pool_status(self) -> dict:
         """获取连接池状态信息"""
-        from fastapi_app.core.database import async_engine, sync_engine
+        from fastapi_app.core.database import async_engine
 
         status = {}
 
-        # 同步引擎连接池状态
-        try:
-            sync_pool = sync_engine.pool
-            status["sync_pool"] = {
-                "size": sync_pool.size(),
-                "checked_in": sync_pool.checkedin(),
-                "checked_out": sync_pool.checkedout(),
-                "overflow": sync_pool.overflow(),
-            }
-        except Exception as e:
-            status["sync_pool"] = {"error": str(e)}
-
-        # 异步引擎连接池状态
         try:
             if async_engine is not None:
                 async_pool = async_engine.pool

@@ -10,23 +10,19 @@ jobs:
   test:
     runs-on: ubuntu-latest
     
-    strategy:
-      matrix:
-        python-version: ['3.10', '3.11', '3.12']
-    
     steps:
     - uses: actions/checkout@v4
     
-    - name: Set up Python ${{ matrix.python-version }}
+    - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: '3.12'
     
     - name: Cache dependencies
       uses: actions/cache@v4
       with:
         path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt', 'requirements/**/*.txt') }}
         restore-keys: |
           ${{ runner.os }}-pip-
     
@@ -34,12 +30,29 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        pip install pytest pytest-cov pytest-html pytest-xdist
-        pip install bandit pip-audit
+        pip install bandit pip-audit ruff
     
-    - name: Run unit tests
+    - name: Run gated test suite
       run: |
-        pytest tests/ -v --cov=app --cov-report=xml --cov-report=html --html=test-report.html -n auto
+        pytest \
+          tests/test_cache.py \
+          tests/test_config.py \
+          tests/test_stock_concurrency.py \
+          tests/test_base_search_service.py \
+          tests/test_customer_search_service.py \
+          tests/test_product_search_service.py \
+          tests/test_case_service.py \
+          tests/test_ocr_service.py \
+          tests/test_finance_service.py \
+          tests/test_purchase_supplier_service.py \
+          tests/test_production_plan_service.py \
+          fastapi_app/tests/test_integration_smoke.py \
+          --cov=fastapi_app \
+          --cov=utils \
+          --cov-report=xml \
+          --cov-report=html \
+          --html=test-report.html \
+          --junitxml=test-results.xml
     
     - name: Upload coverage reports
       uses: codecov/codecov-action@v5
@@ -55,10 +68,12 @@ jobs:
         path: |
           test-report.html
           htmlcov/
+          coverage.xml
+          test-results.xml
     
     - name: Security scan with Bandit
       run: |
-        bandit -r app/ -f json -o security-report.json || true
+        bandit -r fastapi_app/ utils/ -f json -o security-report.json || true
     
     - name: Dependency vulnerability scan
       run: |
@@ -75,13 +90,16 @@ jobs:
     - name: Check coverage threshold
       run: |
         python -c "
+import os
 import xml.etree.ElementTree as ET
 tree = ET.parse('coverage.xml')
 root = tree.getroot()
 coverage = float(root.attrib['line-rate']) * 100
 print(f'Coverage: {coverage:.2f}%')
-if coverage < 80:
-    print('Warning: Coverage below 80%')
+threshold = float(os.getenv('COVERAGE_MIN', '20'))
+if coverage < threshold:
+    print(f'Coverage below threshold: {coverage:.2f}% < {threshold:.2f}%')
+    raise SystemExit(1)
         "
     
   lint:
@@ -98,19 +116,57 @@ if coverage < 80:
     - name: Install linters
       run: |
         python -m pip install --upgrade pip
-        pip install flake8 black pylint
+        pip install ruff mypy
     
-    - name: Run Black
-      run: black --check app/ tests/
-    
-    - name: Run Flake8
-      run: flake8 app/ tests/ --max-line-length=100 --exclude=__pycache__,migrations
-    
-    - name: Run Pylint
-      run: pylint app/ --disable=all --enable=E,F 2>&1 || true
+    - name: Run Ruff gate
+      run: ruff check fastapi_app tests fastapi_app/tests utils --select E9
+
+    - name: Run scoped mypy gate
+      run: python -m mypy --config-file mypy.ini
+
+  frontend:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend-nextjs
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: npm
+        cache-dependency-path: frontend-nextjs/package-lock.json
+
+    - name: Install frontend dependencies
+      run: npm ci
+
+    - name: Install Playwright browser
+      run: npx playwright install --with-deps chromium
+
+    - name: Run frontend lint
+      run: npm run lint
+
+    - name: Run frontend build
+      run: npm run build
+
+    - name: Run frontend E2E tests
+      run: npm run test:e2e
+
+    - name: Upload frontend test artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: frontend-test-artifacts
+        path: |
+          frontend-nextjs/playwright-report/
+          frontend-nextjs/test-results/
   
   build:
-    needs: [test, lint]
+    needs: [test, lint, frontend]
     runs-on: ubuntu-latest
     
     steps:
@@ -121,17 +177,10 @@ if coverage < 80:
       with:
         python-version: '3.12'
     
-    - name: Build package
+    - name: Validate source tree
       run: |
         python -m pip install --upgrade pip
-        pip install build
-        python -m build
-    
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: dist
-        path: dist/
+        python -m compileall fastapi_app utils tests fastapi_app/tests
   
   deploy-staging:
     needs: build

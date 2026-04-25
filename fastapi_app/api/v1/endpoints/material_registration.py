@@ -1,4 +1,6 @@
 """来料登记接口"""
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from fastapi_app.core.deps import require_permission
@@ -11,6 +13,8 @@ from fastapi_app.schemas.material_registration import (
 )
 from fastapi_app.services import material_registration_service as mr_service
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -133,9 +137,12 @@ async def receive_material(
     try:
         result = await mr_service.receive_material(db, item_id, data.received_quantity, data.remark)
         await db.commit()
-        return {'success': True, 'message': '收货登记成功', 'registration': {}}
+        return RegistrationDetailResponse(registration=result['registration'])
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("收货登记失败 item_id=%s: %s", item_id, e)
+        raise HTTPException(status_code=500, detail="收货登记失败，请稍后重试")
 
 
 @router.get("/purchase-orders/{order_id}/items")

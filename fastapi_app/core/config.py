@@ -10,13 +10,25 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 def _build_database_uri() -> str:
-    """构建MySQL数据库URI"""
+    """构建数据库URI（PostgreSQL + asyncpg）"""
     db_host = os.getenv("DB_HOST", "localhost")
-    db_port = os.getenv("DB_PORT", "3306")
     db_user = os.getenv("DB_USER", "erp_app")
     db_password = os.getenv("DB_PASSWORD", "")
     db_name = os.getenv("DB_NAME", "erp_system")
-    return f"mysql+pymysql://{quote_plus(db_user)}:{quote_plus(db_password)}@{db_host}:{db_port}/{db_name}?charset=utf8mb4"
+    db_port = os.getenv("DB_PORT", "5432")
+    # 使用 asyncpg 作为异步驱动
+    return f"postgresql+asyncpg://{quote_plus(db_user)}:{quote_plus(db_password)}@{db_host}:{db_port}/{db_name}"
+
+
+def _build_sync_database_uri() -> str:
+    """构建同步数据库URI（PostgreSQL + psycopg3）- 用于 Alembic 迁移"""
+    db_host = os.getenv("DB_HOST", "localhost")
+    db_user = os.getenv("DB_USER", "erp_app")
+    db_password = os.getenv("DB_PASSWORD", "")
+    db_name = os.getenv("DB_NAME", "erp_system")
+    db_port = os.getenv("DB_PORT", "5432")
+    # 使用 psycopg3 作为同步驱动
+    return f"postgresql+psycopg://{quote_plus(db_user)}:{quote_plus(db_password)}@{db_host}:{db_port}/{db_name}"
 
 
 class Settings(BaseSettings):
@@ -34,16 +46,11 @@ class Settings(BaseSettings):
     OPENAPI_URL: str = "/api/openapi.json"
 
     # 数据库配置
-    # 优先使用 DATABASE_URL 环境变量，否则从 DB_* 变量构建
-    DATABASE_URL: str = os.getenv("DATABASE_URL") or _build_database_uri()
-
-    # 异步数据库URL - 用于 FastAPI 主要业务逻辑（asyncmy 驱动）
-    ASYNC_DATABASE_URL: str = os.getenv(
-        "ASYNC_DATABASE_URL",
-        (os.getenv("DATABASE_URL") or _build_database_uri()).replace(
-            "mysql+pymysql", "mysql+asyncmy"
-        )
-    )
+    # 异步数据库URL - 使用 asyncpg 驱动（性能最优）
+    ASYNC_DATABASE_URL: str = os.getenv("ASYNC_DATABASE_URL") or _build_database_uri()
+    
+    # 同步数据库URL - 使用 psycopg3 驱动（用于 Alembic 迁移等场景）
+    DATABASE_URL: str = os.getenv("DATABASE_URL") or _build_sync_database_uri()
 
     # Redis配置
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -63,8 +70,8 @@ class Settings(BaseSettings):
     )
 
     # CORS配置 - 从环境变量读取允许的源，默认仅允许本地访问
-    # 包含 Nginx 统一入口（端口80）以及直接访问模式（端口5002）
-    BACKEND_CORS_ORIGINS: list[str] = os.getenv("CORS_ORIGINS", "http://localhost,http://localhost:5002").split(",")
+    # 包含 Nginx 统一入口（端口80）、直接访问模式（端口5002）以及 Next.js 前端（端口3000）
+    BACKEND_CORS_ORIGINS: list[str] = os.getenv("CORS_ORIGINS", "http://localhost,http://localhost:5002,http://localhost:3000").split(",")
 
     # 安全配置 - 从环境变量读取，生产环境必须显式设置
     SECRET_KEY: str = os.getenv("SECRET_KEY", "")
@@ -93,12 +100,22 @@ class Settings(BaseSettings):
                 f"SECRET_KEY 不能使用不安全的默认值 '{self.SECRET_KEY}'，"
                 "请生成新的密钥: python -c \"import secrets; print(secrets.token_hex(32))\""
             )
+        if len(self.SECRET_KEY) < 32:
+            raise RuntimeError(
+                f"SECRET_KEY 长度不足（当前 {len(self.SECRET_KEY)} 字符，至少需要 32 字符），"
+                "请生成新的密钥: python -c \"import secrets; print(secrets.token_hex(32))\""
+            )
         if not self.REDIS_PASSWORD and os.getenv("APP_ENV") == "production":
             import warnings
             warnings.warn(
                 "REDIS_PASSWORD 未设置，生产环境建议启用 Redis 认证",
                 UserWarning,
                 stacklevel=2,
+            )
+        if os.getenv("APP_ENV") == "production" and self.ALLOWED_HOSTS == ["*"]:
+            raise RuntimeError(
+                "生产环境禁止 ALLOWED_HOSTS='*'，必须通过环境变量设置具体域名"
+                "（如 ALLOWED_HOSTS=erp.example.com,erp.example.cn）以防止 Host 头注入"
             )
 
     # 分页配置

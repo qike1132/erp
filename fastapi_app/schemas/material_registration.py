@@ -27,7 +27,7 @@ class MaterialRegistrationUpdate(BaseModel):
 
 
 class ReceiveMaterialRequest(BaseModel):
-    received_quantity: float = Field(..., ge=0, description="收货数量")
+    received_quantity: float = Field(..., gt=0, description="收货数量")
     remark: str | None = None
 
 

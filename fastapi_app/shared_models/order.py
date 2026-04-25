@@ -10,6 +10,22 @@ from datetime import datetime
 from fastapi_app.shared_models import Base
 
 
+VALID_ORDER_STATUSES = {'待备货', '部分备货', '已备货', '待出货', '已出货', '已完成', '已取消'}
+
+STATUS_TRANSITIONS = {
+    '待备货': {'部分备货', '已备货', '已取消'},
+    '部分备货': {'已备货', '待出货', '已取消'},
+    '已备货': {'待出货', '已取消'},
+    '待出货': {'已出货', '已取消'},
+    '已出货': {'已完成'},
+    '已完成': set(),
+    '已取消': set(),
+}
+
+DELETABLE_STATUSES = {'待备货', '部分备货', '已取消'}
+EDITABLE_STATUSES = {'待备货', '部分备货'}
+
+
 class Order(Base):
     """订单模型"""
     __tablename__ = 'order'
@@ -20,7 +36,7 @@ class Order(Base):
     order_date: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, index=True, comment='下单时间')
     product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id'), nullable=False, index=True, comment='产品ID')
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, comment='订单数量')
-    status: Mapped[str | None] = mapped_column(String(20), default='待备货', index=True, comment='订单状态')
+    status: Mapped[str] = mapped_column(String(20), default='待备货', nullable=False, index=True, comment='订单状态')
     note: Mapped[str | None] = mapped_column(Text, comment='备注')
     batch_no: Mapped[str | None] = mapped_column(String(100), comment='批次号')
     order_type: Mapped[str] = mapped_column(String(20), default='regular', nullable=False, comment='订单类型：regular=常规订单, custom=定制订单')
@@ -45,7 +61,33 @@ class Order(Base):
         Index('idx_order_customer_product', 'customer', 'product_id'),
         Index('idx_order_locked', 'is_locked'),
         Index('idx_order_type', 'order_type'),
+        {'quote': True},
     )
+
+    @classmethod
+    def validate_status(cls, status: str) -> None:
+        if status not in VALID_ORDER_STATUSES:
+            raise ValueError(f"无效的订单状态: '{status}'，合法值: {', '.join(sorted(VALID_ORDER_STATUSES))}")
+
+    def can_transition_to(self, new_status: str) -> bool:
+        self.validate_status(new_status)
+        allowed = STATUS_TRANSITIONS.get(self.status, set())
+        return new_status in allowed or self.status == new_status
+
+    def transition_to(self, new_status: str) -> None:
+        if not self.can_transition_to(new_status):
+            allowed = STATUS_TRANSITIONS.get(self.status, set())
+            raise ValueError(
+                f"订单 {self.order_no} 不允许从 '{self.status}' 变更为 '{new_status}'，"
+                f"允许的目标状态: {', '.join(sorted(allowed)) if allowed else '无（终态）'}"
+            )
+        self.status = new_status
+
+    def is_deletable(self) -> bool:
+        return self.status in DELETABLE_STATUSES
+
+    def is_editable(self) -> bool:
+        return self.status in EDITABLE_STATUSES
 
     def __repr__(self):
         return f'<Order {self.order_no}>'

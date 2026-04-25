@@ -4,18 +4,28 @@ FastAPI 依赖注入
 认证和权限检查：支持两种认证方式（优先级从高到低）：
 1. JWT Bearer Token（Authorization: Bearer <token>）— 用于API客户端/移动端
 2. Cookie-based JWT（httpOnly cookie）— 用于浏览器Web端
+
+已迁移到全异步数据库操作，移除同步引擎依赖。
 """
 
 from fastapi import Depends, HTTPException, status, Request
-from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload, selectinload
+from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 
 from fastapi_app.core.config import settings
+from fastapi_app.core.database import get_async_db
 from fastapi_app.shared_models import User, Permission
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "get_current_user_id", 
+    "require_permission", 
+    "create_access_token", 
+    "get_async_db",
+]
 
 
 def create_access_token(data: dict, expires_delta=None) -> str:
@@ -100,24 +110,19 @@ def _resolve_user_id(request: Request) -> int | None:
     return user_id
 
 
-async def _verify_user_active(user_id: int) -> bool:
-    """验证用户仍存在且处于启用状态（在线程池中执行同步DB查询，不阻塞事件循环）"""
-    from fastapi_app.core.database import SyncSessionLocal
-
-    def _check():
-        db = SyncSessionLocal()
-        try:
-            user = db.execute(
-                select(User.id, User.status).where(User.id == user_id)
-            ).first()
-            return user is not None and bool(user.status)
-        finally:
-            db.close()
-
-    return await run_in_threadpool(_check)
+async def _verify_user_active(user_id: int, db: AsyncSession) -> bool:
+    """验证用户仍存在且处于启用状态（异步数据库查询）"""
+    result = await db.execute(
+        select(User.id, User.status).where(User.id == user_id)
+    )
+    user = result.first()
+    return user is not None and bool(user.status)
 
 
-async def get_current_user_id(request: Request) -> int:
+async def get_current_user_id(
+    request: Request,
+    db: AsyncSession = Depends(get_async_db)
+) -> int:
     """
     获取当前用户ID（双认证模式）。
 
@@ -136,7 +141,7 @@ async def get_current_user_id(request: Request) -> int:
             detail="未登录",
         )
 
-    if not await _verify_user_active(user_id):
+    if not await _verify_user_active(user_id, db):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="用户不存在或已被禁用",
@@ -145,38 +150,32 @@ async def get_current_user_id(request: Request) -> int:
     return user_id
 
 
-async def _get_user_with_permissions(request: Request) -> User:
+async def _get_user_with_permissions(
+    request: Request,
+    db: AsyncSession = Depends(get_async_db)
+) -> User:
     """
     解析认证信息并从数据库查询用户，同时预加载权限列表。
 
-    使用 run_in_threadpool 包装同步 DB 查询，避免阻塞事件循环。
-    expunge 使 User 对象可在任何上下文安全使用。
+    使用异步数据库查询，expunge 使 User 对象可在任何上下文安全使用。
     """
-    user_id = await get_current_user_id(request)
+    user_id = await get_current_user_id(request, db)
 
-    from fastapi_app.core.database import SyncSessionLocal
-
-    def _fetch():
-        db = SyncSessionLocal()
-        try:
-            result = db.execute(
-                select(User)
-                .options(joinedload(User.permissions).selectinload(Permission.children))
-                .where(User.id == user_id)
-            )
-            user = result.unique().scalar_one_or_none()
-            if user:
-                db.expunge(user)
-            return user
-        finally:
-            db.close()
-
-    user = await run_in_threadpool(_fetch)
+    result = await db.execute(
+        select(User)
+        .options(joinedload(User.permissions).selectinload(Permission.children))
+        .where(User.id == user_id)
+    )
+    user = result.unique().scalar_one_or_none()
+    
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="用户不存在",
         )
+    
+    # expunge 使 User 对象脱离 session，可在任何上下文安全使用
+    db.expunge(user)
     return user
 
 

@@ -49,6 +49,7 @@ class PurchaseOrder(Base):
         Index('idx_purchase_order_customer', 'customer_id'),
         Index('idx_purchase_order_status', 'status'),
         Index('idx_purchase_order_date', 'order_date'),
+        Index('idx_purchase_order_created_by', 'created_by'),
     )
 
     def __repr__(self):

@@ -11,12 +11,12 @@ from datetime import datetime, date, timedelta
 from typing import Optional
 
 import openpyxl
-from sqlalchemy import select, func, and_, delete
+from sqlalchemy import select, func, and_, delete, extract
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.shared_models import (
     CraftWork, PackagingRecord,
-    CaseStockOut, Case,
+    CaseStockOut, Case, Product,
 )
 from fastapi_app.services import escape_like
 
@@ -52,8 +52,8 @@ async def get_craft_works(db: AsyncSession, year: int, month: int,
     返回每条记录 + 按日汇总（含当天皮套出库总数）
     """
     conditions = [
-        func.year(CraftWork.work_date) == year,
-        func.month(CraftWork.work_date) == month,
+        extract('year', CraftWork.work_date) == year,
+        extract('month', CraftWork.work_date) == month,
     ]
     if work_date:
         conditions.append(CraftWork.work_date == _parse_date(work_date))
@@ -203,8 +203,8 @@ async def get_packaging_records(db: AsyncSession, year: int, month: int,
     conditions = []
     if year and month:
         conditions.extend([
-            func.year(PackagingRecord.pack_date) == year,
-            func.month(PackagingRecord.pack_date) == month,
+            extract('year', PackagingRecord.pack_date) == year,
+            extract('month', PackagingRecord.pack_date) == month,
         ])
     if customer:
         conditions.append(PackagingRecord.customer.like(f'%{escape_like(customer)}%'))
@@ -582,14 +582,16 @@ async def _get_case_stockout_daily(db: AsyncSession, start: date,
 async def _get_case_stockout_detail(db: AsyncSession, start: date,
                                      end: date) -> dict:
     """获取皮套出库按日+客户+产品明细"""
+    # sync_name 逻辑：有 product_id 时返回 Product.name，否则返回 Case.name
     result = await db.execute(
         select(
             func.date(CaseStockOut.stockout_date).label('d'),
             CaseStockOut.customer,
-            func.coalesce(Case.sync_name, Case.name).label('product_name'),
+            func.coalesce(Product.name, Case.name).label('product_name'),
             CaseStockOut.quantity,
         )
         .join(Case, CaseStockOut.case_id == Case.id)
+        .outerjoin(Product, Case.product_id == Product.id)
         .where(
             and_(
                 func.date(CaseStockOut.stockout_date) >= start,

@@ -28,18 +28,23 @@ class MaterialRegistration(Base):
     )
     purchase_order: Mapped["PurchaseOrder"] = relationship("PurchaseOrder", backref="registrations")
 
-    @property
-    def computed_status(self) -> str:
-        """计算状态 - 必须每个物料项 individually 完成才算 completed"""
+    def _calc_items_stats(self):
+        """计算物料项汇总统计（内部方法，供 computed_status/progress/to_dict 复用）"""
         items_list = list(self.items) if self.items else []
-        if not items_list:
-            return 'pending'
         total_ordered = sum(float(item.ordered_quantity or 0) for item in items_list)
         total_received = sum(float(item.received_quantity or 0) for item in items_list)
         all_complete = all(
             float(item.received_quantity or 0) >= float(item.ordered_quantity or 0)
             for item in items_list if float(item.ordered_quantity or 0) > 0
         )
+        return items_list, total_ordered, total_received, all_complete
+
+    @property
+    def computed_status(self) -> str:
+        """计算状态 - 必须每个物料项 individually 完成才算 completed"""
+        items_list, total_ordered, total_received, all_complete = self._calc_items_stats()
+        if not items_list:
+            return 'pending'
         if all_complete:
             return 'completed'
         elif total_received > 0:
@@ -49,15 +54,9 @@ class MaterialRegistration(Base):
     @property
     def progress(self) -> float:
         """完成进度百分比，未全部完成时上限99.9%"""
-        items_list = list(self.items) if self.items else []
-        total_ordered = sum(float(item.ordered_quantity or 0) for item in items_list)
+        items_list, total_ordered, total_received, all_complete = self._calc_items_stats()
         if not total_ordered:
             return 0.0
-        total_received = sum(float(item.received_quantity or 0) for item in items_list)
-        all_complete = all(
-            float(item.received_quantity or 0) >= float(item.ordered_quantity or 0)
-            for item in items_list if float(item.ordered_quantity or 0) > 0
-        )
         if all_complete:
             return 100.0
         return min(round(total_received / total_ordered * 100, 1), 99.9)
@@ -67,9 +66,7 @@ class MaterialRegistration(Base):
         self.status = self.computed_status
 
     def to_dict(self):
-        items_list = list(self.items) if self.items else []
-        total_ordered = sum(float(item.ordered_quantity or 0) for item in items_list)
-        total_received = sum(float(item.received_quantity or 0) for item in items_list)
+        items_list, total_ordered, total_received, _ = self._calc_items_stats()
         return {
             'id': self.id,
             'purchase_order_id': self.purchase_order_id,

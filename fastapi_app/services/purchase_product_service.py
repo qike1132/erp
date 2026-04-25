@@ -348,20 +348,25 @@ def calculate_material(db: Session, orders_data: list) -> dict:
 
         for mat in all_materials:
             category = mat.get('category', '')
-            name = mat.get('name', '')
+            name = mat.get('material_name', '')
             key = f"{category}:{name}"
-            per_unit = Decimal(str(mat.get('quantity_per_unit', 0)))
+            per_unit = Decimal(str(mat.get('unit_usage', 0)))
             totals[key]['total'] += per_unit * quantity
             totals[key]['name'] = name
             totals[key]['category'] = category
             totals[key]['unit'] = mat.get('unit', '')
             totals[key]['supplier_name'] = mat.get('supplier_name', '')
+            totals[key]['specification'] = mat.get('specification', '')
+            totals[key]['material_code'] = mat.get('material_code', '')
 
     for key, info in totals.items():
         category = info['category']
         if category in result:
             result[category].append({
                 'name': info['name'],
+                'material_name': info['name'],
+                'material_code': info.get('material_code', ''),
+                'specification': info.get('specification', ''),
                 'total_quantity': float(info['total']),
                 'unit': info['unit'],
                 'supplier_name': info['supplier_name'],

@@ -83,7 +83,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='ERP服务器管理器_v3.5',
+    name='ERP服务器管理器_v4.1',
     debug=False,
     bootloader_ignore_signals=False,
     strip=True,

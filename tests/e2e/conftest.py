@@ -33,8 +33,9 @@ def pytest_collection_modifyitems(config, items):
 
 @pytest.fixture(scope='session')
 def e2e_base_url():
-    """E2E测试基础URL"""
-    return 'http://localhost:5000'
+    """E2E测试基础URL（可通过环境变量 E2E_BASE_URL 覆盖）"""
+    import os
+    return os.getenv('E2E_BASE_URL', 'http://localhost:5002')
 
 
 @pytest.fixture(scope='session')

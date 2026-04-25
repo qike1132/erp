@@ -18,7 +18,7 @@ scrape_configs:
   - job_name: 'fastapi'
     metrics_path: /metrics
     static_configs:
-      - targets: ['erp-app:5002']
+      - targets: ['app:5002']
         labels:
           service: 'fastapi'
 
@@ -30,12 +30,12 @@ scrape_configs:
         labels:
           service: 'nginx'
 
-  # MySQL 指标
-  - job_name: 'mysql'
+  # PostgreSQL 指标
+  - job_name: 'postgres'
     static_configs:
-      - targets: ['mysql-exporter:9104']
+      - targets: ['postgres-exporter:9187']
         labels:
-          service: 'mysql'
+          service: 'postgres'
 
   # Redis 指标
   - job_name: 'redis'
@@ -43,6 +43,14 @@ scrape_configs:
       - targets: ['redis-exporter:9121']
         labels:
           service: 'redis'
+
+  # Celery 任务指标（via celery-exporter）
+  - job_name: 'celery'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['celery-exporter:9808']
+        labels:
+          service: 'celery'
 
   # Prometheus 自身指标
   - job_name: 'prometheus'

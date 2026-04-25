@@ -27,6 +27,23 @@ class OrderUpdate(BaseModel):
     country: Optional[str] = Field(None, max_length=100, description="国家名称")
 
 
+class OrderDetailResponse(BaseModel):
+    """单个订单详情响应"""
+    id: int
+    order_no: str
+    customer: str
+    order_date: str = ""
+    product: Optional[dict] = None
+    quantity: int
+    deduct_quantity: int = 0
+    status: str
+    note: str = ""
+    order_type: str = "regular"
+    country: str = ""
+    is_locked: Optional[bool] = None
+    locked_by_name: Optional[str] = None
+
+
 class OrderListResponse(BaseModel):
     """订单列表响应"""
     success: bool = True

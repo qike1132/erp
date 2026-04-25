@@ -26,6 +26,7 @@ from fastapi_app.api.v1.endpoints.finance import router as finance_router
 from fastapi_app.api.v1.endpoints.production_plan import router as production_plan_router
 from fastapi_app.api.v1.endpoints.purchase_plan import router as purchase_plan_router
 from fastapi_app.api.v1.endpoints.production_summary import router as production_summary_router
+from fastapi_app.api.v1.endpoints.dashboard import router as dashboard_router
 
 api_router = APIRouter()
 
@@ -180,4 +181,11 @@ api_router.include_router(
     production_summary_router,
     prefix="/production-summary",
     tags=["生产计划"],
+)
+
+# 仪表盘路由 - 前缀 /api/v1/dashboard
+api_router.include_router(
+    dashboard_router,
+    prefix="/dashboard",
+    tags=["仪表盘"],
 )

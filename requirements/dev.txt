@@ -6,12 +6,9 @@
 -r base.txt
 
 # ----- 代码质量 -----
-pylint==3.0.3
-flake8==7.0.0
-radon==6.0.1
-bandit==1.7.6
-black==23.12.1
-isort==5.13.2
-mypy==1.7.1
+ruff>=0.11.0               # 替代 black + flake8 + isort，Rust 实现，快 100x
+bandit>=1.7.6
+pre-commit>=4.0.0
+mypy>=1.15.0
 memory-profiler==0.61.0
 py-spy==0.3.14

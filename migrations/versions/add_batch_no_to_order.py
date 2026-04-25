@@ -8,8 +8,8 @@ from alembic import op
 import sqlalchemy as sa
 
 # revision identifiers
-revision = 'add_batch_no_order'
-down_revision = None
+revision = 'add_batch_no_to_order'
+down_revision = 'add_customer_code_to_customer'
 branch_labels = None
 depends_on = None
 

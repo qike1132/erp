@@ -44,6 +44,58 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+# ============================================================
+# 共享 helper — 消除 6 个端点的重复文件/Excel/Sheet 逻辑
+# ============================================================
+
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def _save_uploaded_file(file: UploadFile):
+    """保存上传文件到临时路径，退出时自动清理"""
+    temp_path = None
+    try:
+        temp_fd, temp_path = tempfile.mkstemp(suffix='.xlsx')
+        os.close(temp_fd)
+        content = await file.read(MAX_BATCH_UPLOAD_SIZE + 1)
+        if len(content) > MAX_BATCH_UPLOAD_SIZE:
+            raise ValueError("文件大小超过5MB限制，请拆分后重新上传")
+        with open(temp_path, 'wb') as f:
+            f.write(content)
+        yield temp_path
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except Exception:
+                pass
+
+
+def _find_target_sheet(sheets: list, keywords: list[str]) -> str | None:
+    """按关键词列表匹配 sheet 名称（顺序优先）"""
+    for sheet in sheets:
+        for kw in keywords:
+            if kw in sheet:
+                return sheet
+    return sheets[0] if sheets else None
+
+
+def _build_batch_result(imported: int, skipped: int, errors: list,
+                        success_msg: str, fail_msg: str) -> BatchImportResult:
+    """构建统一的批量导入返回结果"""
+    if imported > 0:
+        msg = f'{success_msg} {imported} 条'
+        if skipped > 0:
+            msg += f'，跳过 {skipped} 行'
+        if errors:
+            msg += f'。错误: {"; ".join(errors[:5])}'
+        return BatchImportResult(success=True, message=msg, imported=imported, skipped=skipped)
+    if errors:
+        return BatchImportResult(success=False, message=f'{fail_msg}。错误: {"; ".join(errors[:3])}')
+    return BatchImportResult(success=False, message=fail_msg)
+
+
 @router.get("/download-template", summary="下载统一导入模板")
 async def download_template(
     current_user: User = Depends(require_permission("batch_import")),
@@ -101,40 +153,19 @@ async def batch_import_orders(
     if not file.filename or not (file.filename.endswith('.xlsx')):
         return BatchImportResult(success=False, message="只支持 Excel 文件格式 (.xlsx)，.xls 已不再支持")
 
-    temp_path = None
     try:
-        # 保存上传文件到临时路径
-        temp_fd, temp_path = tempfile.mkstemp(suffix='.xlsx')
-        os.close(temp_fd)
+        async with _save_uploaded_file(file) as temp_path:
+            success, sheets, err = await read_excel_sheets_async(temp_path)
+            if not success:
+                return BatchImportResult(success=False, message=f"Excel读取失败: {err}")
 
-        # 文件大小检查，防止OOM
-        content = await file.read(MAX_BATCH_UPLOAD_SIZE + 1)
-        if len(content) > MAX_BATCH_UPLOAD_SIZE:
-            return ComprehensiveImportResult(success=False, message="文件大小超过5MB限制，请拆分后重新上传")
+            target_sheet = _find_target_sheet(sheets, ['订单管理'])
+            if not target_sheet:
+                return BatchImportResult(success=False, message='没有找到"订单管理"Sheet')
 
-
-        with open(temp_path, 'wb') as f:
-            f.write(content)
-
-        # 读取 Excel
-        success, sheets, err = await read_excel_sheets_async(temp_path)
-        if not success:
-            return BatchImportResult(success=False, message=f"Excel读取失败: {err}")
-
-        # 找到"订单管理"Sheet
-        target_sheet = None
-        for sheet in sheets:
-            if '订单管理' in sheet:
-                target_sheet = sheet
-                break
-
-        if not target_sheet:
-            return BatchImportResult(success=False, message='没有找到"订单管理"Sheet')
-
-        # 解析数据
-        success, data_list, err = await parse_excel_file_async(temp_path, target_sheet)
-        if not success:
-            return BatchImportResult(success=False, message=f"数据解析失败: {err}")
+            success, data_list, err = await parse_excel_file_async(temp_path, target_sheet)
+            if not success:
+                return BatchImportResult(success=False, message=f"数据解析失败: {err}")
 
         # 预加载所有产品
         result = await db.execute(select(Product))
@@ -222,28 +253,16 @@ async def batch_import_orders(
 
         if imported > 0:
             await db.commit()
-            result_msg = f'成功导入 {imported} 个订单'
-            if skipped > 0:
-                result_msg += f'，已过滤 {skipped} 个'
-            if errors:
-                result_msg += f'。错误: {"; ".join(errors[:5])}'
-            return BatchImportResult(success=True, message=result_msg, imported=imported, skipped=skipped)
         else:
             await db.rollback()
-            if errors:
-                return BatchImportResult(success=False, message=f'没有成功导入任何订单。错误: {"; ".join(errors[:3])}')
-            else:
-                return BatchImportResult(success=False, message='没有找到需要导入的订单数据')
+        return _build_batch_result(
+            imported, skipped, errors,
+            success_msg='成功导入', fail_msg='没有成功导入任何订单'
+        )
 
     except Exception as e:
         logger.error(f"订单批量导入失败: {e}", exc_info=True)
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
-    finally:
-        if temp_path and os.path.exists(temp_path):
-            try:
-                os.unlink(temp_path)
-            except Exception:
-                pass
 
 
 @router.post("/import-case-stockouts", response_model=BatchImportResult, summary="批量导入皮套出库")
@@ -256,40 +275,19 @@ async def batch_import_case_stockouts(
     if not file.filename or not (file.filename.endswith('.xlsx')):
         return BatchImportResult(success=False, message="只支持 Excel 文件格式 (.xlsx)，.xls 已不再支持")
 
-    temp_path = None
     try:
-        temp_fd, temp_path = tempfile.mkstemp(suffix='.xlsx')
-        os.close(temp_fd)
+        async with _save_uploaded_file(file) as temp_path:
+            success, sheets, err = await read_excel_sheets_async(temp_path)
+            if not success:
+                return BatchImportResult(success=False, message=f"Excel读取失败: {err}")
 
-        # 文件大小检查，防止OOM
-        content = await file.read(MAX_BATCH_UPLOAD_SIZE + 1)
-        if len(content) > MAX_BATCH_UPLOAD_SIZE:
-            return ComprehensiveImportResult(success=False, message="文件大小超过5MB限制，请拆分后重新上传")
-
-
-        with open(temp_path, 'wb') as f:
-            f.write(content)
-
-        success, sheets, err = await read_excel_sheets_async(temp_path)
-        if not success:
-            return BatchImportResult(success=False, message=f"Excel读取失败: {err}")
-
-        target_sheet = None
-        for sheet in sheets:
-            if '皮套出库' in sheet or '皮套出货' in sheet:
-                target_sheet = sheet
-                break
-
-        if not target_sheet:
-            # 如果没有匹配到特定Sheet，使用第一个Sheet
-            if sheets:
-                target_sheet = sheets[0]
-            else:
+            target_sheet = _find_target_sheet(sheets, ['皮套出库', '皮套出货'])
+            if not target_sheet:
                 return BatchImportResult(success=False, message='没有找到可用的Sheet')
 
-        success, data_list, err = await parse_excel_file_async(temp_path, target_sheet)
-        if not success:
-            return BatchImportResult(success=False, message=f"数据解析失败: {err}")
+            success, data_list, err = await parse_excel_file_async(temp_path, target_sheet)
+            if not success:
+                return BatchImportResult(success=False, message=f"数据解析失败: {err}")
 
         imported = 0
         skipped = 0
@@ -400,28 +398,16 @@ async def batch_import_case_stockouts(
 
         if imported > 0:
             await db.commit()
-            result_msg = f'成功导入 {imported} 条皮套出库'
-            if skipped > 0:
-                result_msg += f'，跳过 {skipped} 行'
-            if errors:
-                result_msg += f'。错误: {"; ".join(errors[:5])}'
-            return BatchImportResult(success=True, message=result_msg, imported=imported, skipped=skipped)
         else:
             await db.rollback()
-            if errors:
-                return BatchImportResult(success=False, message=f'没有成功导入任何皮套出库。错误: {"; ".join(errors[:3])}')
-            else:
-                return BatchImportResult(success=False, message='没有找到需要导入的皮套出库数据')
+        return _build_batch_result(
+            imported, skipped, errors,
+            success_msg='成功导入皮套出库', fail_msg='没有成功导入任何皮套出库'
+        )
 
     except Exception as e:
         logger.error(f"皮套出库批量导入失败: {e}", exc_info=True)
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
-    finally:
-        if temp_path and os.path.exists(temp_path):
-            try:
-                os.unlink(temp_path)
-            except Exception:
-                pass
 
 
 @router.post("/import-case-stockins", response_model=BatchImportResult, summary="批量导入皮套入库")
@@ -434,39 +420,19 @@ async def batch_import_case_stockins(
     if not file.filename or not (file.filename.endswith('.xlsx')):
         return BatchImportResult(success=False, message="只支持 Excel 文件格式 (.xlsx)，.xls 已不再支持")
 
-    temp_path = None
     try:
-        temp_fd, temp_path = tempfile.mkstemp(suffix='.xlsx')
-        os.close(temp_fd)
+        async with _save_uploaded_file(file) as temp_path:
+            success, sheets, err = await read_excel_sheets_async(temp_path)
+            if not success:
+                return BatchImportResult(success=False, message=f"Excel读取失败: {err}")
 
-        # 文件大小检查，防止OOM
-        content = await file.read(MAX_BATCH_UPLOAD_SIZE + 1)
-        if len(content) > MAX_BATCH_UPLOAD_SIZE:
-            return ComprehensiveImportResult(success=False, message="文件大小超过5MB限制，请拆分后重新上传")
-
-
-        with open(temp_path, 'wb') as f:
-            f.write(content)
-
-        success, sheets, err = await read_excel_sheets_async(temp_path)
-        if not success:
-            return BatchImportResult(success=False, message=f"Excel读取失败: {err}")
-
-        target_sheet = None
-        for sheet in sheets:
-            if '皮套入库' in sheet or '皮套进库' in sheet:
-                target_sheet = sheet
-                break
-
-        if not target_sheet:
-            if sheets:
-                target_sheet = sheets[0]
-            else:
+            target_sheet = _find_target_sheet(sheets, ['皮套入库', '皮套进库'])
+            if not target_sheet:
                 return BatchImportResult(success=False, message='没有找到可用的Sheet')
 
-        success, data_list, err = await parse_excel_file_async(temp_path, target_sheet)
-        if not success:
-            return BatchImportResult(success=False, message=f"数据解析失败: {err}")
+            success, data_list, err = await parse_excel_file_async(temp_path, target_sheet)
+            if not success:
+                return BatchImportResult(success=False, message=f"数据解析失败: {err}")
 
         imported = 0
         skipped = 0
@@ -571,28 +537,16 @@ async def batch_import_case_stockins(
 
         if imported > 0:
             await db.commit()
-            result_msg = f'成功导入 {imported} 条皮套入库'
-            if skipped > 0:
-                result_msg += f'，跳过 {skipped} 行'
-            if errors:
-                result_msg += f'。错误: {"; ".join(errors[:5])}'
-            return BatchImportResult(success=True, message=result_msg, imported=imported, skipped=skipped)
         else:
             await db.rollback()
-            if errors:
-                return BatchImportResult(success=False, message=f'没有成功导入任何皮套入库。错误: {"; ".join(errors[:3])}')
-            else:
-                return BatchImportResult(success=False, message='没有找到需要导入的皮套入库数据')
+        return _build_batch_result(
+            imported, skipped, errors,
+            success_msg='成功导入皮套入库', fail_msg='没有成功导入任何皮套入库'
+        )
 
     except Exception as e:
         logger.error(f"皮套入库批量导入失败: {e}", exc_info=True)
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
-    finally:
-        if temp_path and os.path.exists(temp_path):
-            try:
-                os.unlink(temp_path)
-            except Exception:
-                pass
 
 
 @router.post("/import-stockins", response_model=BatchImportResult, summary="批量导入备货")
@@ -605,36 +559,19 @@ async def batch_import_stockins(
     if not file.filename or not (file.filename.endswith('.xlsx')):
         return BatchImportResult(success=False, message="只支持 Excel 文件格式 (.xlsx)，.xls 已不再支持")
 
-    temp_path = None
     try:
-        temp_fd, temp_path = tempfile.mkstemp(suffix='.xlsx')
-        os.close(temp_fd)
+        async with _save_uploaded_file(file) as temp_path:
+            success, sheets, err = await read_excel_sheets_async(temp_path)
+            if not success:
+                return BatchImportResult(success=False, message=f"Excel读取失败: {err}")
 
-        # 文件大小检查，防止OOM
-        content = await file.read(MAX_BATCH_UPLOAD_SIZE + 1)
-        if len(content) > MAX_BATCH_UPLOAD_SIZE:
-            return ComprehensiveImportResult(success=False, message="文件大小超过5MB限制，请拆分后重新上传")
+            target_sheet = _find_target_sheet(sheets, ['备货管理'])
+            if not target_sheet:
+                return BatchImportResult(success=False, message='没有找到"备货管理"Sheet')
 
-
-        with open(temp_path, 'wb') as f:
-            f.write(content)
-
-        success, sheets, err = await read_excel_sheets_async(temp_path)
-        if not success:
-            return BatchImportResult(success=False, message=f"Excel读取失败: {err}")
-
-        target_sheet = None
-        for sheet in sheets:
-            if '备货管理' in sheet:
-                target_sheet = sheet
-                break
-
-        if not target_sheet:
-            return BatchImportResult(success=False, message='没有找到"备货管理"Sheet')
-
-        success, data_list, err = await parse_excel_file_async(temp_path, target_sheet)
-        if not success:
-            return BatchImportResult(success=False, message=f"数据解析失败: {err}")
+            success, data_list, err = await parse_excel_file_async(temp_path, target_sheet)
+            if not success:
+                return BatchImportResult(success=False, message=f"数据解析失败: {err}")
 
         # 预加载所有产品
         result = await db.execute(select(Product))
@@ -718,28 +655,16 @@ async def batch_import_stockins(
 
         if imported > 0:
             await db.commit()
-            result_msg = f'成功导入 {imported} 条备货'
-            if skipped > 0:
-                result_msg += f'，跳过 {skipped} 行'
-            if errors:
-                result_msg += f'。错误: {"; ".join(errors[:5])}'
-            return BatchImportResult(success=True, message=result_msg, imported=imported, skipped=skipped)
         else:
             await db.rollback()
-            if errors:
-                return BatchImportResult(success=False, message=f'没有成功导入任何备货。错误: {"; ".join(errors[:3])}')
-            else:
-                return BatchImportResult(success=False, message='没有找到需要导入的备货数据')
+        return _build_batch_result(
+            imported, skipped, errors,
+            success_msg='成功导入备货', fail_msg='没有成功导入任何备货'
+        )
 
     except Exception as e:
         logger.error(f"备货批量导入失败: {e}", exc_info=True)
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
-    finally:
-        if temp_path and os.path.exists(temp_path):
-            try:
-                os.unlink(temp_path)
-            except Exception:
-                pass
 
 
 @router.post("/import-stockouts", response_model=BatchImportResult, summary="批量导入出库")
@@ -752,36 +677,19 @@ async def batch_import_stockouts(
     if not file.filename or not (file.filename.endswith('.xlsx')):
         return BatchImportResult(success=False, message="只支持 Excel 文件格式 (.xlsx)，.xls 已不再支持")
 
-    temp_path = None
     try:
-        temp_fd, temp_path = tempfile.mkstemp(suffix='.xlsx')
-        os.close(temp_fd)
+        async with _save_uploaded_file(file) as temp_path:
+            success, sheets, err = await read_excel_sheets_async(temp_path)
+            if not success:
+                return BatchImportResult(success=False, message=f"Excel读取失败: {err}")
 
-        # 文件大小检查，防止OOM
-        content = await file.read(MAX_BATCH_UPLOAD_SIZE + 1)
-        if len(content) > MAX_BATCH_UPLOAD_SIZE:
-            return ComprehensiveImportResult(success=False, message="文件大小超过5MB限制，请拆分后重新上传")
+            target_sheet = _find_target_sheet(sheets, ['出货管理'])
+            if not target_sheet:
+                return BatchImportResult(success=False, message='没有找到"出货管理"Sheet')
 
-
-        with open(temp_path, 'wb') as f:
-            f.write(content)
-
-        success, sheets, err = await read_excel_sheets_async(temp_path)
-        if not success:
-            return BatchImportResult(success=False, message=f"Excel读取失败: {err}")
-
-        target_sheet = None
-        for sheet in sheets:
-            if '出货管理' in sheet:
-                target_sheet = sheet
-                break
-
-        if not target_sheet:
-            return BatchImportResult(success=False, message='没有找到"出货管理"Sheet')
-
-        success, data_list, err = await parse_excel_file_async(temp_path, target_sheet)
-        if not success:
-            return BatchImportResult(success=False, message=f"数据解析失败: {err}")
+            success, data_list, err = await parse_excel_file_async(temp_path, target_sheet)
+            if not success:
+                return BatchImportResult(success=False, message=f"数据解析失败: {err}")
 
         imported = 0
         skipped = 0
@@ -900,28 +808,16 @@ async def batch_import_stockouts(
 
         if imported > 0:
             await db.commit()
-            result_msg = f'成功导入 {imported} 条出货'
-            if skipped > 0:
-                result_msg += f'，跳过 {skipped} 行'
-            if errors:
-                result_msg += f'。错误: {"; ".join(errors[:5])}'
-            return BatchImportResult(success=True, message=result_msg, imported=imported, skipped=skipped)
         else:
             await db.rollback()
-            if errors:
-                return BatchImportResult(success=False, message=f'没有成功导入任何出货。错误: {"; ".join(errors[:3])}')
-            else:
-                return BatchImportResult(success=False, message='没有找到需要导入的出货数据')
+        return _build_batch_result(
+            imported, skipped, errors,
+            success_msg='成功导入出货', fail_msg='没有成功导入任何出货'
+        )
 
     except Exception as e:
         logger.error(f"出库批量导入失败: {e}", exc_info=True)
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
-    finally:
-        if temp_path and os.path.exists(temp_path):
-            try:
-                os.unlink(temp_path)
-            except Exception:
-                pass
 
 
 @router.post("/batch-import", response_model=BatchImportResult, summary="批量导入产品")
@@ -934,36 +830,19 @@ async def batch_import_products(
     if not file.filename or not (file.filename.endswith('.xlsx')):
         return BatchImportResult(success=False, message="只支持 Excel 文件格式 (.xlsx)，.xls 已不再支持")
 
-    temp_path = None
     try:
-        temp_fd, temp_path = tempfile.mkstemp(suffix='.xlsx')
-        os.close(temp_fd)
+        async with _save_uploaded_file(file) as temp_path:
+            success, sheets, err = await read_excel_sheets_async(temp_path)
+            if not success:
+                return BatchImportResult(success=False, message=f"Excel读取失败: {err}")
 
-        # 文件大小检查，防止OOM
-        content = await file.read(MAX_BATCH_UPLOAD_SIZE + 1)
-        if len(content) > MAX_BATCH_UPLOAD_SIZE:
-            return ComprehensiveImportResult(success=False, message="文件大小超过5MB限制，请拆分后重新上传")
+            target_sheet = _find_target_sheet(sheets, ['产品管理'])
+            if not target_sheet:
+                return BatchImportResult(success=False, message='没有找到"产品管理"Sheet')
 
-
-        with open(temp_path, 'wb') as f:
-            f.write(content)
-
-        success, sheets, err = await read_excel_sheets_async(temp_path)
-        if not success:
-            return BatchImportResult(success=False, message=f"Excel读取失败: {err}")
-
-        target_sheet = None
-        for sheet in sheets:
-            if '产品管理' in sheet:
-                target_sheet = sheet
-                break
-
-        if not target_sheet:
-            return BatchImportResult(success=False, message='没有找到"产品管理"Sheet')
-
-        success, data_list, err = await parse_excel_file_async(temp_path, target_sheet)
-        if not success:
-            return BatchImportResult(success=False, message=f"数据解析失败: {err}")
+            success, data_list, err = await parse_excel_file_async(temp_path, target_sheet)
+            if not success:
+                return BatchImportResult(success=False, message=f"数据解析失败: {err}")
 
         imported = 0
         skipped = 0
@@ -1019,28 +898,16 @@ async def batch_import_products(
 
         if imported > 0:
             await db.commit()
-            result_msg = f'成功导入 {imported} 个产品'
-            if skipped > 0:
-                result_msg += f'，已过滤 {skipped} 个重复产品'
-            if errors:
-                result_msg += f'。错误: {"; ".join(errors[:5])}'
-            return BatchImportResult(success=True, message=result_msg, imported=imported, skipped=skipped)
         else:
             await db.rollback()
-            if errors:
-                return BatchImportResult(success=False, message=f'没有成功导入任何产品。错误: {"; ".join(errors[:3])}')
-            else:
-                return BatchImportResult(success=False, message='没有找到需要导入的产品数据（可能都已存在）')
+        return _build_batch_result(
+            imported, skipped, errors,
+            success_msg='成功导入产品', fail_msg='没有找到需要导入的产品数据（可能都已存在）'
+        )
 
     except Exception as e:
         logger.error(f"产品批量导入失败: {e}", exc_info=True)
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
-    finally:
-        if temp_path and os.path.exists(temp_path):
-            try:
-                os.unlink(temp_path)
-            except Exception:
-                pass
 
 
 @router.post("/import-comprehensive", response_model=ComprehensiveImportResult, summary="综合批量导入")
@@ -1056,23 +923,11 @@ async def batch_import_comprehensive(
     if not file.filename or not (file.filename.endswith('.xlsx')):
         return ComprehensiveImportResult(success=False, message="只支持 Excel 文件格式 (.xlsx)，.xls 已不再支持")
 
-    temp_path = None
     try:
-        temp_fd, temp_path = tempfile.mkstemp(suffix='.xlsx')
-        os.close(temp_fd)
-
-        # 文件大小检查，防止OOM
-        content = await file.read(MAX_BATCH_UPLOAD_SIZE + 1)
-        if len(content) > MAX_BATCH_UPLOAD_SIZE:
-            return ComprehensiveImportResult(success=False, message="文件大小超过5MB限制，请拆分后重新上传")
-
-
-        with open(temp_path, 'wb') as f:
-            f.write(content)
-
-        success, sheets, err = await read_excel_sheets_async(temp_path)
-        if not success:
-            return ComprehensiveImportResult(success=False, message=f"Excel读取失败: {err}")
+        async with _save_uploaded_file(file) as temp_path:
+            success, sheets, err = await read_excel_sheets_async(temp_path)
+            if not success:
+                return ComprehensiveImportResult(success=False, message=f"Excel读取失败: {err}")
 
         results = ComprehensiveImportResult()
         sheet_mapping = {
@@ -1153,9 +1008,3 @@ async def batch_import_comprehensive(
     except Exception as e:
         logger.error(f"综合批量导入失败: {e}", exc_info=True)
         return ComprehensiveImportResult(success=False, message='操作失败，请稍后重试')
-    finally:
-        if temp_path and os.path.exists(temp_path):
-            try:
-                os.unlink(temp_path)
-            except Exception:
-                pass

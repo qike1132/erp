@@ -69,7 +69,9 @@ class TestMaterialRegistrationService:
     @pytest.mark.asyncio
     async def test_get_registration_not_found(self, mock_db):
         from fastapi_app.services.material_registration_service import get_registration
-        mock_db.get = AsyncMock(return_value=None)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
 
         with pytest.raises(ValueError, match="不存在"):
             await get_registration(mock_db, 999)
@@ -95,7 +97,13 @@ class TestMaterialRegistrationService:
     @pytest.mark.asyncio
     async def test_receive_material_negative_qty(self, mock_db):
         from fastapi_app.services.material_registration_service import receive_material
-        mock_db.get = AsyncMock(return_value=MagicMock())
+        mock_item = MagicMock()
+        mock_item.registration = MagicMock()
+        mock_item.registration.items = []
+        mock_result = MagicMock()
+        mock_result.unique.return_value = mock_result
+        mock_result.scalar_one_or_none.return_value = mock_item
+        mock_db.execute = AsyncMock(return_value=mock_result)
 
         with pytest.raises(ValueError, match="大于0"):
             await receive_material(mock_db, 1, -5)
@@ -157,7 +165,10 @@ class TestMaterialRegistrationEndpoints:
 
     @pytest.mark.asyncio
     async def test_get_registration_404(self, client, mock_db):
-        mock_db.get = AsyncMock(return_value=None)
+        from fastapi_app.services.material_registration_service import get_registration
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
 
         response = await client.get("/api/v1/material-registrations/registrations/999")
         assert response.status_code == 404

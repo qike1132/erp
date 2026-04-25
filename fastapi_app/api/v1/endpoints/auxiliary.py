@@ -3,7 +3,7 @@ import time
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
@@ -18,25 +18,20 @@ router = APIRouter()
 
 @router.get("/health")
 async def health_check():
-    """应用健康检查"""
-    from utils.redis_cache import redis_cache
-    cache_stats = redis_cache.get_stats()
-
+    """应用健康检查（公开端点，仅返回基本状态）"""
     return {
         "status": "ok",
-        "db": "connected",
         "timestamp": time.time(),
-        "enhanced_cache": True,
-        "cache_backend": cache_stats.get('backend', 'unknown'),
-        "cache_connected": cache_stats.get('connected', False),
     }
 
 
 @router.get("/cache/stats")
-async def cache_stats():
-    """获取缓存统计信息"""
+async def cache_stats(
+    user: User = Depends(require_permission("admin")),
+):
+    """获取缓存统计信息（需管理员权限）"""
     from utils.redis_cache import redis_cache
-    return redis_cache.get_stats()
+    return await redis_cache.get_stats()
 
 
 @router.post("/cache/clear")
@@ -46,7 +41,7 @@ async def clear_cache(
 ):
     """清除缓存（需管理员权限）"""
     from utils.redis_cache import redis_cache
-    deleted = redis_cache.delete_pattern(pattern)
+    deleted = await redis_cache.delete_pattern(pattern)
     return {"success": True, "deleted": deleted, "pattern": pattern}
 
 
@@ -289,26 +284,28 @@ async def delete_supplier_api(
 # ==================== 批量提交 Pydantic 模型 ====================
 
 class BatchOrderItem(BaseModel):
-    product_id: int
+    product_id: int = Field(..., gt=0)
     customer: str
-    quantity: int
-    deduct_stock: Optional[str] = None
+    quantity: int = Field(..., gt=0, le=100000)
+    deduct_stock: Optional[bool] = None
     deduct_quantity: Optional[int] = None
     note: str = ""
+    order_type: str = Field("regular", pattern="^(regular|custom)$")
+    country: Optional[str] = None
 
 class BatchStockInItem(BaseModel):
-    product_id: int
+    product_id: int = Field(..., gt=0)
     customer: str
-    quantity: int
+    quantity: int = Field(..., gt=0, le=100000)
     note: str = ""
 
 class BatchStockOutItem(BaseModel):
-    product_id: int
+    product_id: int = Field(..., gt=0)
     customer: str
-    quantity: int
+    quantity: int = Field(..., gt=0, le=100000)
     note: str = ""
-    order_type: str = "regular"
-    country: str = ""
+    order_type: str = Field("regular", pattern="^(regular|custom)$")
+    country: Optional[str] = None
 
 class BatchOrderRequest(BaseModel):
     orders: List[BatchOrderItem]
@@ -330,9 +327,13 @@ async def batch_submit_orders(
 ):
     """批量提交订单"""
     from fastapi_app.services.order_service import batch_create_orders
-    result = await batch_create_orders(db, [item.model_dump() for item in data.orders])
-    await db.commit()
-    return result
+    try:
+        result = await batch_create_orders(db, [item.model_dump() for item in data.orders])
+        await db.commit()
+        return result
+    except Exception:
+        await db.rollback()
+        raise
 
 
 @router.post("/batch-submit-stockins")
@@ -343,9 +344,13 @@ async def batch_submit_stockins(
 ):
     """批量提交入库"""
     from fastapi_app.services.stock_service import batch_create_stockins
-    result = await batch_create_stockins(db, [item.model_dump() for item in data.stockins])
-    await db.commit()
-    return result
+    try:
+        result = await batch_create_stockins(db, [item.model_dump() for item in data.stockins])
+        await db.commit()
+        return result
+    except Exception:
+        await db.rollback()
+        raise
 
 
 @router.post("/batch-submit-stockouts")
@@ -356,16 +361,20 @@ async def batch_submit_stockouts(
 ):
     """批量提交出库"""
     from fastapi_app.services.stock_service import batch_create_stockouts
-    result = await batch_create_stockouts(db, [item.model_dump() for item in data.stockouts])
-    await db.commit()
-    return result
+    try:
+        result = await batch_create_stockouts(db, [item.model_dump() for item in data.stockouts])
+        await db.commit()
+        return result
+    except Exception:
+        await db.rollback()
+        raise
 
 
 # ==================== 系统状态 API ====================
 
 @router.get("/system/stats")
 async def system_stats(
-    user: User = Depends(require_permission("product_view")),
+    user: User = Depends(require_permission("admin")),
     db: AsyncSession = Depends(get_async_db),
 ):
     """系统统计信息（缓存命中率/性能数据）"""

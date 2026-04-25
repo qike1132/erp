@@ -89,9 +89,9 @@ class TestProductService:
             )
 
     async def test_update_product_not_found(self, mock_db):
-        mock_db.get = AsyncMock(return_value=None)
-        with pytest.raises(ValueError, match="不存在"):
-            await product_service.update_product(mock_db, 999, name="x", barcode=None, image=None, initial_stock=None)
+        with patch('fastapi_app.services.product_service.get_product_for_update', new_callable=AsyncMock, return_value=None):
+            with pytest.raises(ValueError, match="不存在"):
+                await product_service.update_product(mock_db, 999, name="x", barcode=None, image=None, initial_stock=None)
 
     async def test_update_product_success(self, mock_db):
         product = MagicMock()
@@ -100,19 +100,19 @@ class TestProductService:
         product.barcode = ""
         product.image = ""
         product.initial_stock = 10
+        product.current_stock = 10
         product.to_dict.return_value = {'id': 1, 'name': '新名称'}
 
-        mock_db.get = AsyncMock(return_value=product)
-        # 名称唯一性检查返回 None（不重复）
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = None
         mock_db.execute = AsyncMock(return_value=mock_result)
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock()
 
-        result = await product_service.update_product(
-            mock_db, 1, name="新名称", barcode=None, image=None, initial_stock=None
-        )
+        with patch('fastapi_app.services.product_service.get_product_for_update', new_callable=AsyncMock, return_value=product):
+            result = await product_service.update_product(
+                mock_db, 1, name="新名称", barcode=None, image=None, initial_stock=None
+            )
         assert result['name'] == '新名称'
 
     async def test_delete_product_not_found(self, mock_db):
@@ -252,21 +252,21 @@ class TestProductEndpoints:
         product.barcode = ""
         product.image = ""
         product.initial_stock = 0
+        product.current_stock = 0
         product.to_dict.return_value = {'id': 1, 'name': '新名称'}
-        mock_db.get = AsyncMock(return_value=product)
-        # 名称唯一性检查返回 None
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = None
         mock_db.execute = AsyncMock(return_value=mock_result)
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock()
-        response = await client.put("/api/v1/products/edit/1", json={"name": "新名称"})
+        with patch('fastapi_app.services.product_service.get_product_for_update', new_callable=AsyncMock, return_value=product):
+            response = await client.put("/api/v1/products/edit/1", json={"name": "新名称"})
         assert response.status_code == 200
         assert response.json()['success'] is True
 
     async def test_edit_product_not_found(self, client, mock_db):
-        mock_db.get = AsyncMock(return_value=None)
-        response = await client.put("/api/v1/products/edit/999", json={"name": "x"})
+        with patch('fastapi_app.services.product_service.get_product_for_update', new_callable=AsyncMock, return_value=None):
+            response = await client.put("/api/v1/products/edit/999", json={"name": "x"})
         assert response.status_code == 400
 
     async def test_delete_product_success(self, client, mock_db):

@@ -1,65 +1,111 @@
-"""财务统计服务层"""
+"""财务统计服务层
+
+SECURITY NOTE: where_clauses 列表仅包含硬编码的 SQL 片段，
+禁止将用户输入直接拼接到 where_clauses 中，所有用户输入
+必须通过 :param 参数绑定传递，以防止 SQL 注入。
+"""
 import logging
 from datetime import datetime, timedelta
-from sqlalchemy import text
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Any
 
 from fastapi_app.services import escape_like
+from fastapi_app.shared_models import Product, StockOut
 
 logger = logging.getLogger(__name__)
 
 
-async def get_customer_summary(db, customer: str = '', start_date: str = '',
-                               end_date: str = '', page: int = 1,
-                               per_page: int = 20) -> dict:
-    """按客户汇总出货数量和金额（仅手动出货，stockin_id IS NULL）"""
-    per_page = min(max(1, per_page), 100)
+def _normalize_finance_filters(customer: str = '', start_date: str = '', end_date: str = '') -> tuple[list, str]:
     customer = customer.strip()[:100]
-
-    where_clauses = ["so.quantity > 0", "so.stockin_id IS NULL"]
-    params = {}
+    filters = [
+        StockOut.quantity > 0,
+        StockOut.stockin_id.is_(None),
+    ]
 
     if customer:
-        where_clauses.append("COALESCE(so.customer, '') LIKE :customer")
-        params['customer'] = f'%{escape_like(customer)}%'
+        filters.append(
+            func.coalesce(StockOut.customer, '').like(
+                f'%{escape_like(customer)}%',
+                escape='\\',
+            )
+        )
     if start_date:
         try:
-            params['start_date'] = datetime.strptime(start_date, '%Y-%m-%d')
-            where_clauses.append("so.stockout_date >= :start_date")
+            filters.append(StockOut.stockout_date >= datetime.strptime(start_date, '%Y-%m-%d'))
         except ValueError:
             pass
     if end_date:
         try:
-            params['end_date'] = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
-            where_clauses.append("so.stockout_date < :end_date")
+            filters.append(StockOut.stockout_date < datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1))
         except ValueError:
             pass
 
-    where_sql = " AND " + " AND ".join(where_clauses)
+    return filters, customer
 
-    # 总数
-    count_sql = f"""SELECT COUNT(*) FROM (
-        SELECT so.customer
-        FROM stock_out so JOIN product p ON so.product_id = p.id
-        WHERE 1=1 {where_sql}
-        GROUP BY so.customer
-    ) AS grouped"""
-    total = (await db.execute(text(count_sql), params)).scalar() or 0
 
-    # 数据
-    data_sql = f"""SELECT
-        COALESCE(so.customer, '未知客户') AS customer,
-        SUM(so.quantity) AS total_quantity,
-        SUM(so.quantity * COALESCE(p.price, 0)) AS total_amount,
-        COUNT(so.id) AS stockout_count
-        FROM stock_out so JOIN product p ON so.product_id = p.id
-        WHERE 1=1 {where_sql}
-        GROUP BY so.customer
-        ORDER BY total_amount DESC
-        LIMIT :limit OFFSET :offset"""
-    params['limit'] = per_page
-    params['offset'] = (page - 1) * per_page
+def _amount_expr():
+    return StockOut.quantity * func.coalesce(Product.price, 0)
 
-    results = (await db.execute(text(data_sql), params)).fetchall()
+
+def _daily_date_expr():
+    return func.date(StockOut.stockout_date)
+
+
+async def _get_finance_stats(db: AsyncSession, filters: list) -> tuple[int, float]:
+    stats_stmt = (
+        select(
+            func.coalesce(func.sum(StockOut.quantity), 0).label('total_quantity'),
+            func.coalesce(func.sum(_amount_expr()), 0).label('total_amount'),
+        )
+        .select_from(StockOut)
+        .join(Product, StockOut.product_id == Product.id)
+        .where(*filters)
+    )
+    stats_row = (await db.execute(stats_stmt)).fetchone()
+    return (
+        stats_row.total_quantity if stats_row else 0,
+        float(stats_row.total_amount) if stats_row and stats_row.total_amount else 0.0,
+    )
+
+
+async def get_customer_summary(db: AsyncSession, customer: str = '', start_date: str = '',
+                               end_date: str = '', page: int = 1,
+                               per_page: int = 20) -> dict:
+    """按客户汇总出货数量和金额（仅手动出货，stockin_id IS NULL）"""
+    per_page = min(max(1, per_page), 100)
+    filters, customer = _normalize_finance_filters(customer, start_date, end_date)
+    customer_expr = func.coalesce(StockOut.customer, '未知客户')
+    grouped_stmt = (
+        select(
+            customer_expr.label('customer'),
+            func.sum(StockOut.quantity).label('total_quantity'),
+            func.sum(_amount_expr()).label('total_amount'),
+            func.count(StockOut.id).label('stockout_count'),
+        )
+        .select_from(StockOut)
+        .join(Product, StockOut.product_id == Product.id)
+        .where(*filters)
+        .group_by(customer_expr)
+    )
+    count_stmt = select(func.count()).select_from(
+        select(customer_expr)
+        .select_from(StockOut)
+        .join(Product, StockOut.product_id == Product.id)
+        .where(*filters)
+        .group_by(customer_expr)
+        .subquery()
+    )
+    total = (await db.execute(count_stmt)).scalar() or 0
+
+    results = (
+        await db.execute(
+            grouped_stmt
+            .order_by(func.sum(_amount_expr()).desc())
+            .limit(per_page)
+            .offset((page - 1) * per_page)
+        )
+    ).fetchall()
 
     logs = []
     for row in results:
@@ -70,22 +116,15 @@ async def get_customer_summary(db, customer: str = '', start_date: str = '',
             'stockout_count': row.stockout_count,
         })
 
-    # 汇总统计
-    stats_sql = f"""SELECT
-        COALESCE(SUM(so.quantity), 0) AS total_quantity,
-        COALESCE(SUM(so.quantity * COALESCE(p.price, 0)), 0) AS total_amount
-        FROM stock_out so JOIN product p ON so.product_id = p.id
-        WHERE 1=1 {where_sql}"""
-    stats_params = {k: v for k, v in params.items() if k not in ('limit', 'offset')}
-    stats_row = (await db.execute(text(stats_sql), stats_params)).fetchone()
+    total_quantity, total_amount = await _get_finance_stats(db, filters)
 
     return {
         'success': True,
         'logs': logs,
         'stats': {
             'total_count': total,
-            'total_quantity': stats_row.total_quantity if stats_row else 0,
-            'total_amount': float(stats_row.total_amount) if stats_row and stats_row.total_amount else 0.0,
+            'total_quantity': total_quantity,
+            'total_amount': total_amount,
         },
         'pagination': {
             'page': page, 'per_page': per_page,
@@ -95,59 +134,61 @@ async def get_customer_summary(db, customer: str = '', start_date: str = '',
     }
 
 
-async def get_daily_amount(db, customer: str = '', start_date: str = '',
+async def get_daily_amount(db: AsyncSession, customer: str = '', start_date: str = '',
                             end_date: str = '', page: int = 1,
                             per_page: int = 20) -> dict:
     """按日汇总出货金额（仅手动出货，stockin_id IS NULL）"""
     per_page = min(max(1, per_page), 100)
-    customer = customer.strip()[:100]
+    filters, customer = _normalize_finance_filters(customer, start_date, end_date)
+    date_expr = _daily_date_expr()
+    grouped_stmt = (
+        select(
+            date_expr.label('stockout_date_only'),
+            func.sum(StockOut.quantity).label('total_quantity'),
+            func.sum(_amount_expr()).label('total_amount'),
+            func.count(StockOut.id).label('stockout_count'),
+        )
+        .select_from(StockOut)
+        .join(Product, StockOut.product_id == Product.id)
+        .where(*filters)
+        .group_by(date_expr)
+    )
+    count_stmt = select(func.count()).select_from(
+        select(date_expr)
+        .select_from(StockOut)
+        .join(Product, StockOut.product_id == Product.id)
+        .where(*filters)
+        .group_by(date_expr)
+        .subquery()
+    )
+    total = (await db.execute(count_stmt)).scalar() or 0
+    results = (
+        await db.execute(
+            grouped_stmt
+            .order_by(date_expr.desc())
+            .limit(per_page)
+            .offset((page - 1) * per_page)
+        )
+    ).fetchall()
 
-    where_clauses = ["so.quantity > 0", "so.stockin_id IS NULL"]
-    params = {}
-
-    if customer:
-        where_clauses.append("COALESCE(so.customer, '') LIKE :customer")
-        params['customer'] = f'%{escape_like(customer)}%'
-    if start_date:
-        try:
-            params['start_date'] = datetime.strptime(start_date, '%Y-%m-%d')
-            where_clauses.append("so.stockout_date >= :start_date")
-        except ValueError:
-            pass
-    if end_date:
-        try:
-            params['end_date'] = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
-            where_clauses.append("so.stockout_date < :end_date")
-        except ValueError:
-            pass
-
-    where_sql = " AND " + " AND ".join(where_clauses)
-
-    # 总数
-    count_sql = f"""SELECT COUNT(*) FROM (
-        SELECT DATE(so.stockout_date)
-        FROM stock_out so JOIN product p ON so.product_id = p.id
-        WHERE 1=1 {where_sql}
-        GROUP BY DATE(so.stockout_date)
-    ) AS grouped"""
-    total = (await db.execute(text(count_sql), params)).scalar() or 0
-
-    # 数据
-    data_sql = f"""SELECT
-        DATE(so.stockout_date) AS stockout_date_only,
-        SUM(so.quantity) AS total_quantity,
-        SUM(so.quantity * COALESCE(p.price, 0)) AS total_amount,
-        COUNT(so.id) AS stockout_count,
-        GROUP_CONCAT(DISTINCT COALESCE(so.customer, '未知客户') ORDER BY so.customer SEPARATOR '、') AS customer_names
-        FROM stock_out so JOIN product p ON so.product_id = p.id
-        WHERE 1=1 {where_sql}
-        GROUP BY DATE(so.stockout_date)
-        ORDER BY DATE(so.stockout_date) DESC
-        LIMIT :limit OFFSET :offset"""
-    params['limit'] = per_page
-    params['offset'] = (page - 1) * per_page
-
-    results = (await db.execute(text(data_sql), params)).fetchall()
+    page_dates = [row.stockout_date_only for row in results if row.stockout_date_only is not None]
+    customer_names_by_date: dict[Any, list[str]] = {}
+    if page_dates:
+        customer_rows = (
+            await db.execute(
+                select(
+                    date_expr.label('stockout_date_only'),
+                    func.coalesce(StockOut.customer, '未知客户').label('customer_name'),
+                )
+                .select_from(StockOut)
+                .join(Product, StockOut.product_id == Product.id)
+                .where(*filters, date_expr.in_(page_dates))
+                .distinct()
+                .order_by(date_expr.desc(), func.coalesce(StockOut.customer, '未知客户').asc())
+            )
+        ).fetchall()
+        for row in customer_rows:
+            customer_names_by_date.setdefault(row.stockout_date_only, []).append(row.customer_name)
 
     logs = []
     for row in results:
@@ -156,25 +197,18 @@ async def get_daily_amount(db, customer: str = '', start_date: str = '',
             'total_quantity': row.total_quantity,
             'total_amount': float(row.total_amount) if row.total_amount else 0.0,
             'stockout_count': row.stockout_count,
-            'customer_names': row.customer_names or '',
+            'customer_names': '、'.join(customer_names_by_date.get(row.stockout_date_only, [])),
         })
 
-    # 汇总统计
-    stats_sql = f"""SELECT
-        COALESCE(SUM(so.quantity), 0) AS total_quantity,
-        COALESCE(SUM(so.quantity * COALESCE(p.price, 0)), 0) AS total_amount
-        FROM stock_out so JOIN product p ON so.product_id = p.id
-        WHERE 1=1 {where_sql}"""
-    stats_params = {k: v for k, v in params.items() if k not in ('limit', 'offset')}
-    stats_row = (await db.execute(text(stats_sql), stats_params)).fetchone()
+    total_quantity, total_amount = await _get_finance_stats(db, filters)
 
     return {
         'success': True,
         'logs': logs,
         'stats': {
             'total_count': total,
-            'total_quantity': stats_row.total_quantity if stats_row else 0,
-            'total_amount': float(stats_row.total_amount) if stats_row and stats_row.total_amount else 0.0,
+            'total_quantity': total_quantity,
+            'total_amount': total_amount,
         },
         'pagination': {
             'page': page, 'per_page': per_page,
@@ -184,42 +218,25 @@ async def get_daily_amount(db, customer: str = '', start_date: str = '',
     }
 
 
-async def get_daily_amount_chart(db, customer: str = '', start_date: str = '',
+async def get_daily_amount_chart(db: AsyncSession, customer: str = '', start_date: str = '',
                                   end_date: str = '') -> dict:
     """按日汇总出货金额（图表用，不分页，按日期正序）"""
-    customer = customer.strip()[:100]
-
-    where_clauses = ["so.quantity > 0", "so.stockin_id IS NULL"]
-    params = {}
-
-    if customer:
-        where_clauses.append("COALESCE(so.customer, '') LIKE :customer")
-        params['customer'] = f'%{escape_like(customer)}%'
-    if start_date:
-        try:
-            params['start_date'] = datetime.strptime(start_date, '%Y-%m-%d')
-            where_clauses.append("so.stockout_date >= :start_date")
-        except ValueError:
-            pass
-    if end_date:
-        try:
-            params['end_date'] = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
-            where_clauses.append("so.stockout_date < :end_date")
-        except ValueError:
-            pass
-
-    where_sql = " AND " + " AND ".join(where_clauses)
-
-    data_sql = f"""SELECT
-        DATE(so.stockout_date) AS stockout_date_only,
-        SUM(so.quantity) AS total_quantity,
-        SUM(so.quantity * COALESCE(p.price, 0)) AS total_amount
-        FROM stock_out so JOIN product p ON so.product_id = p.id
-        WHERE 1=1 {where_sql}
-        GROUP BY DATE(so.stockout_date)
-        ORDER BY DATE(so.stockout_date) ASC"""
-
-    results = (await db.execute(text(data_sql), params)).fetchall()
+    filters, customer = _normalize_finance_filters(customer, start_date, end_date)
+    date_expr = _daily_date_expr()
+    results = (
+        await db.execute(
+            select(
+                date_expr.label('stockout_date_only'),
+                func.sum(StockOut.quantity).label('total_quantity'),
+                func.sum(_amount_expr()).label('total_amount'),
+            )
+            .select_from(StockOut)
+            .join(Product, StockOut.product_id == Product.id)
+            .where(*filters)
+            .group_by(date_expr)
+            .order_by(date_expr.asc())
+        )
+    ).fetchall()
 
     dates = []
     quantities = []

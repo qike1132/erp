@@ -10,15 +10,8 @@
 Agent:任务执行主体(规划/决策/执行) | Skill:辅助工具(规范指导)
 ✅Agent负责任务执行 | ✅有专项Agent时必须调度
 
-## 14层Middleware链 (v5.0新增)
-借鉴DeerFlow架构，实现有序洋葱模型：
-```
-进入: Safety → Context → ThreadData → Uploads → Sandbox
-      → Summarization → Todo → TokenUsage → Title
-      → Memory → ViewImage → ToolFilter → SubagentLimit
-      → Clarification
-退出: 反向执行
-```
+## 14层Middleware链
+Safety→Context→ThreadData→Uploads→Sandbox→Summarization→Todo→TokenUsage→Title→Memory→ViewImage→ToolFilter→SubagentLimit→Clarification；退出反向执行
 
 ## Agent体系(59个)
 研发30|设计8|测试1|调试5|优化3|安全5
@@ -27,13 +20,13 @@ Agent:任务执行主体(规划/决策/执行) | Skill:辅助工具(规范指导
 接收还原→解析匹配→任务拆解→Middleware处理→Agent调度→执行管控→审核整改→交付闭环
 
 ## 三阶段强制流程
-Agent调度 → Code Review → Solo Coder验收
+Agent调度→Code Review→Solo Coder验收
 
 ## 强制检查清单
 □任务类型识别 □Agent匹配 □调度决策 □Middleware执行 □代码审核 □Solo Coder验收
 
 ## 任务复杂度评估（触发则必须Agent）
-□技术领域>1 | □文件数>3 | □数据库变更 | □多模块 | □多Agent协作
+□技术领域>1 □文件数>3 □数据库变更 □多模块 □多Agent协作
 
 ## 置信度阈值
 ≥95%精细拆解 | 85-94%正常执行 | <70%询问用户
@@ -44,12 +37,7 @@ Agent调度 → Code Review → Solo Coder验收
 ## 核心模块
 QueryGuard(安全) | CircuitBreaker(熔断) | HotReloader(热重载) | MiddlewarePipeline(中间件)
 
-## 性能指标 (v5.0新增)
-| 指标 | 目标 | 说明 |
-|------|------|------|
-| 响应时间 | <2s | P90响应时间 |
-| 错误率 | <0.5% | 系统错误率 |
-| 缓存命中率 | >80% | 多级缓存效率 |
-| 指令解析成功率 | >95% | 意图识别准确率 |
+## 性能指标
+响应时间<2s | 错误率<0.5% | 缓存命中率>80% | 指令解析成功率>95%
 
 **核心原则**: Solo Coder唯一总指挥，所有任务必须经过三阶段流程，禁止跳过Agent调度，Middleware顺序不可更改

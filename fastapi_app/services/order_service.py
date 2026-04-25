@@ -19,8 +19,37 @@ from fastapi_app.shared_models import (
 )
 from fastapi_app.shared.stock_concurrency import get_product_for_update
 from fastapi_app.services import escape_like
+from fastapi_app.core.cache import cache_result, invalidate_cache
 
 logger = logging.getLogger(__name__)
+
+
+def _sync_order_to_purchase_center(order_id: int) -> None:
+    """订单创建后自动同步至采购中心，生成采购订单。
+
+    使用独立的同步 Session，与异步 Order 创建事务隔离。
+    同步失败不影响订单创建本身（best-effort）。
+    """
+    from fastapi_app.core.database import get_sync_engine
+    from fastapi_app.services.purchase_center_service import one_click_generate_order
+    from sqlalchemy.orm import Session
+
+    try:
+        engine = get_sync_engine()
+        with Session(engine) as sync_db:
+            try:
+                result = one_click_generate_order(
+                    sync_db, [order_id], user_id=0, username='system_auto'
+                )
+                logger.info(
+                    f'订单自动同步采购中心完成：order_id={order_id}, '
+                    f'生成采购订单数={result.get("created_count", 0)}'
+                )
+            except Exception:
+                sync_db.rollback()
+                raise
+    except Exception as e:
+        logger.warning(f'订单自动同步采购中心失败：order_id={order_id}, 原因：{e}')
 
 
 class PermissionDeniedError(Exception):
@@ -28,6 +57,51 @@ class PermissionDeniedError(Exception):
     pass
 
 
+async def get_order_by_id(db: AsyncSession, order_id: int) -> Optional[dict]:
+    """根据ID获取单个订单详情（含关联数据）"""
+    from fastapi_app.shared_models import Order
+    from sqlalchemy.orm import selectinload
+
+    query = select(Order).options(
+        joinedload(Order.product),
+        selectinload(Order.order_stockouts),
+        joinedload(Order.locked_by)
+    ).where(Order.id == order_id, Order.is_deleted == False)
+
+    result = await db.execute(query)
+    o = result.scalars().unique().first()
+    if not o:
+        return None
+
+    deduct_quantity = sum(so.quantity for so in o.order_stockouts) if o.order_stockouts else 0
+    return {
+        'id': o.id,
+        'order_no': o.order_no,
+        'customer': o.customer,
+        'order_date': o.order_date.strftime('%Y-%m-%d %H:%M') if o.order_date else '',
+        'product': {
+            'id': o.product.id,
+            'name': o.product.name,
+            'barcode': o.product.barcode or '',
+            'image': o.product.image or ''
+        } if o.product else None,
+        'quantity': o.quantity,
+        'deduct_quantity': deduct_quantity,
+        'status': o.status,
+        'note': o.note or '',
+        'order_type': o.order_type,
+        'country': o.country or '',
+        'is_locked': o.is_locked,
+        'locked_by_name': o.locked_by.username if o.locked_by else None,
+    }
+
+
+@cache_result(
+    key_prefix="orders:list",
+    ttl=60,
+    local_ttl=15,
+    key_builder=lambda *args, **kwargs: f"p{kwargs.get('page', 1)}:pp{kwargs.get('per_page', 50)}:c{kwargs.get('customer', '')}:pid{kwargs.get('product_id', '')}:s{kwargs.get('status', '')}:ot{kwargs.get('order_type', '')}",
+)
 async def get_orders(db: AsyncSession, page: int = 1, per_page: int = 50,
                      customer: Optional[str] = None, product_id: Optional[int] = None,
                      status: Optional[str] = None, order_type: Optional[str] = None) -> dict:
@@ -142,7 +216,12 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
 
     await db.commit()
     await db.refresh(order)
+    await invalidate_cache("orders:*")
     logger.info(f'订单添加成功：{order_no}，客户：{customer}，产品：{product.name}，数量：{quantity}')
+
+    # 自动同步：生成采购订单
+    _sync_order_to_purchase_center(order.id)
+
     return order.to_dict()
 
 
@@ -162,14 +241,16 @@ async def update_order(db: AsyncSession, order_id: int, quantity: int,
         raise ValueError('订单不存在')
 
     if order.is_locked and order.locked_by_id != current_user.id:
-        # 检查是否有待审批请求
+        # 检查是否有待审批请求（eager load requester 避免 N+1）
         result = await db.execute(
-            select(ApprovalRequest).where(
+            select(ApprovalRequest).options(
+                joinedload(ApprovalRequest.requester)
+            ).where(
                 ApprovalRequest.order_id == order_id,
                 ApprovalRequest.status == 'pending'
             )
         )
-        pending = result.scalar_one_or_none()
+        pending = result.unique().scalar_one_or_none()
         if pending:
             raise ValueError(f'该订单正在等待审批（申请人：{pending.requester.username}），暂时无法编辑！')
         else:
@@ -200,6 +281,7 @@ async def update_order(db: AsyncSession, order_id: int, quantity: int,
             db.add(log)
 
         await db.commit()
+        await invalidate_cache("orders:*")
         logger.info(f'订单编辑成功：{order.order_no}，操作人：{current_user.username}')
         return {'success': True, 'message': '订单编辑成功！', 'requires_approval': False}
     else:
@@ -242,6 +324,7 @@ async def update_order(db: AsyncSession, order_id: int, quantity: int,
         _create_approval_log_obj(approval_request, 'create', current_user, {'operation_data': operation_data})
 
         await db.commit()
+        await invalidate_cache("orders:*")
         logger.info(f'订单编辑审批请求已提交：{order.order_no}，申请人：{current_user.username}')
         return {'success': True, 'message': '已提交编辑审批请求，请等待管理员审批！', 'requires_approval': True}
 
@@ -254,18 +337,20 @@ async def delete_order(db: AsyncSession, order_id: int, current_user: User) -> d
     - 管理员直接删除（含库存回滚、抵扣回滚、清理审批记录）
     - 非管理员需要提交审批请求
     """
-    order = await db.get(Order, order_id)
+    order = await db.get(Order, order_id, options=[joinedload(Order.product)])
     if not order:
         raise ValueError('订单不存在')
 
     if order.is_locked and order.locked_by_id != current_user.id:
         result = await db.execute(
-            select(ApprovalRequest).where(
+            select(ApprovalRequest).options(
+                joinedload(ApprovalRequest.requester)
+            ).where(
                 ApprovalRequest.order_id == order_id,
                 ApprovalRequest.status == 'pending'
             )
         )
-        pending = result.scalar_one_or_none()
+        pending = result.unique().scalar_one_or_none()
         if pending:
             raise ValueError(f'该订单正在等待审批（申请人：{pending.requester.username}），暂时无法删除！')
         else:
@@ -309,13 +394,13 @@ async def delete_order(db: AsyncSession, order_id: int, current_user: User) -> d
         # 删除关联出货
         await db.execute(delete(StockOut).where(StockOut.order_id == order.id))
 
-        # 删除关联审批记录
+        # 删除关联审批记录（批量删除避免 N+1）
         result = await db.execute(
-            select(ApprovalRequest).where(ApprovalRequest.order_id == order_id)
+            select(ApprovalRequest.id).where(ApprovalRequest.order_id == order_id)
         )
-        approval_requests = result.scalars().all()
-        for ar in approval_requests:
-            await db.execute(delete(ApprovalLog).where(ApprovalLog.approval_request_id == ar.id))
+        approval_ids = [row[0] for row in result.all()]
+        if approval_ids:
+            await db.execute(delete(ApprovalLog).where(ApprovalLog.approval_request_id.in_(approval_ids)))
         await db.execute(delete(ApprovalRequest).where(ApprovalRequest.order_id == order_id))
 
         deleted_order_no = order.order_no
@@ -428,70 +513,84 @@ def _create_approval_log_obj(approval_request, action, actor, details=None):
         db.add(log)
 
 
+class _BatchItemError(Exception):
+    """批量处理单项业务校验失败，用于触发 savepoint 回滚但不作为真实错误"""
+
+
 async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
     """批量创建订单"""
     from fastapi_app.services.batch_service import generate_order_number
 
     results = []
+    created_order_ids = []  # 记录成功创建的订单ID，用于同步采购中心
     for order_data in orders_data:
         try:
-            product_id = order_data.get('product_id')
-            customer = order_data.get('customer', '')
-            quantity = order_data.get('quantity', 0)
+            async with db.begin_nested():
+                product_id = order_data.get('product_id')
+                customer = order_data.get('customer', '')
+                quantity = order_data.get('quantity', 0)
 
-            if not all([product_id, customer, quantity]):
+                if not all([product_id, customer, quantity]):
+                    results.append({
+                        'success': False, 'error': '缺少必填字段',
+                        'order_no': order_data.get('order_no', '未知')
+                    })
+                    raise _BatchItemError()
+
+                if int(quantity) <= 0 or int(quantity) > 100000:
+                    results.append({
+                        'success': False, 'error': '订单数量必须在1-100000之间',
+                        'order_no': order_data.get('order_no', '未知')
+                    })
+                    raise _BatchItemError()
+
+                product = await get_product_for_update(db, product_id)
+
+                order_no = await generate_order_number(db)
+
+                order = Order(
+                    order_no=order_no,
+                    product_id=product_id,
+                    customer=customer,
+                    quantity=int(quantity),
+                    order_date=datetime.now(),
+                    status='待备货',
+                    note=order_data.get('note', ''),
+                    order_type=order_data.get('order_type', 'regular'),
+                    country=order_data.get('country') if order_data.get('order_type') == 'custom' else None,
+                )
+                db.add(order)
+                await db.flush()
+
+                product.current_stock += int(quantity)
+
+                log = InventoryLog(
+                    product_id=product_id,
+                    change_type='订单创建',
+                    change_quantity=int(quantity),
+                    change_date=datetime.now(),
+                    customer=customer,
+                    related_id=str(order.id),
+                    note=f'批量创建订单 {order.order_no}',
+                )
+                db.add(log)
+
                 results.append({
-                    'success': False, 'error': '缺少必填字段',
-                    'order_no': order_data.get('order_no', '未知')
+                    'success': True, 'order_no': order.order_no, 'id': order.id
                 })
-                continue
-
-            if int(quantity) <= 0 or int(quantity) > 100000:
-                results.append({
-                    'success': False, 'error': '订单数量必须在1-100000之间',
-                    'order_no': order_data.get('order_no', '未知')
-                })
-                continue
-
-            product = await get_product_for_update(db, product_id)
-
-            order_no = await generate_order_number(db)
-
-            order = Order(
-                order_no=order_no,
-                product_id=product_id,
-                customer=customer,
-                quantity=int(quantity),
-                order_date=datetime.now(),
-                status='待备货',
-                note=order_data.get('note', ''),
-                order_type=order_data.get('order_type', 'regular'),
-                country=order_data.get('country') if order_data.get('order_type') == 'custom' else None,
-            )
-            db.add(order)
-            await db.flush()
-
-            product.current_stock += int(quantity)
-
-            log = InventoryLog(
-                product_id=product_id,
-                change_type='订单创建',
-                change_quantity=int(quantity),
-                change_date=datetime.now(),
-                customer=customer,
-                related_id=str(order.id),
-                note=f'批量创建订单 {order.order_no}',
-            )
-            db.add(log)
-
-            results.append({
-                'success': True, 'order_no': order.order_no, 'id': order.id
-            })
+                created_order_ids.append(order.id)
+        except _BatchItemError:
+            pass  # 业务校验失败，savepoint 已自动回滚，继续下一项
         except Exception as e:
-            logger.error(f"批量订单单项失败: {e}")
+            # 数据库异常，begin_nested 已自动回滚 savepoint，session 恢复有效状态
+            logger.error(f"批量订单单项失败: {e}", exc_info=True)
             results.append({
-                'success': False, 'error': '订单处理失败，请稍后重试',
+                'success': False, 'error': str(e) or '订单处理失败，请稍后重试',
                 'order_no': order_data.get('order_no', '未知')
             })
+
+    # 批量创建完成后，统一同步至采购中心
+    for oid in created_order_ids:
+        _sync_order_to_purchase_center(oid)
 
     return {'success': True, 'results': results}

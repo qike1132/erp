@@ -3,8 +3,9 @@
 
 映射到与 Flask-SQLAlchemy Product 相同的 'product' 表。
 """
-from sqlalchemy import String, Integer, DateTime, Index, Numeric
+from sqlalchemy import String, Integer, DateTime, Index, Numeric, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.dialects.postgresql import ARRAY
 from datetime import datetime
 
 from fastapi_app.shared_models import Base
@@ -26,6 +27,11 @@ class Product(Base):
 
     __table_args__ = (
         Index('idx_product_name_barcode', 'name', 'barcode'),
+        # pg_trgm GIN 索引：使 ILIKE '%keyword%' 和 % 运算符走索引
+        Index('idx_product_name_trgm', 'name', postgresql_using='gin',
+              postgresql_ops={'name': 'gin_trgm_ops'}),
+        Index('idx_product_barcode_trgm', 'barcode', postgresql_using='gin',
+              postgresql_ops={'barcode': 'gin_trgm_ops'}),
     )
 
     # 皮套关联（由 Case 模型 backref 自动创建，此处显式声明以确保类型检查）

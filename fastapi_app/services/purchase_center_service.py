@@ -346,6 +346,9 @@ def get_purchase_orders(db: Session, *, page: int = 1, per_page: int = 50,
                 'order_no': o.order_no,
                 'supplier_name': o.supplier_name,
                 'customer_name': o.customer_name,
+                'product_name': o.product_name,
+                'quantity': float(o.product_quantity) if o.product_quantity else None,
+                'order_date': o.order_date.strftime('%Y-%m-%d') if o.order_date else '',
                 'status': o.status,
                 'total_amount': sum(float(item.total_price) if item.total_price else 0 for item in o.items),
                 'item_count': len(o.items),
@@ -374,6 +377,9 @@ def get_purchase_order(db: Session, order_id: int) -> dict:
         'supplier_phone': getattr(order, 'supplier_phone', ''),
         'supplier_address': getattr(order, 'supplier_address', ''),
         'customer_name': order.customer_name,
+        'product_name': order.product_name,
+        'quantity': float(order.product_quantity) if order.product_quantity else None,
+        'order_date': order.order_date.strftime('%Y-%m-%d') if order.order_date else '',
         'status': order.status,
         'total_amount': sum(float(item.total_price) if item.total_price else 0 for item in order.items),
         'remark': order.remark or '',
@@ -670,14 +676,21 @@ def query_supplier_groups(db: Session, order_ids: list) -> list:
     return list(groups.values())
 
 
-def get_factory_order_summary(db: Session, order_ids: list) -> list:
+def get_factory_order_summary(db: Session, order_ids: list) -> dict:
     if not order_ids:
-        return []
+        return {'groups': [], 'order_count': 0}
 
     items = db.query(PurchaseOrderItem).filter(
         PurchaseOrderItem.order_id.in_(order_ids)
     ).all()
 
+    # 获取关联订单的 product_quantity
+    orders = db.query(PurchaseOrder).filter(
+        PurchaseOrder.id.in_(order_ids)
+    ).all()
+    order_qty_map = {o.id: float(o.product_quantity) if o.product_quantity else 0 for o in orders}
+
+    # 按 customer_name|product_name 分组，再按 supplier_name 分组
     customer_product_map = {}
     for item in items:
         key = f"{item.customer_name}|{item.product_name}"
@@ -685,18 +698,43 @@ def get_factory_order_summary(db: Session, order_ids: list) -> list:
             customer_product_map[key] = {
                 'customer_name': item.customer_name,
                 'product_name': item.product_name,
-                'barcode': item.barcode,
-                'items': [],
+                'order_ids': set(),
+                'suppliers_map': {},
             }
-        customer_product_map[key]['items'].append({
-            'material_name': item.material_name,
-            'material_category': item.material_category,
+
+        group = customer_product_map[key]
+        group['order_ids'].add(item.order_id)
+        sname = item.supplier_name or '未指定'
+        if sname not in group['suppliers_map']:
+            group['suppliers_map'][sname] = {
+                'supplier_name': sname,
+                'fabrics': [],
+            }
+
+        group['suppliers_map'][sname]['fabrics'].append({
+            'fabric_name': item.material_name,
+            'specification': item.specification,
             'quantity': float(item.quantity) if item.quantity else 0,
             'unit': item.unit,
-            'supplier_name': item.supplier_name,
+            'item_id': item.id,
+            'item_ids': [item.id],
+            'original_quantities': {str(item.id): float(item.quantity) if item.quantity else 0},
         })
 
-    return list(customer_product_map.values())
+    # 组装最终结构
+    groups = []
+    for group in customer_product_map.values():
+        suppliers = list(group.pop('suppliers_map').values())
+        # 计算 product_quantity：仅汇总该 group 关联订单的数量
+        group_order_ids = group.pop('order_ids')
+        groups.append({
+            'customer_name': group['customer_name'],
+            'product_name': group['product_name'],
+            'product_quantity': sum(order_qty_map.get(oid, 0) for oid in group_order_ids),
+            'suppliers': suppliers,
+        })
+
+    return {'groups': groups, 'order_count': len(order_ids)}
 
 
 def save_factory_summary_edits(db: Session, edits: list) -> dict:
@@ -714,33 +752,37 @@ def save_factory_summary_edits(db: Session, edits: list) -> dict:
     return {'saved': True}
 
 
-def get_supplier_order_summary(db: Session, order_ids: list) -> list:
+def get_supplier_order_summary(db: Session, order_ids: list) -> dict:
     if not order_ids:
-        return []
+        return {'materials': [], 'order_count': 0}
 
     items = db.query(PurchaseOrderItem).filter(
         PurchaseOrderItem.order_id.in_(order_ids)
     ).all()
 
-    supplier_map = {}
+    # 按 supplier_name + material_name + specification + unit 汇总，计算 total_quantity
+    material_map = {}
     for item in items:
         sname = item.supplier_name or '未指定'
-        if sname not in supplier_map:
-            supplier_map[sname] = {
+        spec = item.specification or ''
+        unit = item.unit or ''
+        key = f"{sname}|{item.material_name}|{spec}|{unit}"
+        if key not in material_map:
+            material_map[key] = {
                 'supplier_name': sname,
-                'materials': [],
+                'material_name': item.material_name,
+                'specification': spec,
+                'total_quantity': Decimal('0'),
+                'unit': unit,
             }
+        material_map[key]['total_quantity'] += Decimal(str(item.quantity)) if item.quantity else Decimal('0')
 
-        supplier_map[sname]['materials'].append({
-            'material_name': item.material_name,
-            'material_category': item.material_category,
-            'quantity': float(item.quantity) if item.quantity else 0,
-            'unit': item.unit,
-            'customer_name': item.customer_name,
-            'product_name': item.product_name,
-        })
+    # total_quantity 转换为 float 输出，Decimal 累加已保证精度
+    for m in material_map.values():
+        qty = float(m['total_quantity'])
+        m['total_quantity'] = round(qty, 2) if qty != int(qty) else int(qty)
 
-    return list(supplier_map.values())
+    return {'materials': list(material_map.values()), 'order_count': len(order_ids)}
 
 
 def get_completed_order_suggestions(db: Session, field: str, keyword: str, limit: int = 10) -> list:

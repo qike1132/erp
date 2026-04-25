@@ -693,23 +693,30 @@
                 })
             })
             .then(function(response) {
-                return response.json();
-            })
-            .then(function(data) {
-                if (data.success) {
-                    setTimeout(function() {
-                        window.dispatchEvent(new CustomEvent('loginSuccess'));
-                        window.location.href = '/';
-                    }, 100);
-                } else {
-                    var alertBox = document.createElement('div');
-                    alertBox.className = 'alert-box alert-error';
-                    alertBox.innerHTML = '<i class="fas fa-circle-exclamation"></i><span>' + data.error + '</span>';
-                    loginForm.insertBefore(alertBox, loginForm.firstChild);
+                return response.text().then(function(text) {
+                    var data;
+                    try {
+                        data = JSON.parse(text);
+                    } catch(e) {
+                        data = {};
+                    }
 
-                    btn.innerHTML = originalText;
-                    btn.disabled = false;
-                }
+                    if (response.ok && data.success) {
+                        setTimeout(function() {
+                            window.dispatchEvent(new CustomEvent('loginSuccess'));
+                            window.location.href = '/';
+                        }, 100);
+                    } else {
+                        var errorMsg = data.detail || data.message || data.error || '用户名或密码错误';
+                        var alertBox = document.createElement('div');
+                        alertBox.className = 'alert-box alert-error';
+                        alertBox.innerHTML = '<i class="fas fa-circle-exclamation"></i><span>' + errorMsg + '</span>';
+                        loginForm.insertBefore(alertBox, loginForm.firstChild);
+
+                        btn.innerHTML = originalText;
+                        btn.disabled = false;
+                    }
+                });
             })
             .catch(function(error) {
                 var alertBox = document.createElement('div');

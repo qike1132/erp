@@ -110,7 +110,12 @@ DB_CONNECTIONS_ACTIVE = _get_or_create_gauge(
 CACHE_OPERATIONS = _get_or_create_counter(
     'cache_operations_total',
     '缓存操作计数',
-    ['operation']  # hit, miss, set, delete
+    ['operation']
+)
+
+SLOW_QUERY_TOTAL = _get_or_create_counter(
+    'slow_query_total',
+    '慢查询总数（超过阈值的SQL查询）'
 )
 
 

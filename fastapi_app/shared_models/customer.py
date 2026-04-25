@@ -26,6 +26,16 @@ class Customer(Base):
     create_time: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, comment='创建时间')
     update_time: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
 
+    __table_args__ = (
+        # pg_trgm GIN 索引：使 ILIKE '%keyword%' 和 % 运算符走索引
+        Index('idx_customer_name_trgm', 'name', postgresql_using='gin',
+              postgresql_ops={'name': 'gin_trgm_ops'}),
+        Index('idx_customer_contact_trgm', 'contact', postgresql_using='gin',
+              postgresql_ops={'contact': 'gin_trgm_ops'}),
+        Index('idx_customer_phone_trgm', 'phone', postgresql_using='gin',
+              postgresql_ops={'phone': 'gin_trgm_ops'}),
+    )
+
     def __repr__(self):
         return f'<Customer {self.name}>'
 
