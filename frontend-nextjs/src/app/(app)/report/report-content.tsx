@@ -223,56 +223,19 @@ export function ReportContent() {
 
       <style jsx global>{`
         .rp-wrap { padding: 20px; font-family: "Microsoft YaHei","Segoe UI",sans-serif; }
-        .rp-title { font-size: 22px; font-weight: 600; color: var(--plush-text,#2D3748); margin-bottom: 16px; display: flex; align-items: center; }
-        .rp-tabs { margin-top: 12px; border-bottom: 2px solid #dee2e6; }
-        .rp-tabs .nav-link { color: var(--plush-text-light,#718096); font-weight: 600; border: none; padding: 10px 20px; border-bottom: 3px solid transparent; transition: all 0.2s; background: none; }
-        .rp-tabs .nav-link.active { color: var(--plush-blue-text,#2563EB); font-weight: 700; border-bottom-color: var(--plush-blue-deep,#2563EB); }
-        .rp-tabs .nav-link:hover:not(.active) { color: var(--plush-text,#2D3748); border-bottom-color: rgba(37,99,235,0.3); }
+        .rp-title { font-size: 22px; font-weight: 600; color: #5A4A4A; margin-bottom: 16px; display: flex; align-items: center; }
+        .rp-tabs { margin-top: 12px; border-bottom: 3px solid #D4F1F4; }
+        .rp-tabs .nav-link { color: #595959; font-weight: 600; border: none; padding: 12px 24px; border-bottom: 3px solid transparent; transition: all 0.4s cubic-bezier(0.4,0,0.2,1); background: rgba(255,255,255,0.7); border-radius: var(--radius-md) var(--radius-md) 0 0; box-shadow: 0 -2px 8px rgba(0,0,0,0.05); cursor: pointer; }
+        .rp-tabs .nav-link.active { color: #5A4A4A; background: #FFFFFF; border-bottom-color: #87CEEB; transform: translateY(-2px); box-shadow: 0 -4px 16px rgba(135,206,235,0.35), 0 2px 8px rgba(0,0,0,0.1); }
+        .rp-tabs .nav-link:hover:not(.active) { color: #5A4A4A; background: #FFFFFF; transform: translateY(-2px); box-shadow: 0 -4px 12px rgba(176,224,230,0.25), 0 2px 8px rgba(0,0,0,0.1); border-bottom-color: rgba(135,206,235,0.3); }
         .rp-panel { margin-top: 16px; }
-        .rp-card { border: none; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); margin-bottom: 16px; overflow: hidden; background: #fff; }
-        .rp-card .card-header { padding: 12px 20px; background: #f8f9fa; border-bottom: 1px solid #e9ecef; font-weight: 600; font-size: 15px; color: var(--plush-text,#2D3748); }
+        .rp-card { border: none; border-radius: var(--radius-card); box-shadow: 0 4px 16px rgba(176,224,230,0.25); margin-bottom: 16px; overflow: hidden; background: #fff; }
+        .rp-card .card-header { padding: 12px 20px; background: #FFFFFF; border-bottom: 2px solid #87CEEB; font-weight: 600; font-size: 15px; color: #5A4A4A; }
         .rp-card .card-body { padding: 20px; }
-        .row { display: flex; flex-wrap: wrap; margin: 0 -8px; }
-        .row > [class*="col-"] { padding: 0 8px; }
-        .col-md-2 { flex: 0 0 16.667%; max-width: 16.667%; }
-        .col-md-3 { flex: 0 0 25%; max-width: 25%; }
-        .g-3 { gap: 16px; }
-        .align-items-end { align-items: flex-end; }
-        .form-label { font-size: 13px; color: #718096; font-weight: 500; margin-bottom: 6px; display: block; }
-        .form-select, .form-control { width: 100%; padding: 8px 12px; border: 1px solid #dee2e6; border-radius: 6px; font-size: 14px; color: #2D3748; background: #fff; transition: border-color 0.2s,box-shadow 0.2s; box-sizing: border-box; }
-        .form-select:focus, .form-control:focus { outline: none; border-color: #87CEEB; box-shadow: 0 0 0 3px rgba(135,206,235,0.15); }
-        .form-control::placeholder { color: #a0aec0; }
-        .btn { padding: 8px 16px; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s; border: 1px solid transparent; display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
-        .btn-primary { background: #007bff; color: #fff; border-color: #007bff; }
-        .btn-primary:hover { background: #0069d9; }
-        .btn-outline-secondary { background: #fff; color: #6c757d; border-color: #dee2e6; }
-        .btn-outline-secondary:hover { background: #f8f9fa; color: #495057; }
-        .btn-success { background: #28a745; color: #fff; border-color: #28a745; }
-        .btn-success:hover { background: #218838; }
-        .btn-sm { padding: 4px 12px; font-size: 13px; }
-        .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
-        .bg-warning { background: #ffc107; color: #212529; }
-        .bg-info { background: #17a2b8; color: #fff; }
-        .bg-primary { background: #007bff; color: #fff; }
-        .bg-secondary { background: #6c757d; color: #fff; }
-        .bg-success { background: #28a745; color: #fff; }
-        .bg-danger { background: #dc3545; color: #fff; }
-        .table { width: 100%; border-collapse: collapse; font-size: 14px; }
-        .table thead th { background: #f8f9fa; padding: 10px 12px; border-bottom: 2px solid #dee2e6; font-weight: 600; color: #2D3748; white-space: nowrap; }
-        .table tbody td { padding: 10px 12px; border-bottom: 1px solid #e9ecef; vertical-align: middle; }
-        .table-hover tbody tr:hover { background: #f0f6ff; }
         .rp-td-center { text-align: center; padding: 40px 20px; }
-        .pagination { display: flex; gap: 4px; list-style: none; padding: 0; margin: 16px 0 0; justify-content: center; }
-        .page-item .page-link { padding: 6px 12px; border: 1px solid #dee2e6; border-radius: 4px; color: #007bff; text-decoration: none; font-size: 14px; display: block; transition: all 0.2s; background: #fff; }
-        .page-item.active .page-link { background: #007bff; color: #fff; border-color: #007bff; }
-        .page-item.disabled .page-link { color: #6c757d; pointer-events: none; opacity: 0.5; }
-        .page-item .page-link:hover:not(.disabled) { background: #e9ecef; }
-        .spinner-border { display: inline-block; width: 24px; height: 24px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: rp-spin 0.75s linear infinite; }
-        .text-primary { color: #007bff; }
         @keyframes rp-spin { to { transform: rotate(360deg); } }
         @media (max-width: 768px) {
           .col-md-2, .col-md-3 { flex: 0 0 100%; max-width: 100%; }
-          .row { flex-direction: column; }
         }
       `}</style>
     </div>

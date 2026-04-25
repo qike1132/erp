@@ -7,7 +7,7 @@
 核心:agent-orchestration-core.md(<1KB) | 模块:core/*.md | 参考:agent-orchestration-detailed.md
 
 ## Agent与Skill
-Agent:任务执行主体(规划/决策/执行) | Skill:辅助工具(规范指导)
+Agent:任务执行主体 | Skill:辅助工具
 ✅Agent负责任务执行 | ✅有专项Agent时必须调度
 
 ## 14层Middleware链
@@ -25,7 +25,7 @@ Agent调度→Code Review→Solo Coder验收
 ## 强制检查清单
 □任务类型识别 □Agent匹配 □调度决策 □Middleware执行 □代码审核 □Solo Coder验收
 
-## 任务复杂度评估（触发则必须Agent）
+## 任务复杂度评估
 □技术领域>1 □文件数>3 □数据库变更 □多模块 □多Agent协作
 
 ## 置信度阈值

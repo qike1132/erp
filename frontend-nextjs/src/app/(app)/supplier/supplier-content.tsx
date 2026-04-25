@@ -169,49 +169,36 @@ export function SupplierContent({ initialData }: SupplierContentProps) {
 
       <style jsx global>{`
         .sp-page-root .container-fluid { padding: 0 16px; }
-        .sp-page-root .page-header-wrapper { margin-bottom: 32px; padding-bottom: 24px; border-bottom: 3px solid var(--plush-blue-light, #e0e0e0); }
-        .sp-page-root .page-title { color: var(--plush-text, #2d3748); font-size: 24px; font-weight: 400; margin-bottom: 8px; letter-spacing: -0.5px; }
-        .sp-page-root .page-subtitle { color: var(--plush-text-light, #718096); font-size: 18px; margin: 0; }
+        .sp-page-root .page-header-wrapper { margin-bottom: 32px; padding-bottom: 24px; border-bottom: 3px solid #D4F1F4; }
+        .sp-page-root .page-title { color: #5A4A4A; font-size: 24px; font-weight: 400; margin-bottom: 8px; letter-spacing: -0.5px; }
+        .sp-page-root .page-subtitle { color: #595959; font-size: 18px; margin: 0; }
         .sp-page-root .sidebar-panel { position: sticky; top: 120px; }
         .sp-page-root .form-group-enhanced { margin-bottom: 24px; }
-        .sp-page-root .form-group-enhanced .form-label { display: flex; align-items: center; font-weight: 400; color: var(--plush-text, #2d3748); font-size: 14px; margin-bottom: 8px; }
-        .sp-page-root .btn-submit-enhanced { font-size: 16px; padding: 16px 32px; border-radius: 16px; box-shadow: 0 4px 16px var(--plush-shadow-soft, rgba(176,224,230,0.25)); min-height: 48px; }
-        .sp-page-root .btn-submit-enhanced:hover:not(:disabled) { transform: translateY(-3px) scale(1.02); box-shadow: 0 8px 24px var(--plush-shadow-medium, rgba(135,206,235,0.35)); }
+        .sp-page-root .form-group-enhanced .form-label { display: flex; align-items: center; font-weight: 400; color: #5A4A4A; font-size: 14px; margin-bottom: 8px; }
+        .sp-page-root .btn-submit-enhanced { font-size: 16px; padding: 16px 32px; border-radius: 16px; box-shadow: 0 4px 16px rgba(176,224,230,0.25); min-height: 48px; }
+        .sp-page-root .btn-submit-enhanced:hover:not(:disabled) { transform: translateY(-3px) scale(1.02); box-shadow: 0 8px 24px rgba(135,206,235,0.35); }
         .sp-page-root .main-content-card { min-height: calc(100vh - 200px); }
         .sp-page-root .toolbar-wrapper { flex: 1; max-width: 500px; }
         .sp-page-root .search-box { position: relative; flex: 1; min-width: 200px; }
-        .sp-page-root .search-icon { position: absolute; left: 16px; top: 50%; transform: translateY(-50%); color: var(--plush-text-light, #718096); font-size: 14px; pointer-events: none; }
+        .sp-page-root .search-icon { position: absolute; left: 16px; top: 50%; transform: translateY(-50%); color: #595959; font-size: 14px; pointer-events: none; }
         .sp-page-root .search-input { padding-left: 40px !important; border-radius: var(--radius-button, 12px) !important; min-height: 44px; }
-        .sp-page-root .supplier-name { font-weight: 500; color: var(--plush-text, #2d3748); font-size: 14px; line-height: 1.5; }
-        .sp-page-root .contact-text, .sp-page-root .phone-text, .sp-page-root .address-text, .sp-page-root .time-text { font-size: 14px; color: var(--plush-text-light, #718096); line-height: 1.5; }
+        .sp-page-root .supplier-name { font-weight: 500; color: #5A4A4A; font-size: 14px; line-height: 1.5; }
+        .sp-page-root .contact-text, .sp-page-root .phone-text, .sp-page-root .address-text, .sp-page-root .time-text { font-size: 14px; color: #595959; line-height: 1.5; }
         .sp-page-root .action-buttons { display: flex; gap: 8px; }
         .sp-page-root .action-buttons .btn { width: 44px; height: 44px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 12px; min-height: 44px; min-width: 44px; }
-        .sp-page-root .action-buttons .btn:focus-visible { outline: 2px solid var(--plush-blue-text, #007bff); outline-offset: 2px; }
+        .sp-page-root .action-buttons .btn:focus-visible { outline: 2px solid #87CEEB; outline-offset: 2px; }
         .sp-page-root .empty-state { padding: 64px 40px; }
         .sp-page-root .table { margin-bottom: 0; }
-        .sp-page-root .table thead th { padding: 16px 24px; font-weight: 400; font-size: 14px; letter-spacing: 0.3px; border-bottom: 2px solid var(--plush-blue-light, #e0e0e0); background: var(--plush-white, #fff); line-height: 1.5; }
+        .sp-page-root .table thead th { padding: 16px 24px; font-weight: 400; font-size: 14px; letter-spacing: 0.3px; border-bottom: 2px solid #87CEEB; background: #FFFFFF; line-height: 1.5; }
         .sp-page-root .table tbody tr { animation: fadeIn 0.3s ease forwards; transition: all 0.2s ease; }
         .sp-page-root .table tbody tr:hover, .sp-page-root .table tbody tr:focus-within { background: linear-gradient(135deg, rgba(176, 224, 230, 0.1) 0%, rgba(212, 241, 244, 0.15) 100%); }
-        .sp-page-root .table tbody td { padding: 16px 24px; vertical-align: middle; border-bottom: 1px solid var(--plush-blue-light, #e0e0e0); font-size: 14px; font-weight: 400; line-height: 1.5; }
+        .sp-page-root .table tbody td { padding: 16px 24px; vertical-align: middle; border-bottom: 1px solid #D4F1F4; font-size: 14px; font-weight: 400; line-height: 1.5; }
         .sp-page-root .table-row-animate { opacity: 0; }
         .sp-page-root .card-header { padding: 24px; }
         .sp-page-root .card-body { padding: 24px; }
-        .sp-page-root .form-control { border: 2px solid var(--plush-blue-light, #e0e0e0); border-radius: var(--radius-input, 12px); transition: all 0.3s ease; min-height: 44px; line-height: 1.5; }
-        .sp-page-root .form-control:focus { border-color: var(--plush-blue-text, #007bff); box-shadow: 0 0 0 .2rem rgba(135,206,235,0.25); outline: none; }
-        .sp-page-root .btn-sm { padding: 8px 16px; font-size: 14px; border-radius: 12px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
-        .sp-page-root .btn-outline-primary { color: #0d6efd; border: 2px solid #0d6efd; background: transparent; }
-        .sp-page-root .btn-outline-primary:hover { background: #0d6efd; color: #fff; }
-        .sp-page-root .btn-outline-danger { background: transparent; color: #dc3545; border: 2px solid #dc3545; }
-        .sp-page-root .btn-outline-danger:hover { background: #dc3545; color: white; }
-        .sp-page-root .row { display: flex; flex-wrap: wrap; margin: 0 -16px; }
         .sp-page-root .col-xl-3 { flex: 0 0 25%; max-width: 25%; padding: 0 16px; }
         .sp-page-root .col-xl-9 { flex: 0 0 75%; max-width: 75%; padding: 0 16px; }
-        .sp-page-root .col-lg-4 { padding: 0 16px; }
-        .sp-page-root .col-lg-8 { padding: 0 16px; }
         .sp-page-root .g-5 { gap: 3rem; }
-        .sp-page-root .btn-lg { padding: .5rem 1rem; font-size: 1.25rem; border-radius: .5rem; }
-        .sp-page-root .table-responsive { overflow-x: auto; }
-        .sp-page-root .sticky-top { position: sticky; top: 0; z-index: 10; }
         .sp-page-root .collapse-trigger { cursor: pointer; }
         .sp-page-root .collapse-trigger:hover { background: rgba(176,224,230,0.05); }
         .sp-page-root .collapse-content { overflow: hidden; transition: max-height 0.3s ease; }

@@ -640,17 +640,9 @@ export function ProductListContent({ initialData }: ProductListContentProps) {
         /* Buttons */
         .pl-page-root .btn-elegant { padding: 0.75rem 1.25rem; font-size: 0.9375rem; font-weight: 500; border-radius: 12px; border: 2px solid transparent; transition: all 0.3s ease; display: inline-flex; align-items: center; gap: 0.5rem; cursor: pointer; }
         .pl-page-root .btn-elegant:hover { transform: translateY(-1px); }
-        .pl-page-root .btn-primary { color: #fff; background-color: #0d6efd; border-color: #0d6efd; }
         .pl-page-root .btn-primary:disabled { opacity: 0.65; cursor: not-allowed; transform: none; }
-        .pl-page-root .btn-success { color: #fff; background-color: #22c55e; border-color: #22c55e; }
         .pl-page-root .btn-success:disabled { opacity: 0.65; cursor: not-allowed; }
-        .pl-page-root .btn-outline-secondary { color: #475569; border-color: #e2e8f0; background: #fff; }
-        .pl-page-root .btn-outline-secondary:hover { background: #f8fafc; }
-        .pl-page-root .btn-lg { padding: .5rem 1rem; font-size: 1.25rem; border-radius: .5rem; }
-        .pl-page-root .btn-sm { padding: .375rem .75rem; font-size: .875rem; border-radius: .375rem; }
-        .pl-page-root .w-100 { width: 100%; }
-        .pl-page-root .pt-2 { padding-top: .5rem; }
-        .pl-page-root .pt-5 { padding-top: 1.25rem; }
+        .pl-page-root .mb-8 { margin-bottom: 2rem; }
 
         /* Upload cards */
         .pl-page-root .upload-section-spacious { padding: 0.5rem 0; }
@@ -734,22 +726,6 @@ export function ProductListContent({ initialData }: ProductListContentProps) {
         .pl-page-root .search-input-elegant:focus { background: #fff; border-color: #3b82f6; box-shadow: 0 0 0 4px rgba(59,130,246,0.1); outline: none; }
         .pl-page-root .sort-select-elegant { padding: .75rem 1rem; font-size: .9375rem; background: #f8fafc; border: 2px solid #e2e8f0; border-radius: 12px; min-width: 140px; transition: all 0.3s ease; }
         .pl-page-root .sort-select-elegant:focus { background: #fff; border-color: #3b82f6; outline: none; }
-
-        /* Utility classes */
-        .pl-page-root .d-flex { display: flex; }
-        .pl-page-root .align-items-center { align-items: center; }
-        .pl-page-root .justify-content-between { justify-content: space-between; }
-        .pl-page-root .flex-wrap { flex-wrap: wrap; }
-        .pl-page-root .flex-grow-1 { flex: 1; }
-        .pl-page-root .gap-2 { gap: .5rem; }
-        .pl-page-root .gap-3 { gap: .75rem; }
-        .pl-page-root .gap-4 { gap: 1rem; }
-        .pl-page-root .mb-0 { margin-bottom: 0; }
-        .pl-page-root .mb-2 { margin-bottom: .5rem; }
-        .pl-page-root .mb-3 { margin-bottom: .75rem; }
-        .pl-page-root .mb-4 { margin-bottom: 1rem; }
-        .pl-page-root .p-0 { padding: 0; }
-        .pl-page-root .fw-bold { font-weight: 700; }
 
         /* Modal overlay */
         .pl-page-root .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1050; display: flex; align-items: center; justify-content: center; }
