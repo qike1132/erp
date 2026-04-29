@@ -387,7 +387,7 @@ async def batch_create_case_stockins(db: AsyncSession, stockins_data: list) -> d
 
             await create_case_stockin(db, product_id, quantity, stockin_date, customer, note, stockin_no)
             success_count += 1
-        except Exception as e:
+        except (ValueError, TypeError, RuntimeError) as e:
             failed.append({'index': i, 'error': str(e)})
 
     return {'success': True, 'message': f'成功提交 {success_count} 条入库记录', 'failed': failed}
@@ -414,7 +414,7 @@ async def batch_create_case_stockouts(db: AsyncSession, stockouts_data: list) ->
 
             result = await create_case_stockout(db, product_id, quantity, stockout_date, customer, note, stockout_no)
             results.append({**result, 'id': item.get('id', '未知')})
-        except Exception as e:
+        except (ValueError, TypeError, RuntimeError) as e:
             results.append({'success': False, 'error': str(e), 'id': item.get('id', '未知')})
 
     return {'success': True, 'results': results}

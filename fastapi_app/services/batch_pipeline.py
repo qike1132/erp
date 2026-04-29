@@ -96,7 +96,7 @@ class BatchImportPipeline(ABC, Generic[T]):
             result.created_ids = created_ids
 
             await db.commit()
-        except Exception as e:
+        except (ValueError, TypeError, OSError) as e:
             await db.rollback()
             logger.exception(f"批量导入失败: {e}")
             result.errors.append(f"导入失败: {str(e)}")

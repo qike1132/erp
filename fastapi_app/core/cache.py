@@ -15,7 +15,19 @@ from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
+_CACHE_LOCAL_MAX_SIZE = 10000  # L1 缓存最大条目数
 _cache_local: dict[str, tuple[Any, datetime]] = {}
+
+
+def _evict_local_cache():
+    """当 L1 缓存超过上限时，淘汰最早过期的条目"""
+    if len(_cache_local) <= _CACHE_LOCAL_MAX_SIZE:
+        return
+    # 按过期时间排序，淘汰最旧的 25%
+    sorted_items = sorted(_cache_local.items(), key=lambda x: x[1][1])
+    evict_count = len(sorted_items) // 4
+    for k, _ in sorted_items[:evict_count]:
+        del _cache_local[k]
 
 
 def _get_redis_cache():
@@ -23,7 +35,7 @@ def _get_redis_cache():
     try:
         from utils.redis_cache import redis_cache
         return redis_cache
-    except Exception:
+    except (ImportError, OSError):
         return None
 
 
@@ -61,33 +73,27 @@ def cache_result(
                 if redis:
                     try:
                         cached = await redis.get(cache_key)
-                        if cached:
-                            if serialize:
-                                result = json.loads(cached)
-                            else:
-                                result = cached
+                        if cached is not None:
+                            result = cached
                             _cache_local[cache_key] = (result, now + timedelta(seconds=local_ttl))
                             return result
-                    except Exception as e:
+                    except (OSError, ConnectionError, ValueError) as e:
                         logger.warning("Redis 缓存读取失败，降级到数据库查询: %s", e)
 
                 result = await func(*args, **kwargs)
 
                 _cache_local[cache_key] = (result, now + timedelta(seconds=local_ttl))
+                _evict_local_cache()
 
                 if redis:
                     try:
-                        if serialize:
-                            serialized = json.dumps(result, ensure_ascii=False, default=str)
-                        else:
-                            serialized = result
-                        await redis.set(cache_key, serialized, ex=ttl)
-                    except Exception as e:
+                        await redis.set(cache_key, result, timeout=int(ttl))
+                    except (OSError, ConnectionError, ValueError) as e:
                         logger.warning("Redis 缓存写入失败: %s", e)
 
                 return result
 
-            except Exception as e:
+            except (OSError, ConnectionError, ValueError) as e:
                 logger.error("缓存装饰器执行失败: %s", e, exc_info=True)
                 return await func(*args, **kwargs)
 
@@ -96,27 +102,28 @@ def cache_result(
 
 
 async def invalidate_cache(pattern: str) -> int:
-    """使缓存失效"""
+    """使缓存失效（先删 L2 Redis，再删 L1 本地，缩小竞态窗口）"""
     try:
         deleted = 0
+
+        # 先删 L2 Redis，防止其他进程/协程从 Redis 读到旧数据回填 L1
+        redis = _get_redis_cache()
+        if redis:
+            try:
+                redis_deleted = await redis.delete_pattern(pattern)
+                deleted += redis_deleted
+                logger.info("Redis 缓存失效: pattern=%s, deleted=%d", pattern, redis_deleted)
+            except (OSError, ConnectionError, ValueError) as e:
+                logger.warning("Redis 缓存失效失败: %s", e)
+
+        # 再删 L1 本地缓存
         keys_to_remove = [k for k in _cache_local if _match_pattern(k, pattern)]
         for k in keys_to_remove:
             del _cache_local[k]
         deleted += len(keys_to_remove)
 
-        redis = _get_redis_cache()
-        if redis:
-            try:
-                keys = await redis.keys(pattern)
-                if keys:
-                    redis_deleted = await redis.delete(*keys)
-                    deleted += redis_deleted
-                    logger.info("Redis 缓存失效: pattern=%s, deleted=%d", pattern, redis_deleted)
-            except Exception as e:
-                logger.warning("Redis 缓存失效失败: %s", e)
-
         return deleted
-    except Exception as e:
+    except (OSError, ValueError) as e:
         logger.error("缓存失效失败: %s", e, exc_info=True)
         return 0
 
@@ -143,7 +150,7 @@ async def warmup_cache(func, *args, key_prefix: str, ttl: int = 60, **kwargs):
     redis = _get_redis_cache()
     if redis:
         try:
-            await redis.set(cache_key, json.dumps(result, ensure_ascii=False, default=str), ex=ttl)
-        except Exception:
+            await redis.set(cache_key, result, timeout=int(ttl))
+        except (OSError, ValueError):
             pass
     return result

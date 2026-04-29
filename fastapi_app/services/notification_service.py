@@ -20,11 +20,15 @@ class StockEvent:
     ORDER_UNLOCKED = "order_unlocked"
     APPROVAL_REQUESTED = "approval_requested"
     APPROVAL_RESOLVED = "approval_resolved"
+    ORDER_CREATED = "order_created"
+    PURCHASE_ORDER_CREATED = "purchase_order_created"
 
 
 EVENT_DISPLAY_MESSAGES = {
     "stock_changed": "库存数据已更新",
     "shipment_plan_uploaded": "新的出货计划已上传",
+    "order_created": "新订单已创建",
+    "purchase_order_created": "新采购订单已生成",
 }
 
 _async_redis_client = None
@@ -44,7 +48,7 @@ async def _get_async_redis_client():
             url = url.replace("redis://", f"redis://:{settings.REDIS_PASSWORD}@")
         _async_redis_client = aioredis.from_url(url)
         return _async_redis_client
-    except Exception as e:
+    except (ImportError, OSError, ValueError) as e:
         logger.warning("异步 Redis 客户端初始化失败: %s", e)
         return None
 
@@ -57,7 +61,7 @@ async def _warmup_async_redis():
         if client:
             await client.ping()
             logger.info("异步 Redis 客户端预热成功")
-    except Exception as e:
+    except (OSError, ConnectionError, ValueError) as e:
         logger.warning("异步 Redis 客户端预热失败: %s", e)
         _async_redis_client = None
 
@@ -79,7 +83,7 @@ async def publish_stock_event(event_type: str, data: dict, redis_client=None):
         }
         await redis_client.publish("erp:stock_events", json.dumps(event, ensure_ascii=False))
         logger.debug("事件已发布: %s", event_type)
-    except Exception as e:
+    except (OSError, ConnectionError, ValueError) as e:
         logger.warning("事件发布失败: %s", e)
 
 
@@ -120,7 +124,7 @@ class ConnectionManager:
             for ws in connections:
                 try:
                     await ws.send_json(event)
-                except Exception:
+                except RuntimeError:
                     logger.debug("WebSocket 广播发送失败，标记断开: user_id=%s", user_id)
                     disconnected.append((user_id, ws))
         for user_id, ws in disconnected:
@@ -131,7 +135,7 @@ class ConnectionManager:
         for ws in list(connections):
             try:
                 await ws.send_json(event)
-            except Exception:
+            except RuntimeError:
                 logger.debug("WebSocket 定向发送失败，断开: user_id=%s", user_id)
                 self.disconnect(ws, user_id)
 
@@ -175,7 +179,7 @@ class ConnectionManager:
             except asyncio.CancelledError:
                 logger.info("Redis Pub/Sub 监听任务已取消")
                 break
-            except Exception as e:
+            except (OSError, ConnectionError, ValueError) as e:
                 logger.error("Redis Pub/Sub 监听异常: %s，5s 后重连", e)
 
             await self._cleanup_connections()
@@ -190,13 +194,13 @@ class ConnectionManager:
             try:
                 await self._pubsub.unsubscribe("erp:stock_events")
                 await self._pubsub.close()
-            except Exception as e:
+            except (OSError, ConnectionError) as e:
                 logger.debug("PubSub 关闭异常（可忽略）: %s", e)
             self._pubsub = None
         if self._async_redis:
             try:
                 await self._async_redis.close()
-            except Exception as e:
+            except (OSError, ConnectionError) as e:
                 logger.debug("Redis 连接关闭异常（可忽略）: %s", e)
             self._async_redis = None
 

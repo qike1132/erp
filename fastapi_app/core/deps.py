@@ -28,15 +28,35 @@ __all__ = [
 ]
 
 
+def _get_signing_key() -> str:
+    """获取 JWT 签名密钥（支持 HS256 和 RS256）"""
+    if settings.ALGORITHM.startswith("RS"):
+        if not settings.JWT_PRIVATE_KEY_PATH:
+            raise RuntimeError("RS256 模式必须设置 JWT_PRIVATE_KEY_PATH 环境变量")
+        with open(settings.JWT_PRIVATE_KEY_PATH, "r") as f:
+            return f.read()
+    return settings.SECRET_KEY
+
+
+def _get_verify_key() -> str:
+    """获取 JWT 验证密钥（支持 HS256 和 RS256）"""
+    if settings.ALGORITHM.startswith("RS"):
+        if not settings.JWT_PUBLIC_KEY_PATH:
+            raise RuntimeError("RS256 模式必须设置 JWT_PUBLIC_KEY_PATH 环境变量")
+        with open(settings.JWT_PUBLIC_KEY_PATH, "r") as f:
+            return f.read()
+    return settings.SECRET_KEY
+
+
 def create_access_token(data: dict, expires_delta=None) -> str:
-    """生成JWT Token"""
+    """生成JWT Token（支持 HS256 / RS256）"""
     from datetime import datetime, timedelta, timezone
     import jwt
 
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode["exp"] = expire
-    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    return jwt.encode(to_encode, _get_signing_key(), algorithm=settings.ALGORITHM)
 
 
 def _decode_jwt_token(token: str) -> dict:
@@ -44,7 +64,7 @@ def _decode_jwt_token(token: str) -> dict:
     import jwt
 
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(token, _get_verify_key(), algorithms=[settings.ALGORITHM])
         return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(

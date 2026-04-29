@@ -1,0 +1,13 @@
+# ============================================================
+# 密码哈希迁移依赖（仅运行迁移脚本时需要）
+# 安装: pip install -r requirements/migration.txt
+#
+# 用于将旧格式密码哈希（bcrypt/pbkdf2/scrypt）迁移到 Argon2id。
+# 迁移完成后无需保留此安装。
+# 迁移脚本: python scripts/migrate_password_hashes.py
+# ============================================================
+
+-r base.txt
+
+# ----- 旧哈希格式验证 -----
+bcrypt==5.0.0

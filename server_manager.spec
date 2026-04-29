@@ -33,6 +33,9 @@ hiddenimports = [
     'PIL.Image',
     'PIL.ImageDraw',
     'PIL.ImageTk',        # 窗口图标
+    
+    # 进程管理
+    'psutil',
 ] + pystray_hiddenimports
 
 # 排除不必要的模块
@@ -83,7 +86,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='ERP服务器管理器_v4.1',
+    name='ERP服务器管理器_v5.19',
     debug=False,
     bootloader_ignore_signals=False,
     strip=True,

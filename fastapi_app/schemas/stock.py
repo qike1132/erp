@@ -20,7 +20,7 @@ def _validate_date_format(v: str) -> str:
 class StockInCreate(BaseModel):
     """创建入库请求"""
     product_id: int = Field(..., gt=0, description="产品ID")
-    quantity: int = Field(..., gt=0, le=100000, description="入库数量")
+    quantity: int = Field(..., gt=0, le=9999999, description="入库数量")
     customer: str = Field(..., min_length=1, max_length=100, description="客户名称")
     stockin_date: str = Field(..., description="入库日期 (YYYY-MM-DD)")
     note: Optional[str] = Field(None, max_length=500, description="备注")
@@ -33,7 +33,7 @@ class StockInCreate(BaseModel):
 
 class StockInUpdate(BaseModel):
     """更新入库请求"""
-    quantity: Optional[int] = Field(None, gt=0, le=100000, description="入库数量")
+    quantity: Optional[int] = Field(None, gt=0, le=9999999, description="入库数量")
     customer: Optional[str] = Field(None, min_length=1, max_length=100, description="客户名称")
     stockin_date: Optional[str] = Field(None, description="入库日期 (YYYY-MM-DD)")
     note: Optional[str] = Field(None, max_length=500, description="备注")
@@ -49,7 +49,7 @@ class StockInUpdate(BaseModel):
 class StockOutCreate(BaseModel):
     """创建出库请求"""
     product_id: int = Field(..., gt=0, description="产品ID")
-    quantity: int = Field(..., gt=0, le=100000, description="出库数量")
+    quantity: int = Field(..., gt=0, le=9999999, description="出库数量")
     customer: str = Field(..., min_length=1, max_length=100, description="客户名称")
     stockout_date: str = Field(..., description="出库日期 (YYYY-MM-DD)")
     note: Optional[str] = Field(None, max_length=500, description="备注")
@@ -64,7 +64,7 @@ class StockOutCreate(BaseModel):
 
 class StockOutUpdate(BaseModel):
     """更新出库请求"""
-    quantity: Optional[int] = Field(None, gt=0, le=100000, description="出库数量")
+    quantity: Optional[int] = Field(None, gt=0, le=9999999, description="出库数量")
     customer: Optional[str] = Field(None, min_length=1, max_length=100, description="客户名称")
     stockout_date: Optional[str] = Field(None, description="出库日期 (YYYY-MM-DD)")
     note: Optional[str] = Field(None, max_length=500, description="备注")

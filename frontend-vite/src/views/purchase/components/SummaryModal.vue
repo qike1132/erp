@@ -1,0 +1,313 @@
+<template>
+  <UiDialog :open="open" class="max-w-[1000px]" @update:open="$emit('close')">
+    <template #title>
+      <div class="flex items-center gap-2"><i class="fas fa-clipboard-list text-primary-500" /> 汇总下单</div>
+    </template>
+
+    <!-- Tab headers -->
+    <div class="flex border-b-2 border-gray-200 mb-0">
+      <div
+        :class="[
+          'px-5 py-2.5 cursor-pointer text-sm font-semibold border-b-[3px] mb-[-2px] transition-all',
+          activeTab === 'factory' ? 'border-b-primary-400 text-primary-400' : 'border-b-transparent text-gray-400',
+        ]"
+        @click="activeTab = 'factory'"
+      >
+        <i class="fas fa-industry" /> 工厂内部订单
+      </div>
+      <div
+        :class="[
+          'px-5 py-2.5 cursor-pointer text-sm font-semibold border-b-[3px] mb-[-2px] transition-all',
+          activeTab === 'supplier' ? 'border-b-rose text-rose' : 'border-b-transparent text-gray-400',
+        ]"
+        @click="activeTab = 'supplier'"
+      >
+        <i class="fas fa-truck" /> 供应商采购订单
+      </div>
+    </div>
+
+    <div class="py-4">
+      <!-- Factory Tab -->
+      <template v-if="activeTab === 'factory' && factoryData">
+        <div
+          class="mb-3 p-3 rounded-lg flex justify-between items-center bg-gradient-to-r from-primary-400/10 to-purple-600/10"
+        >
+          <div>
+            <div class="font-semibold text-sm mb-1.5">
+              <i class="fas fa-industry text-primary-400" /> 工厂内部采购订单汇总
+            </div>
+            <div class="text-xs text-text-secondary">
+              已选择 <strong class="text-primary-400">{{ factoryData.order_count || orderCount }}</strong> 个订单
+            </div>
+          </div>
+          <div class="flex gap-2">
+            <button
+              v-if="!editMode"
+              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-border bg-transparent text-text-secondary hover:text-primary-500 hover:border-primary-500 hover:bg-primary-50 transition-all"
+              @click="$emit('toggleEditMode', true)"
+            >
+              <i class="fas fa-edit" /> 自定义编辑
+            </button>
+            <template v-else>
+              <button
+                class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-warning-500 rounded-lg border-none transition-all hover:bg-warning-600"
+                @click="$emit('toggleEditMode', false)"
+              >
+                <i class="fas fa-times" /> 取消编辑
+              </button>
+              <button
+                class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-success-500 rounded-lg border-none transition-all hover:bg-success-600"
+                @click="$emit('saveEdits')"
+              >
+                <i class="fas fa-save" /> 保存修改
+              </button>
+            </template>
+          </div>
+        </div>
+
+        <div class="max-h-[calc(100vh-320px)] overflow-auto">
+          <table class="w-full border-collapse font-[SimSun,_宋体] text-[13px] bg-white">
+            <thead>
+              <tr class="bg-border-light">
+                <th class="w-[10%]">客户</th>
+                <th class="w-[16%]">产品名称</th>
+                <th class="w-[7%]">订单数量</th>
+                <th class="w-[10%]">供应商</th>
+                <th class="w-[25%]">布料名称</th>
+                <th class="w-[17%]">规格型号</th>
+                <th class="w-[15%]">数量</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template v-for="(group, gi) in factoryData.groups || []" :key="gi">
+                <template v-for="(supplier, si) in group.suppliers || []" :key="si">
+                  <tr v-for="(fabric, fi) in supplier.fabrics || []" :key="fi">
+                    <td v-if="isFirstFabricRow(gi, si, fi)" :rowspan="getGroupFabricCount(gi)" class="font-bold">
+                      {{ group.customer_name }}
+                    </td>
+                    <td v-if="isFirstFabricRow(gi, si, fi)" :rowspan="getGroupFabricCount(gi)">
+                      {{ group.product_name }}
+                    </td>
+                    <td v-if="isFirstFabricRow(gi, si, fi)" :rowspan="getGroupFabricCount(gi)">
+                      {{ formatQty(group.product_quantity || group.order_quantity) }}
+                    </td>
+                    <td v-if="fi === 0" :rowspan="supplier.fabrics.length">
+                      {{ supplier.supplier_name }}
+                    </td>
+                    <td>{{ fabric.fabric_name }}</td>
+                    <td>{{ fabric.specification || '' }}</td>
+                    <td class="text-right">
+                      <template v-if="editMode">
+                        <input
+                          type="number"
+                          class="w-20 text-right py-1 px-1.5 text-[13px] inline-block border border-border rounded focus:outline-none focus:border-primary-500"
+                          :value="fabric.quantity"
+                          min="0"
+                          @change="$emit('updateQty', gi, si, fi, ($event.target as HTMLInputElement).value)"
+                          @focus="($event.target as HTMLInputElement).select()"
+                        />
+                        <span class="text-xs ml-0.5">{{ fabric.unit || '' }}</span>
+                        <span
+                          v-if="fabric.item_ids && fabric.item_ids.length > 1"
+                          class="text-[10px] text-gray-400 ml-1"
+                          title="此为合并项"
+                          >(合)</span
+                        >
+                      </template>
+                      <template v-else>
+                        {{ fabric.quantity }} {{ fabric.unit || '' }}
+                        <span
+                          v-if="fabric.item_ids && fabric.item_ids.length > 1"
+                          class="text-[10px] text-gray-400 ml-1"
+                          title="此为合并项"
+                          >(合)</span
+                        >
+                      </template>
+                    </td>
+                  </tr>
+                </template>
+              </template>
+              <tr class="bg-border-light font-bold">
+                <td colspan="4" class="text-center">合计</td>
+                <td />
+                <td />
+                <td class="text-right">
+                  {{ factoryGrandTotal }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="mt-4 pt-3 border-t border-border flex justify-between items-center">
+          <div class="flex gap-2">
+            <button
+              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-success-500 rounded-lg border-none transition-all hover:bg-success-600"
+              @click="$emit('exportFactory')"
+            >
+              <i class="fas fa-file-excel" /> 导出 Excel
+            </button>
+          </div>
+          <div class="flex gap-2">
+            <button
+              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-border bg-transparent text-text-secondary hover:text-primary-500 hover:border-primary-500 hover:bg-primary-50 transition-all"
+              @click="$emit('close')"
+            >
+              关闭
+            </button>
+            <button
+              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-primary-500 rounded-lg border-none transition-all hover:bg-primary-600"
+              @click="$emit('printFactory')"
+            >
+              <i class="fas fa-print" /> 打印预览
+            </button>
+          </div>
+        </div>
+      </template>
+
+      <!-- Supplier Tab -->
+      <template v-if="activeTab === 'supplier' && supplierData">
+        <div
+          class="mb-3 p-3 rounded-lg flex justify-between items-center bg-gradient-to-r from-rose/10 to-rose-deep/10"
+        >
+          <div>
+            <div class="font-semibold text-sm mb-1.5"><i class="fas fa-truck text-rose" /> 供应商采购订单汇总</div>
+            <div class="text-xs text-text-secondary">
+              已选择 <strong class="text-rose">{{ supplierData.order_count || orderCount }}</strong> 个订单，涵盖
+              <strong class="text-rose">{{ supplierGroups.length }}</strong> 家供应商，共
+              <strong class="text-rose">{{ (supplierData.materials || []).length }}</strong> 种物料
+            </div>
+          </div>
+        </div>
+
+        <div class="max-h-[calc(100vh-320px)] overflow-auto">
+          <table class="w-full border-collapse font-[SimSun,_宋体] text-[13px] bg-white">
+            <thead>
+              <tr class="bg-border-light">
+                <th class="w-[12%]">供应商</th>
+                <th class="w-[30%]">物料名称</th>
+                <th class="w-[28%]">规格型号</th>
+                <th class="w-[30%]">数量</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template v-for="(sg, sgi) in supplierGroups" :key="sgi">
+                <tr v-for="(m, mi) in sg.materials" :key="mi">
+                  <td v-if="mi === 0" :rowspan="sg.materials.length" class="font-bold">
+                    {{ sg.supplierName }}
+                  </td>
+                  <td>{{ m.material_name }}</td>
+                  <td>{{ m.specification || '' }}</td>
+                  <td class="text-right">{{ m.total_quantity }} {{ m.unit || '' }}</td>
+                </tr>
+              </template>
+              <tr class="bg-border-light font-bold">
+                <td class="text-center">合计</td>
+                <td />
+                <td />
+                <td class="text-right">
+                  {{ supplierGrandTotal }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="mt-4 pt-3 border-t border-border flex justify-between items-center">
+          <div class="flex gap-2">
+            <button
+              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-success-500 rounded-lg border-none transition-all hover:bg-success-600"
+              @click="$emit('exportSupplier')"
+            >
+              <i class="fas fa-file-archive" /> 导出汇总
+            </button>
+          </div>
+          <div class="flex gap-2">
+            <button
+              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-border bg-transparent text-text-secondary hover:text-primary-500 hover:border-primary-500 hover:bg-primary-50 transition-all"
+              @click="$emit('close')"
+            >
+              关闭
+            </button>
+            <button
+              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-primary-500 rounded-lg border-none transition-all hover:bg-primary-600"
+              @click="$emit('printSupplier')"
+            >
+              <i class="fas fa-print" /> 打印预览
+            </button>
+          </div>
+        </div>
+      </template>
+    </div>
+  </UiDialog>
+</template>
+
+<script setup lang="ts">
+import { ref, computed } from 'vue'
+import UiDialog from '@/components/ui/UiDialog.vue'
+
+const props = defineProps<{
+  open: boolean
+  factoryData: any
+  supplierData: any
+  editMode: boolean
+  orderCount: number
+  supplierGroups: { supplierName: string; materials: any[] }[]
+}>()
+
+defineEmits<{
+  close: []
+  toggleEditMode: [enable: boolean]
+  saveEdits: []
+  updateQty: [gi: number | string, si: number | string, fi: number | string, value: string]
+  exportFactory: []
+  exportSupplier: []
+  printFactory: []
+  printSupplier: []
+}>()
+
+const activeTab = ref<'factory' | 'supplier'>('factory')
+
+const factoryGrandTotal = computed(() => {
+  let t = 0
+  props.factoryData?.groups?.forEach((g: any) =>
+    g.suppliers?.forEach((s: any) => s.fabrics?.forEach((f: any) => (t += parseFloat(f.quantity) || 0))),
+  )
+  return t
+})
+
+const supplierGrandTotal = computed(() => {
+  let t = 0
+  props.supplierGroups.forEach((g) => g.materials.forEach((m) => (t += parseFloat(m.total_quantity) || 0)))
+  return t
+})
+
+function isFirstFabricRow(gi: number | string, si: number | string, fi: number | string): boolean {
+  return Number(fi) === 0 && Number(si) === 0
+}
+
+function getGroupFabricCount(gi: number | string): number {
+  const group = props.factoryData?.groups?.[Number(gi)]
+  if (!group) return 1
+  return (group.suppliers || []).reduce((sum: number, s: any) => sum + (s.fabrics?.length || 0), 0)
+}
+
+function formatQty(val: any): string {
+  const n = parseFloat(String(val || 0))
+  if (n % 1 === 0) return String(parseInt(String(n)))
+  return n.toFixed(2).replace(/\.?0+$/, '')
+}
+</script>
+
+<style scoped>
+table th,
+table td {
+  border: 1px solid var(--color-text);
+  padding: 8px;
+  vertical-align: middle;
+}
+table th {
+  font-weight: bold;
+  text-align: center;
+}
+</style>

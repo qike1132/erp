@@ -62,7 +62,7 @@ class DBHealthChecker:
         while self._running:
             try:
                 await self._perform_check()
-            except Exception as e:
+            except (OperationalError, DisconnectionError) as e:
                 logger.error("健康检查循环异常: %s", e)
             await asyncio.sleep(self.check_interval)
 
@@ -104,7 +104,7 @@ class DBHealthChecker:
             self.last_failure_detail = f"异步引擎: {e.__class__.__name__}: {str(e)[:200]}"
             logger.warning("异步引擎连接检查失败: %s", self.last_failure_detail)
             return False
-        except Exception as e:
+        except (OperationalError, DisconnectionError) as e:
             self.last_failure_detail = f"异步引擎未知错误: {e.__class__.__name__}: {str(e)[:200]}"
             logger.error("异步引擎连接检查异常: %s", self.last_failure_detail)
             return False
@@ -126,7 +126,7 @@ class DBHealthChecker:
                 }
             else:
                 status["async_pool"] = {"status": "not_initialized"}
-        except Exception as e:
+        except (OperationalError, DisconnectionError) as e:
             status["async_pool"] = {"error": str(e)}
 
         return status

@@ -4,6 +4,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError, OperationalError, DisconnectionError
 
 from fastapi_app.core.database import get_sync_db as get_db
 from fastapi_app.core.deps import require_permission
@@ -25,12 +26,14 @@ def api_get_products(
     category: str = Query('', max_length=100),
     sort_by: str = Query('name'),
     sort_order: str = Query('asc'),
+    simple: bool = Query(False),
     db: Session = Depends(get_db),
     _user=Depends(require_permission("product_manage")),
 ):
     result = svc.get_products(
         db, page=page, per_page=per_page, search=search,
         has_bom=has_bom, category=category, sort_by=sort_by, sort_order=sort_order,
+        simple=simple,
     )
     return {'success': True, **result}
 
@@ -101,7 +104,7 @@ def api_save_product_bom(
         return {'success': True, 'message': msg}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
+    except (SQLAlchemyError, RuntimeError) as e:
         db.rollback()
         logger.error(f"保存BOM数据失败: {e}")
         raise HTTPException(status_code=500, detail="保存失败，请稍后重试")
@@ -148,7 +151,7 @@ def api_calculate_material(
     try:
         result = svc.calculate_material(db, data.orders)
         return {'success': True, **result}
-    except Exception as e:
+    except (ValueError, OperationalError, DisconnectionError, RuntimeError) as e:
         logger.error(f"物料计算失败: {e}")
         raise HTTPException(status_code=500, detail="物料计算失败，请稍后重试")
 

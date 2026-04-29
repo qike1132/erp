@@ -7,10 +7,9 @@
 
 import time
 import logging
-import os
 import asyncio
 
-from fastapi_app.core.config import settings
+from sqlalchemy.exc import OperationalError, DisconnectionError
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +29,7 @@ FLASK_TO_FASTAPI_URL_MAP = {
     'product.products': '/product',
     'customer_order.index': '/customer-order',
     'stock.stockins': '/stock',
-    'stock.stockouts': '/stock',
+    'stock.stockouts': '/stock-out',
     'stock.inventory': '/stock',
     'case.case_management_page': '/case',
     'report.reports': '/report',
@@ -43,14 +42,13 @@ FLASK_TO_FASTAPI_URL_MAP = {
     'material_registration.index': '/material',
     'supplier.suppliers': '/supplier',
     'sku_batch.sku_batch_page': '/batch',
-    'finance.statistics': '/finance',
     'production_plan.plan_list': '/production',
     'production_summary.index': '/production',
     'purchase_plan.plan_list': '/purchase-plan',
 }
 
 # 分区显示顺序
-SECTION_ORDER = ['purchase', 'purchase_tools', 'core', 'finance', 'data', 'system']
+SECTION_ORDER = ['purchase', 'purchase_tools', 'core', 'data', 'system']
 
 # 两级缓存
 _nav_local_cache = {"data": None, "cached_at": 0.0}
@@ -66,7 +64,7 @@ async def invalidate_nav_cache():
         from utils.redis_cache import redis_cache
         await redis_cache.delete('nav_sections')
         logger.info("导航缓存已清除")
-    except Exception:
+    except (OSError, ConnectionError, ValueError):
         logger.warning("导航缓存清除失败", exc_info=True)
 
 
@@ -89,7 +87,7 @@ async def get_nav_sections_async() -> dict:
             _nav_local_cache["data"] = cached
             _nav_local_cache["cached_at"] = now
             return cached
-    except Exception:
+    except (OSError, ConnectionError, ValueError):
         logger.warning("导航Redis缓存读取失败", exc_info=True)
 
     # Level 3: 数据库查询（异步）
@@ -153,13 +151,13 @@ async def get_nav_sections_async() -> dict:
         try:
             from utils.redis_cache import redis_cache
             await redis_cache.set('nav_sections', ordered_sections, timeout=_nav_redis_ttl)
-        except Exception:
+        except (OSError, ConnectionError, ValueError):
             logger.warning("导航Redis缓存写入失败", exc_info=True)
         _nav_local_cache["data"] = ordered_sections
         _nav_local_cache["cached_at"] = time.time()
 
         return ordered_sections
-    except Exception as e:
+    except (OperationalError, DisconnectionError) as e:
         logger.warning("获取导航权限数据失败: %s [%s]", e, type(e).__name__)
         return _nav_local_cache["data"] or {}
 
@@ -197,7 +195,7 @@ def get_nav_sections() -> dict:
             _nav_local_cache["data"] = cached
             _nav_local_cache["cached_at"] = now
             return cached
-    except Exception:
+    except (OSError, ConnectionError, ValueError, RuntimeError):
         logger.warning("导航同步缓存读取失败", exc_info=True)
     
     # 返回空数据，让异步版本填充

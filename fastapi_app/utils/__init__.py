@@ -17,7 +17,7 @@ def parse_date_value(date_value) -> Optional[datetime]:
         try:
             base_date = datetime(1899, 12, 30)
             return base_date + timedelta(days=date_value)
-        except Exception:
+        except (ValueError, OverflowError):
             return None
     try:
         date_str = str(date_value).strip()
@@ -26,7 +26,7 @@ def parse_date_value(date_value) -> Optional[datetime]:
                 return datetime.strptime(date_str, fmt)
             except ValueError:
                 continue
-    except Exception:
+    except (ValueError, TypeError):
         pass
     return None
 

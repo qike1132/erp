@@ -15,6 +15,7 @@ from typing import Optional
 import openpyxl
 from sqlalchemy import select, func, delete, and_, extract
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import OperationalError, DisconnectionError
 
 from fastapi_app.shared_models import (
     ProductionPlan, ProductionPlanLog, StagingPurchasePlan,
@@ -168,14 +169,14 @@ async def get_plans_with_inventory(db: AsyncSession, year: int, month: int,
     try:
         inventory_result = await stock_service.get_inventory(db)
         inventory_map = _build_inventory_map(inventory_result['inventory_data'])
-    except Exception as e:
+    except (OperationalError, DisconnectionError, ValueError) as e:
         logger.warning(f'获取库存数据失败: {e}')
         inventory_map = {}
 
     # 获取当月出货数据
     try:
         shipped_map = await _calc_all_shipped_qty(db, year, month)
-    except Exception as e:
+    except (OperationalError, DisconnectionError, ValueError) as e:
         logger.warning(f'获取出货数据失败: {e}')
         shipped_map = {}
 
@@ -340,12 +341,12 @@ async def get_timeline(db: AsyncSession, year: int, month: int,
     try:
         inventory_result = await stock_service.get_inventory(db)
         inventory_map = _build_inventory_map(inventory_result['inventory_data'])
-    except Exception:
+    except (OperationalError, DisconnectionError, ValueError):
         inventory_map = {}
 
     try:
         shipped_map = await _calc_all_shipped_qty(db, year, month)
-    except Exception:
+    except (OperationalError, DisconnectionError, ValueError):
         shipped_map = {}
 
     # 按日期聚合
@@ -414,7 +415,7 @@ async def upload_excel(db: AsyncSession, file_content: bytes,
 
     try:
         wb = openpyxl.load_workbook(io.BytesIO(file_content), read_only=True)
-    except Exception as e:
+    except (ValueError, OSError) as e:
         raise ValueError(f"Excel文件解析失败: {e}")
 
     try:

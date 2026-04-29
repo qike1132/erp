@@ -10,7 +10,7 @@ from datetime import date as date_type
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError, DisconnectionError
 
 from fastapi_app.core.database import get_async_db
 from fastapi_app.core.deps import require_permission
@@ -47,7 +47,7 @@ async def list_plans(
             plans=result['plans'],
             total=result['total'],
         )
-    except Exception as e:
+    except (OperationalError, DisconnectionError) as e:
         logger.error(f"获取计划列表失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取计划列表失败: {str(e)}")
 
@@ -63,7 +63,7 @@ async def plan_detail(
         return await purchase_plan_service.get_plan_detail(db, plan_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
+    except (OperationalError, DisconnectionError) as e:
         logger.error(f"获取计划详情失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取计划详情失败: {str(e)}")
 
@@ -92,7 +92,7 @@ async def create_plan(
     except IntegrityError as e:
         logger.error(f"创建计划单号冲突: {e}")
         raise HTTPException(status_code=409, detail='单号已存在，请勿重复提交')
-    except Exception as e:
+    except (OperationalError, DisconnectionError) as e:
         logger.error(f"创建计划失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"创建计划失败: {str(e)}")
 
@@ -207,7 +207,7 @@ async def monthly_calendar(
                 if c_obj:
                     c['icon_url'] = c_obj.icon_url or ''
         return result
-    except Exception as e:
+    except (OperationalError, DisconnectionError) as e:
         logger.error(f"获取月度日历数据失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取月度数据失败: {str(e)}")
 
@@ -222,7 +222,7 @@ async def customer_summary(
     """客户汇总统计"""
     try:
         return await purchase_plan_service.get_customer_summary(db, year, month)
-    except Exception as e:
+    except (OperationalError, DisconnectionError) as e:
         logger.error(f"获取客户汇总失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取汇总数据失败: {str(e)}")
 
@@ -238,7 +238,7 @@ async def inventory_compare(
     """库存对比数据"""
     try:
         return await purchase_plan_service.get_inventory_compare(db, year, month, customer_id)
-    except Exception as e:
+    except (OperationalError, DisconnectionError) as e:
         logger.error(f"获取库存对比失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取库存对比失败: {str(e)}")
 
@@ -256,7 +256,7 @@ async def shipment_progress(
         return await purchase_plan_service.get_shipment_progress(db, plan_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
+    except (OperationalError, DisconnectionError) as e:
         logger.error(f"获取出货进度失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取出货进度失败: {str(e)}")
 
@@ -273,7 +273,7 @@ async def shipment_records(
         return {'records': records}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
+    except (OperationalError, DisconnectionError) as e:
         logger.error(f"获取出货流水失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取出货流水失败: {str(e)}")
 async def shipment_sync(
@@ -295,7 +295,7 @@ async def shipment_sync(
             current = date_type.fromordinal(current.toordinal() + 1)
 
         return {"success": True, "synced_count": total_synced}
-    except Exception as e:
+    except (OperationalError, DisconnectionError) as e:
         logger.error(f"出货同步失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"出货同步失败: {str(e)}")
 

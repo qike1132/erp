@@ -4,6 +4,7 @@
 提供排产计划的增删改查、批量上传预览、库存对比、出货进度、时间轴等功能。
 """
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from sqlalchemy.exc import OperationalError, DisconnectionError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db
@@ -37,7 +38,7 @@ async def list_plans(
             monthly_summary=result['monthly_summary'],
             total=result['total'],
         )
-    except Exception as e:
+    except (OperationalError, DisconnectionError) as e:
         raise HTTPException(status_code=500, detail=f"获取排产计划失败: {str(e)}")
 
 
@@ -112,7 +113,7 @@ async def timeline(
     """时间轴数据（按日期+客户维度，用于日历热力图）"""
     try:
         return await production_plan_service.get_timeline(db, year, month, customer)
-    except Exception as e:
+    except (OperationalError, DisconnectionError) as e:
         raise HTTPException(status_code=500, detail=f"获取时间轴数据失败: {str(e)}")
 
 
@@ -126,7 +127,7 @@ async def customer_summary(
     """客户汇总统计"""
     try:
         return await production_plan_service.get_customer_summary(db, year, month)
-    except Exception as e:
+    except (OperationalError, DisconnectionError) as e:
         raise HTTPException(status_code=500, detail=f"获取汇总数据失败: {str(e)}")
 
 
@@ -155,7 +156,7 @@ async def upload_excel(
 
     try:
         content = await file.read()
-    except Exception as e:
+    except (OSError, ValueError) as e:
         raise HTTPException(status_code=400, detail=f"文件读取失败: {e}")
 
     # 使用用户ID作为session_id（简化处理）

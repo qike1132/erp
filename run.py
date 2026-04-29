@@ -1,9 +1,9 @@
 """
-ERP系统开发环境启动脚本 (FastAPI + Next.js)
+ERP系统开发环境启动脚本 (FastAPI + Vue/Vite)
 
 开发模式特点：
   - FastAPI 开启 --reload（代码修改自动重启）
-  - Next.js 开启 HMR（热模块替换）
+  - Vue/Vite 开启 HMR（热模块替换）
 
 用法:
     python run.py

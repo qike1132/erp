@@ -110,7 +110,7 @@ async def update_stock_with_optimistic_lock(
                         f'new_stock={new_stock}, version={old_version}->{old_version + 1}')
             return product
 
-        # 版本冲突，回滚当前事务的脏数据并重试
+        # 版本冲突，使用 savepoint 回滚仅当前修改，保留事务中其他有效修改
         await db.rollback()
         logger.warning(f'库存乐观锁冲突: 产品ID={product_id}, 第{attempt + 1}次重试')
 

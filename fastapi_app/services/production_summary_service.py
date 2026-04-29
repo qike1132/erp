@@ -341,7 +341,7 @@ async def upload_packaging_excel(db: AsyncSession, file_content: bytes,
     """上传Excel文件，解析并批量创建包装部记录"""
     try:
         wb = openpyxl.load_workbook(io.BytesIO(file_content), read_only=True)
-    except Exception as e:
+    except (ValueError, OSError) as e:
         raise ValueError(f"Excel文件解析失败: {e}")
 
     try:

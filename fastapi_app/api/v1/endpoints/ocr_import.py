@@ -7,6 +7,7 @@ import os
 import logging
 
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
+from sqlalchemy.exc import OperationalError, DisconnectionError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db
@@ -212,6 +213,6 @@ async def preview_shipping_doc(
             parsed_items=parsed_items,
         )
 
-    except Exception as e:
+    except (OperationalError, DisconnectionError) as e:
         logger.error(f'OCR 预览失败: {str(e)}', exc_info=True)
         raise HTTPException(status_code=500, detail=f'识别失败: {str(e)}')

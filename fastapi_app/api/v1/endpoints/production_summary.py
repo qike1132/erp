@@ -5,6 +5,7 @@
 """
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import Response
+from sqlalchemy.exc import OperationalError, DisconnectionError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db
@@ -40,7 +41,7 @@ async def list_craft_works(
             daily_summary=result['daily_summary'],
             total=result['total'],
         )
-    except Exception as e:
+    except (OperationalError, DisconnectionError) as e:
         raise HTTPException(status_code=500, detail=f"获取手工部数据失败: {str(e)}")
 
 
@@ -116,7 +117,7 @@ async def export_craft_works(
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": "attachment; filename=craft_work_export.xlsx"},
         )
-    except Exception as e:
+    except (OperationalError, DisconnectionError) as e:
         raise HTTPException(status_code=500, detail=f"导出失败: {str(e)}")
 
 
@@ -142,7 +143,7 @@ async def list_packaging_records(
             data=result['data'],
             total=result['total'],
         )
-    except Exception as e:
+    except (OperationalError, DisconnectionError) as e:
         raise HTTPException(status_code=500, detail=f"获取包装部数据失败: {str(e)}")
 
 
@@ -215,7 +216,7 @@ async def upload_packaging_excel(
 
     try:
         content = await file.read()
-    except Exception as e:
+    except (OSError, ValueError) as e:
         raise HTTPException(status_code=400, detail=f"文件读取失败: {e}")
 
     try:
@@ -243,7 +244,7 @@ async def export_packaging_records(
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": "attachment; filename=packaging_export.xlsx"},
         )
-    except Exception as e:
+    except (OperationalError, DisconnectionError) as e:
         raise HTTPException(status_code=500, detail=f"导出失败: {str(e)}")
 
 
@@ -264,5 +265,5 @@ async def production_summary(
             monthly_summary=result['monthly_summary'],
             total=result['total'],
         )
-    except Exception as e:
+    except (OperationalError, DisconnectionError) as e:
         raise HTTPException(status_code=500, detail=f"获取汇总报表失败: {str(e)}")

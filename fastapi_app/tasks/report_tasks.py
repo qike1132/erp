@@ -85,6 +85,6 @@ def export_report_task(self, report_type: str, filters: dict, user_id: int):
         finally:
             session.close()
 
-    except Exception as exc:
+    except (ValueError, OSError, RuntimeError) as exc:
         logger.error(f"报表导出任务失败: {exc}", exc_info=True)
         raise self.retry(exc=exc)

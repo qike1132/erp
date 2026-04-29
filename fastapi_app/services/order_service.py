@@ -5,13 +5,12 @@
 """
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
-from sqlalchemy.exc import SQLAlchemyError
 
 from fastapi_app.shared_models import (
     Order, Product, InventoryLog, User,
@@ -22,34 +21,6 @@ from fastapi_app.services import escape_like
 from fastapi_app.core.cache import cache_result, invalidate_cache
 
 logger = logging.getLogger(__name__)
-
-
-def _sync_order_to_purchase_center(order_id: int) -> None:
-    """订单创建后自动同步至采购中心，生成采购订单。
-
-    使用独立的同步 Session，与异步 Order 创建事务隔离。
-    同步失败不影响订单创建本身（best-effort）。
-    """
-    from fastapi_app.core.database import get_sync_engine
-    from fastapi_app.services.purchase_center_service import one_click_generate_order
-    from sqlalchemy.orm import Session
-
-    try:
-        engine = get_sync_engine()
-        with Session(engine) as sync_db:
-            try:
-                result = one_click_generate_order(
-                    sync_db, [order_id], user_id=0, username='system_auto'
-                )
-                logger.info(
-                    f'订单自动同步采购中心完成：order_id={order_id}, '
-                    f'生成采购订单数={result.get("created_count", 0)}'
-                )
-            except Exception:
-                sync_db.rollback()
-                raise
-    except Exception as e:
-        logger.warning(f'订单自动同步采购中心失败：order_id={order_id}, 原因：{e}')
 
 
 class PermissionDeniedError(Exception):
@@ -173,7 +144,7 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
 
     业务规则（与Flask一致）：
     - 产品必须存在
-    - 数量 > 0 且 <= 100000
+    - 数量 > 0 且 <= 9999999
     - 客户名称不能为空
     - 创建后增加产品库存
     - 定制订单必须填写国家名称
@@ -181,8 +152,8 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
     if order_type == 'custom' and not country:
         raise ValueError('定制订单必须填写国家名称')
 
-    if quantity <= 0 or quantity > 100000:
-        raise ValueError('订单数量必须在1-100000之间')
+    if quantity <= 0 or quantity > 9999999:
+        raise ValueError('订单数量必须在1-9999999之间')
 
     product = await get_product_for_update(db, product_id)
 
@@ -191,13 +162,12 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
     order = Order(
         order_no=order_no,
         customer=customer,
-        order_date=datetime.now(),
+        order_date=datetime.now(timezone.utc).replace(tzinfo=None),
         product_id=product_id,
         quantity=quantity,
         note=note,
         order_type=order_type,
         country=country if order_type == 'custom' else None,
-        status='待备货'
     )
     db.add(order)
     await db.flush()
@@ -217,10 +187,25 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
     await db.commit()
     await db.refresh(order)
     await invalidate_cache("orders:*")
+    await invalidate_cache("inventory:*")
     logger.info(f'订单添加成功：{order_no}，客户：{customer}，产品：{product.name}，数量：{quantity}')
 
-    # 自动同步：生成采购订单
-    _sync_order_to_purchase_center(order.id)
+    # 发布订单创建事件，通知前端实时刷新
+    try:
+        from fastapi_app.services.notification_service import publish_stock_event, StockEvent
+        await publish_stock_event(StockEvent.ORDER_CREATED, {
+            'order_id': order.id,
+            'order_no': order_no,
+            'customer': customer,
+            'product_name': product.name,
+            'quantity': quantity,
+        })
+    except Exception:
+        pass  # 通知失败不影响主流程
+
+    # 不再自动同步采购中心：订单应先进入"审核订单"队列，由人工审核后再生成采购订单
+    # 旧逻辑：await _sync_order_to_purchase_center(order.id)
+    # 这会导致有 BOM 的订单直接跳过审核步骤，自动生成采购订单
 
     return order.to_dict()
 
@@ -237,7 +222,7 @@ async def update_order(db: AsyncSession, order_id: int, quantity: int,
     - 审批中/被其他用户锁定时拒绝
     """
     order = await db.get(Order, order_id)
-    if not order:
+    if not order or order.is_deleted:
         raise ValueError('订单不存在')
 
     if order.is_locked and order.locked_by_id != current_user.id:
@@ -282,6 +267,7 @@ async def update_order(db: AsyncSession, order_id: int, quantity: int,
 
         await db.commit()
         await invalidate_cache("orders:*")
+        await invalidate_cache("inventory:*")
         logger.info(f'订单编辑成功：{order.order_no}，操作人：{current_user.username}')
         return {'success': True, 'message': '订单编辑成功！', 'requires_approval': False}
     else:
@@ -299,7 +285,7 @@ async def update_order(db: AsyncSession, order_id: int, quantity: int,
 
         order.is_locked = True
         order.locked_by_id = current_user.id
-        order.lock_time = datetime.now()
+        order.lock_time = datetime.now(timezone.utc).replace(tzinfo=None)
 
         operation_data = {
             'customer': customer,
@@ -316,7 +302,7 @@ async def update_order(db: AsyncSession, order_id: int, quantity: int,
             operation_type='edit',
             operation_data=json.dumps(operation_data, ensure_ascii=False),
             status='pending',
-            lock_time=datetime.now()
+            lock_time=datetime.now(timezone.utc).replace(tzinfo=None)
         )
         db.add(approval_request)
         await db.flush()
@@ -325,6 +311,7 @@ async def update_order(db: AsyncSession, order_id: int, quantity: int,
 
         await db.commit()
         await invalidate_cache("orders:*")
+        await invalidate_cache("inventory:*")
         logger.info(f'订单编辑审批请求已提交：{order.order_no}，申请人：{current_user.username}')
         return {'success': True, 'message': '已提交编辑审批请求，请等待管理员审批！', 'requires_approval': True}
 
@@ -338,7 +325,7 @@ async def delete_order(db: AsyncSession, order_id: int, current_user: User) -> d
     - 非管理员需要提交审批请求
     """
     order = await db.get(Order, order_id, options=[joinedload(Order.product)])
-    if not order:
+    if not order or order.is_deleted:
         raise ValueError('订单不存在')
 
     if order.is_locked and order.locked_by_id != current_user.id:
@@ -394,6 +381,9 @@ async def delete_order(db: AsyncSession, order_id: int, current_user: User) -> d
         # 删除关联出货
         await db.execute(delete(StockOut).where(StockOut.order_id == order.id))
 
+        # 删除关联同步记录
+        await db.execute(delete(OrderSyncRecord).where(OrderSyncRecord.source_order_id == order_id))
+
         # 删除关联审批记录（批量删除避免 N+1）
         result = await db.execute(
             select(ApprovalRequest.id).where(ApprovalRequest.order_id == order_id)
@@ -404,8 +394,11 @@ async def delete_order(db: AsyncSession, order_id: int, current_user: User) -> d
         await db.execute(delete(ApprovalRequest).where(ApprovalRequest.order_id == order_id))
 
         deleted_order_no = order.order_no
+        # 硬删除：物理删除订单记录
         await db.delete(order)
         await db.commit()
+        await invalidate_cache("orders:*")
+        await invalidate_cache("inventory:*")
 
         logger.info(f'订单删除成功：{deleted_order_no}，操作人：{current_user.username}，抵扣回滚：{total_deducted}')
         return {'success': True, 'message': f'订单删除成功！抵扣回滚数量：{total_deducted}', 'requires_approval': False}
@@ -423,7 +416,7 @@ async def delete_order(db: AsyncSession, order_id: int, current_user: User) -> d
 
         order.is_locked = True
         order.locked_by_id = current_user.id
-        order.lock_time = datetime.now()
+        order.lock_time = datetime.now(timezone.utc).replace(tzinfo=None)
 
         operation_data = {
             'order_no': order.order_no,
@@ -439,7 +432,7 @@ async def delete_order(db: AsyncSession, order_id: int, current_user: User) -> d
             operation_type='delete',
             operation_data=json.dumps(operation_data, ensure_ascii=False),
             status='pending',
-            lock_time=datetime.now()
+            lock_time=datetime.now(timezone.utc).replace(tzinfo=None)
         )
         db.add(approval_request)
         await db.flush()
@@ -464,7 +457,7 @@ async def cancel_approval(db: AsyncSession, approval_id: int, current_user: User
         raise ValueError('该审批请求已处理，无法取消')
 
     order = await db.get(Order, approval_request.order_id)
-    if order:
+    if order and not order.is_deleted:
         order.is_locked = False
         order.locked_by_id = None
         order.lock_time = None
@@ -505,7 +498,6 @@ def _create_approval_log_obj(approval_request, action, actor, details=None):
         actor_name=actor.username if actor else None,
         details=json.dumps(details, ensure_ascii=False) if details else None
     )
-    db = None
     # 获取session - 通过approval_request的session
     from sqlalchemy.orm import object_session
     db = object_session(approval_request)
@@ -518,7 +510,11 @@ class _BatchItemError(Exception):
 
 
 async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
-    """批量创建订单"""
+    """批量创建订单
+
+    注意：同步至采购中心的操作不在此函数内执行，由调用方在事务提交后统一处理，
+    以确保同步线程池中的独立 Session 能读取到已提交的订单数据。
+    """
     from fastapi_app.services.batch_service import generate_order_number
 
     results = []
@@ -537,9 +533,9 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                     })
                     raise _BatchItemError()
 
-                if int(quantity) <= 0 or int(quantity) > 100000:
+                if int(quantity) <= 0 or int(quantity) > 9999999:
                     results.append({
-                        'success': False, 'error': '订单数量必须在1-100000之间',
+                        'success': False, 'error': '订单数量必须在1-9999999之间',
                         'order_no': order_data.get('order_no', '未知')
                     })
                     raise _BatchItemError()
@@ -553,8 +549,7 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                     product_id=product_id,
                     customer=customer,
                     quantity=int(quantity),
-                    order_date=datetime.now(),
-                    status='待备货',
+                    order_date=datetime.now(timezone.utc).replace(tzinfo=None),
                     note=order_data.get('note', ''),
                     order_type=order_data.get('order_type', 'regular'),
                     country=order_data.get('country') if order_data.get('order_type') == 'custom' else None,
@@ -568,7 +563,7 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                     product_id=product_id,
                     change_type='订单创建',
                     change_quantity=int(quantity),
-                    change_date=datetime.now(),
+                    change_date=datetime.now(timezone.utc).replace(tzinfo=None),
                     customer=customer,
                     related_id=str(order.id),
                     note=f'批量创建订单 {order.order_no}',
@@ -581,7 +576,7 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                 created_order_ids.append(order.id)
         except _BatchItemError:
             pass  # 业务校验失败，savepoint 已自动回滚，继续下一项
-        except Exception as e:
+        except (ValueError, TypeError, OSError) as e:
             # 数据库异常，begin_nested 已自动回滚 savepoint，session 恢复有效状态
             logger.error(f"批量订单单项失败: {e}", exc_info=True)
             results.append({
@@ -589,8 +584,4 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                 'order_no': order_data.get('order_no', '未知')
             })
 
-    # 批量创建完成后，统一同步至采购中心
-    for oid in created_order_ids:
-        _sync_order_to_purchase_center(oid)
-
-    return {'success': True, 'results': results}
+    return {'success': True, 'results': results, 'created_order_ids': created_order_ids}

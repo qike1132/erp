@@ -8,7 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db
 from fastapi_app.core.deps import require_permission
-from fastapi_app.shared_models import User
+from fastapi_app.core.cache import invalidate_cache
+from fastapi_app.shared_models import User, Product
 from fastapi_app.schemas.product import (
     ProductCreate, ProductUpdate, ProductActionResponse,
     ProductListResponse, ProductResponse, ProductStockInfo,
@@ -53,7 +54,6 @@ async def get_product(
     _user: User = Depends(require_permission("product_manage")),
 ):
     """获取单个产品详情"""
-    from fastapi_app.shared_models import Product
     product = await db.get(Product, product_id)
     if not product:
         raise HTTPException(status_code=404, detail="产品不存在")
@@ -73,6 +73,7 @@ async def create_product(
             price=data.price, image=data.image, initial_stock=data.initial_stock
         )
         await redis_cache.delete(PRODUCT_LIST_CACHE_KEY)
+        await invalidate_cache("inventory:*")
         return ProductActionResponse(success=True, message="产品添加成功！")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -93,6 +94,7 @@ async def edit_product(
             initial_stock=data.initial_stock
         )
         await redis_cache.delete(PRODUCT_LIST_CACHE_KEY)
+        await invalidate_cache("inventory:*")
         return ProductActionResponse(success=True, message="产品编辑成功！")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -114,6 +116,7 @@ async def delete_product(
     try:
         await product_service.delete_product(db, product_id)
         await redis_cache.delete(PRODUCT_LIST_CACHE_KEY)
+        await invalidate_cache("inventory:*")
         return ProductActionResponse(success=True, message="产品删除成功！")
     except ProductNotFoundError as e:
         raise HTTPException(status_code=400, detail=e.message)
@@ -129,7 +132,7 @@ async def delete_product(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/search")
+@router.get("/search", response_model=list)
 async def product_search(
     q: str = Query("", description="搜索关键词"),
     db: AsyncSession = Depends(get_async_db),
@@ -150,4 +153,4 @@ async def product_available_stock(
     try:
         return await product_service.get_product_stock(db, product_id)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))

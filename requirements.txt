@@ -5,6 +5,8 @@
 #   生产环境:  pip install -r requirements/base.txt
 #   开发环境:  pip install -r requirements/dev.txt
 #   测试环境:  pip install -r requirements/test.txt
+#   OCR 功能:  pip install -r requirements/ocr.txt      （可选，约 500MB）
+#   密码迁移:  pip install -r requirements/migration.txt （可选，迁移完即可卸载）
 #
 # 此文件引用分拆文件，兼容旧部署流程。
 # ============================================================

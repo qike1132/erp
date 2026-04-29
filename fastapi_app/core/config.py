@@ -48,9 +48,14 @@ class Settings(BaseSettings):
     # 数据库配置
     # 异步数据库URL - 使用 asyncpg 驱动（性能最优）
     ASYNC_DATABASE_URL: str = os.getenv("ASYNC_DATABASE_URL") or _build_database_uri()
-    
+
     # 同步数据库URL - 使用 psycopg3 驱动（用于 Alembic 迁移等场景）
     DATABASE_URL: str = os.getenv("DATABASE_URL") or _build_sync_database_uri()
+
+    # 只读副本 URL（可选，用于报表/列表查询的读写分离）
+    # 设置 DATABASE_REPLICA_URL 后，get_async_read_db() 将使用此连接
+    # 未设置时回退到主库，无读写分离效果
+    ASYNC_DATABASE_REPLICA_URL: str = os.getenv("ASYNC_DATABASE_REPLICA_URL", "")
 
     # Redis配置
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -70,12 +75,16 @@ class Settings(BaseSettings):
     )
 
     # CORS配置 - 从环境变量读取允许的源，默认仅允许本地访问
-    # 包含 Nginx 统一入口（端口80）、直接访问模式（端口5002）以及 Next.js 前端（端口3000）
+    # 包含 Nginx 统一入口（端口80）、直接访问模式（端口5002）以及 Vue/Vite 前端（端口3000）
     BACKEND_CORS_ORIGINS: list[str] = os.getenv("CORS_ORIGINS", "http://localhost,http://localhost:5002,http://localhost:3000").split(",")
 
     # 安全配置 - 从环境变量读取，生产环境必须显式设置
     SECRET_KEY: str = os.getenv("SECRET_KEY", "")
-    ALGORITHM: str = "HS256"
+    ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
+
+    # RSA 密钥路径（RS256 模式必填，HS256 模式忽略）
+    JWT_PRIVATE_KEY_PATH: str = os.getenv("JWT_PRIVATE_KEY_PATH", "")
+    JWT_PUBLIC_KEY_PATH: str = os.getenv("JWT_PUBLIC_KEY_PATH", "")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     # httpOnly JWT Cookie 最大有效期（秒），默认31天
     COOKIE_MAX_AGE: int = int(os.getenv("COOKIE_MAX_AGE", 2678400))
@@ -106,11 +115,9 @@ class Settings(BaseSettings):
                 "请生成新的密钥: python -c \"import secrets; print(secrets.token_hex(32))\""
             )
         if not self.REDIS_PASSWORD and os.getenv("APP_ENV") == "production":
-            import warnings
-            warnings.warn(
-                "REDIS_PASSWORD 未设置，生产环境建议启用 Redis 认证",
-                UserWarning,
-                stacklevel=2,
+            raise RuntimeError(
+                "生产环境必须设置 REDIS_PASSWORD，未认证的 Redis 存在严重安全风险。"
+                "请通过环境变量 REDIS_PASSWORD 设置 Redis 认证密码"
             )
         if os.getenv("APP_ENV") == "production" and self.ALLOWED_HOSTS == ["*"]:
             raise RuntimeError(

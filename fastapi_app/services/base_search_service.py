@@ -181,7 +181,7 @@ class BaseSearchService(Generic[T], ABC):
                 if isinstance(cached, str):
                     return json.loads(cached)
                 return cached
-        except Exception:
+        except (OSError, ConnectionError, ValueError):
             logger.warning("搜索缓存读取失败", exc_info=True)
 
         results = await self.search_async(db, keyword, limit, status_filter)
@@ -194,7 +194,7 @@ class BaseSearchService(Generic[T], ABC):
                 json.dumps(results, ensure_ascii=False, default=str),
                 timeout=self.cache_ttl,
             )
-        except Exception:
+        except (OSError, ValueError):
             logger.warning("搜索缓存写入失败", exc_info=True)
 
         return results
@@ -208,5 +208,5 @@ class BaseSearchService(Generic[T], ABC):
 
             pattern = f"{self.cache_prefix}:search:*"
             await redis_cache.delete_pattern(pattern)
-        except Exception:
+        except (OSError, ConnectionError, ValueError):
             logger.warning("搜索缓存清除失败", exc_info=True)

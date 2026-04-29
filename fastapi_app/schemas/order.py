@@ -10,7 +10,7 @@ from typing import Optional, List
 class OrderCreate(BaseModel):
     """创建订单请求"""
     product_id: int = Field(..., gt=0, description="产品ID")
-    quantity: int = Field(..., gt=0, le=100000, description="订单数量")
+    quantity: int = Field(..., gt=0, le=9999999, description="订单数量")
     customer: str = Field(..., min_length=1, max_length=100, description="客户名称")
     note: Optional[str] = Field(None, max_length=500, description="备注")
     order_type: str = Field("regular", pattern="^(regular|custom)$", description="订单类型")
@@ -20,7 +20,7 @@ class OrderCreate(BaseModel):
 class OrderUpdate(BaseModel):
     """更新订单请求"""
     product_id: Optional[int] = Field(None, gt=0, description="产品ID")
-    quantity: Optional[int] = Field(None, gt=0, le=100000, description="订单数量")
+    quantity: Optional[int] = Field(None, gt=0, le=9999999, description="订单数量")
     customer: Optional[str] = Field(None, min_length=1, max_length=100, description="客户名称")
     note: Optional[str] = Field(None, max_length=500, description="备注")
     order_type: Optional[str] = Field(None, pattern="^(regular|custom)$", description="订单类型")

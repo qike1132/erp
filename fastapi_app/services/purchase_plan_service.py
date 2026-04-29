@@ -388,13 +388,13 @@ async def _get_inventory_map(db: AsyncSession) -> dict:
         if cached is not None:
             # Redis 反序列化后 key 为字符串，需转回元组以保持内部接口一致
             return {tuple(k.split('||')): v for k, v in cached.items()}
-    except Exception as e:
+    except (OSError, ConnectionError, ValueError) as e:
         logger.warning(f'Redis缓存读取失败: {e}')
 
     try:
         inventory_result = await stock_service.get_inventory(db)
         mapping = _build_inventory_map(inventory_result['inventory_data'])
-    except Exception as e:
+    except (ValueError, TypeError, OSError) as e:
         logger.warning(f'获取库存数据失败: {e}')
         return {}
 
@@ -404,7 +404,7 @@ async def _get_inventory_map(db: AsyncSession) -> dict:
         from fastapi.concurrency import run_in_threadpool
         cacheable = {f'{k[0]}||{k[1]}': v for k, v in mapping.items()}
         await redis_cache.set(f'{INVENTORY_CACHE_PREFIX}:map', cacheable, timeout=INVENTORY_CACHE_TTL)
-    except Exception as e:
+    except (OSError, ConnectionError, ValueError) as e:
         logger.warning(f'Redis缓存写入失败: {e}')
 
     return mapping
@@ -827,7 +827,7 @@ async def upload_excel(db: AsyncSession, file_content: bytes,
 
     try:
         wb = openpyxl.load_workbook(io.BytesIO(file_content), read_only=True)
-    except Exception as e:
+    except (OSError, ValueError) as e:
         raise ValueError(f"Excel文件解析失败: {e}")
 
     try:

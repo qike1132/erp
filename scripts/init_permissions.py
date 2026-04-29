@@ -15,7 +15,7 @@ PERMISSIONS_CONFIG = {
     'user': {
         'module_name': '用户管理',
         'icon': 'fa-users-cog',
-        'parent': {'code': 'user_manage', 'name': '用户管理(全部)'},
+        'parent': {'code': 'user_manage', 'name': '用户管理'},
         'children': [
             {'code': 'user_view', 'name': '用户查看'},
             {'code': 'user_create', 'name': '用户创建'},
@@ -35,7 +35,7 @@ PERMISSIONS_CONFIG = {
     'product': {
         'module_name': '产品管理',
         'icon': 'fa-box',
-        'parent': {'code': 'product_manage', 'name': '产品管理(全部)'},
+        'parent': {'code': 'product_manage', 'name': '产品管理'},
         'children': [
             {'code': 'product_view', 'name': '产品查看'},
             {'code': 'product_create', 'name': '产品创建'},
@@ -84,7 +84,7 @@ PERMISSIONS_CONFIG = {
     'case': {
         'module_name': '皮套管理',
         'icon': 'fa-suitcase',
-        'parent': {'code': 'case_manage', 'name': '皮套管理(全部)'},
+        'parent': {'code': 'case_manage', 'name': '皮套管理'},
         'children': [
             {'code': 'case_view', 'name': '皮套查看'},
             {'code': 'case_stockin', 'name': '皮套入库'},
@@ -94,7 +94,7 @@ PERMISSIONS_CONFIG = {
     'report': {
         'module_name': '报表统计',
         'icon': 'fa-chart-bar',
-        'parent': {'code': 'report_manage', 'name': '报表管理(全部)'},
+        'parent': {'code': 'report_manage', 'name': '报表管理'},
         'children': [
             {'code': 'report_view', 'name': '报表查看'},
             {'code': 'report_export', 'name': '报表导出'},
@@ -103,7 +103,7 @@ PERMISSIONS_CONFIG = {
     'approval': {
         'module_name': '审批管理',
         'icon': 'fa-clipboard-check',
-        'parent': {'code': 'approval_manage', 'name': '审批管理(全部)'},
+        'parent': {'code': 'approval_manage', 'name': '审批管理'},
         'children': [
             {'code': 'approval_view', 'name': '审批查看'},
             {'code': 'approval_approve', 'name': '审批操作'},
@@ -112,7 +112,7 @@ PERMISSIONS_CONFIG = {
     'customer': {
         'module_name': '客户管理',
         'icon': 'fa-building',
-        'parent': {'code': 'customer_manage', 'name': '客户管理(全部)'},
+        'parent': {'code': 'customer_manage', 'name': '客户管理'},
         'children': [
             {'code': 'customer_view', 'name': '客户查看'},
             {'code': 'customer_create', 'name': '客户创建'},
@@ -123,7 +123,7 @@ PERMISSIONS_CONFIG = {
     'purchase_center': {
         'module_name': '采购中心',
         'icon': 'fa-store',
-        'parent': {'code': 'purchase_center_manage', 'name': '采购中心(全部)'},
+        'parent': {'code': 'purchase_center_manage', 'name': '采购中心'},
         'children': [
             {'code': 'purchase_center_view', 'name': '采购中心查看'},
             {'code': 'purchase_center_order', 'name': '采购订单管理'},

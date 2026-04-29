@@ -75,7 +75,7 @@ def setup_telemetry(app=None):
             "opentelemetry-instrumentation-fastapi "
             "opentelemetry-exporter-otlp-proto-grpc"
         )
-    except Exception as e:
+    except (ImportError, ValueError, OSError) as e:
         logger.warning("OpenTelemetry 初始化失败: %s", e)
 
 
@@ -90,5 +90,5 @@ def shutdown_telemetry():
         provider = trace.get_tracer_provider()
         if hasattr(provider, 'shutdown'):
             provider.shutdown()
-    except Exception as e:
+    except (ImportError, ValueError, OSError) as e:
         logger.debug("OpenTelemetry 关闭异常（可忽略）: %s", e)

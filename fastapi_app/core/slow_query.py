@@ -45,7 +45,7 @@ def setup_slow_query_listener(engine):
             try:
                 from fastapi_app.core.metrics import SLOW_QUERY_TOTAL
                 SLOW_QUERY_TOTAL.inc()
-            except Exception:
+            except (ImportError, ValueError):
                 pass
 
 

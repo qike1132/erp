@@ -61,7 +61,7 @@ def api_sync_customers(
                 'id': customer.id, 'name': customer.name,
                 'status': 'success', 'sync_time': datetime.now().isoformat(),
             })
-        except Exception:
+        except (ValueError, RuntimeError):
             skipped_count += 1
             details.append({
                 'id': customer.id, 'name': customer.name,

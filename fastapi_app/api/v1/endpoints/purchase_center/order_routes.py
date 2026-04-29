@@ -4,6 +4,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError, OperationalError, DisconnectionError
 
 from fastapi_app.core.database import get_sync_db as get_db
 from fastapi_app.core.deps import require_permission
@@ -27,10 +28,11 @@ def api_create_purchase_order(
 ):
     try:
         result = svc.create_purchase_order(db, data.model_dump(), _user.id, _user.username)
+        db.commit()
         return {'success': True, **result}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
+    except (SQLAlchemyError, RuntimeError) as e:
         db.rollback()
         logger.error(f"创建采购订单失败: {e}")
         raise HTTPException(status_code=500, detail="创建订单失败，请稍后重试")
@@ -45,7 +47,7 @@ def api_one_click_generate_order(
     try:
         result = svc.one_click_generate_order(db, data.order_ids, _user.id, _user.username)
         return {'success': True, **result}
-    except Exception as e:
+    except (ValueError, SQLAlchemyError, RuntimeError) as e:
         db.rollback()
         logger.exception(f"一键生成采购订单失败: {str(e)}")
         raise HTTPException(status_code=500, detail="生成采购订单失败，请稍后重试")
@@ -179,7 +181,7 @@ def api_complete_purchase_order(
         return {'success': True, **result}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
+    except (SQLAlchemyError, RuntimeError) as e:
         db.rollback()
         logger.error(f"完成订单失败: {e}")
         raise HTTPException(status_code=500, detail="完成订单失败，请稍后重试")
@@ -194,7 +196,7 @@ def api_batch_complete_purchase_orders(
     try:
         result = svc.batch_complete_purchase_orders(db, data.ids, _user.id, _user.username)
         return {'success': True, **result}
-    except Exception as e:
+    except (ValueError, SQLAlchemyError, RuntimeError) as e:
         db.rollback()
         raise HTTPException(status_code=500, detail="完成订单失败，请稍后重试")
 
@@ -257,7 +259,7 @@ def api_get_factory_order_summary(
     try:
         result = svc.get_factory_order_summary(db, data.ids)
         return {'success': True, **result}
-    except Exception as e:
+    except (OperationalError, DisconnectionError, ValueError, RuntimeError) as e:
         logger.exception(f"获取工厂订单汇总失败: {str(e)}")
         raise HTTPException(status_code=500, detail="操作失败，请稍后重试")
 
@@ -279,7 +281,7 @@ def api_save_factory_summary_edits(
     try:
         result = svc.save_factory_summary_edits(db, data.edits)
         return {'success': True, **result}
-    except Exception as e:
+    except (SQLAlchemyError, RuntimeError) as e:
         db.rollback()
         logger.exception(f"保存工厂订单编辑失败: {str(e)}")
         raise HTTPException(status_code=500, detail="操作失败，请稍后重试")
@@ -294,7 +296,7 @@ def api_get_supplier_order_summary(
     try:
         result = svc.get_supplier_order_summary(db, data.ids)
         return {'success': True, **result}
-    except Exception as e:
+    except (OperationalError, DisconnectionError, ValueError, RuntimeError) as e:
         logger.exception(f"获取供应商订单汇总失败: {str(e)}")
         raise HTTPException(status_code=500, detail="操作失败，请稍后重试")
 
@@ -314,7 +316,7 @@ def api_get_supplier_summary_by_vendor(
             'supplier_count': len(sorted_suppliers),
             'order_count': len(data.ids),
         }
-    except Exception as e:
+    except (OperationalError, DisconnectionError, ValueError, RuntimeError) as e:
         logger.exception(f"按供应商汇总失败: {str(e)}")
         raise HTTPException(status_code=500, detail="操作失败，请稍后重试")
 

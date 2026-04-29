@@ -4,6 +4,7 @@ Redis 缓存管理器 - 全异步版本
 使用 redis.asyncio.Redis 替代同步 redis.Redis，
 消除 FastAPI 异步事件循环中的阻塞调用。
 """
+import redis
 import redis.asyncio as aioredis
 import json
 import hashlib
@@ -85,6 +86,10 @@ class RedisCacheManager:
         return f"{self.key_prefix}{key}"
 
     def _cleanup_fallback(self):
+        # 惰性清理：仅在缓存条目数超过阈值的 80% 时才执行过期清理
+        if len(self._fallback_cache) < int(self.FALLBACK_MAX_SIZE * 0.8):
+            return
+
         now = time.time()
         expired_keys = [k for k, ts in self._fallback_timestamps.items()
                         if now - ts > self.default_timeout]

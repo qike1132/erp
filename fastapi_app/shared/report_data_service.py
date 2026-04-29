@@ -16,9 +16,7 @@ from fastapi_app.shared_models import Order, StockIn, StockOut, Product
 logger = logging.getLogger(__name__)
 
 
-def _escape_like(value: str) -> str:
-    """转义 SQL LIKE 通配符，防止 LIKE 注入"""
-    return value.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+from fastapi_app.services import escape_like
 
 
 def get_all_logs_data(
@@ -63,7 +61,7 @@ def get_all_logs_data(
             logger.warning(f'未知报表类型: {report_type}')
             return [], {}
 
-    except Exception as e:
+    except (ValueError, TypeError, OSError) as e:
         logger.error(f'获取报表数据错误: {str(e)}', exc_info=True)
         return [], {}
 
@@ -74,12 +72,12 @@ def _get_order_logs(session, customer, product, status, start_date, end_date):
         joinedload(Order.order_stockouts)
     )
     if customer:
-        query = query.filter(Order.customer.like(f'%{_escape_like(customer)}%'))
+        query = query.filter(Order.customer.like(f'%{escape_like(customer)}%'))
     if product:
         query = query.filter(
             or_(
-                Product.name.like(f'%{_escape_like(product)}%'),
-                Product.barcode.like(f'%{_escape_like(product)}%')
+                Product.name.like(f'%{escape_like(product)}%'),
+                Product.barcode.like(f'%{escape_like(product)}%')
             )
         )
     if status:
@@ -142,12 +140,12 @@ def _get_stockin_logs(session, customer, product, start_date, end_date):
         joinedload(StockIn.stockin_stockouts)
     )
     if customer:
-        query = query.filter(StockIn.customer.like(f'%{_escape_like(customer)}%'))
+        query = query.filter(StockIn.customer.like(f'%{escape_like(customer)}%'))
     if product:
         query = query.filter(
             or_(
-                Product.name.like(f'%{_escape_like(product)}%'),
-                Product.barcode.like(f'%{_escape_like(product)}%')
+                Product.name.like(f'%{escape_like(product)}%'),
+                Product.barcode.like(f'%{escape_like(product)}%')
             )
         )
     if start_date:
@@ -204,12 +202,12 @@ def _get_stockout_logs(session, customer, product, start_date, end_date):
         joinedload(StockOut.order)
     )
     if customer:
-        query = query.filter(StockOut.customer.like(f'%{_escape_like(customer)}%'))
+        query = query.filter(StockOut.customer.like(f'%{escape_like(customer)}%'))
     if product:
         query = query.filter(
             or_(
-                Product.name.like(f'%{_escape_like(product)}%'),
-                Product.barcode.like(f'%{_escape_like(product)}%')
+                Product.name.like(f'%{escape_like(product)}%'),
+                Product.barcode.like(f'%{escape_like(product)}%')
             )
         )
     if start_date:
@@ -262,12 +260,12 @@ def _get_deduction_logs(session, customer, product, start_date, end_date):
         joinedload(StockOut.order)
     )
     if customer:
-        query = query.filter(StockOut.customer.like(f'%{_escape_like(customer)}%'))
+        query = query.filter(StockOut.customer.like(f'%{escape_like(customer)}%'))
     if product:
         query = query.filter(
             or_(
-                Product.name.like(f'%{_escape_like(product)}%'),
-                Product.barcode.like(f'%{_escape_like(product)}%')
+                Product.name.like(f'%{escape_like(product)}%'),
+                Product.barcode.like(f'%{escape_like(product)}%')
             )
         )
     if start_date:

@@ -19,9 +19,6 @@ from sqlalchemy.orm import sessionmaker
 from fastapi_app.core.config import settings
 
 
-logger = logging.getLogger(__name__)
-
-
 def _get_pool_config() -> dict:
     return {
         "pool_size": int(os.getenv("DB_POOL_SIZE", "30")),
@@ -64,7 +61,7 @@ _init_async_engine()
 try:
     from fastapi_app.core.slow_query import setup_slow_query_listener
     setup_slow_query_listener(_async_engine.sync_engine)
-except Exception as e:
+except ImportError as e:
     logger.warning('慢查询监听器初始化失败: %s', e)
 
 
@@ -93,11 +90,71 @@ def get_sync_engine():
 
 
 async def get_async_db():
+    """异步数据库会话依赖（Unit of Work 模式）
+
+    - 请求成功时自动 commit
+    - 请求异常时自动 rollback
+    - 服务层应使用 flush() 而非 commit()，由本依赖统一控制事务边界
+    """
     async with _AsyncSessionLocal() as session:
         try:
             yield session
-        finally:
-            await session.close()
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+
+
+# ==================== 只读副本（读写分离） ====================
+
+_read_engine = None
+_ReadSessionLocal = None
+
+
+def _init_read_engine():
+    """初始化只读副本引擎（延迟加载，未配置时回退到主库）"""
+    global _read_engine, _ReadSessionLocal
+    if _read_engine is not None:
+        return
+
+    replica_url = settings.ASYNC_DATABASE_REPLICA_URL
+    if not replica_url:
+        logger.info("未配置只读副本，读取操作将使用主库")
+        return
+
+    _read_engine = create_async_engine(
+        replica_url,
+        **_pool_config,
+        echo=False,
+    )
+    _ReadSessionLocal = async_sessionmaker(
+        bind=_read_engine,
+        class_=AsyncSession,
+        autocommit=False,
+        autoflush=False,
+        expire_on_commit=False,
+    )
+    logger.info("只读副本引擎初始化成功: %s", replica_url.split("@")[-1] if "@" in replica_url else replica_url)
+
+
+async def get_async_read_db():
+    """只读数据库会话依赖（用于报表/列表查询，走只读副本）
+
+    - 未配置副本时自动回退到主库
+    - 无 commit/rollback（只读操作无需事务控制）
+    """
+    _init_read_engine()
+
+    if _ReadSessionLocal is not None:
+        async with _ReadSessionLocal() as session:
+            try:
+                yield session
+            finally:
+                await session.close()
+    else:
+        # 回退到主库
+        async for session in get_async_db():
+            yield session
 
 
 async def dispose_async_engines():
@@ -105,7 +162,7 @@ async def dispose_async_engines():
     if _async_engine is not None:
         try:
             await _async_engine.dispose()
-        except Exception as e:
+        except (OperationalError, DisconnectionError) as e:
             logger.warning("异步引擎释放异常（可能已关闭）: %s", e)
     _async_engine = None
     _AsyncSessionLocal = None

@@ -103,7 +103,7 @@ def sync_shipment_records_task(self):
         finally:
             session.close()
 
-    except Exception as exc:
+    except (ValueError, TypeError, OSError) as exc:
         logger.error(f"出货同步任务失败: {exc}", exc_info=True)
         raise self.retry(exc=exc)
 
@@ -194,7 +194,7 @@ def batch_import_plans_task(self, file_path: str, original_filename: str, user_i
                     session.add(record)
                     success_count += 1
 
-                except Exception as e:
+                except (ValueError, TypeError, OSError) as e:
                     session.rollback()
                     errors.append(f"第{i}行: {str(e)}")
 
@@ -213,7 +213,7 @@ def batch_import_plans_task(self, file_path: str, original_filename: str, user_i
         finally:
             session.close()
 
-    except Exception as exc:
+    except (ValueError, TypeError, OSError) as exc:
         logger.error(f"批量计划导入任务失败: {exc}", exc_info=True)
         if self.request.retries < self.max_retries:
             raise self.retry(exc=exc)

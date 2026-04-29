@@ -1,11 +1,11 @@
 """
-ERP系统生产环境启动脚本 (FastAPI + Next.js)
+ERP系统生产环境启动脚本 (FastAPI + Vue/Vite)
 
 快捷方式，等价于: python start.py --prod
 
 生产模式特点：
   - FastAPI 无 --reload（稳定运行）
-  - Next.js 已构建（.next 目录）
+  - Vue/Vite 已构建（dist 目录）
 
 用法:
     # 启动完整系统

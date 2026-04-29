@@ -10,6 +10,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.exc import OperationalError, DisconnectionError
 
 from fastapi_app.core.database import get_sync_db as get_db
 from fastapi_app.core.deps import require_permission
@@ -67,7 +68,7 @@ def api_summary_print(
         else:
             html = generate_normal_summary_print(orders, order_items_map)
             return {'success': True, 'html': html, 'order_count': len(orders)}
-    except Exception as e:
+    except (OperationalError, DisconnectionError, ValueError, RuntimeError) as e:
         logger.exception(f"汇总打印失败: {str(e)}")
         raise HTTPException(status_code=500, detail="操作失败，请稍后重试")
 
@@ -127,6 +128,6 @@ def export_supplier_summary_excel(
         )
     except HTTPException:
         raise
-    except Exception as e:
+    except (OSError, ValueError, RuntimeError) as e:
         logger.exception(f"导出供应商汇总Excel失败: {str(e)}")
         raise HTTPException(status_code=500, detail="导出失败，请稍后重试")

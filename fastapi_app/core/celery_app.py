@@ -21,7 +21,7 @@ celery_app.conf.update(
 
     # 时区
     timezone="Asia/Shanghai",
-    enable_utc=True,
+    enable_utc=True,  # 以UTC存储时间戳，按时区调度crontab
 
     # 结果过期时间（1小时后自动清理）
     result_expires=3600,

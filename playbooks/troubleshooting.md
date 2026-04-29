@@ -95,3 +95,51 @@
 3. **避免仅依赖异步回调刷新 UI**
    - 即使后台操作会触发 UI 刷新，主线程中也应立即刷新一次
    - 异步回调作为二次确认，而非唯一刷新途径
+
+## BUG-sidebar-disappear | 2026-04-27
+- **现象**: Dashboard 左侧导航栏在点击功能区多次后或放大缩小 UI 后消失
+- **根因**: sidebar 作为 flex 子项缺少 `flex-shrink:0`，viewport 缩小时被压缩至 0 宽度；无响应式处理
+- **解决**: 添加 `flex-shrink:0` + `min-width:68px` 防压缩；添加移动端 `@media` + overlay 适配
+- **参考**: [docs/bugs/BUG-sidebar-disappear.md](../docs/bugs/BUG-sidebar-disappear.md)
+
+## 通用排查模式：前端布局元素消失
+
+当页面中某个布局元素（导航栏、侧边栏等）在缩放或操作后消失时：
+
+1. **检查 flex 子项是否缺少 `flex-shrink: 0`**
+   - flex 容器空间不足时，默认 `flex-shrink: 1` 会导致子项被压缩
+   - 固定宽度元素（如 sidebar）必须设置 `flex-shrink: 0`
+
+2. **检查是否有 `min-width` 保护**
+   - 没有 `min-width` 的元素可被压缩至 0 宽度
+
+3. **检查 `overflow: hidden` 是否裁剪了被挤压的元素**
+   - 父容器 `overflow: hidden` 会使被挤出可视区的元素完全不可见
+
+4. **检查是否有响应式适配**
+   - 缩放页面会改变 CSS viewport 宽度，需要 `@media` 查询或 `resize` 监听适配
+
+## BUG-AUTO-20260428-210353 | 2026-04-28
+- **现象**: 客户订单创建后，采购中心审核订单中看不到该订单
+- **根因**: 1) get_unprocessed_orders() 过滤 has_bom=False 的订单；2) _sync_order_to_purchase_center() 使用 user_id=0 违反外键约束；3) atch_create_orders() 在事务提交前调用同步
+- **解决**: 移除BOM过滤、动态查找管理员用户、同步移至事务提交后、新增WebSocket实时通知
+- **关键检查点**: 
+  - 订单同步是否在 db.commit() 之后调用
+  - 自动同步的用户ID是否在user表中真实存在
+  - has_bom=False 的订单是否被正确展示（仅禁用审核按钮）
+- **参考**: [docs/bugs/BUG-AUTO-20260428-210353.md](../docs/bugs/BUG-AUTO-20260428-210353.md)
+
+## BUG-PURCHASE-UI-FIX-20260428 | 2026-04-28
+- **现象**: 采购中心全选按钮不工作、一键审核/汇总下单/批量确认按钮disabled、下单时间不显示、下单完成422错误
+- **根因**: 1) UiCheckbox与reka-ui API不匹配(checked vs modelValue); 2) completeOrder发id而非order_id; 3) 下单时间显示order_date而非create_time; 4) batchComplete引用过期selectedIds
+- **解决**: 修改UiCheckbox内部映射、修正API字段名、更换时间字段、修复过期引用
+- **关键检查点**:
+  - reka-ui v2 组件使用 modelValue/update:modelValue (v-model模式)
+  - 后端 OrderIdRequest 字段名是 order_id 不是 id
+  - 采购订单有两个时间字段: order_date(日期) 和 create_time(日期+时分)
+- **参考**: [docs/bugs/BUG-PURCHASE-UI-FIX-20260428.md](../docs/bugs/BUG-PURCHASE-UI-FIX-20260428.md)
+
+## BUG-MATERIAL-CALC-FLICKER | 2026-04-29
+- **现象**: 物料计算器页面多选SKU时结果区域出现闪屏
+- **根因**: v-if/v-else 三分支导致结果DOM在calculating时被销毁重建，配合从opacity:0开始的fade-in-up动画
+- **解决**: 参考 [docs/bugs/BUG-MATERIAL-CALC-FLICKER.md](docs/bugs/BUG-MATERIAL-CALC-FLICKER.md)

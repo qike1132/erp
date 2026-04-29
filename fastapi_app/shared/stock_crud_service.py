@@ -19,9 +19,7 @@ from fastapi_app.shared.stock_concurrency import get_product_for_update_sync
 logger = logging.getLogger(__name__)
 
 
-def _escape_like(value: str) -> str:
-    """转义 SQL LIKE 通配符"""
-    return value.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+from fastapi_app.services import escape_like
 
 
 # ==================== 编号生成 ====================
@@ -74,32 +72,32 @@ def generate_number_sync(prefix: str, model, date_field: str, number_field: str,
     today = datetime.now()
     date_str = today.strftime('%Y%m%d')
 
+    # DB 查询在锁外执行，减少锁持有时间
+    # FOR UPDATE 行锁确保数据库层面的并发安全
+    result = session.execute(
+        select(model)
+        .where(func.date(getattr(model, date_field)) == today.date())
+        .order_by(getattr(model, number_field).desc())
+        .limit(1)
+        .with_for_update()
+    )
+    record = result.scalar_one_or_none()
+
+    db_max = 0
+    if record:
+        last_number = getattr(record, number_field)
+        try:
+            db_max = int(last_number.split('-')[-1])
+        except (ValueError, IndexError):
+            pass
+
     with _sync_number_generator._lock:
         _sync_number_generator._cleanup_old_entries()
-
-        # DB 查询在锁内执行，配合 FOR UPDATE 行锁避免 TOCTOU 竞态
-        result = session.execute(
-            select(model)
-            .where(func.date(getattr(model, date_field)) == today.date())
-            .order_by(getattr(model, number_field).desc())
-            .limit(1)
-            .with_for_update()
-        )
-        record = result.scalar_one_or_none()
-
-        db_max = 0
-        if record:
-            last_number = getattr(record, number_field)
-            try:
-                db_max = int(last_number.split('-')[-1])
-            except (ValueError, IndexError):
-                pass
-
         current_seq = max(db_max, _sync_number_generator._counters.get(f"{prefix}:{date_str}", 0)) + 1
         _sync_number_generator._counters[f"{prefix}:{date_str}"] = current_seq
         _sync_number_generator._initialized[f"{prefix}:{date_str}"] = True
 
-        return f"{prefix}-{date_str}-{str(current_seq).zfill(4)}"
+    return f"{prefix}-{date_str}-{str(current_seq).zfill(4)}"
 
 
 def generate_order_number_sync(session: Session) -> str:
@@ -510,7 +508,7 @@ def get_inventory(session: Session, search_customer: str = '',
     )
 
     if search_product:
-        escaped = _escape_like(search_product)
+        escaped = escape_like(search_product)
         products_query = products_query.where(
             Product.name.like(f'%{escaped}%') | Product.barcode.like(f'%{escaped}%')
         )

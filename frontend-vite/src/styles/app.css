@@ -1,0 +1,313 @@
+@import 'tailwindcss';
+
+/* ============ ERP Design Tokens ============ */
+@theme {
+  /* Colors - matching the pc-* CSS variables from Jinja2 */
+  --color-primary-50: #eff5ff;
+  --color-primary-100: #d6e4ff;
+  --color-primary-200: #b8ccff;
+  --color-primary-300: #8babf5;
+  --color-primary-400: #6d95f0;
+  --color-primary-500: #5b8def;
+  --color-primary-600: #3a6bd6;
+  --color-primary-700: #2d5ab8;
+  --color-primary-800: #234996;
+  --color-primary-900: #1e3d7a;
+
+  --color-success-50: #e8f9ef;
+  --color-success-100: #d0f3df;
+  --color-success-200: #a6e8c0;
+  --color-success-300: #6dd89a;
+  --color-success-400: #3dc97a;
+  --color-success-500: #28c76f;
+  --color-success-600: #1e9e55;
+  --color-success-700: #2e7d32;
+  --color-success-800: #16703d;
+  --color-success-900: #115d33;
+
+  --color-warning-50: #fff3e6;
+  --color-warning-100: #ffe6cc;
+  --color-warning-200: #ffd199;
+  --color-warning-300: #ffba66;
+  --color-warning-400: #ffa53d;
+  --color-warning-500: #ff9f43;
+  --color-warning-600: #e88e2e;
+  --color-warning-700: #c47820;
+  --color-warning-800: #a06218;
+  --color-warning-900: #7d4d12;
+
+  --color-danger-50: #fde8e8;
+  --color-danger-100: #fbd0d0;
+  --color-danger-200: #f7a5a5;
+  --color-danger-300: #f27a7b;
+  --color-danger-400: #ed5657;
+  --color-danger-500: #ea5455;
+  --color-danger-600: #d44042;
+  --color-danger-700: #b33335;
+  --color-danger-800: #92282a;
+  --color-danger-900: #721e20;
+
+  --color-info-50: #e5fafe;
+  --color-info-100: #ccf5fd;
+  --color-info-200: #99ebfc;
+  --color-info-300: #66e0fa;
+  --color-info-400: #33d6f9;
+  --color-info-500: #00cfe8;
+  --color-info-600: #00a5bf;
+  --color-info-700: #008099;
+  --color-info-800: #005a6e;
+  --color-info-900: #003d4b;
+
+  /* Purple - consolidated from MaterialView --mr-purple */
+  --color-purple-50: #f5f3ff;
+  --color-purple-100: #ede9fe;
+  --color-purple-200: #ddd6fe;
+  --color-purple-300: #c4b5fd;
+  --color-purple-400: #a78bfa;
+  --color-purple-500: #8b5cf6;
+  --color-purple-600: #7c3aed;
+  --color-purple-700: #6d28d9;
+  --color-purple-800: #5b21b6;
+  --color-purple-900: #4c1d95;
+
+  /* Ocean - product feature color, consolidated from --plush-blue / --accent / DefaultLayout hardcoded */
+  --color-ocean: #b0e0e6;
+  --color-ocean-light: #d4f1f4;
+  --color-ocean-deep: #87ceeb;
+  --color-ocean-text: #02669e;
+
+  /* Rose - supplier tab accent in SummaryModal */
+  --color-rose: #f093fb;
+  --color-rose-light: #f5c6fb;
+  --color-rose-deep: #f5576c;
+
+  --color-surface: #f4f6fc;
+  --color-surface-card: #ffffff;
+  --color-border: #e4e7ed;
+  --color-border-light: #f0f2f5;
+  --color-text: #5A4A4A;
+  --color-text-secondary: #8492a6;
+  --color-text-tertiary: #595959;
+  --color-text-muted: #b0bec5;
+  --color-text-inverse: #ffffff;
+
+  /* Heading - deep navy for page titles */
+  --color-heading: #1a1a2e;
+
+  /* Slate - neutral UI chrome (backgrounds, borders, text hierarchy) */
+  --color-slate-50: #f8fafc;
+  --color-slate-100: #f1f5f9;
+  --color-slate-200: #e2e8f0;
+  --color-slate-300: #cbd5e1;
+  --color-slate-400: #94a3b8;
+  --color-slate-500: #475569;
+  --color-slate-600: #334155;
+  --color-slate-700: #1e293b;
+
+  /* Scrollbar */
+  --color-scrollbar: #c1c1c1;
+
+  /* Font */
+  --font-sans: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'Courier New', monospace;
+
+  /* Radius - Plush Cute style: generous rounding for soft feel */
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 24px;
+  --radius-xl: 28px;
+  --radius-card: 24px;
+  --radius-modal: 28px;
+  --radius-button: 14px;
+  --radius-input: 12px;
+  --radius-nav-item: 14px;
+
+  /* Shadows - blue-tinted for cohesive Plush Cute feel */
+  --shadow-sm: 0 2px 8px rgba(176, 224, 230, 0.15);
+  --shadow-md: 0 4px 16px rgba(176, 224, 230, 0.22);
+  --shadow-lg: 0 8px 32px rgba(135, 206, 235, 0.28);
+  --shadow-xl: 0 12px 48px rgba(135, 206, 235, 0.32);
+
+  /* Gradients - Plush Cute accent gradients */
+  --gradient-primary: linear-gradient(135deg, #5b8def 0%, #3a6bd6 100%);
+  --gradient-success: linear-gradient(135deg, #3dc97a 0%, #28c76f 100%);
+  --gradient-warning: linear-gradient(135deg, #ffa53d 0%, #ff9f43 100%);
+  --gradient-danger: linear-gradient(135deg, #ed5657 0%, #ea5455 100%);
+  --gradient-ocean: linear-gradient(135deg, #d4f1f4 0%, #b0e0e6 100%);
+  --gradient-ocean-deep: linear-gradient(135deg, #b0e0e6 0%, #87ceeb 100%);
+  --gradient-card-header: linear-gradient(135deg, #f8fafc 0%, #ffffff 100%);
+  --gradient-page-title: linear-gradient(135deg, #d4f1f4 0%, #b0e0e6 50%, #87ceeb 100%);
+}
+
+/* ============ Base Styles ============ */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    color: var(--color-text);
+    background: var(--color-surface);
+    font-size: 15px;
+    line-height: 1.6;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-scrollbar);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+/* ============ Component Animations ============ */
+@layer utilities {
+  .animate-fade-in {
+    animation: fadeIn 0.3s ease;
+  }
+  .animate-slide-up {
+    animation: slideUp 0.3s ease;
+  }
+  .animate-spin-slow {
+    animation: spin 0.8s linear infinite;
+  }
+  /* Gradient text */
+  .text-gradient-primary {
+    background: var(--gradient-primary);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  /* Gradient backgrounds */
+  .bg-gradient-primary { background: var(--gradient-primary); }
+  .bg-gradient-success { background: var(--gradient-success); }
+  .bg-gradient-warning { background: var(--gradient-warning); }
+  .bg-gradient-danger { background: var(--gradient-danger); }
+  .bg-gradient-ocean { background: var(--gradient-ocean); }
+  .bg-gradient-ocean-deep { background: var(--gradient-ocean-deep); }
+  .bg-gradient-card-header { background: var(--gradient-card-header); }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pcToastIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* ============ Data Table (consolidated from global.scss) ============ */
+@layer components {
+  .data-table thead th {
+    background: var(--color-surface);
+    padding: 10px 14px;
+    text-align: center;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-bottom: 2px solid var(--color-border);
+  }
+  .data-table tbody td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--color-border-light);
+    color: var(--color-text);
+    vertical-align: middle;
+    text-align: center;
+  }
+
+  /* Notification badge - red count bubble, matching Jinja2 .badge-count spec */
+  .notification-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1px 6px;
+    background: var(--color-danger-500);
+    color: var(--color-text-inverse);
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 10px;
+    min-width: 18px;
+    text-align: center;
+    line-height: 1.5;
+  }
+  .notification-badge-active {
+    background: rgba(255, 255, 255, 0.3);
+    color: inherit;
+  }
+
+  /* Count badge - primary gradient pill for informational counts (e.g. "3 家", "5 个订单") */
+  .count-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 14px;
+    background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-700));
+    color: var(--color-text-inverse);
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  /* Count badge subtle - lightweight neutral pill for metadata (e.g. "共 3 个", "数量: 5") */
+  .count-badge-subtle {
+    display: inline-flex;
+    align-items: center;
+    font-size: 12px;
+    padding: 3px 8px;
+    border-radius: 8px;
+    background: var(--color-border-light);
+    color: var(--color-text-secondary);
+  }
+
+  /* Card hover animation - unified across project, Plush Cute blue-tinted shadows */
+  .card-hover {
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .card-hover:hover {
+    box-shadow: 0 4px 12px rgba(176, 224, 230, 0.2), 0 16px 48px rgba(135, 206, 235, 0.15);
+    transform: translateY(-3px);
+  }
+}

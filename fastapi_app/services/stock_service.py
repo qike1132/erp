@@ -6,11 +6,12 @@
 并处理事件发布等 FastAPI 特有逻辑。
 """
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
+from sqlalchemy.exc import SQLAlchemyError
 
 from fastapi_app.shared_models import (
     InventoryLog, Order, Product, StockIn, StockOut
@@ -23,6 +24,7 @@ from fastapi_app.services.batch_service import (
     generate_stockout_number,
 )
 from fastapi_app.services.notification_service import publish_stock_event, StockEvent
+from fastapi_app.core.cache import invalidate_cache
 
 logger = logging.getLogger(__name__)
 
@@ -284,9 +286,13 @@ async def create_stockin(db: AsyncSession, product_id: int, quantity: int,
     try:
         stockin = await _create_stockin_record(db, product_id, quantity, customer, stockin_date, note)
         await db.commit()
-    except Exception:
+    except (SQLAlchemyError, ValueError):
         await db.rollback()
         raise
+
+    # 失效相关缓存
+    await invalidate_cache("inventory:*")
+    await invalidate_cache("orders:*")
 
     # 发布库存变更事件（数据已提交，事件丢失不影响一致性）
     try:
@@ -299,7 +305,7 @@ async def create_stockin(db: AsyncSession, product_id: int, quantity: int,
                 'change_type': '入库', 'quantity': quantity,
                 'current_stock': product.current_stock,
             })
-    except Exception as e:
+    except (OSError, ConnectionError, ValueError) as e:
         logger.warning(f'入库事件发布失败（不影响数据）: {e}')
     logger.info(f'入库添加成功：{stockin.stockin_no}，客户：{customer}，产品ID：{product_id}，数量：{quantity}')
 
@@ -314,6 +320,7 @@ async def update_stockin(db: AsyncSession, stockin_id: int, quantity: int,
         select(StockIn)
         .where(StockIn.id == stockin_id)
         .options(selectinload(StockIn.stockin_stockouts))
+        .with_for_update()
     )
     stockin_obj = result.scalar_one_or_none()
     if not stockin_obj:
@@ -325,10 +332,12 @@ async def update_stockin(db: AsyncSession, stockin_id: int, quantity: int,
     try:
         await _update_stockin_record(db, stockin_obj, quantity, customer, stockin_date, note)
         await db.commit()
-    except Exception:
+    except (SQLAlchemyError, ValueError):
         await db.rollback()
         raise
 
+    await invalidate_cache("inventory:*")
+    await invalidate_cache("orders:*")
     logger.info(f'入库编辑成功：{old_stockin_no}，数量变更：{old_quantity} -> {quantity}')
 
 
@@ -347,10 +356,12 @@ async def delete_stockin(db: AsyncSession, stockin_id: int) -> None:
     try:
         await _delete_stockin_record(db, stockin_obj)
         await db.commit()
-    except Exception:
+    except (SQLAlchemyError, ValueError):
         await db.rollback()
         raise
 
+    await invalidate_cache("inventory:*")
+    await invalidate_cache("orders:*")
     logger.info(f'入库删除成功：{stockin_no}，数量：{stockin_obj.quantity}')
 
 
@@ -403,9 +414,13 @@ async def create_stockout(db: AsyncSession, product_id: int, quantity: int,
             db, product_id, quantity, customer, stockout_date, note, order_type, country
         )
         await db.commit()
-    except Exception:
+    except (SQLAlchemyError, ValueError):
         await db.rollback()
         raise
+
+    # 失效相关缓存
+    await invalidate_cache("inventory:*")
+    await invalidate_cache("orders:*")
 
     # 发布库存变更事件（数据已提交，事件丢失不影响一致性）
     try:
@@ -416,7 +431,7 @@ async def create_stockout(db: AsyncSession, product_id: int, quantity: int,
                 'change_type': '出库', 'quantity': quantity,
                 'current_stock': product.current_stock,
             })
-    except Exception as e:
+    except (OSError, ConnectionError, ValueError) as e:
         logger.warning(f'出库事件发布失败（不影响数据）: {e}')
     logger.info(f'出库添加成功：产品ID：{product_id}，数量：{quantity}，客户：{customer}')
 
@@ -427,7 +442,10 @@ async def update_stockout(db: AsyncSession, stockout_id: int, new_quantity: int,
                           customer: str, stockout_date_str: str,
                           note: str) -> None:
     """更新出库记录"""
-    stockout_obj = await db.get(StockOut, stockout_id)
+    result = await db.execute(
+        select(StockOut).where(StockOut.id == stockout_id).with_for_update()
+    )
+    stockout_obj = result.scalar_one_or_none()
     if not stockout_obj:
         raise ValueError('出库记录不存在')
 
@@ -438,16 +456,21 @@ async def update_stockout(db: AsyncSession, stockout_id: int, new_quantity: int,
     try:
         await _update_stockout_record(db, stockout_obj, new_quantity, customer, stockout_date, note)
         await db.commit()
-    except Exception:
+    except (SQLAlchemyError, ValueError):
         await db.rollback()
         raise
 
+    await invalidate_cache("inventory:*")
+    await invalidate_cache("orders:*")
     logger.info(f'出库编辑成功：{old_stockout_no}，数量变更：{old_quantity} -> {new_quantity}')
 
 
 async def delete_stockout(db: AsyncSession, stockout_id: int) -> None:
     """删除出库记录"""
-    stockout_obj = await db.get(StockOut, stockout_id)
+    result = await db.execute(
+        select(StockOut).where(StockOut.id == stockout_id).with_for_update()
+    )
+    stockout_obj = result.scalar_one_or_none()
     if not stockout_obj:
         raise ValueError('出库记录不存在')
     stockout_no = stockout_obj.stockout_no
@@ -455,10 +478,12 @@ async def delete_stockout(db: AsyncSession, stockout_id: int) -> None:
     try:
         await _delete_stockout_record(db, stockout_obj)
         await db.commit()
-    except Exception:
+    except (SQLAlchemyError, ValueError):
         await db.rollback()
         raise
 
+    await invalidate_cache("inventory:*")
+    await invalidate_cache("orders:*")
     logger.info(f'出库删除成功：{stockout_no}，数量：{stockout_obj.quantity}')
 
 
@@ -612,7 +637,7 @@ def _parse_date_preserve_time(date_str: str, old_time: datetime | None = None) -
     except ValueError:
         raise ValueError('日期格式不正确！')
 
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     if old_time and (old_time.hour != 0 or old_time.minute != 0 or old_time.second != 0):
         return datetime(base.year, base.month, base.day,
                         old_time.hour, old_time.minute, old_time.second)
@@ -653,7 +678,7 @@ async def batch_create_stockins(db: AsyncSession, stockins_data: list) -> dict:
                 try:
                     async with db.begin_nested():
                         stockin = await _create_stockin_record(
-                            db, product_id, quantity, customer, datetime.now(), note
+                            db, product_id, quantity, customer, datetime.now(timezone.utc).replace(tzinfo=None), note
                         )
                     results[orig_idx] = {
                         'success': True,
@@ -662,12 +687,12 @@ async def batch_create_stockins(db: AsyncSession, stockins_data: list) -> dict:
                     }
                 except ValueError as e:
                     results[orig_idx] = {'success': False, 'error': str(e), 'id': item.get('id', '未知')}
-                except Exception as e:
+                except (ValueError, TypeError, OSError) as e:
                     logger.error(f"批量入库单项失败: {e}", exc_info=True)
                     results[orig_idx] = {'success': False, 'error': str(e) or '入库处理失败，请稍后重试', 'id': item.get('id', '未知')}
 
             await db.commit()
-        except Exception:
+        except (SQLAlchemyError, ValueError, TypeError, OSError):
             await db.rollback()
             raise
 
@@ -717,19 +742,19 @@ async def batch_create_stockouts(db: AsyncSession, stockouts_data: list) -> dict
                 try:
                     async with db.begin_nested():
                         created = await _create_stockout_records(
-                            db, product_id, quantity, customer, datetime.now(), note, order_type, country
+                            db, product_id, quantity, customer, datetime.now(timezone.utc).replace(tzinfo=None), note, order_type, country
                         )
                     stockout_nos = [s.stockout_no for s in created] if created else []
                     results[orig_idx] = {'success': True, 'stockout_no': stockout_nos[0] if stockout_nos else '', 'id': item.get('id', '未知')}
                 except ValueError as e:
                     results[orig_idx] = {'success': False, 'error': str(e), 'id': item.get('id', '未知')}
-                except Exception as e:
+                except (ValueError, TypeError, OSError) as e:
                     # begin_nested 已自动回滚 savepoint，session 恢复有效状态
                     logger.error(f"批量出库单项失败: {e}", exc_info=True)
                     results[orig_idx] = {'success': False, 'error': str(e) or '出库处理失败，请稍后重试', 'id': item.get('id', '未知')}
 
             await db.commit()
-        except Exception:
+        except (SQLAlchemyError, ValueError, TypeError, OSError):
             await db.rollback()
             raise
 

@@ -5,6 +5,7 @@
 """
 from pydantic import BaseModel, Field
 from typing import Optional, List
+from datetime import datetime
 
 
 class ProductCreate(BaseModel):
@@ -34,7 +35,7 @@ class ProductResponse(BaseModel):
     image: Optional[str] = None
     initial_stock: int
     current_stock: int
-    create_time: Optional[str] = None
+    create_time: Optional[datetime | str] = None
 
     class Config:
         from_attributes = True

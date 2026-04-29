@@ -1,24 +1,14 @@
 # ERP系统数据库备份与恢复方案
 
-**更新日期**: 2026-04-16
-**数据库类型**: MySQL (已统一，不再支持SQLite)
+**更新日期**: 2026-04-26
+**数据库类型**: PostgreSQL
 
 ---
 
 ## 1. 数据库配置
 
-### 1.1 MySQL数据库配置
-```env
-DB_TYPE=mysql
-DB_HOST=localhost
-DB_PORT=3306
-DB_USER=root
-DB_PASSWORD=your_password
-DB_NAME=erp_system
-```
-
 ### 1.2 数据库路径
-- **MySQL服务**: localhost:3306
+- **PostgreSQL服务**: localhost:5432
 - **数据库名称**: erp_system
 - **备份目录**: `d:\erp_system\backups\`
 
@@ -141,6 +131,3 @@ mysql -u root -p110110 erp_system_test -e "SELECT COUNT(*) FROM product"
 | 验证 | `python scripts/database/test_connection.py` |
 | 列出备份 | `python scripts/database/db_manager.py list` |
 
----
-
-**注意**: 本系统已统一使用MySQL，不再支持SQLite。

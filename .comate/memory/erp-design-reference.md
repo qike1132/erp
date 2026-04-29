@@ -1,0 +1,514 @@
+---
+name: erp-ui-design-spec
+description: ERP 系统 UI 设计规范（强制性）。所有页面的 UI 设计和改造必须遵守此规范，无例外。
+type: reference
+---
+
+# ERP 系统 UI 设计规范
+
+> **强制性规范**：本规范为所有 ERP 前端页面的 UI 设计标准。当用户说"参考设计"、"参考UI"、"按设计规范"时，必须严格遵守此规范。任何新页面开发、现有页面改造都必须遵守，无例外。
+>
+> **参考实现**：`frontend-vite/src/views/material-calculator/MaterialCalculatorView.vue`
+
+## 一、整体风格定位
+
+**现代卡片式仪表盘风格（Modern Card Dashboard）**，受 Tailwind UI / Shadcn 设计系统影响，企业级 SaaS 风格。
+
+## 二、核心设计规范
+
+### 1. 页面容器（沉浸式全屏）
+```css
+.{prefix}-container {
+  padding: 24px;
+  max-width: 1600px;
+  margin: 0 auto;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+```
+
+### 2. 整体布局：灵活卡片布局
+- **布局不强制**，根据具体页面的内容和交互决定卡片数量与分栏方式：
+  - 单卡单栏（表格为主的管理页：供应商、采购）
+  - 单卡双栏（左右分栏的选择+详情）
+  - 单卡三栏（流程式：选择→输入→结果，如物料计算器）
+  - 多卡片纵向排列（Dashboard 概览，如来料进度监控面板）
+- **不设独立页面标题区**，标题集成在主卡片头部
+- 侧边栏 LOGO 作为返回首页入口（`<router-link to="/dashboard">`）
+
+```css
+.{prefix}-card-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+```
+
+### 3. 卡片（Card）
+- **白底圆角卡片**，不使用 UiCard 组件包裹，用原生 div + scoped CSS
+- `background: white; border-radius: 18px`
+- `border: 1px solid var(--color-border-light, #e2e8f0)`
+- `box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06)`
+- `overflow: hidden`
+- **必须配合悬浮动画**（见第19节动效规范）
+
+### 4. 卡片头部 / 区块标题
+- **白色背景融合进卡片主体**，不使用灰色背景
+- `padding: 14px 24px 10px`
+- `background: transparent`（继承卡片白色背景）
+- `display: flex; justify-content: space-between; align-items: center`
+- 左侧标题：`font-size: 14px; font-weight: 700; color: var(--color-text)` + 图标
+- 右侧：操作按钮组（badge + action buttons + status badge）
+
+**强制规则**：区块标题（如"审核订单"、"采购中订单"等）不使用灰色背景，不使用 uppercase，标题直接融入卡片白色主体，靠字号和字重区分层级。
+
+### 5. 多栏主体（Body Grid，按需使用）
+- 仅在页面内容适合多栏并排时使用，单栏页面无需 grid
+- 三栏示例：`grid-template-columns: 1fr 1fr 1fr`
+- 双栏示例：`grid-template-columns: 1fr 1fr`
+```css
+.{prefix}-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr; /* 按实际需求调整 */
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+```
+
+### 6. 栏目（Column）
+```css
+.{prefix}-col {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.{prefix}-col + .{prefix}-col {
+  border-left: 1px solid var(--color-border-light, #f1f5f9);
+}
+```
+
+### 7. 栏目标题（Column Title）
+```css
+.{prefix}-col-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text);
+  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
+  flex-shrink: 0;
+}
+.{prefix}-col-title i {
+  font-size: 14px;
+  color: var(--color-primary-500);
+}
+```
+
+**强制规则**：栏目标题不使用灰色背景、不使用 uppercase，白色背景融合进栏目。
+
+### 8. 图标色块（Icon Box）
+- 46×46px 圆角方块，`border-radius: 13px`
+- 预设色系：
+  - 蓝（primary）：`background: linear-gradient(135deg, --color-primary-100, --color-primary-200)`
+  - 绿（success）：`background: linear-gradient(135deg, --color-success-100, --color-success-200)`
+  - 紫（purple）：`background: linear-gradient(135deg, --color-purple-100, --color-purple-200)`
+  - 橙（warning）：同上模式用 warning 色系
+- 图标：`font-size: 19px`
+
+### 9. 徽章/标签（Badge）
+- 胶囊形：`border-radius: 20px; padding: 6px 14px`
+- 渐变背景：`background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-700))`
+- 白色文字：`color: white; font-size: 13px; font-weight: 600`
+
+### 10. 操作按钮（Action Button）
+- 扁平圆角按钮，`border-radius: 9px; padding: 7px 14px`
+- `border: 2px solid var(--color-border-light); background: white; font-size: 12px; font-weight: 600`
+- `transition: all 0.3s ease`
+- 主操作（primary）：`color: var(--color-primary-600)`; hover: `background: var(--color-primary-50); border-color: var(--color-primary-300); transform: translateY(-1px)`
+- 危险操作（danger）：`color: var(--color-danger-500)`; hover: `background: var(--color-danger-50); border-color: var(--color-danger-200); transform: translateY(-1px)`
+- 禁用态：`opacity: 0.4; cursor: not-allowed`
+
+### 11. 搜索框
+- `padding: 12px 40px 12px 42px`（左侧留出图标空间）
+- `border: 2px solid var(--color-border-light, #e2e8f0); border-radius: 11px`
+- `background: var(--color-surface, #f8fafc)`
+- `transition: all 0.3s ease`
+- focus：`border-color: var(--color-primary-400); background: white; box-shadow: 0 0 0 4px rgba(0, 148, 191, 0.1)`
+- 右侧清除按钮：圆形 `border-radius: 50%`
+- 下拉建议框：`border: 2px solid var(--color-primary-200); border-radius: 12px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.12)`
+
+### 12. 筛选按钮栏
+- `display: flex; gap: 8px`
+- 按钮：`flex: 1; padding: 9px 14px; background: var(--color-surface); border: 2px solid var(--color-border-light); border-radius: 9px; font-size: 13px; font-weight: 600; transition: all 0.2s ease`
+- 激活态：`background: var(--color-primary-50); border-color: var(--color-primary-400); color: var(--color-primary-700)`
+- hover：`transform: translateY(-1px)`
+
+### 13. 列表项（Product / Order）
+- `display: flex; align-items: center; gap: 12px`
+- `padding: 14px 16px`（产品项）/ `padding: 10px 14px`（订单项）
+- `border: 2px solid var(--color-border-light); border-radius: 12px / 10px`
+- `transition: all 0.3s ease`
+- hover：`border-color: var(--color-primary-300); transform: translateX(4px)`（产品列表项滑移）/ `transform: translateY(-1px)`（订单项微浮）
+- 选中态：`border-color: var(--color-primary-500); background: var(--color-primary-50); box-shadow` 加深
+
+### 14. 表格
+- 不使用自定义类名如 `plush-table`，直接在卡片内用原生 table
+- 表头：`padding: 10px 14px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; background: var(--color-surface); border-bottom: 2px solid var(--color-border-light)`
+- 表体：`padding: 10px 14px; font-size: 13px; border-bottom: 1px solid var(--color-border-light, #f1f5f9); transition: background 0.2s ease`
+- 行 hover：`background: var(--color-primary-50)`
+- 表格外层：`border-radius: 10px; overflow: hidden; border: 1px solid var(--color-border-light)`
+
+### 15. 分类折叠块（Category Block）
+- 头部按钮：`padding: 12px 16px; border-radius: 11px; width: 100%; text-align: left; transition: all 0.3s ease`
+- 色系变体（.mc-cat-filling / fabric / accessory / packaging）：
+  - filling：`background: linear-gradient(135deg, --color-info-50, --color-surface-card)`; 图标/标签色 `--color-primary-700`
+  - fabric：`background: linear-gradient(135deg, --color-success-50, --color-surface-card)`; 色系 `--color-success-700`
+  - accessory：`background: linear-gradient(135deg, --color-warning-50, --color-surface-card)`; 色系 `--color-warning-800`
+  - packaging：`background: linear-gradient(135deg, --color-purple-50, --color-surface-card)`; 色系 `--color-purple-800`
+- 展开箭头：`margin-left: auto; transition: transform 0.25s`; 展开时 `transform: rotate(180deg)`
+
+### 16. 汇总面板（Summary Panel）
+- `background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100))`
+- `border-radius: 13px; border: 1px solid var(--color-primary-200)`
+- `display: flex; justify-content: space-between; align-items: center`
+- 数字：`font-size: 32px; font-weight: 800; color: var(--color-primary-600)`
+
+### 17. 状态徽章（Status Badge）
+- `padding: 5px 12px; border-radius: 16px; font-size: 12px; font-weight: 600`
+- 计算中：`background: var(--color-warning-50); color: var(--color-warning-600)`
+- 完成：`background: var(--color-success-50); color: var(--color-success-600)`
+
+### 18. 空状态/加载状态
+- 居中纵向排列：`flex-direction: column; align-items: center; gap: 10px`
+- `padding: 40px 20px`
+- 图标：`font-size: 28px; opacity: 0.5`
+- 文字：`font-size: 14px; color: var(--color-text-muted)`
+
+### 19. 动效规范（强制）
+
+**三档过渡速度，必须严格遵守：**
+
+| 速度 | 缓动函数 | 适用场景 |
+|------|---------|---------|
+| **0.2s ease** | ease | 行hover、小按钮、输入框focus、表格行 |
+| **0.3s ease** | ease | 操作按钮、表单控件、列表项、筛选按钮、分类头部 |
+| **0.4s cubic-bezier(0.4, 0, 0.2, 1)** | Material Design | 主卡片hover |
+
+**卡片悬浮动画（核心动效，所有主卡片必须实现）：**
+```css
+.card {
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.card:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 16px 48px rgba(0,0,0,0.12);
+  transform: translateY(-2px);
+}
+```
+
+**交互微动效（必须实现）：**
+- 列表项滑移：`transform: translateX(4px)` 用于产品/订单列表项hover
+- 按钮微浮：`transform: translateY(-1px)` 用于操作按钮hover
+- 搜索框focus环：`box-shadow: 0 0 0 4px rgba(0, 148, 191, 0.1)`
+- 表格行hover：`background: var(--color-primary-50); transition: background 0.2s ease`
+
+**禁令：**
+- **禁止**从 `opacity: 0` 开始的入场动画（已确认会导致闪屏）
+- **禁止**在卡片头部/区块标题使用灰色背景
+- **禁止**硬编码色值，必须使用 CSS 变量
+
+### 20. 表单输入框（强制统一）
+所有表单输入控件必须使用统一视觉风格，包括 UiSelect、UiDatePicker、原生 input、原生 textarea：
+
+```css
+/* 统一输入框样式 */
+input, textarea, select, .ui-select-input, .date-input {
+  width: 100%;
+  padding: 0.625rem 2.5rem 0.625rem 1rem;  /* 右侧留出图标/箭头空间 */
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  color: var(--color-heading);
+  background: var(--color-slate-50);
+  border: 2px solid var(--color-ocean-light);
+  border-radius: var(--radius-input);  /* 12px */
+  transition: all 0.3s ease;
+  outline: none;
+  min-height: 44px;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+/* focus 统一 */
+input:focus, textarea:focus, select:focus, .ui-select-input:focus, .date-input:focus {
+  background: var(--color-surface-card);
+  border-color: var(--color-ocean-deep);
+  box-shadow: 0 0 0 0.2rem rgba(135, 206, 235, 0.25);
+}
+/* hover 统一 */
+input:not(:disabled):hover, textarea:not(:disabled):hover, select:not(:disabled):hover,
+.ui-select-input:not(:disabled):hover, .date-input:not(:disabled):hover {
+  border-color: var(--color-ocean-deep);
+}
+/* disabled 统一 */
+input:disabled, textarea:disabled, select:disabled, .ui-select-input:disabled, .date-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+```
+
+**强制规则**：
+- UiSelect 的 `ComboboxInput` 禁止使用 Tailwind 类（`rounded-lg` 等），必须使用自定义 `.ui-select-input` CSS 类
+- 所有输入框的 `border-radius` 必须使用 `var(--radius-input)`，禁止硬编码或使用 Tailwind 的 `rounded-*` 类
+- 所有输入框的 border 宽度统一 `2px`，颜色统一 `var(--color-ocean-light)`，背景统一 `var(--color-slate-50)`
+
+**Placeholder 样式强制规则**：
+浏览器默认为 `::placeholder` 伪元素添加 `opacity: 0.54`（Chrome），导致即使设置了相同颜色值，placeholder 文本也比普通文本更浅/更细。必须显式覆盖：
+
+```css
+textarea::placeholder,
+input::placeholder {
+  color: var(--color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+  opacity: 1;  /* 强制覆盖浏览器默认 opacity: 0.54 */
+}
+```
+
+当其他元素需要与 placeholder 保持一致的视觉风格（如拖拽上传提示文字）时，必须使用与 `::placeholder` 完全相同的属性值：
+```css
+/* 提示文字（等同于 placeholder 视觉效果） */
+.{prefix}-droppable-label {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+```
+
+### 21. 可折叠区块标题（输入框风格）
+表单内的可折叠区块标题栏（如"批量导入"、"OCR 识别导入"）使用与输入框相同的视觉风格，让区块标题融入表单：
+
+```css
+.{prefix}-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: white;
+  border: 2px solid var(--color-border-light, #e2e8f0);
+  border-radius: var(--radius-input, 12px);
+  min-height: 40px;
+  box-sizing: border-box;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+.{prefix}-section-header:hover {
+  border-color: var(--color-ocean-deep);
+  background: var(--color-slate-50);
+}
+.{prefix}-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.{prefix}-section-title i {
+  font-size: 13px;
+  color: var(--color-danger-500);
+}
+```
+
+**强制规则**：可折叠区块标题禁止使用 `border-top` 分隔线 + 透明背景的旧模式，必须使用输入框风格的边框 + 圆角 + 白色背景。
+
+### 22. 拖拽上传区（Upload Area）
+文件上传使用"标题栏即拖拽区"模式，标题栏本身是可点击/可拖拽的文件输入区域，禁止使用 UiUpload 组件：
+
+```css
+/* 标题栏即拖拽区 */
+.{prefix}-section-header.{prefix}-droppable {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: white;
+  border: 2px solid var(--color-border-light, #e2e8f0);
+  border-radius: var(--radius-input, 12px);
+  min-height: 40px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+.{prefix}-droppable:hover {
+  border-color: var(--color-ocean-deep);
+  background: var(--color-slate-50);
+}
+/* 拖拽悬浮态 - success 变体 */
+.{prefix}-droppable.{prefix}-drag-over {
+  border-color: var(--color-success-400);
+  background: var(--color-success-50);
+}
+/* 拖拽悬浮态 - danger 变体（OCR/PDF） */
+.{prefix}-droppable-danger.{prefix}-drag-over {
+  border-color: var(--color-danger-400);
+  background: var(--color-danger-50);
+}
+/* 提示文字（与 placeholder 视觉一致，见 Section 20） */
+.{prefix}-droppable-label {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--color-text-muted);
+  display: flex;
+  margin-bottom: 0;
+  cursor: pointer;
+}
+.{prefix}-droppable-label .label-icon {
+  color: var(--color-text-muted);
+}
+/* 标题栏上方的小标签 */
+.{prefix}-section-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  padding: 8px 0 4px;
+}
+/* 内联操作按钮 */
+.{prefix}-inline-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.{prefix}-inline-btn {
+  padding: 3px 8px;
+  border: 1px solid;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+/* 选中文件行内标签 */
+.{prefix}-file-inline {
+  font-size: 13px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.{prefix}-file-inline-success { color: var(--color-success-600); }
+.{prefix}-file-inline-danger { color: var(--color-danger-600); }
+```
+
+**HTML 模板**：
+```html
+<div class="{prefix}-section-label"><i class="fas fa-file-import"></i> 批量导入</div>
+<div class="{prefix}-section-header {prefix}-droppable"
+  :class="{ '{prefix}-drag-over': dragOver }"
+  @click="fileInputRef?.click()"
+  @dragover.prevent @dragleave @drop.prevent>
+  <label class="form-label {prefix}-droppable-label">
+    <i class="fas fa-file-excel label-icon"></i>
+    <span v-if="selectedFile" class="{prefix}-file-inline {prefix}-file-inline-success">...</span>
+    <span v-else>拖拽文件到标题栏 · 支持 .xlsx / .xls</span>
+  </label>
+  <div class="{prefix}-inline-actions">
+    <button class="{prefix}-inline-btn" @click.stop="handleTemplate">模板</button>
+    <button class="{prefix}-inline-btn {prefix}-inline-btn-success" @click.stop="handleImport">导入</button>
+  </div>
+  <input ref="fileInputRef" type="file" accept=".xlsx,.xls" style="display: none" @change="onFileSelect" />
+</div>
+```
+
+**强制规则**：
+- 文件上传必须使用原生 `<input type="file" style="display: none">` + 标题栏拖拽区，禁止使用 UiUpload 组件
+- 标题栏本身即为拖拽区，禁止单独创建拖拽区域（如 dashed border 拖拽框）
+- 提示文字必须与 `::placeholder` 视觉一致（`font-size: 14px; font-weight: 400; color: var(--color-text-muted)`），见 Section 20
+- 内联操作按钮必须使用 `@click.stop` 阻止冒泡，防止触发标题栏的文件选择器
+- 拖拽区支持两种主题：success（Excel 上传）和 danger（OCR/PDF 上传）
+- 标题栏上方使用 `.{prefix}-section-label` 小标签标注分类
+
+### 23. TAB 切换栏
+- 位于卡片头部右侧，`display: flex; gap: 4px`
+- TAB 按钮：`padding: 7px 16px; border: 2px solid var(--color-border-light); border-radius: 9px; background: white; font-size: 13px; font-weight: 600; transition: all 0.3s ease`
+- 激活态：`background: var(--color-primary-50); color: var(--color-primary-700); border-color: var(--color-primary-400)`
+- hover：`border-color: var(--color-primary-300); color: var(--color-primary-600); transform: translateY(-1px)`
+- 内容区用 `v-show` 切换，加 `.{prefix}-tab-content` 类
+
+### 24. 弹窗表单
+- 标签：`font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-secondary)`
+- 输入框：`padding: 8px 12px; border: 2px solid var(--color-border-light); border-radius: 10px; font-size: 14px; transition: all 0.3s ease`
+- focus：`border-color: var(--color-primary-400); background: white; box-shadow: 0 0 0 4px rgba(0, 148, 191, 0.1)`
+- 关联字段双列：`display: grid; grid-template-columns: 1fr 1fr; gap: 16px`
+
+## 三、布局模式：沉浸式全屏
+
+所有页面采用**隐藏顶部导航栏、保留侧边栏**的沉浸式全屏布局：
+
+1. 路由添加 `meta: { hideHeader: true }`
+2. `DefaultLayout.vue` 根据 `route.meta.hideHeader` 条件隐藏 `<header class="top-header">`
+3. 侧边栏始终显示（不隐藏）
+4. 侧边栏 LOGO 可点击返回首页：`<router-link to="/dashboard" class="sidebar-logo">`
+5. 页面自身不设"返回首页"按钮，依赖侧边栏 LOGO
+6. `content-container` 使用 `no-padding` 类（padding: 0）
+7. 页面容器使用 `height: 100vh` 填满视口
+
+**注意**：布局方式（单栏/双栏/三栏/多卡片）不强制，根据页面具体内容灵活选择。
+
+## 四、CSS 命名规范
+
+- 每个页面用 2-3 字母前缀 + 短横线：`.mc-container` / `.sp-header` / `.pc-card`
+- BEM 简化风格：前缀-元素名，如 `mc-card-header`、`mc-search-input`
+- 所有样式 `scoped`，不使用全局 CSS
+- 颜色全部用 CSS 变量（`var(--color-primary-*)`），不硬编码色值
+
+## 五、模板结构
+
+> 布局不强制三栏，根据页面内容选择单栏/双栏/三栏/多卡片等结构。以下为三栏示例。
+
+```
+<div class="{prefix}-container">
+  <div class="{prefix}-card {prefix}-card-main">
+
+    <!-- 卡片头部：标题 + 操作 -->
+    <div class="{prefix}-card-header">
+      <div class="{prefix}-card-title-group">
+        <div class="{prefix}-icon-box {prefix}-icon-blue">
+          <i class="fas fa-xxx" />
+        </div>
+        <div>
+          <h3>页面标题</h3>
+          <small>页面描述</small>
+        </div>
+      </div>
+      <div class="{prefix}-header-actions">
+        <span class="{prefix}-badge">数量</span>
+        <button class="{prefix}-action-btn {prefix}-action-btn-primary">操作</button>
+      </div>
+    </div>
+
+    <!-- 多栏主体 -->
+    <div class="{prefix}-body">
+      <div class="{prefix}-col">
+        <div class="{prefix}-col-title"><i class="fas fa-xxx" /> 栏目标题</div>
+        <!-- 栏目内容 -->
+      </div>
+      <!-- 更多栏目... -->
+    </div>
+
+  </div>
+</div>
+```
+
+## 六、关键交互规范
+
+1. **多选列表**：点击项目切换选中态（checkbox + 高亮边框），选中态使用 `border-color: var(--color-primary-500)` + `background: var(--color-primary-50)`
+2. **搜索建议**：输入 250ms 防抖后请求，下拉框 `mousedown.prevent` 选中（避免 blur 先触发），blur 150ms 延迟关闭
+3. **数量输入**：`type="number"` + `@input="debounceCalc"` 350ms 防抖触发计算
+4. **折叠分类**：点击分类头切换展开/收起，箭头旋转 180° 指示状态
+5. **批量操作**：弹窗统一输入数量，应用到全部订单项
+6. **删除项目**：使用 `Array.splice()` 而非 `Array.filter()` 避免 Vue 响应式数组替换闪烁

@@ -233,7 +233,7 @@ def extract_text(file_content: bytes, filename: str = "") -> List[Dict]:
         # 尝试 PDF 优先，失败则尝试图片
         try:
             return extract_text_from_pdf(file_content)
-        except Exception:
+        except (ValueError, OSError):
             return extract_text_from_image(file_content)
 
 
@@ -284,7 +284,7 @@ def extract_table_structure(file_content: bytes, filename: str = "") -> List[Dic
                 "html": html_table,
                 "text": text,
             })
-        except Exception as e:
+        except (ValueError, TypeError, OSError) as e:
             logger.warning(f"RapidTable 第{page_idx}页识别失败: {e}")
             continue
 
@@ -1035,7 +1035,7 @@ async def import_staging_stockouts_from_file(
                     f"识别到 {len(table_pages)} 页表格, "
                     f"解析出 {len(parsed_items)} 个出货项"
                 )
-        except Exception as e:
+        except (ValueError, TypeError, OSError) as e:
             logger.warning(f"RapidTable 表格识别失败，将回退到文本模式: {e}")
 
         # 如果 RapidTable 未识别到结果，回退到原有 OCR 文本 + 4策略解析
@@ -1193,7 +1193,7 @@ async def import_staging_stockouts_from_file(
                 db.add(staging_stockout)
                 imported += 1
 
-            except Exception as e:
+            except (ValueError, TypeError, OSError) as e:
                 errors.append(f'第{idx}项处理失败: {str(e)}')
                 continue
 
@@ -1207,7 +1207,7 @@ async def import_staging_stockouts_from_file(
         _prog(status='done', message=result_msg, percent=100)
         return imported, result_msg, errors[:10] if errors else []
 
-    except Exception as e:
+    except (ValueError, TypeError, OSError) as e:
         await db.rollback()
         logger.error(f'OCR 导入失败: {str(e)}', exc_info=True)
         _prog(status='error', message=f'识别导入失败: {str(e)}', percent=0)

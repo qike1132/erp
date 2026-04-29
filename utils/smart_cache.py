@@ -89,45 +89,46 @@ class CacheStats:
 
 
 class LRUCache:
-    """LRU 缓存实现"""
+    """LRU 缓存实现（使用 OrderedDict 实现 O(1) 操作，支持 TTL）"""
     
     def __init__(self, maxsize: int = 1000):
         self.maxsize = maxsize
-        self._cache: Dict[str, Any] = {}
-        self._order: List[str] = []
+        from collections import OrderedDict
+        self._cache: OrderedDict[str, tuple[Any, float]] = OrderedDict()  # key -> (value, expire_at)
         self._lock = threading.Lock()
 
     def get(self, key: str) -> Optional[Any]:
         with self._lock:
             if key in self._cache:
-                self._order.remove(key)
-                self._order.append(key)
-                return self._cache[key]
+                value, expire_at = self._cache[key]
+                # 检查 TTL 过期
+                if expire_at is not None and time.time() > expire_at:
+                    del self._cache[key]
+                    return None
+                self._cache.move_to_end(key)  # O(1) LRU 更新
+                return value
             return None
 
     def set(self, key: str, value: Any, ttl: Optional[int] = None):
         with self._lock:
+            expire_at = time.time() + ttl if ttl is not None else None
             if key in self._cache:
-                self._order.remove(key)
+                self._cache.move_to_end(key)
             elif len(self._cache) >= self.maxsize:
-                oldest = self._order.pop(0)
-                del self._cache[oldest]
+                self._cache.popitem(last=False)  # O(1) 淘汰最旧
             
-            self._cache[key] = value
-            self._order.append(key)
+            self._cache[key] = (value, expire_at)
 
     def delete(self, key: str) -> bool:
         with self._lock:
             if key in self._cache:
                 del self._cache[key]
-                self._order.remove(key)
                 return True
             return False
 
     def clear(self):
         with self._lock:
             self._cache.clear()
-            self._order.clear()
 
     def __contains__(self, key: str) -> bool:
         return key in self._cache
@@ -158,7 +159,7 @@ class SmartCacheManager:
         
         try:
             from utils.redis_cache import redis_cache
-            if redis_cache and redis_cache.client:
+            if redis_cache and redis_cache.redis_client:
                 self._redis_client = redis_cache
                 self._is_redis_available = True
                 return self._redis_client
@@ -181,7 +182,7 @@ class SmartCacheManager:
         redis_client = self._get_redis_client()
         if use_redis and redis_client:
             try:
-                value = redis_client.get_json(cache_key)
+                value = redis_client.get(cache_key)
                 if value is not None:
                     if use_local:
                         self.local_cache.set(cache_key, value)
@@ -207,7 +208,7 @@ class SmartCacheManager:
         redis_client = self._get_redis_client()
         if use_redis and redis_client:
             try:
-                redis_client.set_json(cache_key, value, ttl)
+                redis_client.set(cache_key, value, ttl)
                 self.stats.record_set()
                 return True
             except Exception as e:
@@ -239,30 +240,34 @@ class SmartCacheManager:
             self.stats.record_delete()
         return deleted
 
-    def delete_by_pattern(self, pattern: str) -> int:
+    async def delete_by_pattern(self, pattern: str) -> int:
         count = 0
         redis_client = self._get_redis_client()
         
         if redis_client:
             try:
-                keys = redis_client.client.keys(pattern)
-                if keys:
-                    redis_client.client.delete(*keys)
-                    count += len(keys)
+                count = await redis_client.delete_pattern(pattern)
             except Exception as e:
                 logger.warning(f"Redis 批量删除失败: {e}")
                 self.stats.record_error()
 
+        # Also clear matching local cache entries
+        prefix = pattern.replace('*', '')
+        keys_to_delete = [k for k in list(self.local_cache._cache.keys()) if prefix in k]
+        for k in keys_to_delete:
+            self.local_cache.delete(k)
+            count += 1
+
         return count
 
-    def clear(self, use_local: bool = True, use_redis: bool = True):
+    async def clear(self, use_local: bool = True, use_redis: bool = True):
         if use_local:
             self.local_cache.clear()
 
         redis_client = self._get_redis_client()
         if use_redis and redis_client:
             try:
-                redis_client.clear()
+                await redis_client.delete_pattern('*')
             except Exception as e:
                 logger.warning(f"Redis 清空失败: {e}")
                 self.stats.record_error()

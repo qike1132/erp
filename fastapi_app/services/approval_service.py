@@ -7,7 +7,8 @@ from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.shared_models import (
-    ApprovalRequest, ApprovalLog, Order, Product, InventoryLog, StockOut, User
+    ApprovalRequest, ApprovalLog, Order, Product, InventoryLog, StockOut, User,
+    OrderSyncRecord,
 )
 from fastapi_app.shared.stock_concurrency import get_product_for_update
 from fastapi_app.services import escape_like
@@ -112,6 +113,8 @@ async def approve_request(db: AsyncSession, approval_id: int, current_user: User
     order = await db.get(Order, approval.order_id)
     if not order:
         raise ValueError("关联订单不存在")
+    if order.is_deleted:
+        raise ValueError("关联订单已被删除，无法审批")
 
     if approval.operation_type == 'edit':
         operation_data = json.loads(approval.operation_data)
@@ -168,6 +171,17 @@ async def approve_request(db: AsyncSession, approval_id: int, current_user: User
         for stockout in order_stockouts:
             await db.delete(stockout)
 
+        # 删除关联同步记录和审批记录
+        from sqlalchemy import delete as sa_delete
+        await db.execute(sa_delete(OrderSyncRecord).where(OrderSyncRecord.source_order_id == order.id))
+        approval_result = await db.execute(
+            select(ApprovalRequest.id).where(ApprovalRequest.order_id == order.id)
+        )
+        approval_ids = [row[0] for row in approval_result.all()]
+        if approval_ids:
+            await db.execute(sa_delete(ApprovalLog).where(ApprovalLog.approval_request_id.in_(approval_ids)))
+        await db.execute(sa_delete(ApprovalRequest).where(ApprovalRequest.order_id == order.id))
+
         delete_log = InventoryLog(
             product_id=order.product_id,
             change_type='订单删除(审批)',
@@ -190,6 +204,7 @@ async def approve_request(db: AsyncSession, approval_id: int, current_user: User
                                 {'operation': approval.operation_type})
 
     await db.flush()
+
     return f'已同意{approval.operation_type_display}请求'
 
 

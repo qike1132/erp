@@ -182,6 +182,7 @@ def create_purchase_order(db: Session, data: dict, user_id: int, username: str) 
             material_code=item_data.get('material_code', ''),
             material_name=item_data.get('material_name', ''),
             material_category=item_data.get('material_category', ''),
+            specification=item_data.get('specification', ''),
             quantity=Decimal(str(item_data.get('quantity', 0))),
             unit=item_data.get('unit', ''),
             unit_usage=Decimal(str(item_data.get('unit_usage', 0))),
@@ -202,6 +203,8 @@ def create_purchase_order(db: Session, data: dict, user_id: int, username: str) 
             source_order_id = item_data['source_order_id']
         if item_data.get('product_name'):
             product_name = item_data['product_name']
+        if not customer_name and item_data.get('customer_name'):
+            customer_name = item_data['customer_name']
         product_quantity += Decimal(str(item_data.get('quantity', 0)))
 
     order = PurchaseOrder(
@@ -223,23 +226,16 @@ def create_purchase_order(db: Session, data: dict, user_id: int, username: str) 
         item.order_id = order.id
         db.add(item)
 
-    # 更新关联的销售订单状态
-    source_order_ids = set()
-    for item_data in items_data:
-        oid = item_data.get('source_order_id')
-        if oid:
-            source_order_ids.add(oid)
+    # 不在此处更新销售订单状态，由 one_click_generate_order 统一处理
+    # 旧逻辑：每个供应商分组都设置 status='部分备货'，导致 one_click_generate_order
+    # 中的最终状态检查 order.status == '待备货' 永远为 False，订单停在'部分备货'
 
-    for oid in source_order_ids:
-        source_order = db.get(Order, oid)
-        if source_order and source_order.status == '待备货':
-            source_order.status = '部分备货'
-
-    db.commit()
+    db.flush()
     return {'id': order.id, 'order_no': order_no}
 
 
 def one_click_generate_order(db: Session, order_ids: list, user_id: int, username: str) -> dict:
+    """一键审核：每个销售订单生成一个采购订单，包含该产品所有BOM物料"""
     if not order_ids:
         raise ValueError('请选择订单')
 
@@ -247,8 +243,7 @@ def one_click_generate_order(db: Session, order_ids: list, user_id: int, usernam
     if not orders:
         raise ValueError('未找到订单')
 
-    supplier_items = {}
-    processed_order_ids = set()
+    created_orders = []
 
     for order in orders:
         product = db.query(Product).options(
@@ -261,38 +256,35 @@ def one_click_generate_order(db: Session, order_ids: list, user_id: int, usernam
         if not product or not product.has_bom():
             continue
 
-        processed_order_ids.add(order.id)
-
         all_materials = product.get_all_materials()
+        items = []
+        # 取第一个有供应商名称的物料作为采购订单的 supplier_name
+        first_supplier_name = ''
         for mat in all_materials:
-            sname = mat.get('supplier_name', '') or '未指定供应商'
-            if sname not in supplier_items:
-                supplier_items[sname] = []
-            supplier_items[sname].append({
+            supplier = mat.get('supplier_name', '') or '未指定供应商'
+            if not first_supplier_name and supplier and supplier != '未指定供应商':
+                first_supplier_name = supplier
+            items.append({
                 'product_id': product.id,
                 'product_name': product.name,
                 'barcode': product.barcode or '',
                 'customer_name': order.customer,
-                'material_name': mat.get('name', ''),
+                'material_name': mat.get('material_name', ''),
                 'material_category': mat.get('category', ''),
-                'quantity': float(mat.get('quantity_per_unit', 0)) * order.quantity,
+                'specification': mat.get('specification', ''),
+                'unit_usage': float(mat.get('quantity', 0) or mat.get('unit_usage', 0)),
+                'quantity': float(mat.get('quantity', 0) or mat.get('unit_usage', 0)) * order.quantity,
                 'unit': mat.get('unit', ''),
-                'supplier_name': sname,
+                'supplier_name': supplier,
                 'source_order_id': order.id,
             })
 
-    created_orders = []
-    for supplier_name, items in supplier_items.items():
         result = create_purchase_order(db, {
-            'supplier_name': supplier_name,
+            'supplier_name': first_supplier_name,
             'items': items,
         }, user_id, username)
         created_orders.append(result)
 
-    # 更新原始订单状态（仅更新成功生成采购项的订单）
-    for order in orders:
-        if order.id in processed_order_ids and order.status == '待备货':
-            order.status = '已备货'
     db.commit()
 
     return {
@@ -339,15 +331,22 @@ def get_purchase_orders(db: Session, *, page: int = 1, per_page: int = 50,
     total = query.count()
     orders = query.offset((page - 1) * per_page).limit(per_page).all()
 
+    # 批量查询源订单用于回退 customer_name
+    source_ids = [o.source_order_id for o in orders if o.source_order_id]
+    source_order_map = {}
+    if source_ids:
+        for so in db.query(Order).filter(Order.id.in_(source_ids)).all():
+            source_order_map[so.id] = so
+
     return {
         'orders': [
             {
                 'id': o.id,
                 'order_no': o.order_no,
                 'supplier_name': o.supplier_name,
-                'customer_name': o.customer_name,
-                'product_name': o.product_name,
-                'quantity': float(o.product_quantity) if o.product_quantity else None,
+                'customer_name': o.customer_name or (source_order_map[o.source_order_id].customer if o.source_order_id and o.source_order_id in source_order_map else '') or (o.items[0].customer_name if o.items else '') or '',
+                'product_name': o.product_name or (o.items[0].product_name if o.items else '') or '',
+                'quantity': float(o.product_quantity) if o.product_quantity is not None else None,
                 'order_date': o.order_date.strftime('%Y-%m-%d') if o.order_date else '',
                 'status': o.status,
                 'total_amount': sum(float(item.total_price) if item.total_price else 0 for item in o.items),
@@ -435,22 +434,8 @@ def delete_purchase_order(db: Session, order_id: int) -> dict:
     if not order:
         raise ValueError('采购订单不存在')
 
-    # 回滚关联订单状态（通过 source_order_id 和 source_order_ids）
-    source_order_ids = set()
-    if order.source_order_id:
-        source_order_ids.add(order.source_order_id)
-    if order.source_order_ids:
-        try:
-            for oid in json.loads(order.source_order_ids):
-                if isinstance(oid, int):
-                    source_order_ids.add(oid)
-        except (json.JSONDecodeError, TypeError):
-            pass
-
-    for oid in source_order_ids:
-        source_order = db.get(Order, oid)
-        if source_order:
-            source_order.status = '待备货'
+    # 删除采购订单后，关联的销售订单会自动回到"审核订单"列表
+    # （因为不再有 PurchaseOrder.source_order_id 指向它）
 
     db.delete(order)
     db.commit()
@@ -464,7 +449,6 @@ def _sync_order_to_material_registration(db: Session, order, user_id: int):
         return
 
     registration = MaterialRegistration(
-        registration_no=f'MR{datetime.now().strftime("%Y%m%d")}{order.id:04d}',
         purchase_order_id=order.id,
         purchase_order_no=order.order_no,
         supplier_id=order.supplier_id,
@@ -495,10 +479,13 @@ def complete_purchase_order(db: Session, order_id: int, user_id: int, username: 
     if order.status == '已完成':
         raise ValueError('订单已完成')
 
+    old_status = order.status
     order.status = '已完成'
+    order.completed_at = datetime.now()
+    order.completed_by = username
     db.add(ModificationLog(
         target_type='purchase_order', target_id=order_id,
-        field_name='status', old_value='处理中', new_value='已完成',
+        field_name='status', old_value=old_status or '', new_value='已完成',
         modifier_name=username,
     ))
 
@@ -517,7 +504,7 @@ def batch_complete_purchase_orders(db: Session, ids: list, user_id: int, usernam
         try:
             result = complete_purchase_order(db, oid, user_id, username)
             completed.append(result)
-        except Exception as e:
+        except (ValueError, TypeError, RuntimeError) as e:
             errors.append({'id': oid, 'error': str(e)})
 
     return {'completed_count': len(completed), 'errors': errors}
@@ -538,8 +525,12 @@ def get_completed_purchase_orders(db: Session, *, page: int = 1, per_page: int =
         query = query.filter(PurchaseOrder.customer_name.ilike(f'%{escape_like(customer_name)}%'))
     if supplier_name:
         query = query.filter(PurchaseOrder.supplier_name.ilike(f'%{escape_like(supplier_name)}%'))
-    if barcode or product_name or material_name:
-        query = query.filter(PurchaseOrder.items.any())
+    if barcode:
+        query = query.filter(PurchaseOrder.items.any(PurchaseOrderItem.barcode.ilike(f'%{escape_like(barcode)}%')))
+    if product_name:
+        query = query.filter(PurchaseOrder.items.any(PurchaseOrderItem.product_name.ilike(f'%{escape_like(product_name)}%')))
+    if material_name:
+        query = query.filter(PurchaseOrder.items.any(PurchaseOrderItem.material_name.ilike(f'%{escape_like(material_name)}%')))
     if start_date:
         try:
             sd = datetime.strptime(start_date, '%Y-%m-%d')
@@ -557,15 +548,26 @@ def get_completed_purchase_orders(db: Session, *, page: int = 1, per_page: int =
     total = query.count()
     orders = query.offset((page - 1) * per_page).limit(per_page).all()
 
+    # 批量查询源订单用于回退 customer_name
+    source_ids = [o.source_order_id for o in orders if o.source_order_id]
+    source_order_map = {}
+    if source_ids:
+        for so in db.query(Order).filter(Order.id.in_(source_ids)).all():
+            source_order_map[so.id] = so
+
     return {
         'orders': [
             {
                 'id': o.id,
                 'order_no': o.order_no,
                 'supplier_name': o.supplier_name,
-                'customer_name': o.customer_name,
+                'customer_name': o.customer_name or (source_order_map[o.source_order_id].customer if o.source_order_id and o.source_order_id in source_order_map else '') or (o.items[0].customer_name if o.items else '') or '',
+                'product_name': o.product_name or (o.items[0].product_name if o.items else '') or '',
+                'quantity': float(o.product_quantity) if o.product_quantity is not None else sum(float(item.quantity) if item.quantity else 0 for item in o.items),
                 'total_amount': sum(float(item.total_price) if item.total_price else 0 for item in o.items),
+                'order_date': o.create_time.strftime('%Y-%m-%d') if o.create_time else '',
                 'create_time': o.create_time.strftime('%Y-%m-%d %H:%M') if o.create_time else '',
+                'completed_at': o.completed_at.strftime('%Y-%m-%d %H:%M') if o.completed_at else '',
                 'items': [
                     {
                         'id': item.id,
@@ -605,9 +607,19 @@ def export_completed_orders(db: Session, data: dict) -> str:
 # ============================================================
 
 def get_unprocessed_orders(db: Session, *, customer: str = '', page: int = 1, per_page: int = 50) -> dict:
+    """获取未审核订单（未生成采购订单的销售订单）"""
+    # 使用 NOT EXISTS 替代 NOT IN，性能更优（可利用索引提前终止扫描）
+    from sqlalchemy import exists as sa_exists, select
+    po_exists = sa_exists(
+        select(PurchaseOrder.id).where(PurchaseOrder.source_order_id == Order.id)
+    )
+
     query = db.query(Order).options(
         joinedload(Order.product),
-    ).filter(Order.status == '待备货')
+    ).filter(
+        Order.is_deleted == False,  # noqa: E712
+        ~po_exists,  # 没有关联的采购订单
+    )
 
     if customer:
         query = query.filter(Order.customer.ilike(f'%{escape_like(customer)}%'))
@@ -616,12 +628,30 @@ def get_unprocessed_orders(db: Session, *, customer: str = '', page: int = 1, pe
     total = query.count()
     orders = query.offset((page - 1) * per_page).limit(per_page).all()
 
+    # 收集所有 product_id，批量查询 has_bom 标记（避免依赖 ORM 关系加载状态）
+    product_ids = list(set(o.product_id for o in orders if o.product_id))
+    bom_product_ids = set()
+    if product_ids:
+        # 有任何 BOM 子记录的产品视为 has_bom
+        mat_ids = {r[0] for r in db.query(ProductMaterial.product_id).filter(
+            ProductMaterial.product_id.in_(product_ids),
+            ProductMaterial.cotton_usage > 0,
+        ).all()}
+        fab_ids = {r[0] for r in db.query(ProductFabric.product_id).filter(
+            ProductFabric.product_id.in_(product_ids),
+        ).all()}
+        acc_ids = {r[0] for r in db.query(ProductAccessory.product_id).filter(
+            ProductAccessory.product_id.in_(product_ids),
+        ).all()}
+        pkg_ids = {r[0] for r in db.query(ProductPackaging.product_id).filter(
+            ProductPackaging.product_id.in_(product_ids),
+        ).all()}
+        bom_product_ids = mat_ids | fab_ids | acc_ids | pkg_ids
+
     result = []
     for order in orders:
         product = order.product
-        has_bom = product.has_bom() if product else False
-        if not has_bom:
-            continue
+        has_bom = order.product_id in bom_product_ids
 
         result.append({
             'id': order.id,
@@ -630,12 +660,13 @@ def get_unprocessed_orders(db: Session, *, customer: str = '', page: int = 1, pe
             'product_name': product.name if product else '',
             'quantity': order.quantity,
             'order_date': order.order_date.strftime('%Y-%m-%d') if order.order_date else '',
+            'create_time': order.order_date.strftime('%Y-%m-%d %H:%M') if order.order_date else '',
             'has_bom': has_bom,
         })
 
     return {
         'orders': result,
-        'total': len(result),
+        'total': total,
         'pages': (total + per_page - 1) // per_page if per_page > 0 else 0,
         'current_page': page,
     }
@@ -646,143 +677,328 @@ def get_unprocessed_orders(db: Session, *, customer: str = '', page: int = 1, pe
 # ============================================================
 
 def query_supplier_groups(db: Session, order_ids: list) -> list:
+    """按供应商维度查询并分组采购订单物料，相同物料自动合并数量"""
     if not order_ids:
         return []
 
-    items = db.query(PurchaseOrderItem).filter(
-        PurchaseOrderItem.order_id.in_(order_ids)
-    ).all()
+    orders = db.query(PurchaseOrder).filter(PurchaseOrder.id.in_(order_ids)).all()
+    items = db.query(PurchaseOrderItem).filter(PurchaseOrderItem.order_id.in_(order_ids)).all()
+    order_map = {o.id: o for o in orders}
 
-    groups = {}
+    supplier_groups = {}
+    supplier_redundant_info = {}
+
     for item in items:
-        sname = item.supplier_name or '未指定'
-        if sname not in groups:
-            supplier = db.query(Supplier).filter_by(name=sname).first()
-            groups[sname] = {
-                'supplier_name': sname,
-                'supplier_id': supplier.id if supplier else None,
-                'contact_person': supplier.contact_person if supplier else '',
-                'phone': supplier.phone if supplier else '',
+        order = order_map.get(item.order_id)
+        if not order:
+            continue
+
+        supplier_name = item.supplier_name or order.supplier_name or '未指定供应商'
+        if supplier_name not in supplier_groups:
+            supplier_groups[supplier_name] = {
+                'supplier_name': supplier_name,
                 'items': [],
+                'orders': set(),
             }
-        groups[sname]['items'].append({
-            'product_name': item.product_name,
-            'material_name': item.material_name,
-            'quantity': float(item.quantity) if item.quantity else 0,
-            'unit': item.unit,
-            'customer_name': item.customer_name,
+            supplier_redundant_info[supplier_name] = {
+                'contact_person': order.supplier_contact_person,
+                'phone': order.supplier_phone,
+                'address': order.supplier_address,
+            }
+
+        # 相同物料合并
+        item_key = (item.material_name, item.specification or '', item.unit or '')
+        found = False
+        for existing_item in supplier_groups[supplier_name]['items']:
+            if (existing_item['material_name'], existing_item['specification'], existing_item['unit']) == item_key:
+                existing_item['quantity'] += Decimal(str(item.quantity)) if item.quantity else Decimal('0')
+                existing_item['order_count'] += 1
+                found = True
+                break
+
+        if not found:
+            supplier_groups[supplier_name]['items'].append({
+                'material_name': item.material_name,
+                'specification': item.specification or '',
+                'unit': item.unit or '',
+                'quantity': Decimal(str(item.quantity)) if item.quantity else Decimal('0'),
+                'material_category': item.material_category or '',
+                'order_count': 1,
+            })
+
+        supplier_groups[supplier_name]['orders'].add(order.order_no)
+
+    # 从 Supplier 表获取完整供应商信息，冗余字段作为回退
+    supplier_names = [name for name in supplier_groups if name != '未指定供应商']
+    supplier_record_map = {}
+    if supplier_names:
+        supplier_records = db.query(Supplier).filter(Supplier.name.in_(supplier_names)).all()
+        supplier_record_map = {s.name: s for s in supplier_records}
+
+    result = []
+    for supplier_name, group in supplier_groups.items():
+        record = supplier_record_map.get(supplier_name)
+        redundant = supplier_redundant_info.get(supplier_name, {})
+        if record:
+            contact = record.contact_person or ''
+            phone = record.phone or ''
+            address = record.address or ''
+        else:
+            contact = redundant.get('contact_person') or ''
+            phone = redundant.get('phone') or ''
+            address = redundant.get('address') or ''
+
+        items_list = []
+        for it in group['items']:
+            it['quantity'] = float(it['quantity'])
+            items_list.append(it)
+
+        result.append({
+            'supplier_name': supplier_name,
+            'supplier_id': record.id if record else None,
+            'contact_person': contact,
+            'phone': phone,
+            'address': address,
+            'items': items_list,
+            'orders': sorted(list(group['orders'])),
+            'order_count': len(group['orders']),
         })
 
-    return list(groups.values())
+    return sorted(result, key=lambda x: x['supplier_name'])
 
 
 def get_factory_order_summary(db: Session, order_ids: list) -> dict:
+    """获取工厂内部采购订单汇总
+
+    逻辑：按(客户, 产品) → 供应商 → 物料 三级分组，
+    同一供应商下的相同物料自动合并数量。
+    自动关联同源订单（共享同一 source_order_id 的采购订单一并纳入）。
+    """
     if not order_ids:
         return {'groups': [], 'order_count': 0}
 
-    items = db.query(PurchaseOrderItem).filter(
-        PurchaseOrderItem.order_id.in_(order_ids)
-    ).all()
+    orders = db.query(PurchaseOrder).filter(PurchaseOrder.id.in_(order_ids)).all()
 
-    # 获取关联订单的 product_quantity
-    orders = db.query(PurchaseOrder).filter(
-        PurchaseOrder.id.in_(order_ids)
-    ).all()
-    order_qty_map = {o.id: float(o.product_quantity) if o.product_quantity else 0 for o in orders}
+    # 自动关联同源订单：选中订单的 source_order_id 对应的其他采购订单也纳入汇总
+    source_order_ids = list(set([o.source_order_id for o in orders if o.source_order_id]))
+    if source_order_ids:
+        related_orders = db.query(PurchaseOrder).filter(
+            PurchaseOrder.source_order_id.in_(source_order_ids)
+        ).all()
+        related_order_ids = set(o.id for o in related_orders)
+        all_order_ids = list(set(order_ids) | related_order_ids)
+    else:
+        all_order_ids = list(order_ids)
 
-    # 按 customer_name|product_name 分组，再按 supplier_name 分组
-    customer_product_map = {}
+    if len(all_order_ids) != len(order_ids):
+        orders = db.query(PurchaseOrder).filter(PurchaseOrder.id.in_(all_order_ids)).all()
+
+    items = db.query(PurchaseOrderItem).filter(PurchaseOrderItem.order_id.in_(all_order_ids)).all()
+    order_map = {o.id: o for o in orders}
+
+    # 加载原始销售订单，用于获取准确的 customer / product 信息
+    source_ids = [o.source_order_id for o in orders if o.source_order_id]
+    source_orders = db.query(Order).filter(Order.id.in_(source_ids)).all() if source_ids else []
+    source_order_map = {o.id: o for o in source_orders}
+
+    grouped_data = {}
+    order_count_map = {}
+
     for item in items:
-        key = f"{item.customer_name}|{item.product_name}"
-        if key not in customer_product_map:
-            customer_product_map[key] = {
-                'customer_name': item.customer_name,
-                'product_name': item.product_name,
-                'order_ids': set(),
-                'suppliers_map': {},
-            }
+        order = order_map.get(item.order_id)
+        if not order:
+            continue
 
-        group = customer_product_map[key]
-        group['order_ids'].add(item.order_id)
-        sname = item.supplier_name or '未指定'
-        if sname not in group['suppliers_map']:
-            group['suppliers_map'][sname] = {
-                'supplier_name': sname,
-                'fabrics': [],
-            }
+        # 从原始销售订单解析 customer / product，比 PurchaseOrderItem 上的冗余字段更准确
+        source_order = source_order_map.get(order.source_order_id) if order.source_order_id else None
+        product_name = order.product_name
+        if not product_name and source_order and source_order.product:
+            product_name = source_order.product.name
+        elif not product_name:
+            product_name = order.customer_name or '未指定产品'
 
-        group['suppliers_map'][sname]['fabrics'].append({
-            'fabric_name': item.material_name,
-            'specification': item.specification,
-            'quantity': float(item.quantity) if item.quantity else 0,
-            'unit': item.unit,
-            'item_id': item.id,
-            'item_ids': [item.id],
-            'original_quantities': {str(item.id): float(item.quantity) if item.quantity else 0},
-        })
+        product_qty = order.product_quantity
+        if not product_qty and source_order:
+            product_qty = source_order.quantity
+
+        customer_name = source_order.customer if source_order else (order.customer_name or '未指定客户')
+        supplier_name = item.supplier_name or order.supplier_name or '未指定供应商'
+        fabric_name = item.material_name or '未指定布料'
+        fabric_spec = item.specification or ''
+        fabric_qty = item.quantity or 0
+
+        customer_product_key = (customer_name, product_name)
+        supplier_key = supplier_name
+
+        if customer_product_key not in grouped_data:
+            grouped_data[customer_product_key] = {}
+            order_count_map[customer_product_key] = {'order_count': 0, 'total_fabric_qty': 0, 'product_quantity': product_qty}
+
+        if supplier_key not in grouped_data[customer_product_key]:
+            grouped_data[customer_product_key][supplier_key] = {}
+
+        # 同一供应商下相同物料合并数量
+        fabric_key = (fabric_name, fabric_spec, item.unit or '')
+        if fabric_key not in grouped_data[customer_product_key][supplier_key]:
+            grouped_data[customer_product_key][supplier_key][fabric_key] = {
+                'item_id': item.id,
+                'item_ids': [item.id],
+                'fabric_name': fabric_name,
+                'specification': fabric_spec,
+                'quantity': float(fabric_qty) if fabric_qty else 0,
+                'unit': item.unit or '',
+                'original_quantities': {str(item.id): float(fabric_qty) if fabric_qty else 0},
+            }
+        else:
+            existing = grouped_data[customer_product_key][supplier_key][fabric_key]
+            existing['item_ids'].append(item.id)
+            existing['quantity'] = (float(existing['quantity']) if existing['quantity'] else 0) + (float(fabric_qty) if fabric_qty else 0)
+            existing['original_quantities'][str(item.id)] = float(fabric_qty) if fabric_qty else 0
+
+        order_count_map[customer_product_key]['total_fabric_qty'] += float(fabric_qty) if fabric_qty else 0
+
+    # 统计每个 (客户, 产品) 分组下的订单数量
+    for order in orders:
+        source_order = source_order_map.get(order.source_order_id) if order.source_order_id else None
+        product_name = order.product_name
+        if not product_name and source_order and source_order.product:
+            product_name = source_order.product.name
+        elif not product_name:
+            product_name = order.customer_name or '未指定产品'
+        customer_name = source_order.customer if source_order else (order.customer_name or '未指定客户')
+        cp_key = (customer_name, product_name)
+        if cp_key in order_count_map:
+            order_count_map[cp_key]['order_count'] += 1
 
     # 组装最终结构
-    groups = []
-    for group in customer_product_map.values():
-        suppliers = list(group.pop('suppliers_map').values())
-        # 计算 product_quantity：仅汇总该 group 关联订单的数量
-        group_order_ids = group.pop('order_ids')
-        groups.append({
-            'customer_name': group['customer_name'],
-            'product_name': group['product_name'],
-            'product_quantity': sum(order_qty_map.get(oid, 0) for oid in group_order_ids),
-            'suppliers': suppliers,
+    result_list = []
+    for (customer_name, product_name), supplier_dict in grouped_data.items():
+        order_info = order_count_map[(customer_name, product_name)]
+        suppliers_list = []
+        for supplier_name, fabric_dict in supplier_dict.items():
+            fabrics_list = list(fabric_dict.values())
+            for f in fabrics_list:
+                f['quantity'] = round(f['quantity'], 2)
+            suppliers_list.append({
+                'supplier_name': supplier_name,
+                'fabrics': fabrics_list,
+            })
+        result_list.append({
+            'customer_name': customer_name,
+            'product_name': product_name,
+            'order_quantity': order_info['order_count'],
+            'product_quantity': order_info['product_quantity'],
+            'suppliers': suppliers_list,
+            'total_fabric_qty': order_info['total_fabric_qty'],
         })
 
-    return {'groups': groups, 'order_count': len(order_ids)}
+    return {
+        'groups': result_list,
+        'order_count': len(orders),
+    }
 
 
 def save_factory_summary_edits(db: Session, edits: list) -> dict:
     for edit in edits:
-        item_id = edit.get('id')
-        if not item_id:
+        item_ids = edit.get('item_ids') or ([edit.get('item_id')] if edit.get('item_id') else [])
+        if not item_ids:
             continue
-        item = db.get(PurchaseOrderItem, item_id)
-        if item:
-            if 'quantity' in edit:
-                item.quantity = Decimal(str(edit['quantity']))
-            if 'remark' in edit:
-                item.remark = edit['remark']
+        new_quantity = edit.get('quantity')
+        if new_quantity is None:
+            continue
+        # 如果合并了多个 item，按原始数量比例分配新总量
+        items = [db.get(PurchaseOrderItem, iid) for iid in item_ids]
+        items = [i for i in items if i is not None]
+        if not items:
+            continue
+        if len(items) == 1:
+            items[0].quantity = Decimal(str(new_quantity))
+        else:
+            original_total = sum(float(i.quantity or 0) for i in items)
+            if original_total > 0:
+                remaining = float(new_quantity)
+                for idx, item in enumerate(items):
+                    if idx < len(items) - 1:
+                        ratio = float(item.quantity or 0) / original_total
+                        share = round(remaining * ratio, 2)
+                        item.quantity = Decimal(str(share))
+                        remaining -= share
+                    else:
+                        # 最后一个 item 获得余量，避免浮点累积误差
+                        item.quantity = Decimal(str(round(remaining, 2)))
+            else:
+                # 原始总量为 0 时平均分配
+                per_item = round(float(new_quantity) / len(items), 2)
+                remaining = float(new_quantity)
+                for idx, item in enumerate(items):
+                    if idx < len(items) - 1:
+                        item.quantity = Decimal(str(per_item))
+                        remaining -= per_item
+                    else:
+                        item.quantity = Decimal(str(round(remaining, 2)))
     db.commit()
     return {'saved': True}
 
 
 def get_supplier_order_summary(db: Session, order_ids: list) -> dict:
+    """获取供应商采购订单汇总 - 按物料维度汇总
+
+    逻辑：按 (material_name, spec, unit, supplier) 分组汇总数量，
+    每个物料记录其来源订单明细。
+    自动关联同源订单。
+    """
     if not order_ids:
         return {'materials': [], 'order_count': 0}
 
-    items = db.query(PurchaseOrderItem).filter(
-        PurchaseOrderItem.order_id.in_(order_ids)
-    ).all()
+    orders = db.query(PurchaseOrder).filter(PurchaseOrder.id.in_(order_ids)).all()
 
-    # 按 supplier_name + material_name + specification + unit 汇总，计算 total_quantity
-    material_map = {}
+    # 自动关联同源订单
+    source_order_ids = list(set([o.source_order_id for o in orders if o.source_order_id]))
+    if source_order_ids:
+        related_orders = db.query(PurchaseOrder).filter(
+            PurchaseOrder.source_order_id.in_(source_order_ids)
+        ).all()
+        related_order_ids = set(o.id for o in related_orders)
+        all_order_ids = list(set(order_ids) | related_order_ids)
+    else:
+        all_order_ids = list(order_ids)
+
+    if len(all_order_ids) != len(order_ids):
+        orders = db.query(PurchaseOrder).filter(PurchaseOrder.id.in_(all_order_ids)).all()
+
+    items = db.query(PurchaseOrderItem).filter(PurchaseOrderItem.order_id.in_(all_order_ids)).all()
+    order_map = {o.id: o for o in orders}
+
+    material_summary = {}
     for item in items:
-        sname = item.supplier_name or '未指定'
+        order = order_map.get(item.order_id)
+        sname = item.supplier_name or (order.supplier_name if order else '') or '未指定'
         spec = item.specification or ''
         unit = item.unit or ''
-        key = f"{sname}|{item.material_name}|{spec}|{unit}"
-        if key not in material_map:
-            material_map[key] = {
-                'supplier_name': sname,
+        key = (item.material_name, spec, unit, sname)
+        if key not in material_summary:
+            material_summary[key] = {
                 'material_name': item.material_name,
                 'specification': spec,
-                'total_quantity': Decimal('0'),
                 'unit': unit,
+                'supplier_name': sname,
+                'category': item.material_category or '',
+                'total_quantity': Decimal('0'),
+                'orders': [],
             }
-        material_map[key]['total_quantity'] += Decimal(str(item.quantity)) if item.quantity else Decimal('0')
+        material_summary[key]['total_quantity'] += Decimal(str(item.quantity)) if item.quantity else Decimal('0')
+        material_summary[key]['orders'].append({
+            'order_no': order.order_no if order else '',
+            'product_name': item.product_name or (order.product_name if order else ''),
+            'quantity': float(item.quantity) if item.quantity else 0,
+        })
 
-    # total_quantity 转换为 float 输出，Decimal 累加已保证精度
-    for m in material_map.values():
-        qty = float(m['total_quantity'])
+    materials = list(material_summary.values())
+    for m in materials:
+        qty = float(m.pop('total_quantity'))
         m['total_quantity'] = round(qty, 2) if qty != int(qty) else int(qty)
 
-    return {'materials': list(material_map.values()), 'order_count': len(order_ids)}
+    return {'materials': materials, 'order_count': len(orders)}
 
 
 def get_completed_order_suggestions(db: Session, field: str, keyword: str, limit: int = 10) -> list:
@@ -817,9 +1033,13 @@ def get_completed_order_suggestions(db: Session, field: str, keyword: str, limit
 
 
 def get_completed_order_quick_filters() -> list:
+    today = datetime.now().strftime('%Y-%m-%d')
+    yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+    week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+    month_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
     return [
-        {'label': '今天', 'start': datetime.now().strftime('%Y-%m-%d'), 'end': datetime.now().strftime('%Y-%m-%d')},
-        {'label': '昨天', 'start': (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d'), 'end': (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')},
-        {'label': '近7天', 'start': (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d'), 'end': datetime.now().strftime('%Y-%m-%d')},
-        {'label': '近30天', 'start': (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d'), 'end': datetime.now().strftime('%Y-%m-%d')},
+        {'id': 'today', 'name': '今天', 'filters': {'start_date': today, 'end_date': today}},
+        {'id': 'yesterday', 'name': '昨天', 'filters': {'start_date': yesterday, 'end_date': yesterday}},
+        {'id': 'week', 'name': '近7天', 'filters': {'start_date': week_ago, 'end_date': today}},
+        {'id': 'month', 'name': '近30天', 'filters': {'start_date': month_ago, 'end_date': today}},
     ]

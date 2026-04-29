@@ -208,5 +208,5 @@ def _cleanup_file(file_path: str):
     try:
         if os.path.exists(file_path):
             os.unlink(file_path)
-    except Exception:
+    except OSError:
         pass

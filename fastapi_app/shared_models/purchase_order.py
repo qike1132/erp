@@ -27,7 +27,7 @@ class PurchaseOrder(Base):
     order_date: Mapped[datetime | None] = mapped_column(Date, comment='下单日期')
     status: Mapped[str | None] = mapped_column(String(20), default='pending', comment='状态')
     remark: Mapped[str | None] = mapped_column(Text, comment='备注')
-    source_order_id: Mapped[int | None] = mapped_column(Integer, comment='关联的原始订单ID(单)')
+    source_order_id: Mapped[int | None] = mapped_column(Integer, index=True, comment='关联的原始订单ID(单)')
     source_order_ids: Mapped[str | None] = mapped_column(Text, comment='关联的原始订单IDs(JSON数组)')
     product_name: Mapped[str | None] = mapped_column(String(200), comment='产品名称')
     product_quantity: Mapped[float | None] = mapped_column(Numeric(12, 2), comment='订单数量')
@@ -50,6 +50,7 @@ class PurchaseOrder(Base):
         Index('idx_purchase_order_status', 'status'),
         Index('idx_purchase_order_date', 'order_date'),
         Index('idx_purchase_order_created_by', 'created_by'),
+        Index('idx_purchase_order_source_order_id', 'source_order_id'),
     )
 
     def __repr__(self):

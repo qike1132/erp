@@ -23,12 +23,17 @@ _argon2_hasher = argon2.PasswordHasher(
 logger = logging.getLogger(__name__)
 
 
+_MAX_PASSWORD_LENGTH = 1024
+
+
 def hash_password(password: str) -> str:
     """使用 Argon2id 哈希密码
 
     Argon2id 是 OWASP 2026 推荐的密码哈希算法，
     内存硬特性使其对 GPU/ASIC 暴力破解具有更强抵抗力。
     """
+    if len(password) > _MAX_PASSWORD_LENGTH:
+        raise ValueError(f"密码长度不能超过 {_MAX_PASSWORD_LENGTH} 个字符")
     return _argon2_hasher.hash(password)
 
 
@@ -40,7 +45,7 @@ def _verify_bcrypt(password: str, password_hash: str) -> bool:
     except ImportError:
         logger.warning("bcrypt 未安装，无法验证 bcrypt 哈希")
         return False
-    except Exception as e:
+    except (ValueError, TypeError) as e:
         logger.debug(f"bcrypt 验证失败: {e}")
         return False
 
@@ -57,7 +62,7 @@ def _verify_legacy_pbkdf2(password: str, password_hash: str) -> bool:
             iterations,
         ).hex()
         return hmac.compare_digest(derived, expected)
-    except Exception as e:
+    except (ValueError, TypeError) as e:
         logger.debug(f"pbkdf2 验证失败: {e}")
         return False
 
@@ -78,7 +83,7 @@ def _verify_legacy_scrypt(password: str, password_hash: str) -> bool:
             maxmem=max(0, 128 * n * r * p * 2),
         ).hex()
         return hmac.compare_digest(derived, expected)
-    except Exception as e:
+    except (ValueError, TypeError) as e:
         logger.debug(f"scrypt 验证失败: {e}")
         return False
 
@@ -106,6 +111,8 @@ def verify_password(password: str, password_hash: str) -> bool:
     """
     if not password_hash:
         return False
+    if len(password) > _MAX_PASSWORD_LENGTH:
+        return False
 
     if password_hash.startswith("$argon2id$"):
         try:
@@ -122,7 +129,7 @@ def verify_password(password: str, password_hash: str) -> bool:
         return _verify_bcrypt(password, password_hash)
 
     if password_hash.startswith(("pbkdf2:", "scrypt:")):
-        return _verify_legacy_werkzeug(password, password_hash)
+        return _verify_werkzeug(password, password_hash)
 
     logger.warning(f"未知的密码哈希格式: {password_hash[:20]}...")
     return False

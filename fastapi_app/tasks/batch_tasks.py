@@ -107,7 +107,7 @@ def batch_import_orders_task(self, file_path: str, original_filename: str, user_
                     if imported_count % BATCH_COMMIT_SIZE == 0:
                         session.commit()
 
-                except Exception as e:
+                except (ValueError, TypeError, OSError) as e:
                     session.rollback()
                     errors.append({"row": i, "error": str(e)})
                     logger.error(f"批量导入订单行{i}失败: {e}")
@@ -124,7 +124,7 @@ def batch_import_orders_task(self, file_path: str, original_filename: str, user_
         finally:
             session.close()
 
-    except Exception as exc:
+    except (ValueError, TypeError, OSError) as exc:
         logger.error(f"批量导入订单任务失败: {exc}", exc_info=True)
         if self.request.retries < self.max_retries:
             # 仍有重试机会，保留文件供下次使用
@@ -136,6 +136,10 @@ def batch_import_orders_task(self, file_path: str, original_filename: str, user_
             except OSError:
                 pass
         raise
+
+    # 不再自动同步采购中心：订单应先进入"审核订单"队列，由人工审核后再生成采购订单
+    # 旧逻辑：批量导入后自动调用 one_click_generate_order 生成采购订单
+    # 这会导致有 BOM 的订单直接跳过审核步骤
 
     # 仅在任务最终成功时清理临时文件（Retry异常不会到达此处）
     if file_path and os.path.exists(file_path):
@@ -229,7 +233,7 @@ def batch_import_stockins_task(self, file_path: str, original_filename: str, use
                     if imported_count % BATCH_COMMIT_SIZE == 0:
                         session.commit()
 
-                except Exception as e:
+                except (ValueError, TypeError, OSError) as e:
                     session.rollback()
                     errors.append({"row": i, "error": str(e)})
 
@@ -245,7 +249,7 @@ def batch_import_stockins_task(self, file_path: str, original_filename: str, use
         finally:
             session.close()
 
-    except Exception as exc:
+    except (ValueError, TypeError, OSError) as exc:
         logger.error(f"批量导入备货任务失败: {exc}", exc_info=True)
         if self.request.retries < self.max_retries:
             raise self.retry(exc=exc)

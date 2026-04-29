@@ -6,12 +6,12 @@
 import logging
 from typing import Optional
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import SQLAlchemyError
 
-from fastapi_app.shared_models import Product, InventoryLog
+from fastapi_app.shared_models import Product, InventoryLog, Order, StockIn, StockOut
 from fastapi_app.shared.stock_concurrency import get_product_for_update
 
 logger = logging.getLogger(__name__)
@@ -184,32 +184,33 @@ async def delete_product(db: AsyncSession, product_id: int) -> None:
     - HAS_RELATED_STOCK_INS: 有关联备货记录
     - HAS_RELATED_STOCK_OUTS: 有关联出货记录
     """
-    result = await db.execute(
-        select(Product)
-        .options(
-            selectinload(Product.orders),
-            selectinload(Product.stockins),
-            selectinload(Product.stockouts),
-            selectinload(Product.inventory_logs)
-        )
-        .where(Product.id == product_id)
-    )
-    product = result.scalar_one_or_none()
-
+    product = await db.get(Product, product_id)
     if not product:
         raise ProductNotFoundError(product_id)
 
-    if product.orders:
-        raise ProductHasRelatedOrdersError(product.name, len(product.orders))
+    # 使用 COUNT 查询检查关联，避免加载所有关联数据到内存
+    order_count = (await db.execute(
+        select(func.count(Order.id)).where(Order.product_id == product_id)
+    )).scalar() or 0
+    if order_count > 0:
+        raise ProductHasRelatedOrdersError(product.name, order_count)
 
-    if product.stockins:
-        raise ProductHasRelatedStockInsError(product.name, len(product.stockins))
+    stockin_count = (await db.execute(
+        select(func.count(StockIn.id)).where(StockIn.product_id == product_id)
+    )).scalar() or 0
+    if stockin_count > 0:
+        raise ProductHasRelatedStockInsError(product.name, stockin_count)
 
-    if product.stockouts:
-        raise ProductHasRelatedStockOutsError(product.name, len(product.stockouts))
+    stockout_count = (await db.execute(
+        select(func.count(StockOut.id)).where(StockOut.product_id == product_id)
+    )).scalar() or 0
+    if stockout_count > 0:
+        raise ProductHasRelatedStockOutsError(product.name, stockout_count)
 
-    for log in product.inventory_logs:
-        await db.delete(log)
+    # 删除库存日志（批量删除避免逐条加载）
+    await db.execute(
+        delete(InventoryLog).where(InventoryLog.product_id == product_id)
+    )
 
     await db.delete(product)
     await db.commit()

@@ -66,6 +66,9 @@ async def approve(
     try:
         message = await approval_service.approve_request(db, approval_id, user)
         await db.commit()
+        from fastapi_app.core.cache import invalidate_cache
+        await invalidate_cache("orders:*")
+        await invalidate_cache("inventory:*")
         return ApprovalActionResponse(message=message)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -86,6 +89,8 @@ async def reject(
         reason = data.reason if data else None
         message = await approval_service.reject_request(db, approval_id, user, reason)
         await db.commit()
+        from fastapi_app.core.cache import invalidate_cache
+        await invalidate_cache("orders:*")
         return ApprovalActionResponse(message=message)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -261,21 +261,14 @@ async def process_order_deduction(
         if product and deduct_amount > 0:
             product.current_stock -= deduct_amount
 
-        # 更新订单状态
-        if deduct_amount >= order_quantity:
-            order.status = '已备货'
-        elif deduct_amount > 0:
-            order.status = '部分备货'
-        else:
-            order.status = '待备货'
-
+        # 订单不再使用状态字段标记备货进度，备货状态由采购订单关系隐式决定
         logger.info(f'订单抵扣处理完成：订单{order.order_no}，抵扣数量{deduct_amount}')
         return deduct_amount, deduction_details
 
     except SQLAlchemyError as e:
         logger.error(f'订单抵扣数据库错误：{str(e)}', exc_info=True)
         raise
-    except Exception as e:
+    except (ValueError, TypeError, ArithmeticError) as e:
         logger.error(f'订单抵扣处理错误：{str(e)}', exc_info=True)
         raise
 
@@ -403,7 +396,7 @@ async def parse_excel_file_async(file_path: str, sheet_name: str = None) -> Tupl
                     elif pd.isna(value) if isinstance(value, float) else False:
                         row[key] = None
             return True, data_list, ""
-        except Exception as e:
+        except (ValueError, TypeError, OSError) as e:
             return False, [], str(e)
 
     return await loop.run_in_executor(None, _sync_parse)
@@ -418,7 +411,7 @@ async def read_excel_sheets_async(file_path: str) -> Tuple[bool, list, str]:
             import pandas as pd
             excel_file = pd.ExcelFile(file_path)
             return True, excel_file.sheet_names, ""
-        except Exception as e:
+        except (ValueError, TypeError, OSError) as e:
             return False, [], str(e)
 
     return await loop.run_in_executor(None, _sync_read)
@@ -473,7 +466,7 @@ async def import_products_from_data(db: AsyncSession, data_list: list) -> int:
             )
             db.add(product)
             count += 1
-        except Exception as e:
+        except (ValueError, TypeError, SQLAlchemyError) as e:
             logger.error(f"产品导入 - 行{idx}: 异常 - {str(e)}")
             continue
 
@@ -566,11 +559,11 @@ async def import_orders_from_data(db: AsyncSession, data_list: list) -> Tuple[in
 
                     if deduct_value > 0:
                         await process_order_deduction(db, order, product_id, deduct_value, deduct_stock=True, product=product)
-                except Exception as e:
+                except (ValueError, TypeError, SQLAlchemyError) as e:
                     logger.error(f"订单导入 - 行{idx}: 抵扣处理异常: {e}", exc_info=True)
 
             count += 1
-        except Exception as e:
+        except (ValueError, TypeError, SQLAlchemyError) as e:
             # 回滚当前事务中的脏数据，避免提交半成品
             await db.rollback()
             logger.error(f"订单导入 - 行{idx}: 处理异常: {e}", exc_info=True)
@@ -649,7 +642,7 @@ async def import_stockins_from_data(db: AsyncSession, data_list: list) -> Tuple[
             db.add(log)
 
             count += 1
-        except Exception as e:
+        except (ValueError, TypeError, SQLAlchemyError) as e:
             await db.rollback()
             debug_messages.append(f"行{idx}: 异常 - {str(e)}")
             continue
@@ -752,7 +745,7 @@ async def import_stockouts_from_data(db: AsyncSession, data_list: list) -> Tuple
             db.add(log)
 
             count += 1
-        except Exception as e:
+        except (ValueError, TypeError, SQLAlchemyError) as e:
             await db.rollback()
             debug_messages.append(f"行{idx}: 异常 - {str(e)}")
             continue

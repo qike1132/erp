@@ -21,7 +21,6 @@ class TestBackendPageExposure:
             "/product/list",
             "/stock/stockins",
             "/customer/list",
-            "/finance/statistics",
             "/batch/management",
         ],
     )

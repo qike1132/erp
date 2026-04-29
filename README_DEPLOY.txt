@@ -14,16 +14,15 @@ ERP 系统 - 部署说明
 
 数据库配置
 ============
-如需使用 MySQL 数据库，请编辑 .env 文件：
+如需使用 PostgreSQL 数据库，请编辑 .env 文件：
 
-DB_TYPE=mysql
 DB_HOST=localhost
-DB_PORT=3306
-DB_USER=root
+DB_PORT=5432
+DB_USER=erp_app
 DB_PASSWORD=your_password
 DB_NAME=erp_system
 
-如使用 MySQL，需配置数据库连接信息。
+需配置数据库连接信息。
 
 文件说明
 ========

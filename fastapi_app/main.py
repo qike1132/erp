@@ -4,7 +4,7 @@ FastAPI 应用主入口 - 全异步模式
 已迁移到全异步数据库操作，移除同步引擎依赖。
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi import Request, Response, Depends
@@ -45,8 +45,8 @@ if _sentry_dsn:
             release=f"binfa-erp@{settings.APP_VERSION}",
             enable_tracing=True,
         )
-    except Exception:
-        pass  # sentry-sdk 未安装或 DSN 无效时静默跳过
+    except (ValueError, ImportError):
+        pass
 
 from fastapi_app.core.deps import get_current_user_id
 from fastapi_app.api.v1.router import api_router
@@ -57,6 +57,7 @@ from fastapi_app.core.metrics import (
     get_metrics, get_content_type, METRICS_AVAILABLE
 )
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError, DisconnectionError
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.database import get_async_db
 
@@ -80,7 +81,7 @@ async def lifespan(app: FastAPI):
                 async with async_engine.connect() as conn:
                     await conn.execute(text('SELECT 1'))
             logger.info("异步数据库连接验证成功，连接池预热完成 (%d 个连接)", warmup_count)
-        except Exception as e:
+        except (OperationalError, DisconnectionError) as e:
             logger.error(f"异步数据库连接验证失败: {e}")
     else:
         logger.error("异步数据库引擎未初始化，无法启动")
@@ -95,7 +96,10 @@ async def lifespan(app: FastAPI):
 
     # 预热异步 Redis 客户端
     from fastapi_app.services.notification_service import _warmup_async_redis
-    await _warmup_async_redis()
+    try:
+        await _warmup_async_redis()
+    except Exception as e:
+        logger.warning("异步 Redis 客户端预热失败，部分功能可能不可用: %s", e)
 
     # 初始化 Redis 缓存管理器（异步）
     from utils.redis_cache import redis_cache
@@ -112,14 +116,14 @@ async def lifespan(app: FastAPI):
         )
         stats = await redis_cache.get_stats()
         logger.info("Redis缓存管理器初始化完成，后端: %s", stats.get('backend', 'unknown'))
-    except Exception as e:
+    except (OSError, ValueError) as e:
         logger.warning("Redis缓存初始化失败，将使用内存缓存: %s", e)
 
     # 清除导航缓存
     try:
         from fastapi_app.core.nav_context import invalidate_nav_cache
         await invalidate_nav_cache()
-    except Exception as e:
+    except (OSError, ValueError) as e:
         logger.warning("导航缓存清除失败: %s", e)
 
     # 启动 Redis Pub/Sub → WebSocket 桥梁
@@ -141,7 +145,7 @@ async def lifespan(app: FastAPI):
     if _notif_redis:
         try:
             await _notif_redis.aclose()
-        except Exception:
+        except (OSError, RuntimeError):
             pass
     # 释放缓存管理器 Redis 连接
     from utils.redis_cache import redis_cache
@@ -224,18 +228,36 @@ async def general_exception_handler(request: Request, exc: Exception):
 # CSRF 保护
 try:
     from starlette_csrf import CSRFMiddleware
+    from itsdangerous import URLSafeSerializer
     _csrf_secure = os.getenv("CSRF_COOKIE_SECURE", "").lower() in ("true", "1", "yes")
+    _csrf_serializer = URLSafeSerializer(settings.SECRET_KEY)
     
     @app.middleware("http")
     async def conditional_csrf_middleware(request: Request, call_next):
-        """条件性 CSRF 检查：API 端点跳过 CSRF 检查"""
-        if request.url.path.startswith("/api/"):
-            return await call_next(request)
+        """条件性 CSRF 检查：浏览器变更请求需验证 CSRF token，服务端请求跳过"""
+        # 登录和登出接口豁免 CSRF 检查（用户首次访问没有 cookie，登出时不需要严格验证）
+        is_login_endpoint = request.url.path.startswith("/api/v1/auth/login")
+        is_logout_endpoint = request.url.path.startswith("/api/v1/auth/logout")
+        is_exempt_endpoint = is_login_endpoint or is_logout_endpoint
         
+        # 服务端到服务端请求（如 SSR 渲染）不携带 Origin header，
+        # 不受 CSRF 攻击影响，跳过验证
+        if not is_exempt_endpoint and request.url.path.startswith("/api/") and request.method not in ("GET", "HEAD", "OPTIONS"):
+            origin = request.headers.get("Origin")
+            if origin:
+                # 浏览器请求：验证 CSRF double-submit cookie
+                csrf_cookie = request.cookies.get("fastapi_csrf_token")
+                csrf_header = request.headers.get("X-CSRF-Token")
+                if not csrf_cookie or not csrf_header or csrf_cookie != csrf_header:
+                    return JSONResponse(
+                        status_code=403,
+                        content={"detail": "CSRF token 验证失败"},
+                    )
+
         response = await call_next(request)
-        
-        from itsdangerous import URLSafeSerializer
-        csrf_token = URLSafeSerializer(settings.SECRET_KEY).dumps("csrf_token")
+
+        # 对所有响应设置 CSRF cookie（确保 API 客户端也能获取）
+        csrf_token = _csrf_serializer.dumps("csrf_token")
         response.set_cookie(
             key="fastapi_csrf_token",
             value=csrf_token,
@@ -245,9 +267,10 @@ try:
             secure=_csrf_secure,
             path="/",
         )
+
         return response
     
-    logger.info("CSRF 配置：API 端点已跳过 CSRF 检查")
+    logger.info("CSRF 配置：API 变更请求需验证 CSRF token")
 except ImportError:
     logger.warning("starlette-csrf 未安装，CSRF cookie 保护未启用")
 
@@ -257,7 +280,7 @@ app.add_middleware(
     allow_origins=settings.BACKEND_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-CSRFToken"],
+    allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
 )
 
 # TrustedHost 中间件
@@ -291,6 +314,14 @@ async def limit_request_body_size(request: Request, call_next):
                 return Response(
                     content='{"detail":"无效的Content-Length"}',
                     status_code=400,
+                    media_type="application/json",
+                )
+        else:
+            body = await request.body()
+            if len(body) > MAX_REQUEST_BODY_SIZE:
+                return Response(
+                    content='{"detail":"请求体过大，最大允许10MB"}',
+                    status_code=413,
                     media_type="application/json",
                 )
     response = await call_next(request)
@@ -345,9 +376,8 @@ async def prometheus_middleware(request: Request, call_next):
 # 注册API路由
 app.include_router(api_router, prefix=settings.API_PREFIX)
 
-# 注册页面路由
-from fastapi_app.api.v1.endpoints.pages import router as pages_router
-app.include_router(pages_router)
+# 页面路由已移除 — 所有页面由 Vue/Vite 前端独立提供服务
+# 如需保留旧版入口兼容性，请在 Nginx 层配置重定向
 
 # 静态文件挂载（仅提供 files/ 和 uploads/ 子目录，不再暴露已删除的旧前端资源）
 from fastapi.staticfiles import StaticFiles
@@ -386,7 +416,7 @@ async def websocket_notifications(websocket: WebSocket):
             user_id = payload.get("sub")
             if user_id:
                 user_id = int(user_id)
-        except Exception as e:
+        except (ValueError, TypeError) as e:
             logger.warning("WebSocket Cookie认证失败: %s", e)
 
     # 2. 首条消息认证
@@ -404,7 +434,7 @@ async def websocket_notifications(websocket: WebSocket):
                         user_id = int(user_id)
                 else:
                     pending_message = initial_data
-            except Exception as e:
+            except (ValueError, TypeError, json.JSONDecodeError) as e:
                 logger.warning("WebSocket首条消息认证失败: %s", e)
                 pending_message = initial_data
         except asyncio.TimeoutError:
@@ -419,10 +449,15 @@ async def websocket_notifications(websocket: WebSocket):
     from sqlalchemy import select as _ws_select
     
     async with async_engine.connect() as conn:
-        result = await conn.execute(
-            _ws_select(_WSUser.id, _WSUser.status).where(_WSUser.id == user_id)
-        )
-        _ws_user = result.first()
+        try:
+            result = await conn.execute(
+                _ws_select(_WSUser.id, _WSUser.status).where(_WSUser.id == user_id)
+            )
+            _ws_user = result.first()
+        except (OperationalError, DisconnectionError) as e:
+            logger.warning("WebSocket 用户状态查询失败: %s", e)
+            await websocket.close(code=4503, reason="服务暂时不可用")
+            return
     
     if not _ws_user or not _ws_user[1]:
         await websocket.close(code=4001, reason="用户不存在或已禁用")
@@ -442,7 +477,7 @@ async def websocket_notifications(websocket: WebSocket):
                 await websocket.send_text("pong")
     except WebSocketDisconnect:
         manager.disconnect(websocket, int(user_id))
-    except Exception:
+    except RuntimeError:
         logger.warning("WebSocket 连接异常断开: user_id=%s", user_id, exc_info=False)
         manager.disconnect(websocket, int(user_id))
 
@@ -454,7 +489,7 @@ async def _get_optional_user(
     """可选认证：已认证返回user_id，未认证返回None"""
     try:
         return await get_current_user_id(request, db)
-    except Exception:
+    except (HTTPException, ValueError, TypeError):
         return None
 
 
@@ -496,7 +531,7 @@ async def health_check(user_id: int | None = Depends(_get_optional_user)):
             health_stats = db_health_checker.get_stats()
             health_data["checks"]["db_pool"] = pool_status
             health_data["checks"]["db_health_stats"] = health_stats
-        except Exception as e:
+        except (OperationalError, DisconnectionError) as e:
             health_data["checks"]["db_pool"] = {"error": str(e)[:100]}
 
         if cached_public.get("status") == "unhealthy":
@@ -517,7 +552,7 @@ async def health_check(user_id: int | None = Depends(_get_optional_user)):
     try:
         async with async_engine.connect() as conn:
             await conn.execute(text('SELECT 1'))
-    except Exception:
+    except (OperationalError, DisconnectionError):
         overall_healthy = False
 
     # Redis连通性检查（异步）
@@ -528,11 +563,11 @@ async def health_check(user_id: int | None = Depends(_get_optional_user)):
         if client:
             try:
                 await client.ping()
-            except Exception:
+            except (OSError, ConnectionError):
                 redis_ok = False
         else:
             redis_ok = False
-    except Exception:
+    except (OSError, ImportError):
         redis_ok = False
 
     internal_checks = {
@@ -551,7 +586,7 @@ async def health_check(user_id: int | None = Depends(_get_optional_user)):
             health_stats = db_health_checker.get_stats()
             health_data["checks"]["db_pool"] = pool_status
             health_data["checks"]["db_health_stats"] = health_stats
-        except Exception as e:
+        except (OperationalError, DisconnectionError) as e:
             health_data["checks"]["db_pool"] = {"error": str(e)[:100]}
 
     if not overall_healthy:
@@ -595,7 +630,7 @@ async def db_health_detail(
 
         result["db_variables"] = db_vars
         result["db_status"] = db_status
-    except Exception as e:
+    except (OperationalError, DisconnectionError) as e:
         result["db_error"] = str(e)[:200]
 
     return result

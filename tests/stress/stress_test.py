@@ -53,7 +53,6 @@ API_ENDPOINTS = {
     "GET_products": {"path": "/api/v1/products/list", "weight": 15, "method": "GET"},
     "GET_customers": {"path": "/api/v1/customers/list", "weight": 10, "method": "GET"},
     "GET_stock": {"path": "/api/v1/stock/inventory", "weight": 10, "method": "GET"},
-    "GET_finance": {"path": "/api/v1/finance/statistics", "weight": 5, "method": "GET"},
     "GET_reports": {"path": "/api/v1/reports/sales", "weight": 5, "method": "GET"},
     
     # 表单提交操作 (30%)

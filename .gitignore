@@ -102,6 +102,13 @@ _test_*.xlsx
 *.rar
 *.zip
 
+# Node.js / Frontend
+node_modules/
+frontend-vite/dist/
+frontend-vite/.env.local
+frontend-vite/.env.*.local
+.tmp/
+
 # Logs directory
 logs/
 

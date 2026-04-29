@@ -6,36 +6,28 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
-import json
-import hashlib
 import logging
 
 from fastapi_app.core.database import get_async_db
 from fastapi_app.core.deps import require_permission
-from fastapi_app.core.cache import cache_result, invalidate_cache
-from fastapi_app.shared_models import User
+from fastapi_app.core.cache import invalidate_cache
+from fastapi_app.shared_models import User, Order
 from fastapi_app.schemas.order import (
     OrderCreate, OrderUpdate, OrderActionResponse,
     OrderListResponse, OrderDetailResponse, ApprovalCancelResponse, ApprovalListResponse,
 )
 from fastapi_app.services import order_service
 from fastapi_app.services.order_service import PermissionDeniedError
+from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-async def _get_order_list_cache_key(page, per_page, customer, product_id, status, order_type) -> str:
-    """生成订单列表缓存键"""
-    params = {'page': page, 'per_page': per_page, 'customer': customer,
-              'product_id': product_id, 'status': status, 'order_type': order_type}
-    hash_val = hashlib.md5(json.dumps(params, sort_keys=True, default=str).encode(), usedforsecurity=False).hexdigest()[:12]
-    return f"orders:list:{hash_val}"
 
 
 @router.get("/list", response_model=OrderListResponse)
 async def list_orders(
     page: int = Query(1, ge=1, description="页码"),
-    per_page: int = Query(50, ge=1, le=5000, description="每页数量"),
+    per_page: int = Query(50, ge=1, le=500, description="每页数量"),
     customer: Optional[str] = Query(None, description="客户名筛选"),
     product_id: Optional[int] = Query(None, description="产品ID筛选"),
     status: Optional[str] = Query(None, description="状态筛选"),
@@ -43,33 +35,10 @@ async def list_orders(
     db: AsyncSession = Depends(get_async_db),
     _user: User = Depends(require_permission("order_manage")),
 ):
-    """订单列表（支持分页和筛选，带缓存）"""
-    import json
-    try:
-        from utils.redis_cache import redis_cache
-    except Exception:
-        redis_cache = None
-    
-    cache_key = f"orders:list:{page}:{per_page}:{hash(str(customer) + str(product_id) + str(status) + str(order_type))}"
-    try:
-        if redis_cache:
-            cached_data = await redis_cache.get(cache_key)
-            if cached_data:
-                cached = json.loads(cached_data)
-                return OrderListResponse(data=cached['items'], total=cached['total'],
-                                         page=cached['page'], per_page=cached['per_page'])
-    except Exception:
-        pass
-
+    """订单列表（支持分页和筛选，缓存由 service 层 @cache_result 管理）"""
     result = await order_service.get_orders(db, page=page, per_page=per_page,
                                             customer=customer, product_id=product_id,
                                             status=status, order_type=order_type)
-
-    try:
-        if redis_cache:
-            await redis_cache.set(cache_key, json.dumps(result, ensure_ascii=False, default=str), ex=60)
-    except Exception:
-        pass
 
     return OrderListResponse(data=result['items'], total=result['total'],
                              page=result['page'], per_page=result['per_page'])
@@ -116,7 +85,6 @@ async def edit_order(
     """编辑订单（管理员直接编辑，非管理员提交审批）"""
     try:
         # 获取当前订单以填充未提供的字段
-        from fastapi_app.shared_models import Order
         order = await db.get(Order, order_id)
         if not order:
             raise HTTPException(status_code=404, detail="订单不存在")
@@ -180,17 +148,16 @@ async def my_approvals(
 @router.put("/batch-no/{order_id}")
 async def update_batch_no(
     order_id: int,
-    body: dict,
+    batch_no: str = Query("", max_length=100, description="批次号"),
     db: AsyncSession = Depends(get_async_db),
     user: User = Depends(require_permission("order_manage")),
 ):
     """更新订单批次号"""
-    from fastapi_app.shared_models import Order as OrderModel
-    from sqlalchemy import select
-    result = await db.execute(select(OrderModel).where(OrderModel.id == order_id))
+    result = await db.execute(select(Order).where(Order.id == order_id).with_for_update())
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="订单不存在")
-    order.batch_no = body.get("batch_no", "")
+    order.batch_no = batch_no
     await db.commit()
+    await invalidate_cache("orders:*")
     return {"success": True, "message": "批次号已更新"}

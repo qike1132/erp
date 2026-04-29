@@ -4,6 +4,7 @@ from datetime import datetime, date, timedelta
 from decimal import Decimal
 from sqlalchemy import select, func, or_
 from sqlalchemy.orm import joinedload, selectinload
+from sqlalchemy.exc import OperationalError, DisconnectionError
 
 from fastapi_app.shared_models import (
     MaterialRegistration, MaterialRegistrationItem,
@@ -389,10 +390,8 @@ async def get_history(db, page: int = 1, per_page: int = 20,
     """获取来料登记历史记录 - 仅显示已完成的订单"""
     query = select(MaterialRegistration).options(
         selectinload(MaterialRegistration.items),
-        selectinload(MaterialRegistration.purchase_order),
-    ).join(
-        PurchaseOrder, MaterialRegistration.purchase_order_id == PurchaseOrder.id, isouter=True
-    ).options(joinedload(MaterialRegistration.items))
+        joinedload(MaterialRegistration.purchase_order),
+    )
 
     if order_no:
         query = query.where(MaterialRegistration.purchase_order_no.ilike(f'%{escape_like(order_no)}%'))
@@ -462,7 +461,7 @@ async def get_suggestions(db, field: str, keyword: str, limit: int = 10) -> dict
                 .distinct().limit(limit)
             )
             suggestions = [r[0] for r in result.all() if r[0]]
-    except Exception as e:
+    except (OperationalError, DisconnectionError, ValueError) as e:
         logger.error(f"获取联想建议失败: {e}")
 
     return {'success': True, 'suggestions': suggestions[:limit]}

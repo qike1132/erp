@@ -129,11 +129,10 @@ FLASK_ENV=development
 FLASK_DEBUG=1
 
 # 数据库配置
-DB_TYPE=mysql
 DB_HOST=localhost
-DB_PORT=3306
-DB_USER=root
-DB_PASSWORD=110110
+DB_PORT=5432
+DB_USER=erp_app
+DB_PASSWORD=
 DB_NAME=erp_system
 
 # 数据库连接池（较小）
@@ -161,11 +160,10 @@ FLASK_ENV=production
 FLASK_DEBUG=0
 
 # 数据库配置
-DB_TYPE=mysql
 DB_HOST=localhost
-DB_PORT=3306
-DB_USER=root
-DB_PASSWORD=110110
+DB_PORT=5432
+DB_USER=erp_app
+DB_PASSWORD=
 DB_NAME=erp_system
 
 # 数据库连接池（较大）

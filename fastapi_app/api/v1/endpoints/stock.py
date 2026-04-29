@@ -24,7 +24,7 @@ router = APIRouter()
 @router.get("/in/list", response_model=StockListResponse)
 async def list_stockins(
     page: int = Query(1, ge=1, description="页码"),
-    per_page: int = Query(50, ge=1, le=5000, description="每页数量"),
+    per_page: int = Query(50, ge=1, le=500, description="每页数量"),
     db: AsyncSession = Depends(get_async_db),
     _user: User = Depends(require_permission("stockin_manage")),
 ):
@@ -99,7 +99,7 @@ async def delete_stockin(
 @router.get("/out/list", response_model=StockListResponse)
 async def list_stockouts(
     page: int = Query(1, ge=1, description="页码"),
-    per_page: int = Query(50, ge=1, le=5000, description="每页数量"),
+    per_page: int = Query(50, ge=1, le=500, description="每页数量"),
     db: AsyncSession = Depends(get_async_db),
     _user: User = Depends(require_permission("stockout_manage")),
 ):
@@ -178,36 +178,8 @@ async def inventory(
     db: AsyncSession = Depends(get_async_db),
     _user: User = Depends(require_permission("stockin_manage")),
 ):
-    """库存查看（带缓存）"""
-    import json
-    try:
-        from utils.redis_cache import redis_cache as redis_client
-    except Exception:
-        redis_client = None
-    
-    cache_key = f"inventory:overview:{customer}:{product}"
-    try:
-        if redis_client:
-            cached_data = await redis_client.get(cache_key)
-            if cached_data:
-                result = json.loads(cached_data)
-                return InventoryResponse(
-                    data=result['inventory_data'],
-                    total_order_quantity=result['total_order_qty'],
-                    total_stockin_quantity=result['total_stockin_qty'],
-                    total_stock=result['total_stock'],
-                    all_countries=result['all_countries'],
-                )
-    except Exception:
-        pass
-    
+    """库存查看（缓存由 service 层 invalidate_cache 管理）"""
     result = await stock_service.get_inventory(db, search_customer=customer, search_product=product)
-    
-    try:
-        if redis_client:
-            await redis_client.set(cache_key, json.dumps(result, ensure_ascii=False, default=str), ex=30)
-    except Exception:
-        pass
     
     return InventoryResponse(
         data=result['inventory_data'],
@@ -228,6 +200,7 @@ async def export_inventory(
     """导出库存数据为 Excel 文件"""
     import io
     from fastapi.responses import StreamingResponse
+    from urllib.parse import quote
 
     # 复用 stock_service.get_inventory 获取数据，避免重复逻辑和 Flask 实例创建
     result = await stock_service.get_inventory(db, search_customer=customer, search_product=product)
@@ -238,7 +211,6 @@ async def export_inventory(
 
     def _generate_excel():
         from utils.report_exporter import ReportExporter, generate_filename
-        from urllib.parse import quote
         stats = {
             'total_count': len(inventory_data),
             'total_order_quantity': result['total_order_qty'],

@@ -10,20 +10,21 @@ from datetime import datetime
 from fastapi_app.shared_models import Base
 
 
-VALID_ORDER_STATUSES = {'待备货', '部分备货', '已备货', '待出货', '已出货', '已完成', '已取消'}
+# 新订单 status=None，无需'待备货'/'部分备货'/'已备货'等中间状态
+VALID_ORDER_STATUSES = {'待出货', '已出货', '已完成', '已取消'}
 
+# None 是新订单初始状态，可转为'待出货'或'已取消'
 STATUS_TRANSITIONS = {
-    '待备货': {'部分备货', '已备货', '已取消'},
-    '部分备货': {'已备货', '待出货', '已取消'},
-    '已备货': {'待出货', '已取消'},
+    None: {'待出货', '已取消'},
     '待出货': {'已出货', '已取消'},
     '已出货': {'已完成'},
     '已完成': set(),
     '已取消': set(),
 }
 
-DELETABLE_STATUSES = {'待备货', '部分备货', '已取消'}
-EDITABLE_STATUSES = {'待备货', '部分备货'}
+# None = 新订单，可编辑可删除
+DELETABLE_STATUSES = {None, '已取消'}
+EDITABLE_STATUSES = {None}
 
 
 class Order(Base):
@@ -36,7 +37,7 @@ class Order(Base):
     order_date: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, index=True, comment='下单时间')
     product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id'), nullable=False, index=True, comment='产品ID')
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, comment='订单数量')
-    status: Mapped[str] = mapped_column(String(20), default='待备货', nullable=False, index=True, comment='订单状态')
+    status: Mapped[str | None] = mapped_column(String(20), default=None, nullable=True, index=True, comment='订单状态')
     note: Mapped[str | None] = mapped_column(Text, comment='备注')
     batch_no: Mapped[str | None] = mapped_column(String(100), comment='批次号')
     order_type: Mapped[str] = mapped_column(String(20), default='regular', nullable=False, comment='订单类型：regular=常规订单, custom=定制订单')
@@ -65,8 +66,8 @@ class Order(Base):
     )
 
     @classmethod
-    def validate_status(cls, status: str) -> None:
-        if status not in VALID_ORDER_STATUSES:
+    def validate_status(cls, status: str | None) -> None:
+        if status is not None and status not in VALID_ORDER_STATUSES:
             raise ValueError(f"无效的订单状态: '{status}'，合法值: {', '.join(sorted(VALID_ORDER_STATUSES))}")
 
     def can_transition_to(self, new_status: str) -> bool:

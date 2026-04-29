@@ -34,13 +34,17 @@ def _product_has_bom(product) -> bool:
 
 def get_products(db: Session, *, page: int = 1, per_page: int = 50,
                  search: str = '', has_bom: str = 'all', category: str = '',
-                 sort_by: str = 'name', sort_order: str = 'asc') -> dict:
-    query = db.query(Product).options(
-        selectinload(Product.material),
-        selectinload(Product.fabrics),
-        selectinload(Product.accessories),
-        selectinload(Product.packagings),
-    )
+                 sort_by: str = 'name', sort_order: str = 'asc',
+                 simple: bool = False) -> dict:
+    query = db.query(Product)
+
+    if not simple:
+        query = query.options(
+            selectinload(Product.material),
+            selectinload(Product.fabrics),
+            selectinload(Product.accessories),
+            selectinload(Product.packagings),
+        )
 
     if search:
         query = query.filter(
@@ -78,26 +82,68 @@ def get_products(db: Session, *, page: int = 1, per_page: int = 50,
     total = query.count()
     products = query.offset((page - 1) * per_page).limit(per_page).all()
 
-    result = []
-    for p in products:
-        has_bom_flag = _product_has_bom(p)
-        bom_info = {}
-        if has_bom_flag:
-            bom_info = {
-                'filling_count': 1 if (p.material and p.material.cotton_usage and p.material.cotton_usage > 0) else 0,
-                'fabric_count': len(p.fabrics),
-                'accessory_count': len(p.accessories),
-                'packaging_count': len(p.packagings),
-            }
-        result.append({
-            'id': p.id,
-            'name': p.name,
-            'barcode': p.barcode,
-            'price': float(p.price) if p.price else 0,
-            'has_bom': has_bom_flag,
-            'bom_info': bom_info,
-            'current_stock': p.current_stock,
-        })
+    if simple:
+        product_ids = [p.id for p in products]
+        has_material_ids = set()
+        has_fabric_ids = set()
+        has_accessory_ids = set()
+        has_packaging_ids = set()
+        if product_ids:
+            has_material_ids = set(
+                row[0] for row in db.query(ProductMaterial.product_id)
+                .filter(ProductMaterial.product_id.in_(product_ids), ProductMaterial.cotton_usage > 0)
+                .all()
+            )
+            has_fabric_ids = set(
+                row[0] for row in db.query(ProductFabric.product_id)
+                .filter(ProductFabric.product_id.in_(product_ids))
+                .distinct().all()
+            )
+            has_accessory_ids = set(
+                row[0] for row in db.query(ProductAccessory.product_id)
+                .filter(ProductAccessory.product_id.in_(product_ids))
+                .distinct().all()
+            )
+            has_packaging_ids = set(
+                row[0] for row in db.query(ProductPackaging.product_id)
+                .filter(ProductPackaging.product_id.in_(product_ids))
+                .distinct().all()
+            )
+        result = []
+        for p in products:
+            has_bom_flag = (
+                p.id in has_material_ids or
+                p.id in has_fabric_ids or
+                p.id in has_accessory_ids or
+                p.id in has_packaging_ids
+            )
+            result.append({
+                'id': p.id,
+                'name': p.name,
+                'barcode': p.barcode,
+                'has_bom': has_bom_flag,
+            })
+    else:
+        result = []
+        for p in products:
+            has_bom_flag = _product_has_bom(p)
+            bom_info = {}
+            if has_bom_flag:
+                bom_info = {
+                    'filling_count': 1 if (p.material and p.material.cotton_usage and p.material.cotton_usage > 0) else 0,
+                    'fabric_count': len(p.fabrics),
+                    'accessory_count': len(p.accessories),
+                    'packaging_count': len(p.packagings),
+                }
+            result.append({
+                'id': p.id,
+                'name': p.name,
+                'barcode': p.barcode,
+                'price': float(p.price) if p.price else 0,
+                'has_bom': has_bom_flag,
+                'bom_info': bom_info,
+                'current_stock': p.current_stock,
+            })
 
     return {
         'products': result,
@@ -336,11 +382,25 @@ def calculate_material(db: Session, orders_data: list) -> dict:
     }
     totals = defaultdict(lambda: defaultdict(Decimal))
 
+    product_ids = [item.get('product_id') for item in orders_data if item.get('product_id')]
+    if not product_ids:
+        return result
+
+    product_map = {}
+    products = db.query(Product).options(
+        selectinload(Product.material),
+        selectinload(Product.fabrics),
+        selectinload(Product.accessories),
+        selectinload(Product.packagings),
+    ).filter(Product.id.in_(product_ids)).all()
+    for p in products:
+        product_map[p.id] = p
+
     for order_item in orders_data:
         product_id = order_item.get('product_id')
         quantity = Decimal(str(order_item.get('quantity', 0)))
 
-        product = db.get(Product, product_id)
+        product = product_map.get(product_id)
         if not product or not product.has_bom():
             continue
 

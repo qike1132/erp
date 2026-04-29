@@ -22,11 +22,11 @@ from fastapi_app.api.v1.endpoints.auxiliary import router as auxiliary_router
 from fastapi_app.api.v1.endpoints.tasks import router as tasks_router
 from fastapi_app.api.v1.endpoints.auth import router as auth_router
 from fastapi_app.api.v1.endpoints.ocr_import import router as ocr_import_router
-from fastapi_app.api.v1.endpoints.finance import router as finance_router
 from fastapi_app.api.v1.endpoints.production_plan import router as production_plan_router
 from fastapi_app.api.v1.endpoints.purchase_plan import router as purchase_plan_router
 from fastapi_app.api.v1.endpoints.production_summary import router as production_summary_router
 from fastapi_app.api.v1.endpoints.dashboard import router as dashboard_router
+from fastapi_app.api.v1.endpoints.supplier import router as supplier_router
 
 api_router = APIRouter()
 
@@ -100,6 +100,13 @@ api_router.include_router(
     tags=["客户管理"],
 )
 
+# 供应商管理路由 - 前缀 /api/v1/suppliers
+api_router.include_router(
+    supplier_router,
+    prefix="/suppliers",
+    tags=["供应商管理"],
+)
+
 # 审批管理路由 - 前缀 /api/v1/approvals
 api_router.include_router(
     approval_router,
@@ -138,6 +145,7 @@ api_router.include_router(
 # 异步任务路由 - 前缀 /api/v1/tasks
 api_router.include_router(
     tasks_router,
+    prefix="/tasks",
     tags=["异步任务"],
 )
 
@@ -153,13 +161,6 @@ api_router.include_router(
     ocr_import_router,
     prefix="/ocr-import",
     tags=["OCR识别导入"],
-)
-
-# 财务统计路由 - 前缀 /api/v1/finance
-api_router.include_router(
-    finance_router,
-    prefix="/finance",
-    tags=["财务统计"],
 )
 
 # 排产计划路由 - 前缀 /api/v1/production-plans

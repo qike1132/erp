@@ -1,7 +1,7 @@
 """
 仪表盘 API
 
-为 Next.js 前端提供仪表盘统计数据和最近活动数据。
+为 Vue/Vite 前端提供仪表盘统计数据和最近活动数据。
 从 pages.py:index_page 的服务端渲染逻辑提取而来。
 """
 
@@ -17,6 +17,7 @@ from fastapi_app.core.deps import get_current_user_id
 from fastapi_app.shared_models import Order, StockIn, StockOut, ApprovalRequest, Product, PurchaseOrder
 from fastapi_app.shared_models.material_registration import MaterialRegistration
 from sqlalchemy import func, and_, select
+from sqlalchemy.exc import OperationalError, DisconnectionError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -56,7 +57,7 @@ async def _get_cached_stats():
             if isinstance(cached, str):
                 return json.loads(cached)
             return cached
-    except Exception:
+    except (OSError, ValueError):
         logger.warning("仪表盘缓存读取失败", exc_info=True)
     return None
 
@@ -65,7 +66,7 @@ async def _set_cached_stats(data):
     try:
         from utils.redis_cache import redis_cache
         await redis_cache.set(_CACHE_KEY, json.dumps(data, default=str), timeout=_CACHE_TTL)
-    except Exception:
+    except (OSError, ValueError):
         logger.warning("仪表盘缓存写入失败", exc_info=True)
 
 
@@ -88,7 +89,7 @@ async def _fetch_stats_async(db: AsyncSession) -> dict:
         data["pending_purchases"] = (await db.execute(select(func.count(PurchaseOrder.id)).where(PurchaseOrder.status.in_(["pending", "partial"])))).scalar() or 0
         data["pending_materials"] = (await db.execute(select(func.count(MaterialRegistration.id)).where(MaterialRegistration.status.in_(["pending", "partial"])))).scalar() or 0
         return data
-    except Exception as e:
+    except (OperationalError, DisconnectionError) as e:
         logger.warning("仪表盘异步统计加载失败: %s [%s]", e, type(e).__name__)
         return dict(order_today=0, stockin_today=0, stockout_today=0, pending_approvals=0,
                     order_yesterday=0, stockin_yesterday=0, stockout_yesterday=0,
@@ -121,7 +122,7 @@ async def _fetch_activities_async(db: AsyncSession) -> list:
 
         activities.sort(key=lambda x: x["time"], reverse=True)
         return activities[:8]
-    except Exception as e:
+    except (OperationalError, DisconnectionError) as e:
         logger.warning("仪表盘异步活动加载失败: %s [%s]", e, type(e).__name__)
         return []
 
@@ -138,7 +139,7 @@ async def get_dashboard_stats(
         try:
             dashboard_stats = await _fetch_stats_async(db)
             await _set_cached_stats(dashboard_stats)
-        except Exception:
+        except (OperationalError, DisconnectionError):
             logger.warning("仪表盘统计查询失败", exc_info=True)
             dashboard_stats = {}
 
@@ -154,14 +155,14 @@ async def get_dashboard_activities(
     try:
         activities = await _fetch_activities_async(db)
         return [Activity(**a) for a in activities]
-    except Exception as e:
+    except (OperationalError, DisconnectionError) as e:
         logger.warning("仪表盘活动加载失败: %s [%s]", e, type(e).__name__)
         return []
 
 
 @router.get("/nav-sections")
 async def get_nav_sections(user_id: int = Depends(get_current_user_id)):
-    """导航菜单数据（供Next.js前端使用）"""
+    """导航菜单数据（供前端使用）"""
     from fastapi_app.core.nav_context import get_nav_sections_async
     sections = await get_nav_sections_async()
     return sections

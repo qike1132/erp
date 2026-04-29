@@ -13,6 +13,7 @@ from fastapi_app.schemas.material_registration import (
 )
 from fastapi_app.services import material_registration_service as mr_service
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import SQLAlchemyError
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,10 @@ async def create_registration(
         return RegistrationDetailResponse(registration=result['registration'])
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except SQLAlchemyError as e:
+        await db.rollback()
+        logger.exception("创建来料登记失败: %s", e)
+        raise HTTPException(status_code=500, detail="创建来料登记失败，请稍后重试")
 
 
 @router.put("/registrations/{reg_id}", response_model=RegistrationDetailResponse)
@@ -80,6 +85,10 @@ async def update_registration(
         return RegistrationDetailResponse(registration=result['registration'])
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except SQLAlchemyError as e:
+        await db.rollback()
+        logger.exception("更新来料登记失败: %s", e)
+        raise HTTPException(status_code=500, detail="更新来料登记失败，请稍后重试")
 
 
 @router.delete("/registrations/{reg_id}", response_model=ActionResponse)
@@ -95,6 +104,10 @@ async def delete_registration(
         return ActionResponse(message=result['message'])
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except SQLAlchemyError as e:
+        await db.rollback()
+        logger.exception("删除来料登记失败: %s", e)
+        raise HTTPException(status_code=500, detail="删除来料登记失败，请稍后重试")
 
 
 @router.get("/purchase-orders/available")
@@ -140,7 +153,8 @@ async def receive_material(
         return RegistrationDetailResponse(registration=result['registration'])
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
+    except (SQLAlchemyError, RuntimeError) as e:
+        await db.rollback()
         logger.exception("收货登记失败 item_id=%s: %s", item_id, e)
         raise HTTPException(status_code=500, detail="收货登记失败，请稍后重试")
 
@@ -181,7 +195,7 @@ async def export_registrations(
     """导出来料登记数据"""
     try:
         return await mr_service.export_registrations(db, order_no, supplier, start_date, end_date)
-    except Exception as e:
+    except (ValueError, OSError) as e:
         raise HTTPException(status_code=500, detail="导出来料登记失败")
 
 

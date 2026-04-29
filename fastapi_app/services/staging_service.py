@@ -100,8 +100,8 @@ async def update_staging_order(db: AsyncSession, order_id: int, data: dict) -> d
             order.validation_error = f'产品"{data["product_name"]}"不存在'
     if 'quantity' in data:
         qty = int(data['quantity'])
-        if qty <= 0 or qty > 100000:
-            raise ValueError('数量必须在1-100000之间')
+        if qty <= 0 or qty > 9999999:
+            raise ValueError('数量必须在1-9999999之间')
         order.quantity = qty
     if 'deduct_stock' in data:
         order.deduct_stock = bool(data['deduct_stock'])
@@ -149,7 +149,7 @@ async def confirm_staging_orders(
         for staging in staging_orders:
             try:
                 # 数量校验
-                if staging.quantity <= 0 or staging.quantity > 100000:
+                if staging.quantity <= 0 or staging.quantity > 9999999:
                     errors.append(f'订单{staging.customer}-{staging.product_name}数量无效: {staging.quantity}')
                     staging.status = 'rejected'
                     continue
@@ -196,7 +196,7 @@ async def confirm_staging_orders(
                             custom_deduct_quantity=staging.deduct_quantity,
                             product=product,
                         )
-                    except Exception as ded_err:
+                    except (ValueError, TypeError, OSError) as ded_err:
                         errors.append(
                             f'订单{staging.customer}-{staging.product_name}抵扣处理失败: {str(ded_err)}'
                         )
@@ -204,7 +204,7 @@ async def confirm_staging_orders(
                 staging.status = 'approved'
                 confirmed += 1
 
-            except Exception as e:
+            except (ValueError, TypeError, OSError) as e:
                 errors.append(f'订单{staging.customer}-{staging.product_name}确认失败: {str(e)}')
                 staging.status = 'rejected'
 
@@ -217,7 +217,7 @@ async def confirm_staging_orders(
         )
         await db.commit()
 
-    except Exception as e:
+    except (ValueError, TypeError, OSError) as e:
         await db.rollback()
         logger.error(f'确认暂存订单时发生错误: {str(e)}', exc_info=True)
         raise
@@ -340,7 +340,7 @@ async def import_staging_orders_from_excel(
                 db.add(staging_order)
                 imported += 1
 
-            except Exception as e:
+            except (ValueError, TypeError, OSError) as e:
                 errors.append(f'第{idx}行处理失败: {str(e)}')
                 continue
 
@@ -351,7 +351,7 @@ async def import_staging_orders_from_excel(
             result_msg += f'。错误: {"; ".join(errors[:5])}'
         return imported, result_msg, errors[:10] if errors else []
 
-    except Exception as e:
+    except (ValueError, TypeError, OSError) as e:
         await db.rollback()
         logger.error(f'暂存订单导入失败: {str(e)}', exc_info=True)
         return 0, '导入失败，请稍后重试', []
@@ -359,7 +359,7 @@ async def import_staging_orders_from_excel(
         if temp_path and os.path.exists(temp_path):
             try:
                 os.unlink(temp_path)
-            except Exception:
+            except OSError:
                 pass
 
 
@@ -486,7 +486,7 @@ async def confirm_staging_stockins(
             staging.status = 'approved'
             confirmed += 1
 
-        except Exception as e:
+        except (ValueError, TypeError, OSError) as e:
             errors.append(f'备货{staging.customer}-{staging.product_name}确认失败: {str(e)}')
             staging.status = 'rejected'
 
@@ -599,7 +599,7 @@ async def import_staging_stockins_from_excel(
                 db.add(staging_stockin)
                 imported += 1
 
-            except Exception as e:
+            except (ValueError, TypeError, OSError) as e:
                 errors.append(f'第{idx}行处理失败: {str(e)}')
                 continue
 
@@ -610,7 +610,7 @@ async def import_staging_stockins_from_excel(
             result_msg += f'。错误: {"; ".join(errors[:5])}'
         return imported, result_msg, errors[:10] if errors else []
 
-    except Exception as e:
+    except (ValueError, TypeError, OSError) as e:
         await db.rollback()
         logger.error(f'暂存备货导入失败: {str(e)}', exc_info=True)
         return 0, '导入失败，请稍后重试', []
@@ -618,7 +618,7 @@ async def import_staging_stockins_from_excel(
         if temp_path and os.path.exists(temp_path):
             try:
                 os.unlink(temp_path)
-            except Exception:
+            except OSError:
                 pass
 
 
@@ -786,7 +786,7 @@ async def confirm_staging_stockouts(
             staging.status = 'approved'
             confirmed += 1
 
-        except Exception as e:
+        except (ValueError, TypeError, OSError) as e:
             errors.append(f'出货{staging.customer}-{staging.product_name}确认失败: {str(e)}')
             staging.status = 'rejected'
 
@@ -924,7 +924,7 @@ async def import_staging_stockouts_from_excel(
                 db.add(staging_stockout)
                 imported += 1
 
-            except Exception as e:
+            except (ValueError, TypeError, OSError) as e:
                 errors.append(f'第{idx}行处理失败: {str(e)}')
                 continue
 
@@ -935,7 +935,7 @@ async def import_staging_stockouts_from_excel(
             result_msg += f'。错误: {"; ".join(errors[:5])}'
         return imported, result_msg, errors[:10] if errors else []
 
-    except Exception as e:
+    except (ValueError, TypeError, OSError) as e:
         await db.rollback()
         logger.error(f'暂存出货导入失败: {str(e)}', exc_info=True)
         return 0, '导入失败，请稍后重试', []
@@ -943,5 +943,5 @@ async def import_staging_stockouts_from_excel(
         if temp_path and os.path.exists(temp_path):
             try:
                 os.unlink(temp_path)
-            except Exception:
+            except OSError:
                 pass

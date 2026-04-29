@@ -4,6 +4,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 
 from fastapi_app.core.database import get_sync_db as get_db
 from fastapi_app.core.deps import require_permission
@@ -56,7 +57,7 @@ def api_save_query(
     try:
         result = svc.save_query(db, data.model_dump(), _user.id, _user.username)
         return {'success': True, 'query': result}
-    except Exception:
+    except (SQLAlchemyError, ValueError, RuntimeError):
         db.rollback()
         raise HTTPException(status_code=500, detail="操作失败，请稍后重试")
 

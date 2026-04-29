@@ -68,7 +68,7 @@ async def _save_uploaded_file(file: UploadFile):
         if temp_path and os.path.exists(temp_path):
             try:
                 os.unlink(temp_path)
-            except Exception:
+            except OSError:
                 pass
 
 
@@ -138,7 +138,7 @@ async def download_template(
         )
     except HTTPException:
         raise
-    except Exception as e:
+    except (OSError, ValueError) as e:
         logger.error(f"模板读取失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="模板读取失败，请稍后重试")
 
@@ -245,7 +245,7 @@ async def batch_import_orders(
 
                 imported += 1
 
-            except Exception as e:
+            except (ValueError, TypeError, SQLAlchemyError) as e:
                 logger.error(f"订单导入 - 行处理失败: {e}", exc_info=True)
                 errors.append('行处理失败')
                 skipped += 1
@@ -260,7 +260,7 @@ async def batch_import_orders(
             success_msg='成功导入', fail_msg='没有成功导入任何订单'
         )
 
-    except Exception as e:
+    except (OSError, ValueError) as e:
         logger.error(f"订单批量导入失败: {e}", exc_info=True)
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
 
@@ -390,7 +390,7 @@ async def batch_import_case_stockouts(
 
                 imported += 1
 
-            except Exception as e:
+            except (ValueError, TypeError, SQLAlchemyError) as e:
                 logger.error(f"皮套出库导入 - 行处理失败: {e}", exc_info=True)
                 errors.append('行处理失败')
                 skipped += 1
@@ -405,7 +405,7 @@ async def batch_import_case_stockouts(
             success_msg='成功导入皮套出库', fail_msg='没有成功导入任何皮套出库'
         )
 
-    except Exception as e:
+    except (OSError, ValueError) as e:
         logger.error(f"皮套出库批量导入失败: {e}", exc_info=True)
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
 
@@ -529,7 +529,7 @@ async def batch_import_case_stockins(
 
                 imported += 1
 
-            except Exception as e:
+            except (ValueError, TypeError, SQLAlchemyError) as e:
                 logger.error(f"皮套入库导入 - 行处理失败: {e}", exc_info=True)
                 errors.append('行处理失败')
                 skipped += 1
@@ -544,7 +544,7 @@ async def batch_import_case_stockins(
             success_msg='成功导入皮套入库', fail_msg='没有成功导入任何皮套入库'
         )
 
-    except Exception as e:
+    except (OSError, ValueError) as e:
         logger.error(f"皮套入库批量导入失败: {e}", exc_info=True)
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
 
@@ -647,7 +647,7 @@ async def batch_import_stockins(
 
                 imported += 1
 
-            except Exception as e:
+            except (ValueError, TypeError, SQLAlchemyError) as e:
                 logger.error(f"备货导入 - 行处理失败: {e}", exc_info=True)
                 errors.append('行处理失败')
                 skipped += 1
@@ -662,7 +662,7 @@ async def batch_import_stockins(
             success_msg='成功导入备货', fail_msg='没有成功导入任何备货'
         )
 
-    except Exception as e:
+    except (OSError, ValueError) as e:
         logger.error(f"备货批量导入失败: {e}", exc_info=True)
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
 
@@ -800,7 +800,7 @@ async def batch_import_stockouts(
 
                 imported += 1
 
-            except Exception as e:
+            except (ValueError, TypeError, SQLAlchemyError) as e:
                 logger.error(f"出库导入 - 行处理失败: {e}", exc_info=True)
                 errors.append('行处理失败')
                 skipped += 1
@@ -815,7 +815,7 @@ async def batch_import_stockouts(
             success_msg='成功导入出货', fail_msg='没有成功导入任何出货'
         )
 
-    except Exception as e:
+    except (OSError, ValueError) as e:
         logger.error(f"出库批量导入失败: {e}", exc_info=True)
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
 
@@ -890,7 +890,7 @@ async def batch_import_products(
                 db.add(product)
                 imported += 1
 
-            except Exception as e:
+            except (ValueError, TypeError, SQLAlchemyError) as e:
                 logger.error(f"产品导入 - 行处理失败: {e}", exc_info=True)
                 errors.append('行处理失败')
                 skipped += 1
@@ -905,7 +905,7 @@ async def batch_import_products(
             success_msg='成功导入产品', fail_msg='没有找到需要导入的产品数据（可能都已存在）'
         )
 
-    except Exception as e:
+    except (OSError, ValueError) as e:
         logger.error(f"产品批量导入失败: {e}", exc_info=True)
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
 
@@ -969,7 +969,7 @@ async def batch_import_comprehensive(
                     try:
                         count, _ = await import_orders_from_data(db, data_list)
                         results.imported['orders'] += count
-                    except Exception as order_e:
+                    except (ValueError, TypeError, SQLAlchemyError) as order_e:
                         await db.rollback()
                         nested = await db.begin_nested()
                         logger.error(f"综合导入 - 订单Sheet {sheet_name} 导入失败: {order_e}", exc_info=True)
@@ -978,7 +978,7 @@ async def batch_import_comprehensive(
                     try:
                         count, _ = await import_stockins_from_data(db, data_list)
                         results.imported['stockins'] += count
-                    except Exception as stockin_e:
+                    except (ValueError, TypeError, SQLAlchemyError) as stockin_e:
                         await db.rollback()
                         nested = await db.begin_nested()
                         logger.error(f"综合导入 - 备货Sheet {sheet_name} 导入失败: {stockin_e}", exc_info=True)
@@ -987,12 +987,12 @@ async def batch_import_comprehensive(
                     try:
                         count, _ = await import_stockouts_from_data(db, data_list)
                         results.imported['stockouts'] += count
-                    except Exception as stockout_e:
+                    except (ValueError, TypeError, SQLAlchemyError) as stockout_e:
                         await db.rollback()
                         nested = await db.begin_nested()
                         logger.error(f"综合导入 - 出货Sheet {sheet_name} 导入失败: {stockout_e}", exc_info=True)
                         results.errors.append(f'Sheet {sheet_name} 导入失败')
-            except Exception as e:
+            except (ValueError, TypeError, SQLAlchemyError) as e:
                 await db.rollback()
                 nested = await db.begin_nested()
                 logger.error(f"综合导入 - Sheet {sheet_name} 处理失败: {e}", exc_info=True)
@@ -1005,6 +1005,6 @@ async def batch_import_comprehensive(
 
         return results
 
-    except Exception as e:
+    except (OSError, ValueError) as e:
         logger.error(f"综合批量导入失败: {e}", exc_info=True)
         return ComprehensiveImportResult(success=False, message='操作失败，请稍后重试')

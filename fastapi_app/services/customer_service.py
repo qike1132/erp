@@ -50,7 +50,7 @@ async def get_active_customer_names(db: AsyncSession) -> list[dict]:
         cached = await redis_cache.get(_ACTIVE_CUSTOMER_CACHE_KEY)
         if cached:
             return cached
-    except Exception:
+    except (OSError, ConnectionError, ValueError):
         logger.warning("客户名称缓存读取失败", exc_info=True)
 
     result = await db.execute(
@@ -61,7 +61,7 @@ async def get_active_customer_names(db: AsyncSession) -> list[dict]:
     try:
         from utils.redis_cache import redis_cache
         await redis_cache.set(_ACTIVE_CUSTOMER_CACHE_KEY, data, timeout=_ACTIVE_CUSTOMER_CACHE_TTL)
-    except Exception:
+    except (OSError, ValueError):
         logger.warning("客户名称缓存写入失败", exc_info=True)
 
     return data
@@ -157,5 +157,5 @@ async def _invalidate_customer_cache():
     try:
         from utils.redis_cache import redis_cache
         await redis_cache.delete(_ACTIVE_CUSTOMER_CACHE_KEY)
-    except Exception:
+    except (OSError, ConnectionError, ValueError):
         logger.warning("客户缓存清除失败", exc_info=True)
