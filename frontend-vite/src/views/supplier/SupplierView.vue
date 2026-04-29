@@ -2,21 +2,14 @@
   <div class="sp-container">
     <div class="sp-card sp-card-main">
       <div class="sp-card-header">
-        <div class="sp-card-title-group">
-          <div class="sp-icon-box sp-icon-blue">
-            <i class="fas fa-building" />
-          </div>
-          <div>
-            <h3>供应商管理</h3>
-            <small>管理供应商信息，支持添加、编辑、删除</small>
-          </div>
-        </div>
+        <HeaderTabs />
         <div class="sp-header-actions">
           <span class="count-badge">{{ filteredSuppliers.length }} 家</span>
-          <button class="sp-action-btn sp-action-btn-primary" @click="formOpen = true">
-            <i class="fas fa-plus" />
-            添加供应商
-          </button>
+          <div class="sp-tabs">
+            <button class="sp-tab-btn active" @click="formOpen = true">
+              <i class="fas fa-plus" /> 添加供应商
+            </button>
+          </div>
         </div>
       </div>
 
@@ -189,6 +182,7 @@ import { supplierApi } from '@/api'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
+import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 import { showToast } from '@/composables/useToast'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 
@@ -291,7 +285,7 @@ async function handleEdit() {
 <style scoped>
 /* === Layout === */
 .sp-container {
-  padding: 12px;
+  padding: 8px;
   margin: 0 auto;
   height: 100%;
   display: flex;
@@ -302,7 +296,7 @@ async function handleEdit() {
 /* === Main Card === */
 .sp-card {
   background: white;
-  border-radius: 14px;
+  border-radius: 18px;
   border: 1px solid var(--color-border-light, #e2e8f0);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
@@ -310,8 +304,8 @@ async function handleEdit() {
 }
 
 .sp-card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 16px 48px rgba(0,0,0,0.12);
-  transform: translateY(-2px);
+  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
+  transform: translateY(-6px);
 }
 
 .sp-card-main {
@@ -323,11 +317,17 @@ async function handleEdit() {
 
 .sp-card-header {
   display: flex;
+  flex-wrap: nowrap;
   justify-content: space-between;
   align-items: center;
-  padding: 16px 24px;
+  padding: 10px 24px;
   border-bottom: 1px solid var(--color-border-light, #f1f5f9);
   flex-shrink: 0;
+  gap: 12px;
+}
+.sp-card-header :deep(.ht-bar) {
+  width: auto;
+  margin: 0;
 }
 
 .sp-card-title-group {
@@ -374,32 +374,38 @@ async function handleEdit() {
   align-items: center;
 }
 
-.sp-action-btn {
+.sp-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--color-surface, #f1f5f9);
+  padding: 4px;
+  border-radius: 11px;
+}
+
+.sp-tab-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 7px 14px;
-  border: 2px solid var(--color-border-light, #e2e8f0);
-  border-radius: 9px;
-  font-size: 12px;
+  padding: 8px 18px;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
   font-weight: 600;
+  color: var(--color-text-secondary);
+  background: transparent;
   cursor: pointer;
   transition: all 0.3s ease;
-  background: white;
 }
 
-.sp-action-btn i {
-  font-size: 11px;
-}
-
-.sp-action-btn-primary {
+.sp-tab-btn:hover {
   color: var(--color-primary-600);
+  background: rgba(255, 255, 255, 0.6);
 }
 
-.sp-action-btn-primary:hover {
-  background: var(--color-primary-50);
-  border-color: var(--color-primary-300);
-  transform: translateY(-1px);
+.sp-tab-btn.active {
+  background: white;
+  color: var(--color-primary-600);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
 }
 
 /* === Toolbar (Search) === */

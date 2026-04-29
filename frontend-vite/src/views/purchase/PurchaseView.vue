@@ -2,15 +2,7 @@
   <div class="pc-container">
     <div class="pc-card pc-card-main">
       <div class="pc-card-header">
-        <div class="pc-card-title-group">
-          <div class="pc-icon-box pc-icon-blue">
-            <i class="fas fa-store" />
-          </div>
-          <div>
-            <h3>采购中心</h3>
-            <small>用料计算 · 采购订单</small>
-          </div>
-        </div>
+        <HeaderTabs />
         <div class="pc-header-actions">
           <div class="pc-tabs">
             <button
@@ -135,6 +127,7 @@ import CompletedOrdersPanel from './components/CompletedOrdersPanel.vue'
 import OrderDetailModal from './components/OrderDetailModal.vue'
 import SummaryModal from './components/SummaryModal.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
+import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 
 import { usePurchaseOrders } from './composables/usePurchaseOrders'
 import { useUnprocessedOrders } from './composables/useUnprocessedOrders'
@@ -445,7 +438,7 @@ onUnmounted(() => {
 <style scoped>
 /* === Layout === */
 .pc-container {
-  padding: 12px;
+  padding: 8px;
   margin: 0 auto;
   height: 100%;
   display: flex;
@@ -456,32 +449,36 @@ onUnmounted(() => {
 /* === Main Card === */
 .pc-card {
   background: white;
-  border-radius: 14px;
+  border-radius: 18px;
   border: 1px solid var(--color-border-light, #e2e8f0);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  overflow: hidden;
 }
-
 .pc-card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 16px 48px rgba(0,0,0,0.12);
-  transform: translateY(-2px);
+  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
+  transform: translateY(-6px);
 }
-
 .pc-card-main {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
 }
 
 .pc-card-header {
   display: flex;
+  flex-wrap: nowrap;
   justify-content: space-between;
   align-items: center;
-  padding: 16px 24px;
+  padding: 10px 24px;
   border-bottom: 1px solid var(--color-border-light, #f1f5f9);
   flex-shrink: 0;
+  gap: 12px;
+}
+.pc-card-header :deep(.ht-bar) {
+  width: auto;
+  margin: 0;
 }
 
 .pc-card-title-group {

@@ -2,15 +2,7 @@
   <div class="mc-container">
     <div class="mc-card mc-card-main">
       <div class="mc-card-header">
-        <div class="mc-card-title-group">
-          <div class="mc-icon-box mc-icon-blue">
-            <i class="fas fa-calculator" />
-          </div>
-          <div>
-            <h3>物料计算器</h3>
-            <small>选择产品 → 输入数量 → 查看物料用量</small>
-          </div>
-        </div>
+        <HeaderTabs />
         <div class="mc-header-actions">
           <span class="count-badge">已选 {{ selectedProducts.length }} 个</span>
           <button class="mc-action-btn mc-action-btn-primary" :disabled="orderItems.length === 0" @click="showBatchModal = true">
@@ -235,6 +227,7 @@ import { purchaseApi } from '@/api'
 import { showToast } from '@/composables/useToast'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
+import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 
 interface Product {
   id: number
@@ -446,7 +439,7 @@ loadProducts()
 }
 /* === Layout === */
 .mc-container {
-  padding: 12px;
+  padding: 8px;
   margin: 0 auto;
   height: 100%;
   display: flex;
@@ -457,7 +450,7 @@ loadProducts()
 /* === Main Card === */
 .mc-card {
   background: white;
-  border-radius: 14px;
+  border-radius: 18px;
   border: 1px solid var(--color-border-light, #e2e8f0);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
@@ -465,8 +458,8 @@ loadProducts()
 }
 
 .mc-card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 16px 48px rgba(0,0,0,0.12);
-  transform: translateY(-2px);
+  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
+  transform: translateY(-6px);
 }
 
 .mc-card-main {
@@ -478,10 +471,16 @@ loadProducts()
 
 .mc-card-header {
   display: flex;
+  flex-wrap: nowrap;
   justify-content: space-between;
   align-items: center;
-  padding: 16px 24px;
+  padding: 10px 24px;
   border-bottom: 1px solid var(--color-border-light, #f1f5f9);
+  gap: 12px;
+}
+.mc-card-header :deep(.ht-bar) {
+  width: auto;
+  margin: 0;
 }
 
 .mc-card-title-group {

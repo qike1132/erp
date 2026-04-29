@@ -3,13 +3,7 @@
     <div class="pd-card pd-card-main">
       <!-- 卡片头部 -->
       <div class="pd-card-header">
-        <div class="pd-card-title-group">
-          <div class="pd-icon-box pd-icon-blue"><i class="fas fa-box"></i></div>
-          <div>
-            <h3>产品管理</h3>
-            <small>管理产品基础信息、批量导入和图片上传</small>
-          </div>
-        </div>
+        <HeaderTabs />
       </div>
 
       <!-- 双栏主体 -->
@@ -473,6 +467,7 @@ import { upload, download, resolveStaticUrl } from '@/api/request'
 import { showToast } from '@/composables/useToast'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
+import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 
 interface Product {
   id: number
@@ -1027,7 +1022,7 @@ async function confirmCopyBom() {
 <style scoped>
 /* ===== 容器 ===== */
 .pd-container {
-  padding: 12px;
+  padding: 8px;
   margin: 0 auto;
   height: 100%;
   display: flex;
@@ -1038,15 +1033,15 @@ async function confirmCopyBom() {
 /* ===== 主卡片 ===== */
 .pd-card {
   background: white;
-  border-radius: 14px;
+  border-radius: 18px;
   border: 1px solid var(--color-border-light, #e2e8f0);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
   overflow: hidden;
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .pd-card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 16px 48px rgba(0,0,0,0.12);
-  transform: translateY(-2px);
+  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
+  transform: translateY(-6px);
 }
 .pd-card-main {
   flex: 1;
@@ -1057,12 +1052,18 @@ async function confirmCopyBom() {
 
 /* ===== 卡片头部 ===== */
 .pd-card-header {
-  padding: 14px 24px 10px;
+  padding: 10px 24px;
   background: transparent;
   display: flex;
+  flex-wrap: nowrap;
   justify-content: space-between;
   align-items: center;
   border-bottom: 1px solid var(--color-border-light, #f1f5f9);
+  gap: 12px;
+}
+.pd-card-header :deep(.ht-bar) {
+  width: auto;
+  margin: 0;
 }
 .pd-card-title-group {
   display: flex;

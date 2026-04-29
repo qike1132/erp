@@ -13,12 +13,12 @@
             <form @submit.prevent>
               <div class="form-grid">
                 <div class="form-field">
-                  <label class="form-label"><i class="fas fa-user label-icon"></i>客户名称</label>
-                  <UiSelect v-model="form.customer" placeholder="请选择客户" :options="customerOptions" />
-                </div>
-                <div class="form-field">
                   <label class="form-label"><i class="fas fa-calendar-alt label-icon"></i>出货时间</label>
                   <UiDatePicker v-model="form.date" style="width: 100%" />
+                </div>
+                <div class="form-field">
+                  <label class="form-label"><i class="fas fa-user label-icon"></i>客户名称</label>
+                  <UiSelect v-model="form.customer" placeholder="请选择客户" :options="customerOptions" />
                 </div>
               </div>
 
@@ -338,12 +338,12 @@
     <UiDialog v-model:open="editStagedOpen" title="编辑暂存出货" max-width-class="max-w-[500px]">
       <div class="dialog-form">
         <div class="form-field">
-          <label class="form-label"><i class="fas fa-user label-icon"></i>客户名称</label>
-          <UiSelect v-model="editStagedForm.customer" :options="customerOptions" />
-        </div>
-        <div class="form-field">
           <label class="form-label"><i class="fas fa-calendar-alt label-icon"></i>出货时间</label>
           <UiDatePicker v-model="editStagedForm.date" style="width: 100%" />
+        </div>
+        <div class="form-field">
+          <label class="form-label"><i class="fas fa-user label-icon"></i>客户名称</label>
+          <UiSelect v-model="editStagedForm.customer" :options="customerOptions" />
         </div>
         <div class="form-field">
           <label class="form-label"><i class="fas fa-box label-icon"></i>产品名称</label>
@@ -368,15 +368,15 @@
     <UiDialog v-model:open="editRecordOpen" title="编辑出货记录" max-width-class="max-w-[500px]">
       <div class="dialog-form">
         <div class="form-field">
+          <label class="form-label"><i class="fas fa-calendar-alt label-icon"></i>出货时间</label>
+          <UiDatePicker v-model="editRecordForm.date" style="width: 100%" />
+        </div>
+        <div class="form-field">
           <label class="form-label"><i class="fas fa-user label-icon"></i>客户名称</label>
           <UiSelect
             v-model="editRecordForm.customer"
             :options="[{ value: '', label: '无' }, ...customerOptions]"
           />
-        </div>
-        <div class="form-field">
-          <label class="form-label"><i class="fas fa-calendar-alt label-icon"></i>出货时间</label>
-          <UiDatePicker v-model="editRecordForm.date" style="width: 100%" />
         </div>
         <div class="form-field">
           <label class="form-label"><i class="fas fa-box label-icon"></i>产品名称</label>
@@ -931,7 +931,7 @@ async function saveEditRecord() {
 .form-text-input {
   width: 100%;
   padding: 8px 12px;
-  border: 2px solid var(--color-border-light, #e2e8f0);
+  border: 2px solid var(--color-border, #cbd5e1);
   border-radius: var(--radius-input, 12px);
   font-size: 14px;
   color: var(--color-text);
@@ -978,14 +978,14 @@ async function saveEditRecord() {
   overflow: hidden;
 }
 .so-col + .so-col {
-  border-left: 1px solid var(--color-border-light, #f1f5f9);
+  border-left: 2px solid var(--color-border, #cbd5e1);
 }
 .so-col-title {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 10px 20px;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
+  border-bottom: 1px solid var(--color-border, #cbd5e1);
   font-size: 14px;
   font-weight: 700;
   color: var(--color-text);
@@ -1008,7 +1008,7 @@ async function saveEditRecord() {
   align-items: center;
   padding: 8px 12px;
   background: white;
-  border: 2px solid var(--color-border-light, #e2e8f0);
+  border: 2px solid var(--color-border, #cbd5e1);
   border-radius: var(--radius-input, 12px);
   min-height: 40px;
   box-sizing: border-box;
@@ -1078,7 +1078,7 @@ async function saveEditRecord() {
   justify-content: space-between;
   align-items: center;
   padding: 10px 20px;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
+  border-bottom: 1px solid var(--color-border, #cbd5e1);
 }
 .so-records-title {
   font-size: 14px;
@@ -1123,7 +1123,7 @@ async function saveEditRecord() {
   line-height: 1.5;
   color: var(--color-text);
   background: white;
-  border: 2px solid var(--color-border-light, #e2e8f0);
+  border: 2px solid var(--color-border, #cbd5e1);
   border-radius: var(--radius-input, 12px);
   transition: all 0.3s ease;
   outline: none;
@@ -1171,9 +1171,8 @@ textarea.form-input::placeholder {
   padding: 10px 14px;
   cursor: pointer;
   transition: all 0.2s ease;
-  border-bottom: 1px solid var(--color-border-light);
+  border-bottom: 1px solid var(--color-border-light, #e2e8f0);
   display: flex;
-  justify-content: space-between;
   align-items: center;
   font-size: 13px;
 }
@@ -1189,7 +1188,7 @@ textarea.form-input::placeholder {
 
 /* ===== Staged Cards ===== */
 .so-staged-card {
-  border: 2px solid var(--color-border-light, #e2e8f0);
+  border: 2px solid var(--color-border, #cbd5e1);
   border-left: 4px solid var(--color-danger-500);
   border-radius: 10px;
   padding: 8px 12px;
@@ -1316,7 +1315,7 @@ textarea.form-input::placeholder {
   display: flex;
   justify-content: center;
   padding: 8px 0;
-  border-top: 1px solid var(--color-border-light, #f1f5f9);
+  border-top: 1px solid var(--color-border, #cbd5e1);
 }
 
 /* ===== Droppable Section Header ===== */
@@ -1368,7 +1367,7 @@ textarea.form-input::placeholder {
 }
 .so-inline-btn {
   padding: 3px 8px;
-  border: 1px solid var(--color-border-light, #e2e8f0);
+  border: 1px solid var(--color-border, #cbd5e1);
   border-radius: 6px;
   background: white;
   font-size: 11px;
@@ -1494,15 +1493,16 @@ textarea.form-input::placeholder {
   font-weight: 600;
   font-size: 12px;
   color: var(--color-text);
-  border-bottom: 2px solid var(--color-border-light);
+  border-bottom: 2px solid var(--color-border-light, #e2e8f0);
   line-height: 1.5;
   background: var(--color-surface, #f8fafc);
   text-align: center;
 }
 .so-table tbody tr {
   transition: background 0.2s ease;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
+  border-bottom: 1px solid var(--color-border-light, #e2e8f0);
 }
+
 .so-table tbody tr:hover {
   background: var(--color-primary-50);
 }

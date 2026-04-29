@@ -73,7 +73,7 @@ PERMISSIONS_CONFIG = {
     'stockout': {
         'module_name': '出库管理',
         'icon': 'fa-truck',
-        'parent': {'code': 'stockout_manage', 'name': '出库管理(全部)'},
+        'parent': {'code': 'stockout_manage', 'name': '出库管理'},
         'children': [
             {'code': 'stockout_view', 'name': '出库查看'},
             {'code': 'stockout_create', 'name': '出库创建'},

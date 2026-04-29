@@ -8,7 +8,7 @@ export interface TabItem {
   icon: string
 }
 
-const MAX_TABS = 15
+const MAX_TABS = 6
 
 export const useTabStore = defineStore('tabs', () => {
   const tabs = ref<TabItem[]>([])

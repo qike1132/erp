@@ -3,15 +3,7 @@
     <div class="rp-card rp-card-main">
       <!-- 卡片头部 -->
       <div class="rp-card-header">
-        <div class="rp-card-title-group">
-          <div class="rp-icon-box rp-icon-orange">
-            <i class="fas fa-chart-line" />
-          </div>
-          <div>
-            <h3>报表统计</h3>
-            <small>订单/备货/出货/抵扣流水查询</small>
-          </div>
-        </div>
+        <HeaderTabs />
         <div class="rp-header-actions">
           <div class="rp-tab-group">
             <button v-for="tab in tabs" :key="tab.value" :class="['rp-tab-btn', { active: activeTab === tab.value }]" @click="activeTab = tab.value; handleTabChange()">
@@ -95,6 +87,7 @@ import { reportApi, customerApi } from '@/api'
 import UiSelect from '@/components/ui/UiSelect.vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
+import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 
 type TabType = 'order' | 'stockin' | 'stockout' | 'deduction'
 
@@ -231,7 +224,7 @@ function exportReport() {
 <style scoped>
 /* Container */
 .rp-container {
-  padding: 12px;
+  padding: 8px;
   margin: 0 auto;
   height: 100%;
   display: flex;
@@ -242,15 +235,15 @@ function exportReport() {
 /* Card */
 .rp-card {
   background: white;
-  border-radius: 14px;
+  border-radius: 18px;
   border: 1px solid var(--color-border-light, #e2e8f0);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
 }
 .rp-card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 16px 48px rgba(0,0,0,0.12);
-  transform: translateY(-2px);
+  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
+  transform: translateY(-6px);
 }
 .rp-card-main {
   flex: 1;
@@ -262,10 +255,16 @@ function exportReport() {
 /* Card Header */
 .rp-card-header {
   display: flex;
+  flex-wrap: nowrap;
   justify-content: space-between;
   align-items: center;
-  padding: 14px 24px 10px;
+  padding: 10px 24px;
   border-bottom: 1px solid var(--color-border-light, #f1f5f9);
+  gap: 12px;
+}
+.rp-card-header :deep(.ht-bar) {
+  width: auto;
+  margin: 0;
 }
 .rp-card-title-group {
   display: flex;

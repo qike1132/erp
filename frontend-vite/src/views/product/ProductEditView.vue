@@ -197,7 +197,7 @@ async function handleSave() {
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
   transition: all 0.4s cubic-bezier(0.4,0,0.2,1); overflow: hidden;
 }
-.card-elegant:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 16px 48px rgba(0,0,0,0.12); transform: translateY(-2px); }
+.card-elegant:hover { box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12); transform: translateY(-6px); }
 .card-header-elegant { padding: 1.75rem 2rem; background: transparent; border-bottom: 1px solid var(--color-border-light, #f1f5f9); }
 .card-header-content { display: flex; align-items: center; gap: 0.75rem; }
 .card-title-elegant { font-size: 1.125rem; font-weight: 600; color: var(--color-slate-700); line-height: 1.3; margin: 0; }
@@ -241,7 +241,7 @@ async function handleSave() {
   cursor: pointer; transition: all 0.3s ease;
 }
 .upload-zone-elegant:hover, .upload-zone-elegant:focus-within {
-  border-color: var(--color-primary-500); background: linear-gradient(135deg, var(--color-primary-50) 0%, var(--color-slate-50) 100%); transform: translateY(-2px);
+  border-color: var(--color-primary-500); background: linear-gradient(135deg, var(--color-primary-50) 0%, var(--color-slate-50) 100%); transform: translateY(-6px);
 }
 .upload-zone-content-elegant { display: flex; flex-direction: column; align-items: center; justify-content: center; }
 .upload-icon-big { font-size: 2.5rem; color: var(--color-slate-400); margin-bottom: 0.75rem; }

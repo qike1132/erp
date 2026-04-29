@@ -19,14 +19,19 @@ type: reference
 ### 1. 页面容器（沉浸式全屏）
 ```css
 .{prefix}-container {
-  padding: 24px;
-  max-width: 1600px;
+  padding: 8px;
   margin: 0 auto;
-  height: 100vh;
+  height: 100%;
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
 }
 ```
+
+**强制规则**：
+- 使用 `height: 100%` 填充父容器，禁止使用 `height: 100vh`（会与 `DefaultLayout` 的 `overflow` 冲突导致双重滚动）
+- 禁止设置 `max-width`，卡片全宽展示
+- 必须添加 `box-sizing: border-box`
 
 ### 2. 整体布局：灵活卡片布局
 - **布局不强制**，根据具体页面的内容和交互决定卡片数量与分栏方式：
@@ -51,18 +56,33 @@ type: reference
 - `background: white; border-radius: 18px`
 - `border: 1px solid var(--color-border-light, #e2e8f0)`
 - `box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06)`
-- `overflow: hidden`
+- **禁止在卡片元素上设置 `overflow: hidden`**（会裁剪悬浮阴影），内容裁剪由 `.{prefix}-card-main` 处理
 - **必须配合悬浮动画**（见第19节动效规范）
+
+**卡片 overflow 规则**：
+```css
+.{prefix}-card {
+  /* 不设置 overflow，允许阴影溢出 */
+}
+.{prefix}-card-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;  /* 内容裁剪在此层处理 */
+}
+```
 
 ### 4. 卡片头部 / 区块标题
 - **白色背景融合进卡片主体**，不使用灰色背景
 - `padding: 14px 24px 10px`
 - `background: transparent`（继承卡片白色背景）
-- `display: flex; justify-content: space-between; align-items: center`
+- `display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap`
 - 左侧标题：`font-size: 14px; font-weight: 700; color: var(--color-text)` + 图标
 - 右侧：操作按钮组（badge + action buttons + status badge）
+- **快捷切换标签栏 `<HeaderTabs />`** 必须作为 `card-header` 的第一个子元素，占据整行（`width: 100%`），标题和操作按钮在第二行（见第26节）
 
-**强制规则**：区块标题（如"审核订单"、"采购中订单"等）不使用灰色背景，不使用 uppercase，标题直接融入卡片白色主体，靠字号和字重区分层级。
+**强制规则**：区块标题（如"审核订单"、"采购中订单"等）不使用灰色背景，不使用 uppercase，标题直接融入卡片白色主体，靠字号和字重区分层级。所有页面的 `card-header` 必须添加 `flex-wrap: wrap` 以支持 HeaderTabs 换行布局。
 
 ### 5. 多栏主体（Body Grid，按需使用）
 - 仅在页面内容适合多栏并排时使用，单栏页面无需 grid
@@ -208,8 +228,8 @@ type: reference
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 16px 48px rgba(0,0,0,0.12);
-  transform: translateY(-2px);
+  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
+  transform: translateY(-6px);
 }
 ```
 
@@ -445,7 +465,181 @@ input::placeholder {
 - focus：`border-color: var(--color-primary-400); background: white; box-shadow: 0 0 0 4px rgba(0, 148, 191, 0.1)`
 - 关联字段双列：`display: grid; grid-template-columns: 1fr 1fr; gap: 16px`
 
-## 三、布局模式：沉浸式全屏
+### 25. 侧边栏卡片（Sidebar Card）
+
+侧边栏整体作为**浮动卡片**，与主内容区之间留有间隙，通过 `app-layout` 背景色透出形成视觉分隔。
+
+```css
+.sb-sidebar {
+  width: 280px;
+  min-width: 68px;
+  flex-shrink: 0;
+  background: white;
+  border-radius: 18px;
+  border: 1px solid var(--color-border-light);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
+  display: flex;
+  flex-direction: column;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+  height: calc(100vh - 24px);
+  margin: 12px;
+}
+.sb-sidebar:hover {
+  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
+  transform: translateY(-6px);
+}
+```
+
+**导航项卡片**：每个导航项也是独立的白色小卡片，hover 时微浮 + 阴影加深：
+```css
+.sb-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  margin-bottom: 4px;
+  border-radius: 12px;
+  text-decoration: none;
+  color: var(--color-text);
+  font-weight: 600;
+  font-size: 14px;
+  background: white;
+  border: 1px solid var(--color-border-light);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
+  transition: all 0.3s ease;
+}
+.sb-nav-item:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 12px 32px rgba(0,0,0,0.1);
+  transform: translateY(-1px);
+  border-color: var(--color-primary-200);
+}
+.sb-nav-item.active {
+  background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
+  border-color: var(--color-primary-300);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 12px 32px rgba(0,0,0,0.1);
+}
+```
+
+**导航图标**：32×32px 圆角方块，`border-radius: 9px`，背景 `var(--color-surface)`，激活态渐变：
+```css
+.sb-nav-icon {
+  width: 32px; height: 32px; border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; color: var(--color-text-secondary);
+  background: var(--color-surface); flex-shrink: 0;
+  transition: all 0.3s ease;
+}
+.sb-nav-icon-active {
+  background: linear-gradient(135deg, var(--color-primary-100), var(--color-primary-200));
+  color: var(--color-primary-600);
+}
+```
+
+**折叠态**：`width: 68px`，导航项居中仅显示图标，图标放大到 36×36px / `border-radius: 10px`。
+
+**移动端**：`position: fixed; margin: 0; border-radius: 0; height: 100vh`，折叠态 `width: 0; min-width: 0; overflow: hidden`。
+
+**强制规则**：
+- 侧边栏整体必须是浮动卡片（`margin: 12px; border-radius: 18px`），禁止贴边
+- 导航项必须是白底卡片（`background: white; border + box-shadow`），禁止使用透明/无边框模式
+- 激活态必须使用渐变背景（`linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100))`）
+
+### 26. 快捷切换标签栏（HeaderTabs）
+
+嵌入在卡片头部标题上方的紧凑标签栏，用于多页面快速切换。仅当打开 2+ 页面时显示。
+
+**组件**：`HeaderTabs.vue`，Pinia Store：`useTabStore`（`stores/tabs.ts`）
+
+**布局规则**：
+- `<HeaderTabs />` 作为 `card-header` 的**第一个子元素**
+- `card-header` 必须设置 `flex-wrap: wrap`
+- HeaderTabs 占据第一行（`width: 100%`），标题 + 操作按钮占据第二行
+
+```css
+.ht-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  flex-shrink: 0;
+  width: 100%;
+  margin-bottom: 6px;
+  margin-top: -10px;
+}
+```
+
+**标签样式**（与侧边栏导航项造型一致，白底+双层阴影+渐变激活态）：
+```css
+.ht-tab {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  background: white;
+  border: 1px solid var(--color-border-light);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
+  text-decoration: none;
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: all 0.3s ease;
+  flex-shrink: 0;
+}
+.ht-tab:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 12px 32px rgba(0,0,0,0.1);
+  transform: translateY(-1px);
+  border-color: var(--color-primary-200);
+  color: var(--color-primary-600);
+}
+.ht-tab.active {
+  background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
+  border-color: var(--color-primary-300);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 12px 32px rgba(0,0,0,0.1);
+  color: var(--color-primary-700);
+}
+```
+
+**关闭按钮**：
+```css
+.ht-tab-close {
+  width: 16px; height: 16px; border-radius: 50%;
+  border: none; background: transparent;
+  color: var(--color-text-muted); font-size: 9px;
+  transition: all 0.2s ease; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.ht-tab-close:hover {
+  background: var(--color-danger-50);
+  color: var(--color-danger-500);
+}
+```
+
+**交互规则**：
+- 标签使用 `<router-link>` 导航，关闭按钮使用 `@click.prevent.stop` 阻止冒泡
+- 关闭当前激活标签时，自动切换到相邻标签
+- 返回主页（`/dashboard`）时自动清除所有标签
+- 最大标签数 15，超出时移除最早的标签
+- 标签图标：11px，标签文字最大宽度 100px + `text-overflow: ellipsis`
+
+**HTML 模板**：
+```html
+<div class="{prefix}-card-header">
+  <HeaderTabs />  <!-- 第一个子元素，占据整行 -->
+  <div class="{prefix}-card-title-group">...</div>
+  <div class="{prefix}-header-actions">...</div>
+</div>
+```
+
+**强制规则**：
+- 所有页面卡片头部必须包含 `<HeaderTabs />`
+- HeaderTabs 必须是 card-header 的第一个子元素
+- card-header 必须设置 `flex-wrap: wrap`
+- 禁止将 HeaderTabs 放在 header-actions 内或作为独立组件使用
+
+## 三、布局模式：沉浸式全屏 + 浮动卡片布局
 
 所有页面采用**隐藏顶部导航栏、保留侧边栏**的沉浸式全屏布局：
 
@@ -454,14 +648,49 @@ input::placeholder {
 3. 侧边栏始终显示（不隐藏）
 4. 侧边栏 LOGO 可点击返回首页：`<router-link to="/dashboard" class="sidebar-logo">`
 5. 页面自身不设"返回首页"按钮，依赖侧边栏 LOGO
-6. `content-container` 使用 `no-padding` 类（padding: 0）
-7. 页面容器使用 `height: 100vh` 填满视口
+6. `content-container` 使用 `no-padding` 类（padding: 0, overflow: visible 允许卡片阴影溢出）
+7. 页面容器使用 `height: 100%` 填充父容器（禁止 `100vh`，避免双重滚动）
+
+**防双重滚动规则**：
+- 所有页面容器必须使用 `height: 100%`，禁止 `height: 100vh`
+- `.content-container.no-padding` 设置 `overflow: visible`（允许卡片阴影溢出 + 避免双重滚动）
+- `.main-content.immersive` 设置 `overflow: visible`（hideHeader 模式下允许阴影溢出）
+- 卡片内部滚动由 `.{prefix}-card-main` 的 `overflow: hidden` + `.{prefix}-body` 的 `overflow-y: auto` 管理
+- 禁止在 `.{prefix}-card` 上设置 `overflow: hidden`（会裁剪悬浮阴影）
+
+**浮动卡片间距布局**：
+- `app-layout` 设置 `background: var(--color-surface)` 作为间隙底色
+- 侧边栏：`margin: 12px; border-radius: 18px` 形成浮动卡片（见第25节）
+- 主内容区：`border-radius: 14px; margin: 4px 4px 4px 0` 形成独立卡片
+- 两者之间的间隙通过 `app-layout` 的 `var(--color-surface)` 背景色透出，形成视觉分隔
+
+```css
+.app-layout {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+  position: relative;
+  background: var(--color-surface);
+  box-sizing: border-box;
+}
+.main-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(135deg, var(--color-surface) 0%, var(--color-border-light) 100%);
+  border-radius: 14px;
+  overflow: hidden;
+  margin: 4px 4px 4px 0;
+}
+```
 
 **注意**：布局方式（单栏/双栏/三栏/多卡片）不强制，根据页面具体内容灵活选择。
 
 ## 四、CSS 命名规范
 
 - 每个页面用 2-3 字母前缀 + 短横线：`.mc-container` / `.sp-header` / `.pc-card`
+- 布局组件前缀：`.sb-` 侧边栏（Sidebar）、`.ht-` 快捷切换标签（HeaderTabs）、`.app-` 全局布局
 - BEM 简化风格：前缀-元素名，如 `mc-card-header`、`mc-search-input`
 - 所有样式 `scoped`，不使用全局 CSS
 - 颜色全部用 CSS 变量（`var(--color-primary-*)`），不硬编码色值
@@ -474,8 +703,9 @@ input::placeholder {
 <div class="{prefix}-container">
   <div class="{prefix}-card {prefix}-card-main">
 
-    <!-- 卡片头部：标题 + 操作 -->
+    <!-- 卡片头部：快捷切换标签 + 标题 + 操作 -->
     <div class="{prefix}-card-header">
+      <HeaderTabs />
       <div class="{prefix}-card-title-group">
         <div class="{prefix}-icon-box {prefix}-icon-blue">
           <i class="fas fa-xxx" />

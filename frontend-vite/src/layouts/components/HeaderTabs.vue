@@ -1,15 +1,15 @@
 <template>
-  <div v-if="tabStore.tabs.length > 0" class="tb-bar">
+  <div v-if="tabStore.tabs.length > 1" class="ht-bar">
     <router-link
       v-for="tab in tabStore.tabs"
       :key="tab.path"
       :to="tab.path"
-      :class="['tb-tab', { active: tab.path === tabStore.activePath }]"
+      :class="['ht-tab', { active: tab.path === tabStore.activePath }]"
     >
-      <i v-if="iconMap[tab.icon]" :class="iconMap[tab.icon]" class="tb-tab-icon" />
-      <span class="tb-tab-label">{{ tab.title }}</span>
+      <i v-if="iconMap[tab.icon]" :class="iconMap[tab.icon]" class="ht-tab-icon" />
+      <span class="ht-tab-label">{{ tab.title }}</span>
       <button
-        class="tb-tab-close"
+        class="ht-tab-close"
         @click.prevent.stop="handleClose(tab.path)"
       >
         <i class="fas fa-xmark" />
@@ -67,91 +67,83 @@ const iconMap: Record<string, string> = {
 </script>
 
 <style scoped>
-.tb-bar {
+.ht-bar {
   display: flex;
   align-items: center;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--color-border-light);
-  background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(8px);
-  flex-shrink: 0;
   gap: 4px;
   overflow-x: auto;
+  flex-shrink: 0;
+  width: 100%;
+  margin-bottom: 6px;
+  margin-top: -10px;
 }
 
-.tb-bar::-webkit-scrollbar {
+.ht-bar::-webkit-scrollbar {
   height: 0;
 }
 
-.tb-tab {
+.ht-tab {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
-  border-radius: 9px;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: 7px;
   background: white;
   border: 1px solid var(--color-border-light);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
   text-decoration: none;
   color: var(--color-text);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
-  transition: all 0.2s ease;
+  transition: all 0.3s ease;
   flex-shrink: 0;
 }
 
-.tb-tab:hover {
-  border-color: var(--color-primary-200);
-  box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+.ht-tab:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 12px 32px rgba(0,0,0,0.1);
   transform: translateY(-1px);
-}
-
-.tb-tab.active {
-  background: var(--color-primary-50);
-  border-color: var(--color-primary-400);
-  color: var(--color-primary-700);
-  box-shadow: 0 2px 6px rgba(0,0,0,0.06);
-}
-
-.tb-tab-icon {
-  font-size: 12px;
-  flex-shrink: 0;
-}
-
-.tb-tab.active .tb-tab-icon {
+  border-color: var(--color-primary-200);
   color: var(--color-primary-600);
 }
 
-.tb-tab-label {
-  max-width: 120px;
+.ht-tab.active {
+  background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
+  border-color: var(--color-primary-300);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 12px 32px rgba(0,0,0,0.1);
+  color: var(--color-primary-700);
+}
+
+.ht-tab-icon {
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.ht-tab-label {
+  max-width: 100px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.tb-tab-close {
+.ht-tab-close {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   border: none;
   background: transparent;
-  color: var(--color-text-secondary);
+  color: var(--color-text-muted);
   cursor: pointer;
-  font-size: 10px;
+  font-size: 9px;
   transition: all 0.2s ease;
   flex-shrink: 0;
   padding: 0;
 }
 
-.tb-tab-close:hover {
+.ht-tab-close:hover {
   background: var(--color-danger-50);
   color: var(--color-danger-500);
-}
-
-.tb-tab.active .tb-tab-close:hover {
-  background: var(--color-danger-100);
 }
 </style>

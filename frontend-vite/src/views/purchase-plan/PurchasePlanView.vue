@@ -340,8 +340,8 @@ function handlePlanEdited() {
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .pp-kpi:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
+  transform: translateY(-6px);
+  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
 }
 .pp-kpi-icon {
   width: 42px; height: 42px;

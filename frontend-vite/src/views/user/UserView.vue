@@ -3,15 +3,7 @@
     <div class="us-card us-card-main">
       <!-- 卡片头部 -->
       <div class="us-card-header">
-        <div class="us-card-title-group">
-          <div class="us-icon-box us-icon-blue">
-            <i class="fas fa-users-cog" />
-          </div>
-          <div>
-            <h3>用户管理</h3>
-            <small>管理系统用户和权限分配</small>
-          </div>
-        </div>
+        <HeaderTabs />
       </div>
 
       <!-- 双栏主体 -->
@@ -141,6 +133,7 @@ import UiCheckbox from '@/components/ui/UiCheckbox.vue'
 import { showToast } from '@/composables/useToast'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
+import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 
 // Recursive permission tree node
 const PermNode = defineComponent({
@@ -300,7 +293,7 @@ async function handleSavePermission() {
 <style scoped>
 /* Container */
 .us-container {
-  padding: 12px;
+  padding: 8px;
   margin: 0 auto;
   height: 100%;
   display: flex;
@@ -311,15 +304,15 @@ async function handleSavePermission() {
 /* Card */
 .us-card {
   background: white;
-  border-radius: 14px;
+  border-radius: 18px;
   border: 1px solid var(--color-border-light, #e2e8f0);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
 }
 .us-card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 16px 48px rgba(0,0,0,0.12);
-  transform: translateY(-2px);
+  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
+  transform: translateY(-6px);
 }
 .us-card-main {
   flex: 1;
@@ -331,10 +324,16 @@ async function handleSavePermission() {
 /* Card Header */
 .us-card-header {
   display: flex;
+  flex-wrap: nowrap;
   justify-content: space-between;
   align-items: center;
-  padding: 14px 24px 10px;
+  padding: 10px 24px;
   border-bottom: 1px solid var(--color-border-light, #f1f5f9);
+  gap: 12px;
+}
+.us-card-header :deep(.ht-bar) {
+  width: auto;
+  margin: 0;
 }
 .us-card-title-group {
   display: flex;

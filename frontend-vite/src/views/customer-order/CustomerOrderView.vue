@@ -3,13 +3,7 @@
     <div class="co-card co-card-main">
       <!-- 卡片头部 -->
       <div class="co-card-header">
-        <div class="co-card-title-group">
-          <div class="co-icon-box co-icon-blue"><i class="fas fa-clipboard-list"></i></div>
-          <div>
-            <h3>客户订单</h3>
-            <small>录入订单与备货信息，管理历史记录</small>
-          </div>
-        </div>
+        <HeaderTabs />
         <div class="co-header-actions">
           <div class="co-tab-bar">
             <button :class="['co-tab-btn', activeTab === 'input' && 'active']" @click="activeTab = 'input'">
@@ -71,16 +65,18 @@
                   @focus="onProductFocus"
                   @blur="hideSuggestions"
                 />
-                <div v-if="suggestions.length && showSuggestions" class="co-autocomplete">
-                  <div
-                    v-for="p in suggestions"
-                    :key="p.id"
-                    class="co-autocomplete-item"
-                    @mousedown.prevent="selectProduct(p)"
-                  >
-                    {{ p.name || p.value }}
+                <Transition name="co-dropdown">
+                  <div v-if="suggestions.length && showSuggestions" class="co-autocomplete">
+                    <div
+                      v-for="p in suggestions"
+                      :key="p.id"
+                      class="co-autocomplete-item"
+                      @mousedown.prevent="selectProduct(p)"
+                    >
+                      {{ p.name || p.value }}
+                    </div>
                   </div>
-                </div>
+                </Transition>
               </div>
 
               <div class="co-form-row">
@@ -484,20 +480,22 @@
             @focus="onEditProductFocus"
             @blur="hideEditSuggestions"
           />
-          <div v-if="editSuggestions.length && showEditSuggestions" class="co-autocomplete">
-            <div
-              v-for="p in editSuggestions"
-              :key="p.id"
-              class="co-autocomplete-item"
-              @mousedown.prevent="
-                editSubmittedData.productId = p.id;
-                editSubmittedData.productSearch = p.value;
-                showEditSuggestions = false
-              "
-            >
-              {{ p.value }}
+          <Transition name="co-dropdown">
+            <div v-if="editSuggestions.length && showEditSuggestions" class="co-autocomplete">
+              <div
+                v-for="p in editSuggestions"
+                :key="p.id"
+                class="co-autocomplete-item"
+                @mousedown.prevent="
+                  editSubmittedData.productId = p.id;
+                  editSubmittedData.productSearch = p.value;
+                  showEditSuggestions = false
+                "
+              >
+                {{ p.value }}
+              </div>
             </div>
-          </div>
+          </Transition>
         </div>
         <div class="co-form-group">
           <label class="co-label">数量</label>
@@ -537,6 +535,7 @@ import UiDatePicker from '@/components/ui/UiDatePicker.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiBadge from '@/components/ui/UiBadge.vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
+import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 import UiImage from '@/components/ui/UiImage.vue'
 import UiSelect from '@/components/ui/UiSelect.vue'
 import { showToast } from '@/composables/useToast'
@@ -988,7 +987,7 @@ async function handleImport() {
 .form-number-input {
   width: 100%;
   padding: 8px 12px;
-  border: 2px solid var(--color-border-light, #e2e8f0);
+  border: 2px solid var(--color-border, #cbd5e1);
   border-radius: 10px;
   font-size: 14px;
   color: var(--color-text);
@@ -1009,7 +1008,7 @@ async function handleImport() {
 .form-text-input {
   width: 100%;
   padding: 8px 12px;
-  border: 2px solid var(--color-border-light, #e2e8f0);
+  border: 2px solid var(--color-border, #cbd5e1);
   border-radius: 10px;
   font-size: 14px;
   color: var(--color-text);
@@ -1026,7 +1025,7 @@ async function handleImport() {
 
 /* ===== 页面容器 ===== */
 .co-container {
-  padding: 12px;
+  padding: 8px;
   margin: 0 auto;
   height: 100%;
   display: flex;
@@ -1037,7 +1036,7 @@ async function handleImport() {
 /* ===== 主卡片 ===== */
 .co-card {
   background: white;
-  border-radius: 14px;
+  border-radius: 18px;
   border: 1px solid var(--color-border-light, #e2e8f0);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
   overflow: hidden;
@@ -1050,18 +1049,24 @@ async function handleImport() {
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .co-card-main:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 16px 48px rgba(0,0,0,0.12);
-  transform: translateY(-2px);
+  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
+  transform: translateY(-6px);
 }
 
 /* ===== 卡片头部 ===== */
 .co-card-header {
-  padding: 14px 24px 10px;
+  padding: 10px 24px;
   background: transparent;
   display: flex;
+  flex-wrap: nowrap;
   justify-content: space-between;
   align-items: center;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
+  border-bottom: 2px solid var(--color-border, #cbd5e1);
+  gap: 12px;
+}
+.co-card-header :deep(.ht-bar) {
+  width: auto;
+  margin: 0;
 }
 .co-card-title-group {
   display: flex;
@@ -1161,7 +1166,7 @@ async function handleImport() {
   overflow: hidden;
 }
 .co-col + .co-col {
-  border-left: 1px solid var(--color-border-light, #f1f5f9);
+  border-left: 2px solid var(--color-border, #cbd5e1);
 }
 
 /* ===== 栏目标题 ===== */
@@ -1174,7 +1179,7 @@ async function handleImport() {
   font-size: 14px;
   font-weight: 700;
   color: var(--color-text);
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
+  border-bottom: 1px solid var(--color-border, #cbd5e1);
   flex-shrink: 0;
 }
 .co-col-title i {
@@ -1337,7 +1342,7 @@ async function handleImport() {
 }
 .co-textarea {
   width: 100%;
-  border: 2px solid var(--color-border-light, #e2e8f0);
+  border: 2px solid var(--color-border, #cbd5e1);
   border-radius: 10px;
   padding: 8px 12px;
   font-size: 14px;
@@ -1533,7 +1538,7 @@ async function handleImport() {
   padding: 10px 14px;
   cursor: pointer;
   transition: all 0.2s ease;
-  border-bottom: 1px solid var(--color-border-light);
+  border-bottom: 1px solid var(--color-border-light, #e2e8f0);
   font-size: 13px;
 }
 .co-autocomplete-item:last-child {
@@ -1544,11 +1549,35 @@ async function handleImport() {
   transform: translateX(4px);
 }
 
+/* ===== Dropdown Animation ===== */
+.co-dropdown-enter-active {
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.co-dropdown-leave-active {
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.co-dropdown-enter-from {
+  opacity: 0;
+  transform: translateY(-8px) scale(0.96);
+}
+.co-dropdown-enter-to {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+.co-dropdown-leave-from {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+.co-dropdown-leave-to {
+  opacity: 0;
+  transform: translateY(-6px) scale(0.97);
+}
+
 /* ===== 提交栏 ===== */
 .co-submit-bar {
   text-align: center;
   padding: 16px 24px;
-  border-top: 1px solid var(--color-border-light, #f1f5f9);
+  border-top: 1px solid var(--color-border, #cbd5e1);
 }
 
 /* ===== 折叠 ===== */
@@ -1571,7 +1600,7 @@ async function handleImport() {
   align-items: center;
   padding: 10px 14px;
   background: white;
-  border-bottom: 2px solid var(--color-border-light);
+  border-bottom: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: 10px 10px 0 0;
   cursor: pointer;
   transition: background 0.2s ease;
@@ -1600,12 +1629,12 @@ async function handleImport() {
   font-size: 12px;
   padding: 10px 14px;
   text-align: left;
-  border-bottom: 2px solid var(--color-border-light);
+  border-bottom: 2px solid var(--color-border-light, #e2e8f0);
 }
 .co-table td {
   padding: 10px 14px;
   vertical-align: middle;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
+  border-bottom: 1px solid var(--color-border-light, #e2e8f0);
   transition: background 0.2s ease;
 }
 .co-table tr:hover td {

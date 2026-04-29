@@ -2,7 +2,7 @@
   <div class="app-layout">
     <div v-if="isMobileOverlay" class="sidebar-overlay" @click="isCollapsed = true" />
     <AppSidebar :collapsed="isCollapsed" />
-    <div class="main-content" :class="{ 'no-header': hideChrome }">
+    <div class="main-content" :class="{ 'no-header': hideChrome, 'immersive': hideChrome }">
       <header v-if="!hideChrome" class="top-header">
         <div class="header-left">
           <button class="menu-toggle-btn" @click="isCollapsed = !isCollapsed">
@@ -37,7 +37,6 @@
           </button>
         </div>
       </header>
-      <TabBar />
       <div class="content-container" :class="{ 'no-padding': hideChrome }">
         <router-view />
       </div>
@@ -52,7 +51,6 @@ import { authApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { useTabStore } from '@/stores/tabs'
 import AppSidebar from './components/AppSidebar.vue'
-import TabBar from './components/TabBar.vue'
 
 const MOBILE_BREAKPOINT = 768
 
@@ -147,12 +145,16 @@ async function handleLogout() {
 .main-content {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: linear-gradient(135deg, var(--color-surface) 0%, var(--color-border-light) 100%);
   border-radius: 14px;
   overflow: hidden;
   margin: 4px 4px 4px 0;
+}
+.main-content.immersive {
+  overflow: visible;
 }
 
 .top-header {
@@ -362,10 +364,11 @@ async function handleLogout() {
   min-height: 0;
   padding: 24px;
   overflow-y: auto;
+  box-sizing: border-box;
 }
 
 .content-container.no-padding {
   padding: 0;
-  overflow-y: hidden;
+  overflow: visible;
 }
 </style>

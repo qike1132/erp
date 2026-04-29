@@ -362,8 +362,8 @@ function logBadgeClass(t: string): string {
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .ci-stat-card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 16px 48px rgba(0,0,0,0.12);
-  transform: translateY(-2px);
+  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
+  transform: translateY(-6px);
 }
 .ci-stat-value {
   font-size: 28px;

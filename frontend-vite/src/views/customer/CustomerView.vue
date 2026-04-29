@@ -3,20 +3,14 @@
     <div class="cu-card cu-card-main">
       <!-- 卡片头部 -->
       <div class="cu-card-header">
-        <div class="cu-card-title-group">
-          <div class="cu-icon-box cu-icon-blue">
-            <i class="fas fa-building" />
-          </div>
-          <div>
-            <h3>客户管理</h3>
-            <small>管理所有客户信息与状态</small>
-          </div>
-        </div>
+        <HeaderTabs />
         <div class="cu-header-actions">
           <span class="cu-count-badge">{{ customers.length }}</span>
-          <button class="cu-action-btn cu-action-primary" @click="openForm('add')">
-            <i class="fas fa-plus" style="margin-right: 4px; font-size: 11px" />新建客户
-          </button>
+          <div class="cu-tabs">
+            <button class="cu-tab-btn active" @click="openForm('add')">
+              <i class="fas fa-plus" /> 新建客户
+            </button>
+          </div>
         </div>
       </div>
 
@@ -164,6 +158,7 @@ import type { Customer } from '@/types'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
+import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 
 // ===== 列表查询 =====
@@ -301,7 +296,7 @@ async function handleDelete(row: Customer) {
 <style scoped>
 /* Container */
 .cu-container {
-  padding: 12px;
+  padding: 8px;
   margin: 0 auto;
   height: 100%;
   display: flex;
@@ -312,15 +307,15 @@ async function handleDelete(row: Customer) {
 /* Card */
 .cu-card {
   background: white;
-  border-radius: 14px;
+  border-radius: 18px;
   border: 1px solid var(--color-border-light, #e2e8f0);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
 }
 .cu-card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 16px 48px rgba(0,0,0,0.12);
-  transform: translateY(-2px);
+  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
+  transform: translateY(-6px);
 }
 .cu-card-main {
   flex: 1;
@@ -332,10 +327,16 @@ async function handleDelete(row: Customer) {
 /* Card Header */
 .cu-card-header {
   display: flex;
+  flex-wrap: nowrap;
   justify-content: space-between;
   align-items: center;
-  padding: 14px 24px 10px;
+  padding: 10px 24px;
   border-bottom: 1px solid var(--color-border-light, #f1f5f9);
+  gap: 12px;
+}
+.cu-card-header :deep(.ht-bar) {
+  width: auto;
+  margin: 0;
 }
 .cu-card-title-group {
   display: flex;
@@ -394,29 +395,39 @@ async function handleDelete(row: Customer) {
   font-weight: 600;
 }
 
-/* Action Button */
-.cu-action-btn {
-  padding: 7px 14px;
-  border: 2px solid var(--color-border-light, #e2e8f0);
-  border-radius: 9px;
-  background: white;
-  font-size: 12px;
+/* Tabs */
+.cu-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--color-surface, #f1f5f9);
+  padding: 4px;
+  border-radius: 11px;
+}
+
+.cu-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 18px;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
   font-weight: 600;
+  color: var(--color-text-secondary);
+  background: transparent;
   cursor: pointer;
   transition: all 0.3s ease;
-  color: var(--color-text-secondary);
 }
-.cu-action-primary {
+
+.cu-tab-btn:hover {
   color: var(--color-primary-600);
+  background: rgba(255, 255, 255, 0.6);
 }
-.cu-action-primary:hover:not(:disabled) {
-  background: var(--color-primary-50);
-  border-color: var(--color-primary-300);
-  transform: translateY(-1px);
-}
-.cu-action-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+
+.cu-tab-btn.active {
+  background: white;
+  color: var(--color-primary-600);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
 }
 
 /* Metrics */

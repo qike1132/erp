@@ -3,6 +3,7 @@
     <div class="sk-card sk-card-main">
       <!-- 卡片头部 -->
       <div class="sk-card-header">
+        <HeaderTabs />
         <div class="sk-card-title-group">
           <div class="sk-icon-box sk-icon-blue">
             <i class="fas fa-warehouse" />
@@ -24,12 +25,13 @@
 
 <script setup lang="ts">
 import InventoryTab from './InventoryTab.vue'
+import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 </script>
 
 <style scoped>
 /* Container */
 .sk-container {
-  padding: 12px;
+  padding: 8px;
   margin: 0 auto;
   height: 100%;
   display: flex;
@@ -40,15 +42,15 @@ import InventoryTab from './InventoryTab.vue'
 /* Card */
 .sk-card {
   background: white;
-  border-radius: 14px;
+  border-radius: 18px;
   border: 1px solid var(--color-border-light, #e2e8f0);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
 }
 .sk-card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 16px 48px rgba(0,0,0,0.12);
-  transform: translateY(-2px);
+  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
+  transform: translateY(-6px);
 }
 .sk-card-main {
   flex: 1;
@@ -60,6 +62,7 @@ import InventoryTab from './InventoryTab.vue'
 /* Card Header */
 .sk-card-header {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   padding: 14px 24px 10px;

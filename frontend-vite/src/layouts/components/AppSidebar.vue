@@ -105,21 +105,8 @@ const iconMap: Record<string, string> = {
 }
 
 .sb-sidebar:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 16px 48px rgba(0,0,0,0.12);
-  transform: translateY(-2px);
-}
-
-.sb-sidebar::-webkit-scrollbar {
-  width: 6px;
-}
-
-.sb-sidebar::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.sb-sidebar::-webkit-scrollbar-thumb {
-  background: var(--color-primary-200);
-  border-radius: 3px;
+  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
+  transform: translateY(-6px);
 }
 
 .sb-sidebar.collapsed {
@@ -204,6 +191,11 @@ const iconMap: Record<string, string> = {
   flex: 1;
   padding: 14px 12px;
   overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.sb-nav::-webkit-scrollbar {
+  display: none;
 }
 
 .sb-section {
