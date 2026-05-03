@@ -6,14 +6,14 @@
 
 import re
 from datetime import datetime
-from typing import List, Dict, Any, Optional, Tuple
 from functools import wraps
+from typing import Any
 
 try:
-    import pandas as pd
+    import polars as pl
     from openpyxl import load_workbook
-except ImportError:
-    raise ImportError("请安装 pandas 和 openpyxl: pip install pandas openpyxl")
+except ImportError as err:
+    raise ImportError("请安装 polars 和 openpyxl: pip install polars openpyxl") from err
 
 try:
     from charset_normalizer import from_bytes as cn_from_bytes
@@ -26,49 +26,49 @@ from sqlalchemy.orm import Session
 
 class BatchUploadError(Exception):
     """批量上传异常类"""
-    def __init__(self, message: str, errors: List[Dict[str, Any]] = None):
+    def __init__(self, message: str, errors: list[dict[str, Any]] = None):
         super().__init__(message)
         self.message = message
         self.errors = errors or []
 
 
-def validate_customer_name(customer_name: str) -> Tuple[bool, str]:
+def validate_customer_name(customer_name: str) -> tuple[bool, str]:
     """
     验证客户名称
-    
+
     参数:
         customer_name: 客户名称字符串
-        
+
     返回:
         Tuple[bool, str]: (是否有效，错误信息)
     """
     if not customer_name or not customer_name.strip():
         return False, "客户名称不能为空"
-    
+
     customer_name = customer_name.strip()
-    
+
     if len(customer_name) < 2:
         return False, "客户名称至少需要 2 个字符"
-    
+
     if len(customer_name) > 100:
         return False, "客户名称不能超过 100 个字符"
-    
+
     pattern = r'^[\u4e00-\u9fa5a-zA-Z0-9\s\-\_\.\,\(\)\（\）]+$'
     if not re.match(pattern, customer_name):
         return False, "客户名称包含非法字符"
-    
+
     return True, ""
 
 
-def validate_product(product_identifier: str, db_session: Session, Product_model=None) -> Tuple[bool, Optional[int], str]:
+def validate_product(product_identifier: str, db_session: Session, Product_model=None) -> tuple[bool, int | None, str]:
     """
     验证产品名称并返回产品 ID
-    
+
     参数:
         product_identifier: 产品名称或条形码
         db_session: SQLAlchemy Session
         Product_model: Product 模型类（可选）
-        
+
     返回:
         Tuple[bool, Optional[int], str]: (是否有效，产品 ID, 错误信息)
     """
@@ -86,52 +86,52 @@ def validate_product(product_identifier: str, db_session: Session, Product_model
     try:
         if Product_model is None:
             from fastapi_app.shared_models.product import Product as Product_model
-        
+
         product = db_session.query(Product_model).filter(
-            (Product_model.name == product_identifier) | 
+            (Product_model.name == product_identifier) |
             (Product_model.barcode == product_identifier)
         ).first()
-        
+
         if not product:
             return False, None, f"产品不存在：{product_identifier}"
-        
+
         return True, product.id, ""
-        
+
     except SQLAlchemyError as e:
         return False, None, f"数据库查询失败：{str(e)}"
     except Exception as e:
         return False, None, f"验证产品时发生错误：{str(e)}"
 
 
-def validate_quantity(quantity: Any, field_name: str = "数量") -> Tuple[bool, Optional[int], str]:
+def validate_quantity(quantity: Any, field_name: str = "数量") -> tuple[bool, int | None, str]:
     """验证数量"""
     if quantity is None or (isinstance(quantity, str) and not quantity.strip()):
         return False, None, f"{field_name}不能为空"
-    
+
     try:
         quantity_int = int(quantity)
-        
+
         if quantity_int <= 0:
             return False, None, f"{field_name}必须大于 0"
-        
+
         return True, quantity_int, ""
-        
+
     except ValueError:
         return False, None, f"{field_name}必须是有效的整数"
     except Exception as e:
         return False, None, f"验证{field_name}时发生错误：{str(e)}"
 
 
-def validate_date(date_value: Any, field_name: str = "日期", 
-                  date_format: str = None) -> Tuple[bool, Optional[datetime], str]:
+def validate_date(date_value: Any, field_name: str = "日期",
+                  date_format: str = None) -> tuple[bool, datetime | None, str]:
     """验证日期格式"""
     if date_value is None or (isinstance(date_value, str) and not date_value.strip()):
         return False, None, f"{field_name}不能为空"
-    
+
     try:
         if isinstance(date_value, datetime):
             return True, date_value, ""
-        
+
         if isinstance(date_value, (int, float)):
             try:
                 from datetime import timedelta
@@ -140,9 +140,9 @@ def validate_date(date_value: Any, field_name: str = "日期",
                 return True, date_value, ""
             except Exception:
                 return False, None, f"{field_name}格式不正确"
-        
+
         date_str = str(date_value).strip()
-        
+
         formats = [
             "%Y-%m-%d",
             "%Y/%m/%d",
@@ -153,7 +153,7 @@ def validate_date(date_value: Any, field_name: str = "日期",
             "%m-%d-%Y",
             "%m/%d/%Y",
         ]
-        
+
         chinese_pattern = r'(\d{4})年(\d{1,2})月(\d{1,2})日'
         chinese_match = re.match(chinese_pattern, date_str)
         if chinese_match:
@@ -163,7 +163,7 @@ def validate_date(date_value: Any, field_name: str = "日期",
                 return True, date_obj, ""
             except ValueError:
                 pass
-        
+
         chinese_datetime_pattern = r'(\d{4})年(\d{1,2})月(\d{1,2})日 (\d{1,2}):(\d{1,2}):(\d{1,2})'
         chinese_datetime_match = re.match(chinese_datetime_pattern, date_str)
         if chinese_datetime_match:
@@ -173,19 +173,19 @@ def validate_date(date_value: Any, field_name: str = "日期",
                 return True, date_obj, ""
             except ValueError:
                 pass
-        
+
         if date_format:
             formats.insert(0, date_format)
-        
+
         for fmt in formats:
             try:
                 date_obj = datetime.strptime(date_str, fmt)
                 return True, date_obj, ""
             except ValueError:
                 continue
-        
+
         return False, None, f"{field_name}格式不正确，支持格式：YYYY-MM-DD, YYYY/MM/DD 等"
-        
+
     except Exception as e:
         return False, None, f"验证{field_name}时发生错误：{str(e)}"
 
@@ -213,34 +213,35 @@ def detect_file_encoding(file_path: str) -> str:
         return 'utf-8'
 
 
-def parse_excel_file(file_path: str, sheet_name: str = None) -> Tuple[bool, List[Dict[str, Any]], str]:
-    """解析 Excel 文件返回数据列表"""
+def parse_excel_file(file_path: str, sheet_name: str = None) -> tuple[bool, list[dict[str, Any]], str]:
+    """解析 Excel 文件返回数据列表（Polars 引擎）"""
+    import math
     try:
         if sheet_name:
-            df = pd.read_excel(file_path, sheet_name=sheet_name)
+            df = pl.read_excel(file_path, sheet_name=sheet_name)
         else:
-            excel_file = pd.ExcelFile(file_path)
-            sheet_name = excel_file.sheet_names[0]
-            df = pd.read_excel(file_path, sheet_name=sheet_name)
-        
-        data_list = df.to_dict(orient='records')
-        
+            df = pl.read_excel(file_path)
+            if df is None or df.is_empty():
+                return False, [], "Excel 文件为空"
+
+        data_list = df.to_dicts()
+
         for row in data_list:
             for key, value in row.items():
                 if isinstance(value, str):
                     row[key] = value.strip() if value else None
-                elif pd.isna(value):
+                elif isinstance(value, float) and math.isnan(value):
                     row[key] = None
-        
+
         return True, data_list, ""
-        
+
     except FileNotFoundError:
         return False, [], f"文件不存在：{file_path}"
     except Exception as e:
         return False, [], f"解析 Excel 文件失败：{str(e)}"
 
 
-def generate_error_report(errors: List[Dict[str, Any]], 
+def generate_error_report(errors: list[dict[str, Any]],
                          output_format: str = 'text') -> str:
     """生成错误报告"""
     if not errors:
@@ -250,14 +251,14 @@ def generate_error_report(errors: List[Dict[str, Any]],
             return '<div class="alert alert-success">无错误</div>'
         else:
             return "无错误"
-    
+
     errors_by_row = {}
     for error in errors:
         row = error.get('row', 0)
         if row not in errors_by_row:
             errors_by_row[row] = []
         errors_by_row[row].append(error)
-    
+
     if output_format == 'json':
         import json
         report = {
@@ -273,14 +274,14 @@ def generate_error_report(errors: List[Dict[str, Any]],
                 'details': row_errors
             })
         return json.dumps(report, ensure_ascii=False, indent=2)
-    
+
     elif output_format == 'html':
         html = ['<div class="error-report">']
         html.append(f'<h4>发现 {len(errors)} 个错误，涉及 {len(errors_by_row)} 行</h4>')
         html.append('<table class="table table-bordered">')
         html.append('<thead><tr><th>行号</th><th>字段</th><th>值</th><th>错误信息</th></tr></thead>')
         html.append('<tbody>')
-        
+
         for row, row_errors in sorted(errors_by_row.items()):
             for i, error in enumerate(row_errors):
                 html.append('<tr>')
@@ -290,10 +291,10 @@ def generate_error_report(errors: List[Dict[str, Any]],
                 html.append(f'<td>{error.get("value", "")}</td>')
                 html.append(f'<td class="text-danger">{error.get("message", "")}</td>')
                 html.append('</tr>')
-        
+
         html.append('</tbody></table></div>')
         return ''.join(html)
-    
+
     else:
         lines = [f"发现 {len(errors)} 个错误，涉及 {len(errors_by_row)} 行", "=" * 50]
         for row, row_errors in sorted(errors_by_row.items()):
@@ -308,7 +309,7 @@ def generate_error_report(errors: List[Dict[str, Any]],
 def transactional(func):
     """
     事务处理装饰器
-    
+
     用于自动处理数据库事务，确保数据一致性。
     """
     @wraps(func)
@@ -320,10 +321,10 @@ def transactional(func):
                 break
         if not db_session and 'db_session' in kwargs:
             db_session = kwargs['db_session']
-        
+
         if not db_session:
             raise ValueError("必须提供 SQLAlchemy Session 实例")
-        
+
         try:
             result = func(*args, **kwargs)
             db_session.commit()
@@ -331,19 +332,19 @@ def transactional(func):
         except Exception as e:
             db_session.rollback()
             raise BatchUploadError(f"批量保存失败：{str(e)}") from e
-    
+
     return wrapper
 
 
-def batch_save_with_transaction(data_list: List[Dict[str, Any]], 
+def batch_save_with_transaction(data_list: list[dict[str, Any]],
                                 db_session: Session,
                                 model_class: Any,
-                                mapping: Dict[str, str],
-                                validate_func: callable = None) -> Tuple[bool, List[Dict[str, Any]], str]:
+                                mapping: dict[str, str],
+                                validate_func: callable = None) -> tuple[bool, list[dict[str, Any]], str]:
     """使用事务处理批量保存数据"""
     errors = []
     success_count = 0
-    
+
     try:
         for idx, row_data in enumerate(data_list, start=2):
             try:
@@ -357,25 +358,25 @@ def batch_save_with_transaction(data_list: List[Dict[str, Any]],
                             'message': error_msg
                         })
                         continue
-                
+
                 mapped_data = {}
                 for excel_field, model_field in mapping.items():
                     value = row_data.get(excel_field)
-                    
+
                     if value is not None:
                         mapped_data[model_field] = value
-                
+
                 unique_field = None
                 for field in ['no', 'order_no', 'stockin_no', 'stockout_no']:
                     if field in mapped_data:
                         unique_field = field
                         break
-                
+
                 if unique_field:
                     existing = db_session.query(model_class).filter_by(
                         **{unique_field: mapped_data[unique_field]}
                     ).first()
-                    
+
                     if existing:
                         for key, value in mapped_data.items():
                             setattr(existing, key, value)
@@ -385,9 +386,9 @@ def batch_save_with_transaction(data_list: List[Dict[str, Any]],
                 else:
                     new_record = model_class(**mapped_data)
                     db_session.add(new_record)
-                
+
                 success_count += 1
-                
+
             except Exception as e:
                 errors.append({
                     'row': idx,
@@ -395,15 +396,15 @@ def batch_save_with_transaction(data_list: List[Dict[str, Any]],
                     'value': str(row_data),
                     'message': str(e)
                 })
-        
+
         if errors:
             raise BatchUploadError(
                 f"部分数据保存失败，成功 {success_count} 条，失败 {len(errors)} 条",
                 errors
             )
-        
+
         return True, [], ""
-        
+
     except BatchUploadError:
         raise
     except Exception as e:
@@ -411,19 +412,19 @@ def batch_save_with_transaction(data_list: List[Dict[str, Any]],
         return False, [], f"批量保存失败：{str(e)}"
 
 
-def validate_batch_data(data_list: List[Dict[str, Any]], 
-                       validators: Dict[str, callable],
-                       db_session: Session = None) -> Tuple[bool, List[Dict[str, Any]], str]:
+def validate_batch_data(data_list: list[dict[str, Any]],
+                       validators: dict[str, callable],
+                       db_session: Session = None) -> tuple[bool, list[dict[str, Any]], str]:
     """批量验证数据"""
     errors = []
-    
+
     for idx, row_data in enumerate(data_list, start=2):
         for field, validator in validators.items():
             value = row_data.get(field)
-            
+
             if value is None:
                 continue
-            
+
             try:
                 if field == 'customer':
                     is_valid, error_msg = validator(value)
@@ -441,7 +442,7 @@ def validate_batch_data(data_list: List[Dict[str, Any]],
                         is_valid, product_id, error_msg = validator(value, db_session)
                     else:
                         is_valid, product_id, error_msg = validator(value)
-                    
+
                     if not is_valid:
                         errors.append({
                             'row': idx,
@@ -484,7 +485,7 @@ def validate_batch_data(data_list: List[Dict[str, Any]],
                                 'value': value,
                                 'message': error_msg
                             })
-                            
+
             except Exception as e:
                 errors.append({
                     'row': idx,
@@ -492,8 +493,8 @@ def validate_batch_data(data_list: List[Dict[str, Any]],
                     'value': value,
                     'message': f"验证出错：{str(e)}"
                 })
-    
+
     if errors:
         return False, errors, f"验证失败，共发现 {len(errors)} 个错误"
-    
+
     return True, [], ""

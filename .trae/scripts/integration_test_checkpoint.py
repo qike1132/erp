@@ -13,9 +13,9 @@ Agent调度检查点 - 集成测试
 日期: 2026-04-07
 """
 
+import json
 import subprocess
 import sys
-import json
 from pathlib import Path
 
 SCRIPT_PATH = Path(__file__).parent / "agent_dispatch_checkpoint.py"
@@ -33,10 +33,10 @@ def test_config_loading():
         return False
 
     try:
-        with open(RULES_PATH, 'r', encoding='utf-8') as f:
+        with open(RULES_PATH, encoding='utf-8') as f:
             config = json.load(f)
 
-        print(f"[OK] 配置文件加载成功")
+        print("[OK] 配置文件加载成功")
         print(f"    版本: {config.get('version')}")
         print(f"    名称: {config.get('name')}")
 
@@ -64,7 +64,7 @@ def test_agent_registry_integration():
         print("[FAIL] 配置文件不存在")
         return False
 
-    with open(RULES_PATH, 'r', encoding='utf-8') as f:
+    with open(RULES_PATH, encoding='utf-8') as f:
         config = json.load(f)
 
     priority_levels = config.get("priorityLevels", {})
@@ -103,7 +103,7 @@ def test_confidence_thresholds():
         print("[FAIL] 配置文件不存在")
         return False
 
-    with open(RULES_PATH, 'r', encoding='utf-8') as f:
+    with open(RULES_PATH, encoding='utf-8') as f:
         config = json.load(f)
 
     thresholds = config.get("confidenceThresholds", {})
@@ -141,7 +141,7 @@ def test_task_state_machine():
         print("[FAIL] 配置文件不存在")
         return False
 
-    with open(RULES_PATH, 'r', encoding='utf-8') as f:
+    with open(RULES_PATH, encoding='utf-8') as f:
         config = json.load(f)
 
     states = config.get("taskStates", {})

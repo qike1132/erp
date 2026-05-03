@@ -1,7 +1,9 @@
 import sys
+
 sys.path.insert(0, r'd:\erp_system')
 
 from sqlalchemy import create_engine, text
+
 from fastapi_app.core.config import settings
 
 engine = create_engine(settings.DATABASE_URL)

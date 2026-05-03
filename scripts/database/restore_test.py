@@ -9,11 +9,10 @@
 """
 
 import os
-import subprocess
 import re
+import subprocess
 import sys
 from datetime import datetime
-from pathlib import Path
 
 MYSQL_BIN = r'C:\Program Files\MySQL\MySQL Server 8.4\bin'
 MYSQL_PATH = os.path.join(MYSQL_BIN, 'mysql.exe')
@@ -70,7 +69,7 @@ class DatabaseRestoreTest:
         file_size = os.path.getsize(BACKUP_FILE)
         self.log(f'备份文件大小: {file_size:,} 字节')
 
-        with open(BACKUP_FILE, 'r', encoding='utf-8', errors='ignore') as f:
+        with open(BACKUP_FILE, encoding='utf-8', errors='ignore') as f:
             content = f.read()
 
         table_pattern = r'CREATE TABLE `?(\w+)`?'
@@ -90,7 +89,7 @@ class DatabaseRestoreTest:
         self.log('步骤2: 创建测试数据库')
         self.log('=' * 60)
 
-        self.log(f'删除已存在的测试数据库 (如果存在)...')
+        self.log('删除已存在的测试数据库 (如果存在)...')
         result = self.run_mysql_command(f'DROP DATABASE IF EXISTS {TEST_DB_NAME}')
         if result.returncode != 0:
             self.log(f'删除测试数据库失败: {result.stderr}', 'WARNING')
@@ -120,8 +119,7 @@ class DatabaseRestoreTest:
             result = subprocess.run(
                 [MYSQL_PATH, f'-u{DB_USER}', f'-p{DB_PASSWORD}', TEST_DB_NAME],
                 stdin=f,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
+                capture_output=True
             )
 
         if result.returncode == 0:

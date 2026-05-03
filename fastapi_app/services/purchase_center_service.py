@@ -11,58 +11,58 @@
 后续迭代逐步迁移。此文件保留所有原始导入路径的向后兼容。
 """
 
+import html as html_module
 import json
 import logging
-import html as html_module
-import re
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Optional
 
-from sqlalchemy import or_, and_, func, text
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from fastapi_app.shared_models import (
-    Product, Order, Customer,
-    PurchaseOrder, PurchaseOrderItem,
-    ProductMaterial, ProductFabric, ProductAccessory, ProductPackaging,
-    Supplier, ModificationLog, SavedQuery, OrderStatusLog,
-    MaterialRegistration, MaterialRegistrationItem,
-    MATERIAL_CATEGORIES,
-)
 from fastapi_app.services import escape_like
+from fastapi_app.services.purchase_bom_copy_service import (  # noqa: F401
+    batch_delete_purchase_orders,
+    copy_bom_to_product,
+    get_bom_preview,
+    search_products_for_bom_copy,
+)
+from fastapi_app.services.purchase_history_service import (  # noqa: F401
+    delete_saved_query,
+    get_modification_logs,
+    get_saved_queries,
+    get_status_logs,
+    save_query,
+    use_saved_query,
+)
 
 # 从子模块重导出已拆分的函数
 from fastapi_app.services.purchase_product_service import (  # noqa: F401
     _product_has_bom,
+    calculate_material,
+    get_product_bom,
     get_products,
     get_products_batch_bom,
-    get_search_suggestions,
     get_products_statistics,
-    get_product_bom,
+    get_search_suggestions,
     save_product_bom,
-    calculate_material,
 )
 from fastapi_app.services.purchase_supplier_service import (  # noqa: F401
-    get_suppliers,
     create_supplier,
-    update_supplier,
     delete_supplier,
     get_supplier_materials,
+    get_suppliers,
+    update_supplier,
 )
-from fastapi_app.services.purchase_history_service import (  # noqa: F401
-    get_modification_logs,
-    get_saved_queries,
-    save_query,
-    delete_saved_query,
-    use_saved_query,
-    get_status_logs,
-)
-from fastapi_app.services.purchase_bom_copy_service import (  # noqa: F401
-    search_products_for_bom_copy,
-    get_bom_preview,
-    copy_bom_to_product,
-    batch_delete_purchase_orders,
+from fastapi_app.shared_models import (
+    Customer,
+    MaterialRegistration,
+    MaterialRegistrationItem,
+    ModificationLog,
+    Order,
+    Product,
+    PurchaseOrder,
+    PurchaseOrderItem,
+    Supplier,
 )
 
 logger = logging.getLogger(__name__)
@@ -78,9 +78,9 @@ def get_customers(db: Session, *, page: int = 1, per_page: int = 20,
     query = db.query(Customer)
 
     if status == 'active':
-        query = query.filter(Customer.status == True)
+        query = query.filter(Customer.status)
     elif status == 'inactive':
-        query = query.filter(Customer.status == False)
+        query = query.filter(not Customer.status)
 
     if keyword:
         query = query.filter(Customer.name.ilike(f'%{escape_like(keyword)}%'))
@@ -147,19 +147,19 @@ def get_customers_statistics(db: Session) -> dict:
 # 采购订单 API
 # ============================================================
 
-def _generate_order_no(db: Session, prefix: str = 'CG') -> str:
+def _generate_order_no(db: Session, prefix: str = 'PO') -> str:
     today_str = datetime.now().strftime('%Y%m%d')
-    like_pattern = f'{prefix}{today_str}%'
+    like_pattern = f'{prefix}-{today_str}-%'
     last_order = db.query(PurchaseOrder).filter(
         PurchaseOrder.order_no.like(like_pattern)
     ).order_by(PurchaseOrder.order_no.desc()).first()
 
     if last_order:
-        seq = int(last_order.order_no[-4:]) + 1
+        seq = int(last_order.order_no.split('-')[-1]) + 1
     else:
         seq = 1
 
-    return f'{prefix}{today_str}{seq:04d}'
+    return f'{prefix}-{today_str}-{seq:04d}'
 
 
 def create_purchase_order(db: Session, data: dict, user_id: int, username: str) -> dict:
@@ -196,7 +196,7 @@ def create_purchase_order(db: Session, data: dict, user_id: int, username: str) 
     # 从 items_data 中提取关联信息
     source_order_id = None
     product_name = ''
-    product_quantity = Decimal('0')
+    order_quantity = None
     customer_name = data.get('customer_name', '')
     for item_data in items_data:
         if item_data.get('source_order_id'):
@@ -205,7 +205,11 @@ def create_purchase_order(db: Session, data: dict, user_id: int, username: str) 
             product_name = item_data['product_name']
         if not customer_name and item_data.get('customer_name'):
             customer_name = item_data['customer_name']
-        product_quantity += Decimal(str(item_data.get('quantity', 0)))
+        if order_quantity is None and item_data.get('order_quantity') is not None:
+            order_quantity = item_data['order_quantity']
+
+    # product_quantity 使用原始订单的产品数量（而非物料数量总和）
+    product_quantity = Decimal(str(order_quantity)) if order_quantity is not None else Decimal('0')
 
     order = PurchaseOrder(
         order_no=order_no,
@@ -244,8 +248,26 @@ def one_click_generate_order(db: Session, order_ids: list, user_id: int, usernam
         raise ValueError('未找到订单')
 
     created_orders = []
+    skipped_orders = []
+
+    # 幂等检查：批量查询已有采购订单的 source_order_id，防止并发重复创建
+    existing_po_order_ids = set(
+        row[0] for row in
+        db.query(PurchaseOrder.source_order_id)
+        .filter(PurchaseOrder.source_order_id.in_(order_ids))
+        .all()
+    )
 
     for order in orders:
+        # 跳过已有采购订单的销售订单（幂等保护）
+        if order.id in existing_po_order_ids:
+            skipped_orders.append({
+                'order_id': order.id,
+                'order_no': order.order_no,
+                'reason': '该订单已生成采购订单，不可重复审核',
+            })
+            continue
+
         product = db.query(Product).options(
             selectinload(Product.material),
             selectinload(Product.fabrics),
@@ -254,6 +276,12 @@ def one_click_generate_order(db: Session, order_ids: list, user_id: int, usernam
         ).get(order.product_id)
 
         if not product or not product.has_bom():
+            skipped_orders.append({
+                'order_id': order.id,
+                'order_no': order.order_no,
+                'product_name': product.name if product else '未知产品',
+                'reason': '该产品未配置BOM表，无法审核',
+            })
             continue
 
         all_materials = product.get_all_materials()
@@ -277,6 +305,7 @@ def one_click_generate_order(db: Session, order_ids: list, user_id: int, usernam
                 'unit': mat.get('unit', ''),
                 'supplier_name': supplier,
                 'source_order_id': order.id,
+                'order_quantity': order.quantity,
             })
 
         result = create_purchase_order(db, {
@@ -284,6 +313,16 @@ def one_click_generate_order(db: Session, order_ids: list, user_id: int, usernam
             'items': items,
         }, user_id, username)
         created_orders.append(result)
+
+        # 同步客户订单状态：审核通过 → 待出货
+        if order.status is None:
+            order.status = '待出货'
+            db.add(order)
+
+    # 如果所有订单都被跳过，抛出明确错误（必须在commit前，确保rollback有效）
+    if not created_orders and skipped_orders:
+        reasons = '；'.join(f"{s['order_no']}: {s['reason']}" for s in skipped_orders)
+        raise ValueError(reasons)
 
     db.commit()
 
@@ -309,7 +348,10 @@ def get_purchase_orders(db: Session, *, page: int = 1, per_page: int = 50,
     if customer:
         query = query.filter(PurchaseOrder.customer_name.ilike(f'%{escape_like(customer)}%'))
     if product_name:
-        query = query.filter(PurchaseOrder.items.any(PurchaseOrderItem.product_name.ilike(f'%{escape_like(product_name)}%')))
+        product_subq = db.query(PurchaseOrderItem.order_id).filter(
+            PurchaseOrderItem.product_name.ilike(f'%{escape_like(product_name)}%')
+        ).distinct().subquery()
+        query = query.filter(PurchaseOrder.id.in_(product_subq))
     if supplier:
         query = query.filter(PurchaseOrder.supplier_name.ilike(f'%{escape_like(supplier)}%'))
     if order_no:
@@ -331,18 +373,18 @@ def get_purchase_orders(db: Session, *, page: int = 1, per_page: int = 50,
     total = query.count()
     orders = query.offset((page - 1) * per_page).limit(per_page).all()
 
-    # 批量查询源订单用于回退 customer_name
     source_ids = [o.source_order_id for o in orders if o.source_order_id]
-    source_order_map = {}
+    source_order_map: dict[int, Order] = {}
     if source_ids:
-        for so in db.query(Order).filter(Order.id.in_(source_ids)).all():
-            source_order_map[so.id] = so
+        source_orders = db.query(Order).filter(Order.id.in_(source_ids)).all()
+        source_order_map = {so.id: so for so in source_orders}
 
     return {
         'orders': [
             {
                 'id': o.id,
                 'order_no': o.order_no,
+                'source_order_no': source_order_map[o.source_order_id].order_no if o.source_order_id and o.source_order_id in source_order_map else '',
                 'supplier_name': o.supplier_name,
                 'customer_name': o.customer_name or (source_order_map[o.source_order_id].customer if o.source_order_id and o.source_order_id in source_order_map else '') or (o.items[0].customer_name if o.items else '') or '',
                 'product_name': o.product_name or (o.items[0].product_name if o.items else '') or '',
@@ -490,6 +532,27 @@ def complete_purchase_order(db: Session, order_id: int, user_id: int, username: 
     ))
 
     _sync_order_to_material_registration(db, order, user_id)
+
+    # 同步客户订单状态：采购完成下单 → 已出货
+    synced_orders = []
+    if order.source_order_id:
+        source_order = db.get(Order, order.source_order_id)
+        if source_order and source_order.status == '待出货':
+            source_order.status = '已出货'
+            db.add(source_order)
+            synced_orders.append(source_order)
+    if order.source_order_ids:
+        try:
+            for sid in json.loads(order.source_order_ids):
+                if sid:
+                    so = db.get(Order, sid)
+                    if so and so.status == '待出货':
+                        so.status = '已出货'
+                        db.add(so)
+                        synced_orders.append(so)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
     db.commit()
     return {'id': order_id, 'status': '已完成'}
 
@@ -560,6 +623,7 @@ def get_completed_purchase_orders(db: Session, *, page: int = 1, per_page: int =
             {
                 'id': o.id,
                 'order_no': o.order_no,
+                'source_order_no': source_order_map[o.source_order_id].order_no if o.source_order_id and o.source_order_id in source_order_map else '',
                 'supplier_name': o.supplier_name,
                 'customer_name': o.customer_name or (source_order_map[o.source_order_id].customer if o.source_order_id and o.source_order_id in source_order_map else '') or (o.items[0].customer_name if o.items else '') or '',
                 'product_name': o.product_name or (o.items[0].product_name if o.items else '') or '',
@@ -609,7 +673,8 @@ def export_completed_orders(db: Session, data: dict) -> str:
 def get_unprocessed_orders(db: Session, *, customer: str = '', page: int = 1, per_page: int = 50) -> dict:
     """获取未审核订单（未生成采购订单的销售订单）"""
     # 使用 NOT EXISTS 替代 NOT IN，性能更优（可利用索引提前终止扫描）
-    from sqlalchemy import exists as sa_exists, select
+    from sqlalchemy import exists as sa_exists
+    from sqlalchemy import select
     po_exists = sa_exists(
         select(PurchaseOrder.id).where(PurchaseOrder.source_order_id == Order.id)
     )
@@ -629,24 +694,11 @@ def get_unprocessed_orders(db: Session, *, customer: str = '', page: int = 1, pe
     orders = query.offset((page - 1) * per_page).limit(per_page).all()
 
     # 收集所有 product_id，批量查询 has_bom 标记（避免依赖 ORM 关系加载状态）
-    product_ids = list(set(o.product_id for o in orders if o.product_id))
+    product_ids = list({o.product_id for o in orders if o.product_id})
     bom_product_ids = set()
     if product_ids:
-        # 有任何 BOM 子记录的产品视为 has_bom
-        mat_ids = {r[0] for r in db.query(ProductMaterial.product_id).filter(
-            ProductMaterial.product_id.in_(product_ids),
-            ProductMaterial.cotton_usage > 0,
-        ).all()}
-        fab_ids = {r[0] for r in db.query(ProductFabric.product_id).filter(
-            ProductFabric.product_id.in_(product_ids),
-        ).all()}
-        acc_ids = {r[0] for r in db.query(ProductAccessory.product_id).filter(
-            ProductAccessory.product_id.in_(product_ids),
-        ).all()}
-        pkg_ids = {r[0] for r in db.query(ProductPackaging.product_id).filter(
-            ProductPackaging.product_id.in_(product_ids),
-        ).all()}
-        bom_product_ids = mat_ids | fab_ids | acc_ids | pkg_ids
+        from fastapi_app.services.purchase_product_service import _batch_check_bom_exists
+        bom_product_ids = _batch_check_bom_exists(db, product_ids)
 
     result = []
     for order in orders:
@@ -760,7 +812,7 @@ def query_supplier_groups(db: Session, order_ids: list) -> list:
             'phone': phone,
             'address': address,
             'items': items_list,
-            'orders': sorted(list(group['orders'])),
+            'orders': sorted(group['orders']),
             'order_count': len(group['orders']),
         })
 
@@ -780,12 +832,12 @@ def get_factory_order_summary(db: Session, order_ids: list) -> dict:
     orders = db.query(PurchaseOrder).filter(PurchaseOrder.id.in_(order_ids)).all()
 
     # 自动关联同源订单：选中订单的 source_order_id 对应的其他采购订单也纳入汇总
-    source_order_ids = list(set([o.source_order_id for o in orders if o.source_order_id]))
+    source_order_ids = list({o.source_order_id for o in orders if o.source_order_id})
     if source_order_ids:
         related_orders = db.query(PurchaseOrder).filter(
             PurchaseOrder.source_order_id.in_(source_order_ids)
         ).all()
-        related_order_ids = set(o.id for o in related_orders)
+        related_order_ids = {o.id for o in related_orders}
         all_order_ids = list(set(order_ids) | related_order_ids)
     else:
         all_order_ids = list(order_ids)
@@ -953,12 +1005,12 @@ def get_supplier_order_summary(db: Session, order_ids: list) -> dict:
     orders = db.query(PurchaseOrder).filter(PurchaseOrder.id.in_(order_ids)).all()
 
     # 自动关联同源订单
-    source_order_ids = list(set([o.source_order_id for o in orders if o.source_order_id]))
+    source_order_ids = list({o.source_order_id for o in orders if o.source_order_id})
     if source_order_ids:
         related_orders = db.query(PurchaseOrder).filter(
             PurchaseOrder.source_order_id.in_(source_order_ids)
         ).all()
-        related_order_ids = set(o.id for o in related_orders)
+        related_order_ids = {o.id for o in related_orders}
         all_order_ids = list(set(order_ids) | related_order_ids)
     else:
         all_order_ids = list(order_ids)

@@ -1,6 +1,7 @@
 """生产计划模块端点测试"""
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
 class TestProductionSummaryEndpoints:

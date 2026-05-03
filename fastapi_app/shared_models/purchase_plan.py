@@ -4,9 +4,10 @@
 主从表结构：purchase_plans（主表）+ purchase_plan_details（明细表）
 出货同步表：shipment_records
 """
-from sqlalchemy import String, Integer, Text, DateTime, Date, ForeignKey, Index, Numeric
-from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
+
+from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
 

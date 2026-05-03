@@ -1,6 +1,7 @@
 import os
-from dotenv import load_dotenv
 from urllib.parse import quote_plus
+
+from dotenv import load_dotenv
 
 # 在类定义之前加载 .env，确保 os.getenv("DB_PASSWORD") 等能读到值
 # pydantic_settings 的 env_file 仅为其自身字段服务，不会注入 os.environ
@@ -128,6 +129,18 @@ class Settings(BaseSettings):
     # 分页配置
     DEFAULT_PAGE_SIZE: int = 20
     MAX_PAGE_SIZE: int = 100
+
+    def sanitize_error(self, error: Exception) -> str:
+        """生产环境下脱敏错误消息，防止泄露数据库/内部信息"""
+        if self.FASTAPI_DEBUG or os.getenv("APP_ENV", "") == "development":
+            return str(error)
+        return "服务器内部错误，请联系管理员"
+
+    def sanitize_business_error(self, error: Exception) -> str:
+        """业务校验错误（如 ValueError）可返回具体信息"""
+        if isinstance(error, ValueError):
+            return str(error)
+        return self.sanitize_error(error)
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True, extra="ignore")
 

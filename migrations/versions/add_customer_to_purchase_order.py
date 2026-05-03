@@ -1,9 +1,8 @@
 """
 添加客户字段到采购订单表
 """
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = 'add_customer_to_purchase_order'
 down_revision = 'add_production_plan'

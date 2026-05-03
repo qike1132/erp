@@ -4,8 +4,8 @@
 运行方式（在项目根目录）:
     python scripts/add_production_plan_nav.py
 """
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -61,7 +61,7 @@ def main():
             print("[WARN] 清除导航缓存失败，请手动重启或等待缓存过期")
 
         print(f"[OK] 排产计划导航项已添加 (id={nav.id}, sort_order={next_sort})")
-        print(f"[OK] 排产计划管理权限已添加 (code=production_plan_manage)")
+        print("[OK] 排产计划管理权限已添加 (code=production_plan_manage)")
     finally:
         session.close()
 

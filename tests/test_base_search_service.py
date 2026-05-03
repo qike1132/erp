@@ -1,6 +1,5 @@
 """base_search_service 单元测试"""
-import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 from fastapi_app.services.base_search_service import BaseSearchService
 

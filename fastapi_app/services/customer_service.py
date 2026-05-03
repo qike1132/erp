@@ -1,6 +1,7 @@
 """客户管理服务层"""
 import logging
-from sqlalchemy import select, func
+
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.shared_models import Customer, Order, StockIn, StockOut
@@ -15,9 +16,9 @@ async def get_customers(db: AsyncSession, status: str | None = None) -> list[Cus
     """获取客户列表"""
     query = select(Customer)
     if status == 'active':
-        query = query.where(Customer.status == True)
+        query = query.where(Customer.status)
     elif status == 'inactive':
-        query = query.where(Customer.status == False)
+        query = query.where(not Customer.status)
     query = query.order_by(Customer.name)
     result = await db.execute(query)
     return list(result.scalars().all())
@@ -54,7 +55,7 @@ async def get_active_customer_names(db: AsyncSession) -> list[dict]:
         logger.warning("客户名称缓存读取失败", exc_info=True)
 
     result = await db.execute(
-        select(Customer).where(Customer.status == True).order_by(Customer.name)
+        select(Customer).where(Customer.status).order_by(Customer.name)
     )
     data = [{'id': c.id, 'name': c.name} for c in result.scalars().all()]
 

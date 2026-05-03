@@ -2,14 +2,15 @@
 修复历史出货记录的订单ID关联
 将没有关联订单ID的出货记录按FIFO原则关联到对应订单
 """
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from fastapi_app.core.database import SyncSessionLocal
-from fastapi_app.shared_models import StockOut, Order
 from sqlalchemy import func
+
+from fastapi_app.core.database import SyncSessionLocal
+from fastapi_app.shared_models import Order, StockOut
 
 
 def fix_stockout_order_ids():

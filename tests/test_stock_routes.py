@@ -2,13 +2,14 @@
 库存路由测试 - 提高库存路由覆盖率
 测试范围：入库、出库、库存查看等完整流程
 """
-import pytest
-import json
 from datetime import datetime
+
+import pytest
+
 try:
-    from flask import session
     from app import db
-    from app.models import Product, StockIn, StockOut, InventoryLog, Customer, Order
+    from app.models import Customer, InventoryLog, Order, Product, StockIn, StockOut
+    from flask import session
     HAS_FLASK = True
 except ImportError:
     HAS_FLASK = False
@@ -30,7 +31,7 @@ class TestStockInRoutes:
         """测试入库列表页面访问成功"""
         response = logged_in_client.get('/stock/in/list')
         assert response.status_code == 200
-        assert b'stockin' in response.data or '入库'.encode('utf-8') in response.data
+        assert b'stockin' in response.data or '入库'.encode() in response.data
 
     def test_stockin_list_post_create_success(self, logged_in_client, test_product, test_customer):
         """测试创建入库记录成功"""
@@ -44,7 +45,7 @@ class TestStockInRoutes:
         }
         response = logged_in_client.post('/stock/in/list', data=data, follow_redirects=True)
         assert response.status_code == 200
-        
+
         # 验证库存增加
         db.session.refresh(test_product)
         assert test_product.current_stock == initial_stock + 50
@@ -79,7 +80,7 @@ class TestStockInRoutes:
         """测试编辑入库记录成功"""
         old_quantity = test_stockin.quantity
         new_quantity = old_quantity + 20
-        
+
         data = {
             'customer': test_customer.name,
             'quantity': new_quantity,
@@ -88,7 +89,7 @@ class TestStockInRoutes:
         }
         response = logged_in_client.post(f'/stock/in/edit/{test_stockin.id}', data=data, follow_redirects=True)
         assert response.status_code == 200
-        
+
         # 验证入库记录更新
         db.session.refresh(test_stockin)
         assert test_stockin.quantity == new_quantity
@@ -98,7 +99,7 @@ class TestStockInRoutes:
         initial_stock = test_product.current_stock
         old_quantity = test_stockin.quantity
         new_quantity = old_quantity + 30
-        
+
         data = {
             'customer': test_customer.name,
             'quantity': new_quantity,
@@ -106,7 +107,7 @@ class TestStockInRoutes:
             'note': '更新'
         }
         logged_in_client.post(f'/stock/in/edit/{test_stockin.id}', data=data, follow_redirects=True)
-        
+
         db.session.refresh(test_product)
         assert test_product.current_stock == initial_stock + 30
 
@@ -115,14 +116,14 @@ class TestStockInRoutes:
         initial_stock = test_product.current_stock
         stockin_id = test_stockin.id
         stockin_quantity = test_stockin.quantity
-        
+
         response = logged_in_client.get(f'/stock/in/delete/{stockin_id}', follow_redirects=True)
         assert response.status_code == 200
-        
+
         # 验证入库记录删除
         deleted_stockin = StockIn.query.get(stockin_id)
         assert deleted_stockin is None
-        
+
         # 验证库存减少
         db.session.refresh(test_product)
         assert test_product.current_stock == initial_stock - stockin_quantity
@@ -145,12 +146,12 @@ class TestStockInRoutes:
         )
         db_session.add(stockout)
         db_session.commit()
-        
+
         # 尝试删除入库记录
         response = logged_in_client.get(f'/stock/in/delete/{test_stockin.id}', follow_redirects=True)
         assert response.status_code == 200
         # 应该提示无法删除
-        assert b'error' in response.data or '无法删除'.encode('utf-8') in response.data
+        assert b'error' in response.data or '无法删除'.encode() in response.data
 
 
 @pytest.mark.skipif(not HAS_FLASK, reason="Flask dependencies not available")
@@ -161,13 +162,13 @@ class TestStockOutRoutes:
         """测试出库列表页面访问成功"""
         response = logged_in_client.get('/stock/out/list')
         assert response.status_code == 200
-        assert b'stockout' in response.data or '出库'.encode('utf-8') in response.data
+        assert b'stockout' in response.data or '出库'.encode() in response.data
 
     def test_stockout_list_post_create_success(self, logged_in_client, test_product):
         """测试创建出库记录成功"""
         test_product.current_stock = 100
         db.session.commit()
-        
+
         initial_stock = test_product.current_stock
         data = {
             'product_id': test_product.id,
@@ -177,7 +178,7 @@ class TestStockOutRoutes:
         }
         response = logged_in_client.post('/stock/out/list', data=data, follow_redirects=True)
         assert response.status_code == 200
-        
+
         # 验证库存减少
         db.session.refresh(test_product)
         assert test_product.current_stock == initial_stock - 20
@@ -186,7 +187,7 @@ class TestStockOutRoutes:
         """测试库存不足时出库"""
         test_product.current_stock = 10
         db.session.commit()
-        
+
         data = {
             'product_id': test_product.id,
             'quantity': 100,
@@ -194,7 +195,7 @@ class TestStockOutRoutes:
         }
         response = logged_in_client.post('/stock/out/list', data=data, follow_redirects=True)
         assert response.status_code == 200
-        assert b'error' in response.data or '库存不足'.encode('utf-8') in response.data
+        assert b'error' in response.data or '库存不足'.encode() in response.data
 
     def test_stockout_list_post_nonexistent_product(self, logged_in_client):
         """测试创建出库记录产品不存在"""
@@ -215,10 +216,10 @@ class TestStockOutRoutes:
         """测试编辑出库记录成功"""
         test_product.current_stock = 100
         db.session.commit()
-        
+
         old_quantity = test_stockout.quantity
         new_quantity = old_quantity + 5
-        
+
         data = {
             'quantity': new_quantity,
             'stockout_date': datetime.now().strftime('%Y-%m-%d'),
@@ -226,7 +227,7 @@ class TestStockOutRoutes:
         }
         response = logged_in_client.post(f'/stock/out/edit/{test_stockout.id}', data=data, follow_redirects=True)
         assert response.status_code == 200
-        
+
         # 验证出库记录更新
         db.session.refresh(test_stockout)
         assert test_stockout.quantity == new_quantity
@@ -235,7 +236,7 @@ class TestStockOutRoutes:
         """测试编辑出库记录库存不足"""
         test_product.current_stock = 5
         db.session.commit()
-        
+
         data = {
             'quantity': 100,
             'stockout_date': datetime.now().strftime('%Y-%m-%d')
@@ -248,14 +249,14 @@ class TestStockOutRoutes:
         initial_stock = test_product.current_stock
         stockout_id = test_stockout.id
         stockout_quantity = test_stockout.quantity
-        
+
         response = logged_in_client.get(f'/stock/out/delete/{stockout_id}', follow_redirects=True)
         assert response.status_code == 200
-        
+
         # 验证出库记录删除
         deleted_stockout = StockOut.query.get(stockout_id)
         assert deleted_stockout is None
-        
+
         # 验证库存恢复
         db.session.refresh(test_product)
         assert test_product.current_stock == initial_stock + stockout_quantity
@@ -274,7 +275,7 @@ class TestInventoryRoutes:
         """测试库存查看页面访问成功"""
         response = logged_in_client.get('/stock/inventory')
         assert response.status_code == 200
-        assert b'inventory' in response.data or '库存'.encode('utf-8') in response.data
+        assert b'inventory' in response.data or '库存'.encode() in response.data
 
     def test_inventory_with_products(self, logged_in_client, test_product, test_customer, db_session):
         """测试有产品时的库存查看"""
@@ -288,7 +289,7 @@ class TestInventoryRoutes:
             status='待备货'
         )
         db_session.add(order)
-        
+
         # 创建入库
         stockin = StockIn(
             stockin_no='SI-INV-001',
@@ -299,7 +300,7 @@ class TestInventoryRoutes:
         )
         db_session.add(stockin)
         db_session.commit()
-        
+
         response = logged_in_client.get('/stock/inventory')
         assert response.status_code == 200
 
@@ -317,7 +318,7 @@ class TestStockBusinessLogic:
             'stockin_date': datetime.now().strftime('%Y-%m-%d')
         }
         logged_in_client.post('/stock/in/list', data=data, follow_redirects=True)
-        
+
         # 验证库存日志
         log = InventoryLog.query.filter_by(
             product_id=test_product.id,
@@ -330,14 +331,14 @@ class TestStockBusinessLogic:
         """测试出库时库存日志创建"""
         test_product.current_stock = 100
         db.session.commit()
-        
+
         data = {
             'product_id': test_product.id,
             'quantity': 25,
             'stockout_date': datetime.now().strftime('%Y-%m-%d')
         }
         logged_in_client.post('/stock/out/list', data=data, follow_redirects=True)
-        
+
         # 验证库存日志
         log = InventoryLog.query.filter_by(
             product_id=test_product.id,
@@ -350,14 +351,14 @@ class TestStockBusinessLogic:
         """测试编辑入库时库存日志更新"""
         old_quantity = test_stockin.quantity
         new_quantity = old_quantity + 15
-        
+
         data = {
             'customer': test_customer.name,
             'quantity': new_quantity,
             'stockin_date': datetime.now().strftime('%Y-%m-%d')
         }
         logged_in_client.post(f'/stock/in/edit/{test_stockin.id}', data=data, follow_redirects=True)
-        
+
         # 验证库存日志
         log = InventoryLog.query.filter_by(
             product_id=test_product.id,
@@ -396,7 +397,7 @@ class TestStockEdgeCases:
         """测试出库数量等于库存"""
         test_product.current_stock = 50
         db.session.commit()
-        
+
         data = {
             'product_id': test_product.id,
             'quantity': 50,
@@ -404,7 +405,7 @@ class TestStockEdgeCases:
         }
         response = logged_in_client.post('/stock/out/list', data=data, follow_redirects=True)
         assert response.status_code == 200
-        
+
         db.session.refresh(test_product)
         assert test_product.current_stock == 0
 
@@ -450,7 +451,7 @@ class TestStockPerformance:
             )
             db_session.add(stockin)
         db_session.commit()
-        
+
         response = logged_in_client.get('/stock/in/list')
         assert response.status_code == 200
 
@@ -458,7 +459,7 @@ class TestStockPerformance:
         """测试大量出库记录列表查询"""
         test_product.current_stock = 10000
         db_session.commit()
-        
+
         # 创建100个出库记录
         for i in range(100):
             stockout = StockOut(
@@ -469,7 +470,7 @@ class TestStockPerformance:
             )
             db_session.add(stockout)
         db_session.commit()
-        
+
         response = logged_in_client.get('/stock/out/list')
         assert response.status_code == 200
 

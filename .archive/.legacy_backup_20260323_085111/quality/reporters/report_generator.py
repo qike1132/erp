@@ -4,17 +4,16 @@
 """
 import json
 from datetime import datetime
-from pathlib import Path
-from typing import Dict, Any, List
+from typing import Any
 
 
 class ReportGenerator:
     """报告生成器基类"""
-    
-    def __init__(self, analysis_results: Dict[str, Any]):
+
+    def __init__(self, analysis_results: dict[str, Any]):
         self.results = analysis_results
         self.timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    
+
     def generate(self) -> str:
         """生成报告"""
         raise NotImplementedError
@@ -22,7 +21,7 @@ class ReportGenerator:
 
 class HTMLReportGenerator(ReportGenerator):
     """HTML格式报告生成器"""
-    
+
     def generate(self) -> str:
         """生成HTML报告"""
         html = f"""<!DOCTYPE html>
@@ -104,38 +103,38 @@ class HTMLReportGenerator(ReportGenerator):
     <div class="container">
         <h1>代码质量分析报告</h1>
         <p class="timestamp">生成时间: {self.timestamp}</p>
-        
+
         {self._generate_summary()}
-        
+
         {self._generate_tool_sections()}
     </div>
 </body>
 </html>"""
         return html
-    
+
     def _generate_summary(self) -> str:
         """生成摘要部分"""
         total_issues = 0
         for tool_result in self.results.values():
             if 'summary' in tool_result:
                 total_issues += tool_result['summary'].get('total', 0)
-        
+
         return f"""
         <div class="summary">
             <h2>分析摘要</h2>
             <p><strong>发现问题总数:</strong> {total_issues}</p>
             <p><strong>分析工具数量:</strong> {len(self.results)}</p>
         </div>"""
-    
+
     def _generate_tool_sections(self) -> str:
         """生成各工具分析结果部分"""
         sections = []
-        
+
         for tool_name, result in self.results.items():
             section = f"""
             <div class="tool-section">
                 <h2>{tool_name}</h2>"""
-            
+
             if 'error' in result:
                 section += f"""
                 <div class="issue error">
@@ -148,19 +147,19 @@ class HTMLReportGenerator(ReportGenerator):
                 <h3>摘要</h3>
                 <table>
                     <tr><th>指标</th><th>数量</th></tr>"""
-                    
+
                     for key, value in result['summary'].items():
                         section += f"""
                     <tr><td>{key}</td><td>{value}</td></tr>"""
-                    
+
                     section += """
                 </table>"""
-                
+
                 # 显示部分问题示例
                 if 'issues' in result and result['issues']:
                     section += """
                 <h3>问题示例 (前10个)</h3>"""
-                    
+
                     for issue in result['issues'][:10]:
                         issue_class = 'info'
                         if isinstance(issue, dict):
@@ -169,26 +168,26 @@ class HTMLReportGenerator(ReportGenerator):
                                 issue_class = 'error'
                             elif issue_type in ['warning', 'MEDIUM']:
                                 issue_class = 'warning'
-                            
+
                             issue_text = json.dumps(issue, ensure_ascii=False)
                         else:
                             issue_text = str(issue)
-                        
+
                         section += f"""
                 <div class="issue {issue_class}">
                     <pre>{issue_text}</pre>
                 </div>"""
-            
+
             section += """
             </div>"""
             sections.append(section)
-        
+
         return '\n'.join(sections)
 
 
 class MarkdownReportGenerator(ReportGenerator):
     """Markdown格式报告生成器"""
-    
+
     def generate(self) -> str:
         """生成Markdown报告"""
         md = f"""# 代码质量分析报告
@@ -204,24 +203,24 @@ class MarkdownReportGenerator(ReportGenerator):
 {self._generate_tool_sections_md()}
 """
         return md
-    
+
     def _generate_summary_md(self) -> str:
         """生成Markdown摘要"""
         total_issues = 0
         for tool_result in self.results.values():
             if 'summary' in tool_result:
                 total_issues += tool_result['summary'].get('total', 0)
-        
+
         return f"""- **发现问题总数**: {total_issues}
 - **分析工具数量**: {len(self.results)}"""
-    
+
     def _generate_tool_sections_md(self) -> str:
         """生成Markdown工具分析结果"""
         sections = []
-        
+
         for tool_name, result in self.results.items():
             section = f"### {tool_name}\n\n"
-            
+
             if 'error' in result:
                 section += f"**错误**: {result['error']}\n\n"
             else:
@@ -230,32 +229,32 @@ class MarkdownReportGenerator(ReportGenerator):
                     section += "#### 摘要\n\n"
                     section += "| 指标 | 数量 |\n"
                     section += "|------|------|\n"
-                    
+
                     for key, value in result['summary'].items():
                         section += f"| {key} | {value} |\n"
-                    
+
                     section += "\n"
-                
+
                 # 显示部分问题示例
                 if 'issues' in result and result['issues']:
                     section += "#### 问题示例 (前5个)\n\n"
-                    
+
                     for i, issue in enumerate(result['issues'][:5], 1):
                         if isinstance(issue, dict):
                             issue_text = json.dumps(issue, ensure_ascii=False, indent=2)
                         else:
                             issue_text = str(issue)
-                        
+
                         section += f"{i}. ```json\n{issue_text}\n```\n\n"
-            
+
             sections.append(section)
-        
+
         return '\n'.join(sections)
 
 
 class JSONReportGenerator(ReportGenerator):
     """JSON格式报告生成器"""
-    
+
     def generate(self) -> str:
         """生成JSON报告"""
         report = {
@@ -264,17 +263,17 @@ class JSONReportGenerator(ReportGenerator):
             'results': self.results
         }
         return json.dumps(report, ensure_ascii=False, indent=2)
-    
-    def _generate_summary_dict(self) -> Dict[str, Any]:
+
+    def _generate_summary_dict(self) -> dict[str, Any]:
         """生成摘要字典"""
         total_issues = 0
         tools_summary = {}
-        
+
         for tool_name, result in self.results.items():
             if 'summary' in result:
                 tools_summary[tool_name] = result['summary']
                 total_issues += result['summary'].get('total', 0)
-        
+
         return {
             'total_issues': total_issues,
             'tools_count': len(self.results),
@@ -282,15 +281,15 @@ class JSONReportGenerator(ReportGenerator):
         }
 
 
-def generate_report(analysis_results: Dict[str, Any], output_format: str = 'html', output_file: str = None) -> str:
+def generate_report(analysis_results: dict[str, Any], output_format: str = 'html', output_file: str = None) -> str:
     """
     生成质量分析报告
-    
+
     Args:
         analysis_results: 分析结果
         output_format: 输出格式 (html, markdown, json)
         output_file: 输出文件路径
-    
+
     Returns:
         报告内容
     """
@@ -299,19 +298,19 @@ def generate_report(analysis_results: Dict[str, Any], output_format: str = 'html
         'markdown': MarkdownReportGenerator,
         'json': JSONReportGenerator
     }
-    
+
     generator_class = generators.get(output_format.lower())
     if not generator_class:
         raise ValueError(f"不支持的输出格式: {output_format}")
-    
+
     generator = generator_class(analysis_results)
     report = generator.generate()
-    
+
     if output_file:
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write(report)
         print(f"报告已保存到: {output_file}")
-    
+
     return report
 
 
@@ -323,6 +322,6 @@ if __name__ == '__main__':
             'issues': [{'type': 'error', 'message': '示例错误'}]
         }
     }
-    
+
     report = generate_report(sample_results, 'html', 'quality_report.html')
     print("HTML报告生成完成")

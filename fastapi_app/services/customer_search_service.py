@@ -5,7 +5,8 @@
 默认按 status=True 过滤，搜索字段包括 name、contact、phone。
 """
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 

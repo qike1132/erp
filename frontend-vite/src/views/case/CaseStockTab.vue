@@ -681,17 +681,20 @@ async function saveEdit() {
 /* Mode toggle */
 .cs-mode-toggle {
   display: inline-flex;
-  border-radius: 9px;
-  overflow: hidden;
-  border: 2px solid var(--color-border-light, #e2e8f0);
-  background: var(--color-surface, #f8fafc);
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: white;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
   align-self: flex-start;
 }
 .cs-mode-btn {
-  padding: 10px 24px;
-  font-size: 14px;
+  padding: 8px 14px;
+  font-size: 13px;
   font-weight: 600;
   border: none;
+  border-radius: 9px;
   background: transparent;
   cursor: pointer;
   color: var(--color-text-secondary);
@@ -700,17 +703,22 @@ async function saveEdit() {
   align-items: center;
   gap: 6px;
 }
+.cs-mode-btn:hover {
+  background: var(--color-primary-50);
+  color: var(--color-primary-600);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  transform: translateY(-1px);
+}
 .cs-mode-btn.active {
-  background: var(--color-primary-500);
-  color: white;
-  box-shadow: 0 2px 8px rgba(91, 141, 239, 0.3);
+  background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
+  color: var(--color-primary-700);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 8px rgba(91, 141, 239, 0.2);
+  transform: translateY(-1px);
 }
 .cs-mode-btn.active.out-mode {
-  background: var(--color-danger-500);
-  box-shadow: 0 2px 8px rgba(234, 84, 85, 0.3);
-}
-.cs-mode-btn:not(.active):hover {
-  background: rgba(91, 141, 239, 0.08);
+  background: linear-gradient(135deg, var(--color-danger-50), var(--color-danger-100));
+  color: var(--color-danger-700);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 8px rgba(234, 84, 85, 0.2);
 }
 
 /* Section headers */

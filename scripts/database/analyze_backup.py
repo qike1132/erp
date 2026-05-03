@@ -7,7 +7,7 @@ print('=' * 60)
 print('备份文件分析')
 print('=' * 60)
 
-with open(backup_file, 'r', encoding='utf-8', errors='ignore') as f:
+with open(backup_file, encoding='utf-8', errors='ignore') as f:
     content = f.read()
 
 table_pattern = r'CREATE TABLE `?(\w+)`?'

@@ -1,13 +1,12 @@
 """FastAPI 应用通用工具函数（去重提取）"""
-import re
 import logging
+import re
 from datetime import datetime, timedelta
-from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 
-def parse_date_value(date_value) -> Optional[datetime]:
+def parse_date_value(date_value) -> datetime | None:
     """解析日期值（支持多种格式），解析失败返回None"""
     if date_value is None:
         return None
@@ -31,7 +30,7 @@ def parse_date_value(date_value) -> Optional[datetime]:
     return None
 
 
-def validate_customer_name(customer_name: str) -> Tuple[bool, str]:
+def validate_customer_name(customer_name: str) -> tuple[bool, str]:
     """验证客户名称"""
     if not customer_name or not customer_name.strip():
         return False, "客户名称不能为空"

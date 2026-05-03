@@ -62,7 +62,7 @@ def load_config():
     """加载调度规则配置"""
     config_path = Path(".trae/rules/task-dispatch-rules.json")
     if config_path.exists():
-        with open(config_path, 'r', encoding='utf-8') as f:
+        with open(config_path, encoding='utf-8') as f:
             return json.load(f)
     return None
 
@@ -70,7 +70,7 @@ def load_config():
 def classify_task(task_type: str) -> str:
     """Step 1: 识别任务类型"""
     task_type_lower = task_type.lower()
-    for key in AGENT_REGISTRY.keys():
+    for key in AGENT_REGISTRY:
         if key in task_type_lower:
             return key
     return "unknown"
@@ -164,7 +164,7 @@ def log_dispatch_decision(
         f.write("\n")
 
     if AUDIT_FILE.exists():
-        with open(AUDIT_FILE, 'r', encoding='utf-8') as f:
+        with open(AUDIT_FILE, encoding='utf-8') as f:
             audit_data = json.load(f)
     else:
         audit_data = {"dispatches": []}
@@ -247,12 +247,12 @@ def main():
     task_type = classify_task(args.task_type)
     matched_agents = find_matched_agents(task_type)
 
-    print(f"\n== Agent调度检查点 v1.0.0 ==")
+    print("\n== Agent调度检查点 v1.0.0 ==")
     print(f"   任务类型: {args.task_type} -> 分类为: {task_type}")
     if matched_agents:
         print(f"   可用Agent: {', '.join(matched_agents)}")
     else:
-        print(f"   可用Agent: 无")
+        print("   可用Agent: 无")
 
     decision = evaluate_dispatch_decision(
         task_type=task_type,

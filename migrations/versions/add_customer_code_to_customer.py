@@ -1,9 +1,8 @@
 """
 添加客户编码字段到客户表
 """
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = 'add_customer_code_to_customer'
 down_revision = 'add_customer_to_purchase_order'

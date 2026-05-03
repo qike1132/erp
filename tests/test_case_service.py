@@ -1,6 +1,7 @@
 """case_service 单元测试"""
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from fastapi_app.services.case_service import search_cases
 

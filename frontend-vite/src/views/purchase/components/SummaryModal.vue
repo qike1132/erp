@@ -5,21 +5,15 @@
     </template>
 
     <!-- Tab headers -->
-    <div class="flex border-b-2 border-gray-200 mb-0">
+    <div class="sm-tab-group">
       <div
-        :class="[
-          'px-5 py-2.5 cursor-pointer text-sm font-semibold border-b-[3px] mb-[-2px] transition-all',
-          activeTab === 'factory' ? 'border-b-primary-400 text-primary-400' : 'border-b-transparent text-gray-400',
-        ]"
+        :class="['sm-tab-btn', { active: activeTab === 'factory' }]"
         @click="activeTab = 'factory'"
       >
         <i class="fas fa-industry" /> 工厂内部订单
       </div>
       <div
-        :class="[
-          'px-5 py-2.5 cursor-pointer text-sm font-semibold border-b-[3px] mb-[-2px] transition-all',
-          activeTab === 'supplier' ? 'border-b-rose text-rose' : 'border-b-transparent text-gray-400',
-        ]"
+        :class="['sm-tab-btn', { active: activeTab === 'supplier', 'out-mode': activeTab === 'supplier' }]"
         @click="activeTab = 'supplier'"
       >
         <i class="fas fa-truck" /> 供应商采购订单
@@ -300,6 +294,48 @@ function formatQty(val: any): string {
 </script>
 
 <style scoped>
+.sm-tab-group {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: white;
+  border: 1px solid var(--color-border-light);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
+  margin-bottom: 12px;
+}
+.sm-tab-btn {
+  padding: 8px 14px;
+  border: none;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sm-tab-btn:hover {
+  background: var(--color-primary-50);
+  color: var(--color-primary-600);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  transform: translateY(-1px);
+}
+.sm-tab-btn.active {
+  background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
+  color: var(--color-primary-700);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 8px rgba(91, 141, 239, 0.2);
+  transform: translateY(-1px);
+}
+.sm-tab-btn.active.out-mode {
+  background: linear-gradient(135deg, var(--color-danger-50), var(--color-danger-100));
+  color: var(--color-danger-700);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 8px rgba(234, 84, 85, 0.2);
+}
+
 table th,
 table td {
   border: 1px solid var(--color-text);

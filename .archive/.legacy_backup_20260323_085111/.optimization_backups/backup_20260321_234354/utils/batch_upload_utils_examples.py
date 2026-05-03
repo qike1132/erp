@@ -4,24 +4,22 @@
 演示如何使用 utils/batch_upload_utils.py 中的函数
 """
 
-import sys
 import os
+import sys
 
 # 添加项目根目录到路径
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
-from app import app, db, Product, Order
+from app import app, db
 from batch_upload_utils import (
+    generate_error_report,
+    parse_excel_file,
+    validate_batch_data,
     validate_customer_name,
+    validate_date,
     validate_product,
     validate_quantity,
-    validate_date,
-    parse_excel_file,
-    generate_error_report,
-    validate_batch_data,
-    batch_save_with_transaction,
-    BatchUploadError
 )
 
 
@@ -30,9 +28,9 @@ def example_validate_customer_name():
     print("\n" + "=" * 60)
     print("示例 1: 验证客户名称")
     print("=" * 60)
-    
+
     customer_names = ["张三公司", "张", "张三@#$", ""]
-    
+
     for name in customer_names:
         is_valid, error_msg = validate_customer_name(name)
         if is_valid:
@@ -46,10 +44,10 @@ def example_validate_product():
     print("\n" + "=" * 60)
     print("示例 2: 验证产品并获取产品 ID")
     print("=" * 60)
-    
+
     with app.app_context():
         products = ["笔记本电脑", "不存在的商品", ""]
-        
+
         for product in products:
             is_valid, product_id, error_msg = validate_product(product, db)
             if is_valid:
@@ -63,9 +61,9 @@ def example_validate_quantity():
     print("\n" + "=" * 60)
     print("示例 3: 验证数量")
     print("=" * 60)
-    
+
     quantities = [100, "50", 0, -10, "abc", ""]
-    
+
     for qty in quantities:
         is_valid, int_value, error_msg = validate_quantity(qty)
         if is_valid:
@@ -79,7 +77,7 @@ def example_validate_date():
     print("\n" + "=" * 60)
     print("示例 4: 验证日期")
     print("=" * 60)
-    
+
     dates = [
         "2024-01-15",
         "2024/01/15",
@@ -87,7 +85,7 @@ def example_validate_date():
         "2024-13-45",
         "abc"
     ]
-    
+
     for date in dates:
         is_valid, date_obj, error_msg = validate_date(date)
         if is_valid:
@@ -101,12 +99,12 @@ def example_parse_excel():
     print("\n" + "=" * 60)
     print("示例 5: 解析 Excel 文件")
     print("=" * 60)
-    
+
     file_path = "static/files/订单批量上传模板.xlsx"
-    
+
     if os.path.exists(file_path):
         success, data_list, error_msg = parse_excel_file(file_path)
-        
+
         if success:
             print(f"✓ 解析成功，共 {len(data_list)} 行数据")
             print("\n前 3 行数据:")
@@ -125,7 +123,7 @@ def example_validate_batch_data():
     print("\n" + "=" * 60)
     print("示例 6: 批量验证数据")
     print("=" * 60)
-    
+
     # 模拟从 Excel 读取的数据
     data_list = [
         {
@@ -147,7 +145,7 @@ def example_validate_batch_data():
             'date': '2024-01-20'
         }
     ]
-    
+
     with app.app_context():
         # 定义验证器
         validators = {
@@ -156,10 +154,10 @@ def example_validate_batch_data():
             'quantity': validate_quantity,
             'date': validate_date
         }
-        
+
         # 批量验证
         is_valid, errors, error_msg = validate_batch_data(data_list, validators, db)
-        
+
         if is_valid:
             print("✓ 所有数据验证通过")
         else:
@@ -174,23 +172,23 @@ def example_error_report_formats():
     print("\n" + "=" * 60)
     print("示例 7: 生成不同格式的错误报告")
     print("=" * 60)
-    
+
     # 模拟错误数据
     errors = [
         {'row': 2, 'field': 'customer', 'value': '张', 'message': '客户名称至少需要 2 个字符'},
         {'row': 2, 'field': 'quantity', 'value': '-5', 'message': '数量必须大于 0'},
         {'row': 3, 'field': 'product', 'value': '不存在的商品', 'message': '产品不存在'},
     ]
-    
+
     print("\n1. 文本格式:")
     print("-" * 40)
     print(generate_error_report(errors, 'text'))
-    
+
     print("\n2. HTML 格式 (用于网页显示):")
     print("-" * 40)
     html = generate_error_report(errors, 'html')
     print(f"{html[:200]}...")  # 只显示前 200 字符
-    
+
     print("\n3. JSON 格式 (用于 API 响应):")
     print("-" * 40)
     json_str = generate_error_report(errors, 'json')
@@ -202,34 +200,34 @@ def example_usage_in_flask():
     print("\n" + "=" * 60)
     print("示例 8: 在 Flask 视图中使用（伪代码）")
     print("=" * 60)
-    
+
     print("""
 @app.route('/upload_orders', methods=['POST'])
 def upload_orders():
     '''批量上传订单的 Flask 视图函数'''
     from werkzeug.utils import secure_filename
-    
+
     if 'file' not in request.files:
         flash('没有上传文件')
         return redirect(request.url)
-    
+
     file = request.files['file']
     if file.filename == '':
         flash('没有选择文件')
         return redirect(request.url)
-    
+
     # 保存上传的文件
     filename = secure_filename(file.filename)
     file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     file.save(file_path)
-    
+
     try:
         # 1. 解析 Excel 文件
         success, data_list, error_msg = parse_excel_file(file_path)
         if not success:
             flash(f'解析文件失败：{error_msg}')
             return redirect(request.url)
-        
+
         # 2. 批量验证数据
         validators = {
             'customer': validate_customer_name,
@@ -237,15 +235,15 @@ def upload_orders():
             'quantity': validate_quantity,
             'date': validate_date
         }
-        
+
         is_valid, errors, error_msg = validate_batch_data(data_list, validators, db)
-        
+
         if not is_valid:
             # 生成错误报告并显示
             error_report = generate_error_report(errors, 'html')
             flash(error_report)
             return redirect(request.url)
-        
+
         # 3. 批量保存数据
         mapping = {
             '订单编号': 'order_no',
@@ -255,18 +253,18 @@ def upload_orders():
             '日期': 'order_date',
             '备注': 'note'
         }
-        
+
         success, save_errors, error_msg = batch_save_with_transaction(
             data_list, db, Order, mapping
         )
-        
+
         if success:
             flash(f'成功导入 {len(data_list)} 条订单记录')
             return redirect(url_for('order_list'))
         else:
             flash(f'保存失败：{error_msg}')
             return redirect(request.url)
-            
+
     except BatchUploadError as e:
         flash(f'批量上传失败：{e.message}')
         error_report = generate_error_report(e.errors, 'html')
@@ -283,7 +281,7 @@ def main():
     print("\n" + "=" * 60)
     print("批量上传工具模块使用示例")
     print("=" * 60)
-    
+
     # 运行示例
     example_validate_customer_name()
     example_validate_product()
@@ -293,7 +291,7 @@ def main():
     example_validate_batch_data()
     example_error_report_formats()
     example_usage_in_flask()
-    
+
     print("\n" + "=" * 60)
     print("所有示例运行完成！")
     print("=" * 60)

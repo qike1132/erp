@@ -3,9 +3,8 @@
 
 用于排产计划管理的请求/响应模型，包含库存对比和出货进度字段。
 """
-from pydantic import BaseModel, Field
-from typing import Optional, List
 
+from pydantic import BaseModel, Field
 
 # ==================== 请求模型 ====================
 
@@ -16,19 +15,19 @@ class ProductionPlanCreate(BaseModel):
     barcode: str = Field(..., min_length=1, max_length=50, description="69码")
     quantity: int = Field(..., gt=0, le=999999, description="排产计划数量")
     plan_date: str = Field(..., description="计划日期 (YYYY-MM-DD)")
-    remark: Optional[str] = Field(None, max_length=500, description="备注")
+    remark: str | None = Field(None, max_length=500, description="备注")
 
 
 class ProductionPlanUpdate(BaseModel):
     """更新排产计划请求"""
-    customer_name: Optional[str] = Field(None, min_length=1, max_length=100, description="客户名称")
-    product_name: Optional[str] = Field(None, min_length=1, max_length=100, description="客户产品名称")
-    barcode: Optional[str] = Field(None, min_length=1, max_length=50, description="69码")
-    quantity: Optional[int] = Field(None, gt=0, le=999999, description="排产计划数量")
-    plan_date: Optional[str] = Field(None, description="计划日期 (YYYY-MM-DD)")
-    status: Optional[str] = Field(None, description="状态: pending/confirmed/completed")
-    remark: Optional[str] = Field(None, max_length=500, description="备注")
-    shipped_qty: Optional[int] = Field(None, ge=0, description="已出货数量")
+    customer_name: str | None = Field(None, min_length=1, max_length=100, description="客户名称")
+    product_name: str | None = Field(None, min_length=1, max_length=100, description="客户产品名称")
+    barcode: str | None = Field(None, min_length=1, max_length=50, description="69码")
+    quantity: int | None = Field(None, gt=0, le=999999, description="排产计划数量")
+    plan_date: str | None = Field(None, description="计划日期 (YYYY-MM-DD)")
+    status: str | None = Field(None, description="状态: pending/confirmed/completed")
+    remark: str | None = Field(None, max_length=500, description="备注")
+    shipped_qty: int | None = Field(None, ge=0, description="已出货数量")
 
 
 # ==================== 响应模型 ====================
@@ -48,11 +47,11 @@ class ProductionPlanItem(BaseModel):
     shipment_status: str = 'pending'
     plan_date: str
     status: str
-    remark: Optional[str] = None
-    upload_batch: Optional[str] = None
-    create_time: Optional[str] = None
-    update_time: Optional[str] = None
-    created_by: Optional[str] = None
+    remark: str | None = None
+    upload_batch: str | None = None
+    create_time: str | None = None
+    update_time: str | None = None
+    created_by: str | None = None
 
 
 class CustomerSummaryItem(BaseModel):
@@ -78,8 +77,8 @@ class MonthlySummary(BaseModel):
 class ProductionPlanListResponse(BaseModel):
     """排产计划列表响应"""
     success: bool = True
-    plans: List[ProductionPlanItem] = []
-    monthly_summary: Optional[MonthlySummary] = None
+    plans: list[ProductionPlanItem] = []
+    monthly_summary: MonthlySummary | None = None
     total: int = 0
 
 
@@ -92,5 +91,5 @@ class ProductionPlanActionResponse(BaseModel):
 class BarcodeValidationResponse(BaseModel):
     """69码验证响应"""
     valid: bool
-    product_name: Optional[str] = None
-    message: Optional[str] = None
+    product_name: str | None = None
+    message: str | None = None

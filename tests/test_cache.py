@@ -3,17 +3,17 @@ cache.py 单元测试
 
 覆盖：L1 本地缓存命中/过期/失效、cache_result 装饰器、_match_pattern
 """
-import asyncio
-import pytest
 from datetime import datetime, timedelta
-from unittest.mock import patch, AsyncMock
+from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from fastapi_app.core.cache import (
     _cache_local,
     _match_pattern,
     cache_result,
-    invalidate_local_cache,
     invalidate_cache,
+    invalidate_local_cache,
 )
 
 

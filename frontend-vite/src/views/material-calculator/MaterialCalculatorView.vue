@@ -223,6 +223,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed } from 'vue'
+import { useQuery } from '@tanstack/vue-query'
 import { purchaseApi } from '@/api'
 import { showToast } from '@/composables/useToast'
 import UiButton from '@/components/ui/UiButton.vue'
@@ -254,7 +255,6 @@ const categoryList = [
   { key: 'filling', label: '填充类', icon: 'fas fa-cloud' },
   { key: 'fabric', label: '面料类', icon: 'fas fa-scroll' },
   { key: 'accessory', label: '辅料类', icon: 'fas fa-puzzle-piece' },
-  { key: 'packaging', label: '包装类', icon: 'fas fa-box' },
 ]
 
 const filterOptions: Array<{ label: string; value: 'all' | 'true' | 'false' }> = [
@@ -263,8 +263,6 @@ const filterOptions: Array<{ label: string; value: 'all' | 'true' | 'false' }> =
   { label: '无BOM', value: 'false' },
 ]
 
-const allProducts = ref<Product[]>([])
-const loadingProducts = ref(true)
 const searchQuery = ref('')
 const searchSuggestions = ref<Product[]>([])
 const bomFilter = ref<'all' | 'true' | 'false'>('all')
@@ -278,6 +276,22 @@ const batchQuantity = ref(1)
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 let calcTimer: ReturnType<typeof setTimeout> | null = null
+
+const { data: productsQueryData, isLoading: loadingProducts } = useQuery({
+  queryKey: ['material-calculator-products'],
+  queryFn: async () => {
+    const res = (await purchaseApi.products({ per_page: 200, simple: true })) as any
+    return (res.products ?? []).map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      barcode: p.barcode,
+      has_bom: !!p.has_bom,
+    })) as Product[]
+  },
+  staleTime: 30_000,
+})
+
+const allProducts = computed<Product[]>(() => productsQueryData.value ?? [])
 
 const filteredProducts = computed(() => {
   let list = allProducts.value
@@ -295,23 +309,6 @@ const calcStatus = computed(() => {
 })
 
 const hasResults = computed(() => Object.values(calcResults.value).some((arr) => arr.length > 0))
-
-async function loadProducts() {
-  loadingProducts.value = true
-  try {
-    const res = (await purchaseApi.products({ per_page: 200, simple: true })) as any
-    allProducts.value = (res.products ?? []).map((p: any) => ({
-      id: p.id,
-      name: p.name,
-      barcode: p.barcode,
-      has_bom: !!p.has_bom,
-    }))
-  } catch {
-    showToast('加载产品列表失败', 'error')
-  } finally {
-    loadingProducts.value = false
-  }
-}
 
 function onSearchInput() {
   if (searchTimer) clearTimeout(searchTimer)
@@ -413,8 +410,6 @@ async function triggerCalculation() {
     calculating.value = false
   }
 }
-
-loadProducts()
 </script>
 
 <style scoped>
@@ -594,7 +589,7 @@ loadProducts()
   font-size: 14px;
   outline: none;
   transition: all 0.3s ease;
-  background: var(--color-surface, #f8fafc);
+  background: white;
 }
 
 .mc-search-input:focus {
@@ -719,7 +714,7 @@ loadProducts()
   justify-content: center;
   gap: 6px;
   padding: 9px 14px;
-  background: var(--color-surface, #f8fafc);
+  background: white;
   border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: 9px;
   font-size: 13px;
@@ -730,7 +725,7 @@ loadProducts()
 }
 
 .mc-filter-btn:hover {
-  background: var(--color-surface, #f1f5f9);
+  background: white;
   border-color: var(--color-border, #cbd5e1);
   transform: translateY(-1px);
 }

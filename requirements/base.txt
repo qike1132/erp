@@ -32,9 +32,9 @@ argon2-cffi==25.1.0
 python-dotenv==1.2.2
 
 # ----- 数据处理与 Excel -----
-pandas==2.2.3
 openpyxl==3.1.5
 XlsxWriter==3.2.2
+polars==1.35.2
 
 # ----- 缓存 -----
 redis[hiredis]==7.4.0
@@ -52,7 +52,6 @@ sentry-sdk[fastapi]==2.29.1
 
 # ----- 文本处理与搜索 -----
 charset-normalizer==3.4.0
-pypinyin==0.51.0
 rapidfuzz==3.12.1
 bleach==6.3.0
 

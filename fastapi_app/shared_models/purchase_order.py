@@ -3,9 +3,10 @@
 
 映射到与 Flask-SQLAlchemy PurchaseOrder/PurchaseOrderItem 相同的表。
 """
-from sqlalchemy import String, Integer, Text, Numeric, DateTime, Date, ForeignKey, Index
-from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
+
+from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
 

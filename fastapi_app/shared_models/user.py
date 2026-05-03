@@ -4,9 +4,10 @@
 映射到与 Flask-SQLAlchemy User 相同的 'user' 表。
 列名必须与 Flask 模型完全一致。
 """
-from sqlalchemy import String, Integer, Boolean, Table, Column, ForeignKey, DateTime
-from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
+
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Table
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
 
@@ -52,9 +53,8 @@ class User(Base):
                 for child in p.children:
                     if child.code == permission_code:
                         return True
-            if p.parent_id is None:
-                if permission_code.startswith(p.code.split('_')[0] + '_'):
-                    return True
+            if p.parent_id is None and permission_code.startswith(p.code.split('_')[0] + '_'):
+                return True
 
         return False
 

@@ -3,9 +3,10 @@
 
 映射到与 Flask-SQLAlchemy InventoryLog 相同的 'inventory_log' 表。
 """
-from sqlalchemy import String, Integer, Text, DateTime, ForeignKey, Index, desc
-from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
+
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, desc
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
 

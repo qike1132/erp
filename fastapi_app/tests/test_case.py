@@ -1,6 +1,7 @@
 """皮套管理模块测试"""
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 
 class TestCaseModels:

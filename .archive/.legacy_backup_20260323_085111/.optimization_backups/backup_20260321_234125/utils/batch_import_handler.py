@@ -2,23 +2,24 @@
 批量导入处理工具
 用于统一处理Excel批量导入逻辑,消除重复代码
 """
-import pandas as pd
 import os
 from datetime import datetime
+
+import pandas as pd
 from werkzeug.utils import secure_filename
 
 
 class BatchImportHandler:
     """
     批量导入处理器基类
-    
+
     提供统一的Excel文件处理、数据验证、批量插入功能
     """
-    
+
     def __init__(self, model_class, required_fields, db):
         """
         初始化批量导入处理器
-        
+
         Args:
             model_class: 数据模型类
             required_fields: 必填字段列表
@@ -30,27 +31,27 @@ class BatchImportHandler:
         self.errors = []
         self.success_count = 0
         self.failed_count = 0
-    
+
     def validate_file(self, file):
         """
         验证上传的文件
-        
+
         Args:
             file: Flask文件对象
-        
+
         Returns:
             tuple: (is_valid, file_path or error_message)
         """
         if not file:
             return False, '未选择文件'
-        
+
         if file.filename == '':
             return False, '未选择文件'
-        
+
         # 检查文件扩展名
         if not file.filename.endswith(('.xlsx', '.xls')):
             return False, '只支持Excel文件(.xlsx, .xls)'
-        
+
         # 保存文件
         filename = secure_filename(file.filename)
         timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
@@ -59,16 +60,16 @@ class BatchImportHandler:
         os.makedirs(upload_folder, exist_ok=True)
         file_path = os.path.join(upload_folder, filename)
         file.save(file_path)
-        
+
         return True, file_path
-    
+
     def parse_excel(self, file_path):
         """
         解析Excel文件
-        
+
         Args:
             file_path: Excel文件路径
-        
+
         Returns:
             pandas.DataFrame: 解析后的数据
         """
@@ -78,76 +79,76 @@ class BatchImportHandler:
         except Exception as e:
             self.errors.append(f'Excel文件解析失败: {str(e)}')
             return None
-    
+
     def validate_data(self, df):
         """
         验证数据
-        
+
         Args:
             df: pandas DataFrame
-        
+
         Returns:
             list: 验证通过的数据列表
         """
         validated_data = []
-        
+
         for index, row in df.iterrows():
             row_data = row.to_dict()
-            
+
             # 检查必填字段
             missing_fields = []
             for field in self.required_fields:
                 if field not in row_data or pd.isna(row_data[field]) or str(row_data[field]).strip() == '':
                     missing_fields.append(field)
-            
+
             if missing_fields:
                 self.errors.append(f'第{index + 2}行: 缺少必填字段 {", ".join(missing_fields)}')
                 self.failed_count += 1
                 continue
-            
+
             # 自定义验证
             is_valid, error_msg = self.custom_validate(row_data, index)
             if not is_valid:
                 self.errors.append(f'第{index + 2}行: {error_msg}')
                 self.failed_count += 1
                 continue
-            
+
             validated_data.append(row_data)
-        
+
         return validated_data
-    
+
     def custom_validate(self, row_data, index):
         """
         自定义验证方法,子类可重写
-        
+
         Args:
             row_data: 行数据字典
             index: 行索引
-        
+
         Returns:
             tuple: (is_valid, error_message)
         """
         return True, ''
-    
+
     def process_row(self, row_data):
         """
         处理单行数据,子类必须实现
-        
+
         Args:
             row_data: 行数据字典
-        
+
         Returns:
             model instance or None
         """
         raise NotImplementedError('子类必须实现process_row方法')
-    
+
     def import_from_excel(self, file):
         """
         从Excel导入数据
-        
+
         Args:
             file: Flask文件对象
-        
+
         Returns:
             dict: 导入结果
         """
@@ -161,9 +162,9 @@ class BatchImportHandler:
                 'failed_count': 0,
                 'errors': []
             }
-        
+
         file_path = result
-        
+
         try:
             # 2. 解析Excel
             df = self.parse_excel(file_path)
@@ -175,10 +176,10 @@ class BatchImportHandler:
                     'failed_count': self.failed_count,
                     'errors': self.errors
                 }
-            
+
             # 3. 验证数据
             validated_data = self.validate_data(df)
-            
+
             if not validated_data:
                 return {
                     'success': False,
@@ -187,7 +188,7 @@ class BatchImportHandler:
                     'failed_count': self.failed_count,
                     'errors': self.errors
                 }
-            
+
             # 4. 批量处理
             for row_data in validated_data:
                 try:
@@ -200,14 +201,14 @@ class BatchImportHandler:
                     self.failed_count += 1
                     self.db.session.rollback()
                     continue
-            
+
             # 5. 提交事务
             self.db.session.commit()
-            
+
             # 6. 删除临时文件
             if os.path.exists(file_path):
                 os.remove(file_path)
-            
+
             return {
                 'success': True,
                 'message': f'成功导入{self.success_count}条数据',
@@ -215,7 +216,7 @@ class BatchImportHandler:
                 'failed_count': self.failed_count,
                 'errors': self.errors[:10]  # 只返回前10个错误
             }
-        
+
         except Exception as e:
             self.db.session.rollback()
             return {
@@ -229,12 +230,12 @@ class BatchImportHandler:
 
 class OrderImportHandler(BatchImportHandler):
     """订单批量导入处理器"""
-    
+
     def __init__(self, db, Product, Order):
         super().__init__(Order, ['客户名称', '产品名称', '数量'], db)
         self.Product = Product
         self.Order = Order
-    
+
     def custom_validate(self, row_data, index):
         # 验证数量是否为数字
         try:
@@ -243,9 +244,9 @@ class OrderImportHandler(BatchImportHandler):
                 return False, '数量必须大于0'
         except ValueError:
             return False, '数量必须是整数'
-        
+
         return True, ''
-    
+
     def process_row(self, row_data):
         # 查找产品
         product_name = str(row_data['产品名称']).strip()
@@ -253,7 +254,7 @@ class OrderImportHandler(BatchImportHandler):
         if not product:
             self.errors.append(f'产品不存在: {product_name}')
             return None
-        
+
         # 创建订单
         order = self.Order(
             customer=str(row_data['客户名称']).strip(),
@@ -261,18 +262,18 @@ class OrderImportHandler(BatchImportHandler):
             quantity=int(row_data['数量']),
             note=str(row_data.get('备注', '')).strip() if pd.notna(row_data.get('备注')) else ''
         )
-        
+
         return order
 
 
 class StockInImportHandler(BatchImportHandler):
     """备货批量导入处理器"""
-    
+
     def __init__(self, db, Product, StockIn):
         super().__init__(StockIn, ['客户名称', '产品名称', '数量'], db)
         self.Product = Product
         self.StockIn = StockIn
-    
+
     def custom_validate(self, row_data, index):
         try:
             quantity = int(row_data['数量'])
@@ -280,21 +281,21 @@ class StockInImportHandler(BatchImportHandler):
                 return False, '数量必须大于0'
         except ValueError:
             return False, '数量必须是整数'
-        
+
         return True, ''
-    
+
     def process_row(self, row_data):
         product_name = str(row_data['产品名称']).strip()
         product = self.Product.query.filter_by(name=product_name).first()
         if not product:
             self.errors.append(f'产品不存在: {product_name}')
             return None
-        
+
         stockin = self.StockIn(
             customer=str(row_data['客户名称']).strip(),
             product_id=product.id,
             quantity=int(row_data['数量']),
             note=str(row_data.get('备注', '')).strip() if pd.notna(row_data.get('备注')) else ''
         )
-        
+
         return stockin

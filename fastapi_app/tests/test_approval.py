@@ -1,6 +1,9 @@
 """审批管理模块测试"""
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from fastapi_app.shared_models.approval import ApprovalLog, ApprovalRequest
 
 
 class TestApprovalSchemas:
@@ -14,10 +17,45 @@ class TestApprovalSchemas:
         data = ApprovalActionRequest()
         assert data.reason is None
 
+    def test_approval_action_request_max_length(self):
+        from fastapi_app.schemas.approval import ApprovalActionRequest
+        data = ApprovalActionRequest(reason="a" * 500)
+        assert len(data.reason) == 500
+
     def test_approval_list_response(self):
         from fastapi_app.schemas.approval import ApprovalListResponse
         resp = ApprovalListResponse(data=[], pending_count=5)
         assert resp.pending_count == 5
+
+    def test_approval_item_schema(self):
+        from fastapi_app.schemas.approval import ApprovalItemSchema
+        item = ApprovalItemSchema(
+            id=1, order_id=10, order_no="ORD-001",
+            requester_id=2, requester_name="user1",
+            operation_type="edit", operation_type_display="编辑",
+            status="pending", status_display="待审批",
+        )
+        assert item.id == 1
+        assert item.operation_type == "edit"
+
+
+class TestApprovalModelConstants:
+    def test_operation_type_constants(self):
+        assert ApprovalRequest.OPERATION_EDIT == 'edit'
+        assert ApprovalRequest.OPERATION_DELETE == 'delete'
+
+    def test_status_constants(self):
+        assert ApprovalRequest.STATUS_PENDING == 'pending'
+        assert ApprovalRequest.STATUS_APPROVED == 'approved'
+        assert ApprovalRequest.STATUS_REJECTED == 'rejected'
+        assert ApprovalRequest.STATUS_CANCELLED == 'cancelled'
+
+    def test_action_constants(self):
+        assert ApprovalLog.ACTION_CREATE == 'create'
+        assert ApprovalLog.ACTION_APPROVE == 'approve'
+        assert ApprovalLog.ACTION_REJECT == 'reject'
+        assert ApprovalLog.ACTION_CANCEL == 'cancel'
+        assert ApprovalLog.ACTION_EXECUTE == 'execute'
 
 
 class TestApprovalService:
@@ -36,8 +74,8 @@ class TestApprovalService:
     def mock_approval(self):
         a = MagicMock()
         a.id = 1
-        a.status = 'pending'
-        a.operation_type = 'edit'
+        a.status = ApprovalRequest.STATUS_PENDING
+        a.operation_type = ApprovalRequest.OPERATION_EDIT
         a.operation_type_display = '编辑'
         a.operation_data = '{"quantity": 100}'
         a.requester_id = 2
@@ -72,7 +110,7 @@ class TestApprovalService:
     async def test_approve_self_raises(self, mock_db, mock_approval, mock_current_user):
         from fastapi_app.services.approval_service import approve_request
         mock_db.get = AsyncMock(return_value=mock_approval)
-        mock_approval.requester_id = 1  # same as current user
+        mock_approval.requester_id = 1
 
         with pytest.raises(ValueError, match="不能审批自己"):
             await approve_request(mock_db, 1, mock_current_user)
@@ -86,6 +124,37 @@ class TestApprovalService:
         result = await reject_request(mock_db, 1, mock_current_user, "不符合要求")
         assert mock_db.add.called
         assert "拒绝" in result
+
+    @pytest.mark.asyncio
+    async def test_approve_nonexistent_raises(self, mock_db, mock_current_user):
+        from fastapi_app.services.approval_service import approve_request
+        mock_db.get = AsyncMock(return_value=None)
+
+        with pytest.raises(ValueError, match="审批请求不存在"):
+            await approve_request(mock_db, 999, mock_current_user)
+
+    @pytest.mark.asyncio
+    async def test_approve_already_processed_raises(self, mock_db, mock_approval, mock_current_user):
+        from fastapi_app.services.approval_service import approve_request
+        mock_approval.status = ApprovalRequest.STATUS_APPROVED
+        mock_db.get = AsyncMock(return_value=mock_approval)
+
+        with pytest.raises(ValueError, match="审批请求状态异常"):
+            await approve_request(mock_db, 1, mock_current_user)
+
+    @pytest.mark.asyncio
+    async def test_validate_not_self_approval(self, mock_approval, mock_current_user):
+        from fastapi_app.services.approval_service import _validate_not_self_approval
+        mock_approval.requester_id = 1
+
+        with pytest.raises(ValueError, match="不能审批自己"):
+            _validate_not_self_approval(mock_approval, mock_current_user)
+
+    @pytest.mark.asyncio
+    async def test_validate_not_self_approval_passes(self, mock_approval, mock_current_user):
+        from fastapi_app.services.approval_service import _validate_not_self_approval
+        mock_approval.requester_id = 2
+        _validate_not_self_approval(mock_approval, mock_current_user)
 
 
 class TestApprovalEndpoints:

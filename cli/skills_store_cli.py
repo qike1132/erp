@@ -24,10 +24,9 @@ import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from skills_upgrade import cmd_upgrade as run_skills_upgrade
-
 
 DEFAULT_INSTALL_ROOT = "./skills"
 LOCKFILE_NAME = ".skills_store_lock.json"
@@ -67,7 +66,7 @@ def load_cli_version(base_dir: Path) -> str:
     return CLI_VERSION_FALLBACK
 
 
-def load_cli_metadata(base_dir: Path) -> Dict[str, str]:
+def load_cli_metadata(base_dir: Path) -> dict[str, str]:
     metadata_path = base_dir / CLI_METADATA_FILE_NAME
     if not metadata_path.exists():
         return {}
@@ -77,7 +76,7 @@ def load_cli_metadata(base_dir: Path) -> Dict[str, str]:
         return {}
     if not isinstance(raw, dict):
         return {}
-    out: Dict[str, str] = {}
+    out: dict[str, str] = {}
     for key in (
         "skills_index_url",
         "skills_download_url_template",
@@ -186,7 +185,7 @@ def fill_slug_template(url_template: str, slug: str) -> str:
     return raw.replace("{slug}", urllib.parse.quote(slug))
 
 
-def read_json_from_uri(uri_or_path: str, timeout: int = 20) -> Dict[str, Any]:
+def read_json_from_uri(uri_or_path: str, timeout: int = 20) -> dict[str, Any]:
     parsed = urllib.parse.urlparse(uri_or_path)
     if parsed.scheme in ("", "file"):
         path = parse_path_like_uri(uri_or_path)
@@ -222,11 +221,11 @@ def read_json_from_uri(uri_or_path: str, timeout: int = 20) -> Dict[str, Any]:
     return raw
 
 
-def as_dict(value: Any) -> Dict[str, Any]:
+def as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def first_non_empty_string(obj: Dict[str, Any], keys: List[str]) -> str:
+def first_non_empty_string(obj: dict[str, Any], keys: list[str]) -> str:
     for key in keys:
         value = obj.get(key)
         if isinstance(value, str) and value.strip():
@@ -238,7 +237,7 @@ def normalize_version_text(v: str) -> str:
     return v.strip()
 
 
-def parse_version_key(version: str) -> Optional[Tuple[int, ...]]:
+def parse_version_key(version: str) -> tuple[int, ...] | None:
     raw = version.strip().lower()
     if raw.startswith("v"):
         raw = raw[1:]
@@ -246,7 +245,7 @@ def parse_version_key(version: str) -> Optional[Tuple[int, ...]]:
         return None
     core = raw.split("-", 1)[0].split("+", 1)[0]
     parts = core.split(".")
-    out: List[int] = []
+    out: list[int] = []
     for part in parts:
         if not part.isdigit():
             return None
@@ -268,7 +267,7 @@ def version_is_newer(candidate: str, current: str) -> bool:
     return candidate != current
 
 
-def self_update_url_from_config(config: Dict[str, Any]) -> str:
+def self_update_url_from_config(config: dict[str, Any]) -> str:
     direct = first_non_empty_string(
         config,
         ["self_update_url", "selfUpdateUrl", "update_url", "updateUrl", "manifest_url", "manifestUrl"],
@@ -303,7 +302,7 @@ def resolve_self_update_manifest_url(config_path: Path) -> str:
     return DEFAULT_SELF_UPDATE_MANIFEST_URL
 
 
-def find_cli_script_in_extracted(root: Path) -> Optional[Path]:
+def find_cli_script_in_extracted(root: Path) -> Path | None:
     direct = root / "skills_store_cli.py"
     if direct.exists():
         return direct
@@ -314,7 +313,7 @@ def find_cli_script_in_extracted(root: Path) -> Optional[Path]:
     return matches[0] if matches else None
 
 
-def find_peer_file_in_extracted(root: Path, filename: str) -> Optional[Path]:
+def find_peer_file_in_extracted(root: Path, filename: str) -> Path | None:
     direct = root / filename
     if direct.exists():
         return direct
@@ -339,7 +338,7 @@ def resolve_uri_with_base(raw: str, base_dir: Path) -> str:
     return (base_dir / value).resolve().as_uri()
 
 
-def extract_update_manifest_info(manifest: Dict[str, Any]) -> Tuple[str, str, str]:
+def extract_update_manifest_info(manifest: dict[str, Any]) -> tuple[str, str, str]:
     candidates = [manifest]
     for key in ("latest", "release", "data", "skill", "package"):
         nested = manifest.get(key)
@@ -400,14 +399,14 @@ def install_zip_to_target(
 
 def install_zip_to_target_with_fallback(
     slug: str,
-    zip_uris: List[str],
+    zip_uris: list[str],
     target_dir: Path,
     force: bool,
     expected_sha256: str = "",
 ) -> None:
     candidates = [str(x).strip() for x in zip_uris if str(x).strip()]
     seen = set()
-    ordered: List[str] = []
+    ordered: list[str] = []
     for x in candidates:
         if x in seen:
             continue
@@ -459,7 +458,7 @@ def install_zip_to_target_with_fallback(
         shutil.move(str(stage_dir), str(target_dir))
 
 
-def normalize_skills_payload(data: Any) -> Dict[str, Any]:
+def normalize_skills_payload(data: Any) -> dict[str, Any]:
     if isinstance(data, dict):
         skills = data.get("skills")
         if isinstance(skills, list):
@@ -471,7 +470,7 @@ def normalize_skills_payload(data: Any) -> Dict[str, Any]:
     return {"skills": []}
 
 
-def load_index(index_uri: str) -> Dict[str, Any]:
+def load_index(index_uri: str) -> dict[str, Any]:
     try:
         data = read_json_from_uri(index_uri, timeout=20)
     except Exception as exc:
@@ -479,7 +478,7 @@ def load_index(index_uri: str) -> Dict[str, Any]:
     return normalize_skills_payload(data)
 
 
-def index_local_path_or_none(index_uri: str) -> Optional[Path]:
+def index_local_path_or_none(index_uri: str) -> Path | None:
     parsed = urllib.parse.urlparse(index_uri)
     if parsed.scheme in ("", "file"):
         return parse_path_like_uri(index_uri)
@@ -487,9 +486,9 @@ def index_local_path_or_none(index_uri: str) -> Optional[Path]:
 
 
 def skill_zip_uri(
-    skill: Dict[str, Any],
+    skill: dict[str, Any],
     slug: str,
-    index_path: Optional[Path],
+    index_path: Path | None,
     files_base_uri: str,
     download_url_template: str,
 ) -> str:
@@ -520,7 +519,7 @@ def skill_zip_uri(
     return ""
 
 
-def load_lockfile(install_root: Path) -> Dict[str, Any]:
+def load_lockfile(install_root: Path) -> dict[str, Any]:
     lock_path = install_root / LOCKFILE_NAME
     if not lock_path.exists():
         return {"version": 1, "skills": {}}
@@ -535,7 +534,7 @@ def load_lockfile(install_root: Path) -> Dict[str, Any]:
     return raw
 
 
-def save_lockfile(install_root: Path, lock: Dict[str, Any]) -> None:
+def save_lockfile(install_root: Path, lock: dict[str, Any]) -> None:
     install_root.mkdir(parents=True, exist_ok=True)
     lock_path = install_root / LOCKFILE_NAME
     lock_path.write_text(json.dumps(lock, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -577,7 +576,7 @@ def update_clawhub_lock_v1(slug: str, version: str) -> None:
         verbose_log(f"failed to write clawhub lock, skip: {lock_path}")
 
 
-def skill_text(skill: Dict[str, Any]) -> str:
+def skill_text(skill: dict[str, Any]) -> str:
     tags = skill.get("tags") or []
     if not isinstance(tags, list):
         tags = []
@@ -618,7 +617,7 @@ def fetch_remote_search_results(
     query: str,
     limit: int,
     timeout: int,
-) -> Optional[List[Dict[str, Any]]]:
+) -> list[dict[str, Any]] | None:
     base = str(search_url or "").strip()
     q = str(query or "").strip()
     if not base or not q:
@@ -646,7 +645,7 @@ def fetch_remote_search_results(
         results = raw.get("results")
         if not isinstance(results, list):
             return None
-        out: List[Dict[str, Any]] = []
+        out: list[dict[str, Any]] = []
         for item in results:
             if not isinstance(item, dict):
                 continue
@@ -706,7 +705,7 @@ def cmd_search(args: argparse.Namespace) -> None:
             return
 
     data = load_index(args.index)
-    matches: List[Dict[str, Any]] = []
+    matches: list[dict[str, Any]] = []
     for item in data["skills"]:
         if not isinstance(item, dict):
             continue
@@ -717,7 +716,7 @@ def cmd_search(args: argparse.Namespace) -> None:
         return
 
     if query:
-        def rank(skill: Dict[str, Any]) -> Tuple[int, str]:
+        def rank(skill: dict[str, Any]) -> tuple[int, str]:
             text = skill_text(skill)
             score = text.count(query)
             slug = str(skill.get("slug", ""))
@@ -726,7 +725,7 @@ def cmd_search(args: argparse.Namespace) -> None:
         matches.sort(key=rank, reverse=True)
 
     if json_out:
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         for skill in matches:
             if not isinstance(skill, dict):
                 continue
@@ -852,7 +851,7 @@ def safe_extract_tar(tar_path: Path, target_dir: Path) -> None:
             tf.extractall(target_dir)
 
 
-def find_skill(data: Dict[str, Any], slug: str) -> Optional[Dict[str, Any]]:
+def find_skill(data: dict[str, Any], slug: str) -> dict[str, Any] | None:
     for item in data["skills"]:
         if isinstance(item, dict) and str(item.get("slug", "")).strip() == slug:
             return item
@@ -860,7 +859,7 @@ def find_skill(data: Dict[str, Any], slug: str) -> Optional[Dict[str, Any]]:
 
 
 def cmd_install(args: argparse.Namespace) -> None:
-    data: Dict[str, Any] = {"skills": []}
+    data: dict[str, Any] = {"skills": []}
     try:
         data = load_index(args.index)
     except SystemExit:
@@ -972,7 +971,7 @@ def run_self_upgrade_flow(
     timeout: int,
     check_only: bool,
     quiet: bool,
-) -> Tuple[bool, str, str]:
+) -> tuple[bool, str, str]:
     manifest_url = resolve_self_update_manifest_url(config_path)
     verbose_log(f"fetching manifest: {manifest_url} (timeout={timeout}s)")
     manifest = read_json_from_uri(manifest_url, timeout=timeout)

@@ -15,20 +15,20 @@ ERP 服务器管理器 GUI v5.5
   - 状态强制重置：遇到状态卡顿时，支持强制重置并重新启动
   - 高端暗色 UI — Linear/Vercel 风格配色 + 微交互动画
 """
+import hashlib
+import locale
+import logging
+import math
 import os
-import sys
-import subprocess
-import threading
-import time
 import queue
 import shutil
-import hashlib
-import logging
-import locale
 import socket
+import subprocess
+import sys
+import threading
+import time
 import urllib.request
 from datetime import datetime
-import math
 from pathlib import Path
 
 _IS_WINDOWS = sys.platform == 'win32'
@@ -43,8 +43,9 @@ if _IS_WINDOWS:
                 if hasattr(stream, 'buffer'):
                     stream = io.TextIOWrapper(stream.buffer, encoding='utf-8', errors='replace', line_buffering=True)
 
+import contextlib
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import messagebox, ttk
 
 _VERSION = 'v5.19'
 _WINDOW_TITLE = f'ERP 服务器管理器 {_VERSION}'
@@ -97,10 +98,8 @@ def _get_project_dir():
                 return cfg_path
         for candidate in [Path(r'd:\erp_system')]:
             if candidate.is_dir() and (candidate / 'fastapi_app').is_dir():
-                try:
+                with contextlib.suppress(Exception):
                     (exe_dir / 'erp_project_path.txt').write_text(str(candidate), encoding='utf-8')
-                except Exception:
-                    pass
                 return candidate
         return exe_dir
     return Path(__file__).resolve().parent
@@ -523,10 +522,8 @@ class ServerManagerApp:
         base, accent = self._PALETTE['border_card'], self._PALETTE['accent_h']
         def tick(i):
             if i > 10:
-                try:
+                with contextlib.suppress(Exception):
                     card.configure(highlightbackground=base)
-                except Exception:
-                    pass
                 return
             t = i / 10
             color = _lerp_color(base, accent, t * 2) if t <= 0.5 else _lerp_color(accent, base, (t - 0.5) * 2)
@@ -581,22 +578,16 @@ class ServerManagerApp:
             self._mode = 'none'
         self._kill_tray()
         if self._status_anim_after_id:
-            try:
+            with contextlib.suppress(Exception):
                 self.root.after_cancel(self._status_anim_after_id)
-            except Exception:
-                pass
             self._status_anim_after_id = None
         if self._redis_check_after_id:
-            try:
+            with contextlib.suppress(Exception):
                 self.root.after_cancel(self._redis_check_after_id)
-            except Exception:
-                pass
             self._redis_check_after_id = None
         for aid in self._after_ids.values():
-            try:
+            with contextlib.suppress(Exception):
                 self.root.after_cancel(aid)
-            except Exception:
-                pass
         self._after_ids.clear()
         for attr in ('dual_dev_status_dot', 'dual_prod_status_dot'):
             dot = getattr(self, attr, None)
@@ -614,15 +605,11 @@ class ServerManagerApp:
 
     def _kill_tray(self):
         if self._tray_icon:
-            try:
+            with contextlib.suppress(Exception):
                 self._tray_icon.stop()
-            except Exception:
-                pass
             self._tray_icon = None
-            try:
+            with contextlib.suppress(Exception):
                 self.root.update()
-            except Exception:
-                pass
 
     def setup_logging(self):
         log_dir = _PROJECT_DIR / 'logs'
@@ -719,14 +706,10 @@ class ServerManagerApp:
                         self._msg_queue.put(('log', {'text': f"发现 {len(child_pids)+1} 个关联进程"}))
                         _taskkill(pid)
                         for cpid in child_pids:
-                            try:
+                            with contextlib.suppress(Exception):
                                 _taskkill(cpid)
-                            except Exception:
-                                pass
-                        try:
+                        with contextlib.suppress(Exception):
                             proc.wait(timeout=3)
-                        except Exception:
-                            pass
                         self._kill_port_sync(_API_PORT)
                     else:
                         import signal
@@ -770,10 +753,8 @@ class ServerManagerApp:
             if not self._find_port_pids(port):
                 return
             for opid in self._find_port_pids(port):
-                try:
+                with contextlib.suppress(Exception):
                     _taskkill(opid)
-                except Exception:
-                    pass
             time.sleep(0.5)
 
     def _find_port_pids(self, port):
@@ -811,7 +792,7 @@ class ServerManagerApp:
         try:
             self._msg_queue.put(('log', {'text': '正在清理端口...'}))
             self._kill_port_sync(_API_PORT)
-            
+
             env = os.environ.copy()
             env.update({'PYTHONUNBUFFERED': '1', 'PYTHONIOENCODING': 'utf-8', 'PYTHONUTF8': '1', 'PYTHONPATH': str(_PROJECT_DIR)})
             self._process = subprocess.Popen([_PYTHON_EXE, script], cwd=str(_PROJECT_DIR), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW if _IS_WINDOWS else 0, text=False)
@@ -949,7 +930,7 @@ class ServerManagerApp:
         self._mode = 'none'
         self._current_mode_key = ""
         self._update_all_ui()
-        
+
         self.log_message("正在执行停止/重置操作...")
         self.status_bar_label.config(text="正在停止所有...")
         def _stop_all_worker():
@@ -961,7 +942,7 @@ class ServerManagerApp:
                         self._kill_process_tree(proc.pid)
                 self._frontend_process = None
                 self._process = None
-                
+
                 self._stop_redis()
                 self._kill_residual_async()
                 self._kill_port_sync(_API_PORT)
@@ -985,10 +966,8 @@ class ServerManagerApp:
                     if pids_to_kill:
                         self._msg_queue.put(('log', {'text': f"发现 {len(pids_to_kill)} 个残留进程，正在终止..."}))
                         for pid in pids_to_kill:
-                            try:
+                            with contextlib.suppress(Exception):
                                 _taskkill(pid)
-                            except Exception:
-                                pass
                 except ImportError:
                     self._msg_queue.put(('log', {'text': "缺少psutil库，跳过残留进程清理", 'level': 'WARNING'}))
             except Exception as e:
@@ -1020,15 +999,11 @@ class ServerManagerApp:
             self._msg_queue.put(('log', {'text': f"重启：终止进程树 (PID: {proc.pid})..."}))
             if _IS_WINDOWS:
                 for cpid in self._collect_process_tree(proc.pid):
-                    try:
+                    with contextlib.suppress(Exception):
                         _taskkill(cpid)
-                    except Exception:
-                        pass
                 _taskkill(proc.pid)
-                try:
+                with contextlib.suppress(Exception):
                     proc.wait(timeout=3)
-                except Exception:
-                    pass
             else:
                 proc.terminate()
                 try:
@@ -1049,7 +1024,7 @@ class ServerManagerApp:
             self.log_message(f"前端目录不存在: {_FRONTEND_DIR}", 'ERROR')
             messagebox.showerror("错误", f"前端目录不存在:\n{_FRONTEND_DIR}")
             return
-        
+
         self._mode = 'starting'
         self._current_mode_key = 'dual_dev' if mode == 'dev' else 'dual_prod'
         self._startup_progress, self._startup_steps, self._startup_current_step = 0, ['检查Redis服务', '启动后端服务', '启动前端服务', '完成'], ''
@@ -1061,11 +1036,11 @@ class ServerManagerApp:
     def _start_dual_thread(self, mode, label):
         try:
             creationflags = subprocess.CREATE_NO_WINDOW if _IS_WINDOWS else 0
-            
+
             self._msg_queue.put(('log', {'text': '正在清理端口...'}))
             self._kill_port_sync(_API_PORT)
             self._kill_port_sync(_WEB_PORT)
-            
+
             self._startup_current_step, self._startup_progress = self._startup_steps[0], 1
             self._msg_queue.put(('startup_progress', {'step': self._startup_current_step, 'progress': self._startup_progress, 'total': len(self._startup_steps)}))
             if not self._start_redis():
@@ -1091,10 +1066,8 @@ class ServerManagerApp:
                 if self._process and self._process.poll() is None:
                     self._msg_queue.put(('log', {'text': f'正在终止未就绪的后端进程 (PID: {self._process.pid})...'}))
                     self._kill_process_tree(self._process.pid)
-                    try:
+                    with contextlib.suppress(Exception):
                         self._process.wait(timeout=3)
-                    except Exception:
-                        pass
                 self._process = None
                 self._msg_queue.put(('dual_failed', {'mode': 'dual_dev' if mode == 'dev' else 'dual_prod', 'label': label, 'reason': '后端未就绪'}))
                 return
@@ -1144,10 +1117,8 @@ class ServerManagerApp:
                     if proc and proc.poll() is None:
                         self._msg_queue.put(('log', {'text': f'正在终止未就绪的{name}进程 (PID: {proc.pid})...'}))
                         self._kill_process_tree(proc.pid)
-                        try:
+                        with contextlib.suppress(Exception):
                             proc.wait(timeout=3)
-                        except Exception:
-                            pass
                 self._process, self._frontend_process = None, None
                 self._msg_queue.put(('dual_failed', {'mode': 'dual_dev' if mode == 'dev' else 'dual_prod', 'label': label, 'reason': '前端未就绪'}))
                 return
@@ -1188,19 +1159,15 @@ class ServerManagerApp:
                 if proc and proc.poll() is None:
                     self._msg_queue.put(('log', {'text': f'正在终止{name}进程树 (PID: {proc.pid})...'}))
                     if _IS_WINDOWS:
-                        try:
+                        with contextlib.suppress(Exception):
                             _taskkill(proc.pid)
-                        except Exception:
-                            pass
                     else:
                         try:
                             proc.terminate()
                             proc.wait(timeout=5)
                         except Exception:
-                            try:
+                            with contextlib.suppress(Exception):
                                 proc.kill()
-                            except Exception:
-                                pass
                     self._msg_queue.put(('log', {'text': f'{name}进程已终止 (PID: {proc.pid})'}))
             self._stop_redis()
             self._kill_port_sync(_API_PORT)
@@ -1220,10 +1187,8 @@ class ServerManagerApp:
                 self._msg_queue.put(('log', {'text': f"重启：终止{name}进程树 (PID: {proc.pid})..."}))
                 if _IS_WINDOWS:
                     for cpid in self._collect_process_tree(proc.pid):
-                        try:
+                        with contextlib.suppress(Exception):
                             _taskkill(cpid)
-                        except Exception:
-                            pass
                     _taskkill(proc.pid)
                 else:
                     proc.terminate()
@@ -1267,7 +1232,7 @@ class ServerManagerApp:
         if frontend_alive:
             self.log_message(f"  → 前端: http://localhost:{_WEB_PORT}")
         elif is_prod:
-            self.log_message(f"  → 前端: 由 Nginx 提供服务 (dist/)")
+            self.log_message("  → 前端: 由 Nginx 提供服务 (dist/)")
 
     def _on_dual_failed(self, mode, label, reason):
         self.log_message(f"{label}启动失败: {reason}", 'ERROR')
@@ -1281,10 +1246,8 @@ class ServerManagerApp:
 
     def _update_redis_status(self):
         if self._redis_check_after_id:
-            try:
+            with contextlib.suppress(Exception):
                 self.root.after_cancel(self._redis_check_after_id)
-            except Exception:
-                pass
         def _check_and_update():
             try:
                 is_running = self._is_redis_running()
@@ -1307,7 +1270,7 @@ class ServerManagerApp:
 
     def _update_all_ui(self):
         is_dual_dev, is_dual_prod = self._mode == 'dual_dev', self._mode == 'dual_prod'
-        is_starting, is_restarting, is_stopping = self._mode == 'starting', self._mode == 'restarting', self._mode == 'stopping'
+        is_starting, is_restarting, _is_stopping = self._mode == 'starting', self._mode == 'restarting', self._mode == 'stopping'
         is_none = self._mode == 'none'
         is_busy = not is_none
         current_mode_key = self._current_mode_key
@@ -1382,10 +1345,8 @@ class ServerManagerApp:
                 try:
                     os.killpg(os.getpgid(pid), signal.SIGTERM)
                 except Exception:
-                    try:
+                    with contextlib.suppress(Exception):
                         os.kill(pid, signal.SIGTERM)
-                    except Exception:
-                        pass
         except Exception:
             pass
 
@@ -1524,10 +1485,8 @@ class ServerManagerApp:
     def _update_status_indicator(self, is_busy, is_active):
         color = self._PALETTE['success'] if is_active else self._PALETTE['warning'] if is_busy else self._PALETTE['info']
         if self._status_anim_after_id:
-            try:
+            with contextlib.suppress(Exception):
                 self.root.after_cancel(self._status_anim_after_id)
-            except Exception:
-                pass
             self._status_anim_after_id = None
         self._status_pulse_step = 0
         try:
@@ -1568,10 +1527,8 @@ def main():
             crash_file.write_text(f"[CRASH] {datetime.now()}\n{tb_text}", encoding='utf-8')
         except Exception:
             pass
-        try:
+        with contextlib.suppress(Exception):
             messagebox.showerror("启动失败", f"服务器管理器启动失败:\n{str(e)}" + (f"\n\n日志: {crash_file}" if crash_file else ""))
-        except Exception:
-            pass
         sys.exit(1)
 
 

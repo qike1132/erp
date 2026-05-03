@@ -3,8 +3,9 @@
 Phase 5.2: FastAPI TestClient 集成测试
 确保关键只读端点可访问、返回合理 schema，作为 CI 门禁基础。
 """
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 
 class TestHealthEndpoints:

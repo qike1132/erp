@@ -85,8 +85,8 @@
   --color-surface-card: #ffffff;
   --color-border: #e4e7ed;
   --color-border-light: #f0f2f5;
-  --color-text: #5A4A4A;
-  --color-text-secondary: #8492a6;
+  --color-text: #1a1a2e;
+  --color-text-secondary: #475569;
   --color-text-tertiary: #595959;
   --color-text-muted: #b0bec5;
   --color-text-inverse: #ffffff;
@@ -151,7 +151,6 @@
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    color: var(--color-text);
     background: var(--color-surface);
     font-size: 15px;
     line-height: 1.6;
@@ -168,6 +167,87 @@
   ::-webkit-scrollbar-track {
     background: transparent;
   }
+}
+
+/* ============ Global Typography (unlayered for highest priority) ============ */
+body {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+/* ============ Typography Hierarchy ============ */
+/* H1 — Page title: primary color + largest + heaviest */
+h1 {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--color-primary-700);
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+}
+
+/* H2 — Section title: heading color + heavy */
+h2 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--color-heading);
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+}
+
+/* H3 — Subsection: slightly smaller, still distinct from body */
+h3 {
+  font-size: 1.0625rem;
+  font-weight: 700;
+  color: var(--color-slate-700);
+  line-height: 1.4;
+}
+
+/* H4 — Card/title: same size as body, distinguished by weight + color */
+h4 {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--color-slate-600);
+  line-height: 1.4;
+}
+
+h5, h6 {
+  font-weight: 600;
+  color: var(--color-slate-600);
+  line-height: 1.4;
+}
+
+h5 { font-size: 0.875rem; }
+h6 { font-size: 0.8125rem; }
+
+/* Subtitle — descriptive text below headings */
+.subtitle {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-slate-500);
+  line-height: 1.5;
+}
+
+/* Label — form labels, field names */
+.text-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-slate-500);
+  line-height: 1.4;
+}
+
+/* Auxiliary — hints, timestamps, metadata */
+.text-aux {
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
+/* Button text */
+.text-btn {
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1;
 }
 
 /* ============ Component Animations ============ */

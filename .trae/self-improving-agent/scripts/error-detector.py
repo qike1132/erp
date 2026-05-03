@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import os
-import sys
 
 ERROR_PATTERNS = [
     "error:", "Error:", "ERROR:",
@@ -16,10 +15,7 @@ ERROR_PATTERNS = [
 
 def check_error(output):
     output_upper = output.upper()
-    for pattern in ERROR_PATTERNS:
-        if pattern.upper() in output_upper or pattern in output:
-            return True
-    return False
+    return any(pattern.upper() in output_upper or pattern in output for pattern in ERROR_PATTERNS)
 
 def main():
     tool_output = os.environ.get("CLAUDE_TOOL_OUTPUT", "")

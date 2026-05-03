@@ -4,7 +4,7 @@
 import re
 
 # 读取app.py
-with open('app.py', 'r', encoding='utf-8') as f:
+with open('app.py', encoding='utf-8') as f:
     content = f.read()
 
 # 提取数据库模型定义

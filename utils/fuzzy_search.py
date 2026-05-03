@@ -9,13 +9,13 @@ try:
 except ImportError:
     HAS_RAPIDFUZZ = False
 
-from typing import List, Tuple, Any, Optional
+from typing import Any
 
 
 class FuzzySearcher:
     """模糊搜索器"""
 
-    def __init__(self, items: List[Any], key_func=None):
+    def __init__(self, items: list[Any], key_func=None):
         """
         初始化
 
@@ -28,7 +28,7 @@ class FuzzySearcher:
         self.choices = {i: self.key_func(item) for i, item in enumerate(items)}
 
     def search(self, query: str, threshold: int = 70,
-               limit: int = 10) -> List[Tuple[Any, int]]:
+               limit: int = 10) -> list[tuple[Any, int]]:
         """
         模糊搜索
 
@@ -52,7 +52,7 @@ class FuzzySearcher:
 
         return [(self.items[r[2]], r[1]) for r in results if r[1] >= threshold]
 
-    def find_duplicates(self, threshold: int = 90) -> List[Tuple[Any, Any, int]]:
+    def find_duplicates(self, threshold: int = 90) -> list[tuple[Any, Any, int]]:
         """
         查找重复项
 
@@ -86,7 +86,7 @@ class FuzzySearcher:
 
 
 def fuzzy_match(query: str, choices: dict, threshold: int = 70,
-                limit: int = 10) -> List[Tuple[str, int, Any]]:
+                limit: int = 10) -> list[tuple[str, int, Any]]:
     """
     快速模糊匹配
 

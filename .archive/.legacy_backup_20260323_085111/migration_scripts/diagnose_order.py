@@ -54,13 +54,14 @@ except Exception as e:
 # 测试4: 检查模板文件
 print("\n[测试4] 模板文件")
 import os
+
 template_path = 'templates/order.html'
 if os.path.exists(template_path):
-    print(f"  模板文件: 存在")
+    print("  模板文件: 存在")
     size = os.path.getsize(template_path)
     print(f"  文件大小: {size} 字节")
 else:
-    print(f"  模板文件: 不存在")
+    print("  模板文件: 不存在")
 
 # 测试5: 测试路由访问
 print("\n[测试5] 路由访问测试")
@@ -78,7 +79,7 @@ try:
             print(f"  响应大小: {len(response2.data)} 字节")
             print("  订单页面: 正常")
         else:
-            print(f"  订单页面: 异常")
+            print("  订单页面: 异常")
             print(f"  错误内容: {response2.data.decode('utf-8')[:200]}")
 except Exception as e:
     print(f"  路由测试失败: {e}")

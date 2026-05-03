@@ -6,12 +6,12 @@
 """
 import logging
 from datetime import datetime, timedelta
-from typing import List, Tuple, Optional, Dict, Any
+from typing import Any
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
-from fastapi_app.shared_models import Order, StockIn, StockOut, Product
+from fastapi_app.shared_models import Order, Product, StockIn, StockOut
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ def get_all_logs_data(
     status: str = '',
     start_date: str = '',
     end_date: str = '',
-) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """
     获取指定类型报表的所有数据（不分页，用于导出）
 
@@ -130,7 +130,7 @@ def _get_order_logs(session, customer, product, status, start_date, end_date):
         'pending_count': sum(1 for o in orders if o.status == '待备货'),
         'completed_count': sum(1 for o in orders if o.status == '已出货')
     }
-    logger.info(f'订单报表数据处理完成')
+    logger.info('订单报表数据处理完成')
     return logs, stats
 
 
@@ -189,7 +189,7 @@ def _get_stockin_logs(session, customer, product, start_date, end_date):
         'total_quantity': total_quantity,
         'total_remaining': total_remaining
     }
-    logger.info(f'备货报表数据处理完成')
+    logger.info('备货报表数据处理完成')
     return logs, stats
 
 
@@ -250,7 +250,7 @@ def _get_stockout_logs(session, customer, product, start_date, end_date):
         'total_count': total,
         'total_quantity': total_quantity
     }
-    logger.info(f'出货报表数据处理完成')
+    logger.info('出货报表数据处理完成')
     return logs, stats
 
 
@@ -315,5 +315,5 @@ def _get_deduction_logs(session, customer, product, start_date, end_date):
         'total_quantity': total_quantity,
         'total_orders': len(order_ids)
     }
-    logger.info(f'抵扣报表数据处理完成')
+    logger.info('抵扣报表数据处理完成')
     return logs, stats

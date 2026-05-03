@@ -2,13 +2,15 @@
 客户路由测试 - 提高客户路由覆盖率
 测试范围：客户列表、创建、编辑、删除、API接口等完整流程
 """
-import pytest
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
+
+import pytest
+
 try:
-    from flask import session
     from app import db
     from app.models import Customer, CustomerAccessLog, Order, StockIn, StockOut
+    from flask import session
     HAS_FLASK = True
 except ImportError:
     HAS_FLASK = False
@@ -29,7 +31,7 @@ class TestCustomerRoutes:
         """测试客户列表页面访问成功"""
         response = logged_in_client.get('/customer/list')
         assert response.status_code == 200
-        assert b'customer' in response.data or '客户'.encode('utf-8') in response.data
+        assert b'customer' in response.data or '客户'.encode() in response.data
 
     def test_customer_list_post_create_success(self, logged_in_client):
         """测试创建客户成功"""
@@ -42,7 +44,7 @@ class TestCustomerRoutes:
         }
         response = logged_in_client.post('/customer/list', data=data, follow_redirects=True)
         assert response.status_code == 200
-        
+
         # 验证客户创建
         customer = Customer.query.filter_by(name='新客户').first()
         assert customer is not None
@@ -56,7 +58,7 @@ class TestCustomerRoutes:
         }
         response = logged_in_client.post('/customer/list', data=data, follow_redirects=True)
         assert response.status_code == 200
-        assert b'error' in response.data or '不能为空'.encode('utf-8') in response.data
+        assert b'error' in response.data or '不能为空'.encode() in response.data
 
     def test_customer_list_post_duplicate_name(self, logged_in_client, test_customer):
         """测试创建重复名称客户"""
@@ -67,7 +69,7 @@ class TestCustomerRoutes:
         }
         response = logged_in_client.post('/customer/list', data=data, follow_redirects=True)
         assert response.status_code == 200
-        assert b'error' in response.data or '已存在'.encode('utf-8') in response.data
+        assert b'error' in response.data or '已存在'.encode() in response.data
 
     def test_customer_edit_get_success(self, logged_in_client, test_customer):
         """测试客户编辑页面访问成功"""
@@ -86,7 +88,7 @@ class TestCustomerRoutes:
         }
         response = logged_in_client.post(f'/customer/edit/{test_customer.id}', data=data, follow_redirects=True)
         assert response.status_code == 200
-        
+
         # 验证客户更新
         db.session.refresh(test_customer)
         assert test_customer.name == '更新客户名'
@@ -103,7 +105,7 @@ class TestCustomerRoutes:
         )
         db_session.add(other_customer)
         db_session.commit()
-        
+
         data = {
             'name': other_customer.name,
             'contact': '测试',
@@ -124,11 +126,11 @@ class TestCustomerRoutes:
         )
         db_session.add(customer)
         db_session.commit()
-        
+
         customer_id = customer.id
         response = logged_in_client.get(f'/customer/delete/{customer_id}', follow_redirects=True)
         assert response.status_code == 200
-        
+
         # 验证客户删除
         deleted_customer = Customer.query.get(customer_id)
         assert deleted_customer is None
@@ -146,10 +148,10 @@ class TestCustomerRoutes:
         )
         db_session.add(order)
         db_session.commit()
-        
+
         response = logged_in_client.get(f'/customer/delete/{test_customer.id}', follow_redirects=True)
         assert response.status_code == 200
-        assert b'error' in response.data or '无法删除'.encode('utf-8') in response.data
+        assert b'error' in response.data or '无法删除'.encode() in response.data
 
     def test_customer_delete_not_found(self, logged_in_client):
         """测试删除不存在的客户"""
@@ -159,10 +161,10 @@ class TestCustomerRoutes:
     def test_customer_toggle_status_success(self, logged_in_client, test_customer):
         """测试切换客户状态成功"""
         original_status = test_customer.status
-        
+
         response = logged_in_client.get(f'/customer/toggle-status/{test_customer.id}')
         assert response.status_code == 200
-        
+
         data = json.loads(response.data)
         assert data['success'] is True
         assert data['status'] != original_status
@@ -176,7 +178,7 @@ class TestCustomerAPIRoutes:
         """测试获取所有客户列表"""
         response = logged_in_client.get('/customer/api/list')
         assert response.status_code == 200
-        
+
         data = json.loads(response.data)
         assert isinstance(data, list)
         assert len(data) > 0
@@ -185,7 +187,7 @@ class TestCustomerAPIRoutes:
         """测试获取启用客户列表"""
         response = logged_in_client.get('/customer/api/list?status=active')
         assert response.status_code == 200
-        
+
         data = json.loads(response.data)
         assert isinstance(data, list)
         for customer in data:
@@ -202,10 +204,10 @@ class TestCustomerAPIRoutes:
         )
         db_session.add(customer)
         db_session.commit()
-        
+
         response = logged_in_client.get('/customer/api/list?status=inactive')
         assert response.status_code == 200
-        
+
         data = json.loads(response.data)
         assert isinstance(data, list)
         for c in data:
@@ -215,7 +217,7 @@ class TestCustomerAPIRoutes:
         """测试按名称搜索客户"""
         response = logged_in_client.get(f'/customer/api/search?q={test_customer.name}')
         assert response.status_code == 200
-        
+
         data = json.loads(response.data)
         assert isinstance(data, list)
         assert len(data) > 0
@@ -224,7 +226,7 @@ class TestCustomerAPIRoutes:
         """测试按联系人搜索客户"""
         response = logged_in_client.get(f'/customer/api/search?q={test_customer.contact}')
         assert response.status_code == 200
-        
+
         data = json.loads(response.data)
         assert isinstance(data, list)
 
@@ -232,7 +234,7 @@ class TestCustomerAPIRoutes:
         """测试按电话搜索客户"""
         response = logged_in_client.get(f'/customer/api/search?q={test_customer.phone}')
         assert response.status_code == 200
-        
+
         data = json.loads(response.data)
         assert isinstance(data, list)
 
@@ -240,7 +242,7 @@ class TestCustomerAPIRoutes:
         """测试空查询搜索客户"""
         response = logged_in_client.get('/customer/api/search?q=')
         assert response.status_code == 200
-        
+
         data = json.loads(response.data)
         assert isinstance(data, list)
         assert len(data) == 0
@@ -249,7 +251,7 @@ class TestCustomerAPIRoutes:
         """测试获取启用客户名称列表"""
         response = logged_in_client.get('/customer/api/active-names')
         assert response.status_code == 200
-        
+
         data = json.loads(response.data)
         assert isinstance(data, list)
         for customer in data:
@@ -269,10 +271,10 @@ class TestCustomerAPIRoutes:
         )
         db_session.add(log)
         db_session.commit()
-        
+
         response = logged_in_client.get('/customer/api/access-stats?days=30')
         assert response.status_code == 200
-        
+
         data = json.loads(response.data)
         assert 'total_access' in data
         assert 'success_count' in data
@@ -292,10 +294,10 @@ class TestCustomerAPIRoutes:
             )
             db_session.add(log)
         db_session.commit()
-        
+
         response = logged_in_client.get('/customer/api/access-stats?module=订单')
         assert response.status_code == 200
-        
+
         data = json.loads(response.data)
         assert data['total_access'] > 0
 
@@ -312,10 +314,10 @@ class TestCustomerAPIRoutes:
         )
         db_session.add(log)
         db_session.commit()
-        
+
         response = logged_in_client.get(f'/customer/api/customer-stats/{test_customer.id}?days=30')
         assert response.status_code == 200
-        
+
         data = json.loads(response.data)
         assert 'total_quantity' in data
 
@@ -323,7 +325,7 @@ class TestCustomerAPIRoutes:
         """测试客户数据同步检查"""
         response = logged_in_client.get('/customer/api/sync-check')
         assert response.status_code == 200
-        
+
         data = json.loads(response.data)
         assert 'total_customers' in data
         assert 'active_customers' in data
@@ -337,7 +339,7 @@ class TestCustomerBusinessLogic:
     def test_customer_cache_invalidation_on_create(self, logged_in_client, app):
         """测试创建客户时缓存失效"""
         from utils.redis_cache import redis_cache
-        
+
         # 创建客户
         data = {
             'name': '缓存测试客户',
@@ -345,7 +347,7 @@ class TestCustomerBusinessLogic:
             'phone': '13800138007'
         }
         logged_in_client.post('/customer/list', data=data, follow_redirects=True)
-        
+
         # 验证缓存已清除
         cached_customers = redis_cache.get('customer_list_all')
         assert cached_customers is None
@@ -353,7 +355,7 @@ class TestCustomerBusinessLogic:
     def test_customer_cache_invalidation_on_edit(self, logged_in_client, test_customer):
         """测试编辑客户时缓存失效"""
         from utils.redis_cache import redis_cache
-        
+
         data = {
             'name': '编辑后客户名',
             'contact': '测试',
@@ -361,7 +363,7 @@ class TestCustomerBusinessLogic:
             'status': 'on'
         }
         logged_in_client.post(f'/customer/edit/{test_customer.id}', data=data, follow_redirects=True)
-        
+
         # 验证缓存已清除
         cached_customers = redis_cache.get('customer_list_all')
         assert cached_customers is None
@@ -369,12 +371,12 @@ class TestCustomerBusinessLogic:
     def test_customer_status_toggle(self, logged_in_client, test_customer):
         """测试客户状态切换"""
         original_status = test_customer.status
-        
+
         # 切换状态
         logged_in_client.get(f'/customer/toggle-status/{test_customer.id}')
         db.session.refresh(test_customer)
         assert test_customer.status != original_status
-        
+
         # 再次切换
         logged_in_client.get(f'/customer/toggle-status/{test_customer.id}')
         db.session.refresh(test_customer)
@@ -452,7 +454,7 @@ class TestCustomerPerformance:
             )
             db_session.add(customer)
         db_session.commit()
-        
+
         response = logged_in_client.get('/customer/list')
         assert response.status_code == 200
 
@@ -468,11 +470,11 @@ class TestCustomerPerformance:
             )
             db_session.add(customer)
         db_session.commit()
-        
+
         # 搜索特定客户
         response = logged_in_client.get('/customer/api/search?q=搜索测试客户100')
         assert response.status_code == 200
-        
+
         data = json.loads(response.data)
         assert isinstance(data, list)
 

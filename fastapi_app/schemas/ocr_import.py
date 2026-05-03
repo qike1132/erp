@@ -3,8 +3,8 @@ OCR PDF 导入 Pydantic 数据模型
 
 用于 PDF 出货单 OCR 识别的请求/响应模型。
 """
+
 from pydantic import BaseModel, Field
-from typing import Optional, List
 
 
 class OcrPdfImportResult(BaseModel):
@@ -13,8 +13,8 @@ class OcrPdfImportResult(BaseModel):
     message: str = Field(..., description="结果消息")
     total_imported: int = Field(default=0, description="总导入数量")
     file_count: int = Field(default=0, description="处理文件数")
-    file_results: List[dict] = Field(default_factory=list, description="各文件处理结果")
-    errors: List[str] = Field(default_factory=list, description="错误列表")
+    file_results: list[dict] = Field(default_factory=list, description="各文件处理结果")
+    errors: list[str] = Field(default_factory=list, description="错误列表")
     task_id: str = Field(default="", description="进度追踪ID")
 
 
@@ -38,5 +38,5 @@ class OcrPdfPreviewResult(BaseModel):
     message: str = Field(..., description="结果消息")
     filename: str = Field(default="", description="文件名")
     page_count: int = Field(default=0, description="页数")
-    pages: List[OcrPdfPagePreview] = Field(default_factory=list, description="各页识别文本")
-    parsed_items: List[OcrPdfParsedItem] = Field(default_factory=list, description="解析出的出货项")
+    pages: list[OcrPdfPagePreview] = Field(default_factory=list, description="各页识别文本")
+    parsed_items: list[OcrPdfParsedItem] = Field(default_factory=list, description="解析出的出货项")

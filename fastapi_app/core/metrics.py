@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 METRICS_AVAILABLE = False
 
 try:
-    from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
+    from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
     METRICS_AVAILABLE = True
 except ImportError:
     logger.warning("prometheus_client 未安装，监控指标功能已禁用")

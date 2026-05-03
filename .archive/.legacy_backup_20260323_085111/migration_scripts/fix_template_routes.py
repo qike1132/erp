@@ -2,7 +2,6 @@
 批量修复模板中的路由引用
 """
 import os
-import re
 
 # 路由映射关系
 route_mapping = {
@@ -22,10 +21,9 @@ route_mapping = {
 def fix_template_file(filepath):
     """修复单个模板文件"""
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
+        with open(filepath, encoding='utf-8') as f:
             content = f.read()
 
-        original_content = content
         modified = False
 
         # 替换路由引用
@@ -57,7 +55,7 @@ def fix_all_templates():
     print("=" * 50)
 
     # 遍历templates目录
-    for root, dirs, files in os.walk(templates_dir):
+    for root, _dirs, files in os.walk(templates_dir):
         for file in files:
             if file.endswith('.html'):
                 filepath = os.path.join(root, file)

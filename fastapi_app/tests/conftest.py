@@ -3,12 +3,13 @@
 
 提供测试用的 FastAPI 客户端和 mock 数据库会话。
 """
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from httpx import AsyncClient, ASGITransport
 
-from fastapi_app.main import app
+import pytest
+from httpx import ASGITransport, AsyncClient
+
 from fastapi_app.core.config import settings
+from fastapi_app.main import app
 
 # 将测试用主机名加入 ALLOWED_HOSTS，
 # 避免 TrustedHostMiddleware 拒绝 httpx 测试客户端的 Host: test 头
@@ -117,7 +118,7 @@ async def client():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         # 获取 CSRF cookie（starlette-csrf 在首个响应中设置）
-        csrf_resp = await ac.get("/api/health")
+        await ac.get("/api/health")
         csrf_cookie = ac.cookies.get("fastapi_csrf_token", "")
         # 设置默认 headers，使 POST 等非安全方法自动携带 CSRF token
         if csrf_cookie:

@@ -1,6 +1,4 @@
 """ocr_service 单元测试"""
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi_app.services.ocr_service import create_progress, get_progress
 

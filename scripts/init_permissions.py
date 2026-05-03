@@ -7,138 +7,83 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from sqlalchemy import text
+
 from fastapi_app.core.database import SyncSessionLocal
 from fastapi_app.shared_models import Permission
-from sqlalchemy import text
 
 PERMISSIONS_CONFIG = {
     'user': {
         'module_name': '用户管理',
         'icon': 'fa-users-cog',
         'parent': {'code': 'user_manage', 'name': '用户管理'},
-        'children': [
-            {'code': 'user_view', 'name': '用户查看'},
-            {'code': 'user_create', 'name': '用户创建'},
-            {'code': 'user_edit', 'name': '用户编辑'},
-            {'code': 'user_delete', 'name': '用户删除'},
-        ]
+        'children': []
     },
     'permission': {
         'module_name': '权限管理',
         'icon': 'fa-shield-alt',
         'parent': {'code': 'permission_manage', 'name': '权限管理(全部)'},
-        'children': [
-            {'code': 'permission_view', 'name': '权限查看'},
-            {'code': 'permission_assign', 'name': '权限分配'},
-        ]
+        'children': []
     },
     'product': {
         'module_name': '产品管理',
         'icon': 'fa-box',
         'parent': {'code': 'product_manage', 'name': '产品管理'},
-        'children': [
-            {'code': 'product_view', 'name': '产品查看'},
-            {'code': 'product_create', 'name': '产品创建'},
-            {'code': 'product_edit', 'name': '产品编辑'},
-            {'code': 'product_delete', 'name': '产品删除'},
-            {'code': 'product_import', 'name': '产品导入'},
-            {'code': 'product_export', 'name': '产品导出'},
-        ]
+        'children': []
     },
     'order': {
         'module_name': '订单管理',
         'icon': 'fa-shopping-cart',
         'parent': {'code': 'order_manage', 'name': '订单管理(全部)'},
-        'children': [
-            {'code': 'order_view', 'name': '订单查看'},
-            {'code': 'order_create', 'name': '订单创建'},
-            {'code': 'order_edit', 'name': '订单编辑'},
-            {'code': 'order_delete', 'name': '订单删除'},
-            {'code': 'order_import', 'name': '订单导入'},
-            {'code': 'order_export', 'name': '订单导出'},
-            {'code': 'order_approve', 'name': '订单审批'},
-        ]
+        'children': []
     },
     'stockin': {
         'module_name': '备货管理',
         'icon': 'fa-truck-loading',
         'parent': {'code': 'stockin_manage', 'name': '备货管理(全部)'},
-        'children': [
-            {'code': 'stockin_view', 'name': '入库查看'},
-            {'code': 'stockin_create', 'name': '入库创建'},
-            {'code': 'stockin_edit', 'name': '入库编辑'},
-            {'code': 'stockin_delete', 'name': '入库删除'},
-        ]
+        'children': []
     },
     'stockout': {
         'module_name': '出库管理',
         'icon': 'fa-truck',
         'parent': {'code': 'stockout_manage', 'name': '出库管理'},
-        'children': [
-            {'code': 'stockout_view', 'name': '出库查看'},
-            {'code': 'stockout_create', 'name': '出库创建'},
-            {'code': 'stockout_edit', 'name': '出库编辑'},
-            {'code': 'stockout_delete', 'name': '出库删除'},
-        ]
+        'children': []
     },
     'case': {
         'module_name': '皮套管理',
         'icon': 'fa-suitcase',
         'parent': {'code': 'case_manage', 'name': '皮套管理'},
-        'children': [
-            {'code': 'case_view', 'name': '皮套查看'},
-            {'code': 'case_stockin', 'name': '皮套入库'},
-            {'code': 'case_stockout', 'name': '皮套出库'},
-        ]
+        'children': []
     },
     'report': {
         'module_name': '报表统计',
         'icon': 'fa-chart-bar',
         'parent': {'code': 'report_manage', 'name': '报表管理'},
-        'children': [
-            {'code': 'report_view', 'name': '报表查看'},
-            {'code': 'report_export', 'name': '报表导出'},
-        ]
+        'children': []
     },
     'approval': {
         'module_name': '审批管理',
         'icon': 'fa-clipboard-check',
         'parent': {'code': 'approval_manage', 'name': '审批管理'},
-        'children': [
-            {'code': 'approval_view', 'name': '审批查看'},
-            {'code': 'approval_approve', 'name': '审批操作'},
-        ]
+        'children': []
     },
     'customer': {
         'module_name': '客户管理',
         'icon': 'fa-building',
         'parent': {'code': 'customer_manage', 'name': '客户管理'},
-        'children': [
-            {'code': 'customer_view', 'name': '客户查看'},
-            {'code': 'customer_create', 'name': '客户创建'},
-            {'code': 'customer_edit', 'name': '客户编辑'},
-            {'code': 'customer_delete', 'name': '客户删除'},
-        ]
+        'children': []
     },
     'purchase_center': {
         'module_name': '采购中心',
         'icon': 'fa-store',
         'parent': {'code': 'purchase_center_manage', 'name': '采购中心'},
-        'children': [
-            {'code': 'purchase_center_view', 'name': '采购中心查看'},
-            {'code': 'purchase_center_order', 'name': '采购订单管理'},
-            {'code': 'purchase_center_calculator', 'name': '用料计算'},
-            {'code': 'purchase_center_unprocessed', 'name': '未处理订单'},
-        ]
+        'children': []
     },
     'production_summary': {
         'module_name': '生产报表',
         'icon': 'fa-industry',
         'parent': {'code': 'production_summary_manage', 'name': '生产报表(全部)'},
-        'children': [
-            {'code': 'production_summary_view', 'name': '生产报表查看'},
-            {'code': 'production_summary_manage', 'name': '生产报表管理'},
-        ]
+        'children': []
     },
 }
 
@@ -170,7 +115,7 @@ def init_permissions():
         print("\n开始创建权限数据...")
         permission_map = {}
 
-        for module_code, module_config in PERMISSIONS_CONFIG.items():
+        for _module_code, module_config in PERMISSIONS_CONFIG.items():
             module_name = module_config['module_name']
             parent_data = module_config['parent']
             children = module_config['children']

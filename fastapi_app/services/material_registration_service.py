@@ -1,16 +1,20 @@
 """来料登记服务层"""
 import logging
-from datetime import datetime, date, timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
-from sqlalchemy import select, func, or_
-from sqlalchemy.orm import joinedload, selectinload
-from sqlalchemy.exc import OperationalError, DisconnectionError
 
-from fastapi_app.shared_models import (
-    MaterialRegistration, MaterialRegistrationItem,
-    PurchaseOrder, PurchaseOrderItem, User
-)
+from sqlalchemy import func, select
+from sqlalchemy.exc import DisconnectionError, OperationalError
+from sqlalchemy.orm import joinedload, selectinload
+
 from fastapi_app.services import escape_like
+from fastapi_app.shared_models import (
+    MaterialRegistration,
+    MaterialRegistrationItem,
+    Order,
+    PurchaseOrder,
+    PurchaseOrderItem,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -269,7 +273,7 @@ async def get_stats_overview(db) -> dict:
 
     today = datetime.now().date()
     week_ago = today - timedelta(days=7)
-    month_ago = today - timedelta(days=30)
+    today - timedelta(days=30)
 
     recent = (await db.execute(
         select(func.count()).where(MaterialRegistration.registration_date >= week_ago)
@@ -304,12 +308,50 @@ async def get_purchase_order_items(db, order_id: int) -> dict:
 async def preview_purchase_order(db, order_no: str) -> dict:
     """采购订单快速预览"""
     result = await db.execute(
-        select(PurchaseOrder).where(PurchaseOrder.order_no == order_no)
+        select(PurchaseOrder)
+        .options(joinedload(PurchaseOrder.items))
+        .where(PurchaseOrder.order_no == order_no)
     )
-    order = result.scalar_one_or_none()
+    order = result.unique().scalar_one_or_none()
     if not order:
         raise ValueError("订单不存在")
-    return {'success': True, 'order': order.to_dict()}
+
+    # Fetch source sales orders info
+    source_orders = {}
+    source_order_ids = set()
+    if order.source_order_id:
+        source_order_ids.add(order.source_order_id)
+    if order.source_order_ids:
+        try:
+            import json
+            for sid in json.loads(order.source_order_ids):
+                if sid:
+                    source_order_ids.add(sid)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    if source_order_ids:
+        so_result = await db.execute(
+            select(Order).options(joinedload(Order.product)).where(Order.id.in_(source_order_ids))
+        )
+        for so in so_result.unique().scalars().all():
+            source_orders[so.id] = so
+
+    order_dict = order.to_dict(source_orders=source_orders)
+    order_dict['source_order_ids'] = order.source_order_ids
+
+    # Enrich source order details for display
+    source_details = []
+    for so in source_orders.values():
+        detail: dict = {'id': so.id, 'order_no': so.order_no}
+        if hasattr(so, 'product') and so.product:
+            detail['product_name'] = so.product.name
+        if hasattr(so, 'quantity') and so.quantity:
+            detail['quantity'] = float(so.quantity)
+        detail['customer_name'] = so.customer if hasattr(so, 'customer') else None
+        source_details.append(detail)
+    order_dict['source_orders'] = source_details
+
+    return {'success': True, 'order': order_dict}
 
 
 async def export_registrations(db, order_no: str = '', supplier: str = '',

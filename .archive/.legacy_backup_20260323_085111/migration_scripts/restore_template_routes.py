@@ -19,10 +19,9 @@ route_mapping = {
 def restore_template_file(filepath):
     """恢复单个模板文件"""
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
+        with open(filepath, encoding='utf-8') as f:
             content = f.read()
 
-        original_content = content
         modified = False
 
         # 替换路由引用
@@ -54,7 +53,7 @@ def restore_all_templates():
     print("=" * 50)
 
     # 遍历templates目录
-    for root, dirs, files in os.walk(templates_dir):
+    for root, _dirs, files in os.walk(templates_dir):
         for file in files:
             if file.endswith('.html'):
                 filepath = os.path.join(root, file)

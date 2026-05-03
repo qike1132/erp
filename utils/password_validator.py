@@ -5,12 +5,12 @@ import re
 class PasswordValidator:
     """密码复杂度验证器"""
 
-    MIN_LENGTH = 8
+    MIN_LENGTH = 6
     MAX_LENGTH = 128
-    REQUIRE_UPPERCASE = True
-    REQUIRE_LOWERCASE = True
-    REQUIRE_DIGIT = True
-    REQUIRE_SPECIAL = True
+    REQUIRE_UPPERCASE = False
+    REQUIRE_LOWERCASE = False
+    REQUIRE_DIGIT = False
+    REQUIRE_SPECIAL = False
 
     # 匹配常见特殊字符
     SPECIAL_CHAR_PATTERN = r'[!@#$%^&*(),.?":{}|<>\-_\[\]\\\/~`+=;]'
@@ -73,16 +73,5 @@ class PasswordValidator:
         # 检查常见弱密码
         if password in cls.WEAK_PASSWORDS:
             return False, "密码过于常见，请使用更复杂的密码"
-
-        # 检查连续重复字符（如 "aaabbb"）
-        if cls.REPEAT_PATTERN.search(password):
-            return False, "密码不能包含3个或以上连续重复字符"
-
-        # 检查键盘序列
-        lower_pwd = password.lower()
-        for seq in cls.KEYBOARD_SEQUENCES:
-            for i in range(len(seq) - 3):
-                if seq[i:i+4] in lower_pwd:
-                    return False, "密码不能包含键盘序列字符"
 
         return True, ""

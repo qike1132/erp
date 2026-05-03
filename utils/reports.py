@@ -3,25 +3,25 @@
 提供订单、备货、出货的详细报表 (FastAPI 兼容版本)
 """
 from datetime import datetime, timedelta
-from typing import Dict, List, Any
-from sqlalchemy import func
+from typing import Any
+
 from fastapi_app.core.database import SyncSessionLocal
-from fastapi_app.shared_models import Product, Order, StockIn, StockOut
+from fastapi_app.shared_models import Order, StockIn, StockOut
 
 
 class ReportGenerator:
     """报表生成器"""
-    
+
     def __init__(self):
         pass
-    
+
     # ==================== 订单报表 ====================
-    
-    def get_order_report(self, start_date: datetime = None, 
-                        end_date: datetime = None) -> Dict[str, Any]:
+
+    def get_order_report(self, start_date: datetime = None,
+                        end_date: datetime = None) -> dict[str, Any]:
         """
         订单报表
-        
+
         Args:
             start_date: 开始日期
             end_date: 结束日期
@@ -30,7 +30,7 @@ class ReportGenerator:
             start_date = datetime.now() - timedelta(days=30)
         if not end_date:
             end_date = datetime.now()
-        
+
         session = SyncSessionLocal()
         try:
             # 查询订单数据
@@ -38,11 +38,11 @@ class ReportGenerator:
                 Order.order_date >= start_date,
                 Order.order_date <= end_date
             ).all()
-            
+
             # 统计数据
             total_orders = len(orders)
             total_quantity = sum(o.quantity for o in orders)
-            
+
             # 按状态统计
             status_stats = {}
             for order in orders:
@@ -51,7 +51,7 @@ class ReportGenerator:
                     status_stats[status] = {'count': 0, 'quantity': 0}
                 status_stats[status]['count'] += 1
                 status_stats[status]['quantity'] += order.quantity
-            
+
             # 按客户统计
             customer_stats = {}
             for order in orders:
@@ -60,7 +60,7 @@ class ReportGenerator:
                     customer_stats[customer] = {'count': 0, 'quantity': 0}
                 customer_stats[customer]['count'] += 1
                 customer_stats[customer]['quantity'] += order.quantity
-            
+
             # 按产品统计
             product_stats = {}
             for order in orders:
@@ -69,7 +69,7 @@ class ReportGenerator:
                     product_stats[product_name] = {'count': 0, 'quantity': 0}
                 product_stats[product_name]['count'] += 1
                 product_stats[product_name]['quantity'] += order.quantity
-            
+
             # 按日期统计(趋势)
             daily_stats = {}
             for order in orders:
@@ -78,7 +78,7 @@ class ReportGenerator:
                     daily_stats[date_key] = {'count': 0, 'quantity': 0}
                 daily_stats[date_key]['count'] += 1
                 daily_stats[date_key]['quantity'] += order.quantity
-            
+
             return {
                 'report_type': '订单报表',
                 'period': {
@@ -97,14 +97,14 @@ class ReportGenerator:
             }
         finally:
             session.close()
-    
+
     # ==================== 备货报表 ====================
-    
+
     def get_stockin_report(self, start_date: datetime = None,
-                          end_date: datetime = None) -> Dict[str, Any]:
+                          end_date: datetime = None) -> dict[str, Any]:
         """
         备货报表
-        
+
         Args:
             start_date: 开始日期
             end_date: 结束日期
@@ -113,7 +113,7 @@ class ReportGenerator:
             start_date = datetime.now() - timedelta(days=30)
         if not end_date:
             end_date = datetime.now()
-        
+
         session = SyncSessionLocal()
         try:
             # 查询备货数据
@@ -121,11 +121,11 @@ class ReportGenerator:
                 StockIn.stockin_date >= start_date,
                 StockIn.stockin_date <= end_date
             ).all()
-            
+
             # 统计数据
             total_stockins = len(stockins)
             total_quantity = sum(s.quantity for s in stockins)
-            
+
             # 按客户统计
             customer_stats = {}
             for stockin in stockins:
@@ -134,7 +134,7 @@ class ReportGenerator:
                     customer_stats[customer] = {'count': 0, 'quantity': 0}
                 customer_stats[customer]['count'] += 1
                 customer_stats[customer]['quantity'] += stockin.quantity
-            
+
             # 按产品统计
             product_stats = {}
             for stockin in stockins:
@@ -143,7 +143,7 @@ class ReportGenerator:
                     product_stats[product_name] = {'count': 0, 'quantity': 0}
                 product_stats[product_name]['count'] += 1
                 product_stats[product_name]['quantity'] += stockin.quantity
-            
+
             # 按日期统计
             daily_stats = {}
             for stockin in stockins:
@@ -152,7 +152,7 @@ class ReportGenerator:
                     daily_stats[date_key] = {'count': 0, 'quantity': 0}
                 daily_stats[date_key]['count'] += 1
                 daily_stats[date_key]['quantity'] += stockin.quantity
-            
+
             return {
                 'report_type': '备货报表',
                 'period': {
@@ -170,14 +170,14 @@ class ReportGenerator:
             }
         finally:
             session.close()
-    
+
     # ==================== 出货报表 ====================
-    
+
     def get_stockout_report(self, start_date: datetime = None,
-                           end_date: datetime = None) -> Dict[str, Any]:
+                           end_date: datetime = None) -> dict[str, Any]:
         """
         出货报表
-        
+
         Args:
             start_date: 开始日期
             end_date: 结束日期
@@ -186,7 +186,7 @@ class ReportGenerator:
             start_date = datetime.now() - timedelta(days=30)
         if not end_date:
             end_date = datetime.now()
-        
+
         session = SyncSessionLocal()
         try:
             # 查询出货数据
@@ -194,11 +194,11 @@ class ReportGenerator:
                 StockOut.stockout_date >= start_date,
                 StockOut.stockout_date <= end_date
             ).all()
-            
+
             # 统计数据
             total_stockouts = len(stockouts)
             total_quantity = sum(s.quantity for s in stockouts)
-            
+
             # 按客户统计
             customer_stats = {}
             for stockout in stockouts:
@@ -207,7 +207,7 @@ class ReportGenerator:
                     customer_stats[customer] = {'count': 0, 'quantity': 0}
                 customer_stats[customer]['count'] += 1
                 customer_stats[customer]['quantity'] += stockout.quantity
-            
+
             # 按产品统计
             product_stats = {}
             for stockout in stockouts:
@@ -216,7 +216,7 @@ class ReportGenerator:
                     product_stats[product_name] = {'count': 0, 'quantity': 0}
                 product_stats[product_name]['count'] += 1
                 product_stats[product_name]['quantity'] += stockout.quantity
-            
+
             # 按日期统计
             daily_stats = {}
             for stockout in stockouts:
@@ -225,7 +225,7 @@ class ReportGenerator:
                     daily_stats[date_key] = {'count': 0, 'quantity': 0}
                 daily_stats[date_key]['count'] += 1
                 daily_stats[date_key]['quantity'] += stockout.quantity
-            
+
             return {
                 'report_type': '出货报表',
                 'period': {
@@ -243,11 +243,11 @@ class ReportGenerator:
             }
         finally:
             session.close()
-    
+
     # ==================== 综合报表 ====================
-    
+
     def get_comprehensive_report(self, start_date: datetime = None,
-                                end_date: datetime = None) -> Dict[str, Any]:
+                                end_date: datetime = None) -> dict[str, Any]:
         """
         综合报表
         包含订单、备货、出货的综合分析
@@ -255,7 +255,7 @@ class ReportGenerator:
         order_report = self.get_order_report(start_date, end_date)
         stockin_report = self.get_stockin_report(start_date, end_date)
         stockout_report = self.get_stockout_report(start_date, end_date)
-        
+
         return {
             'report_type': '综合报表',
             'period': order_report['period'],

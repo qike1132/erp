@@ -9,9 +9,10 @@ import hashlib
 import json
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Generic, List, Optional, TypeVar
+from collections.abc import Callable
+from typing import Any, Generic, TypeVar
 
-from sqlalchemy import or_, select, func, text
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -83,7 +84,7 @@ class BaseSearchService(Generic[T], ABC):
         self,
         db: Session,
         keyword: str,
-        status_filter: Optional[Any] = None,
+        status_filter: Any | None = None,
     ):
         """构建搜索查询（同步版本）"""
         model = self.get_model_class()
@@ -103,7 +104,7 @@ class BaseSearchService(Generic[T], ABC):
         self,
         db: AsyncSession,
         keyword: str,
-        status_filter: Optional[Any] = None,
+        status_filter: Any | None = None,
     ):
         """构建搜索查询（异步版本）"""
         model = self.get_model_class()
@@ -127,7 +128,7 @@ class BaseSearchService(Generic[T], ABC):
         db: Session,
         keyword: str,
         limit: int = 20,
-        status_filter: Optional[Any] = None,
+        status_filter: Any | None = None,
     ) -> list[dict]:
         """同步搜索，返回序列化后的 dict 列表"""
         query = self.build_search_query_sync(db, keyword, status_filter)
@@ -141,7 +142,7 @@ class BaseSearchService(Generic[T], ABC):
         db: AsyncSession,
         keyword: str,
         limit: int = 20,
-        status_filter: Optional[Any] = None,
+        status_filter: Any | None = None,
     ) -> list[dict]:
         """异步搜索，返回序列化后的 dict 列表"""
         query = self.build_search_query_async(db, keyword, status_filter)
@@ -151,7 +152,7 @@ class BaseSearchService(Generic[T], ABC):
         serializer = self.get_result_serializer()
         return [serializer(item) for item in results]
 
-    def _get_cache_key(self, keyword: str, limit: int, status_filter: Optional[Any] = None) -> str:
+    def _get_cache_key(self, keyword: str, limit: int, status_filter: Any | None = None) -> str:
         """生成缓存键"""
         params = f"{keyword}:{limit}:{status_filter}"
         hash_val = hashlib.md5(params.encode(), usedforsecurity=False).hexdigest()[:12]
@@ -162,7 +163,7 @@ class BaseSearchService(Generic[T], ABC):
         db: AsyncSession,
         keyword: str,
         limit: int = 20,
-        status_filter: Optional[Any] = None,
+        status_filter: Any | None = None,
     ) -> list[dict]:
         """带 Redis 缓存的异步搜索
 

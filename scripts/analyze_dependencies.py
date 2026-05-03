@@ -5,11 +5,8 @@
 
 import ast
 import os
-import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
-import importlib.util
 
 
 class DependencyAnalyzer:
@@ -17,12 +14,12 @@ class DependencyAnalyzer:
 
     def __init__(self, project_root: str):
         self.project_root = Path(project_root)
-        self.imports_found: Set[str] = set()
-        self.requirements: Dict[str, str] = {}
-        self.unused_deps: List[str] = []
-        self.used_deps: List[str] = []
+        self.imports_found: set[str] = set()
+        self.requirements: dict[str, str] = {}
+        self.unused_deps: list[str] = []
+        self.used_deps: list[str] = []
 
-    def parse_requirements(self, requirements_file: str = "requirements.txt") -> Dict[str, str]:
+    def parse_requirements(self, requirements_file: str = "requirements.txt") -> dict[str, str]:
         """解析requirements.txt文件"""
         req_path = self.project_root / requirements_file
         if not req_path.exists():
@@ -30,7 +27,7 @@ class DependencyAnalyzer:
             return {}
 
         deps = {}
-        with open(req_path, 'r', encoding='utf-8') as f:
+        with open(req_path, encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
                 if line and not line.startswith('#'):
@@ -50,7 +47,7 @@ class DependencyAnalyzer:
         self.requirements = deps
         return deps
 
-    def find_python_files(self) -> List[Path]:
+    def find_python_files(self) -> list[Path]:
         """查找项目中的所有Python文件"""
         exclude_dirs = {
             'venv', 'env', '.venv', '__pycache__',
@@ -66,11 +63,11 @@ class DependencyAnalyzer:
 
         return py_files
 
-    def analyze_imports_in_file(self, file_path: Path) -> Set[str]:
+    def analyze_imports_in_file(self, file_path: Path) -> set[str]:
         """分析单个文件中的import语句"""
         imports = set()
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, encoding='utf-8') as f:
                 content = f.read()
                 tree = ast.parse(content)
 
@@ -79,10 +76,9 @@ class DependencyAnalyzer:
                     for name in node.names:
                         mod_name = name.name.split('.')[0]
                         imports.add(mod_name.lower())
-                elif isinstance(node, ast.ImportFrom):
-                    if node.module:
-                        mod_name = node.module.split('.')[0]
-                        imports.add(mod_name.lower())
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    mod_name = node.module.split('.')[0]
+                    imports.add(mod_name.lower())
 
         except Exception as e:
             print(f"⚠️  无法解析 {file_path}: {e}")
@@ -152,7 +148,7 @@ class DependencyAnalyzer:
         if not self.imports_found:
             self.analyze_all_imports()
 
-        for dep_name in self.requirements.keys():
+        for dep_name in self.requirements:
             # 检查依赖是否被使用
             dep_lower = dep_name.lower()
 
@@ -213,78 +209,38 @@ class DependencyAnalyzer:
             'atexit', 'signal', 'errno', 'ctypes', 'cgitb',
             'webbrowser', 'mailbox', 'mailcap', 'mimetypes',
             'quopri', 'uu', 'base64', 'binascii', 'bz2', 'gzip',
-            'lzma', 'zipfile', 'tarfile', 'shutil', 'tempfile',
-            'crypt', 'getpass', 'getopt', 'optparse', 'argparse',
-            'cmd', 'shlex', 'fileinput', 'linecache', 'stat',
-            'timeit', 'profile', 'pstats', 'hotshot', 'trace',
+            'lzma', 'zipfile', 'tarfile', 'crypt', 'getpass', 'getopt', 'optparse', 'timeit', 'profile', 'pstats', 'hotshot', 'trace',
             'tabnanny', 'compileall', 'py_compile', 'dis',
-            'pickletools', 'reprlib', 'pprint', 'textwrap',
-            'string', 're', 'difflib', 'filecmp', 'struct',
-            'codecs', 'unicodedata', 'stringprep', 'readline',
+            'pickletools', 'reprlib', 'codecs', 'unicodedata', 'stringprep', 'readline',
             'rlcompleter', 'tkinter', 'turtle', 'pydoc',
-            'doctest', 'unittest', 'pytest', 'distutils',
+            'doctest', 'distutils',
             'ensurepip', 'venv', 'zipapp', 'pkgutil',
             'importlib', 'pkg_resources', 'setuptools',
-            'pip', 'wheel', 'packaging', 'email', 'mailbox',
-            'mailcap', 'mimetypes', 'quopri', 'uu', 'base64',
-            'binhex', 'binascii', 'bz2', 'gzip', 'lzma',
-            'zipfile', 'tarfile', 'shutil', 'tempfile',
-            'glob', 'fnmatch', 'pathlib', 'os', 'io',
-            'sys', 'builtins', '__future__', '__hello__',
+            'pip', 'wheel', 'packaging', 'binhex', '__future__', '__hello__',
             '__phello__', '_weakref', '_weakrefset',
-            'abc', 'aifc', 'antigravity', 'argparse',
-            'array', 'ast', 'asynchat', 'asyncore',
-            'atexit', 'audioop', 'base64', 'bdb',
-            'binascii', 'binhex', 'bisect', 'builtins',
-            'bz2', 'calendar', 'cgi', 'cgitb', 'chunk',
-            'cmath', 'cmd', 'code', 'codecs', 'codeop',
-            'collections', 'colorsys', 'compileall',
-            'concurrent', 'configparser', 'contextlib',
-            'contextvars', 'copy', 'copyreg', 'crypt',
-            'csv', 'ctypes', 'curses', 'dataclasses',
-            'datetime', 'dbm', 'decimal', 'difflib',
-            'dis', 'distutils', 'doctest', 'email',
-            'encodings', 'ensurepip', 'enum', 'errno',
-            'faulthandler', 'fcntl', 'filecmp',
-            'fileinput', 'fnmatch', 'formatter',
-            'fractions', 'ftplib', 'functools',
-            'gc', 'getopt', 'getpass', 'gettext',
-            'glob', 'grp', 'gzip', 'hashlib',
-            'heapq', 'hmac', 'html', 'http',
-            'imaplib', 'imghdr', 'imp', 'importlib',
-            'inspect', 'io', 'ipaddress', 'itertools',
-            'json', 'keyword', 'lib2to3', 'linecache',
-            'locale', 'logging', 'lzma', 'macpath',
-            'mailbox', 'mailcap', 'marshal', 'math',
-            'mimetypes', 'mmap', 'modulefinder',
-            'msilib', 'msvcrt', 'multiprocessing',
-            'netrc', 'nis', 'nntplib', 'numbers',
-            'operator', 'optparse', 'os', 'ossaudiodev',
-            'parser', 'pathlib', 'pdb', 'pickle',
-            'pickletools', 'pipes', 'pkgutil',
-            'platform', 'plistlib', 'poplib',
-            'posix', 'pprint', 'profile', 'pstats',
-            'pty', 'pwd', 'py_compile', 'pyclbr',
-            'pydoc', 'queue', 'quopri', 'random',
-            're', 'readline', 'reprlib', 'resource',
-            'rlcompleter', 'runpy', 'sched',
+            'abc', 'aifc', 'antigravity', 'ast', 'asynchat', 'asyncore',
+            'audioop', 'bdb',
+            'calendar', 'cgi', 'chunk',
+            'cmath', 'code', 'codeop',
+            'colorsys', 'concurrent', 'contextvars', 'copyreg', 'curses', 'dbm', 'decimal', 'encodings', 'faulthandler', 'fcntl', 'formatter',
+            'fractions', 'ftplib', 'gc', 'gettext',
+            'hmac', 'imaplib', 'imghdr', 'imp', 'ipaddress', 'keyword', 'lib2to3', 'locale', 'macpath',
+            'marshal', 'mmap', 'modulefinder',
+            'msilib', 'msvcrt', 'netrc', 'nis', 'nntplib', 'numbers',
+            'ossaudiodev',
+            'parser', 'pdb', 'pickle',
+            'pipes', 'plistlib', 'poplib',
+            'posix', 'pty', 'pyclbr',
+            'resource',
+            'runpy', 'sched',
             'secrets', 'select', 'selectors',
-            'shelve', 'shlex', 'shutil', 'signal',
-            'site', 'smtpd', 'smtplib', 'sndhdr',
-            'socket', 'socketserver', 'spwd', 'sqlite3',
-            'ssl', 'stat', 'statistics', 'string',
-            'stringprep', 'struct', 'subprocess',
-            'sunau', 'symtable', 'sys', 'syslog',
-            'tabnanny', 'tarfile', 'telnetlib',
-            'tempfile', 'termios', 'textwrap',
-            'threading', 'time', 'timeit', 'tkinter',
-            'token', 'tokenize', 'trace', 'traceback',
-            'tracemalloc', 'tty', 'turtle', 'types',
-            'typing', 'unicodedata', 'unittest',
-            'urllib', 'uu', 'uuid', 'venv', 'warnings',
-            'wave', 'weakref', 'webbrowser', 'winreg',
-            'winsound', 'xdrlib', 'xml', 'xmlrpc',
-            'zipapp', 'zipfile', 'zipimport', 'zlib',
+            'shelve', 'smtpd', 'smtplib', 'sndhdr',
+            'socketserver', 'spwd', 'sqlite3',
+            'ssl', 'statistics', 'sunau', 'symtable', 'telnetlib',
+            'termios', 'token', 'tokenize', 'tracemalloc', 'tty', 'uuid', 'warnings',
+            'wave', 'weakref', 'winreg',
+            'winsound', 'xdrlib', 'xmlrpc',
+            'zipimport', 'zlib',
         }
         return module_name in std_libs
 

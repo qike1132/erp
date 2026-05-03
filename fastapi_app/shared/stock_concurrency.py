@@ -7,6 +7,7 @@
 本模块为跨框架共享模块，Flask 和 FastAPI 均可直接导入使用，不依赖任何 Web 框架。
 """
 import logging
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session

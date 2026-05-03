@@ -8,19 +8,19 @@
 import logging
 import threading
 from datetime import datetime
-from typing import Optional, Dict, Any, List
 
-from sqlalchemy import select, func, or_
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from fastapi_app.shared_models import Product, StockIn, StockOut, InventoryLog, Order, Customer
 from fastapi_app.shared.stock_concurrency import get_product_for_update_sync
+from fastapi_app.shared_models import InventoryLog, Order, Product, StockIn, StockOut
 
 logger = logging.getLogger(__name__)
 
 
-from fastapi_app.services import escape_like
+import contextlib
 
+from fastapi_app.services import escape_like
 
 # ==================== 编号生成 ====================
 
@@ -86,10 +86,8 @@ def generate_number_sync(prefix: str, model, date_field: str, number_field: str,
     db_max = 0
     if record:
         last_number = getattr(record, number_field)
-        try:
+        with contextlib.suppress(ValueError, IndexError):
             db_max = int(last_number.split('-')[-1])
-        except (ValueError, IndexError):
-            pass
 
     with _sync_number_generator._lock:
         _sync_number_generator._cleanup_old_entries()
@@ -331,7 +329,7 @@ def delete_stockin(session: Session, stockin: StockIn) -> None:
 def create_stockout(session: Session, product_id: int, quantity: int,
                     customer: str, stockout_date: datetime, note: str,
                     order_type: str = 'regular',
-                    country: str = None) -> List[StockOut]:
+                    country: str = None) -> list[StockOut]:
     """
     创建出库记录（含 FIFO 订单分配），扣减库存和写入日志。
     不做 commit，由调用方控制事务。
@@ -573,7 +571,7 @@ def get_inventory(session: Session, search_customer: str = '',
         orders = product.orders
         if search_customer:
             orders = [o for o in orders if o.customer == search_customer]
-        order_customers = set(o.customer for o in orders)
+        order_customers = {o.customer for o in orders}
         product_customers.update(order_customers)
 
         for customer in product_customers:

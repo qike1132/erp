@@ -1,0 +1,197 @@
+"""
+中间件注册模块
+
+从 main.py 提取，包含：
+- CSRF 保护
+- CORS 配置
+- TrustedHost
+- GZip 压缩
+- 请求体大小限制（10MB）
+- Prometheus 请求追踪
+
+中间件执行顺序（自上而下）：
+1. CSRF token 校验（非 GET/HEAD 请求，豁免登录/登出）
+2. CORS 跨域处理
+3. TrustedHost 主机头校验
+4. GZip 响应压缩（>1000 bytes）
+5. 请求体大小限制（10MB）
+6. Prometheus 请求指标采集
+"""
+
+import logging
+import os
+import time
+
+from fastapi import FastAPI, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+
+from fastapi_app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+MAX_REQUEST_BODY_SIZE = 10 * 1024 * 1024
+
+
+def setup_middleware(app: FastAPI) -> None:
+    """注册所有中间件到 FastAPI 应用"""
+
+    _setup_csrf(app)
+    _setup_cors(app)
+    _setup_trusted_host(app)
+    _setup_gzip(app)
+    _setup_body_size_limit(app)
+    _setup_prometheus(app)
+
+
+def _setup_csrf(app: FastAPI) -> None:
+    try:
+        from itsdangerous import URLSafeSerializer
+
+        _csrf_secure = os.getenv("CSRF_COOKIE_SECURE", "").lower() in ("true", "1", "yes")
+        _csrf_serializer = URLSafeSerializer(settings.SECRET_KEY)
+
+        @app.middleware("http")
+        async def conditional_csrf_middleware(request: Request, call_next):
+            is_login_endpoint = request.url.path.startswith("/api/v1/auth/login")
+            is_logout_endpoint = request.url.path.startswith("/api/v1/auth/logout")
+            is_exempt_endpoint = is_login_endpoint or is_logout_endpoint
+
+            if not is_exempt_endpoint and request.url.path.startswith("/api/") and request.method not in ("GET", "HEAD", "OPTIONS"):
+                origin = request.headers.get("Origin")
+                if origin:
+                    csrf_cookie = request.cookies.get("fastapi_csrf_token")
+                    csrf_header = request.headers.get("X-CSRF-Token")
+                    if not csrf_cookie or not csrf_header or csrf_cookie != csrf_header:
+                        return JSONResponse(
+                            status_code=403,
+                            content={"detail": "CSRF token 验证失败"},
+                        )
+
+            response = await call_next(request)
+
+            csrf_token = _csrf_serializer.dumps("csrf_token")
+            response.set_cookie(
+                key="fastapi_csrf_token",
+                value=csrf_token,
+                max_age=86400,
+                httponly=False,
+                samesite="lax",
+                secure=_csrf_secure,
+                path="/",
+            )
+
+            return response
+
+        logger.info("CSRF 配置：API 变更请求需验证 CSRF token")
+    except ImportError:
+        logger.warning("itsdangerous 未安装，CSRF cookie 保护未启用")
+
+
+def _setup_cors(app: FastAPI) -> None:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.BACKEND_CORS_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
+    )
+
+
+def _setup_trusted_host(app: FastAPI) -> None:
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=settings.ALLOWED_HOSTS,
+    )
+
+
+def _setup_gzip(app: FastAPI) -> None:
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+
+def _setup_body_size_limit(app: FastAPI) -> None:
+    @app.middleware("http")
+    async def limit_request_body_size(request: Request, call_next):
+        if request.method in ("POST", "PUT", "PATCH"):
+            content_length = request.headers.get("content-length")
+            if content_length:
+                try:
+                    if int(content_length) > MAX_REQUEST_BODY_SIZE:
+                        return Response(
+                            content='{"detail":"请求体过大，最大允许10MB"}',
+                            status_code=413,
+                            media_type="application/json",
+                        )
+                except ValueError:
+                    return Response(
+                        content='{"detail":"无效的Content-Length"}',
+                        status_code=400,
+                        media_type="application/json",
+                    )
+            else:
+                body = await request.body()
+                if len(body) > MAX_REQUEST_BODY_SIZE:
+                    return Response(
+                        content='{"detail":"请求体过大，最大允许10MB"}',
+                        status_code=413,
+                        media_type="application/json",
+                    )
+        response = await call_next(request)
+        response.headers["X-API-Version"] = "v1"
+        return response
+
+
+def _setup_prometheus(app: FastAPI) -> None:
+    try:
+        from fastapi_app.core.metrics import (
+            METRICS_AVAILABLE,
+            REQUEST_COUNT,
+            REQUEST_LATENCY,
+            REQUESTS_IN_PROGRESS,
+        )
+    except ImportError:
+        return
+
+    if not METRICS_AVAILABLE:
+        return
+
+    @app.middleware("http")
+    async def prometheus_middleware(request: Request, call_next):
+        skip_paths = {"/api/health", "/api/health/db", "/metrics", "/", "/nginx-health"}
+        if request.url.path in skip_paths:
+            return await call_next(request)
+
+        method = request.method
+        path = request.url.path
+        parts = path.rstrip("/").split("/")
+        normalized_parts = []
+        for part in parts:
+            if part.isdigit():
+                normalized_parts.append("{id}")
+            else:
+                normalized_parts.append(part)
+        endpoint = "/".join(normalized_parts)
+
+        REQUESTS_IN_PROGRESS.labels(method=method, endpoint=endpoint).inc()
+        start_time = time.time()
+
+        try:
+            response = await call_next(request)
+            status = response.status_code
+        except Exception:
+            status = 500
+            raise
+        finally:
+            elapsed = time.time() - start_time
+            REQUEST_COUNT.labels(method=method, endpoint=endpoint, status=status).inc()
+            REQUEST_LATENCY.labels(method=method, endpoint=endpoint).observe(elapsed)
+            REQUESTS_IN_PROGRESS.labels(method=method, endpoint=endpoint).dec()
+            if elapsed > 3.0:
+                logger.warning(
+                    "慢请求: %s %s → %s (%.2fs)",
+                    method, endpoint, status, elapsed,
+                )
+
+        return response

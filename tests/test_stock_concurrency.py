@@ -3,16 +3,16 @@ stock_concurrency 模块单元测试
 
 覆盖：get_product_for_update、update_stock_with_optimistic_lock、StockConcurrentError
 """
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi_app.shared.stock_concurrency import (
+    MAX_RETRY,
+    StockConcurrentError,
     get_product_for_update,
     update_stock_with_optimistic_lock,
-    StockConcurrentError,
-    MAX_RETRY,
 )
-
 
 # ============================================================
 # get_product_for_update

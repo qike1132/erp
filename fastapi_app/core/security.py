@@ -7,15 +7,14 @@
 import hashlib
 import hmac
 import logging
-from typing import Optional
 
 import argon2
 
 _argon2_hasher = argon2.PasswordHasher(
     type=argon2.Type.ID,
-    memory_cost=65536,
-    time_cost=3,
-    parallelism=4,
+    memory_cost=47104,
+    time_cost=2,
+    parallelism=2,
     hash_len=32,
     salt_len=16,
 )
@@ -133,6 +132,16 @@ def verify_password(password: str, password_hash: str) -> bool:
 
     logger.warning(f"未知的密码哈希格式: {password_hash[:20]}...")
     return False
+
+
+def check_needs_rehash(password_hash: str) -> bool:
+    """检查 Argon2 哈希是否因参数变更需要重新哈希"""
+    if not password_hash or not password_hash.startswith("$argon2id$"):
+        return False
+    try:
+        return _argon2_hasher.check_needs_rehash(password_hash)
+    except argon2.exceptions.InvalidHashError:
+        return True
 
 
 def needs_migration(password_hash: str) -> bool:

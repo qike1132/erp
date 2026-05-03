@@ -4,16 +4,17 @@ Redis 缓存管理器 - 全异步版本
 使用 redis.asyncio.Redis 替代同步 redis.Redis，
 消除 FastAPI 异步事件循环中的阻塞调用。
 """
-import redis
-import redis.asyncio as aioredis
-import json
+import asyncio
 import hashlib
+import json
+import logging
 import os
 import time
-import logging
-import asyncio
 from functools import wraps
-from typing import Any, Optional
+from typing import Any
+
+import redis
+import redis.asyncio as aioredis
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ class RedisCacheManager:
     FALLBACK_MAX_SIZE = 1000
 
     def __init__(self):
-        self.redis_client: Optional[aioredis.Redis] = None
+        self.redis_client: aioredis.Redis | None = None
         self.default_timeout = 300
         import socket
         instance_id = os.getenv("HOSTNAME", socket.gethostname())[:20]
@@ -104,7 +105,7 @@ class RedisCacheManager:
                 self._fallback_cache.pop(k, None)
                 del self._fallback_timestamps[k]
 
-    async def get(self, key: str) -> Optional[Any]:
+    async def get(self, key: str) -> Any | None:
         full_key = self._make_key(key)
 
         if self.redis_client:
@@ -179,7 +180,7 @@ class RedisCacheManager:
 
         async with self._lock:
             prefix = full_pattern.replace('*', '')
-            keys_to_delete = [k for k in self._fallback_cache.keys() if k.startswith(prefix)]
+            keys_to_delete = [k for k in self._fallback_cache if k.startswith(prefix)]
             for key in keys_to_delete:
                 del self._fallback_cache[key]
                 self._fallback_timestamps.pop(key, None)

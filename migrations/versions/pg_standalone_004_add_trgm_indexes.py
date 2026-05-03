@@ -11,8 +11,6 @@ Revises: 659467a97350
 Create Date: 2026-04-23
 """
 from alembic import op
-import sqlalchemy as sa
-
 
 # revision identifiers, used by Alembic.
 revision = 'pg_standalone_004'

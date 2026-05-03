@@ -1,7 +1,7 @@
 import ast
 
 try:
-    with open('app.py', 'r', encoding='utf-8') as f:
+    with open('app.py', encoding='utf-8') as f:
         content = f.read()
     # 检查语法
     ast.parse(content)

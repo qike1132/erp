@@ -2,12 +2,9 @@
 采购中心 Pydantic 请求/响应模型
 """
 
-from datetime import datetime
-from decimal import Decimal
-from typing import Any, Optional
+from typing import Any
 
-from pydantic import BaseModel, Field
-
+from pydantic import BaseModel
 
 # ============================================================
 # 产品/BOM 相关
@@ -23,9 +20,9 @@ class ProductBomInfo(BaseModel):
 class ProductListItem(BaseModel):
     id: int
     name: str
-    barcode: Optional[str] = None
+    barcode: str | None = None
     has_bom: bool = False
-    bom_info: Optional[ProductBomInfo] = None
+    bom_info: ProductBomInfo | None = None
     current_stock: int = 0
 
 
@@ -39,20 +36,20 @@ class ProductListResponse(BaseModel):
 
 class ProductBomResponse(BaseModel):
     success: bool = True
-    product: Optional[dict] = None
+    product: dict | None = None
     materials: list[dict] = []
 
 
 class ProductStatisticsResponse(BaseModel):
     success: bool = True
-    statistics: Optional[dict] = None
+    statistics: dict | None = None
 
 
 class SearchSuggestionItem(BaseModel):
     id: int
     name: str
-    barcode: Optional[str] = None
-    has_bom: Optional[bool] = None
+    barcode: str | None = None
+    has_bom: bool | None = None
 
 
 class SearchSuggestionResponse(BaseModel):
@@ -61,7 +58,7 @@ class SearchSuggestionResponse(BaseModel):
 
 
 class BomSaveRequest(BaseModel):
-    filling: Optional[dict] = None
+    filling: dict | None = None
     fabrics: list[dict] = []
     accessories: list[dict] = []
     packagings: list[dict] = []
@@ -73,9 +70,9 @@ class MaterialCalculateRequest(BaseModel):
 
 class MaterialCalculateResponse(BaseModel):
     success: bool = True
-    result: Optional[dict] = None
-    total_categories: Optional[dict] = None
-    message: Optional[str] = None
+    result: dict | None = None
+    total_categories: dict | None = None
+    message: str | None = None
 
 
 # ============================================================
@@ -84,18 +81,18 @@ class MaterialCalculateResponse(BaseModel):
 
 class SupplierCreate(BaseModel):
     name: str
-    contact_person: Optional[str] = ''
-    phone: Optional[str] = ''
-    address: Optional[str] = ''
-    remark: Optional[str] = ''
+    contact_person: str | None = ''
+    phone: str | None = ''
+    address: str | None = ''
+    remark: str | None = ''
 
 
 class SupplierResponse(BaseModel):
     id: int
     name: str
-    contact_person: Optional[str] = None
-    phone: Optional[str] = None
-    address: Optional[str] = None
+    contact_person: str | None = None
+    phone: str | None = None
+    address: str | None = None
 
 
 class SupplierListResponse(BaseModel):
@@ -113,7 +110,7 @@ class SupplierMaterialResponse(BaseModel):
 # ============================================================
 
 class CustomerSyncRequest(BaseModel):
-    customer_ids: Optional[list[int]] = None
+    customer_ids: list[int] | None = None
     force: bool = False
 
 
@@ -123,7 +120,7 @@ class CustomerBatchRequest(BaseModel):
 
 class CustomerStatisticsResponse(BaseModel):
     success: bool = True
-    statistics: Optional[dict] = None
+    statistics: dict | None = None
 
 
 # ============================================================
@@ -132,19 +129,19 @@ class CustomerStatisticsResponse(BaseModel):
 
 class PurchaseOrderCreate(BaseModel):
     materials: list[dict]
-    customer_id: Optional[int] = None
-    customer_name: Optional[str] = ''
-    customer_code: Optional[str] = ''
-    remark: Optional[str] = ''
-    unprocessed_order_id: Optional[int] = None
+    customer_id: int | None = None
+    customer_name: str | None = ''
+    customer_code: str | None = ''
+    remark: str | None = ''
+    unprocessed_order_id: int | None = None
 
 
 class PurchaseOrderUpdate(BaseModel):
-    status: Optional[str] = None
-    remark: Optional[str] = None
-    supplier_name: Optional[str] = None
-    customer_name: Optional[str] = None
-    modify_reason: Optional[str] = ''
+    status: str | None = None
+    remark: str | None = None
+    supplier_name: str | None = None
+    customer_name: str | None = None
+    modify_reason: str | None = ''
 
 
 class PurchaseOrderComplete(BaseModel):
@@ -165,14 +162,14 @@ class PurchaseOrderListResponse(BaseModel):
 
 class PurchaseOrderDetailResponse(BaseModel):
     success: bool = True
-    order: Optional[dict] = None
+    order: dict | None = None
 
 
 class PurchaseOrderActionResponse(BaseModel):
     success: bool = True
-    message: Optional[str] = None
-    orders: Optional[list[dict]] = None
-    order: Optional[dict] = None
+    message: str | None = None
+    orders: list[dict] | None = None
+    order: dict | None = None
 
 
 class OneClickGenerateRequest(BaseModel):
@@ -180,11 +177,11 @@ class OneClickGenerateRequest(BaseModel):
 
 
 class CompletedOrdersExportRequest(BaseModel):
-    order_no: Optional[str] = ''
-    customer_name: Optional[str] = ''
-    product_name: Optional[str] = ''
-    start_date: Optional[str] = ''
-    end_date: Optional[str] = ''
+    order_no: str | None = ''
+    customer_name: str | None = ''
+    product_name: str | None = ''
+    start_date: str | None = ''
+    end_date: str | None = ''
 
 
 class BatchPrintRequest(BaseModel):
@@ -217,16 +214,16 @@ class GenerateSupplierOrderRequest(BaseModel):
 
 class SupplierSummaryItem(BaseModel):
     material_name: str
-    specification: Optional[str] = ""
-    unit: Optional[str] = ""
+    specification: str | None = ""
+    unit: str | None = ""
     quantity: float
-    material_category: Optional[str] = ""
+    material_category: str | None = ""
     order_count: int
 
 
 class SupplierSummary(BaseModel):
     supplier_name: str
-    supplier_id: Optional[int] = None
+    supplier_id: int | None = None
     items: list[SupplierSummaryItem]
     orders: list[str]
     order_count: int
@@ -234,16 +231,16 @@ class SupplierSummary(BaseModel):
 
 class SupplierSummaryRequest(BaseModel):
     ids: list[int]
-    format: Optional[str] = "print"
+    format: str | None = "print"
 
 
 class SupplierSummaryResponse(BaseModel):
     success: bool = True
-    suppliers: Optional[list[SupplierSummary]] = None
-    supplier_count: Optional[int] = None
-    order_count: Optional[int] = None
-    html: Optional[str] = None
-    message: Optional[str] = None
+    suppliers: list[SupplierSummary] | None = None
+    supplier_count: int | None = None
+    order_count: int | None = None
+    html: str | None = None
+    message: str | None = None
 
 
 class SupplierSummaryExportRequest(BaseModel):
@@ -256,10 +253,10 @@ class SupplierOrderSummaryRequest(BaseModel):
 
 class SupplierOrderSummaryResponse(BaseModel):
     success: bool = True
-    materials: Optional[list[dict]] = None
-    order_count: Optional[int] = None
-    material_count: Optional[int] = None
-    message: Optional[str] = None
+    materials: list[dict] | None = None
+    order_count: int | None = None
+    material_count: int | None = None
+    message: str | None = None
 
 
 # ============================================================
@@ -268,7 +265,7 @@ class SupplierOrderSummaryResponse(BaseModel):
 
 class SummaryPrintRequest(BaseModel):
     ids: list[int]
-    format: Optional[str] = "print"
+    format: str | None = "print"
 
 
 # ============================================================
@@ -287,14 +284,14 @@ class ModificationLogResponse(BaseModel):
 
 class SavedQueryCreate(BaseModel):
     name: str
-    query_type: Optional[str] = 'purchase_order'
+    query_type: str | None = 'purchase_order'
     conditions: Any
 
 
 class SavedQueryResponse(BaseModel):
     success: bool = True
     queries: list[dict] = []
-    query: Optional[dict] = None
+    query: dict | None = None
 
 
 # ============================================================
@@ -315,7 +312,7 @@ class UnprocessedOrdersResponse(BaseModel):
     success: bool = True
     orders: list[dict] = []
     total: int = 0
-    latest_sync_time: Optional[str] = None
+    latest_sync_time: str | None = None
 
 
 # ============================================================
@@ -338,7 +335,7 @@ class QuickFilterResponse(BaseModel):
 
 class ActionResponse(BaseModel):
     success: bool = True
-    message: Optional[str] = None
+    message: str | None = None
 
 
 class CacheClearResponse(BaseModel):

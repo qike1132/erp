@@ -4,9 +4,8 @@ OCR 模糊匹配工具
 从 ocr_service.py 拆分，提供产品和客户的模糊匹配算法。
 不依赖任何 OCR 引擎或数据库模型，纯文本匹配逻辑。
 """
-import re
 import logging
-from typing import Tuple, Optional, List
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +33,7 @@ def _levenshtein_similarity(s1: str, s2: str) -> float:
     return 1.0 - prev[len2] / max_len
 
 
-def _extract_keywords(text: str) -> List[str]:
+def _extract_keywords(text: str) -> list[str]:
     """从文本中提取核心关键字"""
     cleaned = re.sub(r'[（(][^）)]*[）)]', '', text)
     cleaned = re.sub(r'^\d+cm|^[\d.]+寸|^[\d.]+m|^尺寸', '', cleaned, flags=re.IGNORECASE)
@@ -77,7 +76,7 @@ def fuzzy_match_product(
     all_products: list,
     product_map: dict,
     min_similarity: float = 0.7,
-) -> Tuple[Optional[object], float]:
+) -> tuple[object | None, float]:
     """模糊匹配产品
 
     匹配优先级：精确 > 子串包含 > 关键字 > 编辑距离
@@ -130,7 +129,7 @@ def fuzzy_match_customer(
     ocr_name: str,
     all_customers: list,
     min_similarity: float = 0.7,
-) -> Tuple[Optional[object], float]:
+) -> tuple[object | None, float]:
     """模糊匹配客户
 
     匹配优先级：精确(含去后缀) > 子串包含 > 关键字 > 编辑距离

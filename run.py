@@ -11,8 +11,8 @@ ERP系统开发环境启动脚本 (FastAPI + Vue/Vite)
 高级选项:
     python start.py --help
 """
-import sys
 import os
+import sys
 from pathlib import Path
 
 if __name__ == '__main__':

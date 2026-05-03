@@ -6,17 +6,78 @@ L1: 进程内缓存 (TTL 30s)
 L2: Redis 缓存 (TTL 可配置)
 L3: 数据库
 """
-import json
+import asyncio
+import contextlib
 import hashlib
+import json
 import logging
-from functools import wraps
-from typing import Optional, Callable, Any
+from collections.abc import Callable
 from datetime import datetime, timedelta
+from enum import Flag, auto
+from functools import wraps
+from typing import Any
+
+CACHE_TIMEOUT = 2.0
 
 logger = logging.getLogger(__name__)
 
 _CACHE_LOCAL_MAX_SIZE = 10000  # L1 缓存最大条目数
 _cache_local: dict[str, tuple[Any, datetime]] = {}
+
+
+class CacheDomain(Flag):
+    """缓存域枚举，支持按位或组合"""
+    NONE = 0
+    ORDER = auto()
+    INVENTORY = auto()
+    STOCKIN = auto()
+    PRODUCT = auto()      # 预留：产品信息变更时失效
+    CUSTOMER = auto()     # 预留：客户信息变更时失效
+    SEARCH = auto()       # 预留：搜索索引变更时失效
+
+    # 常用组合
+    ORDER_AND_INVENTORY = ORDER | INVENTORY
+    STOCKOUT = auto()
+    ALL = ORDER | INVENTORY | STOCKIN | STOCKOUT | PRODUCT | CUSTOMER | SEARCH
+
+
+# 缓存域 → pattern 映射（仅允许单域 key，禁止添加组合域 key，
+# 否则 invalidate_related_caches 的按位与判断会导致重复失效）
+_DOMAIN_PATTERN_MAP: dict[CacheDomain, str] = {
+    CacheDomain.ORDER: "orders:*",
+    CacheDomain.INVENTORY: "inventory:*",
+    CacheDomain.STOCKIN: "stockins:*",
+    CacheDomain.PRODUCT: "products:*",
+    CacheDomain.CUSTOMER: "customers:*",
+    CacheDomain.SEARCH: "search:*",
+    CacheDomain.STOCKOUT: "stockouts:*",
+}
+
+
+async def invalidate_related_caches(domains: CacheDomain) -> int:
+    """根据缓存域枚举失效相关缓存
+
+    Args:
+        domains: 缓存域枚举，支持按位或组合，如 CacheDomain.ORDER | CacheDomain.INVENTORY
+
+    Returns:
+        失效的缓存条目数
+    """
+    if domains == CacheDomain.NONE:
+        logger.debug("invalidate_related_caches: 传入 NONE，跳过缓存失效")
+        return 0
+
+    deleted = 0
+    for domain, pattern in _DOMAIN_PATTERN_MAP.items():
+        # 仅匹配单域：跳过组合域 key，防止按位与导致重复失效
+        if domain.value & (domain.value - 1) != 0:
+            continue
+        if domains & domain:
+            try:
+                deleted += await invalidate_cache(pattern)
+            except Exception as e:
+                logger.warning("缓存域 %s 失效失败，继续处理其他域: %s", domain.name, e)
+    return deleted
 
 
 def _evict_local_cache():
@@ -43,7 +104,7 @@ def cache_result(
     key_prefix: str,
     ttl: int = 60,
     local_ttl: int = 30,
-    key_builder: Optional[Callable] = None,
+    key_builder: Callable | None = None,
     serialize: bool = True,
 ):
     """
@@ -56,7 +117,7 @@ def cache_result(
                 if key_builder:
                     cache_key = f"{key_prefix}:{key_builder(*args, **kwargs)}"
                 else:
-                    params_str = json.dumps({'args': str(args), 'kwargs': kwargs}, sort_keys=True, default=str)
+                    params_str = json.dumps({'args': args, 'kwargs': kwargs}, sort_keys=True, default=str)
                     params_hash = hashlib.md5(params_str.encode(), usedforsecurity=False).hexdigest()[:10]
                     cache_key = f"{key_prefix}:{params_hash}"
 
@@ -72,13 +133,16 @@ def cache_result(
                 redis = _get_redis_cache()
                 if redis:
                     try:
-                        cached = await redis.get(cache_key)
+                        cached = await asyncio.wait_for(
+                            redis.get(cache_key),
+                            timeout=CACHE_TIMEOUT
+                        )
                         if cached is not None:
                             result = cached
                             _cache_local[cache_key] = (result, now + timedelta(seconds=local_ttl))
                             return result
-                    except (OSError, ConnectionError, ValueError) as e:
-                        logger.warning("Redis 缓存读取失败，降级到数据库查询: %s", e)
+                    except (TimeoutError, OSError, ConnectionError, ValueError) as e:
+                        logger.warning("Redis 缓存读取失败(timeout=%ss)，降级到数据库查询: %s", CACHE_TIMEOUT, e)
 
                 result = await func(*args, **kwargs)
 
@@ -87,9 +151,12 @@ def cache_result(
 
                 if redis:
                     try:
-                        await redis.set(cache_key, result, timeout=int(ttl))
-                    except (OSError, ConnectionError, ValueError) as e:
-                        logger.warning("Redis 缓存写入失败: %s", e)
+                        await asyncio.wait_for(
+                            redis.set(cache_key, result, timeout=int(ttl)),
+                            timeout=CACHE_TIMEOUT
+                        )
+                    except (TimeoutError, OSError, ConnectionError, ValueError) as e:
+                        logger.warning("Redis 缓存写入失败(timeout=%ss): %s", CACHE_TIMEOUT, e)
 
                 return result
 
@@ -149,8 +216,6 @@ async def warmup_cache(func, *args, key_prefix: str, ttl: int = 60, **kwargs):
     _cache_local[cache_key] = (result, now + timedelta(seconds=30))
     redis = _get_redis_cache()
     if redis:
-        try:
+        with contextlib.suppress(OSError, ValueError):
             await redis.set(cache_key, result, timeout=int(ttl))
-        except (OSError, ValueError):
-            pass
     return result

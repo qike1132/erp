@@ -21,7 +21,7 @@
           v-if="title || $slots.title"
           class="px-6 py-5 border-b border-border-light flex justify-between items-center"
         >
-          <DialogTitle class="text-lg font-semibold m-0 text-text flex items-center gap-2">
+          <DialogTitle class="text-lg font-semibold m-0 text-text flex items-center gap-2 flex-1 justify-center">
             <slot name="title-icon" />
             <slot name="title">
               {{ title }}

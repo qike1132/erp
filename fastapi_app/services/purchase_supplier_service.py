@@ -5,13 +5,18 @@
 """
 import logging
 
-from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from fastapi_app.shared_models import (
-    Product, ProductMaterial, ProductFabric, ProductAccessory, ProductPackaging,
-    Supplier, PurchaseOrder, PurchaseOrderItem,
     MaterialRegistration,
+    ProductAccessory,
+    ProductFabric,
+    ProductMaterial,
+    ProductPackaging,
+    PurchaseOrder,
+    PurchaseOrderItem,
+    Supplier,
 )
 
 logger = logging.getLogger(__name__)

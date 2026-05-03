@@ -14,7 +14,7 @@
         <button class="sk-action-btn sk-action-primary" @click="handleSearch()">
           <i class="fas fa-search" style="margin-right: 4px" />查询
         </button>
-        <button class="sk-action-btn sk-action-outline" @click="handleReset()">
+        <button class="sk-action-btn" @click="handleReset()">
           <i class="fas fa-redo" />
         </button>
       </div>
@@ -34,50 +34,25 @@
     <!-- 统计卡片 -->
     <div v-if="filteredInventory.length" class="sk-stat-row">
       <div class="sk-stat-card sk-stat-primary">
-        <div class="sk-stat-icon"><i class="fas fa-file-invoice" /></div>
-        <div>
-          <div class="sk-stat-value">{{ totalOrderQty }}</div>
-          <div class="sk-stat-label">总订单数</div>
-        </div>
+        <div class="sk-stat-value">{{ totalOrderQty }}</div>
+        <div class="sk-stat-label">总订单数</div>
       </div>
       <div class="sk-stat-card sk-stat-warning">
-        <div class="sk-stat-icon"><i class="fas fa-globe" /></div>
-        <div>
-          <div class="sk-stat-value">{{ totalCustomQty }}</div>
-          <div class="sk-stat-label">定制订单</div>
-        </div>
+        <div class="sk-stat-value">{{ totalCustomQty }}</div>
+        <div class="sk-stat-label">定制订单</div>
       </div>
       <div class="sk-stat-card sk-stat-success">
-        <div class="sk-stat-icon"><i class="fas fa-truck-loading" /></div>
-        <div>
-          <div class="sk-stat-value">{{ totalStockinQty }}</div>
-          <div class="sk-stat-label">总备货数量</div>
-        </div>
+        <div class="sk-stat-value">{{ totalStockinQty }}</div>
+        <div class="sk-stat-label">总备货数量</div>
       </div>
       <div class="sk-stat-card sk-stat-info">
-        <div class="sk-stat-icon"><i class="fas fa-boxes-stacked" /></div>
-        <div>
-          <div class="sk-stat-value">{{ totalStock }}</div>
-          <div class="sk-stat-label">总库存</div>
-        </div>
+        <div class="sk-stat-value">{{ totalStock }}</div>
+        <div class="sk-stat-label">总库存</div>
       </div>
     </div>
 
-    <!-- 库存汇总表 -->
-    <div class="sk-table-section">
-      <div class="sk-section-header">
-        <div class="sk-section-title">
-          <i class="fas fa-cubes" style="color: var(--color-primary-500)" />
-          库存汇总
-        </div>
-        <div class="sk-section-actions">
-          <span class="sk-record-count">共 {{ filteredInventory.length }} 条记录</span>
-          <button v-if="filteredInventory.length" class="sk-action-btn sk-action-success" @click="handleExport">
-            <i class="fas fa-file-excel" style="margin-right: 4px" />导出
-          </button>
-        </div>
-      </div>
-
+    <!-- 主体：表格 -->
+    <div class="sk-card-main">
       <div v-if="isLoading" class="sk-empty">
         <i class="fas fa-spinner fa-spin" />
         <span>加载中...</span>
@@ -90,7 +65,7 @@
         <thead>
           <tr>
             <th>客户</th>
-            <th style="text-align: left">产品名称</th>
+            <th class="sk-th-left">产品名称</th>
             <th>订单数量</th>
             <th>定制订单</th>
             <th>备货数量</th>
@@ -105,7 +80,7 @@
                 {{ item.customer }}
               </span>
             </td>
-            <td style="text-align: left">
+            <td class="sk-td-left">
               <span class="sk-product-cell">
                 <i class="fas fa-cube" />
                 <strong>{{ item.product_name }}</strong>
@@ -232,23 +207,25 @@ async function handleExport() {
     /* error handled by interceptor */
   }
 }
+
+defineExpose({ filteredInventory, handleExport })
 </script>
 
 <style scoped>
+/* === Inventory root === */
 .sk-inventory {
-  padding: 20px 24px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  min-height: 0;
 }
 
-/* Filter Bar */
+/* === Filter Bar === */
 .sk-filter-bar {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
   align-items: flex-end;
-  padding-bottom: 12px;
+  padding: 12px 24px;
   border-bottom: 1px solid var(--color-border-light, #f1f5f9);
 }
 .sk-filter-field { flex-shrink: 0; }
@@ -281,7 +258,7 @@ async function handleExport() {
   align-items: flex-end;
 }
 
-/* Action Buttons */
+/* === Action Buttons (Spec §10) === */
 .sk-action-btn {
   padding: 7px 14px;
   border: 2px solid var(--color-border-light, #e2e8f0);
@@ -297,16 +274,15 @@ async function handleExport() {
 }
 .sk-action-primary { color: var(--color-primary-600); }
 .sk-action-primary:hover { background: var(--color-primary-50); border-color: var(--color-primary-300); transform: translateY(-1px); }
-.sk-action-outline { }
-.sk-action-success { color: var(--color-success-600); border-color: var(--color-success-200); }
-.sk-action-success:hover { background: var(--color-success-50); border-color: var(--color-success-300); transform: translateY(-1px); }
 
-/* Country Tags */
+/* === Country Tags === */
 .sk-country-tags {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
   align-items: center;
+  padding: 8px 24px;
+  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
 }
 .sk-country-label {
   font-size: 13px;
@@ -338,105 +314,53 @@ async function handleExport() {
   box-shadow: 0 2px 8px rgba(91, 141, 239, 0.3);
 }
 
-/* Stat Cards */
+/* === Stat Cards (Spec §3 card style) === */
 .sk-stat-row {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
+  gap: 12px;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
 }
 .sk-stat-card {
-  border-radius: 11px;
-  padding: 12px 14px;
+  border-radius: 13px;
+  padding: 16px;
+  text-align: center;
   border: 1px solid transparent;
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  transition: box-shadow 0.3s ease;
 }
 .sk-stat-card:hover {
-  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-  transform: translateY(-1px);
-}
-.sk-stat-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 9px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  flex-shrink: 0;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
 }
 .sk-stat-value {
-  font-size: 20px;
-  font-weight: 700;
-  line-height: 1;
+  font-size: 28px;
+  font-weight: 800;
+  margin-bottom: 4px;
   font-variant-numeric: tabular-nums;
 }
 .sk-stat-label {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-secondary);
-  margin-top: 1px;
 }
-.sk-stat-primary {
-  background: var(--color-primary-50);
-  border-color: var(--color-primary-200);
-}
-.sk-stat-primary .sk-stat-icon { background: var(--color-primary-100); color: var(--color-primary-600); }
+.sk-stat-primary { background: var(--color-primary-50); border-color: var(--color-primary-200); }
 .sk-stat-primary .sk-stat-value { color: var(--color-primary-600); }
-.sk-stat-warning {
-  background: var(--color-warning-50);
-  border-color: var(--color-warning-200);
-}
-.sk-stat-warning .sk-stat-icon { background: var(--color-warning-100); color: var(--color-warning-600); }
+.sk-stat-warning { background: var(--color-warning-50); border-color: var(--color-warning-200); }
 .sk-stat-warning .sk-stat-value { color: var(--color-warning-600); }
-.sk-stat-success {
-  background: var(--color-success-50);
-  border-color: var(--color-success-200);
-}
-.sk-stat-success .sk-stat-icon { background: var(--color-success-100); color: var(--color-success-600); }
+.sk-stat-success { background: var(--color-success-50); border-color: var(--color-success-200); }
 .sk-stat-success .sk-stat-value { color: var(--color-success-600); }
-.sk-stat-info {
-  background: var(--color-info-50);
-  border-color: var(--color-info-200);
-}
-.sk-stat-info .sk-stat-icon { background: var(--color-info-100); color: var(--color-info-600); }
+.sk-stat-info { background: var(--color-info-50); border-color: var(--color-info-200); }
 .sk-stat-info .sk-stat-value { color: var(--color-info-600); }
 
-/* Table Section */
-.sk-table-section {
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  border-radius: 13px;
+/* === Card Main === */
+.sk-card-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   overflow: hidden;
-  background: white;
-}
-.sk-section-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
-}
-.sk-section-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--color-text);
-}
-.sk-section-title i { font-size: 14px; }
-.sk-section-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.sk-record-count {
-  font-size: 13px;
-  color: var(--color-text-muted);
 }
 
-/* Table */
+/* === Table (Spec §14) === */
 .sk-table {
   width: 100%;
   border-collapse: collapse;
@@ -454,6 +378,7 @@ async function handleExport() {
   text-align: center;
   white-space: nowrap;
 }
+.sk-th-left { text-align: left !important; }
 .sk-table tbody td {
   padding: 10px 14px;
   font-size: 13px;
@@ -463,11 +388,12 @@ async function handleExport() {
   transition: background 0.2s ease;
   color: var(--color-text);
 }
+.sk-td-left { text-align: left !important; }
 .sk-table tbody tr:hover {
   background: var(--color-primary-50);
 }
 
-/* Customer Cell */
+/* === Customer Cell === */
 .sk-customer-cell {
   display: flex;
   align-items: center;
@@ -480,7 +406,7 @@ async function handleExport() {
   font-size: 12px;
 }
 
-/* Product Cell */
+/* === Product Cell === */
 .sk-product-cell {
   display: flex;
   align-items: center;
@@ -491,7 +417,7 @@ async function handleExport() {
   font-size: 12px;
 }
 
-/* Custom Orders */
+/* === Custom Orders === */
 .sk-custom-orders {
   display: inline-grid;
   grid-template-columns: auto auto;
@@ -505,11 +431,11 @@ async function handleExport() {
   color: var(--color-text-secondary);
 }
 
-/* Text Colors */
+/* === Text Colors === */
 .sk-text-negative { color: var(--color-danger-500); }
 .sk-text-positive { color: var(--color-success-500); }
 
-/* Empty */
+/* === Empty === */
 .sk-empty {
   display: flex;
   flex-direction: column;
@@ -521,7 +447,7 @@ async function handleExport() {
 .sk-empty i { font-size: 28px; opacity: 0.5; }
 .sk-empty span { font-size: 14px; }
 
-/* Responsive */
+/* === Responsive === */
 @media (max-width: 900px) {
   .sk-stat-row { grid-template-columns: repeat(2, 1fr); gap: 8px; }
 }

@@ -143,3 +143,22 @@
 - **现象**: 物料计算器页面多选SKU时结果区域出现闪屏
 - **根因**: v-if/v-else 三分支导致结果DOM在calculating时被销毁重建，配合从opacity:0开始的fade-in-up动画
 - **解决**: 参考 [docs/bugs/BUG-MATERIAL-CALC-FLICKER.md](docs/bugs/BUG-MATERIAL-CALC-FLICKER.md)
+
+## BUG-permission-save-500 | 2026-04-30
+- **现象**: 分配权限保存时 POST /api/v1/users/permission/{user_id} 返回 500
+- **根因**: 异步 SQLAlchemy 中 db.get 未预加载关系属性，访问时触发 MissingGreenlet
+- **解决**: 使用 select().options(selectinload()) 预加载关系，参考 [docs/bugs/BUG-permission-save-500.md](docs/bugs/BUG-permission-save-500.md)
+- **通用规则**: 在 async SQLAlchemy 中，所有需要访问的关系属性必须在查询时 eager-load，禁止依赖懒加载
+
+## BUG-CACHE-DUPLICATION | 2026-04-30
+- **鐜拌薄**: 缂撳瓨澶辨晥閫昏緫鍦?7 涓枃浠朵腑閲嶅 18+ 娆★紝鍙傛暟椤哄簭涓嶄竴鑷达紝approval reject 閬楁紡 inventory:* 澶辨晥
+- **鏍瑰洜**: 缂轰箯缁熶竴缂撳瓨澶辨晥鎶借薄锛屾瘡涓湇鍔″嚱鏁扮洿鎺ヨ皟鐢?invalidate_cache() 纭紪鐮?pattern
+- **瑙ｅ喅**: 寮曞叆 CacheDomain Flag 鏋氫妇 + invalidate_related_caches() 鍑芥暟闆嗕腑绠＄悊缂撳瓨鍩熸槧灏?- **鍙傝€?*: [docs/bugs/BUG-CACHE-DUPLICATION.md](docs/bugs/BUG-CACHE-DUPLICATION.md)
+- **閫氱敤瑙勫垯**: 鏂板缂撳瓨鍩熸椂鍙渶淇敼 cache.py 鐨?CacheDomain 鏋氫妇鍜?_DOMAIN_PATTERN_MAP锛屾棤闇€淇敼涓氬姟浠ｇ爜
+
+
+## BUG-CACHE-CANCEL-APPROVAL | 2026-04-30
+- **现象**: 取消审批或非管理员提交删除审批后，订单列表中 is_locked 字段最长 60s 内显示旧值
+- **根因**: cancel_approval 和 delete_order 非管理员路径在 db.commit() 后未调用 invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY)
+- **解决**: 补齐缓存失效调用，与 approve/reject/update_order 保持一致
+- **通用规则**: 所有修改订单/审批状态的路径，commit 后必须调用 invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY)

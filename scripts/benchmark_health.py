@@ -3,14 +3,14 @@ FastAPI 性能基准测试脚本 - 无速率限制版
 针对 /api/v1/health 端点进行纯性能测试
 """
 import asyncio
-import time
-import statistics
-import psutil
-import os
 import json
+import os
+import statistics
+import time
 from datetime import datetime
-from typing import List, Dict
+
 import httpx
+import psutil
 
 BASE_URL = "http://127.0.0.1:5002"
 TEST_DURATION = 30
@@ -19,10 +19,10 @@ TARGET_ENDPOINT = "/api/v1/health"
 
 class PerformanceMetrics:
     def __init__(self):
-        self.response_times: List[float] = []
+        self.response_times: list[float] = []
         self.error_count = 0
         self.success_count = 0
-        self.status_codes: Dict[int, int] = {}
+        self.status_codes: dict[int, int] = {}
         self.start_memory = 0
         self.peak_memory = 0
         self.requests_completed = 0
@@ -48,7 +48,7 @@ async def single_user_benchmark(user_id: int, duration: float, metrics: Performa
                 duration_ms = (time.perf_counter() - start) * 1000
                 metrics.record_request(duration_ms, response.status_code)
                 request_count += 1
-            except Exception as e:
+            except Exception:
                 metrics.record_request(999999, 0)
 
             await asyncio.sleep(0.05)

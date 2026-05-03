@@ -2,13 +2,15 @@
 订单路由测试 - 提高订单路由覆盖率
 测试范围：订单列表、创建、编辑、删除、审批等完整流程
 """
-import pytest
 import json
 from datetime import datetime
+
+import pytest
+
 try:
-    from flask import session
     from app import db
-    from app.models import Order, Product, User, Customer, ApprovalRequest, InventoryLog
+    from app.models import ApprovalRequest, Customer, InventoryLog, Order, Product, User
+    from flask import session
     HAS_FLASK = True
 except ImportError:
     HAS_FLASK = False
@@ -30,7 +32,7 @@ class TestOrderRoutes:
         """测试订单列表页面访问成功"""
         response = logged_in_client.get('/order/list')
         assert response.status_code == 200
-        assert b'order' in response.data or '订单'.encode('utf-8') in response.data
+        assert b'order' in response.data or '订单'.encode() in response.data
 
     def test_order_list_post_create_success(self, logged_in_client, test_product, test_customer):
         """测试创建订单成功"""
@@ -42,7 +44,7 @@ class TestOrderRoutes:
         }
         response = logged_in_client.post('/order/list', data=data, follow_redirects=True)
         assert response.status_code == 200
-        
+
         # 验证订单创建
         order = Order.query.filter_by(customer=test_customer.name).order_by(Order.id.desc()).first()
         assert order is not None
@@ -56,7 +58,7 @@ class TestOrderRoutes:
         }
         response = logged_in_client.post('/order/list', data=data, follow_redirects=True)
         assert response.status_code == 200
-        assert b'error' in response.data or '错误'.encode('utf-8') in response.data
+        assert b'error' in response.data or '错误'.encode() in response.data
 
     def test_order_list_post_invalid_quantity(self, logged_in_client, test_product, test_customer):
         """测试创建订单无效数量"""
@@ -93,7 +95,7 @@ class TestOrderRoutes:
         }
         response = logged_in_client.post(f'/order/edit/{test_order.id}', data=data, follow_redirects=True)
         assert response.status_code == 200
-        
+
         # 验证订单更新
         db.session.refresh(test_order)
         assert test_order.quantity == 20
@@ -122,14 +124,14 @@ class TestOrderRoutes:
         """测试管理员删除订单成功"""
         initial_stock = test_product.current_stock
         order_id = test_order.id
-        
+
         response = logged_in_client.get(f'/order/delete/{order_id}', follow_redirects=True)
         assert response.status_code == 200
-        
+
         # 验证订单删除
         deleted_order = Order.query.get(order_id)
         assert deleted_order is None
-        
+
         # 验证库存回滚
         db.session.refresh(test_product)
         assert test_product.current_stock == initial_stock - test_order.quantity
@@ -150,7 +152,7 @@ class TestOrderRoutes:
         )
         db_session.add(approval)
         db_session.commit()
-        
+
         response = logged_in_client.post(f'/order/cancel-approval/{approval.id}')
         assert response.status_code == 200
         data = json.loads(response.data)
@@ -179,14 +181,14 @@ class TestOrderBusinessLogic:
     def test_order_stock_update_on_create(self, logged_in_client, test_product, test_customer):
         """测试订单创建时库存更新"""
         initial_stock = test_product.current_stock
-        
+
         data = {
             'product_id': test_product.id,
             'customer': test_customer.name,
             'quantity': 15
         }
         logged_in_client.post('/order/list', data=data, follow_redirects=True)
-        
+
         db.session.refresh(test_product)
         assert test_product.current_stock == initial_stock + 15
 
@@ -194,13 +196,13 @@ class TestOrderBusinessLogic:
         """测试订单编辑时库存更新"""
         initial_stock = test_product.current_stock
         old_quantity = test_order.quantity
-        
+
         data = {
             'customer': test_customer.name,
             'quantity': old_quantity + 10
         }
         logged_in_client.post(f'/order/edit/{test_order.id}', data=data, follow_redirects=True)
-        
+
         db.session.refresh(test_product)
         assert test_product.current_stock == initial_stock + 10
 
@@ -212,7 +214,7 @@ class TestOrderBusinessLogic:
             'quantity': 10
         }
         logged_in_client.post('/order/list', data=data, follow_redirects=True)
-        
+
         # 验证库存日志
         log = InventoryLog.query.filter_by(
             product_id=test_product.id,
@@ -227,14 +229,14 @@ class TestOrderBusinessLogic:
             sess['user_id'] = normal_user.id
             sess['username'] = normal_user.username
             sess['is_super'] = normal_user.is_super
-        
+
         data = {
             'customer': '新客户',
             'quantity': 20
         }
         response = logged_in_client.post(f'/order/edit/{test_order.id}', data=data, follow_redirects=True)
         assert response.status_code == 200
-        
+
         # 验证审批请求创建
         approval = ApprovalRequest.query.filter_by(
             order_id=test_order.id,
@@ -281,7 +283,7 @@ class TestOrderEdgeCases:
     def test_order_duplicate_order_no(self, logged_in_client, test_order, test_product, test_customer):
         """测试重复订单号（由系统生成，理论上不会重复）"""
         # 订单号由系统自动生成，测试创建多个订单
-        for i in range(5):
+        for _i in range(5):
             data = {
                 'product_id': test_product.id,
                 'customer': test_customer.name,
@@ -309,7 +311,7 @@ class TestOrderPerformance:
             )
             db_session.add(order)
         db_session.commit()
-        
+
         response = logged_in_client.get('/order/list')
         assert response.status_code == 200
 
@@ -327,7 +329,7 @@ class TestOrderPerformance:
             )
             db_session.add(order)
         db_session.commit()
-        
+
         # 搜索特定客户
         response = logged_in_client.get('/order/list')
         assert response.status_code == 200

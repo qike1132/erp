@@ -2,15 +2,16 @@
 """Skill upgrade flow extracted from the main CLI module."""
 
 import json
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Dict, List
+from typing import Any
 
 
-def _as_dict(value: Any) -> Dict[str, Any]:
+def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _first_non_empty_string(obj: Dict[str, Any], keys: List[str]) -> str:
+def _first_non_empty_string(obj: dict[str, Any], keys: list[str]) -> str:
     for key in keys:
         value = obj.get(key)
         if isinstance(value, str) and value.strip():
@@ -18,7 +19,7 @@ def _first_non_empty_string(obj: Dict[str, Any], keys: List[str]) -> str:
     return ""
 
 
-def _extract_update_url(config: Dict[str, Any], skill_dir: Path, resolve_uri_with_base: Callable[[str, Path], str]) -> str:
+def _extract_update_url(config: dict[str, Any], skill_dir: Path, resolve_uri_with_base: Callable[[str, Path], str]) -> str:
     direct = _first_non_empty_string(
         config,
         ["update_url", "updateUrl", "upgrade_url", "upgradeUrl", "manifest_url", "manifestUrl"],
@@ -36,7 +37,7 @@ def _extract_update_url(config: Dict[str, Any], skill_dir: Path, resolve_uri_wit
 
 def _read_installed_skill_version(
     skill_dir: Path,
-    lock_meta: Dict[str, Any],
+    lock_meta: dict[str, Any],
     skill_meta_name: str,
 ) -> str:
     lock_version = _first_non_empty_string(lock_meta, ["version"])
@@ -56,7 +57,7 @@ def _read_installed_skill_version(
     return ""
 
 
-def cmd_upgrade(args: Any, deps: Dict[str, Any]) -> int:
+def cmd_upgrade(args: Any, deps: dict[str, Any]) -> int:
     load_lockfile = deps["load_lockfile"]
     save_lockfile = deps["save_lockfile"]
     read_json_from_uri = deps["read_json_from_uri"]

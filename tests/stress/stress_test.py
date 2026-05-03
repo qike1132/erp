@@ -17,21 +17,20 @@ ERP系统压力测试框架 - 100并发用户 60分钟测试
 """
 
 import asyncio
-import aiohttp
-import time
+import contextlib
+import csv
 import json
 import os
-import sys
 import statistics
-import csv
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional
-from dataclasses import dataclass, field, asdict
-from enum import Enum
 import threading
-import psutil
+import time
 import tracemalloc
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta
+from typing import Any
 
+import aiohttp
+import psutil
 
 # ==================== 配置 ====================
 
@@ -54,7 +53,7 @@ API_ENDPOINTS = {
     "GET_customers": {"path": "/api/v1/customers/list", "weight": 10, "method": "GET"},
     "GET_stock": {"path": "/api/v1/stock/inventory", "weight": 10, "method": "GET"},
     "GET_reports": {"path": "/api/v1/reports/sales", "weight": 5, "method": "GET"},
-    
+
     # 表单提交操作 (30%)
     "POST_order": {"path": "/api/v1/orders/create", "weight": 8, "method": "POST"},
     "POST_product": {"path": "/api/v1/products/create", "weight": 5, "method": "POST"},
@@ -62,7 +61,7 @@ API_ENDPOINTS = {
     "POST_stockin": {"path": "/api/v1/stock/in/create", "weight": 5, "method": "POST"},
     "POST_stockout": {"path": "/api/v1/stock/out/create", "weight": 5, "method": "POST"},
     "POST_purchase": {"path": "/api/v1/purchase-center", "weight": 2, "method": "POST"},
-    
+
     # 复杂操作 (10%)
     "PUT_order": {"path": "/api/v1/orders/edit/1", "weight": 3, "method": "PUT"},
     "DELETE_order": {"path": "/api/v1/orders/delete/1", "weight": 2, "method": "DELETE"},
@@ -82,7 +81,7 @@ class RequestMetric:
     response_time_ms: float
     timestamp: float
     success: bool
-    error_message: Optional[str] = None
+    error_message: str | None = None
     response_size_bytes: int = 0
 
 
@@ -90,7 +89,7 @@ class RequestMetric:
 class UserSession:
     """虚拟用户会话"""
     user_id: int
-    token: Optional[str] = None
+    token: str | None = None
     request_count: int = 0
     error_count: int = 0
     total_response_time: float = 0.0
@@ -119,49 +118,49 @@ class StressTestReport:
     peak_cpu_usage: float = 0.0
     avg_memory_mb: float = 0.0
     peak_memory_mb: float = 0.0
-    endpoint_metrics: Dict[str, Any] = field(default_factory=dict)
-    errors: List[Dict[str, Any]] = field(default_factory=list)
+    endpoint_metrics: dict[str, Any] = field(default_factory=dict)
+    errors: list[dict[str, Any]] = field(default_factory=list)
 
 
 # ==================== 资源监控 ====================
 
 class ResourceMonitor:
     """系统资源监控"""
-    
+
     def __init__(self, process_name: str = "python"):
         self.process_name = process_name
-        self.cpu_samples: List[float] = []
-        self.memory_samples: List[float] = []
+        self.cpu_samples: list[float] = []
+        self.memory_samples: list[float] = []
         self.monitoring = False
-        self.monitor_thread: Optional[threading.Thread] = None
-    
+        self.monitor_thread: threading.Thread | None = None
+
     def start(self):
         """开始监控"""
         self.monitoring = True
         self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self.monitor_thread.start()
-    
+
     def stop(self):
         """停止监控"""
         self.monitoring = False
         if self.monitor_thread:
             self.monitor_thread.join(timeout=5)
-    
+
     def _monitor_loop(self):
         """监控循环"""
         while self.monitoring:
             try:
                 cpu_percent = psutil.cpu_percent(interval=1)
                 memory = psutil.virtual_memory()
-                
+
                 self.cpu_samples.append(cpu_percent)
                 self.memory_samples.append(memory.used / (1024 * 1024))  # MB
             except Exception:
                 pass
-            
+
             time.sleep(1)
-    
-    def get_stats(self) -> Dict[str, float]:
+
+    def get_stats(self) -> dict[str, float]:
         """获取统计数据"""
         return {
             "avg_cpu_percent": statistics.mean(self.cpu_samples) if self.cpu_samples else 0,
@@ -175,13 +174,13 @@ class ResourceMonitor:
 
 class RequestGenerator:
     """请求负载生成器"""
-    
+
     def __init__(self):
         self.order_counter = 0
         self.product_counter = 0
         self.customer_counter = 0
-    
-    def get_order_data(self) -> Dict[str, Any]:
+
+    def get_order_data(self) -> dict[str, Any]:
         """生成订单表单数据"""
         self.order_counter += 1
         return {
@@ -193,8 +192,8 @@ class RequestGenerator:
             "status": "pending",
             "note": f"压力测试订单 {self.order_counter}"
         }
-    
-    def get_product_data(self) -> Dict[str, Any]:
+
+    def get_product_data(self) -> dict[str, Any]:
         """生成产品表单数据"""
         self.product_counter += 1
         return {
@@ -205,8 +204,8 @@ class RequestGenerator:
             "cost": 30.00,
             "initial_stock": 500
         }
-    
-    def get_customer_data(self) -> Dict[str, Any]:
+
+    def get_customer_data(self) -> dict[str, Any]:
         """生成客户表单数据"""
         self.customer_counter += 1
         return {
@@ -216,8 +215,8 @@ class RequestGenerator:
             "email": f"stress_{self.customer_counter}@test.com",
             "address": f"测试地址 {self.customer_counter}"
         }
-    
-    def get_stockin_data(self) -> Dict[str, Any]:
+
+    def get_stockin_data(self) -> dict[str, Any]:
         """生成入库表单数据"""
         return {
             "product_id": 1,
@@ -226,8 +225,8 @@ class RequestGenerator:
             "batch_no": f"BATCH-{int(time.time())}",
             "note": "压力测试入库"
         }
-    
-    def get_stockout_data(self) -> Dict[str, Any]:
+
+    def get_stockout_data(self) -> dict[str, Any]:
         """生成出库表单数据"""
         return {
             "product_id": 1,
@@ -235,17 +234,17 @@ class RequestGenerator:
             "customer_id": 1,
             "note": "压力测试出库"
         }
-    
-    def get_endpoint_request(self, endpoint_key: str) -> tuple[str, str, Optional[Dict]]:
+
+    def get_endpoint_request(self, endpoint_key: str) -> tuple[str, str, dict | None]:
         """获取端点请求配置
-        
+
         Returns:
             (method, path, data)
         """
         endpoint = API_ENDPOINTS[endpoint_key]
         method = endpoint["method"]
         path = endpoint["path"]
-        
+
         data = None
         if method == "POST":
             if "order" in endpoint_key.lower():
@@ -270,7 +269,7 @@ class RequestGenerator:
                 }
         elif method == "PUT":
             data = self.get_order_data()
-        
+
         return method, path, data
 
 
@@ -278,7 +277,7 @@ class RequestGenerator:
 
 class StressTestExecutor:
     """压力测试执行器"""
-    
+
     def __init__(
         self,
         concurrent_users: int = CONCURRENT_USERS,
@@ -288,15 +287,15 @@ class StressTestExecutor:
         self.concurrent_users = concurrent_users
         self.duration_minutes = duration_minutes
         self.base_url = base_url
-        self.metrics: List[RequestMetric] = []
+        self.metrics: list[RequestMetric] = []
         self.metrics_lock = asyncio.Lock()
         self.stop_event = asyncio.Event()
         self.request_generator = RequestGenerator()
         self.resource_monitor = ResourceMonitor()
-        self.user_sessions: List[UserSession] = []
-        self.tokens: List[str] = []
-    
-    async def authenticate_user(self, session: aiohttp.ClientSession, user_idx: int) -> Optional[str]:
+        self.user_sessions: list[UserSession] = []
+        self.tokens: list[str] = []
+
+    async def authenticate_user(self, session: aiohttp.ClientSession, user_idx: int) -> str | None:
         """用户认证获取Token"""
         try:
             async with session.post(
@@ -313,27 +312,27 @@ class StressTestExecutor:
         except Exception as e:
             print(f"用户 {user_idx} 认证失败: {e}")
         return None
-    
+
     async def execute_request(
         self,
         session: aiohttp.ClientSession,
         endpoint_key: str,
-        token: Optional[str]
+        token: str | None
     ) -> RequestMetric:
         """执行单个请求"""
         method, path, data = self.request_generator.get_endpoint_request(endpoint_key)
         url = f"{self.base_url}{path}"
-        
+
         headers = {}
         if token:
             headers["Authorization"] = f"Bearer {token}"
         headers["Content-Type"] = "application/json"
-        
+
         start_time = time.time()
         status_code = 0
         response_size = 0
         error_message = None
-        
+
         try:
             if method == "GET":
                 async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as response:
@@ -365,10 +364,10 @@ class StressTestExecutor:
                     status_code = response.status
                     response_size = response.content_length or 0
                     await response.read()
-            
+
             success = 200 <= status_code < 400
-            
-        except asyncio.TimeoutError:
+
+        except TimeoutError:
             success = False
             error_message = "请求超时"
         except aiohttp.ClientError as e:
@@ -377,9 +376,9 @@ class StressTestExecutor:
         except Exception as e:
             success = False
             error_message = f"未知错误: {str(e)}"
-        
+
         elapsed_ms = (time.time() - start_time) * 1000
-        
+
         return RequestMetric(
             endpoint=endpoint_key,
             method=method,
@@ -390,149 +389,143 @@ class StressTestExecutor:
             error_message=error_message,
             response_size_bytes=response_size
         )
-    
+
     async def user_worker(self, user_id: int):
         """虚拟用户工作线程"""
         session = aiohttp.ClientSession()
         user_session = UserSession(user_id=user_id)
         self.user_sessions.append(user_session)
-        
+
         # 认证
         token = await self.authenticate_user(session, user_id)
         user_session.token = token
-        
+
         # 端点选择（按权重）
         endpoint_keys = list(API_ENDPOINTS.keys())
         weights = [API_ENDPOINTS[k]["weight"] for k in endpoint_keys]
-        
+
         try:
             while not self.stop_event.is_set():
                 # 选择端点
                 endpoint_key = self._weighted_choice(endpoint_keys, weights)
-                
+
                 # 执行请求
                 metric = await self.execute_request(session, endpoint_key, token)
-                
+
                 # 记录指标
                 async with self.metrics_lock:
                     self.metrics.append(metric)
-                
+
                 user_session.request_count += 1
                 user_session.total_response_time += metric.response_time_ms
                 if not metric.success:
                     user_session.error_count += 1
-                
+
                 # 模拟用户思考时间 (0.5-3秒)
                 think_time = 0.5 + (hash(str(time.time()) + str(user_id)) % 25) / 10
-                try:
+                with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(self.stop_event.wait(), timeout=think_time)
-                except asyncio.TimeoutError:
-                    pass
-                    
+
         except Exception as e:
             print(f"用户 {user_id} 工作线程异常: {e}")
         finally:
             await session.close()
-    
-    def _weighted_choice(self, keys: List[str], weights: List[int]) -> str:
+
+    def _weighted_choice(self, keys: list[str], weights: list[int]) -> str:
         """加权随机选择"""
         total = sum(weights)
         r = hash(str(time.time())) % total
         cumulative = 0
-        for key, weight in zip(keys, weights):
+        for key, weight in zip(keys, weights, strict=False):
             cumulative += weight
             if r < cumulative:
                 return key
         return keys[-1]
-    
+
     async def run(self) -> StressTestReport:
         """运行压力测试"""
         print(f"\n{'='*80}")
-        print(f"ERP系统压力测试启动")
+        print("ERP系统压力测试启动")
         print(f"{'='*80}")
         print(f"并发用户数: {self.concurrent_users}")
         print(f"测试持续时间: {self.duration_minutes} 分钟")
         print(f"目标服务器: {self.base_url}")
         print(f"报告目录: {REPORT_DIR}")
         print(f"{'='*80}\n")
-        
+
         # 开始资源监控
         self.resource_monitor.start()
         tracemalloc.start()
-        
+
         # 记录开始时间
         start_time = time.time()
         test_start = datetime.now()
-        
+
         # 创建异步任务
         workers = [
             asyncio.create_task(self.user_worker(i))
             for i in range(self.concurrent_users)
         ]
-        
+
         # 打印进度
         progress_task = asyncio.create_task(self._print_progress(start_time))
-        
+
         # 等待测试完成或超时
         timeout_seconds = self.duration_minutes * 60
         try:
             await asyncio.wait_for(self.stop_event.wait(), timeout=timeout_seconds)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             print(f"\n测试时间已到 ({self.duration_minutes} 分钟)")
-        
+
         # 停止所有工作线程
         self.stop_event.set()
-        
+
         # 等待所有任务完成
         for worker in workers:
             worker.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await worker
-            except asyncio.CancelledError:
-                pass
-        
+
         progress_task.cancel()
-        
+
         # 停止监控
         self.resource_monitor.stop()
         tracemalloc.stop()
-        
+
         # 生成报告
         end_time = time.time()
         report = self._generate_report(test_start, datetime.now(), start_time, end_time)
-        
+
         # 保存报告
         self._save_report(report)
-        
+
         return report
-    
+
     async def _print_progress(self, start_time: float):
         """打印测试进度"""
         while not self.stop_event.is_set():
             elapsed = time.time() - start_time
             progress = min(100, (elapsed / (self.duration_minutes * 60)) * 100)
-            
+
             async with self.metrics_lock:
                 total_requests = len(self.metrics)
                 failed = sum(1 for m in self.metrics if not m.success)
-            
+
             if total_requests > 0:
                 avg_time = statistics.mean([m.response_time_ms for m in self.metrics[-100:]])
             else:
                 avg_time = 0
-            
+
             elapsed_minutes = elapsed / 60
             print(f"[{elapsed_minutes:.1f}/{self.duration_minutes}min] "
                   f"进度: {progress:.1f}% | "
                   f"请求: {total_requests} | "
                   f"失败: {failed} | "
                   f"近100次平均: {avg_time:.0f}ms")
-            
-            try:
+
+            with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self.stop_event.wait(), timeout=10)
-            except asyncio.TimeoutError:
-                pass
-    
+
     def _generate_report(
         self,
         test_start: datetime,
@@ -542,17 +535,17 @@ class StressTestExecutor:
     ) -> StressTestReport:
         """生成测试报告"""
         duration = end_time - start_time
-        
+
         # 基本统计
         total = len(self.metrics)
         successful = sum(1 for m in self.metrics if m.success)
         failed = total - successful
-        
+
         response_times = [m.response_time_ms for m in self.metrics]
-        
+
         # 计算分位数
         sorted_times = sorted(response_times) if response_times else [0]
-        
+
         def percentile(data, p):
             if not data:
                 return 0
@@ -560,7 +553,7 @@ class StressTestExecutor:
             f = int(k)
             c = f + 1 if f + 1 < len(data) else f
             return data[f] + (k - f) * (data[c] - data[f]) if c != f else data[f]
-        
+
         # 端点指标
         endpoint_stats = {}
         for endpoint_key in API_ENDPOINTS:
@@ -576,10 +569,10 @@ class StressTestExecutor:
                     "max_time_ms": max(times),
                     "p95_time_ms": percentile(sorted(times), 95),
                 }
-        
+
         # 资源统计
         resource_stats = self.resource_monitor.get_stats()
-        
+
         # 错误列表
         errors = []
         for m in self.metrics:
@@ -591,11 +584,11 @@ class StressTestExecutor:
                     "error": m.error_message,
                     "timestamp": datetime.fromtimestamp(m.timestamp).isoformat()
                 })
-        
+
         # 限制错误列表大小
         if len(errors) > 100:
             errors = errors[:100]
-        
+
         report = StressTestReport(
             test_start_time=test_start.isoformat(),
             test_end_time=test_end.isoformat(),
@@ -620,54 +613,54 @@ class StressTestExecutor:
             endpoint_metrics=endpoint_stats,
             errors=errors
         )
-        
+
         return report
-    
+
     def _save_report(self, report: StressTestReport):
         """保存报告"""
         os.makedirs(REPORT_DIR, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
+
         # JSON报告
         json_path = os.path.join(REPORT_DIR, f"stress_report_{timestamp}.json")
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(asdict(report), f, ensure_ascii=False, indent=2)
-        
+
         # CSV详细数据
         csv_path = os.path.join(REPORT_DIR, f"stress_metrics_{timestamp}.csv")
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow(["endpoint", "method", "status_code", "response_time_ms", 
+            writer.writerow(["endpoint", "method", "status_code", "response_time_ms",
                            "success", "error_message", "timestamp"])
             for m in self.metrics:
                 writer.writerow([
-                    m.endpoint, m.method, m.status_code, 
+                    m.endpoint, m.method, m.status_code,
                     round(m.response_time_ms, 2), m.success,
-                    m.error_message or "", 
+                    m.error_message or "",
                     datetime.fromtimestamp(m.timestamp).isoformat()
                 ])
-        
+
         # 文本摘要报告
         txt_path = os.path.join(REPORT_DIR, f"stress_summary_{timestamp}.txt")
         with open(txt_path, "w", encoding="utf-8") as f:
             f.write(f"{'='*80}\n")
-            f.write(f"ERP系统压力测试报告\n")
+            f.write("ERP系统压力测试报告\n")
             f.write(f"{'='*80}\n\n")
             f.write(f"测试时间: {report.test_start_time} - {report.test_end_time}\n")
             f.write(f"持续时间: {report.duration_minutes} 分钟\n")
             f.write(f"并发用户: {report.concurrent_users}\n\n")
-            
+
             f.write(f"{'='*80}\n")
-            f.write(f"总体指标\n")
+            f.write("总体指标\n")
             f.write(f"{'='*80}\n")
             f.write(f"总请求数: {report.total_requests}\n")
             f.write(f"成功请求: {report.successful_requests}\n")
             f.write(f"失败请求: {report.failed_requests}\n")
             f.write(f"错误率: {report.error_rate:.2f}%\n")
             f.write(f"吞吐量: {report.requests_per_second:.2f} 请求/秒\n\n")
-            
+
             f.write(f"{'='*80}\n")
-            f.write(f"响应时间 (ms)\n")
+            f.write("响应时间 (ms)\n")
             f.write(f"{'='*80}\n")
             f.write(f"平均值: {report.avg_response_time_ms:.2f}\n")
             f.write(f"最小值: {report.min_response_time_ms:.2f}\n")
@@ -676,17 +669,17 @@ class StressTestExecutor:
             f.write(f"P90: {report.p90_response_time_ms:.2f}\n")
             f.write(f"P95: {report.p95_response_time_ms:.2f}\n")
             f.write(f"P99: {report.p99_response_time_ms:.2f}\n\n")
-            
+
             f.write(f"{'='*80}\n")
-            f.write(f"资源利用率\n")
+            f.write("资源利用率\n")
             f.write(f"{'='*80}\n")
             f.write(f"平均CPU: {report.avg_cpu_usage:.1f}%\n")
             f.write(f"峰值CPU: {report.peak_cpu_usage:.1f}%\n")
             f.write(f"平均内存: {report.avg_memory_mb:.1f} MB\n")
             f.write(f"峰值内存: {report.peak_memory_mb:.1f} MB\n\n")
-            
+
             f.write(f"{'='*80}\n")
-            f.write(f"端点性能\n")
+            f.write("端点性能\n")
             f.write(f"{'='*80}\n")
             for endpoint, stats in report.endpoint_metrics.items():
                 f.write(f"\n{endpoint}:\n")
@@ -696,16 +689,16 @@ class StressTestExecutor:
                        f"最小: {stats['min_time_ms']:.2f}ms "
                        f"最大: {stats['max_time_ms']:.2f}ms "
                        f"P95: {stats['p95_time_ms']:.2f}ms\n")
-            
+
             if report.errors:
                 f.write(f"\n{'='*80}\n")
-                f.write(f"错误列表 (前100条)\n")
+                f.write("错误列表 (前100条)\n")
                 f.write(f"{'='*80}\n")
                 for err in report.errors[:20]:
                     f.write(f"[{err['timestamp']}] {err['endpoint']} "
                            f"({err['method']}) - {err['error']}\n")
-        
-        print(f"\n报告已保存:")
+
+        print("\n报告已保存:")
         print(f"  JSON: {json_path}")
         print(f"  CSV: {csv_path}")
         print(f"  摘要: {txt_path}")
@@ -771,64 +764,64 @@ async def main():
     """主函数"""
     # 生成保护机制配置
     protection_config = generate_protection_disable_config()
-    
+
     print("\n" + "="*80)
     print("压力测试前准备")
     print("="*80)
     print("\n临时关闭保护机制配置:")
     print(json.dumps(protection_config, ensure_ascii=False, indent=2))
-    
+
     # 设置环境变量（关闭保护机制）
     os.environ["RATE_LIMIT_ENABLED"] = "false"
     os.environ["CSRF_COOKIE_SECURE"] = "false"
     os.environ["FASTAPI_DEBUG"] = "false"
     os.environ["DB_POOL_SIZE"] = "50"
     os.environ["DB_MAX_OVERFLOW"] = "50"
-    
+
     print("\n环境变量已设置:")
-    print(f"  RATE_LIMIT_ENABLED=false")
-    print(f"  CSRF_COOKIE_SECURE=false")
-    print(f"  FASTAPI_DEBUG=false")
-    print(f"  DB_POOL_SIZE=50")
-    print(f"  DB_MAX_OVERFLOW=50")
-    
+    print("  RATE_LIMIT_ENABLED=false")
+    print("  CSRF_COOKIE_SECURE=false")
+    print("  FASTAPI_DEBUG=false")
+    print("  DB_POOL_SIZE=50")
+    print("  DB_MAX_OVERFLOW=50")
+
     # 创建执行器
     executor = StressTestExecutor(
         concurrent_users=CONCURRENT_USERS,
         duration_minutes=DURATION_MINUTES,
         base_url=BASE_URL
     )
-    
+
     # 运行测试
     report = await executor.run()
-    
+
     # 打印摘要
     print("\n" + "="*80)
     print("压力测试完成")
     print("="*80)
-    print(f"\n总体结果:")
+    print("\n总体结果:")
     print(f"  总请求数: {report.total_requests}")
     print(f"  成功率: {(report.successful_requests / report.total_requests * 100) if report.total_requests > 0 else 0:.2f}%")
     print(f"  错误率: {report.error_rate:.2f}%")
     print(f"  吞吐量: {report.requests_per_second:.2f} req/s")
-    print(f"\n响应时间:")
+    print("\n响应时间:")
     print(f"  平均: {report.avg_response_time_ms:.2f}ms")
     print(f"  P50: {report.p50_response_time_ms:.2f}ms")
     print(f"  P90: {report.p90_response_time_ms:.2f}ms")
     print(f"  P95: {report.p95_response_time_ms:.2f}ms")
     print(f"  P99: {report.p99_response_time_ms:.2f}ms")
-    print(f"\n资源利用:")
+    print("\n资源利用:")
     print(f"  平均CPU: {report.avg_cpu_usage:.1f}%")
     print(f"  峰值CPU: {report.peak_cpu_usage:.1f}%")
     print(f"  平均内存: {report.avg_memory_mb:.1f}MB")
     print(f"  峰值内存: {report.peak_memory_mb:.1f}MB")
-    
+
     print("\n" + "="*80)
     print("警告: 测试完成后必须恢复保护机制!")
     print("="*80)
     for step in protection_config["recovery_steps"]:
         print(f"  - {step}")
-    
+
     return report
 
 

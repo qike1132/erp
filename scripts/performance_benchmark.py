@@ -3,14 +3,14 @@ FastAPI 生产性能基准测试脚本
 测试场景：100 并发用户，持续 60 秒
 """
 import asyncio
-import time
-import statistics
-import psutil
-import os
 import json
+import os
+import statistics
+import time
 from datetime import datetime
-from typing import List, Dict
+
 import httpx
+import psutil
 
 BASE_URL = "http://127.0.0.1:5002"
 TEST_DURATION = 60
@@ -25,15 +25,15 @@ TARGET_ENDPOINTS = [
 
 class PerformanceMetrics:
     def __init__(self):
-        self.response_times: List[float] = []
+        self.response_times: list[float] = []
         self.error_count = 0
         self.success_count = 0
-        self.status_codes: Dict[int, int] = {}
+        self.status_codes: dict[int, int] = {}
         self.start_memory = 0
         self.start_cpu = 0
         self.peak_memory = 0
         self.requests_completed = 0
-        
+
     def record_request(self, duration: float, status_code: int):
         self.response_times.append(duration)
         self.requests_completed += 1
@@ -48,23 +48,23 @@ async def single_user_benchmark(user_id: int, duration: float, metrics: Performa
     async with httpx.AsyncClient(timeout=30.0) as client:
         end_time = time.time() + duration
         request_count = 0
-        
+
         while time.time() < end_time:
             for endpoint in TARGET_ENDPOINTS:
                 if time.time() >= end_time:
                     break
-                    
+
                 try:
                     start = time.perf_counter()
                     response = await client.get(f"{BASE_URL}{endpoint}")
                     duration_ms = (time.perf_counter() - start) * 1000
                     metrics.record_request(duration_ms, response.status_code)
                     request_count += 1
-                except Exception as e:
+                except Exception:
                     metrics.record_request(999999, 0)
-                    
+
                 await asyncio.sleep(0.1)
-    
+
     return request_count
 
 async def run_benchmark():
@@ -76,31 +76,31 @@ async def run_benchmark():
     print(f"测试时长: {TEST_DURATION} 秒")
     print(f"测试端点: {', '.join(TARGET_ENDPOINTS)}")
     print("=" * 60)
-    
+
     process = psutil.Process(os.getpid())
     metrics = PerformanceMetrics()
     metrics.start_memory = process.memory_info().rss / 1024 / 1024
-    
+
     print(f"\n初始内存: {metrics.start_memory:.2f} MB")
     print("开始测试...\n")
-    
+
     start_time = time.time()
-    
+
     tasks = [
         single_user_benchmark(i, TEST_DURATION, metrics)
         for i in range(CONCURRENT_USERS)
     ]
-    
+
     results = await asyncio.gather(*tasks)
-    
+
     elapsed = time.time() - start_time
-    
+
     peak_mem = process.memory_info().rss / 1024 / 1024
     metrics.peak_memory = peak_mem
-    
+
     total_requests = sum(results)
     rps = total_requests / elapsed if elapsed > 0 else 0
-    
+
     if metrics.response_times:
         avg_rt = statistics.mean(metrics.response_times)
         min_rt = min(metrics.response_times)
@@ -110,10 +110,10 @@ async def run_benchmark():
         p99 = statistics.quantiles(metrics.response_times, n=100)[98] if len(metrics.response_times) > 1 else avg_rt
     else:
         avg_rt = min_rt = max_rt = p50 = p95 = p99 = 0
-    
+
     success_rate = (metrics.success_count / total_requests * 100) if total_requests > 0 else 0
     error_rate = (metrics.error_count / total_requests * 100) if total_requests > 0 else 0
-    
+
     print("\n" + "=" * 60)
     print("测试结果")
     print("=" * 60)
@@ -140,7 +140,7 @@ async def run_benchmark():
     for code, count in sorted(metrics.status_codes.items()):
         print(f"  {code}: {count}")
     print("=" * 60)
-    
+
     report = {
         "test_time": datetime.now().isoformat(),
         "configuration": {
@@ -173,13 +173,13 @@ async def run_benchmark():
             "status_codes": metrics.status_codes
         }
     }
-    
+
     report_path = os.path.join(os.path.dirname(__file__), "performance_report.json")
     with open(report_path, 'w', encoding='utf-8') as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
-    
+
     print(f"\n报告已保存: {report_path}")
-    
+
     return report
 
 if __name__ == "__main__":

@@ -3,9 +3,10 @@
 
 映射到与 Flask-SQLAlchemy 相同的 'order_sync_record'、'sync_retry_queue'、'order_sync_config' 表。
 """
-from sqlalchemy import String, Integer, Text, DateTime, ForeignKey, Index
-from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime, timedelta
+
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
 
 from fastapi_app.shared_models import Base
 
@@ -72,9 +73,7 @@ class OrderSyncRecord(Base):
             return False
         if self.retry_count >= self.max_retries:
             return False
-        if self.next_retry_time and datetime.now() < self.next_retry_time:
-            return False
-        return True
+        return not (self.next_retry_time and datetime.now() < self.next_retry_time)
 
 
 class SyncRetryQueue(Base):

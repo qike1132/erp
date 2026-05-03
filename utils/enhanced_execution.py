@@ -10,20 +10,18 @@
   6. CostTracker - 成本追踪器 (Token/API调用统计)
   7. SkillHotReloader - 技能热加载器
 """
-import time
 import asyncio
-import threading
-import traceback
-import logging
 import functools
 import hashlib
 import json
-import random as _random
-from typing import Any, Optional, Dict, List, Tuple, Callable, TypeVar, Union
-from dataclasses import dataclass, field
-from datetime import datetime
-from enum import Enum
+import logging
+import threading
+import time
 from collections import OrderedDict
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +33,7 @@ class SpeculativeResult:
     """投机执行结果"""
     ready: bool
     result: Any = None
-    error: Optional[Exception] = None
+    error: Exception | None = None
     elapsed_ms: float = 0
     source: str = 'speculative'
 
@@ -57,8 +55,8 @@ class SpeculativeExecutor:
                  max_concurrent: int = 10):
         self.default_timeout_ms = default_timeout_ms
         self.max_concurrent = max_concurrent
-        self._pending: Dict[str, asyncio.Task] = {}
-        self._results: Dict[str, SpeculativeResult] = {}
+        self._pending: dict[str, asyncio.Task] = {}
+        self._results: dict[str, SpeculativeResult] = {}
         self._lock = threading.Lock()
         self.stats = {
             'speculations': 0,
@@ -69,7 +67,7 @@ class SpeculativeExecutor:
         }
 
     async def speculate(self, key: str, checker: Callable,
-                        timeout_ms: Optional[float] = None) -> SpeculativeResult:
+                        timeout_ms: float | None = None) -> SpeculativeResult:
         """
         发起投机执行
 
@@ -109,7 +107,7 @@ class SpeculativeExecutor:
                 self._results[key] = spec_result
             return spec_result
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self.stats['timeouts'] += 1
             return SpeculativeResult(
                 ready=False, elapsed_ms=timeout,
@@ -152,7 +150,7 @@ class SpeculativeExecutor:
         with self._lock:
             self._results.clear()
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         return {**self.stats, 'cached_results': len(self._results)}
 
 
@@ -169,18 +167,17 @@ class ResultCache:
     def __init__(self, max_size: int = 200, default_ttl: float = 60.0):
         self.max_size = max_size
         self.default_ttl = default_ttl
-        self._cache: OrderedDict[str, Tuple[Any, float, float]] = OrderedDict()
-        self._dependencies: Dict[str, set] = {}
-        self._tool_keys: Dict[str, set] = {}
+        self._cache: OrderedDict[str, tuple[Any, float, float]] = OrderedDict()
+        self._dependencies: dict[str, set] = {}
+        self._tool_keys: dict[str, set] = {}
         self._lock = threading.RLock()
         self.stats = {'hits': 0, 'misses': 0, 'sets': 0, 'invalidations': 0}
 
     def _make_key(self, tool_name: str, input_data: Any) -> str:
-        import hashlib, json
         raw = f"{tool_name}:{json.dumps(input_data, sort_keys=True, default=str)}"
         return hashlib.sha256(raw.encode()).hexdigest()[:20]
 
-    def get(self, tool_name: str, input_data: Any) -> Optional[Any]:
+    def get(self, tool_name: str, input_data: Any) -> Any | None:
         cache_key = self._make_key(tool_name, input_data)
         with self._lock:
             entry = self._cache.get(cache_key)
@@ -197,7 +194,7 @@ class ResultCache:
             return value
 
     def set(self, tool_name: str, input_data: Any, result: Any,
-            ttl: Optional[float] = None, depends_on: Optional[List[str]] = None):
+            ttl: float | None = None, depends_on: list[str] | None = None):
         cache_key = self._make_key(tool_name, input_data)
         effective_ttl = ttl or self.default_ttl
         with self._lock:
@@ -234,7 +231,7 @@ class ResultCache:
                 self._cache.pop(key, None)
             self.stats['invalidations'] += len(dependent_keys)
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         total = self.stats['hits'] + self.stats['misses']
         return {
             **self.stats,
@@ -263,8 +260,8 @@ class ParallelExecutor:
             'errors': 0
         }
 
-    async def execute_parallel(self, tasks: List[Tuple[str, Callable, tuple]],
-                                progress_callback: Optional[Callable]=None) -> List[Tuple[str, Any]]:
+    async def execute_parallel(self, tasks: list[tuple[str, Callable, tuple]],
+                                progress_callback: Callable | None=None) -> list[tuple[str, Any]]:
         """
         并行执行多个任务
 
@@ -306,7 +303,7 @@ class ParallelExecutor:
         self.stats['parallel_executions'] += 1
         return results
 
-    def execute_sync_parallel(self, tasks: List[Tuple[str, Callable, tuple]]) -> List[Tuple[str, Any]]:
+    def execute_sync_parallel(self, tasks: list[tuple[str, Callable, tuple]]) -> list[tuple[str, Any]]:
         """同步版本的并行执行（使用线程池）"""
         import concurrent.futures
         self.stats['total_tasks'] += len(tasks)
@@ -350,8 +347,8 @@ class RetryConfig:
 DEFAULT_RETRY_CONFIG = RetryConfig()
 
 
-def resilient_retry(config: Optional[RetryConfig] = None,
-                   on_retry: Optional[Callable[[int, Exception], None]] = None):
+def resilient_retry(config: RetryConfig | None = None,
+                   on_retry: Callable[[int, Exception], None] | None = None):
     """
     弹性重试装饰器 (借鉴 Claude CLI 的指数退避+随机抖动)
 
@@ -446,7 +443,7 @@ class ErrorDiagnoser:
 
     MAX_CAUSE_DEPTH = 5
 
-    def diagnose(self, error: Exception) -> Dict:
+    def diagnose(self, error: Exception) -> dict:
         """
         完整诊断错误
 
@@ -528,8 +525,8 @@ class CostTracker:
     """
 
     def __init__(self):
-        self._session_costs: List[Dict] = []
-        self._current_session: Optional[Dict] = None
+        self._session_costs: list[dict] = []
+        self._current_session: dict | None = None
         self._lock = threading.Lock()
 
         self.pricing = {
@@ -539,7 +536,7 @@ class CostTracker:
             'cache_creation_cost': 0.000001875
         }
 
-    def start_session(self, session_id: Optional[str] = None):
+    def start_session(self, session_id: str | None = None):
         """开始新的追踪会话"""
         with self._lock:
             self._current_session = {
@@ -580,7 +577,7 @@ class CostTracker:
                 self._current_session['total_cache_read_tokens'] += cache_read_tokens
                 self._current_session['total_cache_creation_tokens'] += cache_creation_tokens
 
-    def end_session(self) -> Optional[Dict]:
+    def end_session(self) -> dict | None:
         """结束当前会话并返回统计"""
         with self._lock:
             if self._current_session:
@@ -609,7 +606,7 @@ class CostTracker:
             6
         )
 
-    def get_current_session_stats(self) -> Optional[Dict]:
+    def get_current_session_stats(self) -> dict | None:
         """获取当前会话统计"""
         with self._lock:
             if self._current_session:
@@ -626,7 +623,7 @@ class CostTracker:
                 }
             return None
 
-    def get_total_stats(self) -> Dict:
+    def get_total_stats(self) -> dict:
         """获取所有会话的累计统计"""
         with self._lock:
             total_cost = sum(s.get('total_cost_usd', 0) for s in self._session_costs)
@@ -652,12 +649,12 @@ class SkillHotReloader:
     FILE_STABILITY_THRESHOLD_MS = 1000
     RELOAD_DEBOUNCE_MS = 300
 
-    def __init__(self, watch_paths: List[str] = None):
+    def __init__(self, watch_paths: list[str] = None):
         self.watch_paths = watch_paths or ['.trae/rules', '.trae/skills']
         self._last_reload = 0.0
         self._pending_changes = False
-        self._callbacks: List[Callable] = []
-        self._loaded_skills: Dict[str, float] = {}
+        self._callbacks: list[Callable] = []
+        self._loaded_skills: dict[str, float] = {}
 
     def register_callback(self, callback: Callable):
         """注册技能变更回调"""
@@ -688,7 +685,7 @@ class SkillHotReloader:
                 logger.error(f"技能热加载回调失败: {e}")
         return True
 
-    def get_loaded_skills(self) -> Dict[str, float]:
+    def get_loaded_skills(self) -> dict[str, float]:
         return dict(self._loaded_skills)
 
 

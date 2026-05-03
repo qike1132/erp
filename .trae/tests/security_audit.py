@@ -4,9 +4,8 @@ Trae AI Agent System v2.0 - 安全审计报告
 """
 import json
 import re
-from pathlib import Path
-from typing import List, Dict, Any, Tuple
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass
@@ -19,7 +18,7 @@ class SecurityIssue:
 
 class SecurityAuditor:
     """安全审计器"""
-    
+
     SENSITIVE_PATTERNS = [
         r'password\s*[=:]\s*["\'][^"\']+["\']',
         r'api_key\s*[=:]\s*["\'][^"\']+["\']',
@@ -27,7 +26,7 @@ class SecurityAuditor:
         r'token\s*[=:]\s*["\'][^"\']+["\']',
         r'private_key\s*[=:]\s*["\'][^"\']+["\']',
     ]
-    
+
     DANGEROUS_PATTERNS = [
         r'eval\s*\(',
         r'exec\s*\(',
@@ -35,14 +34,14 @@ class SecurityAuditor:
         r'subprocess\.call',
         r'os\.system',
     ]
-    
+
     @staticmethod
-    def audit_config_file(file_path: Path) -> List[SecurityIssue]:
+    def audit_config_file(file_path: Path) -> list[SecurityIssue]:
         """审计单个配置文件"""
         issues = []
-        
+
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, encoding='utf-8') as f:
                 content = f.read()
                 config = json.loads(content)
         except Exception as e:
@@ -53,16 +52,16 @@ class SecurityAuditor:
                 recommendation="修复JSON语法错误"
             ))
             return issues
-        
+
         issues.extend(SecurityAuditor._check_sensitive_data(file_path, content))
         issues.extend(SecurityAuditor._check_security_settings(file_path, config))
         issues.extend(SecurityAuditor._check_rate_limiting(file_path, config))
         issues.extend(SecurityAuditor._check_input_validation(file_path, config))
-        
+
         return issues
-    
+
     @staticmethod
-    def _check_sensitive_data(file_path: Path, content: str) -> List[SecurityIssue]:
+    def _check_sensitive_data(file_path: Path, content: str) -> list[SecurityIssue]:
         """检查敏感数据"""
         issues = []
         for pattern in SecurityAuditor.SENSITIVE_PATTERNS:
@@ -74,12 +73,12 @@ class SecurityAuditor:
                     recommendation="移除硬编码的敏感信息，使用环境变量或密钥管理服务"
                 ))
         return issues
-    
+
     @staticmethod
-    def _check_security_settings(file_path: Path, config: Dict) -> List[SecurityIssue]:
+    def _check_security_settings(file_path: Path, config: dict) -> list[SecurityIssue]:
         """检查安全设置"""
         issues = []
-        
+
         if "security" in config:
             sec = config["security"]
             if "encryption" in sec:
@@ -91,7 +90,7 @@ class SecurityAuditor:
                         issue="传输加密未启用",
                         recommendation="启用 inTransit 加密以保护数据传输安全"
                     ))
-        
+
         if "queryGuard" in config:
             qg = config.get("queryGuard", {})
             if not qg.get("strictMode", False):
@@ -101,14 +100,14 @@ class SecurityAuditor:
                     issue="QueryGuard非严格模式",
                     recommendation="启用strictMode以增强安全防护"
                 ))
-        
+
         return issues
-    
+
     @staticmethod
-    def _check_rate_limiting(file_path: Path, config: Dict) -> List[SecurityIssue]:
+    def _check_rate_limiting(file_path: Path, config: dict) -> list[SecurityIssue]:
         """检查速率限制"""
         issues = []
-        
+
         if "rateLimiting" in config:
             rl = config["rateLimiting"]
             if not rl.get("enabled", False):
@@ -127,14 +126,14 @@ class SecurityAuditor:
                         issue="速率限制阈值过高",
                         recommendation="考虑降低maxRequestsPerMinute以提高安全性"
                     ))
-        
+
         return issues
-    
+
     @staticmethod
-    def _check_input_validation(file_path: Path, config: Dict) -> List[SecurityIssue]:
+    def _check_input_validation(file_path: Path, config: dict) -> list[SecurityIssue]:
         """检查输入验证"""
         issues = []
-        
+
         if "inputValidation" in config:
             iv = config["inputValidation"]
             if not iv.get("enabled", False):
@@ -144,7 +143,7 @@ class SecurityAuditor:
                     issue="输入验证未启用",
                     recommendation="启用输入验证以防止注入攻击"
                 ))
-            
+
             blocked = iv.get("blockedPatterns", [])
             critical_patterns = ["<script", "eval(", "require("]
             for pattern in critical_patterns:
@@ -155,7 +154,7 @@ class SecurityAuditor:
                         issue=f"缺少关键阻止模式: {pattern}",
                         recommendation=f"添加 '{pattern}' 到blockedPatterns"
                     ))
-        
+
         return issues
 
 
@@ -172,28 +171,28 @@ def run_security_audit():
         base_dir / "core" / "skills" / "hot-reloader.json",
         base_dir / "monitoring" / "performance.json",
     ]
-    
+
     all_issues = []
     for config_file in config_files:
         if config_file.exists():
             issues = SecurityAuditor.audit_config_file(config_file)
             all_issues.extend(issues)
-    
+
     return all_issues
 
 
-def generate_audit_report(issues: List[SecurityIssue]) -> str:
+def generate_audit_report(issues: list[SecurityIssue]) -> str:
     """生成审计报告"""
     report = []
     report.append("=" * 60)
     report.append("Trae AI Agent System v2.0 安全审计报告")
     report.append("=" * 60)
     report.append("")
-    
+
     severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
     for issue in issues:
         severity_counts[issue.severity] += 1
-    
+
     report.append("## 审计摘要")
     report.append(f"- 严重问题: {severity_counts['critical']}")
     report.append(f"- 高危问题: {severity_counts['high']}")
@@ -201,11 +200,11 @@ def generate_audit_report(issues: List[SecurityIssue]) -> str:
     report.append(f"- 低危问题: {severity_counts['low']}")
     report.append(f"- 总计: {len(issues)}")
     report.append("")
-    
+
     if issues:
         report.append("## 详细问题列表")
         report.append("")
-        
+
         for severity in ["critical", "high", "medium", "low"]:
             severity_issues = [i for i in issues if i.severity == severity]
             if severity_issues:
@@ -219,12 +218,12 @@ def generate_audit_report(issues: List[SecurityIssue]) -> str:
         report.append("## 审计结果")
         report.append("")
         report.append("✅ 未发现安全问题，所有配置文件符合安全标准。")
-    
+
     report.append("")
     report.append("=" * 60)
     report.append("审计完成")
     report.append("=" * 60)
-    
+
     return "\n".join(report)
 
 

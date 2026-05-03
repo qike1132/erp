@@ -3,9 +3,10 @@
 
 映射到与 Flask-SQLAlchemy CustomerAccessLog 相同的 'customer_access_log' 表。
 """
-from sqlalchemy import String, Integer, Text, DateTime, ForeignKey, Index
-from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
+
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
 
@@ -58,8 +59,9 @@ class CustomerAccessLog(Base):
                    related_no=None, quantity=0, status='success', error_message=None,
                    user_id=None, ip_address=None):
         """记录客户接入日志"""
-        from fastapi_app.shared_models import Customer
         from sqlalchemy import select
+
+        from fastapi_app.shared_models import Customer
 
         result = db_session.execute(
             select(Customer).where(Customer.name == customer_name)
@@ -88,6 +90,7 @@ class CustomerAccessLog(Base):
     def get_customer_stats(db_session, customer_name, days=30):
         """获取客户统计信息"""
         from datetime import timedelta
+
         from sqlalchemy import select
 
         start_date = datetime.now() - timedelta(days=days)
@@ -101,11 +104,11 @@ class CustomerAccessLog(Base):
 
         stats = {
             'total_access': len(logs),
-            'success_count': sum(1 for l in logs if l.status == 'success'),
-            'failed_count': sum(1 for l in logs if l.status == 'failed'),
-            'total_quantity': sum(l.quantity for l in logs if l.status == 'success'),
+            'success_count': sum(1 for entry in logs if entry.status == 'success'),
+            'failed_count': sum(1 for entry in logs if entry.status == 'failed'),
+            'total_quantity': sum(entry.quantity for entry in logs if entry.status == 'success'),
             'modules': {},
-            'recent_logs': [l.to_dict() for l in logs[:10]]
+            'recent_logs': [entry.to_dict() for entry in logs[:10]]
         }
         for log in logs:
             if log.module not in stats['modules']:
@@ -118,6 +121,7 @@ class CustomerAccessLog(Base):
     def get_module_stats(db_session, module, days=30):
         """获取模块统计信息"""
         from datetime import timedelta
+
         from sqlalchemy import select
 
         start_date = datetime.now() - timedelta(days=days)
@@ -131,9 +135,9 @@ class CustomerAccessLog(Base):
 
         stats = {
             'total_access': len(logs),
-            'success_count': sum(1 for l in logs if l.status == 'success'),
-            'failed_count': sum(1 for l in logs if l.status == 'failed'),
-            'total_quantity': sum(l.quantity for l in logs if l.status == 'success'),
+            'success_count': sum(1 for entry in logs if entry.status == 'success'),
+            'failed_count': sum(1 for entry in logs if entry.status == 'failed'),
+            'total_quantity': sum(entry.quantity for entry in logs if entry.status == 'success'),
             'customers': {}
         }
         for log in logs:

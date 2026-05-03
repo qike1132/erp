@@ -3,15 +3,14 @@
 使用arrow库简化日期处理，支持人性化日期解析
 """
 
-import arrow
 from datetime import datetime
-from typing import Tuple, Optional
 
+import arrow
 from dateutil.relativedelta import relativedelta
-from dateutil.rrule import rrule, MONTHLY
+from dateutil.rrule import MONTHLY, rrule
 
 
-def parse_date_flexible(date_str: str) -> Optional[datetime]:
+def parse_date_flexible(date_str: str) -> datetime | None:
     """
     灵活解析日期字符串
 
@@ -44,7 +43,7 @@ def parse_date_flexible(date_str: str) -> Optional[datetime]:
         return None
 
 
-def get_date_range(period: str) -> Tuple[Optional[datetime], Optional[datetime]]:
+def get_date_range(period: str) -> tuple[datetime | None, datetime | None]:
     """
     获取日期范围
 
@@ -129,7 +128,7 @@ def get_next_n_months(n: int) -> list:
     return list(rrule(MONTHLY, dtstart=start, count=n))
 
 
-def get_quarter_dates(year: int, quarter: int) -> Tuple[datetime, datetime]:
+def get_quarter_dates(year: int, quarter: int) -> tuple[datetime, datetime]:
     """
     获取指定季度的起止日期
 

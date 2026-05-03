@@ -6,12 +6,11 @@
 import json
 import logging
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from fastapi_app.shared_models import ModificationLog, SavedQuery, OrderStatusLog
 from fastapi_app.services import escape_like
+from fastapi_app.shared_models import ModificationLog, OrderStatusLog, SavedQuery
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +51,7 @@ def save_query(db: Session, data: dict, user_id: int, username: str) -> dict:
     return sq.to_dict()
 
 
-def delete_saved_query(db: Session, query_id: int) -> Optional[str]:
+def delete_saved_query(db: Session, query_id: int) -> str | None:
     sq = db.get(SavedQuery, query_id)
     if not sq:
         return None
@@ -61,7 +60,7 @@ def delete_saved_query(db: Session, query_id: int) -> Optional[str]:
     return '已删除'
 
 
-def use_saved_query(db: Session, query_id: int) -> Optional[dict]:
+def use_saved_query(db: Session, query_id: int) -> dict | None:
     sq = db.get(SavedQuery, query_id)
     if not sq:
         return None

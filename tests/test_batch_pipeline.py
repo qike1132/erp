@@ -3,15 +3,15 @@ batch_pipeline 基类单元测试
 
 覆盖：Pipeline execute 流程、文件大小限制、空数据、校验错误、持久化异常回滚
 """
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from fastapi_app.services.batch_pipeline import (
+    MAX_BATCH_UPLOAD_SIZE,
     BatchImportPipeline,
     BatchImportResult,
-    MAX_BATCH_UPLOAD_SIZE,
 )
-
 
 # ============================================================
 # BatchImportResult

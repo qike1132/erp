@@ -6,12 +6,11 @@ SECURITY NOTE: where_clauses 列表仅包含硬编码的 SQL 片段，
 """
 import logging
 from datetime import datetime, timedelta
-from sqlalchemy import select, func, text, or_
-from sqlalchemy.orm import joinedload
+
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.services import escape_like
-from fastapi_app.shared_models import StockOut, StockIn, Order, Product
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +138,7 @@ async def export_report_to_excel(db, report_type: str, customer: str = '', produ
     在同步线程中执行以避免阻塞事件循环。
     """
     import asyncio
+
     from fastapi_app.core.database import SyncSessionLocal
     from fastapi_app.shared.report_data_service import get_all_logs_data
     from utils.report_exporter import ReportExporter

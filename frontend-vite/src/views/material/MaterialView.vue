@@ -3,22 +3,19 @@
     <div class="mr-main-card">
     <!-- Unified Header + Tabs -->
     <div class="mr-top-bar">
-      <HeaderTabs />
+      <div class="mr-top-left">
+        <HeaderTabs />
+      </div>
       <div class="mr-top-right">
-        <div class="mr-header-stats">
-          <div class="mr-header-stat"><b>{{ overview?.total ?? 0 }}</b><small>总登记</small></div>
-          <div class="mr-header-stat"><b>{{ overview?.overall_progress ?? 0 }}%</b><small>总进度</small></div>
-          <div class="mr-header-stat"><b>{{ overview?.pending ?? 0 }}</b><small>待到货</small></div>
-        </div>
         <div class="mr-tabs">
           <button :class="['mr-tab-btn', { active: activeTab === 'overview' }]" @click="activeTab = 'overview'">
-            <i class="fas fa-chart-pie" /> 监控面板
+            监控面板
           </button>
           <button :class="['mr-tab-btn', { active: activeTab === 'progress' }]" @click="switchToProgress">
-            <i class="fas fa-tasks" /> 来料进度 <span v-if="progressCount > 0" :class="['notification-badge', activeTab === 'progress' ? 'notification-badge-active' : '']">{{ progressCount }}</span>
+            来料进度 <span v-if="progressCount > 0" :class="['notification-badge', activeTab === 'progress' ? 'notification-badge-active' : '']">{{ progressCount }}</span>
           </button>
           <button :class="['mr-tab-btn', { active: activeTab === 'history' }]" @click="switchToHistory">
-            <i class="fas fa-history" /> 历史查询
+            历史查询
           </button>
         </div>
       </div>
@@ -126,18 +123,19 @@
         </div>
       </div>
       <div class="mr-card">
-        <div class="mr-card-b" style="padding:0;overflow-x:auto;">
+        <div class="mr-card-b mr-card-b--flush">
           <table class="mr-tbl" style="min-width:900px;">
             <thead><tr><th style="width:160px;">供应商</th><th style="width:160px;">关联订单</th><th>物料进度</th><th style="width:220px;">总进度</th><th style="width:80px;">操作</th></tr></thead>
             <tbody>
               <tr v-if="pIsLoading"><td colspan="5" class="mr-empty"><i class="fas fa-spinner fa-spin" /><span>加载中...</span></td></tr>
               <tr v-else-if="!progressGroups.length"><td colspan="5" class="mr-empty"><i class="fas fa-inbox" /><span>暂无进行中的来料登记</span></td></tr>
-              <tr v-for="g in progressGroups" :key="g.supplier_name">
-                <td class="mr-td-bold">{{ g.supplier_name }}</td>
-                <td><div v-for="o in g.orders" :key="o.order_no" class="mr-order-link" @click="previewOrder(o.order_no)" title="点击预览订单详情">{{ o.order_no }}</div></td>
-                <td><div class="mr-items-container"><div v-for="i in g.allItems" :key="i.material_name" class="mr-list-item-row"><span class="mr-list-item-name" :title="i.material_name">{{ i.material_name }}</span><span class="mr-list-item-qty">数量:<b>{{ i.ordered_quantity.toFixed(0) }}</b></span><span class="mr-list-item-rcv">已到货:<b>{{ i.received_quantity.toFixed(0) }}</b></span><div class="mr-list-item-bar"><div :class="['mr-sku-fill', fillClass(i)]" :style="{ width: i.progress + '%', height: '100%', borderRadius: '5px' }"></div></div><span class="mr-list-item-pct">{{ i.progress }}%</span></div></div></td>
-                <td><div class="mr-pbar-wrap"><div class="mr-pbar"><div :class="['mr-pfill', progressCls(g)]" :style="{ width: supplierPct(g) + '%' }"></div></div><span class="mr-pbar-pct">{{ supplierPct(g) }}%</span></div></td>
-                <td><div class="mr-action-group"><button type="button" class="mr-action-btn mr-action-view" @click="viewSupplierDetail(g.supplier_name)" title="查看供应商详情"><i class="fas fa-eye" /></button></div></td>
+              <tr v-for="row in progressOrderRows" :key="row.order_no" class="mr-order-row"
+                @mouseenter="onOrderRowEnter($event)" @mouseleave="onOrderRowLeave($event)">
+                <td class="mr-td-bold">{{ row.supplier_name }}</td>
+                <td><span class="mr-order-link" @click="previewOrder(row.order_no)" title="点击预览订单详情">{{ row.order_no }}</span></td>
+                <td><div class="mr-items-container"><div v-for="i in row.items" :key="i.material_name" class="mr-list-item-row"><span class="mr-list-item-name" :title="i.material_name">{{ i.material_name }}</span><span class="mr-list-item-qty">数量:<b>{{ parseFloat(i.ordered_quantity || 0).toFixed(0) }}</b></span><span class="mr-list-item-rcv">已到货:<b>{{ parseFloat(i.received_quantity || 0).toFixed(0) }}</b></span><div class="mr-list-item-bar"><div :class="['mr-sku-fill', fillClass(i)]" :style="{ width: (i.progress || 0) + '%', height: '100%', borderRadius: '5px' }"></div></div><span class="mr-list-item-pct">{{ i.progress || 0 }}%</span></div></div></td>
+                <td><div class="mr-pbar-wrap"><div class="mr-pbar"><div :class="['mr-pfill', row.progress >= 100 ? 'completed' : row.progress > 0 ? 'partial' : 'pending']" :style="{ width: (row.progress || 0) + '%' }"></div></div><span class="mr-pbar-pct">{{ row.progress || 0 }}%</span></div></td>
+                <td><div class="mr-action-group"><button type="button" class="mr-action-btn mr-action-view" @click="viewSupplierDetail(row.supplier_name)" title="查看供应商详情"><i class="fas fa-eye" /></button></div></td>
               </tr>
             </tbody>
           </table>
@@ -171,7 +169,7 @@
         </div>
       </div>
       <div class="mr-card">
-        <div class="mr-card-b" style="padding:0;overflow-x:auto;">
+        <div class="mr-card-b mr-card-b--flush">
           <table class="mr-tbl" style="min-width:900px;">
             <thead><tr><th style="width:150px;">订单号</th><th style="width:100px;">客户</th><th style="width:120px;">产品/数量</th><th style="width:100px;">供应商</th><th>物料名称</th><th style="width:120px;">完成时间</th><th style="width:80px;">操作</th></tr></thead>
             <tbody>
@@ -270,22 +268,36 @@
     </UiDialog>
 
     <!-- Order Preview Dialog -->
-    <UiDialog v-model:open="showOrderPreviewDialog" title="采购订单预览" title-icon="" max-width-class="max-w-[680px]">
+    <UiDialog v-model:open="showOrderPreviewDialog" title="采购订单详情" title-icon="" max-width-class="max-w-[720px]">
       <template #title-icon><i class="fas fa-file-invoice" style="color:var(--color-primary-500);"></i></template>
       <div v-if="orderPreview">
+        <!-- 采购订单基本信息 -->
+        <div class="mr-preview-section-label"><i class="fas fa-shopping-cart" /> 采购订单</div>
         <div class="mr-det-grid" style="grid-template-columns:1fr 1fr;">
           <div><div class="mr-det-lb">订单号</div><div class="mr-det-vl" style="color:var(--color-primary-500);">{{ orderPreview.order_no }}</div></div>
           <div><div class="mr-det-lb">状态</div><div class="mr-det-vl"><span :class="['mr-badge', orderPreview.status === 'completed' || orderPreview.status === '已完成' ? 'mr-badge-completed' : orderPreview.status === 'cancelled' ? 'mr-badge-overdue' : 'mr-badge-pending']">{{ ORDER_STATUS_MAP[orderPreview.status] || orderPreview.status }}</span></div></div>
           <div><div class="mr-det-lb">供应商</div><div class="mr-det-vl">{{ orderPreview.supplier_name || '-' }}</div></div>
-          <div><div class="mr-det-lb">客户</div><div class="mr-det-vl">{{ orderPreview.customer_name || '-' }}</div></div>
-          <div><div class="mr-det-lb">产品</div><div class="mr-det-vl">{{ orderPreview.product_name || '-' }}</div></div>
-          <div><div class="mr-det-lb">订单数量</div><div class="mr-det-vl">{{ orderPreview.product_quantity || orderPreview.quantity || '-' }}</div></div>
           <div><div class="mr-det-lb">下单日期</div><div class="mr-det-vl">{{ orderPreview.order_date || '-' }}</div></div>
-          <div><div class="mr-det-lb">物料项数</div><div class="mr-det-vl">{{ orderPreview.item_count || (orderPreview.items ? orderPreview.items.length : 0) }} 项</div></div>
+          <div><div class="mr-det-lb">客户</div><div class="mr-det-vl">{{ orderPreview.customer_name || '-' }}</div></div>
+          <div><div class="mr-det-lb">产品/数量</div><div class="mr-det-vl">{{ orderPreview.product_name || '-' }}{{ orderPreview.product_quantity ? ' x' + orderPreview.product_quantity : '' }}</div></div>
         </div>
+
+        <!-- 来源销售订单 -->
+        <div v-if="orderPreview.source_orders && orderPreview.source_orders.length" class="mr-source-section">
+          <div class="mr-preview-section-label"><i class="fas fa-link" /> 来源销售订单</div>
+          <div v-for="so in orderPreview.source_orders" :key="so.id" class="mr-source-card">
+            <div class="mr-det-grid" style="grid-template-columns:1fr 1fr;">
+              <div><div class="mr-det-lb">销售订单号</div><div class="mr-det-vl" style="color:var(--color-success-600, #059669);">{{ so.order_no || '-' }}</div></div>
+              <div><div class="mr-det-lb">客户</div><div class="mr-det-vl">{{ so.customer_name || '-' }}</div></div>
+              <div><div class="mr-det-lb">产品</div><div class="mr-det-vl">{{ so.product_name || '-' }}</div></div>
+              <div><div class="mr-det-lb">数量</div><div class="mr-det-vl">{{ so.quantity || '-' }}</div></div>
+            </div>
+          </div>
+        </div>
+
         <div v-if="orderPreview.remark" style="margin-top:12px;padding:10px 14px;background:var(--color-surface,#f8fafc);border-radius:8px;font-size:13px;color:var(--color-text-secondary);"><b>备注:</b> {{ orderPreview.remark }}</div>
-        <h4 style="margin:16px 0 0;font-size:15px;"><i class="fas fa-list" style="color:var(--color-primary-500);margin-right:6px;"></i>物料明细</h4>
-        <table v-if="orderPreview.items && orderPreview.items.length" class="mr-item-tbl" style="margin-top:12px;">
+        <div class="mr-preview-section-label" style="margin-top:16px;"><i class="fas fa-list" /> 物料明细 <span class="mr-preview-count">{{ orderPreview.item_count || (orderPreview.items ? orderPreview.items.length : 0) }} 项</span></div>
+        <table v-if="orderPreview.items && orderPreview.items.length" class="mr-item-tbl">
           <thead><tr><th>物料名称</th><th>规格</th><th style="text-align:right;">数量</th><th>分类</th></tr></thead>
           <tbody><tr v-for="it in orderPreview.items" :key="it.material_name + it.specification"><td>{{ it.material_name || '-' }}</td><td style="color:var(--color-text-secondary);">{{ it.specification || '-' }}</td><td style="text-align:right;font-weight:500;">{{ it.quantity || 0 }} {{ it.unit || '' }}</td><td>{{ CATEGORY_MAP[it.material_category] || '-' }}</td></tr></tbody>
         </table>
@@ -305,6 +317,143 @@ import { materialApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
+
+// --- API Response Types ---
+
+interface CategoryStatRow {
+  category: string
+  ordered: number
+  received: number
+}
+
+interface MaterialOverview {
+  total: number
+  recent_registrations: number
+  pending: number
+  partial: number
+  completed: number
+  overall_progress: number
+  total_received: number
+  total_ordered: number
+  category_stats: CategoryStatRow[]
+}
+
+interface TrendItem {
+  date: string
+  registered: number
+  received: number
+}
+
+interface DistItem {
+  status: string
+  count: number
+}
+
+interface RegItem {
+  id: number
+  material_name: string
+  specification: string
+  material_category: string
+  ordered_quantity: number | string
+  received_quantity: number | string
+  remaining_quantity: number | string
+  progress: number
+  unit: string
+}
+
+interface Registration {
+  id: number
+  purchase_order_no: string
+  supplier_name: string
+  customer_name: string
+  product_name: string
+  product_quantity: number
+  items: RegItem[]
+  status: string
+  progress: number
+  total_ordered: number | string
+  total_received: number | string
+}
+
+interface SourceOrder {
+  order_no: string
+  product_name?: string
+  quantity?: number
+}
+
+interface OrderItem {
+  material_name: string
+  specification?: string
+  material_category?: string
+  ordered_quantity: number | string
+  unit?: string
+}
+
+interface OrderPreview {
+  order_no: string
+  status: string
+  supplier_name: string
+  order_date: string
+  customer_name?: string
+  product_name?: string
+  product_quantity?: number
+  items: OrderItem[]
+  item_count: number
+  source_orders?: SourceOrder[]
+  remark?: string
+}
+
+// --- Internal Types ---
+
+interface SupplierGroup {
+  supplier_name: string
+  orders: OrderSummary[]
+  allItems: MatSummary[]
+}
+
+interface OrderSummary {
+  id: number
+  order_no: string
+  customer_name: string
+  product_name: string
+  product_quantity: number
+  items: RegItem[]
+  status: string
+  progress: number
+  total_ordered: number
+  total_received: number
+  supplier_name?: string
+}
+
+interface MatSummary {
+  material_name: string
+  material_category: string
+  specification: string
+  unit: string
+  ordered_quantity: number
+  received_quantity: number
+  remaining_quantity: number
+  progress: number
+}
+
+interface SupMat {
+  name: string
+  ordered: number
+  received: number
+  remaining: number
+  pct: number
+  firstItemId: number | null
+  unit: string
+  spec: string
+}
+
+interface SupplierDetail {
+  name: string
+  materials: SupMat[]
+  totalOrdered: number
+  totalReceived: number
+  totalPct: number
+}
 
 const authStore = useAuthStore()
 const canManage = computed(() => authStore.hasPermission('product_manage'))
@@ -329,60 +478,69 @@ function toast(msg: string, type = 'info') {
 
 const { data: overviewData } = useQuery({
   queryKey: ['material-overview'],
-  queryFn: async () => { const res = await materialApi.overview() as any; return res.overview ?? res },
+  queryFn: async () => { const res = await materialApi.overview() as { overview: MaterialOverview }; return res.overview ?? res },
   staleTime: 30_000,
 })
-const overview = computed(() => overviewData.value)
+const overview = computed(() => overviewData.value as MaterialOverview | undefined)
 
 const categoryStats = computed(() => {
   const o = overview.value
   if (!o?.category_stats) return []
-  return o.category_stats.map((c: any) => ({ ...c, remaining: (c.ordered || 0) - (c.received || 0), progress: c.ordered > 0 ? Math.round(c.received / c.ordered * 100) : 0 }))
+  return o.category_stats.map((c: CategoryStatRow) => ({ ...c, remaining: (c.ordered || 0) - (c.received || 0), progress: c.ordered > 0 ? Math.round(c.received / c.ordered * 100) : 0 }))
 })
 
-const { data: trendRaw } = useQuery({ queryKey: ['material-trend'], queryFn: async () => { const res = await materialApi.trend(30) as any; return res.trend ?? res ?? [] }, staleTime: 30_000 })
-const trendData = computed(() => Array.isArray(trendRaw.value) ? trendRaw.value : [])
-const trendMax = computed(() => Math.max(...trendData.value.map((t: any) => Math.max(t.registered, t.received)), 1))
+const { data: trendRaw } = useQuery({ queryKey: ['material-trend'], queryFn: async () => { const res = await materialApi.trend(30) as { trend: TrendItem[] }; return res.trend ?? res ?? [] }, staleTime: 30_000 })
+const trendData = computed(() => Array.isArray(trendRaw.value) ? trendRaw.value as TrendItem[] : [])
+const trendMax = computed(() => Math.max(...trendData.value.map((t: TrendItem) => Math.max(t.registered, t.received)), 1))
 
-const { data: distRaw } = useQuery({ queryKey: ['material-distribution'], queryFn: async () => { const res = await materialApi.distribution() as any; return res.distribution ?? res ?? [] }, staleTime: 30_000 })
-const distributionData = computed(() => Array.isArray(distRaw.value) ? distRaw.value : [])
+const { data: distRaw } = useQuery({ queryKey: ['material-distribution'], queryFn: async () => { const res = await materialApi.distribution() as { distribution: DistItem[] }; return res.distribution ?? res ?? [] }, staleTime: 30_000 })
+const distributionData = computed(() => Array.isArray(distRaw.value) ? distRaw.value as DistItem[] : [])
 const pieGradient = computed(() => {
-  const d = distributionData.value; const total = d.reduce((s: number, x: any) => s + x.count, 0) || 1; let cumPct = 0
-  return `conic-gradient(${d.map((item: any) => { const pct = item.count / total * 100; const part = `${STATUS_COLORS[item.status] || '#999'} ${cumPct}% ${cumPct + pct}%`; cumPct += pct; return part }).join(',')})`
+  const d = distributionData.value; const total = d.reduce((s: number, x: DistItem) => s + x.count, 0) || 1; let cumPct = 0
+  return `conic-gradient(${d.map((item: DistItem) => { const pct = item.count / total * 100; const part = `${STATUS_COLORS[item.status] || '#999'} ${cumPct}% ${cumPct + pct}%`; cumPct += pct; return part }).join(',')})`
 })
 
 const pPage = ref(1), pPages = ref(1), pIsLoading = ref(false)
-const progressGroups = ref<any[]>([])
+const progressGroups = ref<SupplierGroup[]>([])
 const progressCount = computed(() => progressGroups.value.length)
+const progressOrderRows = computed(() => {
+  const rows: OrderSummary[] = []
+  progressGroups.value.forEach((g: SupplierGroup) => {
+    g.orders.forEach((o: OrderSummary) => {
+      rows.push({ ...o, supplier_name: g.supplier_name })
+    })
+  })
+  return rows
+})
 const pFilters = reactive({ supplier: '', orderNo: '', customer: '', category: '', startDate: '', endDate: '' })
 
 async function loadProgress(page = 1) {
   pPage.value = page; pIsLoading.value = true
   try {
-    const params: Record<string, any> = { page, per_page: 50 }
+    const params: Record<string, string | number> = { page, per_page: 50 }
     if (pFilters.supplier) params.supplier = pFilters.supplier
     if (pFilters.orderNo) params.order_no = pFilters.orderNo
     if (pFilters.customer) params.customer_name = pFilters.customer
     if (pFilters.category) params.material_category = pFilters.category
     if (pFilters.startDate) params.start_date = pFilters.startDate
     if (pFilters.endDate) params.end_date = pFilters.endDate
-    const data = await materialApi.registrations(params) as any
-    progressGroups.value = groupBySupplier((data.registrations || []).filter((r: any) => r.status !== 'completed'))
+    const data = await materialApi.registrations(params) as { registrations: Registration[]; pages: number; total_pages?: number }
+    progressGroups.value = groupBySupplier((data.registrations || []).filter((r: Registration) => r.status !== 'completed'))
     pPages.value = data.pages ?? data.total_pages ?? 1
-  } catch { toast('加载失败', 'error') } finally { pIsLoading.value = false }
+  } catch (e) { console.error('进度加载失败:', e); toast('加载失败', 'error') } finally { pIsLoading.value = false }
 }
 
-function groupBySupplier(registrations: any[]) {
-  const map: Record<string, any> = {}
+function groupBySupplier(registrations: Registration[]): SupplierGroup[] {
+  const map: Record<string, SupplierGroup> = {}
   registrations.forEach(r => {
     const key = r.supplier_name || '未知供应商'
     if (!map[key]) map[key] = { supplier_name: key, orders: [], allItems: [] }
-    const displayItems = pFilters.category ? (r.items || []).filter((i: any) => i.material_category === pFilters.category) : (r.items || [])
-    map[key].orders.push({ id: r.id, order_no: r.purchase_order_no, customer_name: r.customer_name, product_name: r.product_name, product_quantity: r.product_quantity, items: displayItems, status: r.status, progress: r.progress, total_ordered: r.total_ordered, total_received: r.total_received })
-    displayItems.forEach((item: any) => {
-      const exist = map[key].allItems.find((ai: any) => ai.material_name === item.material_name && ai.material_category === item.material_category)
-      if (exist) { exist.ordered_quantity += parseFloat(item.ordered_quantity || 0); exist.received_quantity += parseFloat(item.received_quantity || 0); exist.remaining_quantity = exist.ordered_quantity - exist.received_quantity; exist.progress = exist.ordered_quantity > 0 ? (exist.received_quantity >= exist.ordered_quantity ? 100.0 : Math.min(Math.round(exist.received_quantity / exist.ordered_quantity * 100 * 10) / 10, 99.9)) : 0 }
-      else map[key].allItems.push({ material_name: item.material_name, material_category: item.material_category, specification: item.specification || '', unit: item.unit || '', ordered_quantity: parseFloat(item.ordered_quantity || 0), received_quantity: parseFloat(item.received_quantity || 0), remaining_quantity: parseFloat(item.remaining_quantity || 0), progress: item.progress || 0 })
+    const displayItems = pFilters.category ? (r.items || []).filter((i: RegItem) => i.material_category === pFilters.category) : (r.items || [])
+    map[key].orders.push({ id: r.id, order_no: r.purchase_order_no, customer_name: r.customer_name, product_name: r.product_name, product_quantity: r.product_quantity, items: displayItems, status: r.status, progress: r.progress, total_ordered: Number(r.total_ordered), total_received: Number(r.total_received) })
+    displayItems.forEach((item: RegItem) => {
+      const exist = map[key].allItems.find((ai: MatSummary) => ai.material_name === item.material_name && ai.material_category === item.material_category)
+      if (exist) { exist.ordered_quantity += parseFloat(String(item.ordered_quantity || 0)); exist.received_quantity += parseFloat(String(item.received_quantity || 0)); exist.remaining_quantity = exist.ordered_quantity - exist.received_quantity; exist.progress = exist.ordered_quantity > 0 ? (exist.received_quantity >= exist.ordered_quantity ? 100.0 : Math.min(Math.round(exist.received_quantity / exist.ordered_quantity * 100 * 10) / 10, 99.9)) : 0 }
+      else map[key].allItems.push({ material_name: item.material_name, material_category: item.material_category, specification: item.specification || '', unit: item.unit || '', ordered_quantity: parseFloat(String(item.ordered_quantity || 0)), received_quantity: parseFloat(String(item.received_quantity || 0)), remaining_quantity: parseFloat(String(item.remaining_quantity || 0)), progress: item.progress || 0 })
     })
   })
   return Object.values(map)
@@ -392,63 +550,82 @@ function resetProgressFilters() { Object.assign(pFilters, { supplier: '', orderN
 const pVisiblePages = computed(() => visiblePages(pPage.value, pPages.value))
 
 const hPage = ref(1), hPages = ref(1), hIsLoading = ref(false)
-const hRegistrations = ref<any[]>([])
+const hRegistrations = ref<Registration[]>([])
 const hFilters = reactive({ orderNo: '', supplier: '', customer: '', category: '', startDate: '', endDate: '' })
 
 async function loadHistory(page = 1) {
   hPage.value = page; hIsLoading.value = true
   try {
-    const params: Record<string, any> = { page, per_page: 15 }
+    const params: Record<string, string | number> = { page, per_page: 15 }
     if (hFilters.orderNo) params.order_no = hFilters.orderNo; if (hFilters.supplier) params.supplier = hFilters.supplier
     if (hFilters.customer) params.customer_name = hFilters.customer; if (hFilters.category) params.material_category = hFilters.category
     if (hFilters.startDate) params.start_date = hFilters.startDate; if (hFilters.endDate) params.end_date = hFilters.endDate
-    const data = await materialApi.history(params) as any
-    hRegistrations.value = data.registrations ?? data.items ?? []; hPages.value = data.pages ?? data.total_pages ?? 1
-  } catch { toast('加载失败', 'error') } finally { hIsLoading.value = false }
+    const data = await materialApi.history(params) as { registrations: Registration[]; pages: number; total_pages?: number }
+    hRegistrations.value = data.registrations ?? []; hPages.value = data.pages ?? data.total_pages ?? 1
+  } catch (e) { console.error('历史加载失败:', e); toast('加载失败', 'error') } finally { hIsLoading.value = false }
 }
 
 function resetHistoryFilters() { Object.assign(hFilters, { orderNo: '', supplier: '', customer: '', category: '', startDate: '', endDate: '' }); loadHistory(1) }
-function materialSummary(r: any) { const items = hFilters.category ? (r.items || []).filter((i: any) => i.material_category === hFilters.category) : (r.items || []); const s = items.slice(0, 2).map((i: any) => i.material_name + '(数量:' + parseFloat(i.ordered_quantity || 0).toFixed(0) + ' 已到货:' + parseFloat(i.received_quantity || 0).toFixed(0) + ')').join(', '); return s + (items.length > 2 ? ' 等' + items.length + '项' : '') }
+function materialSummary(r: Registration) { const items = hFilters.category ? (r.items || []).filter((i: RegItem) => i.material_category === hFilters.category) : (r.items || []); const s = items.slice(0, 2).map((i: RegItem) => i.material_name + '(数量:' + parseFloat(String(i.ordered_quantity || 0)).toFixed(0) + ' 已到货:' + parseFloat(String(i.received_quantity || 0)).toFixed(0) + ')').join(', '); return s + (items.length > 2 ? ' 等' + items.length + '项' : '') }
 const hVisiblePages = computed(() => visiblePages(hPage.value, hPages.value))
 
 function switchToProgress() { activeTab.value = 'progress'; loadProgress(1) }
 function switchToHistory() { activeTab.value = 'history'; loadHistory(1) }
 function visiblePages(current: number, total: number) { const s = Math.max(1, current - 2), e = Math.min(total, current + 2); const pages: number[] = []; for (let i = s; i <= e; i++) pages.push(i); return pages }
-function fillClass(item: any) { const pct = item.progress || 0; if (item.received_quantity >= item.ordered_quantity) return 'full'; if (pct >= 50) return 'half'; if (pct > 0) return 'low'; return 'zero' }
-function progressCls(g: any) { const pct = supplierPct(g); if (pct >= 100) return 'completed'; if (pct > 0) return 'partial'; return 'pending' }
-function supplierPct(g: any) { const o = g.allItems.reduce((s: number, i: any) => s + i.ordered_quantity, 0); const r = g.allItems.reduce((s: number, i: any) => s + i.received_quantity, 0); const c = g.allItems.every((i: any) => i.received_quantity >= i.ordered_quantity); if (o <= 0) return 0; return c ? 100.0 : Math.min(Math.round(r / o * 100 * 10) / 10, 99.9) }
+function fillClass(item: { progress?: number; received_quantity: number; ordered_quantity: number }) { const pct = item.progress || 0; if (item.received_quantity >= item.ordered_quantity) return 'full'; if (pct >= 50) return 'half'; if (pct > 0) return 'low'; return 'zero' }
+function progressCls(g: SupplierGroup) { const pct = supplierPct(g); if (pct >= 100) return 'completed'; if (pct > 0) return 'partial'; return 'pending' }
+function supplierPct(g: SupplierGroup) { const o = g.allItems.reduce((s: number, i: MatSummary) => s + i.ordered_quantity, 0); const r = g.allItems.reduce((s: number, i: MatSummary) => s + i.received_quantity, 0); const c = g.allItems.every((i: MatSummary) => i.received_quantity >= i.ordered_quantity); if (o <= 0) return 0; return c ? 100.0 : Math.min(Math.round(r / o * 100 * 10) / 10, 99.9) }
 
-const showDetailDialog = ref(false), detailData = ref<any>(null)
-async function viewDetail(regId: number) { try { const res = await materialApi.registrationDetail(regId) as any; if (res.success === false) { toast('加载失败', 'error'); return }; detailData.value = res.registration ?? res; showDetailDialog.value = true } catch { toast('加载失败', 'error') } }
+const showDetailDialog = ref(false), detailData = ref<Registration | null>(null)
+async function viewDetail(regId: number) { try { const res = await materialApi.registrationDetail(regId) as { registration?: Registration; success?: boolean }; if (res.success === false) { toast('加载失败', 'error'); return }; detailData.value = res.registration ?? null; showDetailDialog.value = true } catch (e) { console.error('详情加载失败:', e); toast('加载失败', 'error') } }
 
-const showSupplierDialog = ref(false), supplierDetail = ref<any>(null)
+const showSupplierDialog = ref(false), supplierDetail = ref<SupplierDetail | null>(null)
 async function viewSupplierDetail(supplierName: string) {
   try {
-    const data = await materialApi.registrations({ supplier: supplierName, per_page: 100 }) as any
+    const data = await materialApi.registrations({ supplier: supplierName, per_page: 100 }) as { registrations: Registration[]; pages: number }
     if (!data.registrations) { toast('加载失败', 'error'); return }
-    const regList = data.registrations.filter((r: any) => r.status !== 'completed')
+    const regList = data.registrations.filter((r: Registration) => r.status !== 'completed')
     if (!regList.length) { toast('无采购中数据', 'warning'); return }
-    const materialMap: Record<string, any> = {}; let allOrdered = 0, allReceived = 0
-    regList.forEach((r: any) => { allOrdered += parseFloat(r.total_ordered || 0); allReceived += parseFloat(r.total_received || 0); (r.items || []).forEach((i: any) => { const key = (i.material_name || '').trim(); if (!materialMap[key]) materialMap[key] = { ordered: 0, received: 0, remaining: 0, unit: i.unit || '', spec: i.specification || '', itemIds: [] as any[] }; const m = materialMap[key]; m.ordered += parseFloat(i.ordered_quantity || 0); m.received += parseFloat(i.received_quantity || 0); m.remaining += parseFloat(i.remaining_quantity || 0); m.itemIds.push({ id: i.id, ordered: parseFloat(i.ordered_quantity || 0), received: parseFloat(i.received_quantity || 0) }) }) })
-    const materials = Object.keys(materialMap).map(name => { const m = materialMap[name]; const pct = m.ordered > 0 ? (m.received >= m.ordered ? 100.0 : Math.min(Math.round(m.received / m.ordered * 100 * 10) / 10, 99.9)) : 0; return { name, ...m, pct, firstItemId: m.itemIds.find((x: any) => x.received < x.ordered)?.id ?? null } })
+    const materialMap: Record<string, { ordered: number; received: number; remaining: number; unit: string; spec: string; itemIds: { id: number; ordered: number; received: number }[] }> = {}; let allOrdered = 0, allReceived = 0
+    regList.forEach((r: Registration) => { allOrdered += parseFloat(String(r.total_ordered || 0)); allReceived += parseFloat(String(r.total_received || 0)); (r.items || []).forEach((i: RegItem) => { const key = (i.material_name || '').trim(); if (!materialMap[key]) materialMap[key] = { ordered: 0, received: 0, remaining: 0, unit: i.unit || '', spec: i.specification || '', itemIds: [] }; const m = materialMap[key]; m.ordered += parseFloat(String(i.ordered_quantity || 0)); m.received += parseFloat(String(i.received_quantity || 0)); m.remaining += parseFloat(String(i.remaining_quantity || 0)); m.itemIds.push({ id: i.id, ordered: parseFloat(String(i.ordered_quantity || 0)), received: parseFloat(String(i.received_quantity || 0)) }) }) })
+    const materials: SupMat[] = Object.keys(materialMap).map(name => { const m = materialMap[name]; const pct = m.ordered > 0 ? (m.received >= m.ordered ? 100.0 : Math.min(Math.round(m.received / m.ordered * 100 * 10) / 10, 99.9)) : 0; return { name, ...m, pct, firstItemId: m.itemIds.find((x) => x.received < x.ordered)?.id ?? null } })
     const allComplete = materials.every(m => m.received >= m.ordered)
     const totalPct = allOrdered > 0 ? (allComplete ? 100.0 : Math.min(Math.round(allReceived / allOrdered * 100 * 10) / 10, 99.9)) : 0
     supplierDetail.value = { name: supplierName, materials, totalOrdered: allOrdered, totalReceived: allReceived, totalPct }; showSupplierDialog.value = true
-  } catch { toast('加载失败', 'error') }
+  } catch (e) { console.error('供应商详情加载失败:', e); toast('加载失败', 'error') }
 }
 
 const showReceiveDialog = ref(false)
 const receiveItem = reactive({ id: 0, name: '', ordered: 0, received: 0, remaining: 0 })
 const receiveQty = ref<number | null>(null), receiveRemark = ref('')
-function openReceive(item: any) { receiveItem.id = item.id; receiveItem.name = item.material_name; receiveItem.ordered = parseFloat(item.ordered_quantity || 0); receiveItem.received = parseFloat(item.received_quantity || 0); receiveItem.remaining = receiveItem.ordered - receiveItem.received; receiveQty.value = null; receiveRemark.value = ''; showReceiveDialog.value = true }
+function openReceive(item: RegItem) { receiveItem.id = item.id; receiveItem.name = item.material_name; receiveItem.ordered = parseFloat(String(item.ordered_quantity || 0)); receiveItem.received = parseFloat(String(item.received_quantity || 0)); receiveItem.remaining = receiveItem.ordered - receiveItem.received; receiveQty.value = null; receiveRemark.value = ''; showReceiveDialog.value = true }
 function openReceiveById(itemId: number, name: string, ordered: number, received: number) { receiveItem.id = itemId; receiveItem.name = name; receiveItem.ordered = ordered; receiveItem.received = received; receiveItem.remaining = ordered - received; receiveQty.value = null; receiveRemark.value = ''; showReceiveDialog.value = true }
-async function submitReceive() { if (!receiveQty.value || receiveQty.value <= 0) { toast('请输入有效的收货数量', 'warning'); return }; try { const res = await materialApi.receive(receiveItem.id, { received_quantity: receiveQty.value, remark: receiveRemark.value }) as any; if (res.success) { toast(res.auto_completed ? '收货完成，该订单已全部到货，已转入历史记录' : (res.message || '收货登记成功'), res.auto_completed ? 'success' : 'info'); showReceiveDialog.value = false; showDetailDialog.value = false; showSupplierDialog.value = false; loadProgress(pPage.value) } else toast(res.message || '登记失败', 'error') } catch { toast('操作失败', 'error') } }
+async function submitReceive() { if (!receiveQty.value || receiveQty.value <= 0) { toast('请输入有效的收货数量', 'warning'); return }; try { const res = await materialApi.receive(receiveItem.id, { received_quantity: receiveQty.value, remark: receiveRemark.value }) as { success: boolean; auto_completed?: boolean; message?: string }; if (res.success) { toast(res.auto_completed ? '收货完成，该订单已全部到货，已转入历史记录' : (res.message || '收货登记成功'), res.auto_completed ? 'success' : 'info'); showReceiveDialog.value = false; showDetailDialog.value = false; showSupplierDialog.value = false; loadProgress(pPage.value) } else toast(res.message || '登记失败', 'error') } catch (e) { console.error('收货操作失败:', e); toast('操作失败', 'error') } }
 
-const showOrderPreviewDialog = ref(false), orderPreview = ref<any>(null)
-async function previewOrder(orderNo: string) { try { const res = await materialApi.purchaseOrderPreview(orderNo) as any; if (res.success === false) { toast(res.message || '加载失败', 'error'); return }; orderPreview.value = res.order ?? res; showOrderPreviewDialog.value = true } catch { toast('加载失败', 'error') } }
+const showOrderPreviewDialog = ref(false), orderPreview = ref<OrderPreview | null>(null)
+async function previewOrder(orderNo: string) { try { const res = await materialApi.purchaseOrderPreview(orderNo) as { order?: OrderPreview; success?: boolean; message?: string }; if (res.success === false) { toast(res.message || '加载失败', 'error'); return }; orderPreview.value = res.order ?? null; showOrderPreviewDialog.value = true } catch (e) { console.error('订单预览加载失败:', e); toast('加载失败', 'error') } }
 
-async function exportData() { toast('正在导出...', 'info'); try { const res = await materialApi.export({ order_no: pFilters.orderNo, supplier: pFilters.supplier, start_date: pFilters.startDate, end_date: pFilters.endDate }) as any; if (res.success && res.html) { const blob = new Blob([res.html], { type: 'application/vnd.ms-excel' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = '来料进度汇总.xls'; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); toast('导出成功', 'success') } else toast(res.message || '导出失败', 'error') } catch { toast('导出失败', 'error') } }
-async function exportHistory() { toast('正在导出...', 'info'); try { const res = await materialApi.export({}) as any; if (res.success && res.html) { const blob = new Blob([res.html], { type: 'application/vnd.ms-excel' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = '来料历史汇总.xls'; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); toast('导出成功', 'success') } else toast(res.message || '导出失败', 'error') } catch { toast('导出失败', 'error') } }
+async function exportData() { toast('正在导出...', 'info'); try { const res = await materialApi.export({ order_no: pFilters.orderNo, supplier: pFilters.supplier, start_date: pFilters.startDate, end_date: pFilters.endDate }) as { success: boolean; html?: string; message?: string }; if (res.success && res.html) { const blob = new Blob([res.html], { type: 'application/vnd.ms-excel' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = '来料进度汇总.xls'; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); toast('导出成功', 'success') } else toast(res.message || '导出失败', 'error') } catch (e) { console.error('导出失败:', e); toast('导出失败', 'error') } }
+async function exportHistory() { toast('正在导出...', 'info'); try { const res = await materialApi.export({}) as { success: boolean; html?: string; message?: string }; if (res.success && res.html) { const blob = new Blob([res.html], { type: 'application/vnd.ms-excel' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = '来料历史汇总.xls'; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); toast('导出成功', 'success') } else toast(res.message || '导出失败', 'error') } catch (e) { console.error('导出失败:', e); toast('导出失败', 'error') } }
+
+function onOrderRowEnter(e: MouseEvent) {
+  const tr = e.currentTarget as HTMLElement
+  tr.style.transition = 'box-shadow 5s ease, border-color 5s ease'
+  tr.style.boxShadow = '0 4px 12px rgba(0,0,0,0.08), 0 12px 32px rgba(0,0,0,0.1)'
+  tr.style.borderColor = '#93c5fd'
+  const tds = tr.querySelectorAll<HTMLElement>('td')
+  if (tds[0]) { tds[0].style.transition = 'border-left-color 5s ease'; tds[0].style.borderLeftColor = '#93c5fd' }
+  if (tds.length) { const last = tds[tds.length - 1]; last.style.transition = 'border-right-color 5s ease'; last.style.borderRightColor = '#93c5fd' }
+}
+
+function onOrderRowLeave(e: MouseEvent) {
+  const tr = e.currentTarget as HTMLElement
+  tr.style.boxShadow = ''
+  tr.style.borderColor = ''
+  const tds = tr.querySelectorAll<HTMLElement>('td')
+  if (tds[0]) { tds[0].style.borderLeftColor = '' }
+  if (tds.length) { tds[tds.length - 1].style.borderRightColor = '' }
+}
 </script>
 
 <style scoped>
@@ -478,7 +655,7 @@ async function exportHistory() { toast('正在导出...', 'info'); try { const r
   display: flex;
   flex-wrap: nowrap;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   padding: 10px 24px;
   background: transparent;
   border-radius: 0;
@@ -496,6 +673,7 @@ async function exportHistory() { toast('正在导出...', 'info'); try { const r
   display: flex;
   align-items: center;
   gap: 14px;
+  flex: 1;
 }
 
 .mr-top-left h3 {
@@ -530,67 +708,50 @@ async function exportHistory() { toast('正在导出...', 'info'); try { const r
 
 .mr-top-right {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  justify-content: flex-end;
   gap: 24px;
-}
-
-.mr-header-stats {
-  display: flex;
-  gap: 20px;
-}
-
-.mr-header-stat {
-  text-align: center;
-}
-
-.mr-header-stat b {
-  font-size: 22px;
-  font-weight: 800;
-  color: var(--color-primary-600);
-  display: block;
-  line-height: 1.1;
-}
-
-.mr-header-stat small {
-  font-size: 11px;
-  color: var(--color-text-muted);
-  display: block;
-  margin-top: 2px;
 }
 
 /* === Tabs === */
 .mr-tabs {
-  display: flex;
+  display: inline-flex;
   gap: 4px;
-  background: var(--color-surface, #f1f5f9);
   padding: 4px;
-  border-radius: 11px;
+  border-radius: 12px;
+  background: white;
+  border: 1px solid var(--color-border-light);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
 }
 
 .mr-tab-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  padding: 8px 16px;
+  padding: 8px 14px;
   border: none;
-  border-radius: 8px;
+  border-radius: 9px;
   font-size: 13px;
   font-weight: 600;
   color: var(--color-text-secondary);
   background: transparent;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: all 2s ease;
 }
 
 .mr-tab-btn:hover {
+  background: var(--color-primary-50);
   color: var(--color-primary-600);
-  background: rgba(255, 255, 255, 0.6);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  transform: translateY(-1px);
 }
 
 .mr-tab-btn.active {
-  background: white;
-  color: var(--color-primary-600);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
+  color: var(--color-primary-700);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 8px rgba(91, 141, 239, 0.2);
+  transform: translateY(-1px);
 }
 
 /* === Content area === */
@@ -763,6 +924,11 @@ async function exportHistory() { toast('正在导出...', 'info'); try { const r
 
 .mr-card-b {
   padding: 20px;
+}
+
+.mr-card-b--flush {
+  padding: 0;
+  overflow-x: auto;
 }
 
 /* === Chart Row === */
@@ -943,8 +1109,28 @@ async function exportHistory() { toast('正在导出...', 'info'); try { const r
   vertical-align: middle;
 }
 
-.mr-tbl tbody tr { transition: background 0.15s ease; }
-.mr-tbl tbody tr:hover { background: var(--color-primary-50, #eff6ff); }
+.mr-tbl { border-collapse: separate; border-spacing: 0 8px; }
+
+.mr-tbl thead tr th { border-bottom: 2px solid var(--color-border-light, #e2e8f0); }
+
+.mr-tbl tbody tr.mr-order-row {
+  border: 1px solid var(--color-border-light);
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
+  background: white;
+}
+
+.mr-tbl tbody tr.mr-order-row td {
+  background: white;
+  border-top: none;
+  border-bottom: none;
+  border-left: none;
+  border-right: none;
+}
+
+.mr-tbl tbody tr.mr-order-row td:first-child { border-left: 1px solid var(--color-border-light); border-radius: 12px 0 0 12px; }
+.mr-tbl tbody tr.mr-order-row td:last-child { border-right: 1px solid var(--color-border-light); border-radius: 0 12px 12px 0; }
+
 .mr-tbl tbody tr:last-child td { border-bottom: none; }
 
 .mr-td-bold { font-size: 14px; font-weight: 600; }
@@ -956,10 +1142,10 @@ async function exportHistory() { toast('正在导出...', 'info'); try { const r
   font-family: 'Courier New', monospace;
   font-size: 14px;
   color: var(--color-primary-500);
-  margin-bottom: 1px;
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 3px;
+  transition: color 0.2s ease;
 }
 
 .mr-order-link:hover { color: var(--color-primary-700); }
@@ -1123,7 +1309,7 @@ async function exportHistory() { toast('正在导出...', 'info'); try { const r
   border-radius: 10px;
   font-size: 14px;
   transition: all 0.3s ease;
-  background: var(--color-surface, #f8fafc);
+  background: white;
   font-family: inherit;
   color: var(--color-text);
   box-sizing: border-box;
@@ -1142,6 +1328,42 @@ async function exportHistory() { toast('正在导出...', 'info'); try { const r
 .mr-det-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 20px; }
 .mr-det-lb { font-size: 12px; color: var(--color-text-muted); margin-bottom: 6px; }
 .mr-det-vl { font-size: 15px; font-weight: 600; color: var(--color-text); }
+
+/* === Preview Dialog Sections === */
+.mr-preview-section-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.mr-preview-section-label i {
+  font-size: 13px;
+  color: var(--color-primary-500);
+}
+.mr-preview-count {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--color-text-muted);
+  margin-left: 4px;
+}
+.mr-source-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border-light, #e2e8f0);
+}
+.mr-source-card {
+  padding: 14px 16px;
+  background: linear-gradient(135deg, var(--color-success-50, #ECFDF5), var(--color-surface, #f8fafc));
+  border: 1px solid var(--color-success-200, #A7F3D0);
+  border-radius: 12px;
+  margin-bottom: 8px;
+}
+.mr-source-card:last-child {
+  margin-bottom: 0;
+}
 
 .mr-item-tbl { width: 100%; border-collapse: collapse; }
 .mr-item-tbl th { background: var(--color-surface, #f8fafc); padding: 10px 12px; font-size: 12px; text-align: left; }

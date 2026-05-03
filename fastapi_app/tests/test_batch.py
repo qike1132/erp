@@ -1,7 +1,8 @@
 """批量导入接口测试"""
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 from io import BytesIO
+from unittest.mock import patch
+
+import pytest
 
 
 class TestBatchEndpoints:

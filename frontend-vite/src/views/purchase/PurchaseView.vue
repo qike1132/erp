@@ -2,21 +2,23 @@
   <div class="pc-container">
     <div class="pc-card pc-card-main">
       <div class="pc-card-header">
-        <HeaderTabs />
-        <div class="pc-header-actions">
-          <div class="pc-tabs">
+        <div class="pc-header-left">
+          <HeaderTabs />
+        </div>
+        <div class="pc-header-right">
+          <div class="pc-tab-group">
             <button
-              :class="['pc-tab-btn', activeTab === 'orders' ? 'active' : '']"
+              :class="['pc-tab-btn', { active: activeTab === 'orders' }]"
               @click="switchTab('orders')"
             >
-              <i class="fas fa-file-invoice-dollar" /> 采购订单
-              <span v-if="unprocessed.total > 0" :class="['notification-badge', activeTab === 'orders' ? 'notification-badge-active' : '']">{{ unprocessed.total }}</span>
+              采购订单
+              <span v-if="unprocessed.total > 0" class="pc-tab-badge">{{ unprocessed.total }}</span>
             </button>
             <button
-              :class="['pc-tab-btn', activeTab === 'history' ? 'active' : '']"
+              :class="['pc-tab-btn', { active: activeTab === 'history' }]"
               @click="switchTab('history')"
             >
-              <i class="fas fa-check-circle" /> 下单查询
+              下单查询
             </button>
           </div>
         </div>
@@ -33,10 +35,12 @@
             :selected-count="unprocessed.selectedIds.length"
             :valid-selected-count="unprocessed.validSelectedIds.length"
             :all-selected="unprocessed.allSelected"
+            :submitting="isSubmitting"
             @toggle-all="unprocessed.toggleAll"
             @toggle-selection="unprocessed.toggleSelection"
             @one-click-generate="handleOneClickGenerate"
             @quick-generate="handleQuickGenerate"
+            @no-bom-error="handleNoBomError"
           />
 
           <!-- 分隔线 -->
@@ -118,8 +122,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed } from 'vue'
+import { useQueryClient } from '@tanstack/vue-query'
 import { purchaseApi } from '@/api'
+import type { PurchaseOrder, UnprocessedOrder } from '@/types'
 
 import PendingOrdersPanel from './components/PendingOrdersPanel.vue'
 import ActiveOrdersPanel from './components/ActiveOrdersPanel.vue'
@@ -135,8 +141,22 @@ import { useCompletedOrders } from './composables/useCompletedOrders'
 import { useSummaryModal } from './composables/useSummaryModal'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { useAutoRefresh } from './composables/useAutoRefresh'
+import { useWebSocket } from './composables/useWebSocket'
+import { showToast } from '@/composables/useToast'
+
+interface ApiResponse<T = unknown> {
+  success: boolean
+  message?: string
+  data?: T
+  order?: PurchaseOrder
+  orders?: PurchaseOrder[]
+  total?: number
+  html?: string
+  [key: string]: unknown
+}
 
 // --- Composables ---
+const queryClient = useQueryClient()
 const purchaseOrders = usePurchaseOrders()
 const unprocessed = useUnprocessedOrders()
 const completed = useCompletedOrders()
@@ -144,18 +164,18 @@ const summary = useSummaryModal()
 const confirm = useConfirmDialog()
 
 // --- Tab ---
-const activeTab = ref('orders')
+const activeTab = ref<'orders' | 'history'>('orders')
+const ordersTabActive = computed(() => activeTab.value === 'orders')
 const historyInitialized = ref(false)
+const isSubmitting = ref(false)
 
-function switchTab(tab: string) {
+function switchTab(tab: 'orders' | 'history') {
   activeTab.value = tab
   if (tab === 'orders') {
-    unprocessed.load()
-    purchaseOrders.load()
+    Promise.all([unprocessed.load(), purchaseOrders.load()])
   } else if (tab === 'history') {
     if (!historyInitialized.value) {
-      completed.loadQuickFilters()
-      completed.load()
+      Promise.all([completed.loadQuickFilters(), completed.load()])
       historyInitialized.value = true
     } else {
       completed.load()
@@ -163,47 +183,73 @@ function switchTab(tab: string) {
   }
 }
 
-import { showToast } from '@/composables/useToast'
-
 // --- Unprocessed handlers ---
 async function handleOneClickGenerate() {
+  if (isSubmitting.value) return
   const validIds = unprocessed.validSelectedIds
+  const allSelectedIds = unprocessed.selectedIds
   if (validIds.length === 0) {
     showToast('请选择至少一个有BOM配置的订单', 'warning')
     return
   }
+  const noBomOrders = unprocessed.orders.filter(
+    (o: UnprocessedOrder) => allSelectedIds.includes(o.id) && !o.has_bom,
+  )
+  const skippedCount = noBomOrders.length
   const ok = await confirm.confirm(
     `确定要审核 ${validIds.length} 个订单吗？`,
-    '审核通过后将自动计算物料用量并生成采购订单',
+    skippedCount > 0
+      ? `其中 ${skippedCount} 个订单因未配置BOM被排除（${noBomOrders.map((o) => o.order_no).join('、')}），审核通过后将自动计算物料用量并生成采购订单`
+      : '审核通过后将自动计算物料用量并生成采购订单',
     'warning',
   )
   if (!ok) return
+  isSubmitting.value = true
   try {
-    const res = (await purchaseApi.oneClickGenerate({ order_ids: validIds })) as any
+    const res = await purchaseApi.oneClickGenerate({ order_ids: validIds }) as ApiResponse
     if (res.success) {
       showToast(res.message || '审核成功', 'success')
       unprocessed.clearSelection()
       unprocessed.load()
       purchaseOrders.load()
+      queryClient.invalidateQueries({ queryKey: ['orders-list'] })
     } else showToast(res.message || '审核失败', 'error')
-  } catch (err: any) {
-    showToast('审核失败: ' + (err.message || ''), 'error')
+  } catch (err: unknown) {
+    const detail = (err as { response?: { data?: { detail?: string } }; message?: string })?.response?.data?.detail || (err as Error).message || ''
+    showToast('审核失败: ' + detail, 'error')
+  } finally {
+    isSubmitting.value = false
   }
 }
 
 async function handleQuickGenerate(orderId: number) {
+  if (isSubmitting.value) return
+  const order = unprocessed.orders.find((o: UnprocessedOrder) => o.id === orderId)
+  if (!order?.has_bom) {
+    showToast(`订单 ${order?.order_no || ''}无法审核：该产品未配置BOM表`, 'error')
+    return
+  }
   const ok = await confirm.confirm(`确定要审核此订单吗？`, '审核通过后将自动计算物料用量并生成采购订单', 'warning')
   if (!ok) return
+  isSubmitting.value = true
   try {
-    const res = (await purchaseApi.oneClickGenerate({ order_ids: [orderId] })) as any
+    const res = await purchaseApi.oneClickGenerate({ order_ids: [orderId] }) as ApiResponse
     if (res.success) {
       showToast(res.message || '审核成功', 'success')
       unprocessed.load()
       purchaseOrders.load()
+      queryClient.invalidateQueries({ queryKey: ['orders-list'] })
     } else showToast(res.message || '审核失败', 'error')
-  } catch (err: any) {
-    showToast('审核失败: ' + (err.message || ''), 'error')
+  } catch (err: unknown) {
+    const detail = (err as { response?: { data?: { detail?: string } }; message?: string })?.response?.data?.detail || (err as Error).message || ''
+    showToast('审核失败: ' + detail, 'error')
+  } finally {
+    isSubmitting.value = false
   }
+}
+
+function handleNoBomError(order: UnprocessedOrder) {
+  showToast(`订单 ${order.order_no || ''}无法审核：该产品未配置BOM表`, 'error')
 }
 
 // --- Purchase order handlers ---
@@ -213,8 +259,9 @@ async function handleCompleteOrder(orderId: number) {
   try {
     await purchaseOrders.completeOrder(orderId)
     showToast('订单已完成下单', 'success')
-  } catch (err: any) {
-    showToast(err.message || '操作失败', 'error')
+    queryClient.invalidateQueries({ queryKey: ['orders-list'] })
+  } catch (err: unknown) {
+    showToast((err as Error).message || '操作失败', 'error')
   }
 }
 
@@ -232,8 +279,9 @@ async function handleBatchComplete() {
   try {
     const count = await purchaseOrders.batchComplete()
     showToast(`成功完成 ${count} 个订单`, 'success')
-  } catch (err: any) {
-    showToast(err.message || '操作失败', 'error')
+    queryClient.invalidateQueries({ queryKey: ['orders-list'] })
+  } catch (err: unknown) {
+    showToast((err as Error).message || '操作失败', 'error')
   }
 }
 
@@ -245,8 +293,8 @@ async function handleSummary() {
   showToast('正在汇总订单数据...', 'info')
   try {
     await summary.openSummary([...purchaseOrders.selectedIds])
-  } catch (err: any) {
-    showToast(err.message || '汇总失败', 'error')
+  } catch (err: unknown) {
+    showToast((err as Error).message || '汇总失败', 'error')
   }
 }
 
@@ -260,8 +308,8 @@ async function handleSaveFactoryEdits() {
   try {
     await summary.saveFactoryEdits()
     showToast('修改已保存', 'success')
-  } catch (err: any) {
-    showToast(err.message || '保存失败', 'error')
+  } catch (err: unknown) {
+    showToast((err as Error).message || '保存失败', 'error')
   }
 }
 
@@ -272,7 +320,7 @@ function handleUpdateFactoryQty(gi: number | string, si: number | string, fi: nu
 async function handleExportFactorySummary() {
   showToast('正在导出Excel...', 'info')
   try {
-    const res = (await purchaseApi.exportCompleted({ format: 'factory-summary' })) as any
+    const res = await purchaseApi.exportCompleted({ format: 'factory-summary' }) as ApiResponse
     if (res.success && res.html) {
       const bom = '\uFEFF'
       const blob = new Blob([bom + res.html], { type: 'application/vnd.ms-excel;charset=utf-8' })
@@ -299,7 +347,7 @@ async function handleExportSupplierSummary() {
   showToast('正在生成汇总文件，请稍候...', 'info')
   try {
     const { default: axiosInstance } = await import('@/api/request')
-    const blob = (await axiosInstance.post('/purchase-center/orders/supplier-summary-export', { ids }, { responseType: 'blob' })) as unknown as Blob
+    const blob = await axiosInstance.post('/purchase-center/orders/supplier-summary-export', { ids }, { responseType: 'blob' }) as Blob
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
@@ -316,22 +364,22 @@ async function handleExportSupplierSummary() {
 
 // --- Completed order handlers ---
 const detailVisible = ref(false)
-const detailOrder = ref<any>(null)
+const detailOrder = ref<PurchaseOrder | null>(null)
 
 async function handleViewDetail(id: number) {
   try {
-    const res = (await purchaseApi.orderDetail(id)) as any
-    if (res.success) {
+    const res = await purchaseApi.orderDetail(id) as ApiResponse<PurchaseOrder>
+    if (res.success && res.order) {
       detailOrder.value = res.order
       detailVisible.value = true
     } else showToast(res.message || '获取详情失败', 'error')
-  } catch (err: any) {
-    showToast(err.message || '获取详情失败', 'error')
+  } catch (err: unknown) {
+    showToast((err as Error).message || '获取详情失败', 'error')
   }
 }
 
 function handleFilterUpdate(payload: { key: string; value: string }) {
-  ;(completed.filters as any)[payload.key] = payload.value
+  completed.filters[payload.key] = payload.value
 }
 
 function handleCompletedSearch() {
@@ -344,8 +392,8 @@ async function handleExport() {
   try {
     const ok = await completed.exportOrders()
     if (ok) showToast('已导出 下单查询汇总.xls', 'success')
-  } catch (err: any) {
-    showToast(err.message || '导出失败', 'error')
+  } catch (err: unknown) {
+    showToast((err as Error).message || '导出失败', 'error')
   }
 }
 
@@ -358,81 +406,39 @@ function handleCompletedPageChange(page: number) {
 const autoRefresh = useAutoRefresh(async () => {
   if (activeTab.value !== 'orders') return
   try {
-    const res = (await purchaseApi.orders({ page: purchaseOrders.page, per_page: 15 })) as any
+    const [res, uRes] = await Promise.all([
+      purchaseApi.orders({ page: purchaseOrders.page, per_page: 15 }),
+      purchaseApi.unprocessedOrders(),
+    ]) as [ApiResponse, ApiResponse]
     if (res.success !== false && res.total !== purchaseOrders.total) {
       purchaseOrders.total = res.total || 0
-      purchaseOrders.orders = res.orders || []
+      purchaseOrders.orders = (res.orders || []) as PurchaseOrder[]
     }
-    // 刷新完整的未处理订单列表，而不仅是 total
-    const uRes = (await purchaseApi.unprocessedOrders()) as any
     if (uRes.success !== false) {
       unprocessed.total = uRes.total || 0
-      if (uRes.orders) unprocessed.orders = uRes.orders
+      if (uRes.orders) unprocessed.orders = (uRes.orders as UnprocessedOrder[])
     }
   } catch {
     /* silent */
   }
 })
 
-// --- WebSocket 实时通知 ---
-let ws: WebSocket | null = null
-let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null
-let wsReconnectAttempts = 0
-const WS_MAX_RECONNECT_ATTEMPTS = 20
-const WS_RECONNECT_BASE_DELAY = 3000
-
-function connectWebSocket() {
-  if (wsReconnectAttempts >= WS_MAX_RECONNECT_ATTEMPTS) return
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const wsUrl = `${protocol}//${window.location.host}/ws/notifications`
-  ws = new WebSocket(wsUrl)
-
-  ws.onopen = () => {
-    wsReconnectAttempts = 0
-  }
-
-  ws.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data)
-      if (data.type === 'order_created' || data.type === 'purchase_order_created') {
-        // 收到新订单或新采购订单通知，立即刷新列表
-        if (activeTab.value === 'orders') {
-          unprocessed.load()
-          purchaseOrders.load()
-        }
+// --- WebSocket notifications ---
+useWebSocket({
+  onMessage: (data) => {
+    if (data.type === 'order_created' || data.type === 'order_updated' || data.type === 'order_deleted' || data.type === 'purchase_order_created') {
+      if (activeTab.value === 'orders') {
+        unprocessed.load()
+        purchaseOrders.load()
       }
-    } catch {
-      /* ignore non-JSON messages */
     }
-  }
-
-  ws.onclose = () => {
-    wsReconnectAttempts++
-    if (wsReconnectAttempts < WS_MAX_RECONNECT_ATTEMPTS) {
-      const delay = Math.min(WS_RECONNECT_BASE_DELAY * wsReconnectAttempts, 30000)
-      wsReconnectTimer = setTimeout(connectWebSocket, delay)
-    }
-  }
-
-  ws.onerror = () => {
-    ws?.close()
-  }
-}
+  },
+  isActive: ordersTabActive,
+})
 
 // --- Init ---
-onMounted(() => {
-  unprocessed.load()
-  purchaseOrders.load()
-  autoRefresh.start()
-  connectWebSocket()
-})
-
-onUnmounted(() => {
-  autoRefresh.stop()
-  if (wsReconnectTimer) clearTimeout(wsReconnectTimer)
-  ws?.close()
-  ws = null
-})
+Promise.all([unprocessed.load(), purchaseOrders.load()])
+autoRefresh.start()
 </script>
 
 <style scoped>
@@ -470,7 +476,7 @@ onUnmounted(() => {
   display: flex;
   flex-wrap: nowrap;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   padding: 10px 24px;
   border-bottom: 1px solid var(--color-border-light, #f1f5f9);
   flex-shrink: 0;
@@ -479,6 +485,18 @@ onUnmounted(() => {
 .pc-card-header :deep(.ht-bar) {
   width: auto;
   margin: 0;
+}
+
+.pc-header-left {
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
+.pc-header-right {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
 }
 
 .pc-card-title-group {
@@ -526,38 +544,59 @@ onUnmounted(() => {
 }
 
 /* === Tabs === */
-.pc-tabs {
-  display: flex;
+.pc-tab-group {
+  display: inline-flex;
   gap: 4px;
-  background: var(--color-surface, #f1f5f9);
   padding: 4px;
-  border-radius: 11px;
+  border-radius: 12px;
+  background: white;
+  border: 1px solid var(--color-border-light);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
 }
 
 .pc-tab-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 18px;
+  padding: 8px 14px;
   border: none;
-  border-radius: 8px;
+  border-radius: 9px;
   font-size: 13px;
   font-weight: 600;
   color: var(--color-text-secondary);
   background: transparent;
   cursor: pointer;
   transition: all 0.3s ease;
+  white-space: nowrap;
 }
 
 .pc-tab-btn:hover {
+  background: var(--color-primary-50);
   color: var(--color-primary-600);
-  background: rgba(255, 255, 255, 0.6);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  transform: translateY(-1px);
 }
 
 .pc-tab-btn.active {
-  background: white;
-  color: var(--color-primary-600);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
+  color: var(--color-primary-700);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 8px rgba(91, 141, 239, 0.2);
+  transform: translateY(-1px);
+}
+
+.pc-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: var(--color-danger-500);
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 9px;
+  line-height: 1;
 }
 
 /* === Body === */

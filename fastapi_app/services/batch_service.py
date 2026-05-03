@@ -3,21 +3,21 @@
 
 从 Flask batch.py 提取的核心业务逻辑，适配异步 SQLAlchemy。
 """
-import os
-import tempfile
-import logging
 import asyncio
+import contextlib
+import logging
+import os
 from datetime import datetime
-from typing import Tuple, Optional
 
-from sqlalchemy import select, func, and_
+from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from sqlalchemy.exc import SQLAlchemyError
 
-from fastapi_app.shared_models import Product, Order, StockIn, StockOut, InventoryLog
-from fastapi_app.utils import parse_date_value as _shared_parse_date_value, validate_customer_name as _shared_validate_customer_name
 from fastapi_app.shared.stock_concurrency import get_product_for_update
+from fastapi_app.shared_models import InventoryLog, Order, Product, StockIn, StockOut
+from fastapi_app.utils import parse_date_value as _shared_parse_date_value
+from fastapi_app.utils import validate_customer_name as _shared_validate_customer_name
 
 logger = logging.getLogger(__name__)
 
@@ -103,27 +103,27 @@ async def generate_number_async(prefix: str, model, date_field: str, number_fiel
     async with _async_number_generator._lock:
         _async_number_generator._cleanup_old_entries()
 
-        # 每次都从数据库查询当日最大编号，确保跨进程安全
-        result = await db.execute(
-            select(model)
-            .where(func.date(getattr(model, date_field)) == today.date())
-            .order_by(getattr(model, number_field).desc())
-            .limit(1)
-        )
-        record = result.scalar_one_or_none()
+        counter_key = f"{prefix}:{date_str}"
+        if _async_number_generator._initialized.get(counter_key):
+            db_max = _async_number_generator._counters.get(counter_key, 0)
+        else:
+            result = await db.execute(
+                select(model)
+                .where(func.date(getattr(model, date_field)) == today.date())
+                .order_by(getattr(model, number_field).desc())
+                .limit(1)
+            )
+            record = result.scalar_one_or_none()
 
-        db_max = 0
-        if record:
-            last_number = getattr(record, number_field)
-            try:
-                db_max = int(last_number.split('-')[-1])
-            except (ValueError, IndexError):
-                pass
+            db_max = 0
+            if record:
+                last_number = getattr(record, number_field)
+                with contextlib.suppress(ValueError, IndexError):
+                    db_max = int(last_number.split('-')[-1])
 
-        # 同时考虑内存计数器（同进程内连续生成时比DB快）
-        current_seq = max(db_max, _async_number_generator._counters.get(f"{prefix}:{date_str}", 0)) + 1
-        _async_number_generator._counters[f"{prefix}:{date_str}"] = current_seq
-        _async_number_generator._initialized[f"{prefix}:{date_str}"] = True
+        current_seq = max(db_max, _async_number_generator._counters.get(counter_key, 0)) + 1
+        _async_number_generator._counters[counter_key] = current_seq
+        _async_number_generator._initialized[counter_key] = True
 
         return f"{prefix}-{date_str}-{str(current_seq).zfill(4)}"
 
@@ -169,9 +169,9 @@ async def process_order_deduction(
     product_id: int,
     order_quantity: int,
     deduct_stock: bool = True,
-    custom_deduct_quantity: Optional[int] = None,
-    product: Optional[Product] = None,
-) -> Tuple[int, list]:
+    custom_deduct_quantity: int | None = None,
+    product: Product | None = None,
+) -> tuple[int, list]:
     """
     处理订单抵扣备货的核心逻辑
 
@@ -209,7 +209,7 @@ async def process_order_deduction(
 
         if not stockin_available:
             logger.info(f'订单{order.order_no}无可用备货抵扣')
-            order.status = '待备货'
+            order.transition_to('待备货')
             return 0, deduction_details
 
         stockin, available = stockin_available
@@ -261,8 +261,15 @@ async def process_order_deduction(
         if product and deduct_amount > 0:
             product.current_stock -= deduct_amount
 
-        # 订单不再使用状态字段标记备货进度，备货状态由采购订单关系隐式决定
-        logger.info(f'订单抵扣处理完成：订单{order.order_no}，抵扣数量{deduct_amount}')
+        # 更新订单状态（通过状态机校验）
+        if deduct_amount >= order_quantity:
+            order.transition_to('已备货')
+        elif deduct_amount > 0:
+            order.transition_to('部分备货')
+        else:
+            order.transition_to('待备货')
+
+        logger.info(f'订单抵扣处理完成：订单{order.order_no}，抵扣数量{deduct_amount}，状态{order.status}')
         return deduct_amount, deduction_details
 
     except SQLAlchemyError as e:
@@ -372,28 +379,28 @@ async def calculate_available_shipment_quantity(
 
 # ==================== Excel 解析辅助 ====================
 
-async def parse_excel_file_async(file_path: str, sheet_name: str = None) -> Tuple[bool, list, str]:
-    """
-    异步解析 Excel 文件（使用 run_in_executor 避免 CPU 密集操作阻塞事件循环）
-    """
+async def parse_excel_file_async(file_path: str, sheet_name: str = None) -> tuple[bool, list, str]:
+    """异步解析 Excel 文件（Polars 引擎，比 pandas 快 5x）"""
     loop = asyncio.get_running_loop()
 
     def _sync_parse():
         try:
-            import pandas as pd
-            if sheet_name:
-                df = pd.read_excel(file_path, sheet_name=sheet_name)
-            else:
-                excel_file = pd.ExcelFile(file_path)
-                first_sheet = excel_file.sheet_names[0]
-                df = pd.read_excel(file_path, sheet_name=first_sheet)
+            import math
 
-            data_list = df.to_dict(orient='records')
+            import polars as pl
+            if sheet_name:
+                df = pl.read_excel(file_path, sheet_name=sheet_name)
+            else:
+                df = pl.read_excel(file_path)
+                if df is None or df.is_empty():
+                    return False, [], "Excel 文件为空"
+
+            data_list = df.to_dicts()
             for row in data_list:
                 for key, value in row.items():
                     if isinstance(value, str):
                         row[key] = value.strip() if value else None
-                    elif pd.isna(value) if isinstance(value, float) else False:
+                    elif isinstance(value, float) and math.isnan(value):
                         row[key] = None
             return True, data_list, ""
         except (ValueError, TypeError, OSError) as e:
@@ -402,22 +409,24 @@ async def parse_excel_file_async(file_path: str, sheet_name: str = None) -> Tupl
     return await loop.run_in_executor(None, _sync_parse)
 
 
-async def read_excel_sheets_async(file_path: str) -> Tuple[bool, list, str]:
+async def read_excel_sheets_async(file_path: str) -> tuple[bool, list, str]:
     """读取 Excel 文件的所有 Sheet 名称"""
     loop = asyncio.get_running_loop()
 
     def _sync_read():
         try:
-            import pandas as pd
-            excel_file = pd.ExcelFile(file_path)
-            return True, excel_file.sheet_names, ""
+            from openpyxl import load_workbook
+            wb = load_workbook(filename=file_path, read_only=True)
+            sheets = wb.sheetnames
+            wb.close()
+            return True, sheets, ""
         except (ValueError, TypeError, OSError) as e:
             return False, [], str(e)
 
     return await loop.run_in_executor(None, _sync_read)
 
 
-def parse_date_value(date_value) -> Optional[datetime]:
+def parse_date_value(date_value) -> datetime | None:
     """解析日期值（支持多种格式），解析失败返回None - 委托给共享工具函数"""
     return _shared_parse_date_value(date_value)
 
@@ -427,6 +436,10 @@ def parse_date_value(date_value) -> Optional[datetime]:
 async def import_products_from_data(db: AsyncSession, data_list: list) -> int:
     """从数据列表导入产品"""
     count = 0
+    # 预加载所有产品名称，避免 N+1 查询
+    existing_result = await db.execute(select(func.lower(Product.name)))
+    existing_names = {row[0] for row in existing_result.all()}
+
     for idx, row_data in enumerate(data_list, start=2):
         try:
             name = row_data.get('产品名称') or row_data.get('产品名') or row_data.get('名称')
@@ -439,12 +452,7 @@ async def import_products_from_data(db: AsyncSession, data_list: list) -> int:
 
             name = str(name).strip()
 
-            # 检查重复
-            result = await db.execute(
-                select(Product).where(func.lower(Product.name) == func.lower(name))
-            )
-            existing = result.scalar_one_or_none()
-            if existing:
+            if name.lower() in existing_names:
                 continue
 
             try:
@@ -475,7 +483,7 @@ async def import_products_from_data(db: AsyncSession, data_list: list) -> int:
     return count
 
 
-async def import_orders_from_data(db: AsyncSession, data_list: list) -> Tuple[int, list]:
+async def import_orders_from_data(db: AsyncSession, data_list: list) -> tuple[int, list]:
     """从数据列表导入订单"""
     count = 0
     debug_messages = []
@@ -574,7 +582,7 @@ async def import_orders_from_data(db: AsyncSession, data_list: list) -> Tuple[in
     return count, debug_messages
 
 
-async def import_stockins_from_data(db: AsyncSession, data_list: list) -> Tuple[int, list]:
+async def import_stockins_from_data(db: AsyncSession, data_list: list) -> tuple[int, list]:
     """从数据列表导入备货"""
     count = 0
     debug_messages = []
@@ -652,7 +660,7 @@ async def import_stockins_from_data(db: AsyncSession, data_list: list) -> Tuple[
     return count, debug_messages
 
 
-async def import_stockouts_from_data(db: AsyncSession, data_list: list) -> Tuple[int, list]:
+async def import_stockouts_from_data(db: AsyncSession, data_list: list) -> tuple[int, list]:
     """从数据列表导入出货"""
     count = 0
     debug_messages = []
@@ -753,3 +761,61 @@ async def import_stockouts_from_data(db: AsyncSession, data_list: list) -> Tuple
     await db.commit()
     debug_messages.append(f"出货导入完成: 共导入 {count} 条")
     return count, debug_messages
+
+
+def cleanup_temp_file(file_path: str) -> None:
+    """清理临时上传文件"""
+    try:
+        if file_path and os.path.exists(file_path):
+            os.unlink(file_path)
+            logger.debug(f"已清理临时文件: {file_path}")
+    except OSError as e:
+        logger.warning(f"清理临时文件失败: {file_path}, {e}")
+
+
+async def process_order_import(
+    db: AsyncSession, file_path: str, original_filename: str, user_id: int
+) -> dict:
+    """处理订单批量导入（ARQ/Celery 通用）"""
+    result_logger = logging.getLogger(f"{__name__}.order_import")
+    result_logger.info(f"订单批量导入开始: {original_filename}, user_id={user_id}")
+
+    success, data_list, error = await parse_excel_file_async(file_path)
+    if not success:
+        return {"success": False, "error": error, "imported": 0, "skipped": 0}
+
+    if not data_list:
+        return {"success": True, "imported": 0, "skipped": 0, "message": "没有有效数据行"}
+
+    imported, errors = await import_orders_from_data(db, data_list)
+    return {
+        "success": True,
+        "total_imported": imported,
+        "imported": imported,
+        "skipped": len(data_list) - imported,
+        "errors": errors[:20],
+    }
+
+
+async def process_stockin_import(
+    db: AsyncSession, file_path: str, original_filename: str, user_id: int
+) -> dict:
+    """处理备货批量导入（ARQ/Celery 通用）"""
+    result_logger = logging.getLogger(f"{__name__}.stockin_import")
+    result_logger.info(f"备货批量导入开始: {original_filename}, user_id={user_id}")
+
+    success, data_list, error = await parse_excel_file_async(file_path)
+    if not success:
+        return {"success": False, "error": error, "imported": 0, "skipped": 0}
+
+    if not data_list:
+        return {"success": True, "imported": 0, "skipped": 0, "message": "没有有效数据行"}
+
+    imported, errors = await import_stockins_from_data(db, data_list)
+    return {
+        "success": True,
+        "total_imported": imported,
+        "imported": imported,
+        "skipped": len(data_list) - imported,
+        "errors": errors[:20],
+    }

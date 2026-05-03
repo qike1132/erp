@@ -1,7 +1,8 @@
 """OCR 出货单识别接口测试"""
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 from io import BytesIO
+from unittest.mock import AsyncMock, patch
+
+import pytest
 
 
 class TestOcrImportEndpoints:

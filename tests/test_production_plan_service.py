@@ -1,8 +1,9 @@
 """production_plan_service 单元测试"""
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
-from fastapi_app.services.production_plan_service import get_plans, get_plan_by_id, _normalize_plan_date
+import pytest
+
+from fastapi_app.services.production_plan_service import _normalize_plan_date, get_plan_by_id, get_plans
 
 
 class TestProductionPlanService:

@@ -9,7 +9,10 @@ from datetime import datetime
 
 import openpyxl
 from openpyxl import Workbook
-from openpyxl.styles import Alignment as Al, Border as Bd, Font as Ft, Side as Sd
+from openpyxl.styles import Alignment as Al
+from openpyxl.styles import Border as Bd
+from openpyxl.styles import Font as Ft
+from openpyxl.styles import Side as Sd
 
 from fastapi_app.core.logger import logger
 
@@ -204,7 +207,7 @@ th,td{border:1px solid #ddd;padding:8px;text-align:left;vertical-align:middle}
 th{background:#e8e8e8;font-weight:bold;text-align:center}
 .total-row{background:#fff3cd;font-weight:bold}
 .footer{margin-top:30px;text-align:right;color:#666;font-size:11px}"""
-    body_parts = [f'<div class="company-header"><h1>东莞市滨发玩具有限公司</h1><h2>供应商采购订单汇总</h2></div>']
+    body_parts = ['<div class="company-header"><h1>东莞市滨发玩具有限公司</h1><h2>供应商采购订单汇总</h2></div>']
     body_parts.append(f'<div class="summary-info"><strong>汇总时间：</strong>{datetime.now().strftime("%Y-%m-%d %H:%M:%S")} | <strong>供应商数量：</strong>{len(supplier_groups)} | <strong>订单数量：</strong>{len(orders)}</div>')
     for idx, supplier in enumerate(supplier_groups):
         if idx > 0:
@@ -330,7 +333,7 @@ def create_supplier_workbook(supplier: dict) -> Workbook:
             for c1, c2 in DATA_COL_MERGES:
                 ws.merge_cells(start_row=new_row, start_column=c1, end_row=new_row, end_column=c2)
 
-            for c1, c2 in DATA_COL_MERGES:
+            for c1, _ in DATA_COL_MERGES:
                 ws.cell(row=new_row, column=c1).value = None
 
     for idx in range(total_rows):

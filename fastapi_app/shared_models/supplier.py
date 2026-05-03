@@ -3,9 +3,10 @@
 
 映射到与 Flask-SQLAlchemy Supplier 相同的 'supplier' 表。
 """
-from sqlalchemy import String, Integer, Boolean, Text, DateTime, Index
-from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, Index, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
 

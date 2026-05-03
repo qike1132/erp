@@ -215,7 +215,7 @@ async function handleSave() {
 .input-icon { position: absolute; left: 1rem; top: 50%; transform: translateY(-50%); color: var(--color-slate-400); font-size: 1rem; z-index: 10; }
 .form-control-elegant {
   width: 100%; padding: 0.875rem 1rem 0.875rem 3rem; font-size: 1rem; line-height: 1.5; color: var(--color-slate-700);
-  background: var(--color-slate-50); border: 2px solid var(--color-slate-200); border-radius: 14px; transition: all 0.3s ease; outline: none;
+  background: white; border: 2px solid var(--color-slate-200); border-radius: 14px; transition: all 0.3s ease; outline: none;
 }
 .form-control-elegant:focus { background: var(--color-surface-card); border-color: var(--color-primary-500); box-shadow: 0 0 0 4px rgba(59,130,246,0.1); }
 

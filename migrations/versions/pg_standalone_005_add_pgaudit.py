@@ -10,8 +10,6 @@ Create Date: 2026-04-27
 注意：Windows 上 pgaudit 需要从源码编译，若未安装则跳过。
 已配置 PostgreSQL 内置 log_statement='mod' 作为替代审计方案。
 """
-from alembic import op
-import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.

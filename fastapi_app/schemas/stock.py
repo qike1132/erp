@@ -4,8 +4,8 @@
 用于入库、出库、库存查看的请求/响应模型。
 """
 from datetime import datetime
+
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional, List
 
 
 def _validate_date_format(v: str) -> str:
@@ -23,7 +23,7 @@ class StockInCreate(BaseModel):
     quantity: int = Field(..., gt=0, le=9999999, description="入库数量")
     customer: str = Field(..., min_length=1, max_length=100, description="客户名称")
     stockin_date: str = Field(..., description="入库日期 (YYYY-MM-DD)")
-    note: Optional[str] = Field(None, max_length=500, description="备注")
+    note: str | None = Field(None, max_length=500, description="备注")
 
     @field_validator('stockin_date')
     @classmethod
@@ -33,10 +33,10 @@ class StockInCreate(BaseModel):
 
 class StockInUpdate(BaseModel):
     """更新入库请求"""
-    quantity: Optional[int] = Field(None, gt=0, le=9999999, description="入库数量")
-    customer: Optional[str] = Field(None, min_length=1, max_length=100, description="客户名称")
-    stockin_date: Optional[str] = Field(None, description="入库日期 (YYYY-MM-DD)")
-    note: Optional[str] = Field(None, max_length=500, description="备注")
+    quantity: int | None = Field(None, gt=0, le=9999999, description="入库数量")
+    customer: str | None = Field(None, min_length=1, max_length=100, description="客户名称")
+    stockin_date: str | None = Field(None, description="入库日期 (YYYY-MM-DD)")
+    note: str | None = Field(None, max_length=500, description="备注")
 
     @field_validator('stockin_date')
     @classmethod
@@ -52,9 +52,9 @@ class StockOutCreate(BaseModel):
     quantity: int = Field(..., gt=0, le=9999999, description="出库数量")
     customer: str = Field(..., min_length=1, max_length=100, description="客户名称")
     stockout_date: str = Field(..., description="出库日期 (YYYY-MM-DD)")
-    note: Optional[str] = Field(None, max_length=500, description="备注")
+    note: str | None = Field(None, max_length=500, description="备注")
     order_type: str = Field('regular', max_length=20, description="订单类型: regular=常规, custom=定制")
-    country: Optional[str] = Field(None, max_length=100, description="国家名称（仅定制订单使用）")
+    country: str | None = Field(None, max_length=100, description="国家名称（仅定制订单使用）")
 
     @field_validator('stockout_date')
     @classmethod
@@ -64,10 +64,10 @@ class StockOutCreate(BaseModel):
 
 class StockOutUpdate(BaseModel):
     """更新出库请求"""
-    quantity: Optional[int] = Field(None, gt=0, le=9999999, description="出库数量")
-    customer: Optional[str] = Field(None, min_length=1, max_length=100, description="客户名称")
-    stockout_date: Optional[str] = Field(None, description="出库日期 (YYYY-MM-DD)")
-    note: Optional[str] = Field(None, max_length=500, description="备注")
+    quantity: int | None = Field(None, gt=0, le=9999999, description="出库数量")
+    customer: str | None = Field(None, min_length=1, max_length=100, description="客户名称")
+    stockout_date: str | None = Field(None, description="出库日期 (YYYY-MM-DD)")
+    note: str | None = Field(None, max_length=500, description="备注")
 
     @field_validator('stockout_date')
     @classmethod
@@ -80,7 +80,7 @@ class StockOutUpdate(BaseModel):
 class StockListResponse(BaseModel):
     """库存列表响应"""
     success: bool = True
-    data: List[dict]
+    data: list[dict]
     total: int = 0
     page: int = 1
     per_page: int = 50
@@ -95,8 +95,8 @@ class StockActionResponse(BaseModel):
 class InventoryResponse(BaseModel):
     """库存查看响应"""
     success: bool = True
-    data: List[dict]
+    data: list[dict]
     total_order_quantity: int = 0
     total_stockin_quantity: int = 0
     total_stock: int = 0
-    all_countries: List[str] = []
+    all_countries: list[str] = []

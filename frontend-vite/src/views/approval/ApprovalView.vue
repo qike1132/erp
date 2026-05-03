@@ -64,7 +64,7 @@
           <thead>
             <tr>
               <th>类型</th>
-              <th style="text-align: left">摘要</th>
+              <th style="text-align: left">订单号</th>
               <th>提交人</th>
               <th>提交时间</th>
               <th>状态</th>
@@ -73,10 +73,10 @@
           </thead>
           <tbody>
             <tr v-for="row in filteredList" :key="row.id">
-              <td>{{ row.type }}</td>
-              <td style="text-align: left">{{ row.summary }}</td>
-              <td>{{ row.created_by }}</td>
-              <td>{{ row.created_at }}</td>
+              <td>{{ row.operation_type_display }}</td>
+              <td style="text-align: left">{{ row.order_no }}</td>
+              <td>{{ row.requester_name }}</td>
+              <td>{{ row.request_time }}</td>
               <td>
                 <span :class="['ap-badge', statusBadgeClass(row.status)]">
                   {{ statusLabel(row.status) }}
@@ -123,6 +123,33 @@ import UiDialog from '@/components/ui/UiDialog.vue'
 import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 import { showToast } from '@/composables/useToast'
 
+interface ApprovalRow {
+  id: number
+  order_id: number
+  order_no: string | null
+  requester_id: number
+  requester_name: string | null
+  operation_type: string
+  operation_type_display: string
+  operation_data: string | null
+  status: string
+  status_display: string
+  request_time: string | null
+  approver_id: number | null
+  approver_name: string | null
+  approval_time: string | null
+  rejection_reason: string | null
+  lock_time: string | null
+}
+
+interface ApprovalListResult {
+  success: boolean
+  data: ApprovalRow[]
+  pending_count: number
+  approved_count: number
+  rejected_count: number
+}
+
 const queryClient = useQueryClient()
 const actionId = ref<number | ''>(0)
 const searchTerm = ref('')
@@ -137,18 +164,31 @@ const statusOptions = [
 
 const { data: result, isLoading } = useQuery({
   queryKey: ['approvals', statusFilter],
-  queryFn: () => approvalApi.list({ status: statusFilter.value || undefined }) as Promise<any>,
+  queryFn: () => approvalApi.list({ status: statusFilter.value || undefined }) as Promise<ApprovalListResult>,
   staleTime: 30_000,
 })
 
-const items = computed(() => result.value?.items ?? result.value?.approvals ?? [])
+const items = computed(() => result.value?.data ?? [])
 
-const stats = computed(() => result.value?.stats ?? null)
+const stats = computed(() => {
+  const r = result.value
+  if (!r) return null
+  return {
+    pending: r.pending_count ?? 0,
+    approved: r.approved_count ?? 0,
+    rejected: r.rejected_count ?? 0,
+    total: (r.pending_count ?? 0) + (r.approved_count ?? 0) + (r.rejected_count ?? 0),
+  }
+})
 
 const filteredList = computed(() => {
   if (!searchTerm.value) return items.value
   const q = searchTerm.value.toLowerCase()
-  return items.value.filter((i: any) => i.summary?.toLowerCase().includes(q) || i.type?.toLowerCase().includes(q))
+  return items.value.filter(
+    (i) => i.operation_type_display?.toLowerCase().includes(q)
+      || i.order_no?.toLowerCase().includes(q)
+      || i.requester_name?.toLowerCase().includes(q),
+  )
 })
 
 function statusBadgeClass(status: string): string {
@@ -156,18 +196,22 @@ function statusBadgeClass(status: string): string {
   if (status === 'rejected') return 'ap-badge-danger'
   return 'ap-badge-warning'
 }
-function statusLabel(status: string) {
-  return status === 'approved' ? '已通过' : status === 'rejected' ? '已驳回' : '待审批'
+
+function statusLabel(status: string): string {
+  if (status === 'approved') return '已通过'
+  if (status === 'rejected') return '已驳回'
+  return '待审批'
 }
 
-async function handleApprove(row: any) {
+async function handleApprove(row: ApprovalRow) {
   actionId.value = row.id
   try {
     await approvalApi.approve(row.id)
     showToast('审批通过', 'success')
     queryClient.invalidateQueries({ queryKey: ['approvals'] })
-  } catch (err: any) {
-    showToast(err.response?.data?.detail || '操作失败', 'error')
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : '操作失败'
+    showToast(msg, 'error')
   } finally {
     actionId.value = 0
   }
@@ -175,10 +219,10 @@ async function handleApprove(row: any) {
 
 const rejectDialogVisible = ref(false)
 const rejectReason = ref('')
-const rejectTarget = ref<any>(null)
+const rejectTarget = ref<ApprovalRow | null>(null)
 const rejectSaving = ref(false)
 
-function openRejectDialog(row: any) {
+function openRejectDialog(row: ApprovalRow) {
   rejectTarget.value = row
   rejectReason.value = ''
   rejectDialogVisible.value = true
@@ -191,12 +235,15 @@ async function handleReject() {
   }
   rejectSaving.value = true
   try {
-    await approvalApi.reject(rejectTarget.value.id, rejectReason.value)
+    if (rejectTarget.value) {
+      await approvalApi.reject(rejectTarget.value.id, rejectReason.value)
+    }
     showToast('已驳回', 'success')
     rejectDialogVisible.value = false
     queryClient.invalidateQueries({ queryKey: ['approvals'] })
-  } catch (err: any) {
-    showToast(err.response?.data?.detail || '操作失败', 'error')
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : '操作失败'
+    showToast(msg, 'error')
   } finally {
     rejectSaving.value = false
   }
@@ -364,7 +411,7 @@ async function handleReject() {
   padding: 9px 14px 9px 36px;
   border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: 9px;
-  background: var(--color-surface, #f8fafc);
+  background: white;
   font-size: 13px;
   outline: none;
   transition: all 0.3s ease;

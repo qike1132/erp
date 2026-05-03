@@ -2,13 +2,11 @@
 日志系统配置
 提供结构化日志记录功能
 """
+import contextvars
 import logging
 import os
 import shutil
-import sys
 from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
-from datetime import datetime
-import contextvars
 
 # 使用 contextvars 替代 Flask g 对象存储 trace_id
 trace_id_var = contextvars.ContextVar('trace_id', default='system')
@@ -29,7 +27,7 @@ class WindowsSafeTimedRotatingFileHandler(TimedRotatingFileHandler):
             # Windows: 文件被其他线程/进程占用，rename 失败
             # 退化为 copy + truncate：将内容复制到备份文件，再清空原文件
             shutil.copy2(source, dest)
-            with open(source, 'w', encoding=self.encoding or 'utf-8') as f:
+            with open(source, 'w', encoding=self.encoding or 'utf-8'):
                 pass  # 截断原文件为空
 
 class RequestFormatter(logging.Formatter):
@@ -41,23 +39,23 @@ class RequestFormatter(logging.Formatter):
 def setup_logging(app=None):
     """
     配置日志系统
-    
+
     Args:
         debug: 是否开启调试模式
     """
     debug = app if isinstance(app, bool) else (getattr(app, 'debug', False) if app else False)
-    
+
     # 创建日志目录
     log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
     os.makedirs(log_dir, exist_ok=True)
-    
+
     # 设置日志级别
     log_level = logging.DEBUG if debug else logging.INFO
-    
+
     # 配置根日志记录器
     target_logger = logging.getLogger()
     target_logger.setLevel(log_level)
-    
+
     # 1. 文件日志处理器 - 按大小轮转
     file_handler = RotatingFileHandler(
         os.path.join(log_dir, 'erp.log'),
@@ -69,7 +67,7 @@ def setup_logging(app=None):
     file_handler.setFormatter(RequestFormatter(
         '[%(asctime)s] [%(levelname)s] [%(trace_id)s] in %(module)s: %(message)s'
     ))
-    
+
     # 2. 错误日志处理器 - 单独记录错误
     error_handler = RotatingFileHandler(
         os.path.join(log_dir, 'error.log'),
@@ -81,7 +79,7 @@ def setup_logging(app=None):
     error_handler.setFormatter(RequestFormatter(
         '[%(asctime)s] [%(levelname)s] [%(trace_id)s] in %(module)s [%(pathname)s:%(lineno)d]:\n%(message)s\n'
     ))
-    
+
     # 3. 访问日志处理器 - 按天轮转（Windows 安全版本）
     access_handler = WindowsSafeTimedRotatingFileHandler(
         os.path.join(log_dir, 'access.log'),
@@ -94,54 +92,54 @@ def setup_logging(app=None):
     access_handler.setFormatter(RequestFormatter(
         '[%(asctime)s] [%(trace_id)s] %(message)s'
     ))
-    
+
     # 添加处理器
     target_logger.addHandler(file_handler)
     target_logger.addHandler(error_handler)
-    
+
     # 返回访问日志记录器
     access_logger = logging.getLogger('access')
     access_logger.addHandler(access_handler)
     access_logger.setLevel(logging.INFO)
-    
+
     return target_logger, access_logger
 
 
 class Logger:
     """日志工具类"""
-    
+
     def __init__(self, app=None):
         self.app = app
         self.logger = None
         self.access_logger = None
-        
+
         if app:
             self.init_app(app)
-    
+
     def init_app(self, app):
         """初始化日志"""
         self.logger, self.access_logger = setup_logging(app)
-    
+
     def info(self, message, *args, **kwargs):
         """记录信息日志"""
         if self.logger:
             self.logger.info(message, *args, **kwargs)
-    
+
     def error(self, message, *args, **kwargs):
         """记录错误日志"""
         if self.logger:
             self.logger.error(message, *args, **kwargs)
-    
+
     def warning(self, message, *args, **kwargs):
         """记录警告日志"""
         if self.logger:
             self.logger.warning(message, *args, **kwargs)
-    
+
     def debug(self, message, *args, **kwargs):
         """记录调试日志"""
         if self.logger:
             self.logger.debug(message, *args, **kwargs)
-    
+
     def access(self, request, response):
         """记录访问日志"""
         if self.access_logger:

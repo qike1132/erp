@@ -68,14 +68,17 @@ const iconMap: Record<string, string> = {
 
 <style scoped>
 .ht-bar {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: white;
+  border: 1px solid var(--color-border-light);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
   overflow-x: auto;
   flex-shrink: 0;
   width: 100%;
-  margin-bottom: 6px;
-  margin-top: -10px;
 }
 
 .ht-bar::-webkit-scrollbar {
@@ -86,32 +89,32 @@ const iconMap: Record<string, string> = {
   display: flex;
   align-items: center;
   gap: 5px;
-  padding: 4px 8px;
-  border-radius: 7px;
-  background: white;
-  border: 1px solid var(--color-border-light);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
+  padding: 8px 14px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
   text-decoration: none;
-  color: var(--color-text);
-  font-size: 12px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
   transition: all 0.3s ease;
   flex-shrink: 0;
+  cursor: pointer;
 }
 
 .ht-tab:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 12px 32px rgba(0,0,0,0.1);
-  transform: translateY(-1px);
-  border-color: var(--color-primary-200);
+  background: var(--color-primary-50);
   color: var(--color-primary-600);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  transform: translateY(-1px);
 }
 
 .ht-tab.active {
   background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
-  border-color: var(--color-primary-300);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 12px 32px rgba(0,0,0,0.1);
   color: var(--color-primary-700);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 8px rgba(91, 141, 239, 0.2);
+  transform: translateY(-1px);
 }
 
 .ht-tab-icon {
@@ -140,10 +143,12 @@ const iconMap: Record<string, string> = {
   transition: all 0.2s ease;
   flex-shrink: 0;
   padding: 0;
+  opacity: 0.6;
 }
 
 .ht-tab-close:hover {
   background: var(--color-danger-50);
   color: var(--color-danger-500);
+  opacity: 1;
 }
 </style>

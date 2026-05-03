@@ -5,16 +5,18 @@
 1. JWT Bearer Token（移动端/API客户端）
 2. Cookie-based JWT（浏览器Web端）— 登录后设置 httpOnly cookie
 """
+import logging
 import os
 import uuid
-import logging
-from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request, Response
+from datetime import datetime, timedelta
+
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db
 from fastapi_app.core.deps import create_access_token, get_current_user_id
 from fastapi_app.shared_models import User
@@ -60,7 +62,7 @@ async def check_login_status(
     user_id: int = Depends(get_current_user_id),
 ):
     """检查登录状态接口
-    
+
     前端每5分钟调用一次此接口检查登录是否有效。
     返回200表示登录有效，401表示需要重新登录。
     """
@@ -109,22 +111,21 @@ async def log_frontend_error(
     前端在发生错误时调用此接口记录错误信息，
     便于后续分析和优化。
     """
-    from fastapi_app.core.logger import get_logger
-    
+
     # 获取客户端IP
     client_ip = request.client.host if request.client else "unknown"
-    
+
     # 记录到日志文件
     logger.warning(
         f"[Frontend Error] IP={client_ip}, URL={data.url}, "
         f"Error={data.error}, Timestamp={data.timestamp}, "
         f"UserAgent={data.userAgent}, Context={data.context}"
     )
-    
+
     # 如果有堆栈信息，也记录下来
     if data.stack:
         logger.debug(f"[Frontend Error Stack] {data.stack}")
-    
+
     return {
         "success": True,
         "message": "错误日志已记录"
@@ -149,7 +150,7 @@ async def api_login(
     # 手动限速检查：登录接口5次/分钟
     from limits import parse
     from slowapi.util import get_remote_address
-    
+
     limiter = request.app.state.limiter
     key = get_remote_address(request)
     item = parse("5/minute")
@@ -160,8 +161,7 @@ async def api_login(
             detail="登录尝试过于频繁，请稍后再试"
         )
 
-    from fastapi_app.core.security import verify_password, hash_password, needs_migration
-    from fastapi_app.core.config import settings
+    from fastapi_app.core.security import check_needs_rehash, hash_password, needs_migration, verify_password
 
     username = data.username.strip()
     password = data.password
@@ -199,6 +199,15 @@ async def api_login(
             logger.info(f"[Login] 密码哈希已迁移到 Argon2id: user_id={user.id}")
         except (ValueError, TypeError, OSError) as e:
             logger.warning(f"[Login] 密码哈希迁移失败（不影响登录）: {e}")
+            await db.rollback()
+    elif check_needs_rehash(user.password):
+        try:
+            new_hash = hash_password(password)
+            user.password = new_hash
+            await db.commit()
+            logger.info(f"[Login] 密码哈希参数已升级: user_id={user.id}")
+        except (ValueError, TypeError, OSError) as e:
+            logger.warning(f"[Login] 密码哈希升级失败（不影响登录）: {e}")
             await db.rollback()
 
     # 生成JWT Token（仅存储最小必要信息，权限通过数据库实时查询）
@@ -259,8 +268,9 @@ async def api_logout(request: Request):
         resp.delete_cookie(key="auth_status", path="/")
         return resp
     # API 调用：返回 JSON
-    from fastapi.responses import Response
     import json
+
+    from fastapi.responses import Response
     resp = Response(
         content=json.dumps({"success": True, "message": "已登出"}, ensure_ascii=False),
         media_type="application/json",

@@ -1,8 +1,9 @@
-import json, os
+import json
+import os
 
 # 1. 验证 supreme-directive 文件存在且字符数<1000
 supreme_path = r'd:\erp_system\.trae\rules\agent-orchestration-supreme-directive.md'
-with open(supreme_path, 'r', encoding='utf-8') as f:
+with open(supreme_path, encoding='utf-8') as f:
     content = f.read()
     char_count = len(content)
     print('=== 1. Supreme Directive 文件检查 ===')
@@ -13,7 +14,7 @@ with open(supreme_path, 'r', encoding='utf-8') as f:
 
 # 2. 验证 index.json 引用
 index_path = r'd:\erp_system\.trae\rules\index.json'
-with open(index_path, 'r', encoding='utf-8') as f:
+with open(index_path, encoding='utf-8') as f:
     index = json.load(f)
     print('=== 2. Index.json 引用检查 ===')
     main_files = index.get('main_rules', {}).get('files', [])
@@ -24,7 +25,7 @@ with open(index_path, 'r', encoding='utf-8') as f:
 
 # 3. 验证 agent-system-v2.json 配置
 config_path = r'd:\erp_system\.trae\config\agent-system-v2.json'
-with open(config_path, 'r', encoding='utf-8') as f:
+with open(config_path, encoding='utf-8') as f:
     config = json.load(f)
     print('=== 3. Agent System v2 配置检查 ===')
     print(f'QueryEngine enabled: {config.get("queryEngine",{}).get("enabled")}')
@@ -77,7 +78,7 @@ print()
 
 # 7. 验证三阶段流程在 task-dispatch-rules 中的体现
 task_dispatch_path = r'd:\erp_system\.trae\rules\task-dispatch-rules.json'
-with open(task_dispatch_path, 'r', encoding='utf-8') as f:
+with open(task_dispatch_path, encoding='utf-8') as f:
     td = json.load(f)
     print('=== 7. 三阶段流程规则检查 ===')
     states = td.get('taskStates', {})
@@ -93,7 +94,7 @@ with open(task_dispatch_path, 'r', encoding='utf-8') as f:
 # 8. 验证 Middleware 链配置
 print('=== 8. Middleware 链检查 ===')
 mw_rules_path = r'd:\erp_system\.trae\rules\index.json'
-with open(mw_rules_path, 'r', encoding='utf-8') as f:
+with open(mw_rules_path, encoding='utf-8') as f:
     idx = json.load(f)
     module_files = idx.get('module_rules', {}).get('files', [])
     mw_file = any('middleware' in f['name'] for f in module_files)

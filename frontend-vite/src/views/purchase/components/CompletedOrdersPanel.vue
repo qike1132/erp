@@ -133,7 +133,7 @@
             <tbody>
               <tr v-for="o in orders" :key="o.id">
                 <td>{{ o.order_date || '-' }}</td>
-                <td class="pc-td-bold">{{ o.order_no }}</td>
+                <td class="pc-td-bold">{{ o.source_order_no || o.order_no }}</td>
                 <td>{{ o.customer_name || '-' }}</td>
                 <td>{{ o.product_name || '-' }}</td>
                 <td class="pc-td-right pc-td-bold">{{ o.quantity?.toLocaleString() || '-' }}</td>

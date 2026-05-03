@@ -5,9 +5,8 @@ Revises: 9b7b1ead6c4a
 Create Date: 2026-04-06
 
 """
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = 'add_supplier_purchase_order'
 down_revision = 'add_product_version'
@@ -139,7 +138,7 @@ def downgrade():
     op.drop_table('product_packaging')
     op.drop_table('product_fabric')
     op.drop_table('supplier')
-    
+
     try:
         op.drop_column('product_material', 'remark')
         op.drop_column('product_material', 'loss_rate')

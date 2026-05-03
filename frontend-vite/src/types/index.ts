@@ -1,3 +1,17 @@
+export interface ApiResponse<T = unknown> {
+  success: boolean
+  data?: T
+  detail?: string
+  status_code?: number
+}
+
+export interface PaginatedResponse<T> {
+  items: T[]
+  total: number
+  pages: number
+  current_page: number
+}
+
 export interface OrderItem {
   id: number
   product_name: string
@@ -13,7 +27,6 @@ export interface OrderItem {
   locked_by_name?: string
 }
 
-// 入库
 export interface StockInRecord {
   id: number
   stockin_no: string
@@ -28,7 +41,6 @@ export interface StockInRecord {
   note?: string
 }
 
-// 出库
 export interface StockOutRecord {
   id: number
   stockout_no: string
@@ -45,7 +57,6 @@ export interface StockOutRecord {
   country?: string
 }
 
-// 库存
 export interface InventoryItem {
   product_id: number
   product_name: string
@@ -56,7 +67,6 @@ export interface InventoryItem {
   total_deducted: number
 }
 
-// 客户
 export interface Customer {
   id: number
   customer_code?: string
@@ -69,7 +79,6 @@ export interface Customer {
   create_time?: string
 }
 
-// 供应商
 export interface Supplier {
   id: number
   name: string
@@ -80,7 +89,22 @@ export interface Supplier {
   status?: string
 }
 
-// 采购订单
+export interface PurchaseOrderItem {
+  id: number
+  product_name: string
+  barcode: string
+  material_name: string
+  material_category?: string
+  specification?: string
+  quantity: number
+  unit: string
+  unit_price: number
+  total_price: number
+  supplier_name: string
+  customer_name: string
+  remark: string
+}
+
 export interface PurchaseOrder {
   id: number
   order_no: string
@@ -91,22 +115,45 @@ export interface PurchaseOrder {
   create_time: string
   order_date: string
   total_quantity?: number
-  items?: any[]
-  materials?: any[]
+  total_amount?: number
+  item_count?: number
+  source_order_no?: string
+  items?: PurchaseOrderItem[]
+  materials?: PurchaseOrderItem[]
 }
 
-// 审批
+export interface UnprocessedOrder {
+  id: number
+  order_no: string
+  customer: string
+  product_name: string
+  barcode?: string
+  quantity: number
+  order_date: string
+  status: string
+  product?: Product
+  has_bom?: boolean
+}
+
 export interface ApprovalItem {
   id: number
-  type: string
-  ref_id: number
-  summary: string
+  order_id: number
+  order_no: string | null
+  requester_id: number
+  requester_name: string | null
+  operation_type: string
+  operation_type_display: string
+  operation_data: string | null
   status: string
-  created_by: string
-  created_at: string
+  status_display: string
+  request_time: string | null
+  approver_id: number | null
+  approver_name: string | null
+  approval_time: string | null
+  rejection_reason: string | null
+  lock_time: string | null
 }
 
-// 用户
 export interface User {
   id: number
   username: string
@@ -114,7 +161,6 @@ export interface User {
   permissions: string[]
 }
 
-// 导航
 export interface NavSection {
   title: string
   items: NavItem[]
@@ -125,9 +171,9 @@ export interface NavItem {
   path: string
   icon?: string
   permission?: string
+  permissionCodes?: string[]
 }
 
-// 权限
 export interface PermissionItem {
   id: number
   code: string
@@ -136,16 +182,6 @@ export interface PermissionItem {
   children?: PermissionItem[]
 }
 
-// 分页结果
-export interface PageResult<T> {
-  items: T[]
-  total: number
-  page: number
-  per_page: number
-  total_pages?: number
-}
-
-// 产品
 export interface Product {
   id: number
   name: string
@@ -155,4 +191,50 @@ export interface Product {
   unit?: string
   note?: string
   status?: boolean
+}
+
+export interface ProductionCraft {
+  id: number
+  product_name?: string
+  barcode?: string
+  quantity?: number
+  status?: string
+  year?: number
+  month?: number
+}
+
+export interface MaterialRegistration {
+  id: number
+  purchase_order_id?: number
+  purchase_order_no?: string
+  supplier_id?: number
+  supplier_name?: string
+  status?: string
+  created_at?: string
+}
+
+export interface StagingOrder {
+  id: number
+  product_name: string
+  barcode?: string
+  quantity: number
+  customer?: string
+}
+
+export interface ShipmentRecord {
+  id: number
+  plan_id: number
+  product_name: string
+  quantity: number
+  shipped_at?: string
+}
+
+export interface QueryParams {
+  page?: number
+  per_page?: number
+  keyword?: string
+  status?: string
+  sort_by?: string
+  sort_order?: string
+  [key: string]: unknown
 }

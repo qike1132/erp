@@ -38,13 +38,13 @@ cmd = [
 print(f'正在备份MySQL数据库: {db_name}')
 print(f'备份文件: {backup_file}')
 
-result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+result = subprocess.run(cmd, capture_output=True)
 
 if result.returncode == 0:
     with open(backup_file, 'wb') as f:
         f.write(result.stdout)
     file_size = backup_file.stat().st_size
-    print(f'备份成功!')
+    print('备份成功!')
     print(f'文件: {backup_file}')
     print(f'大小: {file_size:,} 字节')
 else:

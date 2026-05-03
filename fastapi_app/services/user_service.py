@@ -1,10 +1,11 @@
 """用户管理服务层"""
 import logging
-from sqlalchemy import select
-from sqlalchemy.orm import joinedload
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.shared_models import User, Permission
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload, selectinload
+
+from fastapi_app.shared_models import Permission, User
 
 logger = logging.getLogger(__name__)
 
@@ -111,28 +112,41 @@ async def get_permissions(db) -> list[Permission]:
 
 async def update_user_permissions(db: AsyncSession, user_id: int, permission_ids: list[int]) -> User:
     """更新用户权限"""
-    user = await db.get(User, user_id)
+    logger.info(f"Updating permissions for user {user_id}: {permission_ids}")
+
+    # 预加载 permissions 关系，避免异步上下文中懒加载触发 MissingGreenlet
+    result = await db.execute(
+        select(User).options(selectinload(User.permissions)).where(User.id == user_id)
+    )
+    user = result.unique().scalar_one_or_none()
     if not user:
         raise ValueError("用户不存在")
 
     # 清空现有权限
     user.permissions.clear()
 
+    # 批量获取权限
+    result = await db.execute(
+        select(Permission).where(Permission.id.in_(permission_ids))
+    )
+    permissions = {p.id: p for p in result.scalars().all()}
+    logger.info(f"Loaded permissions: {list(permissions.keys())}")
+
     for pid in permission_ids:
-        permission = await db.get(Permission, pid)
+        permission = permissions.get(pid)
         if permission:
             # 跳过敏感权限
             if permission.code in SENSITIVE_PERMISSIONS:
+                logger.info(f"Skipping sensitive permission: {permission.code}")
+                continue
+            # 跳过已添加的权限
+            if any(p.id == permission.id for p in user.permissions):
                 continue
             user.permissions.append(permission)
-            # 自动添加子权限
-            if permission.children:
-                for child in permission.children:
-                    if child.code in SENSITIVE_PERMISSIONS:
-                        continue
-                    if child not in user.permissions:
-                        user.permissions.append(child)
+        else:
+            logger.warning(f"Permission {pid} not found")
 
     await db.flush()
     await db.refresh(user)
+    logger.info(f"Permissions updated successfully for user {user_id}")
     return user

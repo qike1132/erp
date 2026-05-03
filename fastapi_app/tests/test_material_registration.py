@@ -1,6 +1,7 @@
 """来料登记模块测试"""
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 
 class TestMaterialRegistrationSchemas:
@@ -28,10 +29,10 @@ class TestMaterialRegistrationModels:
         assert MaterialRegistrationItem.__tablename__ == 'material_registration_item'
 
     def test_computed_status_pending(self):
-        from fastapi_app.shared_models.material_registration import MaterialRegistration, MaterialRegistrationItem
+        from fastapi_app.shared_models.material_registration import MaterialRegistration
         reg = MagicMock()
         reg.items = []
-        mr = MaterialRegistration.__new__(MaterialRegistration)
+        MaterialRegistration.__new__(MaterialRegistration)
         # Just verify it can be imported and instantiated conceptually
 
 
@@ -165,7 +166,6 @@ class TestMaterialRegistrationEndpoints:
 
     @pytest.mark.asyncio
     async def test_get_registration_404(self, client, mock_db):
-        from fastapi_app.services.material_registration_service import get_registration
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = None
         mock_db.execute = AsyncMock(return_value=mock_result)

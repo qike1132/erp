@@ -11,14 +11,14 @@ from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from sqlalchemy import and_, func, select
+from sqlalchemy.exc import DisconnectionError, OperationalError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db
 from fastapi_app.core.deps import get_current_user_id
-from fastapi_app.shared_models import Order, StockIn, StockOut, ApprovalRequest, Product, PurchaseOrder
+from fastapi_app.shared_models import ApprovalRequest, Order, Product, PurchaseOrder, StockIn, StockOut
 from fastapi_app.shared_models.material_registration import MaterialRegistration
-from sqlalchemy import func, and_, select
-from sqlalchemy.exc import OperationalError, DisconnectionError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -91,9 +91,9 @@ async def _fetch_stats_async(db: AsyncSession) -> dict:
         return data
     except (OperationalError, DisconnectionError) as e:
         logger.warning("仪表盘异步统计加载失败: %s [%s]", e, type(e).__name__)
-        return dict(order_today=0, stockin_today=0, stockout_today=0, pending_approvals=0,
-                    order_yesterday=0, stockin_yesterday=0, stockout_yesterday=0,
-                    low_stock_count=0, pending_purchases=0, pending_materials=0)
+        return {"order_today": 0, "stockin_today": 0, "stockout_today": 0, "pending_approvals": 0,
+                    "order_yesterday": 0, "stockin_yesterday": 0, "stockout_yesterday": 0,
+                    "low_stock_count": 0, "pending_purchases": 0, "pending_materials": 0}
 
 
 async def _fetch_activities_async(db: AsyncSession) -> list:

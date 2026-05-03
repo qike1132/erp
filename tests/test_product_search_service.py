@@ -1,8 +1,9 @@
 """product_search_service 单元测试"""
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from fastapi_app.services.product_search_service import ProductSearchService, product_search_service
+import pytest
+
+from fastapi_app.services.product_search_service import ProductSearchService
 
 
 class TestProductSearchService:

@@ -4,8 +4,8 @@
 运行方式（在项目根目录）:
     python scripts/add_supplier_nav.py
 """
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 

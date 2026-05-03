@@ -9,8 +9,9 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
+from sqlalchemy import inspect, text
+
 from fastapi_app.core.database import SyncSessionLocal, sync_engine
-from sqlalchemy import text, inspect
 
 session = SyncSessionLocal()
 

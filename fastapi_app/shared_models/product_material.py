@@ -4,12 +4,12 @@
 支持详细的布料和配件信息。
 物料分类: fabric(面料类) / filling(填充类) / accessory(辅料类) / packaging(包装类)
 """
-from sqlalchemy import String, Integer, Numeric, Text, DateTime, ForeignKey, Index
-from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
 
-from fastapi_app.shared_models import Base
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from fastapi_app.shared_models import Base
 
 MATERIAL_CATEGORIES = {
     'fabric': {'name': '面料类'},

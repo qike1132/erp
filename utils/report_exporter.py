@@ -4,11 +4,10 @@
 """
 import io
 import logging
-from datetime import datetime
-from typing import List, Dict, Any
+from typing import Any
 
 from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +34,7 @@ class ReportExporter:
             bottom=Side(style='thin')
         )
 
-    def export_order_logs(self, logs: List[Dict[str, Any]], stats: Dict[str, Any]) -> bytes:
+    def export_order_logs(self, logs: list[dict[str, Any]], stats: dict[str, Any]) -> bytes:
         """
         导出订单流水
 
@@ -65,7 +64,7 @@ class ReportExporter:
 
         return self._save_workbook(wb)
 
-    def export_stockin_logs(self, logs: List[Dict[str, Any]], stats: Dict[str, Any]) -> bytes:
+    def export_stockin_logs(self, logs: list[dict[str, Any]], stats: dict[str, Any]) -> bytes:
         """
         导出备货流水
 
@@ -94,7 +93,7 @@ class ReportExporter:
 
         return self._save_workbook(wb)
 
-    def export_stockout_logs(self, logs: List[Dict[str, Any]], stats: Dict[str, Any]) -> bytes:
+    def export_stockout_logs(self, logs: list[dict[str, Any]], stats: dict[str, Any]) -> bytes:
         """
         导出出货流水
 
@@ -123,7 +122,7 @@ class ReportExporter:
 
         return self._save_workbook(wb)
 
-    def export_deduction_logs(self, logs: List[Dict[str, Any]], stats: Dict[str, Any]) -> bytes:
+    def export_deduction_logs(self, logs: list[dict[str, Any]], stats: dict[str, Any]) -> bytes:
         """
         导出备货抵扣流水
 
@@ -152,7 +151,7 @@ class ReportExporter:
 
         return self._save_workbook(wb)
 
-    def export_inventory_data(self, inventory_data: List[Dict[str, Any]], stats: Dict[str, Any]) -> bytes:
+    def export_inventory_data(self, inventory_data: list[dict[str, Any]], stats: dict[str, Any]) -> bytes:
         """
         导出库存汇总数据
 
@@ -213,7 +212,7 @@ class ReportExporter:
             else:
                 ws.column_dimensions[col_letter].width = 18
 
-    def _format_inventory_row(self, log: Dict) -> List:
+    def _format_inventory_row(self, log: dict) -> list:
         """格式化库存行数据"""
         return [
             log.get('customer', ''),
@@ -223,7 +222,7 @@ class ReportExporter:
             log.get('total_stock', 0)
         ]
 
-    def _write_sheet(self, ws, headers: List[str], logs: List[Dict], row_formatter):
+    def _write_sheet(self, ws, headers: list[str], logs: list[dict], row_formatter):
         """
         写入工作表内容
 
@@ -262,7 +261,7 @@ class ReportExporter:
             else:
                 ws.column_dimensions[col_letter].width = 18
 
-    def _format_order_row(self, log: Dict) -> List:
+    def _format_order_row(self, log: dict) -> list:
         """格式化订单行数据"""
         return [
             log.get('order_date', ''),
@@ -272,7 +271,7 @@ class ReportExporter:
             log.get('note', '')
         ]
 
-    def _format_stockin_row(self, log: Dict) -> List:
+    def _format_stockin_row(self, log: dict) -> list:
         """格式化备货行数据"""
         return [
             log.get('stockin_date', ''),
@@ -282,7 +281,7 @@ class ReportExporter:
             log.get('note', '')
         ]
 
-    def _format_stockout_row(self, log: Dict) -> List:
+    def _format_stockout_row(self, log: dict) -> list:
         """格式化出货行数据"""
         return [
             log.get('stockout_date', ''),
@@ -292,7 +291,7 @@ class ReportExporter:
             log.get('note', '')
         ]
 
-    def _format_deduction_row(self, log: Dict) -> List:
+    def _format_deduction_row(self, log: dict) -> list:
         """格式化抵扣行数据"""
         return [
             log.get('deduction_time', ''),
@@ -302,7 +301,7 @@ class ReportExporter:
             log.get('order_note', '')
         ]
 
-    def _write_summary(self, ws, stats: Dict, title: str, col_count: int):
+    def _write_summary(self, ws, stats: dict, title: str, col_count: int):
         """
         写入统计信息
 

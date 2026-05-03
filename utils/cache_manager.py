@@ -4,7 +4,6 @@
 """
 import logging
 from functools import wraps
-from starlette.responses import Response
 
 _logger = logging.getLogger(__name__)
 
@@ -20,7 +19,7 @@ def no_cache(view_func):
         if isinstance(result, dict):
             from fastapi.responses import JSONResponse
             result = JSONResponse(content=result)
-        
+
         if hasattr(result, 'headers'):
             result.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
             result.headers['Pragma'] = 'no-cache'
@@ -136,8 +135,8 @@ def add_random_param_to_url(url):
     """
     为URL添加随机参数，防止浏览器缓存
     """
-    import time
     import random
+    import time
 
     separator = '?' if '?' not in url else '&'
     return f"{url}{separator}_t={int(time.time())}&_r={random.randint(1, 1000000)}"

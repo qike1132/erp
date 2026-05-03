@@ -2,11 +2,11 @@
 import pytest
 
 from fastapi_app.shared_models.order import (
-    Order,
-    VALID_ORDER_STATUSES,
-    STATUS_TRANSITIONS,
     DELETABLE_STATUSES,
     EDITABLE_STATUSES,
+    STATUS_TRANSITIONS,
+    VALID_ORDER_STATUSES,
+    Order,
 )
 
 
@@ -169,7 +169,7 @@ class TestOrderStatusTransitionsCompleteness:
             assert target in VALID_ORDER_STATUSES, f"Orphan target status: {target}"
 
     def test_default_status_is_valid(self):
-        order = Order(
+        Order(
             id=1,
             order_no="ORD-TEST-003",
             customer="Test Customer",

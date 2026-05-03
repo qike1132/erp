@@ -8,11 +8,16 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session, joinedload
 
-from fastapi_app.shared_models import (
-    Product, ProductMaterial, ProductFabric, ProductAccessory, ProductPackaging,
-    PurchaseOrder, PurchaseOrderItem,
-)
 from fastapi_app.services.purchase_product_service import _product_has_bom
+from fastapi_app.shared_models import (
+    Product,
+    ProductAccessory,
+    ProductFabric,
+    ProductMaterial,
+    ProductPackaging,
+    PurchaseOrder,
+    PurchaseOrderItem,
+)
 
 logger = logging.getLogger(__name__)
 

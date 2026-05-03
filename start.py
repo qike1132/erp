@@ -14,15 +14,15 @@ ERP系统统一启动管理器
     python start.py --help         # 帮助
 """
 
+import argparse
 import os
-import sys
-import time
 import signal
 import subprocess
+import sys
 import threading
-import argparse
-from pathlib import Path
+import time
 from datetime import datetime
+from pathlib import Path
 
 if sys.platform == 'win32':
     import io
@@ -32,6 +32,7 @@ if sys.platform == 'win32':
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 from dotenv import load_dotenv
+
 load_dotenv(override=False)
 
 # ==================== 配置 ====================
@@ -141,10 +142,9 @@ def main():
     else:
         mode = "prod" if args.prod else "dev"
 
-    if not args.backend_only:
-        if not FRONTEND_DIR.exists():
-            print(Color.wrap(f"错误: 前端目录不存在: {FRONTEND_DIR}", Color.RED))
-            sys.exit(1)
+    if not args.backend_only and not FRONTEND_DIR.exists():
+        print(Color.wrap(f"错误: 前端目录不存在: {FRONTEND_DIR}", Color.RED))
+        sys.exit(1)
 
     print_banner(mode, args.api_port, args.web_port)
 

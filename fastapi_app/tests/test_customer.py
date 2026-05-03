@@ -1,6 +1,7 @@
 """客户管理模块测试"""
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 
 class TestCustomerSchemas:
@@ -10,8 +11,9 @@ class TestCustomerSchemas:
         assert data.name == "测试客户"
 
     def test_customer_create_required_name(self):
-        from fastapi_app.schemas.customer import CustomerCreate
         from pydantic import ValidationError
+
+        from fastapi_app.schemas.customer import CustomerCreate
         with pytest.raises(ValidationError):
             CustomerCreate()
 
@@ -75,7 +77,7 @@ class TestCustomerService:
         mock_result.scalar_one_or_none.return_value = None
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        customer = await create_customer(mock_db, "新客户", "张三", "138", "地址", "备注")
+        await create_customer(mock_db, "新客户", "张三", "138", "地址", "备注")
         assert mock_db.add.called
 
     @pytest.mark.asyncio
@@ -107,7 +109,7 @@ class TestCustomerService:
         from fastapi_app.services.customer_service import toggle_customer_status
         mock_db.get = AsyncMock(return_value=mock_customer)
 
-        result = await toggle_customer_status(mock_db, 1)
+        await toggle_customer_status(mock_db, 1)
         assert mock_customer.status is False  # toggled
 
     @pytest.mark.asyncio

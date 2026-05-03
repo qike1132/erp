@@ -1,9 +1,9 @@
 """
 清除导航缓存
 """
+import asyncio
 import os
 import sys
-import asyncio
 
 # 确保可以导入项目模块
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

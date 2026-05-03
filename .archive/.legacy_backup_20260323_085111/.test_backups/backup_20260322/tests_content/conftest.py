@@ -1,10 +1,11 @@
 """
 pytest配置文件 - 定义公共fixtures和测试配置
 """
-import pytest
 import os
 import sys
 from datetime import datetime
+
+import pytest
 
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -23,7 +24,7 @@ def test_app():
     app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
     app.config['TESTING'] = True
     app.config['WTF_CSRF_ENABLED'] = False
-    
+
     with app.app_context():
         # 创建所有表
         db.create_all()
@@ -48,13 +49,13 @@ def test_db(test_app):
     """创建测试数据库会话"""
     connection = db.engine.connect()
     transaction = connection.begin()
-    
-    options = dict(bind=connection, binds={})
+
+    options = {'bind': connection, 'binds': {}}
     session = db.create_scoped_session(options=options)
     db.session = session
-    
+
     yield session
-    
+
     transaction.rollback()
     connection.close()
     session.remove()
@@ -107,9 +108,9 @@ def sample_user_data():
 def auth_header(test_client, sample_user_data):
     """认证头部fixture"""
     # 创建测试用户
-    from werkzeug.security import generate_password_hash
     from app import User
-    
+    from werkzeug.security import generate_password_hash
+
     user = User(
         username=sample_user_data['username'],
         password=generate_password_hash(sample_user_data['password']),
@@ -119,13 +120,13 @@ def auth_header(test_client, sample_user_data):
     )
     db.session.add(user)
     db.session.commit()
-    
+
     # 登录获取token
     response = test_client.post('/api/login', json={
         'username': sample_user_data['username'],
         'password': sample_user_data['password']
     })
-    
+
     token = response.json.get('token')
     return {'Authorization': f'Bearer {token}'}
 

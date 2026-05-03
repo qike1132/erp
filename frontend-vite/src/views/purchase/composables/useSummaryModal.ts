@@ -2,42 +2,96 @@ import { ref, computed, reactive } from 'vue'
 import { purchaseApi } from '@/api'
 import { printHtml } from '@/utils/print'
 
+interface FabricItem {
+  fabric_name: string
+  specification?: string
+  quantity: number
+  unit?: string
+  item_ids?: number[]
+  item_id?: number
+}
+
+interface SupplierGroup {
+  supplier_name: string
+  fabrics: FabricItem[]
+}
+
+interface FactoryGroup {
+  customer_name: string
+  product_name: string
+  product_quantity?: number
+  order_quantity?: number
+  suppliers: SupplierGroup[]
+}
+
+interface FactorySummaryData {
+  success: boolean
+  message?: string
+  groups: FactoryGroup[]
+}
+
+interface MaterialItem {
+  material_name: string
+  specification?: string
+  total_quantity: number
+  unit?: string
+  supplier_name?: string
+}
+
+interface SupplierSummaryData {
+  success: boolean
+  message?: string
+  materials: MaterialItem[]
+}
+
+interface SaveFactoryEditsResponse {
+  success: boolean
+  message?: string
+}
+
 export function useSummaryModal() {
   const open = ref(false)
   const tab = ref<'factory' | 'supplier'>('factory')
-  const factoryData = ref<any>(null)
-  const factoryOriginalData = ref<any>(null)
-  const supplierData = ref<any>(null)
+  const factoryData = ref<FactorySummaryData | null>(null)
+  const factoryOriginalData = ref<FactorySummaryData | null>(null)
+  const supplierData = ref<SupplierSummaryData | null>(null)
   const editMode = ref(false)
   const orderIds = ref<number[]>([])
+  const supplierOrder = ref<string[]>([])
 
   const supplierGroups = computed(() => {
     if (!supplierData.value?.materials) return []
-    const groups: { supplierName: string; materials: any[] }[] = []
-    const map: Record<string, any[]> = {}
-    const order: string[] = []
-    supplierData.value.materials.forEach((m: any) => {
+    const groups: { supplierName: string; materials: MaterialItem[] }[] = []
+    const map: Record<string, MaterialItem[]> = {}
+    const newOrder: string[] = []
+    supplierData.value.materials.forEach((m) => {
       const s = m.supplier_name || '未指定供应商'
       if (!map[s]) {
         map[s] = []
-        order.push(s)
+        newOrder.push(s)
       }
       map[s].push(m)
     })
-    order.forEach((s) => groups.push({ supplierName: s, materials: map[s] }))
+    const order = supplierOrder.value.length > 0 ? supplierOrder.value : newOrder
+    order.forEach((s) => {
+      if (map[s]) groups.push({ supplierName: s, materials: map[s] })
+    })
+    newOrder.forEach((s) => {
+      if (!order.includes(s) && map[s]) groups.push({ supplierName: s, materials: map[s] })
+    })
     return groups
   })
 
   const supplierGrandTotal = computed(() => {
     let t = 0
-    supplierGroups.value.forEach((g) => g.materials.forEach((m) => (t += parseFloat(m.total_quantity) || 0)))
+    supplierGroups.value.forEach((g) => g.materials.forEach((m) => (t += parseFloat(String(m.total_quantity)) || 0)))
     return t
   })
 
   const factoryGrandTotal = computed(() => {
     let t = 0
-    factoryData.value?.groups?.forEach((g: any) =>
-      g.suppliers?.forEach((s: any) => s.fabrics?.forEach((f: any) => (t += parseFloat(f.quantity) || 0))),
+    factoryData.value?.groups?.forEach((g) =>
+      g.suppliers?.forEach((s) => s.fabrics?.forEach((f) => (t += parseFloat(String(f.quantity)) || 0))),
     )
     return t
   })
@@ -45,13 +99,19 @@ export function useSummaryModal() {
   async function openSummary(ids: number[]) {
     orderIds.value = ids
     const [fRes, sRes] = await Promise.all([
-      purchaseApi.factorySummary(ids) as any,
-      purchaseApi.supplierSummary(ids) as any,
+      purchaseApi.factorySummary(ids) as unknown as FactorySummaryData,
+      purchaseApi.supplierSummary(ids) as unknown as SupplierSummaryData,
     ])
     if (!fRes.success || !sRes.success) throw new Error(fRes.message || sRes.message || '汇总失败')
     factoryData.value = JSON.parse(JSON.stringify(fRes))
     factoryOriginalData.value = JSON.parse(JSON.stringify(fRes))
     supplierData.value = JSON.parse(JSON.stringify(sRes))
+    const initOrder: string[] = []
+    sRes.materials?.forEach((m) => {
+      const s = m.supplier_name || '未指定供应商'
+      if (!initOrder.includes(s)) initOrder.push(s)
+    })
+    supplierOrder.value = initOrder
     editMode.value = false
     tab.value = 'factory'
     open.value = true
@@ -68,13 +128,13 @@ export function useSummaryModal() {
   }
 
   async function saveFactoryEdits() {
-    const edits: any[] = []
+    const edits: { item_ids: number[]; quantity: number }[] = []
     const current = factoryData.value
     const original = factoryOriginalData.value
     if (current?.groups && original?.groups) {
-      current.groups.forEach((group: any, gi: number) => {
-        ;(group.suppliers || []).forEach((supplier: any, si: number) => {
-          ;(supplier.fabrics || []).forEach((fabric: any, fi: number) => {
+      current.groups.forEach((group, gi) => {
+        ;(group.suppliers || []).forEach((supplier, si) => {
+          ;(supplier.fabrics || []).forEach((fabric, fi) => {
             const origFabric = original.groups?.[gi]?.suppliers?.[si]?.fabrics?.[fi]
             if (origFabric && fabric.quantity !== origFabric.quantity) {
               const itemIds = fabric.item_ids || (fabric.item_id ? [fabric.item_id] : [])
@@ -88,16 +148,25 @@ export function useSummaryModal() {
       editMode.value = false
       return
     }
-    const res = (await purchaseApi.saveFactoryEdits(edits)) as any
+    const res = await purchaseApi.saveFactoryEdits(edits) as unknown as SaveFactoryEditsResponse
     if (res.success) {
-      // 保存成功后重新获取汇总数据，确保工厂和供应商标签页同步
-      const [fRes, sRes] = await Promise.all([
-        purchaseApi.factorySummary(orderIds.value) as any,
-        purchaseApi.supplierSummary(orderIds.value) as any,
-      ])
-      factoryData.value = JSON.parse(JSON.stringify(fRes))
-      factoryOriginalData.value = JSON.parse(JSON.stringify(fRes))
-      supplierData.value = JSON.parse(JSON.stringify(sRes))
+      edits.forEach((edit) => {
+        factoryData.value?.groups?.forEach((group) => {
+          ;(group.suppliers || []).forEach((supplier) => {
+            ;(supplier.fabrics || []).forEach((fabric) => {
+              const itemIds = fabric.item_ids || (fabric.item_id ? [fabric.item_id] : [])
+              if (edit.item_ids.some((id) => itemIds.includes(id))) {
+                fabric.quantity = edit.quantity
+              }
+            })
+          })
+        })
+      })
+      factoryOriginalData.value = JSON.parse(JSON.stringify(factoryData.value))
+      try {
+        const sRes = await purchaseApi.supplierSummary(orderIds.value) as unknown as SupplierSummaryData
+        if (sRes.success) supplierData.value = JSON.parse(JSON.stringify(sRes))
+      } catch { /* 非关键，忽略 */ }
       editMode.value = false
       return res
     }
@@ -107,23 +176,24 @@ export function useSummaryModal() {
   function close() {
     open.value = false
     orderIds.value = []
+    supplierOrder.value = []
   }
 
   function printFactory() {
     if (!factoryData.value) return
     const data = factoryData.value
     let tableHtml = ''
-    data.groups?.forEach((group: any) => {
+    data.groups?.forEach((group) => {
       const suppliers = group.suppliers || []
       let globalFabricIdx = 0
-      suppliers.forEach((supplier: any) => {
-        supplier.fabrics?.forEach((fabric: any) => {
+      suppliers.forEach((supplier) => {
+        supplier.fabrics?.forEach((fabric) => {
           tableHtml += '<tr>'
           if (globalFabricIdx === 0) {
-            const rowCount = suppliers.reduce((s: number, sup: any) => s + (sup.fabrics?.length || 0), 0)
+            const rowCount = suppliers.reduce((s, sup) => s + (sup.fabrics?.length || 0), 0)
             tableHtml += `<td rowspan="${rowCount}" style="border:1px solid #333;padding:8px;text-align:center;font-weight:bold;">${group.customer_name}</td>`
             tableHtml += `<td rowspan="${rowCount}" style="border:1px solid #333;padding:8px;text-align:center;">${group.product_name}</td>`
-            const qty = parseFloat(group.product_quantity || group.order_quantity || 0)
+            const qty = parseFloat(String(group.product_quantity || group.order_quantity || 0))
             const qtyStr = qty % 1 === 0 ? String(parseInt(String(qty))) : qty.toFixed(2).replace(/\.?0+$/, '')
             tableHtml += `<td rowspan="${rowCount}" style="border:1px solid #333;padding:8px;text-align:center;">${qtyStr}</td>`
           }

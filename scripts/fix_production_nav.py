@@ -7,8 +7,8 @@
 运行方式（在项目根目录）:
     python scripts/fix_production_nav.py
 """
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -71,7 +71,7 @@ def main():
             session.add(manage_perm)
 
             print(f"[OK] 新增生产计划导航项 (sort_order={next_sort})")
-            print(f"[OK] 新增生产计划管理权限 (code=production_summary_manage)")
+            print("[OK] 新增生产计划管理权限 (code=production_summary_manage)")
 
         session.commit()
 

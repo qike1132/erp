@@ -3,28 +3,31 @@
 
 映射到与 Flask-SQLAlchemy Order 相同的 'order' 表。
 """
-from sqlalchemy import String, Integer, Text, Boolean, DateTime, ForeignKey, Index
-from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
 
+# 订单状态流转：新订单 -> 待备货/已备货/部分备货 -> 待出货 -> 已出货 -> 已完成
+VALID_ORDER_STATUSES = {'待备货', '已备货', '部分备货', '待出货', '已出货', '已完成', '已取消'}
 
-# 新订单 status=None，无需'待备货'/'部分备货'/'已备货'等中间状态
-VALID_ORDER_STATUSES = {'待出货', '已出货', '已完成', '已取消'}
-
-# None 是新订单初始状态，可转为'待出货'或'已取消'
+# None 是新订单初始状态
 STATUS_TRANSITIONS = {
-    None: {'待出货', '已取消'},
+    None: {'待备货', '已取消'},
+    '待备货': {'已备货', '部分备货', '待出货', '已取消'},
+    '已备货': {'待出货', '已取消'},
+    '部分备货': {'已备货', '待出货', '已取消'},
     '待出货': {'已出货', '已取消'},
     '已出货': {'已完成'},
     '已完成': set(),
     '已取消': set(),
 }
 
-# None = 新订单，可编辑可删除
-DELETABLE_STATUSES = {None, '已取消'}
-EDITABLE_STATUSES = {None}
+# None 和 待备货 = 新订单，可编辑可删除
+DELETABLE_STATUSES = {None, '待备货', '已取消'}
+EDITABLE_STATUSES = {None, '待备货'}
 
 
 class Order(Base):

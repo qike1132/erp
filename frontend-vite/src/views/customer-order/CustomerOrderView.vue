@@ -3,14 +3,16 @@
     <div class="co-card co-card-main">
       <!-- 卡片头部 -->
       <div class="co-card-header">
-        <HeaderTabs />
-        <div class="co-header-actions">
+        <div class="co-header-left">
+          <HeaderTabs />
+        </div>
+        <div class="co-header-right">
           <div class="co-tab-bar">
             <button :class="['co-tab-btn', activeTab === 'input' && 'active']" @click="activeTab = 'input'">
-              <i class="fas fa-edit" />录入
+              录入
             </button>
             <button :class="['co-tab-btn', activeTab === 'records' && 'active']" @click="activeTab = 'records'">
-              <i class="fas fa-search" />记录查询
+              记录查询
             </button>
           </div>
         </div>
@@ -249,7 +251,7 @@
           <span class="co-history-title"><i class="fas fa-clipboard-list" />订单列表</span>
           <span v-if="orderList.length" class="count-badge-subtle"
             ><strong>{{ orderList.length }}</strong> 条 ·
-            <strong>{{ orderList.reduce((s: any, o: any) => s + o.quantity, 0) }}</strong> 件</span
+            <strong>{{ orderList.reduce((s: unknown, o: any) => s + o.quantity, 0) }}</strong> 件</span
           >
         </div>
         <div class="co-card-body">
@@ -261,7 +263,7 @@
                   <strong>{{ group.date }}</strong>
                   <span class="count-badge-subtle">{{ group.orders.length }} 条</span>
                   <span class="count-badge-subtle"
-                    >共 {{ group.orders.reduce((s: any, o: any) => s + o.quantity, 0) }} 件</span
+                    >共 {{ group.orders.reduce((s: unknown, o: any) => s + o.quantity, 0) }} 件</span
                   >
                 </div>
                 <i :class="['fas fa-chevron-down co-toggle-icon', expandedOrderGroups.has(group.date) && 'expanded']" />
@@ -271,10 +273,11 @@
                   <thead>
                     <tr>
                       <th style="width: 10%">图片</th>
-                      <th style="width: 22%">产品</th>
+                      <th style="width: 20%">产品</th>
                       <th style="width: 12%">客户</th>
-                      <th style="width: 10%">数量</th>
-                      <th style="width: 10%">抵扣</th>
+                      <th style="width: 9%">数量</th>
+                      <th style="width: 9%">抵扣</th>
+                      <th style="width: 8%">状态</th>
                       <th style="width: 12%">操作</th>
                     </tr>
                   </thead>
@@ -302,6 +305,16 @@
                         <span v-if="row.deduct_quantity > 0" style="color: var(--color-warning-500)">{{ row.deduct_quantity }}</span
                         ><span v-else>-</span>
                       </td>
+                      <td>
+                        <span v-if="row.status === '已出货'" class="co-status-badge co-status-shipped">已出货</span>
+                        <span v-else-if="row.status === '待出货'" class="co-status-badge co-status-pending">待出货</span>
+                        <span v-else-if="row.status === '已完成'" class="co-status-badge co-status-done">已完成</span>
+                        <span v-else-if="row.status === '已取消'" class="co-status-badge co-status-cancel">已取消</span>
+                        <span v-else-if="row.status === '已备货'" class="co-status-badge co-status-new">已备货</span>
+                        <span v-else-if="row.status === '部分备货'" class="co-status-badge co-status-new" style="background:var(--color-warning-100);color:var(--color-warning-600)">部分备货</span>
+                        <span v-else-if="row.status === '待备货'" class="co-status-badge co-status-new" style="background:var(--color-gray-100);color:var(--color-gray-600)">待备货</span>
+                        <span v-else class="co-status-badge co-status-new">新订单</span>
+                      </td>
                       <td style="white-space: nowrap">
                         <template v-if="!row.is_locked">
                           <button class="co-btn-icon co-btn-warn" @click="openEditSubmitted(row)">
@@ -312,7 +325,7 @@
                             :disabled="actionId === row.id"
                             @click="handleDeleteOrder(row)"
                           >
-                            <i class="fas fa-trash" />
+                            <i :class="actionId === row.id ? 'fas fa-spinner fa-spin' : 'fas fa-trash'" />
                           </button>
                         </template>
                         <UiBadge v-else variant="cancelled"> 审批中 </UiBadge>
@@ -336,7 +349,7 @@
           <span class="co-history-title"><i class="fas fa-truck-loading" />备货记录</span>
           <span v-if="stockinList.length" class="count-badge-subtle"
             ><strong>{{ stockinList.length }}</strong> 条 ·
-            <strong>{{ stockinList.reduce((s: any, o: any) => s + o.quantity, 0) }}</strong> 件</span
+            <strong>{{ stockinList.reduce((s: unknown, o: any) => s + o.quantity, 0) }}</strong> 件</span
           >
         </div>
         <div class="co-card-body">
@@ -348,7 +361,7 @@
                   <strong>{{ group.date }}</strong>
                   <span class="count-badge-subtle">{{ group.stockins.length }} 条</span>
                   <span class="count-badge-subtle"
-                    >共 {{ group.stockins.reduce((s: any, o: any) => s + o.quantity, 0) }} 件</span
+                    >共 {{ group.stockins.reduce((s: unknown, o: any) => s + o.quantity, 0) }} 件</span
                   >
                 </div>
                 <i
@@ -402,7 +415,7 @@
                           :disabled="actionId === row.id"
                           @click="handleDeleteStockin(row)"
                         >
-                          <i class="fas fa-trash" />
+                          <i :class="actionId === row.id ? 'fas fa-spinner fa-spin' : 'fas fa-trash'" />
                         </button>
                       </td>
                     </tr>
@@ -554,12 +567,12 @@ const { data: customerData } = useQuery({
   staleTime: 30_000,
 })
 const customerList = computed(() => customerData.value?.customers ?? customerData.value?.items ?? [])
-const customerOptions = computed(() => customerList.value.map((c: any) => ({ value: c.name, label: c.name })))
+const customerOptions = computed(() => customerList.value.map((c: unknown) => ({ value: c.name, label: c.name })))
 
 const { data: ordersData } = useQuery({
   queryKey: ['orders-list'],
   queryFn: async () => {
-    const res = (await orderApi.list({ per_page: 500 })) as any
+    const res = (await orderApi.list({ per_page: 100 })) as any
     return res.data ?? res.orders ?? res.items ?? []
   },
   staleTime: 30_000,
@@ -569,7 +582,7 @@ const orderList = computed(() => (Array.isArray(ordersData.value) ? ordersData.v
 const { data: stockinsData } = useQuery({
   queryKey: ['stockins-list-all'],
   queryFn: async () => {
-    const res = (await get('/stock/in/list', { per_page: 500 })) as any
+    const res = (await get('/stock/in/list', { per_page: 100 })) as any
     return res.stockins ?? res.items ?? []
   },
   staleTime: 30_000,
@@ -581,13 +594,13 @@ async function searchProducts(q: string) {
   if (!q.trim()) return []
   try {
     const d = await get<any[]>('/aux/product-search', { q })
-    return (Array.isArray(d) ? d : []).map((p: any) => ({ value: p.name, id: p.id, ...p }))
+    return (Array.isArray(d) ? d : []).map((p: unknown) => ({ value: p.name, id: p.id, ...p }))
   } catch {
     return []
   }
 }
 
-const suggestions = ref<any[]>([])
+const suggestions = ref<unknown[]>([])
 const showSuggestions = ref(false)
 let searchTimeout: ReturnType<typeof setTimeout> | null = null
 
@@ -652,10 +665,10 @@ async function fetchAvailableStock() {
   }
 }
 
-function handleDeductPreview() {
+async function handleDeductPreview() {
   form.deductStock = !form.deductStock
   if (form.deductStock) {
-    fetchAvailableStock()
+    await fetchAvailableStock()
     deductInfoVisible.value = true
     form.deductQuantity = Math.min(form.quantity, availableStock.value)
   } else {
@@ -694,7 +707,7 @@ function addStaged() {
 }
 
 // ===== Staged items (unified) =====
-const stagedItems = ref<any[]>([])
+const stagedItems = ref<unknown[]>([])
 const stagedOrders = computed(() => stagedItems.value.filter((i) => i.type === 'order'))
 const stagedStockins = computed(() => stagedItems.value.filter((i) => i.type === 'stockin'))
 
@@ -760,7 +773,7 @@ function openEditStaged(idx: number) {
       product_id: editStagedData.value.productId,
       customer: editStagedData.value.customer,
     })
-      .then((res: any) => {
+      .then((res: unknown) => {
         const items = res.stockins ?? res.items ?? res ?? []
         editAvailableStock.value = items.reduce(
           (s: number, i: any) => s + (i.available ?? i.quantity - (i.deducted || 0)),
@@ -784,7 +797,7 @@ function saveEditStaged() {
 const editSubmittedVisible = ref(false)
 const editSubmittedData = ref<any>(null)
 const editSubmittedSaving = ref(false)
-const editSuggestions = ref<any[]>([])
+const editSuggestions = ref<unknown[]>([])
 const showEditSuggestions = ref(false)
 let editSearchTimeout: ReturnType<typeof setTimeout> | null = null
 
@@ -851,6 +864,11 @@ async function handleDeleteOrder(row: any) {
   try {
     await orderApi.delete(row.id)
     showToast('删除成功', 'success')
+    // 乐观更新：立即从本地缓存中移除已删除的订单，无需等待 refetch
+    queryClient.setQueryData(['orders-list'], (old: unknown) => {
+      if (!old || !Array.isArray(old)) return old
+      return old.filter((o: unknown) => o.id !== row.id)
+    })
     queryClient.invalidateQueries({ queryKey: ['orders-list'] })
   } catch (err: any) {
     showToast(err.response?.data?.detail || '删除失败', 'error')
@@ -865,6 +883,11 @@ async function handleDeleteStockin(row: any) {
   try {
     await del(`/aux/stockin/${row.id}`)
     showToast('删除成功', 'success')
+    // 乐观更新：立即从本地缓存中移除已删除的备货记录
+    queryClient.setQueryData(['stockins-list-all'], (old: unknown) => {
+      if (!old || !Array.isArray(old)) return old
+      return old.filter((o: unknown) => o.id !== row.id)
+    })
     queryClient.invalidateQueries({ queryKey: ['stockins-list-all'] })
   } catch (err: any) {
     showToast(err.response?.data?.detail || '删除失败', 'error')
@@ -942,7 +965,7 @@ async function handleImport() {
       const res = (await get('/staging-orders')) as any
       const items = res.staging_orders ?? res.items ?? []
       stagedItems.value.push(
-        ...items.map((i: any) => ({
+        ...items.map((i: unknown) => ({
           type: 'order' as const,
           customer: i.customer,
           productId: i.product_id,
@@ -960,7 +983,7 @@ async function handleImport() {
       const res = (await get('/staging-stockins')) as any
       const items = res.staging_stockins ?? res.items ?? []
       stagedItems.value.push(
-        ...items.map((i: any) => ({
+        ...items.map((i: unknown) => ({
           type: 'stockin' as const,
           customer: i.customer,
           productId: i.product_id,
@@ -1060,7 +1083,7 @@ async function handleImport() {
   display: flex;
   flex-wrap: nowrap;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   border-bottom: 2px solid var(--color-border, #cbd5e1);
   gap: 12px;
 }
@@ -1101,40 +1124,55 @@ async function handleImport() {
 }
 
 /* ===== 头部操作区 ===== */
-.co-header-actions {
+.co-header-left {
   display: flex;
   align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+.co-header-right {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
   gap: 8px;
 }
 
 /* ===== TAB 切换 ===== */
 .co-tab-bar {
-  display: flex;
+  display: inline-flex;
   gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: white;
+  border: 1px solid var(--color-border-light);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
 }
 .co-tab-btn {
-  padding: 7px 16px;
-  border: 2px solid var(--color-border-light);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: none;
   border-radius: 9px;
-  background: white;
   font-size: 13px;
   font-weight: 600;
+  color: var(--color-text-secondary);
+  background: transparent;
   cursor: pointer;
   transition: all 0.3s ease;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--color-text-secondary);
 }
 .co-tab-btn:hover {
-  border-color: var(--color-primary-300);
+  background: var(--color-primary-50);
   color: var(--color-primary-600);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
   transform: translateY(-1px);
 }
 .co-tab-btn.active {
-  background: var(--color-primary-50);
+  background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
   color: var(--color-primary-700);
-  border-color: var(--color-primary-400);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 8px rgba(91, 141, 239, 0.2);
+  transform: translateY(-1px);
 }
 .co-tab-content {
   flex: 1;
@@ -1292,14 +1330,19 @@ async function handleImport() {
 
 /* ===== 类型切换 ===== */
 .co-type-switch {
-  display: flex;
+  display: inline-flex;
   gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: white;
+  border: 1px solid var(--color-border-light);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
 }
 .co-type-btn {
   padding: 5px 14px;
-  border: 2px solid var(--color-border-light);
+  border: none;
   border-radius: 9px;
-  background: white;
+  background: transparent;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -1310,14 +1353,16 @@ async function handleImport() {
   color: var(--color-text-secondary);
 }
 .co-type-btn:hover {
-  border-color: var(--color-primary-300);
+  background: var(--color-primary-50);
   color: var(--color-primary-600);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
   transform: translateY(-1px);
 }
 .co-type-btn.active {
-  background: var(--color-primary-50);
+  background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
   color: var(--color-primary-700);
-  border-color: var(--color-primary-400);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 8px rgba(91, 141, 239, 0.2);
+  transform: translateY(-1px);
 }
 
 /* ===== 表单 ===== */
@@ -1484,6 +1529,36 @@ async function handleImport() {
 .co-type-badge.stockin {
   background: var(--color-success-100);
   color: var(--color-success-600);
+}
+
+/* ===== 订单状态标签 ===== */
+.co-status-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.co-status-new {
+  background: var(--color-gray-100, #f3f4f6);
+  color: var(--color-gray-500, #6b7280);
+}
+.co-status-pending {
+  background: var(--color-warning-50, #fffbeb);
+  color: var(--color-warning-600, #d97706);
+}
+.co-status-shipped {
+  background: var(--color-primary-50, #eff6ff);
+  color: var(--color-primary-600, #2563eb);
+}
+.co-status-done {
+  background: var(--color-success-50, #f0fdf4);
+  color: var(--color-success-600, #059669);
+}
+.co-status-cancel {
+  background: var(--color-error-50, #fef2f2);
+  color: var(--color-error-600, #dc2626);
 }
 
 /* ===== 操作按钮 ===== */

@@ -1,6 +1,7 @@
 """辅助API接口测试"""
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
 class TestAuxiliaryEndpoints:
@@ -114,12 +115,12 @@ class TestAuxiliaryEndpoints:
 
     @pytest.mark.asyncio
     async def test_delete_stockout_api(self, client, mock_db):
-        with patch('fastapi_app.services.stock_service.delete_stockout', new_callable=AsyncMock) as mock_svc:
+        with patch('fastapi_app.services.stock_service.delete_stockout', new_callable=AsyncMock):
             response = await client.delete("/api/v1/aux/stockout/1")
             assert response.status_code in (200, 400)
 
     @pytest.mark.asyncio
     async def test_delete_customer_api(self, client, mock_db):
-        with patch('fastapi_app.services.customer_service.delete_customer', new_callable=AsyncMock) as mock_svc:
+        with patch('fastapi_app.services.customer_service.delete_customer', new_callable=AsyncMock):
             response = await client.delete("/api/v1/aux/customer/1")
             assert response.status_code in (200, 400)

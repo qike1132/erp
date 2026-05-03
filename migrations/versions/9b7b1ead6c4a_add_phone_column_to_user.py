@@ -1,12 +1,12 @@
 """add phone column to user
 
 Revision ID: 9b7b1ead6c4a
-Revises: 
+Revises:
 Create Date: 2026-03-24 09:06:09.418795
 
 """
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import mysql
 
 # revision identifiers, used by Alembic.

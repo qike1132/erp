@@ -15,7 +15,6 @@
             <!-- 产品基本信息 -->
             <div class="pd-section">
               <div class="pd-section-header">
-                <div class="pd-icon-box pd-icon-blue"><i class="fas fa-box"></i></div>
                 <h4 class="pd-section-title">产品基本信息</h4>
               </div>
               <form @submit.prevent="handleAdd">
@@ -346,7 +345,6 @@
             <div v-if="copyBomPreview" class="mb-4">
               <div class="copy-bom-preview-card">
                 <div class="preview-header">
-                  <div class="pd-icon-box pd-icon-blue"><i class="fas fa-info"></i></div>
                   <div>
                     <h6 class="mb-0">{{ copyBomPreview.source_name }}</h6>
                     <p class="text-muted small mb-0">条码：{{ copyBomPreview.source_barcode || '-' }}</p>
@@ -479,9 +477,11 @@ interface Product {
 }
 
 interface BomItem {
+  id?: number
   name: string
   specification: string
   unit: string
+  supplier_id?: number | null
   supplier_name: string
   usage: number
   remark: string
@@ -770,16 +770,18 @@ async function loadBomData(productId: number) {
       const grouped: { fabric: BomItem[]; filling: BomItem[]; accessory: BomItem[] } = { fabric: [], filling: [], accessory: [] }
       materialsList.forEach((item: any) => {
         const cat = item.category || 'accessory'
-        const targetCat = cat === 'packaging' ? 'accessory' : cat
-        if (grouped[targetCat as keyof typeof grouped]) {
-          grouped[targetCat as keyof typeof grouped].push({
+        if (cat === 'packaging') return // 包装类不在BOM配置中管理
+        if (grouped[cat as keyof typeof grouped]) {
+          grouped[cat as keyof typeof grouped].push({
+            id: item.id,
             name: item.material_name || item.name || '',
             specification: item.specification || '',
             unit: item.unit || '码',
+            supplier_id: item.supplier_id || null,
             supplier_name: item.supplier_name || '',
             usage: item.unit_usage || item.quantity || 1,
             remark: item.remark || '',
-            category: targetCat,
+            category: cat,
           })
         }
       })
@@ -794,7 +796,7 @@ async function loadBomData(productId: number) {
 }
 
 function addBomItem() {
-  bomData[currentBomCategory.value].push({ name: '', specification: '', unit: '码', supplier_name: '', usage: 1, remark: '' })
+  bomData[currentBomCategory.value].push({ name: '', specification: '', unit: currentBomCategory.value === 'filling' ? '克' : '码', supplier_name: '', usage: 1, remark: '', category: currentBomCategory.value })
 }
 
 function deleteBomItem(index: number) {
@@ -805,16 +807,50 @@ async function saveBom() {
   const allItems = [
     ...bomData.fabric.map(i => ({ ...i, category: 'fabric' })),
     ...bomData.filling.map(i => ({ ...i, category: 'filling' })),
-    ...bomData.accessory.map(i => ({ ...i, category: 'accessory' })),
+    ...bomData.accessory.map(i => ({ ...i, category: i.category || 'accessory' })),
   ]
   const invalidItems = allItems.filter(i => !i.name || !i.specification || !i.unit || !i.supplier_name)
   if (invalidItems.length > 0) { showToast('请填写所有必填项（物料名称、规格型号、计量单位、默认供应商）', 'warning'); return }
 
   try {
     const payload = {
-      fabrics: bomData.fabric.map(i => ({ ...i, category: 'fabric' })),
-      filling: bomData.filling.length > 0 ? { items: bomData.filling.map(i => ({ ...i, category: 'filling' })) } : null,
-      accessories: bomData.accessory.map(i => ({ ...i, category: 'accessory' })),
+      fabrics: bomData.fabric.map(i => ({
+        id: i.id,
+        fabric_name: i.name,
+        specification: i.specification,
+        unit: i.unit,
+        quantity: i.usage,
+        supplier_id: i.supplier_id,
+        supplier_name: i.supplier_name,
+        remark: i.remark,
+        category: 'fabric',
+      })),
+      filling: bomData.filling.length > 0 ? (() => {
+        if (bomData.filling.length > 1) {
+          showToast('填充类物料每产品仅支持一条，已自动取第一条', 'warning')
+        }
+        const f = bomData.filling[0]
+        return {
+          id: f.id,
+          cotton_usage: f.usage,
+          specification: f.specification,
+          supplier_id: f.supplier_id,
+          supplier_name: f.supplier_name,
+          unit: f.unit,
+          remark: f.remark,
+        }
+      })() : null,
+      accessories: bomData.accessory.map(i => ({
+        id: i.id,
+        accessory_name: i.name,
+        specification: i.specification,
+        unit: i.unit,
+        quantity: i.usage,
+        supplier_id: i.supplier_id,
+        supplier_name: i.supplier_name,
+        remark: i.remark,
+        category: 'accessory',
+      })),
       packagings: [],
     }
     const res = (await productApi.saveBom(currentProductId.value!, payload)) as any
@@ -1187,7 +1223,7 @@ async function confirmCopyBom() {
   font-size: 14px;
   line-height: 1.5;
   color: var(--color-text);
-  background: var(--color-surface, #f8fafc);
+  background: white;
   border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: 10px;
   transition: all 0.3s ease;
@@ -1360,7 +1396,7 @@ async function confirmCopyBom() {
   width: 100%;
   padding: 8px 12px 8px 36px;
   font-size: 13px;
-  background: var(--color-surface, #f8fafc);
+  background: white;
   border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: 9px;
   transition: all 0.3s ease;
@@ -1552,19 +1588,39 @@ async function confirmCopyBom() {
 .bom-modal-close:hover { background: var(--color-border-light, #e2e8f0); color: var(--color-text); transform: rotate(90deg); }
 .bom-modal-body { padding: 0; background: var(--color-surface, #f8fafc); min-height: 500px; overflow-y: auto; flex: 1; }
 .bom-tabs-container {
-  display: flex; gap: 10px; padding: 20px 28px 12px;
-  background: white; border-bottom: 1px solid var(--color-border-light, #e2e8f0);
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: white;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
 }
 .bom-tab-v2 {
-  padding: 10px 20px; border: 2px solid var(--color-border-light, #e2e8f0);
-  background: white; border-radius: 10px; font-size: 13px; font-weight: 600;
-  color: var(--color-text); cursor: pointer; transition: all 0.3s ease;
-  display: flex; align-items: center; gap: 6px;
+  padding: 8px 14px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
-.bom-tab-v2:hover { border-color: var(--color-primary-300); background: var(--color-primary-50); transform: translateY(-1px); }
+.bom-tab-v2:hover {
+  background: var(--color-primary-50);
+  color: var(--color-primary-600);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  transform: translateY(-1px);
+}
 .bom-tab-v2.active {
-  background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-600));
-  color: white; border-color: var(--color-primary-500); box-shadow: 0 4px 12px rgba(59,130,246,0.3);
+  background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
+  color: var(--color-primary-700);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 8px rgba(91, 141, 239, 0.2);
+  transform: translateY(-1px);
 }
 .bom-main-content { padding: 20px 28px 28px; }
 .bom-summary-bar {

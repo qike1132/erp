@@ -3,8 +3,10 @@
     <div class="cu-card cu-card-main">
       <!-- 卡片头部 -->
       <div class="cu-card-header">
-        <HeaderTabs />
-        <div class="cu-header-actions">
+        <div class="cu-header-left">
+          <HeaderTabs />
+        </div>
+        <div class="cu-header-right">
           <span class="cu-count-badge">{{ customers.length }}</span>
           <div class="cu-tabs">
             <button class="cu-tab-btn active" @click="openForm('add')">
@@ -310,29 +312,40 @@ async function handleDelete(row: Customer) {
   border-radius: 18px;
   border: 1px solid var(--color-border-light, #e2e8f0);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  overflow: hidden;
+  transition: box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .cu-card:hover {
-  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
-  transform: translateY(-6px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.06), 0 24px 80px rgba(0,0,0,0.08);
 }
 .cu-card-main {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
 }
 
 /* Card Header */
 .cu-card-header {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   padding: 10px 24px;
   border-bottom: 1px solid var(--color-border-light, #f1f5f9);
   gap: 12px;
+}
+.cu-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+.cu-header-right {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 8px;
 }
 .cu-card-header :deep(.ht-bar) {
   width: auto;
@@ -507,7 +520,7 @@ async function handleDelete(row: Customer) {
   padding: 10px 36px 10px 38px;
   border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: 11px;
-  background: var(--color-surface, #f8fafc);
+  background: white;
   font-size: 13px;
   outline: none;
   transition: all 0.3s ease;
@@ -737,6 +750,35 @@ async function handleDelete(row: Customer) {
   border-color: var(--color-primary-400);
   background: white;
   box-shadow: 0 0 0 4px rgba(0, 148, 191, 0.1);
+}
+
+/* Action Buttons (Section 10) */
+.cu-action-btn {
+  border-radius: 9px;
+  padding: 7px 14px;
+  border: 2px solid var(--color-border-light);
+  background: white;
+  font-size: 12px;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  cursor: pointer;
+  color: var(--color-text);
+  font-family: inherit;
+}
+.cu-action-btn:hover {
+  transform: translateY(-1px);
+}
+.cu-action-primary {
+  color: var(--color-primary-600);
+}
+.cu-action-primary:hover {
+  background: var(--color-primary-50);
+  border-color: var(--color-primary-300);
+}
+.cu-action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
 }
 
 /* Responsive */

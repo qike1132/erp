@@ -2,14 +2,16 @@
 审计日志系统
 记录用户操作和数据变更 (FastAPI 兼容版本)
 """
-from datetime import datetime
-from typing import Dict, Any, Optional
-from functools import wraps
-import json
-from fastapi_app.shared_models.base import Base
-from sqlalchemy import Column, Integer, String, Text, DateTime
-from fastapi_app.core.database import SyncSession
 import contextvars
+import json
+from datetime import datetime
+from functools import wraps
+from typing import Any
+
+from sqlalchemy import Column, DateTime, Integer, String, Text
+
+from fastapi_app.core.database import SyncSession
+from fastapi_app.shared_models.base import Base
 
 # 使用 contextvars 替代 Flask session/request
 current_user_id = contextvars.ContextVar('current_user_id', default=None)
@@ -21,7 +23,7 @@ current_user_agent = contextvars.ContextVar('current_user_agent', default=None)
 class AuditLog(Base):
     """审计日志模型"""
     __tablename__ = 'audit_log'
-    
+
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, nullable=True)
     username = Column(String(50))
@@ -34,8 +36,8 @@ class AuditLog(Base):
     user_agent = Column(String(200))
     description = Column(Text)
     create_time = Column(DateTime, default=datetime.now, index=True)
-    
-    def to_dict(self) -> Dict:
+
+    def to_dict(self) -> dict:
         return {
             'id': self.id,
             'user_id': self.user_id,
@@ -53,14 +55,14 @@ class AuditLog(Base):
 
 class AuditService:
     """审计服务"""
-    
+
     @staticmethod
     def log(action: str, model: str = None, model_id: int = None,
            old_value: Any = None, new_value: Any = None,
            description: str = None) -> AuditLog:
         """
         记录审计日志
-        
+
         Args:
             action: 操作类型
             model: 模型名称
@@ -73,10 +75,10 @@ class AuditService:
         username = current_username.get() or 'anonymous'
         ip_address = current_ip.get()
         user_agent = current_user_agent.get()
-        
+
         old_value_json = json.dumps(old_value, ensure_ascii=False) if old_value else None
         new_value_json = json.dumps(new_value, ensure_ascii=False) if new_value else None
-        
+
         audit_log = AuditLog(
             user_id=user_id,
             username=username,
@@ -89,28 +91,28 @@ class AuditService:
             user_agent=user_agent,
             description=description
         )
-        
+
         with SyncSession() as session:
             session.add(audit_log)
-        
+
         return audit_log
-    
+
     @staticmethod
     def get_logs(user_id: int = None, model: str = None,
                 action: str = None, limit: int = 100) -> list:
         """查询审计日志"""
         with SyncSession() as session:
             query = session.query(AuditLog)
-            
+
             if user_id:
                 query = query.filter(AuditLog.user_id == user_id)
             if model:
                 query = query.filter(AuditLog.model == model)
             if action:
                 query = query.filter(AuditLog.action == action)
-            
+
             return query.order_by(AuditLog.create_time.desc()).limit(limit).all()
-    
+
     @staticmethod
     def get_model_history(model: str, model_id: int) -> list:
         """获取模型的变更历史"""
@@ -127,7 +129,7 @@ def audit_action(action: str, model: str = None):
         @wraps(f)
         def decorated_function(*args, **kwargs):
             result = f(*args, **kwargs)
-            
+
             try:
                 description = f'{action} {model}' if model else action
                 AuditService.log(
@@ -138,9 +140,9 @@ def audit_action(action: str, model: str = None):
                 )
             except Exception as e:
                 print(f'审计日志记录失败: {e}')
-            
+
             return result
-        
+
         return decorated_function
     return decorator
 

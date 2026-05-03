@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field, field_validator
 
 class UserCreate(BaseModel):
     username: str = Field(..., min_length=1, max_length=50, description="用户名")
-    password: str = Field(..., min_length=8, max_length=128, description="密码")
+    password: str = Field(..., min_length=6, max_length=128, description="密码")
     is_super: bool = Field(default=False, description="是否超级用户")
 
     @field_validator('password')

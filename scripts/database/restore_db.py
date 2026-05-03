@@ -24,8 +24,7 @@ with open(BACKUP_FILE, 'rb') as f:
     result = subprocess.run(
         [MYSQL_PATH, f'-u{DB_USER}', f'-p{DB_PASSWORD}', DB_NAME],
         stdin=f,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
+        capture_output=True
     )
 
 if result.returncode == 0:

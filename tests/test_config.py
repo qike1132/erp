@@ -4,8 +4,9 @@ config.py 单元测试
 覆盖：Settings 默认值、ALLOWED_HOSTS 生产环境检查、分页配置
 """
 import os
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 from fastapi_app.core.config import Settings
 
@@ -29,9 +30,8 @@ class TestSettingsDefaults:
 class TestAllowedHostsProduction:
     def test_wildcard_raises_in_production(self):
         """生产环境 ALLOWED_HOSTS='*' 必须报错"""
-        with patch.dict(os.environ, {"APP_ENV": "production"}):
-            with pytest.raises(RuntimeError, match="禁止"):
-                Settings(ALLOWED_HOSTS=["*"])
+        with patch.dict(os.environ, {"APP_ENV": "production"}), pytest.raises(RuntimeError, match="禁止"):
+            Settings(ALLOWED_HOSTS=["*"])
 
     def test_specific_hosts_ok_in_production(self):
         """生产环境指定具体域名不报错"""

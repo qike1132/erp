@@ -16,13 +16,12 @@
 日期: 2026-04-07
 """
 
+import json
 import subprocess
 import sys
-import json
 import time
-from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Tuple, Optional
+from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent
 RULES_PATH = Path(".trae/rules/task-dispatch-rules.json")
@@ -51,13 +50,13 @@ class TestResult:
 
 class SystemFlowTester:
     def __init__(self):
-        self.results: List[TestResult] = []
+        self.results: list[TestResult] = []
         self.config = self._load_config()
         self.step_times = {}
 
     def _load_config(self) -> dict:
         if RULES_PATH.exists():
-            with open(RULES_PATH, 'r', encoding='utf-8') as f:
+            with open(RULES_PATH, encoding='utf-8') as f:
                 return json.load(f)
         return {}
 
@@ -67,7 +66,7 @@ class SystemFlowTester:
         duration = (time.time() - start) * 1000
         return result, duration
 
-    def _run_checkpoint(self, task_type: str, has_agent: bool, dispatched: bool) -> Tuple[int, str]:
+    def _run_checkpoint(self, task_type: str, has_agent: bool, dispatched: bool) -> tuple[int, str]:
         cmd = [
             sys.executable,
             str(CHECKPOINT_SCRIPT),
@@ -95,7 +94,6 @@ class SystemFlowTester:
 
         all_passed = True
         for input_type, expected_category in test_cases:
-            task_type = input_type
             matched = expected_category
 
             if "frontend" in input_type.lower():
@@ -175,7 +173,7 @@ class SystemFlowTester:
             print(f"  步骤{i}: {step_name} (必填: {step_required})")
 
             if step_name in expected_steps:
-                print(f"       [OK] 是预期步骤")
+                print("       [OK] 是预期步骤")
             else:
                 print(f"       [WARN] 非预期步骤: {step_name}")
 
@@ -266,18 +264,18 @@ class SystemFlowTester:
 
         all_review_states_exist = all(state in task_states for state in review_states)
         print(f"[INFO] 审核相关状态: {review_states}")
-        print(f"[OK] 所有审核状态存在" if all_review_states_exist else "[FAIL] 缺少审核状态")
+        print("[OK] 所有审核状态存在" if all_review_states_exist else "[FAIL] 缺少审核状态")
 
         reviewing_state = task_states.get("REVIEWING", {})
         reviewing_transitions = reviewing_state.get("transitions", [])
         print(f"[INFO] REVIEWING状态转换: {reviewing_transitions}")
 
         has_valid_transitions = "APPROVED" in reviewing_transitions and "REVISION_REQUIRED" in reviewing_transitions
-        print(f"[OK] 包含有效的审核转换" if has_valid_transitions else "[FAIL] 审核转换不完整")
+        print("[OK] 包含有效的审核转换" if has_valid_transitions else "[FAIL] 审核转换不完整")
 
         result.passed = all_review_states_exist and has_valid_transitions
         result.expected = "审核流程配置正确"
-        result.actual = f"审核状态完整，转换有效"
+        result.actual = "审核状态完整，转换有效"
         return result
 
     def test_step7_integration_delivery(self) -> TestResult:
@@ -296,7 +294,7 @@ class SystemFlowTester:
         print(f"[INFO] DELIVERED状态: final={is_final}, transitions={transitions}")
 
         has_valid_delivery = is_final and len(transitions) == 0
-        print(f"[OK] 交付状态有效" if has_valid_delivery else "[FAIL] 交付状态无效")
+        print("[OK] 交付状态有效" if has_valid_delivery else "[FAIL] 交付状态无效")
 
         metrics = self.config.get("performanceMetrics", {})
         metric_targets = metrics.get("targets", {})
@@ -403,7 +401,7 @@ class SystemFlowTester:
         result.actual = f"包含{len(fallback_rules)}个降级规则"
         return result
 
-    def run_all_tests(self) -> Dict:
+    def run_all_tests(self) -> dict:
         """运行所有测试"""
         print("=" * 70)
         print("系统执行流程全面测试")
@@ -433,7 +431,7 @@ class SystemFlowTester:
 
         return self._generate_report()
 
-    def _generate_report(self) -> Dict:
+    def _generate_report(self) -> dict:
         """生成测试报告"""
         passed_count = sum(1 for r in self.results if r.passed)
         total_count = len(self.results)

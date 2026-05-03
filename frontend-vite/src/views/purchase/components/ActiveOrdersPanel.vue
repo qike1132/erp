@@ -37,26 +37,23 @@
 
     <!-- Table -->
     <template v-else>
-      <div class="pc-select-bar">
-        <label class="pc-select-label">
-          <UiCheckbox :checked="allSelected" @update:checked="$emit('toggleAll', $event)" />
-          <span>全选</span>
-        </label>
-        <span class="pc-select-count">
-          已选择 <strong>{{ selectedIds.length }}</strong> 个订单
-        </span>
-      </div>
-      <div class="pc-table-wrap">
-        <table>
+      <div class="pc-section-body">
+        <div class="pc-table-wrap">
+          <table>
           <thead>
             <tr>
-              <th style="width:40px" />
+              <th style="width:60px">
+                <div class="pc-th-check">
+                  <UiCheckbox :checked="allSelected" @update:checked="$emit('toggleAll', $event)" />
+                  <span>全选</span>
+                </div>
+              </th>
               <th>下单时间</th>
               <th>订单号</th>
               <th style="text-align:left">客户名称</th>
               <th style="text-align:left">产品名称</th>
               <th style="text-align:right">订单数量</th>
-              <th>操作</th>
+              <th style="text-align:center">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -70,7 +67,7 @@
                 <UiCheckbox :checked="selectedIds.includes(o.id)" @update:checked="$emit('toggleSelection', o.id)" />
               </td>
               <td class="pc-td-nowrap">{{ o.create_time || o.order_date || '' }}</td>
-              <td class="pc-td-nowrap">{{ o.order_no }}</td>
+              <td class="pc-td-nowrap">{{ o.source_order_no || o.order_no }}</td>
               <td class="pc-td-truncate" style="max-width:120px">{{ o.customer_name || '-' }}</td>
               <td class="pc-td-truncate" style="max-width:300px">{{ o.product_name || '-' }}</td>
               <td class="pc-td-right pc-td-nowrap">{{ o.quantity?.toLocaleString() || '-' }}</td>
@@ -111,6 +108,7 @@
         >
           <i class="fas fa-chevron-right" />
         </button>
+      </div>
       </div>
     </template>
   </div>
@@ -235,39 +233,14 @@ const visiblePages = computed(() => {
   border-color: transparent;
 }
 
-/* Select bar */
-.pc-select-bar {
-  margin: 12px 24px;
-  padding: 10px 14px;
-  background: var(--color-primary-50, #eff6ff);
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.pc-select-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-primary-700);
-  cursor: pointer;
-}
-
-.pc-select-count {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-}
-
-.pc-select-count strong {
-  color: var(--color-primary-500);
+/* Section body - consistent padding with header */
+.pc-section-body {
+  padding: 0 24px;
 }
 
 /* Table */
 .pc-table-wrap {
-  padding: 0 24px 16px;
+  padding: 0 0 16px;
   overflow-x: auto;
 }
 
@@ -287,6 +260,19 @@ const visiblePages = computed(() => {
   letter-spacing: 0.05em;
   border-bottom: 2px solid var(--color-border-light, #e2e8f0);
   white-space: nowrap;
+  text-align: left;
+}
+
+.pc-th-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pc-th-check span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
 }
 
 .pc-table-wrap tbody td {

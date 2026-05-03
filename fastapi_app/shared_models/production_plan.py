@@ -3,9 +3,10 @@
 
 映射到与 Flask-SQLAlchemy ProductionPlan 相同的 'production_plan' 表。
 """
-from sqlalchemy import String, Integer, Text, DateTime, Date, Boolean, Index
-from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime
+
+from sqlalchemy import Boolean, Date, DateTime, Index, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
 
 from fastapi_app.shared_models import Base
 

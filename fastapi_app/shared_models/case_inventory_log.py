@@ -1,7 +1,8 @@
 """皮套库存日志模型"""
-from sqlalchemy import String, Integer, ForeignKey, DateTime, Text, Index, desc
-from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
+
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, desc
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
 

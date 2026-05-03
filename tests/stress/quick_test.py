@@ -4,9 +4,9 @@ ERP系统压力测试 - 简化版
 """
 
 import asyncio
-import aiohttp
 import time
-import os
+
+import aiohttp
 
 BASE_URL = "http://127.0.0.1:5002"
 CONCURRENT_USERS = 10
@@ -33,7 +33,7 @@ async def get_token(session):
 async def test_api(session, token, method, path, data=None):
     url = f"{BASE_URL}{path}"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    
+
     start = time.time()
     try:
         if method == "GET":
@@ -55,9 +55,9 @@ async def worker(worker_id, stop_event):
         if not token:
             print(f"Worker {worker_id}: 认证失败")
             return
-        
+
         print(f"Worker {worker_id}: 认证成功")
-        
+
         endpoints = [
             ("GET", "/api/v1/orders/list", None),
             ("GET", "/api/v1/products/list", None),
@@ -65,7 +65,7 @@ async def worker(worker_id, stop_event):
             ("GET", "/api/v1/stock/inventory", None),
             ("POST", "/api/v1/orders/create", {"order_no": f"TEST-{int(time.time())}", "customer_id": 1, "product_id": 1, "quantity": 10, "price": 100}),
         ]
-        
+
         count = 0
         while not stop_event.is_set() and count < 100:
             for method, path, data in endpoints:
@@ -78,24 +78,24 @@ async def main():
     print("=" * 60)
     print(f"压力测试开始: {CONCURRENT_USERS} 并发用户, {DURATION_SECONDS} 秒")
     print("=" * 60)
-    
+
     stop_event = asyncio.Event()
-    
+
     workers = [asyncio.create_task(worker(i, stop_event)) for i in range(CONCURRENT_USERS)]
-    
+
     await asyncio.sleep(DURATION_SECONDS)
     stop_event.set()
-    
+
     for w in workers:
         w.cancel()
-    
+
     await asyncio.gather(*workers, return_exceptions=True)
-    
+
     if results:
         total = len(results)
         success = sum(1 for r in results if r.get("success"))
         avg_time = sum(r.get("time", 0) for r in results) / total
-        
+
         print("\n" + "=" * 60)
         print("测试结果")
         print("=" * 60)
@@ -103,7 +103,7 @@ async def main():
         print(f"成功: {success} ({success/total*100:.1f}%)")
         print(f"失败: {total - success}")
         print(f"平均响应时间: {avg_time:.1f}ms")
-        
+
         status_counts = {}
         for r in results:
             s = r.get("status", 0)

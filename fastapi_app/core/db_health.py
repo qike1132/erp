@@ -5,12 +5,12 @@
 """
 
 import asyncio
+import contextlib
 import logging
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import text
-from sqlalchemy.exc import OperationalError, DisconnectionError
+from sqlalchemy.exc import DisconnectionError, OperationalError
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ class DBHealthChecker:
 
     def __init__(self, check_interval: int = 30):
         self.check_interval = check_interval
-        self._task: Optional[asyncio.Task] = None
+        self._task: asyncio.Task | None = None
         self._running = False
 
         # 统计计数器
@@ -29,10 +29,10 @@ class DBHealthChecker:
         self.recoveries = 0
 
         # 最近事件记录
-        self.last_check_time: Optional[datetime] = None
-        self.last_failure_time: Optional[datetime] = None
-        self.last_recovery_time: Optional[datetime] = None
-        self.last_failure_detail: Optional[str] = None
+        self.last_check_time: datetime | None = None
+        self.last_failure_time: datetime | None = None
+        self.last_recovery_time: datetime | None = None
+        self.last_failure_detail: str | None = None
         self._was_unhealthy = False
 
     async def start(self):
@@ -51,10 +51,8 @@ class DBHealthChecker:
         self._running = False
         if self._task and not self._task.done():
             self._task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._task
-            except asyncio.CancelledError:
-                pass
         logger.info("数据库健康检查已停止")
 
     async def _check_loop(self):
@@ -103,10 +101,6 @@ class DBHealthChecker:
         except (OperationalError, DisconnectionError) as e:
             self.last_failure_detail = f"异步引擎: {e.__class__.__name__}: {str(e)[:200]}"
             logger.warning("异步引擎连接检查失败: %s", self.last_failure_detail)
-            return False
-        except (OperationalError, DisconnectionError) as e:
-            self.last_failure_detail = f"异步引擎未知错误: {e.__class__.__name__}: {str(e)[:200]}"
-            logger.error("异步引擎连接检查异常: %s", self.last_failure_detail)
             return False
 
     def get_pool_status(self) -> dict:

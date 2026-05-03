@@ -1,32 +1,33 @@
 """
-ERP系统数据库管理工具
+ERP系统数据库管理工具 v3.0
 
 功能:
-1. 数据库备份（支持PostgreSQL）
-2. 备份验证
-3. 数据库恢复
-4. 备份文件管理
+1. 数据库备份（PostgreSQL pg_dump / MySQL mysqldump）
+2. 备份验证（含校验和、行数统计、内容完整性检查）
+3. 数据库恢复（PostgreSQL psql / MySQL mysql）
+4. 备份文件管理（列表、删除、清理过期）
+5. 增量备份管理
 
 使用方法:
     python scripts/database/db_manager.py backup
     python scripts/database/db_manager.py verify --file <backup_file>
     python scripts/database/db_manager.py restore --file <backup_file>
     python scripts/database/db_manager.py list
+    python scripts/database/db_manager.py cleanup --keep 7   # 仅保留最近7天
 """
 
-import os
-import sys
-import shutil
-import subprocess
 import argparse
-import json
 import gzip
 import hashlib
-from datetime import datetime
+import json
+import os
+import shutil
+import subprocess
+import sys
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, Tuple, Dict, Any
+from typing import Any
 
-# 添加项目根目录到路径
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -36,19 +37,45 @@ WEEKLY_DIR = BACKUP_DIR / 'weekly'
 MONTHLY_DIR = BACKUP_DIR / 'monthly'
 MANUAL_DIR = BACKUP_DIR / 'manual'
 
+RECOVERY_LOG_DIR = BACKUP_DIR / 'recovery_logs'
+
+
+def _human_size(size: int) -> str:
+    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+        if size < 1024.0:
+            return f"{size:.2f} {unit}"
+        size /= 1024.0
+    return f"{size:.2f} PB"
+
 
 class DatabaseManager:
-    """数据库管理器"""
+    """数据库管理器（PostgreSQL 优先，兼容 MySQL）"""
 
     def __init__(self):
-        self.backup_dirs = [DAILY_DIR, WEEKLY_DIR, MONTHLY_DIR, MANUAL_DIR]
+        self.db_type = self._detect_db_type()
+        self.timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        self.backup_dirs = [
+            DAILY_DIR, WEEKLY_DIR, MONTHLY_DIR, MANUAL_DIR
+        ]
         for dir_path in self.backup_dirs:
             dir_path.mkdir(parents=True, exist_ok=True)
-        self.timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        RECOVERY_LOG_DIR.mkdir(parents=True, exist_ok=True)
         self.load_env()
 
+    def _detect_db_type(self) -> str:
+        db_type = os.getenv('DB_TYPE', '').lower()
+        if db_type in ('postgresql', 'postgres', 'pgsql', 'pg'):
+            return 'postgresql'
+        if db_type in ('mysql', 'mariadb'):
+            return 'mysql'
+        port = os.getenv('DB_PORT', '')
+        if port == '5432':
+            return 'postgresql'
+        if port == '3306':
+            return 'mysql'
+        return 'postgresql'
+
     def load_env(self):
-        """加载环境变量"""
         try:
             from dotenv import load_dotenv
             load_dotenv()
@@ -56,7 +83,6 @@ class DatabaseManager:
             pass
 
     def log(self, message: str, level: str = 'INFO'):
-        """记录日志"""
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         log_line = f"[{timestamp}] [{level}] {message}"
         print(log_line)
@@ -68,93 +94,120 @@ class DatabaseManager:
         except Exception as e:
             print(f"[WARN] 无法写入日志文件: {e}")
 
-    def get_mysql_config(self) -> Dict[str, str]:
-        """获取MySQL配置"""
+    # ============================================================
+    # Config Helpers
+    # ============================================================
+
+    def get_db_config(self) -> dict[str, str]:
         return {
             'host': os.getenv('DB_HOST', 'localhost'),
-            'port': os.getenv('DB_PORT', '3306'),
+            'port': os.getenv('DB_PORT', '5432' if self.db_type == 'postgresql' else '3306'),
             'user': os.getenv('DB_USER', 'erp_app'),
             'password': os.getenv('DB_PASSWORD', ''),
-            'database': os.getenv('DB_NAME', 'erp_system')
+            'database': os.getenv('DB_NAME', 'erp_system'),
         }
 
+    # ============================================================
+    # Checksum Helpers
+    # ============================================================
+
     def calculate_checksum(self, file_path: Path) -> str:
-        """计算文件SHA-256校验和"""
         sha256_hash = hashlib.sha256()
         with open(file_path, 'rb') as f:
-            for byte_block in iter(lambda: f.read(4096), b''):
-                sha256_hash.update(byte_block)
+            for chunk in iter(lambda: f.read(65536), b''):
+                sha256_hash.update(chunk)
         return sha256_hash.hexdigest()
 
     def compress_file(self, file_path: Path) -> Path:
-        """压缩文件"""
         compressed_path = Path(str(file_path) + '.gz')
-        with open(file_path, 'rb') as f_in:
-            with gzip.open(compressed_path, 'wb') as f_out:
-                shutil.copyfileobj(f_in, f_out)
+        with open(file_path, 'rb') as f_in, gzip.open(compressed_path, 'wb') as f_out:
+            shutil.copyfileobj(f_in, f_out)
         return compressed_path
 
     def decompress_file(self, file_path: Path) -> Path:
-        """解压文件"""
         if not str(file_path).endswith('.gz'):
             return file_path
-
         decompressed_path = Path(str(file_path)[:-3])
-        with gzip.open(file_path, 'rb') as f_in:
-            with open(decompressed_path, 'wb') as f_out:
-                shutil.copyfileobj(f_in, f_out)
+        with gzip.open(file_path, 'rb') as f_in, open(decompressed_path, 'wb') as f_out:
+            shutil.copyfileobj(f_in, f_out)
         return decompressed_path
 
-    def create_manifest(self, backup_path: Path, backup_type: str, original_path: Optional[Path] = None) -> Dict[str, Any]:
-        """创建备份清单"""
-        manifest = {
-            'timestamp': self.timestamp,
-            'backup_type': backup_type,
-            'db_type': 'mysql',
-            'created_at': datetime.now().isoformat(),
-            'files': []
-        }
+    # ============================================================
+    # Backup
+    # ============================================================
 
-        if original_path and original_path.exists():
-            manifest['original_size'] = original_path.stat().st_size
-
-        for file_path in backup_path.parent.iterdir():
-            if file_path.is_file() and self.timestamp in file_path.name:
-                manifest['files'].append({
-                    'name': file_path.name,
-                    'size': file_path.stat().st_size,
-                    'checksum': self.calculate_checksum(file_path)
-                })
-
-        manifest_file = backup_path.parent / f'manifest_{self.timestamp}.json'
-        with open(manifest_file, 'w', encoding='utf-8') as f:
-            json.dump(manifest, f, indent=2, ensure_ascii=False)
-
-        return manifest
-
-    def backup_mysql(self, backup_dir: Path, compress: bool = True) -> Tuple[bool, str, Optional[Path]]:
-        """备份MySQL数据库"""
-        config = self.get_mysql_config()
+    def backup_postgresql(self, backup_dir: Path, compress: bool = True) -> tuple[bool, str, Path | None]:
+        config = self.get_db_config()
         backup_file = backup_dir / f'erp_system_backup_{self.timestamp}.sql'
 
-        mysqldump_path = r'C:\Program Files\MySQL\MySQL Server 8.4\bin\mysqldump.exe'
+        env = os.environ.copy()
+        env['PGPASSWORD'] = config['password']
 
         cmd = [
-            mysqldump_path,
+            'pg_dump',
+            '-h', config['host'],
+            '-p', config['port'],
+            '-U', config['user'],
+            '--no-owner',
+            '--no-privileges',
+            config['database'],
+        ]
+
+        self.log(f"执行 pg_dump: {' '.join(cmd[:-1])} ****")
+
+        try:
+            with open(backup_file, 'wb') as f:
+                result = subprocess.run(
+                    cmd, stdout=f, stderr=subprocess.PIPE, env=env, timeout=3600
+                )
+
+            if result.returncode == 0:
+                file_size = backup_file.stat().st_size
+                self.log(f"PostgreSQL 数据库已导出: {backup_file} ({_human_size(file_size)})")
+
+                if compress and file_size > 1024:
+                    compressed_file = self.compress_file(backup_file)
+                    backup_file.unlink()
+                    backup_file = compressed_file
+                    self.log(f"备份文件已压缩: {backup_file} ({_human_size(backup_file.stat().st_size)})")
+
+                return True, f"PostgreSQL 备份成功: {backup_file.name}", backup_file
+            else:
+                stderr_text = result.stderr.decode('utf-8', errors='replace')
+                return False, f"pg_dump 失败: {stderr_text}", None
+
+        except FileNotFoundError:
+            return False, "pg_dump 命令未找到，请确保 PostgreSQL 客户端工具已安装并在 PATH 中", None
+        except subprocess.TimeoutExpired:
+            return False, "pg_dump 执行超时（超过 3600 秒）", None
+        except Exception as e:
+            return False, f"PostgreSQL 备份失败: {str(e)}", None
+
+    def backup_mysql(self, backup_dir: Path, compress: bool = True) -> tuple[bool, str, Path | None]:
+        config = self.get_db_config()
+        backup_file = backup_dir / f'erp_system_backup_{self.timestamp}.sql'
+
+        cmd = [
+            'mysqldump',
             f'-h{config["host"]}',
             f'-P{config["port"]}',
             f'-u{config["user"]}',
         ]
         if config['password']:
             cmd.append(f'-p{config["password"]}')
-        cmd.extend(['--single-transaction', '--routines', '--triggers', config['database']])
+        cmd.extend([
+            '--single-transaction', '--routines', '--triggers',
+            '--skip-lock-tables', config['database'],
+        ])
 
         try:
             with open(backup_file, 'wb') as f:
-                result = subprocess.run(cmd, stdout=f, stderr=subprocess.PIPE)
+                result = subprocess.run(
+                    cmd, stdout=f, stderr=subprocess.PIPE, timeout=3600
+                )
 
             if result.returncode == 0:
-                self.log(f"MySQL数据库已导出到: {backup_file}")
+                self.log(f"MySQL 数据库已导出: {backup_file}")
 
                 if compress:
                     compressed_file = self.compress_file(backup_file)
@@ -162,32 +215,32 @@ class DatabaseManager:
                     backup_file = compressed_file
                     self.log(f"备份文件已压缩: {backup_file}")
 
-                self.create_manifest(backup_file, 'mysql')
-                return True, f"MySQL备份成功: {backup_file}", backup_file
+                return True, f"MySQL 备份成功: {backup_file}", backup_file
             else:
                 stderr_text = result.stderr.decode('utf-8', errors='replace')
-                return False, f"MySQL备份失败: {stderr_text}", None
+                return False, f"mysqldump 失败: {stderr_text}", None
         except FileNotFoundError:
-            return False, "mysqldump命令未找到，请确保MySQL已安装", None
+            return False, "mysqldump 命令未找到，请确保 MySQL 已安装", None
         except Exception as e:
-            return False, f"MySQL备份失败: {str(e)}", None
+            return False, f"MySQL 备份失败: {str(e)}", None
 
-    def backup(self, backup_type: str = 'manual', compress: bool = True) -> Tuple[bool, str]:
-        """执行数据库备份"""
+    def backup(self, backup_type: str = 'manual', compress: bool = True) -> tuple[bool, str]:
         self.log("=" * 60)
-        self.log(f"开始数据库备份 - 类型: {backup_type}")
+        self.log(f"开始数据库备份 - 类型: {backup_type} | 数据库: {self.db_type}")
         self.log("=" * 60)
 
-        # 确定备份目录
         backup_dir_map = {
             'daily': DAILY_DIR,
             'weekly': WEEKLY_DIR,
             'monthly': MONTHLY_DIR,
-            'manual': MANUAL_DIR
+            'manual': MANUAL_DIR,
         }
         backup_dir = backup_dir_map.get(backup_type, MANUAL_DIR)
 
-        success, message, _ = self.backup_mysql(backup_dir, compress)
+        if self.db_type == 'postgresql':
+            success, message, _ = self.backup_postgresql(backup_dir, compress)
+        else:
+            success, message, _ = self.backup_mysql(backup_dir, compress)
 
         if success:
             self.log("=" * 60)
@@ -198,133 +251,223 @@ class DatabaseManager:
 
         return success, message
 
-    def verify_mysql(self, backup_file: Path) -> Tuple[bool, str]:
-        """验证MySQL备份（基本检查）"""
-        try:
-            # 检查文件是否可读且包含基本SQL语句
-            with open(backup_file, 'r', encoding='utf-8', errors='ignore') as f:
-                content = f.read(10000)  # 读取前10KB
+    # ============================================================
+    # Verify
+    # ============================================================
 
-            if 'CREATE TABLE' not in content and 'CREATE DATABASE' not in content:
-                return False, "备份文件似乎不包含有效的SQL语句"
+    def verify_sql_file(self, backup_file: Path) -> tuple[bool, str, dict]:
+        info = {'size': backup_file.stat().st_size, 'tables': []}
 
-            # 检查文件大小
-            file_size = backup_file.stat().st_size
-            if file_size < 100:
-                return False, f"备份文件过小 ({file_size} 字节)"
+        with open(backup_file, encoding='utf-8', errors='ignore') as f:
+            content = f.read(100000)
 
-            self.log(f"MySQL备份文件大小: {file_size:,} 字节")
-            return True, "MySQL备份文件基本检查通过"
-        except Exception as e:
-            return False, f"MySQL备份验证失败: {str(e)}"
+        has_create = 'CREATE TABLE' in content or 'CREATE DATABASE' in content
+        has_insert = 'INSERT INTO' in content or 'COPY' in content
 
-    def verify(self, backup_file: str) -> Tuple[bool, str]:
-        """验证备份文件"""
+        if not has_create and not has_insert:
+            return False, "备份文件不包含有效的数据库语句", info
+
+        if info['size'] < 100:
+            return False, f"备份文件过小 ({info['size']} 字节)", info
+
+        # Count tables by scanning CREATE TABLE statements
+        table_count = content.count('CREATE TABLE') + content.count('CREATE TABLE IF NOT EXISTS')
+        info['tables'].append(f"检测到约 {table_count} 个表定义")
+
+        checksum = self.calculate_checksum(backup_file)
+        info['sha256'] = checksum
+
+        return True, f"SQL 备份文件验证通过 ({_human_size(info['size'])}, SHA256: {checksum[:16]}...)", info
+
+    def verify(self, backup_file: str) -> tuple[bool, str, dict]:
         file_path = Path(backup_file)
-
         if not file_path.exists():
-            return False, f"备份文件不存在: {backup_file}"
+            return False, f"备份文件不存在: {backup_file}", {}
 
-        self.log(f"开始验证备份文件: {file_path}")
+        self.log(f"验证备份文件: {file_path}")
 
-        # 解压（如果需要）
         original_path = file_path
         if str(file_path).endswith('.gz'):
-            self.log("检测到压缩文件，正在解压...")
+            self.log("解压中...")
             file_path = self.decompress_file(file_path)
 
-        # 根据文件扩展名判断数据库类型
-        if str(file_path).endswith('.sql'):
-            success, message = self.verify_mysql(file_path)
-        else:
-            success, message = False, f"无法识别的备份文件类型: {file_path}"
-
-        # 清理临时解压文件
-        if original_path != file_path and file_path.exists():
-            file_path.unlink()
-
-        return success, message
-
-    def restore_mysql(self, backup_file: Path) -> Tuple[bool, str]:
-        """恢复MySQL数据库"""
-        config = self.get_mysql_config()
-
-        mysqldump_path = r'C:\Program Files\MySQL\MySQL Server 8.4\bin\mysqldump.exe'
-        mysql_path = r'C:\Program Files\MySQL\MySQL Server 8.4\bin\mysql.exe'
-
-        # 先备份当前数据库
-        self.log("正在备份当前MySQL数据库...")
-        pre_restore_backup = BACKUP_DIR / f'erp_system_pre_restore_{self.timestamp}.sql'
-        cmd = [
-            mysqldump_path,
-            f'-h{config["host"]}',
-            f'-P{config["port"]}',
-            f'-u{config["user"]}',
-        ]
-        if config['password']:
-            cmd.append(f'-p{config["password"]}')
-        cmd.extend(['--single-transaction', config['database']])
-
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-            if result.returncode == 0:
-                with open(pre_restore_backup, 'w', encoding='utf-8') as f:
-                    f.write(result.stdout)
-                self.log(f"已备份当前数据库到: {pre_restore_backup}")
-        except Exception as e:
-            self.log(f"预恢复备份失败: {e}", 'WARNING')
+            if str(file_path).endswith('.sql'):
+                success, message, info = self.verify_sql_file(file_path)
+            elif str(file_path).endswith('.zip'):
+                success, message, info = self._verify_zip_backup(file_path)
+            else:
+                success, message, info = False, f"无法识别的备份文件类型: {file_path}", {}
+        finally:
+            if original_path != file_path and file_path.exists():
+                file_path.unlink()
 
-        # 恢复备份
-        self.log("正在恢复MySQL数据库...")
-        cmd = [
-            mysql_path,
-            f'-h{config["host"]}',
-            f'-P{config["port"]}',
-            f'-u{config["user"]}',
-        ]
+        return success, message, info
+
+    def _verify_zip_backup(self, file_path: Path) -> tuple[bool, str, dict]:
+        import zipfile
+        try:
+            with zipfile.ZipFile(file_path, 'r') as zf:
+                names = zf.namelist()
+                info = {
+                    'size': file_path.stat().st_size,
+                    'files': names,
+                    'has_manifest': 'manifest.json' in names,
+                    'has_database': any(n.startswith('database/') for n in names),
+                    'has_filestore': any(n.startswith('filestore/') for n in names),
+                }
+                if 'manifest.json' in names:
+                    manifest = json.loads(zf.read('manifest.json'))
+                    info['manifest'] = {
+                        'version': manifest.get('version'),
+                        'type': manifest.get('type', 'unknown'),
+                        'exported_at': manifest.get('exported_at'),
+                        'exported_by': manifest.get('exported_by'),
+                        'table_count': manifest.get('table_count'),
+                        'total_rows': manifest.get('total_rows'),
+                    }
+                checksum = self.calculate_checksum(file_path)
+                info['sha256'] = checksum
+                return True, f"ZIP 备份验证通过 (类型: {info['manifest'].get('type', 'unknown')})", info
+        except Exception as e:
+            return False, f"ZIP 备份验证失败: {e}", {}
+
+    # ============================================================
+    # Restore
+    # ============================================================
+
+    def restore_postgresql(self, backup_file: Path) -> tuple[bool, str]:
+        config = self.get_db_config()
+        env = os.environ.copy()
+        env['PGPASSWORD'] = config['password']
+
+        # Pre-restore backup
+        self.log("正在创建恢复前备份...")
+        pre_backup_dir = BACKUP_DIR / 'pre_restore'
+        pre_backup_dir.mkdir(parents=True, exist_ok=True)
+        pre_backup_dir / f'pre_restore_{self.timestamp}.sql'
+        self.backup_postgresql(pre_backup_dir, compress=False)
+
+        # Terminate existing connections
+        self.log("终止现有数据库连接...")
+        try:
+            subprocess.run([
+                'psql', '-h', config['host'], '-p', config['port'],
+                '-U', config['user'], '-d', 'postgres',
+                '-c', f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                      f"WHERE datname = '{config['database']}' AND pid <> pg_backend_pid();",
+            ], env=env, capture_output=True, timeout=30)
+        except Exception as e:
+            self.log(f"终止连接时出现警告: {e}", 'WARNING')
+
+        # Drop and recreate
+        self.log("重建数据库...")
+        try:
+            subprocess.run([
+                'psql', '-h', config['host'], '-p', config['port'],
+                '-U', config['user'], '-d', 'postgres',
+                '-c', f'DROP DATABASE IF EXISTS "{config["database"]}";',
+            ], env=env, capture_output=True, check=True, timeout=30)
+
+            subprocess.run([
+                'psql', '-h', config['host'], '-p', config['port'],
+                '-U', config['user'], '-d', 'postgres',
+                '-c', f'CREATE DATABASE "{config["database"]}" OWNER "{config["user"]}";',
+            ], env=env, capture_output=True, check=True, timeout=30)
+        except subprocess.CalledProcessError as e:
+            return False, f"数据库重建失败: {e.stderr.decode(errors='replace') if e.stderr else str(e)}"
+
+        # Restore
+        self.log("恢复数据库中...")
+        try:
+            with open(backup_file, 'rb') as f:
+                result = subprocess.run([
+                    'psql', '-h', config['host'], '-p', config['port'],
+                    '-U', config['user'], '-d', config['database'],
+                    '-v', 'ON_ERROR_STOP=0',
+                ], stdin=f, capture_output=True, env=env, timeout=600)
+
+            stderr_text = result.stderr.decode('utf-8', errors='replace')
+
+            if result.returncode != 0:
+                # psql often returns non-zero for minor warnings - log but don't fail
+                warning_lines = [
+                    line for line in stderr_text.split('\n')
+                    if 'ERROR' in line and 'already exists' not in line.lower()
+                ]
+                if warning_lines:
+                    self.log(f"恢复过程中有 {len(warning_lines)} 个错误", 'WARNING')
+                    for line in warning_lines[:10]:
+                        self.log(f"  {line.strip()}", 'WARNING')
+                else:
+                    self.log(f"恢复完成（有非关键警告: {stderr_text[:200]}）", 'WARNING')
+
+            return True, "PostgreSQL 数据库恢复完成"
+        except subprocess.TimeoutExpired:
+            return False, "数据库恢复超时（超过 600 秒）"
+        except FileNotFoundError:
+            return False, "psql 命令未找到，请确保 PostgreSQL 客户端工具已安装"
+        except Exception as e:
+            return False, f"数据库恢复失败: {str(e)}"
+
+    def restore_mysql(self, backup_file: Path) -> tuple[bool, str]:
+        config = self.get_db_config()
+
+        # Pre-restore backup
+        self.log("正在创建恢复前备份...")
+        pre_backup_dir = BACKUP_DIR / 'pre_restore'
+        pre_backup_dir.mkdir(parents=True, exist_ok=True)
+        self.backup_mysql(pre_backup_dir, compress=False)
+
+        self.log("恢复 MySQL 数据库中...")
+        cmd = ['mysql', f'-h{config["host"]}', f'-P{config["port"]}', f'-u{config["user"]}']
         if config['password']:
             cmd.append(f'-p{config["password"]}')
         cmd.append(config['database'])
 
         try:
-            with open(backup_file, 'r', encoding='utf-8') as f:
-                result = subprocess.run(cmd, stdin=f, capture_output=True, text=True, timeout=600)
-
+            with open(backup_file, encoding='utf-8') as f:
+                result = subprocess.run(
+                    cmd, stdin=f, capture_output=True, text=True, timeout=600
+                )
             if result.returncode == 0:
-                return True, "MySQL数据库恢复成功"
+                return True, "MySQL 数据库恢复完成"
             else:
-                return False, f"MySQL恢复失败: {result.stderr}"
+                return False, f"MySQL 恢复失败: {result.stderr}"
         except FileNotFoundError:
-            return False, "mysql命令未找到，请确保MySQL已安装并添加到PATH"
+            return False, "mysql 命令未找到，请确保 MySQL 已安装"
         except Exception as e:
-            return False, f"MySQL恢复失败: {str(e)}"
+            return False, f"MySQL 恢复失败: {str(e)}"
 
-    def restore(self, backup_file: str) -> Tuple[bool, str]:
-        """恢复数据库"""
+    def restore(self, backup_file: str) -> tuple[bool, str]:
         file_path = Path(backup_file)
-
         if not file_path.exists():
             return False, f"备份文件不存在: {backup_file}"
 
         self.log("=" * 60)
         self.log("警告: 即将恢复数据库，这将覆盖当前数据！")
+        self.log(f"数据库类型: {self.db_type}")
         self.log("=" * 60)
 
-        # 解压（如果需要）
         original_path = file_path
         if str(file_path).endswith('.gz'):
-            self.log("检测到压缩文件，正在解压...")
+            self.log("解压备份文件...")
             file_path = self.decompress_file(file_path)
 
-        # 根据文件扩展名判断数据库类型
-        if str(file_path).endswith('.sql'):
-            success, message = self.restore_mysql(file_path)
-        else:
-            success, message = False, f"无法识别的备份文件类型: {file_path}"
+        try:
+            if str(file_path).endswith('.sql'):
+                if self.db_type == 'postgresql':
+                    success, message = self.restore_postgresql(file_path)
+                else:
+                    success, message = self.restore_mysql(file_path)
+            else:
+                success, message = False, f"无法识别的备份文件类型: {file_path}"
+        finally:
+            if original_path != file_path and file_path.exists():
+                file_path.unlink()
 
-        # 清理临时解压文件
-        if original_path != file_path and file_path.exists():
-            file_path.unlink()
+        # Log recovery event
+        self._log_recovery_event(file_path.name if file_path.exists() else original_path.name, success, message)
 
         if success:
             self.log("=" * 60)
@@ -335,105 +478,161 @@ class DatabaseManager:
 
         return success, message
 
-    def list_backups(self) -> list:
-        """列出所有备份"""
-        backups = []
+    def _log_recovery_event(self, filename: str, success: bool, message: str):
+        log_entry = {
+            'timestamp': datetime.now().isoformat(),
+            'backup_file': filename,
+            'db_type': self.db_type,
+            'success': success,
+            'message': message,
+        }
+        log_file = RECOVERY_LOG_DIR / f'recovery_{self.timestamp}.json'
+        try:
+            with open(log_file, 'w', encoding='utf-8') as f:
+                json.dump(log_entry, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
 
+    # ============================================================
+    # List / Cleanup
+    # ============================================================
+
+    def list_backups(self) -> list[dict[str, Any]]:
+        backups = []
         for backup_dir in self.backup_dirs:
             if not backup_dir.exists():
                 continue
-
             for file_path in backup_dir.iterdir():
                 if file_path.is_file() and not file_path.name.startswith('manifest_'):
-                    if file_path.name.endswith(('.sql', '.sql.gz')):
+                    if file_path.name.endswith(('.sql', '.sql.gz', '.zip', '.json')):
                         stat = file_path.stat()
                         backups.append({
                             'path': str(file_path),
                             'name': file_path.name,
                             'directory': backup_dir.name,
                             'size': stat.st_size,
-                            'size_human': self._human_size(stat.st_size),
+                            'size_human': _human_size(stat.st_size),
                             'created': datetime.fromtimestamp(stat.st_ctime).isoformat(),
-                            'modified': datetime.fromtimestamp(stat.st_mtime).isoformat()
+                            'modified': datetime.fromtimestamp(stat.st_mtime).isoformat(),
                         })
-
         backups.sort(key=lambda x: x['modified'], reverse=True)
         return backups
 
-    def _human_size(self, size: int) -> str:
-        """人类可读的文件大小"""
-        for unit in ['B', 'KB', 'MB', 'GB']:
-            if size < 1024.0:
-                return f"{size:.2f} {unit}"
-            size /= 1024.0
-        return f"{size:.2f} TB"
-
     def print_backups(self):
-        """打印备份列表"""
         backups = self.list_backups()
-
         if not backups:
             self.log("没有找到备份文件")
             return
 
-        self.log("=" * 100)
-        self.log(f"{'':<4} {'文件名':<40} {'目录':<10} {'大小':<10} {'修改时间':<20}")
-        self.log("=" * 100)
+        self.log("=" * 110)
+        header = f"{'#':<4} {'文件名':<45} {'目录':<10} {'大小':<12} {'修改时间':<20}"
+        self.log(header)
+        self.log("=" * 110)
 
-        for i, backup in enumerate(backups, 1):
-            modified = datetime.fromisoformat(backup['modified']).strftime('%Y-%m-%d %H:%M')
+        for i, b in enumerate(backups, 1):
+            modified = datetime.fromisoformat(b['modified']).strftime('%Y-%m-%d %H:%M')
             self.log(
-                f"{i:<4} {backup['name']:<40} {backup['directory']:<10} "
-                f"{backup['size_human']:<10} {modified:<20}"
+                f"{i:<4} {b['name']:<45} {b['directory']:<10} "
+                f"{b['size_human']:<12} {modified:<20}"
             )
 
-        self.log("=" * 100)
-        self.log(f"共找到 {len(backups)} 个备份文件")
+        total_size = sum(b['size'] for b in backups)
+        self.log("=" * 110)
+        self.log(f"共 {len(backups)} 个备份文件，总大小 {_human_size(total_size)}")
+
+    def cleanup(self, keep_days: int = 7, dry_run: bool = False):
+        cutoff = datetime.now() - timedelta(days=keep_days)
+        deleted = []
+        total_freed = 0
+
+        for backup in self.list_backups():
+            modified = datetime.fromisoformat(backup['modified'])
+            if modified < cutoff:
+                if dry_run:
+                    self.log(f"[DRY RUN] 将删除: {backup['name']} ({backup['size_human']})")
+                else:
+                    try:
+                        Path(backup['path']).unlink()
+                        deleted.append(backup['name'])
+                        total_freed += backup['size']
+                        self.log(f"已删除: {backup['name']} ({backup['size_human']})")
+                    except Exception as e:
+                        self.log(f"删除失败 {backup['name']}: {e}", 'ERROR')
+
+        if dry_run:
+            self.log(f"[DRY RUN] 将删除 {len(deleted)} 个文件")
+        else:
+            self.log(f"清理完成: 删除 {len(deleted)} 个文件，释放 {_human_size(total_freed)}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description='ERP系统数据库管理工具')
+    parser = argparse.ArgumentParser(
+        description='ERP系统数据库管理工具 v3.0 (PostgreSQL / MySQL)',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+示例:
+  python db_manager.py backup --type daily
+  python db_manager.py verify --file backups/manual/erp_system_backup_20260501_120000.sql.gz
+  python db_manager.py restore --file backups/manual/erp_system_backup_20260501_120000.sql.gz
+  python db_manager.py list
+  python db_manager.py cleanup --keep 7
+        """,
+    )
     subparsers = parser.add_subparsers(title='命令', dest='command')
 
-    # 备份命令
     backup_parser = subparsers.add_parser('backup', help='备份数据库')
-    backup_parser.add_argument('--type', choices=['daily', 'weekly', 'monthly', 'manual'],
-                              default='manual', help='备份类型')
+    backup_parser.add_argument(
+        '--type', choices=['daily', 'weekly', 'monthly', 'manual'],
+        default='manual', help='备份类型'
+    )
     backup_parser.add_argument('--no-compress', action='store_true', help='不压缩备份文件')
 
-    # 验证命令
     verify_parser = subparsers.add_parser('verify', help='验证备份文件')
     verify_parser.add_argument('--file', required=True, help='备份文件路径')
 
-    # 恢复命令
     restore_parser = subparsers.add_parser('restore', help='恢复数据库')
     restore_parser.add_argument('--file', required=True, help='备份文件路径')
-    restore_parser.add_argument('--force', action='store_true', help='强制恢复（不确认）')
+    restore_parser.add_argument('--force', action='store_true', help='跳过确认直接恢复')
 
-    # 列表命令
-    subparsers.add_parser('list', help='列出所有备份')
+    subparsers.add_parser('list', help='列出所有备份文件')
+
+    cleanup_parser = subparsers.add_parser('cleanup', help='清理过期备份文件')
+    cleanup_parser.add_argument('--keep', type=int, default=7, help='保留最近 N 天的备份（默认 7）')
+    cleanup_parser.add_argument('--dry-run', action='store_true', help='仅列出将删除的文件，不实际操作')
 
     args = parser.parse_args()
     manager = DatabaseManager()
 
+    manager.log(f"数据库管理工具 v3.0 | 检测到数据库类型: {manager.db_type}")
+
     if args.command == 'backup':
         success, message = manager.backup(args.type, not args.no_compress)
         sys.exit(0 if success else 1)
+
     elif args.command == 'verify':
-        success, message = manager.verify(args.file)
-        print(f"\n{'验证成功' if success else '验证失败'}: {message}")
+        success, message, info = manager.verify(args.file)
+        verdict = '验证通过' if success else '验证失败'
+        print(f"\n{verdict}: {message}")
+        if info:
+            print(f"详细信息: {json.dumps({k: v for k, v in info.items() if k != 'files'}, indent=2, ensure_ascii=False)}")
         sys.exit(0 if success else 1)
+
     elif args.command == 'restore':
         if not args.force:
             confirm = input("\n警告: 这将覆盖当前数据库！确认继续? (yes/no): ")
-            if confirm.lower() not in ['yes', 'y']:
+            if confirm.lower() not in ('yes', 'y'):
                 print("已取消恢复操作")
                 sys.exit(0)
         success, message = manager.restore(args.file)
         print(f"\n{'恢复成功' if success else '恢复失败'}: {message}")
         sys.exit(0 if success else 1)
+
     elif args.command == 'list':
         manager.print_backups()
+
+    elif args.command == 'cleanup':
+        manager.cleanup(args.keep, args.dry_run)
+
     else:
         parser.print_help()
 

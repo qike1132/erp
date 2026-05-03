@@ -1,8 +1,7 @@
 """purchase_supplier_service 单元测试"""
-import pytest
 from unittest.mock import MagicMock
 
-from fastapi_app.services.purchase_supplier_service import get_suppliers, create_supplier
+from fastapi_app.services.purchase_supplier_service import create_supplier, get_suppliers
 
 
 class TestPurchaseSupplierService:

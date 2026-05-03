@@ -35,6 +35,7 @@ const routes: RouteRecordRaw[] = [
         path: 'purchase-plan',
         name: 'PurchasePlan',
         component: () => import('@/views/purchase-plan/PurchasePlanView.vue'),
+        meta: { hideHeader: true },
       },
       { path: 'material', name: 'Material', component: () => import('@/views/material/MaterialView.vue'), meta: { hideHeader: true } },
       {
@@ -51,6 +52,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'permission', name: 'Permission', component: () => import('@/views/permission/PermissionView.vue') },
       { path: 'settings', name: 'Settings', component: () => import('@/views/settings/SettingsView.vue') },
       { path: 'ocr-import', name: 'OcrImport', component: () => import('@/views/ocr-import/OcrImportView.vue') },
+      { path: 'backup', name: 'Backup', component: () => import('@/views/backup/BackupView.vue'), meta: { hideHeader: true } },
     ],
   },
   { path: '/:pathMatch(.*)*', redirect: '/dashboard' },
@@ -104,15 +106,28 @@ router.beforeEach(async (to: any, _from: any, next: any) => {
   if (!authStore.loaded) {
     try {
       await authStore.init()
-      next()
+      // 等待导航数据加载完成（非阻塞但有短暂等待）
+      await authStore.fetchNavSections()
     } catch {
-      next(`/login?redirect=${encodeURIComponent(to.fullPath)}`)
+      return next(`/login?redirect=${encodeURIComponent(to.fullPath)}`)
     }
-  } else if (!authStore.isLoggedIn) {
-    next(`/login?redirect=${encodeURIComponent(to.fullPath)}`)
-  } else {
-    next()
   }
+
+  if (!authStore.isLoggedIn) {
+    return next(`/login?redirect=${encodeURIComponent(to.fullPath)}`)
+  }
+
+  // 权限检查：非超级用户只能访问 filteredNavSections 中可见的路径
+  if (authStore.user && !authStore.user.isSuper) {
+    const targetPath = '/' + to.path.split('/').filter(Boolean)[0]
+    const allowedPaths = authStore.filteredNavSections.flatMap((s) => s.items.map((i) => i.path))
+    // dashboard 始终可访问
+    if (targetPath !== '/dashboard' && !allowedPaths.includes(targetPath)) {
+      return next('/dashboard')
+    }
+  }
+
+  next()
 })
 
 export default router

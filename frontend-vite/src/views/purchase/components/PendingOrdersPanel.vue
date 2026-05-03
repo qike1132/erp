@@ -7,10 +7,10 @@
       <div class="pc-section-actions">
         <button
           class="pc-btn pc-btn-success"
-          :disabled="validSelectedCount === 0"
+          :disabled="validSelectedCount === 0 || submitting"
           @click="$emit('oneClickGenerate')"
         >
-          <i class="fas fa-magic" /> 一键审核订单 ({{ validSelectedCount }})
+          <i :class="submitting ? 'fas fa-spinner fa-spin' : 'fas fa-magic'" /> 一键审核订单 ({{ validSelectedCount }})
         </button>
       </div>
     </div>
@@ -29,26 +29,23 @@
 
     <!-- Table -->
     <template v-else>
-      <div class="pc-select-bar">
-        <label class="pc-select-label">
-          <UiCheckbox :checked="allSelected" @update:checked="$emit('toggleAll', $event)" />
-          <span>全选</span>
-        </label>
-        <span class="pc-select-count">
-          已选择 <strong>{{ selectedCount }}</strong> 个订单
-        </span>
-      </div>
-      <div class="pc-table-wrap">
-        <table>
+      <div class="pc-section-body">
+        <div class="pc-table-wrap">
+          <table>
           <thead>
             <tr>
-              <th style="width:40px" />
+              <th style="width:60px">
+                <div class="pc-th-check">
+                  <UiCheckbox :checked="allSelected" @update:checked="$emit('toggleAll', $event)" />
+                  <span>全选</span>
+                </div>
+              </th>
               <th>下单时间</th>
               <th>订单号</th>
               <th style="text-align:left">客户名称</th>
               <th style="text-align:left">产品名称</th>
               <th style="text-align:right">订单数量</th>
-              <th>操作</th>
+              <th style="text-align:center">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -70,22 +67,23 @@
                 <button
                   v-if="o.has_bom"
                   class="pc-btn pc-btn-success pc-btn-sm"
+                  :disabled="submitting"
                   @click="$emit('quickGenerate', o.id)"
                 >
-                  <i class="fas fa-magic" /> 审核订单
+                  <i :class="submitting ? 'fas fa-spinner fa-spin' : 'fas fa-magic'" /> 审核订单
                 </button>
                 <button
                   v-else
-                  class="pc-btn pc-btn-sm pc-btn-disabled"
-                  title="该产品未配置BOM表，无法审核"
-                  disabled
+                  class="pc-btn pc-btn-danger pc-btn-sm"
+                  @click="$emit('noBomError', o)"
                 >
-                  <i class="fas fa-magic" /> 审核订单
+                  <i class="fas fa-exclamation-circle" /> 未配置BOM
                 </button>
               </td>
             </tr>
           </tbody>
         </table>
+      </div>
       </div>
     </template>
   </div>
@@ -101,6 +99,7 @@ defineProps<{
   selectedCount: number
   validSelectedCount: number
   allSelected: boolean
+  submitting: boolean
 }>()
 
 defineEmits<{
@@ -108,6 +107,7 @@ defineEmits<{
   toggleSelection: [id: number]
   oneClickGenerate: []
   quickGenerate: [id: number]
+  noBomError: [order: any]
 }>()
 </script>
 
@@ -179,44 +179,31 @@ defineEmits<{
   border-color: transparent;
 }
 
+.pc-btn-danger {
+  color: var(--color-danger-600, #dc2626);
+  border-color: var(--color-danger-200, #fecaca);
+  background: var(--color-danger-50, #fef2f2);
+}
+
+.pc-btn-danger:hover {
+  background: var(--color-danger-500, #ef4444);
+  color: white;
+  border-color: transparent;
+}
+
 .pc-btn-disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
 
-/* Select bar */
-.pc-select-bar {
-  margin: 12px 24px;
-  padding: 10px 14px;
-  background: var(--color-primary-50, #eff6ff);
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.pc-select-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-primary-700);
-  cursor: pointer;
-}
-
-.pc-select-count {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-}
-
-.pc-select-count strong {
-  color: var(--color-primary-500);
+/* Section body - consistent padding with header */
+.pc-section-body {
+  padding: 0 24px;
 }
 
 /* Table */
 .pc-table-wrap {
-  padding: 0 24px 16px;
+  padding: 0 0 16px;
   overflow-x: auto;
 }
 
@@ -236,6 +223,19 @@ defineEmits<{
   letter-spacing: 0.05em;
   border-bottom: 2px solid var(--color-border-light, #e2e8f0);
   white-space: nowrap;
+  text-align: left;
+}
+
+.pc-th-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pc-th-check span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
 }
 
 .pc-table-wrap tbody td {

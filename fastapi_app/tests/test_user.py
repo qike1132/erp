@@ -1,7 +1,7 @@
 """用户管理模块测试"""
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 
 # ==================== Schema 测试 ====================
 
@@ -97,7 +97,7 @@ class TestUserService:
         mock_db.execute = AsyncMock(return_value=mock_result)
 
         with patch('fastapi_app.core.security.hash_password', return_value='hashed'):
-            user = await create_user(mock_db, "newuser", "Test123!@", False)
+            await create_user(mock_db, "newuser", "Test123!@", False)
         assert mock_db.add.called
         assert mock_db.flush.called
 
@@ -134,7 +134,7 @@ class TestUserService:
         from fastapi_app.services.user_service import toggle_user_status
         mock_db.get = AsyncMock(return_value=mock_user)
 
-        result = await toggle_user_status(mock_db, 1)
+        await toggle_user_status(mock_db, 1)
         assert mock_user.status is False  # toggled from True to False
 
     @pytest.mark.asyncio
@@ -169,27 +169,27 @@ class TestUserService:
 
     @pytest.mark.asyncio
     async def test_update_user_permissions_skips_sensitive(self, mock_db, mock_user, mock_permission):
-        from fastapi_app.services.user_service import update_user_permissions, SENSITIVE_PERMISSIONS
-        mock_db.get = AsyncMock(return_value=mock_user)
+        from fastapi_app.services.user_service import update_user_permissions
 
         sensitive_perm = MagicMock()
         sensitive_perm.id = 2
         sensitive_perm.code = "user_manage"
         sensitive_perm.children = []
 
-        mock_db.get = AsyncMock(side_effect=lambda model, pk: {
-            (User if 'User' in str(model) else Permission, pk): mock_user if isinstance(mock_user, type(MagicMock())) and pk == 1 else (sensitive_perm if pk == 2 else mock_permission)
-        }.get((model, pk), None))
-
-        # Simpler approach: make get return user for User model, permission for Permission
-        def get_side_effect(model, pk):
-            if model.__name__ == 'User':
-                return mock_user
-            return mock_permission if pk == 1 else sensitive_perm
-
-        mock_db.get = AsyncMock(side_effect=get_side_effect)
+        # First execute call: load user with permissions
+        mock_user_result = MagicMock()
+        mock_user_result.unique.return_value = mock_user_result
+        mock_user_result.scalar_one_or_none.return_value = mock_user
         mock_user.permissions = MagicMock()
         mock_user.permissions.clear = MagicMock()
+
+        # Second execute call: load permissions by IDs
+        mock_perm_result = MagicMock()
+        mock_perm_scalars = MagicMock()
+        mock_perm_scalars.all.return_value = [mock_permission, sensitive_perm]
+        mock_perm_result.scalars.return_value = mock_perm_scalars
+
+        mock_db.execute = AsyncMock(side_effect=[mock_user_result, mock_perm_result])
 
         await update_user_permissions(mock_db, 1, [1, 2])
         # sensitive permission should not be added

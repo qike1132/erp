@@ -13,7 +13,7 @@
 
     <!-- Navigation -->
     <nav class="sb-nav">
-      <div v-for="section in authStore.navSections" :key="section.title" class="sb-section">
+      <div v-for="section in authStore.filteredNavSections" :key="section.title" class="sb-section">
         <div v-if="!collapsed" class="sb-section-title">
           {{ section.title }}
         </div>
@@ -83,6 +83,7 @@ const iconMap: Record<string, string> = {
   'ocr-import': 'fas fa-upload',
   case: 'fas fa-box',
   'material-calculator': 'fas fa-list',
+  'fa-database': 'fas fa-database',
 }
 </script>
 
@@ -165,8 +166,8 @@ const iconMap: Record<string, string> = {
 }
 
 .sb-logo img {
-  width: 48px;
-  height: 48px;
+  width: 70px;
+  height: 70px;
   border-radius: 13px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
   flex-shrink: 0;
@@ -219,8 +220,8 @@ const iconMap: Record<string, string> = {
   margin-bottom: 4px;
   border-radius: 12px;
   text-decoration: none;
-  color: var(--color-text);
-  font-weight: 600;
+  color: var(--color-heading);
+  font-weight: 800;
   font-size: 14px;
   position: relative;
   background: white;

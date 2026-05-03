@@ -7,13 +7,14 @@
 仅支持 PostgreSQL。
 """
 
-import os
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
 from sqlalchemy import create_engine
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.exc import DisconnectionError, OperationalError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from fastapi_app.core.config import settings
@@ -95,7 +96,29 @@ async def get_async_db():
     - 请求成功时自动 commit
     - 请求异常时自动 rollback
     - 服务层应使用 flush() 而非 commit()，由本依赖统一控制事务边界
+
+    注意：备份恢复操作（psql 路径）会 DROP+CREATE 数据库，导致当前 session
+    的连接失效。此依赖对 commit/rollback 错误进行宽容处理，避免恢复成功后
+    因 session 失效而返回 500 错误。
     """
+    async with _AsyncSessionLocal() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            try:
+                await session.rollback()
+            except Exception:
+                logger.warning("Session rollback failed (may be broken after psql restore)", exc_info=True)
+            raise
+
+
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def get_async_db_context():
+    """异步数据库会话上下文管理器（用于 ARQ 任务等非请求场景）"""
     async with _AsyncSessionLocal() as session:
         try:
             yield session
@@ -169,6 +192,17 @@ async def dispose_async_engines():
     async_engine = None
 
 
+async def verify_db_connectivity() -> bool:
+    """验证数据库连接可用性，返回 True/False"""
+    from sqlalchemy import text
+    try:
+        async with _async_engine.connect() as conn:
+            await conn.execute(text('SELECT 1'))
+        return True
+    except (OperationalError, DisconnectionError):
+        return False
+
+
 import warnings
 
 
@@ -197,7 +231,8 @@ def __getattr__(name):
             DeprecationWarning,
             stacklevel=2,
         )
-        from typing import Generator
+        from collections.abc import Generator
+
         from sqlalchemy.orm import Session
 
         def get_sync_db() -> Generator[Session, None, None]:

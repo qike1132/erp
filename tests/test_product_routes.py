@@ -2,13 +2,15 @@
 产品路由测试 - 提高产品路由覆盖率
 测试范围：产品列表、创建、编辑、删除、搜索等完整流程
 """
-import pytest
 import json
 from datetime import datetime
+
+import pytest
+
 try:
-    from flask import session
     from app import db
-    from app.models import Product, InventoryLog, Order, StockIn, StockOut
+    from app.models import InventoryLog, Order, Product, StockIn, StockOut
+    from flask import session
     HAS_FLASK = True
 except ImportError:
     HAS_FLASK = False
@@ -29,7 +31,7 @@ class TestProductRoutes:
         """测试产品列表页面访问成功"""
         response = logged_in_client.get('/product/list')
         assert response.status_code == 200
-        assert b'product' in response.data or '产品'.encode('utf-8') in response.data
+        assert b'product' in response.data or '产品'.encode() in response.data
 
     def test_product_list_post_create_success(self, logged_in_client):
         """测试创建产品成功"""
@@ -41,7 +43,7 @@ class TestProductRoutes:
         }
         response = logged_in_client.post('/product/list', data=data, follow_redirects=True)
         assert response.status_code == 200
-        
+
         # 验证产品创建
         product = Product.query.filter_by(barcode='NEW001').first()
         assert product is not None
@@ -57,7 +59,7 @@ class TestProductRoutes:
         }
         response = logged_in_client.post('/product/list', data=data, follow_redirects=True)
         assert response.status_code == 200
-        
+
         product = Product.query.filter_by(barcode='NOSTOCK001').first()
         assert product is not None
         assert product.current_stock == 0
@@ -76,7 +78,7 @@ class TestProductRoutes:
         }
         response = logged_in_client.post(f'/product/edit/{test_product.id}', data=data, follow_redirects=True)
         assert response.status_code == 200
-        
+
         # 验证产品更新
         db.session.refresh(test_product)
         assert test_product.name == '更新产品名'
@@ -85,7 +87,7 @@ class TestProductRoutes:
         """测试编辑产品时调整库存"""
         initial_stock = test_product.current_stock
         new_initial_stock = initial_stock + 50
-        
+
         data = {
             'name': test_product.name,
             'barcode': test_product.barcode,
@@ -94,7 +96,7 @@ class TestProductRoutes:
         }
         response = logged_in_client.post(f'/product/edit/{test_product.id}', data=data, follow_redirects=True)
         assert response.status_code == 200
-        
+
         # 验证库存更新
         db.session.refresh(test_product)
         assert test_product.current_stock == initial_stock + 50
@@ -110,11 +112,11 @@ class TestProductRoutes:
         )
         db_session.add(product)
         db_session.commit()
-        
+
         product_id = product.id
         response = logged_in_client.get(f'/product/delete/{product_id}', follow_redirects=True)
         assert response.status_code == 200
-        
+
         # 验证产品删除
         deleted_product = Product.query.get(product_id)
         assert deleted_product is None
@@ -132,10 +134,10 @@ class TestProductRoutes:
         )
         db_session.add(order)
         db_session.commit()
-        
+
         response = logged_in_client.get(f'/product/delete/{test_product.id}', follow_redirects=True)
         assert response.status_code == 200
-        assert b'error' in response.data or '无法删除'.encode('utf-8') in response.data
+        assert b'error' in response.data or '无法删除'.encode() in response.data
 
     def test_product_delete_with_stockins(self, logged_in_client, test_product, test_customer, db_session):
         """测试删除有关联入库的产品"""
@@ -149,10 +151,10 @@ class TestProductRoutes:
         )
         db_session.add(stockin)
         db_session.commit()
-        
+
         response = logged_in_client.get(f'/product/delete/{test_product.id}', follow_redirects=True)
         assert response.status_code == 200
-        assert b'error' in response.data or '无法删除'.encode('utf-8') in response.data
+        assert b'error' in response.data or '无法删除'.encode() in response.data
 
     def test_product_delete_not_found(self, logged_in_client):
         """测试删除不存在的产品"""
@@ -163,7 +165,7 @@ class TestProductRoutes:
         """测试按名称搜索产品"""
         response = logged_in_client.get(f'/product/search?q={test_product.name}')
         assert response.status_code == 200
-        
+
         data = json.loads(response.data)
         assert isinstance(data, list)
         assert len(data) > 0
@@ -172,7 +174,7 @@ class TestProductRoutes:
         """测试按条码搜索产品"""
         response = logged_in_client.get(f'/product/search?q={test_product.barcode}')
         assert response.status_code == 200
-        
+
         data = json.loads(response.data)
         assert isinstance(data, list)
         assert len(data) > 0
@@ -181,7 +183,7 @@ class TestProductRoutes:
         """测试空查询搜索产品"""
         response = logged_in_client.get('/product/search?q=')
         assert response.status_code == 200
-        
+
         data = json.loads(response.data)
         assert isinstance(data, list)
 
@@ -189,7 +191,7 @@ class TestProductRoutes:
         """测试获取产品可用库存成功"""
         response = logged_in_client.get(f'/product/available-stock?product_id={test_product.id}')
         assert response.status_code == 200
-        
+
         data = json.loads(response.data)
         assert data['product_id'] == test_product.id
         assert 'current_stock' in data
@@ -218,10 +220,10 @@ class TestProductBusinessLogic:
             'initial_stock': 50
         }
         logged_in_client.post('/product/list', data=data, follow_redirects=True)
-        
+
         product = Product.query.filter_by(barcode='LOG001').first()
         assert product is not None
-        
+
         # 验证库存日志
         log = InventoryLog.query.filter_by(
             product_id=product.id,
@@ -234,14 +236,14 @@ class TestProductBusinessLogic:
         """测试调整库存时日志记录"""
         initial_stock = test_product.initial_stock
         new_stock = initial_stock + 30
-        
+
         data = {
             'name': test_product.name,
             'barcode': test_product.barcode,
             'initial_stock': new_stock
         }
         logged_in_client.post(f'/product/edit/{test_product.id}', data=data, follow_redirects=True)
-        
+
         # 验证库存日志
         log = InventoryLog.query.filter_by(
             product_id=test_product.id,
@@ -253,13 +255,13 @@ class TestProductBusinessLogic:
     def test_product_cache_invalidation_on_create(self, logged_in_client):
         """测试创建产品时缓存失效"""
         from utils.redis_cache import redis_cache
-        
+
         data = {
             'name': '缓存测试产品',
             'barcode': 'CACHE001'
         }
         logged_in_client.post('/product/list', data=data, follow_redirects=True)
-        
+
         # 验证缓存已清除
         cached_products = redis_cache.get('product_list_all')
         assert cached_products is None
@@ -267,13 +269,13 @@ class TestProductBusinessLogic:
     def test_product_cache_invalidation_on_edit(self, logged_in_client, test_product):
         """测试编辑产品时缓存失效"""
         from utils.redis_cache import redis_cache
-        
+
         data = {
             'name': '编辑后产品名',
             'barcode': test_product.barcode
         }
         logged_in_client.post(f'/product/edit/{test_product.id}', data=data, follow_redirects=True)
-        
+
         # 验证缓存已清除
         cached_products = redis_cache.get('product_list_all')
         assert cached_products is None
@@ -375,7 +377,7 @@ class TestProductPerformance:
             )
             db_session.add(product)
         db_session.commit()
-        
+
         response = logged_in_client.get('/product/list')
         assert response.status_code == 200
 
@@ -391,11 +393,11 @@ class TestProductPerformance:
             )
             db_session.add(product)
         db_session.commit()
-        
+
         # 搜索特定产品
         response = logged_in_client.get('/product/search?q=搜索测试产品100')
         assert response.status_code == 200
-        
+
         data = json.loads(response.data)
         assert isinstance(data, list)
 
@@ -413,7 +415,7 @@ class TestProductPerformance:
             products.append(product)
         db_session.add_all(products)
         db_session.commit()
-        
+
         # 查询每个产品的可用库存
         for product in products[:10]:  # 只测试前10个
             response = logged_in_client.get(f'/product/available-stock?product_id={product.id}')
@@ -436,7 +438,7 @@ class TestProductIntegration:
             status='待备货'
         )
         db_session.add(order)
-        
+
         # 创建入库
         stockin = StockIn(
             stockin_no='SI-INT-001',
@@ -447,7 +449,7 @@ class TestProductIntegration:
         )
         db_session.add(stockin)
         db_session.commit()
-        
+
         # 验证产品关联数据
         assert len(test_product.orders) > 0
         assert len(test_product.stockins) > 0
@@ -455,7 +457,7 @@ class TestProductIntegration:
     def test_product_stock_consistency(self, logged_in_client, test_product, test_customer, db_session):
         """测试产品库存一致性"""
         initial_stock = test_product.current_stock
-        
+
         # 创建入库
         stockin = StockIn(
             stockin_no='SI-CONS-001',
@@ -467,7 +469,7 @@ class TestProductIntegration:
         db_session.add(stockin)
         test_product.current_stock += 30
         db_session.commit()
-        
+
         # 创建出库
         stockout = StockOut(
             stockout_no='SO-CONS-001',
@@ -479,7 +481,7 @@ class TestProductIntegration:
         db_session.add(stockout)
         test_product.current_stock -= 10
         db_session.commit()
-        
+
         # 验证库存一致性
         db.session.refresh(test_product)
         assert test_product.current_stock == initial_stock + 30 - 10

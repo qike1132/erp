@@ -3,22 +3,29 @@
 
 从 Flask order.py 迁移的 REST API。
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Optional
 import logging
 
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
+from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db
 from fastapi_app.core.deps import require_permission
-from fastapi_app.core.cache import invalidate_cache
-from fastapi_app.shared_models import User, Order
 from fastapi_app.schemas.order import (
-    OrderCreate, OrderUpdate, OrderActionResponse,
-    OrderListResponse, OrderDetailResponse, ApprovalCancelResponse, ApprovalListResponse,
+    ApprovalCancelResponse,
+    ApprovalListResponse,
+    OrderActionResponse,
+    OrderCreate,
+    OrderDetailResponse,
+    OrderListResponse,
+    OrderUpdate,
 )
 from fastapi_app.services import order_service
 from fastapi_app.services.order_service import PermissionDeniedError
-from sqlalchemy import select
+from fastapi_app.shared_models import Order, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -28,10 +35,10 @@ router = APIRouter()
 async def list_orders(
     page: int = Query(1, ge=1, description="页码"),
     per_page: int = Query(50, ge=1, le=500, description="每页数量"),
-    customer: Optional[str] = Query(None, description="客户名筛选"),
-    product_id: Optional[int] = Query(None, description="产品ID筛选"),
-    status: Optional[str] = Query(None, description="状态筛选"),
-    order_type: Optional[str] = Query(None, description="订单类型筛选：regular/custom"),
+    customer: str | None = Query(None, description="客户名筛选"),
+    product_id: int | None = Query(None, description="产品ID筛选"),
+    status: str | None = Query(None, description="状态筛选"),
+    order_type: str | None = Query(None, description="订单类型筛选：regular/custom"),
     db: AsyncSession = Depends(get_async_db),
     _user: User = Depends(require_permission("order_manage")),
 ):
@@ -72,7 +79,7 @@ async def create_order(
         )
         return OrderActionResponse(success=True, message="订单添加成功！")
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.put("/edit/{order_id}", response_model=OrderActionResponse)
@@ -102,7 +109,7 @@ async def edit_order(
         )
         return OrderActionResponse(success=result['success'], message=result['message'])
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.delete("/delete/{order_id}", response_model=OrderActionResponse)
@@ -116,7 +123,16 @@ async def delete_order(
         result = await order_service.delete_order(db, order_id, user)
         return OrderActionResponse(success=result['success'], message=result['message'])
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except IntegrityError as e:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=f'订单存在关联数据，无法删除：{e}') from e
+    except PermissionDeniedError as e:
+        raise HTTPException(status_code=403, detail=settings.sanitize_business_error(e)) from e
+    except (SQLAlchemyError, OSError) as e:
+        await db.rollback()
+        logger.error("删除订单失败: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail='删除订单失败，请稍后重试') from e
 
 
 @router.post("/cancel-approval/{approval_id}", response_model=ApprovalCancelResponse)
@@ -128,11 +144,12 @@ async def cancel_approval(
     """取消审批请求"""
     try:
         await order_service.cancel_approval(db, approval_id, user)
+        await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY)
         return ApprovalCancelResponse(success=True, message="审批请求已取消")
     except PermissionDeniedError as e:
-        raise HTTPException(status_code=403, detail=str(e))
+        raise HTTPException(status_code=403, detail=settings.sanitize_business_error(e)) from e
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.get("/my-approvals", response_model=ApprovalListResponse)
@@ -159,5 +176,5 @@ async def update_batch_no(
         raise HTTPException(status_code=404, detail="订单不存在")
     order.batch_no = batch_no
     await db.commit()
-    await invalidate_cache("orders:*")
+    await invalidate_related_caches(CacheDomain.ORDER)
     return {"success": True, "message": "批次号已更新"}

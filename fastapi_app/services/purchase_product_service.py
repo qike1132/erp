@@ -6,16 +6,19 @@
 import json
 import logging
 from decimal import Decimal
-from typing import Optional
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, selectinload
 
-from fastapi_app.shared_models import (
-    Product, ProductMaterial, ProductFabric, ProductAccessory, ProductPackaging,
-    ModificationLog, MATERIAL_CATEGORIES,
-)
 from fastapi_app.services import escape_like
+from fastapi_app.shared_models import (
+    ModificationLog,
+    Product,
+    ProductAccessory,
+    ProductFabric,
+    ProductMaterial,
+    ProductPackaging,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,44 +82,21 @@ def get_products(db: Session, *, page: int = 1, per_page: int = 50,
         sort_col = sort_col.desc()
     query = query.order_by(sort_col)
 
-    total = query.count()
-    products = query.offset((page - 1) * per_page).limit(per_page).all()
+    # simple 模式（物料计算器）仅消费 products 字段，跳过额外的 count(*) 全表扫描。
+    # 非 simple 模式保留 count 以支持分页 UI。
+    if simple:
+        total = None
+        products = query.offset((page - 1) * per_page).limit(per_page).all()
+    else:
+        total = query.count()
+        products = query.offset((page - 1) * per_page).limit(per_page).all()
 
     if simple:
         product_ids = [p.id for p in products]
-        has_material_ids = set()
-        has_fabric_ids = set()
-        has_accessory_ids = set()
-        has_packaging_ids = set()
-        if product_ids:
-            has_material_ids = set(
-                row[0] for row in db.query(ProductMaterial.product_id)
-                .filter(ProductMaterial.product_id.in_(product_ids), ProductMaterial.cotton_usage > 0)
-                .all()
-            )
-            has_fabric_ids = set(
-                row[0] for row in db.query(ProductFabric.product_id)
-                .filter(ProductFabric.product_id.in_(product_ids))
-                .distinct().all()
-            )
-            has_accessory_ids = set(
-                row[0] for row in db.query(ProductAccessory.product_id)
-                .filter(ProductAccessory.product_id.in_(product_ids))
-                .distinct().all()
-            )
-            has_packaging_ids = set(
-                row[0] for row in db.query(ProductPackaging.product_id)
-                .filter(ProductPackaging.product_id.in_(product_ids))
-                .distinct().all()
-            )
+        bom_product_ids = _batch_check_bom_exists(db, product_ids)
         result = []
         for p in products:
-            has_bom_flag = (
-                p.id in has_material_ids or
-                p.id in has_fabric_ids or
-                p.id in has_accessory_ids or
-                p.id in has_packaging_ids
-            )
+            has_bom_flag = p.id in bom_product_ids
             result.append({
                 'id': p.id,
                 'name': p.name,
@@ -147,8 +127,8 @@ def get_products(db: Session, *, page: int = 1, per_page: int = 50,
 
     return {
         'products': result,
-        'total': total,
-        'pages': (total + per_page - 1) // per_page if per_page > 0 else 0,
+        'total': total if total is not None else len(result),
+        'pages': ((total + per_page - 1) // per_page if per_page > 0 else 0) if total is not None else 1,
         'current_page': page,
     }
 
@@ -184,22 +164,46 @@ def get_search_suggestions(db: Session, keyword: str) -> list:
     if not keyword or len(keyword) < 1:
         return []
 
-    products = db.query(Product).options(
-        selectinload(Product.material),
-        selectinload(Product.fabrics),
-        selectinload(Product.accessories),
-        selectinload(Product.packagings),
-    ).filter(
+    products = db.query(Product).filter(
         or_(
             Product.name.ilike(f'%{escape_like(keyword)}%'),
             Product.barcode.ilike(f'%{escape_like(keyword)}%')
         )
     ).limit(10).all()
 
+    product_ids = [p.id for p in products]
+    bom_product_ids = _batch_check_bom_exists(db, product_ids)
+
     return [
-        {'id': p.id, 'name': p.name, 'barcode': p.barcode, 'price': float(p.price) if p.price else 0, 'has_bom': _product_has_bom(p)}
+        {'id': p.id, 'name': p.name, 'barcode': p.barcode, 'price': float(p.price) if p.price else 0, 'has_bom': p.id in bom_product_ids}
         for p in products
     ]
+
+
+def _batch_check_bom_exists(db: Session, product_ids: list[int]) -> set[int]:
+    """批量检查产品是否有BOM，使用 UNION ALL 合并4次查询为1次"""
+    if not product_ids:
+        return set()
+
+    from sqlalchemy import union_all
+
+    subq = union_all(
+        db.query(ProductMaterial.product_id.label('pid')).filter(
+            ProductMaterial.product_id.in_(product_ids),
+            ProductMaterial.cotton_usage > 0,
+        ),
+        db.query(ProductFabric.product_id.label('pid')).filter(
+            ProductFabric.product_id.in_(product_ids),
+        ),
+        db.query(ProductAccessory.product_id.label('pid')).filter(
+            ProductAccessory.product_id.in_(product_ids),
+        ),
+        db.query(ProductPackaging.product_id.label('pid')).filter(
+            ProductPackaging.product_id.in_(product_ids),
+        ),
+    )
+    result = db.execute(subq)
+    return {row[0] for row in result}
 
 
 def get_products_statistics(db: Session) -> dict:
@@ -241,6 +245,7 @@ def save_product_bom(db: Session, product_id: int, data: dict, username: str) ->
             product.material.supplier_id = filling_data.get('supplier_id')
             product.material.supplier_name = filling_data.get('supplier_name', '')
             product.material.specification = filling_data.get('specification', '')
+            product.material.unit = filling_data.get('unit', '')
             product.material.remark = filling_data.get('remark', '')
             new_data = {
                 'cotton_usage': float(product.material.cotton_usage),
@@ -262,6 +267,7 @@ def save_product_bom(db: Session, product_id: int, data: dict, username: str) ->
                 supplier_id=filling_data.get('supplier_id'),
                 supplier_name=filling_data.get('supplier_name', ''),
                 specification=filling_data.get('specification', ''),
+                unit=filling_data.get('unit', ''),
                 remark=filling_data.get('remark', ''),
             )
             db.add(mat)
@@ -273,6 +279,8 @@ def save_product_bom(db: Session, product_id: int, data: dict, username: str) ->
             if fab and fab.product_id == product_id:
                 old_val = fab.fabric_name
                 fab.fabric_name = fab_data.get('fabric_name', '')
+                fab.specification = fab_data.get('specification', '')
+                fab.unit = fab_data.get('unit', '')
                 fab.quantity = Decimal(str(fab_data.get('quantity', 0)))
                 fab.supplier_id = fab_data.get('supplier_id')
                 fab.supplier_name = fab_data.get('supplier_name', '')
@@ -283,10 +291,24 @@ def save_product_bom(db: Session, product_id: int, data: dict, username: str) ->
                         field_name='fabric_name', old_value=old_val, new_value=fab.fabric_name,
                         modifier_name=username,
                     ))
+            else:
+                fab = ProductFabric(
+                    product_id=product_id,
+                    fabric_name=fab_data.get('fabric_name', ''),
+                    specification=fab_data.get('specification', ''),
+                    unit=fab_data.get('unit', ''),
+                    quantity=Decimal(str(fab_data.get('quantity', 0))),
+                    supplier_id=fab_data.get('supplier_id'),
+                    supplier_name=fab_data.get('supplier_name', ''),
+                    remark=fab_data.get('remark', ''),
+                )
+                db.add(fab)
         else:
             fab = ProductFabric(
                 product_id=product_id,
                 fabric_name=fab_data.get('fabric_name', ''),
+                specification=fab_data.get('specification', ''),
+                unit=fab_data.get('unit', ''),
                 quantity=Decimal(str(fab_data.get('quantity', 0))),
                 supplier_id=fab_data.get('supplier_id'),
                 supplier_name=fab_data.get('supplier_name', ''),
@@ -301,6 +323,8 @@ def save_product_bom(db: Session, product_id: int, data: dict, username: str) ->
             if acc and acc.product_id == product_id:
                 old_val = acc.accessory_name
                 acc.accessory_name = acc_data.get('accessory_name', '')
+                acc.specification = acc_data.get('specification', '')
+                acc.unit = acc_data.get('unit', '')
                 acc.quantity = Decimal(str(acc_data.get('quantity', 0)))
                 acc.supplier_id = acc_data.get('supplier_id')
                 acc.supplier_name = acc_data.get('supplier_name', '')
@@ -311,10 +335,24 @@ def save_product_bom(db: Session, product_id: int, data: dict, username: str) ->
                         field_name='accessory_name', old_value=old_val, new_value=acc.accessory_name,
                         modifier_name=username,
                     ))
+            else:
+                acc = ProductAccessory(
+                    product_id=product_id,
+                    accessory_name=acc_data.get('accessory_name', ''),
+                    specification=acc_data.get('specification', ''),
+                    unit=acc_data.get('unit', ''),
+                    quantity=Decimal(str(acc_data.get('quantity', 0))),
+                    supplier_id=acc_data.get('supplier_id'),
+                    supplier_name=acc_data.get('supplier_name', ''),
+                    remark=acc_data.get('remark', ''),
+                )
+                db.add(acc)
         else:
             acc = ProductAccessory(
                 product_id=product_id,
                 accessory_name=acc_data.get('accessory_name', ''),
+                specification=acc_data.get('specification', ''),
+                unit=acc_data.get('unit', ''),
                 quantity=Decimal(str(acc_data.get('quantity', 0))),
                 supplier_id=acc_data.get('supplier_id'),
                 supplier_name=acc_data.get('supplier_name', ''),
@@ -322,36 +360,8 @@ def save_product_bom(db: Session, product_id: int, data: dict, username: str) ->
             )
             db.add(acc)
 
-    packagings_data = data.get('packagings', [])
-    for pkg_data in packagings_data:
-        if pkg_data.get('id'):
-            pkg = db.get(ProductPackaging, pkg_data['id'])
-            if pkg and pkg.product_id == product_id:
-                old_val = pkg.packaging_name
-                pkg.packaging_name = pkg_data.get('packaging_name', '')
-                pkg.quantity = Decimal(str(pkg_data.get('quantity', 0)))
-                pkg.supplier_id = pkg_data.get('supplier_id')
-                pkg.supplier_name = pkg_data.get('supplier_name', '')
-                pkg.remark = pkg_data.get('remark', '')
-                if old_val != pkg.packaging_name:
-                    db.add(ModificationLog(
-                        target_type='packaging', target_id=pkg.id,
-                        field_name='packaging_name', old_value=old_val, new_value=pkg.packaging_name,
-                        modifier_name=username,
-                    ))
-        else:
-            pkg = ProductPackaging(
-                product_id=product_id,
-                packaging_name=pkg_data.get('packaging_name', ''),
-                quantity=Decimal(str(pkg_data.get('quantity', 0))),
-                supplier_id=pkg_data.get('supplier_id'),
-                supplier_name=pkg_data.get('supplier_name', ''),
-                remark=pkg_data.get('remark', ''),
-            )
-            db.add(pkg)
-
     # 处理删除
-    for category, model_cls in [('fabrics', ProductFabric), ('accessories', ProductAccessory), ('packagings', ProductPackaging)]:
+    for category, model_cls in [('fabrics', ProductFabric), ('accessories', ProductAccessory)]:
         existing_ids = {item['id'] for item in data.get(category, []) if item.get('id')}
         to_delete = db.query(model_cls).filter(
             model_cls.product_id == product_id,
@@ -419,7 +429,7 @@ def calculate_material(db: Session, orders_data: list) -> dict:
             totals[key]['specification'] = mat.get('specification', '')
             totals[key]['material_code'] = mat.get('material_code', '')
 
-    for key, info in totals.items():
+    for _key, info in totals.items():
         category = info['category']
         if category in result:
             result[category].append({

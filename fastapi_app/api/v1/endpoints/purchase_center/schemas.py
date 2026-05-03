@@ -2,14 +2,13 @@
 采购中心 Pydantic 请求模型
 """
 
-from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
 
 class OrderIdsRequest(BaseModel):
     """订单ID列表请求"""
-    ids: List[int] = Field(..., min_length=1, description="订单ID列表")
+    ids: list[int] = Field(..., min_length=1, description="订单ID列表")
 
 class OrderIdRequest(BaseModel):
     """单个订单ID请求"""
@@ -17,7 +16,7 @@ class OrderIdRequest(BaseModel):
 
 class OrderIdsAltRequest(BaseModel):
     """订单ID列表请求(备用字段名)"""
-    order_ids: List[int] = Field(..., min_length=1, description="订单ID列表")
+    order_ids: list[int] = Field(..., min_length=1, description="订单ID列表")
 
 class SupplierCreateRequest(BaseModel):
     """创建供应商请求"""
@@ -37,19 +36,19 @@ class SupplierUpdateRequest(BaseModel):
 
 class CustomerSyncRequest(BaseModel):
     """客户同步请求"""
-    customer_ids: Optional[List[int]] = None
+    customer_ids: list[int] | None = None
     force: bool = False
 
 class CustomerBatchRequest(BaseModel):
     """客户批量查询请求"""
-    ids: List[int] = Field(..., min_length=1, description="客户ID列表")
+    ids: list[int] = Field(..., min_length=1, description="客户ID列表")
 
 class BomSaveRequest(BaseModel):
     """保存BOM请求"""
-    filling: Optional[dict] = None
-    fabrics: List[dict] = []
-    accessories: List[dict] = []
-    packagings: List[dict] = []
+    filling: dict | None = None
+    fabrics: list[dict] = []
+    accessories: list[dict] = []
+    packagings: list[dict] = []
 
 class BomCopyRequest(BaseModel):
     """复制BOM请求"""
@@ -58,48 +57,48 @@ class BomCopyRequest(BaseModel):
 
 class CalculateMaterialRequest(BaseModel):
     """物料计算请求"""
-    orders: List[dict] = Field(..., min_length=1, description="订单物料列表")
+    orders: list[dict] = Field(..., min_length=1, description="订单物料列表")
 
 class PurchaseOrderCreateRequest(BaseModel):
     """创建采购订单请求"""
-    materials: List[dict] = Field(..., min_length=1, description="物料列表")
-    customer_id: Optional[int] = None
+    materials: list[dict] = Field(..., min_length=1, description="物料列表")
+    customer_id: int | None = None
     customer_name: str = ''
     customer_code: str = ''
     remark: str = ''
-    unprocessed_order_id: Optional[int] = None
+    unprocessed_order_id: int | None = None
 
 class PurchaseOrderUpdateRequest(BaseModel):
     """更新采购订单请求"""
-    status: Optional[str] = None
-    remark: Optional[str] = None
-    supplier_name: Optional[str] = None
-    customer_name: Optional[str] = None
+    status: str | None = None
+    remark: str | None = None
+    supplier_name: str | None = None
+    customer_name: str | None = None
     modify_reason: str = ''
 
 class BatchCompleteRequest(BaseModel):
     """批量完成订单请求"""
-    ids: List[int] = Field(..., min_length=1, description="订单ID列表")
+    ids: list[int] = Field(..., min_length=1, description="订单ID列表")
 
 class OneClickGenerateRequest(BaseModel):
     """一键生成采购订单请求"""
-    order_ids: List[int] = Field(..., min_length=1, description="订单ID列表")
+    order_ids: list[int] = Field(..., min_length=1, description="订单ID列表")
 
 class ExportCompletedRequest(BaseModel):
     """导出已完成订单请求"""
-    order_no: Optional[str] = None
-    customer_name: Optional[str] = None
-    product_name: Optional[str] = None
-    start_date: Optional[str] = None
-    end_date: Optional[str] = None
+    order_no: str | None = None
+    customer_name: str | None = None
+    product_name: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
 
 class FactorySummarySaveRequest(BaseModel):
     """保存工厂订单编辑请求"""
-    edits: List[dict] = Field(..., min_length=1, description="编辑列表")
+    edits: list[dict] = Field(..., min_length=1, description="编辑列表")
 
 class SummaryPrintRequest(BaseModel):
     """汇总打印请求"""
-    ids: List[int] = Field(..., min_length=1, description="订单ID列表")
+    ids: list[int] = Field(..., min_length=1, description="订单ID列表")
     format: str = 'print'
 
 class SaveQueryRequest(BaseModel):

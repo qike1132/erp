@@ -14,12 +14,12 @@
 
 from fastapi import APIRouter
 
-from fastapi_app.api.v1.endpoints.purchase_center.product_routes import router as product_router
-from fastapi_app.api.v1.endpoints.purchase_center.supplier_routes import router as supplier_router
 from fastapi_app.api.v1.endpoints.purchase_center.customer_routes import router as customer_router
+from fastapi_app.api.v1.endpoints.purchase_center.misc_routes import router as misc_router
 from fastapi_app.api.v1.endpoints.purchase_center.order_routes import router as order_router
 from fastapi_app.api.v1.endpoints.purchase_center.print_routes import router as print_router
-from fastapi_app.api.v1.endpoints.purchase_center.misc_routes import router as misc_router
+from fastapi_app.api.v1.endpoints.purchase_center.product_routes import router as product_router
+from fastapi_app.api.v1.endpoints.purchase_center.supplier_routes import router as supplier_router
 
 router = APIRouter()
 router.include_router(product_router)

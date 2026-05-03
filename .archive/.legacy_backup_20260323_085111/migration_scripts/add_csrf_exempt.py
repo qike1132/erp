@@ -4,7 +4,7 @@
 import re
 
 # 读取app.py文件
-with open('app.py', 'r', encoding='utf-8') as f:
+with open('app.py', encoding='utf-8') as f:
     content = f.read()
 
 # 定义需要处理的API接口列表
@@ -15,7 +15,7 @@ api_endpoints = [
     # ('/api/batch-submit-stockouts', 'stockout_manage'),
     # ('/api/batch-submit-case-stockins', 'case_manage'),
     # ('/api/batch-submit-case-stockouts', 'case_manage'),
-    
+
     # 其他API接口
     ('/api/test-simple-submit', None),  # 测试接口，无权限要求
     ('/api/product-search', None),  # 产品搜索，公开接口
@@ -56,16 +56,16 @@ print("=" * 60)
 changes_made = 0
 
 # 处理每个API接口
-for endpoint, permission in api_endpoints + other_endpoints:
+for endpoint, _permission in api_endpoints + other_endpoints:
     # 查找路由定义
     pattern = rf"(@app\.route\('{endpoint}'[^\)]*\))"
-    
+
     # 检查是否已经有@csrf.exempt
     check_pattern = rf"@csrf\.exempt\s*{pattern}"
     if re.search(check_pattern, content):
         print(f"[SKIP] {endpoint} - 已有@csrf.exempt")
         continue
-    
+
     # 查找路由定义位置
     match = re.search(pattern, content)
     if match:

@@ -6,22 +6,22 @@
 """
 
 import logging
-import sys
 import os
+import sys
+from datetime import datetime
 from pathlib import Path
-from datetime import datetime, timezone
 
 import structlog
-from structlog.processors import JSONRenderer, TimeStamper, add_log_level
+from structlog.processors import JSONRenderer, TimeStamper
 
 
 def setup_logging():
     """配置结构化日志系统（幂等：重复调用不会累积处理器）"""
-    
+
     # 创建日志目录
     log_dir = Path("logs")
     log_dir.mkdir(exist_ok=True)
-    
+
     # 配置 structlog
     structlog.configure(
         processors=[
@@ -42,16 +42,16 @@ def setup_logging():
         logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
     )
-    
+
     # 配置标准库 logging
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
-    
+
     # 幂等处理：移除旧处理器
     for handler in root_logger.handlers[:]:
         handler.close()
         root_logger.removeHandler(handler)
-    
+
     # 控制台处理器
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(logging.INFO)
@@ -60,18 +60,18 @@ def setup_logging():
         datefmt="%Y-%m-%d %H:%M:%S",
     ))
     root_logger.addHandler(console_handler)
-    
+
     # 文件处理器（JSON 格式）
     log_file = log_dir / f"fastapi_{datetime.now().strftime('%Y%m%d')}.log"
     file_handler = logging.FileHandler(log_file, encoding="utf-8")
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(logging.Formatter("%(message)s"))  # structlog 已格式化
     root_logger.addHandler(file_handler)
-    
+
     # 设置特定模块的日志级别
     logging.getLogger("uvicorn").setLevel(logging.INFO)
     logging.getLogger("sqlalchemy").setLevel(logging.WARNING)
-    
+
     return root_logger
 
 

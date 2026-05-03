@@ -3,10 +3,10 @@
 
 映射到与 Flask-SQLAlchemy Product 相同的 'product' 表。
 """
-from sqlalchemy import String, Integer, DateTime, Index, Numeric, text
-from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.dialects.postgresql import ARRAY
 from datetime import datetime
+
+from sqlalchemy import DateTime, Index, Integer, Numeric, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
 

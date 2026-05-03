@@ -18,7 +18,7 @@
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Generic, TypeVar
+from typing import TypeVar
 
 from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,7 +56,7 @@ class BatchImportResult:
         }
 
 
-class BatchImportPipeline(ABC, Generic[T]):
+class BatchImportPipeline[T](ABC):
     """批量导入三阶段 Pipeline 基类"""
 
     async def execute(

@@ -1,7 +1,8 @@
 """皮套出库模型"""
-from sqlalchemy import String, Integer, ForeignKey, DateTime, Text, Index
-from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
+
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
 

@@ -5,15 +5,15 @@ SQLAlchemy 慢查询监听器
 超过阈值的查询自动记录到日志和 Prometheus 指标。
 """
 
-import time
 import logging
 import os
+import time
 
 from sqlalchemy import event
 
 logger = logging.getLogger(__name__)
 
-SLOW_QUERY_THRESHOLD = float(os.getenv("SLOW_QUERY_THRESHOLD", "0.5"))
+SLOW_QUERY_THRESHOLD = float(os.getenv("SLOW_QUERY_THRESHOLD", "0.3"))
 
 _slow_query_count = 0
 

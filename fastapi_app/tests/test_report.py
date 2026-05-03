@@ -1,6 +1,7 @@
 """报表统计模块测试"""
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 
 class TestReportSchemas:

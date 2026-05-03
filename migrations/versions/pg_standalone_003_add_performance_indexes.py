@@ -6,14 +6,14 @@ Revision ID: pg_standalone_003
 Revises: pg_standalone_002
 Create Date: 2026-04-22
 """
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 from alembic import op
 
 revision: str = 'pg_standalone_003'
-down_revision: Union[str, None] = 'pg_standalone_002'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = 'pg_standalone_002'
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

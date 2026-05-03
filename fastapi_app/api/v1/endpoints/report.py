@@ -1,12 +1,12 @@
 """报表统计接口"""
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
-
-from fastapi_app.core.deps import require_permission
-from fastapi_app.core.database import get_async_db
-from fastapi_app.shared_models import User
-from fastapi_app.services import report_service
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from fastapi_app.core.database import get_async_db
+from fastapi_app.core.deps import require_permission
+from fastapi_app.services import report_service
+from fastapi_app.shared_models import User
 
 router = APIRouter()
 
@@ -92,7 +92,6 @@ async def export_report(
     db: AsyncSession = Depends(get_async_db),
 ):
     """导出报表为 Excel 文件"""
-    import io
     if report_type not in ("order", "stockin", "stockout", "deduction"):
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail=f"不支持的报表类型: {report_type}")

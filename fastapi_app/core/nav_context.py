@@ -5,24 +5,15 @@
 提供 get_nav_sections() 函数，支持两级缓存（进程内 + Redis）。
 """
 
-import time
 import logging
-import asyncio
+import time
 
-from sqlalchemy.exc import OperationalError, DisconnectionError
+from sqlalchemy.exc import DisconnectionError, OperationalError
 
 logger = logging.getLogger(__name__)
 
-# 权限映射：某些导航项需要多权限码任一匹配即显示
-SPECIAL_PERMISSION_MAP = {
-    'material_calculator': 'product_manage',
-    'material_registration': 'product_manage',
-    'supplier_manage': 'product_manage',
-    'stock_view': ['stock_view', 'stockin_manage', 'stockout_manage'],
-    'order_manage': ['order_manage', 'stockin_manage'],
-    'production_plan_view': ['production_plan_view', 'production_plan_manage'],
-    'production_summary_view': ['production_summary_view', 'production_summary_manage'],
-}
+# 每个导航项仅根据自身权限码显示，不再做跨模块映射
+SPECIAL_PERMISSION_MAP = {}
 
 # Flask 端点名 → FastAPI 路由路径映射
 FLASK_TO_FASTAPI_URL_MAP = {
@@ -45,6 +36,7 @@ FLASK_TO_FASTAPI_URL_MAP = {
     'production_plan.plan_list': '/production',
     'production_summary.index': '/production',
     'purchase_plan.plan_list': '/purchase-plan',
+    'backup.index': '/backup',
 }
 
 # 分区显示顺序
@@ -92,16 +84,17 @@ async def get_nav_sections_async() -> dict:
 
     # Level 3: 数据库查询（异步）
     try:
+        from sqlalchemy import select
+
         from fastapi_app.core.database import _AsyncSessionLocal
         from fastapi_app.shared_models import Permission
-        from sqlalchemy import select
 
         async with _AsyncSessionLocal() as session:
             result = await session.execute(
                 select(Permission)
                 .where(
                     Permission.parent_id.is_(None),
-                    Permission.is_nav == True,
+                    Permission.is_nav,
                     Permission.url.isnot(None),
                 )
                 .order_by(Permission.section, Permission.sort_order)
@@ -120,6 +113,9 @@ async def get_nav_sections_async() -> dict:
             perm_codes = SPECIAL_PERMISSION_MAP.get(item.code, [item.code])
             if not isinstance(perm_codes, list):
                 perm_codes = [perm_codes]
+            # 确保自身 code 也包含在内，这样分配了具体权限（如 supplier_manage）的用户也能看到对应导航项
+            if item.code not in perm_codes:
+                perm_codes = [item.code] + perm_codes
 
             mapped_url = FLASK_TO_FASTAPI_URL_MAP.get(item.url)
             if mapped_url is None:
@@ -165,7 +161,7 @@ async def get_nav_sections_async() -> dict:
 def get_nav_sections() -> dict:
     """
     获取导航分区数据 - 同步包装器（已废弃，保留向后兼容）。
-    
+
     注意：此函数已废弃，请使用 get_nav_sections_async()。
     """
     import warnings
@@ -174,15 +170,16 @@ def get_nav_sections() -> dict:
         DeprecationWarning,
         stacklevel=2
     )
-    
+
     # 尝试从缓存获取
     now = time.time()
     if _nav_local_cache["data"] is not None and (now - _nav_local_cache["cached_at"]) < _nav_local_ttl:
         return _nav_local_cache["data"]
-    
+
     try:
-        from utils.redis_cache import redis_cache
         import asyncio as _aio
+
+        from utils.redis_cache import redis_cache
         try:
             loop = _aio.get_running_loop()
         except RuntimeError:
@@ -197,6 +194,6 @@ def get_nav_sections() -> dict:
             return cached
     except (OSError, ConnectionError, ValueError, RuntimeError):
         logger.warning("导航同步缓存读取失败", exc_info=True)
-    
+
     # 返回空数据，让异步版本填充
     return _nav_local_cache["data"] or {}

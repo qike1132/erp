@@ -1,6 +1,7 @@
 """异步任务接口测试"""
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 
 class TestTasksEndpoints:

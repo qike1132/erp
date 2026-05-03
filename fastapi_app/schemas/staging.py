@@ -3,10 +3,8 @@
 
 用于暂存订单、备货、出货的请求/响应模型。
 """
-from pydantic import BaseModel, Field
-from typing import Optional, List
-from datetime import datetime
 
+from pydantic import BaseModel, Field
 
 # ==================== 通用响应 ====================
 
@@ -19,7 +17,7 @@ class StagingResponse(BaseModel):
 class StagingListResponse(BaseModel):
     """暂存列表响应"""
     success: bool = Field(True, description="是否成功")
-    data: List[dict] = Field(default_factory=list, description="暂存数据列表")
+    data: list[dict] = Field(default_factory=list, description="暂存数据列表")
     total: int = Field(default=0, description="总数")
 
 
@@ -27,12 +25,12 @@ class StagingListResponse(BaseModel):
 
 class StagingOrderUpdate(BaseModel):
     """更新暂存订单请求"""
-    customer: Optional[str] = Field(None, description="客户名称")
-    product_name: Optional[str] = Field(None, description="产品名称")
-    quantity: Optional[int] = Field(None, gt=0, description="订单数量")
-    deduct_stock: Optional[bool] = Field(None, description="是否抵扣备货")
-    deduct_quantity: Optional[int] = Field(None, ge=0, description="抵扣备货数量")
-    note: Optional[str] = Field(None, description="备注")
+    customer: str | None = Field(None, description="客户名称")
+    product_name: str | None = Field(None, description="产品名称")
+    quantity: int | None = Field(None, gt=0, description="订单数量")
+    deduct_stock: bool | None = Field(None, description="是否抵扣备货")
+    deduct_quantity: int | None = Field(None, ge=0, description="抵扣备货数量")
+    note: str | None = Field(None, description="备注")
 
 
 class StagingOrderConfirmResult(BaseModel):
@@ -40,7 +38,7 @@ class StagingOrderConfirmResult(BaseModel):
     success: bool = Field(..., description="是否成功")
     message: str = Field(..., description="结果消息")
     confirmed: int = Field(default=0, description="确认数量")
-    errors: List[str] = Field(default_factory=list, description="错误列表")
+    errors: list[str] = Field(default_factory=list, description="错误列表")
 
 
 class StagingOrderImportResult(BaseModel):
@@ -48,19 +46,19 @@ class StagingOrderImportResult(BaseModel):
     success: bool = Field(..., description="是否成功")
     message: str = Field(..., description="结果消息")
     imported: int = Field(default=0, description="导入数量")
-    session_id: Optional[str] = Field(None, description="会话ID")
-    errors: List[str] = Field(default_factory=list, description="错误列表")
+    session_id: str | None = Field(None, description="会话ID")
+    errors: list[str] = Field(default_factory=list, description="错误列表")
 
 
 # ==================== 暂存备货 ====================
 
 class StagingStockInUpdate(BaseModel):
     """更新暂存备货请求"""
-    customer: Optional[str] = Field(None, description="客户名称")
-    product_name: Optional[str] = Field(None, description="产品名称")
-    quantity: Optional[int] = Field(None, gt=0, description="备货数量")
-    stockin_date: Optional[str] = Field(None, description="备货时间")
-    note: Optional[str] = Field(None, description="备注")
+    customer: str | None = Field(None, description="客户名称")
+    product_name: str | None = Field(None, description="产品名称")
+    quantity: int | None = Field(None, gt=0, description="备货数量")
+    stockin_date: str | None = Field(None, description="备货时间")
+    note: str | None = Field(None, description="备注")
 
 
 class StagingStockInConfirmResult(BaseModel):
@@ -68,7 +66,7 @@ class StagingStockInConfirmResult(BaseModel):
     success: bool = Field(..., description="是否成功")
     message: str = Field(..., description="结果消息")
     confirmed: int = Field(default=0, description="确认数量")
-    errors: List[str] = Field(default_factory=list, description="错误列表")
+    errors: list[str] = Field(default_factory=list, description="错误列表")
 
 
 class StagingStockInImportResult(BaseModel):
@@ -76,20 +74,20 @@ class StagingStockInImportResult(BaseModel):
     success: bool = Field(..., description="是否成功")
     message: str = Field(..., description="结果消息")
     imported: int = Field(default=0, description="导入数量")
-    errors: List[str] = Field(default_factory=list, description="错误列表")
+    errors: list[str] = Field(default_factory=list, description="错误列表")
 
 
 # ==================== 暂存出货 ====================
 
 class StagingStockOutUpdate(BaseModel):
     """更新暂存出货请求"""
-    customer: Optional[str] = Field(None, description="客户名称")
-    product_name: Optional[str] = Field(None, description="产品名称")
-    quantity: Optional[int] = Field(None, gt=0, description="出货数量")
-    stockout_date: Optional[str] = Field(None, description="出货时间")
-    note: Optional[str] = Field(None, description="备注")
-    order_type: Optional[str] = Field(None, max_length=20, description="订单类型: regular/custom")
-    country: Optional[str] = Field(None, max_length=100, description="国家名称")
+    customer: str | None = Field(None, description="客户名称")
+    product_name: str | None = Field(None, description="产品名称")
+    quantity: int | None = Field(None, gt=0, description="出货数量")
+    stockout_date: str | None = Field(None, description="出货时间")
+    note: str | None = Field(None, description="备注")
+    order_type: str | None = Field(None, max_length=20, description="订单类型: regular/custom")
+    country: str | None = Field(None, max_length=100, description="国家名称")
 
 
 class StagingStockOutConfirmResult(BaseModel):
@@ -97,7 +95,7 @@ class StagingStockOutConfirmResult(BaseModel):
     success: bool = Field(..., description="是否成功")
     message: str = Field(..., description="结果消息")
     confirmed: int = Field(default=0, description="确认数量")
-    errors: List[str] = Field(default_factory=list, description="错误列表")
+    errors: list[str] = Field(default_factory=list, description="错误列表")
 
 
 class StagingStockOutImportResult(BaseModel):
@@ -105,7 +103,7 @@ class StagingStockOutImportResult(BaseModel):
     success: bool = Field(..., description="是否成功")
     message: str = Field(..., description="结果消息")
     imported: int = Field(default=0, description="导入数量")
-    errors: List[str] = Field(default_factory=list, description="错误列表")
+    errors: list[str] = Field(default_factory=list, description="错误列表")
 
 
 # ==================== 清空响应 ====================
@@ -114,4 +112,4 @@ class StagingClearResponse(BaseModel):
     """暂存清空响应"""
     success: bool = Field(True, description="是否成功")
     message: str = Field(..., description="结果消息")
-    deleted: Optional[int] = Field(None, description="删除数量")
+    deleted: int | None = Field(None, description="删除数量")

@@ -5,8 +5,8 @@ OpenTelemetry 可观测性配置
 启用条件：设置环境变量 OTEL_ENABLED=true
 """
 
-import os
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -29,11 +29,10 @@ def setup_telemetry(app=None):
         return
 
     try:
-        from opentelemetry import trace, metrics
+        from opentelemetry import trace
+        from opentelemetry.sdk.resources import Resource
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
-        from opentelemetry.sdk.resources import Resource
-        from opentelemetry.sdk.metrics import MeterProvider
 
         service_name = os.getenv("OTEL_SERVICE_NAME", "binfa-erp")
         resource = Resource.create({
@@ -75,7 +74,7 @@ def setup_telemetry(app=None):
             "opentelemetry-instrumentation-fastapi "
             "opentelemetry-exporter-otlp-proto-grpc"
         )
-    except (ImportError, ValueError, OSError) as e:
+    except (ValueError, OSError) as e:
         logger.warning("OpenTelemetry 初始化失败: %s", e)
 
 

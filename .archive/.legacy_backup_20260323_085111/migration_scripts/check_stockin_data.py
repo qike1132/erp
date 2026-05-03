@@ -1,9 +1,10 @@
 """
 检查备货数据
 """
-from app import app, db
-from app.models import StockIn, StockOut, Product
 import sys
+
+from app import app
+from app.models import Product, StockIn
 
 # 设置UTF-8编码输出
 if sys.platform == 'win32':

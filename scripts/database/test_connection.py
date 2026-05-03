@@ -12,7 +12,6 @@
 import os
 import sys
 from datetime import datetime
-from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -20,8 +19,7 @@ load_dotenv()
 
 import pymysql
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.exc import OperationalError, InterfaceError
+
 
 class DatabaseConnectionTester:
     def __init__(self):
@@ -97,7 +95,7 @@ class DatabaseConnectionTester:
             with engine.connect() as conn:
                 result = conn.execute(text("SELECT VERSION()"))
                 version = result.scalar()
-                self.log(f"SQLAlchemy连接成功!")
+                self.log("SQLAlchemy连接成功!")
                 self.log(f"MySQL版本: {version}")
 
                 result = conn.execute(
@@ -184,9 +182,9 @@ class DatabaseConnectionTester:
                     conn.commit()
                     self.log("写入操作测试通过 - 事务已提交")
 
-                except Exception as e:
+                except Exception:
                     conn.rollback()
-                    self.log(f"写入测试执行成功 (表可能为空但SQL语法正确)", 'WARNING')
+                    self.log("写入测试执行成功 (表可能为空但SQL语法正确)", 'WARNING')
                     self.results['passed'].append('数据写入操作测试')
                     return True
 
@@ -217,7 +215,7 @@ class DatabaseConnectionTester:
                 pool_pre_ping=True
             )
 
-            self.log(f"连接池配置: pool_size=5, max_overflow=10")
+            self.log("连接池配置: pool_size=5, max_overflow=10")
 
             connections = []
             for i in range(3):
@@ -256,9 +254,9 @@ class DatabaseConnectionTester:
                 conn.close()
                 self.log(f"  - {test_name}: 未捕获错误", 'WARNING')
                 all_errors_handled = False
-            except pymysql.err.OperationalError as e:
+            except pymysql.err.OperationalError:
                 self.log(f"  - {test_name}: 正确捕获 (OperationalError)")
-            except pymysql.err.DatabaseError as e:
+            except pymysql.err.DatabaseError:
                 self.log(f"  - {test_name}: 正确捕获 (DatabaseError)")
             except Exception as e:
                 self.log(f"  - {test_name}: 正确捕获 ({type(e).__name__})")

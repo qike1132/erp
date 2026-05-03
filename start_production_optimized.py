@@ -20,8 +20,8 @@ ERP系统生产环境启动脚本 (FastAPI + Vue/Vite)
     # 指定端口
     python start_production_optimized.py --api-port 5002 --web-port 3000
 """
-import sys
 import os
+import sys
 from pathlib import Path
 
 if __name__ == '__main__':

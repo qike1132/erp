@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-import os
-import sys
 
 print('''\n<self-improvement-reminder>
 After completing this task, evaluate if extractable knowledge emerged:

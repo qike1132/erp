@@ -3,39 +3,39 @@
 
 用于产品 CRUD 的请求/响应模型。
 """
-from pydantic import BaseModel, Field
-from typing import Optional, List
 from datetime import datetime
+
+from pydantic import BaseModel, Field
 
 
 class ProductCreate(BaseModel):
     """创建产品请求"""
     name: str = Field(..., min_length=1, max_length=100, description="产品名称")
-    barcode: Optional[str] = Field(None, max_length=50, description="69码/商品条码")
-    price: Optional[float] = Field(None, ge=0, description="产品价格")
-    image: Optional[str] = Field(None, max_length=200, description="产品图片路径")
+    barcode: str | None = Field(None, max_length=50, description="69码/商品条码")
+    price: float | None = Field(None, ge=0, description="产品价格")
+    image: str | None = Field(None, max_length=200, description="产品图片路径")
     initial_stock: int = Field(0, ge=0, le=100000, description="初始库存")
 
 
 class ProductUpdate(BaseModel):
     """更新产品请求"""
-    name: Optional[str] = Field(None, min_length=1, max_length=100, description="产品名称")
-    barcode: Optional[str] = Field(None, max_length=50, description="69码/商品条码")
-    price: Optional[float] = Field(None, ge=0, description="产品价格")
-    image: Optional[str] = Field(None, max_length=200, description="产品图片路径")
-    initial_stock: Optional[int] = Field(None, ge=0, le=100000, description="初始库存")
+    name: str | None = Field(None, min_length=1, max_length=100, description="产品名称")
+    barcode: str | None = Field(None, max_length=50, description="69码/商品条码")
+    price: float | None = Field(None, ge=0, description="产品价格")
+    image: str | None = Field(None, max_length=200, description="产品图片路径")
+    initial_stock: int | None = Field(None, ge=0, le=100000, description="初始库存")
 
 
 class ProductResponse(BaseModel):
     """产品响应"""
     id: int
     name: str
-    barcode: Optional[str] = None
-    price: Optional[float] = 0
-    image: Optional[str] = None
+    barcode: str | None = None
+    price: float | None = 0
+    image: str | None = None
     initial_stock: int
     current_stock: int
-    create_time: Optional[datetime | str] = None
+    create_time: datetime | str | None = None
 
     class Config:
         from_attributes = True
@@ -44,7 +44,7 @@ class ProductResponse(BaseModel):
 class ProductListResponse(BaseModel):
     """产品列表响应"""
     success: bool = True
-    data: List[dict]
+    data: list[dict]
     total: int = 0
 
 
@@ -58,8 +58,8 @@ class ProductSearchItem(BaseModel):
     """产品搜索结果项"""
     id: int
     name: str
-    barcode: Optional[str] = None
-    price: Optional[float] = 0
+    barcode: str | None = None
+    price: float | None = 0
     current_stock: int = 0
 
 

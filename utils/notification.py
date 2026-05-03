@@ -3,8 +3,9 @@
 提供消息通知和提醒功能 (FastAPI 兼容版本)
 """
 from datetime import datetime
-from typing import Dict, List, Any, Optional
-from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey
+
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+
 from fastapi_app.core.database import SyncSessionLocal
 from fastapi_app.shared_models import Base
 
@@ -13,7 +14,7 @@ from fastapi_app.shared_models import Base
 class Notification(Base):
     """通知模型"""
     __tablename__ = 'notification'
-    
+
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('user.id'), nullable=True)
     title = Column(String(100), nullable=False)
@@ -23,8 +24,8 @@ class Notification(Base):
     is_read = Column(Boolean, default=False)
     link = Column(String(200))  # 相关链接
     create_time = Column(DateTime, default=datetime.now)
-    
-    def to_dict(self) -> Dict:
+
+    def to_dict(self) -> dict:
         return {
             'id': self.id,
             'user_id': self.user_id,
@@ -40,16 +41,16 @@ class Notification(Base):
 
 class NotificationService:
     """通知服务"""
-    
+
     @staticmethod
-    def create_notification(title: str, content: str, 
+    def create_notification(title: str, content: str,
                           notification_type: str = 'info',
                           category: str = None,
                           user_id: int = None,
                           link: str = None) -> Notification:
         """
         创建通知
-        
+
         Args:
             title: 通知标题
             content: 通知内容
@@ -76,14 +77,14 @@ class NotificationService:
             raise
         finally:
             session.close()
-    
+
     @staticmethod
-    def get_user_notifications(user_id: int, 
+    def get_user_notifications(user_id: int,
                               unread_only: bool = False,
-                              limit: int = 20) -> List[Notification]:
+                              limit: int = 20) -> list[Notification]:
         """
         获取用户通知
-        
+
         Args:
             user_id: 用户ID
             unread_only: 是否只获取未读通知
@@ -94,14 +95,14 @@ class NotificationService:
             query = session.query(Notification).filter(
                 (Notification.user_id == user_id) | (Notification.user_id.is_(None))
             )
-            
+
             if unread_only:
-                query = query.filter(Notification.is_read == False)
-            
+                query = query.filter(not Notification.is_read)
+
             return query.order_by(Notification.create_time.desc()).limit(limit).all()
         finally:
             session.close()
-    
+
     @staticmethod
     def mark_as_read(notification_id: int) -> bool:
         """标记通知为已读"""
@@ -118,7 +119,7 @@ class NotificationService:
             raise
         finally:
             session.close()
-    
+
     @staticmethod
     def mark_all_as_read(user_id: int) -> int:
         """标记所有通知为已读"""
@@ -126,7 +127,7 @@ class NotificationService:
         try:
             count = session.query(Notification).filter(
                 (Notification.user_id == user_id) | (Notification.user_id.is_(None)),
-                Notification.is_read == False
+                not Notification.is_read
             ).update({'is_read': True})
             session.commit()
             return count
@@ -135,7 +136,7 @@ class NotificationService:
             raise
         finally:
             session.close()
-    
+
     @staticmethod
     def get_unread_count(user_id: int) -> int:
         """获取未读通知数量"""
@@ -143,7 +144,7 @@ class NotificationService:
         try:
             return session.query(Notification).filter(
                 (Notification.user_id == user_id) | (Notification.user_id.is_(None)),
-                Notification.is_read == False
+                not Notification.is_read
             ).count()
         finally:
             session.close()
@@ -168,9 +169,9 @@ class NotificationCategory:
 # 通知模板
 class NotificationTemplates:
     """通知模板"""
-    
+
     @staticmethod
-    def order_created(order_no: str, customer: str) -> Dict:
+    def order_created(order_no: str, customer: str) -> dict:
         """订单创建通知"""
         return {
             'title': '新订单创建',
@@ -178,9 +179,9 @@ class NotificationTemplates:
             'type': NotificationType.INFO,
             'category': NotificationCategory.ORDER
         }
-    
+
     @staticmethod
-    def order_status_changed(order_no: str, old_status: str, new_status: str) -> Dict:
+    def order_status_changed(order_no: str, old_status: str, new_status: str) -> dict:
         """订单状态变更通知"""
         return {
             'title': '订单状态变更',
@@ -188,9 +189,9 @@ class NotificationTemplates:
             'type': NotificationType.INFO,
             'category': NotificationCategory.ORDER
         }
-    
+
     @staticmethod
-    def stock_low(product_name: str, current_stock: int, min_stock: int) -> Dict:
+    def stock_low(product_name: str, current_stock: int, min_stock: int) -> dict:
         """库存不足预警"""
         return {
             'title': '库存不足预警',
@@ -198,9 +199,9 @@ class NotificationTemplates:
             'type': NotificationType.WARNING,
             'category': NotificationCategory.STOCK
         }
-    
+
     @staticmethod
-    def stockin_completed(stockin_no: str, quantity: int) -> Dict:
+    def stockin_completed(stockin_no: str, quantity: int) -> dict:
         """备货完成通知"""
         return {
             'title': '备货完成',
@@ -208,9 +209,9 @@ class NotificationTemplates:
             'type': NotificationType.SUCCESS,
             'category': NotificationCategory.STOCK
         }
-    
+
     @staticmethod
-    def stockout_completed(stockout_no: str, quantity: int) -> Dict:
+    def stockout_completed(stockout_no: str, quantity: int) -> dict:
         """出货完成通知"""
         return {
             'title': '出货完成',

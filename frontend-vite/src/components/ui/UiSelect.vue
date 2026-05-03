@@ -148,7 +148,7 @@ function onOpenChange(val: boolean) {
   font-size: 0.9375rem;
   line-height: 1.5;
   color: var(--color-heading);
-  background: var(--color-slate-50);
+  background: white;
   border: 2px solid var(--color-ocean-light);
   border-radius: var(--radius-input);
   transition: all 0.3s ease;
@@ -160,7 +160,6 @@ function onOpenChange(val: boolean) {
 }
 .ui-select-input:focus {
   background: var(--color-surface-card);
-  border-color: var(--color-ocean-deep);
   box-shadow: 0 0 0 0.2rem rgba(135, 206, 235, 0.25);
 }
 .ui-select-input:not(:disabled):hover {

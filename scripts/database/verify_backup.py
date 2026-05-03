@@ -19,7 +19,7 @@ def verify_backup(backup_file: str):
     print(f'文件大小: {file_size:,} 字节')
 
     # 仅读取前10KB用于验证，避免大文件耗尽内存
-    with open(backup_file, 'r', encoding='utf-8', errors='ignore') as f:
+    with open(backup_file, encoding='utf-8', errors='ignore') as f:
         header = f.read(10240)
 
     table_count = header.count('CREATE TABLE')

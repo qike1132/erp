@@ -1,12 +1,13 @@
 """皮套管理服务层"""
 import logging
 from datetime import datetime, timedelta
-from sqlalchemy import select, func, or_
-from sqlalchemy.orm import joinedload
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.shared_models import Case, CaseStockIn, CaseStockOut, CaseInventoryLog, Product
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
+
 from fastapi_app.services import escape_like
+from fastapi_app.shared_models import Case, CaseInventoryLog, CaseStockIn, CaseStockOut, Product
 
 logger = logging.getLogger(__name__)
 
@@ -169,10 +170,10 @@ async def get_case_inventory_logs(db: AsyncSession, case_id: int, page: int = 1,
     return {
         'success': True,
         'logs': [{
-            'id': l.id, 'change_type': l.change_type, 'change_quantity': l.change_quantity,
-            'change_date': l.change_date.strftime('%Y-%m-%d %H:%M:%S') if l.change_date else '',
-            'customer': l.customer or '', 'related_id': l.related_id or '', 'note': l.note or '',
-        } for l in logs],
+            'id': entry.id, 'change_type': entry.change_type, 'change_quantity': entry.change_quantity,
+            'change_date': entry.change_date.strftime('%Y-%m-%d %H:%M:%S') if entry.change_date else '',
+            'customer': entry.customer or '', 'related_id': entry.related_id or '', 'note': entry.note or '',
+        } for entry in logs],
         'pagination': {
             'page': page, 'pages': (total + per_page - 1) // per_page if per_page else 0,
             'total': total,
@@ -397,7 +398,7 @@ async def batch_create_case_stockouts(db: AsyncSession, stockouts_data: list) ->
     """批量提交皮套出库"""
     results = []
 
-    for i, item in enumerate(stockouts_data):
+    for _i, item in enumerate(stockouts_data):
         try:
             product_id = int(item.get('productId', item.get('product_id', item.get('case_id', 0))))
             quantity = int(item.get('quantity', 0))

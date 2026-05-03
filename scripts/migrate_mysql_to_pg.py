@@ -1,6 +1,6 @@
 """数据迁移脚本: MySQL -> PostgreSQL (自动匹配列+类型转换)"""
-import pymysql
 import psycopg2
+import pymysql
 from psycopg2.extras import execute_values
 
 MYSQL_CONFIG = {
@@ -133,7 +133,7 @@ def migrate_table(mysql_cur, pg_cur, pg_conn, table_name):
                     pg_cur.execute(single_insert, row_data)
                     pg_conn.commit()
                     total_migrated += 1
-                except Exception as e2:
+                except Exception:
                     pg_conn.rollback()
 
     # 验证

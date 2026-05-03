@@ -3,16 +3,16 @@
 使用bleach防止XSS攻击
 """
 
+
 import bleach
-from typing import List, Optional
 
 ALLOWED_TAGS = ['b', 'i', 'u', 'strong', 'em', 'br', 'p']
 ALLOWED_ATTRIBUTES = {}
 
 
 def sanitize_html(text: str,
-                  allowed_tags: Optional[List[str]] = None,
-                  allowed_attributes: Optional[dict] = None) -> str:
+                  allowed_tags: list[str] | None = None,
+                  allowed_attributes: dict | None = None) -> str:
     """
     清理HTML内容
 

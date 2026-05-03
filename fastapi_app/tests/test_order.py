@@ -1,16 +1,14 @@
 """
 订单管理模块测试
 """
-import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from httpx import AsyncClient
 
-from fastapi_app.main import app
+import pytest
+
 from fastapi_app.schemas.order import OrderCreate, OrderUpdate
 from fastapi_app.services import order_service
 from fastapi_app.services.order_service import PermissionDeniedError
-
+from fastapi_app.shared_models.approval import ApprovalRequest
 
 # ==================== Schema 验证 ====================
 
@@ -105,11 +103,13 @@ class TestOrderService:
         order = MagicMock()
         order.id = 1
         order.is_locked = False
+        order.is_deleted = False
         order.locked_by_id = None
         order.quantity = 10
         order.customer = "旧客户"
         order.note = "旧备注"
         order.order_no = "PO-001"
+        order.order_type = 'regular'
         order.product_id = 1
 
         product = MagicMock()
@@ -118,6 +118,7 @@ class TestOrderService:
         user = MagicMock()
         user.is_super = True
         user.username = "admin"
+        user.id = 1
 
         mock_db.get = AsyncMock(return_value=order)
         mock_db.commit = AsyncMock()
@@ -145,7 +146,7 @@ class TestOrderService:
     async def test_cancel_approval_already_processed(self, mock_db):
         approval = MagicMock()
         approval.requester_id = 1
-        approval.status = 'approved'
+        approval.status = ApprovalRequest.STATUS_APPROVED
         mock_db.get = AsyncMock(return_value=approval)
         user = MagicMock()
         user.id = 1
@@ -156,7 +157,7 @@ class TestOrderService:
     async def test_cancel_approval_no_permission(self, mock_db):
         approval = MagicMock()
         approval.requester_id = 2
-        approval.status = 'pending'
+        approval.status = ApprovalRequest.STATUS_PENDING
         mock_db.get = AsyncMock(return_value=approval)
         user = MagicMock()
         user.id = 1
@@ -167,11 +168,12 @@ class TestOrderService:
     async def test_cancel_approval_success(self, mock_db):
         approval = MagicMock()
         approval.requester_id = 1
-        approval.status = 'pending'
+        approval.status = ApprovalRequest.STATUS_PENDING
         approval.order_id = 1
 
         order = MagicMock()
         order.is_locked = True
+        order.is_deleted = False
 
         user = MagicMock()
         user.id = 1
@@ -185,7 +187,7 @@ class TestOrderService:
         with patch('fastapi_app.services.order_service._create_approval_log_obj'):
             await order_service.cancel_approval(mock_db, 1, user)
 
-        assert approval.status == 'cancelled'
+        assert approval.status == ApprovalRequest.STATUS_CANCELLED
 
     async def test_get_my_approvals_empty(self, mock_db):
         user = MagicMock()
@@ -250,10 +252,12 @@ class TestOrderEndpoints:
         order = MagicMock()
         order.id = 1
         order.is_locked = False
+        order.is_deleted = False
         order.locked_by_id = None
         order.quantity = 10
         order.customer = "旧客户"
         order.note = ""
+        order.order_type = 'regular'
         order.product_id = 1
 
         product = MagicMock()
@@ -283,6 +287,7 @@ class TestOrderEndpoints:
         order = MagicMock()
         order.id = 1
         order.is_locked = False
+        order.is_deleted = False
         order.locked_by_id = None
         order.order_no = "PO-001"
         order.product_id = 1
@@ -291,24 +296,27 @@ class TestOrderEndpoints:
 
         product = MagicMock()
         product.id = 1
+        product.current_stock = 100
 
         mock_db.get = AsyncMock(return_value=order)
         mock_db.execute = AsyncMock(return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))))
         mock_db.delete = AsyncMock()
         mock_db.commit = AsyncMock()
 
-        response = await client.delete("/api/v1/orders/delete/1")
+        with patch('fastapi_app.services.order_service.get_product_for_update', new_callable=AsyncMock, return_value=product):
+            response = await client.delete("/api/v1/orders/delete/1")
         assert response.status_code == 200
         assert response.json()['success'] is True
 
     async def test_cancel_approval_success(self, client, mock_db):
         approval = MagicMock()
         approval.requester_id = 1
-        approval.status = 'pending'
+        approval.status = ApprovalRequest.STATUS_PENDING
         approval.order_id = 1
 
         order_obj = MagicMock()
         order_obj.is_locked = True
+        order_obj.is_deleted = False
 
         mock_db.get = AsyncMock(side_effect=[approval, order_obj])
         mock_db.add = MagicMock()

@@ -3,27 +3,35 @@
 
 从 Flask staging_order.py / staging_stockin.py / staging_stockout.py 提取的核心业务逻辑，适配异步 SQLAlchemy。
 """
+import contextlib
+import logging
 import os
 import tempfile
-import logging
-import asyncio
 from datetime import datetime
-from typing import Tuple, Optional, List, Dict
 
-from sqlalchemy import select, func, delete
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.services.batch_service import (
+    calculate_available_shipment_quantity,
+    generate_order_number,
+    generate_stockin_number,
+    generate_stockout_number,
+    parse_excel_file_async,
+    process_order_deduction,
+    read_excel_sheets_async,
+)
 from fastapi_app.shared_models import (
-    Product, Order, StockIn, StockOut, InventoryLog,
-    StagingOrder, StagingStockIn, StagingStockOut,
+    InventoryLog,
+    Order,
+    Product,
+    StagingOrder,
+    StagingStockIn,
+    StagingStockOut,
+    StockIn,
+    StockOut,
 )
 from fastapi_app.utils import parse_date_value, validate_customer_name
-from fastapi_app.services.batch_service import (
-    generate_order_number, process_order_deduction,
-    generate_stockin_number, generate_stockout_number,
-    calculate_available_shipment_quantity,
-    parse_excel_file_async, read_excel_sheets_async,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +51,7 @@ async def _find_product_by_name_or_barcode(db: AsyncSession, name_or_barcode: st
 
 # ==================== 暂存订单服务 ====================
 
-async def get_staging_orders(db: AsyncSession, session_id: str) -> List[dict]:
+async def get_staging_orders(db: AsyncSession, session_id: str) -> list[dict]:
     """获取指定会话的暂存订单列表"""
     result = await db.execute(
         select(StagingOrder)
@@ -121,7 +129,7 @@ async def update_staging_order(db: AsyncSession, order_id: int, data: dict) -> d
 
 async def confirm_staging_orders(
     db: AsyncSession, session_id: str
-) -> Tuple[int, List[str]]:
+) -> tuple[int, list[str]]:
     """
     确认暂存订单 - 转移到正式订单表
 
@@ -134,7 +142,7 @@ async def confirm_staging_orders(
         select(StagingOrder).where(
             StagingOrder.session_id == session_id,
             StagingOrder.status == 'pending',
-            StagingOrder.is_validated == True,
+            StagingOrder.is_validated,
         )
     )
     staging_orders = result.scalars().all()
@@ -164,6 +172,8 @@ async def confirm_staging_orders(
                     quantity=staging.quantity,
                     note=staging.note,
                     status='待备货',
+                    order_type=staging.order_type or 'regular',
+                    country=staging.country if staging.order_type == 'custom' else None,
                 )
                 db.add(order)
                 await db.flush()
@@ -227,7 +237,7 @@ async def confirm_staging_orders(
 
 async def import_staging_orders_from_excel(
     db: AsyncSession, file_content: bytes, session_id: str
-) -> Tuple[int, str, List[str]]:
+) -> tuple[int, str, list[str]]:
     """
     从 Excel 文件导入订单到暂存区
 
@@ -357,15 +367,13 @@ async def import_staging_orders_from_excel(
         return 0, '导入失败，请稍后重试', []
     finally:
         if temp_path and os.path.exists(temp_path):
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(temp_path)
-            except OSError:
-                pass
 
 
 # ==================== 暂存备货服务 ====================
 
-async def get_staging_stockins(db: AsyncSession, session_id: str) -> List[dict]:
+async def get_staging_stockins(db: AsyncSession, session_id: str) -> list[dict]:
     """获取指定会话的暂存备货列表"""
     result = await db.execute(
         select(StagingStockIn)
@@ -428,7 +436,7 @@ async def update_staging_stockin(db: AsyncSession, stockin_id: int, data: dict) 
 
 async def confirm_staging_stockins(
     db: AsyncSession, session_id: str
-) -> Tuple[int, List[str]]:
+) -> tuple[int, list[str]]:
     """确认暂存备货 - 转移到正式备货表"""
     from fastapi_app.shared.stock_concurrency import get_product_for_update
 
@@ -436,7 +444,7 @@ async def confirm_staging_stockins(
         select(StagingStockIn).where(
             StagingStockIn.session_id == session_id,
             StagingStockIn.status == 'pending',
-            StagingStockIn.is_validated == True,
+            StagingStockIn.is_validated,
         )
     )
     staging_stockins = result.scalars().all()
@@ -503,7 +511,7 @@ async def confirm_staging_stockins(
 
 async def import_staging_stockins_from_excel(
     db: AsyncSession, file_content: bytes, session_id: str
-) -> Tuple[int, str, List[str]]:
+) -> tuple[int, str, list[str]]:
     """从 Excel 文件导入备货到暂存区"""
     # 清空当前会话暂存
     await db.execute(
@@ -616,15 +624,13 @@ async def import_staging_stockins_from_excel(
         return 0, '导入失败，请稍后重试', []
     finally:
         if temp_path and os.path.exists(temp_path):
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(temp_path)
-            except OSError:
-                pass
 
 
 # ==================== 暂存出货服务 ====================
 
-async def get_staging_stockouts(db: AsyncSession, session_id: str) -> List[dict]:
+async def get_staging_stockouts(db: AsyncSession, session_id: str) -> list[dict]:
     """获取指定会话的暂存出货列表"""
     result = await db.execute(
         select(StagingStockOut)
@@ -696,7 +702,7 @@ async def update_staging_stockout(db: AsyncSession, stockout_id: int, data: dict
 
 async def confirm_staging_stockouts(
     db: AsyncSession, session_id: str
-) -> Tuple[int, List[str]]:
+) -> tuple[int, list[str]]:
     """确认暂存出货 - 转移到正式出货表"""
     from fastapi_app.shared.stock_concurrency import get_product_for_update
 
@@ -704,8 +710,8 @@ async def confirm_staging_stockouts(
         select(StagingStockOut).where(
             StagingStockOut.session_id == session_id,
             StagingStockOut.status == 'pending',
-            StagingStockOut.is_validated == True,
-            StagingStockOut.stock_check_passed == True,
+            StagingStockOut.is_validated,
+            StagingStockOut.stock_check_passed,
         )
     )
     staging_stockouts = result.scalars().all()
@@ -754,6 +760,7 @@ async def confirm_staging_stockouts(
 
             # 创建出货记录（按订单拆分）
             remaining_qty = staging.quantity
+            affected_order_ids = set()
             for order_detail in shipment_info['orders']:
                 if remaining_qty <= 0:
                     break
@@ -770,9 +777,16 @@ async def confirm_staging_stockouts(
                         note=staging.note,
                     )
                     db.add(stockout)
+                    affected_order_ids.add(order_detail['order_id'])
                     remaining_qty -= ship_qty
 
             product.current_stock -= staging.quantity
+
+            # 更新关联订单状态：已备货/部分备货 -> 待出货
+            for oid in affected_order_ids:
+                order = await db.get(Order, oid)
+                if order and order.status in ('已备货', '部分备货', '待备货'):
+                    order.transition_to('待出货')
 
             log = InventoryLog(
                 product_id=staging.product_id,
@@ -803,7 +817,7 @@ async def confirm_staging_stockouts(
 
 async def import_staging_stockouts_from_excel(
     db: AsyncSession, file_content: bytes, session_id: str
-) -> Tuple[int, str, List[str]]:
+) -> tuple[int, str, list[str]]:
     """从 Excel 文件导入出货到暂存区"""
     # 清空当前会话暂存
     await db.execute(
@@ -941,7 +955,5 @@ async def import_staging_stockouts_from_excel(
         return 0, '导入失败，请稍后重试', []
     finally:
         if temp_path and os.path.exists(temp_path):
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(temp_path)
-            except OSError:
-                pass

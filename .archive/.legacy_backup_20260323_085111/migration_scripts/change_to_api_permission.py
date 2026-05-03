@@ -4,7 +4,7 @@
 import re
 
 # 读取app.py文件
-with open('app.py', 'r', encoding='utf-8') as f:
+with open('app.py', encoding='utf-8') as f:
     content = f.read()
 
 # 定义需要修改的API接口（使用permission_required的）
@@ -42,7 +42,7 @@ changes_made = 0
 for endpoint in api_to_change:
     # 查找路由定义后的permission_required
     pattern = rf"(@app\.route\('{re.escape(endpoint)}'[^\)]*\)\s*@permission_required\('[^']+'\))"
-    
+
     match = re.search(pattern, content)
     if match:
         # 提取权限代码

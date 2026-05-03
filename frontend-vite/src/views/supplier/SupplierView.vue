@@ -2,14 +2,13 @@
   <div class="sp-container">
     <div class="sp-card sp-card-main">
       <div class="sp-card-header">
-        <HeaderTabs />
-        <div class="sp-header-actions">
-          <span class="count-badge">{{ filteredSuppliers.length }} 家</span>
-          <div class="sp-tabs">
-            <button class="sp-tab-btn active" @click="formOpen = true">
-              <i class="fas fa-plus" /> 添加供应商
-            </button>
-          </div>
+        <div class="sp-header-left">
+          <HeaderTabs />
+        </div>
+        <div class="sp-header-right">
+          <button class="sp-action-btn sp-action-btn-primary" @click="formOpen = true">
+            <i class="fas fa-plus" /> 添加供应商
+          </button>
         </div>
       </div>
 
@@ -299,13 +298,12 @@ async function handleEdit() {
   border-radius: 18px;
   border: 1px solid var(--color-border-light, #e2e8f0);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  overflow: hidden;
+  transition: box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .sp-card:hover {
-  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
-  transform: translateY(-6px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 16px 48px rgba(0,0,0,0.12);
+  transform: translateY(-3px);
 }
 
 .sp-card-main {
@@ -317,13 +315,24 @@ async function handleEdit() {
 
 .sp-card-header {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   justify-content: space-between;
-  align-items: center;
-  padding: 10px 24px;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
+  align-items: flex-start;
+  padding: 14px 24px 10px;
   flex-shrink: 0;
   gap: 12px;
+}
+.sp-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+.sp-header-right {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 8px;
 }
 .sp-card-header :deep(.ht-bar) {
   width: auto;
@@ -374,38 +383,31 @@ async function handleEdit() {
   align-items: center;
 }
 
-.sp-tabs {
-  display: flex;
-  gap: 4px;
-  background: var(--color-surface, #f1f5f9);
-  padding: 4px;
-  border-radius: 11px;
-}
-
-.sp-tab-btn {
+/* === Action Button (Design Spec §10) === */
+.sp-action-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  padding: 8px 18px;
-  border: none;
-  border-radius: 8px;
-  font-size: 13px;
+  padding: 7px 14px;
+  border: 2px solid var(--color-border-light);
+  border-radius: 9px;
+  background: white;
+  font-size: 12px;
   font-weight: 600;
-  color: var(--color-text-secondary);
-  background: transparent;
   cursor: pointer;
   transition: all 0.3s ease;
+  color: var(--color-text);
 }
 
-.sp-tab-btn:hover {
+.sp-action-btn-primary {
   color: var(--color-primary-600);
-  background: rgba(255, 255, 255, 0.6);
 }
 
-.sp-tab-btn.active {
-  background: white;
-  color: var(--color-primary-600);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+.sp-action-btn-primary:hover {
+  background: var(--color-primary-50);
+  border-color: var(--color-primary-300);
+  transform: translateY(-1px);
 }
 
 /* === Toolbar (Search) === */
@@ -441,7 +443,7 @@ async function handleEdit() {
   font-size: 14px;
   outline: none;
   transition: all 0.3s ease;
-  background: var(--color-surface, #f8fafc);
+  background: white;
   font-family: inherit;
   color: var(--color-text);
 }
@@ -663,7 +665,7 @@ async function handleEdit() {
   font-size: 14px;
   outline: none;
   transition: all 0.3s ease;
-  background: var(--color-surface, #f8fafc);
+  background: white;
   font-family: inherit;
   color: var(--color-text);
   box-sizing: border-box;

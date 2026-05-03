@@ -1,14 +1,12 @@
 """
 产品管理模块测试
 """
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from httpx import AsyncClient
 
-from fastapi_app.main import app
+import pytest
+
 from fastapi_app.schemas.product import ProductCreate, ProductUpdate
 from fastapi_app.services import product_service
-
 
 # ==================== Schema 验证 ====================
 

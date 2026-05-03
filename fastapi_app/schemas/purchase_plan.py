@@ -3,9 +3,8 @@
 
 主从表结构：PurchasePlan（主表）+ PurchasePlanDetail（明细表）
 """
-from pydantic import BaseModel, Field
-from typing import Optional
 
+from pydantic import BaseModel, Field
 
 # ==================== 请求模型 ====================
 
@@ -30,15 +29,15 @@ class PurchasePlanCreate(BaseModel):
 
 class PurchasePlanUpdate(BaseModel):
     """更新采购计划主单"""
-    status: Optional[str] = Field(None, description="状态: pending/confirmed/completed/cancelled")
-    remark: Optional[str] = Field(None, description="备注")
+    status: str | None = Field(None, description="状态: pending/confirmed/completed/cancelled")
+    remark: str | None = Field(None, description="备注")
 
 
 class PurchasePlanDetailUpdate(BaseModel):
     """更新明细"""
-    quantity: Optional[int] = Field(None, gt=0, le=999999, description="计划数量")
-    plan_date: Optional[str] = Field(None, description="计划日期 YYYY-MM-DD")
-    remark: Optional[str] = Field(None, description="备注")
+    quantity: int | None = Field(None, gt=0, le=999999, description="计划数量")
+    plan_date: str | None = Field(None, description="计划日期 YYYY-MM-DD")
+    remark: str | None = Field(None, description="备注")
 
 
 class AddDetailsRequest(BaseModel):
@@ -49,7 +48,7 @@ class AddDetailsRequest(BaseModel):
 class ConfirmStagingRequest(BaseModel):
     """确认暂存请求"""
     batch_id: str = Field('', description="批次ID")
-    selected_ids: Optional[list[int]] = Field(None, description="仅确认选中的ID列表")
+    selected_ids: list[int] | None = Field(None, description="仅确认选中的ID列表")
 
 
 class SyncShipmentRequest(BaseModel):
@@ -167,8 +166,8 @@ class PurchasePlanActionResponse(BaseModel):
 class BarcodeValidationResponse(BaseModel):
     """69码验证响应"""
     valid: bool
-    product_name: Optional[str] = None
-    product_id: Optional[int] = None
+    product_name: str | None = None
+    product_id: int | None = None
     message: str = ''
 
 

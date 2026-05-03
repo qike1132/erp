@@ -1,18 +1,17 @@
 """辅助API接口 - 补充产品搜索、库存查询、健康检查等"""
 import time
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select, func, or_
+from sqlalchemy import or_, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
-from sqlalchemy.exc import SQLAlchemyError
 
-from fastapi_app.core.deps import require_permission
 from fastapi_app.core.database import get_async_db
-from fastapi_app.shared_models import User, Product, StockIn, StockOut, InventoryLog, Order, Customer
+from fastapi_app.core.deps import require_permission
 from fastapi_app.services import escape_like
+from fastapi_app.shared_models import InventoryLog, Product, StockIn, User
 
 router = APIRouter()
 
@@ -208,7 +207,7 @@ async def delete_stockout_api(
         # svc_delete 已调用 db.commit()，无需重复
         return {'success': True, 'message': '出库删除成功'}
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.delete("/stockin/{id}")
@@ -224,7 +223,7 @@ async def delete_stockin_api(
         # svc_delete 已调用 db.commit()，无需重复
         return {'success': True, 'message': '入库删除成功'}
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.delete("/customer/{id}")
@@ -240,7 +239,7 @@ async def delete_customer_api(
         await db.commit()
         return {'success': True, 'message': '客户删除成功'}
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.delete("/supplier/{id}")
@@ -250,11 +249,15 @@ async def delete_supplier_api(
     db: AsyncSession = Depends(get_async_db),
 ):
     """删除供应商（API方式）"""
-    from fastapi_app.services.purchase_center_service import delete_supplier as svc_delete
     from sqlalchemy import select
+
     from fastapi_app.shared_models import (
-        Supplier, ProductMaterial, ProductFabric,
-        ProductAccessory, ProductPackaging, PurchaseOrder
+        ProductAccessory,
+        ProductFabric,
+        ProductMaterial,
+        ProductPackaging,
+        PurchaseOrder,
+        Supplier,
     )
     try:
         supplier = (await db.execute(select(Supplier).where(Supplier.id == id))).scalar_one_or_none()
@@ -279,7 +282,7 @@ async def delete_supplier_api(
         raise
     except SQLAlchemyError as e:
         await db.rollback()
-        raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}") from e
 
 
 # ==================== 批量提交 Pydantic 模型 ====================
@@ -288,11 +291,11 @@ class BatchOrderItem(BaseModel):
     product_id: int = Field(..., gt=0)
     customer: str
     quantity: int = Field(..., gt=0, le=9999999)
-    deduct_stock: Optional[bool] = None
-    deduct_quantity: Optional[int] = None
+    deduct_stock: bool | None = None
+    deduct_quantity: int | None = None
     note: str = ""
     order_type: str = Field("regular", pattern="^(regular|custom)$")
-    country: Optional[str] = None
+    country: str | None = None
 
 class BatchStockInItem(BaseModel):
     product_id: int = Field(..., gt=0)
@@ -306,16 +309,16 @@ class BatchStockOutItem(BaseModel):
     quantity: int = Field(..., gt=0, le=9999999)
     note: str = ""
     order_type: str = Field("regular", pattern="^(regular|custom)$")
-    country: Optional[str] = None
+    country: str | None = None
 
 class BatchOrderRequest(BaseModel):
-    orders: List[BatchOrderItem]
+    orders: list[BatchOrderItem]
 
 class BatchStockInRequest(BaseModel):
-    stockins: List[BatchStockInItem]
+    stockins: list[BatchStockInItem]
 
 class BatchStockOutRequest(BaseModel):
-    stockouts: List[BatchStockOutItem]
+    stockouts: list[BatchStockOutItem]
 
 
 # ==================== 批量提交 API ====================
@@ -328,15 +331,15 @@ async def batch_submit_orders(
 ):
     """批量提交订单"""
     import logging as _logging
+
     from fastapi_app.services.order_service import batch_create_orders
     try:
         result = await batch_create_orders(db, [item.model_dump() for item in data.orders])
         await db.commit()
 
         # 失效订单和库存缓存，确保列表实时刷新
-        from fastapi_app.core.cache import invalidate_cache
-        await invalidate_cache("orders:*")
-        await invalidate_cache("inventory:*")
+        from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
+        await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY)
 
         # 不再自动同步采购中心：订单应先进入"审核订单"队列，由人工审核后再生成采购订单
         created_order_ids = result.pop('created_order_ids', [])
@@ -344,13 +347,13 @@ async def batch_submit_orders(
         # 发布订单创建事件，通知前端实时刷新
         if created_order_ids:
             try:
-                from fastapi_app.services.notification_service import publish_stock_event, StockEvent
+                from fastapi_app.services.notification_service import StockEvent, publish_stock_event
                 await publish_stock_event(StockEvent.ORDER_CREATED, {
                     'order_ids': created_order_ids,
                     'count': len(created_order_ids),
                 })
             except Exception:
-                pass
+                _logging.warning("批量订单事件发布失败", exc_info=True)
 
         return result
     except (SQLAlchemyError, ValueError, RuntimeError):
@@ -370,10 +373,8 @@ async def batch_submit_stockins(
         result = await batch_create_stockins(db, [item.model_dump() for item in data.stockins])
         await db.commit()
 
-        from fastapi_app.core.cache import invalidate_cache
-        await invalidate_cache("orders:*")
-        await invalidate_cache("inventory:*")
-        await invalidate_cache("stockins:*")
+        from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
+        await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY | CacheDomain.STOCKIN)
 
         return result
     except (SQLAlchemyError, ValueError, RuntimeError):
@@ -393,9 +394,8 @@ async def batch_submit_stockouts(
         result = await batch_create_stockouts(db, [item.model_dump() for item in data.stockouts])
         await db.commit()
 
-        from fastapi_app.core.cache import invalidate_cache
-        await invalidate_cache("orders:*")
-        await invalidate_cache("inventory:*")
+        from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
+        await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY)
 
         return result
     except (SQLAlchemyError, ValueError, RuntimeError):

@@ -3,18 +3,17 @@ notification_service 模块单元测试
 
 覆盖：ConnectionManager 连接/断开/广播/定向发送、publish_stock_event
 """
-import asyncio
 import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from fastapi_app.services.notification_service import (
-    ConnectionManager,
-    publish_stock_event,
-    StockEvent,
-    EVENT_DISPLAY_MESSAGES,
-)
+import pytest
 
+from fastapi_app.services.notification_service import (
+    EVENT_DISPLAY_MESSAGES,
+    ConnectionManager,
+    StockEvent,
+    publish_stock_event,
+)
 
 # ============================================================
 # ConnectionManager — 连接管理

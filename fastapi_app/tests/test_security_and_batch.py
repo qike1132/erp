@@ -3,7 +3,6 @@
 """
 import pytest
 
-
 # ==================== 文件 MIME 校验 ====================
 
 class TestImageMimeValidation:
@@ -74,7 +73,7 @@ class TestBatchStockInSavepoint:
         ]
 
         results = {}
-        for i, item in enumerate(items):
+        for i, _item in enumerate(items):
             nested = session.begin_nested()
             try:
                 nested.commit()
@@ -145,7 +144,7 @@ class TestConfigSecurityValidation:
     def test_secret_key_default_empty_raises(self):
         import subprocess
         import sys
-        
+
         # 创建一个独立的Python脚本来测试配置验证
         test_script = '''
 import os
@@ -159,8 +158,8 @@ try:
 except RuntimeError as e:
     print(f"ERROR_RAISED:{str(e)}")
 '''
-        
-        result = subprocess.run([sys.executable, '-c', test_script], 
+
+        result = subprocess.run([sys.executable, '-c', test_script],
                               capture_output=True, text=True, cwd='.')
         assert "ERROR_RAISED" in result.stdout
         assert "必须通过环境变量" in result.stdout

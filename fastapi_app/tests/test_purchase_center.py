@@ -1,11 +1,10 @@
 """
 采购中心模块测试
 """
-import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
 from decimal import Decimal
-from datetime import datetime, date
+from unittest.mock import MagicMock, patch
 
+import pytest
 
 # ============================================================
 # Schema 测试
@@ -13,7 +12,7 @@ from datetime import datetime, date
 
 class TestPurchaseCenterSchemas:
     def test_product_list_item(self):
-        from fastapi_app.schemas.purchase_center import ProductListItem, ProductBomInfo
+        from fastapi_app.schemas.purchase_center import ProductBomInfo, ProductListItem
         item = ProductListItem(id=1, name="测试产品", barcode="6901234567890", has_bom=True, bom_info=ProductBomInfo(filling_count=1))
         assert item.id == 1
         assert item.has_bom is True
@@ -37,7 +36,7 @@ class TestPurchaseCenterSchemas:
         assert bom.filling['cotton_usage'] == 100
 
     def test_supplier_summary_response(self):
-        from fastapi_app.schemas.purchase_center import SupplierSummaryResponse, SupplierSummary, SupplierSummaryItem
+        from fastapi_app.schemas.purchase_center import SupplierSummary, SupplierSummaryItem, SupplierSummaryResponse
         resp = SupplierSummaryResponse(
             success=True,
             suppliers=[SupplierSummary(
@@ -70,20 +69,20 @@ class TestPurchaseCenterService:
         assert result == []
 
     def test_get_search_suggestions_with_keyword(self):
-        from fastapi_app.services.purchase_center_service import get_search_suggestions
+        from fastapi_app.services.purchase_product_service import get_search_suggestions
         db = MagicMock()
         mock_product = MagicMock()
         mock_product.id = 1
         mock_product.name = "测试产品"
         mock_product.barcode = "690"
-        mock_product.has_bom = False  # 无 BOM 避免 bom 迭代错误
         mock_query = MagicMock()
         mock_query.filter.return_value.limit.return_value.all.return_value = [mock_product]
         db.query.return_value = mock_query
 
-        result = get_search_suggestions(db, '测试')
-        assert len(result) == 1
-        assert result[0]['name'] == '测试产品'
+        with patch('fastapi_app.services.purchase_product_service._batch_check_bom_exists', return_value=set()):
+            result = get_search_suggestions(db, '测试')
+            assert len(result) == 1
+            assert result[0]['name'] == '测试产品'
 
     def test_create_supplier_success(self):
         from fastapi_app.services.purchase_center_service import create_supplier
@@ -439,7 +438,12 @@ class TestPurchaseCenterModels:
         assert Supplier.__tablename__ == 'supplier'
 
     def test_product_material_model(self):
-        from fastapi_app.shared_models.product_material import ProductMaterial, ProductFabric, ProductAccessory, ProductPackaging
+        from fastapi_app.shared_models.product_material import (
+            ProductAccessory,
+            ProductFabric,
+            ProductMaterial,
+            ProductPackaging,
+        )
         assert ProductMaterial.__tablename__ == 'product_material'
         assert ProductFabric.__tablename__ == 'product_fabric'
         assert ProductAccessory.__tablename__ == 'product_accessory'
@@ -660,8 +664,9 @@ class TestBomCopyService:
 
     def test_product_has_bom_true_with_filling(self):
         """有填充类物料时返回True"""
-        from fastapi_app.services.purchase_center_service import _product_has_bom
         from unittest.mock import MagicMock
+
+        from fastapi_app.services.purchase_center_service import _product_has_bom
         product = MagicMock()
         mock_material = MagicMock()
         mock_material.cotton_usage = Decimal('100')
@@ -673,8 +678,9 @@ class TestBomCopyService:
 
     def test_product_has_bom_true_with_fabric(self):
         """有面料类物料时返回True"""
-        from fastapi_app.services.purchase_center_service import _product_has_bom
         from unittest.mock import MagicMock
+
+        from fastapi_app.services.purchase_center_service import _product_has_bom
         product = MagicMock()
         product.material = None
         product.fabrics = [MagicMock()]
@@ -684,8 +690,9 @@ class TestBomCopyService:
 
     def test_product_has_bom_false_all_empty(self):
         """所有物料为空时返回False"""
-        from fastapi_app.services.purchase_center_service import _product_has_bom
         from unittest.mock import MagicMock
+
+        from fastapi_app.services.purchase_center_service import _product_has_bom
         product = MagicMock()
         product.material = None
         product.fabrics = []
@@ -695,8 +702,9 @@ class TestBomCopyService:
 
     def test_product_has_bom_false_zero_cotton(self):
         """填充类cotton_usage为0时返回False"""
-        from fastapi_app.services.purchase_center_service import _product_has_bom
         from unittest.mock import MagicMock
+
+        from fastapi_app.services.purchase_center_service import _product_has_bom
         product = MagicMock()
         mock_material = MagicMock()
         mock_material.cotton_usage = Decimal('0')

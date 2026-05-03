@@ -1,8 +1,8 @@
 """
 批量导入 Pydantic 数据模型
 """
+
 from pydantic import BaseModel, Field
-from typing import Optional, List
 
 
 class BatchImportResult(BaseModel):
@@ -21,7 +21,7 @@ class ComprehensiveImportResult(BaseModel):
         default_factory=lambda: {"products": 0, "orders": 0, "stockins": 0, "stockouts": 0},
         description="各类型导入数量"
     )
-    errors: List[str] = Field(default_factory=list, description="错误列表")
+    errors: list[str] = Field(default_factory=list, description="错误列表")
 
 
 class DeductionDetail(BaseModel):

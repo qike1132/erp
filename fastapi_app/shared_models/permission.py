@@ -3,7 +3,7 @@
 
 映射到与 Flask-SQLAlchemy Permission 相同的 'permission' 表。
 """
-from sqlalchemy import String, Integer, Boolean, ForeignKey
+from sqlalchemy import Boolean, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base

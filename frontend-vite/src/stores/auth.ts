@@ -11,8 +11,7 @@ export const useAuthStore = defineStore('auth', () => {
   const isLoggedIn = computed(() => !!user.value)
 
   async function fetchUser() {
-    const res: any = await authApi.me()
-    // 后端返回 {user_id, username, is_super, permissions}，需要映射
+    const res = await authApi.me()
     const raw = res.user ?? res
     user.value = {
       id: raw.user_id ?? raw.id,
@@ -23,21 +22,21 @@ export const useAuthStore = defineStore('auth', () => {
     return user.value
   }
 
+  type NavApiItem = { name: string; url: string; icon?: string; code: string; permission_codes: string[] }
+
   async function fetchNavSections() {
-    const res: any = await dashboardApi.navSections()
-    // 后端返回 {purchase: {name, items}, core: {name, items}, ...}
-    // 每个 item: {id, name, code, icon, url, permission_codes}
-    // 需要转为 NavSection[] 并映射字段名
+    const res = await dashboardApi.navSections()
     if (Array.isArray(res)) {
       navSections.value = res
     } else if (res && typeof res === 'object') {
-      navSections.value = Object.entries(res).map(([_key, val]: [string, any]) => ({
+      navSections.value = Object.entries(res).map(([_key, val]) => ({
         title: val.name ?? _key,
-        items: (val.items ?? []).map((item: any) => ({
+        items: (val.items ?? []).map((item: NavApiItem) => ({
           title: item.name,
           path: item.url,
           icon: item.icon,
           permission: item.code,
+          permissionCodes: item.permission_codes ?? [item.code],
         })),
       }))
     }
@@ -61,11 +60,28 @@ export const useAuthStore = defineStore('auth', () => {
     return user.value?.permissions?.includes(code) ?? false
   }
 
+  function hasAnyPermission(codes: string[]): boolean {
+    if (user.value?.isSuper) return true
+    return codes.some((code) => user.value?.permissions?.includes(code) ?? false)
+  }
+
+  const filteredNavSections = computed(() => {
+    return navSections.value
+      .map((section) => ({
+        ...section,
+        items: section.items.filter((item) => {
+          const codes = item.permissionCodes ?? (item.permission ? [item.permission] : [])
+          return codes.length === 0 || hasAnyPermission(codes)
+        }),
+      }))
+      .filter((section) => section.items.length > 0)
+  })
+
   function logout() {
     user.value = null
     navSections.value = []
     loaded.value = false
   }
 
-  return { user, navSections, loaded, isLoggedIn, init, fetchUser, fetchNavSections, hasPermission, logout }
+  return { user, navSections, filteredNavSections, loaded, isLoggedIn, init, fetchUser, fetchNavSections, hasPermission, hasAnyPermission, logout }
 })

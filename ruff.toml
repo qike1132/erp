@@ -1,41 +1,16 @@
-# ============================================================
-# Ruff Configuration — BinFa ERP
-# ============================================================
-target-version = "py313"
+target-version = "py312"
 line-length = 120
 
 [lint]
-select = [
-    "E",     # pycodestyle errors
-    "W",     # pycodestyle warnings
-    "F",     # pyflakes
-    "I",     # isort
-    "N",     # pep8-naming
-    "UP",    # pyupgrade
-    "B",     # flake8-bugbear
-    "A",     # flake8-builtins
-    "S",     # flake8-bandit
-    "T20",   # flake8-print
-    "SIM",   # flake8-simplify
-    "RUF",   # ruff-specific
-]
-ignore = [
-    "E501",   # line too long — handled by formatter
-    "S101",   # assert — allowed in tests
-    "S608",   # SQL injection — false positives on parameterized queries
-    "B008",   # function call in default arg — FastAPI Depends pattern
-    "A002",   # shadowing builtin — common in Pydantic models (id, type)
-    "UP007",  # Use X | Y for union — keep Optional for readability
-]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "C4"]
+ignore = ["E501", "B008", "SIM108"]
 
 [lint.per-file-ignores]
-"tests/**/*.py" = ["S101", "S106", "T20"]
-"fastapi_app/tests/**/*.py" = ["S101", "S106", "T20"]
-"scripts/**/*.py" = ["T20"]
-
-[lint.isort]
-known-first-party = ["fastapi_app", "utils", "config"]
+"tests/**/*.py" = ["S101", "S311"]
+"migrations/**/*.py" = ["A003"]
 
 [format]
-quote-style = "double"
+quote-style = "single"
 indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"

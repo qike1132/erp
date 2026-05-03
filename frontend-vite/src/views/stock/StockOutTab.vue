@@ -6,24 +6,24 @@
         <!-- 左栏：出货信息录入 -->
         <div class="so-col">
           <div class="so-col-title">
-            <span><i class="fas fa-shipping-fast"></i> 出货信息录入</span>
+            <span>出货信息录入</span>
             <UiBadge v-if="staged.length" variant="cancelled">已暂存: {{ staged.length }}</UiBadge>
           </div>
           <div class="so-col-scroll">
             <form @submit.prevent>
               <div class="form-grid">
                 <div class="form-field">
-                  <label class="form-label"><i class="fas fa-calendar-alt label-icon"></i>出货时间</label>
+                  <label class="form-label">出货时间</label>
                   <UiDatePicker v-model="form.date" style="width: 100%" />
                 </div>
                 <div class="form-field">
-                  <label class="form-label"><i class="fas fa-user label-icon"></i>客户名称</label>
+                  <label class="form-label">客户名称</label>
                   <UiSelect v-model="form.customer" placeholder="请选择客户" :options="customerOptions" />
                 </div>
               </div>
 
               <div class="form-field" style="position: relative">
-                <label class="form-label"><i class="fas fa-search label-icon"></i>产品名称</label>
+                <label class="form-label">产品名称</label>
                 <input
                   type="text"
                   class="form-text-input"
@@ -47,7 +47,7 @@
               </div>
 
               <div class="form-field">
-                <label class="form-label"><i class="fas fa-cubes label-icon"></i>出货数量</label>
+                <label class="form-label">出货数量</label>
                 <input type="number" class="form-input" v-model.number="form.quantity" min="1" step="1" />
                 <small v-if="shipmentInfo" class="shipment-info">
                   <i class="fas fa-info-circle" style="margin-right: 4px" />
@@ -57,7 +57,7 @@
               </div>
 
               <div class="form-field">
-                <label class="form-label"><i class="fas fa-sticky-note label-icon"></i>备注</label>
+                <label class="form-label">备注</label>
                 <textarea
                   v-model="form.note"
                   class="form-input"
@@ -338,23 +338,23 @@
     <UiDialog v-model:open="editStagedOpen" title="编辑暂存出货" max-width-class="max-w-[500px]">
       <div class="dialog-form">
         <div class="form-field">
-          <label class="form-label"><i class="fas fa-calendar-alt label-icon"></i>出货时间</label>
+          <label class="form-label">出货时间</label>
           <UiDatePicker v-model="editStagedForm.date" style="width: 100%" />
         </div>
         <div class="form-field">
-          <label class="form-label"><i class="fas fa-user label-icon"></i>客户名称</label>
+          <label class="form-label">客户名称</label>
           <UiSelect v-model="editStagedForm.customer" :options="customerOptions" />
         </div>
         <div class="form-field">
-          <label class="form-label"><i class="fas fa-box label-icon"></i>产品名称</label>
+          <label class="form-label">产品名称</label>
           <UiInput :model-value="editStagedForm.productName" disabled />
         </div>
         <div class="form-field">
-          <label class="form-label"><i class="fas fa-cubes label-icon"></i>出货数量</label>
+          <label class="form-label">出货数量</label>
           <input type="number" class="form-input" v-model.number="editStagedForm.quantity" min="1" step="1" />
         </div>
         <div class="form-field">
-          <label class="form-label"><i class="fas fa-sticky-note label-icon"></i>备注</label>
+          <label class="form-label">备注</label>
           <textarea v-model="editStagedForm.note" class="form-input" rows="2" />
         </div>
       </div>
@@ -368,26 +368,26 @@
     <UiDialog v-model:open="editRecordOpen" title="编辑出货记录" max-width-class="max-w-[500px]">
       <div class="dialog-form">
         <div class="form-field">
-          <label class="form-label"><i class="fas fa-calendar-alt label-icon"></i>出货时间</label>
+          <label class="form-label">出货时间</label>
           <UiDatePicker v-model="editRecordForm.date" style="width: 100%" />
         </div>
         <div class="form-field">
-          <label class="form-label"><i class="fas fa-user label-icon"></i>客户名称</label>
+          <label class="form-label">客户名称</label>
           <UiSelect
             v-model="editRecordForm.customer"
             :options="[{ value: '', label: '无' }, ...customerOptions]"
           />
         </div>
         <div class="form-field">
-          <label class="form-label"><i class="fas fa-box label-icon"></i>产品名称</label>
+          <label class="form-label">产品名称</label>
           <UiInput :model-value="editRecordForm.productName" disabled />
         </div>
         <div class="form-field">
-          <label class="form-label"><i class="fas fa-cubes label-icon"></i>出货数量</label>
+          <label class="form-label">出货数量</label>
           <input type="number" class="form-input" v-model.number="editRecordForm.quantity" min="1" step="1" />
         </div>
         <div class="form-field">
-          <label class="form-label"><i class="fas fa-sticky-note label-icon"></i>备注</label>
+          <label class="form-label">备注</label>
           <textarea v-model="editRecordForm.note" class="form-input" rows="2" />
         </div>
       </div>
@@ -443,12 +443,12 @@ const { data: namesData } = useQuery({
 })
 const customerNames = computed(() => {
   const arr = Array.isArray(namesData.value) ? namesData.value : []
-  return arr.map((c: any) => c.name ?? c)
+  return arr.map((c: unknown) => c.name ?? c)
 })
 const customerOptions = computed(() => customerNames.value.map((c: string) => ({ value: c, label: c })))
 
 // === 产品搜索 ===
-const productSuggestions = ref<any[]>([])
+const productSuggestions = ref<unknown[]>([])
 const showSuggestions = ref(false)
 let searchTimeout: ReturnType<typeof setTimeout> | null = null
 
@@ -522,7 +522,7 @@ watch(() => form.customer, () => {
 })
 
 // === 暂存列表 ===
-const staged = ref<any[]>([])
+const staged = ref<unknown[]>([])
 
 const stagedTotalQty = computed(() => staged.value.reduce((s: number, i: any) => s + (i.quantity || 0), 0))
 
@@ -592,7 +592,7 @@ async function submitBatch() {
 
   submitting.value = true
   try {
-    const uniqueKeys: Record<string, { productId: string; customer: string; stockouts: any[] }> = {}
+    const uniqueKeys: Record<string, { productId: string; customer: string; stockouts: unknown[] }> = {}
     const withCustomer = staged.value.filter(s => s.customer)
     withCustomer.forEach(s => {
       const key = `${s.productId}-${s.customer}`
@@ -794,12 +794,12 @@ const filterEnd = ref('')
 const currentPage = ref(1)
 const totalPages = ref(1)
 const isLoading = ref(false)
-const stockoutRecords = ref<any[]>([])
+const stockoutRecords = ref<unknown[]>([])
 
 async function fetchStockouts() {
   isLoading.value = true
   try {
-    const params: Record<string, any> = { page: currentPage.value, per_page: 20 }
+    const params: Record<string, unknown> = { page: currentPage.value, per_page: 20 }
     if (filterCustomer.value) params.customer = filterCustomer.value
     if (filterStart.value) params.start_date = filterStart.value
     if (filterEnd.value) params.end_date = filterEnd.value
@@ -829,8 +829,8 @@ const groupedRecords = computed(() => {
 
   return sortedDates.map(date => {
     const records = groups[date]
-    const summaryMap: Record<string, any> = {}
-    records.forEach((r: any) => {
+    const summaryMap: Record<string, unknown> = {}
+    records.forEach((r: unknown) => {
       const pid = r.product_id ?? r.product?.id ?? 0
       const key = `${r.customer || '未知客户'}|||${pid}`
       if (!summaryMap[key]) {
@@ -853,7 +853,7 @@ const groupedRecords = computed(() => {
       summaryMap[key].ids.push(r.id)
     })
 
-    const summaryList = Object.values(summaryMap).map((item: any) => ({
+    const summaryList = Object.values(summaryMap).map((item: unknown) => ({
       ...item,
       notesDisplay: item.notes.length > 0 ? item.notes.join('; ') : '-',
     }))
@@ -896,7 +896,7 @@ function openEditRecord(item: any) {
   editRecordForm.note = item.notes.length > 0 ? item.notes[0] : ''
   editRecordOpen.value = true
   get(`/stock/out/list`, { id: item.firstId })
-    .then((data: any) => {
+    .then((data: unknown) => {
       const record = Array.isArray(data) ? data[0] : data.stockouts?.[0] ?? data
       if (record) {
         editRecordForm.customer = record.customer || ''

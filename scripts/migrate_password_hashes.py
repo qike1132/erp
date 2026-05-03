@@ -35,21 +35,19 @@ import logging
 import os
 import sys
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 # 将项目根目录加入路径
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from sqlalchemy import create_engine, text, select, update
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import Session, sessionmaker
 
 from fastapi_app.core.config import settings
 from fastapi_app.core.security import hash_password, verify_password
-
 
 # ==================== 配置 ====================
 
@@ -270,7 +268,7 @@ class BackupManager:
             logger.error(f"备份文件不存在: {backup_file}")
             return False
 
-        with open(backup_path, "r", encoding="utf-8") as f:
+        with open(backup_path, encoding="utf-8") as f:
             backup_data = json.load(f)
 
         users = backup_data.get("users", [])
@@ -309,7 +307,7 @@ class StateManager:
     def load_state() -> dict:
         """加载迁移状态"""
         if STATE_FILE.exists():
-            with open(STATE_FILE, "r", encoding="utf-8") as f:
+            with open(STATE_FILE, encoding="utf-8") as f:
                 return json.load(f)
         return {}
 

@@ -1,9 +1,10 @@
 """
 包装部生产记录模型 - 纯 SQLAlchemy 2.0 声明式
 """
-from sqlalchemy import String, Integer, Date, DateTime, Text, Index
-from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime
+
+from sqlalchemy import Date, DateTime, Index, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
 
 from fastapi_app.shared_models import Base
 

@@ -5,8 +5,9 @@ Phase 6.0: 自动化 Schema 对比脚本
 输出差异报告，0 差异或差异已有合理解释才能继续 Phase 6.1。
 """
 
-import sys
+import contextlib
 import os
+import sys
 
 # 确保项目根目录在 sys.path 中
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -14,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 def main():
     from sqlalchemy import inspect as sa_inspect
+
     from fastapi_app.core.database import sync_engine
 
     # 1. 获取数据库实际结构
@@ -39,17 +41,16 @@ def main():
     print("=" * 60)
     fastapi_tables = {}
     try:
-        from fastapi_app.shared_models import Base
         # 触发所有模型注册
         import importlib
+
+        from fastapi_app.shared_models import Base
         models_pkg = os.path.join(os.path.dirname(__file__), 'fastapi_app', 'shared_models')
         if os.path.isdir(models_pkg):
             for fname in os.listdir(models_pkg):
                 if fname.endswith('.py') and not fname.startswith('_'):
-                    try:
+                    with contextlib.suppress(Exception):
                         importlib.import_module(f"fastapi_app.shared_models.{fname[:-3]}")
-                    except Exception:
-                        pass
 
         for mapper in Base.registry.mappers:
             table = mapper.local_table

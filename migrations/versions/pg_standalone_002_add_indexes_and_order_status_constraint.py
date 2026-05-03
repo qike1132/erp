@@ -10,8 +10,6 @@ Adds missing indexes and order status CHECK constraint:
 - order_status_check: Order.status CHECK constraint
 """
 from alembic import op
-import sqlalchemy as sa
-
 
 # revision identifiers, used by Alembic.
 revision = 'pg_standalone_002'

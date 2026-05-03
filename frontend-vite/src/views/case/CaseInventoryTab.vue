@@ -316,7 +316,7 @@ function logBadgeClass(t: string): string {
   padding: 8px 12px 8px 32px;
   border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: 9px;
-  background: var(--color-surface, #f8fafc);
+  background: white;
   font-size: 13px;
   outline: none;
   transition: all 0.3s ease;

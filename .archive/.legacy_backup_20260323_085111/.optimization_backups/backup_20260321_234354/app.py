@@ -1,17 +1,16 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, make_response
-from flask_sqlalchemy import SQLAlchemy
-from flask_wtf.csrf import CSRFProtect
-from datetime import datetime, timedelta
 import os
 import shutil
-from sqlalchemy import text, func
-from sqlalchemy.orm import joinedload, selectinload
-from jinja2 import Environment
-from werkzeug.security import generate_password_hash, check_password_hash
-from functools import wraps
-from werkzeug.utils import secure_filename
 import uuid
+from datetime import datetime, timedelta
+from functools import wraps
+
 from dotenv import load_dotenv
+from flask import Flask, flash, jsonify, make_response, redirect, render_template, request, session, url_for
+from flask_sqlalchemy import SQLAlchemy
+from flask_wtf.csrf import CSRFProtect
+from sqlalchemy import func
+from sqlalchemy.orm import joinedload, selectinload
+from werkzeug.security import check_password_hash, generate_password_hash
 
 # 加载环境变量
 load_dotenv()
@@ -73,7 +72,8 @@ db = SQLAlchemy(app)
 
 # region agent log
 try:
-    import json as _agent_json, time as _agent_time
+    import json as _agent_json
+    import time as _agent_time
     from pathlib import Path as _agent_Path
 
     def _agent_log(hypothesis_id, location, message, data):
@@ -233,16 +233,13 @@ class User(db.Model):
 
     def __repr__(self):
         return f'<User {self.username}>'
-    
+
     def has_permission(self, permission_code):
         # 超级用户拥有所有权限
         if self.is_super:
             return True
         # 普通用户检查是否有对应权限
-        for p in self.permissions:
-            if p.code == permission_code:
-                return True
-        return False
+        return any(p.code == permission_code for p in self.permissions)
 
 class Permission(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -473,24 +470,24 @@ def upload_image():
             return jsonify({'error': '没有选择文件'}), 400
         if not allowed_file(file.filename):
             return jsonify({'error': '不支持的文件格式'}), 400
-        
+
         # 检查文件大小
         file.seek(0, os.SEEK_END)
         file_size = file.tell() / (1024 * 1024)
         file.seek(0)
         if file_size > app.config['MAX_FILE_SIZE']:
             return jsonify({'error': f'文件大小不能超过{app.config["MAX_FILE_SIZE"]}MB'}), 400
-        
+
         # 生成唯一文件名
         ext = file.filename.rsplit('.', 1)[1].lower()
         filename = f'{uuid.uuid4().hex}.{ext}'
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        
+
         # 尝试使用Pillow压缩图片
         try:
             from PIL import Image
             img = Image.open(file)
-            
+
             # 计算新尺寸，保持宽高比
             max_size = app.config['MAX_IMAGE_SIZE']
             if img.width > max_size or img.height > max_size:
@@ -498,7 +495,7 @@ def upload_image():
                 new_width = int(img.width * ratio)
                 new_height = int(img.height * ratio)
                 img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-            
+
             # 保存图片，根据格式调整质量
             if ext in ['jpg', 'jpeg']:
                 img.save(filepath, 'JPEG', quality=85, optimize=True)
@@ -513,7 +510,7 @@ def upload_image():
             # 如果处理出错，直接保存原文件
             file.seek(0)
             file.save(filepath)
-        
+
         # 返回文件URL
         file_url = url_for('static', filename=f'uploads/{filename}')
         return jsonify({'url': file_url})
@@ -521,42 +518,37 @@ def upload_image():
         return jsonify({'error': str(e)}), 500
 
 # 导入统一的工具函数
+import contextlib
+
+from utils.decorators import (
+    api_error,
+)
 from utils.number_generator import (
+    generate_case_stockin_number,
+    generate_case_stockout_number,
     generate_order_number,
     generate_stockin_number,
     generate_stockout_number,
-    generate_case_stockin_number,
-    generate_case_stockout_number
 )
-from utils.decorators import (
-    api_success, 
-    api_error, 
-    validate_int_field, 
-    parse_date,
-    add_inventory_log,
-    add_case_inventory_log,
-    check_product_exists,
-    check_case_exists,
-    db_transaction
-)
+
 
 def process_order_deduction(order, product_id, order_quantity, deduct_stock=True, custom_deduct_quantity=None):
     """
     处理订单抵扣备货的核心逻辑
-    
+
     参数:
         order: Order对象，订单实例
         product_id: int，产品ID
         order_quantity: int，订单数量
         deduct_stock: bool，是否执行抵扣，默认True
         custom_deduct_quantity: int，自定义抵扣数量，None表示抵扣全部
-    
+
     返回:
         int: 实际抵扣的总数量
     """
     if not deduct_stock:
         return 0
-    
+
     _agent_log("H1", "process_order_deduction:start", "Begin deduction flow", {
         "order_id": order.id,
         "product_id": product_id,
@@ -564,17 +556,17 @@ def process_order_deduction(order, product_id, order_quantity, deduct_stock=True
         "custom_deduct_quantity": custom_deduct_quantity,
         "order_customer": order.customer,
     })
-    
+
     # 查询该产品的备货记录，按客户匹配，按时间升序（FIFO原则）
     # 重要：订单只能抵扣相同客户的备货
     stockins = StockIn.query.filter_by(
         product_id=product_id,
         customer=order.customer  # 添加客户匹配条件
     ).order_by(
-        StockIn.stockin_date.asc(), 
+        StockIn.stockin_date.asc(),
         StockIn.id.asc()
     ).all()
-    
+
     # 计算总可用备货数量（需要减去已抵扣的数量）
     total_quantity = 0
     for stockin in stockins:
@@ -582,7 +574,7 @@ def process_order_deduction(order, product_id, order_quantity, deduct_stock=True
         deducted = sum(s.quantity for s in stockin.stockouts) if stockin.stockouts else 0
         available = stockin.quantity - deducted
         total_quantity += available
-    
+
     _agent_log("H2", "process_order_deduction:available", "Computed total available stockins", {
         "total_available": total_quantity,
         "order_quantity": order_quantity,
@@ -590,29 +582,29 @@ def process_order_deduction(order, product_id, order_quantity, deduct_stock=True
         "custom_deduct_quantity": custom_deduct_quantity,
         "order_customer": order.customer,
     })
-    
+
     # 确定需要抵扣的数量
     if custom_deduct_quantity is not None and custom_deduct_quantity > 0:
         remaining_to_deduct = min(custom_deduct_quantity, order_quantity, total_quantity)
     else:
         remaining_to_deduct = min(order_quantity, total_quantity)
-    
+
     total_deducted = 0
-    
+
     # 按FIFO原则从备货记录中抵扣
     for stockin in stockins:
         if remaining_to_deduct <= 0:
             break
-        
+
         # 计算该备货记录的已抵扣数量
         deducted = sum(s.quantity for s in stockin.stockouts) if stockin.stockouts else 0
         available = stockin.quantity - deducted
-        
+
         if available <= 0:
             continue
-        
+
         deduct_amount = min(remaining_to_deduct, available)
-        
+
         _agent_log("H2", "process_order_deduction:loop", "Deduct from single stockin", {
             "stockin_id": stockin.id,
             "stockin_quantity": stockin.quantity,
@@ -621,7 +613,7 @@ def process_order_deduction(order, product_id, order_quantity, deduct_stock=True
             "deduct_amount": deduct_amount,
             "remaining_to_deduct_before": remaining_to_deduct,
         })
-        
+
         # 创建出货记录（仅用于记录抵扣关系，不显示在出货管理中）
         # 通过设置特殊的note标识，在出货管理中过滤掉这些记录
         stockout = StockOut(
@@ -635,10 +627,10 @@ def process_order_deduction(order, product_id, order_quantity, deduct_stock=True
             note=f'[订单抵扣]{order.order_no}'  # 使用特殊标识
         )
         db.session.add(stockout)
-        
+
         # 抵扣时减少产品当前库存
         stockin.product.current_stock -= deduct_amount
-        
+
         # 添加库存日志
         log = InventoryLog(
             product_id=stockin.product_id,
@@ -648,10 +640,10 @@ def process_order_deduction(order, product_id, order_quantity, deduct_stock=True
             note=f'订单抵扣备货：{stockin.stockin_no}'
         )
         db.session.add(log)
-        
+
         total_deducted += deduct_amount
         remaining_to_deduct -= deduct_amount
-    
+
     # 根据抵扣结果更新订单状态
     if total_deducted >= order_quantity:
         order.status = '已备货'
@@ -659,12 +651,12 @@ def process_order_deduction(order, product_id, order_quantity, deduct_stock=True
         order.status = '部分备货'
     else:
         order.status = '待备货'
-    
+
     _agent_log("H3", "process_order_deduction:end", "Finished deduction flow", {
         "total_deducted": total_deducted,
         "final_order_status": order.status,
     })
-    
+
     return total_deducted
 
 # 订单管理
@@ -679,29 +671,29 @@ def orders():
         })
         # 自动生成订单时间，不使用前端传来的值
         order_no = generate_order_number(db, Order)
-        
+
         # 验证必填字段
         product_id_str = request.form.get('product_id', '').strip()
         quantity_str = request.form.get('quantity', '').strip()
-        
+
         if not product_id_str:
             flash('请选择产品！', 'error')
             return redirect(url_for('orders'))
         if not quantity_str or quantity_str == '0':
             flash('请输入有效的数量！', 'error')
             return redirect(url_for('orders'))
-        
+
         try:
             product_id = int(product_id_str)
             quantity = int(quantity_str)
         except ValueError:
             flash('产品ID和数量必须是有效的整数！', 'error')
             return redirect(url_for('orders'))
-        
+
         note = request.form['note']
         customer = request.form['customer']
         order_date = datetime.now()
-        
+
         # 检查订单时间是否已存在
         existing_order = Order.query.filter_by(order_no=order_no).first()
         if existing_order:
@@ -712,7 +704,7 @@ def orders():
         if not product:
             flash('产品不存在！', 'error')
             return redirect(url_for('orders'))
-        
+
         # 创建订单（初始状态为待备货）
         order = Order(
             order_no=order_no,
@@ -725,7 +717,7 @@ def orders():
         )
         db.session.add(order)
         db.session.flush()
-        
+
         # 订单增加库存
         product.current_stock += quantity
         # 添加订单增加库存的日志
@@ -737,10 +729,10 @@ def orders():
             note=f'订单：{order_no}'
         )
         db.session.add(log_order)
-        
+
         # 是否执行抵扣备货逻辑由前端抵扣备货按钮控制
         deduct_stock = request.form.get('deduct_stock') == 'on'
-        
+
         # 检查是否有自定义抵扣数量
         custom_deduct_quantity = None
         deduct_stockins = request.form.get('deduct_stockins', '')
@@ -755,29 +747,29 @@ def orders():
                             break
             except Exception as e:
                 _agent_log("H1", "orders:POST:deduct_error", "Failed to parse deduct_stockins", {"error": str(e)})
-        
+
         # 调用抵扣函数
         if deduct_stock:
-            total_deducted = process_order_deduction(
+            process_order_deduction(
                 order=order,
                 product_id=product_id,
                 order_quantity=quantity,
                 deduct_stock=True,
                 custom_deduct_quantity=custom_deduct_quantity
             )
-        
+
         db.session.commit()
         flash('订单添加成功！', 'success')
         return redirect(url_for('orders'))
         db.session.commit()
         flash('订单添加成功！', 'success')
         return redirect(url_for('orders'))
-    
+
     # GET 请求时，预生成一个订单时间供前端显示
     orders = Order.query.all()
     products = Product.query.all()
     preview_order_no = generate_order_number(db, Order)
-    
+
     # 将Order对象转换为可序列化的字典
     orders_data = []
     for order in orders:
@@ -797,7 +789,7 @@ def orders():
             }
         }
         orders_data.append(order_dict)
-    
+
     return render_template('order.html', orders=orders_data, products=products, preview_order_no=preview_order_no)
 
 # 测试接口 - 简化版本
@@ -837,42 +829,42 @@ def batch_submit_orders():
     try:
         data = request.get_json()
         orders_data = data.get('orders', [])
-        
+
         if not orders_data:
             return jsonify({
                 'success': False,
                 'message': '没有订单数据'
             })
-        
+
         success_count = 0
         failed_orders = []
-        
+
         for order_data in orders_data:
             try:
                 # 完全按照原始代码的逻辑执行
                 order_no = generate_order_number(db, Order)
-                
+
                 product_id_str = str(order_data.get('productId', '')).strip()
                 quantity_str = str(order_data.get('quantity', '')).strip()
                 note = order_data.get('note', '')
                 customer = order_data.get('customer', '')
-                
+
                 if not product_id_str:
                     failed_orders.append({'order': order_data, 'error': '请选择产品'})
                     continue
-                
+
                 if not quantity_str or quantity_str == '0':
                     failed_orders.append({'order': order_data, 'error': '请输入有效的数量'})
                     continue
-                
+
                 product_id = int(product_id_str)
                 quantity = int(quantity_str)
-                
+
                 product = Product.query.get(product_id)
                 if not product:
                     failed_orders.append({'order': order_data, 'error': '产品不存在'})
                     continue
-                
+
                 # 创建订单
                 order = Order(
                     order_no=order_no,
@@ -886,7 +878,7 @@ def batch_submit_orders():
                 db.session.add(order)
                 # 刷新以获取order.id
                 db.session.flush()
-                
+
                 # 订单增加库存
                 product.current_stock += quantity
                 log_order = InventoryLog(
@@ -897,31 +889,29 @@ def batch_submit_orders():
                     note=f'订单：{order_no}'
                 )
                 db.session.add(log_order)
-                
+
                 # 处理抵扣备货逻辑
                 deduct_stock = order_data.get('deductStock') == 'on'
                 custom_deduct_quantity = None
-                
+
                 # 解析自定义抵扣数量
                 deductible_quantity = order_data.get('deductibleQuantity')
                 if deductible_quantity:
-                    try:
+                    with contextlib.suppress(ValueError, TypeError):
                         custom_deduct_quantity = int(deductible_quantity)
-                    except (ValueError, TypeError):
-                        pass
-                
+
                 # 调用抵扣函数
                 if deduct_stock:
-                    total_deducted = process_order_deduction(
+                    process_order_deduction(
                         order=order,
                         product_id=product_id,
                         order_quantity=quantity,
                         deduct_stock=True,
                         custom_deduct_quantity=custom_deduct_quantity
                     )
-                
+
                 success_count += 1
-                
+
             except Exception as e:
                 print(f"处理订单时出错: {e}")
                 failed_orders.append({
@@ -929,10 +919,10 @@ def batch_submit_orders():
                     'error': str(e)
                 })
                 continue
-        
+
         # 提交事务
         db.session.commit()
-        
+
         return jsonify({
             'success': True,
             'message': f'成功提交 {success_count} 个订单',
@@ -940,7 +930,7 @@ def batch_submit_orders():
             'failed_count': len(failed_orders),
             'failed_orders': failed_orders
         })
-        
+
     except Exception as e:
         print(f"批量提交订单出错：{e}")
         db.session.rollback()
@@ -960,57 +950,58 @@ def batch_import_orders():
     批量导入订单 - 支持统一导入模板
     统一模板格式: 客户名称, 产品名称, 订单数量, 抵扣备货, 备货数量, 备注
     """
-    from utils.batch_handler import batch_import_template
-    from utils.excel_handler import validate_required_field, parse_quantity, excel_reader
-    import tempfile
     import shutil
-    
+    import tempfile
+
+    from utils.batch_handler import batch_import_template
+    from utils.excel_handler import excel_reader, parse_quantity, validate_required_field
+
     # 检查文件
     if 'file' not in request.files:
         return api_error('没有文件')
-    
+
     file = request.files['file']
-    
+
     # 保存文件到临时位置，以便多次读取
     temp_fd, temp_path = tempfile.mkstemp(suffix='.xlsx')
     try:
         file.save(temp_path)
-        
+
         # 创建模拟文件对象
         class TempFile:
             def __init__(self, path, filename):
                 self.path = path
                 self.filename = filename
-            
+
             def save(self, dest):
                 shutil.copy(self.path, dest)
-        
+
         temp_file = TempFile(temp_path, file.filename)
-        
+
         # 先读取文件判断模板类型
         with excel_reader(temp_file) as reader:
             if reader.error:
                 return api_error(reader.error)
-            
+
             # 读取表头
             headers = []
             for col in range(1, 10):
                 val = reader.get_cell_value(1, col)
                 if val:
                     headers.append(str(val).strip())
-            
+
             # 判断是否为统一导入模板（包含"抵扣备货"或"备货数量"列）
             is_unified_template = ('抵扣备货' in headers or '备货数量' in headers)
-        
+
         # 重新创建文件对象用于导入
         temp_file = TempFile(temp_path, file.filename)
-        
+
         if is_unified_template:
             # 统一导入模板格式: 客户名称, 产品名称, 订单数量, 抵扣备货, 备货数量, 备注
             def process_unified_order_row(row, get_cell_value):
                 """处理统一导入模板的订单行"""
                 from utils.batch_upload_utils import validate_customer_name, validate_product
-                
+
                 # 读取单元格数据
                 customer = get_cell_value(row, 1)
                 product_identifier = get_cell_value(row, 2)
@@ -1018,43 +1009,43 @@ def batch_import_orders():
                 deduct_flag = get_cell_value(row, 4)  # 抵扣备货
                 # stockin_qty = get_cell_value(row, 5)  # 备货数量，订单导入不需要
                 note = get_cell_value(row, 6)  # 备注
-                
+
                 # 如果订单数量为空，跳过此行（可能是备货行）
                 if quantity is None or (isinstance(quantity, str) and quantity.strip() == ''):
                     return False, None
-                
+
                 # 验证必填字段
                 valid, error = validate_required_field(customer, '客户名称', row)
                 if not valid:
                     return False, error
-                
+
                 valid, error = validate_required_field(product_identifier, '产品名称', row)
                 if not valid:
                     return False, error
-                
+
                 # 清理数据
                 customer = str(customer).strip()
                 product_identifier = str(product_identifier).strip()
                 note = str(note).strip() if note else ''
-                
+
                 # 验证数量
                 quantity, error = parse_quantity(quantity, '订单数量', row)
                 if error:
                     return False, error
-                
+
                 # 验证客户名称
                 is_valid, error_msg = validate_customer_name(customer)
                 if not is_valid:
                     return False, f'第{row}行：{error_msg}'
-                
+
                 # 查找产品
                 is_valid, product_id, error_msg = validate_product(product_identifier, db, Product)
                 if not is_valid:
                     return False, f'第{row}行：{error_msg}'
-                
+
                 # 生成订单编号
                 order_no = generate_order_number(db, Order)
-                
+
                 # 创建订单
                 order = Order(
                     order_no=order_no,
@@ -1067,7 +1058,7 @@ def batch_import_orders():
                 )
                 db.session.add(order)
                 db.session.flush()
-                
+
                 # 添加库存日志
                 log = InventoryLog(
                     product_id=product_id,
@@ -1077,13 +1068,13 @@ def batch_import_orders():
                     note=f'批量导入订单：{order_no}'
                 )
                 db.session.add(log)
-                
+
                 # 处理抵扣备货
                 if deduct_flag and str(deduct_flag).strip() == '是':
                     process_order_deduction(order, product_id, quantity, deduct_stock=True)
-                
+
                 return True, None
-            
+
             return batch_import_template(
                 temp_file,
                 ['客户名称', '产品名称', '订单数量', '抵扣备货', '备货数量', '备注'],
@@ -1096,45 +1087,45 @@ def batch_import_orders():
             def process_order_row(row, get_cell_value):
                 """处理单行订单数据"""
                 from utils.batch_upload_utils import validate_customer_name, validate_product
-                
+
                 # 读取单元格数据
                 customer = get_cell_value(row, 1)
                 product_identifier = get_cell_value(row, 2)
                 quantity = get_cell_value(row, 3)
                 note = get_cell_value(row, 4)
-                
+
                 # 验证必填字段
                 valid, error = validate_required_field(customer, '客户名称', row)
                 if not valid:
                     return False, error
-                
+
                 valid, error = validate_required_field(product_identifier, '产品名称', row)
                 if not valid:
                     return False, error
-                
+
                 # 清理数据
                 customer = str(customer).strip()
                 product_identifier = str(product_identifier).strip()
                 note = str(note).strip() if note else ''
-                
+
                 # 验证数量
                 quantity, error = parse_quantity(quantity, '订单数量', row)
                 if error:
                     return False, error
-                
+
                 # 验证客户名称
                 is_valid, error_msg = validate_customer_name(customer)
                 if not is_valid:
                     return False, f'第{row}行：{error_msg}'
-                
+
                 # 查找产品
                 is_valid, product_id, error_msg = validate_product(product_identifier, db, Product)
                 if not is_valid:
                     return False, f'第{row}行：{error_msg}'
-                
+
                 # 生成订单编号
                 order_no = generate_order_number(db, Order)
-                
+
                 # 创建订单
                 order = Order(
                     order_no=order_no,
@@ -1147,7 +1138,7 @@ def batch_import_orders():
                 )
                 db.session.add(order)
                 db.session.flush()
-                
+
                 # 添加库存日志
                 log = InventoryLog(
                     product_id=product_id,
@@ -1157,9 +1148,9 @@ def batch_import_orders():
                     note=f'批量导入订单：{order_no}'
                 )
                 db.session.add(log)
-                
+
                 return True, None
-            
+
             return batch_import_template(
                 temp_file,
                 ['客户名称', '产品名称', '订单数量', '备注'],
@@ -1167,7 +1158,7 @@ def batch_import_orders():
                 '订单',
                 db
             )
-    
+
     finally:
         # 清理临时文件
         import os
@@ -1187,57 +1178,58 @@ def batch_import_stockins():
     批量导入备货 - 支持统一导入模板
     统一模板格式: 客户名称, 产品名称, 订单数量, 抵扣备货, 备货数量, 备注
     """
-    from utils.batch_handler import batch_import_template
-    from utils.excel_handler import validate_required_field, parse_quantity, ExcelReader, excel_reader
-    import tempfile
     import shutil
-    
+    import tempfile
+
+    from utils.batch_handler import batch_import_template
+    from utils.excel_handler import ExcelReader, excel_reader, parse_quantity, validate_required_field
+
     # 检查文件
     if 'file' not in request.files:
         return api_error('没有文件')
-    
+
     file = request.files['file']
-    
+
     # 保存文件到临时位置，以便多次读取
     temp_fd, temp_path = tempfile.mkstemp(suffix='.xlsx')
     try:
         file.save(temp_path)
-        
+
         # 创建模拟文件对象
         class TempFile:
             def __init__(self, path, filename):
                 self.path = path
                 self.filename = filename
-            
+
             def save(self, dest):
                 shutil.copy(self.path, dest)
-        
+
         temp_file = TempFile(temp_path, file.filename)
-        
+
         # 先读取文件判断模板类型
         with excel_reader(temp_file) as reader:
             if reader.error:
                 return api_error(reader.error)
-            
+
             # 读取表头
             headers = []
             for col in range(1, 10):
                 val = reader.get_cell_value(1, col)
                 if val:
                     headers.append(str(val).strip())
-            
+
             # 判断是否为统一导入模板（包含"抵扣备货"或"备货数量"列）
             is_unified_template = ('抵扣备货' in headers or '备货数量' in headers)
-        
+
         # 重新创建文件对象用于导入
         temp_file = TempFile(temp_path, file.filename)
-        
+
         if is_unified_template:
             # 统一导入模板格式: 客户名称, 产品名称, 订单数量, 抵扣备货, 备货数量, 备注
             def process_unified_stockin_row(row, get_cell_value):
                 """处理统一导入模板的备货行"""
                 from utils.batch_upload_utils import validate_customer_name, validate_product
-                
+
                 # 读取单元格数据
                 customer = get_cell_value(row, 1)
                 product_identifier = get_cell_value(row, 2)
@@ -1245,46 +1237,46 @@ def batch_import_stockins():
                 # deduct_flag = get_cell_value(row, 4)  # 抵扣备货，备货导入不需要
                 quantity = get_cell_value(row, 5)  # 备货数量
                 note = get_cell_value(row, 6)  # 备注
-                
+
                 # 如果备货数量为空，跳过此行（可能是订单行）
                 if quantity is None or (isinstance(quantity, str) and quantity.strip() == ''):
                     return False, None
-                
+
                 # 验证必填字段
                 valid, error = validate_required_field(customer, '客户名称', row)
                 if not valid:
                     return False, error
-                
+
                 valid, error = validate_required_field(product_identifier, '产品名称', row)
                 if not valid:
                     return False, error
-                
+
                 # 清理数据
                 customer = str(customer).strip()
                 product_identifier = str(product_identifier).strip()
                 note = str(note).strip() if note else ''
-                
+
                 # 验证数量
                 quantity, error = parse_quantity(quantity, '备货数量', row)
                 if error:
                     return False, error
-                
+
                 # 验证客户名称
                 is_valid, error_msg = validate_customer_name(customer)
                 if not is_valid:
                     return False, f'第{row}行：{error_msg}'
-                
+
                 # 查找产品
                 is_valid, product_id, error_msg = validate_product(product_identifier, db, Product)
                 if not is_valid:
                     return False, f'第{row}行：{error_msg}'
-                
+
                 # 备货时间使用当前时间
                 stockin_date = datetime.now()
-                
+
                 # 生成备货编号
                 stockin_no = generate_stockin_number(db, StockIn)
-                
+
                 # 创建备货记录
                 stockin = StockIn(
                     stockin_no=stockin_no,
@@ -1295,12 +1287,12 @@ def batch_import_stockins():
                     note=note
                 )
                 db.session.add(stockin)
-                
+
                 # 备货操作增加产品库存
                 product = Product.query.get(product_id)
                 if product:
                     product.current_stock += quantity
-                    
+
                     # 添加库存日志
                     log = InventoryLog(
                         product_id=product_id,
@@ -1310,9 +1302,9 @@ def batch_import_stockins():
                         note=f'批量导入备货：{stockin_no}'
                     )
                     db.session.add(log)
-                
+
                 return True, None
-            
+
             return batch_import_template(
                 temp_file,
                 ['客户名称', '产品名称', '订单数量', '抵扣备货', '备货数量', '备注'],
@@ -1325,50 +1317,50 @@ def batch_import_stockins():
             def process_stockin_row(row, get_cell_value):
                 """处理单行备货数据"""
                 from utils.batch_upload_utils import validate_customer_name, validate_product
-                
+
                 # 读取单元格数据
                 customer = get_cell_value(row, 1)
                 product_identifier = get_cell_value(row, 2)
                 quantity = get_cell_value(row, 3)
                 stockin_date_val = get_cell_value(row, 4)
                 note = get_cell_value(row, 5)
-                
+
                 # 验证必填字段
                 valid, error = validate_required_field(customer, '客户名称', row)
                 if not valid:
                     return False, error
-                
+
                 valid, error = validate_required_field(product_identifier, '产品名称', row)
                 if not valid:
                     return False, error
-                
+
                 # 清理数据
                 customer = str(customer).strip()
                 product_identifier = str(product_identifier).strip()
                 note = str(note).strip() if note else ''
-                
+
                 # 验证数量
                 quantity, error = parse_quantity(quantity, '备货数量', row)
                 if error:
                     return False, error
-                
+
                 # 验证客户名称
                 is_valid, error_msg = validate_customer_name(customer)
                 if not is_valid:
                     return False, f'第{row}行：{error_msg}'
-                
+
                 # 查找产品
                 is_valid, product_id, error_msg = validate_product(product_identifier, db, Product)
                 if not is_valid:
                     return False, f'第{row}行：{error_msg}'
-                
+
                 # 处理备货时间
                 reader = ExcelReader(None)  # 仅用于日期解析
                 stockin_date = reader.parse_date_value(stockin_date_val)
-                
+
                 # 生成备货编号
                 stockin_no = generate_stockin_number(db, StockIn)
-                
+
                 # 创建备货记录
                 stockin = StockIn(
                     stockin_no=stockin_no,
@@ -1379,12 +1371,12 @@ def batch_import_stockins():
                     note=note
                 )
                 db.session.add(stockin)
-                
+
                 # 备货操作增加产品库存
                 product = Product.query.get(product_id)
                 if product:
                     product.current_stock += quantity
-                    
+
                     # 添加库存日志
                     log = InventoryLog(
                         product_id=product_id,
@@ -1394,9 +1386,9 @@ def batch_import_stockins():
                         note=f'批量导入备货：{stockin_no}'
                     )
                     db.session.add(log)
-                
+
                 return True, None
-            
+
             return batch_import_template(
                 temp_file,
                 ['客户名称', '产品名称', '备货数量', '备货时间', '备注'],
@@ -1404,7 +1396,7 @@ def batch_import_stockins():
                 '备货',
                 db
             )
-    
+
     finally:
         # 清理临时文件
         import os
@@ -1425,12 +1417,12 @@ def batch_import_unified():
     使用统一导入模板，通过"导入类型"字段区分不同业务
     """
     from utils.batch_handler import batch_import_unified_template
-    from utils.excel_handler import validate_required_field, parse_quantity, ExcelReader
     from utils.batch_upload_utils import validate_customer_name, validate_product
-    
+    from utils.excel_handler import ExcelReader, parse_quantity, validate_required_field
+
     def process_unified_row(import_type, row, reader, Product, Order, StockIn, InventoryLog, db):
         """处理统一导入的单行数据"""
-        
+
         # 读取公共字段
         customer = reader.get_cell_value(row, 2)
         product_name = reader.get_cell_value(row, 3)
@@ -1439,19 +1431,19 @@ def batch_import_unified():
         time_val = reader.get_cell_value(row, 6)
         deduct_flag = reader.get_cell_value(row, 7)
         note = reader.get_cell_value(row, 8)
-        
+
         if import_type == 'product':
             # ===== 产品导入 =====
             # 验证必填字段
             valid, error = validate_required_field(product_name, '产品名称', row)
             if not valid:
                 return False, error
-            
+
             # 清理数据
             name = str(product_name).strip()
             barcode_val = str(barcode).strip() if barcode else ''
             note_val = str(note).strip() if note else ''
-            
+
             # 验证库存数据
             if quantity is None:
                 initial_stock = 0
@@ -1464,17 +1456,17 @@ def batch_import_unified():
                         initial_stock = int(quantity)
                     else:
                         initial_stock = int(quantity)
-                    
+
                     if initial_stock < 0:
                         initial_stock = 0
                 except (ValueError, TypeError):
                     return False, f'第{row}行：初始库存必须是数字，实际值：{quantity}'
-            
+
             # 检查是否已存在
             existing = Product.query.filter_by(name=name).first()
             if existing:
                 return False, None  # 跳过已存在的产品
-            
+
             # 创建产品
             product = Product(
                 name=name,
@@ -1484,7 +1476,7 @@ def batch_import_unified():
             )
             db.session.add(product)
             db.session.flush()
-            
+
             # 添加库存日志
             log = InventoryLog(
                 product_id=product.id,
@@ -1494,43 +1486,43 @@ def batch_import_unified():
                 note=f'统一导入: {note_val}'
             )
             db.session.add(log)
-            
+
             return True, None
-            
+
         elif import_type == 'order':
             # ===== 订单导入 =====
             # 验证必填字段
             valid, error = validate_required_field(customer, '客户名称', row)
             if not valid:
                 return False, error
-            
+
             valid, error = validate_required_field(product_name, '产品名称', row)
             if not valid:
                 return False, error
-            
+
             # 清理数据
             customer_val = str(customer).strip()
             product_identifier = str(product_name).strip()
             note_val = str(note).strip() if note else ''
-            
+
             # 验证数量
             quantity_val, error = parse_quantity(quantity, '订单数量', row)
             if error:
                 return False, error
-            
+
             # 验证客户名称
             is_valid, error_msg = validate_customer_name(customer_val)
             if not is_valid:
                 return False, f'第{row}行：{error_msg}'
-            
+
             # 查找产品
             is_valid, product_id, error_msg = validate_product(product_identifier, db)
             if not is_valid:
                 return False, f'第{row}行：{error_msg}'
-            
+
             # 生成订单编号
             order_no = generate_order_number(db, Order)
-            
+
             # 创建订单（订单时间自动使用当前北京时间）
             order = Order(
                 order_no=order_no,
@@ -1543,7 +1535,7 @@ def batch_import_unified():
             )
             db.session.add(order)
             db.session.flush()
-            
+
             # 添加库存日志
             log = InventoryLog(
                 product_id=product_id,
@@ -1553,51 +1545,51 @@ def batch_import_unified():
                 note=f'统一导入订单：{order_no}'
             )
             db.session.add(log)
-            
+
             # 处理抵扣备货
             if deduct_flag and str(deduct_flag).strip() == '是':
                 process_order_deduction(order, product_id, quantity_val, deduct_stock=True)
-            
+
             return True, None
-            
+
         elif import_type == 'stockin':
             # ===== 备货导入 =====
             # 验证必填字段
             valid, error = validate_required_field(customer, '客户名称', row)
             if not valid:
                 return False, error
-            
+
             valid, error = validate_required_field(product_name, '产品名称', row)
             if not valid:
                 return False, error
-            
+
             # 清理数据
             customer_val = str(customer).strip()
             product_identifier = str(product_name).strip()
             note_val = str(note).strip() if note else ''
-            
+
             # 验证数量
             quantity_val, error = parse_quantity(quantity, '备货数量', row)
             if error:
                 return False, error
-            
+
             # 验证客户名称
             is_valid, error_msg = validate_customer_name(customer_val)
             if not is_valid:
                 return False, f'第{row}行：{error_msg}'
-            
+
             # 查找产品
             is_valid, product_id, error_msg = validate_product(product_identifier, db)
             if not is_valid:
                 return False, f'第{row}行：{error_msg}'
-            
+
             # 处理备货时间（如果为空则自动使用当前北京时间）
             reader_obj = ExcelReader(None)
             stockin_date = reader_obj.parse_date_value(time_val) if time_val else datetime.now()
-            
+
             # 生成备货编号
             stockin_no = generate_stockin_number(db, StockIn)
-            
+
             # 创建备货记录
             stockin = StockIn(
                 stockin_no=stockin_no,
@@ -1608,12 +1600,12 @@ def batch_import_unified():
                 note=note_val
             )
             db.session.add(stockin)
-            
+
             # 备货操作增加产品库存
             product = Product.query.get(product_id)
             if product:
                 product.current_stock += quantity_val
-                
+
                 # 添加库存日志
                 log = InventoryLog(
                     product_id=product_id,
@@ -1623,17 +1615,17 @@ def batch_import_unified():
                     note=f'统一导入备货：{stockin_no}'
                 )
                 db.session.add(log)
-            
+
             return True, None
-        
+
         return False, f'第{row}行：未知的导入类型'
-    
+
     # 检查文件
     if 'file' not in request.files:
         return api_error('没有文件')
-    
+
     file = request.files['file']
-    
+
     # 使用统一导入模板
     models = {
         'Product': Product,
@@ -1641,7 +1633,7 @@ def batch_import_unified():
         'StockIn': StockIn,
         'InventoryLog': InventoryLog
     }
-    
+
     return batch_import_unified_template(file, db, models, process_unified_row)
 
 
@@ -1656,47 +1648,47 @@ def batch_submit_stockins():
     try:
         data = request.get_json()
         stockins_data = data.get('stockins', [])
-        
+
         if not stockins_data:
             return jsonify({
                 'success': False,
                 'message': '没有备货数据'
             })
-        
+
         success_count = 0
         failed_stockins = []
-        
+
         for stockin_data in stockins_data:
             try:
                 # 生成备货编号
                 stockin_no = generate_stockin_number(db, StockIn)
-                
+
                 # 验证必填字段
                 product_id_str = str(stockin_data.get('productId', '')).strip()
                 quantity_str = str(stockin_data.get('quantity', '')).strip()
                 stockin_date_str = stockin_data.get('stockinDate', '')
-                
+
                 if not product_id_str:
                     failed_stockins.append({
                         'stockin': stockin_data,
                         'error': '请选择产品'
                     })
                     continue
-                
+
                 if not quantity_str or quantity_str == '0':
                     failed_stockins.append({
                         'stockin': stockin_data,
                         'error': '请输入有效的数量'
                     })
                     continue
-                
+
                 if not stockin_date_str:
                     failed_stockins.append({
                         'stockin': stockin_data,
                         'error': '请选择备货时间'
                     })
                     continue
-                
+
                 try:
                     product_id = int(product_id_str)
                     quantity = int(quantity_str)
@@ -1707,7 +1699,7 @@ def batch_submit_stockins():
                         'error': '数据格式错误'
                     })
                     continue
-                
+
                 # 检查产品是否存在
                 product = Product.query.get(product_id)
                 if not product:
@@ -1716,7 +1708,7 @@ def batch_submit_stockins():
                         'error': '产品不存在'
                     })
                     continue
-                
+
                 # 检查数量是否为正整数
                 if quantity <= 0:
                     failed_stockins.append({
@@ -1724,11 +1716,11 @@ def batch_submit_stockins():
                         'error': '数量必须大于0'
                     })
                     continue
-                
+
                 # 创建备货记录
                 note = stockin_data.get('note', '')
                 customer = stockin_data.get('customer', '')
-                
+
                 stockin = StockIn(
                     stockin_no=stockin_no,
                     stockin_date=stockin_date,
@@ -1738,10 +1730,10 @@ def batch_submit_stockins():
                     note=note
                 )
                 db.session.add(stockin)
-                
+
                 # 备货操作增加产品库存
                 product.current_stock += quantity
-                
+
                 # 添加库存日志
                 log = InventoryLog(
                     product_id=product_id,
@@ -1751,19 +1743,19 @@ def batch_submit_stockins():
                     note=f'备货：{stockin_no}'
                 )
                 db.session.add(log)
-                
+
                 success_count += 1
-                
+
             except Exception as e:
                 print(f"处理备货时出错: {e}")
                 failed_stockins.append({
                     'stockin': stockin_data,
                     'error': str(e)
                 })
-        
+
         # 提交事务
         db.session.commit()
-        
+
         return jsonify({
             'success': True,
             'message': f'成功提交 {success_count} 个备货',
@@ -1771,7 +1763,7 @@ def batch_submit_stockins():
             'failed_count': len(failed_stockins),
             'failed_stockins': failed_stockins
         })
-        
+
     except Exception as e:
         print(f"批量提交备货出错: {e}")
         db.session.rollback()
@@ -1792,55 +1784,55 @@ def batch_submit_stockouts():
     try:
         data = request.get_json()
         stockouts_data = data.get('stockouts', [])
-        
+
         if not stockouts_data:
             return jsonify({
                 'success': False,
                 'message': '没有出货数据'
             })
-        
+
         success_count = 0
         failed_stockouts = []
-        
+
         for stockout_data in stockouts_data:
             try:
                 # 生成出货编号
                 stockout_no = generate_stockout_number(db, StockOut)
-                
+
                 # 验证必填字段
                 customer = stockout_data.get('customer', '')
                 product_id_str = str(stockout_data.get('productId', '')).strip()
                 quantity_str = str(stockout_data.get('quantity', '')).strip()
                 stockout_date_str = stockout_data.get('stockoutDate', '')
-                
+
                 if not customer:
                     failed_stockouts.append({
                         'stockout': stockout_data,
                         'error': '请选择客户'
                     })
                     continue
-                
+
                 if not product_id_str:
                     failed_stockouts.append({
                         'stockout': stockout_data,
                         'error': '请选择产品'
                     })
                     continue
-                
+
                 if not quantity_str or quantity_str == '0':
                     failed_stockouts.append({
                         'stockout': stockout_data,
                         'error': '请输入有效的数量'
                     })
                     continue
-                
+
                 if not stockout_date_str:
                     failed_stockouts.append({
                         'stockout': stockout_data,
                         'error': '请选择出货时间'
                     })
                     continue
-                
+
                 try:
                     product_id = int(product_id_str)
                     quantity = int(quantity_str)
@@ -1851,7 +1843,7 @@ def batch_submit_stockouts():
                         'error': '数据格式错误'
                     })
                     continue
-                
+
                 # 检查产品是否存在
                 product = Product.query.get(product_id)
                 if not product:
@@ -1860,17 +1852,17 @@ def batch_submit_stockouts():
                         'error': '产品不存在'
                     })
                     continue
-                
+
                 if product.current_stock < quantity:
                     failed_stockouts.append({
                         'stockout': stockout_data,
                         'error': '库存不足'
                     })
                     continue
-                
+
                 # 创建出货记录
                 note = stockout_data.get('note', '')
-                
+
                 stockout = StockOut(
                     stockout_no=stockout_no,
                     stockout_date=stockout_date,
@@ -1880,10 +1872,10 @@ def batch_submit_stockouts():
                     note=note
                 )
                 db.session.add(stockout)
-                
+
                 # 更新产品库存
                 product.current_stock -= quantity
-                
+
                 # 添加库存日志
                 log = InventoryLog(
                     product_id=product_id,
@@ -1894,19 +1886,19 @@ def batch_submit_stockouts():
                     customer=customer
                 )
                 db.session.add(log)
-                
+
                 success_count += 1
-                
+
             except Exception as e:
                 print(f"处理出货时出错: {e}")
                 failed_stockouts.append({
                     'stockout': stockout_data,
                     'error': str(e)
                 })
-        
+
         # 提交事务
         db.session.commit()
-        
+
         return jsonify({
             'success': True,
             'message': f'成功提交 {success_count} 个出货',
@@ -1914,7 +1906,7 @@ def batch_submit_stockouts():
             'failed_count': len(failed_stockouts),
             'failed_stockouts': failed_stockouts
         })
-        
+
     except Exception as e:
         print(f"批量提交出货出错: {e}")
         db.session.rollback()
@@ -1950,7 +1942,7 @@ def product_search():
 @api_permission_required('order_manage')
 def available_stockins():
     product_id = request.args.get('product_id', type=int)
-    order_quantity = request.args.get('order_quantity', 1, type=int)
+    request.args.get('order_quantity', 1, type=int)
 
     query = StockIn.query.filter(StockIn.quantity > 0)
 
@@ -2073,21 +2065,21 @@ def validate_deduct_quantity():
 def log_operation():
     try:
         data = request.get_json()
-        
+
         if not data:
             return jsonify({'success': False, 'message': '无效的请求数据'})
-        
+
         log_type = data.get('type', '')
         log_data = data.get('data', {})
         timestamp = data.get('timestamp', '')
-        
+
         # 记录到日志
         _agent_log("H1", f"operation_log:{log_type}", "Operation logged", {
             "type": log_type,
             "data": log_data,
             "timestamp": timestamp
         })
-        
+
         return jsonify({'success': True, 'message': '日志记录成功'})
     except Exception as e:
         _agent_log("H1", "operation_log:error", "Failed to log operation", {"error": str(e)})
@@ -2100,21 +2092,21 @@ def log_operation():
 def confirm_stockin_deduction():
     data = request.get_json()
     stockins = data.get('stockins', [])
-    
+
     if not stockins:
         return jsonify({'success': False, 'message': '请选择备货SKU'})
-    
+
     # 验证参数完整性
     for item in stockins:
         if not all(key in item for key in ['id', 'quantity', 'stockin_no', 'product_name']):
             return jsonify({'success': False, 'message': '备货数据不完整'})
-    
+
     # 使用数据库事务确保原子性
     try:
         # 第一阶段：预验证所有备货的可用性
         stockin_objects = []
         total_deducted = 0
-        
+
         for item in stockins:
             stockin = StockIn.query.get(item['id'])
             if not stockin:
@@ -2129,10 +2121,10 @@ def confirm_stockin_deduction():
 
             stockin_objects.append((stockin, quantity))
             total_deducted += quantity
-        
+
         # 第二阶段：执行所有抵扣操作
         stockout_records = []
-        
+
         for stockin, quantity in stockin_objects:
             # 创建出货记录
             stockout_no = f'STK-OUT-{datetime.now().strftime("%Y%m%d%H%M%S%f")}'
@@ -2148,10 +2140,10 @@ def confirm_stockin_deduction():
             )
             db.session.add(stockout)
             stockout_records.append(stockout_no)
-            
+
             # 更新产品库存
             stockin.product.current_stock -= quantity
-            
+
             # 添加库存日志
             log = InventoryLog(
                 product_id=stockin.product_id,
@@ -2161,17 +2153,17 @@ def confirm_stockin_deduction():
                 note=f'订单抵扣：{stockin.stockin_no}，数量：{quantity}'
             )
             db.session.add(log)
-        
+
         # 提交事务
         db.session.commit()
-        
+
         return jsonify({
-            'success': True, 
+            'success': True,
             'message': f'备货抵扣成功，总计抵扣数量：{total_deducted}',
             'total_deducted': total_deducted,
             'stockout_records': stockout_records
         })
-        
+
     except Exception as e:
         # 事务回滚，确保数据一致性
         db.session.rollback()
@@ -2223,7 +2215,7 @@ def delete_order(id):
     if order.status in ['已备货', '已出货']:
         flash('已备货或已出货的订单不能删除！', 'error')
         return redirect(url_for('orders'))
-    
+
     # 先删除关联的出货记录，并恢复订单抵扣的库存
     if order.stockouts:
         for stockout in order.stockouts:
@@ -2240,7 +2232,7 @@ def delete_order(id):
             )
             db.session.add(log_restore)
             db.session.delete(stockout)
-    
+
     # 删除订单时减少库存（恢复订单创建时增加的库存）
     product = order.product
     product.current_stock -= order.quantity
@@ -2253,7 +2245,7 @@ def delete_order(id):
         note=f'删除订单：{order.order_no}'
     )
     db.session.add(log)
-    
+
     # 删除订单
     db.session.delete(order)
     db.session.commit()
@@ -2272,7 +2264,7 @@ def stockins():
         quantity = int(request.form['quantity'])
         note = request.form['note']
         stockin_date = datetime.strptime(request.form['stockin_date'], '%Y-%m-%d') if request.form['stockin_date'] else datetime.now()
-        
+
         # 检查产品是否存在
         product = Product.query.get(product_id)
         if not product:
@@ -2289,23 +2281,24 @@ def stockins():
         db.session.commit()
         flash(f'备货添加成功！备货编号：{stockin_no}', 'success')
         return redirect(url_for('stockins'))
-    
+
     # 使用 joinedload 预加载 stockouts 关联数据，避免 N+1 查询
-    from sqlalchemy.orm import joinedload
     from collections import OrderedDict
-    
+
+    from sqlalchemy.orm import joinedload
+
     # 查询所有备货记录，预加载产品和 stockouts 关联数据
     stockins = StockIn.query.options(
         joinedload(StockIn.product),
         joinedload(StockIn.stockouts).joinedload(StockOut.order)
     ).all()
-    
+
     # 按客户 + 产品分组
     grouped_stockins = OrderedDict()
     for stockin in stockins:
         # 分组键：客户名称 + 产品 ID
         key = (stockin.customer, stockin.product_id)
-        
+
         if key not in grouped_stockins:
             grouped_stockins[key] = {
                 'customer': stockin.customer,
@@ -2317,26 +2310,26 @@ def stockins():
                 'note': stockin.note,
                 'original_records': []
             }
-        
+
         # 累加数量
         grouped_stockins[key]['total_quantity'] += stockin.quantity
-        
+
         # 累加已抵扣数量（通过 stockouts 关联）
         if stockin.stockouts:
             for stockout in stockin.stockouts:
                 grouped_stockins[key]['total_deducted'] += stockout.quantity
-        
+
         # 更新最早时间（如果当前记录更早）
         if stockin.stockin_date < grouped_stockins[key]['earliest_date']:
             grouped_stockins[key]['earliest_date'] = stockin.stockin_date
             grouped_stockins[key]['note'] = stockin.note
-        
+
         # 添加原始记录到列表
         grouped_stockins[key]['original_records'].append(stockin)
-    
+
     products = Product.query.all()
     preview_stockin_no = generate_stockin_number(db, StockIn)
-    
+
     # 将分组数据转换为列表格式，供前端按日期分组
     stockins_list = []
     for key, group in grouped_stockins.items():
@@ -2356,11 +2349,11 @@ def stockins():
                 'deducted': sum(s.quantity for s in record.stockouts) if record.stockouts else 0,
                 'note': record.note
             })
-    
-    return render_template('stockin.html', 
+
+    return render_template('stockin.html',
                          grouped_stockins=grouped_stockins,
                          stockins_json=stockins_list,
-                         products=products, 
+                         products=products,
                          preview_stockin_no=preview_stockin_no)
 
 # 编辑备货记录
@@ -2375,22 +2368,22 @@ def edit_stockin(id):
         quantity = int(request.form['quantity'])
         note = request.form['note']
         stockin_date = datetime.strptime(request.form['stockin_date'], '%Y-%m-%d') if request.form['stockin_date'] else datetime.now()
-        
+
         # 检查备货编号是否已存在（排除当前记录）
         existing_stockin = StockIn.query.filter(StockIn.stockin_no == stockin_no, StockIn.id != id).first()
         if existing_stockin:
             flash('备货编号已存在！', 'error')
             return redirect(url_for('edit_stockin', id=id))
-        
+
         # 检查产品是否存在
         product = Product.query.get(product_id)
         if not product:
             flash('产品不存在！', 'error')
             return redirect(url_for('edit_stockin', id=id))
-        
+
         # 计算库存变化
         quantity_change = quantity - stockin.quantity
-        
+
         # 更新备货记录
         stockin.stockin_no = stockin_no
         stockin.stockin_date = stockin_date
@@ -2398,18 +2391,18 @@ def edit_stockin(id):
         stockin.product_id = product_id
         stockin.quantity = quantity
         stockin.note = note
-        
+
         # 更新产品库存
         product.current_stock += quantity_change
-        
+
         # 添加库存日志
         log = InventoryLog(product_id=product_id, change_type='备货调整', change_quantity=quantity_change, related_id=stockin_no, note=f'调整备货：{stockin_no}')
         db.session.add(log)
-        
+
         db.session.commit()
         flash('备货修改成功！', 'success')
         return redirect(url_for('stockins'))
-    
+
     products = Product.query.all()
     return render_template('edit_stockin.html', stockin=stockin, products=products)
 
@@ -2425,27 +2418,27 @@ def edit_stockout(id):
         quantity = int(request.form['quantity'])
         note = request.form['note']
         stockout_date = datetime.strptime(request.form['stockout_date'], '%Y-%m-%d') if request.form['stockout_date'] else datetime.now()
-        
+
         # 检查出货编号是否已存在（排除当前记录）
         existing_stockout = StockOut.query.filter(StockOut.stockout_no == stockout_no, StockOut.id != id).first()
         if existing_stockout:
             flash('出货编号已存在！', 'error')
             return redirect(url_for('edit_stockout', id=id))
-        
+
         # 检查产品是否存在
         product = Product.query.get(product_id)
         if not product:
             flash('产品不存在！', 'error')
             return redirect(url_for('edit_stockout', id=id))
-        
+
         # 计算库存变化
         quantity_change = quantity - stockout.quantity
-        
+
         # 检查库存是否足够（如果数量增加）
         if quantity_change > 0 and product.current_stock < quantity_change:
             flash('库存不足，无法增加出货数量！', 'error')
             return redirect(url_for('edit_stockout', id=id))
-        
+
         # 更新出货记录
         stockout.stockout_no = stockout_no
         stockout.stockout_date = stockout_date
@@ -2453,10 +2446,10 @@ def edit_stockout(id):
         stockout.product_id = product_id
         stockout.quantity = quantity
         stockout.note = note
-        
+
         # 更新产品库存
         product.current_stock -= quantity_change
-        
+
         # 添加库存日志
         log = InventoryLog(
             product_id=product_id,
@@ -2466,11 +2459,11 @@ def edit_stockout(id):
             note=f'调整出货：{stockout_no}'
         )
         db.session.add(log)
-        
+
         db.session.commit()
         flash('出货修改成功！', 'success')
         return redirect(url_for('stockouts'))
-    
+
     products = Product.query.all()
     return render_template('edit_stockout.html', stockout=stockout, products=products)
 
@@ -2479,12 +2472,12 @@ def edit_stockout(id):
 @permission_required('stockout_manage')
 def delete_stockout(id):
     stockout = StockOut.query.get_or_404(id)
-    
+
     # 保存产品信息
     product = stockout.product
     quantity = stockout.quantity
     stockout_no = stockout.stockout_no
-    
+
     # 删除出货记录
     db.session.delete(stockout)
     # 恢复产品库存
@@ -2507,17 +2500,17 @@ def delete_stockout(id):
 @api_permission_required('stockin_manage')
 def delete_stockin(id):
     stockin = StockIn.query.get_or_404(id)
-    
+
     # 检查是否有出货记录
     if stockin.stockouts:
         flash('该备货已有出货记录，无法删除！', 'error')
         return redirect(url_for('stockins'))
-    
+
     # 保存产品信息
     product = stockin.product
     quantity = stockin.quantity
     stockin_no = stockin.stockin_no
-    
+
     # 删除备货记录
     db.session.delete(stockin)
     # 减少产品库存
@@ -2541,18 +2534,18 @@ def stockouts():
         quantity = int(request.form['quantity'])
         note = request.form['note']
         stockout_date = datetime.strptime(request.form['stockout_date'], '%Y-%m-%d') if request.form['stockout_date'] else datetime.now()
-        
+
         # 检查产品是否存在
         product = Product.query.get(product_id)
         if not product:
             flash('产品不存在！', 'error')
             return redirect(url_for('stockouts'))
-        
+
         # 检查产品库存
         if product.current_stock < quantity:
             flash('库存不足！', 'error')
             return redirect(url_for('stockouts'))
-        
+
         # 创建出货记录
         stockout = StockOut(stockout_no=stockout_no, stockout_date=stockout_date, product_id=product_id, quantity=quantity, customer=customer, note=note)
         db.session.add(stockout)
@@ -2573,7 +2566,7 @@ def stockouts():
         .options(joinedload(StockOut.stockin))\
         .filter(~StockOut.note.like('[订单抵扣]%'))\
         .all()
-    
+
     # 转换为列表格式，供前端按日期分组
     stockouts_list = []
     for stockout in stockouts:
@@ -2591,7 +2584,7 @@ def stockouts():
             'quantity': stockout.quantity,
             'note': stockout.note
         })
-    
+
     preview_stockout_no = generate_stockout_number(db, StockOut)
     return render_template('stockout.html', stockouts=stockouts, stockouts_json=stockouts_list, preview_stockout_no=preview_stockout_no)
 
@@ -2602,7 +2595,7 @@ def inventory():
     # 获取查询参数
     search_customer = request.args.get('customer', '').strip()
     search_product = request.args.get('product', '').strip()
-    
+
     # 获取所有订单和备货数据，按客户和产品分组
     # 订单数量保持原始总量（不扣除抵扣）
     order_groups = db.session.query(
@@ -2610,15 +2603,15 @@ def inventory():
         Order.product_id,
         func.sum(Order.quantity).label('order_quantity')
     ).filter(Order.status != '已取消')
-    
+
     if search_customer:
         order_groups = order_groups.filter(Order.customer.ilike(f'%{search_customer}%'))
-    
+
     order_groups = order_groups.group_by(Order.customer, Order.product_id).all()
-    
+
     # 创建数据字典
     order_data = {(g.customer, g.product_id): g.order_quantity for g in order_groups}
-    
+
     # 重新组织查询逻辑，更简单的方式：
     # 直接查询所有 StockIn，并计算每个 (customer, product_id) 的总备货和总抵扣
     # 使用joinedload预加载关联对象,避免N+1查询问题
@@ -2626,13 +2619,13 @@ def inventory():
         .options(joinedload(StockIn.product))\
         .options(selectinload(StockIn.stockouts))\
         .all()
-    
+
     # 计算每个 stockin 的已抵扣数量
     stockin_deducted = {}
     for stockin in stockins:
         deducted = sum(s.quantity for s in stockin.stockouts) if stockin.stockouts else 0
         stockin_deducted[stockin.id] = deducted
-    
+
     # 按 (customer, product_id) 分组计算总备货和总抵扣
     stockin_data = {}
     for stockin in stockins:
@@ -2644,31 +2637,31 @@ def inventory():
             }
         stockin_data[key]['total_quantity'] += stockin.quantity
         stockin_data[key]['total_deducted'] += stockin_deducted.get(stockin.id, 0)
-    
+
     # 转换为最终的备货数据字典
     final_stockin_data = {}
     for key, data in stockin_data.items():
         net_quantity = data['total_quantity'] - data['total_deducted']
         final_stockin_data[key] = net_quantity
-    
+
     # 获取所有唯一的 (customer, product_id) 组合
     all_keys = set(order_data.keys()).union(set(final_stockin_data.keys()))
-    
+
     # 构建库存数据列表
     inventory_data = []
-    
+
     for customer, product_id in all_keys:
         product = Product.query.get(product_id)
         if not product:
             continue
-        
+
         if search_product and search_product.lower() not in product.name.lower():
             continue
-        
+
         order_qty = order_data.get((customer, product_id), 0)
         stockin_qty = max(0, final_stockin_data.get((customer, product_id), 0))
         total_stock = order_qty + stockin_qty
-        
+
         inventory_data.append({
             'customer': customer,
             'product_id': product_id,
@@ -2678,16 +2671,16 @@ def inventory():
             'stockin_quantity': stockin_qty,
             'total_stock': total_stock
         })
-    
+
     # 按客户和产品名称排序
     inventory_data.sort(key=lambda x: (x['customer'], x['product_name']))
-    
+
     # 计算总统计
     total_order_qty = sum(item['order_quantity'] for item in inventory_data)
     total_stockin_qty = sum(item['stockin_quantity'] for item in inventory_data)
     total_total_qty = sum(item['total_stock'] for item in inventory_data)
-    
-    return render_template('inventory.html', 
+
+    return render_template('inventory.html',
                           inventory_data=inventory_data,
                           search_customer=search_customer,
                           search_product=search_product,
@@ -2713,19 +2706,19 @@ def get_inventory_logs(product_id):
         # 获取分页参数
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
-        
+
         # 限制每页最大数量
         if per_page > 100:
             per_page = 100
-        
+
         # 获取筛选参数
         start_date = request.args.get('start_date', '').strip()
         end_date = request.args.get('end_date', '').strip()
         change_type = request.args.get('change_type', '').strip()
-        
+
         # 构建查询
         logs_query = InventoryLog.query.filter_by(product_id=product_id)
-        
+
         # 日期范围过滤
         if start_date:
             try:
@@ -2733,7 +2726,7 @@ def get_inventory_logs(product_id):
                 logs_query = logs_query.filter(InventoryLog.change_date >= start)
             except ValueError:
                 pass
-        
+
         if end_date:
             try:
                 end = datetime.strptime(end_date, '%Y-%m-%d')
@@ -2741,18 +2734,18 @@ def get_inventory_logs(product_id):
                 logs_query = logs_query.filter(InventoryLog.change_date <= end)
             except ValueError:
                 pass
-        
+
         # 类型过滤
         if change_type:
             logs_query = logs_query.filter(InventoryLog.change_type.ilike(f'%{change_type}%'))
-        
+
         # 执行分页查询
         pagination = logs_query.order_by(InventoryLog.change_date.desc()).paginate(
-            page=page, 
-            per_page=per_page, 
+            page=page,
+            per_page=per_page,
             error_out=False
         )
-        
+
         # 格式化数据
         logs_data = []
         for log in pagination.items:
@@ -2765,7 +2758,7 @@ def get_inventory_logs(product_id):
                 'customer': log.customer or '-',
                 'note': log.note or '-'
             })
-        
+
         return jsonify({
             'success': True,
             'data': logs_data,
@@ -2778,7 +2771,7 @@ def get_inventory_logs(product_id):
                 'has_prev': pagination.has_prev
             }
         })
-        
+
     except Exception as e:
         print(f"获取库存流水失败：{e}")
         return jsonify({
@@ -2799,21 +2792,21 @@ def reports():
     search_product = request.args.get('product', '')
     start_date = request.args.get('start_date', '')
     end_date = request.args.get('end_date', '')
-    
+
     # 构建查询条件
     query = StockOut.query.filter(StockOut.quantity > 0)
-    
+
     # 根据客户筛选
     if search_customer:
         query = query.filter(StockOut.customer.like(f'%{search_customer}%'))
-    
+
     # 根据产品筛选
     if search_product:
         query = query.join(Product).filter(Product.name.like(f'%{search_product}%'))
     else:
         # 没有产品筛选时也需要 join Product 以获取产品信息
         query = query.join(Product)
-    
+
     # 根据时间段筛选
     if start_date:
         try:
@@ -2821,7 +2814,7 @@ def reports():
             query = query.filter(StockOut.stockout_date >= start)
         except ValueError:
             pass
-    
+
     if end_date:
         try:
             end = datetime.strptime(end_date, '%Y-%m-%d')
@@ -2830,14 +2823,14 @@ def reports():
             query = query.filter(StockOut.stockout_date < end)
         except ValueError:
             pass
-    
+
     # 执行查询
     stockouts = query.order_by(StockOut.stockout_date.desc()).all()
-    
+
     # 统计数据
     total_quantity = sum(so.quantity for so in stockouts)
     total_amount = len(stockouts)
-    
+
     return render_template('reports.html',
                           stockouts=stockouts,
                           total_quantity=total_quantity,
@@ -2861,15 +2854,15 @@ def api_deduction_logs():
     product = request.args.get('product', '')
     start_date = request.args.get('start_date', '')
     end_date = request.args.get('end_date', '')
-    
+
     # 查询有订单关联的出货记录（即抵扣记录）
     # StockOut 中 stockin_id 不为空表示是备货抵扣产生的出货
     query = StockOut.query.filter(StockOut.stockin_id.isnot(None))
-    
+
     # 根据客户筛选
     if customer:
         query = query.filter(StockOut.customer.like(f'%{customer}%'))
-    
+
     # 根据产品筛选（支持产品名称或SKU/69码）
     if product:
         query = query.join(Product).filter(
@@ -2881,7 +2874,7 @@ def api_deduction_logs():
     else:
         # 没有产品筛选时也需要 join Product 以获取产品信息
         query = query.join(Product)
-    
+
     # 根据时间段筛选
     if start_date:
         try:
@@ -2889,7 +2882,7 @@ def api_deduction_logs():
             query = query.filter(StockOut.stockout_date >= start)
         except ValueError:
             pass
-    
+
     if end_date:
         try:
             end = datetime.strptime(end_date, '%Y-%m-%d')
@@ -2897,10 +2890,10 @@ def api_deduction_logs():
             query = query.filter(StockOut.stockout_date < end)
         except ValueError:
             pass
-    
+
     # 执行查询，按时间倒序
     stockouts = query.order_by(StockOut.stockout_date.desc()).all()
-    
+
     # 构建返回数据
     logs = []
     order_ids = set()
@@ -2914,7 +2907,7 @@ def api_deduction_logs():
             order_note = so.order.note
             order_id = so.order.id
             order_ids.add(so.order.id)
-        
+
         logs.append({
             'deduction_time': so.stockout_date.strftime('%Y-%m-%d %H:%M'),
             'customer': so.customer,
@@ -2925,14 +2918,14 @@ def api_deduction_logs():
             'order_id': order_id,
             'order_note': order_note
         })
-    
+
     # 统计数据
     stats = {
         'total_count': len(logs),
         'total_quantity': sum(so.quantity for so in stockouts),
         'total_orders': len(order_ids)
     }
-    
+
     return jsonify({
         'success': True,
         'logs': logs,
@@ -3058,17 +3051,17 @@ def download_template():
     try:
         # 导入 openpyxl
         from openpyxl import Workbook
+        from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
         from openpyxl.utils import get_column_letter
-        from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
-        
+
         # 创建 Excel 工作簿
         wb = Workbook()
         ws = wb.active
         ws.title = '统一导入模板'
-        
+
         # 设置表头
         headers = ['导入类型', '客户名称', '产品名称', '69码', '数量', '时间', '是否抵扣备货', '备注']
-        
+
         # 表头样式
         header_font = Font(bold=True, size=11, color='FFFFFF')
         header_alignment = Alignment(horizontal='center', vertical='center')
@@ -3079,7 +3072,7 @@ def download_template():
             top=Side(style='thin'),
             bottom=Side(style='thin')
         )
-        
+
         for col_idx, header in enumerate(headers, 1):
             cell = ws.cell(row=1, column=col_idx)
             cell.value = header
@@ -3087,7 +3080,7 @@ def download_template():
             cell.alignment = header_alignment
             cell.fill = header_fill
             cell.border = thin_border
-        
+
         # 添加示例数据
         examples = [
             ['产品', '', '产品名称1', '6900000000001', 100, '', '', '产品导入示例'],
@@ -3097,26 +3090,26 @@ def download_template():
             ['备货', '客户张三', '产品名称1', '', 100, '2026-03-21', '', '备货导入示例'],
             ['备货', '客户李四', '产品名称2', '', 80, '', '', '时间自动生成'],
         ]
-        
+
         for row_idx, example in enumerate(examples, 2):
             for col_idx, value in enumerate(example, 1):
                 cell = ws.cell(row=row_idx, column=col_idx)
                 cell.value = value
                 cell.alignment = Alignment(horizontal='left', vertical='center')
                 cell.border = thin_border
-        
+
         # 调整列宽
         col_widths = [12, 15, 20, 18, 10, 15, 15, 25]
         for i, width in enumerate(col_widths, 1):
             ws.column_dimensions[get_column_letter(i)].width = width
-        
+
         # 设置行高
         for row in range(1, len(examples) + 2):
             ws.row_dimensions[row].height = 22
-        
+
         # 添加填写说明工作表
         ws2 = wb.create_sheet('填写说明')
-        
+
         instructions = [
             ['统一导入模板填写说明', ''],
             ['', ''],
@@ -3138,7 +3131,7 @@ def download_template():
             ['5. 时间格式', '备货时间格式：YYYY-MM-DD，如 2026-03-21'],
             ['6. 时间自动生成', '订单时间自动按当天北京时间生成'],
         ]
-        
+
         for row_idx, row_data in enumerate(instructions, 1):
             for col_idx, value in enumerate(row_data, 1):
                 cell = ws2.cell(row=row_idx, column=col_idx)
@@ -3147,30 +3140,30 @@ def download_template():
                     cell.font = Font(bold=True, size=14)
                 elif '：' in str(value) and col_idx == 1:
                     cell.font = Font(bold=True)
-        
+
         ws2.column_dimensions['A'].width = 25
         ws2.column_dimensions['B'].width = 50
-        
+
         # 保存到内存
         import io
         from urllib.parse import quote
-        
+
         output = io.BytesIO()
         wb.save(output)
         output.seek(0)
-        
+
         # 验证生成的文件是否有效
         file_size = len(output.getvalue())
         if file_size == 0:
             raise Exception("生成的 Excel 文件为空")
-        
+
         # 生成带时间戳的文件名
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         filename = f'统一导入模板_{timestamp}.xlsx'
-        
+
         # 创建响应
         response = make_response(output.getvalue())
-        
+
         # 设置Content-Disposition，使用RFC 5987编码处理中文文件名
         # 这样浏览器会弹出"另存为"对话框
         encoded_filename = quote(filename)
@@ -3181,15 +3174,15 @@ def download_template():
         response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
         response.headers['Pragma'] = 'no-cache'
         response.headers['Expires'] = '0'
-        
+
         print(f"统一导入模板下载成功，文件大小：{file_size} 字节")
         return response
-        
+
     except Exception as e:
         import traceback
         error_traceback = traceback.format_exc()
         print(f"模板下载错误：{error_traceback}")
-        
+
         # 返回详细的错误信息给前端
         from flask import jsonify
         return jsonify({
@@ -3203,14 +3196,11 @@ def download_template():
 @api_permission_required('product_manage')
 def get_desktop_path():
     import platform
-    import shutil
-    
+
     try:
         system = platform.system()
-        
-        if system == 'Windows':
-            desktop = os.path.join(os.path.expanduser('~'), 'Desktop')
-        elif system == 'Darwin':
+
+        if system == 'Windows' or system == 'Darwin':
             desktop = os.path.join(os.path.expanduser('~'), 'Desktop')
         elif system == 'Linux':
             xdg_desktop = os.environ.get('XDG_DESKTOP_DIR')
@@ -3222,25 +3212,25 @@ def get_desktop_path():
                     desktop = os.path.join(os.path.expanduser('~'), 'desktop')
         else:
             desktop = os.path.join(os.path.expanduser('~'), 'Desktop')
-        
+
         if not os.path.exists(desktop):
             return jsonify({
                 'success': False,
                 'error': f'无法找到桌面路径: {desktop}'
             }), 404
-        
+
         return jsonify({
             'success': True,
             'desktopPath': desktop,
             'system': system,
             'username': os.path.basename(os.path.expanduser('~'))
         })
-        
+
     except Exception as e:
         import traceback
         error_traceback = traceback.format_exc()
         print(f"获取桌面路径错误：{error_traceback}")
-        
+
         return jsonify({
             'success': False,
             'error': f'获取桌面路径失败：{str(e)}'
@@ -3250,57 +3240,56 @@ def get_desktop_path():
 @app.route('/copy-template-to-desktop', methods=['POST'])
 @api_permission_required('product_manage')
 def copy_template_to_desktop():
-    import platform
     import shutil
-    
+
     try:
         data = request.get_json()
         desktop_path = data.get('desktopPath')
-        
+
         if not desktop_path:
             return jsonify({
                 'success': False,
                 'error': '未提供桌面路径'
             }), 400
-        
+
         template_path = os.path.join(app.root_path, 'static', 'files', '模板.xlsx')
-        
+
         if not os.path.exists(template_path):
             return jsonify({
                 'success': False,
                 'error': f'模板文件不存在: {template_path}'
             }), 404
-        
+
         if not os.path.exists(desktop_path):
             return jsonify({
                 'success': False,
                 'error': f'桌面路径不存在: {desktop_path}'
             }), 404
-        
+
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         filename = f'产品导入模板_{timestamp}.xlsx'
         destination = os.path.join(desktop_path, filename)
-        
+
         shutil.copy2(template_path, destination)
-        
+
         return jsonify({
             'success': True,
             'message': '模板文件已成功复制到桌面',
             'savedPath': destination,
             'filename': filename
         })
-        
+
     except PermissionError:
         return jsonify({
             'success': False,
             'error': '文件复制失败：权限不足。请以管理员身份运行或选择其他目录'
         }), 403
-        
+
     except Exception as e:
         import traceback
         error_traceback = traceback.format_exc()
         print(f"复制模板文件错误：{error_traceback}")
-        
+
         return jsonify({
             'success': False,
             'error': f'复制模板文件失败：{str(e)}'
@@ -3313,18 +3302,17 @@ def copy_template_to_desktop():
 def save_template_dialog():
     try:
         # 使用 tkinter 打开 Windows 文件保存对话框
-        from tkinter import filedialog
-        from tkinter import Tk
-        
+        from tkinter import Tk, filedialog
+
         # 获取模板类型参数
         data = request.get_json() or {}
         template_type = data.get('type', 'product')
-        
+
         # 创建隐藏的主窗口
         root = Tk()
         root.withdraw()  # 隐藏主窗口
         root.attributes('-topmost', True)  # 设置为顶层窗口
-        
+
         # 根据模板类型生成默认文件名和模板路径
         if template_type == 'stockin':
             default_filename = f"备货导入模板_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
@@ -3342,7 +3330,7 @@ def save_template_dialog():
             default_filename = f"产品导入模板_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
             template_path = os.path.join(app.root_path, 'static', 'files', '模板.xlsx')
             dialog_title = "保存生产模板"
-        
+
         # 打开文件保存对话框
         file_path = filedialog.asksaveasfilename(
             defaultextension=".xlsx",
@@ -3353,28 +3341,28 @@ def save_template_dialog():
             title=dialog_title,
             initialfile=default_filename
         )
-        
+
         # 销毁窗口
         root.destroy()
-        
+
         # 用户取消保存
         if not file_path:
             return jsonify({
                 'success': False,
                 'error': '用户取消保存'
             }), 400
-        
+
         # 确保文件扩展名正确
         if not file_path.lower().endswith('.xlsx'):
             file_path += '.xlsx'
-        
+
         # 检查模板文件是否存在
         if not os.path.exists(template_path):
             return jsonify({
                 'success': False,
                 'error': f'模板文件不存在：{template_path}'
             }), 404
-        
+
         # 检查目标目录是否存在
         target_dir = os.path.dirname(file_path)
         if not os.path.exists(target_dir):
@@ -3382,16 +3370,16 @@ def save_template_dialog():
                 'success': False,
                 'error': f'目标目录不存在：{target_dir}'
             }), 400
-        
+
         # 复制文件
         shutil.copy2(template_path, file_path)
-        
+
         return jsonify({
             'success': True,
             'message': '模板保存成功',
             'savedPath': file_path
         })
-        
+
     except PermissionError as e:
         error_msg = str(e)
         print(f"权限错误：{error_msg}")
@@ -3399,35 +3387,35 @@ def save_template_dialog():
             'success': False,
             'error': '保存失败：权限不足。请选择其他有写入权限的目录，或以管理员身份运行。'
         }), 403
-        
+
     except OSError as e:
         error_msg = str(e)
         print(f"系统错误：{error_msg}")
-        
+
         # 判断是否是文件被占用
         if 'being used by another process' in error_msg or '无法访问文件' in error_msg:
             return jsonify({
                 'success': False,
                 'error': '保存失败：目标文件正在被其他程序使用。请关闭相关程序后重试。'
             }), 409
-        
+
         # 判断是否是磁盘空间不足
         if 'not enough space' in error_msg or '没有足够的空间' in error_msg:
             return jsonify({
                 'success': False,
                 'error': '保存失败：磁盘空间不足。请选择其他磁盘分区。'
             }), 400
-        
+
         return jsonify({
             'success': False,
             'error': f'保存失败：系统错误 - {str(e)}'
         }), 500
-        
+
     except Exception as e:
         import traceback
         error_traceback = traceback.format_exc()
         print(f"保存模板对话框错误：{error_traceback}")
-        
+
         return jsonify({
             'success': False,
             'error': f'保存失败：{str(e)}'
@@ -3443,23 +3431,23 @@ def batch_import():
     """
     from utils.batch_handler import batch_import_template
     from utils.excel_handler import validate_required_field
-    
+
     def process_product_row(row, get_cell_value):
         """处理单行产品数据"""
         # 读取单元格数据
         name = get_cell_value(row, 1)
         barcode = get_cell_value(row, 2)
         initial_stock = get_cell_value(row, 3)
-        
+
         # 验证必填字段
         valid, error = validate_required_field(name, '产品名称', row)
         if not valid:
             return False, error
-        
+
         # 清理数据
         name = str(name).strip()
         barcode = str(barcode).strip() if barcode else ''
-        
+
         # 验证库存数据
         if initial_stock is None:
             initial_stock = 0
@@ -3471,17 +3459,17 @@ def batch_import():
                 initial_stock = int(initial_stock)
             else:
                 initial_stock = int(initial_stock)
-            
+
             if initial_stock < 0:
                 initial_stock = 0
         except (ValueError, TypeError):
             return False, f'第{row}行：初始库存必须是数字，实际值：{initial_stock}'
-        
+
         # 检查是否已存在
         existing = Product.query.filter_by(name=name).first()
         if existing:
             return False, None  # 跳过已存在的产品
-        
+
         # 创建产品
         product = Product(
             name=name,
@@ -3491,7 +3479,7 @@ def batch_import():
         )
         db.session.add(product)
         db.session.flush()
-        
+
         # 添加库存日志
         log = InventoryLog(
             product_id=product.id,
@@ -3501,15 +3489,15 @@ def batch_import():
             note='批量导入'
         )
         db.session.add(log)
-        
+
         return True, None
-    
+
     # 检查文件
     if 'file' not in request.files:
         return api_error('没有文件')
-    
+
     file = request.files['file']
-    
+
     # 使用批量导入模板
     return batch_import_template(
         file,
@@ -3550,36 +3538,36 @@ def batch_submit_case_stockins():
     try:
         data = request.get_json()
         stockins_data = data.get('stockins', [])
-        
+
         if not stockins_data:
             return jsonify({
                 'success': False,
                 'message': '没有入库数据'
             })
-        
+
         success_count = 0
         failed_stockins = []
-        
+
         for stockin_data in stockins_data:
             try:
                 stockin_no = generate_case_stockin_number(db, CaseStockIn)
-                
+
                 product_id_str = str(stockin_data.get('productId', '')).strip()
                 quantity_str = str(stockin_data.get('quantity', '')).strip()
                 stockin_date_str = stockin_data.get('stockinDate', '')
-                
+
                 if not product_id_str:
                     failed_stockins.append({'stockin': stockin_data, 'error': '请选择皮套'})
                     continue
-                
+
                 if not quantity_str or quantity_str == '0':
                     failed_stockins.append({'stockin': stockin_data, 'error': '请输入有效的数量'})
                     continue
-                
+
                 if not stockin_date_str:
                     failed_stockins.append({'stockin': stockin_data, 'error': '请选择入库时间'})
                     continue
-                
+
                 try:
                     product_id = int(product_id_str)
                     quantity = int(quantity_str)
@@ -3587,19 +3575,19 @@ def batch_submit_case_stockins():
                 except ValueError:
                     failed_stockins.append({'stockin': stockin_data, 'error': '数据格式错误'})
                     continue
-                
+
                 case_obj = Case.query.get(product_id)
                 if not case_obj:
                     failed_stockins.append({'stockin': stockin_data, 'error': '皮套不存在'})
                     continue
-                
+
                 if quantity <= 0:
                     failed_stockins.append({'stockin': stockin_data, 'error': '数量必须大于 0'})
                     continue
-                
+
                 note = stockin_data.get('note', '')
                 customer = stockin_data.get('customer', '')
-                
+
                 stockin = CaseStockIn(
                     stockin_no=stockin_no,
                     stockin_date=stockin_date,
@@ -3609,9 +3597,9 @@ def batch_submit_case_stockins():
                     note=note
                 )
                 db.session.add(stockin)
-                
+
                 case_obj.current_stock += quantity
-                
+
                 log = CaseInventoryLog(
                     case_id=product_id,
                     change_type='入库',
@@ -3621,15 +3609,15 @@ def batch_submit_case_stockins():
                     customer=customer
                 )
                 db.session.add(log)
-                
+
                 success_count += 1
-                
+
             except Exception as e:
                 print(f"处理皮套入库时出错：{e}")
                 failed_stockins.append({'stockin': stockin_data, 'error': str(e)})
-        
+
         db.session.commit()
-        
+
         return jsonify({
             'success': True,
             'message': f'成功提交 {success_count} 个入库',
@@ -3637,7 +3625,7 @@ def batch_submit_case_stockins():
             'failed_count': len(failed_stockins),
             'failed_stockins': failed_stockins
         })
-        
+
     except Exception as e:
         print(f"批量提交皮套入库出错：{e}")
         db.session.rollback()
@@ -3655,41 +3643,41 @@ def batch_submit_case_stockouts():
     try:
         data = request.get_json()
         stockouts_data = data.get('stockouts', [])
-        
+
         if not stockouts_data:
             return jsonify({
                 'success': False,
                 'message': '没有出库数据'
             })
-        
+
         success_count = 0
         failed_stockouts = []
-        
+
         for stockout_data in stockouts_data:
             try:
                 stockout_no = generate_case_stockout_number(db, CaseStockOut)
-                
+
                 customer = stockout_data.get('customer', '')
                 product_id_str = str(stockout_data.get('productId', '')).strip()
                 quantity_str = str(stockout_data.get('quantity', '')).strip()
                 stockout_date_str = stockout_data.get('stockoutDate', '')
-                
+
                 if not customer:
                     failed_stockouts.append({'stockout': stockout_data, 'error': '请选择客户'})
                     continue
-                
+
                 if not product_id_str:
                     failed_stockouts.append({'stockout': stockout_data, 'error': '请选择皮套'})
                     continue
-                
+
                 if not quantity_str or quantity_str == '0':
                     failed_stockouts.append({'stockout': stockout_data, 'error': '请输入有效的数量'})
                     continue
-                
+
                 if not stockout_date_str:
                     failed_stockouts.append({'stockout': stockout_data, 'error': '请选择出库时间'})
                     continue
-                
+
                 try:
                     product_id = int(product_id_str)
                     quantity = int(quantity_str)
@@ -3697,18 +3685,18 @@ def batch_submit_case_stockouts():
                 except ValueError:
                     failed_stockouts.append({'stockout': stockout_data, 'error': '数据格式错误'})
                     continue
-                
+
                 case_obj = Case.query.get(product_id)
                 if not case_obj:
                     failed_stockouts.append({'stockout': stockout_data, 'error': '皮套不存在'})
                     continue
-                
+
                 if case_obj.current_stock < quantity:
                     failed_stockouts.append({'stockout': stockout_data, 'error': '库存不足'})
                     continue
-                
+
                 note = stockout_data.get('note', '')
-                
+
                 stockout = CaseStockOut(
                     stockout_no=stockout_no,
                     stockout_date=stockout_date,
@@ -3718,9 +3706,9 @@ def batch_submit_case_stockouts():
                     note=note
                 )
                 db.session.add(stockout)
-                
+
                 case_obj.current_stock -= quantity
-                
+
                 log = CaseInventoryLog(
                     case_id=product_id,
                     change_type='出库',
@@ -3730,15 +3718,15 @@ def batch_submit_case_stockouts():
                     customer=customer
                 )
                 db.session.add(log)
-                
+
                 success_count += 1
-                
+
             except Exception as e:
                 print(f"处理皮套出库时出错：{e}")
                 failed_stockouts.append({'stockout': stockout_data, 'error': str(e)})
-        
+
         db.session.commit()
-        
+
         return jsonify({
             'success': True,
             'message': f'成功提交 {success_count} 个出库',
@@ -3746,7 +3734,7 @@ def batch_submit_case_stockouts():
             'failed_count': len(failed_stockouts),
             'failed_stockouts': failed_stockouts
         })
-        
+
     except Exception as e:
         print(f"批量提交皮套出库出错：{e}")
         db.session.rollback()
@@ -3780,24 +3768,24 @@ def case_inventory_logs(case_id):
     start_date = request.args.get('start_date', '')
     end_date = request.args.get('end_date', '')
     change_type = request.args.get('change_type', '')
-    
+
     query = CaseInventoryLog.query.filter_by(case_id=case_id)
-    
+
     if start_date:
         start = datetime.strptime(start_date, '%Y-%m-%d')
         query = query.filter(CaseInventoryLog.change_date >= start)
-    
+
     if end_date:
         end = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
         query = query.filter(CaseInventoryLog.change_date < end)
-    
+
     if change_type:
         query = query.filter(CaseInventoryLog.change_type == change_type)
-    
+
     query = query.order_by(CaseInventoryLog.change_date.desc())
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
     logs = pagination.items
-    
+
     result = []
     for log in logs:
         result.append({
@@ -3809,7 +3797,7 @@ def case_inventory_logs(case_id):
             'note': log.note or '',
             'customer': log.customer or ''
         })
-    
+
     return jsonify({
         'logs': result,
         'total': pagination.total,
@@ -3877,29 +3865,29 @@ def api_case_stockins():
     end_date = request.args.get('end_date', '')
     quantity_min = request.args.get('quantity_min', type=int)
     quantity_max = request.args.get('quantity_max', type=int)
-    
+
     query = CaseStockIn.query
-    
+
     if customer:
         query = query.filter(CaseStockIn.customer.contains(customer))
-    
+
     if start_date:
         start = datetime.strptime(start_date, '%Y-%m-%d')
         query = query.filter(CaseStockIn.stockin_date >= start)
-    
+
     if end_date:
         end = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
         query = query.filter(CaseStockIn.stockin_date < end)
-    
+
     if quantity_min:
         query = query.filter(CaseStockIn.quantity >= quantity_min)
-    
+
     if quantity_max:
         query = query.filter(CaseStockIn.quantity <= quantity_max)
-    
+
     query = query.order_by(CaseStockIn.stockin_date.desc())
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
-    
+
     result = []
     for stockin in pagination.items:
         result.append({
@@ -3933,29 +3921,29 @@ def api_case_stockouts():
     end_date = request.args.get('end_date', '')
     quantity_min = request.args.get('quantity_min', type=int)
     quantity_max = request.args.get('quantity_max', type=int)
-    
+
     query = CaseStockOut.query
-    
+
     if customer:
         query = query.filter(CaseStockOut.customer.contains(customer))
-    
+
     if start_date:
         start = datetime.strptime(start_date, '%Y-%m-%d')
         query = query.filter(CaseStockOut.stockout_date >= start)
-    
+
     if end_date:
         end = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
         query = query.filter(CaseStockOut.stockout_date < end)
-    
+
     if quantity_min:
         query = query.filter(CaseStockOut.quantity >= quantity_min)
-    
+
     if quantity_max:
         query = query.filter(CaseStockOut.quantity <= quantity_max)
-    
+
     query = query.order_by(CaseStockOut.stockout_date.desc())
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
-    
+
     result = []
     for stockout in pagination.items:
         result.append({
@@ -3969,7 +3957,7 @@ def api_case_stockouts():
             'quantity': stockout.quantity,
             'note': stockout.note or ''
         })
-    
+
     return jsonify({
         'stockouts': result,
         'total': pagination.total,
@@ -4001,20 +3989,20 @@ def update_case_stockin(stockin_id):
     try:
         data = request.get_json()
         stockin = CaseStockIn.query.get_or_404(stockin_id)
-        
+
         old_quantity = stockin.quantity
         new_quantity = data.get('quantity', old_quantity)
         quantity_change = new_quantity - old_quantity
-        
+
         stockin.customer = data.get('customer', stockin.customer)
         stockin.stockin_date = datetime.strptime(data.get('stockin_date', stockin.stockin_date.strftime('%Y-%m-%d')), '%Y-%m-%d')
         stockin.quantity = new_quantity
         stockin.note = data.get('note', stockin.note)
-        
+
         case_obj = Case.query.get(stockin.case_id)
         if case_obj:
             case_obj.current_stock += quantity_change
-            
+
             log = CaseInventoryLog(
                 case_id=stockin.case_id,
                 change_type='入库调整',
@@ -4023,9 +4011,9 @@ def update_case_stockin(stockin_id):
                 note=f'入库调整：{stockin.stockin_no}'
             )
             db.session.add(log)
-        
+
         db.session.commit()
-        
+
         return jsonify({'success': True, 'message': '更新成功'})
     except Exception as e:
         db.session.rollback()
@@ -4037,14 +4025,14 @@ def delete_case_stockin(stockin_id):
     """删除皮套入库记录"""
     try:
         stockin = CaseStockIn.query.get_or_404(stockin_id)
-        
+
         if stockin.stockouts:
             return jsonify({'success': False, 'message': '该入库记录已有出库，无法删除'})
-        
+
         case_obj = Case.query.get(stockin.case_id)
         if case_obj:
             case_obj.current_stock -= stockin.quantity
-            
+
             log = CaseInventoryLog(
                 case_id=stockin.case_id,
                 change_type='删除入库',
@@ -4053,10 +4041,10 @@ def delete_case_stockin(stockin_id):
                 note=f'删除入库：{stockin.stockin_no}'
             )
             db.session.add(log)
-        
+
         db.session.delete(stockin)
         db.session.commit()
-        
+
         return jsonify({'success': True, 'message': '删除成功'})
     except Exception as e:
         db.session.rollback()
@@ -4086,20 +4074,20 @@ def update_case_stockout(stockout_id):
     try:
         data = request.get_json()
         stockout = CaseStockOut.query.get_or_404(stockout_id)
-        
+
         old_quantity = stockout.quantity
         new_quantity = data.get('quantity', old_quantity)
         quantity_change = new_quantity - old_quantity
-        
+
         stockout.customer = data.get('customer', stockout.customer)
         stockout.stockout_date = datetime.strptime(data.get('stockout_date', stockout.stockout_date.strftime('%Y-%m-%d')), '%Y-%m-%d')
         stockout.quantity = new_quantity
         stockout.note = data.get('note', stockout.note)
-        
+
         case_obj = Case.query.get(stockout.case_id)
         if case_obj:
             case_obj.current_stock -= quantity_change
-            
+
             log = CaseInventoryLog(
                 case_id=stockout.case_id,
                 change_type='出库调整',
@@ -4108,9 +4096,9 @@ def update_case_stockout(stockout_id):
                 note=f'出库调整：{stockout.stockout_no}'
             )
             db.session.add(log)
-        
+
         db.session.commit()
-        
+
         return jsonify({'success': True, 'message': '更新成功'})
     except Exception as e:
         db.session.rollback()
@@ -4122,11 +4110,11 @@ def delete_case_stockout(stockout_id):
     """删除皮套出库记录"""
     try:
         stockout = CaseStockOut.query.get_or_404(stockout_id)
-        
+
         case_obj = Case.query.get(stockout.case_id)
         if case_obj:
             case_obj.current_stock += stockout.quantity
-            
+
             log = CaseInventoryLog(
                 case_id=stockout.case_id,
                 change_type='删除出库',
@@ -4135,10 +4123,10 @@ def delete_case_stockout(stockout_id):
                 note=f'删除出库：{stockout.stockout_no}'
             )
             db.session.add(log)
-        
+
         db.session.delete(stockout)
         db.session.commit()
-        
+
         return jsonify({'success': True, 'message': '删除成功'})
     except Exception as e:
         db.session.rollback()
@@ -4151,11 +4139,11 @@ def case_inventory_summary():
     """获取皮套库存汇总"""
     cases = Case.query.all()
     result = []
-    
+
     for case in cases:
         total_in = sum(s.quantity for s in case.stockins) if case.stockins else 0
         total_out = sum(s.quantity for s in case.stockouts) if case.stockouts else 0
-        
+
         result.append({
             'id': case.id,
             'name': case.name,
@@ -4165,7 +4153,7 @@ def case_inventory_summary():
             'total_out': total_out,
             'current_stock': case.current_stock
         })
-    
+
     return jsonify(result)
 
 @app.route('/cases')
@@ -4182,17 +4170,17 @@ def case_products():
             name = request.form.get('name', '').strip()
             barcode = request.form.get('barcode', '').strip()
             image = request.form.get('image', '')
-            
+
             if not name:
                 flash('皮套名称不能为空', 'error')
                 return redirect(url_for('case_products'))
-            
+
             # 检查名称是否重复
             existing = Case.query.filter_by(name=name).first()
             if existing:
                 flash('该皮套名称已存在', 'error')
                 return redirect(url_for('case_products'))
-            
+
             case_obj = Case(
                 name=name,
                 barcode=barcode or None,
@@ -4202,14 +4190,14 @@ def case_products():
             )
             db.session.add(case_obj)
             db.session.commit()
-            
+
             flash('皮套添加成功', 'success')
             return redirect(url_for('case_products'))
-            
+
         except Exception as e:
             db.session.rollback()
             flash(f'添加失败：{str(e)}', 'error')
-    
+
     cases = Case.query.order_by(Case.create_time.desc()).all()
     return render_template('case_product.html', cases=cases, is_home=False)
 
@@ -4220,17 +4208,17 @@ def delete_case_product(case_id):
     """删除皮套基础数据"""
     try:
         case_obj = Case.query.get_or_404(case_id)
-        
+
         # 检查是否有相关业务记录
         if case_obj.stockins:
             return jsonify({'success': False, 'message': '该皮套已有入库记录，无法删除'})
-        
+
         if case_obj.stockouts:
             return jsonify({'success': False, 'message': '该皮套已有出库记录，无法删除'})
-        
+
         db.session.delete(case_obj)
         db.session.commit()
-        
+
         return jsonify({'success': True, 'message': '删除成功'})
     except Exception as e:
         db.session.rollback()

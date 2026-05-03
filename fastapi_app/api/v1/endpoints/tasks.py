@@ -3,16 +3,15 @@
 提供 Celery 任务的提交和状态查询
 若 Celery 未安装，端点返回 503 提示
 """
-from fastapi import APIRouter, HTTPException, UploadFile, File, Depends
-from pydantic import BaseModel
-from typing import Optional
-import tempfile
 import os
 import shutil
-import logging
+import tempfile
 
-from fastapi_app.core.logger import logger
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from pydantic import BaseModel
+
 from fastapi_app.core.deps import require_permission
+from fastapi_app.core.logger import logger
 from fastapi_app.shared_models import User
 
 # Celery 懒加载：避免顶层导入导致缺失 celery 包时整个应用无法启动
@@ -40,14 +39,49 @@ def _require_celery():
 
 router = APIRouter(prefix="/tasks", tags=["异步任务"])
 
+MAX_IMPORT_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+
+VALID_FILE_SIGNATURES = {
+    '.xlsx': (b'PK\x03\x04', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
+    '.csv': None,  # CSV 无固定魔数，纯文本检测
+}
+
+def _validate_import_file(file: UploadFile) -> None:
+    filename = file.filename or ''
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in VALID_FILE_SIGNATURES:
+        raise HTTPException(status_code=400, detail=f"不支持的文件类型: {ext}，仅支持 .xlsx / .csv")
+
+    header = file.file.read(8)
+    file_size = len(header)
+    if file_size < 4 and ext == '.xlsx':
+        raise HTTPException(status_code=400, detail="文件内容为空或过小")
+
+    sig_info = VALID_FILE_SIGNATURES[ext]
+    if sig_info is not None:
+        expected_sig, _ = sig_info
+        if header[:len(expected_sig)] != expected_sig:
+            raise HTTPException(status_code=400, detail=f"文件内容与扩展名不匹配，可能不是有效的 {ext} 文件")
+    elif ext == '.csv':
+        if header and header[0] < 0x20 and header[0] not in (0x09, 0x0a, 0x0d):
+            raise HTTPException(status_code=400, detail="CSV 文件包含非法控制字符")
+
+    file.file.seek(0)
+
+    remaining = file.file.read()
+    total_size = len(remaining)
+    file.file.seek(0)
+    if total_size > MAX_IMPORT_FILE_SIZE:
+        raise HTTPException(status_code=400, detail=f"文件大小超过 {MAX_IMPORT_FILE_SIZE // 1024 // 1024}MB 限制")
+
 
 # ==================== Schemas ====================
 
 class TaskStatusResponse(BaseModel):
     task_id: str
     status: str  # PENDING, STARTED, SUCCESS, FAILURE, RETRY, REVOKED
-    result: Optional[dict] = None
-    progress: Optional[float] = None
+    result: dict | None = None
+    progress: float | None = None
 
 
 class ReportExportRequest(BaseModel):
@@ -92,24 +126,22 @@ async def async_import_orders(
     current_user: User = Depends(require_permission("batch_import")),
 ):
     """异步批量导入订单（提交后台任务）"""
-    if not file.filename.endswith(('.xlsx', '.csv')):
-        raise HTTPException(status_code=400, detail="仅支持 Excel (.xlsx) 或 CSV 文件，.xls 已不再支持")
+    _validate_import_file(file)
 
-    # 保存上传文件到临时位置
     suffix = os.path.splitext(file.filename)[1]
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         shutil.copyfileobj(file.file, tmp)
         tmp_path = tmp.name
 
-    # 提交 Celery 任务
     from fastapi_app.tasks.batch_tasks import batch_import_orders_task
     task = batch_import_orders_task.delay(tmp_path, file.filename, user_id=current_user.id)
+    task_id_str = task.id
 
     return {
         "success": True,
         "message": "批量导入任务已提交",
-        "task_id": task.id,
-        "status_url": f"/api/v1/tasks/status/{task.id}",
+        "task_id": task_id_str,
+        "status_url": f"/api/v1/tasks/status/{task_id_str}",
     }
 
 
@@ -119,8 +151,7 @@ async def async_import_stockins(
     current_user: User = Depends(require_permission("batch_import")),
 ):
     """异步批量导入备货（提交后台任务）"""
-    if not file.filename.endswith(('.xlsx', '.csv')):
-        raise HTTPException(status_code=400, detail="仅支持 Excel (.xlsx) 或 CSV 文件，.xls 已不再支持")
+    _validate_import_file(file)
 
     suffix = os.path.splitext(file.filename)[1]
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -129,12 +160,13 @@ async def async_import_stockins(
 
     from fastapi_app.tasks.batch_tasks import batch_import_stockins_task
     task = batch_import_stockins_task.delay(tmp_path, file.filename, user_id=current_user.id)
+    task_id_str = task.id
 
     return {
         "success": True,
         "message": "批量导入任务已提交",
-        "task_id": task.id,
-        "status_url": f"/api/v1/tasks/status/{task.id}",
+        "task_id": task_id_str,
+        "status_url": f"/api/v1/tasks/status/{task_id_str}",
     }
 
 

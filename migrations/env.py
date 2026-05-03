@@ -2,7 +2,6 @@ import logging
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import text
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -31,6 +30,7 @@ def get_engine_url():
 # add your model's MetaData object here
 # for 'autogenerate' support
 from fastapi_app.shared_models import Base
+
 config.set_main_option('sqlalchemy.url', get_engine_url())
 target_metadata = Base.metadata
 

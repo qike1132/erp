@@ -1,7 +1,8 @@
 """皮套模型 - 纯 SQLAlchemy 2.0 声明式"""
-from sqlalchemy import String, Integer, Boolean, ForeignKey, DateTime, Text, Index
-from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
+
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
 

@@ -1,9 +1,12 @@
 """添加 production_plan 新字段的迁移脚本"""
-import sys, os
+import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from fastapi_app.core.database import sync_engine
 from sqlalchemy import inspect, text
+
+from fastapi_app.core.database import sync_engine
 
 insp = inspect(sync_engine)
 existing = [c['name'] for c in insp.get_columns('production_plan')]

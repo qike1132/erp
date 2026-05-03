@@ -1,14 +1,12 @@
 """
 库存管理模块测试
 """
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from httpx import AsyncClient
 
-from fastapi_app.main import app
-from fastapi_app.schemas.stock import StockInCreate, StockInUpdate, StockOutCreate, StockOutUpdate
+import pytest
+
+from fastapi_app.schemas.stock import StockInCreate, StockInUpdate, StockOutCreate
 from fastapi_app.services import stock_service
-
 
 # ==================== Schema 验证 ====================
 

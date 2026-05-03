@@ -2,8 +2,8 @@
 优化建议生成器
 基于质量分析结果生成具体的优化建议
 """
-from typing import Dict, Any, List
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -21,15 +21,15 @@ class OptimizationSuggestion:
 
 class OptimizationSuggestionGenerator:
     """优化建议生成器"""
-    
-    def __init__(self, analysis_results: Dict[str, Any]):
+
+    def __init__(self, analysis_results: dict[str, Any]):
         self.results = analysis_results
         self.suggestions = []
-    
-    def generate(self) -> List[OptimizationSuggestion]:
+
+    def generate(self) -> list[OptimizationSuggestion]:
         """生成优化建议"""
         self.suggestions = []
-        
+
         # 分析各工具结果并生成建议
         for tool_name, result in self.results.items():
             if tool_name == 'PylintAnalyzer':
@@ -40,21 +40,21 @@ class OptimizationSuggestionGenerator:
                 self._analyze_radon(result)
             elif tool_name == 'BanditAnalyzer':
                 self._analyze_bandit(result)
-        
+
         # 按优先级排序
         self.suggestions.sort(key=lambda x: {'high': 0, 'medium': 1, 'low': 2}[x.priority])
-        
+
         return self.suggestions
-    
-    def _analyze_pylint(self, result: Dict[str, Any]):
+
+    def _analyze_pylint(self, result: dict[str, Any]):
         """分析Pylint结果"""
         if 'issues' not in result:
             return
-        
+
         for issue in result['issues']:
             category = self._map_pylint_category(issue.get('type', ''))
             priority = self._map_priority(issue.get('type', ''))
-            
+
             suggestion = OptimizationSuggestion(
                 category=category,
                 priority=priority,
@@ -66,17 +66,17 @@ class OptimizationSuggestionGenerator:
                 risk="低风险,建议优先处理高优先级问题"
             )
             self.suggestions.append(suggestion)
-    
-    def _analyze_flake8(self, result: Dict[str, Any]):
+
+    def _analyze_flake8(self, result: dict[str, Any]):
         """分析Flake8结果"""
         if 'issues' not in result:
             return
-        
+
         for issue in result['issues']:
             suggestion = OptimizationSuggestion(
                 category='code_quality',
                 priority='medium',
-                title=f"Flake8: 代码规范问题",
+                title="Flake8: 代码规范问题",
                 description=str(issue),
                 location="",
                 suggestion="遵循PEP8代码规范",
@@ -84,11 +84,11 @@ class OptimizationSuggestionGenerator:
                 risk="低风险"
             )
             self.suggestions.append(suggestion)
-    
-    def _analyze_radon(self, result: Dict[str, Any]):
+
+    def _analyze_radon(self, result: dict[str, Any]):
         """分析Radon结果"""
         summary = result.get('summary', {})
-        
+
         # 检查圈复杂度
         avg_cc = summary.get('avg_cc', 0)
         if avg_cc > 10:
@@ -103,7 +103,7 @@ class OptimizationSuggestionGenerator:
                 risk="中等风险,需要仔细测试重构后的代码"
             )
             self.suggestions.append(suggestion)
-        
+
         # 检查可维护性指数
         avg_mi = summary.get('avg_mi', 100)
         if avg_mi < 65:
@@ -118,16 +118,16 @@ class OptimizationSuggestionGenerator:
                 risk="低风险"
             )
             self.suggestions.append(suggestion)
-    
-    def _analyze_bandit(self, result: Dict[str, Any]):
+
+    def _analyze_bandit(self, result: dict[str, Any]):
         """分析Bandit结果"""
         if 'issues' not in result:
             return
-        
+
         for issue in result['issues']:
             severity = issue.get('issue_severity', 'LOW')
             priority = 'high' if severity == 'HIGH' else 'medium' if severity == 'MEDIUM' else 'low'
-            
+
             suggestion = OptimizationSuggestion(
                 category='security',
                 priority=priority,
@@ -139,7 +139,7 @@ class OptimizationSuggestionGenerator:
                 risk="必须修复,存在安全风险"
             )
             self.suggestions.append(suggestion)
-    
+
     def _map_pylint_category(self, issue_type: str) -> str:
         """映射Pylint问题类型到类别"""
         mapping = {
@@ -149,7 +149,7 @@ class OptimizationSuggestionGenerator:
             'refactor': 'maintainability'
         }
         return mapping.get(issue_type, 'code_quality')
-    
+
     def _map_priority(self, issue_type: str) -> str:
         """映射问题类型到优先级"""
         mapping = {
@@ -162,11 +162,11 @@ class OptimizationSuggestionGenerator:
             'LOW': 'low'
         }
         return mapping.get(issue_type, 'low')
-    
-    def _get_pylint_suggestion(self, issue: Dict[str, Any]) -> str:
+
+    def _get_pylint_suggestion(self, issue: dict[str, Any]) -> str:
         """获取Pylint问题的具体建议"""
         symbol = issue.get('symbol', '')
-        
+
         suggestions = {
             'unused-variable': "删除未使用的变量或使用它",
             'unused-import': "删除未使用的导入",
@@ -177,13 +177,13 @@ class OptimizationSuggestionGenerator:
             'duplicate-code': "提取重复代码为公共函数或类",
             'missing-docstring': "添加文档字符串"
         }
-        
+
         return suggestions.get(symbol, "根据Pylint建议修复此问题")
-    
-    def _get_bandit_suggestion(self, issue: Dict[str, Any]) -> str:
+
+    def _get_bandit_suggestion(self, issue: dict[str, Any]) -> str:
         """获取Bandit安全问题的具体建议"""
         test_id = issue.get('test_id', '')
-        
+
         suggestions = {
             'B101': "避免使用assert语句,使用正规的断言库",
             'B102': "避免使用exec函数",
@@ -206,10 +206,10 @@ class OptimizationSuggestionGenerator:
             'B309': "避免使用不安全的XML解析",
             'B310': "避免使用不安全的XML解析"
         }
-        
+
         return suggestions.get(test_id, "修复此安全问题")
-    
-    def to_dict_list(self) -> List[Dict[str, str]]:
+
+    def to_dict_list(self) -> list[dict[str, str]]:
         """转换为字典列表"""
         return [
             {
@@ -238,10 +238,10 @@ if __name__ == '__main__':
             ]
         }
     }
-    
+
     generator = OptimizationSuggestionGenerator(sample_results)
     suggestions = generator.generate()
-    
+
     print(f"生成 {len(suggestions)} 条优化建议:")
     for i, s in enumerate(suggestions, 1):
         print(f"\n{i}. [{s.priority}] {s.title}")

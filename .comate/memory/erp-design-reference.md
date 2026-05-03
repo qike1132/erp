@@ -39,7 +39,7 @@ type: reference
   - 单卡双栏（左右分栏的选择+详情）
   - 单卡三栏（流程式：选择→输入→结果，如物料计算器）
   - 多卡片纵向排列（Dashboard 概览，如来料进度监控面板）
-- **不设独立页面标题区**，标题集成在主卡片头部
+- **不设独立页面标题区**，标题集成在主卡片头部（可选，无标题时可省略标题组）
 - 侧边栏 LOGO 作为返回首页入口（`<router-link to="/dashboard">`）
 
 ```css
@@ -56,8 +56,8 @@ type: reference
 - `background: white; border-radius: 18px`
 - `border: 1px solid var(--color-border-light, #e2e8f0)`
 - `box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06)`
+- **悬浮动画仅增强阴影，禁止位移**（见第19节动效规范）
 - **禁止在卡片元素上设置 `overflow: hidden`**（会裁剪悬浮阴影），内容裁剪由 `.{prefix}-card-main` 处理
-- **必须配合悬浮动画**（见第19节动效规范）
 
 **卡片 overflow 规则**：
 ```css
@@ -78,9 +78,16 @@ type: reference
 - `padding: 14px 24px 10px`
 - `background: transparent`（继承卡片白色背景）
 - `display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap`
+- **两种布局方式**：
+  1. **标准布局**：HeaderTabs（第一行）+ 标题 + 操作按钮（第二行）
+  2. **左右分栏布局**：左侧 HeaderTabs / 标题，右侧页面TAB按钮/操作按钮（适用于采购页面等需要独立TAB切换的场景）
 - 左侧标题：`font-size: 14px; font-weight: 700; color: var(--color-text)` + 图标
 - 右侧：操作按钮组（badge + action buttons + status badge）
-- **快捷切换标签栏 `<HeaderTabs />`** 必须作为 `card-header` 的第一个子元素，占据整行（`width: 100%`），标题和操作按钮在第二行（见第26节）
+- **快捷切换标签栏 `<HeaderTabs />`** 必须作为 `card-header` 的第一个子元素（标准布局）或左侧栏的内容（左右分栏布局）
+- **左右分栏布局规则**：
+  - 左侧栏：`.{prefix}-header-left`，`flex: 1; display: flex; align-items: center;`，放置 HeaderTabs 或标题
+  - 右侧栏：`.{prefix}-header-right`，`display: flex; align-items: flex-start; justify-content: flex-end;`，放置页面 TAB 按钮或操作按钮
+  - 卡片头部 `align-items` 根据右侧内容调整：为右侧栏对齐时使用 `align-items: flex-start`
 
 **强制规则**：区块标题（如"审核订单"、"采购中订单"等）不使用灰色背景，不使用 uppercase，标题直接融入卡片白色主体，靠字号和字重区分层级。所有页面的 `card-header` 必须添加 `flex-wrap: wrap` 以支持 HeaderTabs 换行布局。
 
@@ -157,7 +164,7 @@ type: reference
 ### 11. 搜索框
 - `padding: 12px 40px 12px 42px`（左侧留出图标空间）
 - `border: 2px solid var(--color-border-light, #e2e8f0); border-radius: 11px`
-- `background: var(--color-surface, #f8fafc)`
+- `background: white`
 - `transition: all 0.3s ease`
 - focus：`border-color: var(--color-primary-400); background: white; box-shadow: 0 0 0 4px rgba(0, 148, 191, 0.1)`
 - 右侧清除按钮：圆形 `border-radius: 50%`
@@ -165,7 +172,7 @@ type: reference
 
 ### 12. 筛选按钮栏
 - `display: flex; gap: 8px`
-- 按钮：`flex: 1; padding: 9px 14px; background: var(--color-surface); border: 2px solid var(--color-border-light); border-radius: 9px; font-size: 13px; font-weight: 600; transition: all 0.2s ease`
+- 按钮：`flex: 1; padding: 9px 14px; background: white; border: 2px solid var(--color-border-light); border-radius: 9px; font-size: 13px; font-weight: 600; transition: all 0.2s ease`
 - 激活态：`background: var(--color-primary-50); border-color: var(--color-primary-400); color: var(--color-primary-700)`
 - hover：`transform: translateY(-1px)`
 
@@ -217,29 +224,41 @@ type: reference
 | 速度 | 缓动函数 | 适用场景 |
 |------|---------|---------|
 | **0.2s ease** | ease | 行hover、小按钮、输入框focus、表格行 |
-| **0.3s ease** | ease | 操作按钮、表单控件、列表项、筛选按钮、分类头部 |
+| **0.3s ease** | ease | 操作按钮、表单控件、列表项、筛选按钮、分类头部、TAB按钮 |
 | **0.4s cubic-bezier(0.4, 0, 0.2, 1)** | Material Design | 主卡片hover |
 
-**卡片悬浮动画（核心动效，所有主卡片必须实现）：**
+**卡片悬浮动画（主卡片阴影增强，禁止位移）：**
 ```css
 .card {
   border: 1px solid var(--color-border-light, #e2e8f0);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .card:hover {
-  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
-  transform: translateY(-6px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.06), 0 24px 80px rgba(0,0,0,0.08);
+}
+```
+
+**统计卡片悬浮动画（轻阴影增强，禁止位移）：**
+```css
+.stat-card {
+  transition: box-shadow 0.3s ease;
+}
+.stat-card:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
 }
 ```
 
 **交互微动效（必须实现）：**
 - 列表项滑移：`transform: translateX(4px)` 用于产品/订单列表项hover
 - 按钮微浮：`transform: translateY(-1px)` 用于操作按钮hover
+- TAB按钮微浮：`transform: translateY(-1px)` 用于TAB按钮hover（含active态）
 - 搜索框focus环：`box-shadow: 0 0 0 4px rgba(0, 148, 191, 0.1)`
 - 表格行hover：`background: var(--color-primary-50); transition: background 0.2s ease`
 
 **禁令：**
+- **禁止**在主卡片（`.{prefix}-card`）上使用 `transform: translateY(-6px)` 或任何位移效果（会导致视觉错位/双重卡片感）
+- **禁止**在统计卡片（`.stat-card`）上使用 `transform: translateY(-6px)` 或任何位移效果
 - **禁止**从 `opacity: 0` 开始的入场动画（已确认会导致闪屏）
 - **禁止**在卡片头部/区块标题使用灰色背景
 - **禁止**硬编码色值，必须使用 CSS 变量
@@ -255,7 +274,7 @@ input, textarea, select, .ui-select-input, .date-input {
   font-size: 0.9375rem;
   line-height: 1.5;
   color: var(--color-heading);
-  background: var(--color-slate-50);
+  background: white;
   border: 2px solid var(--color-ocean-light);
   border-radius: var(--radius-input);  /* 12px */
   transition: all 0.3s ease;
@@ -329,7 +348,7 @@ input::placeholder {
 }
 .{prefix}-section-header:hover {
   border-color: var(--color-ocean-deep);
-  background: var(--color-slate-50);
+  background: white;
 }
 .{prefix}-section-title {
   font-size: 13px;
@@ -366,7 +385,7 @@ input::placeholder {
 }
 .{prefix}-droppable:hover {
   border-color: var(--color-ocean-deep);
-  background: var(--color-slate-50);
+  background: white;
 }
 /* 拖拽悬浮态 - success 变体 */
 .{prefix}-droppable.{prefix}-drag-over {
@@ -453,11 +472,46 @@ input::placeholder {
 - 标题栏上方使用 `.{prefix}-section-label` 小标签标注分类
 
 ### 23. TAB 切换栏
-- 位于卡片头部右侧，`display: flex; gap: 4px`
-- TAB 按钮：`padding: 7px 16px; border: 2px solid var(--color-border-light); border-radius: 9px; background: white; font-size: 13px; font-weight: 600; transition: all 0.3s ease`
-- 激活态：`background: var(--color-primary-50); color: var(--color-primary-700); border-color: var(--color-primary-400)`
-- hover：`border-color: var(--color-primary-300); color: var(--color-primary-600); transform: translateY(-1px)`
+- **两种位置**：
+  1. 卡片头部右侧操作按钮区域（标准位置）
+  2. 卡片头部右侧独立栏（左右分栏布局，适用于采购页面等场景）
+- **TAB容器（侧边栏风格白色圆角容器）**：
+  ```css
+  .{prefix}-tab-group {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border-radius: 12px;
+    background: white;
+    border: 1px solid var(--color-border-light);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
+  }
+  ```
+- **TAB按钮样式（与侧边栏导航项造型一致）**：
+  - `padding: 8px 14px; border: none; border-radius: 9px; background: transparent`
+  - `font-size: 13px; font-weight: 600; color: var(--color-text-secondary)`
+  - `transition: all 0.3s ease`
+  - 激活态：`background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100)); color: var(--color-primary-700); box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 8px rgba(91, 141, 239, 0.2); transform: translateY(-1px)`
+  - hover：`background: var(--color-primary-50); color: var(--color-primary-600); box-shadow: 0 4px 12px rgba(0,0,0,0.08); transform: translateY(-1px)`
+- TAB按钮内容：纯文字，不强制使用图标
 - 内容区用 `v-show` 切换，加 `.{prefix}-tab-content` 类
+- **TAB角标**（可选，用于显示未处理数量）：
+  ```css
+  .{prefix}-tab-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    background: var(--color-danger-500);
+    color: white;
+    font-size: 10px;
+    font-weight: 700;
+    border-radius: 9px;
+    line-height: 1;
+  }
+  ```
 
 ### 24. 弹窗表单
 - 标签：`font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-secondary)`
@@ -486,8 +540,7 @@ input::placeholder {
   margin: 12px;
 }
 .sb-sidebar:hover {
-  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
-  transform: translateY(-6px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.06), 0 24px 80px rgba(0,0,0,0.08);
 }
 ```
 
@@ -558,47 +611,50 @@ input::placeholder {
 
 ```css
 .ht-bar {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: white;
+  border: 1px solid var(--color-border-light);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
   overflow-x: auto;
   flex-shrink: 0;
   width: 100%;
-  margin-bottom: 6px;
-  margin-top: -10px;
 }
 ```
 
-**标签样式**（与侧边栏导航项造型一致，白底+双层阴影+渐变激活态）：
+**标签样式**（与 TAB 切换栏 `.tab-group` 造型一致，白底圆角容器+透明按钮+渐变激活态）：
 ```css
 .ht-tab {
   display: flex;
   align-items: center;
   gap: 5px;
-  padding: 4px 8px;
-  border-radius: 7px;
-  background: white;
-  border: 1px solid var(--color-border-light);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
+  padding: 8px 14px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
   text-decoration: none;
-  color: var(--color-text);
-  font-size: 12px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
   transition: all 0.3s ease;
   flex-shrink: 0;
+  cursor: pointer;
 }
 .ht-tab:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 12px 32px rgba(0,0,0,0.1);
-  transform: translateY(-1px);
-  border-color: var(--color-primary-200);
+  background: var(--color-primary-50);
   color: var(--color-primary-600);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  transform: translateY(-1px);
 }
 .ht-tab.active {
   background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
-  border-color: var(--color-primary-300);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 12px 32px rgba(0,0,0,0.1);
   color: var(--color-primary-700);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 8px rgba(91, 141, 239, 0.2);
+  transform: translateY(-1px);
 }
 ```
 
@@ -610,10 +666,12 @@ input::placeholder {
   color: var(--color-text-muted); font-size: 9px;
   transition: all 0.2s ease; padding: 0;
   display: flex; align-items: center; justify-content: center;
+  opacity: 0.6;
 }
 .ht-tab-close:hover {
   background: var(--color-danger-50);
   color: var(--color-danger-500);
+  opacity: 1;
 }
 ```
 
@@ -706,7 +764,7 @@ input::placeholder {
     <!-- 卡片头部：快捷切换标签 + 标题 + 操作 -->
     <div class="{prefix}-card-header">
       <HeaderTabs />
-      <div class="{prefix}-card-title-group">
+      <div class="{prefix}-card-title-group">  <!-- 可选，无标题时可省略 -->
         <div class="{prefix}-icon-box {prefix}-icon-blue">
           <i class="fas fa-xxx" />
         </div>

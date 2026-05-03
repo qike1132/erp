@@ -20,16 +20,17 @@
   - 批量审批: 相似操作合并确认
   - 完整审计: 所有决策可追溯
 """
-import time
-import json
-import threading
 import hashlib
+import json
 import logging
-from typing import Any, Optional, Dict, List, Tuple, Callable
-from enum import Enum
-from dataclasses import dataclass, field, asdict
+import threading
+import time
+from collections.abc import Callable
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
+from enum import Enum
 from functools import wraps
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +78,7 @@ class AuditLogEntry:
     reason: str
     ip_address: str
     session_id: str
-    metadata: Dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
 
 
 class TranscriptLearner:
@@ -89,8 +90,8 @@ class TranscriptLearner:
 
     def __init__(self, max_history: int = 1000):
         self.max_history = max_history
-        self._approval_history: List[Dict] = []
-        self._patterns: Dict[str, Dict] = {}
+        self._approval_history: list[dict] = []
+        self._patterns: dict[str, dict] = {}
         self._lock = threading.Lock()
         self.stats = {
             'total_decisions': 0,
@@ -121,7 +122,7 @@ class TranscriptLearner:
                 self._approval_history = self._approval_history[-self.max_history:]
             self._update_patterns(entry)
 
-    def _update_patterns(self, entry: Dict):
+    def _update_patterns(self, entry: dict):
         """更新模式库"""
         pattern_key = f"{entry['tool_name']}:{entry['danger_level']}"
         if pattern_key not in self._patterns:
@@ -140,7 +141,7 @@ class TranscriptLearner:
     def should_auto_approve(self, tool_name: str, input_data: Any,
                             danger_level: DangerLevel,
                             min_confidence: float = 0.85,
-                            min_samples: int = 5) -> Tuple[bool, str]:
+                            min_samples: int = 5) -> tuple[bool, str]:
         """
         判断是否应该自动批准
 
@@ -170,7 +171,7 @@ class TranscriptLearner:
 
         return False, f"low_confidence({confidence:.1%})"
 
-    def get_learning_stats(self) -> Dict:
+    def get_learning_stats(self) -> dict:
         """获取学习统计"""
         with self._lock:
             return {
@@ -225,13 +226,12 @@ class SafetyClassifier:
         self.dangerous_regex = [re.compile(p, re.IGNORECASE) for p in self.DANGEROUS_PATTERNS]
         self.risky_regex = [re.compile(p, re.IGNORECASE) for p in self.RISKY_PATTERNS]
 
-    def classify(self, tool_name: str, input_data: Any) -> Tuple[DangerLevel, str, float]:
+    def classify(self, tool_name: str, input_data: Any) -> tuple[DangerLevel, str, float]:
         """
         分类危险度
 
         返回: (危险度级别, 匹配原因, 置信度)
         """
-        import re
         if isinstance(input_data, str):
             input_str = input_data
         else:
@@ -240,11 +240,11 @@ class SafetyClassifier:
 
         for regex in self.dangerous_regex:
             if regex.search(input_str):
-                return DangerLevel.DANGEROUS, f"matched_dangerous_pattern", 0.95
+                return DangerLevel.DANGEROUS, "matched_dangerous_pattern", 0.95
 
         for regex in self.risky_regex:
             if regex.search(input_str):
-                return Risky, f"matched_risky_pattern", 0.75
+                return DangerLevel.RISKY, "matched_risky_pattern", 0.75
 
         read_only_keywords = ['select', 'get', 'find', 'list', 'search', 'read', 'view', 'info']
         if any(kw in input_lower for kw in read_only_keywords):
@@ -262,13 +262,13 @@ class AuditLogger:
 
     def __init__(self, max_logs: int = 10000):
         self.max_logs = max_logs
-        self._logs: List[AuditLogEntry] = []
+        self._logs: list[AuditLogEntry] = []
         self._lock = threading.Lock()
 
     def log(self, user_id: str, action: str, resource_type: str,
             resource_id: str, decision: str, danger_level: str,
             reason: str, ip_address: str = '', session_id: str = '',
-            metadata: Optional[Dict] = None):
+            metadata: dict | None = None):
         """记录审计日志"""
         entry = AuditLogEntry(
             id=hashlib.sha256(f"{time.time()}{action}{resource_id}".encode()).hexdigest()[:12],
@@ -289,8 +289,8 @@ class AuditLogger:
             if len(self._logs) > self.max_logs:
                 self._logs = self._logs[-self.max_logs:]
 
-    def query(self, filters: Optional[Dict] = None,
-              limit: int = 100, offset: int = 0) -> Tuple[List[Dict], int]:
+    def query(self, filters: dict | None = None,
+              limit: int = 100, offset: int = 0) -> tuple[list[dict], int]:
         """查询审计日志"""
         filters = filters or {}
         results = [asdict(log) for log in self._logs]
@@ -320,7 +320,7 @@ class AuditLogger:
             logger.error(f"导出审计日志失败: {e}")
             return False
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         """获取统计信息"""
         decisions = {'allow': 0, 'deny': 0}
         levels = {d.value: 0 for d in DangerLevel}
@@ -351,8 +351,8 @@ class EnhancedPermissionSystem:
         self.classifier = SafetyClassifier()
         self.audit = AuditLogger()
         self.current_mode = PermissionMode.DEFAULT
-        self._always_allow_rules: List[Callable] = []
-        self._always_deny_rules: List[Callable] = []
+        self._always_allow_rules: list[Callable] = []
+        self._always_deny_rules: list[Callable] = []
 
     def set_mode(self, mode: PermissionMode):
         """设置当前权限模式"""
@@ -521,7 +521,7 @@ class EnhancedPermissionSystem:
             decision_source='default'
         )
 
-    def get_system_stats(self) -> Dict:
+    def get_system_stats(self) -> dict:
         """获取完整系统状态"""
         return {
             'current_mode': self.current_mode.value,
@@ -542,7 +542,7 @@ def require_permission(resource_type: str, action: str = 'execute'):
     return permission_system.check_permission(resource_type, action)
 
 
-def batch_permission_check(items: List[Tuple[str, Any]]) -> List[PermissionDecision]:
+def batch_permission_check(items: list[tuple[str, Any]]) -> list[PermissionDecision]:
     """
     批量权限检查 (借鉴 Claude CLI 的批量审批机制)
 

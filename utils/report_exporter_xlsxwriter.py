@@ -3,9 +3,9 @@
 性能优于openpyxl，支持图表
 """
 
-import xlsxwriter
 from io import BytesIO
-from typing import List, Dict, Any, Optional
+
+import xlsxwriter
 
 
 class XlsxWriterExporter:
@@ -32,9 +32,9 @@ class XlsxWriterExporter:
             'num_format': '#,##0'
         }
 
-    def export_data(self, data: List[Dict], title: str = 'Sheet1',
-                    headers: Optional[List[str]] = None,
-                    column_widths: Optional[Dict[str, int]] = None) -> bytes:
+    def export_data(self, data: list[dict], title: str = 'Sheet1',
+                    headers: list[str] | None = None,
+                    column_widths: dict[str, int] | None = None) -> bytes:
         """
         导出数据到Excel
 
@@ -86,7 +86,7 @@ class XlsxWriterExporter:
         output.seek(0)
         return output.getvalue()
 
-    def export_with_chart(self, data: List[Dict], title: str = 'Sheet1',
+    def export_with_chart(self, data: list[dict], title: str = 'Sheet1',
                           chart_type: str = 'column',
                           categories_col: str = None,
                           values_col: str = None) -> bytes:
@@ -108,7 +108,7 @@ class XlsxWriterExporter:
         worksheet = workbook.add_worksheet(title)
 
         header_fmt = workbook.add_format(self.header_format)
-        cell_fmt = workbook.add_format(self.cell_format)
+        workbook.add_format(self.cell_format)
 
         if not data:
             workbook.close()

@@ -10,12 +10,9 @@
 - DELETE /staging-orders/clear
 - POST   /staging-orders/confirm
 """
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from httpx import AsyncClient, ASGITransport
-
-from fastapi_app.main import app
-
 
 # ==================== 模型级别单元测试 ====================
 
@@ -95,7 +92,6 @@ class TestStagingServiceHelpers:
         assert callable(import_staging_orders_from_excel)
 
     def test_parse_date_value_datetime(self):
-        from datetime import datetime
         # 验证 staging 服务能处理 datetime 类型日期
         from fastapi_app.services.staging_service import confirm_staging_orders
         assert callable(confirm_staging_orders)
@@ -529,7 +525,7 @@ class TestStagingServiceLogic:
         mock_result.scalar_one_or_none.return_value = mock_order
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        result = await update_staging_order(mock_db, 1, {"customer": "新客户"})
+        await update_staging_order(mock_db, 1, {"customer": "新客户"})
         assert mock_order.customer == "新客户"
         mock_db.commit.assert_called_once()
 
@@ -553,7 +549,7 @@ class TestStagingServiceLogic:
         product_result.scalar_one_or_none.return_value = mock_product
         mock_db.execute = AsyncMock(side_effect=[order_result, product_result])
 
-        result = await update_staging_order(mock_db, 1, {"product_name": "新产品"})
+        await update_staging_order(mock_db, 1, {"product_name": "新产品"})
         assert mock_order.is_validated is True
         assert mock_order.product_id == 5
 
@@ -573,7 +569,7 @@ class TestStagingServiceLogic:
         product_result.scalar_one_or_none.return_value = None
         mock_db.execute = AsyncMock(side_effect=[order_result, product_result])
 
-        result = await update_staging_order(mock_db, 1, {"product_name": "不存在的产品"})
+        await update_staging_order(mock_db, 1, {"product_name": "不存在的产品"})
         assert mock_order.is_validated is False
         assert mock_order.product_id is None
 

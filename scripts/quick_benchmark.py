@@ -2,12 +2,13 @@
 FastAPI 性能基准测试脚本
 """
 import asyncio
-import time
-import statistics
-import psutil
 import json
+import statistics
+import time
 from datetime import datetime
+
 import httpx
+import psutil
 
 BASE_URL = "http://127.0.0.1:5002"
 TEST_DURATION = 20
@@ -23,7 +24,7 @@ async def single_user(user_id: int, duration: float, results: list):
                 resp = await client.get(f"{BASE_URL}{TARGET_ENDPOINT}")
                 elapsed_ms = (time.perf_counter() - start) * 1000
                 results.append((elapsed_ms, resp.status_code))
-            except Exception as e:
+            except Exception:
                 results.append((999999, 0))
 
 async def main():
@@ -48,7 +49,7 @@ async def main():
     print(f"\n总请求: {total}")
     print(f"成功: {success} ({(success/total*100) if total > 0 else 0:.1f}%)")
     print(f"RPS: {rps:.2f}")
-    print(f"\n响应时间 (ms):")
+    print("\n响应时间 (ms):")
     print(f"  平均: {statistics.mean(times):.2f}")
     print(f"  最小: {min(times):.2f}")
     print(f"  最大: {max(times):.2f}")
@@ -92,7 +93,7 @@ async def main():
     with open("d:/erp_system/scripts/performance_report.json", "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
 
-    print(f"\n报告已保存: d:/erp_system/scripts/performance_report.json")
+    print("\n报告已保存: d:/erp_system/scripts/performance_report.json")
     print("=" * 50)
 
 if __name__ == "__main__":

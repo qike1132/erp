@@ -3,10 +3,12 @@
 """
 import os
 import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from fastapi_app.core.database import SyncSessionLocal
 from sqlalchemy import text
+
+from fastapi_app.core.database import SyncSessionLocal
 
 session = SyncSessionLocal()
 

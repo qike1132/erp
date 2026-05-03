@@ -5,9 +5,10 @@
 FastAPI 异步测试采用 httpx AsyncClient；
 Flask 遗留 fixtures 仅在 Flask 依赖可用时加载。
 """
-import pytest
 import os
 import sys
+
+import pytest
 
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -51,12 +52,9 @@ def mock_user():
 # ============================================================
 
 try:
-    from flask import Flask
     from app import create_app, db
-    from app.models import (
-        User, Product, Order, StockIn, StockOut,
-        InventoryLog, Customer, Permission, ApprovalRequest
-    )
+    from app.models import ApprovalRequest, Customer, InventoryLog, Order, Permission, Product, StockIn, StockOut, User
+    from flask import Flask
     HAS_FLASK = True
 except ImportError:
     HAS_FLASK = False

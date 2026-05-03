@@ -5,12 +5,11 @@
 支持基础搜索（返回产品信息）和 BOM 搜索（返回产品+BOM 信息）。
 """
 import logging
+from collections.abc import Callable
 from decimal import Decimal
-from typing import Any, Callable
+from typing import Any
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy.orm import Session, joinedload
 
 from fastapi_app.services.base_search_service import BaseSearchService
 from fastapi_app.shared_models import Product

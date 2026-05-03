@@ -4,15 +4,13 @@
 从 Flask product.py 提取的核心业务逻辑，适配异步 SQLAlchemy。
 """
 import logging
-from typing import Optional
 
-from sqlalchemy import select, func, delete
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
-from sqlalchemy.exc import SQLAlchemyError
 
-from fastapi_app.shared_models import Product, InventoryLog, Order, StockIn, StockOut
+from fastapi_app.core.cache import CacheDomain, cache_result, invalidate_related_caches
 from fastapi_app.shared.stock_concurrency import get_product_for_update
+from fastapi_app.shared_models import InventoryLog, Order, Product, StockIn, StockOut
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +59,7 @@ class ProductHasRelatedStockOutsError(ProductDeleteError):
         )
 
 
+@cache_result(key_prefix="products:all", ttl=60, local_ttl=15)
 async def get_products(db: AsyncSession) -> list[dict]:
     """获取所有产品列表"""
     result = await db.execute(
@@ -70,9 +69,9 @@ async def get_products(db: AsyncSession) -> list[dict]:
     return [p.to_dict() for p in products]
 
 
-async def create_product(db: AsyncSession, name: str, barcode: Optional[str],
-                         image: Optional[str], initial_stock: int,
-                         price: Optional[float] = None) -> dict:
+async def create_product(db: AsyncSession, name: str, barcode: str | None,
+                         image: str | None, initial_stock: int,
+                         price: float | None = None) -> dict:
     """
     创建产品
 
@@ -112,14 +111,15 @@ async def create_product(db: AsyncSession, name: str, barcode: Optional[str],
 
     await db.commit()
     await db.refresh(product)
+    await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY | CacheDomain.PRODUCT | CacheDomain.STOCKIN)
     logger.info(f'产品添加成功：{name}，初始库存：{initial_stock}')
     return product.to_dict()
 
 
-async def update_product(db: AsyncSession, product_id: int, name: Optional[str],
-                         barcode: Optional[str], image: Optional[str],
-                         initial_stock: Optional[int],
-                         price: Optional[float] = None) -> dict:
+async def update_product(db: AsyncSession, product_id: int, name: str | None,
+                         barcode: str | None, image: str | None,
+                         initial_stock: int | None,
+                         price: float | None = None) -> dict:
     """
     更新产品
 
@@ -166,6 +166,7 @@ async def update_product(db: AsyncSession, product_id: int, name: Optional[str],
 
     await db.commit()
     await db.refresh(product)
+    await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY | CacheDomain.PRODUCT | CacheDomain.STOCKIN)
     logger.info(f'产品编辑成功：{product.name}')
     return product.to_dict()
 
@@ -214,6 +215,7 @@ async def delete_product(db: AsyncSession, product_id: int) -> None:
 
     await db.delete(product)
     await db.commit()
+    await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY | CacheDomain.PRODUCT | CacheDomain.STOCKIN)
     logger.info(f'产品删除成功：{product.name}')
 
 

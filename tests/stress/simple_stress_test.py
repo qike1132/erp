@@ -3,15 +3,11 @@ ERP系统简化压力测试 - 直接测试API可用性
 """
 
 import asyncio
-import aiohttp
-import time
-import json
-import os
-import sys
 import statistics
-from datetime import datetime
-from typing import Dict, List, Optional
+import time
 from dataclasses import dataclass
+
+import aiohttp
 
 BASE_URL = "http://127.0.0.1:5002"
 CONCURRENT_USERS = 10  # 减少到10个并发
@@ -25,7 +21,7 @@ class Metric:
     error: str = ""
 
 
-async def get_token(session: aiohttp.ClientSession) -> Optional[str]:
+async def get_token(session: aiohttp.ClientSession) -> str | None:
     """获取认证token"""
     try:
         async with session.post(
@@ -41,7 +37,7 @@ async def get_token(session: aiohttp.ClientSession) -> Optional[str]:
     return None
 
 
-async def test_endpoint(session: aiohttp.ClientSession, token: str, method: str, path: str, json_data: Optional[Dict] = None) -> Metric:
+async def test_endpoint(session: aiohttp.ClientSession, token: str, method: str, path: str, json_data: dict | None = None) -> Metric:
     """测试单个端点"""
     url = f"{BASE_URL}{path}"
     headers = {
@@ -70,7 +66,7 @@ async def test_endpoint(session: aiohttp.ClientSession, token: str, method: str,
     return Metric(status=0, response_time=0, success=False, error="Unknown method")
 
 
-async def user_worker(worker_id: int, results: List[Metric], stop_event: asyncio.Event):
+async def user_worker(worker_id: int, results: list[Metric], stop_event: asyncio.Event):
     """用户工作协程"""
     async with aiohttp.ClientSession() as session:
         token = await get_token(session)
@@ -101,7 +97,7 @@ async def main():
     print("ERP压力测试开始")
     print("=" * 60)
 
-    results: List[Metric] = []
+    results: list[Metric] = []
     stop_event = asyncio.Event()
 
     # 创建worker任务
@@ -137,7 +133,7 @@ async def main():
     print(f"总请求数: {total}")
     print(f"成功: {successes} ({successes/total*100:.1f}%)")
     print(f"失败: {failures} ({failures/total*100:.1f}%)")
-    print(f"\n响应时间:")
+    print("\n响应时间:")
     print(f"  平均: {statistics.mean(response_times):.1f}ms")
     print(f"  最小: {min(response_times):.1f}ms")
     print(f"  最大: {max(response_times):.1f}ms")
@@ -145,18 +141,18 @@ async def main():
     print(f"  P90: {sorted_times[int(len(sorted_times)*0.9)]:.1f}ms")
 
     # 按状态码统计
-    status_counts: Dict[int, int] = {}
+    status_counts: dict[int, int] = {}
     for r in results:
         status_counts[r.status] = status_counts.get(r.status, 0) + 1
 
-    print(f"\n状态码分布:")
+    print("\n状态码分布:")
     for status, count in sorted(status_counts.items()):
         print(f"  {status}: {count}")
 
     # 错误信息
     errors = [r.error for r in results if r.error]
     if errors:
-        print(f"\n错误信息 (前5个):")
+        print("\n错误信息 (前5个):")
         for err in errors[:5]:
             print(f"  - {err[:100]}")
 

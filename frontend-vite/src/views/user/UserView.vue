@@ -26,14 +26,9 @@
                   </button>
                 </div>
               </div>
-              <div class="us-form-group">
-                <label>确认密码 <span class="us-required">*</span></label>
-                <div class="us-input-wrapper">
-                  <input v-model="form.confirmPassword" :type="showPwd2 ? 'text' : 'password'" class="us-input" placeholder="再次输入密码" />
-                  <button type="button" class="us-pwd-toggle" @click="showPwd2 = !showPwd2">
-                    <i :class="showPwd2 ? 'fas fa-eye-slash' : 'fas fa-eye'" />
-                  </button>
-                </div>
+              <div class="us-form-group us-form-group-row">
+                <UiCheckbox :checked="form.isSuper" @update:checked="form.isSuper = $event" />
+                <label class="us-checkbox-label" @click="form.isSuper = !form.isSuper">超级管理员</label>
               </div>
               <p v-if="formError" class="us-form-error">{{ formError }}</p>
               <button type="submit" class="us-submit-btn" :disabled="submitting">
@@ -72,8 +67,8 @@
                 <tr v-for="row in users" :key="row.id">
                   <td>{{ row.username }}</td>
                   <td>
-                    <span :class="['us-badge', row.is_superuser ? 'us-badge-danger' : 'us-badge-info']">
-                      {{ row.is_superuser ? '管理员' : '普通用户' }}
+                    <span :class="['us-badge', row.is_super ? 'us-badge-danger' : 'us-badge-info']">
+                      {{ row.is_super ? '超级管理员' : '普通用户' }}
                     </span>
                   </td>
                   <td>
@@ -87,7 +82,7 @@
                     <button class="us-action-btn us-action-primary" :disabled="actionId === row.id" @click="handleToggle(row)">
                       {{ row.is_active !== false ? '禁用' : '启用' }}
                     </button>
-                    <button class="us-action-btn us-action-danger" :disabled="actionId === row.id || row.is_superuser" @click="handleDelete(row)">
+                    <button class="us-action-btn us-action-danger" :disabled="actionId === row.id || row.is_super" @click="handleDelete(row)">
                       删除
                     </button>
                   </td>
@@ -100,11 +95,32 @@
     </div>
 
     <!-- 权限分配弹窗 -->
-    <UiDialog :open="permDialogVisible" title="分配权限" @update:open="permDialogVisible = $event">
-      <div class="perm-tree">
-        <template v-for="node in permissionTree" :key="node.id">
-          <PermNode :node="node" :checked-keys="permCheckedKeys" @toggle="togglePermNode" />
-        </template>
+    <UiDialog :open="permDialogVisible" title="分配权限" max-width-class="max-w-[640px]" @update:open="permDialogVisible = $event">
+      <div class="us-perm-header">
+        <div class="us-perm-user">{{ permTargetName }}</div>
+        <button class="us-perm-toggle-all" @click="toggleAllPerms">{{ permIsAllChecked ? '取消全选' : '全选' }}</button>
+      </div>
+      <div class="us-perm-tree">
+        <div v-for="sec in permissionSections" :key="sec.key" class="us-perm-section">
+          <div class="us-perm-section-title">{{ sec.name }}</div>
+          <div v-for="node in sec.items" :key="node.id" class="us-perm-group">
+            <div class="us-perm-group-header" @click="node.children?.length ? togglePermExpand(node.id) : togglePermNode(node.id)">
+              <UiCheckbox :checked="isPermChecked(node.id)" @update:checked="togglePermNode(node.id)" @click.stop />
+              <span class="us-perm-group-name">
+                <i v-if="node.icon" class="us-perm-group-icon fas" :class="node.icon" />
+                {{ node.name }}
+              </span>
+              <span v-if="node.children?.length" class="us-perm-group-count">{{ getPermChildCount(node, permCheckedKeys) }}</span>
+              <i v-if="node.children?.length" class="us-perm-expand-icon fas" :class="isPermExpanded(node.id) ? 'fa-chevron-down' : 'fa-chevron-right'" />
+            </div>
+            <div v-if="node.children?.length && isPermExpanded(node.id)" class="us-perm-group-body">
+              <div v-for="child in node.children" :key="child.id" class="us-perm-item" @click="togglePermNode(child.id)">
+                <UiCheckbox :checked="isPermChecked(child.id)" @update:checked="togglePermNode(child.id)" @click.stop />
+                <span class="us-perm-item-name">{{ child.name }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
       <template #footer>
         <button class="us-action-btn" @click="permDialogVisible = false">取消</button>
@@ -125,7 +141,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, h, defineComponent } from 'vue'
+import { ref, reactive, computed } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { userApi, permissionApi } from '@/api'
 import UiDialog from '@/components/ui/UiDialog.vue'
@@ -135,46 +151,9 @@ import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 
-// Recursive permission tree node
-const PermNode = defineComponent({
-  name: 'PermNode',
-  props: { node: { type: Object, required: true }, checkedKeys: { type: Array as () => number[], required: true } },
-  emits: ['toggle'],
-  setup(props, { emit }) {
-    return () => {
-      const node = props.node
-      const isChecked = props.checkedKeys.includes(node.id)
-      const children = node.children?.length
-        ? h(
-            'div',
-            { style: 'padding-left: 20px' },
-            node.children.map((c: any) =>
-              h(PermNode, { node: c, checkedKeys: props.checkedKeys, onToggle: (id: number) => emit('toggle', id) }),
-            ),
-          )
-        : null
-      return h('div', { style: 'margin-bottom: 4px' }, [
-        h(
-          'div',
-          {
-            style: 'display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer',
-            onClick: () => emit('toggle', node.id),
-          },
-          [
-            h(UiCheckbox, { checked: isChecked, 'onUpdate:checked': () => emit('toggle', node.id) }),
-            h('span', { style: 'font-size:13px' }, node.name),
-          ],
-        ),
-        children,
-      ])
-    }
-  },
-})
-
 const actionId = ref<number | ''>(0)
 const formError = ref('')
 const showPwd1 = ref(false)
-const showPwd2 = ref(false)
 const queryClient = useQueryClient()
 const confirmDialog = useConfirmDialog()
 
@@ -187,7 +166,7 @@ const users = computed(() => result.value?.items ?? result.value?.users ?? resul
 
 // 添加用户
 const submitting = ref(false)
-const form = reactive({ username: '', password: '', confirmPassword: '' })
+const form = reactive({ username: '', password: '', isSuper: false })
 
 async function handleAdd() {
   formError.value = ''
@@ -203,15 +182,11 @@ async function handleAdd() {
     formError.value = '密码至少6位'
     return
   }
-  if (form.password !== form.confirmPassword) {
-    formError.value = '两次输入密码不一致'
-    return
-  }
   submitting.value = true
   try {
-    await userApi.create({ username: form.username, password: form.password })
+    await userApi.create({ username: form.username, password: form.password, is_super: form.isSuper })
     showToast('添加成功', 'success')
-    Object.assign(form, { username: '', password: '', confirmPassword: '' })
+    Object.assign(form, { username: '', password: '', isSuper: false })
     queryClient.invalidateQueries({ queryKey: ['users-list'] })
   } catch (err: any) {
     showToast(err.response?.data?.detail || '添加失败', 'error')
@@ -253,23 +228,134 @@ const permDialogVisible = ref(false)
 const permSubmitting = ref(false)
 const permissionTree = ref<any[]>([])
 const permCheckedKeys = ref<number[]>([])
+const permExpandedKeys = ref<Set<number>>(new Set())
 const permTargetUserId = ref(0)
+const permTargetName = ref('')
+
+const sectionOrder = ['purchase', 'purchase_tools', 'core', 'data', 'system']
+
+const permissionSections = computed(() => {
+  const map = new Map<string, { key: string; name: string; items: any[] }>()
+  for (const node of permissionTree.value) {
+    const secKey = node.section || 'other'
+    const secName = node.section_name || secKey
+    if (!map.has(secKey)) map.set(secKey, { key: secKey, name: secName, items: [] })
+    map.get(secKey)!.items.push(node)
+  }
+  const sections = [...map.values()]
+  sections.sort((a, b) => {
+    const ai = sectionOrder.indexOf(a.key)
+    const bi = sectionOrder.indexOf(b.key)
+    if (ai !== -1 && bi !== -1) return ai - bi
+    if (ai !== -1) return -1
+    if (bi !== -1) return 1
+    return a.key.localeCompare(b.key)
+  })
+  return sections
+})
+
+function isPermExpanded(id: number): boolean {
+  return permExpandedKeys.value.has(id)
+}
+
+function togglePermExpand(id: number) {
+  const s = permExpandedKeys.value
+  if (s.has(id)) s.delete(id)
+  else s.add(id)
+}
+
+function isPermChecked(id: number): boolean {
+  return permCheckedKeys.value.includes(id)
+}
 
 function togglePermNode(id: number) {
-  const idx = permCheckedKeys.value.indexOf(id)
-  if (idx >= 0) permCheckedKeys.value.splice(idx, 1)
-  else permCheckedKeys.value.push(id)
+  const node = permissionTree.value.find((n: any) => n.id === id)
+  if (node && node.children?.length) {
+    // Toggle parent with children: cascade to all children
+    const childIds = node.children.map((c: any) => c.id)
+    const allChecked = childIds.every((cid: number) => permCheckedKeys.value.includes(cid))
+    if (allChecked) {
+      // Uncheck parent + all children
+      permCheckedKeys.value = permCheckedKeys.value.filter((k: number) => k !== id && !childIds.includes(k))
+    } else {
+      // Check parent + all children
+      const toAdd = [id, ...childIds].filter((k: number) => !permCheckedKeys.value.includes(k))
+      permCheckedKeys.value.push(...toAdd)
+    }
+  } else {
+    // Toggle child or parent without children: simple toggle
+    const idx = permCheckedKeys.value.indexOf(id)
+    if (idx >= 0) {
+      permCheckedKeys.value.splice(idx, 1)
+      // Uncheck parent if no siblings checked
+      for (const parent of permissionTree.value) {
+        if (parent.children?.some((c: any) => c.id === id)) {
+          const anyChildChecked = parent.children.some((c: any) => permCheckedKeys.value.includes(c.id))
+          if (!anyChildChecked) {
+            const pidx = permCheckedKeys.value.indexOf(parent.id)
+            if (pidx >= 0) permCheckedKeys.value.splice(pidx, 1)
+          }
+          break
+        }
+      }
+    } else {
+      permCheckedKeys.value.push(id)
+      // Check parent if all siblings checked
+      for (const parent of permissionTree.value) {
+        if (parent.children?.some((c: any) => c.id === id)) {
+          const allChildrenChecked = parent.children.every((c: any) => permCheckedKeys.value.includes(c.id))
+          if (allChildrenChecked) {
+            if (!permCheckedKeys.value.includes(parent.id)) {
+              permCheckedKeys.value.push(parent.id)
+            }
+          }
+          break
+        }
+      }
+    }
+  }
+}
+
+function getPermChildCount(node: any, checked: number[]): string {
+  if (!node.children?.length) return ''
+  const total = node.children.length
+  const checkedCount = node.children.filter((c: any) => checked.includes(c.id)).length
+  return `${checkedCount}/${total}`
+}
+
+const permIsAllChecked = computed(() => {
+  const allIds: number[] = []
+  for (const node of permissionTree.value) {
+    allIds.push(node.id)
+    for (const c of node.children ?? []) allIds.push(c.id)
+  }
+  return allIds.length > 0 && allIds.every((id: number) => permCheckedKeys.value.includes(id))
+})
+
+function toggleAllPerms() {
+  const allIds: number[] = []
+  for (const node of permissionTree.value) {
+    allIds.push(node.id)
+    for (const c of node.children ?? []) allIds.push(c.id)
+  }
+  if (permIsAllChecked.value) {
+    permCheckedKeys.value = []
+  } else {
+    permCheckedKeys.value = [...allIds]
+  }
 }
 
 async function openPermissionDialog(row: any) {
   permTargetUserId.value = row.id
+  permTargetName.value = row.username
   try {
     const [permRes, userPermRes] = await Promise.all([
       permissionApi.tree() as Promise<any>,
       userApi.getPermission(row.id) as Promise<any>,
     ])
     permissionTree.value = permRes.tree ?? permRes ?? []
-    permCheckedKeys.value = (userPermRes.permission_ids ?? userPermRes.data ?? []) as number[]
+    permCheckedKeys.value = (userPermRes.user_permission_ids ?? userPermRes.permission_ids ?? []) as number[]
+    permExpandedKeys.value = new Set()
     permDialogVisible.value = true
   } catch {
     showToast('加载权限数据失败', 'error')
@@ -279,11 +365,14 @@ async function openPermissionDialog(row: any) {
 async function handleSavePermission() {
   permSubmitting.value = true
   try {
+    console.log('Saving permissions:', permTargetUserId.value, permCheckedKeys.value)
     await userApi.savePermission(permTargetUserId.value, permCheckedKeys.value)
     showToast('权限保存成功', 'success')
     permDialogVisible.value = false
   } catch (err: any) {
-    showToast(err.response?.data?.detail || '保存失败', 'error')
+    console.error('Save permission error:', err)
+    const errorMsg = err.response?.data?.detail || err.message || '保存失败'
+    showToast(errorMsg, 'error')
   } finally {
     permSubmitting.value = false
   }
@@ -418,6 +507,18 @@ async function handleSavePermission() {
 }
 .us-form-group {
   margin-bottom: 14px;
+}
+.us-form-group-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.us-checkbox-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+  cursor: pointer;
+  user-select: none;
 }
 .us-form-group label {
   display: block;
@@ -607,9 +708,133 @@ async function handleSavePermission() {
   font-size: 14px;
 }
 
-/* Perm Tree */
-.perm-tree {
-  max-height: 400px;
-  overflow-y: auto;
+/* ===== Permission Dialog ===== */
+.us-perm-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--color-border-light, #e2e8f0);
+}
+.us-perm-user {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+.us-perm-toggle-all {
+  padding: 5px 12px;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  border-radius: 7px;
+  background: white;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.us-perm-toggle-all:hover {
+  border-color: var(--color-primary-300);
+  color: var(--color-primary-600);
+}
+.us-perm-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.us-perm-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.us-perm-section-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0 4px;
+}
+.us-perm-group {
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  border-radius: 10px;
+  flex-shrink: 0;
+  transition: border-color 0.2s ease;
+}
+.us-perm-group:hover {
+  border-color: var(--color-primary-200);
+}
+.us-perm-group-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--color-surface, #f8fafc);
+  cursor: pointer;
+  transition: background 0.2s ease;
+  border-top-left-radius: 9px;
+  border-top-right-radius: 9px;
+}
+.us-perm-group:not(:has(.us-perm-group-body)) .us-perm-group-header {
+  border-radius: 9px;
+}
+.us-perm-group-header:hover {
+  background: var(--color-primary-50);
+}
+.us-perm-group-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text);
+  flex: 1;
+  min-width: 0;
+}
+.us-perm-group-icon {
+  font-size: 14px;
+  color: var(--color-primary-500);
+  width: 18px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.us-perm-group-count {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  background: white;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  flex-shrink: 0;
+}
+.us-perm-expand-icon {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+.us-perm-group-body {
+  padding: 4px 14px 8px 46px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.us-perm-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.us-perm-item:hover {
+  background: var(--color-primary-50);
+}
+.us-perm-item-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
 }
 </style>

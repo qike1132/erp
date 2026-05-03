@@ -3,14 +3,16 @@
     <div class="cs-card cs-card-main">
       <!-- 卡片头部 -->
       <div class="cs-card-header">
-        <HeaderTabs />
-        <div class="cs-header-actions">
+        <div class="cs-header-left">
+          <HeaderTabs />
+        </div>
+        <div class="cs-header-right">
           <div class="cs-tab-group">
             <button :class="['cs-tab-btn', { active: activeTab === 'stock' }]" @click="activeTab = 'stock'">
-              <i class="fas fa-exchange-alt" style="margin-right: 4px" />出入库
+              出入库
             </button>
             <button :class="['cs-tab-btn', { active: activeTab === 'inventory' }]" @click="activeTab = 'inventory'">
-              <i class="fas fa-warehouse" style="margin-right: 4px" />库存查询
+              库存查询
             </button>
           </div>
         </div>
@@ -70,10 +72,22 @@ const activeTab = ref('stock')
   display: flex;
   flex-wrap: nowrap;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   padding: 10px 24px;
   border-bottom: 1px solid var(--color-border-light, #f1f5f9);
   gap: 12px;
+}
+.cs-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+.cs-header-right {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 8px;
 }
 .cs-card-header :deep(.ht-bar) {
   width: auto;
@@ -121,31 +135,39 @@ const activeTab = ref('stock')
 /* Tab Group */
 .cs-tab-group {
   display: inline-flex;
-  border-radius: 9px;
-  overflow: hidden;
-  border: 2px solid var(--color-border-light, #e2e8f0);
-  background: var(--color-surface, #f8fafc);
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: white;
+  border: 1px solid var(--color-border-light);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
 }
 .cs-tab-btn {
-  padding: 8px 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: none;
+  border-radius: 9px;
   font-size: 13px;
   font-weight: 600;
-  border: none;
+  color: var(--color-text-secondary);
   background: transparent;
   cursor: pointer;
-  color: var(--color-text-secondary);
   transition: all 0.3s ease;
-  display: flex;
-  align-items: center;
-  gap: 4px;
+}
+.cs-tab-btn:hover {
+  background: var(--color-primary-50);
+  color: var(--color-primary-600);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  transform: translateY(-1px);
 }
 .cs-tab-btn.active {
-  background: var(--color-primary-500);
-  color: white;
-  box-shadow: 0 2px 8px rgba(91, 141, 239, 0.3);
-}
-.cs-tab-btn:not(.active):hover {
-  background: rgba(91, 141, 239, 0.08);
+  background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
+  color: var(--color-primary-700);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 8px rgba(91, 141, 239, 0.2);
+  transform: translateY(-1px);
 }
 
 /* Body */

@@ -62,7 +62,7 @@ function openPicker() {
   font-size: 0.9375rem;
   line-height: 1.5;
   color: var(--color-heading);
-  background: var(--color-slate-50);
+  background: white;
   border: 2px solid var(--color-ocean-light);
   border-radius: var(--radius-input);
   transition: all 0.3s ease;

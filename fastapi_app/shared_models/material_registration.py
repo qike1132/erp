@@ -1,7 +1,8 @@
 """来料登记模型"""
-from sqlalchemy import String, Integer, ForeignKey, DateTime, Text, Date, Numeric, Index
-from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
+
+from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
 

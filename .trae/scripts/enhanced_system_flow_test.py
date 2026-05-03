@@ -14,15 +14,15 @@
 日期: 2026-04-07
 """
 
+import json
 import subprocess
 import sys
-import json
 import time
-from pathlib import Path
-from datetime import datetime
-from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
+from pathlib import Path
+from typing import Any
 
 SCRIPT_DIR = Path(__file__).parent
 RULES_PATH = Path(".trae/rules/task-dispatch-rules.json")
@@ -52,13 +52,13 @@ class TestCase:
     name: str
     category: str
     severity: TestSeverity
-    inputs: Dict[str, Any]
+    inputs: dict[str, Any]
     expected_result: Any
     actual_result: Any = None
     status: TestStatus = TestStatus.SKIPPED
     error_message: str = ""
     execution_time_ms: float = 0.0
-    logs: List[str] = field(default_factory=list)
+    logs: list[str] = field(default_factory=list)
     screenshot_path: str = ""
 
 
@@ -66,12 +66,12 @@ class TestCase:
 class TestSuite:
     name: str
     description: str
-    test_cases: List[TestCase] = field(default_factory=list)
+    test_cases: list[TestCase] = field(default_factory=list)
 
 
 class EnhancedSystemFlowTester:
     def __init__(self):
-        self.test_suites: List[TestSuite] = []
+        self.test_suites: list[TestSuite] = []
         self.config = self._load_config()
         self.start_time = time.time()
         self.total_tests = 0
@@ -81,11 +81,11 @@ class EnhancedSystemFlowTester:
 
     def _load_config(self) -> dict:
         if RULES_PATH.exists():
-            with open(RULES_PATH, 'r', encoding='utf-8') as f:
+            with open(RULES_PATH, encoding='utf-8') as f:
                 return json.load(f)
         return {}
 
-    def _run_checkpoint(self, task_type: str, has_agent: bool, dispatched: bool) -> Tuple[int, str, str]:
+    def _run_checkpoint(self, task_type: str, has_agent: bool, dispatched: bool) -> tuple[int, str, str]:
         cmd = [
             sys.executable,
             str(CHECKPOINT_SCRIPT),
@@ -144,18 +144,7 @@ class EnhancedSystemFlowTester:
 
                 self._add_log(test_case, f"实际值类型: {type(actual).__name__}")
 
-                if isinstance(expected, int) and isinstance(actual, (dict, list)):
-                    actual_count = len(actual)
-                    test_case.actual_result = actual_count
-                    self._add_log(test_case, f"实际值(计数): {actual_count}")
-                    if actual_count == expected:
-                        test_case.status = TestStatus.PASSED
-                        self._add_log(test_case, "结果判定: PASSED")
-                    else:
-                        test_case.status = TestStatus.FAILED
-                        test_case.error_message = f"期望数量{expected}, 实际数量{actual_count}"
-                        self._add_log(test_case, f"结果判定: FAILED - {test_case.error_message}")
-                elif isinstance(expected, list) and isinstance(actual, list):
+                if isinstance(expected, int) and isinstance(actual, (dict, list)) or isinstance(expected, list) and isinstance(actual, list):
                     actual_count = len(actual)
                     test_case.actual_result = actual_count
                     self._add_log(test_case, f"实际值(计数): {actual_count}")
@@ -181,7 +170,7 @@ class EnhancedSystemFlowTester:
 
                 self._add_log(test_case, f"状态转换: {from_state} -> {to_state}")
                 if expect_reject:
-                    self._add_log(test_case, f"预期: 系统应拒绝此转换")
+                    self._add_log(test_case, "预期: 系统应拒绝此转换")
 
                 valid_transitions = self.config.get("taskStates", {}).get(from_state, {}).get("transitions", [])
                 test_case.actual_result = valid_transitions
@@ -521,7 +510,7 @@ class EnhancedSystemFlowTester:
         suite.test_cases = test_cases
         return suite
 
-    def run_all_tests(self) -> Dict:
+    def run_all_tests(self) -> dict:
         """运行所有测试套件"""
         print("=" * 80)
         print("Agent协同体系 - 系统执行流程加强测试")
@@ -578,7 +567,7 @@ class EnhancedSystemFlowTester:
             "test_results": [self._test_case_to_dict(tc) for tc in all_results]
         }
 
-    def _test_case_to_dict(self, tc: TestCase) -> Dict:
+    def _test_case_to_dict(self, tc: TestCase) -> dict:
         return {
             "id": tc.id,
             "name": tc.name,
@@ -593,7 +582,7 @@ class EnhancedSystemFlowTester:
             "logs": tc.logs
         }
 
-    def generate_detailed_report(self, results: Dict) -> str:
+    def generate_detailed_report(self, results: dict) -> str:
         """生成详细文本报告"""
         metadata = results["test_metadata"]
 
@@ -602,7 +591,7 @@ class EnhancedSystemFlowTester:
         report.append("Agent协同体系 - 系统执行流程加强测试报告")
         report.append("=" * 80)
         report.append(f"\n报告生成时间: {datetime.now().isoformat()}")
-        report.append(f"测试版本: v2.0.0 (增强版)")
+        report.append("测试版本: v2.0.0 (增强版)")
 
         report.append("\n" + "-" * 80)
         report.append("一、测试执行概要")

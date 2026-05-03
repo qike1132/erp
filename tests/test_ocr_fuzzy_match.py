@@ -3,17 +3,15 @@ ocr_fuzzy_match 模块单元测试
 
 覆盖：Levenshtein 相似度、关键字提取、产品模糊匹配、客户模糊匹配
 """
-import pytest
 from types import SimpleNamespace
 
 from fastapi_app.services.ocr_fuzzy_match import (
-    _levenshtein_similarity,
     _extract_keywords,
     _keyword_match_score,
-    fuzzy_match_product,
+    _levenshtein_similarity,
     fuzzy_match_customer,
+    fuzzy_match_product,
 )
-
 
 # ============================================================
 # _levenshtein_similarity

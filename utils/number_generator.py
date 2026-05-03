@@ -2,7 +2,9 @@
 通用编号生成器工具
 用于统一生成各类业务单据编号,消除重复代码
 """
+import contextlib
 from datetime import datetime
+
 from sqlalchemy import func
 
 
@@ -84,10 +86,8 @@ def generate_number(prefix, model, date_field, number_field, db):
             db_max = 0
             if records and records[0]:
                 last_number = getattr(records[0], number_field)
-                try:
+                with contextlib.suppress(ValueError, IndexError):
                     db_max = int(last_number.split('-')[-1])
-                except (ValueError, IndexError):
-                    pass
 
             # 初始化计数器，但不生成编号
             _number_generator.get_next_seq(prefix, date_str, db_max)

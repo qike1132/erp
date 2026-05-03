@@ -3,9 +3,10 @@
 
 映射到与 Flask-SQLAlchemy 相同的表。
 """
-from sqlalchemy import String, Integer, Text, DateTime, ForeignKey, Index
-from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime
+
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
 
 from fastapi_app.shared_models import Base
 
@@ -31,7 +32,6 @@ class ModificationLog(Base):
     )
 
     def to_dict(self):
-        import json
         return {
             'id': self.id,
             'target_type': self.target_type,

@@ -4,29 +4,31 @@ API V1 路由注册
 
 from fastapi import APIRouter
 
-from fastapi_app.api.v1.endpoints.purchase_center import router as purchase_center_router
+from fastapi_app.api.v1.endpoints.approval import router as approval_router
+from fastapi_app.api.v1.endpoints.auth import router as auth_router
+from fastapi_app.api.v1.endpoints.auxiliary import router as auxiliary_router
+from fastapi_app.api.v1.endpoints.backup import router as backup_router
 from fastapi_app.api.v1.endpoints.batch import router as batch_router
+from fastapi_app.api.v1.endpoints.case_endpoint import router as case_router
+from fastapi_app.api.v1.endpoints.customer import router as customer_router
+from fastapi_app.api.v1.endpoints.dashboard import router as dashboard_router
+from fastapi_app.api.v1.endpoints.material_registration import router as material_reg_router
+from fastapi_app.api.v1.endpoints.ocr_import import router as ocr_import_router
+from fastapi_app.api.v1.endpoints.order import router as order_router
+from fastapi_app.api.v1.endpoints.permission import router as permission_router
+from fastapi_app.api.v1.endpoints.product import router as product_router
+from fastapi_app.api.v1.endpoints.production_plan import router as production_plan_router
+from fastapi_app.api.v1.endpoints.production_summary import router as production_summary_router
+from fastapi_app.api.v1.endpoints.purchase_center import router as purchase_center_router
+from fastapi_app.api.v1.endpoints.purchase_plan import router as purchase_plan_router
+from fastapi_app.api.v1.endpoints.report import router as report_router
 from fastapi_app.api.v1.endpoints.staging_order import router as staging_order_router
 from fastapi_app.api.v1.endpoints.staging_stockin import router as staging_stockin_router
 from fastapi_app.api.v1.endpoints.staging_stockout import router as staging_stockout_router
-from fastapi_app.api.v1.endpoints.product import router as product_router
-from fastapi_app.api.v1.endpoints.order import router as order_router
 from fastapi_app.api.v1.endpoints.stock import router as stock_router
-from fastapi_app.api.v1.endpoints.user import router as user_router
-from fastapi_app.api.v1.endpoints.customer import router as customer_router
-from fastapi_app.api.v1.endpoints.approval import router as approval_router
-from fastapi_app.api.v1.endpoints.report import router as report_router
-from fastapi_app.api.v1.endpoints.case_endpoint import router as case_router
-from fastapi_app.api.v1.endpoints.material_registration import router as material_reg_router
-from fastapi_app.api.v1.endpoints.auxiliary import router as auxiliary_router
-from fastapi_app.api.v1.endpoints.tasks import router as tasks_router
-from fastapi_app.api.v1.endpoints.auth import router as auth_router
-from fastapi_app.api.v1.endpoints.ocr_import import router as ocr_import_router
-from fastapi_app.api.v1.endpoints.production_plan import router as production_plan_router
-from fastapi_app.api.v1.endpoints.purchase_plan import router as purchase_plan_router
-from fastapi_app.api.v1.endpoints.production_summary import router as production_summary_router
-from fastapi_app.api.v1.endpoints.dashboard import router as dashboard_router
 from fastapi_app.api.v1.endpoints.supplier import router as supplier_router
+from fastapi_app.api.v1.endpoints.tasks import router as tasks_router
+from fastapi_app.api.v1.endpoints.user import router as user_router
 
 api_router = APIRouter()
 
@@ -189,4 +191,18 @@ api_router.include_router(
     dashboard_router,
     prefix="/dashboard",
     tags=["仪表盘"],
+)
+
+# 权限管理路由 - 前缀 /api/v1/permissions
+api_router.include_router(
+    permission_router,
+    prefix="/permissions",
+    tags=["权限管理"],
+)
+
+# 数据备份路由 - 前缀 /api/v1/backup
+api_router.include_router(
+    backup_router,
+    prefix="/backup",
+    tags=["数据备份"],
 )

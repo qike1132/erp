@@ -3,9 +3,10 @@
 
 映射到与 Flask-SQLAlchemy StagingStockOut 相同的 'staging_stock_out' 表。
 """
-from sqlalchemy import String, Integer, Boolean, Text, DateTime, ForeignKey, Index
-from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
 

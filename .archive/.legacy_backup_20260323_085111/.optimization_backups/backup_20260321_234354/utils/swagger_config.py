@@ -7,10 +7,10 @@ from flasgger import Swagger
 def setup_swagger(app):
     """
     配置Swagger API文档
-    
+
     Args:
         app: Flask应用实例
-    
+
     Returns:
         Swagger: Swagger实例
     """
@@ -28,7 +28,7 @@ def setup_swagger(app):
         "swagger_ui": True,
         "specs_route": '/api/docs'
     }
-    
+
     swagger_template = {
         "swagger": "2.0",
         "info": {
@@ -52,13 +52,13 @@ def setup_swagger(app):
             }
         }
     }
-    
+
     swagger = Swagger(
         app,
         config=swagger_config,
         template=swagger_template
     )
-    
+
     return swagger
 
 

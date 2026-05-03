@@ -5,10 +5,10 @@ WebSocket 实时通知服务 - 全异步版本
 所有 Redis 操作均使用 redis.asyncio，消除事件循环阻塞。
 """
 import asyncio
+import contextlib
 import json
 import logging
 from datetime import datetime
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +21,8 @@ class StockEvent:
     APPROVAL_REQUESTED = "approval_requested"
     APPROVAL_RESOLVED = "approval_resolved"
     ORDER_CREATED = "order_created"
+    ORDER_UPDATED = "order_updated"
+    ORDER_DELETED = "order_deleted"
     PURCHASE_ORDER_CREATED = "purchase_order_created"
 
 
@@ -28,6 +30,8 @@ EVENT_DISPLAY_MESSAGES = {
     "stock_changed": "库存数据已更新",
     "shipment_plan_uploaded": "新的出货计划已上传",
     "order_created": "新订单已创建",
+    "order_updated": "订单信息已更新",
+    "order_deleted": "订单已删除",
     "purchase_order_created": "新采购订单已生成",
 }
 
@@ -42,6 +46,7 @@ async def _get_async_redis_client():
 
     try:
         import redis.asyncio as aioredis
+
         from fastapi_app.core.config import settings
         url = settings.REDIS_URL
         if settings.REDIS_PASSWORD and settings.REDIS_PASSWORD not in url:
@@ -92,7 +97,7 @@ class ConnectionManager:
 
     def __init__(self):
         self.active_connections: dict[int, list] = {}
-        self._redis_task: Optional[asyncio.Task] = None
+        self._redis_task: asyncio.Task | None = None
         self._async_redis = None
         self._pubsub = None
         self._redis_url = None
@@ -147,7 +152,6 @@ class ConnectionManager:
         return url
 
     async def start_redis_listener(self):
-        import redis.asyncio as aioredis
 
         self._redis_url = self._build_redis_url()
         self._redis_task = asyncio.create_task(self._listen_loop())
@@ -207,10 +211,8 @@ class ConnectionManager:
     async def stop_redis_listener(self):
         if self._redis_task and not self._redis_task.done():
             self._redis_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._redis_task
-            except asyncio.CancelledError:
-                pass
         self._redis_task = None
         await self._cleanup_connections()
         logger.info("Redis Pub/Sub 订阅已停止")

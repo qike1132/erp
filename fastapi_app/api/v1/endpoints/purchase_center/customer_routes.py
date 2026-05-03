@@ -7,12 +7,13 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from fastapi_app.api.v1.endpoints.purchase_center.schemas import (
+    CustomerBatchRequest,
+    CustomerSyncRequest,
+)
 from fastapi_app.core.database import get_sync_db as get_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.services import purchase_center_service as svc
-from fastapi_app.api.v1.endpoints.purchase_center.schemas import (
-    CustomerSyncRequest, CustomerBatchRequest,
-)
 
 router = APIRouter()
 
@@ -42,7 +43,6 @@ def api_sync_customers(
     _user=Depends(require_permission("product_manage")),
 ):
     customer_ids = data.customer_ids
-    force = data.force
 
     from fastapi_app.shared_models import Customer
     customers = db.query(Customer)

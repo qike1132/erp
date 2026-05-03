@@ -1,10 +1,12 @@
 """
 Celery 应用配置
 使用 Redis 作为 Broker 和 Result Backend
-优化: Worker 并发、任务路由、事件监控、Redis 连接池
+优化: Worker 并发、任务路由、事件监控、Redis 连接池、死信队列(DLQ)
 """
 from celery import Celery
 from celery.schedules import crontab
+from kombu import Exchange, Queue
+
 from fastapi_app.core.config import settings
 
 celery_app = Celery(
@@ -12,6 +14,9 @@ celery_app = Celery(
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
 )
+
+DEFAULT_EXCHANGE = Exchange('tasks', type='direct')
+DLX_EXCHANGE = Exchange('dlx', type='direct')
 
 celery_app.conf.update(
     # 序列化（已强制 JSON，禁用 pickle RCE 风险）
@@ -53,20 +58,13 @@ celery_app.conf.update(
     },
 
     # 队列定义（显式声明所有队列，确保队列存在）
-    task_queues={
-        "celery": {
-            "exchange": "tasks",
-            "routing_key": "task.default",
-        },
-        "batch": {
-            "exchange": "tasks",
-            "routing_key": "task.batch",
-        },
-        "reports": {
-            "exchange": "tasks",
-            "routing_key": "task.reports",
-        },
-    },
+    # dead_letter 队列用于接收重试耗尽的任务，供人工介入/告警
+    task_queues=(
+        Queue("celery", DEFAULT_EXCHANGE, routing_key="task.default"),
+        Queue("batch", DEFAULT_EXCHANGE, routing_key="task.batch"),
+        Queue("reports", DEFAULT_EXCHANGE, routing_key="task.reports"),
+        Queue("dead_letter", DLX_EXCHANGE, routing_key="dlx.failed"),
+    ),
 
     # Redis Broker 连接优化
     broker_transport_options={
