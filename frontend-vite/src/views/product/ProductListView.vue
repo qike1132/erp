@@ -14,9 +14,6 @@
           <div class="pd-col-scroll">
             <!-- 产品基本信息 -->
             <div class="pd-section">
-              <div class="pd-section-header">
-                <h4 class="pd-section-title">产品基本信息</h4>
-              </div>
               <form @submit.prevent="handleAdd">
                 <div class="pd-form-group">
                   <label class="pd-label">产品名称</label>
@@ -1164,7 +1161,8 @@ async function confirmCopyBom() {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 12px 20px;
+  padding: 0 20px;
+  height: 52px;
   font-size: 14px;
   font-weight: 700;
   color: var(--color-text);

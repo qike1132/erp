@@ -227,7 +227,7 @@ async def confirm_staging_orders(
         )
         await db.commit()
 
-    except (ValueError, TypeError, OSError) as e:
+    except Exception as e:
         await db.rollback()
         logger.error(f'确认暂存订单时发生错误: {str(e)}', exc_info=True)
         raise
@@ -258,9 +258,8 @@ async def import_staging_orders_from_excel(
     temp_path = None
     try:
         temp_fd, temp_path = tempfile.mkstemp(suffix='.xlsx')
+        os.write(temp_fd, file_content)
         os.close(temp_fd)
-        with open(temp_path, 'wb') as f:
-            f.write(file_content)
 
         # 读取 Sheet 名称
         success, sheets, err = await read_excel_sheets_async(temp_path)
@@ -299,6 +298,7 @@ async def import_staging_orders_from_excel(
                 note = row_data.get('备注')
 
                 if not customer or not product_name or not quantity:
+                    errors.append(f'第{idx}行缺少必填字段（客户/产品/数量）')
                     continue
 
                 customer = str(customer).strip()
@@ -358,8 +358,11 @@ async def import_staging_orders_from_excel(
 
         result_msg = f'成功导入 {imported} 个订单到暂存区'
         if errors:
-            result_msg += f'。错误: {"; ".join(errors[:5])}'
-        return imported, result_msg, errors[:10] if errors else []
+            total_err = len(errors)
+            result_msg += f'。共{total_err}个错误: {"; ".join(errors[:5])}'
+            if total_err > 5:
+                result_msg += f'...（仅显示前5条，共{total_err}条）'
+        return imported, result_msg, errors
 
     except (ValueError, TypeError, OSError) as e:
         await db.rollback()
@@ -522,9 +525,8 @@ async def import_staging_stockins_from_excel(
     temp_path = None
     try:
         temp_fd, temp_path = tempfile.mkstemp(suffix='.xlsx')
+        os.write(temp_fd, file_content)
         os.close(temp_fd)
-        with open(temp_path, 'wb') as f:
-            f.write(file_content)
 
         success, sheets, err = await read_excel_sheets_async(temp_path)
         if not success:
@@ -561,6 +563,7 @@ async def import_staging_stockins_from_excel(
                 note = row_data.get('备注')
 
                 if not customer or not product_name or not quantity:
+                    errors.append(f'第{idx}行缺少必填字段（客户/产品/数量）')
                     continue
 
                 customer = str(customer).strip()
@@ -615,8 +618,11 @@ async def import_staging_stockins_from_excel(
 
         result_msg = f'成功导入 {imported} 个备货到暂存区'
         if errors:
-            result_msg += f'。错误: {"; ".join(errors[:5])}'
-        return imported, result_msg, errors[:10] if errors else []
+            total_err = len(errors)
+            result_msg += f'。共{total_err}个错误: {"; ".join(errors[:5])}'
+            if total_err > 5:
+                result_msg += f'...（仅显示前5条，共{total_err}条）'
+        return imported, result_msg, errors
 
     except (ValueError, TypeError, OSError) as e:
         await db.rollback()
@@ -828,9 +834,8 @@ async def import_staging_stockouts_from_excel(
     temp_path = None
     try:
         temp_fd, temp_path = tempfile.mkstemp(suffix='.xlsx')
+        os.write(temp_fd, file_content)
         os.close(temp_fd)
-        with open(temp_path, 'wb') as f:
-            f.write(file_content)
 
         success, sheets, err = await read_excel_sheets_async(temp_path)
         if not success:
@@ -946,8 +951,11 @@ async def import_staging_stockouts_from_excel(
 
         result_msg = f'成功导入 {imported} 个出货到暂存区'
         if errors:
-            result_msg += f'。错误: {"; ".join(errors[:5])}'
-        return imported, result_msg, errors[:10] if errors else []
+            total_err = len(errors)
+            result_msg += f'。共{total_err}个错误: {"; ".join(errors[:5])}'
+            if total_err > 5:
+                result_msg += f'...（仅显示前5条，共{total_err}条）'
+        return imported, result_msg, errors
 
     except (ValueError, TypeError, OSError) as e:
         await db.rollback()

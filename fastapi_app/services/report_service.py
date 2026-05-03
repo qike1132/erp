@@ -14,15 +14,37 @@ from fastapi_app.services import escape_like
 
 logger = logging.getLogger(__name__)
 
+_cached_dialect: str | None = None
+
+
+def _parse_report_date(date_str: str, field_name: str) -> datetime:
+    """解析报表日期参数，格式必须为 YYYY-MM-DD"""
+    try:
+        return datetime.strptime(date_str, '%Y-%m-%d')
+    except ValueError:
+        raise ValueError(f'{field_name}日期格式无效（{date_str}），应为 YYYY-MM-DD')
+
 
 def _get_dialect_name() -> str:
-    """获取当前数据库方言名称（postgresql 或 mysql）"""
-    from fastapi_app.core.database import async_engine
-    return async_engine.dialect.name
+    """获取当前数据库方言名称（postgresql 或 mysql），启动后缓存"""
+    global _cached_dialect
+    if _cached_dialect is None:
+        from fastapi_app.core.database import async_engine
+        _cached_dialect = async_engine.dialect.name
+    return _cached_dialect
 
 
 def _quote_identifier(name: str) -> str:
-    """根据数据库方言引用标识符（PG 用双引号，MySQL 用反引号）"""
+    """根据数据库方言引用标识符（PG 用双引号，MySQL 用反引号）
+
+    SECURITY: name 参数仅允许硬编码的表名/列名，禁止传入用户输入。
+    """
+    _ALLOWED_IDENTIFIERS = frozenset({
+        'order', 'product', 'stock_in', 'stock_out', 'inventory_log',
+        'customer', 'o', 's', 'p', 'so', 'si',
+    })
+    if name not in _ALLOWED_IDENTIFIERS:
+        raise ValueError(f"非法SQL标识符: {name!r}，仅允许预定义标识符")
     dialect = _get_dialect_name()
     if dialect == "postgresql":
         return f'"{name}"'
@@ -35,7 +57,17 @@ def _string_agg(expr: str, separator: str, distinct: bool = True) -> str:
 
     PostgreSQL: STRING_AGG(DISTINCT expr, separator)
     MySQL: GROUP_CONCAT(DISTINCT expr ORDER BY expr SEPARATOR separator)
+
+    SECURITY: expr 参数仅允许硬编码的列引用，禁止传入用户输入。
     """
+    _ALLOWED_EXPRS = frozenset({
+        'o.order_no', 'o.note', 's.stockin_no', 's.note',
+        'so.stockout_no', 'so.note', 'so.customer',
+    })
+    if expr not in _ALLOWED_EXPRS:
+        raise ValueError(f"非法SQL聚合表达式: {expr!r}，仅允许预定义表达式")
+    if separator not in (', ', '; '):
+        raise ValueError(f"非法SQL聚合分隔符: {separator!r}")
     dialect = _get_dialect_name()
     distinct_kw = "DISTINCT " if distinct else ""
     if dialect == "postgresql":
@@ -67,17 +99,11 @@ async def get_order_logs(db: AsyncSession, customer: str = '', product: str = ''
             where_clauses.append("o.status = :status")
             params['status'] = status
     if start_date:
-        try:
-            params['start_date'] = datetime.strptime(start_date, '%Y-%m-%d')
-            where_clauses.append("o.order_date >= :start_date")
-        except ValueError:
-            pass
+        params['start_date'] = _parse_report_date(start_date, '开始')
+        where_clauses.append("o.order_date >= :start_date")
     if end_date:
-        try:
-            params['end_date'] = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
-            where_clauses.append("o.order_date < :end_date")
-        except ValueError:
-            pass
+        params['end_date'] = _parse_report_date(end_date, '结束') + timedelta(days=1)
+        where_clauses.append("o.order_date < :end_date")
 
     where_sql = " AND " + " AND ".join(where_clauses) if where_clauses else ""
 
@@ -119,7 +145,8 @@ async def get_order_logs(db: AsyncSession, customer: str = '', product: str = ''
             'order_nos': row.order_nos or '', 'note': row.notes or '',
         })
 
-    qty_sql = f"SELECT SUM(o.quantity) FROM {order_tbl} o JOIN product p ON o.product_id = p.id WHERE 1=1 {where_sql}"
+    # total_qty 使用与 count 相同的 WHERE 条件，但无需 GROUP BY
+    qty_sql = f"SELECT COALESCE(SUM(o.quantity), 0) FROM {order_tbl} o JOIN product p ON o.product_id = p.id WHERE 1=1 {where_sql}"
     total_qty = (await db.execute(text(qty_sql), params)).scalar() or 0
 
     return {
@@ -152,7 +179,9 @@ async def export_report_to_excel(db, report_type: str, customer: str = '', produ
                 start_date=start_date, end_date=end_date
             )
 
-            if len(logs) > 10000:
+            truncated = len(logs) > 10000
+            if truncated:
+                logger.warning(f"报表导出截断：共{len(logs)}条，仅导出前10000条")
                 logs = logs[:10000]
 
             exporter = ReportExporter()
@@ -198,17 +227,11 @@ async def get_stockin_logs(db: AsyncSession, customer: str = '', product: str = 
         where_clauses.append("(COALESCE(p.name, '') LIKE :product OR COALESCE(p.barcode, '') LIKE :product)")
         params['product'] = f'%{escape_like(product)}%'
     if start_date:
-        try:
-            params['start_date'] = datetime.strptime(start_date, '%Y-%m-%d')
-            where_clauses.append("s.stockin_date >= :start_date")
-        except ValueError:
-            pass
+        params['start_date'] = _parse_report_date(start_date, '开始')
+        where_clauses.append("s.stockin_date >= :start_date")
     if end_date:
-        try:
-            params['end_date'] = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
-            where_clauses.append("s.stockin_date < :end_date")
-        except ValueError:
-            pass
+        params['end_date'] = _parse_report_date(end_date, '结束') + timedelta(days=1)
+        where_clauses.append("s.stockin_date < :end_date")
 
     where_sql = " AND " + " AND ".join(where_clauses) if where_clauses else ""
 
@@ -275,17 +298,12 @@ async def get_stockout_logs(db: AsyncSession, customer: str = '', product: str =
         where_clauses.append("(COALESCE(p.name, '') LIKE :product OR COALESCE(p.barcode, '') LIKE :product)")
         params['product'] = f'%{escape_like(product)}%'
     if start_date:
-        try:
-            params['start_date'] = datetime.strptime(start_date, '%Y-%m-%d')
-            where_clauses.append("so.stockout_date >= :start_date")
-        except ValueError:
-            pass
+        params['start_date'] = _parse_report_date(start_date, '开始')
+        where_clauses.append("so.stockout_date >= :start_date")
     if end_date:
-        try:
-            params['end_date'] = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
-            where_clauses.append("so.stockout_date < :end_date")
-        except ValueError:
-            pass
+        params['end_date'] = _parse_report_date(end_date, '结束') + timedelta(days=1)
+        where_clauses.append("so.stockout_date < :end_date")
+
 
     where_sql = " AND " + " AND ".join(where_clauses)
 
@@ -352,17 +370,12 @@ async def get_deduction_logs(db: AsyncSession, customer: str = '', product: str 
         where_clauses.append("(COALESCE(p.name, '') LIKE :product OR COALESCE(p.barcode, '') LIKE :product)")
         params['product'] = f'%{escape_like(product)}%'
     if start_date:
-        try:
-            params['start_date'] = datetime.strptime(start_date, '%Y-%m-%d')
-            where_clauses.append("so.stockout_date >= :start_date")
-        except ValueError:
-            pass
+        params['start_date'] = _parse_report_date(start_date, '开始')
+        where_clauses.append("so.stockout_date >= :start_date")
     if end_date:
-        try:
-            params['end_date'] = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
-            where_clauses.append("so.stockout_date < :end_date")
-        except ValueError:
-            pass
+        params['end_date'] = _parse_report_date(end_date, '结束') + timedelta(days=1)
+        where_clauses.append("so.stockout_date < :end_date")
+
 
     where_sql = " AND " + " AND ".join(where_clauses)
 

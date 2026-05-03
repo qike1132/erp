@@ -55,9 +55,9 @@ async def _delete_stockin_record(db: AsyncSession, stockin: StockIn) -> None:
     if stockin.stockin_stockouts:
         raise ValueError('该入库记录已有出库关联，无法删除')
     product = await get_product_for_update(db, stockin.product_id)
+    if product.current_stock - stockin.quantity < 0:
+        raise ValueError(f'删除入库记录将导致库存为负数（产品：{product.name}，当前库存：{product.current_stock}，入库数量：{stockin.quantity}）')
     product.current_stock -= stockin.quantity
-    if product.current_stock < 0:
-        logger.warning(f'库存出现负数：产品{product.name}(ID:{product.id})，当前库存{product.current_stock}')
     db.add(InventoryLog(product_id=stockin.product_id, change_type='入库删除', change_quantity=-stockin.quantity, related_id=str(stockin.id), note=f'入库删除ID：{stockin.id}'))
     await db.delete(stockin)
     await db.flush()
@@ -75,20 +75,21 @@ async def _create_stockout_records(db: AsyncSession, product_id: int, quantity: 
         raise ValueError(f"出货数量超过可出货量！订单总量：{shipment_info['order_quantity']}，已出货：{shipment_info['shipped_quantity']}，可出货：{shipment_info['available_quantity']}")
     remaining_qty = quantity
     created_stockouts: list[StockOut] = []
-    for order_detail in shipment_info['orders']:
-        if remaining_qty <= 0:
-            break
-        if order_detail['available'] <= 0:
-            continue
-        ship_qty = min(remaining_qty, order_detail['available'])
-        stockout = StockOut(stockout_no=await generate_stockout_number(db), product_id=product_id, quantity=ship_qty, stockout_date=stockout_date, customer=customer, order_id=order_detail['order_id'], note=note)
-        db.add(stockout)
+    async with db.begin_nested():
+        for order_detail in shipment_info['orders']:
+            if remaining_qty <= 0:
+                break
+            if order_detail['available'] <= 0:
+                continue
+            ship_qty = min(remaining_qty, order_detail['available'])
+            stockout = StockOut(stockout_no=await generate_stockout_number(db), product_id=product_id, quantity=ship_qty, stockout_date=stockout_date, customer=customer, order_id=order_detail['order_id'], note=note)
+            db.add(stockout)
+            await db.flush()
+            created_stockouts.append(stockout)
+            remaining_qty -= ship_qty
+        product.current_stock -= quantity
+        db.add(InventoryLog(product_id=product_id, change_type='出库', change_quantity=-quantity, related_id=','.join(str(s.id) for s in created_stockouts) if created_stockouts else '', note=f'出库数量：{quantity}'))
         await db.flush()
-        created_stockouts.append(stockout)
-        remaining_qty -= ship_qty
-    product.current_stock -= quantity
-    db.add(InventoryLog(product_id=product_id, change_type='出库', change_quantity=-quantity, related_id=','.join(str(s.id) for s in created_stockouts) if created_stockouts else '', note=f'出库数量：{quantity}'))
-    await db.flush()
     return created_stockouts
 
 async def _update_stockout_record(db: AsyncSession, stockout: StockOut, new_quantity: int, customer: str, stockout_date: datetime, note: str) -> StockOut:
@@ -98,7 +99,7 @@ async def _update_stockout_record(db: AsyncSession, stockout: StockOut, new_quan
     product = await get_product_for_update(db, stockout.product_id)
     if product.current_stock + old_quantity < new_quantity:
         raise ValueError('库存不足！')
-    if customer:
+    if customer and customer.strip():
         shipment_info = await calculate_available_shipment_quantity(db, stockout.product_id, customer)
         available_with_current = shipment_info['available_quantity'] + old_quantity
         if new_quantity > available_with_current:
@@ -176,7 +177,7 @@ async def update_stockin(db: AsyncSession, stockin_id: int, quantity: int, custo
 
 async def delete_stockin(db: AsyncSession, stockin_id: int) -> None:
     """删除入库记录"""
-    result = await db.execute(select(StockIn).where(StockIn.id == stockin_id).options(selectinload(StockIn.stockin_stockouts)))
+    result = await db.execute(select(StockIn).where(StockIn.id == stockin_id).options(selectinload(StockIn.stockin_stockouts)).with_for_update())
     stockin_obj = result.scalar_one_or_none()
     if not stockin_obj:
         raise ValueError('入库记录不存在')

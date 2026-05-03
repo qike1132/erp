@@ -119,8 +119,8 @@ def calculate_available_shipment_quantity(
     session: Session,
     product_id: int,
     customer: str,
-    order_type: str = None,
-    country: str = None,
+    order_type: str | None = None,
+    country: str | None = None,
 ) -> dict:
     """
     计算指定客户和产品的可出货量
@@ -309,9 +309,9 @@ def delete_stockin(session: Session, stockin: StockIn) -> None:
         raise ValueError('该入库记录已有出库关联，无法删除')
 
     product = get_product_for_update_sync(session, stockin.product_id)
+    if product.current_stock - stockin.quantity < 0:
+        raise ValueError(f'删除入库记录将导致库存为负数（产品：{product.name}，当前库存：{product.current_stock}，入库数量：{stockin.quantity}）')
     product.current_stock -= stockin.quantity
-    if product.current_stock < 0:
-        logger.warning(f'库存出现负数：产品{product.name}(ID:{product.id})，当前库存{product.current_stock}')
 
     log = InventoryLog(
         product_id=stockin.product_id,
@@ -536,6 +536,7 @@ def get_inventory(session: Session, search_customer: str = '',
 
     # 按 product_id + customer 分组
     stockout_map = {}
+    stockout_customers_by_product = {}
     for so in all_stockouts:
         key = (so.product_id, so.customer or '')
         if key not in stockout_map:
@@ -545,6 +546,11 @@ def get_inventory(session: Session, search_customer: str = '',
             stockout_map[key]['order'] += so.quantity
         else:
             stockout_map[key]['direct'] += so.quantity
+        if so.customer:
+            pid = so.product_id
+            if pid not in stockout_customers_by_product:
+                stockout_customers_by_product[pid] = set()
+            stockout_customers_by_product[pid].add(so.customer)
 
     inventory_data = []
     total_order_qty = 0
@@ -561,12 +567,10 @@ def get_inventory(session: Session, search_customer: str = '',
             if s.customer:
                 product_customers.add(s.customer)
 
-        all_stockouts_for_product = [so for so in all_stockouts if so.product_id == product.id]
+        stockout_customers = stockout_customers_by_product.get(product.id, set())
         if search_customer:
-            all_stockouts_for_product = [so for so in all_stockouts_for_product if so.customer == search_customer]
-        for so in all_stockouts_for_product:
-            if so.customer:
-                product_customers.add(so.customer)
+            stockout_customers = {c for c in stockout_customers if c == search_customer}
+        product_customers.update(stockout_customers)
 
         orders = product.orders
         if search_customer:

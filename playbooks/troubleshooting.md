@@ -162,3 +162,14 @@
 - **根因**: cancel_approval 和 delete_order 非管理员路径在 db.commit() 后未调用 invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY)
 - **解决**: 补齐缓存失效调用，与 approve/reject/update_order 保持一致
 - **通用规则**: 所有修改订单/审批状态的路径，commit 后必须调用 invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY)
+
+## BUG-AUDIT-93 | 2026-05-03
+- **现象**: 代码审核发现93个问题（6 P0, 19 P1, 42 P2, 13 P3），涵盖核心交易链、产品物料、报表、系统管理
+- **根因**: 多类别：SQLAlchemy过滤器失效（not vs == False）、事务回滚范围错误、输入校验缺失、SQL注入风险、并发安全（缺少FOR UPDATE）
+- **解决**: 实际修复37个bug，4个已存在保护，39个为架构设计建议。详见 [docs/bugs/BUG-AUDIT-93.md](../docs/bugs/BUG-AUDIT-93.md)
+- **关键检查点**:
+  - SQLAlchemy WHERE 中 `not Model.field` 不生成正确SQL，必须用 `Model.field == False` 或 `~Model.field`
+  - 异步事务中 `db.rollback()` 回滚整个事务，用 `db.begin_nested()` 创建 savepoint
+  - 库存变更前必须预检查（pre-mutation check），不能先修改再检查
+  - 临时文件写入使用 `os.write(fd, content)` 避免 TOCTOU 竞态
+  - 编号生成必须用 `with_for_update()` 行锁防止并发重复

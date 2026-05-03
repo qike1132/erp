@@ -15,6 +15,7 @@ from sqlalchemy.orm import joinedload, selectinload
 from fastapi_app.core.cache import CacheDomain, cache_result, invalidate_related_caches
 from fastapi_app.core.state_machine import can_transition
 from fastapi_app.services import escape_like
+from fastapi_app.services.notification_service import StockEvent
 from fastapi_app.shared.stock_concurrency import get_product_for_update
 from fastapi_app.shared_models import (
     ApprovalLog,
@@ -29,29 +30,31 @@ from fastapi_app.shared_models import (
 logger = logging.getLogger(__name__)
 
 
-class PermissionDeniedError(Exception):
-    """用户无权限执行此操作"""
-    pass
+async def _safe_invalidate_purchase_cache():
+    """安全清除采购中心缓存，失败仅记录警告"""
+    try:
+        from fastapi_app.core.purchase_cache import invalidate_purchase_caches
+        await invalidate_purchase_caches()
+    except Exception:
+        logger.warning("采购中心缓存失效失败", exc_info=True)
 
 
-async def get_order_by_id(db: AsyncSession, order_id: int) -> dict | None:
-    """根据ID获取单个订单详情（含关联数据）"""
-    from sqlalchemy.orm import selectinload
+async def _safe_publish_event(event_type, data: dict):
+    """安全发布库存事件，失败仅记录警告"""
+    try:
+        from fastapi_app.services.notification_service import StockEvent, publish_stock_event
+        await publish_stock_event(event_type, data)
+    except Exception:
+        logger.warning(f"事件发布失败: {event_type}", exc_info=True)
 
-    from fastapi_app.shared_models import Order
 
-    query = select(Order).options(
-        joinedload(Order.product),
-        selectinload(Order.order_stockouts),
-        joinedload(Order.locked_by)
-    ).where(Order.id == order_id, not Order.is_deleted)
+def _calc_deduct_quantity(order) -> int:
+    """计算订单已抵扣备货数量（仅统计关联入库的出库记录）"""
+    return sum(so.quantity for so in order.order_stockouts if so.stockin_id is not None) if order.order_stockouts else 0
 
-    result = await db.execute(query)
-    o = result.scalars().unique().first()
-    if not o:
-        return None
 
-    deduct_quantity = sum(so.quantity for so in o.order_stockouts if so.stockin_id is not None) if o.order_stockouts else 0
+def _order_to_dict(o, deduct_quantity: int = 0) -> dict:
+    """将 Order ORM 对象转换为前端字典，消除重复代码"""
     return {
         'id': o.id,
         'order_no': o.order_no,
@@ -74,6 +77,29 @@ async def get_order_by_id(db: AsyncSession, order_id: int) -> dict | None:
     }
 
 
+class PermissionDeniedError(Exception):
+    """用户无权限执行此操作"""
+    pass
+
+
+async def get_order_by_id(db: AsyncSession, order_id: int) -> dict | None:
+    """根据ID获取单个订单详情（含关联数据）"""
+
+    query = select(Order).options(
+        joinedload(Order.product),
+        selectinload(Order.order_stockouts),
+        joinedload(Order.locked_by)
+    ).where(Order.id == order_id, Order.is_deleted == False)
+
+    result = await db.execute(query)
+    o = result.scalars().unique().first()
+    if not o:
+        return None
+
+    deduct_quantity = _calc_deduct_quantity(o)
+    return _order_to_dict(o, deduct_quantity)
+
+
 @cache_result(
     key_prefix="orders:list",
     ttl=60,
@@ -89,8 +115,8 @@ async def get_orders(db: AsyncSession, page: int = 1, per_page: int = 50,
         joinedload(Order.product),
         selectinload(Order.order_stockouts),
         joinedload(Order.locked_by)
-    ).where(not Order.is_deleted)
-    count_query = select(func.count(Order.id)).where(not Order.is_deleted)
+    ).where(Order.is_deleted == False)
+    count_query = select(func.count(Order.id)).where(Order.is_deleted == False)
 
     # 筛选条件（共用，避免 DRY 违反）
     conditions = []
@@ -119,27 +145,8 @@ async def get_orders(db: AsyncSession, page: int = 1, per_page: int = 50,
 
     orders_data = []
     for o in orders:
-        deduct_quantity = sum(so.quantity for so in o.order_stockouts if so.stockin_id is not None) if o.order_stockouts else 0
-        orders_data.append({
-            'id': o.id,
-            'order_no': o.order_no,
-            'customer': o.customer,
-            'order_date': o.order_date.strftime('%Y-%m-%d %H:%M') if o.order_date else '',
-            'product': {
-                'id': o.product.id,
-                'name': o.product.name,
-                'barcode': o.product.barcode or '',
-                'image': o.product.image or ''
-            } if o.product else None,
-            'quantity': o.quantity,
-            'deduct_quantity': deduct_quantity,
-            'status': o.status,
-            'note': o.note or '',
-            'order_type': o.order_type,
-            'country': o.country or '',
-            'is_locked': o.is_locked,
-            'locked_by_name': o.locked_by.username if o.locked_by else None,
-        })
+        deduct_quantity = _calc_deduct_quantity(o)
+        orders_data.append(_order_to_dict(o, deduct_quantity))
     return {'items': orders_data, 'total': total, 'page': page, 'per_page': per_page}
 
 
@@ -201,25 +208,16 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
     # 旧逻辑：await _sync_order_to_purchase_center(order.id)
     # 这会导致有 BOM 的订单直接跳过审核步骤，自动生成采购订单
 
-    # 新订单创建后，立即清除采购中心缓存（在发布事件之前，确保前端刷新时缓存已失效）
-    try:
-        from fastapi_app.core.purchase_cache import invalidate_purchase_caches
-        await invalidate_purchase_caches()
-    except Exception:
-        logger.warning("采购中心缓存失效失败", exc_info=True)
+    await _safe_invalidate_purchase_cache()
 
     # 发布订单创建事件，通知前端实时刷新
-    try:
-        from fastapi_app.services.notification_service import StockEvent, publish_stock_event
-        await publish_stock_event(StockEvent.ORDER_CREATED, {
+    await _safe_publish_event(StockEvent.ORDER_CREATED, {
             'order_id': order.id,
             'order_no': order_no,
             'customer': customer,
             'product_name': product.name,
             'quantity': quantity,
         })
-    except Exception:
-        logger.warning("订单创建事件发布失败", exc_info=True)
 
     return order.to_dict()
 
@@ -250,6 +248,10 @@ async def _update_order_directly(
     current_user: User, order_type: str | None,
     country: str | None,
 ) -> dict:
+    if quantity <= 0 or quantity > 9999999:
+        raise ValueError('订单数量必须在1-9999999之间')
+    if not customer or not customer.strip():
+        raise ValueError('客户名称不能为空')
     old_quantity = order.quantity
     old_customer = order.customer
     order.customer = customer
@@ -259,8 +261,6 @@ async def _update_order_directly(
         order.order_type = order_type
     if country is not None:
         order.country = country if order_type != 'regular' else None
-    elif order.order_type == 'custom' and not order.country and not country:
-        pass
 
     if quantity != old_quantity:
         product = await get_product_for_update(db, order.product_id)
@@ -289,24 +289,16 @@ async def _update_order_directly(
     await db.commit()
     await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY)
 
-    try:
-        from fastapi_app.core.purchase_cache import invalidate_purchase_caches
-        await invalidate_purchase_caches()
-    except Exception:
-        logger.warning("采购中心缓存失效失败(update)", exc_info=True)
+    await _safe_invalidate_purchase_cache()
 
     logger.info(f'订单编辑成功：{order.order_no}，操作人：{current_user.username}')
 
-    try:
-        from fastapi_app.services.notification_service import StockEvent, publish_stock_event
-        await publish_stock_event(StockEvent.ORDER_UPDATED, {
-            'order_id': order_id,
-            'order_no': order.order_no,
-            'customer': customer,
-            'quantity': quantity,
-        })
-    except Exception:
-        logger.warning("订单更新事件发布失败", exc_info=True)
+    await _safe_publish_event(StockEvent.ORDER_UPDATED, {
+        'order_id': order_id,
+        'order_no': order.order_no,
+        'customer': customer,
+        'quantity': quantity,
+    })
 
     return {'success': True, 'message': '订单编辑成功！', 'requires_approval': False}
 
@@ -383,11 +375,10 @@ async def _delete_order_directly(
         )
         db.add(stockout_log)
 
-    product.current_stock -= order.quantity
-    if product.current_stock < 0:
-        logger.warning(f'库存出现负数：产品{product.name}(ID:{product.id})，当前库存{product.current_stock}')
-    if total_deducted > 0:
-        product.current_stock += total_deducted
+    net_change = total_deducted - order.quantity
+    if product.current_stock + net_change < 0:
+        raise ValueError(f'删除订单将导致库存为负数（产品：{product.name}，当前库存：{product.current_stock}，净变化：{net_change:+d}）')
+    product.current_stock += net_change
 
     log = InventoryLog(
         product_id=order.product_id,
@@ -428,20 +419,13 @@ async def _delete_order_directly(
     except (OSError, ValueError) as e:
         logger.warning(f'缓存清除失败：{e}')
 
-    try:
-        from fastapi_app.core.purchase_cache import invalidate_purchase_caches
-        await invalidate_purchase_caches()
-    except Exception:
-        logger.warning("采购中心缓存失效失败(delete)", exc_info=True)
+    await _safe_invalidate_purchase_cache()
 
-    try:
-        from fastapi_app.services.notification_service import StockEvent, publish_stock_event
-        asyncio.ensure_future(publish_stock_event(StockEvent.ORDER_DELETED, {
-            'order_id': order_id,
-            'order_no': deleted_order_no,
-        }))
-    except Exception:
-        logger.warning("订单删除事件发布失败", exc_info=True)
+    task = asyncio.create_task(_safe_publish_event(StockEvent.ORDER_DELETED, {
+        'order_id': order_id,
+        'order_no': deleted_order_no,
+    }))
+    task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
 
     logger.info(f'订单删除成功：{deleted_order_no}，操作人：{current_user.username}，抵扣回滚：{total_deducted}')
     return {'success': True, 'message': f'订单删除成功！抵扣回滚数量：{total_deducted}', 'requires_approval': False}
@@ -567,7 +551,7 @@ async def _create_approval_log_obj(approval_request: ApprovalRequest, action: st
         await _create_approval_log(session, approval_request, action, actor, details)
 
 
-class _BatchItemError(Exception):
+class _SavepointRollbackSignal(Exception):
     """批量处理单项业务校验失败，用于触发 savepoint 回滚但不作为真实错误"""
 
 
@@ -593,14 +577,14 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                         'success': False, 'error': '缺少必填字段',
                         'order_no': order_data.get('order_no', '未知')
                     })
-                    raise _BatchItemError()
+                    raise _SavepointRollbackSignal()
 
                 if int(quantity) <= 0 or int(quantity) > 9999999:
                     results.append({
                         'success': False, 'error': '订单数量必须在1-9999999之间',
                         'order_no': order_data.get('order_no', '未知')
                     })
-                    raise _BatchItemError()
+                    raise _SavepointRollbackSignal()
 
                 product = await get_product_for_update(db, product_id)
 
@@ -651,13 +635,13 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                             'success': False, 'error': '抵扣处理失败，请稍后重试',
                             'order_no': order.order_no,
                         })
-                        raise _BatchItemError() from ded_err
+                        raise _SavepointRollbackSignal() from ded_err
 
                 results.append({
                     'success': True, 'order_no': order.order_no, 'id': order.id
                 })
                 created_order_ids.append(order.id)
-        except _BatchItemError:
+        except _SavepointRollbackSignal:
             pass  # 业务校验失败，savepoint 已自动回滚，继续下一项
         except (ValueError, TypeError, OSError) as e:
             # 数据库异常，begin_nested 已自动回滚 savepoint，session 恢复有效状态

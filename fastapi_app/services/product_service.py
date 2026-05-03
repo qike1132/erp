@@ -78,8 +78,14 @@ async def create_product(db: AsyncSession, name: str, barcode: str | None,
     业务规则（与Flask一致）：
     - 产品名称不能为空
     - 产品名称唯一（不区分大小写）
+    - 初始库存 >= 0
     - 初始库存 > 0 时记录 InventoryLog
     """
+    if not name or not name.strip():
+        raise ValueError('产品名称不能为空')
+    if initial_stock < 0:
+        raise ValueError('初始库存不能为负数')
+
     # 检查名称唯一性
     result = await db.execute(
         select(Product).where(func.lower(Product.name) == func.lower(name))
@@ -131,7 +137,7 @@ async def update_product(db: AsyncSession, product_id: int, name: str | None,
     if not product:
         raise ValueError('产品不存在')
 
-    if name and name != product.name:
+    if name and name.strip() != product.name:
         result = await db.execute(
             select(Product).where(
                 func.lower(Product.name) == func.lower(name),
@@ -152,8 +158,11 @@ async def update_product(db: AsyncSession, product_id: int, name: str | None,
 
     if initial_stock is not None and initial_stock != product.initial_stock:
         stock_change = initial_stock - product.initial_stock
+        new_current_stock = product.current_stock + stock_change
+        if new_current_stock < 0:
+            raise ValueError(f'初始库存调整将导致当前库存为负数（当前库存：{product.current_stock}，调整量：{stock_change:+d}）')
         product.initial_stock = initial_stock
-        product.current_stock += stock_change
+        product.current_stock = new_current_stock
 
         log = InventoryLog(
             product_id=product.id,
@@ -191,7 +200,7 @@ async def delete_product(db: AsyncSession, product_id: int) -> None:
 
     # 使用 COUNT 查询检查关联，避免加载所有关联数据到内存
     order_count = (await db.execute(
-        select(func.count(Order.id)).where(Order.product_id == product_id)
+        select(func.count(Order.id)).where(Order.product_id == product_id, Order.is_deleted == False)
     )).scalar() or 0
     if order_count > 0:
         raise ProductHasRelatedOrdersError(product.name, order_count)
@@ -208,13 +217,17 @@ async def delete_product(db: AsyncSession, product_id: int) -> None:
     if stockout_count > 0:
         raise ProductHasRelatedStockOutsError(product.name, stockout_count)
 
-    # 删除库存日志（批量删除避免逐条加载）
-    await db.execute(
-        delete(InventoryLog).where(InventoryLog.product_id == product_id)
-    )
+    try:
+        # 删除库存日志（批量删除避免逐条加载）
+        await db.execute(
+            delete(InventoryLog).where(InventoryLog.product_id == product_id)
+        )
 
-    await db.delete(product)
-    await db.commit()
+        await db.delete(product)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
     await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY | CacheDomain.PRODUCT | CacheDomain.STOCKIN)
     logger.info(f'产品删除成功：{product.name}')
 
@@ -224,8 +237,8 @@ async def search_products(db: AsyncSession, query: str) -> list[dict]:
 
     委托至 product_search_service 统一实现，保持原有返回格式。
     """
-    from fastapi_app.services.product_search_service import product_search_service
-    return await product_search_service.search_async_with_cache(db, query, limit=20)
+    from fastapi_app.services.product_search_service import product_search_service as _search_svc
+    return await _search_svc.search_async_with_cache(db, query, limit=20)
 
 
 async def get_product_stock(db: AsyncSession, product_id: int) -> dict:
@@ -238,5 +251,5 @@ async def get_product_stock(db: AsyncSession, product_id: int) -> dict:
         'product_id': product.id,
         'name': product.name,
         'current_stock': product.current_stock,
-        'available_stock': product.current_stock,
+        'initial_stock': product.initial_stock,
     }

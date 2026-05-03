@@ -81,6 +81,9 @@ async def _run_pg_dump(output_path: Path) -> dict:
     db_port = os.getenv('DB_PORT', '5432')
     db_user = os.getenv('DB_USER', 'erp_app')
     db_name = os.getenv('DB_NAME', 'erp_system')
+    # SECURITY: validate database name contains only safe characters
+    if not db_name.isidentifier():
+        raise ValueError(f'Invalid database name: {db_name!r}')
     db_password = os.getenv('DB_PASSWORD', '')
     env = os.environ.copy()
     env['PGPASSWORD'] = db_password
@@ -349,6 +352,9 @@ async def _restore_database_via_psql(zf: zipfile.ZipFile, db: AsyncSession) -> d
     db_port = os.getenv('DB_PORT', '5432')
     db_user = os.getenv('DB_USER', 'erp_app')
     db_name = os.getenv('DB_NAME', 'erp_system')
+    # SECURITY: validate database name contains only safe characters
+    if not db_name.isidentifier():
+        raise ValueError(f'Invalid database name: {db_name!r}')
     db_password = os.getenv('DB_PASSWORD', '')
     env = os.environ.copy()
     env['PGPASSWORD'] = db_password

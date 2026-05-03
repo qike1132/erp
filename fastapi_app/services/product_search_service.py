@@ -48,21 +48,20 @@ class ProductSearchService(BaseSearchService[Product]):
         if not keyword:
             return []
 
+        from fastapi_app.services.purchase_product_service import _product_has_bom
+        from sqlalchemy.orm import selectinload
+
         query = self.build_search_query_sync(db, keyword)
-        query = query.limit(20)
+        query = query.options(
+            joinedload(Product.material),
+            selectinload(Product.fabrics),
+            selectinload(Product.accessories),
+            selectinload(Product.packagings),
+        ).limit(20)
         products = query.all()
 
-        from fastapi_app.services.purchase_product_service import _product_has_bom
-
         result = []
-        for product in products:
-            p = db.query(Product).options(
-                joinedload(Product.material),
-                joinedload(Product.fabrics),
-                joinedload(Product.accessories),
-                joinedload(Product.packagings),
-            ).get(product.id)
-
+        for p in products:
             has_bom = _product_has_bom(p)
             material_count = (
                 len(p.fabrics) + len(p.accessories) + len(p.packagings)

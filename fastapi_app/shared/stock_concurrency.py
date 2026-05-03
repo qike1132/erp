@@ -83,36 +83,36 @@ async def update_stock_with_optimistic_lock(
         ValueError: 库存不足
     """
     for attempt in range(retries):
-        # 1. 读取当前产品和版本
-        product = await db.get(Product, product_id)
-        if not product:
-            raise ValueError(f'产品ID {product_id} 不存在')
+        async with db.begin_nested():
+            # 1. 读取当前产品和版本
+            product = await db.get(Product, product_id)
+            if not product:
+                raise ValueError(f'产品ID {product_id} 不存在')
 
-        old_version = product.version
-        new_stock = product.current_stock + delta
+            old_version = product.version
+            new_stock = product.current_stock + delta
 
-        # 库存不足检查
-        if new_stock < 0:
-            raise ValueError(f'库存不足！当前库存: {product.current_stock}，需要: {abs(delta)}')
+            # 库存不足检查
+            if new_stock < 0:
+                raise ValueError(f'库存不足！当前库存: {product.current_stock}，需要: {abs(delta)}')
 
-        # 2. 使用乐观锁更新：WHERE version = old_version
-        from sqlalchemy import update
-        stmt = (
-            update(Product)
-            .where(Product.id == product_id, Product.version == old_version)
-            .values(current_stock=new_stock, version=old_version + 1)
-        )
-        result = await db.execute(stmt)
+            # 2. 使用乐观锁更新：WHERE version = old_version
+            from sqlalchemy import update
+            stmt = (
+                update(Product)
+                .where(Product.id == product_id, Product.version == old_version)
+                .values(current_stock=new_stock, version=old_version + 1)
+            )
+            result = await db.execute(stmt)
 
-        if result.rowcount == 1:
-            # 更新成功，刷新对象
-            await db.refresh(product)
-            logger.info(f'库存更新成功: 产品ID={product_id}, delta={delta}, '
-                        f'new_stock={new_stock}, version={old_version}->{old_version + 1}')
-            return product
+            if result.rowcount == 1:
+                # 更新成功，刷新对象
+                await db.refresh(product)
+                logger.info(f'库存更新成功: 产品ID={product_id}, delta={delta}, '
+                            f'new_stock={new_stock}, version={old_version}->{old_version + 1}')
+                return product
 
-        # 版本冲突，使用 savepoint 回滚仅当前修改，保留事务中其他有效修改
-        await db.rollback()
+        # 版本冲突，savepoint 已自动回滚，保留事务中其他有效修改
         logger.warning(f'库存乐观锁冲突: 产品ID={product_id}, 第{attempt + 1}次重试')
 
     raise StockConcurrentError(

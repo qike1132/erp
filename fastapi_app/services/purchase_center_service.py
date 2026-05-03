@@ -152,12 +152,14 @@ def _generate_order_no(db: Session, prefix: str = 'PO') -> str:
     like_pattern = f'{prefix}-{today_str}-%'
     last_order = db.query(PurchaseOrder).filter(
         PurchaseOrder.order_no.like(like_pattern)
-    ).order_by(PurchaseOrder.order_no.desc()).first()
+    ).order_by(PurchaseOrder.order_no.desc()).with_for_update().first()
 
+    seq = 1
     if last_order:
-        seq = int(last_order.order_no.split('-')[-1]) + 1
-    else:
-        seq = 1
+        try:
+            seq = int(last_order.order_no.split('-')[-1]) + 1
+        except (ValueError, IndexError):
+            seq = 1
 
     return f'{prefix}-{today_str}-{seq:04d}'
 

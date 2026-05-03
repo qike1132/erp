@@ -136,7 +136,7 @@ async def delete_customer(db: AsyncSession, customer_id: int) -> None:
         raise ValueError("客户不存在")
 
     has_orders = await db.execute(
-        select(Order).where(Order.customer == customer.name).limit(1)
+        select(Order).where(Order.customer == customer.name, Order.is_deleted == False).limit(1)
     )
     has_stockins = await db.execute(
         select(StockIn).where(StockIn.customer == customer.name).limit(1)

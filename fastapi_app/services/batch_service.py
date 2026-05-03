@@ -320,7 +320,8 @@ async def calculate_available_shipment_quantity(
         }
 
     # 单次查询获取所有订单的已出货量，替代N+1循环查询
-    # 加 FOR UPDATE 行锁防止并发事务读到相同的可用量后各自创建出库导致超发
+    # 注意：PostgreSQL 不支持 FOR UPDATE 与 GROUP BY 组合使用，
+    # 写入路径的并发安全由 _create_stockout_records 中的产品行锁保证
     order_ids = [o.id for o in orders]
     shipped_result = await db.execute(
         select(StockOut.order_id, func.sum(StockOut.quantity))
@@ -329,7 +330,6 @@ async def calculate_available_shipment_quantity(
             StockOut.stockin_id.is_(None)
         )
         .group_by(StockOut.order_id)
-        .with_for_update()
     )
     shipped_map = dict(shipped_result.all())
 

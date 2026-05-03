@@ -69,6 +69,8 @@
             >
               <div class="sp-day-header">
                 <span class="sp-day-badge">{{ r._fullDate }}：{{ fmtQty(r.totalQty) }}</span>
+                <span v-if="r._pendingCount > 0" class="sp-day-alert" :class="getAlertClass(r.date)">{{ getAlertLabel(r.date) }}</span>
+                <span v-else-if="r._shippedPct === 100" class="sp-day-alert sp-day-done"><i class="fas fa-check" /> 完成</span>
               </div>
               
               <span v-for="(cn, i) in r.customerNames" :key="cn" class="sp-day-customer-tag">
@@ -273,12 +275,14 @@
           </div>
           <div class="sp-sku-detail-body">
             <div v-if="!skuDateDetail.length" class="sp-sku-detail-empty">该 SKU 本月暂无出货计划</div>
-            <div v-else class="sp-sku-detail-grid">
-              <div v-for="item in skuDateDetail" :key="item.date + item.customer" class="sp-sku-detail-card" :class="{ 'sp-sku-detail-shipped': item.status === 'shipped' }">
-                <div class="sp-sku-detail-date">{{ item.day }}日 周{{ item.weekday }}</div>
-                <div class="sp-sku-detail-qty">{{ item.qty }}</div>
-                <div class="sp-sku-detail-customer">{{ item.customer }}</div>
-                <span class="sp-sku-detail-status" :class="item.status === 'shipped' ? 'sp-sku-detail-tag-done' : 'sp-sku-detail-tag-pending'">{{ item.status === 'shipped' ? '已出' : '待出' }}</span>
+            <div v-else class="sp-sku-detail-list">
+              <div class="sp-sku-detail-header-row">
+                <span class="sp-sku-detail-header-label">日期</span>
+                <span class="sp-sku-detail-header-label">数量</span>
+              </div>
+              <div v-for="item in skuDateDetail" :key="item.date" class="sp-sku-detail-row" :class="{ 'sp-sku-detail-shipped': item.status === 'shipped' }">
+                <span class="sp-sku-detail-date">{{ item.date }}</span>
+                <span class="sp-sku-detail-qty">{{ item.qty }}</span>
               </div>
             </div>
           </div>
@@ -313,7 +317,7 @@ const drwId = ref(0);
 const modalKw = ref('');
 const modalSelCust = ref('');
 const viewTab = ref<'daily' | 'summary'>('daily');
-const skuSortField = ref('plan');
+const skuSortField = ref('customer');
 const skuSortDir = ref<'asc' | 'desc'>('desc');
 const custFilter = ref('');
 const skuDetailOpen = ref(false);
@@ -422,13 +426,28 @@ const sortedSkuList = computed<SkuRow[]>(() => {
       s.customer_name.toLowerCase().includes(k)
     );
   }
-  const fieldMap: Record<string, keyof SkuRow> = { barcode: 'barcode', plan: 'plan_qty', shipped: 'shipped_qty', remain: 'remain_qty' };
+  const fieldMap: Record<string, keyof SkuRow> = { customer: 'customer_name', barcode: 'barcode', plan: 'plan_qty', shipped: 'shipped_qty', remain: 'remain_qty' };
   const sf = fieldMap[skuSortField.value] ?? 'plan_qty';
   const sd = skuSortDir.value === 'asc' ? 1 : -1;
+  // compute total plan_qty per customer
+  const custTotal: Record<string, number> = {};
+  for (const s of list) {
+    custTotal[s.customer_name] = (custTotal[s.customer_name] || 0) + s.plan_qty;
+  }
   list.sort((a, b) => {
     const av = a[sf], bv = b[sf];
-    if (typeof av === 'string' && typeof bv === 'string') return av.localeCompare(bv) * sd;
-    return ((av as number) - (bv as number)) * sd;
+    let cmp: number;
+    if (typeof av === 'string' && typeof bv === 'string') {
+      cmp = av.localeCompare(bv);
+    } else {
+      cmp = ((av as number) - (bv as number));
+    }
+    if (cmp !== 0) return cmp * sd;
+    // primary: customer group by total plan_qty desc
+    const ct = (custTotal[b.customer_name] || 0) - (custTotal[a.customer_name] || 0);
+    if (ct !== 0) return ct;
+    // secondary: within customer, plan_qty desc
+    return b.plan_qty - a.plan_qty;
   });
   return list;
 });
@@ -451,22 +470,19 @@ const skuDateDetail = computed<SkuDateItem[]>(() => {
   const pn = skuDetailName.value;
   const cn = skuDetailCustomer.value;
   if (!pn) return [];
-  const result: SkuDateItem[] = [];
+  const byDate: Record<string, SkuDateItem> = {};
   for (const [dateStr, plans] of Object.entries(pbd)) {
     if (!plans?.length) continue;
     for (const p of plans) {
       if (p.product_name !== pn || p.customer_name !== cn) continue;
-      const dt = new Date(dateStr + 'T00:00:00');
-      result.push({
-        date: dateStr,
-        day: dt.getDate(),
-        weekday: WDS[dt.getDay()] || '?',
-        qty: Number(p.quantity || 0),
-        customer: p.customer_name || '未知客户',
-        status: p.shipment_status || 'pending',
-      });
+      if (!byDate[dateStr]) {
+        const dt = new Date(dateStr + 'T00:00:00');
+        byDate[dateStr] = { date: dateStr, day: dt.getDate(), weekday: WDS[dt.getDay()] || '?', qty: 0, customer: p.customer_name || '未知客户', status: p.shipment_status || 'pending' };
+      }
+      byDate[dateStr].qty += Number(p.quantity || 0);
     }
   }
+  const result = Object.values(byDate);
   result.sort((a, b) => a.date.localeCompare(b.date));
   return result;
 });
@@ -552,6 +568,28 @@ const kpis = computed(() => {
 function fmtQty(n: number): string {
   if (n >= 10000) return (n / 10000).toFixed(1) + '万';
   return String(n);
+}
+
+function getDaysDiff(dateStr: string): number {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(dateStr + 'T00:00:00');
+  return Math.ceil((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function getAlertClass(dateStr: string): string {
+  const diff = getDaysDiff(dateStr);
+  if (diff < 0) return 'sp-day-overdue';
+  if (diff <= 3) return 'sp-day-due-soon';
+  return '';
+}
+
+function getAlertLabel(dateStr: string): string {
+  const diff = getDaysDiff(dateStr);
+  if (diff < 0) return '延期 ' + Math.abs(diff) + ' 天';
+  if (diff === 0) return '今日出货';
+  if (diff <= 3) return '临期 ' + diff + ' 天';
+  return '';
 }
 
 function exportDayCSV() {
@@ -696,8 +734,9 @@ function exportCSV() {
 }
 
 .sp-toolbar-stats:hover {
-  border-color: var(--color-primary-200);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+  border-color: var(--color-primary-300);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  transform: translateY(-2px);
 }
 
 .sp-stat {
@@ -990,9 +1029,13 @@ function exportCSV() {
 }
 
 .sp-day-card:hover {
-  border-color: var(--color-primary-200);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-  transform: translateY(-2px);
+  border-color: var(--color-primary-300);
+  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.06);
+  transform: translateY(-4px);
+}
+
+.sp-day-card:hover::before {
+  background: linear-gradient(135deg, var(--color-primary-400), var(--color-primary-600));
 }
 
 .sp-day-selected {
@@ -1007,7 +1050,12 @@ function exportCSV() {
 }
 
 .sp-day-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   padding: 0 0 8px;
+  margin-top: -10px;
 }
 
 .sp-day-badge {
@@ -1020,6 +1068,33 @@ function exportCSV() {
   font-weight: 700;
   border-radius: 6px;
   white-space: nowrap;
+}
+
+.sp-day-alert {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.sp-day-due-soon {
+  background: var(--color-warning-100);
+  color: var(--color-warning-700);
+}
+
+.sp-day-overdue {
+  background: var(--color-danger-100);
+  color: var(--color-danger-700);
+}
+
+.sp-day-done {
+  background: var(--color-success-100);
+  color: var(--color-success-700);
 }
 
 .sp-day-customer-tag {
@@ -1832,64 +1907,53 @@ function exportCSV() {
   font-size: 14px;
 }
 
-.sp-sku-detail-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 12px;
-}
-
-.sp-sku-detail-card {
-  background: var(--color-primary-50);
-  border: 1px solid var(--color-primary-100);
-  border-radius: 12px;
-  padding: 12px;
+.sp-sku-detail-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 0;
 }
 
-.sp-sku-detail-shipped {
-  background: var(--color-success-50);
-  border-color: var(--color-success-100);
+.sp-sku-detail-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 2px solid var(--color-border-light, #e2e8f0);
+  margin-bottom: 4px;
+}
+
+.sp-sku-detail-header-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.sp-sku-detail-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-border-light, #e2e8f0);
+}
+
+.sp-sku-detail-row:last-child {
+  border-bottom: none;
+}
+
+.sp-sku-detail-shipped .sp-sku-detail-date {
+  color: var(--color-success-600);
 }
 
 .sp-sku-detail-date {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
-  color: var(--color-text-secondary);
+  color: var(--color-heading);
 }
 
 .sp-sku-detail-qty {
-  font-size: 22px;
+  font-size: 16px;
   font-weight: 800;
-  color: var(--color-heading);
-  line-height: 1.1;
-}
-
-.sp-sku-detail-customer {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sp-sku-detail-status {
-  display: inline-block;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 6px;
-  width: fit-content;
-}
-
-.sp-sku-detail-tag-done {
-  background: var(--color-success-100);
-  color: var(--color-success-700);
-}
-
-.sp-sku-detail-tag-pending {
-  background: var(--color-warning-100);
-  color: var(--color-warning-700);
+  color: var(--color-primary-700);
+  font-variant-numeric: tabular-nums;
 }
 </style>
