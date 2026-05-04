@@ -355,6 +355,7 @@
 import { ref, computed } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 import { backupApi } from '@/api'
+import type { ApiResponse } from '@/types'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
@@ -369,7 +370,7 @@ const totalRows = computed(() => tables.value.reduce((sum, t) => sum + (t.rows >
 async function loadTables() {
   tablesLoading.value = true
   try {
-    const res = await backupApi.tables() as any
+    const res = await backupApi.tables() as ApiResponse
     if (res.success) tables.value = res.tables
   } catch {
     showToast('加载表信息失败', 'error')
@@ -411,7 +412,7 @@ async function handleSaveToServer() {
   savingToServer.value = true
   saveResult.value = null
   try {
-    const res = await backupApi.saveToServer(backupRemark.value) as any
+    const res = await backupApi.saveToServer(backupRemark.value) as ApiResponse
     if (res.success) {
       saveResult.value = res
       showToast('备份已保存到服务器', 'success')
@@ -466,7 +467,7 @@ async function validateFile(file: File) {
   const formData = new FormData()
   formData.append('file', file)
   try {
-    const res = await backupApi.validateFile(formData) as any
+    const res = await backupApi.validateFile(formData) as ApiResponse
     if (res.success) validationResult.value = res.summary
   } catch (e: any) {
     showToast(e?.response?.data?.detail || '验证失败', 'error')
@@ -497,7 +498,7 @@ const deletingFile = ref('')
 async function loadServerBackups() {
   serverBackupsLoading.value = true
   try {
-    const res = await backupApi.listServerBackups() as any
+    const res = await backupApi.listServerBackups() as ApiResponse
     if (res.success) serverBackups.value = res.backups
   } catch (e: any) {
     showToast(e?.response?.data?.detail || '加载服务器备份列表失败', 'error')
@@ -522,7 +523,7 @@ function handleServerRestore(filename: string) {
 async function handleServerDelete(filename: string) {
   deletingFile.value = filename
   try {
-    const res = await backupApi.deleteServerBackup(filename) as any
+    const res = await backupApi.deleteServerBackup(filename) as ApiResponse
     if (res.success) {
       showToast('备份已删除', 'success')
       serverBackups.value = serverBackups.value.filter(b => b.filename !== filename)
@@ -558,7 +559,7 @@ async function doFileRestore() {
   try {
     const formData = new FormData()
     formData.append('file', selectedFile.value)
-    const res = await backupApi.importBackup(formData) as any
+    const res = await backupApi.importBackup(formData) as ApiResponse
     restoreResult.value = res
     if (res.success) {
       const msg = res.format === 'zip'
@@ -579,7 +580,7 @@ async function doServerRestore() {
   if (!pendingRestoreFilename) return
   restoringFile.value = pendingRestoreFilename
   try {
-    const res = await backupApi.restoreServerBackup(pendingRestoreFilename) as any
+    const res = await backupApi.restoreServerBackup(pendingRestoreFilename) as ApiResponse
     if (res.success) {
       const msg = res.format === 'zip'
         ? '恢复成功（完整备份）'
@@ -603,7 +604,7 @@ const incrementalResult = ref<any>(null)
 async function handleSaveIncremental() {
   savingIncremental.value = true
   try {
-    const res = await backupApi.saveIncremental(backupRemark.value) as any
+    const res = await backupApi.saveIncremental(backupRemark.value) as ApiResponse
     if (res.success) {
       showToast(`增量备份成功: ${res.filename} (${res.total_rows} 条变更)`, 'success')
       incrementalResult.value = res
@@ -621,7 +622,7 @@ async function doIncrementalRestore() {
   if (!pendingRestoreFilename) return
   restoringFile.value = pendingRestoreFilename
   try {
-    const res = await backupApi.restoreIncremental(pendingRestoreFilename) as any
+    const res = await backupApi.restoreIncremental(pendingRestoreFilename) as ApiResponse
     restoreResult.value = res
     if (res.success) {
       const msg = `增量恢复成功，共更新 ${res.total_upserted || 0} 条记录`

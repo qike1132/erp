@@ -543,6 +543,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { get, post, del } from '@/api/request'
 import { orderApi, customerApi } from '@/api'
+import type { ApiResponse } from '@/types'
 import UiInput from '@/components/ui/UiInput.vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
 import UiButton from '@/components/ui/UiButton.vue'
@@ -572,7 +573,7 @@ const customerOptions = computed(() => customerList.value.map((c: unknown) => ({
 const { data: ordersData } = useQuery({
   queryKey: ['orders-list'],
   queryFn: async () => {
-    const res = (await orderApi.list({ per_page: 100 })) as any
+    const res = (await orderApi.list({ per_page: 50 })) as any
     return res.data ?? res.orders ?? res.items ?? []
   },
   staleTime: 30_000,
@@ -582,7 +583,7 @@ const orderList = computed(() => (Array.isArray(ordersData.value) ? ordersData.v
 const { data: stockinsData } = useQuery({
   queryKey: ['stockins-list-all'],
   queryFn: async () => {
-    const res = (await get('/stock/in/list', { per_page: 100 })) as any
+    const res = (await get('/stock/in/list', { per_page: 50 })) as any
     return res.stockins ?? res.items ?? []
   },
   staleTime: 30_000,

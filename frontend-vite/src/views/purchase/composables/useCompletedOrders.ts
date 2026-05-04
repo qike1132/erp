@@ -1,8 +1,15 @@
 import { ref, reactive, computed } from 'vue'
 import { purchaseApi } from '@/api'
+import type { ApiResponse, PurchaseOrder } from '@/types'
+
+interface QuickFilter {
+  id: string
+  name?: string
+  filters?: { start_date?: string; end_date?: string }
+}
 
 export function useCompletedOrders() {
-  const orders = ref<any[]>([])
+  const orders = ref<PurchaseOrder[]>([])
   const loading = ref(false)
   const page = ref(1)
   const total = ref(0)
@@ -19,14 +26,14 @@ export function useCompletedOrders() {
     end_date: '',
   })
 
-  const quickFilters = ref<any[]>([])
+  const quickFilters = ref<QuickFilter[]>([])
   const currentQuickFilterId = ref<string | null>(null)
   const filterExpanded = ref(false)
 
   async function load() {
     loading.value = true
     try {
-      const params: Record<string, any> = { page: page.value, per_page: 20 }
+      const params: Record<string, string | number> = { page: page.value, per_page: 20 }
       if (filters.order_no) params.order_no = filters.order_no
       if (filters.customer_name) params.customer_name = filters.customer_name
       if (filters.product_name) params.product_name = filters.product_name
@@ -35,7 +42,7 @@ export function useCompletedOrders() {
       if (filters.material_name) params.material_name = filters.material_name
       if (filters.start_date) params.start_date = filters.start_date
       if (filters.end_date) params.end_date = filters.end_date
-      const res = (await purchaseApi.completed(params)) as any
+      const res = await purchaseApi.completed(params) as ApiResponse<PurchaseOrder[]> & { orders?: PurchaseOrder[]; total?: number; total_pages?: number; pages?: number }
       orders.value = res.orders || []
       total.value = res.total || 0
       totalPages.value = res.total_pages || res.pages || 1
@@ -48,7 +55,7 @@ export function useCompletedOrders() {
 
   async function loadQuickFilters() {
     try {
-      const res = (await purchaseApi.quickFilters()) as any
+      const res = await purchaseApi.quickFilters() as ApiResponse & { quick_filters?: QuickFilter[] }
       if (res.success && res.quick_filters) quickFilters.value = res.quick_filters
     } catch {
       /* ignore */
@@ -58,9 +65,9 @@ export function useCompletedOrders() {
   async function applyQuickFilter(filterId: string) {
     currentQuickFilterId.value = filterId
     try {
-      const res = (await purchaseApi.quickFilters()) as any
+      const res = await purchaseApi.quickFilters() as ApiResponse & { quick_filters?: QuickFilter[] }
       if (res.success && res.quick_filters) {
-        const filter = res.quick_filters.find((f: any) => f.id === filterId)
+        const filter = res.quick_filters.find((f) => f.id === filterId)
         if (filter) {
           filters.start_date = filter.filters?.start_date || ''
           filters.end_date = filter.filters?.end_date || ''
@@ -96,13 +103,13 @@ export function useCompletedOrders() {
   }
 
   async function exportOrders() {
-    const params: Record<string, any> = {}
+    const params: Record<string, string> = {}
     if (filters.order_no) params.order_no = filters.order_no
     if (filters.customer_name) params.customer_name = filters.customer_name
     if (filters.supplier_name) params.supplier_name = filters.supplier_name
     if (filters.start_date) params.start_date = filters.start_date
     if (filters.end_date) params.end_date = filters.end_date
-    const res = (await purchaseApi.exportCompleted(params)) as any
+    const res = await purchaseApi.exportCompleted(params) as ApiResponse & { html?: string }
     if (res.success && res.html) {
       const bom = '\uFEFF'
       const blob = new Blob([bom + res.html], { type: 'application/vnd.ms-excel;charset=utf-8' })

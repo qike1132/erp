@@ -666,7 +666,7 @@ class TestBomCopyService:
         """有填充类物料时返回True"""
         from unittest.mock import MagicMock
 
-        from fastapi_app.services.purchase_center_service import _product_has_bom
+        from fastapi_app.services.purchase_center_service import product_has_bom
         product = MagicMock()
         mock_material = MagicMock()
         mock_material.cotton_usage = Decimal('100')
@@ -674,37 +674,37 @@ class TestBomCopyService:
         product.fabrics = []
         product.accessories = []
         product.packagings = []
-        assert _product_has_bom(product) is True
+        assert product_has_bom(product) is True
 
     def test_product_has_bom_true_with_fabric(self):
         """有面料类物料时返回True"""
         from unittest.mock import MagicMock
 
-        from fastapi_app.services.purchase_center_service import _product_has_bom
+        from fastapi_app.services.purchase_center_service import product_has_bom
         product = MagicMock()
         product.material = None
         product.fabrics = [MagicMock()]
         product.accessories = []
         product.packagings = []
-        assert _product_has_bom(product) is True
+        assert product_has_bom(product) is True
 
     def test_product_has_bom_false_all_empty(self):
         """所有物料为空时返回False"""
         from unittest.mock import MagicMock
 
-        from fastapi_app.services.purchase_center_service import _product_has_bom
+        from fastapi_app.services.purchase_center_service import product_has_bom
         product = MagicMock()
         product.material = None
         product.fabrics = []
         product.accessories = []
         product.packagings = []
-        assert _product_has_bom(product) is False
+        assert product_has_bom(product) is False
 
     def test_product_has_bom_false_zero_cotton(self):
         """填充类cotton_usage为0时返回False"""
         from unittest.mock import MagicMock
 
-        from fastapi_app.services.purchase_center_service import _product_has_bom
+        from fastapi_app.services.purchase_center_service import product_has_bom
         product = MagicMock()
         mock_material = MagicMock()
         mock_material.cotton_usage = Decimal('0')
@@ -712,4 +712,4 @@ class TestBomCopyService:
         product.fabrics = []
         product.accessories = []
         product.packagings = []
-        assert _product_has_bom(product) is False
+        assert product_has_bom(product) is False

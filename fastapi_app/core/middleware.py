@@ -44,6 +44,7 @@ def setup_middleware(app: FastAPI) -> None:
     _setup_gzip(app)
     _setup_body_size_limit(app)
     _setup_prometheus(app)
+    _setup_security_headers(app)
 
 
 def _setup_csrf(app: FastAPI) -> None:
@@ -88,6 +89,32 @@ def _setup_csrf(app: FastAPI) -> None:
         logger.info("CSRF 配置：API 变更请求需验证 CSRF token")
     except ImportError:
         logger.warning("itsdangerous 未安装，CSRF cookie 保护未启用")
+
+
+def _setup_security_headers(app: FastAPI) -> None:
+    csp = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: blob:; "
+        "font-src 'self' data:; "
+        "connect-src 'self' ws: wss:; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'"
+    )
+
+    @app.middleware("http")
+    async def security_headers_middleware(request: Request, call_next):
+        response = await call_next(request)
+        response.headers["Content-Security-Policy"] = csp
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        return response
+
+    logger.info("安全头部已配置（CSP / X-Content-Type-Options / X-Frame-Options）")
 
 
 def _setup_cors(app: FastAPI) -> None:
@@ -180,7 +207,7 @@ def _setup_prometheus(app: FastAPI) -> None:
         try:
             response = await call_next(request)
             status = response.status_code
-        except Exception:
+        except (RuntimeError, OSError, ValueError):
             status = 500
             raise
         finally:

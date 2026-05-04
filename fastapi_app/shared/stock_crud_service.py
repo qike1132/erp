@@ -39,8 +39,10 @@ class SyncNumberGenerator:
 
     @classmethod
     def _cleanup_old_entries(cls):
+        """清理非当日的计数器条目，防止内存泄漏"""
         today_str = datetime.now().strftime('%Y%m%d')
-        if cls._last_cleanup_date == today_str:
+        # 防御性清理：条目过多时强制清理（即使日期相同）
+        if cls._last_cleanup_date == today_str and len(cls._counters) < 500:
             return
         expired_keys = [k for k in cls._counters if not k.endswith(today_str)]
         for k in expired_keys:

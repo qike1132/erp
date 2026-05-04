@@ -41,7 +41,8 @@ class AsyncNumberGenerator:
     def _cleanup_old_entries(cls):
         """清理非当日的计数器条目，防止内存泄漏"""
         today_str = datetime.now().strftime('%Y%m%d')
-        if cls._last_cleanup_date == today_str:
+        # 防御性清理：条目过多时强制清理（即使日期相同）
+        if cls._last_cleanup_date == today_str and len(cls._counters) < 500:
             return
         expired_keys = [k for k in cls._counters if not k.endswith(today_str)]
         for k in expired_keys:
@@ -107,11 +108,13 @@ async def generate_number_async(prefix: str, model, date_field: str, number_fiel
         if _async_number_generator._initialized.get(counter_key):
             db_max = _async_number_generator._counters.get(counter_key, 0)
         else:
+            # 使用 FOR UPDATE 行锁确保跨进程安全（与同步版一致）
             result = await db.execute(
                 select(model)
                 .where(func.date(getattr(model, date_field)) == today.date())
                 .order_by(getattr(model, number_field).desc())
                 .limit(1)
+                .with_for_update()
             )
             record = result.scalar_one_or_none()
 
@@ -321,7 +324,7 @@ async def calculate_available_shipment_quantity(
 
     # 单次查询获取所有订单的已出货量，替代N+1循环查询
     # 注意：PostgreSQL 不支持 FOR UPDATE 与 GROUP BY 组合使用，
-    # 写入路径的并发安全由 _create_stockout_records 中的产品行锁保证
+    # 写入路径的并发安全由 stock_service.create_stockout_core 中的产品行锁保证
     order_ids = [o.id for o in orders]
     shipped_result = await db.execute(
         select(StockOut.order_id, func.sum(StockOut.quantity))

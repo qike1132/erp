@@ -6,6 +6,7 @@
 import logging
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache import CacheDomain, cache_result, invalidate_related_caches
@@ -61,12 +62,29 @@ class ProductHasRelatedStockOutsError(ProductDeleteError):
 
 @cache_result(key_prefix="products:all", ttl=60, local_ttl=15)
 async def get_products(db: AsyncSession) -> list[dict]:
-    """获取所有产品列表"""
+    """获取所有产品列表（内部使用，如搜索、映射构建等场景）"""
     result = await db.execute(
         select(Product).order_by(Product.create_time.desc())
     )
     products = result.scalars().all()
     return [p.to_dict() for p in products]
+
+
+async def get_products_page(db: AsyncSession, page: int = 1, per_page: int = 50) -> dict:
+    """获取产品列表（分页），避免产品数过大时全量加载"""
+    per_page = min(max(1, per_page), 200)
+    total = (await db.execute(select(func.count(Product.id)))).scalar() or 0
+    result = await db.execute(
+        select(Product).order_by(Product.create_time.desc())
+        .offset((page - 1) * per_page).limit(per_page)
+    )
+    products = result.scalars().all()
+    return {
+        'items': [p.to_dict() for p in products],
+        'total': total,
+        'page': page,
+        'per_page': per_page,
+    }
 
 
 async def create_product(db: AsyncSession, name: str, barcode: str | None,
@@ -200,7 +218,7 @@ async def delete_product(db: AsyncSession, product_id: int) -> None:
 
     # 使用 COUNT 查询检查关联，避免加载所有关联数据到内存
     order_count = (await db.execute(
-        select(func.count(Order.id)).where(Order.product_id == product_id, Order.is_deleted == False)
+        select(func.count(Order.id)).where(Order.product_id == product_id, ~Order.is_deleted)
     )).scalar() or 0
     if order_count > 0:
         raise ProductHasRelatedOrdersError(product.name, order_count)
@@ -225,7 +243,7 @@ async def delete_product(db: AsyncSession, product_id: int) -> None:
 
         await db.delete(product)
         await db.commit()
-    except Exception:
+    except (SQLAlchemyError, RuntimeError, OSError, ValueError):
         await db.rollback()
         raise
     await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY | CacheDomain.PRODUCT | CacheDomain.STOCKIN)
@@ -242,7 +260,7 @@ async def search_products(db: AsyncSession, query: str) -> list[dict]:
 
 
 async def get_product_stock(db: AsyncSession, product_id: int) -> dict:
-    """获取产品可用库存"""
+    """获取产品可用库存（当前 available_stock = current_stock，后续可扩展扣减已分配量）"""
     product = await db.get(Product, product_id)
     if not product:
         raise ValueError('产品不存在')
@@ -251,5 +269,5 @@ async def get_product_stock(db: AsyncSession, product_id: int) -> dict:
         'product_id': product.id,
         'name': product.name,
         'current_stock': product.current_stock,
-        'initial_stock': product.initial_stock,
+        'available_stock': product.current_stock,
     }

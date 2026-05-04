@@ -662,7 +662,11 @@ function exportCSV() {
   border-radius: 18px;
   border: 1px solid var(--color-border-light, #e2e8f0);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  transition: box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.sp-card:hover {
+  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
+  transform: translateY(-6px);
 }
 
 .sp-card-main {
@@ -736,7 +740,6 @@ function exportCSV() {
 .sp-toolbar-stats:hover {
   border-color: var(--color-primary-300);
   box-shadow: 0 4px 12px rgba(0,0,0,0.06);
-  transform: translateY(-2px);
 }
 
 .sp-stat {
@@ -1007,7 +1010,7 @@ function exportCSV() {
   border: 1px solid var(--color-border-light, #e2e8f0);
   background: white;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
   position: relative;
   overflow: hidden;
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
@@ -1016,37 +1019,15 @@ function exportCSV() {
   gap: 14px;
 }
 
-.sp-day-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 4px;
-  height: 100%;
-  background: transparent;
-  transition: background 0.3s ease;
-  border-radius: 0 14px 14px 0;
-}
-
 .sp-day-card:hover {
   border-color: var(--color-primary-300);
-  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.06);
-  transform: translateY(-4px);
-}
-
-.sp-day-card:hover::before {
-  background: linear-gradient(135deg, var(--color-primary-400), var(--color-primary-600));
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
 }
 
 .sp-day-selected {
   border-color: var(--color-primary-400);
   background: var(--color-primary-50);
   box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-  transform: translateY(-2px);
-}
-
-.sp-day-selected::before {
-  background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-700));
 }
 
 .sp-day-header {

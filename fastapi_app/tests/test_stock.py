@@ -64,7 +64,7 @@ class TestStockInService:
     async def test_create_stockin_product_not_found(self, mock_db):
         mock_db.commit = AsyncMock()
         mock_db.rollback = AsyncMock()
-        with patch('fastapi_app.services.stock_service._create_stockin_record', new_callable=AsyncMock, side_effect=ValueError('产品ID 999 不存在')):
+        with patch('fastapi_app.services.stock_service.create_stockin_core', new_callable=AsyncMock, side_effect=ValueError('产品ID 999 不存在')):
             with pytest.raises(ValueError, match="产品ID 999 不存在"):
                 await stock_service.create_stockin(
                     mock_db, product_id=999, quantity=10,
@@ -85,7 +85,7 @@ class TestStockInService:
         mock_db.rollback = AsyncMock()
         mock_db.get = AsyncMock(return_value=product)
 
-        with patch('fastapi_app.services.stock_service._create_stockin_record', new_callable=AsyncMock, return_value=stockin):
+        with patch('fastapi_app.services.stock_service.create_stockin_core', new_callable=AsyncMock, return_value=stockin):
             with patch('fastapi_app.services.stock_service.publish_stock_event', new_callable=AsyncMock):
                 result = await stock_service.create_stockin(
                     mock_db, product_id=1, quantity=10,
@@ -139,7 +139,7 @@ class TestStockInService:
         mock_db.commit = AsyncMock()
         mock_db.rollback = AsyncMock()
 
-        with patch('fastapi_app.services.stock_service._delete_stockin_record', new_callable=AsyncMock, return_value=None) as mock_delete:
+        with patch('fastapi_app.services.stock_service.delete_stockin_core', new_callable=AsyncMock, return_value=None) as mock_delete:
             await stock_service.delete_stockin(mock_db, 1)
         mock_delete.assert_awaited_once()
 
@@ -164,7 +164,7 @@ class TestStockOutService:
     async def test_create_stockout_product_not_found(self, mock_db):
         mock_db.commit = AsyncMock()
         mock_db.rollback = AsyncMock()
-        with patch('fastapi_app.services.stock_service._create_stockout_records', new_callable=AsyncMock, side_effect=ValueError('产品ID 999 不存在')):
+        with patch('fastapi_app.services.stock_service.create_stockout_core', new_callable=AsyncMock, side_effect=ValueError('产品ID 999 不存在')):
             with pytest.raises(ValueError, match="产品ID 999 不存在"):
                 await stock_service.create_stockout(
                     mock_db, product_id=999, quantity=10,
@@ -178,7 +178,7 @@ class TestStockOutService:
         mock_db.commit = AsyncMock()
         mock_db.rollback = AsyncMock()
         mock_db.get = AsyncMock(return_value=product)
-        with patch('fastapi_app.services.stock_service._create_stockout_records', new_callable=AsyncMock, side_effect=ValueError('库存不足')):
+        with patch('fastapi_app.services.stock_service.create_stockout_core', new_callable=AsyncMock, side_effect=ValueError('库存不足')):
             with pytest.raises(ValueError, match="库存不足"):
                 await stock_service.create_stockout(
                     mock_db, product_id=1, quantity=10,
@@ -232,7 +232,7 @@ class TestStockOutService:
         mock_db.commit = AsyncMock()
         mock_db.rollback = AsyncMock()
 
-        with patch('fastapi_app.services.stock_service._delete_stockout_record', new_callable=AsyncMock, return_value=None) as mock_delete:
+        with patch('fastapi_app.services.stock_service.delete_stockout_core', new_callable=AsyncMock, return_value=None) as mock_delete:
             await stock_service.delete_stockout(mock_db, 1)
         mock_delete.assert_awaited_once()
 
@@ -283,7 +283,7 @@ class TestStockInEndpoints:
         mock_db.commit = AsyncMock()
         mock_db.rollback = AsyncMock()
         mock_db.get = AsyncMock(return_value=product)
-        with patch('fastapi_app.services.stock_service._create_stockin_record', new_callable=AsyncMock, return_value=stockin):
+        with patch('fastapi_app.services.stock_service.create_stockin_core', new_callable=AsyncMock, return_value=stockin):
             with patch('fastapi_app.services.stock_service.publish_stock_event', new_callable=AsyncMock):
                 response = await client.post("/api/v1/stock/in/create", json={
                     "product_id": 1, "quantity": 10,
@@ -296,7 +296,7 @@ class TestStockInEndpoints:
     async def test_create_stockin_product_not_found(self, mock_perm, client, mock_db):
         mock_db.commit = AsyncMock()
         mock_db.rollback = AsyncMock()
-        with patch('fastapi_app.services.stock_service._create_stockin_record', new_callable=AsyncMock, side_effect=ValueError('产品ID 999 不存在')):
+        with patch('fastapi_app.services.stock_service.create_stockin_core', new_callable=AsyncMock, side_effect=ValueError('产品ID 999 不存在')):
             response = await client.post("/api/v1/stock/in/create", json={
                 "product_id": 999, "quantity": 10,
                 "customer": "客户", "stockin_date": "2026-01-15"
@@ -323,7 +323,7 @@ class TestStockInEndpoints:
         mock_db.execute = AsyncMock(return_value=mock_result)
         mock_db.commit = AsyncMock()
         mock_db.rollback = AsyncMock()
-        with patch('fastapi_app.services.stock_service._delete_stockin_record', new_callable=AsyncMock, return_value=None):
+        with patch('fastapi_app.services.stock_service.delete_stockin_core', new_callable=AsyncMock, return_value=None):
             response = await client.delete("/api/v1/stock/in/delete/1")
         assert response.status_code == 200
 
@@ -357,7 +357,7 @@ class TestStockOutEndpoints:
         mock_db.commit = AsyncMock()
         mock_db.rollback = AsyncMock()
         mock_db.get = AsyncMock(return_value=product)
-        with patch('fastapi_app.services.stock_service._create_stockout_records', new_callable=AsyncMock, side_effect=ValueError('库存不足')):
+        with patch('fastapi_app.services.stock_service.create_stockout_core', new_callable=AsyncMock, side_effect=ValueError('库存不足')):
             response = await client.post("/api/v1/stock/out/create", json={
                 "product_id": 1, "quantity": 10,
                 "customer": "客户", "stockout_date": "2026-01-15"
@@ -368,7 +368,7 @@ class TestStockOutEndpoints:
     async def test_create_stockout_product_not_found(self, mock_perm, client, mock_db):
         mock_db.commit = AsyncMock()
         mock_db.rollback = AsyncMock()
-        with patch('fastapi_app.services.stock_service._create_stockout_records', new_callable=AsyncMock, side_effect=ValueError('产品ID 999 不存在')):
+        with patch('fastapi_app.services.stock_service.create_stockout_core', new_callable=AsyncMock, side_effect=ValueError('产品ID 999 不存在')):
             response = await client.post("/api/v1/stock/out/create", json={
                 "product_id": 999, "quantity": 10,
                 "customer": "客户", "stockout_date": "2026-01-15"

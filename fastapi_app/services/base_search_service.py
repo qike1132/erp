@@ -29,13 +29,13 @@ class BaseSearchService(Generic[T], ABC):
     子类需实现:
         - get_model_class(): 返回 ORM 模型类
         - get_search_fields(): 返回可搜索的字段名列表
-        - get_result_serializer(): 返回结果序列化函数
+        - get_result_formatter(): 返回结果格式化函数
 
     使用示例:
         class ProductSearchService(BaseSearchService[Product]):
             def get_model_class(self) -> type: return Product
             def get_search_fields(self) -> list[str]: return ['name', 'barcode']
-            def get_result_serializer(self) -> Callable: ...
+            def get_result_formatter(self) -> Callable: ...
     """
 
     def __init__(self, cache_prefix: str = "", cache_ttl: int = 300, use_trgm: bool = True):
@@ -52,8 +52,8 @@ class BaseSearchService(Generic[T], ABC):
         """返回可搜索的字段名列表"""
 
     @abstractmethod
-    def get_result_serializer(self) -> Callable[[Any], dict]:
-        """返回结果序列化函数，将 ORM 对象转为 dict"""
+    def get_result_formatter(self) -> Callable[[Any], dict]:
+        """返回结果格式化函数，将 ORM 对象转为 dict"""
 
     def _build_keyword_conditions(self, keyword: str, use_trgm: bool = True):
         """构建关键词 OR 条件列表
@@ -130,12 +130,12 @@ class BaseSearchService(Generic[T], ABC):
         limit: int = 20,
         status_filter: Any | None = None,
     ) -> list[dict]:
-        """同步搜索，返回序列化后的 dict 列表"""
+        """同步搜索，返回格式化后的 dict 列表"""
         query = self.build_search_query_sync(db, keyword, status_filter)
         query = query.limit(limit)
         results = query.all()
-        serializer = self.get_result_serializer()
-        return [serializer(item) for item in results]
+        formatter = self.get_result_formatter()
+        return [formatter(item) for item in results]
 
     async def search_async(
         self,
@@ -144,13 +144,13 @@ class BaseSearchService(Generic[T], ABC):
         limit: int = 20,
         status_filter: Any | None = None,
     ) -> list[dict]:
-        """异步搜索，返回序列化后的 dict 列表"""
+        """异步搜索，返回格式化后的 dict 列表"""
         query = self.build_search_query_async(db, keyword, status_filter)
         query = query.limit(limit)
         result = await db.execute(query)
         results = result.scalars().all()
-        serializer = self.get_result_serializer()
-        return [serializer(item) for item in results]
+        formatter = self.get_result_formatter()
+        return [formatter(item) for item in results]
 
     def _get_cache_key(self, keyword: str, limit: int, status_filter: Any | None = None) -> str:
         """生成缓存键"""

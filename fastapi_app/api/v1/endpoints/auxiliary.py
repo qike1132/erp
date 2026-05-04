@@ -352,7 +352,7 @@ async def batch_submit_orders(
                     'order_ids': created_order_ids,
                     'count': len(created_order_ids),
                 })
-            except Exception:
+            except (RuntimeError, OSError, ValueError):
                 _logging.warning("批量订单事件发布失败", exc_info=True)
 
         return result

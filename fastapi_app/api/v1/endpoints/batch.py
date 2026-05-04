@@ -65,7 +65,7 @@ async def _save_uploaded_file(file: UploadFile):
         if len(content) > MAX_BATCH_UPLOAD_SIZE:
             raise ValueError('文件大小超过5MB限制，请拆分后重新上传')
         with open(temp_path, 'wb') as f:
-            f.write(content)
+            await asyncio.to_thread(f.write, content)
         yield temp_path
     finally:
         if temp_path and os.path.exists(temp_path):

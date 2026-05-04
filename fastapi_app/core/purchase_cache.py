@@ -37,7 +37,7 @@ async def invalidate_purchase_caches() -> int:
     try:
         from fastapi_app.core.cache import invalidate_local_cache
         count += invalidate_local_cache("orders:*")
-    except Exception:
+    except (RuntimeError, OSError, ValueError):
         pass
 
     await _async_publish_invalidation_signal()
@@ -53,7 +53,7 @@ async def _async_publish_invalidation_signal() -> None:
         if client is None:
             return
         await client.publish(_CHANNEL, json.dumps({"scope": "purchase_caches"}))
-    except Exception:
+    except (RuntimeError, OSError, ValueError):
         pass
 
 
@@ -66,7 +66,7 @@ def _clear_all_local_caches() -> int:
     try:
         from fastapi_app.core.cache import invalidate_local_cache
         count += invalidate_local_cache("orders:*")
-    except Exception:
+    except (RuntimeError, OSError, ValueError):
         pass
     return count
 
@@ -136,10 +136,10 @@ async def _listen_loop() -> None:
                 if pubsub:
                     await pubsub.unsubscribe(_CHANNEL)
                     await pubsub.close()
-            except Exception:
+            except (RuntimeError, OSError, ValueError):
                 pass
             try:
                 if redis_client:
                     await redis_client.close()
-            except Exception:
+            except (RuntimeError, OSError, ValueError):
                 pass

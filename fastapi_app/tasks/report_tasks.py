@@ -10,7 +10,7 @@ from celery import shared_task
 from fastapi_app.core.logger import logger
 
 
-@shared_task(bind=True, name='export_report', queue='reports', max_retries=1, default_retry_delay=60)
+@shared_task(bind=True, name='export_report', queue='reports', max_retries=1, default_retry_delay=60, soft_time_limit=300, time_limit=600)
 def export_report_task(self, report_type: str, filters: dict, user_id: int):
     """异步导出报表
 

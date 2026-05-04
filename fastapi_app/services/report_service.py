@@ -79,7 +79,7 @@ def _string_agg(expr: str, separator: str, distinct: bool = True) -> str:
 async def get_order_logs(db: AsyncSession, customer: str = '', product: str = '', status: str = '',
                          start_date: str = '', end_date: str = '',
                          page: int = 1, per_page: int = 20) -> dict:
-    """订单流水（分页+分组聚合）"""
+    """订单流水（分页+分组聚合，COUNT(*) OVER() 合并计数查询）"""
     per_page = min(max(1, per_page), 100)
     customer = customer.strip()[:100]
     product = product.strip()[:100]
@@ -107,33 +107,27 @@ async def get_order_logs(db: AsyncSession, customer: str = '', product: str = ''
 
     where_sql = " AND " + " AND ".join(where_clauses) if where_clauses else ""
 
-    # 总数
     order_tbl = _quote_identifier("order")
-    count_sql = f"""SELECT COUNT(*) FROM (
-        SELECT DATE(o.order_date), o.customer, p.name, p.barcode, o.status
-        FROM {order_tbl} o JOIN product p ON o.product_id = p.id
-        WHERE 1=1 {where_sql}
-        GROUP BY DATE(o.order_date), o.customer, p.name, p.barcode, o.status
-    ) AS grouped"""
-    total = (await db.execute(text(count_sql), params)).scalar() or 0
+    params['limit'] = per_page
+    params['offset'] = (page - 1) * per_page
 
-    # 数据
+    # 数据 + 计数合并查询（COUNT(*) OVER() 在 GROUP BY 后、LIMIT 前计算）
     data_sql = f"""SELECT
         DATE(o.order_date) as order_date_only, o.customer, p.name as product_name,
         p.barcode as product_barcode, o.status,
         SUM(o.quantity) as total_quantity, COUNT(o.id) as order_count,
         {_string_agg('o.order_no', ', ')} as order_nos,
-        {_string_agg('o.note', '; ')} as notes
+        {_string_agg('o.note', '; ')} as notes,
+        COUNT(*) OVER() as total_count
         FROM {order_tbl} o JOIN product p ON o.product_id = p.id
         WHERE 1=1 {where_sql}
         GROUP BY DATE(o.order_date), o.customer, p.name, p.barcode, o.status
         ORDER BY DATE(o.order_date) DESC
         LIMIT :limit OFFSET :offset"""
-    params['limit'] = per_page
-    params['offset'] = (page - 1) * per_page
 
     results = (await db.execute(text(data_sql), params)).fetchall()
 
+    total = results[0].total_count if results else 0
     logs = []
     for row in results:
         logs.append({
@@ -145,7 +139,7 @@ async def get_order_logs(db: AsyncSession, customer: str = '', product: str = ''
             'order_nos': row.order_nos or '', 'note': row.notes or '',
         })
 
-    # total_qty 使用与 count 相同的 WHERE 条件，但无需 GROUP BY
+    # total_qty 单独查询（无 GROUP BY，简单聚合，速度快）
     qty_sql = f"SELECT COALESCE(SUM(o.quantity), 0) FROM {order_tbl} o JOIN product p ON o.product_id = p.id WHERE 1=1 {where_sql}"
     total_qty = (await db.execute(text(qty_sql), params)).scalar() or 0
 
@@ -169,6 +163,9 @@ async def export_report_to_excel(db, report_type: str, customer: str = '', produ
     from fastapi_app.core.database import SyncSessionLocal
     from fastapi_app.shared.report_data_service import get_all_logs_data
     from utils.report_exporter import ReportExporter
+
+    if SyncSessionLocal is None:
+        raise RuntimeError('SyncSessionLocal 未配置，无法导出报表。请检查数据库配置。')
 
     def _sync_export():
         session = SyncSessionLocal()
@@ -212,7 +209,7 @@ async def export_report_to_excel(db, report_type: str, customer: str = '', produ
 async def get_stockin_logs(db: AsyncSession, customer: str = '', product: str = '',
                            start_date: str = '', end_date: str = '',
                            page: int = 1, per_page: int = 20) -> dict:
-    """备货流水（分页+分组聚合）"""
+    """备货流水（分页+分组聚合，COUNT(*) OVER() 合并计数查询）"""
     per_page = min(max(1, per_page), 100)
     customer = customer.strip()[:100]
     product = product.strip()[:100]
@@ -234,31 +231,25 @@ async def get_stockin_logs(db: AsyncSession, customer: str = '', product: str = 
         where_clauses.append("s.stockin_date < :end_date")
 
     where_sql = " AND " + " AND ".join(where_clauses) if where_clauses else ""
-
-    count_sql = f"""SELECT COUNT(*) FROM (
-        SELECT DATE(s.stockin_date), s.customer, p.name, p.barcode
-        FROM stock_in s JOIN product p ON s.product_id = p.id
-        WHERE 1=1 {where_sql}
-        GROUP BY DATE(s.stockin_date), s.customer, p.name, p.barcode
-    ) AS grouped"""
-    total = (await db.execute(text(count_sql), params)).scalar() or 0
+    params['limit'] = per_page
+    params['offset'] = (page - 1) * per_page
 
     data_sql = f"""SELECT
         DATE(s.stockin_date) as stockin_date_only, s.customer, p.name as product_name,
         p.barcode as product_barcode,
         SUM(s.quantity) as total_quantity, COUNT(s.id) as stockin_count,
         {_string_agg('s.stockin_no', ', ')} as stockin_nos,
-        {_string_agg('s.note', '; ')} as notes
+        {_string_agg('s.note', '; ')} as notes,
+        COUNT(*) OVER() as total_count
         FROM stock_in s JOIN product p ON s.product_id = p.id
         WHERE 1=1 {where_sql}
         GROUP BY DATE(s.stockin_date), s.customer, p.name, p.barcode
         ORDER BY DATE(s.stockin_date) DESC
         LIMIT :limit OFFSET :offset"""
-    params['limit'] = per_page
-    params['offset'] = (page - 1) * per_page
 
     results = (await db.execute(text(data_sql), params)).fetchall()
 
+    total = results[0].total_count if results else 0
     logs = []
     for row in results:
         logs.append({
@@ -269,7 +260,7 @@ async def get_stockin_logs(db: AsyncSession, customer: str = '', product: str = 
             'stockin_nos': row.stockin_nos or '', 'note': row.notes or '',
         })
 
-    qty_sql = f"SELECT SUM(s.quantity) FROM stock_in s JOIN product p ON s.product_id = p.id WHERE 1=1 {where_sql}"
+    qty_sql = f"SELECT COALESCE(SUM(s.quantity), 0) FROM stock_in s JOIN product p ON s.product_id = p.id WHERE 1=1 {where_sql}"
     total_qty = (await db.execute(text(qty_sql), params)).scalar() or 0
 
     return {
@@ -283,7 +274,7 @@ async def get_stockin_logs(db: AsyncSession, customer: str = '', product: str = 
 async def get_stockout_logs(db: AsyncSession, customer: str = '', product: str = '',
                             start_date: str = '', end_date: str = '',
                             page: int = 1, per_page: int = 20) -> dict:
-    """出货流水（仅手动出货，stockin_id IS NULL）"""
+    """出货流水（仅手动出货，stockin_id IS NULL，COUNT(*) OVER() 合并计数查询）"""
     per_page = min(max(1, per_page), 100)
     customer = customer.strip()[:100]
     product = product.strip()[:100]
@@ -304,33 +295,26 @@ async def get_stockout_logs(db: AsyncSession, customer: str = '', product: str =
         params['end_date'] = _parse_report_date(end_date, '结束') + timedelta(days=1)
         where_clauses.append("so.stockout_date < :end_date")
 
-
     where_sql = " AND " + " AND ".join(where_clauses)
-
-    count_sql = f"""SELECT COUNT(*) FROM (
-        SELECT DATE(so.stockout_date), so.customer, p.name, p.barcode
-        FROM stock_out so JOIN product p ON so.product_id = p.id
-        WHERE 1=1 {where_sql}
-        GROUP BY DATE(so.stockout_date), so.customer, p.name, p.barcode
-    ) AS grouped"""
-    total = (await db.execute(text(count_sql), params)).scalar() or 0
+    params['limit'] = per_page
+    params['offset'] = (page - 1) * per_page
 
     data_sql = f"""SELECT
         DATE(so.stockout_date) as stockout_date_only, so.customer, p.name as product_name,
         p.barcode as product_barcode,
         SUM(so.quantity) as total_quantity, COUNT(so.id) as stockout_count,
         {_string_agg('so.stockout_no', ', ')} as stockout_nos,
-        {_string_agg('so.note', '; ')} as notes
+        {_string_agg('so.note', '; ')} as notes,
+        COUNT(*) OVER() as total_count
         FROM stock_out so JOIN product p ON so.product_id = p.id
         WHERE 1=1 {where_sql}
         GROUP BY DATE(so.stockout_date), so.customer, p.name, p.barcode
         ORDER BY DATE(so.stockout_date) DESC
         LIMIT :limit OFFSET :offset"""
-    params['limit'] = per_page
-    params['offset'] = (page - 1) * per_page
 
     results = (await db.execute(text(data_sql), params)).fetchall()
 
+    total = results[0].total_count if results else 0
     logs = []
     for row in results:
         logs.append({
@@ -341,7 +325,7 @@ async def get_stockout_logs(db: AsyncSession, customer: str = '', product: str =
             'stockout_nos': row.stockout_nos or '', 'note': row.notes or '',
         })
 
-    qty_sql = f"SELECT SUM(so.quantity) FROM stock_out so JOIN product p ON so.product_id = p.id WHERE 1=1 {where_sql}"
+    qty_sql = f"SELECT COALESCE(SUM(so.quantity), 0) FROM stock_out so JOIN product p ON so.product_id = p.id WHERE 1=1 {where_sql}"
     total_qty = (await db.execute(text(qty_sql), params)).scalar() or 0
 
     return {
@@ -355,7 +339,7 @@ async def get_stockout_logs(db: AsyncSession, customer: str = '', product: str =
 async def get_deduction_logs(db: AsyncSession, customer: str = '', product: str = '',
                               start_date: str = '', end_date: str = '',
                               page: int = 1, per_page: int = 20) -> dict:
-    """备货抵扣流水（stockin_id IS NOT NULL）"""
+    """备货抵扣流水（stockin_id IS NOT NULL，COUNT(*) OVER() 合并计数查询）"""
     per_page = min(max(1, per_page), 100)
     customer = customer.strip()[:100]
     product = product.strip()[:100]
@@ -376,34 +360,27 @@ async def get_deduction_logs(db: AsyncSession, customer: str = '', product: str 
         params['end_date'] = _parse_report_date(end_date, '结束') + timedelta(days=1)
         where_clauses.append("so.stockout_date < :end_date")
 
-
     where_sql = " AND " + " AND ".join(where_clauses)
-
-    count_sql = f"""SELECT COUNT(*) FROM (
-        SELECT DATE(so.stockout_date), so.customer, p.name, p.barcode
-        FROM stock_out so JOIN product p ON so.product_id = p.id
-        WHERE 1=1 {where_sql}
-        GROUP BY DATE(so.stockout_date), so.customer, p.name, p.barcode
-    ) AS grouped"""
-    total = (await db.execute(text(count_sql), params)).scalar() or 0
+    params['limit'] = per_page
+    params['offset'] = (page - 1) * per_page
 
     data_sql = f"""SELECT
         DATE(so.stockout_date) as deduction_date_only, so.customer, p.name as product_name,
         p.barcode as sku,
         SUM(so.quantity) as total_quantity, COUNT(so.id) as deduction_count,
         {_string_agg('o.order_no', ', ')} as order_nos,
-        {_string_agg('o.note', '; ')} as order_notes
+        {_string_agg('o.note', '; ')} as order_notes,
+        COUNT(*) OVER() as total_count
         FROM stock_out so JOIN product p ON so.product_id = p.id
         LEFT JOIN {_quote_identifier('order')} o ON so.order_id = o.id
         WHERE 1=1 {where_sql}
         GROUP BY DATE(so.stockout_date), so.customer, p.name, p.barcode
         ORDER BY DATE(so.stockout_date) DESC
         LIMIT :limit OFFSET :offset"""
-    params['limit'] = per_page
-    params['offset'] = (page - 1) * per_page
 
     results = (await db.execute(text(data_sql), params)).fetchall()
 
+    total = results[0].total_count if results else 0
     logs = []
     for row in results:
         logs.append({
@@ -414,7 +391,7 @@ async def get_deduction_logs(db: AsyncSession, customer: str = '', product: str 
             'order_nos': row.order_nos or '', 'order_note': row.order_notes or '',
         })
 
-    qty_sql = f"SELECT SUM(so.quantity) FROM stock_out so JOIN product p ON so.product_id = p.id WHERE 1=1 {where_sql}"
+    qty_sql = f"SELECT COALESCE(SUM(so.quantity), 0) FROM stock_out so JOIN product p ON so.product_id = p.id WHERE 1=1 {where_sql}"
     total_qty = (await db.execute(text(qty_sql), params)).scalar() or 0
 
     return {

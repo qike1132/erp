@@ -458,6 +458,7 @@
 import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { productApi } from '@/api'
+import type { ApiResponse } from '@/types'
 import { upload, download, resolveStaticUrl } from '@/api/request'
 import { showToast } from '@/composables/useToast'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'

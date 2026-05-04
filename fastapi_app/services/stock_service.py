@@ -26,7 +26,7 @@ from fastapi_app.shared_models import InventoryLog, Product, StockIn, StockOut
 
 logger = logging.getLogger(__name__)
 
-async def _create_stockin_record(db: AsyncSession, product_id: int, quantity: int, customer: str, stockin_date: datetime, note: str) -> StockIn:
+async def create_stockin_core(db: AsyncSession, product_id: int, quantity: int, customer: str, stockin_date: datetime, note: str) -> StockIn:
     if quantity <= 0:
         raise ValueError('入库数量必须大于0')
     stockin = StockIn(stockin_no=await generate_stockin_number(db), product_id=product_id, quantity=quantity, customer=customer, stockin_date=stockin_date, note=note)
@@ -38,7 +38,7 @@ async def _create_stockin_record(db: AsyncSession, product_id: int, quantity: in
     await db.flush()
     return stockin
 
-async def _update_stockin_record(db: AsyncSession, stockin: StockIn, quantity: int, customer: str, stockin_date: datetime, note: str) -> StockIn:
+async def update_stockin_core(db: AsyncSession, stockin: StockIn, quantity: int, customer: str, stockin_date: datetime, note: str) -> StockIn:
     old_quantity = stockin.quantity
     stockin.quantity = quantity
     stockin.customer = customer
@@ -51,7 +51,7 @@ async def _update_stockin_record(db: AsyncSession, stockin: StockIn, quantity: i
     await db.flush()
     return stockin
 
-async def _delete_stockin_record(db: AsyncSession, stockin: StockIn) -> None:
+async def delete_stockin_core(db: AsyncSession, stockin: StockIn) -> None:
     if stockin.stockin_stockouts:
         raise ValueError('该入库记录已有出库关联，无法删除')
     product = await get_product_for_update(db, stockin.product_id)
@@ -62,7 +62,7 @@ async def _delete_stockin_record(db: AsyncSession, stockin: StockIn) -> None:
     await db.delete(stockin)
     await db.flush()
 
-async def _create_stockout_records(db: AsyncSession, product_id: int, quantity: int, customer: str, stockout_date: datetime, note: str, order_type: str='regular', country: str | None=None) -> list[StockOut]:
+async def create_stockout_core(db: AsyncSession, product_id: int, quantity: int, customer: str, stockout_date: datetime, note: str, order_type: str='regular', country: str | None=None) -> list[StockOut]:
     product = await get_product_for_update(db, product_id)
     if product.current_stock < quantity:
         raise ValueError('库存不足！')
@@ -92,7 +92,7 @@ async def _create_stockout_records(db: AsyncSession, product_id: int, quantity: 
         await db.flush()
     return created_stockouts
 
-async def _update_stockout_record(db: AsyncSession, stockout: StockOut, new_quantity: int, customer: str, stockout_date: datetime, note: str) -> StockOut:
+async def update_stockout_core(db: AsyncSession, stockout: StockOut, new_quantity: int, customer: str, stockout_date: datetime, note: str) -> StockOut:
     if stockout.stockin_id is not None:
         raise ValueError('订单抵扣的出货记录不能直接编辑！请通过订单管理进行修改。')
     old_quantity = stockout.quantity
@@ -114,7 +114,7 @@ async def _update_stockout_record(db: AsyncSession, stockout: StockOut, new_quan
     await db.flush()
     return stockout
 
-async def _delete_stockout_record(db: AsyncSession, stockout: StockOut) -> None:
+async def delete_stockout_core(db: AsyncSession, stockout: StockOut) -> None:
     if stockout.stockin_id is not None:
         raise ValueError('订单抵扣的出货记录不能直接删除！请通过订单管理进行修改。')
     product = await get_product_for_update(db, stockout.product_id)
@@ -138,7 +138,7 @@ async def create_stockin(db: AsyncSession, product_id: int, quantity: int, custo
     """创建入库记录"""
     stockin_date = _parse_date_preserve_time(stockin_date_str)
     try:
-        stockin = await _create_stockin_record(db, product_id, quantity, customer, stockin_date, note)
+        stockin = await create_stockin_core(db, product_id, quantity, customer, stockin_date, note)
         await db.commit()
     except (SQLAlchemyError, ValueError):
         await db.rollback()
@@ -166,7 +166,7 @@ async def update_stockin(db: AsyncSession, stockin_id: int, quantity: int, custo
     old_quantity = stockin_obj.quantity
     old_stockin_no = stockin_obj.stockin_no
     try:
-        await _update_stockin_record(db, stockin_obj, quantity, customer, stockin_date, note)
+        await update_stockin_core(db, stockin_obj, quantity, customer, stockin_date, note)
         await db.commit()
     except (SQLAlchemyError, ValueError):
         await db.rollback()
@@ -183,7 +183,7 @@ async def delete_stockin(db: AsyncSession, stockin_id: int) -> None:
         raise ValueError('入库记录不存在')
     stockin_no = stockin_obj.stockin_no
     try:
-        await _delete_stockin_record(db, stockin_obj)
+        await delete_stockin_core(db, stockin_obj)
         await db.commit()
     except (SQLAlchemyError, ValueError):
         await db.rollback()
@@ -208,7 +208,7 @@ async def create_stockout(db: AsyncSession, product_id: int, quantity: int, cust
     """创建出库记录"""
     stockout_date = _parse_date_preserve_time(stockout_date_str)
     try:
-        await _create_stockout_records(db, product_id, quantity, customer, stockout_date, note, order_type, country)
+        await create_stockout_core(db, product_id, quantity, customer, stockout_date, note, order_type, country)
         await db.commit()
     except (SQLAlchemyError, ValueError):
         await db.rollback()
@@ -234,7 +234,7 @@ async def update_stockout(db: AsyncSession, stockout_id: int, new_quantity: int,
     old_quantity = stockout_obj.quantity
     old_stockout_no = stockout_obj.stockout_no
     try:
-        await _update_stockout_record(db, stockout_obj, new_quantity, customer, stockout_date, note)
+        await update_stockout_core(db, stockout_obj, new_quantity, customer, stockout_date, note)
         await db.commit()
     except (SQLAlchemyError, ValueError):
         await db.rollback()
@@ -251,7 +251,7 @@ async def delete_stockout(db: AsyncSession, stockout_id: int) -> None:
         raise ValueError('出库记录不存在')
     stockout_no = stockout_obj.stockout_no
     try:
-        await _delete_stockout_record(db, stockout_obj)
+        await delete_stockout_core(db, stockout_obj)
         await db.commit()
     except (SQLAlchemyError, ValueError):
         await db.rollback()
@@ -417,7 +417,7 @@ async def batch_create_stockins(db: AsyncSession, stockins_data: list) -> dict:
                 note = item.get('note', '')
                 try:
                     async with db.begin_nested():
-                        stockin = await _create_stockin_record(db, product_id, quantity, customer, datetime.now(UTC).replace(tzinfo=None), note)
+                        stockin = await create_stockin_core(db, product_id, quantity, customer, datetime.now(UTC).replace(tzinfo=None), note)
                     results[orig_idx] = {'success': True, 'stockin_no': stockin.stockin_no, 'id': stockin.id}
                 except ValueError as e:
                     results[orig_idx] = {'success': False, 'error': str(e), 'id': item.get('id', '未知')}
@@ -467,7 +467,7 @@ async def batch_create_stockouts(db: AsyncSession, stockouts_data: list) -> dict
                 note = item.get('note', '')
                 try:
                     async with db.begin_nested():
-                        created = await _create_stockout_records(db, product_id, quantity, customer, datetime.now(UTC).replace(tzinfo=None), note, order_type, country)
+                        created = await create_stockout_core(db, product_id, quantity, customer, datetime.now(UTC).replace(tzinfo=None), note, order_type, country)
                     stockout_nos = [s.stockout_no for s in created] if created else []
                     results[orig_idx] = {'success': True, 'stockout_no': stockout_nos[0] if stockout_nos else '', 'id': item.get('id', '未知')}
                 except ValueError as e:

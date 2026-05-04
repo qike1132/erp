@@ -35,16 +35,16 @@ async def _safe_invalidate_purchase_cache():
     try:
         from fastapi_app.core.purchase_cache import invalidate_purchase_caches
         await invalidate_purchase_caches()
-    except Exception:
+    except (RuntimeError, OSError, ValueError):
         logger.warning("采购中心缓存失效失败", exc_info=True)
 
 
 async def _safe_publish_event(event_type, data: dict):
     """安全发布库存事件，失败仅记录警告"""
     try:
-        from fastapi_app.services.notification_service import StockEvent, publish_stock_event
+        from fastapi_app.services.notification_service import publish_stock_event
         await publish_stock_event(event_type, data)
-    except Exception:
+    except (RuntimeError, OSError, ValueError):
         logger.warning(f"事件发布失败: {event_type}", exc_info=True)
 
 
@@ -89,7 +89,7 @@ async def get_order_by_id(db: AsyncSession, order_id: int) -> dict | None:
         joinedload(Order.product),
         selectinload(Order.order_stockouts),
         joinedload(Order.locked_by)
-    ).where(Order.id == order_id, Order.is_deleted == False)
+    ).where(Order.id == order_id, ~Order.is_deleted)
 
     result = await db.execute(query)
     o = result.scalars().unique().first()
@@ -115,8 +115,8 @@ async def get_orders(db: AsyncSession, page: int = 1, per_page: int = 50,
         joinedload(Order.product),
         selectinload(Order.order_stockouts),
         joinedload(Order.locked_by)
-    ).where(Order.is_deleted == False)
-    count_query = select(func.count(Order.id)).where(Order.is_deleted == False)
+    ).where(~Order.is_deleted)
+    count_query = select(func.count(Order.id)).where(~Order.is_deleted)
 
     # 筛选条件（共用，避免 DRY 违反）
     conditions = []
@@ -629,7 +629,7 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                             custom_deduct_quantity=deduct_quantity,
                             product=product,
                         )
-                    except Exception as ded_err:
+                    except (ValueError, TypeError, RuntimeError, OSError) as ded_err:
                         logger.error(f"订单抵扣处理失败: {ded_err}", exc_info=True)
                         results.append({
                             'success': False, 'error': '抵扣处理失败，请稍后重试',

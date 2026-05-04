@@ -76,7 +76,7 @@ async def lifespan(application: FastAPI):
     from fastapi_app.services.notification_service import _warmup_async_redis
     try:
         await _warmup_async_redis()
-    except Exception as e:
+    except (RuntimeError, OSError, ValueError) as e:
         logger.warning("异步 Redis 客户端预热失败: %s", e)
 
     from utils.redis_cache import redis_cache

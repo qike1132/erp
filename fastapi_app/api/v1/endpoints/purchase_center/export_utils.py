@@ -96,11 +96,9 @@ th{background:#f5f5f5;font-weight:bold}
     return build_print_html("采购订单汇总", ''.join(body_parts), extra_css)
 
 
-def generate_factory_summary_print(db, orders, order_items_map):
+def generate_factory_summary_print(orders, order_items_map, source_orders=None):
     """生成工厂内部汇总格式打印HTML"""
-    from fastapi_app.shared_models import Order
-    source_order_ids = [o.source_order_id for o in orders if o.source_order_id]
-    source_orders = db.query(Order).filter(Order.id.in_(source_order_ids)).all() if source_order_ids else []
+    source_orders = source_orders or []
     source_order_map = {o.id: o for o in source_orders}
 
     grouped_data = {}

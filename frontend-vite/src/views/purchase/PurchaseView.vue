@@ -125,7 +125,7 @@
 import { ref, computed } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 import { purchaseApi } from '@/api'
-import type { PurchaseOrder, UnprocessedOrder } from '@/types'
+import type { ApiResponse, PurchaseOrder, UnprocessedOrder } from '@/types'
 
 import PendingOrdersPanel from './components/PendingOrdersPanel.vue'
 import ActiveOrdersPanel from './components/ActiveOrdersPanel.vue'
@@ -143,17 +143,6 @@ import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { useAutoRefresh } from './composables/useAutoRefresh'
 import { useWebSocket } from './composables/useWebSocket'
 import { showToast } from '@/composables/useToast'
-
-interface ApiResponse<T = unknown> {
-  success: boolean
-  message?: string
-  data?: T
-  order?: PurchaseOrder
-  orders?: PurchaseOrder[]
-  total?: number
-  html?: string
-  [key: string]: unknown
-}
 
 // --- Composables ---
 const queryClient = useQueryClient()

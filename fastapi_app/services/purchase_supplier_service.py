@@ -5,8 +5,8 @@
 """
 import logging
 
-from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.shared_models import (
     MaterialRegistration,
@@ -22,16 +22,19 @@ from fastapi_app.shared_models import (
 logger = logging.getLogger(__name__)
 
 
-def get_suppliers(db: Session, with_stats: bool = False) -> list:
-    suppliers = db.query(Supplier).order_by(Supplier.name).all()
-    # Batch-fetch material counts to avoid N+1 when with_stats=True
+async def get_suppliers(db: AsyncSession, with_stats: bool = False) -> list:
+    result = await db.execute(select(Supplier).order_by(Supplier.name))
+    suppliers = result.scalars().all()
+
     material_counts: dict[int, int] = {}
     if with_stats:
-        rows = db.query(
-            ProductMaterial.supplier_id,
-            func.count(ProductMaterial.id)
-        ).group_by(ProductMaterial.supplier_id).all()
-        material_counts = dict(rows)
+        rows_result = await db.execute(
+            select(
+                ProductMaterial.supplier_id,
+                func.count(ProductMaterial.id)
+            ).group_by(ProductMaterial.supplier_id)
+        )
+        material_counts = {row[0]: row[1] for row in rows_result}
 
     supplier_list = []
     for supplier in suppliers:
@@ -48,8 +51,9 @@ def get_suppliers(db: Session, with_stats: bool = False) -> list:
     return supplier_list
 
 
-def create_supplier(db: Session, data: dict) -> dict:
-    existing = db.query(Supplier).filter_by(name=data['name']).first()
+async def create_supplier(db: AsyncSession, data: dict) -> dict:
+    result = await db.execute(select(Supplier).where(Supplier.name == data['name']))
+    existing = result.scalar_one_or_none()
     if existing:
         raise ValueError('供应商已存在')
 
@@ -61,12 +65,12 @@ def create_supplier(db: Session, data: dict) -> dict:
         remark=data.get('remark', ''),
     )
     db.add(supplier)
-    db.commit()
+    await db.commit()
     return {'id': supplier.id, 'name': supplier.name}
 
 
-def update_supplier(db: Session, supplier_id: int, data: dict) -> dict:
-    supplier = db.get(Supplier, supplier_id)
+async def update_supplier(db: AsyncSession, supplier_id: int, data: dict) -> dict:
+    supplier = await db.get(Supplier, supplier_id)
     if not supplier:
         raise ValueError('供应商不存在')
 
@@ -74,7 +78,10 @@ def update_supplier(db: Session, supplier_id: int, data: dict) -> dict:
     if not new_name:
         raise ValueError('供应商名称不能为空')
 
-    existing = db.query(Supplier).filter(Supplier.name == new_name, Supplier.id != supplier_id).first()
+    result = await db.execute(
+        select(Supplier).where(Supplier.name == new_name, Supplier.id != supplier_id)
+    )
+    existing = result.scalar_one_or_none()
     if existing:
         raise ValueError('供应商名称已存在')
 
@@ -86,19 +93,13 @@ def update_supplier(db: Session, supplier_id: int, data: dict) -> dict:
     supplier.address = data.get('address', '')
     supplier.remark = data.get('remark', '')
 
-    # 同步供应商信息到所有关联表
-    _sync_supplier_info(db, supplier, old_name)
+    await _sync_supplier_info(db, supplier, old_name)
 
-    db.commit()
+    await db.commit()
     return {'id': supplier.id, 'name': supplier.name}
 
 
-def _sync_supplier_info(db: Session, supplier, old_name: str):
-    """供应商信息变更后，同步所有冗余的供应商字段到关联表
-
-    同步字段: supplier_name, supplier_contact_person, supplier_phone, supplier_address
-    目标表: BOM物料表(仅name), 采购订单(全部4字段), 采购订单明细/来料登记(仅name)
-    """
+async def _sync_supplier_info(db: AsyncSession, supplier, old_name: str):
     sid = supplier.id
     new_name = supplier.name
     new_contact = supplier.contact_person
@@ -106,71 +107,94 @@ def _sync_supplier_info(db: Session, supplier, old_name: str):
     new_address = supplier.address
     name_changed = old_name != new_name
 
-    # BOM 物料表 — 按 supplier_id 匹配
-    for Model in (ProductMaterial, ProductFabric, ProductAccessory, ProductPackaging):
-        db.query(Model).filter_by(supplier_id=sid).update({'supplier_name': new_name})
+    for model_cls in (ProductMaterial, ProductFabric, ProductAccessory, ProductPackaging):
+        await db.execute(
+            update(model_cls).where(model_cls.supplier_id == sid).values(supplier_name=new_name)
+        )
         if name_changed:
-            db.query(Model).filter(
-                Model.supplier_name == old_name,
-                Model.supplier_id.is_(None)
-            ).update({'supplier_name': new_name})
+            await db.execute(
+                update(model_cls).where(
+                    model_cls.supplier_name == old_name,
+                    model_cls.supplier_id.is_(None)
+                ).values(supplier_name=new_name)
+            )
 
-    # 采购订单 — 按 supplier_id 匹配，含全部供应商冗余字段
-    db.query(PurchaseOrder).filter_by(supplier_id=sid).update({
-        'supplier_name': new_name,
-        'supplier_contact_person': new_contact,
-        'supplier_phone': new_phone,
-        'supplier_address': new_address,
-    })
-    # 同时按 supplier_name 匹配无 supplier_id 的历史数据
-    db.query(PurchaseOrder).filter(
-        PurchaseOrder.supplier_name == (new_name if not name_changed else old_name),
-        PurchaseOrder.supplier_id.is_(None)
-    ).update({
-        'supplier_name': new_name,
-        'supplier_contact_person': new_contact,
-        'supplier_phone': new_phone,
-        'supplier_address': new_address,
-    })
-
-    # 采购订单明细 — 无 supplier_id，按旧 supplier_name 匹配
+    await db.execute(
+        update(PurchaseOrder).where(PurchaseOrder.supplier_id == sid).values(
+            supplier_name=new_name,
+            supplier_contact_person=new_contact,
+            supplier_phone=new_phone,
+            supplier_address=new_address,
+        )
+    )
     if name_changed:
-        db.query(PurchaseOrderItem).filter_by(supplier_name=old_name).update({'supplier_name': new_name})
+        await db.execute(
+            update(PurchaseOrder).where(
+                PurchaseOrder.supplier_name == old_name,
+                PurchaseOrder.supplier_id.is_(None)
+            ).values(
+                supplier_name=new_name,
+                supplier_contact_person=new_contact,
+                supplier_phone=new_phone,
+                supplier_address=new_address,
+            )
+        )
 
-    # 来料登记 — 按 supplier_id 匹配
-    db.query(MaterialRegistration).filter_by(supplier_id=sid).update({'supplier_name': new_name})
     if name_changed:
-        db.query(MaterialRegistration).filter(
-            MaterialRegistration.supplier_name == old_name,
-            MaterialRegistration.supplier_id.is_(None)
-        ).update({'supplier_name': new_name})
+        await db.execute(
+            update(PurchaseOrderItem).where(
+                PurchaseOrderItem.supplier_name == old_name
+            ).values(supplier_name=new_name)
+        )
+
+    await db.execute(
+        update(MaterialRegistration).where(
+            MaterialRegistration.supplier_id == sid
+        ).values(supplier_name=new_name)
+    )
+    if name_changed:
+        await db.execute(
+            update(MaterialRegistration).where(
+                MaterialRegistration.supplier_name == old_name,
+                MaterialRegistration.supplier_id.is_(None)
+            ).values(supplier_name=new_name)
+        )
 
 
-def delete_supplier(db: Session, supplier_id: int) -> dict:
-    supplier = db.get(Supplier, supplier_id)
+async def delete_supplier(db: AsyncSession, supplier_id: int) -> dict:
+    supplier = await db.get(Supplier, supplier_id)
     if not supplier:
         raise ValueError('供应商不存在')
 
     has_bom = (
-        db.query(ProductMaterial).filter_by(supplier_id=supplier_id).first() or
-        db.query(ProductFabric).filter_by(supplier_id=supplier_id).first() or
-        db.query(ProductAccessory).filter_by(supplier_id=supplier_id).first() or
-        db.query(ProductPackaging).filter_by(supplier_id=supplier_id).first()
-    )
-    has_orders = db.query(PurchaseOrder).filter_by(supplier_id=supplier_id).first()
+        await db.execute(select(ProductMaterial).where(ProductMaterial.supplier_id == supplier_id).limit(1))
+    ).scalar_one_or_none() or (
+        await db.execute(select(ProductFabric).where(ProductFabric.supplier_id == supplier_id).limit(1))
+    ).scalar_one_or_none() or (
+        await db.execute(select(ProductAccessory).where(ProductAccessory.supplier_id == supplier_id).limit(1))
+    ).scalar_one_or_none() or (
+        await db.execute(select(ProductPackaging).where(ProductPackaging.supplier_id == supplier_id).limit(1))
+    ).scalar_one_or_none()
+
+    has_orders = (
+        await db.execute(select(PurchaseOrder).where(PurchaseOrder.supplier_id == supplier_id).limit(1))
+    ).scalar_one_or_none()
 
     if has_bom or has_orders:
         raise ValueError('该供应商已有相关BOM或采购订单数据，无法删除')
 
-    db.delete(supplier)
-    db.commit()
+    await db.delete(supplier)
+    await db.commit()
     return {'id': supplier_id, 'name': supplier.name}
 
 
-def get_supplier_materials(db: Session, supplier_id: int) -> list:
-    materials = db.query(ProductMaterial).filter(
-        ProductMaterial.supplier_id == supplier_id
-    ).order_by(ProductMaterial.name).all()
+async def get_supplier_materials(db: AsyncSession, supplier_id: int) -> list:
+    result = await db.execute(
+        select(ProductMaterial).where(
+            ProductMaterial.supplier_id == supplier_id
+        ).order_by(ProductMaterial.name)
+    )
+    materials = result.scalars().all()
 
     return [
         {

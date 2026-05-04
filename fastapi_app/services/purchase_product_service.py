@@ -7,8 +7,9 @@ import json
 import logging
 from decimal import Decimal
 
-from sqlalchemy import or_
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import func, or_, select, union_all
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from fastapi_app.services import escape_like
 from fastapi_app.shared_models import (
@@ -23,7 +24,7 @@ from fastapi_app.shared_models import (
 logger = logging.getLogger(__name__)
 
 
-def _product_has_bom(product) -> bool:
+def product_has_bom(product) -> bool:
     """判断产品是否配置了BOM（任意一类物料有数据即视为有BOM）"""
     has_filling = (
         product.material is not None and
@@ -35,11 +36,35 @@ def _product_has_bom(product) -> bool:
     return has_filling or has_fabric or has_accessory or has_packaging
 
 
-def get_products(db: Session, *, page: int = 1, per_page: int = 50,
-                 search: str = '', has_bom: str = 'all', category: str = '',
-                 sort_by: str = 'name', sort_order: str = 'asc',
-                 simple: bool = False) -> dict:
-    query = db.query(Product)
+async def _batch_check_bom_exists(db: AsyncSession, product_ids: list[int]) -> set[int]:
+    if not product_ids:
+        return set()
+
+    subq = union_all(
+        select(ProductMaterial.product_id).where(
+            ProductMaterial.product_id.in_(product_ids),
+            ProductMaterial.cotton_usage > 0,
+        ),
+        select(ProductFabric.product_id).where(
+            ProductFabric.product_id.in_(product_ids),
+        ),
+        select(ProductAccessory.product_id).where(
+            ProductAccessory.product_id.in_(product_ids),
+        ),
+        select(ProductPackaging.product_id).where(
+            ProductPackaging.product_id.in_(product_ids),
+        ),
+    )
+    result = await db.execute(select(subq.c.product_id))
+    return {row[0] for row in result}
+
+
+async def get_products(db: AsyncSession, *, page: int = 1, per_page: int = 50,
+                       search: str = '', has_bom: str = 'all', category: str = '',
+                       sort_by: str = 'name', sort_order: str = 'asc',
+                       simple: bool = False) -> dict:
+    query = select(Product)
+    count_query = select(func.count(Product.id))
 
     if not simple:
         query = query.options(
@@ -50,7 +75,13 @@ def get_products(db: Session, *, page: int = 1, per_page: int = 50,
         )
 
     if search:
-        query = query.filter(
+        query = query.where(
+            or_(
+                Product.name.ilike(f'%{escape_like(search)}%'),
+                Product.barcode.ilike(f'%{escape_like(search)}%')
+            )
+        )
+        count_query = count_query.where(
             or_(
                 Product.name.ilike(f'%{escape_like(search)}%'),
                 Product.barcode.ilike(f'%{escape_like(search)}%')
@@ -58,19 +89,25 @@ def get_products(db: Session, *, page: int = 1, per_page: int = 50,
         )
 
     if has_bom == 'true':
-        query = query.filter(Product.material.has())
+        query = query.where(Product.material.has())
+        count_query = count_query.where(Product.material.has())
     elif has_bom == 'false':
-        query = query.filter(~Product.material.has())
+        query = query.where(~Product.material.has())
+        count_query = count_query.where(~Product.material.has())
 
     if category:
         if category == 'filling':
-            query = query.filter(Product.material.has())
+            query = query.where(Product.material.has())
+            count_query = count_query.where(Product.material.has())
         elif category == 'fabric':
-            query = query.filter(Product.fabrics.any())
+            query = query.where(Product.fabrics.any())
+            count_query = count_query.where(Product.fabrics.any())
         elif category == 'accessory':
-            query = query.filter(Product.accessories.any())
+            query = query.where(Product.accessories.any())
+            count_query = count_query.where(Product.accessories.any())
         elif category == 'packaging':
-            query = query.filter(Product.packagings.any())
+            query = query.where(Product.packagings.any())
+            count_query = count_query.where(Product.packagings.any())
 
     sort_map = {
         'name': Product.name,
@@ -82,58 +119,61 @@ def get_products(db: Session, *, page: int = 1, per_page: int = 50,
         sort_col = sort_col.desc()
     query = query.order_by(sort_col)
 
-    # simple 模式（物料计算器）仅消费 products 字段，跳过额外的 count(*) 全表扫描。
-    # 非 simple 模式保留 count 以支持分页 UI。
-    if simple:
-        total = None
-        products = query.offset((page - 1) * per_page).limit(per_page).all()
-    else:
-        total = query.count()
-        products = query.offset((page - 1) * per_page).limit(per_page).all()
+    query = query.offset((page - 1) * per_page).limit(per_page)
+    result = await db.execute(query)
+    products = result.scalars().unique().all()
 
     if simple:
         product_ids = [p.id for p in products]
-        bom_product_ids = _batch_check_bom_exists(db, product_ids)
-        result = []
+        bom_product_ids = await _batch_check_bom_exists(db, product_ids)
+        output = []
         for p in products:
-            has_bom_flag = p.id in bom_product_ids
-            result.append({
+            output.append({
                 'id': p.id,
                 'name': p.name,
                 'barcode': p.barcode,
-                'has_bom': has_bom_flag,
+                'has_bom': p.id in bom_product_ids,
             })
-    else:
-        result = []
-        for p in products:
-            has_bom_flag = _product_has_bom(p)
-            bom_info = {}
-            if has_bom_flag:
-                bom_info = {
-                    'filling_count': 1 if (p.material and p.material.cotton_usage and p.material.cotton_usage > 0) else 0,
-                    'fabric_count': len(p.fabrics),
-                    'accessory_count': len(p.accessories),
-                    'packaging_count': len(p.packagings),
-                }
-            result.append({
-                'id': p.id,
-                'name': p.name,
-                'barcode': p.barcode,
-                'price': float(p.price) if p.price else 0,
-                'has_bom': has_bom_flag,
-                'bom_info': bom_info,
-                'current_stock': p.current_stock,
-            })
+        return {
+            'products': output,
+            'total': len(output),
+            'pages': 1,
+            'current_page': page,
+        }
+
+    total_result = await db.execute(count_query)
+    total = total_result.scalar()
+
+    output = []
+    for p in products:
+        has_bom_flag = product_has_bom(p)
+        bom_info = {}
+        if has_bom_flag:
+            bom_info = {
+                'filling_count': 1 if (p.material and p.material.cotton_usage and p.material.cotton_usage > 0) else 0,
+                'fabric_count': len(p.fabrics),
+                'accessory_count': len(p.accessories),
+                'packaging_count': len(p.packagings),
+            }
+        output.append({
+            'id': p.id,
+            'name': p.name,
+            'barcode': p.barcode,
+            'price': float(p.price) if p.price else 0,
+            'has_bom': has_bom_flag,
+            'bom_info': bom_info,
+            'current_stock': p.current_stock,
+        })
 
     return {
-        'products': result,
-        'total': total if total is not None else len(result),
-        'pages': ((total + per_page - 1) // per_page if per_page > 0 else 0) if total is not None else 1,
+        'products': output,
+        'total': total,
+        'pages': (total + per_page - 1) // per_page if per_page > 0 else 0,
         'current_page': page,
     }
 
 
-def get_products_batch_bom(db: Session, product_ids_str: str) -> dict:
+async def get_products_batch_bom(db: AsyncSession, product_ids_str: str) -> dict:
     if not product_ids_str:
         return {'products': {}}
 
@@ -142,73 +182,64 @@ def get_products_batch_bom(db: Session, product_ids_str: str) -> dict:
     except ValueError:
         return {'products': {}}
 
-    products = db.query(Product).options(
-        selectinload(Product.material),
-        selectinload(Product.fabrics),
-        selectinload(Product.accessories),
-        selectinload(Product.packagings),
-    ).filter(Product.id.in_(pid_list)).all()
-    result = {}
+    result = await db.execute(
+        select(Product).options(
+            selectinload(Product.material),
+            selectinload(Product.fabrics),
+            selectinload(Product.accessories),
+            selectinload(Product.packagings),
+        ).where(Product.id.in_(pid_list))
+    )
+    products = result.scalars().unique().all()
+
+    output = {}
     for p in products:
         if p.has_bom():
             all_mats = p.get_all_materials()
-            result[str(p.id)] = {
+            output[str(p.id)] = {
                 'name': p.name,
                 'barcode': p.barcode,
                 'materials': all_mats,
             }
-    return {'products': result}
+    return {'products': output}
 
 
-def get_search_suggestions(db: Session, keyword: str) -> list:
+async def get_search_suggestions(db: AsyncSession, keyword: str) -> list:
     if not keyword or len(keyword) < 1:
         return []
 
-    products = db.query(Product).filter(
-        or_(
-            Product.name.ilike(f'%{escape_like(keyword)}%'),
-            Product.barcode.ilike(f'%{escape_like(keyword)}%')
-        )
-    ).limit(10).all()
+    result = await db.execute(
+        select(Product).where(
+            or_(
+                Product.name.ilike(f'%{escape_like(keyword)}%'),
+                Product.barcode.ilike(f'%{escape_like(keyword)}%')
+            )
+        ).limit(10)
+    )
+    products = result.scalars().all()
 
     product_ids = [p.id for p in products]
-    bom_product_ids = _batch_check_bom_exists(db, product_ids)
+    bom_product_ids = await _batch_check_bom_exists(db, product_ids)
 
     return [
-        {'id': p.id, 'name': p.name, 'barcode': p.barcode, 'price': float(p.price) if p.price else 0, 'has_bom': p.id in bom_product_ids}
+        {
+            'id': p.id, 'name': p.name, 'barcode': p.barcode,
+            'price': float(p.price) if p.price else 0,
+            'has_bom': p.id in bom_product_ids,
+        }
         for p in products
     ]
 
 
-def _batch_check_bom_exists(db: Session, product_ids: list[int]) -> set[int]:
-    """批量检查产品是否有BOM，使用 UNION ALL 合并4次查询为1次"""
-    if not product_ids:
-        return set()
+async def get_products_statistics(db: AsyncSession) -> dict:
+    total_result = await db.execute(select(func.count(Product.id)))
+    total = total_result.scalar()
 
-    from sqlalchemy import union_all
-
-    subq = union_all(
-        db.query(ProductMaterial.product_id.label('pid')).filter(
-            ProductMaterial.product_id.in_(product_ids),
-            ProductMaterial.cotton_usage > 0,
-        ),
-        db.query(ProductFabric.product_id.label('pid')).filter(
-            ProductFabric.product_id.in_(product_ids),
-        ),
-        db.query(ProductAccessory.product_id.label('pid')).filter(
-            ProductAccessory.product_id.in_(product_ids),
-        ),
-        db.query(ProductPackaging.product_id.label('pid')).filter(
-            ProductPackaging.product_id.in_(product_ids),
-        ),
+    has_bom_result = await db.execute(
+        select(func.count(Product.id)).where(Product.material.has())
     )
-    result = db.execute(subq)
-    return {row[0] for row in result}
+    has_bom = has_bom_result.scalar()
 
-
-def get_products_statistics(db: Session) -> dict:
-    total = db.query(Product).count()
-    has_bom = db.query(Product).filter(Product.material.has()).count()
     return {
         'total': total,
         'has_bom': has_bom,
@@ -216,8 +247,8 @@ def get_products_statistics(db: Session) -> dict:
     }
 
 
-def get_product_bom(db: Session, product_id: int) -> dict:
-    product = db.get(Product, product_id)
+async def get_product_bom(db: AsyncSession, product_id: int) -> dict:
+    product = await db.get(Product, product_id)
     if not product:
         return None
     all_materials = product.get_all_materials() if product.has_bom() else []
@@ -229,8 +260,8 @@ def get_product_bom(db: Session, product_id: int) -> dict:
     }
 
 
-def save_product_bom(db: Session, product_id: int, data: dict, username: str) -> str:
-    product = db.get(Product, product_id)
+async def save_product_bom(db: AsyncSession, product_id: int, data: dict, username: str) -> str:
+    product = await db.get(Product, product_id)
     if not product:
         raise ValueError('产品不存在')
 
@@ -252,16 +283,15 @@ def save_product_bom(db: Session, product_id: int, data: dict, username: str) ->
                 'supplier_name': product.material.supplier_name,
             }
             if old_data != new_data:
-                mod = ModificationLog(
+                db.add(ModificationLog(
                     target_type='material', target_id=product.material.id,
                     field_name='filling_data',
                     old_value=json.dumps(old_data, ensure_ascii=False),
                     new_value=json.dumps(new_data, ensure_ascii=False),
                     modifier_name=username,
-                )
-                db.add(mod)
+                ))
         else:
-            mat = ProductMaterial(
+            db.add(ProductMaterial(
                 product_id=product_id,
                 cotton_usage=Decimal(str(filling_data.get('cotton_usage', 0))),
                 supplier_id=filling_data.get('supplier_id'),
@@ -269,13 +299,12 @@ def save_product_bom(db: Session, product_id: int, data: dict, username: str) ->
                 specification=filling_data.get('specification', ''),
                 unit=filling_data.get('unit', ''),
                 remark=filling_data.get('remark', ''),
-            )
-            db.add(mat)
+            ))
 
     fabrics_data = data.get('fabrics', [])
     for fab_data in fabrics_data:
         if fab_data.get('id'):
-            fab = db.get(ProductFabric, fab_data['id'])
+            fab = await db.get(ProductFabric, fab_data['id'])
             if fab and fab.product_id == product_id:
                 old_val = fab.fabric_name
                 fab.fabric_name = fab_data.get('fabric_name', '')
@@ -288,11 +317,11 @@ def save_product_bom(db: Session, product_id: int, data: dict, username: str) ->
                 if old_val != fab.fabric_name:
                     db.add(ModificationLog(
                         target_type='fabric', target_id=fab.id,
-                        field_name='fabric_name', old_value=old_val, new_value=fab.fabric_name,
-                        modifier_name=username,
+                        field_name='fabric_name', old_value=old_val,
+                        new_value=fab.fabric_name, modifier_name=username,
                     ))
             else:
-                fab = ProductFabric(
+                db.add(ProductFabric(
                     product_id=product_id,
                     fabric_name=fab_data.get('fabric_name', ''),
                     specification=fab_data.get('specification', ''),
@@ -301,10 +330,9 @@ def save_product_bom(db: Session, product_id: int, data: dict, username: str) ->
                     supplier_id=fab_data.get('supplier_id'),
                     supplier_name=fab_data.get('supplier_name', ''),
                     remark=fab_data.get('remark', ''),
-                )
-                db.add(fab)
+                ))
         else:
-            fab = ProductFabric(
+            db.add(ProductFabric(
                 product_id=product_id,
                 fabric_name=fab_data.get('fabric_name', ''),
                 specification=fab_data.get('specification', ''),
@@ -313,13 +341,12 @@ def save_product_bom(db: Session, product_id: int, data: dict, username: str) ->
                 supplier_id=fab_data.get('supplier_id'),
                 supplier_name=fab_data.get('supplier_name', ''),
                 remark=fab_data.get('remark', ''),
-            )
-            db.add(fab)
+            ))
 
     accessories_data = data.get('accessories', [])
     for acc_data in accessories_data:
         if acc_data.get('id'):
-            acc = db.get(ProductAccessory, acc_data['id'])
+            acc = await db.get(ProductAccessory, acc_data['id'])
             if acc and acc.product_id == product_id:
                 old_val = acc.accessory_name
                 acc.accessory_name = acc_data.get('accessory_name', '')
@@ -332,11 +359,11 @@ def save_product_bom(db: Session, product_id: int, data: dict, username: str) ->
                 if old_val != acc.accessory_name:
                     db.add(ModificationLog(
                         target_type='accessory', target_id=acc.id,
-                        field_name='accessory_name', old_value=old_val, new_value=acc.accessory_name,
-                        modifier_name=username,
+                        field_name='accessory_name', old_value=old_val,
+                        new_value=acc.accessory_name, modifier_name=username,
                     ))
             else:
-                acc = ProductAccessory(
+                db.add(ProductAccessory(
                     product_id=product_id,
                     accessory_name=acc_data.get('accessory_name', ''),
                     specification=acc_data.get('specification', ''),
@@ -345,10 +372,9 @@ def save_product_bom(db: Session, product_id: int, data: dict, username: str) ->
                     supplier_id=acc_data.get('supplier_id'),
                     supplier_name=acc_data.get('supplier_name', ''),
                     remark=acc_data.get('remark', ''),
-                )
-                db.add(acc)
+                ))
         else:
-            acc = ProductAccessory(
+            db.add(ProductAccessory(
                 product_id=product_id,
                 accessory_name=acc_data.get('accessory_name', ''),
                 specification=acc_data.get('specification', ''),
@@ -357,31 +383,32 @@ def save_product_bom(db: Session, product_id: int, data: dict, username: str) ->
                 supplier_id=acc_data.get('supplier_id'),
                 supplier_name=acc_data.get('supplier_name', ''),
                 remark=acc_data.get('remark', ''),
-            )
-            db.add(acc)
+            ))
 
-    # 处理删除
     for category, model_cls in [('fabrics', ProductFabric), ('accessories', ProductAccessory)]:
         existing_ids = {item['id'] for item in data.get(category, []) if item.get('id')}
-        to_delete = db.query(model_cls).filter(
-            model_cls.product_id == product_id,
-            ~model_cls.id.in_(existing_ids) if existing_ids else True,
-        ).all()
+        result = await db.execute(
+            select(model_cls).where(
+                model_cls.product_id == product_id,
+                ~model_cls.id.in_(existing_ids) if existing_ids else True,
+            )
+        )
+        to_delete = result.scalars().all()
         for item in to_delete:
-            db.delete(item)
+            await db.delete(item)
             db.add(ModificationLog(
                 target_type=category[:-1], target_id=item.id,
-                field_name='deleted', old_value=getattr(item, f'{category[:-2]}y_name', '') or '',
+                field_name='deleted',
+                old_value=getattr(item, f'{category[:-2]}y_name', '') or '',
                 new_value='(已删除)',
                 modifier_name=username,
             ))
 
-    db.commit()
+    await db.commit()
     return 'BOM 保存成功'
 
 
-def calculate_material(db: Session, orders_data: list) -> dict:
-    """聚合多个订单的物料需求，按类别分组"""
+async def calculate_material(db: AsyncSession, orders_data: list) -> dict:
     from collections import defaultdict
 
     result = {
@@ -396,15 +423,16 @@ def calculate_material(db: Session, orders_data: list) -> dict:
     if not product_ids:
         return result
 
-    product_map = {}
-    products = db.query(Product).options(
-        selectinload(Product.material),
-        selectinload(Product.fabrics),
-        selectinload(Product.accessories),
-        selectinload(Product.packagings),
-    ).filter(Product.id.in_(product_ids)).all()
-    for p in products:
-        product_map[p.id] = p
+    products_result = await db.execute(
+        select(Product).options(
+            selectinload(Product.material),
+            selectinload(Product.fabrics),
+            selectinload(Product.accessories),
+            selectinload(Product.packagings),
+        ).where(Product.id.in_(product_ids))
+    )
+    products = products_result.scalars().unique().all()
+    product_map = {p.id: p for p in products}
 
     for order_item in orders_data:
         product_id = order_item.get('product_id')

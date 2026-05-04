@@ -1,8 +1,9 @@
 import { ref, computed, reactive } from 'vue'
 import { purchaseApi } from '@/api'
+import type { ApiResponse, PurchaseOrder } from '@/types'
 
 export function usePurchaseOrders() {
-  const orders = ref<any[]>([])
+  const orders = ref<PurchaseOrder[]>([])
   const loading = ref(false)
   const page = ref(1)
   const pages = ref(1)
@@ -14,7 +15,7 @@ export function usePurchaseOrders() {
   async function load() {
     loading.value = true
     try {
-      const res = (await purchaseApi.orders({ page: page.value, per_page: 15 })) as any
+      const res = await purchaseApi.orders({ page: page.value, per_page: 15 }) as ApiResponse<PurchaseOrder[]> & { pages?: number; orders?: PurchaseOrder[]; total?: number }
       orders.value = res.orders || []
       total.value = res.total || 0
       pages.value = res.pages || 1
@@ -41,7 +42,7 @@ export function usePurchaseOrders() {
   }
 
   async function completeOrder(orderId: number) {
-    const res = (await purchaseApi.completeOrder(orderId)) as any
+    const res = await purchaseApi.completeOrder(orderId) as ApiResponse
     if (res.success) {
       await load()
       return true
@@ -51,7 +52,7 @@ export function usePurchaseOrders() {
 
   async function batchComplete() {
     const count = selectedIds.value.length
-    const res = (await purchaseApi.batchComplete([...selectedIds.value])) as any
+    const res = await purchaseApi.batchComplete([...selectedIds.value]) as ApiResponse & { completed_count?: number }
     if (res.success) {
       clearSelection()
       await load()

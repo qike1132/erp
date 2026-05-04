@@ -16,7 +16,7 @@ import openpyxl
 from sqlalchemy import and_, delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import load_only, selectinload
 
 from fastapi_app.services import customer_service, product_service, stock_service
 from fastapi_app.services.plan_utils import (
@@ -72,7 +72,7 @@ async def get_plan_list(db: AsyncSession, year: int, month: int, customer_id: in
         conditions.append(PurchasePlan.customer_id == customer_id)
     if status:
         conditions.append(PurchasePlan.status == status)
-    result = await db.execute(select(PurchasePlan).options(selectinload(PurchasePlan.details)).where(*conditions).order_by(PurchasePlan.create_time.desc()))
+    result = await db.execute(select(PurchasePlan).options(selectinload(PurchasePlan.details).load_only(PurchasePlanDetail.id, PurchasePlanDetail.quantity, PurchasePlanDetail.plan_id, PurchasePlanDetail.product_name)).where(*conditions).order_by(PurchasePlan.create_time.desc()))
     plans = result.scalars().all()
     # FIFO 分配出货数量
     all_details = [d for p in plans for d in p.details]

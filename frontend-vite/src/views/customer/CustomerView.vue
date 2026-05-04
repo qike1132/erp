@@ -166,7 +166,7 @@ import { useConfirmDialog } from '@/composables/useConfirmDialog'
 // ===== 列表查询 =====
 const { data: result, isLoading } = useQuery({
   queryKey: ['customers-list'],
-  queryFn: () => customerApi.list({ per_page: 200 }) as Promise<any>,
+  queryFn: () => customerApi.list({ per_page: 50 }) as Promise<any>,
   staleTime: 30_000,
 })
 

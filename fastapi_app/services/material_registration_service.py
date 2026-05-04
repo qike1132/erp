@@ -56,24 +56,26 @@ async def get_registrations(db, page: int = 1, per_page: int = 20,
     result = await db.execute(query)
     registrations = list(result.scalars().all())
 
-    # 统计
-    pending_count = (await db.execute(
-        select(func.count()).where(MaterialRegistration.status == 'pending')
-    )).scalar() or 0
-    partial_count = (await db.execute(
-        select(func.count()).where(MaterialRegistration.status == 'partial')
-    )).scalar() or 0
-    completed_count = (await db.execute(
-        select(func.count()).where(MaterialRegistration.status == 'completed')
-    )).scalar() or 0
-    total_all = (await db.execute(select(func.count()).select_from(MaterialRegistration))).scalar() or 0
+    status_counts_result = await db.execute(
+        select(MaterialRegistration.status, func.count())
+        .where(MaterialRegistration.status.in_(['pending', 'partial', 'completed']))
+        .group_by(MaterialRegistration.status)
+    )
+    status_counts = {row[0]: row[1] for row in status_counts_result}
+    pending_count = status_counts.get('pending', 0)
+    partial_count = status_counts.get('partial', 0)
+    completed_count = status_counts.get('completed', 0)
+    total_all = sum(status_counts.values())
 
-    total_ordered = (await db.execute(
-        select(func.sum(MaterialRegistrationItem.ordered_quantity))
-    )).scalar() or 0
-    total_received = (await db.execute(
-        select(func.sum(MaterialRegistrationItem.received_quantity))
-    )).scalar() or 0
+    totals_result = await db.execute(
+        select(
+            func.sum(MaterialRegistrationItem.ordered_quantity),
+            func.sum(MaterialRegistrationItem.received_quantity),
+        )
+    )
+    totals_row = totals_result.one()
+    total_ordered = totals_row[0] or 0
+    total_received = totals_row[1] or 0
 
     stats = {
         'total': total_all, 'pending': pending_count, 'partial': partial_count,
@@ -256,24 +258,29 @@ async def receive_material(db, item_id: int, received_quantity: float,
 
 
 async def get_stats_overview(db) -> dict:
-    """统计概览"""
-    all_regs = (await db.execute(
-        select(MaterialRegistration).options(selectinload(MaterialRegistration.items))
-    )).scalars().all()
-    pending = sum(1 for r in all_regs if r.computed_status == 'pending')
-    partial = sum(1 for r in all_regs if r.computed_status == 'partial')
-    completed = sum(1 for r in all_regs if r.computed_status == 'completed')
+    status_counts_result = await db.execute(
+        select(MaterialRegistration.status, func.count())
+        .where(MaterialRegistration.status.in_(['pending', 'partial', 'completed']))
+        .group_by(MaterialRegistration.status)
+    )
+    status_counts = {row[0]: row[1] for row in status_counts_result}
+    pending = status_counts.get('pending', 0)
+    partial = status_counts.get('partial', 0)
+    completed = status_counts.get('completed', 0)
+    total_all_num = sum(status_counts.values())
 
-    total_ordered = (await db.execute(
-        select(func.sum(MaterialRegistrationItem.ordered_quantity))
-    )).scalar() or 0
-    total_received = (await db.execute(
-        select(func.sum(MaterialRegistrationItem.received_quantity))
-    )).scalar() or 0
+    totals_result = await db.execute(
+        select(
+            func.sum(MaterialRegistrationItem.ordered_quantity),
+            func.sum(MaterialRegistrationItem.received_quantity),
+        )
+    )
+    totals_row = totals_result.one()
+    total_ordered = totals_row[0] or 0
+    total_received = totals_row[1] or 0
 
     today = datetime.now().date()
     week_ago = today - timedelta(days=7)
-    today - timedelta(days=30)
 
     recent = (await db.execute(
         select(func.count()).where(MaterialRegistration.registration_date >= week_ago)
@@ -282,12 +289,12 @@ async def get_stats_overview(db) -> dict:
     return {
         'success': True,
         'overview': {
-            'total': len(all_regs), 'pending': pending, 'partial': partial,
+            'total': total_all_num, 'pending': pending, 'partial': partial,
             'completed': completed,
             'total_ordered': float(total_ordered),
             'total_received': float(total_received),
             'total_remaining': float(total_ordered) - float(total_received),
-            'overall_progress': min(round(float(total_received) / float(total_ordered or 1) * 100, 1), 99.9) if completed < len(all_regs) else (100.0 if len(all_regs) > 0 else 0),
+            'overall_progress': min(round(float(total_received) / float(total_ordered or 1) * 100, 1), 99.9) if completed < total_all_num else (100.0 if total_all_num > 0 else 0),
             'recent_registrations': recent,
         }
     }
@@ -429,11 +436,10 @@ async def get_history(db, page: int = 1, per_page: int = 20,
                       order_no: str = '', supplier: str = '',
                       customer_name: str = '', material_category: str = '',
                       start_date: str = '', end_date: str = '') -> dict:
-    """获取来料登记历史记录 - 仅显示已完成的订单"""
     query = select(MaterialRegistration).options(
         selectinload(MaterialRegistration.items),
         joinedload(MaterialRegistration.purchase_order),
-    )
+    ).where(MaterialRegistration.status == 'completed')
 
     if order_no:
         query = query.where(MaterialRegistration.purchase_order_no.ilike(f'%{escape_like(order_no)}%'))
@@ -460,7 +466,7 @@ async def get_history(db, page: int = 1, per_page: int = 20,
 
     query = query.order_by(MaterialRegistration.update_time.desc())
     result = await db.execute(query)
-    all_regs = [r for r in result.unique().scalars().all() if r.computed_status == 'completed']
+    all_regs = list(result.unique().scalars().all())
 
     total = len(all_regs)
     offset = (page - 1) * per_page
@@ -510,16 +516,17 @@ async def get_suggestions(db, field: str, keyword: str, limit: int = 10) -> dict
 
 
 async def get_stats_distribution(db) -> dict:
-    """获取来料登记状态分布"""
-    all_regs = (await db.execute(
-        select(MaterialRegistration).options(selectinload(MaterialRegistration.items))
-    )).scalars().all()
-    pending = sum(1 for r in all_regs if r.computed_status == 'pending')
-    partial = sum(1 for r in all_regs if r.computed_status == 'partial')
-    completed = sum(1 for r in all_regs if r.computed_status == 'completed')
+    status_counts_result = await db.execute(
+        select(MaterialRegistration.status, func.count())
+        .where(MaterialRegistration.status.in_(['pending', 'partial', 'completed']))
+        .group_by(MaterialRegistration.status)
+    )
+    status_counts = {row[0]: row[1] for row in status_counts_result}
+    pending = status_counts.get('pending', 0)
+    partial = status_counts.get('partial', 0)
+    completed = status_counts.get('completed', 0)
 
-    today = datetime.now().date()
-    month_ago = today - timedelta(days=30)
+    month_ago = datetime.now().date() - timedelta(days=30)
     overdue_items = (await db.execute(
         select(func.count(MaterialRegistrationItem.id)).where(
             MaterialRegistrationItem.ordered_quantity > MaterialRegistrationItem.received_quantity,

@@ -222,7 +222,7 @@ async def _dispose_and_reinit_pool():
     if engine is not None:
         try:
             await engine.dispose()
-        except Exception as e:
+        except (RuntimeError, OSError) as e:
             logger.warning(f'释放引擎连接池异常（可忽略）: {e}')
     db_mod._async_engine = None
     db_mod._AsyncSessionLocal = None
@@ -253,7 +253,7 @@ async def _restore_from_zip(zip_bytes: bytes, db: AsyncSession) -> dict:
         lock_acquired = True
     except HTTPException:
         raise
-    except Exception:
+    except (RuntimeError, OSError):
         logger.warning('获取恢复锁失败，继续执行恢复操作')
     psql_restored = False
     psql_attempted = False
@@ -319,7 +319,7 @@ async def _restore_from_zip(zip_bytes: bytes, db: AsyncSession) -> dict:
             except (OSError, SQLAlchemyError):
                 logger.warning('HTTP异常后回滚失败')
         raise
-    except Exception as e:
+    except (RuntimeError, OSError, ValueError) as e:
         if not psql_attempted:
             try:
                 await db.rollback()
@@ -330,7 +330,7 @@ async def _restore_from_zip(zip_bytes: bytes, db: AsyncSession) -> dict:
         if lock_acquired and (not psql_attempted):
             try:
                 await db.execute(text('SELECT pg_advisory_unlock(:lock_id)'), {'lock_id': RESTORE_LOCK_ID})
-            except Exception:
+            except (RuntimeError, OSError):
                 logger.warning('释放恢复锁失败')
         if psql_attempted:
             try:
@@ -456,7 +456,7 @@ def _restore_config(zf: zipfile.ZipFile) -> dict:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(zf.read(name))
             restored.append(rel_path)
-        except Exception as e:
+        except (OSError, ValueError) as e:
             errors.append(f'{rel_path}: {e}')
     return {'status': 'ok' if not errors else 'partial', 'restored': restored, 'errors': errors}
 
@@ -632,12 +632,12 @@ async def _restore_legacy_json(backup_data: dict, db: AsyncSession) -> dict:
         try:
             from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
             await invalidate_related_caches(CacheDomain.ALL)
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError) as e:
             logger.warning(f'恢复后缓存清除失败: {e}')
         try:
             from fastapi_app.core.purchase_cache import invalidate_purchase_caches
             invalidate_purchase_caches()
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError) as e:
             logger.warning(f'恢复后采购缓存清除失败: {e}')
         try:
             manifest_tables = {tname: {'rows': td.get('count', len(td.get('rows', [])))} for tname, td in backup_data.get('tables', {}).items()}
@@ -685,7 +685,7 @@ async def _verify_restore(db: AsyncSession, manifest_tables: dict[str, dict], ma
             result = await db.execute(text(f'SELECT COUNT(*) FROM "{tname}"'))
             actual_rows = result.scalar() or 0
             table_exists = True
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError) as e:
             actual_rows = -1
             table_exists = False
             logger.warning(f'验证: 统计表 {tname} 行数失败: {e}')

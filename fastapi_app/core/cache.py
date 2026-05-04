@@ -75,7 +75,7 @@ async def invalidate_related_caches(domains: CacheDomain) -> int:
         if domains & domain:
             try:
                 deleted += await invalidate_cache(pattern)
-            except Exception as e:
+            except (RuntimeError, OSError, ValueError) as e:
                 logger.warning("缓存域 %s 失效失败，继续处理其他域: %s", domain.name, e)
     return deleted
 

@@ -27,7 +27,7 @@ class CustomerSearchService(BaseSearchService[Customer]):
     def get_search_fields(self) -> list[str]:
         return ["name", "contact", "phone"]
 
-    def get_result_serializer(self) -> Callable[[Any], dict]:
+    def get_result_formatter(self) -> Callable[[Any], dict]:
         def serialize(customer: Customer) -> dict:
             return {
                 "id": customer.id,

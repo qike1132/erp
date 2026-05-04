@@ -413,6 +413,7 @@ import { ref, reactive, computed } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 import { get, post, put, del, upload, download } from '@/api/request'
 import { customerApi, stockApi, auxApi, ocrApi } from '@/api'
+import type { ApiResponse } from '@/types'
 
 const props = defineProps<{ activeTab: 'input' | 'records' }>()
 import UiInput from '@/components/ui/UiInput.vue'
@@ -438,7 +439,7 @@ import { watch } from 'vue'
 
 const { data: namesData } = useQuery({
   queryKey: ['customer-active-names'],
-  queryFn: async () => { const res = await customerApi.activeNames() as any; return res.names ?? res ?? [] },
+  queryFn: async () => { const res = await customerApi.activeNames() as ApiResponse<string[]>; return res.names ?? res ?? [] },
   staleTime: 30_000,
 })
 const customerNames = computed(() => {
@@ -455,7 +456,7 @@ let searchTimeout: ReturnType<typeof setTimeout> | null = null
 async function searchProducts(q: string) {
   if (!q.trim()) { productSuggestions.value = []; showSuggestions.value = false; return }
   try {
-    const data = await stockApi.searchProducts(q) as any
+    const data = await stockApi.searchProducts(q) as ApiResponse<Record<string, unknown>[]>
     productSuggestions.value = Array.isArray(data) ? data : data?.products ?? data?.data ?? []
     showSuggestions.value = productSuggestions.value.length > 0
   } catch {
@@ -501,7 +502,7 @@ async function fetchShipmentInfo() {
     return
   }
   try {
-    const data = await stockApi.availableShipment(Number(form.productId), form.customer) as any
+    const data = await stockApi.availableShipment(Number(form.productId), form.customer) as ApiResponse<{ order_quantity: number; shipped_quantity: number; available_quantity: number }>
     shipmentInfo.value = data
   } catch {
     shipmentInfo.value = null
@@ -534,7 +535,7 @@ async function addStaged() {
 
   if (form.productId && form.customer) {
     try {
-      const data = await stockApi.availableShipment(Number(form.productId), form.customer) as any
+      const data = await stockApi.availableShipment(Number(form.productId), form.customer) as ApiResponse<{ order_quantity: number; shipped_quantity: number; available_quantity: number }>
       if (form.quantity > data.available_quantity) {
         showToast(`出货数量超过可出货量！可出货: ${data.available_quantity}`, 'error')
         return
@@ -603,7 +604,7 @@ async function submitBatch() {
     for (const key in uniqueKeys) {
       const { productId, customer, stockouts } = uniqueKeys[key]
       try {
-        const data = await stockApi.availableShipment(Number(productId), customer) as any
+        const data = await stockApi.availableShipment(Number(productId), customer) as ApiResponse<{ order_quantity: number; shipped_quantity: number; available_quantity: number }>
         const totalQty = stockouts.reduce((sum: number, s: any) => sum + s.quantity, 0)
         if (totalQty > data.available_quantity) {
           showToast(`客户: ${customer} 产品ID: ${productId} 出货量超过可出货量(${data.available_quantity})`, 'error')
@@ -621,7 +622,7 @@ async function submitBatch() {
       note: s.note,
     }))
 
-    const result = await stockApi.batchSubmitStockouts(stockoutsForApi) as any
+    const result = await stockApi.batchSubmitStockouts(stockoutsForApi) as ApiResponse
     if (result.success !== false) {
       showToast('出货提交成功', 'success')
       staged.value = []
@@ -684,13 +685,13 @@ async function handleImportExcel() {
     const fd = new FormData()
     fd.append('file', excelFile.value)
     const sessionId = `stg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    const res = await stockApi.stagingStockouts.importExcel(fd) as any
+    const res = await stockApi.stagingStockouts.importExcel(fd) as ApiResponse & { session_id?: string }
     if (res.success) {
       showToast(`成功导入 ${res.imported ?? res.count ?? 0} 条记录到暂存区`, 'success')
       excelFile.value = null
       if (res.data?.length || res.imported) {
         try {
-          const confirmRes = await stockApi.stagingStockouts.confirm(sessionId) as any
+          const confirmRes = await stockApi.stagingStockouts.confirm(sessionId) as ApiResponse
           if (confirmRes.success) {
             showToast('暂存出货已确认提交', 'success')
             fetchStockouts()
@@ -734,7 +735,7 @@ async function handleOcrPreview() {
   try {
     const fd = new FormData()
     pdfFiles.value.forEach(f => fd.append('files', f))
-    const res = await post('/ocr-import/preview', fd) as any
+    const res = await post('/ocr-import/preview', fd) as ApiResponse
     showToast(res.message || '预览完成', 'info')
   } catch (err: any) {
     showToast(err.response?.data?.detail || '预览失败', 'error')
@@ -750,7 +751,7 @@ async function handleOcrImport() {
   ocrProgress.pct = 0
   ocrProgress.msg = '创建任务...'
   try {
-    const task = await ocrApi.createTask() as any
+    const task = await ocrApi.createTask() as ApiResponse & { task_id?: string }
     const taskId = task.task_id || task.id
     if (!taskId) throw new Error('创建OCR任务失败')
 
@@ -764,7 +765,7 @@ async function handleOcrImport() {
     let completed = false
     while (!completed) {
       await new Promise(r => setTimeout(r, 2000))
-      const prog = await ocrApi.progress(taskId) as any
+      const prog = await ocrApi.progress(taskId) as ApiResponse & { status?: string; progress?: number; message?: string }
       const pct = prog.progress ?? prog.percent ?? 0
       ocrProgress.pct = Math.min(90, 20 + pct * 0.7)
       ocrProgress.msg = prog.status || '处理中...'
@@ -803,7 +804,7 @@ async function fetchStockouts() {
     if (filterCustomer.value) params.customer = filterCustomer.value
     if (filterStart.value) params.start_date = filterStart.value
     if (filterEnd.value) params.end_date = filterEnd.value
-    const res = await stockApi.stockouts(params) as any
+    const res = await stockApi.stockouts(params) as ApiResponse<Record<string, unknown>[]>
     const items = res.stockouts ?? res.data ?? res.items ?? []
     stockoutRecords.value = items
     const total = res.total ?? items.length

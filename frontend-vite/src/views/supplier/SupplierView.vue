@@ -184,16 +184,7 @@ import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 import { showToast } from '@/composables/useToast'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
-
-interface Supplier {
-  id: number
-  name: string
-  contact_person: string
-  phone: string
-  address: string
-  remark: string
-  created_at: string
-}
+import type { Supplier } from '@/types'
 
 const actionId = ref<number | ''>(0)
 const queryClient = useQueryClient()

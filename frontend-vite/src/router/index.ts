@@ -108,7 +108,8 @@ router.beforeEach(async (to: any, _from: any, next: any) => {
       await authStore.init()
       // 等待导航数据加载完成（非阻塞但有短暂等待）
       await authStore.fetchNavSections()
-    } catch {
+    } catch (error) {
+      console.error('[Router] 用户初始化失败:', error)
       return next(`/login?redirect=${encodeURIComponent(to.fullPath)}`)
     }
   }

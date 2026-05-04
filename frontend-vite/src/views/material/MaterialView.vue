@@ -582,7 +582,7 @@ async function viewDetail(regId: number) { try { const res = await materialApi.r
 const showSupplierDialog = ref(false), supplierDetail = ref<SupplierDetail | null>(null)
 async function viewSupplierDetail(supplierName: string) {
   try {
-    const data = await materialApi.registrations({ supplier: supplierName, per_page: 100 }) as { registrations: Registration[]; pages: number }
+    const data = await materialApi.registrations({ supplier: supplierName, per_page: 50 }) as { registrations: Registration[]; pages: number }
     if (!data.registrations) { toast('加载失败', 'error'); return }
     const regList = data.registrations.filter((r: Registration) => r.status !== 'completed')
     if (!regList.length) { toast('无采购中数据', 'warning'); return }

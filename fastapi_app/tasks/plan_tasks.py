@@ -17,7 +17,7 @@ from fastapi_app.core.database import SyncSessionLocal
 from fastapi_app.core.logger import logger
 
 
-@shared_task(bind=True, name='sync_shipment_records_task', queue='batch', max_retries=2, default_retry_delay=60)
+@shared_task(bind=True, name='sync_shipment_records_task', queue='batch', max_retries=2, default_retry_delay=60, soft_time_limit=300, time_limit=600)
 def sync_shipment_records_task(self):
     """
     每日凌晨同步出货数据
@@ -53,7 +53,7 @@ def sync_shipment_records_task(self):
         logger.error(f'出货同步任务失败: {exc}', exc_info=True)
         raise self.retry(exc=exc) from exc
 
-@shared_task(bind=True, name='batch_import_plans_task', queue='batch', max_retries=2, default_retry_delay=30)
+@shared_task(bind=True, name='batch_import_plans_task', queue='batch', max_retries=2, default_retry_delay=30, soft_time_limit=300, time_limit=600)
 def batch_import_plans_task(self, file_path: str, original_filename: str, user_id: int):
     """
     大批量计划导入（>500行时由API层触发）

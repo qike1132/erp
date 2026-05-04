@@ -14,7 +14,7 @@ from fastapi_app.core.database import SyncSessionLocal
 from fastapi_app.core.logger import logger
 
 
-@shared_task(bind=True, name='batch_import_orders', queue='batch', max_retries=2, default_retry_delay=30)
+@shared_task(bind=True, name='batch_import_orders', queue='batch', max_retries=2, default_retry_delay=30, soft_time_limit=300, time_limit=600)
 def batch_import_orders_task(self, file_path: str, original_filename: str, user_id: int):
     """异步批量导入订单
 
@@ -89,7 +89,7 @@ def batch_import_orders_task(self, file_path: str, original_filename: str, user_
         with contextlib.suppress(OSError):
             os.unlink(file_path)
 
-@shared_task(bind=True, name='batch_import_stockins', queue='batch', max_retries=2, default_retry_delay=30)
+@shared_task(bind=True, name='batch_import_stockins', queue='batch', max_retries=2, default_retry_delay=30, soft_time_limit=300, time_limit=600)
 def batch_import_stockins_task(self, file_path: str, original_filename: str, user_id: int):
     """异步批量导入备货"""
     allowed_dirs = [tempfile.gettempdir(), os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'static', 'uploads')]

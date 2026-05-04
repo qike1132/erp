@@ -13,7 +13,7 @@ import os
 logger = logging.getLogger(__name__)
 
 from sqlalchemy import create_engine
-from sqlalchemy.exc import DisconnectionError, OperationalError
+from sqlalchemy.exc import DisconnectionError, OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -105,10 +105,10 @@ async def get_async_db():
         try:
             yield session
             await session.commit()
-        except Exception:
+        except (RuntimeError, OSError, ValueError, SQLAlchemyError):
             try:
                 await session.rollback()
-            except Exception:
+            except (RuntimeError, OSError, SQLAlchemyError):
                 logger.warning("Session rollback failed (may be broken after psql restore)", exc_info=True)
             raise
 
@@ -123,7 +123,7 @@ async def get_async_db_context():
         try:
             yield session
             await session.commit()
-        except Exception:
+        except (RuntimeError, OSError, ValueError, SQLAlchemyError):
             await session.rollback()
             raise
 

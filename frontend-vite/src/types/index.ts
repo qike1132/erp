@@ -2,7 +2,12 @@ export interface ApiResponse<T = unknown> {
   success: boolean
   data?: T
   detail?: string
+  message?: string
   status_code?: number
+  order?: T
+  orders?: T[]
+  total?: number
+  html?: string
 }
 
 export interface PaginatedResponse<T> {
@@ -87,6 +92,7 @@ export interface Supplier {
   address?: string
   remark?: string
   status?: string
+  created_at?: string
 }
 
 export interface PurchaseOrderItem {

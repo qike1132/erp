@@ -204,7 +204,13 @@ async def _handle_edit_approval(db: AsyncSession, approval: ApprovalRequest, ord
 
     old_quantity = order.quantity
     old_customer = order.customer
-    new_quantity = operation_data.get('quantity', old_quantity)
+    new_quantity = int(operation_data.get('quantity', old_quantity))
+    new_customer = operation_data.get('customer', old_customer)
+
+    if new_quantity <= 0 or new_quantity > 9999999:
+        raise ValueError('订单数量必须在1-9999999之间')
+    if not new_customer or not str(new_customer).strip():
+        raise ValueError('客户名称不能为空')
 
     if new_quantity != old_quantity:
         product = await get_product_for_update(db, order.product_id)
@@ -221,14 +227,13 @@ async def _handle_edit_approval(db: AsyncSession, approval: ApprovalRequest, ord
             note=f'审批通过修改订单：{order.order_no}',
         ))
 
-    order.customer = operation_data.get('customer', order.customer)
+    order.customer = new_customer
     order.quantity = new_quantity
     order.note = operation_data.get('note', order.note)
     order.is_locked = False
     order.locked_by_id = None
 
     # 同步更新采购中心中关联的采购订单
-    new_customer = operation_data.get('customer', old_customer)
     try:
         from fastapi_app.services.order_purchase_sync import sync_order_update
         await sync_order_update(
@@ -236,7 +241,7 @@ async def _handle_edit_approval(db: AsyncSession, approval: ApprovalRequest, ord
             customer=new_customer, old_customer=old_customer,
             quantity=new_quantity, old_quantity=old_quantity,
         )
-    except Exception as e:
+    except (RuntimeError, OSError, ValueError) as e:
         logger.warning('审批编辑-采购中心同步失败: %s', e)
 
 
@@ -258,9 +263,10 @@ async def _handle_delete_approval(db: AsyncSession, approval: ApprovalRequest, o
             note='审批删除订单回滚抵扣',
         ))
 
-    product.current_stock -= order.quantity
-    if total_deducted > 0:
-        product.current_stock += total_deducted
+    net_change = total_deducted - order.quantity
+    if product.current_stock + net_change < 0:
+        raise ValueError(f'删除订单将导致库存为负数（当前库存：{product.current_stock}，净变化：{net_change:+d}）')
+    product.current_stock += net_change
 
     for stockout in order_stockouts:
         await db.delete(stockout)
@@ -288,7 +294,7 @@ async def _handle_delete_approval(db: AsyncSession, approval: ApprovalRequest, o
     try:
         from fastapi_app.services.order_purchase_sync import sync_order_delete
         await sync_order_delete(db, order.id)
-    except Exception as e:
+    except (RuntimeError, OSError, ValueError) as e:
         logger.warning('审批删除-采购中心同步失败: %s', e)
 
 

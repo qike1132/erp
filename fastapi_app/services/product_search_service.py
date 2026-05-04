@@ -28,7 +28,7 @@ class ProductSearchService(BaseSearchService[Product]):
     def get_search_fields(self) -> list[str]:
         return ["name", "barcode"]
 
-    def get_result_serializer(self) -> Callable[[Any], dict]:
+    def get_result_formatter(self) -> Callable[[Any], dict]:
         def serialize(product: Product) -> dict:
             return {
                 "id": product.id,
@@ -48,7 +48,7 @@ class ProductSearchService(BaseSearchService[Product]):
         if not keyword:
             return []
 
-        from fastapi_app.services.purchase_product_service import _product_has_bom
+        from fastapi_app.services.purchase_product_service import product_has_bom
         from sqlalchemy.orm import selectinload
 
         query = self.build_search_query_sync(db, keyword)
@@ -62,7 +62,7 @@ class ProductSearchService(BaseSearchService[Product]):
 
         result = []
         for p in products:
-            has_bom = _product_has_bom(p)
+            has_bom = product_has_bom(p)
             material_count = (
                 len(p.fabrics) + len(p.accessories) + len(p.packagings)
                 + (1 if p.material and getattr(p.material, "cotton_usage", Decimal("0")) > 0 else 0)

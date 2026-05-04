@@ -74,7 +74,7 @@ async def approve(
         try:
             from fastapi_app.core.purchase_cache import invalidate_purchase_caches
             await invalidate_purchase_caches()
-        except Exception:
+        except (RuntimeError, OSError, ValueError):
             logger.warning("采购中心缓存失效失败(approval)", exc_info=True)
         # 在 commit 后发布事件，避免 commit 失败时前端收到错误通知
         try:
@@ -89,7 +89,7 @@ async def approve(
                     'order_id': result.get('order_id'),
                     'order_no': result.get('order_no', ''),
                 })
-        except Exception:
+        except (RuntimeError, OSError, ValueError):
             logger.warning("审批事件发布失败", exc_info=True)
         return ApprovalActionResponse(message=result['message'])
     except ValueError as e:
