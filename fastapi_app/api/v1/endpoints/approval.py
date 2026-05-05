@@ -119,5 +119,12 @@ async def pending_count(
     user: User = Depends(_require_admin()),
     db: AsyncSession = Depends(get_async_db),
 ):
-    count = await approval_service.get_pending_count(db)
+    from fastapi_app.core.cache import cache_result
+    from fastapi_app.services.approval_service import get_pending_count as _get_pending_count
+
+    @cache_result(key_prefix="approval:pending_count", ttl=30, local_ttl=10)
+    async def _cached_count():
+        return await _get_pending_count(db)
+
+    count = await _cached_count()
     return ApprovalPendingCountResponse(count=count)

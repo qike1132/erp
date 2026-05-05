@@ -1,58 +1,71 @@
 <template>
-  <div class="inline-flex justify-center items-center gap-1 py-4">
-    <button
-      class="px-3 py-1.5 border border-border bg-white rounded-lg text-sm cursor-pointer transition-all duration-200 text-text hover:border-primary-500 hover:text-primary-500 disabled:opacity-40 disabled:cursor-not-allowed"
-      :disabled="currentPage <= 1"
-      @click="$emit('update:currentPage', currentPage - 1)"
-    >
-      <i class="fas fa-chevron-left" />
+  <div class="ui-pagination">
+    <button class="ui-page-btn" :disabled="currentPage <= 1" @click="$emit('update:currentPage', 1)">
+      <i class="fas fa-angle-double-left" />
     </button>
-    <button
-      v-for="p in visiblePages"
-      :key="p"
-      :class="[
-        'px-3 py-1.5 border rounded-lg text-sm cursor-pointer transition-all duration-200',
-        p === currentPage
-          ? 'bg-primary-500 text-white border-primary-500'
-          : 'bg-white border-border text-text hover:border-primary-500 hover:text-primary-500',
-      ]"
-      @click="$emit('update:currentPage', p)"
-    >
-      {{ p }}
+    <button class="ui-page-btn" :disabled="currentPage <= 1" @click="$emit('update:currentPage', currentPage - 1)">
+      <i class="fas fa-angle-left" />
     </button>
-    <button
-      class="px-3 py-1.5 border border-border bg-white rounded-lg text-sm cursor-pointer transition-all duration-200 text-text hover:border-primary-500 hover:text-primary-500 disabled:opacity-40 disabled:cursor-not-allowed"
-      :disabled="currentPage >= totalPages"
-      @click="$emit('update:currentPage', currentPage + 1)"
-    >
-      <i class="fas fa-chevron-right" />
+    <span class="ui-page-info">{{ currentPage }} / {{ totalPages }}</span>
+    <button class="ui-page-btn" :disabled="currentPage >= totalPages" @click="$emit('update:currentPage', currentPage + 1)">
+      <i class="fas fa-angle-right" />
     </button>
+    <button class="ui-page-btn" :disabled="currentPage >= totalPages" @click="$emit('update:currentPage', totalPages)">
+      <i class="fas fa-angle-double-right" />
+    </button>
+    <span v-if="totalItems != null" class="ui-page-total">共 {{ totalItems }} 条</span>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-
-const props = defineProps<{
+defineProps<{
   currentPage: number
   totalPages: number
-  maxVisible?: number
+  totalItems?: number
 }>()
 
 defineEmits<{
   'update:currentPage': [page: number]
 }>()
-
-const maxShow = computed(() => props.maxVisible ?? 5)
-
-const visiblePages = computed(() => {
-  const total = props.totalPages
-  const current = props.currentPage
-  let start = Math.max(1, current - Math.floor(maxShow.value / 2))
-  let end = Math.min(total, start + maxShow.value - 1)
-  if (end - start < maxShow.value - 1) start = Math.max(1, end - maxShow.value + 1)
-  const pages: number[] = []
-  for (let i = start; i <= end; i++) pages.push(i)
-  return pages
-})
 </script>
+
+<style scoped>
+.ui-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--color-border-light, #f1f5f9);
+}
+.ui-page-btn {
+  padding: 6px 10px;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  border-radius: 6px;
+  background: white;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  transition: all 0.2s;
+}
+.ui-page-btn:hover:not(:disabled) {
+  border-color: var(--color-primary-300);
+  color: var(--color-primary-600);
+}
+.ui-page-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.ui-page-info {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+  min-width: 80px;
+  text-align: center;
+}
+.ui-page-total {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin-left: 8px;
+}
+</style>

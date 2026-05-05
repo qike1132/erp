@@ -35,11 +35,13 @@ from fastapi_app.services.purchase_history_service import (  # noqa: F401
 )
 from fastapi_app.services.purchase_order_service import (  # noqa: F401
     batch_complete_purchase_orders,
+    cleanup_orphan_pending_purchase_orders,
     complete_purchase_order,
     create_purchase_order,
     delete_purchase_order,
     export_completed_orders,
     generate_purchase_order_no,
+    generate_purchase_orders_from_customer_orders,
     get_completed_order_quick_filters,
     get_completed_order_suggestions,
     get_completed_purchase_orders,
@@ -54,13 +56,13 @@ from fastapi_app.services.purchase_order_service import (  # noqa: F401
     update_purchase_order,
 )
 from fastapi_app.services.purchase_product_service import (  # noqa: F401
-    product_has_bom,
     calculate_material,
     get_product_bom,
     get_products,
     get_products_batch_bom,
     get_products_statistics,
     get_search_suggestions,
+    product_has_bom,
     save_product_bom,
 )
 from fastapi_app.services.purchase_supplier_service import (  # noqa: F401

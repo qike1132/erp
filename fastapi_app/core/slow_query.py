@@ -13,7 +13,7 @@ from sqlalchemy import event
 
 logger = logging.getLogger(__name__)
 
-SLOW_QUERY_THRESHOLD = float(os.getenv("SLOW_QUERY_THRESHOLD", "0.3"))
+SLOW_QUERY_THRESHOLD = float(os.getenv("SLOW_QUERY_THRESHOLD", "0.2"))
 
 _slow_query_count = 0
 

@@ -63,7 +63,7 @@ async def api_create_purchase_order(data: PurchaseOrderCreateRequest, db: AsyncS
 @router.post('/orders/one-click-generate')
 async def api_one_click_generate_order(data: OneClickGenerateRequest, db: AsyncSession=Depends(get_db), _user=Depends(require_permission('product_manage'))):
     try:
-        result = await svc.one_click_generate_order(db, data.order_ids)
+        result = await svc.generate_purchase_orders_from_customer_orders(db, data.order_ids)
         _invalidate_orders_cache()
         return {'success': True, **result}
     except ValueError as e:
@@ -171,21 +171,22 @@ async def api_get_order_print_data(order_id: int, db: AsyncSession=Depends(get_d
 @router.post('/orders/batch-print')
 async def api_get_orders_batch_print_data(data: OrderIdsRequest, db: AsyncSession=Depends(get_db), _user=Depends(require_permission('product_manage'))):
     from sqlalchemy import select
+
     from fastapi_app.shared_models import PurchaseOrder
     result = await db.execute(select(PurchaseOrder).where(PurchaseOrder.id.in_(data.ids)))
     orders = result.scalars().all()
     return {'success': True, 'orders': [o.to_dict() for o in orders]}
 
 @router.get('/unprocessed-orders')
-async def api_get_unprocessed_orders(page: int=Query(1, ge=1), per_page: int=Query(50, ge=1), supplier_id: int | None=Query(None), db: AsyncSession=Depends(get_db), _user=Depends(require_permission('product_manage'))):
-    cache_key = _make_orders_cache_key(endpoint='unprocessed', page=page, per_page=per_page, supplier_id=supplier_id)
+async def api_get_unprocessed_orders(page: int=Query(1, ge=1), per_page: int=Query(15, ge=1), db: AsyncSession=Depends(get_db), _user=Depends(require_permission('product_manage'))):
+    cache_key = _make_orders_cache_key(endpoint='unprocessed', page=page, per_page=per_page)
     entry = _UNPROCESSED_L1_CACHE.get(cache_key)
     if entry is not None:
         cached_at, cached_result = entry
         if time.monotonic() - cached_at < _UNPROCESSED_CACHE_TTL:
             return {'success': True, **cached_result}
         del _UNPROCESSED_L1_CACHE[cache_key]
-    result = await svc.get_unprocessed_orders(db, page=page, per_page=per_page, supplier_id=supplier_id)
+    result = await svc.get_unprocessed_orders(db, page=page, per_page=per_page)
     _UNPROCESSED_L1_CACHE[cache_key] = (time.monotonic(), result)
     if len(_UNPROCESSED_L1_CACHE) > 50:
         oldest_key = min(_UNPROCESSED_L1_CACHE, key=lambda k: _UNPROCESSED_L1_CACHE[k][0])

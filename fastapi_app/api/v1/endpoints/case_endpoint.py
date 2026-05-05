@@ -1,14 +1,14 @@
 """皮套管理接口"""
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from fastapi_app.core.database import get_async_db
 from fastapi_app.core.deps import require_permission
-from fastapi_app.services import case_service
-from fastapi_app.shared_models import User
+from fastapi_app.services import case_service, escape_like
+from fastapi_app.shared_models import Product, User
 
 router = APIRouter()
 
@@ -64,8 +64,8 @@ async def case_stockins(page: int=Query(1, ge=1), per_page: int=Query(20, ge=1, 
 async def get_case_stockin(stockin_id: int, user: User=Depends(require_permission('case_manage')), db: AsyncSession=Depends(get_async_db)):
     """获取单个皮套入库记录"""
     from fastapi_app.shared_models import CaseStockIn
-    result = await db.execute(select(CaseStockIn).where(CaseStockIn.id == stockin_id))
-    stockin = result.scalar_one_or_none()
+    result = await db.execute(select(CaseStockIn).options(joinedload(CaseStockIn.case)).where(CaseStockIn.id == stockin_id))
+    stockin = result.unique().scalar_one_or_none()
     if not stockin:
         raise HTTPException(status_code=404, detail='入库记录不存在')
     return {'id': stockin.id, 'stockin_no': stockin.stockin_no, 'stockin_date': stockin.stockin_date.strftime('%Y-%m-%d') if stockin.stockin_date else '', 'customer': stockin.customer, 'case_id': stockin.case_id, 'case_name': stockin.case.sync_name if stockin.case else '', 'quantity': stockin.quantity, 'note': stockin.note or ''}
@@ -107,8 +107,8 @@ async def case_stockouts(page: int=Query(1, ge=1), per_page: int=Query(20, ge=1,
 async def get_case_stockout(stockout_id: int, user: User=Depends(require_permission('case_manage')), db: AsyncSession=Depends(get_async_db)):
     """获取单个皮套出库记录"""
     from fastapi_app.shared_models import CaseStockOut
-    result = await db.execute(select(CaseStockOut).where(CaseStockOut.id == stockout_id))
-    stockout = result.scalar_one_or_none()
+    result = await db.execute(select(CaseStockOut).options(joinedload(CaseStockOut.case)).where(CaseStockOut.id == stockout_id))
+    stockout = result.unique().scalar_one_or_none()
     if not stockout:
         raise HTTPException(status_code=404, detail='出库记录不存在')
     return {'id': stockout.id, 'stockout_no': stockout.stockout_no, 'stockout_date': stockout.stockout_date.strftime('%Y-%m-%d') if stockout.stockout_date else '', 'customer': stockout.customer, 'case_id': stockout.case_id, 'case_name': stockout.case.sync_name if stockout.case else '', 'quantity': stockout.quantity, 'note': stockout.note or ''}
@@ -142,9 +142,9 @@ async def batch_submit_case_stockouts(data: BatchCaseStockOutRequest, user: User
     return result
 
 @router.get('/inventory-summary')
-async def inventory_summary(user: User=Depends(require_permission('case_manage')), db: AsyncSession=Depends(get_async_db)):
+async def inventory_summary(page: int=Query(1, ge=1), per_page: int=Query(50, ge=1, le=200), search: str=Query('', description='搜索产品名称或69码'), user: User=Depends(require_permission('case_manage')), db: AsyncSession=Depends(get_async_db)):
     """皮套库存汇总"""
-    return await case_service.get_case_inventory_summary(db)
+    return await case_service.get_case_inventory_summary(db, page=page, per_page=per_page, search=search)
 
 @router.get('/inventory-logs/{case_id}')
 async def inventory_logs(case_id: int, page: int=Query(1, ge=1), per_page: int=Query(20, ge=1, le=100), type: str=Query(''), start_date: str=Query(''), end_date: str=Query(''), user: User=Depends(require_permission('case_manage')), db: AsyncSession=Depends(get_async_db)):
@@ -152,12 +152,30 @@ async def inventory_logs(case_id: int, page: int=Query(1, ge=1), per_page: int=Q
     return await case_service.get_case_inventory_logs(db, case_id, page, per_page, type, start_date, end_date)
 
 @router.get('/products')
-async def case_products(user: User=Depends(require_permission('case_manage')), db: AsyncSession=Depends(get_async_db)):
-    """皮套产品列表"""
-    from fastapi_app.shared_models import Case
-    result = await db.execute(select(Case).options(joinedload(Case.product)).order_by(Case.create_time.desc()))
+async def case_products(page: int=Query(1, ge=1, description='页码'), per_page: int=Query(50, ge=1, le=200, description='每页数量'), search: str=Query('', description='搜索产品名称或69码'), user: User=Depends(require_permission('case_manage')), db: AsyncSession=Depends(get_async_db)):
+    """皮套产品列表（分页）"""
+    query = select(Case).options(joinedload(Case.product))
+    count_base = select(func.count()).select_from(Case)
+    if search:
+        pattern = f'%{escape_like(search)}%'
+        query = query.outerjoin(Product, Case.product_id == Product.id).where(
+            Case.name.like(pattern) | Case.barcode.like(pattern)
+            | Product.name.like(pattern) | Product.barcode.like(pattern)
+        )
+        count_base = count_base.outerjoin(Product, Case.product_id == Product.id).where(
+            Case.name.like(pattern) | Case.barcode.like(pattern)
+            | Product.name.like(pattern) | Product.barcode.like(pattern)
+        )
+    total = (await db.execute(count_base)).scalar() or 0
+    offset = (page - 1) * per_page
+    result = await db.execute(query.order_by(Case.create_time.desc()).offset(offset).limit(per_page))
     cases = list(result.unique().scalars().all())
-    return {'cases': [{'id': c.id, 'name': c.sync_name, 'barcode': c.sync_barcode or '', 'image': c.image or '', 'current_stock': c.current_stock, 'create_time': c.create_time.strftime('%Y-%m-%d') if c.create_time else ''} for c in cases]}
+    return {
+        'cases': [{'id': c.id, 'name': c.sync_name, 'barcode': c.sync_barcode or '', 'image': c.image or '', 'current_stock': c.current_stock, 'create_time': c.create_time.strftime('%Y-%m-%d') if c.create_time else ''} for c in cases],
+        'total': total,
+        'page': page,
+        'per_page': per_page,
+    }
 
 @router.post('/products')
 async def create_case_product(data: CaseProductCreate, user: User=Depends(require_permission('case_manage')), db: AsyncSession=Depends(get_async_db)):

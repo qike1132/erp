@@ -129,7 +129,7 @@ async def _calc_all_shipped_qty(db: AsyncSession, year: int, month: int) -> dict
     """
     start = date(year, month, 1)
     end = last_day_of_month(year, month)
-    result = await db.execute(select(StockOut.customer, Product.name.label('product_name'), func.coalesce(func.sum(StockOut.quantity), 0).label('total_qty')).join(Product, StockOut.product_id == Product.id).where(and_(func.date(StockOut.stockout_date) >= start, func.date(StockOut.stockout_date) <= end, StockOut.customer.isnot(None), StockOut.customer != '')).group_by(StockOut.customer, Product.name))
+    result = await db.execute(select(StockOut.customer, Product.name.label('product_name'), func.coalesce(func.sum(StockOut.quantity - StockOut.returned_quantity), 0).label('total_qty')).join(Product, StockOut.product_id == Product.id).where(and_(func.date(StockOut.stockout_date) >= start, func.date(StockOut.stockout_date) <= end, StockOut.customer.isnot(None), StockOut.customer != '')).group_by(StockOut.customer, Product.name))
     return {(row.customer, row.product_name): row.total_qty for row in result.all()}
 
 def _calc_stock_status(plan_qty: int, inventory_qty: int) -> str:

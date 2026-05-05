@@ -108,7 +108,7 @@ export const stockApi = {
 // ===== 采购 =====
 export const purchaseApi = {
   orders: (params?: QueryParams) => get<{ orders: PurchaseOrder[]; total: number; pages: number; current_page: number }>('/purchase-center/orders', params),
-  unprocessedOrders: () => get<UnprocessedOrder[]>('/purchase-center/unprocessed-orders'),
+  unprocessedOrders: (params?: { page?: number; per_page?: number }) => get<{ orders: UnprocessedOrder[]; total: number; pages: number; current_page: number }>('/purchase-center/unprocessed-orders', params),
   completeOrder: (id: number) => post(`/purchase-center/orders/complete`, { order_id: id }),
   batchComplete: (ids: number[]) => post('/purchase-center/orders/batch-complete', { ids }),
   deleteOrder: (id: number) => del(`/purchase-center/orders/${id}`),
@@ -182,6 +182,28 @@ export const productionApi = {
     get<Record<string, unknown>>('/production-summary/summary', { year: new Date().getFullYear(), ...params }),
 }
 
+// ===== 每日生产报表（重构版）=====
+export const dailyProductionApi = {
+  records: (params?: QueryParams) =>
+    get('/daily-production/records', {
+      year: new Date().getFullYear(),
+      month: new Date().getMonth() + 1,
+      ...params,
+    }),
+  createRecord: (data: Record<string, unknown>) => post('/daily-production/records', data),
+  updateRecord: (id: number, data: Record<string, unknown>) => put(`/daily-production/records/${id}`, data),
+  deleteRecord: (id: number) => del(`/daily-production/records/${id}`),
+  dailySummary: (date: string) => get('/daily-production/daily-summary', { date }),
+  monthlySummary: (params?: QueryParams) =>
+    get('/daily-production/monthly-summary', {
+      year: new Date().getFullYear(),
+      month: new Date().getMonth() + 1,
+      ...params,
+    }),
+  export: (params?: QueryParams) => download('/daily-production/export', 'production_report.xlsx', params),
+  productInfo: (productId: number) => get<{ success: boolean; data: { id: number; name: string; barcode: string; price: number } }>(`/daily-production/product-info/${productId}`),
+}
+
 // ===== 报表 =====
 export const reportApi = {
   orderLogs: (params?: QueryParams) => get<Record<string, unknown>[]>('/reports/order-logs', params),
@@ -209,8 +231,16 @@ export const permissionApi = {
 }
 
 // ===== Dashboard =====
+interface DashboardResponse<T = any> {
+  success: boolean;
+  data: T;
+}
+
 export const dashboardApi = {
-  stats: () => get<Record<string, unknown>>('/dashboard/stats'),
+  stats: async () => {
+    const resp = await get<DashboardResponse<Record<string, unknown>>>('/dashboard/stats');
+    return resp.data;
+  },
   activities: () => get<Record<string, unknown>[]>('/dashboard/activities'),
   navSections: () => get<NavSection[] | Record<string, { name: string; items: Array<{ name: string; url: string; icon?: string; code: string; permission_codes: string[] }> }>>('/dashboard/nav-sections'),
 }
@@ -273,4 +303,12 @@ export const backupApi = {
     post(`/backup/save-incremental?remark=${encodeURIComponent(remark)}${since ? '&since=' + encodeURIComponent(since) : ''}`),
   restoreIncremental: (filename: string) =>
     post(`/backup/restore-incremental/${encodeURIComponent(filename)}?confirm=true`),
+}
+
+// ===== App版本管理 =====
+export const appUpdateApi = {
+  list: (platform: string = 'android') => get('/app/versions', { platform }),
+  checkLatest: (currentVersionCode: number, platform: string = 'android') => get('/app/latest', { platform, current_version_code: currentVersionCode }),
+  upload: (formData: FormData) => upload('/app/upload', formData),
+  publish: (versionId: number) => post(`/app/${versionId}/publish`),
 }

@@ -24,7 +24,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-_CACHE_KEY = "dashboard:stats"
+_CACHE_KEY_STATS = "dashboard:stats"
+_CACHE_KEY_ACTIVITIES = "dashboard:activities"
 _CACHE_TTL = 300
 
 
@@ -41,6 +42,11 @@ class DashboardStats(BaseModel):
     pending_materials: int = 0
 
 
+class DashboardResponse(BaseModel):
+    success: bool = True
+    data: DashboardStats | None = None
+
+
 class Activity(BaseModel):
     type: str
     time: str
@@ -52,7 +58,7 @@ class Activity(BaseModel):
 async def _get_cached_stats():
     try:
         from utils.redis_cache import redis_cache
-        cached = await redis_cache.get(_CACHE_KEY)
+        cached = await redis_cache.get(_CACHE_KEY_STATS)
         if cached:
             if isinstance(cached, str):
                 return json.loads(cached)
@@ -65,9 +71,30 @@ async def _get_cached_stats():
 async def _set_cached_stats(data):
     try:
         from utils.redis_cache import redis_cache
-        await redis_cache.set(_CACHE_KEY, json.dumps(data, default=str), timeout=_CACHE_TTL)
+        await redis_cache.set(_CACHE_KEY_STATS, json.dumps(data, default=str), timeout=_CACHE_TTL)
     except (OSError, ValueError):
         logger.warning("仪表盘缓存写入失败", exc_info=True)
+
+
+async def _get_cached_activities():
+    try:
+        from utils.redis_cache import redis_cache
+        cached = await redis_cache.get(_CACHE_KEY_ACTIVITIES)
+        if cached:
+            if isinstance(cached, str):
+                return json.loads(cached)
+            return cached
+    except (OSError, ValueError):
+        logger.warning("仪表盘活动缓存读取失败", exc_info=True)
+    return None
+
+
+async def _set_cached_activities(data):
+    try:
+        from utils.redis_cache import redis_cache
+        await redis_cache.set(_CACHE_KEY_ACTIVITIES, json.dumps(data, default=str), timeout=60)
+    except (OSError, ValueError):
+        logger.warning("仪表盘活动缓存写入失败", exc_info=True)
 
 
 async def _fetch_stats_async(db: AsyncSession) -> dict:
@@ -127,7 +154,7 @@ async def _fetch_activities_async(db: AsyncSession) -> list:
         return []
 
 
-@router.get("/stats", response_model=DashboardStats)
+@router.get("/stats", response_model=DashboardResponse)
 async def get_dashboard_stats(
     user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_async_db),
@@ -143,7 +170,10 @@ async def get_dashboard_stats(
             logger.warning("仪表盘统计查询失败", exc_info=True)
             dashboard_stats = {}
 
-    return DashboardStats(**dashboard_stats)
+    return DashboardResponse(
+        success=True,
+        data=DashboardStats(**dashboard_stats)
+    )
 
 
 @router.get("/activities", response_model=list[Activity])
@@ -151,9 +181,13 @@ async def get_dashboard_activities(
     user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_async_db),
 ):
-    """仪表盘最近活动数据（实时查询）"""
+    """仪表盘最近活动数据（Redis缓存60秒）"""
+    cached_activities = await _get_cached_activities()
+    if cached_activities is not None:
+        return [Activity(**a) for a in cached_activities]
     try:
         activities = await _fetch_activities_async(db)
+        await _set_cached_activities(activities)
         return [Activity(**a) for a in activities]
     except (OperationalError, DisconnectionError) as e:
         logger.warning("仪表盘活动加载失败: %s [%s]", e, type(e).__name__)

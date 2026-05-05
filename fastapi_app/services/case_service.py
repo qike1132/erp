@@ -120,16 +120,30 @@ async def get_case_stockout_list(db: AsyncSession, page: int = 1, per_page: int 
     }
 
 
-async def get_case_inventory_summary(db) -> list[dict]:
-    """获取皮套库存汇总"""
+async def get_case_inventory_summary(db, page: int = 1, per_page: int = 50, search: str = '') -> dict:
+    """获取皮套库存汇总（分页）"""
     in_sq = select(CaseStockIn.case_id, func.sum(CaseStockIn.quantity).label('total_in')).group_by(CaseStockIn.case_id).subquery()
     out_sq = select(CaseStockOut.case_id, func.sum(CaseStockOut.quantity).label('total_out')).group_by(CaseStockOut.case_id).subquery()
 
-    result = await db.execute(
-        select(Case, func.coalesce(in_sq.c.total_in, 0), func.coalesce(out_sq.c.total_out, 0))
-        .outerjoin(in_sq, Case.id == in_sq.c.case_id)
+    base_q = select(Case, func.coalesce(in_sq.c.total_in, 0), func.coalesce(out_sq.c.total_out, 0)) \
+        .outerjoin(in_sq, Case.id == in_sq.c.case_id) \
         .outerjoin(out_sq, Case.id == out_sq.c.case_id)
-    )
+
+    if search:
+        search_pattern = f'%{escape_like(search)}%'
+        base_q = base_q.outerjoin(Product, Case.product_id == Product.id).where(
+            Case.name.like(search_pattern) | Case.barcode.like(search_pattern)
+            | Product.name.like(search_pattern) | Product.barcode.like(search_pattern)
+        )
+
+    count_q = select(func.count()).select_from(base_q.subquery())
+    total = (await db.execute(count_q)).scalar() or 0
+
+    per_page = max(1, min(per_page, 200))
+    offset = (page - 1) * per_page
+    base_q = base_q.offset(offset).limit(per_page)
+
+    result = await db.execute(base_q)
 
     data = []
     for case_obj, total_in, total_out in result.all():
@@ -141,7 +155,32 @@ async def get_case_inventory_summary(db) -> list[dict]:
             'initial_stock': case_obj.initial_stock, 'current_stock': calc_stock,
             'total_in': int(total_in or 0), 'total_out': int(total_out or 0),
         })
-    return data
+
+    stats_q = select(
+        func.coalesce(func.sum(in_sq.c.total_in), 0),
+        func.coalesce(func.sum(out_sq.c.total_out), 0),
+    ).select_from(Case) \
+        .outerjoin(in_sq, Case.id == in_sq.c.case_id) \
+        .outerjoin(out_sq, Case.id == out_sq.c.case_id)
+    if search:
+        stats_q = stats_q.outerjoin(Product, Case.product_id == Product.id).where(
+            Case.name.like(search_pattern) | Case.barcode.like(search_pattern)
+            | Product.name.like(search_pattern) | Product.barcode.like(search_pattern)
+        )
+    sum_in, sum_out = (await db.execute(stats_q)).one()
+
+    return {
+        'inventory': data,
+        'total': total,
+        'page': page,
+        'per_page': per_page,
+        'pages': (total + per_page - 1) // per_page if per_page > 0 else 0,
+        'stats': {
+            'total_stock': int(sum_in or 0) - int(sum_out or 0),
+            'total_in': int(sum_in or 0),
+            'total_out': int(sum_out or 0),
+        },
+    }
 
 
 async def get_case_inventory_logs(db: AsyncSession, case_id: int, page: int = 1, per_page: int = 20,

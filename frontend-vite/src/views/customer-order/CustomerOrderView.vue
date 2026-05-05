@@ -176,7 +176,7 @@
             <template v-if="stagedItems.length">
               <div
                 v-for="(item, idx) in stagedItems"
-                :key="idx"
+                :key="item.type + '-' + item.productId + '-' + idx"
                 class="co-staged-card"
                 :style="{ borderColor: item.type === 'order' ? 'var(--color-ocean-light)' : 'var(--color-success-200)' }"
               >
@@ -563,32 +563,49 @@ const confirmDialog = useConfirmDialog()
 
 // ===== Data queries =====
 const { data: customerData } = useQuery({
-  queryKey: ['customers-list'],
-  queryFn: () => customerApi.list() as Promise<any>,
+  queryKey: ['customers-active-names'],
+  queryFn: () => customerApi.activeNames() as Promise<any>,
   staleTime: 30_000,
+  gcTime: 60_000,
 })
-const customerList = computed(() => customerData.value?.customers ?? customerData.value?.items ?? [])
+const customerList = computed(() => {
+  const raw = customerData.value?.names ?? customerData.value ?? []
+  return raw.map((c: any) => ({ name: c.name ?? c }))
+})
 const customerOptions = computed(() => customerList.value.map((c: unknown) => ({ value: c.name, label: c.name })))
 
+const orderPage = ref(1)
+const orderPerPage = 20
 const { data: ordersData } = useQuery({
-  queryKey: ['orders-list'],
+  queryKey: ['orders-list', () => orderPage.value],
   queryFn: async () => {
-    const res = (await orderApi.list({ per_page: 50 })) as any
-    return res.data ?? res.orders ?? res.items ?? []
+    const res = (await orderApi.list({ per_page: orderPerPage, page: orderPage.value })) as any
+    return res
   },
   staleTime: 30_000,
+  gcTime: 60_000,
 })
-const orderList = computed(() => (Array.isArray(ordersData.value) ? ordersData.value : []))
+const orderList = computed(() => ordersData.value?.data ?? ordersData.value?.orders ?? ordersData.value?.items ?? [])
+const orderTotal = computed(() => ordersData.value?.total ?? orderList.value.length)
+const orderTotalPages = computed(() => Math.max(1, Math.ceil(orderTotal.value / orderPerPage)))
 
+const stockinPage = ref(1)
+const stockinPerPage = 20
 const { data: stockinsData } = useQuery({
-  queryKey: ['stockins-list-all'],
+  queryKey: ['stockins-list', () => stockinPage.value],
   queryFn: async () => {
-    const res = (await get('/stock/in/list', { per_page: 50 })) as any
-    return res.stockins ?? res.items ?? []
+    const res = (await get('/stock/in/list', { per_page: stockinPerPage, page: stockinPage.value })) as any
+    return res
   },
   staleTime: 30_000,
+  gcTime: 60_000,
 })
-const stockinList = computed(() => (Array.isArray(stockinsData.value) ? stockinsData.value : []))
+const stockinList = computed(() => stockinsData.value?.stockins ?? stockinsData.value?.items ?? [])
+const stockinTotal = computed(() => stockinsData.value?.total ?? stockinList.value.length)
+const stockinTotalPages = computed(() => Math.max(1, Math.ceil(stockinTotal.value / stockinPerPage)))
+
+function goOrderPage(p: number) { orderPage.value = p }
+function goStockinPage(p: number) { stockinPage.value = p }
 
 // ===== Product search (shared) =====
 async function searchProducts(q: string) {
@@ -684,7 +701,11 @@ function openDeductEdit() {
 
 function addStaged() {
   if (!canAdd.value) {
-    showToast('请填写日期、客户和产品', 'warning')
+    if (!form.productId && form.productSearch) {
+      showToast('请从下拉列表中选择产品', 'warning')
+    } else {
+      showToast('请填写日期、客户和产品', 'warning')
+    }
     return
   }
   stagedItems.value.push({
@@ -725,6 +746,7 @@ async function submitOrders() {
       deduct_stock: i.deductStock || false,
       deduct_quantity: i.deductQuantity || 0,
       note: i.note || '',
+      order_date: i.date || '',
     }))
     await post('/aux/batch-submit-orders', { orders: payload })
     showToast('订单提交成功', 'success')

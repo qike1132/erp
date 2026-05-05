@@ -10,10 +10,10 @@ import threading
 from datetime import datetime
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
 from fastapi_app.shared.stock_concurrency import get_product_for_update_sync
-from fastapi_app.shared_models import InventoryLog, Order, Product, StockIn, StockOut
+from fastapi_app.shared_models import InventoryLog, Order, Product, StockIn, StockOut, StockReturn
 
 logger = logging.getLogger(__name__)
 
@@ -168,10 +168,10 @@ def calculate_available_shipment_quantity(
             'orders': []
         }
 
-    # 单次查询获取所有订单的已出货量，加 FOR UPDATE 行锁
+    # 单次查询获取所有订单的已出货量（扣除退货后的净出货量），加 FOR UPDATE 行锁
     order_ids = [o.id for o in orders]
     shipped_result = session.execute(
-        select(StockOut.order_id, func.sum(StockOut.quantity))
+        select(StockOut.order_id, func.sum(StockOut.quantity - StockOut.returned_quantity))
         .where(
             StockOut.order_id.in_(order_ids),
             StockOut.stockin_id.is_(None)
@@ -421,19 +421,23 @@ def update_stockout(session: Session, stockout: StockOut, new_quantity: int,
     if stockout.stockin_id is not None:
         raise ValueError('订单抵扣的出货记录不能直接编辑！请通过订单管理进行修改。')
 
+    if new_quantity < stockout.returned_quantity:
+        raise ValueError(f'出货数量不能小于已退货数量({stockout.returned_quantity})')
+
     old_quantity = stockout.quantity
+    old_net = old_quantity - stockout.returned_quantity
 
     product = get_product_for_update_sync(session, stockout.product_id)
 
-    if product.current_stock + old_quantity < new_quantity:
+    if product.current_stock + old_net < new_quantity - stockout.returned_quantity:
         raise ValueError('库存不足！')
 
     if customer:
         shipment_info = calculate_available_shipment_quantity(
             session, stockout.product_id, customer
         )
-        available_with_current = shipment_info['available_quantity'] + old_quantity
-        if new_quantity > available_with_current:
+        available_with_current = shipment_info['available_quantity'] + old_net
+        if new_quantity - stockout.returned_quantity > available_with_current:
             raise ValueError(
                 f'出货数量超过可出货量！订单总量：{shipment_info["order_quantity"]}，'
                 f'可出货（含当前记录）：{available_with_current}'
@@ -459,11 +463,14 @@ def update_stockout(session: Session, stockout: StockOut, new_quantity: int,
 
 def delete_stockout(session: Session, stockout: StockOut) -> None:
     """
-    删除出库记录，回退库存。如果是抵扣出库则拒绝删除。
+    删除出库记录，回退库存。如果是抵扣出库或已有退货则拒绝删除。
     不做 commit，由调用方控制事务。
     """
     if stockout.stockin_id is not None:
         raise ValueError('订单抵扣的出货记录不能直接删除！请通过订单管理进行修改。')
+
+    if stockout.returned_quantity > 0:
+        raise ValueError('该出货记录已有退货关联，无法删除！请先删除退货记录。')
 
     product = get_product_for_update_sync(session, stockout.product_id)
     product.current_stock += stockout.quantity
@@ -479,6 +486,124 @@ def delete_stockout(session: Session, stockout: StockOut) -> None:
     session.delete(stockout)
 
 
+# ==================== 退货 CRUD ====================
+
+def create_stockreturn(session: Session, stockout_id: int, quantity: int,
+                       return_date: datetime, reason: str | None = None,
+                       note: str | None = None) -> StockReturn:
+    """
+    创建退货记录，恢复库存和写入日志。
+    不做 commit，由调用方控制事务。
+    """
+    if quantity <= 0:
+        raise ValueError('退货数量必须大于0')
+
+    stockout_result = session.execute(
+        select(StockOut).where(StockOut.id == stockout_id).with_for_update()
+    )
+    stockout = stockout_result.scalar_one_or_none()
+    if not stockout:
+        raise ValueError('出货记录不存在')
+
+    available_return = stockout.quantity - stockout.returned_quantity
+    if quantity > available_return:
+        raise ValueError(f'退货数量超过可退数量！出货数量：{stockout.quantity}，已退货：{stockout.returned_quantity}，可退：{available_return}')
+
+    return_no = generate_stockreturn_number_sync(session)
+    customer = stockout.customer
+    order_id = stockout.order_id
+
+    stockreturn = StockReturn(
+        return_no=return_no,
+        return_date=return_date,
+        product_id=stockout.product_id,
+        quantity=quantity,
+        customer=customer,
+        stockout_id=stockout_id,
+        order_id=order_id,
+        reason=reason,
+        note=note,
+    )
+    session.add(stockreturn)
+
+    stockout.returned_quantity += quantity
+
+    product = get_product_for_update_sync(session, stockout.product_id)
+    product.current_stock += quantity
+
+    log = InventoryLog(
+        product_id=stockout.product_id,
+        change_type='退货',
+        change_quantity=quantity,
+        related_id=str(stockreturn.id),
+        note=f'退货ID：{stockreturn.id}，关联出货ID：{stockout_id}',
+        customer=customer,
+    )
+    session.add(log)
+
+    if order_id:
+        recalc_order_status_after_return(session, order_id)
+
+    session.flush()
+    return stockreturn
+
+
+def delete_stockreturn(session: Session, stockreturn: StockReturn) -> None:
+    """
+    删除退货记录，扣回库存。
+    不做 commit，由调用方控制事务。
+    """
+    stockout_result = session.execute(
+        select(StockOut).where(StockOut.id == stockreturn.stockout_id).with_for_update()
+    )
+    stockout = stockout_result.scalar_one_or_none()
+    if not stockout:
+        raise ValueError('关联的出货记录不存在')
+
+    stockout.returned_quantity -= stockreturn.quantity
+
+    product = get_product_for_update_sync(session, stockreturn.product_id)
+    product.current_stock -= stockreturn.quantity
+
+    log = InventoryLog(
+        product_id=stockreturn.product_id,
+        change_type='退货删除',
+        change_quantity=-stockreturn.quantity,
+        related_id=str(stockreturn.id),
+        note=f'退货删除ID：{stockreturn.id}，关联出货ID：{stockout.id}',
+        customer=stockreturn.customer,
+    )
+    session.add(log)
+
+    if stockreturn.order_id:
+        recalc_order_status_after_return(session, stockreturn.order_id)
+
+    session.delete(stockreturn)
+
+
+def recalc_order_status_after_return(session: Session, order_id: int) -> None:
+    """
+    退货后重算订单状态
+    """
+    order = session.get(Order, order_id)
+    if not order:
+        return
+
+    result = session.execute(
+        select(func.sum(StockOut.quantity - StockOut.returned_quantity))
+        .where(
+            StockOut.order_id == order_id,
+            StockOut.stockin_id.is_(None),
+        )
+    )
+    net_shipped = result.scalar() or 0
+
+    if net_shipped <= 0 and order.status in ('已出货', '待出货', '已完成'):
+        order.status = '待备货'
+    elif net_shipped < order.quantity and order.status in ('已出货', '已完成'):
+        order.status = '待出货'
+
+
 # ==================== 库存查看 ====================
 
 def get_inventory(session: Session, search_customer: str = '',
@@ -489,7 +614,7 @@ def get_inventory(session: Session, search_customer: str = '',
     业务规则（与原 Flask/FastAPI 实现一致）：
     - 备货剩余 = 该客户该产品的入库量 - 已被订单抵扣的量
     - 订单可用 = 该客户该产品的订单总量 - 已出货量（非抵扣）
-    - 总库存 = 备货剩余 + 常规订单数量 + 定制订单数量
+    - 总库存 = 备货剩余 + 常规订单数量 + 定制订单数量 - 已出货总量
 
     Args:
         session: SQLAlchemy 同步会话
@@ -500,10 +625,10 @@ def get_inventory(session: Session, search_customer: str = '',
         dict: { inventory_data, total_order_qty, total_stockin_qty, total_stock, all_countries }
     """
     products_query = (
-        select(Product)
-        .options(
-            selectinload(Product.orders),
-            selectinload(Product.stockins).selectinload(StockIn.stockin_stockouts)
+        select(
+            Product.id,
+            Product.name,
+            Product.barcode,
         )
     )
 
@@ -514,7 +639,7 @@ def get_inventory(session: Session, search_customer: str = '',
         )
 
     result = session.execute(products_query)
-    products = result.scalars().unique().all()
+    products = result.all()
 
     if not products:
         return {
@@ -526,111 +651,140 @@ def get_inventory(session: Session, search_customer: str = '',
         }
 
     product_ids = [p.id for p in products]
+    product_map = {p.id: p for p in products}
 
-    # 批量预加载出库记录
-    stockout_result = session.execute(
-        select(StockOut).where(
-            StockOut.product_id.in_(product_ids),
-            StockOut.stockin_id.is_(None)
+    order_agg = session.execute(
+        select(
+            Order.product_id,
+            Order.customer,
+            Order.order_type,
+            Order.country,
+            func.sum(Order.quantity).label('total_qty'),
         )
-    )
-    all_stockouts = stockout_result.scalars().all()
+        .where(Order.product_id.in_(product_ids), ~Order.is_deleted)
+        .group_by(Order.product_id, Order.customer, Order.order_type, Order.country)
+    ).all()
 
-    # 按 product_id + customer 分组
-    stockout_map = {}
-    stockout_customers_by_product = {}
-    for so in all_stockouts:
-        key = (so.product_id, so.customer or '')
-        if key not in stockout_map:
-            stockout_map[key] = {'direct': 0, 'order': 0, 'total': 0}
-        stockout_map[key]['total'] += so.quantity
-        if so.order_id:
-            stockout_map[key]['order'] += so.quantity
+    stockin_detail = session.execute(
+        select(
+            StockIn.id,
+            StockIn.product_id,
+            StockIn.customer,
+            StockIn.quantity,
+            func.coalesce(func.sum(StockOut.quantity - StockOut.returned_quantity), 0).label('deducted_qty'),
+        )
+        .outerjoin(StockOut, StockOut.stockin_id == StockIn.id)
+        .where(StockIn.product_id.in_(product_ids))
+        .group_by(StockIn.id, StockIn.product_id, StockIn.customer, StockIn.quantity)
+    ).all()
+
+    si_remaining = {}
+    for r in stockin_detail:
+        key = (r.product_id, r.customer or '')
+        remaining = r.quantity - r.deducted_qty
+        si_remaining[key] = si_remaining.get(key, 0) + remaining
+
+    direct_stockout_agg = session.execute(
+        select(
+            StockOut.product_id,
+            StockOut.customer,
+            StockOut.order_id,
+            func.sum(StockOut.quantity - StockOut.returned_quantity).label('total_qty'),
+        )
+        .where(
+            StockOut.product_id.in_(product_ids),
+            StockOut.stockin_id.is_(None),
+        )
+        .group_by(StockOut.product_id, StockOut.customer, StockOut.order_id)
+    ).all()
+
+    order_type_map = {}
+    direct_order_ids = [r.order_id for r in direct_stockout_agg if r.order_id]
+    if direct_order_ids:
+        order_type_rows = session.execute(
+            select(Order.id, Order.order_type).where(Order.id.in_(direct_order_ids))
+        ).all()
+        order_type_map = {r.id: r.order_type for r in order_type_rows}
+
+    so_by_key = {}
+    for r in direct_stockout_agg:
+        key = (r.product_id, r.customer or '')
+        if key not in so_by_key:
+            so_by_key[key] = {'direct': 0, 'regular': 0, 'custom': 0, 'total': 0}
+        otype = order_type_map.get(r.order_id, 'regular') if r.order_id else None
+        so_by_key[key]['total'] += r.total_qty
+        if otype == 'custom':
+            so_by_key[key]['custom'] += r.total_qty
+        elif otype == 'regular':
+            so_by_key[key]['regular'] += r.total_qty
         else:
-            stockout_map[key]['direct'] += so.quantity
-        if so.customer:
-            pid = so.product_id
-            if pid not in stockout_customers_by_product:
-                stockout_customers_by_product[pid] = set()
-            stockout_customers_by_product[pid].add(so.customer)
+            so_by_key[key]['direct'] += r.total_qty
+
+    order_by_cust = {}
+    for r in order_agg:
+        key = (r.product_id, r.customer or '')
+        if key not in order_by_cust:
+            order_by_cust[key] = {}
+        label = r.country if r.order_type == 'custom' and r.country else '常规'
+        order_by_cust[key][label] = order_by_cust[key].get(label, 0) + (r.total_qty or 0)
+
+    all_keys = set()
+    for k in si_remaining:
+        if search_customer and k[1] != search_customer:
+            continue
+        all_keys.add(k)
+    for k in so_by_key:
+        if search_customer and k[1] != search_customer:
+            continue
+        all_keys.add(k)
+    for k in order_by_cust:
+        if search_customer and k[1] != search_customer:
+            continue
+        all_keys.add(k)
 
     inventory_data = []
     total_order_qty = 0
     total_stockin_qty = 0
     total_stock = 0
 
-    for product in products:
-        stockins = product.stockins
-        if search_customer:
-            stockins = [s for s in stockins if s.customer == search_customer]
+    for (pid, customer) in all_keys:
+        prod = product_map.get(pid)
+        if not prod:
+            continue
 
-        product_customers = set()
-        for s in stockins:
-            if s.customer:
-                product_customers.add(s.customer)
+        country_orders = order_by_cust.get((pid, customer), {})
+        regular_order_qty = country_orders.get('常规', 0)
+        custom_order_qty = sum(v for k, v in country_orders.items() if k != '常规')
 
-        stockout_customers = stockout_customers_by_product.get(product.id, set())
-        if search_customer:
-            stockout_customers = {c for c in stockout_customers if c == search_customer}
-        product_customers.update(stockout_customers)
+        cust_stockin_qty = si_remaining.get((pid, customer), 0)
+        so_data = so_by_key.get((pid, customer), {'direct': 0, 'regular': 0, 'custom': 0, 'total': 0})
+        cust_stockout_qty = so_data['total']
 
-        orders = product.orders
-        if search_customer:
-            orders = [o for o in orders if o.customer == search_customer]
-        order_customers = {o.customer for o in orders}
-        product_customers.update(order_customers)
+        direct_shipped = so_data['direct']
+        regular_shipped = so_data['regular']
+        custom_shipped = so_data['custom']
+        remaining_reg = max(0, regular_order_qty - direct_shipped - regular_shipped)
+        remaining_cus = max(0, custom_order_qty - custom_shipped)
+        total_qty = cust_stockin_qty + remaining_reg + remaining_cus
 
-        for customer in product_customers:
-            cust_stockin_qty = sum(
-                s.quantity - sum(so.quantity for so in s.stockin_stockouts)
-                for s in product.stockins if s.customer == customer
-            )
+        has_stockin_record = cust_stockin_qty > 0
+        has_order_record = bool(country_orders)
+        has_positive_stock = total_qty > 0
 
-            so_key = (product.id, customer)
-            so_data = stockout_map.get(so_key, {'direct': 0, 'order': 0, 'total': 0})
-            cust_stockout_qty = so_data['total']
-
-            customer_orders = [o for o in orders if o.customer == customer]
-            cust_order_total = sum(o.quantity for o in customer_orders)
-
-            # 按订单类型/国家细分
-            country_orders = {}
-            for o in customer_orders:
-                if getattr(o, 'order_type', 'regular') == 'custom' and o.country:
-                    label = o.country
-                else:
-                    label = '常规'
-                country_orders[label] = country_orders.get(label, 0) + o.quantity
-
-            regular_order_qty = country_orders.get('常规', 0)
-            custom_order_qty = sum(v for k, v in country_orders.items() if k != '常规')
-
-            direct_shipped = so_data['direct']
-            order_shipped = so_data['order']
-            total_shipped = direct_shipped + order_shipped
-            available_order_qty = max(0, cust_order_total - total_shipped)
-            total_qty = cust_stockin_qty + regular_order_qty + custom_order_qty
-
-            has_stockin_record = any(s.customer == customer for s in product.stockins)
-            has_order_record = len(customer_orders) > 0
-            has_positive_stock = (available_order_qty > 0 or
-                                  cust_stockin_qty > 0 or
-                                  total_qty > 0)
-
-            if (has_stockin_record or has_order_record) and has_positive_stock:
-                inventory_data.append({
-                    'customer': customer,
-                    'product_name': product.name,
-                    'product_barcode': product.barcode or '',
-                    'order_quantity': regular_order_qty if regular_order_qty > 0 else '',
-                    'country_orders': country_orders,
-                    'stockin_quantity': cust_stockin_qty if cust_stockin_qty > 0 else '',
-                    'stockout_quantity': cust_stockout_qty if cust_stockout_qty > 0 else '',
-                    'total_stock': total_qty if total_qty > 0 else '',
-                })
-                total_stockin_qty += cust_stockin_qty
-                total_order_qty += regular_order_qty + custom_order_qty
-                total_stock += total_qty
+        if (has_stockin_record or has_order_record) and has_positive_stock:
+            inventory_data.append({
+                'customer': customer,
+                'product_name': prod.name,
+                'product_barcode': prod.barcode or '',
+                'order_quantity': remaining_reg if remaining_reg > 0 else '',
+                'country_orders': country_orders,
+                'stockin_quantity': cust_stockin_qty if cust_stockin_qty > 0 else '',
+                'stockout_quantity': cust_stockout_qty if cust_stockout_qty > 0 else '',
+                'total_stock': total_qty if total_qty > 0 else '',
+            })
+            total_stockin_qty += cust_stockin_qty
+            total_order_qty += remaining_reg + remaining_cus
+            total_stock += total_qty
 
     all_countries = set()
     for item in inventory_data:

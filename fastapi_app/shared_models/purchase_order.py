@@ -3,12 +3,19 @@
 
 映射到与 Flask-SQLAlchemy PurchaseOrder/PurchaseOrderItem 相同的表。
 """
+from __future__ import annotations
+
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
+
+if TYPE_CHECKING:
+    from fastapi_app.shared_models.product import Product
+    from fastapi_app.shared_models.supplier import Supplier
 
 
 class PurchaseOrder(Base):
@@ -32,6 +39,7 @@ class PurchaseOrder(Base):
     source_order_ids: Mapped[str | None] = mapped_column(Text, comment='关联的原始订单IDs(JSON数组)')
     product_name: Mapped[str | None] = mapped_column(String(200), comment='产品名称')
     product_quantity: Mapped[float | None] = mapped_column(Numeric(12, 2), comment='订单数量')
+    total_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), default=0, comment='订单总金额')
     create_time: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, comment='创建时间')
     update_time: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
     created_by: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id'), comment='创建人')

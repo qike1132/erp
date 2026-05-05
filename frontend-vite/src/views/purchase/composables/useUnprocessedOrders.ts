@@ -1,10 +1,13 @@
 import { ref, computed, reactive } from 'vue'
 import { purchaseApi } from '@/api'
+import { showToast } from '@/composables/useToast'
 import type { UnprocessedOrder } from '@/types'
 
 interface UnprocessedOrdersResponse {
   orders: UnprocessedOrder[]
   total: number
+  pages: number
+  current_page: number
 }
 
 interface OneClickGenerateResponse {
@@ -18,6 +21,9 @@ export function useUnprocessedOrders() {
   const orders = ref<UnprocessedOrder[]>([])
   const loading = ref(false)
   const total = ref(0)
+  const currentPage = ref(1)
+  const totalPages = ref(1)
+  const perPage = ref(15)
   const selectedIds = ref<number[]>([])
 
   const validSelectedIds = computed(() =>
@@ -29,14 +35,19 @@ export function useUnprocessedOrders() {
 
   const allSelected = computed(() => orders.value.length > 0 && selectedIds.value.length >= orders.value.length)
 
-  async function load() {
+  async function load(page?: number) {
     loading.value = true
     try {
-      const res = await purchaseApi.unprocessedOrders() as unknown as UnprocessedOrdersResponse
+      const p = page ?? currentPage.value
+      const res = await purchaseApi.unprocessedOrders({ page: p, per_page: perPage.value }) as unknown as UnprocessedOrdersResponse
       orders.value = res.orders || []
       total.value = res.total || orders.value.length
-    } catch {
+      totalPages.value = res.pages || 1
+      currentPage.value = res.current_page || p
+      selectedIds.value = []
+    } catch (err: any) {
       orders.value = []
+      showToast(err.response?.data?.detail || '加载待审核订单失败', 'error')
     } finally {
       loading.value = false
     }
@@ -79,6 +90,9 @@ export function useUnprocessedOrders() {
     orders,
     loading,
     total,
+    currentPage,
+    totalPages,
+    perPage,
     selectedIds,
     validSelectedIds,
     allSelected,

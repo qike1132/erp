@@ -7,7 +7,6 @@
           <HeaderTabs />
         </div>
         <div class="sk-header-right">
-          <span v-if="itemCount" class="sk-badge">{{ itemCount }} 条</span>
           <button v-if="itemCount" class="sk-action-btn sk-action-success" @click="handleExport">
             <i class="fas fa-file-excel" style="margin-right: 4px" />导出
           </button>

@@ -1,5 +1,6 @@
 import { ref, reactive, computed } from 'vue'
 import { purchaseApi } from '@/api'
+import { showToast } from '@/composables/useToast'
 import type { ApiResponse, PurchaseOrder } from '@/types'
 
 interface QuickFilter {
@@ -46,8 +47,9 @@ export function useCompletedOrders() {
       orders.value = res.orders || []
       total.value = res.total || 0
       totalPages.value = res.total_pages || res.pages || 1
-    } catch {
+    } catch (err: any) {
       orders.value = []
+      showToast(err.response?.data?.detail || '加载已完成订单失败', 'error')
     } finally {
       loading.value = false
     }

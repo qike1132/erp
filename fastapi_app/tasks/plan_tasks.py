@@ -30,7 +30,7 @@ def sync_shipment_records_task(self):
         session = SyncSessionLocal()
         try:
             target_date = date.today() - timedelta(days=1)
-            rows = session.execute(text("\n                SELECT so.id, so.stockout_no, so.customer, so.product_id,\n                       so.quantity, DATE(so.stockout_date) as stockout_date,\n                       p.name as product_name\n                FROM stock_out so\n                JOIN product p ON so.product_id = p.id\n                WHERE DATE(so.stockout_date) = :target_date\n                  AND so.customer IS NOT NULL AND so.customer != ''\n            "), {'target_date': target_date}).fetchall()
+            rows = session.execute(text("\n                SELECT so.id, so.stockout_no, so.customer, so.product_id,\n                       so.quantity, so.returned_quantity, DATE(so.stockout_date) as stockout_date,\n                       p.name as product_name\n                FROM stock_out so\n                JOIN product p ON so.product_id = p.id\n                WHERE DATE(so.stockout_date) = :target_date\n                  AND so.customer IS NOT NULL AND so.customer != ''\n            "), {'target_date': target_date}).fetchall()
             customers = session.execute(text('SELECT id, name FROM customer')).fetchall()
             customer_id_map = {c.name: c.id for c in customers}
             synced_count = 0
@@ -40,9 +40,9 @@ def sync_shipment_records_task(self):
                     continue
                 existing = session.execute(text('SELECT id FROM shipment_records WHERE shipment_no = :no'), {'no': row.stockout_no}).fetchone()
                 if existing:
-                    session.execute(text('\n                        UPDATE shipment_records\n                        SET quantity = :qty, synced_at = NOW()\n                        WHERE shipment_no = :no\n                    '), {'qty': row.quantity, 'no': row.stockout_no})
+                    session.execute(text('\n                        UPDATE shipment_records\n                        SET quantity = :qty, synced_at = NOW()\n                        WHERE shipment_no = :no\n                    '), {'qty': row.quantity - row.returned_quantity, 'no': row.stockout_no})
                 else:
-                    session.execute(text("\n                        INSERT INTO shipment_records\n                            (shipment_no, customer_id, customer_name, product_id,\n                             product_name, quantity, shipment_date, source_type,\n                             source_id, synced_at)\n                        VALUES (:no, :cid, :cname, :pid, :pname, :qty,\n                                :sdate, 'stockout', :sid, NOW())\n                    "), {'no': row.stockout_no, 'cid': customer_id, 'cname': row.customer, 'pid': row.product_id, 'pname': row.product_name, 'qty': row.quantity, 'sdate': row.stockout_date, 'sid': row.id})
+                    session.execute(text("\n                        INSERT INTO shipment_records\n                            (shipment_no, customer_id, customer_name, product_id,\n                             product_name, quantity, shipment_date, source_type,\n                             source_id, synced_at)\n                        VALUES (:no, :cid, :cname, :pid, :pname, :qty,\n                                :sdate, 'stockout', :sid, NOW())\n                    "), {'no': row.stockout_no, 'cid': customer_id, 'cname': row.customer, 'pid': row.product_id, 'pname': row.product_name, 'qty': row.quantity - row.returned_quantity, 'sdate': row.stockout_date, 'sid': row.id})
                 synced_count += 1
             session.commit()
             logger.info(f'出货记录同步完成：{target_date}，{synced_count}条')

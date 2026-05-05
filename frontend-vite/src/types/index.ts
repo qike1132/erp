@@ -209,6 +209,55 @@ export interface ProductionCraft {
   month?: number
 }
 
+export interface DailyProductionRecord {
+  id: number
+  department: string
+  product_id?: number | null
+  product_name: string
+  barcode: string
+  unit_price: number
+  quantity: number
+  production_value: number
+  production_date: string
+  remark?: string | null
+  create_time?: string | null
+  created_by?: string | null
+}
+
+export interface DepartmentSummary {
+  department: string
+  department_label: string
+  total_quantity: number
+  total_value: number
+  sku_count: number
+}
+
+export interface DailySummary {
+  date: string
+  departments: DepartmentSummary[]
+  overall_quantity: number
+  overall_value: number
+  overall_sku_count: number
+}
+
+export interface MonthlyDayData {
+  date: string
+  day: number
+  filling: { quantity: number; value: number; sku_count: number }
+  handcraft: { quantity: number; value: number; sku_count: number }
+  packaging: { quantity: number; value: number; sku_count: number }
+  total: { quantity: number; value: number; sku_count: number }
+}
+
+export interface MonthlySummary {
+  year: number
+  month: number
+  daily_data: MonthlyDayData[]
+  monthly_departments: DepartmentSummary[]
+  monthly_total_quantity: number
+  monthly_total_value: number
+}
+
 export interface MaterialRegistration {
   id: number
   purchase_order_id?: number
@@ -243,4 +292,48 @@ export interface QueryParams {
   sort_by?: string
   sort_order?: string
   [key: string]: unknown
+}
+
+export interface ShipmentInfo {
+  order_quantity: number
+  shipped_quantity: number
+  available_quantity: number
+}
+
+export interface StagedStockout {
+  id: number
+  productId: string
+  productName: string
+  customer: string
+  date: string
+  quantity: number
+  note?: string
+}
+
+export interface StockoutRecordGroup {
+  date: string
+  expanded: boolean
+  records: StockOutRecord[]
+  totalQty: number
+  summaryList: StockoutRecordSummary[]
+}
+
+export interface StockoutRecordSummary {
+  key: string
+  firstId: number
+  customer: string
+  productName: string
+  productImage?: string
+  barcode?: string
+  quantity: number
+  deductQuantity: number
+  notesDisplay?: string
+}
+
+export interface StockoutBatchSubmit {
+  product_id: number
+  customer: string
+  quantity: number
+  stockout_date: string
+  note?: string
 }

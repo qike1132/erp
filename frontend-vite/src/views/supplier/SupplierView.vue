@@ -22,11 +22,12 @@
               type="text"
               placeholder="搜索供应商名称..."
               class="sp-search-input"
+              @input="onSearchInput"
             />
             <button
               v-if="searchTerm"
               class="sp-search-clear"
-              @click="searchTerm = ''"
+              @click="clearSearch"
             >
               <i class="fas fa-times" />
             </button>
@@ -43,7 +44,7 @@
         </div>
 
         <!-- Empty -->
-        <div v-else-if="filteredSuppliers.length === 0" class="sp-empty-state">
+        <div v-else-if="suppliers.length === 0" class="sp-empty-state">
           <i class="fas fa-truck" />
           <span>{{ searchTerm ? '没有匹配的供应商' : '暂无供应商，请先添加' }}</span>
           <small v-if="searchTerm">试试其他关键词</small>
@@ -63,7 +64,7 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in filteredSuppliers" :key="row.id">
+              <tr v-for="row in suppliers" :key="row.id">
                 <td>
                   <span class="sp-name">{{ row.name }}</span>
                 </td>
@@ -89,6 +90,9 @@
               </tr>
             </tbody>
           </table>
+
+          <!-- Pagination -->
+          <UiPagination v-if="totalItems > perPage" :current-page="currentPage" :total-pages="totalPages" :total-items="totalItems" @update:current-page="goPage" />
         </div>
       </div>
     </div>
@@ -175,11 +179,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, watch } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { supplierApi } from '@/api'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
+import UiPagination from '@/components/ui/UiPagination.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 import { showToast } from '@/composables/useToast'
@@ -189,20 +194,40 @@ import type { Supplier } from '@/types'
 const actionId = ref<number | ''>(0)
 const queryClient = useQueryClient()
 const confirmDialog = useConfirmDialog()
+
+const searchTerm = ref('')
+const currentPage = ref(1)
+const perPage = 20
+
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+const debouncedSearch = ref('')
+function onSearchInput() {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    debouncedSearch.value = searchTerm.value
+    currentPage.value = 1
+  }, 300)
+}
+function clearSearch() {
+  searchTerm.value = ''
+  debouncedSearch.value = ''
+  currentPage.value = 1
+}
+
 const { data: result, isLoading } = useQuery({
-  queryKey: ['suppliers-list'],
-  queryFn: () => supplierApi.list() as Promise<any>,
+  queryKey: ['suppliers-list', () => debouncedSearch.value, () => currentPage.value],
+  queryFn: () => supplierApi.list({ per_page: perPage, page: currentPage.value, search: debouncedSearch.value || undefined }) as Promise<any>,
   staleTime: 30_000,
+  gcTime: 60_000,
 })
 
 const suppliers = computed<Supplier[]>(() => result.value?.data ?? result.value?.suppliers ?? [])
+const totalItems = computed(() => result.value?.total ?? suppliers.value.length)
+const totalPages = computed(() => Math.max(1, Math.ceil(totalItems.value / perPage)))
 
-const searchTerm = ref('')
-const filteredSuppliers = computed(() => {
-  if (!searchTerm.value) return suppliers.value
-  const term = searchTerm.value.toLowerCase()
-  return suppliers.value.filter((s) => s.name.toLowerCase().includes(term))
-})
+function goPage(p: number) {
+  currentPage.value = p
+}
 
 // Add form
 const formOpen = ref(false)

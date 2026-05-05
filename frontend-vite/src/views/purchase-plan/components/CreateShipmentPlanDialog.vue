@@ -353,7 +353,7 @@ async function handleSubmit() {
   } catch (err: any) {
     const detail = err.response?.data?.detail || err.message || '创建失败，请重试'
     errorMsg.value = typeof detail === 'string' ? detail : JSON.stringify(detail)
-    showToast('创建失败', 'error')
+    showToast(errorMsg.value, 'error')
   } finally {
     submitting.value = false
   }

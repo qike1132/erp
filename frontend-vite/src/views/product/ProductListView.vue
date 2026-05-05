@@ -99,7 +99,7 @@
             <div class="pd-col-actions">
               <div class="pd-search">
                 <i class="fas fa-search pd-search-icon"></i>
-                <input v-model="searchTerm" type="text" class="pd-search-input" placeholder="搜索产品名称或69码..." />
+                <input v-model="searchTerm" type="text" class="pd-search-input" placeholder="搜索产品名称或69码..." @input="onSearchInput" />
               </div>
               <select v-model="sortOrder" class="pd-sort">
                 <option value="name-asc">名称 A-Z</option>
@@ -166,25 +166,7 @@
             </div>
 
             <!-- 分页 -->
-            <div v-if="filteredProducts.length > itemsPerPage" class="pd-pagi-wrap">
-              <div class="pd-pagi-inner">
-                <div class="pd-pagi-info">显示 {{ paginationStart }}-{{ paginationEnd }} 条，共 {{ filteredProducts.length }} 条</div>
-                <nav>
-                  <ul class="pd-pagi">
-                    <li class="page-item" :class="{ disabled: currentPage === 1 }">
-                      <a class="page-link" href="#" @click.prevent="currentPage > 1 && (currentPage--)"><i class="fas fa-chevron-left"></i></a>
-                    </li>
-                    <li v-for="p in visiblePages" :key="p" class="page-item" :class="{ active: p === currentPage, disabled: p === '...' }">
-                      <a v-if="typeof p === 'number'" class="page-link" href="#" @click.prevent="goToPage(p)">{{ p }}</a>
-                      <span v-else class="page-link">...</span>
-                    </li>
-                    <li class="page-item" :class="{ disabled: currentPage === totalPages }">
-                      <a class="page-link" href="#" @click.prevent="currentPage < totalPages && (currentPage++)"><i class="fas fa-chevron-right"></i></a>
-                    </li>
-                  </ul>
-                </nav>
-              </div>
-            </div>
+            <UiPagination v-if="total > PAGE_SIZE" :current-page="currentPage" :total-pages="totalPages" :total-items="total" @update:current-page="goToPage" />
           </div>
         </div>
       </div>
@@ -272,7 +254,7 @@
                         </tr>
                       </thead>
                       <tbody>
-                        <tr v-for="(item, idx) in currentBomItems" :key="idx">
+                        <tr v-for="(item, idx) in currentBomItems" :key="item.id ?? 'bom-' + idx">
                           <td><input v-model="item.name" type="text" class="bom-table-input" placeholder="输入物料名称" /></td>
                           <td><input v-model="item.specification" type="text" class="bom-table-input" placeholder="输入规格型号" /></td>
                           <td>
@@ -462,6 +444,7 @@ import type { ApiResponse } from '@/types'
 import { upload, download, resolveStaticUrl } from '@/api/request'
 import { showToast } from '@/composables/useToast'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
+import UiPagination from '@/components/ui/UiPagination.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 
@@ -492,14 +475,15 @@ const queryClient = useQueryClient()
 const confirmDialog = useConfirmDialog()
 
 // 产品列表
+const PAGE_SIZE = 20
 const currentPage = ref(1)
+const searchTerm = ref('')
 const total = ref(0)
-const itemsPerPage = 10
 
 const { data: result, isLoading } = useQuery({
-  queryKey: ['products-list', currentPage],
+  queryKey: ['products-list', currentPage, searchTerm],
   queryFn: async () => {
-    const res = (await productApi.list({ page: currentPage.value, per_page: 20 })) as any
+    const res = (await productApi.list({ page: currentPage.value, per_page: PAGE_SIZE, search: searchTerm.value || undefined })) as any
     total.value = res.total ?? 0
     return res
   },
@@ -508,46 +492,27 @@ const { data: result, isLoading } = useQuery({
 
 const products = computed<Product[]>(() => result.value?.data ?? result.value?.products ?? [])
 
-// 搜索和排序
-const searchTerm = ref('')
+// 排序（在当前页数据上排序）
 const sortOrder = ref('name-asc')
 const filteredProducts = computed(() => {
-  let list = products.value
-  if (searchTerm.value) {
-    const q = searchTerm.value.toLowerCase()
-    list = list.filter(p => p.name.toLowerCase().includes(q) || (p.barcode || '').toLowerCase().includes(q))
-  }
-  return [...list].sort((a, b) => {
+  return [...products.value].sort((a, b) => {
     if (sortOrder.value === 'name-asc') return a.name.localeCompare(b.name, 'zh-CN')
     if (sortOrder.value === 'name-desc') return b.name.localeCompare(a.name, 'zh-CN')
     return 0
   })
 })
 
-// 客户端分页
-const totalPages = computed(() => Math.ceil(filteredProducts.value.length / itemsPerPage) || 1)
-const paginatedProducts = computed(() => {
-  const start = (currentPage.value - 1) * itemsPerPage
-  return filteredProducts.value.slice(start, start + itemsPerPage)
-})
-const paginationStart = computed(() => (currentPage.value - 1) * itemsPerPage + 1)
-const paginationEnd = computed(() => Math.min(currentPage.value * itemsPerPage, filteredProducts.value.length))
-
-const visiblePages = computed(() => {
-  const tp = totalPages.value
-  const cp = currentPage.value
-  const max = 5
-  let start = Math.max(1, cp - Math.floor(max / 2))
-  let end = Math.min(tp, start + max - 1)
-  if (end - start < max - 1) start = Math.max(1, end - max + 1)
-  const pages: (number | string)[] = []
-  if (start > 1) { pages.push(1); if (start > 2) pages.push('...') }
-  for (let i = start; i <= end; i++) pages.push(i)
-  if (end < tp) { if (end < tp - 1) pages.push('...'); pages.push(tp) }
-  return pages
-})
+// 服务端分页
+const totalPages = computed(() => Math.ceil(total.value / PAGE_SIZE) || 1)
+const paginatedProducts = computed(() => filteredProducts.value)
 
 watch(searchTerm, () => { currentPage.value = 1 })
+
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+function onSearchInput() {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => { currentPage.value = 1 }, 300)
+}
 
 function goToPage(p: number) { currentPage.value = p }
 
@@ -1509,23 +1474,6 @@ async function confirmCopyBom() {
 .pd-empty-icon { font-size: 28px; color: var(--color-text-secondary); opacity: 0.5; }
 .pd-empty-text { font-size: 14px; color: var(--color-text-secondary); margin: 0; }
 .pd-loading { padding: 24px 0; text-align: center; color: var(--color-text-secondary); }
-
-/* ===== 分页 ===== */
-.pd-pagi-wrap { background: white; border-top: 1px solid var(--color-border-light, #f1f5f9); }
-.pd-pagi-inner { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 14px; }
-.pd-pagi-info { font-size: 13px; color: var(--color-text-secondary); }
-.pd-pagi { display: flex; list-style: none; margin: 0; padding: 0; gap: 4px; }
-.pd-pagi .page-link {
-  width: 36px; height: 36px; border-radius: 8px; border: 2px solid var(--color-border-light, #e2e8f0);
-  color: var(--color-text-secondary); display: flex; align-items: center; justify-content: center;
-  font-weight: 500; font-size: 13px; transition: all 0.2s ease; text-decoration: none;
-}
-.pd-pagi .page-link:hover { background: var(--color-surface, #f8fafc); border-color: var(--color-border-light); color: var(--color-text); }
-.pd-pagi .page-item.active .page-link {
-  background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-600));
-  border-color: var(--color-primary-500); color: white; box-shadow: 0 4px 12px rgba(59,130,246,0.3);
-}
-.pd-pagi .page-item.disabled .page-link { opacity: 0.4; pointer-events: none; }
 
 /* ===== 模态框遮罩 ===== */
 .pd-overlay {

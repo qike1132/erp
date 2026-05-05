@@ -57,6 +57,7 @@ class SyncShipmentRequest(BaseModel):
     month: int = Field(..., ge=1, le=12, description="月份")
 
 
+
 # ==================== 响应模型 ====================
 
 class PurchasePlanItem(BaseModel):

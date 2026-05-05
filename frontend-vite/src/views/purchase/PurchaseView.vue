@@ -31,6 +31,9 @@
           <PendingOrdersPanel
             :orders="unprocessed.orders"
             :loading="unprocessed.loading"
+            :total="unprocessed.total"
+            :current-page="unprocessed.currentPage"
+            :total-pages="unprocessed.totalPages"
             :selected-ids="unprocessed.selectedIds"
             :selected-count="unprocessed.selectedIds.length"
             :valid-selected-count="unprocessed.validSelectedIds.length"
@@ -41,6 +44,7 @@
             @one-click-generate="handleOneClickGenerate"
             @quick-generate="handleQuickGenerate"
             @no-bom-error="handleNoBomError"
+            @change-page="unprocessed.load"
           />
 
           <!-- 分隔线 -->
@@ -397,7 +401,7 @@ const autoRefresh = useAutoRefresh(async () => {
   try {
     const [res, uRes] = await Promise.all([
       purchaseApi.orders({ page: purchaseOrders.page, per_page: 15 }),
-      purchaseApi.unprocessedOrders(),
+      purchaseApi.unprocessedOrders({ page: unprocessed.currentPage, per_page: unprocessed.perPage }),
     ]) as [ApiResponse, ApiResponse]
     if (res.success !== false && res.total !== purchaseOrders.total) {
       purchaseOrders.total = res.total || 0

@@ -3,12 +3,24 @@
 
 映射到与 Flask-SQLAlchemy Product 相同的 'product' 表。
 """
+from __future__ import annotations
+
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, Index, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
+
+if TYPE_CHECKING:
+    from fastapi_app.shared_models.case import Case
+    from fastapi_app.shared_models.product_material import (
+        ProductAccessory,
+        ProductFabric,
+        ProductMaterial,
+        ProductPackaging,
+    )
 
 
 class Product(Base):

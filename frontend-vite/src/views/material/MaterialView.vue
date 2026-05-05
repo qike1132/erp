@@ -17,6 +17,8 @@
           <button :class="['mr-tab-btn', { active: activeTab === 'history' }]" @click="switchToHistory">
             历史查询
           </button>
+          <button v-if="canManage && activeTab === 'progress'" class="mr-btn mr-btn-ghost" @click="exportData" title="导出来料进度数据"><i class="fas fa-file-export" /> 导出</button>
+          <button v-if="canManage && activeTab === 'history'" class="mr-btn mr-btn-ghost" @click="exportHistory" title="导出历史数据"><i class="fas fa-file-export" /> 导出历史</button>
         </div>
       </div>
     </div>
@@ -76,7 +78,7 @@
           <div class="mr-chart-title"><i class="fas fa-chart-line" /> 近30天到货趋势</div>
           <div class="mr-chart-body">
             <div class="mr-trend" v-if="trendData.length">
-              <div v-for="(t, idx) in trendData" :key="idx" class="mr-tb"
+              <div v-for="(t, idx) in trendData" :key="t.date" class="mr-tb"
                 :style="{ height: Math.max(Math.round((Math.max(t.registered, t.received) / trendMax) * 140), 4) + 'px', background: t.registered > 0 ? 'var(--color-primary-200)' : '#e5e7eb' }">
                 <div class="mr-tip">{{ t.date }}<br>登记: {{ t.registered }} | 收货: {{ t.received }}</div>
               </div>
@@ -104,23 +106,13 @@
 
     <!-- ========== 来料进度 ========== -->
     <div v-show="activeTab === 'progress'" class="mr-content">
-      <div class="mr-card">
-        <div class="mr-card-h">
-          <div class="mr-card-t"><i class="fas fa-filter" /> 筛选条件</div>
-          <div v-if="canManage" class="mr-card-actions">
-            <button class="mr-btn mr-btn-ghost" @click="exportData" title="导出来料进度数据"><i class="fas fa-file-export" /> 导出</button>
-          </div>
-        </div>
-        <div class="mr-card-b">
-          <div class="mr-filters">
-            <div class="mr-fg"><label>供应商</label><input type="text" v-model="pFilters.supplier" placeholder="搜索..." @keyup.enter="loadProgress(1)"></div>
-            <div class="mr-fg"><label>订单号</label><input type="text" v-model="pFilters.orderNo" placeholder="搜索..." @keyup.enter="loadProgress(1)"></div>
-            <div class="mr-fg"><label>客户</label><input type="text" v-model="pFilters.customer" placeholder="搜索..." @keyup.enter="loadProgress(1)"></div>
-            <div class="mr-fg"><label>分类</label><select v-model="pFilters.category" @change="loadProgress(1)"><option value="">全部</option><option value="fabric">面料</option><option value="filling">填充</option><option value="accessory">辅料</option><option value="packaging">包装</option></select></div>
-            <div class="mr-fg"><label>日期</label><UiDatePicker v-model="pFilters.startDate" @update:model-value="loadProgress(1)" /><span class="mr-date-sep">~</span><UiDatePicker v-model="pFilters.endDate" @update:model-value="loadProgress(1)" /></div>
-            <button class="mr-btn mr-btn-ghost" @click="resetProgressFilters"><i class="fas fa-redo" /> 重置</button>
-          </div>
-        </div>
+      <div class="mr-filters">
+        <div class="mr-fg"><label>供应商</label><input type="text" v-model="pFilters.supplier" placeholder="搜索..." @keyup.enter="loadProgress(1)"></div>
+        <div class="mr-fg"><label>订单号</label><input type="text" v-model="pFilters.orderNo" placeholder="搜索..." @keyup.enter="loadProgress(1)"></div>
+        <div class="mr-fg"><label>客户</label><input type="text" v-model="pFilters.customer" placeholder="搜索..." @keyup.enter="loadProgress(1)"></div>
+        <div class="mr-fg"><label>分类</label><select v-model="pFilters.category" @change="loadProgress(1)"><option value="">全部</option><option value="fabric">面料</option><option value="filling">填充</option><option value="accessory">辅料</option><option value="packaging">包装</option></select></div>
+        <div class="mr-fg"><label>日期</label><UiDatePicker v-model="pFilters.startDate" @update:model-value="loadProgress(1)" /><span class="mr-date-sep">~</span><UiDatePicker v-model="pFilters.endDate" @update:model-value="loadProgress(1)" /></div>
+        <button class="mr-btn mr-btn-ghost" @click="resetProgressFilters"><i class="fas fa-redo" /> 重置</button>
       </div>
       <div class="mr-card">
         <div class="mr-card-b mr-card-b--flush">
@@ -139,34 +131,20 @@
               </tr>
             </tbody>
           </table>
-          <div class="mr-pagi" v-if="pPages > 1">
-            <button :disabled="pPage <= 1" @click="loadProgress(1)"><i class="fas fa-angle-double-left" /></button>
-            <button :disabled="pPage <= 1" @click="loadProgress(pPage - 1)"><i class="fas fa-angle-left" /></button>
-            <button v-for="pg in pVisiblePages" :key="pg" :class="{ act: pg === pPage }" @click="loadProgress(pg)">{{ pg }}</button>
-            <button :disabled="pPage >= pPages" @click="loadProgress(pPage + 1)"><i class="fas fa-angle-right" /></button>
-            <span class="mr-pagi-info">第 {{ pPage }}/{{ pPages }} 页</span>
-          </div>
+          <UiPagination v-if="pPages > 1" :current-page="pPage" :total-pages="pPages" @update:current-page="loadProgress" />
         </div>
       </div>
     </div>
 
     <!-- ========== 历史查询 ========== -->
     <div v-show="activeTab === 'history'" class="mr-content">
-      <div class="mr-card">
-        <div class="mr-card-h">
-          <div class="mr-card-t"><i class="fas fa-search" /> 历史查询条件</div>
-          <button v-if="canManage" class="mr-btn mr-btn-ghost" @click="exportHistory" title="导出历史数据"><i class="fas fa-file-export" /> 导出历史</button>
-        </div>
-        <div class="mr-card-b">
-          <div class="mr-filters">
-            <div class="mr-fg"><label>订单号</label><input type="text" v-model="hFilters.orderNo" placeholder="搜索..." @keyup.enter="loadHistory(1)"></div>
-            <div class="mr-fg"><label>供应商</label><input type="text" v-model="hFilters.supplier" placeholder="搜索..." @keyup.enter="loadHistory(1)"></div>
-            <div class="mr-fg"><label>客户</label><input type="text" v-model="hFilters.customer" placeholder="搜索..." @keyup.enter="loadHistory(1)"></div>
-            <div class="mr-fg"><label>分类</label><select v-model="hFilters.category" @change="loadHistory(1)"><option value="">全部</option><option value="fabric">面料</option><option value="filling">填充</option><option value="accessory">辅料</option><option value="packaging">包装</option></select></div>
-            <div class="mr-fg"><label>完成日期</label><UiDatePicker v-model="hFilters.startDate" @update:model-value="loadHistory(1)" /><span class="mr-date-sep">~</span><UiDatePicker v-model="hFilters.endDate" @update:model-value="loadHistory(1)" /></div>
-            <button class="mr-btn mr-btn-ghost" @click="resetHistoryFilters"><i class="fas fa-redo" /> 重置</button>
-          </div>
-        </div>
+      <div class="mr-filters">
+        <div class="mr-fg"><label>订单号</label><input type="text" v-model="hFilters.orderNo" placeholder="搜索..." @keyup.enter="loadHistory(1)"></div>
+        <div class="mr-fg"><label>供应商</label><input type="text" v-model="hFilters.supplier" placeholder="搜索..." @keyup.enter="loadHistory(1)"></div>
+        <div class="mr-fg"><label>客户</label><input type="text" v-model="hFilters.customer" placeholder="搜索..." @keyup.enter="loadHistory(1)"></div>
+        <div class="mr-fg"><label>分类</label><select v-model="hFilters.category" @change="loadHistory(1)"><option value="">全部</option><option value="fabric">面料</option><option value="filling">填充</option><option value="accessory">辅料</option><option value="packaging">包装</option></select></div>
+        <div class="mr-fg"><label>完成日期</label><UiDatePicker v-model="hFilters.startDate" @update:model-value="loadHistory(1)" /><span class="mr-date-sep">~</span><UiDatePicker v-model="hFilters.endDate" @update:model-value="loadHistory(1)" /></div>
+        <button class="mr-btn mr-btn-ghost" @click="resetHistoryFilters"><i class="fas fa-redo" /> 重置</button>
       </div>
       <div class="mr-card">
         <div class="mr-card-b mr-card-b--flush">
@@ -186,13 +164,7 @@
               </tr>
             </tbody>
           </table>
-          <div class="mr-pagi" v-if="hPages > 1">
-            <button :disabled="hPage <= 1" @click="loadHistory(1)"><i class="fas fa-angle-double-left" /></button>
-            <button :disabled="hPage <= 1" @click="loadHistory(hPage - 1)"><i class="fas fa-angle-left" /></button>
-            <button v-for="pg in hVisiblePages" :key="pg" :class="{ act: pg === hPage }" @click="loadHistory(pg)">{{ pg }}</button>
-            <button :disabled="hPage >= hPages" @click="loadHistory(hPage + 1)"><i class="fas fa-angle-right" /></button>
-            <span class="mr-pagi-info">第 {{ hPage }}/{{ hPages }} 页</span>
-          </div>
+          <UiPagination v-if="hPages > 1" :current-page="hPage" :total-pages="hPages" @update:current-page="loadHistory" />
         </div>
       </div>
     </div>
@@ -210,18 +182,27 @@
           <div><div class="mr-det-lb">总进度</div><div class="mr-det-vl">{{ detailData.progress }}% (已到货 {{ detailData.total_received }} / 数量 {{ detailData.total_ordered }})</div></div>
         </div>
         <h4 style="margin:18px 0 14px;font-size:16px;"><i class="fas fa-cubes" style="color:var(--color-primary-500);"></i> SKU物料来料进度</h4>
-        <div v-for="i in (detailData.items || [])" :key="i.id" class="mr-sku-row">
-          <div class="mr-sku-top"><span><span class="mr-sku-name">{{ i.material_name }}</span><span class="mr-sku-spec">{{ i.specification || '' }}</span></span><span class="mr-sku-pct" :style="{ color: i.received_quantity >= i.ordered_quantity ? 'var(--color-success-500)' : (i.progress >= 50 ? 'var(--color-primary-500)' : 'var(--color-warning-500)') }">{{ i.progress }}%</span></div>
-          <div class="mr-sku-bar"><div :class="['mr-sku-fill', fillClass(i)]" :style="{ width: i.progress + '%' }"></div></div>
-          <div class="mr-sku-info">
-            <span>分类: <b>{{ CATEGORY_MAP[i.material_category] || '-' }}</b></span>
-            <span>数量: <b>{{ i.ordered_quantity }}</b> {{ i.unit || '' }}</span>
-            <span>已到货: <b style="color:var(--color-success-500);">{{ i.received_quantity }}</b></span>
-            <span>未到: <b style="color:var(--color-warning-500);">{{ i.remaining_quantity }}</b></span>
-            <button v-if="canManage && i.received_quantity < i.ordered_quantity" class="mr-btn mr-btn-success mr-btn-sm" @click="openReceive(i)" title="登记收货数量"><i class="fas fa-box" /> 收货</button>
-            <span v-else-if="i.received_quantity >= i.ordered_quantity" style="color:var(--color-success-500);font-weight:600;">&#10003; 已完成</span>
-          </div>
-        </div>
+        <VirtualList
+          :items="detailData.items || []"
+          :itemHeight="90"
+          :containerHeight="360"
+          :itemKey="(i: any) => i.id"
+        >
+          <template #default="{ item: i }">
+            <div class="mr-sku-row" style="margin-bottom:0;">
+              <div class="mr-sku-top"><span><span class="mr-sku-name">{{ i.material_name }}</span><span class="mr-sku-spec">{{ i.specification || '' }}</span></span><span class="mr-sku-pct" :style="{ color: i.received_quantity >= i.ordered_quantity ? 'var(--color-success-500)' : (i.progress >= 50 ? 'var(--color-primary-500)' : 'var(--color-warning-500)') }">{{ i.progress }}%</span></div>
+              <div class="mr-sku-bar"><div :class="['mr-sku-fill', fillClass(i)]" :style="{ width: i.progress + '%' }"></div></div>
+              <div class="mr-sku-info">
+                <span>分类: <b>{{ CATEGORY_MAP[i.material_category] || '-' }}</b></span>
+                <span>数量: <b>{{ i.ordered_quantity }}</b> {{ i.unit || '' }}</span>
+                <span>已到货: <b style="color:var(--color-success-500);">{{ i.received_quantity }}</b></span>
+                <span>未到: <b style="color:var(--color-warning-500);">{{ i.remaining_quantity }}</b></span>
+                <button v-if="canManage && i.received_quantity < i.ordered_quantity" class="mr-btn mr-btn-success mr-btn-sm" @click="openReceive(i)" title="登记收货数量"><i class="fas fa-box" /> 收货</button>
+                <span v-else-if="i.received_quantity >= i.ordered_quantity" style="color:var(--color-success-500);font-weight:600;">&#10003; 已完成</span>
+              </div>
+            </div>
+          </template>
+        </VirtualList>
       </div>
     </UiDialog>
 
@@ -316,6 +297,8 @@ import { useQuery } from '@tanstack/vue-query'
 import { materialApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import UiDialog from '@/components/ui/UiDialog.vue'
+import UiPagination from '@/components/ui/UiPagination.vue'
+import VirtualList from '@/components/ui/VirtualList.vue'
 import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 
 // --- API Response Types ---
@@ -514,6 +497,33 @@ const progressOrderRows = computed(() => {
 })
 const pFilters = reactive({ supplier: '', orderNo: '', customer: '', category: '', startDate: '', endDate: '' })
 
+const hPage = ref(1), hPages = ref(1), hIsLoading = ref(false)
+const hRegistrations = ref<Registration[]>([])
+const hFilters = reactive({ orderNo: '', supplier: '', customer: '', category: '', startDate: '', endDate: '' })
+
+async function loadHistory(page = 1) {
+  hPage.value = page; hIsLoading.value = true
+  try {
+    const params: Record<string, string | number> = { page, per_page: 50 }
+    if (hFilters.orderNo) params.order_no = hFilters.orderNo
+    if (hFilters.supplier) params.supplier = hFilters.supplier
+    if (hFilters.customer) params.customer_name = hFilters.customer
+    if (hFilters.category) params.material_category = hFilters.category
+    if (hFilters.startDate) params.start_date = hFilters.startDate
+    if (hFilters.endDate) params.end_date = hFilters.endDate
+    const data = await materialApi.history(params) as { registrations: Registration[]; pages: number; total_pages?: number }
+    hRegistrations.value = data.registrations || []
+    hPages.value = data.pages ?? data.total_pages ?? 1
+  } catch (e) { console.error('历史加载失败:', e); toast('加载失败', 'error') } finally { hIsLoading.value = false }
+}
+
+function resetHistoryFilters() { Object.assign(hFilters, { orderNo: '', supplier: '', customer: '', category: '', startDate: '', endDate: '' }); loadHistory(1) }
+function materialSummary(r: Registration) {
+  const items = r.items || []
+  if (!items.length) return '-'
+  return items.map(i => i.material_name).join(', ')
+}
+
 async function loadProgress(page = 1) {
   pPage.value = page; pIsLoading.value = true
   try {
@@ -547,31 +557,8 @@ function groupBySupplier(registrations: Registration[]): SupplierGroup[] {
 }
 
 function resetProgressFilters() { Object.assign(pFilters, { supplier: '', orderNo: '', customer: '', category: '', startDate: '', endDate: '' }); loadProgress(1) }
-const pVisiblePages = computed(() => visiblePages(pPage.value, pPages.value))
-
-const hPage = ref(1), hPages = ref(1), hIsLoading = ref(false)
-const hRegistrations = ref<Registration[]>([])
-const hFilters = reactive({ orderNo: '', supplier: '', customer: '', category: '', startDate: '', endDate: '' })
-
-async function loadHistory(page = 1) {
-  hPage.value = page; hIsLoading.value = true
-  try {
-    const params: Record<string, string | number> = { page, per_page: 15 }
-    if (hFilters.orderNo) params.order_no = hFilters.orderNo; if (hFilters.supplier) params.supplier = hFilters.supplier
-    if (hFilters.customer) params.customer_name = hFilters.customer; if (hFilters.category) params.material_category = hFilters.category
-    if (hFilters.startDate) params.start_date = hFilters.startDate; if (hFilters.endDate) params.end_date = hFilters.endDate
-    const data = await materialApi.history(params) as { registrations: Registration[]; pages: number; total_pages?: number }
-    hRegistrations.value = data.registrations ?? []; hPages.value = data.pages ?? data.total_pages ?? 1
-  } catch (e) { console.error('历史加载失败:', e); toast('加载失败', 'error') } finally { hIsLoading.value = false }
-}
-
-function resetHistoryFilters() { Object.assign(hFilters, { orderNo: '', supplier: '', customer: '', category: '', startDate: '', endDate: '' }); loadHistory(1) }
-function materialSummary(r: Registration) { const items = hFilters.category ? (r.items || []).filter((i: RegItem) => i.material_category === hFilters.category) : (r.items || []); const s = items.slice(0, 2).map((i: RegItem) => i.material_name + '(数量:' + parseFloat(String(i.ordered_quantity || 0)).toFixed(0) + ' 已到货:' + parseFloat(String(i.received_quantity || 0)).toFixed(0) + ')').join(', '); return s + (items.length > 2 ? ' 等' + items.length + '项' : '') }
-const hVisiblePages = computed(() => visiblePages(hPage.value, hPages.value))
-
 function switchToProgress() { activeTab.value = 'progress'; loadProgress(1) }
 function switchToHistory() { activeTab.value = 'history'; loadHistory(1) }
-function visiblePages(current: number, total: number) { const s = Math.max(1, current - 2), e = Math.min(total, current + 2); const pages: number[] = []; for (let i = s; i <= e; i++) pages.push(i); return pages }
 function fillClass(item: { progress?: number; received_quantity: number; ordered_quantity: number }) { const pct = item.progress || 0; if (item.received_quantity >= item.ordered_quantity) return 'full'; if (pct >= 50) return 'half'; if (pct > 0) return 'low'; return 'zero' }
 function progressCls(g: SupplierGroup) { const pct = supplierPct(g); if (pct >= 100) return 'completed'; if (pct > 0) return 'partial'; return 'pending' }
 function supplierPct(g: SupplierGroup) { const o = g.allItems.reduce((s: number, i: MatSummary) => s + i.ordered_quantity, 0); const r = g.allItems.reduce((s: number, i: MatSummary) => s + i.received_quantity, 0); const c = g.allItems.every((i: MatSummary) => i.received_quantity >= i.ordered_quantity); if (o <= 0) return 0; return c ? 100.0 : Math.min(Math.round(r / o * 100 * 10) / 10, 99.9) }
@@ -633,6 +620,10 @@ function onOrderRowLeave(e: MouseEvent) {
 .mr-container {
   padding: 8px;
   margin: 0 auto;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
 }
 
 .mr-main-card {
@@ -641,8 +632,11 @@ function onOrderRowLeave(e: MouseEvent) {
   border: 1px solid var(--color-border-light, #e2e8f0);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   overflow: hidden;
-  min-height: calc(100vh - 48px);
 }
 
 .mr-main-card:hover {
@@ -663,6 +657,7 @@ function onOrderRowLeave(e: MouseEvent) {
   box-shadow: none;
   margin-bottom: 0;
   gap: 12px;
+  flex-shrink: 0;
 }
 .mr-top-bar :deep(.ht-bar) {
   width: auto;
@@ -756,6 +751,9 @@ function onOrderRowLeave(e: MouseEvent) {
 
 /* === Content area === */
 .mr-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   padding: 0 24px 24px;
 }
 
@@ -763,18 +761,18 @@ function onOrderRowLeave(e: MouseEvent) {
 .mr-stats {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: 16px;
+  margin-bottom: 20px;
 }
 
 .mr-sc {
-  border-radius: 12px;
-  padding: 14px 16px;
+  border-radius: 14px;
+  padding: 18px 20px;
   position: relative;
   overflow: hidden;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
   transition: transform 0.3s ease;
 }
 
@@ -789,13 +787,13 @@ function onOrderRowLeave(e: MouseEvent) {
 .mr-sc.s-progress { background: linear-gradient(135deg, var(--color-primary-50, #EFF6FF), var(--color-success-50, #ECFDF5)); }
 
 .mr-sc-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 15px;
+  font-size: 18px;
   flex-shrink: 0;
 }
 
@@ -807,17 +805,17 @@ function onOrderRowLeave(e: MouseEvent) {
 
 .mr-sc-info { flex: 1; min-width: 0; }
 
-.mr-sv { font-size: 24px; font-weight: 800; line-height: 1.1; }
+.mr-sv { font-size: 28px; font-weight: 800; line-height: 1.1; }
 .mr-sc.s-pending .mr-sv { color: #C2410C; }
 .mr-sc.s-partial .mr-sv { color: var(--color-primary-600, #4A7DE8); }
 .mr-sc.s-completed .mr-sv { color: var(--color-success-600, #059669); }
 .mr-sc.s-total .mr-sv { color: var(--color-purple-600, #7C3AED); }
 .mr-sc.s-progress .mr-sv { color: var(--color-primary-600, #4A7DE8); }
 
-.mr-sl { font-size: 12px; color: var(--color-text-secondary); margin-top: 2px; }
+.mr-sl { font-size: 13px; color: var(--color-text-secondary); margin-top: 2px; }
 
 .mr-sc-sub {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-muted);
   white-space: nowrap;
   flex-shrink: 0;
@@ -825,7 +823,7 @@ function onOrderRowLeave(e: MouseEvent) {
 
 /* === Section Label === */
 .mr-section-label {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--color-text-secondary);
   text-transform: uppercase;
@@ -838,20 +836,20 @@ function onOrderRowLeave(e: MouseEvent) {
 
 .mr-section-label i {
   color: var(--color-primary-500);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 /* === Category Cards === */
 .mr-cat-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
-  margin-bottom: 16px;
+  gap: 14px;
+  margin-bottom: 20px;
 }
 
 .mr-cat-card {
-  border-radius: 10px;
-  padding: 14px;
+  border-radius: 12px;
+  padding: 18px;
   border-left: 4px solid transparent;
   background: var(--color-surface, #f8fafc);
   transition: all 0.3s ease;
@@ -875,10 +873,10 @@ function onOrderRowLeave(e: MouseEvent) {
   margin-bottom: 8px;
 }
 
-.mr-cat-nm { font-size: 13px; font-weight: 700; color: var(--color-text); }
-.mr-cat-pg { font-size: 13px; color: var(--color-success-600, #059669); font-weight: 700; }
+.mr-cat-nm { font-size: 14px; font-weight: 700; color: var(--color-text); }
+.mr-cat-pg { font-size: 14px; color: var(--color-success-600, #059669); font-weight: 700; }
 
-.mr-cat-bar { height: 5px; background: #E5E7EB; border-radius: 5px; overflow: hidden; margin-bottom: 8px; }
+.mr-cat-bar { height: 6px; background: #E5E7EB; border-radius: 5px; overflow: hidden; margin-bottom: 10px; }
 
 .mr-cat-fill { height: 100%; border-radius: 5px; transition: width 0.5s ease; }
 .mr-cat-fill.fabric { background: var(--color-purple-500, #8B5CF6); }
@@ -886,25 +884,25 @@ function onOrderRowLeave(e: MouseEvent) {
 .mr-cat-fill.accessory { background: var(--color-info-500, #00CFE8); }
 .mr-cat-fill.packaging { background: var(--color-success-500, #28C76F); }
 
-.mr-cat-det { display: flex; justify-content: space-between; font-size: 11px; color: var(--color-text-secondary); }
+.mr-cat-det { display: flex; justify-content: space-between; font-size: 12px; color: var(--color-text-secondary); }
 
 /* === Cards === */
 .mr-card {
   background: white;
   border-radius: 14px;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
   overflow: hidden;
 }
 
 .mr-card-h {
-  padding: 14px 20px 10px;
+  padding: 16px 24px 12px;
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 
 .mr-card-t {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--color-text);
   display: flex;
@@ -914,7 +912,7 @@ function onOrderRowLeave(e: MouseEvent) {
 
 .mr-card-t i {
   color: var(--color-primary-500);
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .mr-card-actions {
@@ -923,7 +921,7 @@ function onOrderRowLeave(e: MouseEvent) {
 }
 
 .mr-card-b {
-  padding: 20px;
+  padding: 24px;
 }
 
 .mr-card-b--flush {
@@ -935,18 +933,18 @@ function onOrderRowLeave(e: MouseEvent) {
 .mr-chart-row {
   display: grid;
   grid-template-columns: 2fr 1fr;
-  gap: 12px;
+  gap: 16px;
 }
 
 .mr-chart-card {
   background: var(--color-surface, #f8fafc);
-  border-radius: 12px;
-  padding: 14px;
+  border-radius: 14px;
+  padding: 18px;
   overflow: hidden;
 }
 
 .mr-chart-title {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--color-text-secondary);
   margin-bottom: 10px;
@@ -957,7 +955,7 @@ function onOrderRowLeave(e: MouseEvent) {
 
 .mr-chart-title i {
   color: var(--color-primary-500);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .mr-chart-body {
@@ -1257,46 +1255,6 @@ function onOrderRowLeave(e: MouseEvent) {
 }
 
 /* === Pagination === */
-.mr-pagi {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 4px;
-  padding: 14px;
-}
-
-.mr-pagi button {
-  padding: 6px 12px;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  background: white;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  font-size: 13px;
-  color: var(--color-text);
-}
-
-.mr-pagi button:hover:not(:disabled) {
-  border-color: var(--color-primary-500);
-  color: var(--color-primary-500);
-}
-
-.mr-pagi button.act {
-  background: var(--color-primary-500);
-  color: white;
-  border-color: var(--color-primary-500);
-}
-
-.mr-pagi button:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.mr-pagi-info {
-  font-size: 13px;
-  color: var(--color-text-secondary);
-}
-
 /* === Dialog Form Fields === */
 .mr-fg2 { margin-bottom: 16px; }
 .mr-fg2 label { display: block; font-size: 12px; font-weight: 600; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }

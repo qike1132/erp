@@ -6,14 +6,35 @@ FastAPI 应用主入口 - 全异步模式
 WebSocket → api/ws.py
 """
 
+# 1. 标准库
 import os
+import pathlib
+import warnings
 from contextlib import asynccontextmanager, suppress
 
+# 2. 第三方库
 import msgspec
+import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.util import get_remote_address
 from starlette.exceptions import HTTPException as StarletteHTTPException
+
+# 3. 项目内部
+from fastapi_app.api.v1.router import api_router
+from fastapi_app.api.ws import register_websocket
+from fastapi_app.core.config import settings
+from fastapi_app.core.database import async_engine, dispose_async_engines
+from fastapi_app.core.db_health import db_health_checker
+from fastapi_app.core.exceptions import AppError
+from fastapi_app.core.health import register_health_routes
+from fastapi_app.core.logger import logger, setup_logging
+from fastapi_app.core.middleware import setup_middleware
 
 
 class MsgspecResponse(JSONResponse):
@@ -22,17 +43,6 @@ class MsgspecResponse(JSONResponse):
     def render(self, content: object) -> bytes:
         return msgspec.json.encode(content)
 
-
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
-from slowapi.util import get_remote_address
-
-from fastapi_app.api.v1.router import api_router
-from fastapi_app.core.config import settings
-from fastapi_app.core.database import async_engine, dispose_async_engines
-from fastapi_app.core.db_health import db_health_checker
-from fastapi_app.core.logger import logger, setup_logging
 
 _sentry_dsn = os.getenv("SENTRY_DSN")
 if _sentry_dsn:
@@ -50,29 +60,25 @@ if _sentry_dsn:
         pass
 
 
-@asynccontextmanager
-async def lifespan(application: FastAPI):
-    setup_logging()
-    logger.info(f"{settings.APP_NAME} v{settings.APP_VERSION} 启动中...")
+async def _setup_database():
+    """数据库连接验证与连接池预热"""
+    if async_engine is None:
+        return
+    from fastapi_app.core.database import verify_db_connectivity
+    if not await verify_db_connectivity():
+        logger.error("异步数据库连接验证失败")
+        raise RuntimeError("异步数据库引擎无法连接数据库")
+    pool = async_engine.pool
+    warmup_count = min(5, pool.size())
+    from sqlalchemy import text as warmup_text
+    for _ in range(warmup_count):
+        async with async_engine.connect() as warmup_conn:
+            await warmup_conn.execute(warmup_text('SELECT 1'))
+    logger.info("异步数据库连接验证成功，连接池预热完成 (%d 个连接)", warmup_count)
 
-    if async_engine is not None:
-        from fastapi_app.core.database import verify_db_connectivity
-        if not await verify_db_connectivity():
-            logger.error("异步数据库连接验证失败")
-            raise RuntimeError("异步数据库引擎无法连接数据库")
-        pool = async_engine.pool
-        warmup_count = min(5, pool.size())
-        for _ in range(warmup_count):
-            from sqlalchemy import text as warmup_text
-            async with async_engine.connect() as warmup_conn:
-                await warmup_conn.execute(warmup_text('SELECT 1'))
-        logger.info("异步数据库连接验证成功，连接池预热完成 (%d 个连接)", warmup_count)
 
-    await db_health_checker.start()
-
-    from fastapi_app.core.telemetry import setup_telemetry
-    setup_telemetry(application)
-
+async def _setup_redis_caches():
+    """Redis 预热与缓存初始化"""
     from fastapi_app.services.notification_service import _warmup_async_redis
     try:
         await _warmup_async_redis()
@@ -102,6 +108,20 @@ async def lifespan(application: FastAPI):
     except (OSError, ValueError) as e:
         logger.warning("导航缓存清除失败: %s", e)
 
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    setup_logging()
+    logger.info(f"{settings.APP_NAME} v{settings.APP_VERSION} 启动中...")
+
+    await _setup_database()
+    await db_health_checker.start()
+
+    from fastapi_app.core.telemetry import setup_telemetry
+    setup_telemetry(application)
+
+    await _setup_redis_caches()
+
     from fastapi_app.services.notification_service import manager
     await manager.start_redis_listener()
 
@@ -125,7 +145,9 @@ async def lifespan(application: FastAPI):
         with suppress(OSError, RuntimeError):
             await _notif_redis.aclose()
 
-    await redis_cache.close()
+    from utils.redis_cache import redis_cache
+    with suppress(OSError, RuntimeError):
+        await redis_cache.close()
     logger.info("数据库连接池已关闭")
 
 
@@ -140,8 +162,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-import warnings
-
 with warnings.catch_warnings():
     warnings.filterwarnings("ignore", message="Config file .* not found")
     limiter = Limiter(
@@ -153,6 +173,19 @@ with warnings.catch_warnings():
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
+
+
+@app.exception_handler(AppError)
+async def app_error_handler(request: Request, exc: AppError):
+    return MsgspecResponse(
+        content={
+            "success": False,
+            "detail": exc.message,
+            "code": exc.code,
+            "status_code": exc.status_code,
+        },
+        status_code=exc.status_code,
+    )
 
 
 @app.exception_handler(StarletteHTTPException)
@@ -196,23 +229,11 @@ async def general_exception_handler(request: Request, exc: Exception):
     )
 
 
-from fastapi_app.core.middleware import setup_middleware
-
 setup_middleware(app)
-
-from fastapi_app.core.health import register_health_routes
-
 register_health_routes(app)
-
-from fastapi_app.api.ws import register_websocket
-
 register_websocket(app)
 
 app.include_router(api_router, prefix=settings.API_PREFIX)
-
-import pathlib
-
-from fastapi.staticfiles import StaticFiles
 
 _static_dir = pathlib.Path(__file__).resolve().parent.parent / "static"
 if _static_dir.is_dir():
@@ -222,6 +243,9 @@ if _static_dir.is_dir():
     _uploads_dir = _static_dir / "uploads"
     if _uploads_dir.is_dir():
         app.mount("/static/uploads", StaticFiles(directory=str(_uploads_dir)), name="static-uploads")
+    _releases_dir = _static_dir / "releases"
+    if _releases_dir.is_dir():
+        app.mount("/static/releases", StaticFiles(directory=str(_releases_dir)), name="static-releases")
 
 
 @app.get("/", tags=["根路径"])
@@ -234,7 +258,6 @@ async def root():
 
 
 if __name__ == "__main__":
-    import uvicorn
     uvicorn.run(
         "fastapi_app.main:app",
         host="0.0.0.0",

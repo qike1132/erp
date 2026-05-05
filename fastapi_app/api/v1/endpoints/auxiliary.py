@@ -92,33 +92,45 @@ async def product_available_stock(
 @router.get("/inventory-logs/{product_id}")
 async def get_inventory_logs(
     product_id: int,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
     user: User = Depends(require_permission("stock_view")),
     db: AsyncSession = Depends(get_async_db),
 ):
-    """获取产品库存日志"""
+    """获取产品库存日志（分页）"""
+    from sqlalchemy import func
+    count_result = await db.execute(
+        select(func.count(InventoryLog.id)).where(InventoryLog.product_id == product_id)
+    )
+    total = count_result.scalar() or 0
     result = await db.execute(
         select(InventoryLog).where(InventoryLog.product_id == product_id)
         .order_by(InventoryLog.change_date.desc())
+        .offset((page - 1) * per_page).limit(per_page)
     )
     logs = list(result.scalars().all())
 
-    return [{
-        'id': log.id, 'change_type': log.change_type,
-        'change_quantity': log.change_quantity,
-        'related_id': log.related_id,
-        'note': log.note,
-        'change_date': log.change_date.strftime('%Y-%m-%d %H:%M:%S') if log.change_date else '',
-    } for log in logs]
+    return {
+        'items': [{
+            'id': log.id, 'change_type': log.change_type,
+            'change_quantity': log.change_quantity,
+            'related_id': log.related_id,
+            'note': log.note,
+            'change_date': log.change_date.strftime('%Y-%m-%d %H:%M:%S') if log.change_date else '',
+        } for log in logs],
+        'total': total, 'page': page, 'per_page': per_page,
+    }
 
 
 @router.get("/available-stockins")
 async def available_stockins(
     product_id: int | None = Query(None),
     customer: str = Query('', max_length=100),
+    limit: int = Query(100, ge=1, le=500),
     user: User = Depends(require_permission("stock_view")),
     db: AsyncSession = Depends(get_async_db),
 ):
-    """获取可用入库记录"""
+    """获取可用入库记录（限制返回数量）"""
     query = select(StockIn).options(
         joinedload(StockIn.stockin_stockouts), joinedload(StockIn.product)
     )
@@ -128,7 +140,7 @@ async def available_stockins(
     if customer:
         query = query.where(StockIn.customer == customer)
 
-    query = query.order_by(StockIn.stockin_date.asc())
+    query = query.order_by(StockIn.stockin_date.asc()).limit(limit)
     result = await db.execute(query)
     stockins = list(result.unique().scalars().all())
 
@@ -296,6 +308,7 @@ class BatchOrderItem(BaseModel):
     note: str = ""
     order_type: str = Field("regular", pattern="^(regular|custom)$")
     country: str | None = None
+    order_date: str | None = None  # 格式: YYYY-MM-DD，为空则使用当前时间
 
 class BatchStockInItem(BaseModel):
     product_id: int = Field(..., gt=0)
@@ -341,7 +354,6 @@ async def batch_submit_orders(
         from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
         await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY)
 
-        # 不再自动同步采购中心：订单应先进入"审核订单"队列，由人工审核后再生成采购订单
         created_order_ids = result.pop('created_order_ids', [])
 
         # 发布订单创建事件，通知前端实时刷新

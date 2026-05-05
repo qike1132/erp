@@ -1,10 +1,16 @@
 """皮套库存日志模型"""
+from __future__ import annotations
+
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, desc
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
+
+if TYPE_CHECKING:
+    from fastapi_app.shared_models.case import Case
 
 
 class CaseInventoryLog(Base):

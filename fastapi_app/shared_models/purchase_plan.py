@@ -80,6 +80,7 @@ class PurchasePlanDetail(Base):
         Index('idx_ppd_plan_date', 'plan_id', 'plan_date'),
         Index('idx_ppd_product_id', 'product_id'),
         Index('idx_ppd_plan_date_only', 'plan_date'),
+        Index('idx_ppd_barcode', 'barcode'),
     )
 
     def __repr__(self):
@@ -120,6 +121,7 @@ class ShipmentRecord(Base):
     __table_args__ = (
         Index('idx_sr_customer_product_date', 'customer_id', 'product_id', 'shipment_date'),
         Index('idx_sr_shipment_date', 'shipment_date'),
+        Index('idx_sr_customer_name', 'customer_name'),
     )
 
     def __repr__(self):

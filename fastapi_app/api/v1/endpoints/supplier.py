@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db as get_db
 from fastapi_app.core.deps import require_permission
-from fastapi_app.shared_models import User
 from fastapi_app.schemas.supplier import (
     SupplierActionResponse,
     SupplierCreate,
@@ -16,6 +15,7 @@ from fastapi_app.schemas.supplier import (
     SupplierUpdate,
 )
 from fastapi_app.services import purchase_supplier_service
+from fastapi_app.shared_models import User
 from utils.redis_cache import redis_cache
 
 router = APIRouter()
@@ -26,17 +26,19 @@ def _supplier_to_resp(s) -> SupplierResponse:
     return SupplierResponse(id=s.id, name=s.name, contact_person=s.contact_person, phone=s.phone, address=s.address, remark=s.remark, status=s.status, created_at=s.created_at.strftime('%Y-%m-%d %H:%M') if s.created_at else None)
 
 @router.get('/list', response_model=SupplierListResponse)
-async def list_suppliers(_user: User=Depends(require_permission('supplier_manage')), db: AsyncSession=Depends(get_db)):
-    """供应商列表（带缓存）"""
-    cached = await redis_cache.get(SUPPLIER_LIST_CACHE_KEY)
-    if cached is not None:
-        return SupplierListResponse(data=[SupplierResponse(**c) for c in cached], total=len(cached))
-    from fastapi_app.shared_models import Supplier
-    result = await db.execute(select(Supplier).order_by(Supplier.name))
-    suppliers = result.scalars().all()
-    supplier_dicts = [_supplier_to_resp(s).model_dump() for s in suppliers]
-    await redis_cache.set(SUPPLIER_LIST_CACHE_KEY, supplier_dicts, SUPPLIER_LIST_CACHE_TTL)
-    return SupplierListResponse(data=[_supplier_to_resp(s) for s in suppliers], total=len(suppliers))
+async def list_suppliers(page: int=Query(1, ge=1, description='页码'), per_page: int=Query(50, ge=1, le=200, description='每页数量'), search: str=Query('', max_length=100, description='搜索关键词'), _user: User=Depends(require_permission('supplier_manage')), db: AsyncSession=Depends(get_db)):
+    """供应商列表（支持分页和搜索，带缓存）"""
+    if not search and page == 1:
+        cache_key = f"{SUPPLIER_LIST_CACHE_KEY}:{per_page}"
+        cached = await redis_cache.get(cache_key)
+        if cached is not None:
+            return SupplierListResponse(data=[SupplierResponse(**c) for c in cached['items']], total=cached['total'])
+    result = await purchase_supplier_service.get_suppliers(db, page=page, per_page=per_page, search=search)
+    supplier_dicts = [SupplierResponse(**s).model_dump() for s in result['items']]
+    if not search and page == 1:
+        cache_key = f"{SUPPLIER_LIST_CACHE_KEY}:{per_page}"
+        await redis_cache.set(cache_key, {'items': supplier_dicts, 'total': result['total']}, SUPPLIER_LIST_CACHE_TTL)
+    return SupplierListResponse(data=[SupplierResponse(**s) for s in result['items']], total=result['total'])
 
 @router.post('/create', response_model=SupplierActionResponse)
 async def create_supplier(data: SupplierCreate, _user: User=Depends(require_permission('supplier_manage')), db: AsyncSession=Depends(get_db)):
@@ -83,18 +85,27 @@ async def toggle_status(supplier_id: int, _user: User=Depends(require_permission
 
 @router.get('/search')
 async def search_suppliers(q: str=Query('', description='搜索关键词'), _user: User=Depends(require_permission('supplier_manage')), db: AsyncSession=Depends(get_db)):
-    """供应商搜索"""
+    """供应商搜索（限制返回50条）"""
     if not q.strip():
         return []
+    from fastapi_app.services import escape_like
     from fastapi_app.shared_models import Supplier
-    result = await db.execute(select(Supplier).where(Supplier.name.ilike(f'%{q.strip()}%')).order_by(Supplier.name))
+    escaped = escape_like(q.strip())
+    result = await db.execute(select(Supplier).where(Supplier.name.ilike(f'%{escaped}%')).order_by(Supplier.name).limit(50))
     suppliers = result.scalars().all()
     return [_supplier_to_resp(s) for s in suppliers]
 
+_ACTIVE_SUPPLIER_CACHE_KEY = 'supplier:active_names'
+_ACTIVE_SUPPLIER_CACHE_TTL = 300
+
 @router.get('/active-names')
 async def active_names(_user: User=Depends(require_permission('supplier_manage')), db: AsyncSession=Depends(get_db)):
-    """获取所有启用供应商名称列表（用于下拉选择）"""
+    """获取所有启用供应商名称列表（带Redis缓存，用于下拉选择）"""
+    cached = await redis_cache.get(_ACTIVE_SUPPLIER_CACHE_KEY)
+    if cached is not None:
+        return cached
     from fastapi_app.shared_models import Supplier
     result = await db.execute(select(Supplier).where(Supplier.status).order_by(Supplier.name))
-    suppliers = result.scalars().all()
-    return [s.name for s in suppliers]
+    data = [s.name for s in result.scalars().all()]
+    await redis_cache.set(_ACTIVE_SUPPLIER_CACHE_KEY, data, _ACTIVE_SUPPLIER_CACHE_TTL)
+    return data

@@ -84,17 +84,25 @@
           </tbody>
         </table>
       </div>
+
+      <!-- Pagination -->
+      <UiPagination v-if="totalPages > 1" :current-page="currentPage" :total-pages="totalPages" :total-items="total" @update:current-page="$emit('changePage', $event)" />
       </div>
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import UiCheckbox from '@/components/ui/UiCheckbox.vue'
+import UiPagination from '@/components/ui/UiPagination.vue'
 
-defineProps<{
+const props = defineProps<{
   orders: any[]
   loading: boolean
+  total: number
+  currentPage: number
+  totalPages: number
   selectedIds: number[]
   selectedCount: number
   validSelectedCount: number
@@ -108,6 +116,7 @@ defineEmits<{
   oneClickGenerate: []
   quickGenerate: [id: number]
   noBomError: [order: any]
+  changePage: [page: number]
 }>()
 </script>
 
@@ -294,4 +303,5 @@ defineEmits<{
 .pc-loading-state i {
   font-size: 20px;
 }
+
 </style>

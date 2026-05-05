@@ -50,7 +50,7 @@ async def _safe_publish_event(event_type, data: dict):
 
 def _calc_deduct_quantity(order) -> int:
     """计算订单已抵扣备货数量（仅统计关联入库的出库记录）"""
-    return sum(so.quantity for so in order.order_stockouts if so.stockin_id is not None) if order.order_stockouts else 0
+    return sum(so.quantity - so.returned_quantity for so in order.order_stockouts if so.stockin_id is not None) if order.order_stockouts else 0
 
 
 def _order_to_dict(o, deduct_quantity: int = 0) -> dict:
@@ -204,10 +204,6 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
     await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY)
     logger.info(f'订单添加成功：{order_no}，客户：{customer}，产品：{product.name}，数量：{quantity}')
 
-    # 不再自动同步采购中心：订单应先进入"审核订单"队列，由人工审核后再生成采购订单
-    # 旧逻辑：await _sync_order_to_purchase_center(order.id)
-    # 这会导致有 BOM 的订单直接跳过审核步骤，自动生成采购订单
-
     await _safe_invalidate_purchase_cache()
 
     # 发布订单创建事件，通知前端实时刷新
@@ -253,7 +249,7 @@ async def _update_order_directly(
     if not customer or not customer.strip():
         raise ValueError('客户名称不能为空')
     old_quantity = order.quantity
-    old_customer = order.customer
+    _ = order.customer
     order.customer = customer
     order.quantity = quantity
     order.note = note
@@ -273,18 +269,6 @@ async def _update_order_directly(
             note=f'订单修改：{order.order_no}'
         )
         db.add(log)
-
-    try:
-        from fastapi_app.services.order_purchase_sync import sync_order_update
-        sync_result = await sync_order_update(
-            db, order_id,
-            customer=customer, old_customer=old_customer,
-            quantity=quantity, old_quantity=old_quantity,
-        )
-        if sync_result:
-            logger.info(f'采购中心同步更新：{sync_result}')
-    except (ValueError, OSError) as e:
-        logger.warning(f'采购中心同步更新失败：{e}')
 
     await db.commit()
     await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY)
@@ -363,15 +347,18 @@ async def _delete_order_directly(
         select(StockOut).where(StockOut.order_id == order.id)
     )
     order_stockouts = result.scalars().all()
-    total_deducted = sum(so.quantity for so in order_stockouts)
+    total_deducted = sum(so.quantity - so.returned_quantity for so in order_stockouts)
 
     for stockout in order_stockouts:
+        net_qty = stockout.quantity - stockout.returned_quantity
+        if net_qty <= 0:
+            continue
         stockout_log = InventoryLog(
             product_id=order.product_id,
             change_type='抵扣回滚',
-            change_quantity=stockout.quantity,
+            change_quantity=net_qty,
             related_id=order.order_no,
-            note=f'订单删除回滚抵扣：{order.order_no}，恢复备货ID {stockout.stockin_id if stockout.stockin_id else "未知"} 的 {stockout.quantity} 件'
+            note=f'订单删除回滚抵扣：{order.order_no}，恢复备货ID {stockout.stockin_id if stockout.stockin_id else "未知"} 的 {net_qty} 件'
         )
         db.add(stockout_log)
 
@@ -392,6 +379,10 @@ async def _delete_order_directly(
     await db.execute(delete(StockOut).where(StockOut.order_id == order.id))
     await db.execute(delete(OrderSyncRecord).where(OrderSyncRecord.source_order_id == order_id))
 
+    # 清理关联的 pending 采购订单
+    from fastapi_app.services.purchase_order_service import cleanup_orphan_pending_purchase_orders
+    await cleanup_orphan_pending_purchase_orders(db, [order_id])
+
     result = await db.execute(
         select(ApprovalRequest.id).where(ApprovalRequest.order_id == order_id)
     )
@@ -404,14 +395,6 @@ async def _delete_order_directly(
     db.expire(order)
     await db.refresh(order)
     await db.delete(order)
-
-    try:
-        from fastapi_app.services.order_purchase_sync import sync_order_delete
-        sync_result = await sync_order_delete(db, order_id)
-        if sync_result['deleted_purchase_orders'] > 0 or sync_result['updated_purchase_orders'] > 0:
-            logger.info(f'采购中心同步删除：{sync_result}')
-    except (ValueError, OSError) as e:
-        logger.warning(f'采购中心同步删除失败：{e}')
 
     await db.commit()
     try:

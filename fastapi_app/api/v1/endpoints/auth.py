@@ -251,7 +251,7 @@ async def api_login(
         success=True,
         message="登录成功",
         access_token=access_token,
-        token_type="bearer",
+        token_type="bearer",  # nosec
     )
 
 

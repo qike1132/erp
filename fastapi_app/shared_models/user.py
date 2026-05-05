@@ -4,12 +4,18 @@
 映射到与 Flask-SQLAlchemy User 相同的 'user' 表。
 列名必须与 Flask 模型完全一致。
 """
+from __future__ import annotations
+
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Table
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
+
+if TYPE_CHECKING:
+    from fastapi_app.shared_models.permission import Permission
 
 # 用户-权限多对多关联表（与 Flask 端映射同一张表）
 user_permission = Table(

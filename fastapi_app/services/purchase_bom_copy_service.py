@@ -29,7 +29,7 @@ async def search_products_for_bom_copy(db: AsyncSession, keyword: str) -> list:
     if not keyword:
         return []
 
-    query = await product_search_service.build_search_query_async(db, keyword)
+    query = product_search_service.build_search_query_async(db, keyword)
     query = query.options(
         selectinload(Product.material),
         selectinload(Product.fabrics),

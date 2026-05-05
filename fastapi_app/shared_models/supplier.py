@@ -3,12 +3,18 @@
 
 映射到与 Flask-SQLAlchemy Supplier 相同的 'supplier' 表。
 """
+from __future__ import annotations
+
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
+
+if TYPE_CHECKING:
+    from fastapi_app.shared_models.purchase_order import PurchaseOrder
 
 
 class Supplier(Base):

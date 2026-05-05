@@ -56,7 +56,7 @@
                   v-for="d in details"
                   :key="d.id"
                   class="drw-detail-card"
-                  :class="{ 'drw-detail-shipped': d.shipment_status === 'shipped' }"
+                  :class="{ 'drw-detail-shipped': d.shipment_status === 'completed' }"
                 >
                   <div class="drw-detail-top">
                     <span class="drw-detail-product">{{ d.product_name }}</span>
@@ -154,12 +154,12 @@ function planStatusTxt(s: string) {
   return '待确认'
 }
 function detailStatusCls(s: string) {
-  if (s === 'shipped') return 'drw-dst-shipped'
+  if (s === 'completed') return 'drw-dst-shipped'
   if (s === 'partial') return 'drw-dst-partial'
   return 'drw-dst-pending'
 }
 function detailStatusTxt(s: string) {
-  if (s === 'shipped') return '已出货'
+  if (s === 'completed') return '已出货'
   if (s === 'partial') return '部分出货'
   return '待出货'
 }

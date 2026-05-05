@@ -7,48 +7,11 @@
           <HeaderTabs />
         </div>
         <div class="cu-header-right">
-          <span class="cu-count-badge">{{ customers.length }}</span>
           <div class="cu-tabs">
             <button class="cu-tab-btn active" @click="openForm('add')">
               <i class="fas fa-plus" /> 新建客户
             </button>
           </div>
-        </div>
-      </div>
-
-      <!-- 统计指标 -->
-      <div class="cu-metrics">
-        <div class="cu-metric-card cu-metric-all" :class="{ active: statusFilter === 'all' }" @click="statusFilter = 'all'; currentPage = 1">
-          <div class="cu-metric-icon cu-icon-blue"><i class="fas fa-building" /></div>
-          <div class="cu-metric-content">
-            <span class="cu-metric-number">{{ customers.length }}</span>
-            <span class="cu-metric-label">全部客户</span>
-          </div>
-        </div>
-        <div class="cu-metric-card cu-metric-active" :class="{ active: statusFilter === 'active' }" @click="statusFilter = 'active'; currentPage = 1">
-          <div class="cu-metric-icon cu-icon-green"><i class="fas fa-circle-check" /></div>
-          <div class="cu-metric-content">
-            <span class="cu-metric-number">{{ activeCount }}</span>
-            <span class="cu-metric-label">已启用</span>
-          </div>
-        </div>
-        <div class="cu-metric-card cu-metric-inactive" :class="{ active: statusFilter === 'inactive' }" @click="statusFilter = 'inactive'; currentPage = 1">
-          <div class="cu-metric-icon cu-icon-red"><i class="fas fa-circle-xmark" /></div>
-          <div class="cu-metric-content">
-            <span class="cu-metric-number">{{ inactiveCount }}</span>
-            <span class="cu-metric-label">已禁用</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- 搜索栏 -->
-      <div class="cu-search-bar">
-        <div class="cu-search-wrapper">
-          <i class="fas fa-search cu-search-icon" />
-          <input v-model="searchTerm" class="cu-search-input" placeholder="搜索客户名称、联系人或电话..." @input="currentPage = 1" />
-          <button v-if="searchTerm" class="cu-search-clear" @click="searchTerm = ''; currentPage = 1">
-            <i class="fas fa-times" />
-          </button>
         </div>
       </div>
 
@@ -58,7 +21,7 @@
           <i class="fas fa-spinner fa-spin" />
           <span>加载中...</span>
         </div>
-        <template v-else-if="pagedCustomers.length === 0">
+        <template v-else-if="customers.length === 0">
           <div class="cu-empty">
             <i class="fas fa-building" />
             <span>暂无客户数据</span>
@@ -78,7 +41,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in pagedCustomers" :key="row.id">
+            <tr v-for="row in customers" :key="row.id">
               <td style="text-align: left">
                 <div class="cu-customer-cell">
                   <div class="cu-customer-avatar">{{ row.name.charAt(0) }}</div>
@@ -109,10 +72,7 @@
         </table>
 
         <!-- 分页 -->
-        <div v-if="filteredTotal > perPage" class="cu-table-footer">
-          <span class="cu-total-text">共 {{ filteredTotal }} 条</span>
-          <UiPagination :current-page="currentPage" :total-pages="totalPages" @update:current-page="currentPage = $event" />
-        </div>
+        <UiPagination v-if="totalItems > perPage" :current-page="currentPage" :total-pages="totalPages" :total-items="totalItems" @update:current-page="currentPage = $event" />
       </div>
     </div>
 
@@ -163,11 +123,32 @@ import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 
-// ===== 列表查询 =====
+// ===== 列表查询（服务端分页+搜索） =====
+const searchTerm = ref('')
+const statusFilter = ref<'all' | 'active' | 'inactive'>('all')
+const currentPage = ref(1)
+const perPage = 15
+
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+const debouncedSearch = ref('')
+function onSearchInput() {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    debouncedSearch.value = searchTerm.value
+    currentPage.value = 1
+  }, 300)
+}
+function clearSearch() {
+  searchTerm.value = ''
+  debouncedSearch.value = ''
+  currentPage.value = 1
+}
+
 const { data: result, isLoading } = useQuery({
-  queryKey: ['customers-list'],
-  queryFn: () => customerApi.list({ per_page: 50 }) as Promise<any>,
+  queryKey: ['customers-list', () => debouncedSearch.value, () => statusFilter.value, () => currentPage.value],
+  queryFn: () => customerApi.list({ per_page: perPage, page: currentPage.value, search: debouncedSearch.value || undefined, status: statusFilter.value !== 'all' ? statusFilter.value : undefined }) as Promise<any>,
   staleTime: 30_000,
+  gcTime: 60_000,
 })
 
 const customers = computed<Customer[]>(() => {
@@ -175,39 +156,16 @@ const customers = computed<Customer[]>(() => {
   return raw.map((c: any) => ({ ...c, status: c.status === true || c.status === 'active' }))
 })
 
+const totalItems = computed(() => result.value?.total ?? customers.value.length)
+const totalPages = computed(() => Math.ceil(totalItems.value / perPage) || 1)
+
 // ===== 统计 =====
-const activeCount = computed(() => customers.value.filter((c) => c.status).length)
-const inactiveCount = computed(() => customers.value.filter((c) => !c.status).length)
-
-// ===== 搜索与筛选 =====
-const searchTerm = ref('')
-const statusFilter = ref<'all' | 'active' | 'inactive'>('all')
-
-const filteredCustomers = computed(() => {
-  let list = customers.value
-  if (searchTerm.value) {
-    const term = searchTerm.value.toLowerCase()
-    list = list.filter(
-      (c) =>
-        c.name.toLowerCase().includes(term) ||
-        (c.contact && c.contact.toLowerCase().includes(term)) ||
-        (c.phone && c.phone.includes(term)),
-    )
-  }
-  if (statusFilter.value === 'active') list = list.filter((c) => c.status)
-  if (statusFilter.value === 'inactive') list = list.filter((c) => !c.status)
-  return list
+const activeCount = computed(() => {
+  const t = totalItems.value
+  const inactive = result.value?.inactive_count ?? 0
+  return t - inactive
 })
-
-// ===== 客户端分页 =====
-const currentPage = ref(1)
-const perPage = 20
-const filteredTotal = computed(() => filteredCustomers.value.length)
-const totalPages = computed(() => Math.ceil(filteredTotal.value / perPage) || 1)
-const pagedCustomers = computed(() => {
-  const start = (currentPage.value - 1) * perPage
-  return filteredCustomers.value.slice(start, start + perPage)
-})
+const inactiveCount = computed(() => result.value?.inactive_count ?? 0)
 
 // ===== 表单 =====
 const formVisible = ref(false)
@@ -675,18 +633,6 @@ async function handleDelete(row: Customer) {
 .cu-icon-delete:hover { color: var(--color-danger-500); background: var(--color-danger-50); }
 
 /* Table Footer */
-.cu-table-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px 24px;
-  border-top: 1px solid var(--color-border-light);
-}
-.cu-total-text {
-  font-size: 13px;
-  color: var(--color-text-muted);
-}
-
 /* Empty */
 .cu-empty {
   display: flex;

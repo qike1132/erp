@@ -90,7 +90,7 @@ async def api_summary_print(data: SummaryPrintRequest, db: AsyncSession=Depends(
 
 @router.post('/orders/supplier-summary-export')
 async def export_supplier_summary_excel(data: OrderIdsRequest, db: AsyncSession=Depends(get_db), _user=Depends(require_permission('product_manage'))):
-    order_ids = data.ids
+    _ = data.ids
     try:
         sorted_suppliers = await svc.query_supplier_groups(db)
         if not sorted_suppliers:

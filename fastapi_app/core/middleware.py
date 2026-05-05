@@ -207,7 +207,7 @@ def _setup_prometheus(app: FastAPI) -> None:
         try:
             response = await call_next(request)
             status = response.status_code
-        except (RuntimeError, OSError, ValueError):
+        except Exception:
             status = 500
             raise
         finally:

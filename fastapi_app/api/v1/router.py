@@ -4,6 +4,7 @@ API V1 路由注册
 
 from fastapi import APIRouter
 
+from fastapi_app.api.v1.endpoints.app_update import router as app_update_router
 from fastapi_app.api.v1.endpoints.approval import router as approval_router
 from fastapi_app.api.v1.endpoints.auth import router as auth_router
 from fastapi_app.api.v1.endpoints.auxiliary import router as auxiliary_router
@@ -11,6 +12,7 @@ from fastapi_app.api.v1.endpoints.backup import router as backup_router
 from fastapi_app.api.v1.endpoints.batch import router as batch_router
 from fastapi_app.api.v1.endpoints.case_endpoint import router as case_router
 from fastapi_app.api.v1.endpoints.customer import router as customer_router
+from fastapi_app.api.v1.endpoints.daily_production import router as daily_production_router
 from fastapi_app.api.v1.endpoints.dashboard import router as dashboard_router
 from fastapi_app.api.v1.endpoints.material_registration import router as material_reg_router
 from fastapi_app.api.v1.endpoints.ocr_import import router as ocr_import_router
@@ -179,6 +181,13 @@ api_router.include_router(
     tags=["采购计划"],
 )
 
+# 生产报表路由（重构版）- 前缀 /api/v1/daily-production
+api_router.include_router(
+    daily_production_router,
+    prefix="/daily-production",
+    tags=["生产报表"],
+)
+
 # 生产计划路由 - 前缀 /api/v1/production-summary
 api_router.include_router(
     production_summary_router,
@@ -205,4 +214,11 @@ api_router.include_router(
     backup_router,
     prefix="/backup",
     tags=["数据备份"],
+)
+
+# App版本管理路由 - 前缀 /api/v1/app
+api_router.include_router(
+    app_update_router,
+    prefix="/app",
+    tags=["App版本管理"],
 )

@@ -8,8 +8,44 @@
       </h1>
       <p class="lead text-sm md:text-[17px] text-text-secondary leading-relaxed max-w-[650px] relative z-[1] m-0">专业的毛绒玩具企业供应链管理平台 — 智能、高效、可靠的数字化管理解决方案</p>
     </div>
+
+
   </div>
 </template>
+
+<script setup lang="ts">
+import { ref, onMounted } from 'vue';
+import UiStatCard from '@/components/ui/UiStatCard.vue';
+import { dashboardApi } from '@/api';
+
+const stats = ref<any>(null);
+
+async function loadStats() {
+  try {
+    const data = await dashboardApi.stats();
+    stats.value = data;
+  } catch (e) {
+    console.error('Failed to load stats:', e);
+    // 使用默认数据
+    stats.value = {
+      order_today: 0,
+      order_yesterday: 0,
+      stockin_today: 0,
+      stockin_yesterday: 0,
+      stockout_today: 0,
+      stockout_yesterday: 0,
+      pending_approvals: 0,
+      low_stock_count: 0,
+      pending_purchases: 0,
+      pending_materials: 0
+    };
+  }
+}
+
+onMounted(() => {
+  loadStats();
+});
+</script>
 
 <style scoped>
 .home-hero {

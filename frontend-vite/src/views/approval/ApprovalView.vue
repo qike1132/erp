@@ -34,7 +34,8 @@
       <div class="ap-filter-bar">
         <div class="ap-search-wrapper">
           <i class="fas fa-search ap-search-icon" />
-          <input v-model="searchTerm" class="ap-search-input" placeholder="搜索类型或摘要..." />
+          <input v-model="searchTerm" class="ap-search-input" placeholder="搜索类型或摘要..." @input="onSearchInput" />
+          <button v-if="searchTerm" class="ap-search-clear" @click="clearSearch"><i class="fas fa-times" /></button>
         </div>
         <div class="ap-filter-group">
           <button
@@ -54,7 +55,7 @@
           <i class="fas fa-spinner fa-spin" />
           <span>加载中...</span>
         </div>
-        <template v-else-if="filteredList.length === 0">
+        <template v-else-if="items.length === 0">
           <div class="ap-empty">
             <i class="fas fa-clipboard-check" />
             <span>暂无审批记录</span>
@@ -72,7 +73,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in filteredList" :key="row.id">
+            <tr v-for="row in items" :key="row.id">
               <td>{{ row.operation_type_display }}</td>
               <td style="text-align: left">{{ row.order_no }}</td>
               <td>{{ row.requester_name }}</td>
@@ -94,6 +95,16 @@
             </tr>
           </tbody>
         </table>
+
+        <!-- Pagination -->
+        <div v-if="totalItems > perPage" class="ap-pagination">
+          <button class="ap-page-btn" :disabled="currentPage <= 1" @click="goPage(1)"><i class="fas fa-angle-double-left" /></button>
+          <button class="ap-page-btn" :disabled="currentPage <= 1" @click="goPage(currentPage - 1)"><i class="fas fa-angle-left" /></button>
+          <span class="ap-page-info">{{ currentPage }} / {{ totalPages }}</span>
+          <button class="ap-page-btn" :disabled="currentPage >= totalPages" @click="goPage(currentPage + 1)"><i class="fas fa-angle-right" /></button>
+          <button class="ap-page-btn" :disabled="currentPage >= totalPages" @click="goPage(totalPages)"><i class="fas fa-angle-double-right" /></button>
+          <span class="ap-page-total">共 {{ totalItems }} 条</span>
+        </div>
       </div>
     </div>
 
@@ -154,6 +165,23 @@ const queryClient = useQueryClient()
 const actionId = ref<number | ''>(0)
 const searchTerm = ref('')
 const statusFilter = ref('')
+const currentPage = ref(1)
+const perPage = 20
+
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+const debouncedSearch = ref('')
+function onSearchInput() {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    debouncedSearch.value = searchTerm.value
+    currentPage.value = 1
+  }, 300)
+}
+function clearSearch() {
+  searchTerm.value = ''
+  debouncedSearch.value = ''
+  currentPage.value = 1
+}
 
 const statusOptions = [
   { value: '', label: '全部' },
@@ -163,12 +191,15 @@ const statusOptions = [
 ]
 
 const { data: result, isLoading } = useQuery({
-  queryKey: ['approvals', statusFilter],
-  queryFn: () => approvalApi.list({ status: statusFilter.value || undefined }) as Promise<ApprovalListResult>,
+  queryKey: ['approvals', () => statusFilter.value, () => debouncedSearch.value, () => currentPage.value],
+  queryFn: () => approvalApi.list({ status: statusFilter.value || undefined, search: debouncedSearch.value || undefined, page: currentPage.value, per_page: perPage }) as Promise<ApprovalListResult>,
   staleTime: 30_000,
+  gcTime: 60_000,
 })
 
 const items = computed(() => result.value?.data ?? [])
+const totalItems = computed(() => result.value?.total ?? items.value.length)
+const totalPages = computed(() => Math.max(1, Math.ceil(totalItems.value / perPage)))
 
 const stats = computed(() => {
   const r = result.value
@@ -181,15 +212,9 @@ const stats = computed(() => {
   }
 })
 
-const filteredList = computed(() => {
-  if (!searchTerm.value) return items.value
-  const q = searchTerm.value.toLowerCase()
-  return items.value.filter(
-    (i) => i.operation_type_display?.toLowerCase().includes(q)
-      || i.order_no?.toLowerCase().includes(q)
-      || i.requester_name?.toLowerCase().includes(q),
-  )
-})
+function goPage(p: number) {
+  currentPage.value = p
+}
 
 function statusBadgeClass(status: string): string {
   if (status === 'approved') return 'ap-badge-success'
@@ -210,10 +235,9 @@ async function handleApprove(row: ApprovalRow) {
     showToast('审批通过', 'success')
     queryClient.invalidateQueries({ queryKey: ['approvals'] })
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : '操作失败'
+    const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || '操作失败'
     showToast(msg, 'error')
-  } finally {
-    actionId.value = 0
+    queryClient.invalidateQueries({ queryKey: ['approvals'] })
   }
 }
 
@@ -242,8 +266,9 @@ async function handleReject() {
     rejectDialogVisible.value = false
     queryClient.invalidateQueries({ queryKey: ['approvals'] })
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : '操作失败'
+    const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || '操作失败'
     showToast(msg, 'error')
+    queryClient.invalidateQueries({ queryKey: ['approvals'] })
   } finally {
     rejectSaving.value = false
   }
@@ -562,5 +587,56 @@ async function handleReject() {
   border-color: var(--color-primary-400);
   background: white;
   box-shadow: 0 0 0 4px rgba(0, 148, 191, 0.1);
+}
+
+/* === Pagination === */
+.ap-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 24px;
+  border-top: 1px solid var(--color-border-light, #f1f5f9);
+}
+.ap-page-btn {
+  padding: 6px 10px;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  border-radius: 6px;
+  background: white;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  transition: all 0.2s;
+}
+.ap-page-btn:hover:not(:disabled) {
+  border-color: var(--color-primary-300);
+  color: var(--color-primary-600);
+}
+.ap-page-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.ap-page-info {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+  min-width: 80px;
+  text-align: center;
+}
+.ap-page-total {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin-left: 8px;
+}
+.ap-search-clear {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  font-size: 12px;
 }
 </style>

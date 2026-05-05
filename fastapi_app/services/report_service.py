@@ -279,7 +279,7 @@ async def get_stockout_logs(db: AsyncSession, customer: str = '', product: str =
     customer = customer.strip()[:100]
     product = product.strip()[:100]
 
-    where_clauses = ["so.quantity > 0", "so.stockin_id IS NULL"]
+    where_clauses = ["(so.quantity - so.returned_quantity) > 0", "so.stockin_id IS NULL"]
     params = {}
 
     if customer:
@@ -302,7 +302,7 @@ async def get_stockout_logs(db: AsyncSession, customer: str = '', product: str =
     data_sql = f"""SELECT
         DATE(so.stockout_date) as stockout_date_only, so.customer, p.name as product_name,
         p.barcode as product_barcode,
-        SUM(so.quantity) as total_quantity, COUNT(so.id) as stockout_count,
+        SUM(so.quantity - so.returned_quantity) as total_quantity, COUNT(so.id) as stockout_count,
         {_string_agg('so.stockout_no', ', ')} as stockout_nos,
         {_string_agg('so.note', '; ')} as notes,
         COUNT(*) OVER() as total_count
@@ -325,7 +325,7 @@ async def get_stockout_logs(db: AsyncSession, customer: str = '', product: str =
             'stockout_nos': row.stockout_nos or '', 'note': row.notes or '',
         })
 
-    qty_sql = f"SELECT COALESCE(SUM(so.quantity), 0) FROM stock_out so JOIN product p ON so.product_id = p.id WHERE 1=1 {where_sql}"
+    qty_sql = f"SELECT COALESCE(SUM(so.quantity - so.returned_quantity), 0) FROM stock_out so JOIN product p ON so.product_id = p.id WHERE 1=1 {where_sql}"
     total_qty = (await db.execute(text(qty_sql), params)).scalar() or 0
 
     return {
@@ -367,7 +367,7 @@ async def get_deduction_logs(db: AsyncSession, customer: str = '', product: str 
     data_sql = f"""SELECT
         DATE(so.stockout_date) as deduction_date_only, so.customer, p.name as product_name,
         p.barcode as sku,
-        SUM(so.quantity) as total_quantity, COUNT(so.id) as deduction_count,
+        SUM(so.quantity - so.returned_quantity) as total_quantity, COUNT(so.id) as deduction_count,
         {_string_agg('o.order_no', ', ')} as order_nos,
         {_string_agg('o.note', '; ')} as order_notes,
         COUNT(*) OVER() as total_count
@@ -391,7 +391,7 @@ async def get_deduction_logs(db: AsyncSession, customer: str = '', product: str 
             'order_nos': row.order_nos or '', 'order_note': row.order_notes or '',
         })
 
-    qty_sql = f"SELECT COALESCE(SUM(so.quantity), 0) FROM stock_out so JOIN product p ON so.product_id = p.id WHERE 1=1 {where_sql}"
+    qty_sql = f"SELECT COALESCE(SUM(so.quantity - so.returned_quantity), 0) FROM stock_out so JOIN product p ON so.product_id = p.id WHERE 1=1 {where_sql}"
     total_qty = (await db.execute(text(qty_sql), params)).scalar() or 0
 
     return {

@@ -1,10 +1,10 @@
 """客户管理服务层"""
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.shared_models import Customer, Order, StockIn, StockOut
+from fastapi_app.shared_models import Customer, CustomerAccessLog, Order, PurchaseOrder, PurchasePlan, StockIn, StockOut
 
 logger = logging.getLogger(__name__)
 
@@ -12,16 +12,32 @@ _ACTIVE_CUSTOMER_CACHE_KEY = "active_customer_names"
 _ACTIVE_CUSTOMER_CACHE_TTL = 300
 
 
-async def get_customers(db: AsyncSession, status: str | None = None) -> list[Customer]:
-    """获取客户列表"""
+async def get_customers(db: AsyncSession, status: str | None = None, page: int = 1, per_page: int = 50, search: str = '') -> dict:
+    """获取客户列表（支持分页和搜索）"""
     query = select(Customer)
+    count_query = select(func.count(Customer.id))
     if status == 'active':
         query = query.where(Customer.status)
+        count_query = count_query.where(Customer.status)
     elif status == 'inactive':
         query = query.where(not Customer.status)
-    query = query.order_by(Customer.name)
+        count_query = count_query.where(not Customer.status)
+    if search:
+        escaped = search.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+        like_pattern = f'%{escaped}%'
+        query = query.where(or_(Customer.name.ilike(like_pattern), Customer.contact.ilike(like_pattern), Customer.phone.ilike(like_pattern)))
+        count_query = count_query.where(or_(Customer.name.ilike(like_pattern), Customer.contact.ilike(like_pattern), Customer.phone.ilike(like_pattern)))
+    total = (await db.execute(count_query)).scalar() or 0
+    query = query.order_by(Customer.name).offset((page - 1) * per_page).limit(per_page)
     result = await db.execute(query)
-    return list(result.scalars().all())
+    customers = list(result.scalars().all())
+    return {'items': customers, 'total': total, 'page': page, 'per_page': per_page}
+
+
+async def get_customer(db: AsyncSession, customer_id: int) -> Customer | None:
+    """获取单个客户"""
+    result = await db.execute(select(Customer).where(Customer.id == customer_id))
+    return result.scalar_one_or_none()
 
 
 async def search_customers(db: AsyncSession, query_str: str) -> list[Customer]:
@@ -144,8 +160,18 @@ async def delete_customer(db: AsyncSession, customer_id: int) -> None:
     has_stockouts = await db.execute(
         select(StockOut).where(StockOut.customer == customer.name).limit(1)
     )
+    has_access_logs = await db.execute(
+        select(CustomerAccessLog).where(CustomerAccessLog.customer_id == customer_id).limit(1)
+    )
+    has_purchase_orders = await db.execute(
+        select(PurchaseOrder).where(PurchaseOrder.customer_id == customer_id).limit(1)
+    )
+    has_purchase_plans = await db.execute(
+        select(PurchasePlan).where(PurchasePlan.customer_id == customer_id).limit(1)
+    )
 
-    if has_orders.scalar_one_or_none() or has_stockins.scalar_one_or_none() or has_stockouts.scalar_one_or_none():
+    if (has_orders.scalar_one_or_none() or has_stockins.scalar_one_or_none() or has_stockouts.scalar_one_or_none()
+            or has_access_logs.scalar_one_or_none() or has_purchase_orders.scalar_one_or_none() or has_purchase_plans.scalar_one_or_none()):
         raise ValueError("该客户已有相关单据，无法删除！建议禁用该客户。")
 
     await db.delete(customer)

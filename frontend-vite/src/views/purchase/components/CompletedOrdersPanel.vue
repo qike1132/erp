@@ -153,30 +153,7 @@
       </template>
 
       <!-- Pagination -->
-      <div v-if="totalPages > 1" class="pc-pagination">
-        <button
-          class="pc-page-btn"
-          :disabled="currentPage <= 1"
-          @click="$emit('update:currentPage', currentPage - 1)"
-        >
-          <i class="fas fa-chevron-left" />
-        </button>
-        <button
-          v-for="p in visiblePages"
-          :key="p"
-          :class="['pc-page-btn', { 'pc-page-active': p === currentPage }]"
-          @click="$emit('update:currentPage', p)"
-        >
-          {{ p }}
-        </button>
-        <button
-          class="pc-page-btn"
-          :disabled="currentPage >= totalPages"
-          @click="$emit('update:currentPage', currentPage + 1)"
-        >
-          <i class="fas fa-chevron-right" />
-        </button>
-      </div>
+      <UiPagination v-if="totalPages > 1" :current-page="currentPage" :total-pages="totalPages" :total-items="total" @update:current-page="$emit('update:currentPage', $event)" />
     </div>
   </div>
 </template>
@@ -184,6 +161,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
+import UiPagination from '@/components/ui/UiPagination.vue'
 
 const props = defineProps<{
   orders: any[]
@@ -215,18 +193,6 @@ const basicFields = [
   { key: 'supplier_name', label: '供应商名称', placeholder: '输入供应商名称', icon: 'fas fa-search' },
   { key: 'barcode', label: '69码', placeholder: '输入69码查询对应SKU', icon: 'fas fa-barcode' },
 ]
-
-const visiblePages = computed(() => {
-  const total = props.totalPages
-  const current = props.currentPage
-  const maxShow = 5
-  let start = Math.max(1, current - Math.floor(maxShow / 2))
-  let end = Math.min(total, start + maxShow - 1)
-  if (end - start < maxShow - 1) start = Math.max(1, end - maxShow + 1)
-  const pages: number[] = []
-  for (let i = start; i <= end; i++) pages.push(i)
-  return pages
-})
 </script>
 
 <style scoped>
@@ -486,46 +452,6 @@ const visiblePages = computed(() => {
 .pc-td-bold { font-weight: 600; }
 .pc-td-muted { color: var(--color-text-muted, #94a3b8); }
 .pc-td-small { font-size: 12px; }
-
-/* Pagination */
-.pc-pagination {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 4px;
-  padding: 12px 24px 16px;
-}
-
-.pc-page-btn {
-  padding: 6px 12px;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  background: white;
-  border-radius: 8px;
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  color: var(--color-text);
-}
-
-.pc-page-btn:hover:not(:disabled) {
-  border-color: var(--color-primary-500);
-  color: var(--color-primary-500);
-}
-
-.pc-page-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.pc-page-active {
-  background: var(--color-primary-500);
-  color: white;
-  border-color: var(--color-primary-500);
-}
-
-.pc-page-active:hover {
-  color: white !important;
-}
 
 /* Empty & Loading */
 .pc-empty-state {

@@ -84,6 +84,7 @@ const iconMap: Record<string, string> = {
   case: 'fas fa-box',
   'material-calculator': 'fas fa-list',
   'fa-database': 'fas fa-database',
+  'fa-mobile-alt': 'fas fa-mobile-alt',
 }
 </script>
 

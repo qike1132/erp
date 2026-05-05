@@ -3,13 +3,19 @@
 
 映射到与 Flask-SQLAlchemy ApprovalRequest / ApprovalLog 相同的表。
 """
+from __future__ import annotations
+
 from datetime import UTC, datetime
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, backref, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
+
+if TYPE_CHECKING:
+    from fastapi_app.shared_models.order import Order
+    from fastapi_app.shared_models.user import User
 
 _DATETIME_FMT = '%Y-%m-%d %H:%M:%S'
 

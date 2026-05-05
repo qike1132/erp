@@ -1,11 +1,12 @@
 """
 客户订单 ↔ 采购中心同步服务
 
-当客户订单发生变更（删除/更新）时，同步更新采购中心的相关数据，
+当客户订单发生变更（创建/删除/更新）时，同步更新采购中心的相关数据，
 确保两个系统间的数据一致性。
 
 核心设计：
 - 使用与调用方相同的 AsyncSession，在同一事务内完成同步
+- 创建同步：客户订单创建后，自动在采购中心创建 pending 状态的采购订单（审核订单）
 - 删除同步处理两种关联：source_order_id（单值）和 source_order_ids（JSON 数组）
 - 更新同步包括：客户名、订单数量、采购项数量（基于 unit_usage 重算）
 """
@@ -20,6 +21,54 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.shared_models import PurchaseOrder, PurchaseOrderItem
 
 logger = logging.getLogger(__name__)
+
+
+async def sync_order_create(
+    db: AsyncSession,
+    order_id: int,
+    order_no: str,
+    customer: str,
+    product_id: int,
+    product_name: str,
+    quantity: int,
+) -> dict:
+    """当客户订单被创建时，在采购中心创建一条 pending 状态的采购订单
+
+    该采购订单出现在"审核订单"队列中，由人工审核后根据 BOM 展开生成正式采购单。
+    """
+    # 检查是否已存在关联该客户订单的采购订单（避免重复同步）
+    existing = await db.execute(
+        select(PurchaseOrder).where(PurchaseOrder.source_order_id == order_id)
+    )
+    if existing.scalars().first():
+        logger.info('客户订单 %s 已有关联采购订单，跳过同步', order_no)
+        return {'skipped': True}
+
+    # 检查产品是否有 BOM（物料配置），用于前端显示 has_bom
+    from fastapi_app.shared_models import ProductMaterial
+    bom_result = await db.execute(
+        select(ProductMaterial).where(ProductMaterial.product_id == product_id)
+    )
+    has_bom = bom_result.scalars().first() is not None
+
+    po = PurchaseOrder(
+        order_no=f'PO-PENDING-{order_id}',
+        customer_name=customer,
+        product_name=product_name,
+        product_quantity=quantity,
+        source_order_id=order_id,
+        status='pending',
+        remark=f'自动同步自客户订单 {order_no}',
+    )
+    db.add(po)
+    await db.flush()
+
+    logger.info(
+        '同步创建采购审核订单：PO-PENDING-%d（关联客户订单: %s，客户: %s，产品: %s）',
+        order_id, order_no, customer, product_name,
+    )
+
+    return {'purchase_order_id': po.id, 'has_bom': has_bom}
 
 
 async def sync_order_delete(db: AsyncSession, order_id: int) -> dict:

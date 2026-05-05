@@ -248,7 +248,15 @@ async def get_products_statistics(db: AsyncSession) -> dict:
 
 
 async def get_product_bom(db: AsyncSession, product_id: int) -> dict:
-    product = await db.get(Product, product_id)
+    result = await db.execute(
+        select(Product).options(
+            selectinload(Product.material),
+            selectinload(Product.fabrics),
+            selectinload(Product.accessories),
+            selectinload(Product.packagings),
+        ).where(Product.id == product_id)
+    )
+    product = result.scalars().first()
     if not product:
         return None
     all_materials = product.get_all_materials() if product.has_bom() else []
@@ -261,7 +269,15 @@ async def get_product_bom(db: AsyncSession, product_id: int) -> dict:
 
 
 async def save_product_bom(db: AsyncSession, product_id: int, data: dict, username: str) -> str:
-    product = await db.get(Product, product_id)
+    result = await db.execute(
+        select(Product).options(
+            selectinload(Product.material),
+            selectinload(Product.fabrics),
+            selectinload(Product.accessories),
+            selectinload(Product.packagings),
+        ).where(Product.id == product_id)
+    )
+    product = result.scalars().first()
     if not product:
         raise ValueError('产品不存在')
 
@@ -385,6 +401,10 @@ async def save_product_bom(db: AsyncSession, product_id: int, data: dict, userna
                 remark=acc_data.get('remark', ''),
             ))
 
+    _delete_meta = {
+        'fabrics': ('fabric', 'fabric_name'),
+        'accessories': ('accessory', 'accessory_name'),
+    }
     for category, model_cls in [('fabrics', ProductFabric), ('accessories', ProductAccessory)]:
         existing_ids = {item['id'] for item in data.get(category, []) if item.get('id')}
         result = await db.execute(
@@ -394,12 +414,13 @@ async def save_product_bom(db: AsyncSession, product_id: int, data: dict, userna
             )
         )
         to_delete = result.scalars().all()
+        target_type, name_attr = _delete_meta[category]
         for item in to_delete:
             await db.delete(item)
             db.add(ModificationLog(
-                target_type=category[:-1], target_id=item.id,
+                target_type=target_type, target_id=item.id,
                 field_name='deleted',
-                old_value=getattr(item, f'{category[:-2]}y_name', '') or '',
+                old_value=getattr(item, name_attr, '') or '',
                 new_value='(已删除)',
                 modifier_name=username,
             ))

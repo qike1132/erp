@@ -1,5 +1,6 @@
 import { ref, computed, reactive } from 'vue'
 import { purchaseApi } from '@/api'
+import { showToast } from '@/composables/useToast'
 import type { ApiResponse, PurchaseOrder } from '@/types'
 
 export function usePurchaseOrders() {
@@ -19,8 +20,9 @@ export function usePurchaseOrders() {
       orders.value = res.orders || []
       total.value = res.total || 0
       pages.value = res.pages || 1
-    } catch {
+    } catch (err: any) {
       orders.value = []
+      showToast(err.response?.data?.detail || '加载采购订单失败', 'error')
     } finally {
       loading.value = false
     }

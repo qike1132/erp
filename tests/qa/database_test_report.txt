@@ -1,0 +1,105 @@
+======================================================================
+ERP系统数据库测试报告
+======================================================================
+生成时间: 2026-05-05
+测试工具: pytest + SQLAlchemy 2.0 async session (asyncpg)
+数据库: PostgreSQL (通过 fastapi_app/core/database.py 配置)
+
+======================================================================
+测试结果摘要
+======================================================================
+总计: 10 个测试用例
+通过: 1 个 (10.0%)
+失败: 9 个 (90.0%)
+
+======================================================================
+详细结果
+======================================================================
+
+[PASS] 数据库连接测试 (test_connection):
+  - SELECT 1 正常返回
+  - 结论: 数据库连接正常，SQLAlchemy连接池工作正常
+
+[FAIL] 表发现测试 (test_table_discovery):
+  - Error: AttributeError - 连接管理异常
+  - 原因: asyncpg连接在event loop关闭后仍尝试操作
+  - 潜在问题: 异步连接管理生命周期问题
+
+[FAIL] 批量插入测试 (test_insert_100_products):
+  - Error: ProgrammingError - 关系 "products" 不存在
+  - 原因: 当前数据库schema中可能未创建products表
+  - 建议: 需要执行SQLAlchemy create_all() 或 Alembic migration
+  - 测试数据: 100条产品数据已由Faker生成（产品编码P100000~P100099）
+
+[FAIL] 简单查询测试:
+  - 原因: 异步连接管理问题(Event loop closed)
+
+[FAIL] 筛选查询测试:
+  - Error: ProgrammingError - 关系 "products" 不存在
+  - 测试SQL: SELECT * FROM products WHERE price > 0 ORDER BY id DESC LIMIT 20
+
+[FAIL] 聚合查询测试:
+  - 原因: 异步连接管理问题
+
+[FAIL] 更新回滚测试:
+  - Error: ProgrammingError - 关系 "products" 不存在
+  - 测试SQL: SELECT COUNT(*) FROM products
+
+[FAIL] 插入回滚测试:
+  - 原因: 异步连接管理问题
+
+[FAIL] 嵌套事务测试:
+  - Error: ProgrammingError - 关系 "products" 不存在
+  - 测试SQL: SELECT COUNT(*) FROM products
+
+[FAIL] 删除回滚测试:
+  - 原因: 异步连接管理问题 - Event loop is closed
+
+======================================================================
+20000条测试数据生成状态
+======================================================================
+
+数据生成器: tests/qa/data_generator.py ✓ 已就绪
+总生成量: 20000 条
+数据分布:
+  - products(产品):           3,000 条
+  - customers(客户):          2,000 条
+  - suppliers(供应商):        1,000 条
+  - orders(订单):             4,000 条
+  - stock_in(入库):           3,000 条
+  - stock_out(出库):          2,500 条
+  - approvals(审批):          1,000 条
+  - users(用户):                500 条
+  - cases(皮套):              2,000 条
+  - material_registration(来料): 1,000 条
+
+数据生成器验证: ✓ 可独立运行，生成逻辑正常
+
+======================================================================
+问题分析
+======================================================================
+
+1. 数据库schema不完整:
+   数据库中缺少核心表(products, orders等)，可能原因:
+   - SQLAlchemy create_all() 未执行
+   - Alembic migration未执行
+   - 数据库角色权限不足
+   - 表名使用了非预想命名（如带schema前缀）
+
+2. 异步连接生命周期:
+   Windows环境下asyncpg + ProactorEventLoop存在兼容性问题，
+   event loop提前关闭导致部分连接失败。
+
+3. 数据安全保证:
+   - 所有测试操作均在BEGIN...ROLLBACK事务中
+   - 测试数据未持久化到数据库
+   - 生产数据完整性未受影响 ✓
+
+======================================================================
+建议
+======================================================================
+
+1. 执行数据库迁移: 运行 alembic upgrade head 确保表结构完整
+2. 优化异步测试: 在Windows环境使用 uvloop 或 WindowsSelectorEventLoopPolicy
+3. 增加Schema验证: 测试前自动检测表是否存在，优雅跳过不存在的表
+4. 大规模数据测试: 在完整的表结构基础上，使用批量COPY或execute_many提升性能

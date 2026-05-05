@@ -13,12 +13,14 @@ class Base(DeclarativeBase):
 
 
 # 导入所有模型（确保 Base.metadata 注册了所有表）
+from fastapi_app.shared_models.app_version import AppVersion
 from fastapi_app.shared_models.approval import ApprovalLog, ApprovalRequest
 from fastapi_app.shared_models.case import Case
 from fastapi_app.shared_models.case_inventory_log import CaseInventoryLog
 from fastapi_app.shared_models.case_stock_in import CaseStockIn
 from fastapi_app.shared_models.case_stock_out import CaseStockOut
 from fastapi_app.shared_models.craft_work import CraftWork
+from fastapi_app.shared_models.daily_production_record import DailyProductionRecord
 from fastapi_app.shared_models.customer import Customer
 from fastapi_app.shared_models.customer_access_log import CustomerAccessLog
 from fastapi_app.shared_models.inventory_log import InventoryLog
@@ -45,15 +47,18 @@ from fastapi_app.shared_models.staging_stock_in import StagingStockIn
 from fastapi_app.shared_models.staging_stock_out import StagingStockOut
 from fastapi_app.shared_models.stock_in import StockIn
 from fastapi_app.shared_models.stock_out import StockOut
+from fastapi_app.shared_models.stock_return import StockReturn
 from fastapi_app.shared_models.supplier import Supplier
 from fastapi_app.shared_models.user import User, user_permission
 
 __all__ = [
+    'AppVersion',
     'Base',
     'Product',
     'Order',
     'StockIn',
     'StockOut',
+    'StockReturn',
     'InventoryLog',
     'User',
     'user_permission',
@@ -92,5 +97,6 @@ __all__ = [
     'PurchasePlanDetail',
     'ShipmentRecord',
     'CraftWork',
+    'DailyProductionRecord',
     'PackagingRecord',
 ]

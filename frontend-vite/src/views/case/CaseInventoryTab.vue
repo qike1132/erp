@@ -10,7 +10,7 @@
         <div class="ci-header-actions">
           <div class="ci-search-wrapper">
             <i class="fas fa-search ci-search-icon" />
-            <input v-model="invSearch" class="ci-search-input" placeholder="搜索产品名称或69码..." />
+            <input v-model="invSearch" class="ci-search-input" placeholder="搜索产品名称或69码..." @input="onInvSearchInput" />
           </div>
           <button class="ci-action-btn ci-action-primary" @click="invRefetch()">
             <i class="fas fa-sync-alt" style="margin-right: 4px" />刷新
@@ -36,7 +36,7 @@
 
       <!-- 库存表格 -->
       <div v-if="invIsLoading" class="ci-loading"><i class="fas fa-spinner fa-spin" /><span>加载中...</span></div>
-      <div v-else-if="filteredInventory.length === 0" class="ci-empty"><i class="fas fa-warehouse" /><span>暂无库存数据</span></div>
+      <div v-else-if="inventoryList.length === 0" class="ci-empty"><i class="fas fa-warehouse" /><span>暂无库存数据</span></div>
       <table v-else class="ci-table">
         <thead>
           <tr>
@@ -50,7 +50,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in filteredInventory" :key="row.name" style="cursor: pointer" @click="selectCaseRow(row)">
+          <tr v-for="row in inventoryList" :key="row.id" style="cursor: pointer" @click="selectCaseRow(row)">
             <td style="text-align: left"><strong>{{ row.name }}</strong></td>
             <td><small>{{ row.barcode || '-' }}</small></td>
             <td style="text-align: right">{{ row.initial_stock }}</td>
@@ -67,6 +67,11 @@
           </tr>
         </tbody>
       </table>
+      <div v-if="invTotalPages > 1" class="ci-pagination">
+        <button class="ci-page-btn" :disabled="invPage <= 1" @click="invPage--"><i class="fas fa-chevron-left" /></button>
+        <span class="ci-page-info">{{ invPage }} / {{ invTotalPages }}</span>
+        <button class="ci-page-btn" :disabled="invPage >= invTotalPages" @click="invPage++"><i class="fas fa-chevron-right" /></button>
+      </div>
     </div>
 
     <!-- 库存流水记录 -->
@@ -159,17 +164,30 @@ const queryClient = useQueryClient()
 
 // === 库存汇总 ===
 const invSearch = ref('')
+const debouncedInvSearch = ref('')
+const invPage = ref(1)
+const invPerPage = 50
 const selectedCaseId = ref<number | null>(null)
 const selectedCaseName = ref('')
+
+let invSearchTimer: ReturnType<typeof setTimeout> | null = null
+function onInvSearchInput() {
+  if (invSearchTimer) clearTimeout(invSearchTimer)
+  invSearchTimer = setTimeout(() => {
+    debouncedInvSearch.value = invSearch.value
+    invPage.value = 1
+  }, 300)
+}
 
 const {
   data: invData,
   isLoading: invIsLoading,
   refetch: invRefetch,
 } = useQuery({
-  queryKey: ['case-inventory'],
-  queryFn: () => get('/cases/inventory-summary') as Promise<any>,
+  queryKey: ['case-inventory', invPage, debouncedInvSearch],
+  queryFn: () => get('/cases/inventory-summary', { page: invPage.value, per_page: invPerPage, search: debouncedInvSearch.value }) as Promise<any>,
   staleTime: 30_000,
+  gcTime: 60_000,
 })
 
 const inventoryList = computed(() => {
@@ -177,19 +195,12 @@ const inventoryList = computed(() => {
   return list
 })
 
-const filteredInventory = computed(() => {
-  if (!invSearch.value) return inventoryList.value
-  const q = invSearch.value.toLowerCase()
-  return inventoryList.value.filter(
-    (i: any) => i.name?.toLowerCase().includes(q) || i.barcode?.toLowerCase().includes(q),
-  )
-})
+const invTotalPages = computed(() => invData.value?.pages ?? 0)
+const invStats = computed(() => invData.value?.stats ?? null)
 
-const invTotalStock = computed(() =>
-  filteredInventory.value.reduce((s: number, i: any) => s + (i.current_stock || 0), 0),
-)
-const invTotalIn = computed(() => filteredInventory.value.reduce((s: number, i: any) => s + (i.total_in || 0), 0))
-const invTotalOut = computed(() => filteredInventory.value.reduce((s: number, i: any) => s + (i.total_out || 0), 0))
+const invTotalStock = computed(() => invStats.value?.total_stock ?? 0)
+const invTotalIn = computed(() => invStats.value?.total_in ?? 0)
+const invTotalOut = computed(() => invStats.value?.total_out ?? 0)
 
 function selectCaseRow(row: any) {
   selectedCaseId.value = row.id
@@ -488,4 +499,11 @@ function logBadgeClass(t: string): string {
   display: block;
   margin-bottom: 8px;
 }
+
+/* Pagination */
+.ci-pagination { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 8px 16px; border-top: 1px solid var(--color-border-light, #f1f5f9); }
+.ci-page-btn { width: 28px; height: 28px; border: 1px solid var(--color-border, #e4e7ed); border-radius: 6px; background: white; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--color-text-secondary); transition: all 0.2s ease; }
+.ci-page-btn:hover:not(:disabled) { border-color: var(--color-primary-400); color: var(--color-primary-600); background: var(--color-primary-50); }
+.ci-page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.ci-page-info { font-size: 12px; font-weight: 600; color: var(--color-text-secondary); }
 </style>

@@ -73,13 +73,19 @@
                 <span v-else-if="r._shippedPct === 100" class="sp-day-alert sp-day-done"><i class="fas fa-check" /> 完成</span>
               </div>
               
-              <span v-for="(cn, i) in r.customerNames" :key="cn" class="sp-day-customer-tag">
-                {{ cn }}
-              </span>
+              <div class="sp-day-body">
+                <span v-for="(cn, i) in r.customerNames.slice(0, 5)" :key="cn" class="sp-day-customer-tag">
+                  {{ cn }}
+                </span>
+                <span v-if="r.customerNames.length > 5" class="sp-day-more-tag">
+                  +{{ r.customerNames.length - 5 }}家客户
+                </span>
             </div>
           </div>
         </div>
       </div>
+    </div>
+
 
       <div v-else class="sp-body">
         <div v-if="sLoading" class="sp-empty"><i class="fas fa-spinner fa-spin" />加载中...</div>
@@ -126,31 +132,22 @@
                         <i v-else class="fas fa-sort sp-sort-muted"></i>
                       </span>
                     </th>
-                    <th class="sp-sku-th-progress">进度</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="(s, i) in sortedSkuList" :key="`${s.customer_name}|${s.product_name}`" :class="{ 'sp-sku-row-odd': i % 2 === 1 }" class="sp-sku-row-clickable" @click="openSkuDetail(s.barcode, s.product_name, s.customer_name)">
+                  <tr v-for="(s, i) in paginatedSkuList" :key="`${s.customer_name}|${s.product_name}`" :class="{ 'sp-sku-row-odd': i % 2 === 1 }" class="sp-sku-row-clickable" @click="openSkuDetail(s.barcode, s.product_name, s.customer_name)">
                     <td class="sp-sku-td-customer">{{ s.customer_name }}</td>
                     <td class="sp-sku-td-product"><span class="sp-sku-product-name">{{ s.product_name }}</span></td>
                     <td class="sp-sku-td-barcode"><code class="sp-sku-barcode">{{ s.barcode }}</code></td>
                     <td class="sp-sku-td-number">{{ s.plan_qty }}</td>
                     <td class="sp-sku-td-number sp-sku-td-success">{{ s.shipped_qty }}</td>
-                    <td class="sp-sku-td-number" :class="{ 'sp-sku-td-warning': s.remain_qty > 0 }">{{ s.remain_qty }}</td>
-                    <td class="sp-sku-td-progress">
-                      <div class="sp-sku-mini-bar">
-                        <div class="sp-sku-mini-fill" :class="{ 'sp-sku-mini-done': s.remain_qty === 0 }" :style="{ width: s._pct + '%' }"></div>
-                      </div>
-                      <span class="sp-sku-mini-text">{{ s._pct }}%</span>
-                    </td>
+                    <td class="sp-sku-td-number sp-sku-td-warning">{{ s.remain_qty }}</td>
                   </tr>
                 </tbody>
               </table>
             </div>
-            <div class="sp-sku-table-footer">
-              共 <b>{{ sortedSkuList.length }}</b> 个SKU · 计划总量 <b>{{ skuTotals.plan }}</b> · 已出货 <b class="sp-sku-foot-success">{{ skuTotals.shipped }}</b> · 待出货 <b class="sp-sku-foot-warning">{{ skuTotals.remain }}</b>
-            </div>
           </div>
+          <UiPagination v-if="skuTotalPages > 1" :current-page="skuPage" :total-pages="skuTotalPages" :total-items="sortedSkuList.length" @update:current-page="skuPage = $event" />
         </div>
       </div>
     </div>
@@ -160,34 +157,28 @@
         <div class="sp-modal">
           <div class="sp-modal-header">
             <div class="sp-modal-header-info">
-              <span class="sp-modal-badge">{{ selDetail._dayNum }}日</span>
               <span class="sp-modal-title">{{ selDetail.date }} · 周{{ selDetail._weekday }}</span>
+              <div class="sp-modal-tabs">
+                <button :class="['sp-modal-tab', { 'sp-modal-tab-active': modalTab === 'plans' }]" @click="modalTab = 'plans'">计划明细</button>
+                <button :class="['sp-modal-tab', { 'sp-modal-tab-active': modalTab === 'records' }]" @click="modalTab = 'records'">出货记录</button>
+              </div>
+            </div>
+            <div class="sp-modal-header-progress" v-if="modalTab === 'plans'">
+              <div class="sp-modal-progress-bar">
+                <div class="sp-modal-progress-fill" :style="{ width: selDetail._shippedPct + '%' }"></div>
+                <span class="sp-modal-progress-text">{{ selDetail._shippedPct }}%</span>
+              </div>
             </div>
             <div class="sp-modal-header-actions">
-              <button class="sp-modal-btn" @click="exportDayCSV" title="导出当日"><i class="fas fa-file-export"></i></button>
+              <button class="sp-modal-export-btn" @click="exportDayCSV"><i class="fas fa-download"></i> 导出当日</button>
               <button class="sp-modal-btn sp-modal-btn-close" @click="sel = ''"><i class="fas fa-times"></i></button>
             </div>
           </div>
-          <div class="sp-modal-body">
-            <div class="sp-modal-stats">
-              <span class="sp-modal-stat"><b>{{ selDetail.customerCount }}</b> 客户</span>
-              <span class="sp-modal-stat"><b>{{ selDetail.planCount }}</b> 条计划</span>
-              <span class="sp-modal-stat"><b>{{ selDetail.totalQty }}</b> 件</span>
-              <span class="sp-modal-stat"><b>{{ selDetail._shippedCount }}</b> 已出</span>
-              <span class="sp-modal-stat"><b>{{ selDetail._pendingCount }}</b> 待出</span>
-            </div>
-            <div class="sp-modal-progress">
-              <div class="sp-modal-progress-bar">
-                <div class="sp-modal-progress-fill" :style="{ width: selDetail._shippedPct + '%' }"></div>
-                <span class="sp-modal-progress-text">出货进度 {{ selDetail._shippedPct }}%</span>
-              </div>
-            </div>
+
+          <!-- 计划明细 Tab -->
+          <div v-if="modalTab === 'plans'" class="sp-modal-body">
             <div class="sp-modal-split">
               <div class="sp-modal-sidebar">
-                <div class="sp-sidebar-search">
-                  <i class="fas fa-search"></i>
-                  <input v-model="modalKw" placeholder="搜索客户..." />
-                </div>
                 <div class="sp-sidebar-list">
                   <div
                     v-for="(group, cname) in filteredModalCustomers"
@@ -200,54 +191,46 @@
                       <span class="sp-customer-name">{{ cname }}</span>
                       <span class="sp-customer-badge">{{ group.length }}</span>
                     </div>
-                    <div class="sp-customer-row-info">
-                      <span class="sp-customer-qty">{{ group.reduce((s, p) => s + Number(p.quantity || 0), 0) }} 件</span>
-                      <span class="sp-customer-shipped">{{ group.filter(p => p.shipment_status === 'shipped').length }} 已出</span>
+                    <div class="sp-customer-summary">
+                      <span class="sp-customer-summary-item"><b>{{ group.reduce((s, p) => s + Number(p.quantity || 0), 0) }}</b> 计划</span>
+                      <span class="sp-customer-summary-item sp-customer-summary-shipped"><b>{{ group.reduce((s, p) => s + Number(p.shipped_qty || 0), 0) }}</b> 已出</span>
+                      <span class="sp-customer-summary-item sp-customer-summary-pending"><b>{{ group.reduce((s, p) => s + Number(p.remaining_qty || 0), 0) }}</b> 待出</span>
                     </div>
                   </div>
                 </div>
               </div>
               <div class="sp-modal-main">
-                <div v-if="modalSelGroup" class="sp-modal-main-header">
-                  <span class="sp-modal-main-title">{{ modalSelCust }}</span>
-                  <span class="sp-modal-main-meta">{{ modalSelGroup.length }} 条 · {{ modalSelGroup.reduce((s, p) => s + Number(p.quantity || 0), 0) }} 件</span>
+                <div v-if="modalSelGroup" class="sp-plan-list-header">
+                  <span class="sp-plan-list-header-name">产品</span>
+                  <div class="sp-plan-list-header-qtys">
+                    <span>计划</span>
+                    <span>已出</span>
+                    <span>待出</span>
+                  </div>
                 </div>
                 <div v-if="modalSelGroup" class="sp-modal-main-list">
-                  <div
-                    v-for="p in modalSelGroup"
-                    :key="p.detail_id"
-                    class="sp-plan-item"
+                  <VirtualList
+                    :items="modalSelGroup"
+                    :itemHeight="54"
+                    :containerHeight="420"
+                    :itemKey="(p: any) => p.detail_id"
                   >
-                    <div class="sp-plan-left">
-                      <span class="sp-plan-name">{{ p.product_name }}</span>
-                      <code class="sp-plan-barcode">{{ p.barcode }}</code>
-                    </div>
-                    <div class="sp-plan-middle">
-                      <div class="sp-plan-qtys">
-                        <div class="sp-plan-qty-item">
-                          <span class="sp-plan-qty-label">计划</span>
-                          <span class="sp-plan-qty-value">{{ p.quantity }}</span>
+                    <template #default="{ item: p }">
+                      <div class="sp-plan-item" style="margin-bottom:0;">
+                        <div class="sp-plan-left">
+                          <span class="sp-plan-name">{{ p.product_name }}</span>
+                          <code class="sp-plan-barcode">{{ p.barcode }}</code>
                         </div>
-                        <div class="sp-plan-qty-item">
-                          <span class="sp-plan-qty-label">已出</span>
-                          <span class="sp-plan-qty-value sp-qty-green">{{ p.shipped_qty }}</span>
-                        </div>
-                        <div class="sp-plan-qty-item">
-                          <span class="sp-plan-qty-label">待出</span>
-                          <span class="sp-plan-qty-value" :class="p.remaining_qty > 0 ? 'sp-qty-orange' : ''">{{ p.remaining_qty }}</span>
+                        <div class="sp-plan-middle">
+                          <div class="sp-plan-qtys">
+                            <span class="sp-plan-qty-value">{{ p.quantity }}</span>
+                            <span class="sp-plan-qty-value sp-qty-green">{{ p.shipped_qty }}</span>
+                            <span class="sp-plan-qty-value" :class="p.remaining_qty > 0 ? 'sp-qty-orange' : ''">{{ p.remaining_qty }}</span>
+                          </div>
                         </div>
                       </div>
-                      <div class="sp-plan-progress">
-                        <div class="sp-plan-progress-bar">
-                          <div class="sp-plan-progress-fill" :class="{ 'sp-progress-done': p.shipped_qty >= p.quantity }" :style="{ width: (p.quantity > 0 ? Math.round((p.shipped_qty / p.quantity) * 100) : 0) + '%' }"></div>
-                        </div>
-                        <span class="sp-plan-progress-text">{{ p.quantity > 0 ? Math.round((p.shipped_qty / p.quantity) * 100) : 0 }}%</span>
-                      </div>
-                    </div>
-                    <span :class="p.shipment_status === 'shipped' ? 'sp-status-done' : p.shipment_status === 'partial' ? 'sp-status-partial' : 'sp-status-pending'">
-                      {{ p.shipment_status === 'shipped' ? '已出货' : p.shipment_status === 'partial' ? '部分出货' : '待出货' }}
-                    </span>
-                  </div>
+                    </template>
+                  </VirtualList>
                 </div>
                 <div v-else class="sp-modal-empty">
                   <i class="fas fa-hand-pointer"></i>请从左侧选择客户
@@ -255,10 +238,30 @@
               </div>
             </div>
           </div>
-          <div class="sp-modal-footer">
-            <button class="sp-modal-footer-btn" @click="sel = ''">关闭</button>
-            <button class="sp-modal-footer-btn sp-modal-footer-btn-primary" @click="exportDayCSV"><i class="fas fa-download"></i> 导出</button>
+
+          <!-- 出货记录 Tab -->
+          <div v-else class="sp-modal-body">
+            <div v-if="stockoutLoading" class="sp-modal-empty"><i class="fas fa-spinner fa-spin" />加载中...</div>
+            <div v-else-if="stockoutError" class="sp-modal-empty"><i class="fas fa-exclamation-circle" />加载失败</div>
+            <div v-else-if="!stockoutRecords.length" class="sp-modal-empty"><i class="fas fa-inbox" />暂无出货记录</div>
+            <div v-else class="sp-stockout-list">
+              <div class="sp-stockout-header">
+                <span class="sp-stockout-col-date">出货时间</span>
+                <span class="sp-stockout-col-no">出货单号</span>
+                <span class="sp-stockout-col-customer">客户</span>
+                <span class="sp-stockout-col-product">产品</span>
+                <span class="sp-stockout-col-qty">数量</span>
+              </div>
+              <div v-for="rec in stockoutRecords" :key="rec.shipment_no" class="sp-stockout-row">
+                <span class="sp-stockout-col-date">{{ rec.shipment_date }}</span>
+                <span class="sp-stockout-col-no">{{ rec.shipment_no }}</span>
+                <span class="sp-stockout-col-customer">{{ rec.customer_name }}</span>
+                <span class="sp-stockout-col-product">{{ rec.product_name }}</span>
+                <span class="sp-stockout-col-qty">{{ rec.quantity }}</span>
+              </div>
+            </div>
           </div>
+
         </div>
       </div>
     </Transition>
@@ -280,14 +283,14 @@
                 <span class="sp-sku-detail-header-label">日期</span>
                 <span class="sp-sku-detail-header-label">数量</span>
               </div>
-              <div v-for="item in skuDateDetail" :key="item.date" class="sp-sku-detail-row" :class="{ 'sp-sku-detail-shipped': item.status === 'shipped' }">
+              <div v-for="item in skuDateDetail" :key="item.date" class="sp-sku-detail-row" :class="{ 'sp-sku-detail-shipped': item.status === 'completed' }">
                 <span class="sp-sku-detail-date">{{ item.date }}</span>
                 <span class="sp-sku-detail-qty">{{ item.qty }}</span>
-              </div>
             </div>
           </div>
         </div>
       </div>
+    </div>
     </Transition>
   </div>
 
@@ -297,12 +300,14 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
-import { useQuery, useQueryClient } from '@tanstack/vue-query';
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/vue-query';
 import { planApi } from '@/api';
 import { showToast } from '@/composables/useToast';
 import HeaderTabs from '@/layouts/components/HeaderTabs.vue';
 import PlanDetailDrawer from './components/PlanDetailDrawer.vue';
 import CreateShipmentPlanDialog from './components/CreateShipmentPlanDialog.vue';
+import UiPagination from '@/components/ui/UiPagination.vue';
+import VirtualList from '@/components/ui/VirtualList.vue';
 
 const qc = useQueryClient();
 
@@ -314,7 +319,6 @@ const sel = ref('');
 const showCreate = ref(false);
 const drwOpen = ref(false);
 const drwId = ref(0);
-const modalKw = ref('');
 const modalSelCust = ref('');
 const viewTab = ref<'daily' | 'summary'>('daily');
 const skuSortField = ref('customer');
@@ -323,22 +327,76 @@ const custFilter = ref('');
 const skuDetailOpen = ref(false);
 const skuDetailBarcode = ref('');
 const skuDetailName = ref('');
+const modalTab = ref<'plans' | 'records'>('plans');
+const stockoutLoading = ref(false);
+const stockoutError = ref(false);
+const stockoutRecords = ref<any[]>([]);
 
 watch(globalKw, () => { if (viewTab.value === 'daily') sel.value = ''; });
 watch([y, m], () => { sel.value = ''; globalKw.value = ''; });
 watch(viewTab, () => { globalKw.value = ''; });
 watch(sel, () => {
-  modalKw.value = '';
   const firstCust = selDetail.value ? Object.keys(selDetail.value._byCustomer)[0] : '';
   modalSelCust.value = firstCust;
+  modalTab.value = 'plans';
 });
+
+watch(modalTab, async (tab) => {
+  if (tab === 'records' && sel.value) {
+    await loadStockoutRecords();
+  }
+});
+
+async function loadStockoutRecords() {
+  if (!sel.value) return;
+  stockoutLoading.value = true;
+  stockoutError.value = false;
+  stockoutRecords.value = [];
+  try {
+    const plans = selDetail.value?.plans || [];
+    const planIds = [...new Set(plans.map((p: Plan) => p.plan_id))];
+    if (planIds.length === 0) {
+      stockoutLoading.value = false;
+      return;
+    }
+    // 并行请求所有 plan 的出货记录，替代串行 N+1
+    const chunkSize = 10;
+    const allRecords: any[] = [];
+    for (let i = 0; i < planIds.length; i += chunkSize) {
+      const chunk = planIds.slice(i, i + chunkSize);
+      const responses = await Promise.all(chunk.map(pid => planApi.shipmentRecords(pid)));
+      for (const res of responses) {
+        const records = (res as any)?.records ?? res ?? [];
+        allRecords.push(...records);
+      }
+    }
+    // 去重 by shipment_no（同一出货记录可能被多个计划匹配到）
+    const seen = new Set<string>();
+    stockoutRecords.value = allRecords.filter((r: any) => {
+      if (!r.shipment_no || seen.has(r.shipment_no)) return false;
+      seen.add(r.shipment_no);
+      return true;
+    });
+  } catch (e) {
+    stockoutError.value = true;
+    console.error('Failed to load shipment records', e);
+  } finally {
+    stockoutLoading.value = false;
+  }
+}
 
 const WDS = ['日', '一', '二', '三', '四', '五', '六'];
 
 const { data: d, isLoading, isError, refetch } = useQuery({
   queryKey: ['pp-monthly', () => y.value, () => m.value],
-  queryFn: async () => (await planApi.monthly({ year: y.value, month: m.value })) as any,
-  staleTime: 30_000,
+  queryFn: async () => {
+    const res = (await planApi.monthly({ year: y.value, month: m.value })) as any;
+    // 冻结返回数据，阻止 Vue 对 20K+ 明细做深层响应式转换，降低内存和 CPU 开销
+    return res ? Object.freeze(JSON.parse(JSON.stringify(res))) : res;
+  },
+  staleTime: 5 * 60 * 1000,
+  retry: 2,
+  placeholderData: keepPreviousData,
 });
 
 function refetchAll() { refetch(); refetchSummary(); }
@@ -351,7 +409,9 @@ interface CustSumItem { customer_id: number; customer_name: string; plan_qty: nu
 const { data: sData, isLoading: sLoading, refetch: refetchSummary } = useQuery({
   queryKey: ['pp-summary', () => y.value, () => m.value],
   queryFn: async () => (await planApi.customerSummary({ year: y.value, month: m.value })) as any,
-  staleTime: 30_000,
+  staleTime: 5 * 60 * 1000,
+  retry: 2,
+  placeholderData: keepPreviousData,
 });
 
 const allCustomers = computed<CustSumItem[]>(() => {
@@ -371,7 +431,7 @@ const sKpi = computed(() => {
   const planQty = cs.reduce((s, c) => s + Number(c.plan_qty || 0), 0);
   const shipQty = cs.reduce((s, c) => s + Number(c.shipped_qty || 0), 0);
   const remainQty = cs.reduce((s, c) => s + Number(c.remaining_qty || 0), 0);
-  const pct = planQty > 0 ? Math.round(shipQty / planQty * 100) : 0;
+  const pct = planQty > 0 ? Math.floor(shipQty / planQty * 1000) / 10 : 0;
   return {
     kpi0,
     lbl0,
@@ -409,7 +469,7 @@ const skuSummary = computed<SkuRow[]>(() => {
       shipped_qty: v.shipped,
       remain_qty: v.remain,
       customer_name: v.customer_name,
-      _pct: v.plan > 0 ? Math.round(v.shipped / v.plan * 100) : 0,
+      _pct: v.plan > 0 ? Math.floor(v.shipped / v.plan * 1000) / 10 : 0,
       _odd: false,
     });
   }
@@ -452,16 +512,18 @@ const sortedSkuList = computed<SkuRow[]>(() => {
   return list;
 });
 
-const skuTotals = computed(() => {
-  const list = sortedSkuList.value;
-  return {
-    plan: list.reduce((s, r) => s + r.plan_qty, 0),
-    shipped: list.reduce((s, r) => s + r.shipped_qty, 0),
-    remain: list.reduce((s, r) => s + r.remain_qty, 0),
-  };
+const skuDetailCustomer = ref('');
+const skuPage = ref(1);
+const skuPageSize = 30;
+
+const skuTotalPages = computed(() => Math.max(1, Math.ceil(sortedSkuList.value.length / skuPageSize)));
+const paginatedSkuList = computed<SkuRow[]>(() => {
+  const start = (skuPage.value - 1) * skuPageSize;
+  return sortedSkuList.value.slice(start, start + skuPageSize);
 });
 
-const skuDetailCustomer = ref('');
+// Reset page when filters/sort/search change
+watch([custFilter, skuSortField, skuSortDir, globalKw], () => { skuPage.value = 1; });
 
 interface SkuDateItem { date: string; day: number; weekday: string; qty: number; customer: string; status: string; }
 
@@ -477,7 +539,7 @@ const skuDateDetail = computed<SkuDateItem[]>(() => {
       if (p.product_name !== pn || p.customer_name !== cn) continue;
       if (!byDate[dateStr]) {
         const dt = new Date(dateStr + 'T00:00:00');
-        byDate[dateStr] = { date: dateStr, day: dt.getDate(), weekday: WDS[dt.getDay()] || '?', qty: 0, customer: p.customer_name || '未知客户', status: p.shipment_status || 'pending' };
+        byDate[dateStr] = { date: dateStr, day: dt.getDate(), weekday: WDS[dt.getDay()] || '?', qty: 0, customer: p.customer_name || '未知客户', status: getShipmentStatus(p.quantity, p.shipped_qty) };
       }
       byDate[dateStr].qty += Number(p.quantity || 0);
     }
@@ -502,8 +564,10 @@ const rows = computed<Row[]>(() => {
     const dt = new Date(ds + 'T00:00:00');
     const ns = new Set(pl.map(p => p.customer_name));
     const tq = pl.reduce((s, p) => s + Number(p.quantity || 0), 0);
-    const shipped = pl.filter(p => p.shipment_status === 'shipped').length;
-    const pending = pl.filter(p => p.shipment_status !== 'shipped').length;
+    const shippedQty = pl.reduce((s, p) => s + Number(p.shipped_qty || 0), 0);
+    // 前端自行计算 shipment_status，避免后端传输冗余字段
+    const shipped = pl.filter(p => getShipmentStatus(p.quantity, p.shipped_qty) === 'completed').length;
+    const pending = pl.filter(p => getShipmentStatus(p.quantity, p.shipped_qty) !== 'completed').length;
     const byCust: Record<string, Plan[]> = {};
     for (const p of pl) {
       const cn = p.customer_name || '未知';
@@ -511,7 +575,7 @@ const rows = computed<Row[]>(() => {
       byCust[cn].push(p);
     }
     const _fullDate = `${dt.getMonth() + 1}月${dt.getDate()}日`;
-    list.push({ date: ds, _dayNum: dt.getDate(), _weekday: WDS[dt.getDay()] || '?', customerCount: ns.size, planCount: pl.length, totalQty: tq, _isPeak: false, _shippedCount: shipped, _pendingCount: pending, _shippedPct: pl.length > 0 ? Math.round(shipped / pl.length * 100) : 0, customerNames: [...ns].sort(), plans: pl, _byCustomer: byCust, _fullDate });
+    list.push({ date: ds, _dayNum: dt.getDate(), _weekday: WDS[dt.getDay()] || '?', customerCount: ns.size, planCount: pl.length, totalQty: tq, _isPeak: false, _shippedCount: shipped, _pendingCount: pending, _shippedPct: tq > 0 ? Math.floor(shippedQty / tq * 1000) / 10 : 0, customerNames: [...ns].sort(), plans: pl, _byCustomer: byCust, _fullDate });
   }
   list.sort((a, b) => a.date.localeCompare(b.date));
   let maxP = 0;
@@ -536,14 +600,7 @@ const selDetail = computed(() => sel.value ? rowMap.value.get(sel.value) ?? null
 
 const filteredModalCustomers = computed(() => {
   if (!selDetail.value) return {};
-  const bc = selDetail.value._byCustomer;
-  if (!modalKw.value) return bc;
-  const k = modalKw.value.toLowerCase();
-  const out: Record<string, Plan[]> = {};
-  for (const [cname, group] of Object.entries(bc)) {
-    if (cname.toLowerCase().includes(k)) out[cname] = group;
-  }
-  return out;
+  return selDetail.value._byCustomer;
 });
 
 const modalSelGroup = computed(() => {
@@ -566,8 +623,13 @@ const kpis = computed(() => {
 });
 
 function fmtQty(n: number): string {
-  if (n >= 10000) return (n / 10000).toFixed(1) + '万';
   return String(n);
+}
+
+function getShipmentStatus(quantity: number, shippedQty: number): string {
+  if (shippedQty >= quantity) return 'completed';
+  if (shippedQty > 0) return 'partial';
+  return 'pending';
 }
 
 function getDaysDiff(dateStr: string): number {
@@ -597,7 +659,10 @@ function exportDayCSV() {
   const r = selDetail.value;
   const h = '客户,产品,条码,数量,已出,待出,状态';
   const ls = [h];
-  for (const p of r.plans) ls.push([p.customer_name, p.product_name, p.barcode, p.quantity, p.shipped_qty, p.remaining_qty, p.shipment_status === 'shipped' ? '已出货' : '待出货'].join(','));
+  for (const p of r.plans) {
+    const st = getShipmentStatus(p.quantity, p.shipped_qty);
+    ls.push([p.customer_name, p.product_name, p.barcode, p.quantity, p.shipped_qty, p.remaining_qty, st === 'completed' ? '已出货' : st === 'partial' ? '部分出货' : '待出货'].join(','));
+  }
   const blob = new Blob(['\uFEFF' + ls.join('\n')], { type: 'text/csv;charset=utf-8' });
   const u = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = u; a.download = `出货计划_${r.date}_详情.csv`; a.click();
@@ -1012,11 +1077,12 @@ function exportCSV() {
   cursor: pointer;
   transition: box-shadow 0.3s ease, border-color 0.3s ease;
   position: relative;
-  overflow: hidden;
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
   display: flex;
   flex-direction: column;
   gap: 14px;
+  max-height: 260px;
+  overflow: hidden;
 }
 
 .sp-day-card:hover {
@@ -1037,6 +1103,7 @@ function exportCSV() {
   gap: 8px;
   padding: 0 0 8px;
   margin-top: -10px;
+  flex-shrink: 0;
 }
 
 .sp-day-badge {
@@ -1084,6 +1151,28 @@ function exportCSV() {
   font-weight: 800;
   color: var(--color-heading);
   line-height: 1.2;
+}
+
+.sp-day-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+}
+
+.sp-day-more-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-primary-600);
+  background: var(--color-primary-50);
+  padding: 3px 10px;
+  border-radius: 10px;
+  cursor: pointer;
 }
 
 .sp-day-metrics {
@@ -1176,7 +1265,8 @@ function exportCSV() {
 
 .sp-sku-table-wrapper {
   border-radius: 10px;
-  overflow: hidden;
+  overflow-y: auto;
+  max-height: calc(100vh - 200px);
   border: 1px solid var(--color-border-light, #e2e8f0);
 }
 
@@ -1186,7 +1276,10 @@ function exportCSV() {
 }
 
 .sp-sku-table thead {
-  background: transparent;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: white;
 }
 
 .sp-sku-table th {
@@ -1273,11 +1366,6 @@ function exportCSV() {
   width: 100%;
 }
 
-.sp-sku-th-progress,
-.sp-sku-td-progress {
-  width: 12%;
-}
-
 .sp-sku-product-name {
   font-size: 13px;
   font-weight: 600;
@@ -1294,64 +1382,14 @@ function exportCSV() {
   border-radius: 0;
 }
 
-.sp-sku-td-success {
+.sp-sku-table td.sp-sku-td-success {
   color: var(--color-success-600);
   font-weight: 600;
 }
 
-.sp-sku-td-warning {
+.sp-sku-table td.sp-sku-td-warning {
   color: var(--color-warning-600);
   font-weight: 600;
-}
-
-.sp-sku-td-progress {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.sp-sku-mini-bar {
-  flex: 1;
-  height: 6px;
-  border-radius: 3px;
-  background: var(--color-border-light, #e2e8f0);
-  overflow: hidden;
-  min-width: 60px;
-}
-
-.sp-sku-mini-fill {
-  height: 100%;
-  border-radius: 3px;
-  background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-700));
-  transition: width 0.4s ease;
-}
-
-.sp-sku-mini-done {
-  background: linear-gradient(135deg, var(--color-success-500), var(--color-success-700));
-}
-
-.sp-sku-mini-text {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--color-text-secondary);
-  min-width: 32px;
-  text-align: right;
-}
-
-.sp-sku-table-footer {
-  padding: 12px 14px;
-  background: transparent;
-  font-size: 12px;
-  color: var(--color-text-muted);
-  border-top: 1px solid var(--color-border-light, #e2e8f0);
-}
-
-.sp-sku-foot-success {
-  color: var(--color-success-600);
-}
-
-.sp-sku-foot-warning {
-  color: var(--color-warning-600);
 }
 
 .sp-empty {
@@ -1385,7 +1423,7 @@ function exportCSV() {
 .sp-modal {
   width: 1200px;
   max-width: 96vw;
-  height: 720px;
+  height: 85vh;
   max-height: 94vh;
   background: white;
   border-radius: 18px;
@@ -1397,11 +1435,11 @@ function exportCSV() {
 
 .sp-modal-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
   padding: 16px 24px;
   border-bottom: 1px solid var(--color-border-light);
   flex-shrink: 0;
+  gap: 16px;
 }
 
 .sp-modal-header-info {
@@ -1451,6 +1489,28 @@ function exportCSV() {
   background: var(--color-primary-50);
 }
 
+.sp-modal-export-btn {
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 9px;
+  border: 1px solid var(--color-border-light);
+  background: white;
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+.sp-modal-export-btn:hover {
+  border-color: var(--color-primary-300);
+  color: var(--color-primary-500);
+  background: var(--color-primary-50);
+}
+
 .sp-modal-body {
   flex: 1;
   display: flex;
@@ -1460,38 +1520,23 @@ function exportCSV() {
   padding: 20px 24px;
 }
 
-.sp-modal-stats {
-  display: flex;
-  gap: 16px;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-}
-
-.sp-modal-stat {
-  font-size: 14px;
-  color: var(--color-text);
-}
-
-.sp-modal-stat b {
-  color: var(--color-heading);
-}
-
-.sp-modal-progress {
-  margin-bottom: 20px;
+.sp-modal-header-progress {
+  flex: 1;
+  flex-shrink: 0;
 }
 
 .sp-modal-progress-bar {
   position: relative;
   height: 36px;
-  background: var(--color-surface);
-  border-radius: var(--radius-input);
-  overflow: hidden;
+  border-radius: 9px;
   border: 1px solid var(--color-border-light);
+  background: white;
+  overflow: hidden;
 }
 
 .sp-modal-progress-fill {
   height: 100%;
-  background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-700));
+  background: linear-gradient(135deg, var(--color-success-400), var(--color-success-600));
   border-radius: var(--radius-input);
   transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -1502,7 +1547,7 @@ function exportCSV() {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--color-heading);
 }
@@ -1569,13 +1614,11 @@ function exportCSV() {
   border-radius: 12px;
   background: white;
   cursor: pointer;
-  transition: all 0.3s ease;
 }
 
 .sp-customer-item:hover {
   border-color: var(--color-primary-300);
   background: var(--color-primary-50);
-  transform: translateX(4px);
 }
 
 .sp-customer-selected {
@@ -1588,7 +1631,31 @@ function exportCSV() {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 4px;
+}
+
+.sp-customer-summary {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.sp-customer-summary-item {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.sp-customer-summary-item b {
+  font-weight: 700;
+  color: var(--color-text);
+  margin-right: 2px;
+}
+
+.sp-customer-summary-shipped b {
+  color: var(--color-success-600);
+}
+
+.sp-customer-summary-pending b {
+  color: var(--color-warning-600);
 }
 
 .sp-customer-name {
@@ -1604,22 +1671,6 @@ function exportCSV() {
   color: var(--color-primary-600);
   font-size: 11px;
   font-weight: 600;
-}
-
-.sp-customer-row-info {
-  display: flex;
-  gap: 12px;
-  font-size: 12px;
-  color: var(--color-text-muted);
-}
-
-.sp-customer-qty {
-  font-weight: 500;
-}
-
-.sp-customer-shipped {
-  font-weight: 500;
-  color: var(--color-success-600);
 }
 
 .sp-modal-main {
@@ -1656,15 +1707,21 @@ function exportCSV() {
 }
 
 .sp-plan-item {
-  padding: 14px 16px;
-  margin-bottom: 10px;
+  padding: 8px 16px;
+  margin-bottom: 6px;
   border: 1px solid var(--color-border-light);
-  border-radius: 12px;
+  border-radius: 10px;
   background: white;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.sp-plan-item:hover {
+  border-color: var(--color-primary-500);
+  background: var(--color-primary-50);
+  box-shadow: 0 2px 8px rgba(91, 141, 239, 0.15);
 }
 
 .sp-plan-left {
@@ -1687,11 +1744,37 @@ function exportCSV() {
 }
 
 .sp-plan-middle {
-  flex: 1;
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 0 20px;
+  align-items: center;
+  gap: 20px;
+  margin-left: auto;
+}
+
+.sp-plan-list-header {
+  display: flex;
+  align-items: center;
+  padding: 0 16px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--color-border-light);
+  margin-bottom: 6px;
+}
+
+.sp-plan-list-header-qtys {
+  display: flex;
+  gap: 20px;
+  margin-left: auto;
+}
+
+.sp-plan-list-header-qtys span {
+  min-width: 36px;
+  text-align: right;
+}
+
+.sp-plan-list-header-name {
   min-width: 0;
 }
 
@@ -1700,18 +1783,9 @@ function exportCSV() {
   gap: 20px;
 }
 
-.sp-plan-qty-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.sp-plan-qty-label {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+.sp-plan-qtys .sp-plan-qty-value {
+  min-width: 36px;
+  text-align: right;
 }
 
 .sp-plan-qty-value {
@@ -1745,7 +1819,7 @@ function exportCSV() {
 .sp-plan-progress-fill {
   height: 100%;
   border-radius: 3px;
-  background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-700));
+  background: linear-gradient(135deg, var(--color-success-400), var(--color-success-600));
   transition: width 0.4s ease;
 }
 
@@ -1937,4 +2011,51 @@ function exportCSV() {
   color: var(--color-primary-700);
   font-variant-numeric: tabular-nums;
 }
+
+/* ============ Modal Tabs ============ */
+.sp-modal-tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--color-surface, #f8fafc);
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  margin-top: 8px;
+}
+.sp-modal-tab {
+  padding: 5px 14px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: inherit;
+}
+.sp-modal-tab:hover { background: var(--color-primary-50); color: var(--color-primary-600); }
+.sp-modal-tab-active { background: white; color: var(--color-primary-700); box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+
+/* ============ Shipment Records List ============ */
+.sp-stockout-list { display: flex; flex-direction: column; gap: 0; }
+.sp-stockout-header {
+  display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+  background: var(--color-surface, #f8fafc); border-radius: 10px 10px 0 0;
+  border-bottom: 2px solid var(--color-border-light, #e2e8f0);
+  font-size: 11px; font-weight: 700; color: var(--color-text-secondary);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.sp-stockout-col-date { flex: 1; }
+.sp-stockout-col-no { flex: 1.2; }
+.sp-stockout-col-customer { flex: 1.5; }
+.sp-stockout-col-product { flex: 2; }
+.sp-stockout-col-qty { flex: 0.8; text-align: center; }
+.sp-stockout-row {
+  display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border-light, #e2e8f0); transition: background 0.15s; font-size: 13px;
+}
+.sp-stockout-row:last-child { border-bottom: none; }
+.sp-stockout-row:hover { background: var(--color-primary-50, #eff6ff); }
+.sp-stockout-col-no { flex: 1.2; font-family: var(--font-mono); font-size: 12px; color: var(--color-text-secondary); }
 </style>

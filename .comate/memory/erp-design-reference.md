@@ -255,6 +255,22 @@ type: reference
 - TAB按钮微浮：`transform: translateY(-1px)` 用于TAB按钮hover（含active态）
 - 搜索框focus环：`box-shadow: 0 0 0 4px rgba(0, 148, 191, 0.1)`
 - 表格行hover：`background: var(--color-primary-50); transition: background 0.2s ease`
+- **滚动列表项hover/选中（禁止位移）**：用于弹窗内的计划详情、客户卡片等滚动容器内的列表项，`transform` 会导致裁剪：
+```css
+.list-item {
+    border: 1px solid var(--color-border-light);
+    border-radius: 10px;
+    background: white;
+    transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+.list-item:hover {
+    border-color: var(--color-primary-500);
+    background: var(--color-primary-50);
+    box-shadow: 0 2px 8px rgba(91, 141, 239, 0.15);
+}
+```
+  - **禁止 transform**：滚动容器内 `translateY`/`scale` 会裁剪
+  - **选中态同 hover**：`border-color: var(--color-primary-500)` + `background: var(--color-primary-50)` + 蓝色阴影
 
 **禁令：**
 - **禁止**在主卡片（`.{prefix}-card`）上使用 `transform: translateY(-6px)` 或任何位移效果（会导致视觉错位/双重卡片感）

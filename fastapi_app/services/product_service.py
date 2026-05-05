@@ -5,11 +5,12 @@
 """
 import logging
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache import CacheDomain, cache_result, invalidate_related_caches
+from fastapi_app.services import escape_like
 from fastapi_app.shared.stock_concurrency import get_product_for_update
 from fastapi_app.shared_models import InventoryLog, Order, Product, StockIn, StockOut
 
@@ -70,12 +71,19 @@ async def get_products(db: AsyncSession) -> list[dict]:
     return [p.to_dict() for p in products]
 
 
-async def get_products_page(db: AsyncSession, page: int = 1, per_page: int = 50) -> dict:
-    """获取产品列表（分页），避免产品数过大时全量加载"""
+async def get_products_page(db: AsyncSession, page: int = 1, per_page: int = 50, search: str = '') -> dict:
+    """获取产品列表（分页+搜索），避免产品数过大时全量加载"""
     per_page = min(max(1, per_page), 200)
-    total = (await db.execute(select(func.count(Product.id)))).scalar() or 0
+    query = select(Product)
+    count_query = select(func.count(Product.id))
+    if search:
+        escaped = escape_like(search)
+        search_filter = or_(Product.name.like(f'%{escaped}%', escape='\\'), Product.barcode.like(f'%{escaped}%', escape='\\'))
+        query = query.where(search_filter)
+        count_query = count_query.where(search_filter)
+    total = (await db.execute(count_query)).scalar() or 0
     result = await db.execute(
-        select(Product).order_by(Product.create_time.desc())
+        query.order_by(Product.create_time.desc())
         .offset((page - 1) * per_page).limit(per_page)
     )
     products = result.scalars().all()

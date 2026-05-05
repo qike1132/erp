@@ -22,8 +22,21 @@ from fastapi_app.shared_models import (
 logger = logging.getLogger(__name__)
 
 
-async def get_suppliers(db: AsyncSession, with_stats: bool = False) -> list:
-    result = await db.execute(select(Supplier).order_by(Supplier.name))
+async def get_suppliers(db: AsyncSession, with_stats: bool = False, page: int = 1, per_page: int = 50, search: str = '') -> dict:
+    query = select(Supplier)
+    count_query = select(func.count(Supplier.id))
+
+    if search:
+        from fastapi_app.services import escape_like
+        escaped = escape_like(search)
+        like_pattern = f'%{escaped}%'
+        query = query.where(Supplier.name.ilike(like_pattern))
+        count_query = count_query.where(Supplier.name.ilike(like_pattern))
+
+    total = (await db.execute(count_query)).scalar() or 0
+
+    query = query.order_by(Supplier.name).offset((page - 1) * per_page).limit(per_page)
+    result = await db.execute(query)
     suppliers = result.scalars().all()
 
     material_counts: dict[int, int] = {}
@@ -44,11 +57,14 @@ async def get_suppliers(db: AsyncSession, with_stats: bool = False) -> list:
             'contact_person': getattr(supplier, 'contact_person', None),
             'phone': getattr(supplier, 'phone', None),
             'address': getattr(supplier, 'address', None),
+            'remark': getattr(supplier, 'remark', None),
+            'status': getattr(supplier, 'status', True),
+            'created_at': supplier.created_at.strftime('%Y-%m-%d %H:%M') if supplier.created_at else None,
         }
         if with_stats:
             s_dict['material_count'] = material_counts.get(supplier.id, 0)
         supplier_list.append(s_dict)
-    return supplier_list
+    return {'items': supplier_list, 'total': total, 'page': page, 'per_page': per_page}
 
 
 async def create_supplier(db: AsyncSession, data: dict) -> dict:

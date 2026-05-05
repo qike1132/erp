@@ -52,6 +52,8 @@ class UserListResponse(BaseModel):
     success: bool = True
     users: list[UserResponse]
     total: int = 0
+    page: int = 1
+    per_page: int = 15
 
 
 class UserActionResponse(BaseModel):

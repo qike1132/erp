@@ -40,10 +40,6 @@
 
         <!-- 右栏：用户列表 -->
         <div class="us-col">
-          <div class="us-col-title">
-            <i class="fas fa-list" /> 用户列表
-            <span class="us-count-badge">{{ users.length }}</span>
-          </div>
           <div class="us-col-scroll">
             <div v-if="isLoading" class="us-empty">
               <i class="fas fa-spinner fa-spin" />
@@ -72,15 +68,15 @@
                     </span>
                   </td>
                   <td>
-                    <span :class="['us-badge', row.is_active !== false ? 'us-badge-success' : 'us-badge-muted']">
-                      {{ row.is_active !== false ? '启用' : '禁用' }}
+                    <span :class="['us-badge', row.status !== false ? 'us-badge-success' : 'us-badge-muted']">
+                      {{ row.status !== false ? '启用' : '禁用' }}
                     </span>
                   </td>
-                  <td>{{ row.created_at ? row.created_at.split('T')[0] : '-' }}</td>
+                  <td>{{ row.create_time || '-' }}</td>
                   <td style="white-space: nowrap">
                     <button class="us-action-btn us-action-primary" @click="openPermissionDialog(row)">权限</button>
                     <button class="us-action-btn us-action-primary" :disabled="actionId === row.id" @click="handleToggle(row)">
-                      {{ row.is_active !== false ? '禁用' : '启用' }}
+                      {{ row.status !== false ? '禁用' : '启用' }}
                     </button>
                     <button class="us-action-btn us-action-danger" :disabled="actionId === row.id || row.is_super" @click="handleDelete(row)">
                       删除
@@ -89,6 +85,16 @@
                 </tr>
               </tbody>
             </table>
+
+            <!-- Pagination -->
+            <div v-if="totalItems > perPage" class="us-pagination">
+              <button class="us-page-btn" :disabled="currentPage <= 1" @click="goPage(1)"><i class="fas fa-angle-double-left" /></button>
+              <button class="us-page-btn" :disabled="currentPage <= 1" @click="goPage(currentPage - 1)"><i class="fas fa-angle-left" /></button>
+              <span class="us-page-info">{{ currentPage }} / {{ totalPages }}</span>
+              <button class="us-page-btn" :disabled="currentPage >= totalPages" @click="goPage(currentPage + 1)"><i class="fas fa-angle-right" /></button>
+              <button class="us-page-btn" :disabled="currentPage >= totalPages" @click="goPage(totalPages)"><i class="fas fa-angle-double-right" /></button>
+              <span class="us-page-total">共 {{ totalItems }} 条</span>
+            </div>
           </div>
         </div>
       </div>
@@ -157,12 +163,22 @@ const showPwd1 = ref(false)
 const queryClient = useQueryClient()
 const confirmDialog = useConfirmDialog()
 
+const currentPage = ref(1)
+const perPage = 15
+
 const { data: result, isLoading } = useQuery({
-  queryKey: ['users-list'],
-  queryFn: () => userApi.list() as Promise<any>,
+  queryKey: ['users-list', () => currentPage.value],
+  queryFn: () => userApi.list({ page: currentPage.value, per_page: perPage }) as Promise<any>,
   staleTime: 30_000,
+  gcTime: 60_000,
 })
 const users = computed(() => result.value?.items ?? result.value?.users ?? result.value?.data ?? [])
+const totalItems = computed(() => result.value?.total ?? users.value.length)
+const totalPages = computed(() => Math.max(1, Math.ceil(totalItems.value / perPage)))
+
+function goPage(p: number) {
+  currentPage.value = p
+}
 
 // 添加用户
 const submitting = ref(false)
@@ -836,5 +852,45 @@ async function handleSavePermission() {
   font-size: 13px;
   font-weight: 500;
   color: var(--color-text);
+}
+
+/* === Pagination === */
+.us-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 24px;
+  border-top: 1px solid var(--color-border-light, #f1f5f9);
+}
+.us-page-btn {
+  padding: 6px 10px;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  border-radius: 6px;
+  background: white;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  transition: all 0.2s;
+}
+.us-page-btn:hover:not(:disabled) {
+  border-color: var(--color-primary-300);
+  color: var(--color-primary-600);
+}
+.us-page-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.us-page-info {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+  min-width: 80px;
+  text-align: center;
+}
+.us-page-total {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin-left: 8px;
 }
 </style>

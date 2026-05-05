@@ -132,9 +132,7 @@
         </template>
       </UiTable>
 
-      <div style="display: flex; justify-content: flex-end; margin-top: 16px">
-        <UiPagination :current-page="page" :total-pages="totalPages" @update:current-page="handlePageChange" />
-      </div>
+      <UiPagination :current-page="page" :total-pages="totalPages" @update:current-page="handlePageChange" />
     </UiCard>
   </div>
 </template>

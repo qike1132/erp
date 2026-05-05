@@ -173,3 +173,13 @@
   - 库存变更前必须预检查（pre-mutation check），不能先修改再检查
   - 临时文件写入使用 `os.write(fd, content)` 避免 TOCTOU 竞态
   - 编号生成必须用 `with_for_update()` 行锁防止并发重复
+
+## BUG-SYNC-ORDER-TO-PURCHASE | 2026-05-04
+- **现象**: 客户订单新订单无法同步到采购中心，采购中心看不到新建的客户订单
+- **根因**: `get_unprocessed_orders()` 查询 `PurchaseOrder` 表（依赖主动推送 sync），但 `sync_order_create()` 仅覆盖 2/4 创建路径，72.7% 数据丢失
+- **解决**: 改为直接查询 `Order` 表（被动读取），移除全部 sync 调用链。参考 [docs/bugs/BUG-SYNC-ORDER-TO-PURCHASE.md](../docs/bugs/BUG-SYNC-ORDER-TO-PURCHASE.md)
+
+## 通用排查模式：数据同步丢失
+- **特征**: A 模块看不到 B 模块创建的数据
+- **优先检查**: 是否存在"主动推送"式同步机制（sync_xxx_create），是否有创建路径未调用同步
+- **推荐方案**: 优先使用"被动读取"（直接查询源表），避免"主动推送"（需要每条路径都调用同步）

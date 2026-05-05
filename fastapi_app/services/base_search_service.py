@@ -38,7 +38,7 @@ class BaseSearchService(Generic[T], ABC):
             def get_result_formatter(self) -> Callable: ...
     """
 
-    def __init__(self, cache_prefix: str = "", cache_ttl: int = 300, use_trgm: bool = True):
+    def __init__(self, cache_prefix: str = "", cache_ttl: int = 300, use_trgm: bool = False):
         self.cache_prefix = cache_prefix
         self.cache_ttl = cache_ttl
         self.use_trgm = use_trgm
@@ -55,13 +55,12 @@ class BaseSearchService(Generic[T], ABC):
     def get_result_formatter(self) -> Callable[[Any], dict]:
         """返回结果格式化函数，将 ORM 对象转为 dict"""
 
-    def _build_keyword_conditions(self, keyword: str, use_trgm: bool = True):
+    def _build_keyword_conditions(self, keyword: str, use_trgm: bool = False):
         """构建关键词 OR 条件列表
 
-        当 use_trgm=True 且 pg_trgm 扩展可用时，使用 % 运算符
-        进行三字组匹配，性能远优于 ILIKE '%keyword%'。
-        % 运算符同时支持模糊匹配（如"泰迪能"匹配"泰迪熊"）。
-        当 use_trgm=False 时回退到传统 ILIKE 模式。
+        默认使用 ILIKE 子串匹配，确保中英文关键词都能命中。
+        当 use_trgm=True 时额外叠加 pg_trgm % 相似度匹配（OR 组合），
+        既保证子串命中，又增加模糊匹配能力。
         """
         model = self.get_model_class()
         search_fields = self.get_search_fields()
@@ -70,14 +69,11 @@ class BaseSearchService(Generic[T], ABC):
         for field_name in search_fields:
             col = getattr(model, field_name, None)
             if col is not None:
+                # ILIKE 子串匹配：保证中文/短关键词必定命中
+                conditions.append(col.ilike(f"%{escaped}%"))
                 if use_trgm:
-                    # pg_trgm 的 % 运算符：基于相似度匹配，自动使用 GIN 索引
-                    # 比 ILIKE 快 10-50 倍，且支持模糊匹配
-                    conditions.append(
-                        col.op('%')(keyword)
-                    )
-                else:
-                    conditions.append(col.ilike(f"%{escaped}%"))
+                    # pg_trgm % 运算符：额外叠加相似度模糊匹配
+                    conditions.append(col.op('%')(keyword))
         return conditions
 
     def build_search_query_sync(
@@ -116,7 +112,8 @@ class BaseSearchService(Generic[T], ABC):
 
         if keyword:
             keyword_conds = self._build_keyword_conditions(keyword, self.use_trgm)
-            conditions.extend(keyword_conds)
+            if keyword_conds:
+                conditions.append(or_(*keyword_conds))
 
         if conditions:
             query = query.where(*conditions)

@@ -233,17 +233,6 @@ async def _handle_edit_approval(db: AsyncSession, approval: ApprovalRequest, ord
     order.is_locked = False
     order.locked_by_id = None
 
-    # 同步更新采购中心中关联的采购订单
-    try:
-        from fastapi_app.services.order_purchase_sync import sync_order_update
-        await sync_order_update(
-            db, order.id,
-            customer=new_customer, old_customer=old_customer,
-            quantity=new_quantity, old_quantity=old_quantity,
-        )
-    except (RuntimeError, OSError, ValueError) as e:
-        logger.warning('审批编辑-采购中心同步失败: %s', e)
-
 
 async def _handle_delete_approval(db: AsyncSession, approval: ApprovalRequest, order: Order) -> None:
     product = await get_product_for_update(db, order.product_id)
@@ -252,15 +241,18 @@ async def _handle_delete_approval(db: AsyncSession, approval: ApprovalRequest, o
         select(StockOut).where(StockOut.order_id == order.id)
     )
     order_stockouts = list(result.scalars().all())
-    total_deducted = sum(so.quantity for so in order_stockouts)
+    total_deducted = sum(so.quantity - so.returned_quantity for so in order_stockouts)
 
     for stockout in order_stockouts:
+        net_qty = stockout.quantity - stockout.returned_quantity
+        if net_qty <= 0:
+            continue
         db.add(InventoryLog(
             product_id=order.product_id,
             change_type='抵扣回滚(审批)',
-            change_quantity=stockout.quantity,
+            change_quantity=net_qty,
             related_id=order.order_no,
-            note='审批删除订单回滚抵扣',
+            note=f'审批删除订单回滚抵扣，净退回{net_qty}件',
         ))
 
     net_change = total_deducted - order.quantity
@@ -290,12 +282,10 @@ async def _handle_delete_approval(db: AsyncSession, approval: ApprovalRequest, o
 
     await db.delete(order)
 
-    # 同步删除采购中心中关联的采购订单
-    try:
-        from fastapi_app.services.order_purchase_sync import sync_order_delete
-        await sync_order_delete(db, order.id)
-    except (RuntimeError, OSError, ValueError) as e:
-        logger.warning('审批删除-采购中心同步失败: %s', e)
+    # 清理关联的 pending 采购订单
+    from fastapi_app.services.purchase_order_service import cleanup_orphan_pending_purchase_orders
+    await cleanup_orphan_pending_purchase_orders(db, [order.id])
+
 
 
 async def _create_approval_log(db: AsyncSession, approval_request: ApprovalRequest, action: str,

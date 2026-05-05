@@ -324,13 +324,7 @@
           </div>
         </div>
 
-        <div v-if="totalPages > 1" class="pagination-wrap">
-          <UiPagination
-            :current-page="currentPage"
-            :total-pages="totalPages"
-            @update:current-page="currentPage = $event; fetchStockouts()"
-          />
-        </div>
+        <UiPagination v-if="totalPages > 1" :current-page="currentPage" :total-pages="totalPages" @update:current-page="currentPage = $event; fetchStockouts()" />
       </div>
     </div>
 
@@ -411,9 +405,9 @@
 <script setup lang="ts">
 import { ref, reactive, computed } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
-import { get, post, put, del, upload, download } from '@/api/request'
+import { get, post, put, del } from '@/api/request'
 import { customerApi, stockApi, auxApi, ocrApi } from '@/api'
-import type { ApiResponse } from '@/types'
+import type { ApiResponse, ShipmentInfo, StagedStockout, Product } from '@/types'
 
 const props = defineProps<{ activeTab: 'input' | 'records' }>()
 import UiInput from '@/components/ui/UiInput.vue'
@@ -423,8 +417,6 @@ import UiButton from '@/components/ui/UiButton.vue'
 import UiBadge from '@/components/ui/UiBadge.vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
-import UiSpinner from '@/components/ui/UiSpinner.vue'
-import UiEmpty from '@/components/ui/UiEmpty.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { showToast } from '@/composables/useToast'
@@ -444,19 +436,19 @@ const { data: namesData } = useQuery({
 })
 const customerNames = computed(() => {
   const arr = Array.isArray(namesData.value) ? namesData.value : []
-  return arr.map((c: unknown) => c.name ?? c)
+  return arr.map((c: unknown) => (typeof c === 'object' && c !== null ? (c as { name?: string }).name : c))
 })
 const customerOptions = computed(() => customerNames.value.map((c: string) => ({ value: c, label: c })))
 
 // === 产品搜索 ===
-const productSuggestions = ref<unknown[]>([])
+const productSuggestions = ref<Product[]>([])
 const showSuggestions = ref(false)
 let searchTimeout: ReturnType<typeof setTimeout> | null = null
 
 async function searchProducts(q: string) {
   if (!q.trim()) { productSuggestions.value = []; showSuggestions.value = false; return }
   try {
-    const data = await stockApi.searchProducts(q) as ApiResponse<Record<string, unknown>[]>
+    const data = await stockApi.searchProducts(q) as ApiResponse<Product[]>
     productSuggestions.value = Array.isArray(data) ? data : data?.products ?? data?.data ?? []
     showSuggestions.value = productSuggestions.value.length > 0
   } catch {
@@ -486,7 +478,7 @@ function onSearchInput() {
   searchTimeout = setTimeout(() => searchProducts(form.search), 300)
 }
 
-function selectProduct(p: any) {
+function selectProduct(p: Product) {
   form.productId = String(p.id)
   form.search = p.name
   showSuggestions.value = false
@@ -494,7 +486,7 @@ function selectProduct(p: any) {
 }
 
 // === 可出货量查询 ===
-const shipmentInfo = ref<{ order_quantity: number; shipped_quantity: number; available_quantity: number } | null>(null)
+const shipmentInfo = ref<ShipmentInfo | null>(null)
 
 async function fetchShipmentInfo() {
   if (!form.productId || !form.customer) {
@@ -502,8 +494,8 @@ async function fetchShipmentInfo() {
     return
   }
   try {
-    const data = await stockApi.availableShipment(Number(form.productId), form.customer) as ApiResponse<{ order_quantity: number; shipped_quantity: number; available_quantity: number }>
-    shipmentInfo.value = data
+    const data = await stockApi.availableShipment(Number(form.productId), form.customer) as ApiResponse<ShipmentInfo>
+    shipmentInfo.value = data.data ?? data
   } catch {
     shipmentInfo.value = null
   }
@@ -523,9 +515,9 @@ watch(() => form.customer, () => {
 })
 
 // === 暂存列表 ===
-const staged = ref<unknown[]>([])
+const staged = ref<StagedStockout[]>([])
 
-const stagedTotalQty = computed(() => staged.value.reduce((s: number, i: any) => s + (i.quantity || 0), 0))
+const stagedTotalQty = computed(() => staged.value.reduce((s: number, i: StagedStockout) => s + (i.quantity || 0), 0))
 
 async function addStaged() {
   if (!canAdd.value) {
@@ -593,7 +585,7 @@ async function submitBatch() {
 
   submitting.value = true
   try {
-    const uniqueKeys: Record<string, { productId: string; customer: string; stockouts: unknown[] }> = {}
+    const uniqueKeys: Record<string, { productId: string; customer: string; stockouts: StagedStockout[] }> = {}
     const withCustomer = staged.value.filter(s => s.customer)
     withCustomer.forEach(s => {
       const key = `${s.productId}-${s.customer}`
@@ -604,10 +596,11 @@ async function submitBatch() {
     for (const key in uniqueKeys) {
       const { productId, customer, stockouts } = uniqueKeys[key]
       try {
-        const data = await stockApi.availableShipment(Number(productId), customer) as ApiResponse<{ order_quantity: number; shipped_quantity: number; available_quantity: number }>
-        const totalQty = stockouts.reduce((sum: number, s: any) => sum + s.quantity, 0)
-        if (totalQty > data.available_quantity) {
-          showToast(`客户: ${customer} 产品ID: ${productId} 出货量超过可出货量(${data.available_quantity})`, 'error')
+        const data = await stockApi.availableShipment(Number(productId), customer) as ApiResponse<ShipmentInfo>
+        const shipment = data.data ?? data
+        const totalQty = stockouts.reduce((sum: number, s: StagedStockout) => sum + s.quantity, 0)
+        if (totalQty > (shipment.available_quantity ?? 0)) {
+          showToast(`客户: ${customer} 产品ID: ${productId} 出货量超过可出货量(${shipment.available_quantity})`, 'error')
           submitting.value = false
           return
         }
@@ -628,10 +621,11 @@ async function submitBatch() {
       staged.value = []
       fetchStockouts()
     } else {
-      showToast(result.error || result.message || '提交失败', 'error')
+      showToast((result as { error?: string }).error || result.message || '提交失败', 'error')
     }
-  } catch (err: any) {
-    showToast(err.response?.data?.detail || '批量提交失败', 'error')
+  } catch (err: unknown) {
+    const error = err as { response?: { data?: { detail?: string } } }
+    showToast(error.response?.data?.detail || '批量提交失败', 'error')
   } finally {
     submitting.value = false
   }
@@ -685,7 +679,7 @@ async function handleImportExcel() {
     const fd = new FormData()
     fd.append('file', excelFile.value)
     const sessionId = `stg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    const res = await stockApi.stagingStockouts.importExcel(fd) as ApiResponse & { session_id?: string }
+    const res = await stockApi.stagingStockouts.importExcel(fd) as ApiResponse & { session_id?: string; imported?: number; count?: number }
     if (res.success) {
       showToast(`成功导入 ${res.imported ?? res.count ?? 0} 条记录到暂存区`, 'success')
       excelFile.value = null
@@ -701,8 +695,9 @@ async function handleImportExcel() {
     } else {
       showToast(res.message || '导入失败', 'error')
     }
-  } catch (err: any) {
-    showToast(err.response?.data?.detail || '导入失败', 'error')
+  } catch (err: unknown) {
+    const error = err as { response?: { data?: { detail?: string } } }
+    showToast(error.response?.data?.detail || '导入失败', 'error')
   } finally {
     importing.value = false
   }
@@ -737,8 +732,9 @@ async function handleOcrPreview() {
     pdfFiles.value.forEach(f => fd.append('files', f))
     const res = await post('/ocr-import/preview', fd) as ApiResponse
     showToast(res.message || '预览完成', 'info')
-  } catch (err: any) {
-    showToast(err.response?.data?.detail || '预览失败', 'error')
+  } catch (err: unknown) {
+    const error = err as { response?: { data?: { detail?: string } } }
+    showToast(error.response?.data?.detail || '预览失败', 'error')
   } finally {
     ocrPreviewing.value = false
   }
@@ -751,7 +747,7 @@ async function handleOcrImport() {
   ocrProgress.pct = 0
   ocrProgress.msg = '创建任务...'
   try {
-    const task = await ocrApi.createTask() as ApiResponse & { task_id?: string }
+    const task = await ocrApi.createTask() as ApiResponse & { task_id?: string; id?: string }
     const taskId = task.task_id || task.id
     if (!taskId) throw new Error('创建OCR任务失败')
 
@@ -765,7 +761,7 @@ async function handleOcrImport() {
     let completed = false
     while (!completed) {
       await new Promise(r => setTimeout(r, 2000))
-      const prog = await ocrApi.progress(taskId) as ApiResponse & { status?: string; progress?: number; message?: string }
+      const prog = await ocrApi.progress(taskId) as ApiResponse & { status?: string; progress?: number; percent?: number; message?: string }
       const pct = prog.progress ?? prog.percent ?? 0
       ocrProgress.pct = Math.min(90, 20 + pct * 0.7)
       ocrProgress.msg = prog.status || '处理中...'
@@ -779,8 +775,9 @@ async function handleOcrImport() {
     showToast('OCR识别导入完成', 'success')
     pdfFiles.value = []
     fetchStockouts()
-  } catch (err: any) {
-    showToast(err.response?.data?.detail || 'OCR导入失败', 'error')
+  } catch (err: unknown) {
+    const error = err as { response?: { data?: { detail?: string } } }
+    showToast(error.response?.data?.detail || 'OCR导入失败', 'error')
   } finally {
     ocrImporting.value = false
     setTimeout(() => { ocrProgress.show = false }, 2000)
@@ -795,7 +792,19 @@ const filterEnd = ref('')
 const currentPage = ref(1)
 const totalPages = ref(1)
 const isLoading = ref(false)
-const stockoutRecords = ref<unknown[]>([])
+const stockoutRecords = ref<{
+  id?: number;
+  stockout_date?: string;
+  product_id?: number;
+  product?: { id?: number; name?: string; image?: string; barcode?: string };
+  product_name?: string;
+  product_image?: string;
+  barcode?: string;
+  customer?: string;
+  quantity?: number;
+  deduct_quantity?: number;
+  note?: string;
+}[]>([])
 
 async function fetchStockouts() {
   isLoading.value = true
@@ -804,9 +813,9 @@ async function fetchStockouts() {
     if (filterCustomer.value) params.customer = filterCustomer.value
     if (filterStart.value) params.start_date = filterStart.value
     if (filterEnd.value) params.end_date = filterEnd.value
-    const res = await stockApi.stockouts(params) as ApiResponse<Record<string, unknown>[]>
+    const res = await stockApi.stockouts(params) as ApiResponse & { stockouts?: unknown[]; items?: unknown[]; total?: number }
     const items = res.stockouts ?? res.data ?? res.items ?? []
-    stockoutRecords.value = items
+    stockoutRecords.value = items as typeof stockoutRecords.value
     const total = res.total ?? items.length
     totalPages.value = Math.ceil(total / 20) || 1
   } catch {
@@ -818,8 +827,21 @@ async function fetchStockouts() {
 
 fetchStockouts()
 
+interface StockoutSummary {
+  key: string;
+  customer: string;
+  productName: string;
+  productImage?: string | null;
+  barcode: string;
+  quantity: number;
+  deductQuantity: number;
+  notes: string[];
+  ids: number[];
+  firstId?: number;
+}
+
 const groupedRecords = computed(() => {
-  const groups: Record<string, any[]> = {}
+  const groups: Record<string, typeof stockoutRecords.value> = {}
   stockoutRecords.value.forEach(r => {
     const dateKey = r.stockout_date || '未知日期'
     if (!groups[dateKey]) groups[dateKey] = []
@@ -830,8 +852,8 @@ const groupedRecords = computed(() => {
 
   return sortedDates.map(date => {
     const records = groups[date]
-    const summaryMap: Record<string, unknown> = {}
-    records.forEach((r: unknown) => {
+    const summaryMap: Record<string, StockoutSummary> = {}
+    records.forEach((r) => {
       const pid = r.product_id ?? r.product?.id ?? 0
       const key = `${r.customer || '未知客户'}|||${pid}`
       if (!summaryMap[key]) {
@@ -843,18 +865,18 @@ const groupedRecords = computed(() => {
           barcode: r.barcode || r.product?.barcode || '',
           quantity: 0,
           deductQuantity: 0,
-          notes: [] as string[],
-          ids: [] as number[],
+          notes: [],
+          ids: [],
           firstId: r.id,
         }
       }
       summaryMap[key].quantity += r.quantity || 0
       summaryMap[key].deductQuantity += r.deduct_quantity || 0
       if (r.note && !summaryMap[key].notes.includes(r.note)) summaryMap[key].notes.push(r.note)
-      summaryMap[key].ids.push(r.id)
+      if (r.id !== undefined) summaryMap[key].ids.push(r.id)
     })
 
-    const summaryList = Object.values(summaryMap).map((item: unknown) => ({
+    const summaryList = Object.values(summaryMap).map((item) => ({
       ...item,
       notesDisplay: item.notes.length > 0 ? item.notes.join('; ') : '-',
     }))
@@ -863,7 +885,7 @@ const groupedRecords = computed(() => {
       date,
       records,
       summaryList,
-      totalQty: summaryList.reduce((s: number, i: any) => s + i.quantity, 0),
+      totalQty: summaryList.reduce((s: number, i: StockoutSummary & { quantity: number }) => s + i.quantity, 0),
       expanded: true,
     }
   })
@@ -877,8 +899,9 @@ async function handleDeleteRecord(id: number) {
     await stockApi.deleteStockout(id)
     showToast('删除成功', 'success')
     fetchStockouts()
-  } catch (err: any) {
-    showToast(err.response?.data?.detail || '删除失败', 'error')
+  } catch (err: unknown) {
+    const error = err as { response?: { data?: { detail?: string } } }
+    showToast(error.response?.data?.detail || '删除失败', 'error')
   } finally {
     actionId.value = 0
   }
@@ -888,8 +911,8 @@ async function handleDeleteRecord(id: number) {
 const editRecordOpen = ref(false)
 const editRecordForm = reactive({ id: 0, customer: '', date: '', productName: '', quantity: 1, note: '' })
 
-function openEditRecord(item: any) {
-  editRecordForm.id = item.firstId
+function openEditRecord(item: StockoutSummary & { notes: string[] }) {
+  editRecordForm.id = item.firstId || 0
   editRecordForm.customer = item.customer || ''
   editRecordForm.date = ''
   editRecordForm.productName = item.productName || ''
@@ -898,13 +921,14 @@ function openEditRecord(item: any) {
   editRecordOpen.value = true
   get(`/stock/out/list`, { id: item.firstId })
     .then((data: unknown) => {
-      const record = Array.isArray(data) ? data[0] : data.stockouts?.[0] ?? data
+      const record = Array.isArray(data) ? data[0] : (data as { stockouts?: unknown[]; data?: unknown }).stockouts?.[0] ?? data
       if (record) {
-        editRecordForm.customer = record.customer || ''
-        editRecordForm.date = record.stockout_date || ''
-        editRecordForm.productName = record.product_name || record.product?.name || ''
-        editRecordForm.quantity = record.quantity || 1
-        editRecordForm.note = record.note || ''
+        const r = record as { customer?: string; stockout_date?: string; product_name?: string; product?: { name?: string }; quantity?: number; note?: string }
+        editRecordForm.customer = r.customer || ''
+        editRecordForm.date = r.stockout_date || ''
+        editRecordForm.productName = r.product_name || r.product?.name || ''
+        editRecordForm.quantity = r.quantity || 1
+        editRecordForm.note = r.note || ''
       }
     })
     .catch(() => {})
@@ -921,8 +945,9 @@ async function saveEditRecord() {
     showToast('更新成功', 'success')
     editRecordOpen.value = false
     fetchStockouts()
-  } catch (err: any) {
-    showToast(err.response?.data?.detail || '更新失败', 'error')
+  } catch (err: unknown) {
+    const error = err as { response?: { data?: { detail?: string } } }
+    showToast(error.response?.data?.detail || '更新失败', 'error')
   }
 }
 </script>
@@ -1560,11 +1585,6 @@ textarea.form-input::placeholder {
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
-.pagination-wrap {
-  padding: 12px 16px;
-  border-top: 1px solid var(--color-border-light);
-}
-
 /* ===== Dialog Form ===== */
 .dialog-form {
   display: flex;

@@ -21,12 +21,12 @@ from fastapi_app.shared_models import User
 router = APIRouter()
 
 @router.get('/list', response_model=UserListResponse)
-async def list_users(user: User=Depends(require_permission('user_manage')), db: AsyncSession=Depends(get_async_db)):
+async def list_users(page: int = 1, per_page: int = 15, user: User=Depends(require_permission('user_manage')), db: AsyncSession=Depends(get_async_db)):
     """用户列表"""
     if not user.is_super:
         raise HTTPException(status_code=403, detail='仅超级用户可访问')
-    users = await user_service.get_users(db)
-    return UserListResponse(users=[UserResponse(id=u.id, username=u.username, is_super=u.is_super, status=u.status, create_time=u.create_time.strftime('%Y-%m-%d %H:%M') if u.create_time else None) for u in users], total=len(users))
+    users, total = await user_service.get_users(db, page=page, per_page=per_page)
+    return UserListResponse(users=[UserResponse(id=u.id, username=u.username, is_super=u.is_super, status=u.status, create_time=u.create_time.strftime('%Y-%m-%d %H:%M') if u.create_time else None) for u in users], total=total, page=page, per_page=per_page)
 
 @router.post('/create', response_model=UserActionResponse)
 async def create_user(data: UserCreate, user: User=Depends(require_permission('user_manage')), db: AsyncSession=Depends(get_async_db)):

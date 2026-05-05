@@ -3,12 +3,19 @@
 
 映射到与 Flask-SQLAlchemy Order 相同的 'order' 表。
 """
+from __future__ import annotations
+
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
+
+if TYPE_CHECKING:
+    from fastapi_app.shared_models.product import Product
+    from fastapi_app.shared_models.user import User
 
 # 订单状态流转：新订单 -> 待备货/已备货/部分备货 -> 待出货 -> 已出货 -> 已完成
 VALID_ORDER_STATUSES = {'待备货', '已备货', '部分备货', '待出货', '已出货', '已完成', '已取消'}

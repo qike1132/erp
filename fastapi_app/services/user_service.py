@@ -1,7 +1,7 @@
 """用户管理服务层"""
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -12,12 +12,19 @@ logger = logging.getLogger(__name__)
 SENSITIVE_PERMISSIONS = ['user_manage']
 
 
-async def get_users(db: AsyncSession) -> list[User]:
-    """获取所有用户列表"""
+async def get_users(db: AsyncSession, page: int = 1, per_page: int = 15) -> tuple[list[User], int]:
+    """获取用户列表（分页）"""
+    # 总数
+    count_result = await db.execute(select(func.count(User.id)))
+    total = count_result.scalar_one()
+    # 分页数据
+    offset = (page - 1) * per_page
     result = await db.execute(
         select(User).options(joinedload(User.permissions)).order_by(User.id)
+        .offset(offset).limit(per_page)
     )
-    return list(result.unique().scalars().all())
+    users = list(result.unique().scalars().all())
+    return users, total
 
 
 async def create_user(db: AsyncSession, username: str, password: str, is_super: bool) -> User:

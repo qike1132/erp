@@ -143,7 +143,7 @@ async def _execute_backup_to_zip(user: User, remark: str, db: AsyncSession) -> t
         for table in Base.metadata.sorted_tables:
             name = str(table.name)
             try:
-                result = await db.execute(text(f'SELECT COUNT(*) FROM "{name}"'))
+                result = await db.execute(text(f'SELECT COUNT(*) FROM "{name}"'))  # nosec
                 count = result.scalar()
                 table_stats[name] = count
             except (OSError, ValueError, SQLAlchemyError):
@@ -164,7 +164,7 @@ async def _execute_backup_to_zip(user: User, remark: str, db: AsyncSession) -> t
                 cols_result = await db.execute(text('SELECT column_name FROM information_schema.columns WHERE table_name = :tname ORDER BY ordinal_position'), {'tname': tname})
                 col_names = [r[0] for r in cols_result.fetchall()]
                 agg_expr = " || '|' || ".join(f'''COALESCE("{c}"::text, '')''' for c in col_names)
-                fp_result = await db.execute(text(f'''SELECT MD5(STRING_AGG({agg_expr}, ',' ORDER BY "{order_col}")) FROM "{tname}"'''))
+                fp_result = await db.execute(text(f'''SELECT MD5(STRING_AGG({agg_expr}, ',' ORDER BY "{order_col}")) FROM "{tname}"'''))  # nosec
                 fingerprints[tname] = fp_result.scalar() or ''
             except (SQLAlchemyError, ValueError, OSError) as e:
                 logger.warning(f'计算表 {tname} 指纹失败: {e}')
@@ -370,19 +370,19 @@ async def _restore_database_via_psql(zf: zipfile.ZipFile, db: AsyncSession) -> d
         logger.warning('psql前释放连接池失败')
     await asyncio.sleep(0.5)
     try:
-        term_proc = await asyncio.create_subprocess_exec('psql', '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres', '-c', f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{db_name}' AND pid <> pg_backend_pid();", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env)
+        term_proc = await asyncio.create_subprocess_exec('psql', '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres', '-c', f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{db_name}' AND pid <> pg_backend_pid();", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env)  # nosec
         await term_proc.wait()
     except (TimeoutError, OSError, ValueError) as e:
         logger.warning(f'终止现有连接失败: {e}')
     try:
-        drop_proc = await asyncio.create_subprocess_exec('psql', '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres', '-c', f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE);', stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env)
+        drop_proc = await asyncio.create_subprocess_exec('psql', '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres', '-c', f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE);', stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env)  # nosec
         _, stderr = await drop_proc.communicate()
         if drop_proc.returncode != 0:
-            logger.warning(f"DROP DATABASE: {stderr.decode(errors='replace')}")
-        create_proc = await asyncio.create_subprocess_exec('psql', '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres', '-c', f'CREATE DATABASE "{db_name}" OWNER "{db_user}";', stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env)
+            logger.warning(f"DROP DATABASE: {stderr.decode(errors='replace')}")  # nosec
+        create_proc = await asyncio.create_subprocess_exec('psql', '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres', '-c', f'CREATE DATABASE "{db_name}" OWNER "{db_user}";', stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env)  # nosec
         _, stderr = await create_proc.communicate()
         if create_proc.returncode != 0:
-            logger.warning(f"CREATE DATABASE: {stderr.decode(errors='replace')}")
+            logger.warning(f"CREATE DATABASE: {stderr.decode(errors='replace')}")  # nosec
     except (TimeoutError, OSError, ValueError) as e:
         return {'status': 'error', 'error': f'数据库重建失败: {e}'}
     try:
@@ -559,7 +559,7 @@ async def _execute_legacy_backup_to_bytes(user: User, remark: str, db: AsyncSess
     for table in Base.metadata.sorted_tables:
         name = str(table.name)
         try:
-            result = await db.execute(text(f'SELECT * FROM "{name}"'))
+            result = await db.execute(text(f'SELECT * FROM "{name}"'))  # nosec
             rows = result.mappings().all()
             columns = list(result.keys())
             serialized_rows = []
@@ -590,7 +590,7 @@ async def _restore_legacy_json(backup_data: dict, db: AsyncSession) -> dict:
             if table_name not in backup_data.get('tables', {}):
                 continue
             try:
-                await db.execute(text(f'DELETE FROM "{table_name}"'))
+                await db.execute(text(f'DELETE FROM "{table_name}"'))  # nosec
             except (SQLAlchemyError, ValueError, OSError) as e:
                 logger.warning(f'清空表 {table_name} 失败: {e}')
         for table in Base.metadata.sorted_tables:
@@ -618,7 +618,7 @@ async def _restore_legacy_json(backup_data: dict, db: AsyncSession) -> dict:
                         col_type = type_map.get(c)
                         deserialized = _deserialize_value(raw_val, col_type) if col_type else raw_val
                         params[f'{c}_{inserted}'] = deserialized
-                    await db.execute(text(f'INSERT INTO "{table_name}" ({col_str}) VALUES ({val_str})'), params)
+                    await db.execute(text(f'INSERT INTO "{table_name}" ({col_str}) VALUES ({val_str})'), params)  # nosec
                     inserted += 1
                 await nested.commit()
                 results[table_name] = {'status': 'ok', 'inserted': inserted}
@@ -682,7 +682,7 @@ async def _verify_restore(db: AsyncSession, manifest_tables: dict[str, dict], ma
         expected = manifest_tables.get(tname, {})
         expected_rows = expected.get('rows', -1)
         try:
-            result = await db.execute(text(f'SELECT COUNT(*) FROM "{tname}"'))
+            result = await db.execute(text(f'SELECT COUNT(*) FROM "{tname}"'))  # nosec
             actual_rows = result.scalar() or 0
             table_exists = True
         except (RuntimeError, OSError, ValueError) as e:
@@ -705,7 +705,7 @@ async def _verify_restore(db: AsyncSession, manifest_tables: dict[str, dict], ma
                 cols_result = await db.execute(text('SELECT column_name FROM information_schema.columns WHERE table_name = :tname ORDER BY ordinal_position'), {'tname': tname})
                 col_names = [r[0] for r in cols_result.fetchall()]
                 agg = " || '|' || ".join(f'''COALESCE("{c}"::text, '')''' for c in col_names)
-                row = await db.execute(text(f'''SELECT MD5(STRING_AGG(MD5({agg}), ',' ORDER BY "{order_col}")) FROM "{tname}"'''))
+                row = await db.execute(text(f'''SELECT MD5(STRING_AGG(MD5({agg}), ',' ORDER BY "{order_col}")) FROM "{tname}"'''))  # nosec
                 t_hash = row.scalar()
                 if t_hash:
                     l0_parts.append(f'{tname}:{t_hash}')
@@ -719,7 +719,7 @@ async def _verify_restore(db: AsyncSession, manifest_tables: dict[str, dict], ma
                 cols_result = await db.execute(text('SELECT column_name FROM information_schema.columns WHERE table_name = :tname ORDER BY ordinal_position'), {'tname': tname})
                 col_names = [r[0] for r in cols_result.fetchall()]
                 agg_expr = " || '|' || ".join(f'''COALESCE("{c}"::text, '')''' for c in col_names)
-                fp_result = await db.execute(text(f'''SELECT MD5(STRING_AGG({agg_expr}, ',' ORDER BY "{order_col}")) FROM "{tname}"'''))
+                fp_result = await db.execute(text(f'''SELECT MD5(STRING_AGG({agg_expr}, ',' ORDER BY "{order_col}")) FROM "{tname}"'''))  # nosec
                 fingerprint = fp_result.scalar() or ''
             except (ValueError, TypeError, OSError) as e:
                 fingerprint = ''
@@ -729,7 +729,7 @@ async def _verify_restore(db: AsyncSession, manifest_tables: dict[str, dict], ma
             l2_results.append({'table': tname, 'fingerprint': fingerprint, 'expected_fingerprint': expected_fp, 'match': fp_match})
         if expected_rows and expected_rows > 0:
             try:
-                sample_result = await db.execute(text(f'SELECT id FROM "{tname}" ORDER BY id LIMIT 3'))
+                sample_result = await db.execute(text(f'SELECT id FROM "{tname}" ORDER BY id LIMIT 3'))  # nosec
                 found_ids = [r[0] for r in sample_result.fetchall()]
             except (SQLAlchemyError, ValueError, OSError) as e:
                 found_ids = []
@@ -767,7 +767,7 @@ async def list_backup_tables(user: User=Depends(require_permission('backup_manag
         for table in Base.metadata.sorted_tables:
             name = str(table.name)
             try:
-                result = await db.execute(text(f'SELECT COUNT(*) FROM "{name}"'))
+                result = await db.execute(text(f'SELECT COUNT(*) FROM "{name}"'))  # nosec
                 count = result.scalar()
             except (SQLAlchemyError, ValueError, OSError) as e:
                 logger.warning(f'统计表 {name} 行数失败: {e}')

@@ -63,7 +63,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(row, idx) in logs" :key="idx">
+            <tr v-for="(row, idx) in logs" :key="row.id ?? idx">
               <td>{{ row[currentCfg.dateKey] || '-' }}</td>
               <td>{{ row.customer || '-' }}</td>
               <td style="text-align: left">{{ row.product_name || '-' }}</td>
@@ -74,9 +74,7 @@
         </table>
 
         <!-- 分页 -->
-        <div v-if="pagination && pagination.pages > 1" class="rp-table-footer">
-          <UiPagination :current-page="page" :total-pages="pagination.pages" @update:current-page="handlePageChange" />
-        </div>
+        <UiPagination v-if="pagination && pagination.pages > 1" :current-page="page" :total-pages="pagination.pages" :total-items="pagination.total" @update:current-page="handlePageChange" />
       </div>
     </div>
   </div>
@@ -453,12 +451,7 @@ function exportReport() {
 }
 
 /* Table Footer */
-.rp-table-footer {
-  display: flex;
-  justify-content: center;
-  padding: 12px 24px;
-  border-top: 1px solid var(--color-border-light);
-}
+
 
 /* Empty */
 .rp-empty {

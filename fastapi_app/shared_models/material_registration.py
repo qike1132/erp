@@ -1,10 +1,16 @@
 """来料登记模型"""
+from __future__ import annotations
+
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
+
+if TYPE_CHECKING:
+    from fastapi_app.shared_models.purchase_order import PurchaseOrder
 
 
 class MaterialRegistration(Base):
@@ -28,6 +34,14 @@ class MaterialRegistration(Base):
         cascade="all, delete-orphan"
     )
     purchase_order: Mapped["PurchaseOrder"] = relationship("PurchaseOrder", backref="registrations")
+
+    __table_args__ = (
+        Index('idx_material_reg_purchase_order', 'purchase_order_id'),
+        Index('idx_material_reg_supplier', 'supplier_id'),
+        Index('idx_material_reg_status', 'status'),
+        Index('idx_material_reg_date', 'registration_date'),
+        Index('idx_material_reg_status_date', 'status', 'registration_date'),
+    )
 
     def _calc_items_stats(self):
         """计算物料项汇总统计（内部方法，供 computed_status/progress/to_dict 复用）"""

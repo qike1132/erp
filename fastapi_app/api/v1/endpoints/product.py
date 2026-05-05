@@ -32,9 +32,10 @@ router = APIRouter()
 
 @router.get('/list', response_model=ProductListResponse)
 async def list_products(page: int = Query(1, ge=1), per_page: int = Query(50, ge=1, le=200),
+                        search: str = Query('', description='搜索产品名称或69码'),
                         db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('product_manage'))):
-    """产品列表（分页+缓存）"""
-    result = await product_service.get_products_page(db, page=page, per_page=per_page)
+    """产品列表（分页+缓存+搜索）"""
+    result = await product_service.get_products_page(db, page=page, per_page=per_page, search=search)
     return ProductListResponse(data=result['items'], total=result['total'])
 
 @router.get('/{product_id}', response_model=ProductResponse)
