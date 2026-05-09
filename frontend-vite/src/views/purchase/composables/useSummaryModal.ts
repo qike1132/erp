@@ -2,6 +2,65 @@ import { ref, computed, reactive } from 'vue'
 import { purchaseApi } from '@/api'
 import { printHtml } from '@/utils/print'
 
+function buildFactoryHtml(data: { groups?: any[] }): string {
+  let tableHtml = ''
+  data.groups?.forEach((group: any) => {
+    const suppliers = group.suppliers || []
+    let globalFabricIdx = 0
+    suppliers.forEach((supplier: any) => {
+      supplier.fabrics?.forEach((fabric: any) => {
+        tableHtml += '<tr>'
+        if (globalFabricIdx === 0) {
+          const rowCount = suppliers.reduce((s: number, sup: any) => s + (sup.fabrics?.length || 0), 0)
+          tableHtml += `<td rowspan="${rowCount}" style="border:1px solid #333;padding:8px;text-align:center;font-weight:bold;">${group.customer_name}</td>`
+          tableHtml += `<td rowspan="${rowCount}" style="border:1px solid #333;padding:8px;text-align:center;">${group.product_name}</td>`
+          const qty = parseFloat(String(group.product_quantity || group.order_quantity || 0))
+          const qtyStr = qty % 1 === 0 ? String(parseInt(String(qty))) : qty.toFixed(2).replace(/\.?0+$/, '')
+          tableHtml += `<td rowspan="${rowCount}" style="border:1px solid #333;padding:8px;text-align:center;">${qtyStr}</td>`
+        }
+        tableHtml += `<td style="border:1px solid #333;padding:8px;text-align:center;">${supplier.supplier_name}</td>`
+        tableHtml += `<td style="border:1px solid #333;padding:8px;">${fabric.fabric_name}</td>`
+        tableHtml += `<td style="border:1px solid #333;padding:8px;">${fabric.specification || ''}</td>`
+        tableHtml += `<td style="border:1px solid #333;padding:8px;text-align:right;">${fabric.quantity} ${fabric.unit || ''}</td>`
+        tableHtml += '</tr>'
+        globalFabricIdx++
+      })
+    })
+  })
+  return tableHtml
+}
+
+function buildSupplierHtml(groups: { supplierName: string; materials: any[] }[]): string {
+  let tableHtml = ''
+  groups.forEach((g) => {
+    g.materials.forEach((m: any, mi: number) => {
+      tableHtml += '<tr>'
+      if (mi === 0)
+        tableHtml += `<td rowspan="${g.materials.length}" style="border:1px solid #333;padding:8px;text-align:center;font-weight:bold;">${g.supplierName}</td>`
+      tableHtml += `<td style="border:1px solid #333;padding:8px;">${m.material_name}</td>`
+      tableHtml += `<td style="border:1px solid #333;padding:8px;">${m.specification || ''}</td>`
+      tableHtml += `<td style="border:1px solid #333;padding:8px;text-align:right;">${m.total_quantity} ${m.unit || ''}</td>`
+      tableHtml += '</tr>'
+    })
+  })
+  return tableHtml
+}
+
+function downloadAsXls(html: string, filename: string) {
+  const bom = '\uFEFF'
+  const style = `<style>body{font-family:SimSun,宋体;padding:20px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #333;padding:8px;font-size:13px}th{background:#e6e6e6}</style>`
+  const fullHtml = `<html><head><meta charset="utf-8">${style}</head><body>${html}</body></html>`
+  const blob = new Blob([bom + fullHtml], { type: 'application/vnd.ms-excel;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
 interface FabricItem {
   fabric_name: string
   specification?: string
@@ -55,7 +114,9 @@ export function useSummaryModal() {
   const factoryData = ref<FactorySummaryData | null>(null)
   const factoryOriginalData = ref<FactorySummaryData | null>(null)
   const supplierData = ref<SupplierSummaryData | null>(null)
+  const supplierOriginalData = ref<SupplierSummaryData | null>(null)
   const editMode = ref(false)
+  const lossRate = ref(0)
   const orderIds = ref<number[]>([])
   const supplierOrder = ref<string[]>([])
 
@@ -106,6 +167,7 @@ export function useSummaryModal() {
     factoryData.value = JSON.parse(JSON.stringify(fRes))
     factoryOriginalData.value = JSON.parse(JSON.stringify(fRes))
     supplierData.value = JSON.parse(JSON.stringify(sRes))
+    supplierOriginalData.value = JSON.parse(JSON.stringify(sRes))
     const initOrder: string[] = []
     sRes.materials?.forEach((m) => {
       const s = m.supplier_name || '未指定供应商'
@@ -118,13 +180,44 @@ export function useSummaryModal() {
   }
 
   function toggleEditMode(enable: boolean) {
-    if (!enable) factoryData.value = JSON.parse(JSON.stringify(factoryOriginalData.value))
+    if (!enable) {
+      factoryData.value = JSON.parse(JSON.stringify(factoryOriginalData.value))
+      supplierData.value = JSON.parse(JSON.stringify(supplierOriginalData.value))
+      lossRate.value = 0
+    }
     editMode.value = enable
   }
 
   function updateFactoryQty(gi: number, si: number, fi: number, value: number) {
     factoryData.value?.groups?.[gi]?.suppliers?.[si]?.fabrics?.[fi] &&
       (factoryData.value.groups[gi].suppliers[si].fabrics[fi].quantity = value)
+  }
+
+  function applyLossRate(rate: number) {
+    lossRate.value = rate
+    if (!factoryOriginalData.value?.groups) return
+    factoryData.value?.groups?.forEach((group, gi) => {
+      group.suppliers?.forEach((supplier, si) => {
+        supplier.fabrics?.forEach((fabric, fi) => {
+          const originalFabric = factoryOriginalData.value?.groups?.[gi]?.suppliers?.[si]?.fabrics?.[fi]
+          if (originalFabric) {
+            const originalQty = parseFloat(String(originalFabric.quantity)) || 0
+            const newQty = originalQty + originalQty * (rate / 1000)
+            fabric.quantity = Math.round(newQty * 100) / 100
+          }
+        })
+      })
+    })
+    if (supplierOriginalData.value?.materials) {
+      supplierData.value?.materials?.forEach((m, mi) => {
+        const origM = supplierOriginalData.value?.materials?.[mi]
+        if (origM) {
+          const originalQty = parseFloat(String(origM.total_quantity)) || 0
+          const newQty = originalQty + originalQty * (rate / 1000)
+          m.total_quantity = Math.round(newQty * 100) / 100
+        }
+      })
+    }
   }
 
   async function saveFactoryEdits() {
@@ -165,7 +258,10 @@ export function useSummaryModal() {
       factoryOriginalData.value = JSON.parse(JSON.stringify(factoryData.value))
       try {
         const sRes = await purchaseApi.supplierSummary(orderIds.value) as unknown as SupplierSummaryData
-        if (sRes.success) supplierData.value = JSON.parse(JSON.stringify(sRes))
+        if (sRes.success) {
+          supplierData.value = JSON.parse(JSON.stringify(sRes))
+          supplierOriginalData.value = JSON.parse(JSON.stringify(sRes))
+        }
       } catch { /* 非关键，忽略 */ }
       editMode.value = false
       return res
@@ -181,49 +277,28 @@ export function useSummaryModal() {
 
   function printFactory() {
     if (!factoryData.value) return
-    const data = factoryData.value
-    let tableHtml = ''
-    data.groups?.forEach((group) => {
-      const suppliers = group.suppliers || []
-      let globalFabricIdx = 0
-      suppliers.forEach((supplier) => {
-        supplier.fabrics?.forEach((fabric) => {
-          tableHtml += '<tr>'
-          if (globalFabricIdx === 0) {
-            const rowCount = suppliers.reduce((s, sup) => s + (sup.fabrics?.length || 0), 0)
-            tableHtml += `<td rowspan="${rowCount}" style="border:1px solid #333;padding:8px;text-align:center;font-weight:bold;">${group.customer_name}</td>`
-            tableHtml += `<td rowspan="${rowCount}" style="border:1px solid #333;padding:8px;text-align:center;">${group.product_name}</td>`
-            const qty = parseFloat(String(group.product_quantity || group.order_quantity || 0))
-            const qtyStr = qty % 1 === 0 ? String(parseInt(String(qty))) : qty.toFixed(2).replace(/\.?0+$/, '')
-            tableHtml += `<td rowspan="${rowCount}" style="border:1px solid #333;padding:8px;text-align:center;">${qtyStr}</td>`
-          }
-          tableHtml += `<td style="border:1px solid #333;padding:8px;text-align:center;">${supplier.supplier_name}</td>`
-          tableHtml += `<td style="border:1px solid #333;padding:8px;">${fabric.fabric_name}</td>`
-          tableHtml += `<td style="border:1px solid #333;padding:8px;">${fabric.specification || ''}</td>`
-          tableHtml += `<td style="border:1px solid #333;padding:8px;text-align:right;">${fabric.quantity} ${fabric.unit || ''}</td>`
-          tableHtml += '</tr>'
-          globalFabricIdx++
-        })
-      })
-    })
+    const tableHtml = buildFactoryHtml(factoryData.value)
     printHtml('工厂内部采购订单汇总', `<table><thead><tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>数量</th></tr></thead><tbody>${tableHtml}</tbody></table>`)
   }
 
   function printSupplier() {
     if (!supplierData.value) return
-    let tableHtml = ''
-    supplierGroups.value.forEach((g) => {
-      g.materials.forEach((m, mi) => {
-        tableHtml += '<tr>'
-        if (mi === 0)
-          tableHtml += `<td rowspan="${g.materials.length}" style="border:1px solid #333;padding:8px;text-align:center;font-weight:bold;">${g.supplierName}</td>`
-        tableHtml += `<td style="border:1px solid #333;padding:8px;">${m.material_name}</td>`
-        tableHtml += `<td style="border:1px solid #333;padding:8px;">${m.specification || ''}</td>`
-        tableHtml += `<td style="border:1px solid #333;padding:8px;text-align:right;">${m.total_quantity} ${m.unit || ''}</td>`
-        tableHtml += '</tr>'
-      })
-    })
+    const tableHtml = buildSupplierHtml(supplierGroups.value)
     printHtml('供应商采购订单汇总', `<table><thead><tr><th>供应商</th><th>物料名称</th><th>规格型号</th><th>数量</th></tr></thead><tbody>${tableHtml}</tbody></table>`)
+  }
+
+  function exportFactory() {
+    if (!factoryData.value) return
+    const tableHtml = buildFactoryHtml(factoryData.value)
+    const html = `<div style="text-align:center;margin-bottom:20px"><h2>工厂内部采购订单汇总</h2></div><table><thead><tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>数量</th></tr></thead><tbody>${tableHtml}</tbody></table>`
+    downloadAsXls(html, '工厂内部采购汇总.xls')
+  }
+
+  function exportSupplier() {
+    if (!supplierData.value) return
+    const tableHtml = buildSupplierHtml(supplierGroups.value)
+    const html = `<div style="text-align:center;margin-bottom:20px"><h2>供应商采购订单汇总</h2></div><table><thead><tr><th>供应商</th><th>物料名称</th><th>规格型号</th><th>数量</th></tr></thead><tbody>${tableHtml}</tbody></table>`
+    downloadAsXls(html, '供应商采购订单汇总.xls')
   }
 
   return reactive({
@@ -232,6 +307,7 @@ export function useSummaryModal() {
     factoryData,
     supplierData,
     editMode,
+    lossRate,
     orderIds,
     supplierGroups,
     supplierGrandTotal,
@@ -240,8 +316,11 @@ export function useSummaryModal() {
     close,
     toggleEditMode,
     updateFactoryQty,
+    applyLossRate,
     saveFactoryEdits,
     printFactory,
     printSupplier,
+    exportFactory,
+    exportSupplier,
   })
 }

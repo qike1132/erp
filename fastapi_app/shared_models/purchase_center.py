@@ -25,6 +25,7 @@ class ModificationLog(Base):
     modifier_name: Mapped[str | None] = mapped_column(String(100), comment='修改人姓名')
     modify_time: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, index=True, comment='修改时间')
     modify_reason: Mapped[str | None] = mapped_column(Text, comment='修改原因')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
 
     __table_args__ = (
         Index('idx_mod_target', 'target_type', 'target_id'),
@@ -59,6 +60,7 @@ class SavedQuery(Base):
     create_time: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, comment='创建时间')
     use_count: Mapped[int | None] = mapped_column(Integer, default=0, comment='使用次数')
     last_use_time: Mapped[datetime | None] = mapped_column(DateTime, comment='最后使用时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
 
     __table_args__ = (
         Index('idx_saved_query_type', 'query_type'),

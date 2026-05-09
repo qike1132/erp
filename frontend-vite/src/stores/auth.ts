@@ -14,9 +14,9 @@ export const useAuthStore = defineStore('auth', () => {
     const res = await authApi.me()
     const raw = res.user ?? res
     user.value = {
-      id: raw.user_id ?? raw.id,
+      id: raw.user_id || raw.id || 0,
       username: raw.username,
-      isSuper: raw.is_super ?? raw.isSuper ?? false,
+      isSuper: raw.is_super || raw.isSuper || false,
       permissions: raw.permissions ?? [],
     }
     return user.value

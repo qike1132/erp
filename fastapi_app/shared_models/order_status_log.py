@@ -29,6 +29,7 @@ class OrderStatusLog(Base):
     action_result: Mapped[str | None] = mapped_column(String(20), default='success', comment='操作结果: success/failed')
     remark: Mapped[str | None] = mapped_column(Text, comment='备注说明')
     related_data: Mapped[str | None] = mapped_column(Text, comment='关联数据JSON')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
 
     __table_args__ = (
         Index('idx_status_target', 'target_type', 'target_id'),

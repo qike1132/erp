@@ -7,7 +7,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.database import get_async_db
+from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.schemas.stock import (
     InventoryResponse,
@@ -24,7 +24,7 @@ from fastapi_app.shared_models import StockIn, StockOut, User
 router = APIRouter()
 
 @router.get('/in/list', response_model=StockListResponse)
-async def list_stockins(page: int=Query(1, ge=1, description='页码'), per_page: int=Query(50, ge=1, le=500, description='每页数量'), db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('stockin_manage'))):
+async def list_stockins(page: int=Query(1, ge=1, description='页码'), per_page: int=Query(50, ge=1, le=500, description='每页数量'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('stockin_manage'))):
     """入库列表（支持分页）"""
     result = await stock_service.get_stockins(db, page=page, per_page=per_page)
     return StockListResponse(data=result['items'], total=result['total'], page=result['page'], per_page=result['per_page'])
@@ -64,7 +64,7 @@ async def delete_stockin(stockin_id: int, db: AsyncSession=Depends(get_async_db)
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 @router.get('/out/list', response_model=StockListResponse)
-async def list_stockouts(page: int=Query(1, ge=1, description='页码'), per_page: int=Query(50, ge=1, le=500, description='每页数量'), db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('stockout_manage'))):
+async def list_stockouts(page: int=Query(1, ge=1, description='页码'), per_page: int=Query(50, ge=1, le=500, description='每页数量'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('stockout_manage'))):
     """出库列表（仅独立出库，支持分页）"""
     result = await stock_service.get_stockouts(db, page=page, per_page=per_page)
     return StockListResponse(data=result['items'], total=result['total'], page=result['page'], per_page=result['per_page'])
@@ -104,7 +104,7 @@ async def delete_stockout(stockout_id: int, db: AsyncSession=Depends(get_async_d
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 @router.get('/inventory', response_model=InventoryResponse)
-async def inventory(customer: str=Query('', description='客户名称筛选'), product: str=Query('', description='产品名称筛选'), page: int=Query(1, ge=1, description='页码'), per_page: int=Query(50, ge=1, le=200, description='每页数量'), country: str=Query('', description='国家筛选'), db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('stockin_manage'))):
+async def inventory(customer: str=Query('', description='客户名称筛选'), product: str=Query('', description='产品名称筛选'), page: int=Query(1, ge=1, description='页码'), per_page: int=Query(50, ge=1, le=200, description='每页数量'), country: str=Query('', description='国家筛选'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('stockin_manage'))):
     """库存查看（SQL CTE 分页优化版，过滤和分页在数据库层面完成）"""
     result = await stock_service.get_inventory_paginated(db, search_customer=customer, search_product=product, country=country, page=page, per_page=per_page)
     return InventoryResponse(
@@ -119,7 +119,7 @@ async def inventory(customer: str=Query('', description='客户名称筛选'), p
     )
 
 @router.get('/export-inventory')
-async def export_inventory(customer: str=Query('', description='客户名称筛选'), product: str=Query('', description='产品名称筛选'), db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('stockin_manage'))):
+async def export_inventory(customer: str=Query('', description='客户名称筛选'), product: str=Query('', description='产品名称筛选'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('stockin_manage'))):
     """导出库存数据为 Excel 文件"""
     import io
     from urllib.parse import quote

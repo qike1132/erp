@@ -55,6 +55,7 @@ celery_app.conf.update(
         "fastapi_app.tasks.batch_tasks.*": {"queue": "batch"},
         "fastapi_app.tasks.report_tasks.*": {"queue": "reports"},
         "fastapi_app.tasks.plan_tasks.*": {"queue": "batch"},
+        "fastapi_app.tasks.backup_tasks.*": {"queue": "batch"},
     },
 
     # 队列定义（显式声明所有队列，确保队列存在）
@@ -84,13 +85,18 @@ celery_app.conf.update(
         "fastapi_app.tasks.batch_tasks",
         "fastapi_app.tasks.report_tasks",
         "fastapi_app.tasks.plan_tasks",
+        "fastapi_app.tasks.backup_tasks",
     ],
 
     # 定时任务（Celery Beat）
     beat_schedule={
         "sync-shipment-daily": {
             "task": "sync_shipment_records_task",
-            "schedule": crontab(hour=1, minute=0),  # 每天凌晨1点
+            "schedule": crontab(hour=1, minute=0),
+        },
+        "backup-integrity-check": {
+            "task": "backup_integrity_check_task",
+            "schedule": crontab(hour=3, minute=0),
         },
     },
 )

@@ -15,8 +15,10 @@ from fastapi_app.api.v1.endpoints.customer import router as customer_router
 from fastapi_app.api.v1.endpoints.daily_production import router as daily_production_router
 from fastapi_app.api.v1.endpoints.dashboard import router as dashboard_router
 from fastapi_app.api.v1.endpoints.material_registration import router as material_reg_router
+from fastapi_app.api.v1.endpoints.monitoring import router as monitoring_router
 from fastapi_app.api.v1.endpoints.ocr_import import router as ocr_import_router
 from fastapi_app.api.v1.endpoints.order import router as order_router
+from fastapi_app.api.v1.endpoints.order_batch import router as order_batch_router
 from fastapi_app.api.v1.endpoints.permission import router as permission_router
 from fastapi_app.api.v1.endpoints.product import router as product_router
 from fastapi_app.api.v1.endpoints.production_plan import router as production_plan_router
@@ -81,6 +83,13 @@ api_router.include_router(
     order_router,
     prefix="/orders",
     tags=["订单管理"],
+)
+
+# 订单批次号路由 - 前缀 /api/v1/order-batch
+api_router.include_router(
+    order_batch_router,
+    prefix="/order-batch",
+    tags=["订单批次号"],
 )
 
 # 库存管理路由 - 前缀 /api/v1/stock
@@ -221,4 +230,11 @@ api_router.include_router(
     app_update_router,
     prefix="/app",
     tags=["App版本管理"],
+)
+
+# 性能监控路由 - 前缀 /api/v1/monitoring
+api_router.include_router(
+    monitoring_router,
+    prefix="/monitoring",
+    tags=["性能监控"],
 )

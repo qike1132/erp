@@ -12,7 +12,7 @@ describe('UiButton', () => {
   })
 
   it('renders different variants', () => {
-    const variants = ['primary', 'secondary', 'outline', 'ghost', 'danger'] as const
+    const variants = ['primary', 'success', 'outline', 'ghost', 'danger'] as const
     for (const variant of variants) {
       const wrapper = mount(UiButton, {
         props: { variant },

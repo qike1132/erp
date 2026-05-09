@@ -113,7 +113,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { authApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
@@ -127,10 +127,23 @@ const loading = ref(false)
 const showPassword = ref(false)
 const form = reactive({ username: '', password: '', remember: false })
 
+onMounted(() => {
+  const saved = localStorage.getItem('remembered_username')
+  if (saved) {
+    form.username = saved
+    form.remember = true
+  }
+})
+
 async function handleLogin() {
   if (!form.username || !form.password) return
   loading.value = true
   try {
+    if (form.remember) {
+      localStorage.setItem('remembered_username', form.username)
+    } else {
+      localStorage.removeItem('remembered_username')
+    }
     await authApi.login({ username: form.username, password: form.password })
     await authStore.init()
     const redirect = (route.query.redirect as string) || '/dashboard'

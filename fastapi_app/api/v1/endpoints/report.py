@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.database import get_async_db
+from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.services import report_service
 from fastapi_app.shared_models import User
@@ -21,7 +21,7 @@ async def order_logs(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     user: User = Depends(require_permission("report_view")),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
 ):
     """订单流水"""
     return await report_service.get_order_logs(
@@ -38,7 +38,7 @@ async def stockin_logs(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     user: User = Depends(require_permission("report_view")),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
 ):
     """备货流水"""
     return await report_service.get_stockin_logs(
@@ -55,7 +55,7 @@ async def stockout_logs(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     user: User = Depends(require_permission("report_view")),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
 ):
     """出货流水"""
     return await report_service.get_stockout_logs(
@@ -72,7 +72,7 @@ async def deduction_logs(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     user: User = Depends(require_permission("report_view")),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
 ):
     """备货抵扣流水"""
     return await report_service.get_deduction_logs(
@@ -89,7 +89,7 @@ async def export_report(
     start_date: str = Query('', description="开始日期"),
     end_date: str = Query('', description="结束日期"),
     user: User = Depends(require_permission("report_view")),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
 ):
     """导出报表为 Excel 文件"""
     if report_type not in ("order", "stockin", "stockout", "deduction"):
@@ -111,7 +111,7 @@ async def export_report(
 @router.get("/test-export")
 async def test_export(
     user: User = Depends(require_permission("report_view")),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
 ):
     """测试导出功能（导出订单报表）"""
     buffer = await report_service.export_report_to_excel(

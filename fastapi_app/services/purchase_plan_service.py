@@ -5,6 +5,7 @@
 功能：CRUD、批量上传预览、库存对比（Redis缓存）、出货进度追踪、
 月度日历数据、客户汇总统计、计划编号生成。
 """
+import asyncio
 import calendar
 import io
 import json
@@ -13,10 +14,12 @@ import uuid
 from datetime import date, datetime, timedelta
 
 import openpyxl
-from sqlalchemy import and_, delete, func, select
+from sqlalchemy import and_, delete, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only, selectinload
+
+from fastapi_app.core.cache import cache_result
 
 from fastapi_app.services import customer_service, product_service, stock_service
 from fastapi_app.services.plan_utils import (
@@ -50,6 +53,15 @@ async def _invalidate_fifo_cache(plan_month: str) -> None:
         await redis_cache.delete(f'{FIFO_CACHE_PREFIX}:{plan_month}')
     except (OSError, ConnectionError, ValueError) as e:
         logger.warning(f'FIFO缓存清除失败: {e}')
+
+
+async def _invalidate_plan_caches(plan_month: str = '') -> None:
+    """清除采购计划相关所有缓存（FIFO + 月度日历 + 客户汇总）"""
+    if plan_month:
+        await _invalidate_fifo_cache(plan_month)
+    from fastapi_app.core.cache import invalidate_cache
+    await invalidate_cache('pp:monthly:*')
+    await invalidate_cache('pp:summary:*')
 
 async def _generate_plan_no(db: AsyncSession) -> str:
     """
@@ -123,6 +135,68 @@ async def get_plan_detail(db: AsyncSession, plan_id: int) -> dict:
         detail_list.append(detail_dict)
     return {'plan': plan.to_dict(), 'details': detail_list}
 
+def _validate_plan_month(plan_month: str) -> tuple[int, int]:
+    """验证并解析计划月份格式，返回(year, month)"""
+    ym_parts = plan_month.split('-')
+    if len(ym_parts) != 2:
+        raise ValueError(f'月份格式不正确: {plan_month}，请使用 YYYY-MM 格式')
+    return int(ym_parts[0]), int(ym_parts[1])
+
+
+def _validate_details_cross_month(details: list[dict], target_year: int, target_month: int, plan_month: str) -> None:
+    """验证明细日期不跨月"""
+    for d in details:
+        plan_date_val = normalize_plan_date(d['plan_date'])
+        if plan_date_val.year != target_year or plan_date_val.month != target_month:
+            raise ValueError(f"计划日期 {d['plan_date']} 与计划月份 {plan_month} 不一致，不允许跨月")
+
+
+async def _validate_products_exist(db: AsyncSession, details: list[dict]) -> None:
+    """验证明细中产品（barcode/product_name）均存在"""
+    barcodes_to_check = list({d.get('barcode', '') for d in details if d.get('barcode')})
+    if barcodes_to_check:
+        result = await db.execute(select(Product.barcode).where(Product.barcode.in_(barcodes_to_check)))
+        existing = {row[0] for row in result.all()}
+        for d in details:
+            barcode = d.get('barcode', '')
+            if barcode and barcode not in existing:
+                raise ValueError(f"69码 '{barcode}' 未找到对应产品")
+    names_to_check = list({d.get('product_name', '') for d in details if not d.get('barcode') and d.get('product_name')})
+    if names_to_check:
+        result = await db.execute(select(Product.name).where(Product.name.in_(names_to_check)))
+        existing = {row[0] for row in result.all()}
+        for d in details:
+            pname = d.get('product_name', '')
+            if not d.get('barcode') and pname and pname not in existing:
+                raise ValueError(f"产品 '{pname}' 未找到对应记录")
+
+
+def _format_insufficient_error(insufficient: list[dict]) -> str:
+    """格式化库存不足错误信息"""
+    parts = []
+    for it in insufficient:
+        prefix = f"{it['barcode']}(" if it['barcode'] else ''
+        suffix = ')' if it['barcode'] else ''
+        parts.append(f"产品 {prefix}{it['product_name']}{suffix} 计划数量 {it['total_quantity']}，当前库存 {it['current_stock']}，不足 {it['total_quantity'] - it['current_stock']}")
+    return '; '.join(parts)
+
+
+async def _persist_plan_with_retry(db: AsyncSession, *, customer_id: int, customer_name: str, plan_month: str, remark: str, upload_batch: str, created_by: str) -> PurchasePlan:
+    """创建主单记录，含编号冲突重试（最多3次）"""
+    for attempt in range(3):
+        plan_no = await _generate_plan_no(db)
+        try:
+            async with db.begin_nested():
+                plan = PurchasePlan(plan_no=plan_no, plan_month=plan_month, customer_id=customer_id, customer_name=customer_name, status='pending', remark=remark, upload_batch=upload_batch, created_by=created_by)
+                db.add(plan)
+                await db.flush()
+            return plan
+        except IntegrityError:
+            if attempt == 2:
+                raise ValueError('单号生成冲突，请勿重复提交') from None
+            logger.warning(f'plan_no {plan_no} 冲突，重试({attempt + 1}/3)')
+
+
 async def create_plan(db: AsyncSession, *, customer_id: int, customer_name: str, plan_month: str, details: list[dict], remark: str='', created_by: str='', upload_batch: str='') -> dict:
     """
     创建采购计划主单 + 明细
@@ -133,57 +207,22 @@ async def create_plan(db: AsyncSession, *, customer_id: int, customer_name: str,
     customer = await db.execute(select(Customer).where(Customer.id == customer_id))
     if not customer.scalar_one_or_none():
         raise ValueError(f'客户ID {customer_id} 不存在')
-    ym_parts = plan_month.split('-')
-    if len(ym_parts) != 2:
-        raise ValueError(f'月份格式不正确: {plan_month}，请使用 YYYY-MM 格式')
-    target_year, target_month = (int(ym_parts[0]), int(ym_parts[1]))
-    for d in details:
-        plan_date_val = normalize_plan_date(d['plan_date'])
-        if plan_date_val.year != target_year or plan_date_val.month != target_month:
-            raise ValueError(f"计划日期 {d['plan_date']} 与计划月份 {plan_month} 不一致，不允许跨月")
-    barcodes_to_check = list({d.get('barcode', '') for d in details if d.get('barcode')})
-    if barcodes_to_check:
-        barcode_result = await db.execute(select(Product.barcode).where(Product.barcode.in_(barcodes_to_check)))
-        existing_barcodes = {row[0] for row in barcode_result.all()}
-        for d in details:
-            barcode = d.get('barcode', '')
-            if barcode and barcode not in existing_barcodes:
-                raise ValueError(f"69码 '{barcode}' 未找到对应产品")
-    names_to_check = list({d.get('product_name', '') for d in details if not d.get('barcode') and d.get('product_name')})
-    if names_to_check:
-        name_result = await db.execute(select(Product.name).where(Product.name.in_(names_to_check)))
-        existing_names = {row[0] for row in name_result.all()}
-        for d in details:
-            pname = d.get('product_name', '')
-            if not d.get('barcode') and pname and pname not in existing_names:
-                raise ValueError(f"产品 '{pname}' 未找到对应记录")
+    target_year, target_month = _validate_plan_month(plan_month)
+    _validate_details_cross_month(details, target_year, target_month, plan_month)
+    await _validate_products_exist(db, details)
     insufficient = await _check_inventory_realtime(db, [{'barcode': d.get('barcode', ''), 'product_name': d.get('product_name', ''), 'quantity': d['quantity']} for d in details])
     if insufficient:
-        errors = '; '.join(f"产品 {it['barcode'] + '(' if it['barcode'] else ''}{it['product_name']}{')' if it['barcode'] else ''} 计划数量 {it['total_quantity']}，当前库存 {it['current_stock']}，不足 {it['total_quantity'] - it['current_stock']}" for it in insufficient)
-        raise ValueError(f'库存不足，无法创建出货计划：{errors}')
-    plan = None
-    for _attempt in range(3):
-        plan_no = await _generate_plan_no(db)
-        try:
-            async with db.begin_nested():
-                plan = PurchasePlan(plan_no=plan_no, plan_month=plan_month, customer_id=customer_id, customer_name=customer_name, status='pending', remark=remark, upload_batch=upload_batch, created_by=created_by)
-                db.add(plan)
-                await db.flush()
-            break
-        except IntegrityError:
-            if _attempt == 2:
-                raise ValueError('单号生成冲突，请勿重复提交') from None
-            logger.warning(f'plan_no {plan_no} 冲突，重试({_attempt + 1}/3)')
-            continue
+        raise ValueError(f'库存不足，无法创建出货计划：{_format_insufficient_error(insufficient)}')
+    plan = await _persist_plan_with_retry(db, customer_id=customer_id, customer_name=customer_name, plan_month=plan_month, remark=remark, upload_batch=upload_batch, created_by=created_by)
     for d in details:
         plan_date_val = normalize_plan_date(d['plan_date'])
         detail = PurchasePlanDetail(plan_id=plan.id, product_id=d['product_id'], product_name=d['product_name'], barcode=d['barcode'], plan_date=plan_date_val, quantity=d['quantity'], shipped_qty=0, remark=d.get('remark', ''))
         db.add(detail)
     await _log_action(db, plan.id, 'create', None, plan.to_dict(), created_by)
     await db.commit()
-    await _invalidate_fifo_cache(plan_month)
-    logger.info(f'采购计划创建成功：{plan_no} - {customer_name} - {len(details)}条明细')
-    return {'plan_id': plan.id, 'plan_no': plan_no}
+    await _invalidate_plan_caches(plan_month)
+    logger.info(f'采购计划创建成功：{plan.plan_no} - {customer_name} - {len(details)}条明细')
+    return {'plan_id': plan.id, 'plan_no': plan.plan_no}
 
 async def update_plan(db: AsyncSession, plan_id: int, *, created_by: str='', **kwargs) -> dict:
     """更新采购计划主单信息（状态、备注等）"""
@@ -198,7 +237,7 @@ async def update_plan(db: AsyncSession, plan_id: int, *, created_by: str='', **k
     await db.flush()
     await _log_action(db, plan.id, 'update', old_data, plan.to_dict(), created_by)
     await db.commit()
-    await _invalidate_fifo_cache(plan.plan_month)
+    await _invalidate_plan_caches(plan.plan_month)
     return plan.to_dict()
 
 async def delete_plan(db: AsyncSession, plan_id: int, *, operator: str='') -> None:
@@ -212,7 +251,7 @@ async def delete_plan(db: AsyncSession, plan_id: int, *, operator: str='') -> No
     await db.delete(plan)
     await _log_action(db, plan_id, 'delete', old_data, None, operator)
     await db.commit()
-    await _invalidate_fifo_cache(plan_month)
+    await _invalidate_plan_caches(plan_month)
     logger.info(f'采购计划删除成功：ID={plan_id}')
 
 async def update_detail(db: AsyncSession, detail_id: int, *, created_by: str='', **kwargs) -> dict:
@@ -233,7 +272,7 @@ async def update_detail(db: AsyncSession, detail_id: int, *, created_by: str='',
     await db.flush()
     await db.commit()
     if plan_month_row:
-        await _invalidate_fifo_cache(plan_month_row[0])
+        await _invalidate_plan_caches(plan_month_row[0])
     return detail.to_dict()
 
 async def delete_detail(db: AsyncSession, detail_id: int) -> None:
@@ -247,7 +286,7 @@ async def delete_detail(db: AsyncSession, detail_id: int) -> None:
     await db.delete(detail)
     await db.commit()
     if plan_month_row:
-        await _invalidate_fifo_cache(plan_month_row[0])
+        await _invalidate_plan_caches(plan_month_row[0])
 
 async def add_details(db: AsyncSession, plan_id: int, details: list[dict]) -> dict:
     """向主单追加明细"""
@@ -266,13 +305,14 @@ async def add_details(db: AsyncSession, plan_id: int, details: list[dict]) -> di
         db.add(detail)
         added += 1
     await db.commit()
-    await _invalidate_fifo_cache(plan.plan_month)
+    await _invalidate_plan_caches(plan.plan_month)
     return {'added_count': added}
 
 async def _get_inventory_map(db: AsyncSession) -> dict:
     """
     获取库存查找字典 key=(customer_name, product_name) value=total_stock
     优先从 Redis 缓存读取，缓存未命中则查询 stock_service
+    超时保护：asyncio.timeout(8) 防止 _fetch_inventory 的4条聚合SQL长时间阻塞
     """
     try:
         from utils.redis_cache import redis_cache
@@ -282,8 +322,12 @@ async def _get_inventory_map(db: AsyncSession) -> dict:
     except (OSError, ConnectionError, ValueError) as e:
         logger.warning(f'Redis缓存读取失败: {e}')
     try:
-        inventory_result = await stock_service.get_inventory(db)
+        async with asyncio.timeout(8):
+            inventory_result = await stock_service.get_inventory(db)
         mapping = build_inventory_map(inventory_result['inventory_data'])
+    except asyncio.TimeoutError:
+        logger.error('库存查询超时(8s)，返回空映射降级')
+        return {}
     except (ValueError, TypeError, OSError) as e:
         logger.warning(f'获取库存数据失败: {e}')
         return {}
@@ -396,122 +440,196 @@ async def _get_shipped_fifo_map(db: AsyncSession, plan_details: list, customer_n
             cached = await redis_cache.get(cache_key)
             if cached is not None:
                 # 验证缓存包含所有请求的 detail_id（缓存 key 为 str，需统一类型比较）
-                cached_int_keys = {int(k) for k in cached.keys()}
+                cached_int_keys = {int(k) for k in cached}
                 detail_ids = {d.id for d in plan_details}
                 if detail_ids.issubset(cached_int_keys):
                     return {int(k): v for k, v in cached.items()}
         except (OSError, ConnectionError, ValueError) as e:
             logger.warning(f'FIFO缓存读取失败: {e}')
 
-    # 收集所有需要查询的 (customer_name, product_name) 对
-    keys_needed = set()
-    for d in plan_details:
-        cname = customer_name_map.get(d.plan_id, '') if customer_name_map else ''
-        if cname and d.product_name:
-            keys_needed.add((cname, d.product_name))
-
-    if not keys_needed:
-        return {}
-
-    # 去重（P1-01: IN列表保护）
-    customers = list({k[0] for k in keys_needed})
-    product_names = list({k[1] for k in keys_needed})
-
-    # P0-01: 计算日期下限——取所有相关明细中最早的plan_date往前推12个月
-    # P1-NEW-01: 转为datetime类型，确保与StockOut.stockout_date(DateTime)比较时索引可用
-    earliest_plan_date = min((d.plan_date for d in plan_details if d.plan_date), default=date.today())
-    # 用replace减年，避免闰年timedelta(days=365)偏移
     try:
-        limit_date = earliest_plan_date.replace(year=earliest_plan_date.year - 1)
-    except ValueError:
-        limit_date = earliest_plan_date.replace(year=earliest_plan_date.year - 1, day=28)
-    stockout_date_limit = datetime(limit_date.year, limit_date.month, limit_date.day)
-
-    # 查询相关主单（P1-03: 用customer_id匹配替代字符串匹配）
-    plan_result = await db.execute(
-        select(PurchasePlan).where(PurchasePlan.customer_name.in_(customers))
-    )
-    all_plans = plan_result.scalars().all()
-    plan_id_to_customer = {p.id: p.customer_name for p in all_plans}
-
-    # 查询相关主单的所有明细
-    relevant_plan_ids = list(plan_id_to_customer.keys())
-    if not relevant_plan_ids:
-        return {}
-
-    detail_result = await db.execute(
-        select(PurchasePlanDetail)
-        .where(PurchasePlanDetail.plan_id.in_(relevant_plan_ids))
-        .order_by(PurchasePlanDetail.plan_date, PurchasePlanDetail.id)
-    )
-    all_details = detail_result.scalars().all()
-
-    # 按 (customer_name, product_name) 分组，保持 plan_date ASC 顺序
-    details_by_key: dict[tuple, list] = {}
-    for d in all_details:
-        cname = plan_id_to_customer.get(d.plan_id, '')
-        if not cname or not d.product_name:
-            continue
-        key = (cname, d.product_name)
-        if key not in keys_needed:
-            continue
-        if key not in details_by_key:
-            details_by_key[key] = []
-        details_by_key[key].append(d)
-
-    # 查出这些客户+产品的出货记录，P0-01: 加12个月日期下限
-
-    stockout_result = await db.execute(
-        select(StockOut.customer, Product.name.label('product_name'), StockOut.quantity, StockOut.returned_quantity, StockOut.stockout_date)
-        .join(Product, StockOut.product_id == Product.id)
-        .where(
-            and_(
-                StockOut.customer.in_(customers),
-                Product.name.in_(product_names),
-                StockOut.customer.isnot(None),
-                StockOut.customer != '',
-                StockOut.stockout_date >= stockout_date_limit,
-            )
-        )
-        .order_by(StockOut.stockout_date, StockOut.id)
-    )
-    stockout_rows = stockout_result.all()
-
-    # 按 (customer, product_name) 分组，累计出货总量
-    shipped_by_key: dict[tuple, int] = {}
-    for row in stockout_rows:
-        key = (row.customer, row.product_name)
-        shipped_by_key[key] = shipped_by_key.get(key, 0) + (row.quantity - row.returned_quantity)
-
-    # FIFO 分配
-    allocated: dict[int, int] = {}
-    for key, details in details_by_key.items():
-        total_shipped = shipped_by_key.get(key, 0)
-        remaining = total_shipped
-        for d in details:
-            if remaining <= 0:
-                allocated[d.id] = 0
-            else:
-                alloc = min(d.quantity, remaining)
-                allocated[d.id] = alloc
-                remaining -= alloc
-
-    # 确保所有传入的 plan_details 都有分配值
-    for d in plan_details:
-        if d.id not in allocated:
-            allocated[d.id] = 0
-
-    # 写入 Redis 缓存
-    if plan_month:
+        result = await _fifo_query_with_timeout(db, plan_details, customer_name_map, plan_month)
+        return result
+    except asyncio.TimeoutError:
+        # SET LOCAL 在 ROLLBACK 后自动重置，但异常路径下连接可能未正确 ROLLBACK
+        # 显式 RESET 防止 statement_timeout 污染后续查询
         try:
-            from utils.redis_cache import redis_cache
-            cache_key = f'{FIFO_CACHE_PREFIX}:{plan_month}'
-            cacheable = {str(k): v for k, v in allocated.items()}
-            await redis_cache.set(cache_key, cacheable, timeout=FIFO_CACHE_TTL)
-        except (OSError, ConnectionError, ValueError) as e:
-            logger.warning(f'FIFO缓存写入失败: {e}')
+            await db.execute(text("RESET statement_timeout"))
+        except Exception:
+            pass
+        logger.error(f'FIFO查询超时 plan_month={plan_month}，返回空映射降级')
+        return {d.id: 0 for d in plan_details}
+    except Exception as e:
+        try:
+            await db.execute(text("RESET statement_timeout"))
+        except Exception:
+            pass
+        logger.error(f'FIFO查询异常: {e}，返回空映射降级', exc_info=True)
+        return {d.id: 0 for d in plan_details}
 
-    return allocated
+
+async def _fifo_query_with_timeout(db: AsyncSession, plan_details: list, customer_name_map: dict | None, plan_month: str) -> dict[int, int]:
+    """FIFO 查询核心逻辑，带超时保护"""
+    async with asyncio.timeout(10):
+        # 收集所有需要查询的 (customer_name, product_name) 对
+        keys_needed = set()
+        product_ids_needed = set()
+        for d in plan_details:
+            cname = customer_name_map.get(d.plan_id, '') if customer_name_map else ''
+            if cname and d.product_name:
+                keys_needed.add((cname, d.product_name))
+            if d.product_id:
+                product_ids_needed.add(d.product_id)
+
+        if not keys_needed:
+            return {}
+
+        # 去重（P1-01: IN列表保护）
+        customers = list({k[0] for k in keys_needed})
+        product_ids = list(product_ids_needed)
+
+        # P0-01: 计算日期下限——取所有相关明细中最早的plan_date往前推12个月
+        # P1-NEW-01: 转为datetime类型，确保与StockOut.stockout_date(DateTime)比较时索引可用
+        earliest_plan_date = min((d.plan_date for d in plan_details if d.plan_date), default=date.today())
+        # 用replace减年，避免闰年timedelta(days=365)偏移
+        try:
+            limit_date = earliest_plan_date.replace(year=earliest_plan_date.year - 1)
+        except ValueError:
+            limit_date = earliest_plan_date.replace(year=earliest_plan_date.year - 1, day=28)
+        stockout_date_limit = datetime(limit_date.year, limit_date.month, limit_date.day)
+
+        # 查询相关主单（P1-03: 用customer_id匹配替代字符串匹配）
+        plan_result = await db.execute(
+            select(PurchasePlan).where(PurchasePlan.customer_name.in_(customers))
+        )
+        all_plans = plan_result.scalars().all()
+        plan_id_to_customer = {p.id: p.customer_name for p in all_plans}
+
+        # 查询相关主单的所有明细
+        relevant_plan_ids = list(plan_id_to_customer.keys())
+        if not relevant_plan_ids:
+            return {}
+
+        detail_result = await db.execute(
+            select(PurchasePlanDetail)
+            .where(PurchasePlanDetail.plan_id.in_(relevant_plan_ids))
+            .order_by(PurchasePlanDetail.plan_date, PurchasePlanDetail.id)
+        )
+        all_details = detail_result.scalars().all()
+
+        # 按 (customer_name, product_name) 分组，保持 plan_date ASC 顺序
+        details_by_key: dict[tuple, list] = {}
+        for d in all_details:
+            cname = plan_id_to_customer.get(d.plan_id, '')
+            if not cname or not d.product_name:
+                continue
+            key = (cname, d.product_name)
+            if key not in keys_needed:
+                continue
+            if key not in details_by_key:
+                details_by_key[key] = []
+            details_by_key[key].append(d)
+
+        # 设置服务端查询超时：SET LOCAL 仅在当前事务内生效，COMMIT/ROLLBACK 后自动重置
+        # 防止 asyncio.timeout 仅取消客户端 await 而 PostgreSQL 仍在执行慢查询
+        try:
+            await db.execute(text("SET LOCAL statement_timeout = '10s'"))
+        except Exception:
+            pass  # SET LOCAL 失败不阻断主流程，依赖 asyncio.timeout 兜底
+
+        # 查出这些客户+产品的出货记录
+        # 优化：用 product_id IN(...) 替代 JOIN Product + Product.name IN(...)
+        # 利用已有索引 idx_stockout_product_customer_type (product_id, customer, stockin_id)
+        # 和 idx_stockout_customer_date (customer, stockout_date)
+        if not product_ids:
+            # 无 product_id 时降级为 JOIN 查询
+            product_names = list({k[1] for k in keys_needed})
+            stockout_result = await db.execute(
+                select(StockOut.customer, Product.name.label('product_name'), StockOut.quantity, StockOut.returned_quantity, StockOut.stockout_date)
+                .join(Product, StockOut.product_id == Product.id)
+                .where(
+                    and_(
+                        StockOut.customer.in_(customers),
+                        Product.name.in_(product_names),
+                        StockOut.customer.isnot(None),
+                        StockOut.customer != '',
+                        StockOut.stockout_date >= stockout_date_limit,
+                    )
+                )
+                .order_by(StockOut.stockout_date, StockOut.id)
+            )
+        else:
+            # 优先用 product_id 查询，避免 JOIN Product 表的额外开销
+            # 先查 stock_out，再在内存中用 product_id → product_name 映射关联
+            stockout_result = await db.execute(
+                select(StockOut.customer, StockOut.product_id, StockOut.quantity, StockOut.returned_quantity, StockOut.stockout_date)
+                .where(
+                    and_(
+                        StockOut.customer.in_(customers),
+                        StockOut.product_id.in_(product_ids),
+                        StockOut.customer.isnot(None),
+                        StockOut.customer != '',
+                        StockOut.stockout_date >= stockout_date_limit,
+                    )
+                )
+                .order_by(StockOut.stockout_date, StockOut.id)
+            )
+            # 构建 product_id → product_name 映射
+            pid_result = await db.execute(select(Product.id, Product.name).where(Product.id.in_(product_ids)))
+            pid_to_name = {r.id: r.name for r in pid_result.all()}
+
+        stockout_rows = stockout_result.all()
+
+        # 构建 product_id → product_name 完整映射（优先用 Product 表，fallback 用计划明细的 product_name）
+        if product_ids:
+            # 补充：pid_to_name 中缺失的 product_id，用计划明细中的 product_name 填充
+            detail_pid_to_name: dict[int, str] = {}
+            for d in all_details:
+                if d.product_id and d.product_name and d.product_id not in detail_pid_to_name:
+                    detail_pid_to_name[d.product_id] = d.product_name
+            for pid, pname in detail_pid_to_name.items():
+                if pid not in pid_to_name:
+                    pid_to_name[pid] = pname
+
+        # 按 (customer, product_name) 分组，累计出货总量
+        shipped_by_key: dict[tuple, int] = {}
+        for row in stockout_rows:
+            if product_ids:
+                pname = pid_to_name.get(row.product_id, '')
+            else:
+                pname = row.product_name
+            key = (row.customer, pname)
+            shipped_by_key[key] = shipped_by_key.get(key, 0) + (row.quantity - row.returned_quantity)
+
+        # FIFO 分配
+        allocated: dict[int, int] = {}
+        for key, details in details_by_key.items():
+            total_shipped = shipped_by_key.get(key, 0)
+            remaining = total_shipped
+            for d in details:
+                if remaining <= 0:
+                    allocated[d.id] = 0
+                else:
+                    alloc = min(d.quantity, remaining)
+                    allocated[d.id] = alloc
+                    remaining -= alloc
+
+        # 确保所有传入的 plan_details 都有分配值
+        for d in plan_details:
+            if d.id not in allocated:
+                allocated[d.id] = 0
+
+        # 写入 Redis 缓存
+        if plan_month:
+            try:
+                from utils.redis_cache import redis_cache
+                cache_key = f'{FIFO_CACHE_PREFIX}:{plan_month}'
+                cacheable = {str(k): v for k, v in allocated.items()}
+                await redis_cache.set(cache_key, cacheable, timeout=FIFO_CACHE_TTL)
+            except (OSError, ConnectionError, ValueError) as e:
+                logger.warning(f'FIFO缓存写入失败: {e}')
+
+        return allocated
 
 async def get_shipment_progress(db: AsyncSession, plan_id: int) -> dict:
     """获取指定计划的出货进度"""
@@ -554,6 +672,12 @@ async def get_shipment_records(db: AsyncSession, plan_id: int) -> list[dict]:
     rows = result.all()
     return [{'stockout_id': row.id, 'shipment_no': row.stockout_no, 'customer_name': row.customer or '', 'product_name': row.product_name, 'quantity': row.quantity - row.returned_quantity, 'shipment_date': row.stockout_date.strftime('%Y-%m-%d') if row.stockout_date else '', 'source_type': 'stockout', 'note': row.note or ''} for row in rows]
 
+@cache_result(
+    key_prefix="pp:monthly",
+    ttl=120,
+    local_ttl=30,
+    key_builder=lambda *args, **kwargs: f"y{kwargs.get('year', 0)}:m{kwargs.get('month', 0)}:c{kwargs.get('customer_id', 0)}",
+)
 async def get_monthly_calendar(db: AsyncSession, year: int, month: int, customer_id: int=0) -> dict:
     """
     月度日历数据：按日期聚合计划，供前端时序面板渲染
@@ -611,6 +735,12 @@ async def get_monthly_calendar(db: AsyncSession, year: int, month: int, customer
                 customer_set[plan.customer_id] = {'id': plan.customer_id, 'name': plan.customer_name, 'icon_url': None}
     return {'year': year, 'month': month, 'days_in_month': days_in_month, 'plans_by_date': plans_by_date, 'customers': list(customer_set.values())}
 
+@cache_result(
+    key_prefix="pp:summary",
+    ttl=120,
+    local_ttl=30,
+    key_builder=lambda *args, **kwargs: f"y{kwargs.get('year', 0)}:m{kwargs.get('month', 0)}",
+)
 async def get_customer_summary(db: AsyncSession, year: int, month: int) -> dict:
     """客户维度汇总统计，单次 eager loading 查询"""
     plan_month = f'{year}-{month:02d}'
@@ -639,7 +769,7 @@ async def get_customer_summary(db: AsyncSession, year: int, month: int) -> dict:
                 ps['warning'] = True
     # 汇总到客户级别
     summary = {}
-    for product_key, ps in product_summary.items():
+    for ps in product_summary.values():
         cid = ps['customer_id']
         if cid not in summary:
             summary[cid] = {'customer_id': cid, 'customer_name': ps['customer_name'], 'plan_qty': 0, 'inventory_qty': 0, 'shipped_qty': 0, 'remaining_qty': 0, 'warning_count': 0}
@@ -849,6 +979,10 @@ async def confirm_staging(db: AsyncSession, session_id: str, batch_id: str='', c
         created_plans.append({'plan_id': plan.id, 'plan_no': plan.plan_no})
     await db.execute(delete(StagingPurchasePlan).where(*conditions))
     await db.commit()
+    # 清除所有涉及月份的缓存（confirm_staging 可能跨多月）
+    affected_months = {pm for _, pm in groups.keys() if pm}
+    for pm in affected_months:
+        await _invalidate_plan_caches(pm)
     logger.info(f'暂存数据确认保存：{len(created_plans)}个主单，{created_details}条明细')
     return {'created_plans': created_plans, 'created_count': created_details, 'skipped_count': len(records) - len(valid_records)}
 

@@ -111,14 +111,16 @@
       :factory-data="summary.factoryData"
       :supplier-data="summary.supplierData"
       :edit-mode="summary.editMode"
+      :loss-rate="summary.lossRate"
       :order-count="purchaseOrders.selectedIds.length"
       :supplier-groups="summary.supplierGroups"
       @close="summary.close"
       @toggle-edit-mode="summary.toggleEditMode"
       @save-edits="handleSaveFactoryEdits"
       @update-qty="handleUpdateFactoryQty"
-      @export-factory="handleExportFactorySummary"
-      @export-supplier="handleExportSupplierSummary"
+      @apply-loss-rate="summary.applyLossRate"
+      @export-factory="summary.exportFactory"
+      @export-supplier="summary.exportSupplier"
       @print-factory="summary.printFactory"
       @print-supplier="summary.printSupplier"
     />
@@ -310,58 +312,13 @@ function handleUpdateFactoryQty(gi: number | string, si: number | string, fi: nu
   summary.updateFactoryQty(Number(gi), Number(si), Number(fi), parseFloat(value) || 0)
 }
 
-async function handleExportFactorySummary() {
-  showToast('正在导出Excel...', 'info')
-  try {
-    const res = await purchaseApi.exportCompleted({ format: 'factory-summary' }) as ApiResponse
-    if (res.success && res.html) {
-      const bom = '\uFEFF'
-      const blob = new Blob([bom + res.html], { type: 'application/vnd.ms-excel;charset=utf-8' })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = '工厂内部采购汇总.xls'
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      URL.revokeObjectURL(url)
-    }
-  } catch {
-    showToast('导出失败', 'error')
-  }
-}
-
-async function handleExportSupplierSummary() {
-  const ids = summary.orderIds.length > 0 ? [...summary.orderIds] : [...purchaseOrders.selectedIds]
-  if (ids.length === 0) {
-    showToast('请先选择订单', 'error')
-    return
-  }
-  showToast('正在生成汇总文件，请稍候...', 'info')
-  try {
-    const { default: axiosInstance } = await import('@/api/request')
-    const blob = await axiosInstance.post('/purchase-center/orders/supplier-summary-export', { ids }, { responseType: 'blob' }) as Blob
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = blob.type.includes('zip') ? '供应商采购订单汇总.zip' : '供应商采购订单汇总.xlsx'
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    URL.revokeObjectURL(url)
-    showToast('导出成功', 'success')
-  } catch {
-    showToast('导出失败，请稍后重试', 'error')
-  }
-}
-
 // --- Completed order handlers ---
 const detailVisible = ref(false)
 const detailOrder = ref<PurchaseOrder | null>(null)
 
 async function handleViewDetail(id: number) {
   try {
-    const res = await purchaseApi.orderDetail(id) as ApiResponse<PurchaseOrder>
+    const res = await purchaseApi.orderDetail(id)
     if (res.success && res.order) {
       detailOrder.value = res.order
       detailVisible.value = true
@@ -372,7 +329,7 @@ async function handleViewDetail(id: number) {
 }
 
 function handleFilterUpdate(payload: { key: string; value: string }) {
-  completed.filters[payload.key] = payload.value
+  ;(completed.filters as Record<string, string>)[payload.key] = payload.value
 }
 
 function handleCompletedSearch() {
@@ -402,12 +359,12 @@ const autoRefresh = useAutoRefresh(async () => {
     const [res, uRes] = await Promise.all([
       purchaseApi.orders({ page: purchaseOrders.page, per_page: 15 }),
       purchaseApi.unprocessedOrders({ page: unprocessed.currentPage, per_page: unprocessed.perPage }),
-    ]) as [ApiResponse, ApiResponse]
-    if (res.success !== false && res.total !== purchaseOrders.total) {
+    ])
+    if (res.total !== purchaseOrders.total) {
       purchaseOrders.total = res.total || 0
       purchaseOrders.orders = (res.orders || []) as PurchaseOrder[]
     }
-    if (uRes.success !== false) {
+    if (uRes) {
       unprocessed.total = uRes.total || 0
       if (uRes.orders) unprocessed.orders = (uRes.orders as UnprocessedOrder[])
     }

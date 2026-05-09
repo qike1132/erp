@@ -54,7 +54,7 @@
 
       <div v-if="viewTab === 'daily'" class="sp-body">
         <div v-if="isLoading" class="sp-empty"><i class="fas fa-spinner fa-spin" />加载中...</div>
-        <div v-else-if="isError" class="sp-empty"><i class="fas fa-exclamation-circle" />加载失败</div>
+        <div v-else-if="isError" class="sp-empty"><i class="fas fa-exclamation-circle" />加载失败 <button class="sp-retry-btn" @click="refetch()">重试</button></div>
         <div v-else-if="!rows.length" class="sp-empty"><i class="fas fa-inbox" />本月暂无出货计划</div>
         <div v-else>
           <div class="sp-day-grid">
@@ -89,6 +89,7 @@
 
       <div v-else class="sp-body">
         <div v-if="sLoading" class="sp-empty"><i class="fas fa-spinner fa-spin" />加载中...</div>
+        <div v-else-if="sError" class="sp-empty"><i class="fas fa-exclamation-circle" />加载失败 <button class="sp-retry-btn" @click="refetchSummary()">重试</button></div>
         <div v-else-if="!summaryCustomers.length" class="sp-empty"><i class="fas fa-inbox" />本月暂无数据</div>
         <div v-else>
           <div class="sp-customer-tags">
@@ -395,7 +396,8 @@ const { data: d, isLoading, isError, refetch } = useQuery({
     return res ? Object.freeze(JSON.parse(JSON.stringify(res))) : res;
   },
   staleTime: 5 * 60 * 1000,
-  retry: 2,
+  retry: 1,
+  retryDelay: 2000,
   placeholderData: keepPreviousData,
 });
 
@@ -406,12 +408,14 @@ interface Row { date: string; _dayNum: number; _weekday: string; customerCount: 
 
 interface CustSumItem { customer_id: number; customer_name: string; plan_qty: number; inventory_qty: number; shipped_qty: number; remaining_qty: number; warning_count: number; }
 
-const { data: sData, isLoading: sLoading, refetch: refetchSummary } = useQuery({
+const { data: sData, isLoading: sLoading, isError: sError, refetch: refetchSummary } = useQuery({
   queryKey: ['pp-summary', () => y.value, () => m.value],
   queryFn: async () => (await planApi.customerSummary({ year: y.value, month: m.value })) as any,
   staleTime: 5 * 60 * 1000,
-  retry: 2,
+  retry: 1,
+  retryDelay: 2000,
   placeholderData: keepPreviousData,
+  enabled: () => viewTab.value === 'summary',
 });
 
 const allCustomers = computed<CustSumItem[]>(() => {
@@ -1406,6 +1410,21 @@ function exportCSV() {
 .sp-empty i {
   font-size: 28px;
   opacity: 0.5;
+}
+
+.sp-retry-btn {
+  margin-top: 6px;
+  padding: 4px 16px;
+  border: 1px solid var(--color-border, #d0d5dd);
+  border-radius: 6px;
+  background: var(--color-bg, #fff);
+  color: var(--color-text, #344054);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.sp-retry-btn:hover {
+  background: var(--color-bg-hover, #f2f4f7);
 }
 
 .sp-modal-bg {

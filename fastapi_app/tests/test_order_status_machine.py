@@ -1,12 +1,11 @@
-"""订单状态机单元测试"""
+"""订单状态派生计算单元测试"""
 import pytest
+from datetime import datetime
 
 from fastapi_app.shared_models.order import (
-    DELETABLE_STATUSES,
-    EDITABLE_STATUSES,
-    STATUS_TRANSITIONS,
     VALID_ORDER_STATUSES,
     Order,
+    compute_status_from_stockouts,
 )
 
 
@@ -28,155 +27,105 @@ class TestOrderStatusValidation:
     def test_valid_status_count(self):
         assert len(VALID_ORDER_STATUSES) == 7
 
+    def test_default_status_is_valid(self):
+        assert "待备货" in VALID_ORDER_STATUSES
+        Order.validate_status("待备货")
 
-class TestOrderStatusTransitions:
-    """测试状态转移规则"""
 
-    def _make_order(self, status: str) -> Order:
+class TestComputeStatusFromStockouts:
+    """测试派生状态计算函数"""
+
+    def _make_order(self, quantity: int = 10, batch_completed_at=None) -> Order:
         return Order(
             id=1,
             order_no="ORD-TEST-001",
             customer="Test Customer",
             product_id=1,
-            quantity=10,
-            status=status,
+            quantity=quantity,
+            status=None,
+            batch_completed_at=batch_completed_at,
         )
 
-    def test_pending_to_partial(self):
-        order = self._make_order("待备货")
-        assert order.can_transition_to("部分备货")
-        order.transition_to("部分备货")
-        assert order.status == "部分备货"
+    # --- 基础状态：无备货无出货 ---
 
-    def test_pending_to_full_prep(self):
-        order = self._make_order("待备货")
-        assert order.can_transition_to("已备货")
+    def test_no_stockouts_returns_pending(self):
+        order = self._make_order()
+        assert compute_status_from_stockouts(order, 0, 0) == '待备货'
 
-    def test_pending_to_cancel(self):
-        order = self._make_order("待备货")
-        assert order.can_transition_to("已取消")
+    # --- 备货状态 ---
 
-    def test_partial_to_ready_ship(self):
-        order = self._make_order("部分备货")
-        assert order.can_transition_to("待出货")
+    def test_partial_deduction_returns_partial(self):
+        order = self._make_order(quantity=10)
+        assert compute_status_from_stockouts(order, 5, 0) == '部分备货'
 
-    def test_partial_to_full_prep(self):
-        order = self._make_order("部分备货")
-        assert order.can_transition_to("已备货")
+    def test_full_deduction_returns_full_prep(self):
+        order = self._make_order(quantity=10)
+        assert compute_status_from_stockouts(order, 10, 0) == '已备货'
 
-    def test_full_prep_to_ready_ship(self):
-        order = self._make_order("已备货")
-        assert order.can_transition_to("待出货")
+    def test_deduction_exceeds_quantity_returns_full_prep(self):
+        order = self._make_order(quantity=10)
+        assert compute_status_from_stockouts(order, 15, 0) == '已备货'
 
-    def test_ready_ship_to_shipped(self):
-        order = self._make_order("待出货")
-        assert order.can_transition_to("已出货")
+    # --- 出货状态 ---
 
-    def test_shipped_to_completed(self):
-        order = self._make_order("已出货")
-        assert order.can_transition_to("已完成")
+    def test_partial_shipment_returns_ready_ship(self):
+        order = self._make_order(quantity=10)
+        assert compute_status_from_stockouts(order, 0, 5) == '待出货'
 
-    def test_completed_is_terminal(self):
-        order = self._make_order("已完成")
-        for status in VALID_ORDER_STATUSES:
-            if status != "已完成":
-                assert not order.can_transition_to(status), f"已完成 should not transition to {status}"
+    def test_full_shipment_returns_shipped(self):
+        order = self._make_order(quantity=10)
+        assert compute_status_from_stockouts(order, 0, 10) == '已出货'
 
-    def test_cancelled_is_terminal(self):
-        order = self._make_order("已取消")
-        for status in VALID_ORDER_STATUSES:
-            if status != "已取消":
-                assert not order.can_transition_to(status), f"已取消 should not transition to {status}"
+    def test_shipment_exceeds_quantity_returns_shipped(self):
+        order = self._make_order(quantity=10)
+        assert compute_status_from_stockouts(order, 0, 15) == '已出货'
 
-    def test_invalid_transition_raises_value_error(self):
-        order = self._make_order("已完成")
-        with pytest.raises(ValueError, match="不允许.*变更为"):
-            order.transition_to("待备货")
+    # --- 出货优先于备货 ---
 
-    def test_same_status_is_allowed(self):
-        order = self._make_order("待备货")
-        assert order.can_transition_to("待备货")
-        order.transition_to("待备货")
-        assert order.status == "待备货"
+    def test_shipment_takes_priority_over_deduction(self):
+        """有出货记录时，出货状态优先于备货状态"""
+        order = self._make_order(quantity=10)
+        # 5件备货 + 3件出货 = 待出货（出货未满）
+        assert compute_status_from_stockouts(order, 5, 3) == '待出货'
+        # 5件备货 + 10件出货 = 已出货（出货已满）
+        assert compute_status_from_stockouts(order, 5, 10) == '已出货'
 
-    def test_invalid_status_in_transition_raises(self):
-        order = self._make_order("待备货")
-        with pytest.raises(ValueError, match="无效的订单状态"):
-            order.transition_to("invalid_status")
+    # --- 批次完成 ---
 
-    def test_full_transition_chain(self):
-        order = self._make_order("待备货")
-        chain = ["待备货", "部分备货", "已备货", "待出货", "已出货", "已完成"]
-        for status in chain:
-            order.transition_to(status)
-            assert order.status == status
+    def test_batch_completed_takes_highest_priority(self):
+        """batch_completed_at 有值时，无论备货/出货量如何，均为批次已完成"""
+        order = self._make_order(batch_completed_at=datetime.now())
+        assert compute_status_from_stockouts(order, 0, 0) == '批次已完成'
+        assert compute_status_from_stockouts(order, 5, 0) == '批次已完成'
+        assert compute_status_from_stockouts(order, 0, 10) == '批次已完成'
 
+    # --- 边界值 ---
 
-class TestOrderDeletableEditable:
-    """测试可删除/可编辑状态"""
+    def test_zero_deduction_and_shipment(self):
+        order = self._make_order(quantity=1)
+        assert compute_status_from_stockouts(order, 0, 0) == '待备货'
 
-    def _make_order(self, status: str) -> Order:
-        return Order(
-            id=1,
-            order_no="ORD-TEST-002",
-            customer="Test Customer",
-            product_id=1,
-            quantity=10,
-            status=status,
-        )
+    def test_single_item_full_deduction(self):
+        order = self._make_order(quantity=1)
+        assert compute_status_from_stockouts(order, 1, 0) == '已备货'
 
-    def test_deletable_statuses(self):
-        for status in DELETABLE_STATUSES:
-            order = self._make_order(status)
-            assert order.is_deletable()
+    def test_single_item_full_shipment(self):
+        order = self._make_order(quantity=1)
+        assert compute_status_from_stockouts(order, 0, 1) == '已出货'
 
-    def test_not_deletable_statuses(self):
-        for status in VALID_ORDER_STATUSES - DELETABLE_STATUSES:
-            order = self._make_order(status)
-            assert not order.is_deletable()
+    # --- 退货场景（净量减少） ---
 
-    def test_editable_statuses(self):
-        for status in EDITABLE_STATUSES:
-            order = self._make_order(status)
-            assert order.is_editable()
+    def test_return_reverts_shipped_to_ready_ship(self):
+        """已出货后退部分货，净出货量 < 订单量 → 待出货"""
+        order = self._make_order(quantity=10)
+        assert compute_status_from_stockouts(order, 0, 6) == '待出货'
 
-    def test_not_editable_statuses(self):
-        for status in VALID_ORDER_STATUSES - EDITABLE_STATUSES:
-            order = self._make_order(status)
-            assert not order.is_editable()
+    def test_return_reverts_to_pending(self):
+        """全部退货，净出货量 = 0，净备货量 = 0 → 待备货"""
+        order = self._make_order(quantity=10)
+        assert compute_status_from_stockouts(order, 0, 0) == '待备货'
 
-    def test_completed_not_deletable(self):
-        order = self._make_order("已完成")
-        assert not order.is_deletable()
-
-    def test_shipped_not_editable(self):
-        order = self._make_order("已出货")
-        assert not order.is_editable()
-
-
-class TestOrderStatusTransitionsCompleteness:
-    """测试状态转移图完整性"""
-
-    def test_all_statuses_have_transitions(self):
-        for status in VALID_ORDER_STATUSES:
-            assert status in STATUS_TRANSITIONS, f"{status} missing from STATUS_TRANSITIONS"
-
-    def test_no_orphan_statuses(self):
-        all_targets = set()
-        for targets in STATUS_TRANSITIONS.values():
-            all_targets.update(targets)
-        for target in all_targets:
-            assert target in VALID_ORDER_STATUSES, f"Orphan target status: {target}"
-
-    def test_default_status_is_valid(self):
-        Order(
-            id=1,
-            order_no="ORD-TEST-003",
-            customer="Test Customer",
-            product_id=1,
-            quantity=10,
-        )
-        # SQLAlchemy default applies on INSERT, not Python construction
-        # So we test that the default value itself is valid
-        assert "待备货" in VALID_ORDER_STATUSES
-        Order.validate_status("待备货")
+    def test_partial_return_with_deduction(self):
+        """退完出货后仍有备货 → 已备货"""
+        order = self._make_order(quantity=10)
+        assert compute_status_from_stockouts(order, 10, 0) == '已备货'

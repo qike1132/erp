@@ -8,13 +8,28 @@ export interface ApiResponse<T = unknown> {
   orders?: T[]
   total?: number
   html?: string
+  task_id?: string
+  filename?: string
+  total_rows?: number
+  total_upserted?: number
+  summary?: T
+  tables?: T
+  backups?: T
+  names?: T
+  products?: T
+  registrations?: T
+  pages?: number
 }
+
+/** 分页结果，与后端 PaginatedResponse 对齐 */
+export type PageResult<T> = PaginatedResponse<T>
 
 export interface PaginatedResponse<T> {
   items: T[]
   total: number
   pages: number
   current_page: number
+  next_cursor?: string | number
 }
 
 export interface OrderItem {
@@ -165,6 +180,8 @@ export interface User {
   username: string
   isSuper: boolean
   permissions: string[]
+  password?: string
+  is_super?: boolean
 }
 
 export interface NavSection {
@@ -197,6 +214,8 @@ export interface Product {
   unit?: string
   note?: string
   status?: boolean
+  price?: number
+  image?: string
 }
 
 export interface ProductionCraft {
@@ -336,4 +355,90 @@ export interface StockoutBatchSubmit {
   quantity: number
   stockout_date: string
   note?: string
+}
+
+export interface OrderBatchItem {
+  id: number
+  order_no: string
+  customer: string
+  order_date: string | null
+  product_id: number
+  product_name: string | null
+  quantity: number
+  status: string | null
+  batch_no: string | null
+  batch_completed_at: string | null
+  is_locked: boolean | null
+}
+
+export interface BatchNoUpdatePayload {
+  batch_no: string | null
+  sync_same_batch?: boolean
+}
+
+export interface BatchAssignPayload {
+  order_ids: number[]
+  batch_no: string
+}
+
+export interface BatchCompletePayload {
+  batch_no: string
+}
+
+export interface ApprovalListResult {
+  success: boolean
+  data: ApprovalItem[]
+  total: number
+  pending_count: number
+  approved_count: number
+  rejected_count: number
+}
+
+export interface Registration {
+  id: number
+  purchase_order_id?: number
+  purchase_order_no?: string
+  supplier_id?: number
+  supplier_name?: string
+  status?: string
+  created_at?: string
+  items?: RegistrationItem[]
+  update_time?: string
+  customer_name?: string
+  product_name?: string
+  product_quantity?: number
+  progress?: number
+  total_ordered?: number
+  total_received?: number
+  remark?: string
+}
+
+export interface RegistrationItem {
+  id: number
+  material_name: string
+  specification?: string
+  material_category?: string
+  ordered_quantity: number
+  received_quantity: number
+  unit?: string
+  remark?: string
+  progress?: number
+}
+
+export interface OrderPreview {
+  id: number
+  purchase_order_no: string
+  supplier_name: string
+  customer_name: string
+  product_name: string
+  product_quantity: number
+  items: RegistrationItem[]
+  status: string
+  progress: number
+  total_ordered: number
+  total_received: number
+  update_time?: string
+  source_orders?: { id: number; order_no: string; customer_name?: string; product_name?: string; quantity?: number }[]
+  item_count?: number
+  order_date?: string
 }

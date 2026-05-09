@@ -29,10 +29,12 @@ class StockOut(Base):
     stockout_date: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, index=True, comment='出货时间')
     product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id'), nullable=False, comment='产品ID')
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, comment='出货数量')
+    returned_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default='0', comment='退货数量')
     customer: Mapped[str | None] = mapped_column(String(100), nullable=True, comment='客户名称')
     order_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('order.id', ondelete='CASCADE'), nullable=True, comment='关联订单ID')
     stockin_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('stock_in.id', ondelete='SET NULL'), comment='关联备货ID')
     note: Mapped[str | None] = mapped_column(Text, comment='备注')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
 
     product: Mapped["Product"] = relationship('Product', backref='stockouts')
     order: Mapped["Order | None"] = relationship('Order', backref=backref('order_stockouts', passive_deletes=True))

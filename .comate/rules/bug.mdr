@@ -1,549 +1,142 @@
-﻿修复 BUG
-# 修复BUG专用（Windows 原生 · 严格工程纪律版 · v2.4.1-LTS）
-
-## 🎯 角色定义
-你是一名具备严格工程纪律的 Windows 原生自动 BUG 修复代理。执行 BUG 修复时，**必须 100% 按以下状态机顺序推进，禁止任何跳步、禁止幻觉输出、禁止提前终止、禁止使用 Linux/WSL 命令，所有操作必须使用 Windows PowerShell 5.1+ 原生语法**。
-
-## 📦 技术栈上下文（供诊断参考）
-### 后端技术栈
-| 分类 | 技术 | 版本/说明 |
-|------|------|----------|
-| Python | Python 3.11+ | 兼容 3.11~3.13，Docker 基础镜像 python:3.13-slim |
-| Web 框架 (主) | Flask | 传统服务端渲染，端口 5003 |
-| Web 框架 (新) | FastAPI | 现代 API 服务，端口 5002 |
-| ORM | SQLAlchemy + Flask-SQLAlchemy | 同步 ORM |
-| 数据库 | MySQL 8.0 | PyMySQL 驱动 |
-| 缓存 | Redis 7.2 | 缓存 + 消息队列 + Pub/Sub |
-| 迁移工具 | Flask-Migrate (Alembic) | 数据库版本管理 |
-| 任务队列 | Celery | 异步任务处理（批量导入、报表导出） |
-| 认证 | Flask-WTF CSRF + JWT | 双认证机制 |
-| 限流 | Flask-Limiter + SlowAPI | 双框架限流 |
-| 监控 | Prometheus + Grafana | 指标采集与可视化 |
-
-### 前端技术栈
-| 分类 | 技术 | 说明 |
-|------|------|------|
-| 渲染方式 | Jinja2 模板 | 服务端渲染，templates/ 目录 |
-| CSS 框架 | Bootstrap 5 | 响应式布局 |
-| JS | 原生 JavaScript + jQuery | 无前端框架 |
-| 图标 | Font Awesome | 图标库 |
-| 通信 | Fetch API + WebSocket | 实时通知 |
-
-### 部署与运维
-| 分类 | 技术 | 说明 |
-|------|------|------|
-| 容器化 | Docker Compose | 多服务编排 |
-| 反向代理 | Nginx | 统一入口，静态文件服务 |
-| 内网穿透 | Cloudflare Tunnel | 公网访问 |
-| CI/CD | GitHub Actions + Jenkins | 自动化部署 |
-| WSGI 服务器 | Waitress | 生产环境 Flask 服务 |
-| ASGI 服务器 | Uvicorn | 生产环境 FastAPI 服务 |
+# IDE BUG 修复规范 (v1.0)
+> 基于 bug.mdr v2.4.1-LTS 精简，适配 IDE 交互场景
+> 核心保留：先诊断后修复 · 最小修复 · 修复必须验证 · 凭证驱动 · 文档沉淀
+> 核心移除：8阶段状态机 · 150行环境探测脚本 · MECE矩阵 · 三重回滚 · 服务重启PID校验 · L1-L5强制全量验证
 
 ---
 
-## 🛡️ 十一大强制约束协议（违规直接终止并回滚）
+## 一、核心纪律
 
-| 约束维度 | AI 强制执行规则 | 违规判定标准 |
-|----------|----------------|------------|
-| **单 BUG 强制闭环** | 必须完整走完 `初始化→日志诊断→根因定位→最小修复→L1~L5 全量验证→环境确认→服务重启→健康校验→回滚预案→清理归档` 全链路。任意一层校验未通过前，**绝对禁止输出 `[STATUS] CLOSED`**。 | 未跑满全链路即声明修复完成 → `PREMATURE_CLOSURE`，强制回滚 |
-| **MECE 五维全覆盖** | 每层验证必须显式覆盖 `[输入校验，输出断言，状态流转，依赖注入，异常分支]` 五大维度，必须输出预定义的 `[MECE_CHECK]` 矩阵，无矩阵视为未完成验证。 | 矩阵缺失/校验路径遗漏 → `COVERAGE_VIOLATION`，终止执行 |
-| **零幻觉基线规则** | 所有结论必须附带 `[BASELINE_REF]` 可追溯凭证（格式：文件路径:行号 / git diff hash / 日志文件哈希 / 进程 PID / 命令输出文件路径）。绝对禁止使用「假设/预期/测试通过/没问题」等无证据主观表述。 | 无凭证主观推断 → `HALLUCINATION_DETECTED`，强制回滚 |
-| **防截断安全协议** | 单次输出字符数>4096 时，必须按逻辑阶段拆分 `[CHUNK x/y]` 分块输出。日志/执行产物必须重定向至 `.tmp/` 目录，正文仅输出文件路径、总行数、首尾各 5 行核心内容。 | 关键堆栈/执行结果截断 → `TRUNCATION_VIOLATION`，重新输出 |
-| **防卡死超时协议** | 所有执行命令必须使用 `Invoke-WithTimeout` 辅助函数包装（自动检测 Job 支持，降级为进程监控），阻塞>30s 自动终止并标记 `[EXEC_TIMEOUT]`。禁止使用 `tail -f`/`ping`/任何交互式提示命令。 | 进程阻塞/触发交互 → `EXEC_HANG`，强制终止并回滚 |
-| **状态持久化规则** | 每一个 PHASE 执行完成后，必须：(1) 将 `[STATE_SNAPSHOT]` JSON 写入 `.tmp/state_phase{N}.json`；(2) 在对话正文末尾输出纯文本 JSON。JSON 缺失/格式损坏则强制回退至 `PHASE 0`。 | 字段缺失/JSON 格式错误 → `STATE_LOST`，强制回退 |
-| **环境快照与三重回滚** | 修复前必须完成 3 项备份：1. 代码备份（Git 仓库自动 stash，非 Git 仓库全量复制修改文件至 `.tmp/code_backup/`）；2. 配置文件备份（`*.json`/`*.config`/`*.env` 脱敏后备份至 `.tmp/config_backup/`）；3. 依赖快照（兼容 pip/poetry/pipenv，自动检测 poetry-plugin-export）。任何环节执行失败，必须按「代码→配置→依赖」顺序执行三重回滚。 | 备份缺失/回滚失败/临时文件残留 → `ENV_POLLUTION`，强制清理 |
-| **服务状态闭环规则** | 代码变更后必须完成 4 步校验：1. 停止旧进程/服务并记录原始 PID；2. 冷启动服务；3. 验证新 PID 与原始 PID 不一致；4. 健康端点连续 3 次返回 200 OK（间隔 2s）。**若检测到非管理员权限，则降级为：仅输出重启指南 + 健康检查脚本，不执行实际重启**。 | 未重启服务/健康检查失败/PID 未变更 → `SERVICE_STALE`，强制回滚 |
-| **性能与安全门禁** | 修复后必须执行 2 项强制校验：1. 接口响应时间基准对比，波动不得超过 15%；2. 静态代码安全扫描（Python 使用 bandit，Node 使用 npm audit），不得存在高危漏洞。 | 性能劣化/高危漏洞未修复 → `QUALITY_GATE_FAILED`，终止执行 |
-| **文档沉淀规则** | 修复闭环后必须完成 2 项记录：1. 更新 `docs/bugs/BUG-{BUG_ID}.md`，记录 BUG 根因、影响范围、修复方案、验证结果；2. 通用问题补充至 `playbooks/troubleshooting.md` 故障排查手册。 | 文档未更新 → `KNOWLEDGE_LOST`，补充完成后方可闭环 |
-| **闭环后强制清理备份** | **仅在 PHASE 8 最终输出 `[STATUS] CLOSED` 前**，必须执行备份目录彻底删除（精确匹配代码/配置/依赖/日志/产物备份）。处于 `RETRY`/`BLOCKED`/验证中状态时**绝对禁止清理**，必须保留至回滚或最终成功。 | 成功前清理备份/失败后残留 → `CLEANUP_VIOLATION`，强制拦截并重试 |
+1. **先诊断后修复**：未定位根因禁止改代码。诊断必须输出根因位置（file:startLine-endLine）和证据（日志/堆栈/代码行为）
+2. **双重凭证**：每个结论必须绑定 `location`（文件:行号）和 `evidence`（代码证据/日志/测试结果），与 shenhecode.mdr 统一
+3. **最小修复**：只改必须改的，不做额外重构、不加防御性代码、不"顺便"优化相邻代码
+4. **修复必须验证**：跑已有测试 + 验证修复点。禁止改完不验证就声明完成
+5. **文档沉淀**：P0/P1 级 BUG 必须记录根因和修复方案（commit message 或 docs/bugs/）
 
 ---
 
-## 🔁 执行状态机（严格按顺序执行，禁止跳步）
+## 二、修复流程（三步法）
 
-⚠️ 所有命令均为 Windows PowerShell 5.1+ 原生语法，禁止任何 Linux/WSL 命令，禁止跨环境调用
+### Step 1：诊断（必须）
 
-### 🔹 PHASE 0: 初始化与环境探测 (INIT)
-**必须先执行以下 PowerShell 代码，无报错后方可进入下一阶段**
+**目标**：定位根因，不是定位症状。
 
-```powershell
-# =============================================================================
-# PHASE 0: 初始化与环境探测 (INIT) v2.4.1-LTS
-# 修复: P2-01 使用直接尝试导出替代插件检测，消除误判
-# =============================================================================
+1. 读取用户描述的错误现象
+2. 追踪代码执行路径：入口→处理逻辑→返回值→异常分支
+3. 定位根因，输出：
+   - **根因位置**：`file:startLine-endLine`
+   - **根因描述**：具体代码行为导致的具体错误
+   - **证据**：代码行/日志/堆栈片段
 
-# --- 0.1 环境设置：强制 UTF-8 输出 ---
-$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-Write-Output "[ENV] PowerShell: $($PSVersionTable.PSVersion) ($($PSVersionTable.PSEdition))"
+**禁止**：
+- 未读代码就猜测原因
+- 只描述现象不定位根因（"接口报500"不是根因，"line 42 空指针解引用"是根因）
+- 修改代码来"试一下"（试错不是诊断）
 
-# --- 0.2 权限检测 ---
-$isAdmin = $false
-try {
-    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
-    $isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-} catch {
-    Write-Warning "[PRIVILEGE] 无法检测管理员状态，假定非管理员模式"
-}
-Write-Output "[PRIVILEGE] 管理员权限: $isAdmin"
+### Step 2：修复（必须）
 
-# --- 0.3 前置依赖检查（温和降级） ---
-$requiredCommands = @("git", "pip", "bandit")
-$missingCommands = @()
-foreach ($cmd in $requiredCommands) {
-    if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) {
-        $missingCommands += $cmd
-        Write-Warning "[DEPS] 命令 '$cmd' 未找到，相关步骤将跳过"
-    }
-}
-if ($missingCommands.Count -gt 0) {
-    Write-Warning "[DEPS] 缺失: $($missingCommands -join ', ')"
-}
-Write-Output "[DEPS_CHECK] 校验完成"
+**目标**：最小变更解决根因。
 
-# --- 0.4 初始化临时目录（防御性清理验证） ---
-try {
-    $currentDir = (Get-Location).Path
-    $tmpPath = Join-Path $currentDir ".tmp"
-    if ($tmpPath -eq $currentDir) {
-        throw "拒绝操作：临时目录路径等于当前工作目录，停止清理防止数据丢失"
-    }
-    if (Test-Path $tmpPath) {
-        Remove-Item -Recurse -Force $tmpPath -ErrorAction SilentlyContinue
-    }
-    New-Item -ItemType Directory -Force -Path $tmpPath, "$tmpPath/code_backup", "$tmpPath/config_backup", "$tmpPath/logs", "$tmpPath/test_results" | Out-Null
-    Write-Output "[DIR_INIT] 临时目录已重建 (路径: $tmpPath)"
-} catch {
-    Write-Error "[FATAL] 无法创建临时目录: $($_.Exception.Message)"
-    exit 1
-}
+1. 确认 git 工作区状态（clean 或 stash 未提交变更）
+2. 编写修复代码，遵循最小修复原则
+3. 输出变更摘要：
+   - **变更文件**：文件路径列表
+   - **变更内容**：每处变更的一句话描述
+   - **影响范围**：↑1层调用方 / ↓1层被调用方
 
-# --- 0.5 日志路径探测 ---
-$logPath = $env:LOG_PATH
-$possibleLogPaths = @(
-    $logPath, ".\logs\fastapi.log", ".\fastapi.log", ".\logs\flask.log", ".\flask.log",
-    ".\nohup.out", ".\windows-service.log", ".\waitress.log", ".\uvicorn.log", ".\access.log"
-)
-$validLogPath = $null
-foreach ($p in $possibleLogPaths) {
-    if ($p -and (Test-Path $p -ErrorAction SilentlyContinue)) { $validLogPath = $p; break }
-}
-if (-not $validLogPath) {
-    Write-Warning "[LOG_INIT] 未找到日志文件，创建空占位"
-    $logPath = ".tmp\log_empty.txt"
-    "" | Out-File -Encoding utf8 $logPath
-} else {
-    Copy-Item -Path $validLogPath -Destination .tmp\log_copy.log -Force
-    $logPath = ".tmp\log_copy.log"
-    Write-Output "[LOG_INIT] 日志已复制"
-}
+**禁止**：
+- 改动与根因无关的代码
+- 添加"防御性"代码处理不可能发生的场景
+- 重构/优化相邻代码
+- 修改配置文件/环境变量（除非根因就是配置错误）
 
-# --- 0.6 生成环境基线快照 ---
-$gitCommit = "NOT_A_GIT_REPO"
-if (Get-Command git -ErrorAction SilentlyContinue) {
-    git rev-parse --git-dir 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0) { $gitCommit = git rev-parse HEAD }
-}
-$logHash = if (Test-Path $logPath) { (Get-FileHash -Algorithm SHA256 -Path $logPath).Hash } else { "N/A" }
-$logLines = if (Test-Path $logPath) { (Get-Content $logPath -ErrorAction SilentlyContinue | Measure-Object -Line).Lines } else { 0 }
-$procSnapshot = Get-Process | Where-Object { $_.ProcessName -match "python|node|java" } | Select-Object Id, ProcessName, StartTime
+### Step 3：验证（必须）
 
-# 端口扫描（管理员优先 Get-NetTCPConnection，失败降级 netstat）
-$portSnapshot = @()
-if ($isAdmin) {
-    try {
-        $portSnapshot = Get-NetTCPConnection -State Listen -ErrorAction Stop | Select-Object LocalAddress, LocalPort, OwningProcess
-    } catch {
-        Write-Warning "[PORT_SCAN] Get-NetTCPConnection 不可用，降级 netstat"
-    }
-}
-if ($portSnapshot.Count -eq 0) {
-    $portSnapshot = netstat -ano | Select-String "LISTENING|ABHÖREN|ECOUTE|LISTEN|IN ASCOLTO" | ForEach-Object {
-        $parts = $_ -split '\s+'
-        if ($parts.Length -ge 5) {
-            [PSCustomObject]@{ LocalAddress = $parts[1]; LocalPort = ($parts[1] -split ':')[-1]; OwningProcess = $parts[-1] }
-        }
-    }
-}
+**目标**：确认修复有效且未引入回归。
 
-@{
-    log_original_path = if ($validLogPath) { $validLogPath } else { "NOT_FOUND" }
-    log_temp_path = $logPath
-    log_total_lines = $logLines
-    log_sha256_hash = $logHash
-    git_commit_id = $gitCommit
-    process_snapshot = $procSnapshot
-    port_snapshot = $portSnapshot
-    is_admin = $isAdmin
-    exec_timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-} | ConvertTo-Json -Depth 4 | Out-File -Encoding utf8 .tmp\baseline.json
-Write-Output "[BASELINE] 快照已保存"
+1. 跑已有测试（`pytest` 相关模块）
+2. 验证修复点（手动构造输入或检查代码路径）
+3. 检查影响范围内是否有回归
 
-# --- 0.7 配置脱敏备份 ---
-$configFiles = Get-ChildItem -Path . -Recurse -Include *.json,*.config,*.env,*.ini -ErrorAction SilentlyContinue | Where-Object {
-    $_.FullName -notlike "*\.tmp*" -and $_.FullName -notlike "*\node_modules*" -and $_.FullName -notlike "*\__pycache__*"
-}
-$keysToMask = @('password', 'secret', 'key', 'token', 'auth', 'api_key', 'db_pass', 'jwt_secret', 'redis_url')
-$backupCount = 0
-foreach ($file in $configFiles) {
-    try {
-        $content = Get-Content $file.FullName -Raw -ErrorAction Stop
-        $desensitized = $content
-        foreach ($k in $keysToMask) {
-            $pattern = "(?i)(\b$k\b\s*[=:]\s*['""]?)[^'"",\s\n]+(['""]?)"
-            $desensitized = $desensitized -replace $pattern, '$1***$2'
-        }
-        $desensitized | Out-File -Encoding utf8 ".tmp/config_backup/$($file.Name)"
-        $backupCount++
-    } catch {
-        Write-Warning "[CONFIG_BACKUP] 失败: $($file.Name)"
-    }
-}
-Write-Output "[CONFIG_BACKUP] 已备份 $backupCount 个文件"
+**验证清单**（修复驱动，非固定模板）：
+- [ ] 根因验证：修复是否解决了诊断中定位的根因？
+- [ ] 回归验证：修复是否引入新问题？
+- [ ] 边界验证：修复是否覆盖了边界条件？
 
-# --- 0.8 依赖快照（修复 P2-01：直接尝试导出，失败降级） ---
-try {
-    if (Test-Path "pyproject.toml") {
-        if (Get-Command poetry -ErrorAction SilentlyContinue) {
-            try {
-                poetry export -f requirements.txt --output .tmp/deps_before.txt 2>$null
-                if ($LASTEXITCODE -eq 0) {
-                    Write-Output "[DEPS] 使用 poetry export"
-                } else {
-                    throw "poetry export 失败 (退出码: $LASTEXITCODE)"
-                }
-            } catch {
-                Write-Warning "[DEPS] poetry export 不可用，降级 pip freeze"
-                pip freeze 2>$null | Out-File -Encoding utf8 .tmp/deps_before.txt
-            }
-        } else {
-            pip freeze 2>$null | Out-File -Encoding utf8 .tmp/deps_before.txt
-        }
-    } elseif (Test-Path "Pipfile" -and (Get-Command pipenv -ErrorAction SilentlyContinue)) {
-        pipenv lock -r 2>$null | Out-File -Encoding utf8 .tmp/deps_before.txt
-    } elseif (Get-Command pip -ErrorAction SilentlyContinue) {
-        pip freeze 2>$null | Out-File -Encoding utf8 .tmp/deps_before.txt
-    } else {
-        "No dependency tool found" | Out-File .tmp/deps_before.txt
-    }
-    Write-Output "[DEPS_SNAPSHOT] 已保存"
-} catch {
-    Write-Warning "[DEPS_SNAPSHOT] 生成失败: $($_.Exception.Message)"
-    "Error generating deps snapshot" | Out-File .tmp/deps_before.txt
-}
-
-# --- 0.9 健康端点探测（显式优先级） ---
-$healthTimeout = if ($env:HEALTH_TIMEOUT) { [int]$env:HEALTH_TIMEOUT } else { 5 }
-$validHealthUrl = $null
-if ($env:PRIMARY_PORT) {
-    $candidate = "http://localhost:$($env:PRIMARY_PORT)/health"
-    try {
-        $resp = Invoke-WebRequest -Uri $candidate -TimeoutSec $healthTimeout -ErrorAction Stop -UseBasicParsing
-        if ($resp.StatusCode -eq 200) {
-            $validHealthUrl = $candidate
-            Write-Output "[HEALTH_CHECK] ✅ PRIMARY_PORT 指定: $validHealthUrl"
-        }
-    } catch {
-        Write-Warning "[HEALTH_CHECK] PRIMARY_PORT 端点不可达: $candidate"
-    }
-}
-if (-not $validHealthUrl -and $env:HEALTH_URL) {
-    try {
-        $resp = Invoke-WebRequest -Uri $env:HEALTH_URL -TimeoutSec $healthTimeout -ErrorAction Stop -UseBasicParsing
-        if ($resp.StatusCode -eq 200) {
-            $validHealthUrl = $env:HEALTH_URL
-            Write-Output "[HEALTH_CHECK] ✅ HEALTH_URL 指定: $validHealthUrl"
-        }
-    } catch {
-        Write-Warning "[HEALTH_CHECK] HEALTH_URL 不可达: $env:HEALTH_URL"
-    }
-}
-if (-not $validHealthUrl) {
-    $autoUrls = @("http://localhost:5002/health", "http://localhost:5003/health")
-    foreach ($url in $autoUrls) {
-        try {
-            $resp = Invoke-WebRequest -Uri $url -TimeoutSec $healthTimeout -ErrorAction Stop -UseBasicParsing
-            if ($resp.StatusCode -eq 200) {
-                $validHealthUrl = $url
-                Write-Output "[HEALTH_CHECK] ✅ 自动探测: $url"
-                break
-            }
-        } catch {}
-    }
-}
-if (-not $validHealthUrl) {
-    $validHealthUrl = "http://localhost:5003/health"
-    Write-Warning "[HEALTH_CHECK] 所有端点不可达，使用兜底: $validHealthUrl"
-}
-$validHealthUrl | Out-File -Encoding utf8 .tmp\health_url.txt
-
-# --- 0.10 超时执行辅助函数 ---
-$SupportsJobs = $true
-try {
-    $testJob = Start-Job -ScriptBlock { 1 } -ErrorAction Stop
-    Wait-Job $testJob -TimeoutSec 2 | Out-Null
-    Remove-Job $testJob -Force -ErrorAction SilentlyContinue
-} catch {
-    $SupportsJobs = $false
-    Write-Warning "[UTIL] Start-Job 不可用，将使用进程监控模式"
-}
-
-function Invoke-WithTimeout {
-    param(
-        [Parameter(Mandatory=$true)][string]$Command,
-        [int]$TimeoutSec = 30,
-        [string]$LogFile = ".tmp\logs\exec.log"
-    )
-    if ($SupportsJobs) {
-        $job = Start-Job -ScriptBlock { Invoke-Expression $using:Command }
-        $completed = Wait-Job $job -TimeoutSec $TimeoutSec
-        if ($completed) {
-            $output = Receive-Job $job
-            $output | Out-File -FilePath $LogFile -Append -Encoding utf8
-            Remove-Job $job -Force
-            return @{ Success = $true; Output = $output }
-        } else {
-            Stop-Job $job -ErrorAction SilentlyContinue
-            Remove-Job $job -Force -ErrorAction SilentlyContinue
-            $errMsg = "[EXEC_TIMEOUT] Job 超时 (${TimeoutSec}s): $Command"
-            Write-Error $errMsg | Out-File $LogFile -Append
-            return @{ Success = $false; Error = $errMsg }
-        }
-    } else {
-        $proc = Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile", "-Command", $Command `
-            -RedirectStandardOutput ".tmp\logs\proc_out.txt" `
-            -RedirectStandardError ".tmp\logs\proc_err.txt" `
-            -PassThru -NoNewWindow
-        $elapsed = 0
-        while ($elapsed -lt $TimeoutSec -and -not $proc.HasExited) {
-            Start-Sleep -Seconds 1
-            $elapsed++
-        }
-        if (-not $proc.HasExited) {
-            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-            $errMsg = "[EXEC_TIMEOUT] 进程超时 (${TimeoutSec}s): $Command"
-            Write-Error $errMsg | Out-File $LogFile -Append
-            return @{ Success = $false; Error = $errMsg }
-        }
-        $output = ""
-        if (Test-Path ".tmp\logs\proc_out.txt") { $output += Get-Content ".tmp\logs\proc_out.txt" -Raw }
-        if (Test-Path ".tmp\logs\proc_err.txt") { $output += Get-Content ".tmp\logs\proc_err.txt" -Raw }
-        $output | Out-File -FilePath $LogFile -Append -Encoding utf8
-        return @{ Success = ($proc.ExitCode -eq 0); Output = $output; ExitCode = $proc.ExitCode }
-    }
-}
-Write-Output "[UTIL_READY] Invoke-WithTimeout 已加载 (Job 支持: $SupportsJobs)"
-
-# --- 0.11 BUG_ID 解析 ---
-$bugId = $env:BUG_ID
-if (-not $bugId) {
-    $branchName = git branch --show-current 2>$null
-    if ($branchName) {
-        switch -Regex ($branchName) {
-            "^fix/(.+)$"   { $bugId = $matches[1]; break }
-            "^bugfix/(.+)$" { $bugId = $matches[1]; break }
-            "^issue/(\d+)$" { $bugId = "ISSUE-$($matches[1])"; break }
-            "^hotfix/(.+)$" { $bugId = "HOTFIX-$($matches[1])"; break }
-            default { $bugId = $null }
-        }
-    }
-    if (-not $bugId) {
-        $bugId = "AUTO-" + (Get-Date -Format "yyyyMMdd-HHmmss")
-        Write-Warning "[BUG_ID] 使用自动生成: $bugId"
-    }
-}
-Write-Output "[BUG_ID] $bugId"
-
-# --- 0.12 输出 PHASE 0 状态快照 ---
-$stateSnapshot = @{
-    phase = 0
-    status = "INIT_COMPLETED"
-    baseline_file = ".tmp\baseline.json"
-    health_url = $validHealthUrl
-    git_commit = $gitCommit
-    is_admin = $isAdmin
-    supports_jobs = $SupportsJobs
-    timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-}
-$stateSnapshot | ConvertTo-Json -Depth 3 | Out-File -Encoding utf8 ".tmp\state_phase0.json"
-Write-Output "`n[STATE_SNAPSHOT] $(ConvertTo-Json $stateSnapshot -Compress)"
-Write-Output "`n[PHASE 0 COMPLETED] ✅ 环境初始化完成"
-
-# --- 0.13 显式推进指令 ---
-Write-Output "`n[ACTION_REQUIRED] 请 AI 代理立即进入 PHASE 1，执行诊断命令："
-Write-Output "  Get-Content .tmp\log_copy.log -Tail 50"
-Write-Output "  或根据用户 BUG 描述执行针对性日志过滤。"
-Write-Output "  若用户尚未提供 BUG 描述，请主动询问具体错误现象或堆栈信息。"
-```
+**如果测试失败**：回到 Step 2 修复，不跳过验证声明完成。
 
 ---
 
-### 🔹 PHASE 1~7 执行框架（AI 严格按约束逐项推进）
+## 三、复杂 BUG 扩展流程
 
-> 📌 **执行规范**：每个 PHASE 必须输出 `[MECE_CHECK]` 矩阵 + `[BASELINE_REF]` 凭证 + `[STATE_SNAPSHOT]` JSON
+以下场景在 Step 1 诊断后判断是否需要扩展：
 
-```text
-[MECE_CHECK] (PHASE X - 验证层级)
-- 输入校验: PASS/FAIL | 凭证: [文件:行号 或 输出文件路径]
-- 输出断言: PASS/FAIL | 凭证: [...]
-- 状态流转: PASS/FAIL | 凭证: [...]
-- 依赖注入: PASS/FAIL | 凭证: [...]
-- 异常分支: PASS/FAIL | 凭证: [...]
+| 场景 | 扩展步骤 |
+|------|---------|
+| 影响范围不明确 | Step 1 后增加**影响评估**：扫描↑2层调用方，列出受影响功能 |
+| 涉及数据库迁移 | Step 2 后增加**迁移验证**：确认迁移可逆、数据无丢失 |
+| 涉及并发/竞态 | Step 3 后增加**并发验证**：多线程/多进程场景下验证 |
+| 涉及安全漏洞 | Step 3 后增加**安全验证**：确认漏洞利用路径被阻断 |
+| P0 级（数据丢失/服务崩溃） | Step 3 后增加**文档沉淀**：写 docs/bugs/BUG-{ID}.md |
 
-[BASELINE_REF] [文件路径:行号 / git diff hash / 日志哈希 / PID / 输出文件路径]
-
-[STATE_SNAPSHOT] {"phase":X,"status":"PASS/FAIL","timestamp":"...","next_phase":"X+1"}
-```
-
-#### L1~L5 全量验证层级定义
-| 层级 | 名称 | 覆盖范围 | 执行工具/方法 |
-|------|------|----------|---------------|
-| L1 | 单元测试 | 修复函数/方法的独立逻辑 | `pytest tests/unit/ -v` |
-| L2 | 集成测试 | 数据库/缓存/外部服务交互 | `pytest tests/integration/ -v` |
-| L3 | 接口契约测试 | API 请求/响应结构、状态码 | `Invoke-WebRequest` / `curl` 脚本 |
-| L4 | 端到端测试 | 完整用户场景模拟 | `pytest tests/e2e/` |
-| L5 | 性能与安全门禁 | 响应时间 ≤15% 波动，bandit 无高危 | `bandit -r src/ -f json` |
+扩展流程不强制所有 BUG 执行，按诊断结论按需启用。
 
 ---
 
-### 🔹 PHASE 8: 闭环清理与文档归档 (v2.4.1-LTS)
+## 四、回滚机制
 
-```powershell
-# =============================================================================
-# PHASE 8: 闭环清理与文档归档 v2.4.1-LTS
-# =============================================================================
+**唯一回滚手段：git**
 
-# --- 8.1 BUG_ID 确认 ---
-$bugId = $env:BUG_ID
-if (-not $bugId) {
-    $branchName = git branch --show-current 2>$null
-    if ($branchName) {
-        switch -Regex ($branchName) {
-            "^fix/(.+)$"    { $bugId = $matches[1]; break }
-            "^bugfix/(.+)$" { $bugId = $matches[1]; break }
-            "^issue/(\d+)$" { $bugId = "ISSUE-$($matches[1])"; break }
-            "^hotfix/(.+)$" { $bugId = "HOTFIX-$($matches[1])"; break }
-            default { $bugId = "AUTO-" + (Get-Date -Format "yyyyMMdd-HHmmss") }
-        }
-    } else {
-        $bugId = "AUTO-" + (Get-Date -Format "yyyyMMdd-HHmmss")
-        Write-Warning "[BUG_ID] 使用自动生成: $bugId"
-    }
-}
+- 修复前：确认 git 工作区干净，或 `git stash` 保存未提交变更
+- 修复失败：`git checkout -- <file>` 撤销单文件，或 `git stash pop` 恢复全部
+- 修复完成且验证通过：正常 commit
 
-# --- 8.2 生成文档（仅摘要，避免截断）---
-$docDir = "docs/bugs"
-if (-not (Test-Path $docDir)) { New-Item -ItemType Directory -Force -Path $docDir | Out-Null }
-$docPath = "$docDir/BUG-${bugId}.md"
-
-$gitCommitFull = if (Get-Command git -ErrorAction SilentlyContinue) { git rev-parse HEAD 2>$null } else { "N/A" }
-$gitDiffStat = if (Get-Command git -ErrorAction SilentlyContinue) { (git diff --stat HEAD 2>$null) -join "`n" } else { "N/A" }
-
-$rootCause = if ($env:BUG_ROOT_CAUSE) { $env:BUG_ROOT_CAUSE } else { "[由 AI 在 Phase 2 填充]" }
-$impactScope = if ($env:BUG_IMPACT) { $env:BUG_IMPACT } else { "[由 AI 填充]" }
-
-@"
-# BUG-${bugId} 修复记录
-
-- **修复时间**: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-- **Git Commit**: $gitCommitFull
-- **根因分析**: $rootCause
-- **影响范围**: $impactScope
-- **修复方案统计**:
-  ```
-  $gitDiffStat
-  ```
-- **完整代码差异**: 请通过 Git Commit `$gitCommitFull` 查看完整变更，防止文档截断。
-- **验证结果**: L1~L5 全部通过 ✅
-- **健康端点**: $(Get-Content .tmp\health_url.txt)
-"@ | Out-File -Encoding utf8 $docPath
-Write-Output "[DOC] 已保存: $docPath"
-
-# --- 8.3 补充故障排查手册 ---
-$playbookPath = "playbooks/troubleshooting.md"
-if (-not (Test-Path $playbookPath)) {
-    New-Item -ItemType Directory -Force -Path "playbooks" | Out-Null
-    "# 故障排查手册`n`n" | Out-File -Encoding utf8 $playbookPath
-}
-$playbookEntry = @"
-
-## BUG-${bugId} | $(Get-Date -Format "yyyy-MM-dd")
-- **现象**: [待补充]
-- **根因**: $rootCause
-- **解决**: 参考 [$docPath]($docPath)
-"@
-Add-Content -Path $playbookPath -Value $playbookEntry -Encoding utf8
-Write-Output "[PLAYBOOK] 已更新: $playbookPath"
-
-# --- 8.4 清理临时目录（增强防御）---
-$tmpPath = Join-Path (Get-Location).Path ".tmp"
-$currentDir = (Get-Location).Path
-if ($tmpPath -and (Test-Path $tmpPath) -and ($tmpPath -ne $currentDir) -and ($tmpPath -like "*\.tmp")) {
-    Remove-Item -Recurse -Force $tmpPath -ErrorAction SilentlyContinue
-    Write-Output "[CLEANUP] 临时目录已删除: $tmpPath"
-} else {
-    Write-Warning "[CLEANUP] 跳过清理：路径验证失败或路径不符合清理规则"
-}
-
-# --- 8.5 闭环声明 ---
-$finalSnapshot = @{
-    phase = 8
-    status = "CLOSED"
-    bug_id = $bugId
-    doc_path = $docPath
-    playbook_updated = $true
-    cleanup_done = $true
-    timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-}
-Write-Output "`n[STATE_SNAPSHOT] $(ConvertTo-Json $finalSnapshot -Compress)"
-Write-Output "`n[STATUS] CLOSED - BUG#$bugId 修复流程完整闭环"
-```
+**不创建**：`.tmp/` 备份目录、配置文件脱敏副本、依赖快照文件。
 
 ---
 
-## 📎 附录：关键输出格式规范
+## 五、技术栈感知
 
-### [MECE_CHECK] 矩阵模板
-```text
-[MECE_CHECK] (PHASE X)
-- 输入校验: PASS | 凭证: test_xxx.py:45
-- 输出断言: PASS | 凭证: 200 OK
-- 状态流转: PASS | 凭证: DB 状态变更
-- 依赖注入: PASS | 凭证: Mock 隔离
-- 异常分支: PASS | 凭证: 异常捕获
-```
+**不从规则文件硬编码假设，从项目代码推断**：
 
-### [BASELINE_REF] 凭证格式
-```text
-[BASELINE_REF] src/api/user.py:128 | git diff a1b2c3d | log sha256:abc123... | PID:12345
-```
+修复启动时静默读取：
+- `requirements.txt` / `pyproject.toml` → Python 依赖和版本
+- 项目实际代码 → 数据库类型（MySQL/PostgreSQL）、ORM（SQLAlchemy同步/异步）、框架（Flask/FastAPI）
+- `docker-compose.yml` → 服务架构
 
-### [STATE_SNAPSHOT] JSON Schema
-```json
-{"phase":0,"status":"INIT_COMPLETED","baseline_file":".tmp\\baseline.json","health_url":"http://localhost:5003/health","git_commit":"abc123f","is_admin":true,"supports_jobs":true,"timestamp":"2026-01-19T14:30:22Z"}
-```
+推断失败的信息在诊断中标记 `[待确认]`，不阻塞修复。
 
 ---
 
-## ⚠️ 重要执行提醒
+## 六、修复与审核的联动（强制执行）
 
-1. **权限降级**：非管理员下，服务重启等敏感操作将转为输出指南。
-2. **截断处理**：超长输出请分块 `[CHUNK 1/2]`，正文仅展示摘要。
-3. **回滚触发**：任何阶段 `status == "FAIL"`，立即执行三重回滚。
-4. **人工介入**：连续 2 次重试失败后，输出 `[BLOCKED]` 并提示需人工排查。
-5. **企业环境**：若 `Start-Job` 被策略禁用，系统将自动降级为进程监控模式，无需手动干预。
+当 BUG 修复由代码审核（shenhecode.mdr）触发时（审核发现 P0/P1 自动切换）：
+
+1. 审核报告中的 P0/P1 问题 → **直接作为 Step 1 的诊断结论**（跳过用户描述，直接从审核证据开始）
+2. 审核报告中的修复方向 → 作为 Step 2 的参考（不照搬，按实际代码调整）
+3. 修复完成后 → **必须触发回流审核**：对修复文件重新执行 shenhecode.mdr 广度扫描
+4. 回流审核发现新 P0/P1 → 再次进入 bug.mdr 修复（最多 3 轮）
+5. 回流审核无 P0/P1 → 闭环完成
 
 ---
 
-✅ **提示词加载完成 · v2.4.1-LTS · 审计闭环**
+## 七、与原版 bug.mdr 的对照
 
-🎯 **就绪状态**: 可立即投入生产使用，支持：
-- ✅ Windows PowerShell 5.1 / 7.x / PS Core
-- ✅ 非管理员/受限终端/企业策略环境
-- ✅ Poetry (直接尝试导出，失败降级)、Pipenv、pip 多依赖管理
-- ✅ 多端口服务健康检查显式优先级 (PRIMARY_PORT > HEALTH_URL > 自动)
-- ✅ Git Diff 防截断，文档与 Playbook 双轨沉淀
+| 原版 | 精简版 | 理由 |
+|------|--------|------|
+| PHASE 0：150行环境探测脚本 | 静默读取项目文件 | IDE可自动获取信息 |
+| 8阶段严格状态机 | 3步法 + 可选扩展 | 按复杂度选流程，不一刀切 |
+| MECE五维验证矩阵 | 修复驱动3问验证清单 | 维度由修复内容决定 |
+| 三重回滚（代码+配置+依赖） | git 唯一回滚 | git已是完整回滚机制 |
+| L1-L5五层强制验证 | 跑已有测试 + 验证修复点 | 按项目实际测试能力 |
+| 服务重启 + PID校验 + 健康检查 | 移除，提示用户执行 | 不应重启服务 |
+| STATE_SNAPSHOT JSON持久化 | 移除 | 交互式场景由人类确认 |
+| 十一大强制约束 | 5条核心纪律 | 去CI管道约束 |
+| 固定技术栈声明（MySQL 8.0） | 自动探测，代码为权威 | 避免栈基线与实际矛盾 |
+| 所有BUG写文档 | P0/P1写文档，其他commit记录 | 分级记录，避免形式主义 |
 
-**请提供 BUG 描述，系统将自动启动 PHASE 0 初始化，并主动推进至诊断阶段...** 🚀
-````
+---
+
+**版本**: v1.0-IDE
+**来源**: bug.mdr v2.4.1-LTS 精简
+**定位**: IDE交互场景BUG修复规范 · 先诊断后修复 · 最小变更 · 凭证驱动 · 与shenhecode.mdr审核联动

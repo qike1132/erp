@@ -5,7 +5,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
-from fastapi_app.core.database import get_async_db
+from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.schemas.approval import (
     ApprovalActionRequest,
@@ -36,7 +36,7 @@ async def approval_list(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     user: User = Depends(_require_admin()),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
 ):
     result = await approval_service.get_approval_list(db, status, search, page, per_page)
     return ApprovalListResponse(
@@ -51,7 +51,7 @@ async def approval_list(
 async def approval_detail(
     approval_id: int,
     user: User = Depends(_require_admin()),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
 ):
     try:
         data = await approval_service.get_approval_detail(db, approval_id)
@@ -117,7 +117,7 @@ async def reject(
 @router.get("/pending-count", response_model=ApprovalPendingCountResponse)
 async def pending_count(
     user: User = Depends(_require_admin()),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
 ):
     from fastapi_app.core.cache import cache_result
     from fastapi_app.services.approval_service import get_pending_count as _get_pending_count

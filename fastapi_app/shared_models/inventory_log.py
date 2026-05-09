@@ -29,6 +29,7 @@ class InventoryLog(Base):
     related_id: Mapped[str | None] = mapped_column(String(50), comment='关联单据编号')
     note: Mapped[str | None] = mapped_column(Text, comment='备注')
     customer: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True, comment='客户名称')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
 
     product: Mapped["Product"] = relationship('Product', backref='inventory_logs')
 

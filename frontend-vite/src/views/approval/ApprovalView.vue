@@ -192,7 +192,7 @@ const statusOptions = [
 
 const { data: result, isLoading } = useQuery({
   queryKey: ['approvals', () => statusFilter.value, () => debouncedSearch.value, () => currentPage.value],
-  queryFn: () => approvalApi.list({ status: statusFilter.value || undefined, search: debouncedSearch.value || undefined, page: currentPage.value, per_page: perPage }) as Promise<ApprovalListResult>,
+  queryFn: () => approvalApi.list({ status: statusFilter.value || undefined, search: debouncedSearch.value || undefined, page: currentPage.value, per_page: perPage }),
   staleTime: 30_000,
   gcTime: 60_000,
 })

@@ -44,7 +44,7 @@ class ProductResponse(BaseModel):
 class ProductListResponse(BaseModel):
     """产品列表响应"""
     success: bool = True
-    data: list[dict]
+    items: list[dict]
     total: int = 0
 
 

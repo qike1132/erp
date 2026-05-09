@@ -47,10 +47,10 @@ class PurchaseOrder(Base):
     completed_by: Mapped[str | None] = mapped_column(String(50), comment='完成人')
 
     items: Mapped[list["PurchaseOrderItem"]] = relationship(
-        'PurchaseOrderItem', backref='order', cascade='all, delete-orphan', lazy='select'
+        'PurchaseOrderItem', backref='order', cascade='all, delete-orphan', lazy='selectin'
     )
     supplier_rel: Mapped["Supplier | None"] = relationship(
-        "Supplier", back_populates="purchase_orders", lazy="select"
+        "Supplier", back_populates="purchase_orders", lazy="selectin"
     )
 
     __table_args__ = (
@@ -126,6 +126,8 @@ class PurchaseOrderItem(Base):
     remark: Mapped[str | None] = mapped_column(Text, comment='备注')
     supplier_name: Mapped[str | None] = mapped_column(String(100), comment='供应商名称(明细级)')
     create_time: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, comment='创建时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+
 
     __table_args__ = (
         Index('idx_purchase_order_item_order', 'order_id'),

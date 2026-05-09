@@ -28,5 +28,6 @@ class CaseStockOut(Base):
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     customer: Mapped[str | None] = mapped_column(String(100), index=True)
     note: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
 
     case: Mapped["Case"] = relationship('Case', backref='stockouts')

@@ -4,7 +4,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.config import settings
-from fastapi_app.core.database import get_async_db as get_db
+from fastapi_app.core.database import get_async_db as get_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.schemas.supplier import (
     SupplierActionResponse,
@@ -26,7 +26,7 @@ def _supplier_to_resp(s) -> SupplierResponse:
     return SupplierResponse(id=s.id, name=s.name, contact_person=s.contact_person, phone=s.phone, address=s.address, remark=s.remark, status=s.status, created_at=s.created_at.strftime('%Y-%m-%d %H:%M') if s.created_at else None)
 
 @router.get('/list', response_model=SupplierListResponse)
-async def list_suppliers(page: int=Query(1, ge=1, description='页码'), per_page: int=Query(50, ge=1, le=200, description='每页数量'), search: str=Query('', max_length=100, description='搜索关键词'), _user: User=Depends(require_permission('supplier_manage')), db: AsyncSession=Depends(get_db)):
+async def list_suppliers(page: int=Query(1, ge=1, description='页码'), per_page: int=Query(50, ge=1, le=200, description='每页数量'), search: str=Query('', max_length=100, description='搜索关键词'), _user: User=Depends(require_permission('supplier_manage')), db: AsyncSession=Depends(get_async_read_db)):
     """供应商列表（支持分页和搜索，带缓存）"""
     if not search and page == 1:
         cache_key = f"{SUPPLIER_LIST_CACHE_KEY}:{per_page}"
@@ -84,7 +84,7 @@ async def toggle_status(supplier_id: int, _user: User=Depends(require_permission
         raise HTTPException(status_code=400, detail=settings.sanitize_business_error(e)) from e
 
 @router.get('/search')
-async def search_suppliers(q: str=Query('', description='搜索关键词'), _user: User=Depends(require_permission('supplier_manage')), db: AsyncSession=Depends(get_db)):
+async def search_suppliers(q: str=Query('', description='搜索关键词'), _user: User=Depends(require_permission('supplier_manage')), db: AsyncSession=Depends(get_async_read_db)):
     """供应商搜索（限制返回50条）"""
     if not q.strip():
         return []
@@ -99,7 +99,7 @@ _ACTIVE_SUPPLIER_CACHE_KEY = 'supplier:active_names'
 _ACTIVE_SUPPLIER_CACHE_TTL = 300
 
 @router.get('/active-names')
-async def active_names(_user: User=Depends(require_permission('supplier_manage')), db: AsyncSession=Depends(get_db)):
+async def active_names(_user: User=Depends(require_permission('supplier_manage')), db: AsyncSession=Depends(get_async_read_db)):
     """获取所有启用供应商名称列表（带Redis缓存，用于下拉选择）"""
     cached = await redis_cache.get(_ACTIVE_SUPPLIER_CACHE_KEY)
     if cached is not None:

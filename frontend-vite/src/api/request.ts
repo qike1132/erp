@@ -3,7 +3,7 @@ import type { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse, AxiosErr
 
 const service: AxiosInstance = axios.create({
   baseURL: '/api/v1',
-  timeout: 30000,
+  timeout: 15000,
   withCredentials: true,
 })
 
@@ -33,7 +33,7 @@ service.interceptors.response.use(
 )
 
 const RETRY_STATUS_CODES = [502, 503, 504]
-const MAX_RETRIES = 3
+const MAX_RETRIES = 2
 const RETRY_DELAY_MS = 1000
 
 function shouldRetry(error: AxiosError, retryCount: number): boolean {

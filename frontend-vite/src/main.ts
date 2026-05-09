@@ -28,5 +28,7 @@ app.use(VueQueryPlugin, {
 
 app.mount('#app')
 
+import('./utils/webVitals').then(({ initWebVitals }) => initWebVitals())
+
 // FontAwesome 异步加载 — 不阻塞首次渲染，图标在页面可见后短暂延迟出现
 import('@fortawesome/fontawesome-free/css/all.min.css')

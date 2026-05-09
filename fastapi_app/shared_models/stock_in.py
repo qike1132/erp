@@ -28,7 +28,10 @@ class StockIn(Base):
     customer: Mapped[str] = mapped_column(String(100), nullable=False, index=True, comment='客户名称')
     product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id'), nullable=False, index=True, comment='产品ID')
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, comment='备货数量')
+    order_type: Mapped[str] = mapped_column(String(20), default='regular', nullable=False, comment='订单类型：regular=常规订单, custom=定制订单')
+    country: Mapped[str | None] = mapped_column(String(100), comment='国家名称（仅定制订单使用）')
     note: Mapped[str | None] = mapped_column(Text, comment='备注')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
 
     product: Mapped["Product"] = relationship('Product', backref='stockins')
     stockin_stockouts: Mapped[list["StockOut"]] = relationship('StockOut', backref='stockin')

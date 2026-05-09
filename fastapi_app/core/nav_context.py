@@ -38,6 +38,7 @@ FLASK_TO_FASTAPI_URL_MAP = {
     'purchase_plan.plan_list': '/purchase-plan',
     'backup.index': '/backup',
     'app_update.index': '/app-update',
+    'order_batch.index': '/order-batch',
 }
 
 # 分区显示顺序

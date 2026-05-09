@@ -28,6 +28,7 @@ class PackagingRecord(Base):
     upload_batch: Mapped[str | None] = mapped_column(String(64), nullable=True, comment='上传批次ID')
     create_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, comment='创建时间')
     created_by: Mapped[str | None] = mapped_column(String(50), nullable=True, comment='创建人')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
 
     def to_dict(self):
         return {

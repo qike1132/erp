@@ -85,6 +85,7 @@ const iconMap: Record<string, string> = {
   'material-calculator': 'fas fa-list',
   'fa-database': 'fas fa-database',
   'fa-mobile-alt': 'fas fa-mobile-alt',
+  'fa-layer-group': 'fas fa-layer-group',
 }
 </script>
 

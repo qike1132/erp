@@ -26,8 +26,30 @@ from fastapi_app.shared_models import (
     StockOut,
     User,
 )
+from fastapi_app.shared_models.order import compute_status_from_stockouts
 
 logger = logging.getLogger(__name__)
+
+
+async def compute_order_status_from_db(db: AsyncSession, order: Order) -> str:
+    """从数据库查询订单关联的出入库记录，派生计算订单状态"""
+    result = await db.execute(
+        select(StockOut.stockin_id, func.sum(StockOut.quantity - StockOut.returned_quantity))
+        .where(StockOut.order_id == order.id)
+        .group_by(StockOut.stockin_id)
+    )
+    deducted_qty = 0
+    shipped_qty = 0
+    for stockin_id, qty in result:
+        if qty is None:
+            continue
+        if stockin_id is not None:
+            deducted_qty += int(qty)
+        else:
+            shipped_qty += int(qty)
+    deducted_qty = max(0, deducted_qty)
+    shipped_qty = max(0, shipped_qty)
+    return compute_status_from_stockouts(order, deducted_qty, shipped_qty)
 
 
 async def _safe_invalidate_purchase_cache():

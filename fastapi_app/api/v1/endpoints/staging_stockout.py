@@ -8,7 +8,7 @@ import logging
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.database import get_async_db
+from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.schemas.staging import (
     StagingListResponse,
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 @router.get('', response_model=StagingListResponse, summary='获取暂存出货列表')
-async def get_staging_stockouts(session_id: str=Query(..., description='会话ID'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_permission('batch_import'))):
+async def get_staging_stockouts(session_id: str=Query(..., description='会话ID'), db: AsyncSession=Depends(get_async_read_db), current_user: User=Depends(require_permission('batch_import'))):
     """获取指定会话的暂存出货列表"""
     data = await svc.get_staging_stockouts(db, session_id)
     return StagingListResponse(success=True, data=data, total=len(data))

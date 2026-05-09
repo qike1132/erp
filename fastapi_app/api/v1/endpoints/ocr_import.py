@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.exc import DisconnectionError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.schemas.ocr_import import OcrPdfImportResult, OcrPdfPreviewResult
@@ -126,4 +127,4 @@ async def preview_shipping_doc(file: UploadFile=File(..., description='PDF 或�
         return OcrPdfPreviewResult(success=True, message=f'识别完成，共 {len(pages)} 页，识别到 {len(parsed_items)} 个出货项', filename=filename, page_count=len(pages), pages=[{'page': p.get('page', 0), 'text': p.get('text', '')[:500]} for p in pages], parsed_items=parsed_items)
     except (OperationalError, DisconnectionError) as e:
         logger.error(f'OCR 预览失败: {str(e)}', exc_info=True)
-        raise HTTPException(status_code=500, detail=f'识别失败: {str(e)}') from e
+        raise HTTPException(status_code=500, detail=f'识别失败: {settings.sanitize_error(e)}') from e

@@ -34,14 +34,25 @@
               已选择 <strong class="text-primary-400">{{ factoryData.order_count || orderCount }}</strong> 个订单
             </div>
           </div>
-          <div class="flex gap-2">
-            <button
-              v-if="!editMode"
-              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-border bg-transparent text-text-secondary hover:text-primary-500 hover:border-primary-500 hover:bg-primary-50 transition-all"
-              @click="$emit('toggleEditMode', true)"
-            >
-              <i class="fas fa-edit" /> 自定义编辑
-            </button>
+          <div class="flex gap-2 items-center">
+            <div v-if="!editMode" class="flex items-center gap-2">
+              <button
+                class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-border bg-transparent text-text-secondary hover:text-primary-500 hover:border-primary-500 hover:bg-primary-50 transition-all"
+                @click="$emit('toggleEditMode', true)"
+              >
+                <i class="fas fa-edit" /> 自定义编辑
+              </button>
+              <label class="text-xs text-text-secondary whitespace-nowrap">损耗率（千分之几）</label>
+              <input
+                type="number"
+                class="w-16 text-right py-1 px-1.5 text-[13px] border border-border rounded focus:outline-none focus:border-primary-500"
+                :value="lossRate"
+                min="0"
+                max="1000"
+                step="any"
+                @input="onLossRateInput"
+              />
+            </div>
             <template v-else>
               <button
                 class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-warning-500 rounded-lg border-none transition-all hover:bg-warning-600"
@@ -101,21 +112,9 @@
                           @focus="($event.target as HTMLInputElement).select()"
                         />
                         <span class="text-xs ml-0.5">{{ fabric.unit || '' }}</span>
-                        <span
-                          v-if="fabric.item_ids && fabric.item_ids.length > 1"
-                          class="text-[10px] text-gray-400 ml-1"
-                          title="此为合并项"
-                          >(合)</span
-                        >
                       </template>
                       <template v-else>
                         {{ fabric.quantity }} {{ fabric.unit || '' }}
-                        <span
-                          v-if="fabric.item_ids && fabric.item_ids.length > 1"
-                          class="text-[10px] text-gray-400 ml-1"
-                          title="此为合并项"
-                          >(合)</span
-                        >
                       </template>
                     </td>
                   </tr>
@@ -245,15 +244,17 @@ const props = defineProps<{
   factoryData: any
   supplierData: any
   editMode: boolean
+  lossRate: number
   orderCount: number
   supplierGroups: { supplierName: string; materials: any[] }[]
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   close: []
   toggleEditMode: [enable: boolean]
   saveEdits: []
   updateQty: [gi: number | string, si: number | string, fi: number | string, value: string]
+  applyLossRate: [rate: number]
   exportFactory: []
   exportSupplier: []
   printFactory: []
@@ -261,6 +262,15 @@ defineEmits<{
 }>()
 
 const activeTab = ref<'factory' | 'supplier'>('factory')
+
+function onLossRateInput(e: Event) {
+  const val = parseFloat((e.target as HTMLInputElement).value)
+  if (isNaN(val) || val < 0) {
+    emit('applyLossRate', 0)
+    return
+  }
+  emit('applyLossRate', Math.min(val, 1000))
+}
 
 const factoryGrandTotal = computed(() => {
   let t = 0

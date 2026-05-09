@@ -8,7 +8,8 @@ from fastapi.responses import Response
 from sqlalchemy.exc import DisconnectionError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.database import get_async_db
+from fastapi_app.core.config import settings
+from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.schemas.daily_production import (
     DailySummaryResponse,
@@ -32,7 +33,7 @@ async def list_records(
     production_date: str = Query('', description='指定日期筛选 (YYYY-MM-DD)'),
     page: int = Query(1, ge=1, description='页码'),
     per_page: int = Query(50, ge=1, le=200, description='每页数量'),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
     _user: User = Depends(require_permission('production_summary_view')),
 ):
     """获取生产记录列表"""
@@ -47,7 +48,7 @@ async def list_records(
             pages=result['pages'], stats=result.get('stats'),
         )
     except (OperationalError, DisconnectionError) as e:
-        raise HTTPException(status_code=500, detail=f'获取数据失败: {str(e)}') from e
+        raise HTTPException(status_code=500, detail=f'获取数据失败: {settings.sanitize_error(e)}') from e
 
 
 @router.post('/records', response_model=ProductionRecordActionResponse)
@@ -110,7 +111,7 @@ async def delete_record(
 @router.get('/daily-summary', response_model=DailySummaryResponse)
 async def daily_summary(
     date: str = Query(..., description='日期 (YYYY-MM-DD)'),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
     _user: User = Depends(require_permission('production_summary_view')),
 ):
     """获取当日汇总"""
@@ -125,7 +126,7 @@ async def daily_summary(
 async def monthly_summary(
     year: int = Query(..., description='年份'),
     month: int = Query(..., ge=1, le=12, description='月份'),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
     _user: User = Depends(require_permission('production_summary_view')),
 ):
     """获取月度汇总"""
@@ -133,7 +134,7 @@ async def monthly_summary(
         result = await daily_production_service.get_monthly_summary(db, year, month)
         return MonthlySummaryResponse(**result)
     except (OperationalError, DisconnectionError) as e:
-        raise HTTPException(status_code=500, detail=f'获取汇总失败: {str(e)}') from e
+        raise HTTPException(status_code=500, detail=f'获取汇总失败: {settings.sanitize_error(e)}') from e
 
 
 @router.get('/export')
@@ -141,7 +142,7 @@ async def export_records(
     start_date: str = Query('', description='起始日期 (YYYY-MM-DD)'),
     end_date: str = Query('', description='结束日期 (YYYY-MM-DD)'),
     department: str = Query('', description='部门筛选 (filling/handcraft/packaging)'),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
     _user: User = Depends(require_permission('production_summary_view')),
 ):
     """导出生产报表为 Excel"""
@@ -155,13 +156,13 @@ async def export_records(
             headers={'Content-Disposition': 'attachment; filename=production_report.xlsx'},
         )
     except (OperationalError, DisconnectionError) as e:
-        raise HTTPException(status_code=500, detail=f'导出失败: {str(e)}') from e
+        raise HTTPException(status_code=500, detail=f'导出失败: {settings.sanitize_error(e)}') from e
 
 
 @router.get('/product-info/{product_id}')
 async def get_product_info(
     product_id: int,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
     _user: User = Depends(require_permission('production_summary_view')),
 ):
     """获取产品信息（用于生产记录时从产品清单获取SKU详情）"""
@@ -171,4 +172,4 @@ async def get_product_info(
             raise HTTPException(status_code=404, detail='产品不存在')
         return {'success': True, 'data': product}
     except (OperationalError, DisconnectionError) as e:
-        raise HTTPException(status_code=500, detail=f'获取产品信息失败: {str(e)}') from e
+        raise HTTPException(status_code=500, detail=f'获取产品信息失败: {settings.sanitize_error(e)}') from e

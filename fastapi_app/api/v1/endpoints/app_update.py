@@ -15,7 +15,7 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.database import get_async_db
+from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import get_current_user_id
 from fastapi_app.shared_models.app_version import AppVersion
 
@@ -69,7 +69,7 @@ def _compute_md5(file_path: str) -> str:
 async def check_update(
     platform: str = "android",
     current_version_code: int = 0,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
 ):
     """客户端检查是否有新版本可用（仅返回已发布的版本）"""
     result = await db.execute(
@@ -202,7 +202,7 @@ async def publish_version(
 async def list_versions(
     platform: str = "android",
     user_id: int = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
 ):
     """管理后台：列出所有版本"""
     result = await db.execute(

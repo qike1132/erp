@@ -60,6 +60,7 @@ class ApprovalRequest(Base):
     approval_time: Mapped[datetime | None] = mapped_column(DateTime, comment='审批时间')
     rejection_reason: Mapped[str | None] = mapped_column(Text, comment='拒绝原因')
     lock_time: Mapped[datetime | None] = mapped_column(DateTime, comment='锁定时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
 
     order: Mapped["Order"] = relationship('Order', backref=backref('approval_requests', passive_deletes=True))
     requester: Mapped["User"] = relationship('User', foreign_keys=[requester_id], backref='approval_requests_made')
@@ -127,6 +128,7 @@ class ApprovalLog(Base):
     actor_name: Mapped[str | None] = mapped_column(String(50), comment='操作人名称')
     action_time: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow, index=True, comment='操作时间')
     details: Mapped[str | None] = mapped_column(Text, comment='操作详情JSON')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
 
     approval_request: Mapped["ApprovalRequest"] = relationship('ApprovalRequest', backref='logs')
     actor: Mapped["User | None"] = relationship('User', backref='approval_logs')

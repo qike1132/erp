@@ -27,10 +27,10 @@ from fastapi_app.shared_models import InventoryLog, Product, StockIn, StockOut, 
 
 logger = logging.getLogger(__name__)
 
-async def create_stockin_core(db: AsyncSession, product_id: int, quantity: int, customer: str, stockin_date: datetime, note: str) -> StockIn:
+async def create_stockin_core(db: AsyncSession, product_id: int, quantity: int, customer: str, stockin_date: datetime, note: str, order_type: str = 'regular', country: str | None = None) -> StockIn:
     if quantity <= 0:
         raise ValueError('入库数量必须大于0')
-    stockin = StockIn(stockin_no=await generate_stockin_number(db), product_id=product_id, quantity=quantity, customer=customer, stockin_date=stockin_date, note=note)
+    stockin = StockIn(stockin_no=await generate_stockin_number(db), product_id=product_id, quantity=quantity, customer=customer, stockin_date=stockin_date, note=note, order_type=order_type, country=country)
     db.add(stockin)
     await db.flush()
     product = await get_product_for_update(db, product_id)
@@ -39,12 +39,14 @@ async def create_stockin_core(db: AsyncSession, product_id: int, quantity: int, 
     await db.flush()
     return stockin
 
-async def update_stockin_core(db: AsyncSession, stockin: StockIn, quantity: int, customer: str, stockin_date: datetime, note: str) -> StockIn:
+async def update_stockin_core(db: AsyncSession, stockin: StockIn, quantity: int, customer: str, stockin_date: datetime, note: str, order_type: str = 'regular', country: str | None = None) -> StockIn:
     old_quantity = stockin.quantity
     stockin.quantity = quantity
     stockin.customer = customer
     stockin.stockin_date = stockin_date
     stockin.note = note
+    stockin.order_type = order_type
+    stockin.country = country
     if quantity != old_quantity:
         product = await get_product_for_update(db, stockin.product_id)
         product.current_stock += quantity - old_quantity
@@ -257,10 +259,9 @@ async def delete_stockreturn_core(db: AsyncSession, stockreturn: StockReturn) ->
 
 async def recalc_order_status_after_return(db: AsyncSession, order_id: int) -> None:
     """
-    退货后重算订单状态
+    退货后重算订单状态（派生计算）
 
-    注意：退货是异常回退操作，直接设置状态而非走 STATUS_TRANSITIONS，
-    因为正常状态机不包含回退转换（如 已出货→待出货）。
+    根据订单关联的实际出入库数据推导状态，无需手动维护状态流转。
     """
     from fastapi_app.shared_models import Order
     order_result = await db.execute(select(Order).where(Order.id == order_id).with_for_update())
@@ -270,25 +271,8 @@ async def recalc_order_status_after_return(db: AsyncSession, order_id: int) -> N
     if order.status in (None, '已取消'):
         return
 
-    result = await db.execute(
-        select(func.sum(StockOut.quantity - StockOut.returned_quantity))
-        .where(
-            StockOut.order_id == order_id,
-            StockOut.stockin_id.is_(None),
-        )
-    )
-    net_shipped = result.scalar() or 0
-
-    # 回退逻辑：根据净出货量逐步回退
-    if net_shipped <= 0:
-        # 全部退完，回退到待备货（可重新走流程）
-        if order.status in ('已出货', '待出货', '已完成', '已备货', '部分备货'):
-            order.status = '待备货'
-    elif net_shipped < order.quantity:
-        # 部分退，回退到待出货（可继续出货）
-        if order.status in ('已出货', '已完成'):
-            order.status = '待出货'
-    # net_shipped >= order.quantity: 全额出货，状态不变
+    from fastapi_app.services.order_service import compute_order_status_from_db
+    order.status = await compute_order_status_from_db(db, order)
 
 async def get_stockins(db: AsyncSession, page: int=1, per_page: int=50) -> dict:
     """获取入库列表（含关联数据，支持分页）- SQL子查询优化版"""
@@ -321,6 +305,8 @@ async def get_stockins(db: AsyncSession, page: int=1, per_page: int=50) -> dict:
             'customer': s.customer,
             'product': {'id': s.product.id, 'name': s.product.name, 'barcode': s.product.barcode or '', 'image': s.product.image or ''} if s.product else None,
             'quantity': s.quantity,
+            'order_type': s.order_type or 'regular',
+            'country': s.country or '',
             'deducted': deducted,
             'note': s.note or '',
         })
@@ -969,9 +955,13 @@ async def batch_create_stockins(db: AsyncSession, stockins_data: list) -> dict:
                 customer = str(item.get('customer', '')).strip()
                 quantity = int(item.get('quantity', 0))
                 note = item.get('note', '')
+                order_type = item.get('order_type', 'regular') or 'regular'
+                country = item.get('country') or None
+                stockin_date_str = item.get('stockin_date') or ''
+                stockin_date = _parse_date_preserve_time(stockin_date_str) if stockin_date_str else datetime.now(UTC).replace(tzinfo=None)
                 try:
                     async with db.begin_nested():
-                        stockin = await create_stockin_core(db, product_id, quantity, customer, datetime.now(UTC).replace(tzinfo=None), note)
+                        stockin = await create_stockin_core(db, product_id, quantity, customer, stockin_date, note, order_type, country)
                     results[orig_idx] = {'success': True, 'stockin_no': stockin.stockin_no, 'id': stockin.id}
                 except ValueError as e:
                     results[orig_idx] = {'success': False, 'error': str(e), 'id': item.get('id', '未知')}

@@ -12,7 +12,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -759,80 +759,101 @@ async def get_completed_purchase_orders(
     }
 
 
-async def get_supplier_order_summary(db: AsyncSession, supplier_id: int | None = None) -> dict:
-    query = select(
-        PurchaseOrder.supplier_name,
-        PurchaseOrder.supplier_id,
-        func.count(PurchaseOrder.id).label('order_count'),
-        func.sum(PurchaseOrder.total_amount).label('total_amount'),
+async def get_supplier_order_summary(db: AsyncSession, order_ids: list | None = None) -> dict:
+    if not order_ids:
+        return {'materials': [], 'order_count': 0}
+
+    items_result = await db.execute(
+        select(PurchaseOrderItem).where(PurchaseOrderItem.order_id.in_(order_ids))
     )
+    all_items = items_result.scalars().all()
 
-    if supplier_id:
-        query = query.where(PurchaseOrder.supplier_id == supplier_id)
-    query = query.where(PurchaseOrder.status == 'completed').group_by(
-        PurchaseOrder.supplier_name, PurchaseOrder.supplier_id,
-    )
-
-    result = await db.execute(query)
-    rows = result.all()
-
-    return {
-        'summary': [
-            {
-                'supplier_name': r.supplier_name,
-                'supplier_id': r.supplier_id,
-                'order_count': r.order_count,
-                'total_amount': float(r.total_amount or 0),
+    # 按 (supplier_name, material_name, specification, unit) 聚合
+    mat_map: dict[tuple, dict] = {}
+    for item in all_items:
+        sup = item.supplier_name or '未指定供应商'
+        key = (sup, item.material_name, item.specification or '', item.unit or '')
+        if key in mat_map:
+            mat_map[key]['total_quantity'] += float(item.quantity or 0)
+        else:
+            mat_map[key] = {
+                'material_name': item.material_name,
+                'specification': item.specification or '',
+                'total_quantity': float(item.quantity or 0),
+                'unit': item.unit or '',
+                'supplier_name': sup,
             }
-            for r in rows
-        ],
-    }
+
+    materials = sorted(mat_map.values(), key=lambda x: (x['supplier_name'], x['material_name']))
+    return {'materials': materials, 'order_count': len(set(item.order_id for item in all_items))}
 
 
 async def get_factory_order_summary(
     db: AsyncSession, order_ids: list | None = None,
 ) -> dict:
-    query = select(
-        PurchaseOrder.id,
-        PurchaseOrder.order_no,
+    if not order_ids:
+        return {'groups': [], 'order_count': 0}
+
+    result = await db.execute(
+        select(PurchaseOrder).where(PurchaseOrder.id.in_(order_ids))
     )
-    if order_ids:
-        query = query.where(PurchaseOrder.id.in_(order_ids))
-    result = await db.execute(query)
-    orders = result.all()
+    orders = result.scalars().all()
 
-    summary = []
-    order_ids = [order_row.id for order_row in orders]
-
-    if order_ids:
-        items_result = await db.execute(
-            select(PurchaseOrderItem).where(PurchaseOrderItem.order_id.in_(order_ids))
-        )
-        all_items = items_result.scalars().all()
-        items_by_order: dict[int, list] = {}
-        for item in all_items:
-            items_by_order.setdefault(item.order_id, []).append(item)
-    else:
-        items_by_order = {}
-
-    for order_row in orders:
-        oid = order_row.id
-        items = items_by_order.get(oid, [])
-        summary.append({
-            'id': oid,
-            'order_no': order_row.order_no,
-            'items': [
-                {
-                    'material_name': i.material_name,
-                    'material_code': i.material_code or '',
-                    'specification': i.specification or '',
-                    'unit': i.unit or '',
-                    'quantity': float(i.quantity or 0),
+    # 按 (customer_name, product_name) 分组
+    group_map: dict[tuple, dict] = {}
+    for po in orders:
+        cust = po.customer_name or '未知客户'
+        prod = po.product_name or '未知产品'
+        key = (cust, prod)
+        if key not in group_map:
+            group_map[key] = {
+                'customer_name': cust,
+                'product_name': prod,
+                'product_quantity': float(po.product_quantity or 0),
+                'order_quantity': float(po.product_quantity or 0),
+                '_supplier_map': {},
+            }
+        group = group_map[key]
+        for item in po.items or []:
+            sup = item.supplier_name or po.supplier_name or '未指定供应商'
+            if sup not in group['_supplier_map']:
+                group['_supplier_map'][sup] = {
+                    'supplier_name': sup,
+                    '_fabric_map': {},
                 }
-                for i in items
-            ],
+            fabric_map = group['_supplier_map'][sup]['_fabric_map']
+            # 合并同名同规格物料
+            fkey = (item.material_name, item.specification or '', item.unit or '')
+            if fkey in fabric_map:
+                fabric_map[fkey]['quantity'] += float(item.quantity or 0)
+                fabric_map[fkey]['item_ids'].append(item.id)
+            else:
+                fabric_map[fkey] = {
+                    'fabric_name': item.material_name,
+                    'specification': item.specification or '',
+                    'quantity': float(item.quantity or 0),
+                    'unit': item.unit or '',
+                    'item_ids': [item.id] if item.id else [],
+                    'item_id': item.id,
+                }
+
+    groups = []
+    for key in sorted(group_map.keys()):
+        g = group_map[key]
+        suppliers = []
+        for skey in sorted(g['_supplier_map'].keys()):
+            s = g['_supplier_map'][skey]
+            fabrics = [f for f in sorted(s['_fabric_map'].values(), key=lambda x: x['fabric_name'])]
+            suppliers.append({'supplier_name': s['supplier_name'], 'fabrics': fabrics})
+        groups.append({
+            'customer_name': g['customer_name'],
+            'product_name': g['product_name'],
+            'product_quantity': g['product_quantity'],
+            'order_quantity': g['order_quantity'],
+            'suppliers': suppliers,
         })
-    return {'summary': summary}
+
+    return {'groups': groups, 'order_count': len(orders)}
 
 
 async def save_factory_summary_edits(
@@ -917,17 +938,34 @@ async def get_unprocessed_orders(
     """
     from fastapi_app.shared_models import Order as CustomerOrder
     from fastapi_app.shared_models import Product
+    from fastapi_app.shared_models.purchase_order import PurchaseOrder
 
-    # 查询所有待备货且未删除的客户订单
-    query = select(CustomerOrder).where(
-        CustomerOrder.status == '待备货',
-        CustomerOrder.is_deleted == False,  # noqa: E712
-    ).order_by(CustomerOrder.order_date.desc())
+    # 排除已有非占位采购单（CG*，通过 source_order_ids 关联）的客户订单
+    po_result = await db.execute(
+        select(PurchaseOrder.source_order_ids).where(
+            PurchaseOrder.source_order_ids.isnot(None),
+        )
+    )
+    processed_order_ids: set[int] = set()
+    for row in po_result.all():
+        try:
+            ids = json.loads(row.source_order_ids)
+            if isinstance(ids, list):
+                processed_order_ids.update(ids)
+        except (ValueError, TypeError):
+            pass
 
-    count_query = select(func.count(CustomerOrder.id)).where(
+    # 查询所有待备货且未删除、且未生成采购单的客户订单
+    base_filter = and_(
         CustomerOrder.status == '待备货',
         CustomerOrder.is_deleted == False,  # noqa: E712
     )
+    if processed_order_ids:
+        base_filter = and_(base_filter, CustomerOrder.id.notin_(processed_order_ids))
+
+    query = select(CustomerOrder).where(base_filter).order_by(CustomerOrder.order_date.desc())
+
+    count_query = select(func.count(CustomerOrder.id)).where(base_filter)
 
     total_result = await db.execute(count_query)
     total = total_result.scalar()
@@ -1173,11 +1211,11 @@ async def generate_purchase_orders_from_customer_orders(
         product_quantity=sum(o.quantity for o in cust_orders),
     )
 
-    processed_order_ids = [o.id for o in cust_orders]
-    for cust_order in cust_orders:
-        cust_order.status = '已备货'
+    new_po_ids = [o['id'] for o in result.get('orders', []) if 'id' in o]
 
-    await cleanup_orphan_pending_purchase_orders(db, processed_order_ids)
+    processed_order_ids = [o.id for o in cust_orders]
+
+    await cleanup_orphan_pending_purchase_orders(db, processed_order_ids, exclude_ids=new_po_ids)
 
     await db.commit()
     return result
@@ -1268,13 +1306,14 @@ async def _build_order_summary(db: AsyncSession, order) -> dict:
 
 
 async def cleanup_orphan_pending_purchase_orders(
-    db: AsyncSession, order_ids: list[int],
+    db: AsyncSession, order_ids: list[int], exclude_ids: list[int] | None = None,
 ) -> None:
     """清理关联指定客户订单的 pending 采购订单（同时处理 source_order_id 和 source_order_ids）"""
     if not order_ids:
         return
 
-    # 先查 source_order_ids (JSON 列) 可能关联的 — 用列查询避免加载完整 ORM 对象
+    _exclude = set(exclude_ids or [])
+
     result2 = await db.execute(
         select(PurchaseOrder.id, PurchaseOrder.source_order_ids).where(
             PurchaseOrder.source_order_ids.isnot(None),
@@ -1290,8 +1329,7 @@ async def cleanup_orphan_pending_purchase_orders(
         except (ValueError, TypeError):
             logger.warning('PurchaseOrder %s has invalid source_order_ids: %s', row.id, row.source_order_ids)
 
-    # 合并 source_order_id (int 列) 直接匹配的 + JSON 匹配的，统一 ORM 删除以触发 cascade
-    all_ids = set(json_match_ids) | set(order_ids)  # order_ids 用于 source_order_id IN 查询
+    all_ids = set(json_match_ids) | set(order_ids)
     if not all_ids:
         return
     result = await db.execute(
@@ -1301,4 +1339,6 @@ async def cleanup_orphan_pending_purchase_orders(
         )
     )
     for po in result.scalars().all():
+        if po.id in _exclude:
+            continue
         await db.delete(po)

@@ -583,25 +583,33 @@ def delete_stockreturn(session: Session, stockreturn: StockReturn) -> None:
 
 def recalc_order_status_after_return(session: Session, order_id: int) -> None:
     """
-    退货后重算订单状态
+    退货后重算订单状态（派生计算）
     """
     order = session.get(Order, order_id)
     if not order:
         return
+    if order.status in (None, '已取消'):
+        return
 
     result = session.execute(
-        select(func.sum(StockOut.quantity - StockOut.returned_quantity))
-        .where(
-            StockOut.order_id == order_id,
-            StockOut.stockin_id.is_(None),
-        )
+        select(StockOut.stockin_id, func.sum(StockOut.quantity - StockOut.returned_quantity))
+        .where(StockOut.order_id == order_id)
+        .group_by(StockOut.stockin_id)
     )
-    net_shipped = result.scalar() or 0
+    deducted_qty = 0
+    shipped_qty = 0
+    for stockin_id, qty in result:
+        if qty is None:
+            continue
+        if stockin_id is not None:
+            deducted_qty += int(qty)
+        else:
+            shipped_qty += int(qty)
+    deducted_qty = max(0, deducted_qty)
+    shipped_qty = max(0, shipped_qty)
 
-    if net_shipped <= 0 and order.status in ('已出货', '待出货', '已完成'):
-        order.status = '待备货'
-    elif net_shipped < order.quantity and order.status in ('已出货', '已完成'):
-        order.status = '待出货'
+    from fastapi_app.shared_models.order import compute_status_from_stockouts
+    order.status = compute_status_from_stockouts(order, deducted_qty, shipped_qty)
 
 
 # ==================== 库存查看 ====================

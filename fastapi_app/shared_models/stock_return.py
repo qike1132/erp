@@ -33,6 +33,7 @@ class StockReturn(Base):
     order_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('order.id', ondelete='SET NULL'), nullable=True, comment='关联订单ID')
     reason: Mapped[str | None] = mapped_column(String(200), comment='退货原因')
     note: Mapped[str | None] = mapped_column(Text, comment='备注')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
 
     product: Mapped["Product"] = relationship('Product', backref='stock_returns')
     stockout: Mapped["StockOut"] = relationship('StockOut', backref='returns')

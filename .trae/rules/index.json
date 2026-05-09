@@ -13,6 +13,39 @@
         "size_chars": 913,
         "status": "active",
         "description": "核心指令精简版（必须始终加载）"
+      },
+      {
+        "name": "karpathy-guidelines.md",
+        "type": "core",
+        "size_chars": 2500,
+        "status": "active",
+        "description": "Karpathy 编码行为准则"
+      },
+      {
+        "name": "shenhecode-bug-linkage.md",
+        "type": "core",
+        "size_chars": 3500,
+        "status": "active",
+        "description": "代码审核→BUG修复自动联动规则（shenhecode.mdr + bug.mdr）",
+        "auto_trigger": {
+          "condition": "shenhecode.mdr审核产出P0/P1级问题",
+          "action": "自动启动bug.mdr修复流程",
+          "priority_levels": ["P0", "P1"]
+        }
+      },
+      {
+        "name": "shenhecode.mdr",
+        "type": "core",
+        "size_chars": 4200,
+        "status": "active",
+        "description": "IDE代码审核规范（基于v12.0精简，防幻觉+证据驱动+审核修复闭环）"
+      },
+      {
+        "name": "bug.mdr",
+        "type": "core",
+        "size_chars": 3500,
+        "status": "active",
+        "description": "IDE BUG修复规范（基于v2.4.1精简，先诊断后修复+最小变更+凭证驱动）"
       }
     ]
   },

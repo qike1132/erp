@@ -26,6 +26,7 @@ class AppVersion(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default='1', comment='是否当前有效版本')
     pushed: Mapped[bool] = mapped_column(Boolean, default=False, server_default='0', comment='是否已推送FCM通知')
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, comment='创建时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
 
     def __repr__(self):
         return f'<AppVersion {self.platform} v{self.version_name}({self.version_code})>'

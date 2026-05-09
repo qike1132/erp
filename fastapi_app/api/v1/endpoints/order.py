@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
 from fastapi_app.core.config import settings
-from fastapi_app.core.database import get_async_db
+from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.schemas.order import (
     ApprovalCancelResponse,
@@ -39,7 +39,7 @@ async def list_orders(
     product_id: int | None = Query(None, description="产品ID筛选"),
     status: str | None = Query(None, description="状态筛选"),
     order_type: str | None = Query(None, description="订单类型筛选：regular/custom"),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
     _user: User = Depends(require_permission("order_manage")),
 ):
     """订单列表（支持分页和筛选，缓存由 service 层 @cache_result 管理）"""
@@ -54,7 +54,7 @@ async def list_orders(
 @router.get("/{order_id}", response_model=OrderDetailResponse)
 async def get_order(
     order_id: int,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
     _user: User = Depends(require_permission("order_manage")),
 ):
     """获取单个订单详情"""
@@ -154,7 +154,7 @@ async def cancel_approval(
 
 @router.get("/my-approvals", response_model=ApprovalListResponse)
 async def my_approvals(
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
     user: User = Depends(require_permission("order_manage")),
 ):
     """查看我的审批请求"""

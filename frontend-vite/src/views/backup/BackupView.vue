@@ -209,25 +209,50 @@
                   <i :class="importing ? 'fas fa-spinner fa-spin' : 'fas fa-undo-alt'" />
                   {{ importing ? '正在恢复...' : '一键恢复全部数据' }}
                 </button>
+
+                <!-- 实时进度条 -->
+                <RestoreProgressBar
+                  v-if="restoreTaskId"
+                  :task-id="restoreTaskId"
+                  @completed="onRestoreProgressCompleted"
+                  @failed="onRestoreProgressFailed"
+                />
               </div>
 
               <!-- 恢复结果 -->
               <div v-if="restoreResult" class="bk-section">
                 <div class="bk-section-label">恢复结果</div>
-                <div class="bk-result-card" :class="restoreResult.errors?.length || restoreResult.results?.warnings?.length ? 'bk-result-partial' : 'bk-result-success'">
+                <div class="bk-result-card" :class="restoreResult.errors?.length || restoreResult.warnings?.length || restoreResult.results?.warnings?.length ? 'bk-result-partial' : 'bk-result-success'">
                   <div class="bk-result-header">
                     <i :class="restoreResult.errors?.length ? 'fas fa-exclamation-circle' : 'fas fa-check-circle'" />
                     {{ restoreResult.errors?.length ? '恢复完成（部分异常）' : '恢复成功' }}
                   </div>
                   <div class="bk-result-stats">
-                    <span v-if="restoreResult.format === 'zip'">ZIP 完整备份恢复</span>
+                    <span v-if="restoreResult.format === 'zip' || restoreResult.database || restoreResult.results?.database">ZIP 完整备份恢复 <template v-if="restoreResult.total_inserted">（{{ restoreResult.total_inserted }} 条记录）</template></span>
                     <span v-else>共恢复 <b>{{ restoreResult.total_inserted }}</b> 条记录</span>
-                    <span v-if="restoreResult.results?.database?.status" class="bk-result-db-status">数据库: {{ restoreResult.results.database.status }}</span>
+                    <span v-if="(restoreResult.database || restoreResult.results?.database)?.status" class="bk-result-db-status">数据库: {{ (restoreResult.database || restoreResult.results?.database).status }}</span>
                     <span v-if="restoreResult.results?.filestore?.restored" class="bk-result-fs-status">附件: {{ restoreResult.results.filestore.restored }} 个</span>
                     <span v-if="restoreResult.results?.config?.restored?.length" class="bk-result-cfg-status">配置: {{ restoreResult.results.config.restored.length }} 个文件</span>
                   </div>
-                  <div v-if="restoreResult.results?.warnings?.length" class="bk-result-errors" style="color: var(--color-warning-500);">
-                    <div v-for="w in restoreResult.results.warnings" :key="w" class="bk-result-err-item">{{ w }}</div>
+                  <div v-if="(restoreResult.database || restoreResult.results?.database)?.errors" class="bk-result-errors" style="color: var(--color-danger-500);">
+                    <div class="bk-result-err-item" v-for="e in (Array.isArray((restoreResult.database || restoreResult.results?.database).errors) ? (restoreResult.database || restoreResult.results?.database).errors : [(restoreResult.database || restoreResult.results?.database).errors])" :key="e">{{ e }}</div>
+                  </div>
+                  <div v-if="(restoreResult.database || restoreResult.results?.database)?.error" class="bk-result-errors">
+                    <div class="bk-result-err-item">{{ (restoreResult.database || restoreResult.results?.database).error }}</div>
+                  </div>
+                  <div v-if="restoreResult.pre_restore_backup || restoreResult.results?.pre_restore_backup" class="bk-pre-restore-info">
+                    <i class="fas fa-shield-alt" /> 安全备份: {{ (restoreResult.pre_restore_backup || restoreResult.results?.pre_restore_backup).success ? '已创建' : '创建失败' }}
+                    <span v-if="(restoreResult.pre_restore_backup || restoreResult.results?.pre_restore_backup).filename">({{ (restoreResult.pre_restore_backup || restoreResult.results?.pre_restore_backup).filename }})</span>
+                  </div>
+                  <div v-if="restoreResult.rollback || restoreResult.results?.rollback" class="bk-result-errors">
+                    <div class="bk-result-err-item" :style="{ color: (restoreResult.rollback || restoreResult.results?.rollback).success ? 'var(--color-success-500)' : 'var(--color-danger-500)' }">
+                      <i :class="(restoreResult.rollback || restoreResult.results?.rollback).success ? 'fas fa-check-circle' : 'fas fa-times-circle'" />
+                      回滚{{ (restoreResult.rollback || restoreResult.results?.rollback).success ? '成功' : '失败' }}
+                      <span v-if="(restoreResult.rollback || restoreResult.results?.rollback).error">: {{ (restoreResult.rollback || restoreResult.results?.rollback).error }}</span>
+                    </div>
+                  </div>
+                  <div v-if="(restoreResult.warnings || restoreResult.results?.warnings)?.length" class="bk-result-errors" style="color: var(--color-warning-500);">
+                    <div v-for="w in (restoreResult.warnings || restoreResult.results?.warnings)" :key="w" class="bk-result-err-item">{{ w }}</div>
                   </div>
                   <div v-if="restoreResult.errors?.length" class="bk-result-errors">
                     <div v-for="e in restoreResult.errors" :key="e" class="bk-result-err-item">{{ e }}</div>
@@ -274,6 +299,14 @@
           <template v-if="backupMode === 'default'">
             <div class="bk-col-title"><i class="fas fa-folder-open" /> 服务器备份</div>
             <div class="bk-col-content">
+              <!-- 服务器恢复进度条 -->
+              <RestoreProgressBar
+                v-if="restoreTaskId && backupMode === 'default'"
+                :task-id="restoreTaskId"
+                @completed="onRestoreProgressCompleted"
+                @failed="onRestoreProgressFailed"
+              />
+
               <div v-if="serverBackupsLoading" class="bk-loading-inline"><i class="fas fa-spinner fa-spin" /> 加载中...</div>
 
               <div v-else-if="!serverBackups.length" class="bk-empty-state">
@@ -344,7 +377,7 @@
         <UiButton variant="ghost" size="sm" @click="showConfirmDialog = false">取消</UiButton>
         <UiButton variant="danger" size="sm" :disabled="importing || !!restoringFile" @click="confirmRestoreAction">
           <i :class="importing || restoringFile ? 'fas fa-spinner fa-spin' : 'fas fa-undo-alt'" />
-          {{ importing || restoringFile ? '恢复中...' : '确认恢复' }}
+          {{ restorePhase || (importing || restoringFile ? '恢复中...' : '确认恢复') }}
         </UiButton>
       </template>
     </UiDialog>
@@ -359,6 +392,7 @@ import type { ApiResponse } from '@/types'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
+import RestoreProgressBar from '@/components/backup/RestoreProgressBar.vue'
 import { showToast } from '@/composables/useToast'
 
 // --- Tables overview ---
@@ -370,8 +404,8 @@ const totalRows = computed(() => tables.value.reduce((sum, t) => sum + (t.rows >
 async function loadTables() {
   tablesLoading.value = true
   try {
-    const res = await backupApi.tables() as ApiResponse
-    if (res.success) tables.value = res.tables
+    const res = await backupApi.tables()
+    if (res.success) tables.value = res.tables ?? []
   } catch {
     showToast('加载表信息失败', 'error')
   } finally {
@@ -433,6 +467,8 @@ const dragOver = ref(false)
 const validationResult = ref<any>(null)
 const importing = ref(false)
 const restoreResult = ref<any>(null)
+const restorePhase = ref('')
+const restoreTaskId = ref<string | null>(null)
 
 function onFileSelect(e: Event) {
   const input = e.target as HTMLInputElement
@@ -498,8 +534,8 @@ const deletingFile = ref('')
 async function loadServerBackups() {
   serverBackupsLoading.value = true
   try {
-    const res = await backupApi.listServerBackups() as ApiResponse
-    if (res.success) serverBackups.value = res.backups
+    const res = await backupApi.listServerBackups()
+    if (res.success) serverBackups.value = res.backups ?? []
   } catch (e: any) {
     showToast(e?.response?.data?.detail || '加载服务器备份列表失败', 'error')
   } finally {
@@ -556,44 +592,89 @@ async function confirmRestoreAction() {
 async function doFileRestore() {
   if (!selectedFile.value) return
   importing.value = true
+  restorePhase.value = '正在启动恢复任务...'
+  restoreResult.value = null
+  restoreTaskId.value = null
   try {
     const formData = new FormData()
     formData.append('file', selectedFile.value)
-    const res = await backupApi.importBackup(formData) as ApiResponse
-    restoreResult.value = res
-    if (res.success) {
-      const msg = res.format === 'zip'
-        ? '恢复成功（完整备份）'
-        : `恢复成功，共 ${res.total_inserted} 条记录`
-      showToast(msg, (res.errors?.length || res.results?.warnings?.length) ? 'warning' : 'success')
-      queryClient.invalidateQueries()
-      loadTables()
+    const res = await backupApi.asyncImport(formData) as ApiResponse
+    if (res.success && res.task_id) {
+      restoreTaskId.value = res.task_id
+      restorePhase.value = '恢复任务已启动，请等待完成...'
+    } else {
+      restorePhase.value = ''
+      importing.value = false
+      showToast('启动恢复任务失败', 'error')
     }
   } catch (e: any) {
-    showToast(e?.response?.data?.detail || '恢复失败', 'error')
-  } finally {
+    restorePhase.value = ''
     importing.value = false
+    showToast(e?.response?.data?.detail || '启动恢复失败', 'error')
   }
+}
+
+function onRestoreProgressCompleted(result: any) {
+  importing.value = false
+  restoringFile.value = ''
+  restorePhase.value = ''
+  restoreResult.value = result
+  if (result) {
+    const dbStatus = result.database?.status || result.results?.database?.status || ''
+    const dbFailed = dbStatus === 'error'
+    const dbPartial = dbStatus === 'partial'
+    const verificationOk = (result.verification || result.results?.verification)?.overall_pass !== false
+    const verificationFailed = !verificationOk
+
+    if (dbFailed) {
+      const errMsg = result.database?.error || result.database?.message || result.results?.database?.error || result.results?.database?.message || '数据库恢复失败'
+      showToast(`恢复失败: ${errMsg}`, 'error')
+    } else if (verificationFailed) {
+      const l1Summary = (result.verification || result.results?.verification)?.l1_row_count?.summary || ''
+      const l2Summary = (result.verification || result.results?.verification)?.l2_fingerprint?.summary || ''
+      showToast(`恢复完成但验证未通过: ${l1Summary}${l2Summary ? '; ' + l2Summary : ''}`, 'warning')
+    } else if (dbPartial) {
+      showToast(`恢复完成，但有部分语句执行失败`, 'warning')
+    } else {
+      const isZip = result.format === 'zip' || result.results?.database
+      const msg = isZip
+        ? `恢复成功（完整备份${result.total_inserted ? '，共 ' + result.total_inserted + ' 条记录' : ''}）`
+        : `恢复成功，共 ${result.total_inserted ?? 0} 条记录`
+      const hasErrors = result.errors?.length || result.results?.warnings?.length
+      showToast(msg, hasErrors ? 'warning' : 'success')
+    }
+    queryClient.invalidateQueries()
+    loadTables()
+  }
+}
+
+function onRestoreProgressFailed(error: string) {
+  importing.value = false
+  restoringFile.value = ''
+  restorePhase.value = ''
+  showToast(error || '恢复失败', 'error')
 }
 
 async function doServerRestore() {
   if (!pendingRestoreFilename) return
   restoringFile.value = pendingRestoreFilename
+  restorePhase.value = '正在启动恢复任务...'
+  restoreResult.value = null
+  restoreTaskId.value = null
   try {
-    const res = await backupApi.restoreServerBackup(pendingRestoreFilename) as ApiResponse
-    if (res.success) {
-      const msg = res.format === 'zip'
-        ? '恢复成功（完整备份）'
-        : `恢复成功，共 ${res.total_inserted} 条记录`
-      showToast(msg, (res.errors?.length || res.results?.warnings?.length) ? 'warning' : 'success')
-      queryClient.invalidateQueries()
-      loadTables()
+    const res = await backupApi.asyncRestoreByName(pendingRestoreFilename) as ApiResponse
+    if (res.success && res.task_id) {
+      restoreTaskId.value = res.task_id
+      restorePhase.value = '恢复任务已启动，请等待完成...'
+    } else {
+      restorePhase.value = ''
+      restoringFile.value = ''
+      showToast('启动恢复任务失败', 'error')
     }
   } catch (e: any) {
-    showToast(e?.response?.data?.detail || '恢复失败', 'error')
-  } finally {
+    restorePhase.value = ''
     restoringFile.value = ''
-    pendingRestoreFilename = ''
+    showToast(e?.response?.data?.detail || '启动恢复失败', 'error')
   }
 }
 
@@ -621,6 +702,7 @@ async function handleSaveIncremental() {
 async function doIncrementalRestore() {
   if (!pendingRestoreFilename) return
   restoringFile.value = pendingRestoreFilename
+  restorePhase.value = '正在增量恢复数据...'
   try {
     const res = await backupApi.restoreIncremental(pendingRestoreFilename) as ApiResponse
     restoreResult.value = res
@@ -632,8 +714,10 @@ async function doIncrementalRestore() {
       loadServerBackups()
     }
   } catch (e: any) {
+    restorePhase.value = ''
     showToast(e?.response?.data?.detail || '增量恢复失败', 'error')
   } finally {
+    restorePhase.value = ''
     restoringFile.value = ''
     pendingRestoreFilename = ''
   }
@@ -1487,5 +1571,18 @@ function formatSize(bytes: number): string {
 
 .bk-action-secondary:hover:not(:disabled) {
   background: var(--color-neutral-200);
+}
+
+.bk-pre-restore-info {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--color-info-600);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.bk-pre-restore-info i {
+  color: var(--color-info-500);
 }
 </style>

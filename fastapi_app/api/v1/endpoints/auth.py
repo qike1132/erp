@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from fastapi_app.core.config import settings
-from fastapi_app.core.database import get_async_db
+from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import create_access_token, get_current_user_id
 from fastapi_app.shared_models import User
 
@@ -76,7 +76,7 @@ async def check_login_status(
 @router.get("/me", response_model=UserInfoResponse)
 async def get_current_user_info(
     user_id: int = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
 ):
     """获取当前登录用户信息（含权限列表）
 
@@ -216,18 +216,18 @@ async def api_login(
         "username": user.username,
     }
 
-    # Cookie有效期：remember=True 时31天，否则1天
-    cookie_max_age = settings.COOKIE_MAX_AGE if data.remember else 86400
+    # Cookie/JWT 有效期：记住我24小时，否则1小时
+    token_max_age = 86400 if data.remember else 3600
     access_token = create_access_token(
         token_data,
-        expires_delta=timedelta(seconds=cookie_max_age),
+        expires_delta=timedelta(seconds=token_max_age),
     )
 
     # 设置 httpOnly cookie（浏览器Web端自动携带）
     response.set_cookie(
         key="access_token",
         value=access_token,
-        max_age=cookie_max_age,
+        max_age=token_max_age,
         httponly=True,
         samesite="lax",
         secure=request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https",
@@ -238,7 +238,7 @@ async def api_login(
     response.set_cookie(
         key="auth_status",
         value="1",
-        max_age=cookie_max_age,
+        max_age=token_max_age,
         httponly=False,
         samesite="lax",
         secure=request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https",

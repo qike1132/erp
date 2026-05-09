@@ -70,6 +70,7 @@ class ProductionPlanLog(Base):
     new_value: Mapped[str | None] = mapped_column(Text, nullable=True, comment='变更后数据(JSON)')
     operator: Mapped[str] = mapped_column(String(50), nullable=False, comment='操作人')
     operate_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, comment='操作时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
 
     def __repr__(self):
         return f'<ProductionPlanLog {self.id} - {self.action} - plan:{self.plan_id}>'
@@ -92,6 +93,7 @@ class StagingPurchasePlan(Base):
     validation_error: Mapped[str | None] = mapped_column(String(500), nullable=True, comment='验证错误信息')
     upload_batch_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True, comment='上传批次ID')
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, comment='创建时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
 
     __table_args__ = (
         Index('idx_spp_session', 'session_id'),

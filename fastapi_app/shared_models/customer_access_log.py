@@ -28,6 +28,7 @@ class CustomerAccessLog(Base):
     user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id'), comment='操作用户ID')
     access_time: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, comment='接入时间')
     ip_address: Mapped[str | None] = mapped_column(String(50), comment='IP地址')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
 
     customer = relationship('Customer', backref='access_logs')
     user = relationship('User', backref='customer_access_logs')

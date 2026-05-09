@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from fastapi_app.core.database import get_async_db
+from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import invalidate_user_permission_cache, require_permission
 from fastapi_app.schemas.user import (
     PermissionResponse,
@@ -21,7 +21,7 @@ from fastapi_app.shared_models import User
 router = APIRouter()
 
 @router.get('/list', response_model=UserListResponse)
-async def list_users(page: int = 1, per_page: int = 15, user: User=Depends(require_permission('user_manage')), db: AsyncSession=Depends(get_async_db)):
+async def list_users(page: int = 1, per_page: int = 15, user: User=Depends(require_permission('user_manage')), db: AsyncSession=Depends(get_async_read_db)):
     """用户列表"""
     if not user.is_super:
         raise HTTPException(status_code=403, detail='仅超级用户可访问')
@@ -80,7 +80,7 @@ async def delete_user(user_id: int, user: User=Depends(require_permission('user_
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 @router.get('/permission/{user_id}', response_model=UserPermissionResponse)
-async def get_user_permissions(user_id: int, user: User=Depends(require_permission('user_manage')), db: AsyncSession=Depends(get_async_db)):
+async def get_user_permissions(user_id: int, user: User=Depends(require_permission('user_manage')), db: AsyncSession=Depends(get_async_read_db)):
     """获取用户权限设置"""
     if not user.is_super:
         raise HTTPException(status_code=403, detail='仅超级用户可访问')

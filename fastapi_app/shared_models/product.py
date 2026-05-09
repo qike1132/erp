@@ -36,6 +36,8 @@ class Product(Base):
     current_stock: Mapped[int] = mapped_column(Integer, default=0, comment='当前库存')
     version: Mapped[int] = mapped_column(Integer, default=0, server_default='0', comment='乐观锁版本号')
     create_time: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, index=True, comment='创建时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+
 
     __table_args__ = (
         Index('idx_product_name_barcode', 'name', 'barcode'),

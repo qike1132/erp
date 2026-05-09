@@ -62,10 +62,14 @@ class ProductHasRelatedStockOutsError(ProductDeleteError):
 
 
 @cache_result(key_prefix="products:all", ttl=60, local_ttl=15)
-async def get_products(db: AsyncSession) -> list[dict]:
-    """获取所有产品列表（内部使用，如搜索、映射构建等场景）"""
+async def get_products(db: AsyncSession, limit: int = 5000) -> list[dict]:
+    """获取所有产品列表（内部使用，如搜索、映射构建等场景）
+
+    Args:
+        limit: 最大返回条数，防止全表扫描导致内存溢出
+    """
     result = await db.execute(
-        select(Product).order_by(Product.create_time.desc())
+        select(Product).order_by(Product.create_time.desc()).limit(limit)
     )
     products = result.scalars().all()
     return [p.to_dict() for p in products]
@@ -78,7 +82,7 @@ async def get_products_page(db: AsyncSession, page: int = 1, per_page: int = 50,
     count_query = select(func.count(Product.id))
     if search:
         escaped = escape_like(search)
-        search_filter = or_(Product.name.like(f'%{escaped}%', escape='\\'), Product.barcode.like(f'%{escaped}%', escape='\\'))
+        search_filter = or_(Product.name.ilike(f'%{escaped}%', escape='\\'), Product.barcode.ilike(f'%{escaped}%', escape='\\'))
         query = query.where(search_filter)
         count_query = count_query.where(search_filter)
     total = (await db.execute(count_query)).scalar() or 0

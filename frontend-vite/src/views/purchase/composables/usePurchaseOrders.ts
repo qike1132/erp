@@ -16,7 +16,7 @@ export function usePurchaseOrders() {
   async function load() {
     loading.value = true
     try {
-      const res = await purchaseApi.orders({ page: page.value, per_page: 15 }) as ApiResponse<PurchaseOrder[]> & { pages?: number; orders?: PurchaseOrder[]; total?: number }
+      const res = await purchaseApi.orders({ page: page.value, per_page: 15 })
       orders.value = res.orders || []
       total.value = res.total || 0
       pages.value = res.pages || 1

@@ -26,6 +26,7 @@ from fastapi_app.shared_models.customer_access_log import CustomerAccessLog
 from fastapi_app.shared_models.inventory_log import InventoryLog
 from fastapi_app.shared_models.material_registration import MaterialRegistration, MaterialRegistrationItem
 from fastapi_app.shared_models.order import Order
+from fastapi_app.shared_models.order_batch_audit import OrderBatchAuditLog
 from fastapi_app.shared_models.order_status_log import OrderStatusLog
 from fastapi_app.shared_models.order_sync import OrderSyncConfig, OrderSyncRecord, SyncRetryQueue
 from fastapi_app.shared_models.packaging_record import PackagingRecord
@@ -89,6 +90,7 @@ __all__ = [
     'ModificationLog',
     'SavedQuery',
     'OrderStatusLog',
+    'OrderBatchAuditLog',
     'CustomerAccessLog',
     'ProductionPlan',
     'ProductionPlanLog',

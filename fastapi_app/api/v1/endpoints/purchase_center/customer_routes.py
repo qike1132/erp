@@ -11,7 +11,7 @@ from fastapi_app.api.v1.endpoints.purchase_center.schemas import (
     CustomerBatchRequest,
     CustomerSyncRequest,
 )
-from fastapi_app.core.database import get_async_db as get_db
+from fastapi_app.core.database import get_async_db as get_db, get_async_read_db as get_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.services import purchase_center_service as svc
 
@@ -26,7 +26,7 @@ async def api_get_customers(
     keyword: str = Query(''),
     sort_by: str = Query('name'),
     sort_order: str = Query('asc'),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
     _user=Depends(require_permission("product_manage")),
 ):
     result = await svc.get_customers(
@@ -90,7 +90,7 @@ async def api_batch_get_customers(
 
 @router.get("/customers/statistics")
 async def api_get_customers_statistics(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
     _user=Depends(require_permission("product_manage")),
 ):
     stats = await svc.get_customers_statistics(db)
@@ -100,7 +100,7 @@ async def api_get_customers_statistics(
 @router.get("/customers/{customer_id}")
 async def api_get_customer_detail(
     customer_id: int,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
     _user=Depends(require_permission("product_manage")),
 ):
     result = await svc.get_customer_detail(db, customer_id)

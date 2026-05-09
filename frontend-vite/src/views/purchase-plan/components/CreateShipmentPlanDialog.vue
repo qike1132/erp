@@ -170,9 +170,10 @@ const mode = ref<'manual' | 'import'>('manual')
 const ym = (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}` })()
 
 interface DetailLine {
-  customer_id: string | number
+  customer_id: string
   product_name: string
   product_id: number
+  barcode: string
   plan_date: string
   quantity: number | null
   _showSuggest: boolean
@@ -180,7 +181,7 @@ interface DetailLine {
 
 const form = reactive({
   details: [
-    { customer_id: '', product_name: '', product_id: 0, plan_date: '', quantity: null, _showSuggest: false },
+    { customer_id: '', product_name: '', product_id: 0, barcode: '', plan_date: '', quantity: null, _showSuggest: false },
   ] as DetailLine[],
 })
 
@@ -232,7 +233,7 @@ const customerOptions = computed(() => {
 })
 
 function addDetail() {
-  form.details.push({ customer_id: '', product_name: '', product_id: 0, plan_date: '', quantity: null, _showSuggest: false })
+  form.details.push({ customer_id: '', product_name: '', product_id: 0, barcode: '', plan_date: '', quantity: null, _showSuggest: false })
 }
 
 function removeDetail(idx: number) {
@@ -285,6 +286,7 @@ function onProductBlur(idx: number) {
 function selectProduct(idx: number, p: any) {
   form.details[idx].product_name = p.name || ''
   form.details[idx].product_id = p.id || 0
+  form.details[idx].barcode = p.barcode || ''
   form.details[idx]._showSuggest = false
   productSuggestions[idx] = []
 }
@@ -302,7 +304,7 @@ async function dlTpl() { try { await planApi.downloadTemplate() } catch { showTo
 function validate(): string | null {
   for (let i = 0; i < form.details.length; i++) {
     const d = form.details[i]
-    if (d.customer_id === '' || d.customer_id === 0) return `第 ${i + 1} 行：请选择客户`
+    if (!d.customer_id) return `第 ${i + 1} 行：请选择客户`
     if (!d.product_name.trim()) return `第 ${i + 1} 行：产品名称不能为空`
     if (!d.plan_date) return `第 ${i + 1} 行：请选择出货日期`
     if (!d.quantity || d.quantity <= 0) return `第 ${i + 1} 行：数量必须大于 0`
@@ -338,7 +340,7 @@ async function handleSubmit() {
         details: lines.map(d => ({
           product_id: d.product_id || 0,
           product_name: d.product_name.trim(),
-          barcode: '',
+          barcode: d.barcode || '',
           plan_date: d.plan_date,
           quantity: Number(d.quantity),
           remark: '',

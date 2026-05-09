@@ -54,6 +54,8 @@ const routes: RouteRecordRaw[] = [
       { path: 'ocr-import', name: 'OcrImport', component: () => import('@/views/ocr-import/OcrImportView.vue') },
       { path: 'backup', name: 'Backup', component: () => import('@/views/backup/BackupView.vue'), meta: { hideHeader: true } },
       { path: 'app-update', name: 'AppUpdate', component: () => import('@/views/app-update/AppUpdateView.vue'), meta: { hideHeader: true } },
+      { path: 'order-batch', name: 'OrderBatch', component: () => import('@/views/order-batch/OrderBatchView.vue'), meta: { hideHeader: true } },
+      { path: 'order-batch-history', name: 'OrderBatchHistory', component: () => import('@/views/order-batch/OrderBatchHistoryView.vue'), meta: { hideHeader: true } },
     ],
   },
   { path: '/:pathMatch(.*)*', redirect: '/dashboard' },

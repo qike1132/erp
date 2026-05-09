@@ -28,6 +28,7 @@ class OrderSyncRecord(Base):
     sync_data: Mapped[str | None] = mapped_column(Text, comment='同步数据JSON')
     operator_id: Mapped[int | None] = mapped_column(Integer, comment='操作人ID')
     operator_name: Mapped[str | None] = mapped_column(String(100), comment='操作人姓名')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
 
     __table_args__ = (
         Index('idx_sync_status_time', 'sync_status', 'sync_time'),
@@ -92,8 +93,8 @@ class SyncRetryQueue(Base):
     last_retry_time: Mapped[datetime | None] = mapped_column(DateTime, comment='上次重试时间')
     last_error: Mapped[str | None] = mapped_column(Text, comment='最后错误信息')
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, comment='创建时间')
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
     priority: Mapped[int] = mapped_column(Integer, default=0, comment='优先级')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
 
     __table_args__ = (
         Index('idx_retry_status_time', 'status', 'next_retry_time'),
@@ -154,8 +155,8 @@ class OrderSyncConfig(Base):
     config_key: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, comment='配置键')
     config_value: Mapped[str | None] = mapped_column(Text, comment='配置值')
     description: Mapped[str | None] = mapped_column(String(255), comment='配置描述')
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
     updated_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id'), comment='更新人ID')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
 
     def to_dict(self):
         return {

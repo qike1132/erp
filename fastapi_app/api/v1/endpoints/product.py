@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
 from fastapi_app.core.config import settings
-from fastapi_app.core.database import get_async_db
+from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.schemas.product import (
     ProductActionResponse,
@@ -33,13 +33,13 @@ router = APIRouter()
 @router.get('/list', response_model=ProductListResponse)
 async def list_products(page: int = Query(1, ge=1), per_page: int = Query(50, ge=1, le=200),
                         search: str = Query('', description='搜索产品名称或69码'),
-                        db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('product_manage'))):
+                        db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('product_manage'))):
     """产品列表（分页+缓存+搜索）"""
     result = await product_service.get_products_page(db, page=page, per_page=per_page, search=search)
-    return ProductListResponse(data=result['items'], total=result['total'])
+    return ProductListResponse(items=result['items'], total=result['total'])
 
 @router.get('/{product_id}', response_model=ProductResponse)
-async def get_product(product_id: int, db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('product_manage'))):
+async def get_product(product_id: int, db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('product_manage'))):
     """获取单个产品详情"""
     product = await db.get(Product, product_id)
     if not product:
@@ -93,13 +93,13 @@ async def delete_product(product_id: int, db: AsyncSession=Depends(get_async_db)
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 @router.get('/search', response_model=list)
-async def product_search(q: str=Query('', description='搜索关键词'), db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('product_manage'))):
+async def product_search(q: str=Query('', description='搜索关键词'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('product_manage'))):
     """产品搜索API"""
     products = await product_service.search_products(db, q)
     return products
 
 @router.get('/available-stock', response_model=ProductStockInfo)
-async def product_available_stock(product_id: int=Query(..., description='产品ID'), db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('product_manage'))):
+async def product_available_stock(product_id: int=Query(..., description='产品ID'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('product_manage'))):
     """获取产品可用库存"""
     try:
         return await product_service.get_product_stock(db, product_id)

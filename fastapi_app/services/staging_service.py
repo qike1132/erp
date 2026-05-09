@@ -757,8 +757,9 @@ async def confirm_staging_stockouts(
 
             for oid in affected_order_ids:
                 order = await db.get(Order, oid)
-                if order and order.status in ('已备货', '部分备货', '待备货'):
-                    order.transition_to('待出货')
+                if order:
+                    from fastapi_app.services.order_service import compute_order_status_from_db
+                    order.status = await compute_order_status_from_db(db, order)
 
             log = InventoryLog(
                 product_id=staging.product_id,

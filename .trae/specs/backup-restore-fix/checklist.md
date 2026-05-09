@@ -1,0 +1,31 @@
+- [x] 增量备份 API 端点 `POST /backup/save-incremental` 实现完成，返回备份文件名和变更行数
+- [x] 增量恢复 API 端点 `POST /backup/restore-incremental/{filename}` 实现完成，使用 UPSERT 模式
+- [x] 前端增量备份按钮点击后成功调用后端 API 并显示结果
+- [x] 前端增量恢复按钮点击后成功调用后端 API 并显示结果
+- [x] psql 恢复流程中连接释放包含重试机制（最多 3 次）
+- [x] psql 恢复流程兼容 PostgreSQL 13 以下版本（不使用 WITH (FORCE)）
+- [x] psql 恢复后 advisory lock 正确释放
+- [x] psql 恢复有 600 秒超时保护
+- [x] `_dispose_and_reinit_pool` 重建失败时有明确错误日志
+- [x] Legacy JSON 恢复前禁用外键约束（`SET session_replication_role = 'replica'`）
+- [x] Legacy JSON 恢复后重新启用外键约束（`SET session_replication_role = 'origin'`）
+- [x] Legacy JSON 恢复参数命名使用 `{col}__row{inserted}` 格式，无命名冲突
+- [x] Legacy JSON 恢复使用批量 INSERT + ON CONFLICT 处理
+- [x] Legacy JSON 恢复无双重 advisory lock
+- [x] 恢复操作前自动创建 `pre_restore_` 前缀的安全备份
+- [x] 安全备份保存到 `BACKUP_DIR / 'pre_restore'` 目录
+- [x] 恢复失败时自动从安全备份回滚
+- [x] `_CHECKSUM_TABLES` 覆盖所有 `Base.metadata.sorted_tables` 中的表
+- [x] 新增模型表自动纳入恢复验证范围
+- [x] `restore_db.py` 使用 PostgreSQL `psql` 命令而非 MySQL
+- [x] `restore_db.py` 支持 .sql.gz 压缩文件自动解压恢复
+- [x] `restore_db.py` 支持 ZIP 格式备份文件恢复
+- [x] 前端恢复结果区域完整展示后端返回的 errors、warnings 详细信息
+- [x] 前端恢复过程有阶段进度指示
+- [x] 全量备份（ZIP 格式）创建成功，manifest 包含所有板块对应的数据表
+- [x] 全量恢复从 ZIP 文件成功执行，数据完整一致
+- [x] 恢复后 L1 行数比对通过
+- [x] 恢复后 L2 指纹校验通过
+- [x] 恢复后 L3 抽样验证通过
+- [x] Legacy JSON 格式备份的恢复功能正常
+- [x] 备份文件包含所有左侧导航栏板块对应的数据表（采购中心、供应商管理、物料计算器、来料登记、核心业务、产品清单、客户订单、出库管理、出货计划、生产报表、数据查询、订单查询、报表管理、皮套管理、系统管理、用户管理、客户管理、审批管理、版本管理）

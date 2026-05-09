@@ -6,20 +6,10 @@
         <div class="co-header-left">
           <HeaderTabs />
         </div>
-        <div class="co-header-right">
-          <div class="co-tab-bar">
-            <button :class="['co-tab-btn', activeTab === 'input' && 'active']" @click="activeTab = 'input'">
-              录入
-            </button>
-            <button :class="['co-tab-btn', activeTab === 'records' && 'active']" @click="activeTab = 'records'">
-              记录查询
-            </button>
-          </div>
-        </div>
       </div>
 
       <!-- TAB: 录入 -->
-      <div v-show="activeTab === 'input'" class="co-tab-content">
+      <div class="co-tab-content">
       <div class="co-body">
         <!-- 左栏：录入表单 -->
         <div class="co-col">
@@ -36,6 +26,31 @@
           </div>
           <div class="co-col-scroll">
             <form @submit.prevent="addStaged">
+              <div class="co-form-row">
+                <div class="co-form-group">
+                  <label class="co-label">订单类型 <span class="co-required">*</span></label>
+                  <UiSelect
+                    v-model="form.orderType"
+                    placeholder="请选择订单类型"
+                    style="width: 100%"
+                    :options="orderTypeOptions"
+                  />
+                </div>
+                <div v-if="isCustomOrder" class="co-form-group">
+                  <label class="co-label">国家</label>
+                  <div style="display: flex; gap: 8px; align-items: center;">
+                    <UiSelect
+                      v-model="form.country"
+                      placeholder="请选择国家"
+                      style="flex: 1"
+                      :options="countryStore.countryOptions"
+                    />
+                    <UiButton variant="outline" style="white-space: nowrap; flex-shrink: 0;" @click="openCountryDialog">
+                      <i class="fas fa-plus" />
+                    </UiButton>
+                  </div>
+                </div>
+              </div>
               <div class="co-form-row">
                 <div v-if="isOrder" class="co-form-group">
                   <label class="co-label">订单时间 <span class="co-required">*</span></label>
@@ -242,196 +257,6 @@
     </div>
       </div>
 
-      <!-- TAB: 记录查询 -->
-      <div v-show="activeTab === 'records'" class="co-tab-content">
-      <div class="co-history-row">
-      <!-- 订单列表 -->
-      <div class="co-card co-history-col">
-        <div class="co-card-header co-header-order">
-          <span class="co-history-title"><i class="fas fa-clipboard-list" />订单列表</span>
-          <span v-if="orderList.length" class="count-badge-subtle"
-            ><strong>{{ orderList.length }}</strong> 条 ·
-            <strong>{{ orderList.reduce((s: unknown, o: any) => s + o.quantity, 0) }}</strong> 件</span
-          >
-        </div>
-        <div class="co-card-body">
-          <template v-if="orderGroups.length">
-            <div v-for="group in orderGroups" :key="group.date" class="co-date-group">
-              <div class="co-date-header co-date-header-order" @click="toggleGroup('order', group.date)">
-                <div class="co-date-header-left">
-                  <i class="fas fa-calendar-alt" />
-                  <strong>{{ group.date }}</strong>
-                  <span class="count-badge-subtle">{{ group.orders.length }} 条</span>
-                  <span class="count-badge-subtle"
-                    >共 {{ group.orders.reduce((s: unknown, o: any) => s + o.quantity, 0) }} 件</span
-                  >
-                </div>
-                <i :class="['fas fa-chevron-down co-toggle-icon', expandedOrderGroups.has(group.date) && 'expanded']" />
-              </div>
-              <div v-show="expandedOrderGroups.has(group.date)" class="co-collapse-content">
-                <table class="co-table">
-                  <thead>
-                    <tr>
-                      <th style="width: 10%">图片</th>
-                      <th style="width: 20%">产品</th>
-                      <th style="width: 12%">客户</th>
-                      <th style="width: 9%">数量</th>
-                      <th style="width: 9%">抵扣</th>
-                      <th style="width: 8%">状态</th>
-                      <th style="width: 12%">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="row in group.orders" :key="row.id">
-                      <td>
-                        <UiImage v-if="row.product?.image" :src="row.product.image" class="co-product-img-sm" /><span
-                          v-else
-                          >-</span
-                        >
-                      </td>
-                      <td>
-                        <div class="co-cell-product">
-                          {{ row.product?.name || '-' }}
-                        </div>
-                        <div class="co-cell-sub">
-                          {{ row.product?.barcode || '' }}
-                        </div>
-                      </td>
-                      <td>{{ row.customer }}</td>
-                      <td>
-                        <strong>{{ row.quantity }}</strong>
-                      </td>
-                      <td>
-                        <span v-if="row.deduct_quantity > 0" style="color: var(--color-warning-500)">{{ row.deduct_quantity }}</span
-                        ><span v-else>-</span>
-                      </td>
-                      <td>
-                        <span v-if="row.status === '已出货'" class="co-status-badge co-status-shipped">已出货</span>
-                        <span v-else-if="row.status === '待出货'" class="co-status-badge co-status-pending">待出货</span>
-                        <span v-else-if="row.status === '已完成'" class="co-status-badge co-status-done">已完成</span>
-                        <span v-else-if="row.status === '已取消'" class="co-status-badge co-status-cancel">已取消</span>
-                        <span v-else-if="row.status === '已备货'" class="co-status-badge co-status-new">已备货</span>
-                        <span v-else-if="row.status === '部分备货'" class="co-status-badge co-status-new" style="background:var(--color-warning-100);color:var(--color-warning-600)">部分备货</span>
-                        <span v-else-if="row.status === '待备货'" class="co-status-badge co-status-new" style="background:var(--color-gray-100);color:var(--color-gray-600)">待备货</span>
-                        <span v-else class="co-status-badge co-status-new">新订单</span>
-                      </td>
-                      <td style="white-space: nowrap">
-                        <template v-if="!row.is_locked">
-                          <button class="co-btn-icon co-btn-warn" @click="openEditSubmitted(row)">
-                            <i class="fas fa-edit" />
-                          </button>
-                          <button
-                            class="co-btn-icon co-btn-danger"
-                            :disabled="actionId === row.id"
-                            @click="handleDeleteOrder(row)"
-                          >
-                            <i :class="actionId === row.id ? 'fas fa-spinner fa-spin' : 'fas fa-trash'" />
-                          </button>
-                        </template>
-                        <UiBadge v-else variant="cancelled"> 审批中 </UiBadge>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </template>
-          <div v-else class="co-empty-state">
-            <i class="fas fa-clipboard-list co-empty-icon" />
-            <p>暂无订单</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- 备货列表 -->
-      <div class="co-card co-history-col">
-        <div class="co-card-header co-header-stockin">
-          <span class="co-history-title"><i class="fas fa-truck-loading" />备货记录</span>
-          <span v-if="stockinList.length" class="count-badge-subtle"
-            ><strong>{{ stockinList.length }}</strong> 条 ·
-            <strong>{{ stockinList.reduce((s: unknown, o: any) => s + o.quantity, 0) }}</strong> 件</span
-          >
-        </div>
-        <div class="co-card-body">
-          <template v-if="stockinGroups.length">
-            <div v-for="group in stockinGroups" :key="group.date" class="co-date-group">
-              <div class="co-date-header co-date-header-stockin" @click="toggleGroup('stockin', group.date)">
-                <div class="co-date-header-left">
-                  <i class="fas fa-calendar-alt" />
-                  <strong>{{ group.date }}</strong>
-                  <span class="count-badge-subtle">{{ group.stockins.length }} 条</span>
-                  <span class="count-badge-subtle"
-                    >共 {{ group.stockins.reduce((s: unknown, o: any) => s + o.quantity, 0) }} 件</span
-                  >
-                </div>
-                <i
-                  :class="['fas fa-chevron-down co-toggle-icon', expandedStockinGroups.has(group.date) && 'expanded']"
-                />
-              </div>
-              <div v-show="expandedStockinGroups.has(group.date)" class="co-collapse-content">
-                <table class="co-table">
-                  <thead>
-                    <tr>
-                      <th style="width: 10%">图片</th>
-                      <th style="width: 22%">产品</th>
-                      <th style="width: 12%">客户</th>
-                      <th style="width: 10%">数量</th>
-                      <th style="width: 10%">可用</th>
-                      <th style="width: 12%">备注</th>
-                      <th style="width: 12%">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="row in group.stockins" :key="row.id">
-                      <td>
-                        <UiImage v-if="row.product?.image" :src="row.product.image" class="co-product-img-sm" /><span
-                          v-else
-                          >-</span
-                        >
-                      </td>
-                      <td>
-                        <div class="co-cell-product">
-                          {{ row.product?.name || '-' }}
-                        </div>
-                        <div class="co-cell-sub">
-                          {{ row.product?.barcode || '' }}
-                        </div>
-                      </td>
-                      <td>{{ row.customer }}</td>
-                      <td>
-                        <strong>{{ row.quantity }}</strong>
-                      </td>
-                      <td
-                        :style="{ color: row.quantity - (row.deducted || 0) > 0 ? 'var(--color-success-700)' : 'var(--color-text-muted)' }"
-                      >
-                        <strong>{{ row.quantity - (row.deducted || 0) }}</strong>
-                      </td>
-                      <td>
-                        <small>{{ row.note || '-' }}</small>
-                      </td>
-                      <td>
-                        <button
-                          class="co-btn-icon co-btn-danger"
-                          :disabled="actionId === row.id"
-                          @click="handleDeleteStockin(row)"
-                        >
-                          <i :class="actionId === row.id ? 'fas fa-spinner fa-spin' : 'fas fa-trash'" />
-                        </button>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </template>
-          <div v-else class="co-empty-state">
-            <i class="fas fa-truck-loading co-empty-icon" />
-            <p>暂无备货记录</p>
-          </div>
-        </div>
-      </div>
-      </div>
-      </div>
     </div>
 
     <!-- 编辑暂存弹窗 -->
@@ -475,55 +300,14 @@
       </template>
     </UiDialog>
 
-    <!-- 编辑已提交订单弹窗 -->
-    <UiDialog :open="editSubmittedVisible" title="编辑订单" @update:open="editSubmittedVisible = $event">
-      <template v-if="editSubmittedData">
-        <div class="co-form-group">
-          <label class="co-label">客户</label>
-          <UiSelect v-model="editSubmittedData.customer" style="width: 100%" :options="customerOptions" />
-        </div>
-        <div class="co-form-group" style="position: relative">
-          <label class="co-label">产品</label>
-          <input
-            type="text"
-            class="form-text-input"
-            :value="editSubmittedData.productSearch"
-            placeholder="搜索产品"
-            @input="editSubmittedData.productSearch = ($event.target as HTMLInputElement).value; onEditProductInput()"
-            @focus="onEditProductFocus"
-            @blur="hideEditSuggestions"
-          />
-          <Transition name="co-dropdown">
-            <div v-if="editSuggestions.length && showEditSuggestions" class="co-autocomplete">
-              <div
-                v-for="p in editSuggestions"
-                :key="p.id"
-                class="co-autocomplete-item"
-                @mousedown.prevent="
-                  editSubmittedData.productId = p.id;
-                  editSubmittedData.productSearch = p.value;
-                  showEditSuggestions = false
-                "
-              >
-                {{ p.value }}
-              </div>
-            </div>
-          </Transition>
-        </div>
-        <div class="co-form-group">
-          <label class="co-label">数量</label>
-          <input type="number" class="form-number-input" v-model.number="editSubmittedData.quantity" min="1" max="9999999" step="1" style="width: 100%" />
-        </div>
-        <div class="co-form-group">
-          <label class="co-label">备注</label>
-          <textarea v-model="editSubmittedData.note" rows="2" class="co-textarea" />
-        </div>
-      </template>
+    <UiDialog :open="countryDialogVisible" title="添加国家" max-width-class="max-w-[420px]" @update:open="countryDialogVisible = $event">
+      <div class="co-form-group">
+        <label class="co-label">国家名称</label>
+        <UiInput v-model="newCountryName" placeholder="请输入国家名称" />
+      </div>
       <template #footer>
-        <UiButton variant="outline" @click="editSubmittedVisible = false"> 取消 </UiButton>
-        <UiButton variant="primary" :disabled="editSubmittedSaving" @click="saveEditSubmitted">
-          {{ editSubmittedSaving ? '保存中...' : '保存' }}
-        </UiButton>
+        <UiButton variant="outline" @click="countryDialogVisible = false">取消</UiButton>
+        <UiButton variant="primary" @click="saveCountry">保存</UiButton>
       </template>
     </UiDialog>
 
@@ -539,27 +323,24 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { get, post, del } from '@/api/request'
-import { orderApi, customerApi } from '@/api'
-import type { ApiResponse } from '@/types'
+import { get, post } from '@/api/request'
+import { customerApi } from '@/api'
 import UiInput from '@/components/ui/UiInput.vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
 import UiButton from '@/components/ui/UiButton.vue'
-import UiBadge from '@/components/ui/UiBadge.vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
-import UiImage from '@/components/ui/UiImage.vue'
 import UiSelect from '@/components/ui/UiSelect.vue'
 import { showToast } from '@/composables/useToast'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
+import { useCountryStore } from '@/stores/country'
 
-const actionId = ref<number | ''>(0)
-const activeTab = ref<'input' | 'records'>('input')
 const queryClient = useQueryClient()
 const confirmDialog = useConfirmDialog()
+const countryStore = useCountryStore()
 
 // ===== Data queries =====
 const { data: customerData } = useQuery({
@@ -572,53 +353,20 @@ const customerList = computed(() => {
   const raw = customerData.value?.names ?? customerData.value ?? []
   return raw.map((c: any) => ({ name: c.name ?? c }))
 })
-const customerOptions = computed(() => customerList.value.map((c: unknown) => ({ value: c.name, label: c.name })))
-
-const orderPage = ref(1)
-const orderPerPage = 20
-const { data: ordersData } = useQuery({
-  queryKey: ['orders-list', () => orderPage.value],
-  queryFn: async () => {
-    const res = (await orderApi.list({ per_page: orderPerPage, page: orderPage.value })) as any
-    return res
-  },
-  staleTime: 30_000,
-  gcTime: 60_000,
-})
-const orderList = computed(() => ordersData.value?.data ?? ordersData.value?.orders ?? ordersData.value?.items ?? [])
-const orderTotal = computed(() => ordersData.value?.total ?? orderList.value.length)
-const orderTotalPages = computed(() => Math.max(1, Math.ceil(orderTotal.value / orderPerPage)))
-
-const stockinPage = ref(1)
-const stockinPerPage = 20
-const { data: stockinsData } = useQuery({
-  queryKey: ['stockins-list', () => stockinPage.value],
-  queryFn: async () => {
-    const res = (await get('/stock/in/list', { per_page: stockinPerPage, page: stockinPage.value })) as any
-    return res
-  },
-  staleTime: 30_000,
-  gcTime: 60_000,
-})
-const stockinList = computed(() => stockinsData.value?.stockins ?? stockinsData.value?.items ?? [])
-const stockinTotal = computed(() => stockinsData.value?.total ?? stockinList.value.length)
-const stockinTotalPages = computed(() => Math.max(1, Math.ceil(stockinTotal.value / stockinPerPage)))
-
-function goOrderPage(p: number) { orderPage.value = p }
-function goStockinPage(p: number) { stockinPage.value = p }
+const customerOptions = computed(() => customerList.value.map((c: { name: string }) => ({ value: c.name, label: c.name })))
 
 // ===== Product search (shared) =====
 async function searchProducts(q: string) {
   if (!q.trim()) return []
   try {
     const d = await get<any[]>('/aux/product-search', { q })
-    return (Array.isArray(d) ? d : []).map((p: unknown) => ({ value: p.name, id: p.id, ...p }))
+    return (Array.isArray(d) ? d : []).map((p: any) => ({ value: p.name, id: p.id, ...p }))
   } catch {
     return []
   }
 }
 
-const suggestions = ref<unknown[]>([])
+const suggestions = ref<any[]>([])
 const showSuggestions = ref(false)
 let searchTimeout: ReturnType<typeof setTimeout> | null = null
 
@@ -654,6 +402,7 @@ function selectProduct(p: any) {
 const today = new Date().toISOString().split('T')[0]
 const form = reactive({
   type: 'order' as 'order' | 'stockin',
+  orderType: 'normal' as 'normal' | 'custom',
   date: today,
   customer: '',
   productSearch: '',
@@ -662,9 +411,39 @@ const form = reactive({
   deductStock: false,
   deductQuantity: 0,
   note: '',
+  country: '',
 })
 const isOrder = computed(() => form.type === 'order')
+const isCustomOrder = computed(() => form.orderType === 'custom')
+const orderTypeOptions = [
+  { value: 'normal', label: '常规订单' },
+  { value: 'custom', label: '定制订单' },
+]
 const canAdd = computed(() => !!form.customer && !!form.productId && form.quantity > 0 && form.quantity <= 9999999 && !!form.date)
+
+const countryDialogVisible = ref(false)
+const newCountryName = ref('')
+
+function openCountryDialog() {
+  newCountryName.value = ''
+  countryDialogVisible.value = true
+}
+
+function saveCountry() {
+  const trimmed = newCountryName.value.trim()
+  if (!trimmed) {
+    showToast('请输入国家名称', 'warning')
+    return
+  }
+  const ok = countryStore.addCountry(trimmed)
+  if (ok) {
+    form.country = trimmed
+    countryDialogVisible.value = false
+    showToast('国家保存成功', 'success')
+  } else {
+    showToast('该国家已存在', 'warning')
+  }
+}
 
 const availableStock = ref(0)
 const deductInfoVisible = ref(false)
@@ -710,12 +489,14 @@ function addStaged() {
   }
   stagedItems.value.push({
     type: form.type,
+    orderType: form.orderType,
     customer: form.customer,
     productId: form.productId,
     productName: form.productSearch,
     quantity: form.quantity,
     date: form.date,
     note: form.note,
+    country: isCustomOrder.value ? form.country : '',
     deductStock: isOrder.value ? form.deductStock : false,
     deductQuantity: isOrder.value && form.deductStock ? form.deductQuantity : 0,
   })
@@ -723,15 +504,17 @@ function addStaged() {
   form.productId = 0
   form.quantity = 1
   form.note = ''
+  form.orderType = 'normal'
+  form.country = ''
   form.deductStock = false
   form.deductQuantity = 0
   deductInfoVisible.value = false
 }
 
 // ===== Staged items (unified) =====
-const stagedItems = ref<unknown[]>([])
-const stagedOrders = computed(() => stagedItems.value.filter((i) => i.type === 'order'))
-const stagedStockins = computed(() => stagedItems.value.filter((i) => i.type === 'stockin'))
+const stagedItems = ref<any[]>([])
+const stagedOrders = computed(() => stagedItems.value.filter((i: any) => i.type === 'order'))
+const stagedStockins = computed(() => stagedItems.value.filter((i: any) => i.type === 'stockin'))
 
 const submitting = ref(false)
 
@@ -747,12 +530,14 @@ async function submitOrders() {
       deduct_quantity: i.deductQuantity || 0,
       note: i.note || '',
       order_date: i.date || '',
+      order_type: i.orderType === 'custom' ? 'custom' : 'regular',
+      country: i.country || '',
     }))
     await post('/aux/batch-submit-orders', { orders: payload })
     showToast('订单提交成功', 'success')
     stagedItems.value = stagedItems.value.filter((i) => i.type !== 'order')
     queryClient.invalidateQueries({ queryKey: ['orders-list'] })
-    queryClient.invalidateQueries({ queryKey: ['stockins-list-all'] })
+    queryClient.invalidateQueries({ queryKey: ['stockins-list'] })
   } catch (err: any) {
     showToast(err.response?.data?.detail || '提交失败', 'error')
   } finally {
@@ -769,11 +554,14 @@ async function submitStockins() {
       customer: i.customer,
       quantity: i.quantity,
       note: i.note || '',
+      stockin_date: i.date || '',
+      order_type: i.orderType === 'custom' ? 'custom' : 'regular',
+      country: i.country || '',
     }))
     await post('/aux/batch-submit-stockins', { stockins: payload })
     showToast('备货提交成功', 'success')
     stagedItems.value = stagedItems.value.filter((i) => i.type !== 'stockin')
-    queryClient.invalidateQueries({ queryKey: ['stockins-list-all'] })
+    queryClient.invalidateQueries({ queryKey: ['stockins-list'] })
   } catch (err: any) {
     showToast(err.response?.data?.detail || '提交失败', 'error')
   } finally {
@@ -796,7 +584,7 @@ function openEditStaged(idx: number) {
       product_id: editStagedData.value.productId,
       customer: editStagedData.value.customer,
     })
-      .then((res: unknown) => {
+      .then((res: any) => {
         const items = res.stockins ?? res.items ?? res ?? []
         editAvailableStock.value = items.reduce(
           (s: number, i: any) => s + (i.available ?? i.quantity - (i.deducted || 0)),
@@ -815,148 +603,6 @@ function saveEditStaged() {
   }
   editStagedVisible.value = false
 }
-
-// ===== Edit submitted order =====
-const editSubmittedVisible = ref(false)
-const editSubmittedData = ref<any>(null)
-const editSubmittedSaving = ref(false)
-const editSuggestions = ref<unknown[]>([])
-const showEditSuggestions = ref(false)
-let editSearchTimeout: ReturnType<typeof setTimeout> | null = null
-
-function onEditProductInput() {
-  if (!editSubmittedData.value) return
-  editSubmittedData.value.productId = 0
-  if (editSearchTimeout) clearTimeout(editSearchTimeout)
-  editSearchTimeout = setTimeout(async () => {
-    editSuggestions.value = await searchProducts(editSubmittedData.value.productSearch)
-    showEditSuggestions.value = editSuggestions.value.length > 0
-  }, 300)
-}
-function onEditProductFocus() {
-  if (!editSubmittedData.value) return
-  if (editSubmittedData.value.productSearch && editSuggestions.value.length === 0) {
-    searchProducts(editSubmittedData.value.productSearch).then((r) => {
-      editSuggestions.value = r
-      showEditSuggestions.value = r.length > 0
-    })
-  } else if (editSuggestions.value.length > 0) {
-    showEditSuggestions.value = true
-  }
-}
-function hideEditSuggestions() {
-  setTimeout(() => { showEditSuggestions.value = false }, 150)
-}
-
-function openEditSubmitted(row: any) {
-  editSubmittedData.value = {
-    id: row.id,
-    customer: row.customer,
-    productId: row.product_id || row.product?.id || 0,
-    productSearch: row.product?.name || '',
-    quantity: row.quantity,
-    note: row.note || '',
-  }
-  editSubmittedVisible.value = true
-}
-
-async function saveEditSubmitted() {
-  if (!editSubmittedData.value) return
-  editSubmittedSaving.value = true
-  try {
-    await orderApi.update(editSubmittedData.value.id, {
-      customer: editSubmittedData.value.customer,
-      product_id: editSubmittedData.value.productId,
-      quantity: editSubmittedData.value.quantity,
-      note: editSubmittedData.value.note,
-    })
-    showToast('订单更新成功', 'success')
-    editSubmittedVisible.value = false
-    queryClient.invalidateQueries({ queryKey: ['orders-list'] })
-  } catch (err: any) {
-    showToast(err.response?.data?.detail || '更新失败', 'error')
-  } finally {
-    editSubmittedSaving.value = false
-  }
-}
-
-// ===== Delete from history =====
-async function handleDeleteOrder(row: any) {
-  if (!(await confirmDialog.confirm('确定要删除这条订单吗？'))) return
-  actionId.value = row.id
-  try {
-    await orderApi.delete(row.id)
-    showToast('删除成功', 'success')
-    // 乐观更新：立即从本地缓存中移除已删除的订单，无需等待 refetch
-    queryClient.setQueryData(['orders-list'], (old: unknown) => {
-      if (!old || !Array.isArray(old)) return old
-      return old.filter((o: unknown) => o.id !== row.id)
-    })
-    queryClient.invalidateQueries({ queryKey: ['orders-list'] })
-  } catch (err: any) {
-    showToast(err.response?.data?.detail || '删除失败', 'error')
-  } finally {
-    actionId.value = 0
-  }
-}
-
-async function handleDeleteStockin(row: any) {
-  if (!(await confirmDialog.confirm('确定要删除这条备货记录吗？'))) return
-  actionId.value = row.id
-  try {
-    await del(`/aux/stockin/${row.id}`)
-    showToast('删除成功', 'success')
-    // 乐观更新：立即从本地缓存中移除已删除的备货记录
-    queryClient.setQueryData(['stockins-list-all'], (old: unknown) => {
-      if (!old || !Array.isArray(old)) return old
-      return old.filter((o: unknown) => o.id !== row.id)
-    })
-    queryClient.invalidateQueries({ queryKey: ['stockins-list-all'] })
-  } catch (err: any) {
-    showToast(err.response?.data?.detail || '删除失败', 'error')
-  } finally {
-    actionId.value = 0
-  }
-}
-
-// ===== History list groups =====
-const expandedOrderGroups = ref(new Set<string>())
-const expandedStockinGroups = ref(new Set<string>())
-
-const orderGroups = computed(() => {
-  const map = new Map<string, any[]>()
-  for (const o of orderList.value) {
-    const d = (o.order_date || '').split(' ')[0] || '未知日期'
-    if (!map.has(d)) map.set(d, [])
-    map.get(d)!.push(o)
-  }
-  return Array.from(map.entries())
-    .sort((a, b) => b[0].localeCompare(a[0]))
-    .map(([date, orders]) => ({ date, orders }))
-})
-
-const stockinGroups = computed(() => {
-  const map = new Map<string, any[]>()
-  for (const s of stockinList.value) {
-    const d = (s.stockin_date || '').split(' ')[0] || '未知日期'
-    if (!map.has(d)) map.set(d, [])
-    map.get(d)!.push(s)
-  }
-  return Array.from(map.entries())
-    .sort((a, b) => b[0].localeCompare(a[0]))
-    .map(([date, stockins]) => ({ date, stockins }))
-})
-
-function toggleGroup(list: 'order' | 'stockin', date: string) {
-  const set = list === 'order' ? expandedOrderGroups.value : expandedStockinGroups.value
-  if (set.has(date)) set.delete(date)
-  else set.add(date)
-}
-
-onMounted(() => {
-  for (const g of orderGroups.value) expandedOrderGroups.value.add(g.date)
-  for (const g of stockinGroups.value) expandedStockinGroups.value.add(g.date)
-})
 
 // ===== Batch upload (shared) =====
 const excelFile = ref<File | null>(null)
@@ -988,7 +634,7 @@ async function handleImport() {
       const res = (await get('/staging-orders')) as any
       const items = res.staging_orders ?? res.items ?? []
       stagedItems.value.push(
-        ...items.map((i: unknown) => ({
+        ...items.map((i: any) => ({
           type: 'order' as const,
           customer: i.customer,
           productId: i.product_id,
@@ -1006,7 +652,7 @@ async function handleImport() {
       const res = (await get('/staging-stockins')) as any
       const items = res.staging_stockins ?? res.items ?? []
       stagedItems.value.push(
-        ...items.map((i: unknown) => ({
+        ...items.map((i: any) => ({
           type: 'stockin' as const,
           customer: i.customer,
           productId: i.product_id,
@@ -1160,43 +806,6 @@ async function handleImport() {
   gap: 8px;
 }
 
-/* ===== TAB 切换 ===== */
-.co-tab-bar {
-  display: inline-flex;
-  gap: 4px;
-  padding: 4px;
-  border-radius: 12px;
-  background: white;
-  border: 1px solid var(--color-border-light);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-}
-.co-tab-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 8px 14px;
-  border: none;
-  border-radius: 9px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  background: transparent;
-  cursor: pointer;
-  transition: all 0.3s ease;
-}
-.co-tab-btn:hover {
-  background: var(--color-primary-50);
-  color: var(--color-primary-600);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-  transform: translateY(-1px);
-}
-.co-tab-btn.active {
-  background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
-  color: var(--color-primary-700);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 8px rgba(91, 141, 239, 0.2);
-  transform: translateY(-1px);
-}
 .co-tab-content {
   flex: 1;
   display: flex;
@@ -1554,36 +1163,6 @@ async function handleImport() {
   color: var(--color-success-600);
 }
 
-/* ===== 订单状态标签 ===== */
-.co-status-badge {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.co-status-new {
-  background: var(--color-gray-100, #f3f4f6);
-  color: var(--color-gray-500, #6b7280);
-}
-.co-status-pending {
-  background: var(--color-warning-50, #fffbeb);
-  color: var(--color-warning-600, #d97706);
-}
-.co-status-shipped {
-  background: var(--color-primary-50, #eff6ff);
-  color: var(--color-primary-600, #2563eb);
-}
-.co-status-done {
-  background: var(--color-success-50, #f0fdf4);
-  color: var(--color-success-600, #059669);
-}
-.co-status-cancel {
-  background: var(--color-error-50, #fef2f2);
-  color: var(--color-error-600, #dc2626);
-}
-
 /* ===== 操作按钮 ===== */
 .co-btn-icon {
   width: 36px;
@@ -1676,157 +1255,6 @@ async function handleImport() {
   text-align: center;
   padding: 16px 24px;
   border-top: 1px solid var(--color-border, #cbd5e1);
-}
-
-/* ===== 折叠 ===== */
-.co-toggle-icon {
-  transition: transform 0.3s ease;
-  color: var(--color-text-secondary);
-  font-size: 12px;
-}
-.co-toggle-icon.expanded {
-  transform: rotate(180deg);
-}
-
-/* ===== 日期分组 ===== */
-.co-date-group {
-  margin-bottom: 12px;
-}
-.co-date-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 14px;
-  background: white;
-  border-bottom: 2px solid var(--color-border-light, #e2e8f0);
-  border-radius: 10px 10px 0 0;
-  cursor: pointer;
-  transition: background 0.2s ease;
-}
-.co-date-header:hover {
-  background: var(--color-primary-50);
-}
-.co-date-header-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.co-collapse-content {
-  border-top: none;
-}
-
-/* ===== 表格 ===== */
-.co-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-.co-table th {
-  background: var(--color-surface, #f8fafc);
-  font-weight: 600;
-  font-size: 12px;
-  padding: 10px 14px;
-  text-align: left;
-  border-bottom: 2px solid var(--color-border-light, #e2e8f0);
-}
-.co-table td {
-  padding: 10px 14px;
-  vertical-align: middle;
-  border-bottom: 1px solid var(--color-border-light, #e2e8f0);
-  transition: background 0.2s ease;
-}
-.co-table tr:hover td {
-  background: var(--color-primary-50);
-}
-.co-product-img {
-  width: 50px;
-  height: 50px;
-  object-fit: cover;
-  border-radius: 8px;
-  transition: transform 0.2s ease;
-}
-.co-product-img:hover {
-  transform: scale(1.1);
-}
-
-/* ===== 历史记录 ===== */
-.co-history-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  padding: 20px 24px;
-  flex: 1;
-  overflow-y: auto;
-}
-@media (max-width: 1024px) {
-  .co-history-row {
-    grid-template-columns: 1fr;
-  }
-}
-.co-history-col {
-  margin-top: 0;
-}
-
-/* ===== 历史卡片头部 ===== */
-.co-card-body {
-  padding: 16px 20px;
-}
-.co-header-order {
-  border-bottom: 3px solid var(--color-primary-500);
-}
-.co-header-stockin {
-  border-bottom: 3px solid var(--color-success-500);
-}
-.co-history-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--color-text);
-}
-.co-header-order .co-history-title {
-  color: var(--color-primary-600);
-}
-.co-header-stockin .co-history-title {
-  color: var(--color-success-600);
-}
-.co-header-order .count-badge-subtle {
-  background: var(--color-primary-50);
-}
-.co-header-stockin .count-badge-subtle {
-  background: var(--color-success-100);
-}
-
-/* ===== 日期头部强调色 ===== */
-.co-date-header-order i {
-  color: var(--color-primary-500);
-}
-.co-date-header-stockin i {
-  color: var(--color-success-500);
-}
-.co-date-header-order {
-  border-left: 4px solid var(--color-primary-500);
-}
-.co-date-header-stockin {
-  border-left: 4px solid var(--color-success-500);
-}
-
-/* ===== 紧凑产品单元格 ===== */
-.co-cell-product {
-  font-size: 13px;
-  line-height: 1.3;
-}
-.co-cell-sub {
-  font-size: 11px;
-  color: var(--color-text-secondary);
-  line-height: 1.2;
-}
-.co-product-img-sm {
-  width: 36px;
-  height: 36px;
-  object-fit: cover;
-  border-radius: 6px;
 }
 
 /* ===== 空状态 ===== */

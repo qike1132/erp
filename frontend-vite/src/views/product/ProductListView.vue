@@ -99,9 +99,9 @@
             <div class="pd-col-actions">
               <div class="pd-search">
                 <i class="fas fa-search pd-search-icon"></i>
-                <input v-model="searchTerm" type="text" class="pd-search-input" placeholder="搜索产品名称或69码..." @input="onSearchInput" />
+                <input :value="searchTerm" type="text" class="pd-search-input" placeholder="搜索产品名称或69码..." @input="onSearchInput" />
               </div>
-              <select v-model="sortOrder" class="pd-sort">
+              <select :value="`${sortBy}-${sortOrder}`" class="pd-sort" @change="onSortChange">
                 <option value="name-asc">名称 A-Z</option>
                 <option value="name-desc">名称 Z-A</option>
               </select>
@@ -134,7 +134,7 @@
                     </tr>
                   </template>
                   <template v-else>
-                    <tr v-for="(row, idx) in paginatedProducts" :key="row.id" class="pd-tr" :style="{ animationDelay: `${idx * 0.05}s` }">
+                    <tr v-for="(row, idx) in paginatedProducts" :key="row.id" class="pd-tr">
                       <td>
                         <div v-if="row.image" class="pd-thumb-box" @click="openImageModal(row.image)">
                           <img :src="resolveStaticUrl(row.image)" class="pd-thumb-img" :alt="row.name" @error="handleImageError($event)" />
@@ -166,7 +166,7 @@
             </div>
 
             <!-- 分页 -->
-            <UiPagination v-if="total > PAGE_SIZE" :current-page="currentPage" :total-pages="totalPages" :total-items="total" @update:current-page="goToPage" />
+            <UiPagination v-if="total > 20" :current-page="currentPage" :total-pages="totalPages" :total-items="total" @update:current-page="goToPage" />
           </div>
         </div>
       </div>
@@ -446,6 +446,7 @@ import { showToast } from '@/composables/useToast'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
+import { useEnhancedList } from '@/composables/useEnhancedList'
 import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 
 interface Product {
@@ -475,46 +476,26 @@ const queryClient = useQueryClient()
 const confirmDialog = useConfirmDialog()
 
 // 产品列表
-const PAGE_SIZE = 20
-const currentPage = ref(1)
-const searchTerm = ref('')
-const total = ref(0)
-
-const { data: result, isLoading } = useQuery({
-  queryKey: ['products-list', currentPage, searchTerm],
-  queryFn: async () => {
-    const res = (await productApi.list({ page: currentPage.value, per_page: PAGE_SIZE, search: searchTerm.value || undefined })) as any
-    total.value = res.total ?? 0
-    return res
-  },
+const {
+  items: paginatedProducts, total, page: currentPage, search: searchTerm,
+  totalPages, isLoading, sortBy, sortOrder, handleSort,
+  handlePageChange: goToPage, handleSearch: setSearchTerm,
+} = useEnhancedList<Product>({
+  key: 'products-list',
+  url: '/products/list',
+  perPage: 20,
   staleTime: 30_000,
 })
 
-const products = computed<Product[]>(() => result.value?.data ?? result.value?.products ?? [])
-
-// 排序（在当前页数据上排序）
-const sortOrder = ref('name-asc')
-const filteredProducts = computed(() => {
-  return [...products.value].sort((a, b) => {
-    if (sortOrder.value === 'name-asc') return a.name.localeCompare(b.name, 'zh-CN')
-    if (sortOrder.value === 'name-desc') return b.name.localeCompare(a.name, 'zh-CN')
-    return 0
-  })
-})
-
-// 服务端分页
-const totalPages = computed(() => Math.ceil(total.value / PAGE_SIZE) || 1)
-const paginatedProducts = computed(() => filteredProducts.value)
-
-watch(searchTerm, () => { currentPage.value = 1 })
-
-let searchTimer: ReturnType<typeof setTimeout> | null = null
-function onSearchInput() {
-  if (searchTimer) clearTimeout(searchTimer)
-  searchTimer = setTimeout(() => { currentPage.value = 1 }, 300)
+function onSearchInput(e: Event) {
+  setSearchTerm((e.target as HTMLInputElement).value)
 }
 
-function goToPage(p: number) { currentPage.value = p }
+function onSortChange(e: Event) {
+  const val = (e.target as HTMLSelectElement).value
+  const [field, order] = val.split('-')
+  handleSort(field, order === 'asc' ? 'ascending' : 'descending')
+}
 
 // ===== 添加产品 =====
 const submitting = ref(false)

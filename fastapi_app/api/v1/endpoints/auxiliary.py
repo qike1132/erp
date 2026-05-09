@@ -8,7 +8,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from fastapi_app.core.database import get_async_db
+from fastapi_app.core.config import settings
+from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.services import escape_like
 from fastapi_app.shared_models import InventoryLog, Product, StockIn, User
@@ -49,7 +50,7 @@ async def clear_cache(
 async def product_search(
     q: str = Query('', max_length=100, description="搜索关键词"),
     user: User = Depends(require_permission("product_view")),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
 ):
     """产品搜索（支持名称、条码）"""
     if not q.strip():
@@ -74,7 +75,7 @@ async def product_search(
 async def product_available_stock(
     product_id: int = Query(..., description="产品ID"),
     user: User = Depends(require_permission("product_view")),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
 ):
     """获取产品可用库存"""
     product = await db.get(Product, product_id)
@@ -95,7 +96,7 @@ async def get_inventory_logs(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
     user: User = Depends(require_permission("stock_view")),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
 ):
     """获取产品库存日志（分页）"""
     from sqlalchemy import func
@@ -128,7 +129,7 @@ async def available_stockins(
     customer: str = Query('', max_length=100),
     limit: int = Query(100, ge=1, le=500),
     user: User = Depends(require_permission("stock_view")),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
 ):
     """获取可用入库记录（限制返回数量）"""
     query = select(StockIn).options(
@@ -157,7 +158,7 @@ async def available_stockins(
 async def stockin_info(
     stockin_id: int,
     user: User = Depends(require_permission("stock_view")),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
 ):
     """获取入库信息详情"""
     stockin = await db.get(StockIn, stockin_id)
@@ -180,7 +181,7 @@ async def available_shipment(
     order_type: str | None = Query(None, max_length=20),
     country: str | None = Query(None, max_length=100),
     user: User = Depends(require_permission("stock_view")),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
 ):
     """获取可出货量（按客户+产品维度，支持按订单类型隔离）
 
@@ -294,7 +295,7 @@ async def delete_supplier_api(
         raise
     except SQLAlchemyError as e:
         await db.rollback()
-        raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}") from e
+        raise HTTPException(status_code=500, detail=f"删除失败: {settings.sanitize_error(e)}") from e
 
 
 # ==================== 批量提交 Pydantic 模型 ====================
@@ -315,6 +316,9 @@ class BatchStockInItem(BaseModel):
     customer: str
     quantity: int = Field(..., gt=0, le=9999999)
     note: str = ""
+    order_type: str = Field("regular", pattern="^(regular|custom)$")
+    country: str | None = None
+    stockin_date: str | None = None
 
 class BatchStockOutItem(BaseModel):
     product_id: int = Field(..., gt=0)
@@ -420,7 +424,7 @@ async def batch_submit_stockouts(
 @router.get("/system/stats")
 async def system_stats(
     user: User = Depends(require_permission("admin")),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
 ):
     """系统统计信息（缓存命中率/性能数据）"""
     try:

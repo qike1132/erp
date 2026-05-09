@@ -212,7 +212,8 @@ async def process_order_deduction(
 
         if not stockin_available:
             logger.info(f'订单{order.order_no}无可用备货抵扣')
-            order.transition_to('待备货')
+            from fastapi_app.services.order_service import compute_order_status_from_db
+            order.status = await compute_order_status_from_db(db, order)
             return 0, deduction_details
 
         stockin, available = stockin_available
@@ -264,13 +265,9 @@ async def process_order_deduction(
         if product and deduct_amount > 0:
             product.current_stock -= deduct_amount
 
-        # 更新订单状态（通过状态机校验）
-        if deduct_amount >= order_quantity:
-            order.transition_to('已备货')
-        elif deduct_amount > 0:
-            order.transition_to('部分备货')
-        else:
-            order.transition_to('待备货')
+        # 更新订单状态（派生计算：根据实际备货/出货量推导状态）
+        from fastapi_app.services.order_service import compute_order_status_from_db
+        order.status = await compute_order_status_from_db(db, order)
 
         logger.info(f'订单抵扣处理完成：订单{order.order_no}，抵扣数量{deduct_amount}，状态{order.status}')
         return deduct_amount, deduction_details

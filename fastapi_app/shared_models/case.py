@@ -30,6 +30,7 @@ class Case(Base):
     current_stock: Mapped[int] = mapped_column(Integer, default=0)
     version: Mapped[int] = mapped_column(Integer, default=0, server_default='0')
     create_time: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, index=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
 
     product: Mapped["Product | None"] = relationship('Product', back_populates='cases')
 

@@ -17,24 +17,31 @@ if TYPE_CHECKING:
     from fastapi_app.shared_models.product import Product
     from fastapi_app.shared_models.user import User
 
-# 订单状态流转：新订单 -> 待备货/已备货/部分备货 -> 待出货 -> 已出货 -> 已完成
-VALID_ORDER_STATUSES = {'待备货', '已备货', '部分备货', '待出货', '已出货', '已完成', '已取消'}
+VALID_ORDER_STATUSES = {'待备货', '已备货', '部分备货', '待出货', '已出货', '已取消', '批次已完成'}
 
-# None 是新订单初始状态
-STATUS_TRANSITIONS = {
-    None: {'待备货', '已取消'},
-    '待备货': {'已备货', '部分备货', '待出货', '已取消'},
-    '已备货': {'待出货', '已取消'},
-    '部分备货': {'已备货', '待出货', '已取消'},
-    '待出货': {'已出货', '已取消'},
-    '已出货': {'已完成'},
-    '已完成': set(),
-    '已取消': set(),
-}
 
-# None 和 待备货 = 新订单，可编辑可删除
-DELETABLE_STATUSES = {None, '待备货', '已取消'}
-EDITABLE_STATUSES = {None, '待备货'}
+def compute_status_from_stockouts(order, deducted_qty: int, shipped_qty: int) -> str:
+    """
+    根据订单业务数据（备货量、出货量）派生订单状态。
+
+    状态由业务事实推导，而非手动推进状态机：
+    - deducted_qty: 净备货抵扣量（StockOut.stockin_id IS NOT NULL 的 quantity-returned_quantity 之和）
+    - shipped_qty: 净独立出货量（StockOut.stockin_id IS NULL 的 quantity-returned_quantity 之和）
+    """
+    if order.batch_completed_at:
+        result = '批次已完成'
+    elif shipped_qty >= order.quantity:
+        result = '已出货'
+    elif shipped_qty > 0:
+        result = '待出货'
+    elif deducted_qty >= order.quantity:
+        result = '已备货'
+    elif deducted_qty > 0:
+        result = '部分备货'
+    else:
+        result = '待备货'
+    Order.validate_status(result)
+    return result
 
 
 class Order(Base):
@@ -56,14 +63,20 @@ class Order(Base):
     locked_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id'), comment='锁定人ID')
     lock_time: Mapped[datetime | None] = mapped_column(DateTime, comment='锁定时间')
 
+    batch_completed_at: Mapped[datetime | None] = mapped_column(DateTime, comment='批次完成时间')
+    batch_completed_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id'), comment='批次完成操作人ID')
+
     is_deleted: Mapped[bool | None] = mapped_column(Boolean, default=False, index=True, comment='是否已删除')
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, comment='删除时间')
     deleted_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id'), comment='删除人ID')
     delete_reason: Mapped[str | None] = mapped_column(String(500), comment='删除原因')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+
 
     product: Mapped["Product"] = relationship('Product', backref='orders')
     locked_by: Mapped["User | None"] = relationship('User', foreign_keys=[locked_by_id], backref='locked_orders')
     deleted_by: Mapped["User | None"] = relationship('User', foreign_keys=[deleted_by_id], backref='deleted_orders')
+    batch_completed_by: Mapped["User | None"] = relationship('User', foreign_keys=[batch_completed_by_id], backref='batch_completed_orders')
 
     __table_args__ = (
         Index('idx_order_customer_status', 'customer', 'status'),
@@ -72,6 +85,8 @@ class Order(Base):
         Index('idx_order_customer_product', 'customer', 'product_id'),
         Index('idx_order_locked', 'is_locked'),
         Index('idx_order_type', 'order_type'),
+        Index('idx_order_batch_no', 'batch_no'),
+        Index('idx_order_batch_completed_at', 'batch_completed_at'),
         {'quote': True},
     )
 
@@ -79,26 +94,6 @@ class Order(Base):
     def validate_status(cls, status: str | None) -> None:
         if status is not None and status not in VALID_ORDER_STATUSES:
             raise ValueError(f"无效的订单状态: '{status}'，合法值: {', '.join(sorted(VALID_ORDER_STATUSES))}")
-
-    def can_transition_to(self, new_status: str) -> bool:
-        self.validate_status(new_status)
-        allowed = STATUS_TRANSITIONS.get(self.status, set())
-        return new_status in allowed or self.status == new_status
-
-    def transition_to(self, new_status: str) -> None:
-        if not self.can_transition_to(new_status):
-            allowed = STATUS_TRANSITIONS.get(self.status, set())
-            raise ValueError(
-                f"订单 {self.order_no} 不允许从 '{self.status}' 变更为 '{new_status}'，"
-                f"允许的目标状态: {', '.join(sorted(allowed)) if allowed else '无（终态）'}"
-            )
-        self.status = new_status
-
-    def is_deletable(self) -> bool:
-        return self.status in DELETABLE_STATUSES
-
-    def is_editable(self) -> bool:
-        return self.status in EDITABLE_STATUSES
 
     def __repr__(self):
         return f'<Order {self.order_no}>'

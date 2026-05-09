@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.database import get_async_db
+from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.schemas.user import PermissionResponse
 from fastapi_app.services import user_service
@@ -14,7 +14,7 @@ router = APIRouter()
 @router.get("/tree", response_model=list[PermissionResponse])
 async def get_permission_tree(
     user: User = Depends(require_permission("user_manage")),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
 ):
     """获取权限树形结构"""
     permissions = await user_service.get_permissions(db)
@@ -41,7 +41,7 @@ async def get_permission_tree(
 @router.get("/list", response_model=list[PermissionResponse])
 async def get_permission_list(
     user: User = Depends(require_permission("user_manage")),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
 ):
     """获取权限平铺列表"""
     permissions = await user_service.get_permissions(db)

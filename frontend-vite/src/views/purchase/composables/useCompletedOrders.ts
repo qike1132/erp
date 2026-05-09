@@ -43,7 +43,7 @@ export function useCompletedOrders() {
       if (filters.material_name) params.material_name = filters.material_name
       if (filters.start_date) params.start_date = filters.start_date
       if (filters.end_date) params.end_date = filters.end_date
-      const res = await purchaseApi.completed(params) as ApiResponse<PurchaseOrder[]> & { orders?: PurchaseOrder[]; total?: number; total_pages?: number; pages?: number }
+      const res = await purchaseApi.completed(params)
       orders.value = res.orders || []
       total.value = res.total || 0
       totalPages.value = res.total_pages || res.pages || 1
@@ -57,7 +57,7 @@ export function useCompletedOrders() {
 
   async function loadQuickFilters() {
     try {
-      const res = await purchaseApi.quickFilters() as ApiResponse & { quick_filters?: QuickFilter[] }
+      const res = await purchaseApi.quickFilters()
       if (res.success && res.quick_filters) quickFilters.value = res.quick_filters
     } catch {
       /* ignore */
@@ -67,7 +67,7 @@ export function useCompletedOrders() {
   async function applyQuickFilter(filterId: string) {
     currentQuickFilterId.value = filterId
     try {
-      const res = await purchaseApi.quickFilters() as ApiResponse & { quick_filters?: QuickFilter[] }
+      const res = await purchaseApi.quickFilters()
       if (res.success && res.quick_filters) {
         const filter = res.quick_filters.find((f) => f.id === filterId)
         if (filter) {
@@ -111,7 +111,7 @@ export function useCompletedOrders() {
     if (filters.supplier_name) params.supplier_name = filters.supplier_name
     if (filters.start_date) params.start_date = filters.start_date
     if (filters.end_date) params.end_date = filters.end_date
-    const res = await purchaseApi.exportCompleted(params) as ApiResponse & { html?: string }
+    const res = await purchaseApi.exportCompleted(params)
     if (res.success && res.html) {
       const bom = '\uFEFF'
       const blob = new Blob([bom + res.html], { type: 'application/vnd.ms-excel;charset=utf-8' })

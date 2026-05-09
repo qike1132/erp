@@ -45,7 +45,12 @@ def invalidate_user_permission_cache(user_id: int | None=None) -> None:
         _PERMISSION_CACHE.pop(user_id, None)
     else:
         _PERMISSION_CACHE.clear()
-__all__ = ['get_current_user_id', 'require_permission', 'create_access_token', 'get_async_db']
+__all__ = ['get_current_user_id', 'require_permission', 'create_access_token', 'get_async_db', 'get_user_identity']
+
+
+def get_user_identity(user: User) -> tuple[str, str]:
+    """从User对象提取(session_id, username)，用于审计和暂存区"""
+    return str(user.id), user.username
 
 def _get_signing_key() -> str:
     """获取 JWT 签名密钥（支持 HS256 和 RS256）"""

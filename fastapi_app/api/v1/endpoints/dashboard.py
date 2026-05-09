@@ -15,7 +15,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.exc import DisconnectionError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.database import get_async_db
+from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import get_current_user_id
 from fastapi_app.shared_models import ApprovalRequest, Order, Product, PurchaseOrder, StockIn, StockOut
 from fastapi_app.shared_models.material_registration import MaterialRegistration
@@ -40,6 +40,36 @@ class DashboardStats(BaseModel):
     low_stock_count: int = 0
     pending_purchases: int = 0
     pending_materials: int = 0
+    production_completion_rate: float = 0.0
+    pending_shipments: int = 0
+    total_shipments_today: int = 0
+    total_orders_today: int = 0
+
+
+class TodoItem(BaseModel):
+    id: int = 0
+    type: str = ""
+    description: str = ""
+    urgency: str = "normal"
+    created_at: str = ""
+    related_module: str = ""
+    related_business_id: int = 0
+
+
+class TodoListResponse(BaseModel):
+    success: bool = True
+    data: list[TodoItem] = []
+
+
+class SystemStatus(BaseModel):
+    is_running: bool = True
+    last_sync_time: str = ""
+    data_status: str = "up_to_date"
+
+
+class SystemStatusResponse(BaseModel):
+    success: bool = True
+    data: SystemStatus | None = None
 
 
 class DashboardResponse(BaseModel):
@@ -115,12 +145,26 @@ async def _fetch_stats_async(db: AsyncSession) -> dict:
         data["low_stock_count"] = (await db.execute(select(func.count(Product.id)).where(Product.current_stock <= 10))).scalar() or 0
         data["pending_purchases"] = (await db.execute(select(func.count(PurchaseOrder.id)).where(PurchaseOrder.status.in_(["pending", "partial"])))).scalar() or 0
         data["pending_materials"] = (await db.execute(select(func.count(MaterialRegistration.id)).where(MaterialRegistration.status.in_(["pending", "partial"])))).scalar() or 0
+
+        data["total_orders_today"] = data["order_today"]
+        data["total_shipments_today"] = data["stockout_today"]
+        try:
+            from fastapi_app.shared_models.production_plan import ProductionPlan
+            total_plans = (await db.execute(select(func.count(ProductionPlan.id)).where(ProductionPlan.plan_date >= today))).scalar() or 0
+            completed_plans = (await db.execute(select(func.count(ProductionPlan.id)).where(and_(ProductionPlan.plan_date >= today, ProductionPlan.status == "completed")))).scalar() or 0
+            data["production_completion_rate"] = round(completed_plans / total_plans, 2) if total_plans > 0 else 0.0
+            data["pending_shipments"] = total_plans - completed_plans
+        except Exception:
+            data["production_completion_rate"] = 0.0
+            data["pending_shipments"] = 0
         return data
     except (OperationalError, DisconnectionError) as e:
         logger.warning("仪表盘异步统计加载失败: %s [%s]", e, type(e).__name__)
         return {"order_today": 0, "stockin_today": 0, "stockout_today": 0, "pending_approvals": 0,
                     "order_yesterday": 0, "stockin_yesterday": 0, "stockout_yesterday": 0,
-                    "low_stock_count": 0, "pending_purchases": 0, "pending_materials": 0}
+                    "low_stock_count": 0, "pending_purchases": 0, "pending_materials": 0,
+                    "production_completion_rate": 0.0, "pending_shipments": 0,
+                    "total_shipments_today": 0, "total_orders_today": 0}
 
 
 async def _fetch_activities_async(db: AsyncSession) -> list:
@@ -157,7 +201,7 @@ async def _fetch_activities_async(db: AsyncSession) -> list:
 @router.get("/stats", response_model=DashboardResponse)
 async def get_dashboard_stats(
     user_id: int = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
 ):
     """仪表盘统计数据（Redis缓存5分钟）"""
     dashboard_stats = await _get_cached_stats()
@@ -179,7 +223,7 @@ async def get_dashboard_stats(
 @router.get("/activities", response_model=list[Activity])
 async def get_dashboard_activities(
     user_id: int = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_read_db),
 ):
     """仪表盘最近活动数据（Redis缓存60秒）"""
     cached_activities = await _get_cached_activities()
@@ -200,3 +244,58 @@ async def get_nav_sections(user_id: int = Depends(get_current_user_id)):
     from fastapi_app.core.nav_context import get_nav_sections_async
     sections = await get_nav_sections_async()
     return sections
+
+
+@router.get("/todos", response_model=TodoListResponse)
+async def get_dashboard_todos(
+    user_id: int = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_async_read_db),
+):
+    """仪表盘待办事项"""
+    try:
+        todos = []
+        pending_orders = (await db.execute(
+            select(Order).where(Order.status == "pending").order_by(Order.order_date.desc()).limit(5)
+        )).scalars().all()
+        for o in pending_orders:
+            todos.append(TodoItem(
+                id=o.id, type="order",
+                description=f"订单 {o.order_no} 待处理",
+                urgency="normal", created_at=str(o.order_date) if o.order_date else "",
+                related_module="order_query", related_business_id=o.id
+            ))
+        try:
+            from fastapi_app.shared_models.production_plan import ProductionPlan
+            pending_plans = (await db.execute(
+                select(ProductionPlan).where(ProductionPlan.status.in_(["pending", "confirmed"])).order_by(ProductionPlan.plan_date.desc()).limit(5)
+            )).scalars().all()
+            for p in pending_plans:
+                todos.append(TodoItem(
+                    id=p.id, type="shipment",
+                    description=f"出货计划 {p.customer_name} 待确认",
+                    urgency="urgent" if p.status == "pending" else "normal",
+                    created_at=str(p.plan_date) if p.plan_date else "",
+                    related_module="shipment_plan", related_business_id=p.id
+                ))
+        except Exception as e:
+            logger.warning("获取出货计划待办失败: %s", e)
+        todos.sort(key=lambda x: 0 if x.urgency == "urgent" else 1)
+        return TodoListResponse(success=True, data=todos[:10])
+    except Exception as e:
+        logger.warning("仪表盘待办加载失败: %s", e, exc_info=True)
+        return TodoListResponse(success=True, data=[])
+
+
+@router.get("/system-status", response_model=SystemStatusResponse)
+async def get_system_status(
+    user_id: int = Depends(get_current_user_id),
+):
+    """系统运行状态"""
+    return SystemStatusResponse(
+        success=True,
+        data=SystemStatus(
+            is_running=True,
+            last_sync_time=str(date.today()),
+            data_status="up_to_date"
+        )
+    )

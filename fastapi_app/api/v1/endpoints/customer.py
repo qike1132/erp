@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.database import get_async_db
+from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import get_current_user_id, require_permission
 from fastapi_app.schemas.customer import (
     CustomerActionResponse,
@@ -25,7 +25,7 @@ def _customer_to_resp(c) -> CustomerResponse:
     return CustomerResponse(id=c.id, customer_code=c.customer_code, name=c.name, contact=c.contact, phone=c.phone, address=c.address, note=c.note, status=c.status, create_time=c.create_time.strftime('%Y-%m-%d %H:%M') if c.create_time else None)
 
 @router.get('/list', response_model=CustomerListResponse)
-async def list_customers(status: str | None=Query(None, description='状态筛选: active/inactive'), page: int=Query(1, ge=1, description='页码'), per_page: int=Query(50, ge=1, le=200, description='每页数量'), search: str=Query('', max_length=100, description='搜索关键词'), user: User=Depends(require_permission('customer_manage')), db: AsyncSession=Depends(get_async_db)):
+async def list_customers(status: str | None=Query(None, description='状态筛选: active/inactive'), page: int=Query(1, ge=1, description='页码'), per_page: int=Query(50, ge=1, le=200, description='每页数量'), search: str=Query('', max_length=100, description='搜索关键词'), user: User=Depends(require_permission('customer_manage')), db: AsyncSession=Depends(get_async_read_db)):
     """客户列表（带缓存，支持分页和搜索）"""
     if not search and page == 1:
         cache_key = f"{CUSTOMER_LIST_CACHE_KEY}:{status or 'all'}:{per_page}"
@@ -39,8 +39,21 @@ async def list_customers(status: str | None=Query(None, description='状态筛�
         await redis_cache.set(cache_key, {'items': customer_dicts, 'total': result['total']}, CUSTOMER_LIST_CACHE_TTL)
     return CustomerListResponse(customers=[_customer_to_resp(c) for c in result['items']], total=result['total'])
 
+@router.get('/search')
+async def search_customers(q: str=Query('', description='搜索关键词'), user: User=Depends(require_permission('customer_manage')), db: AsyncSession=Depends(get_async_read_db)):
+    """客户搜索"""
+    if not q.strip():
+        return []
+    customers = await customer_service.search_customers(db, q.strip())
+    return [_customer_to_resp(c) for c in customers]
+
+@router.get('/active-names')
+async def active_names(db: AsyncSession = Depends(get_async_read_db)):
+    """获取所有启用客户名称列表（用于下拉选择）"""
+    return await customer_service.get_active_customer_names(db)
+
 @router.get('/{customer_id}', response_model=CustomerResponse)
-async def get_customer(customer_id: int, user: User=Depends(require_permission('customer_manage')), db: AsyncSession=Depends(get_async_db)):
+async def get_customer(customer_id: int, user: User=Depends(require_permission('customer_manage')), db: AsyncSession=Depends(get_async_read_db)):
     """获取单个客户"""
     customer = await customer_service.get_customer(db, customer_id)
     if not customer:
@@ -94,16 +107,3 @@ async def toggle_status(customer_id: int, user: User=Depends(require_permission(
         return CustomerToggleResponse(status=customer.status, message=f'客户已{status_text}')
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-
-@router.get('/search')
-async def search_customers(q: str=Query('', description='搜索关键词'), user: User=Depends(require_permission('customer_manage')), db: AsyncSession=Depends(get_async_db)):
-    """客户搜索"""
-    if not q.strip():
-        return []
-    customers = await customer_service.search_customers(db, q.strip())
-    return [_customer_to_resp(c) for c in customers]
-
-@router.get('/active-names')
-async def active_names(db: AsyncSession = Depends(get_async_db)):
-    """获取所有启用客户名称列表（用于下拉选择）"""
-    return await customer_service.get_active_customer_names(db)

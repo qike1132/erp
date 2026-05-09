@@ -11,6 +11,7 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    RestoreProgressBar: typeof import('./components/backup/RestoreProgressBar.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     UiAlert: typeof import('./components/ui/UiAlert.vue')['default']
@@ -44,5 +45,6 @@ declare module 'vue' {
     UiToast: typeof import('./components/ui/UiToast.vue')['default']
     UiUpload: typeof import('./components/ui/UiUpload.vue')['default']
     VirtualList: typeof import('./components/ui/VirtualList.vue')['default']
+    VirtualTable: typeof import('./components/ui/VirtualTable.vue')['default']
   }
 }

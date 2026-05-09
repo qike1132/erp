@@ -24,6 +24,8 @@ class StockEvent:
     ORDER_UPDATED = "order_updated"
     ORDER_DELETED = "order_deleted"
     PURCHASE_ORDER_CREATED = "purchase_order_created"
+    BATCH_NO_UPDATED = "batch_no_updated"
+    BATCH_COMPLETED = "batch_completed"
 
 
 EVENT_DISPLAY_MESSAGES = {
@@ -33,6 +35,8 @@ EVENT_DISPLAY_MESSAGES = {
     "order_updated": "订单信息已更新",
     "order_deleted": "订单已删除",
     "purchase_order_created": "新采购订单已生成",
+    "batch_no_updated": "批次号已更新",
+    "batch_completed": "批次已完成",
 }
 
 _async_redis_client = None

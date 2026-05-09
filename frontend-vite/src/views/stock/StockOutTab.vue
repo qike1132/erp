@@ -310,7 +310,7 @@
                           <button
                             class="action-btn action-delete"
                             :disabled="actionId === item.firstId"
-                            @click="handleDeleteRecord(item.firstId)"
+                            @click="handleDeleteRecord(item.firstId!)"
                           >
                             <i class="fas fa-trash" />
                           </button>
@@ -407,7 +407,7 @@ import { ref, reactive, computed } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 import { get, post, put, del } from '@/api/request'
 import { customerApi, stockApi, auxApi, ocrApi } from '@/api'
-import type { ApiResponse, ShipmentInfo, StagedStockout, Product } from '@/types'
+import type { ApiResponse, ShipmentInfo, StagedStockout, Product, StockOutRecord } from '@/types'
 
 const props = defineProps<{ activeTab: 'input' | 'records' }>()
 import UiInput from '@/components/ui/UiInput.vue'
@@ -431,14 +431,14 @@ import { watch } from 'vue'
 
 const { data: namesData } = useQuery({
   queryKey: ['customer-active-names'],
-  queryFn: async () => { const res = await customerApi.activeNames() as ApiResponse<string[]>; return res.names ?? res ?? [] },
+  queryFn: async () => { const res = await customerApi.activeNames(); return res ?? [] },
   staleTime: 30_000,
 })
 const customerNames = computed(() => {
   const arr = Array.isArray(namesData.value) ? namesData.value : []
   return arr.map((c: unknown) => (typeof c === 'object' && c !== null ? (c as { name?: string }).name : c))
 })
-const customerOptions = computed(() => customerNames.value.map((c: string) => ({ value: c, label: c })))
+const customerOptions = computed(() => customerNames.value.map((c: unknown) => ({ value: String(c), label: String(c) })))
 
 // === 产品搜索 ===
 const productSuggestions = ref<Product[]>([])
@@ -448,8 +448,8 @@ let searchTimeout: ReturnType<typeof setTimeout> | null = null
 async function searchProducts(q: string) {
   if (!q.trim()) { productSuggestions.value = []; showSuggestions.value = false; return }
   try {
-    const data = await stockApi.searchProducts(q) as ApiResponse<Product[]>
-    productSuggestions.value = Array.isArray(data) ? data : data?.products ?? data?.data ?? []
+    const data = await stockApi.searchProducts(q)
+    productSuggestions.value = Array.isArray(data) ? data : (data?.products ?? data?.data ?? []) as Product[]
     showSuggestions.value = productSuggestions.value.length > 0
   } catch {
     productSuggestions.value = []
@@ -494,8 +494,8 @@ async function fetchShipmentInfo() {
     return
   }
   try {
-    const data = await stockApi.availableShipment(Number(form.productId), form.customer) as ApiResponse<ShipmentInfo>
-    shipmentInfo.value = data.data ?? data
+    const data = await stockApi.availableShipment(Number(form.productId), form.customer)
+    shipmentInfo.value = data.data ?? null
   } catch {
     shipmentInfo.value = null
   }
@@ -527,9 +527,10 @@ async function addStaged() {
 
   if (form.productId && form.customer) {
     try {
-      const data = await stockApi.availableShipment(Number(form.productId), form.customer) as ApiResponse<{ order_quantity: number; shipped_quantity: number; available_quantity: number }>
-      if (form.quantity > data.available_quantity) {
-        showToast(`出货数量超过可出货量！可出货: ${data.available_quantity}`, 'error')
+      const data = await stockApi.availableShipment(Number(form.productId), form.customer)
+      const avail = data.data?.available_quantity ?? 0
+      if (form.quantity > (avail ?? 0)) {
+        showToast(`出货数量超过可出货量！可出货: ${avail}`, 'error')
         return
       }
     } catch { /* proceed anyway */ }
@@ -596,11 +597,12 @@ async function submitBatch() {
     for (const key in uniqueKeys) {
       const { productId, customer, stockouts } = uniqueKeys[key]
       try {
-        const data = await stockApi.availableShipment(Number(productId), customer) as ApiResponse<ShipmentInfo>
-        const shipment = data.data ?? data
+        const data = await stockApi.availableShipment(Number(productId), customer)
+        const shipment = data.data
+        if (!shipment) continue
         const totalQty = stockouts.reduce((sum: number, s: StagedStockout) => sum + s.quantity, 0)
         if (totalQty > (shipment.available_quantity ?? 0)) {
-          showToast(`客户: ${customer} 产品ID: ${productId} 出货量超过可出货量(${shipment.available_quantity})`, 'error')
+          showToast(`客户: ${customer} 产品ID: ${productId} 出货量超过可出货量(${shipment.available_quantity ?? 0})`, 'error')
           submitting.value = false
           return
         }
@@ -679,11 +681,11 @@ async function handleImportExcel() {
     const fd = new FormData()
     fd.append('file', excelFile.value)
     const sessionId = `stg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    const res = await stockApi.stagingStockouts.importExcel(fd) as ApiResponse & { session_id?: string; imported?: number; count?: number }
+    const res = await stockApi.stagingStockouts.importExcel(fd)
     if (res.success) {
       showToast(`成功导入 ${res.imported ?? res.count ?? 0} 条记录到暂存区`, 'success')
       excelFile.value = null
-      if (res.data?.length || res.imported) {
+      if ((Array.isArray(res.data) && res.data.length) || res.imported) {
         try {
           const confirmRes = await stockApi.stagingStockouts.confirm(sessionId) as ApiResponse
           if (confirmRes.success) {
@@ -761,8 +763,8 @@ async function handleOcrImport() {
     let completed = false
     while (!completed) {
       await new Promise(r => setTimeout(r, 2000))
-      const prog = await ocrApi.progress(taskId) as ApiResponse & { status?: string; progress?: number; percent?: number; message?: string }
-      const pct = prog.progress ?? prog.percent ?? 0
+      const prog = await ocrApi.progress(taskId)
+      const pct = prog.progress ?? 0
       ocrProgress.pct = Math.min(90, 20 + pct * 0.7)
       ocrProgress.msg = prog.status || '处理中...'
       if (prog.status === 'completed' || prog.status === 'done' || prog.progress >= 100) {
@@ -813,8 +815,8 @@ async function fetchStockouts() {
     if (filterCustomer.value) params.customer = filterCustomer.value
     if (filterStart.value) params.start_date = filterStart.value
     if (filterEnd.value) params.end_date = filterEnd.value
-    const res = await stockApi.stockouts(params) as ApiResponse & { stockouts?: unknown[]; items?: unknown[]; total?: number }
-    const items = res.stockouts ?? res.data ?? res.items ?? []
+    const res = await stockApi.stockouts(params)
+    const items = res.stockouts ?? res.items ?? (Array.isArray(res.data) ? res.data : []) ?? []
     stockoutRecords.value = items as typeof stockoutRecords.value
     const total = res.total ?? items.length
     totalPages.value = Math.ceil(total / 20) || 1

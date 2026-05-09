@@ -1,6 +1,6 @@
 ---
-alwaysApply: false
-description: 
+alwaysApply: true
+description: Karpathy Guidelines - 编码行为准则
 ---
 # Karpathy Guidelines
 

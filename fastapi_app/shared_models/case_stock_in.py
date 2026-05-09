@@ -29,5 +29,6 @@ class CaseStockIn(Base):
     case_id: Mapped[int] = mapped_column(Integer, ForeignKey('case.id'), nullable=False, index=True)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     note: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
 
     case: Mapped["Case"] = relationship('Case', backref='stockins')

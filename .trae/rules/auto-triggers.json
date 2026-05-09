@@ -342,6 +342,13 @@
       "agents": ["code-reviewer"],
       "autoActivate": true,
       "priority": "low"
+    },
+    "audit-bug-linkage": {
+      "keywords": ["审核", "P0", "P1", "shenhecode", "bug.mdr", "代码审核", "安全漏洞", "BUG修复"],
+      "agents": ["code-reviewer", "security-engineer"],
+      "autoActivate": true,
+      "priority": "high",
+      "description": "代码审核发现P0/P1问题时自动触发bug.mdr修复流程"
     }
   },
 

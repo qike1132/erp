@@ -182,7 +182,7 @@ watch(() => [filters.customer, filters.country, debouncedProduct.value], () => {
   page.value = 1
 })
 
-defineExpose({ inventory, handleExport })
+defineExpose({ inventory, filteredInventory: inventory, handleExport })
 </script>
 
 <style scoped>

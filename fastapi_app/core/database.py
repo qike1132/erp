@@ -118,13 +118,21 @@ from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def get_async_db_context():
-    """异步数据库会话上下文管理器（用于 ARQ 任务等非请求场景）"""
+    """异步数据库会话上下文管理器（用于 ARQ 任务等非请求场景）
+
+    注意：备份恢复操作（psql 路径）会 DROP+CREATE 数据库，导致当前 session
+    的连接失效。此上下文管理器对 commit/rollback 错误进行宽容处理，避免恢复
+    成功后因 session 失效而抛出异常。
+    """
     async with _AsyncSessionLocal() as session:
         try:
             yield session
             await session.commit()
         except (RuntimeError, OSError, ValueError, SQLAlchemyError):
-            await session.rollback()
+            try:
+                await session.rollback()
+            except (RuntimeError, OSError, ValueError, SQLAlchemyError):
+                logger.warning("Session rollback failed (may be broken after psql restore)", exc_info=True)
             raise
 
 

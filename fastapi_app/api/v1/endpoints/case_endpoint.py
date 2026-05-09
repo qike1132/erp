@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from fastapi_app.core.database import get_async_db
+from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.services import case_service, escape_like
 from fastapi_app.shared_models import Product, User
@@ -51,17 +51,17 @@ class BatchCaseStockOutRequest(BaseModel):
     stockouts: list[dict]
 
 @router.get('/search')
-async def case_search(q: str=Query('', description='搜索关键词'), user: User=Depends(require_permission('case_manage')), db: AsyncSession=Depends(get_async_db)):
+async def case_search(q: str=Query('', description='搜索关键词'), user: User=Depends(require_permission('case_manage')), db: AsyncSession=Depends(get_async_read_db)):
     """皮套搜索"""
     return await case_service.search_cases(db, q)
 
 @router.get('/in/list')
-async def case_stockins(page: int=Query(1, ge=1), per_page: int=Query(20, ge=1, le=100), customer: str=Query(''), start_date: str=Query(''), end_date: str=Query(''), quantity_min: int | None=Query(None), quantity_max: int | None=Query(None), user: User=Depends(require_permission('case_manage')), db: AsyncSession=Depends(get_async_db)):
+async def case_stockins(page: int=Query(1, ge=1), per_page: int=Query(20, ge=1, le=100), customer: str=Query(''), start_date: str=Query(''), end_date: str=Query(''), quantity_min: int | None=Query(None), quantity_max: int | None=Query(None), user: User=Depends(require_permission('case_manage')), db: AsyncSession=Depends(get_async_read_db)):
     """皮套入库列表"""
     return await case_service.get_case_stockins(db, page, per_page, customer, start_date, end_date, quantity_min, quantity_max)
 
 @router.get('/in/{stockin_id}')
-async def get_case_stockin(stockin_id: int, user: User=Depends(require_permission('case_manage')), db: AsyncSession=Depends(get_async_db)):
+async def get_case_stockin(stockin_id: int, user: User=Depends(require_permission('case_manage')), db: AsyncSession=Depends(get_async_read_db)):
     """获取单个皮套入库记录"""
     from fastapi_app.shared_models import CaseStockIn
     result = await db.execute(select(CaseStockIn).options(joinedload(CaseStockIn.case)).where(CaseStockIn.id == stockin_id))
@@ -99,12 +99,12 @@ async def batch_submit_case_stockins(data: BatchCaseStockInRequest, user: User=D
     return result
 
 @router.get('/out/list')
-async def case_stockouts(page: int=Query(1, ge=1), per_page: int=Query(20, ge=1, le=100), customer: str=Query(''), start_date: str=Query(''), end_date: str=Query(''), quantity_min: int | None=Query(None), quantity_max: int | None=Query(None), user: User=Depends(require_permission('case_manage')), db: AsyncSession=Depends(get_async_db)):
+async def case_stockouts(page: int=Query(1, ge=1), per_page: int=Query(20, ge=1, le=100), customer: str=Query(''), start_date: str=Query(''), end_date: str=Query(''), quantity_min: int | None=Query(None), quantity_max: int | None=Query(None), user: User=Depends(require_permission('case_manage')), db: AsyncSession=Depends(get_async_read_db)):
     """皮套出库列表"""
     return await case_service.get_case_stockout_list(db, page, per_page, customer, start_date, end_date, quantity_min, quantity_max)
 
 @router.get('/out/{stockout_id}')
-async def get_case_stockout(stockout_id: int, user: User=Depends(require_permission('case_manage')), db: AsyncSession=Depends(get_async_db)):
+async def get_case_stockout(stockout_id: int, user: User=Depends(require_permission('case_manage')), db: AsyncSession=Depends(get_async_read_db)):
     """获取单个皮套出库记录"""
     from fastapi_app.shared_models import CaseStockOut
     result = await db.execute(select(CaseStockOut).options(joinedload(CaseStockOut.case)).where(CaseStockOut.id == stockout_id))
@@ -142,17 +142,17 @@ async def batch_submit_case_stockouts(data: BatchCaseStockOutRequest, user: User
     return result
 
 @router.get('/inventory-summary')
-async def inventory_summary(page: int=Query(1, ge=1), per_page: int=Query(50, ge=1, le=200), search: str=Query('', description='搜索产品名称或69码'), user: User=Depends(require_permission('case_manage')), db: AsyncSession=Depends(get_async_db)):
+async def inventory_summary(page: int=Query(1, ge=1), per_page: int=Query(50, ge=1, le=200), search: str=Query('', description='搜索产品名称或69码'), user: User=Depends(require_permission('case_manage')), db: AsyncSession=Depends(get_async_read_db)):
     """皮套库存汇总"""
     return await case_service.get_case_inventory_summary(db, page=page, per_page=per_page, search=search)
 
 @router.get('/inventory-logs/{case_id}')
-async def inventory_logs(case_id: int, page: int=Query(1, ge=1), per_page: int=Query(20, ge=1, le=100), type: str=Query(''), start_date: str=Query(''), end_date: str=Query(''), user: User=Depends(require_permission('case_manage')), db: AsyncSession=Depends(get_async_db)):
+async def inventory_logs(case_id: int, page: int=Query(1, ge=1), per_page: int=Query(20, ge=1, le=100), type: str=Query(''), start_date: str=Query(''), end_date: str=Query(''), user: User=Depends(require_permission('case_manage')), db: AsyncSession=Depends(get_async_read_db)):
     """皮套库存流水"""
     return await case_service.get_case_inventory_logs(db, case_id, page, per_page, type, start_date, end_date)
 
 @router.get('/products')
-async def case_products(page: int=Query(1, ge=1, description='页码'), per_page: int=Query(50, ge=1, le=200, description='每页数量'), search: str=Query('', description='搜索产品名称或69码'), user: User=Depends(require_permission('case_manage')), db: AsyncSession=Depends(get_async_db)):
+async def case_products(page: int=Query(1, ge=1, description='页码'), per_page: int=Query(50, ge=1, le=200, description='每页数量'), search: str=Query('', description='搜索产品名称或69码'), user: User=Depends(require_permission('case_manage')), db: AsyncSession=Depends(get_async_read_db)):
     """皮套产品列表（分页）"""
     query = select(Case).options(joinedload(Case.product))
     count_base = select(func.count()).select_from(Case)

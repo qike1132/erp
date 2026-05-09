@@ -38,6 +38,8 @@ class PurchasePlan(Base):
         Index('idx_ppl_customer_id', 'customer_id'),
         Index('idx_ppl_status', 'status'),
         Index('idx_ppl_upload_batch', 'upload_batch'),
+        Index('idx_ppl_month_customer', 'plan_month', 'customer_id'),
+        Index('idx_ppl_customer_name', 'customer_name'),
     )
 
     def __repr__(self):
@@ -72,8 +74,8 @@ class PurchasePlanDetail(Base):
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, comment='计划数量')
     shipped_qty: Mapped[int] = mapped_column(Integer, default=0, comment='已出货数量(缓存)')
     remark: Mapped[str | None] = mapped_column(Text, nullable=True, comment='备注')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment='更新时间')
 
-    # 关系
     plan: Mapped["PurchasePlan"] = relationship('PurchasePlan', back_populates='details')
 
     __table_args__ = (
@@ -81,6 +83,7 @@ class PurchasePlanDetail(Base):
         Index('idx_ppd_product_id', 'product_id'),
         Index('idx_ppd_plan_date_only', 'plan_date'),
         Index('idx_ppd_barcode', 'barcode'),
+        Index('idx_ppd_product_name', 'product_name'),
     )
 
     def __repr__(self):
@@ -98,6 +101,7 @@ class PurchasePlanDetail(Base):
             'shipped_qty': self.shipped_qty,
             'remaining_qty': self.quantity - self.shipped_qty,
             'remark': self.remark or '',
+            'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M:%S') if self.updated_at else None,
         }
 
 
@@ -117,6 +121,7 @@ class ShipmentRecord(Base):
     source_id: Mapped[int | None] = mapped_column(Integer, nullable=True, comment='来源记录ID')
     synced_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment='同步时间')
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, comment='创建时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
 
     __table_args__ = (
         Index('idx_sr_customer_product_date', 'customer_id', 'product_id', 'shipment_date'),
