@@ -14,7 +14,46 @@
         </div>
       </div>
 
-      <div class="bk-body">
+      <!-- Tab bar -->
+      <div class="bk-tab-bar">
+        <button
+          class="bk-tab-btn"
+          :class="{ 'bk-tab-active': activeTab === 'backup' }"
+          @click="handleTabChange('backup')"
+        >
+          <i class="fas fa-database" /> 备份与恢复
+        </button>
+        <button
+          class="bk-tab-btn"
+          :class="{ 'bk-tab-active': activeTab === 'records' }"
+          @click="handleTabChange('records')"
+        >
+          <i class="fas fa-history" /> 备份记录
+        </button>
+        <div class="bk-tab-actions">
+          <button
+            class="bk-action-btn bk-action-secondary"
+            :disabled="checking"
+            @click="handleIntegrityCheck"
+            title="备份完整性巡检"
+          >
+            <i :class="checking ? 'fas fa-spinner fa-spin' : 'fas fa-shield-alt'" />
+            {{ checking ? '巡检中...' : '完整性巡检' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Integrity check result -->
+      <div v-if="checkResult" class="bk-check-result" :class="checkResult.failed > 0 ? 'bk-check-warn' : 'bk-check-ok'">
+        <i :class="checkResult.failed > 0 ? 'fas fa-exclamation-triangle' : 'fas fa-check-circle'" />
+        <span>
+          巡检完成：{{ checkResult.passed }} 通过，{{ checkResult.failed }} 失败
+          <template v-if="checkResult.latest_backup"> · 最新备份: {{ checkResult.latest_backup }} ({{ formatSize(checkResult.latest_backup_size) }})</template>
+        </span>
+        <button class="bk-check-close" @click="checkResult = null"><i class="fas fa-times" /></button>
+      </div>
+
+      <div v-show="activeTab === 'backup'" class="bk-body">
         <!-- 左栏：一键备份 -->
         <div class="bk-col">
           <div class="bk-col-title"><i class="fas fa-download" /> 一键备份</div>
@@ -360,6 +399,20 @@
           </template>
         </div>
       </div>
+
+      <!-- Records tab -->
+      <div v-show="activeTab === 'records'" class="bk-records-body">
+        <div class="bk-records-content">
+          <BackupRecordList
+            :records="records"
+            :total="recordsTotal"
+            :page="recordsPage"
+            :page-size="recordsPageSize"
+            :loading="recordsLoading"
+            @page-change="loadRecords"
+          />
+        </div>
+      </div>
     </div>
 
     <!-- 确认恢复弹窗 -->
@@ -388,11 +441,12 @@
 import { ref, computed } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 import { backupApi } from '@/api'
-import type { ApiResponse } from '@/types'
+import type { ApiResponse, BackupRecord, BackupScheduleTask } from '@/types'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 import RestoreProgressBar from '@/components/backup/RestoreProgressBar.vue'
+import BackupRecordList from '@/components/backup/BackupRecordList.vue'
 import { showToast } from '@/composables/useToast'
 
 // --- Tables overview ---
@@ -421,6 +475,7 @@ const backupRemark = ref('')
 function switchToDefaultMode() {
   backupMode.value = 'default'
   loadServerBackups()
+  loadSchedule()
 }
 
 // --- Custom path: export (download) ---
@@ -729,6 +784,73 @@ function formatSize(bytes: number): string {
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
 }
+
+// --- Backup Records ---
+const activeTab = ref<'backup' | 'records'>('backup')
+const records = ref<BackupRecord[]>([])
+const recordsTotal = ref(0)
+const recordsPage = ref(1)
+const recordsPageSize = 20
+const recordsLoading = ref(false)
+
+async function loadRecords(page: number = 1) {
+  recordsLoading.value = true
+  try {
+    const res = await backupApi.getRecords(page, recordsPageSize) as any
+    if (res.success) {
+      records.value = res.records ?? []
+      recordsTotal.value = res.total ?? 0
+      recordsPage.value = page
+    }
+  } catch {
+    showToast('加载备份记录失败', 'error')
+  } finally {
+    recordsLoading.value = false
+  }
+}
+
+// --- Integrity Check ---
+const checking = ref(false)
+const checkResult = ref<any>(null)
+
+async function handleIntegrityCheck() {
+  checking.value = true
+  checkResult.value = null
+  try {
+    const res = await backupApi.integrityCheck() as any
+    checkResult.value = res
+    if (res.failed === 0) {
+      showToast('备份完整性巡检通过', 'success')
+    } else {
+      showToast(`巡检发现 ${res.failed} 个问题`, 'warning')
+    }
+  } catch {
+    showToast('完整性巡检失败', 'error')
+  } finally {
+    checking.value = false
+  }
+}
+
+// --- Schedule ---
+const scheduleTasks = ref<BackupScheduleTask[]>([])
+
+async function loadSchedule() {
+  try {
+    const res = await backupApi.getSchedule() as any
+    if (res.success) {
+      scheduleTasks.value = res.tasks ?? []
+    }
+  } catch {
+    // silent
+  }
+}
+
+function handleTabChange(tab: 'backup' | 'records') {
+  activeTab.value = tab
+  if (tab === 'records' && !records.value.length) {
+    loadRecords()
+  }
+}
 </script>
 
 <style scoped>
@@ -995,6 +1117,105 @@ function formatSize(bytes: number): string {
 
 .bk-mode-active i {
   color: var(--color-primary-600);
+}
+
+/* === Tab Bar === */
+.bk-tab-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 20px;
+  border-bottom: 1px solid var(--color-border-light);
+  flex-shrink: 0;
+}
+
+.bk-tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.bk-tab-btn:hover {
+  background: var(--color-primary-50);
+  color: var(--color-primary-600);
+  transform: translateY(-1px);
+}
+
+.bk-tab-active {
+  background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
+  color: var(--color-primary-700);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(91, 141, 239, 0.2);
+  transform: translateY(-1px);
+}
+
+.bk-tab-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+/* === Integrity Check Result === */
+.bk-check-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  margin: 0 20px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.bk-check-ok {
+  background: var(--color-success-50);
+  color: var(--color-success-700);
+  border: 1px solid var(--color-success-200);
+}
+
+.bk-check-warn {
+  background: var(--color-warning-50);
+  color: var(--color-warning-700);
+  border: 1px solid var(--color-warning-200);
+}
+
+.bk-check-close {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.bk-check-close:hover {
+  opacity: 1;
+}
+
+/* === Records Body === */
+.bk-records-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.bk-records-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 20px;
 }
 
 .bk-mode-active span {

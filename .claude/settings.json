@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest fastapi_app/tests/test_backup.py -v)"
+    ]
+  }
+}

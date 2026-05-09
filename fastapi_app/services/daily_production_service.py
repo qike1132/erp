@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta
 
 import openpyxl
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
-from sqlalchemy import and_, extract, func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.shared_models import DailyProductionRecord
@@ -71,35 +71,58 @@ async def get_records(
     per_page: int = 50,
 ) -> dict:
     """获取指定月份的生产记录（分页）"""
+    month_start = date(year, month, 1)
+    if month == 12:
+        month_end = date(year + 1, 1, 1)
+    else:
+        month_end = date(year, month + 1, 1)
     conditions = [
-        extract('year', DailyProductionRecord.production_date) == year,
-        extract('month', DailyProductionRecord.production_date) == month,
+        DailyProductionRecord.production_date >= month_start,
+        DailyProductionRecord.production_date < month_end,
     ]
     if department:
         conditions.append(DailyProductionRecord.department == department)
     if production_date:
         conditions.append(DailyProductionRecord.production_date == _parse_date(production_date))
 
-    count_q = select(func.count()).select_from(DailyProductionRecord).where(*conditions)
-    total = (await db.execute(count_q)).scalar() or 0
-
     per_page = max(1, min(per_page, 200))
     offset = (page - 1) * per_page
+
+    # Single query: paginated data + total count via window function + stats via cross join
+    from sqlalchemy import literal_column
+    from sqlalchemy.orm import aliased
+
+    stats_cte = (
+        select(
+            func.count(DailyProductionRecord.id).label('total_count'),
+            func.coalesce(func.sum(DailyProductionRecord.quantity), 0).label('total_qty'),
+            func.coalesce(func.sum(DailyProductionRecord.unit_price * DailyProductionRecord.quantity), 0).label('total_val'),
+            func.count(func.distinct(DailyProductionRecord.product_name)).label('total_sku'),
+        )
+        .where(*conditions)
+        .cte('stats')
+    )
+
     result = await db.execute(
-        select(DailyProductionRecord)
+        select(
+            DailyProductionRecord,
+            stats_cte.c.total_count,
+            stats_cte.c.total_qty,
+            stats_cte.c.total_val,
+            stats_cte.c.total_sku,
+        )
+        .cross_join(stats_cte)
         .where(*conditions)
         .order_by(DailyProductionRecord.production_date, DailyProductionRecord.department, DailyProductionRecord.id)
         .offset(offset)
         .limit(per_page)
     )
-    records = list(result.scalars().all())
-
-    stats_q = select(
-        func.coalesce(func.sum(DailyProductionRecord.quantity), 0),
-        func.coalesce(func.sum(DailyProductionRecord.unit_price * DailyProductionRecord.quantity), 0),
-        func.count(func.distinct(DailyProductionRecord.product_name)),
-    ).where(*conditions)
-    total_qty, total_val, total_sku = (await db.execute(stats_q)).one()
+    rows = result.all()
+    records = [r[0] for r in rows]
+    total = rows[0][1] if rows else 0
+    total_qty = rows[0][2] if rows else 0
+    total_val = rows[0][3] if rows else 0
+    total_sku = rows[0][4] if rows else 0
 
     return {
         'data': [r.to_dict() for r in records],

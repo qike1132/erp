@@ -1,0 +1,382 @@
+"""
+统一的备份/恢复进度管理模块。
+
+替代原有的 restore_progress.py，同时支持备份和恢复两种操作类型的进度追踪。
+进度数据存储在 Redis 中，用于 WebSocket 断连后的状态恢复缓存。
+
+备份 phases (8): init -> export_db -> pack_filestore -> backup_config ->
+                  backup_redis -> backup_meilisearch -> generate_checksum -> write_file
+恢复 phases (10): pre_backup -> acquire_lock -> read_backup -> restore_db ->
+                   restore_filestore -> restore_config -> restore_redis ->
+                   restore_meilisearch -> rebuild_pool -> verify
+"""
+
+import json
+import logging
+import re
+import uuid
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Redis key prefixes & TTL
+# ---------------------------------------------------------------------------
+BACKUP_KEY_PREFIX = "erp:backup_progress:"
+RESTORE_KEY_PREFIX = "erp:restore_progress:"
+PROGRESS_TTL = 3600  # 1 hour, refreshed on every update
+
+# ---------------------------------------------------------------------------
+# Phase definitions  (name, label, progress_start%, progress_end%)
+# ---------------------------------------------------------------------------
+_BACKUP_PHASES = [
+    ("init",               "初始化",             0,   5),
+    ("export_db",          "导出数据库",          5,  35),
+    ("pack_filestore",     "打包附件文件",       35,  55),
+    ("backup_config",      "备份配置文件",       55,  65),
+    ("backup_redis",       "备份 Redis 数据",    65,  75),
+    ("backup_meilisearch", "备份搜索索引",       75,  85),
+    ("generate_checksum",  "生成校验和",         85,  95),
+    ("write_file",         "写入备份文件",       95, 100),
+]
+
+_RESTORE_PHASES = [
+    ("pre_backup",         "创建恢复前安全备份",  0,   5),
+    ("acquire_lock",       "获取恢复锁",          5,  10),
+    ("read_backup",        "读取并验证备份文件",  10,  15),
+    ("restore_db",         "恢复数据库",          15,  55),
+    ("restore_filestore",  "恢复附件文件",        55,  70),
+    ("restore_config",     "恢复配置文件",        70,  80),
+    ("restore_redis",      "恢复 Redis 数据",     80,  85),
+    ("restore_meilisearch","恢复搜索索引",        85,  90),
+    ("rebuild_pool",       "重建连接池",          90,  93),
+    ("verify",             "数据完整性验证",      93, 100),
+]
+
+_BACKUP_PHASE_MAP = {
+    name: (label, start, end) for name, label, start, end in _BACKUP_PHASES
+}
+_RESTORE_PHASE_MAP = {
+    name: (label, start, end) for name, label, start, end in _RESTORE_PHASES
+}
+
+# ---------------------------------------------------------------------------
+# Error sanitization (REV-11)
+# ---------------------------------------------------------------------------
+# Matches common file-system paths on both Linux and Windows.
+#   /absolute/path/to/file   or   C:\Users\foo\bar  or  \\server\share\path
+_PATH_PATTERN = re.compile(
+    r'(?:'
+    r'[A-Za-z]:\\[^\s,;:\]"\'\)]+'        # Windows drive path  C:\foo\bar
+    r'|\\\\[^\s,;:\]"\'\)]+'               # UNC path            \\server\share
+    r'|/(?:[\w.-]+/)+[\w.-]+'              # Unix absolute path  /var/lib/pg/data
+    r')'
+)
+
+
+def _sanitize_error(error: str, max_len: int = 200) -> str:
+    """Remove file paths and truncate error message for safe Redis storage."""
+    sanitized = _PATH_PATTERN.sub("<path>", error)
+    if len(sanitized) > max_len:
+        sanitized = sanitized[:max_len]
+    return sanitized
+
+
+# ---------------------------------------------------------------------------
+# Redis client resolution (same pattern as restore_progress.py)
+# ---------------------------------------------------------------------------
+async def _get_redis():
+    """Resolve an async Redis client using the same fallback chain as restore_progress.py."""
+    try:
+        from fastapi_app.services.notification_service import _get_async_redis_client
+        client = await _get_async_redis_client()
+        return client
+    except (ImportError, OSError, RuntimeError):
+        pass
+    try:
+        from utils.redis_cache import redis_cache
+        if redis_cache.redis_client:
+            return redis_cache.redis_client
+    except (ImportError, OSError, RuntimeError):
+        pass
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+def _resolve_key(task_id: str, progress_type: str | None = None) -> str:
+    """Return the Redis key for *task_id*.
+
+    When *progress_type* is given (``'backup'`` or ``'restore'``), the key is
+    deterministic.  Otherwise we return the **backup** key as a default; the
+    caller (``update_progress``) will try the other key on cache miss.
+    """
+    if progress_type == "backup":
+        return f"{BACKUP_KEY_PREFIX}{task_id}"
+    return f"{RESTORE_KEY_PREFIX}{task_id}"
+
+
+def _phase_map_for(progress_type: str) -> dict:
+    if progress_type == "backup":
+        return _BACKUP_PHASE_MAP
+    return _RESTORE_PHASE_MAP
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+def generate_task_id() -> str:
+    """Generate a full 128-bit hex task ID (32 characters)."""
+    return uuid.uuid4().hex
+
+
+async def create_progress(
+    task_id: str,
+    operation_type: str = "full",
+    progress_type: str = "restore",
+) -> None:
+    """Create a new progress entry in Redis.
+
+    Parameters
+    ----------
+    task_id:
+        Unique task identifier (from :func:`generate_task_id`).
+    operation_type:
+        Sub-type of the operation, e.g. ``'full'``, ``'incremental'``,
+        ``'file_import'``, ``'server_restore'``.
+    progress_type:
+        ``'restore'`` (default) or ``'backup'``.
+    """
+    client = await _get_redis()
+    if client is None:
+        logger.warning("Redis 不可用，进度追踪将仅记录日志")
+        return
+
+    key = _resolve_key(task_id, progress_type)
+    data = {
+        "task_id": task_id,
+        "progress_type": progress_type,
+        "operation_type": operation_type,
+        "status": "pending",
+        "progress": 0,
+        "phase": "init",
+        "phase_label": "初始化",
+        "started_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "completed_at": None,
+        "result": None,
+        "error": None,
+    }
+    await client.set(key, json.dumps(data, ensure_ascii=False), ex=PROGRESS_TTL)
+
+
+async def update_progress(
+    task_id: str,
+    phase: str,
+    sub_progress: float = 0.0,
+    detail: str = "",
+) -> None:
+    """Update the progress of an ongoing task.
+
+    Automatically detects whether the task is a backup or restore operation
+    by probing both Redis keys.
+    """
+    client = await _get_redis()
+    if client is None:
+        logger.info(f"[进度] {task_id}: {phase} - {detail}")
+        return
+
+    # --- auto-detect progress type by probing keys ---
+    backup_key = f"{BACKUP_KEY_PREFIX}{task_id}"
+    restore_key = f"{RESTORE_KEY_PREFIX}{task_id}"
+
+    raw = await client.get(backup_key)
+    if raw is not None:
+        key = backup_key
+        progress_type = "backup"
+    else:
+        raw = await client.get(restore_key)
+        if raw is not None:
+            key = restore_key
+            progress_type = "restore"
+        else:
+            logger.warning(f"[进度] {task_id}: 未找到进度条目")
+            return
+
+    phase_map = _phase_map_for(progress_type)
+    if phase not in phase_map:
+        logger.warning(f"未知进度阶段 ({progress_type}): {phase}")
+        return
+
+    label, start, end = phase_map[phase]
+    progress = start + (end - start) * min(max(sub_progress, 0.0), 1.0)
+    progress = round(min(progress, 100.0), 1)
+
+    phase_label = f"{label} - {detail}" if detail else label
+
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return
+
+    data["status"] = "running"
+    data["progress"] = progress
+    data["phase"] = phase
+    data["phase_label"] = phase_label
+
+    await client.set(key, json.dumps(data, ensure_ascii=False), ex=PROGRESS_TTL)
+
+
+async def complete_progress(
+    task_id: str,
+    result: dict | None = None,
+    status: str = "completed",
+) -> None:
+    """Mark a task as completed.
+
+    Parameters
+    ----------
+    task_id:
+        Unique task identifier.
+    result:
+        Optional result payload (e.g. backup file info, verification report).
+    status:
+        Completion status -- ``'completed'`` or ``'completed_with_warnings'``.
+    """
+    client = await _get_redis()
+    if client is None:
+        logger.info(f"[进度] {task_id}: 100% - 已完成")
+        return
+
+    # Probe both keys.
+    backup_key = f"{BACKUP_KEY_PREFIX}{task_id}"
+    restore_key = f"{RESTORE_KEY_PREFIX}{task_id}"
+
+    raw = await client.get(backup_key)
+    if raw is not None:
+        key = backup_key
+        progress_type = "backup"
+    else:
+        raw = await client.get(restore_key)
+        if raw is not None:
+            key = restore_key
+            progress_type = "restore"
+        else:
+            return
+
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return
+
+    data["status"] = status
+    data["progress"] = 100
+    data["phase"] = status
+
+    if progress_type == "backup":
+        if status == "completed_with_warnings":
+            data["phase_label"] = "备份完成（有警告）"
+        else:
+            data["phase_label"] = "备份完成"
+    else:
+        if status == "completed_with_warnings":
+            data["phase_label"] = "恢复完成（验证未通过）"
+        else:
+            data["phase_label"] = "恢复完成"
+
+    data["completed_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    data["result"] = result
+
+    await client.set(key, json.dumps(data, ensure_ascii=False), ex=PROGRESS_TTL)
+
+
+async def fail_progress(task_id: str, error: str) -> None:
+    """Mark a task as failed.
+
+    The error message is sanitized: file paths are replaced with ``<path>``
+    and the message is truncated to 200 characters (REV-11).
+    """
+    sanitized = _sanitize_error(error)
+
+    client = await _get_redis()
+    if client is None:
+        logger.error(f"[进度] {task_id}: 失败 - {sanitized}")
+        return
+
+    backup_key = f"{BACKUP_KEY_PREFIX}{task_id}"
+    restore_key = f"{RESTORE_KEY_PREFIX}{task_id}"
+
+    raw = await client.get(backup_key)
+    if raw is not None:
+        key = backup_key
+        progress_type = "backup"
+    else:
+        raw = await client.get(restore_key)
+        if raw is not None:
+            key = restore_key
+            progress_type = "restore"
+        else:
+            return
+
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return
+
+    # If the task is already in a terminal state, do not overwrite.
+    if data.get("status") in ("completed", "completed_with_warnings", "failed"):
+        logger.warning(
+            f"[进度] {task_id}: 任务已结束(status={data.get('status')})，"
+            f"忽略后续失败信号: {sanitized}"
+        )
+        return
+
+    op_label = "备份" if progress_type == "backup" else "恢复"
+
+    data["status"] = "failed"
+    data["phase"] = "failed"
+    data["phase_label"] = f"{op_label}失败: {sanitized[:100]}"
+    data["error"] = sanitized
+    data["completed_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    await client.set(key, json.dumps(data, ensure_ascii=False), ex=PROGRESS_TTL)
+
+
+async def get_progress(task_id: str) -> dict | None:
+    """Retrieve the current progress dict for *task_id*.
+
+    Probes both backup and restore Redis keys.
+    """
+    client = await _get_redis()
+    if client is None:
+        return None
+
+    backup_key = f"{BACKUP_KEY_PREFIX}{task_id}"
+    restore_key = f"{RESTORE_KEY_PREFIX}{task_id}"
+
+    raw = await client.get(backup_key)
+    if raw is None:
+        raw = await client.get(restore_key)
+    if raw is None:
+        return None
+
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+
+async def cleanup_progress(task_id: str) -> None:
+    """Delete the progress entry for *task_id* from Redis.
+
+    Cleans up both possible keys (backup and restore) to avoid stale data.
+    """
+    client = await _get_redis()
+    if client is None:
+        return
+
+    backup_key = f"{BACKUP_KEY_PREFIX}{task_id}"
+    restore_key = f"{RESTORE_KEY_PREFIX}{task_id}"
+
+    await client.delete(backup_key)
+    await client.delete(restore_key)

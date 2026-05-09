@@ -10,9 +10,10 @@ import type { PaginatedResponse } from '@/types'
  *
  * 设计：
  * - 使用 useInfiniteQuery 实现无限滚动，每次加载 perPage 条
- * - 所有已加载页面数据合并为 allItems，传给虚拟滚动组件
+ * - 已加载页面数据合并为 allItems，传给虚拟滚动组件
  * - 滚动到接近底部时自动加载下一页（triggerFetch）
  * - 已加载数据由 vue-query 缓存，30s 内不重复请求
+ * - 内存管理：当已加载页数超过 maxLoadedPages 时，触发 GC 回收远离可视区域的旧页
  */
 interface Options {
   key: string
@@ -21,10 +22,11 @@ interface Options {
   staleTime?: number
   debounceMs?: number
   extraParams?: () => Record<string, any>
+  maxLoadedPages?: number
 }
 
 export function useVirtualScrollList<T>(opts: Options) {
-  const { key, url, perPage: defPP = 50, staleTime = 30_000, debounceMs = 300, extraParams } = opts
+  const { key, url, perPage: defPP = 50, staleTime = 30_000, debounceMs = 300, extraParams, maxLoadedPages = 20 } = opts
   const search = ref('')
   const dSearch = ref('')
   const sortBy = ref('')
@@ -66,14 +68,20 @@ export function useVirtualScrollList<T>(opts: Options) {
       return undefined
     },
     staleTime,
+    gcTime: 5 * 60 * 1000, // 5 minutes garbage collection
   })
+
+  // Track which pages to include based on current scroll position
+  const currentPageWindow = ref<{ start: number; end: number }>({ start: 0, end: maxLoadedPages })
 
   const allItems = computed<T[]>(() => {
     const pages = data.value?.pages
     if (!pages) return []
+    const { start, end } = currentPageWindow.value
     const result: T[] = []
-    for (const page of pages) {
-      if (page.items) result.push(...page.items)
+    for (let i = start; i < Math.min(end, pages.length); i++) {
+      const page = pages[i]
+      if (page?.items) result.push(...page.items)
     }
     return result
   })
@@ -82,15 +90,56 @@ export function useVirtualScrollList<T>(opts: Options) {
   const loadedCount = computed(() => allItems.value.length)
   const hasMore = computed(() => hasNextPage.value ?? false)
 
+  // Page offset: the index in allItems where the current window starts
+  const pageOffset = computed(() => {
+    const pages = data.value?.pages
+    if (!pages) return 0
+    let offset = 0
+    for (let i = 0; i < currentPageWindow.value.start && i < pages.length; i++) {
+      offset += pages[i]?.items?.length ?? 0
+    }
+    return offset
+  })
+
+  function updatePageWindow(visibleStartIndex: number) {
+    const pages = data.value?.pages
+    if (!pages || pages.length <= maxLoadedPages) return
+
+    // Determine which page the visible start index falls into
+    let acc = 0
+    let visiblePage = 0
+    for (let i = 0; i < pages.length; i++) {
+      const len = pages[i]?.items?.length ?? 0
+      if (acc + len > visibleStartIndex + pageOffset.value) {
+        visiblePage = i
+        break
+      }
+      acc += len
+    }
+
+    // Center the window around the visible page
+    const halfWindow = Math.floor(maxLoadedPages / 2)
+    const newStart = Math.max(0, visiblePage - halfWindow)
+    const newEnd = Math.min(pages.length, newStart + maxLoadedPages)
+
+    if (newStart !== currentPageWindow.value.start || newEnd !== currentPageWindow.value.end) {
+      currentPageWindow.value = { start: newStart, end: newEnd }
+    }
+  }
+
   function triggerFetch(visibleEndIndex: number) {
     if (!hasNextPage.value || isFetchingNextPage.value) return
-    if (visibleEndIndex >= loadedCount.value - 5) {
+    // Update page window based on scroll position
+    updatePageWindow(visibleEndIndex > 0 ? visibleEndIndex - 1 : 0)
+    // Fetch next page if approaching the end of loaded data
+    if (visibleEndIndex + pageOffset.value >= loadedCount.value - 5) {
       fetchNextPage()
     }
   }
 
   function resetAndSearch(v: string) {
     search.value = v
+    currentPageWindow.value = { start: 0, end: maxLoadedPages }
   }
 
   function resetFilters() {
@@ -98,6 +147,7 @@ export function useVirtualScrollList<T>(opts: Options) {
     dSearch.value = ''
     sortBy.value = ''
     sortOrder.value = 'desc'
+    currentPageWindow.value = { start: 0, end: maxLoadedPages }
   }
 
   return {

@@ -1,0 +1,70 @@
+========================================
+  Claude Code 配置步骤
+========================================
+
+配置文件已创建完成，现在需要手动复制到用户目录。
+
+========================================
+第一步：复制配置文件
+========================================
+
+请按以下步骤操作：
+
+1. 打开文件资源管理器
+
+2. 进入目录：
+   C:\Users\Administrator\
+
+3. 创建文件夹（如果不存在）：
+   新建文件夹 → 命名为 .claude
+
+4. 复制以下文件：
+
+   从：d:\erp_system\.claude\settings.json
+   到：C:\Users\Administrator\.claude\settings.json
+
+   从：d:\erp_system\.claude.json
+   到：C:\Users\Administrator\.claude.json
+
+========================================
+第二步：重启 VS Code
+========================================
+
+1. 完全关闭 VS Code
+2. 重新打开 VS Code
+3. 打开项目文件夹：d:\erp_system
+
+========================================
+第三步：使用 Claude Code
+========================================
+
+1. 点击编辑器右上角的 Spark 图标 ✨
+   （或者按 Ctrl+Shift+P，输入 "Claude Code: Open"）
+
+2. 在 Claude Code 中输入：
+   /status
+   
+   确认显示的模型是：mimo-v2.5-pro[1m]
+
+========================================
+配置信息
+========================================
+
+API 端点：https://token-plan-cn.xiaomimimo.com/anthropic
+模型：mimo-v2.5-pro[1m] （1M 上下文）
+Token：已配置
+
+========================================
+文件位置
+========================================
+
+项目配置文件：
+- d:\erp_system\.claude\settings.json
+- d:\erp_system\.claude.json
+- d:\erp_system\.vscode\settings.json
+
+需要复制到用户目录的文件：
+- d:\erp_system\.claude\settings.json
+- d:\erp_system\.claude.json
+
+========================================

@@ -192,4 +192,47 @@
 **Reason**: 被 WebSocket 实时推送替代，减少服务端负载和延迟
 **Migration**: 前端移除 `setTimeout(poll, 800)` 轮询逻辑，改用 `useWebSocket` composable
 
-###
+### Requirement: Redis 进度存储
+**Reason**: 进度数据直接从任务流程通过 WebSocket 推送，不再需要 Redis 中间存储
+**Migration**: 删除 `restore_progress.py` 模块，仅保留 Redis 用作 WebSocket 断连后的状态恢复缓存
+
+---
+
+## 技术架构设计
+
+### 后端架构
+
+```
+┌─────────────────────────────────────────────────────┐
+│                   API Layer (backup.py)              │
+│  POST /backup/full          POST /backup/restore     │
+│  POST /backup/incremental   GET  /backup/records     │
+│  GET  /backup/list          WS   /backup/progress    │
+└──────────────────────┬──────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────┐
+│               Service Layer (backup_service.py)      │
+│  BackupService                                        │
+│  - create_full_backup()    - restore_from_zip()      │
+│  - create_incremental()    - validate_backup()       │
+│  - encrypt_backup()        - decrypt_backup()        │
+│  - cleanup_old_backups()   - get_backup_status()     │
+└──────────────────────┬──────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────┐
+│                   Data Layer                          │
+│  BackupRecord Model    │  ProgressManager (WebSocket)│
+│  pg_dump / psql        │  FileSystemManager          │
+└─────────────────────────────────────────────────────┘
+```
+
+### 模块划分
+
+| 模块 | 文件 | 职责 |
+|------|------|------|
+| API 路由 | `backup.py` | 端点定义、权限校验、请求验证 |
+| 业务服务 | `backup_service.py` | 备份/恢复核心逻辑、加密解密 |
+| 数据模型 | `models/backup_record.py` | BackupRecord ORM 模型 |
+| WebSocket 管理 | `services/progress_manager.py` | WebSocket 连接管理、消息广播 |
+| 定时任务 | `tasks/backup_tasks.py` | Celery 任务定义与编排 |
+| 文件管理 | `services/file_manager.py` | 备份文件 CRU

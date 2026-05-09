@@ -98,5 +98,17 @@ celery_app.conf.update(
             "task": "backup_integrity_check_task",
             "schedule": crontab(hour=3, minute=0),
         },
+        "auto-daily-full-backup": {
+            "task": "auto_daily_backup_task",
+            "schedule": crontab(hour=2, minute=0),
+        },
+        "auto-incremental-backup": {
+            "task": "auto_incremental_backup_task",
+            "schedule": crontab(hour='6,10,14,18,22', minute=0),
+        },
+        "backup-cleanup": {
+            "task": "backup_cleanup_task",
+            "schedule": crontab(hour=4, minute=0),
+        },
     },
 )

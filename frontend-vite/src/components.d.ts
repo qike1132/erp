@@ -11,6 +11,7 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    BackupRecordList: typeof import('./components/backup/BackupRecordList.vue')['default']
     RestoreProgressBar: typeof import('./components/backup/RestoreProgressBar.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']

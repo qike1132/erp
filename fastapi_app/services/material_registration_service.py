@@ -47,7 +47,26 @@ async def get_registrations(db, page: int = 1, per_page: int = 20,
         except ValueError:
             pass
 
-    total_q = select(func.count()).select_from(query.subquery())
+    count_conditions = []
+    if status:
+        count_conditions.append(MaterialRegistration.status == status)
+    if order_no:
+        count_conditions.append(MaterialRegistration.purchase_order_no.ilike(f'%{escape_like(order_no)}%'))
+    if supplier:
+        count_conditions.append(MaterialRegistration.supplier_name.ilike(f'%{escape_like(supplier)}%'))
+    if start_date:
+        try:
+            sd = datetime.strptime(start_date, '%Y-%m-%d').date()
+            count_conditions.append(MaterialRegistration.registration_date >= sd)
+        except ValueError:
+            pass
+    if end_date:
+        try:
+            ed = datetime.strptime(end_date, '%Y-%m-%d').date()
+            count_conditions.append(MaterialRegistration.registration_date <= ed)
+        except ValueError:
+            pass
+    total_q = select(func.count(MaterialRegistration.id)).where(*count_conditions)
     total = (await db.execute(total_q)).scalar() or 0
 
     query = query.order_by(MaterialRegistration.create_time.desc())
@@ -367,7 +386,7 @@ async def export_registrations(db, order_no: str = '', supplier: str = '',
     query = select(MaterialRegistration).options(
         selectinload(MaterialRegistration.items),
         selectinload(MaterialRegistration.purchase_order),
-    ).options(joinedload(MaterialRegistration.items))
+    )
     if order_no:
         query = query.where(MaterialRegistration.purchase_order_no.ilike(f'%{escape_like(order_no)}%'))
     if supplier:
@@ -436,41 +455,55 @@ async def get_history(db, page: int = 1, per_page: int = 20,
                       order_no: str = '', supplier: str = '',
                       customer_name: str = '', material_category: str = '',
                       start_date: str = '', end_date: str = '') -> dict:
-    query = select(MaterialRegistration).options(
-        selectinload(MaterialRegistration.items),
-        joinedload(MaterialRegistration.purchase_order),
-    ).where(MaterialRegistration.status == 'completed')
+    # Build filter conditions (shared between count and data queries)
+    conditions = [MaterialRegistration.status == 'completed']
 
     if order_no:
-        query = query.where(MaterialRegistration.purchase_order_no.ilike(f'%{escape_like(order_no)}%'))
+        conditions.append(MaterialRegistration.purchase_order_no.ilike(f'%{escape_like(order_no)}%'))
     if supplier:
-        query = query.where(MaterialRegistration.supplier_name.ilike(f'%{escape_like(supplier)}%'))
+        conditions.append(MaterialRegistration.supplier_name.ilike(f'%{escape_like(supplier)}%'))
     if customer_name:
-        query = query.where(PurchaseOrder.customer_name.ilike(f'%{escape_like(customer_name)}%'))
+        conditions.append(PurchaseOrder.customer_name.ilike(f'%{escape_like(customer_name)}%'))
     if start_date:
         try:
             sd = datetime.strptime(start_date, '%Y-%m-%d').date()
-            query = query.where(MaterialRegistration.registration_date >= sd)
+            conditions.append(MaterialRegistration.registration_date >= sd)
         except ValueError:
             pass
     if end_date:
         try:
             ed = datetime.strptime(end_date, '%Y-%m-%d').date()
-            query = query.where(MaterialRegistration.registration_date <= ed)
+            conditions.append(MaterialRegistration.registration_date <= ed)
         except ValueError:
             pass
     if material_category:
-        query = query.where(
+        conditions.append(
             MaterialRegistration.items.any(MaterialRegistrationItem.material_category == material_category)
         )
 
-    query = query.order_by(MaterialRegistration.update_time.desc())
-    result = await db.execute(query)
-    all_regs = list(result.unique().scalars().all())
+    # Count query — no eager loading, just count
+    count_query = select(func.count(MaterialRegistration.id))
+    if customer_name:
+        count_query = count_query.join(MaterialRegistration.purchase_order)
+    count_query = count_query.where(*conditions)
+    total = (await db.execute(count_query)).scalar() or 0
 
-    total = len(all_regs)
+    # Data query — DB-level pagination with eager loading only for the page
     offset = (page - 1) * per_page
-    page_regs = all_regs[offset:offset + per_page]
+    data_query = select(MaterialRegistration).options(
+        selectinload(MaterialRegistration.items),
+        joinedload(MaterialRegistration.purchase_order),
+    )
+    if customer_name:
+        data_query = data_query.join(MaterialRegistration.purchase_order)
+    data_query = (
+        data_query.where(*conditions)
+        .order_by(MaterialRegistration.update_time.desc())
+        .offset(offset)
+        .limit(per_page)
+    )
+    result = await db.execute(data_query)
+    page_regs = list(result.unique().scalars().all())
 
     return {
         'success': True,

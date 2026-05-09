@@ -51,18 +51,25 @@ const buf = computed(() => props.buffer ?? 10)
 const bodyH = computed(() => props.containerHeight - props.headerHeight)
 const estimatedH = computed(() => props.dynamicHeight ? props.estimatedHeight : props.itemHeight)
 
-const heightCache = ref<number[]>([])
+// Non-reactive height cache — avoids triggering full prefix-sum recomputation on every measurement
+const _heightMap = new Map<number, number>()
+const _itemCountRef = ref(0)
 
 function _getItemHeight(index: number): number {
   if (!props.dynamicHeight) return props.itemHeight
-  return heightCache.value[index] || estimatedH.value
+  return _heightMap.get(index) || estimatedH.value
 }
 
 const _prefixSums = computed(() => {
   if (!props.dynamicHeight) return null
-  const sums: number[] = [0]
-  for (let i = 0; i < props.items.length; i++) {
-    sums.push(sums[i] + (heightCache.value[i] || estimatedH.value))
+  // Only recompute when item count changes, not on every height measurement
+  void _itemCountRef.value
+  // If no heights have been measured, return null to use simple multiplication
+  if (_heightMap.size === 0) return null
+  const n = props.items.length
+  const sums = new Float64Array(n + 1)
+  for (let i = 0; i < n; i++) {
+    sums[i + 1] = sums[i] + (_heightMap.get(i) || estimatedH.value)
   }
   return sums
 })
@@ -102,7 +109,7 @@ const offsetY = computed(() => {
 
 function getItemStyle(index: number) {
   if (!props.dynamicHeight) return { height: `${props.itemHeight}px` }
-  return { height: `${heightCache.value[index] || estimatedH.value}px` }
+  return { height: `${_heightMap.get(index) || estimatedH.value}px` }
 }
 
 function itemKey(item: {raw:T,index:number}) { return props.itemKeyFn ? props.itemKeyFn(item.raw,item.index) : item.index }
@@ -122,7 +129,7 @@ function onScroll() {
 function handleSort(col: ColDef) { if(sortKey.value===col.key) sortOrder.value = sortOrder.value==='asc'?'desc':'asc'; else { sortKey.value=col.key; sortOrder.value='desc' } emit('sort', col.key, sortOrder.value) }
 function scrollToIndex(i: number) { const b = containerRef.value?.querySelector('.vt-body') as HTMLElement; if(!b) return; if(props.dynamicHeight) b.scrollTop = getPosition(i); else b.scrollTop = i * props.itemHeight }
 
-watch(()=>props.items.length,(n,o)=>{ if(n!==o && scrollTop.value>totalHeight.value) nextTick(()=>scrollToIndex(0)) })
+watch(()=>props.items.length,(n,o)=>{ if(n!==o){ _itemCountRef.value=n; if(scrollTop.value>totalHeight.value) nextTick(()=>scrollToIndex(0)) } })
 watch([startIdx, endIdx], ([s, e]) => { emit('visibleChange', s, e) })
 
 let ro: ResizeObserver|null = null

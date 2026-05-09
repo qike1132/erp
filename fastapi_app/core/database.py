@@ -7,6 +7,7 @@
 仅支持 PostgreSQL。
 """
 
+import asyncio
 import logging
 import os
 
@@ -35,6 +36,7 @@ _pool_config = _get_pool_config()
 _async_engine = None
 _AsyncSessionLocal = None
 async_engine = None
+_rebuild_lock = asyncio.Lock()
 
 
 def _init_async_engine():
@@ -198,6 +200,54 @@ async def dispose_async_engines():
     _async_engine = None
     _AsyncSessionLocal = None
     async_engine = None
+
+
+async def rebuild_pool() -> bool:
+    """重建全部数据库连接池（备份恢复后调用，REV-25）
+
+    使用 asyncio.Lock 防止并发重建。依次释放异步主库引擎、
+    只读副本引擎，然后重新初始化。
+
+    Returns:
+        True  -- 重建成功
+
+    Raises:
+        RuntimeError -- 重新初始化失败时抛出
+    """
+    global _async_engine, _AsyncSessionLocal, async_engine
+    global _read_engine, _ReadSessionLocal
+
+    async with _rebuild_lock:
+        # ---- 释放现有引擎 ----
+        if _async_engine is not None:
+            try:
+                await _async_engine.dispose()
+            except (OperationalError, DisconnectionError) as e:
+                logger.warning("异步主库引擎释放异常: %s", e)
+
+        if _read_engine is not None:
+            try:
+                await _read_engine.dispose()
+            except (OperationalError, DisconnectionError) as e:
+                logger.warning("只读副本引擎释放异常: %s", e)
+
+        # ---- 清空全局引用 ----
+        _async_engine = None
+        _AsyncSessionLocal = None
+        async_engine = None
+        _read_engine = None
+        _ReadSessionLocal = None
+
+        # ---- 重新初始化 ----
+        try:
+            _init_async_engine()
+            _init_read_engine()
+        except Exception as e:
+            logger.error("数据库连接池重建失败: %s", e)
+            raise RuntimeError(f"数据库连接池重建失败: {e}") from e
+
+    logger.info("数据库连接池重建成功")
+    return True
 
 
 async def verify_db_connectivity() -> bool:

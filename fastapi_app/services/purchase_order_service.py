@@ -492,6 +492,41 @@ async def complete_purchase_order(db: AsyncSession, order_id: int, username: str
     items = items_result.scalars().all()
 
     now = datetime.now()
+
+    # Pre-fetch cumulative and arrived quantities for all items in a single query
+    item_keys = [(item.material_name, item.material_code or '') for item in items if item.material_name]
+    cumulative_map: dict[tuple[str, str], float] = {}
+    arrived_map: dict[tuple[str, str], float] = {}
+
+    if item_keys:
+        # Single query for cumulative quantities
+        from sqlalchemy import tuple_, case, and_
+        cum_result = await db.execute(
+            select(
+                MaterialRegistration.material_name,
+                MaterialRegistration.material_code,
+                func.coalesce(func.sum(MaterialRegistration.quantity), 0).label('total'),
+            ).where(
+                tuple_(MaterialRegistration.material_name, MaterialRegistration.material_code).in_(item_keys)
+            ).group_by(MaterialRegistration.material_name, MaterialRegistration.material_code)
+        )
+        for row in cum_result.all():
+            cumulative_map[(row[0], row[1] or '')] = float(row[2])
+
+        # Single query for arrived quantities
+        arr_result = await db.execute(
+            select(
+                MaterialRegistration.material_name,
+                MaterialRegistration.material_code,
+                func.coalesce(func.sum(MaterialRegistration.quantity), 0).label('total'),
+            ).where(
+                tuple_(MaterialRegistration.material_name, MaterialRegistration.material_code).in_(item_keys),
+                MaterialRegistration.registration_status == 'arrived',
+            ).group_by(MaterialRegistration.material_name, MaterialRegistration.material_code)
+        )
+        for row in arr_result.all():
+            arrived_map[(row[0], row[1] or '')] = float(row[2])
+
     for item in items:
         reg = MaterialRegistration(
             order_id=order_id,
@@ -511,21 +546,9 @@ async def complete_purchase_order(db: AsyncSession, order_id: int, username: str
         )
         db.add(reg)
 
-        query = select(func.coalesce(func.sum(MaterialRegistration.quantity), 0)).where(
-            MaterialRegistration.material_name == item.material_name,
-            MaterialRegistration.material_code == item.material_code,
-        )
-        cumulative_result = await db.execute(query)
-        cumulative = cumulative_result.scalar() or 0
-
-        arrived_result = await db.execute(
-            select(func.coalesce(func.sum(MaterialRegistration.quantity), 0)).where(
-                MaterialRegistration.material_name == item.material_name,
-                MaterialRegistration.material_code == item.material_code,
-                MaterialRegistration.registration_status == 'arrived',
-            )
-        )
-        arrived_qty = arrived_result.scalar() or 0
+        key = (item.material_name, item.material_code or '')
+        cumulative = cumulative_map.get(key, 0)
+        arrived_qty = arrived_map.get(key, 0)
 
         existing = item.material_code and item.material_name
         is_arrived = cumulative >= item.quantity

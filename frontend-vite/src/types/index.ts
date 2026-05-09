@@ -442,3 +442,52 @@ export interface OrderPreview {
   item_count?: number
   order_date?: string
 }
+
+// ===== 备份系统 =====
+export interface BackupRecord {
+  id: number
+  type: string
+  trigger_type: string
+  filename: string | null
+  size: number | null
+  table_count: number | null
+  total_rows: number | null
+  operator: string | null
+  remark: string | null
+  status: string
+  error_message: string | null
+  duration_seconds: number | null
+  ip_address: string | null
+  user_agent: string | null
+  parent_record_id: number | null
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface BackupScheduleTask {
+  name: string
+  task: string
+  schedule: string
+  enabled: boolean
+  last_run?: string | null
+  last_status?: string | null
+}
+
+export interface BackupStatus {
+  success: boolean
+  backup_dir: string
+  total_backups: number
+  total_size_bytes: number
+  last_full_backup: {
+    filename: string
+    size: number
+    exported_at: string
+    exported_by: string
+    remark: string
+    type: string
+    table_count: number
+    total_rows: number
+  } | null
+  checksum_tables: string[]
+  timestamp: string
+}

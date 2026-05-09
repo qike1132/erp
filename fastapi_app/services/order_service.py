@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
 from fastapi_app.core.cache import CacheDomain, cache_result, invalidate_related_caches
+from fastapi_app.services.enhanced_pagination import optimized_count
 from fastapi_app.core.state_machine import can_transition
 from fastapi_app.services import escape_like
 from fastapi_app.services.notification_service import StockEvent
@@ -154,8 +155,8 @@ async def get_orders(db: AsyncSession, page: int = 1, per_page: int = 50,
         query = query.where(c)
         count_query = count_query.where(c)
 
-    # 总数
-    total = (await db.execute(count_query)).scalar() or 0
+    # 总数 (use approximate count for large tables to avoid full scan)
+    total = await optimized_count(db, count_query, table_name='order')
 
     # 分页查询
     result = await db.execute(
@@ -223,7 +224,7 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
 
     await db.commit()
     await db.refresh(order)
-    await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY)
+    await invalidate_related_caches(CacheDomain.ORDER)
     logger.info(f'订单添加成功：{order_no}，客户：{customer}，产品：{product.name}，数量：{quantity}')
 
     await _safe_invalidate_purchase_cache()
@@ -293,7 +294,7 @@ async def _update_order_directly(
         db.add(log)
 
     await db.commit()
-    await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY)
+    await invalidate_related_caches(CacheDomain.ORDER)
 
     await _safe_invalidate_purchase_cache()
 
@@ -342,7 +343,7 @@ async def _submit_edit_approval(
     await _create_approval_log_obj(approval_request, ApprovalLog.ACTION_CREATE, current_user, {'operation_data': operation_data})
 
     await db.commit()
-    await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY)
+    await invalidate_related_caches(CacheDomain.ORDER)
     logger.info(f'订单编辑审批请求已提交：{order.order_no}，申请人：{current_user.username}')
     return {'success': True, 'message': '已提交编辑审批请求，请等待管理员审批！', 'requires_approval': True}
 
@@ -420,7 +421,7 @@ async def _delete_order_directly(
 
     await db.commit()
     try:
-        await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY)
+        await invalidate_related_caches(CacheDomain.ORDER)
     except (OSError, ValueError) as e:
         logger.warning(f'缓存清除失败：{e}')
 
@@ -467,7 +468,7 @@ async def _submit_delete_approval(
     await _create_approval_log_obj(approval_request, ApprovalLog.ACTION_CREATE, current_user, {'operation_data': operation_data})
 
     await db.commit()
-    await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY)
+    await invalidate_related_caches(CacheDomain.ORDER)
     logger.info(f'订单删除审批请求已提交：{order.order_no}，申请人：{current_user.username}')
     return {'success': True, 'message': '已提交删除审批请求，请等待管理员审批！', 'requires_approval': True}
 

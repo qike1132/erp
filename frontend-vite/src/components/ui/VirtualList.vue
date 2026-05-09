@@ -58,7 +58,9 @@ const scrollTop = ref(0)
 const bufferCount = computed(() => props.buffer ?? 10)
 const estimatedH = computed(() => props.dynamicHeight ? props.estimatedHeight : props.itemHeight)
 
-const heightCache = ref<number[]>([])
+// Non-reactive height cache — avoids triggering full prefix-sum recomputation on every measurement
+const _heightMap = new Map<number, number>()
+const _itemCountRef = ref(0)
 const itemRefs: Map<number, HTMLElement> = new Map()
 let itemRefGeneration = 0
 
@@ -72,30 +74,29 @@ function setItemRef(el: unknown, index: number) {
 
 function measureItems() {
   if (!props.dynamicHeight) return
-  let changed = false
   const currentGen = ++itemRefGeneration
   for (const [idx, el] of itemRefs) {
     if (itemRefGeneration !== currentGen) return
     const h = el.getBoundingClientRect().height
-    if (heightCache.value[idx] !== h) {
-      if (!changed) heightCache.value = [...heightCache.value]
-      heightCache.value[idx] = h
-      changed = true
-    }
+    _heightMap.set(idx, h)
   }
-  if (changed) itemRefs.clear()
+  itemRefs.clear()
 }
 
 function _getItemHeight(index: number): number {
   if (!props.dynamicHeight) return props.itemHeight
-  return heightCache.value[index] || estimatedH.value
+  return _heightMap.get(index) || estimatedH.value
 }
 
 const _prefixSums = computed(() => {
   if (!props.dynamicHeight) return null
-  const sums: number[] = [0]
-  for (let i = 0; i < props.items.length; i++) {
-    sums.push(sums[i] + (heightCache.value[i] || estimatedH.value))
+  // Only recompute when item count changes, not on every height measurement.
+  // Height measurements update _heightMap (non-reactive) and don't trigger this.
+  void _itemCountRef.value
+  const n = props.items.length
+  const sums = new Float64Array(n + 1)
+  for (let i = 0; i < n; i++) {
+    sums[i + 1] = sums[i] + (_heightMap.get(i) || estimatedH.value)
   }
   return sums
 })
@@ -158,7 +159,7 @@ function getItemStyle(index: number) {
   if (!props.dynamicHeight) {
     return { height: `${props.itemHeight}px` }
   }
-  const h = heightCache.value[index] || estimatedH.value
+  const h = _heightMap.get(index) || estimatedH.value
   return { height: `${h}px` }
 }
 
@@ -205,8 +206,11 @@ function scrollToBottom() {
 }
 
 watch(() => props.items.length, (newLen, oldLen) => {
-  if (newLen !== oldLen && scrollTop.value > totalHeight.value) {
-    nextTick(() => scrollToTop())
+  if (newLen !== oldLen) {
+    _itemCountRef.value = newLen
+    if (scrollTop.value > totalHeight.value) {
+      nextTick(() => scrollToTop())
+    }
   }
 })
 
