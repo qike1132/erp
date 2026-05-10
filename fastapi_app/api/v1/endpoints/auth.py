@@ -171,7 +171,7 @@ async def api_login(
         raise HTTPException(status_code=400, detail="请输入用户名和密码")
 
     if len(password) > 128:
-        logger.info(f"[Login] 登录失败: 密码过长, IP={key}, username={username}")
+        logger.info(f"[Login] 登录失败: 密码过长, IP={key}")
         raise HTTPException(status_code=400, detail="密码长度不能超过128位")
 
     result = await db.execute(
@@ -234,16 +234,7 @@ async def api_login(
         path="/",
     )
 
-    # 设置非 httpOnly 标记 cookie，供前端 JS 快速判断登录状态，避免未登录时发起 401 请求导致空白
-    response.set_cookie(
-        key="auth_status",
-        value="1",
-        max_age=token_max_age,
-        httponly=False,
-        samesite="lax",
-        secure=request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https",
-        path="/",
-    )
+    # auth_status cookie 已移除，前端请使用 GET /api/v1/auth/check 检查登录状态
 
     logger.info(f"[Login] 登录成功: IP={key}, username={username}, user_id={user.id}")
 
@@ -257,7 +248,30 @@ async def api_login(
 
 @router.post("/logout")
 async def api_logout(request: Request):
-    """登出接口 — 清除 httpOnly cookie，浏览器表单提交时重定向到登录页"""
+    """登出接口 — 撤销 token 并清除 httpOnly cookie"""
+    # 尝试撤销当前 token（加入黑名单）
+    try:
+        from fastapi_app.core.deps import _decode_jwt_token, revoke_token
+        cookie_token = request.cookies.get('access_token')
+        if cookie_token:
+            payload = _decode_jwt_token(cookie_token)
+            jti = payload.get('jti')
+            exp = payload.get('exp')
+            if jti and exp:
+                await revoke_token(jti, exp)
+        # Bearer token 也尝试撤销
+        auth_header = request.headers.get('authorization', '')
+        if auth_header.startswith('Bearer '):
+            bearer_token = auth_header[7:]
+            if bearer_token and bearer_token != cookie_token:
+                payload = _decode_jwt_token(bearer_token)
+                jti = payload.get('jti')
+                exp = payload.get('exp')
+                if jti and exp:
+                    await revoke_token(jti, exp)
+    except Exception:
+        pass  # token 撤销失败不影响登出流程
+
     # 浏览器表单POST提交时，返回重定向而非JSON
     accept = request.headers.get("accept", "")
     content_type = request.headers.get("content-type", "")
@@ -265,7 +279,6 @@ async def api_logout(request: Request):
         from starlette.responses import RedirectResponse
         resp = RedirectResponse(url="/login", status_code=303)
         resp.delete_cookie(key="access_token", path="/")
-        resp.delete_cookie(key="auth_status", path="/")
         return resp
     # API 调用：返回 JSON
     import json
@@ -276,7 +289,6 @@ async def api_logout(request: Request):
         media_type="application/json",
     )
     resp.delete_cookie(key="access_token", path="/")
-    resp.delete_cookie(key="auth_status", path="/")
     return resp
 
 

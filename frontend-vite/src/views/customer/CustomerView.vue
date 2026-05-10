@@ -17,7 +17,7 @@
 
       <!-- 数据表格 -->
       <div class="cu-table-wrap">
-        <div v-if="isLoading" class="cu-empty">
+        <div v-if="isLoading && customers.length === 0" class="cu-empty">
           <i class="fas fa-spinner fa-spin" />
           <span>加载中...</span>
         </div>
@@ -28,7 +28,9 @@
             <button class="cu-action-btn cu-action-primary" @click="openForm('add')">立即添加</button>
           </div>
         </template>
-        <table v-else class="cu-table">
+        <template v-else>
+        <div v-if="isFetching" class="cu-fetching-bar"><div class="cu-fetching-progress" /></div>
+        <table class="cu-table">
           <thead>
             <tr>
               <th style="text-align: left">客户名称</th>
@@ -73,6 +75,7 @@
 
         <!-- 分页 -->
         <UiPagination v-if="totalItems > perPage" :current-page="currentPage" :total-pages="totalPages" :total-items="totalItems" @update:current-page="currentPage = $event" />
+        </template>
       </div>
     </div>
 
@@ -113,7 +116,8 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed } from 'vue'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery, keepPreviousData } from '@tanstack/vue-query'
+import { showToast } from '@/composables/useToast'
 import { customerApi } from '@/api'
 import { useApiMutation } from '@/composables/useApiMutation'
 import type { Customer } from '@/types'
@@ -144,11 +148,12 @@ function clearSearch() {
   currentPage.value = 1
 }
 
-const { data: result, isLoading } = useQuery({
+const { data: result, isLoading, isFetching } = useQuery({
   queryKey: ['customers-list', () => debouncedSearch.value, () => statusFilter.value, () => currentPage.value],
   queryFn: () => customerApi.list({ per_page: perPage, page: currentPage.value, search: debouncedSearch.value || undefined, status: statusFilter.value !== 'all' ? statusFilter.value : undefined }) as Promise<any>,
   staleTime: 30_000,
   gcTime: 60_000,
+  placeholderData: keepPreviousData,
 })
 
 const customers = computed<Customer[]>(() => {
@@ -216,7 +221,14 @@ const deleteMutation = useApiMutation((id: number) => customerApi.delete(id), {
 const confirmDialog = useConfirmDialog()
 
 async function handleSubmit() {
-  if (!form.name) return
+  if (!form.name?.trim()) {
+    showToast('客户名称不能为空', 'warning')
+    return
+  }
+  if (form.phone && !/^[\d\-+\s()]{6,20}$/.test(form.phone)) {
+    showToast('联系电话格式不正确', 'warning')
+    return
+  }
   submitting.value = true
   try {
     if (formMode.value === 'add') await addMutation.mutate(form)
@@ -644,6 +656,25 @@ async function handleDelete(row: Customer) {
 }
 .cu-empty i { font-size: 28px; opacity: 0.5; }
 .cu-empty span { font-size: 14px; }
+
+/* Fetching progress bar */
+.cu-fetching-bar {
+  height: 2px;
+  background: var(--color-primary-100, #e0f2fe);
+  overflow: hidden;
+  border-radius: 1px;
+}
+.cu-fetching-progress {
+  height: 100%;
+  width: 30%;
+  background: var(--color-primary-500, #3b82f6);
+  border-radius: 1px;
+  animation: cu-progress-slide 1s ease-in-out infinite;
+}
+@keyframes cu-progress-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
 
 /* Dialog Form */
 .cu-form-group {

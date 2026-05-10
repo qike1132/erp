@@ -176,7 +176,7 @@
                 <div class="so-staged-main">
                   <div class="so-staged-info">
                     <div class="so-staged-product">
-                      <i class="fas fa-shipping-fast so-staged-icon" />{{ item.productName }}
+                      <i class="fas fa-shipping-fast so-staged-icon" />{{ item.product_name }}
                     </div>
                     <div class="so-staged-meta">
                       <span class="so-staged-tag"><i class="fas fa-user" />{{ item.customer || '无客户' }}</span>
@@ -248,7 +248,7 @@
       </div>
 
       <div class="so-records-body">
-        <div v-if="isLoading" class="state-placeholder">
+        <div v-if="isLoading && stockoutRecords.length === 0" class="state-placeholder">
           <div class="spinner-ring" />
           <p class="state-text">加载中...</p>
         </div>
@@ -257,7 +257,9 @@
           <p class="state-text">暂无出货记录</p>
         </div>
 
-        <div v-else>
+        <template v-else>
+        <div v-if="isFetching" class="so-fetching-bar"><div class="so-fetching-progress" /></div>
+        <div>
           <div v-for="group in groupedRecords" :key="group.date" class="date-group">
             <div class="date-group-header" @click="group.expanded = !group.expanded">
               <div class="date-group-title">
@@ -323,6 +325,7 @@
             </Transition>
           </div>
         </div>
+        </template>
 
         <UiPagination v-if="totalPages > 1" :current-page="currentPage" :total-pages="totalPages" @update:current-page="currentPage = $event; fetchStockouts()" />
       </div>
@@ -526,20 +529,21 @@ async function addStaged() {
   }
 
   if (form.productId && form.customer) {
-    try {
-      const data = await stockApi.availableShipment(Number(form.productId), form.customer)
-      const avail = data.data?.available_quantity ?? 0
-      if (form.quantity > (avail ?? 0)) {
-        showToast(`出货数量超过可出货量！可出货: ${avail}`, 'error')
-        return
-      }
-    } catch { /* proceed anyway */ }
+    if (shipmentInfo.value === null) {
+      await fetchShipmentInfo()
+    }
+    const avail = shipmentInfo.value?.available_quantity
+    if (avail !== undefined && form.quantity > avail) {
+      showToast(`出货数量超过可出货量！可出货: ${avail}`, 'error')
+      return
+    }
+  }
   }
 
   staged.value.push({
     id: Date.now(),
-    productId: form.productId,
-    productName: form.search,
+    product_id: form.productId,
+    product_name: form.search,
     customer: form.customer,
     date: form.date,
     quantity: form.quantity,
@@ -562,7 +566,7 @@ function openEditStaged(idx: number) {
   const item = staged.value[idx]
   editStagedForm.customer = item.customer || ''
   editStagedForm.date = item.date || ''
-  editStagedForm.productName = item.productName || ''
+  editStagedForm.productName = item.product_name || ''
   editStagedForm.quantity = item.quantity || 1
   editStagedForm.note = item.note || ''
   editStagedOpen.value = true
@@ -586,23 +590,23 @@ async function submitBatch() {
 
   submitting.value = true
   try {
-    const uniqueKeys: Record<string, { productId: string; customer: string; stockouts: StagedStockout[] }> = {}
+    const uniqueKeys: Record<string, { product_id: string; customer: string; stockouts: StagedStockout[] }> = {}
     const withCustomer = staged.value.filter(s => s.customer)
     withCustomer.forEach(s => {
-      const key = `${s.productId}-${s.customer}`
-      if (!uniqueKeys[key]) uniqueKeys[key] = { productId: s.productId, customer: s.customer, stockouts: [] }
+      const key = `${s.product_id}-${s.customer}`
+      if (!uniqueKeys[key]) uniqueKeys[key] = { product_id: s.product_id, customer: s.customer, stockouts: [] }
       uniqueKeys[key].stockouts.push(s)
     })
 
     for (const key in uniqueKeys) {
-      const { productId, customer, stockouts } = uniqueKeys[key]
+      const { product_id, customer, stockouts } = uniqueKeys[key]
       try {
-        const data = await stockApi.availableShipment(Number(productId), customer)
+        const data = await stockApi.availableShipment(Number(product_id), customer)
         const shipment = data.data
         if (!shipment) continue
         const totalQty = stockouts.reduce((sum: number, s: StagedStockout) => sum + s.quantity, 0)
         if (totalQty > (shipment.available_quantity ?? 0)) {
-          showToast(`客户: ${customer} 产品ID: ${productId} 出货量超过可出货量(${shipment.available_quantity ?? 0})`, 'error')
+          showToast(`客户: ${customer} 产品ID: ${product_id} 出货量超过可出货量(${shipment.available_quantity ?? 0})`, 'error')
           submitting.value = false
           return
         }
@@ -610,7 +614,7 @@ async function submitBatch() {
     }
 
     const stockoutsForApi = staged.value.map(s => ({
-      product_id: Number(s.productId),
+      product_id: Number(s.product_id),
       customer: s.customer,
       quantity: s.quantity,
       stockout_date: s.date,
@@ -794,6 +798,7 @@ const filterEnd = ref('')
 const currentPage = ref(1)
 const totalPages = ref(1)
 const isLoading = ref(false)
+const isFetching = ref(false)
 const stockoutRecords = ref<{
   id?: number;
   stockout_date?: string;
@@ -809,7 +814,9 @@ const stockoutRecords = ref<{
 }[]>([])
 
 async function fetchStockouts() {
-  isLoading.value = true
+  const isInitial = stockoutRecords.value.length === 0
+  if (isInitial) isLoading.value = true
+  else isFetching.value = true
   try {
     const params: Record<string, unknown> = { page: currentPage.value, per_page: 20 }
     if (filterCustomer.value) params.customer = filterCustomer.value
@@ -824,6 +831,7 @@ async function fetchStockouts() {
     stockoutRecords.value = []
   } finally {
     isLoading.value = false
+    isFetching.value = false
   }
 }
 
@@ -1578,6 +1586,25 @@ textarea.form-input::placeholder {
   font-size: 14px;
   color: var(--color-text-secondary);
   margin: 0;
+}
+
+/* Fetching progress bar */
+.so-fetching-bar {
+  height: 2px;
+  background: var(--color-primary-100, #e0f2fe);
+  overflow: hidden;
+  border-radius: 1px;
+}
+.so-fetching-progress {
+  height: 100%;
+  width: 30%;
+  background: var(--color-primary-500, #3b82f6);
+  border-radius: 1px;
+  animation: so-progress-slide 1s ease-in-out infinite;
+}
+@keyframes so-progress-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
 }
 .spinner-ring {
   width: 36px;

@@ -36,6 +36,8 @@ class CustomerAccessLog(Base):
     __table_args__ = (
         Index('idx_customer_access_name_time', 'customer_name', 'access_time'),
         Index('idx_customer_access_module_time', 'module', 'access_time'),
+        Index('idx_customer_access_log_customer', 'customer_id'),
+        Index('idx_customer_access_log_user', 'user_id'),
     )
 
     def to_dict(self):

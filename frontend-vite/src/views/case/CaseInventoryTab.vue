@@ -35,9 +35,11 @@
       </div>
 
       <!-- 库存表格 -->
-      <div v-if="invIsLoading" class="ci-loading"><i class="fas fa-spinner fa-spin" /><span>加载中...</span></div>
+      <div v-if="invIsLoading && inventoryList.length === 0" class="ci-loading"><i class="fas fa-spinner fa-spin" /><span>加载中...</span></div>
       <div v-else-if="inventoryList.length === 0" class="ci-empty"><i class="fas fa-warehouse" /><span>暂无库存数据</span></div>
-      <table v-else class="ci-table">
+      <template v-else>
+      <div v-if="invIsFetching" class="ci-fetching-bar"><div class="ci-fetching-progress" /></div>
+      <table class="ci-table">
         <thead>
           <tr>
             <th style="text-align: left">产品名称</th>
@@ -72,6 +74,7 @@
         <span class="ci-page-info">{{ invPage }} / {{ invTotalPages }}</span>
         <button class="ci-page-btn" :disabled="invPage >= invTotalPages" @click="invPage++"><i class="fas fa-chevron-right" /></button>
       </div>
+      </template>
     </div>
 
     <!-- 库存流水记录 -->
@@ -109,9 +112,11 @@
           </div>
         </div>
       </div>
-      <div v-if="logIsLoading" class="ci-loading"><i class="fas fa-spinner fa-spin" /><span>加载中...</span></div>
+      <div v-if="logIsLoading && logList.length === 0" class="ci-loading"><i class="fas fa-spinner fa-spin" /><span>加载中...</span></div>
       <div v-else-if="logList.length === 0" class="ci-empty"><i class="fas fa-history" /><span>暂无流水记录</span></div>
-      <table v-else class="ci-table">
+      <template v-else>
+      <div v-if="logIsFetching" class="ci-fetching-bar"><div class="ci-fetching-progress" /></div>
+      <table class="ci-table">
         <thead>
           <tr>
             <th>操作类型</th>
@@ -140,6 +145,7 @@
         </tbody>
       </table>
       <UiPagination v-if="logTotalPages > 1" :current-page="logPage" :total-pages="logTotalPages" @update:current-page="logPage = $event; logRefetch()" />
+      </template>
     </div>
 
     <!-- 未选中提示 -->
@@ -154,7 +160,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/vue-query'
 import { get } from '@/api/request'
 import UiSelect from '@/components/ui/UiSelect.vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
@@ -182,12 +188,14 @@ function onInvSearchInput() {
 const {
   data: invData,
   isLoading: invIsLoading,
+  isFetching: invIsFetching,
   refetch: invRefetch,
 } = useQuery({
   queryKey: ['case-inventory', invPage, debouncedInvSearch],
   queryFn: () => get('/cases/inventory-summary', { page: invPage.value, per_page: invPerPage, search: debouncedInvSearch.value }) as Promise<any>,
   staleTime: 30_000,
   gcTime: 60_000,
+  placeholderData: keepPreviousData,
 })
 
 const inventoryList = computed(() => {
@@ -228,6 +236,7 @@ const logTypeOptions = [
 const {
   data: logData,
   isLoading: logIsLoading,
+  isFetching: logIsFetching,
   refetch: logRefetch,
 } = useQuery({
   queryKey: ['case-inventory-logs', selectedCaseId, logPage, logFilterType, logFilterStart, logFilterEnd],
@@ -242,6 +251,7 @@ const {
   },
   enabled: computed(() => !!selectedCaseId.value),
   staleTime: 30_000,
+  placeholderData: keepPreviousData,
 })
 
 const logList = computed(() => logData.value?.logs ?? logData.value?.items ?? [])
@@ -486,6 +496,25 @@ function logBadgeClass(t: string): string {
   flex-direction: column;
 }
 .ci-empty i { font-size: 28px; opacity: 0.5; }
+
+/* Fetching progress bar */
+.ci-fetching-bar {
+  height: 2px;
+  background: var(--color-primary-100, #e0f2fe);
+  overflow: hidden;
+  border-radius: 1px;
+}
+.ci-fetching-progress {
+  height: 100%;
+  width: 30%;
+  background: var(--color-primary-500, #3b82f6);
+  border-radius: 1px;
+  animation: ci-progress-slide 1s ease-in-out infinite;
+}
+@keyframes ci-progress-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
 
 /* Empty hint */
 .ci-empty-hint {

@@ -38,7 +38,10 @@ def _origin_allowed(origin: str | None) -> bool:
             return False
         for allowed in settings.ALLOWED_HOSTS:
             if allowed == "*":
-                return True
+                # 开发模式通配符：仅允许 localhost/127.0.0.1，防止跨站劫持
+                if host in ("localhost", "127.0.0.1", "::1"):
+                    return True
+                continue
             if allowed.startswith("*.") and host.endswith(allowed[1:]):
                 return True
             if host == allowed:
@@ -73,11 +76,15 @@ def register_websocket(app: FastAPI) -> None:
         cookie_token = websocket.cookies.get("access_token")
         if cookie_token:
             try:
-                from fastapi_app.core.deps import _decode_jwt_token
+                from fastapi_app.core.deps import _decode_jwt_token, is_token_revoked
                 payload = _decode_jwt_token(cookie_token)
-                uid = payload.get("sub")
-                if uid:
-                    user_id = int(uid)
+                jti = payload.get("jti")
+                if jti and await is_token_revoked(jti):
+                    logger.warning("WebSocket Cookie认证失败: token已撤销")
+                else:
+                    uid = payload.get("sub")
+                    if uid:
+                        user_id = int(uid)
             except (ValueError, TypeError) as e:
                 logger.warning("WebSocket Cookie认证失败: %s", e)
 
@@ -89,11 +96,15 @@ def register_websocket(app: FastAPI) -> None:
                 try:
                     msg = _json.loads(initial_data)
                     if msg.get("type") == "auth" and msg.get("token"):
-                        from fastapi_app.core.deps import _decode_jwt_token
+                        from fastapi_app.core.deps import _decode_jwt_token, is_token_revoked
                         payload = _decode_jwt_token(msg["token"])
-                        uid = payload.get("sub")
-                        if uid:
-                            user_id = int(uid)
+                        jti = payload.get("jti")
+                        if jti and await is_token_revoked(jti):
+                            logger.warning("WebSocket首条消息认证失败: token已撤销")
+                        else:
+                            uid = payload.get("sub")
+                            if uid:
+                                user_id = int(uid)
                     else:
                         pending_message = initial_data
                 except (ValueError, TypeError, _json.JSONDecodeError) as e:
@@ -124,12 +135,46 @@ def register_websocket(app: FastAPI) -> None:
         from fastapi_app.services.notification_service import manager
         manager.connect_existing(websocket, int(user_id))
 
+        import time
+        msg_count = 0
+        msg_window_start = time.monotonic()
+        last_verify_time = time.monotonic()
+        MSG_RATE_LIMIT = 30  # max messages per minute
+        VERIFY_INTERVAL = 60  # verify user active every 60s
+
         try:
             if pending_message and pending_message == "ping":
                 await websocket.send_text("pong")
 
             while True:
                 data = await websocket.receive_text()
+                now = time.monotonic()
+
+                # Rate limiting
+                if now - msg_window_start > 60:
+                    msg_count = 0
+                    msg_window_start = now
+                msg_count += 1
+                if msg_count > MSG_RATE_LIMIT:
+                    logger.warning("WebSocket 消息频率超限: user_id=%s", user_id)
+                    await websocket.close(code=4008, reason="消息频率超限")
+                    break
+
+                # Periodic user active verification
+                if now - last_verify_time > VERIFY_INTERVAL:
+                    last_verify_time = now
+                    async with async_engine.connect() as conn:
+                        try:
+                            result = await conn.execute(
+                                ws_select(WSUser.status).where(WSUser.id == user_id)
+                            )
+                            check_user = result.first()
+                            if not check_user or not check_user[0]:
+                                await websocket.close(code=4003, reason="用户已被禁用")
+                                break
+                        except (OperationalError, DisconnectionError):
+                            logger.warning("WebSocket 用户状态复核查询失败")
+
                 if data == "ping":
                     await websocket.send_text("pong")
         except WebSocketDisconnect:

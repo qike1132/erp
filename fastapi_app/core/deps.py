@@ -8,7 +8,10 @@ FastAPI 依赖注入
 已迁移到全异步数据库操作，移除同步引擎依赖。
 """
 import logging
+import threading
 import time
+import uuid
+from collections import OrderedDict
 from datetime import UTC
 
 from fastapi import Depends, HTTPException, Request, status
@@ -21,31 +24,70 @@ from fastapi_app.core.database import get_async_db
 from fastapi_app.shared_models import Permission, User
 
 logger = logging.getLogger(__name__)
-_PERMISSION_CACHE: dict[int, tuple[float, User]] = {}
-_PERMISSION_CACHE_TTL = 30
+
+
+class _TTLCache:
+    """线程安全的 LRU TTL 缓存，替代 dict 避免并发竞态"""
+
+    def __init__(self, ttl: float = 30, maxsize: int = 500):
+        self._ttl = ttl
+        self._maxsize = maxsize
+        self._lock = threading.Lock()
+        self._data: OrderedDict[int, tuple[float, object]] = OrderedDict()
+
+    def get(self, key: int) -> object | None:
+        with self._lock:
+            entry = self._data.get(key)
+            if entry is None:
+                return None
+            cached_at, value = entry
+            if time.monotonic() - cached_at > self._ttl:
+                del self._data[key]
+                return None
+            self._data.move_to_end(key)
+            return value
+
+    def set(self, key: int, value: object) -> None:
+        with self._lock:
+            self._data[key] = (time.monotonic(), value)
+            self._data.move_to_end(key)
+            if len(self._data) > self._maxsize:
+                self._data.popitem(last=False)
+
+    def pop(self, key: int) -> None:
+        with self._lock:
+            self._data.pop(key, None)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._data.clear()
+
+
+_PERMISSION_CACHE = _TTLCache(ttl=30, maxsize=500)
 
 def _get_cached_user(user_id: int) -> User | None:
-    entry = _PERMISSION_CACHE.get(user_id)
-    if entry is None:
-        return None
-    cached_at, user = entry
-    if time.monotonic() - cached_at > _PERMISSION_CACHE_TTL:
-        del _PERMISSION_CACHE[user_id]
-        return None
-    return user
+    return _PERMISSION_CACHE.get(user_id)
+
 
 def _set_cached_user(user_id: int, user: User) -> None:
-    _PERMISSION_CACHE[user_id] = (time.monotonic(), user)
-    if len(_PERMISSION_CACHE) > 500:
-        oldest_key = min(_PERMISSION_CACHE, key=lambda k: _PERMISSION_CACHE[k][0])
-        del _PERMISSION_CACHE[oldest_key]
+    _PERMISSION_CACHE.set(user_id, user)
+
 
 def invalidate_user_permission_cache(user_id: int | None=None) -> None:
     if user_id is not None:
-        _PERMISSION_CACHE.pop(user_id, None)
+        _PERMISSION_CACHE.pop(user_id)
+        # 同时清除用户活跃状态缓存
+        try:
+            _USER_ACTIVE_CACHE.pop(user_id)
+        except (KeyError, AttributeError):
+            pass
     else:
         _PERMISSION_CACHE.clear()
-__all__ = ['get_current_user_id', 'require_permission', 'create_access_token', 'get_async_db', 'get_user_identity']
+        try:
+            _USER_ACTIVE_CACHE.clear()
+        except AttributeError:
+            pass
+__all__ = ['get_current_user_id', 'require_permission', 'create_access_token', 'get_async_db', 'get_user_identity', 'revoke_token']
 
 
 def get_user_identity(user: User) -> tuple[str, str]:
@@ -71,13 +113,17 @@ def _get_verify_key() -> str:
     return settings.SECRET_KEY
 
 def create_access_token(data: dict, expires_delta=None) -> str:
-    """生成JWT Token（支持 HS256 / RS256）"""
+    """生成JWT Token（支持 HS256 / RS256）
+
+    在 payload 中注入 jti（唯一标识），用于 token 撤销/黑名单。
+    """
     from datetime import datetime, timedelta
 
     import jwt
     to_encode = data.copy()
     expire = datetime.now(UTC) + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode['exp'] = expire
+    to_encode['jti'] = uuid.uuid4().hex
     return jwt.encode(to_encode, _get_signing_key(), algorithm=settings.ALGORITHM)
 
 def _decode_jwt_token(token: str) -> dict:
@@ -90,6 +136,39 @@ def _decode_jwt_token(token: str) -> dict:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='JWT Token已过期') from None
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='JWT Token无效') from None
+
+
+async def revoke_token(jti: str, exp: int) -> None:
+    """将 token 的 jti 加入 Redis 黑名单，TTL 设为 token 剩余有效期
+
+    登出时调用，确保已签发的 token 无法继续使用。
+    Redis 不可用时静默失败（token 仍会自然过期）。
+    """
+    from datetime import datetime
+    remaining = max(exp - int(datetime.now(UTC).timestamp()), 0)
+    if remaining <= 0:
+        return
+    try:
+        from utils.redis_cache import redis_cache
+        redis = redis_cache._redis
+        if redis:
+            await redis.set(f"token_blacklist:{jti}", "1", ex=remaining)
+    except (OSError, RuntimeError, ValueError):
+        pass
+
+
+async def is_token_revoked(jti: str | None) -> bool:
+    """检查 token 是否已被撤销（在黑名单中）"""
+    if not jti:
+        return False
+    try:
+        from utils.redis_cache import redis_cache
+        redis = redis_cache._redis
+        if redis:
+            return bool(await redis.exists(f"token_blacklist:{jti}"))
+    except (OSError, RuntimeError, ValueError):
+        pass
+    return False
 
 def _get_user_id_from_jwt(request: Request) -> int | None:
     """
@@ -136,24 +215,32 @@ def _resolve_user_id(request: Request) -> int | None:
     if user_id is None:
         user_id = _get_user_id_from_cookie(request)
     return user_id
-_USER_ACTIVE_CACHE: dict[int, tuple[float, bool]] = {}
-_USER_ACTIVE_CACHE_TTL = 30
+
+
+def _resolve_token_jti(request: Request) -> str | None:
+    """从 JWT Bearer 或 Cookie JWT 中提取 jti（用于黑名单检查）"""
+    auth_header = request.headers.get('authorization', '')
+    bearer_token = auth_header[7:] if auth_header.startswith('Bearer ') else ''
+    cookie_token = request.cookies.get('access_token', '')
+    token = bearer_token or cookie_token
+    if not token:
+        return None
+    try:
+        payload = _decode_jwt_token(token)
+        return payload.get('jti')
+    except HTTPException:
+        return None
+_USER_ACTIVE_CACHE = _TTLCache(ttl=30, maxsize=500)
 
 async def _verify_user_active(user_id: int, db: AsyncSession) -> bool:
     """验证用户仍存在且处于启用状态（带 L1 缓存，TTL 30s）"""
-    now = time.monotonic()
-    entry = _USER_ACTIVE_CACHE.get(user_id)
-    if entry is not None:
-        cached_at, is_active = entry
-        if now - cached_at < _USER_ACTIVE_CACHE_TTL:
-            return is_active
+    cached = _USER_ACTIVE_CACHE.get(user_id)
+    if cached is not None:
+        return cached
     result = await db.execute(select(User.id, User.status).where(User.id == user_id))
     user = result.first()
     is_active = user is not None and bool(user.status)
-    _USER_ACTIVE_CACHE[user_id] = (now, is_active)
-    if len(_USER_ACTIVE_CACHE) > 500:
-        oldest_key = min(_USER_ACTIVE_CACHE, key=lambda k: _USER_ACTIVE_CACHE[k][0])
-        del _USER_ACTIVE_CACHE[oldest_key]
+    _USER_ACTIVE_CACHE.set(user_id, is_active)
     return is_active
 
 async def get_current_user_id(request: Request, db: AsyncSession=Depends(get_async_db)) -> int:
@@ -165,11 +252,18 @@ async def get_current_user_id(request: Request, db: AsyncSession=Depends(get_asy
     2. httpOnly cookie 中的 access_token（浏览器Web端）
 
     验证用户仍存在且处于启用状态，防止已禁用/删除用户的token继续有效。
+    检查 token 是否已被撤销（黑名单）。
     返回 user_id: int。
     """
     user_id = _resolve_user_id(request)
     if user_id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='未登录')
+
+    # 检查 token 是否已被撤销
+    jti = _resolve_token_jti(request)
+    if await is_token_revoked(jti):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Token已失效')
+
     if not await _verify_user_active(user_id, db):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='用户不存在或已被禁用')
     return user_id

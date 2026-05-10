@@ -122,7 +122,7 @@ router.beforeEach(async (to: any, _from: any, next: any) => {
   }
 
   // 权限检查：非超级用户只能访问 filteredNavSections 中可见的路径
-  if (authStore.user && !authStore.user.isSuper) {
+  if (authStore.user && !authStore.user.is_super) {
     const targetPath = '/' + to.path.split('/').filter(Boolean)[0]
     const allowedPaths = authStore.filteredNavSections.flatMap((s) => s.items.map((i) => i.path))
     // dashboard 始终可访问

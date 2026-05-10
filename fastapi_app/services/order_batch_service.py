@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from fastapi_app.services import escape_like
-from fastapi_app.shared_models import Order, OrderBatchAuditLog, OrderSyncConfig, User
+from fastapi_app.shared_models import Order, OrderBatchAuditLog, OrderSyncConfig, StockOut, User
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +108,92 @@ def _order_batch_to_dict(o: Order) -> dict:
         'batch_completed_at': o.batch_completed_at.isoformat() if o.batch_completed_at else None,
         'is_locked': o.is_locked,
     }
+
+
+async def get_batch_query_list(
+    db: AsyncSession,
+    *,
+    page: int = 1,
+    per_page: int = 50,
+    batch_no: str | None = None,
+    status: str | None = None,
+    customer: str | None = None,
+    keyword: str | None = None,
+) -> dict:
+    whitelist = await get_whitelist(db)
+    if not whitelist:
+        return {'items': [], 'total': 0}
+
+    stmt = select(Order).options(joinedload(Order.product)).where(
+        Order.customer.in_(whitelist),
+        Order.is_deleted.isnot(True),
+    )
+
+    if batch_no:
+        stmt = stmt.where(Order.batch_no == batch_no)
+    if status:
+        stmt = stmt.where(Order.status == status)
+    if customer:
+        stmt = stmt.where(Order.customer == customer)
+    if keyword:
+        kw = f"%{escape_like(keyword)}%"
+        stmt = stmt.where(Order.order_no.ilike(kw))
+
+    count_stmt = select(func.count()).select_from(stmt.subquery())
+    total = (await db.execute(count_stmt)).scalar() or 0
+
+    stmt = stmt.order_by(Order.order_date.desc()).offset((page - 1) * per_page).limit(per_page)
+    result = await db.execute(stmt)
+    orders = result.unique().scalars().all()
+
+    order_ids = [o.id for o in orders]
+
+    stockout_data = {}
+    if order_ids:
+        stockout_result = await db.execute(
+            select(
+                StockOut.order_id,
+                StockOut.stockin_id,
+                func.sum(StockOut.quantity - StockOut.returned_quantity),
+            )
+            .where(StockOut.order_id.in_(order_ids))
+            .group_by(StockOut.order_id, StockOut.stockin_id)
+        )
+        for order_id, stockin_id, qty in stockout_result:
+            if qty is None:
+                continue
+            if order_id not in stockout_data:
+                stockout_data[order_id] = {'deducted_qty': 0, 'shipped_qty': 0}
+            if stockin_id is not None:
+                stockout_data[order_id]['deducted_qty'] += int(qty)
+            else:
+                stockout_data[order_id]['shipped_qty'] += int(qty)
+
+    from fastapi_app.shared_models.order import compute_status_from_stockouts
+
+    items = []
+    for o in orders:
+        sd = stockout_data.get(o.id, {'deducted_qty': 0, 'shipped_qty': 0})
+        computed_status = compute_status_from_stockouts(o, sd['deducted_qty'], sd['shipped_qty'])
+        items.append({
+            'id': o.id,
+            'order_no': o.order_no,
+            'customer': o.customer,
+            'order_date': o.order_date.strftime('%Y-%m-%d %H:%M') if o.order_date else None,
+            'product_id': o.product_id,
+            'product_name': o.product.name if o.product else None,
+            'product_barcode': o.product.barcode if o.product else None,
+            'quantity': o.quantity,
+            'deducted_qty': sd['deducted_qty'],
+            'shipped_qty': sd['shipped_qty'],
+            'status': o.status,
+            'computed_status': computed_status,
+            'batch_no': o.batch_no,
+            'batch_completed_at': o.batch_completed_at.isoformat() if o.batch_completed_at else None,
+            'is_locked': o.is_locked,
+        })
+
+    return {'items': items, 'total': total}
 
 
 async def get_batch_orders(
@@ -298,6 +384,8 @@ async def complete_batch(
     completed = []
     failed_orders = []
 
+    from fastapi_app.services.order_service import compute_order_status_from_db
+
     for o in orders:
         # 批次完成仅适用于已出货的订单
         if o.status != '已出货':
@@ -305,7 +393,6 @@ async def complete_batch(
             continue
         o.batch_completed_at = now
         o.batch_completed_by_id = user.id
-        from fastapi_app.services.order_service import compute_order_status_from_db
         o.status = await compute_order_status_from_db(db, o)
         completed.append(o)
 

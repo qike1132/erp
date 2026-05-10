@@ -23,6 +23,7 @@ from fastapi_app.shared_models.case_stock_out import CaseStockOut
 from fastapi_app.shared_models.craft_work import CraftWork
 from fastapi_app.shared_models.daily_production_record import DailyProductionRecord
 from fastapi_app.shared_models.customer import Customer
+from fastapi_app.shared_models.device_token import DeviceToken
 from fastapi_app.shared_models.customer_access_log import CustomerAccessLog
 from fastapi_app.shared_models.inventory_log import InventoryLog
 from fastapi_app.shared_models.material_registration import MaterialRegistration, MaterialRegistrationItem
@@ -72,6 +73,7 @@ __all__ = [
     'StagingStockIn',
     'StagingStockOut',
     'Customer',
+    'DeviceToken',
     'ApprovalRequest',
     'ApprovalLog',
     'OrderSyncRecord',

@@ -7,7 +7,7 @@
       </div>
 
       <div class="ob-filters">
-        <input v-model="batchNoFilter" class="ob-input" placeholder="批次号筛选" @input="loadHistory" />
+        <input v-model="batchNoFilter" class="ob-input" placeholder="批次号筛选" @input="debouncedLoadHistory" />
         <select v-model="customerFilter" class="ob-select" @change="loadHistory">
           <option value="">全部客户</option>
           <option v-for="c in whitelist" :key="c" :value="c">{{ c }}</option>
@@ -58,7 +58,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onScopeDispose, ref } from 'vue'
 import { orderBatchApi } from '@/api'
 import type { OrderBatchItem } from '@/types'
 
@@ -75,6 +75,16 @@ const batchNoFilter = ref('')
 const customerFilter = ref('')
 const dateFrom = ref('')
 const dateTo = ref('')
+
+let _debTimer: ReturnType<typeof setTimeout> | null = null
+function debouncedLoadHistory() {
+  if (_debTimer) clearTimeout(_debTimer)
+  if (!batchNoFilter.value) { loadHistory(); return }
+  _debTimer = setTimeout(loadHistory, 300)
+}
+onScopeDispose(() => {
+  if (_debTimer) clearTimeout(_debTimer)
+})
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / perPage.value)))
 

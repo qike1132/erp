@@ -48,6 +48,7 @@ class ProductFabric(Base):
 
     __table_args__ = (
         Index('idx_product_fabric_product', 'product_id'),
+        Index('idx_product_fabric_supplier', 'supplier_id'),
     )
 
     def to_dict(self):
@@ -93,6 +94,7 @@ class ProductMaterial(Base):
 
     __table_args__ = (
         Index('idx_product_material_product', 'product_id'),
+        Index('idx_product_material_supplier', 'supplier_id'),
     )
 
     def to_dict(self):
@@ -140,6 +142,7 @@ class ProductAccessory(Base):
 
     __table_args__ = (
         Index('idx_product_accessory_product', 'product_id'),
+        Index('idx_product_accessory_supplier', 'supplier_id'),
     )
 
     def to_dict(self):
@@ -187,6 +190,7 @@ class ProductPackaging(Base):
 
     __table_args__ = (
         Index('idx_product_packaging_product', 'product_id'),
+        Index('idx_product_packaging_supplier', 'supplier_id'),
     )
 
     def to_dict(self):

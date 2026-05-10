@@ -47,6 +47,7 @@ class StagingOrder(Base):
         Index('idx_staging_session', 'session_id'),
         Index('idx_staging_status', 'status'),
         Index('idx_staging_created', 'created_at'),
+        Index('idx_staging_order_product', 'product_id'),
     )
 
     def __repr__(self):

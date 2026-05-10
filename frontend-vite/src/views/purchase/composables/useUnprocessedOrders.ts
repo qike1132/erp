@@ -20,15 +20,23 @@ interface OneClickGenerateResponse {
 export function useUnprocessedOrders() {
   const orders = ref<UnprocessedOrder[]>([])
   const loading = ref(false)
+  const fetching = ref(false)
   const total = ref(0)
   const currentPage = ref(1)
   const totalPages = ref(1)
   const perPage = ref(15)
   const selectedIds = ref<number[]>([])
+  let loadController: AbortController | null = null
+
+  const orderMap = computed(() => {
+    const m = new Map<number, UnprocessedOrder>()
+    for (const o of orders.value) m.set(o.id, o)
+    return m
+  })
 
   const validSelectedIds = computed(() =>
     selectedIds.value.filter((id) => {
-      const o = orders.value.find((x) => x.id === id)
+      const o = orderMap.value.get(id)
       return o && o.has_bom
     }),
   )
@@ -36,20 +44,30 @@ export function useUnprocessedOrders() {
   const allSelected = computed(() => orders.value.length > 0 && selectedIds.value.length >= orders.value.length)
 
   async function load(page?: number) {
-    loading.value = true
+    const isInitial = orders.value.length === 0
+    if (isInitial) loading.value = true
+    else fetching.value = true
+    loadController?.abort()
+    loadController = new AbortController()
+    const signal = loadController.signal
     try {
       const p = page ?? currentPage.value
       const res = await purchaseApi.unprocessedOrders({ page: p, per_page: perPage.value }) as unknown as UnprocessedOrdersResponse
+      if (signal.aborted) return
       orders.value = res.orders || []
       total.value = res.total || orders.value.length
       totalPages.value = res.pages || 1
       currentPage.value = res.current_page || p
       selectedIds.value = []
     } catch (err: any) {
+      if (signal.aborted) return
       orders.value = []
       showToast(err.response?.data?.detail || '加载待审核订单失败', 'error')
     } finally {
-      loading.value = false
+      if (!signal.aborted) {
+        loading.value = false
+        fetching.value = false
+      }
     }
   }
 
@@ -89,6 +107,7 @@ export function useUnprocessedOrders() {
   return reactive({
     orders,
     loading,
+    fetching,
     total,
     currentPage,
     totalPages,

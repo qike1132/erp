@@ -1,4 +1,4 @@
-import { ref, reactive } from 'vue'
+import { ref, reactive, onUnmounted } from 'vue'
 
 export function useConfirmDialog() {
   const open = ref(false)
@@ -28,6 +28,13 @@ export function useConfirmDialog() {
     _resolve?.(false)
     _resolve = null
   }
+
+  onUnmounted(() => {
+    if (_resolve) {
+      _resolve(false)
+      _resolve = null
+    }
+  })
 
   return reactive({ open, text, sub, type, confirm, onConfirm, onCancel })
 }

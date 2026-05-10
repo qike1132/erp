@@ -151,6 +151,7 @@ def _fix_other_nav_sections(session):
         'user_manage': {'url': None, 'section': 'system', 'section_name': '系统管理', 'icon': 'fa-users-cog', 'is_nav': False},
         'permission_manage': {'url': None, 'section': 'system', 'section_name': '系统管理', 'icon': 'fa-shield-alt', 'is_nav': False},
         'production_summary_manage': {'url': 'production_summary.index', 'section': 'core', 'section_name': '核心业务', 'icon': 'fa-industry'},
+        'batch_manage': {'url': 'sku_batch.sku_batch_page', 'section': 'core', 'section_name': '核心业务', 'icon': 'fa-table-cells'},
     }
 
     for code, config in NAV_CONFIG.items():

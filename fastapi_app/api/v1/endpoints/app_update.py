@@ -3,6 +3,7 @@ App版本管理 API
 
 工作流：上传(待发布) → 发布(激活+FCM推送) → 用户收到更新通知
 """
+import asyncio
 import hashlib
 import logging
 import os
@@ -16,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db, get_async_read_db
-from fastapi_app.core.deps import get_current_user_id
+from fastapi_app.core.deps import require_permission
 from fastapi_app.shared_models.app_version import AppVersion
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,11 @@ def _compute_md5(file_path: str) -> str:
     return md5.hexdigest()
 
 
+def _write_file(path: str, content: bytes) -> None:
+    with open(path, 'wb') as f:
+        f.write(content)
+
+
 @router.get("/latest", response_model=CheckUpdateResponse)
 async def check_update(
     platform: str = "android",
@@ -96,7 +102,7 @@ async def upload_version(
     changelog: str = Form("", description="更新日志"),
     force_update: bool = Form(False, description="是否强制更新"),
     file: UploadFile = File(..., description="APK文件"),
-    user_id: int = Depends(get_current_user_id),
+    user: User = Depends(require_permission('app_manage')),
     db: AsyncSession = Depends(get_async_db),
 ):
     """上传新版本APK，状态为「待发布」"""
@@ -109,10 +115,9 @@ async def upload_version(
 
     content = await file.read()
     file_size = len(content)
-    with open(saved_path, 'wb') as f:
-        f.write(content)
+    await asyncio.to_thread(lambda: _write_file(saved_path, content))
 
-    md5_hash = _compute_md5(saved_path)
+    md5_hash = await asyncio.to_thread(_compute_md5, saved_path)
 
     download_url = f"/static/releases/{saved_name}"
 
@@ -140,7 +145,7 @@ async def upload_version(
 @router.post("/{version_id}/publish", response_model=AppVersionResponse)
 async def publish_version(
     version_id: int,
-    user_id: int = Depends(get_current_user_id),
+    user: User = Depends(require_permission('app_manage')),
     db: AsyncSession = Depends(get_async_db),
 ):
     """发布版本：激活版本 + 推送FCM通知到所有设备"""
@@ -201,7 +206,7 @@ async def publish_version(
 @router.get("/versions", response_model=list[AppVersionResponse])
 async def list_versions(
     platform: str = "android",
-    user_id: int = Depends(get_current_user_id),
+    user: User = Depends(require_permission('app_manage')),
     db: AsyncSession = Depends(get_async_read_db),
 ):
     """管理后台：列出所有版本"""

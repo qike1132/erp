@@ -28,8 +28,8 @@ export function useApiMutation<TData = any, TVariables = any>(
         }
       }
       return result
-    } catch (err: any) {
-      const msg = err.response?.data?.detail || options?.errorMsg || '操作失败'
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || options?.errorMsg || '操作失败'
       showToast(msg, 'error')
       throw err
     }

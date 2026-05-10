@@ -41,6 +41,7 @@ class MaterialRegistration(Base):
         Index('idx_material_reg_status', 'status'),
         Index('idx_material_reg_date', 'registration_date'),
         Index('idx_material_reg_status_date', 'status', 'registration_date'),
+        Index('idx_material_registration_created_by', 'created_by'),
     )
 
     def _calc_items_stats(self):
@@ -130,6 +131,7 @@ class MaterialRegistrationItem(Base):
     __table_args__ = (
         Index('idx_material_reg_item_name', 'material_name'),
         Index('idx_material_reg_item_registration', 'registration_id'),
+        Index('idx_material_reg_item_order_item', 'order_item_id'),
     )
 
     def to_dict(self):

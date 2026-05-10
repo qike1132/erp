@@ -26,6 +26,7 @@ class StockEvent:
     PURCHASE_ORDER_CREATED = "purchase_order_created"
     BATCH_NO_UPDATED = "batch_no_updated"
     BATCH_COMPLETED = "batch_completed"
+    SHIPMENT_COMPLETED = "shipment_completed"
 
 
 EVENT_DISPLAY_MESSAGES = {
@@ -37,6 +38,7 @@ EVENT_DISPLAY_MESSAGES = {
     "purchase_order_created": "新采购订单已生成",
     "batch_no_updated": "批次号已更新",
     "batch_completed": "批次已完成",
+    "shipment_completed": "订单出货已完成",
 }
 
 _async_redis_client = None
@@ -54,7 +56,10 @@ async def _get_async_redis_client():
         from fastapi_app.core.config import settings
         url = settings.REDIS_URL
         if settings.REDIS_PASSWORD and settings.REDIS_PASSWORD not in url:
-            url = url.replace("redis://", f"redis://:{settings.REDIS_PASSWORD}@")
+            if url.startswith("rediss://"):
+                url = url.replace("rediss://", f"rediss://:{settings.REDIS_PASSWORD}@")
+            elif url.startswith("redis://"):
+                url = url.replace("redis://", f"redis://:{settings.REDIS_PASSWORD}@")
         _async_redis_client = aioredis.from_url(url)
         return _async_redis_client
     except (ImportError, OSError, ValueError) as e:
@@ -94,6 +99,29 @@ async def publish_stock_event(event_type: str, data: dict, redis_client=None):
         logger.debug("事件已发布: %s", event_type)
     except (OSError, ConnectionError, ValueError) as e:
         logger.warning("事件发布失败: %s", e)
+
+
+async def publish_event_with_fcm(
+    event_type: str,
+    data: dict,
+    fcm_title: str | None = None,
+    fcm_body: str | None = None,
+    redis_client=None,
+):
+    """统一事件发布：WebSocket + FCM 推送"""
+    # 1. WebSocket 广播
+    await publish_stock_event(event_type, data, redis_client)
+
+    # 2. FCM 推送（可选，失败不影响业务）
+    if fcm_title:
+        try:
+            from fastapi_app.services import fcm_service
+
+            fcm_data = {"type": event_type, **{k: str(v) for k, v in data.items()}}
+            # 发送到业务事件主题
+            await fcm_service.send_to_topic("erp_business_events", fcm_title, fcm_body or "", fcm_data)
+        except Exception as e:
+            logger.debug("FCM 推送跳过: %s", e)
 
 
 class ConnectionManager:
@@ -152,7 +180,10 @@ class ConnectionManager:
         from fastapi_app.core.config import settings
         url = settings.REDIS_URL
         if settings.REDIS_PASSWORD and settings.REDIS_PASSWORD not in url:
-            url = url.replace("redis://", f"redis://:{settings.REDIS_PASSWORD}@")
+            if url.startswith("rediss://"):
+                url = url.replace("rediss://", f"rediss://:{settings.REDIS_PASSWORD}@")
+            elif url.startswith("redis://"):
+                url = url.replace("redis://", f"redis://:{settings.REDIS_PASSWORD}@")
         return url
 
     async def start_redis_listener(self):

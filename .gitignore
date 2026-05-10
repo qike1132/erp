@@ -24,12 +24,15 @@ wheels/
 instance/
 .webassets-cache
 
-# Environment
+# Environment & Secrets
 .env
 .env.local
 .env.production
 .env.development
 .env.backup
+.env.*.local
+local.properties
+config/jwt/*.pem
 
 # IDE
 .vscode/

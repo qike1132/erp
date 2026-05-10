@@ -192,9 +192,11 @@
           </div>
         </div>
       </div>
-      <div v-if="siIsLoading" class="cs-loading"><i class="fas fa-spinner fa-spin" /><span>加载中...</span></div>
+      <div v-if="siIsLoading && siList.length === 0" class="cs-loading"><i class="fas fa-spinner fa-spin" /><span>加载中...</span></div>
       <div v-else-if="siList.length === 0" class="cs-empty"><i class="fas fa-inbox" /><span>暂无入库记录</span></div>
-      <table v-else class="cs-table">
+      <template v-else>
+      <div v-if="siIsFetching" class="cs-fetching-bar"><div class="cs-fetching-progress" /></div>
+      <table class="cs-table">
         <thead>
           <tr>
             <th>入库日期</th>
@@ -222,6 +224,7 @@
         </tbody>
       </table>
       <UiPagination v-if="siTotalPages > 1" :current-page="siPage" :total-pages="siTotalPages" @update:current-page="siPage = $event; siRefetch()" />
+      </template>
     </div>
 
     <!-- 出库记录列表 -->
@@ -256,9 +259,11 @@
           </div>
         </div>
       </div>
-      <div v-if="soIsLoading" class="cs-loading"><i class="fas fa-spinner fa-spin" /><span>加载中...</span></div>
+      <div v-if="soIsLoading && soList.length === 0" class="cs-loading"><i class="fas fa-spinner fa-spin" /><span>加载中...</span></div>
       <div v-else-if="soList.length === 0" class="cs-empty"><i class="fas fa-inbox" /><span>暂无出库记录</span></div>
-      <table v-else class="cs-table">
+      <template v-else>
+      <div v-if="soIsFetching" class="cs-fetching-bar"><div class="cs-fetching-progress" /></div>
+      <table class="cs-table">
         <thead>
           <tr>
             <th>出库日期</th>
@@ -286,6 +291,7 @@
         </tbody>
       </table>
       <UiPagination v-if="soTotalPages > 1" :current-page="soPage" :total-pages="soTotalPages" @update:current-page="soPage = $event; soRefetch()" />
+      </template>
     </div>
 
     <!-- 编辑弹窗 -->
@@ -331,7 +337,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed } from 'vue'
-import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/vue-query'
 import { get, post, put, del, upload, download } from '@/api/request'
 import { customerApi } from '@/api'
 import UiSelect from '@/components/ui/UiSelect.vue'
@@ -568,6 +574,7 @@ const siTotalPages = ref(1)
 const {
   data: siData,
   isLoading: siIsLoading,
+  isFetching: siIsFetching,
   refetch: siRefetch,
 } = useQuery({
   queryKey: ['case-stockins', siPage, siFCustomer, siFStart, siFEnd],
@@ -581,6 +588,7 @@ const {
     return res
   },
   staleTime: 30_000,
+  placeholderData: keepPreviousData,
 })
 const siList = computed(() => siData.value?.stockins ?? siData.value?.items ?? [])
 
@@ -595,6 +603,7 @@ const soTotalPages = ref(1)
 const {
   data: soData,
   isLoading: soIsLoading,
+  isFetching: soIsFetching,
   refetch: soRefetch,
 } = useQuery({
   queryKey: ['case-stockouts', soPage, soFCustomer, soFStart, soFEnd],
@@ -608,6 +617,7 @@ const {
     return res
   },
   staleTime: 30_000,
+  placeholderData: keepPreviousData,
 })
 const soList = computed(() => soData.value?.stockouts ?? soData.value?.items ?? [])
 
@@ -1006,6 +1016,25 @@ async function saveEdit() {
   flex-direction: column;
 }
 .cs-empty i { font-size: 28px; opacity: 0.5; }
+
+/* Fetching progress bar */
+.cs-fetching-bar {
+  height: 2px;
+  background: var(--color-primary-100, #e0f2fe);
+  overflow: hidden;
+  border-radius: 1px;
+}
+.cs-fetching-progress {
+  height: 100%;
+  width: 30%;
+  background: var(--color-primary-500, #3b82f6);
+  border-radius: 1px;
+  animation: cs-progress-slide 1s ease-in-out infinite;
+}
+@keyframes cs-progress-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
 
 /* Autocomplete */
 .cs-autocomplete-dropdown {

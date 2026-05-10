@@ -158,6 +158,10 @@ class OrderSyncConfig(Base):
     updated_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id'), comment='更新人ID')
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
 
+    __table_args__ = (
+        Index('idx_order_sync_config_updated_by', 'updated_by_id'),
+    )
+
     def to_dict(self):
         return {
             'id': self.id,

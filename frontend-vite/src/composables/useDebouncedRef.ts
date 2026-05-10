@@ -1,4 +1,4 @@
-import { ref, watch } from 'vue'
+import { ref, watch, onUnmounted } from 'vue'
 
 /**
  * 防抖 ref composable
@@ -20,6 +20,10 @@ export function useDebouncedRef<T>(source: { value: T }, delay = 300) {
       }, delay)
     },
   )
+
+  onUnmounted(() => {
+    if (timer) clearTimeout(timer)
+  })
 
   return debounced
 }

@@ -41,6 +41,7 @@ class StockReturn(Base):
 
     __table_args__ = (
         Index('idx_stockreturn_stockout', 'stockout_id'),
+        Index('idx_stockreturn_order', 'order_id'),
         Index('idx_stockreturn_product_date', 'product_id', 'return_date'),
         Index('idx_stockreturn_customer_date', 'customer', 'return_date'),
     )

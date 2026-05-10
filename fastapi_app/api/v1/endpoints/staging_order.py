@@ -25,15 +25,17 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 @router.get('', response_model=StagingListResponse, summary='获取暂存订单列表')
-async def get_staging_orders(session_id: str=Query('default', description='会话ID'), db: AsyncSession=Depends(get_async_read_db), current_user: User=Depends(require_permission('batch_import'))):
+async def get_staging_orders(session_id: str=Query('default', description='会话ID'), page: int=Query(1, ge=1, description='页码'), per_page: int=Query(100, ge=1, le=500, description='每页数量'), db: AsyncSession=Depends(get_async_read_db), current_user: User=Depends(require_permission('batch_import'))):
     """获取指定会话的暂存订单列表"""
-    data = await svc.get_staging_orders(db, session_id)
-    return StagingListResponse(success=True, data=data, total=len(data))
+    scoped_session = f'u{current_user.id}:{session_id}'
+    data = await svc.get_staging_orders(db, scoped_session, page=page, per_page=per_page)
+    return StagingListResponse(success=True, data=data.get('items', []), total=data.get('total', 0))
 
 @router.delete('/clear-session/{session_id}', response_model=StagingClearResponse, summary='清空指定会话的暂存订单')
 async def clear_staging_orders_by_session(session_id: str, db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_permission('batch_import'))):
     """清空指定批次的暂存订单"""
-    deleted = await svc.clear_staging_orders_by_session(db, session_id)
+    scoped_session = f'u{current_user.id}:{session_id}'
+    deleted = await svc.clear_staging_orders_by_session(db, scoped_session)
     return StagingClearResponse(success=True, message=f'已清空 {deleted} 个暂存订单', deleted=deleted)
 
 @router.post('/import', response_model=StagingOrderImportResult, summary='导入订单到暂存区')
@@ -42,7 +44,12 @@ async def import_staging_orders(file: UploadFile=File(...), session_id: str=Quer
     if not file.filename or not file.filename.endswith('.xlsx'):
         return StagingOrderImportResult(success=False, message='只支持 .xlsx 格式，.xls 已不再支持')
     content = await file.read()
-    imported, message, errors = await svc.import_staging_orders_from_excel(db, content, session_id)
+    if len(content) > 10 * 1024 * 1024:
+        return StagingOrderImportResult(success=False, message='文件大小超过10MB限制')
+    if not content[:4] == b'\x50\x4b\x03\x04':
+        return StagingOrderImportResult(success=False, message='文件内容不是有效的Excel格式')
+    scoped_session = f'u{current_user.id}:{session_id}'
+    imported, message, errors = await svc.import_staging_orders_from_excel(db, content, scoped_session)
     return StagingOrderImportResult(success=imported > 0 or len(errors) == 0, message=message, imported=imported, session_id=session_id, errors=errors)
 
 @router.put('/{order_id}', response_model=StagingResponse, summary='更新暂存订单')
@@ -57,7 +64,8 @@ async def update_staging_order(order_id: int, data: StagingOrderUpdate, db: Asyn
 @router.delete('/clear', response_model=StagingResponse, summary='清空当前会话的暂存订单')
 async def clear_staging_orders(session_id: str=Query('default', description='会话ID'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_permission('batch_import'))):
     """清空当前会话的暂存订单"""
-    await svc.clear_staging_orders(db, session_id)
+    scoped_session = f'u{current_user.id}:{session_id}'
+    await svc.clear_staging_orders(db, scoped_session)
     return StagingResponse(success=True, message='清空成功')
 
 @router.delete('/{order_id}', response_model=StagingResponse, summary='删除暂存订单')
@@ -72,7 +80,8 @@ async def delete_staging_order(order_id: int, db: AsyncSession=Depends(get_async
 @router.post('/confirm', response_model=StagingOrderConfirmResult, summary='确认暂存订单')
 async def confirm_staging_orders(session_id: str=Query('default', description='会话ID'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_permission('batch_import'))):
     """确认暂存订单 - 转移到正式订单表"""
-    confirmed, errors = await svc.confirm_staging_orders(db, session_id)
+    scoped_session = f'u{current_user.id}:{session_id}'
+    confirmed, errors = await svc.confirm_staging_orders(db, scoped_session)
     if confirmed == 0 and errors:
         return StagingOrderConfirmResult(success=False, message=errors[0], confirmed=0, errors=errors)
     return StagingOrderConfirmResult(success=True, message=f'成功确认 {confirmed} 个订单', confirmed=confirmed, errors=errors)

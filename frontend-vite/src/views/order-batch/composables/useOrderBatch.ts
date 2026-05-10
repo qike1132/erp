@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, ref, watch, onScopeDispose } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { orderBatchApi } from '@/api'
 import type { OrderBatchItem } from '@/types'
@@ -12,6 +12,17 @@ export function useOrderBatch() {
   const customerFilter = ref('')
   const statusFilter = ref('')
   const keywordSearch = ref('')
+  const debouncedKeyword = ref('')
+
+  let _debounceTimer: ReturnType<typeof setTimeout> | null = null
+  watch(keywordSearch, (v) => {
+    if (_debounceTimer) clearTimeout(_debounceTimer)
+    if (!v) { debouncedKeyword.value = v; return }
+    _debounceTimer = setTimeout(() => { debouncedKeyword.value = v }, 300)
+  })
+  onScopeDispose(() => {
+    if (_debounceTimer) clearTimeout(_debounceTimer)
+  })
 
   const selectedIds = ref<number[]>([])
   const editingId = ref<number | null>(null)
@@ -23,7 +34,7 @@ export function useOrderBatch() {
     batch_no: batchNoFilter.value || undefined,
     customer: customerFilter.value || undefined,
     status: statusFilter.value || undefined,
-    keyword: keywordSearch.value || undefined,
+    keyword: debouncedKeyword.value || undefined,
   }))
 
   const { data, isLoading, refetch } = useQuery({

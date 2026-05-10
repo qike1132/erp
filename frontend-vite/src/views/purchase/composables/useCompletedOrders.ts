@@ -12,6 +12,7 @@ interface QuickFilter {
 export function useCompletedOrders() {
   const orders = ref<PurchaseOrder[]>([])
   const loading = ref(false)
+  const fetching = ref(false)
   const page = ref(1)
   const total = ref(0)
   const totalPages = ref(1)
@@ -30,9 +31,15 @@ export function useCompletedOrders() {
   const quickFilters = ref<QuickFilter[]>([])
   const currentQuickFilterId = ref<string | null>(null)
   const filterExpanded = ref(false)
+  let loadController: AbortController | null = null
 
   async function load() {
-    loading.value = true
+    const isInitial = orders.value.length === 0
+    if (isInitial) loading.value = true
+    else fetching.value = true
+    loadController?.abort()
+    loadController = new AbortController()
+    const signal = loadController.signal
     try {
       const params: Record<string, string | number> = { page: page.value, per_page: 20 }
       if (filters.order_no) params.order_no = filters.order_no
@@ -44,14 +51,19 @@ export function useCompletedOrders() {
       if (filters.start_date) params.start_date = filters.start_date
       if (filters.end_date) params.end_date = filters.end_date
       const res = await purchaseApi.completed(params)
+      if (signal.aborted) return
       orders.value = res.orders || []
       total.value = res.total || 0
       totalPages.value = res.total_pages || res.pages || 1
     } catch (err: any) {
+      if (signal.aborted) return
       orders.value = []
       showToast(err.response?.data?.detail || '加载已完成订单失败', 'error')
     } finally {
-      loading.value = false
+      if (!signal.aborted) {
+        loading.value = false
+        fetching.value = false
+      }
     }
   }
 
@@ -131,6 +143,7 @@ export function useCompletedOrders() {
   return reactive({
     orders,
     loading,
+    fetching,
     page,
     total,
     totalPages,

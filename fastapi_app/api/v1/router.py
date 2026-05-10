@@ -14,6 +14,7 @@ from fastapi_app.api.v1.endpoints.case_endpoint import router as case_router
 from fastapi_app.api.v1.endpoints.customer import router as customer_router
 from fastapi_app.api.v1.endpoints.daily_production import router as daily_production_router
 from fastapi_app.api.v1.endpoints.dashboard import router as dashboard_router
+from fastapi_app.api.v1.endpoints.device_token import router as device_token_router
 from fastapi_app.api.v1.endpoints.material_registration import router as material_reg_router
 from fastapi_app.api.v1.endpoints.monitoring import router as monitoring_router
 from fastapi_app.api.v1.endpoints.ocr_import import router as ocr_import_router
@@ -209,6 +210,13 @@ api_router.include_router(
     dashboard_router,
     prefix="/dashboard",
     tags=["仪表盘"],
+)
+
+# 设备令牌注册路由 - 前缀 /api/v1/device
+api_router.include_router(
+    device_token_router,
+    prefix="/device",
+    tags=["设备管理"],
 )
 
 # 权限管理路由 - 前缀 /api/v1/permissions

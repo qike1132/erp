@@ -12,7 +12,7 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -343,14 +343,25 @@ def _order_extra_updates(entity, data: dict, _db: AsyncSession) -> None:
 
 # ==================== 暂存订单服务 ====================
 
-async def get_staging_orders(db: AsyncSession, session_id: str) -> list[dict]:
+async def get_staging_orders(db: AsyncSession, session_id: str, page: int = 1, per_page: int = 100) -> dict:
+    """获取暂存订单列表（支持分页）"""
+    base_query = select(StagingOrder).where(
+        StagingOrder.session_id == session_id, StagingOrder.status == 'pending'
+    )
+    # 总数
+    count_result = await db.execute(
+        select(func.count(StagingOrder.id)).where(
+            StagingOrder.session_id == session_id, StagingOrder.status == 'pending'
+        )
+    )
+    total = count_result.scalar() or 0
+    # 分页查询
     result = await db.execute(
-        select(StagingOrder)
-        .where(StagingOrder.session_id == session_id, StagingOrder.status == 'pending')
-        .order_by(StagingOrder.created_at.desc())
+        base_query.order_by(StagingOrder.created_at.desc())
+        .offset((page - 1) * per_page).limit(per_page)
     )
     orders = result.scalars().all()
-    return [order.to_dict() for order in orders]
+    return {'items': [order.to_dict() for order in orders], 'total': total, 'page': page, 'per_page': per_page}
 
 
 async def clear_staging_orders_by_session(db: AsyncSession, session_id: str) -> int:
@@ -404,45 +415,41 @@ async def confirm_staging_orders(
     try:
         for staging in staging_orders:
             try:
-                if staging.quantity <= 0 or staging.quantity > 9999999:
-                    errors.append(f'订单{staging.customer}-{staging.product_name}数量无效: {staging.quantity}')
-                    staging.status = 'rejected'
-                    continue
+                async with db.begin_nested():
+                    if staging.quantity <= 0 or staging.quantity > 9999999:
+                        raise ValueError(f'订单{staging.customer}-{staging.product_name}数量无效: {staging.quantity}')
 
-                order_no = await generate_order_number(db)
+                    order_no = await generate_order_number(db)
 
-                order = Order(
-                    order_no=order_no,
-                    customer=staging.customer,
-                    order_date=staging.order_date or datetime.now(),
-                    product_id=staging.product_id,
-                    quantity=staging.quantity,
-                    note=staging.note,
-                    status='待备货',
-                    order_type=staging.order_type or 'regular',
-                    country=staging.country if staging.order_type == 'custom' else None,
-                )
-                db.add(order)
-                await db.flush()
+                    order = Order(
+                        order_no=order_no,
+                        customer=staging.customer,
+                        order_date=staging.order_date or datetime.now(),
+                        product_id=staging.product_id,
+                        quantity=staging.quantity,
+                        note=staging.note,
+                        status='待备货',
+                        order_type=staging.order_type or 'regular',
+                        country=staging.country if staging.order_type == 'custom' else None,
+                    )
+                    db.add(order)
+                    await db.flush()
 
-                product = await get_product_for_update(db, staging.product_id)
-                if not product:
-                    errors.append(f'订单{staging.customer}-{staging.product_name}产品不存在(ID:{staging.product_id})')
-                    staging.status = 'rejected'
-                    continue
-                product.current_stock += staging.quantity
+                    product = await get_product_for_update(db, staging.product_id)
+                    if not product:
+                        raise ValueError(f'订单{staging.customer}-{staging.product_name}产品不存在(ID:{staging.product_id})')
+                    product.current_stock += staging.quantity
 
-                log = InventoryLog(
-                    product_id=staging.product_id,
-                    change_type='订单',
-                    change_quantity=staging.quantity,
-                    related_id=order_no,
-                    note=f'批量导入订单：{order_no}',
-                )
-                db.add(log)
+                    log = InventoryLog(
+                        product_id=staging.product_id,
+                        change_type='订单',
+                        change_quantity=staging.quantity,
+                        related_id=order_no,
+                        note=f'批量导入订单：{order_no}',
+                    )
+                    db.add(log)
 
-                if staging.deduct_stock and staging.deduct_quantity and staging.deduct_quantity > 0:
-                    try:
+                    if staging.deduct_stock and staging.deduct_quantity and staging.deduct_quantity > 0:
                         await process_order_deduction(
                             db, order,
                             staging.product_id,
@@ -451,13 +458,9 @@ async def confirm_staging_orders(
                             custom_deduct_quantity=staging.deduct_quantity,
                             product=product,
                         )
-                    except (ValueError, TypeError, OSError) as ded_err:
-                        errors.append(
-                            f'订单{staging.customer}-{staging.product_name}抵扣处理失败: {str(ded_err)}'
-                        )
 
-                staging.status = 'approved'
-                confirmed += 1
+                    staging.status = 'approved'
+                    confirmed += 1
 
             except (ValueError, TypeError, OSError) as e:
                 errors.append(f'订单{staging.customer}-{staging.product_name}确认失败: {str(e)}')
@@ -562,41 +565,40 @@ async def confirm_staging_stockins(
 
     for staging in staging_stockins:
         try:
-            if staging.quantity <= 0:
-                errors.append(f'备货{staging.customer}-{staging.product_name}数量无效: {staging.quantity}')
-                staging.status = 'rejected'
-                continue
+            async with db.begin_nested():
+                if staging.quantity <= 0:
+                    errors.append(f'备货{staging.customer}-{staging.product_name}数量无效: {staging.quantity}')
+                    staging.status = 'rejected'
+                    continue
 
-            stockin_no = await generate_stockin_number(db)
+                stockin_no = await generate_stockin_number(db)
 
-            stockin = StockIn(
-                stockin_no=stockin_no,
-                stockin_date=staging.stockin_date or datetime.now(),
-                customer=staging.customer,
-                product_id=staging.product_id,
-                quantity=staging.quantity,
-                note=staging.note,
-            )
-            db.add(stockin)
+                stockin = StockIn(
+                    stockin_no=stockin_no,
+                    stockin_date=staging.stockin_date or datetime.now(),
+                    customer=staging.customer,
+                    product_id=staging.product_id,
+                    quantity=staging.quantity,
+                    note=staging.note,
+                )
+                db.add(stockin)
 
-            product = await get_product_for_update(db, staging.product_id)
-            if not product:
-                errors.append(f'备货{staging.customer}-{staging.product_name}产品不存在(ID:{staging.product_id})')
-                staging.status = 'rejected'
-                continue
-            product.current_stock += staging.quantity
+                product = await get_product_for_update(db, staging.product_id)
+                if not product:
+                    raise ValueError(f'备货{staging.customer}-{staging.product_name}产品不存在(ID:{staging.product_id})')
+                product.current_stock += staging.quantity
 
-            log = InventoryLog(
-                product_id=staging.product_id,
-                change_type='备货',
-                change_quantity=staging.quantity,
-                related_id=stockin_no,
-                note=f'批量导入备货：{stockin_no}',
-            )
-            db.add(log)
+                log = InventoryLog(
+                    product_id=staging.product_id,
+                    change_type='备货',
+                    change_quantity=staging.quantity,
+                    related_id=stockin_no,
+                    note=f'批量导入备货：{stockin_no}',
+                )
+                db.add(log)
 
-            staging.status = 'approved'
-            confirmed += 1
+                staging.status = 'approved'
+                confirmed += 1
 
         except (ValueError, TypeError, OSError) as e:
             errors.append(f'备货{staging.customer}-{staging.product_name}确认失败: {str(e)}')
@@ -695,83 +697,92 @@ async def confirm_staging_stockouts(
 
     confirmed = 0
     errors: list[str] = []
+    completed_orders: list[dict] = []
+
+    from fastapi_app.services.order_service import compute_order_status_from_db
 
     for staging in staging_stockouts:
         try:
-            if not staging.customer:
-                errors.append(f'出货{staging.product_name}确认失败: 必须选择客户，需要有订单支持')
-                staging.status = 'rejected'
-                continue
+            async with db.begin_nested():
+                if not staging.customer:
+                    raise ValueError(f'出货{staging.product_name}确认失败: 必须选择客户，需要有订单支持')
 
-            product = await get_product_for_update(db, staging.product_id)
-            if not product:
-                errors.append(f'出货{staging.customer}-{staging.product_name}确认失败: 产品不存在')
-                staging.status = 'rejected'
-                continue
+                product = await get_product_for_update(db, staging.product_id)
+                if not product:
+                    raise ValueError(f'出货{staging.customer}-{staging.product_name}确认失败: 产品不存在')
 
-            if product.current_stock < staging.quantity:
-                errors.append(f'出货{staging.customer}-{staging.product_name}确认失败: 库存不足')
-                staging.status = 'rejected'
-                continue
+                if product.current_stock < staging.quantity:
+                    raise ValueError(f'出货{staging.customer}-{staging.product_name}确认失败: 库存不足')
 
-            shipment_info = await calculate_available_shipment_quantity(
-                db, staging.product_id, staging.customer,
-                order_type=staging.order_type or 'regular',
-                country=staging.country or None
-            )
-            if shipment_info['available_quantity'] <= 0:
-                errors.append(f'出货{staging.customer}-{staging.product_name}确认失败: 没有可用的订单支持出货')
-                staging.status = 'rejected'
-                continue
-
-            if staging.quantity > shipment_info['available_quantity']:
-                errors.append(
-                    f'出货{staging.customer}-{staging.product_name}确认失败: '
-                    f'出货数量{staging.quantity}超过可出货量{shipment_info["available_quantity"]}'
+                shipment_info = await calculate_available_shipment_quantity(
+                    db, staging.product_id, staging.customer,
+                    order_type=staging.order_type or 'regular',
+                    country=staging.country or None
                 )
-                staging.status = 'rejected'
-                continue
+                if shipment_info['available_quantity'] <= 0:
+                    raise ValueError(f'出货{staging.customer}-{staging.product_name}确认失败: 没有可用的订单支持出货')
 
-            remaining_qty = staging.quantity
-            affected_order_ids: set[int] = set()
-            for order_detail in shipment_info['orders']:
-                if remaining_qty <= 0:
-                    break
-                if order_detail['available'] > 0:
-                    ship_qty = min(remaining_qty, order_detail['available'])
-                    stockout_no = await generate_stockout_number(db)
-                    stockout = StockOut(
-                        stockout_no=stockout_no,
-                        stockout_date=staging.stockout_date or datetime.now(),
-                        product_id=staging.product_id,
-                        quantity=ship_qty,
-                        customer=staging.customer,
-                        order_id=order_detail['order_id'],
-                        note=staging.note,
+                if staging.quantity > shipment_info['available_quantity']:
+                    raise ValueError(
+                        f'出货{staging.customer}-{staging.product_name}确认失败: '
+                        f'出货数量{staging.quantity}超过可出货量{shipment_info["available_quantity"]}'
                     )
-                    db.add(stockout)
-                    affected_order_ids.add(order_detail['order_id'])
-                    remaining_qty -= ship_qty
 
-            product.current_stock -= staging.quantity
+                remaining_qty = staging.quantity
+                affected_order_ids: set[int] = set()
+                for order_detail in shipment_info['orders']:
+                    if remaining_qty <= 0:
+                        break
+                    if order_detail['available'] > 0:
+                        ship_qty = min(remaining_qty, order_detail['available'])
+                        stockout_no = await generate_stockout_number(db)
+                        stockout = StockOut(
+                            stockout_no=stockout_no,
+                            stockout_date=staging.stockout_date or datetime.now(),
+                            product_id=staging.product_id,
+                            quantity=ship_qty,
+                            customer=staging.customer,
+                            order_id=order_detail['order_id'],
+                            note=staging.note,
+                        )
+                        db.add(stockout)
+                        affected_order_ids.add(order_detail['order_id'])
+                        remaining_qty -= ship_qty
 
-            for oid in affected_order_ids:
-                order = await db.get(Order, oid)
-                if order:
-                    from fastapi_app.services.order_service import compute_order_status_from_db
-                    order.status = await compute_order_status_from_db(db, order)
+                product.current_stock -= staging.quantity
 
-            log = InventoryLog(
-                product_id=staging.product_id,
-                change_type='出库',
-                change_quantity=-staging.quantity,
-                related_id='',
-                note=f'批量导入出货：客户{staging.customer}，数量{staging.quantity}',
-            )
-            db.add(log)
+                # 批量查询受影响的订单，避免N+1
+                if affected_order_ids:
+                    order_result = await db.execute(
+                        select(Order).where(Order.id.in_(affected_order_ids))
+                    )
+                    order_map = {o.id: o for o in order_result.scalars().all()}
+                else:
+                    order_map = {}
 
-            staging.status = 'approved'
-            confirmed += 1
+                for oid in affected_order_ids:
+                    order = order_map.get(oid)
+                    if order:
+                        old_status = order.status
+                        order.status = await compute_order_status_from_db(db, order)
+                        if order.status == '已出货' and old_status != '已出货':
+                            completed_orders.append({
+                                'order_id': order.id,
+                                'order_no': order.order_no,
+                                'customer': order.customer,
+                            })
+
+                log = InventoryLog(
+                    product_id=staging.product_id,
+                    change_type='出库',
+                    change_quantity=-staging.quantity,
+                    related_id='',
+                    note=f'批量导入出货：客户{staging.customer}，数量{staging.quantity}',
+                )
+                db.add(log)
+
+                staging.status = 'approved'
+                confirmed += 1
 
         except (ValueError, TypeError, OSError) as e:
             errors.append(f'出货{staging.customer}-{staging.product_name}确认失败: {str(e)}')
@@ -784,6 +795,19 @@ async def confirm_staging_stockouts(
         )
     )
     await db.commit()
+
+    # 发送出货完成事件
+    if completed_orders:
+        from fastapi_app.services.notification_service import publish_event_with_fcm, StockEvent
+        for co in completed_orders:
+            try:
+                await publish_event_with_fcm(
+                    StockEvent.SHIPMENT_COMPLETED, co,
+                    fcm_title="出货完成",
+                    fcm_body=f"订单 {co['order_no']} 已完成出货",
+                )
+            except Exception as e:
+                logger.warning("出货完成事件发布失败: %s", e)
 
     return confirmed, errors
 

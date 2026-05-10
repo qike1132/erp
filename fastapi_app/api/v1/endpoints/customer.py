@@ -48,7 +48,7 @@ async def search_customers(q: str=Query('', description='搜索关键词'), user
     return [_customer_to_resp(c) for c in customers]
 
 @router.get('/active-names')
-async def active_names(db: AsyncSession = Depends(get_async_read_db)):
+async def active_names(user: User=Depends(require_permission('customer_manage')), db: AsyncSession = Depends(get_async_read_db)):
     """获取所有启用客户名称列表（用于下拉选择）"""
     return await customer_service.get_active_customer_names(db)
 

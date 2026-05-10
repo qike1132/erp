@@ -6,7 +6,6 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,7 +22,7 @@ from fastapi_app.schemas.order import (
     OrderListResponse,
     OrderUpdate,
 )
-from fastapi_app.services import order_service
+from fastapi_app.services import order_batch_service, order_service
 from fastapi_app.services.order_service import PermissionDeniedError
 from fastapi_app.shared_models import Order, User
 
@@ -126,7 +125,8 @@ async def delete_order(
         raise HTTPException(status_code=400, detail=str(e)) from e
     except IntegrityError as e:
         await db.rollback()
-        raise HTTPException(status_code=409, detail=f'订单存在关联数据，无法删除：{e}') from e
+        logger.warning("删除订单完整性约束冲突: %s", e)
+        raise HTTPException(status_code=409, detail='订单存在关联数据，无法删除') from e
     except PermissionDeniedError as e:
         raise HTTPException(status_code=403, detail=settings.sanitize_business_error(e)) from e
     except (SQLAlchemyError, OSError) as e:
@@ -170,11 +170,12 @@ async def update_batch_no(
     user: User = Depends(require_permission("order_manage")),
 ):
     """更新订单批次号"""
-    result = await db.execute(select(Order).where(Order.id == order_id).with_for_update())
-    order = result.scalar_one_or_none()
-    if not order:
-        raise HTTPException(status_code=404, detail="订单不存在")
-    order.batch_no = batch_no
-    await db.commit()
-    await invalidate_related_caches(CacheDomain.ORDER)
-    return {"success": True, "message": "批次号已更新"}
+    try:
+        await order_batch_service.update_batch_no(
+            db, order_id=order_id, batch_no=batch_no,
+            sync_same_batch=False, user=user,
+        )
+        await invalidate_related_caches(CacheDomain.ORDER)
+        return {"success": True, "message": "批次号已更新"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e

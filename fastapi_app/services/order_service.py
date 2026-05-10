@@ -8,12 +8,12 @@ import json
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload, selectinload
+from sqlalchemy.orm import joinedload
 
 from fastapi_app.core.cache import CacheDomain, cache_result, invalidate_related_caches
-from fastapi_app.services.enhanced_pagination import optimized_count
+from fastapi_app.services.enhanced_pagination import OFFSET_THRESHOLD, optimized_count
 from fastapi_app.core.state_machine import can_transition
 from fastapi_app.services import escape_like
 from fastapi_app.services.notification_service import StockEvent
@@ -34,22 +34,15 @@ logger = logging.getLogger(__name__)
 
 async def compute_order_status_from_db(db: AsyncSession, order: Order) -> str:
     """从数据库查询订单关联的出入库记录，派生计算订单状态"""
+    # 复用 _batch_deduct_quantities 获取抵扣备货量（与列表展示逻辑一致）
+    deduct_map = await _batch_deduct_quantities(db, [order.id])
+    deducted_qty = max(0, deduct_map.get(order.id, 0))
+    # 单独查询独立出货量（stockin_id IS NULL 的出库记录）
     result = await db.execute(
-        select(StockOut.stockin_id, func.sum(StockOut.quantity - StockOut.returned_quantity))
-        .where(StockOut.order_id == order.id)
-        .group_by(StockOut.stockin_id)
+        select(func.coalesce(func.sum(StockOut.quantity - StockOut.returned_quantity), 0))
+        .where(StockOut.order_id == order.id, StockOut.stockin_id.is_(None))
     )
-    deducted_qty = 0
-    shipped_qty = 0
-    for stockin_id, qty in result:
-        if qty is None:
-            continue
-        if stockin_id is not None:
-            deducted_qty += int(qty)
-        else:
-            shipped_qty += int(qty)
-    deducted_qty = max(0, deducted_qty)
-    shipped_qty = max(0, shipped_qty)
+    shipped_qty = max(0, int(result.scalar()))
     return compute_status_from_stockouts(order, deducted_qty, shipped_qty)
 
 
@@ -62,18 +55,25 @@ async def _safe_invalidate_purchase_cache():
         logger.warning("采购中心缓存失效失败", exc_info=True)
 
 
-async def _safe_publish_event(event_type, data: dict):
-    """安全发布库存事件，失败仅记录警告"""
+async def _safe_publish_event(event_type, data: dict, fcm_title: str = None, fcm_body: str = None):
+    """安全发布库存事件（WebSocket + FCM），失败仅记录警告"""
     try:
-        from fastapi_app.services.notification_service import publish_stock_event
-        await publish_stock_event(event_type, data)
+        from fastapi_app.services.notification_service import publish_event_with_fcm
+        await publish_event_with_fcm(event_type, data, fcm_title=fcm_title, fcm_body=fcm_body)
     except (RuntimeError, OSError, ValueError):
         logger.warning(f"事件发布失败: {event_type}", exc_info=True)
 
 
-def _calc_deduct_quantity(order) -> int:
-    """计算订单已抵扣备货数量（仅统计关联入库的出库记录）"""
-    return sum(so.quantity - so.returned_quantity for so in order.order_stockouts if so.stockin_id is not None) if order.order_stockouts else 0
+async def _batch_deduct_quantities(db: AsyncSession, order_ids: list[int]) -> dict[int, int]:
+    """批量查询订单已抵扣备货数量（单次 SQL 聚合，替代 selectinload + Python 遍历）"""
+    if not order_ids:
+        return {}
+    result = await db.execute(
+        select(StockOut.order_id, func.coalesce(func.sum(StockOut.quantity - StockOut.returned_quantity), 0))
+        .where(StockOut.order_id.in_(order_ids), StockOut.stockin_id.isnot(None))
+        .group_by(StockOut.order_id)
+    )
+    return {row[0]: int(row[1]) for row in result.all()}
 
 
 def _order_to_dict(o, deduct_quantity: int = 0) -> dict:
@@ -110,17 +110,16 @@ async def get_order_by_id(db: AsyncSession, order_id: int) -> dict | None:
 
     query = select(Order).options(
         joinedload(Order.product),
-        selectinload(Order.order_stockouts),
         joinedload(Order.locked_by)
-    ).where(Order.id == order_id, ~Order.is_deleted)
+    ).where(Order.id == order_id, Order.is_deleted.isnot(True))
 
     result = await db.execute(query)
     o = result.scalars().unique().first()
     if not o:
         return None
 
-    deduct_quantity = _calc_deduct_quantity(o)
-    return _order_to_dict(o, deduct_quantity)
+    deduct_map = await _batch_deduct_quantities(db, [o.id])
+    return _order_to_dict(o, deduct_map.get(o.id, 0))
 
 
 @cache_result(
@@ -133,13 +132,12 @@ async def get_orders(db: AsyncSession, page: int = 1, per_page: int = 50,
                      customer: str | None = None, product_id: int | None = None,
                      status: str | None = None, order_type: str | None = None) -> dict:
     """获取订单列表（含关联数据，支持分页和筛选）"""
-    # 基础查询
+    # 基础查询（移除 selectinload(order_stockouts)，改用 SQL 聚合）
     query = select(Order).options(
         joinedload(Order.product),
-        selectinload(Order.order_stockouts),
         joinedload(Order.locked_by)
-    ).where(~Order.is_deleted)
-    count_query = select(func.count(Order.id)).where(~Order.is_deleted)
+    ).where(Order.is_deleted.isnot(True))
+    count_query = select(func.count(Order.id)).where(Order.is_deleted.isnot(True))
 
     # 筛选条件（共用，避免 DRY 违反）
     conditions = []
@@ -158,18 +156,48 @@ async def get_orders(db: AsyncSession, page: int = 1, per_page: int = 50,
     # 总数 (use approximate count for large tables to avoid full scan)
     total = await optimized_count(db, count_query, table_name='order')
 
-    # 分页查询
-    result = await db.execute(
-        query.order_by(Order.order_date.desc())
-        .offset((page - 1) * per_page)
-        .limit(per_page)
-    )
-    orders = result.scalars().unique().all()
+    # 分页查询 — 深翻页自动切换 keyset 分页
+    offset = (page - 1) * per_page
+    if offset > OFFSET_THRESHOLD:
+        # 深翻页：用子查询定位游标值，避免 OFFSET 扫描跳过大量行
+        logger.debug("深翻页 offset=%d 超过阈值 %d，自动使用keyset分页", offset, OFFSET_THRESHOLD)
+        # 构造不含 eager load 的纯定位子查询（更快），使用 (order_date, id) 组合游标确保唯一性
+        cursor_base = select(Order.order_date, Order.id).where(Order.is_deleted.isnot(True))
+        for c in conditions:
+            cursor_base = cursor_base.where(c)
+        cursor_subq = cursor_base.order_by(Order.order_date.desc(), Order.id.desc()).offset(offset).limit(1).subquery()
+        # 使用组合游标 (order_date, id) 做行比较，确保相同时间戳的行也能正确定位
+        result = await db.execute(
+            query.where(tuple_(Order.order_date, Order.id) <= select(cursor_subq.c.order_date, cursor_subq.c.id))
+            .order_by(Order.order_date.desc(), Order.id.desc())
+            .limit(per_page)
+        )
+        orders = result.scalars().unique().all()
+        # fallback: 并发删除可能导致游标偏移，回退到 OFFSET
+        if not orders:
+            logger.debug("keyset分页返回空，fallback到OFFSET分页")
+            result = await db.execute(
+                query.order_by(Order.order_date.desc())
+                .offset(offset)
+                .limit(per_page)
+            )
+            orders = result.scalars().unique().all()
+    else:
+        # 常规翻页：OFFSET + LIMIT
+        result = await db.execute(
+            query.order_by(Order.order_date.desc())
+            .offset(offset)
+            .limit(per_page)
+        )
+        orders = result.scalars().unique().all()
+
+    # 单次 SQL 聚合获取所有订单的抵扣数量，替代 selectinload + Python 遍历
+    order_ids = [o.id for o in orders]
+    deduct_map = await _batch_deduct_quantities(db, order_ids)
 
     orders_data = []
     for o in orders:
-        deduct_quantity = _calc_deduct_quantity(o)
-        orders_data.append(_order_to_dict(o, deduct_quantity))
+        orders_data.append(_order_to_dict(o, deduct_map.get(o.id, 0)))
     return {'items': orders_data, 'total': total, 'page': page, 'per_page': per_page}
 
 
@@ -222,7 +250,7 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
     )
     db.add(log)
 
-    await db.commit()
+    await db.flush()
     await db.refresh(order)
     await invalidate_related_caches(CacheDomain.ORDER)
     logger.info(f'订单添加成功：{order_no}，客户：{customer}，产品：{product.name}，数量：{quantity}')
@@ -236,7 +264,7 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
             'customer': customer,
             'product_name': product.name,
             'quantity': quantity,
-        })
+        }, fcm_title="新订单已创建", fcm_body=f"订单 {order_no}，客户：{customer}，数量：{quantity}")
 
     return order.to_dict()
 
@@ -293,7 +321,7 @@ async def _update_order_directly(
         )
         db.add(log)
 
-    await db.commit()
+    await db.flush()
     await invalidate_related_caches(CacheDomain.ORDER)
 
     await _safe_invalidate_purchase_cache()
@@ -305,7 +333,7 @@ async def _update_order_directly(
         'order_no': order.order_no,
         'customer': customer,
         'quantity': quantity,
-    })
+    }, fcm_title="订单已更新", fcm_body=f"订单 {order.order_no} 信息已更新")
 
     return {'success': True, 'message': '订单编辑成功！', 'requires_approval': False}
 
@@ -314,6 +342,11 @@ async def _submit_edit_approval(
     db: AsyncSession, order: Order, order_id: int,
     quantity: int, customer: str, note: str, current_user: User,
 ) -> dict:
+    if not customer or not customer.strip():
+        raise ValueError('客户名称不能为空')
+    if quantity is not None and (quantity <= 0 or quantity > 9999999):
+        raise ValueError('订单数量必须在1-9999999之间')
+
     await _ensure_no_pending_request(db, order_id, current_user, '编辑')
 
     order.is_locked = True
@@ -342,7 +375,7 @@ async def _submit_edit_approval(
 
     await _create_approval_log_obj(approval_request, ApprovalLog.ACTION_CREATE, current_user, {'operation_data': operation_data})
 
-    await db.commit()
+    await db.flush()
     await invalidate_related_caches(CacheDomain.ORDER)
     logger.info(f'订单编辑审批请求已提交：{order.order_no}，申请人：{current_user.username}')
     return {'success': True, 'message': '已提交编辑审批请求，请等待管理员审批！', 'requires_approval': True}
@@ -415,11 +448,11 @@ async def _delete_order_directly(
     await db.execute(delete(ApprovalRequest).where(ApprovalRequest.order_id == order_id))
 
     deleted_order_no = order.order_no
-    db.expire(order)
-    await db.refresh(order)
-    await db.delete(order)
+    order.is_deleted = True
+    order.deleted_at = datetime.now(UTC).replace(tzinfo=None)
+    order.deleted_by_id = current_user.id
 
-    await db.commit()
+    await db.flush()
     try:
         await invalidate_related_caches(CacheDomain.ORDER)
     except (OSError, ValueError) as e:
@@ -430,8 +463,8 @@ async def _delete_order_directly(
     task = asyncio.create_task(_safe_publish_event(StockEvent.ORDER_DELETED, {
         'order_id': order_id,
         'order_no': deleted_order_no,
-    }))
-    task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+    }, fcm_title="订单已删除", fcm_body=f"订单 {deleted_order_no} 已被删除"))
+    task.add_done_callback(lambda t: t.exception() and logger.error(f'订单删除事件发布失败: {t.exception()}') if not t.cancelled() and t.exception() else None)
 
     logger.info(f'订单删除成功：{deleted_order_no}，操作人：{current_user.username}，抵扣回滚：{total_deducted}')
     return {'success': True, 'message': f'订单删除成功！抵扣回滚数量：{total_deducted}', 'requires_approval': False}
@@ -467,7 +500,7 @@ async def _submit_delete_approval(
 
     await _create_approval_log_obj(approval_request, ApprovalLog.ACTION_CREATE, current_user, {'operation_data': operation_data})
 
-    await db.commit()
+    await db.flush()
     await invalidate_related_caches(CacheDomain.ORDER)
     logger.info(f'订单删除审批请求已提交：{order.order_no}，申请人：{current_user.username}')
     return {'success': True, 'message': '已提交删除审批请求，请等待管理员审批！', 'requires_approval': True}
@@ -494,7 +527,7 @@ async def cancel_approval(db: AsyncSession, approval_id: int, current_user: User
 
     await _create_approval_log_obj(approval_request, ApprovalLog.ACTION_CANCEL, current_user, {'reason': '用户主动取消'})
 
-    await db.commit()
+    await db.flush()
 
 
 async def get_my_approvals(db: AsyncSession, current_user: User) -> list[dict]:
@@ -574,18 +607,32 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
     for order_data in orders_data:
         try:
             async with db.begin_nested():
-                product_id = order_data.get('product_id')
-                customer = order_data.get('customer', '')
-                quantity = order_data.get('quantity', 0)
+                try:
+                    product_id = int(order_data['product_id'])
+                except (TypeError, ValueError, KeyError):
+                    results.append({
+                        'success': False, 'error': '无效的产品ID',
+                        'order_no': order_data.get('order_no', '未知')
+                    })
+                    raise _SavepointRollbackSignal()
+                try:
+                    quantity = int(order_data.get('quantity', 0))
+                except (TypeError, ValueError):
+                    results.append({
+                        'success': False, 'error': '无效的订单数量',
+                        'order_no': order_data.get('order_no', '未知')
+                    })
+                    raise _SavepointRollbackSignal()
+                customer = str(order_data.get('customer', '')).strip()
 
-                if not all([product_id, customer, quantity]):
+                if not product_id or not customer or quantity <= 0:
                     results.append({
                         'success': False, 'error': '缺少必填字段',
                         'order_no': order_data.get('order_no', '未知')
                     })
                     raise _SavepointRollbackSignal()
 
-                if int(quantity) <= 0 or int(quantity) > 9999999:
+                if quantity > 9999999:
                     results.append({
                         'success': False, 'error': '订单数量必须在1-9999999之间',
                         'order_no': order_data.get('order_no', '未知')

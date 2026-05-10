@@ -15,6 +15,7 @@ from decimal import Decimal
 from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from fastapi_app.services import escape_like
 from fastapi_app.shared_models import (
@@ -818,9 +819,9 @@ async def get_factory_order_summary(
         return {'groups': [], 'order_count': 0}
 
     result = await db.execute(
-        select(PurchaseOrder).where(PurchaseOrder.id.in_(order_ids))
+        select(PurchaseOrder).options(selectinload(PurchaseOrder.items)).where(PurchaseOrder.id.in_(order_ids))
     )
-    orders = result.scalars().all()
+    orders = result.scalars().unique().all()
 
     # 按 (customer_name, product_name) 分组
     group_map: dict[tuple, dict] = {}

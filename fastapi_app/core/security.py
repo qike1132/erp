@@ -130,7 +130,7 @@ def verify_password(password: str, password_hash: str) -> bool:
     if password_hash.startswith(("pbkdf2:", "scrypt:")):
         return _verify_werkzeug(password, password_hash)
 
-    logger.warning(f"未知的密码哈希格式: {password_hash[:20]}...")
+    logger.warning("未知的密码哈希格式 (前缀不匹配已知算法)")
     return False
 
 

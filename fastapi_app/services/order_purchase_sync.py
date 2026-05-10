@@ -154,22 +154,29 @@ async def sync_order_update(
     result = await db.execute(
         select(PurchaseOrder).where(PurchaseOrder.source_order_id == order_id)
     )
+    purchase_orders = list(result.scalars())
+    if not purchase_orders:
+        return None
+
+    # 批量查询所有采购订单的明细，避免N+1
+    po_ids = [po.id for po in purchase_orders]
+    items_result = await db.execute(
+        select(PurchaseOrderItem).where(PurchaseOrderItem.order_id.in_(po_ids))
+    )
+    items_by_order: dict[int, list[PurchaseOrderItem]] = {}
+    for item in items_result.scalars():
+        items_by_order.setdefault(item.order_id, []).append(item)
+
     updated_count = 0
-    for po in result.scalars():
+    for po in purchase_orders:
         if customer_changed:
             po.customer_name = customer
-            items_result = await db.execute(
-                select(PurchaseOrderItem).where(PurchaseOrderItem.order_id == po.id)
-            )
-            for item in items_result.scalars():
+            for item in items_by_order.get(po.id, []):
                 item.customer_name = customer
 
         if quantity_changed:
             po.product_quantity = Decimal(str(quantity))
-            items_result = await db.execute(
-                select(PurchaseOrderItem).where(PurchaseOrderItem.order_id == po.id)
-            )
-            for item in items_result.scalars():
+            for item in items_by_order.get(po.id, []):
                 if item.unit_usage and item.unit_usage > 0:
                     new_qty = item.unit_usage * Decimal(str(quantity))
                     item.quantity = new_qty

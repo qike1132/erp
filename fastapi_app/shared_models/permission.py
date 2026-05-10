@@ -5,7 +5,7 @@
 """
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
@@ -38,6 +38,10 @@ class Permission(Base):
         "Permission",
         back_populates="parent",
         foreign_keys="Permission.parent_id",
+    )
+
+    __table_args__ = (
+        Index('idx_permission_parent', 'parent_id'),
     )
 
     def __repr__(self):

@@ -105,7 +105,7 @@
 
     <!-- Results -->
     <div class="pc-results">
-      <div v-if="loading" class="pc-loading-state">
+      <div v-if="loading && orders.length === 0" class="pc-loading-state">
         <i class="fas fa-spinner fa-spin" />
         <span>加载中...</span>
       </div>
@@ -114,6 +114,7 @@
         <span>暂无已完成的订单</span>
       </div>
       <template v-else>
+        <div v-if="fetching" class="pc-fetching-bar"><div class="pc-fetching-progress" /></div>
         <div class="pc-result-info">
           共 <strong>{{ total }}</strong> 条记录
         </div>
@@ -162,10 +163,12 @@
 import { computed } from 'vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
+import type { PurchaseOrder } from '@/types'
 
 const props = defineProps<{
-  orders: any[]
+  orders: PurchaseOrder[]
   loading: boolean
+  fetching?: boolean
   total: number
   currentPage: number
   totalPages: number
@@ -482,5 +485,24 @@ const basicFields = [
 
 .pc-loading-state i {
   font-size: 20px;
+}
+
+/* Fetching progress bar */
+.pc-fetching-bar {
+  height: 2px;
+  background: var(--color-primary-100, #e0f2fe);
+  overflow: hidden;
+  border-radius: 1px;
+}
+.pc-fetching-progress {
+  height: 100%;
+  width: 30%;
+  background: var(--color-primary-500, #3b82f6);
+  border-radius: 1px;
+  animation: pc-progress-slide 1s ease-in-out infinite;
+}
+@keyframes pc-progress-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
 }
 </style>

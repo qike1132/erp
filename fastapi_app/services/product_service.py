@@ -230,7 +230,7 @@ async def delete_product(db: AsyncSession, product_id: int) -> None:
 
     # 使用 COUNT 查询检查关联，避免加载所有关联数据到内存
     order_count = (await db.execute(
-        select(func.count(Order.id)).where(Order.product_id == product_id, ~Order.is_deleted)
+        select(func.count(Order.id)).where(Order.product_id == product_id, Order.is_deleted.isnot(True))
     )).scalar() or 0
     if order_count > 0:
         raise ProductHasRelatedOrdersError(product.name, order_count)

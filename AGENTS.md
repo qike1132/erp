@@ -62,3 +62,108 @@
 - **部署策略**: Blue-Green(零停机即时回滚)、Canary(渐进+指标验证)、Rolling(顺序+健康检查)
 - **监控栈**: Prometheus+Grafana(指标)、ELK/Loki(日志)、Jaeger/OpenTelemetry(链路)
 - **成功指标**: 部署频率>1次/天、提交到上线<1小时、MTTR<30分钟、变更失败率<5%
+
+---
+
+## gstack — AI Engineering Workflow (Comate Adapted)
+
+Adapted from [garrytan/gstack](https://github.com/garrytan/gstack). Full methodology files in `.claude/gstack-*.md`.
+
+### CONFLICT RESOLUTION: Adapted Files Take Priority
+
+When a gstack skill is triggered, **two sources may exist**: the original SKILL.md (registered via Comate skill from d:\gstack) and the adapted `.claude/gstack-*.md` file. **The adapted file always takes priority.** The original SKILL.md contains Unix bash preambles and binary dependencies incompatible with Windows/Comate. Use the adapted methodology instead.
+
+If no `.claude/gstack-*.md` file exists for a skill, the original SKILL.md may be used — but skip the Preamble (bash) section entirely and go straight to the workflow/methodology content.
+
+### ALWAYS-ACTIVE RULE: Automatic Skill Routing
+
+**This rule applies to EVERY task, without exception.**
+
+Before starting ANY task, you MUST:
+1. **Match** the user's request against the routing table below
+2. **Read** the corresponding `.claude/gstack-*.md` methodology file
+3. **Follow** the methodology's steps and principles — do not improvise
+
+This is not optional. If a task matches a gstack skill, the methodology file IS the process.
+
+### Ethos
+1. **Boil the Lake** — AI makes completeness cheap. Do the complete thing, not the 90% shortcut.
+2. **Search Before Building** — Search first (Layer 1: tried-and-true, Layer 2: current trends, Layer 3: first principles).
+3. **User Sovereignty** — AI recommends. User decides. Never act on behalf of the user without asking.
+
+### Skill Routing Table
+
+| Trigger keywords / intent | Skill | Methodology file |
+|---------------------------|-------|-----------------|
+| 头脑风暴 / 值得做吗 / brainstorming / "is this worth building?" / 产品创意 | `/office-hours` | `.claude/gstack-office-hours.md` |
+| 战略审查 / 范围评估 / strategy / scope review | `/plan-ceo-review` | `.claude/gstack-plan-ceo-review.md` |
+| 架构审查 / 工程评审 / architecture / eng review | `/plan-eng-review` | `.claude/gstack-plan-eng-review.md` |
+| 设计系统 / 设计咨询 / design system / design review | `/design-consultation` | `.claude/gstack-design-consultation.md` |
+| 设计方案评分 / 设计维度审查 / design plan review / UX评分 | `/plan-design-review` | `.claude/gstack-plan-design-review.md` |
+| 开发者体验 / DX审查 / developer experience / TTHW | `/plan-devex-review` | `.claude/gstack-plan-devex-review.md` |
+| 设计变体 / 多方案对比 / show me options / design variants | `/design-shotgun` | `.claude/gstack-design-shotgun.md` |
+| 设计转HTML / 设计实现 / implement design / production HTML | `/design-html` | `.claude/gstack-design-html.md` |
+| 视觉审查 / UI审计 / visual audit / polish UI | `/design-review` | `.claude/gstack-design-review.md` |
+| DX实测 / 开发者体验审计 / devex audit / API易用性 | `/devex-review` | `.claude/gstack-devex-review.md` |
+| 全流程审查 / autoplan / full review pipeline | `/autoplan` | `.claude/gstack-autoplan.md` |
+| Bug / 调试 / 报错 / 错误 / debugging / error / broken / 不工作 | `/investigate` | `.claude/gstack-investigate.md` |
+| 代码审查 / review / diff / PR审查 / 代码质量 | `/review` | `.claude/gstack-review.md` |
+| 发布 / 部署 / 上线 / ship / deploy / PR / 推送 | `/ship` | `.claude/gstack-ship.md` |
+| 安全审计 / 安全检查 / security audit / vulnerability | `/cso` | `.claude/gstack-cso.md` |
+| 回顾 / 总结 / retro / retrospective / 周会 | `/retro` | `.claude/gstack-retro.md` |
+| 代码健康 / 健康检查 / code health / dashboard | `/health` | `.claude/gstack-health.md` |
+| 保存进度 / context save / 暂停 | `/context-save` | `.claude/gstack-context-save.md` |
+| 恢复上下文 / context restore / 继续 / where was I | `/context-restore` | `.claude/gstack-context-restore.md` |
+| 项目经验 / 学习记录 / learnings / patterns / pitfall | `/learn` | `.claude/gstack-learn.md` |
+| 小心 / 谨慎 / careful / 危险操作前警告 | `/careful` | Warn before rm -rf, DROP, force-push |
+| 冻结 / 限制目录 / freeze / lock directory | `/freeze` | Block edits outside specified directory |
+| guard / careful + freeze | `/guard` | Activate both at once |
+| 解冻 / 取消限制 / unfreeze / unlock | `/unfreeze` | Remove directory edit restrictions |
+| 合并部署 / land and deploy / merge PR / 上线验证 | `/land-and-deploy` | `.claude/gstack-land-and-deploy.md` |
+| 更新文档 / document release / 发布文档 | `/document-release` | `.claude/gstack-document-release.md` |
+| 性能基准 / benchmark / 性能回归 / Core Web Vitals | `/benchmark` | `.claude/gstack-benchmark.md` |
+
+### Routing Decision Process
+
+For each user message, apply this decision tree:
+
+```
+User message received
+  │
+  ├─ Does it contain a slash command? (e.g., /investigate, /review)
+  │   └─ YES → Read the matching methodology file, follow it
+  │
+  ├─ Does the intent match a trigger keyword in the routing table?
+  │   └─ YES → Read the matching methodology file, follow it
+  │
+  ├─ Is it a bug/error/unexpected behavior report?
+  │   └─ YES → Auto-route to /investigate
+  │
+  ├─ Is it a code change request that's ready to ship?
+  │   └─ YES → Apply /ship methodology for the release steps
+  │
+  └─ General coding task
+      └─ Apply gstack ethos (Boil the Lake, Search Before Building, User Sovereignty)
+```
+
+### Quick Reference
+- `/office-hours` → 6 forcing questions: Demand Reality → Status Quo → Desperate Specificity → Narrowest Wedge → Observation → Future-Fit
+- `/plan-design-review` → Rate 12 design dimensions 0-10 with gap method, fix toward 10
+- `/plan-devex-review` → TTHW measurement, 7 DX characteristics, friction point triage
+- `/autoplan` → Auto-run CEO → design → eng → DX, surface taste decisions at final gate
+- `/design-shotgun` → Generate 4-6 design variants, comparison board, iterate until satisfied
+- `/design-html` → Turn mockup into production HTML/CSS (mobile-first, accessible)
+- `/design-review` → Live visual audit + fix loop with atomic commits
+- `/review` → Diff analysis with BLOCKER/SUGGESTION/NIT severity, path concreteness rule
+- `/investigate` → Iron Law: no fixes without root cause. Investigate → Analyze → Hypothesize → Implement
+- `/ship` → Tests → Review → VERSION bump → CHANGELOG → Commit → Push → PR
+- `/land-and-deploy` → Merge PR → Monitor CI → Deploy → Verify production health
+- `/document-release` → Update README, CHANGELOG, API docs, migration guides after shipping
+- `/cso` → OWASP Top 10 + STRIDE, daily (8/10) or comprehensive (2/10) mode
+- `/benchmark` → Performance baseline + regression detection (API latency, bundle size, query time)
+- `/context-save` → Save git state + decisions + remaining work to checkpoint file
+- `/context-restore` → Load saved context and resume where you left off
+- `/learn` → View, search, prune, export project learnings across sessions
+- `/careful` → Warn before: rm -rf, DROP TABLE, force-push, docker system prune
+- `/freeze` → Block edits outside specified directory
+- `/guard` → Both careful + freeze at once

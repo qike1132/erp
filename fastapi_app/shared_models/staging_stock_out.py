@@ -46,6 +46,7 @@ class StagingStockOut(Base):
         Index('idx_staging_stockout_session', 'session_id'),
         Index('idx_staging_stockout_status', 'status'),
         Index('idx_staging_stockout_created', 'created_at'),
+        Index('idx_staging_stockout_product', 'product_id'),
     )
 
     def __repr__(self):

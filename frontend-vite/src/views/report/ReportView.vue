@@ -44,15 +44,17 @@
 
       <!-- 表格 -->
       <div class="rp-table-wrap">
-        <div v-if="isLoading && searched" class="rp-empty">
+        <div v-if="isLoading && searched && !logs.length" class="rp-empty">
           <i class="fas fa-spinner fa-spin" />
           <span>加载中...</span>
         </div>
         <div v-else-if="!logs.length" class="rp-empty">
           <i class="fas fa-chart-line" />
-          <span>{{ isLoading ? '加载中...' : '暂无数据' }}</span>
+          <span>{{ isFetching ? '加载中...' : '暂无数据' }}</span>
         </div>
-        <table v-else class="rp-table">
+        <template v-else>
+        <div v-if="isFetching" class="rp-fetching-bar"><div class="rp-fetching-progress" /></div>
+        <table class="rp-table">
           <thead>
             <tr>
               <th>{{ currentCfg.dateLabel }}</th>
@@ -75,6 +77,7 @@
 
         <!-- 分页 -->
         <UiPagination v-if="pagination && pagination.pages > 1" :current-page="page" :total-pages="pagination.pages" :total-items="pagination.total" @update:current-page="handlePageChange" />
+        </template>
       </div>
     </div>
   </div>
@@ -82,7 +85,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed } from 'vue'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery, keepPreviousData } from '@tanstack/vue-query'
 import { reportApi, customerApi } from '@/api'
 import UiSelect from '@/components/ui/UiSelect.vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
@@ -167,7 +170,7 @@ const customerOptions = computed(() =>
 )
 
 // 报表数据
-const { data: reportData, isLoading } = useQuery({
+const { data: reportData, isLoading, isFetching } = useQuery({
   queryKey: ['report-data', activeTab, page, filters],
   queryFn: async () => {
     const params: Record<string, any> = { page: page.value, per_page: 15 }
@@ -180,6 +183,7 @@ const { data: reportData, isLoading } = useQuery({
   },
   enabled: searched,
   staleTime: 30_000,
+  placeholderData: keepPreviousData,
 })
 
 function currentTabEndpoint(): keyof typeof reportApi {
@@ -464,4 +468,23 @@ function exportReport() {
 }
 .rp-empty i { font-size: 28px; opacity: 0.5; }
 .rp-empty span { font-size: 14px; }
+
+/* Fetching progress bar */
+.rp-fetching-bar {
+  height: 2px;
+  background: var(--color-primary-100, #e0f2fe);
+  overflow: hidden;
+  border-radius: 1px;
+}
+.rp-fetching-progress {
+  height: 100%;
+  width: 30%;
+  background: var(--color-primary-500, #3b82f6);
+  border-radius: 1px;
+  animation: rp-progress-slide 1s ease-in-out infinite;
+}
+@keyframes rp-progress-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
 </style>

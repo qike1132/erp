@@ -5,12 +5,13 @@ import type {
   NavSection, PermissionItem, StagingOrder,
   MaterialRegistration, Registration, OrderPreview, ProductionCraft, ShipmentRecord,
   InventoryItem, StockInRecord, StockOutRecord, ShipmentInfo,
-  QueryParams, OrderBatchItem, BatchNoUpdatePayload, BatchAssignPayload, BatchCompletePayload,
+  QueryParams, OrderBatchItem, BatchQueryItem, PaginatedResponse,
+  BatchNoUpdatePayload, BatchAssignPayload, BatchCompletePayload,
 } from '@/types'
 
 // ===== 认证 =====
 interface AuthMeResponse {
-  user: { user_id: number; id?: number; username: string; is_super: boolean; isSuper?: boolean; permissions: string[] }
+  user: { user_id: number; id?: number; username: string; is_super: boolean; permissions: string[] }
   user_id: number
   username: string
   is_super: boolean
@@ -147,9 +148,8 @@ export const approvalApi = {
 
 // ===== 批次 =====
 export const batchApi = {
-  list: (params?: QueryParams) =>
-    get<ProductionCraft[]>('/production-summary/craft/list', { year: new Date().getFullYear(), ...params }),
-  stats: () => get<Record<string, unknown>>('/production-summary/summary'),
+  list: (params?: Record<string, unknown>) =>
+    get<PaginatedResponse<BatchQueryItem>>('/order-batch/batch-query', params),
 }
 
 // ===== 物料 =====
@@ -239,7 +239,7 @@ export const permissionApi = {
 }
 
 // ===== Dashboard =====
-interface DashboardResponse<T = any> {
+interface DashboardResponse<T = unknown> {
   success: boolean;
   data: T;
 }

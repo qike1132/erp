@@ -26,4 +26,5 @@ class OrderBatchAuditLog(Base):
     __table_args__ = (
         Index('idx_batch_audit_batch_action', 'batch_no', 'action'),
         Index('idx_batch_audit_time', 'created_at'),
+        Index('idx_order_batch_audit_operator', 'operator_id'),
     )

@@ -28,7 +28,7 @@ class Product(Base):
     __tablename__ = 'product'
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True, index=True, comment='产品名称')
+    name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True, comment='产品名称')
     barcode: Mapped[str | None] = mapped_column(String(50), index=True, comment='69码/商品条码')
     price: Mapped[float | None] = mapped_column(Numeric(10, 2), default=0, server_default='0', comment='产品价格')
     image: Mapped[str | None] = mapped_column(String(200), comment='产品图片路径')
@@ -51,18 +51,22 @@ class Product(Base):
     # 皮套关联（由 Case 模型 backref 自动创建，此处显式声明以确保类型检查）
     cases: Mapped[list["Case"]] = relationship("Case", back_populates="product")
 
-    # BOM 物料关联
+    # BOM 物料关联（lazy="raise" 强制显式 selectinload，避免不需要 BOM 的查询产生 N+1）
     material: Mapped["ProductMaterial | None"] = relationship(
-        "ProductMaterial", back_populates="product", uselist=False, cascade="all, delete-orphan"
+        "ProductMaterial", back_populates="product", uselist=False, cascade="all, delete-orphan",
+        lazy="raise",
     )
     fabrics: Mapped[list["ProductFabric"]] = relationship(
-        "ProductFabric", back_populates="product", cascade="all, delete-orphan"
+        "ProductFabric", back_populates="product", cascade="all, delete-orphan",
+        lazy="raise",
     )
     accessories: Mapped[list["ProductAccessory"]] = relationship(
-        "ProductAccessory", back_populates="product", cascade="all, delete-orphan"
+        "ProductAccessory", back_populates="product", cascade="all, delete-orphan",
+        lazy="raise",
     )
     packagings: Mapped[list["ProductPackaging"]] = relationship(
-        "ProductPackaging", back_populates="product", cascade="all, delete-orphan"
+        "ProductPackaging", back_populates="product", cascade="all, delete-orphan",
+        lazy="raise",
     )
 
     def __repr__(self):

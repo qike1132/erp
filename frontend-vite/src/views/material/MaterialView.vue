@@ -119,8 +119,9 @@
           <table class="mr-tbl" style="min-width:900px;">
             <thead><tr><th style="width:160px;">供应商</th><th style="width:160px;">关联订单</th><th>物料进度</th><th style="width:220px;">总进度</th><th style="width:80px;">操作</th></tr></thead>
             <tbody>
-              <tr v-if="pIsLoading"><td colspan="5" class="mr-empty"><i class="fas fa-spinner fa-spin" /><span>加载中...</span></td></tr>
+              <tr v-if="pIsLoading && !progressGroups.length"><td colspan="5" class="mr-empty"><i class="fas fa-spinner fa-spin" /><span>加载中...</span></td></tr>
               <tr v-else-if="!progressGroups.length"><td colspan="5" class="mr-empty"><i class="fas fa-inbox" /><span>暂无进行中的来料登记</span></td></tr>
+              <tr v-if="pIsFetching && progressGroups.length"><td colspan="5" class="mr-fetching-bar"><div class="mr-fetching-progress" /></td></tr>
               <tr v-for="row in progressOrderRows" :key="row.order_no" class="mr-order-row"
                 @mouseenter="onOrderRowEnter($event)" @mouseleave="onOrderRowLeave($event)">
                 <td class="mr-td-bold">{{ row.supplier_name }}</td>
@@ -151,8 +152,9 @@
           <table class="mr-tbl" style="min-width:900px;">
             <thead><tr><th style="width:150px;">订单号</th><th style="width:100px;">客户</th><th style="width:120px;">产品/数量</th><th style="width:100px;">供应商</th><th>物料名称</th><th style="width:120px;">完成时间</th><th style="width:80px;">操作</th></tr></thead>
             <tbody>
-              <tr v-if="hIsLoading"><td colspan="7" class="mr-empty"><i class="fas fa-spinner fa-spin" /><span>加载中...</span></td></tr>
+              <tr v-if="hIsLoading && !hRegistrations.length"><td colspan="7" class="mr-empty"><i class="fas fa-spinner fa-spin" /><span>加载中...</span></td></tr>
               <tr v-else-if="!hRegistrations.length"><td colspan="7" class="mr-empty"><i class="fas fa-archive" /><span>暂无历史记录</span></td></tr>
+              <tr v-if="hIsFetching && hRegistrations.length"><td colspan="7" class="mr-fetching-bar"><div class="mr-fetching-progress" /></td></tr>
               <tr v-for="r in hRegistrations" :key="r.id">
                 <td class="mr-td-order">{{ r.purchase_order_no }}</td>
                 <td>{{ r.customer_name || '-' }}</td>
@@ -489,7 +491,7 @@ const pieGradient = computed(() => {
   return `conic-gradient(${d.map((item: DistItem) => { const pct = item.count / total * 100; const part = `${STATUS_COLORS[item.status] || '#999'} ${cumPct}% ${cumPct + pct}%`; cumPct += pct; return part }).join(',')})`
 })
 
-const pPage = ref(1), pPages = ref(1), pIsLoading = ref(false)
+const pPage = ref(1), pPages = ref(1), pIsLoading = ref(false), pIsFetching = ref(false)
 const progressGroups = ref<SupplierGroup[]>([])
 const progressCount = computed(() => progressGroups.value.length)
 const progressOrderRows = computed(() => {
@@ -503,12 +505,15 @@ const progressOrderRows = computed(() => {
 })
 const pFilters = reactive({ supplier: '', orderNo: '', customer: '', category: '', startDate: '', endDate: '' })
 
-const hPage = ref(1), hPages = ref(1), hIsLoading = ref(false)
+const hPage = ref(1), hPages = ref(1), hIsLoading = ref(false), hIsFetching = ref(false)
 const hRegistrations = ref<Registration[]>([])
 const hFilters = reactive({ orderNo: '', supplier: '', customer: '', category: '', startDate: '', endDate: '' })
 
 async function loadHistory(page = 1) {
-  hPage.value = page; hIsLoading.value = true
+  hPage.value = page
+  const isInitial = hRegistrations.value.length === 0
+  if (isInitial) hIsLoading.value = true
+  else hIsFetching.value = true
   try {
     const params: Record<string, string | number> = { page, per_page: 50 }
     if (hFilters.orderNo) params.order_no = hFilters.orderNo
@@ -520,7 +525,7 @@ async function loadHistory(page = 1) {
     const data = await materialApi.history(params) as any
     hRegistrations.value = data.registrations || []
     hPages.value = data.pages ?? data.total_pages ?? 1
-  } catch (e) { console.error('历史加载失败:', e); toast('加载失败', 'error') } finally { hIsLoading.value = false }
+  } catch (e) { console.error('历史加载失败:', e); toast('加载失败', 'error') } finally { hIsLoading.value = false; hIsFetching.value = false }
 }
 
 function resetHistoryFilters() { Object.assign(hFilters, { orderNo: '', supplier: '', customer: '', category: '', startDate: '', endDate: '' }); loadHistory(1) }
@@ -531,7 +536,10 @@ function materialSummary(r: Registration) {
 }
 
 async function loadProgress(page = 1) {
-  pPage.value = page; pIsLoading.value = true
+  pPage.value = page
+  const isInitial = progressGroups.value.length === 0
+  if (isInitial) pIsLoading.value = true
+  else pIsFetching.value = true
   try {
     const params: Record<string, string | number> = { page, per_page: 50 }
     if (pFilters.supplier) params.supplier = pFilters.supplier
@@ -543,7 +551,7 @@ async function loadProgress(page = 1) {
     const data = await materialApi.registrations(params) as any
     progressGroups.value = groupBySupplier((data.registrations || []).filter((r: Registration) => r.status !== 'completed'))
     pPages.value = data.pages ?? data.total_pages ?? 1
-  } catch (e) { console.error('进度加载失败:', e); toast('加载失败', 'error') } finally { pIsLoading.value = false }
+  } catch (e) { console.error('进度加载失败:', e); toast('加载失败', 'error') } finally { pIsLoading.value = false; pIsFetching.value = false }
 }
 
 function groupBySupplier(registrations: Registration[]): SupplierGroup[] {
@@ -1251,6 +1259,25 @@ function onOrderRowLeave(e: MouseEvent) {
 }
 
 .mr-empty i { font-size: 28px; opacity: 0.5; }
+
+/* Fetching progress bar */
+.mr-fetching-bar {
+  padding: 0 !important;
+  height: 2px;
+  background: var(--color-primary-100, #e0f2fe);
+  overflow: hidden;
+}
+.mr-fetching-progress {
+  height: 100%;
+  width: 30%;
+  background: var(--color-primary-500, #3b82f6);
+  border-radius: 1px;
+  animation: mr-progress-slide 1s ease-in-out infinite;
+}
+@keyframes mr-progress-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
 
 .mr-empty-inline {
   grid-column: 1 / -1;

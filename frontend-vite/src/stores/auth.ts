@@ -16,7 +16,7 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = {
       id: raw.user_id || raw.id || 0,
       username: raw.username,
-      isSuper: raw.is_super || raw.isSuper || false,
+      is_super: raw.is_super || false,
       permissions: raw.permissions ?? [],
     }
     return user.value
@@ -56,12 +56,12 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function hasPermission(code: string): boolean {
-    if (user.value?.isSuper) return true
+    if (user.value?.is_super) return true
     return user.value?.permissions?.includes(code) ?? false
   }
 
   function hasAnyPermission(codes: string[]): boolean {
-    if (user.value?.isSuper) return true
+    if (user.value?.is_super) return true
     return codes.some((code) => user.value?.permissions?.includes(code) ?? false)
   }
 

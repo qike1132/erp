@@ -16,8 +16,8 @@ class Customer(Base):
     __tablename__ = 'customer'
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    customer_code: Mapped[str | None] = mapped_column(String(50), unique=True, index=True, comment='客户编码')
-    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True, comment='客户名称')
+    customer_code: Mapped[str | None] = mapped_column(String(50), unique=True, comment='客户编码')
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, comment='客户名称')
     contact: Mapped[str | None] = mapped_column(String(50), comment='联系人')
     phone: Mapped[str | None] = mapped_column(String(20), comment='联系电话')
     address: Mapped[str | None] = mapped_column(String(200), comment='地址')

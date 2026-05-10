@@ -1,7 +1,7 @@
 """客户管理服务层"""
 import logging
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.shared_models import Customer, CustomerAccessLog, Order, PurchaseOrder, PurchasePlan, StockIn, StockOut
@@ -151,27 +151,20 @@ async def delete_customer(db: AsyncSession, customer_id: int) -> None:
     if not customer:
         raise ValueError("客户不存在")
 
-    has_orders = await db.execute(
-        select(Order).where(Order.customer == customer.name, Order.is_deleted == False).limit(1)
+    # 单次查询检查所有关联数据，替代6次串行 EXISTS 查询
+    checks = await db.execute(
+        select(
+            exists(select(1).where(Order.customer == customer.name, Order.is_deleted == False)).label('has_orders'),
+            exists(select(1).where(StockIn.customer == customer.name)).label('has_stockins'),
+            exists(select(1).where(StockOut.customer == customer.name)).label('has_stockouts'),
+            exists(select(1).where(CustomerAccessLog.customer_id == customer_id)).label('has_access_logs'),
+            exists(select(1).where(PurchaseOrder.customer_id == customer_id)).label('has_purchase_orders'),
+            exists(select(1).where(PurchasePlan.customer_id == customer_id)).label('has_purchase_plans'),
+        )
     )
-    has_stockins = await db.execute(
-        select(StockIn).where(StockIn.customer == customer.name).limit(1)
-    )
-    has_stockouts = await db.execute(
-        select(StockOut).where(StockOut.customer == customer.name).limit(1)
-    )
-    has_access_logs = await db.execute(
-        select(CustomerAccessLog).where(CustomerAccessLog.customer_id == customer_id).limit(1)
-    )
-    has_purchase_orders = await db.execute(
-        select(PurchaseOrder).where(PurchaseOrder.customer_id == customer_id).limit(1)
-    )
-    has_purchase_plans = await db.execute(
-        select(PurchasePlan).where(PurchasePlan.customer_id == customer_id).limit(1)
-    )
-
-    if (has_orders.scalar_one_or_none() or has_stockins.scalar_one_or_none() or has_stockouts.scalar_one_or_none()
-            or has_access_logs.scalar_one_or_none() or has_purchase_orders.scalar_one_or_none() or has_purchase_plans.scalar_one_or_none()):
+    row = checks.one()
+    if any([row.has_orders, row.has_stockins, row.has_stockouts,
+            row.has_access_logs, row.has_purchase_orders, row.has_purchase_plans]):
         raise ValueError("该客户已有相关单据，无法删除！建议禁用该客户。")
 
     await db.delete(customer)

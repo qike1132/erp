@@ -12,6 +12,8 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
+_background_tasks: set[asyncio.Task] = set()
+
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -62,13 +64,18 @@ async def list_backup_tables(
     """列出所有可备份的数据库表及行数"""
     from fastapi_app.shared_models import Base
     from sqlalchemy import text
+    # 白名单验证：仅允许 ORM 模型中已定义的表名
+    valid_table_names = {t.name for t in Base.metadata.sorted_tables}
     table_info = []
     try:
         for table in Base.metadata.sorted_tables:
             name = str(table.name)
+            if name not in valid_table_names:
+                logger.warning(f'跳过非法表名: {name}')
+                continue
             try:
                 qtname = backup_service.quote_table(name)
-                result = await db.execute(text(f'SELECT COUNT(*) FROM {qtname}'))  # nosec
+                result = await db.execute(text(f'SELECT COUNT(*) FROM {qtname}'))
                 count = result.scalar()
             except Exception as e:
                 logger.warning(f'统计表 {name} 行数失败: {e}')
@@ -76,7 +83,7 @@ async def list_backup_tables(
             table_info.append({'name': name, 'rows': count})
     except Exception as e:
         logger.error(f'列出备份表失败: {e}')
-        raise HTTPException(status_code=500, detail=f'获取表信息失败: {e}') from e
+        raise HTTPException(status_code=500, detail='获取表信息失败，请查看服务器日志') from e
     return {'success': True, 'tables': table_info, 'total': len(table_info)}
 
 
@@ -98,7 +105,7 @@ async def export_backup(
             json_bytes = await backup_service.execute_legacy_backup_to_bytes(user, remark, db)
         except Exception as e:
             logger.error(f'JSON 备份导出失败: {e}')
-            raise HTTPException(status_code=500, detail=f'备份失败: {e}') from e
+            raise HTTPException(status_code=500, detail='备份失败，请查看服务器日志') from e
         filename = f'erp_backup_{timestamp}.json'
         return StreamingResponse(
             io.BytesIO(json_bytes), media_type='application/json',
@@ -109,7 +116,7 @@ async def export_backup(
         zip_path, manifest = await backup_service.create_full_backup_to_file(db, user, remark)
     except Exception as e:
         logger.error(f'ZIP 备份导出失败: {e}')
-        raise HTTPException(status_code=500, detail=f'备份失败: {e}') from e
+        raise HTTPException(status_code=500, detail='备份失败，请查看服务器日志') from e
     filename = f'erp_backup_{timestamp}.zip'
 
     # 使用 FileResponse 流式返回，自动清理临时文件
@@ -165,28 +172,6 @@ async def import_backup(
     except Exception:
         pre_restore_info = {'success': False, 'error': '创建安全备份失败'}
 
-    if is_zip:
-        try:
-            result = await backup_service.restore_from_zip(content, db)
-        except RestoreError as e:
-            raise HTTPException(status_code=500, detail=str(e)) from e
-        result['pre_restore_backup'] = pre_restore_info
-        total_rows = sum(td.get('rows', 0) for td in result.get('_manifest_tables', {}).values())
-        result.pop('_manifest_tables', None)
-        verification_ok = result.get('verification', {}).get('overall_pass', True)
-        return {
-            'success': verification_ok, 'format': 'zip', 'results': result,
-            'total_inserted': total_rows,
-            'restored_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        }
-    # JSON path
-    try:
-        backup_data = json.loads(content)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail='备份文件格式无效（非 ZIP 亦非有效 JSON）') from None
-    if 'tables' not in backup_data:
-        raise HTTPException(status_code=400, detail='JSON 备份文件缺少 tables 字段')
-
     from sqlalchemy import text
     lock_acquired = False
     try:
@@ -198,21 +183,47 @@ async def import_backup(
         raise
     except (RuntimeError, OSError):
         logger.warning('获取恢复锁失败，继续执行恢复操作')
+
     try:
-        result = await backup_service.restore_legacy_json(backup_data, db)
+        if is_zip:
+            try:
+                result = await backup_service.restore_from_zip(content, db)
+            except RestoreError as e:
+                raise HTTPException(status_code=500, detail=str(e)) from e
+            result['pre_restore_backup'] = pre_restore_info
+            total_rows = sum(td.get('rows', 0) for td in result.get('_manifest_tables', {}).values())
+            result.pop('_manifest_tables', None)
+            verification_ok = result.get('verification', {}).get('overall_pass', True)
+            return {
+                'success': verification_ok, 'format': 'zip', 'results': result,
+                'total_inserted': total_rows,
+                'restored_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            }
+        # JSON path
+        try:
+            backup_data = await asyncio.to_thread(json.loads, content)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail='备份文件格式无效（非 ZIP 亦非有效 JSON）') from None
+        if 'tables' not in backup_data:
+            raise HTTPException(status_code=400, detail='JSON 备份文件缺少 tables 字段')
+
+        try:
+            result = await backup_service.restore_legacy_json(backup_data, db)
+        except Exception:
+            raise
+        verification_ok = result.get('verification', {}).get('overall_pass', True)
+        return {
+            'success': verification_ok, 'format': 'json',
+            'total_inserted': result['total_inserted'], 'results': result['results'],
+            'errors': result['errors'], 'pre_restore_backup': pre_restore_info,
+            'restored_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        }
     finally:
         if lock_acquired:
             try:
                 await db.execute(text('SELECT pg_advisory_unlock(:lock_id)'), {'lock_id': backup_service.RESTORE_LOCK_ID})
             except (RuntimeError, OSError, Exception):
                 logger.warning('释放恢复锁失败')
-    verification_ok = result.get('verification', {}).get('overall_pass', True)
-    return {
-        'success': verification_ok, 'format': 'json',
-        'total_inserted': result['total_inserted'], 'results': result['results'],
-        'errors': result['errors'], 'pre_restore_backup': pre_restore_info,
-        'restored_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -259,7 +270,7 @@ async def save_backup_to_server(
         zip_bytes, manifest = await backup_service.create_full_backup(db, user, remark)
     except Exception as e:
         logger.error(f'服务端备份失败: {e}')
-        raise HTTPException(status_code=500, detail=f'备份失败: {e}') from e
+        raise HTTPException(status_code=500, detail='备份失败，请查看服务器日志') from e
     filename = f'erp_backup_{timestamp}.zip'
     filepath = backup_service.BACKUP_DIR / filename
     filepath.write_bytes(zip_bytes)
@@ -335,7 +346,7 @@ async def restore_server_backup(
         }
     # JSON path
     try:
-        backup_data = json.loads(content)
+        backup_data = await asyncio.to_thread(json.loads, content)
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail='备份文件格式无效') from None
     if 'tables' not in backup_data:
@@ -409,7 +420,7 @@ async def save_incremental_backup(
         result = await backup_service.create_incremental_backup(db, user, remark, since)
     except Exception as e:
         logger.error(f'增量备份失败: {e}')
-        raise HTTPException(status_code=500, detail=f'增量备份失败: {e}') from e
+        raise HTTPException(status_code=500, detail='增量备份失败，请查看服务器日志') from e
     return result
 
 
@@ -515,7 +526,9 @@ async def async_import_backup(
     await create_progress(task_id, 'file_import')
     await backup_service.acquire_restore_lock(task_id)
 
-    asyncio.create_task(_run_async_file_restore(task_id, content, is_zip, filename))
+    task = asyncio.create_task(_run_async_file_restore(task_id, content, is_zip, filename))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
     return {'success': True, 'task_id': task_id, 'message': '恢复任务已启动'}
 
 
@@ -552,7 +565,9 @@ async def async_restore_server_backup(
     await backup_service.acquire_restore_lock(task_id)
 
     is_zip = safe_name.endswith('.zip') or content[:4] == b'PK\x03\x04'
-    asyncio.create_task(_run_async_file_restore(task_id, content, is_zip, safe_name))
+    task = asyncio.create_task(_run_async_file_restore(task_id, content, is_zip, safe_name))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
     return {'success': True, 'task_id': task_id, 'message': '恢复任务已启动'}
 
 
@@ -581,7 +596,7 @@ async def _run_async_file_restore(task_id: str, content: bytes, is_zip: bool, fi
                     result = await backup_service.restore_from_zip(content, db, task_id=task_id)
                 else:
                     try:
-                        backup_data = json.loads(content)
+                        backup_data = await asyncio.to_thread(json.loads, content)
                     except json.JSONDecodeError:
                         await fail_progress(task_id, '备份文件格式无效（非 ZIP 亦非有效 JSON）')
                         return
@@ -730,5 +745,5 @@ async def trigger_backup_schedule(
     try:
         celery_app.send_task(task_id_str)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f'触发任务失败: {e}') from e
+        raise HTTPException(status_code=500, detail='触发任务失败，请查看服务器日志') from e
     return {'success': True, 'task_name': task_name, 'message': f'任务 {task_name} 已触发'}

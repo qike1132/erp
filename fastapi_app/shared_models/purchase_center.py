@@ -30,6 +30,7 @@ class ModificationLog(Base):
     __table_args__ = (
         Index('idx_mod_target', 'target_type', 'target_id'),
         Index('idx_mod_time', 'modify_time'),
+        Index('idx_modification_log_modifier', 'modifier_id'),
     )
 
     def to_dict(self):

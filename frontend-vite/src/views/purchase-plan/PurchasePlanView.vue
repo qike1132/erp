@@ -53,10 +53,12 @@
       </div>
 
       <div v-if="viewTab === 'daily'" class="sp-body">
-        <div v-if="isLoading" class="sp-empty"><i class="fas fa-spinner fa-spin" />加载中...</div>
+        <div v-if="isLoading && !d" class="sp-empty"><i class="fas fa-spinner fa-spin" />加载中...</div>
         <div v-else-if="isError" class="sp-empty"><i class="fas fa-exclamation-circle" />加载失败 <button class="sp-retry-btn" @click="refetch()">重试</button></div>
         <div v-else-if="!rows.length" class="sp-empty"><i class="fas fa-inbox" />本月暂无出货计划</div>
-        <div v-else>
+        <template v-else>
+        <div v-if="isFetching" class="sp-fetching-bar"><div class="sp-fetching-progress" /></div>
+        <div>
           <div class="sp-day-grid">
             <div
               v-for="(r, idx) in filtered"
@@ -82,16 +84,19 @@
                 </span>
             </div>
           </div>
+          </div>
         </div>
+        </template>
       </div>
-    </div>
 
 
       <div v-else class="sp-body">
-        <div v-if="sLoading" class="sp-empty"><i class="fas fa-spinner fa-spin" />加载中...</div>
+        <div v-if="sLoading && !sData" class="sp-empty"><i class="fas fa-spinner fa-spin" />加载中...</div>
         <div v-else-if="sError" class="sp-empty"><i class="fas fa-exclamation-circle" />加载失败 <button class="sp-retry-btn" @click="refetchSummary()">重试</button></div>
         <div v-else-if="!summaryCustomers.length" class="sp-empty"><i class="fas fa-inbox" />本月暂无数据</div>
-        <div v-else>
+        <template v-else>
+        <div v-if="sFetching" class="sp-fetching-bar"><div class="sp-fetching-progress" /></div>
+        <div>
           <div class="sp-customer-tags">
             <button
               :class="['sp-tag', { 'sp-tag-active': !custFilter }]"
@@ -150,6 +155,7 @@
           </div>
           <UiPagination v-if="skuTotalPages > 1" :current-page="skuPage" :total-pages="skuTotalPages" :total-items="sortedSkuList.length" @update:current-page="skuPage = $event" />
         </div>
+        </template>
       </div>
     </div>
 
@@ -388,7 +394,7 @@ async function loadStockoutRecords() {
 
 const WDS = ['日', '一', '二', '三', '四', '五', '六'];
 
-const { data: d, isLoading, isError, refetch } = useQuery({
+const { data: d, isLoading, isFetching, isError, refetch } = useQuery({
   queryKey: ['pp-monthly', () => y.value, () => m.value],
   queryFn: async () => {
     const res = (await planApi.monthly({ year: y.value, month: m.value })) as any;
@@ -396,6 +402,7 @@ const { data: d, isLoading, isError, refetch } = useQuery({
     return res ? Object.freeze(JSON.parse(JSON.stringify(res))) : res;
   },
   staleTime: 5 * 60 * 1000,
+  gcTime: 30 * 60 * 1000,
   retry: 1,
   retryDelay: 2000,
   placeholderData: keepPreviousData,
@@ -408,10 +415,11 @@ interface Row { date: string; _dayNum: number; _weekday: string; customerCount: 
 
 interface CustSumItem { customer_id: number; customer_name: string; plan_qty: number; inventory_qty: number; shipped_qty: number; remaining_qty: number; warning_count: number; }
 
-const { data: sData, isLoading: sLoading, isError: sError, refetch: refetchSummary } = useQuery({
+const { data: sData, isLoading: sLoading, isFetching: sFetching, isError: sError, refetch: refetchSummary } = useQuery({
   queryKey: ['pp-summary', () => y.value, () => m.value],
   queryFn: async () => (await planApi.customerSummary({ year: y.value, month: m.value })) as any,
   staleTime: 5 * 60 * 1000,
+  gcTime: 30 * 60 * 1000,
   retry: 1,
   retryDelay: 2000,
   placeholderData: keepPreviousData,
@@ -448,13 +456,25 @@ const sKpi = computed(() => {
 
 interface SkuRow { barcode: string; product_name: string; plan_qty: number; shipped_qty: number; remain_qty: number; customer_name: string; _pct: number; _odd: boolean; }
 
-const skuSummary = computed<SkuRow[]>(() => {
+// ---- 单次遍历 plans_by_date，同时生成 rows + skuSummary ----
+const _parsed = computed(() => {
   const pbd = (d.value?.plans_by_date ?? {}) as Record<string, Plan[]>;
+  const list: Row[] = [];
   const byKey: Record<string, { customer_name: string; barcode: string; product_name: string; plan: number; shipped: number; remain: number; }> = {};
-  for (const pl of Object.values(pbd)) {
+  for (const [ds, pl] of Object.entries(pbd)) {
     if (!pl?.length) continue;
+    const dt = new Date(ds + 'T00:00:00');
+    const ns = new Set(pl.map(p => p.customer_name));
+    const tq = pl.reduce((s, p) => s + Number(p.quantity || 0), 0);
+    const shippedQty = pl.reduce((s, p) => s + Number(p.shipped_qty || 0), 0);
+    const shipped = pl.filter(p => getShipmentStatus(p.quantity, p.shipped_qty) === 'completed').length;
+    const pending = pl.filter(p => getShipmentStatus(p.quantity, p.shipped_qty) !== 'completed').length;
+    const byCust: Record<string, Plan[]> = {};
     for (const p of pl) {
-      if (custFilter.value && p.customer_name !== custFilter.value) continue;
+      const cn = p.customer_name || '未知';
+      if (!byCust[cn]) byCust[cn] = [];
+      byCust[cn].push(p);
+      // 同步构建 skuSummary（不做custFilter过滤，保持rows独立）
       const customerName = p.customer_name || '未知客户';
       const pn = p.product_name || '—';
       const key = `${customerName}|${pn}`;
@@ -463,10 +483,16 @@ const skuSummary = computed<SkuRow[]>(() => {
       byKey[key].shipped += Number(p.shipped_qty || 0);
       byKey[key].remain += Number(p.remaining_qty || 0);
     }
+    const _fullDate = `${dt.getMonth() + 1}月${dt.getDate()}日`;
+    list.push({ date: ds, _dayNum: dt.getDate(), _weekday: WDS[dt.getDay()] || '?', customerCount: ns.size, planCount: pl.length, totalQty: tq, _isPeak: false, _shippedCount: shipped, _pendingCount: pending, _shippedPct: tq > 0 ? Math.floor(shippedQty / tq * 1000) / 10 : 0, customerNames: [...ns].sort(), plans: pl, _byCustomer: byCust, _fullDate });
   }
-  const list: SkuRow[] = [];
+  list.sort((a, b) => a.date.localeCompare(b.date));
+  let maxP = 0;
+  for (const r of list) { if (r.planCount > maxP) maxP = r.planCount; }
+  for (const r of list) { r._isPeak = r.planCount === maxP && maxP > 0; }
+  const skuList: SkuRow[] = [];
   for (const v of Object.values(byKey)) {
-    list.push({
+    skuList.push({
       barcode: v.barcode,
       product_name: v.product_name,
       plan_qty: v.plan,
@@ -477,11 +503,18 @@ const skuSummary = computed<SkuRow[]>(() => {
       _odd: false,
     });
   }
-  return list.sort((a, b) => a.customer_name.localeCompare(b.customer_name) || a.barcode.localeCompare(b.barcode));
+  skuList.sort((a, b) => a.customer_name.localeCompare(b.customer_name) || a.barcode.localeCompare(b.barcode));
+  return { rows: list, skuSummary: skuList };
 });
+
+const rows = computed<Row[]>(() => _parsed.value.rows);
+const skuSummary = computed<SkuRow[]>(() => _parsed.value.skuSummary);
 
 const sortedSkuList = computed<SkuRow[]>(() => {
   let list = [...skuSummary.value];
+  if (custFilter.value) {
+    list = list.filter(s => s.customer_name === custFilter.value);
+  }
   if (globalKw.value && viewTab.value === 'summary') {
     const k = globalKw.value.toLowerCase();
     list = list.filter(s => 
@@ -559,34 +592,6 @@ function openSkuDetail(barcode: string, name: string, customer: string) {
   skuDetailCustomer.value = customer;
   skuDetailOpen.value = true;
 }
-
-const rows = computed<Row[]>(() => {
-  const pbd = (d.value?.plans_by_date ?? {}) as Record<string, Plan[]>;
-  const list: Row[] = [];
-  for (const [ds, pl] of Object.entries(pbd)) {
-    if (!pl?.length) continue;
-    const dt = new Date(ds + 'T00:00:00');
-    const ns = new Set(pl.map(p => p.customer_name));
-    const tq = pl.reduce((s, p) => s + Number(p.quantity || 0), 0);
-    const shippedQty = pl.reduce((s, p) => s + Number(p.shipped_qty || 0), 0);
-    // 前端自行计算 shipment_status，避免后端传输冗余字段
-    const shipped = pl.filter(p => getShipmentStatus(p.quantity, p.shipped_qty) === 'completed').length;
-    const pending = pl.filter(p => getShipmentStatus(p.quantity, p.shipped_qty) !== 'completed').length;
-    const byCust: Record<string, Plan[]> = {};
-    for (const p of pl) {
-      const cn = p.customer_name || '未知';
-      if (!byCust[cn]) byCust[cn] = [];
-      byCust[cn].push(p);
-    }
-    const _fullDate = `${dt.getMonth() + 1}月${dt.getDate()}日`;
-    list.push({ date: ds, _dayNum: dt.getDate(), _weekday: WDS[dt.getDay()] || '?', customerCount: ns.size, planCount: pl.length, totalQty: tq, _isPeak: false, _shippedCount: shipped, _pendingCount: pending, _shippedPct: tq > 0 ? Math.floor(shippedQty / tq * 1000) / 10 : 0, customerNames: [...ns].sort(), plans: pl, _byCustomer: byCust, _fullDate });
-  }
-  list.sort((a, b) => a.date.localeCompare(b.date));
-  let maxP = 0;
-  for (const r of list) { if (r.planCount > maxP) maxP = r.planCount; }
-  for (const r of list) { r._isPeak = r.planCount === maxP && maxP > 0; }
-  return list;
-});
 
 const filtered = computed(() => {
   if (!globalKw.value || viewTab.value !== 'daily') return rows.value;
@@ -1410,6 +1415,25 @@ function exportCSV() {
 .sp-empty i {
   font-size: 28px;
   opacity: 0.5;
+}
+
+/* Fetching progress bar */
+.sp-fetching-bar {
+  height: 2px;
+  background: var(--color-primary-100, #e0f2fe);
+  overflow: hidden;
+  border-radius: 1px;
+}
+.sp-fetching-progress {
+  height: 100%;
+  width: 30%;
+  background: var(--color-primary-500, #3b82f6);
+  border-radius: 1px;
+  animation: sp-progress-slide 1s ease-in-out infinite;
+}
+@keyframes sp-progress-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
 }
 
 .sp-retry-btn {

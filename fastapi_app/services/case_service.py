@@ -223,6 +223,10 @@ async def get_case_inventory_logs(db: AsyncSession, case_id: int, page: int = 1,
 async def create_case_stockin(db: AsyncSession, product_id: int, quantity: int, stockin_date: str,
                                customer: str = '', note: str = '', stockin_no: str = '') -> dict:
     """创建皮套入库记录"""
+    if quantity <= 0:
+        raise ValueError('入库数量必须大于0')
+    if quantity > 9999999:
+        raise ValueError('入库数量不能超过9999999')
     case_obj = await db.execute(select(Case).where(Case.product_id == product_id).with_for_update())
     case_obj = case_obj.scalar_one_or_none()
 
@@ -251,6 +255,8 @@ async def create_case_stockout(db: AsyncSession, case_id_or_product_id: int, qua
                                 stockout_date: str, customer: str = '',
                                 note: str = '', stockout_no: str = '') -> dict:
     """创建皮套出库记录"""
+    if quantity <= 0 or quantity > 9999999:
+        raise ValueError('出货数量必须在1-9999999之间')
     case_obj = await db.execute(select(Case).where(Case.product_id == case_id_or_product_id).with_for_update())
     case_obj = case_obj.scalar_one_or_none()
 

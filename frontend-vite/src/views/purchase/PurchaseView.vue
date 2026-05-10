@@ -31,6 +31,7 @@
           <PendingOrdersPanel
             :orders="unprocessed.orders"
             :loading="unprocessed.loading"
+            :fetching="unprocessed.fetching"
             :total="unprocessed.total"
             :current-page="unprocessed.currentPage"
             :total-pages="unprocessed.totalPages"
@@ -54,6 +55,7 @@
           <ActiveOrdersPanel
             :orders="purchaseOrders.orders"
             :loading="purchaseOrders.loading"
+            :fetching="purchaseOrders.fetching"
             :total="purchaseOrders.total"
             :current-page="purchaseOrders.page"
             :total-pages="purchaseOrders.pages"
@@ -74,6 +76,7 @@
             v-model:filter-expanded="completed.filterExpanded"
             :orders="completed.orders"
             :loading="completed.loading"
+            :fetching="completed.fetching"
             :total="completed.total"
             :current-page="completed.page"
             :total-pages="completed.totalPages"
@@ -128,7 +131,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onBeforeUnmount } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 import { purchaseApi } from '@/api'
 import type { ApiResponse, PurchaseOrder, UnprocessedOrder } from '@/types'
@@ -389,6 +392,10 @@ useWebSocket({
 // --- Init ---
 Promise.all([unprocessed.load(), purchaseOrders.load()])
 autoRefresh.start()
+
+onBeforeUnmount(() => {
+  autoRefresh.stop()
+})
 </script>
 
 <style scoped>

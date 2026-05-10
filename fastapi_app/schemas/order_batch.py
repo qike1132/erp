@@ -61,5 +61,33 @@ class BatchCompleteResponse(BaseModel):
     failed_orders: list[dict] = []
 
 
+class BatchQueryItem(BaseModel):
+    id: int
+    order_no: str
+    customer: str
+    order_date: str | None = None
+    product_id: int
+    product_name: str | None = None
+    product_barcode: str | None = None
+    quantity: int
+    deducted_qty: int = 0
+    shipped_qty: int = 0
+    status: str | None = None
+    computed_status: str | None = None
+    batch_no: str | None = None
+    batch_completed_at: str | None = None
+    is_locked: bool | None = None
+
+    model_config = {'from_attributes': True}
+
+
+class BatchQueryListResponse(BaseModel):
+    success: bool = True
+    data: list[BatchQueryItem] = []
+    total: int = 0
+    page: int = 1
+    per_page: int = 50
+
+
 class WhitelistResponse(BaseModel):
     customers: list[str] = []

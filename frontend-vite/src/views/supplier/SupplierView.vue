@@ -37,8 +37,8 @@
 
       <!-- Content area -->
       <div class="sp-content">
-        <!-- Loading -->
-        <div v-if="isLoading" class="sp-loading-state">
+        <!-- Loading (initial only) -->
+        <div v-if="isLoading && suppliers.length === 0" class="sp-loading-state">
           <i class="fas fa-spinner fa-spin" />
           <span>加载中...</span>
         </div>
@@ -52,6 +52,7 @@
 
         <!-- Table -->
         <div v-else class="sp-table-wrap">
+          <div v-if="isFetching" class="sp-fetching-bar"><div class="sp-fetching-progress" /></div>
           <table>
             <thead>
               <tr>
@@ -180,7 +181,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, watch } from 'vue'
-import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/vue-query'
 import { supplierApi } from '@/api'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
@@ -214,11 +215,12 @@ function clearSearch() {
   currentPage.value = 1
 }
 
-const { data: result, isLoading } = useQuery({
+const { data: result, isLoading, isFetching } = useQuery({
   queryKey: ['suppliers-list', () => debouncedSearch.value, () => currentPage.value],
   queryFn: () => supplierApi.list({ per_page: perPage, page: currentPage.value, search: debouncedSearch.value || undefined }) as Promise<any>,
   staleTime: 30_000,
   gcTime: 60_000,
+  placeholderData: keepPreviousData,
 })
 
 const suppliers = computed<Supplier[]>(() => result.value?.data ?? result.value?.suppliers ?? [])
@@ -632,6 +634,25 @@ async function handleEdit() {
 
 .sp-loading-state i {
   font-size: 20px;
+}
+
+/* Fetching progress bar */
+.sp-fetching-bar {
+  height: 2px;
+  background: var(--color-primary-100, #e0f2fe);
+  overflow: hidden;
+  border-radius: 1px;
+}
+.sp-fetching-progress {
+  height: 100%;
+  width: 30%;
+  background: var(--color-primary-500, #3b82f6);
+  border-radius: 1px;
+  animation: sp-progress-slide 1s ease-in-out infinite;
+}
+@keyframes sp-progress-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
 }
 
 /* === Required Mark === */

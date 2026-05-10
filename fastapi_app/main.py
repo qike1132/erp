@@ -205,11 +205,15 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    # 生产环境不暴露字段名和类型详情，仅返回通用提示
+    if os.getenv("APP_ENV") == "production":
+        detail = "请求参数验证失败"
+    else:
+        detail = f"请求参数验证失败: {exc.errors()}"
     return MsgspecResponse(
         content={
             "success": False,
-            "detail": "请求参数验证失败",
-            "errors": str(exc.errors()),
+            "detail": detail,
             "status_code": 422,
         },
         status_code=422,

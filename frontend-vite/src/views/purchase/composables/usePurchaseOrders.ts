@@ -6,25 +6,37 @@ import type { ApiResponse, PurchaseOrder } from '@/types'
 export function usePurchaseOrders() {
   const orders = ref<PurchaseOrder[]>([])
   const loading = ref(false)
+  const fetching = ref(false)
   const page = ref(1)
   const pages = ref(1)
   const total = ref(0)
   const selectedIds = ref<number[]>([])
+  let loadController: AbortController | null = null
 
   const allSelected = computed(() => orders.value.length > 0 && selectedIds.value.length >= orders.value.length)
 
   async function load() {
-    loading.value = true
+    const isInitial = orders.value.length === 0
+    if (isInitial) loading.value = true
+    else fetching.value = true
+    loadController?.abort()
+    loadController = new AbortController()
+    const signal = loadController.signal
     try {
       const res = await purchaseApi.orders({ page: page.value, per_page: 15 })
+      if (signal.aborted) return
       orders.value = res.orders || []
       total.value = res.total || 0
       pages.value = res.pages || 1
     } catch (err: any) {
+      if (signal.aborted) return
       orders.value = []
       showToast(err.response?.data?.detail || '加载采购订单失败', 'error')
     } finally {
-      loading.value = false
+      if (!signal.aborted) {
+        loading.value = false
+        fetching.value = false
+      }
     }
   }
 
@@ -66,6 +78,7 @@ export function usePurchaseOrders() {
   return reactive({
     orders,
     loading,
+    fetching,
     page,
     pages,
     total,

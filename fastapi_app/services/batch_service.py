@@ -497,83 +497,83 @@ async def import_orders_from_data(db: AsyncSession, data_list: list) -> tuple[in
 
     for idx, row_data in enumerate(data_list, start=2):
         try:
-            customer = row_data.get('客户名称') or row_data.get('客户')
-            product_name = row_data.get('产品名称') or row_data.get('产品')
-            quantity = row_data.get('数量') or row_data.get('订单数量')
-            note = row_data.get('备注') or ''
-            deduct_flag = row_data.get('抵扣备货') or row_data.get('是否抵扣备货') or row_data.get('抵扣')
+            async with db.begin_nested():
+                customer = row_data.get('客户名称') or row_data.get('客户')
+                product_name = row_data.get('产品名称') or row_data.get('产品')
+                quantity = row_data.get('数量') or row_data.get('订单数量')
+                note = row_data.get('备注') or ''
+                deduct_flag = row_data.get('抵扣备货') or row_data.get('是否抵扣备货') or row_data.get('抵扣')
 
-            if not customer or not product_name or not quantity:
-                continue
-
-            customer = str(customer).strip()
-            product_name = str(product_name).strip()
-
-            is_valid, error_msg = validate_customer_name(customer)
-            if not is_valid:
-                debug_messages.append(f"行{idx}: 客户验证失败 - {error_msg}")
-                continue
-
-            # 使用预加载的产品字典查找
-            product = product_map.get(product_name.lower().strip())
-            product = product or product_map.get(product_name)
-            if not product:
-                debug_messages.append(f"行{idx}: 产品不存在 - {product_name}")
-                continue
-            product_id = product.id
-
-            try:
-                qty = int(quantity)
-                if qty <= 0:
+                if not customer or not product_name or not quantity:
                     continue
-            except ValueError:
-                continue
 
-            order_no = await generate_order_number(db)
-            order = Order(
-                order_no=order_no,
-                customer=customer,
-                order_date=datetime.now(),
-                product_id=product_id,
-                quantity=qty,
-                note=str(note).strip() if note else '',
-                status='待备货'
-            )
-            db.add(order)
-            await db.flush()
+                customer = str(customer).strip()
+                product_name = str(product_name).strip()
 
-            # 使用悲观锁更新产品库存，防止并发修改
-            locked_product = await get_product_for_update(db, product_id)
-            locked_product.current_stock += qty
+                is_valid, error_msg = validate_customer_name(customer)
+                if not is_valid:
+                    debug_messages.append(f"行{idx}: 客户验证失败 - {error_msg}")
+                    continue
 
-            log = InventoryLog(
-                product_id=product_id,
-                change_type='订单',
-                change_quantity=qty,
-                related_id=order_no,
-                note='综合导入订单：' + order_no
-            )
-            db.add(log)
+                # 使用预加载的产品字典查找
+                product = product_map.get(product_name.lower().strip())
+                product = product or product_map.get(product_name)
+                if not product:
+                    debug_messages.append(f"行{idx}: 产品不存在 - {product_name}")
+                    continue
+                product_id = product.id
 
-            # 处理抵扣备货逻辑
-            if deduct_flag:
                 try:
-                    deduct_flag_str = str(deduct_flag).strip()
-                    deduct_value = 0
-                    if deduct_flag_str.isdigit():
-                        deduct_value = int(deduct_flag_str)
-                    elif deduct_flag_str.lower() in ['是', 'yes']:
-                        deduct_value = 1
+                    qty = int(quantity)
+                    if qty <= 0:
+                        continue
+                except ValueError:
+                    continue
 
-                    if deduct_value > 0:
-                        await process_order_deduction(db, order, product_id, deduct_value, deduct_stock=True, product=product)
-                except (ValueError, TypeError, SQLAlchemyError) as e:
-                    logger.error(f"订单导入 - 行{idx}: 抵扣处理异常: {e}", exc_info=True)
+                order_no = await generate_order_number(db)
+                order = Order(
+                    order_no=order_no,
+                    customer=customer,
+                    order_date=datetime.now(),
+                    product_id=product_id,
+                    quantity=qty,
+                    note=str(note).strip() if note else '',
+                    status='待备货'
+                )
+                db.add(order)
+                await db.flush()
 
-            count += 1
+                # 使用悲观锁更新产品库存，防止并发修改
+                locked_product = await get_product_for_update(db, product_id)
+                locked_product.current_stock += qty
+
+                log = InventoryLog(
+                    product_id=product_id,
+                    change_type='订单',
+                    change_quantity=qty,
+                    related_id=order_no,
+                    note='综合导入订单：' + order_no
+                )
+                db.add(log)
+
+                # 处理抵扣备货逻辑
+                if deduct_flag:
+                    try:
+                        deduct_flag_str = str(deduct_flag).strip()
+                        deduct_value = 0
+                        if deduct_flag_str.isdigit():
+                            deduct_value = int(deduct_flag_str)
+                        elif deduct_flag_str.lower() in ['是', 'yes']:
+                            deduct_value = 1
+
+                        if deduct_value > 0:
+                            await process_order_deduction(db, order, product_id, deduct_value, deduct_stock=True, product=product)
+                    except (ValueError, TypeError, SQLAlchemyError) as e:
+                        logger.error(f"订单导入 - 行{idx}: 抵扣处理异常: {e}", exc_info=True)
+
+                count += 1
         except (ValueError, TypeError, SQLAlchemyError) as e:
-            # 回滚当前事务中的脏数据，避免提交半成品
-            await db.rollback()
+            # savepoint 自动回滚此行，不影响其他行
             logger.error(f"订单导入 - 行{idx}: 处理异常: {e}", exc_info=True)
             continue
 
@@ -595,63 +595,63 @@ async def import_stockins_from_data(db: AsyncSession, data_list: list) -> tuple[
 
     for idx, row_data in enumerate(data_list, start=2):
         try:
-            customer = row_data.get('客户名称') or row_data.get('客户')
-            product_name = row_data.get('产品名称') or row_data.get('产品')
-            quantity = row_data.get('数量') or row_data.get('备货数量')
-            stockin_date_val = row_data.get('时间') or row_data.get('备货时间')
-            note = row_data.get('备注') or ''
+            async with db.begin_nested():
+                customer = row_data.get('客户名称') or row_data.get('客户')
+                product_name = row_data.get('产品名称') or row_data.get('产品')
+                quantity = row_data.get('数量') or row_data.get('备货数量')
+                stockin_date_val = row_data.get('时间') or row_data.get('备货时间')
+                note = row_data.get('备注') or ''
 
-            if not customer or not product_name or not quantity:
-                continue
-
-            customer = str(customer).strip()
-            product_name = str(product_name).strip()
-
-            is_valid, error_msg = validate_customer_name(customer)
-            if not is_valid:
-                continue
-
-            product = product_map.get(product_name.lower().strip())
-            product = product or product_map.get(product_name)
-            if not product:
-                continue
-            product_id = product.id
-
-            try:
-                qty = int(quantity)
-                if qty <= 0:
+                if not customer or not product_name or not quantity:
                     continue
-            except ValueError:
-                continue
 
-            stockin_date = parse_date_value(stockin_date_val) or datetime.now()
-            stockin_no = await generate_stockin_number(db)
-            stockin = StockIn(
-                stockin_no=stockin_no,
-                stockin_date=stockin_date,
-                customer=customer,
-                product_id=product_id,
-                quantity=qty,
-                note=str(note).strip() if note else ''
-            )
-            db.add(stockin)
+                customer = str(customer).strip()
+                product_name = str(product_name).strip()
 
-            # 使用悲观锁更新产品库存，防止并发修改
-            locked_product = await get_product_for_update(db, product_id)
-            locked_product.current_stock += qty
+                is_valid, error_msg = validate_customer_name(customer)
+                if not is_valid:
+                    continue
 
-            log = InventoryLog(
-                product_id=product_id,
-                change_type='备货',
-                change_quantity=qty,
-                related_id=stockin_no,
-                note='综合导入备货：' + stockin_no
-            )
-            db.add(log)
+                product = product_map.get(product_name.lower().strip())
+                product = product or product_map.get(product_name)
+                if not product:
+                    continue
+                product_id = product.id
 
-            count += 1
+                try:
+                    qty = int(quantity)
+                    if qty <= 0:
+                        continue
+                except ValueError:
+                    continue
+
+                stockin_date = parse_date_value(stockin_date_val) or datetime.now()
+                stockin_no = await generate_stockin_number(db)
+                stockin = StockIn(
+                    stockin_no=stockin_no,
+                    stockin_date=stockin_date,
+                    customer=customer,
+                    product_id=product_id,
+                    quantity=qty,
+                    note=str(note).strip() if note else ''
+                )
+                db.add(stockin)
+
+                # 使用悲观锁更新产品库存，防止并发修改
+                locked_product = await get_product_for_update(db, product_id)
+                locked_product.current_stock += qty
+
+                log = InventoryLog(
+                    product_id=product_id,
+                    change_type='备货',
+                    change_quantity=qty,
+                    related_id=stockin_no,
+                    note='综合导入备货：' + stockin_no
+                )
+                db.add(log)
+
+                count += 1
         except (ValueError, TypeError, SQLAlchemyError) as e:
-            await db.rollback()
             debug_messages.append(f"行{idx}: 异常 - {str(e)}")
             continue
 
@@ -667,94 +667,94 @@ async def import_stockouts_from_data(db: AsyncSession, data_list: list) -> tuple
 
     for idx, row_data in enumerate(data_list, start=2):
         try:
-            product_identifier = row_data.get('产品名称') or row_data.get('产品') or row_data.get('69码') or row_data.get('条码')
-            quantity = row_data.get('数量') or row_data.get('出货数量')
-            customer = row_data.get('客户名称') or row_data.get('客户')
-            stockout_date_val = row_data.get('时间') or row_data.get('出货时间')
-            note = row_data.get('备注') or ''
-            country_val = row_data.get('国家') or row_data.get('国家名称')
-            if not country_val or (isinstance(country_val, float) and country_val != country_val):
-                country_parsed = ''
-            else:
-                country_parsed = str(country_val).strip()
-            order_type_parsed = 'custom' if country_parsed else 'regular'
+            async with db.begin_nested():
+                product_identifier = row_data.get('产品名称') or row_data.get('产品') or row_data.get('69码') or row_data.get('条码')
+                quantity = row_data.get('数量') or row_data.get('出货数量')
+                customer = row_data.get('客户名称') or row_data.get('客户')
+                stockout_date_val = row_data.get('时间') or row_data.get('出货时间')
+                note = row_data.get('备注') or ''
+                country_val = row_data.get('国家') or row_data.get('国家名称')
+                if not country_val or (isinstance(country_val, float) and country_val != country_val):
+                    country_parsed = ''
+                else:
+                    country_parsed = str(country_val).strip()
+                order_type_parsed = 'custom' if country_parsed else 'regular'
 
-            if not product_identifier or not quantity:
-                continue
-
-            product_identifier = str(product_identifier).strip()
-            customer = str(customer).strip() if customer else ''
-
-            if not customer:
-                continue
-
-            # 查找产品
-            result = await db.execute(
-                select(Product).where(
-                    (Product.name == product_identifier) | (Product.barcode == product_identifier)
-                )
-            )
-            product = result.scalar_one_or_none()
-            if not product:
-                continue
-
-            try:
-                qty = int(quantity)
-                if qty <= 0:
+                if not product_identifier or not quantity:
                     continue
-            except ValueError:
-                continue
 
-            if product.current_stock < qty:
-                continue
+                product_identifier = str(product_identifier).strip()
+                customer = str(customer).strip() if customer else ''
 
-            shipment_info = await calculate_available_shipment_quantity(
-                db, product.id, customer,
-                order_type=order_type_parsed, country=country_parsed or None
-            )
-            if shipment_info['available_quantity'] <= 0:
-                continue
+                if not customer:
+                    continue
 
-            if qty > shipment_info['available_quantity']:
-                continue
-
-            stockout_date = parse_date_value(stockout_date_val) or datetime.now()
-
-            remaining_qty = qty
-            for order_detail in shipment_info['orders']:
-                if remaining_qty <= 0:
-                    break
-                if order_detail['available'] > 0:
-                    ship_qty = min(remaining_qty, order_detail['available'])
-                    stockout_no = await generate_stockout_number(db)
-                    stockout = StockOut(
-                        stockout_no=stockout_no,
-                        stockout_date=stockout_date,
-                        product_id=product.id,
-                        quantity=ship_qty,
-                        customer=customer,
-                        order_id=order_detail['order_id'],
-                        note=str(note).strip() if note else ''
+                # 查找产品
+                result = await db.execute(
+                    select(Product).where(
+                        (Product.name == product_identifier) | (Product.barcode == product_identifier)
                     )
-                    db.add(stockout)
-                    remaining_qty -= ship_qty
+                )
+                product = result.scalar_one_or_none()
+                if not product:
+                    continue
 
-            # 使用悲观锁更新产品库存，防止并发修改
-            locked_product = await get_product_for_update(db, product.id)
-            locked_product.current_stock -= qty
+                try:
+                    qty = int(quantity)
+                    if qty <= 0:
+                        continue
+                except ValueError:
+                    continue
 
-            log = InventoryLog(
-                product_id=product.id,
-                change_type='出库',
-                change_quantity=-qty,
-                related_id='',
-                note=f'综合导入出货：客户{customer}，数量{qty}'
-            )
-            db.add(log)
+                if product.current_stock < qty:
+                    continue
 
-            count += 1
+                shipment_info = await calculate_available_shipment_quantity(
+                    db, product.id, customer,
+                    order_type=order_type_parsed, country=country_parsed or None
+                )
+                if shipment_info['available_quantity'] <= 0:
+                    continue
+
+                if qty > shipment_info['available_quantity']:
+                    continue
+
+                stockout_date = parse_date_value(stockout_date_val) or datetime.now()
+
+                remaining_qty = qty
+                for order_detail in shipment_info['orders']:
+                    if remaining_qty <= 0:
+                        break
+                    if order_detail['available'] > 0:
+                        ship_qty = min(remaining_qty, order_detail['available'])
+                        stockout_no = await generate_stockout_number(db)
+                        stockout = StockOut(
+                            stockout_no=stockout_no,
+                            stockout_date=stockout_date,
+                            product_id=product.id,
+                            quantity=ship_qty,
+                            customer=customer,
+                            order_id=order_detail['order_id'],
+                            note=str(note).strip() if note else ''
+                        )
+                        db.add(stockout)
+                        remaining_qty -= ship_qty
+
+                # 使用悲观锁更新产品库存，防止并发修改
+                locked_product = await get_product_for_update(db, product.id)
+                locked_product.current_stock -= qty
+
+                log = InventoryLog(
+                    product_id=product.id,
+                    change_type='出库',
+                    change_quantity=-qty,
+                    related_id='',
+                    note=f'综合导入出货：客户{customer}，数量{qty}'
+                )
+                db.add(log)
+
+                count += 1
         except (ValueError, TypeError, SQLAlchemyError) as e:
-            await db.rollback()
             debug_messages.append(f"行{idx}: 异常 - {str(e)}")
             continue
 

@@ -44,7 +44,7 @@
     </div>
 
     <div class="sk-card-main">
-      <div v-if="isLoading" class="sk-empty">
+      <div v-if="isLoading && inventory.length === 0" class="sk-empty">
         <i class="fas fa-spinner fa-spin" />
         <span>加载中...</span>
       </div>
@@ -53,6 +53,7 @@
         <span>暂无库存数据</span>
       </div>
       <template v-else>
+        <div v-if="isFetching" class="sk-fetching-bar"><div class="sk-fetching-progress" /></div>
         <table class="sk-table">
           <thead>
             <tr>
@@ -102,7 +103,7 @@
 
 <script setup lang="ts">
 import { reactive, computed, watch, ref } from 'vue'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery, keepPreviousData } from '@tanstack/vue-query'
 import { stockApi } from '@/api'
 import UiPagination from '@/components/ui/UiPagination.vue'
 import { useDebouncedRef } from '@/composables/useDebouncedRef'
@@ -118,6 +119,7 @@ const totalPages = computed(() => Math.max(1, Math.ceil(totalItems.value / perPa
 const {
   data: invData,
   isLoading,
+  isFetching,
   refetch,
 } = useQuery({
   queryKey: ['inventory', () => filters.customer, debouncedProduct, () => filters.country, () => page.value],
@@ -131,6 +133,7 @@ const {
     }) as Promise<any>,
   staleTime: 30_000,
   gcTime: 60_000,
+  placeholderData: keepPreviousData,
 })
 
 const inventory = computed(() => {
@@ -396,6 +399,25 @@ defineExpose({ inventory, filteredInventory: inventory, handleExport })
 }
 .sk-empty i { font-size: 28px; opacity: 0.5; }
 .sk-empty span { font-size: 14px; }
+
+/* Fetching progress bar */
+.sk-fetching-bar {
+  height: 2px;
+  background: var(--color-primary-100, #e0f2fe);
+  overflow: hidden;
+  border-radius: 1px;
+}
+.sk-fetching-progress {
+  height: 100%;
+  width: 30%;
+  background: var(--color-primary-500, #3b82f6);
+  border-radius: 1px;
+  animation: sk-progress-slide 1s ease-in-out infinite;
+}
+@keyframes sk-progress-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
 
 @media (max-width: 900px) {
   .sk-stat-row { flex-wrap: wrap; gap: 6px; }

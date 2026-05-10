@@ -30,6 +30,8 @@ logger = logging.getLogger(__name__)
 async def create_stockin_core(db: AsyncSession, product_id: int, quantity: int, customer: str, stockin_date: datetime, note: str, order_type: str = 'regular', country: str | None = None) -> StockIn:
     if quantity <= 0:
         raise ValueError('入库数量必须大于0')
+    if quantity > 9999999:
+        raise ValueError('入库数量不能超过9999999')
     stockin = StockIn(stockin_no=await generate_stockin_number(db), product_id=product_id, quantity=quantity, customer=customer, stockin_date=stockin_date, note=note, order_type=order_type, country=country)
     db.add(stockin)
     await db.flush()
@@ -257,22 +259,29 @@ async def delete_stockreturn_core(db: AsyncSession, stockreturn: StockReturn) ->
     await db.flush()
 
 
-async def recalc_order_status_after_return(db: AsyncSession, order_id: int) -> None:
+async def recalc_order_status_after_return(db: AsyncSession, order_id: int) -> dict | None:
     """
     退货后重算订单状态（派生计算）
 
     根据订单关联的实际出入库数据推导状态，无需手动维护状态流转。
+    返回出货完成的订单信息（如状态变更为'已出货'），否则返回 None。
+    调用方需在 commit 后自行发布事件。
     """
     from fastapi_app.shared_models import Order
     order_result = await db.execute(select(Order).where(Order.id == order_id).with_for_update())
     order = order_result.scalar_one_or_none()
     if not order:
-        return
+        return None
     if order.status in (None, '已取消'):
-        return
+        return None
 
+    old_status = order.status
     from fastapi_app.services.order_service import compute_order_status_from_db
     order.status = await compute_order_status_from_db(db, order)
+
+    if order.status == '已出货' and old_status != '已出货':
+        return {'order_id': order.id, 'order_no': order.order_no, 'customer': order.customer}
+    return None
 
 async def get_stockins(db: AsyncSession, page: int=1, per_page: int=50) -> dict:
     """获取入库列表（含关联数据，支持分页）- SQL子查询优化版"""
@@ -386,7 +395,7 @@ async def create_stockout(db: AsyncSession, product_id: int, quantity: int, cust
     """创建出库记录"""
     stockout_date = _parse_date_preserve_time(stockout_date_str)
     try:
-        await create_stockout_core(db, product_id, quantity, customer, stockout_date, note, order_type, country)
+        created_stockouts = await create_stockout_core(db, product_id, quantity, customer, stockout_date, note, order_type, country)
         await db.commit()
     except (SQLAlchemyError, ValueError):
         await db.rollback()
@@ -399,6 +408,45 @@ async def create_stockout(db: AsyncSession, product_id: int, quantity: int, cust
             await publish_stock_event(StockEvent.STOCK_CHANGED, {'product_id': product_id, 'product_name': product.name, 'change_type': '出库', 'quantity': quantity, 'current_stock': product.current_stock})
     except (OSError, ConnectionError, ValueError) as e:
         logger.warning(f'出库事件发布失败（不影响数据）: {e}')
+
+    # 检测出货完成 — 批量查询受影响订单，避免 N+1
+    if created_stockouts:
+        from fastapi_app.shared_models import Order
+        from fastapi_app.services.order_service import compute_order_status_from_db
+        from fastapi_app.services.notification_service import publish_event_with_fcm
+        affected_order_ids: set[int] = {so.order_id for so in created_stockouts if so.order_id}
+        if affected_order_ids:
+            # 批量获取所有受影响订单
+            order_result = await db.execute(
+                select(Order).where(Order.id.in_(affected_order_ids))
+            )
+            order_map = {o.id: o for o in order_result.scalars().all()}
+            status_changed = False
+            for oid in affected_order_ids:
+                order = order_map.get(oid)
+                if order and order.status != '已出货':
+                    old_status = order.status
+                    new_status = await compute_order_status_from_db(db, order)
+                    if new_status != old_status:
+                        order.status = new_status
+                        status_changed = True
+                    if new_status == '已出货' and old_status != '已出货':
+                        try:
+                            await publish_event_with_fcm(
+                                StockEvent.SHIPMENT_COMPLETED,
+                                {'order_id': order.id, 'order_no': order.order_no, 'customer': order.customer},
+                                fcm_title="出货完成",
+                                fcm_body=f"订单 {order.order_no} 已完成出货",
+                            )
+                        except Exception as e:
+                            logger.warning('出货完成事件发布失败: %s', e)
+            if status_changed:
+                try:
+                    await db.commit()
+                except SQLAlchemyError:
+                    await db.rollback()
+                    logger.warning('订单状态更新提交失败')
+
     logger.info(f'出库添加成功：产品ID：{product_id}，数量：{quantity}，客户：{customer}')
     return {'quantity': quantity}
 

@@ -92,17 +92,39 @@ def _setup_csrf(app: FastAPI) -> None:
 
 
 def _setup_security_headers(app: FastAPI) -> None:
-    csp = (
-        "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
-        "style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data: blob:; "
-        "font-src 'self' data:; "
-        "connect-src 'self' ws: wss:; "
-        "frame-ancestors 'none'; "
-        "base-uri 'self'; "
-        "form-action 'self'"
-    )
+    """安全响应头中间件
+
+    CSP 策略说明：
+    - 生产环境移除 'unsafe-eval'（仅 Vite HMR 需要）
+    - 'unsafe-inline' 保留用于 Vue 内联样式，后续迁移到 nonce 方案
+    - frame-ancestors 'none' 防止点击劫持
+    """
+    is_production = os.getenv("APP_ENV") == "production"
+
+    if is_production:
+        csp = (
+            "default-src 'self'; "
+            "script-src 'self'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: blob:; "
+            "font-src 'self' data:; "
+            "connect-src 'self' wss:; "
+            "frame-ancestors 'none'; "
+            "base-uri 'self'; "
+            "form-action 'self'"
+        )
+    else:
+        csp = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: blob:; "
+            "font-src 'self' data:; "
+            "connect-src 'self' ws: wss:; "
+            "frame-ancestors 'none'; "
+            "base-uri 'self'; "
+            "form-action 'self'"
+        )
 
     @app.middleware("http")
     async def security_headers_middleware(request: Request, call_next):
@@ -110,11 +132,14 @@ def _setup_security_headers(app: FastAPI) -> None:
         response.headers["Content-Security-Policy"] = csp
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()"
+        if is_production:
+            response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
         return response
 
-    logger.info("安全头部已配置（CSP / X-Content-Type-Options / X-Frame-Options）")
+    mode_label = "生产（无 unsafe-eval/ws:）" if is_production else "开发（含 unsafe-eval/ws:）"
+    logger.info("安全头部已配置（CSP 模式: %s）", mode_label)
 
 
 def _setup_cors(app: FastAPI) -> None:

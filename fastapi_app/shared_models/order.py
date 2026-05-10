@@ -87,6 +87,9 @@ class Order(Base):
         Index('idx_order_type', 'order_type'),
         Index('idx_order_batch_no', 'batch_no'),
         Index('idx_order_batch_completed_at', 'batch_completed_at'),
+        Index('idx_order_locked_by', 'locked_by_id'),
+        Index('idx_order_deleted_by', 'deleted_by_id'),
+        Index('idx_order_batch_completed_by', 'batch_completed_by_id'),
         {'quote': True},
     )
 

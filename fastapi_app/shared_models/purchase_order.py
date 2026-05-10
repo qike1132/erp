@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 from datetime import datetime
+
+from sqlalchemy import inspect as sa_inspect
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text
@@ -23,7 +25,7 @@ class PurchaseOrder(Base):
     __tablename__ = 'purchase_order'
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    order_no: Mapped[str] = mapped_column(String(30), nullable=False, unique=True, index=True, comment='订单编号')
+    order_no: Mapped[str] = mapped_column(String(30), nullable=False, unique=True, comment='订单编号')
     supplier_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('supplier.id'), comment='供应商ID')
     supplier_name: Mapped[str | None] = mapped_column(String(100), comment='供应商名称(冗余)')
     supplier_contact_person: Mapped[str | None] = mapped_column(String(50), comment='供应商联系人(冗余)')
@@ -47,10 +49,10 @@ class PurchaseOrder(Base):
     completed_by: Mapped[str | None] = mapped_column(String(50), comment='完成人')
 
     items: Mapped[list["PurchaseOrderItem"]] = relationship(
-        'PurchaseOrderItem', backref='order', cascade='all, delete-orphan', lazy='selectin'
+        'PurchaseOrderItem', backref='order', cascade='all, delete-orphan', lazy='raise'
     )
     supplier_rel: Mapped["Supplier | None"] = relationship(
-        "Supplier", back_populates="purchase_orders", lazy="selectin"
+        "Supplier", back_populates="purchase_orders", lazy="raise"
     )
 
     __table_args__ = (
@@ -78,6 +80,9 @@ class PurchaseOrder(Base):
                 if not quantity and hasattr(source_order, 'quantity'):
                     quantity = source_order.quantity
 
+        _has_items = 'items' not in sa_inspect(self).unloaded
+        _items = self.items if _has_items else []
+
         return {
             'id': self.id,
             'order_no': self.order_no,
@@ -99,8 +104,8 @@ class PurchaseOrder(Base):
             'update_time': self.update_time.strftime('%Y-%m-%d %H:%M:%S') if self.update_time else None,
             'completed_at': self.completed_at.strftime('%Y-%m-%d %H:%M:%S') if self.completed_at else None,
             'completed_by': self.completed_by,
-            'item_count': len(self.items) if self.items else 0,
-            'items': [item.to_dict() for item in self.items] if self.items else [],
+            'item_count': len(_items),
+            'items': [item.to_dict() for item in _items],
             'quantity': float(quantity) if quantity else None
         }
 

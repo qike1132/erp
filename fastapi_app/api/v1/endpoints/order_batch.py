@@ -11,6 +11,8 @@ from fastapi_app.schemas.order_batch import (
     BatchCompleteResponse,
     BatchNoUpdate,
     BatchNoUpdateResponse,
+    BatchQueryItem,
+    BatchQueryListResponse,
     OrderBatchListResponse,
     WhitelistResponse,
 )
@@ -18,6 +20,23 @@ from fastapi_app.services import order_batch_service
 from fastapi_app.shared_models import User
 
 router = APIRouter()
+
+
+@router.get("/batch-query", response_model=BatchQueryListResponse)
+async def batch_query_list(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=500),
+    batch_no: str | None = Query(None),
+    status: str | None = Query(None),
+    customer: str | None = Query(None),
+    keyword: str | None = Query(None),
+    db: AsyncSession = Depends(get_async_read_db),
+    _user: User = Depends(require_permission("batch_manage")),
+):
+    result = await order_batch_service.get_batch_query_list(
+        db, page=page, per_page=per_page, batch_no=batch_no, status=status, customer=customer, keyword=keyword,
+    )
+    return BatchQueryListResponse(data=result['items'], total=result['total'], page=page, per_page=per_page)
 
 
 @router.get("/orders", response_model=OrderBatchListResponse)

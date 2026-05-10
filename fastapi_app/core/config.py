@@ -42,9 +42,10 @@ class Settings(BaseSettings):
 
     # API配置
     API_PREFIX: str = "/api/v1"
-    DOCS_URL: str = "/api/docs"
-    REDOC_URL: str = "/api/redoc"
-    OPENAPI_URL: str = "/api/openapi.json"
+    # 生产环境（APP_ENV=production）自动关闭文档端点，防止暴露 API 结构
+    DOCS_URL: str | None = None if os.getenv("APP_ENV") == "production" else "/api/docs"
+    REDOC_URL: str | None = None if os.getenv("APP_ENV") == "production" else "/api/redoc"
+    OPENAPI_URL: str | None = None if os.getenv("APP_ENV") == "production" else "/api/openapi.json"
 
     # 数据库配置
     # 异步数据库URL - 使用 asyncpg 驱动（性能最优）
@@ -75,9 +76,23 @@ class Settings(BaseSettings):
         f"redis://:{quote_plus(os.getenv('REDIS_PASSWORD', ''))}@{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', '6379')}/2"
     )
 
+    # FCM 推送配置（可选，未设置时降级为仅 WebSocket 通知）
+    FCM_SERVICE_ACCOUNT_PATH: str = os.getenv("FCM_SERVICE_ACCOUNT_PATH", "")
+    FCM_ENABLED: bool = os.getenv("FCM_ENABLED", "false").lower() in ("true", "1", "yes")
+
     # CORS配置 - 从环境变量读取允许的源，默认仅允许本地访问
     # 包含 Nginx 统一入口（端口80）、直接访问模式（端口5002）以及 Vue/Vite 前端（端口3000）
-    BACKEND_CORS_ORIGINS: list[str] = os.getenv("CORS_ORIGINS", "http://localhost,http://localhost:5002,http://localhost:3000").split(",")
+    # 生产环境自动过滤非 HTTPS 源（localhost 除外，用于本地健康检查）
+    _raw_cors: str = os.getenv("CORS_ORIGINS", "http://localhost,http://localhost:5002,http://localhost:3000")
+    BACKEND_CORS_ORIGINS: list[str] = [
+        origin.strip() for origin in _raw_cors.split(",")
+        if origin.strip()
+        and (
+            os.getenv("APP_ENV") != "production"
+            or origin.strip().startswith("https://")
+            or origin.strip().startswith("http://localhost")
+        )
+    ]
 
     # 安全配置 - 从环境变量读取，生产环境必须显式设置
     SECRET_KEY: str = os.getenv("SECRET_KEY", "")
@@ -124,6 +139,12 @@ class Settings(BaseSettings):
             raise RuntimeError(
                 "生产环境禁止 ALLOWED_HOSTS='*'，必须通过环境变量设置具体域名"
                 "（如 ALLOWED_HOSTS=erp.example.com,erp.example.cn）以防止 Host 头注入"
+            )
+        _ALLOWED_JWT_ALGORITHMS = {"HS256", "RS256"}
+        if self.ALGORITHM not in _ALLOWED_JWT_ALGORITHMS:
+            raise RuntimeError(
+                f"JWT_ALGORITHM 必须为 {_ALLOWED_JWT_ALGORITHMS} 之一，"
+                f"当前值 '{self.ALGORITHM}' 不在允许范围内"
             )
 
     # 分页配置

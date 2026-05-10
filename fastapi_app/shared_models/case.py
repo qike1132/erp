@@ -22,9 +22,9 @@ class Case(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    product_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('product.id'), nullable=True, index=True)
+    product_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('product.id'), nullable=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
-    barcode: Mapped[str | None] = mapped_column(String(50), index=True)
+    barcode: Mapped[str | None] = mapped_column(String(50))
     image: Mapped[str | None] = mapped_column(String(200))
     initial_stock: Mapped[int] = mapped_column(Integer, default=0)
     current_stock: Mapped[int] = mapped_column(Integer, default=0)

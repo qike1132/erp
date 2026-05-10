@@ -141,6 +141,9 @@ export interface PurchaseOrder {
   source_order_no?: string
   items?: PurchaseOrderItem[]
   materials?: PurchaseOrderItem[]
+  product_name?: string
+  quantity?: number
+  completed_at?: string
 }
 
 export interface UnprocessedOrder {
@@ -154,6 +157,7 @@ export interface UnprocessedOrder {
   status: string
   product?: Product
   has_bom?: boolean
+  create_time?: string
 }
 
 export interface ApprovalItem {
@@ -178,10 +182,8 @@ export interface ApprovalItem {
 export interface User {
   id: number
   username: string
-  isSuper: boolean
-  permissions: string[]
-  password?: string
   is_super?: boolean
+  permissions: string[]
 }
 
 export interface NavSection {
@@ -321,8 +323,8 @@ export interface ShipmentInfo {
 
 export interface StagedStockout {
   id: number
-  productId: string
-  productName: string
+  product_id: string
+  product_name: string
   customer: string
   date: string
   quantity: number
@@ -366,6 +368,24 @@ export interface OrderBatchItem {
   product_name: string | null
   quantity: number
   status: string | null
+  batch_no: string | null
+  batch_completed_at: string | null
+  is_locked: boolean | null
+}
+
+export interface BatchQueryItem {
+  id: number
+  order_no: string
+  customer: string
+  order_date: string | null
+  product_id: number
+  product_name: string | null
+  product_barcode: string | null
+  quantity: number
+  deducted_qty: number
+  shipped_qty: number
+  status: string | null
+  computed_status: string | null
   batch_no: string | null
   batch_completed_at: string | null
   is_locked: boolean | null

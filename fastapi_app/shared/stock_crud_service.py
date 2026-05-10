@@ -669,7 +669,7 @@ def get_inventory(session: Session, search_customer: str = '',
             Order.country,
             func.sum(Order.quantity).label('total_qty'),
         )
-        .where(Order.product_id.in_(product_ids), ~Order.is_deleted)
+        .where(Order.product_id.in_(product_ids), Order.is_deleted.isnot(True))
         .group_by(Order.product_id, Order.customer, Order.order_type, Order.country)
     ).all()
 

@@ -8,15 +8,10 @@ from fastapi_app.core.deps import invalidate_user_permission_cache, require_perm
 from fastapi_app.schemas.user import (
     PermissionResponse,
     UserActionResponse,
-    UserCreate,
-    UserListResponse,
-    UserPermissionResponse,
-    UserPermissionUpdate,
-    UserResponse,
-    UserUpdate,
 )
 from fastapi_app.services import user_service
 from fastapi_app.shared_models import User
+from sqlalchemy import select, func
 
 router = APIRouter()
 
@@ -33,6 +28,10 @@ async def create_user(data: UserCreate, user: User=Depends(require_permission('u
     """添加用户"""
     if not user.is_super:
         raise HTTPException(status_code=403, detail='仅超级用户可访问')
+    # 防止删除最后一个超级用户
+    super_count = await db.scalar(select(func.count()).select_from(User).where(User.is_super == True, User.is_deleted == False))  # noqa: E712
+    if super_count <= 1:
+        raise HTTPException(status_code=400, detail='无法删除最后一个超级用户')
     try:
         await user_service.create_user(db, data.username, data.password, data.is_super)
         await db.commit()
@@ -45,6 +44,10 @@ async def edit_user(user_id: int, data: UserUpdate, user: User=Depends(require_p
     """编辑用户"""
     if not user.is_super:
         raise HTTPException(status_code=403, detail='仅超级用户可访问')
+    # 防止删除最后一个超级用户
+    super_count = await db.scalar(select(func.count()).select_from(User).where(User.is_super == True, User.is_deleted == False))  # noqa: E712
+    if super_count <= 1:
+        raise HTTPException(status_code=400, detail='无法删除最后一个超级用户')
     try:
         await user_service.update_user(db, user_id, data.password, data.is_super)
         await db.commit()
@@ -57,6 +60,10 @@ async def toggle_user_status(user_id: int, user: User=Depends(require_permission
     """切换用户状态"""
     if not user.is_super:
         raise HTTPException(status_code=403, detail='仅超级用户可访问')
+    # 防止删除最后一个超级用户
+    super_count = await db.scalar(select(func.count()).select_from(User).where(User.is_super == True, User.is_deleted == False))  # noqa: E712
+    if super_count <= 1:
+        raise HTTPException(status_code=400, detail='无法删除最后一个超级用户')
     try:
         updated_user = await user_service.toggle_user_status(db, user_id)
         await db.commit()
@@ -71,6 +78,10 @@ async def delete_user(user_id: int, user: User=Depends(require_permission('user_
     """删除用户"""
     if not user.is_super:
         raise HTTPException(status_code=403, detail='仅超级用户可访问')
+    # 防止删除最后一个超级用户
+    super_count = await db.scalar(select(func.count()).select_from(User).where(User.is_super == True, User.is_deleted == False))  # noqa: E712
+    if super_count <= 1:
+        raise HTTPException(status_code=400, detail='无法删除最后一个超级用户')
     try:
         await user_service.delete_user(db, user_id)
         await db.commit()
@@ -97,6 +108,10 @@ async def update_user_permissions(user_id: int, data: UserPermissionUpdate, user
     """设置用户权限"""
     if not user.is_super:
         raise HTTPException(status_code=403, detail='仅超级用户可访问')
+    # 防止删除最后一个超级用户
+    super_count = await db.scalar(select(func.count()).select_from(User).where(User.is_super == True, User.is_deleted == False))  # noqa: E712
+    if super_count <= 1:
+        raise HTTPException(status_code=400, detail='无法删除最后一个超级用户')
     try:
         await user_service.update_user_permissions(db, user_id, data.permission_ids)
         await db.commit()

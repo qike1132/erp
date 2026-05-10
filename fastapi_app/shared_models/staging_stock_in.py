@@ -42,6 +42,7 @@ class StagingStockIn(Base):
         Index('idx_staging_stockin_session', 'session_id'),
         Index('idx_staging_stockin_status', 'status'),
         Index('idx_staging_stockin_created', 'created_at'),
+        Index('idx_staging_stockin_product', 'product_id'),
     )
 
     def __repr__(self):

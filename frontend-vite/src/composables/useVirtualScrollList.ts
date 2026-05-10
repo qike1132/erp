@@ -1,4 +1,4 @@
-import { ref, computed, watch, readonly } from 'vue'
+import { ref, computed, watch, readonly, onUnmounted } from 'vue'
 import { useInfiniteQuery } from '@tanstack/vue-query'
 import { get } from '@/api/request'
 import type { PaginatedResponse } from '@/types'
@@ -37,6 +37,7 @@ export function useVirtualScrollList<T>(opts: Options) {
     if (timer) clearTimeout(timer)
     timer = setTimeout(() => { dSearch.value = v }, debounceMs)
   })
+  onUnmounted(() => { if (timer) clearTimeout(timer) })
 
   const qk = computed(() => [
     key, dSearch.value, sortBy.value, sortOrder.value, extraParams?.() ?? {},

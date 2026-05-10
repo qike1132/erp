@@ -70,6 +70,7 @@ class ApprovalRequest(Base):
         Index('idx_approval_status_time', 'status', 'request_time'),
         Index('idx_approval_request_order', 'order_id'),
         Index('idx_approval_request_requester', 'requester_id'),
+        Index('idx_approval_approver', 'approver_id'),
     )
 
     @property
@@ -135,6 +136,7 @@ class ApprovalLog(Base):
 
     __table_args__ = (
         Index('idx_approval_log_request', 'approval_request_id'),
+        Index('idx_approval_log_actor', 'actor_id'),
     )
 
     @property

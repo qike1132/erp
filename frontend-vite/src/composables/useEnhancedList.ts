@@ -1,4 +1,4 @@
-import { ref, computed, watch, readonly } from 'vue'
+import { ref, computed, watch, readonly, onUnmounted } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { get } from '@/api/request'
 import type { PaginatedResponse } from '@/types'
@@ -18,6 +18,7 @@ export function useEnhancedList<T>(opts: Options) {
 
   let timer: ReturnType<typeof setTimeout> | null = null
   watch(search, (v) => { if (timer) clearTimeout(timer); timer = setTimeout(() => { dSearch.value = v; page.value = 1; keysetCursor.value = undefined }, debounceMs) })
+  onUnmounted(() => { if (timer) clearTimeout(timer) })
 
   const qk = computed(() => [key, page.value, perPage.value, dSearch.value, sortBy.value, sortOrder.value, keysetCursor.value, extraParams?.() ?? {}])
   const qp = computed(() => ({

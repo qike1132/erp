@@ -27,7 +27,7 @@
                 {{ authStore.user?.username || '用户' }}
               </div>
               <div class="user-role-header">
-                {{ authStore.user?.isSuper ? '超级管理员' : '普通用户' }}
+                {{ authStore.user?.is_super ? '超级管理员' : '普通用户' }}
               </div>
             </div>
           </div>

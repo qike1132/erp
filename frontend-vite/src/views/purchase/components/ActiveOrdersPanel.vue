@@ -23,8 +23,8 @@
       </div>
     </div>
 
-    <!-- Loading -->
-    <div v-if="loading" class="pc-loading-state">
+    <!-- Loading (initial only) -->
+    <div v-if="loading && orders.length === 0" class="pc-loading-state">
       <i class="fas fa-spinner fa-spin" />
       <span>加载中...</span>
     </div>
@@ -38,6 +38,7 @@
     <!-- Table -->
     <template v-else>
       <div class="pc-section-body">
+        <div v-if="fetching" class="pc-fetching-bar"><div class="pc-fetching-progress" /></div>
         <div class="pc-table-wrap">
           <table>
           <thead>
@@ -60,11 +61,11 @@
             <tr
               v-for="o in orders"
               :key="o.id"
-              :class="{ 'pc-row-selected': selectedIds.includes(o.id) }"
+              :class="{ 'pc-row-selected': selectedSet.has(o.id) }"
               @click="$emit('toggleSelection', o.id)"
             >
               <td class="pc-td-center" @click.stop>
-                <UiCheckbox :checked="selectedIds.includes(o.id)" @update:checked="$emit('toggleSelection', o.id)" />
+                <UiCheckbox :checked="selectedSet.has(o.id)" @update:checked="$emit('toggleSelection', o.id)" />
               </td>
               <td class="pc-td-nowrap">{{ o.create_time || o.order_date || '' }}</td>
               <td class="pc-td-nowrap">{{ o.source_order_no || o.order_no }}</td>
@@ -95,16 +96,20 @@
 import { computed } from 'vue'
 import UiCheckbox from '@/components/ui/UiCheckbox.vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
+import type { PurchaseOrder } from '@/types'
 
 const props = defineProps<{
-  orders: any[]
+  orders: PurchaseOrder[]
   loading: boolean
+  fetching?: boolean
   total: number
   currentPage: number
   totalPages: number
   selectedIds: number[]
   allSelected: boolean
 }>()
+
+const selectedSet = computed(() => new Set(props.selectedIds))
 
 defineEmits<{
   toggleAll: [checked: boolean]
@@ -297,5 +302,24 @@ defineEmits<{
 
 .pc-loading-state i {
   font-size: 20px;
+}
+
+/* Fetching progress bar */
+.pc-fetching-bar {
+  height: 2px;
+  background: var(--color-primary-100, #e0f2fe);
+  overflow: hidden;
+  border-radius: 1px;
+}
+.pc-fetching-progress {
+  height: 100%;
+  width: 30%;
+  background: var(--color-primary-500, #3b82f6);
+  border-radius: 1px;
+  animation: pc-progress-slide 1s ease-in-out infinite;
+}
+@keyframes pc-progress-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
 }
 </style>

@@ -35,6 +35,7 @@ class OrderStatusLog(Base):
         Index('idx_status_target', 'target_type', 'target_id'),
         Index('idx_status_time', 'action_time'),
         Index('idx_status_order', 'order_no'),
+        Index('idx_order_status_log_operator', 'operator_id'),
     )
 
     def to_dict(self):

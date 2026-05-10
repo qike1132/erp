@@ -1,0 +1,87 @@
+{
+  "date": "2026-05-10",
+  "commit": "55a084d",
+  "branch": "new-main",
+  "metrics": {
+    "frontend_bundle_js_kb": 1817.4,
+    "frontend_bundle_css_kb": 397.8,
+    "frontend_dist_total_mb": 2.54,
+    "frontend_js_file_count": 56,
+    "notable_large_chunks": {
+      "ProductionView.js_kb": 1115.7,
+      "index.js_kb": 116.2,
+      "plugin-vue_export-helper.js_kb": 107.1,
+      "PurchaseView.js_kb": 44.0,
+      "PurchasePlanView.js_kb": 36.0,
+      "CaseView.js_kb": 29.7,
+      "StockOutView.js_kb": 24.4
+    }
+  },
+  "performance_optimizations_applied": {
+    "backend": [
+      {
+        "id": "opt-1",
+        "file": "fastapi_app/services/order_service.py",
+        "change": "Keyset pagination (order_date, id) cursor replacing OFFSET for deep pages",
+        "expected_impact": "Deep page queries O(1) vs O(n) with OFFSET, eliminates sequential scan on page > 100"
+      },
+      {
+        "id": "opt-2",
+        "file": "fastapi_app/services/batch_service.py",
+        "change": "_batch_deduct_quantities() SQL aggregation replacing selectinload + Python loop",
+        "expected_impact": "Single SQL query vs N+1 ORM loads, estimated 10-50x faster for batches with many items"
+      },
+      {
+        "id": "opt-3",
+        "file": "fastapi_app/services/stock_service.py",
+        "change": "Fixed order.status not persisted after compute_order_status_from_db()",
+        "expected_impact": "Bug fix - order status now correctly updates and commits after stockout creation"
+      },
+      {
+        "id": "opt-4",
+        "file": "fastapi_app/services/customer_service.py",
+        "change": "Removed unused import (case, literal)",
+        "expected_impact": "Minor cleanup, no performance impact"
+      },
+      {
+        "id": "opt-5",
+        "file": "fastapi_app/api/v1/endpoints/staging_order.py",
+        "change": "Added page/per_page Query parameters for pagination",
+        "expected_impact": "API now supports pagination, prevents full table scans on staging orders"
+      }
+    ],
+    "frontend": [
+      {
+        "id": "opt-7",
+        "file": "frontend-vite/src/views/purchase-plan/PurchasePlanView.vue",
+        "change": "Merged rows + skuSummary computed into single _parsed pass, decoupled custFilter",
+        "expected_impact": "4 iterations over plans_by_date reduced to 1, eliminates unnecessary rows re-computation when custFilter changes"
+      },
+      {
+        "id": "opt-9a",
+        "file": "frontend-vite/src/views/order-batch/composables/useOrderBatch.ts",
+        "change": "300ms debounce on keyword search with onScopeDispose cleanup and immediate clear for empty",
+        "expected_impact": "Reduces API calls during typing from per-keystroke to max 3.3/sec"
+      },
+      {
+        "id": "opt-9b",
+        "file": "frontend-vite/src/views/order-batch/OrderBatchHistoryView.vue",
+        "change": "300ms debounce on batchNoFilter with immediate clear for empty",
+        "expected_impact": "Same as opt-9a"
+      },
+      {
+        "id": "opt-10",
+        "file": "frontend-vite/src/views/purchase/composables/useUnprocessedOrders.ts",
+        "change": "orderMap computed (Map) replacing O(n*m) .find() inside .filter() with O(1) .get()",
+        "expected_impact": "O(n*m) -> O(n+m) for validSelectedIds, significant when n orders * m selected items"
+      },
+      {
+        "id": "opt-11",
+        "file": "frontend-vite/src/views/stock/StockOutTab.vue",
+        "change": "Removed redundant stockApi.availableShipment() call, using cached shipmentInfo",
+        "expected_impact": "Eliminates 1 API call per staged item addition"
+      }
+    ]
+  },
+  "notes": "App not running during benchmark - no live API latency data. Backend metrics are theoretical based on code analysis. Frontend bundle size measured from existing dist/ build. Live API benchmark requires running PostgreSQL + uvicorn."
+}

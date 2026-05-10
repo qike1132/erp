@@ -171,10 +171,11 @@ async def api_get_order_print_data(order_id: int, db: AsyncSession=Depends(get_r
 @router.post('/orders/batch-print')
 async def api_get_orders_batch_print_data(data: OrderIdsRequest, db: AsyncSession=Depends(get_db), _user=Depends(require_permission('product_manage'))):
     from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
 
     from fastapi_app.shared_models import PurchaseOrder
-    result = await db.execute(select(PurchaseOrder).where(PurchaseOrder.id.in_(data.ids)))
-    orders = result.scalars().all()
+    result = await db.execute(select(PurchaseOrder).options(selectinload(PurchaseOrder.items)).where(PurchaseOrder.id.in_(data.ids)))
+    orders = result.scalars().unique().all()
     return {'success': True, 'orders': [o.to_dict() for o in orders]}
 
 @router.get('/unprocessed-orders')

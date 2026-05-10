@@ -1,136 +1,100 @@
 <template>
   <div class="batch-page">
-    <UiPageHeader>批次管理<template #description>查看和管理产品批次信息</template></UiPageHeader>
+    <UiPageHeader>批次号查询<template #description>按客户订单查询批次号及备货状态，仅显示白名单客户（MINISO）订单</template></UiPageHeader>
 
     <UiCard>
-      <div style="display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap">
-        <UiInput v-model="filters.batch_no" placeholder="批次号" style="width: 160px" />
-        <UiInput v-model="filters.sku" placeholder="SKU编号" style="width: 160px" />
+      <div class="bt-filterbar">
+        <UiInput v-model="filters.batch_no" placeholder="批次号" style="width: 140px" />
+        <UiInput v-model="filters.customer" placeholder="客户名称" style="width: 150px" />
         <UiSelect v-model="filters.status" placeholder="状态" style="width: 120px" :options="statusOptions" />
-        <UiDatePicker v-model="filters.startDate" style="width: 130px" />
-        <span style="line-height: 36px; color: var(--color-text-muted)">-</span>
-        <UiDatePicker v-model="filters.endDate" style="width: 130px" />
+        <UiInput v-model="filters.keyword" placeholder="订单号搜索" style="width: 160px" />
         <UiButton variant="primary" @click="refetch()"> 查询 </UiButton>
         <UiButton variant="outline" @click="exportData"> 导出 CSV </UiButton>
       </div>
 
-      <div v-if="isLoading" class="flex justify-center py-12">
+      <div v-if="isLoading && !result" class="flex justify-center py-12">
         <UiSpinner />
       </div>
-      <UiTable v-else>
+      <template v-else>
+      <div v-if="isFetching" class="bt-fetching-bar"><div class="bt-fetching-progress" /></div>
+      <UiTable>
         <template #header>
-          <th
-            class="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wider cursor-pointer hover:text-primary-500"
-            style="width: 160px"
-            @click="
-              handleSort({ prop: 'sku', order: sortBy === 'sku' && sortOrder === 'asc' ? 'ascending' : 'descending' })
-            "
-          >
-            SKU编号
-            <i
-              v-if="sortBy === 'sku'"
-              :class="sortOrder === 'asc' ? 'fas fa-sort-up' : 'fas fa-sort-down'"
-              class="ml-1"
-            />
+          <th class="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wider" style="width: 150px">
+            订单号
           </th>
-          <th
-            class="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wider cursor-pointer hover:text-primary-500"
-            style="width: 160px"
-            @click="
-              handleSort({
-                prop: 'batch_no',
-                order: sortBy === 'batch_no' && sortOrder === 'asc' ? 'ascending' : 'descending',
-              })
-            "
-          >
-            批次号
-            <i
-              v-if="sortBy === 'batch_no'"
-              :class="sortOrder === 'asc' ? 'fas fa-sort-up' : 'fas fa-sort-down'"
-              class="ml-1"
-            />
+          <th class="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wider" style="width: 120px">
+            客户
           </th>
-          <th
-            class="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wider"
-            style="min-width: 150px"
-          >
+          <th class="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wider" style="min-width: 130px">
             产品名称
           </th>
-          <th
-            class="px-4 py-3 text-right text-xs font-semibold text-text-secondary uppercase tracking-wider"
-            style="width: 100px"
-          >
-            数量
+          <th class="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wider" style="width: 120px">
+            SKU条码
           </th>
-          <th
-            class="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wider"
-            style="width: 100px"
-          >
+          <th class="px-4 py-3 text-right text-xs font-semibold text-text-secondary uppercase tracking-wider" style="width: 80px">
+            订单数量
+          </th>
+          <th class="px-4 py-3 text-right text-xs font-semibold text-text-secondary uppercase tracking-wider" style="width: 80px">
+            备货数量
+          </th>
+          <th class="px-4 py-3 text-right text-xs font-semibold text-text-secondary uppercase tracking-wider" style="width: 80px">
+            出货数量
+          </th>
+          <th class="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wider" style="width: 90px">
             状态
           </th>
-          <th
-            class="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wider cursor-pointer hover:text-primary-500"
-            style="width: 120px"
-            @click="
-              handleSort({
-                prop: 'production_date',
-                order: sortBy === 'production_date' && sortOrder === 'asc' ? 'ascending' : 'descending',
-              })
-            "
-          >
-            生产日期
-            <i
-              v-if="sortBy === 'production_date'"
-              :class="sortOrder === 'asc' ? 'fas fa-sort-up' : 'fas fa-sort-down'"
-              class="ml-1"
-            />
-          </th>
-          <th
-            class="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wider"
-            style="width: 120px"
-          >
-            有效期
+          <th class="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wider" style="width: 130px">
+            批次号
           </th>
         </template>
         <tr
           v-for="row in items"
-          :key="row.id ?? row.batch_no"
+          :key="row.id"
           class="border-b border-border-light hover:bg-surface transition-colors"
         >
-          <td class="px-4 py-3 text-sm">
-            {{ row.sku }}
+          <td class="px-4 py-3 text-sm font-mono">
+            {{ row.order_no }}
           </td>
           <td class="px-4 py-3 text-sm">
-            {{ row.batch_no }}
+            {{ row.customer }}
           </td>
           <td class="px-4 py-3 text-sm">
-            {{ row.product_name }}
+            {{ row.product_name ?? '-' }}
+          </td>
+          <td class="px-4 py-3 text-sm font-mono">
+            {{ row.product_barcode ?? '-' }}
           </td>
           <td class="px-4 py-3 text-sm text-right">
             {{ row.quantity }}
           </td>
+          <td class="px-4 py-3 text-sm text-right">
+            <span :class="row.deducted_qty >= row.quantity ? 'text-green-600 font-medium' : row.deducted_qty > 0 ? 'text-amber-600' : 'text-text-muted'">
+              {{ row.deducted_qty }}
+            </span>
+          </td>
+          <td class="px-4 py-3 text-sm text-right">
+            <span :class="row.shipped_qty > 0 ? 'text-blue-600 font-medium' : 'text-text-muted'">
+              {{ row.shipped_qty }}
+            </span>
+          </td>
           <td class="px-4 py-3 text-sm">
-            <UiBadge
-              :variant="row.status === 'completed' ? 'completed' : row.status === 'discontinued' ? 'info' : 'pending'"
-            >
-              {{ row.status === 'completed' ? '完成' : row.status === 'discontinued' ? '停用' : '在产' }}
+            <UiBadge :variant="statusVariant(row.status)">
+              {{ statusLabel(row.status) }}
             </UiBadge>
           </td>
-          <td class="px-4 py-3 text-sm">
-            {{ row.production_date }}
-          </td>
-          <td class="px-4 py-3 text-sm">
-            {{ row.expiry_date }}
+          <td class="px-4 py-3 text-sm font-mono">
+            {{ row.batch_no ?? '-' }}
           </td>
         </tr>
         <template v-if="!items.length">
           <tr>
-            <td colspan="7">
+            <td colspan="9">
               <UiEmpty text="暂无批次数据" />
             </td>
           </tr>
         </template>
       </UiTable>
+      </template>
 
       <UiPagination :current-page="page" :total-pages="totalPages" @update:current-page="handlePageChange" />
     </UiCard>
@@ -139,11 +103,12 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed } from 'vue'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery, keepPreviousData } from '@tanstack/vue-query'
 import { batchApi } from '@/api'
+import type { BatchQueryItem } from '@/types'
 import UiCard from '@/components/ui/UiCard.vue'
 import UiInput from '@/components/ui/UiInput.vue'
-import UiDatePicker from '@/components/ui/UiDatePicker.vue'
+import UiSelect from '@/components/ui/UiSelect.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiTable from '@/components/ui/UiTable.vue'
 import UiBadge from '@/components/ui/UiBadge.vue'
@@ -156,48 +121,54 @@ import { showToast } from '@/composables/useToast'
 const page = ref(1)
 const perPage = ref(20)
 const total = ref(0)
-const sortBy = ref('')
-const sortOrder = ref('desc')
 
-const filters = reactive({ batch_no: '', sku: '', status: '', startDate: '', endDate: '' })
+const filters = reactive({ batch_no: '', customer: '', status: '', keyword: '' })
 
 const statusOptions = [
   { value: '', label: '全部' },
-  { value: 'in_production', label: '在产' },
-  { value: 'completed', label: '完成' },
-  { value: 'discontinued', label: '停用' },
+  { value: '待备货', label: '待备货' },
+  { value: '部分备货', label: '部分备货' },
+  { value: '已备货', label: '已备货' },
+  { value: '待出货', label: '待出货' },
+  { value: '已出货', label: '已出货' },
+  { value: '批次已完成', label: '批次已完成' },
 ]
+
+const statusVariant = (s: string | null): string => {
+  if (!s) return 'default'
+  if (s === '已出货' || s === '批次已完成') return 'completed'
+  if (s === '待备货') return 'pending'
+  if (s === '部分备货' || s === '待出货') return 'warning'
+  if (s === '已备货') return 'info'
+  return 'default'
+}
+
+const statusLabel = (s: string | null): string => s ?? '-'
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / perPage.value)))
 
 const {
   data: result,
   isLoading,
+  isFetching,
   refetch,
 } = useQuery({
-  queryKey: ['batch-list', page, perPage, sortBy, sortOrder, filters],
+  queryKey: ['batch-query', page, perPage, filters],
   queryFn: async () => {
-    const params: Record<string, any> = { page: page.value, per_page: perPage.value }
+    const params: Record<string, unknown> = { page: page.value, per_page: perPage.value }
     if (filters.batch_no) params.batch_no = filters.batch_no
-    if (filters.sku) params.sku = filters.sku
+    if (filters.customer) params.customer = filters.customer
     if (filters.status) params.status = filters.status
-    if (sortBy.value) {
-      params.sort_by = sortBy.value
-      params.sort_order = sortOrder.value
-    }
-    const res = (await batchApi.list(params)) as any
-    total.value = res.total ?? 0
+    if (filters.keyword) params.keyword = filters.keyword
+    const res = await batchApi.list(params)
+    total.value = (res as any).total ?? 0
     return res
   },
   staleTime: 30_000,
+  placeholderData: keepPreviousData,
 })
 
-const items = computed(() => result.value?.items ?? result.value?.data ?? [])
-
-function handleSort({ prop, order }: any) {
-  sortBy.value = prop || ''
-  sortOrder.value = order === 'ascending' ? 'asc' : 'desc'
-}
+const items = computed<BatchQueryItem[]>(() => (result.value as any)?.data ?? [])
 
 function handlePageChange(p: number) {
   page.value = p
@@ -209,18 +180,54 @@ function exportData() {
     showToast('无数据可导出', 'warning')
     return
   }
-  const headers = ['SKU编号', '批次号', '产品名称', '数量', '状态', '生产日期', '有效期']
+  const headers = ['订单号', '客户', '产品名称', 'SKU条码', '订单数量', '备货数量', '出货数量', '状态', '批次号']
   let csv = '\uFEFF' + headers.join(',') + '\n'
-  items.value.forEach((r: any) => {
+  items.value.forEach((r) => {
     csv +=
-      [r.sku, r.batch_no, r.product_name, r.quantity, r.status, r.production_date, r.expiry_date]
-        .map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`)
+      [r.order_no, r.customer, r.product_name ?? '', r.product_barcode ?? '', r.quantity, r.deducted_qty, r.shipped_qty, r.status ?? '', r.batch_no ?? '']
+        .map((c) => {
+          let s = String(c).replace(/"/g, '""')
+          if (/^[=+\-@\t\r]/.test(s)) s = "'" + s
+          return `"${s}"`
+        })
         .join(',') + '\n'
   })
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
   const link = document.createElement('a')
   link.href = URL.createObjectURL(blob)
-  link.download = `批次管理_${new Date().toISOString().slice(0, 10)}.csv`
+  link.download = `批次号查询_${new Date().toISOString().slice(0, 10)}.csv`
   link.click()
+  URL.revokeObjectURL(link.href)
 }
 </script>
+
+<style scoped>
+.bt-filterbar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.bt-fetching-bar {
+  height: 2px;
+  background: var(--color-primary-100, #e0f2fe);
+  overflow: hidden;
+  border-radius: 1px;
+  margin-bottom: 8px;
+}
+
+.bt-fetching-progress {
+  height: 100%;
+  width: 30%;
+  background: var(--color-primary-500, #3b82f6);
+  border-radius: 1px;
+  animation: bt-progress-slide 1s ease-in-out infinite;
+}
+
+@keyframes bt-progress-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+</style>
