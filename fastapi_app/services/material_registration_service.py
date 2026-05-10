@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import DisconnectionError, OperationalError
 from sqlalchemy.orm import joinedload, selectinload
 
+from fastapi_app.core.cache import cache_result, invalidate_cache, CacheDomain, invalidate_related_caches
 from fastapi_app.services import escape_like
 from fastapi_app.shared_models import (
     MaterialRegistration,
@@ -17,6 +18,37 @@ from fastapi_app.shared_models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+async def _get_material_stats(db) -> dict:
+    """获取来料统计数据（独立缓存，不随列表请求每次执行）"""
+    status_counts_result = await db.execute(
+        select(MaterialRegistration.status, func.count())
+        .where(MaterialRegistration.status.in_(['pending', 'partial', 'completed']))
+        .group_by(MaterialRegistration.status)
+    )
+    status_counts = {row[0]: row[1] for row in status_counts_result}
+    pending_count = status_counts.get('pending', 0)
+    partial_count = status_counts.get('partial', 0)
+    completed_count = status_counts.get('completed', 0)
+    total_all = sum(status_counts.values())
+
+    totals_result = await db.execute(
+        select(
+            func.sum(MaterialRegistrationItem.ordered_quantity),
+            func.sum(MaterialRegistrationItem.received_quantity),
+        )
+    )
+    totals_row = totals_result.one()
+    total_ordered = totals_row[0] or 0
+    total_received = totals_row[1] or 0
+
+    return {
+        'total': total_all, 'pending': pending_count, 'partial': partial_count,
+        'completed': completed_count,
+        'total_ordered': float(total_ordered), 'total_received': float(total_received),
+        'overall_progress': min(round(float(total_received) / float(total_ordered or 1) * 100, 1), 99.9) if completed_count < total_all else (100.0 if total_all > 0 else 0),
+    }
 
 
 async def get_registrations(db, page: int = 1, per_page: int = 20,
@@ -75,33 +107,7 @@ async def get_registrations(db, page: int = 1, per_page: int = 20,
     result = await db.execute(query)
     registrations = list(result.scalars().all())
 
-    status_counts_result = await db.execute(
-        select(MaterialRegistration.status, func.count())
-        .where(MaterialRegistration.status.in_(['pending', 'partial', 'completed']))
-        .group_by(MaterialRegistration.status)
-    )
-    status_counts = {row[0]: row[1] for row in status_counts_result}
-    pending_count = status_counts.get('pending', 0)
-    partial_count = status_counts.get('partial', 0)
-    completed_count = status_counts.get('completed', 0)
-    total_all = sum(status_counts.values())
-
-    totals_result = await db.execute(
-        select(
-            func.sum(MaterialRegistrationItem.ordered_quantity),
-            func.sum(MaterialRegistrationItem.received_quantity),
-        )
-    )
-    totals_row = totals_result.one()
-    total_ordered = totals_row[0] or 0
-    total_received = totals_row[1] or 0
-
-    stats = {
-        'total': total_all, 'pending': pending_count, 'partial': partial_count,
-        'completed': completed_count,
-        'total_ordered': float(total_ordered), 'total_received': float(total_received),
-        'overall_progress': min(round(float(total_received) / float(total_ordered or 1) * 100, 1), 99.9) if completed_count < total_all else (100.0 if total_all > 0 else 0),
-    }
+    stats = await _get_material_stats(db)
 
     return {
         'success': True,
@@ -404,7 +410,7 @@ async def export_registrations(db, order_no: str = '', supplier: str = '',
         except ValueError:
             pass
 
-    query = query.order_by(MaterialRegistration.create_time.desc())
+    query = query.order_by(MaterialRegistration.create_time.desc()).limit(5000)
     result = await db.execute(query)
     registrations = list(result.unique().scalars().all())
 

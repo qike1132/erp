@@ -38,7 +38,8 @@ class CacheDomain(Flag):
     # 常用组合
     ORDER_AND_INVENTORY = ORDER | INVENTORY
     STOCKOUT = auto()
-    ALL = ORDER | INVENTORY | STOCKIN | STOCKOUT | PRODUCT | CUSTOMER | SEARCH
+    MATERIAL = auto()
+    ALL = ORDER | INVENTORY | STOCKIN | STOCKOUT | PRODUCT | CUSTOMER | SEARCH | MATERIAL
 
 
 # 缓存域 → pattern 映射（仅允许单域 key，禁止添加组合域 key，
@@ -51,6 +52,7 @@ _DOMAIN_PATTERN_MAP: dict[CacheDomain, str] = {
     CacheDomain.CUSTOMER: "customers:*",
     CacheDomain.SEARCH: "search:*",
     CacheDomain.STOCKOUT: "stockouts:*",
+    CacheDomain.MATERIAL: "material:*",
 }
 
 

@@ -122,6 +122,7 @@ This is not optional. If a task matches a gstack skill, the methodology file IS 
 | 合并部署 / land and deploy / merge PR / 上线验证 | `/land-and-deploy` | `.claude/gstack-land-and-deploy.md` |
 | 更新文档 / document release / 发布文档 | `/document-release` | `.claude/gstack-document-release.md` |
 | 性能基准 / benchmark / 性能回归 / Core Web Vitals | `/benchmark` | `.claude/gstack-benchmark.md` |
+| 部署配置 / setup deploy / configure deployment / 部署设置 | `/setup-deploy` | `.claude/gstack-setup-deploy.md` |
 
 ### Routing Decision Process
 
@@ -161,6 +162,7 @@ User message received
 - `/document-release` → Update README, CHANGELOG, API docs, migration guides after shipping
 - `/cso` → OWASP Top 10 + STRIDE, daily (8/10) or comprehensive (2/10) mode
 - `/benchmark` → Performance baseline + regression detection (API latency, bundle size, query time)
+- `/setup-deploy` → Detect deploy platform, configure health checks, write deploy config to CLAUDE.md
 - `/context-save` → Save git state + decisions + remaining work to checkpoint file
 - `/context-restore` → Load saved context and resume where you left off
 - `/learn` → View, search, prune, export project learnings across sessions

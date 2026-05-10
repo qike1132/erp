@@ -267,7 +267,7 @@
               <VirtualList
                 :items="stockoutRecords"
                 :itemHeight="40"
-                :containerHeight="400"
+                :containerHeight="460"
                 :itemKey="(r: any) => r.shipment_no"
               >
                 <template #default="{ item: rec }">
@@ -1663,11 +1663,8 @@ function exportCSV() {
   opacity: 1;
 }
 
-.sp-sidebar-list {
-  flex: 1;
-  overflow-y: auto;
-  min-height: 0;
-}
+
+
 
 .sp-customer-item {
   padding: 12px 14px;

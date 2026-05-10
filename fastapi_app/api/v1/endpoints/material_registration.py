@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.schemas.material_registration import (
@@ -42,6 +43,7 @@ async def create_registration(data: MaterialRegistrationCreate, user: User=Depen
     try:
         result = await mr_service.create_registration(db, data.purchase_order_id, user.id, user.username, data.remark, [item.model_dump() for item in data.items])
         await db.commit()
+        await invalidate_related_caches(CacheDomain.MATERIAL)
         return RegistrationDetailResponse(registration=result['registration'])
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -56,6 +58,7 @@ async def update_registration(reg_id: int, data: MaterialRegistrationUpdate, use
     try:
         result = await mr_service.update_registration(db, reg_id, data.status, data.remark, data.items)
         await db.commit()
+        await invalidate_related_caches(CacheDomain.MATERIAL)
         return RegistrationDetailResponse(registration=result['registration'])
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
@@ -70,6 +73,7 @@ async def delete_registration(reg_id: int, user: User=Depends(require_permission
     try:
         result = await mr_service.delete_registration(db, reg_id)
         await db.commit()
+        await invalidate_related_caches(CacheDomain.MATERIAL)
         return ActionResponse(message=result['message'])
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
@@ -99,6 +103,7 @@ async def receive_material(item_id: int, data: ReceiveMaterialRequest, user: Use
     try:
         result = await mr_service.receive_material(db, item_id, data.received_quantity, data.remark)
         await db.commit()
+        await invalidate_related_caches(CacheDomain.MATERIAL)
         return RegistrationDetailResponse(registration=result['registration'])
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
