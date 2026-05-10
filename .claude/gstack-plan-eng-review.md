@@ -1,8 +1,24 @@
 # /plan-eng-review — Engineering Plan Review (Comate Adapted)
 
-> Lock architecture, data flow, edge cases, and test requirements.
+> Lock architecture, data flow, edge cases, test requirements, and performance considerations. Opinionated recommendations, not just observations.
 
-## Step 1: Architecture Lock
+## Required Checklist
+
+Every eng review MUST cover all 5 sections. NEVER skip or compress the test review.
+
+### 1. Scope Challenge
+
+Before reviewing architecture, challenge whether the plan maps correctly to existing code:
+
+- **Read actual code** — not just the plan's description of it
+- **Map sub-problems to existing code** — which files/functions already solve parts of this?
+- **Check for scope creep** — is the plan solving problems that don't exist?
+- **Check for missing scope** — is the plan ignoring parts of the blast radius?
+- **Second-order effects** — "If we do X, what happens to Y? And then what happens because Y changed?"
+- **Coupling radar** — "Which other systems will need to change if we change this?"
+- **Failure mode anticipation** — "What happens when this fails? And then what?"
+
+### 2. Architecture Review
 
 For each architectural decision in the plan:
 
@@ -11,12 +27,79 @@ For each architectural decision in the plan:
 3. **Check coupling** — which components depend on this decision? How hard to change later?
 4. **Check reversibility** — is this a one-way door or two-way door? If one-way, is the evidence strong enough?
 
-Cognitive patterns to apply:
-- **Second-order effects**: "If we do X, what happens to Y? And then what happens because Y changed?"
-- **Coupling radar**: "Which other systems will need to change if we change this?"
-- **Failure mode anticipation**: "What happens when this fails? And then what?"
+**Produce an ASCII dependency graph** showing component relationships:
+```
+[AuthService] ──→ [UserDB]
+     │
+     ├──→ [SessionCache]
+     │
+     └──→ [APIGateway] ──→ [OrderService] ──→ [OrderDB]
+```
 
-## Step 2: Data Flow Mapping
+Evaluate:
+- **Coupling** — which components are tightly coupled? Should they be?
+- **Scaling** — where are the bottlenecks? What breaks at 10x traffic?
+- **Security** — where are the trust boundaries? What needs authentication?
+
+### 3. Code Quality Review
+
+Identify issues in the proposed implementation:
+- **DRY violations** — same logic in multiple places
+- **Naming** — unclear or inconsistent names
+- **Complexity** — functions > 50 lines, nesting > 3 levels
+- **Error handling** — missing error cases, swallowed errors
+- **Type safety** — any types, type assertions, missing validation
+- **Dead code** — unused imports, unreachable paths
+
+### 4. Test Review — NEVER SKIP OR COMPRESS
+
+**This section is MANDATORY.** It is NEVER acceptable to skip it, compress it to a one-liner, or write "tests look good."
+
+1. **Read actual code** — understand what codepaths exist
+2. **Build a test diagram** — map every codepath to a test case:
+
+```
+Codepath → Test Required → Test Exists? → Coverage Gap?
+─────────────────────────────────────────────────────────
+POST /api/orders (happy) → Integration test → No → YES
+POST /api/orders (invalid) → Unit test → No → YES
+POST /api/orders (unauth) → Integration test → Yes → No
+```
+
+3. **Categorize test requirements:**
+
+**Happy Path Tests** (MUST have):
+- Core workflow end-to-end
+- Each API endpoint with valid input
+- Each user-facing feature
+
+**Sad Path Tests** (MUST have):
+- Each validation rule with invalid input
+- Each error handler
+- Authentication/authorization failures
+
+**Integration Tests** (MUST have):
+- Cross-service interactions
+- Database operations (not mocked)
+- External API calls (with contract tests)
+
+**Performance Tests** (if relevant):
+- Expected load capacity
+- Response time under load
+- Database query performance
+
+### 5. Performance Review
+
+Identify potential bottlenecks systematically:
+- **N+1 queries** — any loop that makes a query per iteration
+- **Missing indexes** — queries filtering/sorting without index support
+- **Large data transfers** — sending entire tables when pagination would work
+- **Synchronous operations that should be async** — blocking I/O, long computations
+- **Memory-intensive operations** — loading entire datasets into memory
+- **Hot paths that need optimization** — code on the critical request path
+- **Caching opportunities** — data that's read often but rarely changes
+
+## Data Flow Mapping
 
 Trace data through the system:
 ```
@@ -31,7 +114,7 @@ For each step, verify:
 - Retrieval is efficient (indexes, query patterns)
 - Output is correct (format, completeness, timeliness)
 
-## Step 3: Edge Case Enumeration
+## Edge Case Enumeration
 
 Systematically identify boundary conditions:
 
@@ -61,39 +144,6 @@ Systematically identify boundary conditions:
 - Clock skew between services
 - Long-running operations
 
-## Step 4: Test Coverage Requirements
-
-Define what MUST be tested (not nice-to-have, MUST):
-
-### Happy Path Tests
-- Core workflow end-to-end
-- Each API endpoint with valid input
-
-### Sad Path Tests
-- Each validation rule with invalid input
-- Each error handler
-- Authentication/authorization failures
-
-### Integration Tests
-- Cross-service interactions
-- Database operations (not mocked)
-- External API calls (with contract tests)
-
-### Performance Tests (if relevant)
-- Expected load capacity
-- Response time under load
-- Database query performance
-
-## Step 5: Performance Considerations
-
-Identify potential bottlenecks:
-- N+1 queries
-- Missing indexes
-- Large data transfers
-- Synchronous operations that should be async
-- Memory-intensive operations
-- Hot paths that need optimization
-
 ## Output Format
 
 ```
@@ -104,26 +154,39 @@ Identify potential bottlenecks:
 |----------|-------------|---------|---------------|------------|
 | [Decision] | [Alts] | [Low/Med/High] | [One/Two-way] | [High/Med/Low] |
 
+### Dependency Graph
+[ASCII diagram]
+
 ### Data Flow
-[ASCII diagram or structured description]
+[Structured description with validation at each step]
 
 ### Critical Edge Cases
 1. [Edge case] → [Handling plan] → [Test required?]
 
-### Test Requirements
+### Test Diagram
+[Every codepath mapped to test requirement]
+
+### Test Requirements (MUST)
 - [ ] [Test 1]
 - [ ] [Test 2]
 
 ### Performance Concerns
 1. [Concern] → [Mitigation]
 
+### Failure Modes Registry
+1. [Failure mode] → [Likelihood] → [Impact] → [Mitigation]
+
 ### Risks
 1. [Risk] → [Likelihood: High/Med/Low] → [Impact: High/Med/Low] → [Mitigation]
+
+### TODOS.md Updates
+- [Add any items discovered during review]
 ```
 
-## Proactive Trigger Rules
+## Important Rules
 
-Invoke this skill when:
-- User is planning a new feature or architecture change
-- User asks for engineering review
-- Before starting implementation of a complex feature
+- **Test review is NEVER optional.** Every codepath must be mapped.
+- **Read actual code.** Don't review the plan in a vacuum — check what exists.
+- **Produce the dependency graph.** It's not optional decoration — it forces you to think about coupling.
+- **Edge cases are systematic.** Don't just list the ones you happen to think of — go through each category.
+- **Performance review must check for N+1.** This is the most common and most damaging performance issue.

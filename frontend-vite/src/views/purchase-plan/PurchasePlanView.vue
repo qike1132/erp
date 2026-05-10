@@ -186,25 +186,30 @@
           <div v-if="modalTab === 'plans'" class="sp-modal-body">
             <div class="sp-modal-split">
               <div class="sp-modal-sidebar">
-                <div class="sp-sidebar-list">
-                  <div
-                    v-for="(group, cname) in filteredModalCustomers"
-                    :key="cname"
-                    class="sp-customer-item"
-                    :class="{ 'sp-customer-selected': modalSelCust === cname }"
-                    @click="modalSelCust = cname"
-                  >
-                    <div class="sp-customer-row">
-                      <span class="sp-customer-name">{{ cname }}</span>
-                      <span class="sp-customer-badge">{{ group.length }}</span>
+                <VirtualList
+                  :items="customerList"
+                  :itemHeight="72"
+                  :containerHeight="460"
+                  :itemKey="(c: any) => c.name"
+                >
+                  <template #default="{ item: entry }">
+                    <div
+                      class="sp-customer-item"
+                      :class="{ 'sp-customer-selected': modalSelCust === entry.name }"
+                      @click="modalSelCust = entry.name"
+                    >
+                      <div class="sp-customer-row">
+                        <span class="sp-customer-name">{{ entry.name }}</span>
+                        <span class="sp-customer-badge">{{ entry.plans.length }}</span>
+                      </div>
+                      <div class="sp-customer-summary">
+                        <span class="sp-customer-summary-item"><b>{{ entry.plans.reduce((s: number, p: any) => s + Number(p.quantity || 0), 0) }}</b> 计划</span>
+                        <span class="sp-customer-summary-item sp-customer-summary-shipped"><b>{{ entry.plans.reduce((s: number, p: any) => s + Number(p.shipped_qty || 0), 0) }}</b> 已出</span>
+                        <span class="sp-customer-summary-item sp-customer-summary-pending"><b>{{ entry.plans.reduce((s: number, p: any) => s + Number(p.remaining_qty || 0), 0) }}</b> 待出</span>
+                      </div>
                     </div>
-                    <div class="sp-customer-summary">
-                      <span class="sp-customer-summary-item"><b>{{ group.reduce((s, p) => s + Number(p.quantity || 0), 0) }}</b> 计划</span>
-                      <span class="sp-customer-summary-item sp-customer-summary-shipped"><b>{{ group.reduce((s, p) => s + Number(p.shipped_qty || 0), 0) }}</b> 已出</span>
-                      <span class="sp-customer-summary-item sp-customer-summary-pending"><b>{{ group.reduce((s, p) => s + Number(p.remaining_qty || 0), 0) }}</b> 待出</span>
-                    </div>
-                  </div>
-                </div>
+                  </template>
+                </VirtualList>
               </div>
               <div class="sp-modal-main">
                 <div v-if="modalSelGroup" class="sp-plan-list-header">
@@ -259,13 +264,22 @@
                 <span class="sp-stockout-col-product">产品</span>
                 <span class="sp-stockout-col-qty">数量</span>
               </div>
-              <div v-for="rec in stockoutRecords" :key="rec.shipment_no" class="sp-stockout-row">
-                <span class="sp-stockout-col-date">{{ rec.shipment_date }}</span>
-                <span class="sp-stockout-col-no">{{ rec.shipment_no }}</span>
-                <span class="sp-stockout-col-customer">{{ rec.customer_name }}</span>
-                <span class="sp-stockout-col-product">{{ rec.product_name }}</span>
-                <span class="sp-stockout-col-qty">{{ rec.quantity }}</span>
-              </div>
+              <VirtualList
+                :items="stockoutRecords"
+                :itemHeight="40"
+                :containerHeight="400"
+                :itemKey="(r: any) => r.shipment_no"
+              >
+                <template #default="{ item: rec }">
+                  <div class="sp-stockout-row">
+                    <span class="sp-stockout-col-date">{{ rec.shipment_date }}</span>
+                    <span class="sp-stockout-col-no">{{ rec.shipment_no }}</span>
+                    <span class="sp-stockout-col-customer">{{ rec.customer_name }}</span>
+                    <span class="sp-stockout-col-product">{{ rec.product_name }}</span>
+                    <span class="sp-stockout-col-qty">{{ rec.quantity }}</span>
+                  </div>
+                </template>
+              </VirtualList>
             </div>
           </div>
 
@@ -610,6 +624,11 @@ const selDetail = computed(() => sel.value ? rowMap.value.get(sel.value) ?? null
 const filteredModalCustomers = computed(() => {
   if (!selDetail.value) return {};
   return selDetail.value._byCustomer;
+});
+
+const customerList = computed(() => {
+  const obj = filteredModalCustomers.value;
+  return Object.entries(obj).map(([name, plans]) => ({ name, plans }));
 });
 
 const modalSelGroup = computed(() => {

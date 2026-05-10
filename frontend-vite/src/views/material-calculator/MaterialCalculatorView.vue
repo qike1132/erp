@@ -86,25 +86,32 @@
               <i class="fas fa-inbox" />
               <span>暂无产品</span>
             </div>
-            <div
-              v-for="p in filteredProducts"
-              :key="p.id"
-              :class="['mc-product-item', selectedProducts.includes(p.id) ? 'selected' : '']"
-              @click="toggleProduct(p)"
+            <VirtualList
+              :items="filteredProducts"
+              :itemHeight="52"
+              :containerHeight="600"
+              :itemKey="(p: any) => p.id"
             >
-              <i :class="['mc-checkbox', selectedProducts.includes(p.id) ? 'fas fa-check-square' : 'far fa-square']" />
-              <div class="mc-product-details">
-                <div class="mc-product-name">
-                  {{ p.name }}
+              <template #default="{ item: p }">
+                <div
+                  :class="['mc-product-item', selectedProducts.includes(p.id) ? 'selected' : '']"
+                  @click="toggleProduct(p)"
+                >
+                  <i :class="['mc-checkbox', selectedProducts.includes(p.id) ? 'fas fa-check-square' : 'far fa-square']" />
+                  <div class="mc-product-details">
+                    <div class="mc-product-name">
+                      {{ p.name }}
+                    </div>
+                    <div v-if="p.barcode" class="mc-product-code">
+                      {{ p.barcode }}
+                    </div>
+                  </div>
+                  <span :class="['mc-bom-badge', p.has_bom ? 'has-bom' : 'no-bom']">
+                    {{ p.has_bom ? '有BOM' : '无BOM' }}
+                  </span>
                 </div>
-                <div v-if="p.barcode" class="mc-product-code">
-                  {{ p.barcode }}
-                </div>
-              </div>
-              <span :class="['mc-bom-badge', p.has_bom ? 'has-bom' : 'no-bom']">
-                {{ p.has_bom ? '有BOM' : '无BOM' }}
-              </span>
-            </div>
+              </template>
+            </VirtualList>
           </div>
         </div>
 
@@ -228,6 +235,7 @@ import { purchaseApi } from '@/api'
 import { showToast } from '@/composables/useToast'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
+import VirtualList from '@/components/ui/VirtualList.vue'
 import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 
 interface Product {
@@ -740,7 +748,7 @@ async function triggerCalculation() {
 .mc-product-list {
   padding: 0 16px 16px;
   flex: 1;
-  overflow-y: auto;
+  overflow: hidden;
   min-height: 0;
 }
 
