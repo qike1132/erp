@@ -13,6 +13,7 @@ import contextlib
 import logging
 import os
 import re
+import threading
 import uuid
 from datetime import datetime
 
@@ -27,34 +28,35 @@ from fastapi_app.shared_models import Customer, Product, StagingStockOut
 
 logger = logging.getLogger(__name__)
 _progress_store: dict[str, dict] = {}
+_progress_lock = threading.Lock()
 _PROGRESS_MAX_AGE = 3600
 
 def _cleanup_progress_store():
-    """清理过期的进度记录"""
     import time
     now = time.time()
-    expired_keys = [k for k, v in _progress_store.items() if now - v.get('_created_at', 0) > _PROGRESS_MAX_AGE]
-    for k in expired_keys:
-        del _progress_store[k]
+    with _progress_lock:
+        expired_keys = [k for k, v in _progress_store.items() if now - v.get('_created_at', 0) > _PROGRESS_MAX_AGE]
+        for k in expired_keys:
+            del _progress_store[k]
 
 def create_progress() -> str:
-    """创建新的进度追踪 ID，返回 task_id"""
     import time
     _cleanup_progress_store()
     task_id = str(uuid.uuid4())
-    _progress_store[task_id] = {'status': 'pending', 'percent': 0, 'message': '等待处理...', 'filename': '', '_created_at': time.time()}
+    with _progress_lock:
+        _progress_store[task_id] = {'status': 'pending', 'percent': 0, 'message': '等待处理...', 'filename': '', '_created_at': time.time()}
     return task_id
 
 def get_progress(task_id: str) -> dict:
-    """获取进度信息"""
-    return _progress_store.get(task_id, {'status': 'not_found', 'percent': 0, 'message': '任务不存在'})
+    with _progress_lock:
+        return _progress_store.get(task_id, {'status': 'not_found', 'percent': 0, 'message': '任务不存在'}).copy()
 
 def _update_progress(task_id: str, **kwargs):
-    """更新进度（防止百分比倒退，错误状态除外）"""
-    if task_id in _progress_store:
-        if 'percent' in kwargs and kwargs.get('status') != 'error' and ('percent' in _progress_store[task_id]):
-            kwargs['percent'] = max(kwargs['percent'], _progress_store[task_id]['percent'])
-        _progress_store[task_id].update(kwargs)
+    with _progress_lock:
+        if task_id in _progress_store:
+            if 'percent' in kwargs and kwargs.get('status') != 'error' and ('percent' in _progress_store[task_id]):
+                kwargs['percent'] = max(kwargs['percent'], _progress_store[task_id]['percent'])
+            _progress_store[task_id].update(kwargs)
 _pdf_extracter = None
 _img_extracter = None
 _table_extracter = None

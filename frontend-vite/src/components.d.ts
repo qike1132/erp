@@ -12,9 +12,11 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     BackupRecordList: typeof import('./components/backup/BackupRecordList.vue')['default']
+    RealTimeSyncExample: typeof import('./components/RealTimeSyncExample.vue')['default']
     RestoreProgressBar: typeof import('./components/backup/RestoreProgressBar.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    SyncStatusIndicator: typeof import('./components/SyncStatusIndicator.vue')['default']
     UiAlert: typeof import('./components/ui/UiAlert.vue')['default']
     UiBadge: typeof import('./components/ui/UiBadge.vue')['default']
     UiButton: typeof import('./components/ui/UiButton.vue')['default']
@@ -34,6 +36,7 @@ declare module 'vue' {
     UiProgress: typeof import('./components/ui/UiProgress.vue')['default']
     UiProgressBar: typeof import('./components/ui/UiProgressBar.vue')['default']
     UiSelect: typeof import('./components/ui/UiSelect.vue')['default']
+    UiSkeleton: typeof import('./components/ui/UiSkeleton.vue')['default']
     UiSpinner: typeof import('./components/ui/UiSpinner.vue')['default']
     UiStatCard: typeof import('./components/ui/UiStatCard.vue')['default']
     UiStatistic: typeof import('./components/ui/UiStatistic.vue')['default']
@@ -43,7 +46,6 @@ declare module 'vue' {
     UiTable: typeof import('./components/ui/UiTable.vue')['default']
     UiTabs: typeof import('./components/ui/UiTabs.vue')['default']
     UiTabTrigger: typeof import('./components/ui/UiTabTrigger.vue')['default']
-    UiToast: typeof import('./components/ui/UiToast.vue')['default']
     UiUpload: typeof import('./components/ui/UiUpload.vue')['default']
     VirtualList: typeof import('./components/ui/VirtualList.vue')['default']
     VirtualTable: typeof import('./components/ui/VirtualTable.vue')['default']

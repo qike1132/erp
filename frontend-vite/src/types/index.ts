@@ -1,35 +1,53 @@
+// ===== 基础 API 响应类型 =====
+
+/** 通用 API 响应（精简版，仅保留通用字段） */
 export interface ApiResponse<T = unknown> {
   success: boolean
   data?: T
   detail?: string
   message?: string
   status_code?: number
-  order?: T
-  orders?: T[]
-  total?: number
-  html?: string
-  task_id?: string
-  filename?: string
-  total_rows?: number
-  total_upserted?: number
-  summary?: T
-  tables?: T
-  backups?: T
-  names?: T
-  products?: T
-  registrations?: T
-  pages?: number
 }
 
-/** 分页结果，与后端 PaginatedResponse 对齐 */
-export type PageResult<T> = PaginatedResponse<T>
-
+/** 分页响应（含分页元数据） */
 export interface PaginatedResponse<T> {
   items: T[]
   total: number
   pages: number
   current_page: number
   next_cursor?: string | number
+}
+
+/** 分页结果，与后端 PaginatedResponse 对齐 */
+export type PageResult<T> = PaginatedResponse<T>
+
+/** 登录响应 */
+export interface LoginResponse {
+  success: boolean
+  access_token: string
+  token_type: string
+}
+
+/** 异步任务响应 */
+export interface TaskResponse {
+  success: boolean
+  task_id: string
+}
+
+/** 导出/下载响应 */
+export interface ExportResponse {
+  success: boolean
+  filename: string
+  html?: string
+}
+
+/** 用户信息（登录响应内嵌） */
+export interface UserInfo {
+  user_id: number
+  id?: number
+  username: string
+  is_super: boolean
+  permissions: string[]
 }
 
 export interface OrderItem {
@@ -43,6 +61,8 @@ export interface OrderItem {
   order_date: string
   note: string
   status: string
+  order_type?: string
+  country?: string
   is_locked?: boolean
   locked_by_name?: string
 }
@@ -186,6 +206,12 @@ export interface User {
   permissions: string[]
 }
 
+export interface UserCreate {
+  username: string
+  password: string
+  is_super?: boolean
+}
+
 export interface NavSection {
   title: string
   items: NavItem[]
@@ -266,7 +292,6 @@ export interface MonthlyDayData {
   day: number
   filling: { quantity: number; value: number; sku_count: number }
   handcraft: { quantity: number; value: number; sku_count: number }
-  packaging: { quantity: number; value: number; sku_count: number }
   total: { quantity: number; value: number; sku_count: number }
 }
 

@@ -81,9 +81,10 @@ class Settings(BaseSettings):
     FCM_ENABLED: bool = os.getenv("FCM_ENABLED", "false").lower() in ("true", "1", "yes")
 
     # CORS配置 - 从环境变量读取允许的源，默认仅允许本地访问
-    # 包含 Nginx 统一入口（端口80）、直接访问模式（端口5002）以及 Vue/Vite 前端（端口3000）
-    # 生产环境自动过滤非 HTTPS 源（localhost 除外，用于本地健康检查）
-    _raw_cors: str = os.getenv("CORS_ORIGINS", "http://localhost,http://localhost:5002,http://localhost:3000")
+    # 包含 Nginx 统一入口（端口80）、Python HTTP 服务（端口8000/8080）、
+    # 直接访问模式（端口5002）以及 Vue/Vite 前端（端口3000）
+    # 生产环境自动过滤非 HTTPS 源（localhost/127.0.0.1/null 除外，用于本地开发和独立预览）
+    _raw_cors: str = os.getenv("CORS_ORIGINS", "http://localhost,http://localhost:5002,http://localhost:3000,http://localhost:5173,http://localhost:5174,http://localhost:8000,http://localhost:8080,null")
     BACKEND_CORS_ORIGINS: list[str] = [
         origin.strip() for origin in _raw_cors.split(",")
         if origin.strip()
@@ -130,6 +131,24 @@ class Settings(BaseSettings):
                 f"SECRET_KEY 长度不足（当前 {len(self.SECRET_KEY)} 字符，至少需要 32 字符），"
                 "请生成新的密钥: python -c \"import secrets; print(secrets.token_hex(32))\""
             )
+        # 检查 SECRET_KEY 是否为纯数字（极易被暴力破解）
+        if self.SECRET_KEY.isdigit():
+            raise RuntimeError(
+                "SECRET_KEY 不能为纯数字，纯数字密钥极易被暴力破解。"
+                "请生成新的密钥: python -c \"import secrets; print(secrets.token_hex(32))\""
+            )
+        # 检查 SECRET_KEY 是否包含常见字典词汇（降低密钥熵值）
+        _weak_secret_patterns = (
+            "change-this", "secret", "password", "admin", "default",
+            "example", "sample", "test", "demo", "todo", "fixme",
+            "insecure", "placeholder", "your-", "my-secret",
+        )
+        _secret_lower = self.SECRET_KEY.lower()
+        if any(p in _secret_lower for p in _weak_secret_patterns):
+            raise RuntimeError(
+                "SECRET_KEY 包含常见字典词汇，密钥熵值不足容易被猜测。"
+                "请生成新的密钥: python -c \"import secrets; print(secrets.token_hex(32))\""
+            )
         if not self.REDIS_PASSWORD and os.getenv("APP_ENV") == "production":
             raise RuntimeError(
                 "生产环境必须设置 REDIS_PASSWORD，未认证的 Redis 存在严重安全风险。"
@@ -140,6 +159,18 @@ class Settings(BaseSettings):
                 "生产环境禁止 ALLOWED_HOSTS='*'，必须通过环境变量设置具体域名"
                 "（如 ALLOWED_HOSTS=erp.example.com,erp.example.cn）以防止 Host 头注入"
             )
+        if os.getenv("APP_ENV") == "production":
+            db_url = self.ASYNC_DATABASE_URL or os.getenv("DATABASE_URL", "")
+            _unsafe_db_patterns = (
+                "ERP_Pg_2026_Secure", "change-me", "password", "123456",
+                "110110", "admin123", "postgres", "root", "test", "default",
+                "Password1", "qwerty", "abc123", "111111", "000000",
+            )
+            if any(p in db_url for p in _unsafe_db_patterns):
+                raise RuntimeError(
+                    "生产环境 DATABASE_URL 包含不安全的默认密码，"
+                    "请通过环境变量 POSTGRES_PASSWORD 或 DATABASE_URL 设置强密码"
+                )
         _ALLOWED_JWT_ALGORITHMS = {"HS256", "RS256"}
         if self.ALGORITHM not in _ALLOWED_JWT_ALGORITHMS:
             raise RuntimeError(

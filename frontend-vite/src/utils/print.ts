@@ -3,6 +3,10 @@
  * 避免 window.open 弹窗被拦截，且无需离开当前页面。
  */
 
+function escapeHtml(str: string): string {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
 const PRINT_STYLE = `
   body { font-family: SimSun, 宋体; padding: 20px; }
   table { width: 100%; border-collapse: collapse; }
@@ -12,11 +16,12 @@ const PRINT_STYLE = `
 
 /**
  * 在当前页面内触发打印预览
- * @param title 打印标题
- * @param bodyHtml 主体内容 HTML（如表格）
+ * @param title 打印标题（纯文本，自动转义）
+ * @param bodyHtml 主体内容 HTML（由调用方负责安全，确保已转义用户输入）
  * @param style 自定义 CSS（默认使用项目打印样式）
  */
 export function printHtml(title: string, bodyHtml: string, style: string = PRINT_STYLE) {
+  if (!!import.meta.env.VITE_CAPACITOR) return
   const iframe = document.createElement('iframe')
   iframe.style.position = 'fixed'
   iframe.style.right = '0'
@@ -32,10 +37,11 @@ export function printHtml(title: string, bodyHtml: string, style: string = PRINT
     return
   }
 
+  const safeTitle = escapeHtml(title)
   doc.open()
   doc.write(
-    `<!DOCTYPE html><html><head><title>${title}</title><style>${style}</style></head>` +
-    `<body><div style="text-align:center;margin-bottom:20px;"><h2>${title}</h2></div>${bodyHtml}</body></html>`,
+    `<!DOCTYPE html><html><head><title>${safeTitle}</title><style>${style}</style></head>` +
+    `<body><div style="text-align:center;margin-bottom:20px;"><h2>${safeTitle}</h2></div>${bodyHtml}</body></html>`,
   )
   doc.close()
 
@@ -53,7 +59,7 @@ export function printHtml(title: string, bodyHtml: string, style: string = PRINT
  * @param style 自定义 CSS
  */
 export function printTable(title: string, headers: string[], rows: string[][], style?: string) {
-  const thead = `<tr>${headers.map((h) => `<th>${h}</th>`).join('')}</tr>`
-  const tbody = rows.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join('')}</tr>`).join('')
+  const thead = `<tr>${headers.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr>`
+  const tbody = rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`).join('')
   printHtml(title, `<table><thead>${thead}</thead><tbody>${tbody}</tbody></table>`, style)
 }

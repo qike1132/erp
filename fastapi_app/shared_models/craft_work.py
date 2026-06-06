@@ -1,7 +1,7 @@
 """
 手工部生产记录模型 - 纯 SQLAlchemy 2.0 声明式
 """
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import Date, DateTime, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
@@ -22,9 +22,9 @@ class CraftWork(Base):
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, comment='生产数量')
     work_date: Mapped[datetime] = mapped_column(Date, nullable=False, comment='生产日期')
     remark: Mapped[str | None] = mapped_column(String(500), nullable=True, comment='备注')
-    create_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, comment='创建时间')
+    create_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), comment='创建时间')
     created_by: Mapped[str | None] = mapped_column(String(50), nullable=True, comment='创建人')
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
 
     def to_dict(self):
         return {

@@ -48,7 +48,6 @@ class BomSaveRequest(BaseModel):
     filling: dict | None = None
     fabrics: list[dict] = []
     accessories: list[dict] = []
-    packagings: list[dict] = []
 
 class BomCopyRequest(BaseModel):
     """复制BOM请求"""

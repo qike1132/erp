@@ -5,12 +5,16 @@
         <HeaderTabs />
         <div class="sp-header-content">
           <div class="sp-header-left">
-            <div class="sp-tab-group">
+            <div class="sp-tab-group" role="tablist">
               <button
+                role="tab"
+                :aria-selected="viewTab === 'daily'"
                 :class="['sp-tab', { 'sp-tab-active': viewTab === 'daily' }]"
                 @click="viewTab = 'daily'"
               >每日计划</button>
               <button
+                role="tab"
+                :aria-selected="viewTab === 'summary'"
                 :class="['sp-tab', { 'sp-tab-active': viewTab === 'summary' }]"
                 @click="viewTab = 'summary'"
               >月度汇总</button>
@@ -22,17 +26,17 @@
       <div class="sp-toolbar">
         <div class="sp-toolbar-actions">
           <div class="sp-nav">
-            <button class="sp-nav-btn" @click="prevMonth"><i class="fas fa-chevron-left" /></button>
+            <button class="sp-nav-btn" @click="prevMonth" aria-label="上一页"><i class="fas fa-chevron-left"  aria-hidden="true" /></button>
             <span class="sp-nav-label">{{ y }}年{{ String(m).padStart(2, '0') }}月</span>
-            <button class="sp-nav-btn" @click="nextMonth"><i class="fas fa-chevron-right" /></button>
+            <button class="sp-nav-btn" @click="nextMonth" aria-label="下一页"><i class="fas fa-chevron-right"  aria-hidden="true" /></button>
           </div>
           <div class="sp-search-box">
-            <i class="fas fa-search" />
+            <i class="fas fa-search"  aria-hidden="true" />
             <input v-model="globalKw" :placeholder="viewTab === 'daily' ? '搜索日期、客户...' : '搜索产品、SKU、客户...'" />
-            <button v-if="globalKw" class="sp-search-clear" @click="globalKw = ''"><i class="fas fa-times" /></button>
+            <button v-if="globalKw" class="sp-search-clear" @click="globalKw = ''" aria-label="关闭"><i class="fas fa-times"  aria-hidden="true" /></button>
           </div>
           <button class="sp-action-btn" @click="viewTab === 'daily' ? exportCSV() : exportSkuCSV()">导出</button>
-          <button class="sp-action-btn sp-action-btn-primary" @click="showCreate = true"><i class="fas fa-plus" />新建</button>
+          <button class="sp-action-btn sp-action-btn-primary" @click="showCreate = true"><i class="fas fa-plus"  aria-hidden="true" />新建</button>
         </div>
         <div v-if="summaryCustomers.length" class="sp-toolbar-stats-wrapper">
           <div class="sp-toolbar-stats">
@@ -53,9 +57,9 @@
       </div>
 
       <div v-if="viewTab === 'daily'" class="sp-body">
-        <div v-if="isLoading && !d" class="sp-empty"><i class="fas fa-spinner fa-spin" />加载中...</div>
-        <div v-else-if="isError" class="sp-empty"><i class="fas fa-exclamation-circle" />加载失败 <button class="sp-retry-btn" @click="refetch()">重试</button></div>
-        <div v-else-if="!rows.length" class="sp-empty"><i class="fas fa-inbox" />本月暂无出货计划</div>
+        <div v-if="isLoading && !d" class="sp-empty"><i class="fas fa-spinner fa-spin"  aria-hidden="true" />加载中…</div>
+        <div v-else-if="isError" class="sp-empty"><i class="fas fa-exclamation-circle"  aria-hidden="true" />加载失败 <button class="sp-retry-btn" @click="refetch()">重试</button></div>
+        <div v-else-if="!rows.length" class="sp-empty"><i class="fas fa-inbox"  aria-hidden="true" />本月暂无出货计划</div>
         <template v-else>
         <div v-if="isFetching" class="sp-fetching-bar"><div class="sp-fetching-progress" /></div>
         <div>
@@ -72,7 +76,7 @@
               <div class="sp-day-header">
                 <span class="sp-day-badge">{{ r._fullDate }}：{{ fmtQty(r.totalQty) }}</span>
                 <span v-if="r._pendingCount > 0" class="sp-day-alert" :class="getAlertClass(r.date)">{{ getAlertLabel(r.date) }}</span>
-                <span v-else-if="r._shippedPct === 100" class="sp-day-alert sp-day-done"><i class="fas fa-check" /> 完成</span>
+                <span v-else-if="r._shippedPct === 100" class="sp-day-alert sp-day-done"><i class="fas fa-check"  aria-hidden="true" /> 完成</span>
               </div>
               
               <div class="sp-day-body">
@@ -91,9 +95,9 @@
 
 
       <div v-else class="sp-body">
-        <div v-if="sLoading && !sData" class="sp-empty"><i class="fas fa-spinner fa-spin" />加载中...</div>
-        <div v-else-if="sError" class="sp-empty"><i class="fas fa-exclamation-circle" />加载失败 <button class="sp-retry-btn" @click="refetchSummary()">重试</button></div>
-        <div v-else-if="!summaryCustomers.length" class="sp-empty"><i class="fas fa-inbox" />本月暂无数据</div>
+        <div v-if="sLoading && !sData" class="sp-empty"><i class="fas fa-spinner fa-spin"  aria-hidden="true" />加载中…</div>
+        <div v-else-if="sError" class="sp-empty"><i class="fas fa-exclamation-circle"  aria-hidden="true" />加载失败 <button class="sp-retry-btn" @click="refetchSummary()">重试</button></div>
+        <div v-else-if="!summaryCustomers.length" class="sp-empty"><i class="fas fa-inbox"  aria-hidden="true" />本月暂无数据</div>
         <template v-else>
         <div v-if="sFetching" class="sp-fetching-bar"><div class="sp-fetching-progress" /></div>
         <div>
@@ -177,8 +181,8 @@
               </div>
             </div>
             <div class="sp-modal-header-actions">
-              <button class="sp-modal-export-btn" @click="exportDayCSV"><i class="fas fa-download"></i> 导出当日</button>
-              <button class="sp-modal-btn sp-modal-btn-close" @click="sel = ''"><i class="fas fa-times"></i></button>
+              <button class="sp-modal-export-btn" @click="exportDayCSV"><i class="fas fa-download" aria-hidden="true"></i> 导出当日</button>
+              <button class="sp-modal-btn sp-modal-btn-close" @click="sel = ''" aria-label="关闭"><i class="fas fa-times" aria-hidden="true"></i></button>
             </div>
           </div>
 
@@ -245,7 +249,7 @@
                   </VirtualList>
                 </div>
                 <div v-else class="sp-modal-empty">
-                  <i class="fas fa-hand-pointer"></i>请从左侧选择客户
+                  <i class="fas fa-hand-pointer" aria-hidden="true"></i>请从左侧选择客户
                 </div>
               </div>
             </div>
@@ -253,9 +257,9 @@
 
           <!-- 出货记录 Tab -->
           <div v-else class="sp-modal-body">
-            <div v-if="stockoutLoading" class="sp-modal-empty"><i class="fas fa-spinner fa-spin" />加载中...</div>
-            <div v-else-if="stockoutError" class="sp-modal-empty"><i class="fas fa-exclamation-circle" />加载失败</div>
-            <div v-else-if="!stockoutRecords.length" class="sp-modal-empty"><i class="fas fa-inbox" />暂无出货记录</div>
+            <div v-if="stockoutLoading" class="sp-modal-empty"><i class="fas fa-spinner fa-spin"  aria-hidden="true" />加载中…</div>
+            <div v-else-if="stockoutError" class="sp-modal-empty"><i class="fas fa-exclamation-circle"  aria-hidden="true" />加载失败</div>
+            <div v-else-if="!stockoutRecords.length" class="sp-modal-empty"><i class="fas fa-inbox"  aria-hidden="true" />暂无出货记录</div>
             <div v-else class="sp-stockout-list">
               <div class="sp-stockout-header">
                 <span class="sp-stockout-col-date">出货时间</span>
@@ -295,7 +299,7 @@
               <div class="sp-sku-detail-title">{{ skuDetailName }}</div>
               <div class="sp-sku-detail-sub">{{ skuDetailBarcode }}</div>
             </div>
-            <button class="sp-modal-btn sp-modal-btn-close" @click="skuDetailOpen = false"><i class="fas fa-times"></i></button>
+            <button class="sp-modal-btn sp-modal-btn-close" @click="skuDetailOpen = false" aria-label="关闭"><i class="fas fa-times" aria-hidden="true"></i></button>
           </div>
           <div class="sp-sku-detail-body">
             <div v-if="!skuDateDetail.length" class="sp-sku-detail-empty">该 SKU 本月暂无出货计划</div>
@@ -755,11 +759,11 @@ function exportCSV() {
   border-radius: 18px;
   border: 1px solid var(--color-border-light, #e2e8f0);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .sp-card:hover {
-  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
-  transform: translateY(-6px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  transform: translateY(-2px);
 }
 
 .sp-card-main {
@@ -827,7 +831,7 @@ function exportCSV() {
   border-radius: var(--radius-input, 12px);
   border: 2px solid var(--color-border-light, #e2e8f0);
   background: transparent;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
 }
 
 .sp-toolbar-stats:hover {
@@ -906,7 +910,7 @@ function exportCSV() {
   font-weight: 800;
   color: var(--color-heading);
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
   font-family: inherit;
 }
 
@@ -943,7 +947,7 @@ function exportCSV() {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, color 0.3s ease, background 0.3s ease;
   flex-shrink: 0;
 }
 
@@ -971,7 +975,7 @@ function exportCSV() {
   background: var(--color-primary-50);
   color: var(--color-primary-600);
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: background 0.3s ease;
   font-family: inherit;
   flex-shrink: 0;
 }
@@ -988,7 +992,7 @@ function exportCSV() {
   border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: var(--radius-input, 12px);
   background: white;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
   min-width: 180px;
   box-sizing: border-box;
 }
@@ -1009,6 +1013,8 @@ function exportCSV() {
   font-family: inherit;
   min-width: 0;
 }
+
+.sp-search-box input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 
 .sp-search-box input::placeholder {
   color: var(--color-text-muted);
@@ -1034,7 +1040,7 @@ function exportCSV() {
   background: var(--color-border-light, #e2e8f0);
   color: var(--color-text-muted);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background 0.2s ease, color 0.2s ease;
   padding: 0;
   flex-shrink: 0;
 }
@@ -1058,7 +1064,7 @@ function exportCSV() {
   font-weight: 600;
   cursor: pointer;
   color: var(--color-primary-600);
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, border-color 0.3s ease, transform 0.3s ease;
   font-family: inherit;
   display: flex;
   align-items: center;
@@ -1262,7 +1268,7 @@ function exportCSV() {
   font-weight: 500;
   color: var(--color-text-secondary);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
   font-family: inherit;
   user-select: none;
   white-space: nowrap;
@@ -1542,7 +1548,7 @@ function exportCSV() {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, color 0.3s ease, background 0.3s ease;
 }
 
 .sp-modal-btn:hover {
@@ -1564,7 +1570,7 @@ function exportCSV() {
   cursor: pointer;
   font-size: 13px;
   font-weight: 500;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, color 0.3s ease, background 0.3s ease;
 }
 
 .sp-modal-export-btn:hover {
@@ -1657,6 +1663,8 @@ function exportCSV() {
   color: var(--color-heading);
   font-family: inherit;
 }
+
+.sp-sidebar-search input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 
 .sp-sidebar-search input::placeholder {
   color: var(--color-text-muted);
@@ -1930,7 +1938,7 @@ function exportCSV() {
   font-weight: 600;
   cursor: pointer;
   color: var(--color-text-secondary);
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, border-color 0.3s ease, transform 0.3s ease;
   font-family: inherit;
   display: flex;
   align-items: center;
@@ -2090,7 +2098,7 @@ function exportCSV() {
   font-weight: 700;
   color: var(--color-text-secondary);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background 0.2s, color 0.2s;
   font-family: inherit;
 }
 .sp-modal-tab:hover { background: var(--color-primary-50); color: var(--color-primary-600); }

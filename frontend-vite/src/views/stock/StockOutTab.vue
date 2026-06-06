@@ -38,7 +38,9 @@
                     v-for="p in productSuggestions"
                     :key="p.id"
                     class="autocomplete-item"
+                    role="option"
                     @mousedown.prevent="selectProduct(p)"
+                    @keydown.enter="selectProduct(p)"
                   >
                     {{ p.name }}
                     <span v-if="p.barcode" class="barcode-hint">{{ p.barcode }}</span>
@@ -48,9 +50,9 @@
 
               <div class="form-field">
                 <label class="form-label">出货数量</label>
-                <input type="number" class="form-input" v-model.number="form.quantity" min="1" step="1" />
+                <input type="number" class="form-input" v-model.number="form.quantity" min="1" step="1" name="quantity" autocomplete="off" />
                 <small v-if="shipmentInfo" class="shipment-info">
-                  <i class="fas fa-info-circle" style="margin-right: 4px" />
+                  <i class="fas fa-info-circle" style="margin-right: 4px"  aria-hidden="true" />
                   订单量: {{ shipmentInfo.order_quantity }} | 已出货: {{ shipmentInfo.shipped_quantity }} | 可出货:
                   <strong style="color: var(--color-primary-500)">{{ shipmentInfo.available_quantity }}</strong>
                 </small>
@@ -67,7 +69,7 @@
               </div>
 
               <!-- 批量导入出货 -->
-              <div class="so-section-label"><i class="fas fa-file-import"></i> 批量导入</div>
+              <div class="so-section-label"><i class="fas fa-file-import" aria-hidden="true"></i> 批量导入</div>
               <div
                 class="so-section-header so-droppable"
                 :class="{ 'so-drag-over': excelDragOver }"
@@ -77,16 +79,16 @@
                 @drop.prevent="onExcelDrop"
               >
                 <label class="form-label so-droppable-label">
-                  <i class="fas fa-file-excel label-icon"></i>
-                  <span v-if="excelFile" class="so-file-inline so-file-inline-success"><i class="fas fa-file-excel" />{{ excelFile.name }}</span>
+                  <i class="fas fa-file-excel label-icon" aria-hidden="true"></i>
+                  <span v-if="excelFile" class="so-file-inline so-file-inline-success"><i class="fas fa-file-excel"  aria-hidden="true" />{{ excelFile.name }}</span>
                   <span v-else>拖拽文件到标题栏 · 支持 .xlsx / .xls</span>
                 </label>
                 <div class="so-inline-actions">
                   <button class="so-inline-btn" :disabled="templateDownloading" @click.stop="handleDownloadTemplate">
-                    <i :class="templateDownloading ? 'fas fa-spinner fa-spin' : 'fas fa-download'" />模板
+                    <i :class="templateDownloading ? 'fas fa-spinner fa-spin' : 'fas fa-download'"  aria-hidden="true" />模板
                   </button>
                   <button class="so-inline-btn so-inline-btn-success" :disabled="!excelFile || importing" @click.stop="handleImportExcel">
-                    <i :class="importing ? 'fas fa-spinner fa-spin' : 'fas fa-upload'" />{{
+                    <i :class="importing ? 'fas fa-spinner fa-spin' : 'fas fa-upload'"  aria-hidden="true" />{{
                       importing ? '导入中' : '导入'
                     }}
                   </button>
@@ -95,13 +97,14 @@
                   ref="excelInputRef"
                   type="file"
                   accept=".xlsx,.xls"
+                  name="file"
                   style="display: none"
                   @change="onExcelFileSelect"
                 />
               </div>
 
               <!-- OCR 识别 -->
-              <div class="so-section-label"><i class="fas fa-file-pdf"></i> OCR 识别</div>
+              <div class="so-section-label"><i class="fas fa-file-pdf" aria-hidden="true"></i> OCR 识别</div>
               <div
                 class="so-section-header so-droppable so-droppable-danger"
                 :class="{ 'so-drag-over': ocrDragOver }"
@@ -111,16 +114,16 @@
                 @drop.prevent="onOcrDrop"
               >
                 <label class="form-label so-droppable-label">
-                  <i class="fas fa-file-pdf label-icon"></i>
-                  <span v-if="pdfFiles.length" class="so-file-inline so-file-inline-danger"><i class="fas fa-file-image" />已选 {{ pdfFiles.length }} 个文件</span>
+                  <i class="fas fa-file-pdf label-icon" aria-hidden="true"></i>
+                  <span v-if="pdfFiles.length" class="so-file-inline so-file-inline-danger"><i class="fas fa-file-image"  aria-hidden="true" />已选 {{ pdfFiles.length }} 个文件</span>
                   <span v-else>拖拽文件到标题栏 · 支持 PDF / PNG / JPG / BMP / TIFF</span>
                 </label>
                 <div class="so-inline-actions">
                   <button class="so-inline-btn" :disabled="!pdfFiles.length || ocrPreviewing" @click.stop="handleOcrPreview">
-                    <i :class="ocrPreviewing ? 'fas fa-spinner fa-spin' : 'fas fa-eye'" />预览
+                    <i :class="ocrPreviewing ? 'fas fa-spinner fa-spin' : 'fas fa-eye'"  aria-hidden="true" />预览
                   </button>
                   <button class="so-inline-btn so-inline-btn-danger" :disabled="!pdfFiles.length || ocrImporting" @click.stop="handleOcrImport">
-                    <i :class="ocrImporting ? 'fas fa-spinner fa-spin' : 'fas fa-magic'" />导入
+                    <i :class="ocrImporting ? 'fas fa-spinner fa-spin' : 'fas fa-magic'"  aria-hidden="true" />导入
                   </button>
                 </div>
                 <input
@@ -128,6 +131,7 @@
                   type="file"
                   accept=".pdf,.png,.jpg,.jpeg,.bmp,.tiff,.tif,.webp"
                   multiple
+                  name="file"
                   style="display: none"
                   @change="onOcrFileSelect"
                 />
@@ -150,7 +154,7 @@
                 @click="addStaged"
                 style="margin-top: 15px"
               >
-                <i class="fas fa-plus-circle" />新增出货
+                <i class="fas fa-plus-circle"  aria-hidden="true" />新增出货
               </UiButton>
             </form>
           </div>
@@ -159,12 +163,12 @@
         <!-- 右栏：暂存列表 -->
         <div class="so-col">
           <div class="so-col-title">
-            <span><i class="fas fa-clipboard-list"></i> 暂存出货列表</span>
+            <span><i class="fas fa-clipboard-list" aria-hidden="true"></i> 暂存出货列表</span>
             <span class="staged-count">共 {{ staged.length }} 个，合计 {{ stagedTotalQty }}</span>
           </div>
           <div class="so-col-scroll">
             <div v-if="staged.length === 0" class="so-empty-state">
-              <i class="fas fa-box-open so-empty-icon" />
+              <i class="fas fa-box-open so-empty-icon"  aria-hidden="true" />
               <p>暂无暂存出货</p>
             </div>
             <TransitionGroup v-else name="staged-list" tag="div">
@@ -176,11 +180,11 @@
                 <div class="so-staged-main">
                   <div class="so-staged-info">
                     <div class="so-staged-product">
-                      <i class="fas fa-shipping-fast so-staged-icon" />{{ item.product_name }}
+                      <i class="fas fa-shipping-fast so-staged-icon"  aria-hidden="true" />{{ item.product_name }}
                     </div>
                     <div class="so-staged-meta">
-                      <span class="so-staged-tag"><i class="fas fa-user" />{{ item.customer || '无客户' }}</span>
-                      <span class="so-staged-tag"><i class="fas fa-calendar-alt" />{{ item.date }}</span>
+                      <span class="so-staged-tag"><i class="fas fa-user"  aria-hidden="true" />{{ item.customer || '无客户' }}</span>
+                      <span class="so-staged-tag"><i class="fas fa-calendar-alt"  aria-hidden="true" />{{ item.date }}</span>
                     </div>
                     <div class="so-staged-badges">
                       <span class="badge-tag badge-danger">数量: {{ item.quantity }}</span>
@@ -188,11 +192,11 @@
                     </div>
                   </div>
                   <div class="so-staged-actions">
-                    <button class="action-btn action-edit" @click="openEditStaged(idx)">
-                      <i class="fas fa-edit" />
+                    <button class="action-btn action-edit" @click="openEditStaged(idx)" aria-label="编辑">
+                      <i class="fas fa-edit"  aria-hidden="true" />
                     </button>
-                    <button class="action-btn action-delete" @click="staged.splice(idx, 1)">
-                      <i class="fas fa-trash" />
+                    <button class="action-btn action-delete" @click="removeStagedItem(idx)" aria-label="删除">
+                      <i class="fas fa-trash"  aria-hidden="true" />
                     </button>
                   </div>
                 </div>
@@ -210,8 +214,8 @@
           :disabled="submitting"
           @click="submitBatch"
         >
-          <i class="fas fa-paper-plane" style="margin-right: 6px" />
-          {{ submitting ? '提交中...' : '添加出货' }}
+          <i class="fas fa-paper-plane" style="margin-right: 6px"  aria-hidden="true" />
+          {{ submitting ? '提交中…' : '添加出货' }}
         </UiButton>
       </div>
     </div>
@@ -219,29 +223,29 @@
     <!-- TAB: 记录查询 -->
     <div v-show="activeTab === 'records'" class="so-tab-content">
       <div class="so-records-header">
-        <span class="so-records-title"><i class="fas fa-list-alt"></i> 出货记录列表</span>
+        <span class="so-records-title"><i class="fas fa-list-alt" aria-hidden="true"></i> 出货记录列表</span>
         <UiButton variant="outline" size="sm" @click="showFilter = !showFilter">
-          <i class="fas fa-filter" style="margin-right: 4px" />筛选
+          <i class="fas fa-filter" style="margin-right: 4px"  aria-hidden="true" />筛选
         </UiButton>
       </div>
 
       <div v-if="showFilter" class="filter-panel">
         <div class="filter-row">
           <div class="filter-field">
-            <label class="form-label"><i class="fas fa-user label-icon"></i>客户</label>
+            <label class="form-label"><i class="fas fa-user label-icon" aria-hidden="true"></i>客户</label>
             <UiSelect v-model="filterCustomer" placeholder="全部" :options="customerOptions" style="width: 100%" />
           </div>
           <div class="filter-field">
-            <label class="form-label"><i class="fas fa-calendar-alt label-icon"></i>开始日期</label>
+            <label class="form-label"><i class="fas fa-calendar-alt label-icon" aria-hidden="true"></i>开始日期</label>
             <UiDatePicker v-model="filterStart" style="width: 100%" />
           </div>
           <div class="filter-field">
-            <label class="form-label"><i class="fas fa-calendar-alt label-icon"></i>结束日期</label>
+            <label class="form-label"><i class="fas fa-calendar-alt label-icon" aria-hidden="true"></i>结束日期</label>
             <UiDatePicker v-model="filterEnd" style="width: 100%" />
           </div>
           <div class="filter-field filter-action">
             <UiButton variant="primary" size="sm" @click="fetchStockouts">
-              <i class="fas fa-search" style="margin-right: 4px" />查询
+              <i class="fas fa-search" style="margin-right: 4px"  aria-hidden="true" />查询
             </UiButton>
           </div>
         </div>
@@ -250,10 +254,10 @@
       <div class="so-records-body">
         <div v-if="isLoading && stockoutRecords.length === 0" class="state-placeholder">
           <div class="spinner-ring" />
-          <p class="state-text">加载中...</p>
+          <p class="state-text">加载中…</p>
         </div>
         <div v-else-if="stockoutRecords.length === 0" class="state-placeholder state-empty">
-          <div class="empty-illustration"><i class="fas fa-shipping-fast" /></div>
+          <div class="empty-illustration"><i class="fas fa-shipping-fast"  aria-hidden="true" /></div>
           <p class="state-text">暂无出货记录</p>
         </div>
 
@@ -261,17 +265,17 @@
         <div v-if="isFetching" class="so-fetching-bar"><div class="so-fetching-progress" /></div>
         <div>
           <div v-for="group in groupedRecords" :key="group.date" class="date-group">
-            <div class="date-group-header" @click="group.expanded = !group.expanded">
+            <button type="button" class="date-group-header" @click="toggleGroupExpanded(group.date)">
               <div class="date-group-title">
-                <i class="fas fa-calendar-alt" style="color: var(--color-danger-500); margin-right: 8px" />
+                <i class="fas fa-calendar-alt" style="color: var(--color-danger-500); margin-right: 8px"  aria-hidden="true" />
                 <strong>{{ group.date }}</strong>
                 <span class="badge-tag badge-info">{{ group.records.length }} 条记录</span>
                 <span class="badge-tag badge-secondary">共 {{ group.totalQty }} 件</span>
               </div>
-              <i :class="['fas fa-chevron-down toggle-icon', { expanded: group.expanded }]" />
-            </div>
+              <i :class="['fas fa-chevron-down toggle-icon', { expanded: isGroupExpanded(group.date) }]"  aria-hidden="true" />
+            </button>
             <Transition name="group-expand">
-              <div v-if="group.expanded" class="date-group-content">
+              <div v-if="isGroupExpanded(group.date)" class="date-group-content">
                 <table class="so-table">
                   <thead>
                     <tr>
@@ -306,15 +310,15 @@
                       <td><span class="cell-muted">{{ item.notesDisplay }}</span></td>
                       <td>
                         <div class="action-group">
-                          <button class="action-btn action-edit" @click="openEditRecord(item)">
-                            <i class="fas fa-edit" />
+                          <button class="action-btn action-edit" @click="openEditRecord(item, group.date)" aria-label="编辑">
+                            <i class="fas fa-edit"  aria-hidden="true" />
                           </button>
                           <button
                             class="action-btn action-delete"
                             :disabled="actionId === item.firstId"
                             @click="handleDeleteRecord(item.firstId!)"
-                          >
-                            <i class="fas fa-trash" />
+                           aria-label="删除">
+                            <i class="fas fa-trash"  aria-hidden="true" />
                           </button>
                         </div>
                       </td>
@@ -348,7 +352,7 @@
         </div>
         <div class="form-field">
           <label class="form-label">出货数量</label>
-          <input type="number" class="form-input" v-model.number="editStagedForm.quantity" min="1" step="1" />
+          <input type="number" class="form-input" v-model.number="editStagedForm.quantity" min="1" step="1" name="quantity" autocomplete="off" />
         </div>
         <div class="form-field">
           <label class="form-label">备注</label>
@@ -372,7 +376,7 @@
           <label class="form-label">客户名称</label>
           <UiSelect
             v-model="editRecordForm.customer"
-            :options="[{ value: '', label: '无' }, ...customerOptions]"
+            :options="[{ value: '__none__', label: '无' }, ...customerOptions]"
           />
         </div>
         <div class="form-field">
@@ -381,7 +385,7 @@
         </div>
         <div class="form-field">
           <label class="form-label">出货数量</label>
-          <input type="number" class="form-input" v-model.number="editRecordForm.quantity" min="1" step="1" />
+          <input type="number" class="form-input" v-model.number="editRecordForm.quantity" min="1" step="1" name="quantity" autocomplete="off" />
         </div>
         <div class="form-field">
           <label class="form-label">备注</label>
@@ -423,6 +427,7 @@ import UiDialog from '@/components/ui/UiDialog.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { showToast } from '@/composables/useToast'
+import { toISODate } from '@/utils/format'
 
 const queryClient = useQueryClient()
 const confirmDialog = useConfirmDialog()
@@ -505,7 +510,7 @@ async function fetchShipmentInfo() {
 }
 
 // === 表单 ===
-const today = new Date().toISOString().split('T')[0]
+const today = toISODate()
 const form = reactive({ customer: '', date: today, search: '', productId: '', quantity: 1, note: '' })
 
 const canAdd = computed(() => {
@@ -519,6 +524,12 @@ watch(() => form.customer, () => {
 
 // === 暂存列表 ===
 const staged = ref<StagedStockout[]>([])
+
+async function removeStagedItem(idx: number) {
+  const ok = await confirmDialog.confirm('确定删除？', '此操作不可恢复', 'danger')
+  if (!ok) return
+  staged.value.splice(idx, 1)
+}
 
 const stagedTotalQty = computed(() => staged.value.reduce((s: number, i: StagedStockout) => s + (i.quantity || 0), 0))
 
@@ -537,7 +548,6 @@ async function addStaged() {
       showToast(`出货数量超过可出货量！可出货: ${avail}`, 'error')
       return
     }
-  }
   }
 
   staged.value.push({
@@ -621,13 +631,34 @@ async function submitBatch() {
       note: s.note,
     }))
 
-    const result = await stockApi.batchSubmitStockouts(stockoutsForApi) as ApiResponse
-    if (result.success !== false) {
+    const result = await stockApi.batchSubmitStockouts(stockoutsForApi) as ApiResponse & { results?: Array<{ success: boolean; error?: string }> }
+
+    // 检查单项结果，处理部分成功/全部失败的情况
+    const results = result.results ?? []
+    const failedItems = results.filter((r: { success: boolean }) => !r.success)
+    const successCount = results.length - failedItems.length
+
+    if (result.success !== false && failedItems.length === 0) {
+      // 全部成功
       showToast('出货提交成功', 'success')
       staged.value = []
       fetchStockouts()
+      queryClient.invalidateQueries({ queryKey: ['pp-monthly'] })
+      queryClient.invalidateQueries({ queryKey: ['pp-summary'] })
+    } else if (successCount > 0) {
+      // 部分成功
+      const errorMsgs = failedItems.slice(0, 3).map((r: { error?: string }, i: number) => `第${i + 1}项: ${r.error || '未知错误'}`).join('; ')
+      const suffix = failedItems.length > 3 ? `...等共${failedItems.length}项失败` : ''
+      showToast(`部分出货成功(${successCount}/${results.length})，失败项: ${errorMsgs}${suffix}`, 'warning')
+      fetchStockouts()
+      queryClient.invalidateQueries({ queryKey: ['pp-monthly'] })
+      queryClient.invalidateQueries({ queryKey: ['pp-summary'] })
     } else {
-      showToast((result as { error?: string }).error || result.message || '提交失败', 'error')
+      // 全部失败
+      const errorMsg = failedItems.length > 0 
+        ? failedItems.slice(0, 3).map((r: { error?: string }, i: number) => `第${i + 1}项: ${r.error || '未知错误'}`).join('; ')
+        : (result as { error?: string }).error || result.message || '提交失败'
+      showToast(errorMsg, 'error')
     }
   } catch (err: unknown) {
     const error = err as { response?: { data?: { detail?: string } } }
@@ -695,6 +726,8 @@ async function handleImportExcel() {
           if (confirmRes.success) {
             showToast('暂存出货已确认提交', 'success')
             fetchStockouts()
+            queryClient.invalidateQueries({ queryKey: ['pp-monthly'] })
+            queryClient.invalidateQueries({ queryKey: ['pp-summary'] })
           }
         } catch { /* staging confirm optional */ }
       }
@@ -770,7 +803,7 @@ async function handleOcrImport() {
       const prog = await ocrApi.progress(taskId)
       const pct = prog.progress ?? 0
       ocrProgress.pct = Math.min(90, 20 + pct * 0.7)
-      ocrProgress.msg = prog.status || '处理中...'
+      ocrProgress.msg = prog.status || '处理中…'
       if (prog.status === 'completed' || prog.status === 'done' || prog.progress >= 100) {
         completed = true
       }
@@ -781,6 +814,8 @@ async function handleOcrImport() {
     showToast('OCR识别导入完成', 'success')
     pdfFiles.value = []
     fetchStockouts()
+    queryClient.invalidateQueries({ queryKey: ['pp-monthly'] })
+    queryClient.invalidateQueries({ queryKey: ['pp-summary'] })
   } catch (err: unknown) {
     const error = err as { response?: { data?: { detail?: string } } }
     showToast(error.response?.data?.detail || 'OCR导入失败', 'error')
@@ -896,10 +931,24 @@ const groupedRecords = computed(() => {
       records,
       summaryList,
       totalQty: summaryList.reduce((s: number, i: StockoutSummary & { quantity: number }) => s + i.quantity, 0),
-      expanded: true,
     }
   })
 })
+
+// === 日期组折叠状态 ===
+const collapsedGroups = ref(new Set<string>())
+
+function toggleGroupExpanded(date: string) {
+  if (collapsedGroups.value.has(date)) {
+    collapsedGroups.value.delete(date)
+  } else {
+    collapsedGroups.value.add(date)
+  }
+}
+
+function isGroupExpanded(date: string) {
+  return !collapsedGroups.value.has(date)
+}
 
 // === 删除出货记录 ===
 async function handleDeleteRecord(id: number) {
@@ -909,6 +958,8 @@ async function handleDeleteRecord(id: number) {
     await stockApi.deleteStockout(id)
     showToast('删除成功', 'success')
     fetchStockouts()
+    queryClient.invalidateQueries({ queryKey: ['pp-monthly'] })
+    queryClient.invalidateQueries({ queryKey: ['pp-summary'] })
   } catch (err: unknown) {
     const error = err as { response?: { data?: { detail?: string } } }
     showToast(error.response?.data?.detail || '删除失败', 'error')
@@ -921,33 +972,20 @@ async function handleDeleteRecord(id: number) {
 const editRecordOpen = ref(false)
 const editRecordForm = reactive({ id: 0, customer: '', date: '', productName: '', quantity: 1, note: '' })
 
-function openEditRecord(item: StockoutSummary & { notes: string[] }) {
+function openEditRecord(item: StockoutSummary & { notes: string[] }, date: string) {
   editRecordForm.id = item.firstId || 0
-  editRecordForm.customer = item.customer || ''
-  editRecordForm.date = ''
+  editRecordForm.customer = item.customer || '__none__'
+  editRecordForm.date = date || ''
   editRecordForm.productName = item.productName || ''
   editRecordForm.quantity = item.quantity || 1
   editRecordForm.note = item.notes.length > 0 ? item.notes[0] : ''
   editRecordOpen.value = true
-  get(`/stock/out/list`, { id: item.firstId })
-    .then((data: unknown) => {
-      const record = Array.isArray(data) ? data[0] : (data as { stockouts?: unknown[]; data?: unknown }).stockouts?.[0] ?? data
-      if (record) {
-        const r = record as { customer?: string; stockout_date?: string; product_name?: string; product?: { name?: string }; quantity?: number; note?: string }
-        editRecordForm.customer = r.customer || ''
-        editRecordForm.date = r.stockout_date || ''
-        editRecordForm.productName = r.product_name || r.product?.name || ''
-        editRecordForm.quantity = r.quantity || 1
-        editRecordForm.note = r.note || ''
-      }
-    })
-    .catch(() => {})
 }
 
 async function saveEditRecord() {
   try {
     await put(`/stock/out/edit/${editRecordForm.id}`, {
-      customer: editRecordForm.customer,
+      customer: editRecordForm.customer === '__none__' ? '' : editRecordForm.customer,
       stockout_date: editRecordForm.date,
       quantity: editRecordForm.quantity,
       note: editRecordForm.note,
@@ -955,6 +993,8 @@ async function saveEditRecord() {
     showToast('更新成功', 'success')
     editRecordOpen.value = false
     fetchStockouts()
+    queryClient.invalidateQueries({ queryKey: ['pp-monthly'] })
+    queryClient.invalidateQueries({ queryKey: ['pp-summary'] })
   } catch (err: unknown) {
     const error = err as { response?: { data?: { detail?: string } } }
     showToast(error.response?.data?.detail || '更新失败', 'error')
@@ -973,9 +1013,10 @@ async function saveEditRecord() {
   color: var(--color-text);
   font-family: inherit;
   background: white;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
   outline: none;
 }
+.form-text-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 .form-text-input:focus {
   border-color: var(--color-primary-400);
   background: white;
@@ -1049,7 +1090,7 @@ async function saveEditRecord() {
   min-height: 40px;
   box-sizing: border-box;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, background 0.3s ease;
 }
 .so-section-header:hover {
   border-color: var(--color-ocean-deep);
@@ -1161,13 +1202,14 @@ async function saveEditRecord() {
   background: white;
   border: 2px solid var(--color-border, #cbd5e1);
   border-radius: var(--radius-input, 12px);
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
   outline: none;
   min-height: 40px;
   box-sizing: border-box;
   font-family: inherit;
   -moz-appearance: textfield;
 }
+.form-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 .form-input::-webkit-inner-spin-button,
 .form-input::-webkit-outer-spin-button { opacity: 1; }
 .form-input:focus {
@@ -1206,7 +1248,7 @@ textarea.form-input::placeholder {
 .autocomplete-item {
   padding: 10px 14px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background 0.2s ease, transform 0.2s ease;
   border-bottom: 1px solid var(--color-border-light, #e2e8f0);
   display: flex;
   align-items: center;
@@ -1229,7 +1271,7 @@ textarea.form-input::placeholder {
   border-radius: 10px;
   padding: 8px 12px;
   margin-bottom: 6px;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, transform 0.3s ease;
 }
 .so-staged-card:hover {
   border-color: var(--color-primary-300);
@@ -1285,8 +1327,8 @@ textarea.form-input::placeholder {
 }
 
 /* Staged list transition */
-.staged-list-enter-active { transition: all 0.3s ease; }
-.staged-list-leave-active { transition: all 0.2s ease; }
+.staged-list-enter-active { transition: opacity 0.3s ease, transform 0.3s ease; }
+.staged-list-leave-active { transition: opacity 0.2s ease, transform 0.2s ease; }
 .staged-list-enter-from { opacity: 0; transform: translateX(-12px); }
 .staged-list-leave-to { opacity: 0; transform: translateX(12px); }
 .staged-list-move { transition: transform 0.3s ease; }
@@ -1321,7 +1363,7 @@ textarea.form-input::placeholder {
   align-items: center;
   justify-content: center;
   font-size: 14px;
-  transition: all 0.2s ease;
+  transition: background 0.2s ease, transform 0.2s ease;
   cursor: pointer;
   padding: 0;
 }
@@ -1410,7 +1452,7 @@ textarea.form-input::placeholder {
   font-weight: 600;
   color: var(--color-text-secondary);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: border-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -1486,6 +1528,12 @@ textarea.form-input::placeholder {
   background: transparent;
   cursor: pointer;
   transition: background 0.2s ease;
+  border: none;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
 }
 .date-group-header:hover {
   background: var(--color-primary-50);
@@ -1512,8 +1560,8 @@ textarea.form-input::placeholder {
 }
 
 /* Group expand transition */
-.group-expand-enter-active { transition: all 0.3s ease; }
-.group-expand-leave-active { transition: all 0.2s ease; }
+.group-expand-enter-active { transition: max-height 0.3s ease, opacity 0.3s ease; }
+.group-expand-leave-active { transition: max-height 0.2s ease, opacity 0.2s ease; }
 .group-expand-enter-from,
 .group-expand-leave-to { max-height: 0; opacity: 0; overflow: hidden; }
 .group-expand-enter-to,

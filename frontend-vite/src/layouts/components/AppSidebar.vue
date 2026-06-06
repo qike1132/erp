@@ -3,7 +3,7 @@
     <!-- Header -->
     <div class="sb-header">
       <router-link to="/dashboard" class="sb-logo">
-        <img src="/logo_plush.png" alt="滨发玩具" />
+        <img src="/logo_plush.png" alt="滨发玩具" width="70" height="70" />
         <div v-if="!collapsed" class="sb-logo-text">
           <div class="sb-logo-title">滨发协同系统</div>
           <div class="sb-logo-subtitle">供应链管理平台 v2.0</div>
@@ -24,7 +24,7 @@
           :class="['sb-nav-item', { active: isActive(item.path) }]"
         >
           <div class="sb-nav-icon" :class="{ 'sb-nav-icon-active': isActive(item.path) }">
-            <i :class="iconMap[item.icon ?? ''] ?? 'fas fa-file'" />
+            <i :class="resolveIcon(item.icon)" aria-hidden="true" />
           </div>
           <span v-if="!collapsed" class="sb-nav-label">{{ item.title }}</span>
         </router-link>
@@ -50,21 +50,6 @@ function isActive(path: string) {
 }
 
 const iconMap: Record<string, string> = {
-  'fa-store': 'fas fa-store',
-  'fa-truck': 'fas fa-truck',
-  'fa-truck-loading': 'fas fa-truck-loading',
-  'fa-calculator': 'fas fa-calculator',
-  'fa-box': 'fas fa-box',
-  'fa-box-open': 'fas fa-box-open',
-  'fa-file-invoice': 'fas fa-file-invoice',
-  'fa-shipping-fast': 'fas fa-shipping-fast',
-  'fa-yen-sign': 'fas fa-yen-sign',
-  'fa-warehouse': 'fas fa-warehouse',
-  'fa-chart-bar': 'fas fa-chart-bar',
-  'fa-industry': 'fas fa-industry',
-  'fa-users-cog': 'fas fa-users-cog',
-  'fa-building': 'fas fa-building',
-  'fa-clipboard-check': 'fas fa-clipboard-check',
   dashboard: 'fas fa-gauge',
   order: 'fas fa-cart-shopping',
   product: 'fas fa-box',
@@ -77,15 +62,31 @@ const iconMap: Record<string, string> = {
   batch: 'fas fa-table-cells',
   production: 'fas fa-industry',
   report: 'fas fa-chart-bar',
-  user: 'fas fa-user',
+  user: 'fas fa-users-gear',
   permission: 'fas fa-ticket',
   settings: 'fas fa-gear',
   'ocr-import': 'fas fa-upload',
   case: 'fas fa-box',
   'material-calculator': 'fas fa-list',
+  'fa-shield-alt': 'fas fa-shield-halved',
+  'fa-shopping-cart': 'fas fa-cart-shopping',
+  'fa-users-cog': 'fas fa-users-gear',
+  'fa-mobile-alt': 'fas fa-mobile-screen-button',
+  'fa-file-invoice': 'fas fa-file-invoice',
+  'fa-shipping-fast': 'fas fa-truck-fast',
+  'fa-box-open': 'fas fa-box-open',
+  'fa-yen-sign': 'fas fa-yen-sign',
+  'fa-calculator': 'fas fa-calculator',
+  'fa-truck-loading': 'fas fa-truck-ramp-box',
   'fa-database': 'fas fa-database',
-  'fa-mobile-alt': 'fas fa-mobile-alt',
-  'fa-layer-group': 'fas fa-layer-group',
+  'fa-building': 'fas fa-building',
+}
+
+function resolveIcon(icon: string | undefined): string {
+  if (!icon) return 'fas fa-circle'
+  if (iconMap[icon]) return iconMap[icon]
+  if (icon.startsWith('fa-')) return `fas ${icon}`
+  return 'fas fa-circle'
 }
 </script>
 
@@ -101,15 +102,14 @@ const iconMap: Record<string, string> = {
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
   display: flex;
   flex-direction: column;
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
   height: calc(100vh - 24px);
   margin: 12px;
 }
 
 .sb-sidebar:hover {
-  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
-  transform: translateY(-6px);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.08);
 }
 
 .sb-sidebar.collapsed {
@@ -175,6 +175,10 @@ const iconMap: Record<string, string> = {
   flex-shrink: 0;
 }
 
+.sb-logo-text {
+  min-width: 0;
+}
+
 .sb-logo-title {
   font-size: 17px;
   font-weight: 700;
@@ -229,7 +233,7 @@ const iconMap: Record<string, string> = {
   background: white;
   border: 1px solid var(--color-border-light);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
 }
 
 .sb-nav-item:hover {
@@ -268,7 +272,7 @@ const iconMap: Record<string, string> = {
   color: var(--color-text-secondary);
   background: var(--color-surface);
   flex-shrink: 0;
-  transition: all 0.3s ease;
+  transition: color 0.3s ease, background 0.3s ease;
 }
 
 .sb-nav-icon-active {

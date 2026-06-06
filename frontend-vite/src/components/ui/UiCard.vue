@@ -1,7 +1,7 @@
 <template>
   <div
     :class="[
-      'bg-surface-card rounded-[var(--radius-card)] border border-border-light card-hover overflow-hidden',
+      'ui-card bg-surface-card rounded-[var(--radius-card)] border border-border-light overflow-hidden',
       shadowClass,
       paddingClass,
     ]"
@@ -40,3 +40,14 @@ withDefaults(
   },
 )
 </script>
+
+<style scoped>
+.ui-card {
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.ui-card:hover {
+  transform: translateY(-1px) scale(1.01);
+  box-shadow: 0 8px 25px rgba(135, 206, 235, 0.35);
+}
+</style>

@@ -5,6 +5,7 @@
 提供 get_nav_sections() 函数，支持两级缓存（进程内 + Redis）。
 """
 
+import asyncio
 import logging
 import time
 
@@ -37,7 +38,6 @@ FLASK_TO_FASTAPI_URL_MAP = {
     'production_summary.index': '/production',
     'purchase_plan.plan_list': '/purchase-plan',
     'backup.index': '/backup',
-    'app_update.index': '/app-update',
     'order_batch.index': '/order-batch',
 }
 
@@ -46,14 +46,15 @@ SECTION_ORDER = ['purchase', 'purchase_tools', 'core', 'data', 'system']
 
 # 两级缓存
 _nav_local_cache = {"data": None, "cached_at": 0.0}
-_nav_local_ttl = 60  # 进程内缓存 60 秒
-_nav_redis_ttl = 300  # Redis 缓存 5 分钟
+_nav_local_ttl = 60
+_nav_redis_ttl = 300
+_nav_cache_lock = asyncio.Lock()
 
 
 async def invalidate_nav_cache():
-    """清除导航缓存"""
-    _nav_local_cache["data"] = None
-    _nav_local_cache["cached_at"] = 0.0
+    async with _nav_cache_lock:
+        _nav_local_cache["data"] = None
+        _nav_local_cache["cached_at"] = 0.0
     try:
         from utils.redis_cache import redis_cache
         await redis_cache.delete('nav_sections')
@@ -68,18 +69,19 @@ async def get_nav_sections_async() -> dict:
 
     返回格式：{section_key: {name: str, items: [{id, name, code, icon, url, permission_codes}]}}
     """
-    # Level 1: 进程内缓存
     now = time.time()
-    if _nav_local_cache["data"] is not None and (now - _nav_local_cache["cached_at"]) < _nav_local_ttl:
-        return _nav_local_cache["data"]
+    async with _nav_cache_lock:
+        if _nav_local_cache["data"] is not None and (now - _nav_local_cache["cached_at"]) < _nav_local_ttl:
+            return _nav_local_cache["data"]
 
     # Level 2: Redis 缓存
     try:
         from utils.redis_cache import redis_cache
         cached = await redis_cache.get('nav_sections')
         if cached is not None:
-            _nav_local_cache["data"] = cached
-            _nav_local_cache["cached_at"] = now
+            async with _nav_cache_lock:
+                _nav_local_cache["data"] = cached
+                _nav_local_cache["cached_at"] = now
             return cached
     except (OSError, ConnectionError, ValueError):
         logger.warning("导航Redis缓存读取失败", exc_info=True)
@@ -151,8 +153,9 @@ async def get_nav_sections_async() -> dict:
             await redis_cache.set('nav_sections', ordered_sections, timeout=_nav_redis_ttl)
         except (OSError, ConnectionError, ValueError):
             logger.warning("导航Redis缓存写入失败", exc_info=True)
-        _nav_local_cache["data"] = ordered_sections
-        _nav_local_cache["cached_at"] = time.time()
+        async with _nav_cache_lock:
+            _nav_local_cache["data"] = ordered_sections
+            _nav_local_cache["cached_at"] = time.time()
 
         return ordered_sections
     except (OperationalError, DisconnectionError) as e:

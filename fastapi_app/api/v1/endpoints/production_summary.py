@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
+from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.schemas.production_summary import (
     CraftWorkActionResponse,
     CraftWorkCreate,
@@ -20,6 +21,7 @@ from fastapi_app.schemas.production_summary import (
     PackagingRecordCreate,
     PackagingRecordListResponse,
     PackagingRecordUpdate,
+    PackagingUploadResponse,
     ProductionSummaryResponse,
 )
 from fastapi_app.services import production_summary_service
@@ -39,30 +41,24 @@ async def list_craft_works(year: int=Query(..., description='年份'), month: in
 @router.post('/craft/create', response_model=CraftWorkActionResponse)
 async def create_craft_work(data: CraftWorkCreate, db: AsyncSession=Depends(get_async_db), user: User=Depends(require_permission('production_summary_manage'))):
     """创建手工部生产记录"""
-    try:
+    async with db_transaction(db):
         await production_summary_service.create_craft_work(db, worker_name=data.worker_name, quantity=data.quantity, work_date_str=data.work_date, remark=data.remark or '', created_by=user.username if hasattr(user, 'username') else '')
-        return CraftWorkActionResponse(success=True, message='手工部记录创建成功！')
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    return CraftWorkActionResponse(success=True, message='手工部记录创建成功！')
 
 @router.put('/craft/edit/{record_id}', response_model=CraftWorkActionResponse)
 async def update_craft_work(record_id: int, data: CraftWorkUpdate, db: AsyncSession=Depends(get_async_db), user: User=Depends(require_permission('production_summary_manage'))):
     """编辑手工部生产记录"""
-    try:
+    async with db_transaction(db):
         update_data = data.model_dump(exclude_unset=True)
         await production_summary_service.update_craft_work(db, record_id, created_by=user.username if hasattr(user, 'username') else '', **update_data)
-        return CraftWorkActionResponse(success=True, message='手工部记录更新成功！')
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    return CraftWorkActionResponse(success=True, message='手工部记录更新成功！')
 
 @router.delete('/craft/delete/{record_id}', response_model=CraftWorkActionResponse)
 async def delete_craft_work(record_id: int, db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('production_summary_manage'))):
     """删除手工部生产记录"""
-    try:
+    async with db_transaction(db):
         await production_summary_service.delete_craft_work(db, record_id)
-        return CraftWorkActionResponse(success=True, message='手工部记录删除成功！')
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    return CraftWorkActionResponse(success=True, message='手工部记录删除成功！')
 
 @router.get('/craft/export')
 async def export_craft_works(start_date: str=Query('', description='起始日期 (YYYY-MM-DD)'), end_date: str=Query('', description='结束日期 (YYYY-MM-DD)'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('production_summary_view'))):
@@ -85,32 +81,26 @@ async def list_packaging_records(year: int=Query(..., description='年份'), mon
 @router.post('/packaging/create', response_model=PackagingRecordActionResponse)
 async def create_packaging_record(data: PackagingRecordCreate, db: AsyncSession=Depends(get_async_db), user: User=Depends(require_permission('production_summary_manage'))):
     """创建包装部记录"""
-    try:
+    async with db_transaction(db):
         await production_summary_service.create_packaging_record(db, customer=data.customer, product_name=data.product_name, barcode=data.barcode, quantity=data.quantity, pack_date_str=data.pack_date, remark=data.remark or '', created_by=user.username if hasattr(user, 'username') else '')
-        return PackagingRecordActionResponse(success=True, message='包装部记录创建成功！')
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    return PackagingRecordActionResponse(success=True, message='包装部记录创建成功！')
 
 @router.put('/packaging/edit/{record_id}', response_model=PackagingRecordActionResponse)
 async def update_packaging_record(record_id: int, data: PackagingRecordUpdate, db: AsyncSession=Depends(get_async_db), user: User=Depends(require_permission('production_summary_manage'))):
     """编辑包装部记录"""
-    try:
+    async with db_transaction(db):
         update_data = data.model_dump(exclude_unset=True)
         await production_summary_service.update_packaging_record(db, record_id, created_by=user.username if hasattr(user, 'username') else '', **update_data)
-        return PackagingRecordActionResponse(success=True, message='包装部记录更新成功！')
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    return PackagingRecordActionResponse(success=True, message='包装部记录更新成功！')
 
 @router.delete('/packaging/delete/{record_id}', response_model=PackagingRecordActionResponse)
 async def delete_packaging_record(record_id: int, db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('production_summary_manage'))):
     """删除包装部记录"""
-    try:
+    async with db_transaction(db):
         await production_summary_service.delete_packaging_record(db, record_id)
-        return PackagingRecordActionResponse(success=True, message='包装部记录删除成功！')
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    return PackagingRecordActionResponse(success=True, message='包装部记录删除成功！')
 
-@router.post('/packaging/upload')
+@router.post('/packaging/upload', response_model=PackagingUploadResponse)
 async def upload_packaging_excel(file: UploadFile=File(..., description='Excel文件'), db: AsyncSession=Depends(get_async_db), user: User=Depends(require_permission('production_summary_manage'))):
     """批量导入包装部记录（Excel上传）"""
     if not file.filename.endswith('.xlsx'):
@@ -119,12 +109,10 @@ async def upload_packaging_excel(file: UploadFile=File(..., description='Excel�
         content = await file.read()
     except (OSError, ValueError) as e:
         raise HTTPException(status_code=400, detail=f'文件读取失败: {e}') from e
-    try:
+    async with db_transaction(db):
         created_by = user.username if hasattr(user, 'username') else ''
         result = await production_summary_service.upload_packaging_excel(db, content, created_by)
-        return {'success': True, **result}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {'success': True, **result}
 
 @router.get('/packaging/export')
 async def export_packaging_records(start_date: str=Query('', description='起始日期 (YYYY-MM-DD)'), end_date: str=Query('', description='结束日期 (YYYY-MM-DD)'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('production_summary_view'))):

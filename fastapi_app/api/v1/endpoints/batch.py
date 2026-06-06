@@ -103,12 +103,11 @@ async def download_template(current_user: User=Depends(require_permission('batch
     if not os.path.exists(template_path):
         raise HTTPException(status_code=404, detail='模板文件不存在')
     try:
-        loop = asyncio.get_running_loop()
 
         def _read_file():
             with open(template_path, 'rb') as f:
                 return f.read()
-        file_content = await loop.run_in_executor(None, _read_file)
+        file_content = await asyncio.to_thread(_read_file)
         if not file_content:
             raise HTTPException(status_code=500, detail='模板文件为空')
         filename = '统一导入模板.xlsx'
@@ -178,23 +177,22 @@ async def batch_import_orders(file: UploadFile=File(...), db: AsyncSession=Depen
                 db.add(order)
                 await db.flush()
                 locked_product = await get_product_for_update(db, product_id)
-                locked_product.current_stock += qty
                 log = InventoryLog(product_id=product_id, change_type='订单', change_quantity=qty, related_id=order_no, note=f'批量导入订单：{order_no}')
                 db.add(log)
                 if deduct_flag and str(deduct_flag).strip() == '是':
                     await process_order_deduction(db, order, product_id, qty, deduct_stock=True, product=locked_product)
                 imported += 1
             except (ValueError, TypeError, SQLAlchemyError) as e:
+                await db.rollback()
                 logger.error(f'订单导入 - 行处理失败: {e}', exc_info=True)
                 errors.append('行处理失败')
                 skipped += 1
                 continue
         if imported > 0:
             await db.commit()
-        else:
-            await db.rollback()
         return _build_batch_result(imported, skipped, errors, success_msg='成功导入', fail_msg='没有成功导入任何订单')
     except (OSError, ValueError) as e:
+        await db.rollback()
         logger.error(f'订单批量导入失败: {e}', exc_info=True)
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
 
@@ -271,16 +269,16 @@ async def batch_import_case_stockouts(file: UploadFile=File(...), db: AsyncSessi
                 db.add(log)
                 imported += 1
             except (ValueError, TypeError, SQLAlchemyError) as e:
+                await db.rollback()
                 logger.error(f'皮套出库导入 - 行处理失败: {e}', exc_info=True)
                 errors.append('行处理失败')
                 skipped += 1
                 continue
         if imported > 0:
             await db.commit()
-        else:
-            await db.rollback()
         return _build_batch_result(imported, skipped, errors, success_msg='成功导入皮套出库', fail_msg='没有成功导入任何皮套出库')
     except (OSError, ValueError) as e:
+        await db.rollback()
         logger.error(f'皮套出库批量导入失败: {e}', exc_info=True)
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
 
@@ -353,16 +351,16 @@ async def batch_import_case_stockins(file: UploadFile=File(...), db: AsyncSessio
                 db.add(log)
                 imported += 1
             except (ValueError, TypeError, SQLAlchemyError) as e:
+                await db.rollback()
                 logger.error(f'皮套入库导入 - 行处理失败: {e}', exc_info=True)
                 errors.append('行处理失败')
                 skipped += 1
                 continue
         if imported > 0:
             await db.commit()
-        else:
-            await db.rollback()
         return _build_batch_result(imported, skipped, errors, success_msg='成功导入皮套入库', fail_msg='没有成功导入任何皮套入库')
     except (OSError, ValueError) as e:
+        await db.rollback()
         logger.error(f'皮套入库批量导入失败: {e}', exc_info=True)
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
 
@@ -429,16 +427,16 @@ async def batch_import_stockins(file: UploadFile=File(...), db: AsyncSession=Dep
                 db.add(log)
                 imported += 1
             except (ValueError, TypeError, SQLAlchemyError) as e:
+                await db.rollback()
                 logger.error(f'备货导入 - 行处理失败: {e}', exc_info=True)
                 errors.append('行处理失败')
                 skipped += 1
                 continue
         if imported > 0:
             await db.commit()
-        else:
-            await db.rollback()
         return _build_batch_result(imported, skipped, errors, success_msg='成功导入备货', fail_msg='没有成功导入任何备货')
     except (OSError, ValueError) as e:
+        await db.rollback()
         logger.error(f'备货批量导入失败: {e}', exc_info=True)
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
 
@@ -529,16 +527,16 @@ async def batch_import_stockouts(file: UploadFile=File(...), db: AsyncSession=De
                 db.add(log)
                 imported += 1
             except (ValueError, TypeError, SQLAlchemyError) as e:
+                await db.rollback()
                 logger.error(f'出库导入 - 行处理失败: {e}', exc_info=True)
                 errors.append('行处理失败')
                 skipped += 1
                 continue
         if imported > 0:
             await db.commit()
-        else:
-            await db.rollback()
         return _build_batch_result(imported, skipped, errors, success_msg='成功导入出货', fail_msg='没有成功导入任何出货')
     except (OSError, ValueError) as e:
+        await db.rollback()
         logger.error(f'出库批量导入失败: {e}', exc_info=True)
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
 
@@ -588,16 +586,16 @@ async def batch_import_products(file: UploadFile=File(...), db: AsyncSession=Dep
                 db.add(product)
                 imported += 1
             except (ValueError, TypeError, SQLAlchemyError) as e:
+                await db.rollback()
                 logger.error(f'产品导入 - 行处理失败: {e}', exc_info=True)
                 errors.append('行处理失败')
                 skipped += 1
                 continue
         if imported > 0:
             await db.commit()
-        else:
-            await db.rollback()
         return _build_batch_result(imported, skipped, errors, success_msg='成功导入产品', fail_msg='没有找到需要导入的产品数据（可能都已存在）')
     except (OSError, ValueError) as e:
+        await db.rollback()
         logger.error(f'产品批量导入失败: {e}', exc_info=True)
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
 
@@ -671,5 +669,6 @@ async def batch_import_comprehensive(file: UploadFile=File(...), db: AsyncSessio
         await db.commit()
         return results
     except (OSError, ValueError) as e:
+        await db.rollback()
         logger.error(f'综合批量导入失败: {e}', exc_info=True)
         return ComprehensiveImportResult(success=False, message='操作失败，请稍后重试')

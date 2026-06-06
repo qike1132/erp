@@ -74,6 +74,7 @@ class DBHealthChecker:
         is_healthy = False
         if async_engine is not None:
             is_healthy = await self._check_async_engine(async_engine)
+            self._update_pool_metrics(async_engine)
 
         if not is_healthy:
             self.failed_checks += 1
@@ -91,6 +92,29 @@ class DBHealthChecker:
                     self.recoveries,
                 )
             self.last_failure_detail = None
+
+    def _update_pool_metrics(self, engine):
+        """更新连接池 Prometheus 指标"""
+        try:
+            from fastapi_app.core.metrics import (
+                DB_POOL_SIZE, DB_POOL_CHECKED_OUT,
+                DB_POOL_OVERFLOW, DB_POOL_CHECKEDIN,
+            )
+            pool = engine.pool
+            DB_POOL_SIZE.labels(pool='async_main').set(pool.size())
+            DB_POOL_CHECKED_OUT.labels(pool='async_main').set(pool.checkedout())
+            DB_POOL_OVERFLOW.labels(pool='async_main').set(pool.overflow())
+            DB_POOL_CHECKEDIN.labels(pool='async_main').set(pool.checkedin())
+
+            from fastapi_app.core.database import _read_engine
+            if _read_engine is not None:
+                rpool = _read_engine.pool
+                DB_POOL_SIZE.labels(pool='async_read').set(rpool.size())
+                DB_POOL_CHECKED_OUT.labels(pool='async_read').set(rpool.checkedout())
+                DB_POOL_OVERFLOW.labels(pool='async_read').set(rpool.overflow())
+                DB_POOL_CHECKEDIN.labels(pool='async_read').set(rpool.checkedin())
+        except Exception:
+            pass
 
     async def _check_async_engine(self, engine) -> bool:
         """检查异步引擎连接"""

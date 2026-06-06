@@ -114,61 +114,52 @@ class TestProductService:
         assert result['name'] == '新名称'
 
     async def test_delete_product_not_found(self, mock_db):
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.get = AsyncMock(return_value=None)
         with pytest.raises(Exception, match="不存在"):
             await product_service.delete_product(mock_db, 999)
 
     async def test_delete_product_has_orders(self, mock_db):
         product = MagicMock()
-        product.orders = [MagicMock()]
-        product.stockins = []
-        product.stockouts = []
-        product.inventory_logs = []
         product.name = "测试产品"
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = product
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.get = AsyncMock(return_value=product)
+        mock_count_result = MagicMock()
+        mock_count_result.scalar.return_value = 5
+        mock_db.execute = AsyncMock(return_value=mock_count_result)
         with pytest.raises(Exception, match="关联.*订单"):
             await product_service.delete_product(mock_db, 1)
 
     async def test_delete_product_has_stockins(self, mock_db):
         product = MagicMock()
-        product.orders = []
-        product.stockins = [MagicMock()]
-        product.stockouts = []
-        product.inventory_logs = []
         product.name = "测试产品"
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = product
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.get = AsyncMock(return_value=product)
+        mock_count_0 = MagicMock()
+        mock_count_0.scalar.return_value = 0
+        mock_count_5 = MagicMock()
+        mock_count_5.scalar.return_value = 5
+        mock_db.execute = AsyncMock(side_effect=[mock_count_0, mock_count_5])
         with pytest.raises(Exception, match="关联.*备货"):
             await product_service.delete_product(mock_db, 1)
 
     async def test_delete_product_has_stockouts(self, mock_db):
         product = MagicMock()
-        product.orders = []
-        product.stockins = []
-        product.stockouts = [MagicMock()]
-        product.inventory_logs = []
         product.name = "测试产品"
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = product
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.get = AsyncMock(return_value=product)
+        mock_count_0 = MagicMock()
+        mock_count_0.scalar.return_value = 0
+        mock_count_5 = MagicMock()
+        mock_count_5.scalar.return_value = 5
+        mock_db.execute = AsyncMock(side_effect=[mock_count_0, mock_count_0, mock_count_5])
         with pytest.raises(Exception, match="关联.*出货"):
             await product_service.delete_product(mock_db, 1)
 
     async def test_delete_product_success(self, mock_db):
         product = MagicMock()
-        product.orders = []
-        product.stockins = []
-        product.stockouts = []
-        product.inventory_logs = []
         product.name = "测试产品"
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = product
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.get = AsyncMock(return_value=product)
+        mock_count_result = MagicMock()
+        mock_count_result.scalar.return_value = 0
+        mock_delete_result = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[mock_count_result, mock_count_result, mock_count_result, mock_delete_result])
         mock_db.delete = AsyncMock()
         mock_db.commit = AsyncMock()
         await product_service.delete_product(mock_db, 1)
@@ -269,36 +260,29 @@ class TestProductEndpoints:
 
     async def test_delete_product_success(self, client, mock_db):
         product = MagicMock()
-        product.orders = []
-        product.stockins = []
-        product.stockouts = []
-        product.inventory_logs = []
         product.name = "测试产品"
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = product
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.get = AsyncMock(return_value=product)
+        mock_count_result = MagicMock()
+        mock_count_result.scalar.return_value = 0
+        mock_delete_result = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[mock_count_result, mock_count_result, mock_count_result, mock_delete_result])
         mock_db.delete = AsyncMock()
         mock_db.commit = AsyncMock()
         response = await client.delete("/api/v1/products/delete/1")
         assert response.status_code == 200
 
     async def test_delete_product_not_found(self, client, mock_db):
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.get = AsyncMock(return_value=None)
         response = await client.delete("/api/v1/products/delete/999")
         assert response.status_code == 400
 
     async def test_delete_product_has_orders(self, client, mock_db):
         product = MagicMock()
-        product.orders = [MagicMock()]
-        product.stockins = []
-        product.stockouts = []
-        product.inventory_logs = []
         product.name = "测试产品"
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = product
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.get = AsyncMock(return_value=product)
+        mock_count_result = MagicMock()
+        mock_count_result.scalar.return_value = 5
+        mock_db.execute = AsyncMock(return_value=mock_count_result)
         response = await client.delete("/api/v1/products/delete/1")
         assert response.status_code == 400
         assert "订单" in response.json()["detail"]
@@ -326,4 +310,4 @@ class TestProductEndpoints:
     async def test_available_stock_not_found(self, client, mock_db):
         mock_db.get = AsyncMock(return_value=None)
         response = await client.get("/api/v1/products/available-stock?product_id=999")
-        assert response.status_code == 404
+        assert response.status_code == 400

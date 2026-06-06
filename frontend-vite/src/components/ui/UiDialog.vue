@@ -2,11 +2,11 @@
   <DialogRoot :open="open" @update:open="$emit('update:open', $event)">
     <DialogPortal>
       <DialogOverlay
-        class="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9999] data-[state=open]:animate-[fadeIn_0.2s_ease]"
+        class="fixed inset-0 bg-black/50 backdrop-blur-sm z-[var(--z-overlay)] data-[state=open]:animate-[fadeIn_0.2s_ease]"
       />
       <DialogContent
         :class="[
-          'fixed inset-0 m-auto bg-surface-card rounded-2xl shadow-lg w-[95%] h-fit max-h-[90vh] overflow-hidden flex flex-col z-[9999] animate-slide-up',
+          'fixed inset-0 m-auto bg-surface-card rounded-2xl shadow-lg w-[95%] h-fit max-h-[90vh] overflow-hidden flex flex-col z-[var(--z-modal)] animate-slide-up',
           maxWidthClass,
         ]"
       >
@@ -17,6 +17,9 @@
         >
           对话框
         </DialogTitle>
+        <DialogDescription class="sr-only">
+          对话框内容
+        </DialogDescription>
         <div
           v-if="title || $slots.title"
           class="px-6 py-5 border-b border-border-light flex justify-between items-center"
@@ -28,12 +31,13 @@
             </slot>
           </DialogTitle>
           <DialogClose
-            class="w-8 h-8 border-none bg-surface rounded-full cursor-pointer flex items-center justify-center text-text-secondary transition-all duration-200 hover:bg-danger-50 hover:text-danger-500"
+            class="w-8 h-8 border-none bg-surface rounded-full cursor-pointer flex items-center justify-center text-text-secondary transition-colors duration-200 hover:bg-danger-50 hover:text-danger-500"
+            aria-label="关闭"
           >
-            <i class="fas fa-times" />
+            <i class="fas fa-times" aria-hidden="true" />
           </DialogClose>
         </div>
-        <div class="p-6 overflow-y-auto flex-1">
+        <div class="p-6 overflow-y-auto flex-1 overscroll-contain">
           <slot />
         </div>
         <div v-if="$slots.footer" class="px-6 py-4 border-t border-border-light flex justify-end gap-2">
@@ -45,7 +49,7 @@
 </template>
 
 <script setup lang="ts">
-import { DialogRoot, DialogPortal, DialogOverlay, DialogContent, DialogTitle, DialogClose } from 'reka-ui'
+import { DialogRoot, DialogPortal, DialogOverlay, DialogContent, DialogTitle, DialogDescription, DialogClose } from 'reka-ui'
 
 withDefaults(
   defineProps<{

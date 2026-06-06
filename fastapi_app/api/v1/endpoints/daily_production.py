@@ -11,9 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
+from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.schemas.daily_production import (
     DailySummaryResponse,
     MonthlySummaryResponse,
+    ProductInfoResponse,
     ProductionRecordActionResponse,
     ProductionRecordCreate,
     ProductionRecordListResponse,
@@ -58,7 +60,7 @@ async def create_record(
     user: User = Depends(require_permission('production_summary_manage')),
 ):
     """创建生产记录"""
-    try:
+    async with db_transaction(db):
         await daily_production_service.create_record(
             db,
             department=data.department,
@@ -71,9 +73,7 @@ async def create_record(
             remark=data.remark or '',
             created_by=user.username if hasattr(user, 'username') else '',
         )
-        return ProductionRecordActionResponse(success=True, message='生产记录创建成功')
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    return ProductionRecordActionResponse(success=True, message='生产记录创建成功')
 
 
 @router.put('/records/{record_id}', response_model=ProductionRecordActionResponse)
@@ -84,14 +84,12 @@ async def update_record(
     user: User = Depends(require_permission('production_summary_manage')),
 ):
     """更新生产记录"""
-    try:
+    async with db_transaction(db):
         update_data = data.model_dump(exclude_unset=True)
         await daily_production_service.update_record(
             db, record_id, created_by=user.username if hasattr(user, 'username') else '', **update_data
         )
-        return ProductionRecordActionResponse(success=True, message='生产记录更新成功')
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    return ProductionRecordActionResponse(success=True, message='生产记录更新成功')
 
 
 @router.delete('/records/{record_id}', response_model=ProductionRecordActionResponse)
@@ -101,11 +99,9 @@ async def delete_record(
     _user: User = Depends(require_permission('production_summary_manage')),
 ):
     """删除生产记录"""
-    try:
+    async with db_transaction(db):
         await daily_production_service.delete_record(db, record_id)
-        return ProductionRecordActionResponse(success=True, message='生产记录删除成功')
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    return ProductionRecordActionResponse(success=True, message='生产记录删除成功')
 
 
 @router.get('/daily-summary', response_model=DailySummaryResponse)
@@ -159,7 +155,7 @@ async def export_records(
         raise HTTPException(status_code=500, detail=f'导出失败: {settings.sanitize_error(e)}') from e
 
 
-@router.get('/product-info/{product_id}')
+@router.get('/product-info/{product_id}', response_model=ProductInfoResponse)
 async def get_product_info(
     product_id: int,
     db: AsyncSession = Depends(get_async_read_db),

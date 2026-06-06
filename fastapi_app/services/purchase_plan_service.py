@@ -20,8 +20,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only, selectinload
 
 from fastapi_app.core.cache import cache_result
+from fastapi_app.core.redis_wrapper import safe_delete, safe_get, safe_set
 
 from fastapi_app.services import customer_service, product_service, stock_service
+from fastapi_app.services.notification_service import StockEvent, publish_stock_event
 from fastapi_app.services.plan_utils import (
     build_inventory_map,
     calc_shipment_status,
@@ -43,16 +45,12 @@ logger = logging.getLogger(__name__)
 INVENTORY_CACHE_PREFIX = 'inventory'
 INVENTORY_CACHE_TTL = 300
 FIFO_CACHE_PREFIX = 'plan_fifo'
-FIFO_CACHE_TTL = 300
+FIFO_CACHE_TTL = 1800
 
 
 async def _invalidate_fifo_cache(plan_month: str) -> None:
     """清除指定月份的 FIFO 缓存"""
-    try:
-        from utils.redis_cache import redis_cache
-        await redis_cache.delete(f'{FIFO_CACHE_PREFIX}:{plan_month}')
-    except (OSError, ConnectionError, ValueError) as e:
-        logger.warning(f'FIFO缓存清除失败: {e}')
+    await safe_delete(f'{FIFO_CACHE_PREFIX}:{plan_month}', context='FIFO缓存清除')
 
 
 async def _invalidate_plan_caches(plan_month: str = '') -> None:
@@ -221,6 +219,7 @@ async def create_plan(db: AsyncSession, *, customer_id: int, customer_name: str,
     await _log_action(db, plan.id, 'create', None, plan.to_dict(), created_by)
     await db.commit()
     await _invalidate_plan_caches(plan_month)
+    await publish_stock_event(StockEvent.SHIPMENT_PLAN_UPLOADED, {'plan_id': plan.id, 'plan_no': plan.plan_no, 'customer_name': customer_name, 'detail_count': len(details)})
     logger.info(f'采购计划创建成功：{plan.plan_no} - {customer_name} - {len(details)}条明细')
     return {'plan_id': plan.id, 'plan_no': plan.plan_no}
 
@@ -238,6 +237,7 @@ async def update_plan(db: AsyncSession, plan_id: int, *, created_by: str='', **k
     await _log_action(db, plan.id, 'update', old_data, plan.to_dict(), created_by)
     await db.commit()
     await _invalidate_plan_caches(plan.plan_month)
+    await publish_stock_event(StockEvent.SHIPMENT_PLAN_UPLOADED, {'plan_id': plan.id, 'operation': 'update'})
     return plan.to_dict()
 
 async def delete_plan(db: AsyncSession, plan_id: int, *, operator: str='') -> None:
@@ -249,9 +249,10 @@ async def delete_plan(db: AsyncSession, plan_id: int, *, operator: str='') -> No
     old_data = plan.to_dict()
     plan_month = plan.plan_month
     await db.delete(plan)
-    await _log_action(db, plan_id, 'delete', old_data, None, operator)
+    await _log_action(db, plan.id, 'delete', old_data, None, operator)
     await db.commit()
     await _invalidate_plan_caches(plan_month)
+    await publish_stock_event(StockEvent.STOCK_CHANGED, {'plan_id': plan_id, 'operation': 'delete', 'customer_name': old_data.get('customer_name', '')})
     logger.info(f'采购计划删除成功：ID={plan_id}')
 
 async def update_detail(db: AsyncSession, detail_id: int, *, created_by: str='', **kwargs) -> dict:
@@ -273,6 +274,7 @@ async def update_detail(db: AsyncSession, detail_id: int, *, created_by: str='',
     await db.commit()
     if plan_month_row:
         await _invalidate_plan_caches(plan_month_row[0])
+    await publish_stock_event(StockEvent.SHIPMENT_PLAN_UPLOADED, {'detail_id': detail_id, 'operation': 'update_detail'})
     return detail.to_dict()
 
 async def delete_detail(db: AsyncSession, detail_id: int) -> None:
@@ -287,6 +289,7 @@ async def delete_detail(db: AsyncSession, detail_id: int) -> None:
     await db.commit()
     if plan_month_row:
         await _invalidate_plan_caches(plan_month_row[0])
+    await publish_stock_event(StockEvent.STOCK_CHANGED, {'detail_id': detail_id, 'operation': 'delete_detail'})
 
 async def add_details(db: AsyncSession, plan_id: int, details: list[dict]) -> dict:
     """向主单追加明细"""
@@ -314,13 +317,9 @@ async def _get_inventory_map(db: AsyncSession) -> dict:
     优先从 Redis 缓存读取，缓存未命中则查询 stock_service
     超时保护：asyncio.timeout(8) 防止 _fetch_inventory 的4条聚合SQL长时间阻塞
     """
-    try:
-        from utils.redis_cache import redis_cache
-        cached = await redis_cache.get(f'{INVENTORY_CACHE_PREFIX}:map')
-        if cached is not None:
-            return {tuple(k.split('||')): v for k, v in cached.items()}
-    except (OSError, ConnectionError, ValueError) as e:
-        logger.warning(f'Redis缓存读取失败: {e}')
+    cached = await safe_get(f'{INVENTORY_CACHE_PREFIX}:map', context='库存映射缓存')
+    if cached is not None:
+        return {tuple(k.split('||')): v for k, v in cached.items()}
     try:
         async with asyncio.timeout(8):
             inventory_result = await stock_service.get_inventory(db)
@@ -331,12 +330,8 @@ async def _get_inventory_map(db: AsyncSession) -> dict:
     except (ValueError, TypeError, OSError) as e:
         logger.warning(f'获取库存数据失败: {e}')
         return {}
-    try:
-        from utils.redis_cache import redis_cache
-        cacheable = {f'{k[0]}||{k[1]}': v for k, v in mapping.items()}
-        await redis_cache.set(f'{INVENTORY_CACHE_PREFIX}:map', cacheable, timeout=INVENTORY_CACHE_TTL)
-    except (OSError, ConnectionError, ValueError) as e:
-        logger.warning(f'Redis缓存写入失败: {e}')
+    cacheable = {f'{k[0]}||{k[1]}': v for k, v in mapping.items()}
+    await safe_set(f'{INVENTORY_CACHE_PREFIX}:map', cacheable, timeout=INVENTORY_CACHE_TTL, context='库存映射缓存')
     return mapping
 
 def _calc_stock_status(plan_qty: int, inventory_qty: int) -> str:
@@ -434,18 +429,13 @@ async def _get_shipped_fifo_map(db: AsyncSession, plan_details: list, customer_n
 
     # 尝试从 Redis 缓存读取
     if plan_month:
-        try:
-            from utils.redis_cache import redis_cache
-            cache_key = f'{FIFO_CACHE_PREFIX}:{plan_month}'
-            cached = await redis_cache.get(cache_key)
-            if cached is not None:
-                # 验证缓存包含所有请求的 detail_id（缓存 key 为 str，需统一类型比较）
-                cached_int_keys = {int(k) for k in cached}
-                detail_ids = {d.id for d in plan_details}
-                if detail_ids.issubset(cached_int_keys):
-                    return {int(k): v for k, v in cached.items()}
-        except (OSError, ConnectionError, ValueError) as e:
-            logger.warning(f'FIFO缓存读取失败: {e}')
+        cache_key = f'{FIFO_CACHE_PREFIX}:{plan_month}'
+        cached = await safe_get(cache_key, context='FIFO缓存')
+        if cached is not None:
+            cached_int_keys = {int(k) for k in cached}
+            detail_ids = {d.id for d in plan_details}
+            if detail_ids.issubset(cached_int_keys):
+                return {int(k): v for k, v in cached.items()}
 
     try:
         result = await _fifo_query_with_timeout(db, plan_details, customer_name_map, plan_month)
@@ -498,20 +488,35 @@ async def _fifo_query_with_timeout(db: AsyncSession, plan_details: list, custome
             limit_date = earliest_plan_date.replace(year=earliest_plan_date.year - 1, day=28)
         stockout_date_limit = datetime(limit_date.year, limit_date.month, limit_date.day)
 
-        # 查询相关主单（P1-03: 用customer_id匹配替代字符串匹配）
-        plan_result = await db.execute(
-            select(PurchasePlan).where(PurchasePlan.customer_name.in_(customers))
-        )
-        all_plans = plan_result.scalars().all()
-        plan_id_to_customer = {p.id: p.customer_name for p in all_plans}
+        # 设置服务端查询超时：SET LOCAL 仅在当前事务内生效，COMMIT/ROLLBACK 后自动重置
+        try:
+            await db.execute(text("SET LOCAL statement_timeout = '8s'"))
+        except Exception:
+            pass
 
-        # 查询相关主单的所有明细
+        # 查询相关主单 — 只取 id + customer_name，限制时间范围避免全表扫描
+        plan_result = await db.execute(
+            select(PurchasePlan.id, PurchasePlan.customer_name)
+            .where(
+                PurchasePlan.customer_name.in_(customers),
+                PurchasePlan.plan_month >= f"{earliest_plan_date.year - 1}-{earliest_plan_date.month:02d}",
+            )
+        )
+        all_plan_rows = plan_result.all()
+        plan_id_to_customer = {r.id: r.customer_name for r in all_plan_rows}
+
+        # 查询相关主单的所有明细 — 只取 FIFO 需要的字段
         relevant_plan_ids = list(plan_id_to_customer.keys())
         if not relevant_plan_ids:
             return {}
 
         detail_result = await db.execute(
             select(PurchasePlanDetail)
+            .options(load_only(
+                PurchasePlanDetail.id, PurchasePlanDetail.plan_id,
+                PurchasePlanDetail.product_name, PurchasePlanDetail.product_id,
+                PurchasePlanDetail.plan_date, PurchasePlanDetail.quantity,
+            ))
             .where(PurchasePlanDetail.plan_id.in_(relevant_plan_ids))
             .order_by(PurchasePlanDetail.plan_date, PurchasePlanDetail.id)
         )
@@ -529,13 +534,6 @@ async def _fifo_query_with_timeout(db: AsyncSession, plan_details: list, custome
             if key not in details_by_key:
                 details_by_key[key] = []
             details_by_key[key].append(d)
-
-        # 设置服务端查询超时：SET LOCAL 仅在当前事务内生效，COMMIT/ROLLBACK 后自动重置
-        # 防止 asyncio.timeout 仅取消客户端 await 而 PostgreSQL 仍在执行慢查询
-        try:
-            await db.execute(text("SET LOCAL statement_timeout = '10s'"))
-        except Exception:
-            pass  # SET LOCAL 失败不阻断主流程，依赖 asyncio.timeout 兜底
 
         # 查出这些客户+产品的出货记录
         # 优化：用 product_id IN(...) 替代 JOIN Product + Product.name IN(...)
@@ -621,13 +619,9 @@ async def _fifo_query_with_timeout(db: AsyncSession, plan_details: list, custome
 
         # 写入 Redis 缓存
         if plan_month:
-            try:
-                from utils.redis_cache import redis_cache
-                cache_key = f'{FIFO_CACHE_PREFIX}:{plan_month}'
-                cacheable = {str(k): v for k, v in allocated.items()}
-                await redis_cache.set(cache_key, cacheable, timeout=FIFO_CACHE_TTL)
-            except (OSError, ConnectionError, ValueError) as e:
-                logger.warning(f'FIFO缓存写入失败: {e}')
+            cache_key = f'{FIFO_CACHE_PREFIX}:{plan_month}'
+            cacheable = {str(k): v for k, v in allocated.items()}
+            await safe_set(cache_key, cacheable, timeout=FIFO_CACHE_TTL, context='FIFO缓存')
 
         return allocated
 
@@ -676,7 +670,7 @@ async def get_shipment_records(db: AsyncSession, plan_id: int) -> list[dict]:
     key_prefix="pp:monthly",
     ttl=120,
     local_ttl=30,
-    key_builder=lambda *args, **kwargs: f"y{kwargs.get('year', 0)}:m{kwargs.get('month', 0)}:c{kwargs.get('customer_id', 0)}",
+    key_builder=lambda *args, **kwargs: f"v2:y{args[1] if len(args) > 1 else kwargs.get('year', 0)}:m{args[2] if len(args) > 2 else kwargs.get('month', 0)}:c{args[3] if len(args) > 3 else kwargs.get('customer_id', 0)}",
 )
 async def get_monthly_calendar(db: AsyncSession, year: int, month: int, customer_id: int=0) -> dict:
     """
@@ -685,61 +679,82 @@ async def get_monthly_calendar(db: AsyncSession, year: int, month: int, customer
     优化项：
     - 移除 _get_inventory_map 调用（前端 PurchasePlanView 不使用 inventory_qty / stock_status）
     - 精简返回字段，减少 JSON 序列化体积
-    - 保留 shipped_qty 用于前端进度展示
+    - shipped_qty 使用 FIFO 实时分配（与其他端点一致，不再依赖过时的 shipped_qty 缓存字段）
 
     返回:
       plans_by_date: {"2026-04-01": [{...}, ...], ...}
       customers: [{id, name, icon_url}, ...]
     """
     plan_month = f'{year}-{month:02d}'
-    conditions = [PurchasePlan.plan_month == plan_month]
-    if customer_id:
-        conditions.append(PurchasePlan.customer_id == customer_id)
-    result = await db.execute(
-        select(PurchasePlan).options(
-            selectinload(PurchasePlan.details).load_only(
-                PurchasePlanDetail.id, PurchasePlanDetail.product_name,
-                PurchasePlanDetail.barcode, PurchasePlanDetail.plan_date,
-                PurchasePlanDetail.quantity
-            )
-        ).where(*conditions)
-    )
-    plans = result.scalars().all()
-    # 收集所有明细用于 FIFO 分配
-    all_details = [d for plan in plans for d in plan.details]
-    customer_name_map = {plan.id: plan.customer_name for plan in plans}
-    shipped_fifo_map = await _get_shipped_fifo_map(db, all_details, customer_name_map, plan_month=plan_month)
     days_in_month = calendar.monthrange(year, month)[1]
+
+    # 单条 raw SQL JOIN，跳过 ORM 对象实例化开销
+    sql = text("""
+        SELECT d.id AS detail_id, d.plan_id, p.customer_id, p.customer_name,
+               d.product_name, d.barcode, d.plan_date, d.quantity
+        FROM purchase_plan_details d
+        JOIN purchase_plans p ON d.plan_id = p.id
+        WHERE p.plan_month = :plan_month
+    """ + (" AND p.customer_id = :customer_id" if customer_id else ""))
+
+    params: dict = {'plan_month': plan_month}
+    if customer_id:
+        params['customer_id'] = customer_id
+
+    result = await db.execute(sql, params)
+    rows = result.all()
+
+    detail_shipped_map: dict[int, int] = {}
+    if rows:
+        detail_ids = list({row.detail_id for row in rows})
+        detail_result = await db.execute(
+            select(PurchasePlanDetail)
+            .options(load_only(
+                PurchasePlanDetail.id, PurchasePlanDetail.plan_id,
+                PurchasePlanDetail.product_name, PurchasePlanDetail.product_id,
+                PurchasePlanDetail.plan_date, PurchasePlanDetail.quantity,
+            ))
+            .where(PurchasePlanDetail.id.in_(detail_ids))
+            .order_by(PurchasePlanDetail.plan_date, PurchasePlanDetail.id)
+        )
+        all_details = detail_result.scalars().all()
+        customer_name_map = {}
+        for row in rows:
+            if row.plan_id not in customer_name_map:
+                customer_name_map[row.plan_id] = row.customer_name
+        shipped_fifo_map = await _get_shipped_fifo_map(db, all_details, customer_name_map, plan_month=plan_month)
+        detail_shipped_map = {d.id: shipped_fifo_map.get(d.id, 0) for d in all_details}
+
     plans_by_date: dict[str, list[dict]] = {}
     customer_set: dict[int, dict] = {}
     for day in range(1, days_in_month + 1):
-        d = date(year, month, day)
-        plans_by_date[d.isoformat()] = []
-    for plan in plans:
-        for d in plan.details:
-            shp_qty = shipped_fifo_map.get(d.id, 0)
-            date_str = d.plan_date.isoformat() if d.plan_date else ''
-            if date_str in plans_by_date:
-                plans_by_date[date_str].append({
-                    'detail_id': d.id,
-                    'plan_id': plan.id,
-                    'customer_name': plan.customer_name,
-                    'product_name': d.product_name,
-                    'barcode': d.barcode,
-                    'quantity': d.quantity,
-                    'shipped_qty': shp_qty,
-                    'remaining_qty': d.quantity - shp_qty,
-                    'plan_date': date_str,
-                })
-            if plan.customer_id not in customer_set:
-                customer_set[plan.customer_id] = {'id': plan.customer_id, 'name': plan.customer_name, 'icon_url': None}
+        plans_by_date[date(year, month, day).isoformat()] = []
+
+    for row in rows:
+        date_str = row.plan_date.isoformat() if row.plan_date else ''
+        shp_qty = detail_shipped_map.get(row.detail_id, 0)
+        if date_str in plans_by_date:
+            plans_by_date[date_str].append({
+                'detail_id': row.detail_id,
+                'plan_id': row.plan_id,
+                'customer_name': row.customer_name,
+                'product_name': row.product_name,
+                'barcode': row.barcode,
+                'quantity': row.quantity,
+                'shipped_qty': shp_qty,
+                'remaining_qty': row.quantity - shp_qty,
+                'plan_date': date_str,
+            })
+        if row.customer_id not in customer_set:
+            customer_set[row.customer_id] = {'id': row.customer_id, 'name': row.customer_name, 'icon_url': None}
+
     return {'year': year, 'month': month, 'days_in_month': days_in_month, 'plans_by_date': plans_by_date, 'customers': list(customer_set.values())}
 
 @cache_result(
     key_prefix="pp:summary",
-    ttl=120,
-    local_ttl=30,
-    key_builder=lambda *args, **kwargs: f"y{kwargs.get('year', 0)}:m{kwargs.get('month', 0)}",
+    ttl=1800,
+    local_ttl=5,
+    key_builder=lambda *args, **kwargs: f"v2:y{args[1] if len(args) > 1 else kwargs.get('year', 0)}:m{args[2] if len(args) > 2 else kwargs.get('month', 0)}",
 )
 async def get_customer_summary(db: AsyncSession, year: int, month: int) -> dict:
     """客户维度汇总统计，单次 eager loading 查询"""
@@ -1168,5 +1183,88 @@ async def recalc_plans_after_stockout_delete(db: AsyncSession, customer_name: st
     logger.info(
         f'出货计划回滚完成：stockout_no={stockout_no}, '
         f'客户={customer_name}, 产品={product_name}, 数量={deleted_quantity}, '
+        f'影响计划={len(affected_plans)}, 状态变更={status_changes}'
+    )
+
+
+async def recalc_plans_after_stockout_create(
+    db: AsyncSession, customer_name: str, product_name: str, *, operator: str = ''
+) -> None:
+    """
+    出货记录创建后，重新计算关联出货计划的 shipped_qty 和状态
+
+    由 stock_service.create_stockout() 在创建出货记录后调用。
+    不负责提交事务——这些由调用方处理。
+    """
+    if not customer_name or not product_name:
+        return
+
+    plan_result = await db.execute(
+        select(PurchasePlan).where(PurchasePlan.customer_name == customer_name)
+    )
+    affected_plans = plan_result.scalars().all()
+    if not affected_plans:
+        return
+
+    affected_plan_ids = [p.id for p in affected_plans]
+
+    detail_result = await db.execute(
+        select(PurchasePlanDetail)
+        .where(PurchasePlanDetail.plan_id.in_(affected_plan_ids))
+        .order_by(PurchasePlanDetail.plan_date, PurchasePlanDetail.id)
+        .with_for_update()
+    )
+    all_affected_details = detail_result.scalars().all()
+
+    related_details = [d for d in all_affected_details if d.product_name == product_name]
+    if not related_details:
+        return
+
+    customer_name_map = {p.id: p.customer_name for p in affected_plans}
+    shipped_fifo_map = await _get_shipped_fifo_map(db, related_details, customer_name_map)
+
+    for d in related_details:
+        d.shipped_qty = shipped_fifo_map.get(d.id, 0)
+
+    await db.flush()
+
+    details_by_plan: dict[int, list[PurchasePlanDetail]] = {}
+    for d in all_affected_details:
+        details_by_plan.setdefault(d.plan_id, []).append(d)
+
+    status_changes: dict[int, dict] = {}
+    for plan in affected_plans:
+        plan_details = details_by_plan.get(plan.id, [])
+        has_related = any(d.product_name == product_name for d in plan_details)
+        if not has_related:
+            continue
+
+        old_status = plan.status
+        all_plan_details = [d for d in all_affected_details if d.plan_id == plan.id]
+        shipped_map = {d.id: d.shipped_qty for d in all_plan_details}
+        new_status = _recalc_plan_status(all_plan_details, shipped_map, current_status=old_status)
+
+        if old_status != new_status:
+            plan.status = new_status
+            status_changes[plan.id] = {'old_status': old_status, 'new_status': new_status}
+
+    await db.flush()
+
+    for plan_id in affected_plan_ids:
+        plan_details_snap = [
+            {'id': d.id, 'shipped_qty': d.shipped_qty}
+            for d in related_details if d.plan_id == plan_id
+        ]
+        if plan_details_snap:
+            await _log_action(
+                db, plan_id, 'recalc_stockout',
+                {'product_name': product_name},
+                {'details': plan_details_snap,
+                 'status_change': status_changes.get(plan_id)},
+                operator or 'system',
+            )
+
+    logger.info(
+        f'出货计划重算完成：客户={customer_name}, 产品={product_name}, '
         f'影响计划={len(affected_plans)}, 状态变更={status_changes}'
     )

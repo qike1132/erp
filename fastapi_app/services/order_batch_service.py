@@ -4,12 +4,13 @@ import json
 import logging
 from datetime import datetime
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from fastapi_app.services import escape_like
-from fastapi_app.shared_models import Order, OrderBatchAuditLog, OrderSyncConfig, StockOut, User
+from fastapi_app.services.serializers.order_serializer import OrderSerializer
+from fastapi_app.shared_models import Order, OrderBatchAuditLog, OrderSyncConfig, Product, StockOut, User
 
 logger = logging.getLogger(__name__)
 
@@ -94,20 +95,7 @@ async def is_whitelisted(db: AsyncSession, customer: str) -> bool:
     return customer in whitelist
 
 
-def _order_batch_to_dict(o: Order) -> dict:
-    return {
-        'id': o.id,
-        'order_no': o.order_no,
-        'customer': o.customer,
-        'order_date': o.order_date.strftime('%Y-%m-%d %H:%M') if o.order_date else None,
-        'product_id': o.product_id,
-        'product_name': o.product.name if o.product else None,
-        'quantity': o.quantity,
-        'status': o.status,
-        'batch_no': o.batch_no,
-        'batch_completed_at': o.batch_completed_at.isoformat() if o.batch_completed_at else None,
-        'is_locked': o.is_locked,
-    }
+
 
 
 async def get_batch_query_list(
@@ -121,13 +109,14 @@ async def get_batch_query_list(
     keyword: str | None = None,
 ) -> dict:
     whitelist = await get_whitelist(db)
-    if not whitelist:
-        return {'items': [], 'total': 0}
 
     stmt = select(Order).options(joinedload(Order.product)).where(
-        Order.customer.in_(whitelist),
         Order.is_deleted.isnot(True),
     )
+
+    # 白名单非空时仅显示白名单客户；为空时显示所有客户
+    if whitelist:
+        stmt = stmt.where(Order.customer.in_(whitelist))
 
     if batch_no:
         stmt = stmt.where(Order.batch_no == batch_no)
@@ -137,7 +126,9 @@ async def get_batch_query_list(
         stmt = stmt.where(Order.customer == customer)
     if keyword:
         kw = f"%{escape_like(keyword)}%"
-        stmt = stmt.where(Order.order_no.ilike(kw))
+        stmt = stmt.join(Product, Order.product_id == Product.id).where(
+            or_(Order.order_no.ilike(kw), Product.name.ilike(kw), Product.barcode.ilike(kw))
+        )
 
     count_stmt = select(func.count()).select_from(stmt.subquery())
     total = (await db.execute(count_stmt)).scalar() or 0
@@ -175,23 +166,14 @@ async def get_batch_query_list(
     for o in orders:
         sd = stockout_data.get(o.id, {'deducted_qty': 0, 'shipped_qty': 0})
         computed_status = compute_status_from_stockouts(o, sd['deducted_qty'], sd['shipped_qty'])
-        items.append({
-            'id': o.id,
-            'order_no': o.order_no,
-            'customer': o.customer,
-            'order_date': o.order_date.strftime('%Y-%m-%d %H:%M') if o.order_date else None,
-            'product_id': o.product_id,
-            'product_name': o.product.name if o.product else None,
+        base_data = OrderSerializer.serialize(o, OrderSerializer.BATCH_CONFIG)
+        base_data.update({
             'product_barcode': o.product.barcode if o.product else None,
-            'quantity': o.quantity,
             'deducted_qty': sd['deducted_qty'],
             'shipped_qty': sd['shipped_qty'],
-            'status': o.status,
             'computed_status': computed_status,
-            'batch_no': o.batch_no,
-            'batch_completed_at': o.batch_completed_at.isoformat() if o.batch_completed_at else None,
-            'is_locked': o.is_locked,
         })
+        items.append(base_data)
 
     return {'items': items, 'total': total}
 
@@ -224,7 +206,9 @@ async def get_batch_orders(
         stmt = stmt.where(Order.customer == customer)
     if keyword:
         kw = f"%{escape_like(keyword)}%"
-        stmt = stmt.where((Order.order_no.ilike(kw)) | (Order.customer.ilike(kw)))
+        stmt = stmt.join(Product, Order.product_id == Product.id).where(
+            or_(Order.order_no.ilike(kw), Product.name.ilike(kw), Product.barcode.ilike(kw))
+        )
 
     count_stmt = select(func.count()).select_from(stmt.subquery())
     total = (await db.execute(count_stmt)).scalar() or 0
@@ -233,7 +217,7 @@ async def get_batch_orders(
     result = await db.execute(stmt)
     orders = result.unique().scalars().all()
 
-    return {'items': [_order_batch_to_dict(o) for o in orders], 'total': total}
+    return {'items': [OrderSerializer.serialize(o, OrderSerializer.BATCH_CONFIG) for o in orders], 'total': total}
 
 
 async def get_batch_history(
@@ -274,7 +258,7 @@ async def get_batch_history(
 
     items = []
     for o in orders:
-        d = _order_batch_to_dict(o)
+        d = OrderSerializer.serialize(o, OrderSerializer.BATCH_CONFIG)
         d['batch_completed_by'] = o.batch_completed_by.username if o.batch_completed_by else None
         items.append(d)
 
@@ -293,8 +277,6 @@ async def update_batch_no(
     order = result.scalar_one_or_none()
     if not order:
         raise ValueError(f"订单不存在: {order_id}")
-    if not await is_whitelisted(db, order.customer):
-        raise ValueError(f"订单客户 {order.customer} 不在白名单中")
 
     old_batch_no = order.batch_no
     updated_ids = [order_id]

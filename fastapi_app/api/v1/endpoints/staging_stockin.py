@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
+from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.schemas.staging import (
     StagingListResponse,
     StagingResponse,
@@ -47,11 +48,9 @@ async def import_staging_stockins(file: UploadFile=File(...), session_id: str=Qu
 @router.put('/{stockin_id}', response_model=StagingResponse, summary='更新暂存备货')
 async def update_staging_stockin(stockin_id: int, data: StagingStockInUpdate, db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_permission('batch_import'))):
     """更新暂存备货"""
-    try:
+    async with db_transaction(db):
         await svc.update_staging_stockin(db, stockin_id, data.model_dump(exclude_unset=True))
-        return StagingResponse(success=True, message='更新成功')
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+    return StagingResponse(success=True, message='更新成功')
 
 @router.delete('/clear', response_model=StagingResponse, summary='清空暂存备货')
 async def clear_staging_stockins(session_id: str=Query('default', description='会话ID'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_permission('batch_import'))):
@@ -63,11 +62,9 @@ async def clear_staging_stockins(session_id: str=Query('default', description='�
 @router.delete('/{stockin_id}', response_model=StagingResponse, summary='删除暂存备货')
 async def delete_staging_stockin(stockin_id: int, db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_permission('batch_import'))):
     """删除暂存备货"""
-    try:
+    async with db_transaction(db):
         await svc.delete_staging_stockin(db, stockin_id)
-        return StagingResponse(success=True, message='删除成功')
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+    return StagingResponse(success=True, message='删除成功')
 
 @router.post('/confirm', response_model=StagingStockInConfirmResult, summary='确认暂存备货')
 async def confirm_staging_stockins(session_id: str=Query('default', description='会话ID'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_permission('batch_import'))):

@@ -4,16 +4,16 @@
     <div class="ci-section">
       <div class="ci-section-header">
         <div class="ci-section-title">
-          <i class="fas fa-warehouse" style="color: var(--color-primary-500)" />
+          <i class="fas fa-warehouse" style="color: var(--color-primary-500)"  aria-hidden="true" />
           皮套库存汇总
         </div>
         <div class="ci-header-actions">
           <div class="ci-search-wrapper">
-            <i class="fas fa-search ci-search-icon" />
+            <i class="fas fa-search ci-search-icon"  aria-hidden="true" />
             <input v-model="invSearch" class="ci-search-input" placeholder="搜索产品名称或69码..." @input="onInvSearchInput" />
           </div>
           <button class="ci-action-btn ci-action-primary" @click="invRefetch()">
-            <i class="fas fa-sync-alt" style="margin-right: 4px" />刷新
+            <i class="fas fa-sync-alt" style="margin-right: 4px"  aria-hidden="true" />刷新
           </button>
         </div>
       </div>
@@ -35,8 +35,8 @@
       </div>
 
       <!-- 库存表格 -->
-      <div v-if="invIsLoading && inventoryList.length === 0" class="ci-loading"><i class="fas fa-spinner fa-spin" /><span>加载中...</span></div>
-      <div v-else-if="inventoryList.length === 0" class="ci-empty"><i class="fas fa-warehouse" /><span>暂无库存数据</span></div>
+      <div v-if="invIsLoading && inventoryList.length === 0" class="ci-loading"><i class="fas fa-spinner fa-spin"  aria-hidden="true" /><span>加载中…</span></div>
+      <div v-else-if="inventoryList.length === 0" class="ci-empty"><i class="fas fa-warehouse"  aria-hidden="true" /><span>暂无库存数据</span></div>
       <template v-else>
       <div v-if="invIsFetching" class="ci-fetching-bar"><div class="ci-fetching-progress" /></div>
       <table class="ci-table">
@@ -63,16 +63,16 @@
             </td>
             <td>
               <button class="ci-icon-btn ci-icon-info" @click.stop="selectCaseRow(row)">
-                <i class="fas fa-history" style="margin-right: 2px" />流水
+                <i class="fas fa-history" style="margin-right: 2px"  aria-hidden="true" />流水
               </button>
             </td>
           </tr>
         </tbody>
       </table>
       <div v-if="invTotalPages > 1" class="ci-pagination">
-        <button class="ci-page-btn" :disabled="invPage <= 1" @click="invPage--"><i class="fas fa-chevron-left" /></button>
+        <button class="ci-page-btn" :disabled="invPage <= 1" @click="invPage--" aria-label="上一页"><i class="fas fa-chevron-left"  aria-hidden="true" /></button>
         <span class="ci-page-info">{{ invPage }} / {{ invTotalPages }}</span>
-        <button class="ci-page-btn" :disabled="invPage >= invTotalPages" @click="invPage++"><i class="fas fa-chevron-right" /></button>
+        <button class="ci-page-btn" :disabled="invPage >= invTotalPages" @click="invPage++"><i class="fas fa-chevron-right"  aria-hidden="true" /></button>
       </div>
       </template>
     </div>
@@ -81,11 +81,11 @@
     <div v-if="selectedCaseName" class="ci-section">
       <div class="ci-section-header">
         <div class="ci-section-title">
-          <i class="fas fa-history" style="color: var(--color-primary-500)" />
+          <i class="fas fa-history" style="color: var(--color-primary-500)"  aria-hidden="true" />
           库存流水记录 <small style="color: var(--color-text-muted)">- {{ selectedCaseName }}</small>
         </div>
         <button class="ci-action-btn ci-action-outline" @click="showLogFilter = !showLogFilter">
-          <i class="fas fa-filter" style="margin-right: 4px" />筛选
+          <i class="fas fa-filter" style="margin-right: 4px"  aria-hidden="true" />筛选
         </button>
       </div>
       <div v-if="showLogFilter" class="ci-filter-panel">
@@ -104,16 +104,16 @@
           </div>
           <div class="ci-filter-action">
             <button class="ci-action-btn ci-action-primary" @click="logPage = 1; logRefetch()">
-              <i class="fas fa-search" style="margin-right: 4px" />查询
+              <i class="fas fa-search" style="margin-right: 4px"  aria-hidden="true" />查询
             </button>
-            <button class="ci-action-btn ci-action-outline" style="margin-left: 8px" @click="clearLogFilter">
-              <i class="fas fa-times" />
+            <button class="ci-action-btn ci-action-outline" style="margin-left: 8px" @click="clearLogFilter" aria-label="关闭">
+              <i class="fas fa-times"  aria-hidden="true" />
             </button>
           </div>
         </div>
       </div>
-      <div v-if="logIsLoading && logList.length === 0" class="ci-loading"><i class="fas fa-spinner fa-spin" /><span>加载中...</span></div>
-      <div v-else-if="logList.length === 0" class="ci-empty"><i class="fas fa-history" /><span>暂无流水记录</span></div>
+      <div v-if="logIsLoading && logList.length === 0" class="ci-loading"><i class="fas fa-spinner fa-spin"  aria-hidden="true" /><span>加载中…</span></div>
+      <div v-else-if="logList.length === 0" class="ci-empty"><i class="fas fa-history"  aria-hidden="true" /><span>暂无流水记录</span></div>
       <template v-else>
       <div v-if="logIsFetching" class="ci-fetching-bar"><div class="ci-fetching-progress" /></div>
       <table class="ci-table">
@@ -151,7 +151,7 @@
     <!-- 未选中提示 -->
     <div v-if="!selectedCaseName" class="ci-section">
       <div class="ci-empty-hint">
-        <i class="fas fa-info-circle" />
+        <i class="fas fa-info-circle"  aria-hidden="true" />
         <p>请点击上方库存表格中的产品查看流水记录</p>
       </div>
     </div>
@@ -340,10 +340,11 @@ function logBadgeClass(t: string): string {
   background: white;
   font-size: 13px;
   outline: none;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
   font-family: inherit;
   color: var(--color-text);
 }
+.ci-search-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 .ci-search-input:focus {
   border-color: var(--color-primary-400);
   background: white;
@@ -359,7 +360,7 @@ function logBadgeClass(t: string): string {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, border-color 0.3s ease, transform 0.3s ease;
   color: var(--color-text-secondary);
 }
 .ci-action-primary { color: var(--color-primary-600); }
@@ -380,11 +381,11 @@ function logBadgeClass(t: string): string {
   padding: 16px;
   text-align: center;
   border: 1px solid transparent;
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .ci-stat-card:hover {
-  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
-  transform: translateY(-6px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  transform: translateY(-2px);
 }
 .ci-stat-value {
   font-size: 28px;
@@ -453,7 +454,7 @@ function logBadgeClass(t: string): string {
   justify-content: center;
   cursor: pointer;
   font-size: 12px;
-  transition: all 0.2s ease;
+  transition: background 0.2s ease;
   padding: 4px 8px;
   gap: 4px;
 }
@@ -531,7 +532,7 @@ function logBadgeClass(t: string): string {
 
 /* Pagination */
 .ci-pagination { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 8px 16px; border-top: 1px solid var(--color-border-light, #f1f5f9); }
-.ci-page-btn { width: 28px; height: 28px; border: 1px solid var(--color-border, #e4e7ed); border-radius: 6px; background: white; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--color-text-secondary); transition: all 0.2s ease; }
+.ci-page-btn { width: 28px; height: 28px; border: 1px solid var(--color-border, #e4e7ed); border-radius: 6px; background: white; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--color-text-secondary); transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease; }
 .ci-page-btn:hover:not(:disabled) { border-color: var(--color-primary-400); color: var(--color-primary-600); background: var(--color-primary-50); }
 .ci-page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .ci-page-info { font-size: 12px; font-weight: 600; color: var(--color-text-secondary); }

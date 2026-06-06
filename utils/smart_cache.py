@@ -169,6 +169,18 @@ class SmartCacheManager:
         self._is_redis_available = False
         return None
 
+    @staticmethod
+    def _await(coro):
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(asyncio.run, coro).result()
+        return asyncio.run(coro)
+
     def get(self, key: str, default: Any = None,
             use_local: bool = True, use_redis: bool = True) -> Any:
         cache_key = self._make_key(key)
@@ -182,7 +194,7 @@ class SmartCacheManager:
         redis_client = self._get_redis_client()
         if use_redis and redis_client:
             try:
-                value = redis_client.get(cache_key)
+                value = self._await(redis_client.get(cache_key))
                 if value is not None:
                     if use_local:
                         self.local_cache.set(cache_key, value)
@@ -208,7 +220,7 @@ class SmartCacheManager:
         redis_client = self._get_redis_client()
         if use_redis and redis_client:
             try:
-                redis_client.set(cache_key, value, ttl)
+                self._await(redis_client.set(cache_key, value, ttl))
                 self.stats.record_set()
                 return True
             except Exception as e:
@@ -229,7 +241,7 @@ class SmartCacheManager:
         redis_client = self._get_redis_client()
         if use_redis and redis_client:
             try:
-                redis_client.delete(cache_key)
+                self._await(redis_client.delete(cache_key))
                 deleted = True
             except Exception as e:
                 logger.warning(f"Redis 删除失败: {e}")

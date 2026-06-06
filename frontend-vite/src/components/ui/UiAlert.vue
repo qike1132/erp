@@ -1,7 +1,7 @@
 <template>
-  <div :class="['rounded-lg px-4 py-3 flex items-start gap-3', variantClass]">
-    <i :class="[iconClass, 'mt-0.5']" />
-    <div class="flex-1 text-sm">
+  <div role="alert" :class="['rounded-lg px-4 py-3 flex items-start gap-3', variantClass]">
+    <i :class="[iconClass, 'mt-0.5']" aria-hidden="true" />
+    <div class="flex-1 min-w-0 text-sm">
       <div v-if="title" class="font-semibold mb-0.5">
         {{ title }}
       </div>
@@ -10,9 +10,10 @@
     <button
       v-if="closable"
       class="text-current opacity-50 hover:opacity-100 transition-opacity"
+      aria-label="关闭"
       @click="$emit('close')"
     >
-      <i class="fas fa-times text-sm" />
+      <i class="fas fa-times text-sm" aria-hidden="true" />
     </button>
   </div>
 </template>

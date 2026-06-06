@@ -2,7 +2,7 @@
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,13 +11,114 @@ from sqlalchemy.orm import joinedload
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
+from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.services import escape_like
 from fastapi_app.shared_models import InventoryLog, Product, StockIn, User
+from fastapi_app.shared_models.country import Country
+
+class HealthCheckResponse(BaseModel):
+    status: str
+    timestamp: float
+
+class CacheClearResponse(BaseModel):
+    success: bool
+    deleted: int = 0
+    pattern: str = ''
+
+class ProductSearchItem(BaseModel):
+    id: int
+    name: str
+    barcode: str
+    price: float = 0
+    current_stock: int = 0
+
+class ProductAvailableStockResponse(BaseModel):
+    product_id: int
+    name: str
+    current_stock: int = 0
+    available_stock: int = 0
+
+class InventoryLogItem(BaseModel):
+    id: int
+    change_type: str = ''
+    change_quantity: int = 0
+    related_id: int | str | None = None
+    note: str | None = None
+    change_date: str = ''
+
+class InventoryLogsResponse(BaseModel):
+    items: list[InventoryLogItem] = []
+    total: int = 0
+    page: int = 1
+    per_page: int = 50
+
+class AvailableStockinItem(BaseModel):
+    id: int
+    product_id: int
+    product_name: str = ''
+    quantity: int = 0
+    customer: str = ''
+    stockin_date: str = ''
+    available: int = 0
+
+class StockinInfoResponse(BaseModel):
+    id: int
+    product_id: int
+    product_name: str = ''
+    quantity: int = 0
+    customer: str = ''
+    stockin_date: str = ''
+    note: str = ''
+
+class AvailableShipmentResponse(BaseModel):
+    order_quantity: int = 0
+    shipped_quantity: int = 0
+    available_quantity: int = 0
+    regular_available: int = 0
+    custom_available: int = 0
+
+class AuxActionResponse(BaseModel):
+    success: bool
+    message: str = ''
+
+class BatchOrderResultItem(BaseModel):
+    success: bool
+    order_no: str = ''
+    id: int | None = None
+    error: str | None = None
+
+class BatchOrderResponse(BaseModel):
+    success: bool
+    results: list[BatchOrderResultItem] = []
+
+class BatchStockinResultItem(BaseModel):
+    success: bool
+    stockin_no: str = ''
+    id: int | str | None = None
+    error: str | None = None
+
+class BatchStockinResponse(BaseModel):
+    success: bool
+    results: list[BatchStockinResultItem] = []
+
+class BatchStockoutResultItem(BaseModel):
+    success: bool
+    stockout_no: str = ''
+    id: int | str | None = None
+    error: str | None = None
+
+class BatchStockoutResponse(BaseModel):
+    success: bool
+    results: list[BatchStockoutResultItem] = []
+
+class SystemStatsResponse(BaseModel):
+    cache: dict = {}
+    performance: dict = {}
 
 router = APIRouter()
 
 
-@router.get("/health")
+@router.get("/health", response_model=HealthCheckResponse)
 async def health_check():
     """应用健康检查（公开端点，仅返回基本状态）"""
     return {
@@ -26,7 +127,7 @@ async def health_check():
     }
 
 
-@router.get("/cache/stats")
+@router.get("/cache/stats", response_model=dict)
 async def cache_stats(
     user: User = Depends(require_permission("admin")),
 ):
@@ -35,7 +136,7 @@ async def cache_stats(
     return await redis_cache.get_stats()
 
 
-@router.post("/cache/clear")
+@router.post("/cache/clear", response_model=CacheClearResponse)
 async def clear_cache(
     pattern: str = Query("*", description="清除匹配的缓存键"),
     user: User = Depends(require_permission("admin")),
@@ -46,7 +147,7 @@ async def clear_cache(
     return {"success": True, "deleted": deleted, "pattern": pattern}
 
 
-@router.get("/product-search")
+@router.get("/product-search", response_model=list[ProductSearchItem])
 async def product_search(
     q: str = Query('', max_length=100, description="搜索关键词"),
     user: User = Depends(require_permission("product_view")),
@@ -71,7 +172,7 @@ async def product_search(
     } for p in products]
 
 
-@router.get("/product-available-stock")
+@router.get("/product-available-stock", response_model=ProductAvailableStockResponse)
 async def product_available_stock(
     product_id: int = Query(..., description="产品ID"),
     user: User = Depends(require_permission("product_view")),
@@ -90,7 +191,7 @@ async def product_available_stock(
     }
 
 
-@router.get("/inventory-logs/{product_id}")
+@router.get("/inventory-logs/{product_id}", response_model=InventoryLogsResponse)
 async def get_inventory_logs(
     product_id: int,
     page: int = Query(1, ge=1),
@@ -123,7 +224,7 @@ async def get_inventory_logs(
     }
 
 
-@router.get("/available-stockins")
+@router.get("/available-stockins", response_model=list[AvailableStockinItem])
 async def available_stockins(
     product_id: int | None = Query(None),
     customer: str = Query('', max_length=100),
@@ -154,7 +255,7 @@ async def available_stockins(
     } for s in stockins]
 
 
-@router.get("/stockin-info/{stockin_id}")
+@router.get("/stockin-info/{stockin_id}", response_model=StockinInfoResponse)
 async def stockin_info(
     stockin_id: int,
     user: User = Depends(require_permission("stock_view")),
@@ -174,7 +275,7 @@ async def stockin_info(
     }
 
 
-@router.get("/available-shipment")
+@router.get("/available-shipment", response_model=AvailableShipmentResponse)
 async def available_shipment(
     product_id: int | None = Query(None),
     customer: str = Query('', max_length=100),
@@ -207,7 +308,7 @@ async def available_shipment(
 
 # ==================== 删除接口 ====================
 
-@router.delete("/stockout/{id}")
+@router.delete("/stockout/{id}", response_model=AuxActionResponse)
 async def delete_stockout_api(
     id: int,
     user: User = Depends(require_permission("stockout_manage")),
@@ -215,15 +316,12 @@ async def delete_stockout_api(
 ):
     """删除出库记录（API方式）"""
     from fastapi_app.services.stock_service import delete_stockout as svc_delete
-    try:
+    async with db_transaction(db, commit=False):
         await svc_delete(db, id)
-        # svc_delete 已调用 db.commit()，无需重复
-        return {'success': True, 'message': '出库删除成功'}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {'success': True, 'message': '出库删除成功'}
 
 
-@router.delete("/stockin/{id}")
+@router.delete("/stockin/{id}", response_model=AuxActionResponse)
 async def delete_stockin_api(
     id: int,
     user: User = Depends(require_permission("stockin_manage")),
@@ -231,15 +329,12 @@ async def delete_stockin_api(
 ):
     """删除入库记录（API方式）"""
     from fastapi_app.services.stock_service import delete_stockin as svc_delete
-    try:
+    async with db_transaction(db, commit=False):
         await svc_delete(db, id)
-        # svc_delete 已调用 db.commit()，无需重复
-        return {'success': True, 'message': '入库删除成功'}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {'success': True, 'message': '入库删除成功'}
 
 
-@router.delete("/customer/{id}")
+@router.delete("/customer/{id}", response_model=AuxActionResponse)
 async def delete_customer_api(
     id: int,
     user: User = Depends(require_permission("customer_manage")),
@@ -247,15 +342,12 @@ async def delete_customer_api(
 ):
     """删除客户（API方式）"""
     from fastapi_app.services.customer_service import delete_customer as svc_delete
-    try:
+    async with db_transaction(db):
         await svc_delete(db, id)
-        await db.commit()
-        return {'success': True, 'message': '客户删除成功'}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {'success': True, 'message': '客户删除成功'}
 
 
-@router.delete("/supplier/{id}")
+@router.delete("/supplier/{id}", response_model=AuxActionResponse)
 async def delete_supplier_api(
     id: int,
     user: User = Depends(require_permission("product_manage")),
@@ -268,33 +360,30 @@ async def delete_supplier_api(
         ProductAccessory,
         ProductFabric,
         ProductMaterial,
-        ProductPackaging,
         PurchaseOrder,
         Supplier,
     )
     try:
-        supplier = (await db.execute(select(Supplier).where(Supplier.id == id))).scalar_one_or_none()
-        if not supplier:
-            raise HTTPException(status_code=404, detail="供应商不存在")
+        async with db_transaction(db):
+            supplier = (await db.execute(select(Supplier).where(Supplier.id == id))).scalar_one_or_none()
+            if not supplier:
+                raise HTTPException(status_code=404, detail="供应商不存在")
 
-        has_bom = (
-            (await db.execute(select(ProductMaterial.id).where(ProductMaterial.supplier_id == id).limit(1))).scalar() or
-            (await db.execute(select(ProductFabric.id).where(ProductFabric.supplier_id == id).limit(1))).scalar() or
-            (await db.execute(select(ProductAccessory.id).where(ProductAccessory.supplier_id == id).limit(1))).scalar() or
-            (await db.execute(select(ProductPackaging.id).where(ProductPackaging.supplier_id == id).limit(1))).scalar()
-        )
-        has_orders = (await db.execute(select(PurchaseOrder.id).where(PurchaseOrder.supplier_id == id).limit(1))).scalar()
+            has_bom = (
+                (await db.execute(select(ProductMaterial.id).where(ProductMaterial.supplier_id == id).limit(1))).scalar() or
+                (await db.execute(select(ProductFabric.id).where(ProductFabric.supplier_id == id).limit(1))).scalar() or
+                (await db.execute(select(ProductAccessory.id).where(ProductAccessory.supplier_id == id).limit(1))).scalar()
+            )
+            has_orders = (await db.execute(select(PurchaseOrder.id).where(PurchaseOrder.supplier_id == id).limit(1))).scalar()
 
-        if has_bom or has_orders:
-            raise HTTPException(status_code=400, detail="该供应商已有相关BOM或采购订单数据，无法删除")
+            if has_bom or has_orders:
+                raise HTTPException(status_code=400, detail="该供应商已有相关BOM或采购订单数据，无法删除")
 
-        await db.delete(supplier)
-        await db.commit()
+            await db.delete(supplier)
         return {'success': True, 'message': '供应商删除成功'}
     except HTTPException:
         raise
     except SQLAlchemyError as e:
-        await db.rollback()
         raise HTTPException(status_code=500, detail=f"删除失败: {settings.sanitize_error(e)}") from e
 
 
@@ -309,7 +398,13 @@ class BatchOrderItem(BaseModel):
     note: str = ""
     order_type: str = Field("regular", pattern="^(regular|custom)$")
     country: str | None = None
-    order_date: str | None = None  # 格式: YYYY-MM-DD，为空则使用当前时间
+    order_date: str | None = None
+
+    @model_validator(mode='after')
+    def validate_custom_order(self):
+        if self.order_type == 'custom' and not self.country:
+            raise ValueError('定制订单必须填写国家名称')
+        return self
 
 class BatchStockInItem(BaseModel):
     product_id: int = Field(..., gt=0)
@@ -327,6 +422,7 @@ class BatchStockOutItem(BaseModel):
     note: str = ""
     order_type: str = Field("regular", pattern="^(regular|custom)$")
     country: str | None = None
+    stockout_date: str | None = None
 
 class BatchOrderRequest(BaseModel):
     orders: list[BatchOrderItem]
@@ -337,10 +433,9 @@ class BatchStockInRequest(BaseModel):
 class BatchStockOutRequest(BaseModel):
     stockouts: list[BatchStockOutItem]
 
-
 # ==================== 批量提交 API ====================
 
-@router.post("/batch-submit-orders")
+@router.post("/batch-submit-orders", response_model=BatchOrderResponse)
 async def batch_submit_orders(
     data: BatchOrderRequest,
     user: User = Depends(require_permission("order_manage")),
@@ -351,16 +446,14 @@ async def batch_submit_orders(
 
     from fastapi_app.services.order_service import batch_create_orders
     try:
-        result = await batch_create_orders(db, [item.model_dump() for item in data.orders])
-        await db.commit()
+        async with db_transaction(db):
+            result = await batch_create_orders(db, [item.model_dump() for item in data.orders])
 
-        # 失效订单和库存缓存，确保列表实时刷新
         from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
         await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY)
 
         created_order_ids = result.pop('created_order_ids', [])
 
-        # 发布订单创建事件，通知前端实时刷新
         if created_order_ids:
             try:
                 from fastapi_app.services.notification_service import StockEvent, publish_stock_event
@@ -372,12 +465,11 @@ async def batch_submit_orders(
                 _logging.warning("批量订单事件发布失败", exc_info=True)
 
         return result
-    except (SQLAlchemyError, ValueError, RuntimeError):
-        await db.rollback()
+    except (SQLAlchemyError, RuntimeError):
         raise
 
 
-@router.post("/batch-submit-stockins")
+@router.post("/batch-submit-stockins", response_model=BatchStockinResponse)
 async def batch_submit_stockins(
     data: BatchStockInRequest,
     user: User = Depends(require_permission("stockin_manage")),
@@ -386,42 +478,74 @@ async def batch_submit_stockins(
     """批量提交入库"""
     from fastapi_app.services.stock_service import batch_create_stockins
     try:
-        result = await batch_create_stockins(db, [item.model_dump() for item in data.stockins])
-        await db.commit()
+        async with db_transaction(db):
+            result = await batch_create_stockins(db, [item.model_dump() for item in data.stockins])
 
         from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
         await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY | CacheDomain.STOCKIN)
 
         return result
-    except (SQLAlchemyError, ValueError, RuntimeError):
-        await db.rollback()
+    except (SQLAlchemyError, RuntimeError):
         raise
 
 
-@router.post("/batch-submit-stockouts")
+@router.post("/batch-submit-stockouts", response_model=BatchStockoutResponse)
 async def batch_submit_stockouts(
     data: BatchStockOutRequest,
     user: User = Depends(require_permission("stockout_manage")),
     db: AsyncSession = Depends(get_async_db),
 ):
     """批量提交出库"""
-    from fastapi_app.services.stock_service import batch_create_stockouts
-    try:
-        result = await batch_create_stockouts(db, [item.model_dump() for item in data.stockouts])
-        await db.commit()
+    import logging as _logging
 
+    from fastapi_app.services.stock_service import batch_create_stockouts
+    async with db_transaction(db):
+        result = await batch_create_stockouts(db, [item.model_dump() for item in data.stockouts])
+
+    # Post-commit: cache invalidation + event publishing
+    try:
         from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
         await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY)
 
-        return result
-    except (SQLAlchemyError, ValueError, RuntimeError):
-        await db.rollback()
-        raise
+        # 采购计划重算 + 事件发布
+        successful_pairs: set[tuple[int, str]] = set()
+        for idx, item in enumerate(data.stockouts):
+            r = result['results'][idx]
+            if r.get('success'):
+                successful_pairs.add((item.product_id, item.customer))
+
+        if successful_pairs:
+            from fastapi_app.services.purchase_plan_service import recalc_plans_after_stockout_create, _invalidate_plan_caches
+            from datetime import UTC as _UTC, datetime as _dt
+            unique_product_ids = {pid for pid, _ in successful_pairs}
+            product_result = await db.execute(
+                select(Product.id, Product.name).where(Product.id.in_(unique_product_ids))
+            )
+            product_name_map = {row[0]: row[1] for row in product_result.all()}
+            for product_id, customer in successful_pairs:
+                product_name = product_name_map.get(product_id, '')
+                if product_name:
+                    await recalc_plans_after_stockout_create(db, customer, product_name)
+
+            now_month = _dt.now(_UTC).strftime('%Y-%m')
+            await _invalidate_plan_caches(now_month)
+
+            from fastapi_app.core.exception_handler import safe_publish_event
+            from fastapi_app.services.notification_service import StockEvent, publish_stock_event
+            for product_id, _ in successful_pairs:
+                product = await db.get(Product, product_id)
+                if product is not None:
+                    total_qty = sum(item.quantity for item in data.stockouts if item.product_id == product_id)
+                    await safe_publish_event(publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': product_id, 'product_name': product.name, 'change_type': '出库', 'quantity': total_qty, 'current_stock': product.current_stock}, context="批量出库事件发布")
+    except Exception as e:
+        _logging.getLogger(__name__).warning(f"出库后置操作部分失败（不影响出库结果）: {e}", exc_info=True)
+
+    return result
 
 
 # ==================== 系统状态 API ====================
 
-@router.get("/system/stats")
+@router.get("/system/stats", response_model=SystemStatsResponse)
 async def system_stats(
     user: User = Depends(require_permission("admin")),
     db: AsyncSession = Depends(get_async_read_db),
@@ -440,3 +564,53 @@ async def system_stats(
         return stats
     except ImportError:
         return {'cache': {}, 'performance': {}}
+
+
+# ==================== 国家管理 API ====================
+
+class CountryResponse(BaseModel):
+    id: int
+    name: str
+
+class CountryCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+
+@router.get("/countries", response_model=list[CountryResponse])
+async def list_countries(
+    user: User = Depends(require_permission("order_manage")),
+    db: AsyncSession = Depends(get_async_read_db),
+):
+    result = await db.execute(select(Country).order_by(Country.name))
+    countries = result.scalars().all()
+    return [{'id': c.id, 'name': c.name} for c in countries]
+
+@router.post("/countries", response_model=CountryResponse)
+async def create_country(
+    data: CountryCreateRequest,
+    user: User = Depends(require_permission("order_manage")),
+    db: AsyncSession = Depends(get_async_db),
+):
+    name = data.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="国家名称不能为空")
+    existing = await db.execute(select(Country).where(Country.name == name))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="该国家已存在")
+    country = Country(name=name)
+    db.add(country)
+    await db.flush()
+    await db.refresh(country)
+    return {'id': country.id, 'name': country.name}
+
+@router.delete("/countries/{country_id}")
+async def delete_country(
+    country_id: int,
+    user: User = Depends(require_permission("order_manage")),
+    db: AsyncSession = Depends(get_async_db),
+):
+    result = await db.execute(select(Country).where(Country.id == country_id))
+    country = result.scalar_one_or_none()
+    if not country:
+        raise HTTPException(status_code=404, detail="国家不存在")
+    await db.delete(country)
+    return {'success': True, 'message': '国家删除成功'}

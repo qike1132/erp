@@ -6,13 +6,6 @@ import pytest
 
 class TestAuthEndpoints:
     @pytest.mark.asyncio
-    async def test_login_page_renders(self, client):
-        """GET /login 应返回 200 和 HTML 内容"""
-        response = await client.get("/login")
-        assert response.status_code == 200
-        assert "text/html" in response.headers.get("content-type", "")
-
-    @pytest.mark.asyncio
     async def test_login_invalid_credentials(self, client, mock_db):
         """POST /api/v1/auth/login 使用错误凭证应返回 401 或 403"""
         # mock_db.execute 返回空结果，模拟用户不存在
@@ -79,8 +72,8 @@ class TestAuthEndpoints:
         # 验证 cookie 设置了较长的 max_age（31天左右）
         set_cookie_headers = response.headers.get_list("set-cookie")
         cookie_header = next((h for h in set_cookie_headers if "access_token" in h), "")
-        assert "Max-Age=2678" in cookie_header or "max-age=2678" in cookie_header, \
-            f"记住我应设置约31天的cookie有效期，实际: {cookie_header}"
+        assert "Max-Age=86400" in cookie_header or "max-age=86400" in cookie_header, \
+            f"记住我应设置约1天的cookie有效期，实际: {cookie_header}"
 
     @pytest.mark.asyncio
     async def test_login_without_remember_me_sets_short_cookie(self, client, mock_db):
@@ -113,5 +106,5 @@ class TestAuthEndpoints:
         # 验证 cookie 设置了较短的 max_age（1天=86400秒）
         set_cookie_headers = response.headers.get_list("set-cookie")
         cookie_header = next((h for h in set_cookie_headers if "access_token" in h), "")
-        assert "Max-Age=86400" in cookie_header or "max-age=86400" in cookie_header, \
-            f"未记住我应设置1天的cookie有效期，实际: {cookie_header}"
+        assert "Max-Age=3600" in cookie_header or "max-age=3600" in cookie_header, \
+            f"未记住我应设置1小时的cookie有效期，实际: {cookie_header}"

@@ -62,13 +62,17 @@ class TestAuxiliaryEndpoints:
 
     @pytest.mark.asyncio
     async def test_inventory_logs(self, client, mock_db):
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = []
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_count = MagicMock()
+        mock_count.scalar.return_value = 0
+        mock_data = MagicMock()
+        mock_data.scalars.return_value.all.return_value = []
+        mock_db.execute = AsyncMock(side_effect=[mock_count, mock_data])
 
         response = await client.get("/api/v1/aux/inventory-logs/1")
         assert response.status_code == 200
-        assert response.json() == []
+        data = response.json()
+        assert data['items'] == []
+        assert data['total'] == 0
 
     @pytest.mark.asyncio
     async def test_available_stockins(self, client, mock_db):

@@ -1,0 +1,17 @@
+{
+  "cookies": [
+    {
+      "name": "fastapi_csrf_token",
+      "value": "ImNzcmZfdG9rZW4i.oFmxdOkUGSqGDVtrBS6Rkbjqrpo",
+      "domain": "192.168.0.95",
+      "path": "/",
+      "expires": 1780709202.407534,
+      "size": 62,
+      "httpOnly": false,
+      "secure": false,
+      "session": false,
+      "sameSite": "Lax"
+    }
+  ],
+  "origins": []
+}

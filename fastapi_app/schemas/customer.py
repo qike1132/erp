@@ -49,3 +49,8 @@ class CustomerToggleResponse(BaseModel):
     success: bool = True
     status: bool
     message: str
+
+
+class CustomerActiveNameItem(BaseModel):
+    id: int
+    name: str

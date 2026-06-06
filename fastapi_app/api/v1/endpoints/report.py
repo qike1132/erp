@@ -5,13 +5,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
+from fastapi_app.schemas.report import ReportResponse
 from fastapi_app.services import report_service
 from fastapi_app.shared_models import User
 
 router = APIRouter()
 
 
-@router.get("/order-logs")
+@router.get("/order-logs", response_model=ReportResponse)
 async def order_logs(
     customer: str = Query('', description="客户筛选"),
     product: str = Query('', description="产品筛选"),
@@ -29,7 +30,7 @@ async def order_logs(
     )
 
 
-@router.get("/stockin-logs")
+@router.get("/stockin-logs", response_model=ReportResponse)
 async def stockin_logs(
     customer: str = Query('', description="客户筛选"),
     product: str = Query('', description="产品筛选"),
@@ -46,7 +47,7 @@ async def stockin_logs(
     )
 
 
-@router.get("/stockout-logs")
+@router.get("/stockout-logs", response_model=ReportResponse)
 async def stockout_logs(
     customer: str = Query('', description="客户筛选"),
     product: str = Query('', description="产品筛选"),
@@ -63,7 +64,7 @@ async def stockout_logs(
     )
 
 
-@router.get("/deduction-logs")
+@router.get("/deduction-logs", response_model=ReportResponse)
 async def deduction_logs(
     customer: str = Query('', description="客户筛选"),
     product: str = Query('', description="产品筛选"),
@@ -107,18 +108,3 @@ async def export_report(
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
-
-@router.get("/test-export")
-async def test_export(
-    user: User = Depends(require_permission("report_view")),
-    db: AsyncSession = Depends(get_async_read_db),
-):
-    """测试导出功能（导出订单报表）"""
-    buffer = await report_service.export_report_to_excel(
-        db, "order", "", "", "", "", ""
-    )
-    return StreamingResponse(
-        buffer,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=test_report.xlsx"}
-    )

@@ -70,7 +70,10 @@ class MaterialCalculateRequest(BaseModel):
 
 class MaterialCalculateResponse(BaseModel):
     success: bool = True
-    result: dict | None = None
+    filling: list = []
+    fabric: list = []
+    accessory: list = []
+    packaging: list = []
     total_categories: dict | None = None
     message: str | None = None
 

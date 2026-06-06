@@ -93,3 +93,73 @@ class BarcodeValidationResponse(BaseModel):
     valid: bool
     product_name: str | None = None
     message: str | None = None
+
+
+class TimelinePlanItem(BaseModel):
+    id: int
+    customer_name: str
+    product_name: str
+    barcode: str
+    quantity: int
+    inventory_qty: int = 0
+    shipped_qty: int = 0
+    remaining_qty: int = 0
+    stock_status: str = 'normal'
+
+
+class TimelineDayItem(BaseModel):
+    date: str
+    day: int
+    plans: list[TimelinePlanItem] = []
+    total_plan_qty: int = 0
+    has_warning: bool = False
+
+
+class TimelineResponse(BaseModel):
+    year: int
+    month: int
+    days_in_month: int
+    timeline: list[TimelineDayItem] = []
+    customers: list[str] = []
+
+
+class UploadExcelResponse(BaseModel):
+    success: bool
+    batch_id: str = ''
+    total: int = 0
+    success_count: int = 0
+    error_count: int = 0
+    errors: list[str] = []
+
+
+class StagingPlanItem(BaseModel):
+    id: int
+    customer_name: str = ''
+    product_name: str = ''
+    barcode: str = ''
+    quantity: int = 0
+    plan_date: str = ''
+    plan_month: str = ''
+    remark: str = ''
+    is_validated: bool = False
+    validation_error: str = ''
+    upload_batch_id: str = ''
+
+
+class StagingListResponse(BaseModel):
+    success: bool
+    data: list[StagingPlanItem] = []
+    total: int = 0
+
+
+class StagingValidateResponse(BaseModel):
+    success: bool
+    total: int = 0
+    valid_count: int = 0
+    error_count: int = 0
+
+
+class StagingConfirmResponse(BaseModel):
+    success: bool
+    created_count: int = 0
+    skipped_count: int = 0

@@ -2,7 +2,7 @@
 批量导入异步任务
 
 将 Excel 批量导入等耗时操作放入 Celery Worker 执行。
-已去除 Flask create_app 依赖，使用 SyncSessionLocal + shared_models。
+使用同步数据库会话（Celery Worker 为同步进程，无法使用 async session）。
 """
 import contextlib
 import os
@@ -10,8 +10,13 @@ import tempfile
 
 from celery import shared_task
 
-from fastapi_app.core.database import SyncSessionLocal
+from fastapi_app.core.database import get_sync_engine
 from fastapi_app.core.logger import logger
+from sqlalchemy.orm import Session, sessionmaker
+
+_SyncSession = sessionmaker(
+    autocommit=False, autoflush=False, bind=get_sync_engine()
+)
 
 
 @shared_task(bind=True, name='batch_import_orders', queue='batch', max_retries=2, default_retry_delay=30, soft_time_limit=300, time_limit=600)
@@ -43,9 +48,10 @@ def batch_import_orders_task(self, file_path: str, original_filename: str, user_
         success, data_list, error = parse_excel_file(file_path)
         if not success:
             return {'success': False, 'error': error, 'imported_count': 0, 'task_id': self.request.id}
-        session = SyncSessionLocal()
+        session: Session = _SyncSession()
         try:
             imported_count = 0
+            last_committed_count = 0
             errors = []
             BATCH_COMMIT_SIZE = 50
             for i, row in enumerate(data_list, start=2):
@@ -63,15 +69,18 @@ def batch_import_orders_task(self, file_path: str, original_filename: str, user_
                     order = Order(order_no=generate_order_number_sync(session), product_id=product.id, customer=customer, quantity=int(quantity), order_date=datetime.now(), status='待备货', note=row.get('备注', ''))
                     session.add(order)
                     session.flush()
-                    product.current_stock += int(quantity)
                     log = InventoryLog(product_id=product.id, change_type='订单创建', change_quantity=int(quantity), change_date=datetime.now(), customer=customer, related_id=str(order.id), note=f'批量导入订单 {order.order_no}')
                     session.add(log)
                     imported_count += 1
                     if imported_count % BATCH_COMMIT_SIZE == 0:
                         session.commit()
+                        last_committed_count = imported_count
                 except (ValueError, TypeError, OSError) as e:
                     session.rollback()
-                    errors.append({'row': i, 'error': str(e)})
+                    # 保留已提交批次的计数，仅回滚当前未提交批次
+                    uncommitted_in_batch = imported_count - last_committed_count
+                    imported_count = last_committed_count
+                    errors.append({'row': i, 'error': str(e), 'skipped_uncommitted': uncommitted_in_batch})
                     logger.error(f'批量导入订单行{i}失败: {e}')
             session.commit()
             return {'success': True, 'imported_count': imported_count, 'errors': errors, 'task_id': self.request.id}
@@ -80,14 +89,14 @@ def batch_import_orders_task(self, file_path: str, original_filename: str, user_
     except (ValueError, TypeError, OSError) as exc:
         logger.error(f'批量导入订单任务失败: {exc}', exc_info=True)
         if self.request.retries < self.max_retries:
-            raise self.retry(exc=exc) from exc
+            # 指数退避：30s, 60s, 120s...
+            countdown = 30 * (2 ** self.request.retries)
+            raise self.retry(exc=exc, countdown=countdown) from exc
+        raise
+    finally:
         if file_path and os.path.exists(file_path):
             with contextlib.suppress(OSError):
                 os.unlink(file_path)
-        raise
-    if file_path and os.path.exists(file_path):
-        with contextlib.suppress(OSError):
-            os.unlink(file_path)
 
 @shared_task(bind=True, name='batch_import_stockins', queue='batch', max_retries=2, default_retry_delay=30, soft_time_limit=300, time_limit=600)
 def batch_import_stockins_task(self, file_path: str, original_filename: str, user_id: int):
@@ -109,9 +118,10 @@ def batch_import_stockins_task(self, file_path: str, original_filename: str, use
         success, data_list, error = parse_excel_file(file_path)
         if not success:
             return {'success': False, 'error': error, 'imported_count': 0, 'task_id': self.request.id}
-        session = SyncSessionLocal()
+        session: Session = _SyncSession()
         try:
             imported_count = 0
+            last_committed_count = 0
             errors = []
             BATCH_COMMIT_SIZE = 50
             for i, row in enumerate(data_list, start=2):
@@ -135,8 +145,10 @@ def batch_import_stockins_task(self, file_path: str, original_filename: str, use
                     imported_count += 1
                     if imported_count % BATCH_COMMIT_SIZE == 0:
                         session.commit()
+                        last_committed_count = imported_count
                 except (ValueError, TypeError, OSError) as e:
                     session.rollback()
+                    imported_count = last_committed_count
                     errors.append({'row': i, 'error': str(e)})
             session.commit()
             return {'success': True, 'imported_count': imported_count, 'errors': errors, 'task_id': self.request.id}
@@ -146,10 +158,8 @@ def batch_import_stockins_task(self, file_path: str, original_filename: str, use
         logger.error(f'批量导入备货任务失败: {exc}', exc_info=True)
         if self.request.retries < self.max_retries:
             raise self.retry(exc=exc) from exc
+        raise
+    finally:
         if file_path and os.path.exists(file_path):
             with contextlib.suppress(OSError):
                 os.unlink(file_path)
-        raise
-    if file_path and os.path.exists(file_path):
-        with contextlib.suppress(OSError):
-            os.unlink(file_path)

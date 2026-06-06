@@ -29,6 +29,7 @@ down_revision = 'pg_standalone_010'
 branch_labels = None
 depends_on = (
     'pg_standalone_003',
+    'add_backup_record',
     'add_device_token',
     'add_order_batch_fields',
     'add_order_type_country_stockin',

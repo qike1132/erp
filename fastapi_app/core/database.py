@@ -22,10 +22,17 @@ from fastapi_app.core.config import settings
 
 
 def _get_pool_config() -> dict:
+    """根据 Worker 数动态计算连接池大小，防止超出 PostgreSQL max_connections"""
+    workers = int(os.getenv("UVICORN_WORKERS", "4"))
+    # 确保: workers × (pool_size + max_overflow) < PG max_connections (默认100)
+    # 留 20 连接给 Celery/迁移/管理工具
+    available = int(os.getenv("DB_MAX_CONNECTIONS", "100")) - 20
+    pool_size = max(5, available // (workers * 2))
+    max_overflow = max(3, available // (workers * 3))
     return {
-        "pool_size": int(os.getenv("DB_POOL_SIZE", "30")),
+        "pool_size": pool_size,
         "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT", "30")),
-        "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", "20")),
+        "max_overflow": max_overflow,
         "pool_pre_ping": True,
         "pool_use_lifo": True,  # LIFO 策略，减少空闲连接
     }
@@ -103,6 +110,8 @@ async def get_async_db():
     的连接失效。此依赖对 commit/rollback 错误进行宽容处理，避免恢复成功后
     因 session 失效而返回 500 错误。
     """
+    if _AsyncSessionLocal is None:
+        raise RuntimeError("数据库引擎未初始化，请先调用 init_async_engine()")
     async with _AsyncSessionLocal() as session:
         try:
             yield session
@@ -110,7 +119,7 @@ async def get_async_db():
         except (RuntimeError, OSError, ValueError, SQLAlchemyError):
             try:
                 await session.rollback()
-            except (RuntimeError, OSError, SQLAlchemyError):
+            except (RuntimeError, OSError, ValueError, SQLAlchemyError):
                 logger.warning("Session rollback failed (may be broken after psql restore)", exc_info=True)
             raise
 
@@ -126,6 +135,8 @@ async def get_async_db_context():
     的连接失效。此上下文管理器对 commit/rollback 错误进行宽容处理，避免恢复
     成功后因 session 失效而抛出异常。
     """
+    if _AsyncSessionLocal is None:
+        raise RuntimeError("数据库引擎未初始化，请先调用 init_async_engine()")
     async with _AsyncSessionLocal() as session:
         try:
             yield session

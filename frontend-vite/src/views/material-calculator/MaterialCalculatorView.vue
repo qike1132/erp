@@ -6,11 +6,11 @@
         <div class="mc-header-actions">
           <span class="count-badge">已选 {{ selectedProducts.length }} 个</span>
           <button class="mc-action-btn mc-action-btn-primary" :disabled="orderItems.length === 0" @click="showBatchModal = true">
-            <i class="fas fa-layer-group" />
+            <i class="fas fa-layer-group"  aria-hidden="true" />
             批量录入
           </button>
           <button class="mc-action-btn mc-action-btn-danger" :disabled="orderItems.length === 0" @click="clearAll">
-            <i class="fas fa-eraser" />
+            <i class="fas fa-eraser"  aria-hidden="true" />
             清空
           </button>
           <span v-if="calcStatus" :class="['mc-status-badge', calculating ? 'calculating' : 'done']">
@@ -23,14 +23,14 @@
         <!-- Column 1: Product Selection -->
         <div class="mc-col mc-col-products">
           <div class="mc-col-title">
-            <i class="fas fa-boxes-stacked" />
+            <i class="fas fa-boxes-stacked"  aria-hidden="true" />
             产品选择
           </div>
 
           <!-- Search -->
           <div class="mc-search-wrapper">
             <div class="mc-search-input-group">
-              <i class="fas fa-search mc-search-icon" />
+              <i class="fas fa-search mc-search-icon"  aria-hidden="true" />
               <input
                 v-model="searchQuery"
                 type="text"
@@ -47,8 +47,8 @@
                   searchQuery = '';
                   onSearchInput()
                 "
-              >
-                <i class="fas fa-times" />
+               aria-label="关闭">
+                <i class="fas fa-times"  aria-hidden="true" />
               </button>
             </div>
             <div v-if="searchSuggestions.length" class="mc-search-dropdown">
@@ -79,16 +79,16 @@
           <!-- Product list -->
           <div class="mc-product-list">
             <div v-if="loadingProducts" class="mc-loading-state">
-              <i class="fas fa-spinner fa-spin" />
-              <span>加载中...</span>
+              <i class="fas fa-spinner fa-spin"  aria-hidden="true" />
+              <span>加载中…</span>
             </div>
             <div v-else-if="filteredProducts.length === 0" class="mc-empty-state">
-              <i class="fas fa-inbox" />
+              <i class="fas fa-inbox"  aria-hidden="true" />
               <span>暂无产品</span>
             </div>
             <VirtualList
               :items="filteredProducts"
-              :itemHeight="52"
+              :itemHeight="80"
               :containerHeight="600"
               :itemKey="(p: any) => p.id"
             >
@@ -97,7 +97,7 @@
                   :class="['mc-product-item', selectedProducts.includes(p.id) ? 'selected' : '']"
                   @click="toggleProduct(p)"
                 >
-                  <i :class="['mc-checkbox', selectedProducts.includes(p.id) ? 'fas fa-check-square' : 'far fa-square']" />
+                  <i :class="['mc-checkbox', selectedProducts.includes(p.id) ? 'fas fa-check-square' : 'far fa-square']"  aria-hidden="true" />
                   <div class="mc-product-details">
                     <div class="mc-product-name">
                       {{ p.name }}
@@ -118,13 +118,13 @@
         <!-- Column 2: Order Quantity -->
         <div class="mc-col mc-col-orders">
           <div class="mc-col-title">
-            <i class="fas fa-clipboard-check" />
+            <i class="fas fa-clipboard-check"  aria-hidden="true" />
             订单数量录入
           </div>
 
           <div class="mc-order-list">
             <div v-if="orderItems.length === 0" class="mc-empty-state">
-              <i class="fas fa-hand-point-left" />
+              <i class="fas fa-hand-point-left"  aria-hidden="true" />
               <span>请从左侧选择产品</span>
             </div>
             <div v-for="item in orderItems" :key="item.product_id" class="mc-order-item">
@@ -141,8 +141,8 @@
                   @input="debounceCalc"
                 />
               </div>
-              <button class="mc-delete-btn" @click="removeProduct(item.product_id)">
-                <i class="fas fa-trash-alt" />
+              <button class="mc-delete-btn" @click="removeProduct(item.product_id)" aria-label="删除">
+                <i class="fas fa-trash-alt"  aria-hidden="true" />
               </button>
             </div>
           </div>
@@ -159,13 +159,13 @@
         <!-- Column 3: Calculation Results -->
         <div class="mc-col mc-col-results">
           <div class="mc-col-title">
-            <i class="fas fa-chart-pie" />
+            <i class="fas fa-chart-pie"  aria-hidden="true" />
             物料用量计算结果
           </div>
 
           <div class="mc-result-content">
             <div v-if="!hasResults" class="mc-empty-state">
-              <i class="fas fa-calculator" />
+              <i class="fas fa-calculator"  aria-hidden="true" />
               <span>选择产品并输入数量后自动计算</span>
             </div>
             <div v-else>
@@ -176,10 +176,10 @@
                 :class="'mc-cat-' + cat.key"
               >
                 <button class="mc-category-header" @click="collapsed[cat.key] = !collapsed[cat.key]">
-                  <i :class="['mc-cat-icon', cat.icon]" />
+                  <i :class="['mc-cat-icon', cat.icon]"  aria-hidden="true" />
                   <span class="mc-cat-label">{{ cat.label }}</span>
                   <span class="mc-cat-count">({{ calcResults[cat.key]?.length ?? 0 }} 项)</span>
-                  <i :class="['fas fa-chevron-down mc-cat-toggle', collapsed[cat.key] ? '' : 'expanded']" />
+                  <i :class="['fas fa-chevron-down mc-cat-toggle', collapsed[cat.key] ? '' : 'expanded']"  aria-hidden="true" />
                 </button>
 
                 <div v-if="!collapsed[cat.key] && calcResults[cat.key]?.length" class="mc-category-table">
@@ -440,6 +440,7 @@ async function triggerCalculation() {
   border-color: var(--color-primary-500);
   box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.15);
 }
+.form-number-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 /* === Layout === */
 .mc-container {
   padding: 8px;
@@ -456,13 +457,13 @@ async function triggerCalculation() {
   border-radius: 18px;
   border: 1px solid var(--color-border-light, #e2e8f0);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
 }
 
 .mc-card:hover {
-  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
-  transform: translateY(-6px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  transform: translateY(-2px);
 }
 
 .mc-card-main {
@@ -596,9 +597,11 @@ async function triggerCalculation() {
   border-radius: 11px;
   font-size: 14px;
   outline: none;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
   background: white;
 }
+
+.mc-search-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 
 .mc-search-input:focus {
   border-color: var(--color-primary-400);
@@ -615,7 +618,7 @@ async function triggerCalculation() {
   cursor: pointer;
   padding: 6px;
   border-radius: 50%;
-  transition: all 0.2s ease;
+  transition: background 0.2s ease, color 0.2s ease;
 }
 
 .mc-search-clear:hover {
@@ -729,7 +732,7 @@ async function triggerCalculation() {
   font-weight: 600;
   color: var(--color-text-secondary);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease;
 }
 
 .mc-filter-btn:hover {
@@ -756,13 +759,15 @@ async function triggerCalculation() {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 14px 16px;
+  padding: 0 16px;
   border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: 12px;
-  margin-bottom: 10px;
+  margin: 4px 0;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, background 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease;
   background: white;
+  height: calc(100% - 8px);
+  box-sizing: border-box;
 }
 
 .mc-product-item:hover {
@@ -826,7 +831,7 @@ async function triggerCalculation() {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, background 0.3s ease, transform 0.3s ease;
   background: white;
 }
 
@@ -875,7 +880,7 @@ async function triggerCalculation() {
   border-radius: 10px;
   margin-bottom: 8px;
   background: white;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease;
 }
 
 .mc-order-item:hover {
@@ -912,7 +917,7 @@ async function triggerCalculation() {
   cursor: pointer;
   padding: 8px;
   border-radius: 8px;
-  transition: all 0.2s;
+  transition: background 0.2s, color 0.2s;
   font-size: 13px;
 }
 
@@ -997,7 +1002,7 @@ async function triggerCalculation() {
   border-radius: 11px;
   border: none;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: background 0.3s ease;
   text-align: left;
 }
 

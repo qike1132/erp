@@ -20,18 +20,81 @@ from sqlalchemy.orm import selectinload
 from fastapi_app.services import escape_like
 from fastapi_app.shared_models import (
     MaterialRegistration,
+    MaterialRegistrationItem,
     ModificationLog,
     Product,
     ProductAccessory,
     ProductFabric,
     ProductMaterial,
-    ProductPackaging,
     PurchaseOrder,
     PurchaseOrderItem,
 )
 from fastapi_app.shared_models.order import Order
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_source_order_ids(po) -> list[int]:
+    """解析采购订单关联的客户订单ID列表"""
+    ids: list[int] = []
+    if po.source_order_id:
+        ids.append(po.source_order_id)
+    if po.source_order_ids:
+        try:
+            parsed = json.loads(po.source_order_ids) if isinstance(po.source_order_ids, str) else po.source_order_ids
+            ids.extend(int(x) for x in parsed)
+        except (ValueError, TypeError):
+            pass
+    return ids
+
+
+async def _fetch_bom_data(db: AsyncSession, product_ids: list[int], prod_name_map: dict[int, str] | None = None) -> dict[int, list[dict]]:
+    """获取产品的 BOM 物料数据（填充物、面料、辅料）"""
+    bom_data: dict[int, list[dict]] = {}
+    if not product_ids:
+        return bom_data
+
+    fill_result = await db.execute(
+        select(ProductMaterial).where(ProductMaterial.product_id.in_(product_ids))
+    )
+    for row in fill_result.scalars().all():
+        name_prefix = prod_name_map.get(row.product_id, '') if prod_name_map else ''
+        bom_data.setdefault(row.product_id, []).append({
+            'material_name': f'{name_prefix}-填充物' if name_prefix else '填充物',
+            'specification': row.specification or '',
+            'unit': row.unit or '克',
+            'quantity': float(row.cotton_usage or 0),
+            'supplier_name': row.supplier_name or '',
+            'category': 'filling',
+        })
+
+    fab_result = await db.execute(
+        select(ProductFabric).where(ProductFabric.product_id.in_(product_ids))
+    )
+    for row in fab_result.scalars().all():
+        bom_data.setdefault(row.product_id, []).append({
+            'material_name': row.fabric_name or '面料',
+            'specification': row.specification or '',
+            'unit': row.unit or '米',
+            'quantity': float(row.quantity or 0),
+            'supplier_name': row.supplier_name or '',
+            'category': 'fabric',
+        })
+
+    acc_result = await db.execute(
+        select(ProductAccessory).where(ProductAccessory.product_id.in_(product_ids))
+    )
+    for row in acc_result.scalars().all():
+        bom_data.setdefault(row.product_id, []).append({
+            'material_name': row.accessory_name or '配件',
+            'specification': row.specification or '',
+            'unit': row.unit or '个',
+            'quantity': float(row.quantity or 0),
+            'supplier_name': row.supplier_name or '',
+            'category': 'accessory',
+        })
+
+    return bom_data
 
 
 
@@ -144,8 +207,13 @@ async def get_purchase_orders(db: AsyncSession, *, page: int = 1, per_page: int 
     count_query = select(func.count(PurchaseOrder.id))
 
     if status:
-        query = query.where(PurchaseOrder.status == status)
-        count_query = count_query.where(PurchaseOrder.status == status)
+        if ',' in status:
+            statuses = [s.strip() for s in status.split(',') if s.strip()]
+            query = query.where(PurchaseOrder.status.in_(statuses))
+            count_query = count_query.where(PurchaseOrder.status.in_(statuses))
+        else:
+            query = query.where(PurchaseOrder.status == status)
+            count_query = count_query.where(PurchaseOrder.status == status)
     if supplier_id:
         query = query.where(PurchaseOrder.supplier_id == supplier_id)
         count_query = count_query.where(PurchaseOrder.supplier_id == supplier_id)
@@ -235,6 +303,34 @@ async def get_purchase_orders(db: AsyncSession, *, page: int = 1, per_page: int 
             for r in cust_rows:
                 source_order_map[r.id] = (pid_name_map_fill.get(r.product_id, ''), r.quantity or 0)
 
+    # 解析 source_order_no：将 source_order_ids 关联的客户订单号回填，统一订单号显示
+    po_source_ids_map: dict[int, list[int]] = {}
+    all_source_ids_no: set[int] = set()
+    for o in orders:
+        ids: list[int] = []
+        if o.source_order_id:
+            ids.append(o.source_order_id)
+        if o.source_order_ids:
+            try:
+                parsed = json.loads(o.source_order_ids) if isinstance(o.source_order_ids, str) else o.source_order_ids
+                ids.extend(int(x) for x in parsed)
+            except (ValueError, TypeError):
+                pass
+        po_source_ids_map[o.id] = ids
+        all_source_ids_no.update(ids)
+    source_order_no_map: dict[int, str] = {}
+    if all_source_ids_no:
+        from fastapi_app.shared_models import Order as _CustomerOrder
+        no_result = await db.execute(
+            select(_CustomerOrder.id, _CustomerOrder.order_no).where(_CustomerOrder.id.in_(all_source_ids_no))
+        )
+        source_order_no_map = dict(no_result.all())
+    po_source_no_str: dict[int, str] = {}
+    for o in orders:
+        nos = [source_order_no_map.get(sid, '') for sid in po_source_ids_map.get(o.id, [])]
+        nos = [n for n in nos if n]
+        po_source_no_str[o.id] = '、'.join(nos) if nos else ''
+
     order_list = []
     for order in orders:
         items = items_by_order.get(order.id, [])
@@ -270,6 +366,7 @@ async def get_purchase_orders(db: AsyncSession, *, page: int = 1, per_page: int 
         order_list.append({
             'id': order.id,
             'order_no': order.order_no,
+            'source_order_no': po_source_no_str.get(order.id, ''),
             'supplier_name': order.supplier_name,
             'supplier_id': order.supplier_id,
             'customer_name': order.customer_name,
@@ -321,6 +418,7 @@ async def get_purchase_order(db: AsyncSession, order_id: int) -> dict:
     quantity = float(order.product_quantity or 0) if order.product_quantity else 0
 
     # 回填：从 source_order 获取产品名称和数量
+    source_order_nos: list[str] = []
     if not product_name or not quantity:
         import json as _json
         resolved_ids: list[int] = []
@@ -335,7 +433,7 @@ async def get_purchase_order(db: AsyncSession, order_id: int) -> dict:
         if resolved_ids:
             from fastapi_app.shared_models import Order as CustomerOrder
             cust_result = await db.execute(
-                select(CustomerOrder.id, CustomerOrder.product_id, CustomerOrder.quantity)
+                select(CustomerOrder.id, CustomerOrder.product_id, CustomerOrder.quantity, CustomerOrder.order_no)
                 .where(CustomerOrder.id.in_(resolved_ids))
             )
             cust_rows = cust_result.all()
@@ -353,14 +451,34 @@ async def get_purchase_order(db: AsyncSession, order_id: int) -> dict:
                 if pname:
                     names.add(pname)
                 qty_sum += r.quantity or 0
+                if r.order_no:
+                    source_order_nos.append(r.order_no)
             if not product_name and names:
                 product_name = '、'.join(sorted(names)) if len(names) > 1 else next(iter(names))
             if not quantity and qty_sum:
                 quantity = float(qty_sum)
+    else:
+        # 即使已有 product_name，仍需解析 source_order_no
+        resolved_ids_sn: list[int] = []
+        if order.source_order_id:
+            resolved_ids_sn.append(order.source_order_id)
+        if order.source_order_ids:
+            try:
+                ids_sn = json.loads(order.source_order_ids) if isinstance(order.source_order_ids, str) else order.source_order_ids
+                resolved_ids_sn.extend(int(x) for x in ids_sn)
+            except (ValueError, TypeError):
+                pass
+        if resolved_ids_sn:
+            from fastapi_app.shared_models import Order as _CO
+            no_result = await db.execute(
+                select(_CO.id, _CO.order_no).where(_CO.id.in_(resolved_ids_sn))
+            )
+            source_order_nos = [r.order_no for r in no_result.all() if r.order_no]
 
     return {
         'id': order.id,
         'order_no': order.order_no,
+        'source_order_no': '、'.join(source_order_nos) if source_order_nos else '',
         'supplier_name': order.supplier_name,
         'supplier_id': order.supplier_id,
         'customer_name': order.customer_name,
@@ -494,66 +612,32 @@ async def complete_purchase_order(db: AsyncSession, order_id: int, username: str
 
     now = datetime.now()
 
-    # Pre-fetch cumulative and arrived quantities for all items in a single query
-    item_keys = [(item.material_name, item.material_code or '') for item in items if item.material_name]
-    cumulative_map: dict[tuple[str, str], float] = {}
-    arrived_map: dict[tuple[str, str], float] = {}
-
-    if item_keys:
-        # Single query for cumulative quantities
-        from sqlalchemy import tuple_, case, and_
-        cum_result = await db.execute(
-            select(
-                MaterialRegistration.material_name,
-                MaterialRegistration.material_code,
-                func.coalesce(func.sum(MaterialRegistration.quantity), 0).label('total'),
-            ).where(
-                tuple_(MaterialRegistration.material_name, MaterialRegistration.material_code).in_(item_keys)
-            ).group_by(MaterialRegistration.material_name, MaterialRegistration.material_code)
-        )
-        for row in cum_result.all():
-            cumulative_map[(row[0], row[1] or '')] = float(row[2])
-
-        # Single query for arrived quantities
-        arr_result = await db.execute(
-            select(
-                MaterialRegistration.material_name,
-                MaterialRegistration.material_code,
-                func.coalesce(func.sum(MaterialRegistration.quantity), 0).label('total'),
-            ).where(
-                tuple_(MaterialRegistration.material_name, MaterialRegistration.material_code).in_(item_keys),
-                MaterialRegistration.registration_status == 'arrived',
-            ).group_by(MaterialRegistration.material_name, MaterialRegistration.material_code)
-        )
-        for row in arr_result.all():
-            arrived_map[(row[0], row[1] or '')] = float(row[2])
+    registration = MaterialRegistration(
+        purchase_order_id=order_id,
+        purchase_order_no=order.order_no,
+        supplier_id=order.supplier_id,
+        supplier_name=order.supplier_name or '',
+        registration_date=now.date(),
+        remark='',
+        status='pending',
+    )
+    db.add(registration)
+    await db.flush()
 
     for item in items:
-        reg = MaterialRegistration(
-            order_id=order_id,
-            material_name=item.material_name,
+        reg_item = MaterialRegistrationItem(
+            registration_id=registration.id,
+            order_item_id=item.id,
             material_code=item.material_code or '',
+            material_name=item.material_name,
             specification=item.specification or '',
             unit=item.unit or '',
-            quantity=item.quantity,
-            unit_price=item.unit_price,
-            category=item.material_category or '',
-            supplier_name=order.supplier_name or '',
-            supplier_id=order.supplier_id,
-            customer_name=order.customer_name or '',
-            registration_date=now,
+            ordered_quantity=item.quantity,
+            received_quantity=0,
+            material_category=item.material_category or '',
             remark=item.remark or '',
-            purchase_order_no=order.order_no,
         )
-        db.add(reg)
-
-        key = (item.material_name, item.material_code or '')
-        cumulative = cumulative_map.get(key, 0)
-        arrived_qty = arrived_map.get(key, 0)
-
-        existing = item.material_code and item.material_name
-        is_arrived = cumulative >= item.quantity
-        deficit = max(0, int(item.quantity) - cumulative) if existing else 0
+        db.add(reg_item)
 
         db.add(ModificationLog(
             target_type='purchase_item',
@@ -561,10 +645,8 @@ async def complete_purchase_order(db: AsyncSession, order_id: int, username: str
             field_name='completion',
             old_value=f'{item.material_name}(待完成)',
             new_value=json.dumps({
-                'arrived_qty': str(arrived_qty),
-                'total_qty': str(cumulative),
-                'is_arrived': is_arrived,
-                'deficit': deficit,
+                'ordered_qty': str(float(item.quantity or 0)),
+                'received_qty': '0',
             }, ensure_ascii=False),
             modifier_name=username,
         ))
@@ -589,6 +671,14 @@ async def batch_complete_purchase_orders(db: AsyncSession, order_ids: list, user
     )
     orders = {o.id: o for o in result.scalars().all()}
 
+    # 批量查询所有订单项，避免 N+1
+    all_items_result = await db.execute(
+        select(PurchaseOrderItem).where(PurchaseOrderItem.order_id.in_(order_ids))
+    )
+    items_by_order: dict[int, list] = {}
+    for item in all_items_result.scalars().all():
+        items_by_order.setdefault(item.order_id, []).append(item)
+
     completed = 0
     errors = []
     now = datetime.now()
@@ -603,29 +693,34 @@ async def batch_complete_purchase_orders(db: AsyncSession, order_ids: list, user
                 errors.append(f'订单{order.order_no}状态不允许完成')
                 continue
 
-            items_result = await db.execute(
-                select(PurchaseOrderItem).where(PurchaseOrderItem.order_id == oid)
+            items = items_by_order.get(oid, [])
+
+            registration = MaterialRegistration(
+                purchase_order_id=oid,
+                purchase_order_no=order.order_no,
+                supplier_id=order.supplier_id,
+                supplier_name=order.supplier_name or '',
+                registration_date=now.date(),
+                remark='',
+                status='pending',
             )
-            items = items_result.scalars().all()
+            db.add(registration)
+            await db.flush()
 
             for item in items:
-                reg = MaterialRegistration(
-                    order_id=oid,
-                    material_name=item.material_name,
+                reg_item = MaterialRegistrationItem(
+                    registration_id=registration.id,
+                    order_item_id=item.id,
                     material_code=item.material_code or '',
+                    material_name=item.material_name,
                     specification=item.specification or '',
                     unit=item.unit or '',
-                    quantity=item.quantity,
-                    unit_price=item.unit_price,
-                    category=item.material_category or '',
-                    supplier_name=order.supplier_name or '',
-                    supplier_id=order.supplier_id,
-                    customer_name=order.customer_name or '',
-                    registration_date=now,
+                    ordered_quantity=item.quantity,
+                    received_quantity=0,
+                    material_category=item.material_category or '',
                     remark=item.remark or '',
-                    purchase_order_no=order.order_no,
                 )
-                db.add(reg)
+                db.add(reg_item)
 
             order.status = 'completed'
             order.completed_at = now
@@ -716,24 +811,54 @@ async def get_completed_purchase_orders(
 
         regs_result = await db.execute(
             select(
-                MaterialRegistration.material_name,
-                MaterialRegistration.material_code,
-                func.sum(MaterialRegistration.quantity).label('total'),
+                MaterialRegistrationItem.material_name,
+                MaterialRegistrationItem.material_code,
+                func.sum(MaterialRegistrationItem.received_quantity).label('total'),
+            ).join(
+                MaterialRegistration, MaterialRegistrationItem.registration_id == MaterialRegistration.id
             ).where(
-                MaterialRegistration.order_id.in_(order_ids),
-                MaterialRegistration.registration_status == 'arrived',
+                MaterialRegistration.purchase_order_id.in_(order_ids),
+                MaterialRegistration.status.in_(('pending', 'partial', 'completed')),
             ).group_by(
-                MaterialRegistration.material_name,
-                MaterialRegistration.material_code,
+                MaterialRegistrationItem.material_name,
+                MaterialRegistrationItem.material_code,
             )
         )
         arrived_map = {
-            (r.material_name, r.material_code): int(r.total or 0)
+            (r.material_name, r.material_code or ''): int(r.total or 0)
             for r in regs_result
         }
     else:
         items_by_order = {}
         arrived_map = {}
+
+    # 解析 source_order_no：将 source_order_ids 关联的客户订单号回填
+    po_source_ids_map_c: dict[int, list[int]] = {}
+    all_source_ids_no_c: set[int] = set()
+    for o in orders:
+        ids: list[int] = []
+        if o.source_order_id:
+            ids.append(o.source_order_id)
+        if o.source_order_ids:
+            try:
+                parsed = json.loads(o.source_order_ids) if isinstance(o.source_order_ids, str) else o.source_order_ids
+                ids.extend(int(x) for x in parsed)
+            except (ValueError, TypeError):
+                pass
+        po_source_ids_map_c[o.id] = ids
+        all_source_ids_no_c.update(ids)
+    source_order_no_map_c: dict[int, str] = {}
+    if all_source_ids_no_c:
+        from fastapi_app.shared_models import Order as _CustomerOrderC
+        no_result_c = await db.execute(
+            select(_CustomerOrderC.id, _CustomerOrderC.order_no).where(_CustomerOrderC.id.in_(all_source_ids_no_c))
+        )
+        source_order_no_map_c = dict(no_result_c.all())
+    po_source_no_str_c: dict[int, str] = {}
+    for o in orders:
+        nos = [source_order_no_map_c.get(sid, '') for sid in po_source_ids_map_c.get(o.id, [])]
+        nos = [n for n in nos if n]
+        po_source_no_str_c[o.id] = '、'.join(nos) if nos else ''
 
     order_list = []
     for order in orders:
@@ -760,6 +885,7 @@ async def get_completed_purchase_orders(
         order_list.append({
             'id': order.id,
             'order_no': order.order_no,
+            'source_order_no': po_source_no_str_c.get(order.id, ''),
             'supplier_name': order.supplier_name,
             'supplier_id': order.supplier_id,
             'customer_name': order.customer_name,
@@ -787,29 +913,73 @@ async def get_supplier_order_summary(db: AsyncSession, order_ids: list | None = 
     if not order_ids:
         return {'materials': [], 'order_count': 0}
 
+    result = await db.execute(
+        select(PurchaseOrder).where(PurchaseOrder.id.in_(order_ids))
+    )
+    orders = result.scalars().all()
+
+    source_order_ids: set[int] = set()
+    for po in orders:
+        source_order_ids.update(_parse_source_order_ids(po))
+
+    cust_order_map: dict[int, tuple[int, float]] = {}
+    if source_order_ids:
+        cust_result = await db.execute(
+            select(Order.id, Order.product_id, Order.quantity).where(Order.id.in_(source_order_ids))
+        )
+        for row in cust_result.all():
+            cust_order_map[row.id] = (row.product_id, row.quantity or 0)
+
+    product_ids = list({pid for pid, _ in cust_order_map.values() if pid})
+    bom_data = await _fetch_bom_data(db, product_ids)
+
+    po_ids = [o.id for o in orders]
     items_result = await db.execute(
-        select(PurchaseOrderItem).where(PurchaseOrderItem.order_id.in_(order_ids))
+        select(PurchaseOrderItem).where(PurchaseOrderItem.order_id.in_(po_ids))
     )
     all_items = items_result.scalars().all()
-
-    # 按 (supplier_name, material_name, specification, unit) 聚合
-    mat_map: dict[tuple, dict] = {}
+    items_map: dict[tuple, list] = {}
     for item in all_items:
-        sup = item.supplier_name or '未指定供应商'
-        key = (sup, item.material_name, item.specification or '', item.unit or '')
-        if key in mat_map:
-            mat_map[key]['total_quantity'] += float(item.quantity or 0)
-        else:
-            mat_map[key] = {
-                'material_name': item.material_name,
-                'specification': item.specification or '',
-                'total_quantity': float(item.quantity or 0),
-                'unit': item.unit or '',
-                'supplier_name': sup,
-            }
+        ikey = (item.order_id, item.material_name, item.specification or '', item.unit or '')
+        items_map.setdefault(ikey, []).append(item)
+
+    mat_map: dict[tuple, dict] = {}
+    for po in orders:
+        order_qty = float(po.product_quantity or 0)
+        sids = _parse_source_order_ids(po)
+
+        if not order_qty:
+            for sid in sids:
+                if sid in cust_order_map:
+                    order_qty += cust_order_map[sid][1]
+
+        pid = None
+        for sid in sids:
+            if sid in cust_order_map:
+                pid = cust_order_map[sid][0]
+                break
+
+        for bom in bom_data.get(pid, []):
+            sup = bom['supplier_name'] or po.supplier_name or '未指定供应商'
+            key = (sup, bom['material_name'], bom['specification'], bom['unit'])
+
+            ikey = (po.id, bom['material_name'], bom['specification'], bom['unit'])
+            matching_items = items_map.get(ikey, [])
+            total_qty = sum(float(it.quantity or 0) for it in matching_items) if matching_items else bom['quantity'] * order_qty
+
+            if key in mat_map:
+                mat_map[key]['total_quantity'] += total_qty
+            else:
+                mat_map[key] = {
+                    'material_name': bom['material_name'],
+                    'specification': bom['specification'],
+                    'total_quantity': total_qty,
+                    'unit': bom['unit'],
+                    'supplier_name': sup,
+                }
 
     materials = sorted(mat_map.values(), key=lambda x: (x['supplier_name'], x['material_name']))
-    return {'materials': materials, 'order_count': len(set(item.order_id for item in all_items))}
+    return {'materials': materials, 'order_count': len(orders)}
 
 
 async def get_factory_order_summary(
@@ -819,46 +989,102 @@ async def get_factory_order_summary(
         return {'groups': [], 'order_count': 0}
 
     result = await db.execute(
-        select(PurchaseOrder).options(selectinload(PurchaseOrder.items)).where(PurchaseOrder.id.in_(order_ids))
+        select(PurchaseOrder).where(PurchaseOrder.id.in_(order_ids))
     )
     orders = result.scalars().unique().all()
 
-    # 按 (customer_name, product_name) 分组
+    source_order_ids: set[int] = set()
+    for po in orders:
+        source_order_ids.update(_parse_source_order_ids(po))
+
+    cust_order_map: dict[int, tuple[int, float, str]] = {}
+    if source_order_ids:
+        cust_result = await db.execute(
+            select(Order.id, Order.product_id, Order.quantity, Order.customer).where(Order.id.in_(source_order_ids))
+        )
+        for row in cust_result.all():
+            cust_order_map[row.id] = (row.product_id, row.quantity or 0, row.customer or '')
+
+    product_ids = list({pid for pid, _, _ in cust_order_map.values() if pid})
+    prod_name_map: dict[int, str] = {}
+    if product_ids:
+        prod_result = await db.execute(
+            select(Product.id, Product.name).where(Product.id.in_(product_ids))
+        )
+        prod_name_map = dict(prod_result.all())
+
+    bom_data = await _fetch_bom_data(db, product_ids, prod_name_map)
+
+    po_ids = [o.id for o in orders]
+    items_result = await db.execute(
+        select(PurchaseOrderItem).where(PurchaseOrderItem.order_id.in_(po_ids))
+    )
+    all_items = items_result.scalars().all()
+    items_map: dict[tuple, list] = {}
+    for item in all_items:
+        ikey = (item.order_id, item.material_name, item.specification or '', item.unit or '')
+        items_map.setdefault(ikey, []).append(item)
+
     group_map: dict[tuple, dict] = {}
     for po in orders:
         cust = po.customer_name or '未知客户'
         prod = po.product_name or '未知产品'
+        order_qty = float(po.product_quantity or 0)
+
+        sids = _parse_source_order_ids(po)
+        pid = None
+        for sid in sids:
+            if sid in cust_order_map:
+                pid = cust_order_map[sid][0]
+                if not cust or cust == '未知客户':
+                    cust = cust_order_map[sid][2] or cust
+                if not order_qty:
+                    order_qty = cust_order_map[sid][1]
+                break
+
+        if pid and pid in prod_name_map:
+            prod = prod_name_map[pid]
+
         key = (cust, prod)
         if key not in group_map:
             group_map[key] = {
                 'customer_name': cust,
                 'product_name': prod,
-                'product_quantity': float(po.product_quantity or 0),
-                'order_quantity': float(po.product_quantity or 0),
+                'product_quantity': order_qty,
+                'order_quantity': order_qty,
                 '_supplier_map': {},
             }
         group = group_map[key]
-        for item in po.items or []:
-            sup = item.supplier_name or po.supplier_name or '未指定供应商'
+
+        for bom in bom_data.get(pid, []):
+            sup = bom['supplier_name'] or po.supplier_name or '未指定供应商'
             if sup not in group['_supplier_map']:
                 group['_supplier_map'][sup] = {
                     'supplier_name': sup,
                     '_fabric_map': {},
                 }
             fabric_map = group['_supplier_map'][sup]['_fabric_map']
-            # 合并同名同规格物料
-            fkey = (item.material_name, item.specification or '', item.unit or '')
+            fkey = (bom['material_name'], bom['specification'], bom['unit'])
+
+            ikey = (po.id, bom['material_name'], bom['specification'], bom['unit'])
+            matching_items = items_map.get(ikey, [])
+            if matching_items:
+                per_order_qty = sum(float(it.quantity or 0) for it in matching_items)
+                cur_item_ids = [it.id for it in matching_items]
+            else:
+                per_order_qty = bom['quantity'] * order_qty
+                cur_item_ids = []
+
             if fkey in fabric_map:
-                fabric_map[fkey]['quantity'] += float(item.quantity or 0)
-                fabric_map[fkey]['item_ids'].append(item.id)
+                fabric_map[fkey]['quantity'] += per_order_qty
+                fabric_map[fkey]['item_ids'].extend(cur_item_ids)
             else:
                 fabric_map[fkey] = {
-                    'fabric_name': item.material_name,
-                    'specification': item.specification or '',
-                    'quantity': float(item.quantity or 0),
-                    'unit': item.unit or '',
-                    'item_ids': [item.id] if item.id else [],
-                    'item_id': item.id,
+                    'fabric_name': bom['material_name'],
+                    'specification': bom['specification'],
+                    'quantity': per_order_qty,
+                    'unit': bom['unit'],
+                    'item_ids': cur_item_ids,
                 }
 
     groups = []
@@ -885,20 +1111,39 @@ async def save_factory_summary_edits(
 ) -> dict:
     updated = 0
     for entry in data:
-        oid = entry.get('id')
-        order = await db.get(PurchaseOrder, oid)
-        if not order:
+        item_ids = entry.get('item_ids', [])
+        new_quantity = entry.get('quantity')
+        if not item_ids or new_quantity is None:
             continue
 
-        items_data = entry.get('items', [])
-        for item_entry in items_data:
-            mid = item_entry.get('id')
-            item = await db.get(PurchaseOrderItem, mid) if mid else None
-            if item and item.order_id == oid:
-                if 'quantity' in item_entry:
-                    item.quantity = Decimal(str(item_entry['quantity']))
-                    item.total_price = item.unit_price * item.quantity
-                updated += 1
+        items = []
+        for iid in item_ids:
+            item = await db.get(PurchaseOrderItem, iid)
+            if item:
+                items.append(item)
+
+        if not items:
+            continue
+
+        if len(items) == 1:
+            items[0].quantity = Decimal(str(new_quantity))
+            items[0].total_price = (items[0].unit_price or 0) * items[0].quantity
+            updated += 1
+        else:
+            original_total = sum(float(it.quantity or 0) for it in items)
+            if original_total > 0:
+                ratio = float(new_quantity) / original_total
+                for it in items:
+                    it.quantity = Decimal(str(round(float(it.quantity or 0) * ratio, 2)))
+                    it.total_price = (it.unit_price or 0) * it.quantity
+                    updated += 1
+            else:
+                per_item = Decimal(str(round(float(new_quantity) / len(items), 2)))
+                for it in items:
+                    it.quantity = per_item
+                    it.total_price = (it.unit_price or 0) * it.quantity
+                    updated += 1
+
     await db.commit()
     return {'updated_count': updated}
 
@@ -1025,11 +1270,6 @@ async def get_unprocessed_orders(
         )
         bom_product_ids |= {row[0] for row in accessory_result}
 
-        packaging_result = await db.execute(
-            select(ProductPackaging.product_id).where(ProductPackaging.product_id.in_(product_ids))
-        )
-        bom_product_ids |= {row[0] for row in packaging_result}
-
     return {
         'orders': [
             {
@@ -1127,7 +1367,6 @@ async def generate_purchase_orders_from_customer_orders(
     filling_map: dict[int, list] = {}
     fabric_map: dict[int, list] = {}
     accessory_map: dict[int, list] = {}
-    packaging_map: dict[int, list] = {}
 
     if product_ids:
         fill_result = await db.execute(
@@ -1147,12 +1386,6 @@ async def generate_purchase_orders_from_customer_orders(
         )
         for row in acc_result.scalars().all():
             accessory_map.setdefault(row.product_id, []).append(row)
-
-        pkg_result = await db.execute(
-            select(ProductPackaging).where(ProductPackaging.product_id.in_(product_ids))
-        )
-        for row in pkg_result.scalars().all():
-            packaging_map.setdefault(row.product_id, []).append(row)
 
     items = []
     for cust_order in cust_orders:
@@ -1206,22 +1439,6 @@ async def generate_purchase_orders_from_customer_orders(
                 'customer_name': customer_name,
                 'category': 'accessory',
                 'unit_usage': float(acc.quantity or 0),
-            })
-
-        for pkg in packaging_map.get(pid, []):
-            qty = float(pkg.quantity or 0) * cust_order.quantity
-            items.append({
-                'material_name': pkg.packaging_name or '包装',
-                'material_code': pkg.material_code or '',
-                'specification': pkg.specification or '',
-                'unit': pkg.unit or '个',
-                'unit_price': 0,
-                'quantity': qty,
-                'supplier_name': pkg.supplier_name or '',
-                'supplier_id': pkg.supplier_id,
-                'customer_name': customer_name,
-                'category': 'packaging',
-                'unit_usage': float(pkg.quantity or 0),
             })
 
     if not items:

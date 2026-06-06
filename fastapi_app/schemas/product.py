@@ -5,7 +5,9 @@
 """
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from utils.sanitizer import sanitize_url
 
 
 class ProductCreate(BaseModel):
@@ -16,6 +18,16 @@ class ProductCreate(BaseModel):
     image: str | None = Field(None, max_length=200, description="产品图片路径")
     initial_stock: int = Field(0, ge=0, le=100000, description="初始库存")
 
+    @field_validator('image')
+    @classmethod
+    def sanitize_image_url(cls, v: str | None) -> str | None:
+        if v:
+            sanitized = sanitize_url(v)
+            if not sanitized:
+                raise ValueError('图片URL包含不安全的协议')
+            return sanitized
+        return v
+
 
 class ProductUpdate(BaseModel):
     """更新产品请求"""
@@ -24,6 +36,16 @@ class ProductUpdate(BaseModel):
     price: float | None = Field(None, ge=0, description="产品价格")
     image: str | None = Field(None, max_length=200, description="产品图片路径")
     initial_stock: int | None = Field(None, ge=0, le=100000, description="初始库存")
+
+    @field_validator('image')
+    @classmethod
+    def sanitize_image_url(cls, v: str | None) -> str | None:
+        if v:
+            sanitized = sanitize_url(v)
+            if not sanitized:
+                raise ValueError('图片URL包含不安全的协议')
+            return sanitized
+        return v
 
 
 class ProductResponse(BaseModel):

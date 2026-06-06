@@ -2,7 +2,7 @@
 采购中心模块测试
 """
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -32,7 +32,7 @@ class TestPurchaseCenterSchemas:
 
     def test_bom_save_request(self):
         from fastapi_app.schemas.purchase_center import BomSaveRequest
-        bom = BomSaveRequest(filling={'cotton_usage': 100}, fabrics=[], accessories=[], packagings=[])
+        bom = BomSaveRequest(filling={'cotton_usage': 100}, fabrics=[], accessories=[])
         assert bom.filling['cotton_usage'] == 100
 
     def test_supplier_summary_response(self):
@@ -62,70 +62,71 @@ class TestPurchaseCenterService:
         """通过 endpoint 测试产品统计（直接 service 测试无法 mock SA 类属性）"""
         pass  # 已由 test_get_products_statistics endpoint 测试覆盖
 
-    def test_get_search_suggestions_empty(self):
+    @pytest.mark.asyncio
+    async def test_get_search_suggestions_empty(self):
         from fastapi_app.services.purchase_center_service import get_search_suggestions
         db = MagicMock()
-        result = get_search_suggestions(db, '')
+        result = await get_search_suggestions(db, '')
         assert result == []
 
-    def test_get_search_suggestions_with_keyword(self):
+    @pytest.mark.asyncio
+    async def test_get_search_suggestions_with_keyword(self):
         from fastapi_app.services.purchase_product_service import get_search_suggestions
         db = MagicMock()
         mock_product = MagicMock()
         mock_product.id = 1
         mock_product.name = "测试产品"
         mock_product.barcode = "690"
-        mock_query = MagicMock()
-        mock_query.filter.return_value.limit.return_value.all.return_value = [mock_product]
-        db.query.return_value = mock_query
+        mock_product.price = 0
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [mock_product]
+        db.execute = AsyncMock(return_value=mock_result)
 
-        with patch('fastapi_app.services.purchase_product_service._batch_check_bom_exists', return_value=set()):
-            result = get_search_suggestions(db, '测试')
+        with patch('fastapi_app.services.purchase_product_service._batch_check_bom_exists', new_callable=AsyncMock, return_value=set()):
+            result = await get_search_suggestions(db, '测试')
             assert len(result) == 1
             assert result[0]['name'] == '测试产品'
 
-    def test_create_supplier_success(self):
+    @pytest.mark.asyncio
+    async def test_create_supplier_success(self):
         from fastapi_app.services.purchase_center_service import create_supplier
         db = MagicMock()
-        mock_query = MagicMock()
-        mock_query.filter_by.return_value.first.return_value = None
-        db.query.return_value = mock_query
-        db.add = MagicMock()
-        db.commit = MagicMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        db.execute = AsyncMock(return_value=mock_result)
+        db.add = MagicMock(side_effect=lambda x: setattr(x, 'id', 1))
+        db.commit = AsyncMock()
 
-        supplier_mock = MagicMock()
-        supplier_mock.id = 1
-        supplier_mock.name = "新供应商"
-        db.add.side_effect = lambda x: setattr(x, 'id', 1)
-
-        result = create_supplier(db, {'name': '新供应商', 'contact_person': '张三'})
+        result = await create_supplier(db, {'name': '新供应商', 'contact_person': '张三'})
         assert result['name'] == '新供应商'
 
-    def test_create_supplier_duplicate(self):
+    @pytest.mark.asyncio
+    async def test_create_supplier_duplicate(self):
         from fastapi_app.services.purchase_center_service import create_supplier
         db = MagicMock()
         existing = MagicMock()
-        mock_query = MagicMock()
-        mock_query.filter_by.return_value.first.return_value = existing
-        db.query.return_value = mock_query
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = existing
+        db.execute = AsyncMock(return_value=mock_result)
 
         with pytest.raises(ValueError, match='供应商已存在'):
-            create_supplier(db, {'name': '已存在供应商'})
+            await create_supplier(db, {'name': '已存在供应商'})
 
     def test_get_modification_logs(self):
         """通过 endpoint 测试修改日志"""
         pass  # 已由 test_get_modification_logs endpoint 测试覆盖
 
-    def test_get_saved_queries(self):
+    @pytest.mark.asyncio
+    async def test_get_saved_queries(self):
         from fastapi_app.services.purchase_center_service import get_saved_queries
         db = MagicMock()
         mock_sq = MagicMock()
         mock_sq.to_dict.return_value = {'id': 1, 'name': '测试查询'}
-        mock_query = MagicMock()
-        mock_query.filter_by.return_value.order_by.return_value.all.return_value = [mock_sq]
-        db.query.return_value = mock_query
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [mock_sq]
+        db.execute = AsyncMock(return_value=mock_result)
 
-        result = get_saved_queries(db, user_id=1)
+        result = await get_saved_queries(db, user_id=1)
         assert len(result) == 1
         assert result[0]['name'] == '测试查询'
 
@@ -133,31 +134,37 @@ class TestPurchaseCenterService:
         """通过 endpoint 测试状态日志"""
         pass  # 已由 test_get_status_logs endpoint 测试覆盖
 
-    def test_get_completed_order_quick_filters(self):
+    @pytest.mark.asyncio
+    async def test_get_completed_order_quick_filters(self):
         from fastapi_app.services.purchase_center_service import get_completed_order_quick_filters
-        filters = get_completed_order_quick_filters()
-        assert len(filters) == 4
-        assert filters[0]['label'] == '今天'
-        assert filters[1]['label'] == '昨天'
+        db = MagicMock()
+        mock_result = MagicMock()
+        mock_result.scalar.return_value = 0
+        db.execute = AsyncMock(return_value=mock_result)
+        result = await get_completed_order_quick_filters(db)
+        assert 'today' in result
+        assert 'week' in result
+        assert 'month' in result
 
-    def test_get_completed_order_suggestions_empty(self):
+    @pytest.mark.asyncio
+    async def test_get_completed_order_suggestions_empty(self):
         from fastapi_app.services.purchase_center_service import get_completed_order_suggestions
-        result = get_completed_order_suggestions(MagicMock(), '', '')
+        result = await get_completed_order_suggestions(MagicMock(), '')
         assert result == []
 
-    def test_get_customers_statistics(self):
+    @pytest.mark.asyncio
+    async def test_get_customers_statistics(self):
         from fastapi_app.services.purchase_center_service import get_customers_statistics
         db = MagicMock()
-        # Three separate db.query calls: count(), filter().count(), filter().count()
-        q1 = MagicMock()
-        q1.count.return_value = 100
-        q2 = MagicMock()
-        q2.filter.return_value.count.return_value = 80
-        q3 = MagicMock()
-        q3.filter.return_value.count.return_value = 10
-        db.query.side_effect = [q1, q2, q3]
+        r1 = MagicMock()
+        r1.scalar.return_value = 100
+        r2 = MagicMock()
+        r2.scalar.return_value = 80
+        r3 = MagicMock()
+        r3.scalar.return_value = 10
+        db.execute = AsyncMock(side_effect=[r1, r2, r3])
 
-        result = get_customers_statistics(db)
+        result = await get_customers_statistics(db)
         assert result['total'] == 100
         assert result['active'] == 80
 
@@ -188,11 +195,9 @@ class TestPurchaseCenterEndpoints:
         assert 'fabric' in data['categories']
 
     @pytest.mark.asyncio
-    async def test_cache_clear(self, client):
+    async def test_cache_clear_removed(self, client):
         resp = await client.post("/api/v1/purchase-center/cache/clear")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data['success'] is True
+        assert resp.status_code in (403, 404)
 
     @pytest.mark.asyncio
     async def test_get_search_suggestions_empty(self, client):
@@ -227,11 +232,14 @@ class TestPurchaseCenterEndpoints:
 
     @pytest.mark.asyncio
     async def test_get_quick_filters(self, client):
-        resp = await client.get("/api/v1/purchase-center/orders/completed/quick-filters")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data['success'] is True
-        assert len(data['quick_filters']) == 4
+        with patch('fastapi_app.services.purchase_center_service.get_completed_order_quick_filters', new_callable=AsyncMock, return_value={'today': 0, 'week': 0, 'month': 0}):
+            resp = await client.get("/api/v1/purchase-center/orders/completed/quick-filters")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data['success'] is True
+            assert 'today' in data['quick_filters']
+            assert 'week' in data['quick_filters']
+            assert 'month' in data['quick_filters']
 
     @pytest.mark.asyncio
     async def test_get_modification_logs(self, client):
@@ -442,12 +450,10 @@ class TestPurchaseCenterModels:
             ProductAccessory,
             ProductFabric,
             ProductMaterial,
-            ProductPackaging,
         )
         assert ProductMaterial.__tablename__ == 'product_material'
         assert ProductFabric.__tablename__ == 'product_fabric'
         assert ProductAccessory.__tablename__ == 'product_accessory'
-        assert ProductPackaging.__tablename__ == 'product_packaging'
 
     def test_modification_log_model(self):
         from fastapi_app.shared_models.purchase_center import ModificationLog
@@ -553,7 +559,6 @@ class TestBomCopyAndBatchDelete:
                 'filling': {'cotton_usage': 100},
                 'fabric': [{'fabric_name': '面料A'}],
                 'accessory': [],
-                'packaging': [],
             },
             'material_count': 2,
         }
@@ -673,7 +678,6 @@ class TestBomCopyService:
         product.material = mock_material
         product.fabrics = []
         product.accessories = []
-        product.packagings = []
         assert product_has_bom(product) is True
 
     def test_product_has_bom_true_with_fabric(self):
@@ -685,7 +689,6 @@ class TestBomCopyService:
         product.material = None
         product.fabrics = [MagicMock()]
         product.accessories = []
-        product.packagings = []
         assert product_has_bom(product) is True
 
     def test_product_has_bom_false_all_empty(self):
@@ -697,7 +700,6 @@ class TestBomCopyService:
         product.material = None
         product.fabrics = []
         product.accessories = []
-        product.packagings = []
         assert product_has_bom(product) is False
 
     def test_product_has_bom_false_zero_cotton(self):
@@ -711,5 +713,4 @@ class TestBomCopyService:
         product.material = mock_material
         product.fabrics = []
         product.accessories = []
-        product.packagings = []
         assert product_has_bom(product) is False

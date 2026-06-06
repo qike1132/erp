@@ -13,7 +13,6 @@ class Base(DeclarativeBase):
 
 
 # 导入所有模型（确保 Base.metadata 注册了所有表）
-from fastapi_app.shared_models.app_version import AppVersion
 from fastapi_app.shared_models.backup_record import BackupRecord
 from fastapi_app.shared_models.approval import ApprovalLog, ApprovalRequest
 from fastapi_app.shared_models.case import Case
@@ -39,7 +38,6 @@ from fastapi_app.shared_models.product_material import (
     ProductAccessory,
     ProductFabric,
     ProductMaterial,
-    ProductPackaging,
 )
 from fastapi_app.shared_models.production_plan import ProductionPlan, ProductionPlanLog, StagingPurchasePlan
 from fastapi_app.shared_models.purchase_center import ModificationLog, SavedQuery
@@ -53,9 +51,10 @@ from fastapi_app.shared_models.stock_out import StockOut
 from fastapi_app.shared_models.stock_return import StockReturn
 from fastapi_app.shared_models.supplier import Supplier
 from fastapi_app.shared_models.user import User, user_permission
+from fastapi_app.shared_models.audit_log import AuditLog
+from fastapi_app.shared_models.country import Country
 
 __all__ = [
-    'AppVersion',
     'BackupRecord',
     'Base',
     'Product',
@@ -89,7 +88,6 @@ __all__ = [
     'ProductMaterial',
     'ProductFabric',
     'ProductAccessory',
-    'ProductPackaging',
     'MATERIAL_CATEGORIES',
     'ModificationLog',
     'SavedQuery',
@@ -105,4 +103,6 @@ __all__ = [
     'CraftWork',
     'DailyProductionRecord',
     'PackagingRecord',
+    'AuditLog',
+    'Country',
 ]

@@ -58,7 +58,7 @@ PERMISSIONS_CONFIG = {
     'report': {
         'module_name': '报表统计',
         'icon': 'fa-chart-bar',
-        'parent': {'code': 'report_manage', 'name': '报表管理'},
+        'parent': {'code': 'report_manage', 'name': '订单流水'},
         'children': []
     },
     'approval': {

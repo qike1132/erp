@@ -1,9 +1,13 @@
 <template>
-  <div ref="containerRef" class="vt-container" :style="{ height: `${containerHeight}px` }">
-    <div v-if="columns.length" class="vt-header">
-      <div v-for="col in columns" :key="col.key" class="vt-th"
+  <div ref="containerRef" class="vt-container" role="table" :style="{ height: `${containerHeight}px` }">
+    <div v-if="columns.length" class="vt-header" role="row">
+      <div v-for="col in columns" :key="col.key" class="vt-th" role="columnheader"
         :style="{ width: col.width ? `${col.width}px` : 'auto', minWidth: col.minWidth ? `${col.minWidth}px` : '80px' }"
-        @click="col.sortable && handleSort(col)">
+        :tabindex="col.sortable ? 0 : undefined"
+        :aria-sort="col.sortable ? (sortKey===col.key ? (sortOrder==='asc' ? 'ascending' : 'descending') : 'none') : undefined"
+        @click="col.sortable && handleSort(col)"
+        @keydown.enter="col.sortable && handleSort(col)"
+        @keydown.space.prevent="col.sortable && handleSort(col)">
         <span>{{ col.title }}</span>
         <span v-if="sortKey===col.key" class="sort-ind">{{ sortOrder==='asc'?'↑':'↓' }}</span>
       </div>
@@ -11,9 +15,11 @@
     <div class="vt-body" :style="{ height: `${containerHeight - headerHeight}px` }" @scroll.passive="onScroll">
       <div class="vt-phantom" :style="{ height: `${totalHeight}px` }" />
       <div class="vt-content" :style="{ transform: `translateY(${offsetY}px)` }">
-        <div v-for="item in visibleItems" :key="itemKey(item)" class="vt-row"
-          :style="getItemStyle(item.index)" @click="$emit('rowClick', item.raw, item.index)">
-          <div v-for="col in columns" :key="col.key" class="vt-td"
+        <div v-for="item in visibleItems" :key="itemKey(item)" class="vt-row" role="row"
+          :style="getItemStyle(item.index)" tabindex="0" @click="$emit('rowClick', item.raw, item.index)"
+          @keydown.enter="$emit('rowClick', item.raw, item.index)"
+          @keydown.space.prevent="$emit('rowClick', item.raw, item.index)">
+          <div v-for="col in columns" :key="col.key" class="vt-td" role="cell"
             :style="{ width: col.width ? `${col.width}px` : 'auto', minWidth: col.minWidth ? `${col.minWidth}px` : '80px' }">
             <slot :name="col.key" :item="item.raw" :index="item.index" :value="item.raw[col.key]">
               {{ item.raw[col.key] }}
@@ -22,7 +28,7 @@
         </div>
       </div>
     </div>
-    <div v-if="loading" class="vt-loading"><slot name="loading">加载中...</slot></div>
+    <div v-if="loading" class="vt-loading"><slot name="loading">加载中…</slot></div>
   </div>
 </template>
 
@@ -82,7 +88,7 @@ function getPosition(index: number): number {
 function findStartIndex(scrollPos: number): number {
   if (scrollPos <= 0) return 0
   if (!props.dynamicHeight) return Math.floor(scrollPos / props.itemHeight)
-  if (heightCache.value.length === 0) return Math.floor(scrollPos / estimatedH.value)
+  if (_heightMap.size === 0) return Math.floor(scrollPos / estimatedH.value)
   let lo = 0, hi = props.items.length - 1
   while (lo <= hi) {
     const mid = (lo + hi) >> 1
@@ -152,4 +158,5 @@ defineExpose({ scrollToIndex, scrollToTop:()=>scrollToIndex(0), scrollToBottom:(
 .vt-td{display:flex;align-items:center;padding:0 12px;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-right:1px solid #e5e7eb}
 .vt-td:last-child{border-right:none}
 .vt-loading{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);padding:12px 24px;background:rgba(255,255,255,.9);border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.1);z-index:20}
+.vt-row:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: -2px; }
 </style>

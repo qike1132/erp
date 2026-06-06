@@ -6,7 +6,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Table
@@ -36,8 +36,8 @@ class User(Base):
     password: Mapped[str] = mapped_column(String(200), nullable=False, comment='密码')
     is_super: Mapped[bool] = mapped_column(Boolean, default=False, comment='是否超级用户')
     status: Mapped[bool] = mapped_column(Boolean, default=True, comment='是否启用')
-    create_time: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, comment='创建时间')
-    update_time: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), comment='创建时间')
+    update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
 
     permissions: Mapped[list["Permission"]] = relationship('Permission', secondary=user_permission, backref='users')
 
@@ -59,8 +59,9 @@ class User(Base):
                 for child in p.children:
                     if child.code == permission_code:
                         return True
-            if p.parent_id is None and permission_code.startswith(p.code.split('_')[0] + '_'):
-                return True
+            if p.parent_id is None and p.code == permission_code.rsplit('_', 1)[0] + '_view':
+                if not permission_code.endswith(('_delete', '_edit', '_create')):
+                    return True
 
         return False
 

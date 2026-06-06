@@ -94,6 +94,7 @@ class PurchasePlanDetailItem(BaseModel):
     inventory_qty: int = 0
     stock_status: str = 'sufficient'
     shipment_status: str = 'pending'
+    updated_at: str | None = None
 
 
 class PurchasePlanDetailResponse(BaseModel):
@@ -185,3 +186,73 @@ class MonthlyCalendarResponse(BaseModel):
     days_in_month: int
     plans_by_date: dict[str, list] = {}
     customers: list[dict] = []
+
+
+class CreatePlanResponse(BaseModel):
+    success: bool
+    data: dict = {}
+
+
+class ShipmentRecordItem(BaseModel):
+    stockout_id: int
+    shipment_no: str = ''
+    customer_name: str = ''
+    product_name: str = ''
+    quantity: int = 0
+    shipment_date: str = ''
+    source_type: str = 'stockout'
+    note: str = ''
+
+
+class ShipmentRecordsResponse(BaseModel):
+    records: list[ShipmentRecordItem] = []
+
+
+class ShipmentSyncResponse(BaseModel):
+    success: bool
+    synced_count: int = 0
+
+
+class PurchasePlanUploadExcelResponse(BaseModel):
+    success: bool
+    batch_id: str = ''
+    total: int = 0
+    success_count: int = 0
+    error_count: int = 0
+    errors: list[str] = []
+    is_async: bool = False
+    detected_month: str | None = None
+
+
+class PurchasePlanStagingItem(BaseModel):
+    id: int
+    customer_name: str = ''
+    product_name: str = ''
+    barcode: str = ''
+    quantity: int = 0
+    plan_date: str = ''
+    plan_month: str = ''
+    remark: str = ''
+    is_validated: bool = False
+    validation_error: str = ''
+    upload_batch_id: str = ''
+
+
+class PurchasePlanStagingListResponse(BaseModel):
+    success: bool
+    data: list[PurchasePlanStagingItem] = []
+    total: int = 0
+
+
+class PurchasePlanStagingValidateResponse(BaseModel):
+    success: bool
+    total: int = 0
+    valid_count: int = 0
+    error_count: int = 0
+
+
+class PurchasePlanStagingConfirmResponse(BaseModel):
+    success: bool
+    created_plans: list[dict] = []
+    created_count: int = 0
+    skipped_count: int = 0

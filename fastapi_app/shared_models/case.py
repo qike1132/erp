@@ -1,7 +1,7 @@
 """皮套模型 - 纯 SQLAlchemy 2.0 声明式"""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String
@@ -19,6 +19,10 @@ class Case(Base):
     __table_args__ = (
         Index('idx_case_product', 'product_id'),
         Index('idx_case_barcode', 'barcode'),
+        Index('idx_case_name_trgm', 'name', postgresql_using='gin',
+              postgresql_ops={'name': 'gin_trgm_ops'}),
+        Index('idx_case_barcode_trgm', 'barcode', postgresql_using='gin',
+              postgresql_ops={'barcode': 'gin_trgm_ops'}),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -29,8 +33,8 @@ class Case(Base):
     initial_stock: Mapped[int] = mapped_column(Integer, default=0)
     current_stock: Mapped[int] = mapped_column(Integer, default=0)
     version: Mapped[int] = mapped_column(Integer, default=0, server_default='0')
-    create_time: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, index=True)
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
 
     product: Mapped["Product | None"] = relationship('Product', back_populates='cases')
 

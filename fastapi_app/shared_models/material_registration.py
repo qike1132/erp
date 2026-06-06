@@ -1,10 +1,10 @@
 """来料登记模型"""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text
+from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, desc
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
@@ -22,11 +22,11 @@ class MaterialRegistration(Base):
     purchase_order_no: Mapped[str] = mapped_column(String(30), nullable=False)
     supplier_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('supplier.id'))
     supplier_name: Mapped[str | None] = mapped_column(String(100))
-    registration_date: Mapped[datetime | None] = mapped_column(Date, nullable=False, default=lambda: datetime.now().date())
+    registration_date: Mapped[datetime | None] = mapped_column(Date, nullable=False, default=lambda: datetime.now(timezone.utc).date())
     remark: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), default='pending')
-    create_time: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now)
-    update_time: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     created_by: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id'))
 
     items: Mapped[list["MaterialRegistrationItem"]] = relationship(
@@ -42,6 +42,9 @@ class MaterialRegistration(Base):
         Index('idx_material_reg_date', 'registration_date'),
         Index('idx_material_reg_status_date', 'status', 'registration_date'),
         Index('idx_material_registration_created_by', 'created_by'),
+        Index('idx_material_reg_create_time', desc('create_time')),
+        Index('idx_material_reg_supplier_name', 'supplier_name'),
+        Index('idx_material_reg_order_no', 'purchase_order_no'),
     )
 
     def _calc_items_stats(self):
@@ -122,7 +125,7 @@ class MaterialRegistrationItem(Base):
     received_quantity: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
     material_category: Mapped[str | None] = mapped_column(String(20))
     remark: Mapped[str | None] = mapped_column(Text)
-    create_time: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now)
+    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     registration: Mapped["MaterialRegistration"] = relationship(
         "MaterialRegistration", back_populates="items"
@@ -138,7 +141,7 @@ class MaterialRegistrationItem(Base):
         ordered = float(self.ordered_quantity or 0)
         received = float(self.received_quantity or 0)
         remaining = ordered - received
-        item_progress = round(received / ordered * 100, 1) if ordered > 0 else 0
+        item_progress = min(round(received / ordered * 100, 1), 99.9) if ordered > 0 and received < ordered else (100.0 if received >= ordered and ordered > 0 else 0)
         return {
             'id': self.id,
             'registration_id': self.registration_id,

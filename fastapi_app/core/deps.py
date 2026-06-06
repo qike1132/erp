@@ -7,8 +7,8 @@ FastAPI 依赖注入
 
 已迁移到全异步数据库操作，移除同步引擎依赖。
 """
+import asyncio
 import logging
-import threading
 import time
 import uuid
 from collections import OrderedDict
@@ -27,16 +27,16 @@ logger = logging.getLogger(__name__)
 
 
 class _TTLCache:
-    """线程安全的 LRU TTL 缓存，替代 dict 避免并发竞态"""
+    """异步安全的 LRU TTL 缓存，替代 dict 避免并发竞态"""
 
     def __init__(self, ttl: float = 30, maxsize: int = 500):
         self._ttl = ttl
         self._maxsize = maxsize
-        self._lock = threading.Lock()
+        self._lock = asyncio.Lock()
         self._data: OrderedDict[int, tuple[float, object]] = OrderedDict()
 
-    def get(self, key: int) -> object | None:
-        with self._lock:
+    async def get(self, key: int) -> object | None:
+        async with self._lock:
             entry = self._data.get(key)
             if entry is None:
                 return None
@@ -47,70 +47,82 @@ class _TTLCache:
             self._data.move_to_end(key)
             return value
 
-    def set(self, key: int, value: object) -> None:
-        with self._lock:
+    async def set(self, key: int, value: object) -> None:
+        async with self._lock:
             self._data[key] = (time.monotonic(), value)
             self._data.move_to_end(key)
             if len(self._data) > self._maxsize:
                 self._data.popitem(last=False)
 
-    def pop(self, key: int) -> None:
-        with self._lock:
+    async def pop(self, key: int) -> None:
+        async with self._lock:
             self._data.pop(key, None)
 
-    def clear(self) -> None:
-        with self._lock:
+    async def clear(self) -> None:
+        async with self._lock:
             self._data.clear()
 
 
 _PERMISSION_CACHE = _TTLCache(ttl=30, maxsize=500)
 
-def _get_cached_user(user_id: int) -> User | None:
-    return _PERMISSION_CACHE.get(user_id)
+async def _get_cached_user(user_id: int) -> User | None:
+    return await _PERMISSION_CACHE.get(user_id)
 
 
-def _set_cached_user(user_id: int, user: User) -> None:
-    _PERMISSION_CACHE.set(user_id, user)
+async def _set_cached_user(user_id: int, user: User) -> None:
+    await _PERMISSION_CACHE.set(user_id, user)
 
 
-def invalidate_user_permission_cache(user_id: int | None=None) -> None:
+async def invalidate_user_permission_cache(user_id: int | None=None) -> None:
     if user_id is not None:
-        _PERMISSION_CACHE.pop(user_id)
-        # 同时清除用户活跃状态缓存
+        await _PERMISSION_CACHE.pop(user_id)
         try:
-            _USER_ACTIVE_CACHE.pop(user_id)
+            await _USER_ACTIVE_CACHE.pop(user_id)
         except (KeyError, AttributeError):
             pass
     else:
-        _PERMISSION_CACHE.clear()
+        await _PERMISSION_CACHE.clear()
         try:
-            _USER_ACTIVE_CACHE.clear()
+            await _USER_ACTIVE_CACHE.clear()
         except AttributeError:
             pass
-__all__ = ['get_current_user_id', 'require_permission', 'create_access_token', 'get_async_db', 'get_user_identity', 'revoke_token']
+__all__ = ['get_current_user_id', 'require_permission', 'require_superuser', 'create_access_token', 'get_async_db', 'get_user_identity', 'revoke_token']
 
 
 def get_user_identity(user: User) -> tuple[str, str]:
     """从User对象提取(session_id, username)，用于审计和暂存区"""
     return str(user.id), user.username
 
+_signing_key_cache = None
+_verify_key_cache = None
+
 def _get_signing_key() -> str:
     """获取 JWT 签名密钥（支持 HS256 和 RS256）"""
+    global _signing_key_cache
+    if _signing_key_cache is not None:
+        return _signing_key_cache
     if settings.ALGORITHM.startswith('RS'):
         if not settings.JWT_PRIVATE_KEY_PATH:
             raise RuntimeError('RS256 模式必须设置 JWT_PRIVATE_KEY_PATH 环境变量')
         with open(settings.JWT_PRIVATE_KEY_PATH) as f:
-            return f.read()
-    return settings.SECRET_KEY
+            _signing_key_cache = f.read()
+            return _signing_key_cache
+    _signing_key_cache = settings.SECRET_KEY
+    return _signing_key_cache
 
 def _get_verify_key() -> str:
     """获取 JWT 验证密钥（支持 HS256 和 RS256）"""
+    global _verify_key_cache
+    if _verify_key_cache is not None:
+        return _verify_key_cache
     if settings.ALGORITHM.startswith('RS'):
         if not settings.JWT_PUBLIC_KEY_PATH:
             raise RuntimeError('RS256 模式必须设置 JWT_PUBLIC_KEY_PATH 环境变量')
         with open(settings.JWT_PUBLIC_KEY_PATH) as f:
-            return f.read()
-    return settings.SECRET_KEY
+            _verify_key_cache = f.read()
+            return _verify_key_cache
+    _verify_key_cache = settings.SECRET_KEY
+    return _verify_key_cache
 
 def create_access_token(data: dict, expires_delta=None) -> str:
     """生成JWT Token（支持 HS256 / RS256）
@@ -150,7 +162,7 @@ async def revoke_token(jti: str, exp: int) -> None:
         return
     try:
         from utils.redis_cache import redis_cache
-        redis = redis_cache._redis
+        redis = redis_cache.redis_client
         if redis:
             await redis.set(f"token_blacklist:{jti}", "1", ex=remaining)
     except (OSError, RuntimeError, ValueError):
@@ -163,7 +175,7 @@ async def is_token_revoked(jti: str | None) -> bool:
         return False
     try:
         from utils.redis_cache import redis_cache
-        redis = redis_cache._redis
+        redis = redis_cache.redis_client
         if redis:
             return bool(await redis.exists(f"token_blacklist:{jti}"))
     except (OSError, RuntimeError, ValueError):
@@ -234,13 +246,13 @@ _USER_ACTIVE_CACHE = _TTLCache(ttl=30, maxsize=500)
 
 async def _verify_user_active(user_id: int, db: AsyncSession) -> bool:
     """验证用户仍存在且处于启用状态（带 L1 缓存，TTL 30s）"""
-    cached = _USER_ACTIVE_CACHE.get(user_id)
+    cached = await _USER_ACTIVE_CACHE.get(user_id)
     if cached is not None:
         return cached
     result = await db.execute(select(User.id, User.status).where(User.id == user_id))
     user = result.first()
     is_active = user is not None and bool(user.status)
-    _USER_ACTIVE_CACHE.set(user_id, is_active)
+    await _USER_ACTIVE_CACHE.set(user_id, is_active)
     return is_active
 
 async def get_current_user_id(request: Request, db: AsyncSession=Depends(get_async_db)) -> int:
@@ -255,12 +267,32 @@ async def get_current_user_id(request: Request, db: AsyncSession=Depends(get_asy
     检查 token 是否已被撤销（黑名单）。
     返回 user_id: int。
     """
+    cached_payload = getattr(request.state, '_jwt_payload', None)
+    if cached_payload is not None:
+        user_id = cached_payload.get('sub')
+        if user_id:
+            return int(user_id)
+
     user_id = _resolve_user_id(request)
     if user_id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='未登录')
 
-    # 检查 token 是否已被撤销
-    jti = _resolve_token_jti(request)
+    token = request.headers.get('authorization', '')
+    if token.startswith('Bearer '):
+        token = token[7:]
+    else:
+        token = request.cookies.get('access_token', '')
+
+    if token:
+        try:
+            payload = _decode_jwt_token(token)
+            request.state._jwt_payload = payload
+            jti = payload.get('jti')
+        except HTTPException:
+            jti = _resolve_token_jti(request)
+    else:
+        jti = _resolve_token_jti(request)
+
     if await is_token_revoked(jti):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Token已失效')
 
@@ -276,7 +308,7 @@ async def _get_user_with_permissions(request: Request, db: AsyncSession=Depends(
     expunge 使 User 对象可在任何上下文安全使用。
     """
     user_id = await get_current_user_id(request, db)
-    cached_user = _get_cached_user(user_id)
+    cached_user = await _get_cached_user(user_id)
     if cached_user is not None:
         return cached_user
     result = await db.execute(select(User).options(joinedload(User.permissions).selectinload(Permission.children)).where(User.id == user_id))
@@ -284,7 +316,7 @@ async def _get_user_with_permissions(request: Request, db: AsyncSession=Depends(
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='用户不存在')
     db.expunge(user)
-    _set_cached_user(user_id, user)
+    await _set_cached_user(user_id, user)
     return user
 
 def require_permission(permission_name: str):
@@ -302,3 +334,22 @@ def require_permission(permission_name: str):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='权限不足')
         return current_user
     return permission_checker
+
+
+def require_superuser(permission_name: str = 'user_manage'):
+    """
+    超级用户权限检查依赖工厂。
+
+    先验证权限，再验证 is_super，消除端点中重复的 if not user.is_super 检查。
+
+    用法：
+        @router.get("/list")
+        async def list_users(user: User = Depends(require_superuser()), db: AsyncSession = ...):
+            ...
+    """
+
+    async def superuser_checker(current_user: User=Depends(require_permission(permission_name))) -> User:
+        if not current_user.is_super:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='仅超级用户可访问')
+        return current_user
+    return superuser_checker

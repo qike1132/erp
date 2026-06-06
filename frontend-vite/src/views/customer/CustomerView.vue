@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="cu-container">
     <div class="cu-card cu-card-main">
       <!-- 卡片头部 -->
@@ -9,7 +9,7 @@
         <div class="cu-header-right">
           <div class="cu-tabs">
             <button class="cu-tab-btn active" @click="openForm('add')">
-              <i class="fas fa-plus" /> 新建客户
+              <i class="fas fa-plus"  aria-hidden="true" /> 新建客户
             </button>
           </div>
         </div>
@@ -18,12 +18,12 @@
       <!-- 数据表格 -->
       <div class="cu-table-wrap">
         <div v-if="isLoading && customers.length === 0" class="cu-empty">
-          <i class="fas fa-spinner fa-spin" />
-          <span>加载中...</span>
+          <i class="fas fa-spinner fa-spin"  aria-hidden="true" />
+          <span>加载中…</span>
         </div>
         <template v-else-if="customers.length === 0">
           <div class="cu-empty">
-            <i class="fas fa-building" />
+            <i class="fas fa-building"  aria-hidden="true" />
             <span>暂无客户数据</span>
             <button class="cu-action-btn cu-action-primary" @click="openForm('add')">立即添加</button>
           </div>
@@ -64,9 +64,9 @@
               <td><span class="cu-text-muted">{{ row.create_time || '-' }}</span></td>
               <td>
                 <div class="cu-actions">
-                  <button class="cu-icon-btn cu-icon-edit" title="编辑" @click="openForm('edit', row)"><i class="fas fa-pen-to-square" /></button>
-                  <button class="cu-icon-btn cu-icon-toggle" title="切换状态" @click="handleToggle(row)"><i :class="row.status ? 'fas fa-lock' : 'fas fa-lock-open'" /></button>
-                  <button class="cu-icon-btn cu-icon-delete" title="删除" @click="handleDelete(row)"><i class="fas fa-trash" /></button>
+                  <button class="cu-icon-btn cu-icon-edit" title="编辑" @click="openForm('edit', row)" aria-label="编辑"><i class="fas fa-pen-to-square"  aria-hidden="true" /></button>
+                  <button class="cu-icon-btn cu-icon-toggle" title="切换状态" @click="handleToggle(row)" aria-label="切换状态"><i :class="row.status ? 'fas fa-lock' : 'fas fa-lock-open'"  aria-hidden="true" /></button>
+                  <button class="cu-icon-btn cu-icon-delete" title="删除" @click="handleDelete(row)" aria-label="删除"><i class="fas fa-trash"  aria-hidden="true" /></button>
                 </div>
               </td>
             </tr>
@@ -84,13 +84,13 @@
       <form @submit.prevent="handleSubmit">
         <div class="cu-form-group">
           <label>客户名称 <span class="cu-required">*</span></label>
-          <input v-model="form.name" class="cu-form-input" placeholder="请输入客户名称" />
+          <input v-model="form.name" class="cu-form-input" placeholder="请输入客户名称" name="customer-name" autocomplete="off" />
         </div>
         <div class="cu-form-grid">
-          <div class="cu-form-group"><label>联系人</label><input v-model="form.contact" class="cu-form-input" placeholder="联系人姓名" /></div>
-          <div class="cu-form-group"><label>联系电话</label><input v-model="form.phone" class="cu-form-input" placeholder="联系电话" /></div>
+          <div class="cu-form-group"><label>联系人</label><input v-model="form.contact" class="cu-form-input" placeholder="联系人姓名" name="contact" autocomplete="off" /></div>
+          <div class="cu-form-group"><label>联系电话</label><input v-model="form.phone" class="cu-form-input" placeholder="联系电话" name="phone" autocomplete="tel" /></div>
         </div>
-        <div class="cu-form-group"><label>地址</label><input v-model="form.address" class="cu-form-input" placeholder="详细地址" /></div>
+        <div class="cu-form-group"><label>地址</label><input v-model="form.address" class="cu-form-input" placeholder="详细地址" name="address" autocomplete="off" /></div>
         <div class="cu-form-group">
           <label>备注</label>
           <textarea v-model="form.note" rows="3" placeholder="选填" class="cu-form-textarea" style="resize: none" />
@@ -99,7 +99,7 @@
       <template #footer>
         <button class="cu-action-btn" @click="formVisible = false">取消</button>
         <button class="cu-action-btn cu-action-primary" :disabled="submitting" @click="handleSubmit">
-          {{ submitting ? '提交中...' : formMode === 'add' ? '创建' : '保存修改' }}
+          {{ submitting ? '提交中…' : formMode === 'add' ? '创建' : '保存修改' }}
         </button>
       </template>
     </UiDialog>
@@ -126,6 +126,7 @@ import UiPagination from '@/components/ui/UiPagination.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
+import { formatDate } from '@/utils/format'
 
 // ===== 列表查询（服务端分页+搜索） =====
 const searchTerm = ref('')
@@ -399,7 +400,7 @@ async function handleDelete(row: Customer) {
   color: var(--color-text-secondary);
   background: transparent;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: color 0.3s ease, background 0.3s ease;
 }
 
 .cu-tab-btn:hover {
@@ -429,7 +430,7 @@ async function handleDelete(row: Customer) {
   border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: 13px;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
 }
 .cu-metric-card:hover {
   transform: translateY(-1px);
@@ -493,10 +494,11 @@ async function handleDelete(row: Customer) {
   background: white;
   font-size: 13px;
   outline: none;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
   font-family: inherit;
   color: var(--color-text);
 }
+.cu-search-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 .cu-search-input:focus {
   border-color: var(--color-primary-400);
   background: white;
@@ -518,7 +520,7 @@ async function handleDelete(row: Customer) {
   align-items: center;
   justify-content: center;
   font-size: 10px;
-  transition: all 0.2s ease;
+  transition: background 0.2s ease, color 0.2s ease;
 }
 .cu-search-clear:hover {
   background: var(--color-text-muted);
@@ -636,7 +638,7 @@ async function handleDelete(row: Customer) {
   justify-content: center;
   cursor: pointer;
   color: var(--color-text-muted);
-  transition: all 0.2s ease;
+  transition: background 0.2s ease, color 0.2s ease;
   font-size: 13px;
 }
 .cu-icon-btn:hover { background: var(--color-border-light); }
@@ -696,12 +698,13 @@ async function handleDelete(row: Customer) {
   border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: 10px;
   font-size: 14px;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
   outline: none;
   font-family: inherit;
   color: var(--color-text);
   background: white;
 }
+.cu-form-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 .cu-form-input:focus {
   border-color: var(--color-primary-400);
   background: white;
@@ -719,10 +722,11 @@ async function handleDelete(row: Customer) {
   padding: 8px 12px;
   font-size: 14px;
   outline: none;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
   font-family: inherit;
   color: var(--color-text);
 }
+.cu-form-textarea:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 .cu-form-textarea:focus {
   border-color: var(--color-primary-400);
   background: white;
@@ -737,7 +741,7 @@ async function handleDelete(row: Customer) {
   background: white;
   font-size: 12px;
   font-weight: 600;
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, border-color 0.3s ease, transform 0.3s ease;
   cursor: pointer;
   color: var(--color-text);
   font-family: inherit;

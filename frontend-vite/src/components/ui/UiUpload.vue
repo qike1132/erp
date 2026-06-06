@@ -6,14 +6,16 @@
       :accept="accept"
       :multiple="multiple"
       :disabled="disabled"
+      :name="name"
       class="hidden"
+      aria-label="文件上传"
       @change="handleFileChange"
     />
-    <div @click="triggerUpload">
+    <button type="button" class="w-full text-left" :disabled="disabled" @click="triggerUpload">
       <slot>
         <div
           :class="[
-            'flex flex-col items-center justify-center border-2 border-dashed border-border rounded-xl py-8 px-4 cursor-pointer transition-all',
+            'flex flex-col items-center justify-center border-2 border-dashed border-border rounded-xl py-8 px-4 cursor-pointer transition-colors',
             disabled ? 'opacity-50 cursor-not-allowed' : 'hover:border-primary-500 hover:bg-primary-50/50',
             dragOver ? 'border-primary-500 bg-primary-50/50' : '',
           ]"
@@ -21,13 +23,13 @@
           @dragleave="dragOver = false"
           @drop.prevent="handleDrop"
         >
-          <i class="fas fa-cloud-upload-alt text-3xl text-text-muted mb-2" />
+          <i class="fas fa-cloud-upload-alt text-3xl text-text-muted mb-2" aria-hidden="true" />
           <p class="text-sm text-text-secondary">
             {{ placeholder }}
           </p>
         </div>
       </slot>
-    </div>
+    </button>
   </div>
 </template>
 
@@ -40,6 +42,7 @@ defineProps<{
   disabled?: boolean
   placeholder?: string
   containerClass?: string
+  name?: string
 }>()
 
 const emit = defineEmits<{
@@ -54,8 +57,10 @@ function triggerUpload() {
 }
 
 function handleFileChange(event: Event) {
-  const files = (event.target as HTMLInputElement).files
+  const target = event.target as HTMLInputElement
+  const files = target.files
   if (files) emit('change', files)
+  target.value = ''
 }
 
 function handleDrop(event: DragEvent) {

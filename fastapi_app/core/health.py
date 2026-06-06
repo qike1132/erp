@@ -167,7 +167,74 @@ def register_health_routes(app: FastAPI) -> None:
         from fastapi_app.core.metrics import get_content_type, get_metrics
 
         @app.get("/metrics", tags=["监控"])
-        async def metrics():
+        async def metrics(request: Request):
+            # 生产环境要求 Bearer Token 或内网 IP 访问
+            import os as _os
+            if _os.getenv('APP_ENV') == 'production':
+                auth = request.headers.get('authorization', '')
+                metrics_token = _os.getenv('METRICS_BEARER_TOKEN', '')
+                if metrics_token and not auth.startswith(f'Bearer {metrics_token}'):
+                    from starlette.responses import JSONResponse
+                    return JSONResponse(status_code=401, content={'detail': '未授权访问'})
             return Response(content=get_metrics(), media_type=get_content_type())
     except (ImportError, AttributeError):
         pass
+
+    @app.get("/api/health/live", tags=["健康检查"])
+    async def liveness_probe():
+        """K8s liveness probe - 无缓存，检测进程僵死
+
+        失败时K8s重启容器。仅检查进程存活，不检查外部依赖。
+        """
+        return {"status": "alive"}
+
+    @app.get("/api/health/ready", tags=["健康检查"])
+    async def readiness_probe():
+        """K8s readiness probe - 检查所有依赖就绪
+
+        失败时K8s将Pod从Service摘除，不接收流量。
+        无缓存，实时检查DB+Redis。
+        """
+        db_ok = await verify_db_connectivity()
+        redis_ok = True
+        try:
+            from fastapi_app.services.notification_service import _get_async_redis_client
+            client = await _get_async_redis_client()
+            if client:
+                await client.ping()
+            else:
+                redis_ok = False
+        except (OSError, ConnectionError, ImportError):
+            redis_ok = False
+
+        ready = db_ok and redis_ok
+        result = {
+            "status": "ready" if ready else "not_ready",
+            "database": db_ok,
+            "redis": redis_ok,
+        }
+        if not ready:
+            return Response(
+                content=json.dumps(result, ensure_ascii=False),
+                status_code=503,
+                media_type="application/json",
+            )
+        return result
+
+    @app.get("/api/health/startup", tags=["健康检查"])
+    async def startup_probe():
+        """K8s startup probe - 应用初始化完成检查
+
+        用于慢启动应用，startup成功前liveness/readiness不生效。
+        """
+        try:
+            db_ok = await verify_db_connectivity()
+            if db_ok:
+                return {"status": "started"}
+        except Exception:
+            pass
+        return Response(
+            content=json.dumps({"status": "starting"}, ensure_ascii=False),
+            status_code=503,
+            media_type="application/json",
+        )

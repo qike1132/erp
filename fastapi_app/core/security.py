@@ -54,6 +54,9 @@ def _verify_legacy_pbkdf2(password: str, password_hash: str) -> bool:
         method, salt, expected = password_hash.split("$", 2)
         _, digest_name, iterations_text = method.split(":", 2)
         iterations = int(iterations_text)
+        if iterations > 1_000_000:
+            logger.warning("pbkdf2 iterations 超过上限，拒绝验证: %d", iterations)
+            return False
         derived = hashlib.pbkdf2_hmac(
             digest_name,
             password.encode("utf-8"),
@@ -62,8 +65,11 @@ def _verify_legacy_pbkdf2(password: str, password_hash: str) -> bool:
         ).hex()
         return hmac.compare_digest(derived, expected)
     except (ValueError, TypeError) as e:
-        logger.debug(f"pbkdf2 验证失败: {e}")
+        logger.debug("pbkdf2 验证失败: %s", e)
         return False
+
+
+_MAX_SCRYPT_MAXMEM = 256 * 1024 * 1024
 
 
 def _verify_legacy_scrypt(password: str, password_hash: str) -> bool:
@@ -73,17 +79,21 @@ def _verify_legacy_scrypt(password: str, password_hash: str) -> bool:
         n = int(n_text)
         r = int(r_text)
         p = int(p_text)
+        required_mem = 128 * n * r * p * 2
+        if required_mem > _MAX_SCRYPT_MAXMEM:
+            logger.warning("scrypt maxmem 超过上限，拒绝验证: n=%d r=%d p=%d", n, r, p)
+            return False
         derived = hashlib.scrypt(
             password.encode("utf-8"),
             salt=salt.encode("utf-8"),
             n=n,
             r=r,
             p=p,
-            maxmem=max(0, 128 * n * r * p * 2),
+            maxmem=max(0, required_mem),
         ).hex()
         return hmac.compare_digest(derived, expected)
     except (ValueError, TypeError) as e:
-        logger.debug(f"scrypt 验证失败: {e}")
+        logger.debug("scrypt 验证失败: %s", e)
         return False
 
 

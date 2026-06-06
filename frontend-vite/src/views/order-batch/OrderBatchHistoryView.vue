@@ -7,17 +7,17 @@
       </div>
 
       <div class="ob-filters">
-        <input v-model="batchNoFilter" class="ob-input" placeholder="批次号筛选" @input="debouncedLoadHistory" />
+        <input v-model="batchNoFilter" class="ob-input" placeholder="批次号筛选" name="search" autocomplete="off" @input="debouncedLoadHistory" />
         <select v-model="customerFilter" class="ob-select" @change="loadHistory">
           <option value="">全部客户</option>
           <option v-for="c in whitelist" :key="c" :value="c">{{ c }}</option>
         </select>
-        <input v-model="dateFrom" type="date" class="ob-input" @change="loadHistory" />
+        <input v-model="dateFrom" type="date" class="ob-input" name="date" autocomplete="off" @change="loadHistory" />
         <span class="ob-filter-sep">至</span>
-        <input v-model="dateTo" type="date" class="ob-input" @change="loadHistory" />
+        <input v-model="dateTo" type="date" class="ob-input" name="date" autocomplete="off" @change="loadHistory" />
       </div>
 
-      <div v-if="loading" class="ob-loading">加载中...</div>
+      <div v-if="loading" class="ob-loading">加载中…</div>
       <div v-else-if="orders.length === 0" class="ob-empty">暂无历史记录</div>
 
       <template v-else>
@@ -40,7 +40,7 @@
                 <td class="ob-td">{{ order.customer }}</td>
                 <td class="ob-td">{{ order.product_name }}</td>
                 <td class="ob-td">{{ order.quantity }}</td>
-                <td class="ob-td">{{ order.batch_completed_at }}</td>
+                <td class="ob-td">{{ formatDate(order.batch_completed_at) }}</td>
               </tr>
             </tbody>
           </table>
@@ -61,6 +61,7 @@
 import { computed, onMounted, onScopeDispose, ref } from 'vue'
 import { orderBatchApi } from '@/api'
 import type { OrderBatchItem } from '@/types'
+import { formatDate } from '@/utils/format'
 
 defineEmits<{ close: [] }>()
 

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
+from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.schemas.staging import (
     StagingClearResponse,
     StagingListResponse,
@@ -55,11 +56,9 @@ async def import_staging_orders(file: UploadFile=File(...), session_id: str=Quer
 @router.put('/{order_id}', response_model=StagingResponse, summary='更新暂存订单')
 async def update_staging_order(order_id: int, data: StagingOrderUpdate, db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_permission('batch_import'))):
     """更新暂存订单"""
-    try:
+    async with db_transaction(db):
         await svc.update_staging_order(db, order_id, data.model_dump(exclude_unset=True))
-        return StagingResponse(success=True, message='更新成功')
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+    return StagingResponse(success=True, message='更新成功')
 
 @router.delete('/clear', response_model=StagingResponse, summary='清空当前会话的暂存订单')
 async def clear_staging_orders(session_id: str=Query('default', description='会话ID'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_permission('batch_import'))):
@@ -71,11 +70,9 @@ async def clear_staging_orders(session_id: str=Query('default', description='会
 @router.delete('/{order_id}', response_model=StagingResponse, summary='删除暂存订单')
 async def delete_staging_order(order_id: int, db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_permission('batch_import'))):
     """删除暂存订单"""
-    try:
+    async with db_transaction(db):
         await svc.delete_staging_order(db, order_id)
-        return StagingResponse(success=True, message='删除成功')
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+    return StagingResponse(success=True, message='删除成功')
 
 @router.post('/confirm', response_model=StagingOrderConfirmResult, summary='确认暂存订单')
 async def confirm_staging_orders(session_id: str=Query('default', description='会话ID'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_permission('batch_import'))):

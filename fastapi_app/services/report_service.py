@@ -105,7 +105,7 @@ async def get_order_logs(db: AsyncSession, customer: str = '', product: str = ''
         params['end_date'] = _parse_report_date(end_date, '结束') + timedelta(days=1)
         where_clauses.append("o.order_date < :end_date")
 
-    where_sql = " AND " + " AND ".join(where_clauses) if where_clauses else ""
+    where_sql = (" AND " + " AND ".join(where_clauses)) if where_clauses else ""
 
     order_tbl = _quote_identifier("order")
     params['limit'] = per_page
@@ -214,7 +214,7 @@ async def get_stockin_logs(db: AsyncSession, customer: str = '', product: str = 
     customer = customer.strip()[:100]
     product = product.strip()[:100]
 
-    where_clauses = ["(o.is_deleted = false OR o.is_deleted IS NULL)"]
+    where_clauses = []
     params = {}
 
     if customer:
@@ -230,7 +230,7 @@ async def get_stockin_logs(db: AsyncSession, customer: str = '', product: str = 
         params['end_date'] = _parse_report_date(end_date, '结束') + timedelta(days=1)
         where_clauses.append("s.stockin_date < :end_date")
 
-    where_sql = " AND " + " AND ".join(where_clauses) if where_clauses else ""
+    where_sql = (" AND " + " AND ".join(where_clauses)) if where_clauses else ""
     params['limit'] = per_page
     params['offset'] = (page - 1) * per_page
 

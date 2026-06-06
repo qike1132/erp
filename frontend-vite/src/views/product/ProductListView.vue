@@ -10,7 +10,7 @@
       <div class="pd-body">
         <!-- 左栏：产品信息 -->
         <div class="pd-col">
-          <div class="pd-col-title"><i class="fas fa-edit"></i> 产品信息</div>
+          <div class="pd-col-title"><i class="fas fa-edit" aria-hidden="true"></i> 产品信息</div>
           <div class="pd-col-scroll">
             <!-- 产品基本信息 -->
             <div class="pd-section">
@@ -18,22 +18,22 @@
                 <div class="pd-form-group">
                   <label class="pd-label">产品名称</label>
                   <div class="pd-input-wrap">
-                    <i class="fas fa-tag pd-input-icon"></i>
-                    <input v-model="form.name" type="text" class="pd-input" required placeholder="例如：小熊毛绒玩具" />
+                    <i class="fas fa-tag pd-input-icon" aria-hidden="true"></i>
+                    <input v-model="form.name" type="text" class="pd-input" required placeholder="例如：小熊毛绒玩具" name="product-name" autocomplete="off" />
                   </div>
                 </div>
                 <div class="pd-form-group">
                   <label class="pd-label">69码</label>
                   <div class="pd-input-wrap">
-                    <i class="fas fa-barcode pd-input-icon"></i>
-                    <input v-model="form.barcode" type="text" class="pd-input" placeholder="例如：6958085574210" />
+                    <i class="fas fa-barcode pd-input-icon" aria-hidden="true"></i>
+                    <input v-model="form.barcode" type="text" class="pd-input" placeholder="例如：6958085574210" name="barcode" autocomplete="off" />
                   </div>
                 </div>
                 <div class="pd-form-group">
                   <label class="pd-label">产品价格</label>
                   <div class="pd-input-wrap">
-                    <i class="fas fa-yen-sign pd-input-icon"></i>
-                    <input v-model.number="form.price" type="number" class="pd-input" step="0.01" min="0" placeholder="请输入产品价格" />
+                    <i class="fas fa-yen-sign pd-input-icon" aria-hidden="true"></i>
+                    <input v-model.number="form.price" type="number" class="pd-input" step="0.01" min="0" placeholder="请输入产品价格" name="price" autocomplete="off" />
                   </div>
                 </div>
                 <div class="pd-form-group">
@@ -47,23 +47,23 @@
                     @drop.prevent="onImageDrop"
                   >
                     <label class="form-label pd-droppable-label">
-                      <i class="fas fa-image label-icon"></i>
+                      <i class="fas fa-image label-icon" aria-hidden="true"></i>
                       <template v-if="form.image">
                         <span class="pd-file-inline pd-file-inline-success">
                           <img :src="resolveStaticUrl(form.image)" class="pd-thumb-preview" @click.stop="openImageModal(form.image)" />
-                          <button type="button" class="pd-thumb-remove" @click.stop="form.image = ''"><i class="fas fa-times"></i></button>
+                          <button type="button" class="pd-thumb-remove" @click.stop="form.image = ''" aria-label="关闭"><i class="fas fa-times" aria-hidden="true"></i></button>
                         </span>
                       </template>
                       <span v-else>拖拽文件到标题栏 · 支持 JPG / PNG / GIF</span>
                     </label>
-                    <input ref="imageInputRef" type="file" style="display: none" accept="image/*" @change="onImageSelect" />
+                    <input ref="imageInputRef" type="file" style="display: none" accept="image/*" name="image" @change="onImageSelect" />
                   </div>
                 </div>
               </form>
             </div>
 
             <!-- 产品上传管理 -->
-            <div class="pd-section-label"><i class="fas fa-file-import"></i> 批量导入</div>
+            <div class="pd-section-label"><i class="fas fa-file-import" aria-hidden="true"></i> 批量导入</div>
             <div
               class="pd-section-header pd-droppable"
               :class="{ 'pd-drag-over': excelDragOver }"
@@ -73,21 +73,21 @@
               @drop.prevent="onExcelDrop"
             >
               <label class="form-label pd-droppable-label">
-                <i class="fas fa-file-excel label-icon"></i>
+                <i class="fas fa-file-excel label-icon" aria-hidden="true"></i>
                 <span v-if="excelFile" class="pd-file-inline pd-file-inline-success"><i class="fas fa-file-excel" />{{ excelFile.name }}</span>
                 <span v-else>拖拽文件到标题栏 · 支持 .xlsx / .xls</span>
               </label>
               <div class="pd-inline-actions">
                 <button class="pd-inline-btn" @click.stop="downloadTemplate">模板</button>
                 <button class="pd-inline-btn pd-inline-btn-success" :disabled="!excelFile" @click.stop="handleBatchImport">
-                  {{ importing ? '导入中...' : '导入' }}
+                  {{ importing ? '导入中…' : '导入' }}
                 </button>
               </div>
-              <input ref="excelInputRef" type="file" style="display: none" accept=".xlsx,.xls" @change="onExcelSelect" />
+              <input ref="excelInputRef" type="file" style="display: none" accept=".xlsx,.xls" name="file" @change="onExcelSelect" />
             </div>
 
-            <button type="button" class="pd-btn pd-btn-primary pd-w-full" style="margin-top: 15px" :disabled="submitting" @click="handleAdd">
-              <i class="fas fa-plus me-2"></i>{{ submitting ? '添加中...' : '添加产品' }}
+            <button type="button" class="pd-btn pd-btn-primary w-full justify-center" style="margin-top: 15px" :disabled="submitting" @click="handleAdd">
+              <i class="fas fa-plus me-2" aria-hidden="true"></i>{{ submitting ? '添加中…' : '添加产品' }}
             </button>
           </div>
         </div>
@@ -95,11 +95,11 @@
         <!-- 右栏：产品列表 -->
         <div class="pd-col">
           <div class="pd-col-title">
-            <span><i class="fas fa-list"></i> 产品列表</span>
+            <span><i class="fas fa-list" aria-hidden="true"></i> 产品列表</span>
             <div class="pd-col-actions">
               <div class="pd-search">
-                <i class="fas fa-search pd-search-icon"></i>
-                <input :value="searchTerm" type="text" class="pd-search-input" placeholder="搜索产品名称或69码..." @input="onSearchInput" />
+                <i class="fas fa-search pd-search-icon" aria-hidden="true"></i>
+                <input :value="searchTerm" type="text" class="pd-search-input" placeholder="搜索产品名称或69码..." name="search" autocomplete="off" @input="onSearchInput" />
               </div>
               <select :value="`${sortBy}-${sortOrder}`" class="pd-sort" @change="onSortChange">
                 <option value="name-asc">名称 A-Z</option>
@@ -121,13 +121,13 @@
                 </thead>
                 <tbody>
                   <template v-if="isLoading">
-                    <tr><td colspan="5" class="text-center py-8"><div class="pd-loading"><i class="fas fa-spinner fa-spin"></i> 加载中...</div></td></tr>
+                    <tr><td colspan="5" class="text-center py-8"><div class="pd-loading"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i> 加载中…</div></td></tr>
                   </template>
                   <template v-else-if="paginatedProducts.length === 0">
                     <tr>
                       <td colspan="5" class="text-center py-8">
                         <div class="pd-empty">
-                          <i class="fas fa-inbox pd-empty-icon"></i>
+                          <i class="fas fa-inbox pd-empty-icon" aria-hidden="true"></i>
                           <p class="pd-empty-text">{{ searchTerm ? '未找到匹配的产品' : '暂无产品，请先添加' }}</p>
                         </div>
                       </td>
@@ -140,22 +140,22 @@
                           <img :src="resolveStaticUrl(row.image)" class="pd-thumb-img" :alt="row.name" @error="handleImageError($event)" />
                         </div>
                         <div v-else class="pd-thumb-box">
-                          <div class="pd-no-image"><i class="fas fa-image"></i></div>
+                          <div class="pd-no-image"><i class="fas fa-image" aria-hidden="true"></i></div>
                         </div>
                       </td>
                       <td><span class="pd-name">{{ row.name }}</span></td>
                       <td><span class="pd-barcode">{{ row.barcode || '-' }}</span></td>
-                      <td><span class="pd-price">{{ row.price ? `¥${row.price.toFixed(2)}` : '¥0.00' }}</span></td>
+                      <td><span class="pd-price">{{ formatCurrency(row.price) }}</span></td>
                       <td>
                         <div class="pd-actions">
-                          <button class="pd-act-btn pd-act-bom" title="配置BOM表" @click="openBomModal(row)">
-                            <i class="fas fa-cogs"></i>
+                          <button class="pd-act-btn pd-act-bom" title="配置BOM表" @click="openBomModal(row)" aria-label="设置">
+                            <i class="fas fa-cogs" aria-hidden="true"></i>
                           </button>
-                          <button class="pd-act-btn pd-act-edit" title="编辑" @click="openEditModal(row)">
-                            <i class="fas fa-edit"></i>
+                          <button class="pd-act-btn pd-act-edit" title="编辑" @click="openEditModal(row)" aria-label="编辑">
+                            <i class="fas fa-edit" aria-hidden="true"></i>
                           </button>
-                          <button class="pd-act-btn pd-act-delete" title="删除" :disabled="actionId === row.id" @click="handleDelete(row)">
-                            <i class="fas fa-trash"></i>
+                          <button class="pd-act-btn pd-act-delete" title="删除" :disabled="actionId === row.id" @click="handleDelete(row)" aria-label="删除">
+                            <i class="fas fa-trash" aria-hidden="true"></i>
                           </button>
                         </div>
                       </td>
@@ -178,7 +178,7 @@
         <div class="pd-modal pd-modal-img-dialog">
           <div class="pd-modal-header">
             <h5 class="pd-modal-title">产品图片</h5>
-            <button class="pd-modal-close" @click="imageModalVisible = false"><i class="fas fa-times"></i></button>
+            <button class="pd-modal-close" @click="imageModalVisible = false" aria-label="关闭"><i class="fas fa-times" aria-hidden="true"></i></button>
           </div>
           <div class="pd-modal-body">
             <img :src="resolveStaticUrl(imageModalSrc)" class="pd-modal-img-view" />
@@ -193,26 +193,26 @@
         <div class="bom-modal-content bom-modal-dialog">
           <div class="bom-modal-header">
             <div class="bom-modal-header-left">
-              <h5 class="bom-modal-title"><i class="fas fa-cogs"></i><span>BOM表配置 - {{ bomProductName }}</span></h5>
+              <h5 class="bom-modal-title"><i class="fas fa-cogs" aria-hidden="true"></i><span>BOM表配置 - {{ bomProductName }}</span></h5>
             </div>
-            <button class="bom-modal-close" @click="bomDialogVisible = false"><i class="fas fa-times"></i></button>
+            <button class="bom-modal-close" @click="bomDialogVisible = false" aria-label="关闭"><i class="fas fa-times" aria-hidden="true"></i></button>
           </div>
           <div class="bom-modal-body">
             <div class="bom-tabs-container">
               <button v-for="tab in bomTabs" :key="tab.key" class="bom-tab-v2" :class="{ active: currentBomCategory === tab.key }" @click="switchBomTab(tab.key)">
-                <i :class="tab.icon"></i> {{ tab.label }}
+                <i :class="tab.icon" aria-hidden="true"></i> {{ tab.label }}
               </button>
             </div>
             <div class="bom-main-content">
               <div class="bom-summary-bar">
                 <div class="bom-summary-left">
-                  <span class="bom-summary-text"><i class="fas fa-list"></i>{{ currentBomTabLabel }}物料清单</span>
+                  <span class="bom-summary-text"><i class="fas fa-list" aria-hidden="true"></i>{{ currentBomTabLabel }}物料清单</span>
                   <span class="bom-summary-count">物料总数：<span class="count-value">{{ currentBomItems.length }}</span></span>
                 </div>
                 <div class="bom-summary-center">
                   <div class="pd-input-wrap autocomplete-wrapper">
-                    <i class="fas fa-search pd-input-icon"></i>
-                    <input ref="quickCopyInputRef" v-model="quickCopyKeyword" type="text" class="pd-input" placeholder="输入产品名称或条码，直接复制BOM" autocomplete="off" @keydown="onAutocompleteKeydown" @focus="onQuickCopyFocus" @blur="hideAutocomplete" />
+                    <i class="fas fa-search pd-input-icon" aria-hidden="true"></i>
+                    <input ref="quickCopyInputRef" v-model="quickCopyKeyword" type="text" class="pd-input" placeholder="输入产品名称或条码，直接复制BOM" name="search" autocomplete="off" @keydown="onAutocompleteKeydown" @focus="onQuickCopyFocus" @blur="hideAutocomplete" />
                     <div v-if="autocompleteVisible && autocompleteItems.length > 0" class="autocomplete-dropdown">
                       <div v-for="(item, aIdx) in autocompleteItems" :key="item.id" class="autocomplete-item" :class="{ selected: aIdx === autocompleteIndex, disabled: !item.has_bom }" @click="selectAutocompleteItem(item)">
                         <div class="item-left">
@@ -230,8 +230,8 @@
                   </div>
                 </div>
                 <div class="bom-summary-right">
-                  <button class="bom-btn-copy-v2" :disabled="quickCopyLoading" @click="quickCopyBom"><i class="fas fa-copy"></i>复制BOM</button>
-                  <button class="bom-btn-add-v2" @click="addBomItem"><i class="fas fa-plus"></i>添加物料</button>
+                  <button class="bom-btn-copy-v2" :disabled="quickCopyLoading" @click="quickCopyBom"><i class="fas fa-copy" aria-hidden="true"></i>复制BOM</button>
+                  <button class="bom-btn-add-v2" @click="addBomItem"><i class="fas fa-plus" aria-hidden="true"></i>添加物料</button>
                 </div>
               </div>
               <div v-if="quickCopyProgress.visible" class="mb-3">
@@ -255,25 +255,25 @@
                       </thead>
                       <tbody>
                         <tr v-for="(item, idx) in currentBomItems" :key="item.id ?? 'bom-' + idx">
-                          <td><input v-model="item.name" type="text" class="bom-table-input" placeholder="输入物料名称" /></td>
-                          <td><input v-model="item.specification" type="text" class="bom-table-input" placeholder="输入规格型号" /></td>
+                          <td><input v-model="item.name" type="text" class="bom-table-input" placeholder="输入物料名称" name="material-name" autocomplete="off" /></td>
+                          <td><input v-model="item.specification" type="text" class="bom-table-input" placeholder="输入规格型号" name="specification" autocomplete="off" /></td>
                           <td>
                             <select v-model="item.unit" class="bom-table-select">
                               <option value="码">码</option><option value="克">克</option><option value="个">个</option>
                               <option value="件">件</option><option value="套">套</option><option value="米">米</option><option value="平方">平方</option>
                             </select>
                           </td>
-                          <td><input v-model="item.supplier_name" type="text" class="bom-table-input" placeholder="输入供应商名称" /></td>
-                          <td><input v-model.number="item.usage" type="number" class="bom-table-input" step="0.01" min="0" /></td>
-                          <td><input v-model="item.remark" type="text" class="bom-table-input" placeholder="输入备注" /></td>
-                          <td><button class="bom-table-action-btn delete" @click="deleteBomItem(idx)"><i class="fas fa-trash"></i></button></td>
+                          <td><input v-model="item.supplier_name" type="text" class="bom-table-input" placeholder="输入供应商名称" name="supplier-name" autocomplete="off" /></td>
+                          <td><input v-model.number="item.usage" type="number" class="bom-table-input" step="0.01" min="0" name="quantity" autocomplete="off" /></td>
+                          <td><input v-model="item.remark" type="text" class="bom-table-input" placeholder="输入备注" name="remark" autocomplete="off" /></td>
+                          <td><button class="bom-table-action-btn delete" @click="deleteBomItem(idx)" aria-label="删除"><i class="fas fa-trash" aria-hidden="true"></i></button></td>
                         </tr>
                       </tbody>
                     </table>
                   </div>
                 </div>
                 <div v-else class="bom-empty-state-v2">
-                  <div class="bom-empty-icon"><i class="fas fa-inbox"></i></div>
+                  <div class="bom-empty-icon"><i class="fas fa-inbox" aria-hidden="true"></i></div>
                   <div class="bom-empty-text">
                     <p class="bom-empty-title">暂无物料</p>
                     <p class="bom-empty-hint">点击"添加物料"按钮开始配置</p>
@@ -284,7 +284,7 @@
           </div>
           <div class="bom-modal-footer">
             <button class="bom-btn-cancel" @click="bomDialogVisible = false">取消</button>
-            <button class="bom-btn-save" @click="saveBom"><i class="fas fa-save"></i>保存BOM</button>
+            <button class="bom-btn-save" @click="saveBom"><i class="fas fa-save" aria-hidden="true"></i>保存BOM</button>
           </div>
         </div>
       </div>
@@ -296,21 +296,21 @@
         <div class="bom-modal-content copy-bom-modal-dialog">
           <div class="bom-modal-header">
             <div class="bom-modal-header-left">
-              <h5 class="bom-modal-title"><i class="fas fa-copy"></i><span>复制BOM表</span></h5>
+              <h5 class="bom-modal-title"><i class="fas fa-copy" aria-hidden="true"></i><span>复制BOM表</span></h5>
             </div>
-            <button class="bom-modal-close" @click="copyBomDialogVisible = false"><i class="fas fa-times"></i></button>
+            <button class="bom-modal-close" @click="copyBomDialogVisible = false" aria-label="关闭"><i class="fas fa-times" aria-hidden="true"></i></button>
           </div>
           <div class="bom-modal-body">
             <div class="mb-4">
-              <label class="pd-label mb-2"><i class="fas fa-search me-2"></i>搜索源产品</label>
+              <label class="pd-label mb-2"><i class="fas fa-search me-2" aria-hidden="true"></i>搜索源产品</label>
               <div class="pd-input-wrap">
-                <i class="fas fa-tag pd-input-icon"></i>
-                <input v-model="copyBomSearchKeyword" type="text" class="pd-input" placeholder="输入产品名称或条码进行搜索" @keydown.enter="searchProductForCopy" />
+                <i class="fas fa-tag pd-input-icon" aria-hidden="true"></i>
+                <input v-model="copyBomSearchKeyword" type="text" class="pd-input" placeholder="输入产品名称或条码进行搜索" name="search" autocomplete="off" @keydown.enter="searchProductForCopy" />
               </div>
-              <div class="mt-2"><button class="pd-btn pd-btn-primary pd-btn-sm" @click="searchProductForCopy"><i class="fas fa-search me-2"></i>搜索</button></div>
+              <div class="mt-2"><button class="pd-btn pd-btn-primary pd-btn-sm" @click="searchProductForCopy"><i class="fas fa-search me-2" aria-hidden="true"></i>搜索</button></div>
             </div>
             <div v-if="copyBomProducts.length > 0" class="mb-4">
-              <label class="pd-label mb-2"><i class="fas fa-box me-2"></i>选择源产品</label>
+              <label class="pd-label mb-2"><i class="fas fa-box me-2" aria-hidden="true"></i>选择源产品</label>
               <div class="copy-bom-product-list">
                 <div v-for="p in copyBomProducts" :key="p.id" class="copy-bom-product-item" :class="{ selected: copyBomSourceProductId === p.id }" @click="selectCopyBomProduct(p)">
                   <div>
@@ -326,21 +326,21 @@
                 <div class="preview-header">
                   <div>
                     <h6 class="mb-0">{{ copyBomPreview.source_name }}</h6>
-                    <p class="text-muted small mb-0">条码：{{ copyBomPreview.source_barcode || '-' }}</p>
+                    <p class="text-muted text-sm mb-0">条码：{{ copyBomPreview.source_barcode || '-' }}</p>
                   </div>
                 </div>
                 <div class="preview-stats">
-                  <div class="preview-stat-item"><div class="text-muted small">物料总数</div><div class="fs-4 fw-bold text-primary">{{ copyBomPreview.material_count }}</div></div>
-                  <div class="preview-stat-item"><div class="text-muted small">面料类</div><div class="fs-4 fw-bold">{{ copyBomPreview.fabric_count }}</div></div>
-                  <div class="preview-stat-item"><div class="text-muted small">填充类</div><div class="fs-4 fw-bold">{{ copyBomPreview.filling_count }}</div></div>
-                  <div class="preview-stat-item"><div class="text-muted small">辅料/包装</div><div class="fs-4 fw-bold">{{ copyBomPreview.accessory_count }}</div></div>
+                  <div class="preview-stat-item"><div class="text-muted text-sm">物料总数</div><div class="text-2xl font-bold text-primary-500">{{ copyBomPreview.material_count }}</div></div>
+                  <div class="preview-stat-item"><div class="text-muted text-sm">面料类</div><div class="text-2xl font-bold">{{ copyBomPreview.fabric_count }}</div></div>
+                  <div class="preview-stat-item"><div class="text-muted text-sm">填充类</div><div class="text-2xl font-bold">{{ copyBomPreview.filling_count }}</div></div>
+                  <div class="preview-stat-item"><div class="text-muted text-sm">辅料/包装</div><div class="text-2xl font-bold">{{ copyBomPreview.accessory_count }}</div></div>
                 </div>
               </div>
               <div class="mb-4">
                 <label class="form-check-label">
                   <input v-model="copyBomOverwrite" type="checkbox" class="form-check-input" />
                   <strong>覆盖现有BOM表</strong>
-                  <span class="text-muted d-block small">如果目标产品已有BOM表，勾选此项将覆盖原数据</span>
+                  <span class="text-muted block text-sm">如果目标产品已有BOM表，勾选此项将覆盖原数据</span>
                 </label>
               </div>
             </div>
@@ -351,7 +351,7 @@
           </div>
           <div class="bom-modal-footer">
             <button class="bom-btn-cancel" @click="copyBomDialogVisible = false">取消</button>
-            <button class="bom-btn-save" :disabled="!copyBomSourceProductId" @click="confirmCopyBom"><i class="fas fa-check me-2"></i>确认复制</button>
+            <button class="bom-btn-save" :disabled="!copyBomSourceProductId" @click="confirmCopyBom"><i class="fas fa-check me-2" aria-hidden="true"></i>确认复制</button>
           </div>
         </div>
       </div>
@@ -363,31 +363,31 @@
         <div class="bom-modal-content edit-modal-dialog">
           <div class="bom-modal-header">
             <div class="bom-modal-header-left">
-              <h5 class="bom-modal-title"><i class="fas fa-edit"></i><span>编辑产品 - {{ editForm.name }}</span></h5>
+              <h5 class="bom-modal-title"><i class="fas fa-edit" aria-hidden="true"></i><span>编辑产品 - {{ editForm.name }}</span></h5>
             </div>
-            <button class="bom-modal-close" @click="editDialogVisible = false"><i class="fas fa-times"></i></button>
+            <button class="bom-modal-close" @click="editDialogVisible = false" aria-label="关闭"><i class="fas fa-times" aria-hidden="true"></i></button>
           </div>
           <div class="bom-modal-body">
             <div class="edit-modal-content">
               <div class="pd-form-group">
                 <label class="pd-label">产品名称 <span class="required">*</span></label>
                 <div class="pd-input-wrap">
-                  <i class="fas fa-tag pd-input-icon"></i>
-                  <input v-model="editForm.name" type="text" class="pd-input" required placeholder="请输入产品名称" />
+                  <i class="fas fa-tag pd-input-icon" aria-hidden="true"></i>
+                  <input v-model="editForm.name" type="text" class="pd-input" required placeholder="请输入产品名称" name="product-name" autocomplete="off" />
                 </div>
               </div>
               <div class="pd-form-group">
                 <label class="pd-label">69码/商品条码</label>
                 <div class="pd-input-wrap">
-                  <i class="fas fa-barcode pd-input-icon"></i>
-                  <input v-model="editForm.barcode" type="text" class="pd-input" placeholder="例如：6958085574210" />
+                  <i class="fas fa-barcode pd-input-icon" aria-hidden="true"></i>
+                  <input v-model="editForm.barcode" type="text" class="pd-input" placeholder="例如：6958085574210" name="barcode" autocomplete="off" />
                 </div>
               </div>
               <div class="pd-form-group">
                 <label class="pd-label">产品价格</label>
                 <div class="pd-input-wrap">
-                  <i class="fas fa-yen-sign pd-input-icon"></i>
-                  <input v-model.number="editForm.price" type="number" class="pd-input" step="0.01" min="0" placeholder="请输入产品价格" />
+                  <i class="fas fa-yen-sign pd-input-icon" aria-hidden="true"></i>
+                  <input v-model.number="editForm.price" type="number" class="pd-input" step="0.01" min="0" placeholder="请输入产品价格" name="price" autocomplete="off" />
                 </div>
               </div>
               <div class="pd-form-group">
@@ -401,16 +401,16 @@
                   @drop.prevent="onEditDrop"
                 >
                   <label class="form-label pd-droppable-label">
-                    <i class="fas fa-image label-icon"></i>
+                    <i class="fas fa-image label-icon" aria-hidden="true"></i>
                     <template v-if="editForm.image">
                       <span class="pd-file-inline pd-file-inline-success">
                         <img :src="resolveStaticUrl(editForm.image)" class="pd-thumb-preview" @click.stop="openImageModal(editForm.image)" />
-                        <button type="button" class="pd-thumb-remove" @click.stop="editForm.image = ''"><i class="fas fa-times"></i></button>
+                        <button type="button" class="pd-thumb-remove" @click.stop="editForm.image = ''" aria-label="关闭"><i class="fas fa-times" aria-hidden="true"></i></button>
                       </span>
                     </template>
                     <span v-else>拖拽文件到标题栏 · 支持 JPG / PNG / GIF</span>
                   </label>
-                  <input ref="editImageInputRef" type="file" style="display: none" accept="image/*" @change="onEditImageSelect" />
+                  <input ref="editImageInputRef" type="file" style="display: none" accept="image/*" name="image" @change="onEditImageSelect" />
                 </div>
               </div>
             </div>
@@ -418,7 +418,7 @@
           <div class="bom-modal-footer">
             <button class="bom-btn-cancel" @click="editDialogVisible = false">取消</button>
             <button class="bom-btn-save" :disabled="editSubmitting" @click="handleEditSave">
-              <i class="fas fa-save"></i>{{ editSubmitting ? '保存中...' : '保存修改' }}
+              <i class="fas fa-save" aria-hidden="true"></i>{{ editSubmitting ? '保存中…' : '保存修改' }}
             </button>
           </div>
         </div>
@@ -448,6 +448,7 @@ import UiPagination from '@/components/ui/UiPagination.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { useEnhancedList } from '@/composables/useEnhancedList'
 import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
+import { formatCurrency } from '@/utils/format'
 
 interface Product {
   id: number
@@ -574,7 +575,7 @@ function handleImageError(e: Event) {
   if (parent) {
     const placeholder = document.createElement('div')
     placeholder.className = 'pd-no-image'
-    placeholder.innerHTML = '<i class="fas fa-image"></i>'
+    placeholder.innerHTML = '<i class="fas fa-image" aria-hidden="true"></i>'
     parent.appendChild(placeholder)
   }
 }
@@ -743,7 +744,9 @@ function addBomItem() {
   bomData[currentBomCategory.value].push({ name: '', specification: '', unit: currentBomCategory.value === 'filling' ? '克' : '码', supplier_name: '', usage: 1, remark: '', category: currentBomCategory.value })
 }
 
-function deleteBomItem(index: number) {
+async function deleteBomItem(index: number) {
+  const ok = await confirmDialog.confirm('确定删除？', '此操作不可恢复', 'danger')
+  if (!ok) return
   bomData[currentBomCategory.value].splice(index, 1)
 }
 
@@ -1017,11 +1020,11 @@ async function confirmCopyBom() {
   border: 1px solid var(--color-border-light, #e2e8f0);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
   overflow: hidden;
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .pd-card:hover {
-  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
-  transform: translateY(-6px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  transform: translateY(-2px);
 }
 .pd-card-main {
   flex: 1;
@@ -1171,7 +1174,7 @@ async function confirmCopyBom() {
   background: white;
   border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: 10px;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
   outline: none;
 }
 .pd-input:focus {
@@ -1188,7 +1191,7 @@ async function confirmCopyBom() {
   border-radius: 9px;
   border: 2px solid var(--color-border-light);
   background: white;
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1217,7 +1220,6 @@ async function confirmCopyBom() {
 }
 .pd-btn-success:hover:not(:disabled) { box-shadow: 0 4px 12px rgba(34,197,94,0.3); }
 .pd-btn-sm { padding: 5px 10px; font-size: 11px; }
-.pd-w-full { width: 100%; justify-content: center; }
 
 /* ===== 上传区（droppable-header 风格） ===== */
 .pd-section-header {
@@ -1231,7 +1233,7 @@ async function confirmCopyBom() {
   min-height: 40px;
   box-sizing: border-box;
   cursor: default;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, background 0.3s ease;
 }
 .pd-section-header:hover {
   border-color: var(--color-ocean-deep);
@@ -1274,7 +1276,7 @@ async function confirmCopyBom() {
   cursor: pointer;
   background: white;
   color: var(--color-text-secondary);
-  transition: all 0.2s ease;
+  transition: border-color 0.2s ease, color 0.2s ease;
 }
 .pd-inline-btn:hover {
   border-color: var(--color-ocean-deep);
@@ -1321,7 +1323,7 @@ async function confirmCopyBom() {
   font-size: 9px;
   cursor: pointer;
   margin-left: 2px;
-  transition: all 0.2s ease;
+  transition: background 0.2s ease;
 }
 .pd-thumb-remove:hover { background: rgba(0,0,0,0.7); }
 
@@ -1344,7 +1346,7 @@ async function confirmCopyBom() {
   background: white;
   border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: 9px;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
   outline: none;
 }
 .pd-search-input:focus {
@@ -1359,7 +1361,7 @@ async function confirmCopyBom() {
   border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: 9px;
   min-width: 120px;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
   outline: none;
 }
 .pd-sort:focus {
@@ -1409,8 +1411,13 @@ async function confirmCopyBom() {
   border-radius: 10px;
   overflow: hidden;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
   background: var(--color-surface, #f8fafc);
+  border: none;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .pd-thumb-box:hover { transform: scale(1.05); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
 .pd-thumb-img { width: 100%; height: 100%; object-fit: contain; }
@@ -1440,7 +1447,7 @@ async function confirmCopyBom() {
   align-items: center;
   justify-content: center;
   font-size: 14px;
-  transition: all 0.2s ease;
+  transition: background 0.2s ease, transform 0.2s ease;
   cursor: pointer;
 }
 .pd-act-bom { background: var(--color-primary-50); color: var(--color-primary-600); }
@@ -1478,7 +1485,7 @@ async function confirmCopyBom() {
   width: 32px; height: 32px; border-radius: 8px; border: none;
   background: var(--color-surface, #f8fafc); color: var(--color-text-secondary);
   display: flex; align-items: center; justify-content: center; font-size: 14px;
-  transition: all 0.2s ease; cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease; cursor: pointer;
 }
 .pd-modal-close:hover { background: var(--color-border-light, #e2e8f0); color: var(--color-text); }
 .pd-modal-body {
@@ -1511,7 +1518,7 @@ async function confirmCopyBom() {
 .bom-modal-close {
   width: 36px; height: 36px; border: none; background: var(--color-surface, #f8fafc);
   border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center;
-  color: var(--color-text-secondary); font-size: 16px; transition: all 0.3s ease;
+  color: var(--color-text-secondary); font-size: 16px; transition: background 0.3s ease, color 0.3s ease, transform 0.3s ease;
 }
 .bom-modal-close:hover { background: var(--color-border-light, #e2e8f0); color: var(--color-text); transform: rotate(90deg); }
 .bom-modal-body { padding: 0; background: var(--color-surface, #f8fafc); min-height: 500px; overflow-y: auto; flex: 1; }
@@ -1533,7 +1540,7 @@ async function confirmCopyBom() {
   font-weight: 600;
   color: var(--color-text-secondary);
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1566,13 +1573,13 @@ async function confirmCopyBom() {
 .bom-btn-add-v2 {
   padding: 10px 20px; background: var(--color-success-50); color: var(--color-success-600);
   border: 2px solid var(--color-success-200); border-radius: 10px; font-size: 13px; font-weight: 600;
-  cursor: pointer; transition: all 0.3s ease; display: flex; align-items: center; gap: 6px;
+  cursor: pointer; transition: transform 0.3s ease, box-shadow 0.3s ease; display: flex; align-items: center; gap: 6px;
 }
 .bom-btn-add-v2:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(34,197,94,0.2); }
 .bom-btn-copy-v2 {
   padding: 10px 20px; background: var(--color-primary-50); color: var(--color-primary-600);
   border: 2px solid var(--color-primary-200); border-radius: 10px; font-size: 13px; font-weight: 600;
-  cursor: pointer; transition: all 0.3s ease; display: flex; align-items: center; gap: 6px;
+  cursor: pointer; transition: transform 0.3s ease, box-shadow 0.3s ease; display: flex; align-items: center; gap: 6px;
 }
 .bom-btn-copy-v2:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(59,130,246,0.2); }
 .bom-btn-copy-v2:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
@@ -1593,16 +1600,16 @@ async function confirmCopyBom() {
 .bom-table-v2 tbody td { padding: 10px 16px; border-bottom: 1px solid var(--color-border-light, #f1f5f9); vertical-align: middle; }
 .bom-table-input {
   width: 100%; padding: 6px 10px; border: 1px solid var(--color-border-light, #e2e8f0);
-  border-radius: 8px; font-size: 13px; transition: all 0.2s ease; outline: none;
+  border-radius: 8px; font-size: 13px; transition: border-color 0.2s ease, box-shadow 0.2s ease; outline: none;
 }
 .bom-table-input:focus { border-color: var(--color-primary-400); box-shadow: 0 0 0 3px rgba(0, 148, 191, 0.1); }
 .bom-table-select {
   width: 100%; padding: 6px 10px; border: 1px solid var(--color-border-light, #e2e8f0);
   border-radius: 8px; font-size: 13px; background: white; cursor: pointer;
-  transition: all 0.2s ease; outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease; outline: none;
 }
 .bom-table-select:focus { border-color: var(--color-primary-400); box-shadow: 0 0 0 3px rgba(0, 148, 191, 0.1); }
-.bom-table-action-btn { padding: 5px 8px; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; transition: all 0.2s ease; }
+.bom-table-action-btn { padding: 5px 8px; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; transition: transform 0.2s ease, box-shadow 0.2s ease; }
 .bom-table-action-btn.delete { background: var(--color-danger-50); color: var(--color-danger-600); }
 .bom-table-action-btn.delete:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(229,115,115,0.3); }
 .bom-empty-state-v2 { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; text-align: center; }
@@ -1621,13 +1628,13 @@ async function confirmCopyBom() {
 .bom-btn-cancel {
   padding: 10px 20px; background: white; color: var(--color-text);
   border: 2px solid var(--color-border-light, #e2e8f0); border-radius: 10px;
-  font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.3s ease;
+  font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.3s ease, transform 0.3s ease;
 }
 .bom-btn-cancel:hover { background: var(--color-surface, #f8fafc); transform: translateY(-1px); }
 .bom-btn-save {
   padding: 10px 20px; background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-600));
   color: white; border: 2px solid var(--color-primary-500); border-radius: 10px;
-  font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.3s ease;
+  font-size: 13px; font-weight: 600; cursor: pointer; transition: transform 0.3s ease, box-shadow 0.3s ease;
   display: flex; align-items: center; gap: 6px;
 }
 .bom-btn-save:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(59,130,246,0.3); }
@@ -1648,7 +1655,7 @@ async function confirmCopyBom() {
 }
 .autocomplete-item {
   padding: 10px 14px; display: flex; justify-content: space-between; align-items: center;
-  cursor: pointer; transition: all 0.2s ease;
+  cursor: pointer; transition: background 0.2s ease;
   border-bottom: 1px solid var(--color-border-light, #f1f5f9);
 }
 .autocomplete-item:last-child { border-bottom: none; }
@@ -1668,7 +1675,7 @@ async function confirmCopyBom() {
 .copy-bom-product-item {
   padding: 10px 14px; border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: 10px; margin-bottom: 6px; cursor: pointer;
-  transition: all 0.2s ease; display: flex; justify-content: space-between; align-items: center;
+  transition: border-color 0.2s ease, background 0.2s ease; display: flex; justify-content: space-between; align-items: center;
 }
 .copy-bom-product-item:hover { border-color: var(--color-primary-300); background: var(--color-primary-50); }
 .copy-bom-product-item.selected { border-color: var(--color-success-500); background: var(--color-success-50); }
@@ -1687,19 +1694,6 @@ async function confirmCopyBom() {
 
 /* ===== 工具类 ===== */
 .text-muted { color: var(--color-text-secondary); }
-.small { font-size: 0.875rem; }
-.text-primary { color: var(--color-primary-500); }
-.fs-4 { font-size: 1.5rem; }
-.fw-bold { font-weight: 700; }
-.mb-0 { margin-bottom: 0; }
-.mb-2 { margin-bottom: 0.5rem; }
-.mb-3 { margin-bottom: 0.75rem; }
-.mb-4 { margin-bottom: 1rem; }
-.mt-2 { margin-top: 0.5rem; }
-.me-2 { margin-right: 0.5rem; }
-.d-block { display: block; }
-.text-center { text-align: center; }
-.py-8 { padding-top: 2rem; padding-bottom: 2rem; }
 .form-check-input { width: 1.125rem; height: 1.125rem; margin-right: 0.5rem; }
 .form-check-label { display: flex; align-items: flex-start; gap: 0.5rem; }
 .edit-modal-content { padding: 20px; }

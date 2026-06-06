@@ -54,20 +54,23 @@ def sanitize_plain_text(text: str) -> str:
     return bleach.clean(text, tags=[], strip=True)
 
 
+SAFE_URL_SCHEMES = {'http', 'https', 'mailto', 'tel', 'ftp'}
+
+
 def sanitize_url(url: str) -> str:
-    """
-    清理URL
-
-    Args:
-        url: URL字符串
-
-    Returns:
-        安全的URL
-    """
     if not url:
         return ''
 
-    return bleach.clean(url, tags=[], attributes={}, strip=True)
+    cleaned = bleach.clean(url, tags=[], attributes={}, strip=True)
+
+    stripped = cleaned.strip()
+    colon_pos = stripped.find(':')
+    if colon_pos > 0:
+        scheme = stripped[:colon_pos].lower()
+        if scheme not in SAFE_URL_SCHEMES:
+            return ''
+
+    return cleaned
 
 
 def is_safe_html(text: str) -> bool:

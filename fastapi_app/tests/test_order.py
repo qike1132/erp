@@ -47,16 +47,15 @@ class TestOrderService:
     """订单 Service 测试"""
 
     async def test_get_orders_empty(self, mock_db):
-        mock_count_result = MagicMock()
-        mock_count_result.scalar.return_value = 0
         mock_data_result = MagicMock()
         mock_scalars = MagicMock()
         mock_unique = MagicMock()
         mock_unique.all.return_value = []
         mock_scalars.unique.return_value = mock_unique
         mock_data_result.scalars.return_value = mock_scalars
-        mock_db.execute = AsyncMock(side_effect=[mock_count_result, mock_data_result])
-        result = await order_service.get_orders(mock_db)
+        mock_db.execute = AsyncMock(return_value=mock_data_result)
+        with patch('fastapi_app.services.order_service.optimized_count', new_callable=AsyncMock, return_value=0):
+            result = await order_service.get_orders(mock_db)
         assert result['items'] == []
         assert result['total'] == 0
 
@@ -91,7 +90,9 @@ class TestOrderService:
         assert result['order_no'] == 'PO-001'
 
     async def test_update_order_not_found(self, mock_db):
-        mock_db.get = AsyncMock(return_value=None)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
         user = MagicMock()
         with pytest.raises(ValueError, match="不存在"):
             await order_service.update_order(
@@ -120,7 +121,9 @@ class TestOrderService:
         user.username = "admin"
         user.id = 1
 
-        mock_db.get = AsyncMock(return_value=order)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = order
+        mock_db.execute = AsyncMock(return_value=mock_result)
         mock_db.commit = AsyncMock()
 
         with patch('fastapi_app.services.order_service.get_product_for_update', new_callable=AsyncMock, return_value=product):
@@ -151,7 +154,7 @@ class TestOrderService:
         user = MagicMock()
         user.id = 1
         user.is_super = False
-        with pytest.raises(ValueError, match="已处理"):
+        with pytest.raises(ValueError, match="无法取消"):
             await order_service.cancel_approval(mock_db, 1, user)
 
     async def test_cancel_approval_no_permission(self, mock_db):
@@ -268,9 +271,13 @@ class TestOrderEndpoints:
         user.id = 1
 
         mock_db.get = AsyncMock(return_value=order)
+        mock_execute_result = MagicMock()
+        mock_execute_result.scalar_one_or_none.return_value = order
+        mock_db.execute = AsyncMock(return_value=mock_execute_result)
         mock_db.commit = AsyncMock()
 
-        with patch('fastapi_app.services.order_service.get_product_for_update', new_callable=AsyncMock, return_value=product):
+        with patch('fastapi_app.services.order_service.get_product_for_update', new_callable=AsyncMock, return_value=product), \
+             patch('fastapi_app.services.order_service._safe_publish_event', new_callable=AsyncMock):
             response = await client.put("/api/v1/orders/edit/1", json={
                 "quantity": 20, "customer": "新客户"
             })

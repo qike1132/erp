@@ -18,7 +18,6 @@ from fastapi_app.shared_models import (
     ProductAccessory,
     ProductFabric,
     ProductMaterial,
-    ProductPackaging,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,8 +31,7 @@ def product_has_bom(product) -> bool:
     )
     has_fabric = hasattr(product, 'fabrics') and len(product.fabrics) > 0
     has_accessory = hasattr(product, 'accessories') and len(product.accessories) > 0
-    has_packaging = hasattr(product, 'packagings') and len(product.packagings) > 0
-    return has_filling or has_fabric or has_accessory or has_packaging
+    return has_filling or has_fabric or has_accessory
 
 
 async def _batch_check_bom_exists(db: AsyncSession, product_ids: list[int]) -> set[int]:
@@ -50,9 +48,6 @@ async def _batch_check_bom_exists(db: AsyncSession, product_ids: list[int]) -> s
         ),
         select(ProductAccessory.product_id).where(
             ProductAccessory.product_id.in_(product_ids),
-        ),
-        select(ProductPackaging.product_id).where(
-            ProductPackaging.product_id.in_(product_ids),
         ),
     )
     result = await db.execute(select(subq.c.product_id))
@@ -71,7 +66,6 @@ async def get_products(db: AsyncSession, *, page: int = 1, per_page: int = 50,
             selectinload(Product.material),
             selectinload(Product.fabrics),
             selectinload(Product.accessories),
-            selectinload(Product.packagings),
         )
 
     if search:
@@ -105,9 +99,6 @@ async def get_products(db: AsyncSession, *, page: int = 1, per_page: int = 50,
         elif category == 'accessory':
             query = query.where(Product.accessories.any())
             count_query = count_query.where(Product.accessories.any())
-        elif category == 'packaging':
-            query = query.where(Product.packagings.any())
-            count_query = count_query.where(Product.packagings.any())
 
     sort_map = {
         'name': Product.name,
@@ -153,7 +144,6 @@ async def get_products(db: AsyncSession, *, page: int = 1, per_page: int = 50,
                 'filling_count': 1 if (p.material and p.material.cotton_usage and p.material.cotton_usage > 0) else 0,
                 'fabric_count': len(p.fabrics),
                 'accessory_count': len(p.accessories),
-                'packaging_count': len(p.packagings),
             }
         output.append({
             'id': p.id,
@@ -187,7 +177,6 @@ async def get_products_batch_bom(db: AsyncSession, product_ids_str: str) -> dict
             selectinload(Product.material),
             selectinload(Product.fabrics),
             selectinload(Product.accessories),
-            selectinload(Product.packagings),
         ).where(Product.id.in_(pid_list))
     )
     products = result.scalars().unique().all()
@@ -253,7 +242,6 @@ async def get_product_bom(db: AsyncSession, product_id: int) -> dict:
             selectinload(Product.material),
             selectinload(Product.fabrics),
             selectinload(Product.accessories),
-            selectinload(Product.packagings),
         ).where(Product.id == product_id)
     )
     product = result.scalars().first()
@@ -274,7 +262,6 @@ async def save_product_bom(db: AsyncSession, product_id: int, data: dict, userna
             selectinload(Product.material),
             selectinload(Product.fabrics),
             selectinload(Product.accessories),
-            selectinload(Product.packagings),
         ).where(Product.id == product_id)
     )
     product = result.scalars().first()
@@ -436,7 +423,6 @@ async def calculate_material(db: AsyncSession, orders_data: list) -> dict:
         'filling': [],
         'fabric': [],
         'accessory': [],
-        'packaging': [],
     }
     totals = defaultdict(lambda: defaultdict(Decimal))
 
@@ -449,7 +435,6 @@ async def calculate_material(db: AsyncSession, orders_data: list) -> dict:
             selectinload(Product.material),
             selectinload(Product.fabrics),
             selectinload(Product.accessories),
-            selectinload(Product.packagings),
         ).where(Product.id.in_(product_ids))
     )
     products = products_result.scalars().unique().all()

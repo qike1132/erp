@@ -3,7 +3,7 @@
 
 映射到与 Flask-SQLAlchemy CustomerAccessLog 相同的 'customer_access_log' 表。
 """
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -26,9 +26,9 @@ class CustomerAccessLog(Base):
     status: Mapped[str] = mapped_column(String(20), default='success', comment='状态')
     error_message: Mapped[str | None] = mapped_column(Text, comment='错误信息')
     user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id'), comment='操作用户ID')
-    access_time: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, comment='接入时间')
+    access_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), comment='接入时间')
     ip_address: Mapped[str | None] = mapped_column(String(50), comment='IP地址')
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
 
     customer = relationship('Customer', backref='access_logs')
     user = relationship('User', backref='customer_access_logs')

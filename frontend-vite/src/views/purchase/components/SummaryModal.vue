@@ -1,22 +1,26 @@
 <template>
   <UiDialog :open="open" class="max-w-[1000px]" @update:open="$emit('close')">
     <template #title>
-      <div class="flex items-center gap-2"><i class="fas fa-clipboard-list text-primary-500" /> 汇总下单</div>
+      <div class="flex items-center gap-2"><i class="fas fa-clipboard-list text-primary-500"  aria-hidden="true" /> 汇总下单</div>
     </template>
 
     <!-- Tab headers -->
-    <div class="sm-tab-group">
+    <div class="sm-tab-group" role="tablist">
       <div
+        role="tab"
+        :aria-selected="activeTab === 'factory'"
         :class="['sm-tab-btn', { active: activeTab === 'factory' }]"
         @click="activeTab = 'factory'"
       >
-        <i class="fas fa-industry" /> 工厂内部订单
+        <i class="fas fa-industry"  aria-hidden="true" /> 工厂内部订单
       </div>
       <div
+        role="tab"
+        :aria-selected="activeTab === 'supplier'"
         :class="['sm-tab-btn', { active: activeTab === 'supplier', 'out-mode': activeTab === 'supplier' }]"
         @click="activeTab = 'supplier'"
       >
-        <i class="fas fa-truck" /> 供应商采购订单
+        <i class="fas fa-truck"  aria-hidden="true" /> 供应商采购订单
       </div>
     </div>
 
@@ -28,7 +32,7 @@
         >
           <div>
             <div class="font-semibold text-sm mb-1.5">
-              <i class="fas fa-industry text-primary-400" /> 工厂内部采购订单汇总
+              <i class="fas fa-industry text-primary-400"  aria-hidden="true" /> 工厂内部采购订单汇总
             </div>
             <div class="text-xs text-text-secondary">
               已选择 <strong class="text-primary-400">{{ factoryData.order_count || orderCount }}</strong> 个订单
@@ -37,15 +41,15 @@
           <div class="flex gap-2 items-center">
             <div v-if="!editMode" class="flex items-center gap-2">
               <button
-                class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-border bg-transparent text-text-secondary hover:text-primary-500 hover:border-primary-500 hover:bg-primary-50 transition-all"
+                class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-border bg-transparent text-text-secondary hover:text-primary-500 hover:border-primary-500 hover:bg-primary-50 transition-colors"
                 @click="$emit('toggleEditMode', true)"
               >
-                <i class="fas fa-edit" /> 自定义编辑
+                <i class="fas fa-edit"  aria-hidden="true" /> 自定义编辑
               </button>
               <label class="text-xs text-text-secondary whitespace-nowrap">损耗率（千分之几）</label>
               <input
                 type="number"
-                class="w-16 text-right py-1 px-1.5 text-[13px] border border-border rounded focus:outline-none focus:border-primary-500"
+                class="w-16 text-right py-1 px-1.5 text-[13px] border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
                 :value="lossRate"
                 min="0"
                 max="1000"
@@ -55,16 +59,16 @@
             </div>
             <template v-else>
               <button
-                class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-warning-500 rounded-lg border-none transition-all hover:bg-warning-600"
+                class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-warning-500 rounded-lg border-none transition-colors hover:bg-warning-600"
                 @click="$emit('toggleEditMode', false)"
               >
-                <i class="fas fa-times" /> 取消编辑
+                <i class="fas fa-times"  aria-hidden="true" /> 取消编辑
               </button>
               <button
-                class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-success-500 rounded-lg border-none transition-all hover:bg-success-600"
+                class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-success-500 rounded-lg border-none transition-colors hover:bg-success-600"
                 @click="$emit('saveEdits')"
               >
-                <i class="fas fa-save" /> 保存修改
+                <i class="fas fa-save"  aria-hidden="true" /> 保存修改
               </button>
             </template>
           </div>
@@ -105,7 +109,7 @@
                       <template v-if="editMode">
                         <input
                           type="number"
-                          class="w-20 text-right py-1 px-1.5 text-[13px] inline-block border border-border rounded focus:outline-none focus:border-primary-500"
+                          class="w-20 text-right py-1 px-1.5 text-[13px] inline-block border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
                           :value="fabric.quantity"
                           min="0"
                           @change="$emit('updateQty', gi, si, fi, ($event.target as HTMLInputElement).value)"
@@ -114,7 +118,7 @@
                         <span class="text-xs ml-0.5">{{ fabric.unit || '' }}</span>
                       </template>
                       <template v-else>
-                        {{ fabric.quantity }} {{ fabric.unit || '' }}
+                        {{ formatQty(fabric.quantity) }} {{ fabric.unit || '' }}
                       </template>
                     </td>
                   </tr>
@@ -125,7 +129,7 @@
                 <td />
                 <td />
                 <td class="text-right">
-                  {{ factoryGrandTotal }}
+                  {{ formatQty(factoryGrandTotal) }}
                 </td>
               </tr>
             </tbody>
@@ -135,24 +139,24 @@
         <div class="mt-4 pt-3 border-t border-border flex justify-between items-center">
           <div class="flex gap-2">
             <button
-              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-success-500 rounded-lg border-none transition-all hover:bg-success-600"
+              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-success-500 rounded-lg border-none transition-colors hover:bg-success-600"
               @click="$emit('exportFactory')"
             >
-              <i class="fas fa-file-excel" /> 导出 Excel
+              <i class="fas fa-file-excel"  aria-hidden="true" /> 导出 Excel
             </button>
           </div>
           <div class="flex gap-2">
             <button
-              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-border bg-transparent text-text-secondary hover:text-primary-500 hover:border-primary-500 hover:bg-primary-50 transition-all"
+              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-border bg-transparent text-text-secondary hover:text-primary-500 hover:border-primary-500 hover:bg-primary-50 transition-colors"
               @click="$emit('close')"
             >
               关闭
             </button>
             <button
-              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-primary-500 rounded-lg border-none transition-all hover:bg-primary-600"
+              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-primary-500 rounded-lg border-none transition-colors hover:bg-primary-600"
               @click="$emit('printFactory')"
             >
-              <i class="fas fa-print" /> 打印预览
+              <i class="fas fa-print"  aria-hidden="true" /> 打印预览
             </button>
           </div>
         </div>
@@ -164,7 +168,7 @@
           class="mb-3 p-3 rounded-lg flex justify-between items-center bg-gradient-to-r from-rose/10 to-rose-deep/10"
         >
           <div>
-            <div class="font-semibold text-sm mb-1.5"><i class="fas fa-truck text-rose" /> 供应商采购订单汇总</div>
+            <div class="font-semibold text-sm mb-1.5"><i class="fas fa-truck text-rose"  aria-hidden="true" /> 供应商采购订单汇总</div>
             <div class="text-xs text-text-secondary">
               已选择 <strong class="text-rose">{{ supplierData.order_count || orderCount }}</strong> 个订单，涵盖
               <strong class="text-rose">{{ supplierGroups.length }}</strong> 家供应商，共
@@ -191,7 +195,7 @@
                   </td>
                   <td>{{ m.material_name }}</td>
                   <td>{{ m.specification || '' }}</td>
-                  <td class="text-right">{{ m.total_quantity }} {{ m.unit || '' }}</td>
+                  <td class="text-right">{{ formatQty(m.total_quantity) }} {{ m.unit || '' }}</td>
                 </tr>
               </template>
               <tr class="bg-border-light font-bold">
@@ -199,7 +203,7 @@
                 <td />
                 <td />
                 <td class="text-right">
-                  {{ supplierGrandTotal }}
+                  {{ formatQty(supplierGrandTotal) }}
                 </td>
               </tr>
             </tbody>
@@ -209,24 +213,24 @@
         <div class="mt-4 pt-3 border-t border-border flex justify-between items-center">
           <div class="flex gap-2">
             <button
-              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-success-500 rounded-lg border-none transition-all hover:bg-success-600"
+              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-success-500 rounded-lg border-none transition-colors hover:bg-success-600"
               @click="$emit('exportSupplier')"
             >
-              <i class="fas fa-file-archive" /> 导出汇总
+              <i class="fas fa-file-archive"  aria-hidden="true" /> 导出汇总
             </button>
           </div>
           <div class="flex gap-2">
             <button
-              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-border bg-transparent text-text-secondary hover:text-primary-500 hover:border-primary-500 hover:bg-primary-50 transition-all"
+              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-border bg-transparent text-text-secondary hover:text-primary-500 hover:border-primary-500 hover:bg-primary-50 transition-colors"
               @click="$emit('close')"
             >
               关闭
             </button>
             <button
-              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-primary-500 rounded-lg border-none transition-all hover:bg-primary-600"
+              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-primary-500 rounded-lg border-none transition-colors hover:bg-primary-600"
               @click="$emit('printSupplier')"
             >
-              <i class="fas fa-print" /> 打印预览
+              <i class="fas fa-print"  aria-hidden="true" /> 打印预览
             </button>
           </div>
         </div>
@@ -297,9 +301,7 @@ function getGroupFabricCount(gi: number | string): number {
 }
 
 function formatQty(val: any): string {
-  const n = parseFloat(String(val || 0))
-  if (n % 1 === 0) return String(parseInt(String(n)))
-  return n.toFixed(2).replace(/\.?0+$/, '')
+  return parseFloat(String(val || 0)).toFixed(2)
 }
 </script>
 
@@ -323,7 +325,7 @@ function formatQty(val: any): string {
   color: var(--color-text-secondary);
   background: transparent;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: color 0.3s ease, background 0.3s ease;
   display: flex;
   align-items: center;
   gap: 6px;

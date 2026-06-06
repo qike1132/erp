@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="ob-container">
     <div class="ob-card ob-card-main">
       <!-- Card Header -->
@@ -6,7 +6,7 @@
         <div class="ob-header-left">
           <div class="ob-card-title-group">
             <div class="ob-icon-box ob-icon-blue">
-              <i class="fas fa-layer-group"></i>
+              <i class="fas fa-layer-group" aria-hidden="true"></i>
             </div>
             <div>
               <h3 class="ob-card-title">订单批次号管理</h3>
@@ -15,15 +15,17 @@
           </div>
         </div>
         <div class="ob-header-right">
-          <div class="ob-tab-group">
+          <div class="ob-tab-group" role="tablist">
             <button
               v-for="tab in tabs" :key="tab.key"
+              role="tab"
+              :aria-selected="activeTab === tab.key"
               :class="['ob-tab', { 'ob-tab--active': activeTab === tab.key }]"
               @click="activeTab = tab.key"
             >{{ tab.label }}</button>
           </div>
           <button class="ob-action-btn" @click="showHistory = true">
-            <i class="fas fa-history"></i> 历史记录
+            <i class="fas fa-history" aria-hidden="true"></i> 历史记录
           </button>
         </div>
       </div>
@@ -31,7 +33,7 @@
       <!-- Search -->
       <div class="ob-filterbar">
         <div class="ob-search-wrap">
-          <i class="fas fa-search ob-search-icon"></i>
+          <i class="fas fa-search ob-search-icon" aria-hidden="true"></i>
           <input
             v-model="keywordSearch"
             class="ob-search-input"
@@ -44,11 +46,11 @@
       <!-- Body -->
       <div class="ob-body">
         <div v-if="isLoading" class="ob-empty-state">
-          <i class="fas fa-spinner fa-spin"></i>
-          <span>加载中...</span>
+          <i class="fas fa-spinner fa-spin" aria-hidden="true"></i>
+          <span>加载中…</span>
         </div>
         <div v-else-if="orders.length === 0" class="ob-empty-state">
-          <i class="fas fa-inbox"></i>
+          <i class="fas fa-inbox" aria-hidden="true"></i>
           <span>暂无订单数据</span>
         </div>
 
@@ -84,6 +86,8 @@
                           class="ob-batch-input"
                           :value="item.batch_no || ''"
                           placeholder="输入批次号"
+                          name="batch-no"
+                          autocomplete="off"
                           @blur="saveBatchNo(item.id, ($event.target as HTMLInputElement).value)"
                           @keydown.enter="saveBatchNo(item.id, ($event.target as HTMLInputElement).value); ($event.target as HTMLInputElement).blur()"
                         />
@@ -97,12 +101,12 @@
           </div>
 
           <div class="ob-pager">
-            <button class="ob-action-btn" :disabled="page <= 1" @click="handlePageChange(page - 1)">
-              <i class="fas fa-chevron-left"></i>
+            <button class="ob-action-btn" :disabled="page <= 1" @click="handlePageChange(page - 1)" aria-label="上一页">
+              <i class="fas fa-chevron-left" aria-hidden="true"></i>
             </button>
             <span class="ob-pager-info">{{ page }} / {{ totalPages }}</span>
             <button class="ob-action-btn" :disabled="page >= totalPages" @click="handlePageChange(page + 1)">
-              <i class="fas fa-chevron-right"></i>
+              <i class="fas fa-chevron-right" aria-hidden="true"></i>
             </button>
             <span class="ob-pager-total">共 {{ total }} 条</span>
           </div>
@@ -121,6 +125,7 @@ import { useBatchActions } from './composables/useBatchActions'
 import { useOrderBatchWs } from './composables/useOrderBatchWs'
 import OrderBatchHistoryView from './OrderBatchHistoryView.vue'
 import type { OrderBatchItem } from '@/types'
+import { formatDate } from '@/utils/format'
 
 const {
   page, perPage, customerFilter, keywordSearch,
@@ -168,10 +173,7 @@ const groupedOrders = computed<OrderGroup[]>(() => {
   return Array.from(map.values())
 })
 
-function formatDate(date: string | null): string {
-  if (!date) return '-'
-  return date.split('T')[0]
-}
+
 
 async function saveBatchNo(orderId: number, value: string) {
   const trimmed = value.trim()
@@ -274,7 +276,7 @@ async function saveBatchNo(orderId: number, value: string) {
   font-weight: 600;
   color: var(--color-text-secondary, #64748b);
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
   white-space: nowrap;
 }
 .ob-tab:hover {
@@ -300,7 +302,7 @@ async function saveBatchNo(orderId: number, value: string) {
   font-weight: 600;
   color: var(--color-primary-600, #2563eb);
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, border-color 0.3s ease, transform 0.3s ease;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -347,12 +349,13 @@ async function saveBatchNo(orderId: number, value: string) {
   background: white;
   border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: var(--radius-input, 12px);
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
   outline: none;
   min-height: 44px;
   box-sizing: border-box;
   font-family: inherit;
 }
+.ob-search-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 .ob-search-input:focus {
   background: white;
   border-color: var(--color-primary-400, #60a5fa);
@@ -487,11 +490,12 @@ async function saveBatchNo(orderId: number, value: string) {
   background: white;
   border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: var(--radius-input, 12px);
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
   outline: none;
   font-family: inherit;
   box-sizing: border-box;
 }
+.ob-batch-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 .ob-batch-input:focus {
   background: var(--color-surface-card, #f8fafc);
   border-color: var(--color-primary-400, #60a5fa);

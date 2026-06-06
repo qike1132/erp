@@ -21,7 +21,7 @@ _DATETIME_FMT = '%Y-%m-%d %H:%M:%S'
 
 
 def _utcnow() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
 
 
 def _fmt_dt(value: datetime | None) -> str | None:

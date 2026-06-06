@@ -10,7 +10,7 @@
       <div class="us-body">
         <!-- 左栏：添加用户 -->
         <div class="us-col">
-          <div class="us-col-title"><i class="fas fa-user-plus" /> 添加新用户</div>
+          <div class="us-col-title"><i class="fas fa-user-plus"  aria-hidden="true" /> 添加新用户</div>
           <div class="us-col-scroll">
             <form @submit.prevent="handleAdd" class="us-form">
               <div class="us-form-group">
@@ -21,8 +21,8 @@
                 <label>密码 <span class="us-required">*</span></label>
                 <div class="us-input-wrapper">
                   <input v-model="form.password" :type="showPwd1 ? 'text' : 'password'" class="us-input" placeholder="至少6位" />
-                  <button type="button" class="us-pwd-toggle" @click="showPwd1 = !showPwd1">
-                    <i :class="showPwd1 ? 'fas fa-eye-slash' : 'fas fa-eye'" />
+                  <button type="button" class="us-pwd-toggle" @click="showPwd1 = !showPwd1" aria-label="查看">
+                    <i :class="showPwd1 ? 'fas fa-eye-slash' : 'fas fa-eye'"  aria-hidden="true" />
                   </button>
                 </div>
               </div>
@@ -32,7 +32,7 @@
               </div>
               <p v-if="formError" class="us-form-error">{{ formError }}</p>
               <button type="submit" class="us-submit-btn" :disabled="submitting">
-                {{ submitting ? '添加中...' : '添加用户' }}
+                {{ submitting ? '添加中…' : '添加用户' }}
               </button>
             </form>
           </div>
@@ -42,11 +42,11 @@
         <div class="us-col">
           <div class="us-col-scroll">
             <div v-if="isLoading" class="us-empty">
-              <i class="fas fa-spinner fa-spin" />
-              <span>加载中...</span>
+              <i class="fas fa-spinner fa-spin"  aria-hidden="true" />
+              <span>加载中…</span>
             </div>
             <div v-else-if="users.length === 0" class="us-empty">
-              <i class="fas fa-users" />
+              <i class="fas fa-users"  aria-hidden="true" />
               <span>暂无用户</span>
             </div>
             <table v-else class="us-table">
@@ -72,7 +72,7 @@
                       {{ row.status !== false ? '启用' : '禁用' }}
                     </span>
                   </td>
-                  <td>{{ row.create_time || '-' }}</td>
+                  <td>{{ formatDate(row.create_time) }}</td>
                   <td style="white-space: nowrap">
                     <button class="us-action-btn us-action-primary" @click="openPermissionDialog(row)">权限</button>
                     <button class="us-action-btn us-action-primary" :disabled="actionId === row.id" @click="handleToggle(row)">
@@ -88,11 +88,11 @@
 
             <!-- Pagination -->
             <div v-if="totalItems > perPage" class="us-pagination">
-              <button class="us-page-btn" :disabled="currentPage <= 1" @click="goPage(1)"><i class="fas fa-angle-double-left" /></button>
-              <button class="us-page-btn" :disabled="currentPage <= 1" @click="goPage(currentPage - 1)"><i class="fas fa-angle-left" /></button>
+              <button class="us-page-btn" :disabled="currentPage <= 1" @click="goPage(1)" aria-label="首页"><i class="fas fa-angle-double-left"  aria-hidden="true" /></button>
+              <button class="us-page-btn" :disabled="currentPage <= 1" @click="goPage(currentPage - 1)" aria-label="上一页"><i class="fas fa-angle-left"  aria-hidden="true" /></button>
               <span class="us-page-info">{{ currentPage }} / {{ totalPages }}</span>
-              <button class="us-page-btn" :disabled="currentPage >= totalPages" @click="goPage(currentPage + 1)"><i class="fas fa-angle-right" /></button>
-              <button class="us-page-btn" :disabled="currentPage >= totalPages" @click="goPage(totalPages)"><i class="fas fa-angle-double-right" /></button>
+              <button class="us-page-btn" :disabled="currentPage >= totalPages" @click="goPage(currentPage + 1)"><i class="fas fa-angle-right"  aria-hidden="true" /></button>
+              <button class="us-page-btn" :disabled="currentPage >= totalPages" @click="goPage(totalPages)"><i class="fas fa-angle-double-right"  aria-hidden="true" /></button>
               <span class="us-page-total">共 {{ totalItems }} 条</span>
             </div>
           </div>
@@ -131,7 +131,7 @@
       <template #footer>
         <button class="us-action-btn" @click="permDialogVisible = false">取消</button>
         <button class="us-action-btn us-action-primary" :disabled="permSubmitting" @click="handleSavePermission">
-          {{ permSubmitting ? '保存中...' : '保存' }}
+          {{ permSubmitting ? '保存中…' : '保存' }}
         </button>
       </template>
     </UiDialog>
@@ -156,6 +156,7 @@ import { showToast } from '@/composables/useToast'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
+import { formatDate } from '@/utils/format'
 
 const actionId = ref<number | ''>(0)
 const formError = ref('')
@@ -412,12 +413,12 @@ async function handleSavePermission() {
   border-radius: 18px;
   border: 1px solid var(--color-border-light, #e2e8f0);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
 }
 .us-card:hover {
-  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
-  transform: translateY(-6px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  transform: translateY(-2px);
 }
 .us-card-main {
   flex: 1;
@@ -554,12 +555,13 @@ async function handleSavePermission() {
   border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: 10px;
   font-size: 14px;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
   outline: none;
   font-family: inherit;
   color: var(--color-text);
   background: white;
 }
+.us-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 .us-input:focus {
   border-color: var(--color-primary-400);
   background: white;
@@ -598,7 +600,7 @@ async function handleSavePermission() {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
 }
 .us-submit-btn:hover:not(:disabled) {
   transform: translateY(-1px);
@@ -682,7 +684,7 @@ async function handleSavePermission() {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, border-color 0.3s ease, transform 0.3s ease;
   color: var(--color-text-secondary);
   margin-right: 4px;
 }
@@ -747,7 +749,7 @@ async function handleSavePermission() {
   font-weight: 600;
   color: var(--color-text-secondary);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: border-color 0.2s ease, color 0.2s ease;
 }
 .us-perm-toggle-all:hover {
   border-color: var(--color-primary-300);
@@ -871,7 +873,7 @@ async function handleSavePermission() {
   cursor: pointer;
   font-size: 12px;
   color: var(--color-text-secondary);
-  transition: all 0.2s;
+  transition: border-color 0.2s, color 0.2s;
 }
 .us-page-btn:hover:not(:disabled) {
   border-color: var(--color-primary-300);

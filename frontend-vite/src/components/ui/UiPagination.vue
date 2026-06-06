@@ -1,17 +1,17 @@
 <template>
   <div class="ui-pagination">
-    <button class="ui-page-btn" :disabled="currentPage <= 1" @click="$emit('update:currentPage', 1)">
-      <i class="fas fa-angle-double-left" />
+    <button class="ui-page-btn" :disabled="currentPage <= 1" aria-label="首页" @click="$emit('update:currentPage', 1)">
+      <i class="fas fa-angle-double-left" aria-hidden="true" />
     </button>
-    <button class="ui-page-btn" :disabled="currentPage <= 1" @click="$emit('update:currentPage', currentPage - 1)">
-      <i class="fas fa-angle-left" />
+    <button class="ui-page-btn" :disabled="currentPage <= 1" aria-label="上一页" @click="$emit('update:currentPage', currentPage - 1)">
+      <i class="fas fa-angle-left" aria-hidden="true" />
     </button>
     <span class="ui-page-info">{{ currentPage }} / {{ totalPages }}</span>
-    <button class="ui-page-btn" :disabled="currentPage >= totalPages" @click="$emit('update:currentPage', currentPage + 1)">
-      <i class="fas fa-angle-right" />
+    <button class="ui-page-btn" :disabled="currentPage >= totalPages" aria-label="下一页" @click="$emit('update:currentPage', currentPage + 1)">
+      <i class="fas fa-angle-right" aria-hidden="true" />
     </button>
-    <button class="ui-page-btn" :disabled="currentPage >= totalPages" @click="$emit('update:currentPage', totalPages)">
-      <i class="fas fa-angle-double-right" />
+    <button class="ui-page-btn" :disabled="currentPage >= totalPages" aria-label="末页" @click="$emit('update:currentPage', totalPages)">
+      <i class="fas fa-angle-double-right" aria-hidden="true" />
     </button>
     <span v-if="totalItems != null" class="ui-page-total">共 {{ totalItems }} 条</span>
   </div>
@@ -46,7 +46,7 @@ defineEmits<{
   cursor: pointer;
   font-size: 12px;
   color: var(--color-text-secondary);
-  transition: all 0.2s;
+  transition: border-color 0.2s, color 0.2s;
 }
 .ui-page-btn:hover:not(:disabled) {
   border-color: var(--color-primary-300);
@@ -56,16 +56,19 @@ defineEmits<{
   opacity: 0.4;
   cursor: not-allowed;
 }
+.ui-page-btn:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 .ui-page-info {
   font-size: 13px;
   font-weight: 600;
   color: var(--color-text);
   min-width: 80px;
   text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 .ui-page-total {
   font-size: 12px;
   color: var(--color-text-secondary);
   margin-left: 8px;
+  font-variant-numeric: tabular-nums;
 }
 </style>

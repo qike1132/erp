@@ -8,14 +8,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
+from fastapi_app.core.exceptions import db_transaction
+from fastapi_app.services.notification_service import StockEvent, publish_stock_event
 from fastapi_app.schemas.material_registration import (
     ActionResponse,
+    AvailablePurchaseOrdersResponse,
+    ExportRegistrationsResponse,
     MaterialRegistrationCreate,
     MaterialRegistrationUpdate,
+    PurchaseOrderItemsResponse,
+    PurchaseOrderPreviewResponse,
     ReceiveMaterialRequest,
     RegistrationDetailResponse,
+    RegistrationHistoryResponse,
     RegistrationListResponse,
+    StatsDistributionResponse,
     StatsOverviewResponse,
+    SuggestionsResponse,
     TrendResponse,
 )
 from fastapi_app.services import material_registration_service as mr_service
@@ -41,14 +50,15 @@ async def get_registration(reg_id: int, user: User=Depends(require_permission('p
 async def create_registration(data: MaterialRegistrationCreate, user: User=Depends(require_permission('product_manage')), db: AsyncSession=Depends(get_async_db)):
     """创建来料登记"""
     try:
-        result = await mr_service.create_registration(db, data.purchase_order_id, user.id, user.username, data.remark, [item.model_dump() for item in data.items])
-        await db.commit()
+        async with db_transaction(db):
+            result = await mr_service.create_registration(db, data.purchase_order_id, user.id, user.username, data.remark, [item.model_dump() for item in data.items])
         await invalidate_related_caches(CacheDomain.MATERIAL)
+        try:
+            await publish_stock_event(StockEvent.MATERIAL_UPDATED, {'change_type': '来料登记', 'purchase_order_id': data.purchase_order_id})
+        except (OSError, ValueError) as e:
+            logger.warning('来料登记事件发布失败（不影响数据）: %s', e)
         return RegistrationDetailResponse(registration=result['registration'])
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
     except SQLAlchemyError as e:
-        await db.rollback()
         logger.exception('创建来料登记失败: %s', e)
         raise HTTPException(status_code=500, detail='创建来料登记失败，请稍后重试') from e
 
@@ -56,14 +66,15 @@ async def create_registration(data: MaterialRegistrationCreate, user: User=Depen
 async def update_registration(reg_id: int, data: MaterialRegistrationUpdate, user: User=Depends(require_permission('product_manage')), db: AsyncSession=Depends(get_async_db)):
     """更新来料登记"""
     try:
-        result = await mr_service.update_registration(db, reg_id, data.status, data.remark, data.items)
-        await db.commit()
+        async with db_transaction(db):
+            result = await mr_service.update_registration(db, reg_id, data.status, data.remark, data.items)
         await invalidate_related_caches(CacheDomain.MATERIAL)
+        try:
+            await publish_stock_event(StockEvent.MATERIAL_UPDATED, {'change_type': '来料登记编辑', 'reg_id': reg_id})
+        except (OSError, ValueError) as e:
+            logger.warning('来料登记编辑事件发布失败（不影响数据）: %s', e)
         return RegistrationDetailResponse(registration=result['registration'])
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
     except SQLAlchemyError as e:
-        await db.rollback()
         logger.exception('更新来料登记失败: %s', e)
         raise HTTPException(status_code=500, detail='更新来料登记失败，请稍后重试') from e
 
@@ -71,18 +82,19 @@ async def update_registration(reg_id: int, data: MaterialRegistrationUpdate, use
 async def delete_registration(reg_id: int, user: User=Depends(require_permission('product_manage')), db: AsyncSession=Depends(get_async_db)):
     """删除来料登记"""
     try:
-        result = await mr_service.delete_registration(db, reg_id)
-        await db.commit()
+        async with db_transaction(db):
+            result = await mr_service.delete_registration(db, reg_id)
         await invalidate_related_caches(CacheDomain.MATERIAL)
+        try:
+            await publish_stock_event(StockEvent.MATERIAL_UPDATED, {'change_type': '来料登记删除', 'reg_id': reg_id})
+        except (OSError, ValueError) as e:
+            logger.warning('来料登记删除事件发布失败（不影响数据）: %s', e)
         return ActionResponse(message=result['message'])
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
     except SQLAlchemyError as e:
-        await db.rollback()
         logger.exception('删除来料登记失败: %s', e)
         raise HTTPException(status_code=500, detail='删除来料登记失败，请稍后重试') from e
 
-@router.get('/purchase-orders/available')
+@router.get('/purchase-orders/available', response_model=AvailablePurchaseOrdersResponse)
 async def available_purchase_orders(status: str=Query('pending'), user: User=Depends(require_permission('product_manage')), db: AsyncSession=Depends(get_async_read_db)):
     """获取可用采购订单列表"""
     return await mr_service.get_available_purchase_orders(db, status)
@@ -101,18 +113,19 @@ async def stats_trend(days: int=Query(30, ge=1, le=365), user: User=Depends(requ
 async def receive_material(item_id: int, data: ReceiveMaterialRequest, user: User=Depends(require_permission('product_manage')), db: AsyncSession=Depends(get_async_db)):
     """物料收货登记"""
     try:
-        result = await mr_service.receive_material(db, item_id, data.received_quantity, data.remark)
-        await db.commit()
+        async with db_transaction(db):
+            result = await mr_service.receive_material(db, item_id, data.received_quantity, data.remark)
         await invalidate_related_caches(CacheDomain.MATERIAL)
+        try:
+            await publish_stock_event(StockEvent.MATERIAL_UPDATED, {'change_type': '物料收货', 'item_id': item_id, 'quantity': data.received_quantity})
+        except (OSError, ValueError) as e:
+            logger.warning('物料收货事件发布失败（不影响数据）: %s', e)
         return RegistrationDetailResponse(registration=result['registration'])
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
     except (SQLAlchemyError, RuntimeError) as e:
-        await db.rollback()
         logger.exception('收货登记失败 item_id=%s: %s', item_id, e)
         raise HTTPException(status_code=500, detail='收货登记失败，请稍后重试') from e
 
-@router.get('/purchase-orders/{order_id}/items')
+@router.get('/purchase-orders/{order_id}/items', response_model=PurchaseOrderItemsResponse)
 async def get_purchase_order_items(order_id: int, user: User=Depends(require_permission('product_manage')), db: AsyncSession=Depends(get_async_read_db)):
     """获取采购订单物料明细"""
     try:
@@ -120,7 +133,7 @@ async def get_purchase_order_items(order_id: int, user: User=Depends(require_per
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
 
-@router.get('/purchase-orders/preview/{order_no}')
+@router.get('/purchase-orders/preview/{order_no}', response_model=PurchaseOrderPreviewResponse)
 async def preview_purchase_order(order_no: str, user: User=Depends(require_permission('product_manage')), db: AsyncSession=Depends(get_async_read_db)):
     """采购订单快速预览"""
     try:
@@ -128,7 +141,7 @@ async def preview_purchase_order(order_no: str, user: User=Depends(require_permi
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
 
-@router.post('/export')
+@router.post('/export', response_model=ExportRegistrationsResponse)
 async def export_registrations(order_no: str='', supplier: str='', start_date: str='', end_date: str='', user: User=Depends(require_permission('product_manage')), db: AsyncSession=Depends(get_async_db)):
     """导出来料登记数据"""
     try:
@@ -136,17 +149,17 @@ async def export_registrations(order_no: str='', supplier: str='', start_date: s
     except (ValueError, OSError):
         raise HTTPException(status_code=500, detail='导出来料登记失败') from None
 
-@router.get('/history')
+@router.get('/history', response_model=RegistrationHistoryResponse)
 async def get_history(page: int=Query(1, ge=1), per_page: int=Query(20, ge=1, le=100), order_no: str=Query(''), supplier: str=Query(''), customer_name: str=Query(''), material_category: str=Query(''), start_date: str=Query(''), end_date: str=Query(''), user: User=Depends(require_permission('product_manage')), db: AsyncSession=Depends(get_async_read_db)):
     """获取来料登记历史记录"""
     return await mr_service.get_history(db, page, per_page, order_no, supplier, customer_name, material_category, start_date, end_date)
 
-@router.get('/suggestions')
+@router.get('/suggestions', response_model=SuggestionsResponse)
 async def get_suggestions(field: str=Query(''), keyword: str=Query(''), limit: int=Query(10, ge=1, le=50), user: User=Depends(require_permission('product_manage')), db: AsyncSession=Depends(get_async_read_db)):
     """获取搜索联想建议"""
     return await mr_service.get_suggestions(db, field, keyword, limit)
 
-@router.get('/stats/distribution')
+@router.get('/stats/distribution', response_model=StatsDistributionResponse)
 async def stats_distribution(user: User=Depends(require_permission('product_manage')), db: AsyncSession=Depends(get_async_read_db)):
     """获取来料登记状态分布"""
     return await mr_service.get_stats_distribution(db)

@@ -1,6 +1,7 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useQuery } from '@tanstack/vue-query'
+import { refDebounced } from '@vueuse/core'
 import { get } from '@/api/request'
 import type { PageResult } from '@/types'
 
@@ -8,6 +9,7 @@ import type { PageResult } from '@/types'
  * 通用列表查询 composable
  * - URL 参数同步（page, per_page, search, sort_by, sort_order）
  * - 自动 VueQuery useQuery
+ * - search 防抖 300ms
  */
 export function useListQuery<T>(key: string, url: string, extraParams?: () => Record<string, any>) {
   const route = useRoute()
@@ -19,12 +21,13 @@ export function useListQuery<T>(key: string, url: string, extraParams?: () => Re
   const sortBy = ref((route.query.sort_by as string) || '')
   const sortOrder = ref((route.query.sort_order as string) || 'desc')
 
-  // URL 参数同步
-  watch([page, perPage, search, sortBy, sortOrder], () => {
+  const dSearch = refDebounced(search, 300)
+
+  watch([page, perPage, dSearch, sortBy, sortOrder], () => {
     const query: Record<string, any> = { ...route.query }
     query.page = String(page.value)
     query.per_page = String(perPage.value)
-    if (search.value) query.search = search.value
+    if (dSearch.value) query.search = dSearch.value
     else delete query.search
     if (sortBy.value) query.sort_by = sortBy.value
     if (sortOrder.value) query.sort_order = sortOrder.value
@@ -35,7 +38,7 @@ export function useListQuery<T>(key: string, url: string, extraParams?: () => Re
     key,
     page.value,
     perPage.value,
-    search.value,
+    dSearch.value,
     sortBy.value,
     sortOrder.value,
     extraParams ? extraParams() : {},
@@ -47,7 +50,7 @@ export function useListQuery<T>(key: string, url: string, extraParams?: () => Re
       get<PageResult<T>>(url, {
         page: page.value,
         per_page: perPage.value,
-        search: search.value || undefined,
+        search: dSearch.value || undefined,
         sort_by: sortBy.value || undefined,
         sort_order: sortOrder.value || undefined,
         ...extraParams?.(),

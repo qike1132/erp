@@ -4,7 +4,8 @@
  * 封装轮询逻辑，支持备份和恢复两种模式。
  * 默认 1000ms 轮询，关键阶段可缩短到 500ms。
  */
-import { ref, computed, watch, onUnmounted } from 'vue'
+import { ref, computed, watch } from 'vue'
+import { useIntervalFn } from '@vueuse/core'
 import { backupApi } from '@/api'
 
 export interface ProgressData {
@@ -22,7 +23,6 @@ export interface ProgressData {
 export function useBackupProgress() {
   const progress = ref<ProgressData | null>(null)
   const isPolling = ref(false)
-  let pollTimer: ReturnType<typeof setInterval> | null = null
   let currentTaskId: string | null = null
 
   const displayPercent = computed(() => {
@@ -78,6 +78,12 @@ export function useBackupProgress() {
     }
   }
 
+  const { pause: pausePoll, resume: resumePoll, isActive: isIntervalActive } = useIntervalFn(
+    () => { if (currentTaskId) fetchProgress(currentTaskId) },
+    1000,
+    { immediate: false, controls: true },
+  )
+
   function startPolling(taskId: string, intervalMs: number = 1000) {
     stopPolling()
     currentTaskId = taskId
@@ -94,19 +100,12 @@ export function useBackupProgress() {
       error: null,
     }
 
-    // Initial fetch
     fetchProgress(taskId)
-
-    pollTimer = setInterval(() => {
-      if (currentTaskId) fetchProgress(currentTaskId)
-    }, intervalMs)
+    resumePoll()
   }
 
   function stopPolling() {
-    if (pollTimer) {
-      clearInterval(pollTimer)
-      pollTimer = null
-    }
+    pausePoll()
     isPolling.value = false
     currentTaskId = null
   }
@@ -115,10 +114,6 @@ export function useBackupProgress() {
     stopPolling()
     progress.value = null
   }
-
-  onUnmounted(() => {
-    stopPolling()
-  })
 
   return {
     progress,

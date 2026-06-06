@@ -6,8 +6,10 @@
           <HeaderTabs />
         </div>
         <div class="pc-header-right">
-          <div class="pc-tab-group">
+          <div class="pc-tab-group" role="tablist">
             <button
+              role="tab"
+              :aria-selected="activeTab === 'orders'"
               :class="['pc-tab-btn', { active: activeTab === 'orders' }]"
               @click="switchTab('orders')"
             >
@@ -15,6 +17,8 @@
               <span v-if="unprocessed.total > 0" class="pc-tab-badge">{{ unprocessed.total }}</span>
             </button>
             <button
+              role="tab"
+              :aria-selected="activeTab === 'history'"
               :class="['pc-tab-btn', { active: activeTab === 'history' }]"
               @click="switchTab('history')"
             >
@@ -415,11 +419,11 @@ onBeforeUnmount(() => {
   border-radius: 18px;
   border: 1px solid var(--color-border-light, #e2e8f0);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .pc-card:hover {
-  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
-  transform: translateY(-6px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  transform: translateY(-2px);
 }
 .pc-card-main {
   flex: 1;
@@ -523,7 +527,7 @@ onBeforeUnmount(() => {
   color: var(--color-text-secondary);
   background: transparent;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
   white-space: nowrap;
 }
 

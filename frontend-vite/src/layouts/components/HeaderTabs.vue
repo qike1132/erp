@@ -6,13 +6,14 @@
       :to="tab.path"
       :class="['ht-tab', { active: tab.path === tabStore.activePath }]"
     >
-      <i v-if="iconMap[tab.icon]" :class="iconMap[tab.icon]" class="ht-tab-icon" />
+      <i v-if="resolveIcon(tab.icon)" :class="resolveIcon(tab.icon)" class="ht-tab-icon" aria-hidden="true" />
       <span class="ht-tab-label">{{ tab.title }}</span>
       <button
         class="ht-tab-close"
+        aria-label="关闭"
         @click.prevent.stop="handleClose(tab.path)"
       >
-        <i class="fas fa-xmark" />
+        <i class="fas fa-xmark" aria-hidden="true" />
       </button>
     </router-link>
   </div>
@@ -31,20 +32,6 @@ function handleClose(path: string) {
 }
 
 const iconMap: Record<string, string> = {
-  'fa-store': 'fas fa-store',
-  'fa-truck': 'fas fa-truck',
-  'fa-calculator': 'fas fa-calculator',
-  'fa-box': 'fas fa-box',
-  'fa-box-open': 'fas fa-box-open',
-  'fa-file-invoice': 'fas fa-file-invoice',
-  'fa-shipping-fast': 'fas fa-shipping-fast',
-  'fa-yen-sign': 'fas fa-yen-sign',
-  'fa-warehouse': 'fas fa-warehouse',
-  'fa-chart-bar': 'fas fa-chart-bar',
-  'fa-industry': 'fas fa-industry',
-  'fa-users-cog': 'fas fa-users-cog',
-  'fa-building': 'fas fa-building',
-  'fa-clipboard-check': 'fas fa-clipboard-check',
   dashboard: 'fas fa-gauge',
   order: 'fas fa-cart-shopping',
   product: 'fas fa-box',
@@ -63,12 +50,21 @@ const iconMap: Record<string, string> = {
   'ocr-import': 'fas fa-upload',
   case: 'fas fa-box',
   'material-calculator': 'fas fa-list',
+  'fa-shield-alt': 'fas fa-shield-halved',
+  'fa-shopping-cart': 'fas fa-cart-shopping',
+}
+
+function resolveIcon(icon: string | undefined): string | null {
+  if (!icon) return null
+  if (iconMap[icon]) return iconMap[icon]
+  if (icon.startsWith('fa-')) return `fas ${icon}`
+  return null
 }
 </script>
 
 <style scoped>
 .ht-bar {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 4px;
   padding: 4px;
@@ -78,7 +74,6 @@ const iconMap: Record<string, string> = {
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
   overflow-x: auto;
   flex-shrink: 0;
-  width: 100%;
 }
 
 .ht-bar::-webkit-scrollbar {
@@ -98,7 +93,7 @@ const iconMap: Record<string, string> = {
   font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
   flex-shrink: 0;
   cursor: pointer;
 }
@@ -123,6 +118,7 @@ const iconMap: Record<string, string> = {
 }
 
 .ht-tab-label {
+  min-width: 0;
   max-width: 100px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -140,7 +136,7 @@ const iconMap: Record<string, string> = {
   color: var(--color-text-muted);
   cursor: pointer;
   font-size: 9px;
-  transition: all 0.2s ease;
+  transition: background 0.2s ease, color 0.2s ease, opacity 0.2s ease;
   flex-shrink: 0;
   padding: 0;
   opacity: 0.6;

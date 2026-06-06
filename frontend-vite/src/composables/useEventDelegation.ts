@@ -1,4 +1,5 @@
-import { onMounted, onUnmounted, type Ref } from 'vue'
+import { type Ref } from 'vue'
+import { useEventListener, useThrottleFn, useIntersectionObserver } from '@vueuse/core'
 
 /**
  * 事件委托 - 列表/表格中用单个容器监听替代N个子元素监听
@@ -17,47 +18,35 @@ export function useEventDelegation(
     const id = el.getAttribute(idAttr)
     if (action && handlers[action]) { e.stopPropagation(); handlers[action](id ?? '', e) }
   }
-  onMounted(() => containerRef.value?.addEventListener(event, handleClick))
-  onUnmounted(() => containerRef.value?.removeEventListener(event, handleClick))
+  useEventListener(containerRef, event, handleClick)
   return { handleDelegatedClick: handleClick }
 }
 
 /**
- * 节流滚动 (requestAnimationFrame)
+ * 节流滚动 (基于 VueUse useThrottleFn)
  */
 export function useThrottledScroll(
   containerRef: Ref<HTMLElement | null>,
   callback: (scrollTop: number) => void,
 ) {
-  let rafId: number | null = null
-  function onScroll() {
-    if (rafId !== null) return
-    rafId = requestAnimationFrame(() => { if (containerRef.value) callback(containerRef.value.scrollTop); rafId = null })
-  }
-  onMounted(() => containerRef.value?.addEventListener('scroll', onScroll, { passive: true }))
-  onUnmounted(() => { containerRef.value?.removeEventListener('scroll', onScroll); if (rafId !== null) cancelAnimationFrame(rafId) })
+  const throttled = useThrottleFn(() => {
+    if (containerRef.value) callback(containerRef.value.scrollTop)
+  }, 16, true)
+  useEventListener(containerRef, 'scroll', throttled, { passive: true } as any)
 }
 
 /**
- * IntersectionObserver 惰性加载 (滚动到底部触发加载更多)
+ * IntersectionObserver 惰性加载 (基于 VueUse useIntersectionObserver)
+ * 注意：需在模板中放置 sentinel 元素：<div ref="sentinelRef" style="height:1px">
  */
 export function useLazyLoad(
-  containerRef: Ref<HTMLElement | null>,
+  sentinelRef: Ref<HTMLElement | null>,
   loadCallback: () => void,
   rootMargin = '200px',
 ) {
-  let observer: IntersectionObserver | null = null
-  let sentinel: HTMLElement | null = null
-  onMounted(() => {
-    if (!containerRef.value) return
-    sentinel = document.createElement('div')
-    sentinel.style.height = '1px'
-    containerRef.value.appendChild(sentinel)
-    observer = new IntersectionObserver(
-      (entries) => { for (const e of entries) if (e.isIntersecting) loadCallback() },
-      { root: containerRef.value, threshold: 0.1, rootMargin },
-    )
-    observer.observe(sentinel)
-  })
-  onUnmounted(() => { observer?.disconnect(); sentinel?.remove() })
+  useIntersectionObserver(
+    sentinelRef,
+    (entries) => { for (const e of entries) if (e.isIntersecting) loadCallback() },
+    { threshold: 0.1, rootMargin },
+  )
 }

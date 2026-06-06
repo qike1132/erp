@@ -10,6 +10,7 @@ from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
+from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.schemas.product import (
     ProductActionResponse,
     ProductCreate,
@@ -38,59 +39,15 @@ async def list_products(page: int = Query(1, ge=1), per_page: int = Query(50, ge
     result = await product_service.get_products_page(db, page=page, per_page=per_page, search=search)
     return ProductListResponse(items=result['items'], total=result['total'])
 
-@router.get('/{product_id}', response_model=ProductResponse)
-async def get_product(product_id: int, db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('product_manage'))):
-    """获取单个产品详情"""
-    product = await db.get(Product, product_id)
-    if not product:
-        raise HTTPException(status_code=404, detail='产品不存在')
-    return product
-
 @router.post('/create', response_model=ProductActionResponse)
 async def create_product(data: ProductCreate, db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('product_manage'))):
     """添加产品"""
-    try:
+    async with db_transaction(db):
         await product_service.create_product(db, name=data.name, barcode=data.barcode, price=data.price, image=data.image, initial_stock=data.initial_stock)
-        await invalidate_related_caches(CacheDomain.INVENTORY)
-        return ProductActionResponse(success=True, message='产品添加成功！')
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    await invalidate_related_caches(CacheDomain.INVENTORY)
+    return ProductActionResponse(success=True, message='产品添加成功！')
 
-@router.put('/edit/{product_id}', response_model=ProductActionResponse)
-async def edit_product(product_id: int, data: ProductUpdate, db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('product_manage'))):
-    """编辑产品"""
-    try:
-        await product_service.update_product(db, product_id=product_id, name=data.name, barcode=data.barcode, price=data.price, image=data.image, initial_stock=data.initial_stock)
-        await invalidate_related_caches(CacheDomain.INVENTORY)
-        return ProductActionResponse(success=True, message='产品编辑成功！')
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
 
-@router.delete('/delete/{product_id}', response_model=ProductActionResponse)
-async def delete_product(product_id: int, db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('product_manage'))):
-    """删除产品
-
-    错误响应：
-    - 400: 产品不存在或有关联单据（订单/备货/出货）
-    - 401: 未登录
-    - 403: 权限不足
-    """
-    try:
-        await product_service.delete_product(db, product_id)
-        await invalidate_related_caches(CacheDomain.INVENTORY)
-        return ProductActionResponse(success=True, message='产品删除成功！')
-    except ProductNotFoundError as e:
-        raise HTTPException(status_code=400, detail=e.message) from e
-    except ProductHasRelatedOrdersError as e:
-        raise HTTPException(status_code=400, detail=e.message) from e
-    except ProductHasRelatedStockInsError as e:
-        raise HTTPException(status_code=400, detail=e.message) from e
-    except ProductHasRelatedStockOutsError as e:
-        raise HTTPException(status_code=400, detail=e.message) from e
-    except ProductDeleteError as e:
-        raise HTTPException(status_code=400, detail=settings.sanitize_business_error(e)) from e
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
 
 @router.get('/search', response_model=list)
 async def product_search(q: str=Query('', description='搜索关键词'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('product_manage'))):
@@ -105,3 +62,44 @@ async def product_available_stock(product_id: int=Query(..., description='产品
         return await product_service.get_product_stock(db, product_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+@router.get('/{product_id}', response_model=ProductResponse)
+async def get_product(product_id: int, db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('product_manage'))):
+    """获取单个产品详情"""
+    product = await db.get(Product, product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail='产品不存在')
+    return product
+
+@router.put('/edit/{product_id}', response_model=ProductActionResponse)
+async def edit_product(product_id: int, data: ProductUpdate, db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('product_manage'))):
+    """编辑产品"""
+    async with db_transaction(db):
+        await product_service.update_product(db, product_id=product_id, name=data.name, barcode=data.barcode, price=data.price, image=data.image, initial_stock=data.initial_stock)
+    await invalidate_related_caches(CacheDomain.INVENTORY)
+    return ProductActionResponse(success=True, message='产品编辑成功！')
+
+@router.delete('/delete/{product_id}', response_model=ProductActionResponse)
+async def delete_product(product_id: int, db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('product_manage'))):
+    """删除产品
+
+    错误响应：
+    - 400: 产品不存在或有关联单据（订单/备货/出货）
+    - 401: 未登录
+    - 403: 权限不足
+    """
+    try:
+        async with db_transaction(db):
+            await product_service.delete_product(db, product_id)
+    except ProductNotFoundError as e:
+        raise HTTPException(status_code=400, detail=e.message) from e
+    except ProductHasRelatedOrdersError as e:
+        raise HTTPException(status_code=400, detail=e.message) from e
+    except ProductHasRelatedStockInsError as e:
+        raise HTTPException(status_code=400, detail=e.message) from e
+    except ProductHasRelatedStockOutsError as e:
+        raise HTTPException(status_code=400, detail=e.message) from e
+    except ProductDeleteError as e:
+        raise HTTPException(status_code=400, detail=settings.sanitize_business_error(e)) from e
+    await invalidate_related_caches(CacheDomain.INVENTORY)
+    return ProductActionResponse(success=True, message='产品删除成功！')

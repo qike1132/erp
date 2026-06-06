@@ -146,9 +146,9 @@ class RedisCacheManager:
 
         if self.redis_client:
             try:
-                await self.redis_client.delete(full_key)
+                await self.redis_client.unlink(full_key)
             except Exception as e:
-                logger.warning("Redis async delete error: %s", e)
+                logger.warning("Redis async unlink error: %s", e)
 
         async with self._lock:
             self._fallback_cache.pop(full_key, None)
@@ -169,7 +169,7 @@ class RedisCacheManager:
                         cursor=cursor, match=full_pattern, count=100
                     )
                     if keys:
-                        deleted_count += await self.redis_client.delete(*keys)
+                        deleted_count += await self.redis_client.unlink(*keys)
                     iterations += 1
                     if cursor == 0 or iterations >= max_iterations:
                         break
@@ -369,3 +369,124 @@ class CacheConfig:
     USER_PERMISSIONS = ('user:permissions', 3600)
     USER_PROFILE = ('user:profile', 1800)
     REPORT_DATA = ('report:data', 600)
+    DASHBOARD_STATS = ('dashboard:stats', 120)
+    DAILY_PRODUCTION = ('daily:production', 300)
+    PURCHASE_PLAN = ('purchase:plan', 300)
+    APPROVAL_PENDING = ('approval:pending', 60)
+
+
+class CacheTags:
+    """缓存标签 - 用于关联失效
+
+    写入缓存时关联标签，数据变更时按标签批量失效所有关联缓存。
+    示例：产品更新 → 失效 product, inventory, dashboard 三个标签的所有缓存
+    """
+    PRODUCT = 'tag:product'
+    ORDER = 'tag:order'
+    STOCK = 'tag:stock'
+    INVENTORY = 'tag:inventory'
+    USER = 'tag:user'
+    DASHBOARD = 'tag:dashboard'
+    PURCHASE = 'tag:purchase'
+    PRODUCTION = 'tag:production'
+    APPROVAL = 'tag:approval'
+    REPORT = 'tag:report'
+
+
+CACHE_TAG_RELATIONS = {
+    CacheTags.PRODUCT: [CacheTags.INVENTORY, CacheTags.DASHBOARD, CacheTags.REPORT],
+    CacheTags.ORDER: [CacheTags.DASHBOARD, CacheTags.REPORT, CacheTags.STOCK],
+    CacheTags.STOCK: [CacheTags.INVENTORY, CacheTags.DASHBOARD],
+    CacheTags.INVENTORY: [CacheTags.DASHBOARD],
+    CacheTags.USER: [CacheTags.DASHBOARD],
+    CacheTags.PURCHASE: [CacheTags.DASHBOARD, CacheTags.REPORT],
+    CacheTags.PRODUCTION: [CacheTags.DASHBOARD, CacheTags.REPORT],
+}
+
+
+async def cache_set_with_tags(key: str, value: Any, timeout: int, tags: list[str]):
+    """写入缓存并关联标签"""
+    await redis_cache.set(key, value, timeout)
+    if redis_cache.redis_client:
+        try:
+            full_key = redis_cache._make_key(key)
+            for tag in tags:
+                await redis_cache.redis_client.sadd(tag, full_key)
+                tag_ttl = await redis_cache.redis_client.ttl(tag)
+                if tag_ttl == -1 or tag_ttl < timeout + 60:
+                    await redis_cache.redis_client.expire(tag, timeout + 60)
+        except Exception as e:
+            logger.warning('缓存标签关联失败: %s', e)
+
+
+async def cache_invalidate_tags(*tags: str):
+    """按标签批量失效缓存（含级联标签）"""
+    all_tags = set(tags)
+    for tag in tags:
+        cascaded = CACHE_TAG_RELATIONS.get(tag, [])
+        all_tags.update(cascaded)
+
+    total_deleted = 0
+    if redis_cache.redis_client:
+        try:
+            for tag in all_tags:
+                keys = await redis_cache.redis_client.smembers(tag)
+                if keys:
+                    deleted = await redis_cache.redis_client.unlink(*keys)
+                    total_deleted += deleted
+                await redis_cache.redis_client.unlink(tag)
+        except Exception as e:
+            logger.warning('标签缓存失效失败: %s', e)
+
+    return total_deleted
+
+
+async def warmup_cache():
+    """缓存预热 - 应用启动时加载热点数据到Redis
+
+    优先级: 权限 > 产品列表 > 仪表盘 > 库存统计
+    """
+    logger.info('开始缓存预热...')
+    warmed = 0
+
+    try:
+        from fastapi_app.core.database import get_async_db_context
+        async with get_async_db_context() as db:
+            from sqlalchemy import select, func
+            from fastapi_app.shared_models import Product, User, Permission, user_permission
+
+            try:
+                # 批量 JOIN 查询：一次获取所有活跃用户及其权限，消除 N+1 问题
+                result = await db.execute(
+                    select(User.id, Permission.code)
+                    .join(user_permission, User.id == user_permission.c.user_id)
+                    .join(Permission, Permission.id == user_permission.c.permission_id)
+                    .where(User.status == True)
+                )
+                user_perms: dict[int, list[str]] = {}
+                for uid, code in result.all():
+                    user_perms.setdefault(uid, []).append(code)
+                for uid, codes in user_perms.items():
+                    await redis_cache.set(
+                        f'user:permissions:uid_{uid}',
+                        codes,
+                        3600,
+                    )
+                    warmed += 1
+            except Exception as e:
+                logger.warning('权限缓存预热失败: %s', e)
+
+            try:
+                from sqlalchemy import func as sa_func
+                count_result = await db.execute(select(sa_func.count()).select_from(Product))
+                product_count = count_result.scalar() or 0
+                await redis_cache.set('product:list:count', product_count, 600)
+                warmed += 1
+            except Exception as e:
+                logger.warning('产品计数缓存预热失败: %s', e)
+
+    except Exception as e:
+        logger.warning('缓存预热数据库连接失败: %s', e)
+
+    logger.info('缓存预热完成，预热 %d 项', warmed)
+    return warmed

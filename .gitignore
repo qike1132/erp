@@ -32,7 +32,15 @@ instance/
 .env.backup
 .env.*.local
 local.properties
+# JWT 密钥（敏感文件，不应提交到版本控制）
 config/jwt/*.pem
+config/jwt/*.key
+
+# Android 签名密钥（敏感文件）
+frontend-vite/android/keystore.properties
+frontend-vite/android/app/*.jks
+frontend-vite/android/app/*.keystore
+frontend-vite/android/signing-info.txt
 
 # IDE
 .vscode/
@@ -118,3 +126,4 @@ logs/
 # Test reports
 test_reports/
 *.log
+.gstack/

@@ -3,14 +3,20 @@
     <div v-if="label" class="text-xs font-semibold text-text-secondary mb-1 uppercase tracking-wider">
       {{ label }}
     </div>
-    <div class="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+    <div
+      class="w-full bg-gray-200 rounded-full h-2 overflow-hidden"
+      role="progressbar"
+      :aria-valuenow="Math.round(Math.min(100, Math.max(0, percentage)))"
+      aria-valuemin="0"
+      aria-valuemax="100"
+    >
       <div
-        class="h-full rounded-full transition-all duration-300"
+        class="h-full rounded-full transition-[width] duration-300"
         :class="colorClass"
         :style="{ width: `${Math.min(100, Math.max(0, percentage))}%` }"
       />
     </div>
-    <div v-if="showText" class="text-xs text-text-secondary mt-1 text-right">{{ percentage }}%</div>
+    <div v-if="showText" class="text-xs text-text-secondary mt-1 text-right tabular-nums">{{ percentage }}%</div>
   </div>
 </template>
 

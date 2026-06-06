@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <UiDialog
     :open="open"
     title=""
@@ -6,12 +6,16 @@
     @update:open="$emit('update:open', $event)"
   >
     <template #title>
-      <div class="csd-header-tabs">
+      <div class="csd-header-tabs" role="tablist">
         <span
+          role="tab"
+          :aria-selected="mode === 'manual'"
           :class="['csd-htab', { 'csd-htab-active': mode === 'manual' }]"
           @click="mode = 'manual'"
         >填写数据</span>
         <span
+          role="tab"
+          :aria-selected="mode === 'import'"
           :class="['csd-htab', { 'csd-htab-active': mode === 'import' }]"
           @click="mode = 'import'"
         >批量导入</span>
@@ -87,7 +91,7 @@
                 title="移除此行"
                 @click="removeDetail(idx)"
               >
-                <i class="fas fa-trash" />
+                <i class="fas fa-trash"  aria-hidden="true" />
               </button>
           </div>
         </div>
@@ -104,36 +108,36 @@
           @drop.prevent="onDrop"
         >
           <div class="csd-upload-label">
-            <i class="fas fa-file-excel" />
-            <span v-if="file" class="csd-file-selected"><i class="fas fa-check-circle" />{{ file.name }}</span>
+            <i class="fas fa-file-excel"  aria-hidden="true" />
+            <span v-if="file" class="csd-file-selected"><i class="fas fa-check-circle"  aria-hidden="true" />{{ file.name }}</span>
             <span v-else>拖拽文件到此处或点击选择 · 支持 .xlsx .xls .csv</span>
           </div>
           <div class="csd-upload-buttons">
             <button class="csd-inline-btn" @click.stop="dlTpl">模板</button>
             <button class="csd-inline-btn csd-inline-btn-primary" :disabled="!file || uploading" @click.stop="doUpload">
-              <i v-if="!uploading" class="fas fa-upload"></i>
+              <i v-if="!uploading" class="fas fa-upload" aria-hidden="true"></i>
               <i v-else class="fas fa-spinner fa-spin"></i> 导入
             </button>
-            <button v-if="file" class="csd-inline-btn csd-inline-btn-danger" @click.stop="clearFile">
-              <i class="fas fa-trash"></i>
+            <button v-if="file" class="csd-inline-btn csd-inline-btn-danger" @click.stop="clearFile" aria-label="删除">
+              <i class="fas fa-trash" aria-hidden="true"></i>
             </button>
           </div>
           <input ref="fileInp" type="file" accept=".xlsx,.xls,.csv" hidden @change="onFile" />
         </div>
         <div v-if="upMsg" class="csd-upload-message" :class="{ 'csd-upload-success': upOk, 'csd-upload-error': !upOk }">
-          <i :class="upOk ? 'fas fa-check-circle' : 'fas fa-exclamation-circle'"></i>
+          <i :class="upOk ? 'fas fa-check-circle' : 'fas fa-exclamation-circle'" aria-hidden="true"></i>
           {{ upMsg }}
         </div>
       </template>
 
       <div v-if="errorMsg" class="csd-error">
-        <i class="fas fa-exclamation-circle" /> {{ errorMsg }}
+        <i class="fas fa-exclamation-circle"  aria-hidden="true" /> {{ errorMsg }}
       </div>
     </div>
 
     <template #footer>
       <button v-if="mode === 'manual'" class="csd-btn csd-btn-add" @click="addDetail">
-        <i class="fas fa-plus" /> 添加明细
+        <i class="fas fa-plus"  aria-hidden="true" /> 添加明细
       </button>
       <span style="flex:1"></span>
       <button class="csd-btn csd-btn-cancel" @click="$emit('update:open', false)">
@@ -142,7 +146,7 @@
       <button v-if="mode === 'manual'" class="csd-btn csd-btn-submit" :disabled="submitting" @click="handleSubmit">
         <i v-if="submitting" class="fas fa-spinner fa-spin" />
         <i v-else class="fas fa-check" />
-        {{ submitting ? '保存中...' : '确认创建' }}
+        {{ submitting ? '保存中…' : '确认创建' }}
       </button>
     </template>
   </UiDialog>
@@ -202,7 +206,7 @@ let _ut: any = null
 
 watch(() => props.open, (val) => {
   if (val) {
-    form.details = [{ customer_id: '', product_name: '', product_id: 0, plan_date: '', quantity: null, _showSuggest: false }]
+    form.details = [{ customer_id: '', product_name: '', product_id: 0, barcode: '', plan_date: '', quantity: null, _showSuggest: false }]
     errorMsg.value = ''
     mode.value = 'manual'
     clearFile()
@@ -399,13 +403,14 @@ async function handleSubmit() {
   font-size: 0.9375rem;
   line-height: 1.5;
   outline: none;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
   background: white;
   width: 100%;
   box-sizing: border-box;
   color: var(--color-text);
   height: 44px;
 }
+.csd-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 .csd-input:focus {
   border-color: var(--color-primary-400);
   box-shadow: 0 0 0 4px rgba(0, 148, 191, 0.1);
@@ -442,7 +447,7 @@ async function handleSubmit() {
   font-weight: 600;
   color: var(--color-text-muted);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: color 0.2s ease, background 0.2s ease;
   user-select: none;
   white-space: nowrap;
 }
@@ -468,7 +473,7 @@ async function handleSubmit() {
   border: 2px dashed var(--color-border-light, #e2e8f0);
   border-radius: 11px;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, background 0.3s ease;
   flex-wrap: wrap;
 }
 .csd-upload-hover {
@@ -511,7 +516,7 @@ async function handleSubmit() {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
   background: var(--color-surface);
   color: var(--color-text-secondary);
   font-family: inherit;
@@ -709,7 +714,7 @@ async function handleSubmit() {
   justify-content: center;
   color: var(--color-danger-500);
   font-size: 0.75rem;
-  transition: all 0.2s ease;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
   flex-shrink: 0;
 }
 .csd-remove-btn:hover {
@@ -724,7 +729,7 @@ async function handleSubmit() {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -754,7 +759,7 @@ async function handleSubmit() {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
 }
 .csd-add-line:hover {
   border-color: var(--color-primary-400);
@@ -781,7 +786,7 @@ async function handleSubmit() {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
   display: inline-flex;
   align-items: center;
   gap: 6px;

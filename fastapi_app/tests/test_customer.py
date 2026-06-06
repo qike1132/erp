@@ -68,7 +68,7 @@ class TestCustomerService:
         mock_db.execute = AsyncMock(return_value=mock_result)
 
         customers = await get_customers(mock_db)
-        assert len(customers) == 1
+        assert len(customers['items']) == 1
 
     @pytest.mark.asyncio
     async def test_create_customer_success(self, mock_db):

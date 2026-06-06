@@ -2,6 +2,10 @@ import { ref, computed, reactive } from 'vue'
 import { purchaseApi } from '@/api'
 import { printHtml } from '@/utils/print'
 
+function fmtQty(val: any): string {
+  return parseFloat(String(val || 0)).toFixed(2)
+}
+
 function buildFactoryHtml(data: { groups?: any[] }): string {
   let tableHtml = ''
   data.groups?.forEach((group: any) => {
@@ -15,13 +19,13 @@ function buildFactoryHtml(data: { groups?: any[] }): string {
           tableHtml += `<td rowspan="${rowCount}" style="border:1px solid #333;padding:8px;text-align:center;font-weight:bold;">${group.customer_name}</td>`
           tableHtml += `<td rowspan="${rowCount}" style="border:1px solid #333;padding:8px;text-align:center;">${group.product_name}</td>`
           const qty = parseFloat(String(group.product_quantity || group.order_quantity || 0))
-          const qtyStr = qty % 1 === 0 ? String(parseInt(String(qty))) : qty.toFixed(2).replace(/\.?0+$/, '')
+          const qtyStr = fmtQty(qty)
           tableHtml += `<td rowspan="${rowCount}" style="border:1px solid #333;padding:8px;text-align:center;">${qtyStr}</td>`
         }
         tableHtml += `<td style="border:1px solid #333;padding:8px;text-align:center;">${supplier.supplier_name}</td>`
         tableHtml += `<td style="border:1px solid #333;padding:8px;">${fabric.fabric_name}</td>`
         tableHtml += `<td style="border:1px solid #333;padding:8px;">${fabric.specification || ''}</td>`
-        tableHtml += `<td style="border:1px solid #333;padding:8px;text-align:right;">${fabric.quantity} ${fabric.unit || ''}</td>`
+        tableHtml += `<td style="border:1px solid #333;padding:8px;text-align:right;">${fmtQty(fabric.quantity)} ${fabric.unit || ''}</td>`
         tableHtml += '</tr>'
         globalFabricIdx++
       })
@@ -39,7 +43,7 @@ function buildSupplierHtml(groups: { supplierName: string; materials: any[] }[])
         tableHtml += `<td rowspan="${g.materials.length}" style="border:1px solid #333;padding:8px;text-align:center;font-weight:bold;">${g.supplierName}</td>`
       tableHtml += `<td style="border:1px solid #333;padding:8px;">${m.material_name}</td>`
       tableHtml += `<td style="border:1px solid #333;padding:8px;">${m.specification || ''}</td>`
-      tableHtml += `<td style="border:1px solid #333;padding:8px;text-align:right;">${m.total_quantity} ${m.unit || ''}</td>`
+      tableHtml += `<td style="border:1px solid #333;padding:8px;text-align:right;">${fmtQty(m.total_quantity)} ${m.unit || ''}</td>`
       tableHtml += '</tr>'
     })
   })
@@ -189,8 +193,28 @@ export function useSummaryModal() {
   }
 
   function updateFactoryQty(gi: number, si: number, fi: number, value: number) {
-    factoryData.value?.groups?.[gi]?.suppliers?.[si]?.fabrics?.[fi] &&
-      (factoryData.value.groups[gi].suppliers[si].fabrics[fi].quantity = value)
+    const fabric = factoryData.value?.groups?.[gi]?.suppliers?.[si]?.fabrics?.[fi]
+    if (!fabric) return
+    const oldQty = parseFloat(String(fabric.quantity)) || 0
+    const diff = value - oldQty
+    fabric.quantity = value
+
+    if (diff !== 0 && supplierData.value?.materials) {
+      const fabricName = fabric.fabric_name
+      const spec = fabric.specification || ''
+      const unit = fabric.unit || ''
+      const supplierName = factoryData.value?.groups?.[gi]?.suppliers?.[si]?.supplier_name
+      supplierData.value.materials.forEach((m) => {
+        if (
+          m.material_name === fabricName &&
+          (m.specification || '') === spec &&
+          (m.unit || '') === unit &&
+          (m.supplier_name || '未指定供应商') === (supplierName || '未指定供应商')
+        ) {
+          m.total_quantity = Math.round(((parseFloat(String(m.total_quantity)) || 0) + diff) * 100) / 100
+        }
+      })
+    }
   }
 
   function applyLossRate(rate: number) {

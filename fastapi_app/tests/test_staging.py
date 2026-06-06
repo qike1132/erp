@@ -137,9 +137,11 @@ class TestStagingOrderEndpoints:
 
     async def test_get_staging_orders_empty(self, client, mock_db):
         """测试获取空的暂存订单列表"""
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = []
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_count = MagicMock()
+        mock_count.scalar.return_value = 0
+        mock_data = MagicMock()
+        mock_data.scalars.return_value.all.return_value = []
+        mock_db.execute = AsyncMock(side_effect=[mock_count, mock_data])
 
         response = await client.get(
             "/api/v1/staging-orders",

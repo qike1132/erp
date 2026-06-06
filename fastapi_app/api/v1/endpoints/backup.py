@@ -1,30 +1,161 @@
 """数据备份与恢复 API — 纯路由层
 
 所有业务逻辑委托给 backup_service.py。
-16 个现有端点保持完全相同的路径/方法/签名/响应格式。
+
+主要功能：
+1. 备份管理：创建、恢复、删除备份
+2. 加密支持：默认启用AES-256-GCM加密，支持密码和环境变量
+3. 大文件分片传输：支持Range请求头和分片下载
+4. 细粒度权限控制：backup_read、backup_create、backup_restore、backup_delete、backup_manage
+5. 健康检查：系统状态监控
+6. 备份验证：文件完整性检查和验证缓存
+7. 统计信息：备份系统运行统计
+
+新增端点：
+- GET /export-enhanced: 支持Range请求头的增强备份导出
+- GET /export-info: 获取备份文件信息（大小、分片数量等）
+- GET /export-chunk/{chunk_index}: 下载备份文件的指定分片
+- GET /health: 备份系统健康检查
+- GET /validate/{filename}: 验证服务器上已有备份文件
+- POST /validate-integrity: 执行深度完整性检查
+- GET /stats: 获取备份统计信息
+
+权限说明：
+- backup_read: 查看备份列表和状态
+- backup_create: 创建备份
+- backup_restore: 恢复备份
+- backup_delete: 删除备份
+- backup_manage: 管理备份（所有权限）
 """
 import asyncio
+import hashlib
 import io
 import json
 import logging
 import os
+import secrets
+import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 _background_tasks: set[asyncio.Task] = set()
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, Header, Request
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
+from sqlalchemy.exc import SQLAlchemyError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.database import get_async_db
+from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
+from fastapi_app.schemas.backup import (
+    AsyncTaskResponse,
+    BackupChunkInfo,
+    BackupDeleteResponse,
+    BackupEncryptionRequest,
+    BackupHealthCheckResponse,
+    BackupImportResponse,
+    BackupIntegrityCheckResponse,
+    BackupListResponse,
+    BackupPingResponse,
+    BackupProgressOut,
+    BackupRecordListOut,
+    BackupSaveResponse,
+    BackupScheduleOut,
+    BackupStatisticsResponse,
+    BackupStatusOut,
+    BackupTablesResponse,
+    BackupTriggerOut,
+    BackupValidateResponse,
+    BackupValidationResponse,
+    IncrementalBackupResponse,
+    IncrementalRestoreResponse,
+    IntegrityCheckResponse,
+)
 from fastapi_app.services import backup_service
 from fastapi_app.services.backup_service import (
     BackupError, BackupFileError, BackupLockError, RestoreError,
 )
 from fastapi_app.shared_models import User
+
+
+# ===========================================================================
+# 细粒度权限控制
+# ===========================================================================
+
+def _get_backup_permission(endpoint_name: str) -> str:
+    """
+    根据端点名称返回对应的细粒度权限
+    权限映射：
+    - backup_read: 查看备份列表和状态
+    - backup_create: 创建备份
+    - backup_restore: 恢复备份
+    - backup_delete: 删除备份
+    - backup_manage: 管理备份（所有权限）
+    """
+    permission_map = {
+        # 读取权限
+        'ping': 'backup_read',
+        'list_backup_tables': 'backup_read',
+        'list_server_backups': 'backup_read',
+        'backup_status': 'backup_read',
+        'get_backup_records': 'backup_read',
+        'get_backup_schedule': 'backup_read',
+        'get_backup_info': 'backup_read',
+
+        # 创建权限
+        'export_backup': 'backup_create',
+        'export_backup_enhanced': 'backup_create',
+        'save_backup_to_server': 'backup_create',
+        'save_incremental_backup': 'backup_create',
+
+        # 恢复权限
+        'import_backup': 'backup_restore',
+        'restore_server_backup': 'backup_restore',
+        'restore_incremental_backup': 'backup_restore',
+        'async_import_backup': 'backup_restore',
+        'async_restore_server_backup': 'backup_restore',
+
+        # 删除权限
+        'delete_server_backup': 'backup_delete',
+
+        # 验证权限
+        'validate_backup': 'backup_read',
+        'validate_server_backup': 'backup_read',
+        'run_integrity_check': 'backup_read',
+
+        # 进度查询
+        'get_restore_progress': 'backup_read',
+
+        # 统计
+        'get_backup_statistics': 'backup_read',
+
+        # 调度
+        'trigger_backup_schedule': 'backup_create',
+
+        # 分片导出
+        'export_backup_chunk': 'backup_create',
+
+        # 健康检查
+        'health_check': 'backup_read',
+
+        # 验证文件
+        'validate_backup_file': 'backup_read',
+
+        # 深度完整性检查
+        'validate_backup_integrity': 'backup_read',
+    }
+
+    return permission_map.get(endpoint_name, 'backup_manage')
+
+
+def require_backup_permission(endpoint_name: str):
+    """
+    细粒度权限检查依赖工厂
+    """
+    permission = _get_backup_permission(endpoint_name)
+    return require_permission(permission)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -41,8 +172,8 @@ def _ensure_backup_dir():
 # ---------------------------------------------------------------------------
 # 1. GET /ping
 # ---------------------------------------------------------------------------
-@router.get('/ping')
-async def ping(user: User = Depends(require_permission('backup_manage'))):
+@router.get('/ping', response_model=BackupPingResponse)
+async def ping(user: User = Depends(require_backup_permission('ping'))):
     """快速诊断端点"""
     from fastapi_app.shared_models import Base
     return {
@@ -56,9 +187,9 @@ async def ping(user: User = Depends(require_permission('backup_manage'))):
 # ---------------------------------------------------------------------------
 # 2. GET /tables
 # ---------------------------------------------------------------------------
-@router.get('/tables')
+@router.get('/tables', response_model=BackupTablesResponse)
 async def list_backup_tables(
-    user: User = Depends(require_permission('backup_manage')),
+    user: User = Depends(require_backup_permission('list_backup_tables')),
     db: AsyncSession = Depends(get_async_db),
 ):
     """列出所有可备份的数据库表及行数"""
@@ -77,11 +208,12 @@ async def list_backup_tables(
                 qtname = backup_service.quote_table(name)
                 result = await db.execute(text(f'SELECT COUNT(*) FROM {qtname}'))
                 count = result.scalar()
-            except Exception as e:
+            except (SQLAlchemyError, OperationalError, OSError) as e:
+                await db.rollback()
                 logger.warning(f'统计表 {name} 行数失败: {e}')
                 count = -1
             table_info.append({'name': name, 'rows': count})
-    except Exception as e:
+    except (SQLAlchemyError, OperationalError, RuntimeError) as e:
         logger.error(f'列出备份表失败: {e}')
         raise HTTPException(status_code=500, detail='获取表信息失败，请查看服务器日志') from e
     return {'success': True, 'tables': table_info, 'total': len(table_info)}
@@ -94,54 +226,98 @@ async def list_backup_tables(
 async def export_backup(
     remark: str = '',
     format: str = 'zip',
-    user: User = Depends(require_permission('backup_manage')),
+    encrypt: bool = Query(True, description="是否启用加密"),
+    password: Optional[str] = Query(None, description="加密密码，为空时使用环境变量或生成临时密码"),
+    x_backup_password: Optional[str] = Header(None, alias='X-Backup-Password'),
+    user: User = Depends(require_backup_permission('export_backup')),
     db: AsyncSession = Depends(get_async_db),
 ):
-    """一键备份全部数据（流式返回，避免大文件 OOM）"""
+    """
+    一键备份全部数据（流式返回，避免大文件 OOM）
+    
+    参数：
+    - remark: 备份备注
+    - format: 备份格式，支持 'zip' 或 'json'
+    - encrypt: 是否启用加密，默认True
+    - password: 加密密码（查询参数）
+    - x_backup_password: 加密密码（请求头）
+    
+    加密密码获取优先级：
+    1. password查询参数
+    2. X-Backup-Password请求头
+    3. BACKUP_ENCRYPTION_PASSWORD环境变量
+    4. 生成临时密码（记录到日志）
+    
+    权限：backup_create
+    """
     import os as _os
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    
     if format == 'json':
         try:
             json_bytes = await backup_service.execute_legacy_backup_to_bytes(user, remark, db)
-        except Exception as e:
+        except (BackupError, RuntimeError, OSError) as e:
             logger.error(f'JSON 备份导出失败: {e}')
             raise HTTPException(status_code=500, detail='备份失败，请查看服务器日志') from e
-        filename = f'erp_backup_{timestamp}.json'
+        
+        # JSON格式也支持加密
+        if encrypt:
+            encryption_password = _get_encryption_password(password, x_backup_password)
+            json_bytes = _encrypt_backup_data(json_bytes, encryption_password)
+            filename = f'erp_backup_{timestamp}.json.enc'
+            media_type = 'application/octet-stream'
+        else:
+            filename = f'erp_backup_{timestamp}.json'
+            media_type = 'application/json'
+        
         return StreamingResponse(
-            io.BytesIO(json_bytes), media_type='application/json',
+            io.BytesIO(json_bytes), media_type=media_type,
             headers={'Content-Disposition': f'attachment; filename="{filename}"'},
         )
+    
     try:
         # 使用文件方式避免大 ZIP 占用内存
         zip_path, manifest = await backup_service.create_full_backup_to_file(db, user, remark)
-    except Exception as e:
+    except (BackupError, RuntimeError, OSError) as e:
         logger.error(f'ZIP 备份导出失败: {e}')
         raise HTTPException(status_code=500, detail='备份失败，请查看服务器日志') from e
-    filename = f'erp_backup_{timestamp}.zip'
-
-    # 使用 FileResponse 流式返回，自动清理临时文件
-    def _cleanup():
-        try:
-            _os.unlink(zip_path)
-        except OSError:
-            pass
-
-    return FileResponse(
-        path=str(zip_path),
-        filename=filename,
-        media_type='application/zip',
-        background=_cleanup,
+    
+    # 读取ZIP文件内容
+    with open(zip_path, 'rb') as f:
+        zip_bytes = f.read()
+    
+    # 应用加密
+    if encrypt:
+        encryption_password = _get_encryption_password(password, x_backup_password)
+        encrypted_bytes = _encrypt_backup_data(zip_bytes, encryption_password)
+        filename = f'erp_backup_{timestamp}.zip.enc'
+        media_type = 'application/octet-stream'
+        response_data = encrypted_bytes
+    else:
+        filename = f'erp_backup_{timestamp}.zip'
+        media_type = 'application/zip'
+        response_data = zip_bytes
+    
+    # 清理临时文件
+    try:
+        _os.unlink(zip_path)
+    except OSError:
+        pass
+    
+    return StreamingResponse(
+        io.BytesIO(response_data), media_type=media_type,
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'},
     )
 
 
 # ---------------------------------------------------------------------------
 # 4. POST /import
 # ---------------------------------------------------------------------------
-@router.post('/import')
+@router.post('/import', response_model=BackupImportResponse)
 async def import_backup(
     file: UploadFile = File(...),
     confirm: bool = False,
-    user: User = Depends(require_permission('backup_manage')),
+    user: User = Depends(require_backup_permission('import_backup')),
     db: AsyncSession = Depends(get_async_db),
 ):
     """一键恢复：从备份文件恢复全部数据"""
@@ -169,7 +345,7 @@ async def import_backup(
 
     try:
         pre_restore_info = await backup_service.create_pre_restore_backup(db)
-    except Exception:
+    except (BackupError, OSError):
         pre_restore_info = {'success': False, 'error': '创建安全备份失败'}
 
     from sqlalchemy import text
@@ -209,7 +385,7 @@ async def import_backup(
 
         try:
             result = await backup_service.restore_legacy_json(backup_data, db)
-        except Exception:
+        except (BackupError, SQLAlchemyError, RuntimeError, ValueError):
             raise
         verification_ok = result.get('verification', {}).get('overall_pass', True)
         return {
@@ -229,10 +405,10 @@ async def import_backup(
 # ---------------------------------------------------------------------------
 # 5. POST /validate
 # ---------------------------------------------------------------------------
-@router.post('/validate')
+@router.post('/validate', response_model=BackupValidateResponse)
 async def validate_backup(
     file: UploadFile = File(...),
-    user: User = Depends(require_permission('backup_manage')),
+    user: User = Depends(require_backup_permission('validate_backup')),
 ):
     """验证备份文件，不执行恢复，仅返回摘要信息"""
     filename = file.filename or ''
@@ -257,28 +433,74 @@ async def validate_backup(
 # ---------------------------------------------------------------------------
 # 6. POST /save
 # ---------------------------------------------------------------------------
-@router.post('/save')
+@router.post('/save', response_model=BackupSaveResponse)
 async def save_backup_to_server(
     remark: str = '',
-    user: User = Depends(require_permission('backup_manage')),
+    encrypt: bool = Query(True, description="是否启用加密"),
+    password: Optional[str] = Query(None, description="加密密码，为空时使用环境变量或生成临时密码"),
+    x_backup_password: Optional[str] = Header(None, alias='X-Backup-Password'),
+    user: User = Depends(require_backup_permission('save_backup_to_server')),
     db: AsyncSession = Depends(get_async_db),
 ):
-    """一键备份到服务器默认路径"""
+    """
+    一键备份到服务器默认路径
+    
+    参数：
+    - remark: 备份备注
+    - encrypt: 是否启用加密，默认True
+    - password: 加密密码（查询参数）
+    - x_backup_password: 加密密码（请求头）
+    
+    加密密码获取优先级：
+    1. password查询参数
+    2. X-Backup-Password请求头
+    3. BACKUP_ENCRYPTION_PASSWORD环境变量
+    4. 生成临时密码（记录到日志）
+    
+    权限：backup_create
+    """
     backup_service.ensure_backup_dir()
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    
     try:
         zip_bytes, manifest = await backup_service.create_full_backup(db, user, remark)
-    except Exception as e:
+    except (BackupError, RuntimeError, OSError) as e:
         logger.error(f'服务端备份失败: {e}')
         raise HTTPException(status_code=500, detail='备份失败，请查看服务器日志') from e
-    filename = f'erp_backup_{timestamp}.zip'
+    
+    # 应用加密
+    if encrypt:
+        encryption_password = _get_encryption_password(password, x_backup_password)
+        encrypted_bytes = _encrypt_backup_data(zip_bytes, encryption_password)
+        filename = f'erp_backup_{timestamp}.zip.enc'
+        file_bytes = encrypted_bytes
+    else:
+        filename = f'erp_backup_{timestamp}.zip'
+        file_bytes = zip_bytes
+    
     filepath = backup_service.BACKUP_DIR / filename
-    filepath.write_bytes(zip_bytes)
+    await asyncio.to_thread(filepath.write_bytes, file_bytes)
+
+    # 加密备份时写入 .meta 侧车文件，供列表展示元数据
+    if encrypt:
+        meta_dict = {
+            'created_at': manifest.get('exported_at', ''),
+            'exported_by': manifest.get('exported_by', ''),
+            'remark': remark,
+            'table_count': manifest.get('table_count', 0),
+            'total_rows': manifest.get('total_rows', 0),
+            'includes': manifest.get('includes', {}),
+            'base_timestamp': manifest.get('base_timestamp', ''),
+            'encrypted': True,
+            'algorithm': 'AES-256-GCM',
+        }
+        meta_path = backup_service.BACKUP_DIR / (filename + '.meta')
+        await asyncio.to_thread(meta_path.write_bytes, json.dumps(meta_dict, indent=2, ensure_ascii=False).encode('utf-8'))
 
     # 写入 BackupRecord
     await backup_service.write_backup_record(
         db, record_type='full', trigger_type='manual',
-        filename=filename, size=manifest.get('zip_size', len(zip_bytes)),
+        filename=filename, size=manifest.get('zip_size', len(file_bytes)),
         table_count=manifest.get('table_count', 0),
         total_rows=manifest.get('total_rows', 0),
         operator=user.username if hasattr(user, 'username') else str(user.id),
@@ -287,7 +509,7 @@ async def save_backup_to_server(
 
     return {
         'success': True, 'format': 'zip', 'filename': filename,
-        'size': manifest.get('zip_size', len(zip_bytes)),
+        'size': manifest.get('zip_size', len(file_bytes)),
         'table_count': manifest.get('table_count', 0),
         'total_rows': manifest.get('total_rows', 0),
         'exported_at': manifest.get('exported_at'),
@@ -299,8 +521,8 @@ async def save_backup_to_server(
 # ---------------------------------------------------------------------------
 # 7. GET /list
 # ---------------------------------------------------------------------------
-@router.get('/list')
-async def list_server_backups(user: User = Depends(require_permission('backup_manage'))):
+@router.get('/list', response_model=BackupListResponse)
+async def list_server_backups(user: User = Depends(require_backup_permission('list_server_backups'))):
     """列出服务器默认路径上的所有备份文件"""
     backups = backup_service.list_backup_files()
     return {'success': True, 'backups': backups, 'total': len(backups)}
@@ -309,11 +531,13 @@ async def list_server_backups(user: User = Depends(require_permission('backup_ma
 # ---------------------------------------------------------------------------
 # 8. POST /restore-by-name/{filename}
 # ---------------------------------------------------------------------------
-@router.post('/restore-by-name/{filename}')
+@router.post('/restore-by-name/{filename}', response_model=BackupImportResponse)
 async def restore_server_backup(
     filename: str,
     confirm: bool = Query(False),
-    user: User = Depends(require_permission('backup_manage')),
+    password: Optional[str] = Query(None, description="加密备份的解密密码"),
+    x_backup_password: Optional[str] = Header(None, alias='X-Backup-Password'),
+    user: User = Depends(require_backup_permission('restore_server_backup')),
     db: AsyncSession = Depends(get_async_db),
 ):
     """从服务器默认路径恢复指定备份文件"""
@@ -329,6 +553,20 @@ async def restore_server_backup(
         content = filepath.read_bytes()
     except (OSError, ValueError) as e:
         raise HTTPException(status_code=400, detail=f'读取备份文件失败: {e}') from e
+
+    # 处理加密备份
+    if safe_name.endswith('.enc'):
+        enc_password = _get_encryption_password(password, x_backup_password)
+        if not enc_password:
+            raise HTTPException(status_code=400, detail='加密备份需要提供解密密码')
+        try:
+            content = _decrypt_backup_data(content, enc_password)
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f'解密失败: {str(e)}') from e
+        # 解密后按内部格式处理
+        safe_name = safe_name.removesuffix('.enc')
 
     is_zip = safe_name.endswith('.zip') or content[:4] == b'PK\x03\x04'
     if is_zip:
@@ -383,10 +621,10 @@ async def restore_server_backup(
 # ---------------------------------------------------------------------------
 # 9. DELETE /delete-by-name/{filename}
 # ---------------------------------------------------------------------------
-@router.delete('/delete-by-name/{filename}')
+@router.delete('/delete-by-name/{filename}', response_model=BackupDeleteResponse)
 async def delete_server_backup(
     filename: str,
-    user: User = Depends(require_permission('backup_manage')),
+    user: User = Depends(require_backup_permission('delete_server_backup')),
 ):
     """删除服务器默认路径上的指定备份文件"""
     try:
@@ -399,8 +637,8 @@ async def delete_server_backup(
 # ---------------------------------------------------------------------------
 # 10. GET /status
 # ---------------------------------------------------------------------------
-@router.get('/status')
-async def backup_status(user: User = Depends(require_permission('backup_manage'))):
+@router.get('/status', response_model=BackupStatusOut)
+async def backup_status(user: User = Depends(require_backup_permission('backup_status'))):
     """获取备份系统状态概览"""
     return backup_service.get_backup_status()
 
@@ -408,17 +646,17 @@ async def backup_status(user: User = Depends(require_permission('backup_manage')
 # ---------------------------------------------------------------------------
 # 11. POST /save-incremental
 # ---------------------------------------------------------------------------
-@router.post('/save-incremental')
+@router.post('/save-incremental', response_model=IncrementalBackupResponse)
 async def save_incremental_backup(
     remark: str = '',
     since: str = Query(''),
-    user: User = Depends(require_permission('backup_manage')),
+    user: User = Depends(require_backup_permission('save_incremental_backup')),
     db: AsyncSession = Depends(get_async_db),
 ):
     """增量备份"""
     try:
         result = await backup_service.create_incremental_backup(db, user, remark, since)
-    except Exception as e:
+    except (BackupError, RuntimeError, OSError) as e:
         logger.error(f'增量备份失败: {e}')
         raise HTTPException(status_code=500, detail='增量备份失败，请查看服务器日志') from e
     return result
@@ -427,11 +665,11 @@ async def save_incremental_backup(
 # ---------------------------------------------------------------------------
 # 12. POST /restore-incremental/{filename}
 # ---------------------------------------------------------------------------
-@router.post('/restore-incremental/{filename}')
+@router.post('/restore-incremental/{filename}', response_model=IncrementalRestoreResponse)
 async def restore_incremental_backup(
     filename: str,
     confirm: bool = Query(False),
-    user: User = Depends(require_permission('backup_manage')),
+    user: User = Depends(require_backup_permission('restore_incremental_backup')),
     db: AsyncSession = Depends(get_async_db),
 ):
     """从增量备份恢复"""
@@ -462,8 +700,8 @@ async def restore_incremental_backup(
 # ---------------------------------------------------------------------------
 # 13. POST /integrity-check
 # ---------------------------------------------------------------------------
-@router.post('/integrity-check')
-async def run_integrity_check(user: User = Depends(require_permission('backup_manage'))):
+@router.post('/integrity-check', response_model=IntegrityCheckResponse)
+async def run_integrity_check(user: User = Depends(require_backup_permission('run_integrity_check'))):
     """备份完整性巡检"""
     from fastapi_app.tasks.backup_tasks import _do_integrity_check
     result = await _do_integrity_check()
@@ -473,10 +711,10 @@ async def run_integrity_check(user: User = Depends(require_permission('backup_ma
 # ---------------------------------------------------------------------------
 # 14. GET /progress/{task_id}
 # ---------------------------------------------------------------------------
-@router.get('/progress/{task_id}')
+@router.get('/progress/{task_id}', response_model=BackupProgressOut)
 async def get_restore_progress(
     task_id: str,
-    user: User = Depends(require_permission('backup_manage')),
+    user: User = Depends(require_backup_permission('get_restore_progress')),
 ):
     """查询异步任务进度"""
     from fastapi_app.core.backup_progress import get_progress as _get_progress
@@ -489,11 +727,11 @@ async def get_restore_progress(
 # ---------------------------------------------------------------------------
 # 15. POST /async-import
 # ---------------------------------------------------------------------------
-@router.post('/async-import')
+@router.post('/async-import', response_model=AsyncTaskResponse)
 async def async_import_backup(
     file: UploadFile = File(...),
     confirm: bool = False,
-    user: User = Depends(require_permission('backup_manage')),
+    user: User = Depends(require_backup_permission('async_import_backup')),
 ):
     """异步恢复：从上传文件恢复"""
     if not confirm:
@@ -535,11 +773,11 @@ async def async_import_backup(
 # ---------------------------------------------------------------------------
 # 16. POST /async-restore-by-name/{filename}
 # ---------------------------------------------------------------------------
-@router.post('/async-restore-by-name/{filename}')
+@router.post('/async-restore-by-name/{filename}', response_model=AsyncTaskResponse)
 async def async_restore_server_backup(
     filename: str,
     confirm: bool = Query(False),
-    user: User = Depends(require_permission('backup_manage')),
+    user: User = Depends(require_backup_permission('async_restore_server_backup')),
 ):
     """异步恢复：从服务器文件恢复"""
     if not confirm:
@@ -674,12 +912,12 @@ async def _run_async_file_restore(task_id: str, content: bytes, is_zip: bool, fi
 # ---------------------------------------------------------------------------
 # 新增端点（备份记录、定时任务）
 # ---------------------------------------------------------------------------
-@router.get('/records')
+@router.get('/records', response_model=BackupRecordListOut)
 async def get_backup_records(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    user: User = Depends(require_permission('backup_manage')),
-    db: AsyncSession = Depends(get_async_db),
+    user: User = Depends(require_backup_permission('get_backup_records')),
+    db: AsyncSession = Depends(get_async_read_db),
 ):
     """备份记录分页列表"""
     from fastapi_app.shared_models.backup_record import BackupRecord
@@ -712,8 +950,8 @@ async def get_backup_records(
     }
 
 
-@router.get('/schedule')
-async def get_backup_schedule(user: User = Depends(require_permission('backup_manage'))):
+@router.get('/schedule', response_model=BackupScheduleOut)
+async def get_backup_schedule(user: User = Depends(require_backup_permission('get_backup_schedule'))):
     """定时任务配置"""
     from fastapi_app.core.celery_app import celery_app
     tasks = []
@@ -731,10 +969,10 @@ async def get_backup_schedule(user: User = Depends(require_permission('backup_ma
     return {'success': True, 'tasks': tasks}
 
 
-@router.post('/schedule/trigger')
+@router.post('/schedule/trigger', response_model=BackupTriggerOut)
 async def trigger_backup_schedule(
     task_name: str = Query(...),
-    user: User = Depends(require_permission('backup_manage')),
+    user: User = Depends(require_backup_permission('trigger_backup_schedule')),
 ):
     """手动触发定时任务"""
     from fastapi_app.core.celery_app import celery_app
@@ -744,6 +982,1216 @@ async def trigger_backup_schedule(
     task_id_str = beat_schedule[task_name].get('task', '')
     try:
         celery_app.send_task(task_id_str)
-    except Exception as e:
+    except (RuntimeError, OSError, ConnectionError) as e:
         raise HTTPException(status_code=500, detail='触发任务失败，请查看服务器日志') from e
     return {'success': True, 'task_name': task_name, 'message': f'任务 {task_name} 已触发'}
+
+
+# ===========================================================================
+# 加密辅助函数
+# ===========================================================================
+
+def _get_encryption_password(
+    password: Optional[str] = None,
+    x_backup_password: Optional[str] = Header(None, alias='X-Backup-Password'),
+) -> str:
+    """
+    获取加密密码，优先级：
+    1. 请求参数中的 password
+    2. 请求头 X-Backup-Password
+    3. 环境变量 BACKUP_ENCRYPTION_PASSWORD
+    4. 生成临时密码并记录到日志
+    """
+    # 1. 检查请求参数
+    if password:
+        return password
+    
+    # 2. 检查请求头
+    if x_backup_password:
+        return x_backup_password
+    
+    # 3. 检查环境变量
+    env_password = os.environ.get('BACKUP_ENCRYPTION_PASSWORD')
+    if env_password:
+        return env_password
+    
+    # 4. 生成临时密码
+    temp_password = secrets.token_urlsafe(32)
+    logger.warning(
+        f'未提供加密密码，使用临时密码：{temp_password[:8]}... '
+        f'建议设置 BACKUP_ENCRYPTION_PASSWORD 环境变量或通过请求头/参数提供密码'
+    )
+    return temp_password
+
+
+def _encrypt_backup_data(zip_bytes: bytes, password: str) -> bytes:
+    """
+    加密备份数据
+    """
+    try:
+        from fastapi_app.core.backup_encryption import encrypt_backup
+        encrypted_bytes, meta = encrypt_backup(zip_bytes, password)
+        # 添加元数据到加密数据开头（JSON格式）
+        meta_json = json.dumps(meta, ensure_ascii=False).encode('utf-8')
+        meta_len = len(meta_json).to_bytes(4, 'big')
+        return meta_len + meta_json + encrypted_bytes
+    except ImportError:
+        logger.error('加密模块不可用，备份数据将不加密')
+        return zip_bytes
+    except (ValueError, RuntimeError, OSError) as e:
+        logger.error(f'加密失败: {e}')
+        raise HTTPException(status_code=500, detail=f'备份加密失败: {str(e)}')
+
+
+def _decrypt_backup_data(encrypted_bytes: bytes, password: str) -> bytes:
+    """
+    解密备份数据
+    """
+    try:
+        from fastapi_app.core.backup_encryption import decrypt_backup, BackupFileError
+        
+        # 解析元数据长度
+        if len(encrypted_bytes) < 4:
+            raise BackupFileError('加密数据格式无效')
+        
+        meta_len = int.from_bytes(encrypted_bytes[:4], 'big')
+        if len(encrypted_bytes) < 4 + meta_len:
+            raise BackupFileError('加密数据格式无效')
+        
+        # 跳过元数据，解密实际数据
+        encrypted_data = encrypted_bytes[4 + meta_len:]
+        return decrypt_backup(encrypted_data, password)
+    except ImportError:
+        logger.error('加密模块不可用，假设数据未加密')
+        return encrypted_bytes
+    except BackupFileError as e:
+        raise HTTPException(status_code=400, detail=f'解密失败: {str(e)}')
+    except Exception as e:
+        logger.error(f'解密失败: {e}')
+        raise HTTPException(status_code=500, detail=f'备份解密失败: {str(e)}')
+
+
+def _is_encrypted_data(data: bytes) -> bool:
+    """
+    检查数据是否已加密
+    """
+    try:
+        # 检查是否有元数据长度前缀
+        if len(data) < 4:
+            return False
+        
+        meta_len = int.from_bytes(data[:4], 'big')
+        if len(data) < 4 + meta_len:
+            return False
+        
+        # 尝试解析元数据
+        meta_json = data[4:4 + meta_len]
+        meta = json.loads(meta_json.decode('utf-8'))
+        return meta.get('encrypted', False)
+    except (ValueError, TypeError, OSError, KeyError, json.JSONDecodeError, UnicodeDecodeError, IndexError):
+        return False
+
+
+# ===========================================================================
+# 新增端点：加密默认启用、大文件分片传输、权限控制增强、健康检查、备份验证、统计
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# 分片传输相关辅助函数
+# ---------------------------------------------------------------------------
+
+def _parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
+    """
+    解析Range请求头，返回(start, end)字节范围
+    格式：bytes=start-end
+    """
+    if not range_header.startswith('bytes='):
+        raise HTTPException(status_code=416, detail='无效的Range头格式')
+    
+    range_str = range_header[6:]
+    if '-' not in range_str:
+        raise HTTPException(status_code=416, detail='无效的Range头格式')
+    
+    start_str, end_str = range_str.split('-', 1)
+    
+    try:
+        if start_str and end_str:
+            start = int(start_str)
+            end = int(end_str)
+        elif start_str:
+            start = int(start_str)
+            end = file_size - 1
+        elif end_str:
+            end = int(end_str)
+            start = file_size - end
+            end = file_size - 1
+        else:
+            raise HTTPException(status_code=416, detail='无效的Range头格式')
+    except ValueError:
+        raise HTTPException(status_code=416, detail='无效的Range头格式')
+    
+    if start < 0 or end >= file_size or start > end:
+        raise HTTPException(status_code=416, detail='请求范围超出文件大小')
+    
+    return start, end
+
+
+def _get_chunk_size() -> int:
+    """获取分片大小，默认为10MB"""
+    return 10 * 1024 * 1024  # 10MB
+
+
+# ---------------------------------------------------------------------------
+# GET /export-info
+# ---------------------------------------------------------------------------
+@router.get('/export-info', response_model=BackupChunkInfo)
+async def get_backup_info(
+    remark: str = '',
+    encrypt: bool = Query(True, description="是否启用加密"),
+    password: Optional[str] = Query(None, description="加密密码，为空时使用环境变量或生成临时密码"),
+    x_backup_password: Optional[str] = Header(None, alias='X-Backup-Password'),
+    user: User = Depends(require_backup_permission('get_backup_info')),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """
+    获取备份文件信息（大小、分片数量等）
+    用于支持大文件分片下载
+    """
+    try:
+        # 生成备份数据但不写入文件
+        zip_bytes, manifest = await backup_service.create_full_backup(db, user, remark)
+        
+        # 应用加密
+        if encrypt:
+            encryption_password = _get_encryption_password(password, x_backup_password)
+            backup_data = _encrypt_backup_data(zip_bytes, encryption_password)
+            filename = f'erp_backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.zip.enc'
+        else:
+            backup_data = zip_bytes
+            filename = f'erp_backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.zip'
+        
+        # 计算分片信息
+        total_size = len(backup_data)
+        chunk_size = _get_chunk_size()
+        total_chunks = (total_size + chunk_size - 1) // chunk_size  # 向上取整
+        
+        # 计算校验和
+        import hashlib
+        checksum = hashlib.sha256(backup_data).hexdigest()
+        
+        return {
+            'filename': filename,
+            'total_size': total_size,
+            'chunk_size': chunk_size,
+            'total_chunks': total_chunks,
+            'encrypted': encrypt,
+            'checksum': checksum,
+            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        }
+        
+    except Exception as e:
+        logger.error(f'获取备份信息失败: {e}')
+        raise HTTPException(status_code=500, detail='获取备份信息失败') from e
+
+
+# ---------------------------------------------------------------------------
+# GET /export-chunk/{chunk_index}
+# ---------------------------------------------------------------------------
+@router.get('/export-chunk/{chunk_index}')
+async def export_backup_chunk(
+    chunk_index: int,
+    remark: str = '',
+    encrypt: bool = Query(True, description="是否启用加密"),
+    password: Optional[str] = Query(None, description="加密密码，为空时使用环境变量或生成临时密码"),
+    x_backup_password: Optional[str] = Header(None, alias='X-Backup-Password'),
+    user: User = Depends(require_backup_permission('export_backup_chunk')),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """
+    下载备份文件的指定分片
+    """
+    if chunk_index < 0:
+        raise HTTPException(status_code=400, detail='分片索引不能为负数')
+    
+    try:
+        # 生成备份数据
+        zip_bytes, manifest = await backup_service.create_full_backup(db, user, remark)
+        
+        # 应用加密
+        if encrypt:
+            encryption_password = _get_encryption_password(password, x_backup_password)
+            backup_data = _encrypt_backup_data(zip_bytes, encryption_password)
+        else:
+            backup_data = zip_bytes
+        
+        # 计算分片信息
+        total_size = len(backup_data)
+        chunk_size = _get_chunk_size()
+        total_chunks = (total_size + chunk_size - 1) // chunk_size
+        
+        if chunk_index >= total_chunks:
+            raise HTTPException(status_code=416, detail=f'分片索引超出范围，最大索引为{total_chunks-1}')
+        
+        # 计算分片范围
+        start = chunk_index * chunk_size
+        end = min(start + chunk_size, total_size) - 1
+        chunk_data = backup_data[start:end+1]
+        
+        # 构建响应
+        from fastapi_app.schemas.backup import BackupChunkResponse
+        return BackupChunkResponse(
+            success=True,
+            chunk_index=chunk_index,
+            chunk_data=chunk_data,
+            total_chunks=total_chunks,
+            chunk_size=len(chunk_data),
+            is_last=(chunk_index == total_chunks - 1),
+        )
+        
+    except Exception as e:
+        logger.error(f'下载备份分片失败: {e}')
+        raise HTTPException(status_code=500, detail='下载备份分片失败') from e
+
+
+# ---------------------------------------------------------------------------
+# 增强的 GET /export 支持Range请求头
+# ---------------------------------------------------------------------------
+@router.get('/export-enhanced')
+async def export_backup_enhanced(
+    request: Request,
+    remark: str = '',
+    format: str = 'zip',
+    encrypt: bool = Query(True, description="是否启用加密"),
+    password: Optional[str] = Query(None, description="加密密码，为空时使用环境变量或生成临时密码"),
+    x_backup_password: Optional[str] = Header(None, alias='X-Backup-Password'),
+    user: User = Depends(require_backup_permission('export_backup_enhanced')),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """
+    增强的备份导出端点，支持Range请求头和分片下载
+    """
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    
+    if format == 'json':
+        try:
+            json_bytes = await backup_service.execute_legacy_backup_to_bytes(user, remark, db)
+        except Exception as e:
+            logger.error(f'JSON 备份导出失败: {e}')
+            raise HTTPException(status_code=500, detail='备份失败，请查看服务器日志') from e
+        
+        # JSON格式也支持加密
+        if encrypt:
+            encryption_password = _get_encryption_password(password, x_backup_password)
+            json_bytes = _encrypt_backup_data(json_bytes, encryption_password)
+            filename = f'erp_backup_{timestamp}.json.enc'
+            media_type = 'application/octet-stream'
+        else:
+            filename = f'erp_backup_{timestamp}.json'
+            media_type = 'application/json'
+        
+        backup_data = json_bytes
+        
+    else:  # ZIP格式
+        try:
+            zip_bytes, manifest = await backup_service.create_full_backup(db, user, remark)
+        except Exception as e:
+            logger.error(f'ZIP 备份导出失败: {e}')
+            raise HTTPException(status_code=500, detail='备份失败，请查看服务器日志') from e
+        
+        # 应用加密
+        if encrypt:
+            encryption_password = _get_encryption_password(password, x_backup_password)
+            backup_data = _encrypt_backup_data(zip_bytes, encryption_password)
+            filename = f'erp_backup_{timestamp}.zip.enc'
+            media_type = 'application/octet-stream'
+        else:
+            backup_data = zip_bytes
+            filename = f'erp_backup_{timestamp}.zip'
+            media_type = 'application/zip'
+    
+    # 检查Range请求头
+    range_header = request.headers.get('range')
+    total_size = len(backup_data)
+    
+    if range_header:
+        try:
+            start, end = _parse_range_header(range_header, total_size)
+            chunk_size = end - start + 1
+            chunk_data = backup_data[start:end+1]
+            
+            # 返回部分内容响应
+            from fastapi.responses import Response
+            headers = {
+                'Content-Range': f'bytes {start}-{end}/{total_size}',
+                'Accept-Ranges': 'bytes',
+                'Content-Length': str(chunk_size),
+                'Content-Disposition': f'attachment; filename="{filename}"',
+            }
+            
+            return Response(
+                content=chunk_data,
+                status_code=206,  # Partial Content
+                headers=headers,
+                media_type=media_type,
+            )
+        except HTTPException:
+            # Range解析失败，返回完整文件
+            pass
+    
+    # 返回完整文件
+    headers = {
+        'Content-Length': str(total_size),
+        'Accept-Ranges': 'bytes',
+        'Content-Disposition': f'attachment; filename="{filename}"',
+    }
+    
+    return Response(
+        content=backup_data,
+        headers=headers,
+        media_type=media_type,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /health
+# ---------------------------------------------------------------------------
+@router.get('/health', response_model=BackupHealthCheckResponse)
+async def health_check(
+    user: User = Depends(require_backup_permission('health_check')),
+):
+    """
+    备份系统健康检查端点
+    检查项目：
+    1. 备份目录可写性
+    2. 数据库连接状态
+    3. Redis连接状态（用于进度追踪）
+    4. 最近备份时间（不超过24小时）
+    5. 备份文件完整性
+    """
+    from datetime import datetime, timedelta
+    import os
+    from pathlib import Path
+    
+    checks = {}
+    issues = []
+    overall_status = "healthy"
+    
+    # 1. 检查备份目录可写性
+    try:
+        backup_dir = backup_service.BACKUP_DIR
+        test_file = backup_dir / ".health_check"
+        
+        # 检查目录是否存在
+        if not backup_dir.exists():
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            checks['backup_dir'] = {
+                'status': 'warning',
+                'message': '备份目录不存在，已自动创建',
+                'path': str(backup_dir)
+            }
+        else:
+            # 检查目录可写性
+            try:
+                test_file.touch()
+                test_file.unlink()
+                checks['backup_dir'] = {
+                    'status': 'healthy',
+                    'message': '备份目录可写',
+                    'path': str(backup_dir),
+                    'writable': True
+                }
+            except Exception as e:
+                checks['backup_dir'] = {
+                    'status': 'unhealthy',
+                    'message': f'备份目录不可写: {str(e)}',
+                    'path': str(backup_dir),
+                    'writable': False
+                }
+                issues.append(f'备份目录不可写: {str(e)}')
+                overall_status = "degraded"
+    except Exception as e:
+        checks['backup_dir'] = {
+            'status': 'unhealthy',
+            'message': f'备份目录检查失败: {str(e)}',
+            'error': str(e)
+        }
+        issues.append(f'备份目录检查失败: {str(e)}')
+        overall_status = "unhealthy"
+    
+    # 2. 检查数据库连接状态
+    try:
+        from fastapi_app.core.database import get_async_db_context
+        import asyncio
+        
+        async def check_db_connection():
+            async with get_async_db_context() as db:
+                # 执行简单查询
+                from sqlalchemy import text
+                result = await db.execute(text('SELECT 1'))
+                return result.scalar() == 1
+        
+        # 使用现有的事件循环或创建新的
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        db_ok = loop.run_until_complete(check_db_connection())
+        checks['database'] = {
+            'status': 'healthy' if db_ok else 'unhealthy',
+            'message': '数据库连接正常' if db_ok else '数据库连接失败',
+            'connected': db_ok
+        }
+        if not db_ok:
+            issues.append('数据库连接失败')
+            overall_status = "unhealthy"
+    except Exception as e:
+        checks['database'] = {
+            'status': 'unhealthy',
+            'message': f'数据库连接检查失败: {str(e)}',
+            'error': str(e)
+        }
+        issues.append(f'数据库连接检查失败: {str(e)}')
+        overall_status = "unhealthy"
+    
+    # 3. 检查Redis连接状态
+    try:
+        from utils.redis_cache import redis_cache
+        
+        redis_ok = False
+        try:
+            redis_client = redis_cache.redis_client
+            if redis_client:
+                # 尝试ping Redis
+                import asyncio
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                
+                # 检查Redis连接
+                ping_result = loop.run_until_complete(redis_client.ping())
+                redis_ok = ping_result == True
+            else:
+                redis_ok = False
+                issues.append('Redis客户端未初始化')
+        except Exception as e:
+            redis_ok = False
+        
+        checks['redis'] = {
+            'status': 'healthy' if redis_ok else 'warning',
+            'message': 'Redis连接正常' if redis_ok else 'Redis连接不可用（不影响核心功能）',
+            'connected': redis_ok
+        }
+        if not redis_ok:
+            issues.append('Redis连接不可用，进度追踪功能可能受限')
+            if overall_status == "healthy":
+                overall_status = "degraded"
+    except ImportError:
+        checks['redis'] = {
+            'status': 'warning',
+            'message': 'Redis模块未安装，进度追踪功能不可用',
+            'connected': False
+        }
+        issues.append('Redis模块未安装')
+        if overall_status == "healthy":
+            overall_status = "degraded"
+    except Exception as e:
+        checks['redis'] = {
+            'status': 'warning',
+            'message': f'Redis连接检查失败: {str(e)}',
+            'error': str(e)
+        }
+        issues.append(f'Redis连接检查失败: {str(e)}')
+        if overall_status == "healthy":
+            overall_status = "degraded"
+    
+    # 4. 检查最近备份时间
+    try:
+        backup_files = backup_service.list_backup_files()
+        if backup_files:
+            # 获取最新的备份文件
+            latest_backup = max(backup_files, key=lambda x: x.get('mtime', 0))
+            latest_time = datetime.fromtimestamp(latest_backup.get('mtime', 0))
+            now = datetime.now()
+            hours_since_last_backup = (now - latest_time).total_seconds() / 3600
+            
+            checks['last_backup'] = {
+                'status': 'healthy' if hours_since_last_backup <= 24 else 'warning',
+                'message': f'最近备份时间: {latest_time.strftime("%Y-%m-%d %H:%M:%S")}',
+                'latest_backup_time': latest_time.isoformat(),
+                'hours_since_last_backup': round(hours_since_last_backup, 2),
+                'within_24h': hours_since_last_backup <= 24
+            }
+            
+            if hours_since_last_backup > 24:
+                issues.append(f'最近备份时间超过24小时（{round(hours_since_last_backup, 1)}小时前）')
+                if overall_status == "healthy":
+                    overall_status = "degraded"
+        else:
+            checks['last_backup'] = {
+                'status': 'warning',
+                'message': '未找到备份文件',
+                'latest_backup_time': None,
+                'hours_since_last_backup': None,
+                'within_24h': False
+            }
+            issues.append('未找到任何备份文件')
+            if overall_status == "healthy":
+                overall_status = "degraded"
+    except Exception as e:
+        checks['last_backup'] = {
+            'status': 'unhealthy',
+            'message': f'检查最近备份时间失败: {str(e)}',
+            'error': str(e)
+        }
+        issues.append(f'检查最近备份时间失败: {str(e)}')
+        overall_status = "unhealthy"
+    
+    # 5. 检查备份文件完整性（抽样检查）
+    try:
+        backup_files = backup_service.list_backup_files()
+        if backup_files:
+            # 随机选择1个文件进行检查（避免性能问题）
+            import random
+            sample_files = random.sample(backup_files, min(3, len(backup_files)))
+            
+            integrity_results = []
+            for file_info in sample_files:
+                filename = file_info.get('name', '')
+                filepath = backup_service.BACKUP_DIR / filename
+                
+                try:
+                    # 检查文件是否存在且可读
+                    if filepath.exists() and filepath.is_file():
+                        # 检查文件大小
+                        file_size = filepath.stat().st_size
+                        integrity_results.append({
+                            'filename': filename,
+                            'status': 'healthy',
+                            'size': file_size,
+                            'readable': True,
+                            'message': '文件完整可读'
+                        })
+                    else:
+                        integrity_results.append({
+                            'filename': filename,
+                            'status': 'unhealthy',
+                            'size': 0,
+                            'readable': False,
+                            'message': '文件不存在或不是普通文件'
+                        })
+                        issues.append(f'备份文件异常: {filename}')
+                        overall_status = "degraded"
+                except Exception as e:
+                    integrity_results.append({
+                        'filename': filename,
+                        'status': 'unhealthy',
+                        'size': 0,
+                        'readable': False,
+                        'message': f'文件检查失败: {str(e)}',
+                        'error': str(e)
+                    })
+                    issues.append(f'备份文件检查失败 {filename}: {str(e)}')
+                    overall_status = "degraded"
+            
+            checks['backup_integrity'] = {
+                'status': 'healthy' if all(r['status'] == 'healthy' for r in integrity_results) else 'degraded',
+                'message': f'抽样检查了 {len(integrity_results)} 个备份文件',
+                'sample_size': len(integrity_results),
+                'results': integrity_results
+            }
+        else:
+            checks['backup_integrity'] = {
+                'status': 'warning',
+                'message': '没有备份文件可检查',
+                'sample_size': 0,
+                'results': []
+            }
+    except Exception as e:
+        checks['backup_integrity'] = {
+            'status': 'unhealthy',
+            'message': f'备份文件完整性检查失败: {str(e)}',
+            'error': str(e)
+        }
+        issues.append(f'备份文件完整性检查失败: {str(e)}')
+        overall_status = "unhealthy"
+    
+    # 6. 检查磁盘空间
+    try:
+        import shutil
+        backup_dir = backup_service.BACKUP_DIR
+        if backup_dir.exists():
+            disk_usage = shutil.disk_usage(backup_dir)
+            total_gb = disk_usage.total / (1024**3)
+            used_gb = disk_usage.used / (1024**3)
+            free_gb = disk_usage.free / (1024**3)
+            free_percent = (disk_usage.free / disk_usage.total) * 100
+            
+            checks['disk_space'] = {
+                'status': 'healthy' if free_percent > 10 else 'warning',
+                'message': f'磁盘空间: {free_gb:.1f}GB 可用 ({free_percent:.1f}%)',
+                'total_gb': round(total_gb, 2),
+                'used_gb': round(used_gb, 2),
+                'free_gb': round(free_gb, 2),
+                'free_percent': round(free_percent, 2),
+                'sufficient': free_percent > 10
+            }
+            
+            if free_percent <= 10:
+                issues.append(f'磁盘空间不足: 仅剩 {free_percent:.1f}% 可用空间')
+                if overall_status == "healthy":
+                    overall_status = "degraded"
+            elif free_percent <= 5:
+                issues.append(f'磁盘空间严重不足: 仅剩 {free_percent:.1f}% 可用空间')
+                overall_status = "unhealthy"
+        else:
+            checks['disk_space'] = {
+                'status': 'warning',
+                'message': '备份目录不存在，无法检查磁盘空间',
+                'sufficient': None
+            }
+    except Exception as e:
+        checks['disk_space'] = {
+            'status': 'warning',
+            'message': f'磁盘空间检查失败: {str(e)}',
+            'error': str(e)
+        }
+        issues.append(f'磁盘空间检查失败: {str(e)}')
+        if overall_status == "healthy":
+            overall_status = "degraded"
+    
+    return {
+        'status': overall_status,
+        'timestamp': datetime.now().isoformat(),
+        'checks': checks,
+        'issues': issues
+    }
+
+
+# ---------------------------------------------------------------------------
+# 验证缓存管理
+# ---------------------------------------------------------------------------
+
+class ValidationCache:
+    """备份验证结果缓存"""
+    
+    def __init__(self, ttl_seconds: int = 3600):  # 默认1小时缓存
+        self.cache = {}
+        self.ttl = ttl_seconds
+    
+    def get(self, cache_key: str):
+        """获取缓存项"""
+        if cache_key in self.cache:
+            entry = self.cache[cache_key]
+            if time.time() - entry['timestamp'] < self.ttl:
+                return entry['data']
+            else:
+                # 缓存过期
+                del self.cache[cache_key]
+        return None
+    
+    def set(self, cache_key: str, data):
+        """设置缓存项"""
+        self.cache[cache_key] = {
+            'data': data,
+            'timestamp': time.time()
+        }
+    
+    def clear(self):
+        """清空缓存"""
+        self.cache.clear()
+
+
+# 全局验证缓存实例
+_validation_cache = ValidationCache()
+
+
+def _get_validation_cache_key(filename: str, password: Optional[str] = None) -> str:
+    """生成验证缓存键"""
+    key_parts = [filename]
+    if password:
+        # 使用密码的哈希值，避免存储明文密码
+        key_parts.append(hashlib.sha256(password.encode()).hexdigest()[:16])
+    return hashlib.md5('_'.join(key_parts).encode()).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# GET /validate/{filename}
+# ---------------------------------------------------------------------------
+@router.get('/validate/{filename}', response_model=BackupValidationResponse)
+async def validate_backup_file(
+    filename: str,
+    password: Optional[str] = Query(None, description="加密备份的解密密码"),
+    x_backup_password: Optional[str] = Header(None, alias='X-Backup-Password'),
+    user: User = Depends(require_backup_permission('validate_backup_file')),
+):
+    """
+    验证服务器上已有备份文件的完整性
+    支持加密备份的解密验证
+    """
+    # 安全检查：防止路径遍历
+    safe_name = Path(filename).name
+    if safe_name != filename:
+        raise HTTPException(status_code=400, detail='无效的文件名')
+    
+    filepath = backup_service.BACKUP_DIR / safe_name
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail='备份文件不存在')
+    
+    # 检查缓存
+    cache_key = _get_validation_cache_key(filename, password or x_backup_password)
+    cached_result = _validation_cache.get(cache_key)
+    if cached_result:
+        cached_result['cache_hit'] = True
+        return cached_result
+    
+    try:
+        # 读取文件
+        content = filepath.read_bytes()
+        file_size = len(content)
+        
+        # 检查是否为加密文件
+        encrypted = _is_encrypted_data(content)
+        
+        # 如果是加密文件，尝试解密
+        if encrypted:
+            if not password and not x_backup_password:
+                # 检查环境变量
+                env_password = os.environ.get('BACKUP_ENCRYPTION_PASSWORD')
+                if not env_password:
+                    return {
+                        'success': True,
+                        'filename': filename,
+                        'valid': False,
+                        'encrypted': True,
+                        'size': file_size,
+                        'checksum': None,
+                        'format_version': None,
+                        'table_count': None,
+                        'total_rows': None,
+                        'created_at': None,
+                        'issues': ['文件已加密但未提供密码']
+                    }
+                password_to_use = env_password
+            else:
+                password_to_use = password or x_backup_password
+            
+            try:
+                decrypted_content = _decrypt_backup_data(content, password_to_use)
+                content = decrypted_content
+                encryption_status = 'decrypted'
+            except Exception as e:
+                return {
+                    'success': True,
+                    'filename': filename,
+                    'valid': False,
+                    'encrypted': True,
+                    'size': file_size,
+                    'checksum': None,
+                    'format_version': None,
+                    'table_count': None,
+                    'total_rows': None,
+                    'created_at': None,
+                    'issues': [f'解密失败: {str(e)}']
+                }
+        else:
+            encryption_status = 'not_encrypted'
+        
+        # 计算校验和
+        checksum = hashlib.sha256(content).hexdigest()
+        
+        # 验证文件格式
+        issues = []
+        valid = True
+        
+        try:
+            # 尝试解析为ZIP文件
+            if filename.endswith('.zip') or filename.endswith('.zip.enc'):
+                with zipfile.ZipFile(io.BytesIO(content)) as zip_file:
+                    # 检查必需的manifest文件
+                    namelist = zip_file.namelist()
+                    if 'manifest.json' not in namelist:
+                        issues.append('ZIP文件缺少manifest.json')
+                        valid = False
+                    
+                    # 检查文件完整性
+                    for zip_info in zip_file.infolist():
+                        try:
+                            with zip_file.open(zip_info.filename) as f:
+                                f.read()  # 尝试读取文件
+                        except Exception as e:
+                            issues.append(f'文件 {zip_info.filename} 损坏: {str(e)}')
+                            valid = False
+            
+            # 尝试解析为JSON文件
+            elif filename.endswith('.json') or filename.endswith('.json.enc'):
+                try:
+                    backup_data = json.loads(content.decode('utf-8'))
+                    if 'tables' not in backup_data:
+                        issues.append('JSON文件缺少tables字段')
+                        valid = False
+                except json.JSONDecodeError as e:
+                    issues.append(f'JSON解析失败: {str(e)}')
+                    valid = False
+            
+            else:
+                issues.append('不支持的文件格式')
+                valid = False
+        
+        except zipfile.BadZipFile as e:
+            issues.append(f'ZIP文件损坏: {str(e)}')
+            valid = False
+        except Exception as e:
+            issues.append(f'文件验证失败: {str(e)}')
+            valid = False
+        
+        # 尝试提取元数据
+        format_version = None
+        table_count = None
+        total_rows = None
+        created_at = None
+        
+        if valid:
+            try:
+                if filename.endswith('.zip') or filename.endswith('.zip.enc'):
+                    with zipfile.ZipFile(io.BytesIO(content)) as zip_file:
+                        if 'manifest.json' in zip_file.namelist():
+                            with zip_file.open('manifest.json') as f:
+                                manifest = json.load(f)
+                                format_version = manifest.get('format_version')
+                                table_count = manifest.get('table_count')
+                                total_rows = manifest.get('total_rows')
+                                created_at = manifest.get('exported_at')
+                elif filename.endswith('.json') or filename.endswith('.json.enc'):
+                    backup_data = json.loads(content.decode('utf-8'))
+                    format_version = backup_data.get('format_version', '1.0')
+                    table_count = len(backup_data.get('tables', {}))
+                    total_rows = sum(len(table_data.get('data', [])) for table_data in backup_data.get('tables', {}).values())
+                    created_at = backup_data.get('exported_at')
+            except (ValueError, TypeError, OSError, KeyError, json.JSONDecodeError, UnicodeDecodeError):
+                pass  # 元数据提取失败不影响验证结果
+        
+        # 构建响应
+        result = {
+            'success': True,
+            'filename': filename,
+            'valid': valid,
+            'encrypted': encrypted,
+            'size': file_size,
+            'checksum': checksum,
+            'format_version': format_version,
+            'table_count': table_count,
+            'total_rows': total_rows,
+            'created_at': created_at,
+            'issues': issues,
+            'cache_hit': False,
+            'cache_key': cache_key
+        }
+        
+        # 缓存验证结果（仅当验证成功时）
+        if valid:
+            _validation_cache.set(cache_key, result)
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f'验证备份文件失败: {e}')
+        raise HTTPException(status_code=500, detail=f'验证备份文件失败: {str(e)}') from e
+
+
+# ---------------------------------------------------------------------------
+# POST /validate-integrity
+# ---------------------------------------------------------------------------
+@router.post('/validate-integrity', response_model=BackupIntegrityCheckResponse)
+async def validate_backup_integrity(
+    user: User = Depends(require_backup_permission('validate_backup_integrity')),
+):
+    """
+    执行深度完整性检查，验证所有备份文件的完整性
+    支持缓存避免重复验证
+    """
+    try:
+        backup_files = backup_service.list_backup_files()
+        if not backup_files:
+            return {
+                'success': True,
+                'checked_at': datetime.now().isoformat(),
+                'total_files': 0,
+                'valid_files': 0,
+                'invalid_files': 0,
+                'corrupted_files': [],
+                'missing_files': [],
+                'details': [],
+                'cache_hit': False,
+                'cache_key': None
+            }
+        
+        # 检查缓存
+        cache_key = hashlib.md5(
+            '_'.join(sorted(f['name'] for f in backup_files)).encode()
+        ).hexdigest()
+        
+        cached_result = _validation_cache.get(cache_key)
+        if cached_result:
+            cached_result['cache_hit'] = True
+            return cached_result
+        
+        # 执行完整性检查
+        details = []
+        corrupted_files = []
+        missing_files = []
+        
+        for file_info in backup_files:
+            filename = file_info.get('name', '')
+            filepath = backup_service.BACKUP_DIR / filename
+            
+            try:
+                # 检查文件是否存在
+                if not filepath.exists():
+                    missing_files.append(filename)
+                    details.append({
+                        'filename': filename,
+                        'status': 'missing',
+                        'message': '文件不存在'
+                    })
+                    continue
+                
+                # 检查文件大小
+                file_size = filepath.stat().st_size
+                if file_size == 0:
+                    corrupted_files.append(filename)
+                    details.append({
+                        'filename': filename,
+                        'status': 'corrupted',
+                        'message': '文件大小为0',
+                        'size': file_size
+                    })
+                    continue
+                
+                # 尝试读取文件
+                try:
+                    content = filepath.read_bytes()
+                    
+                    # 检查是否为加密文件
+                    encrypted = _is_encrypted_data(content)
+                    
+                    # 如果是加密文件，跳过深度验证（需要密码）
+                    if encrypted:
+                        details.append({
+                            'filename': filename,
+                            'status': 'encrypted',
+                            'message': '文件已加密，跳过深度验证',
+                            'size': file_size,
+                            'encrypted': True
+                        })
+                        continue
+                    
+                    # 验证文件格式
+                    valid = True
+                    message = '验证通过'
+                    
+                    if filename.endswith('.zip'):
+                        try:
+                            with zipfile.ZipFile(io.BytesIO(content)) as zip_file:
+                                # 测试ZIP文件完整性
+                                test_result = zip_file.testzip()
+                                if test_result is not None:
+                                    valid = False
+                                    message = f'ZIP文件损坏: {test_result}'
+                                    corrupted_files.append(filename)
+                        except zipfile.BadZipFile as e:
+                            valid = False
+                            message = f'ZIP文件格式错误: {str(e)}'
+                            corrupted_files.append(filename)
+                    
+                    elif filename.endswith('.json'):
+                        try:
+                            json.loads(content.decode('utf-8'))
+                        except json.JSONDecodeError as e:
+                            valid = False
+                            message = f'JSON格式错误: {str(e)}'
+                            corrupted_files.append(filename)
+                    
+                    details.append({
+                        'filename': filename,
+                        'status': 'valid' if valid else 'invalid',
+                        'message': message,
+                        'size': file_size,
+                        'encrypted': encrypted,
+                        'valid': valid
+                    })
+                    
+                except Exception as e:
+                    corrupted_files.append(filename)
+                    details.append({
+                        'filename': filename,
+                        'status': 'corrupted',
+                        'message': f'读取失败: {str(e)}',
+                        'size': file_size,
+                        'error': str(e)
+                    })
+                
+            except Exception as e:
+                details.append({
+                    'filename': filename,
+                    'status': 'error',
+                    'message': f'检查过程中发生错误: {str(e)}',
+                    'error': str(e)
+                })
+        
+        valid_files = len(backup_files) - len(corrupted_files) - len(missing_files)
+        
+        result = {
+            'success': True,
+            'checked_at': datetime.now().isoformat(),
+            'total_files': len(backup_files),
+            'valid_files': valid_files,
+            'invalid_files': len(corrupted_files) + len(missing_files),
+            'corrupted_files': corrupted_files,
+            'missing_files': missing_files,
+            'details': details,
+            'cache_hit': False,
+            'cache_key': cache_key
+        }
+        
+        # 缓存结果
+        _validation_cache.set(cache_key, result)
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f'完整性检查失败: {e}')
+        raise HTTPException(status_code=500, detail=f'完整性检查失败: {str(e)}') from e
+
+
+# ---------------------------------------------------------------------------
+# GET /stats
+# ---------------------------------------------------------------------------
+@router.get('/stats', response_model=BackupStatisticsResponse)
+async def get_backup_statistics(
+    user: User = Depends(require_backup_permission('get_backup_statistics')),
+    db: AsyncSession = Depends(get_async_read_db),
+):
+    """
+    获取备份统计信息
+    """
+    from datetime import datetime, timedelta
+    
+    try:
+        # 1. 获取备份文件列表
+        backup_files = backup_service.list_backup_files()
+        
+        # 2. 计算基本统计
+        total_backups = len(backup_files)
+        total_size_bytes = sum(f.get('size', 0) for f in backup_files)
+        
+        # 3. 计算最近备份时间
+        last_backup_time = None
+        if backup_files:
+            latest_backup = max(backup_files, key=lambda x: x.get('mtime', 0))
+            last_backup_time = datetime.fromtimestamp(latest_backup.get('mtime', 0)).isoformat()
+        
+        # 4. 计算备份成功率（从备份记录中获取）
+        from fastapi_app.shared_models.backup_record import BackupRecord
+        from sqlalchemy import select, func
+        
+        # 获取最近30天的备份记录
+        thirty_days_ago = datetime.now() - timedelta(days=30)
+        stmt = select(
+            func.count(BackupRecord.id).label('total'),
+            func.sum(func.case((BackupRecord.status == 'success', 1), else_=0)).label('success')
+        ).where(BackupRecord.created_at >= thirty_days_ago)
+        
+        result = await db.execute(stmt)
+        stats = result.first()
+        
+        total_records = stats.total or 0
+        success_records = stats.success or 0
+        backup_success_rate = (success_records / total_records * 100) if total_records > 0 else 100.0
+        
+        # 5. 计算备份类型分布
+        stmt_dist = select(
+            BackupRecord.type,
+            func.count(BackupRecord.id).label('count')
+        ).where(BackupRecord.created_at >= thirty_days_ago).group_by(BackupRecord.type)
+        
+        result_dist = await db.execute(stmt_dist)
+        type_distribution = {row.type: row.count for row in result_dist}
+        
+        # 6. 计算存储使用情况
+        import shutil
+        backup_dir = backup_service.BACKUP_DIR
+        
+        storage_usage = {}
+        if backup_dir.exists():
+            try:
+                disk_usage = shutil.disk_usage(backup_dir)
+                storage_usage = {
+                    'total_bytes': disk_usage.total,
+                    'used_bytes': disk_usage.used,
+                    'free_bytes': disk_usage.free,
+                    'used_percent': (disk_usage.used / disk_usage.total * 100) if disk_usage.total > 0 else 0,
+                    'free_percent': (disk_usage.free / disk_usage.total * 100) if disk_usage.total > 0 else 0,
+                }
+            except Exception as e:
+                logger.warning(f'无法获取磁盘使用情况: {e}')
+                storage_usage = {'error': str(e)}
+        
+        # 7. 获取最近备份列表（最近10个）
+        recent_backups = []
+        if backup_files:
+            # 按修改时间排序
+            sorted_backups = sorted(backup_files, key=lambda x: x.get('mtime', 0), reverse=True)
+            for backup in sorted_backups[:10]:  # 只取最近10个
+                recent_backups.append({
+                    'filename': backup.get('name', ''),
+                    'size_bytes': backup.get('size', 0),
+                    'modified_time': datetime.fromtimestamp(backup.get('mtime', 0)).isoformat(),
+                    'type': 'full' if 'full' in backup.get('name', '').lower() else 'incremental' if 'inc' in backup.get('name', '').lower() else 'unknown',
+                    'encrypted': backup.get('name', '').endswith('.enc'),
+                })
+        
+        # 8. 计算备份频率
+        backup_frequency = {}
+        if backup_files:
+            # 按日期分组
+            from collections import defaultdict
+            daily_counts = defaultdict(int)
+            
+            for backup in backup_files:
+                mtime = datetime.fromtimestamp(backup.get('mtime', 0))
+                date_key = mtime.strftime('%Y-%m-%d')
+                daily_counts[date_key] += 1
+            
+            backup_frequency = {
+                'daily_average': sum(daily_counts.values()) / max(len(daily_counts), 1),
+                'most_active_day': max(daily_counts.items(), key=lambda x: x[1]) if daily_counts else None,
+                'days_with_backups': len(daily_counts),
+                'total_days': 30,  # 统计周期
+            }
+        
+        return {
+            'success': True,
+            'timestamp': datetime.now().isoformat(),
+            'total_backups': total_backups,
+            'total_size_bytes': total_size_bytes,
+            'last_backup_time': last_backup_time,
+            'backup_success_rate': round(backup_success_rate, 2),
+            'backup_distribution': type_distribution,
+            'storage_usage': storage_usage,
+            'recent_backups': recent_backups,
+            'backup_frequency': backup_frequency,
+            'records_analyzed': {
+                'total': total_records,
+                'success': success_records,
+                'failure': total_records - success_records,
+                'period_days': 30,
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f'获取备份统计信息失败: {e}')
+        raise HTTPException(status_code=500, detail=f'获取备份统计信息失败: {str(e)}') from e

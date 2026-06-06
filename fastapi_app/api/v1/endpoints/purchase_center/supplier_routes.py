@@ -8,12 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.api.v1.endpoints.purchase_center.schemas import SupplierCreateRequest, SupplierUpdateRequest
 from fastapi_app.core.database import get_async_db as get_db, get_async_read_db as get_read_db
 from fastapi_app.core.deps import require_permission
+from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.logger import logger
+from fastapi_app.schemas.purchase_center import SupplierListResponse, SupplierMaterialResponse
 from fastapi_app.services import purchase_center_service as svc
 
 router = APIRouter()
 
-@router.get('/suppliers')
+@router.get('/suppliers', response_model=SupplierListResponse)
 async def api_get_suppliers(with_stats: str=Query('0'), db: AsyncSession=Depends(get_read_db), _user=Depends(require_permission('product_manage'))):
     try:
         suppliers = await svc.get_suppliers(db, with_stats=with_stats == '1')
@@ -25,24 +27,22 @@ async def api_get_suppliers(with_stats: str=Query('0'), db: AsyncSession=Depends
 @router.post('/suppliers')
 async def api_create_supplier(data: SupplierCreateRequest, db: AsyncSession=Depends(get_db), _user=Depends(require_permission('product_manage'))):
     try:
-        result = await svc.create_supplier(db, data.model_dump())
-        return {'success': True, 'supplier': result}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        async with db_transaction(db):
+            result = await svc.create_supplier(db, data.model_dump())
     except (SQLAlchemyError, RuntimeError):
         raise HTTPException(status_code=500, detail='操作失败，请稍后重试') from None
+    return {'success': True, 'supplier': result}
 
 @router.put('/suppliers/{supplier_id}')
 async def api_update_supplier(supplier_id: int, data: SupplierUpdateRequest, db: AsyncSession=Depends(get_db), _user=Depends(require_permission('product_manage'))):
     try:
-        result = await svc.update_supplier(db, supplier_id, data.model_dump())
-        return {'success': True, 'supplier': result}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        async with db_transaction(db):
+            result = await svc.update_supplier(db, supplier_id, data.model_dump())
     except (SQLAlchemyError, RuntimeError):
         raise HTTPException(status_code=500, detail='操作失败，请稍后重试') from None
+    return {'success': True, 'supplier': result}
 
-@router.get('/suppliers/{supplier_id}/materials')
+@router.get('/suppliers/{supplier_id}/materials', response_model=SupplierMaterialResponse)
 async def api_get_supplier_materials(supplier_id: int, db: AsyncSession=Depends(get_read_db), _user=Depends(require_permission('product_manage'))):
     try:
         materials = await svc.get_supplier_materials(db, supplier_id)

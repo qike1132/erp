@@ -4,11 +4,10 @@
 用于订单 CRUD 及审批流程的请求/响应模型。
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class OrderCreate(BaseModel):
-    """创建订单请求"""
     product_id: int = Field(..., gt=0, description="产品ID")
     quantity: int = Field(..., gt=0, le=9999999, description="订单数量")
     customer: str = Field(..., min_length=1, max_length=100, description="客户名称")
@@ -16,15 +15,26 @@ class OrderCreate(BaseModel):
     order_type: str = Field("regular", pattern="^(regular|custom)$", description="订单类型")
     country: str | None = Field(None, max_length=100, description="国家名称（定制订单必填）")
 
+    @model_validator(mode='after')
+    def validate_custom_order(self):
+        if self.order_type == 'custom' and not self.country:
+            raise ValueError('定制订单必须填写国家名称')
+        return self
+
 
 class OrderUpdate(BaseModel):
-    """更新订单请求"""
     product_id: int | None = Field(None, gt=0, description="产品ID")
     quantity: int | None = Field(None, gt=0, le=9999999, description="订单数量")
     customer: str | None = Field(None, min_length=1, max_length=100, description="客户名称")
     note: str | None = Field(None, max_length=500, description="备注")
     order_type: str | None = Field(None, pattern="^(regular|custom)$", description="订单类型")
     country: str | None = Field(None, max_length=100, description="国家名称")
+
+    @model_validator(mode='after')
+    def validate_custom_order(self):
+        if self.order_type == 'custom' and not self.country:
+            raise ValueError('定制订单必须填写国家名称')
+        return self
 
 
 class OrderDetailResponse(BaseModel):

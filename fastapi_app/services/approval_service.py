@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 def _utcnow() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
 
 
 async def get_approval_list(db: AsyncSession, status_filter: str = 'pending', search: str = '',
@@ -213,11 +213,8 @@ async def _handle_edit_approval(db: AsyncSession, approval: ApprovalRequest, ord
         raise ValueError('客户名称不能为空')
 
     if new_quantity != old_quantity:
-        product = await get_product_for_update(db, order.product_id)
         stock_change = new_quantity - old_quantity
-        if product.current_stock + stock_change < 0:
-            raise ValueError(f"库存不足，当前库存：{product.current_stock}")
-        product.current_stock += stock_change
+        product = await get_product_for_update(db, order.product_id)
 
         db.add(InventoryLog(
             product_id=order.product_id,
@@ -255,7 +252,7 @@ async def _handle_delete_approval(db: AsyncSession, approval: ApprovalRequest, o
             note=f'审批删除订单回滚抵扣，净退回{net_qty}件',
         ))
 
-    net_change = total_deducted - order.quantity
+    net_change = total_deducted
     if product.current_stock + net_change < 0:
         raise ValueError(f'删除订单将导致库存为负数（当前库存：{product.current_stock}，净变化：{net_change:+d}）')
     product.current_stock += net_change
@@ -275,9 +272,9 @@ async def _handle_delete_approval(db: AsyncSession, approval: ApprovalRequest, o
     db.add(InventoryLog(
         product_id=order.product_id,
         change_type='订单删除(审批)',
-        change_quantity=-order.quantity,
+        change_quantity=total_deducted,
         related_id=order.order_no,
-        note=f'审批通过删除订单：{order.order_no}',
+        note=f'审批通过删除订单：{order.order_no}，抵扣回滚数量：{total_deducted}',
     ))
 
     await db.delete(order)

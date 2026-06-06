@@ -7,12 +7,12 @@
             <h3 class="drw-title">计划详情</h3>
             <span v-if="planData" class="drw-plan-no">{{ planData.plan_no }}</span>
           </div>
-          <button class="drw-close" @click="close"><i class="fas fa-times" /></button>
+          <button class="drw-close" @click="close" aria-label="关闭"><i class="fas fa-times"  aria-hidden="true" /></button>
         </div>
 
-        <div v-if="isLoading" class="drw-state"><UiSpinner /> 加载中...</div>
+        <div v-if="isLoading" class="drw-state"><UiSpinner /> 加载中…</div>
         <div v-else-if="isError" class="drw-state">
-          <i class="fas fa-exclamation-circle" style="color:var(--color-danger-500)" /> 加载失败
+          <i class="fas fa-exclamation-circle" style="color:var(--color-danger-500)"  aria-hidden="true" /> 加载失败
         </div>
         <template v-else-if="planData">
           <div class="drw-body">
@@ -37,7 +37,7 @@
                 </div>
                 <div class="drw-info-item">
                   <span class="drw-info-label">创建时间</span>
-                  <span class="drw-info-value">{{ planData.create_time || '-' }}</span>
+                  <span class="drw-info-value">{{ formatDateTime(planData.create_time) }}</span>
                 </div>
                 <div class="drw-info-item">
                   <span class="drw-info-label">备注</span>
@@ -113,6 +113,7 @@ import { computed, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { planApi } from '@/api'
 import UiSpinner from '@/components/ui/UiSpinner.vue'
+import { formatDateTime } from '@/utils/format'
 
 const props = defineProps<{
   open: boolean
@@ -223,7 +224,7 @@ function detailStatusTxt(s: string) {
   display: flex; align-items: center; justify-content: center;
   color: var(--color-text-secondary);
   font-size: 0.8rem;
-  transition: all 0.2s;
+  transition: border-color 0.2s, color 0.2s, background 0.2s;
 }
 .drw-close:hover {
   border-color: var(--color-danger-500);
@@ -316,7 +317,7 @@ function detailStatusTxt(s: string) {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  transition: all 0.2s;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 .drw-detail-card:hover {
   border-color: var(--color-primary-200);
@@ -443,7 +444,7 @@ function detailStatusTxt(s: string) {
 
 .drawer-enter-active,
 .drawer-leave-active {
-  transition: all 0.3s ease;
+  transition: opacity 0.3s ease, transform 0.3s ease;
 }
 .drawer-enter-from,
 .drawer-leave-to {

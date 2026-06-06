@@ -1,122 +1,145 @@
 <template>
-  <div class="batch-page">
-    <UiPageHeader>批次号查询<template #description>按客户订单查询批次号及备货状态，仅显示白名单客户（MINISO）订单</template></UiPageHeader>
+  <div class="bt-container">
+    <div class="bt-card">
 
-    <UiCard>
-      <div class="bt-filterbar">
-        <UiInput v-model="filters.batch_no" placeholder="批次号" style="width: 140px" />
-        <UiInput v-model="filters.customer" placeholder="客户名称" style="width: 150px" />
-        <UiSelect v-model="filters.status" placeholder="状态" style="width: 120px" :options="statusOptions" />
-        <UiInput v-model="filters.keyword" placeholder="订单号搜索" style="width: 160px" />
-        <UiButton variant="primary" @click="refetch()"> 查询 </UiButton>
-        <UiButton variant="outline" @click="exportData"> 导出 CSV </UiButton>
+      <!-- 卡片头部 -->
+      <div class="bt-card-header">
+        <HeaderTabs />
+        <div class="bt-header-search">
+          <UiInput v-model="filters.keyword" placeholder="搜索" style="width: 160px" />
+          <UiButton variant="primary" @click="refetch()"> 查询 </UiButton>
+        </div>
+        <div class="bt-header-actions">
+          <span v-if="whitelistCustomers.length" class="bt-tab-group" role="tablist">
+            <button
+              v-for="c in whitelistCustomers"
+              :key="c"
+              role="tab"
+              :aria-selected="filters.customer === c"
+              class="bt-tab-btn"
+              :class="{ 'bt-tab-btn--active': filters.customer === c }"
+              @click="switchCustomer(c)"
+            >{{ c }}</button>
+          </span>
+          <button class="bt-whitelist-btn" @click="showWhitelistModal = true" aria-label="设置">
+            <i class="fas fa-cog"  aria-hidden="true" />
+          </button>
+          <!-- 白名单设置弹窗 -->
+          <div v-if="showWhitelistModal" class="bt-whitelist-overlay" @click.self="showWhitelistModal = false">
+            <div class="bt-whitelist-modal">
+              <div class="bt-whitelist-header">
+                <span>白名单客户</span>
+                <button class="bt-whitelist-close" @click="showWhitelistModal = false">&times;</button>
+              </div>
+              <div class="bt-whitelist-body">
+                <label v-for="c in allCustomers" :key="c" class="bt-whitelist-item">
+                  <input type="checkbox" :value="c" v-model="whitelistEdit" />
+                  <span>{{ c }}</span>
+                </label>
+              </div>
+              <div class="bt-whitelist-footer">
+                <UiButton variant="outline" @click="showWhitelistModal = false">取消</UiButton>
+                <UiButton variant="primary" @click="saveWhitelist" :disabled="whitelistSaving">保存</UiButton>
+              </div>
+            </div>
+          </div>
+          <!-- 完成批次确认弹窗 -->
+          <div v-if="showCompleteModal" class="bt-whitelist-overlay" @click.self="showCompleteModal = false">
+            <div class="bt-whitelist-modal">
+              <div class="bt-whitelist-header">
+                <span>确认完成批次</span>
+                <button class="bt-whitelist-close" @click="showCompleteModal = false">&times;</button>
+              </div>
+              <div class="bt-whitelist-body" style="padding: 20px; font-size: 14px; color: var(--color-text);">
+                确定要完成批次 <strong>{{ completingBatchNo }}</strong> 吗？完成后该批次将不再显示。
+              </div>
+              <div class="bt-whitelist-footer">
+                <UiButton variant="outline" @click="showCompleteModal = false">取消</UiButton>
+                <UiButton variant="primary" :disabled="completing" @click="confirmComplete">确定</UiButton>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <div v-if="isLoading && !result" class="flex justify-center py-12">
-        <UiSpinner />
-      </div>
-      <template v-else>
-      <div v-if="isFetching" class="bt-fetching-bar"><div class="bt-fetching-progress" /></div>
-      <UiTable>
-        <template #header>
-          <th class="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wider" style="width: 150px">
-            订单号
-          </th>
-          <th class="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wider" style="width: 120px">
-            客户
-          </th>
-          <th class="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wider" style="min-width: 130px">
-            产品名称
-          </th>
-          <th class="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wider" style="width: 120px">
-            SKU条码
-          </th>
-          <th class="px-4 py-3 text-right text-xs font-semibold text-text-secondary uppercase tracking-wider" style="width: 80px">
-            订单数量
-          </th>
-          <th class="px-4 py-3 text-right text-xs font-semibold text-text-secondary uppercase tracking-wider" style="width: 80px">
-            备货数量
-          </th>
-          <th class="px-4 py-3 text-right text-xs font-semibold text-text-secondary uppercase tracking-wider" style="width: 80px">
-            出货数量
-          </th>
-          <th class="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wider" style="width: 90px">
-            状态
-          </th>
-          <th class="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wider" style="width: 130px">
-            批次号
-          </th>
-        </template>
-        <tr
-          v-for="row in items"
-          :key="row.id"
-          class="border-b border-border-light hover:bg-surface transition-colors"
-        >
-          <td class="px-4 py-3 text-sm font-mono">
-            {{ row.order_no }}
-          </td>
-          <td class="px-4 py-3 text-sm">
-            {{ row.customer }}
-          </td>
-          <td class="px-4 py-3 text-sm">
-            {{ row.product_name ?? '-' }}
-          </td>
-          <td class="px-4 py-3 text-sm font-mono">
-            {{ row.product_barcode ?? '-' }}
-          </td>
-          <td class="px-4 py-3 text-sm text-right">
-            {{ row.quantity }}
-          </td>
-          <td class="px-4 py-3 text-sm text-right">
-            <span :class="row.deducted_qty >= row.quantity ? 'text-green-600 font-medium' : row.deducted_qty > 0 ? 'text-amber-600' : 'text-text-muted'">
-              {{ row.deducted_qty }}
-            </span>
-          </td>
-          <td class="px-4 py-3 text-sm text-right">
-            <span :class="row.shipped_qty > 0 ? 'text-blue-600 font-medium' : 'text-text-muted'">
-              {{ row.shipped_qty }}
-            </span>
-          </td>
-          <td class="px-4 py-3 text-sm">
-            <UiBadge :variant="statusVariant(row.status)">
-              {{ statusLabel(row.status) }}
-            </UiBadge>
-          </td>
-          <td class="px-4 py-3 text-sm font-mono">
-            {{ row.batch_no ?? '-' }}
-          </td>
-        </tr>
-        <template v-if="!items.length">
-          <tr>
-            <td colspan="9">
-              <UiEmpty text="暂无批次数据" />
-            </td>
-          </tr>
-        </template>
-      </UiTable>
-      </template>
+      <!-- 主内容 -->
+      <div class="bt-card-main">
+        <div v-if="isLoading && !result" class="bt-loading">
+          <UiSpinner />
+        </div>
+        <template v-else>
+          <div v-if="isFetching" class="bt-fetching-bar"><div class="bt-fetching-progress" /></div>
 
-      <UiPagination :current-page="page" :total-pages="totalPages" @update:current-page="handlePageChange" />
-    </UiCard>
+          <!-- 客户分组卡片 -->
+          <div v-if="grouped.length" class="bt-groups">
+            <div v-for="group in grouped" :key="group.customer" class="bt-group-card">
+              <div class="bt-group-header">
+                <span class="bt-group-name">{{ group.customer }}</span>
+                <span class="bt-group-count">{{ group.products.length }} 个产品</span>
+              </div>
+              <div v-for="prod in group.products" :key="prod.key" class="bt-product-row">
+                <div class="bt-product-info">
+                  <span class="bt-product-name">{{ prod.productName || '' }}</span>
+                  <span class="bt-product-barcode">{{ prod.productBarcode || '' }}</span>
+                </div>
+                <div class="bt-order-chips">
+                  <div
+                    v-for="order in prod.orders"
+                    :key="order.id"
+                    class="bt-chip"
+                    :class="chipStatusClass(order)"
+                  >
+                    <span class="bt-chip-date">{{ formatDate(order.order_date) }}</span>
+                    <span class="bt-chip-qty">{{ order.quantity }}</span>
+                    <input
+                      class="bt-batch-input"
+                      :class="{ 'bt-batch-input--has-value': order.batch_no }"
+                      :value="editingId === order.id ? editingValue : (order.batch_no ?? '')"
+                      :placeholder="editingId === order.id ? '批次号' : '批次号'"
+                      @focus="startEdit(order)"
+                      @input="onBatchInput($event, order)"
+                      @keydown.enter.prevent="saveBatchNo(order)"
+                      @keydown.escape="cancelEdit"
+                      @blur="saveBatchNo(order)"
+                    />
+                    <button
+                      v-if="order.batch_no"
+                      class="bt-complete-btn"
+                      @click.stop="openCompleteConfirm(order)"
+                    >完成</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div v-else class="bt-empty">
+            <i class="fas fa-inbox"  aria-hidden="true" />
+            <span>暂无批次数据</span>
+          </div>
+        </template>
+      </div>
+
+      <!-- 分页 -->
+      <div class="bt-pagination">
+        <UiPagination :current-page="page" :total-pages="totalPages" @update:current-page="handlePageChange" />
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, watch } from 'vue'
 import { useQuery, keepPreviousData } from '@tanstack/vue-query'
-import { batchApi } from '@/api'
+import { batchApi, orderBatchApi, customerApi } from '@/api'
 import type { BatchQueryItem } from '@/types'
-import UiCard from '@/components/ui/UiCard.vue'
+import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 import UiInput from '@/components/ui/UiInput.vue'
-import UiSelect from '@/components/ui/UiSelect.vue'
 import UiButton from '@/components/ui/UiButton.vue'
-import UiTable from '@/components/ui/UiTable.vue'
-import UiBadge from '@/components/ui/UiBadge.vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
-import UiEmpty from '@/components/ui/UiEmpty.vue'
 import UiSpinner from '@/components/ui/UiSpinner.vue'
 
 import { showToast } from '@/composables/useToast'
+import { formatDate } from '@/utils/format'
 
 const page = ref(1)
 const perPage = ref(20)
@@ -124,29 +147,82 @@ const total = ref(0)
 
 const filters = reactive({ batch_no: '', customer: '', status: '', keyword: '' })
 
-const statusOptions = [
-  { value: '', label: '全部' },
-  { value: '待备货', label: '待备货' },
-  { value: '部分备货', label: '部分备货' },
-  { value: '已备货', label: '已备货' },
-  { value: '待出货', label: '待出货' },
-  { value: '已出货', label: '已出货' },
-  { value: '批次已完成', label: '批次已完成' },
-]
+// ---- Whitelist customers ----
+const { data: whitelistData, refetch: refetchWhitelist } = useQuery({
+  queryKey: ['order-batch-whitelist'],
+  queryFn: () => orderBatchApi.whitelist(),
+  staleTime: 300_000,
+})
+const whitelistCustomers = computed<string[]>(() => whitelistData.value?.customers ?? [])
 
-const statusVariant = (s: string | null): string => {
-  if (!s) return 'default'
-  if (s === '已出货' || s === '批次已完成') return 'completed'
-  if (s === '待备货') return 'pending'
-  if (s === '部分备货' || s === '待出货') return 'warning'
-  if (s === '已备货') return 'info'
-  return 'default'
+// Auto-select first whitelist customer
+watch(whitelistCustomers, (list) => {
+  if (list.length && (!filters.customer || !list.includes(filters.customer))) {
+    filters.customer = list[0]
+  }
+}, { immediate: true })
+
+// ---- Whitelist modal ----
+const showWhitelistModal = ref(false)
+const whitelistEdit = ref<string[]>([])
+const whitelistSaving = ref(false)
+
+// Fetch all active customers from customer management API
+const { data: activeNamesData } = useQuery({
+  queryKey: ['customer-active-names'],
+  queryFn: () => customerApi.activeNames(),
+  staleTime: 300_000,
+})
+const allCustomers = computed<string[]>(() =>
+  (activeNamesData.value ?? []).map((c: { name: string }) => c.name)
+)
+
+// When modal opens, populate edit list from current whitelist
+watch(showWhitelistModal, (val) => {
+  if (val) {
+    whitelistEdit.value = [...whitelistCustomers.value]
+  }
+})
+
+async function saveWhitelist() {
+  whitelistSaving.value = true
+  try {
+    await orderBatchApi.setWhitelist(whitelistEdit.value)
+    showToast('白名单已更新', 'success')
+    showWhitelistModal.value = false
+    await refetchWhitelist()
+    refetch()
+  } catch {
+    showToast('白名单更新失败', 'error')
+  } finally {
+    whitelistSaving.value = false
+  }
 }
 
-const statusLabel = (s: string | null): string => s ?? '-'
+function switchCustomer(customer: string) {
+  filters.customer = customer
+  page.value = 1
+  refetch()
+}
+
+// ---- Status options ----
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / perPage.value)))
 
+
+
+function chipStatusClass(order: BatchQueryItem): string {
+  const s = order.status
+  if (!s) return ''
+  if (s === '已出货' || s === '批次已完成') return 'bt-chip--completed'
+  if (s === '已备货') return 'bt-chip--stocked'
+  if (s === '部分备货') return 'bt-chip--partial'
+  if (s === '待出货') return 'bt-chip--shipping'
+  if (s === '待备货') return 'bt-chip--pending'
+  return ''
+}
+
+// ---- Main data query ----
 const {
   data: result,
   isLoading,
@@ -170,64 +246,614 @@ const {
 
 const items = computed<BatchQueryItem[]>(() => (result.value as any)?.data ?? [])
 
+// ---- Grouped data: customer → product → orders ----
+interface ProductGroup {
+  key: string
+  productName: string | null
+  productBarcode: string | null
+  orders: BatchQueryItem[]
+}
+interface CustomerGroup {
+  customer: string
+  products: ProductGroup[]
+}
+
+const grouped = computed<CustomerGroup[]>(() => {
+  const wl = whitelistCustomers.value
+  const wlSet = new Set(wl)
+  const whitelistLoaded = wl.length > 0 || whitelistData.value !== undefined
+  const map = new Map<string, Map<string, BatchQueryItem[]>>()
+  const order: string[] = []
+
+  for (const item of items.value) {
+    if (whitelistLoaded && !wlSet.has(item.customer)) continue
+    const cKey = item.customer
+    if (!map.has(cKey)) {
+      map.set(cKey, new Map())
+      order.push(cKey)
+    }
+    const pMap = map.get(cKey)!
+    const pKey = `${item.product_id}`
+    if (!pMap.has(pKey)) {
+      pMap.set(pKey, [])
+    }
+    pMap.get(pKey)!.push(item)
+  }
+
+  return order.map(c => ({
+    customer: c,
+    products: Array.from(map.get(c)!.entries()).map(([pKey, orders]) => ({
+      key: pKey,
+      productName: orders[0].product_name,
+      productBarcode: orders[0].product_barcode,
+      orders: orders.sort((a, b) => (a.order_date ?? '').localeCompare(b.order_date ?? '')),
+    })),
+  }))
+})
+
 function handlePageChange(p: number) {
   page.value = p
   refetch()
 }
 
-function exportData() {
-  if (!items.value.length) {
-    showToast('无数据可导出', 'warning')
+// ---- Batch number inline editing ----
+const editingId = ref<number | null>(null)
+const editingValue = ref('')
+const editingOriginal = ref('')
+const saving = ref(false)
+
+function startEdit(order: BatchQueryItem) {
+  editingId.value = order.id
+  editingValue.value = order.batch_no ?? ''
+  editingOriginal.value = order.batch_no ?? ''
+}
+
+function onBatchInput(event: Event, order: BatchQueryItem) {
+  if (editingId.value !== order.id) {
+    editingId.value = order.id
+    editingOriginal.value = order.batch_no ?? ''
+  }
+  editingValue.value = (event.target as HTMLInputElement).value
+}
+
+function cancelEdit() {
+  editingId.value = null
+  editingValue.value = ''
+}
+
+async function saveBatchNo(order: BatchQueryItem) {
+  if (saving.value) return
+  const newValue = editingValue.value.trim()
+  // Only save if value actually changed from the original
+  if (newValue === editingOriginal.value) {
+    editingId.value = null
     return
   }
-  const headers = ['订单号', '客户', '产品名称', 'SKU条码', '订单数量', '备货数量', '出货数量', '状态', '批次号']
-  let csv = '\uFEFF' + headers.join(',') + '\n'
-  items.value.forEach((r) => {
-    csv +=
-      [r.order_no, r.customer, r.product_name ?? '', r.product_barcode ?? '', r.quantity, r.deducted_qty, r.shipped_qty, r.status ?? '', r.batch_no ?? '']
-        .map((c) => {
-          let s = String(c).replace(/"/g, '""')
-          if (/^[=+\-@\t\r]/.test(s)) s = "'" + s
-          return `"${s}"`
-        })
-        .join(',') + '\n'
-  })
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-  const link = document.createElement('a')
-  link.href = URL.createObjectURL(blob)
-  link.download = `批次号查询_${new Date().toISOString().slice(0, 10)}.csv`
-  link.click()
-  URL.revokeObjectURL(link.href)
+  if (!newValue) {
+    editingId.value = null
+    return
+  }
+  saving.value = true
+  try {
+    await orderBatchApi.updateBatchNo(order.id, { batch_no: newValue || null })
+    showToast('批次号已更新', 'success')
+    editingId.value = null
+    refetch()
+  } catch {
+    showToast('批次号更新失败', 'error')
+  } finally {
+    saving.value = false
+  }
+}
+
+// ---- Complete batch ----
+const showCompleteModal = ref(false)
+const completingBatchNo = ref('')
+const completing = ref(false)
+
+function openCompleteConfirm(order: BatchQueryItem) {
+  completingBatchNo.value = order.batch_no!
+  showCompleteModal.value = true
+}
+
+async function confirmComplete() {
+  completing.value = true
+  try {
+    await orderBatchApi.completeBatch({ batch_no: completingBatchNo.value })
+    showToast('批次已完成', 'success')
+    showCompleteModal.value = false
+    refetch()
+  } catch {
+    showToast('批次完成操作失败', 'error')
+  } finally {
+    completing.value = false
+  }
 }
 </script>
 
 <style scoped>
-.bt-filterbar {
+/* ===== 容器 (Section 1) ===== */
+.bt-container {
+  padding: 8px;
+  margin: 0 auto;
+  height: 100%;
   display: flex;
-  gap: 10px;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-  align-items: center;
+  flex-direction: column;
+  box-sizing: border-box;
 }
 
+/* ===== 卡片 (Section 3) ===== */
+.bt-card {
+  background: white;
+  border-radius: 18px;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
+  transition: box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.bt-card:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  transform: translateY(-2px);
+}
+
+/* ===== 卡片头部 (Section 4) ===== */
+.bt-card-header {
+  padding: 14px 24px 10px;
+  background: transparent;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.bt-card-header :deep(.ht-bar) {
+  width: auto;
+  margin: 0;
+}
+
+.bt-card-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.bt-card-title-group h3 {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text);
+  margin: 0;
+}
+.bt-card-title-group small {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+/* ===== 图标色块 (Section 8) ===== */
+.bt-icon-box {
+  width: 46px;
+  height: 46px;
+  border-radius: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 19px;
+  flex-shrink: 0;
+}
+.bt-icon-blue {
+  background: linear-gradient(135deg, var(--color-primary-100), var(--color-primary-200));
+  color: var(--color-primary-600);
+}
+
+/* ===== 头部操作区 ===== */
+.bt-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  order: 2;
+}
+
+.bt-header-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* ===== TAB 切换栏 (Section 23) ===== */
+.bt-tab-group {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: white;
+  border: 1px solid var(--color-border-light);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
+}
+
+.bt-tab-btn {
+  padding: 8px 14px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+  font-family: inherit;
+}
+.bt-tab-btn:hover {
+  background: var(--color-primary-50);
+  color: var(--color-primary-600);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  transform: translateY(-1px);
+}
+.bt-tab-btn--active {
+  background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
+  color: var(--color-primary-700);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 8px rgba(91, 141, 239, 0.2);
+  transform: translateY(-1px);
+}
+
+/* ===== 卡片主体 (Section 3 overflow) ===== */
+.bt-card-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ===== 加载状态 (Section 18) ===== */
+.bt-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 40px 20px;
+}
+
+/* ===== 空状态 (Section 18) ===== */
+.bt-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 40px 20px;
+  font-size: 14px;
+  color: var(--color-text-muted);
+}
+.bt-empty i {
+  font-size: 28px;
+  opacity: 0.5;
+}
+
+/* ===== 客户分组卡片 ===== */
+.bt-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 0 24px 16px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.bt-group-card {
+  border: 2px solid var(--color-border-light, #e2e8f0);
+  border-radius: 12px;
+  transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+.bt-group-card:hover {
+  border-color: var(--color-primary-500);
+  background: var(--color-primary-50);
+  box-shadow: 0 2px 8px rgba(91, 141, 239, 0.15);
+}
+
+.bt-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
+}
+.bt-group-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+.bt-group-count {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+/* ===== 产品行 ===== */
+.bt-product-row {
+  display: flex;
+  align-items: flex-start;
+  padding: 12px 16px;
+  gap: 16px;
+  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
+  transition: background 0.3s ease, transform 0.3s ease;
+}
+.bt-product-row:last-child {
+  border-bottom: none;
+}
+.bt-product-row:hover {
+  background: var(--color-primary-50);
+  transform: translateX(4px);
+}
+
+.bt-product-info {
+  flex-shrink: 0;
+  width: 160px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 2px;
+  padding-top: 22px;
+}
+.bt-product-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.bt-product-barcode {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--color-text-muted);
+}
+
+/* ===== 订单 Chips (Section 13 列表项风格) ===== */
+.bt-order-chips {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.bt-chip {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  font-size: 13px;
+  background: white;
+  border: 2px solid var(--color-border-light, #e2e8f0);
+  transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+  white-space: nowrap;
+}
+.bt-chip:hover {
+  border-color: var(--color-primary-500);
+  background: var(--color-primary-50);
+  box-shadow: 0 2px 8px rgba(91, 141, 239, 0.15);
+}
+
+/* Chip 状态色 (Section 17 Status Badge) */
+.bt-chip--pending {
+  border-color: var(--color-border-light, #e2e8f0);
+}
+.bt-chip--partial {
+  border-color: var(--color-info-200);
+  background: var(--color-info-50);
+}
+.bt-chip--stocked {
+  border-color: var(--color-primary-200);
+  background: var(--color-primary-50);
+}
+.bt-chip--shipping {
+  border-color: var(--color-purple-200);
+  background: var(--color-purple-50);
+}
+.bt-chip--completed {
+  border-color: var(--color-success-200);
+  background: var(--color-success-50);
+}
+
+.bt-chip-date {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+.bt-chip-qty {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* ===== 批次号标签 ===== */
+/* ===== 批次号输入 ===== */
+.bt-batch-input {
+  width: 120px;
+  padding: 2px 8px;
+  font-size: 12px;
+  color: var(--color-heading);
+  background: white;
+  border: 1px dashed var(--color-border, #d1d5db);
+  border-radius: 6px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  outline: none;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+.bt-batch-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
+.bt-batch-input::placeholder {
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+.bt-batch-input:focus {
+  border-color: var(--color-primary-400);
+  border-style: solid;
+  box-shadow: 0 0 0 2px rgba(91, 141, 239, 0.15);
+}
+.bt-batch-input--has-value {
+  border-style: solid;
+  border-color: var(--color-primary-200);
+  color: var(--color-primary-700);
+  font-weight: 600;
+}
+
+/* ===== 完成批次按钮 ===== */
+.bt-complete-btn {
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-success-600, #16a34a);
+  background: var(--color-success-50, #f0fdf4);
+  border: 1px solid var(--color-success-200, #bbf7d0);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.bt-complete-btn:hover {
+  background: var(--color-success-100, #dcfce7);
+  border-color: var(--color-success-400, #4ade80);
+  transform: translateY(-1px);
+}
+
+/* ===== 白名单设置按钮 ===== */
+.bt-whitelist-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: var(--color-primary-50);
+  color: var(--color-primary-600);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+.bt-whitelist-btn:hover {
+  background: var(--color-primary-100);
+  transform: translateY(-1px);
+}
+
+/* ===== 白名单弹窗 ===== */
+.bt-whitelist-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.bt-whitelist-modal {
+  background: white;
+  border-radius: 16px;
+  width: 360px;
+  max-height: 480px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+}
+.bt-whitelist-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  font-size: 15px;
+  font-weight: 700;
+  border-bottom: 1px solid var(--color-border-light);
+}
+.bt-whitelist-close {
+  background: none;
+  border: none;
+  font-size: 20px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.bt-whitelist-body {
+  padding: 12px 20px;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.bt-whitelist-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 14px;
+  color: var(--color-text);
+  cursor: pointer;
+}
+.bt-whitelist-item input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-primary-500);
+  cursor: pointer;
+}
+.bt-whitelist-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--color-border-light);
+}
+
+/* ===== 分页 ===== */
+.bt-pagination {
+  padding: 12px 24px;
+  display: flex;
+  justify-content: center;
+  border-top: 1px solid var(--color-border-light, #f1f5f9);
+  flex-shrink: 0;
+}
+
+/* ===== Fetching bar ===== */
 .bt-fetching-bar {
   height: 2px;
-  background: var(--color-primary-100, #e0f2fe);
+  background: var(--color-primary-100);
   overflow: hidden;
+  margin: 0 24px;
   border-radius: 1px;
-  margin-bottom: 8px;
 }
-
 .bt-fetching-progress {
   height: 100%;
   width: 30%;
-  background: var(--color-primary-500, #3b82f6);
+  background: var(--color-primary-500);
   border-radius: 1px;
   animation: bt-progress-slide 1s ease-in-out infinite;
 }
-
 @keyframes bt-progress-slide {
   0% { transform: translateX(-100%); }
   100% { transform: translateX(400%); }
+}
+
+/* ===== 响应式 ===== */
+@media (max-width: 768px) {
+  .bt-product-row {
+    flex-direction: column;
+    gap: 8px;
+  }
+  .bt-product-info {
+    width: auto;
+  }
+  .bt-card-header {
+    padding: 12px 16px 8px;
+  }
+  .bt-filterbar {
+    padding: 0 16px 12px;
+  }
+  .bt-groups {
+    padding: 0 16px 12px;
+  }
 }
 </style>

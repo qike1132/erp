@@ -13,7 +13,6 @@ from fastapi_app.shared_models import (
     ProductAccessory,
     ProductFabric,
     ProductMaterial,
-    ProductPackaging,
     PurchaseOrder,
     PurchaseOrderItem,
     Supplier,
@@ -123,7 +122,7 @@ async def _sync_supplier_info(db: AsyncSession, supplier, old_name: str):
     new_address = supplier.address
     name_changed = old_name != new_name
 
-    for model_cls in (ProductMaterial, ProductFabric, ProductAccessory, ProductPackaging):
+    for model_cls in (ProductMaterial, ProductFabric, ProductAccessory):
         await db.execute(
             update(model_cls).where(model_cls.supplier_id == sid).values(supplier_name=new_name)
         )
@@ -188,8 +187,6 @@ async def delete_supplier(db: AsyncSession, supplier_id: int) -> dict:
         await db.execute(select(ProductFabric).where(ProductFabric.supplier_id == supplier_id).limit(1))
     ).scalar_one_or_none() or (
         await db.execute(select(ProductAccessory).where(ProductAccessory.supplier_id == supplier_id).limit(1))
-    ).scalar_one_or_none() or (
-        await db.execute(select(ProductPackaging).where(ProductPackaging.supplier_id == supplier_id).limit(1))
     ).scalar_one_or_none()
 
     has_orders = (

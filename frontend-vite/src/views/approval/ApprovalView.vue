@@ -9,22 +9,22 @@
       <!-- 统计卡片 -->
       <div v-if="stats" class="ap-stats">
         <div class="ap-stat-card ap-stat-pending">
-          <div class="ap-stat-icon"><i class="fas fa-clock" /></div>
+          <div class="ap-stat-icon"><i class="fas fa-clock"  aria-hidden="true" /></div>
           <div class="ap-stat-value">{{ stats.pending ?? 0 }}</div>
           <div class="ap-stat-label">待审批</div>
         </div>
         <div class="ap-stat-card ap-stat-approved">
-          <div class="ap-stat-icon"><i class="fas fa-check-circle" /></div>
+          <div class="ap-stat-icon"><i class="fas fa-check-circle"  aria-hidden="true" /></div>
           <div class="ap-stat-value">{{ stats.approved ?? 0 }}</div>
           <div class="ap-stat-label">已通过</div>
         </div>
         <div class="ap-stat-card ap-stat-rejected">
-          <div class="ap-stat-icon"><i class="fas fa-times-circle" /></div>
+          <div class="ap-stat-icon"><i class="fas fa-times-circle"  aria-hidden="true" /></div>
           <div class="ap-stat-value">{{ stats.rejected ?? 0 }}</div>
           <div class="ap-stat-label">已驳回</div>
         </div>
         <div class="ap-stat-card ap-stat-total">
-          <div class="ap-stat-icon"><i class="fas fa-list-check" /></div>
+          <div class="ap-stat-icon"><i class="fas fa-list-check"  aria-hidden="true" /></div>
           <div class="ap-stat-value">{{ stats.total ?? 0 }}</div>
           <div class="ap-stat-label">合计</div>
         </div>
@@ -33,9 +33,9 @@
       <!-- 搜索与筛选 -->
       <div class="ap-filter-bar">
         <div class="ap-search-wrapper">
-          <i class="fas fa-search ap-search-icon" />
+          <i class="fas fa-search ap-search-icon"  aria-hidden="true" />
           <input v-model="searchTerm" class="ap-search-input" placeholder="搜索类型或摘要..." @input="onSearchInput" />
-          <button v-if="searchTerm" class="ap-search-clear" @click="clearSearch"><i class="fas fa-times" /></button>
+          <button v-if="searchTerm" class="ap-search-clear" @click="clearSearch" aria-label="关闭"><i class="fas fa-times"  aria-hidden="true" /></button>
         </div>
         <div class="ap-filter-group">
           <button
@@ -52,12 +52,12 @@
       <!-- 表格 -->
       <div class="ap-table-wrap">
         <div v-if="isLoading" class="ap-empty">
-          <i class="fas fa-spinner fa-spin" />
-          <span>加载中...</span>
+          <i class="fas fa-spinner fa-spin"  aria-hidden="true" />
+          <span>加载中…</span>
         </div>
         <template v-else-if="items.length === 0">
           <div class="ap-empty">
-            <i class="fas fa-clipboard-check" />
+            <i class="fas fa-clipboard-check"  aria-hidden="true" />
             <span>暂无审批记录</span>
           </div>
         </template>
@@ -86,7 +86,7 @@
               <td>
                 <template v-if="row.status === 'pending'">
                   <button class="ap-action-btn ap-action-success" :disabled="actionId === row.id" @click="handleApprove(row)">
-                    {{ actionId === row.id ? '处理中...' : '通过' }}
+                    {{ actionId === row.id ? '处理中…' : '通过' }}
                   </button>
                   <button class="ap-action-btn ap-action-danger" @click="openRejectDialog(row)">驳回</button>
                 </template>
@@ -98,11 +98,11 @@
 
         <!-- Pagination -->
         <div v-if="totalItems > perPage" class="ap-pagination">
-          <button class="ap-page-btn" :disabled="currentPage <= 1" @click="goPage(1)"><i class="fas fa-angle-double-left" /></button>
-          <button class="ap-page-btn" :disabled="currentPage <= 1" @click="goPage(currentPage - 1)"><i class="fas fa-angle-left" /></button>
+          <button class="ap-page-btn" :disabled="currentPage <= 1" @click="goPage(1)" aria-label="首页"><i class="fas fa-angle-double-left"  aria-hidden="true" /></button>
+          <button class="ap-page-btn" :disabled="currentPage <= 1" @click="goPage(currentPage - 1)" aria-label="上一页"><i class="fas fa-angle-left"  aria-hidden="true" /></button>
           <span class="ap-page-info">{{ currentPage }} / {{ totalPages }}</span>
-          <button class="ap-page-btn" :disabled="currentPage >= totalPages" @click="goPage(currentPage + 1)"><i class="fas fa-angle-right" /></button>
-          <button class="ap-page-btn" :disabled="currentPage >= totalPages" @click="goPage(totalPages)"><i class="fas fa-angle-double-right" /></button>
+          <button class="ap-page-btn" :disabled="currentPage >= totalPages" @click="goPage(currentPage + 1)"><i class="fas fa-angle-right"  aria-hidden="true" /></button>
+          <button class="ap-page-btn" :disabled="currentPage >= totalPages" @click="goPage(totalPages)"><i class="fas fa-angle-double-right"  aria-hidden="true" /></button>
           <span class="ap-page-total">共 {{ totalItems }} 条</span>
         </div>
       </div>
@@ -119,7 +119,7 @@
       <template #footer>
         <button class="ap-action-btn" @click="rejectDialogVisible = false">取消</button>
         <button class="ap-action-btn ap-action-danger" :disabled="rejectSaving" @click="handleReject">
-          {{ rejectSaving ? '提交中...' : '确认驳回' }}
+          {{ rejectSaving ? '提交中…' : '确认驳回' }}
         </button>
       </template>
     </UiDialog>
@@ -292,12 +292,12 @@ async function handleReject() {
   border-radius: 18px;
   border: 1px solid var(--color-border-light, #e2e8f0);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
 }
 .ap-card:hover {
-  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
-  transform: translateY(-6px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  transform: translateY(-2px);
 }
 .ap-card-main {
   flex: 1;
@@ -369,7 +369,7 @@ async function handleReject() {
   gap: 4px;
   padding: 16px;
   border-radius: 13px;
-  transition: all 0.3s ease;
+  transition: transform 0.3s ease;
 }
 .ap-stat-card:hover {
   transform: translateY(-1px);
@@ -439,10 +439,11 @@ async function handleReject() {
   background: white;
   font-size: 13px;
   outline: none;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
   font-family: inherit;
   color: var(--color-text);
 }
+.ap-search-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 .ap-search-input:focus {
   border-color: var(--color-primary-400);
   background: white;
@@ -460,7 +461,7 @@ async function handleReject() {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease, transform 0.2s ease;
   color: var(--color-text-secondary);
 }
 .ap-filter-btn:hover {
@@ -527,7 +528,7 @@ async function handleReject() {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, border-color 0.3s ease, transform 0.3s ease;
   color: var(--color-text-secondary);
   margin-right: 6px;
 }
@@ -576,13 +577,14 @@ async function handleReject() {
   border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: 10px;
   font-size: 14px;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
   outline: none;
   font-family: inherit;
   color: var(--color-text);
   resize: none;
   background: white;
 }
+.ap-form-textarea:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 .ap-form-textarea:focus {
   border-color: var(--color-primary-400);
   background: white;
@@ -606,7 +608,7 @@ async function handleReject() {
   cursor: pointer;
   font-size: 12px;
   color: var(--color-text-secondary);
-  transition: all 0.2s;
+  transition: border-color 0.2s, color 0.2s;
 }
 .ap-page-btn:hover:not(:disabled) {
   border-color: var(--color-primary-300);

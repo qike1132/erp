@@ -12,6 +12,7 @@ interface VitalMetric {
 const queue: VitalMetric[] = []
 const history: VitalMetric[] = []
 let flushTimer: ReturnType<typeof setTimeout> | null = null
+let initialized = false
 
 function flushMetrics() {
   if (queue.length === 0) return
@@ -19,14 +20,7 @@ function flushMetrics() {
   history.push(...batch)
   if (history.length > 100) history.splice(0, history.length - 100)
 
-  const body = JSON.stringify({ vitals: batch })
-  fetch('/api/v1/monitoring/vitals', {
-    method: 'POST',
-    body,
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    keepalive: true,
-  }).catch(() => {})
+  // 后端未实现 vitals 端点，仅本地记录，不发送请求
 }
 
 function handleVital(metric: { name: string; value: number; rating: string; delta: number; navigationType?: string }) {
@@ -38,6 +32,7 @@ function handleVital(metric: { name: string; value: number; rating: string; delt
     navigationType: metric.navigationType ?? 'unknown',
     timestamp: Date.now(),
   })
+  if (queue.length > 50) queue.shift()
 
   if (flushTimer) clearTimeout(flushTimer)
   flushTimer = setTimeout(flushMetrics, 5000)
@@ -48,6 +43,8 @@ function handleVital(metric: { name: string; value: number; rating: string; delt
 }
 
 export function initWebVitals() {
+  if (initialized) return
+  initialized = true
   onLCP(handleVital)
   onCLS(handleVital)
   onINP(handleVital)

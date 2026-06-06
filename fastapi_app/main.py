@@ -109,6 +109,21 @@ async def _setup_redis_caches():
         logger.warning("导航缓存清除失败: %s", e)
 
 
+async def _warm_inventory_cache():
+    """启动时预热库存缓存，确保首次请求命中缓存"""
+    import asyncio
+    await asyncio.sleep(2)  # 等待数据库连接池就绪
+    try:
+        from fastapi_app.core.database import get_async_db
+        from fastapi_app.services.stock_service import get_inventory_paginated
+        async for db in get_async_db():
+            await get_inventory_paginated(db, page=1, per_page=20)
+            logger.info("库存缓存预热完成")
+            break
+    except Exception as e:
+        logger.warning("库存缓存预热失败: %s", e)
+
+
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     setup_logging()
@@ -128,27 +143,61 @@ async def lifespan(application: FastAPI):
     from fastapi_app.core.purchase_cache import start_purchase_cache_listener
     await start_purchase_cache_listener()
 
+    # 预热库存缓存（后台执行，不阻塞启动）
+    import asyncio
+    background_tasks = []
+    task = asyncio.create_task(_warm_inventory_cache())
+    background_tasks.append(task)
+
+    from fastapi_app.core.audit_middleware import _audit_flush_loop
+    task = asyncio.create_task(_audit_flush_loop())
+    background_tasks.append(task)
+
+    from utils.redis_cache import warmup_cache
+    task = asyncio.create_task(warmup_cache())
+    background_tasks.append(task)
+
     yield
 
-    logger.info(f"{settings.APP_NAME} 正在关闭...")
-    await manager.stop_redis_listener()
-    from fastapi_app.core.purchase_cache import stop_purchase_cache_listener
-    await stop_purchase_cache_listener()
-    await db_health_checker.stop()
-    from fastapi_app.core.telemetry import shutdown_telemetry
-    shutdown_telemetry()
-    await dispose_async_engines()
+    # 优雅关闭：提取为独立协程，配合超时保护
+    async def _perform_shutdown():
+        # 先刷写审计日志缓冲区，防止关闭时丢失数据
+        try:
+            from fastapi_app.core.audit_middleware import flush_audit_buffer
+            await flush_audit_buffer()
+        except Exception as e:
+            logger.warning("审计缓冲区刷写失败: %s", e)
 
-    from fastapi_app.services.notification_service import _get_async_redis_client
-    _notif_redis = await _get_async_redis_client()
-    if _notif_redis:
+        # 再取消后台任务
+        for task in background_tasks:
+            task.cancel()
+        await asyncio.gather(*background_tasks, return_exceptions=True)
+
+        logger.info(f"{settings.APP_NAME} 正在关闭...")
+        await manager.stop_redis_listener()
+        from fastapi_app.core.purchase_cache import stop_purchase_cache_listener
+        await stop_purchase_cache_listener()
+        await db_health_checker.stop()
+        from fastapi_app.core.telemetry import shutdown_telemetry
+        shutdown_telemetry()
+        await dispose_async_engines()
+
+        from fastapi_app.services.notification_service import _get_async_redis_client
+        _notif_redis = await _get_async_redis_client()
+        if _notif_redis:
+            with suppress(OSError, RuntimeError):
+                await _notif_redis.aclose()
+
+        from utils.redis_cache import redis_cache
         with suppress(OSError, RuntimeError):
-            await _notif_redis.aclose()
+            await redis_cache.close()
+        logger.info("数据库连接池已关闭")
 
-    from utils.redis_cache import redis_cache
-    with suppress(OSError, RuntimeError):
-        await redis_cache.close()
-    logger.info("数据库连接池已关闭")
+    # 关闭超时保护：防止某步骤 hang 导致整个关闭阻塞
+    try:
+        await asyncio.wait_for(_perform_shutdown(), timeout=15.0)
+    except asyncio.TimeoutError:
+        logger.error("优雅关闭超时（15s），强制退出")
 
 
 app = FastAPI(
@@ -234,6 +283,10 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 
 setup_middleware(app)
+
+from fastapi_app.core.audit_middleware import AuditLogMiddleware
+app.add_middleware(AuditLogMiddleware)
+
 register_health_routes(app)
 register_websocket(app)
 

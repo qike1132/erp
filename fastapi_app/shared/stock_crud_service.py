@@ -6,98 +6,21 @@
 函数内部不做 commit/rollback，由调用方控制事务边界。
 """
 import logging
-import threading
 from datetime import datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from fastapi_app.core.number_generator import generate_number_sync
 from fastapi_app.shared.stock_concurrency import get_product_for_update_sync
 from fastapi_app.shared_models import InventoryLog, Order, Product, StockIn, StockOut, StockReturn
 
 logger = logging.getLogger(__name__)
 
 
-import contextlib
-
 from fastapi_app.services import escape_like
 
 # ==================== 编号生成 ====================
-
-class SyncNumberGenerator:
-    """同步编号生成器（跨进程安全），与 AsyncNumberGenerator 逻辑一致"""
-    _instance = None
-    _counters = {}
-    _initialized = {}
-    _lock = threading.Lock()
-    _last_cleanup_date = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
-    @classmethod
-    def _cleanup_old_entries(cls):
-        """清理非当日的计数器条目，防止内存泄漏"""
-        today_str = datetime.now().strftime('%Y%m%d')
-        # 防御性清理：条目过多时强制清理（即使日期相同）
-        if cls._last_cleanup_date == today_str and len(cls._counters) < 500:
-            return
-        expired_keys = [k for k in cls._counters if not k.endswith(today_str)]
-        for k in expired_keys:
-            cls._counters.pop(k, None)
-            cls._initialized.pop(k, None)
-        cls._last_cleanup_date = today_str
-
-
-_sync_number_generator = SyncNumberGenerator()
-
-
-def generate_number_sync(prefix: str, model, date_field: str, number_field: str, session: Session) -> str:
-    """
-    同步编号生成器（跨进程安全）
-
-    每次从数据库查询当日最大编号，同时考虑内存计数器，
-    确保同进程内连续生成时不会重复。
-
-    Args:
-        prefix: 编号前缀 (如 'PO', 'SI', 'SO')
-        model: 数据模型类
-        date_field: 日期字段名称
-        number_field: 编号字段名称
-        session: SQLAlchemy 同步会话
-
-    Returns:
-        str: 生成的编号,格式为 PREFIX-YYYYMMDD-XXXX
-    """
-    today = datetime.now()
-    date_str = today.strftime('%Y%m%d')
-
-    # DB 查询在锁外执行，减少锁持有时间
-    # FOR UPDATE 行锁确保数据库层面的并发安全
-    result = session.execute(
-        select(model)
-        .where(func.date(getattr(model, date_field)) == today.date())
-        .order_by(getattr(model, number_field).desc())
-        .limit(1)
-        .with_for_update()
-    )
-    record = result.scalar_one_or_none()
-
-    db_max = 0
-    if record:
-        last_number = getattr(record, number_field)
-        with contextlib.suppress(ValueError, IndexError):
-            db_max = int(last_number.split('-')[-1])
-
-    with _sync_number_generator._lock:
-        _sync_number_generator._cleanup_old_entries()
-        current_seq = max(db_max, _sync_number_generator._counters.get(f"{prefix}:{date_str}", 0)) + 1
-        _sync_number_generator._counters[f"{prefix}:{date_str}"] = current_seq
-        _sync_number_generator._initialized[f"{prefix}:{date_str}"] = True
-
-    return f"{prefix}-{date_str}-{str(current_seq).zfill(4)}"
 
 
 def generate_order_number_sync(session: Session) -> str:
@@ -113,6 +36,11 @@ def generate_stockin_number_sync(session: Session) -> str:
 def generate_stockout_number_sync(session: Session) -> str:
     """生成出货编号 SO-YYYYMMDD-XXXX"""
     return generate_number_sync('SO', StockOut, 'stockout_date', 'stockout_no', session)
+
+
+def generate_stockreturn_number_sync(session: Session) -> str:
+    """生成退货编号 SR-YYYYMMDD-XXXX"""
+    return generate_number_sync('SR', StockReturn, 'return_date', 'return_no', session)
 
 
 # ==================== 可出货量计算 ====================
@@ -177,7 +105,6 @@ def calculate_available_shipment_quantity(
             StockOut.stockin_id.is_(None)
         )
         .group_by(StockOut.order_id)
-        .with_for_update()
     )
     shipped_map = dict(shipped_result.all())
 
@@ -504,6 +431,8 @@ def create_stockreturn(session: Session, stockout_id: int, quantity: int,
     stockout = stockout_result.scalar_one_or_none()
     if not stockout:
         raise ValueError('出货记录不存在')
+    if stockout.stockin_id is not None:
+        raise ValueError('不能对订单抵扣的出货记录直接退货')
 
     available_return = stockout.quantity - stockout.returned_quantity
     if quantity > available_return:
@@ -560,6 +489,8 @@ def delete_stockreturn(session: Session, stockreturn: StockReturn) -> None:
     if not stockout:
         raise ValueError('关联的出货记录不存在')
 
+    if stockout.returned_quantity < stockreturn.quantity:
+        raise ValueError('退货数量超过已退货数量')
     stockout.returned_quantity -= stockreturn.quantity
 
     product = get_product_for_update_sync(session, stockreturn.product_id)
@@ -585,7 +516,10 @@ def recalc_order_status_after_return(session: Session, order_id: int) -> None:
     """
     退货后重算订单状态（派生计算）
     """
-    order = session.get(Order, order_id)
+    order_result = session.execute(
+        select(Order).where(Order.id == order_id).with_for_update()
+    )
+    order = order_result.scalar_one_or_none()
     if not order:
         return
     if order.status in (None, '已取消'):

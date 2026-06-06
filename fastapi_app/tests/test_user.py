@@ -85,7 +85,7 @@ class TestUserService:
         mock_result.scalars.return_value = mock_scalars
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        users = await get_users(mock_db)
+        users, total = await get_users(mock_db)
         assert len(users) == 1
 
     @pytest.mark.asyncio
@@ -114,7 +114,9 @@ class TestUserService:
     @pytest.mark.asyncio
     async def test_update_user_not_found(self, mock_db):
         from fastapi_app.services.user_service import update_user
-        mock_db.get = AsyncMock(return_value=None)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
 
         with pytest.raises(ValueError, match="用户不存在"):
             await update_user(mock_db, 999, "Test123!@", None)
@@ -122,7 +124,9 @@ class TestUserService:
     @pytest.mark.asyncio
     async def test_update_user_password(self, mock_db, mock_user):
         from fastapi_app.services.user_service import update_user
-        mock_db.get = AsyncMock(return_value=mock_user)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_user
+        mock_db.execute = AsyncMock(return_value=mock_result)
 
         with patch('fastapi_app.core.security.hash_password', return_value='new_hashed'):
             await update_user(mock_db, 1, "Test123!@", None)
@@ -132,7 +136,9 @@ class TestUserService:
     @pytest.mark.asyncio
     async def test_toggle_user_status_success(self, mock_db, mock_user):
         from fastapi_app.services.user_service import toggle_user_status
-        mock_db.get = AsyncMock(return_value=mock_user)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_user
+        mock_db.execute = AsyncMock(return_value=mock_result)
 
         await toggle_user_status(mock_db, 1)
         assert mock_user.status is False  # toggled from True to False
@@ -143,7 +149,9 @@ class TestUserService:
         super_user = MagicMock()
         super_user.is_super = True
         super_user.status = True
-        mock_db.get = AsyncMock(return_value=super_user)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = super_user
+        mock_db.execute = AsyncMock(return_value=mock_result)
 
         with pytest.raises(ValueError, match="超级用户不能禁用"):
             await toggle_user_status(mock_db, 1)
@@ -152,6 +160,7 @@ class TestUserService:
     async def test_delete_user_success(self, mock_db, mock_user):
         from fastapi_app.services.user_service import delete_user
         mock_db.get = AsyncMock(return_value=mock_user)
+        mock_db.scalar = AsyncMock(return_value=0)
 
         await delete_user(mock_db, 1)
         assert mock_db.delete.called
@@ -280,9 +289,11 @@ class TestUserEndpoints:
         mock_user = MagicMock()
         mock_user.is_super = False
         mock_user.status = True
-        mock_db.get = AsyncMock(return_value=mock_user)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_user
+        mock_db.execute = AsyncMock(return_value=mock_result)
 
-        response = await client.post("/api/v1/users/toggle/1")
+        response = await client.post("/api/v1/users/toggle/2")
         assert response.status_code == 200
 
     @pytest.mark.asyncio
@@ -290,7 +301,8 @@ class TestUserEndpoints:
         mock_user = MagicMock()
         mock_user.is_super = False
         mock_db.get = AsyncMock(return_value=mock_user)
+        mock_db.scalar = AsyncMock(side_effect=[2, 0, 0])
 
-        response = await client.delete("/api/v1/users/delete/1")
+        response = await client.delete("/api/v1/users/delete/2")
         assert response.status_code == 200
         assert "删除" in response.json()["message"]

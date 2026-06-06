@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db, get_async_read_db
+from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.deps import require_permission
 from fastapi_app.schemas.order_batch import (
     BatchAssignRequest,
@@ -63,13 +64,11 @@ async def update_order_batch_no(
     db: AsyncSession = Depends(get_async_db),
     user: User = Depends(require_permission("order_manage")),
 ):
-    try:
+    async with db_transaction(db):
         result = await order_batch_service.update_batch_no(
             db, order_id=order_id, batch_no=data.batch_no, sync_same_batch=data.sync_same_batch, user=user,
         )
-        return BatchNoUpdateResponse(success=True, message="批次号更新成功", updated_count=result['updated_count'])
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    return BatchNoUpdateResponse(success=True, message="批次号更新成功", updated_count=result['updated_count'])
 
 
 @router.post("/orders/batch-assign", response_model=BatchAssignResponse)
@@ -78,13 +77,11 @@ async def batch_assign_orders(
     db: AsyncSession = Depends(get_async_db),
     user: User = Depends(require_permission("order_manage")),
 ):
-    try:
+    async with db_transaction(db):
         result = await order_batch_service.batch_assign(
             db, order_ids=data.order_ids, batch_no=data.batch_no, user=user,
         )
-        return BatchAssignResponse(success=True, message="批次号设置成功", updated_count=result['updated_count'])
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    return BatchAssignResponse(success=True, message="批次号设置成功", updated_count=result['updated_count'])
 
 
 @router.post("/batch/complete", response_model=BatchCompleteResponse)
@@ -93,16 +90,14 @@ async def complete_batch(
     db: AsyncSession = Depends(get_async_db),
     user: User = Depends(require_permission("order_manage")),
 ):
-    try:
+    async with db_transaction(db):
         result = await order_batch_service.complete_batch(db, batch_no=data.batch_no, user=user)
-        return BatchCompleteResponse(
-            success=True,
-            message=f"批次完成，{result['completed_count']}个订单已归档",
-            completed_count=result['completed_count'],
-            failed_orders=result['failed_orders'],
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    return BatchCompleteResponse(
+        success=True,
+        message=f"批次完成，{result['completed_count']}个订单已归档",
+        completed_count=result['completed_count'],
+        failed_orders=result['failed_orders'],
+    )
 
 
 @router.get("/history", response_model=OrderBatchListResponse)
@@ -129,3 +124,13 @@ async def get_whitelist(
 ):
     customers = await order_batch_service.get_whitelist(db)
     return WhitelistResponse(customers=customers)
+
+
+@router.put("/whitelist", response_model=WhitelistResponse)
+async def update_whitelist(
+    data: WhitelistResponse,
+    db: AsyncSession = Depends(get_async_db),
+    user: User = Depends(require_permission("order_manage")),
+):
+    await order_batch_service.set_whitelist(db, data.customers, user.id)
+    return WhitelistResponse(customers=data.customers)

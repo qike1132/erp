@@ -3,7 +3,10 @@ WebSocket 实时通知服务 - 全异步版本
 
 基于 FastAPI WebSocket + Redis Pub/Sub 实现实时库存变更通知和操作冲突预警。
 所有 Redis 操作均使用 redis.asyncio，消除事件循环阻塞。
+
+领域事件集成：订阅 DomainEventType 事件，当领域事件触发时自动广播到 WebSocket。
 """
+from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS
 import asyncio
 import contextlib
 import json
@@ -11,6 +14,37 @@ import logging
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+
+# ===== 领域事件订阅注册 =====
+# 订阅领域事件总线，当收到跨域事件时自动通过 WebSocket 广播
+def _register_domain_event_subscriptions():
+    """注册领域事件订阅：将领域事件转发到 WebSocket 实时通知"""
+    try:
+        from fastapi_app.core.domain_events import subscribe, DomainEventType
+
+        async def _on_order_status_changed(event):
+            """订单状态变更 → WebSocket 广播"""
+            await publish_stock_event(StockEvent.ORDER_UPDATED, event.payload)
+
+        async def _on_order_created(event):
+            """订单创建 → WebSocket 广播"""
+            await publish_stock_event(StockEvent.ORDER_CREATED, event.payload)
+
+        async def _on_stock_out_created(event):
+            """出库单创建 → WebSocket 广播"""
+            await publish_stock_event("stock_changed", event.payload)
+
+        subscribe(DomainEventType.ORDER_STATUS_CHANGED, _on_order_status_changed)
+        subscribe(DomainEventType.ORDER_CREATED, _on_order_created)
+        subscribe(DomainEventType.STOCK_OUT_CREATED, _on_stock_out_created)
+        logger.info("领域事件订阅已注册: ORDER_STATUS_CHANGED, ORDER_CREATED, STOCK_OUT_CREATED")
+    except Exception as e:
+        logger.warning("领域事件订阅注册失败（可忽略）: %s", e)
+
+
+# 模块加载时注册订阅
+_register_domain_event_subscriptions()
 
 
 class StockEvent:
@@ -27,6 +61,8 @@ class StockEvent:
     BATCH_NO_UPDATED = "batch_no_updated"
     BATCH_COMPLETED = "batch_completed"
     SHIPMENT_COMPLETED = "shipment_completed"
+    MATERIAL_UPDATED = "material_updated"
+    CASE_STOCK_CHANGED = "case_stock_changed"
 
 
 EVENT_DISPLAY_MESSAGES = {
@@ -39,6 +75,8 @@ EVENT_DISPLAY_MESSAGES = {
     "batch_no_updated": "批次号已更新",
     "batch_completed": "批次已完成",
     "shipment_completed": "订单出货已完成",
+    "material_updated": "物料数据已更新",
+    "case_stock_changed": "皮套仓储数据已更新",
 }
 
 _async_redis_client = None
@@ -62,7 +100,7 @@ async def _get_async_redis_client():
                 url = url.replace("redis://", f"redis://:{settings.REDIS_PASSWORD}@")
         _async_redis_client = aioredis.from_url(url)
         return _async_redis_client
-    except (ImportError, OSError, ValueError) as e:
+    except INFRA_EXCEPTIONS as e:
         logger.warning("异步 Redis 客户端初始化失败: %s", e)
         return None
 
@@ -75,7 +113,7 @@ async def _warmup_async_redis():
         if client:
             await client.ping()
             logger.info("异步 Redis 客户端预热成功")
-    except (OSError, ConnectionError, ValueError) as e:
+    except INFRA_EXCEPTIONS as e:
         logger.warning("异步 Redis 客户端预热失败: %s", e)
         _async_redis_client = None
 
@@ -97,7 +135,7 @@ async def publish_stock_event(event_type: str, data: dict, redis_client=None):
         }
         await redis_client.publish("erp:stock_events", json.dumps(event, ensure_ascii=False))
         logger.debug("事件已发布: %s", event_type)
-    except (OSError, ConnectionError, ValueError) as e:
+    except INFRA_EXCEPTIONS as e:
         logger.warning("事件发布失败: %s", e)
 
 
@@ -218,7 +256,7 @@ class ConnectionManager:
             except asyncio.CancelledError:
                 logger.info("Redis Pub/Sub 监听任务已取消")
                 break
-            except (OSError, ConnectionError, ValueError) as e:
+            except INFRA_EXCEPTIONS as e:
                 logger.error("Redis Pub/Sub 监听异常: %s，5s 后重连", e)
 
             await self._cleanup_connections()
@@ -233,13 +271,13 @@ class ConnectionManager:
             try:
                 await self._pubsub.unsubscribe("erp:stock_events")
                 await self._pubsub.close()
-            except (OSError, ConnectionError) as e:
+            except INFRA_EXCEPTIONS as e:
                 logger.debug("PubSub 关闭异常（可忽略）: %s", e)
             self._pubsub = None
         if self._async_redis:
             try:
                 await self._async_redis.close()
-            except (OSError, ConnectionError) as e:
+            except INFRA_EXCEPTIONS as e:
                 logger.debug("Redis 连接关闭异常（可忽略）: %s", e)
             self._async_redis = None
 

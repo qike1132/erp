@@ -2,7 +2,7 @@
   <div class="pc-section">
     <div class="pc-section-header">
       <div class="pc-section-title">
-        <i class="fas fa-inbox" /> 审核订单
+        <i class="fas fa-inbox"  aria-hidden="true" /> 审核订单
       </div>
       <div class="pc-section-actions">
         <button
@@ -10,20 +10,20 @@
           :disabled="validSelectedCount === 0 || submitting"
           @click="$emit('oneClickGenerate')"
         >
-          <i :class="submitting ? 'fas fa-spinner fa-spin' : 'fas fa-magic'" /> 一键审核订单 ({{ validSelectedCount }})
+          <i :class="submitting ? 'fas fa-spinner fa-spin' : 'fas fa-magic'"  aria-hidden="true" /> 一键审核订单 ({{ validSelectedCount }})
         </button>
       </div>
     </div>
 
     <!-- Loading (initial only) -->
     <div v-if="loading && orders.length === 0" class="pc-loading-state">
-      <i class="fas fa-spinner fa-spin" />
-      <span>加载中...</span>
+      <i class="fas fa-spinner fa-spin"  aria-hidden="true" />
+      <span>加载中…</span>
     </div>
 
     <!-- Empty -->
     <div v-else-if="orders.length === 0" class="pc-empty-state">
-      <i class="fas fa-inbox" />
+      <i class="fas fa-inbox"  aria-hidden="true" />
       <span>暂无未处理订单</span>
     </div>
 
@@ -59,11 +59,11 @@
               <td class="pc-td-center" @click.stop>
                 <UiCheckbox :checked="selectedSet.has(o.id)" @update:checked="$emit('toggleSelection', o.id)" />
               </td>
-              <td class="pc-td-nowrap">{{ o.create_time || o.order_date || '-' }}</td>
+              <td class="pc-td-nowrap">{{ formatDate(o.create_time || o.order_date) }}</td>
               <td class="pc-td-nowrap">{{ o.order_no }}</td>
               <td class="pc-td-truncate" style="max-width:120px">{{ o.customer || '-' }}</td>
               <td class="pc-td-truncate" style="max-width:300px">{{ o.product_name || '-' }}</td>
-              <td class="pc-td-right pc-td-nowrap">{{ o.quantity?.toLocaleString() || '-' }}</td>
+              <td class="pc-td-right pc-td-nowrap">{{ formatNumber(o.quantity) }}</td>
               <td class="pc-td-center" @click.stop>
                 <button
                   v-if="o.has_bom"
@@ -71,14 +71,14 @@
                   :disabled="submitting"
                   @click="$emit('quickGenerate', o.id)"
                 >
-                  <i :class="submitting ? 'fas fa-spinner fa-spin' : 'fas fa-magic'" /> 审核订单
+                  <i :class="submitting ? 'fas fa-spinner fa-spin' : 'fas fa-magic'"  aria-hidden="true" /> 审核订单
                 </button>
                 <button
                   v-else
                   class="pc-btn pc-btn-danger pc-btn-sm"
                   @click="$emit('noBomError', o)"
                 >
-                  <i class="fas fa-exclamation-circle" /> 未配置BOM
+                  <i class="fas fa-exclamation-circle"  aria-hidden="true" /> 未配置BOM
                 </button>
               </td>
             </tr>
@@ -98,6 +98,7 @@ import { computed } from 'vue'
 import UiCheckbox from '@/components/ui/UiCheckbox.vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
 import type { UnprocessedOrder } from '@/types'
+import { formatDate, formatNumber } from '@/utils/format'
 
 const props = defineProps<{
   orders: UnprocessedOrder[]
@@ -167,7 +168,7 @@ defineEmits<{
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, color 0.3s ease, background 0.3s ease;
   background: white;
 }
 

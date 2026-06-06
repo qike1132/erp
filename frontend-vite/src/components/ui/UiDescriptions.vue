@@ -4,7 +4,7 @@
       <div class="w-1/3 text-text-secondary font-medium">
         {{ row.label }}
       </div>
-      <div class="w-2/3 text-text">
+      <div class="w-2/3 min-w-0 text-text">
         <slot :name="row.key" :value="row.value">
           {{ row.value }}
         </slot>

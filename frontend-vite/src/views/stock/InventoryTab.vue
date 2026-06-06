@@ -7,16 +7,16 @@
       </div>
       <div class="sk-filter-actions">
         <button class="sk-action-btn sk-action-primary" @click="handleSearch()">
-          <i class="fas fa-search" style="margin-right: 4px" />查询
+          <i class="fas fa-search" style="margin-right: 4px"  aria-hidden="true" />查询
         </button>
-        <button class="sk-action-btn" @click="handleReset()">
-          <i class="fas fa-redo" />
+        <button class="sk-action-btn" @click="handleReset()" aria-label="刷新">
+          <i class="fas fa-redo"  aria-hidden="true" />
         </button>
       </div>
       <div v-if="inventory.length" class="sk-stat-row">
         <div class="sk-stat-card sk-stat-primary">
-          <div class="sk-stat-value">{{ totalOrderQty }}</div>
-          <div class="sk-stat-label">总订单数</div>
+          <div class="sk-stat-value">{{ totalRegularQty }}</div>
+          <div class="sk-stat-label">常规订单</div>
         </div>
         <div class="sk-stat-card sk-stat-warning">
           <div class="sk-stat-value">{{ totalCustomQty }}</div>
@@ -24,32 +24,49 @@
         </div>
         <div class="sk-stat-card sk-stat-success">
           <div class="sk-stat-value">{{ totalStockinQty }}</div>
-          <div class="sk-stat-label">总备货数量</div>
+          <div class="sk-stat-label">备货数量</div>
         </div>
         <div class="sk-stat-card sk-stat-info">
-          <div class="sk-stat-value">{{ totalStock }}</div>
-          <div class="sk-stat-label">总库存</div>
+          <div class="sk-stat-value">{{ totalRegularQty + totalCustomQty + totalStockinQty }}</div>
+          <div class="sk-stat-label">总订单</div>
         </div>
       </div>
     </div>
 
-    <div v-if="allCustomers.length" class="sk-country-tags">
-      <span class="sk-country-label">客户：</span>
-      <span
-        v-for="c in allCustomers"
-        :key="c"
-        :class="['sk-country-tag', { active: filters.customer === c }]"
-        @click="toggleCustomer(c)"
-      >{{ c }}</span>
+    <div v-if="allCustomers.length" class="sk-customer-bar">
+      <div class="sk-customer-bar-inner">
+        <span class="sk-customer-bar-label"><i class="fas fa-users" aria-hidden="true" /> 客户</span>
+        <div class="sk-customer-scroll">
+          <button
+            type="button"
+            :class="['sk-customer-chip', { active: !filters.customer }]"
+            @click="selectCustomer('')"
+          >
+            <i class="fas fa-th-large" aria-hidden="true" />全部
+          </button>
+          <button
+            type="button"
+            v-for="c in allCustomers"
+            :key="c"
+            :class="['sk-customer-chip', { active: filters.customer === c }]"
+            @click="selectCustomer(c)"
+          >{{ c }}</button>
+        </div>
+        <Transition name="sk-bar-fade">
+          <div v-if="isFetching" class="sk-customer-loading">
+            <i class="fas fa-circle-notch fa-spin" aria-hidden="true" />
+          </div>
+        </Transition>
+      </div>
     </div>
 
     <div class="sk-card-main">
       <div v-if="isLoading && inventory.length === 0" class="sk-empty">
-        <i class="fas fa-spinner fa-spin" />
-        <span>加载中...</span>
+        <i class="fas fa-spinner fa-spin"  aria-hidden="true" />
+        <span>加载中…</span>
       </div>
       <div v-else-if="inventory.length === 0" class="sk-empty">
-        <i class="fas fa-warehouse" />
+        <i class="fas fa-warehouse"  aria-hidden="true" />
         <span>暂无库存数据</span>
       </div>
       <template v-else>
@@ -62,20 +79,20 @@
               <th>订单数量</th>
               <th>定制订单</th>
               <th>备货数量</th>
-              <th>总库存</th>
+              <th>总订单</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="item in inventory" :key="`${item.customer}-${item.product_name}`">
               <td>
                 <span class="sk-customer-cell">
-                  <i class="fas fa-building" />
+                  <i class="fas fa-building"  aria-hidden="true" />
                   {{ item.customer }}
                 </span>
               </td>
               <td class="sk-td-left">
                 <span class="sk-product-cell">
-                  <i class="fas fa-cube" />
+                  <i class="fas fa-cube"  aria-hidden="true" />
                   <strong>{{ item.product_name }}</strong>
                 </span>
               </td>
@@ -151,6 +168,7 @@ const inventory = computed(() => {
 const allCustomers = computed(() => (invData.value?.all_customers ?? []) as string[])
 
 const totalOrderQty = computed(() => invData.value?.total_order_quantity ?? 0)
+const totalRegularQty = computed(() => Math.max(0, totalOrderQty.value - totalCustomQty.value))
 const totalCustomQty = computed(() => {
   return inventory.value.reduce((s: number, i: any) => {
     const details = i._custom_details ?? []
@@ -158,10 +176,12 @@ const totalCustomQty = computed(() => {
   }, 0)
 })
 const totalStockinQty = computed(() => invData.value?.total_stockin_quantity ?? 0)
-const totalStock = computed(() => invData.value?.total_stock ?? 0)
 
 function toggleCustomer(c: string) {
   filters.customer = filters.customer === c ? '' : c
+}
+function selectCustomer(c: string) {
+  filters.customer = c
 }
 function handleSearch() {
   refetch()
@@ -217,11 +237,12 @@ defineExpose({ inventory, filteredInventory: inventory, handleExport })
   border-radius: 9px;
   font-size: 13px;
   outline: none;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
   font-family: inherit;
   color: var(--color-text);
   background: white;
 }
+.sk-filter-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 .sk-filter-input:focus {
   border-color: var(--color-primary-400);
   box-shadow: 0 0 0 4px rgba(0, 148, 191, 0.1);
@@ -239,49 +260,116 @@ defineExpose({ inventory, filteredInventory: inventory, handleExport })
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, border-color 0.3s ease, transform 0.3s ease;
   color: var(--color-text-secondary);
   display: inline-flex;
   align-items: center;
 }
 .sk-action-primary { color: var(--color-primary-600); }
 .sk-action-primary:hover { background: var(--color-primary-50); border-color: var(--color-primary-300); transform: translateY(-1px); }
-.sk-country-tags {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  align-items: center;
-  padding: 8px 24px;
+/* ===== 客户快捷切换栏 ===== */
+.sk-customer-bar {
   border-bottom: 1px solid var(--color-border-light, #f1f5f9);
+  background: linear-gradient(to bottom, var(--color-surface, #f8fafc), white);
 }
-.sk-country-label {
-  font-size: 13px;
+.sk-customer-bar-inner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 24px;
+  position: relative;
+}
+.sk-customer-bar-label {
+  font-size: 12px;
+  font-weight: 700;
   color: var(--color-text-secondary);
   white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
 }
-.sk-country-tag {
+.sk-customer-bar-label i {
+  color: var(--color-primary-500);
+  font-size: 13px;
+}
+.sk-customer-scroll {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex: 1;
+  min-height: 0;
+  padding: 2px 0;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.sk-customer-scroll::-webkit-scrollbar {
+  display: none;
+}
+.sk-customer-chip {
   display: inline-flex;
   align-items: center;
-  padding: 5px 14px;
-  border-radius: 16px;
+  gap: 5px;
+  padding: 6px 16px;
+  border-radius: 20px;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
   border: 2px solid var(--color-border-light, #e2e8f0);
   background: white;
   color: var(--color-text-secondary);
-  transition: all 0.3s ease;
+  white-space: nowrap;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   user-select: none;
+  font-family: inherit;
+  line-height: inherit;
+  flex-shrink: 0;
+  position: relative;
 }
-.sk-country-tag:hover {
+.sk-customer-chip i {
+  font-size: 11px;
+  transition: transform 0.25s ease;
+}
+.sk-customer-chip:hover {
   border-color: var(--color-primary-300);
   color: var(--color-primary-600);
+  background: var(--color-primary-50);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
-.sk-country-tag.active {
+.sk-customer-chip:hover i {
+  transform: scale(1.15);
+}
+.sk-customer-chip.active {
   background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-700));
   color: white;
   border-color: transparent;
-  box-shadow: 0 2px 8px rgba(91, 141, 239, 0.3);
+  box-shadow: 0 3px 12px rgba(59, 130, 246, 0.35);
+  transform: translateY(-1px);
+}
+.sk-customer-chip.active:hover {
+  background: linear-gradient(135deg, var(--color-primary-600), var(--color-primary-800));
+  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.4);
+}
+.sk-customer-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-primary-500);
+  font-size: 14px;
+  flex-shrink: 0;
+  padding: 0 4px;
+}
+.sk-bar-fade-enter-active {
+  transition: opacity 0.2s ease;
+}
+.sk-bar-fade-leave-active {
+  transition: opacity 0.15s ease;
+}
+.sk-bar-fade-enter-from,
+.sk-bar-fade-leave-to {
+  opacity: 0;
 }
 .sk-stat-row {
   display: flex;
@@ -421,5 +509,8 @@ defineExpose({ inventory, filteredInventory: inventory, handleExport })
 
 @media (max-width: 900px) {
   .sk-stat-row { flex-wrap: wrap; gap: 6px; }
+  .sk-customer-bar-inner { padding: 8px 12px; gap: 8px; }
+  .sk-customer-bar-label { display: none; }
+  .sk-customer-chip { padding: 5px 12px; font-size: 11px; }
 }
 </style>

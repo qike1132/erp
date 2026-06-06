@@ -1,29 +1,10 @@
-import { ref, watch, onUnmounted } from 'vue'
+import { refDebounced } from '@vueuse/core'
+import { ref, type Ref } from 'vue'
 
 /**
- * 防抖 ref composable
+ * 防抖 ref composable（基于 VueUse refDebounced）
  * 延迟更新目标值，避免频繁触发 API 请求
- *
- * @param source 源 ref
- * @param delay 延迟毫秒数，默认 300ms
  */
 export function useDebouncedRef<T>(source: { value: T }, delay = 300) {
-  const debounced = ref(source.value) as { value: T }
-  let timer: ReturnType<typeof setTimeout> | null = null
-
-  watch(
-    () => source.value,
-    (val) => {
-      if (timer) clearTimeout(timer)
-      timer = setTimeout(() => {
-        debounced.value = val
-      }, delay)
-    },
-  )
-
-  onUnmounted(() => {
-    if (timer) clearTimeout(timer)
-  })
-
-  return debounced
+  return refDebounced(ref(source.value) as Ref<T>, delay)
 }

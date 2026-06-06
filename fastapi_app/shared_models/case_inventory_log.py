@@ -1,7 +1,7 @@
 """皮套库存日志模型"""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, desc
@@ -24,11 +24,11 @@ class CaseInventoryLog(Base):
     case_id: Mapped[int] = mapped_column(Integer, ForeignKey('case.id', ondelete='CASCADE'), nullable=False, index=True)
     change_type: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     change_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
-    change_date: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, index=True)
+    change_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
     related_id: Mapped[str | None] = mapped_column(String(50))
     note: Mapped[str | None] = mapped_column(Text)
     customer: Mapped[str | None] = mapped_column(String(100), index=True)
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
 
     case: Mapped["Case"] = relationship('Case', backref='inventory_logs')
 

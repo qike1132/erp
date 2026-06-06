@@ -39,7 +39,7 @@ defineProps<{
   color: var(--color-text-secondary);
   background: transparent;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -75,4 +75,5 @@ defineProps<{
   background: var(--color-primary-500);
   color: white;
 }
+.ui-tab-btn:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 </style>

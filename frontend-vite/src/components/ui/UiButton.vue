@@ -23,7 +23,7 @@ const props = withDefaults(
 )
 
 const baseClasses =
-  'inline-flex items-center gap-1.5 font-medium cursor-pointer whitespace-nowrap transition-all duration-300 border focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2 active:translate-y-0'
+  'inline-flex items-center gap-1.5 font-medium cursor-pointer whitespace-nowrap tabular-nums transition-colors transition-transform transition-shadow duration-300 border focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2 active:translate-y-0'
 
 const variantClasses: Record<string, string> = {
   primary:

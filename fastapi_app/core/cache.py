@@ -11,18 +11,26 @@ import contextlib
 import hashlib
 import json
 import logging
+import random
+from collections import OrderedDict
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from enum import Flag, auto
 from functools import wraps
 from typing import Any
 
-CACHE_TIMEOUT = 2.0
+CACHE_TIMEOUT = 1.0
 
 logger = logging.getLogger(__name__)
 
-_CACHE_LOCAL_MAX_SIZE = 10000  # L1 缓存最大条目数
-_cache_local: dict[str, tuple[Any, datetime]] = {}
+_CACHE_LOCAL_MAX_SIZE = 5000  # L1 缓存最大条目数（从 10000 降至 5000）
+_cache_local: OrderedDict[str, tuple[Any, datetime]] = OrderedDict()
+
+# 断路器：Redis 连续失败 N 次后短路跳过，避免每次请求浪费超时等待
+_redis_fail_count = 0
+_REDIS_CIRCUIT_THRESHOLD = 3
+_redis_circuit_open_until: datetime | None = None
+_REDIS_CIRCUIT_COOLDOWN = timedelta(seconds=30)
 
 
 class CacheDomain(Flag):
@@ -82,15 +90,17 @@ async def invalidate_related_caches(domains: CacheDomain) -> int:
     return deleted
 
 
-def _evict_local_cache():
-    """当 L1 缓存超过上限时，淘汰最早过期的条目"""
-    if len(_cache_local) <= _CACHE_LOCAL_MAX_SIZE:
-        return
-    # 按过期时间排序，淘汰最旧的 25%
-    sorted_items = sorted(_cache_local.items(), key=lambda x: x[1][1])
-    evict_count = len(sorted_items) // 4
-    for k, _ in sorted_items[:evict_count]:
-        del _cache_local[k]
+def _evict_local_cache() -> int:
+    """清理过期条目并淘汰超限条目（O(1) LRU）"""
+    now = datetime.now()
+    # 先清理过期条目
+    expired_keys = [k for k, (_, exp) in _cache_local.items() if now >= exp]
+    for k in expired_keys:
+        _cache_local.pop(k, None)
+    # 淘汰最旧的条目（FIFO 端）
+    while len(_cache_local) > _CACHE_LOCAL_MAX_SIZE:
+        _cache_local.popitem(last=False)
+    return len(expired_keys)
 
 
 def _get_redis_cache():
@@ -115,6 +125,7 @@ def cache_result(
     def decorator(func):
         @wraps(func)
         async def wrapper(*args, **kwargs):
+            global _redis_fail_count, _redis_circuit_open_until
             try:
                 if key_builder:
                     cache_key = f"{key_prefix}:{key_builder(*args, **kwargs)}"
@@ -126,13 +137,22 @@ def cache_result(
                 now = datetime.now()
 
                 if cache_key in _cache_local:
-                    value, expire_at = _cache_local[cache_key]
+                    value, expire_at = _cache_local.pop(cache_key)  # 移除
                     if now < expire_at:
+                        _cache_local[cache_key] = (value, expire_at)  # 移到末尾（最近使用）
                         return value
-                    else:
-                        del _cache_local[cache_key]
+                    # 已过期，不回插
 
-                redis = _get_redis_cache()
+                # 断路器：Redis 连续失败超过阈值时跳过
+                redis_available = True
+                if _redis_circuit_open_until is not None:
+                    if now < _redis_circuit_open_until:
+                        redis_available = False
+                    else:
+                        _redis_circuit_open_until = None
+                        _redis_fail_count = 0
+
+                redis = _get_redis_cache() if redis_available else None
                 if redis:
                     try:
                         cached = await asyncio.wait_for(
@@ -141,24 +161,38 @@ def cache_result(
                         )
                         if cached is not None:
                             result = cached
+                            # 回填 L1：先移除再插入，保证 OrderedDict 顺序
+                            _cache_local.pop(cache_key, None)
                             _cache_local[cache_key] = (result, now + timedelta(seconds=local_ttl))
+                            _redis_fail_count = 0
                             return result
+                        _redis_fail_count = 0
                     except (TimeoutError, OSError, ConnectionError, ValueError) as e:
-                        logger.warning("Redis 缓存读取失败(timeout=%ss)，降级到数据库查询: %s", CACHE_TIMEOUT, e)
+                        _redis_fail_count += 1
+                        if _redis_fail_count >= _REDIS_CIRCUIT_THRESHOLD:
+                            _redis_circuit_open_until = now + _REDIS_CIRCUIT_COOLDOWN
+                            logger.warning("Redis 断路器开启，%s秒内跳过Redis: %s", _REDIS_CIRCUIT_COOLDOWN.total_seconds(), e)
+                        else:
+                            logger.warning("Redis 缓存读取失败(timeout=%ss)，降级到数据库查询: %s", CACHE_TIMEOUT, e)
 
                 result = await func(*args, **kwargs)
 
+                # 写入 L1：先移除再插入，保证 OrderedDict 顺序
+                _cache_local.pop(cache_key, None)
                 _cache_local[cache_key] = (result, now + timedelta(seconds=local_ttl))
                 _evict_local_cache()
 
-                if redis:
+                if redis and redis_available:
                     try:
                         await asyncio.wait_for(
                             redis.set(cache_key, result, timeout=int(ttl)),
                             timeout=CACHE_TIMEOUT
                         )
+                        _redis_fail_count = 0
                     except (TimeoutError, OSError, ConnectionError, ValueError) as e:
-                        logger.warning("Redis 缓存写入失败(timeout=%ss): %s", CACHE_TIMEOUT, e)
+                        _redis_fail_count += 1
+                        if _redis_fail_count >= _REDIS_CIRCUIT_THRESHOLD:
+                            _redis_circuit_open_until = now + _REDIS_CIRCUIT_COOLDOWN
 
                 return result
 
@@ -188,7 +222,7 @@ async def invalidate_cache(pattern: str) -> int:
         # 再删 L1 本地缓存
         keys_to_remove = [k for k in _cache_local if _match_pattern(k, pattern)]
         for k in keys_to_remove:
-            del _cache_local[k]
+            _cache_local.pop(k, None)
         deleted += len(keys_to_remove)
 
         return deleted
@@ -201,7 +235,7 @@ def invalidate_local_cache(pattern: str) -> int:
     """仅使进程内 L1 缓存失效"""
     keys_to_remove = [k for k in _cache_local if _match_pattern(k, pattern)]
     for k in keys_to_remove:
-        del _cache_local[k]
+        _cache_local.pop(k, None)
     return len(keys_to_remove)
 
 
@@ -215,9 +249,21 @@ async def warmup_cache(func, *args, key_prefix: str, ttl: int = 60, **kwargs):
     result = await func(*args, **kwargs)
     cache_key = f"{key_prefix}:prewarm"
     now = datetime.now()
+    _cache_local.pop(cache_key, None)
     _cache_local[cache_key] = (result, now + timedelta(seconds=30))
     redis = _get_redis_cache()
     if redis:
         with contextlib.suppress(OSError, ValueError):
             await redis.set(cache_key, result, timeout=int(ttl))
     return result
+
+
+async def invalidate_dashboard_cache():
+    """失效 dashboard 相关缓存，确保数据同步"""
+    try:
+        await invalidate_cache('dashboard:*')
+        await invalidate_cache('dashboard:stats')
+        await invalidate_cache('dashboard:activities')
+        logger.info("Dashboard 缓存已失效")
+    except Exception as e:
+        logger.warning(f"失效 Dashboard 缓存失败: {e}")

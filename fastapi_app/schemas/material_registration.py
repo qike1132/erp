@@ -1,4 +1,6 @@
 """来料登记相关 Schema"""
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -58,3 +60,41 @@ class TrendResponse(BaseModel):
 class ActionResponse(BaseModel):
     success: bool = True
     message: str
+
+
+class AvailablePurchaseOrdersResponse(BaseModel):
+    success: bool = True
+    orders: list[dict[str, Any]] = []
+
+
+class PurchaseOrderItemsResponse(BaseModel):
+    success: bool = True
+    items: list[dict[str, Any]] = []
+
+
+class PurchaseOrderPreviewResponse(BaseModel):
+    success: bool = True
+    order: dict[str, Any] = {}
+
+
+class ExportRegistrationsResponse(BaseModel):
+    success: bool = True
+    html: str = ""
+
+
+class RegistrationHistoryResponse(BaseModel):
+    success: bool = True
+    registrations: list[dict[str, Any]] = []
+    total: int = 0
+    pages: int = 0
+    current_page: int = 1
+
+
+class SuggestionsResponse(BaseModel):
+    success: bool = True
+    suggestions: list[str] = []
+
+
+class StatsDistributionResponse(BaseModel):
+    success: bool = True
+    distribution: list[dict[str, Any]] = []

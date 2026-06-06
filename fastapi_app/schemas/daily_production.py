@@ -98,3 +98,8 @@ class MonthlySummaryResponse(BaseModel):
     monthly_departments: list[dict] = []
     monthly_total_quantity: int = 0
     monthly_total_value: float = 0
+
+
+class ProductInfoResponse(BaseModel):
+    success: bool = True
+    data: dict = {}

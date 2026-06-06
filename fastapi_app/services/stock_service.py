@@ -5,7 +5,6 @@
 本服务负责异步适配层：将同步 shared 函数包装为异步调用，
 并处理事件发布等 FastAPI 特有逻辑。
 """
-import contextlib
 import logging
 from datetime import UTC, datetime
 
@@ -14,7 +13,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
-from fastapi_app.core.cache import cache_result, invalidate_cache
+from fastapi_app.core.cache import cache_result, invalidate_cache, invalidate_dashboard_cache
+from fastapi_app.core.exception_handler import safe_publish_event
+from fastapi_app.core.number_generator import generate_number_async
 from fastapi_app.services import escape_like
 from fastapi_app.services.batch_service import (
     calculate_available_shipment_quantity,
@@ -24,14 +25,18 @@ from fastapi_app.services.batch_service import (
 from fastapi_app.services.notification_service import StockEvent, publish_stock_event
 from fastapi_app.shared.stock_concurrency import get_product_for_update
 from fastapi_app.shared_models import InventoryLog, Product, StockIn, StockOut, StockReturn
+# 领域事件总线：出库单创建时发布跨域事件
+from fastapi_app.core.domain_events import DomainEvent, DomainEventType, publish as publish_domain_event
 
 logger = logging.getLogger(__name__)
+
+MAX_STOCK_QUANTITY = 9_999_999  # 库存数量上限，超过此值拒绝操作
 
 async def create_stockin_core(db: AsyncSession, product_id: int, quantity: int, customer: str, stockin_date: datetime, note: str, order_type: str = 'regular', country: str | None = None) -> StockIn:
     if quantity <= 0:
         raise ValueError('入库数量必须大于0')
-    if quantity > 9999999:
-        raise ValueError('入库数量不能超过9999999')
+    if quantity > MAX_STOCK_QUANTITY:
+        raise ValueError(f'入库数量不能超过{MAX_STOCK_QUANTITY}')
     stockin = StockIn(stockin_no=await generate_stockin_number(db), product_id=product_id, quantity=quantity, customer=customer, stockin_date=stockin_date, note=note, order_type=order_type, country=country)
     db.add(stockin)
     await db.flush()
@@ -42,6 +47,10 @@ async def create_stockin_core(db: AsyncSession, product_id: int, quantity: int, 
     return stockin
 
 async def update_stockin_core(db: AsyncSession, stockin: StockIn, quantity: int, customer: str, stockin_date: datetime, note: str, order_type: str = 'regular', country: str | None = None) -> StockIn:
+    result = await db.execute(select(StockIn).where(StockIn.id == stockin.id).with_for_update())
+    stockin = result.scalar_one_or_none()
+    if not stockin:
+        raise ValueError('入库记录不存在')
     old_quantity = stockin.quantity
     stockin.quantity = quantity
     stockin.customer = customer
@@ -136,28 +145,7 @@ async def delete_stockout_core(db: AsyncSession, stockout: StockOut) -> None:
 
 async def generate_stockreturn_number(db: AsyncSession) -> str:
     """生成退货编号 SR-YYYYMMDD-XXXX"""
-    from fastapi_app.shared.stock_crud_service import SyncNumberGenerator
-    today = datetime.now(UTC)
-    date_str = today.strftime('%Y%m%d')
-    prefix = 'SR'
-    result = await db.execute(
-        select(StockReturn)
-        .where(func.date(StockReturn.return_date) == today.date())
-        .order_by(StockReturn.return_no.desc())
-        .limit(1)
-        .with_for_update()
-    )
-    record = result.scalar_one_or_none()
-    db_max = 0
-    if record:
-        with contextlib.suppress(ValueError, IndexError):
-            db_max = int(record.return_no.split('-')[-1])
-    generator = SyncNumberGenerator()
-    with generator._lock:
-        generator._cleanup_old_entries()
-        current_seq = max(db_max, generator._counters.get(f"{prefix}:{date_str}", 0)) + 1
-        generator._counters[f"{prefix}:{date_str}"] = current_seq
-    return f"{prefix}-{date_str}-{str(current_seq).zfill(4)}"
+    return await generate_number_async('SR', StockReturn, 'return_date', 'return_no', db)
 
 
 async def create_stockreturn_core(db: AsyncSession, stockout_id: int, quantity: int,
@@ -286,7 +274,15 @@ async def recalc_order_status_after_return(db: AsyncSession, order_id: int) -> d
 async def get_stockins(db: AsyncSession, page: int=1, per_page: int=50) -> dict:
     """获取入库列表（含关联数据，支持分页）- SQL子查询优化版"""
     total = (await db.execute(select(func.count(StockIn.id)))).scalar() or 0
-    # 使用 SQL 子查询计算已抵扣数量，避免 Python 层遍历 stockin_stockouts
+    id_result = await db.execute(
+        select(StockIn.id)
+        .order_by(StockIn.stockin_date.desc())
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+    )
+    page_ids = [row[0] for row in id_result.all()]
+    if not page_ids:
+        return {'items': [], 'total': total, 'page': page, 'per_page': per_page}
     deducted_sub = (
         select(
             StockOut.stockin_id.label('sid'),
@@ -300,9 +296,8 @@ async def get_stockins(db: AsyncSession, page: int=1, per_page: int=50) -> dict:
         select(StockIn, func.coalesce(deducted_sub.c.deducted, 0).label('deducted'))
         .outerjoin(deducted_sub, StockIn.id == deducted_sub.c.sid)
         .options(joinedload(StockIn.product))
+        .where(StockIn.id.in_(page_ids))
         .order_by(StockIn.stockin_date.desc())
-        .offset((page - 1) * per_page)
-        .limit(per_page)
     )
     data = []
     for row in result.all():
@@ -332,14 +327,12 @@ async def create_stockin(db: AsyncSession, product_id: int, quantity: int, custo
         raise
     await invalidate_cache('inventory:*')
     await invalidate_cache('orders:*')
-    try:
-        product = await db.get(Product, product_id)
-        if product is None:
-            logger.warning(f'入库事件发布失败：产品ID {product_id} 不存在')
-        else:
-            await publish_stock_event(StockEvent.STOCK_CHANGED, {'product_id': product_id, 'product_name': product.name, 'change_type': '入库', 'quantity': quantity, 'current_stock': product.current_stock})
-    except (OSError, ConnectionError, ValueError) as e:
-        logger.warning(f'入库事件发布失败（不影响数据）: {e}')
+    await invalidate_dashboard_cache()
+    product = await db.get(Product, product_id)
+    if product is not None:
+        await safe_publish_event(publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': product_id, 'product_name': product.name, 'change_type': '入库', 'quantity': quantity, 'current_stock': product.current_stock}, context="入库事件发布")
+    else:
+        logger.warning('入库事件发布失败：产品ID %s 不存在', product_id)
     logger.info(f'入库添加成功：{stockin.stockin_no}，客户：{customer}，产品ID：{product_id}，数量：{quantity}')
     return {'id': stockin.id, 'stockin_no': stockin.stockin_no}
 
@@ -360,6 +353,10 @@ async def update_stockin(db: AsyncSession, stockin_id: int, quantity: int, custo
         raise
     await invalidate_cache('inventory:*')
     await invalidate_cache('orders:*')
+    await invalidate_dashboard_cache()
+    product = await db.get(Product, stockin_obj.product_id)
+    if product is not None:
+        await safe_publish_event(publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': stockin_obj.product_id, 'product_name': product.name, 'change_type': '入库编辑', 'quantity': quantity, 'current_stock': product.current_stock}, context="入库编辑事件发布")
     logger.info(f'入库编辑成功：{old_stockin_no}，数量变更：{old_quantity} -> {quantity}')
 
 async def delete_stockin(db: AsyncSession, stockin_id: int) -> None:
@@ -377,6 +374,10 @@ async def delete_stockin(db: AsyncSession, stockin_id: int) -> None:
         raise
     await invalidate_cache('inventory:*')
     await invalidate_cache('orders:*')
+    await invalidate_dashboard_cache()
+    product = await db.get(Product, stockin_obj.product_id)
+    if product is not None:
+        await safe_publish_event(publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': stockin_obj.product_id, 'product_name': product.name, 'change_type': '入库删除', 'quantity': -stockin_obj.quantity, 'current_stock': product.current_stock}, context="入库删除事件发布")
     logger.info(f'入库删除成功：{stockin_no}，数量：{stockin_obj.quantity}')
 
 async def get_stockouts(db: AsyncSession, page: int=1, per_page: int=50) -> dict:
@@ -388,70 +389,114 @@ async def get_stockouts(db: AsyncSession, page: int=1, per_page: int=50) -> dict
     stockouts = result.scalars().unique().all()
     data = []
     for s in stockouts:
-        data.append({'id': s.id, 'stockout_no': s.stockout_no, 'stockout_date': s.stockout_date.strftime('%Y-%m-%d') if s.stockout_date else '', 'customer': s.customer, 'product': {'id': s.product.id, 'name': s.product.name, 'barcode': s.product.barcode or '', 'image': s.product.image or ''} if s.product else None, 'quantity': s.quantity, 'returned_quantity': s.returned_quantity, 'note': s.note or '', 'order_type': s.order.order_type if s.order else 'regular', 'country': s.order.country if s.order and s.order.country else ''})
+        # 计算抵扣数量（如果关联了入库）
+        deduct_quantity = 0
+        
+        # 返回前端期望的字段结构
+        item = {
+            'id': s.id, 
+            'stockout_no': s.stockout_no, 
+            'stockout_date': s.stockout_date.strftime('%Y-%m-%d') if s.stockout_date else '', 
+            'customer': s.customer, 
+            'product_id': s.product_id,
+            'product_name': s.product.name if s.product else '',
+            'product_image': s.product.image if s.product else '',
+            'barcode': s.product.barcode if s.product else '',
+            'product': {'id': s.product.id, 'name': s.product.name, 'barcode': s.product.barcode or '', 'image': s.product.image or ''} if s.product else None, 
+            'quantity': s.quantity, 
+            'returned_quantity': s.returned_quantity,
+            'deduct_quantity': deduct_quantity,
+            'note': s.note or '', 
+            'order_type': s.order.order_type if s.order else 'regular', 
+            'country': s.order.country if s.order and s.order.country else ''
+        }
+        data.append(item)
     return {'items': data, 'total': total, 'page': page, 'per_page': per_page}
 
 async def create_stockout(db: AsyncSession, product_id: int, quantity: int, customer: str, stockout_date_str: str, note: str, order_type: str='regular', country: str | None=None) -> dict:
     """创建出库记录"""
     stockout_date = _parse_date_preserve_time(stockout_date_str)
+    shipment_completed_orders = []
     try:
         created_stockouts = await create_stockout_core(db, product_id, quantity, customer, stockout_date, note, order_type, country)
+        if created_stockouts and customer:
+            from fastapi_app.services.purchase_plan_service import recalc_plans_after_stockout_create
+            product_result = await db.execute(select(Product.name).where(Product.id == product_id))
+            product_name_row = product_result.one_or_none()
+            product_name = product_name_row[0] if product_name_row else ''
+            if product_name:
+                await recalc_plans_after_stockout_create(db, customer, product_name)
+
+        if created_stockouts:
+            from fastapi_app.shared_models import Order
+            from fastapi_app.services.order_service import compute_order_status_from_db
+            affected_order_ids: set[int] = {so.order_id for so in created_stockouts if so.order_id}
+            if affected_order_ids:
+                order_result = await db.execute(
+                    select(Order).where(Order.id.in_(affected_order_ids))
+                )
+                order_map = {o.id: o for o in order_result.scalars().all()}
+                for oid in affected_order_ids:
+                    order = order_map.get(oid)
+                    if order and order.status != '已出货':
+                        old_status = order.status
+                        new_status = await compute_order_status_from_db(db, order)
+                        if new_status != old_status:
+                            order.status = new_status
+                        if new_status == '已出货' and old_status != '已出货':
+                            shipment_completed_orders.append({'order_id': order.id, 'order_no': order.order_no, 'customer': order.customer})
+
         await db.commit()
     except (SQLAlchemyError, ValueError):
         await db.rollback()
         raise
     await invalidate_cache('inventory:*')
     await invalidate_cache('orders:*')
-    try:
-        product = await db.get(Product, product_id)
-        if product is not None:
-            await publish_stock_event(StockEvent.STOCK_CHANGED, {'product_id': product_id, 'product_name': product.name, 'change_type': '出库', 'quantity': quantity, 'current_stock': product.current_stock})
-    except (OSError, ConnectionError, ValueError) as e:
-        logger.warning(f'出库事件发布失败（不影响数据）: {e}')
-
-    # 检测出货完成 — 批量查询受影响订单，避免 N+1
+    await invalidate_dashboard_cache()
     if created_stockouts:
-        from fastapi_app.shared_models import Order
-        from fastapi_app.services.order_service import compute_order_status_from_db
+        from fastapi_app.services.purchase_plan_service import _invalidate_plan_caches
+        for stockout in created_stockouts:
+            if stockout.stockout_date:
+                plan_month = stockout.stockout_date.strftime('%Y-%m')
+                await _invalidate_plan_caches(plan_month)
+                break
+    product = await db.get(Product, product_id)
+    if product is not None:
+        await safe_publish_event(publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': product_id, 'product_name': product.name, 'change_type': '出库', 'quantity': quantity, 'current_stock': product.current_stock}, context="出库事件发布")
+
+    if shipment_completed_orders:
         from fastapi_app.services.notification_service import publish_event_with_fcm
-        affected_order_ids: set[int] = {so.order_id for so in created_stockouts if so.order_id}
-        if affected_order_ids:
-            # 批量获取所有受影响订单
-            order_result = await db.execute(
-                select(Order).where(Order.id.in_(affected_order_ids))
-            )
-            order_map = {o.id: o for o in order_result.scalars().all()}
-            status_changed = False
-            for oid in affected_order_ids:
-                order = order_map.get(oid)
-                if order and order.status != '已出货':
-                    old_status = order.status
-                    new_status = await compute_order_status_from_db(db, order)
-                    if new_status != old_status:
-                        order.status = new_status
-                        status_changed = True
-                    if new_status == '已出货' and old_status != '已出货':
-                        try:
-                            await publish_event_with_fcm(
-                                StockEvent.SHIPMENT_COMPLETED,
-                                {'order_id': order.id, 'order_no': order.order_no, 'customer': order.customer},
-                                fcm_title="出货完成",
-                                fcm_body=f"订单 {order.order_no} 已完成出货",
-                            )
-                        except Exception as e:
-                            logger.warning('出货完成事件发布失败: %s', e)
-            if status_changed:
-                try:
-                    await db.commit()
-                except SQLAlchemyError:
-                    await db.rollback()
-                    logger.warning('订单状态更新提交失败')
+        for order_info in shipment_completed_orders:
+            try:
+                await publish_event_with_fcm(
+                    StockEvent.SHIPMENT_COMPLETED,
+                    order_info,
+                    fcm_title="出货完成",
+                    fcm_body=f"订单 {order_info['order_no']} 已完成出货",
+                )
+            except Exception as e:
+                logger.warning('出货完成事件发布失败: %s', e)
+
+    # 领域事件总线：出库单创建 → 发布 STOCK_OUT_CREATED 事件，供跨域订阅者消费
+    try:
+        await publish_domain_event(DomainEvent(
+            event_type=DomainEventType.STOCK_OUT_CREATED,
+            domain='stock',
+            payload={'product_id': product_id, 'quantity': quantity, 'customer': customer},
+        ))
+    except Exception:
+        logger.debug("领域事件 STOCK_OUT_CREATED 发布失败（可忽略）", exc_info=True)
 
     logger.info(f'出库添加成功：产品ID：{product_id}，数量：{quantity}，客户：{customer}')
     return {'quantity': quantity}
 
 async def update_stockout(db: AsyncSession, stockout_id: int, new_quantity: int, customer: str, stockout_date_str: str, note: str) -> None:
     """更新出库记录"""
+    pid_result = await db.execute(select(StockOut.product_id).where(StockOut.id == stockout_id))
+    pid_row = pid_result.one_or_none()
+    if not pid_row:
+        raise ValueError('出库记录不存在')
+    await get_product_for_update(db, pid_row[0])
     result = await db.execute(select(StockOut).where(StockOut.id == stockout_id).with_for_update())
     stockout_obj = result.scalar_one_or_none()
     if not stockout_obj:
@@ -467,6 +512,14 @@ async def update_stockout(db: AsyncSession, stockout_id: int, new_quantity: int,
         raise
     await invalidate_cache('inventory:*')
     await invalidate_cache('orders:*')
+    await invalidate_dashboard_cache()
+    if stockout_obj.stockout_date:
+        from fastapi_app.services.purchase_plan_service import _invalidate_plan_caches
+        plan_month = stockout_obj.stockout_date.strftime('%Y-%m')
+        await _invalidate_plan_caches(plan_month)
+    product = await db.get(Product, stockout_obj.product_id)
+    if product is not None:
+        await safe_publish_event(publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': stockout_obj.product_id, 'product_name': product.name, 'change_type': '出库编辑', 'quantity': new_quantity, 'current_stock': product.current_stock}, context="出库编辑事件发布")
     logger.info(f'出库编辑成功：{old_stockout_no}，数量变更：{old_quantity} -> {new_quantity}')
 
 async def delete_stockout(db: AsyncSession, stockout_id: int) -> None:
@@ -494,6 +547,14 @@ async def delete_stockout(db: AsyncSession, stockout_id: int) -> None:
         raise
     await invalidate_cache('inventory:*')
     await invalidate_cache('orders:*')
+    await invalidate_dashboard_cache()
+    if stockout_obj.stockout_date:
+        from fastapi_app.services.purchase_plan_service import _invalidate_plan_caches
+        plan_month = stockout_obj.stockout_date.strftime('%Y-%m')
+        await _invalidate_plan_caches(plan_month)
+    product = await db.get(Product, stockout_obj.product_id)
+    if product is not None:
+        await safe_publish_event(publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': stockout_obj.product_id, 'product_name': product.name, 'change_type': '出库删除', 'quantity': -deleted_quantity, 'current_stock': product.current_stock}, context="出库删除事件发布")
     logger.info(f'出库删除成功：{stockout_no}，数量：{deleted_quantity}')
 
 async def create_stockreturn(db: AsyncSession, stockout_id: int, quantity: int,
@@ -520,12 +581,10 @@ async def create_stockreturn(db: AsyncSession, stockout_id: int, quantity: int,
         raise
     await invalidate_cache('inventory:*')
     await invalidate_cache('orders:*')
-    try:
-        product = await db.get(Product, stockreturn.product_id)
-        if product is not None:
-            await publish_stock_event(StockEvent.STOCK_CHANGED, {'product_id': stockreturn.product_id, 'product_name': product.name, 'change_type': '退货', 'quantity': quantity, 'current_stock': product.current_stock})
-    except (OSError, ConnectionError, ValueError) as e:
-        logger.warning(f'退货事件发布失败（不影响数据）: {e}')
+    await invalidate_dashboard_cache()
+    product = await db.get(Product, stockreturn.product_id)
+    if product is not None:
+        await safe_publish_event(publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': stockreturn.product_id, 'product_name': product.name, 'change_type': '退货', 'quantity': quantity, 'current_stock': product.current_stock}, context="退货事件发布")
     logger.info(f'退货添加成功：{stockreturn.return_no}，关联出货ID：{stockout_id}，数量：{quantity}')
     return {'id': stockreturn.id, 'return_no': stockreturn.return_no}
 
@@ -558,12 +617,10 @@ async def delete_stockreturn(db: AsyncSession, stockreturn_id: int) -> None:
         raise
     await invalidate_cache('inventory:*')
     await invalidate_cache('orders:*')
-    try:
-        product = await db.get(Product, product_id)
-        if product is not None:
-            await publish_stock_event(StockEvent.STOCK_CHANGED, {'product_id': product_id, 'product_name': product.name, 'change_type': '退货删除', 'quantity': -deleted_quantity, 'current_stock': product.current_stock})
-    except (OSError, ConnectionError, ValueError) as e:
-        logger.warning(f'退货删除事件发布失败（不影响数据）: {e}')
+    await invalidate_dashboard_cache()
+    product = await db.get(Product, product_id)
+    if product is not None:
+        await safe_publish_event(publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': product_id, 'product_name': product.name, 'change_type': '退货删除', 'quantity': -deleted_quantity, 'current_stock': product.current_stock}, context="退货删除事件发布")
     logger.info(f'退货删除成功：{return_no}，数量：{deleted_quantity}')
 
 async def get_stockreturns(db: AsyncSession, stockout_id: int | None = None,
@@ -602,7 +659,7 @@ async def get_inventory(db: AsyncSession, search_customer: str='', search_produc
     目标：O(P*C*S) 内存聚合 → SQL GROUP BY，响应时间降低 50-80%
     """
     product_ids = await _resolve_products(db, search_product)
-    if not product_ids:
+    if product_ids is not None and not product_ids:
         return {'inventory_data': [], 'total_order_qty': 0, 'total_stockin_qty': 0, 'total_stock': 0, 'all_countries': []}
     rows = await _fetch_inventory(db, product_ids, search_customer)
     if not rows:
@@ -647,6 +704,8 @@ async def get_inventory(db: AsyncSession, search_customer: str='', search_produc
     return {'inventory_data': inventory_data, 'total_order_qty': total_order_qty, 'total_stockin_qty': total_stockin_qty, 'total_stock': total_stock, 'all_countries': sorted(all_countries)}
 
 
+@cache_result(key_prefix="inventory:paginated", ttl=120, local_ttl=60,
+             key_builder=lambda db, **kw: f"{kw.get('search_customer','')}-{kw.get('search_product','')}-{kw.get('country','')}-{kw.get('page',1)}-{kw.get('per_page',50)}")
 async def get_inventory_paginated(db: AsyncSession, search_customer: str = '', search_product: str = '',
                                   country: str = '', page: int = 1, per_page: int = 50) -> dict:
     """
@@ -654,16 +713,32 @@ async def get_inventory_paginated(db: AsyncSession, search_customer: str = '', s
     将4次聚合查询合并为单次 CTE 查询，在数据库层面完成合并、过滤和分页，
     避免加载全量数据到 Python 内存。20K+ 条数据时响应时间从秒级降至百毫秒级。
     """
-    product_ids = await _resolve_products(db, search_product)
-    if not product_ids:
-        return _empty_inventory_response(page, per_page)
-
-    pids_param = tuple(product_ids)
-    params: dict = {'pids': pids_param}
+    # 仅在有产品搜索时才加载产品ID列表；无搜索时跳过 ANY(:pids) 条件避免20K元素数组导致全表扫描
+    params: dict = {}
+    pid_clause = ''
+    if search_product:
+        product_ids = await _resolve_products(db, search_product)
+        if not product_ids:
+            return _empty_inventory_response(page, per_page)
+        pids_param = tuple(product_ids)
+        params['pids'] = pids_param
+        pid_clause = ' AND si.product_id = ANY(:pids)'
     cust_clause = ''
+    si_cust = ''
+    so_cust = ''
+    o_cust = ''
     if search_customer:
         params['sc'] = search_customer
+        si_cust = " AND si.customer = :sc"
+        so_cust = " AND so.customer = :sc"
+        o_cust = " AND o.customer = :sc"
         cust_clause = " AND customer = :sc"
+
+    # 构建各表的产品过滤条件（无搜索时为空字符串，避免 ANY(:pids) 全表扫描）
+    si_pid = ' AND si.product_id = ANY(:pids)' if search_product else ''
+    so_pid = ' AND so.product_id = ANY(:pids)' if search_product else ''
+    o_pid = ' AND o.product_id = ANY(:pids)' if search_product else ''
+    sub_pid = ' AND product_id = ANY(:pids)' if search_product else ''
 
     # 单次 CTE 查询：合并4个聚合子查询 → 过滤 → 统计 → 分页
     cte_sql = text(f"""
@@ -674,10 +749,10 @@ WITH stockin_agg AS (
     FROM stock_in si
     LEFT JOIN (
         SELECT stockin_id, SUM(quantity - returned_quantity) AS consumed
-        FROM stock_out WHERE stockin_id IS NOT NULL AND product_id = ANY(:pids)
+        FROM stock_out WHERE stockin_id IS NOT NULL{sub_pid}
         GROUP BY stockin_id
     ) sub ON sub.stockin_id = si.id
-    WHERE si.product_id = ANY(:pids){cust_clause}
+    WHERE 1=1{si_pid}{si_cust}
     GROUP BY si.product_id, si.customer
 ),
 stockout_agg AS (
@@ -688,7 +763,7 @@ stockout_agg AS (
         SUM(CASE WHEN o.order_type = 'custom' THEN so.quantity - so.returned_quantity ELSE 0 END) AS custom_stockout_qty
     FROM stock_out so
     LEFT JOIN "order" o ON so.order_id = o.id
-    WHERE so.stockin_id IS NULL AND so.product_id = ANY(:pids){cust_clause}
+    WHERE so.stockin_id IS NULL{so_pid}{so_cust}
     GROUP BY so.product_id, so.customer
 ),
 order_agg AS (
@@ -697,14 +772,14 @@ order_agg AS (
         SUM(CASE WHEN o.order_type = 'custom' THEN o.quantity ELSE 0 END) AS custom_order_qty,
         1 AS has_order
     FROM "order" o
-    WHERE o.product_id = ANY(:pids){cust_clause}
+    WHERE 1=1{o_pid}{o_cust}
     GROUP BY o.product_id, o.customer
 ),
 country_agg AS (
     SELECT o.product_id, o.customer,
         COALESCE(o.country, '常规') AS country, SUM(o.quantity) AS qty
     FROM "order" o
-    WHERE o.product_id = ANY(:pids) AND o.order_type = 'custom'{cust_clause}
+    WHERE o.order_type = 'custom'{o_pid}{o_cust}
     GROUP BY o.product_id, o.customer, COALESCE(o.country, '常规')
 ),
 merged AS (
@@ -740,42 +815,21 @@ filtered AS (
     WHERE (ic.has_stockin OR ic.has_order) AND ic.total_qty > 0
     {"AND EXISTS (SELECT 1 FROM country_agg ca WHERE ca.product_id = ic.product_id AND ca.customer = ic.customer AND ca.country = :country)" if country else ""}
 ),
--- 全量统计（不受 LIMIT 影响）
-stats_cte AS (
-    SELECT COUNT(*) AS total_count,
-           COALESCE(SUM(f.stockin_qty), 0) AS sum_stockin,
-           COALESCE(SUM(f.remaining_reg + f.remaining_cus), 0) AS sum_order,
-           COALESCE(SUM(f.total_qty), 0) AS sum_stock
-    FROM filtered f
-),
--- 全量国家列表（不受国家筛选影响）
 all_countries_cte AS (
     SELECT STRING_AGG(DISTINCT ca.country, '|') AS countries
     FROM country_agg ca WHERE ca.country != '常规'
-),
--- 全量客户列表（不受客户筛选影响）
-all_customers_cte AS (
-    SELECT STRING_AGG(DISTINCT customer, '|') AS customers
-    FROM (
-        SELECT DISTINCT customer FROM stockin_agg WHERE customer IS NOT NULL
-        UNION
-        SELECT DISTINCT customer FROM stockout_agg WHERE customer IS NOT NULL
-        UNION
-        SELECT DISTINCT customer FROM order_agg WHERE customer IS NOT NULL
-    ) sub
 )
 SELECT f.product_id, f.customer, f.product_name, f.product_barcode,
     f.stockin_qty, f.direct_stockout_qty, f.regular_stockout_qty, f.custom_stockout_qty,
     f.regular_order_qty, f.custom_order_qty, f.remaining_reg, f.remaining_cus, f.total_qty,
     (SELECT STRING_AGG(ca.country || ':' || ca.qty::text, '|')
      FROM country_agg ca WHERE ca.product_id = f.product_id AND ca.customer = f.customer) AS country_data,
-    ac.countries AS all_countries_str,
-    auc.customers AS all_customers_str,
-    s.total_count, s.sum_stockin, s.sum_order, s.sum_stock
+    (SELECT countries FROM all_countries_cte) AS all_countries_str,
+    COUNT(*) OVER() AS total_count,
+    SUM(f.stockin_qty) OVER() AS sum_stockin,
+    SUM(f.remaining_reg + f.remaining_cus) OVER() AS sum_order,
+    SUM(f.total_qty) OVER() AS sum_stock
 FROM filtered f
-CROSS JOIN all_countries_cte ac
-CROSS JOIN all_customers_cte auc
-CROSS JOIN stats_cte s
 ORDER BY f.customer, f.product_name
 LIMIT :limit OFFSET :offset
 """)
@@ -785,31 +839,27 @@ LIMIT :limit OFFSET :offset
     if country:
         params['country'] = country
 
+    # 设置 work_mem 提升大查询性能（避免磁盘溢出）
+    await db.execute(text("SET LOCAL work_mem = '64MB'"))
     result = await db.execute(cte_sql, params)
     rows = result.all()
+
+    # 独立查询所有客户列表（不受客户筛选影响，确保客户栏始终显示全部客户）
+    all_customers = await _get_all_customers(db, pids_param if search_product else None)
+
     if not rows:
-        # 即使无匹配数据，仍需获取国家列表
-        all_countries = await _get_all_countries(db, pids_param, search_customer)
-        all_customers = await _get_all_customers(db, pids_param)
-        return _empty_inventory_response(page, per_page, all_countries, all_customers)
+        return _empty_inventory_response(page, per_page, all_customers=all_customers)
 
-    all_countries: list[str] = []
-    all_customers: list[str] = []
-    total_items = 0
-    sum_stockin = 0
-    sum_order = 0
-    sum_stock = 0
+    # 从窗口函数和子查询获取统计（每行相同，取第一行即可）
+    first = rows[0]
+    total_items = first.total_count
+    sum_stockin = int(first.sum_stockin)
+    sum_order = int(first.sum_order)
+    sum_stock = int(first.sum_stock)
+    all_countries = sorted(first.all_countries_str.split('|')) if first.all_countries_str else []
+
     inventory_data = []
-
     for row in rows:
-        if not all_countries and row.all_countries_str:
-            all_countries = sorted(row.all_countries_str.split('|'))
-        if not all_customers and row.all_customers_str:
-            all_customers = sorted(row.all_customers_str.split('|'))
-        total_items = row.total_count
-        sum_stockin = int(row.sum_stockin)
-        sum_order = int(row.sum_order)
-        sum_stock = int(row.sum_stock)
 
         country_data = _parse_country_data(row.country_data or '')
         so_total = int(row.direct_stockout_qty) + int(row.regular_stockout_qty) + int(row.custom_stockout_qty)
@@ -867,58 +917,82 @@ def _parse_country_data(raw: str) -> dict:
     return country_data
 
 
-async def _get_all_countries(db: AsyncSession, pids: tuple, search_customer: str = '') -> list[str]:
-    """获取所有定制国家列表（用于空结果时）"""
+async def _get_all_countries(db: AsyncSession, pids: tuple | None, search_customer: str = '') -> list[str]:
+    """获取所有定制国家列表"""
     cust_clause = " AND customer = :sc" if search_customer else ''
-    params: dict = {'pids': pids}
+    pid_clause = " AND o.product_id = ANY(:pids)" if pids else ''
+    params: dict = {}
+    if pids:
+        params['pids'] = pids
     if search_customer:
         params['sc'] = search_customer
     sql = text(f"""
         SELECT DISTINCT COALESCE(o.country, '常规') AS country
         FROM "order" o
-        WHERE o.product_id = ANY(:pids) AND o.order_type = 'custom'{cust_clause}
+        WHERE o.order_type = 'custom'{pid_clause}{cust_clause}
           AND o.country IS NOT NULL AND o.country != '常规'
     """)
     result = await db.execute(sql, params)
     return sorted(row[0] for row in result.all())
 
-async def _get_all_customers(db: AsyncSession, pids: tuple) -> list[str]:
-    """获取所有客户列表（用于空结果时）"""
-    sql = text("""
-        SELECT DISTINCT customer FROM (
-            SELECT DISTINCT customer FROM stock_in WHERE product_id = ANY(:pids) AND customer IS NOT NULL
-            UNION
-            SELECT DISTINCT customer FROM stock_out WHERE product_id = ANY(:pids) AND customer IS NOT NULL
-            UNION
-            SELECT DISTINCT customer FROM "order" WHERE product_id = ANY(:pids) AND customer IS NOT NULL
-        ) sub
-    """)
-    result = await db.execute(sql, {'pids': pids})
+async def _get_all_customers(db: AsyncSession, pids: tuple | None) -> list[str]:
+    """获取所有客户列表"""
+    if pids:
+        sql = text("""
+            SELECT DISTINCT customer FROM (
+                SELECT DISTINCT customer FROM stock_in WHERE product_id = ANY(:pids) AND customer IS NOT NULL
+                UNION
+                SELECT DISTINCT customer FROM stock_out WHERE product_id = ANY(:pids) AND customer IS NOT NULL
+                UNION
+                SELECT DISTINCT customer FROM "order" WHERE product_id = ANY(:pids) AND customer IS NOT NULL
+            ) sub
+        """)
+        result = await db.execute(sql, {'pids': pids})
+    else:
+        sql = text("""
+            SELECT DISTINCT customer FROM (
+                SELECT DISTINCT customer FROM stock_in WHERE customer IS NOT NULL
+                UNION
+                SELECT DISTINCT customer FROM stock_out WHERE customer IS NOT NULL
+                UNION
+                SELECT DISTINCT customer FROM "order" WHERE customer IS NOT NULL
+            ) sub
+        """)
+        result = await db.execute(sql)
     return sorted(row[0] for row in result.all())
 
-async def _resolve_products(db: AsyncSession, search: str) -> list[int]:
+async def _resolve_products(db: AsyncSession, search: str) -> list[int] | None:
+    """解析产品ID列表。无搜索时返回 None（表示不限制产品），避免全量加载。"""
     if not search:
-        result = await db.execute(select(Product.id))
-        return [row[0] for row in result.all()]
+        return None  # 无搜索时不加载全量产品ID，调用方应跳过 ANY(:pids) 条件
     escaped = escape_like(search)
     result = await db.execute(select(Product.id).where(or_(Product.name.like(f'%{escaped}%', escape='\\'), Product.barcode.like(f'%{escaped}%', escape='\\'))))
     return [row[0] for row in result.all()]
 
-async def _fetch_inventory(db: AsyncSession, pids: list[int], cust: str='') -> list[dict]:
-    params = {'pids': tuple(pids)}
+async def _fetch_inventory(db: AsyncSession, pids: list[int] | None, cust: str='') -> list[dict]:
+    """库存聚合查询 - 优化版：无产品筛选时跳过 ANY(:pids) 避免全表扫描"""
+    params: dict = {}
+    pid_filter = ''
+    if pids:
+        params['pids'] = tuple(pids)
+        pid_filter = ' AND product_id = ANY(:pids)'
     c = ''
     if cust:
         params['sc'] = cust
         c = ' AND customer = :sc'
-    stockin_sql = text('SELECT si.product_id, si.customer, SUM(si.quantity - COALESCE(sub.consumed, 0)) AS stockin_qty, 1 AS has_stockin FROM stock_in si LEFT JOIN (  SELECT stockin_id, SUM(quantity - returned_quantity) AS consumed   FROM stock_out WHERE stockin_id IS NOT NULL AND product_id = ANY(:pids)   GROUP BY stockin_id) sub ON sub.stockin_id = si.id WHERE si.product_id = ANY(:pids)' + c + ' GROUP BY si.product_id, si.customer')
-    stockout_sql = text('SELECT so.product_id, so.customer, SUM(CASE WHEN so.order_id IS NULL THEN so.quantity - so.returned_quantity ELSE 0 END) AS direct_stockout_qty, SUM(CASE WHEN so.order_id IS NOT NULL AND (o.order_type IS NULL OR o.order_type = \'regular\') THEN so.quantity - so.returned_quantity ELSE 0 END) AS regular_stockout_qty, SUM(CASE WHEN o.order_type = \'custom\' THEN so.quantity - so.returned_quantity ELSE 0 END) AS custom_stockout_qty FROM stock_out so LEFT JOIN "order" o ON so.order_id = o.id WHERE so.stockin_id IS NULL AND so.product_id = ANY(:pids)' + c + ' GROUP BY so.product_id, so.customer')
-    order_sql = text('SELECT o.product_id, o.customer, SUM(CASE WHEN o.order_type IS NULL OR o.order_type = \'regular\' THEN o.quantity ELSE 0 END) AS regular_order_qty, SUM(CASE WHEN o.order_type = \'custom\' THEN o.quantity ELSE 0 END) AS custom_order_qty, 1 AS has_order FROM "order" o WHERE o.product_id = ANY(:pids)' + c + ' GROUP BY o.product_id, o.customer')
-    country_sql = text('SELECT o.product_id, o.customer, COALESCE(o.country, \'常规\') AS country, SUM(o.quantity) AS qty FROM "order" o WHERE o.product_id = ANY(:pids) AND o.order_type = \'custom\'' + c + " GROUP BY o.product_id, o.customer, COALESCE(o.country, '常规')")
+    stockin_sql = text(f'SELECT si.product_id, si.customer, SUM(si.quantity - COALESCE(sub.consumed, 0)) AS stockin_qty, 1 AS has_stockin FROM stock_in si LEFT JOIN (  SELECT stockin_id, SUM(quantity - returned_quantity) AS consumed   FROM stock_out WHERE stockin_id IS NOT NULL{pid_filter}   GROUP BY stockin_id) sub ON sub.stockin_id = si.id WHERE 1=1{pid_filter.replace("product_id", "si.product_id")}' + c + ' GROUP BY si.product_id, si.customer')
+    stockout_sql = text(f'SELECT so.product_id, so.customer, SUM(CASE WHEN so.order_id IS NULL THEN so.quantity - so.returned_quantity ELSE 0 END) AS direct_stockout_qty, SUM(CASE WHEN so.order_id IS NOT NULL AND (o.order_type IS NULL OR o.order_type = \'regular\') THEN so.quantity - so.returned_quantity ELSE 0 END) AS regular_stockout_qty, SUM(CASE WHEN o.order_type = \'custom\' THEN so.quantity - so.returned_quantity ELSE 0 END) AS custom_stockout_qty FROM stock_out so LEFT JOIN "order" o ON so.order_id = o.id WHERE so.stockin_id IS NULL{pid_filter.replace("product_id", "so.product_id")}' + c + ' GROUP BY so.product_id, so.customer')
+    order_sql = text(f'SELECT o.product_id, o.customer, SUM(CASE WHEN o.order_type IS NULL OR o.order_type = \'regular\' THEN o.quantity ELSE 0 END) AS regular_order_qty, SUM(CASE WHEN o.order_type = \'custom\' THEN o.quantity ELSE 0 END) AS custom_order_qty, 1 AS has_order FROM "order" o WHERE 1=1{pid_filter.replace("product_id", "o.product_id")}' + c + ' GROUP BY o.product_id, o.customer')
+    country_sql = text(f'SELECT o.product_id, o.customer, COALESCE(o.country, \'\u5e38\u89c4\') AS country, SUM(o.quantity) AS qty FROM "order" o WHERE o.order_type = \'custom\'{pid_filter.replace("product_id", "o.product_id")}' + c + " GROUP BY o.product_id, o.customer, COALESCE(o.country, '\u5e38\u89c4')")
     si = await _run_sql(db, stockin_sql, params)
     so = await _run_sql(db, stockout_sql, params)
     od = await _run_sql(db, order_sql, params)
     ct = await _run_sql(db, country_sql, params)
-    pnames = await _get_prod_names(db, pids)
+    # 收集实际出现的产品ID再查询名称，避免全量加载
+    all_pids = set()
+    for r in (*si, *so, *od):
+        all_pids.add(r['product_id'])
+    pnames = await _get_prod_names(db, list(all_pids)) if all_pids else {}
     merged = {}
     for r in si:
         k = (r['product_id'], r['customer'])
@@ -1006,7 +1080,7 @@ async def batch_create_stockins(db: AsyncSession, stockins_data: list) -> dict:
                 order_type = item.get('order_type', 'regular') or 'regular'
                 country = item.get('country') or None
                 stockin_date_str = item.get('stockin_date') or ''
-                stockin_date = _parse_date_preserve_time(stockin_date_str) if stockin_date_str else datetime.now(UTC).replace(tzinfo=None)
+                stockin_date = _parse_date_preserve_time(stockin_date_str) if stockin_date_str else datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
                 try:
                     async with db.begin_nested():
                         stockin = await create_stockin_core(db, product_id, quantity, customer, stockin_date, note, order_type, country)
@@ -1023,7 +1097,7 @@ async def batch_create_stockins(db: AsyncSession, stockins_data: list) -> dict:
     return {'success': True, 'results': results}
 
 async def batch_create_stockouts(db: AsyncSession, stockouts_data: list) -> dict:
-    """批量创建出库记录"""
+    """批量创建出库记录（自包含，不调用 create_stockout_core，无嵌套事务）"""
     validated = []
     errors_map = {}
     for idx, item in enumerate(stockouts_data):
@@ -1048,27 +1122,61 @@ async def batch_create_stockouts(db: AsyncSession, stockouts_data: list) -> dict
     results = [None] * len(stockouts_data)
     for idx, err in errors_map.items():
         results[idx] = {'success': False, 'error': err, 'id': stockouts_data[idx].get('id', '未知')}
-    if validated:
+    for orig_idx, item in validated:
+        product_id = item.get('product_id')
+        customer = str(item.get('customer', '')).strip()
+        quantity = int(item.get('quantity', 0))
+        order_type = item.get('order_type', 'regular') or 'regular'
+        country = item.get('country', '') or None
+        note = item.get('note', '')
+        stockout_date_str = item.get('stockout_date') or ''
         try:
-            for orig_idx, item in validated:
-                product_id = item.get('product_id')
-                customer = str(item.get('customer', '')).strip()
-                quantity = int(item.get('quantity', 0))
-                order_type = item.get('order_type', 'regular') or 'regular'
-                country = item.get('country', '') or None
-                note = item.get('note', '')
-                try:
-                    async with db.begin_nested():
-                        created = await create_stockout_core(db, product_id, quantity, customer, datetime.now(UTC).replace(tzinfo=None), note, order_type, country)
-                    stockout_nos = [s.stockout_no for s in created] if created else []
-                    results[orig_idx] = {'success': True, 'stockout_no': stockout_nos[0] if stockout_nos else '', 'id': item.get('id', '未知')}
-                except ValueError as e:
-                    results[orig_idx] = {'success': False, 'error': str(e), 'id': item.get('id', '未知')}
-                except (TypeError, OSError) as e:
-                    logger.error(f'批量出库单项失败: {e}', exc_info=True)
-                    results[orig_idx] = {'success': False, 'error': str(e) or '出库处理失败，请稍后重试', 'id': item.get('id', '未知')}
-            await db.commit()
-        except (SQLAlchemyError, ValueError, TypeError, OSError):
-            await db.rollback()
-            raise
-    return {'success': True, 'results': results}
+            product = await get_product_for_update(db, product_id)
+            if product.current_stock < quantity:
+                results[orig_idx] = {'success': False, 'error': f'库存不足，当前库存: {product.current_stock}', 'id': item.get('id', '未知')}
+                continue
+
+            shipment_info = await calculate_available_shipment_quantity(db, product_id, customer, order_type=order_type, country=country)
+            if shipment_info['available_quantity'] <= 0:
+                results[orig_idx] = {'success': False, 'error': '该客户没有可用的订单支持出货！请先创建订单。', 'id': item.get('id', '未知')}
+                continue
+            if quantity > shipment_info['available_quantity']:
+                results[orig_idx] = {'success': False, 'error': f"出货数量超过可出货量！订单总量：{shipment_info['order_quantity']}，已出货：{shipment_info['shipped_quantity']}，可出货：{shipment_info['available_quantity']}", 'id': item.get('id', '未知')}
+                continue
+
+            remaining_qty = quantity
+            created_stockouts: list[StockOut] = []
+            for order_detail in shipment_info['orders']:
+                if remaining_qty <= 0:
+                    break
+                if order_detail['available'] <= 0:
+                    continue
+                ship_qty = min(remaining_qty, order_detail['available'])
+                stockout_no = await generate_stockout_number(db)
+                stockout = StockOut(
+                    stockout_no=stockout_no, product_id=product_id, quantity=ship_qty,
+                    stockout_date=(_parse_date_preserve_time(stockout_date_str).replace(tzinfo=UTC)),
+                    customer=customer, order_id=order_detail['order_id'], note=note
+                )
+                db.add(stockout)
+                await db.flush()
+                created_stockouts.append(stockout)
+                remaining_qty -= ship_qty
+
+            product.current_stock -= quantity
+            db.add(InventoryLog(
+                product_id=product_id, change_type='出库', change_quantity=-quantity,
+                related_id=','.join(str(s.id) for s in created_stockouts) if created_stockouts else '',
+                note=f'出库数量：{quantity}'
+            ))
+            await db.flush()
+
+            stockout_nos = [s.stockout_no for s in created_stockouts] if created_stockouts else []
+            results[orig_idx] = {'success': True, 'stockout_no': stockout_nos[0] if stockout_nos else '', 'id': item.get('id', '未知')}
+        except ValueError as e:
+            results[orig_idx] = {'success': False, 'error': str(e), 'id': item.get('id', '未知')}
+        except (TypeError, OSError) as e:
+            logger.error(f'批量出库单项失败: {e}', exc_info=True)
+            results[orig_idx] = {'success': False, 'error': str(e) or '出库处理失败，请稍后重试', 'id': item.get('id', '未知')}
+    all_success = all(r is not None and r.get('success') for r in results)
+    return {'success': all_success, 'results': results}

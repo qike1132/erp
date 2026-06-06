@@ -37,7 +37,7 @@ def _require_celery():
         raise HTTPException(status_code=503, detail="Celery 服务未配置，异步任务功能不可用")
     return app
 
-router = APIRouter(prefix="/tasks", tags=["异步任务"])
+router = APIRouter(tags=["异步任务"])
 
 MAX_IMPORT_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 
@@ -68,8 +68,8 @@ def _validate_import_file(file: UploadFile) -> None:
 
     file.file.seek(0)
 
-    remaining = file.file.read()
-    total_size = len(remaining)
+    file.file.seek(0, 2)
+    total_size = file.file.tell()
     file.file.seek(0)
     if total_size > MAX_IMPORT_FILE_SIZE:
         raise HTTPException(status_code=400, detail=f"文件大小超过 {MAX_IMPORT_FILE_SIZE // 1024 // 1024}MB 限制")
@@ -91,6 +91,13 @@ class ReportExportRequest(BaseModel):
     status: str = ""
     start_date: str = ""
     end_date: str = ""
+
+
+class AsyncTaskSubmitResponse(BaseModel):
+    success: bool
+    message: str
+    task_id: str
+    status_url: str
 
 
 # ==================== 任务状态查询 ====================
@@ -120,7 +127,7 @@ async def get_task_status(
 
 # ==================== 批量导入（异步） ====================
 
-@router.post("/import-orders")
+@router.post("/import-orders", response_model=AsyncTaskSubmitResponse)
 async def async_import_orders(
     file: UploadFile = File(...),
     current_user: User = Depends(require_permission("batch_import")),
@@ -145,7 +152,7 @@ async def async_import_orders(
     }
 
 
-@router.post("/import-stockins")
+@router.post("/import-stockins", response_model=AsyncTaskSubmitResponse)
 async def async_import_stockins(
     file: UploadFile = File(...),
     current_user: User = Depends(require_permission("batch_import")),
@@ -172,7 +179,7 @@ async def async_import_stockins(
 
 # ==================== 报表导出（异步） ====================
 
-@router.post("/export-report")
+@router.post("/export-report", response_model=AsyncTaskSubmitResponse)
 async def async_export_report(
     request: ReportExportRequest,
     current_user: User = Depends(require_permission("batch_import")),

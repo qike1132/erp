@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from fastapi_app.core.exceptions import ConflictError
 from fastapi_app.shared_models import Product
 
 logger = logging.getLogger(__name__)
@@ -20,9 +21,11 @@ logger = logging.getLogger(__name__)
 MAX_RETRY = 3
 
 
-class StockConcurrentError(Exception):
-    """库存并发冲突异常"""
-    pass
+class StockConcurrentError(ConflictError):
+    """库存并发冲突异常，返回 HTTP 409 而非 500"""
+
+    def __init__(self, message: str = "库存数据并发冲突，请重试"):
+        super().__init__(message=message)
 
 
 async def get_product_for_update(db: AsyncSession, product_id: int) -> Product:
@@ -84,8 +87,10 @@ async def update_stock_with_optimistic_lock(
     """
     for attempt in range(retries):
         async with db.begin_nested():
-            # 1. 读取当前产品和版本
-            product = await db.get(Product, product_id)
+            if attempt > 0:
+                db.expunge(product)
+            result = await db.execute(select(Product).where(Product.id == product_id))
+            product = result.scalar_one_or_none()
             if not product:
                 raise ValueError(f'产品ID {product_id} 不存在')
 

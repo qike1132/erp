@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
-from fastapi_app.shared_models import Permission, User
+from fastapi_app.shared_models import ApprovalRequest, Order, Permission, User
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ async def create_user(db: AsyncSession, username: str, password: str, is_super: 
 
     # 检查用户名唯一性
     result = await db.execute(
-        select(User).where(User.username == username)
+        select(User).where(User.username == username).with_for_update()
     )
     existing = result.scalar_one_or_none()
     if existing:
@@ -58,7 +58,8 @@ async def create_user(db: AsyncSession, username: str, password: str, is_super: 
 
 async def update_user(db: AsyncSession, user_id: int, password: str | None, is_super: bool | None) -> User:
     """更新用户"""
-    user = await db.get(User, user_id)
+    result = await db.execute(select(User).where(User.id == user_id).with_for_update())
+    user = result.scalar_one_or_none()
     if not user:
         raise ValueError("用户不存在")
 
@@ -80,7 +81,8 @@ async def update_user(db: AsyncSession, user_id: int, password: str | None, is_s
 
 async def toggle_user_status(db: AsyncSession, user_id: int) -> User:
     """切换用户状态"""
-    user = await db.get(User, user_id)
+    result = await db.execute(select(User).where(User.id == user_id).with_for_update())
+    user = result.scalar_one_or_none()
     if not user:
         raise ValueError("用户不存在")
 
@@ -102,6 +104,25 @@ async def delete_user(db: AsyncSession, user_id: int) -> None:
     if user.is_super:
         raise ValueError("超级用户不能删除")
 
+    approval_count = await db.scalar(
+        select(func.count()).select_from(ApprovalRequest).where(
+            ApprovalRequest.requester_id == user_id,
+            ApprovalRequest.status == ApprovalRequest.STATUS_PENDING,
+        )
+    )
+    if approval_count and approval_count > 0:
+        raise ValueError(f"该用户有 {approval_count} 个待处理审批请求，无法删除")
+
+    locked_order_count = await db.scalar(
+        select(func.count()).select_from(Order).where(
+            Order.locked_by_id == user_id,
+            Order.is_locked == True,
+            Order.is_deleted == False,
+        )
+    )
+    if locked_order_count and locked_order_count > 0:
+        raise ValueError(f"该用户锁定了 {locked_order_count} 个订单，无法删除")
+
     await db.delete(user)
     await db.flush()
 
@@ -115,6 +136,13 @@ async def get_permissions(db) -> list[Permission]:
         .order_by(Permission.sort_order)
     )
     return list(result.unique().scalars().all())
+
+
+async def get_permissions_with_user_ids(db, target_user: User) -> tuple[list[Permission], list[int]]:
+    """获取所有权限（树形结构）及目标用户的权限ID列表，合并为单次查询避免N+1问题"""
+    permissions = await get_permissions(db)
+    user_perm_ids = [p.id for p in target_user.permissions]
+    return permissions, user_perm_ids
 
 
 async def update_user_permissions(db: AsyncSession, user_id: int, permission_ids: list[int]) -> User:

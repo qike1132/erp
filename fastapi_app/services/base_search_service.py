@@ -16,6 +16,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from fastapi_app.core.redis_wrapper import safe_delete_pattern, safe_get, safe_set
 from fastapi_app.services import escape_like
 
 logger = logging.getLogger(__name__)
@@ -171,29 +172,20 @@ class BaseSearchService(Generic[T], ABC):
 
         cache_key = self._get_cache_key(keyword, limit, status_filter)
 
-        try:
-            from utils.redis_cache import redis_cache
-
-            cached = await redis_cache.get(cache_key)
-            if cached is not None:
-                if isinstance(cached, str):
-                    return json.loads(cached)
-                return cached
-        except (OSError, ConnectionError, ValueError):
-            logger.warning("搜索缓存读取失败", exc_info=True)
+        cached = await safe_get(cache_key, context='搜索缓存')
+        if cached is not None:
+            if isinstance(cached, str):
+                return json.loads(cached)
+            return cached
 
         results = await self.search_async(db, keyword, limit, status_filter)
 
-        try:
-            from utils.redis_cache import redis_cache
-
-            await redis_cache.set(
-                cache_key,
-                json.dumps(results, ensure_ascii=False, default=str),
-                timeout=self.cache_ttl,
-            )
-        except (OSError, ValueError):
-            logger.warning("搜索缓存写入失败", exc_info=True)
+        await safe_set(
+            cache_key,
+            json.dumps(results, ensure_ascii=False, default=str),
+            timeout=self.cache_ttl,
+            context='搜索缓存',
+        )
 
         return results
 
@@ -201,10 +193,5 @@ class BaseSearchService(Generic[T], ABC):
         """清除搜索缓存（数据变更时调用）"""
         if not self.cache_prefix:
             return
-        try:
-            from utils.redis_cache import redis_cache
-
-            pattern = f"{self.cache_prefix}:search:*"
-            await redis_cache.delete_pattern(pattern)
-        except (OSError, ConnectionError, ValueError):
-            logger.warning("搜索缓存清除失败", exc_info=True)
+        pattern = f"{self.cache_prefix}:search:*"
+        await safe_delete_pattern(pattern, context='搜索缓存')

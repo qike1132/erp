@@ -129,7 +129,7 @@ if coverage < threshold:
 
     defaults:
       run:
-        working-directory: frontend-nextjs
+        working-directory: frontend-vite
 
     steps:
     - uses: actions/checkout@v4
@@ -139,7 +139,7 @@ if coverage < threshold:
       with:
         node-version: '20'
         cache: npm
-        cache-dependency-path: frontend-nextjs/package-lock.json
+        cache-dependency-path: frontend-vite/package-lock.json
 
     - name: Install frontend dependencies
       run: npm ci
@@ -162,8 +162,8 @@ if coverage < threshold:
       with:
         name: frontend-test-artifacts
         path: |
-          frontend-nextjs/playwright-report/
-          frontend-nextjs/test-results/
+          frontend-vite/playwright-report/
+          frontend-vite/test-results/
   
   build:
     needs: [test, lint, frontend]
@@ -193,7 +193,9 @@ if coverage < threshold:
     - name: Deploy to staging
       run: |
         echo "Deploying to staging environment..."
-        # Add deployment commands here
+        docker compose -f docker-compose.yml up -d --build app celery-worker celery-beat
+      env:
+        APP_ENV: staging
     
   deploy-production:
     needs: build
@@ -206,4 +208,5 @@ if coverage < threshold:
     - name: Deploy to production
       run: |
         echo "Deploying to production environment..."
-        # Add deployment commands here
+        kubectl apply -f k8s/configmap.yaml -f k8s/infra.yaml -f k8s/deployment.yaml -f k8s/celery.yaml -f k8s/hpa.yaml -f k8s/ingress.yaml
+        kubectl rollout status deployment/erp-app -n erp-system --timeout=300s

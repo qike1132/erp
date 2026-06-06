@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import DisconnectionError, OperationalError
 from sqlalchemy.orm import joinedload, selectinload
 
-from fastapi_app.core.cache import cache_result, invalidate_cache, CacheDomain, invalidate_related_caches
+from fastapi_app.core.cache import cache_result, CacheDomain, invalidate_related_caches
 from fastapi_app.services import escape_like
 from fastapi_app.shared_models import (
     MaterialRegistration,
@@ -20,8 +20,10 @@ from fastapi_app.shared_models import (
 logger = logging.getLogger(__name__)
 
 
+@cache_result(key_prefix="material:stats", ttl=60, local_ttl=15,
+             key_builder=lambda *a, **kw: "global")
 async def _get_material_stats(db) -> dict:
-    """获取来料统计数据（独立缓存，不随列表请求每次执行）"""
+    """获取来料统计数据（L1 15s + L2 60s 缓存，写操作时通过 MATERIAL 域失效）"""
     status_counts_result = await db.execute(
         select(MaterialRegistration.status, func.count())
         .where(MaterialRegistration.status.in_(['pending', 'partial', 'completed']))
@@ -55,50 +57,33 @@ async def get_registrations(db, page: int = 1, per_page: int = 20,
                            status: str = '', order_no: str = '', supplier: str = '',
                            start_date: str = '', end_date: str = '') -> dict:
     """获取来料登记列表"""
+    # Build filter conditions once, apply to both data query and count query
+    conditions = []
+    if status:
+        conditions.append(MaterialRegistration.status == status)
+    if order_no:
+        conditions.append(MaterialRegistration.purchase_order_no.ilike(f'%{escape_like(order_no)}%'))
+    if supplier:
+        conditions.append(MaterialRegistration.supplier_name.ilike(f'%{escape_like(supplier)}%'))
+    if start_date:
+        try:
+            sd = datetime.strptime(start_date, '%Y-%m-%d').date()
+            conditions.append(MaterialRegistration.registration_date >= sd)
+        except ValueError:
+            pass
+    if end_date:
+        try:
+            ed = datetime.strptime(end_date, '%Y-%m-%d').date()
+            conditions.append(MaterialRegistration.registration_date <= ed)
+        except ValueError:
+            pass
+
     query = select(MaterialRegistration).options(
         selectinload(MaterialRegistration.items),
         selectinload(MaterialRegistration.purchase_order),
-    )
+    ).where(*conditions)
 
-    if status:
-        query = query.where(MaterialRegistration.status == status)
-    if order_no:
-        query = query.where(MaterialRegistration.purchase_order_no.ilike(f'%{escape_like(order_no)}%'))
-    if supplier:
-        query = query.where(MaterialRegistration.supplier_name.ilike(f'%{escape_like(supplier)}%'))
-    if start_date:
-        try:
-            sd = datetime.strptime(start_date, '%Y-%m-%d').date()
-            query = query.where(MaterialRegistration.registration_date >= sd)
-        except ValueError:
-            pass
-    if end_date:
-        try:
-            ed = datetime.strptime(end_date, '%Y-%m-%d').date()
-            query = query.where(MaterialRegistration.registration_date <= ed)
-        except ValueError:
-            pass
-
-    count_conditions = []
-    if status:
-        count_conditions.append(MaterialRegistration.status == status)
-    if order_no:
-        count_conditions.append(MaterialRegistration.purchase_order_no.ilike(f'%{escape_like(order_no)}%'))
-    if supplier:
-        count_conditions.append(MaterialRegistration.supplier_name.ilike(f'%{escape_like(supplier)}%'))
-    if start_date:
-        try:
-            sd = datetime.strptime(start_date, '%Y-%m-%d').date()
-            count_conditions.append(MaterialRegistration.registration_date >= sd)
-        except ValueError:
-            pass
-    if end_date:
-        try:
-            ed = datetime.strptime(end_date, '%Y-%m-%d').date()
-            count_conditions.append(MaterialRegistration.registration_date <= ed)
-        except ValueError:
-            pass
-    total_q = select(func.count(MaterialRegistration.id)).where(*count_conditions)
+    total_q = select(func.count(MaterialRegistration.id)).where(*conditions)
     total = (await db.execute(total_q)).scalar() or 0
 
     query = query.order_by(MaterialRegistration.create_time.desc())
@@ -282,7 +267,10 @@ async def receive_material(db, item_id: int, received_quantity: float,
     }
 
 
+@cache_result(key_prefix="material:overview", ttl=60, local_ttl=15,
+             key_builder=lambda *a, **kw: "global")
 async def get_stats_overview(db) -> dict:
+    """统计概览（L1 15s + L2 60s 缓存，写操作时通过 MATERIAL 域失效）"""
     status_counts_result = await db.execute(
         select(MaterialRegistration.status, func.count())
         .where(MaterialRegistration.status.in_(['pending', 'partial', 'completed']))
@@ -554,7 +542,10 @@ async def get_suggestions(db, field: str, keyword: str, limit: int = 10) -> dict
     return {'success': True, 'suggestions': suggestions[:limit]}
 
 
+@cache_result(key_prefix="material:distribution", ttl=60, local_ttl=15,
+             key_builder=lambda *a, **kw: "global")
 async def get_stats_distribution(db) -> dict:
+    """状态分布（L1 15s + L2 60s 缓存，写操作时通过 MATERIAL 域失效）"""
     status_counts_result = await db.execute(
         select(MaterialRegistration.status, func.count())
         .where(MaterialRegistration.status.in_(['pending', 'partial', 'completed']))
@@ -584,28 +575,34 @@ async def get_stats_distribution(db) -> dict:
     }
 
 
+@cache_result(key_prefix="material:trend", ttl=60, local_ttl=15,
+             key_builder=lambda db, days=30: str(days))
 async def get_stats_trend(db, days: int = 30) -> dict:
-    """趋势数据"""
+    """趋势数据（SQL GROUP BY 替代全量 ORM 加载，L1 15s + L2 60s 缓存）"""
     end_date = datetime.now().date()
     start_date = end_date - timedelta(days=days)
 
-    regs = (await db.execute(
-        select(MaterialRegistration).where(
-            MaterialRegistration.registration_date >= start_date,
-            MaterialRegistration.registration_date <= end_date
-        )
-    )).scalars().all()
-
+    # 生成完整日期骨架
     date_map = {}
     current = start_date
     while current <= end_date:
         date_map[current.strftime('%Y-%m-%d')] = {'registered': 0, 'received': 0}
         current += timedelta(days=1)
 
-    for reg in regs:
-        key = reg.registration_date.strftime('%Y-%m-%d') if reg.registration_date else None
+    # SQL 聚合：只返回 date + count，不加载 ORM 对象
+    reg_counts = (await db.execute(
+        select(MaterialRegistration.registration_date, func.count())
+        .where(
+            MaterialRegistration.registration_date >= start_date,
+            MaterialRegistration.registration_date <= end_date
+        )
+        .group_by(MaterialRegistration.registration_date)
+    )).all()
+
+    for reg_date, cnt in reg_counts:
+        key = reg_date.strftime('%Y-%m-%d') if reg_date else None
         if key and key in date_map:
-            date_map[key]['registered'] += 1
+            date_map[key]['registered'] = cnt
 
     trend = [{'date': k, **v} for k, v in sorted(date_map.items())]
 

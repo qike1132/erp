@@ -49,20 +49,21 @@ def setup_middleware(app: FastAPI) -> None:
 
 def _setup_csrf(app: FastAPI) -> None:
     try:
-        from itsdangerous import URLSafeSerializer
+        import secrets
 
         _csrf_secure = os.getenv("CSRF_COOKIE_SECURE", "").lower() in ("true", "1", "yes")
-        _csrf_serializer = URLSafeSerializer(settings.SECRET_KEY)
 
         @app.middleware("http")
         async def conditional_csrf_middleware(request: Request, call_next):
-            is_login_endpoint = request.url.path.startswith("/api/v1/auth/login")
-            is_logout_endpoint = request.url.path.startswith("/api/v1/auth/logout")
+            is_login_endpoint = request.url.path == "/api/v1/auth/login"
+            is_logout_endpoint = request.url.path == "/api/v1/auth/logout"
             is_exempt_endpoint = is_login_endpoint or is_logout_endpoint
 
             if not is_exempt_endpoint and request.url.path.startswith("/api/") and request.method not in ("GET", "HEAD", "OPTIONS"):
-                origin = request.headers.get("Origin")
-                if origin:
+                _has_bearer = request.headers.get("authorization", "").startswith("Bearer ")
+                if _has_bearer:
+                    pass
+                else:
                     csrf_cookie = request.cookies.get("fastapi_csrf_token")
                     csrf_header = request.headers.get("X-CSRF-Token")
                     if not csrf_cookie or not csrf_header or csrf_cookie != csrf_header:
@@ -73,16 +74,21 @@ def _setup_csrf(app: FastAPI) -> None:
 
             response = await call_next(request)
 
-            csrf_token = _csrf_serializer.dumps("csrf_token")
+            csrf_token = secrets.token_urlsafe(32)
+            _csrf_samesite = "lax"
+            _has_bearer_resp = request.headers.get("authorization", "").startswith("Bearer ")
+            _csrf_sec = False if _has_bearer_resp else _csrf_secure
             response.set_cookie(
                 key="fastapi_csrf_token",
                 value=csrf_token,
                 max_age=86400,
                 httponly=False,
-                samesite="lax",
-                secure=_csrf_secure,
+                samesite=_csrf_samesite,
+                secure=_csrf_sec,
                 path="/",
             )
+            if _has_bearer_resp:
+                response.headers["X-CSRF-Token"] = csrf_token
 
             return response
 
@@ -143,13 +149,53 @@ def _setup_security_headers(app: FastAPI) -> None:
 
 
 def _setup_cors(app: FastAPI) -> None:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.BACKEND_CORS_ORIGINS,
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
-    )
+    is_dev = os.getenv("APP_ENV") != "production"
+    if is_dev:
+        _dev_origins = [
+            "http://localhost",
+            "http://localhost:3000",
+            "http://localhost:3001",
+            "http://localhost:3002",
+            "http://localhost:3003",
+            "http://localhost:3004",
+            "http://localhost:3005",
+            "http://localhost:5002",
+            "http://localhost:5173",
+            "http://localhost:5174",
+            "http://localhost:8000",
+            "http://localhost:8080",
+            "http://localhost:8090",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:3001",
+            "http://127.0.0.1:3005",
+            "http://127.0.0.1:5002",
+            "http://127.0.0.1:5173",
+            "http://127.0.0.1:5174",
+            "http://127.0.0.1:8080",
+        ]
+        # 额外开发环境 origin 可通过环境变量 DEV_CORS_ORIGINS 添加（逗号分隔）
+        extra_origins = os.getenv('DEV_CORS_ORIGINS', '')
+        if extra_origins:
+            _dev_origins.extend(o.strip() for o in extra_origins.split(',') if o.strip())
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=_dev_origins,
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            allow_headers=["*"],
+            expose_headers=["X-CSRF-Token"],
+        )
+    else:
+        # 生产环境 CORS 源通过 CORS_ORIGINS 环境变量配置
+        # Capacitor 移动端如需 null 源，需显式添加: CORS_ORIGINS=https://erp.example.com,null
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.BACKEND_CORS_ORIGINS,
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
+            expose_headers=["X-CSRF-Token"],
+        )
 
 
 def _setup_trusted_host(app: FastAPI) -> None:
@@ -160,6 +206,10 @@ def _setup_trusted_host(app: FastAPI) -> None:
 
 
 def _setup_gzip(app: FastAPI) -> None:
+    # 生产环境由 Nginx 统一处理 GZip 压缩，避免双重压缩
+    if os.getenv("APP_ENV") == "production":
+        logger.info("GZip 压缩由 Nginx 处理（生产环境）")
+        return
     app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
@@ -183,13 +233,16 @@ def _setup_body_size_limit(app: FastAPI) -> None:
                         media_type="application/json",
                     )
             else:
-                body = await request.body()
-                if len(body) > MAX_REQUEST_BODY_SIZE:
-                    return Response(
-                        content='{"detail":"请求体过大，最大允许10MB"}',
-                        status_code=413,
-                        media_type="application/json",
-                    )
+                body = b""
+                async for chunk in request.stream():
+                    body += chunk
+                    if len(body) > MAX_REQUEST_BODY_SIZE:
+                        return Response(
+                            content='{"detail":"请求体过大，最大允许10MB"}',
+                            status_code=413,
+                            media_type="application/json",
+                        )
+                request._body = body
         response = await call_next(request)
         response.headers["X-API-Version"] = "v1"
         return response

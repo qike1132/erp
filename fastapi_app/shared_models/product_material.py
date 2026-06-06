@@ -2,11 +2,11 @@
 产品BOM表模型 - 纯 SQLAlchemy 2.0 声明式
 
 支持详细的布料和配件信息。
-物料分类: fabric(面料类) / filling(填充类) / accessory(辅料类) / packaging(包装类)
+物料分类: fabric(面料类) / filling(填充类) / accessory(辅料类)
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, Text
@@ -21,7 +21,6 @@ MATERIAL_CATEGORIES = {
     'fabric': {'name': '面料类'},
     'filling': {'name': '填充类'},
     'accessory': {'name': '辅料类'},
-    'packaging': {'name': '包装类'}
 }
 
 
@@ -39,8 +38,8 @@ class ProductFabric(Base):
     supplier_name: Mapped[str | None] = mapped_column(String(100), comment='供应商名称(冗余)')
     unit: Mapped[str | None] = mapped_column(String(20), default='码', comment='单位')
     remark: Mapped[str | None] = mapped_column(Text, comment='备注')
-    create_time: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, comment='创建时间')
-    update_time: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), comment='创建时间')
+    update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
 
     material_category = 'fabric'
 
@@ -85,8 +84,8 @@ class ProductMaterial(Base):
     supplier_name: Mapped[str | None] = mapped_column(String(100), comment='供应商名称(冗余)')
     unit: Mapped[str | None] = mapped_column(String(20), default='克', comment='单位')
     remark: Mapped[str | None] = mapped_column(Text, comment='备注')
-    create_time: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, comment='创建时间')
-    update_time: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), comment='创建时间')
+    update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
 
     material_category = 'filling'
 
@@ -135,8 +134,8 @@ class ProductAccessory(Base):
     unit: Mapped[str | None] = mapped_column(String(20), default='个', comment='单位')
     material_category: Mapped[str | None] = mapped_column(String(20), default='accessory', comment='物料分类: accessory/packaging')
     remark: Mapped[str | None] = mapped_column(Text, comment='备注')
-    create_time: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, comment='创建时间')
-    update_time: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), comment='创建时间')
+    update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
 
     product: Mapped["Product"] = relationship("Product", back_populates="accessories")
 
@@ -162,53 +161,6 @@ class ProductAccessory(Base):
             'material_category': category,
             'category': category,
             'category_name': MATERIAL_CATEGORIES.get(category, {}).get('name', '辅料类'),
-            'remark': self.remark,
-            'create_time': self.create_time.strftime('%Y-%m-%d %H:%M:%S') if self.create_time else None
-        }
-
-
-class ProductPackaging(Base):
-    """产品包装材料明细模型"""
-    __tablename__ = 'product_packaging'
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id'), nullable=False, comment='关联产品ID')
-    material_code: Mapped[str | None] = mapped_column(String(50), comment='物料编码')
-    packaging_name: Mapped[str] = mapped_column(String(100), nullable=False, comment='包装材料名称')
-    specification: Mapped[str | None] = mapped_column(String(100), comment='规格型号')
-    quantity: Mapped[float] = mapped_column(Numeric(10, 4), nullable=False, default=1, comment='数量(单SKU标准用量)')
-    supplier_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('supplier.id'), comment='默认供应商ID')
-    supplier_name: Mapped[str | None] = mapped_column(String(100), comment='供应商名称(冗余)')
-    unit: Mapped[str | None] = mapped_column(String(20), default='个', comment='单位')
-    remark: Mapped[str | None] = mapped_column(Text, comment='备注')
-    create_time: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, comment='创建时间')
-    update_time: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
-
-    material_category = 'packaging'
-
-    product: Mapped["Product"] = relationship("Product", back_populates="packagings")
-
-    __table_args__ = (
-        Index('idx_product_packaging_product', 'product_id'),
-        Index('idx_product_packaging_supplier', 'supplier_id'),
-    )
-
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'product_id': self.product_id,
-            'material_code': self.material_code,
-            'material_name': self.packaging_name,
-            'packaging_name': self.packaging_name,
-            'specification': self.specification,
-            'quantity': float(self.quantity) if self.quantity else 0,
-            'unit_usage': float(self.quantity) if self.quantity else 0,
-            'supplier_id': self.supplier_id,
-            'supplier_name': self.supplier_name,
-            'unit': self.unit,
-            'material_category': self.material_category,
-            'category': self.material_category,
-            'category_name': MATERIAL_CATEGORIES.get(self.material_category, {}).get('name', '包装类'),
             'remark': self.remark,
             'create_time': self.create_time.strftime('%Y-%m-%d %H:%M:%S') if self.create_time else None
         }

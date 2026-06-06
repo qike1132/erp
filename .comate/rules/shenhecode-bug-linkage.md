@@ -6,6 +6,8 @@ description: 代码审核→BUG修复自动联动规则。当shenhecode.mdr审�
 # shenhecode.mdr + bug.mdr 自动联动规则
 
 > 审核发现BUG → 自动触发修复 → 修复后回流验证 → 直到零P0/P1
+> 权威源：.comate/rules/shenhecode-bug-linkage.md
+> 版本：v1.1
 
 ## 触发条件
 
@@ -43,9 +45,9 @@ bug.mdr 启动时，从 shenhecode.mdr 审核结果继承：
 | bug.mdr 输入 | shenhecode.mdr 来源 | 说明 |
 |-------------|---------------------|------|
 | 根因位置 | 审核发现的 `location` | `file:startLine-endLine` |
-| 根因描述 | 审核发现的 `description` | 问题完整描述 |
-| 证据 | 审核发现的 `evidence` | 代码行为 → 推断 → 风险 |
-| 修复方向 | 审核发现的 `修复方向` | 自然语言描述 |
+| 根因描述 | 审核发现的 `evidence` | 代码行为 → 推断 → 风险的完整链路 |
+| 证据 | 审核发现的 `evidence` | 代码行/日志/堆栈片段 |
+| 修复方向 | 审核发现的 `修复方向` | 自然语言描述（参考，按实际代码调整） |
 | 验证标准 | 审核发现的 `verifiable_test` | 复现路径或测试条件 |
 | 规则来源 | 审核发现的 `rule_source` | 维度+规则名 |
 

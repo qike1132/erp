@@ -75,12 +75,17 @@ class TestCaseService:
     @pytest.mark.asyncio
     async def test_get_inventory_summary_empty(self, mock_db):
         from fastapi_app.services.case_service import get_case_inventory_summary
-        mock_result = MagicMock()
-        mock_result.all.return_value = []
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_count = MagicMock()
+        mock_count.scalar.return_value = 0
+        mock_data = MagicMock()
+        mock_data.all.return_value = []
+        mock_stats = MagicMock()
+        mock_stats.one.return_value = (0, 0)
+        mock_db.execute = AsyncMock(side_effect=[mock_count, mock_data, mock_stats])
 
         result = await get_case_inventory_summary(mock_db)
-        assert result == []
+        assert result['inventory'] == []
+        assert result['total'] == 0
 
     @pytest.mark.asyncio
     async def test_get_inventory_logs_empty(self, mock_db):
@@ -149,13 +154,18 @@ class TestCaseEndpoints:
 
     @pytest.mark.asyncio
     async def test_inventory_summary(self, client, mock_db):
-        mock_result = MagicMock()
-        mock_result.all.return_value = []
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_count = MagicMock()
+        mock_count.scalar.return_value = 0
+        mock_data = MagicMock()
+        mock_data.all.return_value = []
+        mock_stats = MagicMock()
+        mock_stats.one.return_value = (0, 0)
+        mock_db.execute = AsyncMock(side_effect=[mock_count, mock_data, mock_stats])
 
         response = await client.get("/api/v1/cases/inventory-summary")
         assert response.status_code == 200
-        assert response.json() == []
+        data = response.json()
+        assert data['inventory'] == []
 
     @pytest.mark.asyncio
     async def test_inventory_logs(self, client, mock_db):

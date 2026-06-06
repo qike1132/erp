@@ -12,12 +12,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-OFFSET_THRESHOLD = 5000  # 超过此偏移量自动切换keyset分页
+OFFSET_THRESHOLD = 2000  # OFFSET>2000 自动切换 keyset 分页
 
 
 async def optimized_count(db: AsyncSession, base_query: Select, table_name: str | None = None) -> int:
-    """优化COUNT查询 - 大表先用pg_class近似计数，足够精确则跳过COUNT(*)"""
-    if table_name:
+    """优化COUNT查询 - 仅当无筛选条件且大表时才用pg_class近似计数。
+
+    有 WHERE 条件时必须回退精确 COUNT(*)，否则 pg_class.reltuples 返回的是全表近似值，
+    与筛选后的实际行数可能相差极大，导致分页信息完全错误。
+    """
+    # 检测查询是否包含 WHERE 条件（兼容 SQLAlchemy 2.0）
+    has_where = getattr(base_query, 'whereclause', None) is not None or getattr(base_query, '_where_criteria', None) is not None
+
+    # 仅当无筛选条件时才尝试近似计数
+    if table_name and not has_where:
         try:
             approx_result = await db.execute(
                 text("SELECT reltuples::bigint FROM pg_class WHERE relname = :t"),

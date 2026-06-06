@@ -1,8 +1,12 @@
 import axios from 'axios'
 import type { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse, AxiosError } from 'axios'
 
+const isCap = !!import.meta.env.VITE_CAPACITOR
+
+let isRedirecting401 = false
+
 const service: AxiosInstance = axios.create({
-  baseURL: '/api/v1',
+  baseURL: import.meta.env.VITE_API_BASE_URL || '/api/v1',
   timeout: 15000,
   withCredentials: true,
 })
@@ -10,22 +14,50 @@ const service: AxiosInstance = axios.create({
 service.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   const method = config.method?.toLowerCase()
   if (method && ['post', 'put', 'delete', 'patch'].includes(method)) {
-    const match = document.cookie.match(/fastapi_csrf_token=([^;]+)/)
-    if (match) {
-      config.headers['X-CSRF-Token'] = match[1]
+    const csrfToken = isCap
+      ? localStorage.getItem('csrf_token') || document.cookie.match(/fastapi_csrf_token=([^;]+)/)?.[1] || ''
+      : (document.cookie.match(/fastapi_csrf_token=([^;]+)/)?.[1] || '')
+    if (csrfToken) {
+      config.headers['X-CSRF-Token'] = csrfToken
+    }
+  }
+  if (isCap) {
+    const accessToken = localStorage.getItem('access_token')
+    if (accessToken && !config.headers['Authorization']) {
+      config.headers['Authorization'] = `Bearer ${accessToken}`
+    }
+    if (import.meta.env.DEV) {
+      console.log(`[API] ${method?.toUpperCase()} ${config.baseURL}${config.url}`)
     }
   }
   return config
 })
 
 service.interceptors.response.use(
-  (response: AxiosResponse) => response.data,
+  (response: AxiosResponse) => {
+    if (isCap) {
+      const csrfFromHeader = response.headers['x-csrf-token']
+      if (csrfFromHeader) localStorage.setItem('csrf_token', csrfFromHeader as string)
+    }
+    return response.data
+  },
   (error: AxiosError) => {
+    if (isCap && import.meta.env.DEV) {
+      console.error(`[API Error] ${error.config?.method?.toUpperCase()} ${error.config?.url}`, {
+        status: error.response?.status,
+        data: error.response?.data,
+        message: error.message,
+        code: error.code,
+      })
+    }
     if (error.response?.status === 401) {
-      document.cookie = 'auth_status=; path=/; max-age=0'
-      const current = window.location.pathname
-      if (!current.startsWith('/login')) {
-        window.location.href = `/login?redirect=${encodeURIComponent(current)}`
+      if (!isRedirecting401) {
+        isRedirecting401 = true
+        const current = window.location.pathname
+        if (!current.startsWith('/login')) {
+          window.location.href = `/login?redirect=${encodeURIComponent(current)}`
+        }
+        setTimeout(() => { isRedirecting401 = false }, 2000)
       }
     }
     return Promise.reject(error)
@@ -54,8 +86,7 @@ async function executeWithRetry<T>(
   try {
     return await fn()
   } catch (error: unknown) {
-    const axiosError = error as AxiosError
-    if (shouldRetry(axiosError, retryCount)) {
+    if (axios.isAxiosError(error) && shouldRetry(error, retryCount)) {
       const backoff = RETRY_DELAY_MS * Math.pow(2, retryCount)
       await delay(backoff)
       return executeWithRetry(fn, retryCount + 1)
@@ -68,16 +99,33 @@ export function get<T>(url: string, params?: Record<string, unknown>): Promise<T
   return executeWithRetry(() => service.get(url, { params }) as Promise<T>)
 }
 
+/** 写操作仅对 502/503/504 网关错误重试一次（不重试 4xx 业务错误） */
+const WRITE_RETRY_CODES = [502, 503, 504]
+
+async function executeWriteWithRetry<T>(
+  fn: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await fn()
+  } catch (error: unknown) {
+    if (axios.isAxiosError(error) && error.response && WRITE_RETRY_CODES.includes(error.response.status)) {
+      await delay(RETRY_DELAY_MS)
+      return fn() // 仅重试一次
+    }
+    throw error
+  }
+}
+
 export function post<T>(url: string, data?: unknown): Promise<T> {
-  return service.post(url, data) as Promise<T>
+  return executeWriteWithRetry(() => service.post(url, data) as Promise<T>)
 }
 
 export function put<T>(url: string, data?: unknown): Promise<T> {
-  return service.put(url, data) as Promise<T>
+  return executeWriteWithRetry(() => service.put(url, data) as Promise<T>)
 }
 
 export function del<T>(url: string): Promise<T> {
-  return service.delete(url) as Promise<T>
+  return executeWriteWithRetry(() => service.delete(url) as Promise<T>)
 }
 
 export function upload<T>(url: string, formData: FormData): Promise<T> {
@@ -87,6 +135,29 @@ export function upload<T>(url: string, formData: FormData): Promise<T> {
 }
 
 export function download(url: string, filename: string, params?: Record<string, unknown>): Promise<void> {
+  if (isCap) {
+    return executeWithRetry(() =>
+      service.get(url, { responseType: 'arraybuffer', params }).then(async (data: unknown) => {
+        const { Filesystem, Directory } = await import('@capacitor/filesystem')
+        const { Share } = await import('@capacitor/share')
+        const blob = new Blob([data as ArrayBuffer])
+        const base64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader()
+          reader.onload = () => {
+            const dataUrl = reader.result as string
+            resolve(dataUrl.split(',')[1])
+          }
+          reader.readAsDataURL(blob)
+        })
+        const result = await Filesystem.writeFile({
+          path: filename,
+          data: base64,
+          directory: Directory.Cache,
+        })
+        await Share.share({ url: result.uri, title: filename })
+      }),
+    )
+  }
   return executeWithRetry(() =>
     service.get(url, { responseType: 'blob', params }).then((blob: unknown) => {
       try {
@@ -94,7 +165,8 @@ export function download(url: string, filename: string, params?: Record<string, 
         link.href = URL.createObjectURL(blob as Blob)
         link.download = filename
         link.click()
-        URL.revokeObjectURL(link.href)
+        link.remove()
+        setTimeout(() => URL.revokeObjectURL(link.href), 10000)
       } catch (e) {
         console.error('Download failed:', e)
         throw e
@@ -103,11 +175,13 @@ export function download(url: string, filename: string, params?: Record<string, 
   )
 }
 
-const BACKEND_ORIGIN = import.meta.env.DEV ? 'http://127.0.0.1:5002' : ''
+const BACKEND_ORIGIN = isCap
+  ? ((import.meta.env.VITE_STATIC_ORIGIN ?? '') as string)
+  : (import.meta.env.DEV ? 'http://127.0.0.1:5002' : '')
 
 export function resolveStaticUrl(url: string | null | undefined): string {
   if (!url) return ''
-  if (url.startsWith('http')) return url
+  if (url.startsWith('http') || url.startsWith('//')) return url
   return BACKEND_ORIGIN + url
 }
 

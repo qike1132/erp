@@ -190,7 +190,7 @@ def main():
         if not FRONTEND_DIR.exists():
             log_warn(web_name, "前端目录不存在，跳过")
         elif mode == "prod":
-            # 生产模式：前端由 Nginx 直接服务静态文件，仅需确保构建产物存在
+            # 生产模式：使用 Vite dev server 提供前端（支持 API 代理）
             if not (FRONTEND_DIR / "dist").is_dir():
                 log_warn(web_name, "生产模式：未检测到 dist 构建产物，正在执行 vite build...")
                 npm_cmd = "npm.cmd" if sys.platform == "win32" else "npm"
@@ -202,14 +202,32 @@ def main():
                 if build_proc.returncode != 0:
                     log_error(web_name, f"vite build 失败:\n{build_proc.stderr}")
                 else:
-                    log_success(web_name, "vite build 完成，前端将由 Nginx 提供服务")
+                    log_success(web_name, "vite build 完成")
             else:
-                log_success(web_name, "前端构建产物已就绪，由 Nginx 提供服务")
+                log_success(web_name, "前端构建产物已就绪")
+            # 启动 Vite dev server（支持 API 代理）
+            log_info(web_name, Color.GREEN, "正在启动 Vite 开发服务器...")
+            npm_cmd = "npm.cmd" if sys.platform == "win32" else "npm"
+            cmd = [npm_cmd, "run", "dev"]
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(FRONTEND_DIR),
+                env={**os.environ, "BACKEND_INTERNAL_URL": f"http://127.0.0.1:{args.api_port}"},
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == 'win32' else 0,
+            )
+            procs.append(proc)
+            log_info(web_name, Color.GREEN, f"PID: {proc.pid}")
+            if not args.no_health:
+                log_info(web_name, Color.GREEN, f"等待前端就绪: http://127.0.0.1:{args.web_port}/")
+                if check_health(f"http://127.0.0.1:{args.web_port}/", timeout=60):
+                    log_success(web_name, "前端已就绪")
+                else:
+                    log_warn(web_name, "前端启动超时")
         else:
             # 开发模式：启动 Vite dev server
             log_info(web_name, Color.GREEN, "正在启动 Vite 开发服务器...")
             npm_cmd = "npm.cmd" if sys.platform == "win32" else "npm"
-            cmd = [npm_cmd, "run", "dev", "--", "--port", str(args.web_port)]
+            cmd = [npm_cmd, "run", "dev"]
 
             proc = subprocess.Popen(
                 cmd,

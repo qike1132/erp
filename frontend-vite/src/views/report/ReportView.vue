@@ -7,8 +7,8 @@
           <HeaderTabs />
         </div>
         <div class="rp-header-right">
-          <div class="rp-tab-group">
-            <button v-for="tab in tabs" :key="tab.value" :class="['rp-tab-btn', { active: activeTab === tab.value }]" @click="activeTab = tab.value; handleTabChange()">
+          <div class="rp-tab-group" role="tablist">
+            <button v-for="tab in tabs" :key="tab.value" role="tab" :aria-selected="activeTab === tab.value" :class="['rp-tab-btn', { active: activeTab === tab.value }]" @click="activeTab = tab.value; handleTabChange()">
               {{ tab.label }}
             </button>
           </div>
@@ -37,7 +37,7 @@
           <button class="rp-action-btn rp-action-primary" @click="doSearch">查询</button>
           <button class="rp-action-btn rp-action-outline" @click="doReset">重置</button>
           <button v-if="searched" class="rp-action-btn rp-action-success" @click="exportReport">
-            <i class="fas fa-download" style="margin-right: 4px" />导出
+            <i class="fas fa-download" style="margin-right: 4px"  aria-hidden="true" />导出
           </button>
         </div>
       </div>
@@ -45,12 +45,12 @@
       <!-- 表格 -->
       <div class="rp-table-wrap">
         <div v-if="isLoading && searched && !logs.length" class="rp-empty">
-          <i class="fas fa-spinner fa-spin" />
-          <span>加载中...</span>
+          <i class="fas fa-spinner fa-spin"  aria-hidden="true" />
+          <span>加载中…</span>
         </div>
         <div v-else-if="!logs.length" class="rp-empty">
-          <i class="fas fa-chart-line" />
-          <span>{{ isFetching ? '加载中...' : '暂无数据' }}</span>
+          <i class="fas fa-chart-line"  aria-hidden="true" />
+          <span>{{ isFetching ? '加载中…' : '暂无数据' }}</span>
         </div>
         <template v-else>
         <div v-if="isFetching" class="rp-fetching-bar"><div class="rp-fetching-progress" /></div>
@@ -242,12 +242,12 @@ function exportReport() {
   border-radius: 18px;
   border: 1px solid var(--color-border-light, #e2e8f0);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
 }
 .rp-card:hover {
-  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
-  transform: translateY(-6px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  transform: translateY(-2px);
 }
 .rp-card-main {
   flex: 1;
@@ -344,7 +344,7 @@ function exportReport() {
   color: var(--color-text-secondary);
   background: transparent;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
 }
 .rp-tab-btn:hover {
   background: var(--color-primary-50);
@@ -385,11 +385,12 @@ function exportReport() {
   border-radius: 9px;
   font-size: 13px;
   outline: none;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
   font-family: inherit;
   color: var(--color-text);
   background: white;
 }
+.rp-filter-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 .rp-filter-input:focus {
   border-color: var(--color-primary-400);
   box-shadow: 0 0 0 4px rgba(0, 148, 191, 0.1);
@@ -409,7 +410,7 @@ function exportReport() {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, border-color 0.3s ease, transform 0.3s ease;
   color: var(--color-text-secondary);
   display: flex;
   align-items: center;

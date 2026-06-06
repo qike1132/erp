@@ -13,6 +13,7 @@ from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
+from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.schemas.order import (
     ApprovalCancelResponse,
     ApprovalListResponse,
@@ -38,16 +39,29 @@ async def list_orders(
     product_id: int | None = Query(None, description="产品ID筛选"),
     status: str | None = Query(None, description="状态筛选"),
     order_type: str | None = Query(None, description="订单类型筛选：regular/custom"),
+    start_date: str | None = Query(None, description="开始日期筛选(YYYY-MM-DD)"),
+    end_date: str | None = Query(None, description="结束日期筛选(YYYY-MM-DD)"),
     db: AsyncSession = Depends(get_async_read_db),
     _user: User = Depends(require_permission("order_manage")),
 ):
     """订单列表（支持分页和筛选，缓存由 service 层 @cache_result 管理）"""
     result = await order_service.get_orders(db, page=page, per_page=per_page,
                                             customer=customer, product_id=product_id,
-                                            status=status, order_type=order_type)
+                                            status=status, order_type=order_type,
+                                            start_date=start_date, end_date=end_date)
 
     return OrderListResponse(data=result['items'], total=result['total'],
                              page=result['page'], per_page=result['per_page'])
+
+
+@router.get("/my-approvals", response_model=ApprovalListResponse)
+async def my_approvals(
+    db: AsyncSession = Depends(get_async_read_db),
+    user: User = Depends(require_permission("order_manage")),
+):
+    """查看我的审批请求"""
+    approvals = await order_service.get_my_approvals(db, user)
+    return ApprovalListResponse(data=approvals, total=len(approvals))
 
 
 @router.get("/{order_id}", response_model=OrderDetailResponse)
@@ -70,15 +84,16 @@ async def create_order(
     user: User = Depends(require_permission("order_manage")),
 ):
     """创建订单"""
-    try:
+    async with db_transaction(db):
         await order_service.create_order(
             db, product_id=data.product_id, quantity=data.quantity,
             customer=data.customer, note=data.note or '', current_user=user,
             order_type=data.order_type, country=data.country
         )
-        return OrderActionResponse(success=True, message="订单添加成功！")
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    # 事务提交后再失效缓存，避免并发请求用旧数据回填缓存
+    from fastapi_app.core.cache import invalidate_dashboard_cache
+    await invalidate_dashboard_cache()
+    return OrderActionResponse(success=True, message="订单添加成功！")
 
 
 @router.put("/edit/{order_id}", response_model=OrderActionResponse)
@@ -89,26 +104,25 @@ async def edit_order(
     user: User = Depends(require_permission("order_manage")),
 ):
     """编辑订单（管理员直接编辑，非管理员提交审批）"""
-    try:
-        # 获取当前订单以填充未提供的字段
-        order = await db.get(Order, order_id)
-        if not order:
-            raise HTTPException(status_code=404, detail="订单不存在")
+    order = await db.get(Order, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="订单不存在")
 
-        quantity = data.quantity if data.quantity is not None else order.quantity
-        customer = data.customer if data.customer is not None else order.customer
-        note = data.note if data.note is not None else (order.note or '')
-        order_type = data.order_type if data.order_type is not None else order.order_type
-        country = data.country if data.country is not None else order.country
+    quantity = data.quantity if data.quantity is not None else order.quantity
+    customer = data.customer if data.customer is not None else order.customer
+    note = data.note if data.note is not None else (order.note or '')
+    order_type = data.order_type if data.order_type is not None else order.order_type
+    country = data.country if data.country is not None else order.country
 
+    async with db_transaction(db):
         result = await order_service.update_order(
             db, order_id=order_id, quantity=quantity,
             customer=customer, note=note, current_user=user,
             order_type=order_type, country=country
         )
-        return OrderActionResponse(success=result['success'], message=result['message'])
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    from fastapi_app.core.cache import invalidate_dashboard_cache
+    await invalidate_dashboard_cache()
+    return OrderActionResponse(success=result['success'], message=result['message'])
 
 
 @router.delete("/delete/{order_id}", response_model=OrderActionResponse)
@@ -119,10 +133,11 @@ async def delete_order(
 ):
     """删除订单（管理员直接删除，非管理员提交审批）"""
     try:
-        result = await order_service.delete_order(db, order_id, user)
+        async with db_transaction(db):
+            result = await order_service.delete_order(db, order_id, user)
+        from fastapi_app.core.cache import invalidate_dashboard_cache
+        await invalidate_dashboard_cache()
         return OrderActionResponse(success=result['success'], message=result['message'])
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
     except IntegrityError as e:
         await db.rollback()
         logger.warning("删除订单完整性约束冲突: %s", e)
@@ -141,28 +156,17 @@ async def cancel_approval(
     db: AsyncSession = Depends(get_async_db),
     user: User = Depends(require_permission("order_manage")),
 ):
-    """取消审批请求"""
+    """取消审批请求（仅审批发起者或超级用户可取消）"""
     try:
-        await order_service.cancel_approval(db, approval_id, user)
-        await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY)
-        return ApprovalCancelResponse(success=True, message="审批请求已取消")
+        async with db_transaction(db):
+            await order_service.cancel_approval(db, approval_id, user)
     except PermissionDeniedError as e:
         raise HTTPException(status_code=403, detail=settings.sanitize_business_error(e)) from e
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY)
+    return ApprovalCancelResponse(success=True, message="审批请求已取消")
 
 
-@router.get("/my-approvals", response_model=ApprovalListResponse)
-async def my_approvals(
-    db: AsyncSession = Depends(get_async_read_db),
-    user: User = Depends(require_permission("order_manage")),
-):
-    """查看我的审批请求"""
-    approvals = await order_service.get_my_approvals(db, user)
-    return ApprovalListResponse(data=approvals, total=len(approvals))
-
-
-@router.put("/batch-no/{order_id}")
+@router.put("/batch-no/{order_id}", response_model=OrderActionResponse)
 async def update_batch_no(
     order_id: int,
     batch_no: str = Query("", max_length=100, description="批次号"),
@@ -170,12 +174,31 @@ async def update_batch_no(
     user: User = Depends(require_permission("order_manage")),
 ):
     """更新订单批次号"""
-    try:
+    async with db_transaction(db):
         await order_batch_service.update_batch_no(
             db, order_id=order_id, batch_no=batch_no,
             sync_same_batch=False, user=user,
         )
-        await invalidate_related_caches(CacheDomain.ORDER)
-        return {"success": True, "message": "批次号已更新"}
+    await invalidate_related_caches(CacheDomain.ORDER)
+    return {"success": True, "message": "批次号已更新"}
+
+
+@router.put("/deduct/{order_id}", response_model=OrderActionResponse)
+async def update_deduct_quantity(
+    order_id: int,
+    deduct_quantity: int = Query(..., ge=0, description="新的抵扣备货数量"),
+    db: AsyncSession = Depends(get_async_db),
+    user: User = Depends(require_permission("order_manage")),
+):
+    """修改订单的抵扣备货数量"""
+    try:
+        async with db_transaction(db):
+            result = await order_service.update_deduct_quantity(
+                db, order_id=order_id,
+                new_deduct_quantity=deduct_quantity, current_user=user,
+            )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        raise HTTPException(status_code=400, detail=settings.sanitize_business_error(e)) from e
+    from fastapi_app.core.cache import invalidate_dashboard_cache
+    await invalidate_dashboard_cache()
+    return OrderActionResponse(success=True, message=result['message'])

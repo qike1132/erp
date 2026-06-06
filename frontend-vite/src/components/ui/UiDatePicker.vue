@@ -6,12 +6,14 @@
       type="date"
       :value="modelValue"
       :disabled="disabled"
+      :name="name"
+      :autocomplete="autocomplete"
       :aria-label="label || '选择日期'"
       class="date-input"
       @input="$emit('update:modelValue', ($event.target as HTMLInputElement).value)"
       @click="openPicker"
     />
-    <i class="fas fa-calendar-alt date-icon" @click="openPicker" />
+    <button type="button" class="date-icon" @click="openPicker" aria-label="选择日期"><i class="fas fa-calendar-alt" aria-hidden="true" /></button>
   </div>
 </template>
 
@@ -27,6 +29,8 @@ const props = withDefaults(
     label?: string
     placeholder?: string
     id?: string
+    name?: string
+    autocomplete?: string
   }>(),
   {},
 )
@@ -65,7 +69,7 @@ function openPicker() {
   background: white;
   border: 2px solid var(--color-ocean-light);
   border-radius: var(--radius-input);
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
   outline: none;
   min-height: 44px;
   box-sizing: border-box;
@@ -75,6 +79,7 @@ function openPicker() {
   -webkit-appearance: none;
   appearance: none;
 }
+.date-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 
 .date-input:focus {
   background: var(--color-surface-card);
@@ -99,6 +104,11 @@ function openPicker() {
   color: var(--color-ocean-text);
   font-size: 0.875rem;
   cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+  display: flex;
+  align-items: center;
 }
 
 /* Firefox date input fix */

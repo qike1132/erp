@@ -60,3 +60,64 @@ groups:
         annotations:
           summary: "慢请求数量过多"
           description: "超过1秒的请求数超过10/秒"
+
+      # 连接池饱和度告警
+      - alert: DBPoolSaturation
+        expr: |
+          db_pool_checked_out{pool="async_main"} / db_pool_size{pool="async_main"} > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "数据库连接池饱和度超过80%"
+          description: "主库连接池使用率 {{ $value | humanizePercentage }}，可能需要扩容"
+
+      # 连接池溢出告警
+      - alert: DBPoolOverflow
+        expr: db_pool_overflow{pool="async_main"} > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "数据库连接池溢出"
+          description: "主库连接池溢出连接数: {{ $value }}，需增大pool_size"
+
+      # 慢查询速率告警
+      - alert: HighSlowQueryRate
+        expr: rate(slow_query_total[5m]) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "慢查询频率过高"
+          description: "每分钟慢查询数: {{ $value | humanize }}，需优化SQL"
+
+      # Celery任务失败告警
+      - alert: CeleryTaskFailures
+        expr: rate(celery_task_failure_total[10m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Celery任务失败（重试耗尽）"
+          description: "任务 {{ $labels.task }} 失败率: {{ $value }}/s，需人工介入检查死信队列"
+
+      # Celery任务运行时间过长
+      - alert: CelerySlowTask
+        expr: histogram_quantile(0.95, rate(celery_task_runtime_seconds_bucket[10m])) > 300
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Celery任务P95运行时间超过5分钟"
+          description: "P95运行时间: {{ $value }}s，可能存在性能瓶颈"
+
+      # 死信队列堆积
+      - alert: DeadLetterQueueGrowing
+        expr: celery_dead_letter_queue_depth > 10
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "死信队列堆积超过10条"
+          description: "当前死信队列深度: {{ $value }}，需人工介入处理"

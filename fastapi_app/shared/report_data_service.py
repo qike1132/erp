@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 from fastapi_app.services import escape_like
 
 _YIELD_PER_BATCH = 500
+_MAX_EXPORT_ROWS = 10000  # 报表导出最大行数，避免内存溢出
 
 
 def get_all_logs_data(
@@ -126,6 +127,9 @@ def _get_order_logs(session, customer, product, status, start_date, end_date):
     logger.info(f'订单查询结果数: {total}')
     logs = []
     for order in query.order_by(Order.order_date.desc()).yield_per(_YIELD_PER_BATCH):
+        if len(logs) >= _MAX_EXPORT_ROWS:
+            logger.warning('订单报表导出达到最大行数 %d，已截断', _MAX_EXPORT_ROWS)
+            break
         deducted_quantity = sum(so.quantity - so.returned_quantity for so in order.order_stockouts if so.stockin_id) if hasattr(order, 'order_stockouts') and order.order_stockouts else 0
         note = order.note or ''
         if deducted_quantity > 0:
@@ -181,6 +185,9 @@ def _get_stockin_logs(session, customer, product, start_date, end_date):
     logs = []
     total_remaining = 0
     for stockin in query.order_by(StockIn.stockin_date.desc()).yield_per(_YIELD_PER_BATCH):
+        if len(logs) >= _MAX_EXPORT_ROWS:
+            logger.warning('备货报表导出达到最大行数 %d，已截断', _MAX_EXPORT_ROWS)
+            break
         remaining = stockin.quantity - sum(so.quantity - so.returned_quantity for so in stockin.stockin_stockouts) if stockin.stockin_stockouts else stockin.quantity
         total_remaining += remaining
         logs.append({
@@ -233,6 +240,9 @@ def _get_stockout_logs(session, customer, product, start_date, end_date):
     logger.info(f'出货查询结果数: {total}')
     logs = []
     for so in query.order_by(StockOut.stockout_date.desc()).yield_per(_YIELD_PER_BATCH):
+        if len(logs) >= _MAX_EXPORT_ROWS:
+            logger.warning('出货报表导出达到最大行数 %d，已截断', _MAX_EXPORT_ROWS)
+            break
         order_no = so.order.order_no if so.order else None
         order_id = so.order.id if so.order else None
         logs.append({
@@ -280,6 +290,9 @@ def _get_deduction_logs(session, customer, product, start_date, end_date):
     logger.info(f'抵扣查询结果数: {total}')
     logs = []
     for so in query.order_by(StockOut.stockout_date.desc()).yield_per(_YIELD_PER_BATCH):
+        if len(logs) >= _MAX_EXPORT_ROWS:
+            logger.warning('抵扣报表导出达到最大行数 %d，已截断', _MAX_EXPORT_ROWS)
+            break
         order_no = None
         order_note = None
         order_id = None

@@ -6,10 +6,12 @@
 - 跨进程失效：通过 Redis Pub/Sub 广播失效信号，各 worker 订阅并清除本地缓存
 """
 
+from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS
 import asyncio
 import contextlib
 import json
 import logging
+from urllib.parse import urlparse, urlunparse
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +39,7 @@ async def invalidate_purchase_caches() -> int:
     try:
         from fastapi_app.core.cache import invalidate_local_cache
         count += invalidate_local_cache("orders:*")
-    except (RuntimeError, OSError, ValueError):
+    except (RuntimeError, *INFRA_EXCEPTIONS):
         pass
 
     await _async_publish_invalidation_signal()
@@ -53,7 +55,7 @@ async def _async_publish_invalidation_signal() -> None:
         if client is None:
             return
         await client.publish(_CHANNEL, json.dumps({"scope": "purchase_caches"}))
-    except (RuntimeError, OSError, ValueError):
+    except (RuntimeError, *INFRA_EXCEPTIONS):
         pass
 
 
@@ -66,7 +68,7 @@ def _clear_all_local_caches() -> int:
     try:
         from fastapi_app.core.cache import invalidate_local_cache
         count += invalidate_local_cache("orders:*")
-    except (RuntimeError, OSError, ValueError):
+    except (RuntimeError, *INFRA_EXCEPTIONS):
         pass
     return count
 
@@ -109,7 +111,11 @@ async def _listen_loop() -> None:
 
             url = settings.REDIS_URL
             if settings.REDIS_PASSWORD and settings.REDIS_PASSWORD not in url:
-                url = url.replace("redis://", f"redis://:{settings.REDIS_PASSWORD}@")
+                parsed = urlparse(url)
+                netloc = f":{settings.REDIS_PASSWORD}@{parsed.hostname}"
+                if parsed.port:
+                    netloc += f":{parsed.port}"
+                url = urlunparse(parsed._replace(netloc=netloc))
 
             redis_client = aioredis.from_url(url, decode_responses=True)
             pubsub = redis_client.pubsub()
@@ -128,7 +134,7 @@ async def _listen_loop() -> None:
 
         except asyncio.CancelledError:
             break
-        except (OSError, ConnectionError, ValueError) as e:
+        except INFRA_EXCEPTIONS as e:
             logger.warning("缓存失效监听异常: %s，5s 后重连", e)
             await asyncio.sleep(5)
         finally:
@@ -136,10 +142,10 @@ async def _listen_loop() -> None:
                 if pubsub:
                     await pubsub.unsubscribe(_CHANNEL)
                     await pubsub.close()
-            except (RuntimeError, OSError, ValueError):
+            except (RuntimeError, *INFRA_EXCEPTIONS):
                 pass
             try:
                 if redis_client:
                     await redis_client.close()
-            except (RuntimeError, OSError, ValueError):
+            except (RuntimeError, *INFRA_EXCEPTIONS):
                 pass

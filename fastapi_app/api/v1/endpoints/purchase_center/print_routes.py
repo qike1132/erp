@@ -1,6 +1,7 @@
 """
 采购中心 — 汇总打印 / Excel 导出路由
 """
+import asyncio
 import io
 import zipfile
 from datetime import datetime
@@ -23,11 +24,12 @@ from fastapi_app.api.v1.endpoints.purchase_center.schemas import OrderIdsRequest
 from fastapi_app.core.database import get_async_db as get_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.core.logger import logger
+from fastapi_app.schemas.purchase_center import SupplierSummaryResponse
 from fastapi_app.services import purchase_center_service as svc
 
 router = APIRouter()
 
-@router.post('/orders/summary-print')
+@router.post('/orders/summary-print', response_model=SupplierSummaryResponse)
 async def api_summary_print(data: SummaryPrintRequest, db: AsyncSession=Depends(get_db), _user=Depends(require_permission('product_manage'))):
     ids = data.ids
     format_type = data.format
@@ -96,30 +98,37 @@ async def export_supplier_summary_excel(data: OrderIdsRequest, db: AsyncSession=
         if not sorted_suppliers:
             raise HTTPException(status_code=404, detail='未找到供应商数据')
         date_prefix = datetime.now().strftime('%Y-%m-%d')
-        if len(sorted_suppliers) == 1:
-            supplier = sorted_suppliers[0]
-            wb = create_supplier_workbook(supplier)
-            excel_buffer = io.BytesIO()
-            wb.save(excel_buffer)
-            wb.close()
-            excel_buffer.seek(0)
-            filename = f"{date_prefix}-{supplier['supplier_name']}_采购订单汇总.xlsx"
-            encoded_filename = quote(filename, safe='')
-            return StreamingResponse(excel_buffer, media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', headers={'Content-Disposition': f"attachment; filename*=UTF-8''{encoded_filename}"})
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-            for supplier in sorted_suppliers:
+
+        def _generate_export(sorted_suppliers, date_prefix):
+            if len(sorted_suppliers) == 1:
+                supplier = sorted_suppliers[0]
                 wb = create_supplier_workbook(supplier)
                 excel_buffer = io.BytesIO()
                 wb.save(excel_buffer)
                 wb.close()
                 excel_buffer.seek(0)
-                filename = f"{supplier['supplier_name']}_采购订单汇总.xlsx"
-                zf.writestr(filename, excel_buffer.read())
-        zip_buffer.seek(0)
-        zip_filename = f'{date_prefix}-供应商采购订单汇总.zip'
-        encoded_filename = quote(zip_filename, safe='')
-        return StreamingResponse(zip_buffer, media_type='application/zip', headers={'Content-Disposition': f"attachment; filename*=UTF-8''{encoded_filename}"})
+                filename = f"{date_prefix}-{supplier['supplier_name']}_采购订单汇总.xlsx"
+                encoded_filename = quote(filename, safe='')
+                return ('excel', excel_buffer, encoded_filename)
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for supplier in sorted_suppliers:
+                    wb = create_supplier_workbook(supplier)
+                    excel_buffer = io.BytesIO()
+                    wb.save(excel_buffer)
+                    wb.close()
+                    excel_buffer.seek(0)
+                    filename = f"{supplier['supplier_name']}_采购订单汇总.xlsx"
+                    zf.writestr(filename, excel_buffer.read())
+            zip_buffer.seek(0)
+            zip_filename = f'{date_prefix}-供应商采购订单汇总.zip'
+            encoded_filename = quote(zip_filename, safe='')
+            return ('zip', zip_buffer, encoded_filename)
+
+        export_type, buffer, encoded_filename = await asyncio.to_thread(_generate_export, sorted_suppliers, date_prefix)
+        if export_type == 'excel':
+            return StreamingResponse(buffer, media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', headers={'Content-Disposition': f"attachment; filename*=UTF-8''{encoded_filename}"})
+        return StreamingResponse(buffer, media_type='application/zip', headers={'Content-Disposition': f"attachment; filename*=UTF-8''{encoded_filename}"})
     except HTTPException:
         raise
     except (OSError, ValueError, RuntimeError) as e:

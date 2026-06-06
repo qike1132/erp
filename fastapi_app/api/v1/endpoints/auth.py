@@ -5,20 +5,23 @@
 1. JWT Bearer Token（移动端/API客户端）
 2. Cookie-based JWT（浏览器Web端）— 登录后设置 httpOnly cookie
 """
+import asyncio
 import logging
 import os
 import uuid
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import create_access_token, get_current_user_id
+from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.shared_models import User
 
 logger = logging.getLogger(__name__)
@@ -29,8 +32,8 @@ router = APIRouter()
 # ==================== Schemas ====================
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    username: str = Field(max_length=64)
+    password: str = Field(max_length=128)
     remember: bool = False
 
 class LoginResponse(BaseModel):
@@ -55,9 +58,26 @@ class UserInfoResponse(BaseModel):
     permissions: list[str]
 
 
+class LoginCheckResponse(BaseModel):
+    success: bool = True
+    message: str = ""
+    user_id: int = 0
+
+
+class FrontendErrorLogResponse(BaseModel):
+    success: bool = True
+    message: str = ""
+
+
+class FileUploadResponse(BaseModel):
+    success: bool = True
+    url: str = ""
+    filename: str = ""
+
+
 # ==================== 登录状态检查 ====================
 
-@router.get("/check")
+@router.get("/check", response_model=LoginCheckResponse)
 async def check_login_status(
     user_id: int = Depends(get_current_user_id),
 ):
@@ -100,7 +120,7 @@ async def get_current_user_info(
 
 # ==================== 前端错误日志 ====================
 
-@router.post("/logs/frontend-error")
+@router.post("/logs/frontend-error", response_model=FrontendErrorLogResponse)
 async def log_frontend_error(
     data: FrontendErrorLogRequest,
     request: Request,
@@ -112,19 +132,20 @@ async def log_frontend_error(
     便于后续分析和优化。
     """
 
-    # 获取客户端IP
     client_ip = request.client.host if request.client else "unknown"
 
-    # 记录到日志文件
+    safe_url = data.url.replace('\n', '\\n').replace('\r', '\\r')
+    safe_error = data.error.replace('\n', '\\n').replace('\r', '\\r')
+    safe_ua = data.userAgent.replace('\n', '\\n').replace('\r', '\\r')
+    safe_stack = data.stack.replace('\n', '\\n').replace('\r', '\\r') if data.stack else ""
+
     logger.warning(
-        f"[Frontend Error] IP={client_ip}, URL={data.url}, "
-        f"Error={data.error}, Timestamp={data.timestamp}, "
-        f"UserAgent={data.userAgent}, Context={data.context}"
+        "[Frontend Error] IP=%s, URL=%s, Error=%s, Timestamp=%s, UserAgent=%s",
+        client_ip, safe_url, safe_error, data.timestamp, safe_ua,
     )
 
-    # 如果有堆栈信息，也记录下来
-    if data.stack:
-        logger.debug(f"[Frontend Error Stack] {data.stack}")
+    if safe_stack:
+        logger.debug("[Frontend Error Stack] %s", safe_stack)
 
     return {
         "success": True,
@@ -145,23 +166,27 @@ async def api_login(
 
     返回JWT Token（移动端通过 Authorization: Bearer <token> 使用），
     同时设置 httpOnly cookie（浏览器自动携带，替代 Flask session）。
-    登录接口限速5次/分钟，防止暴力破解。
     """
-    # 手动限速检查：登录接口5次/分钟
-    from limits import parse
+    from fastapi_app.core.security import check_needs_rehash, hash_password, needs_migration, verify_password
     from slowapi.util import get_remote_address
 
-    limiter = request.app.state.limiter
     key = get_remote_address(request)
-    item = parse("5/minute")
-    if not limiter.limiter.hit(item, key, "auth/login"):
-        logger.warning(f"[Login] 登录尝试过于频繁: IP={key}")
-        raise HTTPException(
-            status_code=429,
-            detail="登录尝试过于频繁，请稍后再试"
-        )
 
-    from fastapi_app.core.security import check_needs_rehash, hash_password, needs_migration, verify_password
+    _login_rate_limit_key = f"login_attempt:{key}"
+    try:
+        from utils.redis_cache import redis_cache
+        _redis = redis_cache.redis_client
+        if _redis:
+            _attempts = await _redis.incr(_login_rate_limit_key)
+            if _attempts == 1:
+                await _redis.expire(_login_rate_limit_key, 300)
+            if _attempts > 10:
+                logger.warning("[Login] 登录尝试过多，暂时锁定: IP=%s", key)
+                raise HTTPException(status_code=429, detail="登录尝试过多，请5分钟后重试")
+    except HTTPException:
+        raise
+    except Exception:
+        logger.warning("[Login] Redis 限流不可用，降级为允许登录: IP=%s", key)
 
     username = data.username.strip()
     password = data.password
@@ -181,14 +206,19 @@ async def api_login(
     )
     user = result.scalar_one_or_none()
 
+    from fastapi_app.core.security import verify_password as _vp
+    dummy_hash = "$argon2id$v=19$m=47104,t=2,p=2$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
     if not user:
-        logger.warning(f"[Login] 登录失败: IP={key}")
+        _vp("timing_sidechannel_dummy", dummy_hash)
+        logger.warning("[Login] 登录失败: IP=%s", key)
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     if not user.status:
-        logger.warning(f"[Login] 登录失败: IP={key}")
+        _vp("timing_sidechannel_dummy", dummy_hash)
+        logger.warning("[Login] 登录失败: IP=%s", key)
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     if not verify_password(password, user.password):
-        logger.warning(f"[Login] 登录失败: IP={key}")
+        logger.warning("[Login] 登录失败: IP=%s", key)
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
     if needs_migration(user.password):
@@ -197,7 +227,7 @@ async def api_login(
             user.password = new_hash
             await db.commit()
             logger.info(f"[Login] 密码哈希已迁移到 Argon2id: user_id={user.id}")
-        except (ValueError, TypeError, OSError) as e:
+        except (ValueError, TypeError, OSError, SQLAlchemyError) as e:
             logger.warning(f"[Login] 密码哈希迁移失败（不影响登录）: {e}")
             await db.rollback()
     elif check_needs_rehash(user.password):
@@ -206,7 +236,7 @@ async def api_login(
             user.password = new_hash
             await db.commit()
             logger.info(f"[Login] 密码哈希参数已升级: user_id={user.id}")
-        except (ValueError, TypeError, OSError) as e:
+        except (ValueError, TypeError, OSError, SQLAlchemyError) as e:
             logger.warning(f"[Login] 密码哈希升级失败（不影响登录）: {e}")
             await db.rollback()
 
@@ -224,19 +254,30 @@ async def api_login(
     )
 
     # 设置 httpOnly cookie（浏览器Web端自动携带）
+    _is_https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
+    _is_capacitor = request.headers.get("x-client-type") == "capacitor" or request.headers.get("origin", "").startswith("http://localhost")
+    if _is_capacitor and not _is_https:
+        _samesite = "lax"
+        _secure = False
+    elif _is_https:
+        _samesite = "none"
+        _secure = True
+    else:
+        _samesite = "lax"
+        _secure = False
     response.set_cookie(
         key="access_token",
         value=access_token,
         max_age=token_max_age,
         httponly=True,
-        samesite="lax",
-        secure=request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https",
+        samesite=_samesite,
+        secure=_secure,
         path="/",
     )
 
     # auth_status cookie 已移除，前端请使用 GET /api/v1/auth/check 检查登录状态
 
-    logger.info(f"[Login] 登录成功: IP={key}, username={username}, user_id={user.id}")
+    logger.info("[Login] 登录成功: IP=%s, user_id=%s", key, user.id)
 
     return LoginResponse(
         success=True,
@@ -248,7 +289,7 @@ async def api_login(
 
 @router.post("/logout")
 async def api_logout(request: Request):
-    """登出接口 — 撤销 token 并清除 httpOnly cookie"""
+    """登出接口 — 撤销 token 并清除 httpOnly cookie（允许未认证调用以清理过期session）"""
     # 尝试撤销当前 token（加入黑名单）
     try:
         from fastapi_app.core.deps import _decode_jwt_token, revoke_token
@@ -315,7 +356,7 @@ def _validate_image_content(content: bytes, ext: str) -> bool:
     return False
 
 
-@router.post("/upload")
+@router.post("/upload", response_model=FileUploadResponse)
 async def upload_file(
     file: UploadFile = File(...),
     user_id: int = Depends(get_current_user_id),
@@ -338,7 +379,7 @@ async def upload_file(
         raise HTTPException(status_code=400, detail="文件内容与扩展名不匹配，可能不是有效的图片文件")
 
     # 生成唯一文件名
-    new_filename = f"{datetime.now().strftime('%Y%m%d')}_{uuid.uuid4().hex[:8]}.{ext}"
+    new_filename = f"{datetime.now().strftime('%Y%m%d')}_{uuid.uuid4().hex}.{ext}"
 
     # 确保上传目录存在（与 main.py 中 StaticFiles 挂载路径一致：项目根目录/static/uploads）
     upload_folder = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))), "static", "uploads")
@@ -346,9 +387,11 @@ async def upload_file(
 
     file_path = os.path.join(upload_folder, new_filename)
 
-    # 写入文件
-    with open(file_path, "wb") as f:
-        f.write(content)
+    def _write_file():
+        with open(file_path, "wb") as f:
+            f.write(content)
+
+    await asyncio.to_thread(_write_file)
 
     file_url = f"/static/uploads/{new_filename}"
     return {"success": True, "url": file_url, "filename": new_filename}

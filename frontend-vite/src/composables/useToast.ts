@@ -1,10 +1,35 @@
 /**
  * 全局 Toast 提示 composable
  * Plush Cute 风格 · 毛玻璃质感 + 海洋色阴影 + 渐变图标盒
+ *
+ * 统一通知入口，支持配置化调用
  */
 const TOAST_CONTAINER_ID = '__toast_container__'
 
-const THEME: Record<string, {
+export type ToastType = 'success' | 'error' | 'warning' | 'info'
+
+export interface ToastOptions {
+  /** 显示时长（毫秒），默认 2500 */
+  duration?: number
+  /** 是否可手动关闭，默认 false */
+  closable?: boolean
+  /** 关闭回调 */
+  onClose?: () => void
+}
+
+/** 全局默认配置 */
+let globalConfig: Required<ToastOptions> = {
+  duration: 2500,
+  closable: false,
+  onClose: () => {},
+}
+
+/** 更新全局默认配置 */
+export function configureToast(config: Partial<ToastOptions>) {
+  globalConfig = { ...globalConfig, ...config }
+}
+
+const THEME: Record<ToastType, {
   accent: string
   accentShadow: string
   icon: string
@@ -66,7 +91,7 @@ function getContainer(): HTMLElement {
   return el
 }
 
-export function showToast(msg: string, type = 'info') {
+function _renderToast(msg: string, type: ToastType, options: Required<ToastOptions>) {
   const container = getContainer()
   const theme = THEME[type] || THEME.info
 
@@ -134,6 +159,27 @@ export function showToast(msg: string, type = 'info') {
   })
   wrap.appendChild(text)
 
+  // close button (if closable)
+  let closeBtn: HTMLButtonElement | null = null
+  if (options.closable) {
+    closeBtn = document.createElement('button')
+    closeBtn.innerHTML = '<i class="fas fa-times" style="font-size:12px"></i>'
+    Object.assign(closeBtn.style, {
+      background: 'none',
+      border: 'none',
+      cursor: 'pointer',
+      padding: '4px',
+      marginLeft: '4px',
+      color: '#666',
+      opacity: '0.6',
+      transition: 'opacity 0.2s',
+      pointerEvents: 'auto',
+    })
+    closeBtn.onmouseenter = () => { if (closeBtn) closeBtn.style.opacity = '1' }
+    closeBtn.onmouseleave = () => { if (closeBtn) closeBtn.style.opacity = '0.6' }
+    wrap.appendChild(closeBtn)
+  }
+
   container.appendChild(wrap)
 
   // animate in
@@ -144,17 +190,62 @@ export function showToast(msg: string, type = 'info') {
     })
   })
 
-  // animate out after 2.5s
-  setTimeout(() => {
+  const removeToast = () => {
     wrap.style.opacity = '0'
     wrap.style.transform = 'translateY(-8px) scale(0.96)'
     setTimeout(() => {
       if (wrap.parentNode) wrap.remove()
       if (container.childNodes.length === 0) container.remove()
+      options.onClose()
     }, 350)
-  }, 2500)
+  }
+
+  // close button handler
+  if (closeBtn) {
+    closeBtn.onclick = (e) => {
+      e.stopPropagation()
+      removeToast()
+    }
+  }
+
+  // auto dismiss
+  const timer = setTimeout(removeToast, options.duration)
+
+  // pause on hover (optional UX enhancement)
+  wrap.onmouseenter = () => {
+    // Could implement pause logic here if needed
+  }
 }
 
+/**
+ * 显示 Toast 通知
+ * @param msg 消息内容
+ * @param type 通知类型
+ * @param options 额外配置
+ */
+export function showToast(msg: string, type: ToastType = 'info', options?: ToastOptions) {
+  const merged: Required<ToastOptions> = {
+    duration: options?.duration ?? globalConfig.duration,
+    closable: options?.closable ?? globalConfig.closable,
+    onClose: options?.onClose ?? globalConfig.onClose,
+  }
+  _renderToast(msg, type, merged)
+}
+
+/** 便捷方法集合 */
+export const toast = {
+  success: (msg: string, options?: ToastOptions) => showToast(msg, 'success', options),
+  error: (msg: string, options?: ToastOptions) => showToast(msg, 'error', options),
+  warning: (msg: string, options?: ToastOptions) => showToast(msg, 'warning', options),
+  info: (msg: string, options?: ToastOptions) => showToast(msg, 'info', options),
+}
+
+/**
+ * Composable 形式（用于 Vue 组件内）
+ * @example
+ * const { showToast, toast } = useToast()
+ * toast.success('操作成功')
+ */
 export function useToast() {
-  return { showToast }
+  return { showToast, toast, configureToast }
 }

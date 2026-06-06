@@ -9,6 +9,7 @@ import logging
 import os
 import sys
 from datetime import datetime
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 import structlog
@@ -61,9 +62,14 @@ def setup_logging():
     ))
     root_logger.addHandler(console_handler)
 
-    # 文件处理器（JSON 格式）
+    # 文件处理器（JSON 格式，按天轮转，保留 30 天）
     log_file = log_dir / f"fastapi_{datetime.now().strftime('%Y%m%d')}.log"
-    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    file_handler = TimedRotatingFileHandler(
+        log_file,
+        when="midnight",
+        backupCount=30,
+        encoding="utf-8",
+    )
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(logging.Formatter("%(message)s"))  # structlog 已格式化
     root_logger.addHandler(file_handler)

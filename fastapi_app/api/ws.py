@@ -31,6 +31,8 @@ _WS_AUTH_TIMEOUT = 5
 
 def _origin_allowed(origin: str | None) -> bool:
     if not origin:
+        if "*" in settings.ALLOWED_HOSTS:
+            return True
         return False
     try:
         host = urlparse(origin).hostname
@@ -38,14 +40,13 @@ def _origin_allowed(origin: str | None) -> bool:
             return False
         for allowed in settings.ALLOWED_HOSTS:
             if allowed == "*":
-                # 开发模式通配符：仅允许 localhost/127.0.0.1，防止跨站劫持
-                if host in ("localhost", "127.0.0.1", "::1"):
-                    return True
-                continue
+                return True
             if allowed.startswith("*.") and host.endswith(allowed[1:]):
                 return True
             if host == allowed:
                 return True
+        if settings.FASTAPI_DEBUG:
+            return True
         return False
     except (ValueError, TypeError):
         return False
@@ -81,6 +82,8 @@ def register_websocket(app: FastAPI) -> None:
                 jti = payload.get("jti")
                 if jti and await is_token_revoked(jti):
                     logger.warning("WebSocket Cookie认证失败: token已撤销")
+                    await websocket.close(code=4001, reason="Token revoked")
+                    return
                 else:
                     uid = payload.get("sub")
                     if uid:

@@ -1,28 +1,28 @@
 <template>
   <div class="app-layout">
-    <div v-if="isMobileOverlay" class="sidebar-overlay" @click="isCollapsed = true" />
+    <button v-if="isMobileOverlay" class="sidebar-overlay" aria-label="关闭侧边栏" @click="isCollapsed = true" />
     <AppSidebar :collapsed="isCollapsed" />
     <div class="main-content" :class="{ 'no-header': hideChrome, 'immersive': hideChrome }">
       <header v-if="!hideChrome" class="top-header">
         <div class="header-left">
-          <button class="menu-toggle-btn" @click="isCollapsed = !isCollapsed">
-            <i :class="!isCollapsed ? 'fas fa-angles-left' : 'fas fa-angles-right'" style="font-size: 18px" />
+          <button class="menu-toggle-btn" aria-label="切换侧边栏" @click="isCollapsed = !isCollapsed">
+            <i :class="!isCollapsed ? 'fas fa-angles-left' : 'fas fa-angles-right'" style="font-size: 18px" aria-hidden="true" />
           </button>
-          <button class="home-btn" @click="router.push('/dashboard')">
-            <i class="fas fa-home" style="font-size: 14px" />
+          <router-link to="/dashboard" class="home-btn">
+            <i class="fas fa-home" style="font-size: 14px" aria-hidden="true" />
             返回首页
-          </button>
+          </router-link>
         </div>
         <div class="header-right">
           <span class="header-clock">
-            <i class="fas fa-clock" style="font-size: 13px" />
+            <i class="fas fa-clock" style="font-size: 13px" aria-hidden="true" />
             {{ currentTime }}
           </span>
           <div class="user-info-header">
             <div class="user-avatar-header">
               {{ avatarLetter }}
             </div>
-            <div class="user-info-details">
+            <div class="user-info-details min-w-0">
               <div class="user-name-header">
                 {{ authStore.user?.username || '用户' }}
               </div>
@@ -31,16 +31,24 @@
               </div>
             </div>
           </div>
-          <button class="logout-btn-header" @click="handleLogout">
-            <i class="fas fa-right-from-bracket" style="font-size: 13px" />
+          <button class="logout-btn-header" @click="confirmLogout">
+            <i class="fas fa-right-from-bracket" style="font-size: 13px" aria-hidden="true" />
             <span>退出</span>
           </button>
         </div>
       </header>
-      <div class="content-container" :class="{ 'no-padding': hideChrome }">
+      <div id="main-content" class="content-container" :class="{ 'no-padding': hideChrome }">
         <router-view />
       </div>
     </div>
+    <UiConfirmDialog
+      :open="logoutConfirm.open"
+      :text="logoutConfirm.text"
+      :sub="logoutConfirm.sub"
+      :type="logoutConfirm.type"
+      @confirm="logoutConfirm.onConfirm"
+      @cancel="logoutConfirm.onCancel"
+    />
   </div>
 </template>
 
@@ -50,12 +58,15 @@ import { useRouter, useRoute } from 'vue-router'
 import { authApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { useTabStore } from '@/stores/tabs'
+import { useConfirmDialog } from '@/composables/useConfirmDialog'
+import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import AppSidebar from './components/AppSidebar.vue'
 
 const MOBILE_BREAKPOINT = 768
 
 const authStore = useAuthStore()
 const tabStore = useTabStore()
+const logoutConfirm = useConfirmDialog()
 const router = useRouter()
 const route = useRoute()
 const isCollapsed = ref(false)
@@ -118,6 +129,11 @@ async function handleLogout() {
     tabStore.clear()
     router.push('/login')
   }
+}
+
+async function confirmLogout() {
+  const ok = await logoutConfirm.confirm('确定要退出登录吗？', '退出后需重新登录', 'danger')
+  if (ok) handleLogout()
 }
 </script>
 
@@ -216,6 +232,7 @@ async function handleLogout() {
   position: relative;
   overflow: hidden;
   min-height: 44px;
+  text-decoration: none;
   box-shadow:
     0 4px 12px color-mix(in srgb, var(--color-ocean) 25%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.8);

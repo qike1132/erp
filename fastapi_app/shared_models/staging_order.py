@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text
@@ -24,7 +24,7 @@ class StagingOrder(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     session_id: Mapped[str] = mapped_column(String(64), index=True, comment='会话ID，用于标识同一批导入')
     customer: Mapped[str] = mapped_column(String(100), nullable=False, index=True, comment='客户名称')
-    order_date: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, comment='下单时间')
+    order_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), comment='下单时间')
     product_name: Mapped[str] = mapped_column(String(200), nullable=False, comment='产品名称（冗余存储）')
     product_barcode: Mapped[str | None] = mapped_column(String(50), comment='产品69码（冗余存储）')
     product_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('product.id'), comment='产品ID（确认后填充）')
@@ -37,8 +37,8 @@ class StagingOrder(Base):
     status: Mapped[str | None] = mapped_column(String(20), default='pending', comment='状态：pending=待审核, approved=已确认, rejected=已拒绝')
     is_validated: Mapped[bool | None] = mapped_column(Boolean, default=False, comment='是否已验证产品存在')
     validation_error: Mapped[str | None] = mapped_column(String(500), comment='验证错误信息')
-    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, comment='创建时间')
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), comment='创建时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
     import_batch_id: Mapped[str | None] = mapped_column(String(64), index=True, comment='导入批次ID')
 
     product: Mapped["Product | None"] = relationship('Product', backref='staging_orders')

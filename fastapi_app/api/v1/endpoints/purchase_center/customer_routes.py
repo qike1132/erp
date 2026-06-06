@@ -13,6 +13,7 @@ from fastapi_app.api.v1.endpoints.purchase_center.schemas import (
 )
 from fastapi_app.core.database import get_async_db as get_db, get_async_read_db as get_read_db
 from fastapi_app.core.deps import require_permission
+from fastapi_app.schemas.purchase_center import CustomerStatisticsResponse
 from fastapi_app.services import purchase_center_service as svc
 
 router = APIRouter()
@@ -81,14 +82,14 @@ async def api_sync_customers(
 @router.post("/customers/batch")
 async def api_batch_get_customers(
     data: CustomerBatchRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
     _user=Depends(require_permission("product_manage")),
 ):
     customers = await svc.batch_get_customers(db, data.ids)
     return {'success': True, 'customers': customers}
 
 
-@router.get("/customers/statistics")
+@router.get("/customers/statistics", response_model=CustomerStatisticsResponse)
 async def api_get_customers_statistics(
     db: AsyncSession = Depends(get_read_db),
     _user=Depends(require_permission("product_manage")),

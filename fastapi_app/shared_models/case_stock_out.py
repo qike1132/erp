@@ -1,7 +1,7 @@
 """皮套出库模型"""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
@@ -23,11 +23,11 @@ class CaseStockOut(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     stockout_no: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
-    stockout_date: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, index=True)
+    stockout_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
     case_id: Mapped[int] = mapped_column(Integer, ForeignKey('case.id'), nullable=False, index=True)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     customer: Mapped[str | None] = mapped_column(String(100), index=True)
     note: Mapped[str | None] = mapped_column(Text)
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
 
     case: Mapped["Case"] = relationship('Case', backref='stockouts')

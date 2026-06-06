@@ -61,7 +61,7 @@
             <!-- 数据库概览 -->
             <div class="bk-section">
               <div class="bk-section-label">数据库概览</div>
-              <div v-if="tablesLoading" class="bk-loading-inline"><i class="fas fa-spinner fa-spin" /> 加载中...</div>
+              <div v-if="tablesLoading" class="bk-loading-inline"><i class="fas fa-spinner fa-spin" /> 加载中…</div>
               <div v-else-if="tables.length" class="bk-table-stats">
                 <div class="bk-stat-item">
                   <div class="bk-stat-val">{{ tables.length }}</div>
@@ -346,7 +346,7 @@
                 @failed="onRestoreProgressFailed"
               />
 
-              <div v-if="serverBackupsLoading" class="bk-loading-inline"><i class="fas fa-spinner fa-spin" /> 加载中...</div>
+              <div v-if="serverBackupsLoading" class="bk-loading-inline"><i class="fas fa-spinner fa-spin" /> 加载中…</div>
 
               <div v-else-if="!serverBackups.length" class="bk-empty-state">
                 <i class="fas fa-inbox" />
@@ -372,8 +372,8 @@
                   </div>
                   <div class="bk-backup-meta">
                     <span v-if="b.format" class="bk-backup-format">
-                      <i :class="b.format === 'incremental' ? 'fas fa-layer-group' : b.format === 'zip' ? 'fas fa-file-archive' : 'fas fa-file-code'" />
-                      {{ b.format === 'incremental' ? '增量' : b.format === 'zip' ? 'ZIP' : 'JSON' }}
+                      <i :class="b.format === 'incremental' ? 'fas fa-layer-group' : b.format === 'zip' ? 'fas fa-file-archive' : b.format === 'encrypted' ? 'fas fa-lock' : 'fas fa-file-code'" />
+                      {{ b.format === 'incremental' ? '增量' : b.format === 'zip' ? 'ZIP' : b.format === 'encrypted' ? '加密' : 'JSON' }}
                     </span>
                     <span v-if="b.exported_at"><i class="fas fa-clock" /> {{ b.exported_at }}</span>
                     <span v-if="b.exported_by"><i class="fas fa-user" /> {{ b.exported_by }}</span>
@@ -1080,7 +1080,7 @@ function handleTabChange(tab: 'backup' | 'records') {
   border-radius: var(--radius-md);
   background: white;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, background 0.3s ease;
 }
 
 .bk-mode-btn span {
@@ -1141,7 +1141,7 @@ function handleTabChange(tab: 'backup' | 'records') {
   font-weight: 600;
   color: var(--color-text-secondary);
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, color 0.3s ease, transform 0.3s ease;
 }
 
 .bk-tab-btn:hover {
@@ -1234,7 +1234,7 @@ function handleTabChange(tab: 'backup' | 'records') {
   border-radius: var(--radius-input);
   font-size: 14px;
   outline: none;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
   background: white;
   font-family: inherit;
   color: var(--color-text);
@@ -1268,7 +1268,7 @@ function handleTabChange(tab: 'backup' | 'records') {
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, border-color 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease;
 }
 
 .bk-action-primary {
@@ -1309,7 +1309,7 @@ function handleTabChange(tab: 'backup' | 'records') {
   padding: 28px 20px;
   text-align: center;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, background 0.3s ease;
   background: white;
 }
 
@@ -1363,7 +1363,7 @@ function handleTabChange(tab: 'backup' | 'records') {
   cursor: pointer;
   padding: 4px;
   border-radius: 50%;
-  transition: all 0.2s ease;
+  transition: background 0.2s ease, color 0.2s ease;
 }
 
 .bk-file-clear:hover {
@@ -1492,7 +1492,7 @@ function handleTabChange(tab: 'backup' | 'records') {
   border: 1px solid var(--color-border-light);
   border-radius: var(--radius-sm);
   padding: 14px 16px;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
   background: white;
 }
 
@@ -1539,7 +1539,7 @@ function handleTabChange(tab: 'backup' | 'records') {
   align-items: center;
   justify-content: center;
   font-size: 13px;
-  transition: all 0.2s ease;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
 }
 
 .bk-icon-btn-primary {

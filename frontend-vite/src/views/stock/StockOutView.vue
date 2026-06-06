@@ -52,11 +52,11 @@ const activeTab = ref<'input' | 'records'>('input')
   display: flex;
   flex-direction: column;
   min-height: 0;
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .so-card-main:hover {
-  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
-  transform: translateY(-6px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  transform: translateY(-2px);
 }
 .so-card-header {
   padding: 10px 24px;
@@ -135,7 +135,7 @@ const activeTab = ref<'input' | 'records'>('input')
   color: var(--color-text-secondary);
   background: transparent;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
 }
 .so-tab-btn:hover {
   background: var(--color-primary-50);

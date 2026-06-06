@@ -1,26 +1,20 @@
 import { get, post, put, del, upload, download } from './request'
 import type {
-  ApiResponse, User, OrderItem, Product, Customer, Supplier,
+  ApiResponse, User, UserCreate, OrderItem, Product, Customer, Supplier,
   PurchaseOrder, UnprocessedOrder, ApprovalItem, ApprovalListResult,
   NavSection, PermissionItem, StagingOrder,
   MaterialRegistration, Registration, OrderPreview, ProductionCraft, ShipmentRecord,
   InventoryItem, StockInRecord, StockOutRecord, ShipmentInfo,
   QueryParams, OrderBatchItem, BatchQueryItem, PaginatedResponse,
   BatchNoUpdatePayload, BatchAssignPayload, BatchCompletePayload,
+  LoginResponse, TaskResponse, ExportResponse, UserInfo,
 } from '@/types'
 
 // ===== 认证 =====
-interface AuthMeResponse {
-  user: { user_id: number; id?: number; username: string; is_super: boolean; permissions: string[] }
-  user_id: number
-  username: string
-  is_super: boolean
-  permissions: string[]
-}
 export const authApi = {
-  login: (data: { username: string; password: string }) => post<{ access_token: string }>('/auth/login', data),
+  login: (data: { username: string; password: string; remember?: boolean }) => post<LoginResponse>('/auth/login', data),
   logout: () => post('/auth/logout'),
-  me: () => get<AuthMeResponse>('/auth/me'),
+  me: () => get<{ user: UserInfo } & UserInfo>('/auth/me'),
 }
 
 // ===== 订单 =====
@@ -33,6 +27,7 @@ export const orderApi = {
   lock: (id: number) => post(`/orders/lock/${id}`),
   unlock: (id: number) => post(`/orders/unlock/${id}`),
   deductStock: (id: number) => post(`/orders/deduct-stock/${id}`),
+  updateDeduct: (id: number, deductQuantity: number) => put(`/orders/deduct/${id}`, null, { params: { deduct_quantity: deductQuantity } }),
   staging: {
     add: (data: Partial<StagingOrder>) => post<StagingOrder>('/staging-orders/add', data),
     list: () => get<StagingOrder[]>('/staging-orders/list'),
@@ -82,11 +77,11 @@ export const supplierApi = {
 // ===== 库存 =====
 export const stockApi = {
   stockins: (params?: QueryParams) => get<StockInRecord[]>('/stock/in/list', params),
-  stockouts: (params?: QueryParams) => get<ApiResponse & { stockouts?: StockOutRecord[]; items?: StockOutRecord[]; total?: number }>('/stock/out/list', params),
+  stockouts: (params?: QueryParams) => get<{ stockouts?: StockOutRecord[]; items?: StockOutRecord[]; total?: number }>('/stock/out/list', params),
   inventory: (params?: QueryParams) => get<InventoryItem[]>('/stock/inventory', params),
   deleteStockin: (id: number) => del(`/stock/in/delete/${id}`),
   deleteStockout: (id: number) => del(`/stock/out/delete/${id}`),
-  searchProducts: (q: string) => get<ApiResponse & { products?: Product[] }>('/aux/product-search', { q }),
+  searchProducts: (q: string) => get<{ products?: Product[] }>('/aux/product-search', { q }),
   availableShipment: (productId: number, customer: string) =>
     get<ApiResponse<ShipmentInfo>>('/aux/available-shipment', { product_id: productId, customer }),
   stagingStockins: {
@@ -105,7 +100,7 @@ export const stockApi = {
       post('/staging-stockouts/confirm', sessionId ? { session_id: sessionId } : undefined),
     clear: (sessionId?: string) =>
       del(`/staging-stockouts/clear${sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''}`),
-    importExcel: (formData: FormData) => upload<ApiResponse & { session_id?: string; imported?: number; count?: number }>('/staging-stockouts/import', formData),
+    importExcel: (formData: FormData) => upload<{ session_id?: string; imported?: number; count?: number }>('/staging-stockouts/import', formData),
   },
   batchSubmitStockins: (stockins: Record<string, unknown>[]) => post('/aux/batch-submit-stockins', { stockins }),
   batchSubmitStockouts: (stockouts: Record<string, unknown>[]) => post('/aux/batch-submit-stockouts', { stockouts }),
@@ -122,16 +117,16 @@ export const purchaseApi = {
   deleteOrder: (id: number) => del(`/purchase-center/orders/${id}`),
   batchDelete: (ids: number[]) => post('/purchase-center/orders/batch-delete', { ids }),
   updateOrder: (id: number, data: Partial<PurchaseOrder>) => put(`/purchase-center/orders/${id}`, data),
-  oneClickGenerate: (data: { order_ids: number[] }) => post<ApiResponse & { created_count: number; orders: { id: number; order_no: string }[] }>('/purchase-center/orders/one-click-generate', data),
+  oneClickGenerate: (data: { order_ids: number[] }) => post<{ created_count: number; orders: { id: number; order_no: string }[] }>('/purchase-center/orders/one-click-generate', data),
   orderDetail: (id: number) => get<ApiResponse<PurchaseOrder>>(`/purchase-center/orders/${id}`),
-  completed: (params?: QueryParams) => get<ApiResponse<PurchaseOrder[]> & { orders: PurchaseOrder[]; total: number; total_pages?: number; pages?: number }>('/purchase-center/orders/completed', params),
-  exportCompleted: (params?: QueryParams) => post<ApiResponse & { html?: string }>('/purchase-center/orders/completed/export', params),
-  quickFilters: () => get<ApiResponse & { quick_filters?: { id: string; name?: string; filters?: { start_date?: string; end_date?: string } }[] }>('/purchase-center/orders/completed/quick-filters'),
+  completed: (params?: QueryParams) => get<{ orders: PurchaseOrder[]; total: number; pages: number }>('/purchase-center/orders/completed', params),
+  exportCompleted: (params?: QueryParams) => post<ExportResponse>('/purchase-center/orders/completed/export', params),
+  quickFilters: () => get<{ quick_filters?: { id: string; name?: string; filters?: { start_date?: string; end_date?: string } }[] }>('/purchase-center/orders/completed/quick-filters'),
   suggestions: (field: string, q: string) => get<string[]>('/purchase-center/orders/completed/suggestions', { field, q }),
   factorySummary: (ids: number[]) => post<Record<string, unknown>>('/purchase-center/orders/factory-summary', { ids }),
   supplierSummary: (ids: number[]) => post<Record<string, unknown>[]>('/purchase-center/orders/supplier-summary', { ids }),
   saveFactoryEdits: (edits: Record<string, unknown>[]) => post('/purchase-center/orders/factory-summary/save', { edits }),
-  summaryPrint: (ids: number[], format: string) => post<ApiResponse & { html?: string }>('/purchase-center/orders/summary-print', { ids, format }),
+  summaryPrint: (ids: number[], format: string) => post<ExportResponse>('/purchase-center/orders/summary-print', { ids, format }),
   supplierSummaryExport: (ids: number[]) => post('/purchase-center/orders/supplier-summary-export', { ids }),
   products: (params?: QueryParams) => get<Product[]>('/purchase-center/products', params),
   searchSuggestions: (q: string) => get<string[]>('/purchase-center/products/search-suggestions', { q }),
@@ -157,13 +152,13 @@ export const materialApi = {
   overview: () => get<Record<string, unknown>>('/material-registrations/stats/overview'),
   trend: (days: number) => get<Record<string, unknown>>('/material-registrations/stats/trend', { days }),
   distribution: () => get<Record<string, unknown>>('/material-registrations/stats/distribution'),
-  registrations: (params?: QueryParams) => get<ApiResponse<Registration[]> & { registrations: Registration[]; pages?: number; total_pages?: number }>('/material-registrations/registrations', params),
-  registrationDetail: (id: number) => get<ApiResponse<Registration> & { registration?: Registration }>(`/material-registrations/registrations/${id}`),
-  history: (params?: QueryParams) => get<ApiResponse<Registration[]> & { registrations: Registration[]; pages?: number; total_pages?: number }>('/material-registrations/history', params),
+  registrations: (params?: QueryParams) => get<{ registrations: Registration[]; pages?: number; total_pages?: number }>('/material-registrations/registrations', params),
+  registrationDetail: (id: number) => get<{ registration?: Registration }>(`/material-registrations/registrations/${id}`),
+  history: (params?: QueryParams) => get<{ registrations: Registration[]; pages?: number; total_pages?: number }>('/material-registrations/history', params),
   receive: (id: number, data: { received_quantity: number; remark?: string }) => post<ApiResponse & { auto_completed?: boolean }>(`/material-registrations/items/${id}/receive`, data),
   purchaseOrderPreview: (orderNo: string) =>
-    get<ApiResponse<OrderPreview> & { order?: OrderPreview }>(`/material-registrations/purchase-orders/preview/${encodeURIComponent(orderNo)}`),
-  export: (params?: QueryParams) => post<ApiResponse & { html?: string }>('/material-registrations/export', params),
+    get<{ order?: OrderPreview }>(`/material-registrations/purchase-orders/preview/${encodeURIComponent(orderNo)}`),
+  export: (params?: QueryParams) => post<ExportResponse>('/material-registrations/export', params),
 }
 
 // ===== 生产 =====
@@ -177,15 +172,6 @@ export const productionApi = {
   createCraft: (data: Partial<ProductionCraft>) => post<ProductionCraft>('/production-summary/craft/create', data),
   editCraft: (id: number, data: Partial<ProductionCraft>) => put<ProductionCraft>(`/production-summary/craft/edit/${id}`, data),
   deleteCraft: (id: number) => del(`/production-summary/craft/delete/${id}`),
-  packaging: (params?: QueryParams) =>
-    get<ProductionCraft[]>('/production-summary/packaging/list', {
-      year: new Date().getFullYear(),
-      month: new Date().getMonth() + 1,
-      ...params,
-    }),
-  createPackaging: (data: Partial<ProductionCraft>) => post<ProductionCraft>('/production-summary/packaging/create', data),
-  editPackaging: (id: number, data: Partial<ProductionCraft>) => put<ProductionCraft>(`/production-summary/packaging/edit/${id}`, data),
-  deletePackaging: (id: number) => del(`/production-summary/packaging/delete/${id}`),
   summary: (params?: QueryParams) =>
     get<Record<string, unknown>>('/production-summary/summary', { year: new Date().getFullYear(), ...params }),
 }
@@ -224,7 +210,7 @@ export const reportApi = {
 // ===== 用户/权限 =====
 export const userApi = {
   list: (params?: QueryParams) => get<{ users: User[]; total: number }>('/users/list', params),
-  create: (data: Partial<User>) => post<User>('/users/create', data),
+  create: (data: UserCreate) => post<User>('/users/create', data),
   update: (id: number, data: Partial<User>) => put<User>(`/users/edit/${id}`, data),
   toggle: (id: number) => post(`/users/toggle/${id}`),
   delete: (id: number) => del(`/users/delete/${id}`),
@@ -255,7 +241,7 @@ export const dashboardApi = {
 
 // ===== OCR =====
 export const ocrApi = {
-  createTask: () => post<{ task_id: string }>('/ocr-import/create-task'),
+  createTask: () => post<TaskResponse>('/ocr-import/create-task'),
   upload: (sessionId: string, formData: FormData) => upload('/ocr-import/upload', formData),
   progress: (taskId: string) => get<{ progress: number; status: string }>(`/ocr-import/progress/${taskId}`),
 }
@@ -322,14 +308,6 @@ export const backupApi = {
   getStatus: () => get<ApiResponse>('/backup/status'),
 }
 
-// ===== App版本管理 =====
-export const appUpdateApi = {
-  list: (platform: string = 'android') => get('/app/versions', { platform }),
-  checkLatest: (currentVersionCode: number, platform: string = 'android') => get('/app/latest', { platform, current_version_code: currentVersionCode }),
-  upload: (formData: FormData) => upload('/app/upload', formData),
-  publish: (versionId: number) => post(`/app/${versionId}/publish`),
-}
-
 // ===== 订单批次号 =====
 export const orderBatchApi = {
   orders: (params?: QueryParams) => get<{ success: boolean; data: OrderBatchItem[]; total: number }>('/order-batch/orders', params),
@@ -338,4 +316,5 @@ export const orderBatchApi = {
   completeBatch: (data: BatchCompletePayload) => post<{ success: boolean; message: string; completed_count: number; failed_orders: unknown[] }>('/order-batch/batch/complete', data),
   history: (params?: QueryParams) => get<{ success: boolean; data: OrderBatchItem[]; total: number }>('/order-batch/history', params),
   whitelist: () => get<{ customers: string[] }>('/order-batch/whitelist'),
+  setWhitelist: (customers: string[]) => put<{ customers: string[] }>('/order-batch/whitelist', { customers }),
 }

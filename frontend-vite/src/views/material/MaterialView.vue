@@ -1,4 +1,4 @@
-<template>
+ <template>
   <div class="mr-container">
     <div class="mr-main-card">
     <!-- Unified Header + Tabs -->
@@ -8,9 +8,6 @@
       </div>
       <div class="mr-top-right">
         <div class="mr-tabs">
-          <button :class="['mr-tab-btn', { active: activeTab === 'overview' }]" @click="activeTab = 'overview'">
-            监控面板
-          </button>
           <button :class="['mr-tab-btn', { active: activeTab === 'progress' }]" @click="switchToProgress">
             来料进度 <span v-if="progressCount > 0" :class="['notification-badge', activeTab === 'progress' ? 'notification-badge-active' : '']">{{ progressCount }}</span>
           </button>
@@ -18,88 +15,7 @@
             历史查询
           </button>
           <button v-if="canManage && activeTab === 'progress'" class="mr-btn mr-btn-ghost" @click="exportData" title="导出来料进度数据"><i class="fas fa-file-export" /> 导出</button>
-          <button v-if="canManage && activeTab === 'history'" class="mr-btn mr-btn-ghost" @click="exportHistory" title="导出历史数据"><i class="fas fa-file-export" /> 导出历史</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- ========== 监控面板 ========== -->
-    <div v-if="activeTab === 'overview'" class="mr-content">
-      <!-- Stats Row: colored tinted backgrounds -->
-      <div class="mr-stats">
-        <div class="mr-sc s-total">
-          <div class="mr-sc-icon"><i class="fas fa-clipboard-list" /></div>
-          <div class="mr-sc-info"><div class="mr-sv">{{ overview?.total ?? 0 }}</div><div class="mr-sl">总登记数</div></div>
-          <div class="mr-sc-sub">近7天 +{{ overview?.recent_registrations ?? 0 }}</div>
-        </div>
-        <div class="mr-sc s-pending">
-          <div class="mr-sc-icon"><i class="fas fa-hourglass-half" /></div>
-          <div class="mr-sc-info"><div class="mr-sv">{{ overview?.pending ?? 0 }}</div><div class="mr-sl">未开始</div></div>
-        </div>
-        <div class="mr-sc s-partial">
-          <div class="mr-sc-icon"><i class="fas fa-truck" /></div>
-          <div class="mr-sc-info"><div class="mr-sv">{{ overview?.partial ?? 0 }}</div><div class="mr-sl">部分到货</div></div>
-        </div>
-        <div class="mr-sc s-completed">
-          <div class="mr-sc-icon"><i class="fas fa-check-circle" /></div>
-          <div class="mr-sc-info"><div class="mr-sv">{{ overview?.completed ?? 0 }}</div><div class="mr-sl">全部到货</div></div>
-        </div>
-        <div class="mr-sc s-progress">
-          <div class="mr-sc-icon"><i class="fas fa-chart-line" /></div>
-          <div class="mr-sc-info"><div class="mr-sv">{{ overview?.overall_progress ?? 0 }}%</div><div class="mr-sl">总体进度</div></div>
-          <div class="mr-sc-sub">已收 {{ overview?.total_received ?? 0 }} / 采购 {{ overview?.total_ordered ?? 0 }}</div>
-        </div>
-      </div>
-
-      <!-- Category Progress: compact horizontal bars -->
-      <div class="mr-section-label"><i class="fas fa-th-large" /> 分类进度</div>
-      <div class="mr-cat-grid">
-        <div v-for="cat in categoryStats" :key="cat.category" class="mr-cat-card" :class="'mr-cat-' + cat.category">
-          <div class="mr-cat-hd">
-            <span class="mr-cat-nm">{{ cat.category_name || CATEGORY_MAP[cat.category] || cat.category }}</span>
-            <span class="mr-cat-pg">{{ cat.progress }}%</span>
-          </div>
-          <div class="mr-cat-bar">
-            <div :class="['mr-cat-fill', cat.category]" :style="{ width: cat.progress + '%' }"></div>
-          </div>
-          <div class="mr-cat-det">
-            <span>采购 {{ cat.ordered }}</span>
-            <span>已收 {{ cat.received }}</span>
-            <span>待收 {{ cat.remaining }}</span>
-          </div>
-        </div>
-        <div v-if="!categoryStats.length" class="mr-empty-inline">暂无分类数据</div>
-      </div>
-
-      <!-- Charts: side by side with subtle bg -->
-      <div class="mr-section-label"><i class="fas fa-chart-bar" /> 数据趋势</div>
-      <div class="mr-chart-row">
-        <div class="mr-chart-card">
-          <div class="mr-chart-title"><i class="fas fa-chart-line" /> 近30天到货趋势</div>
-          <div class="mr-chart-body">
-            <div class="mr-trend" v-if="trendData.length">
-              <div v-for="(t, idx) in trendData" :key="t.date" class="mr-tb"
-                :style="{ height: Math.max(Math.round((Math.max(t.registered, t.received) / trendMax) * 140), 4) + 'px', background: t.registered > 0 ? 'var(--color-primary-200)' : '#e5e7eb' }">
-                <div class="mr-tip">{{ t.date }}<br>登记: {{ t.registered }} | 收货: {{ t.received }}</div>
-              </div>
-            </div>
-            <div v-else class="mr-empty-inline">暂无趋势数据</div>
-          </div>
-        </div>
-        <div class="mr-chart-card">
-          <div class="mr-chart-title"><i class="fas fa-chart-pie" /> 状态分布</div>
-          <div class="mr-chart-body">
-            <div class="mr-pie" v-if="distributionData.length">
-              <div class="mr-pie-chart" :style="{ background: pieGradient }"></div>
-              <div class="mr-pie-legend">
-                <div v-for="d in distributionData" :key="d.status" class="mr-pie-item">
-                  <div class="mr-pie-dot" :style="{ background: STATUS_COLORS[d.status] || '#999' }"></div>
-                  {{ STATUS_NAMES[d.status] || d.status }}: {{ d.count }}
-                </div>
-              </div>
-            </div>
-            <div v-else class="mr-empty-inline">暂无分布数据</div>
-          </div>
+          <button v-if="canManage && activeTab === 'history'" class="mr-btn mr-btn-ghost" @click="exportHistory" title="导出历史数据"><i class="fas fa-file-export" /> 导出</button>
         </div>
       </div>
     </div>
@@ -126,8 +42,8 @@
                 <td class="mr-td-bold">{{ row.supplier_name }}</td>
                 <td><span class="mr-order-link" @click="previewOrder(row.order_no)" title="点击预览订单详情">{{ row.order_no }}</span></td>
                 <td><div class="mr-items-container"><div v-for="i in row.items" :key="i.material_name" class="mr-list-item-row"><span class="mr-list-item-name" :title="i.material_name">{{ i.material_name }}</span><span class="mr-list-item-qty">数量:<b>{{ parseFloat(String(i.ordered_quantity || 0)).toFixed(0) }}</b></span><span class="mr-list-item-rcv">已到货:<b>{{ parseFloat(String(i.received_quantity || 0)).toFixed(0) }}</b></span><div class="mr-list-item-bar"><div :class="['mr-sku-fill', fillClass(i)]" :style="{ width: (i.progress || 0) + '%', height: '100%', borderRadius: '5px' }"></div></div><span class="mr-list-item-pct">{{ i.progress || 0 }}%</span></div></div></td>
-                <td><div class="mr-pbar-wrap"><div class="mr-pbar"><div :class="['mr-pfill', row.progress >= 100 ? 'completed' : row.progress > 0 ? 'partial' : 'pending']" :style="{ width: (row.progress || 0) + '%' }"></div></div><span class="mr-pbar-pct">{{ row.progress || 0 }}%</span></div></td>
-                <td><div class="mr-action-group"><button type="button" class="mr-action-btn mr-action-view" @click="viewSupplierDetail(row.supplier_name || '')" title="查看供应商详情"><i class="fas fa-eye" /></button></div></td>
+                <td><div class="mr-pbar-wrap"><div class="mr-pbar"><div :class="['mr-pfill', row.progress >= 100 ? 'completed' : 'pending']" :style="{ width: (row.progress || 0) + '%' }"></div></div><span class="mr-pbar-pct">{{ row.progress || 0 }}%</span></div></td>
+                <td><div class="mr-action-group"><button type="button" class="mr-action-btn mr-action-view" @click="viewSupplierDetail(row.supplier_name || '', row.order_no)" title="查看供应商详情"><i class="fas fa-eye" /></button></div></td>
               </tr>
             </tbody>
           </table>
@@ -180,7 +96,7 @@
           <div><div class="mr-det-lb">产品/数量</div><div class="mr-det-vl">{{ detailData.product_name || '-' }}{{ detailData.product_quantity ? ' x' + detailData.product_quantity : '' }}</div></div>
           <div><div class="mr-det-lb">供应商</div><div class="mr-det-vl">{{ detailData.supplier_name || '-' }}</div></div>
           <div><div class="mr-det-lb">状态</div><div class="mr-det-vl"><span :class="['mr-badge', 'mr-badge-' + detailData.status]">{{ STATUS_MAP[detailData.status] || detailData.status }}</span></div></div>
-          <div><div class="mr-det-lb">总进度</div><div class="mr-det-vl">{{ detailData.progress }}% (已到货 {{ detailData.total_received }} / 数量 {{ detailData.total_ordered }})</div></div>
+          <div><div class="mr-det-lb">总进度</div><div class="mr-det-vl" style="display:flex;align-items:center;gap:8px;"><div class="mr-pbar" style="flex:1;min-width:120px;"><div :class="['mr-pfill', detailData.progress >= 100 ? 'completed' : 'pending']" :style="{ width: (detailData.progress || 0) + '%' }"></div></div><span>{{ detailData.progress }}% (已到货 {{ detailData.total_received }} / 数量 {{ detailData.total_ordered }})</span></div></div>
         </div>
         <h4 style="margin:18px 0 14px;font-size:16px;"><i class="fas fa-cubes" style="color:var(--color-primary-500);"></i> SKU物料来料进度</h4>
         <VirtualList
@@ -208,25 +124,53 @@
     </UiDialog>
 
     <!-- Supplier Detail Dialog -->
-    <UiDialog v-model:open="showSupplierDialog" title="供应商来料详情" title-icon="" max-width-class="max-w-[1000px]">
+    <UiDialog v-model:open="showSupplierDialog" :title="`来料详情 - ${supplierDetailOrderNo}`" title-icon="" max-width-class="max-w-[1000px]">
       <template #title-icon><i class="fas fa-clipboard-list" style="color:var(--color-primary-500);"></i></template>
       <div v-if="supplierDetail">
         <div class="mr-det-grid">
           <div><div class="mr-det-lb">供应商</div><div class="mr-det-vl">{{ supplierDetail.name }}</div></div>
-          <div><div class="mr-det-lb">物料种类</div><div class="mr-det-vl">{{ supplierDetail.materials.length }} 种</div></div>
+          <div><div class="mr-det-lb">关联订单</div><div class="mr-det-vl">{{ supplierDetail.orders.length }} 个</div></div>
           <div><div class="mr-det-lb">总进度</div><div class="mr-det-vl">{{ supplierDetail.totalPct }}% (已到货 {{ supplierDetail.totalReceived.toFixed(0) }} / 数量 {{ supplierDetail.totalOrdered.toFixed(0) }})</div></div>
         </div>
-        <h4 style="margin:20px 0 16px;font-size:16px;"><i class="fas fa-cubes" style="color:var(--color-primary-500);"></i> 物料汇总进度</h4>
-        <div v-for="m in supplierDetail.materials" :key="m.name" class="mr-det-mat-card">
-          <div class="mr-det-mat-top">
-            <div class="mr-det-mat-title"><span class="mr-det-mat-name">{{ m.name }}</span><span v-if="m.spec" class="mr-det-mat-spec">{{ m.spec }}</span></div>
-            <div class="mr-det-mat-nums"><div class="mr-det-mat-num s-ordered"><small>数量</small><b>{{ m.ordered.toFixed(0) }}</b></div><div class="mr-det-mat-num s-received"><small>已到货</small><b>{{ m.received.toFixed(0) }}</b></div><div class="mr-det-mat-num s-remaining"><small>未到</small><b>{{ m.remaining.toFixed(0) }}</b></div></div>
+        <div v-for="o in supplierDetail.orders" :key="o.orderNo" class="mr-source-card" style="margin-bottom:16px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <div style="font-weight:600;font-size:14px;"><i class="fas fa-file-invoice" style="color:var(--color-primary-500);margin-right:6px;"></i>{{ o.orderNo }}<span style="color:var(--color-text-muted);margin-left:8px;font-weight:400;font-size:12px;">{{ o.customerName }} · {{ o.productName }} x{{ o.productQuantity }}</span></div>
+            <span :class="['mr-badge', o.pct >= 100 ? 'mr-badge-completed' : o.pct > 0 ? 'mr-badge-pending' : 'mr-badge-overdue']">{{ o.pct }}%</span>
           </div>
-          <div class="mr-det-mat-bottom">
-            <div class="mr-det-mat-bar"><div :class="['mr-sku-fill', fillClass({ progress: m.pct, received_quantity: m.received, ordered_quantity: m.ordered })]" :style="{ width: m.pct + '%' }"></div></div>
-            <span class="mr-det-mat-pct" :style="{ color: m.received >= m.ordered ? 'var(--color-success-500)' : (m.pct >= 50 ? 'var(--color-primary-500)' : 'var(--color-warning-500)') }">{{ m.pct }}%</span>
-            <button v-if="canManage && m.received < m.ordered && m.firstItemId" class="mr-btn mr-btn-success" @click="openReceiveById(m.firstItemId, m.name, m.ordered, m.received)" title="登记收货"><i class="fas fa-box" /> 收货</button>
-            <span v-else-if="m.received >= m.ordered" style="color:var(--color-success-500);font-weight:700;font-size:14px;">&#10003; 已完成</span>
+          <div v-for="m in o.items" :key="m.name" class="mr-det-mat-card">
+            <div class="mr-det-mat-row">
+              <div class="mr-det-mat-info">
+                <span class="mr-det-mat-name">{{ m.name }}</span>
+                <span v-if="m.spec" class="mr-det-mat-spec">{{ m.spec }}</span>
+              </div>
+              <div class="mr-det-mat-metrics">
+                <div class="mr-det-mat-metric">
+                  <span class="mr-det-mat-label">采购数量</span>
+                  <span class="mr-det-mat-value">{{ m.ordered.toFixed(0) }}</span>
+                </div>
+                <div class="mr-det-mat-metric">
+                  <span class="mr-det-mat-label">已到货</span>
+                  <span class="mr-det-mat-value received">{{ m.received.toFixed(0) }}</span>
+                </div>
+                <div class="mr-det-mat-metric">
+                  <span class="mr-det-mat-label">未到货</span>
+                  <span class="mr-det-mat-value remaining">{{ m.remaining.toFixed(0) }}</span>
+                </div>
+                <div class="mr-det-mat-metric">
+                  <span class="mr-det-mat-label">完成率</span>
+                  <span class="mr-det-mat-value" :class="m.received >= m.ordered ? 'completed' : (m.pct >= 50 ? 'half' : 'low')">{{ m.pct }}%</span>
+                </div>
+              </div>
+              <div class="mr-det-mat-right">
+                <div class="mr-det-mat-status">
+                  <span v-if="m.received >= m.ordered" class="mr-status-completed"><i class="fas fa-check-circle" /> 已完成</span>
+                  <span v-else class="mr-status-pending">进行中</span>
+                </div>
+                <div v-if="canManage && m.received < m.ordered && m.firstItemId" class="mr-det-mat-action">
+                  <button class="mr-btn mr-btn-success" @click="openReceiveById(m.firstItemId, m.name, m.ordered, m.received)" title="登记收货"><i class="fas fa-box" /> 登记收货</button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -253,17 +197,6 @@
     <UiDialog v-model:open="showOrderPreviewDialog" title="采购订单详情" title-icon="" max-width-class="max-w-[720px]">
       <template #title-icon><i class="fas fa-file-invoice" style="color:var(--color-primary-500);"></i></template>
       <div v-if="orderPreview">
-        <!-- 采购订单基本信息 -->
-        <div class="mr-preview-section-label"><i class="fas fa-shopping-cart" /> 采购订单</div>
-        <div class="mr-det-grid" style="grid-template-columns:1fr 1fr;">
-          <div><div class="mr-det-lb">订单号</div><div class="mr-det-vl" style="color:var(--color-primary-500);">{{ orderPreview.order_no }}</div></div>
-          <div><div class="mr-det-lb">状态</div><div class="mr-det-vl"><span :class="['mr-badge', orderPreview.status === 'completed' || orderPreview.status === '已完成' ? 'mr-badge-completed' : orderPreview.status === 'cancelled' ? 'mr-badge-overdue' : 'mr-badge-pending']">{{ ORDER_STATUS_MAP[orderPreview.status] || orderPreview.status }}</span></div></div>
-          <div><div class="mr-det-lb">供应商</div><div class="mr-det-vl">{{ orderPreview.supplier_name || '-' }}</div></div>
-          <div><div class="mr-det-lb">下单日期</div><div class="mr-det-vl">{{ orderPreview.order_date || '-' }}</div></div>
-          <div><div class="mr-det-lb">客户</div><div class="mr-det-vl">{{ orderPreview.customer_name || '-' }}</div></div>
-          <div><div class="mr-det-lb">产品/数量</div><div class="mr-det-vl">{{ orderPreview.product_name || '-' }}{{ orderPreview.product_quantity ? ' x' + orderPreview.product_quantity : '' }}</div></div>
-        </div>
-
         <!-- 来源销售订单 -->
         <div v-if="orderPreview.source_orders && orderPreview.source_orders.length" class="mr-source-section">
           <div class="mr-preview-section-label"><i class="fas fa-link" /> 来源销售订单</div>
@@ -278,9 +211,9 @@
         </div>
 
         <div v-if="orderPreview.remark" style="margin-top:12px;padding:10px 14px;background:var(--color-surface,#f8fafc);border-radius:8px;font-size:13px;color:var(--color-text-secondary);"><b>备注:</b> {{ orderPreview.remark }}</div>
-        <div class="mr-preview-section-label" style="margin-top:16px;"><i class="fas fa-list" /> 物料明细 <span class="mr-preview-count">{{ orderPreview.item_count || (orderPreview.items ? orderPreview.items.length : 0) }} 项</span></div>
+        <div class="mr-preview-section-label"><i class="fas fa-list" /> 物料明细 <span class="mr-preview-count">{{ orderPreview.item_count || (orderPreview.items ? orderPreview.items.length : 0) }} 项</span></div>
         <table v-if="orderPreview.items && orderPreview.items.length" class="mr-item-tbl">
-          <thead><tr><th>物料名称</th><th>规格</th><th style="text-align:right;">数量</th><th>分类</th></tr></thead>
+          <thead><tr><th style="width:40%;">物料名称</th><th style="width:30%;">规格</th><th style="width:15%;text-align:right;">数量</th><th style="width:15%;">分类</th></tr></thead>
           <tbody><tr v-for="it in orderPreview.items" :key="it.material_name + it.specification"><td>{{ it.material_name || '-' }}</td><td style="color:var(--color-text-secondary);">{{ it.specification || '-' }}</td><td style="text-align:right;font-weight:500;">{{ it.quantity || 0 }} {{ it.unit || '' }}</td><td>{{ CATEGORY_MAP[it.material_category || ''] || '-' }}</td></tr></tbody>
         </table>
         <div v-else style="text-align:center;padding:20px;color:var(--color-text-muted);">暂无物料明细</div>
@@ -293,7 +226,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { materialApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
@@ -437,9 +370,20 @@ interface SupMat {
   spec: string
 }
 
+interface SupOrder {
+  orderNo: string
+  customerName: string
+  productName: string
+  productQuantity: number
+  items: SupMat[]
+  totalOrdered: number
+  totalReceived: number
+  pct: number
+}
+
 interface SupplierDetail {
   name: string
-  materials: SupMat[]
+  orders: SupOrder[]
   totalOrdered: number
   totalReceived: number
   totalPct: number
@@ -454,7 +398,7 @@ const STATUS_COLORS: Record<string, string> = { pending: '#FF9F43', partial: '#5
 const CATEGORY_MAP: Record<string, string> = { fabric: '面料', filling: '填充', accessory: '辅料', packaging: '包装' }
 const ORDER_STATUS_MAP: Record<string, string> = { pending: '待处理', completed: '已完成', cancelled: '已取消', '已完成': '已完成' }
 
-const activeTab = ref('overview')
+const activeTab = ref('progress')
 
 const toastMsg = ref('')
 const toastType = ref('info')
@@ -574,28 +518,41 @@ function groupBySupplier(registrations: Registration[]): SupplierGroup[] {
 }
 
 function resetProgressFilters() { Object.assign(pFilters, { supplier: '', orderNo: '', customer: '', category: '', startDate: '', endDate: '' }); loadProgress(1) }
-function switchToProgress() { activeTab.value = 'progress'; loadProgress(1) }
-function switchToHistory() { activeTab.value = 'history'; loadHistory(1) }
-function fillClass(item: { progress?: number; received_quantity: number | string; ordered_quantity: number | string }) { const pct = item.progress || 0; if (Number(item.received_quantity) >= Number(item.ordered_quantity)) return 'full'; if (pct >= 50) return 'half'; if (pct > 0) return 'low'; return 'zero' }
-function progressCls(g: SupplierGroup) { const pct = supplierPct(g); if (pct >= 100) return 'completed'; if (pct > 0) return 'partial'; return 'pending' }
+function switchToProgress() { activeTab.value = 'progress'; if (!progressGroups.value.length && !pIsLoading.value) loadProgress(1) }
+function switchToHistory() { activeTab.value = 'history'; if (!hRegistrations.value.length && !hIsLoading.value) loadHistory(1) }
+function fillClass(item: { progress?: number; received_quantity: number | string; ordered_quantity: number | string }) { const pct = item.progress || 0; if (pct >= 100 || Number(item.received_quantity) >= Number(item.ordered_quantity)) return 'full'; return 'low' }
+function progressCls(g: SupplierGroup) { return supplierPct(g) >= 100 ? 'completed' : 'pending' }
 function supplierPct(g: SupplierGroup) { const o = g.allItems.reduce((s: number, i: MatSummary) => s + i.ordered_quantity, 0); const r = g.allItems.reduce((s: number, i: MatSummary) => s + i.received_quantity, 0); const c = g.allItems.every((i: MatSummary) => i.received_quantity >= i.ordered_quantity); if (o <= 0) return 0; return c ? 100.0 : Math.min(Math.round(r / o * 100 * 10) / 10, 99.9) }
 
 const showDetailDialog = ref(false), detailData = ref<Registration | null>(null)
 async function viewDetail(regId: number) { try { const res = await materialApi.registrationDetail(regId) as any; if (res.success === false) { toast('加载失败', 'error'); return }; detailData.value = res.registration ?? null; showDetailDialog.value = true } catch (e) { console.error('详情加载失败:', e); toast('加载失败', 'error') } }
 
-const showSupplierDialog = ref(false), supplierDetail = ref<SupplierDetail | null>(null)
-async function viewSupplierDetail(supplierName: string) {
+const showSupplierDialog = ref(false), supplierDetail = ref<SupplierDetail | null>(null), supplierDetailOrderNo = ref('')
+async function viewSupplierDetail(supplierName: string, orderNo: string) {
   try {
-    const data = await materialApi.registrations({ supplier: supplierName, per_page: 50 }) as any
+    const data = await materialApi.registrations({ supplier: supplierName, order_no: orderNo, per_page: 50 }) as any
     if (!data.registrations) { toast('加载失败', 'error'); return }
     const regList: any[] = data.registrations.filter((r: any) => r.status !== 'completed')
     if (!regList.length) { toast('无采购中数据', 'warning'); return }
-    const materialMap: Record<string, { ordered: number; received: number; remaining: number; unit: string; spec: string; itemIds: { id: number; ordered: number; received: number }[] }> = {}; let allOrdered = 0, allReceived = 0
-    regList.forEach((r: any) => { allOrdered += parseFloat(String(r.total_ordered || 0)); allReceived += parseFloat(String(r.total_received || 0)); (r.items || []).forEach((i: RegItem) => { const key = (i.material_name || '').trim(); if (!materialMap[key]) materialMap[key] = { ordered: 0, received: 0, remaining: 0, unit: i.unit || '', spec: i.specification || '', itemIds: [] }; const m = materialMap[key]; m.ordered += parseFloat(String(i.ordered_quantity || 0)); m.received += parseFloat(String(i.received_quantity || 0)); m.remaining += parseFloat(String(i.remaining_quantity || 0)); m.itemIds.push({ id: i.id, ordered: parseFloat(String(i.ordered_quantity || 0)), received: parseFloat(String(i.received_quantity || 0)) }) }) })
-    const materials: SupMat[] = Object.keys(materialMap).map(name => { const m = materialMap[name]; const pct = m.ordered > 0 ? (m.received >= m.ordered ? 100.0 : Math.min(Math.round(m.received / m.ordered * 100 * 10) / 10, 99.9)) : 0; return { name, ...m, pct, firstItemId: m.itemIds.find((x) => x.received < x.ordered)?.id ?? null } })
-    const allComplete = materials.every(m => m.received >= m.ordered)
+    let allOrdered = 0, allReceived = 0
+    const orders: SupOrder[] = regList.map((r: any) => {
+      const items: SupMat[] = (r.items || []).map((i: RegItem) => {
+        const ordered = parseFloat(String(i.ordered_quantity || 0))
+        const received = parseFloat(String(i.received_quantity || 0))
+        const pct = ordered > 0 && received < ordered ? Math.min(Math.round(received / ordered * 100 * 10) / 10, 99.9) : (received >= ordered && ordered > 0 ? 100 : 0)
+        return { name: i.material_name, ordered, received, remaining: ordered - received, pct, firstItemId: received < ordered ? i.id : null, unit: i.unit || '', spec: i.specification || '' }
+      })
+      const oTotal = parseFloat(String(r.total_ordered || 0))
+      const rTotal = parseFloat(String(r.total_received || 0))
+      allOrdered += oTotal; allReceived += rTotal
+      const allComplete = items.every(m => m.received >= m.ordered)
+      const orderPct = oTotal > 0 ? (allComplete ? 100.0 : Math.min(Math.round(rTotal / oTotal * 100 * 10) / 10, 99.9)) : 0
+      return { orderNo: r.purchase_order_no || '', customerName: r.customer_name || '', productName: r.product_name || '', productQuantity: r.product_quantity || 0, items, totalOrdered: oTotal, totalReceived: rTotal, pct: orderPct }
+    })
+    const allComplete = orders.every(o => o.items.every(m => m.received >= m.ordered))
     const totalPct = allOrdered > 0 ? (allComplete ? 100.0 : Math.min(Math.round(allReceived / allOrdered * 100 * 10) / 10, 99.9)) : 0
-    supplierDetail.value = { name: supplierName, materials, totalOrdered: allOrdered, totalReceived: allReceived, totalPct }; showSupplierDialog.value = true
+    supplierDetailOrderNo.value = orderNo
+    supplierDetail.value = { name: supplierName, orders, totalOrdered: allOrdered, totalReceived: allReceived, totalPct }; showSupplierDialog.value = true
   } catch (e) { console.error('供应商详情加载失败:', e); toast('加载失败', 'error') }
 }
 
@@ -604,13 +561,17 @@ const receiveItem = reactive({ id: 0, name: '', ordered: 0, received: 0, remaini
 const receiveQty = ref<number | null>(null), receiveRemark = ref('')
 function openReceive(item: RegItem) { receiveItem.id = item.id; receiveItem.name = item.material_name; receiveItem.ordered = parseFloat(String(item.ordered_quantity || 0)); receiveItem.received = parseFloat(String(item.received_quantity || 0)); receiveItem.remaining = receiveItem.ordered - receiveItem.received; receiveQty.value = null; receiveRemark.value = ''; showReceiveDialog.value = true }
 function openReceiveById(itemId: number, name: string, ordered: number, received: number) { receiveItem.id = itemId; receiveItem.name = name; receiveItem.ordered = ordered; receiveItem.received = received; receiveItem.remaining = ordered - received; receiveQty.value = null; receiveRemark.value = ''; showReceiveDialog.value = true }
-async function submitReceive() { if (!receiveQty.value || receiveQty.value <= 0) { toast('请输入有效的收货数量', 'warning'); return }; try { const res = await materialApi.receive(receiveItem.id, { received_quantity: receiveQty.value, remark: receiveRemark.value }) as any; if (res.success) { toast(res.auto_completed ? '收货完成，该订单已全部到货，已转入历史记录' : (res.message || '收货登记成功'), res.auto_completed ? 'success' : 'info'); showReceiveDialog.value = false; showDetailDialog.value = false; showSupplierDialog.value = false; loadProgress(pPage.value) } else toast(res.message || '登记失败', 'error') } catch (e) { console.error('收货操作失败:', e); toast('操作失败', 'error') } }
+async function submitReceive() { if (!receiveQty.value || receiveQty.value <= 0) { toast('请输入有效的收货数量', 'warning'); return }; try { const res = await materialApi.receive(receiveItem.id, { received_quantity: receiveQty.value, remark: receiveRemark.value }) as any; if (res.success) { toast(res.auto_completed ? '收货完成，该订单已全部到货，已转入历史记录' : (res.message || '收货登记成功'), res.auto_completed ? 'success' : 'info'); showReceiveDialog.value = false; const newReceived = receiveItem.received + (receiveQty.value || 0); if (showSupplierDialog.value && supplierDetail.value) { for (const o of supplierDetail.value.orders) { for (const m of o.items) { if (m.firstItemId === receiveItem.id || m.name === receiveItem.name) { m.received = newReceived; m.remaining = m.ordered - newReceived; m.pct = m.ordered > 0 && newReceived < m.ordered ? Math.min(Math.round(newReceived / m.ordered * 100 * 10) / 10, 99.9) : (newReceived >= m.ordered && m.ordered > 0 ? 100 : 0); if (newReceived >= m.ordered) m.firstItemId = null } } } const oAllComplete = supplierDetail.value.orders.every(o => o.items.every(m => m.received >= m.ordered)); supplierDetail.value.totalReceived = supplierDetail.value.orders.reduce((s, o) => s + o.items.reduce((s2, m) => s2 + m.received, 0), 0); supplierDetail.value.totalPct = supplierDetail.value.totalOrdered > 0 ? (oAllComplete ? 100.0 : Math.min(Math.round(supplierDetail.value.totalReceived / supplierDetail.value.totalOrdered * 100 * 10) / 10, 99.9)) : 0 } if (showDetailDialog.value && detailData.value) { const dItem = (detailData.value.items || []).find((i: RegItem) => i.id === receiveItem.id); if (dItem) { dItem.received_quantity = newReceived; dItem.remaining_quantity = parseFloat(String(dItem.ordered_quantity || 0)) - newReceived; dItem.progress = dItem.ordered_quantity > 0 && newReceived < dItem.ordered_quantity ? Math.min(Math.round(newReceived / dItem.ordered_quantity * 100 * 10) / 10, 99.9) : (newReceived >= dItem.ordered_quantity && dItem.ordered_quantity > 0 ? 100 : 0) } } loadProgress(pPage.value) } else toast(res.message || '登记失败', 'error') } catch (e) { console.error('收货操作失败:', e); toast('操作失败', 'error') } }
 
 const showOrderPreviewDialog = ref(false), orderPreview = ref<OrderPreview | null>(null)
 async function previewOrder(orderNo: string) { try { const res = await materialApi.purchaseOrderPreview(orderNo) as any; if (res.success === false) { toast(res.message || '加载失败', 'error'); return }; orderPreview.value = res.order ?? null; showOrderPreviewDialog.value = true } catch (e) { console.error('订单预览加载失败:', e); toast('加载失败', 'error') } }
 
 async function exportData() { toast('正在导出...', 'info'); try { const res = await materialApi.export({ order_no: pFilters.orderNo, supplier: pFilters.supplier, start_date: pFilters.startDate, end_date: pFilters.endDate }) as any; if (res.success && res.html) { const blob = new Blob([res.html], { type: 'application/vnd.ms-excel' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = '来料进度汇总.xls'; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); toast('导出成功', 'success') } else toast(res.message || '导出失败', 'error') } catch (e) { console.error('导出失败:', e); toast('导出失败', 'error') } }
 async function exportHistory() { toast('正在导出...', 'info'); try { const res = await materialApi.export({}) as any; if (res.success && res.html) { const blob = new Blob([res.html], { type: 'application/vnd.ms-excel' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = '来料历史汇总.xls'; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); toast('导出成功', 'success') } else toast(res.message || '导出失败', 'error') } catch (e) { console.error('导出失败:', e); toast('导出失败', 'error') } }
+
+onMounted(() => {
+  switchToProgress()
+})
 </script>
 
 <style scoped>
@@ -638,8 +599,8 @@ async function exportHistory() { toast('正在导出...', 'info'); try { const r
 }
 
 .mr-main-card:hover {
-  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
-  transform: translateY(-6px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  transform: translateY(-2px);
 }
 
 /* === Top Bar (Header + Tabs unified) === */
@@ -1339,9 +1300,7 @@ async function exportHistory() { toast('正在导出...', 'info'); try { const r
   margin-left: 4px;
 }
 .mr-source-section {
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid var(--color-border-light, #e2e8f0);
+  margin-bottom: 16px;
 }
 .mr-source-card {
   padding: 14px 16px;
@@ -1377,21 +1336,130 @@ async function exportHistory() { toast('正在导出...', 'info'); try { const r
 .mr-sku-info span b { color: var(--color-text); font-weight: 600; }
 
 /* === Material Detail Card (Dialog) === */
-.mr-det-mat-card { margin-bottom: 20px; background: white; border-radius: 12px; border: 1px solid var(--color-border-light, #e2e8f0); overflow: hidden; }
-.mr-det-mat-top { padding: 24px 28px; display: flex; align-items: center; gap: 32px; }
-.mr-det-mat-title { display: flex; align-items: baseline; gap: 8px; flex-shrink: 0; min-width: 0; }
-.mr-det-mat-name { font-size: 18px; font-weight: 700; color: var(--color-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; line-height: 1.2; }
-.mr-det-mat-spec { font-size: 18px; font-weight: 700; color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
-.mr-det-mat-nums { display: flex; gap: 1px; flex: 1; background: var(--color-border-light, #e2e8f0); border-radius: 10px; overflow: hidden; }
-.mr-det-mat-num { flex: 1; background: white; padding: 10px 16px; text-align: center; }
-.mr-det-mat-num small { display: block; font-size: 14px; font-weight: 600; color: var(--color-text-muted); line-height: 1.2; margin-bottom: 8px; }
-.mr-det-mat-num b { display: block; font-size: 22px; font-weight: 700; line-height: 1.2; }
-.mr-det-mat-num.s-ordered b { color: var(--color-text); }
-.mr-det-mat-num.s-received b { color: var(--color-success-500, #28C76F); }
-.mr-det-mat-num.s-remaining b { color: var(--color-warning-500, #FF9F43); }
-.mr-det-mat-bottom { padding: 18px 28px 24px; display: flex; align-items: center; gap: 16px; }
-.mr-det-mat-bar { flex: 1; height: 14px; background: #E5E7EB; border-radius: 10px; overflow: hidden; }
-.mr-det-mat-pct { font-size: 20px; font-weight: 800; width: 65px; text-align: right; flex-shrink: 0; }
+.mr-det-mat-card {
+  margin-bottom: 10px;
+  background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+  border-radius: 12px;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  transition: all 0.2s ease;
+  overflow: hidden;
+}
+.mr-det-mat-card:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  border-color: var(--color-primary-200, #bfdbfe);
+}
+.mr-det-mat-row {
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.mr-det-mat-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 0 0 140px;
+}
+.mr-det-mat-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text, #1e293b);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+.mr-det-mat-spec {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-secondary, #64748b);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: var(--color-surface, #f1f5f9);
+  padding: 2px 8px;
+  border-radius: 6px;
+  width: fit-content;
+}
+.mr-det-mat-metrics {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+  justify-content: center;
+}
+.mr-det-mat-metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 16px;
+  background: white;
+  border-radius: 10px;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  min-width: 72px;
+}
+.mr-det-mat-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-muted, #94a3b8);
+}
+.mr-det-mat-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-text, #1e293b);
+  line-height: 1.2;
+}
+.mr-det-mat-value.received { color: var(--color-success-500, #28C76F); }
+.mr-det-mat-value.remaining { color: var(--color-warning-500, #FF9F43); }
+.mr-det-mat-value.completed { color: var(--color-success-500, #28C76F); }
+.mr-det-mat-value.half { color: var(--color-primary-500, #5B8DEF); }
+.mr-det-mat-value.low { color: var(--color-warning-500, #FF9F43); }
+.mr-det-mat-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  min-width: 180px;
+  justify-content: flex-end;
+}
+.mr-det-mat-status {
+  flex-shrink: 0;
+}
+.mr-status-completed {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-success-600, #059669);
+  background: var(--color-success-50, #f0fdf4);
+  padding: 5px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--color-success-200, #bbf7d0);
+}
+.mr-status-pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-warning-600, #d97706);
+  background: var(--color-warning-50, #fffbeb);
+  padding: 5px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--color-warning-200, #fde68a);
+}
+.mr-det-mat-action {
+  flex-shrink: 0;
+}
+.mr-det-mat-action .mr-btn-success {
+  font-size: 12px;
+  padding: 7px 16px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
 
 /* === Toast === */
 .mr-toast {
@@ -1429,8 +1497,10 @@ async function exportHistory() { toast('正在导出...', 'info'); try { const r
   .mr-fg { width: 100%; }
   .mr-top-bar { flex-direction: column; gap: 12px; align-items: flex-start; }
   .mr-det-grid { grid-template-columns: 1fr; }
-  .mr-det-mat-top { flex-direction: column; align-items: stretch; }
-  .mr-det-mat-nums { flex-direction: column; }
-  .mr-det-mat-bottom { flex-wrap: wrap; }
+  .mr-det-mat-row { flex-wrap: wrap; gap: 12px; padding: 12px; }
+  .mr-det-mat-info { flex: 0 0 120px; }
+  .mr-det-mat-metrics { flex-wrap: wrap; gap: 6px; }
+  .mr-det-mat-metric { min-width: 65px; padding: 8px 12px; }
+  .mr-det-mat-value { font-size: 16px; }
 }
 </style>

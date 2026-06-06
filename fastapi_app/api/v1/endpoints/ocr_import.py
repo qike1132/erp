@@ -3,6 +3,7 @@ OCR 出货单识别 FastAPI 端点
 
 支持批量上传 PDF / 图片文件，离线 OCR 识别后写入暂存区。
 """
+import asyncio
 import logging
 import os
 
@@ -103,20 +104,18 @@ async def preview_shipping_doc(file: UploadFile=File(..., description='PDF 或�
         raise HTTPException(status_code=400, detail='文件为空')
     if len(content) > 50 * 1024 * 1024:
         raise HTTPException(status_code=400, detail='文件超过 50MB 限制')
-    import asyncio
     try:
-        loop = asyncio.get_running_loop()
-        table_pages = await loop.run_in_executor(None, svc.extract_table_structure, content, filename)
+        table_pages = await asyncio.to_thread(svc.extract_table_structure, content, filename)
         if table_pages:
             parsed_items = svc.parse_html_shipping_tables(table_pages)
             if not parsed_items:
-                pages = await loop.run_in_executor(None, svc.extract_text, content, filename)
+                pages = await asyncio.to_thread(svc.extract_text, content, filename)
                 if pages:
                     parsed_items = svc.parse_shipping_document(pages)
             else:
                 pages = [{'page': p['page'], 'text': p.get('text', '')[:500]} for p in table_pages]
         else:
-            pages = await loop.run_in_executor(None, svc.extract_text, content, filename)
+            pages = await asyncio.to_thread(svc.extract_text, content, filename)
             if pages:
                 parsed_items = svc.parse_shipping_document(pages)
             else:

@@ -58,13 +58,14 @@ def _ensure_fcm() -> bool:
 def _send_sync(message) -> str:
     """同步发送单条 FCM 消息（在线程中运行）"""
     from firebase_admin import messaging
-    return messaging.send(message)
+    # 设置超时避免 Google 服务慢响应时阻塞线程池
+    return messaging.send(message, timeout=10)
 
 
 def _send_multicast_sync(message):
     """同步发送 FCM 批量消息（在线程中运行）"""
     from firebase_admin import messaging
-    return messaging.send_each_for_multicast(message)
+    return messaging.send_each_for_multicast(message, timeout=15)
 
 
 async def send_to_device(token: str, title: str, body: str, data: dict[str, Any] | None = None):

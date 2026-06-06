@@ -2,7 +2,7 @@
   <div class="pc-section">
     <div class="pc-section-header">
       <div class="pc-section-title">
-        <i class="fas fa-list" /> 采购中订单
+        <i class="fas fa-list"  aria-hidden="true" /> 采购中订单
       </div>
       <div class="pc-section-actions">
         <button
@@ -10,14 +10,14 @@
           :disabled="selectedIds.length === 0"
           @click="$emit('summary')"
         >
-          <i class="fas fa-clipboard-list" /> 汇总下单 ({{ selectedIds.length }})
+          <i class="fas fa-clipboard-list"  aria-hidden="true" /> 汇总下单 ({{ selectedIds.length }})
         </button>
         <button
           class="pc-btn pc-btn-success pc-btn-sm"
           :disabled="selectedIds.length === 0"
           @click="$emit('batchComplete')"
         >
-          <i class="fas fa-check-double" /> 批量确认订单 ({{ selectedIds.length }})
+          <i class="fas fa-check-double"  aria-hidden="true" /> 批量确认订单 ({{ selectedIds.length }})
         </button>
         <span class="count-badge">{{ total }} 个订单</span>
       </div>
@@ -25,13 +25,13 @@
 
     <!-- Loading (initial only) -->
     <div v-if="loading && orders.length === 0" class="pc-loading-state">
-      <i class="fas fa-spinner fa-spin" />
-      <span>加载中...</span>
+      <i class="fas fa-spinner fa-spin"  aria-hidden="true" />
+      <span>加载中…</span>
     </div>
 
     <!-- Empty -->
     <div v-else-if="orders.length === 0" class="pc-empty-state">
-      <i class="fas fa-inbox" />
+      <i class="fas fa-inbox"  aria-hidden="true" />
       <span>暂无采购订单</span>
     </div>
 
@@ -67,17 +67,17 @@
               <td class="pc-td-center" @click.stop>
                 <UiCheckbox :checked="selectedSet.has(o.id)" @update:checked="$emit('toggleSelection', o.id)" />
               </td>
-              <td class="pc-td-nowrap">{{ o.create_time || o.order_date || '' }}</td>
+              <td class="pc-td-nowrap">{{ formatDate(o.create_time || o.order_date) }}</td>
               <td class="pc-td-nowrap">{{ o.source_order_no || o.order_no }}</td>
               <td class="pc-td-truncate" style="max-width:120px">{{ o.customer_name || '-' }}</td>
               <td class="pc-td-truncate" style="max-width:300px">{{ o.product_name || '-' }}</td>
-              <td class="pc-td-right pc-td-nowrap">{{ o.quantity?.toLocaleString() || '-' }}</td>
+              <td class="pc-td-right pc-td-nowrap">{{ o.quantity != null ? formatNumber(o.quantity) : '-' }}</td>
               <td class="pc-td-center" @click.stop>
                 <button
                   class="pc-btn pc-btn-success pc-btn-sm"
                   @click="$emit('completeOrder', o.id)"
                 >
-                  <i class="fas fa-check" /> 下单完成
+                  <i class="fas fa-check"  aria-hidden="true" /> 下单完成
                 </button>
               </td>
             </tr>
@@ -97,6 +97,7 @@ import { computed } from 'vue'
 import UiCheckbox from '@/components/ui/UiCheckbox.vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
 import type { PurchaseOrder } from '@/types'
+import { formatDate, formatNumber } from '@/utils/format'
 
 const props = defineProps<{
   orders: PurchaseOrder[]
@@ -167,7 +168,7 @@ defineEmits<{
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, color 0.3s ease, background 0.3s ease;
   background: white;
 }
 

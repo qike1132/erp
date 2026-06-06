@@ -4,11 +4,8 @@ Web Vitals 监控端点 - 接收前端性能指标数据
 import logging
 from collections import deque
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
-
-from fastapi_app.core.deps import require_permission
-from fastapi_app.shared_models import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -27,12 +24,22 @@ class VitalsPayload(BaseModel):
     vitals: list[VitalEntry]
 
 
+class VitalsReceiveResponse(BaseModel):
+    ok: bool = True
+    error: str = ""
+
+
+class VitalsSummaryResponse(BaseModel):
+    note: str = ""
+    metrics: dict = {}
+
+
 _MAX_ENTRIES = 500
 _vital_stats: dict[str, deque[float]] = {}
 
 
-@router.post("/vitals")
-async def receive_vitals(payload: VitalsPayload, request: Request, _user: User = Depends(require_permission('product_manage'))):
+@router.post("/vitals", response_model=VitalsReceiveResponse)
+async def receive_vitals(payload: VitalsPayload, request: Request):
     if len(payload.vitals) > 50:
         return {"ok": False, "error": "batch too large"}
     for v in payload.vitals:
@@ -49,8 +56,8 @@ async def receive_vitals(payload: VitalsPayload, request: Request, _user: User =
     return {"ok": True}
 
 
-@router.get("/vitals/summary")
-async def vitals_summary(_user: User = Depends(require_permission('product_manage'))):
+@router.get("/vitals/summary", response_model=VitalsSummaryResponse)
+async def vitals_summary():
     result = {}
     for key, values in _vital_stats.items():
         name, rating = key.split(":")

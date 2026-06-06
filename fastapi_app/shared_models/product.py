@@ -5,10 +5,10 @@
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Index, Integer, Numeric, String
+from sqlalchemy import DateTime, Index, Integer, Numeric, String, desc
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
@@ -19,7 +19,6 @@ if TYPE_CHECKING:
         ProductAccessory,
         ProductFabric,
         ProductMaterial,
-        ProductPackaging,
     )
 
 
@@ -35,17 +34,17 @@ class Product(Base):
     initial_stock: Mapped[int] = mapped_column(Integer, default=0, comment='初始库存')
     current_stock: Mapped[int] = mapped_column(Integer, default=0, comment='当前库存')
     version: Mapped[int] = mapped_column(Integer, default=0, server_default='0', comment='乐观锁版本号')
-    create_time: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, index=True, comment='创建时间')
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True, comment='创建时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
 
 
     __table_args__ = (
         Index('idx_product_name_barcode', 'name', 'barcode'),
-        # pg_trgm GIN 索引：使 ILIKE '%keyword%' 和 % 运算符走索引
         Index('idx_product_name_trgm', 'name', postgresql_using='gin',
               postgresql_ops={'name': 'gin_trgm_ops'}),
         Index('idx_product_barcode_trgm', 'barcode', postgresql_using='gin',
               postgresql_ops={'barcode': 'gin_trgm_ops'}),
+        Index('idx_perf_product_name_date', desc('create_time'), 'id'),
     )
 
     # 皮套关联（由 Case 模型 backref 自动创建，此处显式声明以确保类型检查）
@@ -62,10 +61,6 @@ class Product(Base):
     )
     accessories: Mapped[list["ProductAccessory"]] = relationship(
         "ProductAccessory", back_populates="product", cascade="all, delete-orphan",
-        lazy="raise",
-    )
-    packagings: Mapped[list["ProductPackaging"]] = relationship(
-        "ProductPackaging", back_populates="product", cascade="all, delete-orphan",
         lazy="raise",
     )
 
@@ -89,11 +84,10 @@ class Product(Base):
         has_material = self.material and self.material.cotton_usage and self.material.cotton_usage > 0
         has_fabric = len(self.fabrics) > 0
         has_accessory = len(self.accessories) > 0
-        has_packaging = len(self.packagings) > 0
-        return has_material or has_fabric or has_accessory or has_packaging
+        return has_material or has_fabric or has_accessory
 
     def get_all_materials(self):
-        """获取产品所有物料（包括填充物、面料、辅料、包装）"""
+        """获取产品所有物料（包括填充物、面料、辅料）"""
         materials = []
 
         if self.material and self.material.cotton_usage and self.material.cotton_usage > 0:
@@ -104,8 +98,5 @@ class Product(Base):
 
         for accessory in self.accessories:
             materials.append(accessory.to_dict())
-
-        for packaging in self.packagings:
-            materials.append(packaging.to_dict())
 
         return materials

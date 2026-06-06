@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="sp-container">
     <div class="sp-card sp-card-main">
       <div class="sp-card-header">
@@ -7,7 +7,7 @@
         </div>
         <div class="sp-header-right">
           <button class="sp-action-btn sp-action-btn-primary" @click="formOpen = true">
-            <i class="fas fa-plus" /> 添加供应商
+            <i class="fas fa-plus"  aria-hidden="true" /> 添加供应商
           </button>
         </div>
       </div>
@@ -16,20 +16,22 @@
       <div class="sp-toolbar">
         <div class="sp-search-wrapper">
           <div class="sp-search-input-group">
-            <i class="fas fa-search sp-search-icon" />
+            <i class="fas fa-search sp-search-icon"  aria-hidden="true" />
             <input
               v-model="searchTerm"
               type="text"
+              name="search"
               placeholder="搜索供应商名称..."
               class="sp-search-input"
+              autocomplete="off"
               @input="onSearchInput"
             />
             <button
               v-if="searchTerm"
               class="sp-search-clear"
               @click="clearSearch"
-            >
-              <i class="fas fa-times" />
+             aria-label="关闭">
+              <i class="fas fa-times"  aria-hidden="true" />
             </button>
           </div>
         </div>
@@ -39,13 +41,13 @@
       <div class="sp-content">
         <!-- Loading (initial only) -->
         <div v-if="isLoading && suppliers.length === 0" class="sp-loading-state">
-          <i class="fas fa-spinner fa-spin" />
-          <span>加载中...</span>
+          <i class="fas fa-spinner fa-spin"  aria-hidden="true" />
+          <span>加载中…</span>
         </div>
 
         <!-- Empty -->
         <div v-else-if="suppliers.length === 0" class="sp-empty-state">
-          <i class="fas fa-truck" />
+          <i class="fas fa-truck"  aria-hidden="true" />
           <span>{{ searchTerm ? '没有匹配的供应商' : '暂无供应商，请先添加' }}</span>
           <small v-if="searchTerm">试试其他关键词</small>
         </div>
@@ -75,16 +77,16 @@
                 <td>{{ row.created_at ? row.created_at.split('T')[0] : '-' }}</td>
                 <td>
                   <div class="sp-action-group">
-                    <button class="sp-action-btn sp-action-edit" title="编辑" @click="openEditDialog(row)">
-                      <i class="fas fa-edit" />
+                    <button class="sp-action-btn sp-action-edit" title="编辑" @click="openEditDialog(row)" aria-label="编辑">
+                      <i class="fas fa-edit"  aria-hidden="true" />
                     </button>
                     <button
                       class="sp-action-btn sp-action-delete"
                       title="删除"
                       :disabled="actionId === row.id"
                       @click="handleDelete(row)"
-                    >
-                      <i class="fas fa-trash-alt" />
+                     aria-label="删除">
+                      <i class="fas fa-trash-alt"  aria-hidden="true" />
                     </button>
                   </div>
                 </td>
@@ -102,33 +104,33 @@
     <UiDialog :open="formOpen" title="添加新供应商" max-width-class="max-w-[560px]" @update:open="formOpen = $event">
       <form @submit.prevent="handleAdd" class="sp-dialog-form">
         <div class="sp-form-field">
-          <label class="sp-form-label"><i class="fas fa-building" /> 供应商名称 <span class="sp-required">*</span></label>
-          <input v-model="form.name" type="text" class="sp-form-input" required placeholder="例如：广州面料有限公司" />
+          <label class="sp-form-label"><i class="fas fa-building"  aria-hidden="true" /> 供应商名称 <span class="sp-required">*</span></label>
+          <input v-model="form.name" type="text" class="sp-form-input" required placeholder="例如：广州面料有限公司" name="supplier-name" autocomplete="off" />
         </div>
         <div class="sp-form-row">
           <div class="sp-form-field">
-            <label class="sp-form-label"><i class="fas fa-user" /> 联系人</label>
-            <input v-model="form.contact_person" type="text" class="sp-form-input" placeholder="例如：李经理" />
+            <label class="sp-form-label"><i class="fas fa-user"  aria-hidden="true" /> 联系人</label>
+            <input v-model="form.contact_person" type="text" class="sp-form-input" placeholder="例如：李经理" name="contact" autocomplete="off" />
           </div>
           <div class="sp-form-field">
-            <label class="sp-form-label"><i class="fas fa-phone" /> 联系电话</label>
-            <input v-model="form.phone" type="text" class="sp-form-input" placeholder="例如：13800138000" />
+            <label class="sp-form-label"><i class="fas fa-phone"  aria-hidden="true" /> 联系电话</label>
+            <input v-model="form.phone" type="text" class="sp-form-input" placeholder="例如：13800138000" name="phone" autocomplete="tel" />
           </div>
         </div>
         <div class="sp-form-field">
-          <label class="sp-form-label"><i class="fas fa-map-marker-alt" /> 地址</label>
-          <input v-model="form.address" type="text" class="sp-form-input" placeholder="例如：广州市白云区" />
+          <label class="sp-form-label"><i class="fas fa-map-marker-alt"  aria-hidden="true" /> 地址</label>
+          <input v-model="form.address" type="text" class="sp-form-input" placeholder="例如：广州市白云区" name="address" autocomplete="off" />
         </div>
         <div class="sp-form-field">
-          <label class="sp-form-label"><i class="fas fa-sticky-note" /> 备注</label>
+          <label class="sp-form-label"><i class="fas fa-sticky-note"  aria-hidden="true" /> 备注</label>
           <textarea v-model="form.remark" rows="2" class="sp-form-input" placeholder="例如：长期合作供应商" />
         </div>
       </form>
       <template #footer>
         <UiButton variant="ghost" size="sm" @click="formOpen = false">取消</UiButton>
         <UiButton variant="primary" size="sm" :disabled="!form.name || submitting" @click="handleAdd">
-          <i class="fas fa-plus" />
-          {{ submitting ? '提交中...' : '添加供应商' }}
+          <i class="fas fa-plus"  aria-hidden="true" />
+          {{ submitting ? '提交中…' : '添加供应商' }}
         </UiButton>
       </template>
     </UiDialog>
@@ -137,33 +139,33 @@
     <UiDialog :open="editDialogVisible" title="编辑供应商" max-width-class="max-w-[560px]" @update:open="editDialogVisible = $event">
       <form @submit.prevent="handleEdit" class="sp-dialog-form">
         <div class="sp-form-field">
-          <label class="sp-form-label"><i class="fas fa-building" /> 供应商名称 <span class="sp-required">*</span></label>
-          <input v-model="editForm.name" type="text" class="sp-form-input" />
+          <label class="sp-form-label"><i class="fas fa-building"  aria-hidden="true" /> 供应商名称 <span class="sp-required">*</span></label>
+          <input v-model="editForm.name" type="text" class="sp-form-input" name="supplier-name" autocomplete="off" />
         </div>
         <div class="sp-form-row">
           <div class="sp-form-field">
-            <label class="sp-form-label"><i class="fas fa-user" /> 联系人</label>
-            <input v-model="editForm.contact_person" type="text" class="sp-form-input" />
+            <label class="sp-form-label"><i class="fas fa-user"  aria-hidden="true" /> 联系人</label>
+            <input v-model="editForm.contact_person" type="text" class="sp-form-input" name="contact" autocomplete="off" />
           </div>
           <div class="sp-form-field">
-            <label class="sp-form-label"><i class="fas fa-phone" /> 联系电话</label>
-            <input v-model="editForm.phone" type="text" class="sp-form-input" />
+            <label class="sp-form-label"><i class="fas fa-phone"  aria-hidden="true" /> 联系电话</label>
+            <input v-model="editForm.phone" type="text" class="sp-form-input" name="phone" autocomplete="tel" />
           </div>
         </div>
         <div class="sp-form-field">
-          <label class="sp-form-label"><i class="fas fa-map-marker-alt" /> 地址</label>
-          <input v-model="editForm.address" type="text" class="sp-form-input" />
+          <label class="sp-form-label"><i class="fas fa-map-marker-alt"  aria-hidden="true" /> 地址</label>
+          <input v-model="editForm.address" type="text" class="sp-form-input" name="address" autocomplete="off" />
         </div>
         <div class="sp-form-field">
-          <label class="sp-form-label"><i class="fas fa-sticky-note" /> 备注</label>
+          <label class="sp-form-label"><i class="fas fa-sticky-note"  aria-hidden="true" /> 备注</label>
           <textarea v-model="editForm.remark" rows="2" class="sp-form-input" />
         </div>
       </form>
       <template #footer>
         <UiButton variant="ghost" size="sm" @click="editDialogVisible = false">取消</UiButton>
         <UiButton variant="primary" size="sm" :disabled="editSubmitting" @click="handleEdit">
-          <i class="fas fa-save" />
-          {{ editSubmitting ? '保存中...' : '保存' }}
+          <i class="fas fa-save"  aria-hidden="true" />
+          {{ editSubmitting ? '保存中…' : '保存' }}
         </UiButton>
       </template>
     </UiDialog>
@@ -191,6 +193,7 @@ import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 import { showToast } from '@/composables/useToast'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import type { Supplier } from '@/types'
+import { formatDate } from '@/utils/format'
 
 const actionId = ref<number | ''>(0)
 const queryClient = useQueryClient()
@@ -414,7 +417,7 @@ async function handleEdit() {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, border-color 0.3s ease, transform 0.3s ease;
   color: var(--color-text);
 }
 
@@ -460,11 +463,13 @@ async function handleEdit() {
   border-radius: 11px;
   font-size: 14px;
   outline: none;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
   background: white;
   font-family: inherit;
   color: var(--color-text);
 }
+
+.sp-search-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 
 .sp-search-input:focus {
   border-color: var(--color-primary-400);
@@ -481,7 +486,7 @@ async function handleEdit() {
   cursor: pointer;
   padding: 6px;
   border-radius: 50%;
-  transition: all 0.2s ease;
+  transition: background 0.2s ease, color 0.2s ease;
 }
 
 .sp-search-clear:hover {
@@ -560,7 +565,7 @@ async function handleEdit() {
   align-items: center;
   justify-content: center;
   font-size: 13px;
-  transition: all 0.2s ease;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
   cursor: pointer;
   padding: 0;
 }
@@ -701,12 +706,14 @@ async function handleEdit() {
   border-radius: 10px;
   font-size: 14px;
   outline: none;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
   background: white;
   font-family: inherit;
   color: var(--color-text);
   box-sizing: border-box;
 }
+
+.sp-form-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 
 .sp-form-input:focus {
   border-color: var(--color-primary-400);

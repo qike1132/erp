@@ -3,7 +3,7 @@
 
 映射到与 Flask-SQLAlchemy ProductionPlan 相同的 'production_plan' 表。
 """
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import Boolean, Date, DateTime, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -25,8 +25,8 @@ class ProductionPlan(Base):
     shipped_qty: Mapped[int] = mapped_column(Integer, default=0, comment='已出货数量')
     remark: Mapped[str | None] = mapped_column(Text, nullable=True, comment='备注')
     upload_batch: Mapped[str | None] = mapped_column(String(64), nullable=True, comment='上传批次ID')
-    create_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, comment='创建时间')
-    update_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+    create_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), comment='创建时间')
+    update_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
     created_by: Mapped[str | None] = mapped_column(String(50), nullable=True, comment='创建人')
 
     __table_args__ = (
@@ -69,8 +69,8 @@ class ProductionPlanLog(Base):
     old_value: Mapped[str | None] = mapped_column(Text, nullable=True, comment='变更前数据(JSON)')
     new_value: Mapped[str | None] = mapped_column(Text, nullable=True, comment='变更后数据(JSON)')
     operator: Mapped[str] = mapped_column(String(50), nullable=False, comment='操作人')
-    operate_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, comment='操作时间')
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+    operate_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), comment='操作时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
 
     def __repr__(self):
         return f'<ProductionPlanLog {self.id} - {self.action} - plan:{self.plan_id}>'
@@ -92,8 +92,8 @@ class StagingPurchasePlan(Base):
     is_validated: Mapped[bool] = mapped_column(Boolean, default=False, comment='是否已验证')
     validation_error: Mapped[str | None] = mapped_column(String(500), nullable=True, comment='验证错误信息')
     upload_batch_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True, comment='上传批次ID')
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, comment='创建时间')
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), comment='创建时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
 
     __table_args__ = (
         Index('idx_spp_session', 'session_id'),

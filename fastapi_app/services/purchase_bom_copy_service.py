@@ -17,7 +17,6 @@ from fastapi_app.shared_models import (
     ProductAccessory,
     ProductFabric,
     ProductMaterial,
-    ProductPackaging,
     PurchaseOrder,
     PurchaseOrderItem,
 )
@@ -34,7 +33,6 @@ async def search_products_for_bom_copy(db: AsyncSession, keyword: str) -> list:
         selectinload(Product.material),
         selectinload(Product.fabrics),
         selectinload(Product.accessories),
-        selectinload(Product.packagings),
     ).limit(20)
     result = await db.execute(query)
     products = result.scalars().unique().all()
@@ -43,7 +41,7 @@ async def search_products_for_bom_copy(db: AsyncSession, keyword: str) -> list:
     for p in products:
         has_bom = product_has_bom(p)
         material_count = (
-            len(p.fabrics) + len(p.accessories) + len(p.packagings)
+            len(p.fabrics) + len(p.accessories)
             + (1 if p.material and getattr(p.material, "cotton_usage", Decimal("0")) > 0 else 0)
         )
         output.append({
@@ -64,7 +62,6 @@ async def get_bom_preview(db: AsyncSession, source_product_id: int) -> dict:
             selectinload(Product.material),
             selectinload(Product.fabrics),
             selectinload(Product.accessories),
-            selectinload(Product.packagings),
         ).where(Product.id == source_product_id)
     )
     source_product = result.scalar_one_or_none()
@@ -77,7 +74,6 @@ async def get_bom_preview(db: AsyncSession, source_product_id: int) -> dict:
         'filling': None,
         'fabric': [],
         'accessory': [],
-        'packaging': [],
     }
 
     if source_product.material and getattr(source_product.material, 'cotton_usage', Decimal('0')) > 0:
@@ -87,14 +83,11 @@ async def get_bom_preview(db: AsyncSession, source_product_id: int) -> dict:
         bom_data['fabric'].append(fabric.to_dict())
     for accessory in source_product.accessories:
         bom_data['accessory'].append(accessory.to_dict())
-    for packaging in source_product.packagings:
-        bom_data['packaging'].append(packaging.to_dict())
 
     material_count = (
         (1 if bom_data['filling'] else 0)
         + len(bom_data['fabric'])
         + len(bom_data['accessory'])
-        + len(bom_data['packaging'])
     )
 
     create_time_str = (
@@ -128,7 +121,6 @@ async def copy_bom_to_product(db: AsyncSession, target_product_id: int, data: di
             selectinload(Product.material),
             selectinload(Product.fabrics),
             selectinload(Product.accessories),
-            selectinload(Product.packagings),
         ).where(Product.id == source_product_id)
     )
     source_product = src_result.scalar_one_or_none()
@@ -138,7 +130,6 @@ async def copy_bom_to_product(db: AsyncSession, target_product_id: int, data: di
             selectinload(Product.material),
             selectinload(Product.fabrics),
             selectinload(Product.accessories),
-            selectinload(Product.packagings),
         ).where(Product.id == target_product_id)
     )
     target_product = tgt_result.scalar_one_or_none()
@@ -158,7 +149,6 @@ async def copy_bom_to_product(db: AsyncSession, target_product_id: int, data: di
         await db.execute(delete(ProductMaterial).where(ProductMaterial.product_id == target_product_id))
         await db.execute(delete(ProductFabric).where(ProductFabric.product_id == target_product_id))
         await db.execute(delete(ProductAccessory).where(ProductAccessory.product_id == target_product_id))
-        await db.execute(delete(ProductPackaging).where(ProductPackaging.product_id == target_product_id))
 
     if source_product.material and getattr(source_product.material, 'cotton_usage', Decimal('0')) > 0:
         old_mat = source_product.material
@@ -200,20 +190,6 @@ async def copy_bom_to_product(db: AsyncSession, target_product_id: int, data: di
             unit=getattr(old_accessory, 'unit', '') or '个',
             material_category=getattr(old_accessory, 'material_category', '') or 'accessory',
             remark=getattr(old_accessory, 'remark', '') or '',
-        ))
-        copied_count += 1
-
-    for old_packaging in source_product.packagings:
-        db.add(ProductPackaging(
-            product_id=target_product_id,
-            material_code=getattr(old_packaging, 'material_code', '') or '',
-            packaging_name=old_packaging.packaging_name,
-            specification=getattr(old_packaging, 'specification', '') or '',
-            quantity=old_packaging.quantity,
-            supplier_id=getattr(old_packaging, 'supplier_id', None),
-            supplier_name=getattr(old_packaging, 'supplier_name', '') or '',
-            unit=getattr(old_packaging, 'unit', '') or '',
-            remark=getattr(old_packaging, 'remark', '') or '',
         ))
         copied_count += 1
 

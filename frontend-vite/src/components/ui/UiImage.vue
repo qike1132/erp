@@ -1,7 +1,9 @@
 <template>
   <img
     :src="src"
-    :alt="alt"
+    :alt="alt ?? ''"
+    :width="width"
+    :height="height"
     :class="['object-cover rounded-lg', fitClass, className]"
     loading="lazy"
     @error="($event.target as HTMLImageElement).src = ''"
@@ -11,12 +13,17 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-const props = defineProps<{
-  src: string
-  alt?: string
-  fit?: 'contain' | 'cover' | 'fill' | 'none'
-  className?: string
-}>()
+const props = withDefaults(
+  defineProps<{
+    src: string
+    alt?: string
+    fit?: 'contain' | 'cover' | 'fill' | 'none'
+    className?: string
+    width?: number | string
+    height?: number | string
+  }>(),
+  { width: undefined, height: undefined },
+)
 
 const fitClass = computed(() => {
   switch (props.fit) {

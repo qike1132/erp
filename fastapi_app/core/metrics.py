@@ -107,6 +107,36 @@ DB_CONNECTIONS_ACTIVE = _get_or_create_gauge(
     '活跃数据库连接数'
 )
 
+DB_POOL_SIZE = _get_or_create_gauge(
+    'db_pool_size',
+    '连接池大小（总容量）',
+    ['pool']
+)
+
+DB_POOL_CHECKED_OUT = _get_or_create_gauge(
+    'db_pool_checked_out',
+    '连接池已签出连接数',
+    ['pool']
+)
+
+DB_POOL_OVERFLOW = _get_or_create_gauge(
+    'db_pool_overflow',
+    '连接池溢出连接数',
+    ['pool']
+)
+
+DB_POOL_CHECKEDIN = _get_or_create_gauge(
+    'db_pool_checked_in',
+    '连接池空闲连接数',
+    ['pool']
+)
+
+DB_POOL_WAITING = _get_or_create_gauge(
+    'db_pool_waiting',
+    '等待连接的请求数',
+    ['pool']
+)
+
 CACHE_OPERATIONS = _get_or_create_counter(
     'cache_operations_total',
     '缓存操作计数',
@@ -116,6 +146,19 @@ CACHE_OPERATIONS = _get_or_create_counter(
 SLOW_QUERY_TOTAL = _get_or_create_counter(
     'slow_query_total',
     '慢查询总数（超过阈值的SQL查询）'
+)
+
+TASK_FAILURE_TOTAL = _get_or_create_counter(
+    'celery_task_failure_total',
+    'Celery任务失败总数（重试耗尽后计入）',
+    ['task']
+)
+
+TASK_RUNTIME_SECONDS = _get_or_create_histogram(
+    'celery_task_runtime_seconds',
+    'Celery任务运行耗时（秒）',
+    ['task'],
+    buckets=[1, 5, 10, 30, 60, 120, 300, 600]
 )
 
 

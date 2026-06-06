@@ -2,6 +2,7 @@
   <div
     ref="containerRef"
     class="virtual-list-container"
+    role="list"
     :style="{ height: `${containerHeight}px` }"
     @scroll.passive="onScrollPassive"
   >
@@ -17,6 +18,7 @@
         v-for="item in visibleItems"
         :key="getItemKey(item)"
         class="virtual-list-item"
+        role="listitem"
         :ref="el => setItemRef(el, item.index)"
         :style="getItemStyle(item.index)"
       >
@@ -109,7 +111,7 @@ function getPosition(index: number): number {
 function findStartIndex(scrollPos: number): number {
   if (scrollPos <= 0) return 0
   if (!props.dynamicHeight) return Math.floor(scrollPos / props.itemHeight)
-  if (heightCache.value.length === 0) return Math.floor(scrollPos / estimatedH.value)
+  if (_heightMap.size === 0) return Math.floor(scrollPos / estimatedH.value)
   let lo = 0, hi = props.items.length - 1
   while (lo <= hi) {
     const mid = (lo + hi) >> 1

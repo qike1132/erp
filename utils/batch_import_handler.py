@@ -2,6 +2,7 @@
 批量导入处理工具
 用于统一处理Excel批量导入逻辑,消除重复代码
 """
+import contextlib
 import math
 import os
 import re
@@ -186,7 +187,6 @@ class BatchImportHandler:
         file_path = result
 
         try:
-            # 2. 解析Excel
             df = self.parse_excel(file_path)
             if df is None:
                 return {
@@ -197,7 +197,6 @@ class BatchImportHandler:
                     'errors': self.errors
                 }
 
-            # 3. 验证数据
             validated_data = self.validate_data(df)
 
             if not validated_data:
@@ -209,7 +208,6 @@ class BatchImportHandler:
                     'errors': self.errors
                 }
 
-            # 4. 批量处理
             for row_data in validated_data:
                 try:
                     instance = self.process_row(row_data)
@@ -222,19 +220,14 @@ class BatchImportHandler:
                     self.db.session.rollback()
                     continue
 
-            # 5. 提交事务
             self.db.session.commit()
-
-            # 6. 删除临时文件
-            if os.path.exists(file_path):
-                os.remove(file_path)
 
             return {
                 'success': True,
                 'message': f'成功导入{self.success_count}条数据',
                 'success_count': self.success_count,
                 'failed_count': self.failed_count,
-                'errors': self.errors[:10]  # 只返回前10个错误
+                'errors': self.errors[:10]
             }
 
         except Exception as e:
@@ -246,6 +239,10 @@ class BatchImportHandler:
                 'failed_count': self.failed_count,
                 'errors': self.errors
             }
+        finally:
+            if file_path and os.path.exists(file_path):
+                with contextlib.suppress(OSError):
+                    os.remove(file_path)
 
 
 class OrderImportHandler(BatchImportHandler):

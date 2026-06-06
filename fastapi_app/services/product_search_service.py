@@ -56,7 +56,6 @@ class ProductSearchService(BaseSearchService[Product]):
             joinedload(Product.material),
             selectinload(Product.fabrics),
             selectinload(Product.accessories),
-            selectinload(Product.packagings),
         ).limit(20)
         products = query.all()
 
@@ -64,7 +63,7 @@ class ProductSearchService(BaseSearchService[Product]):
         for p in products:
             has_bom = product_has_bom(p)
             material_count = (
-                len(p.fabrics) + len(p.accessories) + len(p.packagings)
+                len(p.fabrics) + len(p.accessories)
                 + (1 if p.material and getattr(p.material, "cotton_usage", Decimal("0")) > 0 else 0)
             )
             result.append({

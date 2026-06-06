@@ -7,11 +7,11 @@
           <HeaderTabs />
         </div>
         <div class="cs-header-right">
-          <div class="cs-tab-group">
-            <button :class="['cs-tab-btn', { active: activeTab === 'stock' }]" @click="activeTab = 'stock'">
+          <div class="cs-tab-group" role="tablist">
+            <button role="tab" :aria-selected="activeTab === 'stock'" :class="['cs-tab-btn', { active: activeTab === 'stock' }]" @click="activeTab = 'stock'">
               出入库
             </button>
-            <button :class="['cs-tab-btn', { active: activeTab === 'inventory' }]" @click="activeTab = 'inventory'">
+            <button role="tab" :aria-selected="activeTab === 'inventory'" :class="['cs-tab-btn', { active: activeTab === 'inventory' }]" @click="activeTab = 'inventory'">
               库存查询
             </button>
           </div>
@@ -53,12 +53,12 @@ const activeTab = ref('stock')
   border-radius: 18px;
   border: 1px solid var(--color-border-light, #e2e8f0);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
 }
 .cs-card:hover {
-  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
-  transform: translateY(-6px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  transform: translateY(-2px);
 }
 .cs-card-main {
   flex: 1;
@@ -155,7 +155,7 @@ const activeTab = ref('stock')
   color: var(--color-text-secondary);
   background: transparent;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
 }
 .cs-tab-btn:hover {
   background: var(--color-primary-50);

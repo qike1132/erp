@@ -5,10 +5,10 @@
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, desc, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
@@ -51,7 +51,7 @@ class Order(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     order_no: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, comment='订单编号')
     customer: Mapped[str] = mapped_column(String(100), nullable=False, index=True, comment='客户名称')
-    order_date: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, index=True, comment='下单时间')
+    order_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True, comment='下单时间')
     product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id'), nullable=False, index=True, comment='产品ID')
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, comment='订单数量')
     status: Mapped[str | None] = mapped_column(String(20), default=None, nullable=True, index=True, comment='订单状态')
@@ -70,7 +70,7 @@ class Order(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, comment='删除时间')
     deleted_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id'), comment='删除人ID')
     delete_reason: Mapped[str | None] = mapped_column(String(500), comment='删除原因')
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
 
 
     product: Mapped["Product"] = relationship('Product', backref='orders')
@@ -90,6 +90,20 @@ class Order(Base):
         Index('idx_order_locked_by', 'locked_by_id'),
         Index('idx_order_deleted_by', 'deleted_by_id'),
         Index('idx_order_batch_completed_by', 'batch_completed_by_id'),
+        Index('idx_order_product_customer_type', 'product_id', 'customer', 'order_type'),
+        Index('idx_order_product_type_country', 'product_id', 'order_type', 'country'),
+        Index('idx_order_customer_trgm', 'customer', postgresql_using='gin',
+              postgresql_ops={'customer': 'gin_trgm_ops'}),
+        Index('idx_perf_order_status_date_covering', 'status', desc('order_date'), 'id',
+              postgresql_where=text("is_deleted = false")),
+        Index('idx_perf_order_customer_date', 'customer', desc('order_date'),
+              postgresql_where=text("is_deleted = false")),
+        Index('idx_order_batch_completed', desc('batch_completed_at'),
+              postgresql_where=text("batch_completed_at IS NOT NULL")),
+        Index('idx_order_not_deleted_date', desc('order_date'),
+              postgresql_where=text("is_deleted IS NOT TRUE")),
+        Index('idx_order_not_deleted_customer', 'customer',
+              postgresql_where=text("is_deleted IS NOT TRUE")),
         {'quote': True},
     )
 

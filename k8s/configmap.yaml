@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: erp-config
+  namespace: erp-system
+data:
+  APP_ENV: production
+  OTEL_ENABLED: "true"
+  OTEL_EXPORTER_TYPE: otlp
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+  OTEL_SERVICE_NAME: binfa-erp
+  CELERY_BROKER_URL: redis://redis:6379/1
+  CELERY_RESULT_BACKEND: redis://redis:6379/2
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: erp-secrets
+  namespace: erp-system
+type: Opaque
+stringData:
+  DATABASE_URL: postgresql+asyncpg://erp:CHANGE_ME@postgres:5432/erp_system
+  SECRET_KEY: CHANGE_ME_IN_PRODUCTION
+  REDIS_PASSWORD: CHANGE_ME

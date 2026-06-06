@@ -13,6 +13,8 @@ interface UseWebSocketOptions {
   reconnectBaseDelay?: number
 }
 
+const isCap = !!import.meta.env.VITE_CAPACITOR
+
 export function useWebSocket(options: UseWebSocketOptions) {
   const { onMessage, isActive, maxReconnectAttempts = 20, reconnectBaseDelay = 3000 } = options
 
@@ -23,8 +25,16 @@ export function useWebSocket(options: UseWebSocketOptions) {
 
   function connect() {
     if (reconnectAttempts >= maxReconnectAttempts) return
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${protocol}//${window.location.host}/ws/notifications`
+
+    let wsUrl: string
+    if (isCap) {
+      const base = import.meta.env.VITE_WS_BASE_URL as string
+      wsUrl = `${base}/ws/notifications`
+    } else {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      wsUrl = `${protocol}//${window.location.host}/ws/notifications`
+    }
+
     ws = new WebSocket(wsUrl)
 
     ws.onopen = () => {
@@ -66,8 +76,26 @@ export function useWebSocket(options: UseWebSocketOptions) {
     }
   }
 
-  onMounted(connect)
-  onUnmounted(cleanup)
+  let resumeCleanup: (() => Promise<void>) | null = null
+
+  onMounted(async () => {
+    connect()
+    if (isCap) {
+      const { App } = await import('@capacitor/app')
+      const listener = await App.addListener('appStateChange', (state) => {
+        if (state.isActive && !manuallyClosed && ws?.readyState !== WebSocket.OPEN) {
+          reconnectAttempts = 0
+          connect()
+        }
+      })
+      resumeCleanup = async () => { await listener.remove() }
+    }
+  })
+
+  onUnmounted(async () => {
+    cleanup()
+    if (resumeCleanup) await resumeCleanup()
+  })
 
   return { cleanup }
 }

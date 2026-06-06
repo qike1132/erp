@@ -5,7 +5,7 @@
     <UiCard>
       <UiUpload accept=".pdf,.png,.jpg,.jpeg,.bmp,.tiff,.webp" multiple @change="handleFileChange">
         <div class="upload-dragger-content">
-          <i class="fas fa-cloud-upload-alt" style="font-size: 48px; color: var(--color-text-muted)" />
+          <i class="fas fa-cloud-upload-alt" style="font-size: 48px; color: var(--color-text-muted)"  aria-hidden="true" />
           <p style="margin-top: 12px">拖拽文件到这里，或点击上传</p>
           <p style="color: var(--color-text-muted); font-size: 12px">支持 PDF/PNG/JPG/BMP/TIFF/WEBP</p>
         </div>
@@ -55,7 +55,7 @@ const progress = ref(0)
 const ocrResult = ref<any>(null)
 
 const progressStatus = ref<'' | 'success' | 'exception' | 'warning'>('')
-const progressText = ref('处理中...')
+const progressText = ref('处理中…')
 
 function beforeUpload(file: File) {
   const maxSize = 20 * 1024 * 1024

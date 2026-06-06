@@ -1,17 +1,17 @@
 <template>
   <div
     :class="[
-      'bg-surface-card rounded-[var(--radius-card)] border border-border-light p-5 shadow-sm transition-all duration-300',
+      'bg-surface-card rounded-[var(--radius-card)] border border-border-light p-5 shadow-sm transition-colors transition-transform transition-shadow duration-300',
       accentClass,
     ]"
     style="border-left-width: 4px"
   >
     <div class="flex items-start justify-between">
-      <div class="flex-1">
+      <div class="flex-1 min-w-0">
         <div class="text-[11px] text-text-secondary uppercase tracking-[1.2px] mb-2 font-medium">
           <slot name="label" />
         </div>
-        <div class="text-3xl font-extrabold text-heading">
+        <div class="text-3xl font-extrabold text-heading tabular-nums">
           <slot />
         </div>
         <div v-if="$slots.extra" class="text-xs text-text-muted mt-2">

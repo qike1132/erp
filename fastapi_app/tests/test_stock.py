@@ -186,7 +186,9 @@ class TestStockOutService:
                 )
 
     async def test_update_stockout_not_found(self, mock_db):
-        mock_db.get = AsyncMock(return_value=None)
+        mock_result = MagicMock()
+        mock_result.one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
         with pytest.raises(ValueError, match="不存在"):
             await stock_service.update_stockout(
                 mock_db, stockout_id=999, new_quantity=10,
@@ -194,18 +196,28 @@ class TestStockOutService:
             )
 
     async def test_update_stockout_is_deduction(self, mock_db):
+        pid_result = MagicMock()
+        pid_result.one_or_none.return_value = (1,)
         stockout = MagicMock()
         stockout.id = 1
         stockout.stockin_id = 5
-        mock_db.get = AsyncMock(return_value=stockout)
-        with pytest.raises(ValueError, match="订单抵扣"):
-            await stock_service.update_stockout(
-                mock_db, stockout_id=1, new_quantity=10,
-                customer="客户", stockout_date_str="2026-01-15", note=""
-            )
+        stockout_result = MagicMock()
+        stockout_result.scalar_one_or_none.return_value = stockout
+        mock_db.execute = AsyncMock(side_effect=[pid_result, stockout_result])
+        mock_db.commit = AsyncMock()
+        mock_db.rollback = AsyncMock()
+        with patch('fastapi_app.services.stock_service.get_product_for_update', new_callable=AsyncMock) as mock_get_product:
+            mock_get_product.return_value = MagicMock()
+            with pytest.raises(ValueError, match="订单抵扣"):
+                await stock_service.update_stockout(
+                    mock_db, stockout_id=1, new_quantity=10,
+                    customer="客户", stockout_date_str="2026-01-15", note=""
+                )
 
     async def test_delete_stockout_not_found(self, mock_db):
-        mock_db.get = AsyncMock(return_value=None)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
         with pytest.raises(ValueError, match="不存在"):
             await stock_service.delete_stockout(mock_db, 999)
 
@@ -213,7 +225,17 @@ class TestStockOutService:
         stockout = MagicMock()
         stockout.id = 1
         stockout.stockin_id = 5
-        mock_db.get = AsyncMock(return_value=stockout)
+        stockout.stockout_no = "SO-001"
+        stockout.quantity = 10
+        stockout.product_id = 1
+        stockout.customer = "客户"
+        stockout_result = MagicMock()
+        stockout_result.scalar_one_or_none.return_value = stockout
+        product_name_result = MagicMock()
+        product_name_result.one_or_none.return_value = ("产品A",)
+        mock_db.execute = AsyncMock(side_effect=[stockout_result, product_name_result])
+        mock_db.commit = AsyncMock()
+        mock_db.rollback = AsyncMock()
         with pytest.raises(ValueError, match="订单抵扣"):
             await stock_service.delete_stockout(mock_db, 1)
 
@@ -224,16 +246,21 @@ class TestStockOutService:
         stockout.quantity = 10
         stockout.product_id = 1
         stockout.stockin_id = None
+        stockout.customer = ""
+        stockout.stockout_date = None
 
-        product = MagicMock()
-        product.id = 1
+        stockout_result = MagicMock()
+        stockout_result.scalar_one_or_none.return_value = stockout
+        product_name_result = MagicMock()
+        product_name_result.one_or_none.return_value = None
 
-        mock_db.get = AsyncMock(return_value=stockout)
+        mock_db.execute = AsyncMock(side_effect=[stockout_result, product_name_result])
         mock_db.commit = AsyncMock()
         mock_db.rollback = AsyncMock()
 
         with patch('fastapi_app.services.stock_service.delete_stockout_core', new_callable=AsyncMock, return_value=None) as mock_delete:
-            await stock_service.delete_stockout(mock_db, 1)
+            with patch('fastapi_app.services.stock_service.invalidate_cache', new_callable=AsyncMock):
+                await stock_service.delete_stockout(mock_db, 1)
         mock_delete.assert_awaited_once()
 
 
@@ -379,12 +406,24 @@ class TestStockOutEndpoints:
         stockout = MagicMock()
         stockout.id = 1
         stockout.stockin_id = 5
-        mock_db.get = AsyncMock(return_value=stockout)
+        stockout.stockout_no = "SO-001"
+        stockout.quantity = 10
+        stockout.product_id = 1
+        stockout.customer = "客户"
+        stockout_result = MagicMock()
+        stockout_result.scalar_one_or_none.return_value = stockout
+        product_name_result = MagicMock()
+        product_name_result.one_or_none.return_value = ("产品A",)
+        mock_db.execute = AsyncMock(side_effect=[stockout_result, product_name_result])
+        mock_db.commit = AsyncMock()
+        mock_db.rollback = AsyncMock()
         response = await client.delete("/api/v1/stock/out/delete/1")
         assert response.status_code == 400
 
     async def test_delete_stockout_not_found(self, client, mock_db):
-        mock_db.get = AsyncMock(return_value=None)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
         response = await client.delete("/api/v1/stock/out/delete/999")
         assert response.status_code == 400
 
@@ -393,26 +432,22 @@ class TestInventoryEndpoints:
     """库存查看 API 端点测试"""
 
     async def test_inventory(self, client, mock_db):
-        mock_result = MagicMock()
-        mock_scalars = MagicMock()
-        mock_unique = MagicMock()
-        mock_unique.all.return_value = []
-        mock_scalars.unique.return_value = mock_unique
-        mock_result.scalars.return_value = mock_scalars
-        mock_db.execute = AsyncMock(return_value=mock_result)
-        response = await client.get("/api/v1/stock/inventory")
+        with patch('fastapi_app.services.stock_service.get_inventory_paginated', new_callable=AsyncMock, return_value={
+            'inventory_data': [], 'total_order_qty': 0, 'total_stockin_qty': 0,
+            'total_stock': 0, 'all_countries': [], 'all_customers': [],
+            'total_items': 0, 'page': 1, 'per_page': 50,
+        }):
+            response = await client.get("/api/v1/stock/inventory")
         assert response.status_code == 200
         data = response.json()
         assert data['success'] is True
         assert data['total_stock'] == 0
 
     async def test_inventory_with_filters(self, client, mock_db):
-        mock_result = MagicMock()
-        mock_scalars = MagicMock()
-        mock_unique = MagicMock()
-        mock_unique.all.return_value = []
-        mock_scalars.unique.return_value = mock_unique
-        mock_result.scalars.return_value = mock_scalars
-        mock_db.execute = AsyncMock(return_value=mock_result)
-        response = await client.get("/api/v1/stock/inventory?customer=测试客户&product=测试产品")
+        with patch('fastapi_app.services.stock_service.get_inventory_paginated', new_callable=AsyncMock, return_value={
+            'inventory_data': [], 'total_order_qty': 0, 'total_stockin_qty': 0,
+            'total_stock': 0, 'all_countries': [], 'all_customers': [],
+            'total_items': 0, 'page': 1, 'per_page': 50,
+        }):
+            response = await client.get("/api/v1/stock/inventory?customer=测试客户&product=测试产品")
         assert response.status_code == 200

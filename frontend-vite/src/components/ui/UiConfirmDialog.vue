@@ -2,7 +2,7 @@
   <UiDialog :open="open" max-width-class="max-w-[420px]" @update:open="onOpenUpdate">
     <div class="p-8">
       <div :class="['w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl', iconBgClass]">
-        <i :class="iconClass" />
+        <i :class="iconClass" aria-hidden="true" />
       </div>
       <div class="text-center text-base text-text mb-2">
         {{ text }}

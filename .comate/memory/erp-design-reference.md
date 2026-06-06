@@ -227,15 +227,16 @@ type: reference
 | **0.3s ease** | ease | 操作按钮、表单控件、列表项、筛选按钮、分类头部、TAB按钮 |
 | **0.4s cubic-bezier(0.4, 0, 0.2, 1)** | Material Design | 主卡片hover |
 
-**卡片悬浮动画（主卡片阴影增强，禁止位移）：**
+**卡片悬浮动画（主卡片上浮 + 阴影增强）：**
 ```css
 .card {
   border: 1px solid var(--color-border-light, #e2e8f0);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  transition: box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .card:hover {
   box-shadow: 0 8px 24px rgba(0,0,0,0.06), 0 24px 80px rgba(0,0,0,0.08);
+  transform: translateY(-6px);
 }
 ```
 
@@ -273,7 +274,6 @@ type: reference
   - **选中态同 hover**：`border-color: var(--color-primary-500)` + `background: var(--color-primary-50)` + 蓝色阴影
 
 **禁令：**
-- **禁止**在主卡片（`.{prefix}-card`）上使用 `transform: translateY(-6px)` 或任何位移效果（会导致视觉错位/双重卡片感）
 - **禁止**在统计卡片（`.stat-card`）上使用 `transform: translateY(-6px)` 或任何位移效果
 - **禁止**从 `opacity: 0` 开始的入场动画（已确认会导致闪屏）
 - **禁止**在卡片头部/区块标题使用灰色背景

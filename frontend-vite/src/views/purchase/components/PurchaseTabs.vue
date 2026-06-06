@@ -1,14 +1,14 @@
-<template>
+﻿<template>
   <UiTabs :model-value="modelValue" @update:model-value="$emit('update:modelValue', $event)">
     <UiTabTrigger value="orders" class="flex-1">
-      <i class="fas fa-file-invoice-dollar" /> 采购订单
+      <i class="fas fa-file-invoice-dollar"  aria-hidden="true" /> 采购订单
       <span
         v-if="unprocessedCount > 0"
         :class="['notification-badge', modelValue === 'orders' ? 'notification-badge-active' : '']"
         >{{ unprocessedCount }}</span
       >
     </UiTabTrigger>
-    <UiTabTrigger value="history" class="flex-1"> <i class="fas fa-check-circle" /> 下单查询 </UiTabTrigger>
+    <UiTabTrigger value="history" class="flex-1"> <i class="fas fa-check-circle"  aria-hidden="true" /> 下单查询 </UiTabTrigger>
   </UiTabs>
 </template>
 

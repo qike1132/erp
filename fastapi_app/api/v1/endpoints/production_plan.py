@@ -10,12 +10,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import get_user_identity, require_permission
+from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.schemas.production_plan import (
     BarcodeValidationResponse,
+    MonthlySummary,
     ProductionPlanActionResponse,
     ProductionPlanCreate,
     ProductionPlanListResponse,
     ProductionPlanUpdate,
+    StagingConfirmResponse,
+    StagingListResponse,
+    StagingValidateResponse,
+    TimelineResponse,
+    UploadExcelResponse,
 )
 from fastapi_app.services import production_plan_service
 from fastapi_app.shared_models import User
@@ -34,35 +41,29 @@ async def list_plans(year: int=Query(..., description='年份'), month: int=Quer
 @router.post('/create', response_model=ProductionPlanActionResponse)
 async def create_plan(data: ProductionPlanCreate, db: AsyncSession=Depends(get_async_db), user: User=Depends(require_permission('production_plan_manage'))):
     """创建排产计划"""
-    try:
+    async with db_transaction(db):
         _, created_by = get_user_identity(user)
         await production_plan_service.create_plan(db, customer_name=data.customer_name, product_name=data.product_name, barcode=data.barcode, quantity=data.quantity, plan_date_str=data.plan_date, remark=data.remark or '', created_by=created_by)
-        return ProductionPlanActionResponse(success=True, message='排产计划创建成功！')
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    return ProductionPlanActionResponse(success=True, message='排产计划创建成功！')
 
 @router.put('/edit/{plan_id}', response_model=ProductionPlanActionResponse)
 async def update_plan(plan_id: int, data: ProductionPlanUpdate, db: AsyncSession=Depends(get_async_db), user: User=Depends(require_permission('production_plan_manage'))):
     """编辑排产计划"""
-    try:
+    async with db_transaction(db):
         update_data = data.model_dump(exclude_unset=True)
         _, created_by = get_user_identity(user)
         await production_plan_service.update_plan(db, plan_id, created_by=created_by, **update_data)
-        return ProductionPlanActionResponse(success=True, message='排产计划更新成功！')
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    return ProductionPlanActionResponse(success=True, message='排产计划更新成功！')
 
 @router.delete('/delete/{plan_id}', response_model=ProductionPlanActionResponse)
 async def delete_plan(plan_id: int, db: AsyncSession=Depends(get_async_db), user: User=Depends(require_permission('production_plan_manage'))):
     """删除排产计划"""
-    try:
+    async with db_transaction(db):
         _, operator = get_user_identity(user)
         await production_plan_service.delete_plan(db, plan_id, operator=operator)
-        return ProductionPlanActionResponse(success=True, message='排产计划删除成功！')
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    return ProductionPlanActionResponse(success=True, message='排产计划删除成功！')
 
-@router.get('/timeline')
+@router.get('/timeline', response_model=TimelineResponse)
 async def timeline(year: int=Query(..., description='年份'), month: int=Query(..., ge=1, le=12, description='月份'), customer: str=Query('', description='客户名称筛选'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('production_plan_view'))):
     """时间轴数据（按日期+客户维度，用于日历热力图）"""
     try:
@@ -70,7 +71,7 @@ async def timeline(year: int=Query(..., description='年份'), month: int=Query(
     except (OperationalError, DisconnectionError) as e:
         raise HTTPException(status_code=500, detail=f'获取时间轴数据失败: {settings.sanitize_error(e)}') from e
 
-@router.get('/customer-summary')
+@router.get('/customer-summary', response_model=MonthlySummary)
 async def customer_summary(year: int=Query(..., description='年份'), month: int=Query(..., ge=1, le=12, description='月份'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('production_plan_view'))):
     """客户汇总统计"""
     try:
@@ -84,7 +85,7 @@ async def validate_barcode(q: str=Query(..., min_length=1, description='69码'),
     result = await production_plan_service.validate_barcode(db, q)
     return BarcodeValidationResponse(**result)
 
-@router.post('/upload')
+@router.post('/upload', response_model=UploadExcelResponse)
 async def upload_excel(file: UploadFile=File(..., description='Excel文件'), db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('production_plan_manage'))):
     """上传Excel文件，解析到暂存表"""
     if not file.filename.endswith('.xlsx'):
@@ -96,37 +97,33 @@ async def upload_excel(file: UploadFile=File(..., description='Excel文件'), db
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(status_code=400, detail='文件大小不能超过10MB')
     session_id, _ = get_user_identity(_user)
-    try:
+    async with db_transaction(db):
         result = await production_plan_service.upload_excel(db, content, session_id)
-        return {'success': True, **result}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {'success': True, **result}
 
-@router.get('/staging/list')
+@router.get('/staging/list', response_model=StagingListResponse)
 async def staging_list(db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('production_plan_manage'))):
     """获取暂存区预览数据"""
     session_id, _ = get_user_identity(_user)
     records = await production_plan_service.get_staging_list(db, session_id)
     return {'success': True, 'data': records, 'total': len(records)}
 
-@router.post('/staging/validate')
+@router.post('/staging/validate', response_model=StagingValidateResponse)
 async def staging_validate(db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('production_plan_manage'))):
     """触发暂存数据验证"""
     session_id, _ = get_user_identity(_user)
     result = await production_plan_service.validate_staging(db, session_id)
     return {'success': True, **result}
 
-@router.post('/staging/confirm')
+@router.post('/staging/confirm', response_model=StagingConfirmResponse)
 async def staging_confirm(batch_id: str=Query('', description='批次ID，空则确认该会话全部'), db: AsyncSession=Depends(get_async_db), user: User=Depends(require_permission('production_plan_manage'))):
     """确认暂存数据，批量写入正式表"""
     session_id, created_by = get_user_identity(user)
-    try:
+    async with db_transaction(db):
         result = await production_plan_service.confirm_staging(db, session_id, batch_id=batch_id, created_by=created_by)
-        return {'success': True, **result}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {'success': True, **result}
 
-@router.delete('/staging/clear')
+@router.delete('/staging/clear', response_model=ProductionPlanActionResponse)
 async def staging_clear(db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('production_plan_manage'))):
     """清空暂存区"""
     session_id, _ = get_user_identity(_user)

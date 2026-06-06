@@ -436,6 +436,23 @@ class ServerManagerApp:
             for err in errors:
                 self.log_message(err, 'ERROR')
 
+    def _get_env_value(self, key: str) -> str:
+        """从项目 .env 文件读取指定键的值"""
+        env_file = _PROJECT_DIR / '.env'
+        if not env_file.is_file():
+            return ''
+        try:
+            for line in env_file.read_text(encoding='utf-8').splitlines():
+                line = line.strip()
+                if line.startswith('#') or '=' not in line:
+                    continue
+                k, _, v = line.partition('=')
+                if k.strip() == key:
+                    return v.strip()
+        except Exception:
+            pass
+        return ''
+
     def _find_redis(self):
         """查找Redis可执行文件和配置文件"""
         redis_exe = next((str(p) for p in _REDIS_EXE_PATHS if p.is_file()), None)
@@ -461,6 +478,9 @@ class ServerManagerApp:
             return False
         try:
             cmd = [redis_exe] + ([redis_conf] if redis_conf else [])
+            redis_password = self._get_env_value('REDIS_PASSWORD')
+            if redis_password:
+                cmd += ['--requirepass', redis_password]
             self._msg_queue.put(('log', {'text': f"正在启动 Redis: {redis_exe}"}))
             self._redis_process = subprocess.Popen(cmd, creationflags=subprocess.CREATE_NO_WINDOW if _IS_WINDOWS else 0, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=False)
             threading.Thread(target=self._read_stdout, args=(self._redis_process,), daemon=True).start()
@@ -1074,7 +1094,7 @@ class ServerManagerApp:
             self._startup_current_step, self._startup_progress = self._startup_steps[2], 3
             self._msg_queue.put(('startup_progress', {'step': self._startup_current_step, 'progress': self._startup_progress, 'total': len(self._startup_steps)}))
             npm_cmd = 'npm.cmd' if _IS_WINDOWS else 'npm'
-            # 生产模式下：前端由 Nginx 直接服务静态文件，仅需确保构建产物存在
+            # 生产模式下：使用 Vite preview 服务提供前端
             if mode == 'prod':
                 if not (_FRONTEND_DIR / 'dist').is_dir():
                     self._msg_queue.put(('log', {'text': '生产模式：未检测到 dist 构建产物，正在执行 vite build...', 'level': 'WARNING'}))
@@ -1091,11 +1111,35 @@ class ServerManagerApp:
                     if build_proc.returncode != 0:
                         self._msg_queue.put(('log', {'text': 'vite build 失败', 'level': 'ERROR'}))
                     else:
-                        self._msg_queue.put(('log', {'text': 'vite build 完成，前端将由 Nginx 提供服务'}))
+                        self._msg_queue.put(('log', {'text': 'vite build 完成'}))
                 else:
-                    self._msg_queue.put(('log', {'text': '前端构建产物已就绪，由 Nginx 提供服务'}))
-                # 生产模式不需要启动前端进程，跳过健康检查
-                self._startup_current_step, self._startup_progress = self._startup_steps[-1], len(self._startup_steps)
+                    self._msg_queue.put(('log', {'text': '前端构建产物已就绪'}))
+                # 启动 Vite preview 服务（使用 3000 端口）
+                preview_env = {**os.environ, 'BACKEND_INTERNAL_URL': f'http://127.0.0.1:{_API_PORT}'}
+                npx_cmd = 'npx.cmd' if _IS_WINDOWS else 'npx'
+                self._frontend_process = subprocess.Popen([npx_cmd, 'vite', 'preview', '--port', str(_WEB_PORT), '--host', '0.0.0.0'], cwd=str(_FRONTEND_DIR), env=preview_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=creationflags, text=False)
+                self._msg_queue.put(('log', {'text': f"前端预览进程已启动 (PID: {self._frontend_process.pid})"}))
+                threading.Thread(target=self._read_frontend_stdout, args=(self._frontend_process,), daemon=True).start()
+                frontend_ready = False
+                for _ in range(60):
+                    try:
+                        urllib.request.urlopen(f'http://127.0.0.1:{_WEB_PORT}/', timeout=2)
+                        frontend_ready = True
+                        break
+                    except Exception:
+                        time.sleep(1)
+                if not frontend_ready:
+                    self._msg_queue.put(('log', {'text': '前端预览服务启动失败或健康检查未通过', 'level': 'ERROR'}))
+                    for proc, name in [(self._frontend_process, '前端'), (self._process, '后端')]:
+                        if proc and proc.poll() is None:
+                            self._msg_queue.put(('log', {'text': f'正在终止未就绪的{name}进程 (PID: {proc.pid})...'}))
+                            self._kill_process_tree(proc.pid)
+                            with contextlib.suppress(Exception):
+                                proc.wait(timeout=3)
+                    self._process, self._frontend_process = None, None
+                    self._msg_queue.put(('dual_failed', {'mode': 'dual_prod', 'label': label, 'reason': '前端未就绪'}))
+                    return
+                self._startup_current_step, self._startup_progress = self._startup_steps[3], 4
                 self._msg_queue.put(('startup_progress', {'step': self._startup_current_step, 'progress': self._startup_progress, 'total': len(self._startup_steps)}))
                 self._msg_queue.put(('dual_started', {'mode': 'dual_prod', 'label': label}))
                 return
@@ -1215,7 +1259,7 @@ class ServerManagerApp:
             self._current_mode_key = ""
             self._update_all_ui()
             return
-        if not is_prod and not frontend_alive:
+        if not frontend_alive:
             self.log_message(f"{label}启动后前端进程已退出，正在清理...", 'WARNING')
             if self._process and self._process.poll() is None:
                 self._kill_process_tree(self._process.pid)
@@ -1232,7 +1276,7 @@ class ServerManagerApp:
         if frontend_alive:
             self.log_message(f"  → 前端: http://localhost:{_WEB_PORT}")
         elif is_prod:
-            self.log_message("  → 前端: 由 Nginx 提供服务 (dist/)")
+            self.log_message("  → 前端: 未检测到前端服务，请检查 dist 构建产物")
 
     def _on_dual_failed(self, mode, label, reason):
         self.log_message(f"{label}启动失败: {reason}", 'ERROR')

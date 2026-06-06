@@ -23,7 +23,7 @@ export function usePurchaseOrders() {
     loadController = new AbortController()
     const signal = loadController.signal
     try {
-      const res = await purchaseApi.orders({ page: page.value, per_page: 15 })
+      const res = await purchaseApi.orders({ page: page.value, per_page: 15, status: 'pending,confirmed' })
       if (signal.aborted) return
       orders.value = res.orders || []
       total.value = res.total || 0

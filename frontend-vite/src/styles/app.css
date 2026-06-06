@@ -88,7 +88,7 @@
   --color-text: #1a1a2e;
   --color-text-secondary: #475569;
   --color-text-tertiary: #595959;
-  --color-text-muted: #b0bec5;
+  --color-text-muted: #64748b;
   --color-text-inverse: #ffffff;
 
   /* Heading - deep navy for page titles */
@@ -106,6 +106,13 @@
 
   /* Scrollbar */
   --color-scrollbar: #c1c1c1;
+
+  /* Z-Index scale */
+  --z-dropdown: 10;
+  --z-sticky: 20;
+  --z-overlay: 30;
+  --z-modal: 40;
+  --z-toast: 50;
 
   /* Font */
   --font-sans: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -172,11 +179,11 @@
 /* ============ Global Typography (unlayered for highest priority) ============ */
 body {
   color: var(--color-text);
-  font-weight: 600;
+  font-weight: 400;
 }
 
 /* ============ Typography Hierarchy ============ */
-/* H1 — Page title: primary color + largest + heaviest */
+/* H1 鈥?Page title: primary color + largest + heaviest */
 h1 {
   font-size: 1.5rem;
   font-weight: 800;
@@ -185,7 +192,7 @@ h1 {
   letter-spacing: -0.02em;
 }
 
-/* H2 — Section title: heading color + heavy */
+/* H2 鈥?Section title: heading color + heavy */
 h2 {
   font-size: 1.25rem;
   font-weight: 700;
@@ -194,7 +201,7 @@ h2 {
   letter-spacing: -0.01em;
 }
 
-/* H3 — Subsection: slightly smaller, still distinct from body */
+/* H3 鈥?Subsection: slightly smaller, still distinct from body */
 h3 {
   font-size: 1.0625rem;
   font-weight: 700;
@@ -202,7 +209,7 @@ h3 {
   line-height: 1.4;
 }
 
-/* H4 — Card/title: same size as body, distinguished by weight + color */
+/* H4 鈥?Card/title: same size as body, distinguished by weight + color */
 h4 {
   font-size: 0.9375rem;
   font-weight: 700;
@@ -219,7 +226,7 @@ h5, h6 {
 h5 { font-size: 0.875rem; }
 h6 { font-size: 0.8125rem; }
 
-/* Subtitle — descriptive text below headings */
+/* Subtitle 鈥?descriptive text below headings */
 .subtitle {
   font-size: 0.875rem;
   font-weight: 500;
@@ -227,7 +234,7 @@ h6 { font-size: 0.8125rem; }
   line-height: 1.5;
 }
 
-/* Label — form labels, field names */
+/* Label 鈥?form labels, field names */
 .text-label {
   font-size: 0.75rem;
   font-weight: 600;
@@ -235,7 +242,7 @@ h6 { font-size: 0.8125rem; }
   line-height: 1.4;
 }
 
-/* Auxiliary — hints, timestamps, metadata */
+/* Auxiliary 鈥?hints, timestamps, metadata */
 .text-aux {
   font-size: 0.75rem;
   font-weight: 400;
@@ -358,7 +365,7 @@ h6 { font-size: 0.8125rem; }
     color: inherit;
   }
 
-  /* Count badge - primary gradient pill for informational counts (e.g. "3 家", "5 个订单") */
+  /* Count badge - primary gradient pill for informational counts (e.g. "3 瀹?, "5 涓鍗?) */
   .count-badge {
     display: inline-flex;
     align-items: center;
@@ -371,7 +378,7 @@ h6 { font-size: 0.8125rem; }
     white-space: nowrap;
   }
 
-  /* Count badge subtle - lightweight neutral pill for metadata (e.g. "共 3 个", "数量: 5") */
+  /* Count badge subtle - lightweight neutral pill for metadata (e.g. "鍏?3 涓?, "鏁伴噺: 5") */
   .count-badge-subtle {
     display: inline-flex;
     align-items: center;
@@ -382,12 +389,43 @@ h6 { font-size: 0.8125rem; }
     color: var(--color-text-secondary);
   }
 
-  /* Card hover animation - unified across project, Plush Cute blue-tinted shadows */
+  /* Card hover animation - ERP UI Design Spec: Plush Cute style */
   .card-hover {
     transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   }
   .card-hover:hover {
-    box-shadow: 0 4px 12px rgba(176, 224, 230, 0.2), 0 16px 48px rgba(135, 206, 235, 0.15);
-    transform: translateY(-3px);
+    transform: translateY(-1px) scale(1.01);
+    box-shadow: 0 8px 25px rgba(135, 206, 235, 0.35);
   }
+}
+
+/* ============ Accessibility & Motion ============ */
+h1, h2, h3, h4, h5, h6 {
+  scroll-margin-top: 80px;
+  text-wrap: balance;
+}
+
+.data-table thead th,
+.data-table tbody td {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-primary-500);
+  outline-offset: 2px;
+}
+
+body {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  overflow-x: hidden;
 }

@@ -1,7 +1,9 @@
-import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
+import { createRouter, createWebHistory, type RouteRecordRaw, type RouteLocationNormalized, type NavigationGuardNext } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
-const routes: RouteRecordRaw[] = [
+const isCapacitor = !!import.meta.env.VITE_CAPACITOR
+
+const pcRoutes: RouteRecordRaw[] = [
   {
     path: '/login',
     name: 'Login',
@@ -45,7 +47,7 @@ const routes: RouteRecordRaw[] = [
         meta: { hideHeader: true },
       },
       { path: 'case', name: 'Case', component: () => import('@/views/case/CaseView.vue'), meta: { hideHeader: true } },
-      { path: 'batch', name: 'Batch', component: () => import('@/views/batch/BatchView.vue') },
+      { path: 'batch', name: 'Batch', component: () => import('@/views/batch/BatchView.vue'), meta: { hideHeader: true } },
       { path: 'production', name: 'Production', component: () => import('@/views/production/ProductionView.vue'), meta: { hideHeader: true } },
       { path: 'report', name: 'Report', component: () => import('@/views/report/ReportView.vue'), meta: { hideHeader: true } },
       { path: 'user', name: 'User', component: () => import('@/views/user/UserView.vue'), meta: { hideHeader: true } },
@@ -53,13 +55,43 @@ const routes: RouteRecordRaw[] = [
       { path: 'settings', name: 'Settings', component: () => import('@/views/settings/SettingsView.vue') },
       { path: 'ocr-import', name: 'OcrImport', component: () => import('@/views/ocr-import/OcrImportView.vue') },
       { path: 'backup', name: 'Backup', component: () => import('@/views/backup/BackupView.vue'), meta: { hideHeader: true } },
-      { path: 'app-update', name: 'AppUpdate', component: () => import('@/views/app-update/AppUpdateView.vue'), meta: { hideHeader: true } },
       { path: 'order-batch', name: 'OrderBatch', component: () => import('@/views/order-batch/OrderBatchView.vue'), meta: { hideHeader: true } },
       { path: 'order-batch-history', name: 'OrderBatchHistory', component: () => import('@/views/order-batch/OrderBatchHistoryView.vue'), meta: { hideHeader: true } },
     ],
   },
   { path: '/:pathMatch(.*)*', redirect: '/dashboard' },
 ]
+
+const mobileRoutes: RouteRecordRaw[] = [
+  {
+    path: '/login',
+    name: 'Login',
+    component: () => import('@/views/login/LoginView.vue'),
+    meta: { requiresAuth: false },
+  },
+  {
+    path: '/',
+    component: () => import('@/mobile/layouts/MobileLayout.vue'),
+    meta: { requiresAuth: true },
+    children: [
+      { path: '', name: 'MDashboard', component: () => import('@/mobile/views/dashboard/DashboardMobile.vue') },
+      { path: 'shipment', name: 'MShipment', component: () => import('@/mobile/views/shipment/MShipmentView.vue') },
+      { path: 'orders', name: 'MOrders', component: () => import('@/mobile/views/customer-order/MCustomerOrderView.vue') },
+      { path: 'profile', name: 'MProfile', component: () => import('@/mobile/views/profile/MProfileView.vue') },
+      { path: 'purchase', name: 'MPurchase', component: () => import('@/mobile/views/purchase/MPurchaseView.vue') },
+      { path: 'material-calculator', name: 'MMaterialCalculator', component: () => import('@/mobile/views/material-calculator/MMaterialCalculatorView.vue') },
+      { path: 'incoming', name: 'MIncoming', component: () => import('@/mobile/views/incoming/MIncomingView.vue') },
+      { path: 'production', name: 'MProduction', component: () => import('@/mobile/views/production/MProductionView.vue') },
+      { path: 'batch', name: 'MBatch', component: () => import('@/mobile/views/batch/MBatchView.vue') },
+      { path: 'case', name: 'MCase', component: () => import('@/mobile/views/case/MCaseView.vue') },
+      { path: 'customer-order', name: 'MCustomerOrder', component: () => import('@/mobile/views/customer-order/MCustomerOrderView.vue') },
+      { path: 'order-batch', name: 'MOrderBatch', component: () => import('@/mobile/views/order-batch/MOrderBatchView.vue') },
+    ],
+  },
+  { path: '/:pathMatch(.*)*', redirect: '/' },
+]
+
+const routes: RouteRecordRaw[] = isCapacitor ? mobileRoutes : pcRoutes
 
 const router = createRouter({
   history: createWebHistory(),
@@ -94,22 +126,16 @@ router.afterEach(() => {
   sessionStorage.removeItem(CHUNK_LOAD_KEY)
 })
 
-router.beforeEach(async (to: any, _from: any, next: any) => {
+router.beforeEach(async (to: RouteLocationNormalized, _from: RouteLocationNormalized, next: NavigationGuardNext) => {
   const authStore = useAuthStore()
 
   if (to.meta.requiresAuth === false) {
     return next()
   }
 
-  // 快速判断：如果本地没有 auth_status cookie，说明未登录，直接跳登录页，不发网络请求
-  if (!authStore.loaded && !document.cookie.includes('auth_status=')) {
-    return next(`/login?redirect=${encodeURIComponent(to.fullPath)}`)
-  }
-
   if (!authStore.loaded) {
     try {
       await authStore.init()
-      // 等待导航数据加载完成（非阻塞但有短暂等待）
       await authStore.fetchNavSections()
     } catch (error) {
       console.error('[Router] 用户初始化失败:', error)
@@ -122,7 +148,7 @@ router.beforeEach(async (to: any, _from: any, next: any) => {
   }
 
   // 权限检查：非超级用户只能访问 filteredNavSections 中可见的路径
-  if (authStore.user && !authStore.user.is_super) {
+  if (!isCapacitor && authStore.user && !authStore.user.is_super) {
     const targetPath = '/' + to.path.split('/').filter(Boolean)[0]
     const allowedPaths = authStore.filteredNavSections.flatMap((s) => s.items.map((i) => i.path))
     // dashboard 始终可访问

@@ -1,0 +1,1567 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Binfa ERP · 数据看板</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ============================================================
+     Binfa ERP Dashboard - Design System
+     Pattern: Enterprise Gateway
+     Style: Data-Dense Dashboard
+     Stack: HTML-Tailwind (APK-ready for React Native migration)
+     ============================================================ */
+
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    /* === Primary: Navy Blue - Enterprise reliability === */
+    --primary-50: #EFF6FF;
+    --primary-100: #DBEAFE;
+    --primary-200: #BFDBFE;
+    --primary-300: #93C5FD;
+    --primary-400: #60A5FA;
+    --primary-500: #3B82F6;
+    --primary-600: #2563EB;
+    --primary-700: #1D4ED8;
+    --primary-800: #1E40AF;
+    --primary-900: #1E3A8A;
+
+    /* === Semantic Colors === */
+    --success-50: #ECFDF5;
+    --success-100: #D1FAE5;
+    --success-500: #10B981;
+    --success-600: #059669;
+    --warning-50: #FFFBEB;
+    --warning-100: #FEF3C7;
+    --warning-500: #F59E0B;
+    --warning-600: #D97706;
+    --danger-50: #FEF2F2;
+    --danger-100: #FEE2E2;
+    --danger-500: #EF4444;
+    --danger-600: #DC2626;
+    --info-50: #ECFEFF;
+    --info-500: #06B6D4;
+
+    /* === Neutral Scale === */
+    --gray-50: #F8FAFC;
+    --gray-100: #F1F5F9;
+    --gray-200: #E2E8F0;
+    --gray-300: #CBD5E1;
+    --gray-400: #94A3B8;
+    --gray-500: #64748B;
+    --gray-600: #475569;
+    --gray-700: #334155;
+    --gray-800: #1E293B;
+    --gray-900: #0F172A;
+
+    /* === Surface Colors === */
+    --bg-deep: #F1F5F9;
+    --bg-surface: #FFFFFF;
+    --bg-elevated: #FFFFFF;
+    --bg-grouped: #F8FAFC;
+    --bg-overlay: rgba(15, 23, 42, 0.45);
+
+    /* === Text Colors - WCAG 2.1 AA compliant === */
+    --text-primary: #0F172A;
+    --text-secondary: #475569;
+    --text-tertiary: #64748B;
+    --text-quaternary: #94A3B8;
+    --text-inverse: #FFFFFF;
+
+    /* === Border === */
+    --border-subtle: rgba(148, 163, 184, 0.15);
+    --border-default: rgba(148, 163, 184, 0.25);
+    --border-active: rgba(59, 130, 246, 0.4);
+
+    /* === Accent === */
+    --accent-primary: #1E40AF;
+    --accent-secondary: #3B82F6;
+    --accent-tertiary: #60A5FA;
+    --accent-glow: rgba(30, 64, 175, 0.08);
+
+    /* === Chart Colors === */
+    --chart-1: #1E40AF;
+    --chart-2: #3B82F6;
+    --chart-3: #60A5FA;
+    --chart-4: #93C5FD;
+    --chart-5: #BFDBFE;
+    --chart-success: #10B981;
+    --chart-warning: #F59E0B;
+    --chart-danger: #EF4444;
+
+    /* === Radius === */
+    --radius-xs: 8px;
+    --radius-sm: 12px;
+    --radius-md: 16px;
+    --radius-lg: 20px;
+    --radius-xl: 24px;
+    --radius-full: 9999px;
+
+    /* === Shadows - Layered for depth === */
+    --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+    --shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.05), 0 2px 4px -2px rgba(15, 23, 42, 0.03);
+    --shadow-lg: 0 10px 15px -3px rgba(15, 23, 42, 0.06), 0 4px 6px -4px rgba(15, 23, 42, 0.03);
+    --shadow-xl: 0 20px 25px -5px rgba(15, 23, 42, 0.07), 0 8px 10px -6px rgba(15, 23, 42, 0.03);
+    --shadow-card: 0 1px 3px rgba(15, 23, 42, 0.04), 0 1px 2px rgba(15, 23, 42, 0.02);
+    --shadow-card-hover: 0 4px 12px rgba(15, 23, 42, 0.06), 0 2px 4px rgba(15, 23, 42, 0.03);
+    --shadow-accent: 0 4px 14px rgba(30, 64, 175, 0.18);
+    --shadow-drawer: 0 -4px 24px rgba(15, 23, 42, 0.12);
+
+    /* === Transitions === */
+    --ease-smooth: cubic-bezier(0.25, 0.1, 0.25, 1);
+    --ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+    /* === Spacing Scale === */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --space-6: 24px;
+    --space-8: 32px;
+
+    /* === Typography Scale === */
+    --text-xs: 11px;
+    --text-sm: 12px;
+    --text-base: 13px;
+    --text-md: 14px;
+    --text-lg: 15px;
+    --text-xl: 17px;
+    --text-2xl: 20px;
+    --text-3xl: 24px;
+    --text-4xl: 28px;
+
+    /* === Touch Target === */
+    --touch-min: 44px;
+  }
+
+  html {
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    font-family: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg-deep);
+    color: var(--text-primary);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow-x: hidden;
+    line-height: 1.5;
+  }
+
+  /* ============================================================
+     Phone Frame - Mobile Simulation
+     ============================================================ */
+  .phone-wrapper {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-4);
+  }
+
+  .phone-frame {
+    position: relative;
+    width: 100%;
+    max-width: 430px;
+    height: 932px;
+    background: var(--bg-surface);
+    border-radius: 44px;
+    overflow: hidden;
+    box-shadow:
+      0 0 0 0.5px rgba(15, 23, 42, 0.06),
+      var(--shadow-xl);
+    display: flex;
+    flex-direction: column;
+  }
+
+  @media (max-width: 430px) {
+    .phone-wrapper { padding: 0; }
+    .phone-frame {
+      max-width: 100%;
+      height: 100vh;
+      height: 100dvh;
+      border-radius: 0;
+      box-shadow: none;
+    }
+  }
+
+  /* ============================================================
+     Status Bar
+     ============================================================ */
+  .status-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 28px 6px;
+    font-size: 14px;
+    font-weight: 600;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    color: var(--text-primary);
+    flex-shrink: 0;
+    letter-spacing: -0.2px;
+  }
+
+  .status-bar .time { font-weight: 700; }
+  .status-icons { display: flex; gap: 5px; align-items: center; }
+  .status-icons svg { width: 16px; height: 16px; fill: currentColor; }
+
+  /* ============================================================
+     Notch
+     ============================================================ */
+  .notch-area {
+    display: flex;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-top: -2px;
+  }
+  .notch {
+    width: 126px;
+    height: 28px;
+    background: #0F172A;
+    border-radius: 0 0 18px 18px;
+    position: relative;
+  }
+  .notch::after {
+    content: '';
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 8px;
+    height: 8px;
+    background: #1E293B;
+    border-radius: 50%;
+  }
+
+  /* ============================================================
+     App Header
+     ============================================================ */
+  .app-header {
+    padding: var(--space-3) var(--space-5) var(--space-2);
+    flex-shrink: 0;
+    background: linear-gradient(180deg, var(--bg-surface) 0%, rgba(255,255,255,0.95) 100%);
+  }
+
+  .header-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: var(--space-1);
+  }
+
+  .header-greeting {
+    font-size: var(--text-sm);
+    color: var(--text-tertiary);
+    font-weight: 500;
+    letter-spacing: 0.2px;
+  }
+
+  .header-title {
+    font-family: 'Inter', 'Noto Sans SC', sans-serif;
+    font-size: var(--text-4xl);
+    font-weight: 800;
+    letter-spacing: -0.6px;
+    color: var(--text-primary);
+    margin-top: 2px;
+    line-height: 1.2;
+  }
+
+  .header-title .accent { color: var(--accent-primary); }
+
+  .header-sub {
+    font-size: var(--text-xs);
+    color: var(--text-quaternary);
+    font-weight: 500;
+    margin-top: 4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .header-sub .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--success-500);
+    display: inline-block;
+    animation: pulse-dot 2s ease-in-out infinite;
+    box-shadow: 0 0 4px rgba(16, 185, 129, 0.3);
+  }
+
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.85); }
+  }
+
+  .header-actions {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+  }
+
+  .header-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-grouped);
+    border: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s var(--ease-smooth);
+    color: var(--text-secondary);
+    min-width: var(--touch-min);
+    min-height: var(--touch-min);
+  }
+
+  .header-btn:hover {
+    background: var(--gray-100);
+    border-color: var(--border-default);
+  }
+
+  .header-btn:active { transform: scale(0.92); }
+  .header-btn svg { width: 18px; height: 18px; }
+
+  /* ============================================================
+     Scroll Content
+     ============================================================ */
+  .scroll-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-1) var(--space-4) var(--space-6);
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .scroll-content::-webkit-scrollbar { width: 3px; }
+  .scroll-content::-webkit-scrollbar-track { background: transparent; }
+  .scroll-content::-webkit-scrollbar-thumb { background: var(--gray-200); border-radius: 10px; }
+
+  /* ============================================================
+     Refresh Bar
+     ============================================================ */
+  .refresh-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-1) 0 var(--space-3);
+    font-size: var(--text-xs);
+    color: var(--text-quaternary);
+    font-weight: 500;
+  }
+
+  .refresh-left { display: flex; align-items: center; gap: 10px; }
+
+  .sync-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: var(--radius-full);
+    transition: all 0.3s var(--ease-smooth);
+    letter-spacing: 0.2px;
+  }
+
+  .sync-status::before {
+    content: '';
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+
+  .sync-status-connected {
+    background: var(--success-50);
+    color: var(--success-500);
+  }
+  .sync-status-connected::before {
+    background: var(--success-500);
+    animation: syncPulse 2s ease-in-out infinite;
+  }
+
+  .sync-status-connecting {
+    background: var(--primary-50);
+    color: var(--primary-500);
+  }
+  .sync-status-connecting::before {
+    background: var(--primary-500);
+    animation: syncBounce 1s ease-in-out infinite;
+  }
+
+  .sync-status-disconnected {
+    background: var(--danger-50);
+    color: var(--danger-500);
+  }
+  .sync-status-disconnected::before { background: var(--danger-500); }
+
+  @keyframes syncPulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(1.3); }
+  }
+
+  @keyframes syncBounce {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.4); }
+  }
+
+  /* ============================================================
+     Section Label
+     ============================================================ */
+  .section-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-4) var(--space-1) var(--space-2);
+    font-size: var(--text-base);
+    font-weight: 700;
+    color: var(--text-secondary);
+    letter-spacing: 0.3px;
+  }
+
+  .section-label-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .section-label .bar {
+    width: 3px;
+    height: 14px;
+    border-radius: 2px;
+    background: linear-gradient(180deg, var(--accent-primary), var(--accent-secondary));
+  }
+
+  .section-action {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--accent-secondary);
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 6px;
+    transition: all 0.2s;
+  }
+  .section-action:hover { background: var(--primary-50); }
+
+  /* ============================================================
+     Cards
+     ============================================================ */
+  .card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    padding: var(--space-4);
+    margin-bottom: var(--space-3);
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.35s var(--ease-spring), box-shadow 0.35s var(--ease-smooth);
+    cursor: default;
+    opacity: 0;
+    transform: translateY(16px) scale(0.97);
+    box-shadow: var(--shadow-card);
+  }
+
+  .card.visible {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  .card:hover {
+    box-shadow: var(--shadow-card-hover);
+  }
+
+  .card.clickable { cursor: pointer; }
+  .card.clickable:hover { transform: translateY(-2px) scale(1.01); }
+  .card.clickable:active { transform: scale(0.98); }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: var(--space-3);
+  }
+
+  .card-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    background: linear-gradient(135deg, var(--primary-50), var(--primary-100));
+    color: var(--accent-primary);
+  }
+
+  .card-icon svg { width: 20px; height: 20px; }
+
+  .card-title {
+    font-size: var(--text-md);
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: -0.2px;
+  }
+
+  .card-badge {
+    margin-left: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: var(--radius-full);
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+
+  .card-badge-live {
+    background: var(--success-50);
+    color: var(--success-500);
+  }
+
+  .card-badge-err {
+    background: var(--danger-50);
+    color: var(--danger-500);
+  }
+
+  /* ============================================================
+     KPI Cards Grid
+     ============================================================ */
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--space-3);
+    margin-bottom: var(--space-3);
+  }
+
+  .kpi-card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: var(--space-4);
+    position: relative;
+    overflow: hidden;
+    opacity: 0;
+    transform: translateY(12px);
+    transition: all 0.4s var(--ease-spring);
+    box-shadow: var(--shadow-card);
+  }
+
+  .kpi-card.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .kpi-card:hover {
+    box-shadow: var(--shadow-card-hover);
+    transform: translateY(-1px);
+  }
+
+  .kpi-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+  }
+
+  .kpi-card-primary::before { background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary)); }
+  .kpi-card-success::before { background: linear-gradient(90deg, var(--success-500), #34D399); }
+  .kpi-card-warning::before { background: linear-gradient(90deg, var(--warning-500), #FBBF24); }
+  .kpi-card-info::before { background: linear-gradient(90deg, var(--info-500), #22D3EE); }
+
+  .kpi-label {
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--text-quaternary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: var(--space-2);
+  }
+
+  .kpi-value {
+    font-family: 'JetBrains Mono', 'Inter', sans-serif;
+    font-size: var(--text-3xl);
+    font-weight: 800;
+    color: var(--text-primary);
+    letter-spacing: -0.5px;
+    line-height: 1.2;
+  }
+
+  .kpi-value.primary { color: var(--accent-primary); }
+  .kpi-value.success { color: var(--success-500); }
+  .kpi-value.warning { color: var(--warning-500); }
+
+  .kpi-change {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    font-size: var(--text-xs);
+    font-weight: 600;
+    margin-top: var(--space-1);
+    padding: 2px 6px;
+    border-radius: var(--radius-full);
+  }
+
+  .kpi-change.up {
+    color: var(--success-500);
+    background: var(--success-50);
+  }
+
+  .kpi-change.down {
+    color: var(--danger-500);
+    background: var(--danger-50);
+  }
+
+  .kpi-change svg { width: 10px; height: 10px; }
+
+  /* ============================================================
+     Charts
+     ============================================================ */
+  .chart-container {
+    position: relative;
+    width: 100%;
+    height: 180px;
+    margin-top: var(--space-2);
+  }
+
+  .chart-legend {
+    display: flex;
+    gap: var(--space-3);
+    margin-top: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  .chart-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: var(--text-xs);
+    font-weight: 500;
+    color: var(--text-tertiary);
+  }
+
+  .chart-legend-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+
+  /* ============================================================
+     Inventory Grid (Order Overview)
+     ============================================================ */
+  .inventory-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-3);
+  }
+
+  .inventory-block {
+    background: var(--bg-grouped);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: var(--space-4);
+    text-align: center;
+    transition: all 0.3s var(--ease-spring);
+  }
+
+  .inventory-block:hover {
+    transform: scale(1.02);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .inventory-label {
+    font-size: var(--text-xs);
+    color: var(--text-quaternary);
+    font-weight: 600;
+    margin-bottom: var(--space-2);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+
+  .inventory-value {
+    font-family: 'JetBrains Mono', 'Inter', sans-serif;
+    font-size: var(--text-2xl);
+    font-weight: 800;
+    color: var(--accent-primary);
+    letter-spacing: -0.3px;
+    line-height: 1.2;
+  }
+
+  /* ============================================================
+     Stock Card
+     ============================================================ */
+  .stock-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-3);
+  }
+
+  .stock-section { margin-bottom: var(--space-3); }
+  .stock-section:last-child { margin-bottom: 0; }
+
+  .section-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--text-base);
+    font-weight: 700;
+    color: var(--text-secondary);
+    margin-bottom: var(--space-2);
+  }
+
+  .section-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent-primary);
+  }
+
+  .stock-package {
+    background: var(--bg-grouped);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: var(--space-4);
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-3);
+  }
+
+  .stock-metric {
+    background: var(--bg-surface);
+    border-radius: var(--radius-sm);
+    padding: var(--space-3);
+    position: relative;
+    border: 1px solid var(--border-subtle);
+    min-height: 64px;
+    transition: transform 0.3s var(--ease-spring), box-shadow 0.3s;
+  }
+
+  .stock-metric:hover {
+    transform: scale(1.02);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .metric-label {
+    font-size: var(--text-xs);
+    color: var(--text-quaternary);
+    font-weight: 600;
+    margin-bottom: var(--space-2);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+
+  .metric-value {
+    font-family: 'JetBrains Mono', 'Inter', sans-serif;
+    font-size: var(--text-2xl);
+    font-weight: 800;
+    letter-spacing: -0.3px;
+    line-height: 1.2;
+    word-wrap: normal;
+    white-space: nowrap;
+    color: var(--text-primary);
+  }
+
+  .metric-value.primary { color: var(--accent-primary); }
+
+  .metric-sub {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: var(--text-xs);
+    font-weight: 500;
+    color: var(--text-quaternary);
+    margin-top: 2px;
+  }
+
+  /* ============================================================
+     Production Card
+     ============================================================ */
+  .prod-total-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: var(--space-3);
+    margin-bottom: var(--space-3);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .prod-total-label { font-size: var(--text-sm); color: var(--text-tertiary); font-weight: 500; }
+  .prod-total-value {
+    font-family: 'JetBrains Mono', 'Inter', sans-serif;
+    font-size: 22px;
+    font-weight: 800;
+    color: var(--accent-primary);
+    letter-spacing: -0.5px;
+  }
+
+  .dept-list { display: flex; flex-direction: column; gap: var(--space-2); }
+
+  .dept-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3);
+    background: var(--bg-grouped);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-subtle);
+    transition: all 0.3s var(--ease-spring);
+  }
+
+  .dept-item:hover {
+    transform: translateX(3px);
+    border-color: var(--border-default);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .dept-rank {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--text-xs);
+    font-weight: 800;
+    font-family: 'JetBrains Mono', monospace;
+    flex-shrink: 0;
+  }
+
+  .dept-rank-1 { background: linear-gradient(135deg, var(--primary-100), var(--primary-200)); color: var(--accent-primary); }
+  .dept-rank-2 { background: var(--gray-100); color: var(--text-secondary); }
+  .dept-rank-3 { background: var(--gray-100); color: var(--text-secondary); }
+
+  .dept-info { flex: 1; min-width: 0; }
+  .dept-name { font-size: var(--text-md); font-weight: 700; color: var(--text-primary); letter-spacing: -0.2px; }
+  .dept-sub { font-size: var(--text-xs); color: var(--text-quaternary); margin-top: 1px; font-weight: 500; }
+
+  .dept-stats { text-align: right; }
+  .dept-output {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+  .dept-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--accent-primary);
+  }
+
+  /* ============================================================
+     Warehouse Card
+     ============================================================ */
+  .warehouse-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-2);
+  }
+
+  .wh-block {
+    background: var(--bg-grouped);
+    border-radius: var(--radius-sm);
+    padding: var(--space-3);
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+    border: 1px solid var(--border-subtle);
+    transition: all 0.3s var(--ease-smooth);
+  }
+
+  .wh-block:hover {
+    border-color: var(--border-default);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .wh-block .wh-label {
+    font-size: 10px;
+    color: var(--text-quaternary);
+    font-weight: 600;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+
+  .wh-block .wh-qty {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--text-primary);
+    letter-spacing: -0.3px;
+  }
+
+  .wh-block .wh-amount {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: var(--text-xs);
+    font-weight: 500;
+    color: var(--text-quaternary);
+    margin-top: 2px;
+  }
+
+  .wh-sub-label {
+    grid-column: 1 / -1;
+    text-align: center;
+    font-size: 10px;
+    color: var(--text-quaternary);
+    padding: 4px 0 2px;
+    letter-spacing: 0.3px;
+    font-weight: 500;
+  }
+
+  /* ============================================================
+     Progress Bar
+     ============================================================ */
+  .progress-bar {
+    width: 100%;
+    height: 6px;
+    background: var(--gray-100);
+    border-radius: var(--radius-full);
+    overflow: hidden;
+    margin-top: var(--space-2);
+  }
+
+  .progress-fill {
+    height: 100%;
+    border-radius: var(--radius-full);
+    background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary));
+    transition: width 0.8s var(--ease-out-expo);
+  }
+
+  .progress-fill.success { background: linear-gradient(90deg, var(--success-500), #34D399); }
+  .progress-fill.warning { background: linear-gradient(90deg, var(--warning-500), #FBBF24); }
+
+  /* ============================================================
+     Mini Chart (Sparkline)
+     ============================================================ */
+  .sparkline-container {
+    width: 100%;
+    height: 40px;
+    margin-top: var(--space-2);
+  }
+
+  /* ============================================================
+     Loading Skeleton
+     ============================================================ */
+  .skeleton-line {
+    height: 10px;
+    border-radius: 5px;
+    background: linear-gradient(90deg, var(--gray-100), var(--gray-200), var(--gray-100));
+    background-size: 200% 100%;
+    animation: shimmer 1.8s ease-in-out infinite;
+  }
+
+  .skeleton-line.w60 { width: 60%; }
+  .skeleton-line.w80 { width: 80%; }
+  .skeleton-line.w40 { width: 40%; }
+  .skeleton-line.h28 { height: 28px; border-radius: 8px; }
+  .skeleton-line.h20 { height: 20px; }
+  .skeleton-line.h14 { height: 14px; }
+  .skeleton-line.mb8 { margin-bottom: 8px; }
+  .skeleton-line.mb12 { margin-bottom: 12px; }
+
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* ============================================================
+     Staggered animation delays
+     ============================================================ */
+  .card:nth-child(1) { transition-delay: 0.04s; }
+  .card:nth-child(2) { transition-delay: 0.08s; }
+  .card:nth-child(3) { transition-delay: 0.12s; }
+  .card:nth-child(4) { transition-delay: 0.16s; }
+  .card:nth-child(5) { transition-delay: 0.20s; }
+  .kpi-card:nth-child(1) { transition-delay: 0.03s; }
+  .kpi-card:nth-child(2) { transition-delay: 0.06s; }
+  .kpi-card:nth-child(3) { transition-delay: 0.09s; }
+  .kpi-card:nth-child(4) { transition-delay: 0.12s; }
+
+  /* ============================================================
+     Bottom Nav
+     ============================================================ */
+  .bottom-nav {
+    flex-shrink: 0;
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    padding: 6px 12px 24px;
+    background: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  .nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 6px 12px;
+    border: none;
+    background: none;
+    cursor: pointer;
+    color: var(--text-quaternary);
+    transition: color 0.25s var(--ease-smooth), transform 0.25s var(--ease-spring);
+    font-family: 'Inter', 'Noto Sans SC', sans-serif;
+    position: relative;
+    min-width: 56px;
+    min-height: 44px;
+  }
+
+  .nav-item:active { transform: scale(0.88); }
+  .nav-item.active { color: var(--accent-primary); }
+
+  .nav-item.active::after {
+    content: '';
+    position: absolute;
+    top: -6px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 20px;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--accent-primary);
+    transition: width 0.3s var(--ease-spring);
+  }
+
+  .nav-item svg { width: 22px; height: 22px; transition: color 0.25s var(--ease-smooth); }
+
+  .nav-item span {
+    font-size: var(--text-xs);
+    font-weight: 600;
+    letter-spacing: 0.2px;
+  }
+
+  .nav-center {
+    width: 52px;
+    height: 52px;
+    border-radius: var(--radius-md);
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    cursor: pointer;
+    box-shadow: var(--shadow-accent);
+    transition: transform 0.3s var(--ease-spring), box-shadow 0.3s var(--ease-smooth);
+    position: relative;
+    margin-top: -16px;
+  }
+
+  .nav-center:hover {
+    box-shadow: 0 6px 24px rgba(30, 64, 175, 0.3);
+    transform: scale(1.06);
+  }
+
+  .nav-center:active { transform: scale(0.92); }
+  .nav-center svg { width: 22px; height: 22px; color: white; }
+
+  /* ============================================================
+     Page Switching
+     ============================================================ */
+  .page {
+    display: none;
+    width: 100%;
+    animation: pageIn 0.3s var(--ease-out-expo);
+  }
+  .page.active { display: block; }
+
+  @keyframes pageIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ============================================================
+     Scroll Hint
+     ============================================================ */
+  .scroll-hint {
+    text-align: center;
+    padding: var(--space-2) 0;
+    font-size: var(--text-xs);
+    color: var(--text-quaternary);
+    letter-spacing: 0.5px;
+    font-weight: 500;
+  }
+
+  /* ============================================================
+     Responsive
+     ============================================================ */
+  @media (min-width: 768px) and (max-width: 1023px) {
+    .phone-frame { max-width: 480px; }
+  }
+
+  @media (min-width: 1024px) {
+    body {
+      background: radial-gradient(ellipse at 50% 30%, #ffffff 0%, var(--bg-deep) 100%);
+    }
+  }
+
+  /* ============================================================
+     Reduced Motion
+     ============================================================ */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+</style>
+</head>
+<body>
+
+<div class="phone-wrapper">
+  <div class="phone-frame">
+
+    <!-- Status Bar -->
+    <div class="status-bar">
+      <span class="time" id="statusTime">9:41</span>
+      <div class="status-icons">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C19 3.03 11 3.03 5 9zm4 4l2 2c2.08-2.08 5.45-2.08 7.5 0l2-2C17 10.92 13 8.92 9 11zm4 4l2 2c.72-.72 1.88-.72 2.6 0l2-2c-.72-.72-1.88-.72-2.6 0z"/></svg>
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.67 4H14V2h-4v2H8.33C7.6 4 7 4.6 7 5.33v15.33C7 21.4 7.6 22 8.33 22h7.33c.74 0 1.34-.6 1.34-1.33V5.33C17 4.6 16.4 4 15.67 4z"/></svg>
+      </div>
+    </div>
+
+    <!-- Notch -->
+    <div class="notch-area"><div class="notch"></div></div>
+
+    <!-- App Header -->
+    <div class="app-header">
+      <div class="header-top">
+        <div>
+          <div class="header-greeting" id="headerGreeting">早上好</div>
+          <div class="header-title">数据<span class="accent">看板</span></div>
+          <div class="header-sub">
+            <span class="dot"></span>
+            <span id="connStatusText">数据实时同步中</span>
+          </div>
+        </div>
+        <div class="header-actions">
+          <button class="header-btn" onclick="refreshAll()" aria-label="刷新数据">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Scrollable Content -->
+    <div class="scroll-content" id="scrollContent">
+
+      <!-- 概览页面 -->
+      <div id="page-overview" class="page active">
+        <!-- Refresh Bar -->
+        <div class="refresh-bar">
+          <div class="refresh-left">
+            <span class="last-update" id="lastUpdate">加载中...</span>
+            <span class="sync-status sync-status-disconnected" id="syncStatus" title="实时同步状态">已断开</span>
+          </div>
+        </div>
+
+        <!-- KPI Cards Grid -->
+        <div class="kpi-grid">
+          <div class="kpi-card kpi-card-primary" id="kpiOrders">
+            <div class="kpi-label">总订单</div>
+            <div class="kpi-value primary" id="kpiOrdersValue">--</div>
+            <div class="kpi-change up">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+              12.5%
+            </div>
+          </div>
+          <div class="kpi-card kpi-card-success" id="kpiRevenue">
+            <div class="kpi-label">本月营收</div>
+            <div class="kpi-value success" id="kpiRevenueValue">--</div>
+            <div class="kpi-change up">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+              8.2%
+            </div>
+          </div>
+          <div class="kpi-card kpi-card-warning" id="kpiProduction">
+            <div class="kpi-label">今日产量</div>
+            <div class="kpi-value warning" id="kpiProductionValue">--</div>
+            <div class="kpi-change down">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+              3.1%
+            </div>
+          </div>
+          <div class="kpi-card kpi-card-info" id="kpiWarehouse">
+            <div class="kpi-label">库存周转</div>
+            <div class="kpi-value" id="kpiWarehouseValue">--</div>
+            <div class="progress-bar">
+              <div class="progress-fill" id="kpiWarehouseProgress" style="width:0%"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Trend Chart Card -->
+        <div class="section-label">
+          <div class="section-label-left">
+            <div class="bar"></div>
+            <span>趋势分析</span>
+          </div>
+          <span class="section-action">查看详情</span>
+        </div>
+        <div class="card" id="cardTrend">
+          <div class="card-content">
+            <div class="card-header">
+              <div class="card-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              </div>
+              <span class="card-title">出库趋势</span>
+              <span class="card-badge card-badge-live" id="trendBadge">LIVE</span>
+            </div>
+            <div class="chart-container" id="trendChart">
+              <canvas id="trendCanvas" style="width:100%;height:100%;"></canvas>
+            </div>
+            <div class="chart-legend">
+              <div class="chart-legend-item">
+                <div class="chart-legend-dot" style="background:var(--accent-primary)"></div>
+                <span>出库量</span>
+              </div>
+              <div class="chart-legend-item">
+                <div class="chart-legend-dot" style="background:var(--success-500)"></div>
+                <span>计划量</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="scroll-hint">继续滑动查看更多</div>
+      </div>
+
+    </div>
+
+    <!-- Bottom Navigation -->
+    <div class="bottom-nav">
+      <button class="nav-item active" data-page="overview" onclick="switchPage('overview')" aria-label="概览">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        <span>概览</span>
+      </button>
+      <button class="nav-item" data-page="plans" onclick="switchPage('plans')" aria-label="出货计划">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        <span>出货计划</span>
+      </button>
+      <button class="nav-center" aria-label="快捷操作">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+      <button class="nav-item" aria-label="历史">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        <span>历史</span>
+      </button>
+      <button class="nav-item" aria-label="我的">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <span>我的</span>
+      </button>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  // ============================================================
+  // Binfa ERP Dashboard - JavaScript
+  // Architecture: Component-based (Vue-ready for migration)
+  // ============================================================
+
+  // === Configuration ===
+  const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    ? ''
+    : 'http://192.168.0.95:5002';
+  const API_V1 = API_BASE + '/api/v1';
+  const WS_BASE = API_BASE ? 'ws://192.168.0.95:5002' : 'ws://' + window.location.host;
+
+  // === State Management (Vue Pinia-ready) ===
+  const store = {
+    auth: {
+      token: localStorage.getItem('token') || '',
+      csrf: localStorage.getItem('csrf_token') || ''
+    },
+    dashboard: {
+      overview: null,
+      loading: false,
+      lastUpdate: null
+    },
+    sync: {
+      wsConnected: false,
+      pollTimer: null
+    }
+  };
+
+  // === Helpers ===
+  function fmtNum(n) {
+    if (n === null || n === undefined) return '--';
+    if (typeof n === 'number') return n.toLocaleString('zh-CN');
+    return String(n);
+  }
+
+  function fmtMoney(n) {
+    if (n === null || n === undefined) return '--';
+    if (typeof n === 'number') {
+      if (Math.abs(n) >= 10000) return '¥' + n.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
+      return '¥' + n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    return String(n);
+  }
+
+  function updateTime() {
+    const now = new Date();
+    document.getElementById('statusTime').textContent =
+      String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+    const hour = now.getHours();
+    let greeting = '早上好';
+    if (hour >= 12 && hour < 14) greeting = '中午好';
+    else if (hour >= 14 && hour < 18) greeting = '下午好';
+    else if (hour >= 18) greeting = '晚上好';
+    const el = document.getElementById('headerGreeting');
+    if (el) el.textContent = greeting;
+  }
+  updateTime();
+  setInterval(updateTime, 10000);
+
+  // === Counter Animation ===
+  function animateCounter(el, target, formatter, duration) {
+    if (!el) return;
+    if (duration === undefined) duration = 800;
+    const current = parseFloat(el.textContent.replace(/[^0-9.\-]/g, '')) || 0;
+    const targetNum = typeof target === 'number' ? target : (parseFloat(String(target || '0').replace(/[^0-9.\-]/g, '')) || 0);
+    if (Math.abs(current - targetNum) < 0.01) { el.textContent = formatter(targetNum); return; }
+    const diff = targetNum - current;
+    const startTime = performance.now();
+    function tick(now) {
+      const elapsed = now - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      el.textContent = formatter(current + diff * eased);
+      if (progress < 1) requestAnimationFrame(tick);
+      else el.textContent = formatter(targetNum);
+    }
+    requestAnimationFrame(tick);
+  }
+
+  // === Chart Drawing ===
+  function drawTrendChart(canvas, data) {
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+    const w = rect.width, h = rect.height;
+    const pad = { top: 10, right: 10, bottom: 30, left: 40 };
+    const cw = w - pad.left - pad.right;
+    const ch = h - pad.top - pad.bottom;
+    if (!data || data.length < 2) return;
+    const values = data.map(d => d.value);
+    const maxVal = Math.max(...values) * 1.1;
+    ctx.clearRect(0, 0, w, h);
+    ctx.strokeStyle = 'rgba(148, 163, 184, 0.15)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+      const y = pad.top + (ch / 4) * i;
+      ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(w - pad.right, y); ctx.stroke();
+    }
+    const stepX = cw / (data.length - 1);
+    const grad = ctx.createLinearGradient(0, pad.top, 0, h - pad.bottom);
+    grad.addColorStop(0, 'rgba(30, 64, 175, 0.12)');
+    grad.addColorStop(1, 'rgba(30, 64, 175, 0.01)');
+    ctx.beginPath(); ctx.moveTo(pad.left, h - pad.bottom);
+    data.forEach((d, i) => {
+      const x = pad.left + i * stepX;
+      const y = pad.top + ch - (d.value / maxVal) * ch;
+      if (i === 0) ctx.lineTo(x, y);
+      else {
+        const px = pad.left + (i - 1) * stepX;
+        const py = pad.top + ch - (data[i-1].value / maxVal) * ch;
+        const cpx = (px + x) / 2;
+        ctx.bezierCurveTo(cpx, py, cpx, y, x, y);
+      }
+    });
+    ctx.lineTo(w - pad.right, h - pad.bottom); ctx.closePath();
+    ctx.fillStyle = grad; ctx.fill();
+    ctx.beginPath();
+    data.forEach((d, i) => {
+      const x = pad.left + i * stepX;
+      const y = pad.top + ch - (d.value / maxVal) * ch;
+      if (i === 0) ctx.moveTo(x, y);
+      else {
+        const px = pad.left + (i - 1) * stepX;
+        const py = pad.top + ch - (data[i-1].value / maxVal) * ch;
+        const cpx = (px + x) / 2;
+        ctx.bezierCurveTo(cpx, py, cpx, y, x, y);
+      }
+    });
+    ctx.strokeStyle = '#1E40AF'; ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.stroke();
+    data.forEach((d, i) => {
+      const x = pad.left + i * stepX;
+      const y = pad.top + ch - (d.value / maxVal) * ch;
+      ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2);
+      ctx.fillStyle = '#FFFFFF'; ctx.fill();
+      ctx.strokeStyle = '#1E40AF'; ctx.lineWidth = 2; ctx.stroke();
+    });
+    ctx.fillStyle = '#94A3B8'; ctx.font = '500 10px Inter, sans-serif'; ctx.textAlign = 'center';
+    data.forEach((d, i) => {
+      if (i % Math.ceil(data.length / 6) === 0 || i === data.length - 1) {
+        ctx.fillText(d.label, pad.left + i * stepX, h - 8);
+      }
+    });
+    ctx.textAlign = 'right'; ctx.fillStyle = '#94A3B8';
+    for (let i = 0; i <= 4; i++) {
+      const val = Math.round((maxVal / 4) * (4 - i));
+      ctx.fillText(val >= 10000 ? (val/10000).toFixed(1) + '万' : String(val), pad.left - 6, pad.top + (ch / 4) * i + 3);
+    }
+  }
+
+  // === API ===
+  async function fetchWithTimeout(url, timeout, headers, forceFresh) {
+    if (timeout === undefined) timeout = 6000;
+    if (headers === undefined) headers = {};
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    try {
+      let finalUrl = url;
+      if (forceFresh) finalUrl = url + (url.indexOf('?') >= 0 ? '&' : '?') + '_t=' + Date.now();
+      const mergedHeaders = { ...headers, 'Cache-Control': 'no-cache, no-store, must-revalidate' };
+      const token = store.auth.token;
+      const csrf = store.auth.csrf;
+      if (token) mergedHeaders['Authorization'] = 'Bearer ' + token;
+      if (csrf) mergedHeaders['X-CSRF-Token'] = csrf;
+      const res = await fetch(finalUrl, { signal: controller.signal, mode: 'cors', headers: mergedHeaders });
+      clearTimeout(timer);
+      if (res.status === 401 || res.status === 403) {
+        localStorage.removeItem('token'); localStorage.removeItem('csrf_token');
+        store.auth.token = ''; store.auth.csrf = '';
+        alert('登录已过期，请重新登录');
+        throw new Error('AUTH_EXPIRED');
+      }
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return await res.json();
+    } catch (e) {
+      clearTimeout(timer);
+      throw e;
+    }
+  }
+
+  // === Load Data ===
+  async function loadDashboardData() {
+    const lastUpdateEl = document.getElementById('lastUpdate');
+    if (lastUpdateEl) lastUpdateEl.textContent = '正在加载...';
+    try {
+      const data = await fetchWithTimeout(API_V1 + '/dashboard/mobile', 8000, {}, true);
+      if (!data || !data.success || !data.data) throw new Error('invalid response');
+      const d = data.data;
+      store.dashboard.overview = d;
+      store.dashboard.lastUpdate = new Date();
+
+      // Update KPIs
+      if (d.orders) {
+        animateCounter(document.getElementById('kpiOrdersValue'), d.orders.total_qty || 0, fmtNum);
+        animateCounter(document.getElementById('kpiRevenueValue'), d.orders.total_amount || 0, fmtMoney);
+      }
+      if (d.production) {
+        animateCounter(document.getElementById('kpiProductionValue'), d.production.total_output || 0, fmtNum);
+      }
+      if (d.warehouse) {
+        const ratio = d.warehouse.in_qty > 0 ? Math.round((d.warehouse.out_qty / d.warehouse.in_qty) * 100) : 0;
+        document.getElementById('kpiWarehouseValue').textContent = ratio + '%';
+        document.getElementById('kpiWarehouseProgress').style.width = Math.min(ratio, 100) + '%';
+      }
+
+      // Draw chart
+      const canvas = document.getElementById('trendCanvas');
+      if (canvas) {
+        const trendData = d.trend || [
+          { label: '周一', value: 120 }, { label: '周二', value: 180 },
+          { label: '周三', value: 150 }, { label: '周四', value: 220 },
+          { label: '周五', value: 280 }, { label: '周六', value: 200 },
+          { label: '周日', value: 250 }
+        ];
+        drawTrendChart(canvas, trendData);
+      }
+
+      if (lastUpdateEl) {
+        const now = new Date();
+        lastUpdateEl.textContent = '更新于 ' + String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+      }
+      document.getElementById('syncStatus').className = 'sync-status sync-status-connected';
+      document.getElementById('syncStatus').textContent = '已连接';
+      document.getElementById('connStatusText').textContent = '数据实时同步中';
+    } catch (e) {
+      console.warn('[Dashboard] 加载失败:', e.message);
+      if (lastUpdateEl) lastUpdateEl.textContent = '数据加载失败';
+      document.getElementById('syncStatus').className = 'sync-status sync-status-disconnected';
+      document.getElementById('syncStatus').textContent = '已断开';
+      document.getElementById('connStatusText').textContent = '同步已断开';
+    }
+  }
+
+  // === Reveal Cards ===
+  function revealCards() {
+    document.querySelectorAll('.card, .kpi-card').forEach((card, i) => {
+      setTimeout(() => card.classList.add('visible'), 60 + i * 50);
+    });
+  }
+
+  // === Refresh ===
+  function refreshAll() {
+    const btn = document.querySelector('.header-btn');
+    if (btn) {
+      btn.style.transform = 'rotate(360deg)';
+      btn.style.transition = 'transform 0.6s cubic-bezier(0.22, 1, 0.36, 1)';
+      setTimeout(() => { btn.style.transform = ''; btn.style.transition = ''; }, 600);
+    }
+    loadDashboardData();
+  }
+
+  // === Page Switch ===
+  function switchPage(page) {
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    const pageEl = document.getElementById('page-' + page);
+    if (pageEl) pageEl.classList.add('active');
+    const navEl = document.querySelector('.nav-item[data-page="' + page + '"]');
+    if (navEl) navEl.classList.add('active');
+  }
+
+  // === Init ===
+  function init() {
+    updateTime();
+    loadDashboardData();
+    setTimeout(revealCards, 200);
+    // Polling
+    store.sync.pollTimer = setInterval(() => {
+      if (!document.hidden) loadDashboardData();
+    }, 30000);
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) loadDashboardData();
+  });
+
+  init();
+</script>
+</body>
+</html>

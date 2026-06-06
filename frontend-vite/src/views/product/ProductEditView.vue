@@ -5,35 +5,35 @@
         <div class="card-header-elegant">
           <div class="card-header-content">
             <button class="btn-back-elegant" @click="$router.push('/product')">
-              <i class="fas fa-arrow-left"></i>
+              <i class="fas fa-arrow-left" aria-hidden="true"></i>
             </button>
             <h3 class="card-title-elegant">编辑产品</h3>
           </div>
         </div>
         <div class="card-body-elegant">
           <div v-if="loading" class="loading-state">
-            <i class="fas fa-spinner fa-spin"></i> 加载中...
+            <i class="fas fa-spinner fa-spin" aria-hidden="true"></i> 加载中…
           </div>
           <form v-else @submit.prevent="handleSave">
             <div class="form-group-spacious">
               <label class="form-label-elegant">产品名称 <span class="required">*</span></label>
               <div class="input-wrapper">
-                <i class="fas fa-tag input-icon"></i>
-                <input v-model="form.name" type="text" class="form-control-elegant" required placeholder="请输入产品名称" />
+                <i class="fas fa-tag input-icon" aria-hidden="true"></i>
+                <input v-model="form.name" type="text" class="form-control-elegant" required placeholder="请输入产品名称" name="product-name" autocomplete="off" />
               </div>
             </div>
             <div class="form-group-spacious">
               <label class="form-label-elegant">69码/商品条码</label>
               <div class="input-wrapper">
-                <i class="fas fa-barcode input-icon"></i>
-                <input v-model="form.barcode" type="text" class="form-control-elegant" placeholder="例如：6958085574210" />
+                <i class="fas fa-barcode input-icon" aria-hidden="true"></i>
+                <input v-model="form.barcode" type="text" class="form-control-elegant" placeholder="例如：6958085574210" name="barcode" autocomplete="off" />
               </div>
             </div>
             <div class="form-group-spacious">
               <label class="form-label-elegant">产品价格</label>
               <div class="input-wrapper">
-                <i class="fas fa-yen-sign input-icon"></i>
-                <input v-model.number="form.price" type="number" class="form-control-elegant" step="0.01" min="0" placeholder="请输入产品价格" />
+                <i class="fas fa-yen-sign input-icon" aria-hidden="true"></i>
+                <input v-model.number="form.price" type="number" class="form-control-elegant" step="0.01" min="0" placeholder="请输入产品价格" name="price" autocomplete="off" />
               </div>
             </div>
             <div class="form-group-spacious">
@@ -49,22 +49,22 @@
                 <template v-if="form.image">
                   <div class="image-preview-wrapper">
                     <img :src="form.image" alt="预览" class="image-preview-img" @click.stop="openImageModal" />
-                    <button type="button" class="image-remove-btn" @click.stop="form.image = ''"><i class="fas fa-times"></i></button>
+                    <button type="button" class="image-remove-btn" @click.stop="form.image = ''" aria-label="关闭"><i class="fas fa-times" aria-hidden="true"></i></button>
                   </div>
                 </template>
                 <template v-else>
                   <div class="upload-zone-content-elegant">
-                    <i class="fas fa-plus upload-icon-big"></i>
+                    <i class="fas fa-plus upload-icon-big" aria-hidden="true"></i>
                     <p class="upload-text">拖拽图片到这里</p>
                     <p class="upload-subtext">或点击选择图片</p>
                   </div>
                 </template>
-                <input ref="fileInputRef" type="file" style="display: none" accept="image/*" @change="onFileSelect" />
+                <input ref="fileInputRef" type="file" style="display: none" accept="image/*" name="image" @change="onFileSelect" />
               </div>
             </div>
             <div class="form-actions">
               <button type="submit" class="btn-elegant btn-primary-elegant" :disabled="submitting">
-                <i class="fas fa-save me-2"></i>{{ submitting ? '保存中...' : '保存修改' }}
+                <i class="fas fa-save me-2" aria-hidden="true"></i>{{ submitting ? '保存中…' : '保存修改' }}
               </button>
               <button type="button" class="btn-elegant btn-outline-secondary-elegant" @click="$router.push('/product')">取消</button>
             </div>
@@ -79,7 +79,7 @@
         <div class="modal-content-elegant modal-image-dialog">
           <div class="modal-header-elegant">
             <h5 class="modal-title-elegant">产品图片</h5>
-            <button class="btn-close-elegant" @click="imageModalVisible = false"><i class="fas fa-times"></i></button>
+            <button class="btn-close-elegant" @click="imageModalVisible = false" aria-label="关闭"><i class="fas fa-times" aria-hidden="true"></i></button>
           </div>
           <div class="modal-body-elegant">
             <img :src="form.image" class="modal-image-elegant" />
@@ -184,7 +184,7 @@ async function handleSave() {
 /* 返回按钮 */
 .btn-back-elegant {
   width: 44px; height: 44px; border-radius: 12px; border: 2px solid var(--color-slate-200); background: var(--color-slate-50); color: var(--color-slate-500);
-  display: flex; align-items: center; justify-content: center; font-size: 1rem; cursor: pointer; transition: all 0.3s ease;
+  display: flex; align-items: center; justify-content: center; font-size: 1rem; cursor: pointer; transition: background 0.3s ease, color 0.3s ease, transform 0.3s ease;
 }
 .btn-back-elegant:hover { background: var(--color-slate-200); color: var(--color-slate-700); transform: translateY(-1px); }
 
@@ -195,9 +195,9 @@ async function handleSave() {
 .card-elegant {
   background: var(--color-surface-card); border-radius: 20px; border: 1px solid var(--color-slate-200);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  transition: all 0.4s cubic-bezier(0.4,0,0.2,1); overflow: hidden;
+  transition: box-shadow 0.4s cubic-bezier(0.4,0,0.2,1), transform 0.4s cubic-bezier(0.4,0,0.2,1); overflow: hidden;
 }
-.card-elegant:hover { box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12); transform: translateY(-6px); }
+.card-elegant:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.06); transform: translateY(-2px); }
 .card-header-elegant { padding: 1.75rem 2rem; background: transparent; border-bottom: 1px solid var(--color-border-light, #f1f5f9); }
 .card-header-content { display: flex; align-items: center; gap: 0.75rem; }
 .card-title-elegant { font-size: 1.125rem; font-weight: 600; color: var(--color-slate-700); line-height: 1.3; margin: 0; }
@@ -215,14 +215,15 @@ async function handleSave() {
 .input-icon { position: absolute; left: 1rem; top: 50%; transform: translateY(-50%); color: var(--color-slate-400); font-size: 1rem; z-index: 10; }
 .form-control-elegant {
   width: 100%; padding: 0.875rem 1rem 0.875rem 3rem; font-size: 1rem; line-height: 1.5; color: var(--color-slate-700);
-  background: white; border: 2px solid var(--color-slate-200); border-radius: 14px; transition: all 0.3s ease; outline: none;
+  background: white; border: 2px solid var(--color-slate-200); border-radius: 14px; transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease; outline: none;
 }
+.form-control-elegant:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 .form-control-elegant:focus { background: var(--color-surface-card); border-color: var(--color-primary-500); box-shadow: 0 0 0 4px rgba(59,130,246,0.1); }
 
 /* 按钮 */
 .btn-elegant {
   padding: 0.75rem 1.25rem; font-size: 0.9375rem; font-weight: 500; border-radius: 12px; border: 2px solid transparent;
-  transition: all 0.3s ease; display: inline-flex; align-items: center; gap: 0.5rem; cursor: pointer;
+  transition: transform 0.3s ease, box-shadow 0.3s ease; display: inline-flex; align-items: center; gap: 0.5rem; cursor: pointer;
 }
 .btn-elegant:hover { transform: translateY(-1px); }
 .btn-elegant:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
@@ -238,7 +239,7 @@ async function handleSave() {
 /* 上传区 */
 .upload-zone-elegant {
   border: 2px dashed var(--color-slate-300); border-radius: 16px; padding: 2.5rem 1.5rem; text-align: center; background: var(--color-surface-card);
-  cursor: pointer; transition: all 0.3s ease;
+  cursor: pointer; transition: border-color 0.3s ease, background 0.3s ease, transform 0.3s ease;
 }
 .upload-zone-elegant:hover, .upload-zone-elegant:focus-within {
   border-color: var(--color-primary-500); background: linear-gradient(135deg, var(--color-primary-50) 0%, var(--color-slate-50) 100%); transform: translateY(-6px);
@@ -263,7 +264,7 @@ async function handleSave() {
 .modal-image-dialog { max-width: 90vw; width: 800px; }
 .modal-header-elegant { padding: 1.5rem 2rem; background: transparent; border-bottom: 1px solid var(--color-border-light, #f1f5f9); display: flex; justify-content: space-between; align-items: center; }
 .modal-title-elegant { font-size: 1.25rem; font-weight: 600; color: var(--color-slate-700); }
-.btn-close-elegant { width: 40px; height: 40px; border-radius: 10px; border: none; background: var(--color-slate-100); color: var(--color-text-secondary); display: flex; align-items: center; justify-content: center; font-size: 1.25rem; transition: all 0.2s ease; cursor: pointer; }
+.btn-close-elegant { width: 40px; height: 40px; border-radius: 10px; border: none; background: var(--color-slate-100); color: var(--color-text-secondary); display: flex; align-items: center; justify-content: center; font-size: 1.25rem; transition: background 0.2s ease, color 0.2s ease; cursor: pointer; }
 .btn-close-elegant:hover { background: var(--color-slate-200); color: var(--color-slate-700); }
 .modal-body-elegant { padding: 2rem; background: var(--color-slate-50); display: flex; align-items: center; justify-content: center; min-height: 60vh; }
 .modal-image-elegant { max-width: 100%; max-height: 80vh; object-fit: contain; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.15); }

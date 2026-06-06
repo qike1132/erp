@@ -80,6 +80,11 @@ celery_app.conf.update(
     task_send_sent_event=True,          # 发送任务发送事件
     worker_send_task_events=True,       # Worker 发送任务事件
 
+    # 任务失败回调（重试耗尽后触发）
+    task_on_failure=lambda sender, task_id, args, kwargs, retval, exc, traceback, **kw:
+        __import__('fastapi_app.core.task_callbacks', fromlist=['on_task_failure'])
+        .on_task_failure(task_id, sender.name, args, kwargs, exc, traceback),
+
     # 自动发现任务模块
     imports=[
         "fastapi_app.tasks.batch_tasks",

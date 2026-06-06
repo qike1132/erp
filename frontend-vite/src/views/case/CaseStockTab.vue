@@ -1,11 +1,11 @@
 <template>
   <div class="cs-stock">
     <!-- 模式切换 -->
-    <div class="cs-mode-toggle">
-      <button :class="['cs-mode-btn', { active: mode === 'stockin' }]" @click="switchMode('stockin')">
+    <div class="cs-mode-toggle" role="tablist">
+      <button role="tab" :aria-selected="mode === 'stockin'" :class="['cs-mode-btn', { active: mode === 'stockin' }]" @click="switchMode('stockin')">
         <i class="fas fa-truck-loading" />入库
       </button>
-      <button :class="['cs-mode-btn', { active: mode === 'stockout', 'out-mode': mode === 'stockout' }]" @click="switchMode('stockout')">
+      <button role="tab" :aria-selected="mode === 'stockout'" :class="['cs-mode-btn', { active: mode === 'stockout', 'out-mode': mode === 'stockout' }]" @click="switchMode('stockout')">
         <i class="fas fa-shipping-fast" />出库
       </button>
     </div>
@@ -17,7 +17,7 @@
         <div class="cs-section-header">
           <div class="cs-section-title">
             <i :class="mode === 'stockin' ? 'fas fa-truck-loading' : 'fas fa-shipping-fast'"
-               :style="{ color: mode === 'stockin' ? 'var(--color-primary-500)' : 'var(--color-danger-500)' }" />
+               :style="{ color: mode === 'stockin' ? 'var(--color-primary-500)' : 'var(--color-danger-500)' }" aria-hidden="true" />
             {{ mode === 'stockin' ? '入库信息录入' : '出库信息录入' }}
           </div>
           <span v-if="staged.length" :class="['cs-badge', mode === 'stockin' ? 'cs-badge-info' : 'cs-badge-danger']">
@@ -96,7 +96,7 @@
           </div>
           <div class="cs-staged-scroll">
             <div v-if="staged.length === 0" class="cs-staged-empty">
-              <i :class="mode === 'stockin' ? 'fas fa-box-open' : 'fas fa-shipping-fast'" />
+              <i :class="mode === 'stockin' ? 'fas fa-box-open' : 'fas fa-shipping-fast'" aria-hidden="true" />
               <p>{{ mode === 'stockin' ? '暂无暂存入库' : '暂无暂存出库' }}</p>
             </div>
             <div
@@ -115,7 +115,7 @@
                   <span class="cs-badge-tag cs-tag-secondary">{{ item.date }}</span>
                 </div>
               </div>
-              <button class="cs-icon-btn cs-icon-danger" @click="staged.splice(idx, 1)"><i class="fas fa-trash" /></button>
+              <button class="cs-icon-btn cs-icon-danger" @click="removeStagedItem(idx)" aria-label="删除"><i class="fas fa-trash" /></button>
             </div>
           </div>
         </div>
@@ -125,7 +125,7 @@
           <div class="cs-section-header cs-collapsible" @click="showBatchUpload = !showBatchUpload">
             <div class="cs-section-title">
               <i :class="mode === 'stockin' ? 'fas fa-file-import' : 'fas fa-file-export'"
-                 :style="{ color: mode === 'stockin' ? 'var(--color-primary-500)' : 'var(--color-danger-500)' }" />
+                 :style="{ color: mode === 'stockin' ? 'var(--color-primary-500)' : 'var(--color-danger-500)' }" aria-hidden="true" />
               {{ mode === 'stockin' ? '批量导入入库' : '批量导出出库' }}
             </div>
             <i :class="['fas fa-chevron-down cs-collapse-arrow', { expanded: showBatchUpload }]" />
@@ -140,7 +140,7 @@
                 <i :class="templateDownloading ? 'fas fa-spinner fa-spin' : 'fas fa-file-excel'" style="margin-right: 4px" />下载模板
               </button>
               <button :class="['cs-action-btn', mode === 'stockin' ? 'cs-action-primary' : 'cs-action-danger']" :disabled="!excelFile || importing" @click="handleImportExcel">
-                <i :class="importing ? 'fas fa-spinner fa-spin' : 'fas fa-upload'" style="margin-right: 4px" />{{ importing ? '导入中...' : '开始导入' }}
+                <i :class="importing ? 'fas fa-spinner fa-spin' : 'fas fa-upload'" style="margin-right: 4px" />{{ importing ? '导入中…' : '开始导入' }}
               </button>
             </div>
           </div>
@@ -156,7 +156,7 @@
         @click="submitBatch"
       >
         <i class="fas fa-paper-plane" style="margin-right: 8px" />
-        {{ submitting ? '提交中...' : mode === 'stockin' ? '提交入库' : '提交出库' }}
+        {{ submitting ? '提交中…' : mode === 'stockin' ? '提交入库' : '提交出库' }}
       </button>
     </div>
 
@@ -192,7 +192,7 @@
           </div>
         </div>
       </div>
-      <div v-if="siIsLoading && siList.length === 0" class="cs-loading"><i class="fas fa-spinner fa-spin" /><span>加载中...</span></div>
+      <div v-if="siIsLoading && siList.length === 0" class="cs-loading"><i class="fas fa-spinner fa-spin" /><span>加载中…</span></div>
       <div v-else-if="siList.length === 0" class="cs-empty"><i class="fas fa-inbox" /><span>暂无入库记录</span></div>
       <template v-else>
       <div v-if="siIsFetching" class="cs-fetching-bar"><div class="cs-fetching-progress" /></div>
@@ -217,8 +217,8 @@
             <td style="text-align: right"><strong>{{ row.quantity }}</strong></td>
             <td><small>{{ row.note || '-' }}</small></td>
             <td>
-              <button class="cs-icon-btn cs-icon-warning" @click="openEditModal('stockin', row)"><i class="fas fa-edit" /></button>
-              <button class="cs-icon-btn cs-icon-danger" :disabled="actionId === row.id" @click="handleDelete('stockin', row)"><i class="fas fa-trash" /></button>
+              <button class="cs-icon-btn cs-icon-warning" @click="openEditModal('stockin', row)" aria-label="编辑"><i class="fas fa-edit" /></button>
+              <button class="cs-icon-btn cs-icon-danger" :disabled="actionId === row.id" @click="handleDelete('stockin', row)" aria-label="删除"><i class="fas fa-trash" /></button>
             </td>
           </tr>
         </tbody>
@@ -259,7 +259,7 @@
           </div>
         </div>
       </div>
-      <div v-if="soIsLoading && soList.length === 0" class="cs-loading"><i class="fas fa-spinner fa-spin" /><span>加载中...</span></div>
+      <div v-if="soIsLoading && soList.length === 0" class="cs-loading"><i class="fas fa-spinner fa-spin" /><span>加载中…</span></div>
       <div v-else-if="soList.length === 0" class="cs-empty"><i class="fas fa-inbox" /><span>暂无出库记录</span></div>
       <template v-else>
       <div v-if="soIsFetching" class="cs-fetching-bar"><div class="cs-fetching-progress" /></div>
@@ -284,8 +284,8 @@
             <td style="text-align: right"><strong style="color: var(--color-danger-500)">{{ row.quantity }}</strong></td>
             <td><small>{{ row.note || '-' }}</small></td>
             <td>
-              <button class="cs-icon-btn cs-icon-warning" @click="openEditModal('stockout', row)"><i class="fas fa-edit" /></button>
-              <button class="cs-icon-btn cs-icon-danger" :disabled="actionId === row.id" @click="handleDelete('stockout', row)"><i class="fas fa-trash" /></button>
+              <button class="cs-icon-btn cs-icon-warning" @click="openEditModal('stockout', row)" aria-label="编辑"><i class="fas fa-edit" /></button>
+              <button class="cs-icon-btn cs-icon-danger" :disabled="actionId === row.id" @click="handleDelete('stockout', row)" aria-label="删除"><i class="fas fa-trash" /></button>
             </td>
           </tr>
         </tbody>
@@ -348,6 +348,7 @@ import UiPagination from '@/components/ui/UiPagination.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { showToast } from '@/composables/useToast'
+import { toISODate } from '@/utils/format'
 
 const actionId = ref<number | ''>(0)
 const queryClient = useQueryClient()
@@ -432,7 +433,7 @@ function selectProduct(p: any) {
 }
 
 // === 表单 ===
-const today = new Date().toISOString().split('T')[0]
+const today = toISODate()
 const form = reactive({ customer: '', date: today, search: '', productId: '', quantity: 1, note: '' })
 
 const canAdd = computed(() => {
@@ -444,6 +445,12 @@ const canAdd = computed(() => {
 
 // === 暂存列表 ===
 const staged = ref<any[]>([])
+
+async function removeStagedItem(idx: number) {
+  const ok = await confirmDialog.confirm('确定删除？', '此操作不可恢复', 'danger')
+  if (!ok) return
+  staged.value.splice(idx, 1)
+}
 
 function addStaged() {
   if (!canAdd.value) {
@@ -708,7 +715,7 @@ async function saveEdit() {
   background: transparent;
   cursor: pointer;
   color: var(--color-text-secondary);
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -806,8 +813,9 @@ async function saveEdit() {
   font-family: inherit;
   background: white;
   outline: none;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
 }
+.cs-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 .cs-input:focus {
   border-color: var(--color-primary-400);
   background: white;
@@ -822,9 +830,11 @@ async function saveEdit() {
   color: var(--color-text);
   resize: vertical;
   font-family: inherit;
+  background: white;
   outline: none;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
 }
+.cs-textarea:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 .cs-textarea:focus {
   border-color: var(--color-primary-400);
   background: white;
@@ -846,7 +856,7 @@ async function saveEdit() {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, border-color 0.3s ease, transform 0.3s ease;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -869,7 +879,7 @@ async function saveEdit() {
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: box-shadow 0.3s ease, transform 0.3s ease;
   color: white;
 }
 .cs-submit-large.cs-submit-primary { background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-700)); }
@@ -909,7 +919,7 @@ async function saveEdit() {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  transition: all 0.3s ease;
+  transition: transform 0.3s ease;
 }
 .cs-staged-item:hover { transform: translateY(-1px); }
 .cs-staged-in { border-color: var(--color-primary-200); }
@@ -934,7 +944,7 @@ async function saveEdit() {
   justify-content: center;
   cursor: pointer;
   font-size: 12px;
-  transition: all 0.2s ease;
+  transition: background 0.2s ease;
 }
 .cs-icon-danger { background: var(--color-danger-50); color: var(--color-danger-500); }
 .cs-icon-danger:hover { background: var(--color-danger-100); }
@@ -950,7 +960,7 @@ async function saveEdit() {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: background 0.2s ease;
   color: var(--color-text-secondary);
 }
 .cs-action-primary { color: var(--color-primary-600); }
@@ -1053,7 +1063,7 @@ async function saveEdit() {
 .cs-autocomplete-item {
   padding: 10px 14px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background 0.2s ease;
   border-bottom: 1px solid var(--color-border-light);
   display: flex;
   justify-content: space-between;

@@ -4,6 +4,7 @@ import logging
 from sqlalchemy import exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.redis_wrapper import safe_delete, safe_get, safe_set
 from fastapi_app.shared_models import Customer, CustomerAccessLog, Order, PurchaseOrder, PurchasePlan, StockIn, StockOut
 
 logger = logging.getLogger(__name__)
@@ -20,8 +21,8 @@ async def get_customers(db: AsyncSession, status: str | None = None, page: int =
         query = query.where(Customer.status)
         count_query = count_query.where(Customer.status)
     elif status == 'inactive':
-        query = query.where(not Customer.status)
-        count_query = count_query.where(not Customer.status)
+        query = query.where(Customer.status.is_(False))
+        count_query = count_query.where(Customer.status.is_(False))
     if search:
         escaped = search.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
         like_pattern = f'%{escaped}%'
@@ -62,24 +63,16 @@ async def search_customers(db: AsyncSession, query_str: str) -> list[Customer]:
 
 async def get_active_customer_names(db: AsyncSession) -> list[dict]:
     """获取所有启用客户名称列表（带Redis缓存5分钟）"""
-    try:
-        from utils.redis_cache import redis_cache
-        cached = await redis_cache.get(_ACTIVE_CUSTOMER_CACHE_KEY)
-        if cached:
-            return cached
-    except (OSError, ConnectionError, ValueError):
-        logger.warning("客户名称缓存读取失败", exc_info=True)
+    cached = await safe_get(_ACTIVE_CUSTOMER_CACHE_KEY, context='客户名称缓存')
+    if cached:
+        return cached
 
     result = await db.execute(
         select(Customer).where(Customer.status).order_by(Customer.name)
     )
     data = [{'id': c.id, 'name': c.name} for c in result.scalars().all()]
 
-    try:
-        from utils.redis_cache import redis_cache
-        await redis_cache.set(_ACTIVE_CUSTOMER_CACHE_KEY, data, timeout=_ACTIVE_CUSTOMER_CACHE_TTL)
-    except (OSError, ValueError):
-        logger.warning("客户名称缓存写入失败", exc_info=True)
+    await safe_set(_ACTIVE_CUSTOMER_CACHE_KEY, data, timeout=_ACTIVE_CUSTOMER_CACHE_TTL, context='客户名称缓存')
 
     return data
 
@@ -174,8 +167,4 @@ async def delete_customer(db: AsyncSession, customer_id: int) -> None:
 
 async def _invalidate_customer_cache():
     """清除客户名称缓存"""
-    try:
-        from utils.redis_cache import redis_cache
-        await redis_cache.delete(_ACTIVE_CUSTOMER_CACHE_KEY)
-    except (OSError, ConnectionError, ValueError):
-        logger.warning("客户缓存清除失败", exc_info=True)
+    await safe_delete(_ACTIVE_CUSTOMER_CACHE_KEY, context='客户名称缓存')

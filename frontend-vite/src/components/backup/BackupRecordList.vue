@@ -1,11 +1,11 @@
 <template>
   <div class="brl-container">
     <div v-if="loading" class="brl-loading">
-      <i class="fas fa-spinner fa-spin" /> 加载中...
+      <i class="fas fa-spinner fa-spin"  aria-hidden="true" /> 加载中…
     </div>
 
     <div v-else-if="!records.length" class="brl-empty">
-      <i class="fas fa-inbox" />
+      <i class="fas fa-inbox"  aria-hidden="true" />
       <p>暂无备份记录</p>
     </div>
 
@@ -13,7 +13,7 @@
       <div v-for="r in records" :key="r.id" class="brl-item" :class="`brl-${r.status}`">
         <div class="brl-item-header">
           <div class="brl-item-icon" :class="iconClass(r)">
-            <i :class="iconName(r)" />
+            <i :class="iconName(r)"  aria-hidden="true" />
           </div>
           <div class="brl-item-info">
             <div class="brl-item-name">
@@ -21,9 +21,9 @@
               <span v-if="r.trigger_type === 'auto'" class="brl-auto-badge">自动</span>
             </div>
             <div class="brl-item-meta">
-              <span v-if="r.operator"><i class="fas fa-user" /> {{ r.operator }}</span>
-              <span v-if="r.created_at"><i class="fas fa-clock" /> {{ formatTime(r.created_at) }}</span>
-              <span v-if="r.duration_seconds != null"><i class="fas fa-stopwatch" /> {{ r.duration_seconds.toFixed(1) }}s</span>
+              <span v-if="r.operator"><i class="fas fa-user"  aria-hidden="true" /> {{ r.operator }}</span>
+              <span v-if="r.created_at"><i class="fas fa-clock"  aria-hidden="true" /> {{ formatDateTime(r.created_at) }}</span>
+              <span v-if="r.duration_seconds != null"><i class="fas fa-stopwatch"  aria-hidden="true" /> {{ r.duration_seconds.toFixed(1) }}s</span>
             </div>
           </div>
           <div class="brl-item-status">
@@ -33,13 +33,13 @@
           </div>
         </div>
         <div class="brl-item-detail">
-          <span v-if="r.table_count != null"><i class="fas fa-table" /> {{ r.table_count }} 表</span>
-          <span v-if="r.total_rows != null"><i class="fas fa-list" /> {{ r.total_rows }} 条</span>
-          <span v-if="r.size != null"><i class="fas fa-weight-hanging" /> {{ formatSize(r.size) }}</span>
-          <span v-if="r.remark" class="brl-remark"><i class="fas fa-comment" /> {{ r.remark }}</span>
+          <span v-if="r.table_count != null"><i class="fas fa-table"  aria-hidden="true" /> {{ r.table_count }} 表</span>
+          <span v-if="r.total_rows != null"><i class="fas fa-list"  aria-hidden="true" /> {{ r.total_rows }} 条</span>
+          <span v-if="r.size != null"><i class="fas fa-weight-hanging"  aria-hidden="true" /> {{ formatSize(r.size) }}</span>
+          <span v-if="r.remark" class="brl-remark"><i class="fas fa-comment"  aria-hidden="true" /> {{ r.remark }}</span>
         </div>
         <div v-if="r.error_message" class="brl-error">
-          <i class="fas fa-exclamation-circle" /> {{ r.error_message }}
+          <i class="fas fa-exclamation-circle"  aria-hidden="true" /> {{ r.error_message }}
         </div>
       </div>
     </div>
@@ -50,8 +50,8 @@
         class="brl-page-btn"
         :disabled="page <= 1"
         @click="$emit('page-change', page - 1)"
-      >
-        <i class="fas fa-chevron-left" />
+       aria-label="上一页">
+        <i class="fas fa-chevron-left"  aria-hidden="true" />
       </button>
       <span class="brl-page-info">{{ page }} / {{ Math.ceil(total / pageSize) }}</span>
       <button
@@ -59,7 +59,7 @@
         :disabled="page >= Math.ceil(total / pageSize)"
         @click="$emit('page-change', page + 1)"
       >
-        <i class="fas fa-chevron-right" />
+        <i class="fas fa-chevron-right"  aria-hidden="true" />
       </button>
     </div>
   </div>
@@ -67,6 +67,7 @@
 
 <script setup lang="ts">
 import type { BackupRecord } from '@/types'
+import { formatDateTime } from '@/utils/format'
 
 defineProps<{
   records: BackupRecord[]
@@ -105,14 +106,7 @@ function statusLabel(status: string) {
   return '运行中'
 }
 
-function formatTime(iso: string) {
-  try {
-    const d = new Date(iso)
-    return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-  } catch {
-    return iso
-  }
-}
+
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return bytes + ' B'
@@ -154,7 +148,7 @@ function formatSize(bytes: number): string {
   border-radius: 12px;
   padding: 12px 14px;
   background: white;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
 }
 
 .brl-item:hover {
@@ -303,7 +297,7 @@ function formatSize(bytes: number): string {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: border-color 0.2s ease, color 0.2s ease;
   font-size: 11px;
   color: var(--color-text-secondary);
 }

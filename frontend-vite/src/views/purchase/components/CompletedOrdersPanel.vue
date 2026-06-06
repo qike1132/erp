@@ -1,21 +1,21 @@
-<template>
+﻿<template>
   <div class="pc-section">
     <div class="pc-section-header">
       <div class="pc-section-title">
-        <i class="fas fa-check-circle" /> 下单查询
+        <i class="fas fa-check-circle"  aria-hidden="true" /> 下单查询
       </div>
       <div class="pc-section-actions">
         <button
           class="pc-btn"
           @click="filterExpanded = !filterExpanded"
         >
-          <i class="fas fa-filter" /> {{ filterExpanded ? '收起筛选' : '展开筛选' }}
+          <i class="fas fa-filter"  aria-hidden="true" /> {{ filterExpanded ? '收起筛选' : '展开筛选' }}
         </button>
         <button
           class="pc-btn pc-btn-primary"
           @click="$emit('export')"
         >
-          <i class="fas fa-file-excel" /> 导出
+          <i class="fas fa-file-excel"  aria-hidden="true" /> 导出
         </button>
       </div>
     </div>
@@ -38,13 +38,13 @@
         <!-- Basic conditions -->
         <div class="pc-filter-group">
           <div class="pc-filter-group-title">
-            <i class="fas fa-info-circle" /> 基本条件
+            <i class="fas fa-info-circle"  aria-hidden="true" /> 基本条件
           </div>
           <div class="pc-filter-fields">
             <div v-for="field in basicFields" :key="field.key" class="pc-filter-field">
               <label class="pc-filter-label">{{ field.label }}</label>
               <div class="pc-filter-input-wrap">
-                <i :class="[field.icon, 'pc-filter-input-icon']" />
+                <i :class="[field.icon, 'pc-filter-input-icon']"  aria-hidden="true" />
                 <input
                   type="text"
                   class="pc-filter-input"
@@ -60,7 +60,7 @@
         <!-- Time & Material -->
         <div class="pc-filter-group">
           <div class="pc-filter-group-title">
-            <i class="fas fa-calendar-alt" /> 时间与物料
+            <i class="fas fa-calendar-alt"  aria-hidden="true" /> 时间与物料
           </div>
           <div class="pc-filter-fields">
             <div class="pc-filter-field">
@@ -80,7 +80,7 @@
             <div class="pc-filter-field pc-filter-field-wide">
               <label class="pc-filter-label">物料名称</label>
               <div class="pc-filter-input-wrap">
-                <i class="fas fa-search pc-filter-input-icon" />
+                <i class="fas fa-search pc-filter-input-icon"  aria-hidden="true" />
                 <input
                   type="text"
                   class="pc-filter-input"
@@ -95,10 +95,10 @@
       </div>
       <div class="pc-filter-actions">
         <button class="pc-btn" @click="$emit('resetFilters')">
-          <i class="fas fa-redo" /> 重置
+          <i class="fas fa-redo"  aria-hidden="true" /> 重置
         </button>
         <button class="pc-btn pc-btn-primary" @click="$emit('search')">
-          <i class="fas fa-search" /> 查询
+          <i class="fas fa-search"  aria-hidden="true" /> 查询
         </button>
       </div>
     </div>
@@ -106,11 +106,11 @@
     <!-- Results -->
     <div class="pc-results">
       <div v-if="loading && orders.length === 0" class="pc-loading-state">
-        <i class="fas fa-spinner fa-spin" />
-        <span>加载中...</span>
+        <i class="fas fa-spinner fa-spin"  aria-hidden="true" />
+        <span>加载中…</span>
       </div>
       <div v-else-if="orders.length === 0" class="pc-empty-state">
-        <i class="fas fa-check-circle" />
+        <i class="fas fa-check-circle"  aria-hidden="true" />
         <span>暂无已完成的订单</span>
       </div>
       <template v-else>
@@ -137,14 +137,14 @@
                 <td class="pc-td-bold">{{ o.source_order_no || o.order_no }}</td>
                 <td>{{ o.customer_name || '-' }}</td>
                 <td>{{ o.product_name || '-' }}</td>
-                <td class="pc-td-right pc-td-bold">{{ o.quantity?.toLocaleString() || '-' }}</td>
-                <td class="pc-td-muted pc-td-small">{{ o.completed_at || '-' }}</td>
+                <td class="pc-td-right pc-td-bold">{{ formatNumber(o.quantity) }}</td>
+                <td class="pc-td-muted pc-td-small">{{ formatDate(o.completed_at) }}</td>
                 <td class="pc-td-center">
                   <button
                     class="pc-btn pc-btn-sm"
                     @click="$emit('viewDetail', o.id)"
                   >
-                    <i class="fas fa-eye" /> 查看
+                    <i class="fas fa-eye"  aria-hidden="true" /> 查看
                   </button>
                 </td>
               </tr>
@@ -164,6 +164,7 @@ import { computed } from 'vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
 import type { PurchaseOrder } from '@/types'
+import { formatDate, formatNumber } from '@/utils/format'
 
 const props = defineProps<{
   orders: PurchaseOrder[]
@@ -238,7 +239,7 @@ const basicFields = [
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.25s ease;
+  transition: border-color 0.25s ease, color 0.25s ease, background 0.25s ease;
   background: white;
   color: var(--color-text-secondary);
 }
@@ -281,7 +282,7 @@ const basicFields = [
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.25s ease;
+  transition: border-color 0.25s ease, color 0.25s ease, background 0.25s ease;
   background: white;
   color: var(--color-text-secondary);
 }
@@ -377,12 +378,14 @@ const basicFields = [
   border-radius: 8px;
   font-size: 13px;
   outline: none;
-  transition: all 0.2s ease;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
   background: white;
   font-family: inherit;
   color: var(--color-text);
   box-sizing: border-box;
 }
+
+.pc-filter-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 
 .pc-filter-input:focus {
   border-color: var(--color-primary-400);

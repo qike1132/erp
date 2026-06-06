@@ -6,21 +6,31 @@
         <div class="co-header-left">
           <HeaderTabs />
         </div>
+        <div class="co-header-right">
+          <div class="co-tab-bar">
+            <button :class="['co-tab-btn', activeTab === 'input' && 'active']" @click="activeTab = 'input'">
+              录入
+            </button>
+            <button :class="['co-tab-btn', activeTab === 'records' && 'active']" @click="activeTab = 'records'">
+              记录查询
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- TAB: 录入 -->
-      <div class="co-tab-content">
+      <div v-show="activeTab === 'input'" class="co-tab-content">
       <div class="co-body">
         <!-- 左栏：录入表单 -->
         <div class="co-col">
           <div class="co-col-title">
-            <span><i class="fas fa-edit"></i> {{ isOrder ? '订单信息录入' : '备货信息录入' }}</span>
+            <span><i class="fas fa-edit" aria-hidden="true"></i> {{ isOrder ? '订单信息录入' : '备货信息录入' }}</span>
             <div class="co-type-switch">
               <button :class="['co-type-btn', isOrder && 'active']" @click="form.type = 'order'">
-                <i class="fas fa-clipboard-list" />订单
+                <i class="fas fa-clipboard-list"  aria-hidden="true" />订单
               </button>
               <button :class="['co-type-btn', !isOrder && 'active']" @click="form.type = 'stockin'">
-                <i class="fas fa-truck-loading" />备货
+                <i class="fas fa-truck-loading"  aria-hidden="true" />备货
               </button>
             </div>
           </div>
@@ -46,7 +56,7 @@
                       :options="countryStore.countryOptions"
                     />
                     <UiButton variant="outline" style="white-space: nowrap; flex-shrink: 0;" @click="openCountryDialog">
-                      <i class="fas fa-plus" />
+                      <i class="fas fa-plus"  aria-hidden="true" />
                     </UiButton>
                   </div>
                 </div>
@@ -78,6 +88,8 @@
                   class="form-text-input"
                   :value="form.productSearch"
                   placeholder="输入产品名称搜索"
+                  name="search"
+                  autocomplete="off"
                   @input="form.productSearch = ($event.target as HTMLInputElement).value; onProductInput()"
                   @focus="onProductFocus"
                   @blur="hideSuggestions"
@@ -88,7 +100,9 @@
                       v-for="p in suggestions"
                       :key="p.id"
                       class="co-autocomplete-item"
+                      role="option"
                       @mousedown.prevent="selectProduct(p)"
+                      @keydown.enter="selectProduct(p)"
                     >
                       {{ p.name || p.value }}
                     </div>
@@ -101,7 +115,7 @@
                   <label class="co-label"
                     >{{ isOrder ? '订单数量' : '备货数量' }} <span class="co-required">*</span></label
                   >
-                  <input type="number" class="form-number-input" v-model.number="form.quantity" min="1" max="9999999" step="1" style="width: 100%" />
+                  <input type="number" class="form-number-input" v-model.number="form.quantity" min="1" max="9999999" step="1" style="width: 100%" name="quantity" autocomplete="off" />
                 </div>
                 <div v-if="isOrder" class="co-form-group">
                   <label class="co-label">抵扣备货数量</label>
@@ -111,25 +125,26 @@
                       :class="['co-btn-deduct', form.deductStock && 'active']"
                       @click="handleDeductPreview"
                     >
-                      <i class="fas fa-boxes" />抵扣备货
+                      <i class="fas fa-boxes"  aria-hidden="true" />抵扣备货
                     </button>
-                    <span
+                    <button
+                      type="button"
                       class="co-deduct-display"
                       :style="{ borderColor: form.deductQuantity > 0 ? 'var(--color-ocean-deep)' : 'var(--color-text-muted)' }"
                       @click="openDeductEdit"
                     >
-                      <i class="fas fa-edit" style="font-size: 11px" />抵扣: <strong>{{ form.deductQuantity }}</strong>
-                    </span>
+                      <i class="fas fa-edit" style="font-size: 11px"  aria-hidden="true" />抵扣: <strong>{{ form.deductQuantity }}</strong>
+                    </button>
                   </div>
                   <div v-if="deductInfoVisible" class="co-deduct-info">
                     <small v-if="availableStock > 0" style="color: var(--color-success-700)">
-                      <i class="fas fa-check-circle" /> 可用备货: <strong>{{ availableStock }}</strong> 件
+                      <i class="fas fa-check-circle"  aria-hidden="true" /> 可用备货: <strong>{{ availableStock }}</strong> 件
                       <span v-if="form.deductQuantity > 0" style="margin-left: 8px; color: var(--color-ocean-text)">
-                        <i class="fas fa-arrow-right" /> 抵扣后剩余:
+                        <i class="fas fa-arrow-right"  aria-hidden="true" /> 抵扣后剩余:
                         <strong>{{ availableStock - form.deductQuantity }}</strong> 件
                       </span>
                     </small>
-                    <small v-else style="color: var(--color-warning-500)"><i class="fas fa-exclamation-circle" /> 暂无可用备货</small>
+                    <small v-else style="color: var(--color-warning-500)"><i class="fas fa-exclamation-circle"  aria-hidden="true" /> 暂无可用备货</small>
                   </div>
                 </div>
               </div>
@@ -145,7 +160,7 @@
               </div>
 
               <!-- 批量导入 -->
-              <div class="co-section-label"><i class="fas fa-file-import"></i> 批量导入</div>
+              <div class="co-section-label"><i class="fas fa-file-import" aria-hidden="true"></i> 批量导入</div>
               <div
                 class="co-section-header co-droppable"
                 :class="{ 'co-drag-over': isDragOver }"
@@ -155,14 +170,14 @@
                 @drop.prevent="onDrop"
               >
                 <label class="form-label co-droppable-label">
-                  <i class="fas fa-file-excel label-icon"></i>
-                  <span v-if="excelFile" class="co-file-inline co-file-inline-success"><i class="fas fa-file-excel" />{{ excelFile.name }}</span>
+                  <i class="fas fa-file-excel label-icon" aria-hidden="true"></i>
+                  <span v-if="excelFile" class="co-file-inline co-file-inline-success"><i class="fas fa-file-excel"  aria-hidden="true" />{{ excelFile.name }}</span>
                   <span v-else>拖拽文件到标题栏 · 支持 .xlsx / .xls</span>
                 </label>
                 <div class="co-inline-actions">
                   <button class="co-inline-btn" @click.stop="downloadTemplate">模板</button>
                   <button class="co-inline-btn co-inline-btn-success" :disabled="!excelFile" @click.stop="handleImport">
-                    {{ importing ? '导入中...' : '导入' }}
+                    {{ importing ? '导入中…' : '导入' }}
                   </button>
                 </div>
                 <input
@@ -175,7 +190,7 @@
               </div>
 
               <UiButton variant="primary" :disabled="!canAdd" style="margin-top: 15px" @click="addStaged">
-                <i class="fas fa-plus-circle" />{{ isOrder ? '新增订单' : '新增备货' }}
+                <i class="fas fa-plus-circle"  aria-hidden="true" />{{ isOrder ? '新增订单' : '新增备货' }}
               </UiButton>
             </form>
           </div>
@@ -184,7 +199,7 @@
         <!-- 右栏：暂存列表 + 批量导入 -->
         <div class="co-col">
           <div class="co-col-title">
-            <span><i class="fas fa-layer-group"></i> 暂存列表</span>
+            <span><i class="fas fa-layer-group" aria-hidden="true"></i> 暂存列表</span>
             <span v-if="stagedItems.length" class="count-badge-subtle">共 {{ stagedItems.length }} 个</span>
           </div>
           <div class="co-col-scroll">
@@ -198,8 +213,9 @@
                 <div class="co-staged-main">
                   <div class="co-staged-info">
                     <span :class="['co-type-badge', item.type]">{{ item.type === 'order' ? '订单' : '备货' }}</span>
-                    <span class="co-staged-tag"><i class="fas fa-user" />{{ item.customer }}</span>
-                    <span class="co-staged-tag"><i class="fas fa-calendar-alt" />{{ item.date }}</span>
+                    <span v-if="item.orderType === 'custom'" class="co-type-badge custom">定制</span>
+                    <span class="co-staged-tag"><i class="fas fa-user"  aria-hidden="true" />{{ item.customer }}</span>
+                    <span class="co-staged-tag"><i class="fas fa-calendar-alt"  aria-hidden="true" />{{ item.date }}</span>
                     <span class="co-staged-product">
                       <i
                         :class="item.type === 'order' ? 'fas fa-shopping-cart' : 'fas fa-cubes'"
@@ -209,21 +225,22 @@
                     </span>
                     <span class="count-badge-subtle">数量: {{ item.quantity }}</span>
                     <span v-if="item.deductQuantity > 0" class="count-badge-subtle">抵扣: {{ item.deductQuantity }}</span>
+                    <span v-if="item.country" class="count-badge-subtle"><i class="fas fa-globe" aria-hidden="true" /> {{ item.country }}</span>
                     <span v-if="item.note" class="count-badge-subtle">备注: {{ item.note }}</span>
                   </div>
                   <div class="co-staged-actions">
-                    <button class="co-btn-icon co-btn-warn" @click="openEditStaged(idx)">
-                      <i class="fas fa-edit" />
+                    <button class="co-btn-icon co-btn-warn" @click="openEditStaged(idx)" aria-label="编辑">
+                      <i class="fas fa-edit"  aria-hidden="true" />
                     </button>
-                    <button class="co-btn-icon co-btn-danger" @click="stagedItems.splice(idx, 1)">
-                      <i class="fas fa-trash" />
+                    <button class="co-btn-icon co-btn-danger" @click="removeStagedItem(idx)" aria-label="删除">
+                      <i class="fas fa-trash"  aria-hidden="true" />
                     </button>
                   </div>
                 </div>
               </div>
             </template>
             <div v-else class="co-empty-state">
-              <i class="fas fa-box-open co-empty-icon" />
+              <i class="fas fa-box-open co-empty-icon"  aria-hidden="true" />
               <p>暂无暂存记录</p>
             </div>
           </div>
@@ -234,30 +251,208 @@
       <div v-if="stagedItems.length" class="co-submit-bar">
       <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap">
         <UiButton
-          v-if="stagedOrders.length"
           variant="primary"
           size="lg"
           :disabled="submitting"
-          style="min-width: 180px"
-          @click="submitOrders"
+          style="min-width: 200px"
+          @click="submitAll"
         >
-          <i class="fas fa-paper-plane" />{{ submitting ? '提交中...' : `提交订单 (${stagedOrders.length})` }}
-        </UiButton>
-        <UiButton
-          v-if="stagedStockins.length"
-          variant="success"
-          size="lg"
-          :disabled="submitting"
-          style="min-width: 180px"
-          @click="submitStockins"
-        >
-          <i class="fas fa-paper-plane" />{{ submitting ? '提交中...' : `提交备货 (${stagedStockins.length})` }}
+          <i class="fas fa-paper-plane"  aria-hidden="true" />{{ submitting ? '提交中…' : `提交订单 (${stagedItems.length})` }}
         </UiButton>
       </div>
     </div>
       </div>
 
+      <!-- TAB: 记录查询 -->
+      <div v-show="activeTab === 'records'" class="co-tab-content">
+        <div class="co-records-header">
+          <span class="co-records-title"><i class="fas fa-list-alt" aria-hidden="true"></i> 订单记录列表</span>
+          <UiButton variant="outline" size="sm" @click="showFilter = !showFilter">
+            <i class="fas fa-filter" style="margin-right: 4px" aria-hidden="true" />筛选
+          </UiButton>
+        </div>
+
+        <div v-if="showFilter" class="co-filter-panel">
+          <div class="co-filter-row">
+            <div class="co-filter-field">
+              <label class="co-label"><i class="fas fa-user" aria-hidden="true"></i> 客户</label>
+              <UiSelect v-model="filterCustomer" placeholder="全部" :options="customerOptions" style="width: 100%" />
+            </div>
+            <div class="co-filter-field">
+              <label class="co-label"><i class="fas fa-tag" aria-hidden="true"></i> 订单类型</label>
+              <UiSelect v-model="filterOrderType" placeholder="全部" :options="filterOrderTypeOptions" style="width: 100%" />
+            </div>
+            <div class="co-filter-field">
+              <label class="co-label"><i class="fas fa-info-circle" aria-hidden="true"></i> 状态</label>
+              <UiSelect v-model="filterStatus" placeholder="全部" :options="statusOptions" style="width: 100%" />
+            </div>
+            <div class="co-filter-field">
+              <label class="co-label"><i class="fas fa-calendar-alt" aria-hidden="true"></i> 开始日期</label>
+              <UiDatePicker v-model="filterStart" style="width: 100%" />
+            </div>
+            <div class="co-filter-field">
+              <label class="co-label"><i class="fas fa-calendar-alt" aria-hidden="true"></i> 结束日期</label>
+              <UiDatePicker v-model="filterEnd" style="width: 100%" />
+            </div>
+            <div class="co-filter-field co-filter-action">
+              <UiButton variant="primary" size="sm" @click="fetchOrders">
+                <i class="fas fa-search" style="margin-right: 4px" aria-hidden="true" />查询
+              </UiButton>
+              <UiButton variant="outline" size="sm" @click="resetFilter">
+                <i class="fas fa-undo" style="margin-right: 4px" aria-hidden="true" />重置
+              </UiButton>
+            </div>
+          </div>
+        </div>
+
+        <div class="co-records-body">
+          <div v-if="isLoadingRecords && orderRecords.length === 0" class="co-state-placeholder">
+            <div class="co-spinner-ring" />
+            <p class="co-state-text">加载中…</p>
+          </div>
+          <div v-else-if="orderRecords.length === 0" class="co-state-placeholder co-state-empty">
+            <div class="co-empty-illustration"><i class="fas fa-clipboard-list" aria-hidden="true" /></div>
+            <p class="co-state-text">暂无订单记录</p>
+          </div>
+
+          <template v-else>
+            <div v-if="isFetchingRecords" class="co-fetching-bar"><div class="co-fetching-progress" /></div>
+            <table class="co-table">
+              <thead>
+                <tr>
+                  <th>订单时间</th>
+                  <th>客户</th>
+                  <th>产品</th>
+                  <th>数量</th>
+                  <th>抵扣备货</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in orderRecords" :key="item.id">
+                  <td><span class="co-cell-muted">{{ item.order_date }}</span></td>
+                  <td><span class="co-cell-main">{{ item.customer }}</span></td>
+                  <td style="text-align: left">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <img v-if="item.product?.image" :src="item.product.image" class="co-product-thumb" />
+                      <div>
+                        <span class="co-cell-main">{{ item.product?.name || '-' }}</span>
+                        <span v-if="item.product?.barcode" class="co-cell-muted" style="display: block; font-size: 11px;">{{ item.product.barcode }}</span>
+                      </div>
+                    </div>
+                  </td>
+                  <td><strong>{{ item.quantity }}</strong></td>
+                  <td>
+                    <span v-if="item.deduct_quantity > 0" class="co-badge-tag co-badge-success">抵扣: {{ item.deduct_quantity }}</span>
+                  </td>
+                  <td>
+                    <div class="co-action-group">
+                      <button class="co-btn-icon co-btn-info" @click="openDetail(item)" aria-label="详情">
+                        <i class="fas fa-eye" aria-hidden="true" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </template>
+
+          <UiPagination v-if="totalPages > 1" :current-page="currentPage" :total-pages="totalPages" @update:current-page="currentPage = $event; fetchOrders()" />
+        </div>
+      </div>
+
     </div>
+
+    <!-- 订单详情弹窗 -->
+    <UiDialog v-model:open="detailOpen" title="编辑订单" max-width-class="max-w-[580px]">
+      <div v-if="detailData" class="oe-dialog">
+        <!-- 订单信息头部 -->
+        <div class="oe-header">
+          <div class="oe-header-left">
+            <span class="oe-order-no">{{ detailData.order_no }}</span>
+            <span :class="['oe-status-dot', getStatusClass(detailData.status)]"></span>
+            <span class="oe-status-text">{{ detailData.status }}</span>
+          </div>
+          <span class="oe-date">{{ detailData.order_date }}</span>
+        </div>
+
+        <!-- 只读信息区 -->
+        <div class="oe-section">
+          <div class="oe-section-title"><i class="fas fa-info-circle" aria-hidden="true" /> 订单信息</div>
+          <div class="oe-info-grid">
+            <div class="oe-info-cell">
+              <span class="oe-info-label">客户</span>
+              <span class="oe-info-value">{{ detailData.customer }}</span>
+            </div>
+            <div class="oe-info-cell">
+              <span class="oe-info-label">订单类型</span>
+              <span class="oe-info-value">{{ detailData.order_type === 'custom' ? '定制' : '常规' }}</span>
+            </div>
+            <div class="oe-info-cell">
+              <span class="oe-info-label">产品</span>
+              <span class="oe-info-value oe-info-product">
+                <img v-if="detailData.product?.image" :src="detailData.product.image" class="oe-product-thumb" />
+                <span>{{ detailData.product?.name || '-' }}</span>
+              </span>
+            </div>
+            <div class="oe-info-cell">
+              <span class="oe-info-label">69码</span>
+              <span class="oe-info-value oe-mono">{{ detailData.product?.barcode || '-' }}</span>
+            </div>
+            <div class="oe-info-cell" v-if="detailData.country">
+              <span class="oe-info-label">国家</span>
+              <span class="oe-info-value">{{ detailData.country }}</span>
+            </div>
+            <div class="oe-info-cell" v-if="detailData.batch_no">
+              <span class="oe-info-label">批次号</span>
+              <span class="oe-info-value oe-mono">{{ detailData.batch_no }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 可编辑区域 -->
+        <div class="oe-section oe-editable">
+          <div class="oe-section-title"><i class="fas fa-pen" aria-hidden="true" /> 编辑内容</div>
+          <div class="oe-edit-grid">
+            <div class="oe-edit-cell">
+              <label class="oe-edit-label">数量</label>
+              <div class="oe-edit-control">
+                <button class="oe-stepper-btn" @click="editForm.quantity = Math.max(1, editForm.quantity - 1)" aria-label="减少">
+                  <i class="fas fa-minus" aria-hidden="true" />
+                </button>
+                <input type="number" class="oe-stepper-input" v-model.number="editForm.quantity" min="1" step="1" autocomplete="off" />
+                <button class="oe-stepper-btn" @click="editForm.quantity = editForm.quantity + 1" aria-label="增加">
+                  <i class="fas fa-plus" aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+            <div class="oe-edit-cell">
+              <label class="oe-edit-label">抵扣备货</label>
+              <div class="oe-edit-control">
+                <button class="oe-stepper-btn" @click="editForm.deductQuantity = Math.max(0, editForm.deductQuantity - 1)" aria-label="减少抵扣">
+                  <i class="fas fa-minus" aria-hidden="true" />
+                </button>
+                <input type="number" class="oe-stepper-input" v-model.number="editForm.deductQuantity" min="0" step="1" autocomplete="off" />
+                <button class="oe-stepper-btn" @click="editForm.deductQuantity = editForm.deductQuantity + 1" aria-label="增加抵扣">
+                  <i class="fas fa-plus" aria-hidden="true" />
+                </button>
+                <span v-if="availableStockin > 0" class="oe-available-hint">可用: {{ availableStockin }}</span>
+              </div>
+            </div>
+          </div>
+          <div class="oe-edit-full">
+            <label class="oe-edit-label">备注</label>
+            <textarea class="oe-textarea" v-model="editForm.note" rows="2" placeholder="输入备注信息…" />
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <UiButton variant="outline" @click="detailOpen = false">取消</UiButton>
+        <UiButton variant="primary" @click="saveEditOrder">
+          <i class="fas fa-check" style="margin-right: 4px" aria-hidden="true" />保存
+        </UiButton>
+      </template>
+    </UiDialog>
 
     <!-- 编辑暂存弹窗 -->
     <UiDialog
@@ -280,13 +475,13 @@
         </div>
         <div class="co-form-group">
           <label class="co-label">{{ editStagedData.type === 'order' ? '订单数量' : '备货数量' }}</label>
-          <input type="number" class="form-number-input" v-model.number="editStagedData.quantity" min="1" max="9999999" step="1" style="width: 100%" />
+          <input type="number" class="form-number-input" v-model.number="editStagedData.quantity" min="1" max="9999999" step="1" style="width: 100%" name="quantity" autocomplete="off" />
         </div>
         <div v-if="editStagedData.type === 'order'" class="co-form-group">
           <label class="co-label">抵扣备货数量</label>
-          <input type="number" class="form-number-input" v-model.number="editStagedData.deductQuantity" min="0" :max="Math.min(editStagedData.quantity, editAvailableStock)" step="1" style="width: 100%" />
+          <input type="number" class="form-number-input" v-model.number="editStagedData.deductQuantity" min="0" :max="Math.min(editStagedData.quantity, editAvailableStock)" step="1" style="width: 100%" name="deduct-quantity" autocomplete="off" />
           <small v-if="editAvailableStock > 0" style="color: var(--color-success-700); margin-top: 4px; display: block">
-            <i class="fas fa-check-circle" /> 可用备货: <strong>{{ editAvailableStock }}</strong> 件
+            <i class="fas fa-check-circle"  aria-hidden="true" /> 可用备货: <strong>{{ editAvailableStock }}</strong> 件
           </small>
         </div>
         <div class="co-form-group">
@@ -303,7 +498,7 @@
     <UiDialog :open="countryDialogVisible" title="添加国家" max-width-class="max-w-[420px]" @update:open="countryDialogVisible = $event">
       <div class="co-form-group">
         <label class="co-label">国家名称</label>
-        <UiInput v-model="newCountryName" placeholder="请输入国家名称" />
+        <UiInput v-model="newCountryName" placeholder="请输入国家名称" name="country" autocomplete="off" />
       </div>
       <template #footer>
         <UiButton variant="outline" @click="countryDialogVisible = false">取消</UiButton>
@@ -323,24 +518,30 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onUnmounted, watch } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { get, post } from '@/api/request'
-import { customerApi } from '@/api'
+import { customerApi, orderApi } from '@/api'
 import UiInput from '@/components/ui/UiInput.vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 import UiSelect from '@/components/ui/UiSelect.vue'
+import UiPagination from '@/components/ui/UiPagination.vue'
 import { showToast } from '@/composables/useToast'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { useCountryStore } from '@/stores/country'
+import { toISODate } from '@/utils/format'
 
 const queryClient = useQueryClient()
 const confirmDialog = useConfirmDialog()
 const countryStore = useCountryStore()
+
+if (!countryStore.loaded) {
+  countryStore.fetchCountries()
+}
 
 // ===== Data queries =====
 const { data: customerData } = useQuery({
@@ -369,6 +570,9 @@ async function searchProducts(q: string) {
 const suggestions = ref<any[]>([])
 const showSuggestions = ref(false)
 let searchTimeout: ReturnType<typeof setTimeout> | null = null
+onUnmounted(() => {
+  if (searchTimeout) clearTimeout(searchTimeout)
+})
 
 function onProductInput() {
   form.productId = 0
@@ -419,7 +623,21 @@ const orderTypeOptions = [
   { value: 'normal', label: '常规订单' },
   { value: 'custom', label: '定制订单' },
 ]
-const canAdd = computed(() => !!form.customer && !!form.productId && form.quantity > 0 && form.quantity <= 9999999 && !!form.date)
+
+const lastCountry = ref('')
+watch(() => form.orderType, (newType, oldType) => {
+  if (oldType === 'custom' && newType === 'normal') {
+    lastCountry.value = form.country
+    form.country = ''
+  } else if (oldType === 'normal' && newType === 'custom' && lastCountry.value) {
+    form.country = lastCountry.value
+  }
+})
+const canAdd = computed(() => {
+  const base = !!form.customer && !!form.productId && form.quantity > 0 && form.quantity <= 9999999 && !!form.date
+  if (isCustomOrder.value) return base && !!form.country
+  return base
+})
 
 const countryDialogVisible = ref(false)
 const newCountryName = ref('')
@@ -429,13 +647,13 @@ function openCountryDialog() {
   countryDialogVisible.value = true
 }
 
-function saveCountry() {
+async function saveCountry() {
   const trimmed = newCountryName.value.trim()
   if (!trimmed) {
     showToast('请输入国家名称', 'warning')
     return
   }
-  const ok = countryStore.addCountry(trimmed)
+  const ok = await countryStore.addCountry(trimmed)
   if (ok) {
     form.country = trimmed
     countryDialogVisible.value = false
@@ -513,16 +731,22 @@ function addStaged() {
 
 // ===== Staged items (unified) =====
 const stagedItems = ref<any[]>([])
+
+async function removeStagedItem(idx: number) {
+  const ok = await confirmDialog.confirm('确定删除？', '此操作不可恢复', 'danger')
+  if (!ok) return
+  stagedItems.value.splice(idx, 1)
+}
 const stagedOrders = computed(() => stagedItems.value.filter((i: any) => i.type === 'order'))
 const stagedStockins = computed(() => stagedItems.value.filter((i: any) => i.type === 'stockin'))
 
 const submitting = ref(false)
 
-async function submitOrders() {
-  if (!stagedOrders.value.length) return
+async function submitAll() {
+  if (!stagedItems.value.length) return
   submitting.value = true
   try {
-    const payload = stagedOrders.value.map((i) => ({
+    const orderPayload = stagedOrders.value.map((i) => ({
       product_id: i.productId,
       customer: i.customer,
       quantity: i.quantity,
@@ -533,23 +757,7 @@ async function submitOrders() {
       order_type: i.orderType === 'custom' ? 'custom' : 'regular',
       country: i.country || '',
     }))
-    await post('/aux/batch-submit-orders', { orders: payload })
-    showToast('订单提交成功', 'success')
-    stagedItems.value = stagedItems.value.filter((i) => i.type !== 'order')
-    queryClient.invalidateQueries({ queryKey: ['orders-list'] })
-    queryClient.invalidateQueries({ queryKey: ['stockins-list'] })
-  } catch (err: any) {
-    showToast(err.response?.data?.detail || '提交失败', 'error')
-  } finally {
-    submitting.value = false
-  }
-}
-
-async function submitStockins() {
-  if (!stagedStockins.value.length) return
-  submitting.value = true
-  try {
-    const payload = stagedStockins.value.map((i) => ({
+    const stockinPayload = stagedStockins.value.map((i) => ({
       product_id: i.productId,
       customer: i.customer,
       quantity: i.quantity,
@@ -558,12 +766,23 @@ async function submitStockins() {
       order_type: i.orderType === 'custom' ? 'custom' : 'regular',
       country: i.country || '',
     }))
-    await post('/aux/batch-submit-stockins', { stockins: payload })
-    showToast('备货提交成功', 'success')
-    stagedItems.value = stagedItems.value.filter((i) => i.type !== 'stockin')
-    queryClient.invalidateQueries({ queryKey: ['stockins-list'] })
-  } catch (err: any) {
-    showToast(err.response?.data?.detail || '提交失败', 'error')
+
+    const tasks: Promise<any>[] = []
+    if (orderPayload.length) tasks.push(post('/aux/batch-submit-orders', { orders: orderPayload }))
+    if (stockinPayload.length) tasks.push(post('/aux/batch-submit-stockins', { stockins: stockinPayload }))
+
+    const results = await Promise.allSettled(tasks)
+    const failed = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined
+
+    if (failed) {
+      showToast((failed.reason as any)?.response?.data?.detail || '提交失败', 'error')
+    } else {
+      showToast('提交成功', 'success')
+      stagedItems.value = []
+    }
+
+    if (orderPayload.length) queryClient.invalidateQueries({ queryKey: ['orders-list'] })
+    if (stockinPayload.length) queryClient.invalidateQueries({ queryKey: ['stockins-list'] })
   } finally {
     submitting.value = false
   }
@@ -672,6 +891,155 @@ async function handleImport() {
     importing.value = false
   }
 }
+
+// ===== Tab switching =====
+const activeTab = ref<'input' | 'records'>('input')
+
+// ===== 订单记录查询 =====
+const showFilter = ref(false)
+const filterCustomer = ref('')
+const filterOrderType = ref('')
+const filterStatus = ref('')
+const filterStart = ref('')
+const filterEnd = ref('')
+const currentPage = ref(1)
+const totalPages = ref(1)
+const isLoadingRecords = ref(false)
+const isFetchingRecords = ref(false)
+const orderRecords = ref<any[]>([])
+
+const filterOrderTypeOptions = [
+  { value: 'regular', label: '常规订单' },
+  { value: 'custom', label: '定制订单' },
+]
+
+const statusOptions = [
+  { value: '待备货', label: '待备货' },
+  { value: '已备货', label: '已备货' },
+  { value: '部分备货', label: '部分备货' },
+  { value: '待出货', label: '待出货' },
+  { value: '已出货', label: '已出货' },
+  { value: '已取消', label: '已取消' },
+  { value: '批次已完成', label: '批次已完成' },
+]
+
+function getStatusClass(status: string): string {
+  const map: Record<string, string> = {
+    '待备货': 'co-status-pending',
+    '已备货': 'co-status-stocked',
+    '部分备货': 'co-status-partial',
+    '待出货': 'co-status-shipping',
+    '已出货': 'co-status-shipped',
+    '已取消': 'co-status-cancelled',
+    '批次已完成': 'co-status-completed',
+  }
+  return map[status] || 'co-status-pending'
+}
+
+async function fetchOrders() {
+  const isInitial = orderRecords.value.length === 0
+  if (isInitial) isLoadingRecords.value = true
+  else isFetchingRecords.value = true
+  try {
+    const params: Record<string, unknown> = { page: currentPage.value, per_page: 20 }
+    if (filterCustomer.value) params.customer = filterCustomer.value
+    if (filterOrderType.value) params.order_type = filterOrderType.value
+    if (filterStatus.value) params.status = filterStatus.value
+    if (filterStart.value) params.start_date = filterStart.value
+    if (filterEnd.value) params.end_date = filterEnd.value
+    const res = await orderApi.list(params) as any
+    const items = res.orders ?? res.data ?? res.items ?? (Array.isArray(res) ? res : []) ?? []
+    orderRecords.value = items
+    const total = res.total ?? items.length
+    totalPages.value = Math.ceil(total / 20) || 1
+  } catch {
+    orderRecords.value = []
+    showToast('查询订单记录失败', 'error')
+  } finally {
+    isLoadingRecords.value = false
+    isFetchingRecords.value = false
+  }
+}
+
+function resetFilter() {
+  filterCustomer.value = ''
+  filterOrderType.value = ''
+  filterStatus.value = ''
+  filterStart.value = ''
+  filterEnd.value = ''
+  currentPage.value = 1
+  fetchOrders()
+}
+
+// 详情弹窗
+const detailOpen = ref(false)
+const detailData = ref<any>(null)
+const editForm = reactive({ quantity: 1, deductQuantity: 0, note: '' })
+const availableStockin = ref(0)
+
+async function openDetail(item: any) {
+  try {
+    const res = await orderApi.detail(item.id) as any
+    const data = res.data ?? res
+    detailData.value = data
+    editForm.quantity = data.quantity || 1
+    editForm.deductQuantity = data.deduct_quantity || 0
+    editForm.note = data.note || ''
+    // 查询可用备货量
+    if (data.product?.id && data.customer) {
+      try {
+        const availRes = await get('/aux/available-stockins', { product_id: data.product.id, customer: data.customer }) as any
+        const availData = availRes.data ?? availRes
+        availableStockin.value = (availData.available_quantity ?? availData.available ?? 0) + (data.deduct_quantity || 0)
+      } catch {
+        availableStockin.value = 0
+      }
+    } else {
+      availableStockin.value = 0
+    }
+    detailOpen.value = true
+  } catch {
+    showToast('获取订单详情失败', 'error')
+  }
+}
+
+async function saveEditOrder() {
+  if (!detailData.value) return
+  try {
+    // 并行提交：订单基本信息 + 抵扣数量
+    const promises: Promise<any>[] = []
+    const originalDeduct = detailData.value.deduct_quantity || 0
+
+    // 基本信息更新
+    promises.push(orderApi.update(detailData.value.id, {
+      quantity: editForm.quantity,
+      note: editForm.note,
+    }))
+
+    // 抵扣数量更新（仅当变化时）
+    if (editForm.deductQuantity !== originalDeduct) {
+      promises.push(orderApi.updateDeduct(detailData.value.id, editForm.deductQuantity))
+    }
+
+    await Promise.all(promises)
+    showToast('保存成功', 'success')
+    detailOpen.value = false
+    queryClient.invalidateQueries({ queryKey: ['orders-list'] })
+    queryClient.invalidateQueries({ queryKey: ['inventory'] })
+    queryClient.invalidateQueries({ queryKey: ['stockins-list'] })
+    queryClient.invalidateQueries({ queryKey: ['stockouts-list'] })
+    fetchOrders()
+  } catch (e: any) {
+    showToast(e?.response?.data?.detail || '保存失败', 'error')
+  }
+}
+
+// 切换到记录查询tab时自动加载数据
+watch(activeTab, (tab) => {
+  if (tab === 'records' && orderRecords.value.length === 0) {
+    fetchOrders()
+  }
+})
 </script>
 
 <style scoped>
@@ -684,10 +1052,11 @@ async function handleImport() {
   font-size: 14px;
   color: var(--color-text);
   font-family: inherit;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
   outline: none;
   -moz-appearance: textfield;
 }
+.form-number-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 .form-number-input::-webkit-inner-spin-button,
 .form-number-input::-webkit-outer-spin-button {
   opacity: 1;
@@ -706,9 +1075,10 @@ async function handleImport() {
   color: var(--color-text);
   font-family: inherit;
   background: white;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
   outline: none;
 }
+.form-text-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 .form-text-input:focus {
   border-color: var(--color-primary-400);
   background: white;
@@ -738,11 +1108,11 @@ async function handleImport() {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .co-card-main:hover {
-  box-shadow: 0 12px 36px rgba(0,0,0,0.08), 0 48px 144px rgba(0,0,0,0.12);
-  transform: translateY(-6px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  transform: translateY(-2px);
 }
 
 /* ===== 卡片头部 ===== */
@@ -875,7 +1245,7 @@ async function handleImport() {
   min-height: 40px;
   box-sizing: border-box;
   cursor: default;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, background 0.3s ease;
 }
 .co-section-header:hover {
   border-color: var(--color-ocean-deep);
@@ -932,7 +1302,7 @@ async function handleImport() {
   cursor: pointer;
   background: white;
   color: var(--color-text-secondary);
-  transition: all 0.2s ease;
+  transition: border-color 0.2s ease, color 0.2s ease;
 }
 .co-inline-btn:hover {
   border-color: var(--color-ocean-deep);
@@ -978,7 +1348,7 @@ async function handleImport() {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -1025,9 +1395,10 @@ async function handleImport() {
   font-size: 14px;
   resize: vertical;
   outline: none;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
   font-family: inherit;
 }
+.co-textarea:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 .co-textarea:focus {
   border-color: var(--color-primary-400);
   background: white;
@@ -1055,7 +1426,7 @@ async function handleImport() {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, color 0.3s ease, transform 0.3s ease;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -1081,8 +1452,10 @@ async function handleImport() {
   border: 2px dashed var(--color-border-light);
   background: var(--color-surface, #f8fafc);
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, background 0.3s ease;
   color: var(--color-text-secondary);
+  font-family: inherit;
+  line-height: inherit;
 }
 .co-deduct-display:hover {
   border-color: var(--color-primary-400);
@@ -1107,7 +1480,7 @@ async function handleImport() {
   border-radius: 10px;
   padding: 10px 14px;
   margin-bottom: 8px;
-  transition: all 0.3s ease;
+  transition: border-color 0.3s ease, transform 0.3s ease;
 }
 .co-staged-card:hover {
   border-color: var(--color-primary-300);
@@ -1162,6 +1535,10 @@ async function handleImport() {
   background: var(--color-success-100);
   color: var(--color-success-600);
 }
+.co-type-badge.custom {
+  background: var(--color-warning-50);
+  color: var(--color-warning-600);
+}
 
 /* ===== 操作按钮 ===== */
 .co-btn-icon {
@@ -1174,7 +1551,7 @@ async function handleImport() {
   justify-content: center;
   font-size: 14px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background 0.2s ease, transform 0.2s ease;
 }
 .co-btn-warn {
   background: var(--color-warning-50);
@@ -1214,7 +1591,7 @@ async function handleImport() {
 .co-autocomplete-item {
   padding: 10px 14px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background 0.2s ease, transform 0.2s ease;
   border-bottom: 1px solid var(--color-border-light, #e2e8f0);
   font-size: 13px;
 }
@@ -1228,10 +1605,10 @@ async function handleImport() {
 
 /* ===== Dropdown Animation ===== */
 .co-dropdown-enter-active {
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1), transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .co-dropdown-leave-active {
-  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1), transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .co-dropdown-enter-from {
   opacity: 0;
@@ -1274,5 +1651,570 @@ async function handleImport() {
 .co-empty-state p {
   margin: 0;
   font-size: 14px;
+}
+
+/* ===== Tab 切换栏 ===== */
+.co-header-right {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.co-tab-bar {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: white;
+  border: 1px solid var(--color-border-light);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
+}
+.co-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: none;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+}
+.co-tab-btn:hover {
+  background: var(--color-primary-50);
+  color: var(--color-primary-600);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  transform: translateY(-1px);
+}
+.co-tab-btn.active {
+  background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
+  color: var(--color-primary-700);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 8px rgba(91, 141, 239, 0.2);
+  transform: translateY(-1px);
+}
+
+/* ===== 记录查询 ===== */
+.co-records-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--color-border, #cbd5e1);
+  flex-shrink: 0;
+}
+.co-records-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.co-records-title i {
+  color: var(--color-primary-500);
+}
+
+.co-filter-panel {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--color-border, #cbd5e1);
+  background: var(--color-surface, #f8fafc);
+}
+.co-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+.co-filter-field {
+  min-width: 140px;
+  flex: 1;
+}
+.co-filter-field .co-label {
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+.co-filter-action {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-width: auto;
+}
+
+.co-records-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0;
+  min-height: 0;
+}
+
+/* ===== 加载/空状态 ===== */
+.co-state-placeholder {
+  text-align: center;
+  padding: 60px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.co-state-empty {
+  color: var(--color-text-muted);
+}
+.co-state-text {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+.co-empty-illustration {
+  font-size: 36px;
+  opacity: 0.4;
+  color: var(--color-text-muted);
+}
+.co-spinner-ring {
+  width: 36px;
+  height: 36px;
+  border: 3px solid var(--color-border-light);
+  border-top-color: var(--color-primary-500);
+  border-radius: 50%;
+  animation: co-spin 0.8s linear infinite;
+}
+@keyframes co-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ===== Fetching 进度条 ===== */
+.co-fetching-bar {
+  height: 3px;
+  background: var(--color-border-light);
+  overflow: hidden;
+}
+.co-fetching-progress {
+  height: 100%;
+  width: 30%;
+  background: var(--color-primary-500);
+  animation: co-fetch-slide 1.2s ease-in-out infinite;
+}
+@keyframes co-fetch-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+/* ===== 数据表格 ===== */
+.co-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.co-table thead {
+  background: var(--color-surface, #f8fafc);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.co-table th {
+  padding: 10px 12px;
+  text-align: center;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  border-bottom: 2px solid var(--color-border, #cbd5e1);
+  white-space: nowrap;
+}
+.co-table td {
+  padding: 10px 12px;
+  text-align: center;
+  border-bottom: 1px solid var(--color-border-light, #e2e8f0);
+  vertical-align: middle;
+}
+.co-table tbody tr:hover {
+  background: var(--color-primary-50);
+}
+.co-cell-main {
+  font-weight: 500;
+  color: var(--color-text);
+}
+.co-cell-muted {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+.co-product-thumb {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+/* ===== Badge tags ===== */
+.co-badge-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.co-badge-success {
+  background: var(--color-success-100);
+  color: var(--color-success-600);
+}
+.co-badge-muted {
+  background: var(--color-surface, #f1f5f9);
+  color: var(--color-text-muted);
+}
+
+/* ===== Status badges ===== */
+.co-status-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.co-status-pending {
+  background: var(--color-warning-50);
+  color: var(--color-warning-600);
+}
+.co-status-stocked {
+  background: var(--color-success-100);
+  color: var(--color-success-600);
+}
+.co-status-partial {
+  background: var(--color-primary-50);
+  color: var(--color-primary-600);
+}
+.co-status-shipping {
+  background: #e0e7ff;
+  color: #4338ca;
+}
+.co-status-shipped {
+  background: var(--color-success-50);
+  color: var(--color-success-700);
+}
+.co-status-cancelled {
+  background: var(--color-danger-50);
+  color: var(--color-danger-500);
+}
+.co-status-completed {
+  background: var(--color-primary-50);
+  color: var(--color-primary-700);
+}
+
+/* ===== Action buttons ===== */
+.co-action-group {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+}
+.co-btn-info {
+  background: var(--color-primary-50);
+  color: var(--color-primary-600);
+}
+.co-btn-info:hover {
+  background: var(--color-primary-100);
+  transform: translateY(-1px);
+}
+
+/* ===== 响应式筛选 ===== */
+@media (max-width: 768px) {
+  .co-filter-row {
+    flex-direction: column;
+  }
+  .co-filter-field {
+    min-width: 100%;
+  }
+  .co-table {
+    font-size: 12px;
+  }
+  .co-table th, .co-table td {
+    padding: 8px 6px;
+  }
+}
+
+/* ===== Order Edit Dialog ===== */
+.oe-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Header */
+.oe-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, var(--color-primary-50, #eff6ff), var(--color-primary-100, #dbeafe));
+  border-radius: 12px;
+  border: 1px solid var(--color-primary-200, #bfdbfe);
+}
+.oe-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.oe-order-no {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-primary-700, #1d4ed8);
+  letter-spacing: 0.02em;
+}
+.oe-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.oe-status-dot.co-status-pending { background: #f59e0b; }
+.oe-status-dot.co-status-stocked { background: #22c55e; }
+.oe-status-dot.co-status-partial { background: #3b82f6; }
+.oe-status-dot.co-status-shipping { background: #6366f1; }
+.oe-status-dot.co-status-shipped { background: #10b981; }
+.oe-status-dot.co-status-cancelled { background: #ef4444; }
+.oe-status-dot.co-status-completed { background: #8b5cf6; }
+.oe-status-text {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+.oe-date {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+/* Section */
+.oe-section {
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.oe-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--color-surface, #f8fafc);
+  border-bottom: 1px solid var(--color-border-light, #e2e8f0);
+}
+.oe-section-title i {
+  color: var(--color-primary-500);
+  font-size: 11px;
+}
+
+/* Info grid (readonly) */
+.oe-info-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+}
+.oe-info-cell {
+  padding: 10px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-bottom: 1px solid var(--color-border-light, #e2e8f0);
+}
+.oe-info-cell:nth-child(odd) {
+  border-right: 1px solid var(--color-border-light, #e2e8f0);
+}
+.oe-info-cell:nth-last-child(-n+2) {
+  border-bottom: none;
+}
+.oe-info-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.oe-info-value {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+.oe-info-product {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.oe-product-thumb {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.oe-mono {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
+/* Editable section */
+.oe-editable {
+  border-color: var(--color-primary-200, #bfdbfe);
+  background: linear-gradient(135deg, rgba(255,255,255,0.9), rgba(239,246,255,0.5));
+}
+.oe-editable .oe-section-title {
+  background: linear-gradient(135deg, var(--color-primary-50, #eff6ff), rgba(219,234,254,0.5));
+  color: var(--color-primary-600, #2563eb);
+  border-bottom-color: var(--color-primary-200, #bfdbfe);
+}
+.oe-edit-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  padding: 16px;
+}
+.oe-edit-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.oe-edit-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+.oe-edit-control {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  height: 40px;
+}
+
+/* Stepper (quantity) */
+.oe-stepper-btn {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--color-border, #cbd5e1);
+  background: var(--color-surface, #f8fafc);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 12px;
+}
+.oe-stepper-btn:first-child {
+  border-radius: 10px 0 0 10px;
+  border-right: none;
+}
+.oe-stepper-btn:last-child {
+  border-radius: 0 10px 10px 0;
+  border-left: none;
+}
+.oe-stepper-btn:hover {
+  background: var(--color-primary-50);
+  color: var(--color-primary-600);
+  border-color: var(--color-primary-300);
+}
+.oe-stepper-input {
+  width: 72px;
+  height: 40px;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+  border: 2px solid var(--color-border, #cbd5e1);
+  border-radius: 0;
+  outline: none;
+  background: white;
+  -moz-appearance: textfield;
+  box-sizing: border-box;
+}
+.oe-stepper-input::-webkit-inner-spin-button,
+.oe-stepper-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.oe-stepper-input:focus {
+  border-color: var(--color-primary-400);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+  z-index: 1;
+  position: relative;
+}
+
+/* Readonly value in edit area */
+.oe-readonly-value {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+  padding: 8px 12px;
+  background: var(--color-surface, #f1f5f9);
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  border-radius: 10px;
+  min-width: 60px;
+  text-align: center;
+}
+.oe-readonly-hint {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  margin-left: 8px;
+  font-style: italic;
+}
+.oe-available-hint {
+  font-size: 11px;
+  color: var(--color-success-600, #16a34a);
+  margin-left: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Textarea */
+.oe-edit-full {
+  padding: 0 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.oe-textarea {
+  width: 100%;
+  padding: 10px 14px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-text);
+  background: white;
+  border: 2px solid var(--color-border, #cbd5e1);
+  border-radius: 10px;
+  outline: none;
+  resize: vertical;
+  font-family: inherit;
+  box-sizing: border-box;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.oe-textarea::placeholder {
+  color: var(--color-text-muted);
+}
+.oe-textarea:focus {
+  border-color: var(--color-primary-400);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+  .oe-info-grid {
+    grid-template-columns: 1fr;
+  }
+  .oe-info-cell:nth-child(odd) {
+    border-right: none;
+  }
+  .oe-edit-grid {
+    grid-template-columns: 1fr;
+  }
+  .oe-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
 }
 </style>

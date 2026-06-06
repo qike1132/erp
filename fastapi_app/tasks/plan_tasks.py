@@ -13,8 +13,13 @@ from datetime import date, timedelta
 
 from celery import shared_task
 
-from fastapi_app.core.database import SyncSessionLocal
+from fastapi_app.core.database import get_sync_engine
 from fastapi_app.core.logger import logger
+from sqlalchemy.orm import sessionmaker
+
+_SyncSession = sessionmaker(
+    autocommit=False, autoflush=False, bind=get_sync_engine()
+)
 
 
 @shared_task(bind=True, name='sync_shipment_records_task', queue='batch', max_retries=2, default_retry_delay=60, soft_time_limit=300, time_limit=600)
@@ -27,7 +32,7 @@ def sync_shipment_records_task(self):
     """
     try:
         from sqlalchemy import text
-        session = SyncSessionLocal()
+        session = _SyncSession()
         try:
             target_date = date.today() - timedelta(days=1)
             rows = session.execute(text("\n                SELECT so.id, so.stockout_no, so.customer, so.product_id,\n                       so.quantity, so.returned_quantity, DATE(so.stockout_date) as stockout_date,\n                       p.name as product_name\n                FROM stock_out so\n                JOIN product p ON so.product_id = p.id\n                WHERE DATE(so.stockout_date) = :target_date\n                  AND so.customer IS NOT NULL AND so.customer != ''\n            "), {'target_date': target_date}).fetchall()
@@ -72,7 +77,7 @@ def batch_import_plans_task(self, file_path: str, original_filename: str, user_i
         import openpyxl
 
         from fastapi_app.shared_models import StagingPurchasePlan
-        session = SyncSessionLocal()
+        session = _SyncSession()
         try:
             batch_id = str(uuid.uuid4())[:8]
             session_id = str(user_id)

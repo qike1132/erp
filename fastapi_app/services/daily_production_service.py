@@ -89,7 +89,7 @@ async def get_records(
     offset = (page - 1) * per_page
 
     # Single query: paginated data + total count via window function + stats via cross join
-    from sqlalchemy import literal_column
+    from sqlalchemy import literal_column, true
     from sqlalchemy.orm import aliased
 
     stats_cte = (
@@ -103,6 +103,9 @@ async def get_records(
         .cte('stats')
     )
 
+    from sqlalchemy.sql.expression import Join
+    cross_from = Join(DailyProductionRecord.__table__, stats_cte, true())
+
     result = await db.execute(
         select(
             DailyProductionRecord,
@@ -111,7 +114,7 @@ async def get_records(
             stats_cte.c.total_val,
             stats_cte.c.total_sku,
         )
-        .cross_join(stats_cte)
+        .select_from(cross_from)
         .where(*conditions)
         .order_by(DailyProductionRecord.production_date, DailyProductionRecord.department, DailyProductionRecord.id)
         .offset(offset)

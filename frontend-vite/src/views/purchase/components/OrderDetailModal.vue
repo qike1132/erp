@@ -1,7 +1,7 @@
 <template>
   <UiDialog :open="open" @update:open="$emit('close')">
     <template #title>
-      <div class="flex items-center gap-2"><i class="fas fa-file-invoice-dollar text-primary-500" /> 采购订单详情</div>
+      <div class="flex items-center gap-2"><i class="fas fa-file-invoice-dollar text-primary-500"  aria-hidden="true" /> 采购订单详情</div>
     </template>
 
     <div v-if="order" class="space-y-4">
@@ -10,10 +10,10 @@
         <div><strong>供应商：</strong>{{ order.supplier_name || '' }}</div>
         <div><strong>客户：</strong>{{ order.customer_name || '-' }}</div>
         <div><strong>下单日期：</strong>{{ order.order_date || '-' }}</div>
-        <div><strong>创建时间：</strong>{{ order.create_time || '-' }}</div>
+        <div><strong>创建时间：</strong>{{ formatDateTime(order.create_time) }}</div>
       </div>
       <div v-if="order.remark"><strong>备注：</strong>{{ order.remark }}</div>
-      <h4 class="m-0 mb-2.5 text-sm flex items-center gap-2"><i class="fas fa-list text-primary-500" /> 物料清单</h4>
+      <h4 class="m-0 mb-2.5 text-sm flex items-center gap-2"><i class="fas fa-list text-primary-500"  aria-hidden="true" /> 物料清单</h4>
       <div class="overflow-x-auto rounded-xl">
         <table class="w-full border-collapse text-[13px] data-table">
           <thead>
@@ -45,7 +45,7 @@
 
     <template #footer>
       <button
-        class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-all text-text-secondary border border-border bg-transparent hover:text-primary-500 hover:border-primary-500 hover:bg-primary-50"
+        class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-colors text-text-secondary border border-border bg-transparent hover:text-primary-500 hover:border-primary-500 hover:bg-primary-50"
         @click="$emit('close')"
       >
         关闭
@@ -56,6 +56,7 @@
 
 <script setup lang="ts">
 import UiDialog from '@/components/ui/UiDialog.vue'
+import { formatDateTime } from '@/utils/format'
 
 defineProps<{
   open: boolean

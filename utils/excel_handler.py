@@ -94,6 +94,8 @@ class ExcelReader:
 
         # 创建临时文件
         self.temp_fd, self.temp_path = tempfile.mkstemp(suffix='.xlsx')
+        os.close(self.temp_fd)
+        self.temp_fd = None
 
         try:
             # 保存文件

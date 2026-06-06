@@ -3,7 +3,7 @@
     <div class="text-text-secondary text-xs font-semibold uppercase tracking-wider mb-1">
       {{ title }}
     </div>
-    <div class="text-2xl font-bold text-text">
+    <div class="text-2xl font-bold text-text min-w-0 tabular-nums">
       {{ formattedValue }}
     </div>
     <div v-if="suffix" class="text-sm text-text-muted ml-1 inline">
@@ -17,6 +17,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { formatNumber } from '@/utils/format'
 
 const props = defineProps<{
   title: string
@@ -28,7 +29,7 @@ const props = defineProps<{
 
 const formattedValue = computed(() => {
   if (props.formatter) return props.formatter(props.value)
-  if (typeof props.value === 'number') return props.value.toLocaleString()
+  if (typeof props.value === 'number') return formatNumber(props.value)
   return props.value
 })
 </script>

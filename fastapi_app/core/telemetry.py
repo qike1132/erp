@@ -44,8 +44,9 @@ def setup_telemetry(app=None):
         trace.set_tracer_provider(TracerProvider(resource=resource))
         _tracer = trace.get_tracer(service_name)
 
-        # Exporter: OTLP (默认) 或 Console
-        exporter_type = os.getenv("OTEL_EXPORTER_TYPE", "console")
+        # Exporter: OTLP (生产默认) 或 Console
+        default_exporter = "otlp" if env == "production" else "console"
+        exporter_type = os.getenv("OTEL_EXPORTER_TYPE", default_exporter)
         if exporter_type == "otlp":
             from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
             exporter = OTLPSpanExporter(
@@ -64,6 +65,27 @@ def setup_telemetry(app=None):
         if app is not None:
             from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
             FastAPIInstrumentor.instrument_app(app)
+
+        # SQLAlchemy Instrumentation
+        try:
+            from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+            SQLAlchemyInstrumentor().instrument()
+        except ImportError:
+            pass
+
+        # Redis Instrumentation
+        try:
+            from opentelemetry.instrumentation.redis import RedisInstrumentor
+            RedisInstrumentor().instrument()
+        except ImportError:
+            pass
+
+        # Requests Instrumentation (outgoing HTTP)
+        try:
+            from opentelemetry.instrumentation.requests import RequestsInstrumentor
+            RequestsInstrumentor().instrument()
+        except ImportError:
+            pass
 
         logger.info("OpenTelemetry 已启用: service=%s, exporter=%s", service_name, exporter_type)
 

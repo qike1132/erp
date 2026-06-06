@@ -4,6 +4,8 @@
 手工部录入、包装部录入、汇总动态报表的请求/响应模型。
 """
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 # ==================== 手工部 ====================
@@ -104,3 +106,13 @@ class PackagingExportRequest(BaseModel):
     """包装部导出请求"""
     start_date: str | None = Field(None, description="起始日期 (YYYY-MM-DD)")
     end_date: str | None = Field(None, description="结束日期 (YYYY-MM-DD)")
+
+
+class PackagingUploadResponse(BaseModel):
+    success: bool = True
+    preview: list[dict[str, Any]] = []
+    total: int = 0
+    valid_count: int = 0
+    error_count: int = 0
+    created_count: int = 0
+    errors: list[str] = []
