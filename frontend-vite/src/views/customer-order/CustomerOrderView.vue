@@ -1,8 +1,8 @@
 <template>
   <div class="co-container">
-    <div class="co-card co-card-main">
+    <div class="page-card page-card-main">
       <!-- 卡片头部 -->
-      <div class="co-card-header">
+      <div class="page-card-header">
         <div class="co-header-left">
           <HeaderTabs />
         </div>
@@ -20,7 +20,7 @@
 
       <!-- TAB: 录入 -->
       <div v-show="activeTab === 'input'" class="co-tab-content">
-      <div class="co-body">
+      <div class="page-card-body">
         <!-- 左栏：录入表单 -->
         <div class="co-col">
           <div class="co-col-title">
@@ -266,7 +266,17 @@
       <!-- TAB: 记录查询 -->
       <div v-show="activeTab === 'records'" class="co-tab-content">
         <div class="co-records-header">
-          <span class="co-records-title"><i class="fas fa-list-alt" aria-hidden="true"></i> 订单记录列表</span>
+          <div class="co-records-title-group">
+            <span class="co-records-title"><i class="fas fa-list-alt" aria-hidden="true"></i> 记录列表</span>
+            <span class="co-record-type-switch">
+              <button
+                v-for="opt in recordTypeOptions"
+                :key="opt.value"
+                :class="['co-type-btn', recordType === opt.value && 'active']"
+                @click="recordType = opt.value; currentPage = 1; fetchOrders()"
+              >{{ opt.label }}</button>
+            </span>
+          </div>
           <UiButton variant="outline" size="sm" @click="showFilter = !showFilter">
             <i class="fas fa-filter" style="margin-right: 4px" aria-hidden="true" />筛选
           </UiButton>
@@ -282,7 +292,7 @@
               <label class="co-label"><i class="fas fa-tag" aria-hidden="true"></i> 订单类型</label>
               <UiSelect v-model="filterOrderType" placeholder="全部" :options="filterOrderTypeOptions" style="width: 100%" />
             </div>
-            <div class="co-filter-field">
+            <div v-if="recordType === 'order'" class="co-filter-field">
               <label class="co-label"><i class="fas fa-info-circle" aria-hidden="true"></i> 状态</label>
               <UiSelect v-model="filterStatus" placeholder="全部" :options="statusOptions" style="width: 100%" />
             </div>
@@ -312,7 +322,7 @@
           </div>
           <div v-else-if="orderRecords.length === 0" class="co-state-placeholder co-state-empty">
             <div class="co-empty-illustration"><i class="fas fa-clipboard-list" aria-hidden="true" /></div>
-            <p class="co-state-text">暂无订单记录</p>
+            <p class="co-state-text">暂无{{ recordType === 'stockin' ? '备货' : '订单' }}记录</p>
           </div>
 
           <template v-else>
@@ -320,32 +330,38 @@
             <table class="co-table">
               <thead>
                 <tr>
-                  <th>订单时间</th>
+                  <th>{{ recordType === 'stockin' ? '备货时间' : '订单时间' }}</th>
+                  <th>编号</th>
                   <th>客户</th>
                   <th>产品</th>
                   <th>数量</th>
-                  <th>抵扣备货</th>
-                  <th>操作</th>
+                  <th v-if="recordType === 'order'">抵扣备货</th>
+                  <th v-if="recordType === 'stockin'">已抵扣</th>
+                  <th v-if="recordType === 'order'">操作</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="item in orderRecords" :key="item.id">
+                <tr v-for="item in orderRecords" :key="(item.record_type || 'order') + '-' + item.id">
                   <td><span class="co-cell-muted">{{ item.order_date }}</span></td>
+                  <td>
+                    <span :class="['co-type-badge', item.record_type === 'stockin' ? 'stockin' : 'order']">
+                      {{ item.record_type === 'stockin' ? '备货' : '订单' }}
+                    </span>
+                    <span class="co-cell-muted" style="margin-left: 4px;">{{ item.order_no }}</span>
+                  </td>
                   <td><span class="co-cell-main">{{ item.customer }}</span></td>
-                  <td style="text-align: left">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                      <img v-if="item.product?.image" :src="item.product.image" class="co-product-thumb" />
-                      <div>
-                        <span class="co-cell-main">{{ item.product?.name || '-' }}</span>
-                        <span v-if="item.product?.barcode" class="co-cell-muted" style="display: block; font-size: 11px;">{{ item.product.barcode }}</span>
-                      </div>
-                    </div>
+                  <td style="text-align: center">
+                    <span class="co-cell-main">{{ item.product?.name || '-' }}</span>
+                    <span v-if="item.product?.barcode" class="co-cell-muted" style="display: block; font-size: 11px;">{{ item.product.barcode }}</span>
                   </td>
                   <td><strong>{{ item.quantity }}</strong></td>
-                  <td>
+                  <td v-if="recordType === 'order'">
                     <span v-if="item.deduct_quantity > 0" class="co-badge-tag co-badge-success">抵扣: {{ item.deduct_quantity }}</span>
                   </td>
-                  <td>
+                  <td v-if="recordType === 'stockin'">
+                    <span v-if="item.deduct_quantity > 0" class="co-badge-tag co-badge-success">已抵扣: {{ item.deduct_quantity }}</span>
+                  </td>
+                  <td v-if="recordType === 'order'">
                     <div class="co-action-group">
                       <button class="co-btn-icon co-btn-info" @click="openDetail(item)" aria-label="详情">
                         <i class="fas fa-eye" aria-hidden="true" />
@@ -518,10 +534,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onUnmounted, watch } from 'vue'
-import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { get, post } from '@/api/request'
-import { customerApi, orderApi } from '@/api'
+import { ref, watch } from 'vue'
 import UiInput from '@/components/ui/UiInput.vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
 import UiButton from '@/components/ui/UiButton.vue'
@@ -529,172 +542,83 @@ import UiDialog from '@/components/ui/UiDialog.vue'
 import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 import UiSelect from '@/components/ui/UiSelect.vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
-import { showToast } from '@/composables/useToast'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
-import { useConfirmDialog } from '@/composables/useConfirmDialog'
-import { useCountryStore } from '@/stores/country'
-import { toISODate } from '@/utils/format'
+import { showToast } from '@/composables/useToast'
+import { useOrderForm } from './composables/useOrderForm'
+import { useOrderList } from './composables/useOrderList'
+import { useOrderActions } from './composables/useOrderActions'
 
-const queryClient = useQueryClient()
-const confirmDialog = useConfirmDialog()
-const countryStore = useCountryStore()
+const {
+  form,
+  isOrder,
+  isCustomOrder,
+  orderTypeOptions,
+  canAdd,
+  customerOptions,
+  suggestions,
+  showSuggestions,
+  onProductInput,
+  onProductFocus,
+  hideSuggestions,
+  selectProduct,
+  countryDialogVisible,
+  newCountryName,
+  openCountryDialog,
+  saveCountry,
+  availableStock,
+  deductInfoVisible,
+  handleDeductPreview,
+  openDeductEdit,
+  resetFormAfterAdd,
+} = useOrderForm()
 
-if (!countryStore.loaded) {
-  countryStore.fetchCountries()
-}
+const {
+  showFilter,
+  filterCustomer,
+  filterOrderType,
+  filterStatus,
+  filterStart,
+  filterEnd,
+  currentPage,
+  totalPages,
+  isLoadingRecords,
+  isFetchingRecords,
+  orderRecords,
+  recordType,
+  recordTypeOptions,
+  filterOrderTypeOptions,
+  statusOptions,
+  getStatusClass,
+  fetchOrders,
+  resetFilter,
+} = useOrderList()
 
-// ===== Data queries =====
-const { data: customerData } = useQuery({
-  queryKey: ['customers-active-names'],
-  queryFn: () => customerApi.activeNames() as Promise<any>,
-  staleTime: 30_000,
-  gcTime: 60_000,
-})
-const customerList = computed(() => {
-  const raw = customerData.value?.names ?? customerData.value ?? []
-  return raw.map((c: any) => ({ name: c.name ?? c }))
-})
-const customerOptions = computed(() => customerList.value.map((c: { name: string }) => ({ value: c.name, label: c.name })))
-
-// ===== Product search (shared) =====
-async function searchProducts(q: string) {
-  if (!q.trim()) return []
-  try {
-    const d = await get<any[]>('/aux/product-search', { q })
-    return (Array.isArray(d) ? d : []).map((p: any) => ({ value: p.name, id: p.id, ...p }))
-  } catch {
-    return []
-  }
-}
-
-const suggestions = ref<any[]>([])
-const showSuggestions = ref(false)
-let searchTimeout: ReturnType<typeof setTimeout> | null = null
-onUnmounted(() => {
-  if (searchTimeout) clearTimeout(searchTimeout)
-})
-
-function onProductInput() {
-  form.productId = 0
-  if (searchTimeout) clearTimeout(searchTimeout)
-  searchTimeout = setTimeout(async () => {
-    suggestions.value = await searchProducts(form.productSearch)
-    showSuggestions.value = suggestions.value.length > 0
-  }, 300)
-}
-function onProductFocus() {
-  if (form.productSearch && suggestions.value.length === 0) {
-    searchProducts(form.productSearch).then((r) => {
-      suggestions.value = r
-      showSuggestions.value = r.length > 0
-    })
-  } else if (suggestions.value.length > 0) {
-    showSuggestions.value = true
-  }
-}
-function hideSuggestions() {
-  setTimeout(() => { showSuggestions.value = false }, 150)
-}
-function selectProduct(p: any) {
-  form.productId = p.id
-  form.productSearch = p.value
-  showSuggestions.value = false
-  if (isOrder.value && form.deductStock) fetchAvailableStock()
-}
-
-// ===== Unified form =====
-const today = new Date().toISOString().split('T')[0]
-const form = reactive({
-  type: 'order' as 'order' | 'stockin',
-  orderType: 'normal' as 'normal' | 'custom',
-  date: today,
-  customer: '',
-  productSearch: '',
-  productId: 0,
-  quantity: 1,
-  deductStock: false,
-  deductQuantity: 0,
-  note: '',
-  country: '',
-})
-const isOrder = computed(() => form.type === 'order')
-const isCustomOrder = computed(() => form.orderType === 'custom')
-const orderTypeOptions = [
-  { value: 'normal', label: '常规订单' },
-  { value: 'custom', label: '定制订单' },
-]
-
-const lastCountry = ref('')
-watch(() => form.orderType, (newType, oldType) => {
-  if (oldType === 'custom' && newType === 'normal') {
-    lastCountry.value = form.country
-    form.country = ''
-  } else if (oldType === 'normal' && newType === 'custom' && lastCountry.value) {
-    form.country = lastCountry.value
-  }
-})
-const canAdd = computed(() => {
-  const base = !!form.customer && !!form.productId && form.quantity > 0 && form.quantity <= 9999999 && !!form.date
-  if (isCustomOrder.value) return base && !!form.country
-  return base
-})
-
-const countryDialogVisible = ref(false)
-const newCountryName = ref('')
-
-function openCountryDialog() {
-  newCountryName.value = ''
-  countryDialogVisible.value = true
-}
-
-async function saveCountry() {
-  const trimmed = newCountryName.value.trim()
-  if (!trimmed) {
-    showToast('请输入国家名称', 'warning')
-    return
-  }
-  const ok = await countryStore.addCountry(trimmed)
-  if (ok) {
-    form.country = trimmed
-    countryDialogVisible.value = false
-    showToast('国家保存成功', 'success')
-  } else {
-    showToast('该国家已存在', 'warning')
-  }
-}
-
-const availableStock = ref(0)
-const deductInfoVisible = ref(false)
-
-async function fetchAvailableStock() {
-  if (!form.productId || !form.customer) {
-    availableStock.value = 0
-    return
-  }
-  try {
-    const res = (await get('/aux/available-stockins', { product_id: form.productId, customer: form.customer })) as any
-    const items = res.stockins ?? res.items ?? res ?? []
-    availableStock.value = items.reduce((s: number, i: any) => s + (i.available ?? i.quantity - (i.deducted || 0)), 0)
-  } catch {
-    availableStock.value = 0
-  }
-}
-
-async function handleDeductPreview() {
-  form.deductStock = !form.deductStock
-  if (form.deductStock) {
-    await fetchAvailableStock()
-    deductInfoVisible.value = true
-    form.deductQuantity = Math.min(form.quantity, availableStock.value)
-  } else {
-    form.deductQuantity = 0
-    deductInfoVisible.value = false
-  }
-}
-function openDeductEdit() {
-  if (!form.deductStock) handleDeductPreview()
-  deductInfoVisible.value = true
-}
+const {
+  stagedItems,
+  removeStagedItem,
+  submitting,
+  submitAll,
+  editStagedVisible,
+  editStagedData,
+  editAvailableStock,
+  openEditStaged,
+  saveEditStaged,
+  excelFile,
+  importing,
+  isDragOver,
+  excelInputRef,
+  handleExcelSelect,
+  onDrop,
+  downloadTemplate,
+  handleImport,
+  detailOpen,
+  detailData,
+  editForm,
+  availableStockin,
+  openDetail,
+  saveEditOrder,
+  confirmDialog,
+} = useOrderActions(form, isOrder, fetchOrders)
 
 function addStaged() {
   if (!canAdd.value) {
@@ -718,321 +642,11 @@ function addStaged() {
     deductStock: isOrder.value ? form.deductStock : false,
     deductQuantity: isOrder.value && form.deductStock ? form.deductQuantity : 0,
   })
-  form.productSearch = ''
-  form.productId = 0
-  form.quantity = 1
-  form.note = ''
-  form.orderType = 'normal'
-  form.country = ''
-  form.deductStock = false
-  form.deductQuantity = 0
-  deductInfoVisible.value = false
-}
-
-// ===== Staged items (unified) =====
-const stagedItems = ref<any[]>([])
-
-async function removeStagedItem(idx: number) {
-  const ok = await confirmDialog.confirm('确定删除？', '此操作不可恢复', 'danger')
-  if (!ok) return
-  stagedItems.value.splice(idx, 1)
-}
-const stagedOrders = computed(() => stagedItems.value.filter((i: any) => i.type === 'order'))
-const stagedStockins = computed(() => stagedItems.value.filter((i: any) => i.type === 'stockin'))
-
-const submitting = ref(false)
-
-async function submitAll() {
-  if (!stagedItems.value.length) return
-  submitting.value = true
-  try {
-    const orderPayload = stagedOrders.value.map((i) => ({
-      product_id: i.productId,
-      customer: i.customer,
-      quantity: i.quantity,
-      deduct_stock: i.deductStock || false,
-      deduct_quantity: i.deductQuantity || 0,
-      note: i.note || '',
-      order_date: i.date || '',
-      order_type: i.orderType === 'custom' ? 'custom' : 'regular',
-      country: i.country || '',
-    }))
-    const stockinPayload = stagedStockins.value.map((i) => ({
-      product_id: i.productId,
-      customer: i.customer,
-      quantity: i.quantity,
-      note: i.note || '',
-      stockin_date: i.date || '',
-      order_type: i.orderType === 'custom' ? 'custom' : 'regular',
-      country: i.country || '',
-    }))
-
-    const tasks: Promise<any>[] = []
-    if (orderPayload.length) tasks.push(post('/aux/batch-submit-orders', { orders: orderPayload }))
-    if (stockinPayload.length) tasks.push(post('/aux/batch-submit-stockins', { stockins: stockinPayload }))
-
-    const results = await Promise.allSettled(tasks)
-    const failed = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined
-
-    if (failed) {
-      showToast((failed.reason as any)?.response?.data?.detail || '提交失败', 'error')
-    } else {
-      showToast('提交成功', 'success')
-      stagedItems.value = []
-    }
-
-    if (orderPayload.length) queryClient.invalidateQueries({ queryKey: ['orders-list'] })
-    if (stockinPayload.length) queryClient.invalidateQueries({ queryKey: ['stockins-list'] })
-  } finally {
-    submitting.value = false
-  }
-}
-
-// ===== Edit staged (unified) =====
-const editStagedVisible = ref(false)
-const editStagedIdx = ref(-1)
-const editStagedData = ref<any>(null)
-const editAvailableStock = ref(0)
-
-function openEditStaged(idx: number) {
-  editStagedIdx.value = idx
-  editStagedData.value = { ...stagedItems.value[idx] }
-  editStagedVisible.value = true
-  if (editStagedData.value.type === 'order' && editStagedData.value.productId && editStagedData.value.customer) {
-    get('/aux/available-stockins', {
-      product_id: editStagedData.value.productId,
-      customer: editStagedData.value.customer,
-    })
-      .then((res: any) => {
-        const items = res.stockins ?? res.items ?? res ?? []
-        editAvailableStock.value = items.reduce(
-          (s: number, i: any) => s + (i.available ?? i.quantity - (i.deducted || 0)),
-          0,
-        )
-      })
-      .catch(() => {
-        editAvailableStock.value = 0
-      })
-  }
-}
-function saveEditStaged() {
-  if (editStagedIdx.value >= 0 && editStagedData.value) {
-    if (editStagedData.value.deductQuantity > 0) editStagedData.value.deductStock = true
-    stagedItems.value[editStagedIdx.value] = { ...editStagedData.value }
-  }
-  editStagedVisible.value = false
-}
-
-// ===== Batch upload (shared) =====
-const excelFile = ref<File | null>(null)
-const importing = ref(false)
-const isDragOver = ref(false)
-const excelInputRef = ref<HTMLInputElement | null>(null)
-
-function handleExcelSelect(e: Event) {
-  excelFile.value = (e.target as HTMLInputElement).files?.[0] ?? null
-}
-function onDrop(e: DragEvent) {
-  isDragOver.value = false
-  const f = e.dataTransfer?.files?.[0]
-  if (f) excelFile.value = f
-}
-function downloadTemplate() {
-  window.open('/api/v1/batch/download-template', '_blank')
-}
-
-async function handleImport() {
-  if (!excelFile.value) return
-  importing.value = true
-  try {
-    const fd = new FormData()
-    fd.append('file', excelFile.value)
-    if (isOrder.value) {
-      await post('/staging-orders/import', fd)
-      showToast('导入成功', 'success')
-      const res = (await get('/staging-orders')) as any
-      const items = res.staging_orders ?? res.items ?? []
-      stagedItems.value.push(
-        ...items.map((i: any) => ({
-          type: 'order' as const,
-          customer: i.customer,
-          productId: i.product_id,
-          productName: i.product_name,
-          quantity: i.quantity,
-          date: i.order_date,
-          note: i.note,
-          deductStock: i.deduct_stock,
-          deductQuantity: i.deduct_quantity || 0,
-        })),
-      )
-    } else {
-      await post('/staging-stockins/import', fd)
-      showToast('导入成功', 'success')
-      const res = (await get('/staging-stockins')) as any
-      const items = res.staging_stockins ?? res.items ?? []
-      stagedItems.value.push(
-        ...items.map((i: any) => ({
-          type: 'stockin' as const,
-          customer: i.customer,
-          productId: i.product_id,
-          productName: i.product_name,
-          quantity: i.quantity,
-          date: i.stockin_date,
-          note: i.note,
-          deductStock: false,
-          deductQuantity: 0,
-        })),
-      )
-    }
-    excelFile.value = null
-  } catch (err: any) {
-    showToast(err.response?.data?.detail || '导入失败', 'error')
-  } finally {
-    importing.value = false
-  }
+  resetFormAfterAdd()
 }
 
 // ===== Tab switching =====
 const activeTab = ref<'input' | 'records'>('input')
-
-// ===== 订单记录查询 =====
-const showFilter = ref(false)
-const filterCustomer = ref('')
-const filterOrderType = ref('')
-const filterStatus = ref('')
-const filterStart = ref('')
-const filterEnd = ref('')
-const currentPage = ref(1)
-const totalPages = ref(1)
-const isLoadingRecords = ref(false)
-const isFetchingRecords = ref(false)
-const orderRecords = ref<any[]>([])
-
-const filterOrderTypeOptions = [
-  { value: 'regular', label: '常规订单' },
-  { value: 'custom', label: '定制订单' },
-]
-
-const statusOptions = [
-  { value: '待备货', label: '待备货' },
-  { value: '已备货', label: '已备货' },
-  { value: '部分备货', label: '部分备货' },
-  { value: '待出货', label: '待出货' },
-  { value: '已出货', label: '已出货' },
-  { value: '已取消', label: '已取消' },
-  { value: '批次已完成', label: '批次已完成' },
-]
-
-function getStatusClass(status: string): string {
-  const map: Record<string, string> = {
-    '待备货': 'co-status-pending',
-    '已备货': 'co-status-stocked',
-    '部分备货': 'co-status-partial',
-    '待出货': 'co-status-shipping',
-    '已出货': 'co-status-shipped',
-    '已取消': 'co-status-cancelled',
-    '批次已完成': 'co-status-completed',
-  }
-  return map[status] || 'co-status-pending'
-}
-
-async function fetchOrders() {
-  const isInitial = orderRecords.value.length === 0
-  if (isInitial) isLoadingRecords.value = true
-  else isFetchingRecords.value = true
-  try {
-    const params: Record<string, unknown> = { page: currentPage.value, per_page: 20 }
-    if (filterCustomer.value) params.customer = filterCustomer.value
-    if (filterOrderType.value) params.order_type = filterOrderType.value
-    if (filterStatus.value) params.status = filterStatus.value
-    if (filterStart.value) params.start_date = filterStart.value
-    if (filterEnd.value) params.end_date = filterEnd.value
-    const res = await orderApi.list(params) as any
-    const items = res.orders ?? res.data ?? res.items ?? (Array.isArray(res) ? res : []) ?? []
-    orderRecords.value = items
-    const total = res.total ?? items.length
-    totalPages.value = Math.ceil(total / 20) || 1
-  } catch {
-    orderRecords.value = []
-    showToast('查询订单记录失败', 'error')
-  } finally {
-    isLoadingRecords.value = false
-    isFetchingRecords.value = false
-  }
-}
-
-function resetFilter() {
-  filterCustomer.value = ''
-  filterOrderType.value = ''
-  filterStatus.value = ''
-  filterStart.value = ''
-  filterEnd.value = ''
-  currentPage.value = 1
-  fetchOrders()
-}
-
-// 详情弹窗
-const detailOpen = ref(false)
-const detailData = ref<any>(null)
-const editForm = reactive({ quantity: 1, deductQuantity: 0, note: '' })
-const availableStockin = ref(0)
-
-async function openDetail(item: any) {
-  try {
-    const res = await orderApi.detail(item.id) as any
-    const data = res.data ?? res
-    detailData.value = data
-    editForm.quantity = data.quantity || 1
-    editForm.deductQuantity = data.deduct_quantity || 0
-    editForm.note = data.note || ''
-    // 查询可用备货量
-    if (data.product?.id && data.customer) {
-      try {
-        const availRes = await get('/aux/available-stockins', { product_id: data.product.id, customer: data.customer }) as any
-        const availData = availRes.data ?? availRes
-        availableStockin.value = (availData.available_quantity ?? availData.available ?? 0) + (data.deduct_quantity || 0)
-      } catch {
-        availableStockin.value = 0
-      }
-    } else {
-      availableStockin.value = 0
-    }
-    detailOpen.value = true
-  } catch {
-    showToast('获取订单详情失败', 'error')
-  }
-}
-
-async function saveEditOrder() {
-  if (!detailData.value) return
-  try {
-    // 并行提交：订单基本信息 + 抵扣数量
-    const promises: Promise<any>[] = []
-    const originalDeduct = detailData.value.deduct_quantity || 0
-
-    // 基本信息更新
-    promises.push(orderApi.update(detailData.value.id, {
-      quantity: editForm.quantity,
-      note: editForm.note,
-    }))
-
-    // 抵扣数量更新（仅当变化时）
-    if (editForm.deductQuantity !== originalDeduct) {
-      promises.push(orderApi.updateDeduct(detailData.value.id, editForm.deductQuantity))
-    }
-
-    await Promise.all(promises)
-    showToast('保存成功', 'success')
-    detailOpen.value = false
-    queryClient.invalidateQueries({ queryKey: ['orders-list'] })
-    queryClient.invalidateQueries({ queryKey: ['inventory'] })
-    queryClient.invalidateQueries({ queryKey: ['stockins-list'] })
-    queryClient.invalidateQueries({ queryKey: ['stockouts-list'] })
-    fetchOrders()
-  } catch (e: any) {
-    showToast(e?.response?.data?.detail || '保存失败', 'error')
-  }
-}
 
 // 切换到记录查询tab时自动加载数据
 watch(activeTab, (tab) => {
@@ -1087,7 +701,7 @@ watch(activeTab, (tab) => {
 
 /* ===== 页面容器 ===== */
 .co-container {
-  padding: 8px;
+  padding: 0;
   margin: 0 auto;
   height: 100%;
   display: flex;
@@ -1096,37 +710,10 @@ watch(activeTab, (tab) => {
 }
 
 /* ===== 主卡片 ===== */
-.co-card {
-  background: white;
-  border-radius: 18px;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  overflow: hidden;
-}
-.co-card-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  transition: box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.co-card-main:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
-  transform: translateY(-2px);
-}
+/* 卡片样式已迁移到全局 .page-card 系列（src/styles/app.css） */
 
 /* ===== 卡片头部 ===== */
-.co-card-header {
-  padding: 10px 24px;
-  background: transparent;
-  display: flex;
-  flex-wrap: nowrap;
-  justify-content: space-between;
-  align-items: flex-start;
-  border-bottom: 2px solid var(--color-border, #cbd5e1);
-  gap: 12px;
-}
-.co-card-header :deep(.ht-bar) {
+.page-card-header :deep(.ht-bar) {
   width: auto;
   margin: 0;
 }
@@ -1185,7 +772,9 @@ watch(activeTab, (tab) => {
 }
 
 /* ===== 双栏主体 ===== */
-.co-body {
+/* 卡片主体样式已迁移到全局 .page-card-body（src/styles/app.css） */
+/* 此处需要 2 列网格布局，覆盖默认 page-card-body */
+.page-card-body {
   display: grid;
   grid-template-columns: 1fr 1fr;
   flex: 1;
@@ -1193,7 +782,7 @@ watch(activeTab, (tab) => {
   overflow: hidden;
 }
 @media (max-width: 1024px) {
-  .co-body {
+  .page-card-body {
     grid-template-columns: 1fr;
   }
 }
@@ -1706,6 +1295,11 @@ watch(activeTab, (tab) => {
   border-bottom: 1px solid var(--color-border, #cbd5e1);
   flex-shrink: 0;
 }
+.co-records-title-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
 .co-records-title {
   font-size: 14px;
   font-weight: 700;
@@ -1716,6 +1310,30 @@ watch(activeTab, (tab) => {
 }
 .co-records-title i {
   color: var(--color-primary-500);
+}
+.co-record-type-switch {
+  display: inline-flex;
+  border: 1px solid var(--color-border, #cbd5e1);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.co-record-type-switch .co-type-btn {
+  padding: 4px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border: none;
+  background: var(--color-bg, #fff);
+  color: var(--color-text-secondary, #64748b);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.co-record-type-switch .co-type-btn.active {
+  background: var(--color-primary-500, #3b82f6);
+  color: #fff;
+}
+.co-type-badge.stockin {
+  background: #dbeafe;
+  color: #2563eb;
 }
 
 .co-filter-panel {
