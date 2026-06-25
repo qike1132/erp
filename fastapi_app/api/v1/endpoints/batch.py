@@ -15,7 +15,7 @@ import tempfile
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -291,7 +291,7 @@ async def _process_comprehensive_sheet(
 @router.get('/download-template', summary='下载统一导入模板')
 async def download_template(
     current_user: User = Depends(require_permission('batch_import')),
-) -> 'Response':
+) -> Response:
     """下载统一导入模板 - 直接读取静态文件。
 
     Args:
