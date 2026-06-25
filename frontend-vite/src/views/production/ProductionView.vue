@@ -1,14 +1,14 @@
 <template>
   <div class="pr-container">
-    <div class="pr-card-main">
+    <div class="page-card page-card-main">
 
       <!-- ====== 顶部工具栏 ====== -->
       <header class="pr-toolbar">
-        <div class="pr-toolbar-tabs-wrap">
-          <HeaderTabs />
-        </div>
-        <div class="pr-toolbar-row">
-          <div class="pr-toolbar-left">
+        <div class="pr-toolbar-row pr-toolbar-row-right">
+          <div class="pr-toolbar-tabs-wrap">
+            <HeaderTabs />
+          </div>
+          <div class="pr-toolbar-controls">
             <div v-if="viewTab !== 'monthly'" class="pr-date-nav">
               <button class="pr-date-btn" @click="dateRef = prevDay(dateRef)" aria-label="上一页"><i class="fas fa-chevron-left" aria-hidden="true" /></button>
               <input v-model="dateRef" type="date" class="pr-date-input" />
@@ -20,20 +20,19 @@
               <span class="pr-month-label">{{ monthlyYear }}年{{ monthlyMonth }}月</span>
               <button class="pr-date-btn" @click="nextMonth" aria-label="下一月"><i class="fas fa-chevron-right" aria-hidden="true" /></button>
             </div>
-          </div>
-          <div class="pr-toolbar-center">
-            <div class="pr-tab-group" role="tablist">
-              <button role="tab" :aria-selected="viewTab === 'daily'" :class="['pr-tab', { 'pr-tab-active': viewTab === 'daily' }]" @click="viewTab = 'daily'">日报</button>
-              <button role="tab" :aria-selected="viewTab === 'monthly'" :class="['pr-tab', { 'pr-tab-active': viewTab === 'monthly' }]" @click="viewTab = 'monthly'">月报</button>
+            <div class="pr-divider" />
+            <div class="pr-actions-group">
+              <div class="pr-tab-group" role="tablist">
+                <button role="tab" :aria-selected="viewTab === 'daily'" :class="['pr-tab', { 'pr-tab-active': viewTab === 'daily' }]" @click="viewTab = 'daily'">日报</button>
+                <button role="tab" :aria-selected="viewTab === 'monthly'" :class="['pr-tab', { 'pr-tab-active': viewTab === 'monthly' }]" @click="viewTab = 'monthly'">月报</button>
+              </div>
+              <button class="pr-action-btn pr-action-primary" @click="openEntryDrawer">
+                <i class="fas fa-plus" aria-hidden="true" /> 录入
+              </button>
+              <button class="pr-action-btn" @click="handleExport">
+                <i class="fas fa-download" aria-hidden="true" /> 导出
+              </button>
             </div>
-          </div>
-          <div class="pr-toolbar-right">
-            <button class="pr-action-btn pr-action-primary" @click="openEntryDrawer">
-              <i class="fas fa-plus" aria-hidden="true" /> 录入
-            </button>
-            <button class="pr-action-btn" @click="handleExport">
-              <i class="fas fa-download" aria-hidden="true" /> 导出
-            </button>
           </div>
         </div>
       </header>
@@ -43,27 +42,9 @@
 
         <section class="pr-kpi-section">
           <div v-if="reportSummary" class="pr-kpi-row">
-            <div class="pr-kpi-card pr-kpi-blue">
-              <div class="pr-kpi-icon-wrap"><i class="fas fa-cubes" aria-hidden="true" /></div>
-              <div class="pr-kpi-body">
-                <span class="pr-kpi-label">总产量</span>
-                <span class="pr-kpi-value">{{ reportSummary.overall_quantity }}<small class="pr-kpi-unit">件</small></span>
-              </div>
-            </div>
-            <div class="pr-kpi-card pr-kpi-green">
-              <div class="pr-kpi-icon-wrap"><i class="fas fa-yen-sign" aria-hidden="true" /></div>
-              <div class="pr-kpi-body">
-                <span class="pr-kpi-label">总产值</span>
-                <span class="pr-kpi-value">{{ formatCurrency(reportSummary.overall_value) }}</span>
-              </div>
-            </div>
-            <div class="pr-kpi-card pr-kpi-amber">
-              <div class="pr-kpi-icon-wrap"><i class="fas fa-barcode" aria-hidden="true" /></div>
-              <div class="pr-kpi-body">
-                <span class="pr-kpi-label">SKU 数</span>
-                <span class="pr-kpi-value">{{ reportSummary.overall_sku_count }}<small class="pr-kpi-unit">种</small></span>
-              </div>
-            </div>
+            <KpiCard icon-class="fas fa-cubes" color-class="pr-kpi-blue" label="总产量" :value="reportSummary.overall_quantity" unit="件" />
+            <KpiCard icon-class="fas fa-yen-sign" color-class="pr-kpi-green" label="总产值" :value="formatCurrency(reportSummary.overall_value)" />
+            <KpiCard icon-class="fas fa-barcode" color-class="pr-kpi-amber" label="SKU 数" :value="reportSummary.overall_sku_count" unit="种" />
           </div>
         </section>
 
@@ -71,7 +52,6 @@
           <div class="pr-section-label">部门概览</div>
           <div v-if="reportSummary?.departments?.length" class="pr-dept-row">
             <div v-for="d in reportSummary.departments" :key="d.department" :class="['pr-dept-card', `pr-dept-${d.department}`]">
-              <div class="pr-dept-accent" />
               <div class="pr-dept-content">
                 <div class="pr-dept-head">
                   <div :class="['pr-dept-icon-sm', `pr-dept-icon-${d.department}`]"><i :class="deptIcon(d.department)" aria-hidden="true" /></div>
@@ -131,27 +111,9 @@
 
         <section class="pr-kpi-section">
           <div v-if="monthlySummary" class="pr-kpi-row">
-            <div class="pr-kpi-card pr-kpi-blue">
-              <div class="pr-kpi-icon-wrap"><i class="fas fa-cubes" aria-hidden="true" /></div>
-              <div class="pr-kpi-body">
-                <span class="pr-kpi-label">月总产量</span>
-                <span class="pr-kpi-value">{{ monthlySummary.overall_quantity ?? 0 }}<small class="pr-kpi-unit">件</small></span>
-              </div>
-            </div>
-            <div class="pr-kpi-card pr-kpi-green">
-              <div class="pr-kpi-icon-wrap"><i class="fas fa-yen-sign" aria-hidden="true" /></div>
-              <div class="pr-kpi-body">
-                <span class="pr-kpi-label">月总产值</span>
-                <span class="pr-kpi-value">{{ formatCurrency(monthlySummary.overall_value ?? 0) }}</span>
-              </div>
-            </div>
-            <div class="pr-kpi-card pr-kpi-amber">
-              <div class="pr-kpi-icon-wrap"><i class="fas fa-calendar-check" aria-hidden="true" /></div>
-              <div class="pr-kpi-body">
-                <span class="pr-kpi-label">生产天数</span>
-                <span class="pr-kpi-value">{{ monthlySummary.daily_data?.filter((d: any) => d.total.quantity > 0).length || 0 }}<small class="pr-kpi-unit">天</small></span>
-              </div>
-            </div>
+            <KpiCard icon-class="fas fa-cubes" color-class="pr-kpi-blue" label="月总产量" :value="monthlySummary.overall_quantity ?? 0" unit="件" />
+            <KpiCard icon-class="fas fa-yen-sign" color-class="pr-kpi-green" label="月总产值" :value="formatCurrency(monthlySummary.overall_value ?? 0)" />
+            <KpiCard icon-class="fas fa-calendar-check" color-class="pr-kpi-amber" label="生产天数" :value="monthlySummary.daily_data?.filter((d: any) => d.total.quantity > 0).length || 0" unit="天" />
           </div>
         </section>
 
@@ -159,7 +121,6 @@
           <div class="pr-section-label">部门概览</div>
           <div v-if="monthlySummary?.monthly_departments?.length" class="pr-dept-row">
             <div v-for="d in monthlySummary.monthly_departments" :key="d.department" :class="['pr-dept-card', `pr-dept-${d.department}`]">
-              <div class="pr-dept-accent" />
               <div class="pr-dept-content">
                 <div class="pr-dept-head">
                   <div :class="['pr-dept-icon-sm', `pr-dept-icon-${d.department}`]"><i :class="deptIcon(d.department)" aria-hidden="true" /></div>
@@ -216,148 +177,243 @@
         </section>
       </div>
 
-      <!-- ============ 录入抽屉 ============ -->
-      <Transition name="pr-drawer">
-        <div v-if="showEntryDrawer" class="pr-drawer-overlay" @click.self="closeEntryDrawer">
-          <div class="pr-drawer">
-            <div class="pr-drawer-header">
-              <h3><i class="fas fa-pen-alt" aria-hidden="true" /> 生产数据录入</h3>
-              <button class="pr-drawer-close" @click="closeEntryDrawer" aria-label="关闭"><i class="fas fa-times" aria-hidden="true" /></button>
-            </div>
-            <div class="pr-drawer-body">
-              <div class="pr-form-group">
-                <label class="pr-form-label">生产日期</label>
-                <input v-model="selectedDate" type="date" class="pr-form-input" />
-              </div>
-              <div class="pr-form-group">
-                <label class="pr-form-label">生产部门 <span class="pr-required">*</span></label>
-                <div class="pr-dept-select">
-                  <button
-                    v-for="dept in departments"
-                    :key="dept.value"
-                    :class="[
-                      'pr-dept-btn',
-                      `pr-dept-btn-${dept.value}`,
-                      { 'pr-dept-btn-active': formDept === dept.value }
-                    ]"
-                    @click="formDept = dept.value"
-                  >
-                    <i :class="dept.icon" aria-hidden="true" /> {{ dept.label }}
-                  </button>
+      <!-- ============ 录入弹窗 (Data Entry Center) ============ -->
+      <Transition name="pr-entry">
+        <div v-if="showEntryDrawer" class="pr-entry-overlay" @click.self="closeEntryDrawer">
+          <div class="pr-entry-modal" role="dialog" aria-labelledby="pr-entry-title">
+            <header class="pr-entry-header">
+              <div class="pr-entry-header-left">
+                <span class="pr-entry-icon"><i class="fas fa-pen-to-square" aria-hidden="true" /></span>
+                <div>
+                  <h3 id="pr-entry-title">录入生产数据</h3>
+                  <span class="pr-entry-sub">{{ selectedDate }} · 快捷键 <kbd>Ctrl</kbd>+<kbd>N</kbd></span>
                 </div>
               </div>
-              <div class="pr-form-group">
-                <label class="pr-form-label">产品 <span class="pr-required">*</span></label>
-                <div class="pr-form-search">
-                  <input
-                    ref="productSearchRef"
-                    v-model="searchQuery"
-                    class="pr-form-input pr-form-search-input"
-                    placeholder="搜索产品名称/69码（支持键盘上下选择）"
-                    @input="onSearchInput"
-                    @focus="onSearchFocus"
-                    @blur="onSearchBlur"
-                    @keydown.down.prevent="moveSearchIndex(1)"
-                    @keydown.up.prevent="moveSearchIndex(-1)"
-                    @keydown.enter.prevent="confirmSearchSelection"
-                    @keydown.esc="showDropdown = false"
-                  />
-                  <i class="fas fa-search pr-form-search-icon" aria-hidden="true" />
-                  <div v-if="showDropdown" class="pr-form-dropdown">
-                    <div v-if="searchLoading" class="pr-form-dropdown-loading">
-                      <i class="fas fa-spinner fa-spin" aria-hidden="true" /> 搜索中...
-                    </div>
-                    <div v-else-if="searchError" class="pr-form-dropdown-error">
-                      <i class="fas fa-exclamation-circle" aria-hidden="true" /> {{ searchError }}
-                    </div>
-                    <div v-else-if="!searchResults.length" class="pr-form-dropdown-empty">
-                      无匹配产品
-                    </div>
-                    <div
-                      v-for="(p, idx) in searchResults"
-                      :key="p.id"
-                      :class="['pr-form-dropdown-item', { 'pr-form-dropdown-item-active': idx === searchActiveIndex }]"
-                      @mousedown.prevent="selectProduct(p)"
+              <button class="pr-entry-close" @click="closeEntryDrawer" aria-label="关闭"><i class="fas fa-times" aria-hidden="true" /></button>
+            </header>
+
+            <div class="pr-entry-body">
+              <!-- 左侧：表单 -->
+              <div class="pr-entry-form">
+                <!-- 1. 日期 -->
+                <div class="pr-entry-group">
+                  <label class="pr-entry-label">生产日期</label>
+                  <div class="pr-entry-date-row">
+                    <button type="button" :class="['pr-date-chip', { active: selectedDate === todayLocal() }]" @click="selectedDate = todayLocal()">今日</button>
+                    <button type="button" :class="['pr-date-chip', { active: selectedDate === prevDay(todayLocal()) }]" @click="selectedDate = prevDay(todayLocal())">昨日</button>
+                    <input v-model="selectedDate" type="date" class="pr-entry-input pr-entry-date-input" />
+                  </div>
+                </div>
+
+                <!-- 2. 部门 -->
+                <div class="pr-entry-group">
+                  <label class="pr-entry-label">生产部门 <span class="pr-req">*</span></label>
+                  <div class="pr-entry-dept-grid">
+                    <button
+                      v-for="dept in departments"
+                      :key="dept.value"
+                      type="button"
+                      :class="['pr-entry-dept-card', `pr-entry-dept-${dept.value}`, { active: formDept === dept.value }]"
+                      @click="formDept = dept.value"
                     >
-                      <div class="pr-form-dropdown-name">{{ p.name }}</div>
-                      <div class="pr-form-dropdown-barcode">{{ p.barcode || '无69码' }}</div>
+                      <span :class="['pr-entry-dept-icon', `pr-entry-dept-icon-${dept.value}`]"><i :class="dept.icon" aria-hidden="true" /></span>
+                      <span class="pr-entry-dept-name">{{ dept.label }}</span>
+                      <span class="pr-entry-dept-mark"><i class="fas fa-circle-check" aria-hidden="true" /></span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- 3. 产品 -->
+                <div class="pr-entry-group">
+                  <label class="pr-entry-label">产品 <span class="pr-req">*</span></label>
+                  <div class="pr-entry-search">
+                    <i class="fas fa-search pr-entry-search-icon" aria-hidden="true" />
+                    <input
+                      ref="productSearchRef"
+                      v-model="searchQuery"
+                      type="text"
+                      class="pr-entry-input pr-entry-search-input"
+                      placeholder="搜索产品名称或69码 (↑↓ 选择, Enter 确认)"
+                      autocomplete="off"
+                      @input="onSearchInput"
+                      @focus="onSearchFocus"
+                      @blur="onSearchBlur"
+                      @keydown.down.prevent="moveSearchIndex(1)"
+                      @keydown.up.prevent="moveSearchIndex(-1)"
+                      @keydown.enter.prevent="confirmSearchSelection"
+                      @keydown.esc="showDropdown = false"
+                    />
+                    <button v-if="searchQuery" type="button" class="pr-entry-search-clear" @click="clearProduct" aria-label="清除">
+                      <i class="fas fa-times" aria-hidden="true" />
+                    </button>
+                    <div v-if="showDropdown" class="pr-entry-dropdown">
+                      <div v-if="searchLoading" class="pr-entry-dropdown-state">
+                        <i class="fas fa-spinner fa-spin" aria-hidden="true" /> 搜索中…
+                      </div>
+                      <div v-else-if="searchError" class="pr-entry-dropdown-state pr-entry-dropdown-error">
+                        <i class="fas fa-exclamation-circle" aria-hidden="true" /> {{ searchError }}
+                      </div>
+                      <div v-else-if="!searchResults.length" class="pr-entry-dropdown-state">
+                        <i class="fas fa-inbox" aria-hidden="true" /> 无匹配产品
+                      </div>
+                      <button
+                        v-for="(p, idx) in searchResults"
+                        :key="p.id"
+                        type="button"
+                        :class="['pr-entry-dropdown-item', { active: idx === searchActiveIndex }]"
+                        @mousedown.prevent="selectProduct(p)"
+                      >
+                        <span class="pr-entry-dropdown-icon"><i class="fas fa-box" aria-hidden="true" /></span>
+                        <span class="pr-entry-dropdown-content">
+                          <span class="pr-entry-dropdown-name">{{ p.name }}</span>
+                          <span class="pr-entry-dropdown-meta">
+                            <span v-if="p.barcode" class="pr-entry-dropdown-barcode"><i class="fas fa-barcode" aria-hidden="true" /> {{ p.barcode }}</span>
+                            <span v-if="p.specification" class="pr-entry-dropdown-spec">{{ p.specification }}</span>
+                          </span>
+                        </span>
+                        <i v-if="idx === searchActiveIndex" class="fas fa-arrow-right pr-entry-dropdown-enter" aria-hidden="true" />
+                      </button>
+                    </div>
+                  </div>
+                  <div v-if="form.product_name" class="pr-entry-selected">
+                    <span class="pr-entry-selected-icon"><i class="fas fa-check-circle" aria-hidden="true" /></span>
+                    <span class="pr-entry-selected-name">{{ form.product_name }}</span>
+                    <span v-if="form.barcode" class="pr-entry-selected-barcode">{{ form.barcode }}</span>
+                  </div>
+                  <div v-if="formErrors.product_name" class="pr-entry-error">{{ formErrors.product_name }}</div>
+                </div>
+
+                <!-- 4. 数量 -->
+                <div class="pr-entry-group">
+                  <label class="pr-entry-label">数量 <span class="pr-req">*</span></label>
+                  <div class="pr-entry-qty-row">
+                    <div class="pr-entry-qty-input-wrap">
+                      <button type="button" class="pr-entry-qty-step" aria-label="减少10" @click="adjustQty(-10)">
+                        <span>−10</span>
+                      </button>
+                      <input
+                        v-model.number="form.quantity"
+                        type="number"
+                        min="0"
+                        inputmode="numeric"
+                        class="pr-entry-input pr-entry-qty-input"
+                        placeholder="0"
+                        @blur="validateField('quantity')"
+                      />
+                      <span class="pr-entry-qty-unit">件</span>
+                      <button type="button" class="pr-entry-qty-step" aria-label="增加10" @click="adjustQty(10)">
+                        <span>+10</span>
+                      </button>
+                    </div>
+                    <div class="pr-entry-qty-btns">
+                      <button type="button" class="pr-entry-qty-pill" @click="adjustQty(-1)">−1</button>
+                      <button type="button" class="pr-entry-qty-pill" @click="adjustQty(1)">+1</button>
+                    </div>
+                  </div>
+                  <div v-if="formErrors.quantity" class="pr-entry-error">{{ formErrors.quantity }}</div>
+                </div>
+
+                <!-- 5. 单价 + 产值 -->
+                <div class="pr-entry-form-grid">
+                  <div class="pr-entry-group">
+                    <label class="pr-entry-label">单价</label>
+                    <div class="pr-entry-price-wrap">
+                      <span class="pr-entry-price-prefix">¥</span>
+                      <input
+                        v-model.number="form.unit_price"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        inputmode="decimal"
+                        class="pr-entry-input pr-entry-price-input"
+                        placeholder="0.00"
+                      />
+                    </div>
+                  </div>
+                  <div class="pr-entry-group">
+                    <label class="pr-entry-label">产值</label>
+                    <div class="pr-entry-value-display">
+                      <i class="fas fa-yen-sign" aria-hidden="true" />
+                      <span>{{ formatCurrency(computedValue) }}</span>
                     </div>
                   </div>
                 </div>
-                <div v-if="form.product_name" class="pr-form-selected">
-                  <i class="fas fa-check-circle" aria-hidden="true" />
-                  <span>{{ form.product_name }}</span>
-                  <span v-if="form.barcode" class="pr-form-selected-barcode">{{ form.barcode }}</span>
-                  <button class="pr-form-selected-clear" @click="clearProduct" aria-label="关闭"><i class="fas fa-times" aria-hidden="true" /></button>
-                </div>
-                <div v-if="formErrors.product_name" class="pr-form-error">{{ formErrors.product_name }}</div>
-              </div>
-              <div class="pr-form-row">
-                <div class="pr-form-group">
-                  <label class="pr-form-label">数量 <span class="pr-required">*</span></label>
-                  <input
-                    v-model.number="form.quantity"
-                    type="number"
-                    min="1"
-                    class="pr-form-input"
-                    placeholder="0"
-                    @blur="validateField('quantity')"
-                  />
-                  <div v-if="formErrors.quantity" class="pr-form-error">{{ formErrors.quantity }}</div>
-                </div>
-                <div class="pr-form-group">
-                  <label class="pr-form-label">单价</label>
-                  <input
-                    v-model.number="form.unit_price"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    class="pr-form-input"
-                    placeholder="0.00"
-                  />
-                </div>
-              </div>
-              <div class="pr-form-group">
-                <label class="pr-form-label">产值</label>
-                <div class="pr-form-value">{{ formatCurrency(computedValue) }}</div>
-              </div>
-              <div class="pr-form-group">
-                <label class="pr-form-label">备注</label>
-                <textarea v-model="form.remark" class="pr-form-input pr-form-textarea" placeholder="选填" rows="2" />
-              </div>
-            </div>
-            <div class="pr-drawer-footer">
-              <button class="pr-drawer-cancel" @click="closeEntryDrawer">取消 (Esc)</button>
-              <button class="pr-drawer-submit" :disabled="isSubmitting" @click="handleSubmit">
-                <i v-if="isSubmitting" class="fas fa-spinner fa-spin" /> 确认录入
-              </button>
-            </div>
-          </div>
-        </div>
-      </Transition>
 
-      <!-- ============ 二次确认弹窗 ============ -->
-      <Transition name="pr-modal">
-        <div v-if="showConfirmModal" class="pr-modal-overlay" @click.self="showConfirmModal = false">
-          <div class="pr-modal">
-            <div class="pr-modal-header">
-              <i class="fas fa-question-circle" aria-hidden="true" />
-              <h4>确认录入</h4>
-            </div>
-            <div class="pr-modal-body">
-              <p>请确认以下生产数据：</p>
-              <div class="pr-confirm-data">
-                <div class="pr-confirm-row"><span>部门：</span><strong>{{ deptLabel(formDept) }}</strong></div>
-                <div class="pr-confirm-row"><span>产品：</span><strong>{{ form.product_name }}</strong></div>
-                <div class="pr-confirm-row"><span>数量：</span><strong>{{ form.quantity }} 件</strong></div>
-                <div class="pr-confirm-row"><span>产值：</span><strong>{{ formatCurrency(computedValue) }}</strong></div>
-                <div class="pr-confirm-row"><span>日期：</span><strong>{{ selectedDate }}</strong></div>
+                <!-- 6. 备注 -->
+                <div class="pr-entry-group">
+                  <label class="pr-entry-label">备注</label>
+                  <input
+                    v-model="form.remark"
+                    type="text"
+                    class="pr-entry-input"
+                    placeholder="选填，例如批次号或特殊说明"
+                  />
+                </div>
               </div>
+
+              <!-- 右侧：侧栏 -->
+              <aside class="pr-entry-sidebar">
+                <div class="pr-entry-side-card">
+                  <div class="pr-entry-side-head">
+                    <span><i class="fas fa-clock-rotate-left" aria-hidden="true" /> 最近使用</span>
+                    <button v-if="recentProducts.length" type="button" class="pr-entry-side-clear" @click="clearRecent">清空</button>
+                  </div>
+                  <div v-if="recentProducts.length" class="pr-entry-recent-list">
+                    <button
+                      v-for="p in recentProducts"
+                      :key="p.id"
+                      type="button"
+                      class="pr-entry-recent-item"
+                      :title="p.barcode || ''"
+                      @click="selectProduct(p)"
+                    >
+                      <span class="pr-entry-recent-bullet" />
+                      <span class="pr-entry-recent-content">
+                        <span class="pr-entry-recent-name">{{ p.name }}</span>
+                        <span v-if="p.barcode" class="pr-entry-recent-barcode">{{ p.barcode }}</span>
+                      </span>
+                      <i class="fas fa-chevron-right pr-entry-recent-arrow" aria-hidden="true" />
+                    </button>
+                  </div>
+                  <div v-else class="pr-entry-empty-small">
+                    <i class="fas fa-inbox" aria-hidden="true" />
+                    <span>暂无最近使用</span>
+                    <small>录入后会自动记录</small>
+                  </div>
+                </div>
+
+                <div class="pr-entry-side-card">
+                  <div class="pr-entry-side-head">
+                    <span><i class="fas fa-keyboard" aria-hidden="true" /> 快捷键</span>
+                  </div>
+                  <div class="pr-entry-shortcuts">
+                    <div class="pr-entry-shortcut"><kbd>↑</kbd><kbd>↓</kbd><span>选择产品</span></div>
+                    <div class="pr-entry-shortcut"><kbd>Enter</kbd><span>确认选择 / 提交</span></div>
+                    <div class="pr-entry-shortcut"><kbd>Ctrl</kbd>+<kbd>Enter</kbd><span>直接提交</span></div>
+                    <div class="pr-entry-shortcut"><kbd>Esc</kbd><span>关闭</span></div>
+                  </div>
+                </div>
+              </aside>
             </div>
-            <div class="pr-modal-footer">
-              <button class="pr-drawer-cancel" @click="showConfirmModal = false">取消</button>
-              <button class="pr-drawer-submit" @click="confirmSubmit">确认提交</button>
-            </div>
+
+            <footer class="pr-entry-footer">
+              <label class="pr-entry-continue" :class="{ active: keepAdding }">
+                <input v-model="keepAdding" type="checkbox" />
+                <span class="pr-entry-continue-box" aria-hidden="true">
+                  <i class="fas fa-check" />
+                </span>
+                <span>保存后继续录入下一条</span>
+              </label>
+              <div class="pr-entry-footer-btns">
+                <button type="button" class="pr-entry-btn-cancel" @click="closeEntryDrawer">取消</button>
+                <button type="button" class="pr-entry-btn-submit" :disabled="isSubmitting" @click="handleSubmit">
+                  <i v-if="isSubmitting" class="fas fa-spinner fa-spin" aria-hidden="true" />
+                  <i v-else class="fas fa-check" aria-hidden="true" />
+                  <span>确认录入</span>
+                  <span class="pr-entry-btn-hint">Ctrl+Enter</span>
+                </button>
+              </div>
+            </footer>
           </div>
         </div>
       </Transition>
@@ -382,7 +438,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { dailyProductionApi, productApi } from '@/api'
 import { showToast } from '@/composables/useToast'
@@ -390,39 +446,12 @@ import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import type { DailyProductionRecord, Product } from '@/types'
 import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
-type EChartsCore = typeof import('echarts/core')
+import KpiCard from './components/KpiCard.vue'
+import { useProductionCharts } from './composables/useProductionCharts'
 
-let echarts: EChartsCore | null = null
-let echartsLoaded = false
+const _timers: ReturnType<typeof setTimeout>[] = []
+
 const confirmDialog = useConfirmDialog()
-
-async function loadEcharts(): Promise<EChartsCore> {
-  if (echartsLoaded && echarts) return echarts
-  const [
-    ec,
-    { BarChart, LineChart },
-    { GridComponent, TooltipComponent, TitleComponent, LegendComponent, DatasetComponent },
-    { CanvasRenderer },
-  ] = await Promise.all([
-    import('echarts/core'),
-    import('echarts/charts'),
-    import('echarts/components'),
-    import('echarts/renderers'),
-  ])
-  ec.use([
-    BarChart,
-    LineChart,
-    GridComponent,
-    TooltipComponent,
-    TitleComponent,
-    LegendComponent,
-    DatasetComponent,
-    CanvasRenderer,
-  ])
-  echarts = ec
-  echartsLoaded = true
-  return ec
-}
 import { formatCurrency, formatNumber } from '@/utils/format'
 const formatMoney = formatNumber
 
@@ -433,12 +462,6 @@ const departments = [
   { value: 'handcraft', label: '手工部', icon: 'fas fa-hand-sparkles' },
   { value: 'packaging', label: '包装部', icon: 'fas fa-box' },
 ]
-
-const deptColors: Record<string, { main: string; light: string; gradient: string[] }> = {
-  filling: { main: '#3b82f6', light: '#eff6ff', gradient: ['#3b82f6', '#1d4ed8'] },
-  handcraft: { main: '#22c55e', light: '#f0fdf4', gradient: ['#22c55e', '#15803d'] },
-  packaging: { main: '#f59e0b', light: '#fffbeb', gradient: ['#f59e0b', '#d97706'] },
-}
 
 function deptLabel(d: string) { return departments.find(x => x.value === d)?.label ?? d }
 function deptIcon(d: string) { return departments.find(x => x.value === d)?.icon ?? 'fas fa-building' }
@@ -453,7 +476,41 @@ const formDept = ref('filling')
 const isSubmitting = ref(false)
 const monthlyYear = ref(new Date().getFullYear())
 const monthlyMonth = ref(new Date().getMonth() + 1)
-const showConfirmModal = ref(false)
+const keepAdding = ref(false)
+
+// ===== 最近使用产品 (localStorage 持久化) =====
+const RECENT_PRODUCTS_KEY = 'production.recentProducts'
+const MAX_RECENT = 6
+const recentProducts = ref<Product[]>(loadRecent())
+
+function loadRecent(): Product[] {
+  try {
+    const raw = localStorage.getItem(RECENT_PRODUCTS_KEY)
+    const arr = raw ? JSON.parse(raw) : []
+    return Array.isArray(arr) ? arr.slice(0, MAX_RECENT) : []
+  } catch { return [] }
+}
+function saveRecent() {
+  try {
+    localStorage.setItem(RECENT_PRODUCTS_KEY, JSON.stringify(recentProducts.value.slice(0, MAX_RECENT)))
+  } catch { /* localStorage 不可用时静默忽略 */ }
+}
+function pushRecent(product: Product) {
+  if (!product || product.id == null) return
+  const filtered = recentProducts.value.filter(x => x.id !== product.id)
+  filtered.unshift(product)
+  recentProducts.value = filtered.slice(0, MAX_RECENT)
+  saveRecent()
+}
+function clearRecent() {
+  recentProducts.value = []
+  saveRecent()
+}
+
+function adjustQty(delta: number) {
+  const cur = Number(form.quantity) || 0
+  form.quantity = Math.max(0, cur + delta)
+}
 
 // 统一日期引用：看板用 selectedDate，日报用 reportDate
 const dateRef = computed({
@@ -501,7 +558,7 @@ function onSearchInput() {
       const res = (await productApi.search(searchQuery.value.trim())) as any
       searchResults.value = res.products ?? res ?? []
       searchError.value = ''
-    } catch (e: any) {
+    } catch (error: any) {
       searchError.value = '产品搜索失败，请重试'
       searchResults.value = []
     } finally {
@@ -515,7 +572,8 @@ function onSearchFocus() {
   }
 }
 function onSearchBlur() {
-  setTimeout(() => { showDropdown.value = false; searchActiveIndex.value = -1 }, 150)
+  const _t = setTimeout(() => { showDropdown.value = false; searchActiveIndex.value = -1 }, 150)
+  _timers.push(_t)
 }
 function moveSearchIndex(delta: number) {
   if (!searchResults.value.length) return
@@ -528,16 +586,17 @@ function confirmSearchSelection() {
     selectProduct(searchResults.value[searchActiveIndex.value])
   }
 }
-async function selectProduct(p: Product) {
-  form.product_id = p.id
-  form.product_name = p.name
-  form.barcode = p.barcode || ''
-  searchQuery.value = p.name
+async function selectProduct(product: Product) {
+  form.product_id = product.id
+  form.product_name = product.name
+  form.barcode = product.barcode || ''
+  searchQuery.value = product.name
   searchResults.value = []
   showDropdown.value = false
   searchActiveIndex.value = -1
+  pushRecent(product)
   try {
-    const infoRes = await dailyProductionApi.productInfo(p.id) as any
+    const infoRes = await dailyProductionApi.productInfo(product.id) as any
     if (infoRes?.data?.price) {
       form.unit_price = infoRes.data.price
     }
@@ -622,11 +681,15 @@ function closeEntryDrawer() {
 
 async function handleSubmit() {
   if (!validateForm()) return
-  showConfirmModal.value = true
+  // 内联直接提交：保留 keepAdding 以支持快速连续录入
+  if (keepAdding.value) {
+    await confirmSubmit({ keepOpen: true })
+  } else {
+    await confirmSubmit({ keepOpen: false })
+  }
 }
 
-async function confirmSubmit() {
-  showConfirmModal.value = false
+async function confirmSubmit(opts: { keepOpen: boolean } = { keepOpen: false }) {
   isSubmitting.value = true
   try {
     await dailyProductionApi.createRecord({
@@ -635,12 +698,19 @@ async function confirmSubmit() {
       production_value: Number(computedValue.value), production_date: selectedDate.value, remark: form.remark,
     } as any)
     showToast('录入成功', 'success')
-    resetForm(); showEntryDrawer.value = false
+    if (opts.keepOpen) {
+      // 连续录入：保留部门/日期，仅重置产品和数量；焦点回到搜索框
+      resetFormForContinue()
+      nextTick(() => productSearchRef.value?.focus())
+    } else {
+      resetForm()
+      showEntryDrawer.value = false
+    }
     queryClient.invalidateQueries({ queryKey: ['daily-production-records'] })
     queryClient.invalidateQueries({ queryKey: ['daily-production-daily-summary'] })
     queryClient.invalidateQueries({ queryKey: ['daily-production-monthly-summary'] })
-  } catch (e: any) {
-    showToast(e?.response?.data?.detail ?? '录入失败', 'error')
+  } catch (error: any) {
+    showToast(error?.response?.data?.detail ?? '录入失败', 'error')
   }
   finally { isSubmitting.value = false }
 }
@@ -649,6 +719,14 @@ function resetForm() {
   form.product_id = null; form.product_name = ''; form.barcode = ''
   form.unit_price = 0; form.quantity = 0; form.remark = ''; searchQuery.value = ''
   formDept.value = 'filling'
+  keepAdding.value = false
+  Object.keys(formErrors).forEach(k => formErrors[k] = '')
+}
+
+function resetFormForContinue() {
+  // 连续录入模式：保留部门、日期、备注、单价；重置产品和数量
+  form.product_id = null; form.product_name = ''; form.barcode = ''
+  form.quantity = 0; searchQuery.value = ''
   Object.keys(formErrors).forEach(k => formErrors[k] = '')
 }
 
@@ -681,9 +759,10 @@ async function handleExport() {
       exportStatus.type = 'success'
       exportStatus.icon = 'fas fa-check-circle'
       exportStatus.message = '导出成功'
-      setTimeout(() => { exportStatus.show = false }, 3000)
+      const _t = setTimeout(() => { exportStatus.show = false }, 3000)
+      _timers.push(_t)
       return
-    } catch (e: any) {
+    } catch (error: any) {
       retries++
       if (retries <= maxRetries) {
         exportStatus.message = `导出失败，正在重试 (${retries}/${maxRetries})...`
@@ -692,158 +771,54 @@ async function handleExport() {
         exportStatus.type = 'error'
         exportStatus.icon = 'fas fa-times-circle'
         exportStatus.message = '导出失败，请稍后重试'
-        setTimeout(() => { exportStatus.show = false }, 5000)
+        const _t = setTimeout(() => { exportStatus.show = false }, 5000)
+        _timers.push(_t)
       }
     }
   }
 }
 
-function formatTime(t?: string | null) { return t ? t.slice(11, 16) : '' }
+function formatTime(timestamp?: string | null) { return timestamp ? timestamp.slice(11, 16) : '' }
 
 // ===== 键盘快捷键 =====
-function handleKeydown(e: KeyboardEvent) {
-  if (e.ctrlKey && (e.key === 'n' || e.key === 'N')) {
-    e.preventDefault()
+function handleKeydown(event: KeyboardEvent) {
+  if (event.ctrlKey && (event.key === 'n' || event.key === 'N')) {
+    event.preventDefault()
     if (!showEntryDrawer.value) openEntryDrawer()
   }
-  if (e.ctrlKey && e.key === 'Enter' && showEntryDrawer.value && !showConfirmModal.value) {
-    e.preventDefault()
+  if (event.ctrlKey && event.key === 'Enter' && showEntryDrawer.value) {
+    event.preventDefault()
     handleSubmit()
   }
-  if (e.key === 'Escape' && showEntryDrawer.value && !showConfirmModal.value) {
+  if (event.key === 'Escape' && showEntryDrawer.value) {
     closeEntryDrawer()
   }
-  if (e.key === 'Escape' && showConfirmModal.value) {
-    showConfirmModal.value = false
-  }
-  if (e.ctrlKey && ['1', '2'].includes(e.key)) {
-    e.preventDefault()
+  if (event.ctrlKey && ['1', '2'].includes(event.key)) {
+    event.preventDefault()
     const tabs = ['daily', 'monthly']
-    viewTab.value = tabs[parseInt(e.key) - 1]
+    viewTab.value = tabs[parseInt(event.key) - 1]
   }
 }
 
 // ===== ECharts =====
 const dailyChartRef = ref<HTMLElement>()
 const monthlyChartRef = ref<HTMLElement>()
-let dailyChart: any = null
-let monthlyChart: any = null
 
-function getChart(el: HTMLElement, existing: any) {
-  if (!echarts) return null
-  return (existing && !existing.isDisposed()) ? existing : echarts!.init(el)
-}
+useProductionCharts(
+  reportSummary,
+  monthlySummary,
+  viewTab,
+  dailyChartRef,
+  monthlyChartRef,
+)
 
-function renderDailyChart() {
-  if (!echarts || !dailyChartRef.value || !reportSummary.value?.departments?.length) return
-  dailyChart = getChart(dailyChartRef.value, dailyChart)
-  if (!dailyChart) return
-  const depts = reportSummary.value.departments
-  dailyChart.setOption({
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, backgroundColor: 'rgba(255,255,255,0.96)', borderColor: '#e2e8f0', textStyle: { color: '#1e293b', fontSize: 13 } },
-    grid: { left: 60, right: 20, top: 20, bottom: 30 },
-    xAxis: { type: 'category', data: depts.map((d: any) => d.department_label), axisLabel: { fontSize: 13, fontWeight: 600, color: '#475569' }, axisLine: { lineStyle: { color: '#e2e8f0' } }, axisTick: { show: false } },
-    yAxis: [
-      { type: 'value', name: '产量', axisLabel: { fontSize: 11, color: '#94a3b8' }, splitLine: { lineStyle: { color: '#f1f5f9', type: 'dashed' } } },
-      { type: 'value', name: '产值', axisLabel: { fontSize: 11, color: '#94a3b8' }, splitLine: { show: false } },
-    ],
-    series: [
-      {
-        name: '产量', type: 'bar', barWidth: '30%',
-        data: depts.map((d: any) => ({
-          value: d.total_quantity,
-          itemStyle: {
-            color: new echarts!.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: deptColors[d.department]?.gradient[0] ?? '#3b82f6' },
-              { offset: 1, color: deptColors[d.department]?.gradient[1] ?? '#1d4ed8' },
-            ]),
-            borderRadius: [6, 6, 0, 0],
-          },
-        })),
-        label: { show: true, position: 'top', fontSize: 12, fontWeight: 600, color: '#1e293b' },
-      },
-      {
-        name: '产值', type: 'bar', barWidth: '30%', yAxisIndex: 1,
-        data: depts.map((d: any) => ({
-          value: d.total_value,
-          itemStyle: {
-            color: new echarts!.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: '#fbbf24' },
-              { offset: 1, color: '#f59e0b' },
-            ]),
-            borderRadius: [6, 6, 0, 0],
-          },
-        })),
-        label: { show: true, position: 'top', fontSize: 11, color: '#1e293b', formatter: (p: any) => `¥${p.value}` },
-      },
-    ],
-  }, true)
-}
-
-function renderMonthlyChart() {
-  if (!echarts || !monthlyChartRef.value || !monthlySummary.value?.daily_data?.length) return
-  monthlyChart = getChart(monthlyChartRef.value, monthlyChart)
-  if (!monthlyChart) return
-  const days = monthlySummary.value.daily_data.filter((d: any) => d.total.quantity > 0)
-  monthlyChart.setOption({
-    tooltip: { trigger: 'axis', backgroundColor: 'rgba(255,255,255,0.96)', borderColor: '#e2e8f0', textStyle: { color: '#1e293b', fontSize: 13 } },
-    legend: { data: ['充棉', '手工', '包装', '合计'], bottom: 0, itemWidth: 12, itemHeight: 12, textStyle: { fontSize: 12, color: '#475569' } },
-    grid: { left: 50, right: 20, top: 20, bottom: 40 },
-    xAxis: { type: 'category', data: days.map((d: any) => d.day + '日'), axisLabel: { fontSize: 11, color: '#94a3b8' }, axisLine: { lineStyle: { color: '#e2e8f0' } }, axisTick: { show: false } },
-    yAxis: { type: 'value', name: '产量', axisLabel: { fontSize: 11, color: '#94a3b8' }, splitLine: { lineStyle: { color: '#f1f5f9', type: 'dashed' } } },
-    series: [
-      {
-        name: '充棉', type: 'bar', stack: 'dept',
-        data: days.map((d: any) => d.filling?.quantity ?? 0),
-        itemStyle: { color: deptColors.filling.main, borderRadius: [0, 0, 0, 0] },
-      },
-      {
-        name: '手工', type: 'bar', stack: 'dept',
-        data: days.map((d: any) => d.handcraft?.quantity ?? 0),
-        itemStyle: { color: deptColors.handcraft.main },
-      },
-      {
-        name: '包装', type: 'bar', stack: 'dept',
-        data: days.map((d: any) => d.packaging?.quantity ?? 0),
-        itemStyle: { color: deptColors.packaging.main, borderRadius: [4, 4, 0, 0] },
-      },
-      {
-        name: '合计', type: 'line',
-        data: days.map((d: any) => d.total.quantity),
-        lineStyle: { width: 2, color: '#64748b' },
-        itemStyle: { color: '#64748b' },
-        symbol: 'circle', symbolSize: 6,
-      },
-    ],
-  }, true)
-}
-
-function handleResize() {
-  if (viewTab.value === 'daily') dailyChart?.resize()
-  else if (viewTab.value === 'monthly') monthlyChart?.resize()
-}
-
-// 图表渲染 watcher
-watch([reportSummary], () => { if (viewTab.value === 'daily') nextTick(() => requestAnimationFrame(renderDailyChart)) })
-watch([monthlySummary], () => { if (viewTab.value === 'monthly') nextTick(() => requestAnimationFrame(renderMonthlyChart)) })
-watch(viewTab, (tab) => {
-  nextTick(() => requestAnimationFrame(() => {
-    if (tab === 'daily') { renderDailyChart(); dailyChart?.resize() }
-    else if (tab === 'monthly') { renderMonthlyChart(); monthlyChart?.resize() }
-  }))
-})
-
-onMounted(async () => {
-  window.addEventListener('resize', handleResize)
+onMounted(() => {
   window.addEventListener('keydown', handleKeydown)
-  await loadEcharts()
-  nextTick(() => requestAnimationFrame(renderDailyChart))
 })
 onUnmounted(() => {
-  window.removeEventListener('resize', handleResize)
   window.removeEventListener('keydown', handleKeydown)
-  dailyChart?.dispose(); monthlyChart?.dispose()
   if (searchTimer) clearTimeout(searchTimer)
+  _timers.forEach(clearTimeout)
 })
 </script>
 
@@ -857,25 +832,13 @@ onUnmounted(() => {
 
 /* === 全局容器 === */
 .pr-container {
-  padding: 12px;
-  margin: 0 auto;
+  width: 100%;
+  padding: 0;
+  margin: 0;
   height: 100%;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-  background: #f1f5f9;
-}
-
-.pr-card-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-  background: white;
-  border-radius: 16px;
-  border: 1px solid #e2e8f0;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 14px rgba(0, 0, 0, 0.06);
 }
 
 /* === 顶部工具栏 === */
@@ -885,8 +848,8 @@ onUnmounted(() => {
   border-bottom: 1px solid #f1f5f9;
   flex-shrink: 0;
 }
-.pr-toolbar-tabs-wrap { display: flex; width: 100%; }
-.pr-toolbar-tabs-wrap :deep(.ht-bar) { width: 100%; margin: 0; }
+.pr-toolbar-tabs-wrap { display: flex; align-items: center; flex: 0 0 auto; min-width: 0; }
+.pr-toolbar-tabs-wrap :deep(.ht-bar) { width: fit-content; margin: 0; }
 .pr-toolbar-row {
   display: flex;
   align-items: center;
@@ -895,9 +858,50 @@ onUnmounted(() => {
   flex-wrap: wrap;
   width: 100%;
 }
+.pr-toolbar-row-right {
+  justify-content: space-between;
+  flex-wrap: nowrap;
+}
+.pr-toolbar-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.pr-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 3px;
+  border-radius: 10px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+}
+.pr-actions-group .pr-tab-group {
+  background: transparent;
+  border: none;
+  padding: 0;
+  border-radius: 8px;
+  gap: 2px;
+}
+.pr-actions-group .pr-action-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  box-shadow: none;
+}
+.pr-actions-group .pr-action-primary {
+  background: transparent;
+  border-color: transparent;
+  color: #1e40af;
+}
 .pr-toolbar-left { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .pr-toolbar-center { display: flex; align-items: center; }
 .pr-toolbar-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+.pr-divider {
+  width: 1px; height: 20px; background: #e2e8f0; flex-shrink: 0;
+}
 
 /* === 日期导航 === */
 .pr-date-nav { display: flex; align-items: center; gap: 6px; }
@@ -986,20 +990,11 @@ onUnmounted(() => {
   position: relative;
   overflow: hidden;
 }
-.pr-kpi-card::before {
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 3px;
-}
 .pr-kpi-card:hover {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
 }
-.pr-kpi-blue::before { background: linear-gradient(90deg, #3b82f6, #1d4ed8); }
 .pr-kpi-blue:hover { border-color: #bfdbfe; }
-.pr-kpi-green::before { background: linear-gradient(90deg, #22c55e, #15803d); }
 .pr-kpi-green:hover { border-color: #bbf7d0; }
-.pr-kpi-amber::before { background: linear-gradient(90deg, #f59e0b, #d97706); }
 .pr-kpi-amber:hover { border-color: #fde68a; }
 
 .pr-kpi-icon-wrap {
@@ -1041,7 +1036,6 @@ onUnmounted(() => {
 .pr-dept-card:hover {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
-.pr-dept-accent { width: 4px; flex-shrink: 0; border-radius: 12px 0 0 12px; }
 .pr-dept-content { flex: 1; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .pr-dept-head { display: flex; align-items: center; gap: 8px; }
 .pr-dept-icon-sm {
@@ -1059,17 +1053,14 @@ onUnmounted(() => {
 .pr-dept-stat-val { font-size: 12px; font-weight: 700; color: #475569; font-variant-numeric: tabular-nums; }
 
 /* 部门色系 */
-.pr-dept-filling .pr-dept-accent { background: #3b82f6; }
 .pr-dept-filling .pr-dept-qty-num { color: #1e3a8a; }
 .pr-dept-filling .pr-dept-icon-sm { background: #eff6ff; color: #1e40af; }
 .pr-dept-filling:hover { border-color: #bfdbfe; }
 
-.pr-dept-handcraft .pr-dept-accent { background: #22c55e; }
 .pr-dept-handcraft .pr-dept-qty-num { color: #14532d; }
 .pr-dept-handcraft .pr-dept-icon-sm { background: #f0fdf4; color: #15803d; }
 .pr-dept-handcraft:hover { border-color: #bbf7d0; }
 
-.pr-dept-packaging .pr-dept-accent { background: #f59e0b; }
 .pr-dept-packaging .pr-dept-qty-num { color: #78350f; }
 .pr-dept-packaging .pr-dept-icon-sm { background: #fffbeb; color: #d97706; }
 .pr-dept-packaging:hover { border-color: #fde68a; }
@@ -1206,176 +1197,552 @@ onUnmounted(() => {
 .pr-page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .pr-page-info { font-size: 12px; font-weight: 600; color: #64748b; }
 
-/* ===== 录入抽屉 ===== */
-.pr-drawer-overlay {
+/* ========================================
+   录入弹窗 — Data Entry Center
+   设计系统：Data-Dense Dashboard
+   信息层级：表头 → 表单 (60%) + 侧栏 (40%) → 操作栏
+   ======================================== */
+
+/* === 遮罩 === */
+.pr-entry-overlay {
   position: fixed; inset: 0;
-  background: rgba(15, 23, 42, 0.4); backdrop-filter: blur(4px);
-  z-index: 100; display: flex; justify-content: flex-end;
+  background: rgba(15, 23, 42, 0.45); backdrop-filter: blur(6px);
+  z-index: 100; display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  box-sizing: border-box;
 }
-.pr-drawer {
-  width: 440px; max-width: 100%; background: white;
+
+/* === 弹窗主体 === */
+.pr-entry-modal {
+  width: 800px; max-width: 100%; max-height: 100%;
+  background: white; border-radius: 18px;
   display: flex; flex-direction: column;
-  box-shadow: -8px 0 30px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.22), 0 4px 12px rgba(15, 23, 42, 0.08);
+  overflow: hidden;
 }
-.pr-drawer-header {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 16px 24px; border-bottom: 1px solid #f1f5f9;
-}
-.pr-drawer-header h3 {
-  font-size: 15px; font-weight: 700; color: #1e293b; margin: 0;
-  display: flex; align-items: center; gap: 8px;
-}
-.pr-drawer-header h3 i { color: #3b82f6; }
-.pr-drawer-close {
-  border: none; background: transparent; color: #94a3b8;
-  font-size: 16px; cursor: pointer; padding: 4px;
-  transition: color 0.2s ease;
-}
-.pr-drawer-close:hover { color: #1e293b; }
-.pr-drawer-body {
-  flex: 1; overflow-y: auto; padding: 20px 24px;
-  display: flex; flex-direction: column; gap: 16px;
-}
-.pr-drawer-footer {
-  display: flex; gap: 10px; padding: 14px 24px;
-  border-top: 1px solid #f1f5f9;
-}
-.pr-drawer-cancel {
-  flex: 1; padding: 10px; border: 1px solid #e2e8f0; border-radius: 10px;
-  background: white; font-size: 14px; font-weight: 600; color: #475569;
-  cursor: pointer; transition: all 0.2s ease;
-}
-.pr-drawer-cancel:hover { border-color: #3b82f6; color: #1e40af; }
-.pr-drawer-submit {
-  flex: 1; padding: 10px; border: none; border-radius: 10px;
-  background: linear-gradient(135deg, #3b82f6, #1e40af);
-  color: white; font-size: 14px; font-weight: 700;
-  cursor: pointer; transition: all 0.2s ease;
-  display: flex; align-items: center; justify-content: center; gap: 6px;
-}
-.pr-drawer-submit:hover:not(:disabled) { box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4); }
-.pr-drawer-submit:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* 抽屉动画 */
-.pr-drawer-enter-active, .pr-drawer-leave-active { transition: opacity 0.3s ease; }
-.pr-drawer-enter-active .pr-drawer, .pr-drawer-leave-active .pr-drawer { transition: transform 0.3s ease; }
-.pr-drawer-enter-from, .pr-drawer-leave-to { opacity: 0; }
-.pr-drawer-enter-from .pr-drawer, .pr-drawer-leave-to .pr-drawer { transform: translateX(100%); }
-
-/* 表单 */
-.pr-form-group { display: flex; flex-direction: column; gap: 5px; }
-.pr-form-label {
-  font-size: 12px; font-weight: 600; text-transform: uppercase;
-  letter-spacing: 0.05em; color: #64748b;
+/* === Header === */
+.pr-entry-header {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px;
+  padding: 18px 24px;
+  background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+  color: white;
+  flex-shrink: 0;
 }
-.pr-required { color: #dc2626; }
-.pr-form-input {
+.pr-entry-header-left { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.pr-entry-icon {
+  width: 42px; height: 42px; border-radius: 12px;
+  background: rgba(255, 255, 255, 0.18); backdrop-filter: blur(10px);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; flex-shrink: 0;
+}
+.pr-entry-header h3 {
+  margin: 0; font-size: 16px; font-weight: 700; color: white;
+  letter-spacing: 0.01em;
+}
+.pr-entry-sub {
+  display: block; font-size: 12px; font-weight: 500;
+  color: rgba(255, 255, 255, 0.85); margin-top: 2px;
+}
+.pr-entry-sub kbd {
+  display: inline-block; padding: 1px 5px;
+  background: rgba(255, 255, 255, 0.2); border-radius: 4px;
+  font-size: 10px; font-family: 'SF Mono', 'Consolas', monospace;
+  margin: 0 1px;
+}
+.pr-entry-close {
+  width: 36px; height: 36px; border: none;
+  background: rgba(255, 255, 255, 0.15); color: white;
+  border-radius: 10px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px;
+  transition: all 0.2s ease;
+}
+.pr-entry-close:hover { background: rgba(255, 255, 255, 0.28); }
+
+/* === Body 双列布局 === */
+.pr-entry-body {
+  flex: 1; min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 0;
+  overflow: hidden;
+}
+
+/* === 左侧表单 === */
+.pr-entry-form {
+  padding: 22px 24px;
+  overflow-y: auto;
+  display: flex; flex-direction: column; gap: 18px;
+  border-right: 1px solid #f1f5f9;
+}
+
+/* 表单分组 */
+.pr-entry-group { display: flex; flex-direction: column; gap: 7px; }
+.pr-entry-label {
+  font-size: 12px; font-weight: 700; color: #475569;
+  letter-spacing: 0.03em; text-transform: uppercase;
+}
+.pr-req { color: #dc2626; font-weight: 800; }
+
+.pr-entry-input {
   width: 100%; padding: 10px 14px; font-size: 14px; line-height: 1.5;
   color: #1e293b; background: white;
   border: 1px solid #e2e8f0; border-radius: 10px;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
   outline: none; min-height: 44px; box-sizing: border-box; font-family: inherit;
 }
-.pr-form-input:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
-.pr-form-input:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
-.pr-form-input:hover:not(:disabled) { border-color: #94a3b8; }
-.pr-form-input::placeholder { color: #94a3b8; font-size: 14px; font-weight: 400; }
-.pr-form-textarea { min-height: 56px; resize: vertical; }
-.pr-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.pr-form-value {
-  padding: 10px 14px; background: #eff6ff; border-radius: 10px;
-  border: 1px solid #bfdbfe;
-  font-size: 18px; font-weight: 800; color: #1e40af;
-  min-height: 44px; display: flex; align-items: center;
-  font-variant-numeric: tabular-nums;
-}
-.pr-form-error { font-size: 12px; color: #dc2626; margin-top: 1px; }
+.pr-entry-input:hover:not(:disabled) { border-color: #cbd5e1; }
+.pr-entry-input:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
+.pr-entry-input:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12); }
+.pr-entry-input::placeholder { color: #94a3b8; }
 
-/* 部门选择按钮 */
-.pr-dept-select { display: flex; gap: 8px; }
-.pr-dept-btn {
-  flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 9px 14px; border: 1px solid #e2e8f0; border-radius: 8px;
-  background: white; font-size: 13px; font-weight: 600; color: #475569;
+.pr-entry-error {
+  font-size: 12px; color: #dc2626; font-weight: 600;
+  display: flex; align-items: center; gap: 4px;
+}
+.pr-entry-error::before {
+  content: '\f06a'; font-family: 'Font Awesome 5 Free'; font-weight: 900;
+  font-size: 11px;
+}
+
+/* === 日期行 === */
+.pr-entry-date-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pr-date-chip {
+  padding: 7px 14px; border: 1px solid #e2e8f0; border-radius: 8px;
+  background: white; font-size: 12px; font-weight: 600; color: #475569;
   cursor: pointer; transition: all 0.2s ease;
 }
-.pr-dept-btn:hover { border-color: #3b82f6; color: #1e40af; }
-.pr-dept-btn-active { border-color: #3b82f6; background: #eff6ff; color: #1e40af; }
-.pr-dept-btn-filling.pr-dept-btn-active { border-color: #3b82f6; color: #1e40af; background: #eff6ff; }
-.pr-dept-btn-handcraft.pr-dept-btn-active { border-color: #22c55e; color: #15803d; background: #f0fdf4; }
-.pr-dept-btn-packaging.pr-dept-btn-active { border-color: #f59e0b; color: #d97706; background: #fffbeb; }
+.pr-date-chip:hover { border-color: #3b82f6; color: #1e40af; }
+.pr-date-chip.active {
+  background: #1e40af; border-color: #1e40af; color: white;
+  box-shadow: 0 1px 3px rgba(30, 64, 175, 0.3);
+}
+.pr-entry-date-input { flex: 1; min-width: 140px; }
 
-/* 搜索 */
-.pr-form-search { position: relative; }
-.pr-form-search-input { padding-left: 38px !important; padding-right: 40px !important; }
-.pr-form-search-icon {
-  position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
-  color: #94a3b8; font-size: 14px; pointer-events: none;
+/* === 部门卡片网格 === */
+.pr-entry-dept-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
 }
-.pr-form-dropdown {
-  position: absolute; top: 100%; left: 0; right: 0; margin-top: 4px;
-  background: white; border: 1px solid #e2e8f0; border-radius: 10px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.12);
-  max-height: 200px; overflow-y: auto; z-index: 20;
+.pr-entry-dept-card {
+  position: relative;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; padding: 14px 10px;
+  border: 2px solid #e2e8f0; border-radius: 12px;
+  background: white; cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
 }
-.pr-form-dropdown-item {
-  padding: 9px 12px; cursor: pointer; transition: background 0.15s ease;
-  border-bottom: 1px solid #f1f5f9;
+.pr-entry-dept-card:hover {
+  border-color: #cbd5e1; transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
-.pr-form-dropdown-item:last-child { border-bottom: none; }
-.pr-form-dropdown-item:hover, .pr-form-dropdown-item-active { background: #eff6ff; }
-.pr-form-dropdown-name { font-size: 13px; font-weight: 600; color: #1e293b; }
-.pr-form-dropdown-barcode { font-size: 11px; color: #64748b; margin-top: 1px; }
-.pr-form-dropdown-loading, .pr-form-dropdown-empty, .pr-form-dropdown-error {
-  padding: 12px; font-size: 13px; color: #64748b; text-align: center;
+.pr-entry-dept-icon {
+  width: 40px; height: 40px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px;
+  transition: all 0.2s ease;
 }
-.pr-form-dropdown-error { color: #dc2626; }
-.pr-form-selected {
-  display: flex; align-items: center; gap: 6px;
-  padding: 6px 10px; background: #eff6ff; border: 1px solid #bfdbfe;
-  border-radius: 8px; font-size: 13px; font-weight: 600; color: #1e40af;
-  margin-top: 4px;
+.pr-entry-dept-name {
+  font-size: 13px; font-weight: 700; color: #475569;
+  letter-spacing: 0.01em;
 }
-.pr-form-selected i { color: #3b82f6; }
-.pr-form-selected-barcode { font-size: 11px; color: #64748b; font-weight: 500; }
-.pr-form-selected-clear {
+.pr-entry-dept-mark {
+  position: absolute; top: 6px; right: 6px;
+  font-size: 14px; color: transparent;
+  transition: all 0.2s ease;
+}
+.pr-entry-dept-card.active { transform: translateY(-1px); }
+.pr-entry-dept-card.active .pr-entry-dept-mark { color: white; }
+
+/* 充棉 - 蓝 */
+.pr-entry-dept-filling .pr-entry-dept-icon { background: #eff6ff; color: #1e40af; }
+.pr-entry-dept-filling:hover { border-color: #93c5fd; }
+.pr-entry-dept-filling.active {
+  background: linear-gradient(135deg, #3b82f6, #1e40af);
+  border-color: #1e40af;
+  box-shadow: 0 6px 16px rgba(59, 130, 246, 0.35);
+}
+.pr-entry-dept-filling.active .pr-entry-dept-icon { background: rgba(255, 255, 255, 0.2); color: white; }
+.pr-entry-dept-filling.active .pr-entry-dept-name { color: white; }
+
+/* 手工 - 绿 */
+.pr-entry-dept-handcraft .pr-entry-dept-icon { background: #f0fdf4; color: #15803d; }
+.pr-entry-dept-handcraft:hover { border-color: #86efac; }
+.pr-entry-dept-handcraft.active {
+  background: linear-gradient(135deg, #22c55e, #15803d);
+  border-color: #15803d;
+  box-shadow: 0 6px 16px rgba(34, 197, 94, 0.35);
+}
+.pr-entry-dept-handcraft.active .pr-entry-dept-icon { background: rgba(255, 255, 255, 0.2); color: white; }
+.pr-entry-dept-handcraft.active .pr-entry-dept-name { color: white; }
+
+/* 包装 - 琥珀 */
+.pr-entry-dept-packaging .pr-entry-dept-icon { background: #fffbeb; color: #d97706; }
+.pr-entry-dept-packaging:hover { border-color: #fcd34d; }
+.pr-entry-dept-packaging.active {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  border-color: #d97706;
+  box-shadow: 0 6px 16px rgba(245, 158, 11, 0.35);
+}
+.pr-entry-dept-packaging.active .pr-entry-dept-icon { background: rgba(255, 255, 255, 0.2); color: white; }
+.pr-entry-dept-packaging.active .pr-entry-dept-name { color: white; }
+
+/* === 产品搜索 === */
+.pr-entry-search { position: relative; }
+.pr-entry-search-input {
+  padding-left: 40px !important; padding-right: 40px !important;
+  font-size: 15px !important; min-height: 48px !important;
+}
+.pr-entry-search-icon {
+  position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+  color: #94a3b8; font-size: 15px; pointer-events: none;
+}
+.pr-entry-search-clear {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  width: 28px; height: 28px; border: none; background: #f1f5f9;
+  border-radius: 50%; cursor: pointer;
+  color: #64748b; font-size: 11px;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s ease;
+}
+.pr-entry-search-clear:hover { background: #e2e8f0; color: #1e293b; }
+
+.pr-entry-dropdown {
+  position: absolute; top: 100%; left: 0; right: 0; margin-top: 6px;
+  background: white; border: 1px solid #e2e8f0; border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.15);
+  max-height: 260px; overflow-y: auto; z-index: 20;
+  padding: 4px;
+}
+.pr-entry-dropdown-state {
+  padding: 16px; font-size: 13px; color: #64748b; text-align: center;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+}
+.pr-entry-dropdown-state i { font-size: 14px; }
+.pr-entry-dropdown-error { color: #dc2626; }
+.pr-entry-dropdown-item {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%; padding: 10px 12px; border: none;
+  background: transparent; text-align: left; cursor: pointer;
+  border-radius: 8px;
+  font-family: inherit; color: inherit;
+  transition: background 0.15s ease;
+}
+.pr-entry-dropdown-item:hover, .pr-entry-dropdown-item.active {
+  background: #eff6ff;
+}
+.pr-entry-dropdown-icon {
+  width: 32px; height: 32px; border-radius: 8px;
+  background: #f1f5f9; color: #64748b;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; flex-shrink: 0;
+}
+.pr-entry-dropdown-item.active .pr-entry-dropdown-icon {
+  background: #dbeafe; color: #1e40af;
+}
+.pr-entry-dropdown-content {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.pr-entry-dropdown-name {
+  font-size: 13px; font-weight: 700; color: #1e293b;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pr-entry-dropdown-meta {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px; color: #64748b;
+}
+.pr-entry-dropdown-barcode { display: inline-flex; align-items: center; gap: 3px; }
+.pr-entry-dropdown-barcode i { font-size: 10px; }
+.pr-entry-dropdown-enter { color: #1e40af; font-size: 12px; }
+
+.pr-entry-selected {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; background: #eff6ff; border: 1px solid #bfdbfe;
+  border-radius: 10px; font-size: 13px; font-weight: 600; color: #1e40af;
+}
+.pr-entry-selected-icon { color: #1e40af; font-size: 15px; flex-shrink: 0; }
+.pr-entry-selected-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pr-entry-selected-barcode {
+  font-size: 11px; color: #64748b; font-weight: 500;
+  font-family: 'SF Mono', 'Consolas', monospace;
+  background: white; padding: 2px 6px; border-radius: 4px;
+  border: 1px solid #bfdbfe;
+}
+
+/* === 数量输入 === */
+.pr-entry-qty-row {
+  display: flex; align-items: center; gap: 10px;
+}
+.pr-entry-qty-input-wrap {
+  flex: 1; min-width: 0;
+  display: flex; align-items: stretch;
+  background: white; border: 1px solid #e2e8f0; border-radius: 12px;
+  overflow: hidden;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.pr-entry-qty-input-wrap:focus-within {
+  border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+.pr-entry-qty-step {
+  border: none; background: #f8fafc;
+  padding: 0 14px; font-size: 13px; font-weight: 700;
+  color: #475569; cursor: pointer; font-family: inherit;
+  transition: background 0.15s ease, color 0.15s ease;
+  min-width: 52px;
+}
+.pr-entry-qty-step:first-child { border-right: 1px solid #e2e8f0; }
+.pr-entry-qty-step:last-child { border-left: 1px solid #e2e8f0; }
+.pr-entry-qty-step:hover { background: #1e40af; color: white; }
+.pr-entry-qty-input {
+  flex: 1; min-width: 0; border: none !important;
+  background: transparent !important;
+  text-align: center; font-size: 22px !important; font-weight: 800 !important;
+  color: #1e293b; padding: 8px 4px !important; min-height: 48px !important;
+  font-variant-numeric: tabular-nums;
+}
+.pr-entry-qty-input:focus { box-shadow: none !important; }
+.pr-entry-qty-input::-webkit-outer-spin-button,
+.pr-entry-qty-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.pr-entry-qty-input { -moz-appearance: textfield; }
+.pr-entry-qty-unit {
+  display: flex; align-items: center;
+  padding: 0 12px; font-size: 12px; font-weight: 600; color: #64748b;
+  background: #f8fafc; border-left: 1px solid #e2e8f0;
+}
+.pr-entry-qty-btns { display: flex; gap: 6px; }
+.pr-entry-qty-pill {
+  padding: 0 14px; height: 48px; border: 1px solid #e2e8f0; border-radius: 12px;
+  background: white; font-size: 14px; font-weight: 700; color: #475569;
+  cursor: pointer; font-family: inherit;
+  transition: all 0.15s ease;
+}
+.pr-entry-qty-pill:hover {
+  background: #1e40af; border-color: #1e40af; color: white;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(30, 64, 175, 0.25);
+}
+
+/* === 单价 / 产值 网格 === */
+.pr-entry-form-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+}
+.pr-entry-price-wrap {
+  position: relative;
+  display: flex; align-items: center;
+}
+.pr-entry-price-prefix {
+  position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+  font-size: 14px; font-weight: 700; color: #64748b; pointer-events: none;
+}
+.pr-entry-price-input { padding-left: 28px !important; }
+.pr-entry-value-display {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px; min-height: 44px;
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  border: 1px solid #bfdbfe; border-radius: 10px;
+  font-size: 18px; font-weight: 800; color: #1e40af;
+  font-variant-numeric: tabular-nums;
+}
+.pr-entry-value-display i { font-size: 14px; opacity: 0.7; }
+
+/* === 右侧栏 === */
+.pr-entry-sidebar {
+  padding: 22px 20px;
+  background: #f8fafc;
+  display: flex; flex-direction: column; gap: 14px;
+  overflow-y: auto;
+}
+.pr-entry-side-card {
+  background: white; border: 1px solid #e2e8f0; border-radius: 12px;
+  overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.pr-entry-side-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px;
+  background: #f8fafc; border-bottom: 1px solid #f1f5f9;
+  font-size: 12px; font-weight: 700; color: #475569;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.pr-entry-side-head span {
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.pr-entry-side-head i { color: #1e40af; font-size: 11px; }
+.pr-entry-side-clear {
   border: none; background: transparent; color: #94a3b8;
-  cursor: pointer; font-size: 12px; margin-left: auto; padding: 2px;
+  font-size: 11px; font-weight: 600; cursor: pointer; padding: 2px 4px;
+  font-family: inherit; text-transform: none; letter-spacing: 0;
   transition: color 0.15s ease;
 }
-.pr-form-selected-clear:hover { color: #1e293b; }
+.pr-entry-side-clear:hover { color: #dc2626; }
 
-/* ===== 二次确认弹窗 ===== */
-.pr-modal-overlay {
-  position: fixed; inset: 0;
-  background: rgba(15, 23, 42, 0.5); backdrop-filter: blur(4px);
-  z-index: 110; display: flex; align-items: center; justify-content: center;
-}
-.pr-modal {
-  background: white; border-radius: 16px; width: 380px; max-width: 90%;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2); overflow: hidden;
-}
-.pr-modal-header {
+.pr-entry-recent-list { display: flex; flex-direction: column; padding: 6px; }
+.pr-entry-recent-item {
   display: flex; align-items: center; gap: 10px;
-  padding: 18px 24px 10px;
+  width: 100%; padding: 9px 10px; border: none;
+  background: transparent; text-align: left; cursor: pointer;
+  border-radius: 8px;
+  font-family: inherit; color: inherit;
+  transition: all 0.15s ease;
 }
-.pr-modal-header i { font-size: 22px; color: #3b82f6; }
-.pr-modal-header h4 { margin: 0; font-size: 15px; font-weight: 700; color: #1e293b; }
-.pr-modal-body { padding: 0 24px 14px; }
-.pr-modal-body p { margin: 0 0 10px; font-size: 13px; color: #64748b; }
-.pr-confirm-data {
-  background: #f8fafc; border-radius: 10px; padding: 12px 14px;
-  display: flex; flex-direction: column; gap: 6px;
-  border: 1px solid #f1f5f9;
+.pr-entry-recent-item:hover {
+  background: #eff6ff;
+  transform: translateX(2px);
 }
-.pr-confirm-row { display: flex; justify-content: space-between; font-size: 13px; }
-.pr-confirm-row span { color: #64748b; }
-.pr-confirm-row strong { color: #1e293b; }
-.pr-modal-footer { display: flex; gap: 10px; padding: 10px 24px 18px; }
+.pr-entry-recent-bullet {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #cbd5e1; flex-shrink: 0;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+.pr-entry-recent-item:hover .pr-entry-recent-bullet {
+  background: #3b82f6; transform: scale(1.4);
+}
+.pr-entry-recent-content {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; gap: 1px;
+}
+.pr-entry-recent-name {
+  font-size: 13px; font-weight: 600; color: #1e293b;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pr-entry-recent-barcode {
+  font-size: 11px; color: #64748b;
+  font-family: 'SF Mono', 'Consolas', monospace;
+}
+.pr-entry-recent-arrow {
+  font-size: 10px; color: #cbd5e1;
+  transition: all 0.15s ease;
+}
+.pr-entry-recent-item:hover .pr-entry-recent-arrow {
+  color: #1e40af; transform: translateX(2px);
+}
 
-/* 弹窗动画 */
-.pr-modal-enter-active, .pr-modal-leave-active { transition: opacity 0.25s ease, transform 0.25s ease; }
-.pr-modal-enter-from, .pr-modal-leave-to { opacity: 0; transform: scale(0.95); }
+.pr-entry-empty-small {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 4px; padding: 24px 12px;
+  color: #94a3b8; text-align: center;
+}
+.pr-entry-empty-small i { font-size: 22px; opacity: 0.5; }
+.pr-entry-empty-small span { font-size: 12px; font-weight: 600; }
+.pr-entry-empty-small small { font-size: 11px; color: #cbd5e1; }
+
+.pr-entry-shortcuts {
+  padding: 10px 14px 12px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.pr-entry-shortcut {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: #475569;
+}
+.pr-entry-shortcut span { margin-left: auto; font-weight: 500; }
+.pr-entry-shortcut kbd {
+  display: inline-block; min-width: 22px; padding: 2px 6px;
+  background: #f1f5f9; border: 1px solid #e2e8f0; border-bottom-width: 2px;
+  border-radius: 5px;
+  font-size: 10px; font-weight: 700; color: #475569;
+  font-family: 'SF Mono', 'Consolas', monospace;
+  text-align: center;
+}
+
+/* === Footer === */
+.pr-entry-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; padding: 14px 24px;
+  background: #f8fafc; border-top: 1px solid #f1f5f9;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.pr-entry-continue {
+  display: inline-flex; align-items: center; gap: 8px;
+  cursor: pointer; font-size: 13px; font-weight: 600; color: #475569;
+  user-select: none;
+  padding: 4px 0;
+}
+.pr-entry-continue input { position: absolute; opacity: 0; pointer-events: none; }
+.pr-entry-continue-box {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 5px;
+  background: white; border: 2px solid #cbd5e1;
+  color: transparent; font-size: 10px;
+  transition: all 0.15s ease;
+}
+.pr-entry-continue.active .pr-entry-continue-box {
+  background: #1e40af; border-color: #1e40af; color: white;
+}
+.pr-entry-continue:hover .pr-entry-continue-box { border-color: #1e40af; }
+.pr-entry-continue.active { color: #1e40af; }
+
+.pr-entry-footer-btns { display: flex; gap: 10px; }
+.pr-entry-btn-cancel {
+  padding: 0 18px; height: 44px; border: 1px solid #e2e8f0; border-radius: 10px;
+  background: white; font-size: 14px; font-weight: 600; color: #475569;
+  cursor: pointer; font-family: inherit;
+  transition: all 0.2s ease;
+}
+.pr-entry-btn-cancel:hover { border-color: #3b82f6; color: #1e40af; background: #eff6ff; }
+.pr-entry-btn-submit {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 0 22px; height: 44px; border: none; border-radius: 10px;
+  background: linear-gradient(135deg, #3b82f6 0%, #1e40af 100%);
+  color: white; font-size: 14px; font-weight: 700;
+  cursor: pointer; font-family: inherit;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(30, 64, 175, 0.25);
+}
+.pr-entry-btn-submit:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(30, 64, 175, 0.4);
+}
+.pr-entry-btn-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+.pr-entry-btn-hint {
+  display: inline-block; padding: 1px 5px;
+  background: rgba(255, 255, 255, 0.2); border-radius: 4px;
+  font-size: 10px; font-weight: 600;
+  font-family: 'SF Mono', 'Consolas', monospace;
+  letter-spacing: 0;
+}
+
+/* === 弹窗动画 === */
+.pr-entry-enter-active, .pr-entry-leave-active { transition: opacity 0.25s ease; }
+.pr-entry-enter-active .pr-entry-modal, .pr-entry-leave-active .pr-entry-modal {
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease;
+}
+.pr-entry-enter-from, .pr-entry-leave-to { opacity: 0; }
+.pr-entry-enter-from .pr-entry-modal, .pr-entry-leave-to .pr-entry-modal {
+  transform: scale(0.96) translateY(8px);
+  opacity: 0;
+}
+
+/* === 响应式 === */
+@media (max-width: 900px) {
+  .pr-entry-overlay { padding: 12px; }
+  .pr-entry-modal { border-radius: 16px; }
+  .pr-entry-body { grid-template-columns: 1fr; }
+  .pr-entry-form { border-right: none; border-bottom: 1px solid #f1f5f9; max-height: 55vh; }
+  .pr-entry-sidebar { padding: 16px; max-height: 40vh; }
+  .pr-entry-dept-grid { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .pr-entry-dept-card { padding: 10px 6px; }
+  .pr-entry-dept-icon { width: 36px; height: 36px; font-size: 16px; }
+  .pr-entry-dept-name { font-size: 12px; }
+  .pr-entry-form-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 600px) {
+  .pr-entry-overlay { padding: 0; }
+  .pr-entry-modal {
+    width: 100%; height: 100%; max-height: 100%;
+    border-radius: 0;
+  }
+  .pr-entry-header { padding: 14px 16px; }
+  .pr-entry-form { padding: 16px; gap: 14px; }
+  .pr-entry-sidebar { padding: 14px; }
+  .pr-entry-footer { padding: 12px 16px; }
+  .pr-entry-footer { flex-direction: column; align-items: stretch; }
+  .pr-entry-footer-btns { width: 100%; }
+  .pr-entry-btn-cancel, .pr-entry-btn-submit { flex: 1; }
+}
 
 /* ===== 导出提示 ===== */
 .pr-export-toast {
@@ -1404,7 +1771,7 @@ onUnmounted(() => {
 
 /* 平板横屏 */
 @media (max-width: 1024px) {
-  .pr-container { padding: 8px; }
+  .pr-container { padding: 0; }
   .pr-toolbar { padding: 12px 16px 8px; }
   .pr-kpi-section { padding: 12px 16px 0; }
   .pr-dept-section { padding: 10px 16px 0; }
@@ -1418,13 +1785,19 @@ onUnmounted(() => {
 
 /* 移动端 / 小平板 */
 @media (max-width: 768px) {
-  .pr-container { padding: 4px; background: #f8fafc; }
-  .pr-card-main { border-radius: 12px; }
+  .pr-container { padding: 0; }
+  .page-card-main { border-radius: 12px; }
   .pr-toolbar { padding: 10px 12px 8px; }
-  .pr-toolbar-row { flex-direction: column; align-items: stretch; gap: 8px; }
-  .pr-toolbar-left { justify-content: center; }
-  .pr-toolbar-center { justify-content: center; }
-  .pr-toolbar-right { justify-content: center; }
+  .pr-toolbar-row { gap: 8px; }
+  .pr-toolbar-row-right {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .pr-toolbar-controls {
+    flex-wrap: wrap;
+    overflow-x: auto;
+  }
+  .pr-divider { display: none; }
 
   .pr-kpi-section { padding: 8px 12px 0; }
   .pr-kpi-row { grid-template-columns: 1fr; gap: 8px; }
@@ -1439,16 +1812,12 @@ onUnmounted(() => {
   .pr-content-row { grid-template-columns: 1fr; gap: 12px; min-height: auto; }
   .pr-chart-body { height: 220px; }
 
-  .pr-drawer { width: 100%; }
-  .pr-form-row { grid-template-columns: 1fr; }
-
   .pr-panel-header { flex-wrap: wrap; gap: 6px; }
   .pr-table-filter { flex-wrap: wrap; }
 }
 
 /* 大屏优化 */
 @media (min-width: 1440px) {
-  .pr-container { max-width: 1600px; }
   .pr-kpi-value { font-size: 28px; }
   .pr-chart-body { height: 320px; }
 }
