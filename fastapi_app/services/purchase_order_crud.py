@@ -96,11 +96,8 @@ async def create_purchase_order(db: AsyncSession, data: dict, include_summary: b
     return result
 
 
-async def update_purchase_order(db: AsyncSession, order_id: int, data: dict, username: str = 'unknown') -> dict:
-    order = await db.get(PurchaseOrder, order_id)
-    if not order:
-        raise ValueError('采购订单不存在')
-
+def _apply_order_field_updates(order: PurchaseOrder, data: dict) -> None:
+    """根据 data 字典更新订单的可变字段。"""
     if 'customer_name' in data:
         order.customer_name = data['customer_name']
     if 'supplier_name' in data:
@@ -110,64 +107,84 @@ async def update_purchase_order(db: AsyncSession, order_id: int, data: dict, use
     if 'status' in data:
         order.status = data['status']
 
+
+def _apply_item_fields(item: PurchaseOrderItem, item_data: dict, order: PurchaseOrder) -> None:
+    """将 item_data 中的字段写入明细对象。"""
+    item.material_name = item_data.get('material_name', '')
+    item.material_code = item_data.get('material_code', '')
+    item.specification = item_data.get('specification', '')
+    item.unit = item_data.get('unit', '')
+    item.unit_price = Decimal(str(item_data.get('unit_price', 0)))
+    item.quantity = Decimal(str(item_data.get('quantity', 0)))
+    item.total_price = item.unit_price * item.quantity
+    item.material_category = item_data.get('category', '')
+    item.remark = item_data.get('remark', '')
+    item.supplier_name = order.supplier_name
+    item.customer_name = order.customer_name
+
+
+async def _upsert_order_items(
+    db: AsyncSession, order: PurchaseOrder, order_id: int, items_data: list
+) -> None:
+    """批量预取并 upsert 订单明细，返回 None（直接修改 order.total_amount）。"""
+    existing_items_result = await db.execute(
+        select(PurchaseOrderItem).where(PurchaseOrderItem.order_id == order_id)
+    )
+    existing_items = {item.id for item in existing_items_result.scalars().all()}
+
+    total_amount = Decimal('0')
+    updated_ids = set()
+
+    # 批量预取待更新的明细，避免循环内逐条 db.get 产生 N+1 查询
+    item_ids_to_fetch = [d.get('id') for d in items_data if d.get('id')]
+    fetched_items_map = {}
+    if item_ids_to_fetch:
+        fetched_result = await db.execute(
+            select(PurchaseOrderItem).where(PurchaseOrderItem.id.in_(item_ids_to_fetch))
+        )
+        fetched_items_map = {i.id: i for i in fetched_result.scalars().all()}
+
+    for item_data in items_data:
+        item_id = item_data.get('id')
+        if item_id:
+            item = fetched_items_map.get(item_id)
+            # 批量预取缺失或跨订单的 id：回退到逐条查询，保持原 db.get 语义
+            if item is None or item.order_id != order_id:
+                item = await db.get(PurchaseOrderItem, item_id)
+            if item is not None and item.order_id == order_id:
+                updated_ids.add(item_id)
+        else:
+            item = PurchaseOrderItem(order_id=order_id)
+
+        if item is None:
+            # id 无效（已被删除）：跳过，避免 AttributeError
+            continue
+
+        _apply_item_fields(item, item_data, order)
+
+        if not item_id:
+            db.add(item)
+        total_amount += item.total_price
+
+    to_delete_ids = existing_items - updated_ids
+    if to_delete_ids:
+        await db.execute(
+            delete(PurchaseOrderItem).where(PurchaseOrderItem.id.in_(to_delete_ids))
+        )
+
+    order.total_amount = total_amount
+
+
+async def update_purchase_order(db: AsyncSession, order_id: int, data: dict, username: str = 'unknown') -> dict:
+    order = await db.get(PurchaseOrder, order_id)
+    if not order:
+        raise ValueError('采购订单不存在')
+
+    _apply_order_field_updates(order, data)
+
     items_data = data.get('items')
     if items_data is not None:
-        existing_items_result = await db.execute(
-            select(PurchaseOrderItem).where(PurchaseOrderItem.order_id == order_id)
-        )
-        existing_items = {item.id for item in existing_items_result.scalars().all()}
-
-        total_amount = Decimal('0')
-        updated_ids = set()
-
-        # 批量预取待更新的明细，避免循环内逐条 db.get 产生 N+1 查询
-        item_ids_to_fetch = [d.get('id') for d in items_data if d.get('id')]
-        fetched_items_map = {}
-        if item_ids_to_fetch:
-            fetched_result = await db.execute(
-                select(PurchaseOrderItem).where(PurchaseOrderItem.id.in_(item_ids_to_fetch))
-            )
-            fetched_items_map = {i.id: i for i in fetched_result.scalars().all()}
-
-        for item_data in items_data:
-            item_id = item_data.get('id')
-            if item_id:
-                item = fetched_items_map.get(item_id)
-                # 批量预取缺失或跨订单的 id：回退到逐条查询，保持原 db.get 语义
-                if item is None or item.order_id != order_id:
-                    item = await db.get(PurchaseOrderItem, item_id)
-                if item is not None and item.order_id == order_id:
-                    updated_ids.add(item_id)
-            else:
-                item = PurchaseOrderItem(order_id=order_id)
-
-            if item is None:
-                # id 无效（已被删除）：跳过，避免 AttributeError
-                continue
-
-            item.material_name = item_data.get('material_name', '')
-            item.material_code = item_data.get('material_code', '')
-            item.specification = item_data.get('specification', '')
-            item.unit = item_data.get('unit', '')
-            item.unit_price = Decimal(str(item_data.get('unit_price', 0)))
-            item.quantity = Decimal(str(item_data.get('quantity', 0)))
-            item.total_price = item.unit_price * item.quantity
-            item.material_category = item_data.get('category', '')
-            item.remark = item_data.get('remark', '')
-            item.supplier_name = order.supplier_name
-            item.customer_name = order.customer_name
-
-            if not item_id:
-                db.add(item)
-            total_amount += item.total_price
-
-        to_delete_ids = existing_items - updated_ids
-        if to_delete_ids:
-            await db.execute(
-                delete(PurchaseOrderItem).where(PurchaseOrderItem.id.in_(to_delete_ids))
-            )
-
-        order.total_amount = total_amount
+        await _upsert_order_items(db, order, order_id, items_data)
 
     await db.flush()
 
