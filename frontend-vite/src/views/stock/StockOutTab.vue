@@ -13,6 +13,17 @@
             <form @submit.prevent>
               <div class="form-grid">
                 <div class="form-field">
+                  <label class="form-label">订单类型 <span style="color: var(--color-danger-500)">*</span></label>
+                  <UiSelect v-model="form.orderType" placeholder="请选择订单类型" :options="orderTypeOptions" />
+                </div>
+                <div v-if="form.orderType === 'custom'" class="form-field">
+                  <label class="form-label">国家 <span style="color: var(--color-danger-500)">*</span></label>
+                  <UiSelect v-model="form.country" placeholder="请选择国家" :options="countryStore.countryOptions" />
+                </div>
+              </div>
+
+              <div class="form-grid">
+                <div class="form-field">
                   <label class="form-label">出货时间</label>
                   <UiDatePicker v-model="form.date" style="width: 100%" />
                 </div>
@@ -32,12 +43,14 @@
                   @input="form.search = ($event.target as HTMLInputElement).value; onSearchInput()"
                   @focus="onProductFocus"
                   @blur="hideSuggestions"
+                  @keydown="onSearchKeydown"
                 />
                 <div v-if="productSuggestions.length && showSuggestions" class="autocomplete-dropdown">
                   <div
-                    v-for="p in productSuggestions"
+                    v-for="(p, idx) in productSuggestions"
                     :key="p.id"
                     class="autocomplete-item"
+                    :class="{ 'autocomplete-active': idx === activeSuggestionIdx }"
                     role="option"
                     @mousedown.prevent="selectProduct(p)"
                     @keydown.enter="selectProduct(p)"
@@ -55,6 +68,9 @@
                   <i class="fas fa-info-circle" style="margin-right: 4px"  aria-hidden="true" />
                   订单量: {{ shipmentInfo.order_quantity }} | 已出货: {{ shipmentInfo.shipped_quantity }} | 可出货:
                   <strong style="color: var(--color-primary-500)">{{ shipmentInfo.available_quantity }}</strong>
+                  <template v-if="shipmentInfo.regular_available != null || shipmentInfo.custom_available != null">
+                    <span class="shipment-detail">（常规: {{ shipmentInfo.regular_available ?? 0 }} | 定制: {{ shipmentInfo.custom_available ?? 0 }}）</span>
+                  </template>
                 </small>
               </div>
 
@@ -188,6 +204,7 @@
                     </div>
                     <div class="so-staged-badges">
                       <span class="badge-tag badge-danger">数量: {{ item.quantity }}</span>
+                      <span v-if="item.order_type === 'custom'" class="badge-tag badge-warning">定制{{ item.country ? `·${item.country}` : '' }}</span>
                       <span v-if="item.note" class="badge-tag badge-secondary">备注: {{ item.note }}</span>
                     </div>
                   </div>
@@ -229,111 +246,128 @@
         </UiButton>
       </div>
 
-      <div v-if="showFilter" class="filter-panel">
-        <div class="filter-row">
-          <div class="filter-field">
-            <label class="form-label"><i class="fas fa-user label-icon" aria-hidden="true"></i>客户</label>
+      <div v-if="showFilter" class="so-filter-panel">
+        <div class="so-filter-row">
+          <div class="so-filter-field">
+            <label class="so-label"><i class="fas fa-user" aria-hidden="true"></i> 客户</label>
             <UiSelect v-model="filterCustomer" placeholder="全部" :options="customerOptions" style="width: 100%" />
           </div>
-          <div class="filter-field">
-            <label class="form-label"><i class="fas fa-calendar-alt label-icon" aria-hidden="true"></i>开始日期</label>
+          <div class="so-filter-field">
+            <label class="so-label"><i class="fas fa-tag" aria-hidden="true"></i> 订单类型</label>
+            <UiSelect v-model="filterOrderType" placeholder="全部" :options="filterOrderTypeOptions" style="width: 100%" />
+          </div>
+          <div class="so-filter-field">
+            <label class="so-label"><i class="fas fa-calendar-alt" aria-hidden="true"></i> 开始日期</label>
             <UiDatePicker v-model="filterStart" style="width: 100%" />
           </div>
-          <div class="filter-field">
-            <label class="form-label"><i class="fas fa-calendar-alt label-icon" aria-hidden="true"></i>结束日期</label>
+          <div class="so-filter-field">
+            <label class="so-label"><i class="fas fa-calendar-alt" aria-hidden="true"></i> 结束日期</label>
             <UiDatePicker v-model="filterEnd" style="width: 100%" />
           </div>
-          <div class="filter-field filter-action">
+          <div class="so-filter-field so-filter-action">
             <UiButton variant="primary" size="sm" @click="fetchStockouts">
               <i class="fas fa-search" style="margin-right: 4px"  aria-hidden="true" />查询
+            </UiButton>
+            <UiButton variant="outline" size="sm" @click="resetFilter">
+              <i class="fas fa-undo" style="margin-right: 4px"  aria-hidden="true" />重置
             </UiButton>
           </div>
         </div>
       </div>
 
       <div class="so-records-body">
-        <div v-if="isLoading && stockoutRecords.length === 0" class="state-placeholder">
-          <div class="spinner-ring" />
-          <p class="state-text">加载中…</p>
+        <div v-if="isLoading && stockoutRecords.length === 0" class="so-state-placeholder">
+          <div class="so-spinner-ring" />
+          <p class="so-state-text">加载中…</p>
         </div>
-        <div v-else-if="stockoutRecords.length === 0" class="state-placeholder state-empty">
-          <div class="empty-illustration"><i class="fas fa-shipping-fast"  aria-hidden="true" /></div>
-          <p class="state-text">暂无出货记录</p>
+        <div v-else-if="stockoutRecords.length === 0" class="so-state-placeholder so-state-empty">
+          <div class="so-empty-illustration"><i class="fas fa-shipping-fast"  aria-hidden="true" /></div>
+          <p class="so-state-text">暂无出货记录</p>
         </div>
 
         <template v-else>
-        <div v-if="isFetching" class="so-fetching-bar"><div class="so-fetching-progress" /></div>
-        <div>
-          <div v-for="group in groupedRecords" :key="group.date" class="date-group">
-            <button type="button" class="date-group-header" @click="toggleGroupExpanded(group.date)">
-              <div class="date-group-title">
-                <i class="fas fa-calendar-alt" style="color: var(--color-danger-500); margin-right: 8px"  aria-hidden="true" />
-                <strong>{{ group.date }}</strong>
-                <span class="badge-tag badge-info">{{ group.records.length }} 条记录</span>
-                <span class="badge-tag badge-secondary">共 {{ group.totalQty }} 件</span>
-              </div>
-              <i :class="['fas fa-chevron-down toggle-icon', { expanded: isGroupExpanded(group.date) }]"  aria-hidden="true" />
-            </button>
-            <Transition name="group-expand">
-              <div v-if="isGroupExpanded(group.date)" class="date-group-content">
-                <table class="so-table">
-                  <thead>
-                    <tr>
-                      <th>客户</th>
-                      <th>产品图片</th>
-                      <th style="text-align: left">产品名称</th>
-                      <th>69码</th>
-                      <th>数量</th>
-                      <th>抵扣备货</th>
-                      <th>备注</th>
-                      <th>操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="item in group.summaryList" :key="item.key">
-                      <td><span class="cell-main">{{ item.customer }}</span></td>
-                      <td>
-                        <img
-                          v-if="item.productImage"
-                          :src="item.productImage"
-                          class="product-thumb"
-                        />
-                        <span v-else class="cell-muted">-</span>
-                      </td>
-                      <td style="text-align: left"><span class="cell-main">{{ item.productName }}</span></td>
-                      <td><span class="cell-muted">{{ item.barcode || '-' }}</span></td>
-                      <td><strong>{{ item.quantity }}</strong></td>
-                      <td>
-                        <span v-if="item.deductQuantity > 0" class="badge-tag badge-success">抵扣: {{ item.deductQuantity }}</span>
-                        <span v-else class="badge-tag badge-muted">否</span>
-                      </td>
-                      <td><span class="cell-muted">{{ item.notesDisplay }}</span></td>
-                      <td>
-                        <div class="action-group">
-                          <button class="action-btn action-edit" @click="openEditRecord(item, group.date)" aria-label="编辑">
-                            <i class="fas fa-edit"  aria-hidden="true" />
-                          </button>
-                          <button
-                            class="action-btn action-delete"
-                            :disabled="actionId === item.firstId"
-                            @click="handleDeleteRecord(item.firstId!)"
-                           aria-label="删除">
-                            <i class="fas fa-trash"  aria-hidden="true" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </Transition>
-          </div>
-        </div>
+          <div v-if="isFetching" class="so-fetching-bar"><div class="so-fetching-progress" /></div>
+          <table class="so-table">
+            <thead>
+              <tr>
+                <th>出货时间</th>
+                <th>客户</th>
+                <th>产品</th>
+                <th>数量</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in stockoutRecords" :key="item.id">
+                <td><span class="so-cell-muted">{{ item.stockout_date }}</span></td>
+                <td><span class="so-cell-main">{{ item.customer || '-' }}</span></td>
+                <td style="text-align: center">
+                  <span class="so-cell-main">{{ item.product_name || item.product?.name || '-' }}</span>
+                  <span v-if="item.barcode || item.product?.barcode" class="so-cell-muted" style="display: block; font-size: 11px;">{{ item.barcode || item.product?.barcode }}</span>
+                </td>
+                <td><strong>{{ item.quantity }}</strong></td>
+                <td>
+                  <div class="so-action-group">
+                    <button class="so-btn-icon so-btn-info" @click="openDetail(item)" aria-label="详情">
+                      <i class="fas fa-eye" aria-hidden="true" />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </template>
 
         <UiPagination v-if="totalPages > 1" :current-page="currentPage" :total-pages="totalPages" @update:current-page="currentPage = $event; fetchStockouts()" />
       </div>
     </div>
+
+    <!-- 出货详情弹窗 -->
+    <UiDialog v-model:open="detailOpen" title="出货详情" max-width-class="max-w-[500px]">
+      <div v-if="detailData" class="so-detail-dialog">
+        <div class="so-detail-grid">
+          <div class="so-detail-cell">
+            <span class="so-detail-label">出货时间</span>
+            <span class="so-detail-value">{{ detailData.stockout_date || '-' }}</span>
+          </div>
+          <div class="so-detail-cell">
+            <span class="so-detail-label">客户</span>
+            <span class="so-detail-value">{{ detailData.customer || '-' }}</span>
+          </div>
+          <div class="so-detail-cell">
+            <span class="so-detail-label">产品</span>
+            <span class="so-detail-value">{{ detailData.product_name || detailData.product?.name || '-' }}</span>
+          </div>
+          <div class="so-detail-cell">
+            <span class="so-detail-label">69码</span>
+            <span class="so-detail-value so-detail-mono">{{ detailData.barcode || detailData.product?.barcode || '-' }}</span>
+          </div>
+          <div class="so-detail-cell">
+            <span class="so-detail-label">数量</span>
+            <span class="so-detail-value"><strong>{{ detailData.quantity }}</strong></span>
+          </div>
+          <div class="so-detail-cell">
+            <span class="so-detail-label">抵扣备货</span>
+            <span class="so-detail-value">{{ detailData.deduct_quantity > 0 ? `抵扣: ${detailData.deduct_quantity}` : '否' }}</span>
+          </div>
+          <div class="so-detail-cell">
+            <span class="so-detail-label">订单类型</span>
+            <span class="so-detail-value">{{ detailData.order_type === 'custom' ? '定制' : '常规' }}</span>
+          </div>
+          <div v-if="detailData.country" class="so-detail-cell">
+            <span class="so-detail-label">国家</span>
+            <span class="so-detail-value">{{ detailData.country }}</span>
+          </div>
+        </div>
+        <div v-if="detailData.note" class="so-detail-note">
+          <span class="so-detail-label">备注</span>
+          <span class="so-detail-value">{{ detailData.note }}</span>
+        </div>
+      </div>
+      <template #footer>
+        <UiButton variant="outline" @click="detailOpen = false">关闭</UiButton>
+      </template>
+    </UiDialog>
 
     <!-- 编辑暂存出货弹窗 -->
     <UiDialog v-model:open="editStagedOpen" title="编辑暂存出货" max-width-class="max-w-[500px]">
@@ -355,6 +389,14 @@
           <input type="number" class="form-input" v-model.number="editStagedForm.quantity" min="1" step="1" name="quantity" autocomplete="off" />
         </div>
         <div class="form-field">
+          <label class="form-label">订单类型</label>
+          <UiSelect v-model="editStagedForm.orderType" :options="orderTypeOptions" />
+        </div>
+        <div v-if="editStagedForm.orderType === 'custom'" class="form-field">
+          <label class="form-label">国家 <span style="color: var(--color-danger-500)">*</span></label>
+          <UiSelect v-model="editStagedForm.country" placeholder="请选择国家" :options="countryStore.countryOptions" />
+        </div>
+        <div class="form-field">
           <label class="form-label">备注</label>
           <textarea v-model="editStagedForm.note" class="form-input" rows="2" />
         </div>
@@ -365,36 +407,33 @@
       </template>
     </UiDialog>
 
-    <!-- 编辑出货记录弹窗 -->
-    <UiDialog v-model:open="editRecordOpen" title="编辑出货记录" max-width-class="max-w-[500px]">
-      <div class="dialog-form">
-        <div class="form-field">
-          <label class="form-label">出货时间</label>
-          <UiDatePicker v-model="editRecordForm.date" style="width: 100%" />
+    <UiDialog :open="stockWarningOpen" title="库存不足提示" max-width-class="max-w-[480px]" @update:open="stockWarningOpen = $event">
+      <div class="so-stock-warning">
+        <div class="so-stock-warning-icon">
+          <i class="fas fa-exclamation-triangle" aria-hidden="true" />
         </div>
-        <div class="form-field">
-          <label class="form-label">客户名称</label>
-          <UiSelect
-            v-model="editRecordForm.customer"
-            :options="[{ value: '__none__', label: '无' }, ...customerOptions]"
-          />
-        </div>
-        <div class="form-field">
-          <label class="form-label">产品名称</label>
-          <UiInput :model-value="editRecordForm.productName" disabled />
-        </div>
-        <div class="form-field">
-          <label class="form-label">出货数量</label>
-          <input type="number" class="form-input" v-model.number="editRecordForm.quantity" min="1" step="1" name="quantity" autocomplete="off" />
-        </div>
-        <div class="form-field">
-          <label class="form-label">备注</label>
-          <textarea v-model="editRecordForm.note" class="form-input" rows="2" />
+        <p class="so-stock-warning-title">该国家定制库存不足以完成出库</p>
+        <div class="so-stock-warning-detail">
+          <div class="so-stock-warning-row">
+            <span class="so-stock-warning-label">产品</span>
+            <span class="so-stock-warning-value">{{ stockWarningData.productName }}</span>
+          </div>
+          <div class="so-stock-warning-row">
+            <span class="so-stock-warning-label">国家</span>
+            <span class="so-stock-warning-value">{{ stockWarningData.country }}</span>
+          </div>
+          <div class="so-stock-warning-row">
+            <span class="so-stock-warning-label">该国家可用库存</span>
+            <span class="so-stock-warning-value so-stock-warning-num">{{ stockWarningData.availableStock }}</span>
+          </div>
+          <div class="so-stock-warning-row">
+            <span class="so-stock-warning-label">出库需求数量</span>
+            <span class="so-stock-warning-value so-stock-warning-num so-stock-warning-demand">{{ stockWarningData.demandQty }}</span>
+          </div>
         </div>
       </div>
       <template #footer>
-        <UiButton variant="outline" @click="editRecordOpen = false">取消</UiButton>
-        <UiButton variant="primary" @click="saveEditRecord">保存</UiButton>
+        <UiButton variant="primary" @click="stockWarningOpen = false">知道了</UiButton>
       </template>
     </UiDialog>
 
@@ -410,11 +449,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
-import { useQueryClient } from '@tanstack/vue-query'
-import { get, post, put, del } from '@/api/request'
-import { customerApi, stockApi, auxApi, ocrApi } from '@/api'
-import type { ApiResponse, ShipmentInfo, StagedStockout, Product, StockOutRecord } from '@/types'
+import { ref, reactive, computed, onUnmounted, watch } from 'vue'
+import { useQueryClient, useQuery } from '@tanstack/vue-query'
+import { customerApi, stockApi, auxApi } from '@/api'
+import { useCountryStore } from '@/stores/country'
+import type { ApiResponse, ShipmentInfo, StagedStockout, Product, StockOutRecord, InventoryItem } from '@/types'
+import { useOcrImport } from './composables/useOcrImport'
+import { useStockWarning } from './composables/useStockWarning'
+import { useStockOutActions } from './composables/useStockOutActions'
 
 const props = defineProps<{ activeTab: 'input' | 'records' }>()
 import UiInput from '@/components/ui/UiInput.vue'
@@ -427,15 +469,21 @@ import UiDialog from '@/components/ui/UiDialog.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { showToast } from '@/composables/useToast'
+
+const countryStore = useCountryStore()
+if (!countryStore.loaded) {
+  countryStore.fetchCountries()
+}
 import { toISODate } from '@/utils/format'
 
 const queryClient = useQueryClient()
 const confirmDialog = useConfirmDialog()
 const actionId = ref<number | ''>(0)
 
+// === 库存不足弹窗（逻辑抽离至 useStockWarning composable） ===
+const { stockWarningOpen, stockWarningData, checkCountryStock } = useStockWarning()
+
 // === 客户列表 ===
-import { useQuery } from '@tanstack/vue-query'
-import { watch } from 'vue'
 
 const { data: namesData } = useQuery({
   queryKey: ['customer-active-names'],
@@ -444,20 +492,27 @@ const { data: namesData } = useQuery({
 })
 const customerNames = computed(() => {
   const arr = Array.isArray(namesData.value) ? namesData.value : []
-  return arr.map((c: unknown) => (typeof c === 'object' && c !== null ? (c as { name?: string }).name : c))
+  return arr.map((entry: unknown) => (typeof entry === 'object' && entry !== null ? (entry as { name?: string }).name : entry))
 })
-const customerOptions = computed(() => customerNames.value.map((c: unknown) => ({ value: String(c), label: String(c) })))
+const customerOptions = computed(() => customerNames.value.map((name: unknown) => ({ value: String(name), label: String(name) })))
 
 // === 产品搜索 ===
 const productSuggestions = ref<Product[]>([])
 const showSuggestions = ref(false)
+const activeSuggestionIdx = ref(-1)
 let searchTimeout: ReturnType<typeof setTimeout> | null = null
+let hideSuggestionsTimeout: ReturnType<typeof setTimeout> | null = null
+
+onUnmounted(() => {
+  if (searchTimeout) clearTimeout(searchTimeout)
+  if (hideSuggestionsTimeout) clearTimeout(hideSuggestionsTimeout)
+})
 
 async function searchProducts(q: string) {
   if (!q.trim()) { productSuggestions.value = []; showSuggestions.value = false; return }
   try {
     const data = await stockApi.searchProducts(q)
-    productSuggestions.value = Array.isArray(data) ? data : (data?.products ?? data?.data ?? []) as Product[]
+    productSuggestions.value = Array.isArray(data) ? data : (data?.products ? [data.products] : []) as Product[]
     showSuggestions.value = productSuggestions.value.length > 0
   } catch {
     productSuggestions.value = []
@@ -475,20 +530,39 @@ function onProductFocus() {
   }
 }
 function hideSuggestions() {
-  setTimeout(() => { showSuggestions.value = false }, 150)
+  if (hideSuggestionsTimeout) clearTimeout(hideSuggestionsTimeout)
+  hideSuggestionsTimeout = setTimeout(() => { showSuggestions.value = false }, 150)
 }
 
 function onSearchInput() {
   form.productId = ''
   shipmentInfo.value = null
   showSuggestions.value = false
+  activeSuggestionIdx.value = -1
   if (searchTimeout) clearTimeout(searchTimeout)
   searchTimeout = setTimeout(() => searchProducts(form.search), 300)
 }
 
-function selectProduct(p: Product) {
-  form.productId = String(p.id)
-  form.search = p.name
+function onSearchKeydown(event: KeyboardEvent) {
+  if (!showSuggestions.value || !productSuggestions.value.length) return
+  if (event.key === 'ArrowDown') {
+    event.preventDefault()
+    activeSuggestionIdx.value = Math.min(activeSuggestionIdx.value + 1, productSuggestions.value.length - 1)
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault()
+    activeSuggestionIdx.value = Math.max(activeSuggestionIdx.value - 1, 0)
+  } else if (event.key === 'Enter' && activeSuggestionIdx.value >= 0) {
+    event.preventDefault()
+    selectProduct(productSuggestions.value[activeSuggestionIdx.value])
+  } else if (event.key === 'Escape') {
+    showSuggestions.value = false
+    activeSuggestionIdx.value = -1
+  }
+}
+
+function selectProduct(product: Product) {
+  form.productId = String(product.id)
+  form.search = product.name
   showSuggestions.value = false
   fetchShipmentInfo()
 }
@@ -502,7 +576,9 @@ async function fetchShipmentInfo() {
     return
   }
   try {
-    const data = await stockApi.availableShipment(Number(form.productId), form.customer)
+    const orderType = form.orderType || undefined
+    const country = form.orderType === 'custom' && form.country ? form.country : undefined
+    const data = await stockApi.availableShipment(Number(form.productId), form.customer, orderType, country)
     shipmentInfo.value = data.data ?? null
   } catch {
     shipmentInfo.value = null
@@ -511,15 +587,29 @@ async function fetchShipmentInfo() {
 
 // === 表单 ===
 const today = toISODate()
-const form = reactive({ customer: '', date: today, search: '', productId: '', quantity: 1, note: '' })
+const form = reactive({ customer: '', date: today, search: '', productId: '', quantity: 1, note: '', orderType: 'regular', country: '' })
+
+const orderTypeOptions = [
+  { value: 'regular', label: '常规订单' },
+  { value: 'custom', label: '定制订单' },
+]
 
 const canAdd = computed(() => {
   if (!form.customer || !form.productId || form.quantity < 1 || !form.date) return false
+  if (form.orderType === 'custom' && !form.country.trim()) return false
   return true
 })
 
 watch(() => form.customer, () => {
   if (form.productId) fetchShipmentInfo()
+})
+
+watch(() => form.orderType, () => {
+  if (form.productId && form.customer) fetchShipmentInfo()
+})
+
+watch(() => form.country, () => {
+  if (form.orderType === 'custom' && form.productId && form.customer) fetchShipmentInfo()
 })
 
 // === 暂存列表 ===
@@ -531,7 +621,7 @@ async function removeStagedItem(idx: number) {
   staged.value.splice(idx, 1)
 }
 
-const stagedTotalQty = computed(() => staged.value.reduce((s: number, i: StagedStockout) => s + (i.quantity || 0), 0))
+const stagedTotalQty = computed(() => staged.value.reduce((sum: number, item: StagedStockout) => sum + (item.quantity || 0), 0))
 
 async function addStaged() {
   if (!canAdd.value) {
@@ -550,6 +640,12 @@ async function addStaged() {
     }
   }
 
+  // 定制订单：校验该国家该SKU的库存是否充足
+  if (form.orderType === 'custom' && form.country && form.productId) {
+    const stockOk = await checkCountryStock(form.search, form.productId, form.country, form.quantity)
+    if (!stockOk) return
+  }
+
   staged.value.push({
     id: Date.now(),
     product_id: form.productId,
@@ -558,18 +654,22 @@ async function addStaged() {
     date: form.date,
     quantity: form.quantity,
     note: form.note,
+    order_type: form.orderType,
+    country: form.orderType === 'custom' ? form.country : '',
   })
   form.search = ''
   form.productId = ''
   form.quantity = 1
   form.note = ''
+  form.orderType = 'regular'
+  form.country = ''
   shipmentInfo.value = null
 }
 
 // === 编辑暂存 ===
 const editStagedOpen = ref(false)
 const editStagedIdx = ref(-1)
-const editStagedForm = reactive({ customer: '', date: '', productName: '', quantity: 1, note: '' })
+const editStagedForm = reactive({ customer: '', date: '', productName: '', quantity: 1, note: '', orderType: 'regular', country: '' })
 
 function openEditStaged(idx: number) {
   editStagedIdx.value = idx
@@ -579,6 +679,8 @@ function openEditStaged(idx: number) {
   editStagedForm.productName = item.product_name || ''
   editStagedForm.quantity = item.quantity || 1
   editStagedForm.note = item.note || ''
+  editStagedForm.orderType = item.order_type || 'regular'
+  editStagedForm.country = item.country || ''
   editStagedOpen.value = true
 }
 
@@ -589,84 +691,19 @@ function saveEditStaged() {
   item.date = editStagedForm.date
   item.quantity = editStagedForm.quantity
   item.note = editStagedForm.note
+  item.order_type = editStagedForm.orderType
+  item.country = editStagedForm.orderType === 'custom' ? editStagedForm.country : ''
   editStagedOpen.value = false
 }
 
 // === 批量提交 ===
 const submitting = ref(false)
 
-async function submitBatch() {
-  if (!staged.value.length) return
-
-  submitting.value = true
-  try {
-    const uniqueKeys: Record<string, { product_id: string; customer: string; stockouts: StagedStockout[] }> = {}
-    const withCustomer = staged.value.filter(s => s.customer)
-    withCustomer.forEach(s => {
-      const key = `${s.product_id}-${s.customer}`
-      if (!uniqueKeys[key]) uniqueKeys[key] = { product_id: s.product_id, customer: s.customer, stockouts: [] }
-      uniqueKeys[key].stockouts.push(s)
-    })
-
-    for (const key in uniqueKeys) {
-      const { product_id, customer, stockouts } = uniqueKeys[key]
-      try {
-        const data = await stockApi.availableShipment(Number(product_id), customer)
-        const shipment = data.data
-        if (!shipment) continue
-        const totalQty = stockouts.reduce((sum: number, s: StagedStockout) => sum + s.quantity, 0)
-        if (totalQty > (shipment.available_quantity ?? 0)) {
-          showToast(`客户: ${customer} 产品ID: ${product_id} 出货量超过可出货量(${shipment.available_quantity ?? 0})`, 'error')
-          submitting.value = false
-          return
-        }
-      } catch { /* proceed */ }
-    }
-
-    const stockoutsForApi = staged.value.map(s => ({
-      product_id: Number(s.product_id),
-      customer: s.customer,
-      quantity: s.quantity,
-      stockout_date: s.date,
-      note: s.note,
-    }))
-
-    const result = await stockApi.batchSubmitStockouts(stockoutsForApi) as ApiResponse & { results?: Array<{ success: boolean; error?: string }> }
-
-    // 检查单项结果，处理部分成功/全部失败的情况
-    const results = result.results ?? []
-    const failedItems = results.filter((r: { success: boolean }) => !r.success)
-    const successCount = results.length - failedItems.length
-
-    if (result.success !== false && failedItems.length === 0) {
-      // 全部成功
-      showToast('出货提交成功', 'success')
-      staged.value = []
-      fetchStockouts()
-      queryClient.invalidateQueries({ queryKey: ['pp-monthly'] })
-      queryClient.invalidateQueries({ queryKey: ['pp-summary'] })
-    } else if (successCount > 0) {
-      // 部分成功
-      const errorMsgs = failedItems.slice(0, 3).map((r: { error?: string }, i: number) => `第${i + 1}项: ${r.error || '未知错误'}`).join('; ')
-      const suffix = failedItems.length > 3 ? `...等共${failedItems.length}项失败` : ''
-      showToast(`部分出货成功(${successCount}/${results.length})，失败项: ${errorMsgs}${suffix}`, 'warning')
-      fetchStockouts()
-      queryClient.invalidateQueries({ queryKey: ['pp-monthly'] })
-      queryClient.invalidateQueries({ queryKey: ['pp-summary'] })
-    } else {
-      // 全部失败
-      const errorMsg = failedItems.length > 0 
-        ? failedItems.slice(0, 3).map((r: { error?: string }, i: number) => `第${i + 1}项: ${r.error || '未知错误'}`).join('; ')
-        : (result as { error?: string }).error || result.message || '提交失败'
-      showToast(errorMsg, 'error')
-    }
-  } catch (err: unknown) {
-    const error = err as { response?: { data?: { detail?: string } } }
-    showToast(error.response?.data?.detail || '批量提交失败', 'error')
-  } finally {
-    submitting.value = false
-  }
-}
+const { submitBatch } = useStockOutActions(staged, submitting, () => {
+  fetchStockouts()
+  queryClient.invalidateQueries({ queryKey: ['pp-monthly'] })
+  queryClient.invalidateQueries({ queryKey: ['pp-summary'] })
+})
 
 // === 批量导入 ===
 const showBatchUpload = ref(true)
@@ -678,24 +715,24 @@ const excelDragOver = ref(false)
 
 function onExcelFileSelect(event: Event) {
   const input = event.target as HTMLInputElement
-  const f = input.files?.[0]
-  if (!f) return
-  if (!(f.name.endsWith('.xlsx') || f.name.endsWith('.xls'))) {
+  const file = input.files?.[0]
+  if (!file) return
+  if (!(file.name.endsWith('.xlsx') || file.name.endsWith('.xls'))) {
     showToast('请上传 Excel 文件（.xlsx 或 .xls）', 'error')
     return
   }
-  excelFile.value = f
+  excelFile.value = file
 }
 
 function onExcelDrop(event: DragEvent) {
   excelDragOver.value = false
-  const f = event.dataTransfer?.files?.[0]
-  if (!f) return
-  if (!(f.name.endsWith('.xlsx') || f.name.endsWith('.xls'))) {
+  const file = event.dataTransfer?.files?.[0]
+  if (!file) return
+  if (!(file.name.endsWith('.xlsx') || file.name.endsWith('.xls'))) {
     showToast('请上传 Excel 文件（.xlsx 或 .xls）', 'error')
     return
   }
-  excelFile.value = f
+  excelFile.value = file
 }
 
 async function handleDownloadTemplate() {
@@ -742,92 +779,20 @@ async function handleImportExcel() {
   }
 }
 
-// === OCR 导入 ===
-const showOcrUpload = ref(true)
-const pdfFiles = ref<File[]>([])
-const ocrPreviewing = ref(false)
-const ocrImporting = ref(false)
-const ocrProgress = reactive({ show: false, pct: 0, msg: '准备中...' })
-const ocrInputRef = ref<HTMLInputElement | null>(null)
-const ocrDragOver = ref(false)
-
-function onOcrFileSelect(event: Event) {
-  const input = event.target as HTMLInputElement
-  pdfFiles.value = input.files ? Array.from(input.files) : []
-}
-
-function onOcrDrop(event: DragEvent) {
-  ocrDragOver.value = false
-  const files = event.dataTransfer?.files
-  if (!files) return
-  pdfFiles.value = Array.from(files)
-}
-
-async function handleOcrPreview() {
-  if (!pdfFiles.value.length) return
-  ocrPreviewing.value = true
-  try {
-    const fd = new FormData()
-    pdfFiles.value.forEach(f => fd.append('files', f))
-    const res = await post('/ocr-import/preview', fd) as ApiResponse
-    showToast(res.message || '预览完成', 'info')
-  } catch (err: unknown) {
-    const error = err as { response?: { data?: { detail?: string } } }
-    showToast(error.response?.data?.detail || '预览失败', 'error')
-  } finally {
-    ocrPreviewing.value = false
-  }
-}
-
-async function handleOcrImport() {
-  if (!pdfFiles.value.length) return
-  ocrImporting.value = true
-  ocrProgress.show = true
-  ocrProgress.pct = 0
-  ocrProgress.msg = '创建任务...'
-  try {
-    const task = await ocrApi.createTask() as ApiResponse & { task_id?: string; id?: string }
-    const taskId = task.task_id || task.id
-    if (!taskId) throw new Error('创建OCR任务失败')
-
-    ocrProgress.msg = '上传文件...'
-    ocrProgress.pct = 20
-    const fd = new FormData()
-    pdfFiles.value.forEach(f => fd.append('files', f))
-    await ocrApi.upload(taskId, fd)
-
-    ocrProgress.msg = 'OCR识别中...'
-    let completed = false
-    while (!completed) {
-      await new Promise(r => setTimeout(r, 2000))
-      const prog = await ocrApi.progress(taskId)
-      const pct = prog.progress ?? 0
-      ocrProgress.pct = Math.min(90, 20 + pct * 0.7)
-      ocrProgress.msg = prog.status || '处理中…'
-      if (prog.status === 'completed' || prog.status === 'done' || prog.progress >= 100) {
-        completed = true
-      }
-    }
-
-    ocrProgress.pct = 100
-    ocrProgress.msg = '导入完成'
-    showToast('OCR识别导入完成', 'success')
-    pdfFiles.value = []
-    fetchStockouts()
-    queryClient.invalidateQueries({ queryKey: ['pp-monthly'] })
-    queryClient.invalidateQueries({ queryKey: ['pp-summary'] })
-  } catch (err: unknown) {
-    const error = err as { response?: { data?: { detail?: string } } }
-    showToast(error.response?.data?.detail || 'OCR导入失败', 'error')
-  } finally {
-    ocrImporting.value = false
-    setTimeout(() => { ocrProgress.show = false }, 2000)
-  }
-}
+// === OCR 导入 (composable) ===
+const {
+  pdfFiles, ocrPreviewing, ocrImporting, ocrProgress, ocrInputRef, ocrDragOver,
+  onOcrFileSelect, onOcrDrop, handleOcrPreview, handleOcrImport,
+} = useOcrImport(() => {
+  fetchStockouts()
+  queryClient.invalidateQueries({ queryKey: ['pp-monthly'] })
+  queryClient.invalidateQueries({ queryKey: ['pp-summary'] })
+})
 
 // === 出货记录列表 ===
 const showFilter = ref(false)
 const filterCustomer = ref('')
+const filterOrderType = ref('')
 const filterStart = ref('')
 const filterEnd = ref('')
 const currentPage = ref(1)
@@ -846,7 +811,14 @@ const stockoutRecords = ref<{
   quantity?: number;
   deduct_quantity?: number;
   note?: string;
+  order_type?: string;
+  country?: string;
 }[]>([])
+
+const filterOrderTypeOptions = [
+  { value: 'regular', label: '常规订单' },
+  { value: 'custom', label: '定制订单' },
+]
 
 async function fetchStockouts() {
   const isInitial = stockoutRecords.value.length === 0
@@ -855,6 +827,7 @@ async function fetchStockouts() {
   try {
     const params: Record<string, unknown> = { page: currentPage.value, per_page: 20 }
     if (filterCustomer.value) params.customer = filterCustomer.value
+    if (filterOrderType.value) params.order_type = filterOrderType.value
     if (filterStart.value) params.start_date = filterStart.value
     if (filterEnd.value) params.end_date = filterEnd.value
     const res = await stockApi.stockouts(params)
@@ -870,84 +843,31 @@ async function fetchStockouts() {
   }
 }
 
+function resetFilter() {
+  filterCustomer.value = ''
+  filterOrderType.value = ''
+  filterStart.value = ''
+  filterEnd.value = ''
+  currentPage.value = 1
+  fetchStockouts()
+}
+
 fetchStockouts()
 
-interface StockoutSummary {
-  key: string;
-  customer: string;
-  productName: string;
-  productImage?: string | null;
-  barcode: string;
-  quantity: number;
-  deductQuantity: number;
-  notes: string[];
-  ids: number[];
-  firstId?: number;
-}
-
-const groupedRecords = computed(() => {
-  const groups: Record<string, typeof stockoutRecords.value> = {}
-  stockoutRecords.value.forEach(r => {
-    const dateKey = r.stockout_date || '未知日期'
-    if (!groups[dateKey]) groups[dateKey] = []
-    groups[dateKey].push(r)
-  })
-
-  const sortedDates = Object.keys(groups).sort((a, b) => b.localeCompare(a))
-
-  return sortedDates.map(date => {
-    const records = groups[date]
-    const summaryMap: Record<string, StockoutSummary> = {}
-    records.forEach((r) => {
-      const pid = r.product_id ?? r.product?.id ?? 0
-      const key = `${r.customer || '未知客户'}|||${pid}`
-      if (!summaryMap[key]) {
-        summaryMap[key] = {
-          key,
-          customer: r.customer || '未知客户',
-          productName: r.product_name || r.product?.name || '-',
-          productImage: r.product_image || r.product?.image || null,
-          barcode: r.barcode || r.product?.barcode || '',
-          quantity: 0,
-          deductQuantity: 0,
-          notes: [],
-          ids: [],
-          firstId: r.id,
-        }
-      }
-      summaryMap[key].quantity += r.quantity || 0
-      summaryMap[key].deductQuantity += r.deduct_quantity || 0
-      if (r.note && !summaryMap[key].notes.includes(r.note)) summaryMap[key].notes.push(r.note)
-      if (r.id !== undefined) summaryMap[key].ids.push(r.id)
-    })
-
-    const summaryList = Object.values(summaryMap).map((item) => ({
-      ...item,
-      notesDisplay: item.notes.length > 0 ? item.notes.join('; ') : '-',
-    }))
-
-    return {
-      date,
-      records,
-      summaryList,
-      totalQty: summaryList.reduce((s: number, i: StockoutSummary & { quantity: number }) => s + i.quantity, 0),
-    }
-  })
+// 切换到记录查询tab时自动加载数据
+watch(() => props.activeTab, (tab) => {
+  if (tab === 'records' && stockoutRecords.value.length === 0) {
+    fetchStockouts()
+  }
 })
 
-// === 日期组折叠状态 ===
-const collapsedGroups = ref(new Set<string>())
+// === 详情弹窗 ===
+const detailOpen = ref(false)
+const detailData = ref<(typeof stockoutRecords.value)[number] | null>(null)
 
-function toggleGroupExpanded(date: string) {
-  if (collapsedGroups.value.has(date)) {
-    collapsedGroups.value.delete(date)
-  } else {
-    collapsedGroups.value.add(date)
-  }
-}
-
-function isGroupExpanded(date: string) {
-  return !collapsedGroups.value.has(date)
+function openDetail(item: (typeof stockoutRecords.value)[number]) {
+  detailData.value = item
+  detailOpen.value = true
 }
 
 // === 删除出货记录 ===
@@ -965,39 +885,6 @@ async function handleDeleteRecord(id: number) {
     showToast(error.response?.data?.detail || '删除失败', 'error')
   } finally {
     actionId.value = 0
-  }
-}
-
-// === 编辑出货记录 ===
-const editRecordOpen = ref(false)
-const editRecordForm = reactive({ id: 0, customer: '', date: '', productName: '', quantity: 1, note: '' })
-
-function openEditRecord(item: StockoutSummary & { notes: string[] }, date: string) {
-  editRecordForm.id = item.firstId || 0
-  editRecordForm.customer = item.customer || '__none__'
-  editRecordForm.date = date || ''
-  editRecordForm.productName = item.productName || ''
-  editRecordForm.quantity = item.quantity || 1
-  editRecordForm.note = item.notes.length > 0 ? item.notes[0] : ''
-  editRecordOpen.value = true
-}
-
-async function saveEditRecord() {
-  try {
-    await put(`/stock/out/edit/${editRecordForm.id}`, {
-      customer: editRecordForm.customer === '__none__' ? '' : editRecordForm.customer,
-      stockout_date: editRecordForm.date,
-      quantity: editRecordForm.quantity,
-      note: editRecordForm.note,
-    })
-    showToast('更新成功', 'success')
-    editRecordOpen.value = false
-    fetchStockouts()
-    queryClient.invalidateQueries({ queryKey: ['pp-monthly'] })
-    queryClient.invalidateQueries({ queryKey: ['pp-summary'] })
-  } catch (err: unknown) {
-    const error = err as { response?: { data?: { detail?: string } } }
-    showToast(error.response?.data?.detail || '更新失败', 'error')
   }
 }
 </script>
@@ -1152,10 +1039,11 @@ async function saveEditRecord() {
 /* ===== Records TAB ===== */
 .so-records-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 10px 20px;
+  justify-content: space-between;
+  padding: 12px 20px;
   border-bottom: 1px solid var(--color-border, #cbd5e1);
+  flex-shrink: 0;
 }
 .so-records-title {
   font-size: 14px;
@@ -1163,7 +1051,7 @@ async function saveEditRecord() {
   color: var(--color-text);
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 .so-records-title i {
   color: var(--color-danger-500);
@@ -1171,7 +1059,42 @@ async function saveEditRecord() {
 .so-records-body {
   flex: 1;
   overflow-y: auto;
-  padding: 0 20px;
+  padding: 0;
+  min-height: 0;
+}
+
+/* ===== Filter Panel ===== */
+.so-filter-panel {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--color-border, #cbd5e1);
+  background: var(--color-surface, #f8fafc);
+}
+.so-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+.so-filter-field {
+  min-width: 140px;
+  flex: 1;
+}
+.so-filter-field .so-label {
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+.so-filter-action {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-width: auto;
+}
+.so-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 4px;
+  color: var(--color-text-secondary);
 }
 
 /* ===== Form ===== */
@@ -1230,6 +1153,11 @@ textarea.form-input::placeholder {
   color: var(--color-text-secondary);
   font-size: 12px;
 }
+.shipment-detail {
+  margin-left: 4px;
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+}
 
 /* ===== Autocomplete ===== */
 .autocomplete-dropdown {
@@ -1255,7 +1183,8 @@ textarea.form-input::placeholder {
   font-size: 13px;
 }
 .autocomplete-item:last-child { border-bottom: none; }
-.autocomplete-item:hover {
+.autocomplete-item:hover,
+.autocomplete-active {
   background: var(--color-primary-50);
   transform: translateX(4px);
 }
@@ -1345,6 +1274,17 @@ textarea.form-input::placeholder {
 .badge-danger { background: var(--color-danger-50); color: var(--color-danger-600); }
 .badge-success { background: var(--color-success-50); color: var(--color-success-600); }
 .badge-secondary { background: var(--color-surface, #f8fafc); color: var(--color-text-secondary); }
+.badge-warning { background: #fef3c7; color: #92400e; }
+.so-stock-warning { text-align: center; padding: 8px 0; }
+.so-stock-warning-icon { font-size: 40px; color: var(--color-warning-500, #f59e0b); margin-bottom: 12px; }
+.so-stock-warning-title { font-size: 15px; font-weight: 600; color: var(--color-text-primary); margin: 0 0 16px; }
+.so-stock-warning-detail { display: inline-block; text-align: left; background: var(--color-bg-secondary, #f8fafc); border-radius: 10px; padding: 12px 20px; }
+.so-stock-warning-row { display: flex; justify-content: space-between; gap: 24px; padding: 6px 0; font-size: 13px; }
+.so-stock-warning-row + .so-stock-warning-row { border-top: 1px solid var(--color-border-light, #f1f5f9); }
+.so-stock-warning-label { color: var(--color-text-secondary); }
+.so-stock-warning-value { font-weight: 500; color: var(--color-text-primary); }
+.so-stock-warning-num { font-variant-numeric: tabular-nums; }
+.so-stock-warning-demand { color: var(--color-danger-500, #ef4444); }
 .badge-muted { background: var(--color-surface, #f8fafc); color: var(--color-text-muted); }
 
 /* ===== Action Buttons ===== */
@@ -1498,169 +1438,184 @@ textarea.form-input::placeholder {
   font-size: 12px;
 }
 
-/* ===== Filter ===== */
-.filter-panel {
-  padding: 14px 16px;
-  background: var(--color-surface, #f8fafc);
-  border-bottom: 1px solid var(--color-border-light);
-  margin-bottom: 0;
-}
-.filter-row {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  align-items: flex-end;
-}
-.filter-field { flex: 1; min-width: 140px; }
-.filter-action { flex: 0 0 auto; }
-
-/* ===== Date Groups ===== */
-.date-group {
-  margin-bottom: 0;
-  border-bottom: 1px solid var(--color-border-light);
-}
-.date-group:last-child { border-bottom: none; }
-.date-group-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 16px;
-  background: transparent;
-  cursor: pointer;
-  transition: background 0.2s ease;
-  border: none;
-  width: 100%;
-  text-align: left;
-  font-family: inherit;
-  font-size: inherit;
-  color: inherit;
-}
-.date-group-header:hover {
-  background: var(--color-primary-50);
-}
-.date-group-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--color-text);
-}
-.date-group-title i {
-  color: var(--color-danger-500);
-}
-.toggle-icon {
-  transition: transform 0.3s;
-  color: var(--color-text-secondary);
-  font-size: 12px;
-}
-.toggle-icon.expanded { transform: rotate(180deg); }
-.date-group-content {
-  padding: 0;
-}
-
-/* Group expand transition */
-.group-expand-enter-active { transition: max-height 0.3s ease, opacity 0.3s ease; }
-.group-expand-leave-active { transition: max-height 0.2s ease, opacity 0.2s ease; }
-.group-expand-enter-from,
-.group-expand-leave-to { max-height: 0; opacity: 0; overflow: hidden; }
-.group-expand-enter-to,
-.group-expand-leave-from { max-height: 2000px; opacity: 1; }
-
 /* ===== Table ===== */
 .so-table {
   width: 100%;
   border-collapse: collapse;
+  font-size: 13px;
 }
-.so-table thead th {
-  padding: 10px 14px;
-  font-weight: 600;
-  font-size: 12px;
-  color: var(--color-text);
-  border-bottom: 2px solid var(--color-border-light, #e2e8f0);
-  line-height: 1.5;
+.so-table thead {
   background: var(--color-surface, #f8fafc);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.so-table th {
+  padding: 10px 12px;
   text-align: center;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  border-bottom: 2px solid var(--color-border, #cbd5e1);
+  white-space: nowrap;
 }
-.so-table tbody tr {
-  transition: background 0.2s ease;
+.so-table td {
+  padding: 10px 12px;
+  text-align: center;
   border-bottom: 1px solid var(--color-border-light, #e2e8f0);
+  vertical-align: middle;
 }
-
 .so-table tbody tr:hover {
   background: var(--color-primary-50);
 }
-.so-table tbody td {
-  padding: 10px 14px;
-  vertical-align: middle;
-  font-size: 13px;
-  color: var(--color-text);
-  line-height: 1.5;
-  text-align: center;
-}
-.product-thumb {
-  width: 36px;
-  height: 36px;
-  object-fit: cover;
-  border-radius: 6px;
-}
-.cell-main {
+.so-cell-main {
   font-weight: 500;
   color: var(--color-text);
 }
-.cell-muted {
+.so-cell-muted {
+  color: var(--color-text-muted);
   font-size: 12px;
-  color: var(--color-text-secondary);
 }
 
-/* ===== Empty & Loading ===== */
-.state-placeholder {
-  padding: 40px 20px;
+/* ===== Badge Tags (records) ===== */
+.so-badge-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.so-badge-success {
+  background: var(--color-success-100);
+  color: var(--color-success-600);
+}
+
+/* ===== Action Buttons (records) ===== */
+.so-action-group {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+}
+.so-btn-icon {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+.so-btn-info {
+  background: var(--color-primary-50);
+  color: var(--color-primary-600);
+}
+.so-btn-info:hover {
+  background: var(--color-primary-100);
+  transform: translateY(-1px);
+}
+
+/* ===== Loading & Empty States ===== */
+.so-state-placeholder {
   text-align: center;
+  padding: 60px 20px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 }
-.state-empty {
-  padding: 60px 20px;
+.so-state-empty {
+  color: var(--color-text-muted);
 }
-.empty-illustration {
-  font-size: 28px;
-  opacity: 0.5;
-  color: var(--color-danger-500);
-}
-.state-text {
+.so-state-text {
   font-size: 14px;
   color: var(--color-text-secondary);
   margin: 0;
 }
-
-/* Fetching progress bar */
-.so-fetching-bar {
-  height: 2px;
-  background: var(--color-primary-100, #e0f2fe);
-  overflow: hidden;
-  border-radius: 1px;
+.so-empty-illustration {
+  font-size: 36px;
+  opacity: 0.4;
+  color: var(--color-text-muted);
 }
-.so-fetching-progress {
-  height: 100%;
-  width: 30%;
-  background: var(--color-primary-500, #3b82f6);
-  border-radius: 1px;
-  animation: so-progress-slide 1s ease-in-out infinite;
-}
-@keyframes so-progress-slide {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(400%); }
-}
-.spinner-ring {
+.so-spinner-ring {
   width: 36px;
   height: 36px;
   border: 3px solid var(--color-border-light);
   border-top-color: var(--color-danger-500);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
+}
+
+/* ===== Fetching Progress Bar ===== */
+.so-fetching-bar {
+  height: 3px;
+  background: var(--color-border-light);
+  overflow: hidden;
+}
+.so-fetching-progress {
+  height: 100%;
+  width: 30%;
+  background: var(--color-primary-500);
+  animation: so-progress-slide 1.2s ease-in-out infinite;
+}
+@keyframes so-progress-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+/* ===== Detail Dialog ===== */
+.so-detail-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.so-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.so-detail-cell {
+  padding: 10px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-bottom: 1px solid var(--color-border-light, #e2e8f0);
+}
+.so-detail-cell:nth-child(odd) {
+  border-right: 1px solid var(--color-border-light, #e2e8f0);
+}
+.so-detail-cell:nth-last-child(-n+2) {
+  border-bottom: none;
+}
+.so-detail-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.so-detail-value {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+.so-detail-mono {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+.so-detail-note {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 16px;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  border-radius: 12px;
 }
 /* ===== Dialog Form ===== */
 .dialog-form {
@@ -1677,10 +1632,23 @@ textarea.form-input::placeholder {
 /* ===== Responsive ===== */
 @media (max-width: 767.98px) {
   .form-grid { grid-template-columns: 1fr; }
-  .so-table thead th,
-  .so-table tbody td {
-    padding: 8px 10px;
+  .so-filter-row {
+    flex-direction: column;
+  }
+  .so-filter-field {
+    min-width: 100%;
+  }
+  .so-table {
     font-size: 12px;
+  }
+  .so-table th, .so-table td {
+    padding: 8px 6px;
+  }
+  .so-detail-grid {
+    grid-template-columns: 1fr;
+  }
+  .so-detail-cell:nth-child(odd) {
+    border-right: none;
   }
 }
 </style>
