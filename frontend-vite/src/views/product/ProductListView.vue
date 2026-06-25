@@ -1,13 +1,13 @@
 <template>
   <div class="pd-container">
-    <div class="pd-card pd-card-main">
+    <div class="page-card page-card-main">
       <!-- 卡片头部 -->
-      <div class="pd-card-header">
+      <div class="page-card-header">
         <HeaderTabs />
       </div>
 
       <!-- 双栏主体 -->
-      <div class="pd-body">
+      <div class="page-card-body">
         <!-- 左栏：产品信息 -->
         <div class="pd-col">
           <div class="pd-col-title"><i class="fas fa-edit" aria-hidden="true"></i> 产品信息</div>
@@ -134,7 +134,7 @@
                     </tr>
                   </template>
                   <template v-else>
-                    <tr v-for="(row, idx) in paginatedProducts" :key="row.id" class="pd-tr">
+                    <tr v-for="row in paginatedProducts" :key="row.id" class="pd-tr">
                       <td>
                         <div v-if="row.image" class="pd-thumb-box" @click="openImageModal(row.image)">
                           <img :src="resolveStaticUrl(row.image)" class="pd-thumb-img" :alt="row.name" @error="handleImageError($event)" />
@@ -312,12 +312,12 @@
             <div v-if="copyBomProducts.length > 0" class="mb-4">
               <label class="pd-label mb-2"><i class="fas fa-box me-2" aria-hidden="true"></i>选择源产品</label>
               <div class="copy-bom-product-list">
-                <div v-for="p in copyBomProducts" :key="p.id" class="copy-bom-product-item" :class="{ selected: copyBomSourceProductId === p.id }" @click="selectCopyBomProduct(p)">
+                <div v-for="product in copyBomProducts" :key="product.id" class="copy-bom-product-item" :class="{ selected: copyBomSourceProductId === product.id }" @click="selectCopyBomProduct(product)">
                   <div>
-                    <div class="product-name">{{ p.name }}</div>
-                    <div class="product-barcode">{{ p.barcode ? '条码: ' + p.barcode : '' }}</div>
+                    <div class="product-name">{{ product.name }}</div>
+                    <div class="product-barcode">{{ product.barcode ? '条码: ' + product.barcode : '' }}</div>
                   </div>
-                  <span class="product-status" :class="p.has_bom ? 'has-bom' : 'no-bom'">{{ p.has_bom ? '有BOM' : '无BOM' }}</span>
+                  <span class="product-status" :class="product.has_bom ? 'has-bom' : 'no-bom'">{{ product.has_bom ? '有BOM' : '无BOM' }}</span>
                 </div>
               </div>
             </div>
@@ -437,11 +437,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, nextTick } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { productApi } from '@/api'
 import type { ApiResponse } from '@/types'
 import { upload, download, resolveStaticUrl } from '@/api/request'
+import { uploadImage } from './composables/useImageUpload'
+import { useProductListActions } from './composables/useProductListActions'
 import { showToast } from '@/composables/useToast'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
@@ -457,18 +459,6 @@ interface Product {
   price: number
   image: string | null
   current_stock?: number
-}
-
-interface BomItem {
-  id?: number
-  name: string
-  specification: string
-  unit: string
-  supplier_id?: number | null
-  supplier_name: string
-  usage: number
-  remark: string
-  category?: string
 }
 
 // ===== 核心状态 =====
@@ -519,14 +509,7 @@ function onImageDrop(e: DragEvent) {
 }
 
 function uploadImageFile(file: File) {
-  const allowed = ['image/jpeg', 'image/png', 'image/gif']
-  if (!allowed.includes(file.type)) { showToast('仅支持 JPG/PNG/GIF 格式', 'error'); return }
-  if (file.size > 5 * 1024 * 1024) { showToast('文件大小不能超过 5MB', 'error'); return }
-  const formData = new FormData()
-  formData.append('file', file)
-  upload<{ url: string }>('/auth/upload', formData)
-    .then(data => { if (data.url) form.image = data.url })
-    .catch(() => showToast('上传失败', 'error'))
+  uploadImage(file, (url) => { form.image = url })
 }
 
 async function handleAdd() {
@@ -603,14 +586,7 @@ function onEditDrop(e: DragEvent) {
 }
 
 function uploadEditImage(file: File) {
-  const allowed = ['image/jpeg', 'image/png', 'image/gif']
-  if (!allowed.includes(file.type)) { showToast('仅支持 JPG/PNG/GIF 格式', 'error'); return }
-  if (file.size > 5 * 1024 * 1024) { showToast('文件大小不能超过 5MB', 'error'); return }
-  const formData = new FormData()
-  formData.append('file', file)
-  upload<{ url: string }>('/auth/upload', formData)
-    .then(data => { if (data.url) editForm.image = data.url })
-    .catch(() => showToast('上传失败', 'error'))
+  uploadImage(file, (url) => { editForm.image = url })
 }
 
 async function handleEditSave() {
@@ -671,341 +647,25 @@ function downloadTemplate() {
   download('/batch/download-template', '产品导入模板.xlsx')
 }
 
-// ===== BOM模态框 =====
-const bomDialogVisible = ref(false)
-const bomProductName = ref('')
-const currentProductId = ref<number | null>(null)
-const currentBomCategory = ref<'fabric' | 'filling' | 'accessory'>('fabric')
-
-const bomTabs = [
-  { key: 'fabric' as const, label: '面料类', icon: 'fas fa-scroll' },
-  { key: 'filling' as const, label: '填充类', icon: 'fas fa-cloud' },
-  { key: 'accessory' as const, label: '辅料类', icon: 'fas fa-puzzle-piece' },
-]
-
-const bomData = reactive<{ fabric: BomItem[]; filling: BomItem[]; accessory: BomItem[] }>({
-  fabric: [],
-  filling: [],
-  accessory: [],
-})
-
-const currentBomItems = computed(() => bomData[currentBomCategory.value])
-const currentBomTabLabel = computed(() => bomTabs.find(t => t.key === currentBomCategory.value)?.label || '')
-
-function switchBomTab(category: 'fabric' | 'filling' | 'accessory') {
-  currentBomCategory.value = category
-}
-
-async function openBomModal(row: Product) {
-  currentProductId.value = row.id
-  bomProductName.value = row.name
-  bomDialogVisible.value = true
-  currentBomCategory.value = 'fabric'
-  await loadBomData(row.id)
-}
-
-async function loadBomData(productId: number) {
-  bomData.fabric = []
-  bomData.filling = []
-  bomData.accessory = []
-  try {
-    const res = (await productApi.loadBom(productId)) as any
-    if (res.success) {
-      const materialsList = res.materials || []
-      const grouped: { fabric: BomItem[]; filling: BomItem[]; accessory: BomItem[] } = { fabric: [], filling: [], accessory: [] }
-      materialsList.forEach((item: any) => {
-        const cat = item.category || 'accessory'
-        if (cat === 'packaging') return // 包装类不在BOM配置中管理
-        if (grouped[cat as keyof typeof grouped]) {
-          grouped[cat as keyof typeof grouped].push({
-            id: item.id,
-            name: item.material_name || item.name || '',
-            specification: item.specification || '',
-            unit: item.unit || '码',
-            supplier_id: item.supplier_id || null,
-            supplier_name: item.supplier_name || '',
-            usage: item.unit_usage || item.quantity || 1,
-            remark: item.remark || '',
-            category: cat,
-          })
-        }
-      })
-      bomData.fabric = grouped.fabric
-      bomData.filling = grouped.filling
-      bomData.accessory = grouped.accessory
-    }
-  } catch (error) {
-    console.error('加载BOM数据失败:', error)
-    showToast('加载BOM数据失败', 'error')
-  }
-}
-
-function addBomItem() {
-  bomData[currentBomCategory.value].push({ name: '', specification: '', unit: currentBomCategory.value === 'filling' ? '克' : '码', supplier_name: '', usage: 1, remark: '', category: currentBomCategory.value })
-}
-
-async function deleteBomItem(index: number) {
-  const ok = await confirmDialog.confirm('确定删除？', '此操作不可恢复', 'danger')
-  if (!ok) return
-  bomData[currentBomCategory.value].splice(index, 1)
-}
-
-async function saveBom() {
-  const allItems = [
-    ...bomData.fabric.map(i => ({ ...i, category: 'fabric' })),
-    ...bomData.filling.map(i => ({ ...i, category: 'filling' })),
-    ...bomData.accessory.map(i => ({ ...i, category: i.category || 'accessory' })),
-  ]
-  const invalidItems = allItems.filter(i => !i.name || !i.specification || !i.unit || !i.supplier_name)
-  if (invalidItems.length > 0) { showToast('请填写所有必填项（物料名称、规格型号、计量单位、默认供应商）', 'warning'); return }
-
-  try {
-    const payload = {
-      fabrics: bomData.fabric.map(i => ({
-        id: i.id,
-        fabric_name: i.name,
-        specification: i.specification,
-        unit: i.unit,
-        quantity: i.usage,
-        supplier_id: i.supplier_id,
-        supplier_name: i.supplier_name,
-        remark: i.remark,
-        category: 'fabric',
-      })),
-      filling: bomData.filling.length > 0 ? (() => {
-        if (bomData.filling.length > 1) {
-          showToast('填充类物料每产品仅支持一条，已自动取第一条', 'warning')
-        }
-        const f = bomData.filling[0]
-        return {
-          id: f.id,
-          cotton_usage: f.usage,
-          specification: f.specification,
-          supplier_id: f.supplier_id,
-          supplier_name: f.supplier_name,
-          unit: f.unit,
-          remark: f.remark,
-        }
-      })() : null,
-      accessories: bomData.accessory.map(i => ({
-        id: i.id,
-        accessory_name: i.name,
-        specification: i.specification,
-        unit: i.unit,
-        quantity: i.usage,
-        supplier_id: i.supplier_id,
-        supplier_name: i.supplier_name,
-        remark: i.remark,
-        category: 'accessory',
-      })),
-      packagings: [],
-    }
-    const res = (await productApi.saveBom(currentProductId.value!, payload)) as any
-    if (res.success) {
-      showToast('保存成功', 'success')
-      bomDialogVisible.value = false
-    } else {
-      showToast(res.error || '保存失败', 'error')
-    }
-  } catch (error) {
-    showToast('保存BOM失败', 'error')
-  }
-}
-
-// ===== 快速复制BOM（自动补全） =====
-const quickCopyKeyword = ref('')
-const quickCopyInputRef = ref<HTMLInputElement | null>(null)
-const quickCopyLoading = ref(false)
-const autocompleteVisible = ref(false)
-const autocompleteItems = ref<any[]>([])
-const autocompleteIndex = ref(-1)
-let autocompleteTimeout: ReturnType<typeof setTimeout> | null = null
-let selectedSourceProductId: number | null = null
-let selectedSourceProductName: string | null = null
-
-const quickCopyProgress = reactive({ visible: false, percent: 0, text: '' })
-
-watch(quickCopyKeyword, (val) => {
-  if (autocompleteTimeout) clearTimeout(autocompleteTimeout)
-  if (val.trim().length < 1) { autocompleteVisible.value = false; return }
-  autocompleteTimeout = setTimeout(() => searchAutocompleteProducts(val.trim()), 300)
-})
-
-async function searchAutocompleteProducts(keyword: string) {
-  try {
-    const res = (await productApi.searchProductsForBom(keyword)) as any
-    autocompleteIndex.value = -1
-    if (res.success && res.products?.length > 0) {
-      autocompleteItems.value = res.products
-      autocompleteVisible.value = true
-    } else {
-      autocompleteItems.value = []
-      autocompleteVisible.value = true
-    }
-  } catch {
-    autocompleteVisible.value = false
-  }
-}
-
-function onAutocompleteKeydown(e: KeyboardEvent) {
-  if (!autocompleteVisible.value || autocompleteItems.value.length === 0) {
-    if (e.key === 'Enter') { e.preventDefault(); autocompleteVisible.value = false; quickCopyBom() }
-    return
-  }
-  const items = autocompleteItems.value.filter(i => i.has_bom)
-  if (e.key === 'ArrowDown') { e.preventDefault(); autocompleteIndex.value = Math.min(autocompleteIndex.value + 1, items.length - 1) }
-  else if (e.key === 'ArrowUp') { e.preventDefault(); autocompleteIndex.value = Math.max(autocompleteIndex.value - 1, -1) }
-  else if (e.key === 'Enter') {
-    e.preventDefault()
-    if (autocompleteIndex.value >= 0 && autocompleteIndex.value < items.length) {
-      selectAutocompleteItem(items[autocompleteIndex.value])
-    } else { autocompleteVisible.value = false; quickCopyBom() }
-  }
-  else if (e.key === 'Escape') { e.preventDefault(); autocompleteVisible.value = false }
-}
-
-function selectAutocompleteItem(item: any) {
-  if (!item.has_bom) return
-  selectedSourceProductId = item.id
-  selectedSourceProductName = item.name
-  quickCopyKeyword.value = item.name
-  autocompleteVisible.value = false
-}
-
-function onQuickCopyFocus() {
-  if (quickCopyKeyword.value.trim() && autocompleteItems.value.length === 0) {
-    searchAutocompleteProducts(quickCopyKeyword.value.trim())
-  } else if (autocompleteItems.value.length > 0) {
-    autocompleteVisible.value = true
-  }
-}
-function hideAutocomplete() {
-  setTimeout(() => { autocompleteVisible.value = false }, 150)
-}
-
-async function quickCopyBom() {
-  let sourceId = selectedSourceProductId
-  let sourceName = selectedSourceProductName || ''
-
-  if (!sourceId) {
-    const keyword = quickCopyKeyword.value.trim()
-    if (!keyword) { showToast('请输入产品名称或条码', 'warning'); return }
-
-    quickCopyLoading.value = true
-    quickCopyProgress.visible = true; quickCopyProgress.percent = 10; quickCopyProgress.text = '搜索产品中...'
-    try {
-      const res = (await productApi.searchProductsForBom(keyword)) as any
-      if (!res.success || !res.products?.length) { hideQuickCopyProgress(); quickCopyLoading.value = false; showToast('未找到匹配的产品', 'warning'); return }
-      const withBom = res.products.filter((p: any) => p.has_bom)
-      if (!withBom.length) { hideQuickCopyProgress(); quickCopyLoading.value = false; showToast('找到产品没有配置BOM表', 'warning'); return }
-      sourceId = withBom[0].id
-      sourceName = withBom[0].name
-    } catch { hideQuickCopyProgress(); quickCopyLoading.value = false; showToast('搜索失败', 'error'); return }
-  }
-
-  quickCopyProgress.percent = 40; quickCopyProgress.text = `正在从 "${sourceName}" 复制BOM...`
-
-  try {
-    quickCopyProgress.percent = 70; quickCopyProgress.text = '执行复制...'
-    const res = (await productApi.copyBom(currentProductId.value!, sourceId!, true)) as any
-    if (res.success) {
-      quickCopyProgress.percent = 100; quickCopyProgress.text = '复制成功！'
-      setTimeout(() => {
-        hideQuickCopyProgress()
-        quickCopyLoading.value = false
-        loadBomData(currentProductId.value!)
-        quickCopyKeyword.value = ''
-        selectedSourceProductId = null
-        selectedSourceProductName = null
-      }, 500)
-    } else {
-      hideQuickCopyProgress(); quickCopyLoading.value = false
-      showToast(res.error || '复制失败', 'error')
-    }
-  } catch { hideQuickCopyProgress(); quickCopyLoading.value = false; showToast('复制失败', 'error') }
-}
-
-function hideQuickCopyProgress() { quickCopyProgress.visible = false }
-
-// 点击外部关闭自动补全
-function onDocClick(e: MouseEvent) {
-  if (autocompleteVisible.value) {
-    const target = e.target as HTMLElement
-    if (!target.closest('.autocomplete-wrapper')) autocompleteVisible.value = false
-  }
-}
-onMounted(() => document.addEventListener('click', onDocClick))
-onUnmounted(() => document.removeEventListener('click', onDocClick))
-
-// ===== 复制BOM模态框 =====
-const copyBomDialogVisible = ref(false)
-const copyBomSearchKeyword = ref('')
-const copyBomProducts = ref<any[]>([])
-const copyBomSourceProductId = ref<number | null>(null)
-const copyBomPreview = ref<any>(null)
-const copyBomOverwrite = ref(false)
-const copyBomProgress = reactive({ visible: false, percent: 0, text: '' })
-
-async function searchProductForCopy() {
-  const keyword = copyBomSearchKeyword.value.trim()
-  if (!keyword) { showToast('请输入产品名称或条码进行搜索', 'warning'); return }
-  try {
-    const res = (await productApi.searchProductsForBom(keyword)) as any
-    if (res.success && res.products?.length > 0) {
-      copyBomProducts.value = res.products
-      copyBomPreview.value = null
-      copyBomSourceProductId.value = null
-    } else {
-      copyBomProducts.value = []
-      showToast('未找到匹配的产品', 'warning')
-    }
-  } catch { showToast('搜索产品失败', 'error') }
-}
-
-async function selectCopyBomProduct(product: any) {
-  if (!product.has_bom) { showToast('该产品没有配置BOM表，请选择其他产品', 'warning'); return }
-  copyBomSourceProductId.value = product.id
-  copyBomPreview.value = null
-  try {
-    const res = (await productApi.bomPreview(product.id)) as any
-    if (res.success) {
-      copyBomPreview.value = {
-        source_name: product.name,
-        source_barcode: product.barcode || '',
-        material_count: res.material_count,
-        fabric_count: res.bom?.fabric?.length || 0,
-        filling_count: res.bom?.filling?.length || 0,
-        accessory_count: (res.bom?.accessory?.length || 0) + (res.bom?.packaging?.length || 0),
-      }
-    }
-  } catch { showToast('加载BOM预览失败', 'error') }
-}
-
-async function confirmCopyBom() {
-  if (!copyBomSourceProductId.value) return
-  copyBomProgress.visible = true; copyBomProgress.percent = 0; copyBomProgress.text = '准备复制...'
-  try {
-    copyBomProgress.percent = 30; copyBomProgress.text = '正在复制BOM表...'
-    const res = (await productApi.copyBom(currentProductId.value!, copyBomSourceProductId.value, copyBomOverwrite.value)) as any
-    if (res.success) {
-      copyBomProgress.percent = 100; copyBomProgress.text = '复制成功！'
-      setTimeout(() => {
-        copyBomProgress.visible = false
-        copyBomDialogVisible.value = false
-        loadBomData(currentProductId.value!)
-      }, 500)
-    } else {
-      copyBomProgress.visible = false
-      showToast(res.error || '复制失败', 'error')
-    }
-  } catch { copyBomProgress.visible = false; showToast('复制失败', 'error') }
-}
+// ===== BOM 相关操作（抽离至 composable） =====
+const {
+  bomDialogVisible, bomProductName, currentBomCategory,
+  bomTabs, currentBomItems, currentBomTabLabel,
+  switchBomTab, openBomModal, addBomItem, deleteBomItem, saveBom,
+  quickCopyKeyword, quickCopyInputRef, quickCopyLoading,
+  autocompleteVisible, autocompleteItems, autocompleteIndex,
+  quickCopyProgress,
+  onAutocompleteKeydown, selectAutocompleteItem, onQuickCopyFocus, hideAutocomplete, quickCopyBom,
+  copyBomDialogVisible, copyBomSearchKeyword, copyBomProducts,
+  copyBomSourceProductId, copyBomPreview, copyBomOverwrite, copyBomProgress,
+  searchProductForCopy, selectCopyBomProduct, confirmCopyBom,
+} = useProductListActions(confirmDialog)
 </script>
 
 <style scoped>
 /* ===== 容器 ===== */
 .pd-container {
-  padding: 8px;
+  padding: 0;
   margin: 0 auto;
   height: 100%;
   display: flex;
@@ -1014,37 +674,10 @@ async function confirmCopyBom() {
 }
 
 /* ===== 主卡片 ===== */
-.pd-card {
-  background: white;
-  border-radius: 18px;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  overflow: hidden;
-  transition: box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.pd-card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
-  transform: translateY(-2px);
-}
-.pd-card-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
+/* 卡片样式已迁移到全局 .page-card 系列（src/styles/app.css） */
 
 /* ===== 卡片头部 ===== */
-.pd-card-header {
-  padding: 10px 24px;
-  background: transparent;
-  display: flex;
-  flex-wrap: nowrap;
-  justify-content: space-between;
-  align-items: center;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
-  gap: 12px;
-}
-.pd-card-header :deep(.ht-bar) {
+.page-card-header :deep(.ht-bar) {
   width: auto;
   margin: 0;
 }
@@ -1088,11 +721,11 @@ async function confirmCopyBom() {
 }
 
 /* ===== 双栏主体 ===== */
-.pd-body {
+/* 卡片主体样式已迁移到全局 .page-card-body（src/styles/app.css） */
+/* 产品页需要 2 列网格布局，覆盖默认 page-card-body */
+.page-card-body {
   display: grid;
   grid-template-columns: 1fr 2fr;
-  flex: 1;
-  min-height: 0;
   overflow: hidden;
 }
 
@@ -1700,7 +1333,7 @@ async function confirmCopyBom() {
 
 /* ===== 响应式 ===== */
 @media (max-width: 1199.98px) {
-  .pd-body { grid-template-columns: 1fr; }
+  .page-card-body { grid-template-columns: 1fr; }
   .pd-col + .pd-col { border-left: none; border-top: 1px solid var(--color-border-light, #f1f5f9); }
 }
 </style>
