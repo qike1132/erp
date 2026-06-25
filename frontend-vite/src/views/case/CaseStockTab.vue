@@ -51,13 +51,13 @@
               />
               <div v-if="productSuggestions.length && showSuggestions" class="cs-autocomplete-dropdown">
                 <div
-                  v-for="p in productSuggestions"
-                  :key="p.id"
+                  v-for="product in productSuggestions"
+                  :key="product.id"
                   class="cs-autocomplete-item"
-                  @mousedown.prevent="selectProduct(p)"
+                  @mousedown.prevent="selectProduct(product)"
                 >
-                  {{ p.name }}
-                  <span v-if="p.barcode" class="cs-barcode-hint">{{ p.barcode }}</span>
+                  {{ product.name }}
+                  <span v-if="product.barcode" class="cs-barcode-hint">{{ product.barcode }}</span>
                 </div>
               </div>
               <small v-if="mode === 'stockout' && form.productId" class="cs-current-stock">当前库存: {{ currentStock }}</small>
@@ -336,29 +336,24 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
-import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/vue-query'
-import { get, post, put, del, upload, download } from '@/api/request'
-import { customerApi } from '@/api'
+import { ref, reactive, computed, onUnmounted } from 'vue'
+import { useQuery, keepPreviousData } from '@tanstack/vue-query'
+import { caseApi, customerApi } from '@/api'
 import UiSelect from '@/components/ui/UiSelect.vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiUpload from '@/components/ui/UiUpload.vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
-import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { showToast } from '@/composables/useToast'
 import { toISODate } from '@/utils/format'
-
-const actionId = ref<number | ''>(0)
-const queryClient = useQueryClient()
-const confirmDialog = useConfirmDialog()
+import { useCaseStockActions } from './composables/useCaseStockActions'
 
 // === 模式 ===
 const mode = ref<'stockin' | 'stockout'>('stockin')
 
-function switchMode(m: 'stockin' | 'stockout') {
-  mode.value = m
+function switchMode(nextMode: 'stockin' | 'stockout') {
+  mode.value = nextMode
   form.customer = ''
   form.date = today
   form.search = ''
@@ -384,10 +379,10 @@ const customers = computed(() => (Array.isArray(customersData.value) ? customers
 const customerOptions = computed(() => customers.value.map((c: string) => ({ value: c, label: c })))
 
 // === 产品搜索 ===
-async function searchCaseProducts(q: string) {
-  if (!q.trim()) return []
+async function searchCaseProducts(query: string) {
+  if (!query.trim()) return []
   try {
-    const data = await get<any[]>('/cases/search', { q })
+    const data = await caseApi.search(query)
     return Array.isArray(data) ? data : []
   } catch {
     return []
@@ -397,20 +392,21 @@ async function searchCaseProducts(q: string) {
 const productSuggestions = ref<any[]>([])
 const showSuggestions = ref(false)
 let searchTimeout: ReturnType<typeof setTimeout> | null = null
+onUnmounted(() => { if (searchTimeout) clearTimeout(searchTimeout) })
 const currentStock = ref(0)
 
 function onProductFocus() {
   if (form.search && productSuggestions.value.length === 0) {
-    searchCaseProducts(form.search).then((r) => {
-      productSuggestions.value = r
-      showSuggestions.value = r.length > 0
+    searchCaseProducts(form.search).then((results) => {
+      productSuggestions.value = results
+      showSuggestions.value = results.length > 0
     })
   } else if (productSuggestions.value.length > 0) {
     showSuggestions.value = true
   }
 }
 function hideSuggestions() {
-  setTimeout(() => { showSuggestions.value = false }, 150)
+  searchTimeout = setTimeout(() => { showSuggestions.value = false }, 150)
 }
 
 function onSearchInput() {
@@ -425,10 +421,10 @@ function onSearchInput() {
   }, 300)
 }
 
-function selectProduct(p: any) {
-  form.productId = String(p.id)
-  form.search = p.name
-  if (mode.value === 'stockout') currentStock.value = p.current_stock ?? 0
+function selectProduct(product: any) {
+  form.productId = String(product.id)
+  form.search = product.name
+  if (mode.value === 'stockout') currentStock.value = product.current_stock ?? 0
   showSuggestions.value = false
 }
 
@@ -445,6 +441,26 @@ const canAdd = computed(() => {
 
 // === 暂存列表 ===
 const staged = ref<any[]>([])
+
+const {
+  confirmDialog,
+  submitting,
+  submitBatch,
+  showBatchUpload,
+  excelFile,
+  importing,
+  templateDownloading,
+  onExcelFileChange,
+  handleDownloadTemplate,
+  handleImportExcel,
+  actionId,
+  handleDelete,
+  editDialogOpen,
+  editMode,
+  editForm,
+  openEditModal,
+  saveEdit,
+} = useCaseStockActions(mode, staged, currentStock)
 
 async function removeStagedItem(idx: number) {
   const ok = await confirmDialog.confirm('确定删除？', '此操作不可恢复', 'danger')
@@ -477,99 +493,6 @@ function addStaged() {
   form.note = ''
 }
 
-// === 批量提交 ===
-const submitting = ref(false)
-
-async function submitBatch() {
-  submitting.value = true
-  try {
-    if (mode.value === 'stockin') {
-      await post('/cases/in/batch', {
-        stockins: staged.value.map((s) => ({
-          productId: s.productId,
-          customer: s.customer,
-          quantity: s.quantity,
-          stockinDate: s.date,
-          note: s.note,
-        })),
-      })
-      showToast('入库成功', 'success')
-    } else {
-      await post('/cases/out/batch', {
-        stockouts: staged.value.map((s) => ({
-          productId: s.productId,
-          customer: s.customer,
-          quantity: s.quantity,
-          stockout_date: s.date,
-          note: s.note,
-        })),
-      })
-      showToast('出库成功', 'success')
-    }
-    staged.value = []
-    currentStock.value = 0
-    queryClient.invalidateQueries({ queryKey: ['case-stockins'] })
-    queryClient.invalidateQueries({ queryKey: ['case-stockouts'] })
-  } catch (err: any) {
-    showToast(err.response?.data?.detail || (mode.value === 'stockin' ? '入库失败' : '出库失败'), 'error')
-  } finally {
-    submitting.value = false
-  }
-}
-
-// === 批量导入/导出 ===
-const showBatchUpload = ref(false)
-const excelFile = ref<File | null>(null)
-const importing = ref(false)
-const templateDownloading = ref(false)
-
-function onExcelFileChange(files: FileList) {
-  const f = files[0]
-  if (!f) return
-  if (!(f.name.endsWith('.xlsx') || f.name.endsWith('.xls'))) {
-    showToast('请上传 Excel 文件（.xlsx 或 .xls）', 'error')
-    return
-  }
-  if (f.size > 10 * 1024 * 1024) {
-    showToast(`文件大小不能超过 10MB，当前文件 ${(f.size / 1024 / 1024).toFixed(1)}MB`, 'error')
-    return
-  }
-  excelFile.value = f
-}
-
-async function handleDownloadTemplate() {
-  templateDownloading.value = true
-  try {
-    await download('/batch/download-template', mode.value === 'stockin' ? '皮套入库模板.xlsx' : '皮套出库模板.xlsx')
-  } catch {
-    showToast('下载失败', 'error')
-  } finally {
-    templateDownloading.value = false
-  }
-}
-
-async function handleImportExcel() {
-  if (!excelFile.value) return
-  importing.value = true
-  try {
-    const fd = new FormData()
-    fd.append('file', excelFile.value)
-    const api = mode.value === 'stockin' ? '/batch/import-case-stockins' : '/batch/import-case-stockouts'
-    const res = (await upload(api, fd)) as any
-    if (res.success) {
-      showToast(`成功导入 ${res.imported} 条记录`, 'success')
-      excelFile.value = null
-      queryClient.invalidateQueries({ queryKey: mode.value === 'stockin' ? ['case-stockins'] : ['case-stockouts'] })
-    } else {
-      showToast(res.message || '导入失败', 'error')
-    }
-  } catch (err: any) {
-    showToast(err.response?.data?.detail || '导入失败', 'error')
-  } finally {
-    importing.value = false
-  }
-}
-
 // === 入库记录列表 ===
 const siShowFilter = ref(false)
 const siFCustomer = ref('')
@@ -590,7 +513,7 @@ const {
     if (siFCustomer.value) params.customer = siFCustomer.value
     if (siFStart.value) params.start_date = siFStart.value
     if (siFEnd.value) params.end_date = siFEnd.value
-    const res = (await get('/cases/in/list', params)) as any
+    const res = (await caseApi.stockins(params)) as any
     siTotalPages.value = res.pages ?? res.total_pages ?? 1
     return res
   },
@@ -619,7 +542,7 @@ const {
     if (soFCustomer.value) params.customer = soFCustomer.value
     if (soFStart.value) params.start_date = soFStart.value
     if (soFEnd.value) params.end_date = soFEnd.value
-    const res = (await get('/cases/out/list', params)) as any
+    const res = (await caseApi.stockouts(params)) as any
     soTotalPages.value = res.pages ?? res.total_pages ?? 1
     return res
   },
@@ -627,64 +550,6 @@ const {
   placeholderData: keepPreviousData,
 })
 const soList = computed(() => soData.value?.stockouts ?? soData.value?.items ?? [])
-
-// === 删除记录 ===
-async function handleDelete(type: 'stockin' | 'stockout', row: any) {
-  if (!(await confirmDialog.confirm(`确定要删除这条${type === 'stockin' ? '入库' : '出库'}记录吗？`))) return
-  actionId.value = row.id
-  try {
-    await del(`/cases/${type === 'stockin' ? 'in' : 'out'}/${row.id}`)
-    showToast('删除成功', 'success')
-    queryClient.invalidateQueries({ queryKey: [type === 'stockin' ? 'case-stockins' : 'case-stockouts'] })
-  } catch (err: any) {
-    showToast(err.response?.data?.detail || '删除失败', 'error')
-  } finally {
-    actionId.value = 0
-  }
-}
-
-// === 编辑记录 ===
-const editDialogOpen = ref(false)
-const editMode = ref<'stockin' | 'stockout'>('stockin')
-const editForm = reactive({ id: 0, customer: '', date: '', productName: '', quantity: 1, note: '' })
-
-function openEditModal(type: 'stockin' | 'stockout', row: any) {
-  editMode.value = type
-  editForm.id = row.id
-  editForm.customer = row.customer || ''
-  editForm.date = type === 'stockin' ? row.stockin_date || '' : row.stockout_date || ''
-  editForm.productName = row.case_name || ''
-  editForm.quantity = row.quantity || 1
-  editForm.note = row.note || ''
-  editDialogOpen.value = true
-  get(`/cases/${type === 'stockin' ? 'in' : 'out'}/${row.id}`)
-    .then((data: any) => {
-      editForm.customer = data.customer || ''
-      editForm.date = type === 'stockin' ? data.stockin_date || '' : data.stockout_date || ''
-      editForm.productName = data.case_name || ''
-      editForm.quantity = data.quantity || 1
-      editForm.note = data.note || ''
-    })
-    .catch(() => {})
-}
-
-async function saveEdit() {
-  try {
-    const payload: Record<string, any> = {
-      customer: editForm.customer,
-      quantity: editForm.quantity,
-      note: editForm.note,
-    }
-    if (editMode.value === 'stockin') payload.stockin_date = editForm.date
-    else payload.stockout_date = editForm.date
-    await put(`/cases/${editMode.value === 'stockin' ? 'in' : 'out'}/${editForm.id}`, payload)
-    showToast('更新成功', 'success')
-    editDialogOpen.value = false
-    queryClient.invalidateQueries({ queryKey: [editMode.value === 'stockin' ? 'case-stockins' : 'case-stockouts'] })
-  } catch (err: any) {
-    showToast(err.response?.data?.detail || '更新失败', 'error')
-  }
-}
 </script>
 
 <style scoped>
