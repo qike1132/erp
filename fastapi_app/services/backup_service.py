@@ -16,14 +16,15 @@ import os
 import shutil
 import tempfile
 import zipfile
-from datetime import date, datetime, time as time_type
+from datetime import date, datetime
+from datetime import time as time_type
 from decimal import Decimal
 from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy import ARRAY, JSON, Boolean, Date, DateTime, Numeric, Time, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlalchemy.exc import SQLAlchemyError, DataError
+from sqlalchemy.exc import DataError, OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,11 @@ class RestoreError(BackupError):
 BACKUP_DIR = Path(os.environ.get('BACKUP_DIR', 'backups/server'))
 MAX_BACKUP_FILE_SIZE = 500 * 1024 * 1024
 RESTORE_LOCK_ID = 20240426
+BACKUP_LOCK_ID = 20240427
+# 备份操作总超时（秒）。超出后取消整个备份流程，避免长时间挂起。
+BACKUP_OPERATION_TIMEOUT = int(os.environ.get('BACKUP_OPERATION_TIMEOUT', '1800'))  # 默认 30 分钟
+# 进程级互斥锁：防止同一进程内并发触发备份（数据库 advisory_lock 跨连接才有效）
+_backup_in_progress: asyncio.Lock = asyncio.Lock()
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 UPLOADS_DIR = PROJECT_ROOT / 'static' / 'uploads'
 CONFIG_DIR = PROJECT_ROOT / 'config'
@@ -117,6 +123,38 @@ def ensure_pre_restore_dir():
 
 
 # ---------------------------------------------------------------------------
+# 备份并发控制
+# ---------------------------------------------------------------------------
+
+async def acquire_backup_lock(db: AsyncSession) -> bool:
+    """
+    获取备份操作的数据库级 advisory lock。
+    与 restore 锁分离，允许恢复期间记录元数据。
+    返回 True 表示获取成功，False 表示已有其他连接持有锁。
+    """
+    try:
+        result = await db.execute(
+            text('SELECT pg_try_advisory_lock(:lock_id)'),
+            {'lock_id': BACKUP_LOCK_ID},
+        )
+        return bool(result.scalar())
+    except (SQLAlchemyError, OSError) as e:
+        logger.warning('获取备份 advisory_lock 失败: %s', e)
+        return False
+
+
+async def release_backup_lock(db: AsyncSession) -> None:
+    """释放备份 advisory lock。失败仅记录日志，不抛出异常。"""
+    try:
+        await db.execute(
+            text('SELECT pg_advisory_unlock(:lock_id)'),
+            {'lock_id': BACKUP_LOCK_ID},
+        )
+    except (SQLAlchemyError, OSError) as e:
+        logger.warning('释放备份 advisory_lock 失败: %s', e)
+
+
+# ---------------------------------------------------------------------------
 # 工具函数
 # ---------------------------------------------------------------------------
 
@@ -130,8 +168,8 @@ def sha256_file(filepath: Path) -> str | None:
     if not filepath.is_file():
         return None
     h = hashlib.sha256()
-    with open(filepath, 'rb') as f:
-        for chunk in iter(lambda: f.read(65536), b''):
+    with open(filepath, 'rb') as file_handle:
+        for chunk in iter(lambda: file_handle.read(65536), b''):
             h.update(chunk)
     return h.hexdigest()
 
@@ -426,26 +464,35 @@ async def restore_from_chunks(
     )
 
 
+def _serialize_datetime(val):
+    return val.strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _serialize_bytes(val):
+    return val.hex()
+
+
+# 顺序敏感：bool 必须在 int 之前（bool 是 int 子类），datetime 必须在 date 之前
+_SERIALIZE_DISPATCH: list[tuple[type, object]] = [
+    (bool, lambda v: v),
+    (int, lambda v: v),
+    (float, lambda v: v),
+    (str, lambda v: v),
+    (datetime, _serialize_datetime),
+    (date, lambda v: v.isoformat()),
+    (Decimal, lambda v: float(v)),
+    (UUID, lambda v: str(v)),
+    ((bytes, bytearray), _serialize_bytes),
+]
+
+
 def serialize_value(val):
     """将数据库值序列化为 JSON 兼容类型"""
     if val is None:
         return None
-    if isinstance(val, bool):
-        return val
-    if isinstance(val, (int, float)):
-        return val
-    if isinstance(val, str):
-        return val
-    if isinstance(val, datetime):
-        return val.strftime('%Y-%m-%d %H:%M:%S')
-    if isinstance(val, date):
-        return val.isoformat()
-    if isinstance(val, Decimal):
-        return float(val)
-    if isinstance(val, UUID):
-        return str(val)
-    if isinstance(val, (bytes, bytearray)):
-        return val.hex()
+    for type_check, serializer in _SERIALIZE_DISPATCH:
+        if isinstance(val, type_check):
+            return serializer(val)
     if hasattr(val, 'isoformat'):
         return val.isoformat()
     return str(val)
@@ -456,56 +503,79 @@ def build_column_type_map(table):
     return {str(col.name): col.type for col in table.columns}
 
 
+def _deserialize_datetime(val):
+    if not isinstance(val, str):
+        return val
+    try:
+        return datetime.strptime(val, '%Y-%m-%d %H:%M:%S')
+    except ValueError:
+        try:
+            return datetime.fromisoformat(val)
+        except ValueError:
+            return val
+
+
+def _deserialize_date(val):
+    if not isinstance(val, str):
+        return val
+    try:
+        return datetime.strptime(val, '%Y-%m-%d').date()
+    except ValueError:
+        try:
+            return date.fromisoformat(val)
+        except ValueError:
+            return val
+
+
+def _deserialize_time(val):
+    if not isinstance(val, str):
+        return val
+    try:
+        return datetime.strptime(val, '%H:%M:%S').time()
+    except ValueError:
+        try:
+            return time_type.fromisoformat(val)
+        except ValueError:
+            return val
+
+
+def _deserialize_boolean(val):
+    if isinstance(val, (int, float)):
+        return bool(val)
+    return val
+
+
+def _deserialize_numeric(val):
+    if isinstance(val, (int, float)):
+        return Decimal(str(val))
+    return val
+
+
+def _deserialize_uuid(val):
+    if isinstance(val, str):
+        return UUID(val)
+    return val
+
+
+_DESERIALIZE_DISPATCH: list[tuple[type, object]] = [
+    (DateTime, _deserialize_datetime),
+    (Date, _deserialize_date),
+    (Time, _deserialize_time),
+    (Boolean, _deserialize_boolean),
+    (Numeric, _deserialize_numeric),
+    (JSON, lambda v: v),
+    (ARRAY, lambda v: v),
+    (PG_UUID, _deserialize_uuid),
+]
+
+
 def deserialize_value(val, col_type):
     """将 JSON 反序列化的值转回正确的 Python 类型"""
     if val is None:
         return None
-    if isinstance(col_type, DateTime):
-        if isinstance(val, str):
-            try:
-                return datetime.strptime(val, '%Y-%m-%d %H:%M:%S')
-            except ValueError:
-                try:
-                    return datetime.fromisoformat(val)
-                except ValueError:
-                    pass
-        return val
-    if isinstance(col_type, Date):
-        if isinstance(val, str):
-            try:
-                return datetime.strptime(val, '%Y-%m-%d').date()
-            except ValueError:
-                try:
-                    return date.fromisoformat(val)
-                except ValueError:
-                    pass
-        return val
-    if isinstance(col_type, Time):
-        if isinstance(val, str):
-            try:
-                return datetime.strptime(val, '%H:%M:%S').time()
-            except ValueError:
-                try:
-                    return time_type.fromisoformat(val)
-                except ValueError:
-                    pass
-        return val
-    if isinstance(col_type, Boolean):
-        if isinstance(val, (int, float)):
-            return bool(val)
-        return val
-    if isinstance(col_type, Numeric):
-        if isinstance(val, (int, float)):
-            return Decimal(str(val))
-        return val
-    if isinstance(col_type, JSON):
-        return val
-    if isinstance(col_type, ARRAY):
-        return val
-    if isinstance(col_type, PG_UUID):
-        if isinstance(val, str):
-            return UUID(val)
-        return val
+    for type_check, handler in _DESERIALIZE_DISPATCH:
+        if isinstance(col_type, type_check):
+            return handler(val)
     return val
 
 
@@ -515,6 +585,68 @@ def quote_table(tname: str) -> str:
     if not tname.replace('_', '').replace('-', '').isalnum():
         raise ValueError(f'不安全的表名: {tname!r}')
     return f'"{tname}"'
+
+
+async def list_tables_with_row_counts(db: AsyncSession) -> list[dict]:
+    """列出所有可备份的数据库表及行数。
+
+    通过 ORM 元数据白名单验证表名，统计失败时该表行数记为 -1。
+
+    Returns:
+        [{'name': str, 'rows': int}, ...]
+    """
+    from sqlalchemy import text
+    from fastapi_app.shared_models import Base
+
+    table_info: list[dict] = []
+    for table in Base.metadata.sorted_tables:
+        name = str(table.name)
+        try:
+            qtname = quote_table(name)
+            result = await db.execute(text(f'SELECT COUNT(*) FROM {qtname}'))  # nosec B608 — qtname 经 quote_table 白名单校验
+            count = result.scalar()
+        except (SQLAlchemyError, OperationalError, OSError):
+            await db.rollback()
+            count = -1
+        table_info.append({'name': name, 'rows': count})
+    return table_info
+
+
+async def get_backup_statistics_records(db: AsyncSession, days: int = 30) -> dict:
+    """查询最近 N 天的备份记录统计。
+
+    Returns:
+        {'total_records': int, 'success_records': int, 'success_rate': float, 'type_distribution': dict}
+    """
+    from datetime import datetime, timedelta
+    from sqlalchemy import func, select
+    from fastapi_app.shared_models.backup_record import BackupRecord
+
+    since = datetime.now() - timedelta(days=days)
+    stmt = select(
+        func.count(BackupRecord.id).label('total'),
+        func.sum(func.case((BackupRecord.status == 'success', 1), else_=0)).label('success'),
+    ).where(BackupRecord.created_at >= since)
+    result = await db.execute(stmt)
+    stats = result.first()
+
+    total_records = stats.total or 0
+    success_records = stats.success or 0
+    success_rate = (success_records / total_records * 100) if total_records > 0 else 100.0
+
+    stmt_dist = select(
+        BackupRecord.type,
+        func.count(BackupRecord.id).label('count'),
+    ).where(BackupRecord.created_at >= since).group_by(BackupRecord.type)
+    result_dist = await db.execute(stmt_dist)
+    type_distribution = {row.type: row.count for row in result_dist}
+
+    return {
+        'total_records': total_records,
+        'success_records': success_records,
+        'success_rate': success_rate,
+        'type_distribution': type_distribution,
+    }
 
 
 def get_checksum_tables() -> set[str]:
@@ -582,7 +714,7 @@ async def create_database_snapshot_backup(
         # 调用原有的 create_full_backup 函数
         return await create_full_backup(db, user, remark, encrypt_password)
         
-    except Exception as e:
+    except Exception as e:  # defensive: log any snapshot backup failure before propagating
         logger.error(f"带快照的备份失败: {e}")
         raise
     finally:
@@ -668,10 +800,7 @@ async def create_binary_log_backup(
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         backup_file = output_dir / f'wal_backup_{timestamp}.tar.gz'
         
-        # 获取数据库连接信息
-        db_host = os.getenv('DB_HOST', 'localhost')
-        db_port = os.getenv('DB_PORT', '5432')
-        db_user = os.getenv('DB_USER', 'erp_app')
+        # 获取数据库连接信息（仅db_name用于校验，其余保留供未来扩展）
         db_name = os.getenv('DB_NAME', 'erp_system')
         if not db_name.isidentifier() or not all(c.isalnum() or c == '_' for c in db_name) or db_name[0].isdigit():
             raise ValueError(f'Invalid database name: {db_name!r}')
@@ -710,7 +839,7 @@ async def create_binary_log_backup(
             'wal_info': wal_info,
         }
         
-    except Exception as e:
+    except (OSError, SQLAlchemyError, ValueError) as e:
         logger.error(f"创建二进制日志备份失败: {e}")
         raise BinaryLogError(f"创建二进制日志备份失败: {e}") from e
 
@@ -761,7 +890,7 @@ async def restore_from_binary_log(
             'restored_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         }
         
-    except Exception as e:
+    except (OSError, SQLAlchemyError, ValueError) as e:
         logger.error(f"从二进制日志备份恢复失败: {e}")
         raise BinaryLogError(f"从二进制日志备份恢复失败: {e}") from e
 
@@ -805,21 +934,21 @@ async def query_table_rows(tname: str, db: AsyncSession, since: str | None = Non
         # 优先尝试 datetime（timestamptz 列需要）；失败时回退到字符串
         try:
             result = await db.execute(
-                text(f'SELECT * FROM {qtname} WHERE "{ts_col}" >= :since'),
+                text(f'SELECT * FROM {qtname} WHERE "{ts_col}" >= :since'),  # nosec B608 — qtname 经 quote_table 白名单校验
                 {'since': since_dt},
             )
         except DataError:
             # 事务已失败，必须先 rollback 才能在新事务中重试
             try:
                 await db.rollback()
-            except Exception:
+            except SQLAlchemyError:
                 pass
             result = await db.execute(
-                text(f'SELECT * FROM {qtname} WHERE "{ts_col}" >= :since'),
+                text(f'SELECT * FROM {qtname} WHERE "{ts_col}" >= :since'),  # nosec B608 — qtname 经 quote_table 白名单校验
                 {'since': since},
             )
     else:
-        result = await db.execute(text(f'SELECT * FROM {qtname}'))
+        result = await db.execute(text(f'SELECT * FROM {qtname}'))  # nosec B608 — qtname 经 quote_table 白名单校验
     rows = result.mappings().all()
     columns = list(result.keys())
     serialized_rows = []
@@ -831,38 +960,47 @@ async def query_table_rows(tname: str, db: AsyncSession, since: str | None = Non
     return serialized_rows
 
 
+def _extract_encrypted_backup_timestamp(f: Path) -> str | None:
+    """从加密备份文件提取时间戳（先查 .meta 侧车文件，再回退到文件名解析）"""
+    # 尝试从 .meta 侧车文件读取
+    meta_path = f.with_name(f.name + '.meta')
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text(encoding='utf-8'))
+            ts = meta.get('created_at') or meta.get('exported_at')
+            if ts:
+                return ts
+        except (OSError, json.JSONDecodeError, ValueError):
+            pass
+    # fallback: 从文件名解析时间戳 erp_backup_YYYYMMDD_HHMMSS.zip.enc
+    try:
+        stem = f.stem  # erp_backup_YYYYMMDD_HHMMSS.zip
+        ts_part = stem.split('_', 2)[-1]  # YYYYMMDD_HHMMSS.zip
+        ts_part = ts_part.rsplit('.', 1)[0]  # YYYYMMDD_HHMMSS
+        if len(ts_part) == 15 and ts_part[8] == '_':
+            return f'{ts_part[:4]}-{ts_part[4:6]}-{ts_part[6:8]} {ts_part[9:11]}:{ts_part[11:13]}:{ts_part[13:15]}'
+    except (ValueError, IndexError):
+        pass
+    return None
+
+
 async def find_last_backup_timestamp() -> str | None:
     """查找最近一次全量备份的导出时间"""
     if not BACKUP_DIR.exists():
         return None
-    for f in sorted(BACKUP_DIR.iterdir(), reverse=True):
-        if not f.is_file() or not f.name.startswith('erp_backup_'):
+    for backup_file in sorted(BACKUP_DIR.iterdir(), reverse=True):
+        if not backup_file.is_file() or not backup_file.name.startswith('erp_backup_'):
             continue
-        # 加密备份：直接从 .meta 侧车文件读取 exported_at
-        if f.name.endswith('.enc'):
-            meta_path = f.with_name(f.name + '.meta')
-            if meta_path.exists():
-                try:
-                    meta = json.loads(meta_path.read_text(encoding='utf-8'))
-                    ts = meta.get('created_at') or meta.get('exported_at')
-                    if ts:
-                        return ts
-                except (OSError, json.JSONDecodeError, ValueError):
-                    pass
-            # fallback: 从文件名解析时间戳 erp_backup_YYYYMMDD_HHMMSS.zip.enc
-            try:
-                stem = f.stem  # erp_backup_YYYYMMDD_HHMMSS.zip
-                ts_part = stem.split('_', 2)[-1]  # YYYYMMDD_HHMMSS.zip
-                ts_part = ts_part.rsplit('.', 1)[0]  # YYYYMMDD_HHMMSS
-                if len(ts_part) == 15 and ts_part[8] == '_':
-                    return f'{ts_part[:4]}-{ts_part[4:6]}-{ts_part[6:8]} {ts_part[9:11]}:{ts_part[11:13]}:{ts_part[13:15]}'
-            except (ValueError, IndexError):
-                pass
+        # 加密备份：从 .meta 侧车文件或文件名提取时间戳
+        if backup_file.name.endswith('.enc'):
+            ts = _extract_encrypted_backup_timestamp(backup_file)
+            if ts:
+                return ts
             continue
         # 普通 zip：从 manifest.json 读取
-        if f.name.endswith('.zip'):
+        if backup_file.name.endswith('.zip'):
             try:
-                with zipfile.ZipFile(f, 'r') as zf:
+                with zipfile.ZipFile(backup_file, 'r') as zf:
                     if 'manifest.json' in zf.namelist():
                         mf = json.loads(zf.read('manifest.json'))
                         return mf.get('exported_at')
@@ -985,7 +1123,7 @@ async def execute_legacy_backup_to_bytes(user, remark: str, db: AsyncSession) ->
             qtname = quote_table(name)
             nested = await db.begin_nested()
             try:
-                result = await db.execute(text(f'SELECT * FROM {qtname}'))
+                result = await db.execute(text(f'SELECT * FROM {qtname}'))  # nosec B608 — qtname 经 quote_table 白名单校验
                 rows = result.mappings().all()
                 columns = list(result.keys())
                 serialized_rows = []
@@ -1023,64 +1161,310 @@ async def create_full_backup(
     如果 use_snapshot 为 True，则使用数据库快照确保备份一致性。
 
     Falls back to JSON database export if pg_dump is not available.
+
+    包含：
+    - 进程级 asyncio.Lock：避免同一进程内并发触发
+    - 数据库 advisory_lock：避免跨进程并发
+    - 总超时控制：超出 BACKUP_OPERATION_TIMEOUT 强制取消
     """
-    snapshot_id = None
-    if use_snapshot:
+    if _backup_in_progress.locked():
+        raise BackupLockError('已有备份任务正在执行中，请稍后重试')
+
+    db_lock_acquired = await acquire_backup_lock(db)
+    if not db_lock_acquired:
+        raise BackupLockError('其他进程正在执行备份，请稍后重试')
+
+    async with _backup_in_progress:
         try:
-            snapshot_id = await get_postgres_snapshot(db)
-            logger.info(f"获取数据库快照成功: {snapshot_id}")
-        except DatabaseSnapshotError as e:
-            logger.warning(f"无法获取数据库快照，继续无快照备份: {e}")
-            # 降级处理，继续备份但不使用快照
-    
+            return await asyncio.wait_for(
+                _do_create_full_backup(db, user, remark, encrypt_password, use_snapshot),
+                timeout=BACKUP_OPERATION_TIMEOUT,
+            )
+        except asyncio.TimeoutError as e:
+            logger.error('备份操作超时（%s秒）', BACKUP_OPERATION_TIMEOUT)
+            raise BackupError(f'备份超时（>{BACKUP_OPERATION_TIMEOUT}s），已强制取消') from e
+        finally:
+            await release_backup_lock(db)
+
+
+async def _acquire_snapshot(db: AsyncSession, use_snapshot: bool) -> str | None:
+    """获取数据库快照，失败时降级返回 None"""
+    if not use_snapshot:
+        return None
+    try:
+        snapshot_id = await get_postgres_snapshot(db)
+        logger.info(f"获取数据库快照成功: {snapshot_id}")
+        return snapshot_id
+    except DatabaseSnapshotError as e:
+        logger.warning(f"无法获取数据库快照，继续无快照备份: {e}")
+        return None
+
+
+async def _dump_database_with_fallback(
+    db: AsyncSession,
+    user,
+    remark: str,
+    dump_path: Path,
+    tmpdir_path: Path,
+    snapshot_id: str | None,
+) -> tuple[dict, bool]:
+    """执行 pg_dump，失败时回退到 JSON 格式，返回 (dump_info, pg_dump_available)"""
+    try:
+        dump_info = await run_pg_dump(dump_path, snapshot_id)
+        return dump_info, True
+    except (TimeoutError, OSError, RuntimeError) as e:
+        logger.warning(f'pg_dump 不可用，使用 JSON 格式备份数据库: {e}')
+        json_path = tmpdir_path / 'database'
+        json_path.mkdir(parents=True, exist_ok=True)
+        json_bytes = await execute_legacy_backup_to_bytes(user, remark, db)
+        json_path_file = json_path / 'dump.json'
+        json_path_file.write_bytes(json_bytes)
+        dump_info = {
+            'pg_version': '', 'db_name': os.getenv('DB_NAME', 'erp_system'),
+            'dump_size': len(json_bytes), 'duration_seconds': 0, 'format': 'json',
+        }
+        return dump_info, False
+
+
+async def _count_table_rows(
+    db: AsyncSession, table_names: list[str], existing_tables: set[str],
+) -> dict[str, int]:
+    """统计各表行数，不存在的表返回 -1"""
+    async def _count_one(tname: str) -> tuple[str, int]:
+        if tname not in existing_tables:
+            return tname, -1
+        nested = await db.begin_nested()
+        try:
+            qtname = quote_table(tname)
+            result = await db.execute(text(f'SELECT COUNT(*) FROM {qtname}'))  # nosec B608 — qtname 经 quote_table 白名单校验
+            await nested.commit()
+            return tname, result.scalar() or 0
+        except (OSError, ValueError, SQLAlchemyError):
+            await nested.rollback()
+            return tname, -1
+
+    count_results = []
+    for tname in table_names:
+        count_results.append(await _count_one(tname))
+    return dict(count_results)
+
+
+async def _compute_table_fingerprints(db: AsyncSession) -> dict[str, str]:
+    """计算所有需校验表的 MD5 指纹"""
+    from fastapi_app.shared_models import Base
+    fingerprints: dict[str, str] = {}
+    for table in Base.metadata.sorted_tables:
+        tname = str(table.name)
+        if tname not in get_checksum_tables():
+            continue
+        try:
+            qtname = quote_table(tname)  # REV-08
+            pk_col = [c.name for c in table.primary_key.columns]
+            order_col = pk_col[0] if pk_col else 'id'
+            cols_result = await db.execute(
+                text('SELECT column_name FROM information_schema.columns WHERE table_name = :tname ORDER BY ordinal_position'),
+                {'tname': tname}
+            )
+            col_names = [r[0] for r in cols_result.fetchall()]
+            # REV-14: 指纹聚合使用 MD5（数据完整性校验，非安全场景）
+            agg_expr = " || '|' || ".join(f'''COALESCE("{c}"::text, '')''' for c in col_names)
+            fp_result = await db.execute(text(
+                f'''SELECT MD5(STRING_AGG({agg_expr}, ',' ORDER BY "{order_col}")) FROM {qtname}'''
+            ))
+            fingerprints[tname] = fp_result.scalar() or ''
+        except (SQLAlchemyError, ValueError, OSError) as e:
+            logger.warning(f'计算表 {tname} 指纹失败: {e}')
+            fingerprints[tname] = ''
+    return fingerprints
+
+
+# 备份配置文件清单
+_CONFIG_FILES_TO_BACKUP = [
+    ('jwt/private.pem', 'jwt/private.pem'),
+    ('jwt/public.pem', 'jwt/public.pem'),
+    ('redis.production.conf', 'redis.production.conf'),
+    ('nginx.conf', 'nginx.conf'),
+    ('.env.production', '.env.production'),
+]
+
+
+def _add_config_files_to_zip(zf: zipfile.ZipFile) -> tuple[list[str], list[str]]:
+    """备份配置文件到 ZIP，返回 (added, excluded)"""
+    added: list[str] = []
+    excluded: list[str] = []
+    for file_name, relative_path in _CONFIG_FILES_TO_BACKUP:
+        file_path = CONFIG_DIR / file_name
+        if not file_path.is_file():
+            continue
+        if should_exclude_file(file_path, relative_path):
+            excluded.append(relative_path)
+            logger.info(f"排除配置文件: {relative_path}")
+        else:
+            zf.write(file_path, f'config/{relative_path}')
+            added.append(relative_path)
+    return added, excluded
+
+
+def _write_filestore_to_zip(zf: zipfile.ZipFile) -> int:
+    """将上传目录写入 ZIP，返回文件数"""
+    file_count = 0
+    for fp in sorted(UPLOADS_DIR.rglob('*')):
+        if fp.is_file():
+            arcname = f'filestore/{fp.relative_to(UPLOADS_DIR)}'
+            zf.write(fp, arcname)
+            file_count += 1
+    return file_count
+
+
+async def _export_meilisearch_to_zip(zf: zipfile.ZipFile) -> dict:
+    """导出 MeiliSearch 索引到 ZIP，返回 includes 信息"""
+    includes: dict = {}
+    try:
+        import httpx
+        async with httpx.AsyncClient() as meili_client:
+            meili_indexes_resp = await meili_client.get(
+                f'{MEILI_HOST}/indexes',
+                headers={'Authorization': f'Bearer {MEILI_MASTER_KEY}'}, timeout=10
+            )
+            if meili_indexes_resp.status_code != 200:
+                return includes
+            meili_indexes_data = meili_indexes_resp.json()
+            meili_index_names = [idx['uid'] for idx in meili_indexes_data.get('results', [])]
+            meili_export = {}
+            for idx_name in meili_index_names:
+                docs_resp = await meili_client.get(
+                    f'{MEILI_HOST}/indexes/{idx_name}/documents',
+                    headers={'Authorization': f'Bearer {MEILI_MASTER_KEY}'},
+                    params={'limit': 100000}, timeout=60
+                )
+                if docs_resp.status_code == 200:
+                    meili_export[idx_name] = docs_resp.json().get('results', [])
+                settings_resp = await meili_client.get(
+                    f'{MEILI_HOST}/indexes/{idx_name}/settings',
+                    headers={'Authorization': f'Bearer {MEILI_MASTER_KEY}'}, timeout=10
+                )
+                if settings_resp.status_code == 200:
+                    meili_export[f'{idx_name}__settings'] = settings_resp.json()
+            if meili_export:
+                meili_bytes = json.dumps(meili_export, ensure_ascii=False).encode('utf-8')
+                zf.writestr('meilisearch/dump.json', meili_bytes)
+                includes['meilisearch_indexes'] = meili_index_names
+                includes['meilisearch_doc_count'] = sum(
+                    len(v) for k, v in meili_export.items() if not k.endswith('__settings')
+                )
+    except (httpx.RequestError, ValueError) as e:
+        logger.warning('MeiliSearch 索引导出失败（可忽略）: %s', e)
+    return includes
+
+
+def _build_backup_manifest(
+    dump_info: dict,
+    user,
+    remark: str,
+    table_stats: dict[str, int],
+    checksums: dict,
+    fingerprints: dict[str, str],
+) -> dict:
+    """构建备份 manifest 字典"""
+    return {
+        'version': BACKUP_FORMAT_VERSION, 'type': 'full', 'app_version': '2.0',
+        'pg_version': dump_info.get('pg_version', ''),
+        'db_name': dump_info.get('db_name', ''),
+        'exported_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'exported_by': user.username if hasattr(user, 'username') else str(user.id),
+        'remark': remark,
+        'table_count': len(table_stats),
+        'total_rows': sum(v for v in table_stats.values() if v >= 0),
+        'dump_size': dump_info.get('dump_size', 0),
+        'dump_duration_seconds': dump_info.get('duration_seconds', 0),
+        'snapshot_id': dump_info.get('snapshot_id'),
+        'tables': {k: {'rows': v} for k, v in table_stats.items()},
+        'includes': {}, 'checksums': checksums, 'fingerprints': fingerprints,
+    }
+
+
+async def _write_backup_archive(
+    zf: zipfile.ZipFile,
+    tmpdir_path: Path,
+    dump_path: Path,
+    pg_dump_available: bool,
+    manifest: dict,
+) -> None:
+    """将所有组件写入备份 ZIP"""
+    if pg_dump_available and dump_path.is_file():
+        zf.write(dump_path, 'database/dump.sql.gz')
+    elif (tmpdir_path / 'database' / 'dump.json').is_file():
+        zf.write(tmpdir_path / 'database' / 'dump.json', 'database/dump.json')
+
+    if UPLOADS_DIR.is_dir():
+        manifest['includes']['filestore_count'] = _write_filestore_to_zip(zf)
+
+    added, excluded = _add_config_files_to_zip(zf)
+    manifest['includes']['config_files'] = added
+    if excluded:
+        manifest['includes']['config_files_excluded'] = excluded
+
+    if REDIS_DUMP.is_file():
+        zf.write(REDIS_DUMP, 'redis/dump.rdb')
+        manifest['includes']['redis_rdb'] = True
+
+    meili_includes = await _export_meilisearch_to_zip(zf)
+    manifest['includes'].update(meili_includes)
+
+    manifest_bytes = json.dumps(manifest, ensure_ascii=False, indent=2).encode('utf-8')
+    zf.writestr('manifest.json', manifest_bytes)
+
+
+def _maybe_encrypt_backup(
+    zip_bytes: bytes,
+    encrypt_password: str | bytearray | None,
+) -> tuple[bytes, dict] | None:
+    """尝试加密备份，返回 (encrypted_bytes, meta_dict) 或 None（不加密/失败回退）"""
+    effective_password = encrypt_password or get_backup_encryption_password()
+    if not effective_password:
+        return None
+    from fastapi_app.core.backup_encryption import encrypt_backup
+    try:
+        encrypted_bytes, meta_dict = encrypt_backup(zip_bytes, effective_password)
+        if encrypt_password:
+            logger.info("使用用户提供的密码进行备份加密")
+        elif BACKUP_ENCRYPTION_PASSWORD or BACKUP_ENCRYPTION_KEY:
+            logger.info("使用环境变量配置的密钥进行备份加密")
+        else:
+            logger.warning(f"使用生成的随机密钥进行备份加密，密钥已记录在日志中")
+        return encrypted_bytes, meta_dict
+    except (ValueError, TypeError) as e:
+        logger.error(f"备份加密失败: {e}")
+        if BACKUP_ENCRYPTION_ENABLED and not BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED:
+            raise BackupError(f"备份加密失败且不允许回退到未加密备份: {e}") from e
+        logger.warning("加密失败，返回未加密的备份文件")
+        return None
+
+
+async def _do_create_full_backup(
+    db: AsyncSession,
+    user,
+    remark: str,
+    encrypt_password: str | bytearray | None,
+    use_snapshot: bool,
+) -> tuple[bytes, dict]:
+    """create_full_backup 的实际实现，由锁和超时控制包裹。"""
+    snapshot_id = await _acquire_snapshot(db, use_snapshot)
+
     with tempfile.TemporaryDirectory(prefix='erp_backup_') as tmpdir:
         tmpdir_path = Path(tmpdir)
         dump_path = tmpdir_path / 'database' / 'dump.sql.gz'
-        dump_info: dict = {}
-        pg_dump_available = False
-        try:
-            dump_info = await run_pg_dump(dump_path, snapshot_id)
-            pg_dump_available = True
-        except (TimeoutError, OSError, RuntimeError) as e:
-            logger.warning(f'pg_dump 不可用，使用 JSON 格式备份数据库: {e}')
-            json_path = tmpdir_path / 'database'
-            json_path.mkdir(parents=True, exist_ok=True)
-            json_bytes = await execute_legacy_backup_to_bytes(user, remark, db)
-            json_path_file = json_path / 'dump.json'
-            json_path_file.write_bytes(json_bytes)
-            dump_info = {
-                'pg_version': '', 'db_name': os.getenv('DB_NAME', 'erp_system'),
-                'dump_size': len(json_bytes), 'duration_seconds': 0, 'format': 'json',
-            }
+        dump_info, pg_dump_available = await _dump_database_with_fallback(
+            db, user, remark, dump_path, tmpdir_path, snapshot_id
+        )
 
         from fastapi_app.shared_models import Base
-
-        # REV-34: COUNT(*) 用 asyncio.gather() 并发执行
         table_names = [str(t.name) for t in Base.metadata.sorted_tables]
-
-        # 先查询实际存在的表，避免查询不存在的表导致事务失败
         existing_result = await db.execute(
             text("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
         )
         existing_tables = {r[0] for r in existing_result.fetchall()}
-
-        async def _count_table(tname: str) -> tuple[str, int]:
-            if tname not in existing_tables:
-                return tname, -1
-            nested = await db.begin_nested()
-            try:
-                qtname = quote_table(tname)
-                result = await db.execute(text(f'SELECT COUNT(*) FROM {qtname}'))
-                await nested.commit()
-                return tname, result.scalar() or 0
-            except (OSError, ValueError, SQLAlchemyError):
-                await nested.rollback()
-                return tname, -1
-
-        count_results = []
-        for n in table_names:
-            count_results.append(await _count_table(n))
-        table_stats = dict(count_results)
+        table_stats = await _count_table_rows(db, table_names, existing_tables)
 
         checksums = {}
         db_dump_name = 'database/dump.sql.gz' if pg_dump_available else 'database/dump.json'
@@ -1088,156 +1472,22 @@ async def create_full_backup(
         if db_dump_file.is_file():
             checksums[db_dump_name] = sha256_file(db_dump_file)  # REV-14
 
-        fingerprints = {}
-        for table in Base.metadata.sorted_tables:
-            tname = str(table.name)
-            if tname not in get_checksum_tables():
-                continue
-            try:
-                qtname = quote_table(tname)  # REV-08
-                pk_col = [c.name for c in table.primary_key.columns]
-                order_col = pk_col[0] if pk_col else 'id'
-                cols_result = await db.execute(
-                    text('SELECT column_name FROM information_schema.columns WHERE table_name = :tname ORDER BY ordinal_position'),
-                    {'tname': tname}
-                )
-                col_names = [r[0] for r in cols_result.fetchall()]
-                # REV-14: 指纹聚合使用 MD5（数据完整性校验，非安全场景）
-                agg_expr = " || '|' || ".join(f'''COALESCE("{c}"::text, '')''' for c in col_names)
-                fp_result = await db.execute(text(
-                    f'''SELECT MD5(STRING_AGG({agg_expr}, ',' ORDER BY "{order_col}")) FROM {qtname}'''
-                ))
-                fingerprints[tname] = fp_result.scalar() or ''
-            except (SQLAlchemyError, ValueError, OSError) as e:
-                logger.warning(f'计算表 {tname} 指纹失败: {e}')
-                fingerprints[tname] = ''
-
-        manifest = {
-            'version': BACKUP_FORMAT_VERSION, 'type': 'full', 'app_version': '2.0',
-            'pg_version': dump_info.get('pg_version', ''),
-            'db_name': dump_info.get('db_name', ''),
-            'exported_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'exported_by': user.username if hasattr(user, 'username') else str(user.id),
-            'remark': remark,
-            'table_count': len(table_stats),
-            'total_rows': sum(v for v in table_stats.values() if v >= 0),
-            'dump_size': dump_info.get('dump_size', 0),
-            'dump_duration_seconds': dump_info.get('duration_seconds', 0),
-            'snapshot_id': dump_info.get('snapshot_id'),
-            'tables': {k: {'rows': v} for k, v in table_stats.items()},
-            'includes': {}, 'checksums': checksums, 'fingerprints': fingerprints,
-        }
+        fingerprints = await _compute_table_fingerprints(db)
+        manifest = _build_backup_manifest(dump_info, user, remark, table_stats, checksums, fingerprints)
 
         zip_path = tmpdir_path / 'backup.zip'
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=3) as zf:
-            if pg_dump_available and dump_path.is_file():
-                zf.write(dump_path, 'database/dump.sql.gz')
-            elif (tmpdir_path / 'database' / 'dump.json').is_file():
-                zf.write(tmpdir_path / 'database' / 'dump.json', 'database/dump.json')
-
-            if UPLOADS_DIR.is_dir():
-                file_count = 0
-                for fp in sorted(UPLOADS_DIR.rglob('*')):
-                    if fp.is_file():
-                        arcname = f'filestore/{fp.relative_to(UPLOADS_DIR)}'
-                        zf.write(fp, arcname)
-                        file_count += 1
-                manifest['includes']['filestore_count'] = file_count
-
-            config_files_added = []
-            config_files_excluded = []
-            
-            # 备份配置文件，排除敏感文件
-            config_files_to_check = [
-                ('jwt/private.pem', 'jwt/private.pem'),
-                ('jwt/public.pem', 'jwt/public.pem'),
-                ('redis.production.conf', 'redis.production.conf'),
-                ('nginx.conf', 'nginx.conf'),
-                ('.env.production', '.env.production'),
-            ]
-            
-            for file_name, relative_path in config_files_to_check:
-                file_path = CONFIG_DIR / file_name
-                if file_path.is_file():
-                    if should_exclude_file(file_path, relative_path):
-                        config_files_excluded.append(relative_path)
-                        logger.info(f"排除配置文件: {relative_path}")
-                    else:
-                        zf.write(file_path, f'config/{relative_path}')
-                        config_files_added.append(relative_path)
-            
-            manifest['includes']['config_files'] = config_files_added
-            if config_files_excluded:
-                manifest['includes']['config_files_excluded'] = config_files_excluded
-
-            if REDIS_DUMP.is_file():
-                zf.write(REDIS_DUMP, 'redis/dump.rdb')
-                manifest['includes']['redis_rdb'] = True
-
-            try:
-                import httpx
-                async with httpx.AsyncClient() as meili_client:
-                    meili_indexes_resp = await meili_client.get(
-                        f'{MEILI_HOST}/indexes',
-                        headers={'Authorization': f'Bearer {MEILI_MASTER_KEY}'}, timeout=10
-                    )
-                    if meili_indexes_resp.status_code == 200:
-                        meili_indexes_data = meili_indexes_resp.json()
-                        meili_index_names = [idx['uid'] for idx in meili_indexes_data.get('results', [])]
-                        meili_export = {}
-                        for idx_name in meili_index_names:
-                            docs_resp = await meili_client.get(
-                                f'{MEILI_HOST}/indexes/{idx_name}/documents',
-                                headers={'Authorization': f'Bearer {MEILI_MASTER_KEY}'},
-                                params={'limit': 100000}, timeout=60
-                            )
-                            if docs_resp.status_code == 200:
-                                meili_export[idx_name] = docs_resp.json().get('results', [])
-                            settings_resp = await meili_client.get(
-                                f'{MEILI_HOST}/indexes/{idx_name}/settings',
-                                headers={'Authorization': f'Bearer {MEILI_MASTER_KEY}'}, timeout=10
-                            )
-                            if settings_resp.status_code == 200:
-                                meili_export[f'{idx_name}__settings'] = settings_resp.json()
-                        if meili_export:
-                            meili_bytes = json.dumps(meili_export, ensure_ascii=False).encode('utf-8')
-                            zf.writestr('meilisearch/dump.json', meili_bytes)
-                            manifest['includes']['meilisearch_indexes'] = meili_index_names
-                            manifest['includes']['meilisearch_doc_count'] = sum(
-                                len(v) for k, v in meili_export.items() if not k.endswith('__settings')
-                            )
-            except Exception as e:
-                logger.warning('MeiliSearch 索引导出失败（可忽略）: %s', e)
-
-            manifest_bytes = json.dumps(manifest, ensure_ascii=False, indent=2).encode('utf-8')
-            zf.writestr('manifest.json', manifest_bytes)
+            await _write_backup_archive(zf, tmpdir_path, dump_path, pg_dump_available, manifest)
 
         zip_bytes = zip_path.read_bytes()
         manifest['zip_size'] = len(zip_bytes)
 
-        # 默认加密（根据环境变量配置）
-        effective_encryption_password = encrypt_password or get_backup_encryption_password()
-        if effective_encryption_password:
-            from fastapi_app.core.backup_encryption import encrypt_backup, create_meta_file
-            try:
-                encrypted_bytes, meta_dict = encrypt_backup(zip_bytes, effective_encryption_password)
-                # 返回加密后的 bytes，manifest 中标记已加密
-                manifest['encrypted'] = True
-                manifest['encryption'] = meta_dict
-                # 记录加密信息
-                if encrypt_password:
-                    logger.info("使用用户提供的密码进行备份加密")
-                elif BACKUP_ENCRYPTION_PASSWORD or BACKUP_ENCRYPTION_KEY:
-                    logger.info("使用环境变量配置的密钥进行备份加密")
-                else:
-                    logger.warning(f"使用生成的随机密钥进行备份加密，密钥已记录在日志中")
-                return encrypted_bytes, manifest
-            except Exception as e:
-                logger.error(f"备份加密失败: {e}")
-                if BACKUP_ENCRYPTION_ENABLED and not BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED:
-                    raise BackupError(f"备份加密失败且不允许回退到未加密备份: {e}") from e
-                logger.warning("加密失败，返回未加密的备份文件")
-                # 继续返回未加密的备份
+        encrypt_result = _maybe_encrypt_backup(zip_bytes, encrypt_password)
+        if encrypt_result is not None:
+            encrypted_bytes, meta_dict = encrypt_result
+            manifest['encrypted'] = True
+            manifest['encryption'] = meta_dict
+            return encrypted_bytes, manifest
 
     return zip_bytes, manifest
 
@@ -1256,203 +1506,226 @@ async def create_full_backup_to_file(
     如果未指定 output_path，使用临时文件。
     如果 use_snapshot 为 True，则使用数据库快照确保备份一致性。
     如果提供 encrypt_password 或配置了环境变量，则使用 AES-256-GCM 加密备份。
+
+    包含：进程级 asyncio.Lock、数据库 advisory_lock、BACKUP_OPERATION_TIMEOUT 总超时控制。
     """
-    snapshot_id = None
-    if use_snapshot:
+    if _backup_in_progress.locked():
+        raise BackupLockError('已有备份任务正在执行中，请稍后重试')
+
+    db_lock_acquired = await acquire_backup_lock(db)
+    if not db_lock_acquired:
+        raise BackupLockError('其他进程正在执行备份，请稍后重试')
+
+    async with _backup_in_progress:
         try:
-            snapshot_id = await get_postgres_snapshot(db)
-            logger.info(f"获取数据库快照成功: {snapshot_id}")
-        except DatabaseSnapshotError as e:
-            logger.warning(f"无法获取数据库快照，继续无快照备份: {e}")
-            # 降级处理，继续备份但不使用快照
-    
+            return await asyncio.wait_for(
+                _do_create_full_backup_to_file(
+                    db, user, remark, output_path, use_snapshot, encrypt_password
+                ),
+                timeout=BACKUP_OPERATION_TIMEOUT,
+            )
+        except asyncio.TimeoutError as e:
+            logger.error('备份到文件操作超时（%s秒）', BACKUP_OPERATION_TIMEOUT)
+            raise BackupError(f'备份超时（>{BACKUP_OPERATION_TIMEOUT}s），已强制取消') from e
+        finally:
+            await release_backup_lock(db)
+
+
+def _compute_dump_checksums(
+    dump_path: Path, tmpdir_path: Path, pg_dump_available: bool,
+) -> dict:
+    """计算数据库转储文件的 SHA256 校验和"""
+    checksums: dict = {}
+    db_dump_name = 'database/dump.sql.gz' if pg_dump_available else 'database/dump.json'
+    db_dump_file = dump_path if pg_dump_available else tmpdir_path / 'database' / 'dump.json'
+    if db_dump_file.is_file():
+        checksums[db_dump_name] = sha256_file(db_dump_file)
+    return checksums
+
+
+def _build_file_backup_manifest(
+    dump_info: dict, user, remark: str,
+    table_stats: dict[str, int], checksums: dict,
+) -> dict:
+    """构建文件备份的 manifest（不含 fingerprints）"""
+    return {
+        'version': BACKUP_FORMAT_VERSION, 'type': 'full', 'app_version': '2.0',
+        'pg_version': dump_info.get('pg_version', ''),
+        'db_name': dump_info.get('db_name', ''),
+        'exported_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'exported_by': user.username if hasattr(user, 'username') else str(user.id),
+        'remark': remark,
+        'table_count': len(table_stats),
+        'total_rows': sum(v for v in table_stats.values() if v >= 0),
+        'dump_size': dump_info.get('dump_size', 0),
+        'dump_duration_seconds': dump_info.get('duration_seconds', 0),
+        'snapshot_id': dump_info.get('snapshot_id'),
+        'tables': {k: {'rows': v} for k, v in table_stats.items()},
+        'includes': {}, 'checksums': checksums,
+    }
+
+
+async def _build_backup_zip_without_meili(
+    tmpdir_path: Path, dump_path: Path, pg_dump_available: bool, manifest: dict,
+) -> bytes:
+    """构建备份 ZIP 并返回字节内容（不含 MeiliSearch 导出）"""
+    zip_path = tmpdir_path / 'backup.zip'
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=3) as zf:
+        if pg_dump_available and dump_path.is_file():
+            zf.write(dump_path, 'database/dump.sql.gz')
+        elif (tmpdir_path / 'database' / 'dump.json').is_file():
+            zf.write(tmpdir_path / 'database' / 'dump.json', 'database/dump.json')
+
+        if UPLOADS_DIR.is_dir():
+            manifest['includes']['filestore_count'] = _write_filestore_to_zip(zf)
+
+        added, excluded = _add_config_files_to_zip(zf)
+        manifest['includes']['config_files'] = added
+        if excluded:
+            manifest['includes']['config_files_excluded'] = excluded
+
+        if REDIS_DUMP.is_file():
+            zf.write(REDIS_DUMP, 'redis/dump.rdb')
+            manifest['includes']['redis_rdb'] = True
+
+        manifest_bytes = json.dumps(manifest, ensure_ascii=False, indent=2).encode('utf-8')
+        zf.writestr('manifest.json', manifest_bytes)
+
+    return zip_path.read_bytes()
+
+
+def _write_backup_bytes_to_file(
+    zip_bytes: bytes, output_path: Path | None, manifest: dict,
+) -> tuple[Path, dict]:
+    """将备份字节写入目标路径或临时文件"""
+    if output_path:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(zip_bytes)
+        return output_path, manifest
+
+    # 使用临时文件
+    fd, tmp_file = tempfile.mkstemp(suffix='.zip', prefix='erp_backup_')
+    os.close(fd)
+    Path(tmp_file).write_bytes(zip_bytes)
+    return Path(tmp_file), manifest
+
+
+async def _do_create_full_backup_to_file(
+    db: AsyncSession,
+    user,
+    remark: str,
+    output_path: Path | None,
+    use_snapshot: bool,
+    encrypt_password: str | bytearray | None,
+) -> tuple[Path, dict]:
+    """create_full_backup_to_file 的实际实现，由锁和超时控制包裹。"""
+    snapshot_id = await _acquire_snapshot(db, use_snapshot)
+
     with tempfile.TemporaryDirectory(prefix='erp_backup_') as tmpdir:
         tmpdir_path = Path(tmpdir)
         dump_path = tmpdir_path / 'database' / 'dump.sql.gz'
-        dump_info: dict = {}
-        pg_dump_available = False
-        try:
-            dump_info = await run_pg_dump(dump_path, snapshot_id)
-            pg_dump_available = True
-        except (TimeoutError, OSError, RuntimeError) as e:
-            logger.warning(f'pg_dump 不可用，使用 JSON 格式备份数据库: {e}')
-            json_path = tmpdir_path / 'database'
-            json_path.mkdir(parents=True, exist_ok=True)
-            json_bytes = await execute_legacy_backup_to_bytes(user, remark, db)
-            json_path_file = json_path / 'dump.json'
-            json_path_file.write_bytes(json_bytes)
-            dump_info = {
-                'pg_version': '', 'db_name': os.getenv('DB_NAME', 'erp_system'),
-                'dump_size': len(json_bytes), 'duration_seconds': 0, 'format': 'json',
-            }
+        dump_info, pg_dump_available = await _dump_database_with_fallback(
+            db, user, remark, dump_path, tmpdir_path, snapshot_id
+        )
 
         from fastapi_app.shared_models import Base
-
-        # REV-34: COUNT(*) 用 asyncio.gather() 并发执行
         table_names = [str(t.name) for t in Base.metadata.sorted_tables]
-
-        # 先查询实际存在的表，避免查询不存在的表导致事务失败
         existing_result = await db.execute(
             text("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
         )
         existing_tables = {r[0] for r in existing_result.fetchall()}
+        table_stats = await _count_table_rows(db, table_names, existing_tables)
 
-        async def _count_table(tname: str) -> tuple[str, int]:
-            if tname not in existing_tables:
-                return tname, -1
-            nested = await db.begin_nested()
-            try:
-                qtname = quote_table(tname)
-                result = await db.execute(text(f'SELECT COUNT(*) FROM {qtname}'))
-                await nested.commit()
-                return tname, result.scalar() or 0
-            except (OSError, ValueError, SQLAlchemyError):
-                await nested.rollback()
-                return tname, -1
+        checksums = _compute_dump_checksums(dump_path, tmpdir_path, pg_dump_available)
+        manifest = _build_file_backup_manifest(dump_info, user, remark, table_stats, checksums)
 
-        count_results = []
-        for n in table_names:
-            count_results.append(await _count_table(n))
-        table_stats = dict(count_results)
+        zip_bytes = await _build_backup_zip_without_meili(
+            tmpdir_path, dump_path, pg_dump_available, manifest
+        )
 
-        checksums = {}
-        db_dump_name = 'database/dump.sql.gz' if pg_dump_available else 'database/dump.json'
-        db_dump_file = dump_path if pg_dump_available else tmpdir_path / 'database' / 'dump.json'
-        if db_dump_file.is_file():
-            checksums[db_dump_name] = sha256_file(db_dump_file)
+        encrypt_result = _maybe_encrypt_backup(zip_bytes, encrypt_password)
+        if encrypt_result is not None:
+            encrypted_bytes, meta_dict = encrypt_result
+            manifest['encrypted'] = True
+            manifest['encryption'] = meta_dict
+            zip_bytes = encrypted_bytes
 
-        manifest = {
-            'version': BACKUP_FORMAT_VERSION, 'type': 'full', 'app_version': '2.0',
-            'pg_version': dump_info.get('pg_version', ''),
-            'db_name': dump_info.get('db_name', ''),
-            'exported_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'exported_by': user.username if hasattr(user, 'username') else str(user.id),
-            'remark': remark,
-            'table_count': len(table_stats),
-            'total_rows': sum(v for v in table_stats.values() if v >= 0),
-            'dump_size': dump_info.get('dump_size', 0),
-            'dump_duration_seconds': dump_info.get('duration_seconds', 0),
-            'snapshot_id': dump_info.get('snapshot_id'),
-            'tables': {k: {'rows': v} for k, v in table_stats.items()},
-            'includes': {}, 'checksums': checksums,
-        }
-
-        zip_path = tmpdir_path / 'backup.zip'
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=3) as zf:
-            if pg_dump_available and dump_path.is_file():
-                zf.write(dump_path, 'database/dump.sql.gz')
-            elif (tmpdir_path / 'database' / 'dump.json').is_file():
-                zf.write(tmpdir_path / 'database' / 'dump.json', 'database/dump.json')
-
-            if UPLOADS_DIR.is_dir():
-                file_count = 0
-                for fp in sorted(UPLOADS_DIR.rglob('*')):
-                    if fp.is_file():
-                        arcname = f'filestore/{fp.relative_to(UPLOADS_DIR)}'
-                        zf.write(fp, arcname)
-                        file_count += 1
-                manifest['includes']['filestore_count'] = file_count
-
-            config_files_added = []
-            config_files_excluded = []
-            
-            # 备份配置文件，排除敏感文件
-            config_files_to_check = [
-                ('jwt/private.pem', 'jwt/private.pem'),
-                ('jwt/public.pem', 'jwt/public.pem'),
-                ('redis.production.conf', 'redis.production.conf'),
-                ('nginx.conf', 'nginx.conf'),
-                ('.env.production', '.env.production'),
-            ]
-            
-            for file_name, relative_path in config_files_to_check:
-                file_path = CONFIG_DIR / file_name
-                if file_path.is_file():
-                    if should_exclude_file(file_path, relative_path):
-                        config_files_excluded.append(relative_path)
-                        logger.info(f"排除配置文件: {relative_path}")
-                    else:
-                        zf.write(file_path, f'config/{relative_path}')
-                        config_files_added.append(relative_path)
-            
-            manifest['includes']['config_files'] = config_files_added
-            if config_files_excluded:
-                manifest['includes']['config_files_excluded'] = config_files_excluded
-
-            if REDIS_DUMP.is_file():
-                zf.write(REDIS_DUMP, 'redis/dump.rdb')
-                manifest['includes']['redis_rdb'] = True
-
-            manifest_bytes = json.dumps(manifest, ensure_ascii=False, indent=2).encode('utf-8')
-            zf.writestr('manifest.json', manifest_bytes)
-
-        # 读取 ZIP 文件内容
-        zip_bytes = zip_path.read_bytes()
-        
-        # 默认加密（根据环境变量配置）
-        effective_encryption_password = encrypt_password or get_backup_encryption_password()
-        if effective_encryption_password:
-            from fastapi_app.core.backup_encryption import encrypt_backup, create_meta_file
-            try:
-                encrypted_bytes, meta_dict = encrypt_backup(zip_bytes, effective_encryption_password)
-                # 更新 manifest 以标记加密
-                manifest['encrypted'] = True
-                manifest['encryption'] = meta_dict
-                # 记录加密信息
-                if encrypt_password:
-                    logger.info("使用用户提供的密码进行备份加密")
-                elif BACKUP_ENCRYPTION_PASSWORD or BACKUP_ENCRYPTION_KEY:
-                    logger.info("使用环境变量配置的密钥进行备份加密")
-                else:
-                    logger.warning(f"使用生成的随机密钥进行备份加密，密钥已记录在日志中")
-                zip_bytes = encrypted_bytes
-            except Exception as e:
-                logger.error(f"备份加密失败: {e}")
-                if BACKUP_ENCRYPTION_ENABLED and not BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED:
-                    raise BackupError(f"备份加密失败且不允许回退到未加密备份: {e}") from e
-                logger.warning("加密失败，使用未加密的备份文件")
-        
-        # 复制到目标路径
-        if output_path:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_bytes(zip_bytes)
-            manifest['zip_size'] = len(zip_bytes)
-            return output_path, manifest
-        else:
-            # 使用临时文件
-            import tempfile as _tempfile
-            fd, tmp_file = _tempfile.mkstemp(suffix='.zip', prefix='erp_backup_')
-            os.close(fd)
-            Path(tmp_file).write_bytes(zip_bytes)
-            manifest['zip_size'] = len(zip_bytes)
-            return Path(tmp_file), manifest
+        manifest['zip_size'] = len(zip_bytes)
+        return _write_backup_bytes_to_file(zip_bytes, output_path, manifest)
 
 
 # ---------------------------------------------------------------------------
 # 恢复相关内部函数
 # ---------------------------------------------------------------------------
 
-async def _reload_redis() -> bool:
-    """尝试重新加载 Redis 数据"""
+def _build_redis_cli_cmd() -> tuple[list | None, dict | None]:
+    """构建 redis-cli 命令和环境变量，未找到 redis-cli 时返回 (None, None)"""
     redis_cli = shutil.which('redis-cli')
     if not redis_cli:
+        return None, None
+
+    from fastapi_app.core.config import settings
+    cmd = [redis_cli]
+    cli_env = os.environ.copy()
+    redis_url = settings.REDIS_URL
+    if redis_url:
+        from urllib.parse import urlparse
+        parsed = urlparse(redis_url)
+        if parsed.hostname:
+            cmd.extend(['-h', parsed.hostname])
+        if parsed.port:
+            cmd.extend(['-p', str(parsed.port)])
+        if parsed.password:
+            cli_env['REDISCLI_AUTH'] = parsed.password
+    cmd.extend(['DEBUG', 'RELOAD'])
+    return cmd, cli_env
+
+
+async def _try_redis_shutdown_and_restart(cmd: list, cli_env: dict) -> bool:
+    """尝试 SHUTDOWN NOSAVE 后重启 Redis 并 PING 验证"""
+    try:
+        shutdown_cmd = cmd[:-2] + ['SHUTDOWN', 'NOSAVE']
+        shutdown_proc = await asyncio.create_subprocess_exec(
+            *shutdown_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=cli_env
+        )
+        try:
+            await asyncio.wait_for(shutdown_proc.communicate(), timeout=5)
+        except asyncio.TimeoutError:
+            shutdown_proc.kill()
+            await shutdown_proc.wait()
+        logger.info('Redis SHUTDOWN NOSAVE 已发送，等待自动重启')
+        await asyncio.sleep(2)
+
+        ping_cmd = cmd[:-2] + ['PING']
+        for _ in range(5):
+            ping_proc = await asyncio.create_subprocess_exec(
+                *ping_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=cli_env
+            )
+            try:
+                await asyncio.wait_for(ping_proc.communicate(), timeout=3)
+            except asyncio.TimeoutError:
+                ping_proc.kill()
+                await ping_proc.wait()
+                await asyncio.sleep(1)
+                continue
+            if ping_proc.returncode == 0:
+                logger.info('Redis 已重启成功')
+                return True
+            await asyncio.sleep(1)
+        logger.warning('Redis 重启后未能响应 PING')
+        return False
+    except (OSError, asyncio.TimeoutError) as e2:
+        logger.warning('Redis SHUTDOWN 尝试失败: %s', e2)
+        return False
+
+
+async def _reload_redis() -> bool:
+    """尝试重新加载 Redis 数据"""
+    cmd, cli_env = _build_redis_cli_cmd()
+    if cmd is None:
         logger.warning('未找到 redis-cli，无法自动重新加载 Redis')
         return False
     try:
-        from fastapi_app.core.config import settings
-        cmd = [redis_cli]
-        cli_env = os.environ.copy()
-        redis_url = settings.REDIS_URL
-        if redis_url:
-            from urllib.parse import urlparse
-            parsed = urlparse(redis_url)
-            if parsed.hostname:
-                cmd.extend(['-h', parsed.hostname])
-            if parsed.port:
-                cmd.extend(['-p', str(parsed.port)])
-            if parsed.password:
-                cli_env['REDISCLI_AUTH'] = parsed.password
-        cmd.extend(['DEBUG', 'RELOAD'])
         proc = await asyncio.create_subprocess_exec(
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=cli_env
         )
@@ -1468,39 +1741,7 @@ async def _reload_redis() -> bool:
             return True
         stderr_text = stderr.decode(errors='replace')
         logger.warning('Redis DEBUG RELOAD 失败: %s', stderr_text)
-        try:
-            shutdown_cmd = cmd[:-2] + ['SHUTDOWN', 'NOSAVE']
-            shutdown_proc = await asyncio.create_subprocess_exec(
-                *shutdown_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=cli_env
-            )
-            try:
-                await asyncio.wait_for(shutdown_proc.communicate(), timeout=5)
-            except asyncio.TimeoutError:
-                shutdown_proc.kill()
-                await shutdown_proc.wait()
-            logger.info('Redis SHUTDOWN NOSAVE 已发送，等待自动重启')
-            await asyncio.sleep(2)
-            ping_cmd = cmd[:-2] + ['PING']
-            for _ in range(5):
-                ping_proc = await asyncio.create_subprocess_exec(
-                    *ping_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=cli_env
-                )
-                try:
-                    await asyncio.wait_for(ping_proc.communicate(), timeout=3)
-                except asyncio.TimeoutError:
-                    ping_proc.kill()
-                    await ping_proc.wait()
-                    await asyncio.sleep(1)
-                    continue
-                if ping_proc.returncode == 0:
-                    logger.info('Redis 已重启成功')
-                    return True
-                await asyncio.sleep(1)
-            logger.warning('Redis 重启后未能响应 PING')
-            return False
-        except (OSError, asyncio.TimeoutError) as e2:
-            logger.warning('Redis SHUTDOWN 尝试失败: %s', e2)
-            return False
+        return await _try_redis_shutdown_and_restart(cmd, cli_env)
     except (OSError, asyncio.TimeoutError) as e:
         logger.warning('Redis 重新加载失败: %s', e)
         return False
@@ -1584,6 +1825,39 @@ async def restore_redis_rdb(zf: zipfile.ZipFile) -> dict:
         return {'status': 'error', 'error': f'Redis RDB 恢复失败: {e}'}
 
 
+async def _restore_meili_index(
+    meili_client, idx_name: str, data: list, meili_data: dict,
+) -> tuple[bool, str | None]:
+    """恢复单个 MeiliSearch 索引，返回 (成功, 错误信息或None)"""
+    settings_key = f'{idx_name}__settings'
+    try:
+        create_resp = await meili_client.post(
+            f'{MEILI_HOST}/indexes',
+            headers={'Authorization': f'Bearer {MEILI_MASTER_KEY}'},
+            json={'uid': idx_name, 'primaryKey': 'id'}, timeout=10
+        )
+        if create_resp.status_code not in (200, 201, 409):
+            return False, f'{idx_name}: 创建索引失败 ({create_resp.status_code})'
+        if settings_key in meili_data:
+            await meili_client.patch(
+                f'{MEILI_HOST}/indexes/{idx_name}/settings',
+                headers={'Authorization': f'Bearer {MEILI_MASTER_KEY}'},
+                json=meili_data[settings_key], timeout=10
+            )
+        if data:
+            docs_resp = await meili_client.post(
+                f'{MEILI_HOST}/indexes/{idx_name}/documents',
+                headers={'Authorization': f'Bearer {MEILI_MASTER_KEY}'},
+                json=data, timeout=60
+            )
+            if docs_resp.status_code in (200, 201, 202):
+                return True, None
+            return False, f'{idx_name}: 文档导入失败 ({docs_resp.status_code})'
+        return True, None
+    except (OSError, ValueError) as e:
+        return False, f'{idx_name}: {e}'
+
+
 async def restore_meilisearch(zf: zipfile.ZipFile) -> dict:
     """恢复 MeiliSearch 索引"""
     try:
@@ -1604,36 +1878,11 @@ async def restore_meilisearch(zf: zipfile.ZipFile) -> dict:
             if not idx_name.replace('_', '').replace('-', '').isalnum():
                 errors.append(f'{idx_name}: 索引名不合法，已跳过')
                 continue
-            settings_key = f'{idx_name}__settings'
-            try:
-                create_resp = await meili_client.post(
-                    f'{MEILI_HOST}/indexes',
-                    headers={'Authorization': f'Bearer {MEILI_MASTER_KEY}'},
-                    json={'uid': idx_name, 'primaryKey': 'id'}, timeout=10
-                )
-                if create_resp.status_code not in (200, 201, 409):
-                    errors.append(f'{idx_name}: 创建索引失败 ({create_resp.status_code})')
-                    continue
-                if settings_key in meili_data:
-                    await meili_client.patch(
-                        f'{MEILI_HOST}/indexes/{idx_name}/settings',
-                        headers={'Authorization': f'Bearer {MEILI_MASTER_KEY}'},
-                        json=meili_data[settings_key], timeout=10
-                    )
-                if data:
-                    docs_resp = await meili_client.post(
-                        f'{MEILI_HOST}/indexes/{idx_name}/documents',
-                        headers={'Authorization': f'Bearer {MEILI_MASTER_KEY}'},
-                        json=data, timeout=60
-                    )
-                    if docs_resp.status_code in (200, 201, 202):
-                        restored_indexes.append(idx_name)
-                    else:
-                        errors.append(f'{idx_name}: 文档导入失败 ({docs_resp.status_code})')
-                else:
-                    restored_indexes.append(idx_name)
-            except (OSError, ValueError) as e:
-                errors.append(f'{idx_name}: {e}')
+            success, error = await _restore_meili_index(meili_client, idx_name, data, meili_data)
+            if success:
+                restored_indexes.append(idx_name)
+            elif error:
+                errors.append(error)
     return {'status': 'ok' if not errors else 'partial', 'restored_indexes': restored_indexes, 'errors': errors}
 
 
@@ -1652,7 +1901,7 @@ async def create_pre_restore_backup(db: AsyncSession) -> dict:
         filepath.write_bytes(zip_bytes)
         cleanup_pre_restore_backups()
         return {'success': True, 'filename': filename, 'filepath': str(filepath), 'size': len(zip_bytes)}
-    except Exception as e:
+    except Exception as e:  # defensive: pre-restore safety backup must not block restore
         logger.warning(f'创建恢复前安全备份失败（不阻塞恢复）: {e}')
         return {'success': False, 'error': str(e)}
 
@@ -1673,44 +1922,37 @@ def cleanup_pre_restore_backups():
             logger.warning(f'清理旧安全备份失败: {old_backup.name}: {e}')
 
 
-async def restore_database_via_psql(zf: zipfile.ZipFile, db: AsyncSession, task_id: str = None) -> dict:
-    """通过 psql 从 dump.sql.gz 恢复数据库"""
-    import time as time_mod
-    from fastapi_app.core.backup_progress import update_progress as _upd_prog
+async def _read_and_decompress_dump(zf: zipfile.ZipFile, report) -> bytes:
+    """从 ZIP 中读取并解压 database/dump.sql.gz，返回解压后的 SQL 字节。"""
+    await report(0.0, '读取备份文件...')
+    await asyncio.sleep(0)
 
-    async def _report(sub: float, detail: str):
-        if task_id:
-            await _upd_prog(task_id, 'restore_db', sub, detail)
-
-    # 分步读取和解压，添加进度报告
-    await _report(0.0, '读取备份文件...')
-    await asyncio.sleep(0)  # 让出控制权，确保前端能收到更新
-
-    # 获取压缩文件大小用于进度计算
     try:
         info = zf.getinfo('database/dump.sql.gz')
         compressed_size = info.file_size
     except KeyError:
         compressed_size = 0
 
-    # 读取压缩数据
-    await _report(0.005, f'读取压缩数据 ({compressed_size // 1024 // 1024}MB)...')
+    await report(0.005, f'读取压缩数据 ({compressed_size // 1024 // 1024}MB)...')
     await asyncio.sleep(0)
     dump_gz = zf.read('database/dump.sql.gz')
 
-    # 解压数据
-    await _report(0.01, '解压数据库备份...')
+    await report(0.01, '解压数据库备份...')
     await asyncio.sleep(0)
     dump_sql = gzip.decompress(dump_gz)
-    del dump_gz  # 释放压缩数据内存
+    del dump_gz
 
     if not dump_sql or not dump_sql.strip():
-        return {'status': 'error', 'error': '数据库备份文件为空，无法恢复'}
+        raise ValueError('数据库备份文件为空，无法恢复')
 
     sql_size_mb = len(dump_sql) // 1024 // 1024
-    await _report(0.015, f'解压完成 ({sql_size_mb}MB)，准备恢复...')
+    await report(0.015, f'解压完成 ({sql_size_mb}MB)，准备恢复...')
     await asyncio.sleep(0)
+    return dump_sql
 
+
+def _get_db_config() -> tuple[str, str, str, str, dict]:
+    """返回 (db_host, db_port, db_user, db_name, env) 元组。"""
     db_host = os.getenv('DB_HOST', 'localhost')
     db_port = os.getenv('DB_PORT', '5432')
     db_user = os.getenv('DB_USER', 'erp_app')
@@ -1720,9 +1962,11 @@ async def restore_database_via_psql(zf: zipfile.ZipFile, db: AsyncSession, task_
     db_password = os.getenv('DB_PASSWORD', '')
     env = os.environ.copy()
     env['PGPASSWORD'] = db_password
+    return db_host, db_port, db_user, db_name, env
 
-    await _report(0.02, '关闭应用数据库连接')
-    await asyncio.sleep(0)
+
+async def _close_db_connections(db: AsyncSession) -> None:
+    """关闭应用数据库会话和连接池。"""
     try:
         await db.close()
     except (OSError, SQLAlchemyError):
@@ -1734,17 +1978,22 @@ async def restore_database_via_psql(zf: zipfile.ZipFile, db: AsyncSession, task_
     except (OSError, ValueError):
         logger.warning('psql前释放连接池失败')
 
-    await _report(0.06, '等待活跃连接释放')
+
+async def _wait_and_terminate_connections(
+    db_host: str, db_port: str, db_user: str, db_name: str, env: dict, report
+) -> None:
+    """等待活跃连接释放，然后终止残留连接。"""
+    await report(0.06, '等待活跃连接释放')
     await asyncio.sleep(0)
     for _retry in range(3):
         await asyncio.sleep(1)
         try:
             check_proc = await asyncio.create_subprocess_exec(
-                'psql', '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres', '-t', '-c',
-                f"SELECT COUNT(*) FROM pg_stat_activity WHERE datname = '{db_name}';",
+                'psql', '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres', '-t',
+                '-v', f'db_name={db_name}', '-c',
+                "SELECT COUNT(*) FROM pg_stat_activity WHERE datname = :'db_name';",
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env
             )
-            # 添加超时防止 psql 命令挂起
             try:
                 check_stdout, _ = await asyncio.wait_for(check_proc.communicate(), timeout=10)
             except asyncio.TimeoutError:
@@ -1760,15 +2009,15 @@ async def restore_database_via_psql(zf: zipfile.ZipFile, db: AsyncSession, task_
         except (TimeoutError, OSError, ValueError) as e:
             logger.warning(f'检查活跃连接失败: {e}，重试 {_retry + 1}/3')
 
-    await _report(0.10, '终止残留数据库连接')
+    await report(0.10, '终止残留数据库连接')
     await asyncio.sleep(0)
     try:
         term_proc = await asyncio.create_subprocess_exec(
-            'psql', '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres', '-c',
-            f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{db_name}' AND pid <> pg_backend_pid();",
+            'psql', '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres',
+            '-v', f'db_name={db_name}', '-c',
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'db_name' AND pid <> pg_backend_pid();",
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env
-        )  # nosec
-        # 添加超时防止 psql 命令挂起
+        )  # nosec B603 — pg_ctl 受控调用，db_name 经白名单校验
         try:
             await asyncio.wait_for(term_proc.wait(), timeout=30)
         except asyncio.TimeoutError:
@@ -1778,7 +2027,12 @@ async def restore_database_via_psql(zf: zipfile.ZipFile, db: AsyncSession, task_
     except (TimeoutError, OSError, ValueError) as e:
         logger.warning(f'终止现有连接失败: {e}')
 
-    await _report(0.14, '重建数据库')
+
+async def _rebuild_database(
+    db_host: str, db_port: str, db_user: str, db_name: str, env: dict, report
+) -> dict | None:
+    """DROP + CREATE 数据库。成功返回 None，失败返回错误 dict。"""
+    await report(0.14, '重建数据库')
     await asyncio.sleep(0)
     try:
         pg_major = 13
@@ -1820,7 +2074,7 @@ async def restore_database_via_psql(zf: zipfile.ZipFile, db: AsyncSession, task_
             'psql', '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres', '-c',
             f'CREATE DATABASE "{db_name}" OWNER "{db_user}";',
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env
-        )  # nosec
+        )  # nosec B603 — pg_ctl 受控调用，db_name 经白名单校验
         try:
             _, stderr = await asyncio.wait_for(create_proc.communicate(), timeout=30)
         except asyncio.TimeoutError:
@@ -1829,14 +2083,78 @@ async def restore_database_via_psql(zf: zipfile.ZipFile, db: AsyncSession, task_
             logger.warning('CREATE DATABASE 超时')
             stderr = b'Timeout'
         if create_proc.returncode != 0:
-            logger.warning(f"CREATE DATABASE: {stderr.decode(errors='replace')}")  # nosec
+            logger.warning(f"CREATE DATABASE: {stderr.decode(errors='replace')}")  # nosec B603 — stderr 解码用于日志
     except (TimeoutError, OSError, ValueError) as e:
         return {'status': 'error', 'error': f'数据库重建失败: {e}'}
+    return None
 
+
+async def _stream_psql_io(proc, dump_sql: bytes, psql_start_time: float, report) -> tuple[bytes, bytes]:
+    """管理 psql 子进程的 stdin 写入和 stdout/stderr 读取，返回 (stdout, stderr)"""
+    import time as time_mod
+    total_size = len(dump_sql)
+    written = 0
+    chunk_size = 256 * 1024
+
+    async def _write_stdin():
+        nonlocal written
+        while written < total_size:
+            end = min(written + chunk_size, total_size)
+            proc.stdin.write(dump_sql[written:end])
+            await proc.stdin.drain()
+            written = end
+            sub = 0.20 + 0.30 * (written / total_size)
+            elapsed = int(time_mod.monotonic() - psql_start_time)
+            await report(sub, f'写入数据 {written * 100 // total_size}% ({elapsed}s)')
+        proc.stdin.close()
+
+    async def _read_stream(stream, chunks):
+        while True:
+            chunk = await stream.read(65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+
+    stdout_chunks = []
+    stderr_chunks = []
+    write_task = asyncio.create_task(_write_stdin())
+    read_out_task = asyncio.create_task(_read_stream(proc.stdout, stdout_chunks))
+    read_err_task = asyncio.create_task(_read_stream(proc.stderr, stderr_chunks))
+
+    await asyncio.wait_for(write_task, timeout=600)
+
+    while not read_out_task.done() or not read_err_task.done():
+        await asyncio.sleep(2)
+        elapsed = int(time_mod.monotonic() - psql_start_time)
+        await report(0.70, f'等待 psql 完成... ({elapsed}s)')
+
+    await asyncio.wait_for(asyncio.gather(read_out_task, read_err_task), timeout=600)
+    await proc.wait()
+
+    return b''.join(stdout_chunks), b''.join(stderr_chunks)
+
+
+def _classify_psql_result(returncode: int, stderr_text: str) -> dict:
+    """根据 psql 返回码和 stderr 文本分类结果"""
+    error_count = stderr_text.lower().count('error:')
+    if returncode != 0:
+        logger.warning(f'psql restore failed (returncode={returncode}): {stderr_text[:2000]}')
+        return {'status': 'error', 'message': '数据库恢复失败', 'errors': stderr_text[:2000]}
+    if error_count > 0:
+        logger.warning(f'psql restore completed with {error_count} errors: {stderr_text[:2000]}')
+        return {'status': 'partial', 'message': f'数据库已恢复，但有 {error_count} 个语句执行失败', 'errors': stderr_text[:2000]}
+    return {'status': 'ok', 'message': '数据库恢复成功'}
+
+
+async def _run_psql_restore(
+    dump_sql: bytes, db_host: str, db_port: str, db_user: str, db_name: str, env: dict, report
+) -> dict:
+    """通过 psql 导入 SQL 数据并返回结果 dict。"""
+    import time as time_mod
     psql_start_time = time_mod.monotonic()
 
     try:
-        await _report(0.20, '开始导入数据库数据')
+        await report(0.20, '开始导入数据库数据')
         await asyncio.sleep(0)
         proc = await asyncio.create_subprocess_exec(
             'psql', '-h', db_host, '-p', db_port, '-U', db_user, '-d', db_name,
@@ -1845,67 +2163,56 @@ async def restore_database_via_psql(zf: zipfile.ZipFile, db: AsyncSession, task_
             stderr=asyncio.subprocess.PIPE, env=env
         )
         try:
-            total_size = len(dump_sql)
-            written = 0
-            chunk_size = 256 * 1024
-
-            async def _write_stdin():
-                nonlocal written
-                while written < total_size:
-                    end = min(written + chunk_size, total_size)
-                    proc.stdin.write(dump_sql[written:end])
-                    await proc.stdin.drain()
-                    written = end
-                    sub = 0.20 + 0.30 * (written / total_size)
-                    elapsed = int(time_mod.monotonic() - psql_start_time)
-                    await _report(sub, f'写入数据 {written * 100 // total_size}% ({elapsed}s)')
-                proc.stdin.close()
-
-            async def _read_stream(stream, chunks):
-                while True:
-                    chunk = await stream.read(65536)
-                    if not chunk:
-                        break
-                    chunks.append(chunk)
-
-            stdout_chunks = []
-            stderr_chunks = []
-            write_task = asyncio.create_task(_write_stdin())
-            read_out_task = asyncio.create_task(_read_stream(proc.stdout, stdout_chunks))
-            read_err_task = asyncio.create_task(_read_stream(proc.stderr, stderr_chunks))
-
-            await asyncio.wait_for(write_task, timeout=600)
-
-            while not read_out_task.done() or not read_err_task.done():
-                await asyncio.sleep(2)
-                elapsed = int(time_mod.monotonic() - psql_start_time)
-                await _report(0.70, f'等待 psql 完成... ({elapsed}s)')
-
-            await asyncio.wait_for(asyncio.gather(read_out_task, read_err_task), timeout=600)
-            await proc.wait()
-
-            stdout = b''.join(stdout_chunks)
-            stderr = b''.join(stderr_chunks)
+            _stdout, stderr = await _stream_psql_io(proc, dump_sql, psql_start_time, report)  # noqa: F841 - _stdout 调试用
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
             return {'status': 'error', 'error': '数据库恢复超时（超过 600 秒），进程已终止'}
 
         stderr_text = stderr.decode(errors='replace')
-        error_count = stderr_text.lower().count('error:')
-        await _report(0.95, '数据导入完成，验证结果')
-
-        if proc.returncode != 0:
-            logger.warning(f'psql restore failed (returncode={proc.returncode}): {stderr_text[:2000]}')
-            return {'status': 'error', 'message': '数据库恢复失败', 'errors': stderr_text[:2000]}
-        if error_count > 0:
-            logger.warning(f'psql restore completed with {error_count} errors: {stderr_text[:2000]}')
-            return {'status': 'partial', 'message': f'数据库已恢复，但有 {error_count} 个语句执行失败', 'errors': stderr_text[:2000]}
-        return {'status': 'ok', 'message': '数据库恢复成功'}
+        await report(0.95, '数据导入完成，验证结果')
+        return _classify_psql_result(proc.returncode, stderr_text)
     except FileNotFoundError:
         return {'status': 'error', 'error': 'psql 命令未找到，请确保 PostgreSQL 客户端工具已安装'}
     except (TimeoutError, OSError, ValueError) as e:
         return {'status': 'error', 'error': f'数据库恢复失败: {e}'}
+
+
+async def restore_database_via_psql(zf: zipfile.ZipFile, db: AsyncSession, task_id: str | None = None) -> dict:
+    """通过 psql 从 dump.sql.gz 恢复数据库"""
+    from fastapi_app.core.backup_progress import update_progress as _upd_prog
+
+    async def _report(sub: float, detail: str):
+        if task_id:
+            await _upd_prog(task_id, 'restore_db', sub, detail)
+
+    # 1. 读取并解压 dump
+    try:
+        dump_sql = await _read_and_decompress_dump(zf, _report)
+    except ValueError as e:
+        return {'status': 'error', 'error': str(e)}
+
+    # 2. 获取数据库配置
+    try:
+        db_host, db_port, db_user, db_name, env = _get_db_config()
+    except ValueError as e:
+        return {'status': 'error', 'error': str(e)}
+
+    # 3. 关闭应用数据库连接
+    await _report(0.02, '关闭应用数据库连接')
+    await asyncio.sleep(0)
+    await _close_db_connections(db)
+
+    # 4. 等待并终止残留连接
+    await _wait_and_terminate_connections(db_host, db_port, db_user, db_name, env, _report)
+
+    # 5. 重建数据库
+    rebuild_result = await _rebuild_database(db_host, db_port, db_user, db_name, env, _report)
+    if rebuild_result is not None:
+        return rebuild_result
+
+    # 6. 执行 psql 恢复
+    return await _run_psql_restore(dump_sql, db_host, db_port, db_user, db_name, env, _report)
 
 
 async def restore_database_via_psql_from_bytes(zip_bytes: bytes, db: AsyncSession) -> dict:
@@ -1919,7 +2226,7 @@ async def restore_database_via_psql_from_bytes(zip_bytes: bytes, db: AsyncSessio
     return await restore_database_via_psql(zf, db)
 
 
-async def restore_database_from_json(zf: zipfile.ZipFile, db: AsyncSession, task_id: str = None) -> dict:
+async def restore_database_from_json(zf: zipfile.ZipFile, db: AsyncSession, task_id: str | None = None) -> dict:
     """从 dump.json 恢复数据库（Legacy JSON 格式）"""
     try:
         json_bytes = zf.read('database/dump.json')
@@ -1937,10 +2244,144 @@ async def restore_database_from_json(zf: zipfile.ZipFile, db: AsyncSession, task
     }
 
 
-async def restore_legacy_json(backup_data: dict, db: AsyncSession, task_id: str = None) -> dict:
-    """从 Legacy JSON 格式备份恢复数据库 (v1.0)"""
+async def _disable_fk_constraints(db: AsyncSession) -> bool:
+    """禁用外键约束（设置 replication_role = 'replica'），返回是否成功"""
+    try:
+        is_super = await db.execute(text("SELECT usesuper FROM pg_user WHERE usename = current_user"))
+        if is_super.scalar():
+            await db.execute(text("SET session_replication_role = 'replica'"))
+            return True
+        logger.info('当前用户非superuser，跳过禁用外键约束（将使用ON CONFLICT处理冲突）')
+    except (SQLAlchemyError, OSError) as e:
+        logger.warning(f'禁用外键约束失败: {e}')
+    return False
+
+
+async def _clear_existing_tables(db: AsyncSession, backup_data: dict) -> None:
+    """清空备份数据中涉及的现有表数据（按依赖逆序）"""
     from fastapi_app.shared_models import Base
+    for table in reversed(Base.metadata.sorted_tables):
+        table_name = str(table.name)
+        if table_name not in backup_data.get('tables', {}):
+            continue
+        qtname = quote_table(table_name)  # REV-08
+        nested = await db.begin_nested()
+        try:
+            await db.execute(text(f'DELETE FROM {qtname}'))  # nosec B608 — qtname 经 quote_table 白名单校验
+            await nested.commit()
+        except (SQLAlchemyError, ValueError, OSError) as e:
+            await nested.rollback()
+            logger.warning(f'清空表 {table_name} 失败（外键约束）: {e}')
+
+
+async def _restore_table_batch(
+    db: AsyncSession, qtname: str, table, columns: list, batch: list,
+    batch_start: int, type_map: dict, table_col_names: set, batch_size: int,
+) -> tuple[int, tuple[int, str] | None]:
+    """恢复单个批次的数据，返回 (插入行数, (批次号, 错误信息) 或 None)"""
+    inserted = 0
+    nested = await db.begin_nested()
+    # 预计算不随行变化的列信息
+    candidate_cols = [c for c in columns if c in type_map and c in table_col_names]
+    pk_cols = [c.name for c in table.primary_key.columns]
+    try:
+        for offset, row in enumerate(batch):
+            idx = batch_start + offset
+            if not row:
+                continue
+            valid_cols = [c for c in candidate_cols if c in row]
+            if not valid_cols:
+                continue
+            col_str = ', '.join(f'"{c}"' for c in valid_cols)
+            val_str = ', '.join(f':{c}__row{idx}' for c in valid_cols)
+            params = {}
+            for c in valid_cols:
+                raw_val = row[c]
+                col_type = type_map.get(c)
+                deserialized = deserialize_value(raw_val, col_type) if col_type else raw_val
+                params[f'{c}__row{idx}'] = deserialized
+            update_cols = [c for c in valid_cols if c not in pk_cols]
+            if pk_cols and update_cols:
+                update_str = ', '.join(f'"{c}" = EXCLUDED."{c}"' for c in update_cols)
+                await db.execute(text(
+                    f'INSERT INTO {qtname} ({col_str}) VALUES ({val_str}) ON CONFLICT ({", ".join(pk_cols)}) DO UPDATE SET {update_str}'
+                ), params)
+            else:
+                await db.execute(text(
+                    f'INSERT INTO {qtname} ({col_str}) VALUES ({val_str}) ON CONFLICT DO NOTHING'
+                ), params)
+            inserted += 1
+        await nested.commit()
+    except (SQLAlchemyError, ValueError, TypeError) as e:
+        await nested.rollback()
+        return inserted, (batch_start // batch_size + 1, str(e))
+    return inserted, None
+
+
+async def _restore_table_data(
+    db: AsyncSession, table, table_data: dict,
+) -> tuple[int, list[str]]:
+    """恢复单个表的数据，返回 (插入行数, 批次错误列表)"""
+    table_name = str(table.name)
+    columns = table_data.get('columns', [])
+    rows = table_data.get('rows', [])
+    table_col_names = {c.name for c in table.columns}
+    type_map = build_column_type_map(table)
+    batch_size = 500
+    inserted = 0
+    batch_errors: list[str] = []
+    qtname = quote_table(table_name)  # REV-08
+
+    for batch_start in range(0, len(rows), batch_size):
+        batch = rows[batch_start:batch_start + batch_size]
+        batch_inserted, error_info = await _restore_table_batch(
+            db, qtname, table, columns, batch, batch_start, type_map, table_col_names, batch_size,
+        )
+        inserted += batch_inserted
+        if error_info:
+            batch_num, error_str = error_info
+            batch_errors.append(f'批次 {batch_num}: {error_str}')
+            logger.warning(f'恢复表 {table_name} 批次 {batch_num} 失败: {error_str}')
+    return inserted, batch_errors
+
+
+async def _re_enable_fk_constraints(db: AsyncSession, replication_role_set: bool) -> None:
+    """重新启用外键约束"""
+    if not replication_role_set:
+        return
+    try:
+        await db.execute(text("SET session_replication_role = 'origin'"))
+    except (SQLAlchemyError, OSError) as e:
+        logger.warning(f'重新启用外键约束失败: {e}')
+
+
+async def _verify_after_legacy_restore(db: AsyncSession, backup_data: dict) -> dict:
+    """恢复后验证数据完整性"""
+    manifest_tables = {
+        tname: {'rows': td.get('count', len(td.get('rows', [])))}
+        for tname, td in backup_data.get('tables', {}).items()
+    }
+    from fastapi_app.core.database import _AsyncSessionLocal
+    verify_db = None
+    if _AsyncSessionLocal is not None:
+        verify_db = _AsyncSessionLocal()
+    try:
+        return await verify_restore(verify_db or db, manifest_tables)
+    except (SQLAlchemyError, ValueError, OSError) as e:
+        logger.warning(f'恢复后验证失败: {e}')
+        return {'overall_pass': False, 'error': str(e)}
+    finally:
+        if verify_db is not None:
+            try:
+                await verify_db.close()
+            except (OSError, ValueError, SQLAlchemyError):
+                pass
+
+
+async def restore_legacy_json(backup_data: dict, db: AsyncSession, task_id: str | None = None) -> dict:
+    """从 Legacy JSON 格式备份恢复数据库 (v1.0)"""
     from fastapi_app.core.backup_progress import update_progress as _upd_prog
+    from fastapi_app.shared_models import Base
 
     async def _report(sub: float, detail: str = ''):
         if task_id:
@@ -1950,85 +2391,20 @@ async def restore_legacy_json(backup_data: dict, db: AsyncSession, task_id: str 
     results = {}
     total_inserted = 0
     errors = []
-    replication_role_set = False
-
-    # 计算需要恢复的表数量用于进度计算
     tables_to_restore = [t for t in Base.metadata.sorted_tables if str(t.name) in backup_data.get('tables', {})]
     total_tables = len(tables_to_restore)
 
     try:
-        try:
-            is_super = await db.execute(text("SELECT usesuper FROM pg_user WHERE usename = current_user"))
-            if is_super.scalar():
-                await db.execute(text("SET session_replication_role = 'replica'"))
-                replication_role_set = True
-            else:
-                logger.info('当前用户非superuser，跳过禁用外键约束（将使用ON CONFLICT处理冲突）')
-        except (SQLAlchemyError, OSError) as e:
-            logger.warning(f'禁用外键约束失败: {e}')
+        replication_role_set = await _disable_fk_constraints(db)
 
         await _report(0.05, '清空现有数据...')
-        for table in reversed(Base.metadata.sorted_tables):
-            table_name = str(table.name)
-            if table_name not in backup_data.get('tables', {}):
-                continue
-            qtname = quote_table(table_name)  # REV-08
-            nested = await db.begin_nested()
-            try:
-                await db.execute(text(f'DELETE FROM {qtname}'))  # nosec
-                await nested.commit()
-            except (SQLAlchemyError, ValueError, OSError) as e:
-                await nested.rollback()
-                logger.warning(f'清空表 {table_name} 失败（外键约束）: {e}')
+        await _clear_existing_tables(db, backup_data)
 
         processed_tables = 0
         for table in tables_to_restore:
             table_name = str(table.name)
             table_data = backup_data['tables'][table_name]
-            columns = table_data.get('columns', [])
-            rows = table_data.get('rows', [])
-            table_col_names = {c.name for c in table.columns}
-            type_map = build_column_type_map(table)
-            BATCH_SIZE = 500
-            inserted = 0
-            batch_errors = []
-            qtname = quote_table(table_name)  # REV-08
-            for batch_start in range(0, len(rows), BATCH_SIZE):
-                batch = rows[batch_start:batch_start + BATCH_SIZE]
-                nested = await db.begin_nested()
-                try:
-                    for offset, row in enumerate(batch):
-                        idx = batch_start + offset
-                        if not row:
-                            continue
-                        valid_cols = [c for c in columns if c in type_map and c in row and c in table_col_names]
-                        if not valid_cols:
-                            continue
-                        col_str = ', '.join(f'"{c}"' for c in valid_cols)
-                        val_str = ', '.join(f':{c}__row{idx}' for c in valid_cols)
-                        params = {}
-                        for c in valid_cols:
-                            raw_val = row[c]
-                            col_type = type_map.get(c)
-                            deserialized = deserialize_value(raw_val, col_type) if col_type else raw_val
-                            params[f'{c}__row{idx}'] = deserialized
-                        pk_cols = [c.name for c in table.primary_key.columns]
-                        update_cols = [c for c in valid_cols if c not in pk_cols]
-                        if pk_cols and update_cols:
-                            update_str = ', '.join(f'"{c}" = EXCLUDED."{c}"' for c in update_cols)
-                            await db.execute(text(
-                                f'INSERT INTO {qtname} ({col_str}) VALUES ({val_str}) ON CONFLICT ({", ".join(pk_cols)}) DO UPDATE SET {update_str}'
-                            ), params)
-                        else:
-                            await db.execute(text(
-                                f'INSERT INTO {qtname} ({col_str}) VALUES ({val_str}) ON CONFLICT DO NOTHING'
-                            ), params)
-                        inserted += 1
-                    await nested.commit()
-                except (SQLAlchemyError, ValueError, TypeError) as e:
-                    await nested.rollback()
-                    batch_errors.append(f'批次 {batch_start // BATCH_SIZE + 1}: {e}')
-                    logger.warning(f'恢复表 {table_name} 批次 {batch_start // BATCH_SIZE + 1} 失败: {e}')
+            inserted, batch_errors = await _restore_table_data(db, table, table_data)
             if batch_errors:
                 results[table_name] = {'status': 'partial', 'inserted': inserted, 'batch_errors': batch_errors}
                 errors.append(f'{table_name}: {len(batch_errors)} 个批次失败')
@@ -2041,45 +2417,21 @@ async def restore_legacy_json(backup_data: dict, db: AsyncSession, task_id: str 
             sub_progress = 0.1 + 0.8 * (processed_tables / total_tables) if total_tables > 0 else 0.9
             await _report(sub_progress, f'已恢复 {processed_tables}/{total_tables} 表 ({table_name}: {inserted}条)')
 
-        await db.commit()
-        if replication_role_set:
-            try:
-                await db.execute(text("SET session_replication_role = 'origin'"))
-            except (SQLAlchemyError, OSError) as e:
-                logger.warning(f'重新启用外键约束失败: {e}')
+        await db.flush()
+        await _re_enable_fk_constraints(db, replication_role_set)
 
+        # 恢复后清除缓存
         try:
-            from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
-            await invalidate_related_caches(CacheDomain.ALL)
+            from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
+            await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ALL)
         except (RuntimeError, OSError, ValueError) as e:
             logger.warning(f'恢复后缓存清除失败: {e}')
         try:
-            from fastapi_app.core.purchase_cache import invalidate_purchase_caches
-            invalidate_purchase_caches()
+            await cache_mgr.invalidate(InvalidationStrategy.PURCHASE)
         except (RuntimeError, OSError, ValueError) as e:
             logger.warning(f'恢复后采购缓存清除失败: {e}')
 
-        verification = {'overall_pass': True}
-        try:
-            manifest_tables = {
-                tname: {'rows': td.get('count', len(td.get('rows', [])))}
-                for tname, td in backup_data.get('tables', {}).items()
-            }
-            from fastapi_app.core.database import _AsyncSessionLocal
-            verify_db = None
-            if _AsyncSessionLocal is not None:
-                verify_db = _AsyncSessionLocal()
-            try:
-                verification = await verify_restore(verify_db or db, manifest_tables)
-            finally:
-                if verify_db is not None:
-                    try:
-                        await verify_db.close()
-                    except (OSError, ValueError, SQLAlchemyError):
-                        pass
-        except (SQLAlchemyError, ValueError, OSError) as e:
-            logger.warning(f'恢复后验证失败: {e}')
-            verification = {'overall_pass': False, 'error': str(e)}
+        verification = await _verify_after_legacy_restore(db, backup_data)
     except (SQLAlchemyError, ValueError, OSError) as e:
         await db.rollback()
         raise RestoreError(f'恢复过程中出错: {e}') from e
@@ -2094,23 +2446,56 @@ async def restore_legacy_json(backup_data: dict, db: AsyncSession, task_id: str 
     return result_dict
 
 
+def _build_restore_tasks(
+    zf: zipfile.ZipFile,
+    confirm_sensitive: bool = False,
+) -> list:
+    """根据 ZIP 内容构建非依赖组件恢复任务列表"""
+    tasks = []
+    namelist = zf.namelist()
+
+    if any(n.startswith('filestore/') for n in namelist):
+        tasks.append(('filestore', asyncio.to_thread(restore_filestore, zf)))
+
+    if any(n.startswith('config/') for n in namelist):
+        tasks.append(('config', asyncio.to_thread(restore_config, zf, confirm_sensitive)))
+
+    if 'redis/dump.rdb' in namelist:
+        tasks.append(('redis', restore_redis_rdb(zf)))
+
+    if any(n.startswith('meilisearch/') for n in namelist):
+        tasks.append(('meilisearch', restore_meilisearch(zf)))
+
+    return tasks
+
+
+def _record_restore_result(component_name: str, result, results: dict) -> None:
+    """记录单个组件恢复结果到 results 字典"""
+    if isinstance(result, Exception):
+        results[component_name] = {'status': 'error', 'error': str(result)}
+        results['errors'].append(f'{component_name}: {result}')
+        logger.error(f"恢复 {component_name} 失败: {result}")
+    else:
+        results[component_name] = result
+
+
 async def restore_non_dependent_components(
     zf: zipfile.ZipFile,
     confirm_sensitive: bool = False,
 ) -> dict:
     """并行恢复非依赖组件（文件存储、配置文件、Redis、MeiliSearch）
-    
+
     这些组件可以并行恢复，因为它们不依赖数据库。
-    
+
     Args:
         zf: ZIP 文件对象
         confirm_sensitive: 是否确认恢复敏感文件
-        
+
     Returns:
         恢复结果字典
     """
     import asyncio
-    
+
     results = {
         'filestore': {},
         'config': {},
@@ -2118,81 +2503,171 @@ async def restore_non_dependent_components(
         'meilisearch': {},
         'errors': [],
     }
-    
-    # 创建恢复任务
-    tasks = []
-    
-    # 文件存储恢复
-    if any(n.startswith('filestore/') for n in zf.namelist()):
-        tasks.append(('filestore', asyncio.to_thread(restore_filestore, zf)))
-    
-    # 配置文件恢复
-    if any(n.startswith('config/') for n in zf.namelist()):
-        tasks.append(('config', asyncio.to_thread(restore_config, zf, confirm_sensitive)))
-    
-    # Redis 恢复
-    if 'redis/dump.rdb' in zf.namelist():
-        tasks.append(('redis', restore_redis_rdb(zf)))
-    
-    # MeiliSearch 恢复
-    if any(n.startswith('meilisearch/') for n in zf.namelist()):
-        tasks.append(('meilisearch', restore_meilisearch(zf)))
-    
-    # 并行执行所有任务
-    if tasks:
-        logger.info(f"开始并行恢复 {len(tasks)} 个非依赖组件")
-        try:
-            # 为异步任务和同步任务分别处理
-            async_tasks = []
-            sync_tasks = []
-            
-            for component_name, task in tasks:
-                if asyncio.iscoroutine(task):
-                    async_tasks.append((component_name, task))
-                else:
-                    sync_tasks.append((component_name, task))
-            
-            # 执行异步任务
-            if async_tasks:
-                async_results = await asyncio.gather(
-                    *[task for _, task in async_tasks],
-                    return_exceptions=True
-                )
-                for (component_name, _), result in zip(async_tasks, async_results):
-                    if isinstance(result, Exception):
-                        results[component_name] = {'status': 'error', 'error': str(result)}
-                        results['errors'].append(f'{component_name}: {result}')
-                        logger.error(f"恢复 {component_name} 失败: {result}")
-                    else:
-                        results[component_name] = result
-            
-            # 执行同步任务（在线程池中）
-            if sync_tasks:
-                loop = asyncio.get_event_loop()
-                sync_results = await asyncio.gather(
-                    *[loop.run_in_executor(None, lambda t=t: t[1]) for t in sync_tasks],
-                    return_exceptions=True
-                )
-                for (component_name, _), result in zip(sync_tasks, sync_results):
-                    if isinstance(result, Exception):
-                        results[component_name] = {'status': 'error', 'error': str(result)}
-                        results['errors'].append(f'{component_name}: {result}')
-                        logger.error(f"恢复 {component_name} 失败: {result}")
-                    else:
-                        results[component_name] = result
-            
-            logger.info("非依赖组件并行恢复完成")
-            
-        except Exception as e:
-            logger.error(f"并行恢复失败: {e}")
-            results['errors'].append(f'并行恢复失败: {e}')
-    
+
+    tasks = _build_restore_tasks(zf, confirm_sensitive)
+    if not tasks:
+        return results
+
+    logger.info(f"开始并行恢复 {len(tasks)} 个非依赖组件")
+    try:
+        async_tasks = [(name, task) for name, task in tasks if asyncio.iscoroutine(task)]
+        sync_tasks = [(name, task) for name, task in tasks if not asyncio.iscoroutine(task)]
+
+        if async_tasks:
+            async_results = await asyncio.gather(
+                *[task for _, task in async_tasks],
+                return_exceptions=True
+            )
+            for (component_name, _), result in zip(async_tasks, async_results):
+                _record_restore_result(component_name, result, results)
+
+        if sync_tasks:
+            loop = asyncio.get_running_loop()
+            sync_results = await asyncio.gather(
+                *[loop.run_in_executor(None, lambda t=t: t[1]) for t in sync_tasks],
+                return_exceptions=True
+            )
+            for (component_name, _), result in zip(sync_tasks, sync_results):
+                _record_restore_result(component_name, result, results)
+
+        logger.info("非依赖组件并行恢复完成")
+
+    except Exception as e:  # defensive: collect unexpected parallel restore orchestration errors
+        logger.error(f"并行恢复失败: {e}")
+        results['errors'].append(f'并行恢复失败: {e}')
+
     return results
 
 
 # ---------------------------------------------------------------------------
 # 恢复后验证
 # ---------------------------------------------------------------------------
+
+async def _compute_l2_fingerprint(
+    db: AsyncSession,
+    table,
+    tname: str,
+    qtname: str,
+    expected_rows: int,
+    checksum_tables: set,
+    manifest_fingerprints: dict,
+) -> dict | None:
+    """计算 L2 指纹验证结果"""
+    if tname not in checksum_tables or not expected_rows or expected_rows <= 0:
+        return None
+    try:
+        pk_col = [c.name for c in table.primary_key.columns]
+        order_col = pk_col[0] if pk_col else 'id'
+        cols_result = await db.execute(
+            text('SELECT column_name FROM information_schema.columns WHERE table_name = :tname ORDER BY ordinal_position'),
+            {'tname': tname}
+        )
+        col_names = [r[0] for r in cols_result.fetchall()]
+        agg_expr = " || '|' || ".join(f'''COALESCE("{c}"::text, '')''' for c in col_names)
+        fp_result = await db.execute(text(
+            f'''SELECT MD5(STRING_AGG({agg_expr}, ',' ORDER BY "{order_col}")) FROM {qtname}'''  # nosec B608 — qtname/col_names 经 quote_table 白名单校验
+        ))
+        fingerprint = fp_result.scalar() or ''
+    except (ValueError, TypeError, OSError) as e:
+        fingerprint = ''
+        logger.warning(f'验证: 表 {tname} 指纹计算失败: {e}')
+    expected_fp = manifest_fingerprints.get(tname, '')
+    fp_match = fingerprint == expected_fp if expected_fp else None
+    return {'table': tname, 'fingerprint': fingerprint, 'expected_fingerprint': expected_fp, 'match': fp_match}
+
+
+async def _compute_l3_sampling(
+    db: AsyncSession,
+    table,
+    tname: str,
+    qtname: str,
+    expected_rows: int,
+) -> dict | None:
+    """计算 L3 ID 抽样验证结果"""
+    if not expected_rows or expected_rows <= 0:
+        return None
+    try:
+        pk_col_sample = [c.name for c in table.primary_key.columns]
+        sample_col = pk_col_sample[0] if pk_col_sample else 'id'
+        sample_result = await db.execute(text(
+            f'SELECT "{sample_col}" FROM {qtname} ORDER BY "{sample_col}" LIMIT 3'
+        ))  # nosec B608 — qtname/sample_col 经 quote_table 白名单校验
+        found_ids = [r[0] for r in sample_result.fetchall()]
+    except (SQLAlchemyError, ValueError, OSError) as e:
+        found_ids = []
+        logger.warning(f'验证: 表 {tname} 抽样查询失败: {e}')
+    return {'table': tname, 'sample_ids': found_ids, 'count_found': len(found_ids)}
+
+
+async def _verify_single_table(
+    db: AsyncSession,
+    table,
+    expected: dict,
+    checksum_tables: set,
+    manifest_fingerprints: dict,
+) -> dict:
+    """验证单个表的 L0-L3 层级，返回结果字典"""
+    tname = str(table.name)
+    qtname = quote_table(tname)  # REV-08
+    expected_rows = expected.get('rows', -1)
+
+    # L1: 行数验证
+    try:
+        result = await db.execute(text(f'SELECT COUNT(*) FROM {qtname}'))  # nosec B608 — qtname 经 quote_table 白名单校验
+        actual_rows = result.scalar() or 0
+        table_exists = True
+    except (RuntimeError, OSError, ValueError) as e:
+        actual_rows = -1
+        table_exists = False
+        logger.warning(f'验证: 统计表 {tname} 行数失败: {e}')
+
+    if not table_exists and expected_rows == 0:
+        l1_pass = True
+    elif expected_rows < 0:
+        l1_pass = None
+    else:
+        l1_pass = actual_rows == expected_rows
+
+    verification = {
+        'l1': {'table': tname, 'expected': expected_rows, 'actual': actual_rows, 'pass': l1_pass},
+        'l0_part': None,
+        'l2': None,
+        'l3': None,
+    }
+
+    if not table_exists:
+        return verification
+
+    # L0: 全局校验和
+    if actual_rows > 0:
+        try:
+            pk_col = [c.name for c in table.primary_key.columns]
+            order_col = pk_col[0] if pk_col else 'id'
+            cols_result = await db.execute(
+                text('SELECT column_name FROM information_schema.columns WHERE table_name = :tname ORDER BY ordinal_position'),
+                {'tname': tname}
+            )
+            col_names = [r[0] for r in cols_result.fetchall()]
+            agg = " || '|' || ".join(f'''COALESCE("{c}"::text, '')''' for c in col_names)
+            row = await db.execute(text(
+                f'''SELECT MD5(STRING_AGG(MD5({agg}), ',' ORDER BY "{order_col}")) FROM {qtname}'''  # nosec B608 — qtname/col_names 经 quote_table 白名单校验
+            ))
+            t_hash = row.scalar()
+            if t_hash:
+                verification['l0_part'] = f'{tname}:{t_hash}'
+        except (SQLAlchemyError, ValueError, OSError) as e:
+            logger.warning(f'验证: 表 {tname} 全局校验和计算失败: {e}')
+
+    # L2: 指纹验证
+    verification['l2'] = await _compute_l2_fingerprint(
+        db, table, tname, qtname, expected_rows, checksum_tables, manifest_fingerprints
+    )
+
+    # L3: ID 抽样
+    verification['l3'] = await _compute_l3_sampling(db, table, tname, qtname, expected_rows)
+
+    return verification
+
 
 async def verify_restore(db: AsyncSession, manifest_tables: dict[str, dict], manifest_fingerprints: dict[str, str] | None = None) -> dict:
     """四层恢复后验证
@@ -2204,91 +2679,25 @@ async def verify_restore(db: AsyncSession, manifest_tables: dict[str, dict], man
     """
     from fastapi_app.shared_models import Base
     checksum_tables = get_checksum_tables()
-    l0_db_hash: str | None = None
-    l0_tables_contributed = 0
     l1_results: list[dict] = []
     l2_results: list[dict] = []
     l3_results: list[dict] = []
     l0_parts: list[str] = []
+    l0_tables_contributed = 0
 
     for table in Base.metadata.sorted_tables:
-        tname = str(table.name)
-        qtname = quote_table(tname)  # REV-08
-        expected = manifest_tables.get(tname, {})
-        expected_rows = expected.get('rows', -1)
-        try:
-            result = await db.execute(text(f'SELECT COUNT(*) FROM {qtname}'))  # nosec
-            actual_rows = result.scalar() or 0
-            table_exists = True
-        except (RuntimeError, OSError, ValueError) as e:
-            actual_rows = -1
-            table_exists = False
-            logger.warning(f'验证: 统计表 {tname} 行数失败: {e}')
-
-        if not table_exists and expected_rows == 0:
-            l1_pass = True
-        elif expected_rows < 0:
-            l1_pass = None
-        else:
-            l1_pass = actual_rows == expected_rows
-        l1_results.append({'table': tname, 'expected': expected_rows, 'actual': actual_rows, 'pass': l1_pass})
-
-        if not table_exists:
-            continue
-
-        if actual_rows > 0:
-            try:
-                pk_col = [c.name for c in table.primary_key.columns]
-                order_col = pk_col[0] if pk_col else 'id'
-                cols_result = await db.execute(
-                    text('SELECT column_name FROM information_schema.columns WHERE table_name = :tname ORDER BY ordinal_position'),
-                    {'tname': tname}
-                )
-                col_names = [r[0] for r in cols_result.fetchall()]
-                agg = " || '|' || ".join(f'''COALESCE("{c}"::text, '')''' for c in col_names)
-                row = await db.execute(text(
-                    f'''SELECT MD5(STRING_AGG(MD5({agg}), ',' ORDER BY "{order_col}")) FROM {qtname}'''  # nosec
-                ))
-                t_hash = row.scalar()
-                if t_hash:
-                    l0_parts.append(f'{tname}:{t_hash}')
-                    l0_tables_contributed += 1
-            except (SQLAlchemyError, ValueError, OSError) as e:
-                logger.warning(f'验证: 表 {tname} 全局校验和计算失败: {e}')
-
-        if tname in checksum_tables and expected_rows and expected_rows > 0:
-            try:
-                pk_col = [c.name for c in table.primary_key.columns]
-                order_col = pk_col[0] if pk_col else 'id'
-                cols_result = await db.execute(
-                    text('SELECT column_name FROM information_schema.columns WHERE table_name = :tname ORDER BY ordinal_position'),
-                    {'tname': tname}
-                )
-                col_names = [r[0] for r in cols_result.fetchall()]
-                agg_expr = " || '|' || ".join(f'''COALESCE("{c}"::text, '')''' for c in col_names)
-                fp_result = await db.execute(text(
-                    f'''SELECT MD5(STRING_AGG({agg_expr}, ',' ORDER BY "{order_col}")) FROM {qtname}'''  # nosec
-                ))
-                fingerprint = fp_result.scalar() or ''
-            except (ValueError, TypeError, OSError) as e:
-                fingerprint = ''
-                logger.warning(f'验证: 表 {tname} 指纹计算失败: {e}')
-            expected_fp = (manifest_fingerprints or {}).get(tname, '')
-            fp_match = fingerprint == expected_fp if expected_fp else None
-            l2_results.append({'table': tname, 'fingerprint': fingerprint, 'expected_fingerprint': expected_fp, 'match': fp_match})
-
-        if expected_rows and expected_rows > 0:
-            try:
-                pk_col_sample = [c.name for c in table.primary_key.columns]
-                sample_col = pk_col_sample[0] if pk_col_sample else 'id'
-                sample_result = await db.execute(text(
-                    f'SELECT "{sample_col}" FROM {qtname} ORDER BY "{sample_col}" LIMIT 3'
-                ))  # nosec
-                found_ids = [r[0] for r in sample_result.fetchall()]
-            except (SQLAlchemyError, ValueError, OSError) as e:
-                found_ids = []
-                logger.warning(f'验证: 表 {tname} 抽样查询失败: {e}')
-            l3_results.append({'table': tname, 'sample_ids': found_ids, 'count_found': len(found_ids)})
+        expected = manifest_tables.get(str(table.name), {})
+        verification = await _verify_single_table(
+            db, table, expected, checksum_tables, manifest_fingerprints or {}
+        )
+        l1_results.append(verification['l1'])
+        if verification['l0_part']:
+            l0_parts.append(verification['l0_part'])
+            l0_tables_contributed += 1
+        if verification['l2']:
+            l2_results.append(verification['l2'])
+        if verification['l3']:
+            l3_results.append(verification['l3'])
 
     l0_summary = {}
     if l0_parts:
@@ -2309,7 +2718,6 @@ async def verify_restore(db: AsyncSession, manifest_tables: dict[str, dict], man
     l2_mismatch = [r for r in l2_results if r['match'] is False]
 
     l1_all_pass = len(l1_mismatch) == 0
-    l2_all_pass = len(l2_mismatch) == 0
     all_passed = l1_all_pass
 
     return {
@@ -2335,6 +2743,199 @@ async def verify_restore(db: AsyncSession, manifest_tables: dict[str, dict], man
 # 统一恢复入口（合并 _restore_from_zip 和 _restore_from_zip_with_progress）
 # ---------------------------------------------------------------------------
 
+def _decrypt_backup_bytes(
+    zip_bytes: bytes,
+    decrypt_password: str | bytearray | None,
+) -> tuple[bytes, zipfile.ZipFile]:
+    """BadZipFile 时尝试解密或报错"""
+    if decrypt_password:
+        from fastapi_app.core.backup_encryption import BackupFileError as EncFileError
+        from fastapi_app.core.backup_encryption import decrypt_backup
+        try:
+            zip_bytes = decrypt_backup(zip_bytes, decrypt_password)
+            return zip_bytes, zipfile.ZipFile(io.BytesIO(zip_bytes))
+        except EncFileError as e:
+            raise RestoreError(f'解密失败: {e}') from e
+    try:
+        if zip_bytes[:4] != b'PK\x03\x04':  # 不是标准ZIP文件头
+            raise RestoreError('备份文件已加密，需要提供解密密码')
+    except (RestoreError, IndexError, TypeError) as e:
+        raise RestoreError('无效的 ZIP 备份文件或加密文件需要密码') from e
+    return zip_bytes, zipfile.ZipFile(io.BytesIO(zip_bytes))
+
+
+def _open_backup_zip(
+    zip_bytes: bytes,
+    decrypt_password: str | bytearray | None,
+) -> tuple[zipfile.ZipFile, bytes, dict]:
+    """打开备份 ZIP，处理解密，返回 (zf, zip_bytes, manifest)"""
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
+    except zipfile.BadZipFile:
+        zip_bytes, zf = _decrypt_backup_bytes(zip_bytes, decrypt_password)
+
+    if 'manifest.json' not in zf.namelist():
+        raise RestoreError('备份文件缺少 manifest.json')
+
+    manifest = json.loads(zf.read('manifest.json'))
+
+    # 检查备份是否加密
+    if manifest.get('encrypted'):
+        if not decrypt_password:
+            raise RestoreError('备份文件已加密，需要提供解密密码')
+        if zip_bytes[:4] != b'PK\x03\x04':  # 已是ZIP则不再二次解密
+            from fastapi_app.core.backup_encryption import BackupFileError as EncFileError
+            from fastapi_app.core.backup_encryption import decrypt_backup
+            try:
+                zip_bytes = decrypt_backup(zip_bytes, decrypt_password)
+                zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
+                manifest = json.loads(zf.read('manifest.json'))  # 重新读取manifest
+            except EncFileError as e:
+                raise RestoreError(f'解密失败: {e}') from e
+    return zf, zip_bytes, manifest
+
+
+def _verify_backup_checksums(zf: zipfile.ZipFile, stored_checksums: dict) -> list[str]:
+    """校验备份文件校验和，返回警告列表"""
+    warnings: list[str] = []
+    for db_file in ('database/dump.sql.gz', 'database/dump.json'):
+        if not stored_checksums.get(db_file):
+            continue
+        actual = sha256_bytes(zf.read(db_file))  # REV-14
+        if actual != stored_checksums[db_file]:
+            warnings.append(f'{db_file} 校验和不匹配，备份文件可能已损坏')
+    return warnings
+
+
+async def _restore_database_dispatch(
+    zf: zipfile.ZipFile,
+    db: AsyncSession,
+    task_id: str | None,
+    results: dict,
+    prog,
+) -> tuple[bool, bool]:
+    """根据备份格式分发数据库恢复，返回 (psql_restored, psql_attempted)"""
+    psql_restored = False
+    psql_attempted = False
+    if 'database/dump.sql.gz' in zf.namelist():
+        psql_attempted = True
+        await prog('restore_db', 0.0, '通过 psql 恢复数据库')
+        db_result = await restore_database_via_psql(zf, db, task_id)
+        results['database'] = db_result
+        if db_result.get('status') == 'error':
+            raise RuntimeError(f"数据库恢复失败: {db_result.get('error') or db_result.get('message', '未知错误')}")
+        if db_result.get('status') in ('ok', 'partial'):
+            psql_restored = True
+        await prog('restore_db', 1.0, '数据库恢复完成')
+    elif 'database/dump.json' in zf.namelist():
+        await prog('restore_db', 0.0, '通过 JSON 恢复数据库')
+        db_result = await restore_database_from_json(zf, db, task_id)
+        results['database'] = db_result
+        if db_result.get('status') == 'error':
+            raise RuntimeError(f"数据库恢复失败: {db_result.get('error') or db_result.get('message', '未知错误')}")
+        await prog('restore_db', 1.0, '数据库恢复完成')
+    else:
+        results['warnings'].append('备份文件中无数据库导出')
+        await prog('restore_db', 1.0, '无数据库数据')
+    return psql_restored, psql_attempted
+
+
+# 各组件进度: (key, has_flag, progress, found_detail_fn, missing_detail)
+_COMPONENT_PROGRESS: list[tuple[str, bool, float, object, str]] = [
+    ('filestore', True, 0.25,
+     lambda cr: f'文件存储恢复完成: {cr.get("restored", 0)} 个文件',
+     '备份文件中无附件数据'),
+    ('config', True, 0.5,
+     lambda cr: f'配置文件恢复完成: {len(cr.get("restored", []))} 个文件',
+     '无配置数据'),
+    ('redis', True, 0.75, lambda cr: 'Redis 恢复完成', '无 Redis 数据'),
+    ('meilisearch', True, 1.0, lambda cr: '搜索索引恢复完成', '无搜索索引数据'),
+]
+
+
+async def _restore_components_with_progress(zf: zipfile.ZipFile, results: dict, prog) -> None:
+    """并行恢复非依赖组件并报告进度"""
+    await prog('restore_components', 0.0, '开始并行恢复非依赖组件')
+
+    has_filestore = any(n.startswith('filestore/') for n in zf.namelist())
+    has_config = any(n.startswith('config/') for n in zf.namelist())
+    has_redis = 'redis/dump.rdb' in zf.namelist()
+    has_meilisearch = any(n.startswith('meilisearch/') for n in zf.namelist())
+
+    if not (has_filestore or has_config or has_redis or has_meilisearch):
+        await prog('restore_components', 1.0, '无非依赖组件需要恢复')
+        return
+
+    components_result = await restore_non_dependent_components(zf, confirm_sensitive=False)
+
+    # 将实际 has_flag 填入进度表
+    flags = {'filestore': has_filestore, 'config': has_config, 'redis': has_redis, 'meilisearch': has_meilisearch}
+    for key, _has_flag, progress, found_fn, missing_detail in _COMPONENT_PROGRESS:
+        if key not in components_result:
+            continue
+        component_data = components_result[key]
+        results[key] = component_data
+        if flags[key]:
+            await prog('restore_components', progress, found_fn(component_data))
+        elif key == 'filestore':
+            results['warnings'].append(missing_detail)
+        else:
+            await prog('restore_components', progress, missing_detail)
+
+    if 'errors' in components_result:
+        results['errors'].extend(components_result['errors'])
+
+
+async def _invalidate_restore_caches() -> None:
+    """恢复后清除缓存"""
+    try:
+        from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
+        await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ALL)
+    except (OSError, ValueError) as e:
+        logger.warning(f'恢复后缓存清除失败: {e}')
+    try:
+        await cache_mgr.invalidate(InvalidationStrategy.PURCHASE)
+    except (OSError, ValueError) as e:
+        logger.warning(f'恢复后采购缓存清除失败: {e}')
+
+
+async def _run_verify_after_restore(
+    db: AsyncSession,
+    manifest: dict,
+    psql_restored: bool,
+    results: dict,
+    prog,
+) -> None:
+    """恢复后数据完整性验证"""
+    await prog('verify', 0.0, '数据完整性验证中')
+    verify_db = None
+    if psql_restored:
+        from fastapi_app.core.database import _AsyncSessionLocal
+        if _AsyncSessionLocal is not None:
+            verify_db = _AsyncSessionLocal()
+    try:
+        target_db = verify_db or db
+        verification = await verify_restore(target_db, manifest.get('tables', {}), manifest.get('fingerprints'))
+        results['verification'] = verification
+        if not verification.get('overall_pass', True):
+            results['_verification_failed'] = True
+            logger.warning(
+                f'恢复后验证未通过: {verification.get("l1_row_count", {}).get("summary", "")} ; '
+                f'{verification.get("l2_fingerprint", {}).get("summary", "")}'
+            )
+        await prog('verify', 1.0, '验证完成' if verification.get('overall_pass', True) else '验证未通过')
+    except (SQLAlchemyError, ValueError, OSError) as e:
+        logger.warning(f'恢复后验证失败: {e}')
+        results['verification'] = {'overall_pass': False, 'error': str(e)}
+        await prog('verify', 1.0, '验证完成（有异常）')
+    finally:
+        if verify_db is not None:
+            try:
+                await verify_db.close()
+            except (OSError, ValueError, SQLAlchemyError):
+                logger.warning('关闭验证数据库会话失败')
+
+
 async def restore_from_zip(
     zip_bytes: bytes,
     db: AsyncSession,
@@ -2346,52 +2947,12 @@ async def restore_from_zip(
     如果 task_id 非 None，则通过 backup_progress 报告进度。
     如果 decrypt_password 非 None，则先解密。
     """
-    # 进度报告辅助
     async def _prog(phase: str, sub: float = 0.0, detail: str = ''):
         if task_id:
             from fastapi_app.core.backup_progress import update_progress
             await update_progress(task_id, phase, sub, detail)
 
-    try:
-        zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
-    except zipfile.BadZipFile:
-        # 可能是加密文件，尝试解密
-        if decrypt_password:
-            from fastapi_app.core.backup_encryption import decrypt_backup, BackupFileError as EncFileError
-            try:
-                zip_bytes = decrypt_backup(zip_bytes, decrypt_password)
-                zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
-            except EncFileError as e:
-                raise RestoreError(f'解密失败: {e}') from e
-        else:
-            # 检查是否是加密文件（尝试解析为加密格式）
-            try:
-                # 尝试检测加密文件格式
-                if zip_bytes[:4] != b'PK\x03\x04':  # 不是标准ZIP文件头
-                    raise RestoreError('备份文件已加密，需要提供解密密码')
-            except (RestoreError, IndexError, TypeError):
-                raise RestoreError('无效的 ZIP 备份文件或加密文件需要密码')
-    
-    if 'manifest.json' not in zf.namelist():
-        raise RestoreError('备份文件缺少 manifest.json')
-
-    manifest = json.loads(zf.read('manifest.json'))
-    
-    # 检查备份是否加密
-    if manifest.get('encrypted'):
-        if not decrypt_password:
-            raise RestoreError('备份文件已加密，需要提供解密密码')
-        # 如果提供了密码但未在开始时解密，现在解密
-        if zip_bytes[:4] == b'PK\x03\x04':  # 已经是ZIP文件，不需要再次解密
-            pass
-        else:
-            from fastapi_app.core.backup_encryption import decrypt_backup, BackupFileError as EncFileError
-            try:
-                zip_bytes = decrypt_backup(zip_bytes, decrypt_password)
-                zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
-                manifest = json.loads(zf.read('manifest.json'))  # 重新读取manifest
-            except EncFileError as e:
-                raise RestoreError(f'解密失败: {e}') from e
+    zf, zip_bytes, manifest = _open_backup_zip(zip_bytes, decrypt_password)
     manifest_tables = manifest.get('tables', {})
     results = {
         'version': manifest.get('version'),
@@ -2403,83 +2964,14 @@ async def restore_from_zip(
     }
 
     stored_checksums = manifest.get('checksums', {})
-    for db_file in ('database/dump.sql.gz', 'database/dump.json'):
-        if stored_checksums.get(db_file):
-            actual = sha256_bytes(zf.read(db_file))  # REV-14
-            if actual != stored_checksums[db_file]:
-                results['warnings'].append(f'{db_file} 校验和不匹配，备份文件可能已损坏')
+    results['warnings'].extend(_verify_backup_checksums(zf, stored_checksums))
 
     psql_restored = False
     psql_attempted = False
     try:
-        if 'database/dump.sql.gz' in zf.namelist():
-            psql_attempted = True
-            await _prog('restore_db', 0.0, '通过 psql 恢复数据库')
-            db_result = await restore_database_via_psql(zf, db, task_id)
-            results['database'] = db_result
-            if db_result.get('status') == 'error':
-                raise RuntimeError(f"数据库恢复失败: {db_result.get('error') or db_result.get('message', '未知错误')}")
-            if db_result.get('status') in ('ok', 'partial'):
-                psql_restored = True
-            await _prog('restore_db', 1.0, '数据库恢复完成')
-        elif 'database/dump.json' in zf.namelist():
-            await _prog('restore_db', 0.0, '通过 JSON 恢复数据库')
-            db_result = await restore_database_from_json(zf, db, task_id)
-            results['database'] = db_result
-            if db_result.get('status') == 'error':
-                raise RuntimeError(f"数据库恢复失败: {db_result.get('error') or db_result.get('message', '未知错误')}")
-            await _prog('restore_db', 1.0, '数据库恢复完成')
-        else:
-            results['warnings'].append('备份文件中无数据库导出')
-            await _prog('restore_db', 1.0, '无数据库数据')
+        psql_restored, psql_attempted = await _restore_database_dispatch(zf, db, task_id, results, _prog)
 
-        # 并行恢复非依赖组件
-        await _prog('restore_components', 0.0, '开始并行恢复非依赖组件')
-        
-        # 检查是否有非依赖组件需要恢复
-        has_filestore = any(n.startswith('filestore/') for n in zf.namelist())
-        has_config = any(n.startswith('config/') for n in zf.namelist())
-        has_redis = 'redis/dump.rdb' in zf.namelist()
-        has_meilisearch = any(n.startswith('meilisearch/') for n in zf.namelist())
-        
-        if has_filestore or has_config or has_redis or has_meilisearch:
-            # 并行恢复非依赖组件
-            components_result = await restore_non_dependent_components(zf, confirm_sensitive=False)
-            
-            # 更新结果
-            if 'filestore' in components_result:
-                results['filestore'] = components_result['filestore']
-                if has_filestore:
-                    await _prog('restore_components', 0.25, f'文件存储恢复完成: {components_result["filestore"].get("restored", 0)} 个文件')
-                else:
-                    results['warnings'].append('备份文件中无附件数据')
-            
-            if 'config' in components_result:
-                results['config'] = components_result['config']
-                if has_config:
-                    await _prog('restore_components', 0.5, f'配置文件恢复完成: {len(components_result["config"].get("restored", []))} 个文件')
-                else:
-                    await _prog('restore_components', 0.5, '无配置数据')
-            
-            if 'redis' in components_result:
-                results['redis'] = components_result['redis']
-                if has_redis:
-                    await _prog('restore_components', 0.75, 'Redis 恢复完成')
-                else:
-                    await _prog('restore_components', 0.75, '无 Redis 数据')
-            
-            if 'meilisearch' in components_result:
-                results['meilisearch'] = components_result['meilisearch']
-                if has_meilisearch:
-                    await _prog('restore_components', 1.0, '搜索索引恢复完成')
-                else:
-                    await _prog('restore_components', 1.0, '无搜索索引数据')
-            
-            # 收集错误
-            if 'errors' in components_result:
-                results['errors'].extend(components_result['errors'])
-        else:
-            await _prog('restore_components', 1.0, '无非依赖组件需要恢复')
+        await _restore_components_with_progress(zf, results, _prog)
 
         if psql_restored or psql_attempted:
             await _prog('rebuild_pool', 0.0, '重建数据库连接池')
@@ -2487,46 +2979,10 @@ async def restore_from_zip(
             await rebuild_pool()
             await _prog('rebuild_pool', 1.0, '连接池已重建')
         else:
-            await db.commit()
+            await db.flush()
 
-        try:
-            from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
-            await invalidate_related_caches(CacheDomain.ALL)
-        except (OSError, ValueError) as e:
-            logger.warning(f'恢复后缓存清除失败: {e}')
-        try:
-            from fastapi_app.core.purchase_cache import invalidate_purchase_caches
-            invalidate_purchase_caches()
-        except (OSError, ValueError) as e:
-            logger.warning(f'恢复后采购缓存清除失败: {e}')
-
-        await _prog('verify', 0.0, '数据完整性验证中')
-        verify_db = None
-        if psql_restored:
-            from fastapi_app.core.database import _AsyncSessionLocal
-            if _AsyncSessionLocal is not None:
-                verify_db = _AsyncSessionLocal()
-        try:
-            target_db = verify_db or db
-            verification = await verify_restore(target_db, manifest.get('tables', {}), manifest.get('fingerprints'))
-            results['verification'] = verification
-            if not verification.get('overall_pass', True):
-                results['_verification_failed'] = True
-                logger.warning(
-                    f'恢复后验证未通过: {verification.get("l1_row_count", {}).get("summary", "")} ; '
-                    f'{verification.get("l2_fingerprint", {}).get("summary", "")}'
-                )
-            await _prog('verify', 1.0, '验证完成' if verification.get('overall_pass', True) else '验证未通过')
-        except (SQLAlchemyError, ValueError, OSError) as e:
-            logger.warning(f'恢复后验证失败: {e}')
-            results['verification'] = {'overall_pass': False, 'error': str(e)}
-            await _prog('verify', 1.0, '验证完成（有异常）')
-        finally:
-            if verify_db is not None:
-                try:
-                    await verify_db.close()
-                except (OSError, ValueError, SQLAlchemyError):
-                    logger.warning('关闭验证数据库会话失败')
+        await _invalidate_restore_caches()
+        await _run_verify_after_restore(db, manifest, psql_restored, results, _prog)
     except RestoreError:
         raise
     except (RuntimeError, OSError, ValueError) as e:
@@ -2550,23 +3006,14 @@ async def restore_from_zip(
 # 增量备份
 # ---------------------------------------------------------------------------
 
-async def create_incremental_backup(
+async def _query_incremental_tables(
     db: AsyncSession,
-    user,
-    remark: str = '',
-    since: str = '',
-    encrypt_password: str | bytearray | None = None,
-) -> dict:
-    """执行增量备份
-    
-    如果提供 encrypt_password 或配置了环境变量，则使用 AES-256-GCM 加密备份。
-    """
-    ensure_backup_dir()
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    effective_since: str,
+) -> tuple[dict, int]:
+    """查询所有表的增量数据，返回 (incremental_tables, total_rows)"""
     from fastapi_app.shared_models import Base
     incremental_tables = {}
     total_rows = 0
-    effective_since = since or await find_last_backup_timestamp() or ''
     for table in Base.metadata.sorted_tables:
         tname = str(table.name)
         try:
@@ -2579,15 +3026,33 @@ async def create_incremental_backup(
             # 表不存在或查询失败不应终止整个增量备份，回滚事务后继续处理其他表
             try:
                 await db.rollback()
-            except Exception:
+            except SQLAlchemyError:
                 pass
             logger.warning(f'增量备份表 {tname} 失败: {e}')
         else:
-            # 每次成功查询后提交，释放事务避免后续查询被 in-transaction 状态污染
+            # 每次成功查询后 flush，避免长事务占用连接
             try:
-                await db.commit()
-            except Exception:
+                await db.flush()
+            except SQLAlchemyError:
                 pass
+    return incremental_tables, total_rows
+
+
+async def create_incremental_backup(
+    db: AsyncSession,
+    user,
+    remark: str = '',
+    since: str = '',
+    encrypt_password: str | bytearray | None = None,
+) -> dict:
+    """执行增量备份
+
+    如果提供 encrypt_password 或配置了环境变量，则使用 AES-256-GCM 加密备份。
+    """
+    ensure_backup_dir()
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    effective_since = since or await find_last_backup_timestamp() or ''
+    incremental_tables, total_rows = await _query_incremental_tables(db, effective_since)
 
     if not incremental_tables:
         return {'success': True, 'filename': None, 'message': '无变更数据需要备份', 'total_rows': 0}
@@ -2619,11 +3084,11 @@ async def create_incremental_backup(
             }
             zf.writestr('manifest.json', json.dumps(manifest, ensure_ascii=False, indent=2).encode('utf-8'))
         zip_bytes = zip_path.read_bytes()
-        
+
         # 默认加密（根据环境变量配置）
         encryption_password = encrypt_password or get_backup_encryption_password()
         if encryption_password:
-            from fastapi_app.core.backup_encryption import encrypt_backup, create_meta_file
+            from fastapi_app.core.backup_encryption import encrypt_backup
             try:
                 encrypted_bytes, meta_dict = encrypt_backup(zip_bytes, encryption_password)
                 # 更新 manifest 以标记加密
@@ -2637,7 +3102,7 @@ async def create_incremental_backup(
                 else:
                     logger.warning(f"使用生成的随机密钥进行增量备份加密，密钥已记录在日志中")
                 zip_bytes = encrypted_bytes
-            except Exception as e:
+            except (ValueError, TypeError) as e:
                 logger.error(f"增量备份加密失败: {e}")
                 if BACKUP_ENCRYPTION_ENABLED and not BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED:
                     raise BackupError(f"增量备份加密失败且不允许回退到未加密备份: {e}") from e
@@ -2653,6 +3118,28 @@ async def create_incremental_backup(
         'base_timestamp': effective_since, 'remark': remark,
         'encrypted': 'encryption_password' in locals() and encryption_password is not None,
     }
+
+
+def _find_latest_full_backup_lsn() -> str | None:
+    """从最近的全量备份 ZIP 中查找 LSN"""
+    if not BACKUP_DIR.exists():
+        return None
+
+    for backup_file in sorted(BACKUP_DIR.iterdir(), reverse=True):
+        if not (backup_file.is_file()
+                and backup_file.name.startswith('erp_backup_')
+                and backup_file.name.endswith('.zip')):
+            continue
+        try:
+            with zipfile.ZipFile(backup_file, 'r') as zf:
+                if 'manifest.json' not in zf.namelist():
+                    continue
+                manifest = json.loads(zf.read('manifest.json'))
+                if manifest.get('type') == 'full':
+                    return manifest.get('lsn')
+        except (OSError, zipfile.BadZipFile, ValueError):
+            continue
+    return None
 
 
 async def create_wal_incremental_backup(
@@ -2687,27 +3174,8 @@ async def create_wal_incremental_backup(
     
     # 如果没有提供起始 LSN，尝试从最近的全量备份获取
     if not start_lsn:
-        # 查找最近的全量备份
-        latest_full_backup = None
-        if BACKUP_DIR.exists():
-            for f in sorted(BACKUP_DIR.iterdir(), reverse=True):
-                if f.is_file() and f.name.startswith('erp_backup_') and f.name.endswith('.zip'):
-                    try:
-                        with zipfile.ZipFile(f, 'r') as zf:
-                            if 'manifest.json' in zf.namelist():
-                                manifest = json.loads(zf.read('manifest.json'))
-                                if manifest.get('type') == 'full':
-                                    latest_full_backup = {
-                                        'filename': f.name,
-                                        'exported_at': manifest.get('exported_at'),
-                                        'lsn': manifest.get('lsn')  # 全量备份可能包含 LSN
-                                    }
-                                    break
-                    except (OSError, zipfile.BadZipFile, ValueError):
-                        continue
-        
-        if latest_full_backup and latest_full_backup.get('lsn'):
-            start_lsn = latest_full_backup['lsn']
+        start_lsn = _find_latest_full_backup_lsn()
+        if start_lsn:
             logger.info(f"使用最近全量备份的 LSN: {start_lsn}")
         else:
             # 如果没有找到全量备份的 LSN，使用当前 LSN（相当于全量备份）
@@ -2766,7 +3234,7 @@ async def create_wal_incremental_backup(
             # 注意：不再重新写入明文 JSON，避免覆盖加密数据
             # 加密后的元数据信息记录在 backup_info 字典中返回给调用方
             
-        except Exception as e:
+        except (OSError, ValueError, TypeError) as e:
             logger.error(f"WAL 增量备份加密失败: {e}")
             if BACKUP_ENCRYPTION_ENABLED and not BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED:
                 raise BackupError(f"WAL 增量备份加密失败且不允许回退到未加密备份: {e}") from e
@@ -2786,16 +3254,12 @@ async def create_wal_incremental_backup(
     }
 
 
-async def restore_incremental(
-    db: AsyncSession,
-    zip_bytes: bytes,
-    filename: str,
-) -> dict:
-    """从增量备份恢复"""
+def _validate_incremental_zip(zip_bytes: bytes) -> tuple[zipfile.ZipFile, dict]:
+    """验证增量备份 ZIP，返回 (zf, backup_data)"""
     try:
         zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
-    except zipfile.BadZipFile:
-        raise RestoreError('无效的 ZIP 文件')
+    except zipfile.BadZipFile as e:
+        raise RestoreError('无效的 ZIP 文件') from e
     if 'manifest.json' not in zf.namelist():
         raise RestoreError('增量备份缺少 manifest.json')
     manifest = json.loads(zf.read('manifest.json'))
@@ -2807,95 +3271,87 @@ async def restore_incremental(
         backup_data = json.loads(zf.read('database/dump.json'))
     except (json.JSONDecodeError, OSError) as e:
         raise RestoreError(f'读取增量备份数据失败: {e}') from e
+    return zf, backup_data
 
-    from fastapi_app.shared_models import Base
-    table_map = {str(t.name): t for t in Base.metadata.sorted_tables}
+
+async def _acquire_restore_lock(db: AsyncSession) -> bool:
+    """尝试获取恢复 advisory lock，返回是否成功"""
+    lock_result = await db.execute(text('SELECT pg_try_advisory_lock(:lock_id)'), {'lock_id': RESTORE_LOCK_ID})
+    return bool(lock_result.scalar())
+
+
+async def _restore_incremental_tables(
+    db: AsyncSession, backup_data: dict, table_map: dict,
+) -> tuple[int, dict, list[str]]:
+    """恢复增量备份的表数据，返回 (total_upserted, results, errors)"""
     total_upserted = 0
     results = {}
     errors = []
+    for tname, table_data in backup_data.get('tables', {}).items():
+        if tname not in table_map:
+            continue
+        table = table_map[tname]
+        upserted, batch_errors = await _restore_table_data(db, table, table_data)
+        if batch_errors:
+            results[tname] = {'status': 'partial', 'upserted': upserted, 'batch_errors': batch_errors}
+            errors.append(f'{tname}: {len(batch_errors)} 个批次失败')
+        else:
+            results[tname] = {'status': 'ok', 'upserted': upserted}
+        total_upserted += upserted
+    return total_upserted, results, errors
+
+
+async def _invalidate_incremental_caches() -> None:
+    """增量恢复后清除缓存"""
+    try:
+        from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
+        await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ALL)
+    except (RuntimeError, OSError, ValueError) as e:
+        logger.warning(f'增量恢复后缓存清除失败: {e}')
+    try:
+        await cache_mgr.invalidate(InvalidationStrategy.PURCHASE)
+    except (RuntimeError, OSError, ValueError) as e:
+        logger.warning(f'增量恢复后采购缓存清除失败: {e}')
+
+
+async def _release_restore_lock(db: AsyncSession) -> None:
+    """释放恢复 advisory lock"""
+    try:
+        await db.execute(text('SELECT pg_advisory_unlock(:lock_id)'), {'lock_id': RESTORE_LOCK_ID})
+    except (OSError, ValueError, SQLAlchemyError):
+        logger.warning('释放增量恢复锁失败')
+
+
+async def restore_incremental(
+    db: AsyncSession,
+    zip_bytes: bytes,
+    filename: str,
+) -> dict:
+    """从增量备份恢复"""
+    zf, backup_data = _validate_incremental_zip(zip_bytes)
+
+    from fastapi_app.shared_models import Base
+    table_map = {str(t.name): t for t in Base.metadata.sorted_tables}
 
     pre_restore_info = await create_pre_restore_backup(db)
     lock_acquired = False
     try:
-        lock_result = await db.execute(text('SELECT pg_try_advisory_lock(:lock_id)'), {'lock_id': RESTORE_LOCK_ID})
-        if not lock_result.scalar():
+        lock_acquired = await _acquire_restore_lock(db)
+        if not lock_acquired:
             raise BackupLockError('另一个恢复操作正在执行中，请稍后重试')  # REV-06
-        lock_acquired = True
         try:
             await db.execute(text("SET session_replication_role = 'replica'"))
         except (SQLAlchemyError, OSError) as e:
             logger.warning(f'禁用外键约束失败: {e}')
 
-        for tname, table_data in backup_data.get('tables', {}).items():
-            if tname not in table_map:
-                continue
-            table = table_map[tname]
-            columns = table_data.get('columns', [])
-            rows = table_data.get('rows', [])
-            type_map = build_column_type_map(table)
-            pk_cols = [c.name for c in table.primary_key.columns]
-            table_col_names = {c.name for c in table.columns}
-            qtname = quote_table(tname)  # REV-08
-            BATCH_SIZE = 500
-            upserted = 0
-            batch_errors = []
-            for batch_start in range(0, len(rows), BATCH_SIZE):
-                batch = rows[batch_start:batch_start + BATCH_SIZE]
-                nested = await db.begin_nested()
-                try:
-                    for offset, row in enumerate(batch):
-                        idx = batch_start + offset
-                        if not row:
-                            continue
-                        valid_cols = [c for c in columns if c in type_map and c in row and c in table_col_names]
-                        if not valid_cols:
-                            continue
-                        col_str = ', '.join(f'"{c}"' for c in valid_cols)
-                        val_str = ', '.join(f':{c}__row{idx}' for c in valid_cols)
-                        params = {}
-                        for c in valid_cols:
-                            raw_val = row[c]
-                            col_type = type_map.get(c)
-                            deserialized = deserialize_value(raw_val, col_type) if col_type else raw_val
-                            params[f'{c}__row{idx}'] = deserialized
-                        update_cols = [c for c in valid_cols if c not in pk_cols]
-                        if pk_cols and update_cols:
-                            update_str = ', '.join(f'"{c}" = EXCLUDED."{c}"' for c in update_cols)
-                            await db.execute(text(
-                                f'INSERT INTO {qtname} ({col_str}) VALUES ({val_str}) ON CONFLICT ({", ".join(pk_cols)}) DO UPDATE SET {update_str}'
-                            ), params)
-                        else:
-                            await db.execute(text(
-                                f'INSERT INTO {qtname} ({col_str}) VALUES ({val_str}) ON CONFLICT DO NOTHING'
-                            ), params)
-                        upserted += 1
-                    await nested.commit()
-                except (SQLAlchemyError, ValueError, TypeError) as e:
-                    await nested.rollback()
-                    batch_errors.append(f'批次 {batch_start // BATCH_SIZE + 1}: {e}')
-                    logger.warning(f'增量恢复表 {tname} 批次 {batch_start // BATCH_SIZE + 1} 失败: {e}')
-            if batch_errors:
-                results[tname] = {'status': 'partial', 'upserted': upserted, 'batch_errors': batch_errors}
-                errors.append(f'{tname}: {len(batch_errors)} 个批次失败')
-            else:
-                results[tname] = {'status': 'ok', 'upserted': upserted}
-            total_upserted += upserted
+        total_upserted, results, errors = await _restore_incremental_tables(db, backup_data, table_map)
 
         try:
             await db.execute(text("SET session_replication_role = 'origin'"))
         except (SQLAlchemyError, OSError) as e:
             logger.warning(f'重新启用外键约束失败: {e}')
-        await db.commit()
-        try:
-            from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
-            await invalidate_related_caches(CacheDomain.ALL)
-        except (RuntimeError, OSError, ValueError) as e:
-            logger.warning(f'增量恢复后缓存清除失败: {e}')
-        try:
-            from fastapi_app.core.purchase_cache import invalidate_purchase_caches
-            invalidate_purchase_caches()
-        except (RuntimeError, OSError, ValueError) as e:
-            logger.warning(f'增量恢复后采购缓存清除失败: {e}')
+        await db.flush()
+        await _invalidate_incremental_caches()
     except BackupLockError:
         raise
     except (SQLAlchemyError, ValueError, OSError) as e:
@@ -2906,10 +3362,7 @@ async def restore_incremental(
         raise RestoreError(f'增量恢复过程中出错: {e}') from e
     finally:
         if lock_acquired:
-            try:
-                await db.execute(text('SELECT pg_advisory_unlock(:lock_id)'), {'lock_id': RESTORE_LOCK_ID})
-            except (OSError, ValueError, SQLAlchemyError):
-                logger.warning('释放增量恢复锁失败')
+            await _release_restore_lock(db)
 
     return {
         'success': True, 'format': 'incremental', 'filename': filename,
@@ -2962,78 +3415,96 @@ async def write_backup_record(
 # 备份文件列表 / 状态查询
 # ---------------------------------------------------------------------------
 
+def _read_encrypted_backup_meta(f: Path) -> dict:
+    """读取加密备份的元数据（从 .meta 侧车文件）"""
+    entry: dict = {'format': 'encrypted', 'encrypted': True}
+    meta_path = f.with_suffix('')  # 去掉 .enc → .zip.meta / .json.meta
+    meta_path = meta_path.with_suffix('.meta')  # → .zip.meta / .json.meta
+    if not meta_path.exists():
+        # 也尝试 .enc.meta
+        meta_path = f.with_name(f.name + '.meta')
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text(encoding='utf-8'))
+            entry.update({
+                'exported_at': meta.get('created_at', ''),
+                'table_count': meta.get('table_count', 0),
+                'total_rows': meta.get('total_rows', 0),
+                'remark': meta.get('remark', ''),
+                'exported_by': meta.get('exported_by', ''),
+                'includes': meta.get('includes', {}),
+                'base_timestamp': meta.get('base_timestamp', ''),
+            })
+        except (OSError, json.JSONDecodeError, ValueError) as e:
+            logger.warning(f'读取加密备份元数据 {meta_path.name} 失败: {e}')
+    return entry
+
+
+def _read_zip_backup_meta(f: Path) -> dict:
+    """读取 ZIP 备份的 manifest 元数据"""
+    entry: dict = {}
+    try:
+        with zipfile.ZipFile(f, 'r') as zf:
+            if 'manifest.json' in zf.namelist():
+                manifest = json.loads(zf.read('manifest.json'))
+                entry.update({
+                    'format': manifest.get('type', 'zip'),
+                    'exported_at': manifest.get('exported_at', ''),
+                    'exported_by': manifest.get('exported_by', ''),
+                    'remark': manifest.get('remark', ''),
+                    'table_count': manifest.get('table_count', 0),
+                    'total_rows': manifest.get('total_rows', 0),
+                    'includes': manifest.get('includes', {}),
+                    'base_timestamp': manifest.get('base_timestamp', ''),
+                    'encrypted': manifest.get('encrypted', False),
+                })
+    except (OSError, zipfile.BadZipFile, ValueError) as e:
+        logger.warning(f'读取 ZIP 备份 {f.name} 失败: {e}')
+        entry['error'] = str(e)
+    return entry
+
+
+def _read_json_backup_meta(f: Path) -> dict:
+    """读取 JSON 备份的元数据"""
+    entry: dict = {}
+    try:
+        data = json.loads(f.read_text(encoding='utf-8'))
+        entry.update({
+            'format': 'json',
+            'exported_at': data.get('exported_at', ''),
+            'exported_by': data.get('exported_by', ''),
+            'remark': data.get('remark', ''),
+            'table_count': len(data.get('tables', {})),
+            'total_rows': sum(t.get('count', len(t.get('rows', []))) for t in data.get('tables', {}).values()),
+        })
+    except (OSError, json.JSONDecodeError, ValueError) as e:
+        logger.warning(f'读取 JSON 备份 {f.name} 失败: {e}')
+        entry['error'] = str(e)
+    return entry
+
+
+def _read_backup_file_meta(f: Path) -> dict:
+    """根据文件扩展名读取备份文件元数据"""
+    if f.name.endswith('.zip.enc') or f.name.endswith('.json.enc'):
+        return _read_encrypted_backup_meta(f)
+    if f.name.endswith('.zip'):
+        return _read_zip_backup_meta(f)
+    if f.name.endswith('.json'):
+        return _read_json_backup_meta(f)
+    return {}
+
+
 def list_backup_files() -> list[dict]:
     """列出服务器上的所有备份文件"""
     backups = []
-    if BACKUP_DIR.exists():
-        for f in sorted(BACKUP_DIR.iterdir(), reverse=True):
-            if not f.is_file():
-                continue
-            if not ((f.name.startswith('erp_backup_') or f.name.startswith('erp_incremental_') or f.name.startswith('erp_auto_'))
-                    and (f.name.endswith('.zip') or f.name.endswith('.json')
-                         or f.name.endswith('.zip.enc') or f.name.endswith('.json.enc'))):
-                continue
-            entry: dict = {'filename': f.name, 'size': f.stat().st_size}
-            if f.name.endswith('.zip.enc') or f.name.endswith('.json.enc'):
-                # 加密备份：无法直接读取内容，从文件名提取基本信息
-                entry.update({
-                    'format': 'encrypted',
-                    'encrypted': True,
-                })
-                # 尝试从同目录 .meta 侧车文件读取元数据
-                meta_path = f.with_suffix('')  # 去掉 .enc → .zip.meta / .json.meta
-                meta_path = meta_path.with_suffix('.meta')  # → .zip.meta / .json.meta
-                if not meta_path.exists():
-                    # 也尝试 .enc.meta
-                    meta_path = f.with_name(f.name + '.meta')
-                if meta_path.exists():
-                    try:
-                        meta = json.loads(meta_path.read_text(encoding='utf-8'))
-                        entry.update({
-                            'exported_at': meta.get('created_at', ''),
-                            'table_count': meta.get('table_count', 0),
-                            'total_rows': meta.get('total_rows', 0),
-                            'remark': meta.get('remark', ''),
-                            'exported_by': meta.get('exported_by', ''),
-                            'includes': meta.get('includes', {}),
-                            'base_timestamp': meta.get('base_timestamp', ''),
-                        })
-                    except (OSError, json.JSONDecodeError, ValueError) as e:
-                        logger.warning(f'读取加密备份元数据 {meta_path.name} 失败: {e}')
-            elif f.name.endswith('.zip'):
-                try:
-                    with zipfile.ZipFile(f, 'r') as zf:
-                        if 'manifest.json' in zf.namelist():
-                            manifest = json.loads(zf.read('manifest.json'))
-                            entry.update({
-                                'format': manifest.get('type', 'zip'),
-                                'exported_at': manifest.get('exported_at', ''),
-                                'exported_by': manifest.get('exported_by', ''),
-                                'remark': manifest.get('remark', ''),
-                                'table_count': manifest.get('table_count', 0),
-                                'total_rows': manifest.get('total_rows', 0),
-                                'includes': manifest.get('includes', {}),
-                                'base_timestamp': manifest.get('base_timestamp', ''),
-                                'encrypted': manifest.get('encrypted', False),
-                            })
-                except (OSError, zipfile.BadZipFile, ValueError) as e:
-                    logger.warning(f'读取 ZIP 备份 {f.name} 失败: {e}')
-                    entry['error'] = str(e)
-            elif f.name.endswith('.json'):
-                try:
-                    data = json.loads(f.read_text(encoding='utf-8'))
-                    entry.update({
-                        'format': 'json',
-                        'exported_at': data.get('exported_at', ''),
-                        'exported_by': data.get('exported_by', ''),
-                        'remark': data.get('remark', ''),
-                        'table_count': len(data.get('tables', {})),
-                        'total_rows': sum(t.get('count', len(t.get('rows', []))) for t in data.get('tables', {}).values()),
-                    })
-                except (OSError, json.JSONDecodeError, ValueError) as e:
-                    logger.warning(f'读取 JSON 备份 {f.name} 失败: {e}')
-                    entry['error'] = str(e)
-            backups.append(entry)
+    if not BACKUP_DIR.exists():
+        return backups
+    for backup_file in sorted(BACKUP_DIR.iterdir(), reverse=True):
+        if not backup_file.is_file() or not _is_backup_file(backup_file.name):
+            continue
+        entry: dict = {'filename': backup_file.name, 'size': backup_file.stat().st_size}
+        entry.update(_read_backup_file_meta(backup_file))
+        backups.append(entry)
     return backups
 
 
@@ -3043,22 +3514,22 @@ def get_backup_status() -> dict:
     total_backups = 0
     total_size = 0
     if BACKUP_DIR.exists():
-        for f in sorted(BACKUP_DIR.iterdir(), reverse=True):
-            if not f.is_file() or not (f.name.endswith('.zip') or f.name.endswith('.json')
-                                        or f.name.endswith('.zip.enc') or f.name.endswith('.json.enc')):
+        for backup_file in sorted(BACKUP_DIR.iterdir(), reverse=True):
+            if not backup_file.is_file() or not (backup_file.name.endswith('.zip') or backup_file.name.endswith('.json')
+                                        or backup_file.name.endswith('.zip.enc') or backup_file.name.endswith('.json.enc')):
                 continue
             total_backups += 1
-            total_size += f.stat().st_size
+            total_size += backup_file.stat().st_size
             if last_full:
                 continue
             try:
-                if f.name.endswith('.zip'):
-                    with zipfile.ZipFile(f, 'r') as zf:
+                if backup_file.name.endswith('.zip'):
+                    with zipfile.ZipFile(backup_file, 'r') as zf:
                         if 'manifest.json' in zf.namelist():
                             mf = json.loads(zf.read('manifest.json'))
                             if mf.get('type') == 'full':
                                 last_full = {
-                                    'filename': f.name, 'size': f.stat().st_size,
+                                    'filename': backup_file.name, 'size': backup_file.stat().st_size,
                                     'exported_at': mf.get('exported_at', ''),
                                     'exported_by': mf.get('exported_by', ''),
                                     'remark': mf.get('remark', ''), 'type': 'full',
@@ -3083,8 +3554,8 @@ def validate_backup_file(content: bytes, filename: str) -> dict:
     if is_zip:
         try:
             zf = zipfile.ZipFile(io.BytesIO(content))
-        except zipfile.BadZipFile:
-            raise BackupFileError('无效的 ZIP 文件')
+        except zipfile.BadZipFile as e:
+            raise BackupFileError('无效的 ZIP 文件') from e
         if 'manifest.json' not in zf.namelist():
             raise BackupFileError('ZIP 备份缺少 manifest.json')
         manifest = json.loads(zf.read('manifest.json'))
@@ -3121,8 +3592,8 @@ def validate_backup_file(content: bytes, filename: str) -> dict:
     # JSON format
     try:
         backup_data = json.loads(content)
-    except json.JSONDecodeError:
-        raise BackupFileError('备份文件格式无效（非 ZIP 亦非有效 JSON）')
+    except json.JSONDecodeError as e:
+        raise BackupFileError('备份文件格式无效（非 ZIP 亦非有效 JSON）') from e
     if 'tables' not in backup_data:
         raise BackupFileError('JSON 备份文件缺少 tables 字段')
     from fastapi_app.shared_models import Base
@@ -3185,7 +3656,7 @@ async def acquire_restore_lock(task_id: str) -> bool:
             nx=True, ex=_RESTORE_LOCK_TTL
         )
         return result is not None
-    except Exception as e:
+    except Exception as e:  # defensive: Redis failure should allow restore to degrade
         logger.warning(f'获取恢复锁失败: {e}')
         return True  # Redis 故障时允许恢复（降级）
 
@@ -3197,7 +3668,7 @@ async def release_restore_lock():
         client = await _get_redis()
         if client is not None:
             await client.delete(_RESTORE_LOCK_KEY)
-    except Exception as e:
+    except Exception as e:  # defensive: release lock failure should not block restore
         logger.warning(f'释放恢复锁失败: {e}')
 
 
@@ -3209,7 +3680,7 @@ async def is_restore_in_progress() -> bool:
         if client is None:
             return False
         return await client.exists(_RESTORE_LOCK_KEY) > 0
-    except Exception:
+    except Exception:  # defensive: Redis failure should report no active restore
         return False
 
 
@@ -3220,6 +3691,98 @@ async def is_restore_in_progress() -> bool:
 # 保留策略配置
 BACKUP_RETENTION_DAYS = 30
 BACKUP_MAX_COUNT = 50
+
+
+_BACKUP_NAME_PREFIXES = ('erp_backup_', 'erp_auto_', 'erp_incremental_')
+_BACKUP_NAME_SUFFIXES = ('.zip', '.json', '.zip.enc', '.json.enc')
+
+
+def _is_backup_file(filename: str) -> bool:
+    """检查文件名是否符合备份文件命名规则"""
+    return (filename.startswith(_BACKUP_NAME_PREFIXES)
+            and filename.endswith(_BACKUP_NAME_SUFFIXES))
+
+
+def _read_incremental_base_timestamp(filepath: Path) -> str | None:
+    """从增量备份 ZIP 中读取基础全量备份的时间戳"""
+    if not filepath.name.endswith('.zip'):
+        return None
+    try:
+        with zipfile.ZipFile(filepath, 'r') as zf:
+            if 'manifest.json' in zf.namelist():
+                manifest = json.loads(zf.read('manifest.json'))
+                return manifest.get('base_timestamp')
+    except (OSError, zipfile.BadZipFile, ValueError):
+        pass
+    return None
+
+
+def _collect_backups() -> list[dict]:
+    """收集所有备份文件及其元数据"""
+    backups = []
+    for backup_file in BACKUP_DIR.iterdir():
+        if not backup_file.is_file() or not _is_backup_file(backup_file.name):
+            continue
+        is_incremental = 'incremental' in backup_file.name
+        base_timestamp = _read_incremental_base_timestamp(backup_file) if is_incremental else None
+        stat = backup_file.stat()
+        backups.append({
+            'path': backup_file, 'name': backup_file.name,
+            'mtime': datetime.fromtimestamp(stat.st_mtime),
+            'size': stat.st_size,
+            'is_incremental': is_incremental,
+            'base_timestamp': base_timestamp,
+        })
+    return backups
+
+
+def _mark_expired_and_excess(backups: list[dict], cutoff: datetime) -> set:
+    """策略1+2: 标记过期和超量文件"""
+    to_delete: set = set()
+    for b in backups:
+        if b['mtime'] < cutoff:
+            to_delete.add(b['name'])
+    if len(backups) - len(to_delete) > BACKUP_MAX_COUNT:
+        for b in reversed(backups):
+            if b['name'] in to_delete:
+                continue
+            if len(backups) - len(to_delete) <= BACKUP_MAX_COUNT:
+                break
+            to_delete.add(b['name'])
+    return to_delete
+
+
+def _cascade_delete_orphans(backups: list[dict], to_delete: set) -> None:
+    """策略3: 级联删除依赖已删除全量备份的增量备份"""
+    full_backup_timestamps = set()
+    for b in backups:
+        if not b['is_incremental'] and b['name'] not in to_delete:
+            try:
+                ts_str = b['name'].replace('erp_backup_', '').replace('erp_auto_daily_', '').replace('.zip', '').replace('.json', '')
+                full_backup_timestamps.add(ts_str)
+            except (ValueError, IndexError):
+                pass
+    for b in backups:
+        if b['is_incremental'] and b['base_timestamp']:
+            base_exists = any(ts for ts in full_backup_timestamps if ts <= b['base_timestamp'])
+            if not base_exists:
+                to_delete.add(b['name'])
+
+
+def _delete_backup_files(to_delete: set) -> tuple[list, list]:
+    """执行文件删除，返回 (deleted_names, errors)"""
+    deleted = []
+    errors = []
+    for name in to_delete:
+        filepath = BACKUP_DIR / name
+        try:
+            filepath.unlink()
+            deleted.append(name)
+            logger.info(f'已清理过期备份: {name}')
+        except OSError as e:
+            errors.append(f'{name}: {e}')
+            logger.warning(f'清理备份失败: {name}: {e}')
+    return deleted, errors
 
 
 def cleanup_old_backups() -> dict:
@@ -3236,91 +3799,14 @@ def cleanup_old_backups() -> dict:
         return {'deleted_count': 0, 'kept_count': 0, 'errors': []}
 
     from datetime import timedelta
+    cutoff = datetime.now() - timedelta(days=BACKUP_RETENTION_DAYS)
 
-    now = datetime.now()
-    cutoff = now - timedelta(days=BACKUP_RETENTION_DAYS)
-    deleted = []
-    errors = []
-
-    # 收集所有备份文件及其元数据
-    backups = []
-    for f in BACKUP_DIR.iterdir():
-        if not f.is_file():
-            continue
-        if not ((f.name.startswith('erp_backup_') or f.name.startswith('erp_auto_') or f.name.startswith('erp_incremental_'))
-                and (f.name.endswith('.zip') or f.name.endswith('.json')
-                     or f.name.endswith('.zip.enc') or f.name.endswith('.json.enc'))):
-            continue
-        mtime = datetime.fromtimestamp(f.stat().st_mtime)
-        size = f.stat().st_size
-        is_incremental = 'incremental' in f.name
-        base_timestamp = None
-
-        # 读取增量备份的基础时间戳
-        if is_incremental and f.name.endswith('.zip'):
-            try:
-                with zipfile.ZipFile(f, 'r') as zf:
-                    if 'manifest.json' in zf.namelist():
-                        manifest = json.loads(zf.read('manifest.json'))
-                        base_timestamp = manifest.get('base_timestamp')
-            except (OSError, zipfile.BadZipFile, ValueError):
-                pass
-
-        backups.append({
-            'path': f, 'name': f.name, 'mtime': mtime, 'size': size,
-            'is_incremental': is_incremental, 'base_timestamp': base_timestamp,
-        })
-
-    # 按时间排序（最新的在前）
+    backups = _collect_backups()
     backups.sort(key=lambda b: b['mtime'], reverse=True)
 
-    # 标记需要删除的文件
-    to_delete = set()
-
-    # 策略1: 删除超过保留天数的
-    for b in backups:
-        if b['mtime'] < cutoff:
-            to_delete.add(b['name'])
-
-    # 策略2: 超过最大数量的
-    if len(backups) - len(to_delete) > BACKUP_MAX_COUNT:
-        # 从最旧的开始删除
-        for b in reversed(backups):
-            if b['name'] in to_delete:
-                continue
-            if len(backups) - len(to_delete) <= BACKUP_MAX_COUNT:
-                break
-            to_delete.add(b['name'])
-
-    # 策略3: 级联删除 - 删除全量备份时，删除依赖它的增量备份
-    full_backup_timestamps = set()
-    for b in backups:
-        if not b['is_incremental'] and b['name'] not in to_delete:
-            # 提取全量备份的时间戳
-            try:
-                ts_str = b['name'].replace('erp_backup_', '').replace('erp_auto_daily_', '').replace('.zip', '').replace('.json', '')
-                full_backup_timestamps.add(ts_str)
-            except (ValueError, IndexError):
-                pass
-
-    # 检查增量备份的基础全量备份是否还在
-    for b in backups:
-        if b['is_incremental'] and b['base_timestamp']:
-            # 如果基础全量备份被删除，增量备份也应该删除
-            base_exists = any(ts for ts in full_backup_timestamps if ts <= b['base_timestamp'])
-            if not base_exists:
-                to_delete.add(b['name'])
-
-    # 执行删除
-    for name in to_delete:
-        filepath = BACKUP_DIR / name
-        try:
-            filepath.unlink()
-            deleted.append(name)
-            logger.info(f'已清理过期备份: {name}')
-        except OSError as e:
-            errors.append(f'{name}: {e}')
-            logger.warning(f'清理备份失败: {name}: {e}')
+    to_delete = _mark_expired_and_excess(backups, cutoff)
+    _cascade_delete_orphans(backups, to_delete)
+    deleted, errors = _delete_backup_files(to_delete)
 
     return {
         'deleted_count': len(deleted),
