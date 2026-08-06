@@ -3,9 +3,9 @@
     <!-- Header -->
     <div class="sb-header">
       <router-link to="/dashboard" class="sb-logo">
-        <img src="/logo_plush.png" alt="滨发玩具" width="70" height="70" />
+        <img src="/logo_plush.png" alt="东莞玩具" width="70" height="70" />
         <div v-if="!collapsed" class="sb-logo-text">
-          <div class="sb-logo-title">滨发协同系统</div>
+          <div class="sb-logo-title">东莞协同系统</div>
           <div class="sb-logo-subtitle">供应链管理平台 v2.0</div>
         </div>
       </router-link>
@@ -22,6 +22,7 @@
           :key="item.path"
           :to="item.path"
           :class="['sb-nav-item', { active: isActive(item.path) }]"
+          @pointerenter="prefetchRoute(item.path)"
         >
           <div class="sb-nav-icon" :class="{ 'sb-nav-icon-active': isActive(item.path) }">
             <i :class="resolveIcon(item.icon)" aria-hidden="true" />
@@ -35,12 +36,13 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
 defineProps<{ collapsed: boolean }>()
 
 const route = useRoute()
+const router = useRouter()
 const authStore = useAuthStore()
 
 const activeBase = computed(() => '/' + route.path.split('/').filter(Boolean)[0])
@@ -49,38 +51,21 @@ function isActive(path: string) {
   return activeBase.value === path
 }
 
-const iconMap: Record<string, string> = {
-  dashboard: 'fas fa-gauge',
-  order: 'fas fa-cart-shopping',
-  product: 'fas fa-box',
-  stock: 'fas fa-warehouse',
-  customer: 'fas fa-user',
-  supplier: 'fas fa-truck',
-  approval: 'fas fa-clipboard-check',
-  purchase: 'fas fa-store',
-  material: 'fas fa-cubes',
-  batch: 'fas fa-table-cells',
-  production: 'fas fa-industry',
-  report: 'fas fa-chart-bar',
-  user: 'fas fa-users-gear',
-  permission: 'fas fa-ticket',
-  settings: 'fas fa-gear',
-  'ocr-import': 'fas fa-upload',
-  case: 'fas fa-box',
-  'material-calculator': 'fas fa-list',
-  'fa-shield-alt': 'fas fa-shield-halved',
-  'fa-shopping-cart': 'fas fa-cart-shopping',
-  'fa-users-cog': 'fas fa-users-gear',
-  'fa-mobile-alt': 'fas fa-mobile-screen-button',
-  'fa-file-invoice': 'fas fa-file-invoice',
-  'fa-shipping-fast': 'fas fa-truck-fast',
-  'fa-box-open': 'fas fa-box-open',
-  'fa-yen-sign': 'fas fa-yen-sign',
-  'fa-calculator': 'fas fa-calculator',
-  'fa-truck-loading': 'fas fa-truck-ramp-box',
-  'fa-database': 'fas fa-database',
-  'fa-building': 'fas fa-building',
+// 悬停预取：触发目标路由的动态 import，点击时即可命中缓存
+const prefetched = new Set<string>()
+function prefetchRoute(path: string) {
+  if (prefetched.has(path)) return
+  prefetched.add(path)
+  const { matched } = router.resolve(path)
+  for (const r of matched) {
+    const c = r.components?.default
+    if (typeof c === 'function') {
+      ;(c as () => Promise<unknown>)().catch(() => {})
+    }
+  }
 }
+
+import { iconMap } from '@/utils/iconMap'
 
 function resolveIcon(icon: string | undefined): string {
   if (!icon) return 'fas fa-circle'
@@ -93,7 +78,7 @@ function resolveIcon(icon: string | undefined): string {
 <style scoped>
 /* ===== Sidebar Card ===== */
 .sb-sidebar {
-  width: 280px;
+  width: 230px;
   min-width: 68px;
   flex-shrink: 0;
   background: white;
@@ -104,12 +89,13 @@ function resolveIcon(icon: string | undefined): string {
   flex-direction: column;
   transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
-  height: calc(100vh - 24px);
-  margin: 12px;
+  height: calc(100vh - 8px);
+  margin: 4px 12px;
 }
 
 .sb-sidebar:hover {
-  box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  transform: translateY(-2px);
 }
 
 .sb-sidebar.collapsed {

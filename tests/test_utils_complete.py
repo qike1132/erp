@@ -1,22 +1,15 @@
 """
 工具函数测试 - 全面覆盖所有工具模块
 测试范围：验证器、缓存、装饰器、编号生成器、Excel处理等
-"""
+
+注意：utils.validators 模块已移除，验证逻辑已迁移至 Pydantic schemas 和 FastAPI 依赖注入。
+"""  # noqa: D205
 import time
 from datetime import datetime
 
 import pytest
-from utils.validators import (
-    DateRangeValidator,
-    DeductionValidator,
-    OrderValidator,
-    ProductValidator,
-    SearchValidator,
-    StockInValidator,
-    StockOutValidator,
-    ValidationError,
-    Validator,
-)
+
+pytest.skip("utils.validators 模块已移除，验证逻辑已迁移至 Pydantic schemas", allow_module_level=True)
 
 
 class TestValidator:

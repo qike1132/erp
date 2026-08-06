@@ -4,7 +4,7 @@ import logging
 from sqlalchemy import exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.redis_wrapper import safe_delete, safe_get, safe_set
+from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
 from fastapi_app.shared_models import Customer, CustomerAccessLog, Order, PurchaseOrder, PurchasePlan, StockIn, StockOut
 
 logger = logging.getLogger(__name__)
@@ -63,6 +63,7 @@ async def search_customers(db: AsyncSession, query_str: str) -> list[Customer]:
 
 async def get_active_customer_names(db: AsyncSession) -> list[dict]:
     """获取所有启用客户名称列表（带Redis缓存5分钟）"""
+    from fastapi_app.core.redis_wrapper import safe_get, safe_set
     cached = await safe_get(_ACTIVE_CUSTOMER_CACHE_KEY, context='客户名称缓存')
     if cached:
         return cached
@@ -167,4 +168,4 @@ async def delete_customer(db: AsyncSession, customer_id: int) -> None:
 
 async def _invalidate_customer_cache():
     """清除客户名称缓存"""
-    await safe_delete(_ACTIVE_CUSTOMER_CACHE_KEY, context='客户名称缓存')
+    await cache_mgr.invalidate(InvalidationStrategy.KEYS, [_ACTIVE_CUSTOMER_CACHE_KEY])

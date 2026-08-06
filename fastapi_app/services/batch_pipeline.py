@@ -20,7 +20,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import TypeVar
 
-from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.shared_models import User
@@ -61,15 +60,20 @@ class BatchImportPipeline[T](ABC):
 
     async def execute(
         self,
-        file: UploadFile,
+        content: bytes,
         db: AsyncSession,
         user: User,
     ) -> BatchImportResult:
-        """执行完整的导入管道: parse → validate → persist"""
+        """执行完整的导入管道: parse → validate → persist
+
+        Args:
+            content: 文件原始字节内容（由端点层从 UploadFile 读取后传入）。
+            db: 异步数据库会话。
+            user: 当前操作用户。
+        """
         result = BatchImportResult()
 
         # 1. 文件大小检查
-        content = await file.read()
         if len(content) > MAX_BATCH_UPLOAD_SIZE:
             result.errors.append(f"文件大小超过限制({MAX_BATCH_UPLOAD_SIZE // 1024 // 1024}MB)")
             result.error_count = 1
@@ -95,8 +99,8 @@ class BatchImportPipeline[T](ABC):
             result.success_count = len(created_ids)
             result.created_ids = created_ids
 
-            await db.commit()
-        except (ValueError, TypeError, OSError) as e:
+            await db.flush()
+        except (ValueError, TypeError, OSError, RuntimeError) as e:
             await db.rollback()
             logger.exception(f"批量导入失败: {e}")
             result.errors.append(f"导入失败: {str(e)}")

@@ -1,7 +1,7 @@
 """
 客户模型 - 纯 SQLAlchemy 2.0 声明式
 
-映射到与 Flask-SQLAlchemy Customer 相同的 'customer' 表。
+映射到 'customer' 表。
 """
 from datetime import datetime, timezone
 

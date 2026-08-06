@@ -24,8 +24,27 @@ _REPORT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-_slow_query_count = 0
-_slow_query_lock = threading.Lock()
+
+class _SlowQueryCounter:
+    def __init__(self):
+        self.value = 0
+        self.lock = threading.Lock()
+
+    def inc(self) -> int:
+        with self.lock:
+            self.value += 1
+            return self.value
+
+    def get(self) -> int:
+        with self.lock:
+            return self.value
+
+    def reset(self) -> None:
+        with self.lock:
+            self.value = 0
+
+
+_counter = _SlowQueryCounter()
 
 
 def _get_threshold(statement: str) -> float:
@@ -43,19 +62,21 @@ def setup_slow_query_listener(engine):
 
     @event.listens_for(engine, "after_cursor_execute")
     def after_cursor_execute(conn, cursor, statement, parameters, context, executemany):
-        total = time.time() - context._query_start_time
-        del context._query_start_time
+        start_time = getattr(context, '_query_start_time', None)
+        if start_time is None:
+            return
+        total = time.time() - start_time
 
         threshold = _get_threshold(statement)
         if total > threshold:
-            with _slow_query_lock:
-                _slow_query_count += 1
+            _counter.inc()
 
             truncated = statement[:200] + "..." if len(statement) > 200 else statement
             logger.warning(
-                "慢查询 [%.3fs > %.2fs]: %s | 参数: %s",
+                "慢查询: %.3fs (阈值: %.1fs) 类型: %s | SQL: %s | 参数: %s",
                 total,
                 threshold,
+                "report" if threshold == SLOW_QUERY_REPORT_THRESHOLD else "oltp",
                 truncated,
                 str(parameters)[:100] if parameters else "",
             )
@@ -63,9 +84,14 @@ def setup_slow_query_listener(engine):
             try:
                 from fastapi_app.core.metrics import SLOW_QUERY_TOTAL
                 SLOW_QUERY_TOTAL.inc()
-            except (ImportError, ValueError):
+            except (ImportError, ValueError, Exception):
                 pass
 
 
 def get_slow_query_count() -> int:
-    return _slow_query_count
+    return _counter.get()
+
+
+def reset_slow_query_count() -> None:
+    """重置慢查询计数器（用于测试/监控指标重置）"""
+    _counter.reset()

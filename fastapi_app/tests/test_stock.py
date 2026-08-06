@@ -79,7 +79,7 @@ class TestStockInService:
 
         stockin = MagicMock()
         stockin.id = 1
-        stockin.stockin_no = "SI-001"
+        stockin.stockin_no = "BH-001"
 
         mock_db.commit = AsyncMock()
         mock_db.rollback = AsyncMock()
@@ -113,7 +113,7 @@ class TestStockInService:
     async def test_delete_stockin_has_stockouts(self, mock_db):
         stockin = MagicMock()
         stockin.id = 1
-        stockin.stockin_no = "SI-001"
+        stockin.stockin_no = "BH-001"
         stockin.quantity = 10
         stockin.stockin_stockouts = [MagicMock(quantity=5)]
         mock_result = MagicMock()
@@ -125,7 +125,7 @@ class TestStockInService:
     async def test_delete_stockin_success(self, mock_db):
         stockin = MagicMock()
         stockin.id = 1
-        stockin.stockin_no = "SI-001"
+        stockin.stockin_no = "BH-001"
         stockin.quantity = 10
         stockin.product_id = 1
         stockin.stockin_stockouts = []
@@ -259,8 +259,7 @@ class TestStockOutService:
         mock_db.rollback = AsyncMock()
 
         with patch('fastapi_app.services.stock_service.delete_stockout_core', new_callable=AsyncMock, return_value=None) as mock_delete:
-            with patch('fastapi_app.services.stock_service.invalidate_cache', new_callable=AsyncMock):
-                await stock_service.delete_stockout(mock_db, 1)
+            await stock_service.delete_stockout(mock_db, 1)
         mock_delete.assert_awaited_once()
 
 
@@ -306,7 +305,7 @@ class TestStockInEndpoints:
         product.current_stock = 100
         stockin = MagicMock()
         stockin.id = 1
-        stockin.stockin_no = "SI-001"
+        stockin.stockin_no = "BH-001"
         mock_db.commit = AsyncMock()
         mock_db.rollback = AsyncMock()
         mock_db.get = AsyncMock(return_value=product)
@@ -341,7 +340,7 @@ class TestStockInEndpoints:
     async def test_delete_stockin_success(self, mock_perm, client, mock_db):
         stockin = MagicMock()
         stockin.id = 1
-        stockin.stockin_no = "SI-001"
+        stockin.stockin_no = "BH-001"
         stockin.quantity = 10
         stockin.product_id = 1
         stockin.stockin_stockouts = []
@@ -434,7 +433,7 @@ class TestInventoryEndpoints:
     async def test_inventory(self, client, mock_db):
         with patch('fastapi_app.services.stock_service.get_inventory_paginated', new_callable=AsyncMock, return_value={
             'inventory_data': [], 'total_order_qty': 0, 'total_stockin_qty': 0,
-            'total_stock': 0, 'all_countries': [], 'all_customers': [],
+            'total_stock': 0, 'total_available_stock': 0, 'all_countries': [], 'all_customers': [],
             'total_items': 0, 'page': 1, 'per_page': 50,
         }):
             response = await client.get("/api/v1/stock/inventory")
@@ -446,7 +445,7 @@ class TestInventoryEndpoints:
     async def test_inventory_with_filters(self, client, mock_db):
         with patch('fastapi_app.services.stock_service.get_inventory_paginated', new_callable=AsyncMock, return_value={
             'inventory_data': [], 'total_order_qty': 0, 'total_stockin_qty': 0,
-            'total_stock': 0, 'all_countries': [], 'all_customers': [],
+            'total_stock': 0, 'total_available_stock': 0, 'all_countries': [], 'all_customers': [],
             'total_items': 0, 'page': 1, 'per_page': 50,
         }):
             response = await client.get("/api/v1/stock/inventory?customer=测试客户&product=测试产品")

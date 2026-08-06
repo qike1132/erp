@@ -242,6 +242,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
+import { fmtQty as formatQty } from '@/utils/formatQty'
 
 const props = defineProps<{
   open: boolean
@@ -298,10 +299,6 @@ function getGroupFabricCount(gi: number | string): number {
   const group = props.factoryData?.groups?.[Number(gi)]
   if (!group) return 1
   return (group.suppliers || []).reduce((sum: number, s: any) => sum + (s.fabrics?.length || 0), 0)
-}
-
-function formatQty(val: any): string {
-  return parseFloat(String(val || 0)).toFixed(2)
 }
 </script>
 

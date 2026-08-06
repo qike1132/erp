@@ -39,7 +39,7 @@ def excel_reader(file):
     自动处理临时文件的创建和清理
 
     参数:
-        file: Flask上传的文件对象
+        file: HTTP上传的文件对象
 
     用法:
         with excel_reader(file) as reader:

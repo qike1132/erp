@@ -10,19 +10,13 @@ from datetime import datetime, timedelta
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.services import escape_like
+from fastapi_app.core.cache import cache_result
+from fastapi_app.core.sanitizer import escape_like
+from fastapi_app.utils import calc_total_pages, parse_date_strict
 
 logger = logging.getLogger(__name__)
 
 _cached_dialect: str | None = None
-
-
-def _parse_report_date(date_str: str, field_name: str) -> datetime:
-    """解析报表日期参数，格式必须为 YYYY-MM-DD"""
-    try:
-        return datetime.strptime(date_str, '%Y-%m-%d')
-    except ValueError:
-        raise ValueError(f'{field_name}日期格式无效（{date_str}），应为 YYYY-MM-DD')
 
 
 def _get_dialect_name() -> str:
@@ -76,6 +70,46 @@ def _string_agg(expr: str, separator: str, distinct: bool = True) -> str:
         return f"GROUP_CONCAT({distinct_kw}{expr} ORDER BY {expr} SEPARATOR '{separator}')"
 
 
+async def _query_logs_generic(
+    db: AsyncSession,
+    *,
+    base_where: list[str],
+    data_sql_template: str,
+    qty_sql_template: str,
+    params: dict,
+    page: int,
+    per_page: int,
+    row_mapper: callable,
+) -> dict:
+    """通用日志查询（分页+分组聚合+COUNT(*) OVER()合并计数）"""
+    where_sql = (" AND " + " AND ".join(base_where)) if base_where else ""
+    params['limit'] = per_page
+    params['offset'] = (page - 1) * per_page
+
+    data_sql = data_sql_template.format(where_sql=where_sql)
+    results = (await db.execute(text(data_sql), params)).fetchall()
+
+    total = results[0].total_count if results else 0
+    logs = [row_mapper(row) for row in results]
+
+    qty_sql = qty_sql_template.format(where_sql=where_sql)
+    total_qty = (await db.execute(text(qty_sql), params)).scalar() or 0
+
+    return {
+        'success': True,
+        'logs': logs,
+        'stats': {'total_count': total, 'total_quantity': total_qty},
+        'pagination': {'page': page, 'per_page': per_page, 'total': total,
+                       'pages': calc_total_pages(total, per_page)},
+    }
+
+
+@cache_result(
+    key_prefix='reports:order_logs',
+    ttl=30,
+    local_ttl=10,
+    key_builder=lambda *args, **kwargs: f"c:{kwargs.get('customer','')}:p:{kwargs.get('product','')}:s:{kwargs.get('status','')}:sd:{kwargs.get('start_date','')}:ed:{kwargs.get('end_date','')}:pg:{kwargs.get('page',1)}:pp:{kwargs.get('per_page',20)}",
+)
 async def get_order_logs(db: AsyncSession, customer: str = '', product: str = '', status: str = '',
                          start_date: str = '', end_date: str = '',
                          page: int = 1, per_page: int = 20) -> dict:
@@ -99,20 +133,21 @@ async def get_order_logs(db: AsyncSession, customer: str = '', product: str = ''
             where_clauses.append("o.status = :status")
             params['status'] = status
     if start_date:
-        params['start_date'] = _parse_report_date(start_date, '开始')
+        params['start_date'] = parse_date_strict(start_date, '开始')
         where_clauses.append("o.order_date >= :start_date")
     if end_date:
-        params['end_date'] = _parse_report_date(end_date, '结束') + timedelta(days=1)
+        params['end_date'] = parse_date_strict(end_date, '结束') + timedelta(days=1)
         where_clauses.append("o.order_date < :end_date")
 
-    where_sql = (" AND " + " AND ".join(where_clauses)) if where_clauses else ""
-
     order_tbl = _quote_identifier("order")
-    params['limit'] = per_page
-    params['offset'] = (page - 1) * per_page
 
-    # 数据 + 计数合并查询（COUNT(*) OVER() 在 GROUP BY 后、LIMIT 前计算）
-    data_sql = f"""SELECT
+    return await _query_logs_generic(
+        db,
+        base_where=where_clauses,
+        params=params,
+        page=page,
+        per_page=per_page,
+        data_sql_template=f"""SELECT
         DATE(o.order_date) as order_date_only, o.customer, p.name as product_name,
         p.barcode as product_barcode, o.status,
         SUM(o.quantity) as total_quantity, COUNT(o.id) as order_count,
@@ -120,35 +155,20 @@ async def get_order_logs(db: AsyncSession, customer: str = '', product: str = ''
         {_string_agg('o.note', '; ')} as notes,
         COUNT(*) OVER() as total_count
         FROM {order_tbl} o JOIN product p ON o.product_id = p.id
-        WHERE 1=1 {where_sql}
+        WHERE 1=1 {{where_sql}}
         GROUP BY DATE(o.order_date), o.customer, p.name, p.barcode, o.status
         ORDER BY DATE(o.order_date) DESC
-        LIMIT :limit OFFSET :offset"""
-
-    results = (await db.execute(text(data_sql), params)).fetchall()
-
-    total = results[0].total_count if results else 0
-    logs = []
-    for row in results:
-        logs.append({
+        LIMIT :limit OFFSET :offset""",
+        qty_sql_template=f"SELECT COALESCE(SUM(o.quantity), 0) FROM {order_tbl} o JOIN product p ON o.product_id = p.id WHERE 1=1 {{where_sql}}",
+        row_mapper=lambda row: {
             'order_date': row.order_date_only.strftime('%Y-%m-%d') if row.order_date_only else '-',
             'customer': row.customer, 'product_name': row.product_name,
             'product_barcode': row.product_barcode or '',
             'quantity': row.total_quantity, 'status': row.status,
             'order_count': row.order_count,
             'order_nos': row.order_nos or '', 'note': row.notes or '',
-        })
-
-    # total_qty 单独查询（无 GROUP BY，简单聚合，速度快）
-    qty_sql = f"SELECT COALESCE(SUM(o.quantity), 0) FROM {order_tbl} o JOIN product p ON o.product_id = p.id WHERE 1=1 {where_sql}"
-    total_qty = (await db.execute(text(qty_sql), params)).scalar() or 0
-
-    return {
-        'success': True,
-        'logs': logs,
-        'stats': {'total_count': total, 'total_quantity': total_qty},
-        'pagination': {'page': page, 'per_page': per_page, 'total': total, 'pages': (total + per_page - 1) // per_page if per_page else 0},
-    }
+        },
+    )
 
 
 async def export_report_to_excel(db, report_type: str, customer: str = '', product: str = '',
@@ -206,6 +226,12 @@ async def export_report_to_excel(db, report_type: str, customer: str = '', produ
     return content
 
 
+@cache_result(
+    key_prefix='reports:stockin_logs',
+    ttl=30,
+    local_ttl=10,
+    key_builder=lambda *args, **kwargs: f"c:{kwargs.get('customer','')}:p:{kwargs.get('product','')}:sd:{kwargs.get('start_date','')}:ed:{kwargs.get('end_date','')}:pg:{kwargs.get('page',1)}:pp:{kwargs.get('per_page',20)}",
+)
 async def get_stockin_logs(db: AsyncSession, customer: str = '', product: str = '',
                            start_date: str = '', end_date: str = '',
                            page: int = 1, per_page: int = 20) -> dict:
@@ -224,17 +250,19 @@ async def get_stockin_logs(db: AsyncSession, customer: str = '', product: str = 
         where_clauses.append("(COALESCE(p.name, '') LIKE :product OR COALESCE(p.barcode, '') LIKE :product)")
         params['product'] = f'%{escape_like(product)}%'
     if start_date:
-        params['start_date'] = _parse_report_date(start_date, '开始')
+        params['start_date'] = parse_date_strict(start_date, '开始')
         where_clauses.append("s.stockin_date >= :start_date")
     if end_date:
-        params['end_date'] = _parse_report_date(end_date, '结束') + timedelta(days=1)
+        params['end_date'] = parse_date_strict(end_date, '结束') + timedelta(days=1)
         where_clauses.append("s.stockin_date < :end_date")
 
-    where_sql = (" AND " + " AND ".join(where_clauses)) if where_clauses else ""
-    params['limit'] = per_page
-    params['offset'] = (page - 1) * per_page
-
-    data_sql = f"""SELECT
+    return await _query_logs_generic(
+        db,
+        base_where=where_clauses,
+        params=params,
+        page=page,
+        per_page=per_page,
+        data_sql_template=f"""SELECT
         DATE(s.stockin_date) as stockin_date_only, s.customer, p.name as product_name,
         p.barcode as product_barcode,
         SUM(s.quantity) as total_quantity, COUNT(s.id) as stockin_count,
@@ -242,35 +270,27 @@ async def get_stockin_logs(db: AsyncSession, customer: str = '', product: str = 
         {_string_agg('s.note', '; ')} as notes,
         COUNT(*) OVER() as total_count
         FROM stock_in s JOIN product p ON s.product_id = p.id
-        WHERE 1=1 {where_sql}
+        WHERE 1=1 {{where_sql}}
         GROUP BY DATE(s.stockin_date), s.customer, p.name, p.barcode
         ORDER BY DATE(s.stockin_date) DESC
-        LIMIT :limit OFFSET :offset"""
-
-    results = (await db.execute(text(data_sql), params)).fetchall()
-
-    total = results[0].total_count if results else 0
-    logs = []
-    for row in results:
-        logs.append({
+        LIMIT :limit OFFSET :offset""",
+        qty_sql_template="SELECT COALESCE(SUM(s.quantity), 0) FROM stock_in s JOIN product p ON s.product_id = p.id WHERE 1=1 {where_sql}",
+        row_mapper=lambda row: {
             'stockin_date': row.stockin_date_only.strftime('%Y-%m-%d') if row.stockin_date_only else '-',
             'customer': row.customer, 'product_name': row.product_name,
             'product_barcode': row.product_barcode or '',
             'quantity': row.total_quantity, 'stockin_count': row.stockin_count,
             'stockin_nos': row.stockin_nos or '', 'note': row.notes or '',
-        })
-
-    qty_sql = f"SELECT COALESCE(SUM(s.quantity), 0) FROM stock_in s JOIN product p ON s.product_id = p.id WHERE 1=1 {where_sql}"
-    total_qty = (await db.execute(text(qty_sql), params)).scalar() or 0
-
-    return {
-        'success': True,
-        'logs': logs,
-        'stats': {'total_count': total, 'total_quantity': total_qty},
-        'pagination': {'page': page, 'per_page': per_page, 'total': total, 'pages': (total + per_page - 1) // per_page if per_page else 0},
-    }
+        },
+    )
 
 
+@cache_result(
+    key_prefix='reports:stockout_logs',
+    ttl=30,
+    local_ttl=10,
+    key_builder=lambda *args, **kwargs: f"c:{kwargs.get('customer','')}:p:{kwargs.get('product','')}:sd:{kwargs.get('start_date','')}:ed:{kwargs.get('end_date','')}:pg:{kwargs.get('page',1)}:pp:{kwargs.get('per_page',20)}",
+)
 async def get_stockout_logs(db: AsyncSession, customer: str = '', product: str = '',
                             start_date: str = '', end_date: str = '',
                             page: int = 1, per_page: int = 20) -> dict:
@@ -290,17 +310,19 @@ async def get_stockout_logs(db: AsyncSession, customer: str = '', product: str =
         where_clauses.append("(COALESCE(p.name, '') LIKE :product OR COALESCE(p.barcode, '') LIKE :product)")
         params['product'] = f'%{escape_like(product)}%'
     if start_date:
-        params['start_date'] = _parse_report_date(start_date, '开始')
+        params['start_date'] = parse_date_strict(start_date, '开始')
         where_clauses.append("so.stockout_date >= :start_date")
     if end_date:
-        params['end_date'] = _parse_report_date(end_date, '结束') + timedelta(days=1)
+        params['end_date'] = parse_date_strict(end_date, '结束') + timedelta(days=1)
         where_clauses.append("so.stockout_date < :end_date")
 
-    where_sql = " AND " + " AND ".join(where_clauses)
-    params['limit'] = per_page
-    params['offset'] = (page - 1) * per_page
-
-    data_sql = f"""SELECT
+    return await _query_logs_generic(
+        db,
+        base_where=where_clauses,
+        params=params,
+        page=page,
+        per_page=per_page,
+        data_sql_template=f"""SELECT
         DATE(so.stockout_date) as stockout_date_only, so.customer, p.name as product_name,
         p.barcode as product_barcode,
         SUM(so.quantity - so.returned_quantity) as total_quantity, COUNT(so.id) as stockout_count,
@@ -309,38 +331,30 @@ async def get_stockout_logs(db: AsyncSession, customer: str = '', product: str =
         COUNT(*) OVER() as total_count
         FROM stock_out so JOIN product p ON so.product_id = p.id
         LEFT JOIN "order" o2 ON so.order_id = o2.id
-        WHERE 1=1 {where_sql}
+        WHERE 1=1 {{where_sql}}
         GROUP BY DATE(so.stockout_date), so.customer, p.name, p.barcode
         ORDER BY DATE(so.stockout_date) DESC
-        LIMIT :limit OFFSET :offset"""
-
-    results = (await db.execute(text(data_sql), params)).fetchall()
-
-    total = results[0].total_count if results else 0
-    logs = []
-    for row in results:
-        logs.append({
+        LIMIT :limit OFFSET :offset""",
+        qty_sql_template="""SELECT COALESCE(SUM(so.quantity - so.returned_quantity), 0)
+        FROM stock_out so JOIN product p ON so.product_id = p.id
+        LEFT JOIN "order" o2 ON so.order_id = o2.id
+        WHERE 1=1 {where_sql}""",
+        row_mapper=lambda row: {
             'stockout_date': row.stockout_date_only.strftime('%Y-%m-%d') if row.stockout_date_only else '-',
             'customer': row.customer or '', 'product_name': row.product_name,
             'product_barcode': row.product_barcode or '',
             'quantity': row.total_quantity, 'stockout_count': row.stockout_count,
             'stockout_nos': row.stockout_nos or '', 'note': row.notes or '',
-        })
-
-    qty_sql = f"""SELECT COALESCE(SUM(so.quantity - so.returned_quantity), 0)
-        FROM stock_out so JOIN product p ON so.product_id = p.id
-        LEFT JOIN "order" o2 ON so.order_id = o2.id
-        WHERE 1=1 {where_sql}"""
-    total_qty = (await db.execute(text(qty_sql), params)).scalar() or 0
-
-    return {
-        'success': True,
-        'logs': logs,
-        'stats': {'total_count': total, 'total_quantity': total_qty},
-        'pagination': {'page': page, 'per_page': per_page, 'total': total, 'pages': (total + per_page - 1) // per_page if per_page else 0},
-    }
+        },
+    )
 
 
+@cache_result(
+    key_prefix='reports:deduction_logs',
+    ttl=30,
+    local_ttl=10,
+    key_builder=lambda *args, **kwargs: f"c:{kwargs.get('customer','')}:p:{kwargs.get('product','')}:sd:{kwargs.get('start_date','')}:ed:{kwargs.get('end_date','')}:pg:{kwargs.get('page',1)}:pp:{kwargs.get('per_page',20)}",
+)
 async def get_deduction_logs(db: AsyncSession, customer: str = '', product: str = '',
                               start_date: str = '', end_date: str = '',
                               page: int = 1, per_page: int = 20) -> dict:
@@ -360,17 +374,21 @@ async def get_deduction_logs(db: AsyncSession, customer: str = '', product: str 
         where_clauses.append("(COALESCE(p.name, '') LIKE :product OR COALESCE(p.barcode, '') LIKE :product)")
         params['product'] = f'%{escape_like(product)}%'
     if start_date:
-        params['start_date'] = _parse_report_date(start_date, '开始')
+        params['start_date'] = parse_date_strict(start_date, '开始')
         where_clauses.append("so.stockout_date >= :start_date")
     if end_date:
-        params['end_date'] = _parse_report_date(end_date, '结束') + timedelta(days=1)
+        params['end_date'] = parse_date_strict(end_date, '结束') + timedelta(days=1)
         where_clauses.append("so.stockout_date < :end_date")
 
-    where_sql = " AND " + " AND ".join(where_clauses)
-    params['limit'] = per_page
-    params['offset'] = (page - 1) * per_page
+    order_tbl = _quote_identifier('order')
 
-    data_sql = f"""SELECT
+    return await _query_logs_generic(
+        db,
+        base_where=where_clauses,
+        params=params,
+        page=page,
+        per_page=per_page,
+        data_sql_template=f"""SELECT
         DATE(so.stockout_date) as deduction_date_only, so.customer, p.name as product_name,
         p.barcode as sku,
         SUM(so.quantity - so.returned_quantity) as total_quantity, COUNT(so.id) as deduction_count,
@@ -378,34 +396,20 @@ async def get_deduction_logs(db: AsyncSession, customer: str = '', product: str 
         {_string_agg('o.note', '; ')} as order_notes,
         COUNT(*) OVER() as total_count
         FROM stock_out so JOIN product p ON so.product_id = p.id
-        LEFT JOIN {_quote_identifier('order')} o ON so.order_id = o.id
-        WHERE 1=1 {where_sql}
+        LEFT JOIN {order_tbl} o ON so.order_id = o.id
+        WHERE 1=1 {{where_sql}}
         GROUP BY DATE(so.stockout_date), so.customer, p.name, p.barcode
         ORDER BY DATE(so.stockout_date) DESC
-        LIMIT :limit OFFSET :offset"""
-
-    results = (await db.execute(text(data_sql), params)).fetchall()
-
-    total = results[0].total_count if results else 0
-    logs = []
-    for row in results:
-        logs.append({
+        LIMIT :limit OFFSET :offset""",
+        qty_sql_template=f"""SELECT COALESCE(SUM(so.quantity - so.returned_quantity), 0)
+        FROM stock_out so JOIN product p ON so.product_id = p.id
+        LEFT JOIN {order_tbl} o ON so.order_id = o.id
+        WHERE 1=1 {{where_sql}}""",
+        row_mapper=lambda row: {
             'deduction_time': row.deduction_date_only.strftime('%Y-%m-%d') if row.deduction_date_only else '-',
             'customer': row.customer or '', 'product_name': row.product_name,
             'sku': row.sku or '',
             'quantity': row.total_quantity, 'deduction_count': row.deduction_count,
             'order_nos': row.order_nos or '', 'order_note': row.order_notes or '',
-        })
-
-    qty_sql = f"""SELECT COALESCE(SUM(so.quantity - so.returned_quantity), 0)
-        FROM stock_out so JOIN product p ON so.product_id = p.id
-        LEFT JOIN {_quote_identifier('order')} o ON so.order_id = o.id
-        WHERE 1=1 {where_sql}"""
-    total_qty = (await db.execute(text(qty_sql), params)).scalar() or 0
-
-    return {
-        'success': True,
-        'logs': logs,
-        'stats': {'total_count': total, 'total_quantity': total_qty},
-        'pagination': {'page': page, 'per_page': per_page, 'total': total, 'pages': (total + per_page - 1) // per_page if per_page else 0},
-    }
+        },
+    )

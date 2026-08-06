@@ -1,7 +1,5 @@
 """
 暂存备货 FastAPI 端点
-
-从 Flask staging_stockin.py 迁移的暂存备货功能。
 """
 import logging
 
@@ -42,7 +40,8 @@ async def import_staging_stockins(file: UploadFile=File(...), session_id: str=Qu
         return StagingStockInImportResult(success=False, message='文件大小超过10MB限制')
     if not content[:4] == b'\x50\x4b\x03\x04':
         return StagingStockInImportResult(success=False, message='文件内容不是有效的Excel格式')
-    imported, message, errors = await svc.import_staging_stockins_from_excel(db, content, scoped_session)
+    async with db_transaction(db):
+        imported, message, errors = await svc.import_staging_stockins_from_excel(db, content, scoped_session)
     return StagingStockInImportResult(success=imported > 0 or len(errors) == 0, message=message, imported=imported, errors=errors)
 
 @router.put('/{stockin_id}', response_model=StagingResponse, summary='更新暂存备货')
@@ -56,7 +55,8 @@ async def update_staging_stockin(stockin_id: int, data: StagingStockInUpdate, db
 async def clear_staging_stockins(session_id: str=Query('default', description='会话ID'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_permission('batch_import'))):
     """清空当前会话的暂存备货"""
     scoped_session = f'u{current_user.id}:{session_id}'
-    await svc.clear_staging_stockins(db, scoped_session)
+    async with db_transaction(db):
+        await svc.clear_staging_stockins(db, scoped_session)
     return StagingResponse(success=True, message='清空成功')
 
 @router.delete('/{stockin_id}', response_model=StagingResponse, summary='删除暂存备货')
@@ -70,7 +70,8 @@ async def delete_staging_stockin(stockin_id: int, db: AsyncSession=Depends(get_a
 async def confirm_staging_stockins(session_id: str=Query('default', description='会话ID'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_permission('batch_import'))):
     """确认暂存备货 - 转移到正式备货表"""
     scoped_session = f'u{current_user.id}:{session_id}'
-    confirmed, errors = await svc.confirm_staging_stockins(db, scoped_session)
+    async with db_transaction(db):
+        confirmed, errors = await svc.confirm_staging_stockins(db, scoped_session)
     if confirmed == 0 and errors:
         return StagingStockInConfirmResult(success=False, message=errors[0], confirmed=0, errors=errors)
     return StagingStockInConfirmResult(success=True, message=f'成功确认 {confirmed} 个备货', confirmed=confirmed, errors=errors)

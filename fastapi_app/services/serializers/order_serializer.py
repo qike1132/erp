@@ -34,6 +34,8 @@ class OrderField(Enum):
     LOCKED_BY_NAME = "locked_by_name"
     BATCH_NO = "batch_no"
     BATCH_COMPLETED_AT = "batch_completed_at"
+    ITEMS = "items"
+    FACTORIES = "factories"
 
 
 @dataclass(frozen=True)
@@ -44,11 +46,13 @@ class SerializerConfig:
         fields: 需要序列化的字段列表
         include_product: 是否包含产品详情对象
         include_locked_by: 是否包含锁定人信息
+        include_items: 是否包含订单 SKU 明细列表
     """
 
     fields: list[OrderField]
     include_product: bool = False
     include_locked_by: bool = False
+    include_items: bool = False
 
 
 class OrderSerializer:
@@ -85,9 +89,12 @@ class OrderSerializer:
             OrderField.COUNTRY,
             OrderField.IS_LOCKED,
             OrderField.LOCKED_BY_NAME,
+            OrderField.ITEMS,
+            OrderField.FACTORIES,
         ],
         include_product=True,
         include_locked_by=True,
+        include_items=True,
     )
 
     # 预定义配置：批次管理
@@ -125,9 +132,11 @@ class OrderSerializer:
             OrderField.LOCKED_BY_NAME,
             OrderField.BATCH_NO,
             OrderField.BATCH_COMPLETED_AT,
+            OrderField.ITEMS,
         ],
         include_product=True,
         include_locked_by=True,
+        include_items=True,
     )
 
     # 基础字段到模型属性的映射
@@ -196,6 +205,34 @@ class OrderSerializer:
                 result["locked_by_name"] = order.locked_by.username
             else:
                 result["locked_by_name"] = None
+
+        if OrderField.ITEMS in config.fields and config.include_items:
+            result["items"] = [
+                {
+                    "id": item.id,
+                    "order_id": item.order_id,
+                    "product_id": item.product_id,
+                    "product_name": item.product_name,
+                    "product_barcode": item.product_barcode,
+                    "quantity": item.quantity,
+                    "order_type": item.order_type,
+                    "country": item.country,
+                    "deduct_stock": item.deduct_stock,
+                    "deduct_quantity": item.deduct_quantity,
+                    "note": item.note,
+                }
+                for item in (order.items or [])
+            ]
+        elif OrderField.ITEMS in config.fields:
+            result["items"] = []
+
+        if OrderField.FACTORIES in config.fields:
+            # 从订单明细聚合工厂名（去重排序），空列表表示无工厂配置
+            result["factories"] = sorted({
+                item.product.factory
+                for item in (order.items or [])
+                if item.product and item.product.factory
+            })
 
         return result
 

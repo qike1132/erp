@@ -53,7 +53,7 @@ class StockOutCreate(BaseModel):
     customer: str = Field(..., min_length=1, max_length=100, description="客户名称")
     stockout_date: str = Field(..., description="出库日期 (YYYY-MM-DD)")
     note: str | None = Field(None, max_length=500, description="备注")
-    order_type: str = Field('regular', max_length=20, description="订单类型: regular=常规, custom=定制")
+    order_type: str = Field('regular', pattern="^(regular|custom)$", description="订单类型: regular=常规, custom=定制")
     country: str | None = Field(None, max_length=100, description="国家名称（仅定制订单使用）")
 
     @field_validator('stockout_date')
@@ -63,7 +63,11 @@ class StockOutCreate(BaseModel):
 
 
 class StockOutUpdate(BaseModel):
-    """更新出库请求"""
+    """更新出库请求
+
+    注意：order_type/country 不可编辑。这两个字段派生自关联的 Order（由 FIFO 分配决定），
+    修改需通过订单管理重新分配，而非直接更新出库记录。
+    """
     quantity: int | None = Field(None, gt=0, le=9999999, description="出库数量")
     customer: str | None = Field(None, min_length=1, max_length=100, description="客户名称")
     stockout_date: str | None = Field(None, description="出库日期 (YYYY-MM-DD)")
@@ -99,6 +103,7 @@ class InventoryResponse(BaseModel):
     total_order_quantity: int = 0
     total_stockin_quantity: int = 0
     total_stock: int = 0
+    total_available_stock: int = 0
     all_countries: list[str] = []
     all_customers: list[str] = []
     total_items: int = 0

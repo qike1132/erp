@@ -87,7 +87,7 @@ spec:
     spec:
       containers:
         - name: redis
-          image: redis:7-alpine
+          image: redis:7.4.9-alpine
           ports:
             - containerPort: 6379
           command:
@@ -138,6 +138,19 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: uploads-pvc
+  namespace: erp-system
+spec:
+  # 多副本共享挂载，需要支持 ReadWriteMany 的存储类（如 NFS / CephFS）
+  accessModes:
+    - ReadWriteMany
   resources:
     requests:
       storage: 20Gi

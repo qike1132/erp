@@ -1,3 +1,0 @@
-{"timestamp": "2026-05-05T09:19:03.948245", "old_version": "1.0.0", "old_code": 75, "new_version": "1.0.1", "new_code": 76, "trigger": "bump_patch", "changelog": "", "sync_status": "pending", "sync_detail": ""}
-{"timestamp": "2026-05-05T09:19:15.347495", "old_version": "1.0.1", "old_code": 76, "new_version": "1.1.0", "new_code": 77, "trigger": "bump_minor", "changelog": "", "sync_status": "pending", "sync_detail": ""}
-{"timestamp": "2026-05-05T10:06:55.215439", "old_version": "1.0", "old_code": 75, "new_version": "1.2", "new_code": 76, "trigger": "manual_set", "changelog": "", "sync_status": "pending", "sync_detail": ""}

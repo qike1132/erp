@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <UiDialog
     :open="open"
     title=""
@@ -153,7 +153,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, watch, onUnmounted } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { planApi, customerApi } from '@/api'
 import { get } from '@/api/request'
@@ -191,6 +191,7 @@ const form = reactive({
 
 const productSuggestions = reactive<Record<number, any[]>>({})
 let _searchTimer: any = null
+onUnmounted(() => { if (_searchTimer) clearTimeout(_searchTimer) })
 
 const submitting = ref(false)
 const errorMsg = ref('')

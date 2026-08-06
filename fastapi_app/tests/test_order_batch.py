@@ -139,7 +139,7 @@ class TestCompleteBatch:
         mock_db.execute.return_value = mock_scalar
 
         with patch.object(order_batch_service, '_safe_publish_event', new_callable=AsyncMock):
-            with patch('fastapi_app.services.order_service.compute_order_status_from_db', new_callable=AsyncMock, return_value='批次已完成') as mock_compute:
+            with patch('fastapi_app.services.order_utils.compute_order_status_from_db', new_callable=AsyncMock, return_value='批次已完成') as mock_compute:
                 result = await order_batch_service.complete_batch(mock_db, batch_no="BATCH-001", user=mock_user)
 
         assert result['completed_count'] == 1

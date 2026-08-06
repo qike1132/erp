@@ -2,11 +2,12 @@
   <DialogRoot :open="open" @update:open="$emit('update:open', $event)">
     <DialogPortal>
       <DialogOverlay
-        class="fixed inset-0 bg-black/50 backdrop-blur-sm z-[var(--z-overlay)] data-[state=open]:animate-[fadeIn_0.2s_ease]"
+        :class="['fixed inset-0 bg-black/50 backdrop-blur-sm data-[state=open]:animate-[fadeIn_0.2s_ease]', overlayZClass]"
       />
       <DialogContent
         :class="[
-          'fixed inset-0 m-auto bg-surface-card rounded-2xl shadow-lg w-[95%] h-fit max-h-[90vh] overflow-hidden flex flex-col z-[var(--z-modal)] animate-slide-up',
+          'fixed inset-0 m-auto bg-surface-card rounded-2xl shadow-lg w-[95%] h-fit max-h-[90vh] overflow-hidden flex flex-col animate-slide-up',
+          contentZClass,
           maxWidthClass,
         ]"
       >
@@ -56,9 +57,13 @@ withDefaults(
     open: boolean
     title?: string
     maxWidthClass?: string
+    overlayZClass?: string
+    contentZClass?: string
   }>(),
   {
     maxWidthClass: 'max-w-[800px]',
+    overlayZClass: 'z-[var(--z-overlay)]',
+    contentZClass: 'z-[var(--z-modal)]',
   },
 )
 

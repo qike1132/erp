@@ -1,7 +1,7 @@
 """
 权限模型 - 纯 SQLAlchemy 2.0 声明式
 
-映射到与 Flask-SQLAlchemy Permission 相同的 'permission' 表。
+映射到 'permission' 表。
 """
 from datetime import datetime, timezone
 
@@ -28,7 +28,7 @@ class Permission(Base):
     is_nav: Mapped[bool] = mapped_column(Boolean, default=True, comment='是否显示在导航栏')
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
 
-    # 自引用关系：与 Flask 端一样使用 remote_side=[id] 指定方向
+    # 自引用关系：使用 remote_side=[id] 指定方向
     parent: Mapped["Permission | None"] = relationship(
         "Permission",
         back_populates="children",

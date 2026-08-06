@@ -1,6 +1,7 @@
-"""FastAPI 服务层共享工具函数"""
+"""FastAPI 服务层共享工具函数
 
+注意：escape_like 已下沉到 fastapi_app.core.sanitizer，此处保留 re-export 以保持向后兼容。
+"""
+from fastapi_app.core.sanitizer import escape_like
 
-def escape_like(value: str) -> str:
-    """转义 SQL LIKE 通配符，防止 LIKE 注入"""
-    return value.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+__all__ = ['escape_like']

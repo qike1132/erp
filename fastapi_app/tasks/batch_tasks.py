@@ -36,6 +36,7 @@ def batch_import_orders_task(self, file_path: str, original_filename: str, user_
     if not any(os.path.commonpath([real_path, d]) == d for d in allowed_dirs if os.path.exists(d)):
         logger.error(f'批量导入订单任务拒绝非法文件路径: {file_path}')
         return {'success': False, 'error': '非法文件路径', 'imported_count': 0, 'task_id': self.request.id}
+    delete_file = True
     try:
         from datetime import datetime
 
@@ -91,10 +92,11 @@ def batch_import_orders_task(self, file_path: str, original_filename: str, user_
         if self.request.retries < self.max_retries:
             # 指数退避：30s, 60s, 120s...
             countdown = 30 * (2 ** self.request.retries)
+            delete_file = False
             raise self.retry(exc=exc, countdown=countdown) from exc
         raise
     finally:
-        if file_path and os.path.exists(file_path):
+        if delete_file and file_path and os.path.exists(file_path):
             with contextlib.suppress(OSError):
                 os.unlink(file_path)
 
@@ -106,6 +108,7 @@ def batch_import_stockins_task(self, file_path: str, original_filename: str, use
     if not any(os.path.commonpath([real_path, d]) == d for d in allowed_dirs if os.path.exists(d)):
         logger.error(f'批量导入备货任务拒绝非法文件路径: {file_path}')
         return {'success': False, 'error': '非法文件路径', 'imported_count': 0, 'task_id': self.request.id}
+    delete_file = True
     try:
         from datetime import datetime
 
@@ -157,9 +160,10 @@ def batch_import_stockins_task(self, file_path: str, original_filename: str, use
     except (ValueError, TypeError, OSError) as exc:
         logger.error(f'批量导入备货任务失败: {exc}', exc_info=True)
         if self.request.retries < self.max_retries:
+            delete_file = False
             raise self.retry(exc=exc) from exc
         raise
     finally:
-        if file_path and os.path.exists(file_path):
+        if delete_file and file_path and os.path.exists(file_path):
             with contextlib.suppress(OSError):
                 os.unlink(file_path)

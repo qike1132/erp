@@ -25,23 +25,23 @@ export function useUnprocessedOrders() {
   const currentPage = ref(1)
   const totalPages = ref(1)
   const perPage = ref(15)
-  const selectedIds = ref<number[]>([])
+  const selectedCompositeIds = ref<string[]>([])
   let loadController: AbortController | null = null
 
   const orderMap = computed(() => {
-    const m = new Map<number, UnprocessedOrder>()
-    for (const o of orders.value) m.set(o.id, o)
+    const m = new Map<string, UnprocessedOrder>()
+    for (const o of orders.value) m.set(o.composite_id, o)
     return m
   })
 
-  const validSelectedIds = computed(() =>
-    selectedIds.value.filter((id) => {
-      const o = orderMap.value.get(id)
+  const validSelectedCompositeIds = computed(() =>
+    selectedCompositeIds.value.filter((cid) => {
+      const o = orderMap.value.get(cid)
       return o && o.has_bom
     }),
   )
 
-  const allSelected = computed(() => orders.value.length > 0 && selectedIds.value.length >= orders.value.length)
+  const allSelected = computed(() => orders.value.length > 0 && selectedCompositeIds.value.length >= orders.value.length)
 
   async function load(page?: number) {
     const isInitial = orders.value.length === 0
@@ -56,9 +56,9 @@ export function useUnprocessedOrders() {
       if (signal.aborted) return
       orders.value = res.orders || []
       total.value = res.total || orders.value.length
-      totalPages.value = res.pages || 1
+      totalPages.value = res.pages || Math.max(1, Math.ceil(total.value / perPage.value))
       currentPage.value = res.current_page || p
-      selectedIds.value = []
+      selectedCompositeIds.value = []
     } catch (err: any) {
       if (signal.aborted) return
       orders.value = []
@@ -71,24 +71,24 @@ export function useUnprocessedOrders() {
     }
   }
 
-  function toggleSelection(id: number) {
-    const idx = selectedIds.value.indexOf(id)
-    if (idx >= 0) selectedIds.value.splice(idx, 1)
-    else selectedIds.value.push(id)
+  function toggleSelection(compositeId: string) {
+    const idx = selectedCompositeIds.value.indexOf(compositeId)
+    if (idx >= 0) selectedCompositeIds.value.splice(idx, 1)
+    else selectedCompositeIds.value.push(compositeId)
   }
 
   function toggleAll(checked: boolean) {
-    if (checked) selectedIds.value = orders.value.map((o) => o.id)
-    else selectedIds.value = []
+    if (checked) selectedCompositeIds.value = orders.value.map((o) => o.composite_id)
+    else selectedCompositeIds.value = []
   }
 
   function clearSelection() {
-    selectedIds.value = []
+    selectedCompositeIds.value = []
   }
 
   async function oneClickGenerate() {
-    if (validSelectedIds.value.length === 0) throw new Error('请选择至少一个有BOM配置的订单')
-    const res = await purchaseApi.oneClickGenerate({ order_ids: validSelectedIds.value }) as unknown as OneClickGenerateResponse
+    if (validSelectedCompositeIds.value.length === 0) throw new Error('请选择至少一个有BOM配置的订单')
+    const res = await purchaseApi.oneClickGenerate({ composite_ids: validSelectedCompositeIds.value }) as unknown as OneClickGenerateResponse
     if (res.success) {
       clearSelection()
       return res
@@ -96,10 +96,10 @@ export function useUnprocessedOrders() {
     throw new Error(res.message || '审核失败')
   }
 
-  async function quickGenerateSingle(orderId: number) {
-    const order = orders.value.find((o) => o.id === orderId)
+  async function quickGenerateSingle(compositeId: string) {
+    const order = orders.value.find((o) => o.composite_id === compositeId)
     if (!order?.has_bom) throw new Error(`订单 ${order?.order_no || ''}无法审核：该产品未配置BOM表`)
-    const res = await purchaseApi.oneClickGenerate({ order_ids: [orderId] }) as unknown as OneClickGenerateResponse
+    const res = await purchaseApi.oneClickGenerate({ composite_ids: [compositeId] }) as unknown as OneClickGenerateResponse
     if (res.success) return res
     throw new Error(res.message || '审核失败')
   }
@@ -112,8 +112,8 @@ export function useUnprocessedOrders() {
     currentPage,
     totalPages,
     perPage,
-    selectedIds,
-    validSelectedIds,
+    selectedCompositeIds,
+    validSelectedCompositeIds,
     allSelected,
     load,
     toggleSelection,

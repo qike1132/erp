@@ -21,6 +21,7 @@ MATERIAL_CATEGORIES = {
     'fabric': {'name': '面料类'},
     'filling': {'name': '填充类'},
     'accessory': {'name': '辅料类'},
+    'packaging': {'name': '包装类'},
 }
 
 

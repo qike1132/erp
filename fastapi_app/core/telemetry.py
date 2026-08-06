@@ -87,6 +87,13 @@ def setup_telemetry(app=None):
         except ImportError:
             pass
 
+        # Celery Instrumentation：在 FastAPI → Celery → DB 链路中自动注入/提取 trace 上下文
+        try:
+            from opentelemetry.instrumentation.celery import CeleryInstrumentor
+            CeleryInstrumentor().instrument()
+        except ImportError:
+            pass
+
         logger.info("OpenTelemetry 已启用: service=%s, exporter=%s", service_name, exporter_type)
 
     except ImportError:
@@ -102,6 +109,34 @@ def setup_telemetry(app=None):
 
 def get_tracer():
     return _tracer
+
+
+def get_trace_context() -> dict:
+    """将当前 OTel trace 上下文序列化为可跨服务传递的字典
+
+    适用于在自定义消息/任务调用中手动传递 traceparent，
+    配合 :func:`attach_trace_context` 在消费端恢复上下文。
+    """
+    carrier = {}
+    try:
+        from opentelemetry.propagate import inject
+        inject(carrier)
+    except ImportError:
+        pass
+    return carrier
+
+
+def attach_trace_context(carrier: dict):
+    """从字典中提取并附加 OTel trace 上下文到当前执行环境"""
+    if not carrier:
+        return
+    try:
+        from opentelemetry.context import attach
+        from opentelemetry.propagate import extract
+
+        attach(extract(carrier))
+    except ImportError:
+        pass
 
 
 def shutdown_telemetry():

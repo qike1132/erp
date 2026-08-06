@@ -63,12 +63,11 @@ async def create_stockin_core(db: AsyncSession, product_id: int, quantity: int, 
         raise ValueError(f'入库数量不能超过 {MAX_STOCK_QUANTITY}')
     stockin = StockIn(stockin_no=await generate_stockin_number(db), product_id=product_id, quantity=quantity, customer=customer, stockin_date=stockin_date, note=note, order_type=order_type, country=country)
     db.add(stockin)
-    await db.flush()
     product = await get_product_for_update(db, product_id)
     product.current_stock += quantity
+    await db.flush()  # 单次 flush：同时写入 StockIn INSERT + Product UPDATE，并填充 stockin.id
     log_inventory_change(db, product_id=product_id, change_type='入库', change_quantity=quantity, related_id=str(stockin.id), note=f'入库ID：{stockin.id}')
-    await db.flush()
-    return stockin
+    return stockin  # 日志条目由调用方的 flush/commit 写入
 
 async def update_stockin_core(db: AsyncSession, stockin: StockIn, quantity: int, customer: str, stockin_date: datetime, note: str, order_type: str = 'regular', country: str | None = None) -> StockIn:
     result = await db.execute(select(StockIn).where(StockIn.id == stockin.id).with_for_update())
@@ -122,11 +121,15 @@ async def create_stockout_core(db: AsyncSession, product_id: int, quantity: int,
             ship_qty = min(remaining_qty, order_detail['available'])
             stockout = StockOut(stockout_no=await generate_stockout_number(db), product_id=product_id, quantity=ship_qty, stockout_date=stockout_date, customer=customer, order_id=order_detail['order_id'], note=note)
             db.add(stockout)
-            await db.flush()
             created_stockouts.append(stockout)
             remaining_qty -= ship_qty
         product.current_stock -= quantity
+        # 第一次 flush：批量写入所有 StockOut INSERT + Product UPDATE，并填充 stockout.id
+        # 原 N 次 flush（N=FIFO订单数）合并为 1 次，减少数据库往返
+        await db.flush()
         log_inventory_change(db, product_id=product_id, change_type='出库', change_quantity=-quantity, related_id=','.join(str(stock_out.id) for stock_out in created_stockouts) if created_stockouts else '', note=f'出库数量：{quantity}')
+        # 第二次 flush：提前暴露 InventoryLog 写入错误（约束违反等），而非依赖 SAVEPOINT 退出时自动 flush
+        # 保留原因：错误早暴露便于定位；移除则错误会延迟到 begin_nested 退出时才触发
         await db.flush()
     return created_stockouts
 
@@ -281,6 +284,12 @@ async def recalc_order_status_after_return(db: AsyncSession, order_id: int) -> d
         return {'order_id': order.id, 'order_no': order.order_no, 'customer': order.customer}
     return None
 
+@cache_result(
+    key_prefix='stockins:list',
+    ttl=30,
+    local_ttl=10,
+    key_builder=lambda *args, **kwargs: f"pg:{kwargs.get('page',1)}:pp:{kwargs.get('per_page',50)}:c:{kwargs.get('customer','') or ''}:ot:{kwargs.get('order_type','') or ''}:sd:{kwargs.get('start_date','') or ''}:ed:{kwargs.get('end_date','') or ''}",
+)
 async def get_stockins(db: AsyncSession, page: int=1, per_page: int=50,
                        customer: str | None = None, order_type: str | None = None,
                        start_date: str | None = None, end_date: str | None = None) -> dict:
@@ -398,19 +407,73 @@ async def delete_stockin(db: AsyncSession, stockin_id: int) -> None:
         await safe_publish_event(publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': stockin_obj.product_id, 'product_name': product.name, 'change_type': '入库删除', 'quantity': -stockin_obj.quantity, 'current_stock': product.current_stock}, context="入库删除事件发布")
     logger.info(f'入库删除成功：{stockin_no}，数量：{stockin_obj.quantity}')
 
-async def get_stockouts(db: AsyncSession, page: int=1, per_page: int=50) -> dict:
-    """获取出库列表（仅独立出库，非抵扣，支持分页）"""
-    base_condition = StockOut.stockin_id.is_(None)
-    base_query = select(StockOut).where(base_condition)
-    total = (await db.execute(select(func.count(StockOut.id)).where(base_condition))).scalar() or 0
-    result = await db.execute(base_query.options(joinedload(StockOut.product), joinedload(StockOut.order)).order_by(StockOut.stockout_date.desc()).offset((page - 1) * per_page).limit(per_page))
+@cache_result(
+    key_prefix='stockouts:list',
+    ttl=30,
+    local_ttl=10,
+    key_builder=lambda *args, **kwargs: f"pg:{kwargs.get('page',1)}:pp:{kwargs.get('per_page',50)}:c:{kwargs.get('customer','') or ''}:ot:{kwargs.get('order_type','') or ''}:sd:{kwargs.get('start_date','') or ''}:ed:{kwargs.get('end_date','') or ''}",
+)
+async def get_stockouts(db: AsyncSession, page: int=1, per_page: int=50,
+                        customer: str | None = None, order_type: str | None = None,
+                        start_date: str | None = None, end_date: str | None = None) -> dict:
+    """获取出库列表（仅独立出库，非抵扣，支持分页和筛选）
+
+    筛选维度：customer（模糊匹配）、order_type（需 JOIN Order，regular 含无订单记录）、
+    start_date/end_date（按 stockout_date 过滤）。
+    """
+    from fastapi_app.shared_models import Order
+
+    conditions = [StockOut.stockin_id.is_(None)]
+    needs_order_join = False
+    if customer:
+        conditions.append(StockOut.customer.like(f'%{escape_like(customer)}%'))
+    if order_type:
+        needs_order_join = True
+        # regular 包含无关联订单的出库（前端展示时默认为 regular）；custom 必须有关联定制订单
+        if order_type == 'regular':
+            conditions.append(or_(StockOut.order_id.is_(None), Order.order_type == 'regular'))
+        else:
+            conditions.append(Order.order_type == order_type)
+    if start_date:
+        try:
+            sd = datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=UTC)
+            conditions.append(StockOut.stockout_date >= sd)
+        except ValueError:
+            pass
+    if end_date:
+        try:
+            ed = datetime.strptime(end_date, '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=UTC)
+            conditions.append(StockOut.stockout_date <= ed)
+        except ValueError:
+            pass
+
+    # 先用子查询过滤 + 分页取 ID，再按 ID 批量加载关联数据，避免 joinedload 与过滤 JOIN 冲突
+    id_query = select(StockOut.id)
+    if needs_order_join:
+        if order_type == 'regular':
+            id_query = id_query.outerjoin(Order)
+        else:
+            id_query = id_query.join(Order)
+    id_query = id_query.where(*conditions)
+
+    total = (await db.execute(select(func.count()).select_from(id_query.subquery()))).scalar() or 0
+
+    id_result = await db.execute(
+        id_query.order_by(StockOut.stockout_date.desc()).offset((page - 1) * per_page).limit(per_page)
+    )
+    page_ids = [row[0] for row in id_result.all()]
+    if not page_ids:
+        return {'items': [], 'total': total, 'page': page, 'per_page': per_page}
+
+    result = await db.execute(
+        select(StockOut)
+        .options(joinedload(StockOut.product), joinedload(StockOut.order))
+        .where(StockOut.id.in_(page_ids))
+        .order_by(StockOut.stockout_date.desc())
+    )
     stockouts = result.scalars().unique().all()
     data = []
     for stock_out in stockouts:
-        # 抵扣数量：该列表仅含独立出库（stockin_id 为 NULL），无抵扣
-        deduct_quantity = 0
-
-        # 返回前端期望的字段结构
         item = {
             'id': stock_out.id,
             'stockout_no': stock_out.stockout_no,
@@ -423,8 +486,8 @@ async def get_stockouts(db: AsyncSession, page: int=1, per_page: int=50) -> dict
             'product': {'id': stock_out.product.id, 'name': stock_out.product.name, 'barcode': stock_out.product.barcode or '', 'image': stock_out.product.image or ''} if stock_out.product else None,
             'quantity': stock_out.quantity,
             'returned_quantity': stock_out.returned_quantity,
-            'deduct_quantity': deduct_quantity,
             'note': stock_out.note or '',
+            # TODO(multi-sku-order): stock_out.order.order_type/country 在多 SKU 下为首 item 兼容值，待后续 spec 改造为按 OrderItem 维度。
             'order_type': stock_out.order.order_type if stock_out.order else 'regular',
             'country': stock_out.order.country if stock_out.order and stock_out.order.country else ''
         }
@@ -733,7 +796,7 @@ async def get_inventory(db: AsyncSession, search_customer: str='', search_produc
 
 
 @cache_result(key_prefix="inventory:paginated", ttl=120, local_ttl=60,
-             key_builder=lambda db, **kw: f"{kw.get('search_customer','')}-{kw.get('search_product','')}-{kw.get('country','')}-{kw.get('page',1)}-{kw.get('per_page',50)}")
+             key_builder=lambda **kwargs: f"{kwargs.get('search_customer','')}-{kwargs.get('search_product','')}-{kwargs.get('country','')}-{kwargs.get('page',1)}-{kwargs.get('per_page',50)}")
 async def get_inventory_paginated(db: AsyncSession, search_customer: str = '', search_product: str = '',
                                   country: str = '', page: int = 1, per_page: int = 50) -> dict:
     """
@@ -1050,7 +1113,7 @@ async def _get_all_countries(db: AsyncSession, pids: tuple | None, search_custom
     return sorted(row[0] for row in result.all())
 
 @cache_result(key_prefix="customers:all", ttl=120, local_ttl=60,
-              key_builder=lambda *args, **kwargs: f"pids{hashlib.sha256(str(args[1]).encode()).hexdigest()[:16] if len(args) > 1 and args[1] else 'all'}")
+              key_builder=lambda **kwargs: f"pids{hashlib.sha256(str(kwargs.get('pids', '')).encode()).hexdigest()[:16] if kwargs.get('pids') else 'all'}")
 async def _get_all_customers(db: AsyncSession, pids: tuple | None) -> list[str]:
     """获取所有客户列表（120s 缓存，客户列表变更频率低）"""
     if pids:
@@ -1278,9 +1341,12 @@ async def _create_stockout_records(db: AsyncSession, product_id: int, customer: 
             customer=customer, order_id=order_detail['order_id'], note=note
         )
         db.add(stockout)
-        await db.flush()
         created_stockouts.append(stockout)
         remaining_qty -= ship_qty
+    # 单次 flush：批量写入所有 StockOut INSERT 并填充 id，供调用方构建 related_id
+    # 原 N 次 flush（N=FIFO订单数）合并为 1 次
+    if created_stockouts:
+        await db.flush()
     return created_stockouts
 
 

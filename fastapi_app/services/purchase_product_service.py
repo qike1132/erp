@@ -3,17 +3,18 @@
 
 从 purchase_center_service.py 拆分，包含产品查询、BOM 保存和物料计算。
 """
-import json
 import logging
+from collections import defaultdict
 from decimal import Decimal
 
 from sqlalchemy import func, or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from fastapi_app.services import escape_like
+from fastapi_app.core.cache import cache_result
+from fastapi_app.core.sanitizer import escape_like
+from fastapi_app.utils import calc_total_pages
 from fastapi_app.shared_models import (
-    ModificationLog,
     Product,
     ProductAccessory,
     ProductFabric,
@@ -23,15 +24,11 @@ from fastapi_app.shared_models import (
 logger = logging.getLogger(__name__)
 
 
-def product_has_bom(product) -> bool:
-    """判断产品是否配置了BOM（任意一类物料有数据即视为有BOM）"""
-    has_filling = (
-        product.material is not None and
-        getattr(product.material, 'cotton_usage', Decimal('0')) > 0
-    )
-    has_fabric = hasattr(product, 'fabrics') and len(product.fabrics) > 0
-    has_accessory = hasattr(product, 'accessories') and len(product.accessories) > 0
-    return has_filling or has_fabric or has_accessory
+# BOM 领域逻辑已聚合到 bom_service.py，此处重新导出以保持向后兼容
+# （purchase_bom_copy_service、purchase_center_service 等仍从此处导入）
+from fastapi_app.services.bom_service import has_bom as product_has_bom  # noqa: E402,F401
+from fastapi_app.services.bom_service import get_bom as get_product_bom  # noqa: E402,F401
+from fastapi_app.services.bom_service import save_bom as save_product_bom  # noqa: E402,F401
 
 
 async def _batch_check_bom_exists(db: AsyncSession, product_ids: list[int]) -> set[int]:
@@ -54,6 +51,17 @@ async def _batch_check_bom_exists(db: AsyncSession, product_ids: list[int]) -> s
     return {row[0] for row in result}
 
 
+@cache_result(
+    key_prefix="purchase:products",
+    ttl=60,
+    key_builder=lambda **kwargs: (
+        f"p{kwargs.get('page', 1)}:pp{kwargs.get('per_page', 50)}:"
+        f"s{(kwargs.get('search', '') or '').strip().lower()}:"
+        f"hb{kwargs.get('has_bom', 'all')}:c{kwargs.get('category', '')}:"
+        f"sb{kwargs.get('sort_by', 'name')}:so{kwargs.get('sort_order', 'asc')}:"
+        f"simp{kwargs.get('simple', False)}"
+    ),
+)
 async def get_products(db: AsyncSession, *, page: int = 1, per_page: int = 50,
                        search: str = '', has_bom: str = 'all', category: str = '',
                        sort_by: str = 'name', sort_order: str = 'asc',
@@ -158,7 +166,7 @@ async def get_products(db: AsyncSession, *, page: int = 1, per_page: int = 50,
     return {
         'products': output,
         'total': total,
-        'pages': (total + per_page - 1) // per_page if per_page > 0 else 0,
+        'pages': calc_total_pages(total, per_page),
         'current_page': page,
     }
 
@@ -236,195 +244,84 @@ async def get_products_statistics(db: AsyncSession) -> dict:
     }
 
 
-async def get_product_bom(db: AsyncSession, product_id: int) -> dict:
-    result = await db.execute(
-        select(Product).options(
-            selectinload(Product.material),
-            selectinload(Product.fabrics),
-            selectinload(Product.accessories),
-        ).where(Product.id == product_id)
-    )
-    product = result.scalars().first()
-    if not product:
-        return None
-    all_materials = product.get_all_materials() if product.has_bom() else []
-    return {
-        'id': product.id,
-        'name': product.name,
-        'barcode': product.barcode,
-        'materials': all_materials,
+def aggregate_materials(orders_data: list, product_map: dict) -> dict:
+    """按 (分类, 物料名, 供应商, 规格) 聚合物料用量。
+
+    纯函数：无 DB 依赖，便于单元测试聚合策略。
+
+    Args:
+        orders_data: 订单列表，每项含 product_id 与 quantity。
+        product_map: {product_id: Product} 映射，Product 须实现 has_bom() 与 get_all_materials()。
+
+    Returns:
+        dict: {category: [CalcRow, ...]}，category ∈ filling/fabric/accessory/packaging。
+    """
+    result: dict[str, list[dict]] = {
+        'filling': [],
+        'fabric': [],
+        'accessory': [],
+        'packaging': [],
     }
+    # 聚合 key 必须包含供应商与规格，避免同名不同供应商/规格的物料被错误合并
+    # 使用元组而非字符串拼接，杜绝分隔符 ':' 导致的键冲突
+    totals: dict[tuple, dict] = {}
 
+    for order_item in orders_data:
+        product_id = order_item.get('product_id')
+        quantity = Decimal(str(order_item.get('quantity', 0)))
 
-async def save_product_bom(db: AsyncSession, product_id: int, data: dict, username: str) -> str:
-    result = await db.execute(
-        select(Product).options(
-            selectinload(Product.material),
-            selectinload(Product.fabrics),
-            selectinload(Product.accessories),
-        ).where(Product.id == product_id)
-    )
-    product = result.scalars().first()
-    if not product:
-        raise ValueError('产品不存在')
+        product = product_map.get(product_id)
+        if not product or not product.has_bom():
+            continue
 
-    filling_data = data.get('filling')
-    if filling_data:
-        if product.material:
-            old_data = {
-                'cotton_usage': float(product.material.cotton_usage) if product.material.cotton_usage else 0,
-                'supplier_name': product.material.supplier_name,
-            }
-            product.material.cotton_usage = Decimal(str(filling_data.get('cotton_usage', 0)))
-            product.material.supplier_id = filling_data.get('supplier_id')
-            product.material.supplier_name = filling_data.get('supplier_name', '')
-            product.material.specification = filling_data.get('specification', '')
-            product.material.unit = filling_data.get('unit', '')
-            product.material.remark = filling_data.get('remark', '')
-            new_data = {
-                'cotton_usage': float(product.material.cotton_usage),
-                'supplier_name': product.material.supplier_name,
-            }
-            if old_data != new_data:
-                db.add(ModificationLog(
-                    target_type='material', target_id=product.material.id,
-                    field_name='filling_data',
-                    old_value=json.dumps(old_data, ensure_ascii=False),
-                    new_value=json.dumps(new_data, ensure_ascii=False),
-                    modifier_name=username,
-                ))
+        for mat in product.get_all_materials():
+            category = mat.get('category', '')
+            name = mat.get('material_name', '')
+            supplier_name = mat.get('supplier_name', '') or ''
+            specification = mat.get('specification', '') or ''
+            key = (category, name, supplier_name, specification)
+
+            bucket = totals.get(key)
+            if bucket is None:
+                bucket = {
+                    'total': Decimal(0),
+                    'name': name,
+                    'category': category,
+                    'unit': mat.get('unit', ''),
+                    'supplier_name': supplier_name,
+                    'specification': specification,
+                    'material_code': mat.get('material_code', ''),
+                }
+                totals[key] = bucket
+
+            per_unit = Decimal(str(mat.get('unit_usage', 0)))
+            bucket['total'] += per_unit * quantity
+
+    for info in totals.values():
+        category = info['category']
+        if category in result:
+            result[category].append({
+                'name': info['name'],
+                'material_name': info['name'],
+                'material_code': info.get('material_code', ''),
+                'specification': info.get('specification', ''),
+                'total_quantity': float(info['total']),
+                'unit': info['unit'],
+                'supplier_name': info['supplier_name'],
+            })
         else:
-            db.add(ProductMaterial(
-                product_id=product_id,
-                cotton_usage=Decimal(str(filling_data.get('cotton_usage', 0))),
-                supplier_id=filling_data.get('supplier_id'),
-                supplier_name=filling_data.get('supplier_name', ''),
-                specification=filling_data.get('specification', ''),
-                unit=filling_data.get('unit', ''),
-                remark=filling_data.get('remark', ''),
-            ))
+            logger.warning('未知物料分类被丢弃: %s (物料: %s)', category, info['name'])
 
-    fabrics_data = data.get('fabrics', [])
-    for fab_data in fabrics_data:
-        if fab_data.get('id'):
-            fab = await db.get(ProductFabric, fab_data['id'])
-            if fab and fab.product_id == product_id:
-                old_val = fab.fabric_name
-                fab.fabric_name = fab_data.get('fabric_name', '')
-                fab.specification = fab_data.get('specification', '')
-                fab.unit = fab_data.get('unit', '')
-                fab.quantity = Decimal(str(fab_data.get('quantity', 0)))
-                fab.supplier_id = fab_data.get('supplier_id')
-                fab.supplier_name = fab_data.get('supplier_name', '')
-                fab.remark = fab_data.get('remark', '')
-                if old_val != fab.fabric_name:
-                    db.add(ModificationLog(
-                        target_type='fabric', target_id=fab.id,
-                        field_name='fabric_name', old_value=old_val,
-                        new_value=fab.fabric_name, modifier_name=username,
-                    ))
-            else:
-                db.add(ProductFabric(
-                    product_id=product_id,
-                    fabric_name=fab_data.get('fabric_name', ''),
-                    specification=fab_data.get('specification', ''),
-                    unit=fab_data.get('unit', ''),
-                    quantity=Decimal(str(fab_data.get('quantity', 0))),
-                    supplier_id=fab_data.get('supplier_id'),
-                    supplier_name=fab_data.get('supplier_name', ''),
-                    remark=fab_data.get('remark', ''),
-                ))
-        else:
-            db.add(ProductFabric(
-                product_id=product_id,
-                fabric_name=fab_data.get('fabric_name', ''),
-                specification=fab_data.get('specification', ''),
-                unit=fab_data.get('unit', ''),
-                quantity=Decimal(str(fab_data.get('quantity', 0))),
-                supplier_id=fab_data.get('supplier_id'),
-                supplier_name=fab_data.get('supplier_name', ''),
-                remark=fab_data.get('remark', ''),
-            ))
-
-    accessories_data = data.get('accessories', [])
-    for acc_data in accessories_data:
-        if acc_data.get('id'):
-            acc = await db.get(ProductAccessory, acc_data['id'])
-            if acc and acc.product_id == product_id:
-                old_val = acc.accessory_name
-                acc.accessory_name = acc_data.get('accessory_name', '')
-                acc.specification = acc_data.get('specification', '')
-                acc.unit = acc_data.get('unit', '')
-                acc.quantity = Decimal(str(acc_data.get('quantity', 0)))
-                acc.supplier_id = acc_data.get('supplier_id')
-                acc.supplier_name = acc_data.get('supplier_name', '')
-                acc.remark = acc_data.get('remark', '')
-                if old_val != acc.accessory_name:
-                    db.add(ModificationLog(
-                        target_type='accessory', target_id=acc.id,
-                        field_name='accessory_name', old_value=old_val,
-                        new_value=acc.accessory_name, modifier_name=username,
-                    ))
-            else:
-                db.add(ProductAccessory(
-                    product_id=product_id,
-                    accessory_name=acc_data.get('accessory_name', ''),
-                    specification=acc_data.get('specification', ''),
-                    unit=acc_data.get('unit', ''),
-                    quantity=Decimal(str(acc_data.get('quantity', 0))),
-                    supplier_id=acc_data.get('supplier_id'),
-                    supplier_name=acc_data.get('supplier_name', ''),
-                    remark=acc_data.get('remark', ''),
-                ))
-        else:
-            db.add(ProductAccessory(
-                product_id=product_id,
-                accessory_name=acc_data.get('accessory_name', ''),
-                specification=acc_data.get('specification', ''),
-                unit=acc_data.get('unit', ''),
-                quantity=Decimal(str(acc_data.get('quantity', 0))),
-                supplier_id=acc_data.get('supplier_id'),
-                supplier_name=acc_data.get('supplier_name', ''),
-                remark=acc_data.get('remark', ''),
-            ))
-
-    _delete_meta = {
-        'fabrics': ('fabric', 'fabric_name'),
-        'accessories': ('accessory', 'accessory_name'),
-    }
-    for category, model_cls in [('fabrics', ProductFabric), ('accessories', ProductAccessory)]:
-        existing_ids = {item['id'] for item in data.get(category, []) if item.get('id')}
-        result = await db.execute(
-            select(model_cls).where(
-                model_cls.product_id == product_id,
-                ~model_cls.id.in_(existing_ids) if existing_ids else True,
-            )
-        )
-        to_delete = result.scalars().all()
-        target_type, name_attr = _delete_meta[category]
-        for item in to_delete:
-            await db.delete(item)
-            db.add(ModificationLog(
-                target_type=target_type, target_id=item.id,
-                field_name='deleted',
-                old_value=getattr(item, name_attr, '') or '',
-                new_value='(已删除)',
-                modifier_name=username,
-            ))
-
-    await db.commit()
-    return 'BOM 保存成功'
+    return result
 
 
 async def calculate_material(db: AsyncSession, orders_data: list) -> dict:
-    from collections import defaultdict
-
     result = {
         'filling': [],
         'fabric': [],
         'accessory': [],
+        'packaging': [],
     }
-    totals = defaultdict(lambda: defaultdict(Decimal))
 
     product_ids = [item.get('product_id') for item in orders_data if item.get('product_id')]
     if not product_ids:
@@ -440,40 +337,4 @@ async def calculate_material(db: AsyncSession, orders_data: list) -> dict:
     products = products_result.scalars().unique().all()
     product_map = {p.id: p for p in products}
 
-    for order_item in orders_data:
-        product_id = order_item.get('product_id')
-        quantity = Decimal(str(order_item.get('quantity', 0)))
-
-        product = product_map.get(product_id)
-        if not product or not product.has_bom():
-            continue
-
-        all_materials = product.get_all_materials()
-
-        for mat in all_materials:
-            category = mat.get('category', '')
-            name = mat.get('material_name', '')
-            key = f"{category}:{name}"
-            per_unit = Decimal(str(mat.get('unit_usage', 0)))
-            totals[key]['total'] += per_unit * quantity
-            totals[key]['name'] = name
-            totals[key]['category'] = category
-            totals[key]['unit'] = mat.get('unit', '')
-            totals[key]['supplier_name'] = mat.get('supplier_name', '')
-            totals[key]['specification'] = mat.get('specification', '')
-            totals[key]['material_code'] = mat.get('material_code', '')
-
-    for _key, info in totals.items():
-        category = info['category']
-        if category in result:
-            result[category].append({
-                'name': info['name'],
-                'material_name': info['name'],
-                'material_code': info.get('material_code', ''),
-                'specification': info.get('specification', ''),
-                'total_quantity': float(info['total']),
-                'unit': info['unit'],
-                'supplier_name': info['supplier_name'],
-            })
-
-    return result
+    return aggregate_materials(orders_data, product_map)

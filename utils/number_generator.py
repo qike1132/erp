@@ -76,7 +76,7 @@ def generate_number(prefix, model, date_field, number_field, db):
 
     # 如果计数器还没有初始化，从数据库查询最大序号
     if not _number_generator.is_initialized(prefix, date_str):
-        # 兼容 sqlalchemy.orm.Session 和 Flask-SQLAlchemy db 对象
+        # 兼容 sqlalchemy.orm.Session 对象
         session = getattr(db, 'session', db)
         with session.no_autoflush:
             records = session.query(model).filter(

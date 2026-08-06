@@ -1,0 +1,77 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["erp", "slow-query", "loki"],
+  "templating": {
+    "list": [
+      {
+        "current": { "value": "Loki", "text": "Loki" },
+        "hide": 2,
+        "name": "DS_LOKI",
+        "type": "constant"
+      }
+    ]
+  },
+  "time": { "from": "now-1h", "to": "now" },
+  "timezone": "browser",
+  "title": "慢查询分析",
+  "uid": "erp-slow-queries",
+  "version": 1,
+  "panels": [
+    {
+      "title": "慢查询速率 (条/秒)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "loki", "uid": "${DS_LOKI}" },
+      "targets": [
+        {
+          "expr": "sum(rate({job=\"fastapi\", event=\"slow_query\"}[5m])) by (query_type)",
+          "legendFormat": "{{query_type}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps" },
+        "overrides": []
+      }
+    },
+    {
+      "title": "慢查询总数 (当前时间范围)",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "loki", "uid": "${DS_LOKI}" },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({job=\"fastapi\", event=\"slow_query\"}[$__range]))"
+        }
+      ]
+    },
+    {
+      "title": "平均耗时 (ms)",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "loki", "uid": "${DS_LOKI}" },
+      "targets": [
+        {
+          "expr": "avg(sum_over_time({job=\"fastapi\", event=\"slow_query\"} | json | unwrap duration [$__range])) by ()"
+        }
+      ]
+    },
+    {
+      "title": "慢查询日志",
+      "type": "logs",
+      "gridPos": { "h": 16, "w": 24, "x": 0, "y": 8 },
+      "datasource": { "type": "loki", "uid": "${DS_LOKI}" },
+      "targets": [
+        {
+          "expr": "{job=\"fastapi\", event=\"slow_query\"} | json",
+          "refId": "A"
+        }
+      ],
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending" }
+    }

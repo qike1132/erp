@@ -1,18 +1,21 @@
 """
 产品管理业务逻辑服务
 
-从 Flask product.py 提取的核心业务逻辑，适配异步 SQLAlchemy。
+核心业务逻辑，异步 SQLAlchemy 实现。
 """
 import logging
 
 from sqlalchemy import delete, func, or_, select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.cache import CacheDomain, cache_result, invalidate_related_caches
-from fastapi_app.services import escape_like
+from fastapi_app.core.cache import CacheDomain, cache_result
+from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
+from fastapi_app.core.sanitizer import escape_like
+from fastapi_app.core.validators import validate_not_empty
 from fastapi_app.shared.stock_concurrency import get_product_for_update
-from fastapi_app.shared_models import InventoryLog, Order, Product, StockIn, StockOut
+from fastapi_app.shared_models import InventoryLog, Order, OrderItem, Product, StockIn, StockOut
+from fastapi_app.services.bom_service import has_bom as product_has_bom  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +64,8 @@ class ProductHasRelatedStockOutsError(ProductDeleteError):
         )
 
 
-@cache_result(key_prefix="products:all", ttl=60, local_ttl=15)
+@cache_result(key_prefix="products:all", ttl=60, local_ttl=15,
+              key_builder=lambda **kwargs: f"limit{kwargs.get('limit', 5000)}")
 async def get_products(db: AsyncSession, limit: int = 5000) -> list[dict]:
     """获取所有产品列表（内部使用，如搜索、映射构建等场景）
 
@@ -75,7 +79,47 @@ async def get_products(db: AsyncSession, limit: int = 5000) -> list[dict]:
     return [p.to_dict() for p in products]
 
 
-async def get_products_page(db: AsyncSession, page: int = 1, per_page: int = 50, search: str = '') -> dict:
+async def get_product_barcode_map(db: AsyncSession, limit: int | None = None, batch_size: int = 1000) -> dict[str, str]:
+    """构建 {barcode: name} 映射，使用分页迭代避免全量加载到内存。
+
+    替代 validate_staging 场景下的 get_products(db) 全量调用，
+    仅 SELECT barcode 和 name 两列，跳过空条码。
+
+    Args:
+        db: 异步数据库会话。
+        limit: 可选，限制总返回条数（None 表示不限制）。
+        batch_size: 单批查询大小，默认 1000。
+
+    Returns:
+        dict[str, str]: {barcode: product_name} 映射，空条码被跳过。
+    """
+    result_map: dict[str, str] = {}
+    offset = 0
+    while True:
+        batch_limit = batch_size
+        if limit is not None:
+            remaining = limit - len(result_map)
+            if remaining <= 0:
+                break
+            batch_limit = min(batch_size, remaining)
+        result = await db.execute(
+            select(Product.barcode, Product.name)
+            .where(Product.barcode.isnot(None), Product.barcode != '')
+            .limit(batch_limit)
+            .offset(offset)
+        )
+        rows = result.all()
+        if not rows:
+            break
+        for barcode, name in rows:
+            result_map[barcode] = name
+        if len(rows) < batch_limit:
+            break
+        offset += batch_limit
+    return result_map
+
+
+async def get_products_page(db: AsyncSession, page: int = 1, per_page: int = 20, search: str = '') -> dict:
     """获取产品列表（分页+搜索），避免产品数过大时全量加载"""
     per_page = min(max(1, per_page), 200)
     query = select(Product)
@@ -101,18 +145,18 @@ async def get_products_page(db: AsyncSession, page: int = 1, per_page: int = 50,
 
 async def create_product(db: AsyncSession, name: str, barcode: str | None,
                          image: str | None, initial_stock: int,
-                         price: float | None = None) -> dict:
+                         price: float | None = None,
+                         factory: str | None = None) -> dict:
     """
     创建产品
 
-    业务规则（与Flask一致）：
+    业务规则：
     - 产品名称不能为空
     - 产品名称唯一（不区分大小写）
     - 初始库存 >= 0
     - 初始库存 > 0 时记录 InventoryLog
     """
-    if not name or not name.strip():
-        raise ValueError('产品名称不能为空')
+    validate_not_empty(name, "产品名称")
     if initial_stock < 0:
         raise ValueError('初始库存不能为负数')
 
@@ -129,11 +173,19 @@ async def create_product(db: AsyncSession, name: str, barcode: str | None,
         barcode=barcode or '',
         price=price or 0,
         image=image or '',
+        factory=factory or '',
         initial_stock=initial_stock,
         current_stock=initial_stock
     )
     db.add(product)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError as e:
+        # 并发场景下 SELECT 检查与 INSERT 之间可能存在竞态，
+        # 由 DB 唯一约束兜底，转为友好的业务错误（db_transaction 会将 ValueError 转 400）
+        if 'product_name_key' in str(e.orig).lower() or 'uq_product_name' in str(e.orig).lower():
+            raise ValueError(f'产品名称"{name}"已存在，每个产品名称必须是唯一的！') from e
+        raise
 
     if initial_stock > 0:
         log = InventoryLog(
@@ -145,9 +197,9 @@ async def create_product(db: AsyncSession, name: str, barcode: str | None,
         )
         db.add(log)
 
-    await db.commit()
+    await db.flush()
     await db.refresh(product)
-    await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY | CacheDomain.PRODUCT | CacheDomain.STOCKIN)
+    await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER_AND_INVENTORY | CacheDomain.PRODUCT | CacheDomain.STOCKIN)
     logger.info(f'产品添加成功：{name}，初始库存：{initial_stock}')
     return product.to_dict()
 
@@ -155,11 +207,12 @@ async def create_product(db: AsyncSession, name: str, barcode: str | None,
 async def update_product(db: AsyncSession, product_id: int, name: str | None,
                          barcode: str | None, image: str | None,
                          initial_stock: int | None,
-                         price: float | None = None) -> dict:
+                         price: float | None = None,
+                         factory: str | None = None) -> dict:
     """
     更新产品
 
-    业务规则（与Flask一致）：
+    业务规则：
     - 名称唯一性检查（排除自身）
     - 初始库存变更时调整 current_stock 并记录 InventoryLog
     """
@@ -185,6 +238,8 @@ async def update_product(db: AsyncSession, product_id: int, name: str | None,
         product.price = price
     if image is not None:
         product.image = image
+    if factory is not None:
+        product.factory = factory
 
     if initial_stock is not None and initial_stock != product.initial_stock:
         stock_change = initial_stock - product.initial_stock
@@ -203,9 +258,14 @@ async def update_product(db: AsyncSession, product_id: int, name: str | None,
         )
         db.add(log)
 
-    await db.commit()
+    try:
+        await db.flush()
+    except IntegrityError as e:
+        if 'product_name_key' in str(e.orig).lower() or 'uq_product_name' in str(e.orig).lower():
+            raise ValueError(f'产品名称"{name or product.name}"已存在，每个产品名称必须是唯一的！') from e
+        raise
     await db.refresh(product)
-    await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY | CacheDomain.PRODUCT | CacheDomain.STOCKIN)
+    await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER_AND_INVENTORY | CacheDomain.PRODUCT | CacheDomain.STOCKIN)
     logger.info(f'产品编辑成功：{product.name}')
     return product.to_dict()
 
@@ -214,7 +274,7 @@ async def delete_product(db: AsyncSession, product_id: int) -> None:
     """
     删除产品
 
-    业务规则（与Flask一致）：
+    业务规则：
     - 有关联单据（订单/入库/出库）时拒绝删除
     - 删除时级联删除库存日志
 
@@ -228,38 +288,48 @@ async def delete_product(db: AsyncSession, product_id: int) -> None:
     if not product:
         raise ProductNotFoundError(product_id)
 
-    # 使用 COUNT 查询检查关联，避免加载所有关联数据到内存
-    order_count = (await db.execute(
-        select(func.count(Order.id)).where(Order.product_id == product_id, Order.is_deleted.isnot(True))
-    )).scalar() or 0
+    # 单次往返完成 3 类关联计数（多 SKU 订单需同时检查 Order.product_id 与 OrderItem.product_id）
+    order_subq = select(func.count(Order.id)).where(
+        or_(
+            Order.product_id == product_id,
+            Order.id.in_(select(OrderItem.order_id).where(OrderItem.product_id == product_id))
+        ),
+        Order.is_deleted.isnot(True)
+    ).scalar_subquery()
+    stockin_subq = select(func.count(StockIn.id)).where(StockIn.product_id == product_id).scalar_subquery()
+    stockout_subq = select(func.count(StockOut.id)).where(StockOut.product_id == product_id).scalar_subquery()
+
+    order_count, stockin_count, stockout_count = (await db.execute(
+        select(order_subq, stockin_subq, stockout_subq)
+    )).one()
+    order_count = order_count or 0
+    stockin_count = stockin_count or 0
+    stockout_count = stockout_count or 0
+
     if order_count > 0:
         raise ProductHasRelatedOrdersError(product.name, order_count)
-
-    stockin_count = (await db.execute(
-        select(func.count(StockIn.id)).where(StockIn.product_id == product_id)
-    )).scalar() or 0
     if stockin_count > 0:
         raise ProductHasRelatedStockInsError(product.name, stockin_count)
-
-    stockout_count = (await db.execute(
-        select(func.count(StockOut.id)).where(StockOut.product_id == product_id)
-    )).scalar() or 0
     if stockout_count > 0:
         raise ProductHasRelatedStockOutsError(product.name, stockout_count)
 
-    try:
-        # 删除库存日志（批量删除避免逐条加载）
-        await db.execute(
-            delete(InventoryLog).where(InventoryLog.product_id == product_id)
-        )
+    # 删除库存日志（批量删除避免逐条加载）
+    await db.execute(
+        delete(InventoryLog).where(InventoryLog.product_id == product_id)
+    )
 
-        await db.delete(product)
-        await db.commit()
-    except (SQLAlchemyError, RuntimeError, OSError, ValueError):
-        await db.rollback()
-        raise
-    await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY | CacheDomain.PRODUCT | CacheDomain.STOCKIN)
+    await db.delete(product)
+    await db.flush()
+    await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER_AND_INVENTORY | CacheDomain.PRODUCT | CacheDomain.STOCKIN)
     logger.info(f'产品删除成功：{product.name}')
+
+
+async def get_product_by_id(db: AsyncSession, product_id: int) -> dict:
+    """按 ID 获取单个产品详情。不存在时抛 ValueError（端点转 404）。"""
+    product = await db.get(Product, product_id)
+    if not product:
+        raise ValueError('产品不存在')
+    return product.to_dict()
 
 
 async def search_products(db: AsyncSession, query: str) -> list[dict]:

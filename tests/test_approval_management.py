@@ -1,12 +1,18 @@
 """
 审批管理模块功能测试
 测试范围：审批流程创建、审批任务提交、审批状态跟踪、审批权限管理、审批记录查询
+
+标记: flask_legacy — 迁移中，需重写为 FastAPI + httpx.AsyncClient
 """
 import json
 import os
 import sys
 import unittest
 from datetime import datetime
+
+import pytest
+
+pytestmark = pytest.mark.flask_legacy
 
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

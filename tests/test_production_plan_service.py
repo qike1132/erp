@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from fastapi_app.services.production_plan_service import _normalize_plan_date, get_plan_by_id, get_plans
+from fastapi_app.services.production_plan_service import get_plan_by_id, get_plans
 
 
 class TestProductionPlanService:
@@ -27,12 +27,3 @@ class TestProductionPlanService:
         mock_db.execute = AsyncMock(return_value=mr)
         plan = await get_plan_by_id(mock_db, plan_id=1)
         assert plan.id == 1
-
-    def test_normalize_plan_date(self):
-        from datetime import date
-        result = _normalize_plan_date('2024-04-15')
-        assert result == date(2024, 4, 15)
-
-    def test_normalize_plan_date_invalid(self):
-        with pytest.raises(ValueError):
-            _normalize_plan_date('invalid')

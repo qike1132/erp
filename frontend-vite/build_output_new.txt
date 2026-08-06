@@ -1,0 +1,154 @@
+﻿
+> binfa-erp-vue3@1.0.0 build
+> vue-tsc -b && vite build
+
+vite.config.ts(9,29): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type '({ mode }: ConfigEnv) => { plugins: (Plugin<any> | Plugin<any>[])[]; resolve: { alias: { '@': string; }; }; build: { cssCodeSplit: true; chunkSizeWarningLimit: number; rollupOptions: { ...; }; }; server: { ...; }; preview: { ...; }; optimizeDeps: { ...; }; }' is not assignable to parameter of type 'UserConfigExport'.
+      Type '({ mode }: ConfigEnv) => { plugins: (Plugin<any> | Plugin<any>[])[]; resolve: { alias: { '@': string; }; }; build: { cssCodeSplit: true; chunkSizeWarningLimit: number; rollupOptions: { ...; }; }; server: { ...; }; preview: { ...; }; optimizeDeps: { ...; }; }' is not assignable to type 'UserConfigFnObject'.
+        Call signature return types '{ plugins: (Plugin<any> | Plugin<any>[])[]; resolve: { alias: { '@': string; }; }; build: { cssCodeSplit: true; chunkSizeWarningLimit: number; rollupOptions: { output: { exports: "auto"; manualChunks: { ...; }; }; }; }; server: { ...; }; preview: { ...; }; optimizeDeps: { ...; }; }' and 'UserConfig' are incompatible.
+          The types of 'build.rollupOptions.output' are incompatible between these types.
+            Type '{ exports: "auto"; manualChunks: { 'vendor-echarts': string[]; 'vendor-vue': string[]; 'vendor-vueuse': string[]; 'vendor-fontawesome': string[]; 'vendor-reka-ui': string[]; 'vendor-axios': string[]; 'vendor-capacitor': string[]; }; }' is not assignable to type 'OutputOptions | OutputOptions[] | undefined'.
+              Type '{ exports: "auto"; manualChunks: { 'vendor-echarts': string[]; 'vendor-vue': string[]; 'vendor-vueuse': string[]; 'vendor-fontawesome': string[]; 'vendor-reka-ui': string[]; 'vendor-axios': string[]; 'vendor-capacitor': string[]; }; }' is not assignable to type 'OutputOptions'.
+                Types of property 'manualChunks' are incompatible.
+                  Type '{ 'vendor-echarts': string[]; 'vendor-vue': string[]; 'vendor-vueuse': string[]; 'vendor-fontawesome': string[]; 'vendor-reka-ui': string[]; 'vendor-axios': string[]; 'vendor-capacitor': string[]; }' is not assignable to type 'ManualChunksFunction'.
+                    Type '{ 'vendor-echarts': string[]; 'vendor-vue': string[]; 'vendor-vueuse': string[]; 'vendor-fontawesome': string[]; 'vendor-reka-ui': string[]; 'vendor-axios': string[]; 'vendor-capacitor': string[]; }' provides no match for the signature '(moduleId: string, meta: { getModuleInfo: (moduleId: string) => ModuleInfo | null; }): string | NullValue<void>'.
+src/api/request.ts(195,21): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string | PromiseLike<string>'.
+  Type 'undefined' is not assignable to type 'string | PromiseLike<string>'.
+src/components/backup/FileRestorePanel.vue(188,28): error TS2769: No overload matches this call.
+  Overload 1 of 5, '(e: "file-select", file: File): void', gave the following error.
+    Argument of type 'File | undefined' is not assignable to parameter of type 'File'.
+      Type 'undefined' is not assignable to type 'File'.
+  Overload 2 of 5, '(e: "restore-completed", result: any): void', gave the following error.
+    Argument of type '"file-select"' is not assignable to parameter of type '"restore-completed"'.
+  Overload 3 of 5, '(e: "restore-failed", error: string): void', gave the following error.
+    Argument of type '"file-select"' is not assignable to parameter of type '"restore-failed"'.
+src/components/backup/IntegrityCheckPanel.vue(10,106): error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.
+  Type 'undefined' is not assignable to type 'number'.
+src/components/ui/VirtualList.vue(101,19): error TS2532: Object is possibly 'undefined'.
+src/components/ui/VirtualList.vue(149,21): error TS2322: Type 'T | undefined' is not assignable to type 'T'.
+  'T' could be instantiated with an arbitrary type which could be unrelated to 'T | undefined'.
+src/components/ui/VirtualList.vue(206,5): error TS2322: Type 'number | undefined' is not assignable to type 'number'.
+  Type 'undefined' is not assignable to type 'number'.
+src/components/ui/VirtualList.vue(213,27): error TS18048: 'totalHeight.value' is possibly 'undefined'.
+src/components/ui/VirtualTable.vue(78,19): error TS2532: Object is possibly 'undefined'.
+src/components/ui/VirtualTable.vue(110,156): error TS2322: Type 'T | undefined' is not assignable to type 'T'.
+  'T' could be instantiated with an arbitrary type which could be unrelated to 'T | undefined'.
+src/components/ui/VirtualTable.vue(138,92): error TS18048: 'totalHeight.value' is possibly 'undefined'.
+src/composables/useBackupProgress.ts(84,25): error TS2353: Object literal may only specify known properties, and 'controls' does not exist in type 'UseIntervalFnOptions'.
+src/composables/useEnhancedList.ts(68,54): error TS2540: Cannot assign to 'value' because it is a read-only property.
+src/composables/useToast.ts(233,16): error TS2551: Property 'WebkitBackdropFilter' does not exist on type 'CSSStyleDeclaration'. Did you mean 'backdropFilter'?
+src/composables/useVirtualScrollList.ts(142,13): error TS2540: Cannot assign to 'value' because it is a read-only property.
+src/main.ts(23,7): error TS2578: Unused '@ts-expect-error' directive.
+src/mobile/views/case/MCaseView.vue(70,54): error TS2322: Type '{ id: number; name: string; }[]' is not assignable to type 'string[]'.
+  Type '{ id: number; name: string; }' is not assignable to type 'string'.
+src/mobile/views/incoming/MIncomingView.vue(67,44): error TS2339: Property 'list' does not exist on type '{ overview: () => Promise<Record<string, unknown>>; trend: (days: number) => Promise<Record<string, unknown>>; distribution: () => Promise<Record<string, unknown>>; ... 5 more ...; export: (params?: QueryParams | undefined) => Promise<...>; }'.
+src/mobile/views/purchase/MPurchaseView.vue(129,51): error TS2551: Property 'completedOrders' does not exist on type '{ orders: (params?: QueryParams | undefined) => Promise<{ orders: PurchaseOrder[]; total: number; pages: number; current_page: number; }>; unprocessedOrders: (params?: { ...; } | undefined) => Promise<...>; ... 18 more ...; calculate: (orders: MaterialOrderInput[]) => Promise<...>; }'. Did you mean 'completeOrder'?
+src/mobile/views/shipment/MShipmentView.vue(70,70): error TS2339: Property 'items' does not exist on type 'Record<string, unknown>[]'.
+src/mobile/views/shipment/MShipmentView.vue(74,44): error TS2551: Property 'shippingProgress' does not exist on type '{ list: (params?: QueryParams | undefined) => Promise<Record<string, unknown>[]>; detail: (id: number) => Promise<Record<string, unknown>>; create: (data: Record<...>) => Promise<...>; ... 16 more ...; downloadTemplate: () => Promise<...>; }'. Did you mean 'shipmentProgress'?
+src/stores/tabs.ts(67,14): error TS18048: 'next' is possibly 'undefined'.
+src/utils/download.ts(15,17): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string | PromiseLike<string>'.
+  Type 'undefined' is not assignable to type 'string | PromiseLike<string>'.
+src/utils/multiLevelCache.ts(89,93): error TS2532: Object is possibly 'undefined'.
+src/utils/multiLevelCache.ts(100,102): error TS2532: Object is possibly 'undefined'.
+src/utils/perfBenchmark.ts(41,11): error TS2322: Type 'number | undefined' is not assignable to type 'number'.
+  Type 'undefined' is not assignable to type 'number'.
+src/utils/perfBenchmark.ts(42,11): error TS2322: Type 'number | undefined' is not assignable to type 'number'.
+  Type 'undefined' is not assignable to type 'number'.
+src/utils/perfBenchmark.ts(43,11): error TS2322: Type 'number | undefined' is not assignable to type 'number'.
+  Type 'undefined' is not assignable to type 'number'.
+src/utils/perfBenchmark.ts(44,11): error TS2322: Type 'number | undefined' is not assignable to type 'number'.
+  Type 'undefined' is not assignable to type 'number'.
+src/utils/perfBenchmark.ts(117,18): error TS2538: Type 'undefined' cannot be used as an index type.
+src/utils/webVitals.ts(72,39): error TS2532: Object is possibly 'undefined'.
+src/views/backup/BackupView.vue(230,41): error TS2339: Property 'tables' does not exist on type 'ApiResponse<{ name: string; rows: number; }[]>'.
+src/views/backup/BackupView.vue(273,7): error TS2322: Type 'ApiResponse<unknown>' is not assignable to type 'BackupSaveResult | { filename: string; size: number; format: string; table_count: number; total_rows: number; includes?: { filestore_count?: number | undefined; config_files?: string[] | undefined; redis_rdb?: boolean | undefined; } | undefined; } | null'.
+src/views/backup/BackupView.vue(316,51): error TS2339: Property 'summary' does not exist on type 'ApiResponse<unknown>'.
+src/views/backup/BackupView.vue(347,48): error TS2339: Property 'backups' does not exist on type 'ApiResponse<{ filename: string; size: number; created_at: string; }[]>'.
+src/views/backup/BackupView.vue(411,28): error TS2339: Property 'task_id' does not exist on type 'ApiResponse<unknown>'.
+src/views/backup/BackupView.vue(412,33): error TS2339: Property 'task_id' does not exist on type 'ApiResponse<unknown>'.
+src/views/backup/BackupView.vue(475,28): error TS2339: Property 'task_id' does not exist on type 'ApiResponse<unknown>'.
+src/views/backup/BackupView.vue(476,33): error TS2339: Property 'task_id' does not exist on type 'ApiResponse<unknown>'.
+src/views/backup/BackupView.vue(498,32): error TS2339: Property 'filename' does not exist on type 'ApiResponse<unknown>'.
+src/views/backup/BackupView.vue(498,49): error TS2339: Property 'total_rows' does not exist on type 'ApiResponse<unknown>'.
+src/views/backup/BackupView.vue(517,37): error TS2339: Property 'total_upserted' does not exist on type 'ApiResponse<unknown>'.
+src/views/dashboard/DashboardView.vue(471,18): error TS18048: 'status' is possibly 'undefined'.
+src/views/ocr-import/OcrImportView.vue(72,23): error TS2345: Argument of type 'File | undefined' is not assignable to parameter of type 'File'.
+  Type 'undefined' is not assignable to type 'File'.
+src/views/ocr-import/OcrImportView.vue(73,20): error TS2322: Type 'File | undefined' is not assignable to type 'File'.
+  Type 'undefined' is not assignable to type 'File'.
+src/views/product/ProductListView.vue(488,14): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/views/production/composables/useProductionCharts.ts(51,62): error TS2322: Type 'EChartsType' is not assignable to type 'ECharts'.
+  Types have separate declarations of a private property '_ssr'.
+src/views/production/composables/useProductionCharts.ts(115,31): error TS18048: 'deptColors.filling' is possibly 'undefined'.
+src/views/production/composables/useProductionCharts.ts(120,31): error TS18048: 'deptColors.handcraft' is possibly 'undefined'.
+src/views/production/composables/useProductionCharts.ts(124,51): error TS2339: Property 'packaging' does not exist on type 'MonthlyDayData'.
+src/views/production/composables/useProductionCharts.ts(125,31): error TS18048: 'deptColors.packaging' is possibly 'undefined'.
+src/views/production/ProductionView.vue(271,43): error TS2339: Property 'specification' does not exist on type '{ id: number; name: string; barcode?: string | undefined; customer?: string | undefined; category?: string | undefined; unit?: string | undefined; note?: string | undefined; status?: boolean | undefined; price?: number | undefined; image?: string | undefined; }'.
+src/views/production/ProductionView.vue(271,94): error TS2339: Property 'specification' does not exist on type '{ id: number; name: string; barcode?: string | undefined; customer?: string | undefined; category?: string | undefined; unit?: string | undefined; note?: string | undefined; status?: boolean | undefined; price?: number | undefined; image?: string | undefined; }'.
+src/views/production/ProductionView.vue(586,19): error TS2345: Argument of type '{ id: number; name: string; barcode?: string | undefined; customer?: string | undefined; category?: string | undefined; unit?: string | undefined; note?: string | undefined; status?: boolean | undefined; price?: number | undefined; image?: string | undefined; } | undefined' is not assignable to parameter of type 'Product'.
+  Type 'undefined' is not assignable to type 'Product'.
+src/views/production/ProductionView.vue(799,5): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/views/purchase-plan/components/CreateShipmentPlanDialog.vue(260,14): error TS2532: Object is possibly 'undefined'.
+src/views/purchase-plan/components/CreateShipmentPlanDialog.vue(261,3): error TS2532: Object is possibly 'undefined'.
+src/views/purchase-plan/components/CreateShipmentPlanDialog.vue(265,5): error TS2532: Object is possibly 'undefined'.
+src/views/purchase-plan/components/CreateShipmentPlanDialog.vue(271,5): error TS2532: Object is possibly 'undefined'.
+src/views/purchase-plan/components/CreateShipmentPlanDialog.vue(276,14): error TS2532: Object is possibly 'undefined'.
+src/views/purchase-plan/components/CreateShipmentPlanDialog.vue(280,7): error TS2532: Object is possibly 'undefined'.
+src/views/purchase-plan/components/CreateShipmentPlanDialog.vue(283,5): error TS2532: Object is possibly 'undefined'.
+src/views/purchase-plan/components/CreateShipmentPlanDialog.vue(288,22): error TS2532: Object is possibly 'undefined'.
+src/views/purchase-plan/components/CreateShipmentPlanDialog.vue(292,3): error TS2532: Object is possibly 'undefined'.
+src/views/purchase-plan/components/CreateShipmentPlanDialog.vue(293,3): error TS2532: Object is possibly 'undefined'.
+src/views/purchase-plan/components/CreateShipmentPlanDialog.vue(294,3): error TS2532: Object is possibly 'undefined'.
+src/views/purchase-plan/components/CreateShipmentPlanDialog.vue(295,3): error TS2532: Object is possibly 'undefined'.
+src/views/purchase-plan/components/CreateShipmentPlanDialog.vue(300,115): error TS2345: Argument of type 'File | undefined' is not assignable to parameter of type 'File'.
+  Type 'undefined' is not assignable to type 'File'.
+src/views/purchase-plan/components/CreateShipmentPlanDialog.vue(301,100): error TS2345: Argument of type 'File | undefined' is not assignable to parameter of type 'File'.
+  Type 'undefined' is not assignable to type 'File'.
+src/views/purchase-plan/components/CreateShipmentPlanDialog.vue(312,10): error TS18048: 'd' is possibly 'undefined'.
+src/views/purchase-plan/components/CreateShipmentPlanDialog.vue(313,10): error TS18048: 'd' is possibly 'undefined'.
+src/views/purchase-plan/components/CreateShipmentPlanDialog.vue(314,10): error TS18048: 'd' is possibly 'undefined'.
+src/views/purchase-plan/components/CreateShipmentPlanDialog.vue(315,10): error TS18048: 'd' is possibly 'undefined'.
+src/views/purchase-plan/components/CreateShipmentPlanDialog.vue(315,24): error TS18048: 'd' is possibly 'undefined'.
+src/views/purchase-plan/components/CreateShipmentPlanDialog.vue(316,27): error TS18048: 'd' is possibly 'undefined'.
+src/views/purchase-plan/components/CreateShipmentPlanDialog.vue(339,25): error TS2532: Object is possibly 'undefined'.
+src/views/purchase-plan/components/CreateShipmentPlanDialog.vue(339,46): error TS2532: Object is possibly 'undefined'.
+src/views/purchase-plan/components/PlanDetailDialog.vue(125,3): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/views/purchase/composables/useCompletedOrders.ts(57,30): error TS2339: Property 'total_pages' does not exist on type '{ orders: PurchaseOrder[]; total: number; pages: number; }'.
+src/views/purchase/composables/useCompletedOrders.ts(73,15): error TS2339: Property 'success' does not exist on type '{ quick_filters?: { id: string; name?: string | undefined; filters?: { start_date?: string | undefined; end_date?: string | undefined; } | undefined; }[] | undefined; }'.
+src/views/purchase/composables/useCompletedOrders.ts(83,15): error TS2339: Property 'success' does not exist on type '{ quick_filters?: { id: string; name?: string | undefined; filters?: { start_date?: string | undefined; end_date?: string | undefined; } | undefined; }[] | undefined; }'.
+src/views/purchase/composables/useCompletedOrders.ts(140,25): error TS2339: Property 'message' does not exist on type 'ExportResponse'.
+src/views/purchase/PurchaseView.vue(224,17): error TS2352: Conversion of type '{ created_count: number; orders: { id: number; order_no: string; }[]; }' to type 'ApiResponse<unknown>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Property 'success' is missing in type '{ created_count: number; orders: { id: number; order_no: string; }[]; }' but required in type 'ApiResponse<unknown>'.
+src/views/purchase/PurchaseView.vue(255,17): error TS2352: Conversion of type '{ created_count: number; orders: { id: number; order_no: string; }[]; }' to type 'ApiResponse<unknown>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Property 'success' is missing in type '{ created_count: number; orders: { id: number; order_no: string; }[]; }' but required in type 'ApiResponse<unknown>'.
+src/views/purchase/PurchaseView.vue(352,28): error TS2339: Property 'order' does not exist on type '{ success: boolean; data?: PurchaseOrder | undefined; } & { data?: PurchaseOrder | undefined; }'.
+src/views/purchase/PurchaseView.vue(353,31): error TS2339: Property 'order' does not exist on type '{ success: boolean; data?: PurchaseOrder | undefined; } & { data?: PurchaseOrder | undefined; }'.
+src/views/purchase/PurchaseView.vue(355,26): error TS2339: Property 'message' does not exist on type '{ success: boolean; data?: PurchaseOrder | undefined; } & { data?: PurchaseOrder | undefined; }'.
+src/views/stock/composables/useStockOutActions.ts(33,17): error TS2339: Property 'product_id' does not exist on type '{ product_id: string; customer: string; order_type: string; country: string; stockouts: StagedStockout[]; } | undefined'.
+src/views/stock/composables/useStockOutActions.ts(33,29): error TS2339: Property 'customer' does not exist on type '{ product_id: string; customer: string; order_type: string; country: string; stockouts: StagedStockout[]; } | undefined'.
+src/views/stock/composables/useStockOutActions.ts(33,39): error TS2339: Property 'order_type' does not exist on type '{ product_id: string; customer: string; order_type: string; country: string; stockouts: StagedStockout[]; } | undefined'.
+src/views/stock/composables/useStockOutActions.ts(33,51): error TS2339: Property 'country' does not exist on type '{ product_id: string; customer: string; order_type: string; country: string; stockouts: StagedStockout[]; } | undefined'.
+src/views/stock/composables/useStockOutActions.ts(33,60): error TS2339: Property 'stockouts' does not exist on type '{ product_id: string; customer: string; order_type: string; country: string; stockouts: StagedStockout[]; } | undefined'.
+src/views/stock/StockOutTab.vue(351,46): error TS18048: '__VLS_ctx.detailData.deduct_quantity' is possibly 'undefined'.
+src/views/stock/StockOutTab.vue(556,19): error TS2345: Argument of type '{ id: number; name: string; barcode?: string | undefined; customer?: string | undefined; category?: string | undefined; unit?: string | undefined; note?: string | undefined; status?: boolean | undefined; price?: number | undefined; image?: string | undefined; } | undefined' is not assignable to parameter of type 'Product'.
+  Type 'undefined' is not assignable to type 'Product'.
+src/views/stock/StockOutTab.vue(677,29): error TS18048: 'item' is possibly 'undefined'.
+src/views/stock/StockOutTab.vue(678,25): error TS18048: 'item' is possibly 'undefined'.
+src/views/stock/StockOutTab.vue(679,32): error TS18048: 'item' is possibly 'undefined'.
+src/views/stock/StockOutTab.vue(680,29): error TS18048: 'item' is possibly 'undefined'.
+src/views/stock/StockOutTab.vue(681,25): error TS18048: 'item' is possibly 'undefined'.
+src/views/stock/StockOutTab.vue(682,30): error TS18048: 'item' is possibly 'undefined'.
+src/views/stock/StockOutTab.vue(683,28): error TS18048: 'item' is possibly 'undefined'.
+src/views/stock/StockOutTab.vue(690,3): error TS18048: 'item' is possibly 'undefined'.
+src/views/stock/StockOutTab.vue(691,3): error TS18048: 'item' is possibly 'undefined'.
+src/views/stock/StockOutTab.vue(692,3): error TS18048: 'item' is possibly 'undefined'.
+src/views/stock/StockOutTab.vue(693,3): error TS18048: 'item' is possibly 'undefined'.
+src/views/stock/StockOutTab.vue(694,3): error TS18048: 'item' is possibly 'undefined'.
+src/views/stock/StockOutTab.vue(695,3): error TS18048: 'item' is possibly 'undefined'.
+src/views/stock/StockOutTab.vue(740,18): error TS2339: Property 'downloadTemplate' does not exist on type '{ productSearch: (q: string) => Promise<{ products?: unknown; }>; availableShipment: (params: { product_id: number; customer: string; order_type?: string | undefined; country?: string | undefined; }) => Promise<...>; query: (params?: QueryParams | undefined) => Promise<...>; }'.
+src/views/stock/StockOutTab.vue(833,68): error TS2339: Property 'data' does not exist on type '{ stockouts?: StockOutRecord[] | undefined; items?: StockOutRecord[] | undefined; total?: number | undefined; }'.
+src/views/stock/StockOutTab.vue(833,80): error TS2339: Property 'data' does not exist on type '{ stockouts?: StockOutRecord[] | undefined; items?: StockOutRecord[] | undefined; total?: number | undefined; }'.

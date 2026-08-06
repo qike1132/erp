@@ -1,10 +1,7 @@
 import { ref, computed, reactive } from 'vue'
 import { purchaseApi } from '@/api'
 import { printHtml } from '@/utils/print'
-
-function fmtQty(val: any): string {
-  return parseFloat(String(val || 0)).toFixed(2)
-}
+import { fmtQty } from '@/utils/formatQty'
 
 function buildFactoryHtml(data: { groups?: any[] }): string {
   let tableHtml = ''
@@ -62,7 +59,7 @@ function downloadAsXls(html: string, filename: string) {
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
-  URL.revokeObjectURL(url)
+  setTimeout(() => URL.revokeObjectURL(url), 10000)
 }
 
 interface FabricItem {
@@ -318,11 +315,14 @@ export function useSummaryModal() {
     downloadAsXls(html, '工厂内部采购汇总.xls')
   }
 
-  function exportSupplier() {
+  async function exportSupplier() {
     if (!supplierData.value) return
-    const tableHtml = buildSupplierHtml(supplierGroups.value)
-    const html = `<div style="text-align:center;margin-bottom:20px"><h2>供应商采购订单汇总</h2></div><table><thead><tr><th>供应商</th><th>物料名称</th><th>规格型号</th><th>数量</th></tr></thead><tbody>${tableHtml}</tbody></table>`
-    downloadAsXls(html, '供应商采购订单汇总.xls')
+    if (orderIds.value.length === 0) return
+    try {
+      await purchaseApi.supplierSummaryExport(orderIds.value)
+    } catch (e) {
+      throw new Error((e as Error).message || '导出失败')
+    }
   }
 
   return reactive({

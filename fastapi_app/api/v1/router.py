@@ -17,9 +17,11 @@ from fastapi_app.api.v1.endpoints.dead_letter import router as dead_letter_route
 from fastapi_app.api.v1.endpoints.device_token import router as device_token_router
 from fastapi_app.api.v1.endpoints.material_registration import router as material_reg_router
 from fastapi_app.api.v1.endpoints.monitoring import router as monitoring_router
+from fastapi_app.api.v1.endpoints.notification import router as notification_router
 from fastapi_app.api.v1.endpoints.ocr_import import router as ocr_import_router
 from fastapi_app.api.v1.endpoints.order import router as order_router
 from fastapi_app.api.v1.endpoints.order_batch import router as order_batch_router
+from fastapi_app.api.v1.endpoints.pattern_room import router as pattern_room_router
 from fastapi_app.api.v1.endpoints.permission import router as permission_router
 from fastapi_app.api.v1.endpoints.product import router as product_router
 from fastapi_app.api.v1.endpoints.production_plan import router as production_plan_router
@@ -274,5 +276,21 @@ api_router.include_router(
     dead_letter_router,
     prefix="/dead-letter",
     tags=["死信队列"],
+    dependencies=[Depends(get_current_user_id)],
+)
+
+# 板房管理路由 - 前缀 /api/v1/pattern-room
+api_router.include_router(
+    pattern_room_router,
+    prefix="/pattern-room",
+    tags=["板房管理"],
+    dependencies=[Depends(get_current_user_id)],
+)
+
+# 通知中心路由 - 前缀 /api/v1/notifications
+api_router.include_router(
+    notification_router,
+    prefix="/notifications",
+    tags=["notifications"],
     dependencies=[Depends(get_current_user_id)],
 )

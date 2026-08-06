@@ -98,16 +98,6 @@ class SupplierResponse(BaseModel):
     address: str | None = None
 
 
-class SupplierListResponse(BaseModel):
-    success: bool = True
-    suppliers: list[dict] = []
-
-
-class SupplierMaterialResponse(BaseModel):
-    success: bool = True
-    materials: list[dict] = []
-
-
 # ============================================================
 # 客户相关
 # ============================================================
@@ -173,6 +163,10 @@ class PurchaseOrderActionResponse(BaseModel):
     message: str | None = None
     orders: list[dict] | None = None
     order: dict | None = None
+    # 一键生成时返回的创建数量
+    created_count: int | None = None
+    # 是否命中唯一约束后回查的幂等结果
+    idempotent: bool | None = None
 
 
 class OneClickGenerateRequest(BaseModel):
@@ -315,6 +309,8 @@ class UnprocessedOrdersResponse(BaseModel):
     success: bool = True
     orders: list[dict] = []
     total: int = 0
+    pages: int = 0
+    current_page: int = 1
     latest_sync_time: str | None = None
 
 
@@ -329,7 +325,7 @@ class SuggestionResponse(BaseModel):
 
 class QuickFilterResponse(BaseModel):
     success: bool = True
-    quick_filters: list[dict] = []
+    quick_filters: dict[str, int] = {}
 
 
 # ============================================================
@@ -339,6 +335,10 @@ class QuickFilterResponse(BaseModel):
 class ActionResponse(BaseModel):
     success: bool = True
     message: str | None = None
+    copied_count: int | None = None
+    deleted_count: int | None = None
+
+    model_config = {'extra': 'allow'}
 
 
 class CacheClearResponse(BaseModel):

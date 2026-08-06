@@ -63,7 +63,7 @@ def init_compression(app):
     初始化压缩中间件
 
     Args:
-        app: Flask应用实例
+        app: FastAPI 应用实例
     """
     compression = CompressionMiddleware(
         app=app,

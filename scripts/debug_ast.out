@@ -1,0 +1,14 @@
+FUNC: check_login_status
+  DECO type=Call: Call(func=Attribute(value=Name(id='router', ctx=Load()), attr='get', ctx=Load()), args=[Constant(value='/check')], keywords=[keyword(arg='response_model', value=Name(id='LoginCheckResponse', ctx=Load(
+FUNC: get_current_user_info
+  DECO type=Call: Call(func=Attribute(value=Name(id='router', ctx=Load()), attr='get', ctx=Load()), args=[Constant(value='/me')], keywords=[keyword(arg='response_model', value=Name(id='UserInfoResponse', ctx=Load()))])
+FUNC: log_frontend_error
+  DECO type=Call: Call(func=Attribute(value=Name(id='router', ctx=Load()), attr='post', ctx=Load()), args=[Constant(value='/logs/frontend-error')], keywords=[keyword(arg='response_model', value=Name(id='FrontendErrorLo
+FUNC: api_login
+  DECO type=Call: Call(func=Attribute(value=Name(id='router', ctx=Load()), attr='post', ctx=Load()), args=[Constant(value='/login')], keywords=[keyword(arg='response_model', value=Name(id='LoginResponse', ctx=Load()))]
+FUNC: api_logout
+  DECO type=Call: Call(func=Attribute(value=Name(id='router', ctx=Load()), attr='post', ctx=Load()), args=[Constant(value='/logout')])
+FUNC: api_refresh_token
+  DECO type=Call: Call(func=Attribute(value=Name(id='router', ctx=Load()), attr='post', ctx=Load()), args=[Constant(value='/refresh')])
+FUNC: upload_file
+  DECO type=Call: Call(func=Attribute(value=Name(id='router', ctx=Load()), attr='post', ctx=Load()), args=[Constant(value='/upload')], keywords=[keyword(arg='response_model', value=Name(id='FileUploadResponse', ctx=Loa

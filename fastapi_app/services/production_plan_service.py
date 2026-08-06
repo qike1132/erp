@@ -9,7 +9,7 @@ import io
 import json
 import logging
 import uuid
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 import openpyxl
 from sqlalchemy import and_, delete, extract, func, select
@@ -54,7 +54,6 @@ async def create_plan(db: AsyncSession, *, customer_name: str, product_name: str
     await db.flush()
     await db.refresh(plan)
     await _log_action(db, plan.id, 'create', None, plan.to_dict(), created_by)
-    await db.commit()
     logger.info(f'排产计划创建成功：{plan.customer_name} - {plan.product_name} - {plan.quantity}')
     return plan
 
@@ -70,11 +69,10 @@ async def update_plan(db: AsyncSession, plan_id: int, *, created_by: str='', **k
                 plan.plan_date = normalize_plan_date(kwargs[field])
             else:
                 setattr(plan, field, kwargs[field])
-    plan.update_time = datetime.now()
+    plan.update_time = datetime.now(UTC).replace(tzinfo=None)
     await db.flush()
     await db.refresh(plan)
     await _log_action(db, plan.id, 'update', old_data, plan.to_dict(), created_by)
-    await db.commit()
     return plan
 
 async def delete_plan(db: AsyncSession, plan_id: int, *, operator: str='') -> None:
@@ -86,7 +84,6 @@ async def delete_plan(db: AsyncSession, plan_id: int, *, operator: str='') -> No
     await db.execute(delete(ProductionPlanLog).where(ProductionPlanLog.plan_id == plan_id))
     await db.delete(plan)
     await _log_action(db, plan_id, 'delete', old_data, None, operator)
-    await db.commit()
     logger.info(f'排产计划删除成功：ID={plan_id}')
 
 async def get_plans_with_inventory(db: AsyncSession, year: int, month: int, customer: str='') -> dict:
@@ -268,9 +265,8 @@ async def validate_staging(db: AsyncSession, session_id: str) -> dict:
     records = result.scalars().all()
     all_customers = await customer_service.get_customers(db)
     customer_names = {c.name for c in all_customers}
-    all_products = await product_service.get_products(db)
-    barcode_set = {p['barcode'] for p in all_products if p.get('barcode')}
-    product_name_map = {p['barcode']: p['name'] for p in all_products if p.get('barcode')}
+    product_name_map = await product_service.get_product_barcode_map(db)
+    barcode_set = set(product_name_map.keys())
     valid_count = 0
     error_count = 0
     for record in records:
@@ -312,14 +308,12 @@ async def confirm_staging(db: AsyncSession, session_id: str, batch_id: str='', c
         db.add(plan)
         created_count += 1
     await db.execute(delete(StagingPurchasePlan).where(*conditions))
-    await db.commit()
     logger.info(f'暂存数据确认保存：{created_count} 条')
     return {'created_count': created_count, 'skipped_count': len(records) - len(valid_records)}
 
 async def clear_staging(db: AsyncSession, session_id: str) -> None:
     """清空暂存区"""
     await db.execute(delete(StagingPurchasePlan).where(StagingPurchasePlan.session_id == session_id))
-    await db.commit()
 
 async def validate_barcode(db: AsyncSession, barcode: str) -> dict:
     """验证69码，返回关联的产品信息"""

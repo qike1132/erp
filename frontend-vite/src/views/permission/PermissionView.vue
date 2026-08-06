@@ -4,8 +4,7 @@
 
     <UiCard>
       <div v-if="isLoading" class="flex items-center justify-center py-10 text-gray-400 gap-2">
-        <UiSpinner /> 加载中…
-      </div>
+        <UiSpinner /></div>
       <template v-else-if="permissionTree.length === 0">
         <UiEmpty description="暂无权限数据" />
       </template>

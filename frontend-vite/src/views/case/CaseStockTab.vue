@@ -38,28 +38,19 @@
           </div>
 
           <div class="cs-form-row" style="grid-template-columns: 2fr 1fr">
-            <div class="cs-form-field" style="position: relative">
+            <div class="cs-form-field">
               <label class="cs-form-label">产品名称</label>
-              <input
-                type="text"
-                class="cs-input"
-                :value="form.search"
+              <UiAutocomplete
+                v-model="form.search"
+                :searchFn="searchCaseProducts"
                 placeholder="输入产品名称或69码搜索"
-                @input="form.search = ($event.target as HTMLInputElement).value; onSearchInput()"
-                @focus="onProductFocus"
-                @blur="hideSuggestions"
-              />
-              <div v-if="productSuggestions.length && showSuggestions" class="cs-autocomplete-dropdown">
-                <div
-                  v-for="product in productSuggestions"
-                  :key="product.id"
-                  class="cs-autocomplete-item"
-                  @mousedown.prevent="selectProduct(product)"
-                >
-                  {{ product.name }}
-                  <span v-if="product.barcode" class="cs-barcode-hint">{{ product.barcode }}</span>
-                </div>
-              </div>
+                @select="onProductSelect"
+              >
+                <template #option="{ item }">
+                  {{ item.name }}
+                  <span v-if="item.barcode" class="cs-barcode-hint">{{ item.barcode }}</span>
+                </template>
+              </UiAutocomplete>
               <small v-if="mode === 'stockout' && form.productId" class="cs-current-stock">当前库存: {{ currentStock }}</small>
             </div>
             <div class="cs-form-field">
@@ -137,10 +128,10 @@
             </div>
             <div class="cs-batch-actions">
               <button class="cs-action-btn cs-action-outline" :disabled="templateDownloading" @click="handleDownloadTemplate">
-                <i :class="templateDownloading ? 'fas fa-spinner fa-spin' : 'fas fa-file-excel'" style="margin-right: 4px" />下载模板
+                <UiLoadingIcon :loading="templateDownloading" icon="file-excel" />下载模板
               </button>
               <button :class="['cs-action-btn', mode === 'stockin' ? 'cs-action-primary' : 'cs-action-danger']" :disabled="!excelFile || importing" @click="handleImportExcel">
-                <i :class="importing ? 'fas fa-spinner fa-spin' : 'fas fa-upload'" style="margin-right: 4px" />{{ importing ? '导入中…' : '开始导入' }}
+                <i :loading="importing" icon="upload" style="margin-right: 4px" />{{ importing ? '导入中…' : '开始导入' }}
               </button>
             </div>
           </div>
@@ -192,7 +183,7 @@
           </div>
         </div>
       </div>
-      <div v-if="siIsLoading && siList.length === 0" class="cs-loading"><i class="fas fa-spinner fa-spin" /><span>加载中…</span></div>
+      <div v-if="siIsLoading && siList.length === 0" class="cs-loading"><UiSpinner /></div>
       <div v-else-if="siList.length === 0" class="cs-empty"><i class="fas fa-inbox" /><span>暂无入库记录</span></div>
       <template v-else>
       <div v-if="siIsFetching" class="cs-fetching-bar"><div class="cs-fetching-progress" /></div>
@@ -259,7 +250,7 @@
           </div>
         </div>
       </div>
-      <div v-if="soIsLoading && soList.length === 0" class="cs-loading"><i class="fas fa-spinner fa-spin" /><span>加载中…</span></div>
+      <div v-if="soIsLoading && soList.length === 0" class="cs-loading"><UiSpinner /></div>
       <div v-else-if="soList.length === 0" class="cs-empty"><i class="fas fa-inbox" /><span>暂无出库记录</span></div>
       <template v-else>
       <div v-if="soIsFetching" class="cs-fetching-bar"><div class="cs-fetching-progress" /></div>
@@ -389,43 +380,12 @@ async function searchCaseProducts(query: string) {
   }
 }
 
-const productSuggestions = ref<any[]>([])
-const showSuggestions = ref(false)
-let searchTimeout: ReturnType<typeof setTimeout> | null = null
-onUnmounted(() => { if (searchTimeout) clearTimeout(searchTimeout) })
 const currentStock = ref(0)
 
-function onProductFocus() {
-  if (form.search && productSuggestions.value.length === 0) {
-    searchCaseProducts(form.search).then((results) => {
-      productSuggestions.value = results
-      showSuggestions.value = results.length > 0
-    })
-  } else if (productSuggestions.value.length > 0) {
-    showSuggestions.value = true
-  }
-}
-function hideSuggestions() {
-  searchTimeout = setTimeout(() => { showSuggestions.value = false }, 150)
-}
-
-function onSearchInput() {
-  form.productId = ''
-  if (mode.value === 'stockout') currentStock.value = 0
-  showSuggestions.value = false
-  if (searchTimeout) clearTimeout(searchTimeout)
-  searchTimeout = setTimeout(async () => {
-    const results = await searchCaseProducts(form.search)
-    productSuggestions.value = results
-    showSuggestions.value = results.length > 0
-  }, 300)
-}
-
-function selectProduct(product: any) {
+function onProductSelect(product: any) {
   form.productId = String(product.id)
   form.search = product.name
   if (mode.value === 'stockout') currentStock.value = product.current_stock ?? 0
-  showSuggestions.value = false
 }
 
 // === 表单 ===

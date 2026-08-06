@@ -32,7 +32,7 @@
       </MList>
 
       <div class="m-app-info">
-        <span>滨发ERP v2.0</span>
+        <span>东莞ERP v2.0</span>
       </div>
     </div>
   </div>

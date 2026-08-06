@@ -44,7 +44,7 @@ async def _get_optional_user(
 ) -> int | None:
     try:
         return await get_current_user_id(request, db)
-    except (HTTPException, ValueError, TypeError, Exception):
+    except Exception:  # defensive: optional user resolution, any auth failure returns None
         return None
 
 
@@ -231,7 +231,7 @@ def register_health_routes(app: FastAPI) -> None:
             db_ok = await verify_db_connectivity()
             if db_ok:
                 return {"status": "started"}
-        except Exception:
+        except (OperationalError, DisconnectionError):
             pass
         return Response(
             content=json.dumps({"status": "starting"}, ensure_ascii=False),

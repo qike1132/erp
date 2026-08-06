@@ -23,6 +23,6 @@ async def clear_and_import_staging(
         await db.execute(staging_model.__table__.delete())
         for obj in staging_objects:
             db.add(obj)
-        await db.commit()
+        await db.flush()
     logger.info(f'{table_name} 暂存导入完成: {len(staging_objects)} 条')
     return len(staging_objects)

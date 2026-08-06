@@ -1,37 +1,44 @@
-import os
-import sys
+"""
+日志模块测试 — 纯 FastAPI 版
 
+验证日志系统在无 Flask 依赖下正常工作。
+"""
 import pytest
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-try:
-    from app import create_app
-    from flask import Flask
-    HAS_FLASK = True
-except ImportError:
-    HAS_FLASK = False
-    create_app = None
+def test_logger_import():
+    """测试 logger 模块可正常导入"""
+    from utils.logger import logger
 
-try:
+    assert logger is not None
+    assert hasattr(logger, "info")
+    assert hasattr(logger, "error")
+    assert hasattr(logger, "warning")
+    assert hasattr(logger, "debug")
+
+
+def test_logger_basic_methods(caplog):
+    """测试日志记录方法"""
     from utils.logger import logger, setup_logging
-except ImportError:
-    logger = None
-    setup_logging = None
+
+    # 初始化：setup_logging 设置 root logger，然后绑定到 logger 实例
+    root_logger, _ = setup_logging()
+    logger.logger = root_logger
+
+    with caplog.at_level("INFO"):
+        logger.info("Test info message")
+        logger.warning("Test warning message")
+        logger.error("Test error message")
+
+    log_text = caplog.text
+    assert "Test info message" in log_text
+    assert "Test warning message" in log_text
+    assert "Test error message" in log_text
 
 
-@pytest.mark.skipif(not HAS_FLASK, reason="Flask dependencies not available")
-def test_logger_initialization():
-    app = create_app('testing')
-    app.config['WTF_CSRF_ENABLED'] = False
+def test_setup_logging():
+    """测试日志初始化函数"""
+    from utils.logger import setup_logging
 
-    with app.app_context():
-        # verify loggers are set
-        assert logger.logger is not None
-        assert logger.access_logger is not None
-
-        # Test logging methods
-        logger.info("Test info")
-        logger.error("Test error")
-        logger.warning("Test warning")
-        logger.debug("Test debug")
+    # 不应抛出异常
+    setup_logging()

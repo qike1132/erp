@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from fastapi_app.core.redis_wrapper import safe_delete_pattern, safe_get, safe_set
-from fastapi_app.services import escape_like
+from fastapi_app.core.sanitizer import escape_like
 
 logger = logging.getLogger(__name__)
 

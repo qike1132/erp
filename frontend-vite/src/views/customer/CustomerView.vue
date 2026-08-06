@@ -1,8 +1,8 @@
-﻿<template>
+<template>
   <div class="cu-container">
-    <div class="cu-card cu-card-main">
+    <div class="page-card page-card-main">
       <!-- 卡片头部 -->
-      <div class="cu-card-header">
+      <div class="page-card-header">
         <div class="cu-header-left">
           <HeaderTabs />
         </div>
@@ -18,8 +18,7 @@
       <!-- 数据表格 -->
       <div class="cu-table-wrap">
         <div v-if="isLoading && customers.length === 0" class="cu-empty">
-          <i class="fas fa-spinner fa-spin"  aria-hidden="true" />
-          <span>加载中…</span>
+          <UiSpinner />
         </div>
         <template v-else-if="customers.length === 0">
           <div class="cu-empty">
@@ -61,7 +60,7 @@
                   <i class="cu-dot" />{{ row.status ? '启用' : '停用' }}
                 </span>
               </td>
-              <td><span class="cu-text-muted">{{ row.create_time || '-' }}</span></td>
+              <td><span class="cu-text-muted">{{ formatDate(row.create_time) }}</span></td>
               <td>
                 <div class="cu-actions">
                   <button class="cu-icon-btn cu-icon-edit" title="编辑" @click="openForm('edit', row)" aria-label="编辑"><i class="fas fa-pen-to-square"  aria-hidden="true" /></button>
@@ -84,7 +83,7 @@
       <form @submit.prevent="handleSubmit">
         <div class="cu-form-group">
           <label>客户名称 <span class="cu-required">*</span></label>
-          <input v-model="form.name" class="cu-form-input" placeholder="请输入客户名称" name="customer-name" autocomplete="off" />
+          <input v-model="form.name" class="cu-form-input" required placeholder="请输入客户名称" name="customer-name" autocomplete="off" />
         </div>
         <div class="cu-form-grid">
           <div class="cu-form-group"><label>联系人</label><input v-model="form.contact" class="cu-form-input" placeholder="联系人姓名" name="contact" autocomplete="off" /></div>
@@ -115,7 +114,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
+/**
+ * CustomerView.vue — 客户管理页面
+ *
+ * 职责：
+ * - 展示客户列表（服务端分页 + 搜索防抖 + 状态筛选）
+ * - 新增 / 编辑 / 删除客户，切换启用/停用状态
+ * - 使用 useApiMutation 统一管理增删改操作
+ */
+import { ref, reactive, computed, onUnmounted } from 'vue'
 import { useQuery, keepPreviousData } from '@tanstack/vue-query'
 import { showToast } from '@/composables/useToast'
 import { customerApi } from '@/api'
@@ -129,13 +136,20 @@ import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { formatDate } from '@/utils/format'
 
 // ===== 列表查询（服务端分页+搜索） =====
+/** 搜索关键词（即时绑定输入框） */
 const searchTerm = ref('')
+/** 状态筛选：all / active / inactive */
 const statusFilter = ref<'all' | 'active' | 'inactive'>('all')
+/** 当前页码 */
 const currentPage = ref(1)
+/** 每页条数 */
 const perPage = 15
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null
+/** 防抖后的搜索关键词，用于触发查询 */
 const debouncedSearch = ref('')
+
+/** 搜索输入防抖处理（300ms），避免频繁请求 */
 function onSearchInput() {
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(() => {
@@ -143,46 +157,44 @@ function onSearchInput() {
     currentPage.value = 1
   }, 300)
 }
-function clearSearch() {
-  searchTerm.value = ''
-  debouncedSearch.value = ''
-  currentPage.value = 1
-}
 
+onUnmounted(() => {
+  if (searchTimer) clearTimeout(searchTimer)
+})
+
+/** 客户列表查询（服务端分页 + 搜索 + 状态筛选） */
 const { data: result, isLoading, isFetching } = useQuery({
   queryKey: ['customers-list', () => debouncedSearch.value, () => statusFilter.value, () => currentPage.value],
-  queryFn: () => customerApi.list({ per_page: perPage, page: currentPage.value, search: debouncedSearch.value || undefined, status: statusFilter.value !== 'all' ? statusFilter.value : undefined }) as Promise<any>,
+  queryFn: () => customerApi.list({ per_page: perPage, page: currentPage.value, search: debouncedSearch.value || undefined, status: statusFilter.value !== 'all' ? statusFilter.value : undefined }),
   staleTime: 30_000,
   gcTime: 60_000,
   placeholderData: keepPreviousData,
 })
 
+/** 当前页客户列表（统一 status 为布尔值） */
 const customers = computed<Customer[]>(() => {
-  const raw = result.value?.customers ?? result.value?.data ?? []
-  return raw.map((c: any) => ({ ...c, status: c.status === true || c.status === 'active' }))
+  const raw = result.value?.customers ?? []
+  return raw.map((c: Customer) => ({ ...c, status: c.status === true || String(c.status) === 'active' }))
 })
 
+/** 总记录数（用于分页） */
 const totalItems = computed(() => result.value?.total ?? customers.value.length)
+/** 总页数（至少为 1） */
 const totalPages = computed(() => Math.ceil(totalItems.value / perPage) || 1)
-
-// ===== 统计 =====
-const activeCount = computed(() => {
-  const t = totalItems.value
-  const inactive = result.value?.inactive_count ?? 0
-  return t - inactive
-})
-const inactiveCount = computed(() => result.value?.inactive_count ?? 0)
 
 // ===== 表单 =====
 const formVisible = ref(false)
+/** 表单模式：新增 / 编辑 */
 const formMode = ref<'add' | 'edit'>('add')
 const submitting = ref(false)
 const form = reactive({ id: 0, name: '', contact: '', phone: '', address: '', note: '' })
 
+/** 重置表单到初始状态 */
 function resetForm() {
   Object.assign(form, { id: 0, name: '', contact: '', phone: '', address: '', note: '' })
 }
 
+/** 打开表单弹窗：新增模式清空表单，编辑模式填充行数据 */
 function openForm(mode: 'add' | 'edit', row?: Customer) {
   formMode.value = mode
   if (mode === 'edit' && row) {
@@ -201,26 +213,31 @@ function openForm(mode: 'add' | 'edit', row?: Customer) {
 }
 
 // ===== Mutations =====
+/** 新增客户 */
 const addMutation = useApiMutation((data: typeof form) => customerApi.create(data), {
   invalidateKeys: ['customers-list'],
   successMsg: '客户创建成功',
 })
 
+/** 编辑客户 */
 const editMutation = useApiMutation((data: typeof form) => customerApi.update(data.id, data), {
   invalidateKeys: ['customers-list'],
   successMsg: '修改已保存',
 })
 
+/** 切换客户启用/停用状态 */
 const toggleMutation = useApiMutation((id: number) => customerApi.toggleStatus(id), {
   invalidateKeys: ['customers-list'],
 })
 
+/** 删除客户 */
 const deleteMutation = useApiMutation((id: number) => customerApi.delete(id), {
   invalidateKeys: ['customers-list'],
   successMsg: '客户已删除',
 })
 const confirmDialog = useConfirmDialog()
 
+/** 提交表单：校验后执行新增或编辑 */
 async function handleSubmit() {
   if (!form.name?.trim()) {
     showToast('客户名称不能为空', 'warning')
@@ -242,8 +259,10 @@ async function handleSubmit() {
   }
 }
 
+/** 当前操作中的客户 ID（用于禁用按钮） */
 const actionId = ref<number | null>(null)
 
+/** 切换客户状态（带确认对话框） */
 async function handleToggle(row: Customer) {
   const action = row.status ? '禁用' : '启用'
   if (!(await confirmDialog.confirm(`确定要${action}客户「${row.name}」吗？`))) return
@@ -255,6 +274,7 @@ async function handleToggle(row: Customer) {
   }
 }
 
+/** 删除客户（带确认对话框） */
 async function handleDelete(row: Customer) {
   if (!(await confirmDialog.confirm(`删除客户「${row.name}」后不可恢复，确认继续？`))) return
   actionId.value = row.id
@@ -269,7 +289,7 @@ async function handleDelete(row: Customer) {
 <style scoped>
 /* Container */
 .cu-container {
-  padding: 8px;
+  padding: 0;
   margin: 0 auto;
   height: 100%;
   display: flex;
@@ -278,33 +298,13 @@ async function handleDelete(row: Customer) {
 }
 
 /* Card */
-.cu-card {
-  background: white;
-  border-radius: 18px;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  transition: box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.cu-card:hover {
-  box-shadow: 0 8px 24px rgba(0,0,0,0.06), 0 24px 80px rgba(0,0,0,0.08);
-}
-.cu-card-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-}
+/* 卡片样式已迁移到全局 .page-card 系列（src/styles/app.css） */
 
 /* Card Header */
-.cu-card-header {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  align-items: flex-start;
-  padding: 10px 24px;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
-  gap: 12px;
+/* 卡片头部样式已迁移到全局 .page-card-header（src/styles/app.css） */
+.page-card-header :deep(.ht-bar) {
+  width: auto;
+  margin: 0;
 }
 .cu-header-left {
   display: flex;
@@ -317,10 +317,6 @@ async function handleDelete(row: Customer) {
   align-items: flex-start;
   justify-content: flex-end;
   gap: 8px;
-}
-.cu-card-header :deep(.ht-bar) {
-  width: auto;
-  margin: 0;
 }
 .cu-card-title-group {
   display: flex;

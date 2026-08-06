@@ -5,6 +5,7 @@ import json
 import os
 from datetime import datetime, timezone
 
+from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 
@@ -126,7 +127,7 @@ def decrypt_backup(
 
     try:
         plaintext = aesgcm.decrypt(nonce, ct_with_tag, None)
-    except Exception as exc:
+    except (InvalidTag, ValueError) as exc:
         raise BackupFileError(
             "Decryption failed — incorrect password or corrupt data",
             code="BACKUP_DECRYPT_AUTH",

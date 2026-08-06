@@ -1,0 +1,132 @@
+import { ref, reactive, type Ref } from 'vue'
+import { productApi } from '@/api'
+import { showToast } from '@/composables/useToast'
+import type { BomSearchProduct, ProgressState } from './bomTypes'
+
+interface UseBomQuickCopyDeps {
+  currentProductId: Ref<number | null>
+  reloadBom: (productId: number) => Promise<void>
+}
+
+/**
+ * BOM 快速复制（UiAutocomplete 驱动）
+ * 简化版：自动补全委托给 UiAutocomplete，本模块只处理复制逻辑。
+ */
+export function useBomQuickCopy({ currentProductId, reloadBom }: UseBomQuickCopyDeps) {
+  const quickCopyKeyword = ref('')
+  const quickCopyLoading = ref(false)
+  const quickCopyProgress = reactive<ProgressState>({ visible: false, percent: 0, text: '' })
+
+  let selectedSourceProductId: number | null = null
+  let selectedSourceProductName: string | null = null
+
+  // ============================================================
+  // UiAutocomplete 搜索函数
+  // ============================================================
+  async function searchProductsForBom(keyword: string): Promise<BomSearchProduct[]> {
+    if (!keyword.trim()) return []
+    try {
+      const res = (await productApi.searchProductsForBom(keyword)) as any
+      return res.success && res.products?.length > 0 ? res.products : []
+    } catch {
+      return []
+    }
+  }
+
+  // ============================================================
+  // 选中处理
+  // ============================================================
+  function selectAutocompleteItem(item: BomSearchProduct) {
+    selectedSourceProductId = item.id
+    selectedSourceProductName = item.name
+  }
+
+  // ============================================================
+  // 执行复制
+  // ============================================================
+  async function quickCopyBom() {
+    const keyword = quickCopyKeyword.value.trim()
+
+    // 优先使用已选中的产品
+    if (selectedSourceProductId && selectedSourceProductName) {
+      return executeCopy(selectedSourceProductId, selectedSourceProductName)
+    }
+
+    // 回退：通过关键词搜索
+    if (!keyword) {
+      showToast('请先搜索并选择产品，或输入产品名称', 'warning')
+      return
+    }
+
+    quickCopyLoading.value = true
+    showProgress(10, '搜索产品中...')
+
+    try {
+      const res = (await productApi.searchProductsForBom(keyword)) as any
+      if (!res.success || !res.products?.length) {
+        hideProgress()
+        quickCopyLoading.value = false
+        showToast('未找到匹配的产品', 'warning')
+        return
+      }
+      const withBom = res.products.filter((p: BomSearchProduct) => p.has_bom)
+      if (!withBom.length) {
+        hideProgress()
+        quickCopyLoading.value = false
+        showToast('找到的产品没有配置BOM表', 'warning')
+        return
+      }
+      return executeCopy(withBom[0].id, withBom[0].name)
+    } catch {
+      hideProgress()
+      quickCopyLoading.value = false
+      showToast('搜索失败', 'error')
+    }
+  }
+
+  async function executeCopy(sourceId: number, sourceName: string) {
+    showProgress(40, `正在从 "${sourceName}" 复制BOM...`)
+
+    try {
+      showProgress(70, '执行复制...')
+      const res = (await productApi.copyBom(currentProductId.value!, sourceId, true)) as any
+      if (res.success) {
+        showProgress(100, '复制成功！')
+        setTimeout(() => {
+          hideProgress()
+          quickCopyLoading.value = false
+          if (currentProductId.value) reloadBom(currentProductId.value)
+          quickCopyKeyword.value = ''
+          selectedSourceProductId = null
+          selectedSourceProductName = null
+        }, 500)
+      } else {
+        hideProgress()
+        quickCopyLoading.value = false
+        showToast(res.error || '复制失败', 'error')
+      }
+    } catch {
+      hideProgress()
+      quickCopyLoading.value = false
+      showToast('复制失败', 'error')
+    }
+  }
+
+  function showProgress(percent: number, text: string) {
+    quickCopyProgress.visible = true
+    quickCopyProgress.percent = percent
+    quickCopyProgress.text = text
+  }
+  function hideProgress() {
+    quickCopyProgress.visible = false
+  }
+
+  return {
+    quickCopyKeyword,
+    quickCopyLoading,
+    quickCopyProgress,
+    searchProductsForBom,
+    selectAutocompleteItem,
+    quickCopyBom,
+  }
+}

@@ -1,11 +1,15 @@
 """
 订单路由测试 - 提高订单路由覆盖率
 测试范围：订单列表、创建、编辑、删除、审批等完整流程
+
+标记: flask_legacy — 迁移中，需重写为 FastAPI + httpx.AsyncClient
 """
 import json
 from datetime import datetime
 
 import pytest
+
+pytestmark = [pytest.mark.flask_legacy]
 
 try:
     from app import db

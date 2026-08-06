@@ -75,6 +75,17 @@ except ImportError as e:
     logger.warning('慢查询监听器初始化失败: %s', e)
 
 
+def _register_slow_listener_for_read_engine():
+    """为只读引擎注册慢查询监听器（延迟执行，确保引擎已创建）"""
+    if _read_engine is not None:
+        try:
+            from fastapi_app.core.slow_query import setup_slow_query_listener
+            setup_slow_query_listener(_read_engine.sync_engine)
+            logger.debug("只读引擎慢查询监听器已注册")
+        except (ImportError, Exception) as e:
+            logger.warning('只读引擎慢查询监听器注册失败: %s', e)
+
+
 _sync_engine = None
 _SyncSessionLocal = None
 
@@ -179,6 +190,7 @@ def _init_read_engine():
         expire_on_commit=False,
     )
     logger.info("只读副本引擎初始化成功: %s", replica_url.split("@")[-1] if "@" in replica_url else replica_url)
+    _register_slow_listener_for_read_engine()
 
 
 async def get_async_read_db():
@@ -253,7 +265,12 @@ async def rebuild_pool() -> bool:
         try:
             _init_async_engine()
             _init_read_engine()
-        except Exception as e:
+
+            from fastapi_app.core.slow_query import setup_slow_query_listener
+            setup_slow_query_listener(_async_engine.sync_engine)
+            _register_slow_listener_for_read_engine()
+            logger.info("慢查询监听器已重新注册")
+        except SQLAlchemyError as e:
             logger.error("数据库连接池重建失败: %s", e)
             raise RuntimeError(f"数据库连接池重建失败: {e}") from e
 

@@ -1,0 +1,33 @@
+﻿[36mvite v8.0.16 [32mbuilding client environment for production...[36m[39m
+node.exe : [33mWarning: Invalid output options (1 issue found)
+At C:\Users\Administrator\.trae-cn\binaries\node\versions\24.14.0\npx.ps1:16 char:5
++     & "$basedir/node$exe"  "$basedir/node_modules/npm/bin/npx-cli.js" ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([33mWarning: I...(1 issue found):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+- For the "manualChunks". Invalid type: Expected Function but received Object. [0m
+[2K
+transforming...✓ 1904 modules transformed.
+[31m✗[39m Build failed in 4.13s
+[31merror during build:
+D:\erp_system\frontend-vite\node_modules\@babel\traverse\node_modules\@babel\generator\lib\generators\classes.js:96
+      printer.tokenChar(59
+                        ^^
+
+SyntaxError: missing ) after argument list
+    at wrapSafe (node:internal/modules/cjs/loader:1743:18)
+    at Module._compile (node:internal/modules/cjs/loader:1786:20)
+    at Object..js (node:internal/modules/cjs/loader:1943:10)
+    at Module.load (node:internal/modules/cjs/loader:1533:32)
+    at Module._load (node:internal/modules/cjs/loader:1335:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.require (node:internal/modules/cjs/loader:1556:12)
+    at require (node:internal/modules/helpers:152:16)
+    at Object.<anonymous> (D:\erp_system\frontend-vite\node_modules\@babel\traverse\node_modules\@babel\generator\lib\g
+enerators\index.js:39:16)
+    at Module._compile (node:internal/modules/cjs/loader:1812:14) {
+  code: 'PLUGIN_ERROR',
+  plugin: 'vite-plugin-pwa:build',
+  hook: 'closeBundle'
+}[39m

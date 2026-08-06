@@ -63,9 +63,8 @@ class StubPipeline(BatchImportPipeline):
 
 
 def _make_upload_file(content: bytes):
-    f = AsyncMock()
-    f.read = AsyncMock(return_value=content)
-    return f
+    """已废弃：保留以兼容旧测试。新测试直接传 bytes。"""
+    return content
 
 
 # ============================================================
@@ -123,7 +122,7 @@ class TestBatchImportPipeline:
         result = await pipe.execute(f, db, user)
         assert result.success_count == 2
         assert result.created_ids == [1, 2]
-        db.commit.assert_awaited_once()
+        db.flush.assert_awaited()
 
     @pytest.mark.asyncio
     async def test_persist_exception_rollback(self):

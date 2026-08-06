@@ -1,0 +1,80 @@
+# ============================================================
+# ERP System - 蓝绿部署 (Green)
+# 新版本部署，验证通过后切换流量
+# ============================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: erp-backend-green
+  namespace: erp-production
+  labels:
+    app: erp-backend
+    version: green
+spec:
+  replicas: 4
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: erp-backend
+      version: green
+  template:
+    metadata:
+      labels:
+        app: erp-backend
+        version: green
+    spec:
+      containers:
+        - name: backend
+          image: registry.example.com/erp-backend:v2.1.0
+          ports:
+            - containerPort: 5002
+          env:
+            - name: APP_ENV
+              value: "production"
+            - name: UVICORN_WORKERS
+              valueFrom:
+                resourceFieldRef:
+                  container: backend
+                  resource: limits.cpu
+                  divisor: "1"
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: erp-secrets
+                  key: secret-key
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: erp-secrets
+                  key: db-password
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: erp-secrets
+                  key: redis-password
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 5002
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 5002
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+      terminationGracePeriodSeconds: 30

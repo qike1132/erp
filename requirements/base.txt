@@ -4,9 +4,10 @@
 # ============================================================
 
 # ----- Web 框架 (FastAPI) -----
-fastapi==0.136.0
+fastapi==0.137.1
+starlette>=1.0.1
 uvicorn[standard]==0.46.0
-python-multipart==0.0.26
+python-multipart==0.0.32
 slowapi==0.1.9
 msgspec==0.21.1
 
@@ -17,12 +18,13 @@ pydantic-settings==2.14.0
 # ----- 数据库 -----
 sqlalchemy==2.0.49
 asyncpg==0.31.0
+# psycopg3：Alembic 同步迁移必需（asyncpg 仅支持异步，无法用于 Alembic 的同步引擎）
 psycopg[binary]==3.3.3
 alembic==1.16.0
 cryptography==46.0.7
 
 # ----- 安全 -----
-PyJWT==2.12.1
+PyJWT==2.13.0
 argon2-cffi==25.1.0
 # bcrypt 仅用于迁移旧密码哈希，已移至 requirements/migration.txt
 # 若需验证旧 bcrypt 哈希：pip install -r requirements/migration.txt
@@ -36,14 +38,25 @@ XlsxWriter==3.2.2
 polars==1.35.2
 
 # ----- 缓存 -----
-redis[hiredis]==7.4.0
+redis[hiredis]==7.4.1
 
 # ----- 监控 -----
 prometheus-client==0.21.0
 structlog==25.5.0
 
+# ----- OpenTelemetry 可观测性 -----
+opentelemetry-api==1.30.0
+opentelemetry-sdk==1.30.0
+opentelemetry-instrumentation-fastapi==0.51b0
+opentelemetry-instrumentation-sqlalchemy==0.51b0
+opentelemetry-instrumentation-redis==0.51b0
+opentelemetry-instrumentation-requests==0.51b0
+opentelemetry-instrumentation-celery==0.51b0
+opentelemetry-exporter-otlp-proto-grpc==1.30.0
+
 # ----- 异步任务 -----
 celery[redis]==5.6.3
+gevent==25.9.1  # Celery gevent pool，用于 I/O 密集型任务队列
 
 # ----- 错误追踪 -----
 sentry-sdk[fastapi]==2.29.1
@@ -53,6 +66,9 @@ charset-normalizer==3.4.0
 
 # ----- HTTP 客户端 -----
 httpx==0.28.1
+
+# ----- 对象存储 -----
+boto3==1.36.0
 
 # ----- OCR 与文档识别（可选）-----
 # OCR 功能已拆分到 requirements/ocr.txt（约 500MB，按需安装）

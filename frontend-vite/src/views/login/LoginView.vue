@@ -2,8 +2,8 @@
   <!-- ═══ Capacitor 移动端：Apple 极简登录 ═══ -->
   <div v-if="isCapacitor" class="m-login-page">
     <div class="m-login-logo-area">
-      <img class="m-login-logo" src="/logo_plush.png" alt="滨发协同系统" />
-      <div class="m-login-title">滨发协同系统</div>
+      <img class="m-login-logo" src="/logo_plush.png" alt="东莞协同系统" />
+      <div class="m-login-title">东莞协同系统</div>
       <div class="m-login-sub">Binfa Collaboration System</div>
     </div>
 
@@ -62,7 +62,7 @@
       </form>
     </div>
 
-    <div class="m-login-footer">滨发玩具供应链管理系统</div>
+    <div class="m-login-footer">东莞玩具供应链管理系统</div>
   </div>
 
   <!-- ═══ PC 端：原有左右分栏登录 ═══ -->
@@ -71,12 +71,12 @@
       <div class="brand-content">
         <div class="logo-wrapper">
           <div class="logo-frame">
-            <img src="/logo_plush.png" alt="滨发玩具" />
+            <img src="/logo_plush.png" alt="东莞玩具" />
           </div>
         </div>
 
         <div class="brand-info">
-          <h1 class="brand-title">滨发玩具协同系统</h1>
+          <h1 class="brand-title">东莞玩具协同系统</h1>
           <p class="brand-tagline">专业的毛绒玩具企业供应链管理平台<br />智能、高效、可靠的数字化管理解决方案</p>
         </div>
 
@@ -173,7 +173,7 @@
         </form>
 
         <div class="login-footer">
-          <p class="footer-text">滨发玩具供应链管理系统</p>
+          <p class="footer-text">东莞玩具供应链管理系统</p>
           <p class="footer-version">v2.0</p>
         </div>
       </div>
@@ -187,6 +187,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { authApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { usePerfMark } from '@/composables/usePerfMark'
+import { setAccessToken } from '@/utils/secureStorage'
 import UiCheckbox from '@/components/ui/UiCheckbox.vue'
 
 const perf = usePerfMark('login')
@@ -233,7 +234,7 @@ async function handleLogin() {
     perf.measure('auth-api', 'auth-start')
     perf.mark('init-start')
     if (isCapacitor && res.access_token) {
-      localStorage.setItem('access_token', res.access_token)
+      setAccessToken(res.access_token)
     }
     await authStore.init(true)
     perf.markEnd('init-start')

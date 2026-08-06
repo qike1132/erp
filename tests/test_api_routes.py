@@ -1,11 +1,15 @@
 """
 API路由测试 - 全面覆盖所有API端点
 测试范围：健康检查、产品搜索、库存查询、批量操作等
+
+标记: flask_legacy — 迁移中，需重写为 FastAPI + httpx.AsyncClient
 """
 import json
 from datetime import datetime
 
 import pytest
+
+pytestmark = [pytest.mark.flask_legacy]
 
 try:
     from app import db

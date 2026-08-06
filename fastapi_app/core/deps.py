@@ -9,6 +9,8 @@ FastAPI 依赖注入
 """
 import asyncio
 import logging
+import os
+import threading
 import time
 import uuid
 from collections import OrderedDict
@@ -66,11 +68,25 @@ class _TTLCache:
 _PERMISSION_CACHE = _TTLCache(ttl=30, maxsize=500)
 
 async def _get_cached_user(user_id: int) -> User | None:
-    return await _PERMISSION_CACHE.get(user_id)
+    cached = await _PERMISSION_CACHE.get(user_id)
+    try:
+        from fastapi_app.core.metrics import PERM_CACHE_HITS, PERM_CACHE_MISSES
+        if cached is not None:
+            PERM_CACHE_HITS.inc()
+        else:
+            PERM_CACHE_MISSES.inc()
+    except ImportError:
+        pass
+    return cached
 
 
 async def _set_cached_user(user_id: int, user: User) -> None:
     await _PERMISSION_CACHE.set(user_id, user)
+    try:
+        from fastapi_app.core.metrics import PERM_CACHE_SIZE
+        PERM_CACHE_SIZE.set(len(_PERMISSION_CACHE._data))
+    except ImportError:
+        pass
 
 
 async def invalidate_user_permission_cache(user_id: int | None=None) -> None:
@@ -86,7 +102,7 @@ async def invalidate_user_permission_cache(user_id: int | None=None) -> None:
             await _USER_ACTIVE_CACHE.clear()
         except AttributeError:
             pass
-__all__ = ['get_current_user_id', 'require_permission', 'require_superuser', 'create_access_token', 'get_async_db', 'get_user_identity', 'revoke_token']
+__all__ = ['get_current_user_id', 'require_permission', 'require_superuser', 'create_access_token', 'create_refresh_token', 'get_async_db', 'get_user_identity', 'revoke_token']
 
 
 def get_user_identity(user: User) -> tuple[str, str]:
@@ -136,6 +152,23 @@ def create_access_token(data: dict, expires_delta=None) -> str:
     expire = datetime.now(UTC) + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode['exp'] = expire
     to_encode['jti'] = uuid.uuid4().hex
+    to_encode['type'] = 'access'
+    return jwt.encode(to_encode, _get_signing_key(), algorithm=settings.ALGORITHM)
+
+
+def create_refresh_token(data: dict) -> str:
+    """生成刷新令牌（有效期较长，仅用于获取新的 access token）
+
+    刷新令牌不包含权限信息，仅包含用户标识。
+    """
+    from datetime import datetime, timedelta
+
+    import jwt
+    to_encode = data.copy()
+    expire = datetime.now(UTC) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    to_encode['exp'] = expire
+    to_encode['jti'] = uuid.uuid4().hex
+    to_encode['type'] = 'refresh'
     return jwt.encode(to_encode, _get_signing_key(), algorithm=settings.ALGORITHM)
 
 def _decode_jwt_token(token: str) -> dict:
@@ -150,36 +183,80 @@ def _decode_jwt_token(token: str) -> dict:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='JWT Token无效') from None
 
 
+class _LRUSet:
+    """进程级 LRU 集合，用于 token 黑名单的本地降级缓存
+
+    多 worker 间不共享，仅作为 Redis 故障时的降级方案。
+    使用 threading.Lock 保护 OrderedDict 操作，确保多线程安全。
+    """
+
+    def __init__(self, maxsize: int = 1000):
+        self._maxsize = maxsize
+        self._data: OrderedDict[str, None] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def add(self, key: str) -> None:
+        with self._lock:
+            self._data[key] = None
+            self._data.move_to_end(key)
+            if len(self._data) > self._maxsize:
+                self._data.popitem(last=False)
+
+    def contains(self, key: str) -> bool:
+        with self._lock:
+            if key in self._data:
+                self._data.move_to_end(key)
+                return True
+            return False
+
+
+_LOCAL_REVOKED_JTIS = _LRUSet(maxsize=1000)
+
+
 async def revoke_token(jti: str, exp: int) -> None:
     """将 token 的 jti 加入 Redis 黑名单，TTL 设为 token 剩余有效期
 
     登出时调用，确保已签发的 token 无法继续使用。
-    Redis 不可用时静默失败（token 仍会自然过期）。
+    Redis 不可用时静默失败（token 仍会自然过期），但会同步写入本地 LRU 缓存作为降级。
     """
     from datetime import datetime
     remaining = max(exp - int(datetime.now(UTC).timestamp()), 0)
     if remaining <= 0:
         return
+    # 始终写入本地 LRU 缓存（无论 Redis 是否可用），作为后续 Redis 故障时的降级依据
+    _LOCAL_REVOKED_JTIS.add(jti)
     try:
-        from utils.redis_cache import redis_cache
-        redis = redis_cache.redis_client
+        from fastapi_app.core.redis_wrapper import get_client
+        redis = get_client()
         if redis:
             await redis.set(f"token_blacklist:{jti}", "1", ex=remaining)
-    except (OSError, RuntimeError, ValueError):
-        pass
+    except Exception:  # defensive: Redis 故障时本地 LRU 缓存已写入，继续服务
+        logger.debug("token 黑名单写入失败", exc_info=True)
 
 
 async def is_token_revoked(jti: str | None) -> bool:
-    """检查 token 是否已被撤销（在黑名单中）"""
+    """检查 token 是否已被撤销（在黑名单中）
+
+    Redis 不可用时降级到本地 LRU 缓存：
+    - 本地缓存命中则返回 True（已撤销）
+    - 本地缓存未命中则返回 False（允许通过）并记录 WARNING 日志
+    本地缓存是进程级的，多 worker 间不共享，作为降级方案可接受。
+    """
     if not jti:
         return False
     try:
-        from utils.redis_cache import redis_cache
-        redis = redis_cache.redis_client
+        from fastapi_app.core.redis_wrapper import get_client
+        redis = get_client()
         if redis:
             return bool(await redis.exists(f"token_blacklist:{jti}"))
-    except (OSError, RuntimeError, ValueError):
-        pass
+        # Redis 客户端未初始化，降级到本地 LRU 缓存
+        if _LOCAL_REVOKED_JTIS.contains(jti):
+            return True
+    except Exception:  # defensive: Redis 不可用时降级到本地 LRU 缓存
+        logger.warning("Redis unavailable, token revocation check degraded to local cache", exc_info=True)
+        # Redis 故障时降级到本地 LRU 缓存
+        if _LOCAL_REVOKED_JTIS.contains(jti):
+            return True
     return False
 
 def _get_user_id_from_jwt(request: Request) -> int | None:
@@ -242,7 +319,7 @@ def _resolve_token_jti(request: Request) -> str | None:
         return payload.get('jti')
     except HTTPException:
         return None
-_USER_ACTIVE_CACHE = _TTLCache(ttl=30, maxsize=500)
+_USER_ACTIVE_CACHE = _TTLCache(ttl=10, maxsize=500)
 
 async def _verify_user_active(user_id: int, db: AsyncSession) -> bool:
     """验证用户仍存在且处于启用状态（带 L1 缓存，TTL 30s）"""
@@ -304,7 +381,7 @@ async def _get_user_with_permissions(request: Request, db: AsyncSession=Depends(
     """
     解析认证信息并从数据库查询用户，同时预加载权限列表。
 
-    使用 L1 进程内缓存（TTL 30s）避免每次请求都查询数据库。
+    使用 L1 进程内缓存（TTL 10s）避免每次请求都查询数据库。
     expunge 使 User 对象可在任何上下文安全使用。
     """
     user_id = await get_current_user_id(request, db)

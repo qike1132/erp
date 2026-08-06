@@ -12,7 +12,8 @@ from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.core.exceptions import db_transaction
-from fastapi_app.services import escape_like
+from fastapi_app.core.sanitizer import escape_like
+from fastapi_app.schemas.order import OrderItemSchema
 from fastapi_app.shared_models import InventoryLog, Product, StockIn, User
 from fastapi_app.shared_models.country import Country
 
@@ -85,10 +86,13 @@ class BatchOrderResultItem(BaseModel):
     success: bool
     order_no: str = ''
     id: int | None = None
+    customer: str = ''
+    items: list[OrderItemSchema] = []
     error: str | None = None
 
 class BatchOrderResponse(BaseModel):
     success: bool
+    created_count: int = 0
     results: list[BatchOrderResultItem] = []
 
 class BatchStockinResultItem(BaseModel):
@@ -132,8 +136,8 @@ async def cache_stats(
     user: User = Depends(require_permission("admin")),
 ):
     """获取缓存统计信息（需管理员权限）"""
-    from utils.redis_cache import redis_cache
-    return await redis_cache.get_stats()
+    from fastapi_app.core.redis_wrapper import safe_get_stats
+    return await safe_get_stats(context="缓存统计")
 
 
 @router.post("/cache/clear", response_model=CacheClearResponse)
@@ -142,8 +146,8 @@ async def clear_cache(
     user: User = Depends(require_permission("admin")),
 ):
     """清除缓存（需管理员权限）"""
-    from utils.redis_cache import redis_cache
-    deleted = await redis_cache.delete_pattern(pattern)
+    from fastapi_app.core.redis_wrapper import safe_delete_pattern
+    deleted = await safe_delete_pattern(pattern, context="缓存清除")
     return {"success": True, "deleted": deleted, "pattern": pattern}
 
 
@@ -442,31 +446,8 @@ async def batch_submit_orders(
     db: AsyncSession = Depends(get_async_db),
 ):
     """批量提交订单"""
-    import logging as _logging
-
-    from fastapi_app.services.order_service import batch_create_orders
-    try:
-        async with db_transaction(db):
-            result = await batch_create_orders(db, [item.model_dump() for item in data.orders])
-
-        from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
-        await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY)
-
-        created_order_ids = result.pop('created_order_ids', [])
-
-        if created_order_ids:
-            try:
-                from fastapi_app.services.notification_service import StockEvent, publish_stock_event
-                await publish_stock_event(StockEvent.ORDER_CREATED, {
-                    'order_ids': created_order_ids,
-                    'count': len(created_order_ids),
-                })
-            except (RuntimeError, OSError, ValueError):
-                _logging.warning("批量订单事件发布失败", exc_info=True)
-
-        return result
-    except (SQLAlchemyError, RuntimeError):
-        raise
+    from fastapi_app.services.auxiliary_service import orchestrate_batch_orders
+    return await orchestrate_batch_orders(db, [item.model_dump() for item in data.orders])
 
 
 @router.post("/batch-submit-stockins", response_model=BatchStockinResponse)
@@ -476,17 +457,8 @@ async def batch_submit_stockins(
     db: AsyncSession = Depends(get_async_db),
 ):
     """批量提交入库"""
-    from fastapi_app.services.stock_service import batch_create_stockins
-    try:
-        async with db_transaction(db):
-            result = await batch_create_stockins(db, [item.model_dump() for item in data.stockins])
-
-        from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
-        await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY | CacheDomain.STOCKIN)
-
-        return result
-    except (SQLAlchemyError, RuntimeError):
-        raise
+    from fastapi_app.services.auxiliary_service import orchestrate_batch_stockins
+    return await orchestrate_batch_stockins(db, [item.model_dump() for item in data.stockins])
 
 
 @router.post("/batch-submit-stockouts", response_model=BatchStockoutResponse)
@@ -496,51 +468,8 @@ async def batch_submit_stockouts(
     db: AsyncSession = Depends(get_async_db),
 ):
     """批量提交出库"""
-    import logging as _logging
-
-    from fastapi_app.services.stock_service import batch_create_stockouts
-    async with db_transaction(db):
-        result = await batch_create_stockouts(db, [item.model_dump() for item in data.stockouts])
-
-    # Post-commit: cache invalidation + event publishing
-    try:
-        from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
-        await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY)
-
-        # 采购计划重算 + 事件发布
-        successful_pairs: set[tuple[int, str]] = set()
-        for idx, item in enumerate(data.stockouts):
-            r = result['results'][idx]
-            if r.get('success'):
-                successful_pairs.add((item.product_id, item.customer))
-
-        if successful_pairs:
-            from fastapi_app.services.purchase_plan_service import recalc_plans_after_stockout_create, _invalidate_plan_caches
-            from datetime import UTC as _UTC, datetime as _dt
-            unique_product_ids = {pid for pid, _ in successful_pairs}
-            product_result = await db.execute(
-                select(Product.id, Product.name).where(Product.id.in_(unique_product_ids))
-            )
-            product_name_map = {row[0]: row[1] for row in product_result.all()}
-            for product_id, customer in successful_pairs:
-                product_name = product_name_map.get(product_id, '')
-                if product_name:
-                    await recalc_plans_after_stockout_create(db, customer, product_name)
-
-            now_month = _dt.now(_UTC).strftime('%Y-%m')
-            await _invalidate_plan_caches(now_month)
-
-            from fastapi_app.core.exception_handler import safe_publish_event
-            from fastapi_app.services.notification_service import StockEvent, publish_stock_event
-            for product_id, _ in successful_pairs:
-                product = await db.get(Product, product_id)
-                if product is not None:
-                    total_qty = sum(item.quantity for item in data.stockouts if item.product_id == product_id)
-                    await safe_publish_event(publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': product_id, 'product_name': product.name, 'change_type': '出库', 'quantity': total_qty, 'current_stock': product.current_stock}, context="批量出库事件发布")
-    except Exception as e:
-        _logging.getLogger(__name__).warning(f"出库后置操作部分失败（不影响出库结果）: {e}", exc_info=True)
-
-    return result
+    from fastapi_app.services.auxiliary_service import orchestrate_batch_stockouts
+    return await orchestrate_batch_stockouts(db, [item.model_dump() for item in data.stockouts])
 
 
 # ==================== 系统状态 API ====================

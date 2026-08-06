@@ -2,7 +2,7 @@
   <div class="pc-section">
     <div class="pc-section-header">
       <div class="pc-section-title">
-        <i class="fas fa-list"  aria-hidden="true" /> 采购中订单
+        <i class="fas fa-list"  aria-hidden="true" /> 待生产订单
       </div>
       <div class="pc-section-actions">
         <button
@@ -25,8 +25,7 @@
 
     <!-- Loading (initial only) -->
     <div v-if="loading && orders.length === 0" class="pc-loading-state">
-      <i class="fas fa-spinner fa-spin"  aria-hidden="true" />
-      <span>加载中…</span>
+      <UiSpinner />
     </div>
 
     <!-- Empty -->
@@ -49,11 +48,11 @@
                   <span>全选</span>
                 </div>
               </th>
-              <th>下单时间</th>
-              <th>订单号</th>
-              <th style="text-align:left">客户名称</th>
+              <th style="width:1%;white-space:nowrap;text-align:left">下单时间</th>
+              <th class="pc-customer-th" style="text-align:left">客户名称</th>
+              <th style="text-align:left">条码</th>
               <th style="text-align:left">产品名称</th>
-              <th style="text-align:right">订单数量</th>
+              <th style="text-align:right">数量</th>
               <th style="text-align:center">操作</th>
             </tr>
           </thead>
@@ -61,17 +60,51 @@
             <tr
               v-for="o in orders"
               :key="o.id"
-              :class="{ 'pc-row-selected': selectedSet.has(o.id) }"
+              :class="{ 'pc-row-selected': selectedSet.has(o.id), 'pc-row-multi-sku': (o.sku_items?.length || 0) > 1 }"
               @click="$emit('toggleSelection', o.id)"
             >
               <td class="pc-td-center" @click.stop>
                 <UiCheckbox :checked="selectedSet.has(o.id)" @update:checked="$emit('toggleSelection', o.id)" />
               </td>
-              <td class="pc-td-nowrap">{{ formatDate(o.create_time || o.order_date) }}</td>
-              <td class="pc-td-nowrap">{{ o.source_order_no || o.order_no }}</td>
-              <td class="pc-td-truncate" style="max-width:120px">{{ o.customer_name || '-' }}</td>
-              <td class="pc-td-truncate" style="max-width:300px">{{ o.product_name || '-' }}</td>
-              <td class="pc-td-right pc-td-nowrap">{{ o.quantity != null ? formatNumber(o.quantity) : '-' }}</td>
+              <td class="pc-td-nowrap">
+                <div class="pc-order-meta-cell">
+                  <div class="pc-order-badges">
+                    <span v-if="(o.sku_items?.length || 0) > 1" class="pc-sku-badge" :title="`${o.sku_items?.length} 个 SKU`">{{ o.sku_items?.length }} SKU</span>
+                  </div>
+                  <span class="pc-order-date">{{ formatDate(o.create_time || o.order_date) }}</span>
+                </div>
+              </td>
+              <td class="pc-td-truncate pc-customer-cell" style="max-width:120px">{{ o.customer_name || '-' }}</td>
+              <td class="pc-barcode-cell">
+                <template v-if="o.sku_items && o.sku_items.length > 0">
+                  <div v-for="(item, idx) in o.sku_items" :key="idx" class="pc-barcode-line">
+                    <span class="pc-barcode-text">{{ item.barcode || '-' }}</span>
+                  </div>
+                </template>
+                <template v-else><span class="pc-barcode-text">-</span></template>
+              </td>
+              <td class="pc-sku-cell">
+                <template v-if="o.sku_items && o.sku_items.length > 0">
+                  <div
+                    v-for="(item, idx) in o.sku_items"
+                    :key="idx"
+                    class="pc-sku-line"
+                  >
+                    <span class="pc-sku-name">{{ item.product_name || '-' }}</span>
+                    <span v-if="item.order_type === 'custom'" class="pc-sku-tag pc-sku-tag--custom">定制</span>
+                    <span v-if="item.country" class="pc-sku-tag">{{ item.country }}</span>
+                  </div>
+                </template>
+                <span v-else>{{ o.product_name || '-' }}</span>
+              </td>
+              <td class="pc-td-right pc-sku-qty-cell">
+                <template v-if="o.sku_items && o.sku_items.length > 0">
+                  <div v-for="(item, idx) in o.sku_items" :key="idx" class="pc-sku-qty">
+                    {{ formatNumber(item.quantity) }}
+                  </div>
+                </template>
+                <template v-else>{{ o.quantity != null ? formatNumber(o.quantity) : '-' }}</template>
+              </td>
               <td class="pc-td-center" @click.stop>
                 <button
                   class="pc-btn pc-btn-success pc-btn-sm"
@@ -132,7 +165,7 @@ defineEmits<{
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 14px 24px 10px;
+  padding: 8px 24px 10px;
   flex-wrap: wrap;
   gap: 8px;
 }
@@ -273,6 +306,156 @@ defineEmits<{
 .pc-td-right { text-align: right; }
 .pc-td-nowrap { white-space: nowrap; }
 .pc-td-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.pc-customer-cell {
+  padding-left: 44px !important;
+}
+
+.pc-customer-th {
+  padding-left: 44px !important;
+}
+
+.pc-order-meta-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 100%;
+  margin-left: -30px;
+}
+
+.pc-order-badges {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.pc-order-badges .pc-sku-badge {
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.pc-order-date {
+  flex-shrink: 0;
+}
+
+/* === Multi-SKU display (aligned with PendingOrdersPanel) === */
+.pc-sku-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 6px;
+  margin-left: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 4px;
+  background: var(--color-primary-100, #dbeafe);
+  color: var(--color-primary-700, #1d4ed8);
+  vertical-align: middle;
+  letter-spacing: 0.02em;
+  height: 18px;
+  min-width: 48px;
+  box-sizing: border-box;
+}
+
+.pc-row-multi-sku td {
+  vertical-align: top;
+}
+
+.pc-sku-cell {
+  padding: 8px 14px !important;
+  max-width: 360px;
+}
+
+.pc-sku-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  font-size: 13px;
+  line-height: 1.4;
+  border-bottom: 1px dashed var(--color-border-light, #f1f5f9);
+}
+
+.pc-sku-line:last-child {
+  border-bottom: none;
+}
+
+.pc-sku-name {
+  font-weight: 500;
+  color: var(--color-text);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pc-barcode-text {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 12px;
+  color: var(--color-text-muted, #94a3b8);
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+.pc-sku-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 4px;
+  background: var(--color-surface, #f1f5f9);
+  color: var(--color-text-secondary, #64748b);
+  flex-shrink: 0;
+}
+
+.pc-sku-tag--custom {
+  background: var(--color-warning-50, #fff3e6);
+  color: var(--color-warning-600, #e88e2e);
+}
+
+.pc-barcode-cell {
+  padding: 8px 14px !important;
+  max-width: 160px;
+  text-align: left;
+}
+
+.pc-barcode-line {
+  display: flex;
+  align-items: center;
+  padding: 2px 0;
+  font-size: 13px;
+  line-height: 1.4;
+  border-bottom: 1px dashed var(--color-border-light, #f1f5f9);
+}
+
+.pc-barcode-line:last-child {
+  border-bottom: none;
+}
+
+.pc-sku-qty-cell {
+  padding: 8px 14px !important;
+}
+
+.pc-sku-qty {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 2px 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  border-bottom: 1px dashed var(--color-border-light, #f1f5f9);
+  color: var(--color-text);
+}
+
+.pc-sku-qty:last-child {
+  border-bottom: none;
+}
 
 /* Empty & Loading */
 .pc-empty-state {

@@ -1,7 +1,5 @@
 """
 采购订单模型 - 纯 SQLAlchemy 2.0 声明式
-
-映射到与 Flask-SQLAlchemy PurchaseOrder/PurchaseOrderItem 相同的表。
 """
 from __future__ import annotations
 
@@ -10,7 +8,7 @@ from datetime import datetime, timezone
 from sqlalchemy import inspect as sa_inspect
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, desc
+from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, desc, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
@@ -66,6 +64,19 @@ class PurchaseOrder(Base):
         Index('idx_purchase_order_supplier_status', 'supplier_id', 'status'),
         Index('idx_po_status_date_covering', 'status', desc('create_time'), 'id',
               postgresql_include=['order_no', 'supplier_name', 'customer_name']),
+        # 防止一键审核产生重复 pending 采购单：同一客户 + 同一供应商 +
+        # 同一 source_order_ids 集合，pending 状态下全局唯一。confirmed / completed
+        # 不受此约束。使用 COALESCE 处理 NULL（PG 默认 NULL != NULL 导致约束失效）。
+        # 注意：必须用 supplier_name 而非 supplier_id，因为业务层按 supplier_name
+        # 分组生成采购单，而 BOM 物料的 supplier_id 普遍为 NULL，用 supplier_id 会
+        # 把不同供应商的新订单合并到同一 bucket 互相冲突。
+        # 配套 alembic 迁移 rebuild_po_dedup_use_supplier_name.py。
+        Index(
+            'uq_po_pending_dedup',
+            func.coalesce(customer_id, 0), func.coalesce(supplier_name, ''), 'source_order_ids',
+            unique=True,
+            postgresql_where=(status == 'pending'),
+        ),
     )
 
     def __repr__(self):

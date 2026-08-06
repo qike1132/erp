@@ -1,10 +1,10 @@
 <template>
   <div class="mc-container">
-    <div class="mc-card mc-card-main">
-      <div class="mc-card-header">
+    <div class="page-card page-card-main">
+      <div class="page-card-header">
         <HeaderTabs />
         <div class="mc-header-actions">
-          <span class="count-badge">已选 {{ selectedProducts.length }} 个</span>
+          <span class="count-badge">已选 {{ selectedProductIds.length }} 个</span>
           <button class="mc-action-btn mc-action-btn-primary" :disabled="orderItems.length === 0" @click="showBatchModal = true">
             <i class="fas fa-layer-group"  aria-hidden="true" />
             批量录入
@@ -19,7 +19,7 @@
         </div>
       </div>
 
-      <div class="mc-body">
+      <div class="page-card-body">
         <!-- Column 1: Product Selection -->
         <div class="mc-col mc-col-products">
           <div class="mc-col-title">
@@ -52,7 +52,7 @@
               </button>
             </div>
             <div v-if="searchSuggestions.length" class="mc-search-dropdown">
-              <div v-for="p in searchSuggestions" :key="p.id" class="mc-dropdown-item" @mousedown.prevent="addProduct(p)">
+              <div v-for="p in searchSuggestions" :key="p.id" class="mc-dropdown-item" @mousedown.prevent="addProductFromSearch(p)">
                 <div class="mc-dropdown-item-info">
                   <span class="mc-dropdown-item-name">{{ p.name }}</span>
                   <span v-if="p.barcode" class="mc-dropdown-item-meta">{{ p.barcode }}</span>
@@ -76,42 +76,50 @@
             </button>
           </div>
 
+          <!-- S5: 产品数达上限提示 -->
+          <div v-if="productCapHint && !loadingProducts" class="mc-cap-hint">{{ productCapHint }}</div>
+
           <!-- Product list -->
-          <div class="mc-product-list">
+          <div ref="productListRef" class="mc-product-list">
             <div v-if="loadingProducts" class="mc-loading-state">
-              <i class="fas fa-spinner fa-spin"  aria-hidden="true" />
-              <span>加载中…</span>
+              <UiSpinner />
             </div>
             <div v-else-if="filteredProducts.length === 0" class="mc-empty-state">
               <i class="fas fa-inbox"  aria-hidden="true" />
               <span>暂无产品</span>
             </div>
-            <VirtualList
-              :items="filteredProducts"
-              :itemHeight="80"
-              :containerHeight="600"
-              :itemKey="(p: any) => p.id"
-            >
-              <template #default="{ item: p }">
-                <div
-                  :class="['mc-product-item', selectedProducts.includes(p.id) ? 'selected' : '']"
-                  @click="toggleProduct(p)"
-                >
-                  <i :class="['mc-checkbox', selectedProducts.includes(p.id) ? 'fas fa-check-square' : 'far fa-square']"  aria-hidden="true" />
-                  <div class="mc-product-details">
-                    <div class="mc-product-name">
-                      {{ p.name }}
+            <template v-else>
+              <VirtualList
+                :items="filteredProducts"
+                :itemHeight="80"
+                :containerHeight="productListHeight"
+                :itemKey="(p: any) => p.id"
+              >
+                <template #default="{ item: p }">
+                  <div
+                    :class="[
+                      'mc-product-item',
+                      selectedProductIds.includes(p.id) ? 'selected' : '',
+                      !p.has_bom ? 'disabled' : '',
+                    ]"
+                    @click="p.has_bom && toggleProduct(p)"
+                  >
+                    <i :class="['mc-checkbox', selectedProductIds.includes(p.id) ? 'fas fa-check-square' : 'far fa-square']"  aria-hidden="true" />
+                    <div class="mc-product-details">
+                      <div class="mc-product-name">
+                        {{ p.name }}
+                      </div>
+                      <div v-if="p.barcode" class="mc-product-code">
+                        {{ p.barcode }}
+                      </div>
                     </div>
-                    <div v-if="p.barcode" class="mc-product-code">
-                      {{ p.barcode }}
-                    </div>
+                    <span :class="['mc-bom-badge', p.has_bom ? 'has-bom' : 'no-bom']">
+                      {{ p.has_bom ? '有BOM' : '无BOM' }}
+                    </span>
                   </div>
-                  <span :class="['mc-bom-badge', p.has_bom ? 'has-bom' : 'no-bom']">
-                    {{ p.has_bom ? '有BOM' : '无BOM' }}
-                  </span>
-                </div>
-              </template>
-            </VirtualList>
+                </template>
+              </VirtualList>
+            </template>
           </div>
         </div>
 
@@ -138,10 +146,10 @@
                   v-model.number="item.quantity"
                   min="0"
                   step="1"
-                  @input="debounceCalc"
+                  @input="onQtyInput(item)"
                 />
               </div>
-              <button class="mc-delete-btn" @click="removeProduct(item.product_id)" aria-label="删除">
+              <button class="mc-delete-btn" @click="removeAndRecalc(item.product_id)" aria-label="删除">
                 <i class="fas fa-trash-alt"  aria-hidden="true" />
               </button>
             </div>
@@ -197,7 +205,7 @@
                         <td>{{ row.supplier_name || '-' }}</td>
                         <td>{{ row.material_name }}</td>
                         <td>{{ row.specification || '-' }}</td>
-                        <td class="mc-qty-cell">{{ row.total_quantity }} {{ row.unit }}</td>
+                        <td class="mc-qty-cell">{{ formatFillingQty(cat.key, row) }}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -229,42 +237,50 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
-import { purchaseApi } from '@/api'
-import { showToast } from '@/composables/useToast'
+import { purchaseApi, type MaterialCalcProduct, type MaterialCalcRow } from '@/api'
+import {
+  useMaterialCalculator,
+  CALC_CATEGORY_LIST,
+  clampQuantity,
+} from '@/composables/useMaterialCalculator'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import VirtualList from '@/components/ui/VirtualList.vue'
 import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 
-interface Product {
-  id: number
-  name: string
-  barcode?: string
-  has_bom: boolean
+// 填充类总采购量按克自动换算为 kg：克/g → kg，其他单位原样显示
+function formatFillingQty(catKey: string, row: MaterialCalcRow): string {
+  if (catKey !== 'filling') return `${row.total_quantity} ${row.unit}`
+  const unit = (row.unit || '').trim()
+  if (unit === '克' || unit.toLowerCase() === 'g') {
+    const kg = row.total_quantity / 1000
+    // 最多保留 3 位小数，去掉尾随零
+    const formatted = `${parseFloat(kg.toFixed(3))}`
+    return `${formatted} kg`
+  }
+  return `${row.total_quantity} ${row.unit}`
 }
 
-interface OrderItem {
-  product_id: number
-  name: string
-  quantity: number
-}
+const {
+  orderItems,
+  calcResults,
+  calculating,
+  selectedProductIds,
+  totalOrders,
+  hasResults,
+  calcStatus,
+  addProduct,
+  removeProduct,
+  clearAll,
+  applyBatch: applyBatchQuantity,
+  debounceCalc,
+  dispose: disposeCalc,
+} = useMaterialCalculator()
 
-interface CalcRow {
-  supplier_name: string
-  material_name: string
-  specification: string
-  total_quantity: number
-  unit: string
-}
-
-const categoryList = [
-  { key: 'filling', label: '填充类', icon: 'fas fa-cloud' },
-  { key: 'fabric', label: '面料类', icon: 'fas fa-scroll' },
-  { key: 'accessory', label: '辅料类', icon: 'fas fa-puzzle-piece' },
-]
-
+// 分类列表与筛选选项
+const categoryList = CALC_CATEGORY_LIST
 const filterOptions: Array<{ label: string; value: 'all' | 'true' | 'false' }> = [
   { label: '全部', value: 'all' },
   { label: '有BOM', value: 'true' },
@@ -272,34 +288,57 @@ const filterOptions: Array<{ label: string; value: 'all' | 'true' | 'false' }> =
 ]
 
 const searchQuery = ref('')
-const searchSuggestions = ref<Product[]>([])
+const searchSuggestions = ref<MaterialCalcProduct[]>([])
 const bomFilter = ref<'all' | 'true' | 'false'>('all')
-const selectedProducts = ref<number[]>([])
-const orderItems = ref<OrderItem[]>([])
-const calculating = ref(false)
-const calcResults = ref<Record<string, CalcRow[]>>({})
 const collapsed = reactive<Record<string, boolean>>({})
 const showBatchModal = ref(false)
 const batchQuantity = ref(1)
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null
-let calcTimer: ReturnType<typeof setTimeout> | null = null
+let hideSuggestionsTimer: ReturnType<typeof setTimeout> | null = null
+
+// S6: 动态测量产品列表高度，替代硬编码 600px
+const productListRef = ref<HTMLElement | null>(null)
+const productListHeight = ref(600)
+let resizeObserver: ResizeObserver | null = null
+
+onMounted(() => {
+  if (productListRef.value) {
+    resizeObserver = new ResizeObserver((entries) => {
+      const h = entries[0]?.contentRect.height
+      if (h && h > 0) productListHeight.value = Math.floor(h)
+    })
+    resizeObserver.observe(productListRef.value)
+  }
+})
+
+onUnmounted(() => {
+  if (searchTimer) clearTimeout(searchTimer)
+  if (hideSuggestionsTimer) clearTimeout(hideSuggestionsTimer)
+  resizeObserver?.disconnect()
+  disposeCalc()
+})
 
 const { data: productsQueryData, isLoading: loadingProducts } = useQuery({
   queryKey: ['material-calculator-products'],
   queryFn: async () => {
-    const res = (await purchaseApi.products({ per_page: 200, simple: true })) as any
-    return (res.products ?? []).map((p: any) => ({
+    const res = await purchaseApi.products({ per_page: 200, simple: true })
+    return (res.products ?? []).map((p) => ({
       id: p.id,
       name: p.name,
-      barcode: p.barcode,
+      barcode: p.barcode ?? undefined,
       has_bom: !!p.has_bom,
-    })) as Product[]
+    })) as MaterialCalcProduct[]
   },
   staleTime: 30_000,
 })
 
-const allProducts = computed<Product[]>(() => productsQueryData.value ?? [])
+const allProducts = computed<MaterialCalcProduct[]>(() => productsQueryData.value ?? [])
+
+// S5: 加载达到 200 上限时提示用户用搜索定位
+const productCapHint = computed(() =>
+  allProducts.value.length >= 200 ? '已加载前 200 个产品，如未找到请使用上方搜索' : '',
+)
 
 const filteredProducts = computed(() => {
   let list = allProducts.value
@@ -307,16 +346,6 @@ const filteredProducts = computed(() => {
   else if (bomFilter.value === 'false') list = list.filter((p) => !p.has_bom)
   return list
 })
-
-const totalOrders = computed(() => orderItems.value.reduce((s, i) => s + i.quantity, 0))
-
-const calcStatus = computed(() => {
-  if (calculating.value) return '计算中...'
-  const total = Object.values(calcResults.value).reduce((s, arr) => s + arr.length, 0)
-  return total > 0 ? `${total} 种物料` : ''
-})
-
-const hasResults = computed(() => Object.values(calcResults.value).some((arr) => arr.length > 0))
 
 function onSearchInput() {
   if (searchTimer) clearTimeout(searchTimer)
@@ -326,7 +355,7 @@ function onSearchInput() {
       return
     }
     try {
-      const res = (await purchaseApi.searchSuggestions(searchQuery.value.trim())) as any
+      const res = await purchaseApi.searchSuggestions(searchQuery.value.trim())
       searchSuggestions.value = res.suggestions ?? []
     } catch {
       searchSuggestions.value = []
@@ -340,83 +369,43 @@ function onMcSearchFocus() {
   }
 }
 function hideMcSuggestions() {
-  setTimeout(() => { searchSuggestions.value = [] }, 150)
+  if (hideSuggestionsTimer) clearTimeout(hideSuggestionsTimer)
+  hideSuggestionsTimer = setTimeout(() => { searchSuggestions.value = [] }, 150)
 }
 
-function toggleProduct(p: Product) {
-  if (!p.has_bom) {
-    showToast(`"${p.name}" 没有BOM，无法计算物料`, 'warning')
-    return
-  }
-  if (selectedProducts.value.includes(p.id)) {
+function toggleProduct(p: MaterialCalcProduct) {
+  // S4: 无 BOM 产品在列表中不可交互（模板侧已禁用点击），此处仅处理有 BOM 的
+  if (selectedProductIds.value.includes(p.id)) {
     removeProduct(p.id)
   } else {
     addProduct(p)
   }
-}
-
-function addProduct(p: Product) {
-  if (!p.has_bom) {
-    showToast(`"${p.name}" 没有BOM，无法计算物料`, 'warning')
-    return
-  }
-  if (selectedProducts.value.includes(p.id)) return
-  selectedProducts.value.push(p.id)
-  orderItems.value.push({ product_id: p.id, name: p.name, quantity: 0 })
-  searchSuggestions.value = []
-  searchQuery.value = ''
   debounceCalc()
 }
 
-function removeProduct(id: number) {
-  const idx = selectedProducts.value.indexOf(id)
-  if (idx >= 0) selectedProducts.value.splice(idx, 1)
-  const oiIdx = orderItems.value.findIndex((i) => i.product_id === id)
-  if (oiIdx >= 0) orderItems.value.splice(oiIdx, 1)
+function removeAndRecalc(id: number) {
+  removeProduct(id)
+  debounceCalc()
+}
+
+function addProductFromSearch(p: MaterialCalcProduct) {
+  if (addProduct(p)) {
+    searchSuggestions.value = []
+    searchQuery.value = ''
+    debounceCalc()
+  }
+}
+
+// S7: 数量输入规整为非负整数
+function onQtyInput(item: { quantity: number }) {
+  item.quantity = clampQuantity(item.quantity)
   debounceCalc()
 }
 
 function applyBatch() {
-  orderItems.value.forEach((i) => {
-    i.quantity = batchQuantity.value
-  })
+  applyBatchQuantity(batchQuantity.value)
   showBatchModal.value = false
   debounceCalc()
-}
-
-function clearAll() {
-  selectedProducts.value = []
-  orderItems.value = []
-  calcResults.value = {}
-}
-
-function debounceCalc() {
-  if (calcTimer) clearTimeout(calcTimer)
-  calcTimer = setTimeout(() => triggerCalculation(), 350)
-}
-
-async function triggerCalculation() {
-  const validOrders = orderItems.value.filter((i) => i.quantity > 0)
-  if (validOrders.length === 0) {
-    calcResults.value = {}
-    return
-  }
-  calculating.value = true
-  try {
-    const res = (await purchaseApi.calculate(
-      validOrders.map((i) => ({ product_id: i.product_id, quantity: i.quantity })),
-    )) as any
-    calcResults.value = {
-      filling: res.filling ?? [],
-      fabric: res.fabric ?? [],
-      accessory: res.accessory ?? [],
-      packaging: res.packaging ?? [],
-    }
-  } catch (err: any) {
-    showToast(err?.response?.data?.detail || '计算失败', 'error')
-  } finally {
-    calculating.value = false
-  }
 }
 </script>
 
@@ -443,7 +432,7 @@ async function triggerCalculation() {
 .form-number-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 /* === Layout === */
 .mc-container {
-  padding: 8px;
+  padding: 0;
   margin: 0 auto;
   height: 100%;
   display: flex;
@@ -452,63 +441,19 @@ async function triggerCalculation() {
 }
 
 /* === Main Card === */
-.mc-card {
-  background: white;
-  border-radius: 18px;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  transition: box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  overflow: hidden;
-}
+/* 卡片样式已迁移到全局 .page-card 系列（src/styles/app.css） */
 
-.mc-card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
-  transform: translateY(-2px);
-}
-
-.mc-card-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.mc-card-header {
-  display: flex;
-  flex-wrap: nowrap;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 24px;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
-  gap: 12px;
-}
-.mc-card-header :deep(.ht-bar) {
+/* === Card Header === */
+/* 卡片头部样式已迁移到全局 .page-card-header（src/styles/app.css） */
+.page-card-header :deep(.ht-bar) {
   width: auto;
   margin: 0;
 }
 
-.mc-card-title-group {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.mc-card-title-group h3 {
-  font-size: 17px;
-  font-weight: 700;
-  color: var(--color-text);
-  margin: 0;
-}
-
-.mc-card-title-group small {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  display: block;
-  margin-top: 2px;
-}
-
 /* === Three Column Body === */
-.mc-body {
+/* 卡片主体样式已迁移到全局 .page-card-body（src/styles/app.css） */
+/* 此处需要 3 列网格布局，覆盖默认 page-card-body */
+.page-card-body {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
   flex: 1;
@@ -542,32 +487,6 @@ async function triggerCalculation() {
 .mc-col-title i {
   font-size: 14px;
   color: var(--color-primary-500);
-}
-
-/* === Icon Boxes === */
-.mc-icon-box {
-  width: 46px;
-  height: 46px;
-  border-radius: 13px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 19px;
-}
-
-.mc-icon-blue {
-  background: linear-gradient(135deg, var(--color-primary-100), var(--color-primary-200));
-  color: var(--color-primary-700);
-}
-
-.mc-icon-green {
-  background: linear-gradient(135deg, var(--color-success-100), var(--color-success-200));
-  color: var(--color-success-700);
-}
-
-.mc-icon-purple {
-  background: linear-gradient(135deg, var(--color-purple-100, #e1bee7), var(--color-purple-200, #ce93d8));
-  color: var(--color-purple-800);
 }
 
 /* === Search === */
@@ -781,6 +700,30 @@ async function triggerCalculation() {
   border-color: var(--color-primary-500);
   background: var(--color-primary-50);
   box-shadow: 0 3px 16px rgba(0, 148, 191, 0.15);
+}
+
+/* S4: 无 BOM 产品禁用交互 */
+.mc-product-item.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.mc-product-item.disabled:hover {
+  border-color: var(--color-border-light, #e2e8f0);
+  background: white;
+  transform: none;
+  box-shadow: none;
+}
+
+/* S5: 产品数达上限提示 */
+.mc-cap-hint {
+  padding: 6px 12px;
+  margin: 0 16px 6px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  background: var(--color-warning-50);
+  border-radius: 8px;
+  text-align: center;
+  flex-shrink: 0;
 }
 
 .mc-checkbox {
@@ -1057,15 +1000,6 @@ async function triggerCalculation() {
 .mc-cat-accessory .mc-cat-icon,
 .mc-cat-accessory .mc-cat-label {
   color: var(--color-warning-800);
-}
-
-.mc-cat-packaging .mc-category-header {
-  background: linear-gradient(135deg, var(--color-purple-50), var(--color-surface-card));
-}
-
-.mc-cat-packaging .mc-cat-icon,
-.mc-cat-packaging .mc-cat-label {
-  color: var(--color-purple-800);
 }
 
 .mc-category-table {

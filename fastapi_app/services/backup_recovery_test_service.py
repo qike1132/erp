@@ -15,13 +15,14 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from fastapi_app.core.database import get_async_db_context
 from fastapi_app.services.backup_alert_service import alert_service
 from fastapi_app.services.backup_health_check_service import health_check_service
-from fastapi_app.services.backup_service import BACKUP_DIR, ensure_backup_dir
+from fastapi_app.services.backup_service import BACKUP_DIR, ensure_backup_dir, quote_table
 from fastapi_app.shared_models.backup_record import BackupRecord
 
 logger = logging.getLogger(__name__)
@@ -124,7 +125,7 @@ class DisasterRecoveryTestService:
             logger.info(f"灾难恢复测试完成: {test_id}")
             return test_report
             
-        except Exception as e:
+        except Exception as e:  # defensive: recovery test orchestration must report failure gracefully
             logger.error(f"灾难恢复测试失败: {e}")
             
             # 发送错误告警
@@ -171,20 +172,21 @@ class DisasterRecoveryTestService:
             )
             
             # 检查测试数据库是否已存在
-            with sync_engine.connect() as conn:
+            # CREATE/DROP DATABASE 属于 DDL，不能在事务块中执行，使用 AUTOCOMMIT 模式
+            with sync_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
                 result = conn.execute(
                     text("SELECT 1 FROM pg_database WHERE datname = :dbname"),
                     {'dbname': test_db_name}
                 )
                 db_exists = result.scalar() is not None
-                
+
                 if db_exists:
-                    # 删除现有测试数据库（使用引号包裹数据库名防止注入）
-                    conn.execute(text(f'DROP DATABASE IF EXISTS "{test_db_name}"'))
+                    # 删除现有测试数据库（使用 quote_table 白名单校验防止注入）
+                    conn.execute(text(f'DROP DATABASE IF EXISTS {quote_table(test_db_name)}'))  # nosec B608 — quote_table 白名单校验
                     logger.info(f"删除已存在的测试数据库: {test_db_name}")
-                
-                # 创建新的测试数据库（使用引号包裹数据库名防止注入）
-                conn.execute(text(f'CREATE DATABASE "{test_db_name}"'))
+
+                # 创建新的测试数据库（使用 quote_table 白名单校验防止注入）
+                conn.execute(text(f'CREATE DATABASE {quote_table(test_db_name)}'))  # nosec B608 — quote_table 白名单校验
                 logger.info(f"创建测试数据库: {test_db_name}")
             
             sync_engine.dispose()
@@ -207,9 +209,9 @@ class DisasterRecoveryTestService:
             logger.info(f"测试环境准备完成: {test_id}")
             return test_env
             
-        except Exception as e:
+        except (SQLAlchemyError, OSError) as e:
             logger.error(f"准备测试环境失败: {e}")
-            raise Exception(f"准备测试环境失败: {str(e)}")
+            raise Exception(f"准备测试环境失败: {str(e)}") from e
     
     async def _select_backup_for_test(self, backup_file: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """选择用于测试的备份文件"""
@@ -249,7 +251,7 @@ class DisasterRecoveryTestService:
             logger.info(f"选择备份文件进行测试: {latest_backup.name}")
             return backup_info
             
-        except Exception as e:
+        except OSError as e:
             logger.error(f"选择备份文件失败: {e}")
             return None
     
@@ -301,7 +303,7 @@ class DisasterRecoveryTestService:
             
             return backup_info
             
-        except Exception as e:
+        except OSError as e:
             logger.error(f"获取备份信息失败 {backup_path.name}: {e}")
             return None
     
@@ -353,7 +355,7 @@ class DisasterRecoveryTestService:
                 'message': '备份文件完整性检查通过'
             }
             
-        except Exception as e:
+        except (OSError, ValueError, KeyError) as e:
             return {
                 'passed': False,
                 'error': f'完整性检查异常: {str(e)}'
@@ -441,7 +443,7 @@ class DisasterRecoveryTestService:
                 logger.info(f"恢复测试执行成功: {test_id}, 导入 {result['imported_rows']} 行数据")
                 return result
                 
-        except Exception as e:
+        except (OSError, ValueError, SQLAlchemyError) as e:
             logger.error(f"恢复测试执行失败 {test_id}: {e}")
             return {
                 'success': False,
@@ -451,7 +453,13 @@ class DisasterRecoveryTestService:
             }
     
     async def _create_test_schema(self, conn, backup_data: Dict[str, Any]) -> None:
-        """创建测试数据库表结构"""
+        """创建测试数据库表结构。
+
+        当前为简化实现，仅创建用于记录测试元数据的 dummy 表，未根据备份数据
+        恢复真实业务 schema。这会导致后续 _validate_schema 等验证无法评估
+        真实备份的可恢复性。TODO: 实现基于备份 manifest / SQL dump 的真实
+        schema 重建（如使用 Base.metadata.create_all 或执行备份中的 DDL）。
+        """
         try:
             # 这里简化处理，实际应该根据备份数据创建完整的表结构
             # 对于真实场景，应该使用完整的DDL语句
@@ -470,7 +478,7 @@ class DisasterRecoveryTestService:
             
             await conn.execute(text(create_table_sql))
             
-        except Exception as e:
+        except Exception as e:  # defensive: log any schema creation failure before re-raising
             logger.error(f"创建测试表结构失败: {e}")
             raise
     
@@ -513,7 +521,7 @@ class DisasterRecoveryTestService:
                         'total_count': row_count
                     }
                     
-                except Exception as e:
+                except Exception as e:  # defensive: per-table import failures should not abort test
                     failed_rows += len(sample_rows)
                     details[table_name] = {
                         'imported': 0,
@@ -529,7 +537,7 @@ class DisasterRecoveryTestService:
                 'details': details
             }
             
-        except Exception as e:
+        except (ValueError, TypeError, AttributeError) as e:
             logger.error(f"导入测试数据失败: {e}")
             return {
                 'imported_rows': 0,
@@ -606,7 +614,7 @@ class DisasterRecoveryTestService:
             logger.info(f"恢复验证完成: {test_id}, 结果: {'通过' if all_passed else '失败'}")
             return result
             
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"恢复验证失败 {test_id}: {e}")
             return {
                 'success': False,
@@ -632,11 +640,14 @@ class DisasterRecoveryTestService:
             
             missing_tables = [t for t in expected_tables if t not in tables]
             extra_tables = [t for t in tables if t not in expected_tables and not t.startswith('backup_test_')]
-            
-            passed = len(missing_tables) == 0
-            
+
+            # 若测试库仅包含 dummy 表，说明真实 schema 未恢复，必须判失败
+            only_dummy_tables = len(tables) > 0 and all(t.startswith('backup_test_') for t in tables)
+            passed = len(missing_tables) == 0 and not only_dummy_tables
+
             return {
                 'passed': passed,
+                'schema_reconstruction_unimplemented': only_dummy_tables,
                 'table_count': len(tables),
                 'expected_tables': len(expected_tables),
                 'missing_tables': missing_tables,
@@ -647,7 +658,7 @@ class DisasterRecoveryTestService:
                 }
             }
             
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"验证模式失败: {e}")
             return {
                 'passed': False,
@@ -667,9 +678,9 @@ class DisasterRecoveryTestService:
                     continue
                 
                 try:
-                    # 查询表中的行数
+                    # 查询表中的行数（使用 quote_table 白名单校验防止注入）
                     result = await conn.execute(
-                        text(f'SELECT COUNT(*) FROM "{table_name}"')
+                        text(f'SELECT COUNT(*) FROM {quote_table(table_name)}')  # nosec B608 — quote_table 白名单校验
                     )
                     row_count = result.scalar() or 0
                     
@@ -682,7 +693,7 @@ class DisasterRecoveryTestService:
                         'match_percentage': round((row_count / expected_rows * 100) if expected_rows > 0 else 0, 2)
                     }
                     
-                except Exception as e:
+                except SQLAlchemyError as e:
                     validation_results[table_name] = {
                         'expected': table_data.get('count', 0),
                         'actual': 0,
@@ -704,7 +715,7 @@ class DisasterRecoveryTestService:
                 'details': validation_results
             }
             
-        except Exception as e:
+        except Exception as e:  # defensive: data integrity validation must report partial results
             logger.error(f"验证数据完整性失败: {e}")
             return {
                 'passed': False,
@@ -713,63 +724,182 @@ class DisasterRecoveryTestService:
             }
     
     async def _validate_constraints(self, conn) -> Dict[str, Any]:
-        """验证数据库约束"""
+        """验证数据库约束完整性。
+
+        对每个外键约束执行 orphan row 检查（外键列非空但引用行缺失），
+        对每个唯一约束执行重复值检查，存在违反即视为验证失败。
+        支持复合外键与复合唯一约束，按约束名分组后按列组合检查。
+        """
+        import re
+        from collections import defaultdict
+
+        ident_re = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
+        def _safe_ident(name: str) -> str:
+            """校验标识符格式并返回双引号包裹形式，防止 SQL 注入。"""
+            if not name or not ident_re.match(name):
+                raise ValueError(f"非法标识符: {name!r}")
+            return f'"{name}"'
+
+        def _safe_idents(names: list[str]) -> list[str]:
+            """批量校验标识符。"""
+            return [_safe_ident(name) for name in names]
+
         try:
-            # 检查外键约束
+            # 检查外键约束（按约束名分组，支持复合外键）。
+            # 子表列与引用表列分别聚合后再按 ordinal_position 对齐，避免直接 JOIN
+            # information_schema.constraint_column_usage 产生笛卡尔积导致列错位。
             result = await conn.execute(text("""
-                SELECT 
-                    tc.table_name, 
-                    kcu.column_name, 
-                    ccu.table_name AS foreign_table_name,
-                    ccu.column_name AS foreign_column_name
-                FROM 
-                    information_schema.table_constraints AS tc 
-                    JOIN information_schema.key_column_usage AS kcu
-                      ON tc.constraint_name = kcu.constraint_name
-                    JOIN information_schema.constraint_column_usage AS ccu
-                      ON ccu.constraint_name = tc.constraint_name
-                WHERE tc.constraint_type = 'FOREIGN KEY'
+                WITH fk_base AS (
+                    SELECT
+                        tc.constraint_name,
+                        tc.table_name,
+                        kcu.column_name,
+                        kcu.ordinal_position
+                    FROM
+                        information_schema.table_constraints AS tc
+                        JOIN information_schema.key_column_usage AS kcu
+                          ON tc.constraint_name = kcu.constraint_name
+                    WHERE tc.constraint_type = 'FOREIGN KEY'
+                ),
+                fk_ref AS (
+                    SELECT
+                        tc.constraint_name,
+                        ccu.table_name AS foreign_table_name,
+                        ccu.column_name AS foreign_column_name,
+                        ccu.ordinal_position
+                    FROM
+                        information_schema.table_constraints AS tc
+                        JOIN information_schema.constraint_column_usage AS ccu
+                          ON ccu.constraint_name = tc.constraint_name
+                    WHERE tc.constraint_type = 'FOREIGN KEY'
+                )
+                SELECT
+                    b.constraint_name,
+                    b.table_name,
+                    b.column_name,
+                    r.foreign_table_name,
+                    r.foreign_column_name,
+                    b.ordinal_position
+                FROM fk_base b
+                JOIN fk_ref r
+                  ON b.constraint_name = r.constraint_name
+                 AND b.ordinal_position = r.ordinal_position
+                ORDER BY b.constraint_name, b.ordinal_position
             """))
-            
-            foreign_keys = []
+
+            fk_groups: Dict[str, Dict[str, Any]] = defaultdict(
+                lambda: {'table': '', 'columns': [], 'foreign_table': '', 'foreign_columns': []}
+            )
             for row in result.fetchall():
-                foreign_keys.append({
-                    'table': row[0],
-                    'column': row[1],
-                    'foreign_table': row[2],
-                    'foreign_column': row[3]
-                })
-            
-            # 检查唯一约束
+                constraint_name = row[0]
+                group = fk_groups[constraint_name]
+                group['constraint_name'] = constraint_name
+                group['table'] = row[1]
+                group['columns'].append(row[2])
+                group['foreign_table'] = row[3]
+                group['foreign_columns'].append(row[4])
+
+            # 检查唯一约束（按约束名分组，支持复合唯一索引）
             result = await conn.execute(text("""
-                SELECT 
+                SELECT
+                    tc.constraint_name,
                     tc.table_name,
-                    kcu.column_name
-                FROM 
-                    information_schema.table_constraints AS tc 
+                    kcu.column_name,
+                    kcu.ordinal_position
+                FROM
+                    information_schema.table_constraints AS tc
                     JOIN information_schema.key_column_usage AS kcu
                       ON tc.constraint_name = kcu.constraint_name
                 WHERE tc.constraint_type = 'UNIQUE'
+                ORDER BY tc.constraint_name, kcu.ordinal_position
             """))
-            
-            unique_constraints = []
+
+            unique_groups: Dict[str, Dict[str, Any]] = defaultdict(
+                lambda: {'table': '', 'columns': []}
+            )
             for row in result.fetchall():
-                unique_constraints.append({
-                    'table': row[0],
-                    'column': row[1]
-                })
-            
+                constraint_name = row[0]
+                group = unique_groups[constraint_name]
+                group['constraint_name'] = constraint_name
+                group['table'] = row[1]
+                group['columns'].append(row[2])
+
+            # 对每个 FK 执行 orphan row 检查（外键列非空但引用行缺失）
+            fk_violations = []
+            for group in fk_groups.values():
+                table = _safe_ident(group['table'])
+                columns = _safe_idents(group['columns'])
+                foreign_table = _safe_ident(group['foreign_table'])
+                foreign_columns = _safe_idents(group['foreign_columns'])
+                join_clause = ' AND '.join(
+                    f't.{c} = f.{fc}' for c, fc in zip(columns, foreign_columns)
+                )
+                not_null_clause = ' AND '.join(f't.{c} IS NOT NULL' for c in columns)
+                orphan_sql = text(f"""
+                    SELECT COUNT(*) FROM {table} t
+                    LEFT JOIN {foreign_table} f ON {join_clause}
+                    WHERE {not_null_clause} AND f.{foreign_columns[0]} IS NULL
+                """)
+                orphan_count = (await conn.execute(orphan_sql)).scalar() or 0
+                if orphan_count > 0:
+                    fk_violations.append({
+                        'constraint_name': group['constraint_name'],
+                        'table': group['table'],
+                        'columns': group['columns'],
+                        'foreign_table': group['foreign_table'],
+                        'foreign_columns': group['foreign_columns'],
+                        'orphan_count': orphan_count,
+                    })
+
+            # 对每个 UNIQUE 约束执行重复值检查
+            unique_violations = []
+            for group in unique_groups.values():
+                table = _safe_ident(group['table'])
+                columns = _safe_idents(group['columns'])
+                col_list = ', '.join(columns)
+                dup_sql = text(f"""
+                    SELECT COUNT(*) FROM (
+                        SELECT {col_list} FROM {table}
+                        WHERE {' AND '.join(f'{c} IS NOT NULL' for c in columns)}
+                        GROUP BY {col_list} HAVING COUNT(*) > 1
+                    ) t
+                """)
+                dup_groups = (await conn.execute(dup_sql)).scalar() or 0
+                if dup_groups > 0:
+                    unique_violations.append({
+                        'constraint_name': group['constraint_name'],
+                        'table': group['table'],
+                        'columns': group['columns'],
+                        'duplicate_groups': dup_groups,
+                    })
+
+            # 约束总数为零（schema 损坏或无约束定义）时视为验证失败，
+            # 避免空约束列表场景下 passed=True 掩盖"约束缺失"灾难情况
+            total_constraints = len(fk_groups) + len(unique_groups)
+            coverage_warning = total_constraints == 0
+            passed = (
+                not coverage_warning
+                and len(fk_violations) == 0
+                and len(unique_violations) == 0
+            )
             return {
-                'passed': True,  # 暂时总是返回通过，实际应该验证约束完整性
-                'foreign_key_count': len(foreign_keys),
-                'unique_constraint_count': len(unique_constraints),
+                'passed': passed,
+                'coverage_warning': coverage_warning,
+                'foreign_key_count': len(fk_groups),
+                'unique_constraint_count': len(unique_groups),
+                'fk_violations': fk_violations,
+                'unique_violations': unique_violations,
                 'details': {
-                    'foreign_keys': foreign_keys,
-                    'unique_constraints': unique_constraints
+                    'foreign_keys': list(fk_groups.values()),
+                    'unique_constraints': list(unique_groups.values()),
                 }
             }
-            
-        except Exception as e:
+
+        except (SQLAlchemyError, ValueError) as e:
+            # ValueError 来自 _safe_ident 对非法标识符的拒绝；
+            # SQLAlchemyError 来自 information_schema 查询失败。
+            # 两者均视为约束验证失败，避免异常逃逸至端点 500。
             logger.error(f"验证约束失败: {e}")
             return {
                 'passed': False,
@@ -802,7 +932,7 @@ class DisasterRecoveryTestService:
                         'duration_ms': round(duration_ms, 2),
                         'status': 'success'
                     }
-                except Exception as e:
+                except SQLAlchemyError as e:
                     performance_metrics[name] = {
                         'query': query,
                         'duration_ms': 0,
@@ -826,7 +956,7 @@ class DisasterRecoveryTestService:
                 'details': performance_metrics
             }
             
-        except Exception as e:
+        except (SQLAlchemyError, ValueError) as e:
             logger.error(f"验证性能失败: {e}")
             return {
                 'passed': False,
@@ -858,18 +988,22 @@ class DisasterRecoveryTestService:
                 poolclass=NullPool
             )
             
-            with sync_engine.connect() as conn:
-                # 断开其他连接
-                conn.execute(text(f"""
-                    SELECT pg_terminate_backend(pid) 
-                    FROM pg_stat_activity 
-                    WHERE datname = '{test_env['test_db_name']}' 
-                    AND pid <> pg_backend_pid()
-                """))
-                
-                # 删除数据库
-                conn.execute(text(f"DROP DATABASE IF EXISTS {test_env['test_db_name']}"))
-            
+            # DROP DATABASE 属于 DDL，不能在事务块中执行，使用 AUTOCOMMIT 模式
+            with sync_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+                # 断开其他连接（参数化查询防止注入）
+                conn.execute(
+                    text("""
+                        SELECT pg_terminate_backend(pid)
+                        FROM pg_stat_activity
+                        WHERE datname = :dbname
+                        AND pid <> pg_backend_pid()
+                    """),
+                    {'dbname': test_env['test_db_name']}
+                )
+
+                # 删除数据库（使用 quote_table 白名单校验防止注入）
+                conn.execute(text(f'DROP DATABASE IF EXISTS {quote_table(test_env["test_db_name"])}'))  # nosec B608 — quote_table 白名单校验
+
             sync_engine.dispose()
             
             # 清理测试目录
@@ -884,7 +1018,7 @@ class DisasterRecoveryTestService:
                 'test_dir': test_env['test_dir']
             }
             
-        except Exception as e:
+        except (SQLAlchemyError, OSError) as e:
             logger.error(f"清理测试环境失败: {e}")
             return {
                 'cleaned': False,
@@ -944,7 +1078,7 @@ class DisasterRecoveryTestService:
             
             return report
             
-        except Exception as e:
+        except Exception as e:  # defensive: report generation must return error payload gracefully
             logger.error(f"生成测试报告失败: {e}")
             return {
                 'test_id': test_id,
@@ -1012,7 +1146,7 @@ class DisasterRecoveryTestService:
             # 清理旧报告
             await self._cleanup_old_reports(test_results_dir)
             
-        except Exception as e:
+        except OSError as e:
             logger.error(f"保存测试结果失败: {e}")
     
     async def _cleanup_old_reports(self, reports_dir: Path) -> None:
@@ -1045,7 +1179,7 @@ class DisasterRecoveryTestService:
             if deleted_count > 0:
                 logger.info(f"清理了 {deleted_count} 个旧的测试报告")
                 
-        except Exception as e:
+        except OSError as e:
             logger.error(f"清理测试报告失败: {e}")
     
     async def _send_test_notification(self, test_report: Dict[str, Any]) -> None:
@@ -1088,7 +1222,7 @@ class DisasterRecoveryTestService:
                 additional_info=test_report
             )
             
-        except Exception as e:
+        except Exception as e:  # defensive: test notification failure must not propagate
             logger.error(f"发送测试通知失败: {e}")
     
     async def get_test_history(self, days: int = 30) -> List[Dict[str, Any]]:
@@ -1123,7 +1257,7 @@ class DisasterRecoveryTestService:
             reports.sort(key=lambda x: x.get('start_time', ''), reverse=True)
             return reports
             
-        except Exception as e:
+        except OSError as e:
             logger.error(f"获取测试历史失败: {e}")
             return []
     
@@ -1173,7 +1307,7 @@ class DisasterRecoveryTestService:
             
             return summary
             
-        except Exception as e:
+        except Exception as e:  # defensive: summary generation must return error payload gracefully
             logger.error(f"获取测试摘要失败: {e}")
             return {
                 'error': str(e),

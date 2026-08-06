@@ -1,7 +1,7 @@
 """
 订单同步与状态流转模型 - 纯 SQLAlchemy 2.0 声明式
 
-映射到与 Flask-SQLAlchemy 相同的 'order_sync_record'、'sync_retry_queue'、'order_sync_config' 表。
+映射到 'order_sync_record', 'sync_retry_queue', 'order_sync_config' 表。
 """
 from datetime import datetime, timedelta, timezone
 

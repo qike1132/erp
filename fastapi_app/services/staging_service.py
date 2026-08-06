@@ -1,7 +1,7 @@
 """
 暂存区业务逻辑服务
 
-从 Flask staging_order.py / staging_stockin.py / staging_stockout.py 提取的核心业务逻辑，适配异步 SQLAlchemy。
+核心业务逻辑，异步 SQLAlchemy 实现。
 """
 import asyncio
 import contextlib
@@ -9,21 +9,25 @@ import logging
 import os
 import tempfile
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.exceptions import NotFoundError
+from fastapi_app.core.validators import validate_quantity_range
 from fastapi_app.services.batch_service import (
     calculate_available_shipment_quantity,
-    generate_order_number,
-    generate_stockin_number,
-    generate_stockout_number,
     parse_excel_file_async,
     process_order_deduction,
     read_excel_sheets_async,
+)
+from fastapi_app.services.numbering import (
+    generate_order_number,
+    generate_stockin_number,
+    generate_stockout_number,
 )
 from fastapi_app.shared_models import (
     InventoryLog,
@@ -166,11 +170,10 @@ async def _generic_import_staging_from_excel(
                 errors.append(f'第{idx}行处理失败: {str(e)}')
                 continue
 
-        await db.commit()
+        await db.flush()
         return imported, _format_import_result(imported, entity_label, errors), errors
 
     except (ValueError, TypeError, OSError) as e:
-        await db.rollback()
         logger.error('%s导入失败: %s', entity_label, str(e), exc_info=True)
         return 0, '导入失败，请稍后重试', []
     finally:
@@ -190,7 +193,7 @@ async def _generic_update_staging_entity(
     result = await db.execute(select(model_class).where(model_class.id == entity_id))
     entity = result.scalar_one_or_none()
     if not entity:
-        raise ValueError(f'{entity_label} {entity_id} 不存在')
+        raise NotFoundError(f'{entity_label} {entity_id} 不存在')
 
     if 'customer' in data:
         entity.customer = data['customer']
@@ -210,7 +213,7 @@ async def _generic_update_staging_entity(
     if extra_updates:
         extra_updates(entity, data, db)
 
-    await db.commit()
+    await db.flush()
     await db.refresh(entity)
     return entity.to_dict()
 
@@ -242,7 +245,7 @@ def _build_stockin_entity(
     fields: dict, session_id: str, product_id: int | None, qty: int,
     is_validated: bool, validation_error: str, product_name: str,
 ) -> StagingStockIn:
-    stockin_date = parse_date_value(fields.get('stockin_date')) or datetime.now()
+    stockin_date = parse_date_value(fields.get('stockin_date')) or datetime.now(UTC).replace(tzinfo=None)
     return StagingStockIn(
         session_id=session_id,
         customer=str(fields.get('customer', '')).strip(),
@@ -262,7 +265,7 @@ def _build_stockout_entity(
     fields: dict, session_id: str, product_id: int | None, qty: int,
     is_validated: bool, validation_error: str, product_name: str,
 ) -> StagingStockOut:
-    stockout_date = parse_date_value(fields.get('stockout_date')) or datetime.now()
+    stockout_date = parse_date_value(fields.get('stockout_date')) or datetime.now(UTC).replace(tzinfo=None)
     customer = str(fields.get('customer', '')).strip()
 
     country_val = fields.get('country', '')
@@ -312,14 +315,14 @@ def _stockout_extra_updates(entity, data: dict, _db: AsyncSession) -> None:
         # extra_updates runs after quantity is set; perform stock check here
         pass
     if 'stockout_date' in data:
-        entity.stockout_date = parse_date_value(data['stockout_date']) or datetime.now()
+        entity.stockout_date = parse_date_value(data['stockout_date']) or datetime.now(UTC).replace(tzinfo=None)
     if 'note' in data:
         entity.note = data['note']
 
 
 def _stockin_extra_updates(entity, data: dict, _db: AsyncSession) -> None:
     if 'stockin_date' in data:
-        entity.stockin_date = parse_date_value(data['stockin_date']) or datetime.now()
+        entity.stockin_date = parse_date_value(data['stockin_date']) or datetime.now(UTC).replace(tzinfo=None)
     if 'note' in data:
         entity.note = data['note']
 
@@ -327,8 +330,7 @@ def _stockin_extra_updates(entity, data: dict, _db: AsyncSession) -> None:
 def _order_extra_updates(entity, data: dict, _db: AsyncSession) -> None:
     if 'quantity' in data:
         qty = int(data['quantity'])
-        if qty <= 0 or qty > 9999999:
-            raise ValueError('数量必须在1-9999999之间')
+        validate_quantity_range(qty)
     if 'deduct_stock' in data:
         entity.deduct_stock = bool(data['deduct_stock'])
     if 'deduct_quantity' in data:
@@ -368,7 +370,7 @@ async def clear_staging_orders_by_session(db: AsyncSession, session_id: str) -> 
     result = await db.execute(
         delete(StagingOrder).where(StagingOrder.session_id == session_id)
     )
-    await db.commit()
+    await db.flush()
     return result.rowcount
 
 
@@ -380,9 +382,9 @@ async def delete_staging_order(db: AsyncSession, order_id: int):
     result = await db.execute(select(StagingOrder).where(StagingOrder.id == order_id))
     order = result.scalar_one_or_none()
     if not order:
-        raise ValueError(f"暂存订单 {order_id} 不存在")
+        raise NotFoundError(f"暂存订单 {order_id} 不存在")
     await db.delete(order)
-    await db.commit()
+    await db.flush()
 
 
 async def update_staging_order(db: AsyncSession, order_id: int, data: dict) -> dict:
@@ -416,15 +418,14 @@ async def confirm_staging_orders(
         for staging in staging_orders:
             try:
                 async with db.begin_nested():
-                    if staging.quantity <= 0 or staging.quantity > 9999999:
-                        raise ValueError(f'订单{staging.customer}-{staging.product_name}数量无效: {staging.quantity}')
+                    validate_quantity_range(staging.quantity)
 
                     order_no = await generate_order_number(db)
 
                     order = Order(
                         order_no=order_no,
                         customer=staging.customer,
-                        order_date=staging.order_date or datetime.now(),
+                        order_date=staging.order_date or datetime.now(UTC).replace(tzinfo=None),
                         product_id=staging.product_id,
                         quantity=staging.quantity,
                         note=staging.note,
@@ -472,10 +473,9 @@ async def confirm_staging_orders(
                 StagingOrder.status == 'rejected',
             )
         )
-        await db.commit()
+        await db.flush()
 
     except (SQLAlchemyError, RuntimeError, OSError, ValueError) as e:
-        await db.rollback()
         logger.error(f'确认暂存订单时发生错误: {str(e)}', exc_info=True)
         raise
 
@@ -519,7 +519,7 @@ async def clear_staging_stockins_by_session(db: AsyncSession, session_id: str) -
     result = await db.execute(
         delete(StagingStockIn).where(StagingStockIn.session_id == session_id)
     )
-    await db.commit()
+    await db.flush()
     return result.rowcount
 
 
@@ -531,9 +531,9 @@ async def delete_staging_stockin(db: AsyncSession, stockin_id: int):
     result = await db.execute(select(StagingStockIn).where(StagingStockIn.id == stockin_id))
     stockin = result.scalar_one_or_none()
     if not stockin:
-        raise ValueError(f"暂存备货 {stockin_id} 不存在")
+        raise NotFoundError(f"暂存备货 {stockin_id} 不存在")
     await db.delete(stockin)
-    await db.commit()
+    await db.flush()
 
 
 async def update_staging_stockin(db: AsyncSession, stockin_id: int, data: dict) -> dict:
@@ -575,7 +575,7 @@ async def confirm_staging_stockins(
 
                 stockin = StockIn(
                     stockin_no=stockin_no,
-                    stockin_date=staging.stockin_date or datetime.now(),
+                    stockin_date=staging.stockin_date or datetime.now(UTC).replace(tzinfo=None),
                     customer=staging.customer,
                     product_id=staging.product_id,
                     quantity=staging.quantity,
@@ -610,7 +610,7 @@ async def confirm_staging_stockins(
             StagingStockIn.status == 'rejected',
         )
     )
-    await db.commit()
+    await db.flush()
 
     return confirmed, errors
 
@@ -653,7 +653,7 @@ async def clear_staging_stockouts_by_session(db: AsyncSession, session_id: str) 
     result = await db.execute(
         delete(StagingStockOut).where(StagingStockOut.session_id == session_id)
     )
-    await db.commit()
+    await db.flush()
     return result.rowcount
 
 
@@ -665,9 +665,9 @@ async def delete_staging_stockout(db: AsyncSession, stockout_id: int):
     result = await db.execute(select(StagingStockOut).where(StagingStockOut.id == stockout_id))
     stockout = result.scalar_one_or_none()
     if not stockout:
-        raise ValueError(f"暂存出货 {stockout_id} 不存在")
+        raise NotFoundError(f"暂存出货 {stockout_id} 不存在")
     await db.delete(stockout)
-    await db.commit()
+    await db.flush()
 
 
 async def update_staging_stockout(db: AsyncSession, stockout_id: int, data: dict) -> dict:
@@ -699,7 +699,7 @@ async def confirm_staging_stockouts(
     errors: list[str] = []
     completed_orders: list[dict] = []
 
-    from fastapi_app.services.order_service import compute_order_status_from_db
+    from fastapi_app.services.order_utils import compute_order_status_from_db
 
     for staging in staging_stockouts:
         try:
@@ -738,7 +738,7 @@ async def confirm_staging_stockouts(
                         stockout_no = await generate_stockout_number(db)
                         stockout = StockOut(
                             stockout_no=stockout_no,
-                            stockout_date=staging.stockout_date or datetime.now(),
+                            stockout_date=staging.stockout_date or datetime.now(UTC).replace(tzinfo=None),
                             product_id=staging.product_id,
                             quantity=ship_qty,
                             customer=staging.customer,
@@ -794,7 +794,7 @@ async def confirm_staging_stockouts(
             StagingStockOut.status == 'rejected',
         )
     )
-    await db.commit()
+    await db.flush()
 
     # 发送出货完成事件
     if completed_orders:
@@ -806,7 +806,7 @@ async def confirm_staging_stockouts(
                     fcm_title="出货完成",
                     fcm_body=f"订单 {co['order_no']} 已完成出货",
                 )
-            except Exception as e:
+            except Exception as e:  # defensive: 单个事件发布失败不影响确认结果
                 logger.warning("出货完成事件发布失败: %s", e)
 
     return confirmed, errors

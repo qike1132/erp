@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { get, post, del } from '@/api/request'
+import { countryApi } from '@/api'
 
 const STORAGE_KEY = 'erp_countries'
 
@@ -31,7 +31,7 @@ export const useCountryStore = defineStore('country', () => {
 
   async function fetchCountries() {
     try {
-      const res = await get<{ id: number; name: string }[]>('/aux/countries')
+      const res = await countryApi.list()
       const list = Array.isArray(res) ? res.map((c) => c.name) : []
       countries.value = list
       saveToStorage(list)
@@ -47,7 +47,7 @@ export const useCountryStore = defineStore('country', () => {
     if (!trimmed) return false
     if (countries.value.includes(trimmed)) return false
     try {
-      await post('/aux/countries', { name: trimmed })
+      await countryApi.create(trimmed)
       countries.value.push(trimmed)
       saveToStorage(countries.value)
       return true
@@ -63,9 +63,9 @@ export const useCountryStore = defineStore('country', () => {
     const idx = countries.value.indexOf(name)
     if (idx === -1) return false
     try {
-      const list = await get<{ id: number; name: string }[]>('/aux/countries')
+      const list = await countryApi.list()
       const match = Array.isArray(list) ? list.find((c) => c.name === name) : null
-      if (match) await del(`/aux/countries/${match.id}`)
+      if (match) await countryApi.delete(match.id)
     } catch {
       // proceed with local removal
     }

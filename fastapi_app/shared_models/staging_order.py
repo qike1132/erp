@@ -1,7 +1,7 @@
 """
 暂存订单模型 - 纯 SQLAlchemy 2.0 声明式
 
-映射到与 Flask-SQLAlchemy StagingOrder 相同的 'staging_order' 表。
+映射到 'staging_order' 表。
 """
 from __future__ import annotations
 

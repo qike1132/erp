@@ -84,7 +84,11 @@ function getContainer(): HTMLElement {
       paddingTop: '48px',
       pointerEvents: 'none',
       zIndex: '99999',
-      gap: '10px',
+      // Note: no `gap` here. Spacing between toasts is owned by each toast's
+      // `marginTop` so it can be transitioned to 0 on exit — flex `gap` does
+      // NOT collapse with item height, so a collapsing toast would leave a
+      // residual 10px gap that snaps shut only on `remove()`, causing the
+      // exact jank the user reported.
     })
     document.body.appendChild(el)
   }
@@ -120,12 +124,16 @@ function _renderToast(msg: string, type: ToastType, options: Required<ToastOptio
     letterSpacing: '0.01em',
     lineHeight: '1.5',
     pointerEvents: 'auto',
+    // Spacing between toasts (in place of container `gap`) — owned per-toast
+    // so it can be transitioned to 0 on exit.
+    marginTop: '10px',
     transition: 'opacity 0.35s cubic-bezier(0.4,0,0.2,1), transform 0.4s cubic-bezier(0.34,1.8,0.64,1)',
     opacity: '0',
     transform: 'translateY(-12px) scale(0.96)',
     maxWidth: '400px',
     minWidth: '180px',
     wordBreak: 'break-word',
+    willChange: 'opacity, transform, max-height, margin-top',
   })
 
   // icon circle
@@ -191,13 +199,52 @@ function _renderToast(msg: string, type: ToastType, options: Required<ToastOptio
   })
 
   const removeToast = () => {
+    // Capture current height so we can transition it to 0 — collapsing the
+    // toast's own reserved space makes sibling toasts slide up smoothly
+    // (continuous layout recalculation per frame) instead of snapping
+    // into place after `remove()`.
+    wrap.style.maxHeight = wrap.offsetHeight + 'px'
+    // Capture current marginTop (10px) so we can transition it to 0 in
+    // lockstep with max-height. Without this, the 10px gap below the
+    // previous toast would snap shut on `remove()` — exactly the jank
+    // the user reported in the multi-toast scenario.
+    wrap.style.marginTop = '10px'
+    // Force reflow so the captured max-height and marginTop are recorded
+    // as the start point of the transition.
+    void wrap.offsetWidth
+
+    // Redesigned exit: fade + drift + collapse own space (height + margin)
+    // in lockstep. The 0.04s delay on the collapse gives the fade a head
+    // start so the toast visibly begins to disappear before its space
+    // starts shrinking.
+    wrap.style.transition = [
+      'opacity 0.26s ease-out',
+      'transform 0.26s ease-out',
+      'max-height 0.26s ease-out 0.04s',
+      'margin-top 0.26s ease-out 0.04s',
+      'padding 0.26s ease-out 0.04s',
+      'border-width 0.26s ease-out 0.04s',
+    ].join(', ')
+    // Drop the backdrop-filter during exit — recomputing the frosted-glass
+    // blur every layout frame is expensive and compounds across multiple
+    // simultaneously-exiting toasts. Opacity will hide the resulting
+    // flat background long before the user notices.
+    wrap.style.backdropFilter = 'none'
+    wrap.style.WebkitBackdropFilter = 'none'
     wrap.style.opacity = '0'
-    wrap.style.transform = 'translateY(-8px) scale(0.96)'
+    wrap.style.transform = 'translateY(-8px) scale(0.94)'
+    wrap.style.maxHeight = '0'
+    wrap.style.marginTop = '0'
+    wrap.style.padding = '0 20px'
+    wrap.style.borderWidth = '0'
+    wrap.style.overflow = 'hidden'
+
+    // 0.26s + 0.04s delay = 0.30s = 300ms; +40ms buffer for slow devices.
     setTimeout(() => {
       if (wrap.parentNode) wrap.remove()
       if (container.childNodes.length === 0) container.remove()
       options.onClose()
-    }, 350)
+    }, 340)
   }
 
   // close button handler

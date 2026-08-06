@@ -1,7 +1,5 @@
 """
 订单状态日志模型 - 纯 SQLAlchemy 2.0 声明式
-
-映射到与 Flask-SQLAlchemy OrderStatusLog 相同的表。
 """
 from datetime import datetime, timezone
 

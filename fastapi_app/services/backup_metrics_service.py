@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import psutil
 from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db_context
@@ -124,7 +125,7 @@ class BackupMetricsService:
             logger.info(f"备份指标收集完成: {backup_type}, 耗时: {duration_seconds:.2f}秒, 大小: {backup_size / (1024**2):.2f}MB")
             return metrics
             
-        except Exception as e:
+        except Exception as e:  # defensive: metrics collection must not crash the backup task
             logger.error(f"收集备份指标失败: {e}")
             return {
                 'error': str(e),
@@ -171,7 +172,7 @@ class BackupMetricsService:
             
             return metrics
             
-        except Exception as e:
+        except OSError as e:
             logger.error(f"收集系统指标失败: {e}")
             return {
                 'error': str(e),
@@ -210,7 +211,7 @@ class BackupMetricsService:
             # 清理旧指标文件
             await self._cleanup_old_metrics(metrics_dir)
             
-        except Exception as e:
+        except OSError as e:
             logger.error(f"存储指标数据失败: {e}")
     
     async def _cleanup_old_metrics(self, metrics_dir: Path) -> None:
@@ -243,7 +244,7 @@ class BackupMetricsService:
             if deleted_count > 0:
                 logger.info(f"清理了 {deleted_count} 个旧的指标文件")
                 
-        except Exception as e:
+        except OSError as e:
             logger.error(f"清理指标文件失败: {e}")
     
     async def _check_performance_thresholds(self, metrics: Dict[str, Any]) -> None:
@@ -282,7 +283,7 @@ class BackupMetricsService:
                 # 这里可以添加告警逻辑
                 # await alert_service.send_alert(...)
                 
-        except Exception as e:
+        except Exception as e:  # defensive: threshold check must not crash metrics collection
             logger.error(f"检查性能阈值失败: {e}")
     
     async def get_performance_summary(self, 
@@ -385,7 +386,7 @@ class BackupMetricsService:
                 
                 return summary
                 
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"获取性能摘要失败: {e}")
             return {
                 'error': str(e),
@@ -508,7 +509,7 @@ class BackupMetricsService:
                 
                 return analysis
                 
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"获取趋势分析失败: {e}")
             return {
                 'error': str(e),
@@ -614,7 +615,7 @@ class BackupMetricsService:
             
             return alerts
             
-        except Exception as e:
+        except Exception as e:  # defensive: alert generation must not crash metrics service
             logger.error(f"获取性能告警失败: {e}")
             return [{
                 'type': 'metrics_error',
@@ -662,7 +663,7 @@ class BackupMetricsService:
             
             return report
             
-        except Exception as e:
+        except Exception as e:  # defensive: report export must return error payload gracefully
             logger.error(f"导出指标报告失败: {e}")
             return {
                 'error': str(e),

@@ -1,7 +1,5 @@
 """
 修改日志 & 保存查询模型 - 纯 SQLAlchemy 2.0 声明式
-
-映射到与 Flask-SQLAlchemy 相同的表。
 """
 from datetime import datetime, timezone
 

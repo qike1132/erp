@@ -1,8 +1,12 @@
 """
-报表数据查询服务（跨框架共享）
+报表数据查询服务
 
-从 app/routes/report.py 提取，消除 FastAPI 对 Flask 路由层的直接依赖。
-接受 SQLAlchemy Session 参数，不依赖 Flask 应用上下文。
+接受 SQLAlchemy Session 参数，框架无关。
+
+TODO(multi-sku-order): 本模块多处 SQL 直接引用 Order.product_id/Order.quantity
+（JOIN、sum 聚合）及遍历 order.product/order.quantity。多 SKU 模型下这些为首 item
+兼容值，完整改造涉及业务语义变更，待后续 spec 改造为 JOIN OrderItem。
+当前依赖 Task 3 设置的兼容值。
 """
 import logging
 from datetime import datetime, timedelta
@@ -16,7 +20,7 @@ from fastapi_app.shared_models import Order, Product, StockIn, StockOut
 logger = logging.getLogger(__name__)
 
 
-from fastapi_app.services import escape_like
+from fastapi_app.core.sanitizer import escape_like
 
 _YIELD_PER_BATCH = 500
 _MAX_EXPORT_ROWS = 10000  # 报表导出最大行数，避免内存溢出
@@ -35,7 +39,7 @@ def get_all_logs_data(
     获取指定类型报表的所有数据（不分页，用于导出）
 
     Args:
-        session: SQLAlchemy 同步会话（Flask db.session 或 SyncSessionLocal()）
+        session: SQLAlchemy 同步会话
         report_type: 报表类型 (order, stockin, stockout, deduction)
         customer: 客户筛选
         product: 产品筛选
@@ -133,11 +137,13 @@ def _get_order_logs(session, customer, product, status, start_date, end_date):
         deducted_quantity = sum(so.quantity - so.returned_quantity for so in order.order_stockouts if so.stockin_id) if hasattr(order, 'order_stockouts') and order.order_stockouts else 0
         note = order.note or ''
         if deducted_quantity > 0:
+            # TODO(multi-sku-order): order.quantity 在多 SKU 下为首 item 兼容值，抵扣备注需按 OrderItem 维度；待后续 spec 改造。
             deduction_note = f'订单{order.quantity}抵扣备货{deducted_quantity}'
             if note:
                 note = f'{deduction_note}，{note}'
             else:
                 note = deduction_note
+        # TODO(multi-sku-order): order.product.name/order.quantity 在多 SKU 下为首 item 兼容值，报表需按 OrderItem 维度展开；待后续 spec 改造。
         logs.append({
             'id': order.id,
             'order_no': order.order_no,

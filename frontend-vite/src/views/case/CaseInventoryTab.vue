@@ -8,10 +8,7 @@
           皮套库存汇总
         </div>
         <div class="ci-header-actions">
-          <div class="ci-search-wrapper">
-            <i class="fas fa-search ci-search-icon"  aria-hidden="true" />
-            <input v-model="invSearch" class="ci-search-input" placeholder="搜索产品名称或69码..." @input="onInvSearchInput" />
-          </div>
+          <UiSearchInput v-model="invSearch" placeholder="搜索产品名称或69码..." @search="onInvSearchInput" />
           <button class="ci-action-btn ci-action-primary" @click="invRefetch()">
             <i class="fas fa-sync-alt" style="margin-right: 4px"  aria-hidden="true" />刷新
           </button>
@@ -35,7 +32,7 @@
       </div>
 
       <!-- 库存表格 -->
-      <div v-if="invIsLoading && inventoryList.length === 0" class="ci-loading"><i class="fas fa-spinner fa-spin"  aria-hidden="true" /><span>加载中…</span></div>
+      <div v-if="invIsLoading && inventoryList.length === 0" class="ci-loading"><UiSpinner /></div>
       <div v-else-if="inventoryList.length === 0" class="ci-empty"><i class="fas fa-warehouse"  aria-hidden="true" /><span>暂无库存数据</span></div>
       <template v-else>
       <div v-if="invIsFetching" class="ci-fetching-bar"><div class="ci-fetching-progress" /></div>
@@ -112,7 +109,7 @@
           </div>
         </div>
       </div>
-      <div v-if="logIsLoading && logList.length === 0" class="ci-loading"><i class="fas fa-spinner fa-spin"  aria-hidden="true" /><span>加载中…</span></div>
+      <div v-if="logIsLoading && logList.length === 0" class="ci-loading"><UiSpinner /></div>
       <div v-else-if="logList.length === 0" class="ci-empty"><i class="fas fa-history"  aria-hidden="true" /><span>暂无流水记录</span></div>
       <template v-else>
       <div v-if="logIsFetching" class="ci-fetching-bar"><div class="ci-fetching-progress" /></div>
@@ -159,24 +156,79 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/vue-query'
+/**
+ * CaseInventoryTab.vue — 皮套库存查询标签页
+ *
+ * 职责：
+ * - 展示皮套库存汇总（统计卡片 + 分页表格）
+ * - 点击产品行查看该产品的库存流水记录
+ * - 支持按操作类型、日期范围筛选流水
+ */
+import { ref, computed, onUnmounted } from 'vue'
+import { useQuery, keepPreviousData } from '@tanstack/vue-query'
 import { get } from '@/api/request'
 import UiSelect from '@/components/ui/UiSelect.vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
 
-const queryClient = useQueryClient()
+/** 库存汇总中单个产品的库存信息 */
+interface InventorySummaryItem {
+  id: number
+  name: string
+  barcode?: string
+  initial_stock: number
+  total_in: number
+  total_out: number
+  current_stock: number
+}
 
-// === 库存汇总 ===
+/** 库存汇总响应 */
+interface InventorySummaryResponse {
+  inventory: InventorySummaryItem[]
+  pages: number
+  stats: {
+    total_stock: number
+    total_in: number
+    total_out: number
+  }
+}
+
+/** 库存流水中单条记录 */
+interface InventoryLogItem {
+  id: number
+  change_type: string
+  change_quantity: number
+  customer?: string
+  related_id?: string
+  change_date: string
+  note?: string
+}
+
+/** 库存流水响应 */
+interface InventoryLogResponse {
+  logs: InventoryLogItem[]
+  pagination: {
+    pages: number
+  }
+}
+
+// ===== 库存汇总 =====
+/** 搜索关键词（即时绑定输入框） */
 const invSearch = ref('')
+/** 防抖后的搜索关键词 */
 const debouncedInvSearch = ref('')
+/** 当前页码 */
 const invPage = ref(1)
+/** 每页条数 */
 const invPerPage = 50
+/** 当前选中的产品 ID */
 const selectedCaseId = ref<number | null>(null)
+/** 当前选中的产品名称（用于流水标题显示） */
 const selectedCaseName = ref('')
 
 let invSearchTimer: ReturnType<typeof setTimeout> | null = null
+
+/** 搜索输入防抖处理（300ms） */
 function onInvSearchInput() {
   if (invSearchTimer) clearTimeout(invSearchTimer)
   invSearchTimer = setTimeout(() => {
@@ -185,6 +237,9 @@ function onInvSearchInput() {
   }, 300)
 }
 
+onUnmounted(() => { if (invSearchTimer) clearTimeout(invSearchTimer) })
+
+/** 库存汇总查询（服务端分页 + 搜索） */
 const {
   data: invData,
   isLoading: invIsLoading,
@@ -192,38 +247,48 @@ const {
   refetch: invRefetch,
 } = useQuery({
   queryKey: ['case-inventory', invPage, debouncedInvSearch],
-  queryFn: () => get('/cases/inventory-summary', { page: invPage.value, per_page: invPerPage, search: debouncedInvSearch.value }) as Promise<any>,
+  queryFn: () => get<InventorySummaryResponse>('/cases/inventory-summary', { page: invPage.value, per_page: invPerPage, search: debouncedInvSearch.value }),
   staleTime: 30_000,
   gcTime: 60_000,
   placeholderData: keepPreviousData,
 })
 
-const inventoryList = computed(() => {
-  const list: any[] = invData.value?.inventory ?? invData.value ?? []
-  return list
-})
-
+/** 库存列表 */
+const inventoryList = computed<InventorySummaryItem[]>(() => invData.value?.inventory ?? [])
+/** 库存总页数 */
 const invTotalPages = computed(() => invData.value?.pages ?? 0)
+/** 库存统计数据 */
 const invStats = computed(() => invData.value?.stats ?? null)
 
+/** 当前总库存 */
 const invTotalStock = computed(() => invStats.value?.total_stock ?? 0)
+/** 累计入库 */
 const invTotalIn = computed(() => invStats.value?.total_in ?? 0)
+/** 累计出库 */
 const invTotalOut = computed(() => invStats.value?.total_out ?? 0)
 
-function selectCaseRow(row: any) {
+/** 选中产品行，加载该产品的流水记录 */
+function selectCaseRow(row: InventorySummaryItem) {
   selectedCaseId.value = row.id
   selectedCaseName.value = row.name
   logPage.value = 1
 }
 
-// === 库存流水 ===
+// ===== 库存流水 =====
+/** 是否显示流水筛选面板 */
 const showLogFilter = ref(false)
+/** 流水筛选：操作类型 */
 const logFilterType = ref('')
+/** 流水筛选：开始日期 */
 const logFilterStart = ref('')
+/** 流水筛选：结束日期 */
 const logFilterEnd = ref('')
+/** 流水当前页码 */
 const logPage = ref(1)
+/** 流水总页数（由 queryFn 更新） */
 const logTotalPages = ref(1)
 
+/** 操作类型选项 */
 const logTypeOptions = [
   { value: '入库', label: '入库' },
   { value: '出库', label: '出库' },
@@ -233,6 +298,7 @@ const logTypeOptions = [
   { value: '删除出库', label: '删除出库' },
 ]
 
+/** 库存流水查询（依赖选中的产品 ID） */
 const {
   data: logData,
   isLoading: logIsLoading,
@@ -241,11 +307,11 @@ const {
 } = useQuery({
   queryKey: ['case-inventory-logs', selectedCaseId, logPage, logFilterType, logFilterStart, logFilterEnd],
   queryFn: async () => {
-    const params: Record<string, any> = { page: logPage.value, per_page: 10 }
+    const params: Record<string, string | number> = { page: logPage.value, per_page: 10 }
     if (logFilterType.value) params.type = logFilterType.value
     if (logFilterStart.value) params.start_date = logFilterStart.value
     if (logFilterEnd.value) params.end_date = logFilterEnd.value
-    const res = (await get(`/cases/inventory-logs/${selectedCaseId.value}`, params)) as any
+    const res = await get<InventoryLogResponse>(`/cases/inventory-logs/${selectedCaseId.value}`, params)
     logTotalPages.value = res.pagination?.pages ?? 1
     return res
   },
@@ -254,8 +320,10 @@ const {
   placeholderData: keepPreviousData,
 })
 
-const logList = computed(() => logData.value?.logs ?? logData.value?.items ?? [])
+/** 流水记录列表 */
+const logList = computed<InventoryLogItem[]>(() => logData.value?.logs ?? [])
 
+/** 清空流水筛选条件 */
 function clearLogFilter() {
   logFilterType.value = ''
   logFilterStart.value = ''
@@ -263,6 +331,7 @@ function clearLogFilter() {
   logPage.value = 1
 }
 
+/** 根据操作类型返回对应的徽章 CSS 类名 */
 function logBadgeClass(t: string): string {
   const map: Record<string, string> = {
     '入库': 'ci-badge-success',

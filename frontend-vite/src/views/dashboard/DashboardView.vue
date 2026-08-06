@@ -7,7 +7,7 @@
     >
       <div class="flex flex-col items-center gap-3">
         <div class="w-10 h-10 rounded-[var(--radius-md)] bg-ocean-light flex items-center justify-center animate-pulse">
-          <i class="fas fa-spinner fa-spin text-ocean-text text-lg" />
+          <UiSpinner />
         </div>
         <span class="text-sm text-text-secondary font-medium">数据加载中...</span>
       </div>
@@ -34,44 +34,42 @@
     </div>
 
     <!-- 大卡片容器 -->
-    <div class="pc-card pc-card-main">
-      <!-- 卡片头部 -->
-      <div class="pc-card-header">
-        <div class="pc-header-left">
-          <div class="pc-card-title-group">
-            <div class="pc-icon-box pc-icon-blue">
-              <i class="fas fa-chart-line" />
+    <div class="page-card page-card-main">
+      <!-- 工具栏（合并自原布局顶部 header：折叠/返回首页/时间/用户信息/退出） -->
+      <div class="page-card-toolbar">
+        <div class="page-toolbar-left">
+          <button class="menu-toggle-btn" aria-label="切换侧边栏" @click="sidebarStore.toggle()">
+            <i :class="!sidebarStore.isCollapsed ? 'fas fa-angles-left' : 'fas fa-angles-right'" style="font-size: 18px" aria-hidden="true" />
+          </button>
+        </div>
+        <div class="page-toolbar-right">
+          <span class="header-clock">
+            <i class="fas fa-clock" style="font-size: 13px" aria-hidden="true" />
+            {{ currentTime }}
+          </span>
+          <div class="user-info-header">
+            <div class="user-avatar-header">
+              {{ avatarLetter }}
             </div>
-            <div>
-              <h3>数据概览</h3>
-              <small>实时监控业务核心指标</small>
+            <div class="user-info-details min-w-0">
+              <div class="user-name-header">
+                {{ authStore.user?.username || '用户' }}
+              </div>
+              <div class="user-role-header">
+                {{ authStore.user?.is_super ? '超级管理员' : '普通用户' }}
+              </div>
             </div>
           </div>
-        </div>
-        <div class="pc-header-right">
-          <span v-if="lastSyncTime" class="text-[11px] text-text-muted">
-            更新于 {{ lastSyncTime }}
-          </span>
+          <NotificationBell v-if="authStore.isLoggedIn" />
+          <button class="logout-btn-header" @click="confirmLogout">
+            <i class="fas fa-right-from-bracket" style="font-size: 13px" aria-hidden="true" />
+            <span>退出</span>
+          </button>
         </div>
       </div>
 
       <!-- 卡片主体 -->
-      <div class="pc-body">
-        <!-- Hero 欢迎区 -->
-        <div class="home-hero p-[28px_24px] md:p-[40px_36px] mb-6">
-          <div class="flex items-center gap-3 md:gap-5 relative z-[1]">
-            <img src="/logo_plush.png" alt="滨发玩具" class="w-12 h-12 md:w-16 md:h-16 rounded-[var(--radius-lg)] shadow-md" />
-            <div>
-              <h1 class="text-xl md:text-[28px] font-semibold text-text mb-1 tracking-tight">
-                滨发玩具协同系统
-              </h1>
-              <p class="text-xs md:text-[14px] text-text-secondary leading-relaxed max-w-[600px] m-0">
-                专业的毛绒玩具企业供应链管理平台 — 智能、高效、可靠的数字化管理解决方案
-              </p>
-            </div>
-          </div>
-        </div>
-
+      <div class="page-card-body">
         <!-- KPI 指标卡片区 -->
         <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4 mb-6">
           <KpiCard
@@ -121,51 +119,66 @@
         </div>
       </div>
     </div>
+
+    <UiConfirmDialog
+      :open="logoutConfirm.open"
+      :text="logoutConfirm.text"
+      :sub="logoutConfirm.sub"
+      :type="logoutConfirm.type"
+      @confirm="logoutConfirm.onConfirm"
+      @cancel="logoutConfirm.onCancel"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick, computed } from 'vue'
+import { ref, shallowRef, onMounted, onUnmounted, nextTick, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import UiCard from '@/components/ui/UiCard.vue'
+import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
+import NotificationBell from '@/layouts/components/NotificationBell.vue'
 import KpiCard from './components/KpiCard.vue'
-import { dashboardApi } from '@/api'
+import { authApi, dashboardApi, stockApi } from '@/api'
+import { useAuthStore } from '@/stores/auth'
+import { useTabStore } from '@/stores/tabs'
+import { useSidebarStore } from '@/stores/sidebar'
+import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { usePerfMark } from '@/composables/usePerfMark'
 import { toast } from '@/composables/useToast'
-import * as echartsModule from 'echarts/core'
-import { LineChart, PieChart } from 'echarts/charts'
-import {
-  GridComponent,
-  TooltipComponent,
-  LegendComponent,
-} from 'echarts/components'
-import { CanvasRenderer } from 'echarts/renderers'
 
+// ECharts 懒加载：避免在首屏（dashboard 为落地页）加载 ~1MB 的图表库
+type EChartsModule = typeof import('echarts/core')
+let _echartsModule: EChartsModule | null = null
 let _echartsReady = false
-function ensureEcharts() {
-  if (!_echartsReady) {
-    echartsModule.use([
-      LineChart,
-      PieChart,
-      GridComponent,
-      TooltipComponent,
-      LegendComponent,
-      CanvasRenderer,
-    ])
-    _echartsReady = true
-  }
-  return echartsModule
+async function ensureEcharts(): Promise<EChartsModule> {
+  if (_echartsReady && _echartsModule) return _echartsModule
+  const mod = await import('echarts/core')
+  const [{ LineChart, PieChart }, { GridComponent, TooltipComponent, LegendComponent }, { CanvasRenderer }] = await Promise.all([
+    import('echarts/charts'),
+    import('echarts/components'),
+    import('echarts/renderers'),
+  ])
+  mod.use([LineChart, PieChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer])
+  _echartsModule = mod
+  _echartsReady = true
+  return mod
 }
-const echarts = new Proxy(echartsModule, {
-  get(_target, prop) {
-    ensureEcharts()
-    return Reflect.get(echartsModule, prop)
-  },
-}) as typeof echartsModule
 
 const perf = usePerfMark('dashboard')
 
+// ===== 工具栏状态（合并自原 DefaultLayout 顶部 header）=====
+const authStore = useAuthStore()
+const tabStore = useTabStore()
+const sidebarStore = useSidebarStore()
+const logoutConfirm = useConfirmDialog()
+const router = useRouter()
+const currentTime = ref('')
+const avatarLetter = computed(() => (authStore.user?.username || 'U').charAt(0).toUpperCase())
+
 // ===== 数据状态 =====
-const stats = ref<Record<string, number> | null>(null)
+// shallowRef：API 响应整体替换（不逐属性变更），避免深层响应式开销
+const stats = shallowRef<Record<string, number> | null>(null)
+const stockStats = shallowRef<{ order_quantity: number; order_regular_quantity: number; order_custom_quantity: number; stockin_quantity: number } | null>(null)
 const isLoading = ref(false)
 const errorMessage = ref('')
 const errorDetail = ref('')
@@ -173,7 +186,7 @@ const lastSyncTime = ref('')
 const orderChartRef = ref<HTMLElement>()
 const stockChartRef = ref<HTMLElement>()
 
-const chartInstances: echarts.ECharts[] = []
+const chartInstances: import('echarts/core').ECharts[] = []
 const resizeHandlers: (() => void)[] = []
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 
@@ -242,9 +255,10 @@ function trendText(today?: number, yesterday?: number): string {
 }
 
 // ===== 图表渲染 =====
-function renderOrderChart() {
+async function renderOrderChart() {
   if (!orderChartRef.value) return
   perf.mark('chart-order-start')
+  const echarts = await ensureEcharts()
   const chart = echarts.init(orderChartRef.value)
   const days: string[] = []
   const now = new Date()
@@ -309,12 +323,13 @@ function renderOrderChart() {
   window.addEventListener('resize', onResize)
 }
 
-function renderStockChart() {
+async function renderStockChart() {
   if (!stockChartRef.value) return
   perf.mark('chart-stock-start')
+  const echarts = await ensureEcharts()
   const chart = echarts.init(stockChartRef.value)
-  const orderTotal = stats.value?.order_today ?? 0
-  const stockinTotal = stats.value?.stockin_today ?? 0
+  const orderTotal = stockStats.value?.order_quantity ?? 0
+  const stockinTotal = stockStats.value?.stockin_quantity ?? 0
 
   chart.setOption({
     tooltip: {
@@ -336,23 +351,34 @@ function renderStockChart() {
     series: [{
       type: 'pie',
       radius: ['42%', '68%'],
-      center: ['50%', '44%'],
-      avoidLabelOverlap: false,
-      padAngle: 3,
-      itemStyle: { borderRadius: 8, borderColor: '#fff', borderWidth: 3 },
-      label: { show: false },
+      center: ['50%', '46%'],
+      avoidLabelOverlap: true,
+      padAngle: 0,
+      minAngle: 15,
+      itemStyle: { borderColor: '#fff', borderWidth: 0 },
+      label: {
+        show: true,
+        fontSize: 12,
+        fontWeight: 'bold',
+        formatter: '{b}\n{c}件 ({d}%)',
+        overflow: 'break',
+        width: 100,
+      },
+      labelLayout: {
+        hideOverlap: true,
+      },
       emphasis: {
         label: {
           show: true,
-          fontSize: 14,
+          fontSize: 13,
           fontWeight: 'bold',
-          formatter: '{b}\n{d}%',
+          formatter: '{b}\n{c}件 ({d}%)',
         },
         scaleSize: 6,
       },
       data: [
-        { value: orderTotal, name: '订单数量', itemStyle: { color: '#5b8def' } },
-        { value: stockinTotal, name: '备货数量', itemStyle: { color: '#28c76f' } },
+        { value: orderTotal, name: '订单数量', itemStyle: { color: '#28c76f' } },
+        { value: stockinTotal, name: '备货数量', itemStyle: { color: '#5b8def' } },
       ],
     }],
   })
@@ -371,13 +397,33 @@ async function loadStats(showLoading = true) {
   errorDetail.value = ''
   perf.mark('api-start')
 
+  // 先加载仪表盘统计，再加载库存统计（库存失败时可用仪表盘数据降级）
+  await loadDashboardStats()
+  await loadStockStats()
+
+  if (showLoading) isLoading.value = false
+  perf.markEnd('api-start')
+  perf.measure('api-stats', 'api-start')
+
+  await nextTick()
+  // 图表渲染失败不应阻塞数据展示，单独 try/catch
   try {
-    // request.ts 的 axios 拦截器已 unwrap 一层 response.data，
-    // 因此 dashboardApi.stats() 返回的就是后端的 { success, data } 包装对象。
-    // 但在 401/网络异常时它可能是一个 AxiosError，会被 try/catch 捕获。
+    await renderOrderChart()
+    await renderStockChart()
+  } catch (chartErr) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.warn('[Dashboard] 图表渲染失败:', chartErr)
+    }
+  }
+  perf.markMountEnd()
+  perf.measureFromMount('full-interactive')
+}
+
+async function loadDashboardStats() {
+  try {
     const resp = await dashboardApi.stats() as { success?: boolean; data?: Record<string, number> } | Record<string, number>
 
-    // 兼容多种返回结构：包装体 / 扁平对象 / undefined
     let raw: Record<string, number> | undefined
     if (resp && typeof resp === 'object') {
       if ('data' in resp && resp.data && typeof resp.data === 'object') {
@@ -391,7 +437,6 @@ async function loadStats(showLoading = true) {
       throw new Error('API 返回数据格式异常：data 字段缺失或非对象类型')
     }
 
-    // 数据校验与类型转换（容错处理：所有字段安全转为 number）
     const validated: Record<string, number> = {
       order_today: Number(raw.order_today) || 0,
       order_yesterday: Number(raw.order_yesterday) || 0,
@@ -441,7 +486,6 @@ async function loadStats(showLoading = true) {
     } else if (axiosError.code === 'ERR_NETWORK') {
       msg = '网络连接失败，请检查网络状态'
     } else if (axiosError.message) {
-      // 兜底：直接显示错误信息（如格式校验抛出的 Error）
       msg = axiosError.message
     }
 
@@ -451,7 +495,6 @@ async function loadStats(showLoading = true) {
       toast.error(msg, { duration: 4000, closable: true })
     }
 
-    // 降级：使用默认值确保页面可正常显示
     stats.value = {
       order_today: 0, order_yesterday: 0,
       stockin_today: 0, stockin_yesterday: 0,
@@ -464,17 +507,26 @@ async function loadStats(showLoading = true) {
       // eslint-disable-next-line no-console
       console.error('[Dashboard] 数据加载失败:', err)
     }
-  } finally {
-    if (showLoading) isLoading.value = false
-    perf.markEnd('api-start')
-    perf.measure('api-stats', 'api-start')
   }
+}
 
-  await nextTick()
-  renderOrderChart()
-  renderStockChart()
-  perf.markMountEnd()
-  perf.measureFromMount('full-interactive')
+async function loadStockStats() {
+  try {
+    const resp = await stockApi.stats()
+    if (resp) {
+      stockStats.value = resp
+    }
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.log('[Dashboard] 库存统计数据加载成功:', stockStats.value)
+    }
+  } catch (err) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.warn('[Dashboard] 库存统计数据加载失败，使用降级数据:', err)
+    }
+    stockStats.value = { order_quantity: stats.value?.order_today ?? 0, order_regular_quantity: 0, order_custom_quantity: 0, stockin_quantity: stats.value?.stockin_today ?? 0 }
+  }
 }
 
 // ===== 重试加载 =====
@@ -484,10 +536,15 @@ function retryLoad() {
     chart.dispose()
   }
   chartInstances.length = 0
-  loadStats(true)
+  loadStats(true).catch((err) => {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.error('[Dashboard] retryLoad failed:', err)
+    }
+  })
 }
 
-// ===== 自动刷新机制（每5分钟） =====
+// ===== 自动刷新机制（每 30 秒，确保"今日备货/今日出货/待审批/待备料"等模块实时显示） =====
 function startAutoRefresh() {
   refreshTimer = setInterval(() => {
     if (import.meta.env.DEV) {
@@ -495,7 +552,7 @@ function startAutoRefresh() {
       console.log('[Dashboard] 自动刷新数据...')
     }
     loadStats(false)
-  }, 5 * 60 * 1000)
+  }, 30 * 1000)
 }
 
 function stopAutoRefresh() {
@@ -505,14 +562,56 @@ function stopAutoRefresh() {
   }
 }
 
+// ===== 工具栏：时钟 =====
+let clockTimer: ReturnType<typeof setInterval> | null = null
+
+function updateTime() {
+  const now = new Date()
+  currentTime.value = now.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+// ===== 工具栏：退出登录 =====
+async function handleLogout() {
+  try {
+    await authApi.logout()
+  } finally {
+    authStore.logout()
+    tabStore.clear()
+    router.push('/login')
+  }
+}
+
+async function confirmLogout() {
+  const ok = await logoutConfirm.confirm('确定要退出登录吗？', '退出后需重新登录', 'danger')
+  if (ok) handleLogout()
+}
+
 // ===== 生命周期 =====
 onMounted(() => {
-  loadStats(true)
+  // catch 防止 loadStats 内部未捕获的 reject 变成 unhandled rejection
+  loadStats(true).catch((err) => {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.error('[Dashboard] onMounted loadStats failed:', err)
+    }
+  })
   startAutoRefresh()
+  updateTime()
+  clockTimer = setInterval(updateTime, 60_000)
 })
 
 onUnmounted(() => {
   stopAutoRefresh()
+  if (clockTimer) {
+    clearInterval(clockTimer)
+    clockTimer = null
+  }
   for (const handler of resizeHandlers) {
     window.removeEventListener('resize', handler)
   }
@@ -525,33 +624,10 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.home-hero {
-  background: linear-gradient(135deg, var(--color-surface-card) 0%, var(--color-ocean-light) 100%);
-  border-radius: var(--radius-card);
-  border: 2px solid var(--color-ocean-light);
-  box-shadow:
-    0 4px 20px rgba(176, 224, 230, 0.25),
-    0 4px 16px rgba(0, 0, 0, 0.06);
-  position: relative;
-  overflow: hidden;
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.home-hero:hover {
-  transform: translateY(-1px) scale(1.01);
-  box-shadow: 0 8px 25px rgba(135, 206, 235, 0.35);
-}
-
-.home-hero::before {
-  content: '';
-  position: absolute;
-  top: -50%;
-  right: -10%;
-  width: 400px;
-  height: 400px;
-  background: radial-gradient(circle, var(--color-ocean) 0%, transparent 70%);
-  opacity: 0.15;
-  border-radius: 50%;
+.dashboard {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .animate-fade-in {
@@ -563,89 +639,135 @@ onUnmounted(() => {
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* === Layout (same as PurchaseView) === */
-.pc-card {
-  background: white;
-  border-radius: 18px;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  transition: box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.pc-card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
-  transform: translateY(-2px);
-}
-.pc-card-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-}
+/* === 工具栏（已迁移到全局 .page-card-toolbar，src/styles/app.css） === */
 
-.pc-card-header {
-  display: flex;
-  flex-wrap: nowrap;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px 24px;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
-  flex-shrink: 0;
-  gap: 12px;
-}
-
-.pc-header-left {
-  flex: 1;
-  display: flex;
-  align-items: center;
-}
-
-.pc-header-right {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-}
-
-.pc-card-title-group {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.pc-card-title-group h3 {
-  font-size: 17px;
-  font-weight: 700;
+.menu-toggle-btn {
+  background: var(--color-surface-card);
+  border: 2px solid var(--color-ocean);
   color: var(--color-text);
-  margin: 0;
-}
-
-.pc-card-title-group small {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  display: block;
-  margin-top: 2px;
-}
-
-.pc-icon-box {
-  width: 46px;
-  height: 46px;
-  border-radius: 13px;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 19px;
+  font-size: 18px;
+  transition: transform 0.2s ease, background 0.2s ease;
+  box-shadow: 0 2px 8px rgba(176, 224, 230, 0.25);
+  will-change: transform;
+}
+
+.menu-toggle-btn:hover {
+  background: var(--color-ocean-light);
+  transform: scale(1.05);
+}
+
+.header-clock {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-tertiary);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.user-info-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(240, 244, 248, 0.9) 100%);
+  box-shadow:
+    0 2px 12px color-mix(in srgb, var(--color-ocean) 25%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  border: 2px solid var(--color-ocean-light);
+  transition:
+    transform 0.35s ease,
+    box-shadow 0.35s ease,
+    border-color 0.35s ease;
+}
+
+.user-info-header:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 6px 20px color-mix(in srgb, var(--color-ocean-deep) 35%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 1);
+  border-color: var(--color-ocean-deep);
+}
+
+.user-avatar-header {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--color-ocean) 0%, var(--color-ocean-deep) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-inverse);
+  font-weight: 700;
+  font-size: 14px;
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--color-ocean) 25%, transparent);
   flex-shrink: 0;
 }
 
-.pc-icon-blue {
-  background: linear-gradient(135deg, var(--color-primary-100), var(--color-primary-200));
-  color: var(--color-primary-700);
+.user-info-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.pc-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 20px 24px;
+.user-name-header {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text);
+  line-height: 1.2;
+}
+
+.user-role-header {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  opacity: 0.85;
+  line-height: 1.2;
+}
+
+.logout-btn-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 18px;
+  border-radius: 14px;
+  border: 2px solid var(--color-danger-200);
+  background: linear-gradient(135deg, var(--color-danger-50) 0%, var(--color-danger-100) 100%);
+  color: var(--color-danger-800);
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    transform 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+    background 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow:
+    0 3px 10px color-mix(in srgb, var(--color-danger-200) 30%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  white-space: nowrap;
+}
+
+.logout-btn-header:hover {
+  background: linear-gradient(135deg, var(--color-danger-100) 0%, var(--color-danger-200) 100%);
+  transform: translateY(-2px);
+  box-shadow:
+    0 6px 18px color-mix(in srgb, var(--color-danger-200) 45%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  border-color: var(--color-danger-300);
+}
+
+@media (max-width: 768px) {
+  .header-clock,
+  .user-info-header {
+    display: none;
+  }
 }
 </style>

@@ -1,7 +1,7 @@
 """
 订单模型 - 纯 SQLAlchemy 2.0 声明式
 
-映射到与 Flask-SQLAlchemy Order 相同的 'order' 表。
+映射到 'order' 表。
 """
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from fastapi_app.shared_models import Base
 
 if TYPE_CHECKING:
+    from fastapi_app.shared_models.order_item import OrderItem
     from fastapi_app.shared_models.product import Product
     from fastapi_app.shared_models.user import User
 
@@ -27,6 +28,9 @@ def compute_status_from_stockouts(order, deducted_qty: int, shipped_qty: int) ->
     状态由业务事实推导，而非手动推进状态机：
     - deducted_qty: 净备货抵扣量（StockOut.stockin_id IS NOT NULL 的 quantity-returned_quantity 之和）
     - shipped_qty: 净独立出货量（StockOut.stockin_id IS NULL 的 quantity-returned_quantity 之和）
+
+    TODO(multi-sku-order): 多 SKU 模型下 order.quantity 为兼容值（sum of items），状态计算
+    语义需重新设计（按 OrderItem 维度还是按聚合 quantity？），待后续 spec 改造。
     """
     if order.batch_completed_at:
         result = '批次已完成'
@@ -77,21 +81,19 @@ class Order(Base):
     locked_by: Mapped["User | None"] = relationship('User', foreign_keys=[locked_by_id], backref='locked_orders')
     deleted_by: Mapped["User | None"] = relationship('User', foreign_keys=[deleted_by_id], backref='deleted_orders')
     batch_completed_by: Mapped["User | None"] = relationship('User', foreign_keys=[batch_completed_by_id], backref='batch_completed_orders')
+    items: Mapped[list["OrderItem"]] = relationship(
+        'OrderItem',
+        cascade='all, delete-orphan',
+        back_populates='order',
+        order_by='OrderItem.id',
+    )
 
     __table_args__ = (
         Index('idx_order_customer_status', 'customer', 'status'),
         Index('idx_order_product_status', 'product_id', 'status'),
         Index('idx_order_status_date', 'status', 'order_date'),
-        Index('idx_order_customer_product', 'customer', 'product_id'),
-        Index('idx_order_locked', 'is_locked'),
-        Index('idx_order_type', 'order_type'),
         Index('idx_order_batch_no', 'batch_no'),
-        Index('idx_order_batch_completed_at', 'batch_completed_at'),
         Index('idx_order_locked_by', 'locked_by_id'),
-        Index('idx_order_deleted_by', 'deleted_by_id'),
-        Index('idx_order_batch_completed_by', 'batch_completed_by_id'),
-        Index('idx_order_product_customer_type', 'product_id', 'customer', 'order_type'),
-        Index('idx_order_product_type_country', 'product_id', 'order_type', 'country'),
         Index('idx_order_customer_trgm', 'customer', postgresql_using='gin',
               postgresql_ops={'customer': 'gin_trgm_ops'}),
         Index('idx_perf_order_status_date_covering', 'status', desc('order_date'), 'id',
@@ -100,10 +102,6 @@ class Order(Base):
               postgresql_where=text("is_deleted = false")),
         Index('idx_order_batch_completed', desc('batch_completed_at'),
               postgresql_where=text("batch_completed_at IS NOT NULL")),
-        Index('idx_order_not_deleted_date', desc('order_date'),
-              postgresql_where=text("is_deleted IS NOT TRUE")),
-        Index('idx_order_not_deleted_customer', 'customer',
-              postgresql_where=text("is_deleted IS NOT TRUE")),
         {'quote': True},
     )
 
@@ -133,4 +131,5 @@ class Order(Base):
             'created_at': self.order_date.isoformat() if self.order_date else None,
             'deleted_at': self.deleted_at.isoformat() if self.deleted_at else None,
             'delete_reason': self.delete_reason,
+            'factories': sorted({item.product.factory for item in self.items if item.product and item.product.factory}),
         }

@@ -40,16 +40,19 @@ class DailyProductionRecord(Base):
     created_by: Mapped[str | None] = mapped_column(String(50), nullable=True, comment='创建人')
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
 
-    def to_dict(self):
+    def to_dict(self, price_fallback: dict[int, float] | None = None):
+        up = float(self.unit_price or 0)
+        if up == 0 and price_fallback and self.product_id and self.product_id in price_fallback:
+            up = price_fallback[self.product_id]
         return {
             'id': self.id,
             'department': self.department,
             'product_id': self.product_id,
             'product_name': self.product_name,
             'barcode': self.barcode or '',
-            'unit_price': float(self.unit_price) if self.unit_price else 0,
+            'unit_price': up,
             'quantity': self.quantity,
-            'production_value': round(float(self.unit_price or 0) * self.quantity, 2),
+            'production_value': round(up * self.quantity, 2),
             'production_date': self.production_date.isoformat() if self.production_date else '',
             'remark': self.remark or '',
             'create_time': self.create_time.strftime('%Y-%m-%d %H:%M:%S') if self.create_time else '',

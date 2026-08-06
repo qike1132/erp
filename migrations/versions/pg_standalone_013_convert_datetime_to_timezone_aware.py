@@ -13,7 +13,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = 'pg_standalone_013'
-down_revision = None
+down_revision = 'pg_standalone_012'
 branch_labels = None
 depends_on = None
 
@@ -106,21 +106,41 @@ _COLUMNS = [
 ]
 
 
+def _q(identifier: str) -> str:
+    """Quote a Postgres identifier (table/column name) with double quotes.
+
+    All identifiers in _COLUMNS are plain ASCII snake_case, but we quote
+    defensively in case future additions include reserved words.
+    """
+    return '"' + identifier.replace('"', '""') + '"'
+
+
 def upgrade() -> None:
+    """Upgrade TIMESTAMP WITHOUT TIME ZONE → TIMESTAMP WITH TIME ZONE.
+
+    CRITICAL: All existing values were stored as naive UTC (see pervasive
+    ``datetime.now(UTC).replace(tzinfo=None)`` pattern in services/ and
+    shared_models/).  Without ``AT TIME ZONE 'UTC'``, PostgreSQL would
+    interpret naive values in the *session's local timezone* (e.g.
+    Asia/Shanghai = UTC+8), silently shifting every historical timestamp
+    by +/- N hours — a silent data-corruption event affecting audit logs,
+    modification histories, inventory timing, and financial reports.
+    """
     for table, column in _COLUMNS:
-        op.alter_column(
-            table, column,
-            existing_type=sa.DateTime(),
-            type_=sa.DateTime(timezone=True),
-            existing_nullable=True,
+        op.execute(
+            f'ALTER TABLE {_q(table)} '
+            f'ALTER COLUMN {_q(column)} '
+            f'TYPE TIMESTAMP WITH TIME ZONE '
+            f"USING {_q(column)} AT TIME ZONE 'UTC'"
         )
 
 
 def downgrade() -> None:
+    """Inverse: timestamptz → timestamp using UTC to preserve values."""
     for table, column in reversed(_COLUMNS):
-        op.alter_column(
-            table, column,
-            existing_type=sa.DateTime(timezone=True),
-            type_=sa.DateTime(),
-            existing_nullable=True,
+        op.execute(
+            f'ALTER TABLE {_q(table)} '
+            f'ALTER COLUMN {_q(column)} '
+            f'TYPE TIMESTAMP WITHOUT TIME ZONE '
+            f"USING {_q(column)} AT TIME ZONE 'UTC'"
         )

@@ -1,11 +1,17 @@
-"""应用自定义异常"""
+"""应用自定义异常与统一错误响应工具"""
+from __future__ import annotations
 
+import logging
+import uuid
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from datetime import datetime
+from typing import Any, AsyncIterator
 
 from fastapi import HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 
 class AppError(Exception):
@@ -53,6 +59,92 @@ class InternalError(AppError):
         super().__init__(message=message, code="INTERNAL_ERROR", status_code=500)
 
 
+# ---------------------------------------------------------------------------
+# 统一错误响应工具
+# ---------------------------------------------------------------------------
+
+def make_error_response(
+    *,
+    code: str,
+    message: str,
+    status_code: int = 400,
+    request_id: str | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    构造统一结构的错误响应体。
+
+    返回结构：
+        {
+            "success": False,
+            "error": {
+                "code": "BUSINESS_ERROR",
+                "message": "操作失败",
+                "request_id": "uuid-or-trace-id",
+                "timestamp": "2026-06-24T09:30:00",
+                "extra": {...}
+            }
+        }
+    """
+    payload: dict[str, Any] = {
+        'success': False,
+        'error': {
+            'code': code,
+            'message': message,
+            'request_id': request_id or _generate_request_id(),
+            'timestamp': datetime.utcnow().isoformat(timespec='seconds') + 'Z',
+        },
+    }
+    if extra:
+        payload['error']['extra'] = extra
+    return payload
+
+
+def _generate_request_id() -> str:
+    """生成短格式请求ID，便于日志关联。"""
+    return uuid.uuid4().hex[:16]
+
+
+def current_iso_timestamp() -> str:
+    """统一的 UTC ISO8601 时间戳字符串。"""
+    return datetime.utcnow().isoformat(timespec='seconds') + 'Z'
+
+
+def new_request_id() -> str:
+    """公开的 request_id 生成函数，供全局 exception handler 等使用。"""
+    return _generate_request_id()
+
+
+def http_error(
+    *,
+    status_code: int,
+    code: str,
+    message: str,
+    extra: dict[str, Any] | None = None,
+) -> HTTPException:
+    """
+    构造一个带有统一错误响应体的 HTTPException。
+
+    使用方式：
+        raise http_error(status_code=400, code='BUSINESS_ERROR', message='...')
+    """
+    return HTTPException(
+        status_code=status_code,
+        detail=make_error_response(
+            code=code, message=message, status_code=status_code, extra=extra,
+        ),
+    )
+
+
+def app_error_to_http(app_error: AppError) -> HTTPException:
+    """将业务异常转换为带有统一响应体的 HTTPException。"""
+    return http_error(
+        status_code=app_error.status_code,
+        code=app_error.code,
+        message=app_error.message,
+    )
+
+
 @asynccontextmanager
 async def db_transaction(db: AsyncSession, *, commit: bool = True) -> AsyncIterator[None]:
     """数据库事务上下文管理器，统一处理 commit/rollback 和异常转换。
@@ -65,14 +157,41 @@ async def db_transaction(db: AsyncSession, *, commit: bool = True) -> AsyncItera
     异常处理：
         - ValueError → HTTP 400（业务校验失败）
         - SQLAlchemyError → HTTP 500（数据库异常，自动 rollback）
+
+    注意：
+        该上下文会捕获 SQLAlchemyError（含 IntegrityError）并统一转换为 HTTP 500。
+        如需在端点层根据唯一约束/外键冲突返回 400/409 等特定状态码，请不要使用
+        db_transaction，改为在端点内手动 `await db.commit()` 并 catch IntegrityError。
+        参考：customer.py delete_customer、order.py delete_order、
+        purchase_plan.py create_plan/staging_confirm、supplier.py delete_supplier。
+
+    Post-commit 回调：
+        服务层可将需要在事务提交成功后执行的异步回调注册到
+        db.info['post_commit_callbacks'] 列表中。db_transaction 在 commit 成功后
+        会按注册顺序执行这些回调；如果 commit 失败或发生回滚，则不会执行。
+        适用于缓存失效、事件发布等必须在持久化完成后才执行的操作。
     """
     try:
         yield
         if commit:
             await db.commit()
+    except NotFoundError as e:
+        await db.rollback()
+        raise HTTPException(status_code=e.status_code, detail=e.message) from e
+    except AppError as e:
+        await db.rollback()
+        raise HTTPException(status_code=e.status_code, detail=e.message) from e
     except ValueError as e:
         await db.rollback()
         raise HTTPException(status_code=400, detail=str(e)) from e
     except SQLAlchemyError as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail="数据库操作失败") from e
+    else:
+        if commit:
+            callbacks = db.info.pop('post_commit_callbacks', [])
+            for callback in callbacks:
+                try:
+                    await callback()
+                except Exception as e:
+                    logger.error("post-commit 回调执行失败: %s", e, exc_info=True)

@@ -3,6 +3,7 @@ import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
 import AutoImport from 'unplugin-auto-import/vite'
 import Components from 'unplugin-vue-components/vite'
+import { PrimeVueResolver } from 'unplugin-vue-components/resolvers'
 import { VitePWA } from 'vite-plugin-pwa'
 import { resolve } from 'path'
 
@@ -58,7 +59,7 @@ export default defineConfig(({ mode }) => {
         { src: '/logo_plush.png', sizes: '512x512', type: 'image/png' },
       ],
     },
-    disable: isCapacitor,
+    disable: isCapacitor || mode === 'development',
   })
 
   return {
@@ -71,6 +72,7 @@ export default defineConfig(({ mode }) => {
       }),
       Components({
         dts: 'src/components.d.ts',
+        resolvers: [PrimeVueResolver()],
       }),
       pwaPlugin,
     ],
@@ -82,24 +84,18 @@ export default defineConfig(({ mode }) => {
     build: {
       cssCodeSplit: true,
       chunkSizeWarningLimit: 600,
-      rolldownOptions: {
+      rollupOptions: {
         output: {
           exports: 'auto',
-          // Vite 8 已知问题：内部 codeSplitting: 'advance' 可能覆盖此配置
-          // 待 Vite 修复后 advancedChunks 参数将完全生效
-          // 当前代码分割主要依赖路由懒加载 + ECharts 异步导入
-          advancedChunks: {
-            minShareCount: 2,
-            minSize: 10000,
-            groups: [
-              { name: 'vendor-echarts', test: /node_modules\/.*(echarts|zrender)/ },
-              { name: 'vendor-vue', test: /node_modules\/.*(\/vue\/|\/pinia\/|\/vue-router\/|\/@tanstack\/)/ },
-              { name: 'vendor-vueuse', test: /node_modules\/.*\/@vueuse\// },
-              { name: 'vendor-fontawesome', test: /node_modules\/.*\/@fortawesome\// },
-              { name: 'vendor-reka-ui', test: /node_modules\/.*\/reka-ui\// },
-              { name: 'vendor-axios', test: /node_modules\/.*\/axios\// },
-              { name: 'vendor-capacitor', test: /node_modules\/.*\/@capacitor\// },
-            ],
+          // Vite 7 使用 Rollup 4 后端；代码分割依赖路由懒加载 + ECharts 异步导入
+          manualChunks: {
+            'vendor-echarts': ['echarts/core', 'echarts/charts', 'echarts/components', 'echarts/renderers'],
+            'vendor-vue': ['vue', 'vue-router', 'pinia', '@tanstack/vue-query'],
+            'vendor-vueuse': ['@vueuse/core'],
+            'vendor-fontawesome': ['@fortawesome/fontawesome-svg-core', '@fortawesome/free-solid-svg-icons'],
+            'vendor-reka-ui': ['reka-ui'],
+            'vendor-axios': ['axios'],
+            'vendor-capacitor': ['@capacitor/core', '@capacitor/app', '@capacitor/filesystem', '@capacitor/share'],
           },
         },
       },
@@ -119,6 +115,44 @@ export default defineConfig(({ mode }) => {
           ws: true,
         },
       },
+    },
+    preview: {
+      host: '0.0.0.0',
+      port: 3000,
+      proxy: {
+        '/api': {
+          target: 'http://127.0.0.1:5002',
+          changeOrigin: true,
+          timeout: 120000,
+          proxyTimeout: 120000,
+        },
+        '/ws': {
+          target: 'ws://127.0.0.1:5002',
+          ws: true,
+        },
+      },
+    },
+    optimizeDeps: {
+      noDiscovery: true,
+      include: [
+        'vue',
+        'vue-router',
+        'pinia',
+        '@tanstack/vue-query',
+        'axios',
+        '@vueuse/core',
+        'reka-ui',
+        'web-vitals',
+        'echarts/core',
+        'echarts/charts',
+        'echarts/components',
+        'echarts/renderers',
+        '@fortawesome/fontawesome-svg-core',
+        '@fortawesome/free-solid-svg-icons',
+        '@capacitor/app',
+        '@capacitor/filesystem',
+        '@capacitor/share',
+      ],
     },
   }
 })

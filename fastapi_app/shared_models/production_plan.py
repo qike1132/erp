@@ -1,7 +1,7 @@
 """
 排产计划模型 - 纯 SQLAlchemy 2.0 声明式
 
-映射到与 Flask-SQLAlchemy ProductionPlan 相同的 'production_plan' 表。
+映射到 'production_plan' 表。
 """
 from datetime import datetime, timezone
 

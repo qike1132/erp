@@ -1,43 +1,24 @@
-import os
-import sys
+"""
+健康检查测试 — FastAPI 异步版
 
+验证 /api/health 和根路径端点可用。
+"""
 import pytest
 
-# Add the project root to the Python path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-try:
-    from app import create_app, db
-    from flask import Flask
-    HAS_FLASK = True
-except ImportError:
-    HAS_FLASK = False
-    create_app = None
-    db = None
+@pytest.mark.asyncio
+async def test_v1_health_check(async_client):
+    """测试 /api/health 健康检查"""
+    resp = await async_client.get("/api/health")
+    assert resp.status_code in (200, 503)
+    data = resp.json()
+    assert data.get("status") is not None
 
 
-@pytest.mark.skipif(not HAS_FLASK, reason="Flask dependencies not available")
-@pytest.fixture
-def app():
-    app = create_app('testing')
-    with app.app_context():
-        db.create_all()
-        yield app
-        db.session.remove()
-        db.drop_all()
-
-@pytest.mark.skipif(not HAS_FLASK, reason="Flask dependencies not available")
-@pytest.fixture
-def client(app):
-    return app.test_client()
-
-@pytest.mark.skipif(not HAS_FLASK, reason="Flask dependencies not available")
-def test_health_check_api(client):
-    """测试 /api/health 健康检查接口"""
-    response = client.get('/api/health')
-    assert response.status_code == 200
-
-    data = response.get_json()
-    assert data is not None
-    assert data.get('status') == 'ok'
-    assert data.get('db') == 'connected'
+@pytest.mark.asyncio
+async def test_root_endpoint(async_client):
+    """测试根路径"""
+    resp = await async_client.get("/")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "version" in data

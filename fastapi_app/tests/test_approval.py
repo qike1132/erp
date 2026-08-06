@@ -109,7 +109,9 @@ class TestApprovalService:
     @pytest.mark.asyncio
     async def test_approve_self_raises(self, mock_db, mock_approval, mock_current_user):
         from fastapi_app.services.approval_service import approve_request
-        mock_db.get = AsyncMock(return_value=mock_approval)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_approval
+        mock_db.execute = AsyncMock(return_value=mock_result)
         mock_approval.requester_id = 1
 
         with pytest.raises(ValueError, match="不能审批自己"):
@@ -118,7 +120,10 @@ class TestApprovalService:
     @pytest.mark.asyncio
     async def test_reject_success(self, mock_db, mock_approval, mock_current_user):
         from fastapi_app.services.approval_service import reject_request
-        mock_db.get = AsyncMock(return_value=mock_approval)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_approval
+        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.get = AsyncMock(return_value=None)
         mock_approval.requester_id = 2
 
         result = await reject_request(mock_db, 1, mock_current_user, "不符合要求")
@@ -128,7 +133,9 @@ class TestApprovalService:
     @pytest.mark.asyncio
     async def test_approve_nonexistent_raises(self, mock_db, mock_current_user):
         from fastapi_app.services.approval_service import approve_request
-        mock_db.get = AsyncMock(return_value=None)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
 
         with pytest.raises(ValueError, match="审批请求不存在"):
             await approve_request(mock_db, 999, mock_current_user)
@@ -137,7 +144,9 @@ class TestApprovalService:
     async def test_approve_already_processed_raises(self, mock_db, mock_approval, mock_current_user):
         from fastapi_app.services.approval_service import approve_request
         mock_approval.status = ApprovalRequest.STATUS_APPROVED
-        mock_db.get = AsyncMock(return_value=mock_approval)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_approval
+        mock_db.execute = AsyncMock(return_value=mock_result)
 
         with pytest.raises(ValueError, match="审批请求状态异常"):
             await approve_request(mock_db, 1, mock_current_user)

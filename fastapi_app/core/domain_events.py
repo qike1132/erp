@@ -18,8 +18,13 @@ logger = logging.getLogger(__name__)
 class DomainEventType(str, Enum):
     ORDER_CREATED = 'order.created'
     ORDER_STATUS_CHANGED = 'order.status_changed'
+    ORDER_DELETED = 'order.deleted'
     STOCK_IN_CREATED = 'stock_in.created'
     STOCK_OUT_CREATED = 'stock_out.created'
+    STOCK_OUT_UPDATED = 'stock_out.updated'
+    STOCK_OUT_DELETED = 'stock_out.deleted'
+    STOCK_RETURN_CREATED = 'stock_return.created'
+    STOCK_RETURN_DELETED = 'stock_return.deleted'
     PRODUCT_UPDATED = 'product.updated'
     PURCHASE_PLAN_UPDATED = 'purchase_plan.updated'
     APPROVAL_DECISION = 'approval.decision'
@@ -83,33 +88,60 @@ async def publish(event: DomainEvent):
             result = handler(event)
             if hasattr(result, '__await__'):
                 await result
-        except Exception as e:
+        except Exception as e:  # defensive: 单个 handler 失败不能影响其他 handler
             logger.error(
                 '领域事件处理失败: event=%s handler=%s error=%s',
                 event.event_type.value, handler.__name__, e,
             )
 
     try:
-        from utils.redis_cache import redis_cache
-        if redis_cache.redis_client:
-            await redis_cache.redis_client.publish(
-                'domain_events',
-                json.dumps(event.to_dict(), ensure_ascii=False, default=str),
-            )
-    except Exception as e:
+        from fastapi_app.core.redis_wrapper import safe_publish
+        await safe_publish(
+            'domain_events',
+            json.dumps(event.to_dict(), ensure_ascii=False, default=str),
+            context="领域事件广播",
+        )
+    except Exception as e:  # defensive: Redis 广播失败不影响进程内事件处理
         logger.debug('领域事件Redis广播失败（可忽略）: %s', e)
+
+
+async def publish_with_retry(event: DomainEvent, max_retries: int = 1, delay: float = 0.5) -> None:
+    """发布领域事件，失败时重试一次。
+
+    重试仍失败则升级为 ERROR 日志并记录完整事件载荷，便于人工恢复。
+    主操作不受影响（仍不抛出）。
+    """
+    last_error: Exception | None = None
+    for attempt in range(max_retries + 1):
+        try:
+            await publish(event)
+            return
+        except Exception as e:  # defensive: 重试期间捕获所有异常
+            last_error = e
+            if attempt < max_retries:
+                await asyncio.sleep(delay)
+    # 所有重试均失败：记录 ERROR 级别日志含完整事件，便于人工恢复
+    logger.error(
+        '领域事件发布失败（已重试 %d 次）: event=%s payload=%s error=%s',
+        max_retries,
+        event.event_type.value,
+        json.dumps(event.payload, ensure_ascii=False, default=str),
+        last_error,
+        exc_info=True,
+    )
 
 
 async def start_event_listener():
     """启动Redis领域事件监听器（跨进程事件接收）"""
+    from fastapi_app.core.redis_wrapper import get_client
     while True:
         pubsub = None
         try:
-            from utils.redis_cache import redis_cache
-            if not redis_cache.redis_client:
+            client = get_client()
+            if not client:
                 await asyncio.sleep(5)
                 continue
-            pubsub = redis_cache.redis_client.pubsub()
+            pubsub = client.pubsub()
             await pubsub.subscribe('domain_events')
             logger.info('领域事件Redis监听器已启动')
             async for message in pubsub.listen():
@@ -123,18 +155,18 @@ async def start_event_listener():
                             result = handler(event)
                             if hasattr(result, '__await__'):
                                 await result
-                        except Exception as e:
+                        except Exception as e:  # defensive: 单个 handler 失败不能影响其他 handler
                             logger.error('跨进程领域事件处理失败: %s', e)
-                except Exception as e:
+                except Exception as e:  # defensive: 单条消息解析失败不能中断监听器
                     logger.error('领域事件消息解析失败: %s', e)
-        except Exception as e:
+        except Exception as e:  # defensive: 监听器异常后自动重连
             logger.warning('领域事件监听器异常: %s', e)
         finally:
             if pubsub:
                 try:
                     await pubsub.unsubscribe()
                     await pubsub.aclose()
-                except Exception:
+                except Exception:  # defensive: 清理失败不影响重连
                     pass
         logger.info('领域事件监听器将在5秒后重连...')
         await asyncio.sleep(5)

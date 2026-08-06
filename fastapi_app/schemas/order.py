@@ -37,6 +37,38 @@ class OrderUpdate(BaseModel):
         return self
 
 
+class OrderItemSchema(BaseModel):
+    """订单明细（SKU 粒度）响应 schema"""
+    id: int
+    order_id: int
+    product_id: int
+    product_name: str | None = None
+    product_barcode: str | None = None
+    quantity: int
+    order_type: str = "regular"
+    country: str | None = None
+    deduct_stock: bool = False
+    deduct_quantity: int = 0
+    note: str | None = None
+
+
+class OrderItemCreate(BaseModel):
+    """订单明细创建 schema（用于批量提交内部组装）"""
+    product_id: int = Field(..., gt=0, description="产品ID")
+    quantity: int = Field(..., gt=0, le=9999999, description="订单数量")
+    order_type: str = Field("regular", pattern="^(regular|custom)$", description="订单类型")
+    country: str | None = Field(None, max_length=100, description="国家名称（定制订单必填）")
+    deduct_stock: bool = False
+    deduct_quantity: int = 0
+    note: str | None = Field(None, max_length=500, description="备注")
+
+    @model_validator(mode='after')
+    def validate_custom_order(self):
+        if self.order_type == 'custom' and not self.country:
+            raise ValueError('定制订单必须填写国家名称')
+        return self
+
+
 class OrderDetailResponse(BaseModel):
     """单个订单详情响应"""
     id: int
@@ -52,6 +84,7 @@ class OrderDetailResponse(BaseModel):
     country: str = ""
     is_locked: bool | None = None
     locked_by_name: str | None = None
+    items: list[OrderItemSchema] = []
 
 
 class OrderListResponse(BaseModel):

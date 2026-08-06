@@ -4,12 +4,13 @@
 从 purchase_center_service.py 拆分，保留原始导入路径的向后兼容。
 """
 import logging
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.services import escape_like
+from fastapi_app.core.sanitizer import escape_like
+from fastapi_app.utils import calc_total_pages
 from fastapi_app.shared_models import Customer
 
 logger = logging.getLogger(__name__)
@@ -61,7 +62,7 @@ async def get_customers(db: AsyncSession, *, page: int = 1, per_page: int = 20,
             for c in customers
         ],
         'total': total,
-        'pages': (total + per_page - 1) // per_page if per_page > 0 else 0,
+        'pages': calc_total_pages(total, per_page),
         'current_page': page,
     }
 
@@ -94,7 +95,7 @@ async def get_customers_statistics(db: AsyncSession) -> dict:
     if hasattr(Customer, 'update_time'):
         recent_result = await db.execute(
             select(func.count(Customer.id)).where(
-                Customer.update_time >= datetime.now() - timedelta(days=30)
+                Customer.update_time >= datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)
             )
         )
         recently_updated = recent_result.scalar()

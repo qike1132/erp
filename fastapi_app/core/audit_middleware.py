@@ -7,7 +7,7 @@
 import json
 import time
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -66,7 +66,7 @@ def _resolve_resource_type(path: str) -> str:
 def _extract_resource_id(path: str) -> str | None:
     parts = path.strip('/').split('/')
     for i, part in enumerate(parts):
-        if i > 0 and parts[i - 1] in RESOURCE_MAP or (i >= 3 and i == len(parts) - 1):
+        if (i > 0 and parts[i - 1] in RESOURCE_MAP) or (i >= 3 and i == len(parts) - 1):
             try:
                 int(part)
                 return part
@@ -77,13 +77,11 @@ def _extract_resource_id(path: str) -> str | None:
 
 class AuditLogMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        request_id = str(uuid.uuid4())[:8]
+        request_id = getattr(request.state, 'request_id', None) or str(uuid.uuid4())[:8]
+        request.state.request_id = request_id
 
         if request.method not in WRITE_METHODS:
-            request.state.request_id = request_id
             return await call_next(request)
-
-        request.state.request_id = request_id
 
         start_time = time.time()
         response: Response = await call_next(request)
@@ -91,7 +89,7 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
 
         try:
             await self._record_audit(request, response, request_id, duration_ms)
-        except Exception as e:
+        except Exception as e:  # defensive: 审计记录失败不能影响主请求
             logger.warning('审计日志记录失败: %s', e)
 
         return response
@@ -104,7 +102,7 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
             try:
                 from fastapi_app.core.deps import _resolve_user_id
                 user_id = _resolve_user_id(request)
-            except Exception:
+            except Exception:  # defensive: 用户 ID 解析失败不影响审计记录
                 pass
 
         action = METHOD_ACTION_MAP.get(request.method, request.method)
@@ -135,7 +133,7 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
             'user_agent': user_agent,
             'request_id': request_id,
             'status_code': response.status_code,
-            'created_at': datetime.now().isoformat(),
+            'created_at': datetime.now(UTC).replace(tzinfo=None),
         }
 
         await _buffer_audit_entry(audit_entry)
@@ -143,30 +141,28 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
 
 async def _buffer_audit_entry(entry: dict):
     try:
-        from utils.redis_cache import redis_cache
-        if redis_cache.redis_client:
-            await redis_cache.redis_client.rpush(AUDIT_BUFFER_KEY, json.dumps(entry, ensure_ascii=False))
-            buf_len = await redis_cache.redis_client.llen(AUDIT_BUFFER_KEY)
+        from fastapi_app.core.redis_wrapper import safe_rpush, safe_llen
+        pushed = await safe_rpush(AUDIT_BUFFER_KEY, json.dumps(entry, ensure_ascii=False), context="审计缓冲")
+        if pushed > 0:
+            buf_len = await safe_llen(AUDIT_BUFFER_KEY, context="审计缓冲")
             if buf_len >= AUDIT_FLUSH_SIZE:
                 await flush_audit_buffer()
         else:
             await _write_audit_direct([entry])
-    except Exception:
+    except Exception:  # defensive: Redis 缓冲失败时降级为直接写入
         await _write_audit_direct([entry])
 
 
 async def flush_audit_buffer():
     try:
-        from utils.redis_cache import redis_cache
-        if not redis_cache.redis_client:
-            return
-        entries_raw = await redis_cache.redis_client.lrange(AUDIT_BUFFER_KEY, 0, AUDIT_FLUSH_SIZE - 1)
+        from fastapi_app.core.redis_wrapper import safe_lrange, safe_ltrim
+        entries_raw = await safe_lrange(AUDIT_BUFFER_KEY, 0, AUDIT_FLUSH_SIZE - 1, context="审计缓冲")
         if not entries_raw:
             return
-        await redis_cache.redis_client.ltrim(AUDIT_BUFFER_KEY, len(entries_raw), -1)
+        await safe_ltrim(AUDIT_BUFFER_KEY, len(entries_raw), -1, context="审计缓冲")
         entries = [json.loads(e) for e in entries_raw]
         await _write_audit_direct(entries)
-    except Exception as e:
+    except Exception as e:  # defensive: 缓冲刷写失败记录日志，不中断请求
         logger.warning('审计日志缓冲刷写失败: %s', e)
 
 
@@ -184,6 +180,10 @@ async def _write_audit_direct(entries: list[dict]):
         session_factory = async_sessionmaker(bind=async_engine, class_=AsyncSession, expire_on_commit=False)
         async with session_factory() as session:
             for entry in entries:
+                # 兜底：无论来自 Redis 缓冲（JSON 反序列化会丢 datetime 类型）还是直接路径，
+                # 都保证 created_at 是 datetime 实例，asyncpg 不接受 timestamp 列的字符串
+                if not isinstance(entry.get('created_at'), datetime):
+                    entry['created_at'] = datetime.now(UTC).replace(tzinfo=None)
                 await session.execute(sa_text("""
                     INSERT INTO audit_log (user_id, username, action, resource_type, resource_id,
                                           detail, ip_address, user_agent, request_id, status_code, created_at)
@@ -192,7 +192,7 @@ async def _write_audit_direct(entries: list[dict]):
                 """), entry)
             await session.commit()
         logger.debug('审计日志写入 %d 条', len(entries))
-    except Exception as e:
+    except Exception as e:  # defensive: 审计日志写入失败不能影响主请求
         logger.warning('审计日志直接写入失败: %s', e)
 
 
@@ -202,5 +202,5 @@ async def _audit_flush_loop():
         await asyncio.sleep(AUDIT_FLUSH_INTERVAL)
         try:
             await flush_audit_buffer()
-        except Exception as e:
+        except Exception as e:  # defensive: 后台定时任务不能因单次异常退出
             logger.error('审计日志定时刷写异常: %s', e, exc_info=True)

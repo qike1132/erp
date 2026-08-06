@@ -1,7 +1,6 @@
 """
-模板上下文：导航权限注入 - 全异步模式
+导航权限注入 - 全异步模式
 
-替代 Flask 的 inject_nav_permissions 上下文处理器。
 提供 get_nav_sections() 函数，支持两级缓存（进程内 + Redis）。
 """
 
@@ -16,10 +15,11 @@ logger = logging.getLogger(__name__)
 # 每个导航项仅根据自身权限码显示，不再做跨模块映射
 SPECIAL_PERMISSION_MAP = {}
 
-# Flask 端点名 → FastAPI 路由路径映射
-FLASK_TO_FASTAPI_URL_MAP = {
+# 权限端点名 → 前端路由路径映射
+PERMISSION_URL_MAP = {
     'product.products': '/product',
     'customer_order.index': '/customer-order',
+    'beile_order.index': '/beile-order',
     'stock.stockins': '/stock',
     'stock.stockouts': '/stock-out',
     'stock.inventory': '/stock',
@@ -38,7 +38,6 @@ FLASK_TO_FASTAPI_URL_MAP = {
     'production_summary.index': '/production',
     'purchase_plan.plan_list': '/purchase-plan',
     'backup.index': '/backup',
-    'order_batch.index': '/order-batch',
 }
 
 # 分区显示顺序
@@ -55,12 +54,12 @@ async def invalidate_nav_cache():
     async with _nav_cache_lock:
         _nav_local_cache["data"] = None
         _nav_local_cache["cached_at"] = 0.0
-    try:
-        from utils.redis_cache import redis_cache
-        await redis_cache.delete('nav_sections')
+    from fastapi_app.core.redis_wrapper import safe_delete
+    deleted = await safe_delete('nav_sections', context="导航缓存")
+    if deleted:
         logger.info("导航缓存已清除")
-    except (OSError, ConnectionError, ValueError):
-        logger.warning("导航缓存清除失败", exc_info=True)
+    else:
+        logger.warning("导航缓存清除失败或Redis不可用")
 
 
 async def get_nav_sections_async() -> dict:
@@ -75,16 +74,13 @@ async def get_nav_sections_async() -> dict:
             return _nav_local_cache["data"]
 
     # Level 2: Redis 缓存
-    try:
-        from utils.redis_cache import redis_cache
-        cached = await redis_cache.get('nav_sections')
-        if cached is not None:
-            async with _nav_cache_lock:
-                _nav_local_cache["data"] = cached
-                _nav_local_cache["cached_at"] = now
-            return cached
-    except (OSError, ConnectionError, ValueError):
-        logger.warning("导航Redis缓存读取失败", exc_info=True)
+    from fastapi_app.core.redis_wrapper import safe_get
+    cached = await safe_get('nav_sections', context="导航缓存")
+    if cached is not None:
+        async with _nav_cache_lock:
+            _nav_local_cache["data"] = cached
+            _nav_local_cache["cached_at"] = now
+        return cached
 
     # Level 3: 数据库查询（异步）
     try:
@@ -114,6 +110,10 @@ async def get_nav_sections_async() -> dict:
                     'items': []
                 }
 
+            # 订单批次号模块已下线，不再显示导航入口
+            if item.code == 'order_batch_manage' or item.url == 'order_batch.index':
+                continue
+
             perm_codes = SPECIAL_PERMISSION_MAP.get(item.code, [item.code])
             if not isinstance(perm_codes, list):
                 perm_codes = [perm_codes]
@@ -121,10 +121,10 @@ async def get_nav_sections_async() -> dict:
             if item.code not in perm_codes:
                 perm_codes = [item.code] + perm_codes
 
-            mapped_url = FLASK_TO_FASTAPI_URL_MAP.get(item.url)
+            mapped_url = PERMISSION_URL_MAP.get(item.url)
             if mapped_url is None:
                 if item.url and not item.url.startswith('/'):
-                    logger.warning("Unmapped Flask endpoint in permission.url: %s (code=%s)", item.url, item.code)
+                    logger.warning("Unmapped permission endpoint: %s (code=%s)", item.url, item.code)
                 url = item.url if item.url.startswith('/') else f'/{item.url}'
             else:
                 url = mapped_url
@@ -148,11 +148,8 @@ async def get_nav_sections_async() -> dict:
                 ordered_sections[key] = sections[key]
 
         # 写入缓存
-        try:
-            from utils.redis_cache import redis_cache
-            await redis_cache.set('nav_sections', ordered_sections, timeout=_nav_redis_ttl)
-        except (OSError, ConnectionError, ValueError):
-            logger.warning("导航Redis缓存写入失败", exc_info=True)
+        from fastapi_app.core.redis_wrapper import safe_set
+        await safe_set('nav_sections', ordered_sections, timeout=_nav_redis_ttl, context="导航缓存")
         async with _nav_cache_lock:
             _nav_local_cache["data"] = ordered_sections
             _nav_local_cache["cached_at"] = time.time()
@@ -184,15 +181,15 @@ def get_nav_sections() -> dict:
     try:
         import asyncio as _aio
 
-        from utils.redis_cache import redis_cache
+        from fastapi_app.core.redis_wrapper import safe_get
         try:
             loop = _aio.get_running_loop()
         except RuntimeError:
             loop = None
         if loop and loop.is_running():
-            cached = _aio.run_coroutine_threadsafe(redis_cache.get('nav_sections'), loop).result(timeout=5)
+            cached = _aio.run_coroutine_threadsafe(safe_get('nav_sections', context="导航缓存(同步)"), loop).result(timeout=5)
         else:
-            cached = _aio.run(redis_cache.get('nav_sections'))
+            cached = _aio.run(safe_get('nav_sections', context="导航缓存(同步)"))
         if cached is not None:
             _nav_local_cache["data"] = cached
             _nav_local_cache["cached_at"] = now

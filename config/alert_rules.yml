@@ -1,123 +1,64 @@
 groups:
-  - name: erp_system_alerts
+  - name: erp_slo
+    interval: 30s
     rules:
-      # HTTP 错误率告警
-      - alert: HighErrorRate
-        expr: |
-          sum(rate(http_requests_total{status=~"5.."}[5m]))
-          /
-          sum(rate(http_requests_total[5m]))
-          > 0.1
-        for: 5m
-        labels:
-          severity: critical
-        annotations:
-          summary: "HTTP错误率过高"
-          description: "5xx错误率超过10%，当前值: {{ $value | humanizePercentage }}"
-
-      # 响应时间告警
-      - alert: HighLatency
-        expr: |
-          histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))
-          > 5
+      # SLO: P95 查询延迟 < 1s
+      - alert: ERP_QueryLatencyP95High
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{method=~"GET|HEAD"}[5m])) by (le, service)) > 1
         for: 5m
         labels:
           severity: warning
+          slo: query-p95-lt-1s
         annotations:
-          summary: "API响应时间P95过高"
-          description: "P95响应时间超过5秒，当前值: {{ $value }}s"
+          summary: "ERP 查询 P95 延迟超过 1s SLO"
+          description: "服务 {{ $labels.service }} 查询 P95 延迟为 {{ $value | humanize }}s，超过 1s 目标。"
 
-      # 服务不可用告警
-      - alert: ServiceDown
-        expr: up == 0
+      # SLO: P95 写入延迟 < 2s
+      - alert: ERP_WriteLatencyP95High
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{method=~"POST|PUT|PATCH|DELETE"}[5m])) by (le, service)) > 2
+        for: 5m
+        labels:
+          severity: warning
+          slo: write-p95-lt-2s
+        annotations:
+          summary: "ERP 写入 P95 延迟超过 2s SLO"
+          description: "服务 {{ $labels.service }} 写入 P95 延迟为 {{ $value | humanize }}s，超过 2s 目标。"
+
+      # SLO: 可用性 > 99.5% (错误率 < 0.5%)
+      - alert: ERP_AvailabilityLow
+        expr: sum(rate(http_requests_total{status=~"5.."}[5m])) by (service) / sum(rate(http_requests_total[5m])) by (service) > 0.005
+        for: 5m
+        labels:
+          severity: critical
+          slo: availability-gt-99.5
+        annotations:
+          summary: "ERP 可用性低于 99.5% SLO"
+          description: "服务 {{ $labels.service }} 5xx 错误率为 {{ $value | humanizePercentage }}，超过 0.5% 阈值。"
+
+      # 补充告警
+      - alert: ERP_HighErrorRate
+        expr: sum(rate(http_requests_total{status=~"4..|5.."}[5m])) by (service) / sum(rate(http_requests_total[5m])) by (service) > 0.1
         for: 2m
         labels:
           severity: critical
         annotations:
-          summary: "服务不可用"
-          description: "实例 {{ $labels.instance }} 已下线超过2分钟"
+          summary: "ERP 错误率过高"
+          description: "服务 {{ $labels.service }} 错误率为 {{ $value | humanizePercentage }}。"
 
-      # Redis连接异常
-      - alert: RedisDown
-        expr: up{job="redis"} == 0
-        for: 1m
-        labels:
-          severity: critical
-        annotations:
-          summary: "Redis服务不可用"
-          description: "Redis实例已下线，缓存功能将降级"
-
-      # 慢请求堆积
-      - alert: TooManySlowRequests
-        expr: |
-          sum(rate(http_request_duration_seconds_count{endpoint=~".*"}[5m]))
-          -
-          sum(rate(http_request_duration_seconds_bucket{le="1"}[5m]))
-          > 10
+      - alert: ERP_DatabaseConnectionsHigh
+        expr: pg_stat_activity_count / pg_settings_max_connections * 100 > 80
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: "慢请求数量过多"
-          description: "超过1秒的请求数超过10/秒"
+          summary: "PostgreSQL 连接数过高"
+          description: "数据库连接使用率为 {{ $value | humanizePercentage }}。"
 
-      # 连接池饱和度告警
-      - alert: DBPoolSaturation
-        expr: |
-          db_pool_checked_out{pool="async_main"} / db_pool_size{pool="async_main"} > 0.8
+      - alert: ERP_CeleryTasksFailing
+        expr: increase(celery_task_failed_total[5m]) > 10
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: "数据库连接池饱和度超过80%"
-          description: "主库连接池使用率 {{ $value | humanizePercentage }}，可能需要扩容"
-
-      # 连接池溢出告警
-      - alert: DBPoolOverflow
-        expr: db_pool_overflow{pool="async_main"} > 0
-        for: 2m
-        labels:
-          severity: warning
-        annotations:
-          summary: "数据库连接池溢出"
-          description: "主库连接池溢出连接数: {{ $value }}，需增大pool_size"
-
-      # 慢查询速率告警
-      - alert: HighSlowQueryRate
-        expr: rate(slow_query_total[5m]) > 0.5
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "慢查询频率过高"
-          description: "每分钟慢查询数: {{ $value | humanize }}，需优化SQL"
-
-      # Celery任务失败告警
-      - alert: CeleryTaskFailures
-        expr: rate(celery_task_failure_total[10m]) > 0
-        for: 2m
-        labels:
-          severity: critical
-        annotations:
-          summary: "Celery任务失败（重试耗尽）"
-          description: "任务 {{ $labels.task }} 失败率: {{ $value }}/s，需人工介入检查死信队列"
-
-      # Celery任务运行时间过长
-      - alert: CelerySlowTask
-        expr: histogram_quantile(0.95, rate(celery_task_runtime_seconds_bucket[10m])) > 300
-        for: 10m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Celery任务P95运行时间超过5分钟"
-          description: "P95运行时间: {{ $value }}s，可能存在性能瓶颈"
-
-      # 死信队列堆积
-      - alert: DeadLetterQueueGrowing
-        expr: celery_dead_letter_queue_depth > 10
-        for: 15m
-        labels:
-          severity: warning
-        annotations:
-          summary: "死信队列堆积超过10条"
-          description: "当前死信队列深度: {{ $value }}，需人工介入处理"
+          summary: "Celery 任务失败数增加"
+          description: "最近 5 分钟 Celery 失败任务数 > 10。"

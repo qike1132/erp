@@ -1,7 +1,7 @@
 <template>
   <div class="pc-container">
-    <div class="pc-card pc-card-main">
-      <div class="pc-card-header">
+    <div class="page-card page-card-main">
+      <div class="page-card-header">
         <div class="pc-header-left">
           <HeaderTabs />
         </div>
@@ -9,12 +9,21 @@
           <div class="pc-tab-group" role="tablist">
             <button
               role="tab"
-              :aria-selected="activeTab === 'orders'"
-              :class="['pc-tab-btn', { active: activeTab === 'orders' }]"
-              @click="switchTab('orders')"
+              :aria-selected="activeTab === 'pending'"
+              :class="['pc-tab-btn', { active: activeTab === 'pending' }]"
+              @click="switchTab('pending')"
             >
-              采购订单
+              待审核订单
               <span v-if="unprocessed.total > 0" class="pc-tab-badge">{{ unprocessed.total }}</span>
+            </button>
+            <button
+              role="tab"
+              :aria-selected="activeTab === 'active'"
+              :class="['pc-tab-btn', { active: activeTab === 'active' }]"
+              @click="switchTab('active')"
+            >
+              待生产订单
+              <span v-if="purchaseOrders.total > 0" class="pc-tab-badge">{{ purchaseOrders.total }}</span>
             </button>
             <button
               role="tab"
@@ -28,10 +37,9 @@
         </div>
       </div>
 
-      <div class="pc-body">
-        <!-- 采购订单面板 -->
-        <div v-show="activeTab === 'orders'" class="pc-tab-content">
-          <!-- 审核订单 -->
+      <div class="page-card-body">
+        <!-- 待审核订单面板 -->
+        <div v-show="activeTab === 'pending'" class="pc-tab-content">
           <PendingOrdersPanel
             :orders="unprocessed.orders"
             :loading="unprocessed.loading"
@@ -39,9 +47,9 @@
             :total="unprocessed.total"
             :current-page="unprocessed.currentPage"
             :total-pages="unprocessed.totalPages"
-            :selected-ids="unprocessed.selectedIds"
-            :selected-count="unprocessed.selectedIds.length"
-            :valid-selected-count="unprocessed.validSelectedIds.length"
+            :selected-composite-ids="unprocessed.selectedCompositeIds"
+            :selected-count="unprocessed.selectedCompositeIds.length"
+            :valid-selected-count="unprocessed.validSelectedCompositeIds.length"
             :all-selected="unprocessed.allSelected"
             :submitting="isSubmitting"
             @toggle-all="unprocessed.toggleAll"
@@ -51,11 +59,10 @@
             @no-bom-error="handleNoBomError"
             @change-page="unprocessed.load"
           />
+        </div>
 
-          <!-- 分隔线 -->
-          <div class="pc-divider" />
-
-          <!-- 采购中订单 -->
+        <!-- 待下订单面板 -->
+        <div v-show="activeTab === 'active'" class="pc-tab-content">
           <ActiveOrdersPanel
             :orders="purchaseOrders.orders"
             :loading="purchaseOrders.loading"
@@ -154,7 +161,7 @@ import { useCompletedOrders } from './composables/useCompletedOrders'
 import { useSummaryModal } from './composables/useSummaryModal'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { useAutoRefresh } from './composables/useAutoRefresh'
-import { useWebSocket } from './composables/useWebSocket'
+import { useWebSocket } from '@/composables/useWebSocket'
 import { showToast } from '@/composables/useToast'
 
 // --- Composables ---
@@ -166,15 +173,17 @@ const summary = useSummaryModal()
 const confirm = useConfirmDialog()
 
 // --- Tab ---
-const activeTab = ref<'orders' | 'history'>('orders')
-const ordersTabActive = computed(() => activeTab.value === 'orders')
+const activeTab = ref<'pending' | 'active' | 'history'>('pending')
+const ordersTabActive = computed(() => activeTab.value === 'pending' || activeTab.value === 'active')
 const historyInitialized = ref(false)
 const isSubmitting = ref(false)
 
-function switchTab(tab: 'orders' | 'history') {
+function switchTab(tab: 'pending' | 'active' | 'history') {
   activeTab.value = tab
-  if (tab === 'orders') {
-    Promise.all([unprocessed.load(), purchaseOrders.load()])
+  if (tab === 'pending') {
+    unprocessed.load()
+  } else if (tab === 'active') {
+    purchaseOrders.load()
   } else if (tab === 'history') {
     if (!historyInitialized.value) {
       Promise.all([completed.loadQuickFilters(), completed.load()])
@@ -188,16 +197,18 @@ function switchTab(tab: 'orders' | 'history') {
 // --- Unprocessed handlers ---
 async function handleOneClickGenerate() {
   if (isSubmitting.value) return
-  const validIds = unprocessed.validSelectedIds
-  const allSelectedIds = unprocessed.selectedIds
+  const validIds = unprocessed.validSelectedCompositeIds
+  const allSelectedIds = unprocessed.selectedCompositeIds
   if (validIds.length === 0) {
     showToast('请选择至少一个有BOM配置的订单', 'warning')
     return
   }
   const noBomOrders = unprocessed.orders.filter(
-    (o: UnprocessedOrder) => allSelectedIds.includes(o.id) && !o.has_bom,
+    (o: UnprocessedOrder) => allSelectedIds.includes(o.composite_id) && !o.has_bom,
   )
   const skippedCount = noBomOrders.length
+  // 提前锁定，防止 confirm 等待期间重复触发
+  isSubmitting.value = true
   const ok = await confirm.confirm(
     `确定要审核 ${validIds.length} 个订单吗？`,
     skippedCount > 0
@@ -205,10 +216,12 @@ async function handleOneClickGenerate() {
       : '审核通过后将自动计算物料用量并生成采购订单',
     'warning',
   )
-  if (!ok) return
-  isSubmitting.value = true
+  if (!ok) {
+    isSubmitting.value = false
+    return
+  }
   try {
-    const res = await purchaseApi.oneClickGenerate({ order_ids: validIds }) as ApiResponse
+    const res = await purchaseApi.oneClickGenerate({ composite_ids: validIds }) as ApiResponse
     if (res.success) {
       showToast(res.message || '审核成功', 'success')
       unprocessed.clearSelection()
@@ -224,18 +237,22 @@ async function handleOneClickGenerate() {
   }
 }
 
-async function handleQuickGenerate(orderId: number) {
+async function handleQuickGenerate(compositeId: string) {
   if (isSubmitting.value) return
-  const order = unprocessed.orders.find((o: UnprocessedOrder) => o.id === orderId)
+  const order = unprocessed.orders.find((o: UnprocessedOrder) => o.composite_id === compositeId)
   if (!order?.has_bom) {
     showToast(`订单 ${order?.order_no || ''}无法审核：该产品未配置BOM表`, 'error')
     return
   }
-  const ok = await confirm.confirm(`确定要审核此订单吗？`, '审核通过后将自动计算物料用量并生成采购订单', 'warning')
-  if (!ok) return
+  // 提前锁定，防止 confirm 等待期间重复触发
   isSubmitting.value = true
+  const ok = await confirm.confirm(`确定要审核此订单吗？`, '审核通过后将自动计算物料用量并生成采购订单', 'warning')
+  if (!ok) {
+    isSubmitting.value = false
+    return
+  }
   try {
-    const res = await purchaseApi.oneClickGenerate({ order_ids: [orderId] }) as ApiResponse
+    const res = await purchaseApi.oneClickGenerate({ composite_ids: [compositeId] }) as ApiResponse
     if (res.success) {
       showToast(res.message || '审核成功', 'success')
       unprocessed.load()
@@ -251,7 +268,13 @@ async function handleQuickGenerate(orderId: number) {
 }
 
 function handleNoBomError(order: UnprocessedOrder) {
-  showToast(`订单 ${order.order_no || ''}无法审核：该产品未配置BOM表`, 'error')
+  const noBomItems = (order.items || []).filter((it) => it.has_bom === false)
+  if ((order.sku_count || 1) > 1 && noBomItems.length > 0) {
+    const names = noBomItems.map((it) => it.product_name).join('、')
+    showToast(`订单 ${order.order_no || ''}无法审核：以下 SKU 未配置BOM：${names}`, 'error', { duration: 6000 })
+  } else {
+    showToast(`订单 ${order.order_no || ''}无法审核：该产品未配置BOM表`, 'error')
+  }
 }
 
 // --- Purchase order handlers ---
@@ -361,22 +384,29 @@ function handleCompletedPageChange(page: number) {
 
 // --- Auto refresh ---
 const autoRefresh = useAutoRefresh(async () => {
-  if (activeTab.value !== 'orders') return
-  try {
-    const [res, uRes] = await Promise.all([
-      purchaseApi.orders({ page: purchaseOrders.page, per_page: 15 }),
-      purchaseApi.unprocessedOrders({ page: unprocessed.currentPage, per_page: unprocessed.perPage }),
-    ])
-    if (res.total !== purchaseOrders.total) {
-      purchaseOrders.total = res.total || 0
-      purchaseOrders.orders = (res.orders || []) as PurchaseOrder[]
+  if (activeTab.value === 'pending') {
+    try {
+      const uRes = await purchaseApi.unprocessedOrders({ page: unprocessed.currentPage, per_page: unprocessed.perPage })
+      if (uRes) {
+        unprocessed.total = uRes.total || 0
+        if (uRes.orders) unprocessed.orders = (uRes.orders as UnprocessedOrder[])
+        unprocessed.totalPages = uRes.pages || Math.max(1, Math.ceil((uRes.total || 0) / unprocessed.perPage))
+        unprocessed.currentPage = uRes.current_page || unprocessed.currentPage
+      }
+    } catch {
+      /* silent */
     }
-    if (uRes) {
-      unprocessed.total = uRes.total || 0
-      if (uRes.orders) unprocessed.orders = (uRes.orders as UnprocessedOrder[])
+  } else if (activeTab.value === 'active') {
+    try {
+      // 与 usePurchaseOrders.load() 保持一致：仅刷新 pending/confirmed 的"待下"订单
+      const res = await purchaseApi.orders({ page: purchaseOrders.page, per_page: 15, status: 'pending,confirmed' })
+      if (res.total !== purchaseOrders.total) {
+        purchaseOrders.total = res.total || 0
+        purchaseOrders.orders = (res.orders || []) as PurchaseOrder[]
+      }
+    } catch {
+      /* silent */
     }
-  } catch {
-    /* silent */
   }
 })
 
@@ -384,9 +414,12 @@ const autoRefresh = useAutoRefresh(async () => {
 useWebSocket({
   onMessage: (data) => {
     if (data.type === 'order_created' || data.type === 'order_updated' || data.type === 'order_deleted' || data.type === 'purchase_order_created') {
-      if (activeTab.value === 'orders') {
+      if (activeTab.value === 'pending') {
         unprocessed.load()
+        autoRefresh.resetTimer()
+      } else if (activeTab.value === 'active') {
         purchaseOrders.load()
+        autoRefresh.resetTimer()
       }
     }
   },
@@ -404,97 +437,28 @@ onBeforeUnmount(() => {
 
 <style scoped>
 /* === Layout === */
+/* 与 DashboardView 的 .dashboard 保持完全一致：
+   - width: 100% 确保撑满主区宽度
+   - height: 100% + display: flex 让 page-card-main 撑满主区高度
+   - padding/margin/box-sizing 与 dashboard 严格对齐 */
 .pc-container {
-  padding: 8px;
-  margin: 0 auto;
+  width: 100%;
   height: 100%;
+  padding: 0;
+  margin: 0;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
 }
 
 /* === Main Card === */
-.pc-card {
-  background: white;
-  border-radius: 18px;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  transition: box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.pc-card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
-  transform: translateY(-2px);
-}
-.pc-card-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-}
+/* 卡片样式已迁移到全局 .page-card 系列（src/styles/app.css）
+   与 DashboardView 共用同一 .page-card.page-card-main，
+   确保 border-radius(18px)、box-shadow、border 视觉参数严格一致 */
 
-.pc-card-header {
-  display: flex;
-  flex-wrap: nowrap;
-  justify-content: space-between;
-  align-items: flex-start;
-  padding: 10px 24px;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
-  flex-shrink: 0;
-  gap: 12px;
-}
 .pc-card-header :deep(.ht-bar) {
   width: auto;
   margin: 0;
-}
-
-.pc-header-left {
-  flex: 1;
-  display: flex;
-  align-items: center;
-}
-
-.pc-header-right {
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
-}
-
-.pc-card-title-group {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.pc-card-title-group h3 {
-  font-size: 17px;
-  font-weight: 700;
-  color: var(--color-text);
-  margin: 0;
-}
-
-.pc-card-title-group small {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  display: block;
-  margin-top: 2px;
-}
-
-/* === Icon Box === */
-.pc-icon-box {
-  width: 46px;
-  height: 46px;
-  border-radius: 13px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 19px;
-  flex-shrink: 0;
-}
-
-.pc-icon-blue {
-  background: linear-gradient(135deg, var(--color-primary-100), var(--color-primary-200));
-  color: var(--color-primary-700);
 }
 
 /* === Header Actions === */
@@ -561,20 +525,9 @@ onBeforeUnmount(() => {
 }
 
 /* === Body === */
-.pc-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-}
+/* 卡片主体样式已迁移到全局 .page-card-body（src/styles/app.css） */
 
 .pc-tab-content {
   padding: 0;
-}
-
-.pc-divider {
-  height: 1px;
-  margin: 0 24px;
-  background: linear-gradient(to right, transparent, var(--color-primary-300, #93c5fd), transparent);
-  opacity: 0.5;
 }
 </style>

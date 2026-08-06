@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from fastapi_app.core.exceptions import BusinessError, NotFoundError
+from fastapi_app.core.number_generator import _acquire_advisory_lock_async, _number_lock_key
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.core.validators import validate_quantity_range
 from fastapi_app.shared_models import Case, CaseInventoryLog, CaseStockIn, CaseStockOut, Product
@@ -170,7 +171,10 @@ async def _get_case_for_update(db: AsyncSession, case_id: int) -> Case:
 
 
 async def _get_or_create_case_for_product(db: AsyncSession, product_id: int) -> Case:
-    """以行级锁方式获取产品关联的皮套记录，不存在则创建。
+    """以事务级咨询锁 + 行级锁方式获取产品关联的皮套记录，不存在则创建。
+
+    使用 pg_advisory_xact_lock 串行化同一 product_id 的创建流程，避免并发场景下
+    多个请求同时查到 None 后各自插入导致重复 Case（Case.product_id 当前无唯一约束）。
 
     Args:
         db: 异步数据库会话。
@@ -182,6 +186,7 @@ async def _get_or_create_case_for_product(db: AsyncSession, product_id: int) -> 
     Raises:
         ValueError: 产品不存在时抛出。
     """
+    await _acquire_advisory_lock_async(db, _number_lock_key('CASE_PRODUCT', str(product_id)))
     result = await db.execute(
         select(Case).where(Case.product_id == product_id).with_for_update()
     )
@@ -385,7 +390,11 @@ def _build_inventory_base_query(in_sq, out_sq, search: str):
     Returns:
         SQLAlchemy 查询对象。
     """
-    base_q = select(Case, func.coalesce(in_sq.c.total_in, 0), func.coalesce(out_sq.c.total_out, 0)) \
+    base_q = select(
+        Case,
+        func.coalesce(in_sq.c.total_in, 0).label('total_in'),
+        func.coalesce(out_sq.c.total_out, 0).label('total_out'),
+    ) \
         .outerjoin(in_sq, Case.id == in_sq.c.case_id) \
         .outerjoin(out_sq, Case.id == out_sq.c.case_id)
 
@@ -473,11 +482,16 @@ async def get_case_inventory_summary(db: AsyncSession, page: int = 1, per_page: 
     out_sq = select(CaseStockOut.case_id, func.sum(CaseStockOut.quantity).label('total_out')).group_by(CaseStockOut.case_id).subquery()
 
     base_q = _build_inventory_base_query(in_sq, out_sq, search)
-    count_q = select(func.count()).select_from(base_q.subquery())
+    # count_q 需应用与 _build_inventory_items 相同的过滤条件（排除无任何入库/出库流水的空记录）
+    base_subq = base_q.subquery()
+    count_q = select(func.count()).select_from(base_subq).where(
+        (base_subq.c.total_in != 0)
+        | (base_subq.c.total_out != 0)
+    )
     total = (await db.execute(count_q)).scalar() or 0
 
     offset = (page - 1) * per_page
-    paged_q = base_q.offset(offset).limit(per_page)
+    paged_q = base_q.order_by(Case.id).offset(offset).limit(per_page)
     result = await db.execute(paged_q)
 
     data = _build_inventory_items(result)
@@ -615,7 +629,7 @@ async def create_case_stockout(db: AsyncSession, product_id: int, quantity: int,
     case_obj.current_stock -= quantity
 
     log = CaseInventoryLog(case_id=case_obj.id, change_type='出库', change_quantity=-quantity,
-                           change_date=datetime.now(UTC).replace(tzinfo=None), customer=customer,
+                           change_date=datetime.now(UTC), customer=customer,
                            related_id=stockout_no, note=f'出库 {stockout_no}')
     db.add(log)
     logger.info('皮套出库成功 case_id=%s quantity=%s stockout_no=%s', case_obj.id, quantity, stockout_no)
@@ -721,20 +735,17 @@ async def delete_case_stockin(db: AsyncSession, stockin_id: int) -> dict:
         dict，包含 success、message 字段。
 
     Raises:
-        ValueError: 入库记录不存在或存在出库关联时抛出。
+        ValueError: 入库记录不存在或删除后库存将为负数时抛出。
     """
     stockin = await db.get(CaseStockIn, stockin_id)
     if not stockin:
         raise ValueError("入库记录不存在")
 
-    # 检查是否有出库关联
-    has_stockout = (await db.execute(
-        select(func.count()).select_from(CaseStockOut).where(CaseStockOut.case_id == stockin.case_id)
-    )).scalar()
-    if has_stockout:
-        raise ValueError("该入库记录已有出库，无法删除")
-
     case_obj = await _get_case_for_update(db, stockin.case_id)
+    # 由于 CaseStockOut 未记录关联的入库 ID，无法精确判断该入库是否被某笔出库引用。
+    # 保守策略：确保删除后库存不会变为负数即可；若当前库存不足则禁止删除。
+    if case_obj.current_stock < stockin.quantity:
+        raise ValueError("当前库存不足，删除该入库后库存将为负数")
     case_obj.current_stock -= stockin.quantity
     log = CaseInventoryLog(
         case_id=stockin.case_id, change_type='删除入库',

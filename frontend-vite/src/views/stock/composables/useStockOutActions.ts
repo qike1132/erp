@@ -27,22 +27,32 @@ export function useStockOutActions(
         uniqueKeys[key].stockouts.push(stockout)
       })
 
-      for (const key in uniqueKeys) {
+      // 预检：并行查询所有分组的可出货量，收集超额组统一展示
+      const overLimitGroups: string[] = []
+      const precheckTasks = Object.keys(uniqueKeys).map(async (key) => {
         const { product_id, customer, order_type, country, stockouts } = uniqueKeys[key]
         try {
           const ot = order_type !== 'regular' ? order_type : undefined
           const co = order_type === 'custom' && country ? country : undefined
           const data = await stockApi.availableShipment(Number(product_id), customer, ot, co)
           const shipment = data.data
-          if (!shipment) continue
+          if (!shipment) return
           const totalQty = stockouts.reduce((sum: number, stockout: StagedStockout) => sum + stockout.quantity, 0)
           if (totalQty > (shipment.available_quantity ?? 0)) {
             const typeLabel = order_type === 'custom' ? `定制${country ? `(${country})` : ''}` : '常规'
-            showToast(`客户: ${customer} 产品ID: ${product_id} [${typeLabel}] 出货量超过可出货量(${shipment.available_quantity ?? 0})`, 'error')
-            submitting.value = false
-            return
+            overLimitGroups.push(`客户: ${customer} 产品ID: ${product_id} [${typeLabel}] 可出货${shipment.available_quantity ?? 0}`)
           }
-        } catch { /* proceed */ }
+        } catch (err) {
+          console.warn(`出货量预检失败: product_id=${product_id}, customer=${customer}`, err)
+        }
+      })
+      await Promise.all(precheckTasks)
+
+      if (overLimitGroups.length > 0) {
+        const suffix = overLimitGroups.length > 2 ? `...等共${overLimitGroups.length}组超额` : ''
+        showToast(`以下组出货量超过可出货量: ${overLimitGroups.slice(0, 2).join('; ')}${suffix}`, 'error')
+        submitting.value = false
+        return
       }
 
       const stockoutsForApi = staged.value.map(stockout => ({

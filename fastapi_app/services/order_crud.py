@@ -3,15 +3,20 @@
 
 职责：订单的创建、更新、删除、查询、审批等核心业务逻辑。
 从 order_service.py 拆分而来，保持函数签名不变。
+
+TODO(multi-sku-order): 本模块多处直接读写 order.product_id/order.quantity/order.order_type/
+order.country（update/delete/deduct 等函数）。多 SKU 模型下这些为首 item 兼容值，
+完整改造涉及业务语义变更（如多 item 下修改/扣减/删除影响哪个 item），风险高，
+待后续 spec 改造为遍历 order.items。当前依赖 Task 3 设置的兼容值。
 """
 import asyncio
 import json
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, select, tuple_
+from sqlalchemy import delete, desc, func, literal, select, tuple_, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 
 from fastapi_app.core.cache import CacheDomain, cache_result
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
@@ -24,7 +29,7 @@ from fastapi_app.services.enhanced_pagination import (
     OFFSET_THRESHOLD,
     optimized_count,
 )
-from fastapi_app.services.notification_service import StockEvent
+from fastapi_app.services.notification_service import StockEvent, dispatch_factory_notifications
 from fastapi_app.services.order_utils import (
     _batch_deduct_quantities,
     compute_order_status_from_db,
@@ -38,7 +43,10 @@ from fastapi_app.shared_models import (
     ApprovalRequest,
     InventoryLog,
     Order,
+    OrderItem,
     OrderSyncRecord,
+    Product,
+    StockIn,
     StockOut,
     User,
 )
@@ -64,7 +72,8 @@ async def get_order_by_id(db: AsyncSession, order_id: int) -> dict | None:
 
     query = select(Order).options(
         joinedload(Order.product),
-        joinedload(Order.locked_by)
+        joinedload(Order.locked_by),
+        selectinload(Order.items),
     ).where(Order.id == order_id, Order.is_deleted.isnot(True))
 
     result = await db.execute(query)
@@ -166,22 +175,33 @@ def _serialize_orders(orders: list, deduct_map: dict) -> list:
     key_prefix="orders:list",
     ttl=60,
     local_ttl=15,
-    key_builder=lambda *args, **kwargs: f"p{kwargs.get('page', 1)}:pp{kwargs.get('per_page', 50)}:c{kwargs.get('customer', '')}:pid{kwargs.get('product_id', '')}:s{kwargs.get('status', '')}:ot{kwargs.get('order_type', '')}:sd{kwargs.get('start_date', '')}:ed{kwargs.get('end_date', '')}",
+    key_builder=lambda *args, **kwargs: f"p{kwargs.get('page', 1)}:pp{kwargs.get('per_page', 50)}:c{kwargs.get('customer', '')}:pid{kwargs.get('product_id', '')}:s{kwargs.get('status', '')}:ot{kwargs.get('order_type', '')}:sd{kwargs.get('start_date', '')}:ed{kwargs.get('end_date', '')}:f{kwargs.get('factory', '')}",
 )
 async def get_orders(db: AsyncSession, page: int = 1, per_page: int = 50,
                      customer: str | None = None, product_id: int | None = None,
                      status: str | None = None, order_type: str | None = None,
-                     start_date: str | None = None, end_date: str | None = None) -> dict:
-    """获取订单列表（含关联数据，支持分页和筛选）"""
+                     start_date: str | None = None, end_date: str | None = None,
+                     factory: str | None = None) -> dict:
+    """获取订单列表（含关联数据，支持分页和筛选）
+
+    Args:
+        factory: 工厂筛选（东莞/湖北）。非空时仅返回包含该工厂 SKU 的订单。
+            权限隔离由调用层（endpoint）负责：当 current_user.factory 非空且非超管时，
+            调用方应强制传入 current_user.factory，忽略前端参数。
+    """
     # 基础查询（移除 selectinload(order_stockouts)，改用 SQL 聚合）
     query = select(Order).options(
         joinedload(Order.product),
-        joinedload(Order.locked_by)
+        joinedload(Order.locked_by),
+        selectinload(Order.items),
     ).where(Order.is_deleted.isnot(True))
     count_query = select(func.count(Order.id)).where(Order.is_deleted.isnot(True))
 
     # 筛选条件（共用，避免 DRY 违反）
     conditions = _build_order_filters(customer, product_id, status, order_type, start_date, end_date)
+    # 工厂筛选：订单包含至少一个属于该工厂的 SKU（加入 conditions 以便深翻页游标子查询同步过滤）
+    if factory:
+        conditions.append(Order.items.any(OrderItem.product.has(Product.factory == factory)))
     for condition in conditions:
         query = query.where(condition)
         count_query = count_query.where(condition)
@@ -201,13 +221,188 @@ async def get_orders(db: AsyncSession, page: int = 1, per_page: int = 50,
     return {'items': orders_data, 'total': total, 'page': page, 'per_page': per_page}
 
 
+@cache_result(
+    key_prefix="orders:beile:list",
+    ttl=60,
+    local_ttl=15,
+    key_builder=lambda *args, **kwargs: f"p{kwargs.get('page', 1)}:pp{kwargs.get('per_page', 50)}:c{kwargs.get('customer', '')}:f{kwargs.get('factory', '')}",
+)
+async def get_beile_orders_with_stockins(
+    db: AsyncSession, *, page: int = 1, per_page: int = 50,
+    customer: str | None = None, factory: str = '湖北',
+) -> dict:
+    """获取湖北工厂订单+备货合并列表。
+
+    通过 UNION ALL 合并查询 Order（订单）和 StockIn（备货），
+    按产品工厂筛选，确保订单和备货记录都能在同一列表中展示。
+
+    参考 purchase_order_query.get_unprocessed_orders 的实现方案。
+    """
+    # ---- 构建 UNION ALL 子查询 ----
+    # Order 部分：未删除订单，通过 order_item.product.factory 筛选
+    order_part = select(
+        literal('order').label('record_type'),
+        Order.id.label('source_id'),
+        Order.order_no.label('order_no'),
+        Order.customer.label('customer'),
+        Order.order_date.label('sort_date'),
+    ).where(
+        Order.is_deleted.isnot(True),
+        Order.items.any(OrderItem.product.has(Product.factory == factory)),
+    )
+    if customer:
+        order_part = order_part.where(Order.customer.like(f'%{escape_like(customer)}%'))
+
+    # StockIn 部分：通过 product.factory 筛选
+    stockin_part = select(
+        literal('stockin').label('record_type'),
+        StockIn.id.label('source_id'),
+        StockIn.stockin_no.label('order_no'),
+        StockIn.customer.label('customer'),
+        StockIn.stockin_date.label('sort_date'),
+    ).where(
+        StockIn.product.has(Product.factory == factory),
+    )
+    if customer:
+        stockin_part = stockin_part.where(StockIn.customer.like(f'%{escape_like(customer)}%'))
+
+    unified = union_all(order_part, stockin_part).subquery()
+
+    # ---- 1. COUNT 总数 ----
+    count_result = await db.execute(select(func.count()).select_from(unified))
+    total = count_result.scalar() or 0
+
+    if total == 0:
+        return {'items': [], 'total': 0, 'page': page, 'per_page': per_page}
+
+    # ---- 2. 分页查询当前页 ----
+    offset = (page - 1) * per_page
+    page_result = await db.execute(
+        select(
+            unified.c.record_type,
+            unified.c.source_id,
+            unified.c.order_no,
+            unified.c.customer,
+            unified.c.sort_date,
+        )
+        .order_by(desc(unified.c.sort_date).nullslast())
+        .limit(per_page)
+        .offset(offset)
+    )
+    rows = page_result.all()
+
+    if not rows:
+        return {'items': [], 'total': total, 'page': page, 'per_page': per_page}
+
+    # ---- 3. 按来源批量查询完整数据 ----
+    order_ids = [r.source_id for r in rows if r.record_type == 'order']
+    stockin_ids = [r.source_id for r in rows if r.record_type == 'stockin']
+
+    orders_map: dict[int, Order] = {}
+    if order_ids:
+        order_result = await db.execute(
+            select(Order)
+            .options(
+                joinedload(Order.product),
+                selectinload(Order.items),
+            )
+            .where(Order.id.in_(order_ids))
+        )
+        for o in order_result.scalars().unique():
+            orders_map[o.id] = o
+
+    stockins_map: dict[int, StockIn] = {}
+    if stockin_ids:
+        stockin_result = await db.execute(
+            select(StockIn)
+            .options(joinedload(StockIn.product))
+            .where(StockIn.id.in_(stockin_ids))
+        )
+        for s in stockin_result.scalars():
+            stockins_map[s.id] = s
+
+    # ---- 4. 构建 records（保持 SQL 排序顺序）----
+    items: list[dict] = []
+    for r in rows:
+        if r.record_type == 'order':
+            o = orders_map.get(r.source_id)
+            if o:
+                items.append(_build_beile_order_record(o, factory))
+        else:
+            s = stockins_map.get(r.source_id)
+            if s:
+                items.append(_build_beile_stockin_record(s, factory))
+
+    return {'items': items, 'total': total, 'page': page, 'per_page': per_page}
+
+
+def _build_beile_order_record(order: Order, factory: str) -> dict:
+    """构建湖北订单列表中的订单记录（含多 SKU）。"""
+    items_data = [
+        {
+            'id': item.id,
+            'product_id': item.product_id,
+            'product_name': item.product_name,
+            'product_barcode': item.product_barcode,
+            'quantity': item.quantity,
+            'order_type': item.order_type,
+            'country': item.country or '',
+            'deduct_quantity': item.deduct_quantity or 0,
+            'note': item.note or '',
+        }
+        for item in (order.items or [])
+    ]
+    first_item = order.items[0] if order.items else None
+    return {
+        'id': order.id,
+        'order_no': order.order_no,
+        'customer': order.customer,
+        'product_id': first_item.product_id if first_item else None,
+        'product_name': first_item.product_name if first_item else None,
+        'quantity': first_item.quantity if first_item else 0,
+        'order_date': order.order_date.strftime('%Y-%m-%d %H:%M') if order.order_date else '',
+        'record_type': 'order',
+        'items': items_data,
+        'factories': [factory],
+    }
+
+
+def _build_beile_stockin_record(stockin: StockIn, factory: str) -> dict:
+    """构建湖北订单列表中的备货记录。"""
+    product_name = stockin.product.name if stockin.product else None
+    product_barcode = stockin.product.barcode if stockin.product else None
+    items_data = [{
+        'id': stockin.id,
+        'product_id': stockin.product_id,
+        'product_name': product_name,
+        'product_barcode': product_barcode,
+        'quantity': stockin.quantity,
+        'order_type': stockin.order_type,
+        'country': stockin.country or '',
+        'deduct_quantity': 0,
+        'note': stockin.note or '',
+    }]
+    return {
+        'id': stockin.id,
+        'order_no': stockin.stockin_no,
+        'customer': stockin.customer,
+        'product_id': stockin.product_id,
+        'product_name': product_name,
+        'quantity': stockin.quantity,
+        'order_date': stockin.stockin_date.strftime('%Y-%m-%d %H:%M') if stockin.stockin_date else '',
+        'record_type': 'stockin',
+        'items': items_data,
+        'factories': [factory],
+    }
+
+
 async def create_order(db: AsyncSession, product_id: int, quantity: int,
                        customer: str, note: str, current_user: User,
                        order_type: str = 'regular', country: str | None = None) -> dict:
     """
     创建订单
 
-    业务规则（与Flask一致）：
+    业务规则：
     - 产品必须存在
     - 数量 > 0 且 <= 9999999
     - 客户名称不能为空
@@ -297,6 +492,7 @@ async def _update_order_directly(
 ) -> dict:
     validate_quantity_range(quantity, "订单数量")
     validate_not_empty(customer, "客户名称")
+    # TODO(multi-sku-order): 读取/修改 order.quantity 在多 SKU 下语义变更（多 item 改哪个？），待后续 spec 改造为遍历 order.items；当前依赖兼容值。
     old_quantity = order.quantity
     _ = order.customer
     order.customer = customer
@@ -308,6 +504,7 @@ async def _update_order_directly(
         order.country = country if order_type != 'regular' else None
 
     if quantity != old_quantity:
+        # TODO(multi-sku-order): order.product_id 在多 SKU 下为首 item 兼容值，库存调整需按 OrderItem 维度；待后续 spec 改造。
         product = await get_product_for_update(db, order.product_id)
         log = InventoryLog(
             product_id=order.product_id,
@@ -319,6 +516,19 @@ async def _update_order_directly(
         db.add(log)
 
     await db.flush()
+
+    # Task 3.2: 派发工厂通知（order_updated）
+    # 仅 flush 不 commit，与 _update_order_directly 事务模型一致；
+    # 简单实现：传 changed_items=None，让 dispatch 遍历 order.items（内部 await 查询）。
+    # 通知失败不应影响订单修改，捕获异常仅记录日志。
+    try:
+        await dispatch_factory_notifications(db, order, 'order_updated', None)
+    except Exception as notify_err:
+        logger.warning(
+            "工厂通知派发失败 order_no=%s: %s", order.order_no, notify_err,
+            exc_info=True,
+        )
+
     await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER_AND_INVENTORY)
     # dashboard 缓存失效已移至 endpoint 层（事务提交后）
 
@@ -375,6 +585,7 @@ async def _increase_deduction(
     product = await get_product_for_update(db, order.product_id)
 
     remaining = diff
+    logs: list[InventoryLog] = []
     for stockin in stockins:
         if remaining <= 0:
             break
@@ -401,15 +612,17 @@ async def _increase_deduction(
         if product and deduct_amount > 0:
             product.current_stock -= deduct_amount
 
-        log = InventoryLog(
+        logs.append(InventoryLog(
             product_id=order.product_id,
             change_type='订单抵扣',
             change_quantity=-deduct_amount,
             related_id=stockout_no,
             note=f'修改抵扣增加：订单{order.order_no}，备货{stockin.stockin_no}，数量{deduct_amount}'
-        )
-        db.add(log)
+        ))
         remaining -= deduct_amount
+
+    if logs:
+        db.add_all(logs)
 
     if remaining > 0:
         raise ValueError(f'可用备货不足，还需{remaining}件无法抵扣')
@@ -438,6 +651,7 @@ async def _decrease_deduction(
     product = await get_product_for_update(db, order.product_id)
 
     remaining = reduce_amount
+    logs: list[InventoryLog] = []
     for stockout in deduction_stockouts:
         if remaining <= 0:
             break
@@ -450,29 +664,30 @@ async def _decrease_deduction(
             remaining -= effective_qty
             if product:
                 product.current_stock += effective_qty
-            log = InventoryLog(
+            logs.append(InventoryLog(
                 product_id=order.product_id,
                 change_type='取消抵扣',
                 change_quantity=effective_qty,
                 related_id=stockout.stockout_no,
                 note=f'修改抵扣减少：订单{order.order_no}，取消出库{stockout.stockout_no}，数量{effective_qty}'
-            )
-            db.add(log)
+            ))
             await db.delete(stockout)
         else:
             # 部分减少
             stockout.quantity -= remaining
             if product:
                 product.current_stock += remaining
-            log = InventoryLog(
+            logs.append(InventoryLog(
                 product_id=order.product_id,
                 change_type='取消抵扣',
                 change_quantity=remaining,
                 related_id=stockout.stockout_no,
                 note=f'修改抵扣减少：订单{order.order_no}，减少出库{stockout.stockout_no}，数量{remaining}'
-            )
-            db.add(log)
+            ))
             remaining = 0
+
+    if logs:
+        db.add_all(logs)
 
 
 async def update_deduct_quantity(
@@ -589,18 +804,21 @@ async def _delete_order_directly(
     order_stockouts = result.scalars().all()
     total_deducted = sum(so.quantity - so.returned_quantity for so in order_stockouts)
 
+    # 批量构建抵扣回滚日志，消除循环内逐条 add 的 N+1 开销
+    rollback_logs = []
     for stockout in order_stockouts:
         net_qty = stockout.quantity - stockout.returned_quantity
         if net_qty <= 0:
             continue
-        stockout_log = InventoryLog(
+        rollback_logs.append(InventoryLog(
             product_id=order.product_id,
             change_type='抵扣回滚',
             change_quantity=net_qty,
             related_id=order.order_no,
             note=f'订单删除回滚抵扣：{order.order_no}，恢复备货ID {stockout.stockin_id if stockout.stockin_id else "未知"} 的 {net_qty} 件'
-        )
-        db.add(stockout_log)
+        ))
+    if rollback_logs:
+        db.add_all(rollback_logs)
 
     net_change = total_deducted
     if product.current_stock + net_change < 0:

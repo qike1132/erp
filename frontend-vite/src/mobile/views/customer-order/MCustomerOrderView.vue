@@ -54,7 +54,7 @@ async function handleSearch() {
   loading.value = true
   try {
     const res = await orderApi.list({ keyword: keyword.value, status: activeTab.value === 'all' ? '' : activeTab.value, page: page.value, per_page: perPage })
-    orders.value = res?.items || []
+    orders.value = res?.data || []
     total.value = res?.total || 0
   } finally { loading.value = false }
 }

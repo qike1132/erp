@@ -12,9 +12,9 @@ import argon2
 
 _argon2_hasher = argon2.PasswordHasher(
     type=argon2.Type.ID,
-    memory_cost=47104,
+    memory_cost=19456,
     time_cost=2,
-    parallelism=2,
+    parallelism=1,
     hash_len=32,
     salt_len=16,
 )

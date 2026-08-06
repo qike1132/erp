@@ -7,13 +7,17 @@ import calendar
 import io
 import logging
 from datetime import date, datetime, timedelta
+from typing import Iterable
 
 import openpyxl
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.shared_models import DailyProductionRecord
+from fastapi_app.core.business_rules import MAX_QUANTITY
+from fastapi_app.core.validators import validate_not_empty
+from fastapi_app.shared_models import DailyProductionRecord, Product
+from fastapi_app.utils import calc_total_pages, parse_date_with_fallback
 
 logger = logging.getLogger(__name__)
 
@@ -24,17 +28,19 @@ DEPARTMENT_LABELS = {
 }
 
 
-def _parse_date(date_str: str) -> date:
-    """解析日期字符串"""
-    try:
-        return datetime.strptime(date_str, '%Y-%m-%d').date()
-    except ValueError:
-        parts = date_str.strip().split('-')
-        if len(parts) != 3:
-            raise ValueError(f'日期格式不正确: {date_str}，请使用 YYYY-MM-DD 格式') from None
-        y, m = (int(parts[0]), int(parts[1]))
-        d = min(int(parts[2]), calendar.monthrange(y, m)[1])
-        return date(y, m, d)
+async def _build_product_price_fallback(
+    db: AsyncSession,
+    records: Iterable[DailyProductionRecord],
+) -> dict[int, float]:
+    """当记录的 unit_price 为 0 时，按 product_id 回退到产品单价
+
+    返回 {product_id: price} 映射；未匹配到产品的记录保持原值 0
+    """
+    fallback_ids = {r.product_id for r in records if (r.unit_price or 0) == 0 and r.product_id}
+    if not fallback_ids:
+        return {}
+    result = await db.execute(select(Product.id, Product.price).where(Product.id.in_(fallback_ids)))
+    return {pid: float(price or 0) for pid, price in result.all()}
 
 
 # ==================== 校验 ====================
@@ -48,12 +54,11 @@ def validate_record_data(
     """校验生产记录数据"""
     if department not in DEPARTMENT_LABELS:
         raise ValueError(f'部门必须是 filling、handcraft、packaging 之一，当前: {department}')
-    if not product_name or not product_name.strip():
-        raise ValueError('产品名称不能为空')
+    validate_not_empty(product_name, "产品名称")
     if quantity <= 0:
-        raise ValueError('生产数量必须大于0')
-    if quantity > 999999:
-        raise ValueError('生产数量不能超过999999')
+        raise ValueError('生产数量必须大于 0')
+    if quantity > MAX_QUANTITY:
+        raise ValueError(f'生产数量不能超过 {MAX_QUANTITY}')
     if unit_price < 0:
         raise ValueError('单价不能为负数')
 
@@ -83,7 +88,7 @@ async def get_records(
     if department:
         conditions.append(DailyProductionRecord.department == department)
     if production_date:
-        conditions.append(DailyProductionRecord.production_date == _parse_date(production_date))
+        conditions.append(DailyProductionRecord.production_date == parse_date_with_fallback(production_date))
 
     per_page = max(1, min(per_page, 200))
     offset = (page - 1) * per_page
@@ -127,12 +132,14 @@ async def get_records(
     total_val = rows[0][3] if rows else 0
     total_sku = rows[0][4] if rows else 0
 
+    price_fallback = await _build_product_price_fallback(db, records)
+
     return {
-        'data': [r.to_dict() for r in records],
+        'data': [r.to_dict(price_fallback) for r in records],
         'total': total,
         'page': page,
         'per_page': per_page,
-        'pages': (total + per_page - 1) // per_page if per_page > 0 else 0,
+        'pages': calc_total_pages(total, per_page),
         'stats': {
             'total_quantity': int(total_qty),
             'total_value': round(float(total_val), 2),
@@ -156,7 +163,7 @@ async def create_record(
 ) -> DailyProductionRecord:
     """创建生产记录"""
     validate_record_data(department, product_name, quantity, unit_price)
-    prod_date = _parse_date(production_date_str)
+    prod_date = parse_date_with_fallback(production_date_str)
 
     # 限制不能录入未来日期的数据
     if prod_date > date.today():
@@ -174,7 +181,7 @@ async def create_record(
         created_by=created_by,
     )
     db.add(record)
-    await db.commit()
+    await db.flush()
     await db.refresh(record)
     logger.info(f'生产记录创建: {department} - {product_name} - {quantity} by {created_by}')
     return record
@@ -211,12 +218,12 @@ async def update_record(
             else:
                 setattr(record, field, kwargs[field])
     if 'production_date' in kwargs and kwargs['production_date'] is not None:
-        new_date = _parse_date(kwargs['production_date'])
+        new_date = parse_date_with_fallback(kwargs['production_date'])
         if new_date > date.today():
             raise ValueError('不能将生产日期修改为未来日期')
         record.production_date = new_date
 
-    await db.commit()
+    await db.flush()
     await db.refresh(record)
     logger.info(f'生产记录更新: {record_id} by {created_by}')
     return record
@@ -231,7 +238,6 @@ async def delete_record(db: AsyncSession, record_id: int) -> None:
     if not record:
         raise ValueError('记录不存在')
     await db.delete(record)
-    await db.commit()
     logger.info(f'生产记录删除: {record_id}')
 
 
@@ -239,13 +245,22 @@ async def delete_record(db: AsyncSession, record_id: int) -> None:
 
 async def get_daily_summary(db: AsyncSession, target_date: str) -> dict:
     """获取指定日期的各部门汇总"""
-    d = _parse_date(target_date)
+    d = parse_date_with_fallback(target_date)
     result = await db.execute(
         select(DailyProductionRecord)
         .where(DailyProductionRecord.production_date == d)
         .order_by(DailyProductionRecord.department, DailyProductionRecord.id)
     )
     records = list(result.scalars().all())
+    price_fallback = await _build_product_price_fallback(db, records)
+
+    def effective_unit_price(r: DailyProductionRecord) -> float:
+        up = float(r.unit_price or 0)
+        if up > 0:
+            return up
+        if r.product_id and r.product_id in price_fallback:
+            return price_fallback[r.product_id]
+        return 0.0
 
     dept_data = {}
     for r in records:
@@ -253,7 +268,7 @@ async def get_daily_summary(db: AsyncSession, target_date: str) -> dict:
         if dept not in dept_data:
             dept_data[dept] = {'quantity': 0, 'value': 0.0, 'skus': set()}
         dept_data[dept]['quantity'] += r.quantity
-        dept_data[dept]['value'] += float(r.unit_price or 0) * r.quantity
+        dept_data[dept]['value'] += effective_unit_price(r) * r.quantity
         if r.product_name:
             dept_data[dept]['skus'].add(r.product_name)
 
@@ -292,15 +307,23 @@ async def get_monthly_summary(db: AsyncSession, year: int, month: int) -> dict:
     end = date(year, month, calendar.monthrange(year, month)[1])
     days_in_month = calendar.monthrange(year, month)[1]
 
+    # 优先使用记录单价；当记录单价为 0 时回退到产品当前单价
+    effective_unit_price = func.coalesce(
+        func.nullif(DailyProductionRecord.unit_price, 0),
+        Product.price,
+        0,
+    )
+
     # 按日+部门聚合
     result = await db.execute(
         select(
             DailyProductionRecord.production_date,
             DailyProductionRecord.department,
             func.coalesce(func.sum(DailyProductionRecord.quantity), 0).label('total_qty'),
-            func.coalesce(func.sum(DailyProductionRecord.unit_price * DailyProductionRecord.quantity), 0).label('total_val'),
+            func.coalesce(func.sum(effective_unit_price * DailyProductionRecord.quantity), 0).label('total_val'),
             func.count(func.distinct(DailyProductionRecord.product_name)).label('sku_count'),
         )
+        .outerjoin(Product, DailyProductionRecord.product_id == Product.id)
         .where(and_(
             DailyProductionRecord.production_date >= start,
             DailyProductionRecord.production_date <= end,
@@ -393,9 +416,9 @@ async def export_records(
     """导出生产记录为 Excel（企业标准格式）"""
     conditions = []
     if start_date:
-        conditions.append(DailyProductionRecord.production_date >= _parse_date(start_date))
+        conditions.append(DailyProductionRecord.production_date >= parse_date_with_fallback(start_date))
     if end_date:
-        conditions.append(DailyProductionRecord.production_date <= _parse_date(end_date))
+        conditions.append(DailyProductionRecord.production_date <= parse_date_with_fallback(end_date))
     if department:
         conditions.append(DailyProductionRecord.department == department)
 
@@ -409,6 +432,15 @@ async def export_records(
 
     result = await db.execute(query)
     records = list(result.scalars().all())
+    price_fallback = await _build_product_price_fallback(db, records)
+
+    def effective_unit_price(r: DailyProductionRecord) -> float:
+        up = float(r.unit_price or 0)
+        if up > 0:
+            return up
+        if r.product_id and r.product_id in price_fallback:
+            return price_fallback[r.product_id]
+        return 0.0
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -440,7 +472,8 @@ async def export_records(
     total_qty = 0
     total_val = 0.0
     for r in records:
-        val = round(float(r.unit_price or 0) * r.quantity, 2)
+        up = effective_unit_price(r)
+        val = round(up * r.quantity, 2)
         total_qty += r.quantity
         total_val += val
         ws.append([
@@ -448,7 +481,7 @@ async def export_records(
             DEPARTMENT_LABELS.get(r.department, r.department),
             r.product_name,
             r.barcode or '',
-            float(r.unit_price) if r.unit_price else 0,
+            up,
             r.quantity,
             val,
             r.remark or '',
@@ -487,7 +520,7 @@ async def export_records(
         if dept not in dept_summary:
             dept_summary[dept] = {'quantity': 0, 'value': 0.0}
         dept_summary[dept]['quantity'] += r.quantity
-        dept_summary[dept]['value'] += float(r.unit_price or 0) * r.quantity
+        dept_summary[dept]['value'] += effective_unit_price(r) * r.quantity
 
     for dept_key in ('filling', 'handcraft', 'packaging'):
         if dept_key in dept_summary:

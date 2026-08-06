@@ -4,12 +4,12 @@
 - 出货数据每日同步（Celery Beat 定时任务）
 - 批量计划导入（>500行时异步处理）
 
-已去除 Flask create_app 依赖，使用 SyncSessionLocal + shared_models。
+使用 SyncSessionLocal + shared_models。
 """
 import contextlib
 import os
 import tempfile
-from datetime import date, timedelta
+from datetime import UTC, datetime, timedelta
 
 from celery import shared_task
 
@@ -34,7 +34,7 @@ def sync_shipment_records_task(self):
         from sqlalchemy import text
         session = _SyncSession()
         try:
-            target_date = date.today() - timedelta(days=1)
+            target_date = datetime.now(UTC).replace(tzinfo=None).date() - timedelta(days=1)
             rows = session.execute(text("\n                SELECT so.id, so.stockout_no, so.customer, so.product_id,\n                       so.quantity, so.returned_quantity, DATE(so.stockout_date) as stockout_date,\n                       p.name as product_name\n                FROM stock_out so\n                JOIN product p ON so.product_id = p.id\n                WHERE DATE(so.stockout_date) = :target_date\n                  AND so.customer IS NOT NULL AND so.customer != ''\n            "), {'target_date': target_date}).fetchall()
             customers = session.execute(text('SELECT id, name FROM customer')).fetchall()
             customer_id_map = {c.name: c.id for c in customers}
@@ -71,6 +71,7 @@ def batch_import_plans_task(self, file_path: str, original_filename: str, user_i
     if not any(os.path.commonpath([real_path, d]) == d for d in allowed_dirs if os.path.exists(d)):
         logger.error(f'批量计划导入任务拒绝非法文件路径: {file_path}')
         return {'success': False, 'error': '非法文件路径', 'imported_count': 0}
+    delete_file = True
     try:
         import uuid
 
@@ -129,11 +130,10 @@ def batch_import_plans_task(self, file_path: str, original_filename: str, user_i
     except (ValueError, TypeError, OSError) as exc:
         logger.error(f'批量计划导入任务失败: {exc}', exc_info=True)
         if self.request.retries < self.max_retries:
+            delete_file = False
             raise self.retry(exc=exc) from exc
-        if file_path and os.path.exists(file_path):
+        raise
+    finally:
+        if delete_file and file_path and os.path.exists(file_path):
             with contextlib.suppress(OSError):
                 os.unlink(file_path)
-        raise
-    if file_path and os.path.exists(file_path):
-        with contextlib.suppress(OSError):
-            os.unlink(file_path)

@@ -1,4 +1,5 @@
 # Bandit configuration
+# B608 (SQL injection) 不再全局跳过，改为按行使用 `# nosec B608` 精确豁免
+# 已标注 nosec B608 的位置均为受控的静态 SQL 片段（值通过绑定参数传递）
 skips:
   - B101  # assert used in tests
-  - B608  # SQL injection false positives on parameterized queries

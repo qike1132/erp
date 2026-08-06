@@ -11,7 +11,13 @@ import asyncio
 import contextlib
 import json
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
+from typing import Literal
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from fastapi_app.shared_models import AuditLog, Notification, Order, OrderItem, Product, User
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +45,7 @@ def _register_domain_event_subscriptions():
         subscribe(DomainEventType.ORDER_CREATED, _on_order_created)
         subscribe(DomainEventType.STOCK_OUT_CREATED, _on_stock_out_created)
         logger.info("领域事件订阅已注册: ORDER_STATUS_CHANGED, ORDER_CREATED, STOCK_OUT_CREATED")
-    except Exception as e:
+    except Exception as e:  # defensive: 启动时领域事件订阅注册失败可忽略
         logger.warning("领域事件订阅注册失败（可忽略）: %s", e)
 
 
@@ -131,7 +137,7 @@ async def publish_stock_event(event_type: str, data: dict, redis_client=None):
         event = {
             "type": event_type,
             "data": data,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(UTC).replace(tzinfo=None).isoformat(),
         }
         await redis_client.publish("erp:stock_events", json.dumps(event, ensure_ascii=False))
         logger.debug("事件已发布: %s", event_type)
@@ -158,7 +164,7 @@ async def publish_event_with_fcm(
             fcm_data = {"type": event_type, **{k: str(v) for k, v in data.items()}}
             # 发送到业务事件主题
             await fcm_service.send_to_topic("erp_business_events", fcm_title, fcm_body or "", fcm_data)
-        except Exception as e:
+        except Exception as e:  # defensive: FCM推送失败不影响事件发布主流程
             logger.debug("FCM 推送跳过: %s", e)
 
 
@@ -292,3 +298,119 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
+
+
+# ==================== 工厂通知派发（Task 2） ====================
+
+
+async def dispatch_factory_notifications(
+    session: AsyncSession,
+    order: Order,
+    action: Literal['new_order', 'order_updated'],
+    changed_items: list[OrderItem] | None = None,
+) -> int:
+    """根据订单涉及的工厂，向对应工厂的启用用户派发系统内通知。
+
+    逻辑：
+    1. 遍历 order.items（若 changed_items 提供则仅遍历 changed_items 的 product_id/quantity），收集涉及的工厂集合（product.factory 非空）
+    2. 对每个工厂，查询 User.factory == 该工厂 且 User.status == True 的用户列表
+    3. 为每个用户批量插入 Notification 记录（type/title/content/related_order_id/is_read）
+    4. 写入 AuditLog（resource_type='notification', action='CREATE', resource_id=str(order.id), detail 含派发摘要）
+    5. 返回派发的通知总数
+
+    注意：
+    - 如果订单不涉及任何工厂（所有 product.factory 为 NULL），直接返回 0，不写 AuditLog
+    - 使用 session.add_all 批量插入 Notification，await session.flush() 但不 commit（由调用方控制事务）
+    - AuditLog 同样 session.add()，不 commit
+    - content 摘要格式示例：'订单 SO20260804001（客户：张三）包含湖北产品：枕头A x10、被套B x5'
+    - 异步实现：内部用 await 查询 items/products/users，避免在 async 上下文中触发 lazy load
+    """
+    # 确定要扫描的 items（用 await 查询，避免 lazy load；changed_items 仅取 product_id/quantity）
+    if changed_items is not None:
+        items_data = [(it.product_id, it.quantity) for it in changed_items]
+    else:
+        result = await session.execute(
+            select(OrderItem.product_id, OrderItem.quantity)
+            .where(OrderItem.order_id == order.id)
+        )
+        items_data = result.all()
+
+    if not items_data:
+        return 0
+
+    # 一次性查询所有 products（避免 N+1 与 lazy load）
+    product_ids = {pid for pid, _ in items_data}
+    result = await session.execute(
+        select(Product).where(Product.id.in_(product_ids))
+    )
+    products = {p.id: p for p in result.scalars().all()}
+
+    # 按工厂分组收集 SKU 摘要：factory -> [(product_name, quantity), ...]
+    factory_skus: dict[str, list[tuple[str, int]]] = {}
+    for product_id, quantity in items_data:
+        product = products.get(product_id)
+        if product is None or not product.factory:
+            continue
+        factory_skus.setdefault(product.factory, []).append((product.name, quantity))
+
+    if not factory_skus:
+        return 0
+
+    title = '新订单通知' if action == 'new_order' else '订单修改通知'
+    order_no = order.order_no
+    customer = order.customer
+
+    notifications: list[Notification] = []
+    factory_user_counts: dict[str, int] = {}
+
+    for factory, sku_list in factory_skus.items():
+        result = await session.execute(
+            select(User.id).where(User.factory == factory, User.status.is_(True))
+        )
+        user_ids = [row[0] for row in result.all()]
+        factory_user_counts[factory] = len(user_ids)
+
+        if not user_ids:
+            continue
+
+        content_payload = {
+            'format_version': 2,
+            'order_type': '贝乐订单',
+            'order_no': order_no,
+            'customer': customer,
+            'factory': factory,
+            'products': [
+                {'name': name, 'quantity': qty}
+                for name, qty in sku_list
+            ],
+        }
+        content = json.dumps(content_payload, ensure_ascii=False)
+
+        for uid in user_ids:
+            notifications.append(Notification(
+                user_id=uid,
+                type=action,
+                title=title,
+                content=content,
+                related_order_id=order.id,
+                is_read=False,
+            ))
+
+    session.add_all(notifications)
+    session.add(AuditLog(
+        action='CREATE',
+        resource_type='notification',
+        resource_id=str(order.id),
+        detail=json.dumps({
+            'action': action,
+            'order_no': order_no,
+            'customer': customer,
+            'factories': {
+                f: {'users': factory_user_counts[f], 'sku_count': len(sku_list)}
+                for f, sku_list in factory_skus.items()
+            },
+            'dispatched': len(notifications),
+        }, ensure_ascii=False),
+    ))
+    await session.flush()
+    return len(notifications)

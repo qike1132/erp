@@ -92,11 +92,42 @@ async def api_summary_print(data: SummaryPrintRequest, db: AsyncSession=Depends(
 
 @router.post('/orders/supplier-summary-export')
 async def export_supplier_summary_excel(data: OrderIdsRequest, db: AsyncSession=Depends(get_db), _user=Depends(require_permission('product_manage'))):
-    _ = data.ids
+    """根据选中的采购订单 ID 列表，按供应商分组导出采购订单 Excel。
+    重载触发标记
+
+    使用 get_supplier_order_summary 获取物料明细，按 supplier_name 分组，
+    每组生成一个独立的供应商采购订单 Excel 工作簿（基于模板）。
+    单个供应商返回 .xlsx，多个供应商打包为 .zip。
+    """
+    if not data.ids:
+        raise HTTPException(status_code=400, detail='请至少选择一个订单')
     try:
-        sorted_suppliers = await svc.query_supplier_groups(db)
-        if not sorted_suppliers:
-            raise HTTPException(status_code=404, detail='未找到供应商数据')
+        from fastapi_app.services.purchase_order_query import get_supplier_order_summary
+
+        summary = await get_supplier_order_summary(db, data.ids)
+        materials = summary.get('materials', [])
+        if not materials:
+            raise HTTPException(status_code=404, detail='未找到供应商物料数据')
+
+        # 按 supplier_name 分组，构建 create_supplier_workbook 所需的数据结构
+        supplier_map: dict[str, dict] = {}
+        order: list[str] = []
+        for m in materials:
+            sname = m.get('supplier_name') or '未指定供应商'
+            if sname not in supplier_map:
+                supplier_map[sname] = {
+                    'supplier_name': sname,
+                    'items': [],
+                }
+                order.append(sname)
+            supplier_map[sname]['items'].append({
+                'material_name': m.get('material_name', ''),
+                'specification': m.get('specification', ''),
+                'quantity': float(m.get('total_quantity', 0)),
+                'unit': m.get('unit', ''),
+            })
+
+        sorted_suppliers = [supplier_map[s] for s in order]
         date_prefix = datetime.now().strftime('%Y-%m-%d')
 
         def _generate_export(sorted_suppliers, date_prefix):

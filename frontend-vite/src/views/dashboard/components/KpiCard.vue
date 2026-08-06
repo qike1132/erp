@@ -32,6 +32,7 @@
           >
             {{ trendText }}
           </span>
+
           <span class="text-[10px] text-text-muted">较昨日</span>
         </div>
         <div v-else-if="isLoading" class="mt-1.5">

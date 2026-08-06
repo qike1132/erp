@@ -21,8 +21,11 @@ async def optimized_count(db: AsyncSession, base_query: Select, table_name: str 
     有 WHERE 条件时必须回退精确 COUNT(*)，否则 pg_class.reltuples 返回的是全表近似值，
     与筛选后的实际行数可能相差极大，导致分页信息完全错误。
     """
-    # 检测查询是否包含 WHERE 条件（兼容 SQLAlchemy 2.0）
-    has_where = getattr(base_query, 'whereclause', None) is not None or getattr(base_query, '_where_criteria', None) is not None
+    # 检测查询是否包含 WHERE 条件（兼容 SQLAlchemy 2.0）。
+    # SQLAlchemy 表达式不支持 bool()，需使用 is not None 判断。
+    whereclause = getattr(base_query, 'whereclause', None)
+    where_criteria = getattr(base_query, '_where_criteria', None)
+    has_where = whereclause is not None or where_criteria is not None
 
     # 仅当无筛选条件时才尝试近似计数
     if table_name and not has_where:
@@ -34,8 +37,8 @@ async def optimized_count(db: AsyncSession, base_query: Select, table_name: str 
             approx = approx_result.scalar()
             if approx and approx > 1000:
                 return approx
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("近似计数查询失败，回退精确计数: %s", e)
     result = await db.execute(base_query)
     return result.scalar() or 0
 
@@ -68,7 +71,10 @@ async def paginate_with_keyset(
     elif offset > OFFSET_THRESHOLD and cursor_column is not None:
         logger.info("深翻页 offset=%d 超过阈值 %d，自动使用keyset近似分页", offset, OFFSET_THRESHOLD)
         subq = base_query.order_by(cursor_column.desc()).offset(offset).limit(1).subquery()
-        cursor_subq_col = subq.c[cursor_column.key] if hasattr(cursor_column, 'key') else subq.c[0]
+        col_name = getattr(cursor_column, 'key', None) or getattr(cursor_column, 'name', None)
+        if col_name is None:
+            raise ValueError("cursor_column 必须有 'key' 或 'name' 属性")
+        cursor_subq_col = subq.c[col_name]
         subq_scalar = select(cursor_subq_col)
         query = base_query.where(cursor_column <= subq_scalar).order_by(cursor_column.desc()).limit(per_page)
     else:

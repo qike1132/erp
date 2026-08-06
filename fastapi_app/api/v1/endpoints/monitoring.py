@@ -8,6 +8,8 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
+# 认证: 由 router.py 通过 dependencies=[Depends(get_current_user_id)] 统一注入，无需在此重复
+# 限流: 如需对 /vitals 接口限流，应在反向代理层或中间件中实现
 router = APIRouter()
 
 
@@ -35,6 +37,7 @@ class VitalsSummaryResponse(BaseModel):
 
 
 _MAX_ENTRIES = 500
+_MAX_KEYS = 100
 _vital_stats: dict[str, deque[float]] = {}
 
 
@@ -51,6 +54,8 @@ async def receive_vitals(payload: VitalsPayload, request: Request):
             )
         key = f"{v.name}:{v.rating}"
         if key not in _vital_stats:
+            if len(_vital_stats) >= _MAX_KEYS:
+                continue
             _vital_stats[key] = deque(maxlen=_MAX_ENTRIES)
         _vital_stats[key].append(v.value)
     return {"ok": True}

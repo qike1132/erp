@@ -1,7 +1,7 @@
 <template>
   <div class="brl-container">
     <div v-if="loading" class="brl-loading">
-      <i class="fas fa-spinner fa-spin"  aria-hidden="true" /> 加载中…
+      <UiSpinner />
     </div>
 
     <div v-else-if="!records.length" class="brl-empty">

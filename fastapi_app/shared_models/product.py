@@ -1,7 +1,7 @@
 """
 产品模型 - 纯 SQLAlchemy 2.0 声明式
 
-映射到与 Flask-SQLAlchemy Product 相同的 'product' 表。
+映射到 'product' 表。
 """
 from __future__ import annotations
 
@@ -31,6 +31,7 @@ class Product(Base):
     barcode: Mapped[str | None] = mapped_column(String(50), index=True, comment='69码/商品条码')
     price: Mapped[float | None] = mapped_column(Numeric(10, 2), default=0, server_default='0', comment='产品价格')
     image: Mapped[str | None] = mapped_column(String(200), comment='产品图片路径')
+    factory: Mapped[str | None] = mapped_column(String(50), comment='所属工厂')
     initial_stock: Mapped[int] = mapped_column(Integer, default=0, comment='初始库存')
     current_stock: Mapped[int] = mapped_column(Integer, default=0, comment='当前库存')
     version: Mapped[int] = mapped_column(Integer, default=0, server_default='0', comment='乐观锁版本号')
@@ -72,8 +73,9 @@ class Product(Base):
             'id': self.id,
             'name': self.name,
             'barcode': self.barcode,
-            'price': float(self.price) if self.price else 0,
+            'price': float(self.price) if self.price is not None else 0,
             'image': self.image,
+            'factory': self.factory,
             'initial_stock': self.initial_stock,
             'current_stock': self.current_stock,
             'create_time': self.create_time.strftime('%Y-%m-%d %H:%M:%S') if self.create_time else None

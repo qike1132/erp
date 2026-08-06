@@ -113,7 +113,7 @@ class DBHealthChecker:
                 DB_POOL_CHECKED_OUT.labels(pool='async_read').set(rpool.checkedout())
                 DB_POOL_OVERFLOW.labels(pool='async_read').set(rpool.overflow())
                 DB_POOL_CHECKEDIN.labels(pool='async_read').set(rpool.checkedin())
-        except Exception:
+        except Exception:  # defensive: metrics collection failure must not interrupt health checks
             pass
 
     async def _check_async_engine(self, engine) -> bool:

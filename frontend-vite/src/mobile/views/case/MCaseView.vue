@@ -71,7 +71,7 @@ async function loadCustomers() {
 }
 async function loadInventory() {
   invLoading.value = true
-  try { inventory.value = (await stockApi.inventory({}))?.items || [] } finally { invLoading.value = false }
+  try { inventory.value = (await stockApi.inventory({}))?.data || [] } finally { invLoading.value = false }
 }
 
 async function handleStockSubmit() {

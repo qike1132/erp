@@ -2,6 +2,8 @@
 ERP系统性能测试框架
 使用Python标准库进行性能测试
 包含响应时间测量、内存监控、性能报告生成功能
+
+标记: flask_legacy — 迁移中，需重写为 FastAPI + httpx.async 模式
 """
 import cProfile
 import io
@@ -18,6 +20,10 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
+
+import pytest
+
+pytestmark = pytest.mark.flask_legacy
 
 from fastapi_app.core.security import hash_password
 

@@ -33,32 +33,20 @@
                 </div>
               </div>
 
-              <div class="form-field" style="position: relative">
+              <div class="form-field">
                 <label class="form-label">产品名称</label>
-                <input
-                  type="text"
-                  class="form-text-input"
-                  :value="form.search"
+                <UiAutocomplete
+                  v-model="form.search"
+                  :searchFn="searchProductsForAutocomplete"
                   placeholder="输入产品名称或69码搜索"
-                  @input="form.search = ($event.target as HTMLInputElement).value; onSearchInput()"
-                  @focus="onProductFocus"
-                  @blur="hideSuggestions"
-                  @keydown="onSearchKeydown"
-                />
-                <div v-if="productSuggestions.length && showSuggestions" class="autocomplete-dropdown">
-                  <div
-                    v-for="(p, idx) in productSuggestions"
-                    :key="p.id"
-                    class="autocomplete-item"
-                    :class="{ 'autocomplete-active': idx === activeSuggestionIdx }"
-                    role="option"
-                    @mousedown.prevent="selectProduct(p)"
-                    @keydown.enter="selectProduct(p)"
-                  >
-                    {{ p.name }}
-                    <span v-if="p.barcode" class="barcode-hint">{{ p.barcode }}</span>
-                  </div>
-                </div>
+                  @select="onProductSelect"
+                  @update:modelValue="form.productId = ''; shipmentInfo = null"
+                >
+                  <template #option="{ item }">
+                    {{ item.name }}
+                    <span v-if="item.barcode" class="barcode-hint">{{ item.barcode }}</span>
+                  </template>
+                </UiAutocomplete>
               </div>
 
               <div class="form-field">
@@ -101,10 +89,10 @@
                 </label>
                 <div class="so-inline-actions">
                   <button class="so-inline-btn" :disabled="templateDownloading" @click.stop="handleDownloadTemplate">
-                    <i :class="templateDownloading ? 'fas fa-spinner fa-spin' : 'fas fa-download'"  aria-hidden="true" />模板
+                    <UiLoadingIcon :loading="templateDownloading" icon="download" />模板
                   </button>
                   <button class="so-inline-btn so-inline-btn-success" :disabled="!excelFile || importing" @click.stop="handleImportExcel">
-                    <i :class="importing ? 'fas fa-spinner fa-spin' : 'fas fa-upload'"  aria-hidden="true" />{{
+                    <UiLoadingIcon :loading="importing" icon="upload" />{{
                       importing ? '导入中' : '导入'
                     }}
                   </button>
@@ -136,10 +124,10 @@
                 </label>
                 <div class="so-inline-actions">
                   <button class="so-inline-btn" :disabled="!pdfFiles.length || ocrPreviewing" @click.stop="handleOcrPreview">
-                    <i :class="ocrPreviewing ? 'fas fa-spinner fa-spin' : 'fas fa-eye'"  aria-hidden="true" />预览
+                    <UiLoadingIcon :loading="ocrPreviewing" icon="eye" />预览
                   </button>
                   <button class="so-inline-btn so-inline-btn-danger" :disabled="!pdfFiles.length || ocrImporting" @click.stop="handleOcrImport">
-                    <i :class="ocrImporting ? 'fas fa-spinner fa-spin' : 'fas fa-magic'"  aria-hidden="true" />导入
+                    <UiLoadingIcon :loading="ocrImporting" icon="magic" />导入
                   </button>
                 </div>
                 <input
@@ -256,13 +244,9 @@
             <label class="so-label"><i class="fas fa-tag" aria-hidden="true"></i> 订单类型</label>
             <UiSelect v-model="filterOrderType" placeholder="全部" :options="filterOrderTypeOptions" style="width: 100%" />
           </div>
-          <div class="so-filter-field">
-            <label class="so-label"><i class="fas fa-calendar-alt" aria-hidden="true"></i> 开始日期</label>
-            <UiDatePicker v-model="filterStart" style="width: 100%" />
-          </div>
-          <div class="so-filter-field">
-            <label class="so-label"><i class="fas fa-calendar-alt" aria-hidden="true"></i> 结束日期</label>
-            <UiDatePicker v-model="filterEnd" style="width: 100%" />
+          <div class="so-filter-field" style="grid-column: span 2">
+            <label class="so-label"><i class="fas fa-calendar-alt" aria-hidden="true" /> 日期范围</label>
+            <UiDateRangePicker v-model="filterDateRange" style="width: 100%" />
           </div>
           <div class="so-filter-field so-filter-action">
             <UiButton variant="primary" size="sm" @click="fetchStockouts">
@@ -453,7 +437,7 @@ import { ref, reactive, computed, onUnmounted, watch } from 'vue'
 import { useQueryClient, useQuery } from '@tanstack/vue-query'
 import { customerApi, stockApi, auxApi } from '@/api'
 import { useCountryStore } from '@/stores/country'
-import type { ApiResponse, ShipmentInfo, StagedStockout, Product, StockOutRecord, InventoryItem } from '@/types'
+import type { ApiResponse, ShipmentInfo, StagedStockout, Product } from '@/types'
 import { useOcrImport } from './composables/useOcrImport'
 import { useStockWarning } from './composables/useStockWarning'
 import { useStockOutActions } from './composables/useStockOutActions'
@@ -478,7 +462,6 @@ import { toISODate } from '@/utils/format'
 
 const queryClient = useQueryClient()
 const confirmDialog = useConfirmDialog()
-const actionId = ref<number | ''>(0)
 
 // === 库存不足弹窗（逻辑抽离至 useStockWarning composable） ===
 const { stockWarningOpen, stockWarningData, checkCountryStock } = useStockWarning()
@@ -497,73 +480,19 @@ const customerNames = computed(() => {
 const customerOptions = computed(() => customerNames.value.map((name: unknown) => ({ value: String(name), label: String(name) })))
 
 // === 产品搜索 ===
-const productSuggestions = ref<Product[]>([])
-const showSuggestions = ref(false)
-const activeSuggestionIdx = ref(-1)
-let searchTimeout: ReturnType<typeof setTimeout> | null = null
-let hideSuggestionsTimeout: ReturnType<typeof setTimeout> | null = null
-
-onUnmounted(() => {
-  if (searchTimeout) clearTimeout(searchTimeout)
-  if (hideSuggestionsTimeout) clearTimeout(hideSuggestionsTimeout)
-})
-
-async function searchProducts(q: string) {
-  if (!q.trim()) { productSuggestions.value = []; showSuggestions.value = false; return }
+async function searchProductsForAutocomplete(q: string): Promise<Product[]> {
+  if (!q.trim()) return []
   try {
     const data = await stockApi.searchProducts(q)
-    productSuggestions.value = Array.isArray(data) ? data : (data?.products ? [data.products] : []) as Product[]
-    showSuggestions.value = productSuggestions.value.length > 0
+    return Array.isArray(data) ? data : (data?.products ? [data.products] : [])
   } catch {
-    productSuggestions.value = []
-    showSuggestions.value = false
+    return []
   }
 }
 
-function onProductFocus() {
-  if (form.search && productSuggestions.value.length === 0) {
-    searchProducts(form.search).then(() => {
-      showSuggestions.value = productSuggestions.value.length > 0
-    })
-  } else if (productSuggestions.value.length > 0) {
-    showSuggestions.value = true
-  }
-}
-function hideSuggestions() {
-  if (hideSuggestionsTimeout) clearTimeout(hideSuggestionsTimeout)
-  hideSuggestionsTimeout = setTimeout(() => { showSuggestions.value = false }, 150)
-}
-
-function onSearchInput() {
-  form.productId = ''
-  shipmentInfo.value = null
-  showSuggestions.value = false
-  activeSuggestionIdx.value = -1
-  if (searchTimeout) clearTimeout(searchTimeout)
-  searchTimeout = setTimeout(() => searchProducts(form.search), 300)
-}
-
-function onSearchKeydown(event: KeyboardEvent) {
-  if (!showSuggestions.value || !productSuggestions.value.length) return
-  if (event.key === 'ArrowDown') {
-    event.preventDefault()
-    activeSuggestionIdx.value = Math.min(activeSuggestionIdx.value + 1, productSuggestions.value.length - 1)
-  } else if (event.key === 'ArrowUp') {
-    event.preventDefault()
-    activeSuggestionIdx.value = Math.max(activeSuggestionIdx.value - 1, 0)
-  } else if (event.key === 'Enter' && activeSuggestionIdx.value >= 0) {
-    event.preventDefault()
-    selectProduct(productSuggestions.value[activeSuggestionIdx.value])
-  } else if (event.key === 'Escape') {
-    showSuggestions.value = false
-    activeSuggestionIdx.value = -1
-  }
-}
-
-function selectProduct(product: Product) {
+function onProductSelect(product: Product) {
   form.productId = String(product.id)
   form.search = product.name
-  showSuggestions.value = false
   fetchShipmentInfo()
 }
 
@@ -706,7 +635,6 @@ const { submitBatch } = useStockOutActions(staged, submitting, () => {
 })
 
 // === 批量导入 ===
-const showBatchUpload = ref(true)
 const excelFile = ref<File | null>(null)
 const importing = ref(false)
 const templateDownloading = ref(false)
@@ -753,11 +681,11 @@ async function handleImportExcel() {
     const fd = new FormData()
     fd.append('file', excelFile.value)
     const sessionId = `stg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    const res = await stockApi.stagingStockouts.importExcel(fd)
+    const res = await stockApi.stagingStockouts.importExcel(fd, sessionId)
     if (res.success) {
-      showToast(`成功导入 ${res.imported ?? res.count ?? 0} 条记录到暂存区`, 'success')
+      showToast(`成功导入 ${res.imported ?? 0} 条记录到暂存区`, 'success')
       excelFile.value = null
-      if ((Array.isArray(res.data) && res.data.length) || res.imported) {
+      if (res.imported) {
         try {
           const confirmRes = await stockApi.stagingStockouts.confirm(sessionId) as ApiResponse
           if (confirmRes.success) {
@@ -795,6 +723,19 @@ const filterCustomer = ref('')
 const filterOrderType = ref('')
 const filterStart = ref('')
 const filterEnd = ref('')
+const filterDateRange = computed<[string, string] | null>({
+  get: () => (filterStart.value && filterEnd.value ? [filterStart.value, filterEnd.value] : null),
+  set: (val) => {
+    if (val && val.length === 2) {
+      filterStart.value = val[0]
+      filterEnd.value = val[1]
+    } else {
+      filterStart.value = ''
+      filterEnd.value = ''
+    }
+    fetchStockouts()
+  },
+})
 const currentPage = ref(1)
 const totalPages = ref(1)
 const isLoading = ref(false)
@@ -852,9 +793,7 @@ function resetFilter() {
   fetchStockouts()
 }
 
-fetchStockouts()
-
-// 切换到记录查询tab时自动加载数据
+// 切换到记录查询tab时自动加载数据（首次进入时触发）
 watch(() => props.activeTab, (tab) => {
   if (tab === 'records' && stockoutRecords.value.length === 0) {
     fetchStockouts()
@@ -868,24 +807,6 @@ const detailData = ref<(typeof stockoutRecords.value)[number] | null>(null)
 function openDetail(item: (typeof stockoutRecords.value)[number]) {
   detailData.value = item
   detailOpen.value = true
-}
-
-// === 删除出货记录 ===
-async function handleDeleteRecord(id: number) {
-  if (!(await confirmDialog.confirm('确定要删除该出货记录吗？删除后不可恢复。'))) return
-  actionId.value = id
-  try {
-    await stockApi.deleteStockout(id)
-    showToast('删除成功', 'success')
-    fetchStockouts()
-    queryClient.invalidateQueries({ queryKey: ['pp-monthly'] })
-    queryClient.invalidateQueries({ queryKey: ['pp-summary'] })
-  } catch (err: unknown) {
-    const error = err as { response?: { data?: { detail?: string } } }
-    showToast(error.response?.data?.detail || '删除失败', 'error')
-  } finally {
-    actionId.value = 0
-  }
 }
 </script>
 

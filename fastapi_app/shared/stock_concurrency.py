@@ -4,7 +4,7 @@
 提供悲观锁 + 乐观锁双重保障，确保 product.current_stock 在并发场景下不会出现数据不一致。
 用法参照 Case 模型的 with_for_update() 模式。
 
-本模块为跨框架共享模块，Flask 和 FastAPI 均可直接导入使用，不依赖任何 Web 框架。
+本模块为框架无关模块，可直接导入使用，不依赖任何 Web 框架。
 """
 import logging
 
@@ -48,7 +48,7 @@ async def get_product_for_update(db: AsyncSession, product_id: int) -> Product:
 
 
 def get_product_for_update_sync(db: Session, product_id: int) -> Product:
-    """同步版本：获取产品并加行级悲观锁（供 Flask 路径使用）"""
+    """同步版本：获取产品并加行级悲观锁"""
     result = db.execute(
         select(Product).where(Product.id == product_id).with_for_update()
     )

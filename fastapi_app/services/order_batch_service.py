@@ -1,16 +1,22 @@
-"""订单批次号管理服务层"""
+"""订单批次号管理服务层
+
+TODO(multi-sku-order): 本模块 keyword 搜索通过 JOIN Product, Order.product_id == Product.id
+按首 item 产品名/barcode 过滤，多 SKU 下无法匹配非首 item 的产品。待后续 spec 改造为
+JOIN OrderItem。当前依赖 Task 3 设置的兼容值。
+"""
 import contextlib
 import json
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from fastapi_app.services import escape_like
+from fastapi_app.core.event_bus import safe_publish_event as _safe_publish_event
+from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.services.serializers.order_serializer import OrderSerializer
-from fastapi_app.shared_models import Order, OrderBatchAuditLog, OrderSyncConfig, Product, StockOut, User
+from fastapi_app.shared_models import Order, OrderBatchAuditLog, OrderSyncConfig, Product, StockIn, StockOut, User
 
 logger = logging.getLogger(__name__)
 
@@ -18,15 +24,8 @@ _WHITELIST_CACHE_KEY = "order_batch:whitelist"
 _WHITELIST_TTL = 300
 
 
-async def _safe_publish_event(event_type: str, data: dict):
-    try:
-        from fastapi_app.services.notification_service import publish_stock_event
-        await publish_stock_event(event_type, data)
-    except (RuntimeError, OSError, ValueError):
-        logger.warning("事件发布失败: %s", event_type, exc_info=True)
-
-
 async def _get_redis_client():
+    """获取模块级共享 Redis 客户端（连接池管理，无需手动关闭）"""
     try:
         from fastapi_app.services.notification_service import _get_async_redis_client
         return await _get_async_redis_client()
@@ -80,7 +79,7 @@ async def set_whitelist(db: AsyncSession, customers: list[str], user_id: int):
     if config:
         config.config_value = value
         config.updated_by_id = user_id
-        config.updated_at = datetime.now()
+        config.updated_at = datetime.now(UTC).replace(tzinfo=None)
     else:
         db.add(OrderSyncConfig(config_key="order_batch_whitelist", config_value=value, description="订单批次号白名单客户"))
 
@@ -110,11 +109,13 @@ async def get_batch_query_list(
 ) -> dict:
     whitelist = await get_whitelist(db)
 
+    # ---- 查询订单（LIMIT 保护内存，total 通过 COUNT 查询获取真实值）----
+    order_items = []
+
     stmt = select(Order).options(joinedload(Order.product)).where(
         Order.is_deleted.isnot(True),
     )
 
-    # 白名单非空时仅显示白名单客户；为空时显示所有客户
     if whitelist:
         stmt = stmt.where(Order.customer.in_(whitelist))
 
@@ -130,11 +131,24 @@ async def get_batch_query_list(
             or_(Order.order_no.ilike(kw), Product.name.ilike(kw), Product.barcode.ilike(kw))
         )
 
-    count_stmt = select(func.count()).select_from(stmt.subquery())
-    total = (await db.execute(count_stmt)).scalar() or 0
+    # 真实总数（不受 LIMIT 影响）
+    count_stmt = select(func.count(Order.id)).where(Order.is_deleted.isnot(True))
+    if whitelist:
+        count_stmt = count_stmt.where(Order.customer.in_(whitelist))
+    if batch_no:
+        count_stmt = count_stmt.where(Order.batch_no == batch_no)
+    if status:
+        count_stmt = count_stmt.where(Order.status == status)
+    if customer:
+        count_stmt = count_stmt.where(Order.customer == customer)
+    if keyword:
+        kw = f"%{escape_like(keyword)}%"
+        count_stmt = count_stmt.join(Product, Order.product_id == Product.id).where(
+            or_(Order.order_no.ilike(kw), Product.name.ilike(kw), Product.barcode.ilike(kw))
+        )
+    order_total = int((await db.execute(count_stmt)).scalar() or 0)
 
-    stmt = stmt.order_by(Order.order_date.desc()).offset((page - 1) * per_page).limit(per_page)
-    result = await db.execute(stmt)
+    result = await db.execute(stmt.order_by(Order.order_date.desc()).limit(5000))
     orders = result.unique().scalars().all()
 
     order_ids = [o.id for o in orders]
@@ -162,7 +176,6 @@ async def get_batch_query_list(
 
     from fastapi_app.shared_models.order import compute_status_from_stockouts
 
-    items = []
     for o in orders:
         sd = stockout_data.get(o.id, {'deducted_qty': 0, 'shipped_qty': 0})
         computed_status = compute_status_from_stockouts(o, sd['deducted_qty'], sd['shipped_qty'])
@@ -172,8 +185,68 @@ async def get_batch_query_list(
             'deducted_qty': sd['deducted_qty'],
             'shipped_qty': sd['shipped_qty'],
             'computed_status': computed_status,
+            'record_type': 'order',
         })
-        items.append(base_data)
+        order_items.append(base_data)
+
+    # ---- 查询备货（LIMIT 保护内存，total 通过 COUNT 查询获取真实值）----
+    stockin_items = []
+
+    si_stmt = select(StockIn).options(joinedload(StockIn.product))
+
+    if whitelist:
+        si_stmt = si_stmt.where(StockIn.customer.in_(whitelist))
+    if customer:
+        si_stmt = si_stmt.where(StockIn.customer == customer)
+    if keyword:
+        kw = f"%{escape_like(keyword)}%"
+        si_stmt = si_stmt.join(Product, StockIn.product_id == Product.id).where(
+            or_(StockIn.stockin_no.ilike(kw), Product.name.ilike(kw), Product.barcode.ilike(kw))
+        )
+
+    # 真实总数（不受 LIMIT 影响）
+    si_count_stmt = select(func.count(StockIn.id))
+    if whitelist:
+        si_count_stmt = si_count_stmt.where(StockIn.customer.in_(whitelist))
+    if customer:
+        si_count_stmt = si_count_stmt.where(StockIn.customer == customer)
+    if keyword:
+        kw = f"%{escape_like(keyword)}%"
+        si_count_stmt = si_count_stmt.join(Product, StockIn.product_id == Product.id).where(
+            or_(StockIn.stockin_no.ilike(kw), Product.name.ilike(kw), Product.barcode.ilike(kw))
+        )
+    stockin_total = int((await db.execute(si_count_stmt)).scalar() or 0)
+
+    si_result = await db.execute(si_stmt.order_by(StockIn.stockin_date.desc()).limit(5000))
+    stockins = si_result.unique().scalars().all()
+
+    for s in stockins:
+        stockin_items.append({
+            'id': s.id,
+            'order_no': s.stockin_no,
+            'customer': s.customer,
+            'order_date': s.stockin_date.strftime('%Y-%m-%d %H:%M') if s.stockin_date else '',
+            'product_id': s.product_id,
+            'product_name': s.product.name if s.product else None,
+            'product_barcode': s.product.barcode if s.product else None,
+            'quantity': s.quantity,
+            'deducted_qty': 0,
+            'shipped_qty': 0,
+            'status': None,
+            'computed_status': None,
+            'batch_no': None,
+            'batch_completed_at': None,
+            'is_locked': None,
+            'record_type': 'stockin',
+        })
+
+    # ---- 合并结果，统一分页 ----
+    all_items = order_items + stockin_items
+    all_items.sort(key=lambda x: x.get('order_date') or '', reverse=True)
+    # total 使用 SQL COUNT 真实值，不受 LIMIT 截断影响
+    total = order_total + stockin_total
+    start = (page - 1) * per_page
+    items = all_items[start:start + per_page]
 
     return {'items': items, 'total': total}
 
@@ -273,7 +346,7 @@ async def update_batch_no(
     sync_same_batch: bool,
     user: User,
 ) -> dict:
-    result = await db.execute(select(Order).where(Order.id == order_id))
+    result = await db.execute(select(Order).where(Order.id == order_id).with_for_update())
     order = result.scalar_one_or_none()
     if not order:
         raise ValueError(f"订单不存在: {order_id}")
@@ -320,7 +393,7 @@ async def batch_assign(
     user: User,
 ) -> dict:
     whitelist = await get_whitelist(db)
-    stmt = select(Order).where(Order.id.in_(order_ids), Order.is_deleted.isnot(True))
+    stmt = select(Order).where(Order.id.in_(order_ids), Order.is_deleted.isnot(True)).with_for_update()
     result = await db.execute(stmt)
     orders = result.scalars().all()
 
@@ -362,11 +435,11 @@ async def complete_batch(
     if not orders:
         raise ValueError(f"批次 {batch_no} 没有可完成的订单")
 
-    now = datetime.now()
+    now = datetime.now(UTC).replace(tzinfo=None)
     completed = []
     failed_orders = []
 
-    from fastapi_app.services.order_service import compute_order_status_from_db
+    from fastapi_app.services.order_utils import compute_order_status_from_db
 
     for o in orders:
         # 批次完成仅适用于已出货的订单

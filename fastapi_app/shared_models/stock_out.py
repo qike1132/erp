@@ -1,7 +1,7 @@
 """
 出货模型 - 纯 SQLAlchemy 2.0 声明式
 
-映射到与 Flask-SQLAlchemy StockOut 相同的 'stock_out' 表。
+映射到 'stock_out' 表。
 """
 from __future__ import annotations
 

@@ -1,14 +1,16 @@
 """来料登记服务层"""
 import logging
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import DisconnectionError, OperationalError
 from sqlalchemy.orm import joinedload, selectinload
 
-from fastapi_app.core.cache import cache_result, CacheDomain, invalidate_related_caches
-from fastapi_app.services import escape_like
+from fastapi_app.core.cache import cache_result
+from fastapi_app.core.sanitizer import escape_like
+from fastapi_app.utils import calc_total_pages
+from fastapi_app.services.purchase_order_query import _build_po_source_sku_map
 from fastapi_app.shared_models import (
     MaterialRegistration,
     MaterialRegistrationItem,
@@ -20,51 +22,30 @@ from fastapi_app.shared_models import (
 logger = logging.getLogger(__name__)
 
 
-@cache_result(key_prefix="material:stats", ttl=60, local_ttl=15,
-             key_builder=lambda *a, **kw: "global")
-async def _get_material_stats(db) -> dict:
-    """获取来料统计数据（L1 15s + L2 60s 缓存，写操作时通过 MATERIAL 域失效）"""
-    status_counts_result = await db.execute(
-        select(MaterialRegistration.status, func.count())
-        .where(MaterialRegistration.status.in_(['pending', 'partial', 'completed']))
-        .group_by(MaterialRegistration.status)
-    )
-    status_counts = {row[0]: row[1] for row in status_counts_result}
-    pending_count = status_counts.get('pending', 0)
-    partial_count = status_counts.get('partial', 0)
-    completed_count = status_counts.get('completed', 0)
-    total_all = sum(status_counts.values())
-
-    totals_result = await db.execute(
-        select(
-            func.sum(MaterialRegistrationItem.ordered_quantity),
-            func.sum(MaterialRegistrationItem.received_quantity),
-        )
-    )
-    totals_row = totals_result.one()
-    total_ordered = totals_row[0] or 0
-    total_received = totals_row[1] or 0
-
-    return {
-        'total': total_all, 'pending': pending_count, 'partial': partial_count,
-        'completed': completed_count,
-        'total_ordered': float(total_ordered), 'total_received': float(total_received),
-        'overall_progress': min(round(float(total_received) / float(total_ordered or 1) * 100, 1), 99.9) if completed_count < total_all else (100.0 if total_all > 0 else 0),
-    }
-
-
+@cache_result(key_prefix="material:registrations", ttl=30, local_ttl=10,
+             key_builder=lambda **kw: f"{kw.get('page',1)}:{kw.get('per_page',20)}:{kw.get('status','')}:{kw.get('order_no','')}:{kw.get('supplier','')}:{kw.get('customer_name','')}:{kw.get('material_category','')}:{kw.get('start_date','')}:{kw.get('end_date','')}:{kw.get('exclude_completed',False)}")
 async def get_registrations(db, page: int = 1, per_page: int = 20,
                            status: str = '', order_no: str = '', supplier: str = '',
-                           start_date: str = '', end_date: str = '') -> dict:
-    """获取来料登记列表"""
+                           customer_name: str = '', material_category: str = '',
+                           start_date: str = '', end_date: str = '',
+                           exclude_completed: bool = False) -> dict:
+    """获取来料登记列表
+
+    支持多维度筛选；当 exclude_completed=True 时排除已完成的登记（用于来料进度 tab）。
+    L1 10s + L2 30s 缓存，写操作时通过 MATERIAL 域失效。
+    """
     # Build filter conditions once, apply to both data query and count query
     conditions = []
     if status:
         conditions.append(MaterialRegistration.status == status)
+    elif exclude_completed:
+        conditions.append(MaterialRegistration.status != 'completed')
     if order_no:
         conditions.append(MaterialRegistration.purchase_order_no.ilike(f'%{escape_like(order_no)}%'))
     if supplier:
         conditions.append(MaterialRegistration.supplier_name.ilike(f'%{escape_like(supplier)}%'))
+    if customer_name:
+        conditions.append(PurchaseOrder.customer_name.ilike(f'%{escape_like(customer_name)}%'))
     if start_date:
         try:
             sd = datetime.strptime(start_date, '%Y-%m-%d').date()
@@ -77,13 +58,24 @@ async def get_registrations(db, page: int = 1, per_page: int = 20,
             conditions.append(MaterialRegistration.registration_date <= ed)
         except ValueError:
             pass
+    if material_category:
+        conditions.append(
+            MaterialRegistration.items.any(MaterialRegistrationItem.material_category == material_category)
+        )
 
-    query = select(MaterialRegistration).options(
+    needs_po_join = bool(customer_name)
+    base_query = select(MaterialRegistration)
+    if needs_po_join:
+        base_query = base_query.join(MaterialRegistration.purchase_order)
+    query = base_query.options(
         selectinload(MaterialRegistration.items),
         selectinload(MaterialRegistration.purchase_order),
     ).where(*conditions)
 
-    total_q = select(func.count(MaterialRegistration.id)).where(*conditions)
+    total_q = select(func.count(MaterialRegistration.id))
+    if needs_po_join:
+        total_q = total_q.join(MaterialRegistration.purchase_order)
+    total_q = total_q.where(*conditions)
     total = (await db.execute(total_q)).scalar() or 0
 
     query = query.order_by(MaterialRegistration.create_time.desc())
@@ -92,15 +84,70 @@ async def get_registrations(db, page: int = 1, per_page: int = 20,
     result = await db.execute(query)
     registrations = list(result.scalars().all())
 
-    stats = await _get_material_stats(db)
+    # 批量查询每条来料登记关联的采购订单明细中的供应商分布，
+    # 以便前端能展示同一采购订单下不同物料供应商（BOM 可配置多个供应商）
+    po_ids = [r.purchase_order_id for r in registrations if r.purchase_order_id]
+    supplier_map: dict[int, set[str]] = {}
+    # item_id -> supplier_name 映射，用于给每个来料登记明细注入供应商信息
+    item_supplier_map: dict[int | None, str] = {}
+    # 查询每个采购订单的 SKU 明细（产品名、条码、数量），用于前端分列显示多 SKU
+    po_sku_map: dict[int, list[dict]] = {}
+    if po_ids:
+        po_for_sku = [r.purchase_order for r in registrations if r.purchase_order]
+        po_sku_map = await _build_po_source_sku_map(db, po_for_sku)
+    if po_ids:
+        sup_result = await db.execute(
+            select(
+                PurchaseOrderItem.order_id,
+                PurchaseOrderItem.id,
+                PurchaseOrderItem.supplier_name,
+                PurchaseOrderItem.material_name,
+            ).where(
+                PurchaseOrderItem.order_id.in_(po_ids),
+                PurchaseOrderItem.supplier_name.isnot(None),
+                PurchaseOrderItem.supplier_name != '',
+            )
+        )
+        # material_name -> supplier_name 映射（按 order_id 分组），用于回填无 order_item_id 的明细
+        po_material_supplier: dict[int, dict[str, str]] = {}
+        for po_id, item_id, sup_name, mat_name in sup_result.all():
+            supplier_map.setdefault(po_id, set()).add(sup_name)
+            if item_id is not None:
+                item_supplier_map[item_id] = sup_name
+            if mat_name:
+                po_material_supplier.setdefault(po_id, {})[mat_name] = sup_name
+
+    reg_dicts = []
+    for r in registrations:
+        d = r.to_dict()
+        names = sorted(supplier_map.get(r.purchase_order_id, set()))
+        d['supplier_names'] = names if names else ([d.get('supplier_name')] if d.get('supplier_name') else [])
+        # 订单时间：采购订单生成时间（用户要求展示"来料登记生成订单的时间"）
+        po = r.purchase_order
+        if po and po.create_time:
+            d['po_create_time'] = po.create_time.strftime('%Y/%m/%d')
+        else:
+            d['po_create_time'] = ''
+        # SKU 明细列表（多 SKU 订单时前端按 SKU 分行显示产品名称和数量）
+        d['sku_items'] = po_sku_map.get(r.purchase_order_id, [])
+        # 给每个明细注入 supplier_name（优先用 order_item_id 匹配，回退用 material_name 匹配）
+        mat_map = po_material_supplier.get(r.purchase_order_id, {})
+        for item in d.get('items', []):
+            oid = item.get('order_item_id')
+            if oid and oid in item_supplier_map:
+                item['supplier_name'] = item_supplier_map[oid]
+            elif item.get('material_name') in mat_map:
+                item['supplier_name'] = mat_map[item['material_name']]
+            else:
+                item['supplier_name'] = r.supplier_name or ''
+        reg_dicts.append(d)
 
     return {
         'success': True,
-        'registrations': [r.to_dict() for r in registrations],
+        'registrations': reg_dicts,
         'total': total,
-        'pages': (total + per_page - 1) // per_page if per_page else 0,
+        'pages': calc_total_pages(total, per_page),
         'current_page': page,
-        'stats': stats,
     }
 
 
@@ -115,7 +162,37 @@ async def get_registration(db, reg_id: int) -> dict:
     reg = result.scalar_one_or_none()
     if not reg:
         raise ValueError("来料登记不存在")
-    return {'success': True, 'registration': reg.to_dict()}
+    d = reg.to_dict()
+    # 给每个明细注入 supplier_name（与列表接口保持一致，便于前端按供应商汇总）
+    po_id = reg.purchase_order_id
+    if po_id:
+        sup_result = await db.execute(
+            select(
+                PurchaseOrderItem.id,
+                PurchaseOrderItem.supplier_name,
+                PurchaseOrderItem.material_name,
+            ).where(
+                PurchaseOrderItem.order_id == po_id,
+                PurchaseOrderItem.supplier_name.isnot(None),
+                PurchaseOrderItem.supplier_name != '',
+            )
+        )
+        item_supplier_map: dict[int, str] = {}
+        material_supplier_map: dict[str, str] = {}
+        for item_id, sup_name, mat_name in sup_result.all():
+            if item_id is not None:
+                item_supplier_map[item_id] = sup_name
+            if mat_name:
+                material_supplier_map[mat_name] = sup_name
+        for item in d.get('items', []):
+            oid = item.get('order_item_id')
+            if oid and oid in item_supplier_map:
+                item['supplier_name'] = item_supplier_map[oid]
+            elif item.get('material_name') in material_supplier_map:
+                item['supplier_name'] = material_supplier_map[item['material_name']]
+            else:
+                item['supplier_name'] = reg.supplier_name or ''
+    return {'success': True, 'registration': d}
 
 
 async def create_registration(db, purchase_order_id: int, user_id: int | None = None,
@@ -131,7 +208,7 @@ async def create_registration(db, purchase_order_id: int, user_id: int | None = 
         purchase_order_no=po.order_no,
         supplier_id=po.supplier_id,
         supplier_name=po.supplier_name,
-        registration_date=datetime.now().date(),
+        registration_date=datetime.now(UTC).replace(tzinfo=None).date(),
         status='pending',
         remark=remark,
         created_by=user_id,
@@ -229,14 +306,19 @@ async def get_available_purchase_orders(db, status: str = 'pending') -> dict:
 
 async def receive_material(db, item_id: int, received_quantity: float,
                            remark: str | None = None) -> dict:
-    """物料收货登记"""
+    """物料收货登记
+
+    使用 SELECT ... FOR UPDATE 悲观锁，防止并发收货导致 received_quantity 丢失更新。
+    purchase_order 改用 selectinload 单独加载，避免 FOR UPDATE 锁定采购订单表。
+    """
     result = await db.execute(
         select(MaterialRegistrationItem)
         .options(
-            joinedload(MaterialRegistrationItem.registration).selectinload(MaterialRegistration.items),
-            joinedload(MaterialRegistrationItem.registration).joinedload(MaterialRegistration.purchase_order),
+            selectinload(MaterialRegistrationItem.registration).selectinload(MaterialRegistration.items),
+            selectinload(MaterialRegistrationItem.registration).selectinload(MaterialRegistration.purchase_order),
         )
         .where(MaterialRegistrationItem.id == item_id)
+        .with_for_update()
     )
     item = result.unique().scalar_one_or_none()
     if not item:
@@ -292,7 +374,7 @@ async def get_stats_overview(db) -> dict:
     total_ordered = totals_row[0] or 0
     total_received = totals_row[1] or 0
 
-    today = datetime.now().date()
+    today = datetime.now(UTC).replace(tzinfo=None).date()
     week_ago = today - timedelta(days=7)
 
     recent = (await db.execute(
@@ -325,59 +407,15 @@ async def get_purchase_order_items(db, order_id: int) -> dict:
     return {'success': True, 'items': [item.to_dict() for item in items]}
 
 
-async def preview_purchase_order(db, order_no: str) -> dict:
-    """采购订单快速预览"""
-    result = await db.execute(
-        select(PurchaseOrder)
-        .options(joinedload(PurchaseOrder.items))
-        .where(PurchaseOrder.order_no == order_no)
-    )
-    order = result.unique().scalar_one_or_none()
-    if not order:
-        raise ValueError("订单不存在")
-
-    # Fetch source sales orders info
-    source_orders = {}
-    source_order_ids = set()
-    if order.source_order_id:
-        source_order_ids.add(order.source_order_id)
-    if order.source_order_ids:
-        try:
-            import json
-            for sid in json.loads(order.source_order_ids):
-                if sid:
-                    source_order_ids.add(sid)
-        except (json.JSONDecodeError, TypeError):
-            pass
-    if source_order_ids:
-        so_result = await db.execute(
-            select(Order).options(joinedload(Order.product)).where(Order.id.in_(source_order_ids))
-        )
-        for so in so_result.unique().scalars().all():
-            source_orders[so.id] = so
-
-    order_dict = order.to_dict(source_orders=source_orders)
-    order_dict['source_order_ids'] = order.source_order_ids
-
-    # Enrich source order details for display
-    source_details = []
-    for so in source_orders.values():
-        detail: dict = {'id': so.id, 'order_no': so.order_no}
-        if hasattr(so, 'product') and so.product:
-            detail['product_name'] = so.product.name
-        if hasattr(so, 'quantity') and so.quantity:
-            detail['quantity'] = float(so.quantity)
-        detail['customer_name'] = so.customer if hasattr(so, 'customer') else None
-        source_details.append(detail)
-    order_dict['source_orders'] = source_details
-
-    return {'success': True, 'order': order_dict}
-
-
 async def export_registrations(db, order_no: str = '', supplier: str = '',
+                               customer_name: str = '', material_category: str = '',
                                start_date: str = '', end_date: str = '') -> dict:
     """导出来料登记数据（返回HTML用于Excel打开）"""
-    query = select(MaterialRegistration).options(
+    needs_po_join = bool(customer_name)
+    base_query = select(MaterialRegistration)
+    if needs_po_join:
+        base_query = base_query.join(MaterialRegistration.purchase_order)
+    query = base_query.options(
         selectinload(MaterialRegistration.items),
         selectinload(MaterialRegistration.purchase_order),
     )
@@ -385,6 +423,8 @@ async def export_registrations(db, order_no: str = '', supplier: str = '',
         query = query.where(MaterialRegistration.purchase_order_no.ilike(f'%{escape_like(order_no)}%'))
     if supplier:
         query = query.where(MaterialRegistration.supplier_name.ilike(f'%{escape_like(supplier)}%'))
+    if customer_name:
+        query = query.where(PurchaseOrder.customer_name.ilike(f'%{escape_like(customer_name)}%'))
     if start_date:
         try:
             sd = datetime.strptime(start_date, '%Y-%m-%d').date()
@@ -397,6 +437,10 @@ async def export_registrations(db, order_no: str = '', supplier: str = '',
             query = query.where(MaterialRegistration.registration_date <= ed)
         except ValueError:
             pass
+    if material_category:
+        query = query.where(
+            MaterialRegistration.items.any(MaterialRegistrationItem.material_category == material_category)
+        )
 
     query = query.order_by(MaterialRegistration.create_time.desc()).limit(5000)
     result = await db.execute(query)
@@ -475,9 +519,12 @@ async def get_history(db, page: int = 1, per_page: int = 20,
             MaterialRegistration.items.any(MaterialRegistrationItem.material_category == material_category)
         )
 
+    # customer_name 筛选需要 JOIN purchase_order；count 与 data 查询共用同一 JOIN 决策
+    needs_po_join = bool(customer_name)
+
     # Count query — no eager loading, just count
     count_query = select(func.count(MaterialRegistration.id))
-    if customer_name:
+    if needs_po_join:
         count_query = count_query.join(MaterialRegistration.purchase_order)
     count_query = count_query.where(*conditions)
     total = (await db.execute(count_query)).scalar() or 0
@@ -488,7 +535,7 @@ async def get_history(db, page: int = 1, per_page: int = 20,
         selectinload(MaterialRegistration.items),
         joinedload(MaterialRegistration.purchase_order),
     )
-    if customer_name:
+    if needs_po_join:
         data_query = data_query.join(MaterialRegistration.purchase_order)
     data_query = (
         data_query.where(*conditions)
@@ -503,7 +550,7 @@ async def get_history(db, page: int = 1, per_page: int = 20,
         'success': True,
         'registrations': [r.to_dict() for r in page_regs],
         'total': total,
-        'pages': (total + per_page - 1) // per_page if per_page else 0,
+        'pages': calc_total_pages(total, per_page),
         'current_page': page,
     }
 
@@ -536,7 +583,7 @@ async def get_suggestions(db, field: str, keyword: str, limit: int = 10) -> dict
                 .distinct().limit(limit)
             )
             suggestions = [r[0] for r in result.all() if r[0]]
-    except (OperationalError, DisconnectionError, ValueError) as e:
+    except (OperationalError, DisconnectionError) as e:
         logger.error(f"获取联想建议失败: {e}")
 
     return {'success': True, 'suggestions': suggestions[:limit]}
@@ -556,7 +603,7 @@ async def get_stats_distribution(db) -> dict:
     partial = status_counts.get('partial', 0)
     completed = status_counts.get('completed', 0)
 
-    month_ago = datetime.now().date() - timedelta(days=30)
+    month_ago = datetime.now(UTC).replace(tzinfo=None).date() - timedelta(days=30)
     overdue_items = (await db.execute(
         select(func.count(MaterialRegistrationItem.id)).where(
             MaterialRegistrationItem.ordered_quantity > MaterialRegistrationItem.received_quantity,
@@ -576,10 +623,10 @@ async def get_stats_distribution(db) -> dict:
 
 
 @cache_result(key_prefix="material:trend", ttl=60, local_ttl=15,
-             key_builder=lambda db, days=30: str(days))
+             key_builder=lambda **kwargs: str(kwargs.get('days', 30)))
 async def get_stats_trend(db, days: int = 30) -> dict:
     """趋势数据（SQL GROUP BY 替代全量 ORM 加载，L1 15s + L2 60s 缓存）"""
-    end_date = datetime.now().date()
+    end_date = datetime.now(UTC).replace(tzinfo=None).date()
     start_date = end_date - timedelta(days=days)
 
     # 生成完整日期骨架

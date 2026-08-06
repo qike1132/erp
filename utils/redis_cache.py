@@ -38,7 +38,7 @@ class RedisCacheManager:
                        redis_port: int = 6379, redis_db: int = 0, redis_password: str = None,
                        default_timeout: int = 300, key_prefix: str = 'erp:'):
         if app is not None:
-            redis_url = redis_url or app.config.get('REDIS_URL') or os.getenv('REDIS_URL')
+            redis_url = redis_url or app.config.get('REDIS_CACHE_URL') or app.config.get('REDIS_URL') or os.getenv('REDIS_CACHE_URL') or os.getenv('REDIS_URL')
             redis_host = app.config.get('REDIS_HOST', os.getenv('REDIS_HOST', 'localhost'))
             redis_port = int(app.config.get('REDIS_PORT', os.getenv('REDIS_PORT', 6379)))
             redis_db = int(app.config.get('REDIS_DB', os.getenv('REDIS_DB', 0)))

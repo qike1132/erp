@@ -1,7 +1,5 @@
 """
 暂存订单 FastAPI 端点
-
-从 Flask staging_order.py 迁移的暂存订单功能。
 """
 import logging
 
@@ -36,7 +34,8 @@ async def get_staging_orders(session_id: str=Query('default', description='会�
 async def clear_staging_orders_by_session(session_id: str, db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_permission('batch_import'))):
     """清空指定批次的暂存订单"""
     scoped_session = f'u{current_user.id}:{session_id}'
-    deleted = await svc.clear_staging_orders_by_session(db, scoped_session)
+    async with db_transaction(db):
+        deleted = await svc.clear_staging_orders_by_session(db, scoped_session)
     return StagingClearResponse(success=True, message=f'已清空 {deleted} 个暂存订单', deleted=deleted)
 
 @router.post('/import', response_model=StagingOrderImportResult, summary='导入订单到暂存区')
@@ -50,7 +49,8 @@ async def import_staging_orders(file: UploadFile=File(...), session_id: str=Quer
     if not content[:4] == b'\x50\x4b\x03\x04':
         return StagingOrderImportResult(success=False, message='文件内容不是有效的Excel格式')
     scoped_session = f'u{current_user.id}:{session_id}'
-    imported, message, errors = await svc.import_staging_orders_from_excel(db, content, scoped_session)
+    async with db_transaction(db):
+        imported, message, errors = await svc.import_staging_orders_from_excel(db, content, scoped_session)
     return StagingOrderImportResult(success=imported > 0 or len(errors) == 0, message=message, imported=imported, session_id=session_id, errors=errors)
 
 @router.put('/{order_id}', response_model=StagingResponse, summary='更新暂存订单')
@@ -64,7 +64,8 @@ async def update_staging_order(order_id: int, data: StagingOrderUpdate, db: Asyn
 async def clear_staging_orders(session_id: str=Query('default', description='会话ID'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_permission('batch_import'))):
     """清空当前会话的暂存订单"""
     scoped_session = f'u{current_user.id}:{session_id}'
-    await svc.clear_staging_orders(db, scoped_session)
+    async with db_transaction(db):
+        await svc.clear_staging_orders(db, scoped_session)
     return StagingResponse(success=True, message='清空成功')
 
 @router.delete('/{order_id}', response_model=StagingResponse, summary='删除暂存订单')
@@ -78,7 +79,8 @@ async def delete_staging_order(order_id: int, db: AsyncSession=Depends(get_async
 async def confirm_staging_orders(session_id: str=Query('default', description='会话ID'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_permission('batch_import'))):
     """确认暂存订单 - 转移到正式订单表"""
     scoped_session = f'u{current_user.id}:{session_id}'
-    confirmed, errors = await svc.confirm_staging_orders(db, scoped_session)
+    async with db_transaction(db):
+        confirmed, errors = await svc.confirm_staging_orders(db, scoped_session)
     if confirmed == 0 and errors:
         return StagingOrderConfirmResult(success=False, message=errors[0], confirmed=0, errors=errors)
     return StagingOrderConfirmResult(success=True, message=f'成功确认 {confirmed} 个订单', confirmed=confirmed, errors=errors)

@@ -1,7 +1,5 @@
 """
 审批流程模型 - 纯 SQLAlchemy 2.0 声明式
-
-映射到与 Flask-SQLAlchemy ApprovalRequest / ApprovalLog 相同的表。
 """
 from __future__ import annotations
 

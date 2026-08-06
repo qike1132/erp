@@ -5,12 +5,12 @@
 """
 import json
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.services import escape_like
+from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.shared_models import ModificationLog, OrderStatusLog, SavedQuery
 
 logger = logging.getLogger(__name__)
@@ -60,7 +60,6 @@ async def save_query(db: AsyncSession, data: dict, user_id: int, username: str) 
         creator_name=username,
     )
     db.add(sq)
-    await db.commit()
     return sq.to_dict()
 
 
@@ -69,7 +68,6 @@ async def delete_saved_query(db: AsyncSession, query_id: int) -> str | None:
     if not sq:
         return None
     await db.delete(sq)
-    await db.commit()
     return '已删除'
 
 
@@ -78,8 +76,7 @@ async def use_saved_query(db: AsyncSession, query_id: int) -> dict | None:
     if not sq:
         return None
     sq.use_count += 1
-    sq.last_use_time = datetime.now()
-    await db.commit()
+    sq.last_use_time = datetime.now(UTC).replace(tzinfo=None)
     return sq.to_dict()
 
 

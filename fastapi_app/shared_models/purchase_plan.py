@@ -72,7 +72,7 @@ class PurchasePlanDetail(Base):
     barcode: Mapped[str] = mapped_column(String(50), nullable=False, comment='69码')
     plan_date: Mapped[datetime] = mapped_column(Date, nullable=False, comment='计划日期')
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, comment='计划数量')
-    shipped_qty: Mapped[int] = mapped_column(Integer, default=0, comment='已出货数量(缓存)')
+    shipped_qty: Mapped[int] = mapped_column(Integer, default=0, comment='[DEPRECATED] 已出货数量缓存 - 所有读路径已改用 FIFO 实时查询 (fifo_allocation.allocate_fifo)，此列仅 _update_shipped_qty 在 recalc 流程中写入。后续可通过 migration 移除。')
     remark: Mapped[str | None] = mapped_column(Text, nullable=True, comment='备注')
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment='更新时间')
 

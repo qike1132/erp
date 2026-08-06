@@ -30,6 +30,10 @@
           <div class="sk-stat-value">{{ totalRegularQty + totalCustomQty + totalStockinQty }}</div>
           <div class="sk-stat-label">总订单</div>
         </div>
+        <div class="sk-stat-card sk-stat-stock">
+          <div class="sk-stat-value">{{ totalAvailableStock }}</div>
+          <div class="sk-stat-label">可用库存</div>
+        </div>
       </div>
     </div>
 
@@ -62,8 +66,7 @@
 
     <div class="sk-card-main">
       <div v-if="isLoading && inventory.length === 0" class="sk-empty">
-        <i class="fas fa-spinner fa-spin"  aria-hidden="true" />
-        <span>加载中…</span>
+        <UiSpinner />
       </div>
       <div v-else-if="inventory.length === 0" class="sk-empty">
         <i class="fas fa-warehouse"  aria-hidden="true" />
@@ -80,6 +83,7 @@
               <th>定制订单</th>
               <th>备货数量</th>
               <th>总订单</th>
+              <th>实时可用库存</th>
             </tr>
           </thead>
           <tbody>
@@ -106,7 +110,17 @@
               </td>
               <td>{{ item.stockin_quantity }}</td>
               <td>
-                <strong :class="item.total_stock < 0 ? 'sk-text-negative' : 'sk-text-positive'">{{ item.total_stock }}</strong>
+                <strong :class="(item.total_stock ?? 0) < 0 ? 'sk-text-negative' : 'sk-text-positive'">{{ item.total_stock ?? 0 }}</strong>
+              </td>
+              <td>
+                <div class="sk-available-cell">
+                  <strong :class="(item.available_stock ?? 0) < 0 ? 'sk-text-negative' : 'sk-text-positive'">{{ item.available_stock ?? 0 }}</strong>
+                  <div v-if="item._country_available && item._country_available.length" class="sk-country-share">
+                    <template v-for="d in item._country_available" :key="`${d.country}-${d.qty}`">
+                      <span class="sk-country-share-label">{{ d.country }}：</span><span>{{ d.qty }}</span>
+                    </template>
+                  </div>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -147,22 +161,27 @@ const {
       country: filters.country || undefined,
       page: page.value,
       per_page: 15,
-    }) as Promise<any>,
+    }),
   staleTime: 30_000,
   gcTime: 60_000,
   placeholderData: keepPreviousData,
 })
 
 const inventory = computed(() => {
-  const raw = invData.value?.data ?? invData.value?.inventory ?? invData.value?.items ?? (Array.isArray(invData.value) ? invData.value : [])
-  return raw.map((item: any) => {
+  const raw = invData.value?.data ?? []
+  return raw.map((item) => {
     if (item._custom_details) return item
     const co = item.country_orders ?? {}
     const details: { country: string; qty: number }[] = []
     for (const [k, v] of Object.entries(co)) {
       if (k !== '常规' && v) details.push({ country: k, qty: Number(v) })
     }
-    return { ...item, _custom_details: details }
+    const abc = item.available_stock_by_country ?? {}
+    const country_available: { country: string; qty: number }[] = []
+    for (const [k, v] of Object.entries(abc)) {
+      if (v) country_available.push({ country: k, qty: Number(v) })
+    }
+    return { ...item, _custom_details: details, _country_available: country_available }
   })
 })
 const allCustomers = computed(() => (invData.value?.all_customers ?? []) as string[])
@@ -170,12 +189,13 @@ const allCustomers = computed(() => (invData.value?.all_customers ?? []) as stri
 const totalOrderQty = computed(() => invData.value?.total_order_quantity ?? 0)
 const totalRegularQty = computed(() => Math.max(0, totalOrderQty.value - totalCustomQty.value))
 const totalCustomQty = computed(() => {
-  return inventory.value.reduce((s: number, i: any) => {
+  return inventory.value.reduce((s, i) => {
     const details = i._custom_details ?? []
-    return s + details.reduce((ss: number, d: any) => ss + d.qty, 0)
+    return s + details.reduce((ss, d) => ss + d.qty, 0)
   }, 0)
 })
 const totalStockinQty = computed(() => invData.value?.total_stockin_quantity ?? 0)
+const totalAvailableStock = computed(() => invData.value?.total_available_stock ?? 0)
 
 function toggleCustomer(c: string) {
   filters.customer = filters.customer === c ? '' : c
@@ -405,6 +425,8 @@ defineExpose({ inventory, filteredInventory: inventory, handleExport })
 .sk-stat-success .sk-stat-value { color: var(--color-success-600); }
 .sk-stat-info { background: var(--color-info-50); border-color: var(--color-info-200); }
 .sk-stat-info .sk-stat-value { color: var(--color-info-600); }
+.sk-stat-stock { background: #f0fdf4; border-color: #bbf7d0; }
+.sk-stat-stock .sk-stat-value { color: #16a34a; }
 .sk-card-main {
   flex: 1;
   display: flex;
@@ -474,6 +496,25 @@ defineExpose({ inventory, filteredInventory: inventory, handleExport })
   text-align: right;
   justify-self: end;
   color: var(--color-text-secondary);
+}
+.sk-available-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: center;
+}
+.sk-country-share {
+  display: inline-grid;
+  grid-template-columns: auto auto;
+  text-align: left;
+  line-height: 1.4;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+.sk-country-share-label {
+  text-align: right;
+  justify-self: end;
+  margin-right: 4px;
 }
 .sk-text-negative { color: var(--color-danger-500); }
 .sk-text-positive { color: var(--color-success-500); }

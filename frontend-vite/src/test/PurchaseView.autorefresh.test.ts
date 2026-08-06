@@ -1,0 +1,113 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+
+// Hoisted mock state — vi.mock factories are hoisted to the top of the file,
+// so we keep mutable mocks inside vi.hoisted() and reference them by name.
+const mocks = vi.hoisted(() => ({
+  ordersMock: vi.fn(),
+  unprocessedMock: vi.fn(),
+}))
+
+vi.mock('@/api', () => ({
+  purchaseApi: {
+    orders: mocks.ordersMock,
+    unprocessedOrders: mocks.unprocessedMock,
+    oneClickGenerate: vi.fn(),
+    completeOrder: vi.fn(),
+    batchComplete: vi.fn(),
+    orderDetail: vi.fn(),
+    deleteOrder: vi.fn(),
+    batchDelete: vi.fn(),
+    updateOrder: vi.fn(),
+    completed: vi.fn(),
+    exportCompleted: vi.fn(),
+    quickFilters: vi.fn(),
+    suggestions: vi.fn(),
+    factorySummary: vi.fn(),
+    supplierSummary: vi.fn(),
+    saveFactoryEdits: vi.fn(),
+    summaryPrint: vi.fn(),
+    supplierSummaryExport: vi.fn(),
+    products: vi.fn(),
+    searchSuggestions: vi.fn(),
+    calculate: vi.fn(),
+  },
+}))
+
+vi.mock('@tanstack/vue-query', () => ({
+  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+}))
+
+vi.mock('@/composables/useToast', () => ({
+  showToast: vi.fn(),
+}))
+
+vi.mock('@/composables/useConfirmDialog', () => ({
+  useConfirmDialog: () => ({
+    open: false,
+    text: '',
+    sub: '',
+    type: 'warning',
+    onConfirm: vi.fn(),
+    onCancel: vi.fn(),
+    confirm: vi.fn(async () => true),
+  }),
+}))
+
+import { mount, flushPromises } from '@vue/test-utils'
+import { nextTick } from 'vue'
+
+const stubs = {
+  PendingOrdersPanel: { template: '<div />' },
+  ActiveOrdersPanel: { template: '<div />' },
+  CompletedOrdersPanel: { template: '<div />' },
+  OrderDetailModal: { template: '<div />' },
+  SummaryModal: { template: '<div />' },
+  UiConfirmDialog: { template: '<div />' },
+  HeaderTabs: { template: '<div />' },
+}
+
+import PurchaseView from '@/views/purchase/PurchaseView.vue'
+
+describe('PurchaseView auto-refresh orders filter (regression for BUG-PURCHASE-COUNT)', () => {
+  beforeEach(() => {
+    mocks.ordersMock.mockReset()
+    mocks.unprocessedMock.mockReset()
+    mocks.ordersMock.mockResolvedValue({ orders: [], total: 0, pages: 1, current_page: 1 })
+    mocks.unprocessedMock.mockResolvedValue({ orders: [], total: 0, pages: 1, current_page: 1 })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('initial load() applies status=pending,confirmed filter', async () => {
+    mount(PurchaseView, { global: { stubs } })
+    await flushPromises()
+    await nextTick()
+
+    const callsWithFilter = mocks.ordersMock.mock.calls.filter(
+      (args) => args[0]?.status === 'pending,confirmed',
+    )
+    expect(callsWithFilter.length).toBeGreaterThan(0)
+  })
+
+  it('auto-refresh callback also includes status=pending,confirmed (BUG-PURCHASE-COUNT regression guard)', async () => {
+    vi.useFakeTimers()
+    mount(PurchaseView, { global: { stubs } })
+    await flushPromises()
+
+    // Isolate auto-refresh-driven calls
+    mocks.ordersMock.mockClear()
+
+    // Advance past 30s to fire at least one auto-refresh cycle
+    await vi.advanceTimersByTimeAsync(31_000)
+    await flushPromises()
+
+    expect(mocks.ordersMock).toHaveBeenCalled()
+    // Every orders() call must include the status filter; otherwise the count
+    // can drift when completed orders exist (BUG-PURCHASE-COUNT regression).
+    for (const call of mocks.ordersMock.mock.calls) {
+      expect(call[0]?.status).toBe('pending,confirmed')
+    }
+  })
+})

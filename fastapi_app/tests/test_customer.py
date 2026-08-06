@@ -1,5 +1,5 @@
 """客户管理模块测试"""
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -175,3 +175,22 @@ class TestCustomerEndpoints:
 
         response = await client.get("/api/v1/customers/active-names")
         assert response.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_delete_customer_integrity_error(self, client, mock_db):
+        """DELETE /api/v1/customers/delete/{id} 触发外键约束时应返回 400"""
+        from sqlalchemy.exc import IntegrityError
+        from unittest.mock import AsyncMock
+
+        async def _raise_integrity(*_args, **_kwargs):
+            raise IntegrityError("fk constraint", params=None, orig=Exception("fk"))
+
+        mock_db.commit = AsyncMock(side_effect=_raise_integrity)
+        mock_db.rollback = AsyncMock()
+
+        with patch("fastapi_app.api.v1.endpoints.customer.customer_service.delete_customer", AsyncMock()):
+            response = await client.delete("/api/v1/customers/delete/1")
+
+        assert response.status_code == 400
+        assert "相关单据" in response.json()["detail"]
+        assert mock_db.rollback.called

@@ -2,11 +2,13 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { authApi, dashboardApi } from '@/api'
 import type { User, NavSection } from '@/types'
+import { removeAccessToken } from '@/utils/secureStorage'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
   const navSections = ref<NavSection[]>([])
   const loaded = ref(false)
+  let _initPromise: Promise<void> | null = null
 
   const isLoggedIn = computed(() => !!user.value)
   const permissionSet = computed(() => new Set(user.value?.permissions ?? []))
@@ -18,6 +20,7 @@ export const useAuthStore = defineStore('auth', () => {
       id: raw.user_id ?? raw.id ?? 0,
       username: raw.username,
       is_super: raw.is_super ?? false,
+      factory: raw.factory ?? null,
       permissions: raw.permissions ?? [],
     }
     return user.value
@@ -47,17 +50,26 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function init(force = false) {
     if (loaded.value && !force) return
-    try {
-      await fetchUser()
-      fetchNavSections().catch((e) => {
-        console.error('[Auth] 导航数据加载失败:', e)
-      })
-    } catch (error) {
-      loaded.value = false
-      throw error
-    } finally {
-      if (user.value) loaded.value = true
-    }
+    // 防止并发调用：多个导航同时触发时复用同一个 Promise
+    if (_initPromise && !force) return _initPromise
+
+    _initPromise = (async () => {
+      try {
+        await fetchUser()
+        // 导航数据加载失败不应阻止用户进入系统
+        await fetchNavSections().catch((e) => {
+          console.error('[Auth] 导航数据加载失败:', e)
+        })
+      } catch (error) {
+        loaded.value = false
+        throw error
+      } finally {
+        if (user.value) loaded.value = true
+        _initPromise = null
+      }
+    })()
+
+    return _initPromise
   }
 
   function hasPermission(code: string): boolean {
@@ -87,7 +99,7 @@ export const useAuthStore = defineStore('auth', () => {
     navSections.value = []
     loaded.value = false
     if (import.meta.env.VITE_CAPACITOR) {
-      localStorage.removeItem('access_token')
+      removeAccessToken()
     }
   }
 

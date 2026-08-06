@@ -1,11 +1,15 @@
 """
 客户路由测试 - 提高客户路由覆盖率
 测试范围：客户列表、创建、编辑、删除、API接口等完整流程
+
+标记: flask_legacy — 迁移中，需重写为 FastAPI + httpx.AsyncClient
 """
 import json
 from datetime import datetime
 
 import pytest
+
+pytestmark = [pytest.mark.flask_legacy]
 
 try:
     from app import db

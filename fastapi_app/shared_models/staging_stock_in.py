@@ -1,7 +1,7 @@
 """
 暂存备货模型 - 纯 SQLAlchemy 2.0 声明式
 
-映射到与 Flask-SQLAlchemy StagingStockIn 相同的 'staging_stock_in' 表。
+映射到 'staging_stock_in' 表。
 """
 from __future__ import annotations
 

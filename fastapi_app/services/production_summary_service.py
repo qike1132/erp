@@ -11,27 +11,17 @@ from datetime import date, datetime
 
 import openpyxl
 from sqlalchemy import and_, extract, func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.services import escape_like
+from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.shared_models import Case, CaseStockOut, CraftWork, PackagingRecord, Product
+from fastapi_app.utils import parse_date_with_fallback
 
 logger = logging.getLogger(__name__)
 
 def _last_day_of_month(year: int, month: int) -> date:
     return date(year, month, calendar.monthrange(year, month)[1])
-
-def _parse_date(date_str: str) -> date:
-    """解析日期字符串"""
-    try:
-        return datetime.strptime(date_str, '%Y-%m-%d').date()
-    except ValueError:
-        parts = date_str.strip().split('-')
-        if len(parts) != 3:
-            raise ValueError(f'日期格式不正确: {date_str}，请使用 YYYY-MM-DD 格式') from None
-        y, m = (int(parts[0]), int(parts[1]))
-        d = min(int(parts[2]), calendar.monthrange(y, m)[1])
-        return date(y, m, d)
 
 async def get_craft_works(db: AsyncSession, year: int, month: int, work_date: str='') -> dict:
     """
@@ -41,7 +31,7 @@ async def get_craft_works(db: AsyncSession, year: int, month: int, work_date: st
     """
     conditions = [extract('year', CraftWork.work_date) == year, extract('month', CraftWork.work_date) == month]
     if work_date:
-        conditions.append(CraftWork.work_date == _parse_date(work_date))
+        conditions.append(CraftWork.work_date == parse_date_with_fallback(work_date))
     result = await db.execute(select(CraftWork).where(*conditions).order_by(CraftWork.work_date, CraftWork.id))
     records = list(result.scalars().all())
     daily_craft = {}
@@ -60,10 +50,10 @@ async def get_craft_works(db: AsyncSession, year: int, month: int, work_date: st
 
 async def create_craft_work(db: AsyncSession, *, worker_name: str, quantity: int, work_date_str: str, remark: str='', created_by: str='') -> CraftWork:
     """创建手工部生产记录"""
-    work_date_val = _parse_date(work_date_str)
+    work_date_val = parse_date_with_fallback(work_date_str)
     record = CraftWork(worker_name=worker_name, quantity=quantity, work_date=work_date_val, remark=remark, created_by=created_by)
     db.add(record)
-    await db.commit()
+    await db.flush()
     await db.refresh(record)
     logger.info(f'手工部记录创建: {worker_name} - {quantity} - {work_date_str}')
     return record
@@ -78,8 +68,8 @@ async def update_craft_work(db: AsyncSession, record_id: int, *, created_by: str
         if field in kwargs and kwargs[field] is not None:
             setattr(record, field, kwargs[field])
     if 'work_date' in kwargs and kwargs['work_date'] is not None:
-        record.work_date = _parse_date(kwargs['work_date'])
-    await db.commit()
+        record.work_date = parse_date_with_fallback(kwargs['work_date'])
+    await db.flush()
     await db.refresh(record)
     return record
 
@@ -90,15 +80,15 @@ async def delete_craft_work(db: AsyncSession, record_id: int) -> None:
     if not record:
         raise ValueError('记录不存在')
     await db.delete(record)
-    await db.commit()
+    await db.flush()
 
 async def export_craft_works(db: AsyncSession, start_date: str='', end_date: str='') -> bytes:
     """导出手工部生产数据为Excel"""
     conditions = []
     if start_date:
-        conditions.append(CraftWork.work_date >= _parse_date(start_date))
+        conditions.append(CraftWork.work_date >= parse_date_with_fallback(start_date))
     if end_date:
-        conditions.append(CraftWork.work_date <= _parse_date(end_date))
+        conditions.append(CraftWork.work_date <= parse_date_with_fallback(end_date))
     query = select(CraftWork).order_by(CraftWork.work_date, CraftWork.id)
     if conditions:
         query = query.where(*conditions)
@@ -130,9 +120,9 @@ async def get_packaging_records(db: AsyncSession, year: int, month: int, custome
     if customer:
         conditions.append(PackagingRecord.customer.like(f'%{escape_like(customer)}%'))
     if start_date:
-        conditions.append(PackagingRecord.pack_date >= _parse_date(start_date))
+        conditions.append(PackagingRecord.pack_date >= parse_date_with_fallback(start_date))
     if end_date:
-        conditions.append(PackagingRecord.pack_date <= _parse_date(end_date))
+        conditions.append(PackagingRecord.pack_date <= parse_date_with_fallback(end_date))
     query = select(PackagingRecord).order_by(PackagingRecord.pack_date.desc(), PackagingRecord.id.desc())
     if conditions:
         query = query.where(*conditions)
@@ -142,43 +132,48 @@ async def get_packaging_records(db: AsyncSession, year: int, month: int, custome
 
 async def create_packaging_record(db: AsyncSession, *, customer: str, product_name: str, barcode: str, quantity: int, pack_date_str: str, remark: str='', created_by: str='', upload_batch: str='') -> PackagingRecord:
     """创建包装部记录"""
-    pack_date_val = _parse_date(pack_date_str)
+    pack_date_val = parse_date_with_fallback(pack_date_str)
     record = PackagingRecord(customer=customer, product_name=product_name, barcode=barcode, quantity=quantity, pack_date=pack_date_val, remark=remark, created_by=created_by, upload_batch=upload_batch)
     db.add(record)
-    await db.commit()
+    await db.flush()
     await db.refresh(record)
     logger.info(f'包装部记录创建: {customer} - {product_name} - {quantity}')
     return record
 
 async def batch_create_packaging_records(db: AsyncSession, records_data: list[dict], created_by: str='') -> dict:
-    """批量创建包装部记录"""
+    """批量创建包装部记录
+
+    每行使用 savepoint（db.begin_nested）隔离，单行 DB 级错误（如约束冲突）
+    仅回滚该行，不影响其他行。遵循 batch_import_service 的 savepoint 模式。
+    """
     batch_id = str(uuid.uuid4())[:8]
     created_count = 0
     errors = []
     for i, item in enumerate(records_data):
         try:
-            customer = str(item.get('customer', '')).strip()
-            product_name = str(item.get('product_name', '')).strip()
-            barcode = str(item.get('barcode', '')).strip()
-            quantity = int(item.get('quantity', 0))
-            pack_date_str = str(item.get('pack_date', '')).strip()
-            if not customer:
-                raise ValueError('客户为空')
-            if not product_name:
-                raise ValueError('产品名称为空')
-            if not barcode:
-                raise ValueError('69码为空')
-            if quantity <= 0:
-                raise ValueError('数量必须为正数')
-            if not pack_date_str:
-                raise ValueError('包装日期为空')
-            pack_date_val = _parse_date(pack_date_str)
-            record = PackagingRecord(customer=customer, product_name=product_name, barcode=barcode, quantity=quantity, pack_date=pack_date_val, remark=str(item.get('remark', '')).strip(), created_by=created_by, upload_batch=batch_id)
-            db.add(record)
-            created_count += 1
-        except (ValueError, KeyError) as e:
+            async with db.begin_nested():
+                customer = str(item.get('customer', '')).strip()
+                product_name = str(item.get('product_name', '')).strip()
+                barcode = str(item.get('barcode', '')).strip()
+                quantity = int(item.get('quantity', 0))
+                pack_date_str = str(item.get('pack_date', '')).strip()
+                if not customer:
+                    raise ValueError('客户为空')
+                if not product_name:
+                    raise ValueError('产品名称为空')
+                if not barcode:
+                    raise ValueError('69码为空')
+                if quantity <= 0:
+                    raise ValueError('数量必须为正数')
+                if not pack_date_str:
+                    raise ValueError('包装日期为空')
+                pack_date_val = parse_date_with_fallback(pack_date_str)
+                record = PackagingRecord(customer=customer, product_name=product_name, barcode=barcode, quantity=quantity, pack_date=pack_date_val, remark=str(item.get('remark', '')).strip(), created_by=created_by, upload_batch=batch_id)
+                db.add(record)
+                await db.flush()
+                created_count += 1
+        except (ValueError, KeyError, SQLAlchemyError) as e:
             errors.append(f'第{i + 1}行: {str(e)}')
-    await db.commit()
     return {'batch_id': batch_id, 'created_count': created_count, 'error_count': len(errors), 'errors': errors}
 
 async def update_packaging_record(db: AsyncSession, record_id: int, *, created_by: str='', **kwargs) -> PackagingRecord:
@@ -191,8 +186,8 @@ async def update_packaging_record(db: AsyncSession, record_id: int, *, created_b
         if field in kwargs and kwargs[field] is not None:
             setattr(record, field, kwargs[field])
     if 'pack_date' in kwargs and kwargs['pack_date'] is not None:
-        record.pack_date = _parse_date(kwargs['pack_date'])
-    await db.commit()
+        record.pack_date = parse_date_with_fallback(kwargs['pack_date'])
+    await db.flush()
     await db.refresh(record)
     return record
 
@@ -203,7 +198,7 @@ async def delete_packaging_record(db: AsyncSession, record_id: int) -> None:
     if not record:
         raise ValueError('记录不存在')
     await db.delete(record)
-    await db.commit()
+    await db.flush()
 
 async def upload_packaging_excel(db: AsyncSession, file_content: bytes, created_by: str='') -> dict:
     """上传Excel文件，解析并批量创建包装部记录"""
@@ -244,7 +239,7 @@ async def upload_packaging_excel(db: AsyncSession, file_content: bytes, created_
                 validation_error = '包装日期为空'
             else:
                 try:
-                    _parse_date(pack_date_str)
+                    parse_date_with_fallback(pack_date_str)
                 except ValueError as e:
                     validation_error = str(e)
             preview.append({'customer': customer, 'product_name': product_name, 'barcode': barcode, 'quantity': quantity, 'pack_date': pack_date_str, 'remark': remark, 'valid': not bool(validation_error), 'error': validation_error})
@@ -259,9 +254,9 @@ async def export_packaging_records(db: AsyncSession, start_date: str='', end_dat
     """导出包装部数据为Excel"""
     conditions = []
     if start_date:
-        conditions.append(PackagingRecord.pack_date >= _parse_date(start_date))
+        conditions.append(PackagingRecord.pack_date >= parse_date_with_fallback(start_date))
     if end_date:
-        conditions.append(PackagingRecord.pack_date <= _parse_date(end_date))
+        conditions.append(PackagingRecord.pack_date <= parse_date_with_fallback(end_date))
     query = select(PackagingRecord).order_by(PackagingRecord.pack_date, PackagingRecord.id)
     if conditions:
         query = query.where(*conditions)

@@ -162,6 +162,29 @@ TASK_RUNTIME_SECONDS = _get_or_create_histogram(
 )
 
 
+# ==================== 缓存监控指标 ====================
+
+PERM_CACHE_SIZE = _get_or_create_gauge(
+    'erp_perm_cache_size',
+    '权限缓存当前大小（L1 TTL Cache）'
+)
+
+PERM_CACHE_HITS = _get_or_create_counter(
+    'erp_perm_cache_hits_total',
+    '权限缓存命中次数'
+)
+
+PERM_CACHE_MISSES = _get_or_create_counter(
+    'erp_perm_cache_misses_total',
+    '权限缓存未命中次数'
+)
+
+USER_ACTIVE_CACHE_SIZE = _get_or_create_gauge(
+    'erp_user_active_cache_size',
+    '用户活跃状态缓存当前大小'
+)
+
+
 def get_metrics():
     """生成 Prometheus 格式的指标数据"""
     return generate_latest()

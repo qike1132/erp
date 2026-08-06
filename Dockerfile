@@ -52,4 +52,6 @@ EXPOSE 5002
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5002/api/health')" || exit 1
 
-CMD ["uvicorn", "fastapi_app.main:app", "--host", "0.0.0.0", "--port", "5002", "--workers", "4", "--loop", "uvloop", "--no-access-log"]
+# Worker 数量通过环境变量 UVICORN_WORKERS 动态配置，默认 4
+# 使用 sh -c 以支持 shell 参数展开 ${VAR:-default}
+CMD ["sh", "-c", "uvicorn fastapi_app.main:app --host 0.0.0.0 --port 5002 --workers ${UVICORN_WORKERS:-4} --loop uvloop --http httptools --no-access-log"]

@@ -1,11 +1,17 @@
 """
 订单管理模块功能测试
 测试范围：订单创建、编辑、删除、查询、审批、状态流转
+
+标记: flask_legacy — 迁移中，需重写为 SQLAlchemy 2.0 异步模式
 """
 import os
 import sys
 import unittest
 from datetime import datetime
+
+import pytest
+
+pytestmark = pytest.mark.flask_legacy
 
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

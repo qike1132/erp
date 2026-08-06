@@ -48,6 +48,30 @@ class TestGetProductForUpdate:
 # update_stock_with_optimistic_lock
 # ============================================================
 
+class _MockNested:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        pass
+
+
+def _make_db():
+    db = AsyncMock()
+    db.commit = AsyncMock()
+    db.rollback = AsyncMock()
+    db.close = AsyncMock()
+    db.flush = AsyncMock()
+    db.delete = AsyncMock()
+    db.refresh = AsyncMock()
+    db.execute = AsyncMock()
+    db.get = AsyncMock()
+    db.scalar = AsyncMock(return_value=0)
+    db.add = MagicMock()
+    db.begin_nested = MagicMock(return_value=_MockNested())
+    return db
+
+
 class TestOptimisticLockUpdate:
     @pytest.mark.asyncio
     async def test_successful_update(self):
@@ -55,13 +79,12 @@ class TestOptimisticLockUpdate:
             id=1, current_stock=100, version=1
         )
 
-        db = AsyncMock()
-        db.get = AsyncMock(return_value=mock_product)
-
-        mock_exec_result = MagicMock()
-        mock_exec_result.rowcount = 1
-        db.execute = AsyncMock(return_value=mock_exec_result)
-        db.refresh = AsyncMock()
+        db = _make_db()
+        select_result = MagicMock()
+        select_result.scalar_one_or_none.return_value = mock_product
+        update_result = MagicMock()
+        update_result.rowcount = 1
+        db.execute = AsyncMock(side_effect=[select_result, update_result])
 
         product = await update_stock_with_optimistic_lock(db, 1, delta=10)
         assert product is mock_product
@@ -69,8 +92,10 @@ class TestOptimisticLockUpdate:
 
     @pytest.mark.asyncio
     async def test_raises_on_missing_product(self):
-        db = AsyncMock()
-        db.get = AsyncMock(return_value=None)
+        db = _make_db()
+        select_result = MagicMock()
+        select_result.scalar_one_or_none.return_value = None
+        db.execute = AsyncMock(return_value=select_result)
 
         with pytest.raises(ValueError, match="产品ID 1 不存在"):
             await update_stock_with_optimistic_lock(db, 1, delta=10)
@@ -80,8 +105,11 @@ class TestOptimisticLockUpdate:
         mock_product = MagicMock(
             id=1, current_stock=5, version=1
         )
-        db = AsyncMock()
-        db.get = AsyncMock(return_value=mock_product)
+
+        db = _make_db()
+        select_result = MagicMock()
+        select_result.scalar_one_or_none.return_value = mock_product
+        db.execute = AsyncMock(return_value=select_result)
 
         with pytest.raises(ValueError, match="库存不足"):
             await update_stock_with_optimistic_lock(db, 1, delta=-10)
@@ -92,19 +120,15 @@ class TestOptimisticLockUpdate:
             id=1, current_stock=100, version=1
         )
 
-        db = AsyncMock()
-        db.get = AsyncMock(return_value=mock_product)
-        db.rollback = AsyncMock()
-        db.refresh = AsyncMock()
-
-        # First 2 calls conflict (rowcount=0), third succeeds
+        db = _make_db()
+        select_result = MagicMock()
+        select_result.scalar_one_or_none.return_value = mock_product
         mock_conflict = MagicMock(rowcount=0)
         mock_success = MagicMock(rowcount=1)
-        db.execute = AsyncMock(side_effect=[mock_conflict, mock_conflict, mock_success])
+        db.execute = AsyncMock(side_effect=[select_result, mock_conflict, select_result, mock_success])
 
         product = await update_stock_with_optimistic_lock(db, 1, delta=5, retries=3)
         assert product is mock_product
-        assert db.rollback.await_count == 2
 
     @pytest.mark.asyncio
     async def test_raises_after_max_retries(self):
@@ -112,14 +136,13 @@ class TestOptimisticLockUpdate:
             id=1, current_stock=100, version=1
         )
 
-        db = AsyncMock()
-        db.get = AsyncMock(return_value=mock_product)
-        db.rollback = AsyncMock()
-
+        db = _make_db()
+        select_result = MagicMock()
+        select_result.scalar_one_or_none.return_value = mock_product
         mock_conflict = MagicMock(rowcount=0)
-        db.execute = AsyncMock(return_value=mock_conflict)
+        db.execute = AsyncMock(side_effect=[select_result, mock_conflict, select_result, mock_conflict])
 
-        with pytest.raises(StockConcurrentError, match="重试.*次后仍失败"):
+        with pytest.raises(StockConcurrentError, match=r"重试.*次后仍失败"):
             await update_stock_with_optimistic_lock(db, 1, delta=5, retries=2)
 
 

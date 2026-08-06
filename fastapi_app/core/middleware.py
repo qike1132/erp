@@ -21,6 +21,7 @@
 import logging
 import os
 import time
+import uuid
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -38,6 +39,7 @@ MAX_REQUEST_BODY_SIZE = 10 * 1024 * 1024
 def setup_middleware(app: FastAPI) -> None:
     """注册所有中间件到 FastAPI 应用"""
 
+    _setup_request_id(app)
     _setup_csrf(app)
     _setup_cors(app)
     _setup_trusted_host(app)
@@ -47,26 +49,82 @@ def setup_middleware(app: FastAPI) -> None:
     _setup_security_headers(app)
 
 
+def _setup_request_id(app: FastAPI) -> None:
+    """X-Request-ID 中间件 - 链路追踪支持
+
+    - 从请求头 X-Request-ID 读取，无则生成 UUID 前8位
+    - 保存到 request.state.request_id 供业务/审计使用
+    - 注入响应头 X-Request-ID 返回给客户端
+    """
+
+    @app.middleware("http")
+    async def request_id_middleware(request: Request, call_next):
+        incoming_rid = request.headers.get("X-Request-ID")
+        request_id = incoming_rid or str(uuid.uuid4())[:8]
+        request.state.request_id = request_id
+
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+
+    logger.info("X-Request-ID 链路追踪中间件已启用")
+
+
 def _setup_csrf(app: FastAPI) -> None:
     try:
         import secrets
 
         _csrf_secure = os.getenv("CSRF_COOKIE_SECURE", "").lower() in ("true", "1", "yes")
 
+        def _is_allowed_origin(origin: str | None) -> bool:
+            """验证请求Origin是否为允许的源"""
+            if not origin:
+                return False
+            is_production = os.getenv("APP_ENV") == "production"
+            if is_production:
+                allowed = settings.BACKEND_CORS_ORIGINS
+                return any(origin.rstrip('/') == allowed_origin.rstrip('/') for allowed_origin in allowed)
+            else:
+                dev_origins = {
+                    "http://localhost",
+                    "http://localhost:3000",
+                    "http://localhost:5173",
+                    "http://localhost:4173",
+                    "http://localhost:8080",
+                    "http://127.0.0.1:3000",
+                    "http://127.0.0.1:5173",
+                    "http://127.0.0.1:8080",
+                }
+                extra = os.getenv('DEV_CORS_ORIGINS', '')
+                if extra:
+                    dev_origins.update(o.strip() for o in extra.split(',') if o.strip())
+                return origin.rstrip('/') in {o.rstrip('/') for o in dev_origins}
+
         @app.middleware("http")
         async def conditional_csrf_middleware(request: Request, call_next):
             is_login_endpoint = request.url.path == "/api/v1/auth/login"
             is_logout_endpoint = request.url.path == "/api/v1/auth/logout"
-            is_exempt_endpoint = is_login_endpoint or is_logout_endpoint
+            # web vitals 上报使用 sendBeacon，无法携带自定义 header，豁免 CSRF
+            is_vitals_endpoint = request.url.path == "/api/v1/monitoring/vitals"
+            is_exempt_endpoint = is_login_endpoint or is_logout_endpoint or is_vitals_endpoint
 
             if not is_exempt_endpoint and request.url.path.startswith("/api/") and request.method not in ("GET", "HEAD", "OPTIONS"):
-                _has_bearer = request.headers.get("authorization", "").startswith("Bearer ")
-                if _has_bearer:
-                    pass
-                else:
+                auth_header = request.headers.get("authorization", "")
+                _has_bearer = auth_header.startswith("Bearer ")
+                _has_cookie = bool(request.cookies)
+
+                if _has_bearer and not _has_cookie:
+                    origin = request.headers.get("origin") or request.headers.get("referer")
+                    if not _is_allowed_origin(origin):
+                        logger.warning("CSRF保护：Bearer Token请求Origin验证失败: %s", origin)
+                        return JSONResponse(
+                            status_code=403,
+                            content={"detail": "跨站请求被拒绝"},
+                        )
+                elif not _has_bearer:
                     csrf_cookie = request.cookies.get("fastapi_csrf_token")
                     csrf_header = request.headers.get("X-CSRF-Token")
-                    if not csrf_cookie or not csrf_header or csrf_cookie != csrf_header:
+                    if not csrf_cookie or not csrf_header or not secrets.compare_digest(csrf_cookie, csrf_header):
                         return JSONResponse(
                             status_code=403,
                             content={"detail": "CSRF token 验证失败"},
@@ -92,7 +150,7 @@ def _setup_csrf(app: FastAPI) -> None:
 
             return response
 
-        logger.info("CSRF 配置：API 变更请求需验证 CSRF token")
+        logger.info("CSRF 配置：API 变更请求需验证 CSRF token，Bearer Token 请求验证 Origin")
     except ImportError:
         logger.warning("itsdangerous 未安装，CSRF cookie 保护未启用")
 
@@ -108,33 +166,55 @@ def _setup_security_headers(app: FastAPI) -> None:
     is_production = os.getenv("APP_ENV") == "production"
 
     if is_production:
-        csp = (
-            "default-src 'self'; "
-            "script-src 'self'; "
-            "style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data: blob:; "
-            "font-src 'self' data:; "
-            "connect-src 'self' wss:; "
-            "frame-ancestors 'none'; "
-            "base-uri 'self'; "
-            "form-action 'self'"
-        )
+        _ws_origins_raw = os.getenv("WS_ALLOWED_ORIGINS", "")
+        if is_production and _ws_origins_raw:
+            _ws_sources = " ".join(
+                f"wss://{o.strip()}" for o in _ws_origins_raw.split(",") if o.strip()
+            )
+            _connect_src = f"'self' {_ws_sources}" if _ws_sources else "'self'"
+        elif is_production:
+            logger.warning("生产环境未配置 WS_ALLOWED_ORIGINS，CSP connect-src 回退到 wss:（建议收紧）")
+            _connect_src = "'self' wss:"
+        else:
+            _connect_src = "'self' ws: wss:"
     else:
-        csp = (
-            "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
-            "style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data: blob:; "
-            "font-src 'self' data:; "
-            "connect-src 'self' ws: wss:; "
-            "frame-ancestors 'none'; "
-            "base-uri 'self'; "
-            "form-action 'self'"
-        )
+        _connect_src = "'self' ws: wss:"
 
     @app.middleware("http")
     async def security_headers_middleware(request: Request, call_next):
+        # 为每个请求生成唯一 CSP nonce
+        import secrets as _secrets
+        _csp_nonce = _secrets.token_urlsafe(16)
+        request.state.csp_nonce = _csp_nonce
+
         response = await call_next(request)
+
+        # 动态构建 CSP（包含 per-request nonce）
+        if is_production:
+            csp = (
+                "default-src 'self'; "
+                "script-src 'self'; "
+                f"style-src 'self' 'nonce-{_csp_nonce}'; "
+                "img-src 'self' data: blob:; "
+                "font-src 'self' data:; "
+                f"connect-src {_connect_src}; "
+                "frame-ancestors 'none'; "
+                "base-uri 'self'; "
+                "form-action 'self'"
+            )
+        else:
+            csp = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+                "style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data: blob:; "
+                "font-src 'self' data:; "
+                f"connect-src {_connect_src}; "
+                "frame-ancestors 'none'; "
+                "base-uri 'self'; "
+                "form-action 'self'"
+            )
+
         response.headers["Content-Security-Policy"] = csp
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
@@ -154,23 +234,11 @@ def _setup_cors(app: FastAPI) -> None:
         _dev_origins = [
             "http://localhost",
             "http://localhost:3000",
-            "http://localhost:3001",
-            "http://localhost:3002",
-            "http://localhost:3003",
-            "http://localhost:3004",
-            "http://localhost:3005",
-            "http://localhost:5002",
             "http://localhost:5173",
-            "http://localhost:5174",
-            "http://localhost:8000",
+            "http://localhost:4173",
             "http://localhost:8080",
-            "http://localhost:8090",
             "http://127.0.0.1:3000",
-            "http://127.0.0.1:3001",
-            "http://127.0.0.1:3005",
-            "http://127.0.0.1:5002",
             "http://127.0.0.1:5173",
-            "http://127.0.0.1:5174",
             "http://127.0.0.1:8080",
         ]
         # 额外开发环境 origin 可通过环境变量 DEV_CORS_ORIGINS 添加（逗号分隔）
@@ -182,7 +250,7 @@ def _setup_cors(app: FastAPI) -> None:
             allow_origins=_dev_origins,
             allow_credentials=True,
             allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            allow_headers=["*"],
+            allow_headers=["Authorization", "Content-Type", "X-Requested-With", "Accept", "Origin", "X-CSRF-Token"],
             expose_headers=["X-CSRF-Token"],
         )
     else:
@@ -285,7 +353,7 @@ def _setup_prometheus(app: FastAPI) -> None:
         try:
             response = await call_next(request)
             status = response.status_code
-        except Exception:
+        except Exception:  # defensive: record metrics for unexpected errors before re-raising
             status = 500
             raise
         finally:

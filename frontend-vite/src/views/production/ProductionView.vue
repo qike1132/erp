@@ -248,8 +248,7 @@
                     </button>
                     <div v-if="showDropdown" class="pr-entry-dropdown">
                       <div v-if="searchLoading" class="pr-entry-dropdown-state">
-                        <i class="fas fa-spinner fa-spin" aria-hidden="true" /> 搜索中…
-                      </div>
+                        <UiSpinner /></div>
                       <div v-else-if="searchError" class="pr-entry-dropdown-state pr-entry-dropdown-error">
                         <i class="fas fa-exclamation-circle" aria-hidden="true" /> {{ searchError }}
                       </div>
@@ -271,6 +270,7 @@
                             <span v-if="p.specification" class="pr-entry-dropdown-spec">{{ p.specification }}</span>
                           </span>
                         </span>
+
                         <i v-if="idx === searchActiveIndex" class="fas fa-arrow-right pr-entry-dropdown-enter" aria-hidden="true" />
                       </button>
                     </div>
@@ -407,8 +407,7 @@
               <div class="pr-entry-footer-btns">
                 <button type="button" class="pr-entry-btn-cancel" @click="closeEntryDrawer">取消</button>
                 <button type="button" class="pr-entry-btn-submit" :disabled="isSubmitting" @click="handleSubmit">
-                  <i v-if="isSubmitting" class="fas fa-spinner fa-spin" aria-hidden="true" />
-                  <i v-else class="fas fa-check" aria-hidden="true" />
+                  <UiLoadingIcon :loading="isSubmitting" icon="check" />
                   <span>确认录入</span>
                   <span class="pr-entry-btn-hint">Ctrl+Enter</span>
                 </button>
@@ -747,7 +746,7 @@ const exportStatus = reactive({ show: false, message: '', type: 'info', icon: 'f
 async function handleExport() {
   exportStatus.show = true
   exportStatus.type = 'info'
-  exportStatus.icon = 'fas fa-spinner fa-spin'
+  exportStatus.icon = 'fas fa-circle-notch fa-spin'
   exportStatus.message = '正在导出报表...'
 
   let retries = 0

@@ -14,10 +14,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db
 from fastapi_app.core.deps import require_permission
+from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.schemas.ocr_import import OcrPdfImportResult, OcrPdfPreviewResult
 from fastapi_app.services import ocr_service as svc
 from fastapi_app.services.ocr_service import IMAGE_EXTENSIONS
 from fastapi_app.shared_models import User
+
+# OCR 文件大小上限，与全局中间件 MAX_REQUEST_BODY_SIZE (10MB) 保持一致
+# 避免中间件在 10MB 即拒绝而端点声明 50MB 的配置不一致问题
+MAX_OCR_FILE_SIZE = 10 * 1024 * 1024
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -52,27 +57,28 @@ async def upload_shipping_docs(files: list[UploadFile]=File(..., description='�
     all_errors: list[str] = []
     file_results: list[dict] = []
     valid_files = 0
-    for i, file in enumerate(files):
-        filename = file.filename or 'unknown'
-        ext = os.path.splitext(filename.lower())[1]
-        if ext not in SUPPORTED_EXTENSIONS:
-            all_errors.append(f'{filename}: 不支持的文件格式（支持 PDF/图片），已跳过')
-            continue
-        content = await file.read()
-        if len(content) > 50 * 1024 * 1024:
-            all_errors.append(f'{filename}: 文件超过 50MB 限制，已跳过')
-            continue
-        if len(content) == 0:
-            all_errors.append(f'{filename}: 文件为空，已跳过')
-            continue
-        valid_files += 1
-        if len(files) > 1:
-            svc._update_progress(task_id, message=f'正在处理第 {i + 1}/{len(files)} 个文件: {filename}')
-        imported, message, errors = await svc.import_staging_stockouts_from_file(db, content, session_id, filename=filename, task_id=task_id)
-        total_imported += imported
-        if errors:
-            all_errors.extend([f'{filename}: {e}' for e in errors])
-        file_results.append({'filename': filename, 'imported': imported, 'message': message})
+    async with db_transaction(db):
+        for i, file in enumerate(files):
+            filename = file.filename or 'unknown'
+            ext = os.path.splitext(filename.lower())[1]
+            if ext not in SUPPORTED_EXTENSIONS:
+                all_errors.append(f'{filename}: 不支持的文件格式（支持 PDF/图片），已跳过')
+                continue
+            content = await file.read()
+            if len(content) > MAX_OCR_FILE_SIZE:
+                all_errors.append(f'{filename}: 文件超过 10MB 限制，已跳过')
+                continue
+            if len(content) == 0:
+                all_errors.append(f'{filename}: 文件为空，已跳过')
+                continue
+            valid_files += 1
+            if len(files) > 1:
+                svc._update_progress(task_id, message=f'正在处理第 {i + 1}/{len(files)} 个文件: {filename}')
+            imported, message, errors = await svc.import_staging_stockouts_from_file(db, content, session_id, filename=filename, task_id=task_id)
+            total_imported += imported
+            if errors:
+                all_errors.extend([f'{filename}: {e}' for e in errors])
+            file_results.append({'filename': filename, 'imported': imported, 'message': message})
     overall_message = f'共处理 {len(file_results)} 个文件，识别导入 {total_imported} 个出货到暂存区'
     svc._update_progress(task_id, status='done', percent=100, message=overall_message)
     return OcrPdfImportResult(success=total_imported > 0 or len(file_results) == 0, message=overall_message, total_imported=total_imported, file_count=len(file_results), file_results=file_results, errors=all_errors[:20], task_id=task_id)
@@ -102,8 +108,8 @@ async def preview_shipping_doc(file: UploadFile=File(..., description='PDF 或�
     content = await file.read()
     if len(content) == 0:
         raise HTTPException(status_code=400, detail='文件为空')
-    if len(content) > 50 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail='文件超过 50MB 限制')
+    if len(content) > MAX_OCR_FILE_SIZE:
+        raise HTTPException(status_code=400, detail='文件超过 10MB 限制')
     try:
         table_pages = await asyncio.to_thread(svc.extract_table_structure, content, filename)
         if table_pages:

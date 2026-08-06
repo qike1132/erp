@@ -36,13 +36,8 @@ async def _get_redis():
         return client
     except (ImportError, OSError, RuntimeError):
         pass
-    try:
-        from utils.redis_cache import redis_cache
-        if redis_cache.redis_client:
-            return redis_cache.redis_client
-    except (ImportError, OSError, RuntimeError):
-        pass
-    return None
+    from fastapi_app.core.redis_wrapper import get_client
+    return get_client()
 
 
 async def create_progress(task_id: str, restore_type: str = "full") -> None:

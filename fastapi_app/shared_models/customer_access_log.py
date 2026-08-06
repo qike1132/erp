@@ -1,7 +1,7 @@
 """
 客户接入日志模型 - 纯 SQLAlchemy 2.0 声明式
 
-映射到与 Flask-SQLAlchemy CustomerAccessLog 相同的 'customer_access_log' 表。
+映射到 'customer_access_log' 表。
 """
 from datetime import datetime, timezone
 

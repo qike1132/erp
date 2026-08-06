@@ -12,21 +12,21 @@
 
       <div class="m-section-header">
         <span class="m-section-title">已选产品 ({{ orderItems.length }})</span>
-        <button v-if="orderItems.length" class="m-text-btn" @click="orderItems = []">清空</button>
+        <button v-if="orderItems.length" class="m-text-btn" @click="clearAll">清空</button>
       </div>
 
       <MEmpty v-if="!orderItems.length" title="请搜索并添加产品" subtitle="输入产品名称后选择，设置采购数量" />
 
       <MList v-else>
-        <div v-for="(item, i) in orderItems" :key="item.product_id" class="m-calc-item">
+        <div v-for="item in orderItems" :key="item.product_id" class="m-calc-item">
           <div class="m-calc-info">
             <div class="m-calc-name">{{ item.name }}</div>
           </div>
           <div class="m-calc-qty">
-            <button class="m-qty-btn" @click="item.quantity > 1 && item.quantity--">−</button>
-            <input v-model.number="item.quantity" type="number" min="1" class="m-qty-input" />
-            <button class="m-qty-btn" @click="item.quantity++">+</button>
-            <button class="m-del-btn" @click="orderItems.splice(i, 1)">✕</button>
+            <button class="m-qty-btn" @click="decQty(item)">−</button>
+            <input v-model.number="item.quantity" type="number" min="0" class="m-qty-input" @input="onQtyInput(item)" />
+            <button class="m-qty-btn" @click="incQty(item)">+</button>
+            <button class="m-del-btn" @click="removeProduct(item.product_id)">✕</button>
           </div>
         </div>
       </MList>
@@ -66,8 +66,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch } from 'vue'
-import { purchaseApi } from '@/api'
+import { ref, reactive, watch, onUnmounted } from 'vue'
+import { purchaseApi, type MaterialCalcProduct } from '@/api'
+import {
+  useMaterialCalculator,
+  CALC_CATEGORY_LABELS,
+  clampQuantity,
+} from '@/composables/useMaterialCalculator'
 import MobileNavBar from '@/mobile/layouts/components/MobileNavBar.vue'
 import MSearchBar from '@/mobile/components/MSearchBar.vue'
 import MList from '@/mobile/components/MList.vue'
@@ -76,15 +81,21 @@ import MEmpty from '@/mobile/components/MEmpty.vue'
 import MSpinner from '@/mobile/components/MSpinner.vue'
 import MBottomSheet from '@/mobile/components/MBottomSheet.vue'
 
-interface OrderItem { product_id: number; name: string; quantity: number }
+const {
+  orderItems,
+  calcResults,
+  calculating,
+  addProduct: addProductToOrder,
+  removeProduct,
+  clearAll,
+  triggerCalculation,
+  dispose,
+} = useMaterialCalculator()
 
 const searchQuery = ref('')
-const searchResults = ref<any[]>([])
+const searchResults = ref<MaterialCalcProduct[]>([])
 const searchLoading = ref(false)
 const searchSheetVisible = ref(false)
-const orderItems = ref<OrderItem[]>([])
-const calcResults = ref<Record<string, any[]> | null>(null)
-const calculating = ref(false)
 const collapsed = reactive<Record<string, boolean>>({})
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null
@@ -93,30 +104,41 @@ watch(searchQuery, (q) => {
   if (!q) { searchResults.value = []; return }
   searchTimer = setTimeout(async () => {
     searchLoading.value = true
-    try { searchResults.value = await purchaseApi.searchSuggestions(q) } finally { searchLoading.value = false }
+    try {
+      const res = await purchaseApi.searchSuggestions(q)
+      searchResults.value = res.suggestions ?? []
+    } finally { searchLoading.value = false }
   }, 300)
 })
 
-function addProduct(p: any) {
-  if (orderItems.value.find((i) => i.product_id === p.id)) return
-  orderItems.value.push({ product_id: p.id, name: p.name, quantity: 1 })
-  searchSheetVisible.value = false
+onUnmounted(() => { if (searchTimer) clearTimeout(searchTimer); dispose() })
+
+function addProduct(p: MaterialCalcProduct) {
+  // 移动端 +/- 按钮 UI，默认数量 1（桌面端用数字输入框，默认 0）
+  if (addProductToOrder(p, 1)) {
+    searchSheetVisible.value = false
+  }
 }
 
-async function handleCalculate() {
+function handleCalculate() {
   if (!orderItems.value.length) return
-  calculating.value = true
-  try {
-    calcResults.value = await purchaseApi.calculate(orderItems.value.map((i) => ({ product_id: i.product_id, quantity: i.quantity })))
-  } finally {
-    calculating.value = false
-  }
+  triggerCalculation()
+}
+
+// S7: 数量规整为非负整数
+function onQtyInput(item: { quantity: number }) {
+  item.quantity = clampQuantity(item.quantity)
+}
+function incQty(item: { quantity: number }) {
+  item.quantity = clampQuantity(item.quantity) + 1
+}
+function decQty(item: { quantity: number }) {
+  item.quantity = Math.max(0, clampQuantity(item.quantity) - 1)
 }
 
 function toggleCategory(cat: string) { collapsed[cat] = !collapsed[cat] }
 function categoryLabel(cat: string) {
-  const map: Record<string, string> = { filling: '填充类', fabric: '面料类', accessory: '辅料类' }
-  return map[cat] || cat
+  return CALC_CATEGORY_LABELS[cat] || cat
 }
 </script>
 

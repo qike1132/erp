@@ -20,31 +20,50 @@ export function useCaseStockActions(
   async function submitBatch() {
     submitting.value = true
     try {
+      const result =
+        mode.value === 'stockin'
+          ? await caseApi.batchStockin({
+              stockins: staged.value.map((stock) => ({
+                productId: stock.productId,
+                customer: stock.customer,
+                quantity: stock.quantity,
+                stockinDate: stock.date,
+                note: stock.note,
+              })),
+            })
+          : await caseApi.batchStockout({
+              stockouts: staged.value.map((stock) => ({
+                productId: stock.productId,
+                customer: stock.customer,
+                quantity: stock.quantity,
+                stockout_date: stock.date,
+                note: stock.note,
+              })),
+            })
+
+      const res = result as any
+      let failedList: Array<{ index: number; error: string }> = []
       if (mode.value === 'stockin') {
-        await caseApi.batchStockin({
-          stockins: staged.value.map((stock) => ({
-            productId: stock.productId,
-            customer: stock.customer,
-            quantity: stock.quantity,
-            stockinDate: stock.date,
-            note: stock.note,
-          })),
-        })
-        showToast('入库成功', 'success')
+        failedList = res?.failed ?? []
       } else {
-        await caseApi.batchStockout({
-          stockouts: staged.value.map((stock) => ({
-            productId: stock.productId,
-            customer: stock.customer,
-            quantity: stock.quantity,
-            stockout_date: stock.date,
-            note: stock.note,
-          })),
-        })
-        showToast('出库成功', 'success')
+        // 出库接口返回 results 列表，需按 success 字段反算失败项
+        const results: Array<{ success?: boolean; error?: string }> = res?.results ?? []
+        failedList = results
+          .map((r, i) => (r.success ? null : { index: i, error: r.error || '出库失败' }))
+          .filter((item): item is { index: number; error: string } => item !== null)
       }
-      staged.value = []
-      currentStock.value = 0
+      if (failedList.length > 0) {
+        const failedIndices = new Set(failedList.map((f) => f.index))
+        staged.value = staged.value.filter((_, i) => failedIndices.has(i))
+        showToast(
+          `${mode.value === 'stockin' ? '入库' : '出库'}部分失败：${failedList.map((f) => f.error).join('；')}`,
+          'error',
+        )
+      } else {
+        showToast(mode.value === 'stockin' ? '入库成功' : '出库成功', 'success')
+        staged.value = []
+        currentStock.value = 0
+      }
       queryClient.invalidateQueries({ queryKey: ['case-stockins'] })
       queryClient.invalidateQueries({ queryKey: ['case-stockouts'] })
     } catch (err: any) {

@@ -1,0 +1,55 @@
+import { get, post } from './request'
+import type { ApiResponse, ExportResponse, QueryParams } from '@/types'
+
+/** 来料登记物料项（对齐后端 MaterialRegistrationItem） */
+export interface RegItem {
+  id: number
+  material_name: string
+  specification: string
+  material_category: string
+  ordered_quantity: number | string
+  received_quantity: number | string
+  remaining_quantity: number | string
+  progress: number
+  unit: string
+  supplier_name?: string
+}
+
+/** SKU 明细（多 SKU 订单时按 SKU 分行显示） */
+export interface RegSkuItem {
+  product_name: string
+  barcode: string
+  quantity: number
+  order_type?: string
+  country?: string
+}
+
+/** 来料登记记录（对齐后端 RegistrationListResponse.registrations） */
+export interface Registration {
+  id: number
+  purchase_order_no: string
+  supplier_name: string
+  supplier_names?: string[]
+  po_create_time?: string
+  customer_name: string
+  product_name: string
+  product_quantity: number
+  items: RegItem[]
+  sku_items?: RegSkuItem[]
+  status: string
+  progress: number
+  total_ordered: number | string
+  total_received: number | string
+  update_time?: string
+}
+
+export const materialApi = {
+  overview: () => get<Record<string, unknown>>('/material-registrations/stats/overview'),
+  trend: (days: number) => get<Record<string, unknown>>('/material-registrations/stats/trend', { days }),
+  distribution: () => get<Record<string, unknown>>('/material-registrations/stats/distribution'),
+  registrations: (params?: QueryParams) => get<{ registrations: Registration[]; pages?: number; total_pages?: number; total?: number }>('/material-registrations/registrations', params),
+  registrationDetail: (id: number) => get<{ registration?: Registration }>(`/material-registrations/registrations/${id}`),
+  history: (params?: QueryParams) => get<{ registrations: Registration[]; pages?: number; total_pages?: number }>('/material-registrations/history', params),
+  receive: (id: number, data: { received_quantity: number; remark?: string }) => post<ApiResponse & { auto_completed?: boolean }>(`/material-registrations/items/${id}/receive`, data),
+  export: (params?: QueryParams) => post<ExportResponse>('/material-registrations/export', params),
+}

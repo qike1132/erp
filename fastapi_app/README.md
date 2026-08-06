@@ -95,26 +95,13 @@ uvicorn fastapi_app.main:app --reload --host 0.0.0.0 --port 5002
 
 检查服务状态。
 
-## 与现有Flask系统集成
+## 数据模型
 
-### 共享数据库连接
-
-在实际使用中，需要配置与现有Flask系统共享的数据库会话。可以参考以下步骤：
-
-1. 创建共享的数据库配置模块
-2. 使用SQLAlchemy 2.0的异步会话
-3. 在FastAPI中复用现有的模型定义
-
-### 数据模型共享
-
-当前实现为了保持独立性，保留了逻辑框架。在实际集成时：
+所有模型定义统一在 `fastapi_app/shared_models/` 下，使用纯 SQLAlchemy 2.0 声明式模型。
 
 ```python
-# 从现有Flask应用导入模型
-from app.models.purchase_order import PurchaseOrder, PurchaseOrderItem
-
-# 或者创建共享模型目录
-from shared_models.purchase_order import PurchaseOrder, PurchaseOrderItem
+from fastapi_app.shared_models.purchase_order import PurchaseOrder, PurchaseOrderItem
+from fastapi_app.shared_models.product import Product
 ```
 
 ## 配置
@@ -166,9 +153,8 @@ ACCESS_TOKEN_EXPIRE_MINUTES=480
 
 ## 下一步
 
-1. 配置与现有Flask系统的数据库连接共享
-2. 实现完整的权限依赖注入
-3. 添加更多采购中心API
-4. 编写单元测试
-5. 配置CI/CD
+1. 实现完整的权限依赖注入
+2. 添加更多采购中心 API
+3. 扩展单元测试覆盖
+4. 迁移 flask_legacy 测试到 FastAPI
 

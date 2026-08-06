@@ -17,6 +17,14 @@ celery_app = Celery(
 
 DEFAULT_EXCHANGE = Exchange('tasks', type='direct')
 DLX_EXCHANGE = Exchange('dlx', type='direct')
+# I/O 密集型任务专用队列：备份、报表导出、批量导入、计划同步等
+# 由 gevent pool worker 消费，以高并发处理等待型任务（DB/文件/网络 I/O）
+IO_QUEUE = 'io'
+# I/O 子队列：按业务类型隔离，避免长任务互相阻塞（如备份不阻塞报表导出）
+IO_QUEUE_REPORTS = 'io.reports'
+IO_QUEUE_BACKUP = 'io.backup'
+IO_QUEUE_BATCH = 'io.batch'
+IO_QUEUE_PLAN = 'io.plan'
 
 celery_app.conf.update(
     # 序列化（已强制 JSON，禁用 pickle RCE 风险）
@@ -50,12 +58,14 @@ celery_app.conf.update(
     task_default_exchange="tasks",
     task_default_routing_key="task.default",
 
-    # 任务路由（按业务类型分队列）
+    # 任务路由：I/O 密集型任务按业务类型进入不同子队列，避免长任务互相阻塞
+    # 其他任务进入默认 celery 队列，由 prefork worker 处理
     task_routes={
-        "fastapi_app.tasks.batch_tasks.*": {"queue": "batch"},
-        "fastapi_app.tasks.report_tasks.*": {"queue": "reports"},
-        "fastapi_app.tasks.plan_tasks.*": {"queue": "batch"},
-        "fastapi_app.tasks.backup_tasks.*": {"queue": "batch"},
+        "fastapi_app.tasks.batch_tasks.*": {"queue": IO_QUEUE_BATCH},
+        "fastapi_app.tasks.report_tasks.*": {"queue": IO_QUEUE_REPORTS},
+        "fastapi_app.tasks.plan_tasks.*": {"queue": IO_QUEUE_PLAN},
+        "fastapi_app.tasks.backup_tasks.*": {"queue": IO_QUEUE_BACKUP},
+        "fastapi_app.tasks.maintenance_tasks.*": {"queue": IO_QUEUE_PLAN},
     },
 
     # 队列定义（显式声明所有队列，确保队列存在）
@@ -64,6 +74,11 @@ celery_app.conf.update(
         Queue("celery", DEFAULT_EXCHANGE, routing_key="task.default"),
         Queue("batch", DEFAULT_EXCHANGE, routing_key="task.batch"),
         Queue("reports", DEFAULT_EXCHANGE, routing_key="task.reports"),
+        Queue(IO_QUEUE, DEFAULT_EXCHANGE, routing_key="task.io"),
+        Queue(IO_QUEUE_REPORTS, DEFAULT_EXCHANGE, routing_key="task.io.reports"),
+        Queue(IO_QUEUE_BACKUP, DEFAULT_EXCHANGE, routing_key="task.io.backup"),
+        Queue(IO_QUEUE_BATCH, DEFAULT_EXCHANGE, routing_key="task.io.batch"),
+        Queue(IO_QUEUE_PLAN, DEFAULT_EXCHANGE, routing_key="task.io.plan"),
         Queue("dead_letter", DLX_EXCHANGE, routing_key="dlx.failed"),
     ),
 
@@ -76,7 +91,7 @@ celery_app.conf.update(
     },
     broker_connection_retry_on_startup=True,  # 启动时自动重连Broker
 
-    # 事件监控（Flower + Prometheus 需要）
+    # 事件监控（celery-exporter / Prometheus 需要）
     task_send_sent_event=True,          # 发送任务发送事件
     worker_send_task_events=True,       # Worker 发送任务事件
 
@@ -91,6 +106,7 @@ celery_app.conf.update(
         "fastapi_app.tasks.report_tasks",
         "fastapi_app.tasks.plan_tasks",
         "fastapi_app.tasks.backup_tasks",
+        "fastapi_app.tasks.maintenance_tasks",
     ],
 
     # 定时任务（Celery Beat）
@@ -114,6 +130,10 @@ celery_app.conf.update(
         "backup-cleanup": {
             "task": "backup_cleanup_task",
             "schedule": crontab(hour=4, minute=0),
+        },
+        "refresh-dashboard-mv": {
+            "task": "refresh_dashboard_mv_task",
+            "schedule": 300.0,  # 每 5 分钟刷新一次仪表盘物化视图
         },
     },
 )

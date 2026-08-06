@@ -1,14 +1,14 @@
 """add audit_log table
 
 Revision ID: pg_standalone_012
-Revises: None
+Revises: add_backup_record
 Create Date: 2026-05-15
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = 'pg_standalone_012'
-down_revision = None
+down_revision = 'add_backup_record'
 branch_labels = None
 depends_on = None
 
@@ -17,7 +17,7 @@ def upgrade() -> None:
     op.create_table(
         'audit_log',
         sa.Column('id', sa.Integer(), primary_key=True),
-        sa.Column('user_id', sa.Integer(), sa.Index('ix_audit_log_user_id'), nullable=True),
+        sa.Column('user_id', sa.Integer(), nullable=True),
         sa.Column('username', sa.String(50), nullable=True),
         sa.Column('action', sa.String(20), nullable=False, index=True),
         sa.Column('resource_type', sa.String(50), nullable=False, index=True),

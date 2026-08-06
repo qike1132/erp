@@ -8,7 +8,7 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: erp-app
-  minReplicas: 2
+  minReplicas: 4
   maxReplicas: 8
   metrics:
     - type: Resource
@@ -23,6 +23,25 @@ spec:
         target:
           type: Utilization
           averageUtilization: 80
+    # 自定义指标：P95 请求延迟 > 800ms 时触发扩容
+    - type: Pods
+      pods:
+        metric:
+          name: http_request_duration_seconds
+          selector:
+            matchLabels:
+              quantile: "0.95"
+        target:
+          type: AverageValue
+          averageValue: "800m"
+    # 自定义指标：Celery 队列堆积任务数 > 50 时触发扩容
+    - type: External
+      external:
+        metric:
+          name: celery_queue_length
+        target:
+          type: AverageValue
+          averageValue: "50"
   behavior:
     scaleUp:
       stabilizationWindowSeconds: 60

@@ -19,7 +19,6 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
@@ -27,12 +26,15 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 # 3. 项目内部
 from fastapi_app.api.v1.router import api_router
+from fastapi_app.api.v2.router import router as api_v2_router
 from fastapi_app.api.ws import register_websocket
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import async_engine, dispose_async_engines
+from fastapi_app.core.limiter import limiter
 from fastapi_app.core.db_health import db_health_checker
-from fastapi_app.core.exceptions import AppError
+from fastapi_app.core.exceptions import AppError, current_iso_timestamp, new_request_id
 from fastapi_app.core.health import register_health_routes
+from fastapi_app.core.deps import _resolve_user_id
 from fastapi_app.core.logger import logger, setup_logging
 from fastapi_app.core.middleware import setup_middleware
 
@@ -87,16 +89,26 @@ async def _setup_redis_caches():
 
     from utils.redis_cache import redis_cache
     try:
-        redis_host = os.getenv('REDIS_HOST', 'localhost')
-        redis_port = int(os.getenv('REDIS_PORT', 6379))
-        redis_db = int(os.getenv('REDIS_DB', 0))
-        redis_password = os.getenv('REDIS_PASSWORD')
-        await redis_cache.init_app(
-            redis_host=redis_host,
-            redis_port=redis_port,
-            redis_db=redis_db,
-            redis_password=redis_password,
+        from fastapi_app.core.config import settings
+
+        redis_url = (
+            getattr(settings, 'REDIS_CACHE_URL', None)
+            or os.getenv('REDIS_CACHE_URL')
+            or os.getenv('REDIS_URL')
         )
+        if redis_url:
+            await redis_cache.init_app(redis_url=redis_url)
+        else:
+            redis_host = os.getenv('REDIS_HOST', 'localhost')
+            redis_port = int(os.getenv('REDIS_PORT', 6379))
+            redis_db = int(os.getenv('REDIS_DB', 0))
+            redis_password = os.getenv('REDIS_PASSWORD')
+            await redis_cache.init_app(
+                redis_host=redis_host,
+                redis_port=redis_port,
+                redis_db=redis_db,
+                redis_password=redis_password,
+            )
         stats = await redis_cache.get_stats()
         logger.info("Redis缓存管理器初始化完成: %s", stats.get('backend', 'unknown'))
     except (OSError, ValueError) as e:
@@ -120,7 +132,7 @@ async def _warm_inventory_cache():
             await get_inventory_paginated(db, page=1, per_page=20)
             logger.info("库存缓存预热完成")
             break
-    except Exception as e:
+    except Exception as e:  # defensive: startup cache warmup failure must not block application boot
         logger.warning("库存缓存预热失败: %s", e)
 
 
@@ -165,7 +177,7 @@ async def lifespan(application: FastAPI):
         try:
             from fastapi_app.core.audit_middleware import flush_audit_buffer
             await flush_audit_buffer()
-        except Exception as e:
+        except Exception as e:  # defensive: shutdown audit flush failure must not block graceful shutdown
             logger.warning("审计缓冲区刷写失败: %s", e)
 
         # 再取消后台任务
@@ -211,27 +223,70 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+def _rate_limit_key(request: Request) -> str:
+    """限流键：已登录用户按 user_id，未登录按 IP。
+
+    从 JWT Bearer 或 Cookie JWT 中提取 sub（用户ID），纯内存操作无 DB 查询。
+    无法解析时降级到客户端 IP，保证登录/公共端点仍有基本防护。
+    """
+    user_id = _resolve_user_id(request)
+    if user_id is not None:
+        return f"user:{user_id}"
+    return get_remote_address(request)
+
+
 with warnings.catch_warnings():
     warnings.filterwarnings("ignore", message="Config file .* not found")
+    # Redis 分布式限流：解决多 worker 下 slowapi 内存计数漂移问题
+    # 已登录用户按 user_id 限流，避免内网多用户共享出口 IP 导致误限流
+    # Redis 不可用时自动回退到进程内存限流（此时多 worker 间不再共享计数）
     limiter = Limiter(
-        key_func=get_remote_address,
+        key_func=_rate_limit_key,
         default_limits=["60/minute"],
         enabled=True,
         config_filename=os.devnull,
+        storage_uri=settings.REDIS_CACHE_URL or "memory://",
+        in_memory_fallback_enabled=True,
+        in_memory_fallback=["60/minute"],
     )
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+    request_id = getattr(request.state, 'request_id', None) or new_request_id()
+    return MsgspecResponse(
+        content={
+            "success": False,
+            "detail": "请求过于频繁，请稍后再试",
+            "status_code": 429,
+            "code": "RATE_LIMIT_EXCEEDED",
+            "request_id": request_id,
+            "timestamp": current_iso_timestamp(),
+        },
+        status_code=429,
+        headers={"Retry-After": "60"},
+    )
+
+
 app.add_middleware(SlowAPIMiddleware)
 
 
 @app.exception_handler(AppError)
 async def app_error_handler(request: Request, exc: AppError):
+    request_id = getattr(request.state, 'request_id', None) or new_request_id()
+    logger.warning(
+        "业务异常: code=%s status=%d request_id=%s path=%s msg=%s",
+        exc.code, exc.status_code, request_id, request.url.path, exc.message,
+    )
     return MsgspecResponse(
         content={
             "success": False,
             "detail": exc.message,
             "code": exc.code,
             "status_code": exc.status_code,
+            "request_id": request_id,
+            "timestamp": current_iso_timestamp(),
         },
         status_code=exc.status_code,
     )
@@ -242,11 +297,18 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     if 300 <= exc.status_code < 400 and exc.headers and "location" in {k.lower(): v for k, v in exc.headers.items()}:
         location = {k.lower(): v for k, v in exc.headers.items()}["location"]
         return RedirectResponse(url=location, status_code=exc.status_code)
+    request_id = getattr(request.state, 'request_id', None) or new_request_id()
+    logger.warning(
+        "HTTP异常: status=%d request_id=%s path=%s detail=%s",
+        exc.status_code, request_id, request.url.path, exc.detail,
+    )
     return MsgspecResponse(
         content={
             "success": False,
             "detail": exc.detail,
             "status_code": exc.status_code,
+            "request_id": request_id,
+            "timestamp": current_iso_timestamp(),
         },
         status_code=exc.status_code,
     )
@@ -254,16 +316,19 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    # 生产环境不暴露字段名和类型详情，仅返回通用提示
     if os.getenv("APP_ENV") == "production":
         detail = "请求参数验证失败"
     else:
         detail = f"请求参数验证失败: {exc.errors()}"
+    request_id = getattr(request.state, 'request_id', None) or new_request_id()
     return MsgspecResponse(
         content={
             "success": False,
             "detail": detail,
             "status_code": 422,
+            "code": "VALIDATION_ERROR",
+            "request_id": request_id,
+            "timestamp": current_iso_timestamp(),
         },
         status_code=422,
     )
@@ -271,12 +336,19 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
-    logger.error("未处理异常: %s", type(exc).__name__, exc_info=True)
+    request_id = getattr(request.state, 'request_id', None) or new_request_id()
+    logger.error(
+        "未处理异常: request_id=%s type=%s path=%s",
+        request_id, type(exc).__name__, request.url.path, exc_info=exc,
+    )
     return MsgspecResponse(
         content={
             "success": False,
             "detail": "服务器内部错误，请稍后重试",
             "status_code": 500,
+            "code": "INTERNAL_ERROR",
+            "request_id": request_id,
+            "timestamp": current_iso_timestamp(),
         },
         status_code=500,
     )
@@ -291,6 +363,7 @@ register_health_routes(app)
 register_websocket(app)
 
 app.include_router(api_router, prefix=settings.API_PREFIX)
+app.include_router(api_v2_router, prefix="/api")
 
 _static_dir = pathlib.Path(__file__).resolve().parent.parent / "static"
 if _static_dir.is_dir():

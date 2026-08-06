@@ -1,8 +1,8 @@
 <template>
   <div class="cs-container">
-    <div class="cs-card cs-card-main">
+    <div class="page-card page-card-main">
       <!-- 卡片头部 -->
-      <div class="cs-card-header">
+      <div class="page-card-header">
         <div class="cs-header-left">
           <HeaderTabs />
         </div>
@@ -19,7 +19,7 @@
       </div>
 
       <!-- 内容区 -->
-      <div class="cs-body">
+      <div class="page-card-body">
         <CaseStockTab v-if="activeTab === 'stock'" />
         <CaseInventoryTab v-if="activeTab === 'inventory'" />
       </div>
@@ -28,18 +28,26 @@
 </template>
 
 <script setup lang="ts">
+/**
+ * CaseView.vue — 皮套出入库管理页面
+ *
+ * 职责：
+ * - 提供出入库（CaseStockTab）和库存查询（CaseInventoryTab）两个标签页
+ * - 通过 activeTab 控制标签页切换
+ */
 import { ref } from 'vue'
 import CaseStockTab from './CaseStockTab.vue'
 import CaseInventoryTab from './CaseInventoryTab.vue'
 import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 
-const activeTab = ref('stock')
+/** 当前激活的标签页：stock（出入库）/ inventory（库存查询） */
+const activeTab = ref<'stock' | 'inventory'>('stock')
 </script>
 
 <style scoped>
 /* Container */
 .cs-container {
-  padding: 8px;
+  padding: 0;
   margin: 0 auto;
   height: 100%;
   display: flex;
@@ -48,48 +56,11 @@ const activeTab = ref('stock')
 }
 
 /* Card */
-.cs-card {
-  background: white;
-  border-radius: 18px;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  transition: box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  overflow: hidden;
-}
-.cs-card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
-  transform: translateY(-2px);
-}
-.cs-card-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
+/* 卡片样式已迁移到全局 .page-card 系列（src/styles/app.css） */
 
 /* Card Header */
-.cs-card-header {
-  display: flex;
-  flex-wrap: nowrap;
-  justify-content: space-between;
-  align-items: flex-start;
-  padding: 10px 24px;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
-  gap: 12px;
-}
-.cs-header-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex: 1;
-}
-.cs-header-right {
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
-  gap: 8px;
-}
-.cs-card-header :deep(.ht-bar) {
+/* 卡片头部样式已迁移到全局 .page-card-header（src/styles/app.css） */
+.page-card-header :deep(.ht-bar) {
   width: auto;
   margin: 0;
 }
@@ -171,9 +142,5 @@ const activeTab = ref('stock')
 }
 
 /* Body */
-.cs-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-}
+/* 卡片主体样式已迁移到全局 .page-card-body（src/styles/app.css） */
 </style>

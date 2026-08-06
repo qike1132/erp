@@ -27,7 +27,13 @@ async def get_users(db: AsyncSession, page: int = 1, per_page: int = 15) -> tupl
     return users, total
 
 
-async def create_user(db: AsyncSession, username: str, password: str, is_super: bool) -> User:
+async def create_user(
+    db: AsyncSession,
+    username: str,
+    password: str,
+    is_super: bool,
+    factory: str | None = None,
+) -> User:
     """创建用户"""
     # 验证密码复杂度
     from utils.password_validator import PasswordValidator
@@ -49,6 +55,7 @@ async def create_user(db: AsyncSession, username: str, password: str, is_super: 
         password=hash_password(password),
         is_super=is_super,
         status=True,
+        factory=factory or None,
     )
     db.add(new_user)
     await db.flush()
@@ -56,8 +63,19 @@ async def create_user(db: AsyncSession, username: str, password: str, is_super: 
     return new_user
 
 
-async def update_user(db: AsyncSession, user_id: int, password: str | None, is_super: bool | None) -> User:
-    """更新用户"""
+async def update_user(
+    db: AsyncSession,
+    user_id: int,
+    password: str | None,
+    is_super: bool | None,
+    factory: str | None = None,
+) -> User:
+    """更新用户
+
+    factory 参数语义：
+    - None：不修改
+    - 空字符串或合法工厂值：写入（空字符串视为清除为 NULL）
+    """
     result = await db.execute(select(User).where(User.id == user_id).with_for_update())
     user = result.scalar_one_or_none()
     if not user:
@@ -73,6 +91,9 @@ async def update_user(db: AsyncSession, user_id: int, password: str | None, is_s
 
     if is_super is not None:
         user.is_super = is_super
+
+    if factory is not None:
+        user.factory = factory or None
 
     await db.flush()
     await db.refresh(user)

@@ -13,7 +13,7 @@ from sqlalchemy import Column, DateTime, Integer, String, Text
 from fastapi_app.core.database import SyncSession
 from fastapi_app.shared_models.base import Base
 
-# 使用 contextvars 替代 Flask session/request
+# 使用 contextvars 存储请求上下文
 current_user_id = contextvars.ContextVar('current_user_id', default=None)
 current_username = contextvars.ContextVar('current_username', default='anonymous')
 current_ip = contextvars.ContextVar('current_ip', default=None)

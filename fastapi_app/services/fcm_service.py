@@ -50,7 +50,7 @@ def _ensure_fcm() -> bool:
     except ImportError:
         logger.warning("firebase_admin 未安装，FCM 推送不可用")
         return False
-    except Exception as e:
+    except Exception as e:  # defensive: FCM初始化失败时应禁用推送服务
         logger.error("Firebase Admin SDK 初始化失败: %s", e)
         return False
 
@@ -82,7 +82,7 @@ async def send_to_device(token: str, title: str, body: str, data: dict[str, Any]
         )
         await asyncio.to_thread(_send_sync, message)
         logger.debug("FCM 推送已发送到设备: %s", token[:20])
-    except Exception as e:
+    except Exception as e:  # defensive: FCM单设备推送失败不影响业务流程
         logger.warning("FCM 设备推送失败: %s", e)
 
 
@@ -100,7 +100,7 @@ async def send_to_topic(topic: str, title: str, body: str, data: dict[str, Any] 
         )
         await asyncio.to_thread(_send_sync, message)
         logger.debug("FCM 推送已发送到主题: %s", topic)
-    except Exception as e:
+    except Exception as e:  # defensive: FCM主题推送失败不影响业务流程
         logger.warning("FCM 主题推送失败: %s", e)
 
 
@@ -140,7 +140,7 @@ async def send_to_user(
             response = await asyncio.to_thread(_send_multicast_sync, msg)
             logger.debug("FCM 用户推送批次 %d: 成功=%d, 失败=%d",
                          i // FCM_MULTICAST_LIMIT, response.success_count, response.failure_count)
-    except Exception as e:
+    except Exception as e:  # defensive: FCM按用户推送失败不影响业务流程
         logger.warning("FCM 用户推送失败(user_id=%s): %s", user_id, e)
 
 
@@ -179,5 +179,5 @@ async def send_to_all_users(
             total_success += response.success_count
             total_failure += response.failure_count
         logger.debug("FCM 批量推送完成: 成功=%d, 失败=%d", total_success, total_failure)
-    except Exception as e:
+    except Exception as e:  # defensive: FCM全量推送失败不影响业务流程
         logger.warning("FCM 全量推送失败: %s", e)

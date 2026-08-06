@@ -11,10 +11,8 @@
     - 69 码校验
 """
 import asyncio
-import calendar
 import logging
 import os
-from datetime import date as date_type
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.exc import DisconnectionError, IntegrityError, OperationalError
@@ -44,11 +42,9 @@ from fastapi_app.schemas.purchase_plan import (
     PurchasePlanUploadExcelResponse,
     ShipmentProgressResponse,
     ShipmentRecordsResponse,
-    ShipmentSyncResponse,
-    SyncShipmentRequest,
 )
 from fastapi_app.services import purchase_plan_service
-from fastapi_app.shared_models import Customer, User
+from fastapi_app.shared_models import User
 
 # 上传 Excel 文件大小上限（10MB）
 MAX_UPLOAD_FILE_SIZE = 10 * 1024 * 1024
@@ -110,8 +106,13 @@ async def plan_detail(plan_id: int, db: AsyncSession=Depends(get_async_read_db),
 async def create_plan(data: PurchasePlanCreate, db: AsyncSession=Depends(get_async_db), user: User=Depends(require_permission('production_plan_manage'))) -> CreatePlanResponse:
     """创建采购计划主单+明细。
 
-    事务模式：手动 commit + catch IntegrityError。
-    原因：db_transaction 会将 IntegrityError 转为 HTTP 500，无法对外层提供 409 单号冲突提示。
+    事务模式：手动 commit + 显式异常分支。
+    原因：db_transaction 会将 IntegrityError 转为 HTTP 500，无法对外层提供 409 提示。
+
+    异常映射：
+        - PlanExistsError（uq_ppl_month_customer 冲突）→ 409 "该客户当月已存在采购计划"
+        - ValueError（业务校验失败 / plan_no 冲突耗尽）→ 400
+        - IntegrityError（仅理论上可达：detail INSERT 异常）→ 500
 
     Args:
         data: 采购计划创建请求体（含客户、计划月份、明细列表等）。
@@ -124,13 +125,19 @@ async def create_plan(data: PurchasePlanCreate, db: AsyncSession=Depends(get_asy
     Raises:
         HTTPException: 业务校验失败返回 400；单号冲突返回 409；数据库异常返回 500。
     """
+    from fastapi_app.services.purchase_plan_crud import PlanExistsError
     try:
         _, created_by = get_user_identity(user)
         result = await purchase_plan_service.create_plan(db, customer_id=data.customer_id, customer_name=data.customer_name, plan_month=data.plan_month, details=[d.model_dump() for d in data.details], remark=data.remark, created_by=created_by)
         await db.commit()
+    except PlanExistsError as e:
+        await db.rollback()
+        # 该客户当月已有计划：冲突不可重试，提示用户编辑现有计划
+        logger.warning(f'创建计划被拒：{e}')
+        raise HTTPException(status_code=409, detail=str(e)) from e
     except IntegrityError as e:
         await db.rollback()
-        logger.error(f'创建计划单号冲突: {e}')
+        logger.error(f'创建计划单号冲突: {e}', exc_info=True)
         raise HTTPException(status_code=409, detail='单号已存在，请勿重复提交') from e
     except ValueError as e:
         await db.rollback()
@@ -139,6 +146,16 @@ async def create_plan(data: PurchasePlanCreate, db: AsyncSession=Depends(get_asy
         await db.rollback()
         logger.error(f'创建计划失败: {e}', exc_info=True)
         raise HTTPException(status_code=500, detail=f'创建计划失败: {settings.sanitize_error(e)}') from e
+    else:
+        # 手动执行 post-commit 回调（缓存失效、事件发布等），与 db_transaction 保持一致
+        callbacks = []
+        if hasattr(db, 'info') and isinstance(db.info, dict) and 'post_commit_callbacks' in db.info:
+            callbacks = db.info.pop('post_commit_callbacks', [])
+        for callback in callbacks:
+            try:
+                await callback()
+            except Exception as e:
+                logger.error("post-commit 回调执行失败: %s", e, exc_info=True)
     return {'success': True, 'data': result}
 
 @router.put('/edit/{plan_id}', response_model=PurchasePlanActionResponse)
@@ -248,18 +265,9 @@ async def monthly_calendar(year: int=Query(..., description='年份'), month: in
     _t0 = _t.perf_counter()
     try:
         async with asyncio.timeout(MONTHLY_QUERY_TIMEOUT_SECONDS):
+            # S2: icon_url 查询已下沉到 service 层 _enrich_customer_icon_urls
             result = await purchase_plan_service.get_monthly_calendar(db, year, month, customer_id)
         logger.info(f'[PERF] monthly_calendar query took {(_t.perf_counter()-_t0)*1000:.0f}ms')
-        # 补充客户图标URL：服务层仅返回客户id/name，图标需额外查询Customer表
-        customer_ids = [c['id'] for c in result['customers']]
-        if customer_ids:
-            from sqlalchemy import select as sa_select
-            c_result = await db.execute(sa_select(Customer).where(Customer.id.in_(customer_ids)))
-            c_map = {c.id: c for c in c_result.scalars().all()}
-            for c in result['customers']:
-                c_obj = c_map.get(c['id'])
-                if c_obj:
-                    c['icon_url'] = c_obj.icon_url or ''
         return result
     except (OperationalError, DisconnectionError) as e:
         logger.error(f'获取月度日历数据失败: {e}', exc_info=True)
@@ -370,37 +378,32 @@ async def shipment_records(plan_id: int=Query(..., description='计划主单ID')
         logger.error(f'获取出货流水失败: {e}', exc_info=True)
         raise HTTPException(status_code=500, detail=f'获取出货流水失败: {settings.sanitize_error(e)}') from e
 
-@router.post('/shipment/sync', response_model=ShipmentSyncResponse)
-async def shipment_sync(data: SyncShipmentRequest, db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('production_plan_manage'))) -> ShipmentSyncResponse:
-    """手动触发出货数据同步。
+@router.get('/shipment/records-by-date', response_model=ShipmentRecordsResponse)
+async def shipment_records_by_date(date: str=Query(..., description='查询日期 YYYY-MM-DD'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('production_plan_view'))) -> ShipmentRecordsResponse:
+    """S1 批量端点：按日期查询所有相关出货流水记录
 
-    按天遍历指定月份，逐日同步出货记录。
+    替代前端按 plan_id 分块 N+1 请求的模式。
+    一次查询返回当日所有客户+产品的出货记录，前端按 shipment_no 去重即可。
 
     Args:
-        data: 同步请求体（含 year、month）。
-        db: 读写数据库会话。
+        date: 查询日期 YYYY-MM-DD。
+        db: 只读数据库会话。
         _user: 当前操作用户（用于权限校验）。
 
     Returns:
-        ShipmentSyncResponse: 同步结果（含累计同步条数）。
+        ShipmentRecordsResponse: 出货流水记录列表。
 
     Raises:
-        HTTPException: 数据库异常返回 500。
+        HTTPException: 日期格式错误返回 400；数据库异常返回 500。
     """
     try:
-        start = date_type(data.year, data.month, 1)
-        end = date_type(data.year, data.month, calendar.monthrange(data.year, data.month)[1])
-        total_synced = 0
-        current = start
-        while current <= end:
-            async with db_transaction(db):
-                result = await purchase_plan_service.sync_shipment_records(db, current)
-            total_synced += result['synced_count']
-            current = date_type.fromordinal(current.toordinal() + 1)
-        return {'success': True, 'synced_count': total_synced}
+        records = await purchase_plan_service.get_shipment_records_by_date(db, date)
+        return {'records': records}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except (OperationalError, DisconnectionError) as e:
-        logger.error(f'出货同步失败: {e}', exc_info=True)
-        raise HTTPException(status_code=500, detail=f'出货同步失败: {settings.sanitize_error(e)}') from e
+        logger.error(f'按日期获取出货流水失败: {e}', exc_info=True)
+        raise HTTPException(status_code=500, detail=f'获取出货流水失败: {settings.sanitize_error(e)}') from e
 
 @router.post('/upload', response_model=PurchasePlanUploadExcelResponse)
 async def upload_excel(file: UploadFile=File(..., description='Excel文件'), db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('production_plan_manage'))) -> PurchasePlanUploadExcelResponse:
@@ -485,6 +488,16 @@ async def staging_confirm(data: ConfirmStagingRequest, db: AsyncSession=Depends(
         await db.rollback()
         logger.error(f'确认计划单号冲突: {e}')
         raise HTTPException(status_code=409, detail='单号已存在，请勿重复提交') from e
+    else:
+        # 手动执行 post-commit 回调（缓存失效、事件发布等），与 db_transaction 保持一致
+        callbacks = []
+        if hasattr(db, 'info') and isinstance(db.info, dict) and 'post_commit_callbacks' in db.info:
+            callbacks = db.info.pop('post_commit_callbacks', [])
+        for callback in callbacks:
+            try:
+                await callback()
+            except Exception as e:
+                logger.error("post-commit 回调执行失败: %s", e, exc_info=True)
     return {'success': True, **result}
 
 @router.delete('/staging/clear', response_model=PurchasePlanActionResponse)

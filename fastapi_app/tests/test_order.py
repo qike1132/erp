@@ -54,13 +54,13 @@ class TestOrderService:
         mock_scalars.unique.return_value = mock_unique
         mock_data_result.scalars.return_value = mock_scalars
         mock_db.execute = AsyncMock(return_value=mock_data_result)
-        with patch('fastapi_app.services.order_service.optimized_count', new_callable=AsyncMock, return_value=0):
+        with patch('fastapi_app.services.order_crud.optimized_count', new_callable=AsyncMock, return_value=0):
             result = await order_service.get_orders(mock_db)
         assert result['items'] == []
         assert result['total'] == 0
 
     async def test_create_order_product_not_found(self, mock_db):
-        with patch('fastapi_app.services.order_service.get_product_for_update', new_callable=AsyncMock, side_effect=ValueError('产品ID 999 不存在')):
+        with patch('fastapi_app.services.order_crud.get_product_for_update', new_callable=AsyncMock, side_effect=ValueError('产品ID 999 不存在')):
             with pytest.raises(ValueError, match="产品ID 999 不存在"):
                 await order_service.create_order(
                     mock_db, product_id=999, quantity=10,
@@ -81,8 +81,8 @@ class TestOrderService:
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock()
 
-        with patch('fastapi_app.services.order_service.get_product_for_update', new_callable=AsyncMock, return_value=product):
-            with patch('fastapi_app.services.order_service._generate_order_number', new_callable=AsyncMock, return_value="PO-001"):
+        with patch('fastapi_app.services.order_crud.get_product_for_update', new_callable=AsyncMock, return_value=product):
+            with patch('fastapi_app.services.order_crud._generate_order_number', new_callable=AsyncMock, return_value="PO-001"):
                 result = await order_service.create_order(
                     mock_db, product_id=1, quantity=10,
                     customer="客户", note="", current_user=MagicMock()
@@ -126,7 +126,7 @@ class TestOrderService:
         mock_db.execute = AsyncMock(return_value=mock_result)
         mock_db.commit = AsyncMock()
 
-        with patch('fastapi_app.services.order_service.get_product_for_update', new_callable=AsyncMock, return_value=product):
+        with patch('fastapi_app.services.order_crud.get_product_for_update', new_callable=AsyncMock, return_value=product):
             result = await order_service.update_order(
                 mock_db, order_id=1, quantity=20,
                 customer="新客户", note="新备注", current_user=user
@@ -187,7 +187,7 @@ class TestOrderService:
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
 
-        with patch('fastapi_app.services.order_service._create_approval_log_obj'):
+        with patch('fastapi_app.services.order_crud._create_approval_log_obj'):
             await order_service.cancel_approval(mock_db, 1, user)
 
         assert approval.status == ApprovalRequest.STATUS_CANCELLED
@@ -237,8 +237,8 @@ class TestOrderEndpoints:
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock()
 
-        with patch('fastapi_app.services.order_service.get_product_for_update', new_callable=AsyncMock, return_value=product):
-            with patch('fastapi_app.services.order_service._generate_order_number', new_callable=AsyncMock, return_value="PO-001"):
+        with patch('fastapi_app.services.order_crud.get_product_for_update', new_callable=AsyncMock, return_value=product):
+            with patch('fastapi_app.services.order_crud._generate_order_number', new_callable=AsyncMock, return_value="PO-001"):
                 response = await client.post("/api/v1/orders/create", json={
                     "product_id": 1, "quantity": 10, "customer": "测试客户"
                 })
@@ -276,8 +276,8 @@ class TestOrderEndpoints:
         mock_db.execute = AsyncMock(return_value=mock_execute_result)
         mock_db.commit = AsyncMock()
 
-        with patch('fastapi_app.services.order_service.get_product_for_update', new_callable=AsyncMock, return_value=product), \
-             patch('fastapi_app.services.order_service._safe_publish_event', new_callable=AsyncMock):
+        with patch('fastapi_app.services.order_crud.get_product_for_update', new_callable=AsyncMock, return_value=product), \
+             patch('fastapi_app.services.order_crud._safe_publish_event', new_callable=AsyncMock):
             response = await client.put("/api/v1/orders/edit/1", json={
                 "quantity": 20, "customer": "新客户"
             })
@@ -310,7 +310,7 @@ class TestOrderEndpoints:
         mock_db.delete = AsyncMock()
         mock_db.commit = AsyncMock()
 
-        with patch('fastapi_app.services.order_service.get_product_for_update', new_callable=AsyncMock, return_value=product):
+        with patch('fastapi_app.services.order_crud.get_product_for_update', new_callable=AsyncMock, return_value=product):
             response = await client.delete("/api/v1/orders/delete/1")
         assert response.status_code == 200
         assert response.json()['success'] is True
@@ -329,7 +329,7 @@ class TestOrderEndpoints:
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
 
-        with patch('fastapi_app.services.order_service._create_approval_log_obj'):
+        with patch('fastapi_app.services.order_crud._create_approval_log_obj'):
             response = await client.post("/api/v1/orders/cancel-approval/1")
         assert response.status_code == 200
         assert response.json()['success'] is True

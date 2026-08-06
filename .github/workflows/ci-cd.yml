@@ -9,7 +9,31 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: erp_test
+          POSTGRES_USER: erp_test
+          POSTGRES_PASSWORD: erp_test_pass
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DB_HOST: localhost
+      DB_USER: erp_test
+      DB_PASSWORD: erp_test_pass
+      DB_NAME: erp_test
+      DB_PORT: "5432"
+      SECRET_KEY: "ci-test-secret-key-with-sufficient-length-for-validation-checks"
+      COVERAGE_MIN: "40"
+
     steps:
     - uses: actions/checkout@v4
     
@@ -32,21 +56,20 @@ jobs:
         pip install -r requirements.txt
         pip install bandit pip-audit ruff
     
+    - name: Verify Alembic migrations
+      run: |
+        python -m alembic -c migrations/alembic.ini upgrade head
+        python -m alembic -c migrations/alembic.ini check
+    
     - name: Run gated test suite
       run: |
         pytest \
-          tests/test_cache.py \
-          tests/test_config.py \
-          tests/test_stock_concurrency.py \
-          tests/test_base_search_service.py \
-          tests/test_customer_search_service.py \
-          tests/test_product_search_service.py \
-          tests/test_case_service.py \
-          tests/test_ocr_service.py \
-          tests/test_finance_service.py \
-          tests/test_purchase_supplier_service.py \
-          tests/test_production_plan_service.py \
-          fastapi_app/tests/test_integration_smoke.py \
+          tests fastapi_app/tests \
+          --ignore=tests/qa \
+          --ignore=tests/e2e \
+          --ignore=tests/stress \
+          --ignore=tests/performance \
+          -m "not flask_legacy" \
           --cov=fastapi_app \
           --cov=utils \
           --cov-report=xml \
@@ -73,11 +96,11 @@ jobs:
     
     - name: Security scan with Bandit
       run: |
-        bandit -r fastapi_app/ utils/ -f json -o security-report.json || true
+        bandit -r fastapi_app/ utils/ -f json -o security-report.json -ii
     
     - name: Dependency vulnerability scan
       run: |
-        pip-audit --format json > dependency-audit.json || true
+        pip-audit --format json > dependency-audit.json
     
     - name: Upload security reports
       uses: actions/upload-artifact@v4
@@ -119,7 +142,7 @@ if coverage < threshold:
         pip install ruff mypy
     
     - name: Run Ruff gate
-      run: ruff check fastapi_app tests fastapi_app/tests utils --select E9
+      run: ruff check fastapi_app tests fastapi_app/tests utils
 
     - name: Run scoped mypy gate
       run: python -m mypy --config-file mypy.ini

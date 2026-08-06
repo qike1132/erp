@@ -1,9 +1,17 @@
 import axios from 'axios'
 import type { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse, AxiosError } from 'axios'
+import { getAccessToken } from '@/utils/secureStorage'
+
+// TODO(技术栈优化): 本模块可考虑用原生 fetch 替代 axios 以减小打包体积。
+// 当前深度依赖 axios 特性（请求/响应拦截器、isAxiosError 类型守卫、retry 退避逻辑、
+// Capacitor 文件下载集成），直接替换风险较高，暂保留。
+// 替换时需重写：CSRF token 注入、401 跳转/403 提示、文件上传(multipart)、
+// 文件下载(blob/arraybuffer)、502/503/504 重试退避。
 
 const isCap = !!import.meta.env.VITE_CAPACITOR
 
 let isRedirecting401 = false
+let isShowing403 = false
 
 const service: AxiosInstance = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api/v1',
@@ -22,7 +30,7 @@ service.interceptors.request.use((config: InternalAxiosRequestConfig) => {
     }
   }
   if (isCap) {
-    const accessToken = localStorage.getItem('access_token')
+    const accessToken = getAccessToken()
     if (accessToken && !config.headers['Authorization']) {
       config.headers['Authorization'] = `Bearer ${accessToken}`
     }
@@ -41,7 +49,7 @@ service.interceptors.response.use(
     }
     return response.data
   },
-  (error: AxiosError) => {
+  async (error: AxiosError) => {
     if (isCap && import.meta.env.DEV) {
       console.error(`[API Error] ${error.config?.method?.toUpperCase()} ${error.config?.url}`, {
         status: error.response?.status,
@@ -58,6 +66,18 @@ service.interceptors.response.use(
           window.location.href = `/login?redirect=${encodeURIComponent(current)}`
         }
         setTimeout(() => { isRedirecting401 = false }, 2000)
+      }
+    }
+    if (error.response?.status === 403) {
+      const detail = (error.response?.data as { detail?: string })?.detail || '权限不足'
+      console.warn('[API 403]', detail)
+      if (!isShowing403) {
+        isShowing403 = true
+        try {
+          const { toast } = await import('@/composables/useToast')
+          toast.warning(detail, { duration: 3000 })
+        } catch { /* composable 不可用时静默降级 */ }
+        setTimeout(() => { isShowing403 = false }, 3000)
       }
     }
     return Promise.reject(error)
@@ -95,8 +115,23 @@ async function executeWithRetry<T>(
   }
 }
 
+// GET 请求去重：同一 url+params 的并发 GET 共享同一个 Promise，避免重复网络请求
+// 注意：去重的 Promise 包含重试逻辑（executeWithRetry），所有去重调用者会共享重试延迟。
+// 如需独立重试或快速失败，请直接使用 service.get()。
+const _inflightGet = new Map<string, Promise<unknown>>()
+
+function _dedupeKey(url: string, params?: Record<string, unknown>): string {
+  return `${url}?${params ? JSON.stringify(params) : ''}`
+}
+
 export function get<T>(url: string, params?: Record<string, unknown>): Promise<T> {
-  return executeWithRetry(() => service.get(url, { params }) as Promise<T>)
+  const key = _dedupeKey(url, params)
+  const existing = _inflightGet.get(key)
+  if (existing) return existing as Promise<T>
+  const p = executeWithRetry(() => service.get(url, { params }) as Promise<T>)
+  _inflightGet.set(key, p)
+  p.finally(() => _inflightGet.delete(key))
+  return p
 }
 
 /** 写操作仅对 502/503/504 网关错误重试一次（不重试 4xx 业务错误） */
@@ -132,6 +167,18 @@ export function upload<T>(url: string, formData: FormData): Promise<T> {
   return service.post(url, formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   }) as Promise<T>
+}
+
+/** POST 请求下载文件（用于需要 POST body 的文件下载场景） */
+export async function postDownload(url: string, data: unknown, filename: string): Promise<void> {
+  // 响应拦截器返回 response.data，因此 res 已是 Blob（responseType: 'blob'）
+  const blob = await service.post(url, data, { responseType: 'blob' }) as unknown as Blob
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL(blob)
+  link.download = filename
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(link.href), 10000)
 }
 
 export function download(url: string, filename: string, params?: Record<string, unknown>): Promise<void> {

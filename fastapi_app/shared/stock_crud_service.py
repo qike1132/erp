@@ -1,9 +1,14 @@
 """
-库存核心业务逻辑（跨框架共享）
+库存核心业务逻辑
 
-统一 Flask 和 FastAPI 的库存 CRUD 逻辑，消除业务规则漂移。
+统一库存 CRUD 逻辑，消除业务规则漂移。
 所有函数接受 SQLAlchemy Session 参数，不依赖任何 Web 框架。
 函数内部不做 commit/rollback，由调用方控制事务边界。
+
+TODO(multi-sku-order): 本模块多处 SQL 直接引用 Order.product_id/Order.quantity/
+Order.order_type/Order.country（where 条件、group_by、select 列）。多 SKU 模型下
+这些为首 item 兼容值，完整改造涉及业务语义变更，待后续 spec 改造为 JOIN OrderItem。
+当前依赖 Task 3 设置的兼容值。
 """
 import logging
 from datetime import datetime
@@ -18,7 +23,7 @@ from fastapi_app.shared_models import InventoryLog, Order, Product, StockIn, Sto
 logger = logging.getLogger(__name__)
 
 
-from fastapi_app.services import escape_like
+from fastapi_app.core.sanitizer import escape_like
 
 # ==================== 编号生成 ====================
 
@@ -29,8 +34,8 @@ def generate_order_number_sync(session: Session) -> str:
 
 
 def generate_stockin_number_sync(session: Session) -> str:
-    """生成备货编号 SI-YYYYMMDD-XXXX"""
-    return generate_number_sync('SI', StockIn, 'stockin_date', 'stockin_no', session)
+    """生成备货编号 BH-YYYYMMDD-XXXX"""
+    return generate_number_sync('BH', StockIn, 'stockin_date', 'stockin_no', session)
 
 
 def generate_stockout_number_sync(session: Session) -> str:
@@ -72,9 +77,13 @@ def calculate_available_shipment_quantity(
         dict: { order_quantity, shipped_quantity, available_quantity,
                 regular_available, custom_available, orders }
     """
+    # 历史兼容：'normal' 在数据库中与 'regular' 等价
+    if order_type == 'normal':
+        order_type = 'regular'
+
     where_clause = [Order.product_id == product_id, Order.customer == customer]
     if order_type:
-        if order_type in ('regular', 'normal'):
+        if order_type == 'regular':
             where_clause.append(Order.order_type.in_(['regular', 'normal']))
         else:
             where_clause.append(Order.order_type == order_type)
@@ -116,12 +125,13 @@ def calculate_available_shipment_quantity(
     order_details = []
 
     for order in orders:
+        # TODO(multi-sku-order): 遍历累加 order.quantity/order_type/country 在多 SKU 下语义变更，待后续 spec 改造为遍历 order.items；当前依赖兼容值。
         total_order_quantity += order.quantity
         _order_type = order.order_type or 'regular'
         _country = order.country or ''
         non_deduction_shipped = shipped_map.get(order.id, 0)
 
-        if _order_type in ('regular', 'normal'):
+        if _order_type in ('regular', 'normal'):  # 'normal' 为历史数据兼容
             regular_order_quantity += order.quantity
             regular_shipped += non_deduction_shipped
         else:
@@ -553,7 +563,7 @@ def get_inventory(session: Session, search_customer: str = '',
     """
     获取库存数据（按产品+客户维度汇总）
 
-    业务规则（与原 Flask/FastAPI 实现一致）：
+    业务规则：
     - 备货剩余 = 该客户该产品的入库量 - 已被订单抵扣的量
     - 订单可用 = 该客户该产品的订单总量 - 已出货量（非抵扣）
     - 总库存 = 备货剩余 + 常规订单数量 + 定制订单数量 - 已出货总量

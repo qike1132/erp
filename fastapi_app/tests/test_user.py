@@ -1,4 +1,5 @@
 """用户管理模块测试"""
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -40,6 +41,103 @@ class TestUserSchemas:
         perm = PermissionResponse(id=1, name="产品管理", code="product_manage", children=[])
         assert perm.code == "product_manage"
         assert perm.children == []
+
+
+# ==================== has_permission 权限继承测试 ====================
+
+def _make_perm(code, parent_id=None, children=None):
+    """构造轻量级权限桩对象，避免依赖数据库"""
+    return SimpleNamespace(code=code, parent_id=parent_id, children=children or [])
+
+
+def _make_user(permissions, is_super=False):
+    """构造轻量级用户桩对象，绑定真实的 has_permission 方法"""
+    from types import MethodType
+    from fastapi_app.shared_models.user import User
+    stub = SimpleNamespace(is_super=is_super, permissions=permissions)
+    stub.has_permission = MethodType(User.has_permission, stub)
+    return stub
+
+
+class TestUserHasPermission:
+    """User.has_permission 权限继承逻辑测试
+
+    覆盖核心场景：
+    - 超级管理员拥有所有权限
+    - user_ 前缀敏感权限仅超级管理员可访问
+    - 拥有 xxx_manage 顶级权限时自动继承 xxx_view
+    - view 不能向上继承 manage
+    - delete/edit/create 不自动继承
+    """
+
+    def test_super_user_has_all_permissions(self):
+        user = _make_user([], is_super=True)
+        assert user.has_permission('product_view') is True
+        assert user.has_permission('product_manage') is True
+        assert user.has_permission('any_permission') is True
+
+    def test_normal_user_no_permissions(self):
+        user = _make_user([], is_super=False)
+        assert user.has_permission('product_view') is False
+        assert user.has_permission('product_manage') is False
+
+    def test_manage_inherits_view(self):
+        """拥有 xxx_manage 时自动通过 xxx_view 检查（本次修复的核心场景）"""
+        user = _make_user([_make_perm('product_manage', parent_id=None)], is_super=False)
+        assert user.has_permission('product_view') is True
+        assert user.has_permission('product_manage') is True
+
+    def test_view_does_not_inherit_manage(self):
+        """view 不能向上继承 manage"""
+        user = _make_user([_make_perm('product_view', parent_id=None)], is_super=False)
+        assert user.has_permission('product_view') is True
+        assert user.has_permission('product_manage') is False
+
+    def test_manage_does_not_inherit_delete_edit_create(self):
+        """拥有 xxx_manage 时不自动通过 delete/edit/create"""
+        user = _make_user([_make_perm('product_manage', parent_id=None)], is_super=False)
+        assert user.has_permission('product_delete') is False
+        assert user.has_permission('product_edit') is False
+        assert user.has_permission('product_create') is False
+
+    def test_non_top_level_manage_does_not_inherit_view(self):
+        """非顶级（parent_id 不为 None）的 manage 权限不触发 view 继承"""
+        user = _make_user([_make_perm('sub_product_manage', parent_id=1)], is_super=False)
+        assert user.has_permission('sub_product_view') is False
+
+    def test_exact_permission_match(self):
+        """精确权限匹配"""
+        user = _make_user([_make_perm('order_manage', parent_id=None)], is_super=False)
+        assert user.has_permission('order_manage') is True
+        assert user.has_permission('order_view') is True
+        assert user.has_permission('stock_view') is False
+
+    def test_child_permission_match(self):
+        """子权限匹配"""
+        child_perm = _make_perm('product_view')
+        parent_perm = _make_perm('product_manage', parent_id=None, children=[child_perm])
+        user = _make_user([parent_perm], is_super=False)
+        assert user.has_permission('product_view') is True
+
+    def test_sensitive_user_permission_requires_super(self):
+        """user_ 前缀敏感权限仅超级管理员可访问"""
+        normal_user = _make_user([_make_perm('user_manage', parent_id=None)], is_super=False)
+        assert normal_user.has_permission('user_manage') is False
+        assert normal_user.has_permission('user_view') is False
+
+        super_user = _make_user([], is_super=True)
+        assert super_user.has_permission('user_manage') is True
+        assert super_user.has_permission('user_view') is True
+
+    def test_multiple_manage_permissions(self):
+        """拥有多个 manage 权限时各自独立继承对应 view"""
+        user = _make_user([
+            _make_perm('product_manage', parent_id=None),
+            _make_perm('order_manage', parent_id=None),
+        ], is_super=False)
+        assert user.has_permission('product_view') is True
+        assert user.has_permission('order_view') is True
+        assert user.has_permission('stock_view') is False
 
 
 # ==================== Service 测试 ====================

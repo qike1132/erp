@@ -1,7 +1,7 @@
 """
 供应商模型 - 纯 SQLAlchemy 2.0 声明式
 
-映射到与 Flask-SQLAlchemy Supplier 相同的 'supplier' 表。
+映射到 'supplier' 表。
 """
 from __future__ import annotations
 
@@ -47,8 +47,6 @@ class Supplier(Base):
             'contact_person': self.contact_person,
             'phone': self.phone,
             'address': self.address,
-            'bank_name': self.bank_name,
-            'bank_account': self.bank_account,
             'remark': self.remark,
             'status': self.status,
             'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None,

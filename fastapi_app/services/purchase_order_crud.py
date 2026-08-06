@@ -77,7 +77,7 @@ async def create_purchase_order(db: AsyncSession, data: dict, include_summary: b
             unit_price=unit_price,
             quantity=quantity,
             total_price=amount,
-            supplier_name=supplier_name,
+            supplier_name=item_data.get('supplier_name') or supplier_name,
             customer_name=customer_name,
             material_category=item_data.get('category', ''),
             remark=item_data.get('remark', ''),
@@ -153,11 +153,15 @@ async def _upsert_order_items(
                 item = await db.get(PurchaseOrderItem, item_id)
             if item is not None and item.order_id == order_id:
                 updated_ids.add(item_id)
+            else:
+                # 关键修复：item 不存在或属于其他订单时置 None，防止后续 _apply_item_fields
+                # 误写入其他订单的明细对象，导致跨订单数据篡改和 total_amount 计算错误。
+                item = None
         else:
             item = PurchaseOrderItem(order_id=order_id)
 
         if item is None:
-            # id 无效（已被删除）：跳过，避免 AttributeError
+            # id 无效（已被删除、不存在，或属于其他订单）：跳过，避免跨订单写入
             continue
 
         _apply_item_fields(item, item_data, order)

@@ -108,3 +108,52 @@ class TestAuthEndpoints:
         cookie_header = next((h for h in set_cookie_headers if "access_token" in h), "")
         assert "Max-Age=3600" in cookie_header or "max-age=3600" in cookie_header, \
             f"未记住我应设置1小时的cookie有效期，实际: {cookie_header}"
+
+    @pytest.mark.asyncio
+    async def test_login_rate_limit_burst(self, client, mock_db):
+        """POST /api/v1/auth/login 同一 IP 1 分钟内超过 5 次应返回 429"""
+        from unittest.mock import AsyncMock
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        mock_redis = MagicMock()
+        mock_redis.incr = AsyncMock(return_value=6)
+        mock_redis.expire = AsyncMock()
+        mock_cache = MagicMock()
+        mock_cache.redis_client = mock_redis
+
+        with patch("fastapi_app.api.v1.endpoints.auth.utils.redis_cache", mock_cache):
+            response = await client.post("/api/v1/auth/login", json={
+                "username": "wronguser",
+                "password": "wrongpass",
+            })
+
+        assert response.status_code == 429
+        assert "1分钟" in response.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_login_rate_limit_window(self, client, mock_db):
+        """POST /api/v1/auth/login 同一 IP 5 分钟内超过 10 次应返回 429"""
+        from unittest.mock import AsyncMock
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        mock_redis = MagicMock()
+        # burst 计数正常（<=5），但 5 分钟窗口计数超过 10
+        mock_redis.incr = AsyncMock(side_effect=[3, 11])
+        mock_redis.expire = AsyncMock()
+        mock_cache = MagicMock()
+        mock_cache.redis_client = mock_redis
+
+        with patch("fastapi_app.api.v1.endpoints.auth.utils.redis_cache", mock_cache):
+            response = await client.post("/api/v1/auth/login", json={
+                "username": "wronguser",
+                "password": "wrongpass",
+            })
+
+        assert response.status_code == 429
+        assert "5分钟" in response.json()["detail"]

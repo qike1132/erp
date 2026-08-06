@@ -31,28 +31,7 @@ function handleClose(path: string) {
   if (next) router.push(next)
 }
 
-const iconMap: Record<string, string> = {
-  dashboard: 'fas fa-gauge',
-  order: 'fas fa-cart-shopping',
-  product: 'fas fa-box',
-  stock: 'fas fa-warehouse',
-  customer: 'fas fa-user',
-  supplier: 'fas fa-truck',
-  approval: 'fas fa-clipboard-check',
-  purchase: 'fas fa-store',
-  material: 'fas fa-cubes',
-  batch: 'fas fa-table-cells',
-  production: 'fas fa-industry',
-  report: 'fas fa-chart-bar',
-  user: 'fas fa-user',
-  permission: 'fas fa-ticket',
-  settings: 'fas fa-gear',
-  'ocr-import': 'fas fa-upload',
-  case: 'fas fa-box',
-  'material-calculator': 'fas fa-list',
-  'fa-shield-alt': 'fas fa-shield-halved',
-  'fa-shopping-cart': 'fas fa-cart-shopping',
-}
+import { iconMap } from '@/utils/iconMap'
 
 function resolveIcon(icon: string | undefined): string | null {
   if (!icon) return null
@@ -64,7 +43,7 @@ function resolveIcon(icon: string | undefined): string | null {
 
 <style scoped>
 .ht-bar {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 4px;
   padding: 4px;
@@ -72,12 +51,10 @@ function resolveIcon(icon: string | undefined): string | null {
   background: white;
   border: 1px solid var(--color-border-light);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  overflow-x: auto;
   flex-shrink: 0;
-}
-
-.ht-bar::-webkit-scrollbar {
-  height: 0;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto;
 }
 
 .ht-tab {

@@ -6,6 +6,7 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from fastapi_app.core.config import settings
@@ -15,6 +16,14 @@ from fastapi_app.main import app
 # 避免 TrustedHostMiddleware 拒绝 httpx 测试客户端的 Host: test 头
 if "test" not in settings.ALLOWED_HOSTS:
     settings.ALLOWED_HOSTS.append("test")
+
+
+@pytest.fixture(autouse=True)
+def _clear_l1_cache():
+    """每个测试前清空 L1 进程内缓存，避免缓存键命中上一轮测试结果导致假阳性"""
+    from fastapi_app.core.cache import invalidate_local_cache
+    invalidate_local_cache('*')
+    yield
 
 
 @pytest.fixture
@@ -32,6 +41,10 @@ def mock_db():
     session.scalar = AsyncMock(return_value=0)
     session.add = MagicMock()
     session.expunge = MagicMock()
+    # db.info 必须是真实 dict，否则 db_transaction 的
+    # db.info.pop('post_commit_callbacks', []) 会因 AsyncMock 自动生成
+    # coroutine 而报 'coroutine' object is not iterable
+    session.info = {}
 
     class _MockNested:
         def __init__(self):
@@ -83,8 +96,8 @@ def mock_order(mock_product):
     return order
 
 
-@pytest.fixture(autouse=True)
-def override_deps(mock_db, mock_current_user):
+@pytest_asyncio.fixture(autouse=True)
+async def override_deps(mock_db, mock_current_user):
     """自动覆盖 FastAPI 依赖注入"""
 
     async def override_get_async_db():
@@ -117,7 +130,7 @@ def override_deps(mock_db, mock_current_user):
     app.dependency_overrides.clear()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def client():
     """异步 HTTP 测试客户端
 

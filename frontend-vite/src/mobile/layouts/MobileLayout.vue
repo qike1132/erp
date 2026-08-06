@@ -1,5 +1,6 @@
 <template>
   <div class="m-layout">
+    <MobileNotificationBell v-if="authStore.isLoggedIn" />
     <div class="m-layout-content">
       <router-view />
     </div>
@@ -31,10 +32,13 @@
 <script setup lang="ts">
 import { ref, defineComponent, markRaw, type Component } from 'vue'
 import { useRouter } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
 import MobileTabBar from './components/MobileTabBar.vue'
 import MobileSubPage from './components/MobileSubPage.vue'
+import MobileNotificationBell from './components/MobileNotificationBell.vue'
 
 const router = useRouter()
+const authStore = useAuthStore()
 const subPageVisible = ref(false)
 const quickActionsVisible = ref(false)
 

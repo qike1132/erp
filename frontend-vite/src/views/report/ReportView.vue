@@ -1,8 +1,8 @@
 <template>
   <div class="rp-container">
-    <div class="rp-card rp-card-main">
+    <div class="page-card page-card-main">
       <!-- 卡片头部 -->
-      <div class="rp-card-header">
+      <div class="page-card-header">
         <div class="rp-header-left">
           <HeaderTabs />
         </div>
@@ -45,8 +45,7 @@
       <!-- 表格 -->
       <div class="rp-table-wrap">
         <div v-if="isLoading && searched && !logs.length" class="rp-empty">
-          <i class="fas fa-spinner fa-spin"  aria-hidden="true" />
-          <span>加载中…</span>
+          <UiSpinner />
         </div>
         <div v-else-if="!logs.length" class="rp-empty">
           <i class="fas fa-chart-line"  aria-hidden="true" />
@@ -65,18 +64,18 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(row, idx) in logs" :key="row.id ?? idx">
+            <tr v-for="(row, idx) in logs" :key="(row.id as string | number | undefined) ?? idx">
               <td>{{ row[currentCfg.dateKey] || '-' }}</td>
               <td>{{ row.customer || '-' }}</td>
               <td style="text-align: left">{{ row.product_name || '-' }}</td>
               <td>{{ row.quantity }}</td>
-              <td style="text-align: left"><span :title="row[currentCfg.noteKey]">{{ row[currentCfg.noteKey] || '-' }}</span></td>
+              <td style="text-align: left"><span :title="String(row[currentCfg.noteKey] || '')">{{ row[currentCfg.noteKey] || '-' }}</span></td>
             </tr>
           </tbody>
         </table>
 
         <!-- 分页 -->
-        <UiPagination v-if="pagination && pagination.pages > 1" :current-page="page" :total-pages="pagination.pages" :total-items="pagination.total" @update:current-page="handlePageChange" />
+        <UiPagination v-if="pagination && (pagination.pages ?? 0) > 1" :current-page="page" :total-pages="pagination.pages ?? 1" :total-items="pagination.total ?? 0" @update:current-page="handlePageChange" />
         </template>
       </div>
     </div>
@@ -84,6 +83,14 @@
 </template>
 
 <script setup lang="ts">
+/**
+ * ReportView.vue — 报表流水查询页面
+ *
+ * 职责：
+ * - 提供订单/备货/出货/抵扣四种流水报表的切换查询
+ * - 支持按客户、产品、日期范围筛选
+ * - 支持导出报表为文件
+ */
 import { ref, reactive, computed } from 'vue'
 import { useQuery, keepPreviousData } from '@tanstack/vue-query'
 import { reportApi, customerApi } from '@/api'
@@ -92,8 +99,10 @@ import UiDatePicker from '@/components/ui/UiDatePicker.vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
 import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 
+/** 报表标签页类型 */
 type TabType = 'order' | 'stockin' | 'stockout' | 'deduction'
 
+/** 单个标签页的列配置 */
 interface TabConfig {
   label: string
   endpoint: string
@@ -104,6 +113,7 @@ interface TabConfig {
   noteKey: string
 }
 
+/** 各标签页的列映射配置 */
 const TAB_CONFIG: Record<TabType, TabConfig> = {
   order: {
     label: '订单流水',
@@ -143,6 +153,7 @@ const TAB_CONFIG: Record<TabType, TabConfig> = {
   },
 }
 
+/** 标签页选项列表 */
 const tabs: { value: TabType; label: string }[] = [
   { value: 'order', label: '订单流水' },
   { value: 'stockin', label: '备货流水' },
@@ -150,44 +161,50 @@ const tabs: { value: TabType; label: string }[] = [
   { value: 'deduction', label: '备货抵扣流水' },
 ]
 
+/** 当前激活的标签页 */
 const activeTab = ref<TabType>('order')
+/** 当前页码 */
 const page = ref(1)
+/** 是否已执行过搜索（控制空状态文案） */
 const searched = ref(true)
 
+/** 筛选条件 */
 const filters = reactive({ customer: '', product: '', startDate: '', endDate: '' })
 
+/** 当前标签页的列配置 */
 const currentCfg = computed(() => TAB_CONFIG[activeTab.value])
 
-// 客户名称列表
+/** 活跃客户名称列表 */
 const { data: namesData } = useQuery({
   queryKey: ['customer-active-names'],
-  queryFn: () => customerApi.activeNames() as Promise<any>,
+  queryFn: () => customerApi.activeNames(),
   staleTime: 30_000,
 })
-const customerNames = computed(() => namesData.value?.names ?? namesData.value ?? [])
+
+/** 客户名称下拉选项 */
 const customerOptions = computed(() =>
-  customerNames.value.map((c: any) => ({ value: c.name ?? c, label: c.name ?? c })),
+  (namesData.value ?? []).map((c) => ({ value: c.name, label: c.name })),
 )
 
-// 报表数据
+/** 报表数据查询 */
 const { data: reportData, isLoading, isFetching } = useQuery({
   queryKey: ['report-data', activeTab, page, filters],
   queryFn: async () => {
-    const params: Record<string, any> = { page: page.value, per_page: 15 }
+    const params: Record<string, string | number> = { page: page.value, per_page: 15 }
     if (filters.customer) params.customer = filters.customer
     if (filters.product) params.product = filters.product
     if (filters.startDate) params.start_date = filters.startDate
     if (filters.endDate) params.end_date = filters.endDate
-    const res = (await reportApi[currentTabEndpoint()](params)) as any
-    return res
+    return await reportApi[currentTabEndpoint()](params)
   },
   enabled: searched,
   staleTime: 30_000,
   placeholderData: keepPreviousData,
 })
 
-function currentTabEndpoint(): keyof typeof reportApi {
-  const map: Record<TabType, keyof typeof reportApi> = {
+/** 根据当前标签页获取对应的 API 方法名 */
+function currentTabEndpoint(): 'orderLogs' | 'stockinLogs' | 'stockoutLogs' | 'deductionLogs' {
+  const map: Record<TabType, 'orderLogs' | 'stockinLogs' | 'stockoutLogs' | 'deductionLogs'> = {
     order: 'orderLogs',
     stockin: 'stockinLogs',
     stockout: 'stockoutLogs',
@@ -196,24 +213,34 @@ function currentTabEndpoint(): keyof typeof reportApi {
   return map[activeTab.value]
 }
 
+/** 当前页的流水记录列表 */
 const logs = computed(() => reportData.value?.logs ?? [])
+/** 分页信息 */
 const pagination = computed(() => reportData.value?.pagination)
 
+/** 执行搜索，重置到第一页 */
 function doSearch() {
   searched.value = true
   page.value = 1
 }
+
+/** 重置所有筛选条件 */
 function doReset() {
   Object.assign(filters, { customer: '', product: '', startDate: '', endDate: '' })
   page.value = 1
 }
+
+/** 切换标签页时重置页码 */
 function handleTabChange() {
   page.value = 1
 }
+
+/** 翻页 */
 function handlePageChange(p: number) {
   page.value = p
 }
 
+/** 导出当前报表为文件 */
 function exportReport() {
   const params = new URLSearchParams()
   params.set('report_type', activeTab.value)
@@ -228,7 +255,7 @@ function exportReport() {
 <style scoped>
 /* Container */
 .rp-container {
-  padding: 8px;
+  padding: 0;
   margin: 0 auto;
   height: 100%;
   display: flex;
@@ -236,36 +263,7 @@ function exportReport() {
   box-sizing: border-box;
 }
 
-/* Card */
-.rp-card {
-  background: white;
-  border-radius: 18px;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  transition: box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  overflow: hidden;
-}
-.rp-card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
-  transform: translateY(-2px);
-}
-.rp-card-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
 /* Card Header */
-.rp-card-header {
-  display: flex;
-  flex-wrap: nowrap;
-  justify-content: space-between;
-  align-items: flex-start;
-  padding: 10px 24px;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
-  gap: 12px;
-}
 .rp-header-left {
   display: flex;
   align-items: center;
@@ -278,7 +276,7 @@ function exportReport() {
   justify-content: flex-end;
   gap: 8px;
 }
-.rp-card-header :deep(.ht-bar) {
+.page-card-header :deep(.ht-bar) {
   width: auto;
   margin: 0;
 }

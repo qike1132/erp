@@ -1,11 +1,14 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
+import PrimeVue from 'primevue/config'
 import { VueQueryPlugin } from '@tanstack/vue-query'
 import './styles/app.css'
 import './styles/mobile-tokens.css'
 
 import App from './App.vue'
 import router from './router'
+import { initTokenCache } from './utils/secureStorage'
+import { plushCutePT } from './styles/primevue-pt'
 
 const app = createApp(App)
 
@@ -45,6 +48,14 @@ window.addEventListener('unhandledrejection', (event) => {
 })
 
 app.use(createPinia())
+app.use(PrimeVue, {
+  unstyled: true,
+  pt: plushCutePT,
+  locale: {
+    emptySearchMessage: '无匹配结果',
+    searchMessage: '{0} 条结果',
+  },
+})
 app.use(router)
 app.use(VueQueryPlugin, {
   queryClientConfig: {
@@ -62,8 +73,12 @@ app.use(VueQueryPlugin, {
   },
 })
 
-app.mount('#app')
+// Capacitor 环境下先从 SecureStorage 加载 token 到缓存，再挂载应用
+// Web 环境下 initTokenCache() 立即返回，不影响启动速度
+initTokenCache().finally(() => app.mount('#app'))
 
 import('./utils/webVitals').then(({ initWebVitals }) => initWebVitals())
 
-import './icons'
+// FontAwesome 图标延后加载：避免 150+ 图标注册阻塞首屏渲染
+// dom.watch() 会在加载完成后自动扫描 DOM 并替换 <i class="fas fa-*"> 占位符
+import('./icons').catch((e) => console.warn('[icons] lazy load failed:', e))

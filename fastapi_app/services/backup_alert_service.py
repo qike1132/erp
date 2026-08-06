@@ -11,6 +11,8 @@
 """
 
 import asyncio
+import html
+import json
 import logging
 import smtplib
 import time
@@ -22,6 +24,7 @@ from urllib.parse import urlparse
 
 import httpx
 from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db_context
@@ -124,7 +127,7 @@ class BackupAlertService:
             logger.info(f"告警发送完成: {task_name}, 严重级别: {severity}")
             return success
             
-        except Exception as e:
+        except Exception as e:  # defensive: alert sender must never propagate exceptions
             logger.error(f"发送告警时发生错误: {e}")
             return False
     
@@ -179,6 +182,8 @@ class BackupAlertService:
                            severity: str,
                            additional_info: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """准备告警数据"""
+        failure_counts = self.failure_counts.get(task_name, {})
+        last_failure_time = failure_counts.get('last_failure_time')
         alert_data = {
             'task_name': task_name,
             'error': error,
@@ -186,7 +191,11 @@ class BackupAlertService:
             'severity': severity,
             'timestamp': datetime.now().isoformat(),
             'hostname': self._get_hostname(),
-            'failure_counts': self.failure_counts.get(task_name, {}),
+            'failure_counts': {
+                'error': failure_counts.get('error', 0),
+                'critical': failure_counts.get('critical', 0),
+                'last_failure_time': last_failure_time.isoformat() if last_failure_time else None,
+            },
         }
         
         if additional_info:
@@ -196,12 +205,15 @@ class BackupAlertService:
     
     async def _log_alert_to_db(self, alert_data: Dict[str, Any]) -> None:
         """记录告警到数据库"""
+        from fastapi_app.core.sanitizer import escape_like
+
         try:
             async with get_async_db_context() as db:
-                # 更新备份记录状态
+                # 更新备份记录状态（对 task_name 做 LIKE 转义，防止 SQL 注入）
+                safe_task_name = escape_like(str(alert_data.get('task_name', '')))
                 stmt = (
                     select(BackupRecord)
-                    .where(BackupRecord.filename.like(f"%{alert_data['task_name']}%"))
+                    .where(BackupRecord.filename.like(f"%{safe_task_name}%"))
                     .order_by(BackupRecord.created_at.desc())
                     .limit(1)
                 )
@@ -211,11 +223,11 @@ class BackupAlertService:
                 if record:
                     record.status = 'failed'
                     record.error_message = f"{alert_data['severity'].upper()}: {alert_data['error']}"
-                    await db.commit()
+                    await db.commit()  # independent-transaction
                 
                 # 这里可以添加专门的告警记录表，暂时先记录到备份记录
                 
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"记录告警到数据库失败: {e}")
     
     def _log_alert(self, alert_data: Dict[str, Any]) -> None:
@@ -268,7 +280,7 @@ class BackupAlertService:
             logger.info(f"邮件告警发送成功: {alert_data['task_name']}")
             return True
             
-        except Exception as e:
+        except (OSError, smtplib.SMTPException) as e:
             logger.error(f"发送邮件告警失败: {e}")
             return False
     
@@ -296,15 +308,27 @@ class BackupAlertService:
         return text
     
     def _generate_email_html(self, alert_data: Dict[str, Any]) -> str:
-        """生成邮件HTML内容"""
+        """生成邮件HTML内容（所有动态字段均经 html.escape 转义，防止 XSS）。"""
+        _e = html.escape
         severity_color = {
             'critical': '#dc3545',
             'error': '#fd7e14',
             'warning': '#ffc107',
             'info': '#17a2b8'
-        }.get(alert_data['severity'], '#6c757d')
-        
-        html = f"""
+        }.get(alert_data.get('severity'), '#6c757d')
+
+        task_name = _e(str(alert_data.get('task_name', '')))
+        task_type = _e(str(alert_data.get('task_type', '')))
+        severity = _e(str(alert_data.get('severity', '')).upper())
+        timestamp = _e(str(alert_data.get('timestamp', '')))
+        hostname = _e(str(alert_data.get('hostname', '')))
+        error_text = _e(str(alert_data.get('error', '')))
+        failure_counts = alert_data.get('failure_counts', {})
+        error_count = _e(str(failure_counts.get('error', 0)))
+        critical_count = _e(str(failure_counts.get('critical', 0)))
+        last_failure_time = _e(str(failure_counts.get('last_failure_time', 'N/A')))
+
+        html_content = f"""
 <!DOCTYPE html>
 <html>
 <head>
@@ -328,39 +352,39 @@ class BackupAlertService:
         </div>
         <div class="content">
             <div class="info-row">
-                <span class="label">任务名称:</span> {alert_data['task_name']}
+                <span class="label">任务名称:</span> {task_name}
             </div>
             <div class="info-row">
-                <span class="label">任务类型:</span> {alert_data['task_type']}
+                <span class="label">任务类型:</span> {task_type}
             </div>
             <div class="info-row">
-                <span class="label">严重级别:</span> <span style="color: {severity_color}; font-weight: bold;">{alert_data['severity'].upper()}</span>
+                <span class="label">严重级别:</span> <span style="color: {severity_color}; font-weight: bold;">{severity}</span>
             </div>
             <div class="info-row">
-                <span class="label">发生时间:</span> {alert_data['timestamp']}
+                <span class="label">发生时间:</span> {timestamp}
             </div>
             <div class="info-row">
-                <span class="label">主机名称:</span> {alert_data['hostname']}
+                <span class="label">主机名称:</span> {hostname}
             </div>
-            
+
             <div class="error-box">
                 <h3>错误信息</h3>
-                <pre style="white-space: pre-wrap; word-wrap: break-word;">{alert_data['error']}</pre>
+                <pre style="white-space: pre-wrap; word-wrap: break-word;">{error_text}</pre>
             </div>
-            
+
             <div class="stats">
                 <h3>失败统计</h3>
                 <div class="info-row">
-                    <span class="label">错误次数:</span> {alert_data['failure_counts'].get('error', 0)}
+                    <span class="label">错误次数:</span> {error_count}
                 </div>
                 <div class="info-row">
-                    <span class="label">严重错误次数:</span> {alert_data['failure_counts'].get('critical', 0)}
+                    <span class="label">严重错误次数:</span> {critical_count}
                 </div>
                 <div class="info-row">
-                    <span class="label">最后失败时间:</span> {alert_data['failure_counts'].get('last_failure_time', 'N/A')}
+                    <span class="label">最后失败时间:</span> {last_failure_time}
                 </div>
             </div>
-            
+
             <p style="color: #6c757d; font-size: 14px; margin-top: 20px;">
                 请及时登录系统处理此告警。
             </p>
@@ -369,7 +393,7 @@ class BackupAlertService:
 </body>
 </html>
 """
-        return html
+        return html_content
     
     async def _send_webhook_alert(self, alert_data: Dict[str, Any]) -> bool:
         """发送Webhook告警"""
@@ -401,7 +425,7 @@ class BackupAlertService:
                     logger.error(f"Webhook告警发送失败: {response.status_code} - {response.text}")
                     return False
                     
-        except Exception as e:
+        except httpx.RequestError as e:
             logger.error(f"发送Webhook告警失败: {e}")
             return False
     
@@ -445,7 +469,7 @@ class BackupAlertService:
                 logger.info(f"任务 {task_name} 第 {attempt} 次尝试成功")
                 return True, result
                 
-            except Exception as e:
+            except Exception as e:  # defensive: retry loop must catch any task failure
                 last_error = e
                 logger.warning(f"任务 {task_name} 第 {attempt} 次尝试失败: {e}")
                 
@@ -515,7 +539,7 @@ class BackupAlertService:
                 
                 return stats
                 
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"获取告警统计信息失败: {e}")
             return {}
 

@@ -39,7 +39,6 @@ class RegistrationListResponse(BaseModel):
     total: int
     pages: int
     current_page: int
-    stats: dict = {}
 
 
 class RegistrationDetailResponse(BaseModel):
@@ -72,14 +71,19 @@ class PurchaseOrderItemsResponse(BaseModel):
     items: list[dict[str, Any]] = []
 
 
-class PurchaseOrderPreviewResponse(BaseModel):
-    success: bool = True
-    order: dict[str, Any] = {}
-
-
 class ExportRegistrationsResponse(BaseModel):
     success: bool = True
     html: str = ""
+
+
+class ExportRequest(BaseModel):
+    """导出来料登记的筛选参数（POST body）"""
+    order_no: str = ''
+    supplier: str = ''
+    customer_name: str = ''
+    material_category: str = ''
+    start_date: str = ''
+    end_date: str = ''
 
 
 class RegistrationHistoryResponse(BaseModel):

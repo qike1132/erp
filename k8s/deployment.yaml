@@ -6,7 +6,7 @@ metadata:
   labels:
     app: erp-app
 spec:
-  replicas: 2
+  replicas: 4
   selector:
     matchLabels:
       app: erp-app
@@ -70,7 +70,8 @@ spec:
               mountPath: /app/static/uploads
       volumes:
         - name: uploads
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: uploads-pvc
 ---
 apiVersion: v1
 kind: Service

@@ -1,7 +1,7 @@
-﻿<template>
+<template>
   <div class="sp-container">
-    <div class="sp-card sp-card-main">
-      <div class="sp-card-header">
+    <div class="page-card page-card-main">
+      <div class="page-card-header">
         <div class="sp-header-left">
           <HeaderTabs />
         </div>
@@ -15,34 +15,14 @@
       <!-- Search bar -->
       <div class="sp-toolbar">
         <div class="sp-search-wrapper">
-          <div class="sp-search-input-group">
-            <i class="fas fa-search sp-search-icon"  aria-hidden="true" />
-            <input
-              v-model="searchTerm"
-              type="text"
-              name="search"
-              placeholder="搜索供应商名称..."
-              class="sp-search-input"
-              autocomplete="off"
-              @input="onSearchInput"
-            />
-            <button
-              v-if="searchTerm"
-              class="sp-search-clear"
-              @click="clearSearch"
-             aria-label="关闭">
-              <i class="fas fa-times"  aria-hidden="true" />
-            </button>
-          </div>
-        </div>
+          <UiSearchInput v-model="searchTerm" placeholder="搜索供应商名称..." @search="onSearchInput" @clear="clearSearch" /></div>
       </div>
 
       <!-- Content area -->
       <div class="sp-content">
         <!-- Loading (initial only) -->
         <div v-if="isLoading && suppliers.length === 0" class="sp-loading-state">
-          <i class="fas fa-spinner fa-spin"  aria-hidden="true" />
-          <span>加载中…</span>
+          <UiSpinner />
         </div>
 
         <!-- Empty -->
@@ -63,6 +43,7 @@
                 <th style="text-align: left">联系电话</th>
                 <th style="text-align: left">地址</th>
                 <th style="text-align: left">创建时间</th>
+                <th style="text-align: center">状态</th>
                 <th style="text-align: right">操作</th>
               </tr>
             </thead>
@@ -74,7 +55,15 @@
                 <td>{{ row.contact_person || '-' }}</td>
                 <td>{{ row.phone || '-' }}</td>
                 <td>{{ row.address || '-' }}</td>
-                <td>{{ row.created_at ? row.created_at.split('T')[0] : '-' }}</td>
+                <td>{{ formatDate(row.created_at) }}</td>
+                <td>
+                  <span
+                    class="sp-status-badge"
+                    :class="row.status ? 'sp-status-active' : 'sp-status-inactive'"
+                    :title="row.status ? '点击禁用' : '点击启用'"
+                    @click="handleToggle(row)"
+                  >{{ row.status ? '启用' : '禁用' }}</span>
+                </td>
                 <td>
                   <div class="sp-action-group">
                     <button class="sp-action-btn sp-action-edit" title="编辑" @click="openEditDialog(row)" aria-label="编辑">
@@ -140,7 +129,7 @@
       <form @submit.prevent="handleEdit" class="sp-dialog-form">
         <div class="sp-form-field">
           <label class="sp-form-label"><i class="fas fa-building"  aria-hidden="true" /> 供应商名称 <span class="sp-required">*</span></label>
-          <input v-model="editForm.name" type="text" class="sp-form-input" name="supplier-name" autocomplete="off" />
+          <input v-model="editForm.name" type="text" class="sp-form-input" required placeholder="请输入供应商名称" name="supplier-name" autocomplete="off" />
         </div>
         <div class="sp-form-row">
           <div class="sp-form-field">
@@ -182,7 +171,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch } from 'vue'
+/**
+ * SupplierView.vue — 供应商管理页面
+ *
+ * 职责：
+ * - 展示供应商列表（服务端分页 + 搜索防抖）
+ * - 新增 / 编辑 / 删除供应商
+ * - 使用 TanStack Vue Query 管理服务端状态
+ */
+import { ref, reactive, computed, onUnmounted } from 'vue'
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/vue-query'
 import { supplierApi } from '@/api'
 import UiButton from '@/components/ui/UiButton.vue'
@@ -192,19 +189,26 @@ import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 import { showToast } from '@/composables/useToast'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
-import type { Supplier } from '@/types'
 import { formatDate } from '@/utils/format'
+import type { Supplier } from '@/types'
 
+/** 当前正在执行删除操作的供应商 ID（0 表示无操作） */
 const actionId = ref<number | ''>(0)
 const queryClient = useQueryClient()
 const confirmDialog = useConfirmDialog()
 
+/** 搜索关键词（即时绑定输入框） */
 const searchTerm = ref('')
+/** 当前页码 */
 const currentPage = ref(1)
+/** 每页条数 */
 const perPage = 20
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null
+/** 防抖后的搜索关键词，用于触发查询 */
 const debouncedSearch = ref('')
+
+/** 搜索输入防抖处理（300ms），避免频繁请求 */
 function onSearchInput() {
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(() => {
@@ -212,35 +216,64 @@ function onSearchInput() {
     currentPage.value = 1
   }, 300)
 }
+
+/** 清空搜索条件并重置到第一页 */
 function clearSearch() {
   searchTerm.value = ''
   debouncedSearch.value = ''
   currentPage.value = 1
 }
 
+onUnmounted(() => {
+  if (searchTimer) clearTimeout(searchTimer)
+})
+
+/** 供应商列表查询（服务端分页 + 搜索） */
 const { data: result, isLoading, isFetching } = useQuery({
   queryKey: ['suppliers-list', () => debouncedSearch.value, () => currentPage.value],
-  queryFn: () => supplierApi.list({ per_page: perPage, page: currentPage.value, search: debouncedSearch.value || undefined }) as Promise<any>,
+  queryFn: () => supplierApi.list({ per_page: perPage, page: currentPage.value, search: debouncedSearch.value || undefined }),
   staleTime: 30_000,
   gcTime: 60_000,
   placeholderData: keepPreviousData,
 })
 
-const suppliers = computed<Supplier[]>(() => result.value?.data ?? result.value?.suppliers ?? [])
+/** 当前页供应商列表 */
+const suppliers = computed<Supplier[]>(() => result.value?.suppliers ?? [])
+/** 总记录数（用于分页） */
 const totalItems = computed(() => result.value?.total ?? suppliers.value.length)
+/** 总页数（至少为 1） */
 const totalPages = computed(() => Math.max(1, Math.ceil(totalItems.value / perPage)))
 
+/** 跳转到指定页 */
 function goPage(p: number) {
   currentPage.value = p
 }
 
-// Add form
+// ===== 新增供应商表单 =====
 const formOpen = ref(false)
 const submitting = ref(false)
 const form = reactive({ name: '', contact_person: '', phone: '', address: '', remark: '' })
 
+/** 提取错误消息：优先取后端 detail，否则返回默认消息 */
+function extractErrorMessage(err: unknown, fallback: string): string {
+  const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+  return detail || fallback
+}
+
+/** 校验表单：名称必填，电话格式可选校验 */
+function validateSupplierForm(name: string, phone: string): string | null {
+  if (!name?.trim()) return '供应商名称不能为空'
+  if (phone && !/^[\d\-+\s()]{6,20}$/.test(phone)) return '联系电话格式不正确'
+  return null
+}
+
+/** 提交新增供应商 */
 async function handleAdd() {
-  if (!form.name) return
+  const error = validateSupplierForm(form.name, form.phone)
+  if (error) {
+    showToast(error, 'warning')
+    return
+  }
   submitting.value = true
   try {
     await supplierApi.create(form)
@@ -248,14 +281,14 @@ async function handleAdd() {
     Object.assign(form, { name: '', contact_person: '', phone: '', address: '', remark: '' })
     formOpen.value = false
     queryClient.invalidateQueries({ queryKey: ['suppliers-list'] })
-  } catch (err: any) {
-    showToast(err.response?.data?.detail || '添加失败', 'error')
+  } catch (err: unknown) {
+    showToast(extractErrorMessage(err, '添加失败'), 'error')
   } finally {
     submitting.value = false
   }
 }
 
-// Delete
+/** 删除供应商（带确认对话框） */
 async function handleDelete(row: Supplier) {
   if (!(await confirmDialog.confirm(`确定要删除供应商"${row.name}"吗？如果该供应商已关联BOM或采购订单，将无法删除。`))) return
   actionId.value = row.id
@@ -263,18 +296,35 @@ async function handleDelete(row: Supplier) {
     await supplierApi.delete(row.id)
     showToast('删除成功', 'success')
     queryClient.invalidateQueries({ queryKey: ['suppliers-list'] })
-  } catch (err: any) {
-    showToast(err.response?.data?.detail || '删除失败', 'error')
+  } catch (err: unknown) {
+    showToast(extractErrorMessage(err, '删除失败'), 'error')
   } finally {
     actionId.value = 0
   }
 }
 
-// Edit form
+/** 切换供应商启用/禁用状态 */
+async function handleToggle(row: Supplier) {
+  const target = row.status ? '禁用' : '启用'
+  if (!(await confirmDialog.confirm(`确定要${target}供应商"${row.name}"吗？`))) return
+  actionId.value = row.id
+  try {
+    await supplierApi.toggleStatus(row.id)
+    showToast(`${target}成功`, 'success')
+    queryClient.invalidateQueries({ queryKey: ['suppliers-list'] })
+  } catch (err: unknown) {
+    showToast(extractErrorMessage(err, `${target}失败`), 'error')
+  } finally {
+    actionId.value = 0
+  }
+}
+
+// ===== 编辑供应商表单 =====
 const editDialogVisible = ref(false)
 const editSubmitting = ref(false)
 const editForm = reactive({ id: 0, name: '', contact_person: '', phone: '', address: '', remark: '' })
 
+/** 打开编辑弹窗，填充当前行数据 */
 function openEditDialog(row: Supplier) {
   Object.assign(editForm, {
     id: row.id,
@@ -287,15 +337,21 @@ function openEditDialog(row: Supplier) {
   editDialogVisible.value = true
 }
 
+/** 提交编辑供应商 */
 async function handleEdit() {
+  const error = validateSupplierForm(editForm.name, editForm.phone)
+  if (error) {
+    showToast(error, 'warning')
+    return
+  }
   editSubmitting.value = true
   try {
     await supplierApi.update(editForm.id, editForm)
     showToast('保存成功', 'success')
     editDialogVisible.value = false
     queryClient.invalidateQueries({ queryKey: ['suppliers-list'] })
-  } catch (err: any) {
-    showToast(err.response?.data?.detail || '保存失败', 'error')
+  } catch (err: unknown) {
+    showToast(extractErrorMessage(err, '保存失败'), 'error')
   } finally {
     editSubmitting.value = false
   }
@@ -305,7 +361,7 @@ async function handleEdit() {
 <style scoped>
 /* === Layout === */
 .sp-container {
-  padding: 8px;
+  padding: 0;
   margin: 0 auto;
   height: 100%;
   display: flex;
@@ -313,36 +369,6 @@ async function handleEdit() {
   box-sizing: border-box;
 }
 
-/* === Main Card === */
-.sp-card {
-  background: white;
-  border-radius: 18px;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  transition: box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.sp-card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 16px 48px rgba(0,0,0,0.12);
-  transform: translateY(-3px);
-}
-
-.sp-card-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.sp-card-header {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  align-items: flex-start;
-  padding: 14px 24px 10px;
-  flex-shrink: 0;
-  gap: 12px;
-}
 .sp-header-left {
   display: flex;
   align-items: center;
@@ -355,7 +381,7 @@ async function handleEdit() {
   justify-content: flex-end;
   gap: 8px;
 }
-.sp-card-header :deep(.ht-bar) {
+.page-card-header :deep(.ht-bar) {
   width: auto;
   margin: 0;
 }
@@ -546,6 +572,46 @@ async function handleEdit() {
 .sp-name {
   font-weight: 600;
   color: var(--color-text);
+}
+
+/* === Status Badge === */
+.sp-status-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
+  text-align: center;
+  min-width: 56px;
+}
+
+.sp-status-active {
+  background: var(--color-success-50, #ecfdf5);
+  color: var(--color-success-700, #047857);
+  border: 1px solid var(--color-success-200, #a7f3d0);
+}
+
+.sp-status-active:hover {
+  background: var(--color-danger-50, #fef2f2);
+  color: var(--color-danger-700, #b91c1c);
+  border-color: var(--color-danger-200, #fecaca);
+  transform: translateY(-1px);
+}
+
+.sp-status-inactive {
+  background: var(--color-surface, #f1f5f9);
+  color: var(--color-text-muted, #94a3b8);
+  border: 1px solid var(--color-border-light, #e2e8f0);
+}
+
+.sp-status-inactive:hover {
+  background: var(--color-success-50, #ecfdf5);
+  color: var(--color-success-700, #047857);
+  border-color: var(--color-success-200, #a7f3d0);
+  transform: translateY(-1px);
 }
 
 /* === Action Buttons (Table) === */

@@ -8,7 +8,7 @@ import os
 import shutil
 from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
 
-# 使用 contextvars 替代 Flask g 对象存储 trace_id
+# 使用 contextvars 存储 trace_id
 trace_id_var = contextvars.ContextVar('trace_id', default='system')
 
 

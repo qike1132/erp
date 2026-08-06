@@ -37,6 +37,16 @@
                   </div>
                 </div>
                 <div class="pd-form-group">
+                  <label class="pd-label">工厂</label>
+                  <div class="pd-input-wrap">
+                    <i class="fas fa-industry pd-input-icon" aria-hidden="true"></i>
+                    <select v-model="form.factory" class="pd-input pd-select" name="factory">
+                      <option value="" disabled>请选择工厂</option>
+                      <option v-for="f in FACTORY_OPTIONS" :key="f" :value="f">{{ f }}</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="pd-form-group">
                   <label class="pd-label">产品图片</label>
                   <div
                     class="pd-section-header pd-droppable"
@@ -97,10 +107,7 @@
           <div class="pd-col-title">
             <span><i class="fas fa-list" aria-hidden="true"></i> 产品列表</span>
             <div class="pd-col-actions">
-              <div class="pd-search">
-                <i class="fas fa-search pd-search-icon" aria-hidden="true"></i>
-                <input :value="searchTerm" type="text" class="pd-search-input" placeholder="搜索产品名称或69码..." name="search" autocomplete="off" @input="onSearchInput" />
-              </div>
+              <UiSearchInput :modelValue="searchTerm" placeholder="搜索产品名称或69码..." @search="onSearchInput" @update:modelValue="searchTerm = $event" />
               <select :value="`${sortBy}-${sortOrder}`" class="pd-sort" @change="onSortChange">
                 <option value="name-asc">名称 A-Z</option>
                 <option value="name-desc">名称 Z-A</option>
@@ -116,16 +123,17 @@
                     <th class="th-name">产品名称</th>
                     <th class="th-barcode">69码</th>
                     <th class="th-price">产品价格</th>
+                    <th class="th-factory">工厂</th>
                     <th class="th-actions">操作</th>
                   </tr>
                 </thead>
                 <tbody>
                   <template v-if="isLoading">
-                    <tr><td colspan="5" class="text-center py-8"><div class="pd-loading"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i> 加载中…</div></td></tr>
+                    <tr><td colspan="6" class="text-center py-8"><div class="pd-loading"><UiSpinner /> 加载中…</div></td></tr>
                   </template>
                   <template v-else-if="paginatedProducts.length === 0">
                     <tr>
-                      <td colspan="5" class="text-center py-8">
+                      <td colspan="6" class="text-center py-8">
                         <div class="pd-empty">
                           <i class="fas fa-inbox pd-empty-icon" aria-hidden="true"></i>
                           <p class="pd-empty-text">{{ searchTerm ? '未找到匹配的产品' : '暂无产品，请先添加' }}</p>
@@ -136,8 +144,8 @@
                   <template v-else>
                     <tr v-for="row in paginatedProducts" :key="row.id" class="pd-tr">
                       <td>
-                        <div v-if="row.image" class="pd-thumb-box" @click="openImageModal(row.image)">
-                          <img :src="resolveStaticUrl(row.image)" class="pd-thumb-img" :alt="row.name" @error="handleImageError($event)" />
+                        <div v-if="row.image && !failedImageIds.has(row.id)" class="pd-thumb-box" @click="openImageModal(row.image)">
+                          <img :src="resolveStaticUrl(row.image)" class="pd-thumb-img" :alt="row.name" @error="handleImageError(row)" />
                         </div>
                         <div v-else class="pd-thumb-box">
                           <div class="pd-no-image"><i class="fas fa-image" aria-hidden="true"></i></div>
@@ -146,6 +154,7 @@
                       <td><span class="pd-name">{{ row.name }}</span></td>
                       <td><span class="pd-barcode">{{ row.barcode || '-' }}</span></td>
                       <td><span class="pd-price">{{ formatCurrency(row.price) }}</span></td>
+                      <td><span class="pd-factory">{{ row.factory || '-' }}</span></td>
                       <td>
                         <div class="pd-actions">
                           <button class="pd-act-btn pd-act-bom" title="配置BOM表" @click="openBomModal(row)" aria-label="设置">
@@ -211,22 +220,24 @@
                 </div>
                 <div class="bom-summary-center">
                   <div class="pd-input-wrap autocomplete-wrapper">
-                    <i class="fas fa-search pd-input-icon" aria-hidden="true"></i>
-                    <input ref="quickCopyInputRef" v-model="quickCopyKeyword" type="text" class="pd-input" placeholder="输入产品名称或条码，直接复制BOM" name="search" autocomplete="off" @keydown="onAutocompleteKeydown" @focus="onQuickCopyFocus" @blur="hideAutocomplete" />
-                    <div v-if="autocompleteVisible && autocompleteItems.length > 0" class="autocomplete-dropdown">
-                      <div v-for="(item, aIdx) in autocompleteItems" :key="item.id" class="autocomplete-item" :class="{ selected: aIdx === autocompleteIndex, disabled: !item.has_bom }" @click="selectAutocompleteItem(item)">
-                        <div class="item-left">
-                          <div class="product-name">{{ item.name }}</div>
-                          <div class="product-info">{{ item.barcode ? '条码: ' + item.barcode : '' }}</div>
+                    <UiAutocomplete
+                      v-model="quickCopyKeyword"
+                      :searchFn="searchProductsForBom"
+                      placeholder="输入产品名称或条码，直接复制BOM"
+                      @select="selectAutocompleteItem"
+                    >
+                      <template #option="{ item }">
+                        <div class="flex items-center justify-between w-full gap-2">
+                          <div class="flex-1 min-w-0">
+                            <div class="product-name">{{ item.name }}</div>
+                            <div class="product-info text-xs text-text-muted">{{ item.barcode ? '条码: ' + item.barcode : '' }}</div>
+                          </div>
+                          <span class="product-status text-xs" :class="item.has_bom ? 'has-bom' : 'no-bom'">
+                            {{ item.has_bom ? '有BOM' : '无BOM' }}
+                          </span>
                         </div>
-                        <div class="item-right">
-                          <span class="product-status" :class="item.has_bom ? 'has-bom' : 'no-bom'">{{ item.has_bom ? '有BOM' : '无BOM' }}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div v-if="autocompleteVisible && autocompleteItems.length === 0 && quickCopyKeyword.length >= 1" class="autocomplete-dropdown">
-                      <div class="autocomplete-item" style="cursor:default;opacity:0.6"><div class="item-left"><div class="product-name">未找到匹配的产品</div></div></div>
-                    </div>
+                      </template>
+                    </UiAutocomplete>
                   </div>
                 </div>
                 <div class="bom-summary-right">
@@ -391,6 +402,16 @@
                 </div>
               </div>
               <div class="pd-form-group">
+                <label class="pd-label">工厂</label>
+                <div class="pd-input-wrap">
+                  <i class="fas fa-industry pd-input-icon" aria-hidden="true"></i>
+                  <select v-model="editForm.factory" class="pd-input pd-select" name="edit-factory">
+                    <option value="" disabled>请选择工厂</option>
+                    <option v-for="f in FACTORY_OPTIONS" :key="f" :value="f">{{ f }}</option>
+                  </select>
+                </div>
+              </div>
+              <div class="pd-form-group">
                 <label class="pd-label">产品图片</label>
                 <div
                   class="pd-section-header pd-droppable"
@@ -458,11 +479,15 @@ interface Product {
   barcode: string
   price: number
   image: string | null
+  factory?: string
   current_stock?: number
 }
 
+// 工厂下拉选项（与后端 VALID_FACTORIES 保持一致）
+const FACTORY_OPTIONS = ['东莞', '湖北'] as const
+
 // ===== 核心状态 =====
-const actionId = ref<number | ''>(0)
+const actionId = ref<number | null>(null)
 const queryClient = useQueryClient()
 const confirmDialog = useConfirmDialog()
 
@@ -490,7 +515,7 @@ function onSortChange(e: Event) {
 
 // ===== 添加产品 =====
 const submitting = ref(false)
-const form = reactive({ name: '', barcode: '', price: 0, image: '' })
+const form = reactive({ name: '', barcode: '', price: 0, factory: '', image: '' })
 const imageInputRef = ref<HTMLInputElement | null>(null)
 const imageDragOver = ref(false)
 
@@ -513,12 +538,19 @@ function uploadImageFile(file: File) {
 }
 
 async function handleAdd() {
-  if (!form.name) return
+  const trimmedName = form.name.trim()
+  if (!trimmedName) return
   submitting.value = true
   try {
-    await productApi.create({ name: form.name, barcode: form.barcode, price: form.price || undefined, image: form.image || undefined })
+    await productApi.create({
+      name: trimmedName,
+      barcode: form.barcode || undefined,
+      price: form.price ?? undefined,
+      factory: form.factory || undefined,
+      image: form.image || undefined,
+    })
     showToast('添加成功', 'success')
-    Object.assign(form, { name: '', barcode: '', price: 0, image: '' })
+    Object.assign(form, { name: '', barcode: '', price: 0, factory: '', image: '' })
     queryClient.invalidateQueries({ queryKey: ['products-list'] })
   } catch (err: any) {
     showToast(err.response?.data?.detail || '添加失败', 'error')
@@ -538,40 +570,33 @@ async function handleDelete(row: Product) {
   } catch (err: any) {
     showToast(err.response?.data?.detail || '删除失败', 'error')
   } finally {
-    actionId.value = 0
+    actionId.value = null
   }
 }
 
 // ===== 图片查看模态框 =====
 const imageModalVisible = ref(false)
 const imageModalSrc = ref('')
+const failedImageIds = ref<Set<number>>(new Set())
 
 function openImageModal(src: string) {
   imageModalSrc.value = src
   imageModalVisible.value = true
 }
 
-function handleImageError(e: Event) {
-  const img = e.target as HTMLImageElement
-  img.style.display = 'none'
-  const parent = img.parentElement
-  if (parent) {
-    const placeholder = document.createElement('div')
-    placeholder.className = 'pd-no-image'
-    placeholder.innerHTML = '<i class="fas fa-image" aria-hidden="true"></i>'
-    parent.appendChild(placeholder)
-  }
+function handleImageError(row: Product) {
+  failedImageIds.value = new Set(failedImageIds.value).add(row.id)
 }
 
 // ===== 编辑产品弹窗 =====
 const editDialogVisible = ref(false)
 const editSubmitting = ref(false)
-const editForm = reactive({ id: 0, name: '', barcode: '', price: 0, image: '' })
+const editForm = reactive({ id: 0, name: '', barcode: '', price: 0, factory: '', image: '' })
 const editImageInputRef = ref<HTMLInputElement | null>(null)
 const editDragOver = ref(false)
 
 function openEditModal(row: Product) {
-  Object.assign(editForm, { id: row.id, name: row.name, barcode: row.barcode, price: row.price, image: row.image || '' })
+  Object.assign(editForm, { id: row.id, name: row.name, barcode: row.barcode, price: row.price, factory: row.factory || '', image: row.image || '' })
   editDialogVisible.value = true
 }
 
@@ -593,7 +618,7 @@ async function handleEditSave() {
   if (!editForm.name.trim()) { showToast('请输入产品名称', 'warning'); return }
   editSubmitting.value = true
   try {
-    await productApi.update(editForm.id, { name: editForm.name, barcode: editForm.barcode, price: editForm.price, image: editForm.image })
+    await productApi.update(editForm.id, { name: editForm.name, barcode: editForm.barcode, price: editForm.price, factory: editForm.factory, image: editForm.image })
     showToast('保存成功', 'success')
     editDialogVisible.value = false
     queryClient.invalidateQueries({ queryKey: ['products-list'] })
@@ -652,10 +677,9 @@ const {
   bomDialogVisible, bomProductName, currentBomCategory,
   bomTabs, currentBomItems, currentBomTabLabel,
   switchBomTab, openBomModal, addBomItem, deleteBomItem, saveBom,
-  quickCopyKeyword, quickCopyInputRef, quickCopyLoading,
-  autocompleteVisible, autocompleteItems, autocompleteIndex,
+  quickCopyKeyword, quickCopyLoading,
   quickCopyProgress,
-  onAutocompleteKeydown, selectAutocompleteItem, onQuickCopyFocus, hideAutocomplete, quickCopyBom,
+  searchProductsForBom, selectAutocompleteItem, quickCopyBom,
   copyBomDialogVisible, copyBomSearchKeyword, copyBomProducts,
   copyBomSourceProductId, copyBomPreview, copyBomOverwrite, copyBomProgress,
   searchProductForCopy, selectCopyBomProduct, confirmCopyBom,
@@ -815,6 +839,18 @@ const {
   border-color: var(--color-primary-400);
   box-shadow: 0 0 0 4px rgba(0, 148, 191, 0.1);
 }
+.pd-select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  padding-right: 32px;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px;
+  cursor: pointer;
+}
+.pd-select:disabled { background-color: var(--color-surface, #f8fafc); cursor: not-allowed; }
 
 /* ===== 按钮 ===== */
 .pd-btn {
@@ -1026,6 +1062,8 @@ const {
 .th-actions { width: 140px; }
 .th-barcode { width: 120px; }
 .th-price { width: 100px; }
+.th-factory { width: 100px; }
+.pd-factory { font-size: 13px; font-weight: 500; color: var(--color-text); }
 .pd-tr {
   transition: background 0.2s ease;
   border-bottom: 1px solid var(--color-border-light, #f1f5f9);

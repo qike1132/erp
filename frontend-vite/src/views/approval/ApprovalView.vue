@@ -1,8 +1,8 @@
 <template>
   <div class="ap-container">
-    <div class="ap-card ap-card-main">
+    <div class="page-card page-card-main">
       <!-- 卡片头部 -->
-      <div class="ap-card-header">
+      <div class="page-card-header">
         <HeaderTabs />
       </div>
 
@@ -32,11 +32,7 @@
 
       <!-- 搜索与筛选 -->
       <div class="ap-filter-bar">
-        <div class="ap-search-wrapper">
-          <i class="fas fa-search ap-search-icon"  aria-hidden="true" />
-          <input v-model="searchTerm" class="ap-search-input" placeholder="搜索类型或摘要..." @input="onSearchInput" />
-          <button v-if="searchTerm" class="ap-search-clear" @click="clearSearch" aria-label="关闭"><i class="fas fa-times"  aria-hidden="true" /></button>
-        </div>
+        <UiSearchInput v-model="searchTerm" placeholder="搜索类型或摘要..." @search="onSearchInput" @clear="clearSearch" />
         <div class="ap-filter-group">
           <button
             v-for="opt in statusOptions"
@@ -52,8 +48,7 @@
       <!-- 表格 -->
       <div class="ap-table-wrap">
         <div v-if="isLoading" class="ap-empty">
-          <i class="fas fa-spinner fa-spin"  aria-hidden="true" />
-          <span>加载中…</span>
+          <UiSpinner />
         </div>
         <template v-else-if="items.length === 0">
           <div class="ap-empty">
@@ -101,8 +96,8 @@
           <button class="ap-page-btn" :disabled="currentPage <= 1" @click="goPage(1)" aria-label="首页"><i class="fas fa-angle-double-left"  aria-hidden="true" /></button>
           <button class="ap-page-btn" :disabled="currentPage <= 1" @click="goPage(currentPage - 1)" aria-label="上一页"><i class="fas fa-angle-left"  aria-hidden="true" /></button>
           <span class="ap-page-info">{{ currentPage }} / {{ totalPages }}</span>
-          <button class="ap-page-btn" :disabled="currentPage >= totalPages" @click="goPage(currentPage + 1)"><i class="fas fa-angle-right"  aria-hidden="true" /></button>
-          <button class="ap-page-btn" :disabled="currentPage >= totalPages" @click="goPage(totalPages)"><i class="fas fa-angle-double-right"  aria-hidden="true" /></button>
+          <button class="ap-page-btn" :disabled="currentPage >= totalPages" @click="goPage(currentPage + 1)" aria-label="下一页"><i class="fas fa-angle-right"  aria-hidden="true" /></button>
+          <button class="ap-page-btn" :disabled="currentPage >= totalPages" @click="goPage(totalPages)" aria-label="末页"><i class="fas fa-angle-double-right"  aria-hidden="true" /></button>
           <span class="ap-page-total">共 {{ totalItems }} 条</span>
         </div>
       </div>
@@ -127,13 +122,22 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+/**
+ * ApprovalView.vue — 审批管理页面
+ *
+ * 职责：
+ * - 展示待审批/已通过/已驳回的审批记录统计
+ * - 支持按状态筛选和关键词搜索
+ * - 审批通过操作与驳回弹窗（需填写驳回原因）
+ */
+import { ref, computed, onUnmounted } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { approvalApi } from '@/api'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 import { showToast } from '@/composables/useToast'
 
+/** 审批记录行数据 */
 interface ApprovalRow {
   id: number
   order_id: number
@@ -162,14 +166,20 @@ interface ApprovalListResult {
 }
 
 const queryClient = useQueryClient()
+/** 当前操作中的审批记录 ID（用于禁用按钮） */
 const actionId = ref<number | ''>(0)
+/** 搜索关键词（实时绑定输入框） */
 const searchTerm = ref('')
+/** 状态筛选值（空字符串表示全部） */
 const statusFilter = ref('')
+/** 当前页码 */
 const currentPage = ref(1)
+/** 每页条数 */
 const perPage = 20
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 const debouncedSearch = ref('')
+/** 搜索输入防抖处理（300ms 延迟） */
 function onSearchInput() {
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(() => {
@@ -177,12 +187,19 @@ function onSearchInput() {
     currentPage.value = 1
   }, 300)
 }
+
+/** 清除搜索条件并重置页码 */
 function clearSearch() {
   searchTerm.value = ''
   debouncedSearch.value = ''
   currentPage.value = 1
 }
 
+onUnmounted(() => {
+  if (searchTimer) clearTimeout(searchTimer)
+})
+
+/** 状态筛选选项 */
 const statusOptions = [
   { value: '', label: '全部' },
   { value: 'pending', label: '待审批' },
@@ -190,6 +207,7 @@ const statusOptions = [
   { value: 'rejected', label: '已驳回' },
 ]
 
+/** 审批列表数据查询 */
 const { data: result, isLoading } = useQuery({
   queryKey: ['approvals', () => statusFilter.value, () => debouncedSearch.value, () => currentPage.value],
   queryFn: () => approvalApi.list({ status: statusFilter.value || undefined, search: debouncedSearch.value || undefined, page: currentPage.value, per_page: perPage }),
@@ -197,10 +215,14 @@ const { data: result, isLoading } = useQuery({
   gcTime: 60_000,
 })
 
+/** 当前页审批记录列表 */
 const items = computed(() => result.value?.data ?? [])
+/** 审批记录总数 */
 const totalItems = computed(() => result.value?.total ?? items.value.length)
+/** 总页数 */
 const totalPages = computed(() => Math.max(1, Math.ceil(totalItems.value / perPage)))
 
+/** 审批统计卡片数据 */
 const stats = computed(() => {
   const r = result.value
   if (!r) return null
@@ -212,22 +234,26 @@ const stats = computed(() => {
   }
 })
 
+/** 跳转到指定页码 */
 function goPage(p: number) {
   currentPage.value = p
 }
 
+/** 根据审批状态返回对应的徽章 CSS 类名 */
 function statusBadgeClass(status: string): string {
   if (status === 'approved') return 'ap-badge-success'
   if (status === 'rejected') return 'ap-badge-danger'
   return 'ap-badge-warning'
 }
 
+/** 根据审批状态返回中文标签 */
 function statusLabel(status: string): string {
   if (status === 'approved') return '已通过'
   if (status === 'rejected') return '已驳回'
   return '待审批'
 }
 
+/** 通过审批 */
 async function handleApprove(row: ApprovalRow) {
   actionId.value = row.id
   try {
@@ -241,17 +267,23 @@ async function handleApprove(row: ApprovalRow) {
   }
 }
 
+/** 驳回弹窗可见状态 */
 const rejectDialogVisible = ref(false)
+/** 驳回原因文本 */
 const rejectReason = ref('')
+/** 驳回目标审批记录 */
 const rejectTarget = ref<ApprovalRow | null>(null)
+/** 驳回操作提交中状态 */
 const rejectSaving = ref(false)
 
+/** 打开驳回弹窗 */
 function openRejectDialog(row: ApprovalRow) {
   rejectTarget.value = row
   rejectReason.value = ''
   rejectDialogVisible.value = true
 }
 
+/** 确认驳回审批（需填写驳回原因） */
 async function handleReject() {
   if (!rejectReason.value) {
     showToast('请输入驳回原因', 'warning')
@@ -278,7 +310,7 @@ async function handleReject() {
 <style scoped>
 /* Container */
 .ap-container {
-  padding: 8px;
+  padding: 0;
   margin: 0 auto;
   height: 100%;
   display: flex;
@@ -287,36 +319,11 @@ async function handleReject() {
 }
 
 /* Card */
-.ap-card {
-  background: white;
-  border-radius: 18px;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  transition: box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  overflow: hidden;
-}
-.ap-card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
-  transform: translateY(-2px);
-}
-.ap-card-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
+/* 卡片样式已迁移到全局 .page-card 系列（src/styles/app.css） */
 
 /* Card Header */
-.ap-card-header {
-  display: flex;
-  flex-wrap: nowrap;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 24px;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
-  gap: 12px;
-}
-.ap-card-header :deep(.ht-bar) {
+/* 卡片头部样式已迁移到全局 .page-card-header（src/styles/app.css） */
+.page-card-header :deep(.ht-bar) {
   width: auto;
   margin: 0;
 }

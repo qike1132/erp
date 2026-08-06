@@ -56,7 +56,7 @@ class BatchImportHandler:
         验证上传的文件
 
         Args:
-            file: Flask文件对象
+            file: HTTP上传文件对象
 
         Returns:
             tuple: (is_valid, file_path or error_message)
@@ -168,7 +168,7 @@ class BatchImportHandler:
         从Excel导入数据
 
         Args:
-            file: Flask文件对象
+            file: HTTP上传文件对象
 
         Returns:
             dict: 导入结果

@@ -1,11 +1,17 @@
 """
 数据模型覆盖率测试 - 提高数据模型测试覆盖率
 测试范围：用户模型、订单模型、库存模型的所有方法
+
+标记: flask_legacy — 迁移中，需重写为 SQLAlchemy 2.0 异步模式
 """
 import os
 import sys
 import unittest
 from datetime import datetime
+
+import pytest
+
+pytestmark = pytest.mark.flask_legacy
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

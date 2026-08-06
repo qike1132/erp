@@ -14,13 +14,24 @@ const history: VitalMetric[] = []
 let flushTimer: ReturnType<typeof setTimeout> | null = null
 let initialized = false
 
+function reportMetrics(batch: VitalMetric[]) {
+  if (batch.length === 0 || typeof navigator === 'undefined' || !navigator.sendBeacon) return
+
+  const payload = JSON.stringify({ vitals: batch })
+  try {
+    navigator.sendBeacon('/api/v1/monitoring/vitals', new Blob([payload], { type: 'application/json' }))
+  } catch {
+    // sendBeacon 失败时静默丢弃，避免影响业务
+  }
+}
+
 function flushMetrics() {
   if (queue.length === 0) return
   const batch = queue.splice(0, queue.length)
   history.push(...batch)
   if (history.length > 100) history.splice(0, history.length - 100)
 
-  // 后端未实现 vitals 端点，仅本地记录，不发送请求
+  reportMetrics(batch)
 }
 
 function handleVital(metric: { name: string; value: number; rating: string; delta: number; navigationType?: string }) {

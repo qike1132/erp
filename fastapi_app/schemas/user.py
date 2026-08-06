@@ -1,11 +1,14 @@
 """用户管理相关 Schema"""
 from pydantic import BaseModel, Field, field_validator
 
+from fastapi_app.schemas.product import _validate_factory
+
 
 class UserCreate(BaseModel):
     username: str = Field(..., min_length=1, max_length=50, description="用户名")
     password: str = Field(..., min_length=6, max_length=128, description="密码")
     is_super: bool = Field(default=False, description="是否超级用户")
+    factory: str | None = Field(default=None, max_length=20, description="所属工厂：东莞/湖北/NULL")
 
     @field_validator('password')
     @classmethod
@@ -16,10 +19,16 @@ class UserCreate(BaseModel):
             raise ValueError(error_msg)
         return v
 
+    @field_validator('factory')
+    @classmethod
+    def validate_factory(cls, v: str | None) -> str | None:
+        return _validate_factory(v)
+
 
 class UserUpdate(BaseModel):
-    password: str | None = Field(default=None, min_length=8, max_length=128, description="密码（不修改则不传）")
+    password: str | None = Field(default=None, min_length=6, max_length=128, description="密码（不修改则不传）")
     is_super: bool | None = Field(default=None, description="是否超级用户")
+    factory: str | None = Field(default=None, max_length=20, description="所属工厂：东莞/湖北/NULL（传空字符串表示清除）")
 
     @field_validator('password')
     @classmethod
@@ -32,6 +41,11 @@ class UserUpdate(BaseModel):
             raise ValueError(error_msg)
         return v
 
+    @field_validator('factory')
+    @classmethod
+    def validate_factory(cls, v: str | None) -> str | None:
+        return _validate_factory(v)
+
 
 class UserPermissionUpdate(BaseModel):
     permission_ids: list[int] = Field(default_factory=list, description="权限ID列表")
@@ -42,6 +56,7 @@ class UserResponse(BaseModel):
     username: str
     is_super: bool
     status: bool
+    factory: str | None = None
     create_time: str | None = None
 
     class Config:

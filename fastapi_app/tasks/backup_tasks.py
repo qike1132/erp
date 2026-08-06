@@ -43,7 +43,7 @@ async def _send_backup_alert(task_name: str, error: str, task_type: str = 'backu
             severity=severity,
             additional_info=additional_info
         )
-    except Exception as e:
+    except Exception as e:  # defensive: alert logging must not crash the caller
         logger.error(f'发送备份告警失败: {e}')
 
 
@@ -62,7 +62,7 @@ async def _collect_backup_metrics(backup_type: str, start_time: datetime, end_ti
             error_message=error_message,
             additional_metrics=additional_metrics
         )
-    except Exception as e:
+    except Exception as e:  # defensive: metrics collection must not crash the caller
         logger.error(f'收集备份指标失败: {e}')
 
 
@@ -117,7 +117,7 @@ def auto_daily_backup_task(self):
                 raise self.retry(exc=result) from result
             return {'status': 'error', 'error': str(result)}
             
-    except Exception as e:
+    except Exception as e:  # defensive: background task must log/alert failure instead of propagating
         error_msg = f'每日自动备份失败: {e}'
         logger.error(error_msg)
         
@@ -164,7 +164,7 @@ async def _do_auto_backup_with_metrics(backup_type: str):
         )
         
         return result
-    except Exception as e:
+    except Exception as e:  # defensive: collect failure metrics before re-raising
         end_time = datetime.now()
         
         # 收集失败指标
@@ -231,7 +231,7 @@ def auto_incremental_backup_task(self):
                 raise self.retry(exc=result) from result
             return {'status': 'error', 'error': str(result)}
             
-    except Exception as e:
+    except Exception as e:  # defensive: background task must log/alert failure instead of propagating
         error_msg = f'自动增量备份失败: {e}'
         logger.error(error_msg)
         
@@ -279,7 +279,7 @@ def backup_integrity_check_task(self):
             logger.info('备份完整性巡检通过')
         
         return result
-    except Exception as e:
+    except Exception as e:  # defensive: background task must log/alert failure instead of propagating
         error_msg = f'备份完整性巡检失败: {e}'
         logger.error(error_msg)
         
@@ -288,7 +288,7 @@ def backup_integrity_check_task(self):
             task_name='backup_integrity_check',
             error=error_msg,
             task_type='integrity_check',
-            severity='error',
+            severity='warning',
             additional_info={
                 'start_time': start_time.isoformat(),
                 'end_time': datetime.now().isoformat()
@@ -341,7 +341,7 @@ def backup_cleanup_task(self):
             ))
             
         return result
-    except Exception as e:
+    except Exception as e:  # defensive: background task must log/alert failure instead of propagating
         error_msg = f'备份智能清理失败: {e}'
         logger.error(error_msg)
         
@@ -515,7 +515,7 @@ def backup_health_check_task(self):
             logger.info(f'备份健康检查完成: {result.get("overall_status")}')
         
         return result
-    except Exception as e:
+    except Exception as e:  # defensive: background task must log/alert failure instead of propagating
         error_msg = f'备份健康检查失败: {e}'
         logger.error(error_msg)
         
@@ -574,7 +574,7 @@ def apply_backup_policy_task(self):
             ))
             
         return result
-    except Exception as e:
+    except Exception as e:  # defensive: background task must log/alert failure instead of propagating
         error_msg = f'应用备份策略失败: {e}'
         logger.error(error_msg)
         
@@ -634,11 +634,11 @@ def disaster_recovery_test_task(self):
             ))
             
         return result
-    except Exception as e:
+    except Exception as e:  # defensive: background task must log/alert failure instead of propagating
         error_msg = f'灾难恢复测试失败: {e}'
         logger.error(error_msg)
         
-        # 发送异常告警
+        # 发送错误告警
         _run_async(_send_backup_alert(
             task_name='disaster_recovery_test',
             error=error_msg,
@@ -696,16 +696,16 @@ def backup_metrics_report_task(self):
             ))
             
         return result
-    except Exception as e:
+    except Exception as e:  # defensive: background task must log/alert failure instead of propagating
         error_msg = f'备份性能指标报告生成失败: {e}'
         logger.error(error_msg)
         
-        # 发送异常告警
+        # 发送告警
         _run_async(_send_backup_alert(
             task_name='backup_metrics_report',
             error=error_msg,
             task_type='metrics',
-            severity='error',
+            severity='warning',
             additional_info={
                 'start_time': start_time.isoformat(),
                 'end_time': datetime.now().isoformat()

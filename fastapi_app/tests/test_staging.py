@@ -14,6 +14,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from fastapi_app.core.exceptions import NotFoundError
+
 # ==================== 模型级别单元测试 ====================
 
 class TestStagingOrderModel:
@@ -497,7 +499,7 @@ class TestStagingServiceLogic:
         mock_result.scalar_one_or_none.return_value = None
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        with pytest.raises(ValueError, match="不存在"):
+        with pytest.raises(NotFoundError, match="不存在"):
             await delete_staging_order(mock_db, 999)
 
     @pytest.mark.asyncio
@@ -513,7 +515,7 @@ class TestStagingServiceLogic:
 
         await delete_staging_order(mock_db, 1)
         mock_db.delete.assert_called_once_with(mock_order)
-        mock_db.commit.assert_called_once()
+        mock_db.flush.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_update_staging_order_customer_only(self):
@@ -529,7 +531,7 @@ class TestStagingServiceLogic:
 
         await update_staging_order(mock_db, 1, {"customer": "新客户"})
         assert mock_order.customer == "新客户"
-        mock_db.commit.assert_called_once()
+        mock_db.flush.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_update_staging_order_product_validation_success(self):
@@ -626,4 +628,4 @@ class TestStagingServiceLogic:
 
         mock_db = AsyncMock()
         await clear_staging_stockins(mock_db, "session-123")
-        mock_db.commit.assert_called_once()
+        mock_db.flush.assert_called_once()

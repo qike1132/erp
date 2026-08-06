@@ -16,6 +16,7 @@
     >
       {{ badge }}
     </span>
+
   </TabsTrigger>
 </template>
 

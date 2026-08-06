@@ -9,6 +9,7 @@ L3: 数据库
 import asyncio
 import contextlib
 import hashlib
+import inspect
 import json
 import logging
 import random
@@ -121,14 +122,24 @@ def cache_result(
 ):
     """
     缓存装饰器 - 支持 L1(内存) + L2(Redis) 两级缓存
+
+    key_builder 签名约定：始终通过 **kwargs 接收参数（参数名与被装饰函数签名一致）。
+    装饰器内部用 inspect.signature.bind 把位置参数绑定到参数名，因此无论调用方
+    使用位置参数还是关键字参数，key_builder 都能通过 kwargs.get('param_name') 正确读取。
     """
     def decorator(func):
+        # 预编译函数签名，避免每次调用重复解析
+        sig = inspect.signature(func)
+
         @wraps(func)
         async def wrapper(*args, **kwargs):
             global _redis_fail_count, _redis_circuit_open_until
             try:
                 if key_builder:
-                    cache_key = f"{key_prefix}:{key_builder(*args, **kwargs)}"
+                    # 把位置参数绑定到参数名，key_builder 始终通过 kwargs 访问
+                    bound = sig.bind(*args, **kwargs)
+                    bound.apply_defaults()
+                    cache_key = f"{key_prefix}:{key_builder(**bound.arguments)}"
                 else:
                     params_str = json.dumps({'args': args, 'kwargs': kwargs}, sort_keys=True, default=str)
                     params_hash = hashlib.md5(params_str.encode(), usedforsecurity=False).hexdigest()[:10]
@@ -175,11 +186,98 @@ def cache_result(
                         else:
                             logger.warning("Redis 缓存读取失败(timeout=%ss)，降级到数据库查询: %s", CACHE_TIMEOUT, e)
 
+                # 缓存击穿保护：分布式锁防止雪崩（stampede）
+                # 获取锁的 worker 重算并回填缓存；未获取锁的 worker 轮询缓存
+                lock_key = f"{cache_key}:lock"
+                lock_acquired = False
+                if redis and redis_available and getattr(redis, 'redis_client', None):
+                    try:
+                        full_lock_key = redis._make_key(lock_key)
+                        lock_acquired = await asyncio.wait_for(
+                            redis.redis_client.set(full_lock_key, "1", nx=True, ex=10),
+                            timeout=CACHE_TIMEOUT
+                        )
+                    except (TimeoutError, OSError, ConnectionError, ValueError):
+                        lock_acquired = False
+
+                if lock_acquired:
+                    # 获得锁：重算并回填缓存
+                    try:
+                        result = await func(*args, **kwargs)
+                        _cache_local.pop(cache_key, None)
+                        _cache_local[cache_key] = (result, datetime.now() + timedelta(seconds=local_ttl))
+                        _evict_local_cache()
+                        if redis and redis_available:
+                            try:
+                                await asyncio.wait_for(
+                                    redis.set(cache_key, result, timeout=int(ttl)),
+                                    timeout=CACHE_TIMEOUT
+                                )
+                                _redis_fail_count = 0
+                            except (TimeoutError, OSError, ConnectionError, ValueError) as e:
+                                _redis_fail_count += 1
+                                if _redis_fail_count >= _REDIS_CIRCUIT_THRESHOLD:
+                                    _redis_circuit_open_until = datetime.now() + _REDIS_CIRCUIT_COOLDOWN
+                                    logger.warning("Redis 断路器开启: %s", e)
+                    finally:
+                        try:
+                            await redis.delete(lock_key)
+                        except (TimeoutError, OSError, ConnectionError):
+                            pass
+                    return result
+                elif redis and redis_available and getattr(redis, 'redis_client', None):
+                    # 未获得锁：轮询缓存（最多 10s = lock TTL），等待持锁 worker 回填
+                    # 注意：仅当 redis_client 可用时才轮询，否则跳过避免 10s 空轮询
+                    for _ in range(100):  # 100 × 100ms = 10s（与 lock TTL 一致）
+                        await asyncio.sleep(0.1)
+                        try:
+                            cached = await asyncio.wait_for(
+                                redis.get(cache_key),
+                                timeout=CACHE_TIMEOUT
+                            )
+                            if cached is not None:
+                                _cache_local.pop(cache_key, None)
+                                _cache_local[cache_key] = (cached, datetime.now() + timedelta(seconds=local_ttl))
+                                return cached
+                        except (TimeoutError, OSError, ConnectionError):
+                            break
+                    # 轮询超时：尝试获取锁再重算，避免延迟雪崩
+                    logger.debug("缓存击穿轮询超时，尝试获取锁重算: %s", cache_key)
+                    if redis and redis_available and getattr(redis, 'redis_client', None):
+                        try:
+                            full_lock_key = redis._make_key(lock_key)
+                            lock_acquired = await asyncio.wait_for(
+                                redis.redis_client.set(full_lock_key, "1", nx=True, ex=10),
+                                timeout=CACHE_TIMEOUT
+                            )
+                        except (TimeoutError, OSError, ConnectionError, ValueError):
+                            lock_acquired = False
+                    if lock_acquired:
+                        try:
+                            result = await func(*args, **kwargs)
+                            _cache_local.pop(cache_key, None)
+                            _cache_local[cache_key] = (result, datetime.now() + timedelta(seconds=local_ttl))
+                            _evict_local_cache()
+                            if redis and redis_available:
+                                try:
+                                    await asyncio.wait_for(
+                                        redis.set(cache_key, result, timeout=int(ttl)),
+                                        timeout=CACHE_TIMEOUT
+                                    )
+                                except (TimeoutError, OSError, ConnectionError, ValueError):
+                                    pass
+                        finally:
+                            try:
+                                await redis.delete(lock_key)
+                            except (TimeoutError, OSError, ConnectionError):
+                                pass
+                        return result
+
                 result = await func(*args, **kwargs)
 
                 # 写入 L1：先移除再插入，保证 OrderedDict 顺序
                 _cache_local.pop(cache_key, None)
-                _cache_local[cache_key] = (result, now + timedelta(seconds=local_ttl))
+                _cache_local[cache_key] = (result, datetime.now() + timedelta(seconds=local_ttl))
                 _evict_local_cache()
 
                 if redis and redis_available:
@@ -192,11 +290,11 @@ def cache_result(
                     except (TimeoutError, OSError, ConnectionError, ValueError) as e:
                         _redis_fail_count += 1
                         if _redis_fail_count >= _REDIS_CIRCUIT_THRESHOLD:
-                            _redis_circuit_open_until = now + _REDIS_CIRCUIT_COOLDOWN
+                            _redis_circuit_open_until = datetime.now() + _REDIS_CIRCUIT_COOLDOWN
 
                 return result
 
-            except (OSError, ConnectionError, ValueError) as e:
+            except (OSError, ConnectionError) as e:
                 logger.error("缓存装饰器执行失败: %s", e, exc_info=True)
                 return await func(*args, **kwargs)
 
@@ -265,5 +363,5 @@ async def invalidate_dashboard_cache():
         await invalidate_cache('dashboard:stats')
         await invalidate_cache('dashboard:activities')
         logger.info("Dashboard 缓存已失效")
-    except Exception as e:
+    except (OSError, ConnectionError) as e:
         logger.warning(f"失效 Dashboard 缓存失败: {e}")

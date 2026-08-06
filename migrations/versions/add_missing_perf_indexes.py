@@ -23,7 +23,7 @@ INDEXES_UP = [
     # InventoryLog 按产品查询
     """
         CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_inventory_log_product_time
-        ON inventory_log (product_id, create_time DESC)
+        ON inventory_log (product_id, change_date DESC)
     """,
     # Order 深翻页组合游标索引
     """

@@ -1,11 +1,17 @@
 """
 产品管理模块功能测试
 测试范围：产品CRUD、分类管理、规格管理、条码管理、边界条件
+
+标记: flask_legacy — 迁移中，需重写为 SQLAlchemy 2.0 异步模式
 """
 import os
 import sys
 import unittest
 from datetime import datetime
+
+import pytest
+
+pytestmark = pytest.mark.flask_legacy
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

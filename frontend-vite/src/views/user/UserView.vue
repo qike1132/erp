@@ -1,8 +1,8 @@
 <template>
   <div class="us-container">
-    <div class="us-card us-card-main">
+    <div class="page-card page-card-main">
       <!-- 卡片头部 -->
-      <div class="us-card-header">
+      <div class="page-card-header">
         <HeaderTabs />
       </div>
 
@@ -30,6 +30,13 @@
                 <UiCheckbox :checked="form.isSuper" @update:checked="form.isSuper = $event" />
                 <label class="us-checkbox-label" @click="form.isSuper = !form.isSuper">超级管理员</label>
               </div>
+              <div class="us-form-group">
+                <label>工厂</label>
+                <select v-model="form.factory" class="us-input" aria-label="工厂">
+                  <option value="">无（跨厂管理员）</option>
+                  <option v-for="f in FACTORY_OPTIONS" :key="f" :value="f">{{ f }}</option>
+                </select>
+              </div>
               <p v-if="formError" class="us-form-error">{{ formError }}</p>
               <button type="submit" class="us-submit-btn" :disabled="submitting">
                 {{ submitting ? '添加中…' : '添加用户' }}
@@ -42,8 +49,7 @@
         <div class="us-col">
           <div class="us-col-scroll">
             <div v-if="isLoading" class="us-empty">
-              <i class="fas fa-spinner fa-spin"  aria-hidden="true" />
-              <span>加载中…</span>
+              <UiSpinner />
             </div>
             <div v-else-if="users.length === 0" class="us-empty">
               <i class="fas fa-users"  aria-hidden="true" />
@@ -54,6 +60,7 @@
                 <tr>
                   <th>用户名</th>
                   <th>角色</th>
+                  <th>工厂</th>
                   <th>状态</th>
                   <th>创建时间</th>
                   <th>操作</th>
@@ -68,6 +75,10 @@
                     </span>
                   </td>
                   <td>
+                    <span v-if="row.factory" :class="['us-badge', 'us-badge-factory']">{{ row.factory }}</span>
+                    <span v-else class="us-badge-muted-text">-</span>
+                  </td>
+                  <td>
                     <span :class="['us-badge', row.status !== false ? 'us-badge-success' : 'us-badge-muted']">
                       {{ row.status !== false ? '启用' : '禁用' }}
                     </span>
@@ -75,6 +86,7 @@
                   <td>{{ formatDate(row.create_time) }}</td>
                   <td style="white-space: nowrap">
                     <button class="us-action-btn us-action-primary" @click="openPermissionDialog(row)">权限</button>
+                    <button class="us-action-btn us-action-primary" @click="openEditDialog(row)">编辑</button>
                     <button class="us-action-btn us-action-primary" :disabled="actionId === row.id" @click="handleToggle(row)">
                       {{ row.status !== false ? '禁用' : '启用' }}
                     </button>
@@ -91,14 +103,34 @@
               <button class="us-page-btn" :disabled="currentPage <= 1" @click="goPage(1)" aria-label="首页"><i class="fas fa-angle-double-left"  aria-hidden="true" /></button>
               <button class="us-page-btn" :disabled="currentPage <= 1" @click="goPage(currentPage - 1)" aria-label="上一页"><i class="fas fa-angle-left"  aria-hidden="true" /></button>
               <span class="us-page-info">{{ currentPage }} / {{ totalPages }}</span>
-              <button class="us-page-btn" :disabled="currentPage >= totalPages" @click="goPage(currentPage + 1)"><i class="fas fa-angle-right"  aria-hidden="true" /></button>
-              <button class="us-page-btn" :disabled="currentPage >= totalPages" @click="goPage(totalPages)"><i class="fas fa-angle-double-right"  aria-hidden="true" /></button>
+              <button class="us-page-btn" :disabled="currentPage >= totalPages" @click="goPage(currentPage + 1)" aria-label="下一页"><i class="fas fa-angle-right"  aria-hidden="true" /></button>
+              <button class="us-page-btn" :disabled="currentPage >= totalPages" @click="goPage(totalPages)" aria-label="末页"><i class="fas fa-angle-double-right"  aria-hidden="true" /></button>
               <span class="us-page-total">共 {{ totalItems }} 条</span>
             </div>
           </div>
         </div>
       </div>
     </div>
+
+    <!-- 编辑用户工厂弹窗 -->
+    <UiDialog :open="editDialogVisible" title="编辑用户" max-width-class="max-w-[480px]" @update:open="editDialogVisible = $event">
+      <div class="us-edit-form">
+        <div class="us-edit-username">用户名：{{ editTargetName }}</div>
+        <div class="us-form-group">
+          <label>工厂</label>
+          <select v-model="editForm.factory" class="us-input" aria-label="工厂">
+            <option value="">无（跨厂管理员）</option>
+            <option v-for="f in FACTORY_OPTIONS" :key="f" :value="f">{{ f }}</option>
+          </select>
+        </div>
+      </div>
+      <template #footer>
+        <button class="us-action-btn" @click="editDialogVisible = false">取消</button>
+        <button class="us-action-btn us-action-primary" :disabled="editSubmitting" @click="handleSaveEdit">
+          {{ editSubmitting ? '保存中…' : '保存' }}
+        </button>
+      </template>
+    </UiDialog>
 
     <!-- 权限分配弹窗 -->
     <UiDialog :open="permDialogVisible" title="分配权限" max-width-class="max-w-[640px]" @update:open="permDialogVisible = $event">
@@ -147,9 +179,18 @@
 </template>
 
 <script setup lang="ts">
+/**
+ * UserView.vue — 用户管理页面
+ *
+ * 职责：
+ * - 左栏：添加新用户（用户名、密码、超级管理员勾选）
+ * - 右栏：用户列表（分页、启用/禁用切换、删除）
+ * - 权限分配弹窗：按模块分组展示权限树，支持全选/级联选择
+ */
 import { ref, reactive, computed } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { userApi, permissionApi } from '@/api'
+import type { PermissionItem } from '@/types'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiCheckbox from '@/components/ui/UiCheckbox.vue'
 import { showToast } from '@/composables/useToast'
@@ -157,6 +198,29 @@ import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 import { formatDate } from '@/utils/format'
+
+/** 用户列表行数据 */
+interface UserRow {
+  id: number
+  username: string
+  is_super?: boolean
+  status?: boolean
+  factory?: string | null
+  create_time?: string
+}
+
+/** 工厂下拉选项（与后端 VALID_FACTORIES 保持一致） */
+const FACTORY_OPTIONS = ['东莞', '湖北'] as const
+
+/** 从错误对象中提取后端返回的 detail 信息 */
+function extractErrorMessage(err: unknown, fallback: string): string {
+  const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+  if (Array.isArray(detail)) {
+    return detail.map((d: { msg?: string }) => d.msg).join('; ') || fallback
+  }
+  if (typeof detail === 'string') return detail
+  return fallback
+}
 
 const actionId = ref<number | ''>(0)
 const formError = ref('')
@@ -167,24 +231,30 @@ const confirmDialog = useConfirmDialog()
 const currentPage = ref(1)
 const perPage = 15
 
+/** 用户列表查询 */
 const { data: result, isLoading } = useQuery({
   queryKey: ['users-list', () => currentPage.value],
-  queryFn: () => userApi.list({ page: currentPage.value, per_page: perPage }) as Promise<any>,
+  queryFn: () => userApi.list({ page: currentPage.value, per_page: perPage }),
   staleTime: 30_000,
   gcTime: 60_000,
 })
-const users = computed(() => result.value?.items ?? result.value?.users ?? result.value?.data ?? [])
+/** 当前页用户列表 */
+const users = computed(() => result.value?.users ?? [])
+/** 用户总数 */
 const totalItems = computed(() => result.value?.total ?? users.value.length)
+/** 总页数 */
 const totalPages = computed(() => Math.max(1, Math.ceil(totalItems.value / perPage)))
 
+/** 跳转到指定页码 */
 function goPage(p: number) {
   currentPage.value = p
 }
 
 // 添加用户
 const submitting = ref(false)
-const form = reactive({ username: '', password: '', isSuper: false })
+const form = reactive({ username: '', password: '', isSuper: false, factory: '' })
 
+/** 提交添加用户表单 */
 async function handleAdd() {
   formError.value = ''
   if (!form.username) {
@@ -201,58 +271,96 @@ async function handleAdd() {
   }
   submitting.value = true
   try {
-    await userApi.create({ username: form.username, password: form.password, is_super: form.isSuper })
+    await userApi.create({
+      username: form.username,
+      password: form.password,
+      is_super: form.isSuper,
+      factory: form.factory || null,
+    })
     showToast('添加成功', 'success')
-    Object.assign(form, { username: '', password: '', isSuper: false })
+    Object.assign(form, { username: '', password: '', isSuper: false, factory: '' })
     queryClient.invalidateQueries({ queryKey: ['users-list'] })
-  } catch (err: any) {
-    showToast(err.response?.data?.detail || '添加失败', 'error')
+  } catch (err: unknown) {
+    showToast(extractErrorMessage(err, '添加失败'), 'error')
   } finally {
     submitting.value = false
   }
 }
 
-// 切换状态
-async function handleToggle(row: any) {
+/** 切换用户启用/禁用状态 */
+async function handleToggle(row: UserRow) {
   actionId.value = row.id
   try {
     await userApi.toggle(row.id)
     showToast('操作成功', 'success')
     queryClient.invalidateQueries({ queryKey: ['users-list'] })
-  } catch (err: any) {
-    showToast(err.response?.data?.detail || '操作失败', 'error')
+  } catch (err: unknown) {
+    showToast(extractErrorMessage(err, '操作失败'), 'error')
   } finally {
     actionId.value = 0
   }
 }
 
-async function handleDelete(row: any) {
+/** 删除用户（带确认弹窗） */
+async function handleDelete(row: UserRow) {
   if (!(await confirmDialog.confirm(`确定要删除用户"${row.username}"吗？`))) return
   actionId.value = row.id
   try {
     await userApi.delete(row.id)
     showToast('删除成功', 'success')
     queryClient.invalidateQueries({ queryKey: ['users-list'] })
-  } catch (err: any) {
-    showToast(err.response?.data?.detail || '删除失败', 'error')
+  } catch (err: unknown) {
+    showToast(extractErrorMessage(err, '删除失败'), 'error')
   } finally {
     actionId.value = 0
+  }
+}
+
+// 编辑用户工厂
+const editDialogVisible = ref(false)
+const editSubmitting = ref(false)
+const editTargetId = ref(0)
+const editTargetName = ref('')
+const editForm = reactive<{ factory: string }>({ factory: '' })
+
+/** 打开编辑用户弹窗，预填当前工厂值 */
+function openEditDialog(row: UserRow) {
+  editTargetId.value = row.id
+  editTargetName.value = row.username
+  editForm.factory = row.factory || ''
+  editDialogVisible.value = true
+}
+
+/** 保存用户工厂编辑 */
+async function handleSaveEdit() {
+  editSubmitting.value = true
+  try {
+    await userApi.update(editTargetId.value, { factory: editForm.factory || null })
+    showToast('保存成功', 'success')
+    editDialogVisible.value = false
+    queryClient.invalidateQueries({ queryKey: ['users-list'] })
+  } catch (err: unknown) {
+    showToast(extractErrorMessage(err, '保存失败'), 'error')
+  } finally {
+    editSubmitting.value = false
   }
 }
 
 // 权限分配
 const permDialogVisible = ref(false)
 const permSubmitting = ref(false)
-const permissionTree = ref<any[]>([])
+const permissionTree = ref<PermissionItem[]>([])
 const permCheckedKeys = ref<number[]>([])
 const permExpandedKeys = ref<Set<number>>(new Set())
 const permTargetUserId = ref(0)
 const permTargetName = ref('')
 
+/** 权限模块分区排序优先级 */
 const sectionOrder = ['purchase', 'purchase_tools', 'core', 'data', 'system']
 
+/** 按模块分区对权限树进行分组 */
 const permissionSections = computed(() => {
-  const map = new Map<string, { key: string; name: string; items: any[] }>()
+  const map = new Map<string, { key: string; name: string; items: PermissionItem[] }>()
   for (const node of permissionTree.value) {
     const secKey = node.section || 'other'
     const secName = node.section_name || secKey
@@ -271,32 +379,36 @@ const permissionSections = computed(() => {
   return sections
 })
 
+/** 判断权限节点是否展开 */
 function isPermExpanded(id: number): boolean {
   return permExpandedKeys.value.has(id)
 }
 
+/** 切换权限节点的展开/折叠状态 */
 function togglePermExpand(id: number) {
   const s = permExpandedKeys.value
   if (s.has(id)) s.delete(id)
   else s.add(id)
 }
 
+/** 判断权限节点是否已选中 */
 function isPermChecked(id: number): boolean {
   return permCheckedKeys.value.includes(id)
 }
 
+/** 切换权限节点的选中状态，支持父子级联 */
 function togglePermNode(id: number) {
-  const node = permissionTree.value.find((n: any) => n.id === id)
+  const node = permissionTree.value.find((n) => n.id === id)
   if (node && node.children?.length) {
     // Toggle parent with children: cascade to all children
-    const childIds = node.children.map((c: any) => c.id)
-    const allChecked = childIds.every((cid: number) => permCheckedKeys.value.includes(cid))
+    const childIds = node.children.map((c) => c.id)
+    const allChecked = childIds.every((cid) => permCheckedKeys.value.includes(cid))
     if (allChecked) {
       // Uncheck parent + all children
-      permCheckedKeys.value = permCheckedKeys.value.filter((k: number) => k !== id && !childIds.includes(k))
+      permCheckedKeys.value = permCheckedKeys.value.filter((k) => k !== id && !childIds.includes(k))
     } else {
       // Check parent + all children
-      const toAdd = [id, ...childIds].filter((k: number) => !permCheckedKeys.value.includes(k))
+      const toAdd = [id, ...childIds].filter((k) => !permCheckedKeys.value.includes(k))
       permCheckedKeys.value.push(...toAdd)
     }
   } else {
@@ -306,8 +418,8 @@ function togglePermNode(id: number) {
       permCheckedKeys.value.splice(idx, 1)
       // Uncheck parent if no siblings checked
       for (const parent of permissionTree.value) {
-        if (parent.children?.some((c: any) => c.id === id)) {
-          const anyChildChecked = parent.children.some((c: any) => permCheckedKeys.value.includes(c.id))
+        if (parent.children?.some((c) => c.id === id)) {
+          const anyChildChecked = parent.children.some((c) => permCheckedKeys.value.includes(c.id))
           if (!anyChildChecked) {
             const pidx = permCheckedKeys.value.indexOf(parent.id)
             if (pidx >= 0) permCheckedKeys.value.splice(pidx, 1)
@@ -319,8 +431,8 @@ function togglePermNode(id: number) {
       permCheckedKeys.value.push(id)
       // Check parent if all siblings checked
       for (const parent of permissionTree.value) {
-        if (parent.children?.some((c: any) => c.id === id)) {
-          const allChildrenChecked = parent.children.every((c: any) => permCheckedKeys.value.includes(c.id))
+        if (parent.children?.some((c) => c.id === id)) {
+          const allChildrenChecked = parent.children.every((c) => permCheckedKeys.value.includes(c.id))
           if (allChildrenChecked) {
             if (!permCheckedKeys.value.includes(parent.id)) {
               permCheckedKeys.value.push(parent.id)
@@ -333,13 +445,15 @@ function togglePermNode(id: number) {
   }
 }
 
-function getPermChildCount(node: any, checked: number[]): string {
+/** 获取权限节点子项的选中计数文本（如 "2/5"） */
+function getPermChildCount(node: PermissionItem, checked: number[]): string {
   if (!node.children?.length) return ''
   const total = node.children.length
-  const checkedCount = node.children.filter((c: any) => checked.includes(c.id)).length
+  const checkedCount = node.children.filter((c) => checked.includes(c.id)).length
   return `${checkedCount}/${total}`
 }
 
+/** 是否所有权限节点均已选中 */
 const permIsAllChecked = computed(() => {
   const allIds: number[] = []
   for (const node of permissionTree.value) {
@@ -349,6 +463,7 @@ const permIsAllChecked = computed(() => {
   return allIds.length > 0 && allIds.every((id: number) => permCheckedKeys.value.includes(id))
 })
 
+/** 全选/取消全选所有权限 */
 function toggleAllPerms() {
   const allIds: number[] = []
   for (const node of permissionTree.value) {
@@ -362,16 +477,17 @@ function toggleAllPerms() {
   }
 }
 
-async function openPermissionDialog(row: any) {
+/** 打开权限分配弹窗，加载权限树和用户已有权限 */
+async function openPermissionDialog(row: UserRow) {
   permTargetUserId.value = row.id
   permTargetName.value = row.username
   try {
     const [permRes, userPermRes] = await Promise.all([
-      permissionApi.tree() as Promise<any>,
-      userApi.getPermission(row.id) as Promise<any>,
+      permissionApi.tree(),
+      userApi.getPermission(row.id),
     ])
-    permissionTree.value = permRes.tree ?? permRes ?? []
-    permCheckedKeys.value = (userPermRes.user_permission_ids ?? userPermRes.permission_ids ?? []) as number[]
+    permissionTree.value = permRes
+    permCheckedKeys.value = userPermRes.user_permission_ids
     permExpandedKeys.value = new Set()
     permDialogVisible.value = true
   } catch {
@@ -379,17 +495,15 @@ async function openPermissionDialog(row: any) {
   }
 }
 
+/** 保存用户权限分配 */
 async function handleSavePermission() {
   permSubmitting.value = true
   try {
-    console.log('Saving permissions:', permTargetUserId.value, permCheckedKeys.value)
     await userApi.savePermission(permTargetUserId.value, permCheckedKeys.value)
     showToast('权限保存成功', 'success')
     permDialogVisible.value = false
-  } catch (err: any) {
-    console.error('Save permission error:', err)
-    const errorMsg = err.response?.data?.detail || err.message || '保存失败'
-    showToast(errorMsg, 'error')
+  } catch (err: unknown) {
+    showToast(extractErrorMessage(err, '保存失败'), 'error')
   } finally {
     permSubmitting.value = false
   }
@@ -399,48 +513,16 @@ async function handleSavePermission() {
 <style scoped>
 /* Container */
 .us-container {
-  padding: 8px;
+  padding: 0;
   margin: 0 auto;
   height: 100%;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
 }
-
-/* Card */
-.us-card {
-  background: white;
-  border-radius: 18px;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  transition: box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  overflow: hidden;
-}
-.us-card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
-  transform: translateY(-2px);
-}
-.us-card-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
+.page-card-header :deep(.ht-bar) { margin: 0; }
 
 /* Card Header */
-.us-card-header {
-  display: flex;
-  flex-wrap: nowrap;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 24px;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
-  gap: 12px;
-}
-.us-card-header :deep(.ht-bar) {
-  width: auto;
-  margin: 0;
-}
 .us-card-title-group {
   display: flex;
   align-items: center;
@@ -645,6 +727,28 @@ async function handleSavePermission() {
 .us-badge-muted {
   background: var(--color-border-light, #f1f5f9);
   color: var(--color-text-muted);
+}
+.us-badge-factory {
+  background: var(--color-warning-50, #fef3c7);
+  color: var(--color-warning-700, #b45309);
+}
+.us-badge-muted-text {
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+/* Edit Dialog */
+.us-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.us-edit-username {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
 }
 
 /* Table */

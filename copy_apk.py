@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Copy real APK to 1.3 version"""
+import os
 import shutil
 import hashlib
 import psycopg2
@@ -38,11 +39,11 @@ def main():
     print("\nUpdating database...")
     try:
         conn = psycopg2.connect(
-            host="localhost",
-            port="5432",
-            user="erp_app",
-            password="110110",
-            dbname="erp_system"
+            host=os.getenv('DB_HOST', 'localhost'),
+            port=os.getenv('DB_PORT', '5432'),
+            user=os.getenv('DB_USER', 'erp_app'),
+            password=os.getenv('DB_PASSWORD', ''),
+            dbname=os.getenv('DB_NAME', 'erp_system')
         )
         cur = conn.cursor()
         

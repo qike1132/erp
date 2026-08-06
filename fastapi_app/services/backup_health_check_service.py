@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import psutil
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db_context
@@ -127,7 +128,7 @@ class BackupHealthCheckService:
             logger.info(f"健康检查完成，状态: {results['overall_status']}")
             return results
             
-        except Exception as e:
+        except Exception as e:  # defensive: health check must report failure but not crash
             logger.error(f"健康检查执行失败: {e}")
             error_result = {
                 'check_time': datetime.now().isoformat(),
@@ -180,7 +181,7 @@ class BackupHealthCheckService:
             
             return result
             
-        except Exception as e:
+        except OSError as e:
             logger.error(f"磁盘空间检查失败: {e}")
             return {
                 'healthy': False,
@@ -230,7 +231,7 @@ class BackupHealthCheckService:
             
             return result
             
-        except Exception as e:
+        except OSError as e:
             logger.error(f"备份时间检查失败: {e}")
             return {
                 'healthy': False,
@@ -298,7 +299,7 @@ class BackupHealthCheckService:
             
             return results
             
-        except Exception as e:
+        except OSError as e:
             logger.error(f"备份完整性检查失败: {e}")
             return {
                 'healthy': False,
@@ -391,7 +392,7 @@ class BackupHealthCheckService:
                 'last_modified': datetime.fromtimestamp(file_path.stat().st_mtime).isoformat()
             }
             
-        except Exception as e:
+        except OSError as e:
             return {
                 'filename': file_path.name,
                 'healthy': False,
@@ -461,7 +462,7 @@ class BackupHealthCheckService:
                 
                 return result
                 
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"备份记录检查失败: {e}")
             return {
                 'healthy': False,
@@ -504,7 +505,7 @@ class BackupHealthCheckService:
             
             return result
             
-        except Exception as e:
+        except OSError as e:
             logger.error(f"系统资源检查失败: {e}")
             return {
                 'healthy': False,
@@ -576,7 +577,7 @@ class BackupHealthCheckService:
             # 清理旧报告
             await self._cleanup_old_reports(report_dir)
             
-        except Exception as e:
+        except OSError as e:
             logger.error(f"存储健康检查报告失败: {e}")
     
     async def _cleanup_old_reports(self, report_dir: Path) -> None:
@@ -609,7 +610,7 @@ class BackupHealthCheckService:
             if deleted_count > 0:
                 logger.info(f"清理了 {deleted_count} 个旧的健康检查报告")
                 
-        except Exception as e:
+        except OSError as e:
             logger.error(f"清理健康检查报告失败: {e}")
     
     async def _alert_on_issues(self, results: Dict[str, Any]) -> None:
@@ -638,7 +639,7 @@ class BackupHealthCheckService:
                 }
             )
             
-        except Exception as e:
+        except Exception as e:  # defensive: health check alert failure must not propagate
             logger.error(f"发送健康检查告警失败: {e}")
     
     async def perform_recovery_test(self, backup_file: Optional[str] = None) -> Dict[str, Any]:
@@ -732,7 +733,7 @@ class BackupHealthCheckService:
                         'tested_file': test_file.name
                     }
                     
-        except Exception as e:
+        except Exception as e:  # defensive: recovery test failure must be reported gracefully
             logger.error(f"恢复测试失败: {e}")
             return {
                 'success': False,
@@ -779,7 +780,7 @@ class BackupHealthCheckService:
             reports.sort(key=lambda x: x.get('check_time', ''), reverse=True)
             return reports
             
-        except Exception as e:
+        except OSError as e:
             logger.error(f"获取健康检查历史失败: {e}")
             return []
 

@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import psutil
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db_context
@@ -110,7 +111,7 @@ class BackupCleanupService:
             logger.info(f"智能清理完成: 删除 {cleanup_result['deleted_count']} 个文件，保留 {len(files_to_keep)} 个文件")
             return report
             
-        except Exception as e:
+        except Exception as e:  # defensive: cleanup task must report failure but not crash
             logger.error(f"智能备份清理失败: {e}")
             
             # 发送错误告警
@@ -158,7 +159,7 @@ class BackupCleanupService:
                 'cleanup_reason': '磁盘空间不足' if needs_cleanup else '磁盘空间充足'
             }
             
-        except Exception as e:
+        except OSError as e:
             logger.error(f"检查磁盘空间失败: {e}")
             return {
                 'error': str(e),
@@ -219,7 +220,7 @@ class BackupCleanupService:
             
             return backup_files
             
-        except Exception as e:
+        except OSError as e:
             logger.error(f"获取备份文件信息失败: {e}")
             return []
     
@@ -261,7 +262,7 @@ class BackupCleanupService:
             
             return files_to_keep
             
-        except Exception as e:
+        except Exception as e:  # defensive: keep all files when marking fails
             logger.error(f"标记保留文件失败: {e}")
             # 如果出错，保留所有文件
             return {file_info['name'] for file_info in backup_files}
@@ -289,7 +290,7 @@ class BackupCleanupService:
                                 file_info['base_timestamp'] <= full_timestamp):
                                 files_to_keep.add(file_info['name'])
                                 
-        except Exception as e:
+        except Exception as e:  # defensive: incremental chain marking must not abort cleanup
             logger.error(f"标记增量备份链失败: {e}")
     
     def _extract_timestamp(self, filename: str) -> Optional[str]:
@@ -382,7 +383,7 @@ class BackupCleanupService:
                 # 从保留列表中移除
                 files_to_keep.difference_update(files_to_remove)
                 
-        except Exception as e:
+        except Exception as e:  # defensive: scoring failure should not abort cleanup
             logger.error(f"计算重要性分数失败: {e}")
     
     async def _test_backup_files(self, 
@@ -421,7 +422,7 @@ class BackupCleanupService:
                     if file_info['name'] in files_to_keep:
                         files_to_keep.remove(file_info['name'])
                     
-        except Exception as e:
+        except Exception as e:  # defensive: recovery test failure should not abort cleanup
             logger.error(f"备份文件测试失败: {e}")
     
     async def _mark_files_to_delete(self, 
@@ -461,7 +462,7 @@ class BackupCleanupService:
             
             return files_to_delete
             
-        except Exception as e:
+        except Exception as e:  # defensive: deletion marking failure should not abort cleanup
             logger.error(f"标记删除文件失败: {e}")
             return set()
     
@@ -484,13 +485,22 @@ class BackupCleanupService:
                         if record_file.exists():
                             record_file.unlink()
                             
-                    except Exception as e:
+                    except OSError as e:
                         errors.append(f"{filename}: {str(e)}")
                         logger.error(f"删除文件失败 {filename}: {e}")
         
             # 删除数据库记录
-            deleted_records = await self._delete_backup_records(deleted_files)
-            
+            deleted_records, db_delete_failed = await self._delete_backup_records(deleted_files)
+            if db_delete_failed:
+                # 磁盘文件已删但 DB 记录残留：记录孤立记录以便后续清理
+                orphan_count = len(deleted_files) - deleted_records
+                if orphan_count > 0:
+                    errors.append(f"{orphan_count} 条备份记录数据库删除失败，存在孤立记录")
+                    logger.warning(
+                        "备份记录数据库删除失败，%d 条孤立记录（文件已删除）: %s",
+                        orphan_count, deleted_files
+                    )
+
             return {
                 'deleted_count': len(deleted_files),
                 'deleted_files': deleted_files,
@@ -500,7 +510,7 @@ class BackupCleanupService:
                 'success': len(errors) == 0
             }
             
-        except Exception as e:
+        except Exception as e:  # defensive: cleanup execution must report failure gracefully
             logger.error(f"执行清理操作失败: {e}")
             return {
                 'deleted_count': 0,
@@ -511,31 +521,34 @@ class BackupCleanupService:
                 'success': False
             }
     
-    async def _delete_backup_records(self, deleted_files: List[str]) -> int:
-        """删除对应的备份记录"""
+    async def _delete_backup_records(self, deleted_files: List[str]) -> tuple[int, bool]:
+        """删除对应的备份记录
+
+        Returns:
+            (deleted_count, db_delete_failed)
+            - deleted_count: 实际删除的记录数
+            - db_delete_failed: 数据库删除是否失败（True 表示存在孤立记录）
+        """
         try:
             if not deleted_files:
-                return 0
-            
+                return 0, False
+
             async with get_async_db_context() as db:
-                deleted_count = 0
-                for filename in deleted_files:
-                    stmt = select(BackupRecord).where(BackupRecord.filename == filename)
-                    result = await db.execute(stmt)
-                    record = result.scalar_one_or_none()
-                    
-                    if record:
-                        await db.delete(record)
-                        deleted_count += 1
-                
+                # 批量删除：单条 DELETE ... WHERE filename IN (...)，避免 N+1
+                from sqlalchemy import delete as sa_delete
+                result = await db.execute(
+                    sa_delete(BackupRecord).where(BackupRecord.filename.in_(deleted_files))
+                )
+                deleted_count = result.rowcount or 0
+
                 if deleted_count > 0:
-                    await db.commit()
-                
-                return deleted_count
-                
-        except Exception as e:
+                    await db.commit()  # independent-transaction
+
+                return deleted_count, False
+
+        except SQLAlchemyError as e:
             logger.error(f"删除备份记录失败: {e}")
-            return 0
+            return 0, True
     
     async def _generate_cleanup_report(self,
                                      backup_files: List[Dict[str, Any]],
@@ -589,7 +602,7 @@ class BackupCleanupService:
             
             return report
             
-        except Exception as e:
+        except Exception as e:  # defensive: report generation must not abort cleanup
             logger.error(f"生成清理报告失败: {e}")
             return {
                 'timestamp': datetime.now().isoformat(),
@@ -661,7 +674,7 @@ class BackupCleanupService:
             # 清理旧报告
             await self._cleanup_old_reports(reports_dir)
             
-        except Exception as e:
+        except OSError as e:
             logger.error(f"保存清理报告失败: {e}")
     
     async def _cleanup_old_reports(self, reports_dir: Path) -> None:
@@ -694,7 +707,7 @@ class BackupCleanupService:
             if deleted_count > 0:
                 logger.info(f"清理了 {deleted_count} 个旧的清理报告")
                 
-        except Exception as e:
+        except OSError as e:
             logger.error(f"清理报告文件失败: {e}")
     
     async def _send_cleanup_notification(self, report: Dict[str, Any]) -> None:
@@ -723,7 +736,7 @@ class BackupCleanupService:
                 additional_info=report
             )
             
-        except Exception as e:
+        except Exception as e:  # defensive: cleanup notification failure must not propagate
             logger.error(f"发送清理通知失败: {e}")
     
     async def get_cleanup_history(self, days: int = 7) -> List[Dict[str, Any]]:
@@ -758,7 +771,7 @@ class BackupCleanupService:
             reports.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
             return reports
             
-        except Exception as e:
+        except OSError as e:
             logger.error(f"获取清理历史失败: {e}")
             return []
 

@@ -21,6 +21,8 @@ metadata:
   namespace: erp-system
 type: Opaque
 stringData:
-  DATABASE_URL: postgresql+asyncpg://erp:CHANGE_ME@postgres:5432/erp_system
-  SECRET_KEY: CHANGE_ME_IN_PRODUCTION
-  REDIS_PASSWORD: CHANGE_ME
+  # 生产部署时必须通过外部 Secret 管理器（Sealed Secrets / External Secrets Operator / Vault）
+  # 注入真实值，禁止使用占位符。部署前校验脚本会拒绝包含 CHANGE_ME 的值。
+  DATABASE_URL: ${DATABASE_URL}
+  SECRET_KEY: ${SECRET_KEY}
+  REDIS_PASSWORD: ${REDIS_PASSWORD}

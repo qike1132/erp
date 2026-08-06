@@ -81,33 +81,15 @@
                 </div>
               </div>
 
-              <div class="co-form-group" style="position: relative">
+              <div class="co-form-group">
                 <label class="co-label">产品名称 <span class="co-required">*</span></label>
-                <input
-                  type="text"
-                  class="form-text-input"
-                  :value="form.productSearch"
+                <UiAutocomplete
+                  v-model="form.productSearch"
+                  :searchFn="searchProducts"
                   placeholder="输入产品名称搜索"
-                  name="search"
-                  autocomplete="off"
-                  @input="form.productSearch = ($event.target as HTMLInputElement).value; onProductInput()"
-                  @focus="onProductFocus"
-                  @blur="hideSuggestions"
+                  @select="selectProduct"
+                  @update:modelValue="form.productId = 0"
                 />
-                <Transition name="co-dropdown">
-                  <div v-if="suggestions.length && showSuggestions" class="co-autocomplete">
-                    <div
-                      v-for="p in suggestions"
-                      :key="p.id"
-                      class="co-autocomplete-item"
-                      role="option"
-                      @mousedown.prevent="selectProduct(p)"
-                      @keydown.enter="selectProduct(p)"
-                    >
-                      {{ p.name || p.value }}
-                    </div>
-                  </div>
-                </Transition>
               </div>
 
               <div class="co-form-row">
@@ -222,17 +204,18 @@
                         :style="{ color: item.type === 'order' ? 'var(--color-ocean-text)' : 'var(--color-success-700)' }"
                       />
                       {{ item.productName }}
-                    </span>
+
                     <span class="count-badge-subtle">数量: {{ item.quantity }}</span>
                     <span v-if="item.deductQuantity > 0" class="count-badge-subtle">抵扣: {{ item.deductQuantity }}</span>
                     <span v-if="item.country" class="count-badge-subtle"><i class="fas fa-globe" aria-hidden="true" /> {{ item.country }}</span>
                     <span v-if="item.note" class="count-badge-subtle">备注: {{ item.note }}</span>
+                </span>
                   </div>
                   <div class="co-staged-actions">
-                    <button class="co-btn-icon co-btn-warn" @click="openEditStaged(idx)" aria-label="编辑">
+                    <button class="co-btn-icon co-btn-warn" @click="openEditStaged(item.uid)" aria-label="编辑">
                       <i class="fas fa-edit"  aria-hidden="true" />
                     </button>
-                    <button class="co-btn-icon co-btn-danger" @click="removeStagedItem(idx)" aria-label="删除">
+                    <button class="co-btn-icon co-btn-danger" @click="removeStagedItem(item.uid)" aria-label="删除">
                       <i class="fas fa-trash"  aria-hidden="true" />
                     </button>
                   </div>
@@ -275,6 +258,7 @@
                 :class="['co-type-btn', recordType === opt.value && 'active']"
                 @click="recordType = opt.value; currentPage = 1; fetchOrders()"
               >{{ opt.label }}</button>
+
             </span>
           </div>
           <UiButton variant="outline" size="sm" @click="showFilter = !showFilter">
@@ -295,6 +279,10 @@
             <div v-if="recordType === 'order'" class="co-filter-field">
               <label class="co-label"><i class="fas fa-info-circle" aria-hidden="true"></i> 状态</label>
               <UiSelect v-model="filterStatus" placeholder="全部" :options="statusOptions" style="width: 100%" />
+            </div>
+            <div v-if="recordType === 'order'" class="co-filter-field">
+              <label class="co-label"><i class="fas fa-industry" aria-hidden="true"></i> 工厂</label>
+              <UiSelect v-model="filterFactory" placeholder="全部" :options="factoryOptions" :disabled="factoryDisabled" style="width: 100%" />
             </div>
             <div class="co-filter-field">
               <label class="co-label"><i class="fas fa-calendar-alt" aria-hidden="true"></i> 开始日期</label>
@@ -333,6 +321,8 @@
                   <th>{{ recordType === 'stockin' ? '备货时间' : '订单时间' }}</th>
                   <th>编号</th>
                   <th>客户</th>
+                  <th v-if="recordType === 'order'">工厂</th>
+                  <th v-if="recordType === 'order'">SKU 数量</th>
                   <th>产品</th>
                   <th>数量</th>
                   <th v-if="recordType === 'order'">抵扣备货</th>
@@ -350,16 +340,24 @@
                     <span class="co-cell-muted" style="margin-left: 4px;">{{ item.order_no }}</span>
                   </td>
                   <td><span class="co-cell-main">{{ item.customer }}</span></td>
+                  <td v-if="recordType === 'order'">
+                    <span class="co-cell-muted">{{ item.factories?.join(', ') || '-' }}</span>
+                  </td>
+                  <td v-if="recordType === 'order'">
+                    <span class="co-badge-tag" :class="(item.items?.length || 1) > 1 ? 'co-badge-success' : 'co-badge-muted'">
+                      {{ item.items?.length || 1 }}
+                    </span>
+                  </td>
                   <td style="text-align: center">
                     <span class="co-cell-main">{{ item.product?.name || '-' }}</span>
                     <span v-if="item.product?.barcode" class="co-cell-muted" style="display: block; font-size: 11px;">{{ item.product.barcode }}</span>
                   </td>
                   <td><strong>{{ item.quantity }}</strong></td>
                   <td v-if="recordType === 'order'">
-                    <span v-if="item.deduct_quantity > 0" class="co-badge-tag co-badge-success">抵扣: {{ item.deduct_quantity }}</span>
+                    <span v-if="(item.deduct_quantity ?? 0) > 0" class="co-badge-tag co-badge-success">抵扣: {{ item.deduct_quantity }}</span>
                   </td>
                   <td v-if="recordType === 'stockin'">
-                    <span v-if="item.deduct_quantity > 0" class="co-badge-tag co-badge-success">已抵扣: {{ item.deduct_quantity }}</span>
+                    <span v-if="(item.deduct_quantity ?? 0) > 0" class="co-badge-tag co-badge-success">已抵扣: {{ item.deduct_quantity }}</span>
                   </td>
                   <td v-if="recordType === 'order'">
                     <div class="co-action-group">
@@ -426,6 +424,38 @@
           </div>
         </div>
 
+        <!-- SKU 明细列表（多 SKU 时显示） -->
+        <div v-if="detailData.items?.length > 1" class="oe-section">
+          <div class="oe-section-title">
+            <i class="fas fa-list-ul" aria-hidden="true" /> 订单明细（{{ detailData.items.length }} 个 SKU）
+          </div>
+          <table class="oe-sku-table">
+            <thead>
+              <tr>
+                <th>产品名</th>
+                <th>数量</th>
+                <th>类型</th>
+                <th>国家</th>
+                <th>抵扣数量</th>
+                <th>备注</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(sku, idx) in detailData.items" :key="sku.id ?? idx">
+                <td class="oe-sku-product">
+                  {{ sku.product_name || '-' }}
+                  <span v-if="sku.product_barcode" class="oe-sku-barcode">{{ sku.product_barcode }}</span>
+                </td>
+                <td><strong>{{ sku.quantity }}</strong></td>
+                <td>{{ sku.order_type === 'custom' ? '定制' : '常规' }}</td>
+                <td>{{ sku.country || '-' }}</td>
+                <td>{{ sku.deduct_quantity || 0 }}</td>
+                <td class="oe-sku-note">{{ sku.note || '-' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
         <!-- 可编辑区域 -->
         <div class="oe-section oe-editable">
           <div class="oe-section-title"><i class="fas fa-pen" aria-hidden="true" /> 编辑内容</div>
@@ -463,18 +493,20 @@
         </div>
       </div>
       <template #footer>
-        <UiButton variant="outline" @click="detailOpen = false">取消</UiButton>
-        <UiButton variant="primary" @click="saveEditOrder">
-          <i class="fas fa-check" style="margin-right: 4px" aria-hidden="true" />保存
+        <UiButton variant="outline" :disabled="saving" @click="detailOpen = false">取消</UiButton>
+        <UiButton v-if="deductRetryPending" variant="warning" :disabled="saving" @click="retryDeductUpdate">
+          <i class="fas fa-redo" style="margin-right: 4px" aria-hidden="true" />重试抵扣更新
+        </UiButton>
+        <UiButton variant="primary" :disabled="saving" @click="saveEditOrder">
+          <i class="fas fa-check" style="margin-right: 4px" aria-hidden="true" />{{ saving ? '保存中…' : '保存' }}
         </UiButton>
       </template>
     </UiDialog>
 
     <!-- 编辑暂存弹窗 -->
     <UiDialog
-      :open="editStagedVisible"
+      v-model:open="editStagedVisible"
       :title="editStagedData?.type === 'order' ? '编辑暂存订单' : '编辑暂存备货'"
-      @update:open="editStagedVisible = $event"
     >
       <template v-if="editStagedData">
         <div class="co-form-group">
@@ -511,7 +543,7 @@
       </template>
     </UiDialog>
 
-    <UiDialog :open="countryDialogVisible" title="添加国家" max-width-class="max-w-[420px]" @update:open="countryDialogVisible = $event">
+    <UiDialog v-model:open="countryDialogVisible" title="添加国家" max-width-class="max-w-[420px]">
       <div class="co-form-group">
         <label class="co-label">国家名称</label>
         <UiInput v-model="newCountryName" placeholder="请输入国家名称" name="country" autocomplete="off" />
@@ -555,11 +587,8 @@ const {
   orderTypeOptions,
   canAdd,
   customerOptions,
-  suggestions,
-  showSuggestions,
-  onProductInput,
-  onProductFocus,
-  hideSuggestions,
+  countryStore,
+  searchProducts,
   selectProduct,
   countryDialogVisible,
   newCountryName,
@@ -577,6 +606,7 @@ const {
   filterCustomer,
   filterOrderType,
   filterStatus,
+  filterFactory,
   filterStart,
   filterEnd,
   currentPage,
@@ -587,6 +617,8 @@ const {
   recordType,
   recordTypeOptions,
   filterOrderTypeOptions,
+  factoryOptions,
+  factoryDisabled,
   statusOptions,
   getStatusClass,
   fetchOrders,
@@ -617,7 +649,11 @@ const {
   availableStockin,
   openDetail,
   saveEditOrder,
+  saving,
+  deductRetryPending,
+  retryDeductUpdate,
   confirmDialog,
+  genUid,
 } = useOrderActions(form, isOrder, fetchOrders)
 
 function addStaged() {
@@ -630,6 +666,7 @@ function addStaged() {
     return
   }
   stagedItems.value.push({
+    uid: genUid(),
     type: form.type,
     orderType: form.orderType,
     customer: form.customer,
@@ -1243,12 +1280,6 @@ watch(activeTab, (tab) => {
 }
 
 /* ===== Tab 切换栏 ===== */
-.co-header-right {
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
-  gap: 8px;
-}
 .co-tab-bar {
   display: inline-flex;
   gap: 4px;
@@ -1330,10 +1361,6 @@ watch(activeTab, (tab) => {
 .co-record-type-switch .co-type-btn.active {
   background: var(--color-primary-500, #3b82f6);
   color: #fff;
-}
-.co-type-badge.stockin {
-  background: #dbeafe;
-  color: #2563eb;
 }
 
 .co-filter-panel {
@@ -1674,6 +1701,57 @@ watch(activeTab, (tab) => {
   font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
   font-size: 13px;
   letter-spacing: 0.02em;
+}
+
+/* SKU 明细表格（多 SKU 订单详情） */
+.oe-sku-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.oe-sku-table thead th {
+  padding: 8px 12px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--color-surface, #f8fafc);
+  border-bottom: 1px solid var(--color-border-light, #e2e8f0);
+  white-space: nowrap;
+}
+.oe-sku-table tbody td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border-light, #e2e8f0);
+  color: var(--color-text);
+  vertical-align: middle;
+}
+.oe-sku-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.oe-sku-table tbody tr:hover {
+  background: var(--color-primary-50);
+}
+.oe-sku-product {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-weight: 500;
+}
+.oe-sku-barcode {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 10px;
+  color: var(--color-text-muted);
+  letter-spacing: 0.02em;
+}
+.oe-sku-note {
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  max-width: 160px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Editable section */

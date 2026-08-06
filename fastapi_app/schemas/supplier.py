@@ -16,7 +16,7 @@ class SupplierUpdate(BaseModel):
     phone: str | None = Field(default=None, max_length=20, description="电话")
     address: str | None = Field(default=None, max_length=200, description="地址")
     remark: str | None = Field(default=None, description="备注")
-    status: bool | None = Field(default=None, description="状态")
+    # status 字段已移除：状态切换由独立的 /toggle-status 端点处理
 
 
 class SupplierResponse(BaseModel):
@@ -35,7 +35,7 @@ class SupplierResponse(BaseModel):
 
 class SupplierListResponse(BaseModel):
     success: bool = True
-    data: list[SupplierResponse]
+    suppliers: list[SupplierResponse]
     total: int = 0
 
 

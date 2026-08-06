@@ -75,6 +75,11 @@ def register_websocket(app: FastAPI) -> None:
         pending_message = None
 
         cookie_token = websocket.cookies.get("access_token")
+        # region debug-point DBG-1 cookie-auth-trace
+        _dbg_cookie_len = len(cookie_token) if cookie_token else 0
+        logger.info("[DBG-1] WebSocket auth start: cookie_present=%s cookie_len=%s",
+                    bool(cookie_token), _dbg_cookie_len)
+        # endregion
         if cookie_token:
             try:
                 from fastapi_app.core.deps import _decode_jwt_token, is_token_revoked
@@ -88,9 +93,19 @@ def register_websocket(app: FastAPI) -> None:
                     uid = payload.get("sub")
                     if uid:
                         user_id = int(uid)
+                # region debug-point DBG-2 cookie-auth-success
+                logger.info("[DBG-2] Cookie auth path done: user_id_set=%s uid=%s",
+                            user_id is not None, uid)
+                # endregion
             except (ValueError, TypeError) as e:
-                logger.warning("WebSocket Cookie认证失败: %s", e)
+                logger.warning("WebSocket Cookie认证失败: %s | exc_type=%s", e, type(e).__name__)
+            except Exception as e:  # noqa: BLE001  # debug-only: 捕获 HTTPException 等未处理异常以确认假设 H4
+                logger.error("[DBG-2] Cookie auth UNCAUGHT exception: exc_type=%s msg=%s",
+                             type(e).__name__, e)
 
+        # region debug-point DBG-3 message-auth-entry
+        logger.info("[DBG-3] Entering message-auth path: user_id_set=%s", user_id is not None)
+        # endregion
         if not user_id:
             try:
                 initial_data = await asyncio.wait_for(
@@ -116,6 +131,10 @@ def register_websocket(app: FastAPI) -> None:
             except TimeoutError:
                 logger.warning("WebSocket等待认证消息超时")
 
+        # region debug-point DBG-4 final-auth-result
+        logger.info("[DBG-4] Auth complete: user_id_set=%s final_uid=%s",
+                    user_id is not None, user_id)
+        # endregion
         if not user_id:
             await websocket.close(code=4001, reason="未认证")
             return
@@ -142,16 +161,27 @@ def register_websocket(app: FastAPI) -> None:
         msg_count = 0
         msg_window_start = time.monotonic()
         last_verify_time = time.monotonic()
+        last_recv_time = time.monotonic()
         MSG_RATE_LIMIT = 30  # max messages per minute
         VERIFY_INTERVAL = 60  # verify user active every 60s
+        HEARTBEAT_INTERVAL = 30  # 服务端主动 ping 间隔（秒）
+        HEARTBEAT_TIMEOUT = 60  # 60s 无响应则断开（stale 连接清理）
 
         try:
             if pending_message and pending_message == "ping":
                 await websocket.send_text("pong")
 
             while True:
-                data = await websocket.receive_text()
+                try:
+                    data = await asyncio.wait_for(
+                        websocket.receive_text(), timeout=HEARTBEAT_TIMEOUT
+                    )
+                except TimeoutError:
+                    logger.info("WebSocket 心跳超时断开: user_id=%s", user_id)
+                    await websocket.close(code=4008, reason="心跳超时")
+                    break
                 now = time.monotonic()
+                last_recv_time = now
 
                 # Rate limiting
                 if now - msg_window_start > 60:

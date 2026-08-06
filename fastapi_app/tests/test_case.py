@@ -183,6 +183,10 @@ class TestCaseEndpoints:
         case = MagicMock()
         case.current_stock = 0
         mock_db.get = AsyncMock(return_value=case)
+        # 模拟引用检查返回 0（无关联入库/出库/流水记录）
+        mock_ref_result = MagicMock()
+        mock_ref_result.scalar.return_value = 0
+        mock_db.execute = AsyncMock(return_value=mock_ref_result)
 
         response = await client.delete("/api/v1/cases/product/1")
         assert response.status_code == 200

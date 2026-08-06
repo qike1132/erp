@@ -47,7 +47,23 @@ export interface UserInfo {
   id?: number
   username: string
   is_super: boolean
+  factory?: string | null
   permissions: string[]
+}
+
+/** 订单明细（SKU 粒度），对应后端 OrderItemSchema */
+export interface OrderSKU {
+  id: number
+  order_id: number
+  product_id: number
+  product_name: string | null
+  product_barcode: string | null
+  quantity: number
+  order_type: string
+  country: string | null
+  deduct_stock: boolean
+  deduct_quantity: number
+  note: string | null
 }
 
 export interface OrderItem {
@@ -65,6 +81,10 @@ export interface OrderItem {
   country?: string
   is_locked?: boolean
   locked_by_name?: string
+  /** 主订单下的 SKU 明细列表（多 SKU 聚合时 >1） */
+  items?: OrderSKU[]
+  /** 订单关联的工厂名列表（从 items 聚合，去重排序），如 ['东莞','湖北'] */
+  factories?: string[]
 }
 
 export interface StockInRecord {
@@ -101,10 +121,44 @@ export interface InventoryItem {
   product_id: number
   product_name: string
   barcode: string
+  product_barcode?: string
+  customer?: string
   current_stock: number
   total_stockin: number
   total_stockout: number
   total_deducted: number
+  stockin_qty?: number
+  has_stockin?: number
+  direct_stockout_qty?: number
+  regular_stockout_qty?: number
+  custom_stockout_qty?: number
+  regular_order_qty?: number
+  custom_order_qty?: number
+  has_order?: number
+  country_data?: string
+  order_quantity?: number
+  stockin_quantity?: number
+  total_stock?: number
+  available_stock?: number
+  country_orders?: Record<string, number>
+  available_stock_by_country?: Record<string, number>
+  _custom_details?: { country: string; qty: number }[]
+  _country_available?: { country: string; qty: number }[]
+}
+
+/** 后端 /stock/inventory 响应结构（InventoryResponse schema） */
+export interface InventoryResponse {
+  success: boolean
+  data: InventoryItem[]
+  total_order_quantity: number
+  total_stockin_quantity: number
+  total_stock: number
+  total_available_stock: number
+  all_countries: string[]
+  all_customers: string[]
+  total_items: number
+  page: number
+  per_page: number
 }
 
 export interface Customer {
@@ -126,24 +180,38 @@ export interface Supplier {
   phone?: string
   address?: string
   remark?: string
-  status?: string
+  status?: boolean
   created_at?: string
 }
 
 export interface PurchaseOrderItem {
   id: number
-  product_name: string
-  barcode: string
+  product_name?: string
+  barcode?: string
   material_name: string
+  /** 后端 _serialize_po_item 返回 material_code */
+  material_code?: string
+  /** 后端返回 category（material_category 为兼容字段） */
   material_category?: string
+  category?: string
   specification?: string
   quantity: number
-  unit: string
-  unit_price: number
-  total_price: number
-  supplier_name: string
-  customer_name: string
-  remark: string
+  unit?: string
+  unit_price?: number
+  total_price?: number
+  /** 后端 _serialize_po_item 返回 amount */
+  amount?: number
+  supplier_name?: string
+  customer_name?: string
+  remark?: string
+}
+
+export interface PurchaseOrderSkuItem {
+  product_name: string
+  barcode: string
+  quantity: number
+  order_type?: string
+  country?: string
 }
 
 export interface PurchaseOrder {
@@ -152,7 +220,9 @@ export interface PurchaseOrder {
   status: string
   customer_name: string
   supplier_name: string
+  /** 后端 get_purchase_order 返回 note（与 remark 同义） */
   remark?: string
+  note?: string
   create_time: string
   order_date: string
   total_quantity?: number
@@ -161,13 +231,30 @@ export interface PurchaseOrder {
   source_order_no?: string
   items?: PurchaseOrderItem[]
   materials?: PurchaseOrderItem[]
+  sku_items?: PurchaseOrderSkuItem[]
   product_name?: string
   quantity?: number
   completed_at?: string
+  supplier_id?: number
+  customer?: string
+}
+
+export interface UnprocessedOrderItem {
+  id: number
+  product_id: number
+  product_name: string
+  product_barcode?: string | null
+  quantity: number
+  order_type?: string
+  country?: string
+  deduct_quantity?: number
+  note?: string
+  has_bom?: boolean
 }
 
 export interface UnprocessedOrder {
   id: number
+  composite_id: string
   order_no: string
   customer: string
   product_name: string
@@ -178,6 +265,9 @@ export interface UnprocessedOrder {
   product?: Product
   has_bom?: boolean
   create_time?: string
+  record_type?: 'order' | 'stockin'
+  items?: UnprocessedOrderItem[]
+  sku_count?: number
 }
 
 export interface ApprovalItem {
@@ -203,6 +293,9 @@ export interface User {
   id: number
   username: string
   is_super?: boolean
+  status?: boolean
+  factory?: string | null
+  create_time?: string
   permissions: string[]
 }
 
@@ -210,6 +303,7 @@ export interface UserCreate {
   username: string
   password: string
   is_super?: boolean
+  factory?: string | null
 }
 
 export interface NavSection {
@@ -230,6 +324,12 @@ export interface PermissionItem {
   code: string
   name: string
   parent_id: number | null
+  icon?: string
+  url?: string
+  section?: string
+  section_name?: string
+  sort_order?: number
+  is_nav?: boolean
   children?: PermissionItem[]
 }
 
@@ -244,6 +344,7 @@ export interface Product {
   status?: boolean
   price?: number
   image?: string
+  factory?: string
 }
 
 export interface ProductionCraft {
@@ -344,6 +445,8 @@ export interface ShipmentInfo {
   order_quantity: number
   shipped_quantity: number
   available_quantity: number
+  regular_available?: number
+  custom_available?: number
 }
 
 export interface StagedStockout {
@@ -354,6 +457,8 @@ export interface StagedStockout {
   date: string
   quantity: number
   note?: string
+  order_type?: string
+  country?: string
 }
 
 export interface StockoutRecordGroup {
@@ -414,6 +519,7 @@ export interface BatchQueryItem {
   batch_no: string | null
   batch_completed_at: string | null
   is_locked: boolean | null
+  record_type?: string  // 'order' or 'stockin'
 }
 
 export interface BatchNoUpdatePayload {
@@ -468,24 +574,6 @@ export interface RegistrationItem {
   unit?: string
   remark?: string
   progress?: number
-}
-
-export interface OrderPreview {
-  id: number
-  purchase_order_no: string
-  supplier_name: string
-  customer_name: string
-  product_name: string
-  product_quantity: number
-  items: RegistrationItem[]
-  status: string
-  progress: number
-  total_ordered: number
-  total_received: number
-  update_time?: string
-  source_orders?: { id: number; order_no: string; customer_name?: string; product_name?: string; quantity?: number }[]
-  item_count?: number
-  order_date?: string
 }
 
 // ===== 备份系统 =====

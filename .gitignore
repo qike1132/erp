@@ -41,6 +41,10 @@ frontend-vite/android/keystore.properties
 frontend-vite/android/app/*.jks
 frontend-vite/android/app/*.keystore
 frontend-vite/android/signing-info.txt
+android-app/*.keystore
+android-app/keystore.properties
+android-app/signing-info.txt
+android-app/release.keystore
 
 # IDE
 .vscode/

@@ -10,6 +10,6 @@
     "python.testing.unittestEnabled": true,
     "diffEditor.renderSideBySide": false,
     "git.ignoreLimitWarning": true,
-    "clawMode.mode": "editor",
-    "workbench.activityBar.location": "default"
+    "workbench.activityBar.location": "default",
+    "clawMode.mode": "claw"
 }

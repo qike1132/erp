@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db_context
@@ -88,7 +89,7 @@ class BackupPolicyService:
             else:
                 # 返回默认策略
                 return self._get_default_policy()
-        except Exception as e:
+        except (OSError, ValueError) as e:
             logger.error(f"获取备份策略失败: {e}")
             return self._get_default_policy()
     
@@ -196,7 +197,7 @@ class BackupPolicyService:
             logger.info(f"备份策略已更新: {updated_policy.get('policy_name', 'unknown')}")
             return True, "备份策略更新成功"
             
-        except Exception as e:
+        except (OSError, ValueError, TypeError) as e:
             logger.error(f"更新备份策略失败: {e}")
             return False, f"更新备份策略失败: {str(e)}"
     
@@ -252,7 +253,7 @@ class BackupPolicyService:
             
             return True, "验证通过"
             
-        except Exception as e:
+        except (TypeError, ValueError, AttributeError) as e:
             return False, f"策略验证失败: {str(e)}"
     
     def _is_valid_cron(self, cron_expr: str) -> bool:
@@ -358,7 +359,7 @@ class BackupPolicyService:
             
             logger.info("配置已从策略更新")
             
-        except Exception as e:
+        except Exception as e:  # defensive: config update failure should not crash policy loading
             logger.error(f"从策略更新配置失败: {e}")
     
     async def apply_backup_policy(self) -> Dict[str, Any]:
@@ -406,7 +407,7 @@ class BackupPolicyService:
             logger.info(f"备份策略应用成功: {policy.get('policy_name')}")
             return result
             
-        except Exception as e:
+        except Exception as e:  # defensive: policy application must report failure gracefully
             logger.error(f"应用备份策略失败: {e}")
             
             # 发送告警
@@ -456,7 +457,7 @@ class BackupPolicyService:
                 try:
                     storage_location.mkdir(parents=True, exist_ok=True)
                     checks['backup_location']['message'] = f'备份目录已创建: {storage_location}'
-                except Exception as e:
+                except OSError as e:
                     checks['backup_location']['passed'] = False
                     checks['backup_location']['message'] = f'无法创建备份目录: {str(e)}'
             
@@ -490,7 +491,7 @@ class BackupPolicyService:
             
             return checks
             
-        except Exception as e:
+        except Exception as e:  # defensive: policy checks should return partial results on failure
             logger.error(f"策略检查失败: {e}")
             checks['policy_checks'] = {'passed': False, 'message': f'策略检查失败: {str(e)}'}
             return checks
@@ -533,14 +534,14 @@ class BackupPolicyService:
                             try:
                                 backup_file.unlink()
                                 deleted_files.append(record.filename)
-                            except Exception as e:
+                            except OSError as e:
                                 logger.error(f"删除备份文件失败 {record.filename}: {e}")
                 
                 # 删除数据库记录
                 if records_to_delete:
                     for record in records_to_delete:
                         await db.delete(record)
-                    await db.commit()
+                    await db.commit()  # independent-transaction
                 
                 result = {
                     'applied': True,
@@ -557,7 +558,7 @@ class BackupPolicyService:
                 
                 return result
                 
-        except Exception as e:
+        except (SQLAlchemyError, OSError) as e:
             logger.error(f"应用保留策略失败: {e}")
             return {
                 'applied': False,
@@ -621,7 +622,7 @@ class BackupPolicyService:
                 'sync_enabled': sync_to_secondary
             }
             
-        except Exception as e:
+        except Exception as e:  # defensive: storage policy is currently a no-op placeholder
             logger.error(f"应用存储策略失败: {e}")
             return {
                 'applied': False,
@@ -723,7 +724,7 @@ class BackupPolicyService:
             
             return compliance
             
-        except Exception as e:
+        except (SQLAlchemyError, OSError) as e:
             logger.error(f"获取策略合规性报告失败: {e}")
             return {
                 'error': str(e),

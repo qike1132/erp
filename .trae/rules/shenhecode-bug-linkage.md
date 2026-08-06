@@ -1,8 +1,7 @@
 ---
-alwaysApply: true
+alwaysApply: false
 description: 代码审核→BUG修复自动联动规则。当shenhecode.mdr审核发现P0/P1级问题时自动触发bug.mdr修复流程。
 ---
-
 # shenhecode.mdr + bug.mdr 自动联动规则
 
 > 审核发现BUG → 自动触发修复 → 修复后回流验证 → 直到零P0/P1

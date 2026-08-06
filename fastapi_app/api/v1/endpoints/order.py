@@ -1,7 +1,11 @@
 """
 订单管理 API 端点
 
-从 Flask order.py 迁移的 REST API。
+职责：
+- 提供订单的增删改查接口
+- 处理订单审批流程（创建、取消）
+- 管理订单批次号与抵扣备货数量
+- 协调缓存失效与领域事件发布
 """
 import logging
 
@@ -9,11 +13,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
+from fastapi_app.core.cache import CacheDomain
+from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
-from fastapi_app.core.exceptions import db_transaction
+from fastapi_app.core.domain_events import DomainEvent, DomainEventType
+from fastapi_app.core.domain_events import publish as publish_domain_event
+from fastapi_app.core.exceptions import NotFoundError, db_transaction
 from fastapi_app.schemas.order import (
     ApprovalCancelResponse,
     ApprovalListResponse,
@@ -41,14 +48,65 @@ async def list_orders(
     order_type: str | None = Query(None, description="订单类型筛选：regular/custom"),
     start_date: str | None = Query(None, description="开始日期筛选(YYYY-MM-DD)"),
     end_date: str | None = Query(None, description="结束日期筛选(YYYY-MM-DD)"),
+    factory: str | None = Query(None, description="工厂筛选：东莞/湖北"),
     db: AsyncSession = Depends(get_async_read_db),
-    _user: User = Depends(require_permission("order_manage")),
-):
-    """订单列表（支持分页和筛选，缓存由 service 层 @cache_result 管理）"""
+    user: User = Depends(require_permission("order_manage")),
+) -> OrderListResponse:
+    """获取订单列表（支持分页和多维度筛选）。
+
+    缓存由 service 层 @cache_result 管理，端点层不重复缓存。
+
+    工厂权限隔离：当 current_user.factory 非空且非超管时，强制按本厂过滤，
+    前端传入的 factory 参数被忽略；管理员（factory 为空或 is_super=true）可手动筛选。
+
+    Args:
+        page: 页码，从 1 开始。
+        per_page: 每页数量，1-500。
+        customer: 客户名筛选关键字。
+        product_id: 产品 ID 筛选。
+        status: 订单状态筛选。
+        order_type: 订单类型筛选（regular=常规/custom=定制）。
+        start_date: 开始日期（YYYY-MM-DD）。
+        end_date: 结束日期（YYYY-MM-DD）。
+        factory: 工厂筛选（东莞/湖北）。受权限隔离约束。
+        db: 异步数据库会话（只读副本）。
+        user: 当前登录用户，用于工厂权限隔离。
+
+    Returns:
+        OrderListResponse: 包含订单列表和分页信息的响应。
+    """
+    # 权限隔离：绑定工厂的非超管用户强制按本厂过滤，忽略前端传参
+    if user.factory and not user.is_super:
+        factory = user.factory
+
     result = await order_service.get_orders(db, page=page, per_page=per_page,
                                             customer=customer, product_id=product_id,
                                             status=status, order_type=order_type,
-                                            start_date=start_date, end_date=end_date)
+                                            start_date=start_date, end_date=end_date,
+                                            factory=factory)
+
+    return OrderListResponse(data=result['items'], total=result['total'],
+                             page=result['page'], per_page=result['per_page'])
+
+
+@router.get("/beile-list", response_model=OrderListResponse)
+async def list_beile_orders(
+    page: int = Query(1, ge=1, description="页码"),
+    per_page: int = Query(50, ge=1, le=500, description="每页数量"),
+    customer: str | None = Query(None, description="客户名筛选"),
+    status: str | None = Query(None, description="状态筛选"),
+    db: AsyncSession = Depends(get_async_read_db),
+    _user: User = Depends(require_permission("beile_order_view")),
+) -> OrderListResponse:
+    """获取湖北工厂订单+备货合并列表。
+
+    专供湖北订单页面使用，权限要求 beile_order_view（而非 order_manage）。
+    强制 factory='湖北'，忽略前端传参，确保数据隔离。
+    同时包含订单（Order）和备货（StockIn）记录，通过 record_type 字段区分。
+    """
+    result = await order_service.get_beile_orders_with_stockins(
+        db, page=page, per_page=per_page, customer=customer, factory='湖北',
+    )
 
     return OrderListResponse(data=result['items'], total=result['total'],
                              page=result['page'], per_page=result['per_page'])
@@ -58,8 +116,16 @@ async def list_orders(
 async def my_approvals(
     db: AsyncSession = Depends(get_async_read_db),
     user: User = Depends(require_permission("order_manage")),
-):
-    """查看我的审批请求"""
+) -> ApprovalListResponse:
+    """查看当前用户提交的审批请求列表。
+
+    Args:
+        db: 异步数据库会话（只读副本）。
+        user: 当前登录用户，用于筛选其提交的审批。
+
+    Returns:
+        ApprovalListResponse: 包含审批列表和总数的响应。
+    """
     approvals = await order_service.get_my_approvals(db, user)
     return ApprovalListResponse(data=approvals, total=len(approvals))
 
@@ -69,10 +135,23 @@ async def get_order(
     order_id: int,
     db: AsyncSession = Depends(get_async_read_db),
     _user: User = Depends(require_permission("order_manage")),
-):
-    """获取单个订单详情"""
+) -> OrderDetailResponse:
+    """获取单个订单详情。
+
+    Args:
+        order_id: 订单 ID。
+        db: 异步数据库会话（只读副本）。
+        _user: 当前登录用户（仅需通过权限校验）。
+
+    Returns:
+        OrderDetailResponse: 订单详情。
+
+    Raises:
+        HTTPException: 订单不存在时抛出 404。
+    """
     result = await order_service.get_order_by_id(db, order_id)
     if not result:
+        logger.info("订单详情查询失败：order_id=%s 不存在", order_id)
         raise HTTPException(status_code=404, detail="订单不存在")
     return result
 
@@ -82,8 +161,19 @@ async def create_order(
     data: OrderCreate,
     db: AsyncSession = Depends(get_async_db),
     user: User = Depends(require_permission("order_manage")),
-):
-    """创建订单"""
+) -> OrderActionResponse:
+    """创建订单。
+
+    事务提交后再失效缓存，避免并发请求用旧数据回填缓存。
+
+    Args:
+        data: 订单创建参数（产品、数量、客户、类型等）。
+        db: 异步数据库会话（读写主库）。
+        user: 当前登录用户，作为订单创建人。
+
+    Returns:
+        OrderActionResponse: 包含成功标志和提示消息的响应。
+    """
     async with db_transaction(db):
         await order_service.create_order(
             db, product_id=data.product_id, quantity=data.quantity,
@@ -91,8 +181,7 @@ async def create_order(
             order_type=data.order_type, country=data.country
         )
     # 事务提交后再失效缓存，避免并发请求用旧数据回填缓存
-    from fastapi_app.core.cache import invalidate_dashboard_cache
-    await invalidate_dashboard_cache()
+    await cache_mgr.invalidate_dashboard()
     return OrderActionResponse(success=True, message="订单添加成功！")
 
 
@@ -102,12 +191,30 @@ async def edit_order(
     data: OrderUpdate,
     db: AsyncSession = Depends(get_async_db),
     user: User = Depends(require_permission("order_manage")),
-):
-    """编辑订单（管理员直接编辑，非管理员提交审批）"""
+) -> OrderActionResponse:
+    """编辑订单（管理员直接编辑，非管理员提交审批）。
+
+    未提供的字段沿用订单原值，实现部分更新语义。
+
+    Args:
+        order_id: 订单 ID。
+        data: 订单更新参数（仅包含需要修改的字段）。
+        db: 异步数据库会话（读写主库）。
+        user: 当前登录用户，用于权限判断和审批流程。
+
+    Returns:
+        OrderActionResponse: 包含成功标志和提示消息的响应。
+
+    Raises:
+        HTTPException: 订单不存在时抛出 404。
+    """
     order = await db.get(Order, order_id)
     if not order:
+        logger.info("编辑订单失败：order_id=%s 不存在", order_id)
         raise HTTPException(status_code=404, detail="订单不存在")
 
+    # 未传入的字段沿用原值，实现部分更新
+    # TODO(multi-sku-order): 读取 order.quantity/order_type/country 在多 SKU 下为首 item 兼容值，待后续 spec 改造为按 OrderItem 维度。
     quantity = data.quantity if data.quantity is not None else order.quantity
     customer = data.customer if data.customer is not None else order.customer
     note = data.note if data.note is not None else (order.note or '')
@@ -120,8 +227,7 @@ async def edit_order(
             customer=customer, note=note, current_user=user,
             order_type=order_type, country=country
         )
-    from fastapi_app.core.cache import invalidate_dashboard_cache
-    await invalidate_dashboard_cache()
+    await cache_mgr.invalidate_dashboard()
     return OrderActionResponse(success=result['success'], message=result['message'])
 
 
@@ -130,24 +236,54 @@ async def delete_order(
     order_id: int,
     db: AsyncSession = Depends(get_async_db),
     user: User = Depends(require_permission("order_manage")),
-):
-    """删除订单（管理员直接删除，非管理员提交审批）"""
+) -> OrderActionResponse:
+    """删除订单（管理员直接删除，非管理员提交审批）。
+
+    事务模式：手动 commit + catch IntegrityError。
+    原因：db_transaction 会将 IntegrityError 转为 HTTP 500，无法对外层提供 409 关联数据提示。
+
+    Args:
+        order_id: 订单 ID。
+        db: 异步数据库会话（读写主库）。
+        user: 当前登录用户，用于权限判断。
+
+    Returns:
+        OrderActionResponse: 包含成功标志和提示消息的响应。
+
+    Raises:
+        HTTPException: 关联数据冲突返回 409；权限不足返回 403；
+            参数错误返回 400；数据库异常返回 500。
+    """
     try:
-        async with db_transaction(db):
-            result = await order_service.delete_order(db, order_id, user)
-        from fastapi_app.core.cache import invalidate_dashboard_cache
-        await invalidate_dashboard_cache()
-        return OrderActionResponse(success=result['success'], message=result['message'])
+        result = await order_service.delete_order(db, order_id, user)
+        await db.commit()
     except IntegrityError as e:
         await db.rollback()
         logger.warning("删除订单完整性约束冲突: %s", e)
         raise HTTPException(status_code=409, detail='订单存在关联数据，无法删除') from e
     except PermissionDeniedError as e:
-        raise HTTPException(status_code=403, detail=settings.sanitize_business_error(e)) from e
-    except (SQLAlchemyError, OSError) as e:
         await db.rollback()
-        logger.error("删除订单失败: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail='删除订单失败，请稍后重试') from e
+        raise HTTPException(status_code=403, detail=settings.sanitize_business_error(e)) from e
+    except (ValueError, NotFoundError) as e:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except SQLAlchemyError as e:
+        await db.rollback()
+        logger.error("删除订单数据库异常: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail='数据库操作失败') from e
+
+    await cache_mgr.invalidate_dashboard()
+    # 领域事件：ORDER_DELETED 在事务提交后发布（订阅者使用独立 session，需可见已提交变更）
+    if result.get('success'):
+        try:
+            await publish_domain_event(DomainEvent(
+                event_type=DomainEventType.ORDER_DELETED,
+                domain='order',
+                payload={'order_id': order_id},
+            ))
+        except Exception:  # defensive: 领域事件发布失败不影响删除操作结果
+            logger.warning("ORDER_DELETED 领域事件发布失败", exc_info=True)
+    return OrderActionResponse(success=result['success'], message=result['message'])
 
 
 @router.post("/cancel-approval/{approval_id}", response_model=ApprovalCancelResponse)
@@ -155,14 +291,27 @@ async def cancel_approval(
     approval_id: int,
     db: AsyncSession = Depends(get_async_db),
     user: User = Depends(require_permission("order_manage")),
-):
-    """取消审批请求（仅审批发起者或超级用户可取消）"""
+) -> ApprovalCancelResponse:
+    """取消审批请求（仅审批发起者或超级用户可取消）。
+
+    Args:
+        approval_id: 审批记录 ID。
+        db: 异步数据库会话（读写主库）。
+        user: 当前登录用户，用于权限校验。
+
+    Returns:
+        ApprovalCancelResponse: 包含成功标志和提示消息的响应。
+
+    Raises:
+        HTTPException: 权限不足时抛出 403。
+    """
     try:
         async with db_transaction(db):
             await order_service.cancel_approval(db, approval_id, user)
     except PermissionDeniedError as e:
         raise HTTPException(status_code=403, detail=settings.sanitize_business_error(e)) from e
-    await invalidate_related_caches(CacheDomain.ORDER_AND_INVENTORY)
+    await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER_AND_INVENTORY)
+    await cache_mgr.invalidate_dashboard()
     return ApprovalCancelResponse(success=True, message="审批请求已取消")
 
 
@@ -172,14 +321,25 @@ async def update_batch_no(
     batch_no: str = Query("", max_length=100, description="批次号"),
     db: AsyncSession = Depends(get_async_db),
     user: User = Depends(require_permission("order_manage")),
-):
-    """更新订单批次号"""
+) -> OrderActionResponse:
+    """更新订单批次号。
+
+    Args:
+        order_id: 订单 ID。
+        batch_no: 批次号，最长 100 字符。
+        db: 异步数据库会话（读写主库）。
+        user: 当前登录用户，作为操作人。
+
+    Returns:
+        OrderActionResponse: 包含成功标志和提示消息的响应。
+    """
     async with db_transaction(db):
         await order_batch_service.update_batch_no(
             db, order_id=order_id, batch_no=batch_no,
             sync_same_batch=False, user=user,
         )
-    await invalidate_related_caches(CacheDomain.ORDER)
+    await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER)
+    await cache_mgr.invalidate_dashboard()
     return {"success": True, "message": "批次号已更新"}
 
 
@@ -189,8 +349,21 @@ async def update_deduct_quantity(
     deduct_quantity: int = Query(..., ge=0, description="新的抵扣备货数量"),
     db: AsyncSession = Depends(get_async_db),
     user: User = Depends(require_permission("order_manage")),
-):
-    """修改订单的抵扣备货数量"""
+) -> OrderActionResponse:
+    """修改订单的抵扣备货数量。
+
+    Args:
+        order_id: 订单 ID。
+        deduct_quantity: 新的抵扣备货数量，必须 >= 0。
+        db: 异步数据库会话（读写主库）。
+        user: 当前登录用户，用于权限校验。
+
+    Returns:
+        OrderActionResponse: 包含成功标志和提示消息的响应。
+
+    Raises:
+        HTTPException: 参数校验失败时抛出 400。
+    """
     try:
         async with db_transaction(db):
             result = await order_service.update_deduct_quantity(
@@ -199,6 +372,5 @@ async def update_deduct_quantity(
             )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=settings.sanitize_business_error(e)) from e
-    from fastapi_app.core.cache import invalidate_dashboard_cache
-    await invalidate_dashboard_cache()
+    await cache_mgr.invalidate_dashboard()
     return OrderActionResponse(success=True, message=result['message'])

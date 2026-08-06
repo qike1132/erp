@@ -73,7 +73,7 @@ def _push_to_dead_letter(entry: dict):
                         json.dumps(entry, ensure_ascii=False, default=str),
                     )
                 )
-    except Exception as e:
+    except Exception as e:  # defensive: dead-letter persistence failure must not mask original task failure
         logger.warning('死信队列写入失败: %s', e)
 
 
@@ -81,7 +81,7 @@ def _send_failure_alert(task_name: str, task_id: str, exc):
     try:
         from fastapi_app.core.metrics import TASK_FAILURE_TOTAL
         TASK_FAILURE_TOTAL.labels(task=task_name).inc()
-    except Exception:
+    except Exception:  # defensive: metrics emission failure must not interrupt failure alerting
         pass
     logger.critical(
         'ALERT: Celery任务失败需人工介入 task=%s id=%s exc=%s',
@@ -93,5 +93,5 @@ def _safe_repr(obj, max_len: int = 500) -> str:
     try:
         s = repr(obj)
         return s[:max_len] + '...' if len(s) > max_len else s
-    except Exception:
+    except Exception:  # defensive: repr() failure fallback for logging
         return '<unrepresentable>'

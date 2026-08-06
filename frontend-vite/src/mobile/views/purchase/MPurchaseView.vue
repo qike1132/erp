@@ -135,10 +135,10 @@ function showOrderDetail(order: any) {
 }
 
 async function handleOneClick() {
-  const ids = (unprocessed.value?.items || []).map((o: any) => o.id)
+  const ids = (unprocessed.value?.items || []).map((o: any) => `order:${o.id}`)
   if (!ids.length) return
   try {
-    await purchaseApi.oneClickGenerate({ order_ids: ids })
+    await purchaseApi.oneClickGenerate({ composite_ids: ids })
     loadUnprocessed()
     refetchOrders()
   } catch { /* toast handled by request.ts */ }
@@ -157,6 +157,7 @@ function statusLabel(s: string) {
 
 refetchOrders()
 loadUnprocessed()
+loadCompleted()
 </script>
 
 <style scoped>

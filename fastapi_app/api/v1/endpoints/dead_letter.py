@@ -3,14 +3,19 @@
 
 提供失败任务查看、重试、清除等操作
 """
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from fastapi_app.core.deps import require_permission
 from fastapi_app.core.logger import logger
+from fastapi_app.core.redis_wrapper import get_client, safe_llen, safe_lrange, safe_lrem
 from fastapi_app.shared_models import User
 
 router = APIRouter()
+
+DLQ_KEY = 'celery:dead_letter'
 
 
 class DeadLetterListResponse(BaseModel):
@@ -37,6 +42,13 @@ class DeadLetterStatsResponse(BaseModel):
     queue_key: str = "celery:dead_letter"
 
 
+def _require_redis():
+    client = get_client()
+    if not client:
+        raise HTTPException(503, 'Redis不可用')
+    return client
+
+
 @router.get('/dead-letter', response_model=DeadLetterListResponse, summary='查看死信队列中的失败任务')
 async def list_dead_letter(
     limit: int = Query(50, ge=1, le=200, description='返回条数'),
@@ -44,14 +56,9 @@ async def list_dead_letter(
     _user: User = Depends(require_permission('admin')),
 ):
     try:
-        from utils.redis_cache import redis_cache
-        if not redis_cache.redis_client:
-            raise HTTPException(503, 'Redis不可用')
-        total = await redis_cache.redis_client.llen('celery:dead_letter')
-        entries_raw = await redis_cache.redis_client.lrange(
-            'celery:dead_letter', offset, offset + limit - 1,
-        )
-        import json
+        _require_redis()
+        total = await safe_llen(DLQ_KEY, context="死信队列")
+        entries_raw = await safe_lrange(DLQ_KEY, offset, offset + limit - 1, context="死信队列")
         entries = [json.loads(e) for e in entries_raw]
         return {'total': total, 'offset': offset, 'limit': limit, 'entries': entries}
     except HTTPException:
@@ -64,11 +71,8 @@ async def list_dead_letter(
 @router.post('/dead-letter/{task_id}/retry', response_model=DeadLetterRetryResponse, summary='重试死信队列中的失败任务')
 async def retry_dead_letter_task(task_id: str, _user: User = Depends(require_permission('admin'))):
     try:
-        from utils.redis_cache import redis_cache
-        if not redis_cache.redis_client:
-            raise HTTPException(503, 'Redis不可用')
-        import json
-        entries_raw = await redis_cache.redis_client.lrange('celery:dead_letter', 0, -1)
+        _require_redis()
+        entries_raw = await safe_lrange(DLQ_KEY, 0, -1, context="死信队列")
         target_idx = None
         target_entry = None
         for i, raw in enumerate(entries_raw):
@@ -87,7 +91,7 @@ async def retry_dead_letter_task(task_id: str, _user: User = Depends(require_per
         if not task_func:
             raise HTTPException(400, f'任务 {task_name} 未注册')
         new_result = task_func.apply_async(args=args, kwargs=kwargs)
-        await redis_cache.redis_client.lrem('celery:dead_letter', 1, entries_raw[target_idx])
+        await safe_lrem(DLQ_KEY, 1, entries_raw[target_idx], context="死信队列")
         logger.info('重试死信任务: %s -> new_id=%s', task_id, new_result.id)
         return {
             'status': 'retried',
@@ -105,16 +109,13 @@ async def retry_dead_letter_task(task_id: str, _user: User = Depends(require_per
 @router.delete('/dead-letter/{task_id}', response_model=DeadLetterRemoveResponse, summary='从死信队列中移除失败任务')
 async def remove_dead_letter_task(task_id: str, _user: User = Depends(require_permission('admin'))):
     try:
-        from utils.redis_cache import redis_cache
-        if not redis_cache.redis_client:
-            raise HTTPException(503, 'Redis不可用')
-        import json
-        entries_raw = await redis_cache.redis_client.lrange('celery:dead_letter', 0, -1)
+        _require_redis()
+        entries_raw = await safe_lrange(DLQ_KEY, 0, -1, context="死信队列")
         removed = False
         for raw in entries_raw:
             entry = json.loads(raw)
             if entry.get('task_id') == task_id:
-                await redis_cache.redis_client.lrem('celery:dead_letter', 1, raw)
+                await safe_lrem(DLQ_KEY, 1, raw, context="死信队列")
                 removed = True
                 break
         if not removed:
@@ -130,11 +131,9 @@ async def remove_dead_letter_task(task_id: str, _user: User = Depends(require_pe
 @router.get('/dead-letter/stats', response_model=DeadLetterStatsResponse, summary='死信队列统计')
 async def dead_letter_stats(_user: User = Depends(require_permission('admin'))):
     try:
-        from utils.redis_cache import redis_cache
-        if not redis_cache.redis_client:
-            raise HTTPException(503, 'Redis不可用')
-        total = await redis_cache.redis_client.llen('celery:dead_letter')
-        return {'total_failed': total, 'queue_key': 'celery:dead_letter'}
+        _require_redis()
+        total = await safe_llen(DLQ_KEY, context="死信队列")
+        return {'total_failed': total, 'queue_key': DLQ_KEY}
     except HTTPException:
         raise
     except Exception as e:

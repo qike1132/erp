@@ -5,11 +5,8 @@
 1. JWT Bearer Token（移动端/API客户端）
 2. Cookie-based JWT（浏览器Web端）— 登录后设置 httpOnly cookie
 """
-import asyncio
 import logging
-import os
-import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, Field
@@ -17,16 +14,23 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from starlette.concurrency import run_in_threadpool
 
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
-from fastapi_app.core.deps import create_access_token, get_current_user_id
+from fastapi_app.core.deps import create_access_token, create_refresh_token, get_current_user_id
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.shared_models import User
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# 登录限流常量
+LOGIN_BURST_LIMIT = 5          # 1 分钟内最大尝试次数
+LOGIN_BURST_WINDOW = 60        # 突发窗口（秒）
+LOGIN_ATTEMPT_LIMIT = 10       # 5 分钟内最大尝试次数
+LOGIN_ATTEMPT_WINDOW = 300     # 持续窗口（秒）
 
 
 # ==================== Schemas ====================
@@ -55,6 +59,7 @@ class UserInfoResponse(BaseModel):
     user_id: int
     username: str
     is_super: bool
+    factory: str | None = None
     permissions: list[str]
 
 
@@ -73,6 +78,7 @@ class FileUploadResponse(BaseModel):
     success: bool = True
     url: str = ""
     filename: str = ""
+    file_id: int | None = None
 
 
 # ==================== 登录状态检查 ====================
@@ -114,6 +120,7 @@ async def get_current_user_info(
         user_id=user.id,
         username=user.username,
         is_super=user.is_super,
+        factory=user.factory,
         permissions=[p.code for p in user.permissions] if user.permissions else [],
     )
 
@@ -165,7 +172,7 @@ async def api_login(
     """AJAX登录API（JWT + Cookie双模式）
 
     返回JWT Token（移动端通过 Authorization: Bearer <token> 使用），
-    同时设置 httpOnly cookie（浏览器自动携带，替代 Flask session）。
+    同时设置 httpOnly cookie（浏览器自动携带）。
     """
     from fastapi_app.core.security import check_needs_rehash, hash_password, needs_migration, verify_password
     from slowapi.util import get_remote_address
@@ -173,19 +180,36 @@ async def api_login(
     key = get_remote_address(request)
 
     _login_rate_limit_key = f"login_attempt:{key}"
+    _login_burst_key = f"login_burst:{key}"
     try:
-        from utils.redis_cache import redis_cache
-        _redis = redis_cache.redis_client
+        from fastapi_app.core.redis_wrapper import get_client
+        _redis = get_client()
         if _redis:
+            # 分层限流：1 分钟内最多 5 次（快速连发保护）
+            _burst = await _redis.incr(_login_burst_key)
+            if _burst == 1:
+                await _redis.expire(_login_burst_key, LOGIN_BURST_WINDOW)
+            if _burst > LOGIN_BURST_LIMIT:
+                logger.warning("[Login] 登录尝试过快，1分钟内超过%d次: IP=%s", LOGIN_BURST_LIMIT, key)
+                raise HTTPException(
+                    status_code=429,
+                    detail="登录尝试过于频繁，请1分钟后重试",
+                    headers={"Retry-After": str(LOGIN_BURST_WINDOW)},
+                )
+            # 5 分钟内最多 10 次（持续暴力破解保护）
             _attempts = await _redis.incr(_login_rate_limit_key)
             if _attempts == 1:
-                await _redis.expire(_login_rate_limit_key, 300)
-            if _attempts > 10:
+                await _redis.expire(_login_rate_limit_key, LOGIN_ATTEMPT_WINDOW)
+            if _attempts > LOGIN_ATTEMPT_LIMIT:
                 logger.warning("[Login] 登录尝试过多，暂时锁定: IP=%s", key)
-                raise HTTPException(status_code=429, detail="登录尝试过多，请5分钟后重试")
+                raise HTTPException(
+                    status_code=429,
+                    detail="登录尝试过多，请5分钟后重试",
+                    headers={"Retry-After": str(LOGIN_ATTEMPT_WINDOW)},
+                )
     except HTTPException:
         raise
-    except Exception:
+    except Exception:  # defensive: Redis限流不可用时降级允许登录
         logger.warning("[Login] Redis 限流不可用，降级为允许登录: IP=%s", key)
 
     username = data.username.strip()
@@ -207,23 +231,23 @@ async def api_login(
     user = result.scalar_one_or_none()
 
     from fastapi_app.core.security import verify_password as _vp
-    dummy_hash = "$argon2id$v=19$m=47104,t=2,p=2$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    dummy_hash = "$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
     if not user:
-        _vp("timing_sidechannel_dummy", dummy_hash)
+        await run_in_threadpool(_vp, "timing_sidechannel_dummy", dummy_hash)
         logger.warning("[Login] 登录失败: IP=%s", key)
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     if not user.status:
-        _vp("timing_sidechannel_dummy", dummy_hash)
+        await run_in_threadpool(_vp, "timing_sidechannel_dummy", dummy_hash)
         logger.warning("[Login] 登录失败: IP=%s", key)
         raise HTTPException(status_code=401, detail="用户名或密码错误")
-    if not verify_password(password, user.password):
+    if not await run_in_threadpool(verify_password, password, user.password):
         logger.warning("[Login] 登录失败: IP=%s", key)
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
     if needs_migration(user.password):
         try:
-            new_hash = hash_password(password)
+            new_hash = await run_in_threadpool(hash_password, password)
             user.password = new_hash
             await db.commit()
             logger.info(f"[Login] 密码哈希已迁移到 Argon2id: user_id={user.id}")
@@ -232,7 +256,7 @@ async def api_login(
             await db.rollback()
     elif check_needs_rehash(user.password):
         try:
-            new_hash = hash_password(password)
+            new_hash = await run_in_threadpool(hash_password, password)
             user.password = new_hash
             await db.commit()
             logger.info(f"[Login] 密码哈希参数已升级: user_id={user.id}")
@@ -252,6 +276,8 @@ async def api_login(
         token_data,
         expires_delta=timedelta(seconds=token_max_age),
     )
+    refresh_token = create_refresh_token(token_data)
+    refresh_max_age = settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400
 
     # 设置 httpOnly cookie（浏览器Web端自动携带）
     _is_https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
@@ -269,6 +295,15 @@ async def api_login(
         key="access_token",
         value=access_token,
         max_age=token_max_age,
+        httponly=True,
+        samesite=_samesite,
+        secure=_secure,
+        path="/",
+    )
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        max_age=refresh_max_age,
         httponly=True,
         samesite=_samesite,
         secure=_secure,
@@ -300,6 +335,17 @@ async def api_logout(request: Request):
             exp = payload.get('exp')
             if jti and exp:
                 await revoke_token(jti, exp)
+        # 撤销刷新令牌
+        refresh_cookie = request.cookies.get('refresh_token')
+        if refresh_cookie:
+            try:
+                r_payload = _decode_jwt_token(refresh_cookie)
+                r_jti = r_payload.get('jti')
+                r_exp = r_payload.get('exp')
+                if r_jti and r_exp:
+                    await revoke_token(r_jti, r_exp)
+            except Exception as e:
+                logger.warning("[Logout] 撤销刷新令牌失败（不影响登出）: %s", e)
         # Bearer token 也尝试撤销
         auth_header = request.headers.get('authorization', '')
         if auth_header.startswith('Bearer '):
@@ -310,8 +356,8 @@ async def api_logout(request: Request):
                 exp = payload.get('exp')
                 if jti and exp:
                     await revoke_token(jti, exp)
-    except Exception:
-        pass  # token 撤销失败不影响登出流程
+    except Exception as e:  # defensive: token撤销失败不影响登出流程
+        logger.warning("[Logout] token 撤销流程异常（不影响登出）: %s", e)
 
     # 浏览器表单POST提交时，返回重定向而非JSON
     accept = request.headers.get("accept", "")
@@ -320,6 +366,7 @@ async def api_logout(request: Request):
         from starlette.responses import RedirectResponse
         resp = RedirectResponse(url="/login", status_code=303)
         resp.delete_cookie(key="access_token", path="/")
+        resp.delete_cookie(key="refresh_token", path="/")
         return resp
     # API 调用：返回 JSON
     import json
@@ -330,7 +377,81 @@ async def api_logout(request: Request):
         media_type="application/json",
     )
     resp.delete_cookie(key="access_token", path="/")
+    resp.delete_cookie(key="refresh_token", path="/")
     return resp
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str | None = None
+
+
+@router.post("/refresh")
+async def api_refresh_token(
+    request: Request,
+    response: Response,
+    data: RefreshRequest | None = None,
+    db: AsyncSession = Depends(get_async_db),
+):
+    """刷新访问令牌 — 使用刷新令牌获取新的 access token
+
+    刷新令牌来源优先级：
+    1. 请求体中的 refresh_token（移动端/Capacitor）
+    2. httpOnly cookie 中的 refresh_token（浏览器Web端）
+    """
+    from fastapi_app.core.deps import _decode_jwt_token, is_token_revoked
+
+    refresh_token = None
+    if data and data.refresh_token:
+        refresh_token = data.refresh_token
+    else:
+        refresh_token = request.cookies.get("refresh_token")
+
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="缺少刷新令牌")
+
+    try:
+        payload = _decode_jwt_token(refresh_token)
+    except HTTPException:
+        raise HTTPException(status_code=401, detail="刷新令牌无效或已过期")
+
+    if payload.get("type") != "refresh":
+        raise HTTPException(status_code=401, detail="令牌类型错误")
+
+    jti = payload.get("jti")
+    if await is_token_revoked(jti):
+        raise HTTPException(status_code=401, detail="刷新令牌已失效")
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="刷新令牌无效")
+
+    result = await db.execute(select(User.id, User.status, User.username).where(User.id == int(user_id)))
+    user_row = result.first()
+    if not user_row or not user_row.status:
+        raise HTTPException(status_code=401, detail="用户不存在或已被禁用")
+
+    token_data = {"sub": str(user_id), "username": user_row.username}
+    token_max_age = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    access_token = create_access_token(
+        token_data,
+        expires_delta=timedelta(seconds=token_max_age),
+    )
+
+    _is_https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
+    _samesite = "none" if _is_https else "lax"
+    _secure = _is_https
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        max_age=token_max_age,
+        httponly=True,
+        samesite=_samesite,
+        secure=_secure,
+        path="/",
+    )
+
+    logger.info("[Refresh] 令牌刷新成功: user_id=%s", user_id)
+    return {"success": True, "access_token": access_token, "token_type": "bearer"}
 
 
 # ==================== 文件上传 ====================
@@ -360,6 +481,7 @@ def _validate_image_content(content: bytes, ext: str) -> bool:
 async def upload_file(
     file: UploadFile = File(...),
     user_id: int = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """图片上传API（限制5MB，需登录）"""
     if not file.filename:
@@ -378,21 +500,13 @@ async def upload_file(
     if not _validate_image_content(content, ext):
         raise HTTPException(status_code=400, detail="文件内容与扩展名不匹配，可能不是有效的图片文件")
 
-    # 生成唯一文件名
-    new_filename = f"{datetime.now().strftime('%Y%m%d')}_{uuid.uuid4().hex}.{ext}"
-
-    # 确保上传目录存在（与 main.py 中 StaticFiles 挂载路径一致：项目根目录/static/uploads）
-    upload_folder = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))), "static", "uploads")
-    os.makedirs(upload_folder, exist_ok=True)
-
-    file_path = os.path.join(upload_folder, new_filename)
-
-    def _write_file():
-        with open(file_path, "wb") as f:
-            f.write(content)
-
-    await asyncio.to_thread(_write_file)
-
-    file_url = f"/static/uploads/{new_filename}"
-    return {"success": True, "url": file_url, "filename": new_filename}
+    # 使用对象存储服务保存文件，数据库存储元数据
+    from fastapi_app.services.storage_service import save_upload
+    result = await save_upload(
+        content=content,
+        original_filename=file.filename,
+        db=db,
+        uploader_id=user_id,
+    )
+    return {"success": True, "url": result["url"], "filename": result["storage_key"], "file_id": result["id"]}
 

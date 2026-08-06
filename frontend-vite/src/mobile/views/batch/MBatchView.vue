@@ -59,7 +59,7 @@ async function handleSearch() {
   loading.value = true
   try {
     const res = await batchApi.list({ keyword: keyword.value, status: statusFilter.value === 'all' ? '' : statusFilter.value, page: 1, per_page: 50 })
-    groups.value = res?.groups || res?.items || []
+    groups.value = res?.data || []
   } finally { loading.value = false }
 }
 
