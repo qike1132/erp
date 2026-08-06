@@ -9,7 +9,7 @@
 - 提供生产报表 Excel 导出接口
 - 提供产品信息查询接口（用于生产记录录入时获取 SKU 详情）
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from sqlalchemy.exc import DisconnectionError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +18,7 @@ from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.core.exceptions import db_transaction
+from fastapi_app.core.limiter import limiter
 from fastapi_app.schemas.daily_production import (
     DailySummaryResponse,
     MonthlySummaryResponse,
@@ -210,7 +211,9 @@ async def monthly_summary(
 
 
 @router.get('/export')
+@limiter.limit("3/minute")
 async def export_records(
+    request: Request,
     start_date: str = Query('', description='起始日期 (YYYY-MM-DD)'),
     end_date: str = Query('', description='结束日期 (YYYY-MM-DD)'),
     department: str = Query('', description='部门筛选 (filling/handcraft/packaging)'),

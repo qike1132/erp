@@ -7,12 +7,13 @@
 
 依赖服务：report_service
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_read_db
 from fastapi_app.core.deps import require_permission
+from fastapi_app.core.limiter import limiter
 from fastapi_app.schemas.report import ReportResponse
 from fastapi_app.services import report_service
 from fastapi_app.shared_models import User
@@ -150,7 +151,9 @@ async def deduction_logs(
 
 
 @router.get('/export')
+@limiter.limit("3/minute")
 async def export_report(
+    request: Request,
     report_type: str = Query(..., description='报表类型: order/stockin/stockout/deduction'),
     customer: str = Query('', description='客户筛选'),
     product: str = Query('', description='产品筛选'),

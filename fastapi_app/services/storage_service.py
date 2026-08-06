@@ -190,13 +190,22 @@ async def save_upload(
     key = _generate_key(original_filename, prefix=prefix)
     content_type = _guess_content_type(original_filename)
 
-    url = await storage.upload(key, content, content_type=content_type)
+    # S3 熔断时降级到本地存储，保证业务可用性
+    try:
+        url = await storage.upload(key, content, content_type=content_type)
+    except CircuitBreakerOpenError as e:
+        logger.warning("S3 存储熔断中，降级到本地存储: %s", e)
+        local_backend = LocalStorageBackend()
+        url = await local_backend.upload(key, content, content_type=content_type)
+        storage_type_override = "local"
+    else:
+        storage_type_override = settings.STORAGE_TYPE.lower()
 
     record = FileRecord(
         original_filename=original_filename,
         storage_key=key,
-        bucket=settings.S3_BUCKET if settings.STORAGE_TYPE.lower() == "s3" else "local",
-        storage_type=settings.STORAGE_TYPE.lower(),
+        bucket=settings.S3_BUCKET if storage_type_override == "s3" else "local",
+        storage_type=storage_type_override,
         size=len(content),
         content_type=content_type,
         uploader_id=uploader_id,
@@ -231,7 +240,10 @@ async def delete_upload(record_id: int, db) -> bool:
         return False
 
     storage = get_storage()
-    await storage.delete(record.storage_key)
+    try:
+        await storage.delete(record.storage_key)
+    except CircuitBreakerOpenError as e:
+        logger.warning("S3 存储熔断中，跳过对象删除（元数据仍会删除）: %s", e)
     await db.delete(record)
     await db.flush()
     logger.info("文件已删除", file_id=record.id, key=record.storage_key)

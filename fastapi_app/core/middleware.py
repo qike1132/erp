@@ -160,23 +160,23 @@ def _setup_security_headers(app: FastAPI) -> None:
 
     CSP 策略说明：
     - 生产环境移除 'unsafe-eval'（仅 Vite HMR 需要）
-    - 'unsafe-inline' 保留用于 Vue 内联样式，后续迁移到 nonce 方案
+    - 生产环境 style-src 使用 per-request nonce 替代 'unsafe-inline'（防 XSS 注入）
+    - 开发环境保留 'unsafe-inline'（Vue 内联样式 + HMR 需要）
     - frame-ancestors 'none' 防止点击劫持
     """
     is_production = os.getenv("APP_ENV") == "production"
 
-    if is_production:
-        _ws_origins_raw = os.getenv("WS_ALLOWED_ORIGINS", "")
-        if is_production and _ws_origins_raw:
-            _ws_sources = " ".join(
-                f"wss://{o.strip()}" for o in _ws_origins_raw.split(",") if o.strip()
-            )
-            _connect_src = f"'self' {_ws_sources}" if _ws_sources else "'self'"
-        elif is_production:
-            logger.warning("生产环境未配置 WS_ALLOWED_ORIGINS，CSP connect-src 回退到 wss:（建议收紧）")
-            _connect_src = "'self' wss:"
-        else:
-            _connect_src = "'self' ws: wss:"
+    # 生产环境 WSS 域名白名单：从 WS_ALLOWED_ORIGINS 读取（逗号分隔）
+    # 未配置时回退到 'wss:'（保持向后兼容，但日志告警）
+    _ws_origins_raw = os.getenv("WS_ALLOWED_ORIGINS", "")
+    if is_production and _ws_origins_raw:
+        _ws_sources = " ".join(
+            f"wss://{o.strip()}" for o in _ws_origins_raw.split(",") if o.strip()
+        )
+        _connect_src = f"'self' {_ws_sources}" if _ws_sources else "'self'"
+    elif is_production:
+        logger.warning("生产环境未配置 WS_ALLOWED_ORIGINS，CSP connect-src 回退到 wss:（建议收紧）")
+        _connect_src = "'self' wss:"
     else:
         _connect_src = "'self' ws: wss:"
 

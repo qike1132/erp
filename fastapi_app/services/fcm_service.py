@@ -16,6 +16,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.circuit_breaker import CircuitBreakerOpenError, get_breaker
+
 logger = logging.getLogger(__name__)
 
 _fcm_initialized = False
@@ -80,8 +82,17 @@ async def send_to_device(token: str, title: str, body: str, data: dict[str, Any]
             data={k: str(v) for k, v in (data or {}).items()},
             token=token,
         )
-        await asyncio.to_thread(_send_sync, message)
+
+        # 通过熔断器保护 FCM 调用，失败计数达到阈值后快速失败
+        breaker = get_breaker("fcm_push")
+
+        async def _do_send() -> None:
+            await asyncio.to_thread(_send_sync, message)
+
+        await breaker.call(_do_send)
         logger.debug("FCM 推送已发送到设备: %s", token[:20])
+    except CircuitBreakerOpenError as e:
+        logger.warning("FCM 设备推送被熔断器拦截: %s", e)
     except Exception as e:  # defensive: FCM单设备推送失败不影响业务流程
         logger.warning("FCM 设备推送失败: %s", e)
 
@@ -98,8 +109,17 @@ async def send_to_topic(topic: str, title: str, body: str, data: dict[str, Any] 
             data={k: str(v) for k, v in (data or {}).items()},
             topic=topic,
         )
-        await asyncio.to_thread(_send_sync, message)
+
+        # 通过熔断器保护 FCM 调用，失败计数达到阈值后快速失败
+        breaker = get_breaker("fcm_push")
+
+        async def _do_send() -> None:
+            await asyncio.to_thread(_send_sync, message)
+
+        await breaker.call(_do_send)
         logger.debug("FCM 推送已发送到主题: %s", topic)
+    except CircuitBreakerOpenError as e:
+        logger.warning("FCM 主题推送被熔断器拦截: %s", e)
     except Exception as e:  # defensive: FCM主题推送失败不影响业务流程
         logger.warning("FCM 主题推送失败: %s", e)
 
@@ -130,6 +150,7 @@ async def send_to_user(
 
         from firebase_admin import messaging
 
+        breaker = get_breaker("fcm_push")
         for i in range(0, len(tokens), FCM_MULTICAST_LIMIT):
             batch = tokens[i:i + FCM_MULTICAST_LIMIT]
             msg = messaging.MulticastMessage(
@@ -137,9 +158,15 @@ async def send_to_user(
                 data={k: str(v) for k, v in (data or {}).items()},
                 tokens=batch,
             )
-            response = await asyncio.to_thread(_send_multicast_sync, msg)
+
+            async def _do_send_multicast(_msg=msg) -> Any:
+                return await asyncio.to_thread(_send_multicast_sync, _msg)
+
+            response = await breaker.call(_do_send_multicast)
             logger.debug("FCM 用户推送批次 %d: 成功=%d, 失败=%d",
                          i // FCM_MULTICAST_LIMIT, response.success_count, response.failure_count)
+    except CircuitBreakerOpenError as e:
+        logger.warning("FCM 用户推送被熔断器拦截(user_id=%s): %s", user_id, e)
     except Exception as e:  # defensive: FCM按用户推送失败不影响业务流程
         logger.warning("FCM 用户推送失败(user_id=%s): %s", user_id, e)
 
@@ -166,6 +193,7 @@ async def send_to_all_users(
 
         from firebase_admin import messaging
 
+        breaker = get_breaker("fcm_push")
         total_success = 0
         total_failure = 0
         for i in range(0, len(tokens), FCM_MULTICAST_LIMIT):
@@ -175,9 +203,15 @@ async def send_to_all_users(
                 data={k: str(v) for k, v in (data or {}).items()},
                 tokens=batch,
             )
-            response = await asyncio.to_thread(_send_multicast_sync, msg)
+
+            async def _do_send_multicast(_msg=msg) -> Any:
+                return await asyncio.to_thread(_send_multicast_sync, _msg)
+
+            response = await breaker.call(_do_send_multicast)
             total_success += response.success_count
             total_failure += response.failure_count
         logger.debug("FCM 批量推送完成: 成功=%d, 失败=%d", total_success, total_failure)
+    except CircuitBreakerOpenError as e:
+        logger.warning("FCM 全量推送被熔断器拦截: %s", e)
     except Exception as e:  # defensive: FCM全量推送失败不影响业务流程
         logger.warning("FCM 全量推送失败: %s", e)

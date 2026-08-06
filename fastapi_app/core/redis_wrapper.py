@@ -256,3 +256,91 @@ def _ctx(context: str, key: str) -> str:
     if context:
         return f"[{context}] key={key}"
     return f"key={key}"
+
+
+# ==================== Redis Sentinel 支持 ====================
+
+def create_sentinel_client(
+    sentinel_hosts: str,
+    master_name: str = "mymaster",
+    password: str = "",
+    db: int = 0,
+    socket_timeout: float = 0.5,
+) -> Any:
+    """创建 Redis Sentinel 客户端
+
+    Args:
+        sentinel_hosts: Sentinel 节点列表，逗号分隔 (host1:port1,host2:port2)
+        master_name: Sentinel master 名称
+        password: Redis 认证密码
+        db: Redis 数据库编号
+        socket_timeout: 连接超时
+
+    Returns:
+        Redis 客户端实例（指向 master）
+
+    用法:
+        # 在 config.py 或启动脚本中
+        if settings.REDIS_SENTINEL_HOSTS:
+            client = create_sentinel_client(
+                settings.REDIS_SENTINEL_HOSTS,
+                password=settings.REDIS_PASSWORD,
+            )
+    """
+    try:
+        from redis.sentinel import Sentinel
+        import redis.asyncio as aioredis
+
+        sentinel_nodes = [
+            (h.strip(), int(p.strip()))
+            for h, p in [
+                addr.split(":") for addr in sentinel_hosts.split(",")
+            ]
+        ]
+
+        sentinel = Sentinel(sentinel_nodes, socket_timeout=socket_timeout)
+
+        # 获取 master 地址
+        master_host, master_port = sentinel.discover_master(master_name)
+
+        # 创建异步客户端连接 master
+        client = aioredis.Redis(
+            host=master_host,
+            port=master_port,
+            password=password if password else None,
+            db=db,
+            socket_timeout=socket_timeout,
+            decode_responses=True,
+        )
+
+        logger.info(
+            "Redis Sentinel 客户端已创建: master=%s:%d (sentinels=%d)",
+            master_host, master_port, len(sentinel_nodes)
+        )
+        return client
+
+    except ImportError:
+        logger.warning("redis.sentinel 不可用，请安装 redis[hiredis]")
+        return None
+    except Exception as e:
+        logger.error("Redis Sentinel 客户端创建失败: %s", e)
+        return None
+
+
+async def get_sentinel_aware_client() -> Any:
+    """获取 Sentinel 感知的 Redis 客户端
+
+    优先使用 Sentinel 模式（如果配置了 REDIS_SENTINEL_HOSTS），
+    否则回退到普通客户端。
+    """
+    from fastapi_app.core.config import settings
+
+    if settings.REDIS_SENTINEL_HOSTS:
+        return create_sentinel_client(
+            sentinel_hosts=settings.REDIS_SENTINEL_HOSTS,
+            password=settings.REDIS_PASSWORD,
+            db=settings.REDIS_DB,
+        )
+
+    # 回退到普通客户端
+    return get_client()

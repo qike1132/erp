@@ -20,6 +20,7 @@ from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import create_access_token, create_refresh_token, get_current_user_id
 from fastapi_app.core.exceptions import db_transaction
+from fastapi_app.core.limiter import limiter
 from fastapi_app.shared_models import User
 
 logger = logging.getLogger(__name__)
@@ -163,6 +164,7 @@ async def log_frontend_error(
 # ==================== 登录 ====================
 
 @router.post("/login", response_model=LoginResponse)
+@limiter.limit("5/minute")
 async def api_login(
     request: Request,
     response: Response,

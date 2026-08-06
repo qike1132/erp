@@ -10,7 +10,7 @@ import io
 import logging
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import and_, func, select
@@ -20,6 +20,7 @@ from fastapi_app.core.cache import cache_result
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import get_current_user_id, require_permission
 from fastapi_app.core.exceptions import db_transaction
+from fastapi_app.core.limiter import limiter
 from fastapi_app.schemas.stock import (
     InventoryResponse,
     StockActionResponse,
@@ -348,7 +349,9 @@ def _build_inventory_excel(inventory_data: list, result: dict) -> tuple[bytes, s
 
 
 @router.get('/export-inventory')
+@limiter.limit("3/minute")
 async def export_inventory(
+    request: Request,
     customer: str = Query('', description='客户名称筛选'),
     product: str = Query('', description='产品名称筛选'),
     db: AsyncSession = Depends(get_async_read_db),

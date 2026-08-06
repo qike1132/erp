@@ -235,20 +235,10 @@ def _rate_limit_key(request: Request) -> str:
     return get_remote_address(request)
 
 
-with warnings.catch_warnings():
-    warnings.filterwarnings("ignore", message="Config file .* not found")
-    # Redis 分布式限流：解决多 worker 下 slowapi 内存计数漂移问题
-    # 已登录用户按 user_id 限流，避免内网多用户共享出口 IP 导致误限流
-    # Redis 不可用时自动回退到进程内存限流（此时多 worker 间不再共享计数）
-    limiter = Limiter(
-        key_func=_rate_limit_key,
-        default_limits=["60/minute"],
-        enabled=True,
-        config_filename=os.devnull,
-        storage_uri=settings.REDIS_CACHE_URL or "memory://",
-        in_memory_fallback_enabled=True,
-        in_memory_fallback=["60/minute"],
-    )
+# limiter 单例由 fastapi_app.core.limiter 提供（避免循环导入）。
+# 此处覆盖 key_func：已登录用户按 user_id 限流，避免内网多用户共享出口 IP 导致误限流。
+# 装饰器在请求时才调用 key_func，故覆盖后所有端点立即生效。
+limiter.key_func = _rate_limit_key
 app.state.limiter = limiter
 
 
