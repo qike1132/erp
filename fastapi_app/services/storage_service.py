@@ -126,10 +126,15 @@ class S3StorageBackend(StorageBackend):
         return await breaker.call(_do_upload)
 
     async def delete(self, key: str) -> None:
-        def _delete() -> None:
-            self._client.delete_object(Bucket=self.bucket, Key=key)
+        """删除 S3 文件，通过熔断器保护"""
+        breaker = get_breaker("s3_delete")
 
-        await asyncio.to_thread(_delete)
+        async def _do_delete() -> None:
+            def _delete() -> None:
+                self._client.delete_object(Bucket=self.bucket, Key=key)
+            await asyncio.to_thread(_delete)
+
+        await breaker.call(_do_delete)
 
     def get_url(self, key: str) -> str:
         if self.public_url:
