@@ -1,255 +1,287 @@
+<script setup lang="ts">
+import { ref, computed, watch } from 'vue'
+import UiDialog from '@/components/ui/UiDialog.vue'
+import UiButton from '@/components/ui/UiButton.vue'
+import type { BatchPartCreateRequest } from '@/api/patternRoom'
+
+/** 批量新增部位表单行 */
+interface PartFormRow {
+  part_name: string
+  supplier_id: number | null
+  supplier_name: string
+  fabric_name: string
+  fabric_color_no: string
+}
+
+const props = defineProps<{
+  open: boolean
+  submitting: boolean
+}>()
+
+const emit = defineEmits<{
+  'update:open': [value: boolean]
+  'submit-batch': [data: BatchPartCreateRequest]
+}>()
+
+const rows = ref<PartFormRow[]>([createEmptyRow()])
+
+function createEmptyRow(): PartFormRow {
+  return {
+    part_name: '',
+    supplier_id: null,
+    supplier_name: '',
+    fabric_name: '',
+    fabric_color_no: '',
+  }
+}
+
+function resetRows() {
+  rows.value = [createEmptyRow()]
+}
+
+watch(
+  () => props.open,
+  (visible) => {
+    if (visible) resetRows()
+  },
+)
+
+function addRow() {
+  rows.value.push(createEmptyRow())
+}
+
+function removeRow(index: number) {
+  rows.value.splice(index, 1)
+  if (rows.value.length === 0) {
+    rows.value.push(createEmptyRow())
+  }
+}
+
+const filledCount = computed(() => rows.value.filter((r) => r.part_name.trim().length > 0).length)
+
+const canSubmit = computed(() => filledCount.value > 0 && !props.submitting)
+
+function handleSubmit() {
+  const items = rows.value
+    .filter((r) => r.part_name.trim().length > 0)
+    .map((r) => ({
+      part_name: r.part_name.trim(),
+      supplier_id: r.supplier_id,
+      supplier_name: r.supplier_name.trim() || null,
+      fabric_name: r.fabric_name.trim() || null,
+      fabric_color_no: r.fabric_color_no.trim() || null,
+    }))
+
+  emit('submit-batch', { items })
+}
+
+function closeDialog() {
+  emit('update:open', false)
+}
+</script>
+
 <template>
   <UiDialog
     :open="open"
-    :title="isEditing ? '编辑部位' : '新增部位'"
-    max-width="560px"
+    title="新增部位"
+    max-width-class="max-w-[800px]"
     @update:open="$emit('update:open', $event)"
   >
-    <div class="pf-body">
-      <div class="pf-grid">
-        <!-- 部位名称 -->
-        <div class="pf-field pf-full">
-          <label class="pf-label">部位名称 <span class="pf-required">*</span></label>
-          <input
-            v-model="form.part_name"
-            class="pf-input"
-            placeholder="如：领口、袖口、前幅"
-          />
-        </div>
+    <div class="batch-part-form">
+      <div class="batch-part-form__head" aria-hidden="true">
+        <span class="batch-part-form__cell batch-part-form__cell--name">
+          部位名称 <span class="required-mark">*</span>
+        </span>
+        <span class="batch-part-form__cell batch-part-form__cell--supplier">供应商</span>
+        <span class="batch-part-form__cell batch-part-form__cell--fabric">布料名称</span>
+        <span class="batch-part-form__cell batch-part-form__cell--color">色号</span>
+        <span class="batch-part-form__cell batch-part-form__cell--action" />
+      </div>
 
-        <!-- 排序 -->
-        <div class="pf-field">
-          <label class="pf-label">排序号</label>
-          <input
-            v-model.number="form.sort_order"
-            type="number"
-            class="pf-input"
-            placeholder="0"
-          />
-        </div>
+      <div class="batch-part-form__body">
+        <div
+          v-for="(row, index) in rows"
+          :key="index"
+          class="batch-part-form__row"
+        >
+          <div class="batch-part-form__cell batch-part-form__cell--name">
+            <input
+              v-model="row.part_name"
+              class="batch-part-input"
+              placeholder="如 身体，头部"
+              type="text"
+            />
+          </div>
 
-        <!-- 布料名称 -->
-        <div class="pf-field pf-full">
-          <label class="pf-label">布料名称</label>
-          <input
-            v-model="form.fabric_name"
-            class="pf-input"
-            placeholder="如：纯棉平纹布"
-          />
-        </div>
+          <div class="batch-part-form__cell batch-part-form__cell--supplier">
+            <input
+              v-model="row.supplier_name"
+              class="batch-part-input"
+              placeholder="供应商"
+              type="text"
+            />
+          </div>
 
-        <!-- 布料规格 -->
-        <div class="pf-field pf-full">
-          <label class="pf-label">布料规格</label>
-          <input
-            v-model="form.fabric_spec"
-            class="pf-input"
-            placeholder="如：40S*40S/133*72"
-          />
-        </div>
+          <div class="batch-part-form__cell batch-part-form__cell--fabric">
+            <input
+              v-model="row.fabric_name"
+              class="batch-part-input"
+              placeholder="布料名称"
+              type="text"
+            />
+          </div>
 
-        <!-- 供应商 -->
-        <div class="pf-field pf-full">
-          <label class="pf-label">供应商</label>
-          <select v-model="form.supplier_id" class="pf-select">
-            <option :value="null">-- 请选择 --</option>
-            <option v-for="s in suppliers" :key="s.id" :value="s.id">{{ s.name }}</option>
-          </select>
-        </div>
+          <div class="batch-part-form__cell batch-part-form__cell--color">
+            <input
+              v-model="row.fabric_color_no"
+              class="batch-part-input"
+              placeholder="色号"
+              type="text"
+            />
+          </div>
 
-        <!-- 联系人 -->
-        <div class="pf-field">
-          <label class="pf-label">联系人</label>
-          <input v-model="form.contact_person" class="pf-input" placeholder="联系人姓名" />
-        </div>
-
-        <!-- 联系电话 -->
-        <div class="pf-field">
-          <label class="pf-label">联系电话</label>
-          <input v-model="form.contact_phone" class="pf-input" placeholder="手机或座机" />
-        </div>
-
-        <!-- 单价 -->
-        <div class="pf-field">
-          <label class="pf-label">单价（元）</label>
-          <input v-model.number="form.unit_price" type="number" step="0.01" class="pf-input" placeholder="0.00" />
-        </div>
-
-        <!-- 交货天数 -->
-        <div class="pf-field">
-          <label class="pf-label">交货天数</label>
-          <input v-model.number="form.delivery_days" type="number" class="pf-input" placeholder="0" />
-        </div>
-
-        <!-- 备注 -->
-        <div class="pf-field pf-full">
-          <label class="pf-label">备注</label>
-          <textarea v-model="form.remark" class="pf-textarea" rows="2" placeholder="其他说明..." />
+          <div class="batch-part-form__cell batch-part-form__cell--action">
+            <button
+              v-if="rows.length > 1"
+              type="button"
+              class="row-remove-btn"
+              title="删除此行"
+              @click="removeRow(index)"
+            >
+              <i class="fas fa-times" aria-hidden="true" />
+            </button>
+          </div>
         </div>
       </div>
+
+      <button type="button" class="add-row-btn" @click="addRow">
+        <i class="fas fa-plus" aria-hidden="true" />
+        添加行
+      </button>
     </div>
+
     <template #footer>
-      <div class="pf-footer">
-        <UiButton variant="ghost" @click="$emit('update:open', false)">取消</UiButton>
-        <UiButton variant="primary" :loading="submitting" :disabled="!form.part_name.trim()" @click="handleSubmit">
-          {{ isEditing ? '保存' : '创建' }}
+      <div class="batch-part-form__footer">
+        <UiButton variant="ghost" @click="closeDialog">取消</UiButton>
+        <UiButton
+          variant="primary"
+          :disabled="!canSubmit"
+          @click="handleSubmit"
+        >
+          提交（{{ filledCount }} 个）
         </UiButton>
       </div>
     </template>
   </UiDialog>
 </template>
 
-<script setup lang="ts">
-import { reactive, computed, watch } from 'vue'
-import UiDialog from '@/components/ui/UiDialog.vue'
-import UiButton from '@/components/ui/UiButton.vue'
-import type { Supplier } from '@/types'
-import type { PartDetail, PartCreateRequest, PartUpdateRequest } from '@/api/patternRoom'
-
-const props = defineProps<{
-  open: boolean
-  part: PartDetail | null
-  suppliers: Supplier[]
-  submitting: boolean
-}>()
-
-const emit = defineEmits<{
-  'update:open': [value: boolean]
-  'submit-create': [data: PartCreateRequest]
-  'submit-update': [data: PartUpdateRequest]
-}>()
-
-const isEditing = computed(() => props.part != null)
-
-const form = reactive({
-  part_name: '',
-  sort_order: 0,
-  fabric_name: '',
-  fabric_spec: '',
-  supplier_id: null as number | null,
-  contact_person: '',
-  contact_phone: '',
-  unit_price: null as number | null,
-  delivery_days: null as number | null,
-  remark: '',
-})
-
-watch(() => props.open, (val) => {
-  if (val) {
-    if (props.part) {
-      form.part_name = props.part.part_name ?? ''
-      form.sort_order = props.part.sort_order ?? 0
-      form.fabric_name = props.part.fabric_name ?? ''
-      form.fabric_spec = props.part.fabric_spec ?? ''
-      form.supplier_id = props.part.supplier_id ?? null
-      form.contact_person = props.part.contact_person ?? ''
-      form.contact_phone = props.part.contact_phone ?? ''
-      form.unit_price = props.part.unit_price ?? null
-      form.delivery_days = props.part.delivery_days ?? null
-      form.remark = props.part.remark ?? ''
-    } else {
-      resetForm()
-    }
-  }
-})
-
-function resetForm() {
-  form.part_name = ''
-  form.sort_order = 0
-  form.fabric_name = ''
-  form.fabric_spec = ''
-  form.supplier_id = null
-  form.contact_person = ''
-  form.contact_phone = ''
-  form.unit_price = null
-  form.delivery_days = null
-  form.remark = ''
-}
-
-function handleSubmit() {
-  if (isEditing.value) {
-    const data: PartUpdateRequest = {
-      part_name: form.part_name,
-      sort_order: form.sort_order,
-      fabric_name: form.fabric_name || null,
-      fabric_spec: form.fabric_spec || null,
-      supplier_id: form.supplier_id,
-      contact_person: form.contact_person || null,
-      contact_phone: form.contact_phone || null,
-      unit_price: form.unit_price,
-      delivery_days: form.delivery_days,
-      remark: form.remark || null,
-      version: props.part!.version,
-    }
-    emit('submit-update', data)
-  } else {
-    const data: PartCreateRequest = {
-      part_name: form.part_name,
-      sort_order: form.sort_order,
-      fabric_name: form.fabric_name || null,
-      fabric_spec: form.fabric_spec || null,
-      supplier_id: form.supplier_id,
-      contact_person: form.contact_person || null,
-      contact_phone: form.contact_phone || null,
-      unit_price: form.unit_price,
-      delivery_days: form.delivery_days,
-      remark: form.remark || null,
-    }
-    emit('submit-create', data)
-  }
-}
-</script>
-
 <style scoped>
-.pf-body {
-  padding: 16px 0;
-  max-height: 60vh;
-  overflow-y: auto;
-}
-.pf-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
-}
-.pf-field {
+.batch-part-form {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 12px;
 }
-.pf-full {
-  grid-column: 1 / -1;
+
+.batch-part-form__head,
+.batch-part-form__row {
+  display: grid;
+  grid-template-columns: 1.5fr 1.5fr 1.25fr 1fr 36px;
+  gap: 12px;
+  align-items: center;
 }
-.pf-label {
+
+.batch-part-form__head {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border-light);
   font-size: 13px;
   font-weight: 600;
   color: var(--color-text-primary);
 }
-.pf-required {
-  color: #ef4444;
+
+.batch-part-form__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 48vh;
+  overflow-y: auto;
+  padding-right: 4px;
 }
-.pf-input, .pf-select, .pf-textarea {
+
+.batch-part-form__cell {
+  min-width: 0;
+}
+
+.batch-part-form__cell--action {
+  display: flex;
+  justify-content: center;
+}
+
+.required-mark {
+  color: var(--color-danger-500, #ef4444);
+}
+
+.batch-part-input {
   width: 100%;
-  padding: 8px 12px;
+  padding: 6px 10px;
   border: 1px solid var(--color-border-light);
-  border-radius: 8px;
+  border-radius: 6px;
   font-size: 13px;
   font-family: inherit;
-  background: var(--color-surface);
+  background: #fff;
   color: var(--color-text-primary);
   outline: none;
   transition: border-color 0.2s;
   box-sizing: border-box;
 }
-.pf-input:focus, .pf-select:focus, .pf-textarea:focus {
+
+.batch-part-input:focus {
   border-color: var(--color-primary-500);
 }
-.pf-textarea {
-  resize: vertical;
+
+.row-remove-btn {
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-muted, #94a3b8);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  transition: all 0.15s;
 }
-.pf-footer {
+
+.row-remove-btn:hover {
+  background: var(--color-danger-50);
+  color: var(--color-danger-500);
+}
+
+.add-row-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-primary-600);
+  border: 1px dashed var(--color-primary-300);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.add-row-btn:hover {
+  background: var(--color-primary-50);
+  border-color: var(--color-primary-500);
+}
+
+.batch-part-form__footer {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  padding-top: 8px;
 }
 </style>

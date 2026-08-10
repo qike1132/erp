@@ -19,11 +19,13 @@ from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.logger import logger
 from fastapi_app.schemas.customer_sampling import (
     ActionResponse,
+    BatchPartCreateRequest,
     ChangeLogListResponse,
     GroupedListResponse,
     PartCreateRequest,
     PartListResponse,
     PartUpdateRequest,
+    PartsByVersionResponse,
     ProjectCreateRequest,
     ProjectDetailResponse,
     ProjectListResponse,
@@ -231,6 +233,7 @@ async def api_create_part(
                 sort_order=data.sort_order,
                 fabric_name=data.fabric_name,
                 fabric_spec=data.fabric_spec,
+                fabric_color_no=data.fabric_color_no,
                 supplier_id=data.supplier_id,
                 contact_person=data.contact_person,
                 contact_phone=data.contact_phone,
@@ -247,7 +250,51 @@ async def api_create_part(
         raise HTTPException(status_code=500, detail='创建失败') from e
 
 
-# ==================== 10. 编辑部位布料 ====================
+# ==================== 9b. 批量新增部位 ====================
+
+@router.post('/projects/{project_id}/parts/batch', response_model=ActionResponse)
+async def api_batch_create_parts(
+    project_id: int,
+    data: BatchPartCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission(PERM)),
+) -> dict[str, Any]:
+    """批量新增部位（一次事务中创建多条）"""
+    try:
+        items = [item.model_dump() for item in data.items]
+        async with db_transaction(db):
+            result = await svc.batch_create_parts(db, project_id, items=items, user_id=current_user.id)
+        return {'success': True, 'message': f"已创建 {result['count']} 个部位", **result}
+    except HTTPException:
+        raise
+    except SQLAlchemyError as e:
+        logger.exception('批量新增部位失败')
+        raise HTTPException(status_code=500, detail='批量创建失败') from e
+
+
+# ==================== 9c. 复制部位版本 ====================
+
+@router.post('/parts/{part_id}/copy-version', response_model=ActionResponse)
+async def api_copy_part_version(
+    part_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission(PERM)),
+) -> dict[str, Any]:
+    """复制部位版本 — 在该部位名称下新增一个版本号 +1 的空白记录"""
+    try:
+        async with db_transaction(db):
+            result = await svc.copy_part_version(db, part_id, user_id=current_user.id)
+        return {
+            'success': True,
+            'message': f"已创建版本 {result['version_no']}",
+            **result,
+        }
+    except HTTPException:
+        raise
+    except SQLAlchemyError as e:
+        logger.exception('复制部位版本失败')
+        raise HTTPException(status_code=500, detail='复制失败') from e
+
 
 @router.put('/parts/{part_id}', response_model=ActionResponse)
 async def api_update_part(
@@ -266,7 +313,9 @@ async def api_update_part(
                 sort_order=data.sort_order,
                 fabric_name=data.fabric_name,
                 fabric_spec=data.fabric_spec,
+                fabric_color_no=data.fabric_color_no,
                 supplier_id=data.supplier_id,
+                supplier_name=data.supplier_name,
                 contact_person=data.contact_person,
                 contact_phone=data.contact_phone,
                 unit_price=data.unit_price,
@@ -377,4 +426,19 @@ async def api_list_change_logs(
         return await svc.list_change_logs(db, project_id, page=page, per_page=per_page)
     except SQLAlchemyError as e:
         logger.exception('查询变更日志失败')
+        raise HTTPException(status_code=500, detail='查询失败') from e
+
+
+# ==================== 16. 部位跨版本汇总 ====================
+
+@router.get('/projects/{project_id}/parts-by-version', response_model=PartsByVersionResponse)
+async def api_get_parts_by_version(
+    project_id: int,
+    db: AsyncSession = Depends(get_read_db),
+) -> dict[str, Any]:
+    """获取项目所有版本的部位布料数据（跨版本二维表数据源）"""
+    try:
+        return await svc.get_parts_by_version(db, project_id)
+    except SQLAlchemyError as e:
+        logger.exception('查询部位跨版本数据失败')
         raise HTTPException(status_code=500, detail='查询失败') from e

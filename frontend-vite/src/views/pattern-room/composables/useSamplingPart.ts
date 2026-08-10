@@ -31,8 +31,12 @@ function resolvePartErrorMessage(err: unknown, fallback: string): string {
 }
 
 export function useSamplingPart(projectId: Ref<number | null>) {
-  /** 当前项目的部位列表 */
+  /** 当前项目的部位列表（当前版本） */
   const parts = ref<PartDetail[]>([])
+  /** 跨版本部位汇总（所有版本扁平列表，带 version_no） */
+  const partsByVersion = ref<PartDetail[]>([])
+  /** 版本号列表 */
+  const versionList = ref<string[]>([])
   /** 加载中 */
   const loading = ref(false)
   /** 提交中（新增/编辑/删除） */
@@ -55,6 +59,25 @@ export function useSamplingPart(projectId: Ref<number | null>) {
       error.value = message
       toast.error(message)
       parts.value = []
+    } finally {
+      loading.value = false
+    }
+  }
+
+  /**
+   * 加载跨版本部位汇总（部位+版本二维表数据源）
+   */
+  async function fetchPartsByVersion(id: number): Promise<void> {
+    loading.value = true
+    error.value = null
+    try {
+      const res = await patternRoomApi.getPartsByVersion(id)
+      partsByVersion.value = res.items ?? []
+      versionList.value = res.versions ?? []
+    } catch (e) {
+      console.error('[useSamplingPart] 查询跨版本部位数据失败:', e)
+      partsByVersion.value = []
+      versionList.value = []
     } finally {
       loading.value = false
     }
@@ -139,15 +162,18 @@ export function useSamplingPart(projectId: Ref<number | null>) {
   /** 清空部位状态 */
   function clearParts() {
     parts.value = []
+    partsByVersion.value = []
+    versionList.value = []
     error.value = null
   }
 
-  // watch projectId 自动重新加载部位列表
+  // watch projectId 自动重新加载部位列表 + 跨版本汇总
   watch(
     projectId,
     (newId) => {
       if (newId != null) {
         fetchParts(newId)
+        fetchPartsByVersion(newId)
       } else {
         clearParts()
       }
@@ -157,10 +183,13 @@ export function useSamplingPart(projectId: Ref<number | null>) {
 
   return {
     parts,
+    partsByVersion,
+    versionList,
     loading,
     submitting,
     error,
     fetchParts,
+    fetchPartsByVersion,
     create,
     update,
     remove,

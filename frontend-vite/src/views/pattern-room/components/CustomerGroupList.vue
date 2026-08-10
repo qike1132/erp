@@ -25,27 +25,32 @@
       description="点击右上角「新增打样项目」创建第一个项目"
     />
 
-    <!-- 客户分组列表 -->
-    <div v-else class="cgl-list">
-      <div v-for="group in groups" :key="group.customer_id ?? '_unassigned'" class="cgl-group">
-        <!-- 分组标题 -->
-        <button class="cgl-group-header" @click="toggleGroup(group.customer_id)">
-          <i
-            :class="[
-              'fas',
-              'cgl-chevron',
-              isGroupOpen(group.customer_id) ? 'fa-chevron-down' : 'fa-chevron-right',
-            ]"
-            aria-hidden="true"
-          />
-          <span class="cgl-group-name">{{ group.customer_name || '未分配客户' }}</span>
-          <span class="cgl-group-count">{{ group.project_count }}</span>
+    <!-- 客户 + 项目双栏布局 -->
+    <div v-else class="cgl-body">
+      <!-- 左侧：客户名称列表 -->
+      <div class="cgl-customer-list">
+        <button
+          v-for="group in groups"
+          :key="group.customer_id ?? '_unassigned'"
+          :class="['cgl-customer-item', { active: isCustomerSelected(group.customer_id) }]"
+          @click="selectCustomer(group.customer_id)"
+        >
+          <span class="cgl-customer-name">{{ group.customer_name || '未分配客户' }}</span>
+          <span class="cgl-customer-count">{{ group.project_count }}</span>
         </button>
+      </div>
 
-        <!-- 分组下的项目卡片 -->
-        <div v-show="isGroupOpen(group.customer_id)" class="cgl-projects">
+      <!-- 右侧：项目卡片 -->
+      <div class="cgl-project-area">
+        <div v-if="!selectedGroup" class="cgl-project-empty">
+          <span>请选择一个客户</span>
+        </div>
+        <div v-else-if="selectedGroup.projects.length === 0" class="cgl-project-empty">
+          <span>该客户暂无项目</span>
+        </div>
+        <div v-else class="cgl-projects">
           <button
-            v-for="proj in group.projects"
+            v-for="proj in selectedGroup.projects"
             :key="proj.id"
             :class="['cgl-project-card', { active: selectedProjectId === proj.id }]"
             @click="$emit('select-project', proj.id)"
@@ -74,7 +79,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import UiSpinner from '@/components/ui/UiSpinner.vue'
 import EmptyState from './EmptyState.vue'
 import type { CustomerGroup } from '@/api/patternRoom'
@@ -92,25 +97,26 @@ const emit = defineEmits<{
   'add-project': []
 }>()
 
-/** 展开的分组 key 集合 */
-const openGroups = ref<Set<string>>(new Set())
+/** 当前选中的客户 key */
+const selectedCustomerKey = ref<string | null>(null)
 
 function groupKey(customerId: number | null): string {
   return customerId != null ? String(customerId) : '_unassigned'
 }
 
-function isGroupOpen(customerId: number | null): boolean {
-  return openGroups.value.has(groupKey(customerId))
+function isCustomerSelected(customerId: number | null): boolean {
+  return selectedCustomerKey.value === groupKey(customerId)
 }
 
-function toggleGroup(customerId: number | null) {
-  const key = groupKey(customerId)
-  if (openGroups.value.has(key)) {
-    openGroups.value.delete(key)
-  } else {
-    openGroups.value.add(key)
-  }
+function selectCustomer(customerId: number | null) {
+  selectedCustomerKey.value = groupKey(customerId)
 }
+
+/** 当前选中的分组 */
+const selectedGroup = computed(() => {
+  if (!selectedCustomerKey.value) return null
+  return props.groups.find((g) => groupKey(g.customer_id) === selectedCustomerKey.value) ?? null
+})
 
 function onSearchInput(e: Event) {
   const target = e.target as HTMLInputElement
@@ -124,12 +130,12 @@ function formatTime(iso: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-// 默认展开第一个分组
+// 默认选中第一个分组
 watch(
   () => props.groups,
-  (g: CustomerGroup[]) => {
-    if (g && g.length > 0 && openGroups.value.size === 0) {
-      openGroups.value.add(groupKey(g[0].customer_id))
+  (g) => {
+    if (g && g.length > 0 && selectedCustomerKey.value === null) {
+      selectedCustomerKey.value = groupKey(g[0]!.customer_id)
     }
   },
   { immediate: true },
@@ -188,63 +194,92 @@ watch(
   font-size: 13px;
 }
 
-/* 分组 */
-.cgl-list {
+/* 双栏主体 */
+.cgl-body {
   flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 左侧：客户名称列表 */
+.cgl-customer-list {
+  flex: 0 0 150px;
+  border-right: 1px solid var(--color-border-light, #e5e7eb);
   overflow-y: auto;
+  background: transparent;
+  padding: 4px 0;
 }
 
-.cgl-group {
-  border-bottom: 1px solid var(--color-border-light, #e5e7eb);
-}
-
-.cgl-group-header {
+.cgl-customer-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
-  padding: 10px 12px;
+  padding: 10px 10px;
   border: none;
-  background: var(--color-surface, #f9fafb);
+  border-left: 3px solid transparent;
+  background: transparent;
   cursor: pointer;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 500;
   color: var(--color-text-primary);
   text-align: left;
-  transition: background 0.15s;
+  transition: all 0.15s;
 }
 
-.cgl-group-header:hover {
-  background: var(--color-surface-hover, #f3f4f6);
+.cgl-customer-item:hover {
+  background: transparent;
 }
 
-.cgl-chevron {
-  font-size: 10px;
-  color: var(--color-text-secondary);
-  width: 12px;
-  transition: transform 0.2s;
+.cgl-customer-item.active {
+  border-left-color: #ff9f43;
+  background: #ff9f4310;
+  color: #ff9f43;
+  font-weight: 600;
 }
 
-.cgl-group-name {
+.cgl-customer-name {
   flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.cgl-group-count {
-  font-size: 11px;
+.cgl-customer-count {
+  font-size: 10px;
   font-weight: 500;
-  padding: 2px 8px;
-  border-radius: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
   background: #ff9f4320;
   color: #ff9f43;
+  flex-shrink: 0;
+}
+
+.cgl-customer-item.active .cgl-customer-count {
+  background: #ff9f4340;
+}
+
+/* 右侧：项目区域 */
+.cgl-project-area {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.cgl-project-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--color-text-secondary, #9ca3af);
+  font-size: 13px;
 }
 
 /* 项目卡片 */
 .cgl-projects {
-  padding: 4px 8px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .cgl-project-card {
@@ -252,7 +287,6 @@ watch(
   gap: 10px;
   width: 100%;
   padding: 8px;
-  margin-bottom: 4px;
   border: 1px solid transparent;
   border-radius: 8px;
   background: #fff;
@@ -276,14 +310,15 @@ watch(
 }
 
 .cgl-card-thumb {
-  width: 40px;
-  height: 40px;
-  border-radius: 6px;
+  width: 200px;
+  height: 200px;
+  border-radius: 8px;
   overflow: hidden;
   background: var(--color-surface, #f3f4f6);
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
 }
 
 .cgl-card-thumb img {
@@ -293,7 +328,7 @@ watch(
 }
 
 .cgl-card-thumb-placeholder i {
-  font-size: 16px;
+  font-size: 48px;
   color: var(--color-text-secondary);
   opacity: 0.5;
 }

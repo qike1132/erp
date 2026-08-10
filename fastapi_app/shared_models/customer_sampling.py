@@ -167,13 +167,17 @@ class CustomerSamplingPart(Base):
     """部位表（当前工作布料数据）
 
     每个部位关联一条布料信息记录。
-    同一打样项目下部位名称唯一（DB 唯一索引 uq_csp_part_name + 应用层校验）。
+    同一打样项目下，同一 version_no 内部位名称唯一。
+    通过"复制版本"操作可在同一 part_name 下创建多个版本（T1/T2/T3...）。
     """
     __tablename__ = 'customer_sampling_part'
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     project_id: Mapped[int] = mapped_column(
         Integer, ForeignKey('customer_sampling_project.id', ondelete='CASCADE'), nullable=False,
+    )
+    version_no: Mapped[str] = mapped_column(
+        String(8), nullable=False, default='T1', server_default='T1', comment='版本号 T1/T2/T3...',
     )
     part_name: Mapped[str] = mapped_column(String(100), nullable=False, comment='部位名称')
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment='排序值')
@@ -209,8 +213,8 @@ class CustomerSamplingPart(Base):
     supplier: Mapped["Supplier | None"] = relationship("Supplier", lazy='selectin')
 
     __table_args__ = (
-        # 同项目下按部位名称+排序查询（去掉唯一约束，支持同一部位多个子项 T1/T2/T3）
-        Index('idx_csp_part_name', 'project_id', 'part_name'),
+        # 同项目 + 同版本下部位名称唯一（T1/T2/T3 各自独立）
+        Index('idx_csp_part_name_version', 'project_id', 'version_no', 'part_name'),
         Index('idx_csp_part_sort', 'project_id', 'sort_order'),
         # 单价非负、交期非负约束
         CheckConstraint('unit_price IS NULL OR unit_price >= 0', name='ck_csp_part_unit_price_nonneg'),
@@ -224,6 +228,7 @@ class CustomerSamplingPart(Base):
         return {
             'id': self.id,
             'project_id': self.project_id,
+            'version_no': self.version_no,
             'part_name': self.part_name,
             'sort_order': self.sort_order,
             'fabric_name': self.fabric_name or '',
@@ -248,6 +253,7 @@ class CustomerSamplingPart(Base):
         """
         return {
             'id': self.id,
+            'version_no': self.version_no,
             'part_name': self.part_name,
             'sort_order': self.sort_order,
             'fabric_name': self.fabric_name or '',
@@ -260,6 +266,7 @@ class CustomerSamplingPart(Base):
             'unit_price': float(self.unit_price) if self.unit_price is not None else None,
             'delivery_days': self.delivery_days,
             'remark': self.remark or '',
+            'version': self.version,
         }
 
 

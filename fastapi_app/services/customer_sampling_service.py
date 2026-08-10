@@ -647,6 +647,7 @@ async def create_part(
         sort_order=sort_order,
         fabric_name=fabric_name,
         fabric_spec=fabric_spec,
+        fabric_color_no=fabric_color_no,
         supplier_id=supplier_id,
         supplier_name=supplier_name,
         contact_person=contact_person,
@@ -669,6 +670,125 @@ async def create_part(
     return {'id': part.id}
 
 
+async def batch_create_parts(
+    db: AsyncSession,
+    project_id: int,
+    *,
+    items: list[dict],
+    user_id: int | None = None,
+) -> dict:
+    """批量新增部位
+
+    一次事务中创建多条部位记录。
+    每项 item 包含: part_name (必填), version_no (默认 T1),
+    supplier_id / fabric_name / fabric_color_no (可选)
+    """
+    await _ensure_project_exists(db, project_id)
+    operator_name = await _get_user_name(db, user_id)
+    created_ids: list[int] = []
+
+    for item in items:
+        part_name = item['part_name']
+        version_no = item.get('version_no', 'T1')
+        supplier_id = item.get('supplier_id')
+        fabric_name = item.get('fabric_name')
+        fabric_color_no = item.get('fabric_color_no')
+
+        # 同版本下部位名称唯一
+        await _ensure_part_name_unique(db, project_id, part_name, version_no=version_no)
+
+        supplier_name = item.get('supplier_name') or ''
+        if supplier_id is not None:
+            supplier_name = await _resolve_supplier_name(db, supplier_id)
+            if not supplier_name:
+                raise NotFoundError(f'供应商 {supplier_id} 不存在')
+
+        part = CustomerSamplingPart(
+            project_id=project_id,
+            version_no=version_no,
+            part_name=part_name,
+            sort_order=0,
+            fabric_name=fabric_name,
+            fabric_color_no=fabric_color_no,
+            supplier_id=supplier_id,
+            supplier_name=supplier_name,
+        )
+        db.add(part)
+        await db.flush()
+        created_ids.append(part.id)
+
+        await _write_change_log(
+            db, project_id, 'create_part', user_id, operator_name,
+            part_name=part_name,
+        )
+
+    logger.info(
+        '批量新增部位: project_id=%s, count=%d, ids=%s',
+        project_id, len(created_ids), created_ids,
+    )
+    return {'ids': created_ids, 'count': len(created_ids)}
+
+
+async def copy_part_version(
+    db: AsyncSession,
+    part_id: int,
+    *,
+    user_id: int | None = None,
+) -> dict:
+    """复制部位版本 — 在该部位名称下新增一个版本号 +1 的空白记录
+
+    流程：
+    1. 加载原部位记录
+    2. 计算下一版本号（如 T1 → T2, T2 → T3）
+    3. 创建新部位行：相同 part_name、空布料信息、新 version_no
+    4. 写审计日志
+    """
+    # 加载原部位
+    result = await db.execute(
+        select(CustomerSamplingPart).where(CustomerSamplingPart.id == part_id)
+    )
+    part = result.scalar_one_or_none()
+    if part is None:
+        raise NotFoundError('部位不存在')
+
+    # 计算下一版本号
+    current_ver = part.version_no or 'T1'
+    new_version_no = _next_version(current_ver)
+
+    # 确保新版本号下同名称不重复（防御性检查）
+    await _ensure_part_name_unique(
+        db, part.project_id, part.part_name, version_no=new_version_no,
+    )
+
+    # 创建新版本行：保留 part_name，清空布料信息
+    new_part = CustomerSamplingPart(
+        project_id=part.project_id,
+        version_no=new_version_no,
+        part_name=part.part_name,
+        sort_order=part.sort_order,
+        fabric_name=None,
+        fabric_color_no=None,
+        supplier_id=None,
+        supplier_name='',
+    )
+    db.add(new_part)
+    await db.flush()
+
+    # 写审计日志
+    operator_name = await _get_user_name(db, user_id)
+    await _write_change_log(
+        db, part.project_id, 'copy_part_version', user_id, operator_name,
+        part_name=part.part_name,
+        target_version=new_version_no,
+    )
+
+    logger.info(
+        '复制部位版本: part_id=%s → %s, part_name=%s, version %s → %s',
+        part_id, new_part.id, part.part_name, current_ver, new_version_no,
+    )
+    return {'id': new_part.id, 'version_no': new_version_no}
+
+
 async def update_part(
     db: AsyncSession,
     part_id: int,
@@ -677,7 +797,9 @@ async def update_part(
     sort_order: int | None = None,
     fabric_name: str | None = None,
     fabric_spec: str | None = None,
+    fabric_color_no: str | None = None,
     supplier_id: int | None = None,
+    supplier_name: str | None = None,
     contact_person: str | None = None,
     contact_phone: str | None = None,
     unit_price: float | None = None,
@@ -708,14 +830,17 @@ async def update_part(
         await _ensure_part_name_unique(db, part.project_id, part_name, exclude_id=part_id)
         part.part_name = part_name
 
-    # 解析供应商名称
+    # 解析供应商
     if supplier_id is not None and supplier_id != part.supplier_id:
-        supplier_name = ''
+        resolved_name = ''
         if supplier_id is not None:
-            supplier_name = await _resolve_supplier_name(db, supplier_id)
-            if not supplier_name:
+            resolved_name = await _resolve_supplier_name(db, supplier_id)
+            if not resolved_name:
                 raise NotFoundError('所选供应商不存在')
         part.supplier_id = supplier_id
+        part.supplier_name = resolved_name
+    elif supplier_name is not None and supplier_name != part.supplier_name:
+        # 允许直接更新供应商名称（不通过 supplier_id）
         part.supplier_name = supplier_name
 
     # 更新可选字段
@@ -725,6 +850,8 @@ async def update_part(
         part.fabric_name = fabric_name
     if fabric_spec is not None:
         part.fabric_spec = fabric_spec
+    if fabric_color_no is not None:
+        part.fabric_color_no = fabric_color_no
     if contact_person is not None:
         part.contact_person = contact_person
     if contact_phone is not None:
@@ -1007,6 +1134,75 @@ async def get_version_detail(db: AsyncSession, version_id: int) -> dict:
     }
 
 
+async def get_parts_by_version(db: AsyncSession, project_id: int) -> dict:
+    """获取项目所有版本的部位布料数据（跨版本二维表数据源）
+
+    数据来源两级合并：
+    1. `customer_sampling_part` 表 — 所有版本号实时数据（优先，保证新增/编辑/删除立即可见）
+    2. `customer_sampling_fabric_version.snapshot_data` — 历史快照（补充 part 表未覆盖的版本）
+
+    按 part_name → version_no 排序后返回扁平列表。
+
+    Returns:
+        {
+            'success': True,
+            'items': [PartDetail + version_no, ...],
+            'versions': ['T1', 'T2', ...],
+        }
+    """
+    await _ensure_project_exists(db, project_id)
+
+    # 1. 从 part 表读取所有版本化部件（带 supplier 关联）
+    parts_result = await db.execute(
+        select(CustomerSamplingPart)
+        .options(selectinload(CustomerSamplingPart.supplier))
+        .where(CustomerSamplingPart.project_id == project_id)
+        .order_by(CustomerSamplingPart.sort_order)
+    )
+    all_parts = parts_result.scalars().all()
+
+    # 从 part 表构建 (part_name, version_no) → dict 的索引
+    seen_keys: set[tuple[str, str]] = set()
+    items: list[dict] = []
+    version_set: set[str] = set()
+
+    for part in all_parts:
+        key = (part.part_name, part.version_no)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        version_set.add(part.version_no)
+        part_copy = {**part.to_snapshot_dict(), 'version_no': part.version_no}
+        items.append(part_copy)
+
+    # 2. 从历史版本快照补充 part 表未覆盖的版本
+    versions_result = await db.execute(
+        select(CustomerSamplingFabricVersion)
+        .where(CustomerSamplingFabricVersion.project_id == project_id)
+        .order_by(CustomerSamplingFabricVersion.id.asc())
+    )
+    versions = versions_result.scalars().all()
+
+    for ver in versions:
+        version_set.add(ver.version_no)
+        snapshot: list[dict] = ver.snapshot_data or []
+        for part in snapshot:
+            key = (part.get('part_name', ''), ver.version_no)
+            if key in seen_keys:
+                continue  # part 表已有此版本数据，跳过快照
+            seen_keys.add(key)
+            part_copy = {**part, 'version_no': ver.version_no}
+            items.append(part_copy)
+
+    version_list = sorted(version_set, key=lambda v: (len(v), v))
+
+    return {
+        'success': True,
+        'items': items,
+        'versions': version_list,
+    }
+
+
 async def list_change_logs(
     db: AsyncSession,
     project_id: int,
@@ -1062,19 +1258,23 @@ async def _ensure_part_name_unique(
     db: AsyncSession,
     project_id: int,
     part_name: str,
+    *,
+    version_no: str = 'T1',
     exclude_id: int | None = None,
 ) -> None:
-    """校验部位名称同项目下唯一
+    """校验部位名称同项目 + 同版本下唯一
 
     Args:
+        version_no: 版本号，同一版本内部位名称唯一
         exclude_id: 编辑时排除自身 ID
     """
     query = select(CustomerSamplingPart.id).where(
         CustomerSamplingPart.project_id == project_id,
         CustomerSamplingPart.part_name == part_name,
+        CustomerSamplingPart.version_no == version_no,
     )
     if exclude_id is not None:
         query = query.where(CustomerSamplingPart.id != exclude_id)
     result = await db.execute(query)
     if result.scalar_one_or_none() is not None:
-        raise BusinessError(f'部位名称 "{part_name}" 已存在')
+        raise BusinessError(f'部位名称 "{part_name}" 在当前版本中已存在')

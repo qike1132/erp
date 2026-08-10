@@ -22,11 +22,19 @@
         <div class="pr-top-right">
           <button
             v-if="canManage"
-            class="pr-add-btn"
+            class="pr-add-btn pr-add-btn--primary"
             @click="openCreateProjectDialog"
           >
             <i class="fas fa-plus" aria-hidden="true" />
             新增打样项目
+          </button>
+          <button
+            v-if="canManage && selectedProjectId"
+            class="pr-add-btn"
+            @click="openCreatePartDialog"
+          >
+            <i class="fas fa-plus" aria-hidden="true" />
+            录入布料信息
           </button>
         </div>
       </div>
@@ -73,23 +81,14 @@
           <main class="pr-right-pane">
             <ProjectDetailPanel
               :project="projectHook.currentProject.value"
-              :versions="versionHook.versions.value"
-              :current-version-id="versionHook.currentVersionId.value"
-              :version-detail="versionHook.versionDetail.value"
-              :is-baseline="versionHook.isBaseline.value"
-              :is-degraded="versionHook.isDegraded.value"
-              :is-current-version="isCurrentVersion"
-              :current-parts="partHook.parts.value"
+              :parts-by-version="partHook.partsByVersion.value"
+              :version-list="partHook.versionList.value"
               :version-loading="versionHook.loading.value"
               :part-loading="partHook.loading.value"
               :can-manage="canManage"
-              @edit="openEditProjectDialog"
-              @delete="confirmDeleteProject"
-              @switch-version="onSwitchVersion"
-              @create-version="openCreateVersionDialog"
-              @add-part="openCreatePartDialog"
-              @edit-part="openEditPartDialog"
-              @delete-part="confirmDeletePart"
+              @copy-version="onCopyPartVersion"
+              @delete-version="onDeleteVersion"
+              @save-edit="onSaveEdit"
             />
           </main>
         </div>
@@ -132,12 +131,9 @@
     <!-- 部位表单弹窗（新增/编辑） -->
     <PartFormDialog
       :open="partFormVisible"
-      :part="partFormMode === 'edit' ? editingPart : null"
-      :suppliers="suppliers"
       :submitting="partHook.submitting.value"
       @update:open="partFormVisible = $event"
-      @submit-create="onPartSubmitCreate"
-      @submit-update="onPartSubmitUpdate"
+      @submit-batch="onPartSubmitBatch"
     />
 
     <!-- 版本创建弹窗 -->
@@ -188,15 +184,15 @@ import { usePermission } from '@/composables/usePermission'
 import { toast } from '@/composables/useToast'
 
 import { customerApi } from '@/api/customer'
-import { supplierApi } from '@/api/supplier'
-import type { Customer, Supplier } from '@/types'
+import type { Customer } from '@/types'
 import type {
   ProjectCreateRequest,
   ProjectUpdateRequest,
-  PartCreateRequest,
-  PartUpdateRequest,
+  BatchPartCreateRequest,
   PartDetail,
+  PartUpdateRequest,
 } from '@/api/patternRoom'
+import { patternRoomApi } from '@/api/patternRoom'
 
 // ==================== 权限 ====================
 const { hasPermission } = usePermission()
@@ -211,25 +207,15 @@ const selectedProjectId = ref<number | null>(null)
 const partHook = useSamplingPart(selectedProjectId)
 const versionHook = useSamplingVersion(selectedProjectId)
 
-// ==================== 客户/供应商列表（表单选项） ====================
+// ==================== 客户列表（项目表单选项） ====================
 const customers = ref<Customer[]>([])
-const suppliers = ref<Supplier[]>([])
 
 async function loadCustomers() {
   try {
-    const res = await customerApi.list({ per_page: 1000 })
+    const res = await customerApi.list({ per_page: 200 })
     customers.value = res.customers ?? []
   } catch (e) {
     console.error('[PatternRoomView] 加载客户列表失败:', e)
-  }
-}
-
-async function loadSuppliers() {
-  try {
-    const res = await supplierApi.list({ per_page: 1000 })
-    suppliers.value = res.suppliers ?? []
-  } catch (e) {
-    console.error('[PatternRoomView] 加载供应商列表失败:', e)
   }
 }
 
@@ -252,7 +238,6 @@ onMounted(() => {
   // 初始化加载
   groupHook.loadGrouped()
   loadCustomers()
-  loadSuppliers()
 })
 
 onUnmounted(() => {
@@ -389,74 +374,130 @@ async function confirmDeleteProject() {
   }
 }
 
-// ==================== 部位 CRUD ====================
+// ==================== 部位批量创建 ====================
 const partFormVisible = ref(false)
-const partFormMode = ref<'create' | 'edit'>('create')
-const editingPart = ref<PartDetail | null>(null)
 
 function openCreatePartDialog() {
   if (!canManage.value) {
     toast.warning('无操作权限')
     return
   }
-  partFormMode.value = 'create'
-  editingPart.value = null
   partFormVisible.value = true
 }
 
-function openEditPartDialog(part: PartDetail) {
+async function onPartSubmitBatch(data: BatchPartCreateRequest) {
+  if (!selectedProjectId.value) return
+  try {
+    const res = await patternRoomApi.batchCreateParts(selectedProjectId.value, data)
+    if (res.success) {
+      toast.success(res.message || `已创建 ${data.items.length} 个部位`)
+      partFormVisible.value = false
+      if (selectedProjectId.value) {
+        await projectHook.fetchDetail(selectedProjectId.value)
+        await partHook.fetchPartsByVersion(selectedProjectId.value)
+      }
+    } else {
+      toast.error(res.message || '批量创建失败')
+    }
+  } catch (e) {
+    console.error('[PatternRoomView] 批量创建部位失败:', e)
+    toast.error('批量创建部位失败')
+  }
+}
+
+/** 复制部位版本：在该部位名称下新增一个版本号 +1 的空白记录 */
+async function onCopyPartVersion(part: PartDetail) {
   if (!canManage.value) {
     toast.warning('无操作权限')
     return
   }
-  partFormMode.value = 'edit'
-  editingPart.value = part
-  partFormVisible.value = true
-}
-
-async function onPartSubmitCreate(data: PartCreateRequest) {
-  const res = await partHook.create(data)
-  if (res) {
-    toast.success('部位创建成功')
-    partFormVisible.value = false
-    // 刷新项目详情（部位数等）
-    if (selectedProjectId.value) await projectHook.fetchDetail(selectedProjectId.value)
-  } else {
-    toast.error(partHook.error.value || '新增部位失败')
+  if (part.id == null) {
+    toast.warning('该记录为历史快照，无法复制版本')
+    return
+  }
+  try {
+    const res = await patternRoomApi.copyPartVersion(part.id)
+    if (res.success) {
+      toast.success(res.message || `已复制版本 ${res.version_no ?? ''}`)
+      if (selectedProjectId.value) {
+        await partHook.fetchPartsByVersion(selectedProjectId.value)
+      }
+    } else {
+      toast.error(res.message || '复制版本失败')
+    }
+  } catch (e) {
+    console.error('[PatternRoomView] 复制部位版本失败:', e)
+    toast.error('复制部位版本失败')
   }
 }
 
-async function onPartSubmitUpdate(data: PartUpdateRequest) {
-  if (!editingPart.value?.id) return
-  const res = await partHook.update(editingPart.value.id, data)
-  if (res) {
-    toast.success('部位更新成功')
-    partFormVisible.value = false
-    editingPart.value = null
-    if (selectedProjectId.value) await projectHook.fetchDetail(selectedProjectId.value)
-  } else {
-    toast.error(partHook.error.value || '编辑部位失败')
-  }
-}
-
-async function confirmDeletePart(part: PartDetail) {
+/** 保存内联编辑 */
+async function onSaveEdit(
+  part: PartDetail,
+  data: { supplier_name: string; fabric_name: string; fabric_color_no: string },
+) {
   if (!canManage.value) {
     toast.warning('无操作权限')
     return
   }
-  if (!part.id) return
+  if (part.id == null) {
+    toast.warning('该记录为历史快照，无法编辑')
+    return
+  }
+  try {
+    const payload: PartUpdateRequest = {
+      version: part.version ?? 0,
+      supplier_name: data.supplier_name || null,
+      fabric_name: data.fabric_name || null,
+      fabric_color_no: data.fabric_color_no || null,
+    }
+    const res = await patternRoomApi.updatePart(part.id, payload)
+    if (res.success) {
+      toast.success('保存成功')
+      if (selectedProjectId.value) {
+        await partHook.fetchPartsByVersion(selectedProjectId.value)
+      }
+    } else {
+      toast.error(res.message || '保存失败')
+    }
+  } catch (e) {
+    console.error('[PatternRoomView] 保存部位编辑失败:', e)
+    const errMsg = (e as { response?: { status?: number } })?.response?.status === 409
+      ? '数据已被他人更新，请刷新后重试'
+      : '保存失败'
+    toast.error(errMsg)
+  }
+}
+
+/** 删除部位版本 */
+async function onDeleteVersion(part: PartDetail) {
+  if (!canManage.value) {
+    toast.warning('无操作权限')
+    return
+  }
+  if (part.id == null) {
+    toast.warning('该记录为历史快照，无法删除')
+    return
+  }
   const ok = await confirmDialog.confirm(
-    '确认删除该部位？',
-    `部位「${part.part_name}」及其布料信息将被删除，历史版本快照中该部位数据保留。`,
+    '确认删除该部位版本？',
+    `部位「${part.part_name}」版本 ${part.version_no ?? '-'}，删除后不可恢复。`,
     'danger',
   )
   if (!ok) return
-  const res = await partHook.remove(part.id)
-  if (res) {
-    toast.success('部位删除成功')
-    if (selectedProjectId.value) await projectHook.fetchDetail(selectedProjectId.value)
-  } else {
-    toast.error(partHook.error.value || '删除部位失败')
+  try {
+    const res = await patternRoomApi.deletePart(part.id)
+    if (res.success) {
+      toast.success(res.message || '删除成功')
+      if (selectedProjectId.value) {
+        await partHook.fetchPartsByVersion(selectedProjectId.value)
+      }
+    } else {
+      toast.error(res.message || '删除失败')
+    }
+  } catch (e) {
+    console.error('[PatternRoomView] 删除部位版本失败:', e)
+    toast.error('删除部位版本失败')
   }
 }
 
@@ -530,31 +571,49 @@ watch(selectedProjectId, (newId, oldId) => {
 }
 
 .pr-top-right {
-  flex: 0 0 auto;
-  display: flex;
-  gap: 8px;
-  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: white;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
 }
 
 .pr-add-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 16px;
+  padding: 8px 14px;
+  border: none;
+  border-radius: 9px;
   font-size: 13px;
   font-weight: 600;
-  color: #fff;
-  background: linear-gradient(135deg, #ff9f43, #ff8c1f);
-  border: none;
-  border-radius: 10px;
+  color: var(--color-text-secondary, #6b7280);
+  background: transparent;
   cursor: pointer;
-  transition: all 0.2s ease;
-  box-shadow: 0 3px 10px rgba(255, 159, 67, 0.25);
+  transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+  white-space: nowrap;
+  font-family: inherit;
 }
 
 .pr-add-btn:hover {
+  background: var(--color-primary-50);
+  color: var(--color-primary-600);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
   transform: translateY(-1px);
-  box-shadow: 0 5px 14px rgba(255, 159, 67, 0.35);
+}
+
+.pr-add-btn--primary {
+  background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
+  color: var(--color-primary-700);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 8px rgba(91, 141, 239, 0.2);
+  transform: translateY(-1px);
+}
+
+.pr-add-btn--primary:hover {
+  background: linear-gradient(135deg, var(--color-primary-100), var(--color-primary-200));
+  color: var(--color-primary-700);
 }
 
 .pr-body {
@@ -577,7 +636,7 @@ watch(selectedProjectId, (newId, oldId) => {
 /* 左侧 */
 .pr-left-pane {
   position: relative;
-  flex: 0 0 380px;
+  flex: 0 0 680px;
   border: 1px solid var(--color-border-light, #e5e7eb);
   border-radius: 12px;
   overflow: hidden;

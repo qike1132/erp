@@ -89,8 +89,16 @@ let requestSeq = 0
 // ============================================================
 // 搜索逻辑 — @complete 驱动搜索 + requestSeq 防过期
 // ============================================================
-function onInputChange(value: string) {
-  emit('update:modelValue', value)
+function onInputChange(value: string | Record<string, unknown>) {
+  let displayValue: string
+  // PrimeVue 选中项时 emit 的是完整 option 对象而非 label 字符串，需提取
+  if (value != null && typeof value === 'object' && !Array.isArray(value)) {
+    const labelKey = typeof props.optionLabel === 'string' ? props.optionLabel : 'name'
+    displayValue = (value[labelKey] as string) ?? ''
+  } else {
+    displayValue = String(value ?? '')
+  }
+  emit('update:modelValue', displayValue)
 }
 
 function onComplete(event: AutoCompleteCompleteEvent) {

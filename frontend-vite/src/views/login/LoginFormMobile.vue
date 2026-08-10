@@ -1,8 +1,8 @@
 <template>
   <div class="m-login-page">
     <div class="m-login-logo-area">
-      <img class="m-login-logo" src="/logo_plush.png" alt="东莞协同系统" />
-      <div class="m-login-title">东莞协同系统</div>
+      <img class="m-login-logo" src="/logo_plush.png" alt="滨发协同系统" />
+      <div class="m-login-title">滨发协同系统</div>
       <div class="m-login-sub">Binfa Collaboration System</div>
     </div>
 

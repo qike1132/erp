@@ -5,7 +5,7 @@
       <router-link to="/dashboard" class="sb-logo">
         <img src="/logo_plush.png" alt="东莞玩具" width="70" height="70" />
         <div v-if="!collapsed" class="sb-logo-text">
-          <div class="sb-logo-title">东莞协同系统</div>
+          <div class="sb-logo-title">滨发协同系统</div>
           <div class="sb-logo-subtitle">供应链管理平台 v2.0</div>
         </div>
       </router-link>

@@ -37,10 +37,12 @@ class PartDetail(BaseModel):
 
     id: int | None = None
     project_id: int | None = None
+    version_no: str | None = None
     part_name: str = Field(..., min_length=1, max_length=100, description='部位名称')
     sort_order: int = Field(0, ge=0, description='排序值')
     fabric_name: str = ''
     fabric_spec: str = ''
+    fabric_color_no: str = ''
     supplier_id: int | None = None
     supplier_name: str = ''
     contact_person: str = ''
@@ -51,12 +53,20 @@ class PartDetail(BaseModel):
     created_at: str = ''
     updated_at: str = ''
     version: int = 0
+    version_no: str | None = None
 
 
 class PartListResponse(BaseModel):
     """部位列表响应"""
     success: bool = True
     items: list[PartDetail] = Field(default_factory=list)
+
+
+class PartsByVersionResponse(BaseModel):
+    """部位跨版本汇总响应（部位+版本二维表数据源）"""
+    success: bool = True
+    items: list[PartDetail] = Field(default_factory=list)
+    versions: list[str] = Field(default_factory=list)
 
 
 # ==================== 版本 ====================
@@ -229,6 +239,7 @@ class PartCreateRequest(BaseModel):
     sort_order: int = Field(0, ge=0, description='排序值')
     fabric_name: str | None = Field(None, max_length=200, description='布料名称')
     fabric_spec: str | None = Field(None, max_length=200, description='布料规格')
+    fabric_color_no: str | None = Field(None, max_length=50, description='色号')
     supplier_id: int | None = None
     contact_person: str | None = Field(None, max_length=100, description='联系人')
     contact_phone: str | None = Field(None, max_length=50, description='联系电话')
@@ -246,7 +257,9 @@ class PartUpdateRequest(BaseModel):
     sort_order: int | None = Field(None, ge=0)
     fabric_name: str | None = Field(None, max_length=200)
     fabric_spec: str | None = Field(None, max_length=200)
+    fabric_color_no: str | None = Field(None, max_length=50)
     supplier_id: int | None = None
+    supplier_name: str | None = Field(None, max_length=200, description='供应商名称(文本)')
     contact_person: str | None = Field(None, max_length=100)
     contact_phone: str | None = Field(None, max_length=50)
     unit_price: float | None = Field(None, ge=0)
@@ -258,3 +271,18 @@ class PartUpdateRequest(BaseModel):
 class VersionCreateRequest(BaseModel):
     """创建新版本请求"""
     reason: str | None = Field(None, max_length=500, description='变更原因(可选)')
+
+
+class BatchPartItem(BaseModel):
+    """批量新增部位单项"""
+    part_name: str = Field(..., min_length=1, max_length=100, description='部位名称')
+    supplier_id: int | None = None
+    supplier_name: str | None = Field(None, max_length=100, description='供应商名称（手动输入）')
+    fabric_name: str | None = Field(None, max_length=200, description='布料名称')
+    fabric_color_no: str | None = Field(None, max_length=50, description='色号')
+    version_no: str = Field('T1', max_length=8, description='版本号')
+
+
+class BatchPartCreateRequest(BaseModel):
+    """批量新增部位请求"""
+    items: list[BatchPartItem] = Field(..., min_length=1, max_length=50, description='部位列表')

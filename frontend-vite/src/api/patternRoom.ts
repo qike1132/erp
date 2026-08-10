@@ -39,6 +39,7 @@ export interface PartDetail {
   sort_order: number
   fabric_name: string
   fabric_spec: string
+  fabric_color_no: string
   supplier_id: number | null
   supplier_name: string
   contact_person: string
@@ -50,12 +51,36 @@ export interface PartDetail {
   updated_at?: string
   /** 乐观锁版本号 */
   version: number
+  /** 所属版本号（跨版本查询时填充） */
+  version_no?: string | null
 }
 
 /** 部位列表响应 */
 export interface PartListResponse {
   success: boolean
   items: PartDetail[]
+}
+
+/** 部位跨版本汇总响应 */
+export interface PartsByVersionResponse {
+  success: boolean
+  items: PartDetail[]
+  versions: string[]
+}
+
+/** 批量新增部位单项 */
+export interface BatchPartItem {
+  part_name: string
+  supplier_id: number | null
+  supplier_name?: string | null
+  fabric_name: string | null
+  fabric_color_no: string | null
+  version_no?: string
+}
+
+/** 批量新增部位请求 */
+export interface BatchPartCreateRequest {
+  items: BatchPartItem[]
 }
 
 // ==================== 版本 ====================
@@ -229,7 +254,9 @@ export interface PartUpdateRequest {
   sort_order?: number | null
   fabric_name?: string | null
   fabric_spec?: string | null
+  fabric_color_no?: string | null
   supplier_id?: number | null
+  supplier_name?: string | null
   contact_person?: string | null
   contact_phone?: string | null
   unit_price?: number | null
@@ -339,4 +366,16 @@ export const patternRoomApi = {
       `/pattern-room/projects/${projectId}/change-logs`,
       params as Record<string, unknown>,
     ),
+
+  // ---------- 16. 部位跨版本汇总 ----------
+  getPartsByVersion: (projectId: number) =>
+    get<PartsByVersionResponse>(`/pattern-room/projects/${projectId}/parts-by-version`),
+
+  // ---------- 17. 批量新增部位 ----------
+  batchCreateParts: (projectId: number, data: BatchPartCreateRequest) =>
+    post<ActionResponse>(`/pattern-room/projects/${projectId}/parts/batch`, data),
+
+  // ---------- 18. 复制部位版本 ----------
+  copyPartVersion: (partId: number) =>
+    post<ActionResponse>(`/pattern-room/parts/${partId}/copy-version`),
 }
