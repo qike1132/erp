@@ -74,12 +74,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import UiSpinner from '@/components/ui/UiSpinner.vue'
 import EmptyState from './EmptyState.vue'
 import type { CustomerGroup } from '@/api/patternRoom'
 
-defineProps<{
+const props = defineProps<{
   groups: CustomerGroup[]
   loading: boolean
   hasData: boolean
@@ -125,9 +125,8 @@ function formatTime(iso: string): string {
 }
 
 // 默认展开第一个分组
-import { watch } from 'vue'
 watch(
-  () => (defineProps as any).groups,
+  () => props.groups,
   (g: CustomerGroup[]) => {
     if (g && g.length > 0 && openGroups.value.size === 0) {
       openGroups.value.add(groupKey(g[0].customer_id))
