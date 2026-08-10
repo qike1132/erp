@@ -158,3 +158,17 @@ async def generate_pattern_room_bom_number(db: AsyncSession) -> str:
     """生成板房打样编号 BF-YYYYMMDD-XXXX"""
     from fastapi_app.shared_models import PatternRoomBom
     return await generate_number_async('BF', PatternRoomBom, 'created_at', 'bom_no', db)
+
+
+async def generate_customer_sampling_number(db: AsyncSession) -> str:
+    """生成按客户分类打样项目序列号 CS-YYYYMMDD-XXXX
+
+    格式约定（design.md 2.3.4）：
+    - CS：Customer Sampling 前缀
+    - YYYYMMDD：UTC 日期
+    - XXXX：当日序号，zfill(4)，从 0001 开始
+
+    唯一性由 DB 唯一索引 + numbering 服务的 advisory lock + FOR UPDATE 跨进程保证。
+    """
+    from fastapi_app.shared_models import CustomerSamplingProject
+    return await generate_number_async('CS', CustomerSamplingProject, 'created_at', 'sequence_no', db)

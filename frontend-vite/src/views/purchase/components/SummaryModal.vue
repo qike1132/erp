@@ -1,7 +1,7 @@
 <template>
   <UiDialog :open="open" class="max-w-[1000px]" @update:open="$emit('close')">
     <template #title>
-      <div class="flex items-center gap-2"><i class="fas fa-clipboard-list text-primary-500"  aria-hidden="true" /> 汇总下单</div>
+      <div class="flex items-center gap-2"><FontAwesomeIcon icon="clipboard-list" class="text-primary-500" aria-hidden="true" /> 汇总下单</div>
     </template>
 
     <!-- Tab headers -->
@@ -12,7 +12,7 @@
         :class="['sm-tab-btn', { active: activeTab === 'factory' }]"
         @click="activeTab = 'factory'"
       >
-        <i class="fas fa-industry"  aria-hidden="true" /> 工厂内部订单
+        <FontAwesomeIcon icon="industry" aria-hidden="true" /> 工厂内部订单
       </div>
       <div
         role="tab"
@@ -20,7 +20,7 @@
         :class="['sm-tab-btn', { active: activeTab === 'supplier', 'out-mode': activeTab === 'supplier' }]"
         @click="activeTab = 'supplier'"
       >
-        <i class="fas fa-truck"  aria-hidden="true" /> 供应商采购订单
+        <FontAwesomeIcon icon="truck" aria-hidden="true" /> 供应商采购订单
       </div>
     </div>
 
@@ -32,7 +32,7 @@
         >
           <div>
             <div class="font-semibold text-sm mb-1.5">
-              <i class="fas fa-industry text-primary-400"  aria-hidden="true" /> 工厂内部采购订单汇总
+              <FontAwesomeIcon icon="industry" class="text-primary-400" aria-hidden="true" /> 工厂内部采购订单汇总
             </div>
             <div class="text-xs text-text-secondary">
               已选择 <strong class="text-primary-400">{{ factoryData.order_count || orderCount }}</strong> 个订单
@@ -44,7 +44,7 @@
                 class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-border bg-transparent text-text-secondary hover:text-primary-500 hover:border-primary-500 hover:bg-primary-50 transition-colors"
                 @click="$emit('toggleEditMode', true)"
               >
-                <i class="fas fa-edit"  aria-hidden="true" /> 自定义编辑
+                <FontAwesomeIcon icon="edit" aria-hidden="true" /> 自定义编辑
               </button>
               <label class="text-xs text-text-secondary whitespace-nowrap">损耗率（千分之几）</label>
               <input
@@ -62,13 +62,13 @@
                 class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-warning-500 rounded-lg border-none transition-colors hover:bg-warning-600"
                 @click="$emit('toggleEditMode', false)"
               >
-                <i class="fas fa-times"  aria-hidden="true" /> 取消编辑
+                <FontAwesomeIcon icon="times" aria-hidden="true" /> 取消编辑
               </button>
               <button
                 class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-success-500 rounded-lg border-none transition-colors hover:bg-success-600"
                 @click="$emit('saveEdits')"
               >
-                <i class="fas fa-save"  aria-hidden="true" /> 保存修改
+                <FontAwesomeIcon icon="save" aria-hidden="true" /> 保存修改
               </button>
             </template>
           </div>
@@ -142,7 +142,7 @@
               class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-success-500 rounded-lg border-none transition-colors hover:bg-success-600"
               @click="$emit('exportFactory')"
             >
-              <i class="fas fa-file-excel"  aria-hidden="true" /> 导出 Excel
+              <FontAwesomeIcon icon="file-excel" aria-hidden="true" /> 导出 Excel
             </button>
           </div>
           <div class="flex gap-2">
@@ -156,7 +156,7 @@
               class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-primary-500 rounded-lg border-none transition-colors hover:bg-primary-600"
               @click="$emit('printFactory')"
             >
-              <i class="fas fa-print"  aria-hidden="true" /> 打印预览
+              <FontAwesomeIcon icon="print" aria-hidden="true" /> 打印预览
             </button>
           </div>
         </div>
@@ -168,7 +168,7 @@
           class="mb-3 p-3 rounded-lg flex justify-between items-center bg-gradient-to-r from-rose/10 to-rose-deep/10"
         >
           <div>
-            <div class="font-semibold text-sm mb-1.5"><i class="fas fa-truck text-rose"  aria-hidden="true" /> 供应商采购订单汇总</div>
+            <div class="font-semibold text-sm mb-1.5"><FontAwesomeIcon icon="truck" class="text-rose" aria-hidden="true" /> 供应商采购订单汇总</div>
             <div class="text-xs text-text-secondary">
               已选择 <strong class="text-rose">{{ supplierData.order_count || orderCount }}</strong> 个订单，涵盖
               <strong class="text-rose">{{ supplierGroups.length }}</strong> 家供应商，共
@@ -216,7 +216,7 @@
               class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-success-500 rounded-lg border-none transition-colors hover:bg-success-600"
               @click="$emit('exportSupplier')"
             >
-              <i class="fas fa-file-archive"  aria-hidden="true" /> 导出汇总
+              <FontAwesomeIcon icon="file-archive" aria-hidden="true" /> 导出汇总
             </button>
           </div>
           <div class="flex gap-2">
@@ -230,7 +230,7 @@
               class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-primary-500 rounded-lg border-none transition-colors hover:bg-primary-600"
               @click="$emit('printSupplier')"
             >
-              <i class="fas fa-print"  aria-hidden="true" /> 打印预览
+              <FontAwesomeIcon icon="print" aria-hidden="true" /> 打印预览
             </button>
           </div>
         </div>

@@ -6,11 +6,11 @@
         <div class="mc-header-actions">
           <span class="count-badge">已选 {{ selectedProductIds.length }} 个</span>
           <button class="mc-action-btn mc-action-btn-primary" :disabled="orderItems.length === 0" @click="showBatchModal = true">
-            <i class="fas fa-layer-group"  aria-hidden="true" />
+            <FontAwesomeIcon icon="layer-group" aria-hidden="true" />
             批量录入
           </button>
           <button class="mc-action-btn mc-action-btn-danger" :disabled="orderItems.length === 0" @click="clearAll">
-            <i class="fas fa-eraser"  aria-hidden="true" />
+            <FontAwesomeIcon icon="eraser" aria-hidden="true" />
             清空
           </button>
           <span v-if="calcStatus" :class="['mc-status-badge', calculating ? 'calculating' : 'done']">
@@ -23,14 +23,14 @@
         <!-- Column 1: Product Selection -->
         <div class="mc-col mc-col-products">
           <div class="mc-col-title">
-            <i class="fas fa-boxes-stacked"  aria-hidden="true" />
+            <FontAwesomeIcon icon="boxes-stacked" aria-hidden="true" />
             产品选择
           </div>
 
           <!-- Search -->
           <div class="mc-search-wrapper">
             <div class="mc-search-input-group">
-              <i class="fas fa-search mc-search-icon"  aria-hidden="true" />
+              <FontAwesomeIcon icon="search" class="mc-search-icon" aria-hidden="true" />
               <input
                 v-model="searchQuery"
                 type="text"
@@ -48,7 +48,7 @@
                   onSearchInput()
                 "
                aria-label="关闭">
-                <i class="fas fa-times"  aria-hidden="true" />
+                <FontAwesomeIcon icon="times" aria-hidden="true" />
               </button>
             </div>
             <div v-if="searchSuggestions.length" class="mc-search-dropdown">
@@ -85,7 +85,7 @@
               <UiSpinner />
             </div>
             <div v-else-if="filteredProducts.length === 0" class="mc-empty-state">
-              <i class="fas fa-inbox"  aria-hidden="true" />
+              <FontAwesomeIcon icon="inbox" aria-hidden="true" />
               <span>暂无产品</span>
             </div>
             <template v-else>
@@ -93,7 +93,7 @@
                 :items="filteredProducts"
                 :itemHeight="80"
                 :containerHeight="productListHeight"
-                :itemKey="(p: any) => p.id"
+                :itemKey="(p: { id: number }) => p.id"
               >
                 <template #default="{ item: p }">
                   <div
@@ -104,7 +104,7 @@
                     ]"
                     @click="p.has_bom && toggleProduct(p)"
                   >
-                    <i :class="['mc-checkbox', selectedProductIds.includes(p.id) ? 'fas fa-check-square' : 'far fa-square']"  aria-hidden="true" />
+                    <FontAwesomeIcon :icon="selectedProductIds.includes(p.id) ? 'check-square' : 'square'" class="mc-checkbox" aria-hidden="true" />
                     <div class="mc-product-details">
                       <div class="mc-product-name">
                         {{ p.name }}
@@ -126,13 +126,13 @@
         <!-- Column 2: Order Quantity -->
         <div class="mc-col mc-col-orders">
           <div class="mc-col-title">
-            <i class="fas fa-clipboard-check"  aria-hidden="true" />
+            <FontAwesomeIcon icon="clipboard-check" aria-hidden="true" />
             订单数量录入
           </div>
 
           <div class="mc-order-list">
             <div v-if="orderItems.length === 0" class="mc-empty-state">
-              <i class="fas fa-hand-point-left"  aria-hidden="true" />
+              <FontAwesomeIcon icon="hand-point-left" aria-hidden="true" />
               <span>请从左侧选择产品</span>
             </div>
             <div v-for="item in orderItems" :key="item.product_id" class="mc-order-item">
@@ -150,7 +150,7 @@
                 />
               </div>
               <button class="mc-delete-btn" @click="removeAndRecalc(item.product_id)" aria-label="删除">
-                <i class="fas fa-trash-alt"  aria-hidden="true" />
+                <FontAwesomeIcon icon="trash-alt" aria-hidden="true" />
               </button>
             </div>
           </div>
@@ -167,13 +167,13 @@
         <!-- Column 3: Calculation Results -->
         <div class="mc-col mc-col-results">
           <div class="mc-col-title">
-            <i class="fas fa-chart-pie"  aria-hidden="true" />
+            <FontAwesomeIcon icon="chart-pie" aria-hidden="true" />
             物料用量计算结果
           </div>
 
           <div class="mc-result-content">
             <div v-if="!hasResults" class="mc-empty-state">
-              <i class="fas fa-calculator"  aria-hidden="true" />
+              <FontAwesomeIcon icon="calculator" aria-hidden="true" />
               <span>选择产品并输入数量后自动计算</span>
             </div>
             <div v-else>
@@ -187,7 +187,7 @@
                   <i :class="['mc-cat-icon', cat.icon]"  aria-hidden="true" />
                   <span class="mc-cat-label">{{ cat.label }}</span>
                   <span class="mc-cat-count">({{ calcResults[cat.key]?.length ?? 0 }} 项)</span>
-                  <i :class="['fas fa-chevron-down mc-cat-toggle', collapsed[cat.key] ? '' : 'expanded']"  aria-hidden="true" />
+                  <FontAwesomeIcon icon="chevron-down" :class="['mc-cat-toggle', collapsed[cat.key] ? '' : 'expanded']" aria-hidden="true" />
                 </button>
 
                 <div v-if="!collapsed[cat.key] && calcResults[cat.key]?.length" class="mc-category-table">

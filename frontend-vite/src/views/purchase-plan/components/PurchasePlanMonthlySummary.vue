@@ -1,8 +1,8 @@
 <template>
   <div class="sp-body">
     <div v-if="loading" class="sp-empty"><UiSpinner /></div>
-    <div v-else-if="error" class="sp-empty"><i class="fas fa-exclamation-circle"  aria-hidden="true" />加载失败 <button class="sp-retry-btn" @click="emit('refetch')">重试</button></div>
-    <div v-else-if="!hasData" class="sp-empty"><i class="fas fa-inbox"  aria-hidden="true" />本月暂无数据</div>
+    <div v-else-if="error" class="sp-empty"><FontAwesomeIcon icon="exclamation-circle" aria-hidden="true" />加载失败 <button class="sp-retry-btn" @click="emit('refetch')">重试</button></div>
+    <div v-else-if="!hasData" class="sp-empty"><FontAwesomeIcon icon="inbox" aria-hidden="true" />本月暂无数据</div>
     <template v-else>
     <div v-if="fetching" class="sp-fetching-bar"><div class="sp-fetching-progress" /></div>
     <div>
@@ -31,20 +31,20 @@
                 </th>
                 <th class="sp-sku-th-number sp-sku-th-sortable" @click="emit('toggle-sku-sort', 'plan')">
                   <span class="sp-sku-th-text">计划数量
-                    <i v-if="skuSortField === 'plan'" :class="skuSortDir === 'asc' ? 'fas fa-sort-up' : 'fas fa-sort-down'"></i>
-                    <i v-else class="fas fa-sort sp-sort-muted"></i>
+                    <FontAwesomeIcon v-if="skuSortField === 'plan'" :icon="skuSortDir === 'asc' ? 'sort-up' : 'sort-down'" />
+                    <FontAwesomeIcon v-else icon="sort" class="sp-sort-muted" />
                   </span>
                 </th>
                 <th class="sp-sku-th-number sp-sku-th-sortable" @click="emit('toggle-sku-sort', 'shipped')">
                   <span class="sp-sku-th-text">已出货
-                    <i v-if="skuSortField === 'shipped'" :class="skuSortDir === 'asc' ? 'fas fa-sort-up' : 'fas fa-sort-down'"></i>
-                    <i v-else class="fas fa-sort sp-sort-muted"></i>
+                    <FontAwesomeIcon v-if="skuSortField === 'shipped'" :icon="skuSortDir === 'asc' ? 'sort-up' : 'sort-down'" />
+                    <FontAwesomeIcon v-else icon="sort" class="sp-sort-muted" />
                   </span>
                 </th>
                 <th class="sp-sku-th-number sp-sku-th-sortable" @click="emit('toggle-sku-sort', 'remain')">
                   <span class="sp-sku-th-text">待出货
-                    <i v-if="skuSortField === 'remain'" :class="skuSortDir === 'asc' ? 'fas fa-sort-up' : 'fas fa-sort-down'"></i>
-                    <i v-else class="fas fa-sort sp-sort-muted"></i>
+                    <FontAwesomeIcon v-if="skuSortField === 'remain'" :icon="skuSortDir === 'asc' ? 'sort-up' : 'sort-down'" />
+                    <FontAwesomeIcon v-else icon="sort" class="sp-sort-muted" />
                   </span>
                 </th>
               </tr>

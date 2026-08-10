@@ -4,12 +4,12 @@
     class="bk-check-result"
     :class="checkResult.failed > 0 ? 'bk-check-warn' : 'bk-check-ok'"
   >
-    <i :class="checkResult.failed > 0 ? 'fas fa-exclamation-triangle' : 'fas fa-check-circle'" />
+    <FontAwesomeIcon :icon="checkResult.failed > 0 ? 'exclamation-triangle' : 'check-circle'" />
     <span>
       巡检完成：{{ checkResult.passed }} 通过，{{ checkResult.failed }} 失败
       <template v-if="checkResult.latest_backup"> · 最新备份: {{ checkResult.latest_backup }} ({{ formatSize(checkResult.latest_backup_size) }})</template>
     </span>
-    <button class="bk-check-close" @click="$emit('close')"><i class="fas fa-times" /></button>
+    <button class="bk-check-close" @click="$emit('close')"><FontAwesomeIcon icon="times" /></button>
   </div>
 </template>
 

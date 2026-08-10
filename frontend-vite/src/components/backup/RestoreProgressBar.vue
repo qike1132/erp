@@ -23,7 +23,7 @@
     </div>
 
     <div v-if="progress.error" class="rp-error">
-      <i class="fas fa-exclamation-circle" /> {{ progress.error }}
+      <FontAwesomeIcon icon="exclamation-circle" /> {{ progress.error }}
     </div>
 
     <div v-if="isCompleted && progress.result" class="rp-result-summary" :class="resultSummaryClass">

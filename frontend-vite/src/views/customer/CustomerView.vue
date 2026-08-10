@@ -9,7 +9,7 @@
         <div class="cu-header-right">
           <div class="cu-tabs">
             <button class="cu-tab-btn active" @click="openForm('add')">
-              <i class="fas fa-plus"  aria-hidden="true" /> 新建客户
+              <FontAwesomeIcon icon="plus" aria-hidden="true" /> 新建客户
             </button>
           </div>
         </div>
@@ -22,7 +22,7 @@
         </div>
         <template v-else-if="customers.length === 0">
           <div class="cu-empty">
-            <i class="fas fa-building"  aria-hidden="true" />
+            <FontAwesomeIcon icon="building" aria-hidden="true" />
             <span>暂无客户数据</span>
             <button class="cu-action-btn cu-action-primary" @click="openForm('add')">立即添加</button>
           </div>
@@ -63,9 +63,9 @@
               <td><span class="cu-text-muted">{{ formatDate(row.create_time) }}</span></td>
               <td>
                 <div class="cu-actions">
-                  <button class="cu-icon-btn cu-icon-edit" title="编辑" @click="openForm('edit', row)" aria-label="编辑"><i class="fas fa-pen-to-square"  aria-hidden="true" /></button>
-                  <button class="cu-icon-btn cu-icon-toggle" title="切换状态" @click="handleToggle(row)" aria-label="切换状态"><i :class="row.status ? 'fas fa-lock' : 'fas fa-lock-open'"  aria-hidden="true" /></button>
-                  <button class="cu-icon-btn cu-icon-delete" title="删除" @click="handleDelete(row)" aria-label="删除"><i class="fas fa-trash"  aria-hidden="true" /></button>
+                  <button class="cu-icon-btn cu-icon-edit" title="编辑" @click="openForm('edit', row)" aria-label="编辑"><FontAwesomeIcon icon="pen-to-square" aria-hidden="true" /></button>
+                  <button class="cu-icon-btn cu-icon-toggle" title="切换状态" @click="handleToggle(row)" aria-label="切换状态"><FontAwesomeIcon :icon="row.status ? 'lock' : 'lock-open'" aria-hidden="true" /></button>
+                  <button class="cu-icon-btn cu-icon-delete" title="删除" @click="handleDelete(row)" aria-label="删除"><FontAwesomeIcon icon="trash" aria-hidden="true" /></button>
                 </div>
               </td>
             </tr>

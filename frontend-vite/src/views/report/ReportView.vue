@@ -37,7 +37,7 @@
           <button class="rp-action-btn rp-action-primary" @click="doSearch">查询</button>
           <button class="rp-action-btn rp-action-outline" @click="doReset">重置</button>
           <button v-if="searched" class="rp-action-btn rp-action-success" @click="exportReport">
-            <i class="fas fa-download" style="margin-right: 4px"  aria-hidden="true" />导出
+            <FontAwesomeIcon icon="download" style="margin-right: 4px"  aria-hidden="true" />导出
           </button>
         </div>
       </div>
@@ -48,7 +48,7 @@
           <UiSpinner />
         </div>
         <div v-else-if="!logs.length" class="rp-empty">
-          <i class="fas fa-chart-line"  aria-hidden="true" />
+          <FontAwesomeIcon icon="chart-line" aria-hidden="true" />
           <span>{{ isFetching ? '加载中…' : '暂无数据' }}</span>
         </div>
         <template v-else>

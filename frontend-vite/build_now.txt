@@ -1,0 +1,61 @@
+﻿[36mvite v7.3.6 [32mbuilding client environment for production...[36m[39m
+transforming...
+node.exe : [33m[plugin vite:esbuild] src/styles/primevue-pt.ts: [33mDuplicate key "content" in object literal[33m
+所在位置 C:\Users\Administrator\.trae-cn\binaries\node\versions\24.14.0\npx.ps1:16 字符: 5
++     & "$basedir/node$exe"  "$basedir/node_modules/npm/bin/npx-cli.js" ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([33m[plugin vi...ct literal[33m:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+98 |        ],
+99 |      },
+100|      content: 'flex-1 px-6 py-5 overflow-y-auto',
+   |      ^
+101|    },
+102|  
+[39m
+[33m[plugin vite:esbuild] src/styles/primevue-pt.ts: [33mDuplicate key "content" in object literal[33m
+240 |      closeButton:
+241 |        'inline-flex items-center justify-center w-8 h-8 rounded-full text-text-muted hover:bg-slate-100 hover:tex
+t-tex...
+242 |      content: 'flex-1 px-6 py-5 overflow-y-auto',
+    |      ^
+243 |      footer: 'flex items-center justify-end gap-3 px-6 py-4 border-t border-border-light flex-shrink-0',
+244 |    },
+[39m
+[33mnode_modules/@vueuse/core/dist/index.js (3362:0): A comment
+
+"/* #__PURE__ */"
+
+in "node_modules/@vueuse/core/dist/index.js" contains an annotation that Rollup cannot interpret due to the position of
+ the comment. The comment will be removed to avoid issues.[39m
+[33mnode_modules/@vueuse/core/dist/index.js (5780:22): A comment
+
+"/* #__PURE__ */"
+
+in "node_modules/@vueuse/core/dist/index.js" contains an annotation that Rollup cannot interpret due to the position of
+ the comment. The comment will be removed to avoid issues.[39m
+[32m✓[39m 2484 modules transformed.
+[31m✗[39m Build failed in 29.62s
+
+PWA v1.3.0
+mode      generateSW
+precache  180 entries (3534.40 KiB)
+files generated
+  dist/sw.js
+  dist/workbox-2da51cb1.js
+[31merror during build:
+[31m[vite:prepare-out-dir] [safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED] {"count":175,"threshold":50,"scope":"turn"
+,"targets":["D:\\erp_system\\frontend-vite\\dist\\assets"],"targetCount":1}[31m
+    at checkBulkDeleteGuard (D:\CodeBuddy CN\resources\app\extensions\genie\out\vendor\shim\node-safe-delete-shim.cjs:2
+73:19)
+    at tryTrash (D:\CodeBuddy CN\resources\app\extensions\genie\out\vendor\shim\node-safe-delete-shim.cjs:602:5)
+    at tryRm (D:\CodeBuddy CN\resources\app\extensions\genie\out\vendor\shim\node-safe-delete-shim.cjs:775:5)
+    at Object.wrappedRmSync [as rmSync] (D:\CodeBuddy CN\resources\app\extensions\genie\out\vendor\shim\node-safe-delet
+e-shim.cjs:781:15)
+    at emptyDir (file:///D:/erp_system/frontend-vite/node_modules/vite/dist/node/chunks/config.js:2167:11)
+    at prepareOutDir (file:///D:/erp_system/frontend-vite/node_modules/vite/dist/node/chunks/config.js:33405:55)
+    at Object.handler (file:///D:/erp_system/frontend-vite/node_modules/vite/dist/node/chunks/config.js:33395:6)
+    at Object.handler (file:///D:/erp_system/frontend-vite/node_modules/vite/dist/node/chunks/config.js:33823:13)
+    at file:///D:/erp_system/frontend-vite/node_modules/rollup/dist/es/shared/node-entry.js:22987:40
+    at async Promise.all (index 0)[39m

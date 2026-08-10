@@ -7,7 +7,7 @@
       :aria-label="`通知中心，${unreadCount} 条未读`"
       @click="goToCenter"
     >
-      <i class="fas fa-bell" aria-hidden="true" />
+      <FontAwesomeIcon icon="bell" aria-hidden="true" />
       <span v-if="unreadCount > 0" class="nb-badge">{{ displayCount }}</span>
     </button>
   </div>

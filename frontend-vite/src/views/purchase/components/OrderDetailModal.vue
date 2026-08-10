@@ -4,7 +4,7 @@
       <!-- 物料清单 -->
       <div class="odm-section">
         <div class="odm-section-title">
-          <i class="fas fa-list" aria-hidden="true" />
+          <FontAwesomeIcon icon="list" aria-hidden="true" />
           <span>物料清单</span>
           <span v-if="(order.items || []).length > 0" class="odm-section-count">{{ (order.items || []).length }} 项</span>
         </div>

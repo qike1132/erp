@@ -1,4 +1,4 @@
-import { library, dom } from '@fortawesome/fontawesome-svg-core'
+import { library } from '@fortawesome/fontawesome-svg-core'
 import {
   faAnglesLeft,
   faAnglesRight,
@@ -38,6 +38,7 @@ import {
   faCircleMinus,
   faCircleExclamation,
   faCircleInfo,
+  faCircleNotch,
   faCirclePlus,
   faCircleQuestion,
   faCircleXmark,
@@ -217,6 +218,7 @@ library.add(
   faCircleMinus,
   faCircleExclamation,
   faCircleInfo,
+  faCircleNotch,
   faCirclePlus,
   faCircleQuestion,
   faCircleXmark,
@@ -422,4 +424,5 @@ for (const { fa5Name, icon } of FA5_ALIASES) {
   } as any)
 }
 
-dom.watch()
+// dom.watch() 已移除 — 改为全局注册 FontAwesomeIcon Vue 组件，
+// 彻底消除 MutationObserver 与 Vue 虚拟 DOM 的冲突

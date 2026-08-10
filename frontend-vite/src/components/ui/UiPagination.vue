@@ -1,17 +1,17 @@
 <template>
   <div class="ui-pagination">
     <button class="ui-page-btn" :disabled="currentPage <= 1" aria-label="首页" @click="$emit('update:currentPage', 1)">
-      <i class="fas fa-angle-double-left" aria-hidden="true" />
+      <FontAwesomeIcon icon="angle-double-left" aria-hidden="true" />
     </button>
     <button class="ui-page-btn" :disabled="currentPage <= 1" aria-label="上一页" @click="$emit('update:currentPage', currentPage - 1)">
-      <i class="fas fa-angle-left" aria-hidden="true" />
+      <FontAwesomeIcon icon="angle-left" aria-hidden="true" />
     </button>
     <span class="ui-page-info">{{ currentPage }} / {{ totalPages }}</span>
     <button class="ui-page-btn" :disabled="currentPage >= totalPages" aria-label="下一页" @click="$emit('update:currentPage', currentPage + 1)">
-      <i class="fas fa-angle-right" aria-hidden="true" />
+      <FontAwesomeIcon icon="angle-right" aria-hidden="true" />
     </button>
     <button class="ui-page-btn" :disabled="currentPage >= totalPages" aria-label="末页" @click="$emit('update:currentPage', totalPages)">
-      <i class="fas fa-angle-double-right" aria-hidden="true" />
+      <FontAwesomeIcon icon="angle-double-right" aria-hidden="true" />
     </button>
     <span v-if="totalItems != null" class="ui-page-total">共 {{ totalItems }} 条</span>
   </div>

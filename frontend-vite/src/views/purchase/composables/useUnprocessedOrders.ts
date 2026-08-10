@@ -1,6 +1,7 @@
 import { ref, computed, reactive } from 'vue'
 import { purchaseApi } from '@/api'
 import { showToast } from '@/composables/useToast'
+import { getErrorMessage } from '@/types/errors'
 import type { UnprocessedOrder } from '@/types'
 
 interface UnprocessedOrdersResponse {
@@ -59,10 +60,10 @@ export function useUnprocessedOrders() {
       totalPages.value = res.pages || Math.max(1, Math.ceil(total.value / perPage.value))
       currentPage.value = res.current_page || p
       selectedCompositeIds.value = []
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (signal.aborted) return
       orders.value = []
-      showToast(err.response?.data?.detail || '加载待审核订单失败', 'error')
+      showToast(getErrorMessage(err, '加载待审核订单失败'), 'error')
     } finally {
       if (!signal.aborted) {
         loading.value = false

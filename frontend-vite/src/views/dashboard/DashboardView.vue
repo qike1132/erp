@@ -19,7 +19,7 @@
       class="mb-4 p-3 rounded-[var(--radius-card)] bg-danger-50 border border-danger-200 flex items-center gap-3 animate-fade-in"
     >
       <div class="w-7 h-7 rounded-[var(--radius-md)] bg-danger-100 flex items-center justify-center shrink-0">
-        <i class="fas fa-triangle-exclamation text-danger-500 text-xs" />
+        <FontAwesomeIcon icon="triangle-exclamation" class="text-danger-500 text-xs" />
       </div>
       <div class="flex-1 min-w-0">
         <p class="text-sm text-danger-700 font-medium">{{ errorMessage }}</p>
@@ -29,7 +29,7 @@
         class="px-3 py-1.5 rounded-[var(--radius-button)] bg-danger-500 text-white text-xs font-semibold hover:bg-danger-600 transition-all duration-300 hover:-translate-y-0.5 shrink-0"
         @click="retryLoad"
       >
-        <i class="fas fa-rotate-right mr-1" />重试
+        <FontAwesomeIcon icon="rotate-right" class="mr-1" />重试
       </button>
     </div>
 
@@ -39,12 +39,12 @@
       <div class="page-card-toolbar">
         <div class="page-toolbar-left">
           <button class="menu-toggle-btn" aria-label="切换侧边栏" @click="sidebarStore.toggle()">
-            <i :class="!sidebarStore.isCollapsed ? 'fas fa-angles-left' : 'fas fa-angles-right'" style="font-size: 18px" aria-hidden="true" />
+            <FontAwesomeIcon :icon="!sidebarStore.isCollapsed ? 'angles-left' : 'angles-right'" style="font-size: 18px" aria-hidden="true" />
           </button>
         </div>
         <div class="page-toolbar-right">
           <span class="header-clock">
-            <i class="fas fa-clock" style="font-size: 13px" aria-hidden="true" />
+            <FontAwesomeIcon icon="clock" style="font-size: 13px" aria-hidden="true" />
             {{ currentTime }}
           </span>
           <div class="user-info-header">
@@ -62,7 +62,7 @@
           </div>
           <NotificationBell v-if="authStore.isLoggedIn" />
           <button class="logout-btn-header" @click="confirmLogout">
-            <i class="fas fa-right-from-bracket" style="font-size: 13px" aria-hidden="true" />
+            <FontAwesomeIcon icon="right-from-bracket" style="font-size: 13px" aria-hidden="true" />
             <span>退出</span>
           </button>
         </div>
@@ -94,7 +94,7 @@
               <div class="flex items-center justify-between w-full">
                 <div class="flex items-center gap-2">
                   <div class="w-8 h-8 rounded-[var(--radius-md)] bg-primary-50 flex items-center justify-center">
-                    <i class="fas fa-chart-line text-primary-500 text-sm" />
+                    <FontAwesomeIcon icon="chart-line" class="text-primary-500 text-sm" />
                   </div>
                   <span class="text-sm font-semibold text-text">订单趋势（近7日）</span>
                 </div>
@@ -109,7 +109,7 @@
             <template #header>
               <div class="flex items-center gap-2">
                 <div class="w-8 h-8 rounded-[var(--radius-md)] bg-purple-50 flex items-center justify-center">
-                  <i class="fas fa-chart-pie text-purple-500 text-sm" />
+                  <FontAwesomeIcon icon="chart-pie" class="text-purple-500 text-sm" />
                 </div>
                 <span class="text-sm font-semibold text-text">订单与备货分布</span>
               </div>
@@ -147,21 +147,19 @@ import { usePerfMark } from '@/composables/usePerfMark'
 import { toast } from '@/composables/useToast'
 
 // ECharts 懒加载：避免在首屏（dashboard 为落地页）加载 ~1MB 的图表库
+// 🟢 改为共享预加载模块：登录成功后即开始下载，dashboard 挂载时直接复用缓存
+import { ensureEcharts, getEchartsModule } from '@/utils/echartsPreload'
 type EChartsModule = typeof import('echarts/core')
-let _echartsModule: EChartsModule | null = null
-let _echartsReady = false
-async function ensureEcharts(): Promise<EChartsModule> {
-  if (_echartsReady && _echartsModule) return _echartsModule
-  const mod = await import('echarts/core')
-  const [{ LineChart, PieChart }, { GridComponent, TooltipComponent, LegendComponent }, { CanvasRenderer }] = await Promise.all([
-    import('echarts/charts'),
-    import('echarts/components'),
-    import('echarts/renderers'),
-  ])
-  mod.use([LineChart, PieChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer])
-  _echartsModule = mod
-  _echartsReady = true
-  return mod
+
+/**
+ * 安全初始化图表：若 DOM 已有旧实例则先 dispose。
+ * 消除 "There is a chart instance already initialized on the dom" 警告，
+ * 杜绝自动刷新时的实例堆积与内存泄露。
+ */
+function safeInit(dom: HTMLElement, echarts: EChartsModule): ReturnType<EChartsModule['init']> {
+  const existing = echarts.getInstanceByDom(dom)
+  if (existing) existing.dispose()
+  return echarts.init(dom)
 }
 
 const perf = usePerfMark('dashboard')
@@ -186,9 +184,30 @@ const lastSyncTime = ref('')
 const orderChartRef = ref<HTMLElement>()
 const stockChartRef = ref<HTMLElement>()
 
-const chartInstances: import('echarts/core').ECharts[] = []
-const resizeHandlers: (() => void)[] = []
+// 图表 & resize 生命周期统一管理
+const _chartMeta: { chart: import('echarts/core').ECharts; handler: () => void }[] = []
+/** 图表具名引用：消除 _chartMeta[0]/[1] 硬编码，支持任意图表增删 */
+let _orderChart: import('echarts/core').ECharts | null = null
+let _stockChart: import('echarts/core').ECharts | null = null
 let refreshTimer: ReturnType<typeof setInterval> | null = null
+
+/** 销毁所有图表实例并移除 resize 监听，确保零泄露 */
+function disposeAllCharts() {
+  for (const { chart, handler } of _chartMeta) {
+    window.removeEventListener('resize', handler)
+    chart.dispose()
+  }
+  _chartMeta.length = 0
+  _orderChart = null
+  _stockChart = null
+}
+
+/** 注册图表到生命周期管理器（resize + dispose 由 disposeAllCharts 统一处理） */
+function registerChart(chart: import('echarts/core').ECharts) {
+  const handler = () => chart.resize()
+  window.addEventListener('resize', handler)
+  _chartMeta.push({ chart, handler })
+}
 
 // ===== KPI 卡片数据 =====
 const kpiCards = computed(() => [
@@ -255,11 +274,11 @@ function trendText(today?: number, yesterday?: number): string {
 }
 
 // ===== 图表渲染 =====
-async function renderOrderChart() {
-  if (!orderChartRef.value) return
-  perf.mark('chart-order-start')
-  const echarts = await ensureEcharts()
-  const chart = echarts.init(orderChartRef.value)
+/** 标记图表是否已完成首次完整渲染（之后仅更新数据，不复建实例） */
+let _chartsRendered = false
+
+/** 构建折线图 option（数据和日期可变，样式固定） */
+function buildOrderChartOption(echarts: EChartsModule) {
   const days: string[] = []
   const now = new Date()
   for (let i = 6; i >= 0; i--) {
@@ -267,12 +286,10 @@ async function renderOrderChart() {
     d.setDate(d.getDate() - i)
     days.push(`${d.getMonth() + 1}/${d.getDate()}`)
   }
-
   const data = [0, 0, 0, 0, 0, 0, stats.value?.order_today ?? 0]
-
-  chart.setOption({
+  return {
     tooltip: {
-      trigger: 'axis',
+      trigger: 'axis' as const,
       backgroundColor: 'rgba(255,255,255,0.95)',
       borderColor: '#e2e8f0',
       borderWidth: 1,
@@ -281,27 +298,21 @@ async function renderOrderChart() {
     },
     grid: { top: 24, right: 20, bottom: 32, left: 48 },
     xAxis: {
-      type: 'category',
-      data: days,
+      type: 'category' as const, data: days,
       axisLine: { lineStyle: { color: '#e2e8f0' } },
       axisLabel: { color: '#64748b', fontSize: 11 },
       axisTick: { show: false },
     },
     yAxis: {
-      type: 'value',
-      splitLine: { lineStyle: { color: '#f1f5f9', type: 'dashed' } },
+      type: 'value' as const,
+      splitLine: { lineStyle: { color: '#f1f5f9', type: 'dashed' as const } },
       axisLabel: { color: '#64748b', fontSize: 11 },
-      axisLine: { show: false },
-      axisTick: { show: false },
+      axisLine: { show: false }, axisTick: { show: false },
     },
     series: [{
-      type: 'line',
-      smooth: true,
-      symbol: 'circle',
-      symbolSize: 8,
-      showSymbol: false,
-      data,
-      lineStyle: { color: '#5b8def', width: 3, cap: 'round' },
+      type: 'line' as const, smooth: true, symbol: 'circle' as const, symbolSize: 8,
+      showSymbol: false, data,
+      lineStyle: { color: '#5b8def', width: 3, cap: 'round' as const },
       itemStyle: { color: '#5b8def', borderWidth: 2, borderColor: '#fff' },
       areaStyle: {
         color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
@@ -309,71 +320,38 @@ async function renderOrderChart() {
           { offset: 1, color: 'rgba(91,141,239,0.01)' },
         ]),
       },
-      emphasis: {
-        showSymbol: true,
-        itemStyle: { shadowBlur: 8, shadowColor: 'rgba(91,141,239,0.4)' },
-      },
+      emphasis: { showSymbol: true, itemStyle: { shadowBlur: 8, shadowColor: 'rgba(91,141,239,0.4)' } },
     }],
-  })
-  perf.markEnd('chart-order-start')
-  perf.measure('chart-order-render', 'chart-order-start')
-  chartInstances.push(chart)
-  const onResize = () => chart.resize()
-  resizeHandlers.push(onResize)
-  window.addEventListener('resize', onResize)
+  }
 }
 
-async function renderStockChart() {
-  if (!stockChartRef.value) return
-  perf.mark('chart-stock-start')
-  const echarts = await ensureEcharts()
-  const chart = echarts.init(stockChartRef.value)
+/** 构建饼图 option（数据可变，样式固定） */
+function buildStockChartOption() {
   const orderTotal = stockStats.value?.order_quantity ?? 0
   const stockinTotal = stockStats.value?.stockin_quantity ?? 0
-
-  chart.setOption({
+  return {
     tooltip: {
-      trigger: 'item',
-      formatter: '{b}: {c}件 ({d}%)',
+      trigger: 'item' as const, formatter: '{b}: {c}件 ({d}%)',
       backgroundColor: 'rgba(255,255,255,0.95)',
-      borderColor: '#e2e8f0',
-      borderWidth: 1,
+      borderColor: '#e2e8f0', borderWidth: 1,
       textStyle: { color: '#1a1a2e', fontSize: 12 },
       extraCssText: 'box-shadow: 0 4px 16px rgba(0,0,0,0.08); border-radius: 12px;',
     },
     legend: {
-      bottom: 0,
-      itemWidth: 10,
-      itemHeight: 10,
-      itemGap: 20,
+      bottom: 0, itemWidth: 10, itemHeight: 10, itemGap: 20,
       textStyle: { color: '#64748b', fontSize: 12 },
     },
     series: [{
-      type: 'pie',
-      radius: ['42%', '68%'],
-      center: ['50%', '46%'],
-      avoidLabelOverlap: true,
-      padAngle: 0,
-      minAngle: 15,
+      type: 'pie' as const, radius: ['42%', '68%'], center: ['50%', '46%'],
+      avoidLabelOverlap: true, padAngle: 0, minAngle: 15,
       itemStyle: { borderColor: '#fff', borderWidth: 0 },
       label: {
-        show: true,
-        fontSize: 12,
-        fontWeight: 'bold',
-        formatter: '{b}\n{c}件 ({d}%)',
-        overflow: 'break',
-        width: 100,
+        show: true, fontSize: 12, fontWeight: 'bold' as const,
+        formatter: '{b}\n{c}件 ({d}%)', overflow: 'break' as const, width: 100,
       },
-      labelLayout: {
-        hideOverlap: true,
-      },
+      labelLayout: { hideOverlap: true },
       emphasis: {
-        label: {
-          show: true,
-          fontSize: 13,
-          fontWeight: 'bold',
-          formatter: '{b}\n{c}件 ({d}%)',
-        },
+        label: { show: true, fontSize: 13, fontWeight: 'bold' as const, formatter: '{b}\n{c}件 ({d}%)' },
         scaleSize: 6,
       },
       data: [
@@ -381,13 +359,42 @@ async function renderStockChart() {
         { value: stockinTotal, name: '备货数量', itemStyle: { color: '#5b8def' } },
       ],
     }],
-  })
+  }
+}
+
+async function renderOrderChart() {
+  if (!orderChartRef.value) return
+  perf.mark('chart-order-start')
+  const echarts = await ensureEcharts()
+  const chart = safeInit(orderChartRef.value, echarts)
+  chart.setOption(buildOrderChartOption(echarts))
+  perf.markEnd('chart-order-start')
+  perf.measure('chart-order-render', 'chart-order-start')
+  registerChart(chart)
+  _orderChart = chart
+}
+
+async function renderStockChart() {
+  if (!stockChartRef.value) return
+  perf.mark('chart-stock-start')
+  const echarts = await ensureEcharts()
+  const chart = safeInit(stockChartRef.value, echarts)
+  chart.setOption(buildStockChartOption())
   perf.markEnd('chart-stock-start')
   perf.measure('chart-stock-render', 'chart-stock-start')
-  chartInstances.push(chart)
-  const onResize = () => chart.resize()
-  resizeHandlers.push(onResize)
-  window.addEventListener('resize', onResize)
+  registerChart(chart)
+  _stockChart = chart
+}
+
+/** 仅更新图表数据（不复建实例）：用于自动刷新，近乎零开销 */
+function updateOrderChart() {
+  if (!_orderChart) return
+  _orderChart.setOption(buildOrderChartOption(getEchartsModule()!))
+}
+
+function updateStockChart() {
+  if (!_stockChart) return
+  _stockChart.setOption(buildStockChartOption())
 }
 
 // ===== 数据加载（含错误处理和日志） =====
@@ -406,10 +413,16 @@ async function loadStats(showLoading = true) {
   perf.measure('api-stats', 'api-start')
 
   await nextTick()
-  // 图表渲染失败不应阻塞数据展示，单独 try/catch
+  // 🟢 首次完整渲染图表；后续自动刷新仅更新数据（不复建实例）
   try {
-    await renderOrderChart()
-    await renderStockChart()
+    if (!_chartsRendered) {
+      await renderOrderChart()
+      await renderStockChart()
+      _chartsRendered = true
+    } else {
+      updateOrderChart()
+      updateStockChart()
+    }
   } catch (chartErr) {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
@@ -531,11 +544,8 @@ async function loadStockStats() {
 
 // ===== 重试加载 =====
 function retryLoad() {
-  // 清理旧图表实例
-  for (const chart of chartInstances) {
-    chart.dispose()
-  }
-  chartInstances.length = 0
+  _chartsRendered = false
+  disposeAllCharts()
   loadStats(true).catch((err) => {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
@@ -612,14 +622,8 @@ onUnmounted(() => {
     clearInterval(clockTimer)
     clockTimer = null
   }
-  for (const handler of resizeHandlers) {
-    window.removeEventListener('resize', handler)
-  }
-  resizeHandlers.length = 0
-  for (const chart of chartInstances) {
-    chart.dispose()
-  }
-  chartInstances.length = 0
+  _chartsRendered = false
+  disposeAllCharts()
 })
 </script>
 

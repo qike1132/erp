@@ -35,12 +35,13 @@ const sizeClasses: Record<string, string> = {
 
 <template>
   <span class="inline-flex relative">
-    <i
+    <FontAwesomeIcon
       v-show="loading"
-      class="fas fa-circle-notch fa-spin"
+      icon="circle-notch"
+      spin
       :class="sizeClasses[size]"
       aria-hidden="true"
     />
-    <i v-show="!loading" :class="[`fas fa-${icon}`, sizeClasses[size]]" aria-hidden="true" />
+    <FontAwesomeIcon v-show="!loading" :icon="icon" :class="sizeClasses[size]" aria-hidden="true" />
   </span>
 </template>

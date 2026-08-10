@@ -8,7 +8,7 @@
         </div>
         <div class="sk-header-right">
           <button v-if="itemCount" class="sk-action-btn sk-action-success" @click="handleExport">
-            <i class="fas fa-file-excel" style="margin-right: 4px"  aria-hidden="true" />导出
+            <FontAwesomeIcon icon="file-excel" style="margin-right: 4px"  aria-hidden="true" />导出
           </button>
         </div>
       </div>

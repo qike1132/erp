@@ -2,7 +2,7 @@
   <div class="pc-section">
     <div class="pc-section-header">
       <div class="pc-section-title">
-        <i class="fas fa-list"  aria-hidden="true" /> 待生产订单
+        <FontAwesomeIcon icon="list" aria-hidden="true" /> 待生产订单
       </div>
       <div class="pc-section-actions">
         <button
@@ -10,14 +10,14 @@
           :disabled="selectedIds.length === 0"
           @click="$emit('summary')"
         >
-          <i class="fas fa-clipboard-list"  aria-hidden="true" /> 汇总下单 ({{ selectedIds.length }})
+          <FontAwesomeIcon icon="clipboard-list" aria-hidden="true" /> 汇总下单 ({{ selectedIds.length }})
         </button>
         <button
           class="pc-btn pc-btn-success pc-btn-sm"
           :disabled="selectedIds.length === 0"
           @click="$emit('batchComplete')"
         >
-          <i class="fas fa-check-double"  aria-hidden="true" /> 批量确认订单 ({{ selectedIds.length }})
+          <FontAwesomeIcon icon="check-double" aria-hidden="true" /> 批量确认订单 ({{ selectedIds.length }})
         </button>
         <span class="count-badge">{{ total }} 个订单</span>
       </div>
@@ -30,7 +30,7 @@
 
     <!-- Empty -->
     <div v-else-if="orders.length === 0" class="pc-empty-state">
-      <i class="fas fa-inbox"  aria-hidden="true" />
+      <FontAwesomeIcon icon="inbox" aria-hidden="true" />
       <span>暂无采购订单</span>
     </div>
 
@@ -110,7 +110,7 @@
                   class="pc-btn pc-btn-success pc-btn-sm"
                   @click="$emit('completeOrder', o.id)"
                 >
-                  <i class="fas fa-check"  aria-hidden="true" /> 下单完成
+                  <FontAwesomeIcon icon="check" aria-hidden="true" /> 下单完成
                 </button>
               </td>
             </tr>

@@ -35,7 +35,7 @@
             class="w-8 h-8 border-none bg-surface rounded-full cursor-pointer flex items-center justify-center text-text-secondary transition-colors duration-200 hover:bg-danger-50 hover:text-danger-500"
             aria-label="关闭"
           >
-            <i class="fas fa-times" aria-hidden="true" />
+            <FontAwesomeIcon icon="times" aria-hidden="true" />
           </DialogClose>
         </div>
         <div class="p-6 overflow-y-auto flex-1 overscroll-contain">

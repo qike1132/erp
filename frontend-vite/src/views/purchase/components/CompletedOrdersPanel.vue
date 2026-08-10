@@ -8,11 +8,11 @@
       </div>
       <div class="coq-toolbar-right">
         <button class="coq-btn coq-btn-ghost" @click="filterExpanded = !filterExpanded">
-          <i class="fas fa-sliders-h" aria-hidden="true" />
+          <FontAwesomeIcon icon="sliders-h" aria-hidden="true" />
           <span>{{ filterExpanded ? '收起' : '高级' }}</span>
         </button>
         <button class="coq-btn coq-btn-primary" @click="$emit('export')">
-          <i class="fas fa-file-export" aria-hidden="true" />
+          <FontAwesomeIcon icon="file-export" aria-hidden="true" />
           <span>导出</span>
         </button>
       </div>
@@ -34,7 +34,7 @@
     <div class="coq-search">
       <div class="coq-search-grid">
         <div class="coq-search-cell">
-          <i class="fas fa-hashtag coq-search-icon" aria-hidden="true" />
+          <FontAwesomeIcon icon="hashtag" class="coq-search-icon" aria-hidden="true" />
           <input
             type="text"
             class="coq-search-input"
@@ -45,7 +45,7 @@
           />
         </div>
         <div class="coq-search-cell">
-          <i class="fas fa-user coq-search-icon" aria-hidden="true" />
+          <FontAwesomeIcon icon="user" class="coq-search-icon" aria-hidden="true" />
           <input
             type="text"
             class="coq-search-input"
@@ -56,7 +56,7 @@
           />
         </div>
         <div class="coq-search-cell">
-          <i class="fas fa-box coq-search-icon" aria-hidden="true" />
+          <FontAwesomeIcon icon="box" class="coq-search-icon" aria-hidden="true" />
           <input
             type="text"
             class="coq-search-input"
@@ -82,7 +82,7 @@
           />
         </div>
         <button class="coq-btn coq-btn-primary coq-search-go" @click="$emit('search')">
-          <i class="fas fa-search" aria-hidden="true" />
+          <FontAwesomeIcon icon="search" aria-hidden="true" />
           <span>查询</span>
         </button>
       </div>
@@ -123,7 +123,7 @@
             />
           </div>
           <button class="coq-btn coq-btn-ghost coq-advanced-reset" @click="$emit('resetFilters')">
-            <i class="fas fa-undo" aria-hidden="true" />
+            <FontAwesomeIcon icon="undo" aria-hidden="true" />
             <span>重置</span>
           </button>
         </div>
@@ -139,7 +139,7 @@
 
       <!-- 空状态 -->
       <div v-else-if="orders.length === 0" class="coq-empty">
-        <i class="fas fa-folder-open" aria-hidden="true" />
+        <FontAwesomeIcon icon="folder-open" aria-hidden="true" />
         <p class="coq-empty-text">暂无订单记录</p>
         <p class="coq-empty-hint">调整搜索条件或选择其他时间范围</p>
       </div>

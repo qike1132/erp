@@ -44,11 +44,12 @@ scrape_configs:
         labels:
           service: 'redis'
 
-  # Celery 任务指标（via celery-exporter）
+  # Celery 任务指标（celery-exporter 已移除，任务量小无需独立监控容器）
   - job_name: 'celery'
     metrics_path: /metrics
     static_configs:
-      - targets: ['celery-exporter:9808']
+      # celery-exporter 已移除，注释 celery 监控 job
+      # - targets: ['celery-exporter:9808']
         labels:
           service: 'celery'
 

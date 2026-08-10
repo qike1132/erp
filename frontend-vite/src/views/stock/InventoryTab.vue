@@ -7,10 +7,10 @@
       </div>
       <div class="sk-filter-actions">
         <button class="sk-action-btn sk-action-primary" @click="handleSearch()">
-          <i class="fas fa-search" style="margin-right: 4px"  aria-hidden="true" />查询
+          <FontAwesomeIcon icon="search" style="margin-right: 4px"  aria-hidden="true" />查询
         </button>
         <button class="sk-action-btn" @click="handleReset()" aria-label="刷新">
-          <i class="fas fa-redo"  aria-hidden="true" />
+          <FontAwesomeIcon icon="redo" aria-hidden="true" />
         </button>
       </div>
       <div v-if="inventory.length" class="sk-stat-row">
@@ -39,14 +39,14 @@
 
     <div v-if="allCustomers.length" class="sk-customer-bar">
       <div class="sk-customer-bar-inner">
-        <span class="sk-customer-bar-label"><i class="fas fa-users" aria-hidden="true" /> 客户</span>
+        <span class="sk-customer-bar-label"><FontAwesomeIcon icon="users" aria-hidden="true" /> 客户</span>
         <div class="sk-customer-scroll">
           <button
             type="button"
             :class="['sk-customer-chip', { active: !filters.customer }]"
             @click="selectCustomer('')"
           >
-            <i class="fas fa-th-large" aria-hidden="true" />全部
+            <FontAwesomeIcon icon="th-large" aria-hidden="true" />全部
           </button>
           <button
             type="button"
@@ -58,7 +58,7 @@
         </div>
         <Transition name="sk-bar-fade">
           <div v-if="isFetching" class="sk-customer-loading">
-            <i class="fas fa-circle-notch fa-spin" aria-hidden="true" />
+            <FontAwesomeIcon icon="circle-notch" class="fa-spin" aria-hidden="true" />
           </div>
         </Transition>
       </div>
@@ -69,7 +69,7 @@
         <UiSpinner />
       </div>
       <div v-else-if="inventory.length === 0" class="sk-empty">
-        <i class="fas fa-warehouse"  aria-hidden="true" />
+        <FontAwesomeIcon icon="warehouse" aria-hidden="true" />
         <span>暂无库存数据</span>
       </div>
       <template v-else>
@@ -90,13 +90,13 @@
             <tr v-for="item in inventory" :key="`${item.customer}-${item.product_name}`">
               <td>
                 <span class="sk-customer-cell">
-                  <i class="fas fa-building"  aria-hidden="true" />
+                  <FontAwesomeIcon icon="building" aria-hidden="true" />
                   {{ item.customer }}
                 </span>
               </td>
               <td class="sk-td-left">
                 <span class="sk-product-cell">
-                  <i class="fas fa-cube"  aria-hidden="true" />
+                  <FontAwesomeIcon icon="cube" aria-hidden="true" />
                   <strong>{{ item.product_name }}</strong>
                 </span>
               </td>

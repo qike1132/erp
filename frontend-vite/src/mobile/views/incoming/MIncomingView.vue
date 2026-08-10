@@ -8,10 +8,10 @@
         <div v-if="loading" class="m-center"><MSpinner size="lg" /></div>
         <template v-else-if="overview">
           <div class="m-stats-row">
-            <MStatCard :value="overview.total_registrations ?? 0" label="总登记数" icon-bg="rgba(0,113,227,0.1)">
+            <MStatCard :value="overview.total ?? 0" label="总登记数" icon-bg="rgba(0,113,227,0.1)">
               <template #icon><svg viewBox="0 0 24 24" fill="none" stroke="#0071E3" stroke-width="2" width="20" height="20"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></template>
             </MStatCard>
-            <MStatCard :value="overview.pending_count ?? 0" label="待收货" icon-bg="rgba(255,149,0,0.1)">
+            <MStatCard :value="overview.pending ?? 0" label="待收货" icon-bg="rgba(255,149,0,0.1)">
               <template #icon><svg viewBox="0 0 24 24" fill="none" stroke="#FF9500" stroke-width="2" width="20" height="20"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></template>
             </MStatCard>
           </div>
@@ -23,13 +23,13 @@
         <div v-if="recordsLoading" class="m-center"><MSpinner size="lg" /></div>
         <MEmpty v-else-if="!records.length" title="暂无登记记录" />
         <MList v-else>
-          <MListItem v-for="r in records" :key="r.id" :title="r.material_name || '—'" :subtitle="`${r.supplier_name || '—'} · ${r.quantity || 0}${r.unit || ''}`">
+          <MListItem v-for="r in records" :key="r.id" :title="r.purchase_order_no || r.product_name || '—'" :subtitle="`${r.supplier_name || '—'} · ${r.product_quantity || 0}`">
             <template #icon>
-              <div class="m-icon-bg" :style="{ background: r.received ? 'var(--m-accent-emerald)' : 'var(--m-accent-amber)' }">
+              <div class="m-icon-bg" :style="{ background: r.status === 'completed' ? 'var(--m-accent-emerald)' : 'var(--m-accent-amber)' }">
                 <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" width="16" height="16"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
               </div>
             </template>
-            <template #value><span :class="['m-badge', r.received ? 'done' : 'pending']">{{ r.received ? '已收货' : '待收货' }}</span></template>
+            <template #value><span :class="['m-badge', r.status === 'completed' ? 'done' : 'pending']">{{ r.status === 'completed' ? '已收货' : (r.status === 'partial' ? '部分收货' : '待收货') }}</span></template>
           </MListItem>
         </MList>
       </template>
@@ -64,7 +64,7 @@ async function loadOverview() {
 
 async function loadRecords() {
   recordsLoading.value = true
-  try { records.value = (await materialApi.list({ page: 1, per_page: 50 }))?.items || [] } finally { recordsLoading.value = false }
+  try { records.value = (await materialApi.registrations({ page: 1, per_page: 50 }))?.registrations || [] } finally { recordsLoading.value = false }
 }
 
 onMounted(() => { loadOverview(); loadRecords() })

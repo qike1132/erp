@@ -10,7 +10,7 @@
       <div class="us-body">
         <!-- 左栏：添加用户 -->
         <div class="us-col">
-          <div class="us-col-title"><i class="fas fa-user-plus"  aria-hidden="true" /> 添加新用户</div>
+          <div class="us-col-title"><FontAwesomeIcon icon="user-plus" aria-hidden="true" /> 添加新用户</div>
           <div class="us-col-scroll">
             <form @submit.prevent="handleAdd" class="us-form">
               <div class="us-form-group">
@@ -22,7 +22,7 @@
                 <div class="us-input-wrapper">
                   <input v-model="form.password" :type="showPwd1 ? 'text' : 'password'" class="us-input" placeholder="至少6位" />
                   <button type="button" class="us-pwd-toggle" @click="showPwd1 = !showPwd1" aria-label="查看">
-                    <i :class="showPwd1 ? 'fas fa-eye-slash' : 'fas fa-eye'"  aria-hidden="true" />
+                    <FontAwesomeIcon :icon="showPwd1 ? 'eye-slash' : 'eye'" aria-hidden="true" />
                   </button>
                 </div>
               </div>
@@ -52,7 +52,7 @@
               <UiSpinner />
             </div>
             <div v-else-if="users.length === 0" class="us-empty">
-              <i class="fas fa-users"  aria-hidden="true" />
+              <FontAwesomeIcon icon="users" aria-hidden="true" />
               <span>暂无用户</span>
             </div>
             <table v-else class="us-table">
@@ -100,11 +100,11 @@
 
             <!-- Pagination -->
             <div v-if="totalItems > perPage" class="us-pagination">
-              <button class="us-page-btn" :disabled="currentPage <= 1" @click="goPage(1)" aria-label="首页"><i class="fas fa-angle-double-left"  aria-hidden="true" /></button>
-              <button class="us-page-btn" :disabled="currentPage <= 1" @click="goPage(currentPage - 1)" aria-label="上一页"><i class="fas fa-angle-left"  aria-hidden="true" /></button>
+              <button class="us-page-btn" :disabled="currentPage <= 1" @click="goPage(1)" aria-label="首页"><FontAwesomeIcon icon="angle-double-left" aria-hidden="true" /></button>
+              <button class="us-page-btn" :disabled="currentPage <= 1" @click="goPage(currentPage - 1)" aria-label="上一页"><FontAwesomeIcon icon="angle-left" aria-hidden="true" /></button>
               <span class="us-page-info">{{ currentPage }} / {{ totalPages }}</span>
-              <button class="us-page-btn" :disabled="currentPage >= totalPages" @click="goPage(currentPage + 1)" aria-label="下一页"><i class="fas fa-angle-right"  aria-hidden="true" /></button>
-              <button class="us-page-btn" :disabled="currentPage >= totalPages" @click="goPage(totalPages)" aria-label="末页"><i class="fas fa-angle-double-right"  aria-hidden="true" /></button>
+              <button class="us-page-btn" :disabled="currentPage >= totalPages" @click="goPage(currentPage + 1)" aria-label="下一页"><FontAwesomeIcon icon="angle-right" aria-hidden="true" /></button>
+              <button class="us-page-btn" :disabled="currentPage >= totalPages" @click="goPage(totalPages)" aria-label="末页"><FontAwesomeIcon icon="angle-double-right" aria-hidden="true" /></button>
               <span class="us-page-total">共 {{ totalItems }} 条</span>
             </div>
           </div>
@@ -145,11 +145,11 @@
             <div class="us-perm-group-header" @click="node.children?.length ? togglePermExpand(node.id) : togglePermNode(node.id)">
               <UiCheckbox :checked="isPermChecked(node.id)" @update:checked="togglePermNode(node.id)" @click.stop />
               <span class="us-perm-group-name">
-                <i v-if="node.icon" class="us-perm-group-icon fas" :class="node.icon" />
+                <FontAwesomeIcon v-if="node.icon" :icon="node.icon.replace('fa-', '')" class="us-perm-group-icon" />
                 {{ node.name }}
               </span>
               <span v-if="node.children?.length" class="us-perm-group-count">{{ getPermChildCount(node, permCheckedKeys) }}</span>
-              <i v-if="node.children?.length" class="us-perm-expand-icon fas" :class="isPermExpanded(node.id) ? 'fa-chevron-down' : 'fa-chevron-right'" />
+              <FontAwesomeIcon v-if="node.children?.length" :icon="isPermExpanded(node.id) ? 'chevron-down' : 'chevron-right'" class="us-perm-expand-icon" />
             </div>
             <div v-if="node.children?.length && isPermExpanded(node.id)" class="us-perm-group-body">
               <div v-for="child in node.children" :key="child.id" class="us-perm-item" @click="togglePermNode(child.id)">

@@ -14,8 +14,8 @@
           <button :class="['mr-tab-btn', { active: activeTab === 'history' }]" @click="switchToHistory">
             历史查询
           </button>
-          <button v-if="canManage && activeTab === 'progress'" class="mr-btn mr-btn-ghost" @click="exportData" title="导出来料进度数据"><i class="fas fa-file-export" /> 导出</button>
-          <button v-if="canManage && activeTab === 'history'" class="mr-btn mr-btn-ghost" @click="exportHistory" title="导出历史数据"><i class="fas fa-file-export" /> 导出</button>
+          <button v-if="canManage && activeTab === 'progress'" class="mr-btn mr-btn-ghost" @click="exportData" title="导出来料进度数据"><FontAwesomeIcon icon="file-export" /> 导出</button>
+          <button v-if="canManage && activeTab === 'history'" class="mr-btn mr-btn-ghost" @click="exportHistory" title="导出历史数据"><FontAwesomeIcon icon="file-export" /> 导出</button>
         </div>
       </div>
     </div>
@@ -28,15 +28,26 @@
         <div class="mr-fg"><label>客户</label><input type="text" v-model="pFilters.customer" placeholder="搜索..." @keyup.enter="loadProgress(1)"></div>
         <div class="mr-fg"><label>分类</label><select v-model="pFilters.category" @change="loadProgress(1)"><option value="">全部</option><option value="fabric">面料</option><option value="filling">填充</option><option value="accessory">辅料</option><option value="packaging">包装</option></select></div>
         <div class="mr-fg"><label>日期</label><UiDatePicker v-model="pFilters.startDate" @update:model-value="loadProgress(1)" /><span class="mr-date-sep">~</span><UiDatePicker v-model="pFilters.endDate" @update:model-value="loadProgress(1)" /></div>
-        <button class="mr-btn mr-btn-ghost" @click="resetProgressFilters"><i class="fas fa-redo" /> 重置</button>
+        <button class="mr-btn mr-btn-ghost" @click="resetProgressFilters"><FontAwesomeIcon icon="redo" /> 重置</button>
       </div>
       <div class="mr-card">
         <div class="mr-card-b mr-card-b--flush">
           <table class="mr-tbl" style="min-width:1000px;">
             <thead><tr><th style="width:110px;">订单时间</th><th style="width:120px;">客户</th><th>产品名称</th><th style="width:100px;">订单数量</th><th>物料进度（按供应商分组）</th><th style="width:200px;">总进度</th><th style="width:80px;">操作</th></tr></thead>
             <tbody>
-              <tr v-if="pIsLoading && !progressRows.length"><td colspan="7" class="mr-empty"><UiSpinner /></td></tr>
-              <tr v-else-if="!progressRows.length"><td colspan="7" class="mr-empty"><i class="fas fa-inbox" /><span>暂无进行中的来料登记</span></td></tr>
+              <!-- 骨架屏：首次加载且无缓存数据时显示 -->
+              <template v-if="pIsLoading && !progressRows.length">
+                <tr v-for="n in 5" :key="'skel-p-'+n" class="mr-skel-row">
+                  <td><div class="mr-skel-block" style="width:90px" /></td>
+                  <td><div class="mr-skel-block" style="width:70px" /></td>
+                  <td><div class="mr-skel-block" style="width:140px" /></td>
+                  <td><div class="mr-skel-block" style="width:60px" /></td>
+                  <td><div class="mr-skel-block" style="width:100%" /></td>
+                  <td><div class="mr-skel-block" style="width:160px" /></td>
+                  <td><div class="mr-skel-block" style="width:34px;height:34px;border-radius:9px" /></td>
+                </tr>
+              </template>
+              <tr v-else-if="!pIsLoading && !progressRows.length"><td colspan="7" class="mr-empty"><FontAwesomeIcon icon="inbox" /><span>暂无进行中的来料登记</span></td></tr>
               <tr v-if="pIsFetching && progressRows.length"><td colspan="7" class="mr-fetching-bar"><div class="mr-fetching-progress" /></td></tr>
               <tr v-for="row in progressOrderRows" :key="row.order_no" class="mr-order-row">
                 <td class="mr-td-date">{{ row.po_create_time || '-' }}</td>
@@ -56,7 +67,7 @@
                 <td>
                   <div class="mr-supplier-groups">
                     <div v-for="grp in row.groupedItems" :key="grp.supplierName" class="mr-supplier-group">
-                      <div class="mr-supplier-label"><i class="fas fa-truck" /><span>{{ grp.supplierName || '未指定' }}</span><span class="mr-supplier-count">{{ grp.items.length }} 项</span></div>
+                      <div class="mr-supplier-label"><FontAwesomeIcon icon="truck" /><span>{{ grp.supplierName || '未指定' }}</span><span class="mr-supplier-count">{{ grp.items.length }} 项</span></div>
                       <div class="mr-items-container">
                         <div v-for="i in grp.items" :key="i.material_name" class="mr-list-item-row">
                           <span class="mr-list-item-name" :title="i.material_name">{{ i.material_name }}</span>
@@ -70,7 +81,7 @@
                   </div>
                 </td>
                 <td><div class="mr-pbar-wrap"><div class="mr-pbar"><div :class="['mr-pfill', row.progress >= 100 ? 'completed' : 'pending']" :style="{ width: (row.progress || 0) + '%' }"></div></div><span class="mr-pbar-pct">{{ row.progress || 0 }}%</span></div></td>
-                <td><div class="mr-action-group"><button type="button" class="mr-action-btn mr-action-view" @click="viewSupplierDetail(row.supplier_name || '', row.order_no)" title="查看供应商详情"><i class="fas fa-eye" /></button></div></td>
+                <td><div class="mr-action-group"><button type="button" class="mr-action-btn mr-action-view" @click="viewSupplierDetail(row.supplier_name || '', row.order_no)" title="查看供应商详情"><FontAwesomeIcon icon="eye" /></button></div></td>
               </tr>
             </tbody>
           </table>
@@ -87,15 +98,26 @@
         <div class="mr-fg"><label>客户</label><input type="text" v-model="hFilters.customer" placeholder="搜索..." @keyup.enter="loadHistory(1)"></div>
         <div class="mr-fg"><label>分类</label><select v-model="hFilters.category" @change="loadHistory(1)"><option value="">全部</option><option value="fabric">面料</option><option value="filling">填充</option><option value="accessory">辅料</option><option value="packaging">包装</option></select></div>
         <div class="mr-fg"><label>完成日期</label><UiDatePicker v-model="hFilters.startDate" @update:model-value="loadHistory(1)" /><span class="mr-date-sep">~</span><UiDatePicker v-model="hFilters.endDate" @update:model-value="loadHistory(1)" /></div>
-        <button class="mr-btn mr-btn-ghost" @click="resetHistoryFilters"><i class="fas fa-redo" /> 重置</button>
+        <button class="mr-btn mr-btn-ghost" @click="resetHistoryFilters"><FontAwesomeIcon icon="redo" /> 重置</button>
       </div>
       <div class="mr-card">
         <div class="mr-card-b mr-card-b--flush">
           <table class="mr-tbl" style="min-width:900px;">
             <thead><tr><th style="width:150px;">订单号</th><th style="width:100px;">客户</th><th style="width:120px;">产品/数量</th><th style="width:100px;">供应商</th><th>物料名称</th><th style="width:120px;">完成时间</th><th style="width:80px;">操作</th></tr></thead>
             <tbody>
-              <tr v-if="hIsLoading && !hRegistrations.length"><td colspan="7" class="mr-empty"><UiSpinner /></td></tr>
-              <tr v-else-if="!hRegistrations.length"><td colspan="7" class="mr-empty"><i class="fas fa-archive" /><span>暂无历史记录</span></td></tr>
+              <!-- 骨架屏：首次加载且无缓存数据时显示 -->
+              <template v-if="hIsLoading && !hRegistrations.length">
+                <tr v-for="n in 5" :key="'skel-h-'+n" class="mr-skel-row">
+                  <td><div class="mr-skel-block" style="width:130px" /></td>
+                  <td><div class="mr-skel-block" style="width:70px" /></td>
+                  <td><div class="mr-skel-block" style="width:120px" /></td>
+                  <td><div class="mr-skel-block" style="width:80px" /></td>
+                  <td><div class="mr-skel-block" style="width:100%" /></td>
+                  <td><div class="mr-skel-block" style="width:100px" /></td>
+                  <td><div class="mr-skel-block" style="width:34px;height:34px;border-radius:9px" /></td>
+                </tr>
+              </template>
+              <tr v-else-if="!hIsLoading && !hRegistrations.length"><td colspan="7" class="mr-empty"><FontAwesomeIcon icon="archive" /><span>暂无历史记录</span></td></tr>
               <tr v-if="hIsFetching && hRegistrations.length"><td colspan="7" class="mr-fetching-bar"><div class="mr-fetching-progress" /></td></tr>
               <tr v-for="r in hRegistrations" :key="r.id">
                 <td class="mr-td-order">{{ r.purchase_order_no }}</td>
@@ -104,7 +126,7 @@
                 <td>{{ r.supplier_name || '-' }}</td>
                 <td class="mr-td-small">{{ materialSummary(r) }}</td>
                 <td class="mr-td-small mr-td-muted">{{ r.update_time || '-' }}</td>
-                <td><div class="mr-action-group"><button type="button" class="mr-action-btn mr-action-view" @click="viewDetail(r.id)" title="查看详情"><i class="fas fa-eye" /></button></div></td>
+                <td><div class="mr-action-group"><button type="button" class="mr-action-btn mr-action-view" @click="viewDetail(r.id)" title="查看详情"><FontAwesomeIcon icon="eye" /></button></div></td>
               </tr>
             </tbody>
           </table>
@@ -137,7 +159,7 @@
       @submit="submitReceive"
     />
 
-    <div :class="['mr-toast', { show: toastMsg }, toastType]"><i :class="['fas', toastIcon]"></i> {{ toastMsg }}</div>
+    <div :class="['mr-toast', { show: toastMsg }, toastType]"><FontAwesomeIcon :icon="toastIcon" /> {{ toastMsg }}</div>
     </div>
   </div>
 </template>
@@ -157,6 +179,7 @@ import type { RegItem, Registration } from '@/api/material'
 import { useAuthStore } from '@/stores/auth'
 import UiPagination from '@/components/ui/UiPagination.vue'
 import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
+import { readMaterialCache, writeMaterialCache, clearMaterialCache } from '@/composables/useMaterialCache'
 const MaterialDetailDialog = defineAsyncComponent(() => import('./components/MaterialDetailDialog.vue'))
 const SupplierDialog = defineAsyncComponent(() => import('./components/SupplierDialog.vue'))
 const ReceiveDialog = defineAsyncComponent(() => import('./components/ReceiveDialog.vue'))
@@ -280,23 +303,48 @@ const hPage = ref(1), hPages = ref(1), hIsLoading = ref(false), hIsFetching = re
 const hRegistrations = ref<Registration[]>([])
 const hFilters = reactive({ orderNo: '', supplier: '', customer: '', category: '', startDate: '', endDate: '' })
 
-/** 加载历史查询数据（服务端分页 + 筛选） */
+/** 加载历史查询数据（服务端分页 + 筛选 + SWR 缓存） */
 async function loadHistory(page = 1) {
   hPage.value = page
-  const isInitial = hRegistrations.value.length === 0
-  if (isInitial) hIsLoading.value = true
-  else hIsFetching.value = true
+  const params: Record<string, string | number> = { page, per_page: 20 }
+  if (hFilters.orderNo) params.order_no = hFilters.orderNo
+  if (hFilters.supplier) params.supplier = hFilters.supplier
+  if (hFilters.customer) params.customer_name = hFilters.customer
+  if (hFilters.category) params.material_category = hFilters.category
+  if (hFilters.startDate) params.start_date = hFilters.startDate
+  if (hFilters.endDate) params.end_date = hFilters.endDate
+
+  // SWR: 先尝试从缓存渲染
+  const { cached, fresh } = readMaterialCache('history', params)
+  if (cached) {
+    hRegistrations.value = cached.registrations || []
+    hPages.value = cached.pages ?? 1
+    if (fresh) {
+      // 缓存未过期，直接返回，异步静默刷新
+      scheduleBackgroundRefresh(() => loadHistoryFromApi(params))
+      return
+    }
+    // 缓存已过期，先渲染旧数据，同时显示轻量进度条
+    hIsFetching.value = true
+  } else {
+    hIsLoading.value = true
+  }
+
+  await loadHistoryFromApi(params)
+}
+
+/** 实际 API 调用（供首次加载和后台刷新复用） */
+async function loadHistoryFromApi(params: Record<string, string | number>) {
   try {
-    const params: Record<string, string | number> = { page, per_page: 20 }
-    if (hFilters.orderNo) params.order_no = hFilters.orderNo
-    if (hFilters.supplier) params.supplier = hFilters.supplier
-    if (hFilters.customer) params.customer_name = hFilters.customer
-    if (hFilters.category) params.material_category = hFilters.category
-    if (hFilters.startDate) params.start_date = hFilters.startDate
-    if (hFilters.endDate) params.end_date = hFilters.endDate
     const data = await materialApi.history(params)
     hRegistrations.value = data.registrations || []
     hPages.value = data.pages ?? data.total_pages ?? 1
+    // 成功时写入缓存
+    writeMaterialCache('history', params, {
+      registrations: data.registrations || [],
+      pages: data.pages ?? data.total_pages ?? 1,
+      total: data.total ?? 0,
+    })
   } catch { toast('加载失败', 'error') } finally { hIsLoading.value = false; hIsFetching.value = false }
 }
 
@@ -310,30 +358,94 @@ function materialSummary(r: Registration) {
   return items.map(i => i.material_name).join(', ')
 }
 
-/** 加载来料进度数据（服务端分页 + 筛选 + 服务端排除已完成） */
+/** 后台静默刷新调度器：延迟 200ms 避免阻塞首屏渲染 */
+let _bgRefreshTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleBackgroundRefresh(fn: () => Promise<void>) {
+  if (_bgRefreshTimer) clearTimeout(_bgRefreshTimer)
+  _bgRefreshTimer = setTimeout(() => {
+    fn().catch(() => { /* 静默刷新失败不影响已渲染内容 */ })
+  }, 200)
+}
+
+/** 加载来料进度数据（服务端分页 + 筛选 + SWR 缓存） */
 async function loadProgress(page = 1) {
   pPage.value = page
-  const isInitial = progressRows.value.length === 0
-  if (isInitial) pIsLoading.value = true
-  else pIsFetching.value = true
+  const params: Record<string, string | number | boolean> = { page, per_page: 20, exclude_completed: true }
+  if (pFilters.supplier) params.supplier = pFilters.supplier
+  if (pFilters.orderNo) params.order_no = pFilters.orderNo
+  if (pFilters.customer) params.customer_name = pFilters.customer
+  if (pFilters.category) params.material_category = pFilters.category
+  if (pFilters.startDate) params.start_date = pFilters.startDate
+  if (pFilters.endDate) params.end_date = pFilters.endDate
+
+  // SWR: 先尝试从缓存渲染
+  const { cached, fresh } = readMaterialCache('progress', params)
+  if (cached) {
+    progressRows.value = cached.registrations || []
+    pPages.value = cached.pages ?? 1
+    pTotal.value = cached.total ?? 0
+    if (fresh) {
+      // 缓存未过期，直接返回，异步静默刷新
+      scheduleBackgroundRefresh(() => loadProgressFromApi(params))
+      return
+    }
+    // 缓存已过期，先渲染旧数据，同时显示轻量进度条
+    pIsFetching.value = true
+  } else {
+    pIsLoading.value = true
+  }
+
+  await loadProgressFromApi(params)
+}
+
+/** 实际 API 调用（供首次加载和后台刷新复用） */
+async function loadProgressFromApi(params: Record<string, string | number | boolean>) {
   try {
-    const params: Record<string, string | number | boolean> = { page, per_page: 20, exclude_completed: true }
-    if (pFilters.supplier) params.supplier = pFilters.supplier
-    if (pFilters.orderNo) params.order_no = pFilters.orderNo
-    if (pFilters.customer) params.customer_name = pFilters.customer
-    if (pFilters.category) params.material_category = pFilters.category
-    if (pFilters.startDate) params.start_date = pFilters.startDate
-    if (pFilters.endDate) params.end_date = pFilters.endDate
     const data = await materialApi.registrations(params)
     progressRows.value = data.registrations || []
     pPages.value = data.pages ?? data.total_pages ?? 1
     pTotal.value = data.total ?? 0
+    // 成功时写入缓存
+    writeMaterialCache('progress', params, {
+      registrations: data.registrations || [],
+      pages: data.pages ?? data.total_pages ?? 1,
+      total: data.total ?? 0,
+    })
   } catch { toast('加载失败', 'error') } finally { pIsLoading.value = false; pIsFetching.value = false }
 }
 
 function resetProgressFilters() { Object.assign(pFilters, { supplier: '', orderNo: '', customer: '', category: '', startDate: '', endDate: '' }); loadProgress(1) }
-function switchToProgress() { activeTab.value = 'progress'; if (!progressRows.value.length && !pIsLoading.value) loadProgress(1) }
-function switchToHistory() { activeTab.value = 'history'; if (!hRegistrations.value.length && !hIsLoading.value) loadHistory(1) }
+function switchToProgress() {
+  activeTab.value = 'progress'
+  if (!progressRows.value.length && !pIsLoading.value) {
+    // 尝试从缓存恢复，实现即时渲染
+    const params: Record<string, unknown> = { page: 1, per_page: 20, exclude_completed: true }
+    const { cached } = readMaterialCache('progress', params)
+    if (cached) {
+      progressRows.value = cached.registrations || []
+      pPages.value = cached.pages ?? 1
+      pTotal.value = cached.total ?? 0
+      // 后台静默刷新
+      scheduleBackgroundRefresh(() => loadProgressFromApi({ ...params }))
+    } else {
+      loadProgress(1)
+    }
+  }
+}
+function switchToHistory() {
+  activeTab.value = 'history'
+  if (!hRegistrations.value.length && !hIsLoading.value) {
+    const params: Record<string, unknown> = { page: 1, per_page: 20 }
+    const { cached } = readMaterialCache('history', params)
+    if (cached) {
+      hRegistrations.value = cached.registrations || []
+      hPages.value = cached.pages ?? 1
+      scheduleBackgroundRefresh(() => loadHistoryFromApi({ ...params }))
+    } else {
+      loadHistory(1)
+    }
+  }
+}
 function fillClass(item: { progress?: number; received_quantity: number | string; ordered_quantity: number | string }) { const pct = item.progress || 0; if (pct >= 100 || Number(item.received_quantity) >= Number(item.ordered_quantity)) return 'full'; return 'low' }
 
 const showDetailDialog = ref(false), detailData = ref<Registration | null>(null)
@@ -516,6 +628,10 @@ async function exportHistory() {
 
 onMounted(() => {
   switchToProgress()
+})
+
+onUnmounted(() => {
+  if (_bgRefreshTimer) clearTimeout(_bgRefreshTimer)
 })
 </script>
 
@@ -1229,5 +1345,21 @@ onMounted(() => {
   .mr-det-mat-metrics { flex-wrap: wrap; gap: 6px; }
   .mr-det-mat-metric { min-width: 65px; padding: 8px 12px; }
   .mr-det-mat-value { font-size: 16px; }
+}
+
+/* === Skeleton Screen === */
+.mr-skel-row td {
+  padding: 14px 14px;
+}
+.mr-skel-block {
+  height: 16px;
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 200% 100%;
+  border-radius: 6px;
+  animation: mr-skel-shimmer 1.5s ease-in-out infinite;
+}
+@keyframes mr-skel-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 </style>

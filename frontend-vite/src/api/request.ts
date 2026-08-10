@@ -13,6 +13,26 @@ const isCap = !!import.meta.env.VITE_CAPACITOR
 let isRedirecting401 = false
 let isShowing403 = false
 
+// CSRF Token 内存缓存：优先从缓存读取，避免 document.cookie 被 XSS 窃取
+// 首次请求时从响应头 x-csrf-token 获取并缓存，后续请求直接使用
+let _csrfCache: string | null = null
+
+/** 清空 CSRF 缓存（注销时调用） */
+export function clearCsrfCache(): void {
+  _csrfCache = null
+}
+
+/**
+ * PC 端（Cookie 认证）从 Cookie 读取 CSRF token。
+ * 后端 CSRF 中间件只对 Bearer 请求在响应头设置 X-CSRF-Token；
+ * PC 端登录是 Cookie 认证（无 Bearer），因此响应头中没有 X-CSRF-Token，
+ * 必须从 Cookie 兜底读取。
+ */
+function getCsrfFromCookie(): string {
+  const match = document.cookie.match(/(?:^|;\s*)fastapi_csrf_token=([^;]*)/)
+  return match ? decodeURIComponent(match[1]) : ''
+}
+
 const service: AxiosInstance = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api/v1',
   timeout: 15000,
@@ -22,9 +42,14 @@ const service: AxiosInstance = axios.create({
 service.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   const method = config.method?.toLowerCase()
   if (method && ['post', 'put', 'delete', 'patch'].includes(method)) {
+    // CSRF Token 获取优先级：
+    //   Capacitor → localStorage('csrf_token') → 响应头缓存
+    //   PC 端     → 响应头缓存 → Cookie('fastapi_csrf_token')
+    // PC 端登录是 Cookie 认证（无 Bearer），后端不会在响应头设置 X-CSRF-Token，
+    // 需从 Cookie 兜底读取，否则首次 POST 请求会 403
     const csrfToken = isCap
-      ? localStorage.getItem('csrf_token') || document.cookie.match(/fastapi_csrf_token=([^;]+)/)?.[1] || ''
-      : (document.cookie.match(/fastapi_csrf_token=([^;]+)/)?.[1] || '')
+      ? (localStorage.getItem('csrf_token') || _csrfCache || getCsrfFromCookie())
+      : (_csrfCache || getCsrfFromCookie())
     if (csrfToken) {
       config.headers['X-CSRF-Token'] = csrfToken
     }
@@ -43,9 +68,12 @@ service.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 
 service.interceptors.response.use(
   (response: AxiosResponse) => {
-    if (isCap) {
-      const csrfFromHeader = response.headers['x-csrf-token']
-      if (csrfFromHeader) localStorage.setItem('csrf_token', csrfFromHeader as string)
+    const csrfFromHeader = response.headers['x-csrf-token']
+    if (csrfFromHeader) {
+      _csrfCache = csrfFromHeader as string
+      if (isCap) {
+        localStorage.setItem('csrf_token', csrfFromHeader as string)
+      }
     }
     return response.data
   },
@@ -61,10 +89,7 @@ service.interceptors.response.use(
     if (error.response?.status === 401) {
       if (!isRedirecting401) {
         isRedirecting401 = true
-        const current = window.location.pathname
-        if (!current.startsWith('/login')) {
-          window.location.href = `/login?redirect=${encodeURIComponent(current)}`
-        }
+        window.dispatchEvent(new CustomEvent('auth:expired'))
         setTimeout(() => { isRedirecting401 = false }, 2000)
       }
     }
@@ -164,9 +189,7 @@ export function del<T>(url: string): Promise<T> {
 }
 
 export function upload<T>(url: string, formData: FormData): Promise<T> {
-  return service.post(url, formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  }) as Promise<T>
+  return service.post(url, formData) as Promise<T>
 }
 
 /** POST 请求下载文件（用于需要 POST body 的文件下载场景） */
@@ -222,14 +245,34 @@ export function download(url: string, filename: string, params?: Record<string, 
   )
 }
 
-const BACKEND_ORIGIN = isCap
-  ? ((import.meta.env.VITE_STATIC_ORIGIN ?? '') as string)
-  : (import.meta.env.DEV ? 'http://127.0.0.1:5002' : '')
-
+/**
+ * 解析静态资源 URL（相对路径 → 完整 URL）
+ *
+ * 优先级（自上而下）：
+ * 1. 已是 http/https 绝对路径 → 原样返回（直连对象存储等场景）
+ * 2. Capacitor 模式 → 使用 VITE_STATIC_ORIGIN（移动端独立静态域名）
+ * 3. 浏览器环境 → 同源 /static，由 Vite proxy / nginx 反代转发到后端
+ *    - Dev (Vite dev server) → vite.config.ts 的 /static proxy
+ *    - Preview (Vite preview) → vite.config.ts 的 preview.proxy
+ *    - Production (nginx) → 反代 /static/ → http://127.0.0.1:5002/static/
+ *    优点：始终同源，无 CORS / 跨域 cookie 问题
+ * 4. SSR → 返回原路径
+ */
 export function resolveStaticUrl(url: string | null | undefined): string {
   if (!url) return ''
   if (url.startsWith('http') || url.startsWith('//')) return url
-  return BACKEND_ORIGIN + url
+
+  // 1) Capacitor / 显式配置的静态资源专用域名
+  const explicit = import.meta.env.VITE_STATIC_ORIGIN
+  if (explicit) return explicit + url
+
+  // 2) 浏览器环境：走同源 /static（由反向代理转发到后端）
+  if (typeof window !== 'undefined') {
+    return `${window.location.origin}${url}`
+  }
+
+  // 3) SSR / 测试环境兜底
+  return url
 }
 
 export default service

@@ -4,13 +4,13 @@
     <div class="ci-section">
       <div class="ci-section-header">
         <div class="ci-section-title">
-          <i class="fas fa-warehouse" style="color: var(--color-primary-500)"  aria-hidden="true" />
+          <FontAwesomeIcon icon="warehouse" style="color: var(--color-primary-500)"  aria-hidden="true" />
           皮套库存汇总
         </div>
         <div class="ci-header-actions">
           <UiSearchInput v-model="invSearch" placeholder="搜索产品名称或69码..." @search="onInvSearchInput" />
           <button class="ci-action-btn ci-action-primary" @click="invRefetch()">
-            <i class="fas fa-sync-alt" style="margin-right: 4px"  aria-hidden="true" />刷新
+            <FontAwesomeIcon icon="sync-alt" style="margin-right: 4px"  aria-hidden="true" />刷新
           </button>
         </div>
       </div>
@@ -33,7 +33,7 @@
 
       <!-- 库存表格 -->
       <div v-if="invIsLoading && inventoryList.length === 0" class="ci-loading"><UiSpinner /></div>
-      <div v-else-if="inventoryList.length === 0" class="ci-empty"><i class="fas fa-warehouse"  aria-hidden="true" /><span>暂无库存数据</span></div>
+      <div v-else-if="inventoryList.length === 0" class="ci-empty"><FontAwesomeIcon icon="warehouse" aria-hidden="true" /><span>暂无库存数据</span></div>
       <template v-else>
       <div v-if="invIsFetching" class="ci-fetching-bar"><div class="ci-fetching-progress" /></div>
       <table class="ci-table">
@@ -60,16 +60,16 @@
             </td>
             <td>
               <button class="ci-icon-btn ci-icon-info" @click.stop="selectCaseRow(row)">
-                <i class="fas fa-history" style="margin-right: 2px"  aria-hidden="true" />流水
+                <FontAwesomeIcon icon="history" style="margin-right: 2px"  aria-hidden="true" />流水
               </button>
             </td>
           </tr>
         </tbody>
       </table>
       <div v-if="invTotalPages > 1" class="ci-pagination">
-        <button class="ci-page-btn" :disabled="invPage <= 1" @click="invPage--" aria-label="上一页"><i class="fas fa-chevron-left"  aria-hidden="true" /></button>
+        <button class="ci-page-btn" :disabled="invPage <= 1" @click="invPage--" aria-label="上一页"><FontAwesomeIcon icon="chevron-left" aria-hidden="true" /></button>
         <span class="ci-page-info">{{ invPage }} / {{ invTotalPages }}</span>
-        <button class="ci-page-btn" :disabled="invPage >= invTotalPages" @click="invPage++"><i class="fas fa-chevron-right"  aria-hidden="true" /></button>
+        <button class="ci-page-btn" :disabled="invPage >= invTotalPages" @click="invPage++"><FontAwesomeIcon icon="chevron-right" aria-hidden="true" /></button>
       </div>
       </template>
     </div>
@@ -78,11 +78,11 @@
     <div v-if="selectedCaseName" class="ci-section">
       <div class="ci-section-header">
         <div class="ci-section-title">
-          <i class="fas fa-history" style="color: var(--color-primary-500)"  aria-hidden="true" />
+          <FontAwesomeIcon icon="history" style="color: var(--color-primary-500)"  aria-hidden="true" />
           库存流水记录 <small style="color: var(--color-text-muted)">- {{ selectedCaseName }}</small>
         </div>
         <button class="ci-action-btn ci-action-outline" @click="showLogFilter = !showLogFilter">
-          <i class="fas fa-filter" style="margin-right: 4px"  aria-hidden="true" />筛选
+          <FontAwesomeIcon icon="filter" style="margin-right: 4px"  aria-hidden="true" />筛选
         </button>
       </div>
       <div v-if="showLogFilter" class="ci-filter-panel">
@@ -101,16 +101,16 @@
           </div>
           <div class="ci-filter-action">
             <button class="ci-action-btn ci-action-primary" @click="logPage = 1; logRefetch()">
-              <i class="fas fa-search" style="margin-right: 4px"  aria-hidden="true" />查询
+              <FontAwesomeIcon icon="search" style="margin-right: 4px"  aria-hidden="true" />查询
             </button>
             <button class="ci-action-btn ci-action-outline" style="margin-left: 8px" @click="clearLogFilter" aria-label="关闭">
-              <i class="fas fa-times"  aria-hidden="true" />
+              <FontAwesomeIcon icon="times" aria-hidden="true" />
             </button>
           </div>
         </div>
       </div>
       <div v-if="logIsLoading && logList.length === 0" class="ci-loading"><UiSpinner /></div>
-      <div v-else-if="logList.length === 0" class="ci-empty"><i class="fas fa-history"  aria-hidden="true" /><span>暂无流水记录</span></div>
+      <div v-else-if="logList.length === 0" class="ci-empty"><FontAwesomeIcon icon="history" aria-hidden="true" /><span>暂无流水记录</span></div>
       <template v-else>
       <div v-if="logIsFetching" class="ci-fetching-bar"><div class="ci-fetching-progress" /></div>
       <table class="ci-table">
@@ -148,7 +148,7 @@
     <!-- 未选中提示 -->
     <div v-if="!selectedCaseName" class="ci-section">
       <div class="ci-empty-hint">
-        <i class="fas fa-info-circle"  aria-hidden="true" />
+        <FontAwesomeIcon icon="info-circle" aria-hidden="true" />
         <p>请点击上方库存表格中的产品查看流水记录</p>
       </div>
     </div>

@@ -4,6 +4,7 @@ import { get, post } from '@/api/request'
 import { orderApi } from '@/api'
 import { showToast } from '@/composables/useToast'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
+import { getErrorMessage } from '@/types/errors'
 import type { FormState, StagedItem, AvailableStockinItem } from './types'
 
 /** 生成暂存项唯一标识（使用 crypto.randomUUID 确保无碰撞） */
@@ -70,16 +71,16 @@ export function useOrderActions(
       if (orderPayload.length) {
         try {
           orderRes = await post('/aux/batch-submit-orders', { orders: orderPayload })
-        } catch (e: any) {
-          showToast(e?.response?.data?.detail || '订单提交失败', 'error')
+        } catch (e: unknown) {
+          showToast(getErrorMessage(e, '订单提交失败'), 'error')
           orderFailed = true
         }
       }
       if (!orderFailed && stockinPayload.length) {
         try {
           await post('/aux/batch-submit-stockins', { stockins: stockinPayload })
-        } catch (e: any) {
-          showToast(e?.response?.data?.detail || '备货提交失败', 'error')
+        } catch (e: unknown) {
+          showToast(getErrorMessage(e, '备货提交失败'), 'error')
           stockinFailed = true
         }
       }
@@ -228,8 +229,8 @@ export function useOrderActions(
         )
       }
       excelFile.value = null
-    } catch (err: any) {
-      showToast(err.response?.data?.detail || '导入失败', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err, '导入失败'), 'error')
     } finally {
       importing.value = false
     }
@@ -288,10 +289,10 @@ export function useOrderActions(
         try {
           await orderApi.updateDeduct(detailData.value.id, editForm.deductQuantity)
           deductRetryPending.value = false
-        } catch (e: any) {
+        } catch (e: unknown) {
           deductRetryPending.value = true
           showToast(
-            e?.response?.data?.detail || '订单信息已保存，但抵扣数量更新失败，请重试抵扣更新',
+            getErrorMessage(e, '订单信息已保存，但抵扣数量更新失败，请重试抵扣更新'),
             'warning',
           )
           // 仍然刷新列表以反映已保存的数量变更
@@ -311,8 +312,8 @@ export function useOrderActions(
       queryClient.invalidateQueries({ queryKey: ['stockins-list'] })
       queryClient.invalidateQueries({ queryKey: ['stockouts-list'] })
       fetchOrders()
-    } catch (e: any) {
-      showToast(e?.response?.data?.detail || '保存失败', 'error')
+    } catch (e: unknown) {
+      showToast(getErrorMessage(e, '保存失败'), 'error')
     } finally {
       saving.value = false
     }
@@ -330,8 +331,8 @@ export function useOrderActions(
       queryClient.invalidateQueries({ queryKey: ['orders-list'] })
       queryClient.invalidateQueries({ queryKey: ['inventory'] })
       fetchOrders()
-    } catch (e: any) {
-      showToast(e?.response?.data?.detail || '抵扣更新仍失败，请稍后重试', 'error')
+    } catch (e: unknown) {
+      showToast(getErrorMessage(e, '抵扣更新仍失败，请稍后重试'), 'error')
     } finally {
       saving.value = false
     }

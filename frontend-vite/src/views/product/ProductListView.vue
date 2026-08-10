@@ -10,7 +10,7 @@
       <div class="page-card-body">
         <!-- 左栏：产品信息 -->
         <div class="pd-col">
-          <div class="pd-col-title"><i class="fas fa-edit" aria-hidden="true"></i> 产品信息</div>
+          <div class="pd-col-title"><FontAwesomeIcon icon="edit" aria-hidden="true" /> 产品信息</div>
           <div class="pd-col-scroll">
             <!-- 产品基本信息 -->
             <div class="pd-section">
@@ -18,28 +18,28 @@
                 <div class="pd-form-group">
                   <label class="pd-label">产品名称</label>
                   <div class="pd-input-wrap">
-                    <i class="fas fa-tag pd-input-icon" aria-hidden="true"></i>
+                    <FontAwesomeIcon icon="tag" class="pd-input-icon" aria-hidden="true" />
                     <input v-model="form.name" type="text" class="pd-input" required placeholder="例如：小熊毛绒玩具" name="product-name" autocomplete="off" />
                   </div>
                 </div>
                 <div class="pd-form-group">
                   <label class="pd-label">69码</label>
                   <div class="pd-input-wrap">
-                    <i class="fas fa-barcode pd-input-icon" aria-hidden="true"></i>
+                    <FontAwesomeIcon icon="barcode" class="pd-input-icon" aria-hidden="true" />
                     <input v-model="form.barcode" type="text" class="pd-input" placeholder="例如：6958085574210" name="barcode" autocomplete="off" />
                   </div>
                 </div>
                 <div class="pd-form-group">
                   <label class="pd-label">产品价格</label>
                   <div class="pd-input-wrap">
-                    <i class="fas fa-yen-sign pd-input-icon" aria-hidden="true"></i>
+                    <FontAwesomeIcon icon="yen-sign" class="pd-input-icon" aria-hidden="true" />
                     <input v-model.number="form.price" type="number" class="pd-input" step="0.01" min="0" placeholder="请输入产品价格" name="price" autocomplete="off" />
                   </div>
                 </div>
                 <div class="pd-form-group">
                   <label class="pd-label">工厂</label>
                   <div class="pd-input-wrap">
-                    <i class="fas fa-industry pd-input-icon" aria-hidden="true"></i>
+                    <FontAwesomeIcon icon="industry" class="pd-input-icon" aria-hidden="true" />
                     <select v-model="form.factory" class="pd-input pd-select" name="factory">
                       <option value="" disabled>请选择工厂</option>
                       <option v-for="f in FACTORY_OPTIONS" :key="f" :value="f">{{ f }}</option>
@@ -57,11 +57,11 @@
                     @drop.prevent="onImageDrop"
                   >
                     <label class="form-label pd-droppable-label">
-                      <i class="fas fa-image label-icon" aria-hidden="true"></i>
+                      <FontAwesomeIcon icon="image" class="label-icon" aria-hidden="true" />
                       <template v-if="form.image">
                         <span class="pd-file-inline pd-file-inline-success">
                           <img :src="resolveStaticUrl(form.image)" class="pd-thumb-preview" @click.stop="openImageModal(form.image)" />
-                          <button type="button" class="pd-thumb-remove" @click.stop="form.image = ''" aria-label="关闭"><i class="fas fa-times" aria-hidden="true"></i></button>
+                          <button type="button" class="pd-thumb-remove" @click.stop="form.image = ''" aria-label="关闭"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
                         </span>
                       </template>
                       <span v-else>拖拽文件到标题栏 · 支持 JPG / PNG / GIF</span>
@@ -73,7 +73,7 @@
             </div>
 
             <!-- 产品上传管理 -->
-            <div class="pd-section-label"><i class="fas fa-file-import" aria-hidden="true"></i> 批量导入</div>
+            <div class="pd-section-label"><FontAwesomeIcon icon="file-import" aria-hidden="true" /> 批量导入</div>
             <div
               class="pd-section-header pd-droppable"
               :class="{ 'pd-drag-over': excelDragOver }"
@@ -83,8 +83,8 @@
               @drop.prevent="onExcelDrop"
             >
               <label class="form-label pd-droppable-label">
-                <i class="fas fa-file-excel label-icon" aria-hidden="true"></i>
-                <span v-if="excelFile" class="pd-file-inline pd-file-inline-success"><i class="fas fa-file-excel" />{{ excelFile.name }}</span>
+                <FontAwesomeIcon icon="file-excel" class="label-icon" aria-hidden="true" />
+                <span v-if="excelFile" class="pd-file-inline pd-file-inline-success"><FontAwesomeIcon icon="file-excel" />{{ excelFile.name }}</span>
                 <span v-else>拖拽文件到标题栏 · 支持 .xlsx / .xls</span>
               </label>
               <div class="pd-inline-actions">
@@ -97,7 +97,7 @@
             </div>
 
             <button type="button" class="pd-btn pd-btn-primary w-full justify-center" style="margin-top: 15px" :disabled="submitting" @click="handleAdd">
-              <i class="fas fa-plus me-2" aria-hidden="true"></i>{{ submitting ? '添加中…' : '添加产品' }}
+              <FontAwesomeIcon icon="plus" class="me-2" aria-hidden="true" />{{ submitting ? '添加中…' : '添加产品' }}
             </button>
           </div>
         </div>
@@ -105,7 +105,7 @@
         <!-- 右栏：产品列表 -->
         <div class="pd-col">
           <div class="pd-col-title">
-            <span><i class="fas fa-list" aria-hidden="true"></i> 产品列表</span>
+            <span><FontAwesomeIcon icon="list" aria-hidden="true" /> 产品列表</span>
             <div class="pd-col-actions">
               <UiSearchInput :modelValue="searchTerm" placeholder="搜索产品名称或69码..." @search="onSearchInput" @update:modelValue="searchTerm = $event" />
               <select :value="`${sortBy}-${sortOrder}`" class="pd-sort" @change="onSortChange">
@@ -135,7 +135,7 @@
                     <tr>
                       <td colspan="6" class="text-center py-8">
                         <div class="pd-empty">
-                          <i class="fas fa-inbox pd-empty-icon" aria-hidden="true"></i>
+                          <FontAwesomeIcon icon="inbox" class="pd-empty-icon" aria-hidden="true" />
                           <p class="pd-empty-text">{{ searchTerm ? '未找到匹配的产品' : '暂无产品，请先添加' }}</p>
                         </div>
                       </td>
@@ -148,7 +148,7 @@
                           <img :src="resolveStaticUrl(row.image)" class="pd-thumb-img" :alt="row.name" @error="handleImageError(row)" />
                         </div>
                         <div v-else class="pd-thumb-box">
-                          <div class="pd-no-image"><i class="fas fa-image" aria-hidden="true"></i></div>
+                          <div class="pd-no-image"><FontAwesomeIcon icon="image" aria-hidden="true" /></div>
                         </div>
                       </td>
                       <td><span class="pd-name">{{ row.name }}</span></td>
@@ -158,13 +158,13 @@
                       <td>
                         <div class="pd-actions">
                           <button class="pd-act-btn pd-act-bom" title="配置BOM表" @click="openBomModal(row)" aria-label="设置">
-                            <i class="fas fa-cogs" aria-hidden="true"></i>
+                            <FontAwesomeIcon icon="cogs" aria-hidden="true" />
                           </button>
                           <button class="pd-act-btn pd-act-edit" title="编辑" @click="openEditModal(row)" aria-label="编辑">
-                            <i class="fas fa-edit" aria-hidden="true"></i>
+                            <FontAwesomeIcon icon="edit" aria-hidden="true" />
                           </button>
                           <button class="pd-act-btn pd-act-delete" title="删除" :disabled="actionId === row.id" @click="handleDelete(row)" aria-label="删除">
-                            <i class="fas fa-trash" aria-hidden="true"></i>
+                            <FontAwesomeIcon icon="trash" aria-hidden="true" />
                           </button>
                         </div>
                       </td>
@@ -187,7 +187,7 @@
         <div class="pd-modal pd-modal-img-dialog">
           <div class="pd-modal-header">
             <h5 class="pd-modal-title">产品图片</h5>
-            <button class="pd-modal-close" @click="imageModalVisible = false" aria-label="关闭"><i class="fas fa-times" aria-hidden="true"></i></button>
+            <button class="pd-modal-close" @click="imageModalVisible = false" aria-label="关闭"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
           </div>
           <div class="pd-modal-body">
             <img :src="resolveStaticUrl(imageModalSrc)" class="pd-modal-img-view" />
@@ -202,9 +202,9 @@
         <div class="bom-modal-content bom-modal-dialog">
           <div class="bom-modal-header">
             <div class="bom-modal-header-left">
-              <h5 class="bom-modal-title"><i class="fas fa-cogs" aria-hidden="true"></i><span>BOM表配置 - {{ bomProductName }}</span></h5>
+              <h5 class="bom-modal-title"><FontAwesomeIcon icon="cogs" aria-hidden="true" /><span>BOM表配置 - {{ bomProductName }}</span></h5>
             </div>
-            <button class="bom-modal-close" @click="bomDialogVisible = false" aria-label="关闭"><i class="fas fa-times" aria-hidden="true"></i></button>
+            <button class="bom-modal-close" @click="bomDialogVisible = false" aria-label="关闭"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
           </div>
           <div class="bom-modal-body">
             <div class="bom-tabs-container">
@@ -215,7 +215,7 @@
             <div class="bom-main-content">
               <div class="bom-summary-bar">
                 <div class="bom-summary-left">
-                  <span class="bom-summary-text"><i class="fas fa-list" aria-hidden="true"></i>{{ currentBomTabLabel }}物料清单</span>
+                  <span class="bom-summary-text"><FontAwesomeIcon icon="list" aria-hidden="true" />{{ currentBomTabLabel }}物料清单</span>
                   <span class="bom-summary-count">物料总数：<span class="count-value">{{ currentBomItems.length }}</span></span>
                 </div>
                 <div class="bom-summary-center">
@@ -241,8 +241,8 @@
                   </div>
                 </div>
                 <div class="bom-summary-right">
-                  <button class="bom-btn-copy-v2" :disabled="quickCopyLoading" @click="quickCopyBom"><i class="fas fa-copy" aria-hidden="true"></i>复制BOM</button>
-                  <button class="bom-btn-add-v2" @click="addBomItem"><i class="fas fa-plus" aria-hidden="true"></i>添加物料</button>
+                  <button class="bom-btn-copy-v2" :disabled="quickCopyLoading" @click="quickCopyBom"><FontAwesomeIcon icon="copy" aria-hidden="true" />复制BOM</button>
+                  <button class="bom-btn-add-v2" @click="addBomItem"><FontAwesomeIcon icon="plus" aria-hidden="true" />添加物料</button>
                 </div>
               </div>
               <div v-if="quickCopyProgress.visible" class="mb-3">
@@ -277,14 +277,14 @@
                           <td><input v-model="item.supplier_name" type="text" class="bom-table-input" placeholder="输入供应商名称" name="supplier-name" autocomplete="off" /></td>
                           <td><input v-model.number="item.usage" type="number" class="bom-table-input" step="0.01" min="0" name="quantity" autocomplete="off" /></td>
                           <td><input v-model="item.remark" type="text" class="bom-table-input" placeholder="输入备注" name="remark" autocomplete="off" /></td>
-                          <td><button class="bom-table-action-btn delete" @click="deleteBomItem(idx)" aria-label="删除"><i class="fas fa-trash" aria-hidden="true"></i></button></td>
+                          <td><button class="bom-table-action-btn delete" @click="deleteBomItem(idx)" aria-label="删除"><FontAwesomeIcon icon="trash" aria-hidden="true" /></button></td>
                         </tr>
                       </tbody>
                     </table>
                   </div>
                 </div>
                 <div v-else class="bom-empty-state-v2">
-                  <div class="bom-empty-icon"><i class="fas fa-inbox" aria-hidden="true"></i></div>
+                  <div class="bom-empty-icon"><FontAwesomeIcon icon="inbox" aria-hidden="true" /></div>
                   <div class="bom-empty-text">
                     <p class="bom-empty-title">暂无物料</p>
                     <p class="bom-empty-hint">点击"添加物料"按钮开始配置</p>
@@ -295,7 +295,7 @@
           </div>
           <div class="bom-modal-footer">
             <button class="bom-btn-cancel" @click="bomDialogVisible = false">取消</button>
-            <button class="bom-btn-save" @click="saveBom"><i class="fas fa-save" aria-hidden="true"></i>保存BOM</button>
+            <button class="bom-btn-save" @click="saveBom"><FontAwesomeIcon icon="save" aria-hidden="true" />保存BOM</button>
           </div>
         </div>
       </div>
@@ -307,21 +307,21 @@
         <div class="bom-modal-content copy-bom-modal-dialog">
           <div class="bom-modal-header">
             <div class="bom-modal-header-left">
-              <h5 class="bom-modal-title"><i class="fas fa-copy" aria-hidden="true"></i><span>复制BOM表</span></h5>
+              <h5 class="bom-modal-title"><FontAwesomeIcon icon="copy" aria-hidden="true" /><span>复制BOM表</span></h5>
             </div>
-            <button class="bom-modal-close" @click="copyBomDialogVisible = false" aria-label="关闭"><i class="fas fa-times" aria-hidden="true"></i></button>
+            <button class="bom-modal-close" @click="copyBomDialogVisible = false" aria-label="关闭"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
           </div>
           <div class="bom-modal-body">
             <div class="mb-4">
-              <label class="pd-label mb-2"><i class="fas fa-search me-2" aria-hidden="true"></i>搜索源产品</label>
+              <label class="pd-label mb-2"><FontAwesomeIcon icon="search" class="me-2" aria-hidden="true" />搜索源产品</label>
               <div class="pd-input-wrap">
-                <i class="fas fa-tag pd-input-icon" aria-hidden="true"></i>
+                <FontAwesomeIcon icon="tag" class="pd-input-icon" aria-hidden="true" />
                 <input v-model="copyBomSearchKeyword" type="text" class="pd-input" placeholder="输入产品名称或条码进行搜索" name="search" autocomplete="off" @keydown.enter="searchProductForCopy" />
               </div>
-              <div class="mt-2"><button class="pd-btn pd-btn-primary pd-btn-sm" @click="searchProductForCopy"><i class="fas fa-search me-2" aria-hidden="true"></i>搜索</button></div>
+              <div class="mt-2"><button class="pd-btn pd-btn-primary pd-btn-sm" @click="searchProductForCopy"><FontAwesomeIcon icon="search" class="me-2" aria-hidden="true" />搜索</button></div>
             </div>
             <div v-if="copyBomProducts.length > 0" class="mb-4">
-              <label class="pd-label mb-2"><i class="fas fa-box me-2" aria-hidden="true"></i>选择源产品</label>
+              <label class="pd-label mb-2"><FontAwesomeIcon icon="box" class="me-2" aria-hidden="true" />选择源产品</label>
               <div class="copy-bom-product-list">
                 <div v-for="product in copyBomProducts" :key="product.id" class="copy-bom-product-item" :class="{ selected: copyBomSourceProductId === product.id }" @click="selectCopyBomProduct(product)">
                   <div>
@@ -362,7 +362,7 @@
           </div>
           <div class="bom-modal-footer">
             <button class="bom-btn-cancel" @click="copyBomDialogVisible = false">取消</button>
-            <button class="bom-btn-save" :disabled="!copyBomSourceProductId" @click="confirmCopyBom"><i class="fas fa-check me-2" aria-hidden="true"></i>确认复制</button>
+            <button class="bom-btn-save" :disabled="!copyBomSourceProductId" @click="confirmCopyBom"><FontAwesomeIcon icon="check" class="me-2" aria-hidden="true" />确认复制</button>
           </div>
         </div>
       </div>
@@ -374,37 +374,37 @@
         <div class="bom-modal-content edit-modal-dialog">
           <div class="bom-modal-header">
             <div class="bom-modal-header-left">
-              <h5 class="bom-modal-title"><i class="fas fa-edit" aria-hidden="true"></i><span>编辑产品 - {{ editForm.name }}</span></h5>
+              <h5 class="bom-modal-title"><FontAwesomeIcon icon="edit" aria-hidden="true" /><span>编辑产品 - {{ editForm.name }}</span></h5>
             </div>
-            <button class="bom-modal-close" @click="editDialogVisible = false" aria-label="关闭"><i class="fas fa-times" aria-hidden="true"></i></button>
+            <button class="bom-modal-close" @click="editDialogVisible = false" aria-label="关闭"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
           </div>
           <div class="bom-modal-body">
             <div class="edit-modal-content">
               <div class="pd-form-group">
                 <label class="pd-label">产品名称 <span class="required">*</span></label>
                 <div class="pd-input-wrap">
-                  <i class="fas fa-tag pd-input-icon" aria-hidden="true"></i>
+                  <FontAwesomeIcon icon="tag" class="pd-input-icon" aria-hidden="true" />
                   <input v-model="editForm.name" type="text" class="pd-input" required placeholder="请输入产品名称" name="product-name" autocomplete="off" />
                 </div>
               </div>
               <div class="pd-form-group">
                 <label class="pd-label">69码/商品条码</label>
                 <div class="pd-input-wrap">
-                  <i class="fas fa-barcode pd-input-icon" aria-hidden="true"></i>
+                  <FontAwesomeIcon icon="barcode" class="pd-input-icon" aria-hidden="true" />
                   <input v-model="editForm.barcode" type="text" class="pd-input" placeholder="例如：6958085574210" name="barcode" autocomplete="off" />
                 </div>
               </div>
               <div class="pd-form-group">
                 <label class="pd-label">产品价格</label>
                 <div class="pd-input-wrap">
-                  <i class="fas fa-yen-sign pd-input-icon" aria-hidden="true"></i>
+                  <FontAwesomeIcon icon="yen-sign" class="pd-input-icon" aria-hidden="true" />
                   <input v-model.number="editForm.price" type="number" class="pd-input" step="0.01" min="0" placeholder="请输入产品价格" name="price" autocomplete="off" />
                 </div>
               </div>
               <div class="pd-form-group">
                 <label class="pd-label">工厂</label>
                 <div class="pd-input-wrap">
-                  <i class="fas fa-industry pd-input-icon" aria-hidden="true"></i>
+                  <FontAwesomeIcon icon="industry" class="pd-input-icon" aria-hidden="true" />
                   <select v-model="editForm.factory" class="pd-input pd-select" name="edit-factory">
                     <option value="" disabled>请选择工厂</option>
                     <option v-for="f in FACTORY_OPTIONS" :key="f" :value="f">{{ f }}</option>
@@ -422,11 +422,11 @@
                   @drop.prevent="onEditDrop"
                 >
                   <label class="form-label pd-droppable-label">
-                    <i class="fas fa-image label-icon" aria-hidden="true"></i>
+                    <FontAwesomeIcon icon="image" class="label-icon" aria-hidden="true" />
                     <template v-if="editForm.image">
                       <span class="pd-file-inline pd-file-inline-success">
                         <img :src="resolveStaticUrl(editForm.image)" class="pd-thumb-preview" @click.stop="openImageModal(editForm.image)" />
-                        <button type="button" class="pd-thumb-remove" @click.stop="editForm.image = ''" aria-label="关闭"><i class="fas fa-times" aria-hidden="true"></i></button>
+                        <button type="button" class="pd-thumb-remove" @click.stop="editForm.image = ''" aria-label="关闭"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
                       </span>
                     </template>
                     <span v-else>拖拽文件到标题栏 · 支持 JPG / PNG / GIF</span>
@@ -439,7 +439,7 @@
           <div class="bom-modal-footer">
             <button class="bom-btn-cancel" @click="editDialogVisible = false">取消</button>
             <button class="bom-btn-save" :disabled="editSubmitting" @click="handleEditSave">
-              <i class="fas fa-save" aria-hidden="true"></i>{{ editSubmitting ? '保存中…' : '保存修改' }}
+              <FontAwesomeIcon icon="save" aria-hidden="true" />{{ editSubmitting ? '保存中…' : '保存修改' }}
             </button>
           </div>
         </div>
@@ -466,6 +466,7 @@ import { upload, download, resolveStaticUrl } from '@/api/request'
 import { uploadImage } from './composables/useImageUpload'
 import { useProductListActions } from './composables/useProductListActions'
 import { showToast } from '@/composables/useToast'
+import { getErrorMessage } from '@/types/errors'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
@@ -552,8 +553,8 @@ async function handleAdd() {
     showToast('添加成功', 'success')
     Object.assign(form, { name: '', barcode: '', price: 0, factory: '', image: '' })
     queryClient.invalidateQueries({ queryKey: ['products-list'] })
-  } catch (err: any) {
-    showToast(err.response?.data?.detail || '添加失败', 'error')
+  } catch (err: unknown) {
+    showToast(getErrorMessage(err, '添加失败'), 'error')
   } finally {
     submitting.value = false
   }
@@ -567,8 +568,8 @@ async function handleDelete(row: Product) {
     await productApi.delete(row.id)
     showToast('删除成功', 'success')
     queryClient.invalidateQueries({ queryKey: ['products-list'] })
-  } catch (err: any) {
-    showToast(err.response?.data?.detail || '删除失败', 'error')
+  } catch (err: unknown) {
+    showToast(getErrorMessage(err, '删除失败'), 'error')
   } finally {
     actionId.value = null
   }
@@ -622,8 +623,8 @@ async function handleEditSave() {
     showToast('保存成功', 'success')
     editDialogVisible.value = false
     queryClient.invalidateQueries({ queryKey: ['products-list'] })
-  } catch (err: any) {
-    showToast(err.response?.data?.detail || '保存失败', 'error')
+  } catch (err: unknown) {
+    showToast(getErrorMessage(err, '保存失败'), 'error')
   } finally {
     editSubmitting.value = false
   }
@@ -661,8 +662,8 @@ async function handleBatchImport() {
     showToast('导入成功', 'success')
     excelFile.value = null
     queryClient.invalidateQueries({ queryKey: ['products-list'] })
-  } catch (err: any) {
-    showToast(err.response?.data?.detail || '导入失败', 'error')
+  } catch (err: unknown) {
+    showToast(getErrorMessage(err, '导入失败'), 'error')
   } finally {
     importing.value = false
   }

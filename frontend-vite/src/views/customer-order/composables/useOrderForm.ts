@@ -50,7 +50,7 @@ export function useOrderForm() {
     customer: '',
     productSearch: '',
     productId: 0,
-    quantity: 1,
+    quantity: 0,
     deductStock: false,
     deductQuantity: 0,
     note: '',
@@ -158,7 +158,7 @@ export function useOrderForm() {
   function resetFormAfterAdd() {
     form.productSearch = ''
     form.productId = 0
-    form.quantity = 1
+    form.quantity = 0
     form.note = ''
     form.orderType = 'normal'
     form.country = ''

@@ -10,15 +10,15 @@
           </div>
           <div class="pr-toolbar-controls">
             <div v-if="viewTab !== 'monthly'" class="pr-date-nav">
-              <button class="pr-date-btn" @click="dateRef = prevDay(dateRef)" aria-label="上一页"><i class="fas fa-chevron-left" aria-hidden="true" /></button>
+              <button class="pr-date-btn" @click="dateRef = prevDay(dateRef)" aria-label="上一页"><FontAwesomeIcon icon="chevron-left" aria-hidden="true" /></button>
               <input v-model="dateRef" type="date" class="pr-date-input" />
-              <button class="pr-date-btn" @click="dateRef = nextDay(dateRef)" aria-label="下一页"><i class="fas fa-chevron-right" aria-hidden="true" /></button>
+              <button class="pr-date-btn" @click="dateRef = nextDay(dateRef)" aria-label="下一页"><FontAwesomeIcon icon="chevron-right" aria-hidden="true" /></button>
               <button class="pr-today-btn" @click="dateRef = todayLocal()">今天</button>
             </div>
             <div v-else class="pr-date-nav">
-              <button class="pr-date-btn" @click="prevMonth" aria-label="上一月"><i class="fas fa-chevron-left" aria-hidden="true" /></button>
+              <button class="pr-date-btn" @click="prevMonth" aria-label="上一月"><FontAwesomeIcon icon="chevron-left" aria-hidden="true" /></button>
               <span class="pr-month-label">{{ monthlyYear }}年{{ monthlyMonth }}月</span>
-              <button class="pr-date-btn" @click="nextMonth" aria-label="下一月"><i class="fas fa-chevron-right" aria-hidden="true" /></button>
+              <button class="pr-date-btn" @click="nextMonth" aria-label="下一月"><FontAwesomeIcon icon="chevron-right" aria-hidden="true" /></button>
             </div>
             <div class="pr-divider" />
             <div class="pr-actions-group">
@@ -27,10 +27,10 @@
                 <button role="tab" :aria-selected="viewTab === 'monthly'" :class="['pr-tab', { 'pr-tab-active': viewTab === 'monthly' }]" @click="viewTab = 'monthly'">月报</button>
               </div>
               <button class="pr-action-btn pr-action-primary" @click="openEntryDrawer">
-                <i class="fas fa-plus" aria-hidden="true" /> 录入
+                <FontAwesomeIcon icon="plus" aria-hidden="true" /> 录入
               </button>
               <button class="pr-action-btn" @click="handleExport">
-                <i class="fas fa-download" aria-hidden="true" /> 导出
+                <FontAwesomeIcon icon="download" aria-hidden="true" /> 导出
               </button>
             </div>
           </div>
@@ -42,9 +42,9 @@
 
         <section class="pr-kpi-section">
           <div v-if="reportSummary" class="pr-kpi-row">
-            <KpiCard icon-class="fas fa-cubes" color-class="pr-kpi-blue" label="总产量" :value="reportSummary.overall_quantity" unit="件" />
-            <KpiCard icon-class="fas fa-yen-sign" color-class="pr-kpi-green" label="总产值" :value="formatCurrency(reportSummary.overall_value)" />
-            <KpiCard icon-class="fas fa-barcode" color-class="pr-kpi-amber" label="SKU 数" :value="reportSummary.overall_sku_count" unit="种" />
+            <KpiCard icon="cubes" color-class="pr-kpi-blue" label="总产量" :value="reportSummary.overall_quantity" unit="件" />
+            <KpiCard icon="yen-sign" color-class="pr-kpi-green" label="总产值" :value="formatCurrency(reportSummary.overall_value)" />
+            <KpiCard icon="barcode" color-class="pr-kpi-amber" label="SKU 数" :value="reportSummary.overall_sku_count" unit="种" />
           </div>
         </section>
 
@@ -80,13 +80,13 @@
           <div class="pr-content-row">
             <div class="pr-chart-panel">
               <div class="pr-panel-header">
-                <span class="pr-panel-title"><i class="fas fa-chart-bar" aria-hidden="true" /> {{ reportDate }} 生产概况</span>
+                <span class="pr-panel-title"><FontAwesomeIcon icon="chart-bar" aria-hidden="true" /> {{ reportDate }} 生产概况</span>
               </div>
               <div ref="dailyChartRef" class="pr-chart-body" />
             </div>
             <div v-if="reportSummary?.departments?.length" class="pr-table-panel">
               <div class="pr-panel-header">
-                <span class="pr-panel-title"><i class="fas fa-table" aria-hidden="true" /> 部门汇总</span>
+                <span class="pr-panel-title"><FontAwesomeIcon icon="table" aria-hidden="true" /> 部门汇总</span>
               </div>
               <div class="pr-table-scroll">
                 <table class="pr-table">
@@ -111,9 +111,9 @@
 
         <section class="pr-kpi-section">
           <div v-if="monthlySummary" class="pr-kpi-row">
-            <KpiCard icon-class="fas fa-cubes" color-class="pr-kpi-blue" label="月总产量" :value="monthlySummary.overall_quantity ?? 0" unit="件" />
-            <KpiCard icon-class="fas fa-yen-sign" color-class="pr-kpi-green" label="月总产值" :value="formatCurrency(monthlySummary.overall_value ?? 0)" />
-            <KpiCard icon-class="fas fa-calendar-check" color-class="pr-kpi-amber" label="生产天数" :value="monthlySummary.daily_data?.filter((d: any) => d.total.quantity > 0).length || 0" unit="天" />
+            <KpiCard icon="cubes" color-class="pr-kpi-blue" label="月总产量" :value="monthlySummary.overall_quantity ?? 0" unit="件" />
+            <KpiCard icon="yen-sign" color-class="pr-kpi-green" label="月总产值" :value="formatCurrency(monthlySummary.overall_value ?? 0)" />
+            <KpiCard icon="calendar-check" color-class="pr-kpi-amber" label="生产天数" :value="monthlySummary.daily_data?.filter((d: any) => d.total.quantity > 0).length || 0" unit="天" />
           </div>
         </section>
 
@@ -149,13 +149,13 @@
           <div class="pr-content-row">
             <div class="pr-chart-panel">
               <div class="pr-panel-header">
-                <span class="pr-panel-title"><i class="fas fa-chart-area" aria-hidden="true" /> 月度趋势</span>
+                <span class="pr-panel-title"><FontAwesomeIcon icon="chart-area" aria-hidden="true" /> 月度趋势</span>
               </div>
               <div ref="monthlyChartRef" class="pr-chart-body" />
             </div>
             <div v-if="monthlySummary?.daily_data?.length" class="pr-table-panel">
               <div class="pr-panel-header">
-                <span class="pr-panel-title"><i class="fas fa-table" aria-hidden="true" /> 每日明细</span>
+                <span class="pr-panel-title"><FontAwesomeIcon icon="table" aria-hidden="true" /> 每日明细</span>
               </div>
               <div class="pr-table-scroll">
                 <table class="pr-table">
@@ -183,13 +183,13 @@
           <div class="pr-entry-modal" role="dialog" aria-labelledby="pr-entry-title">
             <header class="pr-entry-header">
               <div class="pr-entry-header-left">
-                <span class="pr-entry-icon"><i class="fas fa-pen-to-square" aria-hidden="true" /></span>
+                <span class="pr-entry-icon"><FontAwesomeIcon icon="pen-to-square" aria-hidden="true" /></span>
                 <div>
                   <h3 id="pr-entry-title">录入生产数据</h3>
                   <span class="pr-entry-sub">{{ selectedDate }} · 快捷键 <kbd>Ctrl</kbd>+<kbd>N</kbd></span>
                 </div>
               </div>
-              <button class="pr-entry-close" @click="closeEntryDrawer" aria-label="关闭"><i class="fas fa-times" aria-hidden="true" /></button>
+              <button class="pr-entry-close" @click="closeEntryDrawer" aria-label="关闭"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
             </header>
 
             <div class="pr-entry-body">
@@ -218,7 +218,7 @@
                     >
                       <span :class="['pr-entry-dept-icon', `pr-entry-dept-icon-${dept.value}`]"><i :class="dept.icon" aria-hidden="true" /></span>
                       <span class="pr-entry-dept-name">{{ dept.label }}</span>
-                      <span class="pr-entry-dept-mark"><i class="fas fa-circle-check" aria-hidden="true" /></span>
+                      <span class="pr-entry-dept-mark"><FontAwesomeIcon icon="circle-check" aria-hidden="true" /></span>
                     </button>
                   </div>
                 </div>
@@ -227,7 +227,7 @@
                 <div class="pr-entry-group">
                   <label class="pr-entry-label">产品 <span class="pr-req">*</span></label>
                   <div class="pr-entry-search">
-                    <i class="fas fa-search pr-entry-search-icon" aria-hidden="true" />
+                    <FontAwesomeIcon icon="search" class="pr-entry-search-icon" aria-hidden="true" />
                     <input
                       ref="productSearchRef"
                       v-model="searchQuery"
@@ -244,16 +244,16 @@
                       @keydown.esc="showDropdown = false"
                     />
                     <button v-if="searchQuery" type="button" class="pr-entry-search-clear" @click="clearProduct" aria-label="清除">
-                      <i class="fas fa-times" aria-hidden="true" />
+                      <FontAwesomeIcon icon="times" aria-hidden="true" />
                     </button>
                     <div v-if="showDropdown" class="pr-entry-dropdown">
                       <div v-if="searchLoading" class="pr-entry-dropdown-state">
                         <UiSpinner /></div>
                       <div v-else-if="searchError" class="pr-entry-dropdown-state pr-entry-dropdown-error">
-                        <i class="fas fa-exclamation-circle" aria-hidden="true" /> {{ searchError }}
+                        <FontAwesomeIcon icon="exclamation-circle" aria-hidden="true" /> {{ searchError }}
                       </div>
                       <div v-else-if="!searchResults.length" class="pr-entry-dropdown-state">
-                        <i class="fas fa-inbox" aria-hidden="true" /> 无匹配产品
+                        <FontAwesomeIcon icon="inbox" aria-hidden="true" /> 无匹配产品
                       </div>
                       <button
                         v-for="(p, idx) in searchResults"
@@ -262,21 +262,21 @@
                         :class="['pr-entry-dropdown-item', { active: idx === searchActiveIndex }]"
                         @mousedown.prevent="selectProduct(p)"
                       >
-                        <span class="pr-entry-dropdown-icon"><i class="fas fa-box" aria-hidden="true" /></span>
+                        <span class="pr-entry-dropdown-icon"><FontAwesomeIcon icon="box" aria-hidden="true" /></span>
                         <span class="pr-entry-dropdown-content">
                           <span class="pr-entry-dropdown-name">{{ p.name }}</span>
                           <span class="pr-entry-dropdown-meta">
-                            <span v-if="p.barcode" class="pr-entry-dropdown-barcode"><i class="fas fa-barcode" aria-hidden="true" /> {{ p.barcode }}</span>
+                            <span v-if="p.barcode" class="pr-entry-dropdown-barcode"><FontAwesomeIcon icon="barcode" aria-hidden="true" /> {{ p.barcode }}</span>
                             <span v-if="p.specification" class="pr-entry-dropdown-spec">{{ p.specification }}</span>
                           </span>
                         </span>
 
-                        <i v-if="idx === searchActiveIndex" class="fas fa-arrow-right pr-entry-dropdown-enter" aria-hidden="true" />
+                        <FontAwesomeIcon v-if="idx === searchActiveIndex" icon="arrow-right" class="pr-entry-dropdown-enter" aria-hidden="true" />
                       </button>
                     </div>
                   </div>
                   <div v-if="form.product_name" class="pr-entry-selected">
-                    <span class="pr-entry-selected-icon"><i class="fas fa-check-circle" aria-hidden="true" /></span>
+                    <span class="pr-entry-selected-icon"><FontAwesomeIcon icon="check-circle" aria-hidden="true" /></span>
                     <span class="pr-entry-selected-name">{{ form.product_name }}</span>
                     <span v-if="form.barcode" class="pr-entry-selected-barcode">{{ form.barcode }}</span>
                   </div>
@@ -333,7 +333,7 @@
                   <div class="pr-entry-group">
                     <label class="pr-entry-label">产值</label>
                     <div class="pr-entry-value-display">
-                      <i class="fas fa-yen-sign" aria-hidden="true" />
+                      <FontAwesomeIcon icon="yen-sign" aria-hidden="true" />
                       <span>{{ formatCurrency(computedValue) }}</span>
                     </div>
                   </div>
@@ -355,7 +355,7 @@
               <aside class="pr-entry-sidebar">
                 <div class="pr-entry-side-card">
                   <div class="pr-entry-side-head">
-                    <span><i class="fas fa-clock-rotate-left" aria-hidden="true" /> 最近使用</span>
+                    <span><FontAwesomeIcon icon="clock-rotate-left" aria-hidden="true" /> 最近使用</span>
                     <button v-if="recentProducts.length" type="button" class="pr-entry-side-clear" @click="clearRecent">清空</button>
                   </div>
                   <div v-if="recentProducts.length" class="pr-entry-recent-list">
@@ -372,11 +372,11 @@
                         <span class="pr-entry-recent-name">{{ p.name }}</span>
                         <span v-if="p.barcode" class="pr-entry-recent-barcode">{{ p.barcode }}</span>
                       </span>
-                      <i class="fas fa-chevron-right pr-entry-recent-arrow" aria-hidden="true" />
+                      <FontAwesomeIcon icon="chevron-right" class="pr-entry-recent-arrow" aria-hidden="true" />
                     </button>
                   </div>
                   <div v-else class="pr-entry-empty-small">
-                    <i class="fas fa-inbox" aria-hidden="true" />
+                    <FontAwesomeIcon icon="inbox" aria-hidden="true" />
                     <span>暂无最近使用</span>
                     <small>录入后会自动记录</small>
                   </div>
@@ -384,7 +384,7 @@
 
                 <div class="pr-entry-side-card">
                   <div class="pr-entry-side-head">
-                    <span><i class="fas fa-keyboard" aria-hidden="true" /> 快捷键</span>
+                    <span><FontAwesomeIcon icon="keyboard" aria-hidden="true" /> 快捷键</span>
                   </div>
                   <div class="pr-entry-shortcuts">
                     <div class="pr-entry-shortcut"><kbd>↑</kbd><kbd>↓</kbd><span>选择产品</span></div>
@@ -400,7 +400,7 @@
               <label class="pr-entry-continue" :class="{ active: keepAdding }">
                 <input v-model="keepAdding" type="checkbox" />
                 <span class="pr-entry-continue-box" aria-hidden="true">
-                  <i class="fas fa-check" />
+                  <FontAwesomeIcon icon="check" />
                 </span>
                 <span>保存后继续录入下一条</span>
               </label>
@@ -557,7 +557,7 @@ function onSearchInput() {
       const res = (await productApi.search(searchQuery.value.trim())) as any
       searchResults.value = res.products ?? res ?? []
       searchError.value = ''
-    } catch (error: any) {
+    } catch (error: unknown) {
       searchError.value = '产品搜索失败，请重试'
       searchResults.value = []
     } finally {
@@ -708,7 +708,7 @@ async function confirmSubmit(opts: { keepOpen: boolean } = { keepOpen: false }) 
     queryClient.invalidateQueries({ queryKey: ['daily-production-records'] })
     queryClient.invalidateQueries({ queryKey: ['daily-production-daily-summary'] })
     queryClient.invalidateQueries({ queryKey: ['daily-production-monthly-summary'] })
-  } catch (error: any) {
+  } catch (error: unknown) {
     showToast(error?.response?.data?.detail ?? '录入失败', 'error')
   }
   finally { isSubmitting.value = false }
@@ -761,7 +761,7 @@ async function handleExport() {
       const _t = setTimeout(() => { exportStatus.show = false }, 3000)
       _timers.push(_t)
       return
-    } catch (error: any) {
+    } catch (error: unknown) {
       retries++
       if (retries <= maxRetries) {
         exportStatus.message = `导出失败，正在重试 (${retries}/${maxRetries})...`

@@ -1,10 +1,10 @@
 <template>
   <UiDialog :open="open" @update:open="$emit('update:open', $event)" :title="`来料详情 - ${supplierDetailOrderNo}`" title-icon="" max-width-class="max-w-[1000px]">
-    <template #title-icon><i class="fas fa-clipboard-list" style="color:var(--color-primary-500);"></i></template>
+    <template #title-icon><FontAwesomeIcon icon="clipboard-list" style="color:var(--color-primary-500);" /></template>
     <div v-if="supplierDetail">
       <div v-for="g in supplierDetail.supplierGroups" :key="g.supplierName" class="mr-source-card" style="margin-bottom:16px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-          <div style="font-weight:600;font-size:14px;"><i class="fas fa-truck" style="color:var(--color-primary-500);margin-right:6px;"></i>{{ g.supplierName }}<span style="color:var(--color-text-muted);margin-left:8px;font-weight:400;font-size:12px;">{{ g.items.length }} 项</span></div>
+          <div style="font-weight:600;font-size:14px;"><FontAwesomeIcon icon="truck" style="color:var(--color-primary-500);margin-right:6px;" />{{ g.supplierName }}<span style="color:var(--color-text-muted);margin-left:8px;font-weight:400;font-size:12px;">{{ g.items.length }} 项</span></div>
           <span :class="['mr-badge', g.pct >= 100 ? 'mr-badge-completed' : g.pct > 0 ? 'mr-badge-pending' : 'mr-badge-overdue']">{{ g.pct }}%</span>
         </div>
         <div v-for="m in g.items" :key="m.name" class="mr-det-mat-card">
@@ -20,9 +20,9 @@
               <span class="mr-det-mat-metric"><span class="mr-det-mat-label">完成率</span><b class="mr-det-mat-value" :class="m.received >= m.ordered ? 'completed' : (m.pct >= 50 ? 'half' : 'low')">{{ m.pct }}%</b></span>
             </div>
             <div class="mr-det-mat-right">
-              <span v-if="m.received >= m.ordered" class="mr-status-completed"><i class="fas fa-check-circle" /> 已完成</span>
+              <span v-if="m.received >= m.ordered" class="mr-status-completed"><FontAwesomeIcon icon="check-circle" /> 已完成</span>
               <span v-else class="mr-status-pending">未完成</span>
-              <button v-if="canManage && m.received < m.ordered && m.subItems.length" class="mr-btn mr-btn-success" @click="$emit('openReceiveBySubItems', m.subItems, m.name, m.ordered, m.received)" title="登记收货"><i class="fas fa-box" /> 登记收货</button>
+              <button v-if="canManage && m.received < m.ordered && m.subItems.length" class="mr-btn mr-btn-success" @click="$emit('openReceiveBySubItems', m.subItems, m.name, m.ordered, m.received)" title="登记收货"><FontAwesomeIcon icon="box" /> 登记收货</button>
             </div>
           </div>
         </div>

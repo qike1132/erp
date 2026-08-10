@@ -22,13 +22,28 @@ from fastapi_app.core.config import settings
 
 
 def _get_pool_config() -> dict:
-    """根据 Worker 数动态计算连接池大小，防止超出 PostgreSQL max_connections"""
+    """根据 Worker 数动态计算连接池大小，防止超出 PostgreSQL max_connections。
+
+    PgBouncer 启用时（PGBouncer_ENABLED=true），应用侧连接池显著缩小：
+    PgBouncer 负责连接复用，应用侧只需少量连接到 PgBouncer 即可，
+    避免应用侧连接池与 PgBouncer 连接池叠加导致连接数膨胀。
+    """
     workers = int(os.getenv("UVICORN_WORKERS", "4"))
     # 确保: workers × (pool_size + max_overflow) < PG max_connections (默认100)
     # 留 20 连接给 Celery/迁移/管理工具
     available = int(os.getenv("DB_MAX_CONNECTIONS", "100")) - 20
-    pool_size = max(5, available // (workers * 2))
-    max_overflow = max(3, available // (workers * 3))
+
+    # PgBouncer 启用时减小应用侧连接池（PgBouncer 负责连接复用）
+    pgbouncer_enabled = os.getenv("PGBouncer_ENABLED", "false").lower() in ("true", "1", "yes")
+    if pgbouncer_enabled:
+        # PgBouncer transaction 模式下，应用侧每个 worker 只需少量连接
+        # 除数更大（workers*4 / workers*6），使单 worker 连接数更少
+        pool_size = max(3, available // (workers * 4))
+        max_overflow = max(2, available // (workers * 6))
+    else:
+        pool_size = max(5, available // (workers * 2))
+        max_overflow = max(3, available // (workers * 3))
+
     return {
         "pool_size": pool_size,
         "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT", "30")),

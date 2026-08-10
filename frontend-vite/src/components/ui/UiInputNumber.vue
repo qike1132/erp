@@ -14,7 +14,7 @@
         aria-label="减少"
         @click="decrement"
       >
-        <i class="fas fa-minus text-xs text-text-secondary" aria-hidden="true" />
+        <FontAwesomeIcon icon="minus" class="text-xs text-text-secondary" aria-hidden="true" />
       </button>
       <input
         :id="inputId"
@@ -40,7 +40,7 @@
         aria-label="增加"
         @click="increment"
       >
-        <i class="fas fa-plus text-xs text-text-secondary" aria-hidden="true" />
+        <FontAwesomeIcon icon="plus" class="text-xs text-text-secondary" aria-hidden="true" />
       </button>
     </div>
   </div>

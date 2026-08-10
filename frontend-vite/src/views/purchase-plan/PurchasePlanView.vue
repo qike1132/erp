@@ -26,13 +26,13 @@
       <div class="sp-toolbar">
         <div class="sp-toolbar-actions">
           <div class="sp-nav">
-            <button class="sp-nav-btn" @click="prevMonth" aria-label="上一页"><i class="fas fa-chevron-left"  aria-hidden="true" /></button>
+            <button class="sp-nav-btn" @click="prevMonth" aria-label="上一页"><FontAwesomeIcon icon="chevron-left" aria-hidden="true" /></button>
             <span class="sp-nav-label">{{ y }}年{{ String(m).padStart(2, '0') }}月</span>
-            <button class="sp-nav-btn" @click="nextMonth" aria-label="下一页"><i class="fas fa-chevron-right"  aria-hidden="true" /></button>
+            <button class="sp-nav-btn" @click="nextMonth" aria-label="下一页"><FontAwesomeIcon icon="chevron-right" aria-hidden="true" /></button>
           </div>
           <UiSearchInput v-model="globalKw" :placeholder="viewTab === 'daily' ? '搜索日期、客户...' : '搜索产品、SKU、客户...'" @clear="globalKw = ''" />
           <button class="sp-action-btn" @click="viewTab === 'daily' ? exportCSV() : exportSkuCSV()">导出</button>
-          <button class="sp-action-btn sp-action-btn-primary" @click="showCreate = true"><i class="fas fa-plus"  aria-hidden="true" />新建</button>
+          <button class="sp-action-btn sp-action-btn-primary" @click="showCreate = true"><FontAwesomeIcon icon="plus" aria-hidden="true" />新建</button>
         </div>
         <div v-if="summaryCustomers.length" class="sp-toolbar-stats-wrapper">
           <div class="sp-toolbar-stats">
@@ -54,8 +54,8 @@
 
       <div v-if="viewTab === 'daily'" class="sp-body">
         <div v-if="isLoading && !d" class="sp-empty"><UiSpinner /></div>
-        <div v-else-if="isError" class="sp-empty"><i class="fas fa-exclamation-circle"  aria-hidden="true" />加载失败 <button class="sp-retry-btn" @click="refetch()">重试</button></div>
-        <div v-else-if="!rows.length" class="sp-empty"><i class="fas fa-inbox"  aria-hidden="true" />本月暂无出货计划</div>
+        <div v-else-if="isError" class="sp-empty"><FontAwesomeIcon icon="exclamation-circle" aria-hidden="true" />加载失败 <button class="sp-retry-btn" @click="refetch()">重试</button></div>
+        <div v-else-if="!rows.length" class="sp-empty"><FontAwesomeIcon icon="inbox" aria-hidden="true" />本月暂无出货计划</div>
         <template v-else>
         <div v-if="isFetching" class="sp-fetching-bar"><div class="sp-fetching-progress" /></div>
         <div>
@@ -72,7 +72,7 @@
               <div class="sp-day-header">
                 <span class="sp-day-badge">{{ r._fullDate }}：{{ fmtQty(r.totalQty) }}</span>
                 <span v-if="r._pendingCount > 0" class="sp-day-alert" :class="getAlertClass(r.date)">{{ getAlertLabel(r.date) }}</span>
-                <span v-else-if="r._shippedPct === 100" class="sp-day-alert sp-day-done"><i class="fas fa-check"  aria-hidden="true" /> 完成</span>
+                <span v-else-if="r._shippedPct === 100" class="sp-day-alert sp-day-done"><FontAwesomeIcon icon="check" aria-hidden="true" /> 完成</span>
               </div>
 
               <div class="sp-day-body">

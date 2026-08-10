@@ -22,6 +22,7 @@ from fastapi_app.api.v1.endpoints.ocr_import import router as ocr_import_router
 from fastapi_app.api.v1.endpoints.order import router as order_router
 from fastapi_app.api.v1.endpoints.order_batch import router as order_batch_router
 from fastapi_app.api.v1.endpoints.pattern_room import router as pattern_room_router
+from fastapi_app.api.v1.endpoints.customer_sampling import router as customer_sampling_router
 from fastapi_app.api.v1.endpoints.permission import router as permission_router
 from fastapi_app.api.v1.endpoints.product import router as product_router
 from fastapi_app.api.v1.endpoints.production_plan import router as production_plan_router
@@ -264,11 +265,12 @@ api_router.include_router(
 )
 
 # 性能监控路由 - 前缀 /api/v1/monitoring
+# 注意：不在此层添加认证依赖，因为 POST /vitals 由 sendBeacon 上报（无法携带 auth header）
+# 需要认证的端点（如 GET /vitals/summary）在 monitoring.py 内部单独声明 dependency
 api_router.include_router(
     monitoring_router,
     prefix="/monitoring",
     tags=["性能监控"],
-    dependencies=[Depends(get_current_user_id)],
 )
 
 # 死信队列路由 - 前缀 /api/v1/dead-letter
@@ -279,13 +281,21 @@ api_router.include_router(
     dependencies=[Depends(get_current_user_id)],
 )
 
-# 板房管理路由 - 前缀 /api/v1/pattern-room
+# 按客户分类打样管理路由 - 前缀 /api/v1/pattern-room（保持路径不变，用户无感切换）
+# 新模块接管 /pattern-room 路径，旧 pattern_room_router 注册暂注释（T14 统一清理旧代码）
 api_router.include_router(
-    pattern_room_router,
+    customer_sampling_router,
     prefix="/pattern-room",
     tags=["板房管理"],
     dependencies=[Depends(get_current_user_id)],
 )
+# 旧 pattern_room 路由注册（已由 customer_sampling_router 接管，T14 将删除此注释与旧文件）
+# api_router.include_router(
+#     pattern_room_router,
+#     prefix="/pattern-room",
+#     tags=["板房管理"],
+#     dependencies=[Depends(get_current_user_id)],
+# )
 
 # 通知中心路由 - 前缀 /api/v1/notifications
 api_router.include_router(

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { countryApi } from '@/api'
+import { getErrorStatus } from '@/types/errors'
 
 const STORAGE_KEY = 'erp_countries'
 
@@ -51,8 +52,8 @@ export const useCountryStore = defineStore('country', () => {
       countries.value.push(trimmed)
       saveToStorage(countries.value)
       return true
-    } catch (err: any) {
-      if (err.response?.status === 409) return false
+    } catch (err: unknown) {
+      if (getErrorStatus(err) === 409) return false
       countries.value.push(trimmed)
       saveToStorage(countries.value)
       return true

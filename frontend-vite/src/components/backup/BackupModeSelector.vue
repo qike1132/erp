@@ -30,7 +30,7 @@
           :class="['bk-mode-btn', backupMode === 'custom' ? 'bk-mode-active' : '']"
           @click="$emit('mode-change', 'custom')"
         >
-          <i class="fas fa-file-download" />
+          <FontAwesomeIcon icon="file-download" />
           <span>自定义路径</span>
           <small>下载到本地</small>
         </button>
@@ -38,7 +38,7 @@
           :class="['bk-mode-btn', backupMode === 'default' ? 'bk-mode-active' : '']"
           @click="$emit('mode-change', 'default')"
         >
-          <i class="fas fa-server" />
+          <FontAwesomeIcon icon="server" />
           <span>默认路径</span>
           <small>保存到服务器</small>
         </button>
@@ -93,7 +93,7 @@
     <div v-if="saveResult" class="bk-section">
       <div class="bk-result-card bk-result-success">
         <div class="bk-result-header">
-          <i class="fas fa-check-circle" /> 备份已保存
+          <FontAwesomeIcon icon="check-circle" /> 备份已保存
         </div>
         <div class="bk-result-stats">
           <span>文件: <b>{{ saveResult.filename }}</b></span>
@@ -103,9 +103,9 @@
         </div>
         <!-- ZIP includes badges -->
         <div v-if="saveResult.format === 'zip' && saveResult.includes" class="bk-backup-includes" style="margin-top: 8px;">
-          <span v-if="saveResult.includes.filestore_count" class="bk-badge"><i class="fas fa-paperclip" /> {{ saveResult.includes.filestore_count }} 附件</span>
-          <span v-if="saveResult.includes.config_files?.length" class="bk-badge"><i class="fas fa-cog" /> {{ saveResult.includes.config_files.length }} 配置</span>
-          <span v-if="saveResult.includes.redis_rdb" class="bk-badge"><i class="fas fa-bolt" /> Redis</span>
+          <span v-if="saveResult.includes.filestore_count" class="bk-badge"><FontAwesomeIcon icon="paperclip" /> {{ saveResult.includes.filestore_count }} 附件</span>
+          <span v-if="saveResult.includes.config_files?.length" class="bk-badge"><FontAwesomeIcon icon="cog" /> {{ saveResult.includes.config_files.length }} 配置</span>
+          <span v-if="saveResult.includes.redis_rdb" class="bk-badge"><FontAwesomeIcon icon="bolt" /> Redis</span>
         </div>
       </div>
     </div>

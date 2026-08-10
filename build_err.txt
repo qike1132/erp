@@ -1,0 +1,55 @@
+▲ [WARNING] Duplicate key "@fortawesome/fontawesome-free" in object literal [duplicate-object-key]
+
+    package.json:65:4:
+      65 │     "@fortawesome/fontawesome-free": "^7.2.0",
+         ╵     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  The original key "@fortawesome/fontawesome-free" is here:
+
+    package.json:63:4:
+      63 │     "@fortawesome/fontawesome-free": "^7.3.1",
+         ╵     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+[33m[plugin vite:esbuild] src/styles/primevue-pt.ts: [33mDuplicate key "content" in object literal[33m
+98 |        ],
+99 |      },
+100|      content: 'flex-1 px-6 py-5 overflow-y-auto',
+   |      ^
+101|    },
+102|  
+[39m
+[33m[plugin vite:esbuild] src/styles/primevue-pt.ts: [33mDuplicate key "content" in object literal[33m
+240 |      closeButton:
+241 |        'inline-flex items-center justify-center w-8 h-8 rounded-full text-text-muted hover:bg-slate-100 hover:text-tex...
+242 |      content: 'flex-1 px-6 py-5 overflow-y-auto',
+    |      ^
+243 |      footer: 'flex items-center justify-end gap-3 px-6 py-4 border-t border-border-light flex-shrink-0',
+244 |    },
+[39m
+[33mnode_modules/@vueuse/core/dist/index.js (3362:0): A comment
+
+"/* #__PURE__ */"
+
+in "node_modules/@vueuse/core/dist/index.js" contains an annotation that Rollup cannot interpret due to the position of the comment. The comment will be removed to avoid issues.[39m
+[33mnode_modules/@vueuse/core/dist/index.js (5780:22): A comment
+
+"/* #__PURE__ */"
+
+in "node_modules/@vueuse/core/dist/index.js" contains an annotation that Rollup cannot interpret due to the position of the comment. The comment will be removed to avoid issues.[39m
+[31m✗[39m Build failed in 31.23s
+[31merror during build:
+D:\erp_system\frontend-vite\node_modules\@babel\traverse\node_modules\@babel\generator\lib\generators\classes.js:96
+      printer.tokenChar(59
+                        ^^
+
+SyntaxError: missing ) after argument list
+    at wrapSafe (node:internal/modules/cjs/loader:1743:18)
+    at Module._compile (node:internal/modules/cjs/loader:1786:20)
+    at Object..js (node:internal/modules/cjs/loader:1943:10)
+    at Module.load (node:internal/modules/cjs/loader:1533:32)
+    at Module._load (node:internal/modules/cjs/loader:1335:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.require (node:internal/modules/cjs/loader:1556:12)
+    at require (node:internal/modules/helpers:152:16)
+    at Object.<anonymous> (D:\erp_system\frontend-vite\node_modules\@babel\traverse\node_modules\@babel\generator\lib\generators\index.js:39:16)
+    at Module._compile (node:internal/modules/cjs/loader:1812:14)[39m

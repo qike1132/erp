@@ -4,6 +4,9 @@
  *
  * 统一通知入口，支持配置化调用
  */
+import { icon } from '@fortawesome/fontawesome-svg-core'
+import { faCheck, faTimes, faExclamation, faInfo } from '@fortawesome/free-solid-svg-icons'
+
 const TOAST_CONTAINER_ID = '__toast_container__'
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info'
@@ -32,35 +35,35 @@ export function configureToast(config: Partial<ToastOptions>) {
 const THEME: Record<ToastType, {
   accent: string
   accentShadow: string
-  icon: string
+  iconDef: typeof faCheck
   iconBg: string
   iconColor: string
 }> = {
   success: {
     accent: '#28c76f',
     accentShadow: 'rgba(40, 199, 111, 0.18)',
-    icon: 'fas fa-check',
+    iconDef: faCheck,
     iconBg: 'linear-gradient(135deg, #3dc97a, #28c76f)',
     iconColor: '#fff',
   },
   error: {
     accent: '#ea5455',
     accentShadow: 'rgba(234, 84, 85, 0.18)',
-    icon: 'fas fa-times',
+    iconDef: faTimes,
     iconBg: 'linear-gradient(135deg, #ed5657, #ea5455)',
     iconColor: '#fff',
   },
   warning: {
     accent: '#ff9f43',
     accentShadow: 'rgba(255, 159, 67, 0.18)',
-    icon: 'fas fa-exclamation',
+    iconDef: faExclamation,
     iconBg: 'linear-gradient(135deg, #ffa53d, #ff9f43)',
     iconColor: '#fff',
   },
   info: {
     accent: '#5b8def',
     accentShadow: 'rgba(91, 141, 239, 0.18)',
-    icon: 'fas fa-info',
+    iconDef: faInfo,
     iconBg: 'linear-gradient(135deg, #6d95f0, #5b8def)',
     iconColor: '#fff',
   },
@@ -90,6 +93,8 @@ function getContainer(): HTMLElement {
       // residual 10px gap that snaps shut only on `remove()`, causing the
       // exact jank the user reported.
     })
+    el.setAttribute('aria-live', 'polite')
+    el.setAttribute('aria-atomic', 'false')
     document.body.appendChild(el)
   }
   return el
@@ -135,6 +140,7 @@ function _renderToast(msg: string, type: ToastType, options: Required<ToastOptio
     wordBreak: 'break-word',
     willChange: 'opacity, transform, max-height, margin-top',
   })
+  wrap.setAttribute('role', 'alert')
 
   // icon circle
   const iconWrap = document.createElement('div')
@@ -149,13 +155,17 @@ function _renderToast(msg: string, type: ToastType, options: Required<ToastOptio
     flexShrink: '0',
     boxShadow: `0 2px 8px ${theme.accentShadow}`,
   })
-  const icon = document.createElement('i')
-  icon.className = theme.icon
-  Object.assign(icon.style, {
-    fontSize: '12px',
-    color: theme.iconColor,
+  // 使用 FontAwesome icon() API 直接渲染 SVG，替代 dom.watch() 方案
+  const renderedIcon = icon(theme.iconDef, {
+    styles: { color: theme.iconColor },
   })
-  iconWrap.appendChild(icon)
+  const svgEl = renderedIcon.node[0] as SVGElement
+  Object.assign(svgEl.style, {
+    width: '14px',
+    height: '14px',
+  })
+  svgEl.setAttribute('aria-hidden', 'true')
+  iconWrap.appendChild(svgEl)
   wrap.appendChild(iconWrap)
 
   // text
@@ -171,7 +181,15 @@ function _renderToast(msg: string, type: ToastType, options: Required<ToastOptio
   let closeBtn: HTMLButtonElement | null = null
   if (options.closable) {
     closeBtn = document.createElement('button')
-    closeBtn.innerHTML = '<i class="fas fa-times" style="font-size:12px"></i>'
+    closeBtn.setAttribute('aria-label', '关闭通知')
+    const closeIcon = icon(faTimes)
+    closeBtn.innerHTML = closeIcon.html
+    const closeSvg = closeBtn.querySelector('svg')
+    if (closeSvg) {
+      closeSvg.style.width = '12px'
+      closeSvg.style.height = '12px'
+      closeSvg.setAttribute('aria-hidden', 'true')
+    }
     Object.assign(closeBtn.style, {
       background: 'none',
       border: 'none',

@@ -1,6 +1,6 @@
 <template>
   <UiDialog :open="open" @update:open="$emit('update:open', $event)" title="来料进度详情" title-icon="" max-width-class="max-w-[1000px]">
-    <template #title-icon><i class="fas fa-clipboard-list" style="color:var(--color-primary-500);"></i></template>
+    <template #title-icon><FontAwesomeIcon icon="clipboard-list" style="color:var(--color-primary-500);" /></template>
     <div v-if="detailData">
       <div class="mr-det-grid">
         <div><div class="mr-det-lb">订单号</div><div class="mr-det-vl" style="color:var(--color-primary-500);">{{ detailData.purchase_order_no }}</div></div>
@@ -9,12 +9,12 @@
         <div><div class="mr-det-lb">状态</div><div class="mr-det-vl"><span :class="['mr-badge', 'mr-badge-' + detailData.status]">{{ STATUS_MAP[detailData.status] || detailData.status }}</span></div></div>
         <div><div class="mr-det-lb">总进度</div><div class="mr-det-vl" style="display:flex;align-items:center;gap:8px;"><div class="mr-pbar" style="flex:1;min-width:120px;"><div :class="['mr-pfill', detailData.progress >= 100 ? 'completed' : 'pending']" :style="{ width: (detailData.progress || 0) + '%' }"></div></div><span>{{ detailData.progress }}% (已到货 {{ detailData.total_received }} / 数量 {{ detailData.total_ordered }})</span></div></div>
       </div>
-      <h4 style="margin:18px 0 14px;font-size:16px;"><i class="fas fa-cubes" style="color:var(--color-primary-500);"></i> SKU物料来料进度</h4>
+      <h4 style="margin:18px 0 14px;font-size:16px;"><FontAwesomeIcon icon="cubes" style="color:var(--color-primary-500);" /> SKU物料来料进度</h4>
       <VirtualList
         :items="mergedItems"
         :itemHeight="90"
         :containerHeight="360"
-        :itemKey="(i: any) => i.material_name"
+        :itemKey="(i: { material_name: string }) => i.material_name"
       >
         <template #default="{ item: i }">
           <div class="mr-sku-row" style="margin-bottom:0;">
@@ -25,7 +25,7 @@
               <span>数量: <b>{{ i.ordered_quantity }}</b> {{ i.unit || '' }}</span>
               <span>已到货: <b style="color:var(--color-success-500);">{{ i.received_quantity }}</b></span>
               <span>未到: <b style="color:var(--color-warning-500);">{{ i.remaining_quantity }}</b></span>
-              <button v-if="canManage && i.received_quantity < i.ordered_quantity" class="mr-btn mr-btn-success mr-btn-sm" @click="$emit('openReceive', i)" title="登记收货数量"><i class="fas fa-box" /> 收货</button>
+              <button v-if="canManage && i.received_quantity < i.ordered_quantity" class="mr-btn mr-btn-success mr-btn-sm" @click="$emit('openReceive', i)" title="登记收货数量"><FontAwesomeIcon icon="box" /> 收货</button>
               <span v-else-if="i.received_quantity >= i.ordered_quantity" style="color:var(--color-success-500);font-weight:600;">&#10003; 已完成</span>
             </div>
           </div>

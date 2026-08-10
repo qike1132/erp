@@ -35,7 +35,7 @@
         <div v-if="invLoading" class="m-center"><MSpinner size="lg" /></div>
         <MEmpty v-else-if="!inventory.length" title="暂无库存数据" />
         <MList v-else>
-          <MListItem v-for="item in inventory" :key="item.id" :title="item.product_name || '—'" :subtitle="`${item.customer || ''} · ${item.quantity || 0}件`" />
+          <MListItem v-for="item in inventory" :key="item.product_id" :title="item.product_name || '—'" :subtitle="`${item.customer || ''} · ${item.current_stock || 0}件`" />
         </MList>
       </template>
     </div>
@@ -67,7 +67,11 @@ const inventory = ref<any[]>([])
 const invLoading = ref(false)
 
 async function loadCustomers() {
-  try { const res = await customerApi.activeNames(); customers.value = res || [] } catch { /* */ }
+  try {
+    const res = await customerApi.activeNames()
+    // 后端返回 [{ id, name }, ...]，只需名称列表供下拉框使用
+    customers.value = (res || []).map((c: any) => c.name).filter(Boolean)
+  } catch { /* */ }
 }
 async function loadInventory() {
   invLoading.value = true

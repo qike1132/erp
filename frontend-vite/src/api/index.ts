@@ -2,6 +2,7 @@
 // 新代码应直接从具体模块导入，如 `import { orderApi } from '@/api/order'`
 
 export { authApi } from './auth'
+export { clearCsrfCache } from './request'
 export { orderApi } from './order'
 export { bomApi, purchaseApi } from './purchase'
 export type {
@@ -30,8 +31,6 @@ export { caseApi } from './case'
 export { orderBatchApi } from './orderBatch'
 export { countryApi } from './country'
 export { patternRoomApi } from './patternRoom'
-export { notificationApi } from './notification'
-export type { Notification, NotificationListResponse, NotificationListParams } from './notification'
 
 // 向后兼容：productApi 合并核心方法 + BOM 方法（BOM 实际属于采购中心域）
 // 新代码应分别使用 productApi（核心）和 bomApi（BOM 相关）

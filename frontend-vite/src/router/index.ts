@@ -1,8 +1,13 @@
+/**
+ * 路由配置 - 响应式自适应
+ * 根据设备类型（PC/移动端/Capacitor）自动加载对应路由集
+ * 所有路由懒加载，确保每种设备只加载自己需要的代码
+ */
 import { createRouter, createWebHistory, type RouteRecordRaw, type RouteLocationNormalized } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { isMobileDevice, isCapacitor } from '@/composables/useDevice'
 
-const isCapacitor = !!import.meta.env.VITE_CAPACITOR
-
+// ==================== PC 端路由====================
 const pcRoutes: RouteRecordRaw[] = [
   {
     path: '/login',
@@ -62,11 +67,13 @@ const pcRoutes: RouteRecordRaw[] = [
   { path: '/:pathMatch(.*)*', redirect: '/dashboard' },
 ]
 
+// ==================== 移动端路由====================
+// 所有路径与 PC 端一致（无前缀），通过设备检测路由级别二选一
 const mobileRoutes: RouteRecordRaw[] = [
   {
     path: '/login',
-    name: 'Login',
-    component: () => import('@/views/login/LoginView.vue'),
+    name: 'MLogin',
+    component: () => import('@/mobile/views/login/MLoginView.vue'),
     meta: { requiresAuth: false },
   },
   {
@@ -74,9 +81,12 @@ const mobileRoutes: RouteRecordRaw[] = [
     component: () => import('@/mobile/layouts/MobileLayout.vue'),
     meta: { requiresAuth: true },
     children: [
-      { path: '', name: 'MDashboard', component: () => import('@/mobile/views/dashboard/DashboardMobile.vue') },
+      { path: '', redirect: '/dashboard' },
+      { path: 'dashboard', name: 'MDashboard', component: () => import('@/mobile/views/dashboard/DashboardMobile.vue') },
+      { path: 'product', name: 'MProduct', component: () => import('@/mobile/views/product/MProductView.vue') },
+      { path: 'stock', name: 'MStock', component: () => import('@/mobile/views/stock/MStockView.vue') },
       { path: 'shipment', name: 'MShipment', component: () => import('@/mobile/views/shipment/MShipmentView.vue') },
-      { path: 'orders', name: 'MOrders', component: () => import('@/mobile/views/customer-order/MCustomerOrderView.vue') },
+      { path: 'customer-order', name: 'MOrders', component: () => import('@/mobile/views/customer-order/MCustomerOrderView.vue') },
       { path: 'profile', name: 'MProfile', component: () => import('@/mobile/views/profile/MProfileView.vue') },
       { path: 'purchase', name: 'MPurchase', component: () => import('@/mobile/views/purchase/MPurchaseView.vue') },
       { path: 'material-calculator', name: 'MMaterialCalculator', component: () => import('@/mobile/views/material-calculator/MMaterialCalculatorView.vue') },
@@ -84,25 +94,32 @@ const mobileRoutes: RouteRecordRaw[] = [
       { path: 'production', name: 'MProduction', component: () => import('@/mobile/views/production/MProductionView.vue') },
       { path: 'batch', name: 'MBatch', component: () => import('@/mobile/views/batch/MBatchView.vue') },
       { path: 'case', name: 'MCase', component: () => import('@/mobile/views/case/MCaseView.vue') },
-      { path: 'customer-order', name: 'MCustomerOrder', component: () => import('@/mobile/views/customer-order/MCustomerOrderView.vue') },
       { path: 'notifications', name: 'MNotifications', component: () => import('@/views/notifications/NotificationCenterView.vue') },
     ],
   },
   { path: '/:pathMatch(.*)*', redirect: '/' },
 ]
 
-const routes: RouteRecordRaw[] = isCapacitor ? mobileRoutes : pcRoutes
+// ==================== 设备自适应路由选择 ====================
+// 使用 typeof 安全检测 __CAPACITOR_BUILD__，兜底 Vite define 因缓存等原因未正确替换的场景
+const _isCapBuild = typeof __CAPACITOR_BUILD__ !== 'undefined' && __CAPACITOR_BUILD__
+const useMobile = _isCapBuild || isMobileDevice()
+const routes: RouteRecordRaw[] = useMobile ? mobileRoutes : pcRoutes
 
+if (import.meta.env.DEV) {
+  console.log(`[Router] 设备类型: ${useMobile ? '移动端' : 'PC端'}${_isCapBuild ? ' (Capacitor)' : ''}`)
+}
+
+// ==================== 创建路由实例 ====================
 const router = createRouter({
   history: createWebHistory(),
   routes,
 })
 
-// 处理动态导入失败：Vite dev server 连接中断/重启后，浏览器缓存的模块引用失效
-// 自动刷新页面以重新获取所有模块（Vue Router 官方推荐方案）
-// 增加防循环保护：连续刷新超过阈值后停止，避免服务持续不可达时无限刷新
+// ==================== Chunk 加载失败自动重试 ====================
 const CHUNK_LOAD_KEY = '__router_reload_count'
 const MAX_RELOAD = 3
+
 function isChunkLoadError(msg: string): boolean {
   return (
     msg.includes('Failed to fetch dynamically imported module') ||
@@ -110,6 +127,7 @@ function isChunkLoadError(msg: string): boolean {
     msg.includes('error loading dynamically imported module')
   )
 }
+
 router.onError((error, to) => {
   if (!isChunkLoadError(error.message)) return
   const count = Number(sessionStorage.getItem(CHUNK_LOAD_KEY) || 0) + 1
@@ -121,11 +139,12 @@ router.onError((error, to) => {
   sessionStorage.setItem(CHUNK_LOAD_KEY, String(count))
   window.location.href = to.fullPath
 })
-// 导航成功时清零计数器
+
 router.afterEach(() => {
   sessionStorage.removeItem(CHUNK_LOAD_KEY)
 })
 
+// ==================== 路由守卫：认证 + 权限检查====================
 router.beforeEach(async (to: RouteLocationNormalized, _from: RouteLocationNormalized) => {
   const authStore = useAuthStore()
 
@@ -138,7 +157,7 @@ router.beforeEach(async (to: RouteLocationNormalized, _from: RouteLocationNormal
       await authStore.init()
       await authStore.fetchNavSections()
     } catch (error) {
-      console.error('[Router] 用户初始化失败:', error)
+      console.error('[Router] 用户初始化失败', error)
       return `/login?redirect=${encodeURIComponent(to.fullPath)}`
     }
   }
@@ -148,14 +167,15 @@ router.beforeEach(async (to: RouteLocationNormalized, _from: RouteLocationNormal
   }
 
   // 权限检查：非超级用户只能访问 filteredNavSections 中可见的路径
-  if (!isCapacitor && authStore.user && !authStore.user.is_super) {
+  if (authStore.user && !authStore.user.is_super) {
     const targetPath = '/' + to.path.split('/').filter(Boolean)[0]
     const allowedPaths = authStore.filteredNavSections.flatMap((s) => s.items.map((i) => i.path))
-    // dashboard 和 notifications 始终可访问（所有用户均有权查看自己的通知）
-    if (targetPath !== '/dashboard' && targetPath !== '/notifications' && !allowedPaths.includes(targetPath)) {
+    if (targetPath !== '/dashboard' && targetPath !== '/notifications' && targetPath !== '/' && !allowedPaths.includes(targetPath)) {
       return '/dashboard'
     }
   }
+
+  return true
 })
 
 export default router

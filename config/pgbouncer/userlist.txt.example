@@ -1,0 +1,18 @@
+;; PgBouncer 用户认证文件模板（scram-sha-256）
+;; 格式: "username" "password_hash"
+;;
+;; 生成 SCRAM-SHA-256 密码哈希:
+;;   psql> \password <password>        (在 psql 中设置后从 pg_shadow 复制)
+;;   或: python -c "import psycopg; ..." (使用 psycopg3 的 scram 加密)
+;;   或: pg_password_hash <password>  (若工具可用)
+;;
+;; 部署步骤:
+;;   1. 复制本文件为 userlist.txt:  cp userlist.txt.example userlist.txt
+;;   2. 填入实际密码哈希值
+;;   3. 重启 pgbouncer 服务
+;;
+;; ⚠️ 生产环境必须替换为实际 SCRAM-SHA-256 哈希值，不得留空！
+;; ⚠️ 推荐通过环境变量在容器启动时生成，避免硬编码凭证。
+"erp" ""
+"erp_admin" ""
+"erp_monitor" ""

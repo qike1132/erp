@@ -733,8 +733,13 @@ async def fetch_mobile_dashboard(query_date: str | None, db: AsyncSession) -> di
     # 3. 出货数据：复用 stock_data.today_* 值（查询结构与 stock 当日完全相同，已在步骤 1 设置）
 
     try:
-        # 4. 订单数据：合并当日+总订单金额为 SUM FILTER（3→1），合并库存数量+金额（2→1）
-        # COUNT(Order.id) 不能与 OrderItem JOIN 合并（行数膨胀），保持单独查询
+        # 4. 订单数据：合并当日+总订单件数+总金额为 SUM FILTER（3→1），合并库存数量+金额（2→1）
+        # 全部基于 OrderItem 展开聚合，与 total_amount 的"件数×单价"语义保持一致：
+        #   - total_qty = SUM(oi.quantity)   总订单商品件数（= 用户期望的"总订单数量"）
+        #   - total_amt = SUM(oi.quantity * price)  总订单商品金额
+        # 历史上 total_qty 误用 count(Order.id)（订单个数，21），与总额 8 千万量级明显不匹配；
+        # 改为件数后与 daily_qty/daily_amount 维度一致，并与 total_amount 形成"件数×单价≈总额"。
+        # COUNT(Order.id) 单独查询已废弃（行数膨胀 + 多一次 DB 往返）。
         order_row = (await db.execute(
             select(
                 func.coalesce(func.sum(OrderItem.quantity).filter(
@@ -743,6 +748,7 @@ async def fetch_mobile_dashboard(query_date: str | None, db: AsyncSession) -> di
                 func.coalesce(func.sum(OrderItem.quantity * Product.price).filter(
                     Order.order_date >= today_start, Order.order_date < today_end
                 ), 0).label('daily_amt'),
+                func.coalesce(func.sum(OrderItem.quantity), 0).label('total_qty'),
                 func.coalesce(func.sum(OrderItem.quantity * Product.price), 0).label('total_amt'),
             )
             .join(OrderItem, OrderItem.order_id == Order.id, isouter=True)
@@ -751,14 +757,8 @@ async def fetch_mobile_dashboard(query_date: str | None, db: AsyncSession) -> di
         )).one()
         order_data.daily_qty = int(order_row.daily_qty)
         order_data.daily_amount = round(float(order_row.daily_amt), 2)
+        order_data.total_qty = int(order_row.total_qty)
         order_data.total_amount = round(float(order_row.total_amt), 2)
-
-        # 总订单数（不能与 OrderItem JOIN 合并，否则 COUNT 会因多 SKU 行膨胀）
-        count_o = await db.execute(
-            select(func.count(Order.id))
-            .where(Order.is_deleted.isnot(True))
-        )
-        order_data.total_qty = int(count_o.scalar() or 0)
 
         # 产品总库存数量 + 金额合并（2→1）
         inv_row = (await db.execute(

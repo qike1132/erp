@@ -7,7 +7,7 @@
         </div>
         <div class="sp-header-right">
           <button class="sp-action-btn sp-action-btn-primary" @click="formOpen = true">
-            <i class="fas fa-plus"  aria-hidden="true" /> 添加供应商
+            <FontAwesomeIcon icon="plus" aria-hidden="true" /> 添加供应商
           </button>
         </div>
       </div>
@@ -27,7 +27,7 @@
 
         <!-- Empty -->
         <div v-else-if="suppliers.length === 0" class="sp-empty-state">
-          <i class="fas fa-truck"  aria-hidden="true" />
+          <FontAwesomeIcon icon="truck" aria-hidden="true" />
           <span>{{ searchTerm ? '没有匹配的供应商' : '暂无供应商，请先添加' }}</span>
           <small v-if="searchTerm">试试其他关键词</small>
         </div>
@@ -67,7 +67,7 @@
                 <td>
                   <div class="sp-action-group">
                     <button class="sp-action-btn sp-action-edit" title="编辑" @click="openEditDialog(row)" aria-label="编辑">
-                      <i class="fas fa-edit"  aria-hidden="true" />
+                      <FontAwesomeIcon icon="edit" aria-hidden="true" />
                     </button>
                     <button
                       class="sp-action-btn sp-action-delete"
@@ -75,7 +75,7 @@
                       :disabled="actionId === row.id"
                       @click="handleDelete(row)"
                      aria-label="删除">
-                      <i class="fas fa-trash-alt"  aria-hidden="true" />
+                      <FontAwesomeIcon icon="trash-alt" aria-hidden="true" />
                     </button>
                   </div>
                 </td>
@@ -93,32 +93,32 @@
     <UiDialog :open="formOpen" title="添加新供应商" max-width-class="max-w-[560px]" @update:open="formOpen = $event">
       <form @submit.prevent="handleAdd" class="sp-dialog-form">
         <div class="sp-form-field">
-          <label class="sp-form-label"><i class="fas fa-building"  aria-hidden="true" /> 供应商名称 <span class="sp-required">*</span></label>
+          <label class="sp-form-label"><FontAwesomeIcon icon="building" aria-hidden="true" /> 供应商名称 <span class="sp-required">*</span></label>
           <input v-model="form.name" type="text" class="sp-form-input" required placeholder="例如：广州面料有限公司" name="supplier-name" autocomplete="off" />
         </div>
         <div class="sp-form-row">
           <div class="sp-form-field">
-            <label class="sp-form-label"><i class="fas fa-user"  aria-hidden="true" /> 联系人</label>
+            <label class="sp-form-label"><FontAwesomeIcon icon="user" aria-hidden="true" /> 联系人</label>
             <input v-model="form.contact_person" type="text" class="sp-form-input" placeholder="例如：李经理" name="contact" autocomplete="off" />
           </div>
           <div class="sp-form-field">
-            <label class="sp-form-label"><i class="fas fa-phone"  aria-hidden="true" /> 联系电话</label>
+            <label class="sp-form-label"><FontAwesomeIcon icon="phone" aria-hidden="true" /> 联系电话</label>
             <input v-model="form.phone" type="text" class="sp-form-input" placeholder="例如：13800138000" name="phone" autocomplete="tel" />
           </div>
         </div>
         <div class="sp-form-field">
-          <label class="sp-form-label"><i class="fas fa-map-marker-alt"  aria-hidden="true" /> 地址</label>
+          <label class="sp-form-label"><FontAwesomeIcon icon="map-marker-alt" aria-hidden="true" /> 地址</label>
           <input v-model="form.address" type="text" class="sp-form-input" placeholder="例如：广州市白云区" name="address" autocomplete="off" />
         </div>
         <div class="sp-form-field">
-          <label class="sp-form-label"><i class="fas fa-sticky-note"  aria-hidden="true" /> 备注</label>
+          <label class="sp-form-label"><FontAwesomeIcon icon="sticky-note" aria-hidden="true" /> 备注</label>
           <textarea v-model="form.remark" rows="2" class="sp-form-input" placeholder="例如：长期合作供应商" />
         </div>
       </form>
       <template #footer>
         <UiButton variant="ghost" size="sm" @click="formOpen = false">取消</UiButton>
         <UiButton variant="primary" size="sm" :disabled="!form.name || submitting" @click="handleAdd">
-          <i class="fas fa-plus"  aria-hidden="true" />
+          <FontAwesomeIcon icon="plus" aria-hidden="true" />
           {{ submitting ? '提交中…' : '添加供应商' }}
         </UiButton>
       </template>
@@ -128,32 +128,32 @@
     <UiDialog :open="editDialogVisible" title="编辑供应商" max-width-class="max-w-[560px]" @update:open="editDialogVisible = $event">
       <form @submit.prevent="handleEdit" class="sp-dialog-form">
         <div class="sp-form-field">
-          <label class="sp-form-label"><i class="fas fa-building"  aria-hidden="true" /> 供应商名称 <span class="sp-required">*</span></label>
+          <label class="sp-form-label"><FontAwesomeIcon icon="building" aria-hidden="true" /> 供应商名称 <span class="sp-required">*</span></label>
           <input v-model="editForm.name" type="text" class="sp-form-input" required placeholder="请输入供应商名称" name="supplier-name" autocomplete="off" />
         </div>
         <div class="sp-form-row">
           <div class="sp-form-field">
-            <label class="sp-form-label"><i class="fas fa-user"  aria-hidden="true" /> 联系人</label>
+            <label class="sp-form-label"><FontAwesomeIcon icon="user" aria-hidden="true" /> 联系人</label>
             <input v-model="editForm.contact_person" type="text" class="sp-form-input" name="contact" autocomplete="off" />
           </div>
           <div class="sp-form-field">
-            <label class="sp-form-label"><i class="fas fa-phone"  aria-hidden="true" /> 联系电话</label>
+            <label class="sp-form-label"><FontAwesomeIcon icon="phone" aria-hidden="true" /> 联系电话</label>
             <input v-model="editForm.phone" type="text" class="sp-form-input" name="phone" autocomplete="tel" />
           </div>
         </div>
         <div class="sp-form-field">
-          <label class="sp-form-label"><i class="fas fa-map-marker-alt"  aria-hidden="true" /> 地址</label>
+          <label class="sp-form-label"><FontAwesomeIcon icon="map-marker-alt" aria-hidden="true" /> 地址</label>
           <input v-model="editForm.address" type="text" class="sp-form-input" name="address" autocomplete="off" />
         </div>
         <div class="sp-form-field">
-          <label class="sp-form-label"><i class="fas fa-sticky-note"  aria-hidden="true" /> 备注</label>
+          <label class="sp-form-label"><FontAwesomeIcon icon="sticky-note" aria-hidden="true" /> 备注</label>
           <textarea v-model="editForm.remark" rows="2" class="sp-form-input" />
         </div>
       </form>
       <template #footer>
         <UiButton variant="ghost" size="sm" @click="editDialogVisible = false">取消</UiButton>
         <UiButton variant="primary" size="sm" :disabled="editSubmitting" @click="handleEdit">
-          <i class="fas fa-save"  aria-hidden="true" />
+          <FontAwesomeIcon icon="save" aria-hidden="true" />
           {{ editSubmitting ? '保存中…' : '保存' }}
         </UiButton>
       </template>

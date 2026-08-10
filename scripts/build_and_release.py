@@ -34,7 +34,7 @@ from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPTS_DIR.parent
-ANDROID_DIR = PROJECT_ROOT / "android-app"
+ANDROID_DIR = PROJECT_ROOT / "frontend-vite" / "android"
 CHANGELOG_FILE = PROJECT_ROOT / "version_changelog.jsonl"
 
 API_BASE_URL = os.getenv("ERP_API_URL", "http://192.168.0.95:5002/api/v1")

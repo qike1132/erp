@@ -1,0 +1,39 @@
+[33m[plugin vite:esbuild] src/styles/primevue-pt.ts: [33mDuplicate key "content" in object literal[33m
+98 |        ],
+99 |      },
+100|      content: 'flex-1 px-6 py-5 overflow-y-auto',
+   |      ^
+101|    },
+102|  
+[39m
+[33m[plugin vite:esbuild] src/styles/primevue-pt.ts: [33mDuplicate key "content" in object literal[33m
+240 |      closeButton:
+241 |        'inline-flex items-center justify-center w-8 h-8 rounded-full text-text-muted hover:bg-slate-100 hover:text-tex...
+242 |      content: 'flex-1 px-6 py-5 overflow-y-auto',
+    |      ^
+243 |      footer: 'flex items-center justify-end gap-3 px-6 py-4 border-t border-border-light flex-shrink-0',
+244 |    },
+[39m
+[33mnode_modules/@vueuse/core/dist/index.js (3362:0): A comment
+
+"/* #__PURE__ */"
+
+in "node_modules/@vueuse/core/dist/index.js" contains an annotation that Rollup cannot interpret due to the position of the comment. The comment will be removed to avoid issues.[39m
+[33mnode_modules/@vueuse/core/dist/index.js (5780:22): A comment
+
+"/* #__PURE__ */"
+
+in "node_modules/@vueuse/core/dist/index.js" contains an annotation that Rollup cannot interpret due to the position of the comment. The comment will be removed to avoid issues.[39m
+[31m✗[39m Build failed in 33.94s
+[31merror during build:
+[31m[vite:prepare-out-dir] [safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED] {"count":175,"threshold":50,"scope":"turn","targets":["D:\\erp_system\\frontend-vite\\dist\\assets"],"targetCount":1}[31m
+    at checkBulkDeleteGuard (D:\CodeBuddy CN\resources\app\extensions\genie\out\vendor\shim\node-safe-delete-shim.cjs:273:19)
+    at tryTrash (D:\CodeBuddy CN\resources\app\extensions\genie\out\vendor\shim\node-safe-delete-shim.cjs:602:5)
+    at tryRm (D:\CodeBuddy CN\resources\app\extensions\genie\out\vendor\shim\node-safe-delete-shim.cjs:775:5)
+    at Object.wrappedRmSync [as rmSync] (D:\CodeBuddy CN\resources\app\extensions\genie\out\vendor\shim\node-safe-delete-shim.cjs:781:15)
+    at emptyDir (file:///D:/erp_system/frontend-vite/node_modules/vite/dist/node/chunks/config.js:2167:11)
+    at prepareOutDir (file:///D:/erp_system/frontend-vite/node_modules/vite/dist/node/chunks/config.js:33405:55)
+    at Object.handler (file:///D:/erp_system/frontend-vite/node_modules/vite/dist/node/chunks/config.js:33395:6)
+    at Object.handler (file:///D:/erp_system/frontend-vite/node_modules/vite/dist/node/chunks/config.js:33823:13)
+    at file:///D:/erp_system/frontend-vite/node_modules/rollup/dist/es/shared/node-entry.js:22987:40
+    at async Promise.all (index 0)[39m

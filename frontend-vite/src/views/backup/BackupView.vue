@@ -5,7 +5,7 @@
         <HeaderTabs />
         <div class="bk-card-title-group">
           <div class="bk-icon-box bk-icon-blue">
-            <i class="fas fa-database" />
+            <FontAwesomeIcon icon="database" />
           </div>
           <div>
             <h3>数据备份与恢复</h3>
@@ -21,14 +21,14 @@
           :class="{ 'bk-tab-active': activeTab === 'backup' }"
           @click="handleTabChange('backup')"
         >
-          <i class="fas fa-database" /> 备份与恢复
+          <FontAwesomeIcon icon="database" /> 备份与恢复
         </button>
         <button
           class="bk-tab-btn"
           :class="{ 'bk-tab-active': activeTab === 'records' }"
           @click="handleTabChange('records')"
         >
-          <i class="fas fa-history" /> 备份记录
+          <FontAwesomeIcon icon="history" /> 备份记录
         </button>
         <div class="bk-tab-actions">
           <button
@@ -49,7 +49,7 @@
       <div v-show="activeTab === 'backup'" class="bk-body">
         <!-- 左栏：一键备份 -->
         <div class="bk-col">
-          <div class="bk-col-title"><i class="fas fa-download" /> 一键备份</div>
+          <div class="bk-col-title"><FontAwesomeIcon icon="download" /> 一键备份</div>
           <BackupModeSelector
             :tables="tables"
             :tables-loading="tablesLoading"
@@ -71,7 +71,7 @@
         <div class="bk-col">
           <!-- 自定义路径模式：文件上传恢复 -->
           <template v-if="backupMode === 'custom'">
-            <div class="bk-col-title"><i class="fas fa-upload" /> 一键恢复</div>
+            <div class="bk-col-title"><FontAwesomeIcon icon="upload" /> 一键恢复</div>
             <FileRestorePanel
               :selected-file="selectedFile"
               :validation-result="validationResult"
@@ -89,7 +89,7 @@
 
           <!-- 默认路径模式：服务器备份列表 -->
           <template v-if="backupMode === 'default'">
-            <div class="bk-col-title"><i class="fas fa-folder-open" /> 服务器备份</div>
+            <div class="bk-col-title"><FontAwesomeIcon icon="folder-open" /> 服务器备份</div>
             <div class="bk-col-content">
               <!-- 服务器恢复进度条 -->
               <RestoreProgressBar
@@ -102,7 +102,7 @@
               <div v-if="serverBackupsLoading" class="bk-loading-inline"><UiSpinner /></div>
 
               <div v-else-if="!serverBackups.length" class="bk-empty-state">
-                <i class="fas fa-inbox" />
+                <FontAwesomeIcon icon="inbox" />
                 <p>暂无服务器备份</p>
                 <small>点击左侧「备份到服务器」创建第一个备份</small>
               </div>
@@ -111,7 +111,7 @@
                 <div v-for="b in serverBackups" :key="b.filename" class="bk-backup-item">
                   <div class="bk-backup-header">
                     <div class="bk-backup-name">
-                      <i class="fas fa-file-archive" />
+                      <FontAwesomeIcon icon="file-archive" />
                       <span>{{ b.filename }}</span>
                     </div>
                     <div class="bk-backup-actions">
@@ -125,26 +125,26 @@
                   </div>
                   <div class="bk-backup-meta">
                     <span v-if="b.format" class="bk-backup-format">
-                      <i :class="b.format === 'incremental' ? 'fas fa-layer-group' : b.format === 'zip' ? 'fas fa-file-archive' : b.format === 'encrypted' ? 'fas fa-lock' : 'fas fa-file-code'" />
+                      <FontAwesomeIcon :icon="b.format === 'incremental' ? 'fas fa-layer-group' : b.format === 'zip' ? 'fas fa-file-archive' : b.format === 'encrypted' ? 'lock' : 'file-code'" />
                       {{ b.format === 'incremental' ? '增量' : b.format === 'zip' ? 'ZIP' : b.format === 'encrypted' ? '加密' : 'JSON' }}
                     </span>
-                    <span v-if="b.exported_at"><i class="fas fa-clock" /> {{ b.exported_at }}</span>
-                    <span v-if="b.exported_by"><i class="fas fa-user" /> {{ b.exported_by }}</span>
-                    <span><i class="fas fa-table" /> {{ b.table_count }} 表 / {{ b.total_rows }} 条</span>
-                    <span><i class="fas fa-weight" /> {{ formatSize(b.size) }}</span>
+                    <span v-if="b.exported_at"><FontAwesomeIcon icon="clock" /> {{ b.exported_at }}</span>
+                    <span v-if="b.exported_by"><FontAwesomeIcon icon="user" /> {{ b.exported_by }}</span>
+                    <span><FontAwesomeIcon icon="table" /> {{ b.table_count }} 表 / {{ b.total_rows }} 条</span>
+                    <span><FontAwesomeIcon icon="weight" /> {{ formatSize(b.size) }}</span>
                   </div>
                   <!-- ZIP-specific includes badges -->
                   <div v-if="b.format === 'zip' && b.includes" class="bk-backup-includes">
-                    <span v-if="b.includes.filestore_count" class="bk-badge"><i class="fas fa-paperclip" /> {{ b.includes.filestore_count }} 附件</span>
-                    <span v-if="b.includes.config_files?.length" class="bk-badge"><i class="fas fa-cog" /> {{ b.includes.config_files.length }} 配置</span>
-                    <span v-if="b.includes.redis_rdb" class="bk-badge"><i class="fas fa-bolt" /> Redis</span>
+                    <span v-if="b.includes.filestore_count" class="bk-badge"><FontAwesomeIcon icon="paperclip" /> {{ b.includes.filestore_count }} 附件</span>
+                    <span v-if="b.includes.config_files?.length" class="bk-badge"><FontAwesomeIcon icon="cog" /> {{ b.includes.config_files.length }} 配置</span>
+                    <span v-if="b.includes.redis_rdb" class="bk-badge"><FontAwesomeIcon icon="bolt" /> Redis</span>
                   </div>
                   <!-- Incremental backup: base timestamp -->
                   <div v-if="b.format === 'incremental' && b.base_timestamp" class="bk-backup-includes">
-                    <span class="bk-badge bk-badge-inc"><i class="fas fa-clock" /> 基于 {{ b.base_timestamp }}</span>
+                    <span class="bk-badge bk-badge-inc"><FontAwesomeIcon icon="clock" /> 基于 {{ b.base_timestamp }}</span>
                   </div>
                   <div v-if="b.remark" class="bk-backup-remark">
-                    <i class="fas fa-comment" /> {{ b.remark }}
+                    <FontAwesomeIcon icon="comment" /> {{ b.remark }}
                   </div>
                 </div>
               </div>
@@ -170,9 +170,9 @@
 
     <!-- 确认恢复弹窗 -->
     <UiDialog v-model:open="showConfirmDialog" title="确认恢复数据" max-width-class="max-w-[480px]">
-      <template #title-icon><i class="fas fa-exclamation-triangle" style="color: var(--color-danger-500);" /></template>
+      <template #title-icon><FontAwesomeIcon icon="exclamation-triangle" style="color: var(--color-danger-500);" /></template>
       <div class="bk-confirm-body">
-        <div class="bk-confirm-icon"><i class="fas fa-exclamation-triangle" /></div>
+        <div class="bk-confirm-icon"><FontAwesomeIcon icon="exclamation-triangle" /></div>
         <div class="bk-confirm-text">
           <p><b>此操作将清除当前所有数据，并从备份文件恢复。</b></p>
           <p>该操作不可撤销，请确保已做好必要准备。</p>
@@ -204,6 +204,7 @@ import BackupModeSelector from '@/components/backup/BackupModeSelector.vue'
 import FileRestorePanel from '@/components/backup/FileRestorePanel.vue'
 import IntegrityCheckPanel from '@/components/backup/IntegrityCheckPanel.vue'
 import { showToast } from '@/composables/useToast'
+import { getErrorMessage } from '@/types/errors'
 
 interface BackupSaveResult {
   filename: string
@@ -253,8 +254,8 @@ async function handleExport() {
   try {
     await backupApi.exportBackup(backupRemark.value)
     showToast('备份文件已下载', 'success')
-  } catch (e: any) {
-    showToast(e?.response?.data?.detail || '备份失败', 'error')
+  } catch (e: unknown) {
+    showToast(getErrorMessage(e, '备份失败'), 'error')
   } finally {
     exporting.value = false
   }
@@ -275,8 +276,8 @@ async function handleSaveToServer() {
       loadServerBackups()
       loadTables()
     }
-  } catch (e: any) {
-    showToast(e?.response?.data?.detail || '保存到服务器失败', 'error')
+  } catch (e: unknown) {
+    showToast(getErrorMessage(e, '保存到服务器失败'), 'error')
   } finally {
     savingToServer.value = false
   }
@@ -314,8 +315,8 @@ async function validateFile(file: File) {
   try {
     const res = await backupApi.validateFile(formData) as ApiResponse
     if (res.success) validationResult.value = res.summary
-  } catch (e: any) {
-    showToast(e?.response?.data?.detail || '验证失败', 'error')
+  } catch (e: unknown) {
+    showToast(getErrorMessage(e, '验证失败'), 'error')
   }
 }
 
@@ -345,8 +346,8 @@ async function loadServerBackups() {
   try {
     const res = await backupApi.listServerBackups()
     if (res.success) serverBackups.value = res.backups ?? []
-  } catch (e: any) {
-    showToast(e?.response?.data?.detail || '加载服务器备份列表失败', 'error')
+  } catch (e: unknown) {
+    showToast(getErrorMessage(e, '加载服务器备份列表失败'), 'error')
   } finally {
     serverBackupsLoading.value = false
   }
@@ -373,8 +374,8 @@ async function handleServerDelete(filename: string) {
       showToast('备份已删除', 'success')
       serverBackups.value = serverBackups.value.filter(b => b.filename !== filename)
     }
-  } catch (e: any) {
-    showToast(e?.response?.data?.detail || '删除失败', 'error')
+  } catch (e: unknown) {
+    showToast(getErrorMessage(e, '删除失败'), 'error')
   } finally {
     deletingFile.value = ''
   }
@@ -416,10 +417,10 @@ async function doFileRestore() {
       importing.value = false
       showToast('启动恢复任务失败', 'error')
     }
-  } catch (e: any) {
+  } catch (e: unknown) {
     restorePhase.value = ''
     importing.value = false
-    showToast(e?.response?.data?.detail || '启动恢复失败', 'error')
+    showToast(getErrorMessage(e, '启动恢复失败'), 'error')
   }
 }
 
@@ -480,10 +481,10 @@ async function doServerRestore() {
       restoringFile.value = ''
       showToast('启动恢复任务失败', 'error')
     }
-  } catch (e: any) {
+  } catch (e: unknown) {
     restorePhase.value = ''
     restoringFile.value = ''
-    showToast(e?.response?.data?.detail || '启动恢复失败', 'error')
+    showToast(getErrorMessage(e, '启动恢复失败'), 'error')
   }
 }
 
@@ -499,8 +500,8 @@ async function handleSaveIncremental() {
       loadServerBackups()
       loadTables()
     }
-  } catch (e: any) {
-    showToast(e?.response?.data?.detail || '增量备份失败', 'error')
+  } catch (e: unknown) {
+    showToast(getErrorMessage(e, '增量备份失败'), 'error')
   } finally {
     savingIncremental.value = false
   }
@@ -520,9 +521,9 @@ async function doIncrementalRestore() {
       loadTables()
       loadServerBackups()
     }
-  } catch (e: any) {
+  } catch (e: unknown) {
     restorePhase.value = ''
-    showToast(e?.response?.data?.detail || '增量恢复失败', 'error')
+    showToast(getErrorMessage(e, '增量恢复失败'), 'error')
   } finally {
     restorePhase.value = ''
     restoringFile.value = ''

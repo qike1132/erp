@@ -56,7 +56,6 @@ opentelemetry-exporter-otlp-proto-grpc==1.30.0
 
 # ----- 异步任务 -----
 celery[redis]==5.6.3
-gevent==25.9.1  # Celery gevent pool，用于 I/O 密集型任务队列
 
 # ----- 错误追踪 -----
 sentry-sdk[fastapi]==2.29.1

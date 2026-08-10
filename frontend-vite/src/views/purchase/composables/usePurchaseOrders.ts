@@ -1,6 +1,7 @@
 import { ref, computed, reactive } from 'vue'
 import { purchaseApi } from '@/api'
 import { showToast } from '@/composables/useToast'
+import { getErrorMessage } from '@/types/errors'
 import type { ApiResponse, PurchaseOrder } from '@/types'
 
 export function usePurchaseOrders() {
@@ -28,10 +29,10 @@ export function usePurchaseOrders() {
       orders.value = res.orders || []
       total.value = res.total || 0
       pages.value = res.pages || 1
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (signal.aborted) return
       orders.value = []
-      showToast(err.response?.data?.detail || '加载采购订单失败', 'error')
+      showToast(getErrorMessage(err, '加载采购订单失败'), 'error')
     } finally {
       if (!signal.aborted) {
         loading.value = false

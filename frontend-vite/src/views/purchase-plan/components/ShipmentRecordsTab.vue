@@ -1,7 +1,7 @@
 <template>
   <div v-if="loading" class="sp-modal-empty"><UiSpinner /></div>
-  <div v-else-if="error" class="sp-modal-empty"><i class="fas fa-exclamation-circle"  aria-hidden="true" />加载失败</div>
-  <div v-else-if="!records.length" class="sp-modal-empty"><i class="fas fa-inbox"  aria-hidden="true" />暂无出货记录</div>
+  <div v-else-if="error" class="sp-modal-empty"><FontAwesomeIcon icon="exclamation-circle" aria-hidden="true" />加载失败</div>
+  <div v-else-if="!records.length" class="sp-modal-empty"><FontAwesomeIcon icon="inbox" aria-hidden="true" />暂无出货记录</div>
   <div v-else class="sp-stockout-list">
     <div class="sp-stockout-header">
       <span class="sp-stockout-col-date">出货时间</span>
@@ -14,7 +14,7 @@
       :items="records"
       :itemHeight="40"
       :containerHeight="460"
-      :itemKey="(r: any) => r.shipment_no"
+      :itemKey="(r: { shipment_no: string }) => r.shipment_no"
     >
       <template #default="{ item: rec }">
         <div class="sp-stockout-row">

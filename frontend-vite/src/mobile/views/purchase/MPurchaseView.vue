@@ -7,10 +7,10 @@
       <template v-if="activeTab === 'orders'">
         <MSearchBar v-model="keyword" placeholder="搜索订单号/产品..." @search="refetchOrders" />
         <div v-if="ordersLoading" class="m-center"><MSpinner size="lg" /></div>
-        <MEmpty v-else-if="!orders?.items?.length" title="暂无采购订单" subtitle="新订单将实时推送" />
+        <MEmpty v-else-if="!orders?.orders?.length" title="暂无采购订单" subtitle="新订单将实时推送" />
         <MList v-else header="采购中">
           <MListItem
-            v-for="order in orders.items"
+            v-for="order in orders.orders"
             :key="order.id"
             :title="`#${order.id} ${order.product_name || ''}`"
             :subtitle="`${order.supplier_name || '—'} · ${order.quantity || 0}件`"
@@ -30,10 +30,10 @@
 
       <template v-if="activeTab === 'unprocessed'">
         <div v-if="unprocessedLoading" class="m-center"><MSpinner size="lg" /></div>
-        <MEmpty v-else-if="!unprocessed?.items?.length" title="暂无待审核订单" />
+        <MEmpty v-else-if="!unprocessed?.orders?.length" title="暂无待审核订单" />
         <MList v-else :header="`待审核 (${unprocessed.total || 0})`">
           <MListItem
-            v-for="order in unprocessed.items"
+            v-for="order in unprocessed.orders"
             :key="order.id"
             :title="`#${order.id} ${order.product_name || ''}`"
             :subtitle="`${order.quantity || 0}件 · ${order.customer_name || ''}`"
@@ -45,7 +45,7 @@
             </template>
           </MListItem>
         </MList>
-        <button v-if="unprocessed?.items?.length" class="m-fab" @click="handleOneClick">
+        <button v-if="unprocessed?.orders?.length" class="m-fab" @click="handleOneClick">
           <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" width="20" height="20"><polyline points="20 6 9 17 4 12"/></svg>
           一键审核
         </button>
@@ -54,10 +54,10 @@
       <template v-if="activeTab === 'completed'">
         <MSearchBar v-model="completedKeyword" placeholder="搜索已完成订单..." />
         <div v-if="completedLoading" class="m-center"><MSpinner size="lg" /></div>
-        <MEmpty v-else-if="!completedOrders?.items?.length" title="暂无已完成订单" />
+        <MEmpty v-else-if="!completedOrders?.orders?.length" title="暂无已完成订单" />
         <MList v-else header="已完成">
           <MListItem
-            v-for="order in completedOrders.items"
+            v-for="order in completedOrders.orders"
             :key="order.id"
             :title="`#${order.id} ${order.product_name || ''}`"
             :subtitle="`${order.supplier_name || '—'} · ${order.quantity || 0}件`"
@@ -135,7 +135,7 @@ function showOrderDetail(order: any) {
 }
 
 async function handleOneClick() {
-  const ids = (unprocessed.value?.items || []).map((o: any) => `order:${o.id}`)
+  const ids = (unprocessed.value?.orders || []).map((o: any) => `order:${o.id}`)
   if (!ids.length) return
   try {
     await purchaseApi.oneClickGenerate({ composite_ids: ids })

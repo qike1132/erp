@@ -1,176 +1,342 @@
 /**
- * 板房模块 API 客户端
+ * 按客户分类打样信息模块 API 客户端
  *
- * 对应后端路由前缀: /api/v1/pattern-room
+ * 对应后端路由前缀: /api/v1/pattern-room（保持路径不变，用户无感切换）
+ * 后端 endpoint: fastapi_app/api/v1/endpoints/customer_sampling.py
+ * 后端 schema:   fastapi_app/schemas/customer_sampling.py
+ *
+ * 保持导出名 `patternRoomApi` 不变以兼容 `api/index.ts`。
+ * 内部完全重写为面向"客户分组 + 部位布料 + 版本快照"扁平结构的 15 个 API 方法。
  */
-import { get, post, put, del } from './request'
-import type { QueryParams } from '@/types'
+import { get, post, put, del, upload } from './request'
 
-// ==================== 类型定义 ====================
+// ==================== 类型别名 ====================
 
-export interface BomItemVersion {
+/** 变更类型：新增 / 修改 / 删除 */
+export type ChangeType = 'add' | 'modify' | 'delete'
+
+// ==================== 通用响应 ====================
+
+/** 操作响应（创建/更新/删除/上传） */
+export interface ActionResponse {
+  success: boolean
+  message: string
   id?: number
-  bom_item_id?: number
-  version: string
-  supplier_id?: number | null
+  sequence_no?: string
+  version_id?: number
+  version_no?: string
+  file_id?: number
+  url?: string
+}
+
+// ==================== 部位布料 ====================
+
+/** 部位布料详情 */
+export interface PartDetail {
+  id: number | null
+  project_id?: number
+  part_name: string
+  sort_order: number
+  fabric_name: string
+  fabric_spec: string
+  supplier_id: number | null
   supplier_name: string
-  material_spec: string
-  unit_price?: number | null
   contact_person: string
   contact_phone: string
-  delivery_days?: number | null
+  unit_price: number | null
+  delivery_days: number | null
   remark: string
-  snapshot_at?: string
-}
-
-export interface BomItem {
-  id?: number
-  bom_id?: number
-  parent_id?: number | null
-  sort_order: number
-  material_name: string
-  category: 'fabric' | 'filling' | 'accessory' | 'packaging'
-  quantity: number
-  unit: string
-  spec: string
-  current_supplier_id?: number | null
-  current_supplier_name: string
-  current_version: string
-  remark: string
-  children?: BomItem[]
-  versions?: BomItemVersion[]
-  // 前端临时字段
-  _editing?: boolean
-  _expanded?: boolean
-}
-
-export interface PatternRoomBom {
-  id: number
-  bom_no: string
-  product_name: string
-  customer_id?: number | null
-  customer_name: string
-  current_version: string
-  status: 'draft' | 'sampling' | 'confirmed' | 'archived'
-  status_label: string
-  remark: string
-  created_by?: number | null
-  created_by_name?: string | null
-  created_at: string
-  updated_at: string
+  created_at?: string
+  updated_at?: string
+  /** 乐观锁版本号 */
   version: number
-  items?: BomItem[]
-  change_logs?: ChangeLog[]
 }
 
-export interface ChangeLog {
+/** 部位列表响应 */
+export interface PartListResponse {
+  success: boolean
+  items: PartDetail[]
+}
+
+// ==================== 版本 ====================
+
+/** 版本简要信息 */
+export interface VersionBrief {
   id: number
-  bom_id: number
-  bom_item_id?: number | null
-  change_type: 'create' | 'version_upgrade' | 'supplier_change' | 'status_change' | 'item_edit'
+  version_no: string
+  created_at: string
+  reason: string
+}
+
+/** 版本列表响应 */
+export interface VersionListResponse {
+  success: boolean
+  items: VersionBrief[]
+}
+
+/** 字段级差异 */
+export interface FieldDiff {
+  field: string
+  old: unknown
+  new: unknown
+}
+
+/** 变更记录（版本 diff 元素） */
+export interface ChangeRecord {
+  change_type: ChangeType
+  part_name: string
+  new_value: PartDetail | null
+  old_value: PartDetail | null
+  field_diffs: FieldDiff[] | null
+}
+
+/** 版本详情响应
+ *
+ * - T1（is_baseline=true）：返回 full_snapshot，change_summary=null
+ * - T2+ 正常：返回 change_summary（预计算 diff），full_snapshot=null
+ * - 降级（degraded=true，前一版本缺失）：返回 full_snapshot + degraded=true
+ */
+export interface VersionDetailResponse {
+  id: number
+  project_id: number
+  version_no: string
+  created_at: string
+  is_baseline: boolean
+  degraded: boolean
+  full_snapshot: PartDetail[] | null
+  change_summary: ChangeRecord[] | null
+}
+
+// ==================== 变更日志 ====================
+
+/** 变更日志条目 */
+export interface ChangeLogEntry {
+  id: number
+  project_id: number
+  target_version: string
+  action: string
+  action_label: string
+  change_type: string
   change_type_label: string
-  from_version: string
-  to_version: string
-  change_reason: string
-  change_details: Array<{ field: string; old: unknown; new: unknown }>
-  operator_id?: number | null
+  part_name: string
+  field_diffs: unknown[]
+  operator_id: number | null
   operator_name: string
   created_at: string
 }
 
-export interface VersionDiff {
-  bom_item_id: number
-  material_name: string
-  category: string
-  quantity: number
-  unit: string
-  from_supplier: string
-  to_supplier: string
-  diff: Array<{ field: string; old: unknown; new: unknown }>
-}
-
-export interface BomListResult {
+/** 变更日志列表响应（分页） */
+export interface ChangeLogListResponse {
   success: boolean
-  items: PatternRoomBom[]
+  items: ChangeLogEntry[]
   total: number
   pages: number
   current_page: number
 }
 
-export interface BomDetailResult {
-  success: boolean
-  bom: PatternRoomBom
+// ==================== 打样项目 ====================
+
+/** 打样项目摘要（列表展示） */
+export interface ProjectSummary {
+  id: number
+  sequence_no: string
+  product_name: string
+  product_image_url: string | null
+  current_version: string
+  updated_at: string
 }
 
-export interface VersionListResult {
-  success: boolean
-  versions: string[]
+/** 客户分组 */
+export interface CustomerGroup {
+  customer_id: number | null
+  customer_name: string
+  project_count: number
+  latest_update_time: string
+  projects: ProjectSummary[]
 }
 
-export interface VersionCompareResult {
+/** 按客户分组聚合查询响应 */
+export interface GroupedListResponse {
   success: boolean
-  from_version: string
-  to_version: string
-  bom: PatternRoomBom
-  differences: VersionDiff[]
+  groups: CustomerGroup[]
+  total_projects: number
 }
 
-export interface ChangeLogListResult {
+/** 打样项目列表响应（分页） */
+export interface ProjectListResponse {
   success: boolean
-  items: ChangeLog[]
+  items: ProjectSummary[]
   total: number
   pages: number
   current_page: number
 }
 
-export interface BomActionResult {
-  success: boolean
-  id?: number
-  bom_no?: string
-  message?: string
-  [key: string]: unknown
+/** 打样项目详情响应 */
+export interface ProjectDetailResponse {
+  id: number
+  sequence_no: string
+  product_name: string
+  product_image_url: string | null
+  product_image_file_id: number | null
+  customer_id: number | null
+  customer_name: string
+  current_version: string
+  remark: string
+  created_by_name: string | null
+  created_at: string
+  updated_at: string
+  /** 乐观锁版本号 */
+  version: number
+  parts: PartDetail[]
+  versions: VersionBrief[]
+}
+
+// ==================== 请求 Schema ====================
+
+/** 新增打样项目请求 */
+export interface ProjectCreateRequest {
+  product_name: string
+  customer_id?: number | null
+  remark?: string | null
+}
+
+/** 编辑打样项目请求（version 为乐观锁版本号，必填） */
+export interface ProjectUpdateRequest {
+  product_name?: string | null
+  customer_id?: number | null
+  remark?: string | null
+  product_image_file_id?: number | null
+  version: number
+}
+
+/** 新增部位请求 */
+export interface PartCreateRequest {
+  part_name: string
+  sort_order?: number
+  fabric_name?: string | null
+  fabric_spec?: string | null
+  supplier_id?: number | null
+  contact_person?: string | null
+  contact_phone?: string | null
+  unit_price?: number | null
+  delivery_days?: number | null
+  remark?: string | null
+}
+
+/** 编辑部位请求（version 为乐观锁版本号，必填） */
+export interface PartUpdateRequest {
+  part_name?: string | null
+  sort_order?: number | null
+  fabric_name?: string | null
+  fabric_spec?: string | null
+  supplier_id?: number | null
+  contact_person?: string | null
+  contact_phone?: string | null
+  unit_price?: number | null
+  delivery_days?: number | null
+  remark?: string | null
+  version: number
+}
+
+/** 创建新版本请求 */
+export interface VersionCreateRequest {
+  reason?: string | null
+}
+
+// ==================== 查询参数 ====================
+
+/** 分组列表查询参数 */
+export interface GroupedListParams {
+  keyword?: string
+  customer_id?: number
+}
+
+/** 项目列表查询参数（分页） */
+export interface ProjectListParams {
+  page?: number
+  per_page?: number
+  keyword?: string
+  customer_id?: number
+}
+
+/** 变更日志查询参数（分页） */
+export interface ChangeLogListParams {
+  page?: number
+  per_page?: number
 }
 
 // ==================== API ====================
 
+/**
+ * 按客户分类打样信息模块 API
+ *
+ * 15 个方法对应后端 15 个端点，路径前缀 /pattern-room。
+ * 命名遵循 camelCase（前端约定），API 路径使用 kebab-case。
+ */
 export const patternRoomApi = {
-  // BOM 管理
-  listBom: (params?: QueryParams) =>
-    get<BomListResult>('/pattern-room/bom', params),
-  getBom: (id: number) =>
-    get<BomDetailResult>(`/pattern-room/bom/${id}`),
-  createBom: (data: {
-    product_name: string
-    customer_id?: number | null
-    customer_name?: string
-    remark?: string
-    items?: BomItem[]
-  }) => post<BomActionResult>('/pattern-room/bom', data),
-  updateBom: (id: number, data: Partial<{
-    product_name: string
-    customer_id: number | null
-    customer_name: string
-    remark: string
-    status: string
-  }>) => put<BomActionResult>(`/pattern-room/bom/${id}`, data),
-  deleteBom: (id: number) =>
-    del<BomActionResult>(`/pattern-room/bom/${id}`),
-  saveBomItems: (id: number, items: BomItem[]) =>
-    put<BomActionResult>(`/pattern-room/bom/${id}/items`, { items }),
-  copyBom: (id: number, data?: { product_name?: string }) =>
-    post<BomActionResult>(`/pattern-room/bom/${id}/copy`, data || {}),
+  // ---------- 1. 按客户分组聚合查询 ----------
+  getGroupedList: (params?: GroupedListParams) =>
+    get<GroupedListResponse>('/pattern-room/grouped-list', params as Record<string, unknown>),
 
-  // 版本管理
-  listVersions: (bomId: number) =>
-    get<VersionListResult>(`/pattern-room/bom/${bomId}/versions`),
-  createVersion: (bomId: number, data: { reason: string }) =>
-    post<BomActionResult>(`/pattern-room/bom/${bomId}/versions`, data),
-  compareVersions: (bomId: number, from: string, to: string) =>
-    get<VersionCompareResult>(`/pattern-room/bom/${bomId}/compare`, { from_version: from, to_version: to }),
+  // ---------- 2. 打样项目列表 ----------
+  listProjects: (params?: ProjectListParams) =>
+    get<ProjectListResponse>('/pattern-room/projects', params as Record<string, unknown>),
 
-  // 变更日志
-  listChangeLogs: (bomId: number, params?: QueryParams) =>
-    get<ChangeLogListResult>(`/pattern-room/bom/${bomId}/change-logs`, params),
-  getChangeLog: (logId: number) =>
-    get<{ success: boolean; log: ChangeLog }>(`/pattern-room/change-logs/${logId}`),
+  // ---------- 3. 打样项目详情 ----------
+  getProject: (id: number) =>
+    get<ProjectDetailResponse>(`/pattern-room/projects/${id}`),
+
+  // ---------- 4. 新增打样项目 ----------
+  createProject: (data: ProjectCreateRequest) =>
+    post<ActionResponse>('/pattern-room/projects', data),
+
+  // ---------- 5. 编辑打样项目 ----------
+  updateProject: (id: number, data: ProjectUpdateRequest) =>
+    put<ActionResponse>(`/pattern-room/projects/${id}`, data),
+
+  // ---------- 6. 删除打样项目 ----------
+  deleteProject: (id: number) =>
+    del<ActionResponse>(`/pattern-room/projects/${id}`),
+
+  // ---------- 7. 上传产品图片（multipart/form-data） ----------
+  uploadProjectImage: (id: number, file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return upload<ActionResponse>(`/pattern-room/projects/${id}/image`, formData)
+  },
+
+  // ---------- 8. 部位列表 ----------
+  listParts: (projectId: number) =>
+    get<PartListResponse>(`/pattern-room/projects/${projectId}/parts`),
+
+  // ---------- 9. 新增部位 ----------
+  createPart: (projectId: number, data: PartCreateRequest) =>
+    post<ActionResponse>(`/pattern-room/projects/${projectId}/parts`, data),
+
+  // ---------- 10. 编辑部位布料 ----------
+  updatePart: (partId: number, data: PartUpdateRequest) =>
+    put<ActionResponse>(`/pattern-room/parts/${partId}`, data),
+
+  // ---------- 11. 删除部位 ----------
+  deletePart: (partId: number) =>
+    del<ActionResponse>(`/pattern-room/parts/${partId}`),
+
+  // ---------- 12. 版本列表 ----------
+  listVersions: (projectId: number) =>
+    get<VersionListResponse>(`/pattern-room/projects/${projectId}/versions`),
+
+  // ---------- 13. 创建新版本 ----------
+  createVersion: (projectId: number, data: VersionCreateRequest) =>
+    post<ActionResponse>(`/pattern-room/projects/${projectId}/versions`, data),
+
+  // ---------- 14. 版本详情 ----------
+  getVersionDetail: (versionId: number) =>
+    get<VersionDetailResponse>(`/pattern-room/versions/${versionId}`),
+
+  // ---------- 15. 变更日志列表 ----------
+  listChangeLogs: (projectId: number, params?: ChangeLogListParams) =>
+    get<ChangeLogListResponse>(
+      `/pattern-room/projects/${projectId}/change-logs`,
+      params as Record<string, unknown>,
+    ),
 }

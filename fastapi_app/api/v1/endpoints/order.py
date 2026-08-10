@@ -30,7 +30,7 @@ from fastapi_app.schemas.order import (
     OrderListResponse,
     OrderUpdate,
 )
-from fastapi_app.services import order_batch_service, order_service
+from fastapi_app.services import order_batch_service, order_crud, order_service
 from fastapi_app.services.order_service import PermissionDeniedError
 from fastapi_app.shared_models import Order, User
 
@@ -79,11 +79,15 @@ async def list_orders(
     if user.factory and not user.is_super:
         factory = user.factory
 
-    result = await order_service.get_orders(db, page=page, per_page=per_page,
-                                            customer=customer, product_id=product_id,
-                                            status=status, order_type=order_type,
-                                            start_date=start_date, end_date=end_date,
-                                            factory=factory)
+    try:
+        result = await order_service.get_orders(db, page=page, per_page=per_page,
+                                                customer=customer, product_id=product_id,
+                                                status=status, order_type=order_type,
+                                                start_date=start_date, end_date=end_date,
+                                                factory=factory)
+    except Exception as e:
+        logger.exception("[OrderList] 获取订单列表失败: %s", e)
+        raise HTTPException(status_code=500, detail=f"获取订单列表失败: {str(e)[:200]}")
 
     return OrderListResponse(data=result['items'], total=result['total'],
                              page=result['page'], per_page=result['per_page'])
@@ -104,7 +108,7 @@ async def list_beile_orders(
     强制 factory='湖北'，忽略前端传参，确保数据隔离。
     同时包含订单（Order）和备货（StockIn）记录，通过 record_type 字段区分。
     """
-    result = await order_service.get_beile_orders_with_stockins(
+    result = await order_crud.get_beile_orders_with_stockins(
         db, page=page, per_page=per_page, customer=customer, factory='湖北',
     )
 

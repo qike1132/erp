@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/vue-query'
 import { caseApi } from '@/api'
 import { showToast } from '@/composables/useToast'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
+import { getErrorMessage } from '@/types/errors'
 
 type StockMode = 'stockin' | 'stockout'
 
@@ -66,8 +67,8 @@ export function useCaseStockActions(
       }
       queryClient.invalidateQueries({ queryKey: ['case-stockins'] })
       queryClient.invalidateQueries({ queryKey: ['case-stockouts'] })
-    } catch (err: any) {
-      showToast(err.response?.data?.detail || (mode.value === 'stockin' ? '入库失败' : '出库失败'), 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err, mode.value === 'stockin' ? '入库失败' : '出库失败'), 'error')
     } finally {
       submitting.value = false
     }
@@ -118,8 +119,8 @@ export function useCaseStockActions(
       } else {
         showToast(res.message || '导入失败', 'error')
       }
-    } catch (err: any) {
-      showToast(err.response?.data?.detail || '导入失败', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err, '导入失败'), 'error')
     } finally {
       importing.value = false
     }
@@ -135,8 +136,8 @@ export function useCaseStockActions(
       await (type === 'stockin' ? caseApi.deleteStockin(row.id) : caseApi.deleteStockout(row.id))
       showToast('删除成功', 'success')
       queryClient.invalidateQueries({ queryKey: [type === 'stockin' ? 'case-stockins' : 'case-stockouts'] })
-    } catch (err: any) {
-      showToast(err.response?.data?.detail || '删除失败', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err, '删除失败'), 'error')
     } finally {
       actionId.value = 0
     }
@@ -181,8 +182,8 @@ export function useCaseStockActions(
       showToast('更新成功', 'success')
       editDialogOpen.value = false
       queryClient.invalidateQueries({ queryKey: [editMode.value === 'stockin' ? 'case-stockins' : 'case-stockouts'] })
-    } catch (err: any) {
-      showToast(err.response?.data?.detail || '更新失败', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err, '更新失败'), 'error')
     }
   }
 

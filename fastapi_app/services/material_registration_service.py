@@ -1,4 +1,5 @@
 """来料登记服务层"""
+import json
 import logging
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -10,7 +11,6 @@ from sqlalchemy.orm import joinedload, selectinload
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.utils import calc_total_pages
-from fastapi_app.services.purchase_order_query import _build_po_source_sku_map
 from fastapi_app.shared_models import (
     MaterialRegistration,
     MaterialRegistrationItem,
@@ -84,67 +84,9 @@ async def get_registrations(db, page: int = 1, per_page: int = 20,
     result = await db.execute(query)
     registrations = list(result.scalars().all())
 
-    # 批量查询每条来料登记关联的采购订单明细中的供应商分布，
-    # 以便前端能展示同一采购订单下不同物料供应商（BOM 可配置多个供应商）
-    po_ids = [r.purchase_order_id for r in registrations if r.purchase_order_id]
-    supplier_map: dict[int, set[str]] = {}
-    # item_id -> supplier_name 映射，用于给每个来料登记明细注入供应商信息
-    item_supplier_map: dict[int | None, str] = {}
-    # 查询每个采购订单的 SKU 明细（产品名、条码、数量），用于前端分列显示多 SKU
-    po_sku_map: dict[int, list[dict]] = {}
-    if po_ids:
-        po_for_sku = [r.purchase_order for r in registrations if r.purchase_order]
-        po_sku_map = await _build_po_source_sku_map(db, po_for_sku)
-    if po_ids:
-        sup_result = await db.execute(
-            select(
-                PurchaseOrderItem.order_id,
-                PurchaseOrderItem.id,
-                PurchaseOrderItem.supplier_name,
-                PurchaseOrderItem.material_name,
-            ).where(
-                PurchaseOrderItem.order_id.in_(po_ids),
-                PurchaseOrderItem.supplier_name.isnot(None),
-                PurchaseOrderItem.supplier_name != '',
-            )
-        )
-        # material_name -> supplier_name 映射（按 order_id 分组），用于回填无 order_item_id 的明细
-        po_material_supplier: dict[int, dict[str, str]] = {}
-        for po_id, item_id, sup_name, mat_name in sup_result.all():
-            supplier_map.setdefault(po_id, set()).add(sup_name)
-            if item_id is not None:
-                item_supplier_map[item_id] = sup_name
-            if mat_name:
-                po_material_supplier.setdefault(po_id, {})[mat_name] = sup_name
-
-    reg_dicts = []
-    for r in registrations:
-        d = r.to_dict()
-        names = sorted(supplier_map.get(r.purchase_order_id, set()))
-        d['supplier_names'] = names if names else ([d.get('supplier_name')] if d.get('supplier_name') else [])
-        # 订单时间：采购订单生成时间（用户要求展示"来料登记生成订单的时间"）
-        po = r.purchase_order
-        if po and po.create_time:
-            d['po_create_time'] = po.create_time.strftime('%Y/%m/%d')
-        else:
-            d['po_create_time'] = ''
-        # SKU 明细列表（多 SKU 订单时前端按 SKU 分行显示产品名称和数量）
-        d['sku_items'] = po_sku_map.get(r.purchase_order_id, [])
-        # 给每个明细注入 supplier_name（优先用 order_item_id 匹配，回退用 material_name 匹配）
-        mat_map = po_material_supplier.get(r.purchase_order_id, {})
-        for item in d.get('items', []):
-            oid = item.get('order_item_id')
-            if oid and oid in item_supplier_map:
-                item['supplier_name'] = item_supplier_map[oid]
-            elif item.get('material_name') in mat_map:
-                item['supplier_name'] = mat_map[item['material_name']]
-            else:
-                item['supplier_name'] = r.supplier_name or ''
-        reg_dicts.append(d)
-
     return {
         'success': True,
-        'registrations': reg_dicts,
+        'registrations': [r.to_dict() for r in registrations],
         'total': total,
         'pages': calc_total_pages(total, per_page),
         'current_page': page,
@@ -162,37 +104,7 @@ async def get_registration(db, reg_id: int) -> dict:
     reg = result.scalar_one_or_none()
     if not reg:
         raise ValueError("来料登记不存在")
-    d = reg.to_dict()
-    # 给每个明细注入 supplier_name（与列表接口保持一致，便于前端按供应商汇总）
-    po_id = reg.purchase_order_id
-    if po_id:
-        sup_result = await db.execute(
-            select(
-                PurchaseOrderItem.id,
-                PurchaseOrderItem.supplier_name,
-                PurchaseOrderItem.material_name,
-            ).where(
-                PurchaseOrderItem.order_id == po_id,
-                PurchaseOrderItem.supplier_name.isnot(None),
-                PurchaseOrderItem.supplier_name != '',
-            )
-        )
-        item_supplier_map: dict[int, str] = {}
-        material_supplier_map: dict[str, str] = {}
-        for item_id, sup_name, mat_name in sup_result.all():
-            if item_id is not None:
-                item_supplier_map[item_id] = sup_name
-            if mat_name:
-                material_supplier_map[mat_name] = sup_name
-        for item in d.get('items', []):
-            oid = item.get('order_item_id')
-            if oid and oid in item_supplier_map:
-                item['supplier_name'] = item_supplier_map[oid]
-            elif item.get('material_name') in material_supplier_map:
-                item['supplier_name'] = material_supplier_map[item['material_name']]
-            else:
-                item['supplier_name'] = reg.supplier_name or ''
-    return {'success': True, 'registration': d}
+    return {'success': True, 'registration': reg.to_dict()}
 
 
 async def create_registration(db, purchase_order_id: int, user_id: int | None = None,
@@ -405,6 +317,54 @@ async def get_purchase_order_items(db, order_id: int) -> dict:
     )
     items = list(result.scalars().all())
     return {'success': True, 'items': [item.to_dict() for item in items]}
+
+
+async def preview_purchase_order(db, order_no: str) -> dict:
+    """采购订单快速预览"""
+    result = await db.execute(
+        select(PurchaseOrder)
+        .options(joinedload(PurchaseOrder.items))
+        .where(PurchaseOrder.order_no == order_no)
+    )
+    order = result.unique().scalar_one_or_none()
+    if not order:
+        raise ValueError("订单不存在")
+
+    # Fetch source sales orders info
+    source_orders = {}
+    source_order_ids = set()
+    if order.source_order_id:
+        source_order_ids.add(order.source_order_id)
+    if order.source_order_ids:
+        try:
+            for sid in json.loads(order.source_order_ids):
+                if sid:
+                    source_order_ids.add(sid)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    if source_order_ids:
+        so_result = await db.execute(
+            select(Order).options(joinedload(Order.product)).where(Order.id.in_(source_order_ids))
+        )
+        for so in so_result.unique().scalars().all():
+            source_orders[so.id] = so
+
+    order_dict = order.to_dict(source_orders=source_orders)
+    order_dict['source_order_ids'] = order.source_order_ids
+
+    # Enrich source order details for display
+    source_details = []
+    for so in source_orders.values():
+        detail: dict = {'id': so.id, 'order_no': so.order_no}
+        if hasattr(so, 'product') and so.product:
+            detail['product_name'] = so.product.name
+        if hasattr(so, 'quantity') and so.quantity:
+            detail['quantity'] = float(so.quantity)
+        detail['customer_name'] = so.customer if hasattr(so, 'customer') else None
+        source_details.append(detail)
+    order_dict['source_orders'] = source_details
+
+    return {'success': True, 'order': order_dict}
 
 
 async def export_registrations(db, order_no: str = '', supplier: str = '',

@@ -115,7 +115,11 @@ def mock_async_db():
     session.execute = AsyncMock()
     session.get = AsyncMock()
     session.add = MagicMock()
-    session.begin_nested = MagicMock(return_value=AsyncMock())
+    # begin_nested 返回一个 async context manager
+    nested = AsyncMock()
+    nested.__aenter__ = AsyncMock(return_value=nested)
+    nested.__aexit__ = AsyncMock(return_value=None)
+    session.begin_nested = MagicMock(return_value=nested)
     return session
 
 

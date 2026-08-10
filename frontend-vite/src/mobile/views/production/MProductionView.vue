@@ -13,14 +13,14 @@
       <div v-if="loading" class="m-center"><MSpinner size="lg" /></div>
       <template v-else-if="summary">
         <div class="m-kpi-row">
-          <MStatCard :value="summary.total_quantity ?? 0" label="总产量" icon-bg="rgba(0,113,227,0.1)" />
-          <MStatCard :value="fmtMoney(summary.total_value ?? 0)" label="总产值" icon-bg="rgba(48,209,88,0.1)" />
+          <MStatCard :value="totalQuantity ?? 0" label="总产量" icon-bg="rgba(0,113,227,0.1)" />
+          <MStatCard :value="fmtMoney(totalValue ?? 0)" label="总产值" icon-bg="rgba(48,209,88,0.1)" />
         </div>
         <div class="m-dept-grid">
           <MCard v-for="dept in departments" :key="dept.key" padded>
             <div class="m-dept-name">{{ dept.name }}</div>
             <div class="m-dept-val">{{ dept.quantity }}</div>
-            <MProgress :value="dept.quantity" :max="summary.total_quantity || 1" animated />
+            <MProgress :value="dept.quantity" :max="totalQuantity || 1" animated />
           </MCard>
         </div>
       </template>
@@ -46,13 +46,35 @@ const monthlyMonth = ref(new Date().getMonth() + 1)
 const summary = ref<any>(null)
 const loading = ref(false)
 
+const DEPARTMENT_LABELS: Record<string, string> = {
+  filling: '充棉部',
+  handcraft: '手工部',
+  packaging: '包装部',
+}
+
 const departments = computed(() => {
-  const d = summary.value?.departments || {}
-  return [
-    { key: 'filling', name: '充棉部', quantity: d.filling?.quantity || 0 },
-    { key: 'handcraft', name: '手工部', quantity: d.handcraft?.quantity || 0 },
-    { key: 'packaging', name: '包装部', quantity: d.packaging?.quantity || 0 },
-  ]
+  // 日报：summary.departments = [{ department, department_label, total_quantity, ... }]
+  // 月报：summary.monthly_departments = [{ department, ... }]
+  const list = viewTab.value === 'monthly'
+    ? (summary.value?.monthly_departments || [])
+    : (summary.value?.departments || [])
+  return list.map((d: any) => {
+    const key = d.department
+    return {
+      key,
+      name: d.department_label || DEPARTMENT_LABELS[key] || key,
+      quantity: d.total_quantity ?? 0,
+    }
+  })
+})
+
+const totalQuantity = computed(() => {
+  if (viewTab.value === 'monthly') return summary.value?.monthly_total_quantity ?? 0
+  return summary.value?.overall_quantity ?? 0
+})
+const totalValue = computed(() => {
+  if (viewTab.value === 'monthly') return summary.value?.monthly_total_value ?? 0
+  return summary.value?.overall_value ?? 0
 })
 
 function fmtMoney(v: number) {

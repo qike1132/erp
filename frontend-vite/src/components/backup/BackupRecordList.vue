@@ -5,7 +5,7 @@
     </div>
 
     <div v-else-if="!records.length" class="brl-empty">
-      <i class="fas fa-inbox"  aria-hidden="true" />
+      <FontAwesomeIcon icon="inbox" aria-hidden="true" />
       <p>暂无备份记录</p>
     </div>
 
@@ -21,9 +21,9 @@
               <span v-if="r.trigger_type === 'auto'" class="brl-auto-badge">自动</span>
             </div>
             <div class="brl-item-meta">
-              <span v-if="r.operator"><i class="fas fa-user"  aria-hidden="true" /> {{ r.operator }}</span>
-              <span v-if="r.created_at"><i class="fas fa-clock"  aria-hidden="true" /> {{ formatDateTime(r.created_at) }}</span>
-              <span v-if="r.duration_seconds != null"><i class="fas fa-stopwatch"  aria-hidden="true" /> {{ r.duration_seconds.toFixed(1) }}s</span>
+              <span v-if="r.operator"><FontAwesomeIcon icon="user" aria-hidden="true" /> {{ r.operator }}</span>
+              <span v-if="r.created_at"><FontAwesomeIcon icon="clock" aria-hidden="true" /> {{ formatDateTime(r.created_at) }}</span>
+              <span v-if="r.duration_seconds != null"><FontAwesomeIcon icon="stopwatch" aria-hidden="true" /> {{ r.duration_seconds.toFixed(1) }}s</span>
             </div>
           </div>
           <div class="brl-item-status">
@@ -33,13 +33,13 @@
           </div>
         </div>
         <div class="brl-item-detail">
-          <span v-if="r.table_count != null"><i class="fas fa-table"  aria-hidden="true" /> {{ r.table_count }} 表</span>
-          <span v-if="r.total_rows != null"><i class="fas fa-list"  aria-hidden="true" /> {{ r.total_rows }} 条</span>
-          <span v-if="r.size != null"><i class="fas fa-weight-hanging"  aria-hidden="true" /> {{ formatSize(r.size) }}</span>
-          <span v-if="r.remark" class="brl-remark"><i class="fas fa-comment"  aria-hidden="true" /> {{ r.remark }}</span>
+          <span v-if="r.table_count != null"><FontAwesomeIcon icon="table" aria-hidden="true" /> {{ r.table_count }} 表</span>
+          <span v-if="r.total_rows != null"><FontAwesomeIcon icon="list" aria-hidden="true" /> {{ r.total_rows }} 条</span>
+          <span v-if="r.size != null"><FontAwesomeIcon icon="weight-hanging" aria-hidden="true" /> {{ formatSize(r.size) }}</span>
+          <span v-if="r.remark" class="brl-remark"><FontAwesomeIcon icon="comment" aria-hidden="true" /> {{ r.remark }}</span>
         </div>
         <div v-if="r.error_message" class="brl-error">
-          <i class="fas fa-exclamation-circle"  aria-hidden="true" /> {{ r.error_message }}
+          <FontAwesomeIcon icon="exclamation-circle" aria-hidden="true" /> {{ r.error_message }}
         </div>
       </div>
     </div>
@@ -51,7 +51,7 @@
         :disabled="page <= 1"
         @click="$emit('page-change', page - 1)"
        aria-label="上一页">
-        <i class="fas fa-chevron-left"  aria-hidden="true" />
+        <FontAwesomeIcon icon="chevron-left" aria-hidden="true" />
       </button>
       <span class="brl-page-info">{{ page }} / {{ Math.ceil(total / pageSize) }}</span>
       <button
@@ -59,7 +59,7 @@
         :disabled="page >= Math.ceil(total / pageSize)"
         @click="$emit('page-change', page + 1)"
       >
-        <i class="fas fa-chevron-right"  aria-hidden="true" />
+        <FontAwesomeIcon icon="chevron-right" aria-hidden="true" />
       </button>
     </div>
   </div>

@@ -47,7 +47,6 @@ export interface UserInfo {
   id?: number
   username: string
   is_super: boolean
-  factory?: string | null
   permissions: string[]
 }
 
@@ -83,8 +82,6 @@ export interface OrderItem {
   locked_by_name?: string
   /** 主订单下的 SKU 明细列表（多 SKU 聚合时 >1） */
   items?: OrderSKU[]
-  /** 订单关联的工厂名列表（从 items 聚合，去重排序），如 ['东莞','湖北'] */
-  factories?: string[]
 }
 
 export interface StockInRecord {
@@ -294,7 +291,6 @@ export interface User {
   username: string
   is_super?: boolean
   status?: boolean
-  factory?: string | null
   create_time?: string
   permissions: string[]
 }
@@ -303,7 +299,6 @@ export interface UserCreate {
   username: string
   password: string
   is_super?: boolean
-  factory?: string | null
 }
 
 export interface NavSection {
@@ -344,7 +339,6 @@ export interface Product {
   status?: boolean
   price?: number
   image?: string
-  factory?: string
 }
 
 export interface ProductionCraft {
@@ -574,6 +568,24 @@ export interface RegistrationItem {
   unit?: string
   remark?: string
   progress?: number
+}
+
+export interface OrderPreview {
+  id: number
+  purchase_order_no: string
+  supplier_name: string
+  customer_name: string
+  product_name: string
+  product_quantity: number
+  items: RegistrationItem[]
+  status: string
+  progress: number
+  total_ordered: number
+  total_received: number
+  update_time?: string
+  source_orders?: { id: number; order_no: string; customer_name?: string; product_name?: string; quantity?: number }[]
+  item_count?: number
+  order_date?: string
 }
 
 // ===== 备份系统 =====

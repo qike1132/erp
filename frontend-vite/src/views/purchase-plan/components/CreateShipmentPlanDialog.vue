@@ -91,7 +91,7 @@
                 title="移除此行"
                 @click="removeDetail(idx)"
               >
-                <i class="fas fa-trash"  aria-hidden="true" />
+                <FontAwesomeIcon icon="trash" aria-hidden="true" />
               </button>
           </div>
         </div>
@@ -108,44 +108,44 @@
           @drop.prevent="onDrop"
         >
           <div class="csd-upload-label">
-            <i class="fas fa-file-excel"  aria-hidden="true" />
-            <span v-if="file" class="csd-file-selected"><i class="fas fa-check-circle"  aria-hidden="true" />{{ file.name }}</span>
+            <FontAwesomeIcon icon="file-excel" aria-hidden="true" />
+            <span v-if="file" class="csd-file-selected"><FontAwesomeIcon icon="check-circle" aria-hidden="true" />{{ file.name }}</span>
             <span v-else>拖拽文件到此处或点击选择 · 支持 .xlsx .xls .csv</span>
           </div>
           <div class="csd-upload-buttons">
             <button class="csd-inline-btn" @click.stop="dlTpl">模板</button>
             <button class="csd-inline-btn csd-inline-btn-primary" :disabled="!file || uploading" @click.stop="doUpload">
-              <i v-if="!uploading" class="fas fa-upload" aria-hidden="true"></i>
-              <i v-else class="fas fa-spinner fa-spin"></i> 导入
+              <FontAwesomeIcon v-if="!uploading" icon="upload" aria-hidden="true" />
+              <FontAwesomeIcon v-else icon="spinner" spin /> 导入
             </button>
             <button v-if="file" class="csd-inline-btn csd-inline-btn-danger" @click.stop="clearFile" aria-label="删除">
-              <i class="fas fa-trash" aria-hidden="true"></i>
+              <FontAwesomeIcon icon="trash" aria-hidden="true" />
             </button>
           </div>
           <input ref="fileInp" type="file" accept=".xlsx,.xls,.csv" hidden @change="onFile" />
         </div>
         <div v-if="upMsg" class="csd-upload-message" :class="{ 'csd-upload-success': upOk, 'csd-upload-error': !upOk }">
-          <i :class="upOk ? 'fas fa-check-circle' : 'fas fa-exclamation-circle'" aria-hidden="true"></i>
+          <FontAwesomeIcon :icon="upOk ? 'check-circle' : 'exclamation-circle'" aria-hidden="true" />
           {{ upMsg }}
         </div>
       </template>
 
       <div v-if="errorMsg" class="csd-error">
-        <i class="fas fa-exclamation-circle"  aria-hidden="true" /> {{ errorMsg }}
+        <FontAwesomeIcon icon="exclamation-circle" aria-hidden="true" /> {{ errorMsg }}
       </div>
     </div>
 
     <template #footer>
       <button v-if="mode === 'manual'" class="csd-btn csd-btn-add" @click="addDetail">
-        <i class="fas fa-plus"  aria-hidden="true" /> 添加明细
+        <FontAwesomeIcon icon="plus" aria-hidden="true" /> 添加明细
       </button>
       <span style="flex:1"></span>
       <button class="csd-btn csd-btn-cancel" @click="$emit('update:open', false)">
         取消
       </button>
       <button v-if="mode === 'manual'" class="csd-btn csd-btn-submit" :disabled="submitting" @click="handleSubmit">
-        <i v-if="submitting" class="fas fa-spinner fa-spin" />
-        <i v-else class="fas fa-check" />
+        <FontAwesomeIcon v-if="submitting" icon="spinner" spin />
+        <FontAwesomeIcon v-else icon="check" />
         {{ submitting ? '保存中…' : '确认创建' }}
       </button>
     </template>
@@ -158,6 +158,7 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { planApi, customerApi } from '@/api'
 import { get } from '@/api/request'
 import { showToast } from '@/composables/useToast'
+import { getErrorMessage } from '@/types/errors'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiSelect from '@/components/ui/UiSelect.vue'
 
@@ -301,7 +302,7 @@ function onDrop(ev: DragEvent) { dragOver.value = false; const fs = ev.dataTrans
 function onFile(ev: Event) { const t2 = ev.target as HTMLInputElement; if (t2.files?.length) vfile(t2.files[0]); t2.value = '' }
 function vfile(f: File) { clearUpMsg(); const ext = '.' + (f.name.split('.').pop()?.toLowerCase() ?? ''); if (!['.xlsx', '.xls', '.csv'].includes(ext)) { showUpMsg('仅支持 .xlsx .xls .csv', false); return; } if (f.size > 10 * 1024 * 1024) { showUpMsg('文件超过 10MB', false); return; } if (f.size === 0) { showUpMsg('文件为空', false); return; } file.value = f }
 function clearFile() { file.value = null; clearUpMsg() }
-async function doUpload() { if (!file.value) return; uploading.value = true; clearUpMsg(); try { const fd = new FormData(); fd.append('file', file.value); const r = await planApi.upload(fd) as any; showUpMsg(`导入成功，共 ${r.total || 0} 条`, true); clearFile(); qc.invalidateQueries({ queryKey: ['pp-monthly'] }); qc.invalidateQueries({ queryKey: ['pp-summary'] }); emit('created') } catch (e: any) { showUpMsg(e.response?.data?.detail || e.message || '导入失败', false) } finally { uploading.value = false } }
+async function doUpload() { if (!file.value) return; uploading.value = true; clearUpMsg(); try { const fd = new FormData(); fd.append('file', file.value); const r = await planApi.upload(fd) as any; showUpMsg(`导入成功，共 ${r.total || 0} 条`, true); clearFile(); qc.invalidateQueries({ queryKey: ['pp-monthly'] }); qc.invalidateQueries({ queryKey: ['pp-summary'] }); emit('created') } catch (e: unknown) { showUpMsg(getErrorMessage(e, '导入失败'), false) } finally { uploading.value = false } }
 function showUpMsg(msg: string, ok: boolean) { upMsg.value = msg; upOk.value = ok; clearTimeout(_ut); _ut = setTimeout(() => upMsg.value = '', 5000) }
 function clearUpMsg() { upMsg.value = ''; clearTimeout(_ut) }
 async function dlTpl() { try { await planApi.downloadTemplate() } catch { showToast('下载失败', 'error') } }
@@ -357,9 +358,9 @@ async function handleSubmit() {
 
     showToast('出货计划创建成功', 'success')
     emit('created')
-  } catch (err: any) {
-    const detail = err.response?.data?.detail || err.message || '创建失败，请重试'
-    errorMsg.value = typeof detail === 'string' ? detail : JSON.stringify(detail)
+  } catch (err: unknown) {
+    const detail = getErrorMessage(err, '创建失败，请重试')
+    errorMsg.value = detail
     showToast(errorMsg.value, 'error')
   } finally {
     submitting.value = false

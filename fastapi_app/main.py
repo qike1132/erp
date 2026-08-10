@@ -356,16 +356,23 @@ app.include_router(api_router, prefix=settings.API_PREFIX)
 app.include_router(api_v2_router, prefix="/api")
 
 _static_dir = pathlib.Path(__file__).resolve().parent.parent / "static"
-if _static_dir.is_dir():
-    _files_dir = _static_dir / "files"
-    if _files_dir.is_dir():
-        app.mount("/static/files", StaticFiles(directory=str(_files_dir)), name="static-files")
-    _uploads_dir = _static_dir / "uploads"
-    if _uploads_dir.is_dir():
-        app.mount("/static/uploads", StaticFiles(directory=str(_uploads_dir)), name="static-uploads")
-    _releases_dir = _static_dir / "releases"
-    if _releases_dir.is_dir():
-        app.mount("/static/releases", StaticFiles(directory=str(_releases_dir)), name="static-releases")
+
+# 确保 static 子目录存在并挂载，避免因目录未预创建导致静态文件 404
+# static/ 不存在时创建并挂载 uploads/releases/files
+if not _static_dir.is_dir():
+    _static_dir.mkdir(parents=True, exist_ok=True)
+
+_uploads_dir = _static_dir / "uploads"
+_uploads_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/static/uploads", StaticFiles(directory=str(_uploads_dir)), name="static-uploads")
+
+_files_dir = _static_dir / "files"
+_files_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/static/files", StaticFiles(directory=str(_files_dir)), name="static-files")
+
+_releases_dir = _static_dir / "releases"
+_releases_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/static/releases", StaticFiles(directory=str(_releases_dir)), name="static-releases")
 
 
 @app.get("/", tags=["根路径"])

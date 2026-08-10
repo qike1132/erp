@@ -1,5 +1,8 @@
+/**
+ * 网络状态监听 composable
+ * Capacitor 环境下使用原生 Network API，Web 环境降级为 navigator.onLine
+ */
 import { ref, onMounted, onUnmounted } from 'vue'
-import { Network } from '@capacitor/network'
 
 export function useNetworkStatus() {
   const connected = ref(true)
@@ -10,7 +13,19 @@ export function useNetworkStatus() {
   let offlineHandler: (() => void) | null = null
 
   async function init() {
+    // 仅在 Capacitor 环境才尝试加载原生 Network API
+    if (!import.meta.env.VITE_CAPACITOR) {
+      connected.value = navigator.onLine
+      onlineHandler = () => { connected.value = true }
+      offlineHandler = () => { connected.value = false }
+      window.addEventListener('online', onlineHandler)
+      window.addEventListener('offline', offlineHandler)
+      return
+    }
+
+    // Capacitor 环境：动态 import，避免 Web 构建解析失败
     try {
+      const { Network } = await import('@capacitor/network')
       const status = await Network.getStatus()
       connected.value = status.connected
       connectionType.value = status.connectionType
@@ -20,6 +35,7 @@ export function useNetworkStatus() {
         connectionType.value = status.connectionType
       })
     } catch {
+      console.warn('[useNetworkStatus] Capacitor Network API unavailable, falling back to browser')
       connected.value = navigator.onLine
       onlineHandler = () => { connected.value = true }
       offlineHandler = () => { connected.value = false }

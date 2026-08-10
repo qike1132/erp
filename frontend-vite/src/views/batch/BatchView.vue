@@ -23,7 +23,7 @@
           </span>
 
           <button class="bt-whitelist-btn" @click="showWhitelistModal = true" aria-label="设置">
-            <i class="fas fa-cog"  aria-hidden="true" />
+            <FontAwesomeIcon icon="cog" aria-hidden="true" />
           </button>
           <!-- 白名单设置弹窗 -->
           <div v-if="showWhitelistModal" class="bt-whitelist-overlay" @click.self="showWhitelistModal = false">
@@ -116,7 +116,7 @@
             </div>
           </div>
           <div v-else class="bt-empty">
-            <i class="fas fa-inbox"  aria-hidden="true" />
+            <FontAwesomeIcon icon="inbox" aria-hidden="true" />
             <span>暂无批次数据</span>
           </div>
         </template>

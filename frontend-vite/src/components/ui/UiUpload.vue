@@ -23,7 +23,7 @@
           @dragleave="dragOver = false"
           @drop.prevent="handleDrop"
         >
-          <i class="fas fa-cloud-upload-alt text-3xl text-text-muted mb-2" aria-hidden="true" />
+          <FontAwesomeIcon icon="cloud-upload-alt" class="text-3xl text-text-muted mb-2" aria-hidden="true" />
           <p class="text-sm text-text-secondary">
             {{ placeholder }}
           </p>

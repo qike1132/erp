@@ -9,22 +9,22 @@
       <!-- 统计卡片 -->
       <div v-if="stats" class="ap-stats">
         <div class="ap-stat-card ap-stat-pending">
-          <div class="ap-stat-icon"><i class="fas fa-clock"  aria-hidden="true" /></div>
+          <div class="ap-stat-icon"><FontAwesomeIcon icon="clock" aria-hidden="true" /></div>
           <div class="ap-stat-value">{{ stats.pending ?? 0 }}</div>
           <div class="ap-stat-label">待审批</div>
         </div>
         <div class="ap-stat-card ap-stat-approved">
-          <div class="ap-stat-icon"><i class="fas fa-check-circle"  aria-hidden="true" /></div>
+          <div class="ap-stat-icon"><FontAwesomeIcon icon="check-circle" aria-hidden="true" /></div>
           <div class="ap-stat-value">{{ stats.approved ?? 0 }}</div>
           <div class="ap-stat-label">已通过</div>
         </div>
         <div class="ap-stat-card ap-stat-rejected">
-          <div class="ap-stat-icon"><i class="fas fa-times-circle"  aria-hidden="true" /></div>
+          <div class="ap-stat-icon"><FontAwesomeIcon icon="times-circle" aria-hidden="true" /></div>
           <div class="ap-stat-value">{{ stats.rejected ?? 0 }}</div>
           <div class="ap-stat-label">已驳回</div>
         </div>
         <div class="ap-stat-card ap-stat-total">
-          <div class="ap-stat-icon"><i class="fas fa-list-check"  aria-hidden="true" /></div>
+          <div class="ap-stat-icon"><FontAwesomeIcon icon="list-check" aria-hidden="true" /></div>
           <div class="ap-stat-value">{{ stats.total ?? 0 }}</div>
           <div class="ap-stat-label">合计</div>
         </div>
@@ -52,7 +52,7 @@
         </div>
         <template v-else-if="items.length === 0">
           <div class="ap-empty">
-            <i class="fas fa-clipboard-check"  aria-hidden="true" />
+            <FontAwesomeIcon icon="clipboard-check" aria-hidden="true" />
             <span>暂无审批记录</span>
           </div>
         </template>
@@ -93,11 +93,11 @@
 
         <!-- Pagination -->
         <div v-if="totalItems > perPage" class="ap-pagination">
-          <button class="ap-page-btn" :disabled="currentPage <= 1" @click="goPage(1)" aria-label="首页"><i class="fas fa-angle-double-left"  aria-hidden="true" /></button>
-          <button class="ap-page-btn" :disabled="currentPage <= 1" @click="goPage(currentPage - 1)" aria-label="上一页"><i class="fas fa-angle-left"  aria-hidden="true" /></button>
+          <button class="ap-page-btn" :disabled="currentPage <= 1" @click="goPage(1)" aria-label="首页"><FontAwesomeIcon icon="angle-double-left" aria-hidden="true" /></button>
+          <button class="ap-page-btn" :disabled="currentPage <= 1" @click="goPage(currentPage - 1)" aria-label="上一页"><FontAwesomeIcon icon="angle-left" aria-hidden="true" /></button>
           <span class="ap-page-info">{{ currentPage }} / {{ totalPages }}</span>
-          <button class="ap-page-btn" :disabled="currentPage >= totalPages" @click="goPage(currentPage + 1)" aria-label="下一页"><i class="fas fa-angle-right"  aria-hidden="true" /></button>
-          <button class="ap-page-btn" :disabled="currentPage >= totalPages" @click="goPage(totalPages)" aria-label="末页"><i class="fas fa-angle-double-right"  aria-hidden="true" /></button>
+          <button class="ap-page-btn" :disabled="currentPage >= totalPages" @click="goPage(currentPage + 1)" aria-label="下一页"><FontAwesomeIcon icon="angle-right" aria-hidden="true" /></button>
+          <button class="ap-page-btn" :disabled="currentPage >= totalPages" @click="goPage(totalPages)" aria-label="末页"><FontAwesomeIcon icon="angle-double-right" aria-hidden="true" /></button>
           <span class="ap-page-total">共 {{ totalItems }} 条</span>
         </div>
       </div>

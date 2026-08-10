@@ -2,7 +2,11 @@
 死信队列(DLQ)管理端点
 
 提供失败任务查看、重试、清除等操作
+
+注意：task_callbacks.py 使用 _safe_repr() 存储 args/kwargs 为 repr 字符串，
+因此读取时需要 ast.literal_eval 反序列化，以便 send_task 收到正确的参数类型。
 """
+import ast
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -49,6 +53,40 @@ def _require_redis():
     return client
 
 
+def _parse_dead_letter_args(args_raw) -> list:
+    """将 _safe_repr 存储的 repr 字符串还原为参数列表。
+
+    task_callbacks.py 使用 repr() 序列化 args/kwargs，
+    ast.literal_eval 可安全地将 repr 字符串还原为原始 Python 对象。
+    """
+    if isinstance(args_raw, (list, tuple)):
+        return list(args_raw)
+    if not isinstance(args_raw, str):
+        return []
+    try:
+        parsed = ast.literal_eval(args_raw)
+        if isinstance(parsed, tuple):
+            return list(parsed)
+        return parsed if isinstance(parsed, list) else [parsed]
+    except (ValueError, SyntaxError):
+        logger.warning('无法解析死信任务参数: %s', args_raw[:200])
+        return [args_raw]
+
+
+def _parse_dead_letter_kwargs(kwargs_raw) -> dict:
+    """将 _safe_repr 存储的 repr 字符串还原为参数字典。"""
+    if isinstance(kwargs_raw, dict):
+        return kwargs_raw
+    if not isinstance(kwargs_raw, str):
+        return {}
+    try:
+        parsed = ast.literal_eval(kwargs_raw)
+        return parsed if isinstance(parsed, dict) else {}
+    except (ValueError, SyntaxError):
+        logger.warning('无法解析死信任务关键字参数: %s', kwargs_raw[:200])
+        return {}
+
+
 @router.get('/dead-letter', response_model=DeadLetterListResponse, summary='查看死信队列中的失败任务')
 async def list_dead_letter(
     limit: int = Query(50, ge=1, le=200, description='返回条数'),
@@ -84,13 +122,10 @@ async def retry_dead_letter_task(task_id: str, _user: User = Depends(require_per
         if target_idx is None:
             raise HTTPException(404, f'任务 {task_id} 不在死信队列中')
         task_name = target_entry.get('task_name')
-        args = target_entry.get('args', [])
-        kwargs = target_entry.get('kwargs', {})
+        args = _parse_dead_letter_args(target_entry.get('args', []))
+        kwargs = _parse_dead_letter_kwargs(target_entry.get('kwargs', {}))
         from fastapi_app.core.celery_app import celery_app
-        task_func = celery_app.tasks.get(task_name)
-        if not task_func:
-            raise HTTPException(400, f'任务 {task_name} 未注册')
-        new_result = task_func.apply_async(args=args, kwargs=kwargs)
+        new_result = celery_app.send_task(task_name, args=args, kwargs=kwargs)
         await safe_lrem(DLQ_KEY, 1, entries_raw[target_idx], context="死信队列")
         logger.info('重试死信任务: %s -> new_id=%s', task_id, new_result.id)
         return {

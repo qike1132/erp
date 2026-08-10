@@ -69,7 +69,7 @@ function detailStatusTxt(s: string) { return DETAIL_STATUS_TEXT[s] || '待出货
 
     <!-- 错误态 -->
     <div v-else-if="isError" class="flex items-center justify-center gap-2 py-12 text-text-muted">
-      <i class="fas fa-exclamation-circle text-danger-600" aria-hidden="true" />
+      <FontAwesomeIcon icon="exclamation-circle" class="text-danger-600" aria-hidden="true" />
       加载失败
     </div>
 

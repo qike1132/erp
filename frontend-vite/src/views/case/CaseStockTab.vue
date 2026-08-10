@@ -3,10 +3,10 @@
     <!-- 模式切换 -->
     <div class="cs-mode-toggle" role="tablist">
       <button role="tab" :aria-selected="mode === 'stockin'" :class="['cs-mode-btn', { active: mode === 'stockin' }]" @click="switchMode('stockin')">
-        <i class="fas fa-truck-loading" />入库
+        <FontAwesomeIcon icon="truck-loading" />入库
       </button>
       <button role="tab" :aria-selected="mode === 'stockout'" :class="['cs-mode-btn', { active: mode === 'stockout', 'out-mode': mode === 'stockout' }]" @click="switchMode('stockout')">
-        <i class="fas fa-shipping-fast" />出库
+        <FontAwesomeIcon icon="shipping-fast" />出库
       </button>
     </div>
 
@@ -16,8 +16,7 @@
       <div class="cs-form-section">
         <div class="cs-section-header">
           <div class="cs-section-title">
-            <i :class="mode === 'stockin' ? 'fas fa-truck-loading' : 'fas fa-shipping-fast'"
-               :style="{ color: mode === 'stockin' ? 'var(--color-primary-500)' : 'var(--color-danger-500)' }" aria-hidden="true" />
+            <FontAwesomeIcon :icon="mode === 'stockin' ? 'truck-loading' : 'shipping-fast'" :style="{ color: mode === 'stockin' ? 'var(--color-primary-500)' : 'var(--color-danger-500)' }" aria-hidden="true" />
             {{ mode === 'stockin' ? '入库信息录入' : '出库信息录入' }}
           </div>
           <span v-if="staged.length" :class="['cs-badge', mode === 'stockin' ? 'cs-badge-info' : 'cs-badge-danger']">
@@ -70,7 +69,7 @@
             :disabled="!canAdd"
             @click="addStaged"
           >
-            <i class="fas fa-plus-circle" style="margin-right: 4px" />{{ mode === 'stockin' ? '新增入库' : '新增出库' }}
+            <FontAwesomeIcon icon="plus-circle" style="margin-right: 4px" />{{ mode === 'stockin' ? '新增入库' : '新增出库' }}
           </button>
         </form>
       </div>
@@ -80,14 +79,14 @@
         <div class="cs-staged-section">
           <div class="cs-section-header">
             <div class="cs-section-title">
-              <i class="fas fa-layer-group" />
+              <FontAwesomeIcon icon="layer-group" />
               {{ mode === 'stockin' ? '暂存入库列表' : '暂存出库列表' }}
             </div>
             <span class="cs-staged-count">共 {{ staged.length }} 个</span>
           </div>
           <div class="cs-staged-scroll">
             <div v-if="staged.length === 0" class="cs-staged-empty">
-              <i :class="mode === 'stockin' ? 'fas fa-box-open' : 'fas fa-shipping-fast'" aria-hidden="true" />
+              <FontAwesomeIcon :icon="mode === 'stockin' ? 'box-open' : 'shipping-fast'" aria-hidden="true" />
               <p>{{ mode === 'stockin' ? '暂无暂存入库' : '暂无暂存出库' }}</p>
             </div>
             <div
@@ -97,16 +96,16 @@
             >
               <div class="cs-staged-info">
                 <div class="cs-staged-product">
-                  <i class="fas fa-cubes" :style="{ color: mode === 'stockin' ? 'var(--color-primary-500)' : 'var(--color-danger-500)', marginRight: '4px' }" />
+                  <FontAwesomeIcon icon="cubes" :style="{ color: mode === 'stockin' ? 'var(--color-primary-500)' : 'var(--color-danger-500)', marginRight: '4px' }" />
                   {{ item.productName }}
                 </div>
-                <div class="cs-staged-meta"><i class="fas fa-user" style="margin-right: 4px" />{{ item.customer || '无客户' }}</div>
+                <div class="cs-staged-meta"><FontAwesomeIcon icon="user" style="margin-right: 4px" />{{ item.customer || '无客户' }}</div>
                 <div class="cs-staged-badges">
                   <span :class="['cs-badge-tag', mode === 'stockin' ? 'cs-tag-info' : 'cs-tag-danger']">数量: {{ item.quantity }}</span>
                   <span class="cs-badge-tag cs-tag-secondary">{{ item.date }}</span>
                 </div>
               </div>
-              <button class="cs-icon-btn cs-icon-danger" @click="removeStagedItem(idx)" aria-label="删除"><i class="fas fa-trash" /></button>
+              <button class="cs-icon-btn cs-icon-danger" @click="removeStagedItem(idx)" aria-label="删除"><FontAwesomeIcon icon="trash" /></button>
             </div>
           </div>
         </div>
@@ -115,16 +114,15 @@
         <div class="cs-batch-section">
           <div class="cs-section-header cs-collapsible" @click="showBatchUpload = !showBatchUpload">
             <div class="cs-section-title">
-              <i :class="mode === 'stockin' ? 'fas fa-file-import' : 'fas fa-file-export'"
-                 :style="{ color: mode === 'stockin' ? 'var(--color-primary-500)' : 'var(--color-danger-500)' }" aria-hidden="true" />
+              <FontAwesomeIcon :icon="mode === 'stockin' ? 'file-import' : 'file-export'" :style="{ color: mode === 'stockin' ? 'var(--color-primary-500)' : 'var(--color-danger-500)' }" aria-hidden="true" />
               {{ mode === 'stockin' ? '批量导入入库' : '批量导出出库' }}
             </div>
-            <i :class="['fas fa-chevron-down cs-collapse-arrow', { expanded: showBatchUpload }]" />
+            <FontAwesomeIcon icon="chevron-down" :class="['cs-collapse-arrow', { expanded: showBatchUpload }]" />
           </div>
           <div v-if="showBatchUpload" class="cs-batch-content">
             <UiUpload accept=".xlsx,.xls" placeholder="拖拽 Excel 文件到这里，或点击选择文件（支持 .xlsx / .xls）" @change="onExcelFileChange" />
             <div v-if="excelFile" class="cs-file-selected">
-              <i class="fas fa-file-excel" style="color: var(--color-success-500); margin-right: 6px" />{{ excelFile.name }}
+              <FontAwesomeIcon icon="file-excel" style="color: var(--color-success-500); margin-right: 6px" />{{ excelFile.name }}
             </div>
             <div class="cs-batch-actions">
               <button class="cs-action-btn cs-action-outline" :disabled="templateDownloading" @click="handleDownloadTemplate">
@@ -146,7 +144,7 @@
         :disabled="!staged.length"
         @click="submitBatch"
       >
-        <i class="fas fa-paper-plane" style="margin-right: 8px" />
+        <FontAwesomeIcon icon="paper-plane" style="margin-right: 8px" />
         {{ submitting ? '提交中…' : mode === 'stockin' ? '提交入库' : '提交出库' }}
       </button>
     </div>
@@ -155,11 +153,11 @@
     <div class="cs-record-section">
       <div class="cs-section-header">
         <div class="cs-section-title">
-          <i class="fas fa-truck-loading" style="color: var(--color-primary-500)" />
+          <FontAwesomeIcon icon="truck-loading" style="color: var(--color-primary-500)" />
           入库记录列表
         </div>
         <button class="cs-action-btn cs-action-outline" @click="siShowFilter = !siShowFilter">
-          <i class="fas fa-filter" style="margin-right: 4px" />筛选
+          <FontAwesomeIcon icon="filter" style="margin-right: 4px" />筛选
         </button>
       </div>
       <div v-if="siShowFilter" class="cs-filter-panel">
@@ -178,13 +176,13 @@
           </div>
           <div class="cs-filter-action">
             <button class="cs-action-btn cs-action-primary" @click="siPage = 1; siRefetch()">
-              <i class="fas fa-search" style="margin-right: 4px" />查询
+              <FontAwesomeIcon icon="search" style="margin-right: 4px" />查询
             </button>
           </div>
         </div>
       </div>
       <div v-if="siIsLoading && siList.length === 0" class="cs-loading"><UiSpinner /></div>
-      <div v-else-if="siList.length === 0" class="cs-empty"><i class="fas fa-inbox" /><span>暂无入库记录</span></div>
+      <div v-else-if="siList.length === 0" class="cs-empty"><FontAwesomeIcon icon="inbox" /><span>暂无入库记录</span></div>
       <template v-else>
       <div v-if="siIsFetching" class="cs-fetching-bar"><div class="cs-fetching-progress" /></div>
       <table class="cs-table">
@@ -208,8 +206,8 @@
             <td style="text-align: right"><strong>{{ row.quantity }}</strong></td>
             <td><small>{{ row.note || '-' }}</small></td>
             <td>
-              <button class="cs-icon-btn cs-icon-warning" @click="openEditModal('stockin', row)" aria-label="编辑"><i class="fas fa-edit" /></button>
-              <button class="cs-icon-btn cs-icon-danger" :disabled="actionId === row.id" @click="handleDelete('stockin', row)" aria-label="删除"><i class="fas fa-trash" /></button>
+              <button class="cs-icon-btn cs-icon-warning" @click="openEditModal('stockin', row)" aria-label="编辑"><FontAwesomeIcon icon="edit" /></button>
+              <button class="cs-icon-btn cs-icon-danger" :disabled="actionId === row.id" @click="handleDelete('stockin', row)" aria-label="删除"><FontAwesomeIcon icon="trash" /></button>
             </td>
           </tr>
         </tbody>
@@ -222,11 +220,11 @@
     <div class="cs-record-section">
       <div class="cs-section-header">
         <div class="cs-section-title">
-          <i class="fas fa-shipping-fast" style="color: var(--color-danger-500)" />
+          <FontAwesomeIcon icon="shipping-fast" style="color: var(--color-danger-500)" />
           出库记录列表
         </div>
         <button class="cs-action-btn cs-action-outline" @click="soShowFilter = !soShowFilter">
-          <i class="fas fa-filter" style="margin-right: 4px" />筛选
+          <FontAwesomeIcon icon="filter" style="margin-right: 4px" />筛选
         </button>
       </div>
       <div v-if="soShowFilter" class="cs-filter-panel">
@@ -245,13 +243,13 @@
           </div>
           <div class="cs-filter-action">
             <button class="cs-action-btn cs-action-primary" @click="soPage = 1; soRefetch()">
-              <i class="fas fa-search" style="margin-right: 4px" />查询
+              <FontAwesomeIcon icon="search" style="margin-right: 4px" />查询
             </button>
           </div>
         </div>
       </div>
       <div v-if="soIsLoading && soList.length === 0" class="cs-loading"><UiSpinner /></div>
-      <div v-else-if="soList.length === 0" class="cs-empty"><i class="fas fa-inbox" /><span>暂无出库记录</span></div>
+      <div v-else-if="soList.length === 0" class="cs-empty"><FontAwesomeIcon icon="inbox" /><span>暂无出库记录</span></div>
       <template v-else>
       <div v-if="soIsFetching" class="cs-fetching-bar"><div class="cs-fetching-progress" /></div>
       <table class="cs-table">
@@ -275,8 +273,8 @@
             <td style="text-align: right"><strong style="color: var(--color-danger-500)">{{ row.quantity }}</strong></td>
             <td><small>{{ row.note || '-' }}</small></td>
             <td>
-              <button class="cs-icon-btn cs-icon-warning" @click="openEditModal('stockout', row)" aria-label="编辑"><i class="fas fa-edit" /></button>
-              <button class="cs-icon-btn cs-icon-danger" :disabled="actionId === row.id" @click="handleDelete('stockout', row)" aria-label="删除"><i class="fas fa-trash" /></button>
+              <button class="cs-icon-btn cs-icon-warning" @click="openEditModal('stockout', row)" aria-label="编辑"><FontAwesomeIcon icon="edit" /></button>
+              <button class="cs-icon-btn cs-icon-danger" :disabled="actionId === row.id" @click="handleDelete('stockout', row)" aria-label="删除"><FontAwesomeIcon icon="trash" /></button>
             </td>
           </tr>
         </tbody>

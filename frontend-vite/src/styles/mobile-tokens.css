@@ -1,45 +1,217 @@
 :root {
+  /* ========== 背景色 ========== */
   --m-bg-deep: #F5F5F7;
   --m-bg-surface: #FFFFFF;
   --m-bg-card: #FFFFFF;
   --m-bg-grouped: #F5F5F7;
+  --m-bg-card-alt: #F2F2F7;
+  --m-bg-selected: #EFF6FF;
+  --m-bg-dept: #F1F5F9;
+  --m-bg-error-banner: #FEF2F2;
 
+  /* ========== 文字色 ========== */
   --m-text-primary: #1D1D1F;
   --m-text-secondary: #86868B;
   --m-text-tertiary: #AEAEB2;
+  --m-text-inverse: #FFFFFF;
 
+  /* ========== 强调色（Apple 主色调）========== */
   --m-accent: #0071E3;
-  --m-accent-glow: rgba(0,113,227,0.08);
+  --m-accent-light: #2997FF;
+  --m-accent-glow: rgba(0, 113, 227, 0.08);
+  --m-accent-glow-strong: rgba(0, 113, 227, 0.15);
+
+  /* ========== 功能色（语义色）========== */
+  --m-success: #22C55E;
+  --m-success-light: #DCFCE7;
+  --m-success-dark: #15803D;
+  --m-success-glow: rgba(34, 197, 94, 0.1);
+
+  --m-warning: #F59E0B;
+  --m-warning-light: #FEF3C7;
+  --m-warning-dark: #92400E;
+  --m-warning-glow: rgba(245, 158, 11, 0.1);
+
+  --m-error: #EF4444;
+  --m-error-light: #FEE2E2;
+  --m-error-dark: #B91C1C;
+  --m-error-glow: rgba(239, 68, 68, 0.1);
+
+  --m-info: #525252;
+  --m-info-light: #F5F5F5;
+
+  /* ========== Apple 风格强调色系 ========== */
   --m-accent-emerald: #30D158;
   --m-accent-amber: #FF9500;
   --m-accent-violet: #AF52DE;
   --m-accent-rose: #FF2D55;
+  --m-accent-teal: #5AC8FA;
+  --m-accent-orange: #FF9500;
+  --m-accent-red: #FF3B30;
+  --m-accent-green: #34C759;
 
-  --m-radius-sm: 12px;
-  --m-radius-md: 16px;
-  --m-radius-lg: 22px;
-  --m-radius-xl: 28px;
+  /* ========== 模块色 ========== */
+  --m-module-shipment: #262626;
+  --m-module-case-out: #525252;
+  --m-module-craft: #22C55E;
+  --m-module-packaging: #737373;
+  --m-module-diff: #EF4444;
 
-  --m-shadow-card: 0 1px 2px rgba(0,0,0,0.02), 0 4px 16px rgba(0,0,0,0.04);
-  --m-shadow-card-hover: 0 2px 4px rgba(0,0,0,0.02), 0 8px 24px rgba(0,0,0,0.06);
-  --m-shadow-sheet: 0 -4px 24px rgba(0,0,0,0.08);
+  /* ========== 圆角系统（对齐 APK Shape.kt）========== */
+  --m-radius-xs: 4px;
+  --m-radius-sm: 6px;
+  --m-radius-md: 8px;
+  --m-radius-lg: 12px;
+  --m-radius-xl: 16px;
+  --m-radius-2xl: 22px;
+  --m-radius-3xl: 28px;
 
+  /* 组件级圆角 */
+  --m-radius-button: 8px;
+  --m-radius-button-md: 14px;
+  --m-radius-chip: 50px;
+  --m-radius-input: 8px;
+  --m-radius-input-lg: 12px;
+  --m-radius-dialog: 16px;
+  --m-radius-avatar: 10px;
+  --m-radius-icon-box: 12px;
+  --m-radius-metric-block: 12px;
+  --m-radius-dept-item: 12px;
+  --m-radius-bottom-sheet: 16px 16px 0 0;
+  --m-radius-card: 12px;
+  --m-radius-card-md: 16px;
+  --m-radius-card-lg: 22px;
+
+  /* ========== 阴影系统 ========== */
+  --m-shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --m-shadow-medium: 0 2px 8px rgba(0, 0, 0, 0.10);
+  --m-shadow-strong: 0 4px 16px rgba(0, 0, 0, 0.16);
+
+  /* 组件级阴影 */
+  --m-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.02), 0 4px 16px rgba(0, 0, 0, 0.04);
+  --m-shadow-card-hover: 0 2px 4px rgba(0, 0, 0, 0.02), 0 8px 24px rgba(0, 0, 0, 0.06);
+  --m-shadow-sheet: 0 -4px 24px rgba(0, 0, 0, 0.08);
+  --m-shadow-button: 0 4px 14px rgba(0, 113, 227, 0.15);
+  --m-shadow-dialog: 0 8px 40px rgba(0, 0, 0, 0.12);
+
+  /* ========== 间距系统（对齐 APK Spacing.kt）========== */
+  --m-spacing-2: 2px;
+  --m-spacing-4: 4px;
   --m-gap-xs: 6px;
-  --m-gap-sm: 10px;
-  --m-gap-md: 16px;
-  --m-gap-lg: 20px;
-  --m-gap-xl: 24px;
+  --m-gap-sm: 8px;
+  --m-gap-md: 12px;
+  --m-gap-lg: 16px;
+  --m-gap-xl: 20px;
+  --m-spacing-24: 24px;
+  --m-spacing-xxl: 32px;
+  --m-spacing-40: 40px;
+  --m-spacing-48: 48px;
 
+  /* ========== 排版系统（对齐 APK Type.kt）========== */
+  /* 字号 + 字重 + 行高 */
+  --m-font-display-lg: 32px;
+  --m-font-display-md: 28px;
+  --m-font-display-sm: 24px;
+  --m-font-headline-lg: 24px;
+  --m-font-headline: 20px;
+  --m-font-headline-sm: 18px;
+  --m-font-title: 16px;
+  --m-font-title-sm: 14px;
+  --m-font-body-lg: 15px;
+  --m-font-body: 14px;
+  --m-font-body-sm: 13px;
+  --m-font-label: 14px;
+  --m-font-label-sm: 12px;
+  --m-font-label-xs: 11px;
+  --m-font-tab: 9px;
+
+  --m-font-weight-bold: 700;
+  --m-font-weight-semibold: 600;
+  --m-font-weight-medium: 500;
+  --m-font-weight-regular: 400;
+
+  --m-line-height-tight: 1.1;
+  --m-line-height-normal: 1.4;
+  --m-line-height-relaxed: 1.6;
+
+  /* ========== 安全区域 ========== */
   --m-safe-top: env(safe-area-inset-top, 0px);
   --m-safe-bottom: env(safe-area-inset-bottom, 0px);
   --m-safe-left: env(safe-area-inset-left, 0px);
   --m-safe-right: env(safe-area-inset-right, 0px);
 
+  /* ========== 动画缓动 ========== */
   --m-ease-smooth: cubic-bezier(0.25, 0.1, 0.25, 1);
   --m-ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  --m-ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --m-ease-in: cubic-bezier(0.4, 0, 1, 1);
 
+  --m-duration-fast: 150ms;
+  --m-duration-normal: 250ms;
+  --m-duration-slow: 400ms;
+
+  /* ========== 导航布局 ========== */
   --m-tabbar-height: 56px;
   --m-tabbar-safe: calc(var(--m-tabbar-height) + var(--m-safe-bottom));
   --m-statusbar-height: env(safe-area-inset-top, 20px);
   --m-touch-min: 44px;
+
+  /* ========== 毛玻璃效果 ========== */
+  --m-blur-tabbar: blur(24px) saturate(180%);
+  --m-blur-card: blur(12px) saturate(160%);
+
+  /* ========== 边框 ========== */
+  --m-border-subtle: 0.5px solid rgba(0, 0, 0, 0.04);
+  --m-border-light: 0.5px solid rgba(0, 0, 0, 0.06);
+  --m-border-active: 1px solid rgba(0, 0, 0, 0.08);
+  --m-border-accent: 1px solid var(--m-accent);
+
+  /* ========== 分割线 ========== */
+  --m-divider: #E2E8F0;
+
+  /* ========== 骨架屏 ========== */
+  --m-skeleton-base: #E5E5E5;
+  --m-skeleton-shine: #F0F0F0;
+
+  /* ========== 强调色 token（功能色别名，保持向后兼容）========== */
+  --m-accent-emerald: #30D158;
+  --m-accent-amber: #FF9500;
+  --m-accent-violet: #AF52DE;
+  --m-accent-rose: #FF2D55;
+
+  /* ========== 模块色 token（保持向后兼容）========== */
+  --m-radius-sm: 12px;
+  --m-radius-md: 16px;
+  --m-radius-lg: 22px;
+  --m-radius-xl: 28px;
+}
+
+/* ========== 骨架屏 shimmer 动画 ========== */
+@keyframes m-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* ========== 通用淡入动画 ========== */
+@keyframes m-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ========== 底部弹出动画 ========== */
+@keyframes m-slide-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+/* ========== 卡片入场动画 ========== */
+@keyframes m-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

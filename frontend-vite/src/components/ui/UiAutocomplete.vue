@@ -52,6 +52,9 @@ const props = withDefaults(
     disabled?: boolean
     debounceMs?: number
     minQueryLength?: number
+    /** PrimeVue AutoComplete appendTo。默认 'body' 保证父容器 overflow:hidden 时不裁剪。
+     * 传 undefined 则渲染在组件树内（适用于无裁剪风险的场景，避免 body 级重排跳动）。 */
+    appendTo?: string
   }>(),
   {
     modelValue: '',
@@ -60,6 +63,7 @@ const props = withDefaults(
     disabled: false,
     minQueryLength: 1,
     optionLabel: 'name',
+    appendTo: 'body',
   },
 )
 
@@ -158,7 +162,7 @@ watch(
     :disabled="disabled"
     :loading="loading"
     :minLength="minQueryLength"
-    appendTo="body"
+    :appendTo="(appendTo as string | undefined)"
     @update:modelValue="onInputChange"
     @complete="onComplete"
     @item-select="onItemSelect"

@@ -13,7 +13,7 @@
       aria-label="关闭"
       @click="$emit('close')"
     >
-      <i class="fas fa-times text-sm" aria-hidden="true" />
+      <FontAwesomeIcon icon="times" class="text-sm" aria-hidden="true" />
     </button>
   </div>
 </template>

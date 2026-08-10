@@ -17,8 +17,8 @@ celery_app = Celery(
 
 DEFAULT_EXCHANGE = Exchange('tasks', type='direct')
 DLX_EXCHANGE = Exchange('dlx', type='direct')
-# I/O 密集型任务专用队列：备份、报表导出、批量导入、计划同步等
-# 由 gevent pool worker 消费，以高并发处理等待型任务（DB/文件/网络 I/O）
+# I/O 密集型任务队列：备份、报表导出、批量导入、计划同步等
+# 由 prefork worker 按队列消费，队列隔离防止长任务互相阻塞
 IO_QUEUE = 'io'
 # I/O 子队列：按业务类型隔离，避免长任务互相阻塞（如备份不阻塞报表导出）
 IO_QUEUE_REPORTS = 'io.reports'
@@ -48,7 +48,7 @@ celery_app.conf.update(
     task_reject_on_worker_lost=True,
 
     # Worker 并发优化
-    worker_prefetch_multiplier=1,       # 每次只取1个任务，避免长任务阻塞短任务
+    worker_prefetch_multiplier=4,       # 与 worker 进程数一致，避免长任务浪费空闲进程
     worker_max_tasks_per_child=1000,    # 每1000个任务重启Worker进程，防止内存泄漏
     worker_max_memory_per_child=300000, # 300MB 内存上限后重启子进程
     worker_disable_rate_limits=True,    # 禁用速率限制（减少Redis开销，由SlowAPI在API层限流）
@@ -84,16 +84,16 @@ celery_app.conf.update(
 
     # Redis Broker 连接优化
     broker_transport_options={
-        "visibility_timeout": 7200,     # 2小时可见性超时（长任务防丢失）
+        "visibility_timeout": 1800,     # 30分钟可见性超时
         "max_connections": 20,          # 连接池上限
         "fanout_prefix": True,          # 广播前缀优化
         "fanout_patterns": True,        # 广播模式优化
     },
     broker_connection_retry_on_startup=True,  # 启动时自动重连Broker
 
-    # 事件监控（celery-exporter / Prometheus 需要）
-    task_send_sent_event=True,          # 发送任务发送事件
-    worker_send_task_events=True,       # Worker 发送任务事件
+    # 事件监控：任务量小，关闭事件流减少 Redis 广播开销
+    task_send_sent_event=False,
+    worker_send_task_events=False,
 
     # 任务失败回调（重试耗尽后触发）
     task_on_failure=lambda sender, task_id, args, kwargs, retval, exc, traceback, **kw:

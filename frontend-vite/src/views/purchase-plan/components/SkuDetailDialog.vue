@@ -7,7 +7,7 @@
             <div class="sp-sku-detail-title">{{ name }}</div>
             <div class="sp-sku-detail-sub">{{ barcode }}</div>
           </div>
-          <button class="sp-modal-btn sp-modal-btn-close" @click="close" aria-label="关闭"><i class="fas fa-times" aria-hidden="true"></i></button>
+          <button class="sp-modal-btn sp-modal-btn-close" @click="close" aria-label="关闭"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
         </div>
         <div class="sp-sku-detail-body">
           <div v-if="!dateDetail.length" class="sp-sku-detail-empty">该 SKU 本月暂无出货计划</div>

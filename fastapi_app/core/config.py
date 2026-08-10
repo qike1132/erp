@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     """FastAPI应用配置"""
 
     # 应用基本信息
-    APP_NAME: str = "东莞协同系统 API"
+    APP_NAME: str = "滨发协同系统 API"
     APP_VERSION: str = "2.0.0"
     FASTAPI_DEBUG: bool = os.getenv("FASTAPI_DEBUG", "false").lower() in ("true", "1", "yes")
 

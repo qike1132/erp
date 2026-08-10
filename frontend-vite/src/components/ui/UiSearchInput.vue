@@ -76,7 +76,7 @@ function onClear() {
       @click="onClear"
       aria-label="清空"
     >
-      <i class="fas fa-times text-xs" aria-hidden="true" />
+      <FontAwesomeIcon icon="times" class="text-xs" aria-hidden="true" />
     </button>
     <button
       type="button"
@@ -84,7 +84,7 @@ function onClear() {
       @click="onSearchClick"
       aria-label="搜索"
     >
-      <i class="fas fa-search text-sm" aria-hidden="true" />
+      <FontAwesomeIcon icon="search" class="text-sm" aria-hidden="true" />
     </button>
   </div>
 </template>

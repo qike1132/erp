@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import { purchaseApi, type MaterialCalcProduct, type MaterialCalcRow } from '@/api'
 import { showToast } from '@/composables/useToast'
+import { getErrorMessage } from '@/types/errors'
 
 export interface OrderItem {
   product_id: number
@@ -106,9 +107,9 @@ export function useMaterialCalculator() {
         fabric: res.fabric ?? [],
         accessory: res.accessory ?? [],
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (reqId !== calcRequestId) return
-      showToast(err?.response?.data?.detail || '计算失败', 'error')
+      showToast(getErrorMessage(err, '计算失败'), 'error')
     } finally {
       if (reqId === calcRequestId) calculating.value = false
     }

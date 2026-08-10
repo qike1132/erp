@@ -34,7 +34,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { batchApi } from '@/api'
 import MobileNavBar from '@/mobile/layouts/components/MobileNavBar.vue'
 import MSearchBar from '@/mobile/components/MSearchBar.vue'
@@ -52,14 +52,25 @@ const statusChips = [
   { label: '已备货', value: 'stocked' },
   { label: '已出货', value: 'shipped' },
 ]
-const groups = ref<any[]>([])
+const rawList = ref<any[]>([])
 const loading = ref(false)
+
+const groups = computed(() => {
+  // 后端返回的是扁平 BatchQueryItem[]，按客户分组以保留原 UI 结构
+  const map = new Map<string, { key: string; customer: string; items: any[] }>()
+  for (const item of rawList.value) {
+    const key = item.customer || '未知客户'
+    if (!map.has(key)) map.set(key, { key, customer: key, items: [] })
+    map.get(key)!.items.push(item)
+  }
+  return Array.from(map.values())
+})
 
 async function handleSearch() {
   loading.value = true
   try {
     const res = await batchApi.list({ keyword: keyword.value, status: statusFilter.value === 'all' ? '' : statusFilter.value, page: 1, per_page: 50 })
-    groups.value = res?.data || []
+    rawList.value = res?.data || []
   } finally { loading.value = false }
 }
 

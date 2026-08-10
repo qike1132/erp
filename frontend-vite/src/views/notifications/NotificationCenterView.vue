@@ -4,7 +4,7 @@
     <div class="nc-header">
       <div class="nc-header-left">
         <button class="nc-back-btn" @click="goBack" :aria-label="'返回上一页'">
-          <i class="fas fa-arrow-left" aria-hidden="true" />
+          <FontAwesomeIcon icon="arrow-left" aria-hidden="true" />
         </button>
         <div class="nc-title-group">
           <h1 class="nc-title">通知中心</h1>
@@ -17,7 +17,7 @@
           :disabled="marking || unreadCount === 0"
           @click="handleMarkAll"
         >
-          <i class="fas fa-check-double" aria-hidden="true" />
+          <FontAwesomeIcon icon="check-double" aria-hidden="true" />
           <span>全部已读</span>
         </button>
       </div>
@@ -27,12 +27,12 @@
     <Transition name="nc-slide">
       <div v-if="hasSelection" class="nc-batch-bar">
         <div class="nc-batch-info">
-          <i class="fas fa-check-circle" aria-hidden="true" />
+          <FontAwesomeIcon icon="check-circle" aria-hidden="true" />
           已选 <strong>{{ selectedCount }}</strong> 条
         </div>
         <div class="nc-batch-actions">
           <button class="nc-btn nc-btn--primary-sm" @click="handleBatchMarkRead">
-            <i class="fas fa-envelope-open-text" aria-hidden="true" />
+            <FontAwesomeIcon icon="envelope-open-text" aria-hidden="true" />
             标记已读
           </button>
           <button class="nc-btn nc-btn--ghost-sm" @click="clearSelection">
@@ -55,7 +55,7 @@
       <!-- 空状态 -->
       <div v-else-if="list.length === 0" class="nc-state">
         <div class="nc-state-icon nc-state-icon--empty">
-          <i class="fas fa-bell-slash" aria-hidden="true" />
+          <FontAwesomeIcon icon="bell-slash" aria-hidden="true" />
         </div>
         <p class="nc-state-text">暂无通知</p>
         <p class="nc-state-hint">当有新的订单或系统通知时，会在这里显示</p>
@@ -101,12 +101,12 @@
                 <div class="nc-item-head-left">
                   <span v-if="!item.is_read" class="nc-item-dot" aria-hidden="true" />
                   <span class="nc-item-type-icon" aria-hidden="true">
-                    <i class="fas fa-bell" />
+                    <FontAwesomeIcon icon="bell" />
                   </span>
                   <h3 class="nc-item-title">{{ item.title }}</h3>
                 </div>
                 <time class="nc-item-time" :datetime="item.created_at ?? undefined">
-                  <i class="far fa-clock" aria-hidden="true" />
+                  <FontAwesomeIcon icon="clock" aria-hidden="true" />
                   {{ formatRelativeTime(item.created_at) }}
                 </time>
               </header>
@@ -115,7 +115,7 @@
               <template v-if="item._parsed && item._parsed.format_version === 2">
                 <div class="nc-order-line">
                   <span class="nc-order-time">
-                    <i class="far fa-calendar-alt" aria-hidden="true" />
+                    <FontAwesomeIcon icon="calendar-alt" aria-hidden="true" />
                     {{ formatDateTime(item.created_at) }}
                   </span>
                   <span v-if="item._parsed.customer" class="nc-order-customer">
@@ -156,7 +156,7 @@
             @click="goToPage(page - 1)"
             aria-label="上一页"
           >
-            <i class="fas fa-chevron-left" aria-hidden="true" />
+            <FontAwesomeIcon icon="chevron-left" aria-hidden="true" />
           </button>
           <span class="nc-page-info">{{ page }} / {{ totalPages }}</span>
           <button
@@ -165,7 +165,7 @@
             @click="goToPage(page + 1)"
             aria-label="下一页"
           >
-            <i class="fas fa-chevron-right" aria-hidden="true" />
+            <FontAwesomeIcon icon="chevron-right" aria-hidden="true" />
           </button>
         </div>
       </div>

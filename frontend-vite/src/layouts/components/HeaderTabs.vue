@@ -13,7 +13,7 @@
         aria-label="关闭"
         @click.prevent.stop="handleClose(tab.path)"
       >
-        <i class="fas fa-xmark" aria-hidden="true" />
+        <FontAwesomeIcon icon="xmark" aria-hidden="true" />
       </button>
     </router-link>
   </div>

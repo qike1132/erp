@@ -71,6 +71,14 @@ from fastapi_app.shared_models.pattern_room import (
     PatternRoomBomItemVersion,
     PatternRoomChangeLog,
 )
+from fastapi_app.shared_models.customer_sampling import (
+    CUSTOMER_SAMPLING_ACTIONS,
+    CUSTOMER_SAMPLING_CHANGE_TYPES,
+    CustomerSamplingChangeLog,
+    CustomerSamplingFabricVersion,
+    CustomerSamplingPart,
+    CustomerSamplingProject,
+)
 
 __all__ = [
     'FileRecord',
@@ -133,4 +141,10 @@ __all__ = [
     'PATTERN_ROOM_CATEGORIES',
     'PATTERN_ROOM_BOM_STATUSES',
     'PATTERN_ROOM_CHANGE_TYPES',
+    'CustomerSamplingProject',
+    'CustomerSamplingPart',
+    'CustomerSamplingFabricVersion',
+    'CustomerSamplingChangeLog',
+    'CUSTOMER_SAMPLING_ACTIONS',
+    'CUSTOMER_SAMPLING_CHANGE_TYPES',
 ]

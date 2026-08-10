@@ -2,7 +2,7 @@
   <div class="pc-section">
     <div class="pc-section-header">
       <div class="pc-section-title">
-        <i class="fas fa-inbox"  aria-hidden="true" /> 待审核订单
+        <FontAwesomeIcon icon="inbox" aria-hidden="true" /> 待审核订单
       </div>
       <div class="pc-section-actions">
         <button
@@ -22,7 +22,7 @@
 
     <!-- Empty -->
     <div v-else-if="orders.length === 0" class="pc-empty-state">
-      <i class="fas fa-inbox"  aria-hidden="true" />
+      <FontAwesomeIcon icon="inbox" aria-hidden="true" />
       <span>暂无未处理订单</span>
     </div>
 
@@ -114,7 +114,7 @@
                   class="pc-btn pc-btn-danger pc-btn-sm"
                   @click="$emit('noBomError', o)"
                 >
-                  <i class="fas fa-exclamation-circle"  aria-hidden="true" /> 未配置BOM
+                  <FontAwesomeIcon icon="exclamation-circle" aria-hidden="true" /> 未配置BOM
                 </button>
               </td>
             </tr>

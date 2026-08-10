@@ -13,7 +13,7 @@
       @input="$emit('update:modelValue', ($event.target as HTMLInputElement).value)"
       @click="openPicker"
     />
-    <button type="button" class="date-icon" @click="openPicker" aria-label="选择日期"><i class="fas fa-calendar-alt" aria-hidden="true" /></button>
+    <button type="button" class="date-icon" @click="openPicker" aria-label="选择日期"><FontAwesomeIcon icon="calendar-alt" aria-hidden="true" /></button>
   </div>
 </template>
 

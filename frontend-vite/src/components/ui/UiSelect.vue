@@ -23,7 +23,7 @@
           :disabled="disabled"
           aria-label="选择选项"
         >
-          <i class="fas fa-chevron-down text-xs" aria-hidden="true" />
+          <FontAwesomeIcon icon="chevron-down" class="text-xs" aria-hidden="true" />
         </ComboboxTrigger>
       </ComboboxAnchor>
 
@@ -45,7 +45,7 @@
             class="px-3 py-2 text-[13px] text-text cursor-pointer rounded-md mx-1 outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 data-[highlighted]:bg-primary-50 data-[highlighted]:text-primary-700 transition-colors flex items-center"
           >
             <ComboboxItemIndicator class="mr-1 text-primary-500">
-              <i class="fas fa-check text-[10px]" aria-hidden="true" />
+              <FontAwesomeIcon icon="check" class="text-[10px]" aria-hidden="true" />
             </ComboboxItemIndicator>
             <span>{{ item.label }}</span>
           </ComboboxItem>

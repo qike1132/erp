@@ -44,7 +44,6 @@
                 >
                   <template #option="{ item }">
                     {{ item.name }}
-                    <span v-if="item.barcode" class="barcode-hint">{{ item.barcode }}</span>
                   </template>
                 </UiAutocomplete>
               </div>
@@ -53,7 +52,7 @@
                 <label class="form-label">出货数量</label>
                 <input type="number" class="form-input" v-model.number="form.quantity" min="1" step="1" name="quantity" autocomplete="off" />
                 <small v-if="shipmentInfo" class="shipment-info">
-                  <i class="fas fa-info-circle" style="margin-right: 4px"  aria-hidden="true" />
+                  <FontAwesomeIcon icon="info-circle" style="margin-right: 4px"  aria-hidden="true" />
                   订单量: {{ shipmentInfo.order_quantity }} | 已出货: {{ shipmentInfo.shipped_quantity }} | 可出货:
                   <strong style="color: var(--color-primary-500)">{{ shipmentInfo.available_quantity }}</strong>
                   <template v-if="shipmentInfo.regular_available != null || shipmentInfo.custom_available != null">
@@ -73,7 +72,7 @@
               </div>
 
               <!-- 批量导入出货 -->
-              <div class="so-section-label"><i class="fas fa-file-import" aria-hidden="true"></i> 批量导入</div>
+              <div class="so-section-label"><FontAwesomeIcon icon="file-import" aria-hidden="true" /> 批量导入</div>
               <div
                 class="so-section-header so-droppable"
                 :class="{ 'so-drag-over': excelDragOver }"
@@ -83,8 +82,8 @@
                 @drop.prevent="onExcelDrop"
               >
                 <label class="form-label so-droppable-label">
-                  <i class="fas fa-file-excel label-icon" aria-hidden="true"></i>
-                  <span v-if="excelFile" class="so-file-inline so-file-inline-success"><i class="fas fa-file-excel"  aria-hidden="true" />{{ excelFile.name }}</span>
+                  <FontAwesomeIcon icon="file-excel" class="label-icon" aria-hidden="true" />
+                  <span v-if="excelFile" class="so-file-inline so-file-inline-success"><FontAwesomeIcon icon="file-excel" aria-hidden="true" />{{ excelFile.name }}</span>
                   <span v-else>拖拽文件到标题栏 · 支持 .xlsx / .xls</span>
                 </label>
                 <div class="so-inline-actions">
@@ -108,7 +107,7 @@
               </div>
 
               <!-- OCR 识别 -->
-              <div class="so-section-label"><i class="fas fa-file-pdf" aria-hidden="true"></i> OCR 识别</div>
+              <div class="so-section-label"><FontAwesomeIcon icon="file-pdf" aria-hidden="true" /> OCR 识别</div>
               <div
                 class="so-section-header so-droppable so-droppable-danger"
                 :class="{ 'so-drag-over': ocrDragOver }"
@@ -118,8 +117,8 @@
                 @drop.prevent="onOcrDrop"
               >
                 <label class="form-label so-droppable-label">
-                  <i class="fas fa-file-pdf label-icon" aria-hidden="true"></i>
-                  <span v-if="pdfFiles.length" class="so-file-inline so-file-inline-danger"><i class="fas fa-file-image"  aria-hidden="true" />已选 {{ pdfFiles.length }} 个文件</span>
+                  <FontAwesomeIcon icon="file-pdf" class="label-icon" aria-hidden="true" />
+                  <span v-if="pdfFiles.length" class="so-file-inline so-file-inline-danger"><FontAwesomeIcon icon="file-image" aria-hidden="true" />已选 {{ pdfFiles.length }} 个文件</span>
                   <span v-else>拖拽文件到标题栏 · 支持 PDF / PNG / JPG / BMP / TIFF</span>
                 </label>
                 <div class="so-inline-actions">
@@ -158,7 +157,7 @@
                 @click="addStaged"
                 style="margin-top: 15px"
               >
-                <i class="fas fa-plus-circle"  aria-hidden="true" />新增出货
+                <FontAwesomeIcon icon="plus-circle" aria-hidden="true" />新增出货
               </UiButton>
             </form>
           </div>
@@ -167,12 +166,12 @@
         <!-- 右栏：暂存列表 -->
         <div class="so-col">
           <div class="so-col-title">
-            <span><i class="fas fa-clipboard-list" aria-hidden="true"></i> 暂存出货列表</span>
+            <span><FontAwesomeIcon icon="clipboard-list" aria-hidden="true" /> 暂存出货列表</span>
             <span class="staged-count">共 {{ staged.length }} 个，合计 {{ stagedTotalQty }}</span>
           </div>
           <div class="so-col-scroll">
             <div v-if="staged.length === 0" class="so-empty-state">
-              <i class="fas fa-box-open so-empty-icon"  aria-hidden="true" />
+              <FontAwesomeIcon icon="box-open" class="so-empty-icon" aria-hidden="true" />
               <p>暂无暂存出货</p>
             </div>
             <TransitionGroup v-else name="staged-list" tag="div">
@@ -184,11 +183,11 @@
                 <div class="so-staged-main">
                   <div class="so-staged-info">
                     <div class="so-staged-product">
-                      <i class="fas fa-shipping-fast so-staged-icon"  aria-hidden="true" />{{ item.product_name }}
+                      <FontAwesomeIcon icon="shipping-fast" class="so-staged-icon" aria-hidden="true" />{{ item.product_name }}
                     </div>
                     <div class="so-staged-meta">
-                      <span class="so-staged-tag"><i class="fas fa-user"  aria-hidden="true" />{{ item.customer || '无客户' }}</span>
-                      <span class="so-staged-tag"><i class="fas fa-calendar-alt"  aria-hidden="true" />{{ item.date }}</span>
+                      <span class="so-staged-tag"><FontAwesomeIcon icon="user" aria-hidden="true" />{{ item.customer || '无客户' }}</span>
+                      <span class="so-staged-tag"><FontAwesomeIcon icon="calendar-alt" aria-hidden="true" />{{ item.date }}</span>
                     </div>
                     <div class="so-staged-badges">
                       <span class="badge-tag badge-danger">数量: {{ item.quantity }}</span>
@@ -198,10 +197,10 @@
                   </div>
                   <div class="so-staged-actions">
                     <button class="action-btn action-edit" @click="openEditStaged(idx)" aria-label="编辑">
-                      <i class="fas fa-edit"  aria-hidden="true" />
+                      <FontAwesomeIcon icon="edit" aria-hidden="true" />
                     </button>
                     <button class="action-btn action-delete" @click="removeStagedItem(idx)" aria-label="删除">
-                      <i class="fas fa-trash"  aria-hidden="true" />
+                      <FontAwesomeIcon icon="trash" aria-hidden="true" />
                     </button>
                   </div>
                 </div>
@@ -219,7 +218,7 @@
           :disabled="submitting"
           @click="submitBatch"
         >
-          <i class="fas fa-paper-plane" style="margin-right: 6px"  aria-hidden="true" />
+          <FontAwesomeIcon icon="paper-plane" style="margin-right: 6px"  aria-hidden="true" />
           {{ submitting ? '提交中…' : '添加出货' }}
         </UiButton>
       </div>
@@ -228,32 +227,32 @@
     <!-- TAB: 记录查询 -->
     <div v-show="activeTab === 'records'" class="so-tab-content">
       <div class="so-records-header">
-        <span class="so-records-title"><i class="fas fa-list-alt" aria-hidden="true"></i> 出货记录列表</span>
+        <span class="so-records-title"><FontAwesomeIcon icon="list-alt" aria-hidden="true" /> 出货记录列表</span>
         <UiButton variant="outline" size="sm" @click="showFilter = !showFilter">
-          <i class="fas fa-filter" style="margin-right: 4px"  aria-hidden="true" />筛选
+          <FontAwesomeIcon icon="filter" style="margin-right: 4px"  aria-hidden="true" />筛选
         </UiButton>
       </div>
 
       <div v-if="showFilter" class="so-filter-panel">
         <div class="so-filter-row">
           <div class="so-filter-field">
-            <label class="so-label"><i class="fas fa-user" aria-hidden="true"></i> 客户</label>
+            <label class="so-label"><FontAwesomeIcon icon="user" aria-hidden="true" /> 客户</label>
             <UiSelect v-model="filterCustomer" placeholder="全部" :options="customerOptions" style="width: 100%" />
           </div>
           <div class="so-filter-field">
-            <label class="so-label"><i class="fas fa-tag" aria-hidden="true"></i> 订单类型</label>
+            <label class="so-label"><FontAwesomeIcon icon="tag" aria-hidden="true" /> 订单类型</label>
             <UiSelect v-model="filterOrderType" placeholder="全部" :options="filterOrderTypeOptions" style="width: 100%" />
           </div>
           <div class="so-filter-field" style="grid-column: span 2">
-            <label class="so-label"><i class="fas fa-calendar-alt" aria-hidden="true" /> 日期范围</label>
+            <label class="so-label"><FontAwesomeIcon icon="calendar-alt" aria-hidden="true" /> 日期范围</label>
             <UiDateRangePicker v-model="filterDateRange" style="width: 100%" />
           </div>
           <div class="so-filter-field so-filter-action">
             <UiButton variant="primary" size="sm" @click="fetchStockouts">
-              <i class="fas fa-search" style="margin-right: 4px"  aria-hidden="true" />查询
+              <FontAwesomeIcon icon="search" style="margin-right: 4px"  aria-hidden="true" />查询
             </UiButton>
             <UiButton variant="outline" size="sm" @click="resetFilter">
-              <i class="fas fa-undo" style="margin-right: 4px"  aria-hidden="true" />重置
+              <FontAwesomeIcon icon="undo" style="margin-right: 4px"  aria-hidden="true" />重置
             </UiButton>
           </div>
         </div>
@@ -265,7 +264,7 @@
           <p class="so-state-text">加载中…</p>
         </div>
         <div v-else-if="stockoutRecords.length === 0" class="so-state-placeholder so-state-empty">
-          <div class="so-empty-illustration"><i class="fas fa-shipping-fast"  aria-hidden="true" /></div>
+          <div class="so-empty-illustration"><FontAwesomeIcon icon="shipping-fast" aria-hidden="true" /></div>
           <p class="so-state-text">暂无出货记录</p>
         </div>
 
@@ -293,7 +292,7 @@
                 <td>
                   <div class="so-action-group">
                     <button class="so-btn-icon so-btn-info" @click="openDetail(item)" aria-label="详情">
-                      <i class="fas fa-eye" aria-hidden="true" />
+                      <FontAwesomeIcon icon="eye" aria-hidden="true" />
                     </button>
                   </div>
                 </td>
@@ -394,7 +393,7 @@
     <UiDialog :open="stockWarningOpen" title="库存不足提示" max-width-class="max-w-[480px]" @update:open="stockWarningOpen = $event">
       <div class="so-stock-warning">
         <div class="so-stock-warning-icon">
-          <i class="fas fa-exclamation-triangle" aria-hidden="true" />
+          <FontAwesomeIcon icon="exclamation-triangle" aria-hidden="true" />
         </div>
         <p class="so-stock-warning-title">该国家定制库存不足以完成出库</p>
         <div class="so-stock-warning-detail">
@@ -516,7 +515,7 @@ async function fetchShipmentInfo() {
 
 // === 表单 ===
 const today = toISODate()
-const form = reactive({ customer: '', date: today, search: '', productId: '', quantity: 1, note: '', orderType: 'regular', country: '' })
+const form = reactive({ customer: '', date: today, search: '', productId: '', quantity: 0, note: '', orderType: 'regular', country: '' })
 
 const orderTypeOptions = [
   { value: 'regular', label: '常规订单' },
@@ -588,7 +587,7 @@ async function addStaged() {
   })
   form.search = ''
   form.productId = ''
-  form.quantity = 1
+  form.quantity = 0
   form.note = ''
   form.orderType = 'regular'
   form.country = ''
@@ -811,6 +810,11 @@ function openDetail(item: (typeof stockoutRecords.value)[number]) {
 </script>
 
 <style scoped>
+/* ===== 强制覆盖产品名称输入框灰色背景（PT HMR 不重载 main.ts 的双保险） ===== */
+:deep(input.bg-slate-50) {
+  background-color: #ffffff !important;
+}
+
 /* ===== Form Text Input ===== */
 .form-text-input {
   width: 100%;

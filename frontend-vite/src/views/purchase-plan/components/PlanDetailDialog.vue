@@ -17,8 +17,8 @@
             </div>
           </div>
           <div class="sp-modal-header-actions">
-            <button class="sp-modal-export-btn" @click="exportDayCSV"><i class="fas fa-download" aria-hidden="true"></i> 导出当日</button>
-            <button class="sp-modal-btn sp-modal-btn-close" @click="close" aria-label="关闭"><i class="fas fa-times" aria-hidden="true"></i></button>
+            <button class="sp-modal-export-btn" @click="exportDayCSV"><FontAwesomeIcon icon="download" aria-hidden="true" /> 导出当日</button>
+            <button class="sp-modal-btn sp-modal-btn-close" @click="close" aria-label="关闭"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
           </div>
         </div>
 
@@ -30,7 +30,7 @@
                 :items="customerList"
                 :itemHeight="72"
                 :containerHeight="460"
-                :itemKey="(c: any) => c.name"
+                :itemKey="(c: { name: string }) => c.name"
               >
                 <template #default="{ item: entry }">
                   <div
@@ -65,7 +65,7 @@
                   :items="modalSelGroup"
                   :itemHeight="54"
                   :containerHeight="420"
-                  :itemKey="(p: any) => p.detail_id"
+                  :itemKey="(p: { detail_id: number | string }) => p.detail_id"
                 >
                   <template #default="{ item: p }">
                     <div class="sp-plan-item" style="margin-bottom:0;">
@@ -85,7 +85,7 @@
                 </VirtualList>
               </div>
               <div v-else class="sp-modal-empty">
-                <i class="fas fa-hand-pointer" aria-hidden="true"></i>请从左侧选择客户
+                <FontAwesomeIcon icon="hand-pointer" aria-hidden="true" />请从左侧选择客户
               </div>
             </div>
           </div>

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { authApi, dashboardApi } from '@/api'
+import { authApi, dashboardApi, clearCsrfCache } from '@/api'
 import type { User, NavSection } from '@/types'
 import { removeAccessToken } from '@/utils/secureStorage'
 
@@ -98,6 +98,7 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = null
     navSections.value = []
     loaded.value = false
+    clearCsrfCache()
     if (import.meta.env.VITE_CAPACITOR) {
       removeAccessToken()
     }

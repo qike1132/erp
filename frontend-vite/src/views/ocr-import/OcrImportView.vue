@@ -5,7 +5,7 @@
     <UiCard>
       <UiUpload accept=".pdf,.png,.jpg,.jpeg,.bmp,.tiff,.webp" multiple @change="handleFileChange">
         <div class="upload-dragger-content">
-          <i class="fas fa-cloud-upload-alt" style="font-size: 48px; color: var(--color-text-muted)"  aria-hidden="true" />
+          <FontAwesomeIcon icon="cloud-upload-alt" style="font-size: 48px; color: var(--color-text-muted)"  aria-hidden="true" />
           <p style="margin-top: 12px">拖拽文件到这里，或点击上传</p>
           <p style="color: var(--color-text-muted); font-size: 12px">支持 PDF/PNG/JPG/BMP/TIFF/WEBP</p>
         </div>
@@ -47,6 +47,7 @@ import UiAlert from '@/components/ui/UiAlert.vue'
 import UiPageHeader from '@/components/ui/UiPageHeader.vue'
 
 import { showToast } from '@/composables/useToast'
+import { getErrorMessage } from '@/types/errors'
 
 type UploadOptions = { file: File; onProgress?: (e: { percent: number }) => void }
 
@@ -122,8 +123,8 @@ async function handleUpload(options: UploadOptions) {
     await apiUpload(`/ocr-import/upload?session_id=${sid}`, formData)
 
     showToast('文件上传成功，开始识别...', 'success')
-  } catch (err: any) {
-    showToast(err.response?.data?.detail || '上传失败', 'error')
+  } catch (err: unknown) {
+    showToast(getErrorMessage(err, '上传失败'), 'error')
     progressStatus.value = 'exception'
   }
 }

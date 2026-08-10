@@ -45,7 +45,7 @@
           iconBgClass,
         ]"
       >
-        <i :class="['fas', icon, 'text-sm md:text-base', iconColorClass]" aria-hidden="true" />
+        <FontAwesomeIcon :icon="icon" :class="['text-sm md:text-base', iconColorClass]" aria-hidden="true" />
       </div>
     </div>
   </div>

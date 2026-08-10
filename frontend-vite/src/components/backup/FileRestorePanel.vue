@@ -17,13 +17,13 @@
         @drop.prevent="handleDrop"
       >
         <div v-if="selectedFile" class="bk-file-info">
-          <i class="fas fa-file-alt" />
+          <FontAwesomeIcon icon="file-alt" />
           <span class="bk-file-name">{{ selectedFile.name }}</span>
           <span class="bk-file-size">({{ formatSize(selectedFile.size) }})</span>
-          <button class="bk-file-clear" aria-label="关闭" @click.stop="handleClear"><i class="fas fa-times" /></button>
+          <button class="bk-file-clear" aria-label="关闭" @click.stop="handleClear"><FontAwesomeIcon icon="times" /></button>
         </div>
         <div v-else class="bk-drop-hint">
-          <i class="fas fa-cloud-upload-alt" />
+          <FontAwesomeIcon icon="cloud-upload-alt" />
           <span>拖拽 .zip / .json / .gz 备份文件到此处，或点击选择</span>
         </div>
       </div>
@@ -43,33 +43,33 @@
           <div v-if="validationResult.checksums_ok !== null && validationResult.checksums_ok !== undefined"><div class="bk-det-lb">校验和</div><div class="bk-det-vl" :style="{ color: validationResult.checksums_ok ? 'var(--color-success-500)' : 'var(--color-danger-500)' }">{{ validationResult.checksums_ok ? '通过' : '不匹配' }}</div></div>
         </div>
         <div v-if="validationResult.remark" class="bk-validate-remark">
-          <i class="fas fa-comment" /> {{ validationResult.remark }}
+          <FontAwesomeIcon icon="comment" /> {{ validationResult.remark }}
         </div>
         <!-- ZIP-specific: included components -->
         <div v-if="validationResult.zip_contents" class="bk-validate-remark" style="margin-top: 8px;">
           <div style="display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px;">
             <span :style="{ color: validationResult.zip_contents.has_database ? 'var(--color-success-500)' : 'var(--color-danger-500)' }">
-              <i :class="validationResult.zip_contents.has_database ? 'fas fa-check-circle' : 'fas fa-times-circle'" /> 数据库
+              <FontAwesomeIcon :icon="validationResult.zip_contents.has_database ? 'check-circle' : 'times-circle'" /> 数据库
             </span>
             <span :style="{ color: validationResult.zip_contents.has_filestore ? 'var(--color-success-500)' : 'var(--color-warning-500)' }">
-              <i :class="validationResult.zip_contents.has_filestore ? 'fas fa-check-circle' : 'fas fa-minus-circle'" /> 附件({{ validationResult.zip_contents.filestore_count || 0 }})
+              <FontAwesomeIcon :icon="validationResult.zip_contents.has_filestore ? 'check-circle' : 'minus-circle'" /> 附件({{ validationResult.zip_contents.filestore_count || 0 }})
             </span>
 
             <span :style="{ color: validationResult.zip_contents.has_config ? 'var(--color-success-500)' : 'var(--color-warning-500)' }">
-              <i :class="validationResult.zip_contents.has_config ? 'fas fa-check-circle' : 'fas fa-minus-circle'" /> 配置
+              <FontAwesomeIcon :icon="validationResult.zip_contents.has_config ? 'check-circle' : 'minus-circle'" /> 配置
             </span>
 
             <span :style="{ color: validationResult.zip_contents.has_redis ? 'var(--color-success-500)' : 'var(--color-warning-500)' }">
-              <i :class="validationResult.zip_contents.has_redis ? 'fas fa-check-circle' : 'fas fa-minus-circle'" /> Redis
+              <FontAwesomeIcon :icon="validationResult.zip_contents.has_redis ? 'check-circle' : 'minus-circle'" /> Redis
             </span>
 
           </div>
         </div>
         <div v-if="missingTables.length" class="bk-validate-warn">
-          <i class="fas fa-exclamation-triangle" /> {{ missingTables.length }} 个表在当前数据库中不存在：{{ missingTables.join(', ') }}
+          <FontAwesomeIcon icon="exclamation-triangle" /> {{ missingTables.length }} 个表在当前数据库中不存在：{{ missingTables.join(', ') }}
         </div>
         <div v-if="validationResult.checksum_errors?.length" class="bk-validate-warn">
-          <i class="fas fa-exclamation-triangle" /> {{ validationResult.checksum_errors.join('; ') }}
+          <FontAwesomeIcon icon="exclamation-triangle" /> {{ validationResult.checksum_errors.join('; ') }}
         </div>
       </div>
       <button class="bk-action-btn bk-action-danger" :disabled="importing" @click="$emit('restore')">
@@ -91,7 +91,7 @@
       <div class="bk-section-label">恢复结果</div>
       <div class="bk-result-card" :class="restoreResult.errors?.length || restoreResult.warnings?.length || restoreResult.results?.warnings?.length ? 'bk-result-partial' : 'bk-result-success'">
         <div class="bk-result-header">
-          <i :class="restoreResult.errors?.length ? 'fas fa-exclamation-circle' : 'fas fa-check-circle'" />
+          <FontAwesomeIcon :icon="restoreResult.errors?.length ? 'exclamation-circle' : 'check-circle'" />
           {{ restoreResult.errors?.length ? '恢复完成（部分异常）' : '恢复成功' }}
         </div>
         <div class="bk-result-stats">
@@ -108,12 +108,12 @@
           <div class="bk-result-err-item">{{ (restoreResult.database || restoreResult.results?.database).error }}</div>
         </div>
         <div v-if="restoreResult.pre_restore_backup || restoreResult.results?.pre_restore_backup" class="bk-pre-restore-info">
-          <i class="fas fa-shield-alt" /> 安全备份: {{ (restoreResult.pre_restore_backup || restoreResult.results?.pre_restore_backup).success ? '已创建' : '创建失败' }}
+          <FontAwesomeIcon icon="shield-alt" /> 安全备份: {{ (restoreResult.pre_restore_backup || restoreResult.results?.pre_restore_backup).success ? '已创建' : '创建失败' }}
           <span v-if="(restoreResult.pre_restore_backup || restoreResult.results?.pre_restore_backup).filename">({{ (restoreResult.pre_restore_backup || restoreResult.results?.pre_restore_backup).filename }})</span>
         </div>
         <div v-if="restoreResult.rollback || restoreResult.results?.rollback" class="bk-result-errors">
           <div class="bk-result-err-item" :style="{ color: (restoreResult.rollback || restoreResult.results?.rollback).success ? 'var(--color-success-500)' : 'var(--color-danger-500)' }">
-            <i :class="(restoreResult.rollback || restoreResult.results?.rollback).success ? 'fas fa-check-circle' : 'fas fa-times-circle'" />
+            <FontAwesomeIcon :icon="(restoreResult.rollback || restoreResult.results?.rollback).success ? 'check-circle' : 'times-circle'" />
             回滚{{ (restoreResult.rollback || restoreResult.results?.rollback).success ? '成功' : '失败' }}
             <span v-if="(restoreResult.rollback || restoreResult.results?.rollback).error">: {{ (restoreResult.rollback || restoreResult.results?.rollback).error }}</span>
           </div>
@@ -128,7 +128,7 @@
       <!-- 验证报告 -->
       <div v-if="restoreResult.results?.verification || restoreResult.verification" class="bk-verify-card">
         <div class="bk-verify-title">
-          <i :class="(restoreResult.results?.verification || restoreResult.verification).overall_pass ? 'fas fa-shield-alt' : 'fas fa-shield-alt bk-verify-fail'" />
+          <FontAwesomeIcon icon="shield-alt" :class="(restoreResult.results?.verification || restoreResult.verification).overall_pass ? '' : 'bk-verify-fail'" />
           数据完整性验证
         </div>
         <div class="bk-verify-summary">
@@ -154,7 +154,7 @@
         <div v-if="(restoreResult.results?.verification || restoreResult.verification).l2_fingerprint?.results?.length" class="bk-verify-fp-list">
           <div v-for="fp in (restoreResult.results?.verification || restoreResult.verification).l2_fingerprint.results" :key="fp.table" class="bk-verify-fp-item">
             <span :class="fp.match === true ? 'bk-verify-ok' : fp.match === false ? 'bk-verify-fail' : ''">
-              <i :class="fp.match === true ? 'fas fa-check' : fp.match === false ? 'fas fa-times' : 'fas fa-minus'" />
+              <FontAwesomeIcon :icon="fp.match === true ? 'fas fa-check' : fp.match === false ? 'times' : 'minus'" />
               {{ fp.table }}
             </span>
           </div>

@@ -2,7 +2,7 @@
 ERP APK 版本号自动管理器
 
 支持 X.Y 格式版本号（如 1.0, 1.1, 2.0），提供版本号递增、读取、写入功能。
-版本信息存储在 android-app/version.properties 文件中。
+版本信息存储在 frontend-vite/android/version.properties 文件中。
 
 用法:
     python scripts/version_manager.py bump     # 次版本号+1 (1.0 -> 1.1)
@@ -18,7 +18,7 @@ import hashlib
 from datetime import datetime
 from pathlib import Path
 
-VERSION_FILE = Path(__file__).resolve().parent.parent / "android-app" / "version.properties"
+VERSION_FILE = Path(__file__).resolve().parent.parent / "frontend-vite" / "android" / "version.properties"
 CHANGELOG_FILE = Path(__file__).resolve().parent.parent / "version_changelog.jsonl"
 
 

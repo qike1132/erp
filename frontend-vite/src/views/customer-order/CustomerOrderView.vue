@@ -24,13 +24,13 @@
         <!-- 左栏：录入表单 -->
         <div class="co-col">
           <div class="co-col-title">
-            <span><i class="fas fa-edit" aria-hidden="true"></i> {{ isOrder ? '订单信息录入' : '备货信息录入' }}</span>
+            <span><FontAwesomeIcon icon="edit" aria-hidden="true" /> {{ isOrder ? '订单信息录入' : '备货信息录入' }}</span>
             <div class="co-type-switch">
               <button :class="['co-type-btn', isOrder && 'active']" @click="form.type = 'order'">
-                <i class="fas fa-clipboard-list"  aria-hidden="true" />订单
+                <FontAwesomeIcon icon="clipboard-list" aria-hidden="true" />订单
               </button>
               <button :class="['co-type-btn', !isOrder && 'active']" @click="form.type = 'stockin'">
-                <i class="fas fa-truck-loading"  aria-hidden="true" />备货
+                <FontAwesomeIcon icon="truck-loading" aria-hidden="true" />备货
               </button>
             </div>
           </div>
@@ -56,7 +56,7 @@
                       :options="countryStore.countryOptions"
                     />
                     <UiButton variant="outline" style="white-space: nowrap; flex-shrink: 0;" @click="openCountryDialog">
-                      <i class="fas fa-plus"  aria-hidden="true" />
+                      <FontAwesomeIcon icon="plus" aria-hidden="true" />
                     </UiButton>
                   </div>
                 </div>
@@ -89,7 +89,11 @@
                   placeholder="输入产品名称搜索"
                   @select="selectProduct"
                   @update:modelValue="form.productId = 0"
-                />
+                >
+                  <template #option="{ item }">
+                    {{ item.name }}
+                  </template>
+                </UiAutocomplete>
               </div>
 
               <div class="co-form-row">
@@ -107,7 +111,7 @@
                       :class="['co-btn-deduct', form.deductStock && 'active']"
                       @click="handleDeductPreview"
                     >
-                      <i class="fas fa-boxes"  aria-hidden="true" />抵扣备货
+                      <FontAwesomeIcon icon="boxes" aria-hidden="true" />抵扣备货
                     </button>
                     <button
                       type="button"
@@ -115,18 +119,18 @@
                       :style="{ borderColor: form.deductQuantity > 0 ? 'var(--color-ocean-deep)' : 'var(--color-text-muted)' }"
                       @click="openDeductEdit"
                     >
-                      <i class="fas fa-edit" style="font-size: 11px"  aria-hidden="true" />抵扣: <strong>{{ form.deductQuantity }}</strong>
+                      <FontAwesomeIcon icon="edit" style="font-size: 11px"  aria-hidden="true" />抵扣: <strong>{{ form.deductQuantity }}</strong>
                     </button>
                   </div>
                   <div v-if="deductInfoVisible" class="co-deduct-info">
                     <small v-if="availableStock > 0" style="color: var(--color-success-700)">
-                      <i class="fas fa-check-circle"  aria-hidden="true" /> 可用备货: <strong>{{ availableStock }}</strong> 件
+                      <FontAwesomeIcon icon="check-circle" aria-hidden="true" /> 可用备货: <strong>{{ availableStock }}</strong> 件
                       <span v-if="form.deductQuantity > 0" style="margin-left: 8px; color: var(--color-ocean-text)">
-                        <i class="fas fa-arrow-right"  aria-hidden="true" /> 抵扣后剩余:
+                        <FontAwesomeIcon icon="arrow-right" aria-hidden="true" /> 抵扣后剩余:
                         <strong>{{ availableStock - form.deductQuantity }}</strong> 件
                       </span>
                     </small>
-                    <small v-else style="color: var(--color-warning-500)"><i class="fas fa-exclamation-circle"  aria-hidden="true" /> 暂无可用备货</small>
+                    <small v-else style="color: var(--color-warning-500)"><FontAwesomeIcon icon="exclamation-circle" aria-hidden="true" /> 暂无可用备货</small>
                   </div>
                 </div>
               </div>
@@ -142,7 +146,7 @@
               </div>
 
               <!-- 批量导入 -->
-              <div class="co-section-label"><i class="fas fa-file-import" aria-hidden="true"></i> 批量导入</div>
+              <div class="co-section-label"><FontAwesomeIcon icon="file-import" aria-hidden="true" /> 批量导入</div>
               <div
                 class="co-section-header co-droppable"
                 :class="{ 'co-drag-over': isDragOver }"
@@ -152,8 +156,8 @@
                 @drop.prevent="onDrop"
               >
                 <label class="form-label co-droppable-label">
-                  <i class="fas fa-file-excel label-icon" aria-hidden="true"></i>
-                  <span v-if="excelFile" class="co-file-inline co-file-inline-success"><i class="fas fa-file-excel"  aria-hidden="true" />{{ excelFile.name }}</span>
+                  <FontAwesomeIcon icon="file-excel" class="label-icon" aria-hidden="true" />
+                  <span v-if="excelFile" class="co-file-inline co-file-inline-success"><FontAwesomeIcon icon="file-excel" aria-hidden="true" />{{ excelFile.name }}</span>
                   <span v-else>拖拽文件到标题栏 · 支持 .xlsx / .xls</span>
                 </label>
                 <div class="co-inline-actions">
@@ -172,7 +176,7 @@
               </div>
 
               <UiButton variant="primary" :disabled="!canAdd" style="margin-top: 15px" @click="addStaged">
-                <i class="fas fa-plus-circle"  aria-hidden="true" />{{ isOrder ? '新增订单' : '新增备货' }}
+                <FontAwesomeIcon icon="plus-circle" aria-hidden="true" />{{ isOrder ? '新增订单' : '新增备货' }}
               </UiButton>
             </form>
           </div>
@@ -181,7 +185,7 @@
         <!-- 右栏：暂存列表 + 批量导入 -->
         <div class="co-col">
           <div class="co-col-title">
-            <span><i class="fas fa-layer-group" aria-hidden="true"></i> 暂存列表</span>
+            <span><FontAwesomeIcon icon="layer-group" aria-hidden="true" /> 暂存列表</span>
             <span v-if="stagedItems.length" class="count-badge-subtle">共 {{ stagedItems.length }} 个</span>
           </div>
           <div class="co-col-scroll">
@@ -196,34 +200,31 @@
                   <div class="co-staged-info">
                     <span :class="['co-type-badge', item.type]">{{ item.type === 'order' ? '订单' : '备货' }}</span>
                     <span v-if="item.orderType === 'custom'" class="co-type-badge custom">定制</span>
-                    <span class="co-staged-tag"><i class="fas fa-user"  aria-hidden="true" />{{ item.customer }}</span>
-                    <span class="co-staged-tag"><i class="fas fa-calendar-alt"  aria-hidden="true" />{{ item.date }}</span>
+                    <span class="co-staged-tag"><FontAwesomeIcon icon="user" aria-hidden="true" />{{ item.customer }}</span>
+                    <span class="co-staged-tag"><FontAwesomeIcon icon="calendar-alt" aria-hidden="true" />{{ item.date }}</span>
                     <span class="co-staged-product">
-                      <i
-                        :class="item.type === 'order' ? 'fas fa-shopping-cart' : 'fas fa-cubes'"
-                        :style="{ color: item.type === 'order' ? 'var(--color-ocean-text)' : 'var(--color-success-700)' }"
-                      />
+                      <FontAwesomeIcon :icon="item.type === 'order' ? 'shopping-cart' : 'cubes'" :style="{ color: item.type === 'order' ? 'var(--color-ocean-text)' : 'var(--color-success-700)' }" />
                       {{ item.productName }}
 
                     <span class="count-badge-subtle">数量: {{ item.quantity }}</span>
                     <span v-if="item.deductQuantity > 0" class="count-badge-subtle">抵扣: {{ item.deductQuantity }}</span>
-                    <span v-if="item.country" class="count-badge-subtle"><i class="fas fa-globe" aria-hidden="true" /> {{ item.country }}</span>
+                    <span v-if="item.country" class="count-badge-subtle"><FontAwesomeIcon icon="globe" aria-hidden="true" /> {{ item.country }}</span>
                     <span v-if="item.note" class="count-badge-subtle">备注: {{ item.note }}</span>
                 </span>
                   </div>
                   <div class="co-staged-actions">
                     <button class="co-btn-icon co-btn-warn" @click="openEditStaged(item.uid)" aria-label="编辑">
-                      <i class="fas fa-edit"  aria-hidden="true" />
+                      <FontAwesomeIcon icon="edit" aria-hidden="true" />
                     </button>
                     <button class="co-btn-icon co-btn-danger" @click="removeStagedItem(item.uid)" aria-label="删除">
-                      <i class="fas fa-trash"  aria-hidden="true" />
+                      <FontAwesomeIcon icon="trash" aria-hidden="true" />
                     </button>
                   </div>
                 </div>
               </div>
             </template>
             <div v-else class="co-empty-state">
-              <i class="fas fa-box-open co-empty-icon"  aria-hidden="true" />
+              <FontAwesomeIcon icon="box-open" class="co-empty-icon" aria-hidden="true" />
               <p>暂无暂存记录</p>
             </div>
           </div>
@@ -240,7 +241,7 @@
           style="min-width: 200px"
           @click="submitAll"
         >
-          <i class="fas fa-paper-plane"  aria-hidden="true" />{{ submitting ? '提交中…' : `提交订单 (${stagedItems.length})` }}
+          <FontAwesomeIcon icon="paper-plane" aria-hidden="true" />{{ submitting ? '提交中…' : `提交订单 (${stagedItems.length})` }}
         </UiButton>
       </div>
     </div>
@@ -250,7 +251,7 @@
       <div v-show="activeTab === 'records'" class="co-tab-content">
         <div class="co-records-header">
           <div class="co-records-title-group">
-            <span class="co-records-title"><i class="fas fa-list-alt" aria-hidden="true"></i> 记录列表</span>
+            <span class="co-records-title"><FontAwesomeIcon icon="list-alt" aria-hidden="true" /> 记录列表</span>
             <span class="co-record-type-switch">
               <button
                 v-for="opt in recordTypeOptions"
@@ -262,42 +263,42 @@
             </span>
           </div>
           <UiButton variant="outline" size="sm" @click="showFilter = !showFilter">
-            <i class="fas fa-filter" style="margin-right: 4px" aria-hidden="true" />筛选
+            <FontAwesomeIcon icon="filter" style="margin-right: 4px" aria-hidden="true" />筛选
           </UiButton>
         </div>
 
         <div v-if="showFilter" class="co-filter-panel">
           <div class="co-filter-row">
             <div class="co-filter-field">
-              <label class="co-label"><i class="fas fa-user" aria-hidden="true"></i> 客户</label>
+              <label class="co-label"><FontAwesomeIcon icon="user" aria-hidden="true" /> 客户</label>
               <UiSelect v-model="filterCustomer" placeholder="全部" :options="customerOptions" style="width: 100%" />
             </div>
             <div class="co-filter-field">
-              <label class="co-label"><i class="fas fa-tag" aria-hidden="true"></i> 订单类型</label>
+              <label class="co-label"><FontAwesomeIcon icon="tag" aria-hidden="true" /> 订单类型</label>
               <UiSelect v-model="filterOrderType" placeholder="全部" :options="filterOrderTypeOptions" style="width: 100%" />
             </div>
             <div v-if="recordType === 'order'" class="co-filter-field">
-              <label class="co-label"><i class="fas fa-info-circle" aria-hidden="true"></i> 状态</label>
+              <label class="co-label"><FontAwesomeIcon icon="info-circle" aria-hidden="true" /> 状态</label>
               <UiSelect v-model="filterStatus" placeholder="全部" :options="statusOptions" style="width: 100%" />
             </div>
             <div v-if="recordType === 'order'" class="co-filter-field">
-              <label class="co-label"><i class="fas fa-industry" aria-hidden="true"></i> 工厂</label>
+              <label class="co-label"><FontAwesomeIcon icon="industry" aria-hidden="true" /> 工厂</label>
               <UiSelect v-model="filterFactory" placeholder="全部" :options="factoryOptions" :disabled="factoryDisabled" style="width: 100%" />
             </div>
             <div class="co-filter-field">
-              <label class="co-label"><i class="fas fa-calendar-alt" aria-hidden="true"></i> 开始日期</label>
+              <label class="co-label"><FontAwesomeIcon icon="calendar-alt" aria-hidden="true" /> 开始日期</label>
               <UiDatePicker v-model="filterStart" style="width: 100%" />
             </div>
             <div class="co-filter-field">
-              <label class="co-label"><i class="fas fa-calendar-alt" aria-hidden="true"></i> 结束日期</label>
+              <label class="co-label"><FontAwesomeIcon icon="calendar-alt" aria-hidden="true" /> 结束日期</label>
               <UiDatePicker v-model="filterEnd" style="width: 100%" />
             </div>
             <div class="co-filter-field co-filter-action">
               <UiButton variant="primary" size="sm" @click="fetchOrders">
-                <i class="fas fa-search" style="margin-right: 4px" aria-hidden="true" />查询
+                <FontAwesomeIcon icon="search" style="margin-right: 4px" aria-hidden="true" />查询
               </UiButton>
               <UiButton variant="outline" size="sm" @click="resetFilter">
-                <i class="fas fa-undo" style="margin-right: 4px" aria-hidden="true" />重置
+                <FontAwesomeIcon icon="undo" style="margin-right: 4px" aria-hidden="true" />重置
               </UiButton>
             </div>
           </div>
@@ -309,7 +310,7 @@
             <p class="co-state-text">加载中…</p>
           </div>
           <div v-else-if="orderRecords.length === 0" class="co-state-placeholder co-state-empty">
-            <div class="co-empty-illustration"><i class="fas fa-clipboard-list" aria-hidden="true" /></div>
+            <div class="co-empty-illustration"><FontAwesomeIcon icon="clipboard-list" aria-hidden="true" /></div>
             <p class="co-state-text">暂无{{ recordType === 'stockin' ? '备货' : '订单' }}记录</p>
           </div>
 
@@ -362,7 +363,7 @@
                   <td v-if="recordType === 'order'">
                     <div class="co-action-group">
                       <button class="co-btn-icon co-btn-info" @click="openDetail(item)" aria-label="详情">
-                        <i class="fas fa-eye" aria-hidden="true" />
+                        <FontAwesomeIcon icon="eye" aria-hidden="true" />
                       </button>
                     </div>
                   </td>
@@ -392,7 +393,7 @@
 
         <!-- 只读信息区 -->
         <div class="oe-section">
-          <div class="oe-section-title"><i class="fas fa-info-circle" aria-hidden="true" /> 订单信息</div>
+          <div class="oe-section-title"><FontAwesomeIcon icon="info-circle" aria-hidden="true" /> 订单信息</div>
           <div class="oe-info-grid">
             <div class="oe-info-cell">
               <span class="oe-info-label">客户</span>
@@ -427,7 +428,7 @@
         <!-- SKU 明细列表（多 SKU 时显示） -->
         <div v-if="detailData.items?.length > 1" class="oe-section">
           <div class="oe-section-title">
-            <i class="fas fa-list-ul" aria-hidden="true" /> 订单明细（{{ detailData.items.length }} 个 SKU）
+            <FontAwesomeIcon icon="list-ul" aria-hidden="true" /> 订单明细（{{ detailData.items.length }} 个 SKU）
           </div>
           <table class="oe-sku-table">
             <thead>
@@ -458,17 +459,17 @@
 
         <!-- 可编辑区域 -->
         <div class="oe-section oe-editable">
-          <div class="oe-section-title"><i class="fas fa-pen" aria-hidden="true" /> 编辑内容</div>
+          <div class="oe-section-title"><FontAwesomeIcon icon="pen" aria-hidden="true" /> 编辑内容</div>
           <div class="oe-edit-grid">
             <div class="oe-edit-cell">
               <label class="oe-edit-label">数量</label>
               <div class="oe-edit-control">
                 <button class="oe-stepper-btn" @click="editForm.quantity = Math.max(1, editForm.quantity - 1)" aria-label="减少">
-                  <i class="fas fa-minus" aria-hidden="true" />
+                  <FontAwesomeIcon icon="minus" aria-hidden="true" />
                 </button>
                 <input type="number" class="oe-stepper-input" v-model.number="editForm.quantity" min="1" step="1" autocomplete="off" />
                 <button class="oe-stepper-btn" @click="editForm.quantity = editForm.quantity + 1" aria-label="增加">
-                  <i class="fas fa-plus" aria-hidden="true" />
+                  <FontAwesomeIcon icon="plus" aria-hidden="true" />
                 </button>
               </div>
             </div>
@@ -476,11 +477,11 @@
               <label class="oe-edit-label">抵扣备货</label>
               <div class="oe-edit-control">
                 <button class="oe-stepper-btn" @click="editForm.deductQuantity = Math.max(0, editForm.deductQuantity - 1)" aria-label="减少抵扣">
-                  <i class="fas fa-minus" aria-hidden="true" />
+                  <FontAwesomeIcon icon="minus" aria-hidden="true" />
                 </button>
                 <input type="number" class="oe-stepper-input" v-model.number="editForm.deductQuantity" min="0" step="1" autocomplete="off" />
                 <button class="oe-stepper-btn" @click="editForm.deductQuantity = editForm.deductQuantity + 1" aria-label="增加抵扣">
-                  <i class="fas fa-plus" aria-hidden="true" />
+                  <FontAwesomeIcon icon="plus" aria-hidden="true" />
                 </button>
                 <span v-if="availableStockin > 0" class="oe-available-hint">可用: {{ availableStockin }}</span>
               </div>
@@ -495,10 +496,10 @@
       <template #footer>
         <UiButton variant="outline" :disabled="saving" @click="detailOpen = false">取消</UiButton>
         <UiButton v-if="deductRetryPending" variant="warning" :disabled="saving" @click="retryDeductUpdate">
-          <i class="fas fa-redo" style="margin-right: 4px" aria-hidden="true" />重试抵扣更新
+          <FontAwesomeIcon icon="redo" style="margin-right: 4px" aria-hidden="true" />重试抵扣更新
         </UiButton>
         <UiButton variant="primary" :disabled="saving" @click="saveEditOrder">
-          <i class="fas fa-check" style="margin-right: 4px" aria-hidden="true" />{{ saving ? '保存中…' : '保存' }}
+          <FontAwesomeIcon icon="check" style="margin-right: 4px" aria-hidden="true" />{{ saving ? '保存中…' : '保存' }}
         </UiButton>
       </template>
     </UiDialog>
@@ -529,7 +530,7 @@
           <label class="co-label">抵扣备货数量</label>
           <input type="number" class="form-number-input" v-model.number="editStagedData.deductQuantity" min="0" :max="Math.min(editStagedData.quantity, editAvailableStock)" step="1" style="width: 100%" name="deduct-quantity" autocomplete="off" />
           <small v-if="editAvailableStock > 0" style="color: var(--color-success-700); margin-top: 4px; display: block">
-            <i class="fas fa-check-circle"  aria-hidden="true" /> 可用备货: <strong>{{ editAvailableStock }}</strong> 件
+            <FontAwesomeIcon icon="check-circle" aria-hidden="true" /> 可用备货: <strong>{{ editAvailableStock }}</strong> 件
           </small>
         </div>
         <div class="co-form-group">
@@ -694,6 +695,11 @@ watch(activeTab, (tab) => {
 </script>
 
 <style scoped>
+/* ===== 强制覆盖产品名称输入框灰色背景（PT HMR 不重载 main.ts 的双保险） ===== */
+:deep(input.bg-slate-50) {
+  background-color: #ffffff !important;
+}
+
 /* ===== 表单输入 ===== */
 .form-number-input {
   width: 100%;

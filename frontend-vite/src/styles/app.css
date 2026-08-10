@@ -436,6 +436,10 @@ h6 { font-size: 0.8125rem; }
     min-height: 0;
     overflow-y: auto;
     padding: 20px 24px;
+    /* 预留滚动条空间，防止内容高度变化（如表格行数从16→6）时
+       scrollbar 出现/消失 → 容器宽度变化 → 卡片上下/左右跳动 */
+    scrollbar-gutter: stable;
+    overflow-anchor: none;
   }
 
   /* ============ Page Card Toolbar (Dashboard's top toolbar inside the card) ============ */
@@ -502,4 +506,6 @@ body {
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
   overflow-x: hidden;
+  /* 始终预留滚动条空间，防止 scrollbar 出现/消失导致视口宽度变化 → CLS */
+  scrollbar-gutter: stable;
 }

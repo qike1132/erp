@@ -13,7 +13,7 @@
         iconBgClass,
       ]"
     >
-      <i :class="['fas', icon, 'text-sm md:text-lg', iconColorClass]" aria-hidden="true" />
+      <FontAwesomeIcon :icon="icon" :class="['text-sm md:text-lg', iconColorClass]" aria-hidden="true" />
     </div>
     <div class="flex-1 min-w-0">
       <div class="text-sm md:text-[15px] font-bold text-heading truncate">
@@ -24,7 +24,7 @@
       </div>
     </div>
     <div class="shrink-0 opacity-0 -translate-x-2 transition-all duration-300 group-hover:opacity-100 group-hover:translate-x-0">
-      <i class="fas fa-chevron-right text-xs text-text-muted" />
+      <FontAwesomeIcon icon="chevron-right" class="text-xs text-text-muted" />
     </div>
   </RouterLink>
 </template>

@@ -13,7 +13,7 @@
     @update:model-value="($event: boolean | 'indeterminate') => $emit('update:checked', $event === true)"
   >
     <CheckboxIndicator class="flex items-center justify-center">
-      <i class="fas fa-check text-xs" aria-hidden="true" />
+      <FontAwesomeIcon icon="check" class="text-xs" aria-hidden="true" />
     </CheckboxIndicator>
   </CheckboxRoot>
 </template>

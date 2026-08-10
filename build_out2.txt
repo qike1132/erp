@@ -1,0 +1,10 @@
+[36mvite v7.3.6 [32mbuilding client environment for production...[36m[39m
+transforming...
+[32m✓[39m 2484 modules transformed.
+
+PWA v1.3.0
+mode      generateSW
+precache  180 entries (3534.40 KiB)
+files generated
+  dist/sw.js
+  dist/workbox-2da51cb1.js

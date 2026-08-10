@@ -4,12 +4,14 @@ Web Vitals 监控端点 - 接收前端性能指标数据
 import logging
 from collections import deque
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
+from fastapi_app.core.deps import get_current_user_id
+
 logger = logging.getLogger(__name__)
-# 认证: 由 router.py 通过 dependencies=[Depends(get_current_user_id)] 统一注入，无需在此重复
-# 限流: 如需对 /vitals 接口限流，应在反向代理层或中间件中实现
+# POST /vitals：由前端 sendBeacon 上报，无法携带 auth header，因此不作认证（router.py 也不注入全局 dependency）
+# GET /vitals/summary：管理端查看汇总数据，需要登录认证，在端点函数参数中单独声明 Depends
 router = APIRouter()
 
 
@@ -62,7 +64,10 @@ async def receive_vitals(payload: VitalsPayload, request: Request):
 
 
 @router.get("/vitals/summary", response_model=VitalsSummaryResponse)
-async def vitals_summary():
+async def vitals_summary(
+    _current_user_id: int = Depends(get_current_user_id),
+):
+    """查看 Web Vitals 汇总数据（需登录）"""
     result = {}
     for key, values in _vital_stats.items():
         name, rating = key.split(":")
