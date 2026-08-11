@@ -9,10 +9,14 @@
         <div v-if="tabRef" class="bo-filter-bar">
           <div class="bo-search-field">
             <UiAutocomplete
+              ref="productAc"
               v-model="tabRef.filters.orderNo"
               :searchFn="searchProducts"
               placeholder="输入关键字，下拉选择产品"
               appendTo="self"
+              suppress-after-select
+              :search-delay-ms="500"
+              :show-loading="false"
               @select="tabRef.applyProductFilter(($event as ProductSuggestion).name)"
             >
               <template #option="{ item }">
@@ -25,15 +29,19 @@
           </div>
           <div class="bo-search-field">
             <UiAutocomplete
+              ref="customerAc"
               v-model="tabRef.filters.customer"
               :searchFn="searchCustomers"
               placeholder="输入关键字，下拉选择客户"
               appendTo="self"
+              suppress-after-select
+              :search-delay-ms="500"
+              :show-loading="false"
               @select="tabRef.applyCustomerFilter(($event as CustomerSuggestion).name)"
             />
           </div>
           <div class="bo-filter-actions">
-            <button class="bo-action-btn bo-action-primary" @click="tabRef.handleSearch()">
+            <button class="bo-action-btn bo-action-primary" @click="handleSearchClick()">
               <FontAwesomeIcon icon="search" style="margin-right: 4px" aria-hidden="true" />查询
             </button>
             <button class="bo-action-btn" @click="tabRef.handleReset()" aria-label="重置">
@@ -68,6 +76,25 @@ import { productApi, customerApi } from '@/api'
 // FontAwesomeIcon 已在 main.ts 全局注册
 
 const tabRef = ref<InstanceType<typeof BeileOrderTab> | null>(null)
+/** UiAutocomplete 为泛型组件，InstanceType 无法推导，用结构化类型描述暴露的句柄 */
+type AutocompleteHandle = { setSuppressed: (v: boolean) => void }
+const productAc = ref<AutocompleteHandle | null>(null)
+const customerAc = ref<AutocompleteHandle | null>(null)
+
+/**
+ * 点击查询：确认筛选后抑制两个下拉面板再次展开，
+ * 避免编辑已提交的搜索词时面板遮挡表格造成闪烁。
+ * 清空输入框或点重置后自动恢复下拉功能。
+ */
+function handleSearchClick() {
+  tabRef.value?.handleSearch()
+  if (tabRef.value?.filters.orderNo.trim()) {
+    productAc.value?.setSuppressed?.(true)
+  }
+  if (tabRef.value?.filters.customer.trim()) {
+    customerAc.value?.setSuppressed?.(true)
+  }
+}
 
 // ===== 产品自动补全 =====
 type ProductSuggestion = { id: number; name: string; barcode?: string }
@@ -202,6 +229,13 @@ async function searchCustomers(q: string): Promise<CustomerSuggestion[]> {
 }
 
 /* 卡片主体样式复用全局 .page-card-body（src/styles/app.css） */
+
+/* 表格区域上/左/右完全贴合卡片边缘（卡片自身有边框），分页栏贴底；
+   内容区自身不再滚动（表格内部滚动），无需预留滚动条位 */
+.bo-container .page-card-body {
+  padding: 0;
+  scrollbar-gutter: auto;
+}
 
 /* 窄屏：恢复 flex-wrap 让筛选区可换行，避免挤压 header */
 @media (max-width: 900px) {

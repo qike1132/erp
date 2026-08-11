@@ -509,3 +509,13 @@ body {
   /* 始终预留滚动条空间，防止 scrollbar 出现/消失导致视口宽度变化 → CLS */
   scrollbar-gutter: stable;
 }
+
+/*
+ * 下拉面板瞬时显示：禁用 PrimeVue anchored-overlay 的 300ms 缩放/淡入动画。
+ * 在表格上方的搜索框中逐键输入时，面板每次挂载/更新都会重播该动画并覆盖表格
+ * 顶部行，视觉上表现为“表格闪烁”；改为瞬时显示后面板安静出现，不再闪烁。
+ */
+.p-anchored-overlay-enter-active,
+.p-anchored-overlay-leave-active {
+  animation: none !important;
+}

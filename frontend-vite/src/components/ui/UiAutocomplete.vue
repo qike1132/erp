@@ -52,9 +52,18 @@ const props = withDefaults(
     disabled?: boolean
     debounceMs?: number
     minQueryLength?: number
+    /** 触发搜索前的停顿毫秒数（透传给 PrimeVue AutoComplete 的 delay）。
+     * 调大后快速连续键入不会逐键触发搜索，避免下拉面板/加载态逐键闪烁。 */
+    searchDelayMs?: number
+    /** 搜索期间是否在输入框内显示加载 spinner。
+     * 在表格上方打开面板的页面可关闭，避免逐键出现转圈闪烁。 */
+    showLoading?: boolean
     /** PrimeVue AutoComplete appendTo。默认 'body' 保证父容器 overflow:hidden 时不裁剪。
      * 传 undefined 则渲染在组件树内（适用于无裁剪风险的场景，避免 body 级重排跳动）。 */
     appendTo?: string
+    /** 选中建议后抑制下拉面板再次自动展开（编辑已提交的搜索词时不再弹面板，
+     * 避免面板遮挡下方内容造成闪烁）；清空输入后自动恢复。 */
+    suppressAfterSelect?: boolean
   }>(),
   {
     modelValue: '',
@@ -63,7 +72,10 @@ const props = withDefaults(
     disabled: false,
     minQueryLength: 1,
     optionLabel: 'name',
+    searchDelayMs: 300,
+    showLoading: true,
     appendTo: 'body',
+    suppressAfterSelect: false,
   },
 )
 
@@ -86,6 +98,14 @@ const internalSuggestions = ref<T[]>([])
 const loading = ref(false)
 let requestSeq = 0
 
+// 选中/提交后抑制下拉：编辑已选中的搜索词时不再触发搜索与面板展开，清空输入后自动恢复
+const suppressSearch = ref(false)
+
+/** 供父组件控制抑制状态（如点击查询按钮提交后主动抑制） */
+function setSuppressed(v: boolean) {
+  suppressSearch.value = v
+}
+
 // ============================================================
 // 搜索逻辑 — @complete 驱动搜索 + requestSeq 防过期
 // ============================================================
@@ -107,6 +127,13 @@ function onComplete(event: AutoCompleteCompleteEvent) {
 
 function triggerSearch(query: string) {
   const q = query.trim()
+
+  // 已提交搜索后编辑输入框：不弹下拉（避免面板遮挡下方表格闪烁）
+  if (suppressSearch.value) {
+    internalSuggestions.value = []
+    loading.value = false
+    return
+  }
 
   // 静态建议列表
   if (props.suggestions && props.suggestions.length > 0) {
@@ -146,6 +173,9 @@ function triggerSearch(query: string) {
 }
 
 function onItemSelect(event: { value: T }) {
+  if (props.suppressAfterSelect) {
+    suppressSearch.value = true
+  }
   emit('select', event.value)
 }
 
@@ -159,6 +189,18 @@ watch(
   },
   { immediate: true },
 )
+
+// 输入清空 = 开始新搜索，恢复下拉功能
+watch(
+  () => props.modelValue,
+  (val) => {
+    if (!val) {
+      suppressSearch.value = false
+    }
+  },
+)
+
+defineExpose({ setSuppressed })
 </script>
 
 <template>
@@ -168,9 +210,11 @@ watch(
     :optionLabel="(optionLabel as string)"
     :placeholder="placeholder"
     :disabled="disabled"
-    :loading="loading"
+    :loading="showLoading ? loading : false"
+    :delay="searchDelayMs"
     :minLength="minQueryLength"
     :appendTo="(appendTo as string | undefined)"
+    :showEmptyMessage="!suppressSearch"
     @update:modelValue="onInputChange"
     @complete="onComplete"
     @item-select="onItemSelect"

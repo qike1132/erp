@@ -19,6 +19,7 @@
             <tr>
               <th class="bo-th-center" style="white-space:nowrap; width: 170px;">下单时间</th>
               <th class="bo-th-center" style="width: 170px;">客户名称</th>
+              <th v-if="showProductColumn" class="bo-th-center" style="width: 180px;">产品名称</th>
               <th class="bo-th-center" style="width: 100px;">工厂</th>
               <th class="bo-th-center" style="width: 130px;">数量</th>
               <th class="bo-th-left">备注</th>
@@ -40,16 +41,27 @@
                 </div>
               </td>
               <td class="bo-td-center bo-td-middle bo-customer-cell" style="width:170px">{{ item.customer || '-' }}</td>
+              <td v-if="showProductColumn" class="bo-td-center bo-product-cell" style="width: 180px;">
+                <template v-if="visibleSkus(item).length > 0">
+                  <div v-for="sku in visibleSkus(item)" :key="sku.id" class="bo-sku-line">
+                    <span class="bo-sku-name" :title="sku.product_name || ''">{{ sku.product_name || '-' }}</span>
+                  </div>
+                </template>
+                <span v-else class="bo-sku-name">{{ item.product_name || '-' }}</span>
+              </td>
               <td class="bo-td-center bo-td-middle" style="width: 100px;"><span class="bo-cell-main">{{ item.factories?.join(', ') || '湖北' }}</span></td>
               <td class="bo-td-center" style="width: 130px;">
-                <template v-if="item.items && item.items.length > 0">
+                <template v-if="showProductColumn && visibleSkus(item).length > 0">
+                  <strong>{{ visibleSkus(item).reduce((sum, s) => sum + (s.quantity || 0), 0) }}</strong>
+                </template>
+                <template v-else-if="item.items && item.items.length > 0">
                   <strong>{{ item.items.reduce((sum, s) => sum + (s.quantity || 0), 0) }}</strong>
                 </template>
                 <template v-else><strong>{{ item.quantity }}</strong></template>
               </td>
               <td class="bo-td-left">
-                <template v-if="item.items && item.items.length > 0">
-                  <div v-for="sku in item.items" :key="sku.id" class="bo-sku-line">
+                <template v-if="visibleSkus(item).length > 0">
+                  <div v-for="sku in visibleSkus(item)" :key="sku.id" class="bo-sku-line">
                     <span v-if="sku.note" class="bo-sku-note" :title="sku.note">{{ sku.note }}</span>
                   </div>
                 </template>
@@ -58,11 +70,11 @@
             </tr>
           </tbody>
           </table>
-        </div>
 
-        <div v-if="displayOrders.length === 0" class="bo-empty bo-empty-inline">
-          <FontAwesomeIcon icon="search-minus" aria-hidden="true" />
-          <span>当前页未匹配到该订单号</span>
+          <div v-if="displayOrders.length === 0" class="bo-empty bo-empty-inline">
+            <FontAwesomeIcon icon="search-minus" aria-hidden="true" />
+            <span>当前页未匹配到该订单号</span>
+          </div>
         </div>
 
         <UiPagination
@@ -70,7 +82,10 @@
           :current-page="currentPage"
           :total-pages="totalPages"
           :total-items="totalItems"
+          :page-size="perPage"
+          :page-size-options="PAGE_SIZE_OPTIONS"
           @update:current-page="goPage"
+          @update:page-size="perPage = $event"
         />
       </template>
     </div>
@@ -137,8 +152,11 @@ import UiPagination from '@/components/ui/UiPagination.vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 
-/** 每页记录数 */
-const PER_PAGE = 18
+/** 每页条数选项（分页组件下拉可选） */
+const PAGE_SIZE_OPTIONS = [18, 30, 50, 100]
+
+/** 当前每页条数，可由分页组件修改 */
+const perPage = ref(18)
 
 /** 湖北订单行：OrderItem 在后端实际响应中还包含 order_no / customer / product（未在 OrderItem 类型中声明） */
 type BeileOrderRow = OrderItem & {
@@ -162,7 +180,7 @@ const page = ref(1)
 
 const currentPage = computed(() => page.value)
 const totalItems = computed(() => ordersData.value?.total ?? 0)
-const totalPages = computed(() => Math.max(1, Math.ceil(totalItems.value / PER_PAGE)))
+const totalPages = computed(() => Math.max(1, Math.ceil(totalItems.value / perPage.value)))
 
 const {
   data: ordersData,
@@ -170,12 +188,12 @@ const {
   isFetching,
   refetch,
 } = useQuery({
-  queryKey: ['beile-orders', appliedCustomer, () => page.value],
+  queryKey: ['beile-orders', appliedCustomer, () => page.value, () => perPage.value],
   queryFn: () =>
     orderApi.beileList({
       customer: appliedCustomer.value || undefined,
       page: page.value,
-      per_page: PER_PAGE,
+      per_page: perPage.value,
     }),
   staleTime: 30_000,
   gcTime: 60_000,
@@ -185,18 +203,38 @@ const {
 /** 服务端返回的订单列表（已应用 customer 筛选与分页） */
 const orders = computed<BeileOrderRow[]>(() => (ordersData.value?.data ?? []) as BeileOrderRow[])
 
+/** 搜索产品时是否显示产品名称列：仅当已应用产品关键字筛选时显示 */
+const showProductColumn = computed(() => appliedProduct.value.trim() !== '')
+
+/** SKU 是否匹配关键字（产品名称或条码） */
+function skuMatchesKeyword(sku: { product_name?: string | null; product_barcode?: string | null }, kw: string): boolean {
+  return (sku.product_name || '').toLowerCase().includes(kw)
+    || (sku.product_barcode || '').toLowerCase().includes(kw)
+}
+
+/**
+ * 行内展示的 SKU：应用产品筛选时仅返回名称/条码匹配关键字的 SKU，
+ * 使产品名称、数量、备注只对应搜索到的那个产品；未筛选时返回全部。
+ */
+function visibleSkus(item: BeileOrderRow): NonNullable<BeileOrderRow['items']> {
+  const kw = appliedProduct.value.trim().toLowerCase()
+  if (!kw) return item.items || []
+  const matched = (item.items || []).filter((s) => skuMatchesKeyword(s, kw))
+  return matched.length > 0 ? matched : (item.items || [])
+}
+
 /**
  * 客户端二次过滤：当前页订单中 product_name/barcode 模糊匹配。
  * 仅当 appliedProduct 有值时才过滤（选择建议或点击查询后生效），
  * 自由键入不触发过滤，避免输入中途表格发生抖动。
+ * 匹配任一 SKU（名称或条码），而不只是订单首个产品。
  */
 const displayOrders = computed<BeileOrderRow[]>(() => {
   const kw = appliedProduct.value.trim().toLowerCase()
   if (!kw) return orders.value
   return orders.value.filter((o) => {
-    const pname = (o.product_name || '').toLowerCase()
-    const bc = (o.barcode || '').toLowerCase()
-    return pname.includes(kw) || bc.includes(kw)
+    if ((o.product_name || '').toLowerCase().includes(kw)) return true
+    return (o.items || []).some((s) => skuMatchesKeyword(s, kw))
   })
 })
 
@@ -269,12 +307,18 @@ defineExpose({
 watch(() => appliedCustomer.value, () => {
   page.value = 1
 })
+
+// 每页条数变化时回到第一页
+watch(perPage, () => {
+  page.value = 1
+})
 </script>
 
 <style scoped>
 .bo-inventory {
   display: flex;
   flex-direction: column;
+  height: 100%;
   min-height: 0;
 }
 
@@ -286,16 +330,15 @@ watch(() => appliedCustomer.value, () => {
   min-height: 0;
   overflow: hidden;
 }
-.bo-table-scroll {
+/* 表格区自身滚动：让分页按钮固定贴在卡片底部，
+   避免行数/多 SKU 高度变化时翻页按钮上下跳动 */
+/* 表格不设边框：卡片自身已有边框，订单列左侧不再出现重复线条
+   （对齐客户/库存页的裸表格风格）；分页栏自带顶边作分隔线 */
+.bo-table-wrap {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
-}
-.bo-table-wrap {
-  border-radius: 10px;
-  border: 1.5px solid #b8bec6;
-  overflow: hidden;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 4px 12px rgba(15, 23, 42, 0.06);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 .bo-table {
   width: 100%;
@@ -365,6 +408,16 @@ watch(() => appliedCustomer.value, () => {
 }
 .bo-customer-cell {
   font-weight: 600;
+  white-space: nowrap;
+}
+.bo-product-cell {
+  text-align: left !important;
+}
+.bo-product-cell .bo-sku-name {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .bo-cell-main {
