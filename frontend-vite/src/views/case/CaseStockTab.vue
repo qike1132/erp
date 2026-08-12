@@ -351,7 +351,6 @@ function switchMode(nextMode: 'stockin' | 'stockout') {
   form.note = ''
   currentStock.value = 0
   staged.value = []
-  showSuggestions.value = false
   excelFile.value = null
 }
 

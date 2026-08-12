@@ -12,7 +12,7 @@ export async function downloadFileByUrl(url: string, filename: string) {
       const reader = new FileReader()
       reader.onload = () => {
         const dataUrl = reader.result as string
-        resolve(dataUrl.split(',')[1])
+        resolve(dataUrl.split(',')[1] ?? '')
       }
       reader.readAsDataURL(blob)
     })

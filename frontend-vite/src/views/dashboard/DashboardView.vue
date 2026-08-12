@@ -477,7 +477,7 @@ async function loadDashboardStats() {
     let detail = ''
 
     if (axiosError.response) {
-      const status = axiosError.response.status
+      const status = axiosError.response.status ?? 0
       if (status === 401) {
         msg = '登录已过期，正在跳转...'
         detail = '请重新登录后查看数据'

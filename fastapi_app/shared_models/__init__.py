@@ -75,6 +75,7 @@ from fastapi_app.shared_models.customer_sampling import (
     CustomerSamplingFabricVersion,
     CustomerSamplingPart,
     CustomerSamplingProject,
+    CustomerSamplingRole,
 )
 
 __all__ = [
@@ -136,6 +137,7 @@ __all__ = [
     'AuditLog',
     'Country',
     'CustomerSamplingProject',
+    'CustomerSamplingRole',
     'CustomerSamplingPart',
     'CustomerSamplingFabricVersion',
     'CustomerSamplingChangeLog',

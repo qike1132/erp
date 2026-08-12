@@ -8,6 +8,14 @@ export interface OrderListApiResponse {
   total: number
   page: number
   per_page: number
+  /** 未确认湖北订单总数（beile-list 专用，顶部横幅） */
+  unconfirmed_count?: number
+}
+
+export interface ConfirmOrderResponse {
+  success: boolean
+  message: string
+  already_confirmed?: boolean
 }
 
 export const orderApi = {
@@ -21,6 +29,7 @@ export const orderApi = {
   unlock: (id: number) => post(`/orders/unlock/${id}`),
   deductStock: (id: number) => post(`/orders/deduct-stock/${id}`),
   updateDeduct: (id: number, deductQuantity: number) => put(`/orders/deduct/${id}?deduct_quantity=${deductQuantity}`),
+  confirmBeileOrder: (id: number) => post<ConfirmOrderResponse>(`/orders/${id}/confirm`),
   staging: {
     add: (data: Partial<StagingOrder>) => post<StagingOrder>('/staging-orders/add', data),
     list: () => get<StagingOrder[]>('/staging-orders/list'),

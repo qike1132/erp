@@ -40,50 +40,91 @@
         </button>
       </div>
 
-      <!-- 右侧：项目卡片 -->
-      <div class="cgl-project-area">
+      <!-- 右侧：项目卡片（虚拟滚动，仅渲染视口附近的卡片） -->
+      <div ref="projectAreaRef" class="cgl-project-area">
         <div v-if="!selectedGroup" class="cgl-project-empty">
           <span>请选择一个客户</span>
         </div>
         <div v-else-if="selectedGroup.projects.length === 0" class="cgl-project-empty">
           <span>该客户暂无项目</span>
         </div>
-        <div v-else class="cgl-projects">
-          <button
-            v-for="proj in selectedGroup.projects"
-            :key="proj.id"
-            :class="['cgl-project-card', { active: selectedProjectId === proj.id }]"
-            @click="$emit('select-project', proj.id)"
-          >
-            <div class="cgl-card-left">
-              <div v-if="proj.product_image_url" class="cgl-card-thumb">
-                <img :src="proj.product_image_url" alt="" />
+        <VirtualList
+          v-else-if="projectAreaHeight > 0"
+          ref="virtualListRef"
+          :items="selectedGroup.projects"
+          :item-height="PROJECT_CARD_SLOT_H"
+          :container-height="projectAreaHeight"
+          :item-key="(p: ProjectSummary) => p.id"
+          class="cgl-virtual-list"
+        >
+          <template #default="{ item: proj }">
+            <button
+              :class="['cgl-project-card', { active: selectedProjectId === proj.id }]"
+              @click="$emit('select-project', proj.id)"
+            >
+              <div class="cgl-card-left">
+                <div
+                  v-if="proj.product_image_url"
+                  class="cgl-card-thumb"
+                  :class="{ 'is-loaded': thumbLoaded.has(proj.id) }"
+                >
+                  <!-- 骨架屏：图片加载完成前显示微光动画占位 -->
+                  <div class="cgl-thumb-skeleton" aria-hidden="true" />
+                  <!-- 模糊占位图（32px，blur-up）：滚动即见，清晰图加载后淡出 -->
+                  <img
+                    v-if="proj.product_image_blur_url"
+                    :src="proj.product_image_blur_url"
+                    class="cgl-thumb-blur"
+                    alt=""
+                    aria-hidden="true"
+                    decoding="async"
+                    fetchpriority="low"
+                  />
+                  <!-- 清晰缩略图：加载完成后淡入 -->
+                  <img
+                    :src="proj.product_image_thumbnail_url || proj.product_image_url"
+                    class="cgl-thumb-img"
+                    alt=""
+                    width="200"
+                    height="200"
+                    loading="lazy"
+                    decoding="async"
+                    fetchpriority="low"
+                    @error="onThumbError($event, proj)"
+                    @load="onThumbLoad(proj.id)"
+                  />
+                </div>
+                <div v-else class="cgl-card-thumb cgl-card-thumb-placeholder">
+                  <i class="fas fa-tshirt" aria-hidden="true" />
+                </div>
               </div>
-              <div v-else class="cgl-card-thumb cgl-card-thumb-placeholder">
-                <i class="fas fa-tshirt" aria-hidden="true" />
-              </div>
-            </div>
-            <div class="cgl-card-right">
-              <div class="cgl-card-info">
-                <div class="cgl-card-line">
-                  <span class="cgl-card-label">时间：</span>
-                  <span class="cgl-card-value">{{ formatTime(proj.updated_at) }}</span>
-                </div>
-                <div class="cgl-card-line">
-                  <span class="cgl-card-label">名称：</span>
-                  <span class="cgl-card-value">{{ proj.product_name }}</span>
-                </div>
-                <div class="cgl-card-line">
-                  <span class="cgl-card-label">客户：</span>
-                  <span class="cgl-card-value">{{ selectedGroup?.customer_name || '-' }}</span>
-                </div>
-                <div class="cgl-card-line">
-                  <span class="cgl-card-label">编号：</span>
-                  <span class="cgl-card-value">{{ projectDisplayNumbers.get(proj.id) }}</span>
+              <div class="cgl-card-right">
+                <div class="cgl-card-info">
+                  <div class="cgl-card-line">
+                    <span class="cgl-card-label">时间：</span>
+                    <span class="cgl-card-value">{{ formatTime(proj.updated_at) }}</span>
+                  </div>
+                  <div class="cgl-card-line">
+                    <span class="cgl-card-label">名称：</span>
+                    <span class="cgl-card-value">{{ proj.product_name }}</span>
+                  </div>
+                  <div class="cgl-card-line">
+                    <span class="cgl-card-label">客户：</span>
+                    <span class="cgl-card-value">{{ selectedGroup?.customer_name || '-' }}</span>
+                  </div>
+                  <div class="cgl-card-line">
+                    <span class="cgl-card-label">编号：</span>
+                    <span class="cgl-card-value">{{ projectDisplayNumbers.get(proj.id) }}</span>
+                  </div>
                 </div>
               </div>
-            </div>
-          </button>
+            </button>
+          </template>
+        </VirtualList>
+        <!-- 兜底：测量高度失败时不显示空白，恢复后自动渲染 -->
+        <div v-else class="cgl-project-empty" aria-live="polite">
+          <UiSpinner size="sm" />
+          <span>加载中...</span>
         </div>
       </div>
     </div>
@@ -91,10 +132,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import UiSpinner from '@/components/ui/UiSpinner.vue'
 import EmptyState from './EmptyState.vue'
-import type { CustomerGroup } from '@/api/patternRoom'
+import VirtualList from '@/components/ui/VirtualList.vue'
+import type { CustomerGroup, ProjectSummary } from '@/api/patternRoom'
 
 const props = defineProps<{
   groups: CustomerGroup[]
@@ -108,6 +150,14 @@ const emit = defineEmits<{
   search: [keyword: string]
   'add-project': []
 }>()
+
+/**
+ * 项目卡片高度（200px 缩略图 + 上下 8px 内边距 = 216px），
+ * 加上卡片间距 6px 后作为虚拟滚动单个槽位高度。
+ * 卡片内容均为单行截断，高度恒定，适合固定高度虚拟滚动。
+ */
+const PROJECT_CARD_H = 216
+const PROJECT_CARD_SLOT_H = PROJECT_CARD_H + 6
 
 /** 当前选中的客户 key */
 const selectedCustomerKey = ref<string | null>(null)
@@ -128,6 +178,99 @@ function selectCustomer(customerId: number | null) {
 const selectedGroup = computed(() => {
   if (!selectedCustomerKey.value) return null
   return props.groups.find((g) => groupKey(g.customer_id) === selectedCustomerKey.value) ?? null
+})
+
+// ==================== 虚拟滚动容器高度测量 ====================
+const projectAreaRef = ref<HTMLElement | null>(null)
+/**
+ * 容器高度。初始为 0，模板靠 `v-else-if="projectAreaHeight > 0"` 守卫 VirtualList 渲染。
+ * 由于父级 flex 链可能在数据加载后才完成布局，单次 onMounted 测量经常得到 0，
+ * 这里采用多策略保证最终能拿到正确高度：
+ *   1. onMounted 同步测量（best-effort）
+ *   2. nextTick 后再次测量（父级 v-if/v-else 切换后）
+ *   3. requestAnimationFrame 后测量（最终布局稳定）
+ *   4. 监听自身 + 父级尺寸变化（ResizeObserver，仅在变化时触发）
+ *   5. 监听 window resize（视口变化）
+ *   6. 监听 groups 数据变化（分组重新渲染可能影响布局）
+ */
+const projectAreaHeight = ref(0)
+// VirtualList 为泛型组件，InstanceType 无法推导，用结构化类型描述所需句柄
+const virtualListRef = ref<{ scrollToTop: () => void } | null>(null)
+
+let areaResizeObserver: ResizeObserver | null = null
+let parentResizeObserver: ResizeObserver | null = null
+let windowResizeHandler: (() => void) | null = null
+
+function measureProjectArea() {
+  if (!projectAreaRef.value) return
+  // getBoundingClientRect 比 clientHeight 更可靠：不受 box-sizing 影响
+  const rect = projectAreaRef.value.getBoundingClientRect()
+  // 使用 offsetHeight 优先（已包含 padding），若为 0 则降级到 rect.height
+  const h = projectAreaRef.value.offsetHeight || Math.round(rect.height)
+  if (h > 0 && h !== projectAreaHeight.value) {
+    projectAreaHeight.value = h
+  }
+}
+
+function tryMeasureWithRetry() {
+  // 同步测量（此时通常 onMounted 刚执行）
+  measureProjectArea()
+  if (projectAreaHeight.value > 0) return
+  // nextTick 后再试（父级 v-if/v-else 切换可能影响布局）
+  nextTick(() => {
+    measureProjectArea()
+    if (projectAreaHeight.value > 0) return
+    // rAF 后再试（最终布局稳定阶段）
+    requestAnimationFrame(() => {
+      measureProjectArea()
+    })
+  })
+}
+
+onMounted(() => {
+  tryMeasureWithRetry()
+  if (projectAreaRef.value && typeof ResizeObserver !== 'undefined') {
+    areaResizeObserver = new ResizeObserver(measureProjectArea)
+    areaResizeObserver.observe(projectAreaRef.value)
+    // 同时监听父级（cgl-body / pr-left-pane）尺寸变化，
+    // 解决父级从 0 → 有数据时自身尺寸可能不变导致漏触发的问题
+    // 只需追踪最近一层 flex 父级即可，过深会增加无意义的回调
+    const parent = projectAreaRef.value.parentElement
+    if (parent) {
+      parentResizeObserver = new ResizeObserver(measureProjectArea)
+      parentResizeObserver.observe(parent)
+    }
+  }
+  // 监听 window resize（窄屏/宽屏切换、抽屉展开/收起等场景）
+  windowResizeHandler = () => {
+    // rAF 延迟，避免 resize 期间反复触发
+    requestAnimationFrame(measureProjectArea)
+  }
+  window.addEventListener('resize', windowResizeHandler)
+})
+
+onUnmounted(() => {
+  areaResizeObserver?.disconnect()
+  parentResizeObserver?.disconnect()
+  if (windowResizeHandler) {
+    window.removeEventListener('resize', windowResizeHandler)
+    windowResizeHandler = null
+  }
+})
+
+// groups 数据变化时（首次加载 / 新增后刷新 / 删除后刷新），
+// 父级布局可能因 v-else 分支从"空状态"切换到"双栏布局"而高度变化，
+// 此时主动触发一次测量，覆盖 ResizeObserver 在 0→非0 边界不触发的盲区。
+watch(
+  () => props.groups,
+  () => {
+    nextTick(() => nextTick(measureProjectArea))
+  },
+)
+
+// 切换客户时回到列表顶部
+watch(selectedCustomerKey, () => {
+  virtualListRef.value?.scrollToTop()
 })
 
 /** 按日期生成递增编号：YYYYMMDD + 两位序号（同天内按 updated_at 顺序递增） */
@@ -168,6 +311,31 @@ function formatTime(iso: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
+/** 已加载清晰缩略图的项目 id 集合（驱动骨架屏/模糊图淡出与清晰图淡入） */
+const thumbLoaded = ref<Set<number>>(new Set())
+
+/** 清晰缩略图加载完成：记录状态，触发 blur-up 过渡 */
+function onThumbLoad(projectId: number) {
+  if (!thumbLoaded.value.has(projectId)) {
+    thumbLoaded.value = new Set(thumbLoaded.value).add(projectId)
+  }
+}
+
+/**
+ * 缩略图加载失败时回退到原图。
+ * - 历史数据（缩略图未生成）会出现 404，需要回退
+ * - 设置 data-fallback 标记位防止反复重试；回退图加载成功同样触发淡入
+ */
+function onThumbError(e: Event, proj: { product_image_url?: string | null }) {
+  const img = e.target as HTMLImageElement
+  if (img.dataset.fallback || !proj.product_image_url) {
+    img.src = ''
+    return
+  }
+  img.dataset.fallback = '1'
+  img.src = proj.product_image_url
+}
+
 // 默认选中第一个分组
 watch(
   () => props.groups,
@@ -177,6 +345,23 @@ watch(
     }
   },
   { immediate: true },
+)
+
+// 选中项目变化时，自动切换到包含该项目的客户分组
+// 场景：新增项目后选中新项目，但新项目所属客户与当前选中分组不同，
+// 若不切换分组，右侧卡片区域看不到新项目。
+watch(
+  () => props.selectedProjectId,
+  (newId) => {
+    if (newId == null) return
+    // 当前分组已包含该项目，无需切换
+    if (selectedGroup.value?.projects.some((p) => p.id === newId)) return
+    // 查找包含该项目的分组并切换
+    const targetGroup = props.groups.find((g) => g.projects.some((p) => p.id === newId))
+    if (targetGroup) {
+      selectedCustomerKey.value = groupKey(targetGroup.customer_id)
+    }
+  },
 )
 </script>
 
@@ -296,12 +481,14 @@ watch(
   background: #ff9f4340;
 }
 
-/* 右侧：项目区域 */
+/* 右侧：项目区域（虚拟滚动容器，不再自行滚动，滚动由 VirtualList 接管）
+ * contain 限定重排范围，滚动时不影响左侧客户列与外部布局。 */
 .cgl-project-area {
   flex: 1;
   min-width: 0;
-  overflow-y: auto;
+  overflow: hidden;
   padding: 8px;
+  contain: layout;
 }
 
 .cgl-project-empty {
@@ -313,24 +500,26 @@ watch(
   font-size: 13px;
 }
 
-/* 项目卡片 */
-.cgl-projects {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+/* 虚拟滚动列表：滚动容器自身高度由 JS 测量注入 */
+.cgl-virtual-list {
+  height: 100%;
 }
 
+/* 项目卡片（固定高度，配合虚拟滚动） */
 .cgl-project-card {
   display: flex;
   gap: 10px;
   width: 100%;
+  height: 216px;
+  margin-bottom: 6px;
   padding: 8px;
+  box-sizing: border-box;
   border: 1px solid transparent;
   border-radius: 8px;
   background: #fff;
   cursor: pointer;
   text-align: left;
-  transition: all 0.15s;
+  transition: border-color 0.15s, background 0.15s;
 }
 
 .cgl-project-card:hover {
@@ -348,6 +537,7 @@ watch(
 }
 
 .cgl-card-thumb {
+  position: relative;
   width: 200px;
   height: 200px;
   border-radius: 8px;
@@ -359,10 +549,59 @@ watch(
   flex-shrink: 0;
 }
 
-.cgl-card-thumb img {
+/* 骨架屏：微光扫过动画，清晰图加载完成后淡出 */
+.cgl-thumb-skeleton {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(100deg, #f1f5f9 40%, #e2e8f0 50%, #f1f5f9 60%);
+  background-size: 200% 100%;
+  animation: cgl-shimmer 1.4s linear infinite;
+  opacity: 1;
+  transition: opacity 0.3s ease;
+}
+
+.cgl-card-thumb.is-loaded .cgl-thumb-skeleton {
+  opacity: 0;
+}
+
+@keyframes cgl-shimmer {
+  0% { background-position: 120% 0; }
+  100% { background-position: -120% 0; }
+}
+
+/* 模糊占位图（blur-up）：铺满 + CSS 模糊放大，清晰图加载后淡出 */
+.cgl-thumb-blur {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
   width: 100%;
   height: 100%;
   object-fit: cover;
+  filter: blur(10px);
+  transform: scale(1.15);
+  opacity: 1;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+
+.cgl-card-thumb.is-loaded .cgl-thumb-blur {
+  opacity: 0;
+}
+
+/* 清晰缩略图：默认透明，加载完成后淡入（避免占位闪烁） */
+.cgl-thumb-img {
+  position: relative;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.cgl-card-thumb.is-loaded .cgl-thumb-img {
+  opacity: 1;
 }
 
 .cgl-card-thumb-placeholder i {

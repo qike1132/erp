@@ -27,6 +27,7 @@ export interface ActionResponse {
   version_no?: string
   file_id?: number
   url?: string
+  thumbnail_url?: string
 }
 
 // ==================== 部位布料 ====================
@@ -35,6 +36,7 @@ export interface ActionResponse {
 export interface PartDetail {
   id: number | null
   project_id?: number
+  role_id?: number | null
   part_name: string
   sort_order: number
   fabric_name: string
@@ -67,6 +69,40 @@ export interface PartsByVersionResponse {
   items: PartDetail[]
   versions: string[]
   final_version: string
+}
+
+// ==================== 角色 ====================
+
+/** 角色简要信息 */
+export interface RoleBrief {
+  id: number
+  project_id: number
+  role_name: string
+  sort_order: number
+  is_default: boolean
+  current_version: string
+  created_at: string
+  updated_at: string
+  /** 乐观锁版本号 */
+  version: number
+}
+
+/** 角色列表响应 */
+export interface RoleListResponse {
+  success: boolean
+  items: RoleBrief[]
+}
+
+/** 新增角色请求 */
+export interface RoleCreateRequest {
+  role_name: string
+}
+
+/** 编辑角色请求（乐观锁 version 必填） */
+export interface RoleUpdateRequest {
+  role_name?: string | null
+  current_version?: string | null
+  version: number
 }
 
 /** 批量新增部位单项 */
@@ -168,6 +204,8 @@ export interface ProjectSummary {
   sequence_no: string
   product_name: string
   product_image_url: string | null
+  product_image_thumbnail_url: string | null
+  product_image_blur_url: string | null
   current_version: string
   updated_at: string
 }
@@ -203,6 +241,8 @@ export interface ProjectDetailResponse {
   sequence_no: string
   product_name: string
   product_image_url: string | null
+  product_image_thumbnail_url: string | null
+  product_image_blur_url: string | null
   product_image_file_id: number | null
   customer_id: number | null
   customer_name: string
@@ -215,6 +255,7 @@ export interface ProjectDetailResponse {
   version: number
   parts: PartDetail[]
   versions: VersionBrief[]
+  roles: RoleBrief[]
 }
 
 // ==================== 请求 Schema ====================
@@ -224,6 +265,7 @@ export interface ProjectCreateRequest {
   product_name: string
   customer_id?: number | null
   remark?: string | null
+  initial_roles?: string[] | null
 }
 
 /** 编辑打样项目请求（version 为乐观锁版本号，必填） */
@@ -335,8 +377,8 @@ export const patternRoomApi = {
   },
 
   // ---------- 8. 部位列表 ----------
-  listParts: (projectId: number) =>
-    get<PartListResponse>(`/pattern-room/projects/${projectId}/parts`),
+  listParts: (projectId: number, roleId?: number) =>
+    get<PartListResponse>(`/pattern-room/projects/${projectId}/parts`, roleId != null ? { role_id: roleId } : undefined),
 
   // ---------- 9. 新增部位 ----------
   createPart: (projectId: number, data: PartCreateRequest) =>
@@ -355,8 +397,11 @@ export const patternRoomApi = {
     get<VersionListResponse>(`/pattern-room/projects/${projectId}/versions`),
 
   // ---------- 13. 创建新版本 ----------
-  createVersion: (projectId: number, data: VersionCreateRequest) =>
-    post<ActionResponse>(`/pattern-room/projects/${projectId}/versions`, data),
+  createVersion: (projectId: number, data: VersionCreateRequest, roleId?: number) =>
+    post<ActionResponse>(
+      `/pattern-room/projects/${projectId}/versions${roleId != null ? `?role_id=${roleId}` : ''}`,
+      data,
+    ),
 
   // ---------- 14. 版本详情 ----------
   getVersionDetail: (versionId: number) =>
@@ -370,14 +415,36 @@ export const patternRoomApi = {
     ),
 
   // ---------- 16. 部位跨版本汇总 ----------
-  getPartsByVersion: (projectId: number) =>
-    get<PartsByVersionResponse>(`/pattern-room/projects/${projectId}/parts-by-version`),
+  getPartsByVersion: (projectId: number, roleId?: number) =>
+    get<PartsByVersionResponse>(
+      `/pattern-room/projects/${projectId}/parts-by-version`,
+      roleId != null ? { role_id: roleId } : undefined,
+    ),
 
   // ---------- 17. 批量新增部位 ----------
-  batchCreateParts: (projectId: number, data: BatchPartCreateRequest) =>
-    post<ActionResponse>(`/pattern-room/projects/${projectId}/parts/batch`, data),
+  batchCreateParts: (projectId: number, data: BatchPartCreateRequest, roleId?: number) =>
+    post<ActionResponse>(
+      `/pattern-room/projects/${projectId}/parts/batch${roleId != null ? `?role_id=${roleId}` : ''}`,
+      data,
+    ),
 
   // ---------- 18. 复制部位版本 ----------
   copyPartVersion: (partId: number) =>
     post<ActionResponse>(`/pattern-room/parts/${partId}/copy-version`),
+
+  // ---------- 19. 角色列表 ----------
+  listRoles: (projectId: number) =>
+    get<RoleListResponse>(`/pattern-room/projects/${projectId}/roles`),
+
+  // ---------- 20. 新增角色 ----------
+  createRole: (projectId: number, data: RoleCreateRequest) =>
+    post<ActionResponse>(`/pattern-room/projects/${projectId}/roles`, data),
+
+  // ---------- 21. 编辑角色（改名 / 设置最终版本） ----------
+  updateRole: (roleId: number, data: RoleUpdateRequest) =>
+    put<ActionResponse>(`/pattern-room/roles/${roleId}`, data),
+
+  // ---------- 22. 删除角色 ----------
+  deleteRole: (roleId: number) =>
+    del<ActionResponse>(`/pattern-room/roles/${roleId}`),
 }

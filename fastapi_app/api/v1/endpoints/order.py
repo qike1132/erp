@@ -115,7 +115,22 @@ async def list_beile_orders(
     )
 
     return OrderListResponse(data=result['items'], total=result['total'],
-                             page=result['page'], per_page=result['per_page'])
+                             page=result['page'], per_page=result['per_page'],
+                             unconfirmed_count=result['unconfirmed_count'])
+
+
+@router.post("/{order_id}/confirm", response_model=OrderActionResponse)
+async def confirm_beile_order(
+    order_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    user: User = Depends(require_permission("beile_order_view")),
+) -> OrderActionResponse:
+    """确认湖北订单（beile-order 页面）。
+
+    仅允许确认 factory=湖北 的订单，幂等（已确认直接返回成功）。
+    """
+    result = await order_crud.confirm_beile_order(db, order_id, user)
+    return OrderActionResponse(**result)
 
 
 @router.get("/my-approvals", response_model=ApprovalListResponse)

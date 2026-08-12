@@ -182,7 +182,7 @@
       <template #footer>
         <UiButton variant="ghost" size="sm" @click="showConfirmDialog = false">取消</UiButton>
         <UiButton variant="danger" size="sm" :disabled="importing || !!restoringFile" @click="confirmRestoreAction">
-          <UiLoadingIcon :loading="importing || restoringFile" icon="undo-alt" />
+          <UiLoadingIcon :loading="importing || !!restoringFile" icon="undo-alt" />
           {{ restorePhase || (importing || restoringFile ? '恢复中...' : '确认恢复') }}
         </UiButton>
       </template>
@@ -269,7 +269,7 @@ async function handleSaveToServer() {
   savingToServer.value = true
   saveResult.value = null
   try {
-    const res = await backupApi.saveToServer(backupRemark.value) as ApiResponse
+    const res = await backupApi.saveToServer(backupRemark.value)
     if (res.success) {
       saveResult.value = res
       showToast('备份已保存到服务器', 'success')
@@ -313,7 +313,7 @@ async function validateFile(file: File) {
   const formData = new FormData()
   formData.append('file', file)
   try {
-    const res = await backupApi.validateFile(formData) as ApiResponse
+    const res = await backupApi.validateFile(formData)
     if (res.success) validationResult.value = res.summary
   } catch (e: unknown) {
     showToast(getErrorMessage(e, '验证失败'), 'error')
@@ -408,7 +408,7 @@ async function doFileRestore() {
   try {
     const formData = new FormData()
     formData.append('file', selectedFile.value)
-    const res = await backupApi.asyncImport(formData) as ApiResponse
+    const res = await backupApi.asyncImport(formData)
     if (res.success && res.task_id) {
       restoreTaskId.value = res.task_id
       restorePhase.value = '恢复任务已启动，请等待完成...'
@@ -472,7 +472,7 @@ async function doServerRestore() {
   restoreResult.value = null
   restoreTaskId.value = null
   try {
-    const res = await backupApi.asyncRestoreByName(pendingRestoreFilename) as ApiResponse
+    const res = await backupApi.asyncRestoreByName(pendingRestoreFilename)
     if (res.success && res.task_id) {
       restoreTaskId.value = res.task_id
       restorePhase.value = '恢复任务已启动，请等待完成...'
@@ -494,7 +494,7 @@ const savingIncremental = ref(false)
 async function handleSaveIncremental() {
   savingIncremental.value = true
   try {
-    const res = await backupApi.saveIncremental(backupRemark.value) as ApiResponse
+    const res = await backupApi.saveIncremental(backupRemark.value)
     if (res.success) {
       showToast(`增量备份成功: ${res.filename} (${res.total_rows} 条变更)`, 'success')
       loadServerBackups()
@@ -512,7 +512,7 @@ async function doIncrementalRestore() {
   restoringFile.value = pendingRestoreFilename
   restorePhase.value = '正在增量恢复数据...'
   try {
-    const res = await backupApi.restoreIncremental(pendingRestoreFilename) as ApiResponse
+    const res = await backupApi.restoreIncremental(pendingRestoreFilename)
     restoreResult.value = res
     if (res.success) {
       const msg = `增量恢复成功，共更新 ${res.total_upserted || 0} 条记录`

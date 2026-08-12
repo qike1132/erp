@@ -70,7 +70,7 @@ function beforeUpload(file: File) {
 function handleFileChange(files: FileList) {
   for (let i = 0; i < files.length; i++) {
     const file = files[i]
-    if (!beforeUpload(file)) continue
+    if (!file || !beforeUpload(file)) continue
     handleUpload({ file })
   }
 }

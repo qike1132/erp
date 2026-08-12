@@ -65,6 +65,6 @@ export function useEnhancedList<T>(opts: Options) {
     handleSizeChange: (v: number) => { perPage.value = v; page.value = 1; keysetCursor.value = undefined },
     handleSort: (p: string, o: string|null) => { sortBy.value = p; sortOrder.value = o === 'ascending' ? 'asc' : 'desc'; page.value = 1; keysetCursor.value = undefined },
     handleSearch: (v: string) => { search.value = v },
-    resetFilters: () => { search.value = ''; dSearch.value = ''; sortBy.value = ''; sortOrder.value = 'desc'; page.value = 1; keysetCursor.value = undefined },
+    resetFilters: () => { search.value = ''; sortBy.value = ''; sortOrder.value = 'desc'; page.value = 1; keysetCursor.value = undefined },
   }
 }

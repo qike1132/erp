@@ -86,7 +86,10 @@ export class MultiLevelCache {
 
   private _evictL1(): void {
     const entries = Array.from(this.l1.entries()).sort((a, b) => a[1].expireAt - b[1].expireAt)
-    for (let i = 0; i < Math.max(1, Math.floor(entries.length * 0.25)); i++) this.l1.delete(entries[i][0])
+    for (let i = 0; i < Math.max(1, Math.floor(entries.length * 0.25)); i++) {
+      const entry = entries[i]
+      if (entry) this.l1.delete(entry[0])
+    }
   }
 
   private _evictL2(): void {
@@ -97,7 +100,10 @@ export class MultiLevelCache {
         if (k?.startsWith(p)) { try { items.push({ k, t: JSON.parse(localStorage.getItem(k) ?? '{}').createdAt ?? 0 }) } catch {} }
       }
       items.sort((a, b) => a.t - b.t)
-      for (let i = 0; i < Math.max(1, Math.floor(items.length * 0.25)); i++) localStorage.removeItem(items[i].k)
+      for (let i = 0; i < Math.max(1, Math.floor(items.length * 0.25)); i++) {
+        const item = items[i]
+        if (item) localStorage.removeItem(item.k)
+      }
     } catch {}
   }
 }

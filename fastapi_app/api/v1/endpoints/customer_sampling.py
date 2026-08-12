@@ -30,6 +30,9 @@ from fastapi_app.schemas.customer_sampling import (
     ProjectDetailResponse,
     ProjectListResponse,
     ProjectUpdateRequest,
+    RoleCreateRequest,
+    RoleListResponse,
+    RoleUpdateRequest,
     VersionCreateRequest,
     VersionDetailResponse,
     VersionListResponse,
@@ -110,6 +113,7 @@ async def api_create_project(
                 product_name=data.product_name,
                 customer_id=data.customer_id,
                 remark=data.remark,
+                initial_roles=data.initial_roles,
                 user_id=current_user.id,
             )
         return {'success': True, 'message': '创建成功', **result}
@@ -205,11 +209,12 @@ async def api_upload_project_image(
 @router.get('/projects/{project_id}/parts', response_model=PartListResponse)
 async def api_list_parts(
     project_id: int,
+    role_id: int | None = Query(None, description='角色ID筛选（未传时默认指向默认角色）'),
     db: AsyncSession = Depends(get_read_db),
 ) -> dict[str, Any]:
-    """查询项目下所有部位（按 sort_order 升序，含布料信息）"""
+    """查询项目下指定角色的部位（按 sort_order 升序，含布料信息）"""
     try:
-        return await svc.list_parts(db, project_id)
+        return await svc.list_parts(db, project_id, role_id=role_id)
     except SQLAlchemyError as e:
         logger.exception('查询部位列表失败')
         raise HTTPException(status_code=500, detail='查询失败') from e
@@ -257,14 +262,17 @@ async def api_create_part(
 async def api_batch_create_parts(
     project_id: int,
     data: BatchPartCreateRequest,
+    role_id: int | None = Query(None, description='归属角色ID（未传时默认指向默认角色）'),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permission(PERM)),
 ) -> dict[str, Any]:
-    """批量新增部位（一次事务中创建多条）"""
+    """批量新增部位（一次事务中创建多条，归属到指定角色）"""
     try:
         items = [item.model_dump() for item in data.items]
         async with db_transaction(db):
-            result = await svc.batch_create_parts(db, project_id, items=items, user_id=current_user.id)
+            result = await svc.batch_create_parts(
+                db, project_id, items=items, role_id=role_id, user_id=current_user.id,
+            )
         return {'success': True, 'message': f"已创建 {result['count']} 个部位", **result}
     except HTTPException:
         raise
@@ -374,16 +382,18 @@ async def api_list_versions(
 async def api_create_version(
     project_id: int,
     data: VersionCreateRequest,
+    role_id: int | None = Query(None, description='角色ID（未传时默认指向默认角色，每个角色版本独立）'),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permission(PERM)),
 ) -> dict[str, Any]:
-    """创建新版本（快照当前部位布料 + 计算相对前一版本 diff）"""
+    """创建新版本（角色维度独立，快照该角色当前部位布料 + 计算相对前一版本 diff）"""
     try:
         async with db_transaction(db):
             result = await svc.create_version(
                 db,
                 project_id,
                 reason=data.reason,
+                role_id=role_id,
                 user_id=current_user.id,
             )
         return {
@@ -435,11 +445,97 @@ async def api_list_change_logs(
 @router.get('/projects/{project_id}/parts-by-version', response_model=PartsByVersionResponse)
 async def api_get_parts_by_version(
     project_id: int,
+    role_id: int | None = Query(None, description='角色ID筛选（未传时默认指向默认角色）'),
     db: AsyncSession = Depends(get_read_db),
 ) -> dict[str, Any]:
-    """获取项目所有版本的部位布料数据（跨版本二维表数据源）"""
+    """获取指定角色所有版本的部位布料数据（跨版本二维表数据源）"""
     try:
-        return await svc.get_parts_by_version(db, project_id)
+        return await svc.get_parts_by_version(db, project_id, role_id=role_id)
     except SQLAlchemyError as e:
         logger.exception('查询部位跨版本数据失败')
         raise HTTPException(status_code=500, detail='查询失败') from e
+
+
+# ==================== 17. 角色列表 ====================
+
+@router.get('/projects/{project_id}/roles', response_model=RoleListResponse)
+async def api_list_roles(
+    project_id: int,
+    db: AsyncSession = Depends(get_read_db),
+) -> dict[str, Any]:
+    """列出项目所有角色（按 sort_order 升序）"""
+    try:
+        return await svc.list_roles(db, project_id)
+    except SQLAlchemyError as e:
+        logger.exception('查询角色列表失败')
+        raise HTTPException(status_code=500, detail='查询失败') from e
+
+
+# ==================== 18. 新增角色 ====================
+
+@router.post('/projects/{project_id}/roles', response_model=ActionResponse)
+async def api_create_role(
+    project_id: int,
+    data: RoleCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission(PERM)),
+) -> dict[str, Any]:
+    """新增角色（项目内 role_name 唯一，默认角色不可重复创建）"""
+    try:
+        async with db_transaction(db):
+            result = await svc.create_role(
+                db, project_id, role_name=data.role_name, user_id=current_user.id,
+            )
+        return {'success': True, 'message': '创建成功', **result}
+    except HTTPException:
+        raise
+    except SQLAlchemyError as e:
+        logger.exception('新增角色失败')
+        raise HTTPException(status_code=500, detail='创建失败') from e
+
+
+# ==================== 19. 编辑角色（改名 / 设置最终版本） ====================
+
+@router.put('/roles/{role_id}', response_model=ActionResponse)
+async def api_update_role(
+    role_id: int,
+    data: RoleUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission(PERM)),
+) -> dict[str, Any]:
+    """编辑角色（乐观锁校验，is_default 不可改，可改名或设置最终版本）"""
+    try:
+        async with db_transaction(db):
+            await svc.update_role(
+                db, role_id,
+                role_name=data.role_name,
+                current_version=data.current_version,
+                version=data.version,
+                user_id=current_user.id,
+            )
+        return {'success': True, 'message': '更新成功'}
+    except HTTPException:
+        raise
+    except SQLAlchemyError as e:
+        logger.exception('编辑角色失败')
+        raise HTTPException(status_code=500, detail='更新失败') from e
+
+
+# ==================== 20. 删除角色 ====================
+
+@router.delete('/roles/{role_id}', response_model=ActionResponse)
+async def api_delete_role(
+    role_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission(PERM)),
+) -> dict[str, Any]:
+    """删除角色（默认角色不可删除，级联删 part + version）"""
+    try:
+        async with db_transaction(db):
+            await svc.delete_role(db, role_id, user_id=current_user.id)
+        return {'success': True, 'message': '删除成功'}
+    except HTTPException:
+        raise
+    except SQLAlchemyError as e:
+        logger.exception('删除角色失败')
+        raise HTTPException(status_code=500, detail='删除失败') from e

@@ -126,7 +126,7 @@ async function loadUnprocessed() {
 
 async function loadCompleted() {
   completedLoading.value = true
-  try { completedOrders.value = await purchaseApi.completedOrders({ page: 1, per_page: 50 }) } finally { completedLoading.value = false }
+  try { completedOrders.value = await purchaseApi.completed({ page: 1, per_page: 50 }) } finally { completedLoading.value = false }
 }
 
 function showOrderDetail(order: any) {

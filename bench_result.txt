@@ -1,0 +1,4 @@
+当前(47104/2/2): avg=54.1ms min=51.4ms max=59.0ms
+OWASP(19456/2/1): avg=36.3ms min=35.2ms max=37.3ms
+平衡(19456/3/1): avg=52.9ms min=50.6ms max=55.7ms
+快速(12288/3/1): avg=32.8ms min=30.8ms max=35.0ms

@@ -94,6 +94,8 @@ class OrderListResponse(BaseModel):
     total: int = 0
     page: int = 1
     per_page: int = 50
+    # 未确认湖北订单总数（beile-list 专用，列表顶部横幅使用）
+    unconfirmed_count: int = 0
 
 
 class OrderActionResponse(BaseModel):

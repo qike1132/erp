@@ -49,8 +49,8 @@ export const plushCutePT: PrimeVuePTOptions = {
     }),
     optionGroup: 'px-3 py-1.5 text-[11px] font-semibold text-text-muted uppercase tracking-wider',
     emptyMessage: 'px-3 py-6 text-center text-sm text-text-muted',
-    loadingIcon: 'mr-2 animate-spin',
-    dropdownButton: {
+    loader: 'mr-2 animate-spin',
+    dropdown: {
       class: [
         'border-0 bg-transparent',
         'text-text-muted',
@@ -82,22 +82,12 @@ export const plushCutePT: PrimeVuePTOptions = {
               ? 'mt-auto w-full max-h-[80vh]'
               : 'mb-auto w-full max-h-[80vh]',
         'overflow-y-auto',
+        'px-6 py-5',
         'animate-slide-up',
       ],
     }),
     header: 'flex items-center justify-between px-6 py-4 border-b border-border-light flex-shrink-0',
     title: 'text-lg font-bold text-heading',
-    closeButton: {
-      class: [
-        'inline-flex items-center justify-center',
-        'w-8 h-8',
-        'rounded-full',
-        'text-text-muted',
-        'hover:bg-slate-100 hover:text-text',
-        'transition-colors duration-200',
-      ],
-    },
-    content: 'flex-1 px-6 py-5 overflow-y-auto',
   },
 
   // ============================================================
@@ -116,7 +106,15 @@ export const plushCutePT: PrimeVuePTOptions = {
         context.selected ? 'bg-primary-50' : 'hover:bg-slate-50',
       ],
     }),
-    headerCell: ({ props }: { props: { sortable: boolean } }) => ({
+    columnResizeIndicator: 'absolute top-0 right-0 w-1 h-full bg-primary cursor-col-resize',
+    emptyMessage: 'py-12 text-center text-sm text-text-muted',
+  },
+
+  // ============================================================
+  // Column（DataTable 单元格：表头/表体样式以列级 PT 为准）
+  // ============================================================
+  column: {
+    headerCell: {
       class: [
         'px-3 py-3',
         'text-xs font-semibold text-text-secondary',
@@ -124,32 +122,31 @@ export const plushCutePT: PrimeVuePTOptions = {
         'bg-surface',
         'border-b-2 border-border',
         'text-center',
-        props.sortable ? 'cursor-pointer select-none hover:text-primary' : '',
+      ],
+    },
+    bodyCell: {
+      class: 'px-3 py-3 text-sm text-text text-center align-middle',
+    },
+  },
+
+  // ============================================================
+  // Paginator（独立分页器，UiDataTable 内嵌 Paginator 组件）
+  // ============================================================
+  paginator: {
+    root: 'flex items-center justify-between px-4 py-3 border-t border-border-light',
+    page: ({ context }: { context: { active: boolean } }) => ({
+      class: [
+        'inline-flex items-center justify-center',
+        'min-w-[32px] h-8',
+        'px-2.5',
+        'text-sm font-medium',
+        'rounded-md',
+        'transition-colors duration-150',
+        context.active
+          ? 'bg-primary text-white shadow-sm'
+          : 'text-text-secondary hover:bg-slate-100',
       ],
     }),
-    bodyCell: 'px-3 py-3 text-sm text-text text-center align-middle',
-    columnResizeIndicator: 'absolute top-0 right-0 w-1 h-full bg-primary cursor-col-resize',
-    paginator: {
-      root: 'flex items-center justify-between px-4 py-3 border-t border-border-light',
-      pageButton: ({ context }: { context: { active: boolean } }) => ({
-        class: [
-          'inline-flex items-center justify-center',
-          'min-w-[32px] h-8',
-          'px-2.5',
-          'text-sm font-medium',
-          'rounded-md',
-          'transition-colors duration-150',
-          context.active
-            ? 'bg-primary text-white shadow-sm'
-            : 'text-text-secondary hover:bg-slate-100',
-        ],
-      }),
-    },
-    sortIcon: 'ml-1 inline-block text-text-muted',
-    loadingOverlay: 'absolute inset-0 bg-white/70 flex items-center justify-center z-10',
-    emptyMessage: 'py-12 text-center text-sm text-text-muted',
-    headerCheckbox: 'flex items-center justify-center',
-    bodyCheckbox: 'flex items-center justify-center',
   },
 
   // ============================================================
@@ -157,26 +154,15 @@ export const plushCutePT: PrimeVuePTOptions = {
   // ============================================================
   datepicker: {
     root: 'relative',
-    input: {
-      class: [
-        'w-full',
-        'py-2.5 px-4',
-        'text-sm',
-        'bg-slate-50',
-        'border-2 border-ocean-light',
-        'rounded-[var(--radius-input)]',
-        'transition-colors duration-200',
-        'focus:border-primary focus:shadow-[0_0_0_0.2rem_rgba(135,206,235,0.25)]',
-        'focus:outline-none',
-        'placeholder:text-text-muted',
-      ],
-    },
     panel: 'absolute z-[var(--z-dropdown)] bg-white border border-border rounded-xl shadow-lg mt-1 p-3',
     header: 'flex items-center justify-between px-1 py-2',
     title: 'text-sm font-semibold text-text',
-    previousButton: 'inline-flex items-center justify-center w-8 h-8 rounded-full text-text-muted hover:bg-slate-100 transition-colors',
-    nextButton: 'inline-flex items-center justify-center w-8 h-8 rounded-full text-text-muted hover:bg-slate-100 transition-colors',
-    table: 'w-full border-collapse',
+    pcPrevButton: {
+      root: { class: 'inline-flex items-center justify-center w-8 h-8 rounded-full text-text-muted hover:bg-slate-100 transition-colors' },
+    },
+    pcNextButton: {
+      root: { class: 'inline-flex items-center justify-center w-8 h-8 rounded-full text-text-muted hover:bg-slate-100 transition-colors' },
+    },
     weekHeader: 'text-xs text-text-muted font-medium py-1',
     day: ({ context }: { context: { selected: boolean; today: boolean; disabled: boolean } }) => ({
       class: [
@@ -187,8 +173,6 @@ export const plushCutePT: PrimeVuePTOptions = {
         context.disabled ? 'opacity-30 cursor-not-allowed' : '',
       ],
     }),
-    monthTitle: 'text-sm font-semibold text-text',
-    yearTitle: 'text-sm font-semibold text-text',
     buttonbar: 'flex items-center justify-between pt-3 mt-3 border-t border-border-light',
   },
 
@@ -196,21 +180,9 @@ export const plushCutePT: PrimeVuePTOptions = {
   // Select (Combobox)
   // ============================================================
   select: {
-    root: 'relative',
-    label: 'block text-xs font-semibold text-text-secondary mb-1.5',
-    input: {
-      class: [
-        'flex items-center justify-between',
-        'w-full',
-        'py-2.5 px-4',
-        'text-sm',
-        'bg-slate-50',
-        'border-2 border-ocean-light',
-        'rounded-[var(--radius-input)]',
-        'transition-colors duration-200',
-        'focus-within:border-primary focus-within:shadow-[0_0_0_0.2rem_rgba(135,206,235,0.25)]',
-      ],
-    },
+    root:
+      'relative w-full bg-slate-50 border-2 border-ocean-light rounded-[var(--radius-input)] transition-colors duration-200 focus-within:border-primary focus-within:shadow-[0_0_0_0.2rem_rgba(135,206,235,0.25)]',
+    label: 'block w-full py-2.5 px-4 text-sm text-text',
     dropdown: 'text-text-muted',
     overlay: 'absolute z-[var(--z-dropdown)] w-full mt-1',
     listContainer: 'bg-white border border-border rounded-xl shadow-lg overflow-y-auto max-h-60',
@@ -234,12 +206,12 @@ export const plushCutePT: PrimeVuePTOptions = {
     root: 'fixed inset-0 flex items-center justify-center z-[var(--z-modal)]',
     mask: 'fixed inset-0 bg-black/30 backdrop-blur-sm transition-opacity duration-300',
     content:
-      'relative bg-white rounded-[var(--radius-modal)] shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col animate-slide-up',
+      'relative bg-white rounded-[var(--radius-modal)] shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col animate-slide-up flex-1 px-6 py-5 overflow-y-auto',
     header: 'flex items-center justify-between px-6 py-4 border-b border-border-light flex-shrink-0',
     title: 'text-lg font-bold text-heading',
-    closeButton:
-      'inline-flex items-center justify-center w-8 h-8 rounded-full text-text-muted hover:bg-slate-100 hover:text-text transition-colors',
-    content: 'flex-1 px-6 py-5 overflow-y-auto',
+    pcCloseButton: {
+      root: { class: 'inline-flex items-center justify-center w-8 h-8 rounded-full text-text-muted hover:bg-slate-100 hover:text-text transition-colors' },
+    },
     footer: 'flex items-center justify-end gap-3 px-6 py-4 border-t border-border-light flex-shrink-0',
   },
 
@@ -309,7 +281,7 @@ export const plushCutePT: PrimeVuePTOptions = {
         }`,
       }
     },
-    content: 'flex-1 text-sm',
+    messageContent: 'flex-1 text-sm',
     closeButton: 'text-current opacity-60 hover:opacity-100 transition-opacity',
   },
 }

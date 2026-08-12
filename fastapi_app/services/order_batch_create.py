@@ -14,7 +14,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.business_rules import MAX_QUANTITY
-from fastapi_app.services.notification_service import dispatch_factory_notifications
+from fastapi_app.services.notification_service import (
+    dispatch_beile_unconfirmed_notifications,
+    dispatch_factory_notifications,
+)
 from fastapi_app.services.order_deduction_service import process_order_deduction
 from fastapi_app.shared_models import (
     InventoryLog,
@@ -241,11 +244,34 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                 # Task 3.1: 派发工厂通知（new_order）
                 # 仅 flush 不 commit，与 batch_create_orders 事务模型一致；
                 # 通知失败不应影响订单创建，捕获异常仅记录日志。
+                # 湖北订单确认流程去重：含湖北 SKU 的订单跳过通用工厂通知中的
+                # 「湖北」工厂——湖北用户由下方 dispatch_beile_unconfirmed_notifications
+                # （湖北新订单待确认，可跳转 beile-order 高亮、确认时自动已读）覆盖，
+                # 避免同一订单给同一用户派发两条重复通知；其他地区工厂不受影响。
+                has_hubei_sku = any(
+                    product_map.get(it.product_id) is not None
+                    and product_map[it.product_id].factory == '湖北'
+                    for it in created_items
+                )
                 try:
-                    await dispatch_factory_notifications(db, order, 'new_order', created_items)
+                    await dispatch_factory_notifications(
+                        db, order, 'new_order', created_items,
+                        skip_factory='湖北' if has_hubei_sku else None,
+                    )
                 except Exception as notify_err:
                     logger.warning(
                         "工厂通知派发失败 order_no=%s: %s", order.order_no, notify_err,
+                        exc_info=True,
+                    )
+
+                # 湖北新订单未确认提醒（独立确认流程，仅湖北 SKU 派发；失败不影响订单创建）
+                try:
+                    await dispatch_beile_unconfirmed_notifications(
+                        db, order, [(it.product_id, it.quantity) for it in created_items]
+                    )
+                except Exception as notify_err:
+                    logger.warning(
+                        "湖北未确认提醒派发失败 order_no=%s: %s", order.order_no, notify_err,
                         exc_info=True,
                     )
         except _SavepointRollbackSignal:

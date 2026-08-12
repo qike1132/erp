@@ -38,10 +38,10 @@ function bench(label: string, fn: () => void | Promise<void>, iterations = 10): 
           iterations,
           times,
           avg: times.reduce((s, v) => s + v, 0) / times.length,
-          median: times[Math.floor(times.length / 2)],
-          p95: times[Math.floor(times.length * 0.95)],
-          min: times[0],
-          max: times[times.length - 1],
+          median: times[Math.floor(times.length / 2)]!,
+          p95: times[Math.floor(times.length * 0.95)]!,
+          min: times[0]!,
+          max: times[times.length - 1]!,
         }
         results.push(result)
         const status = result.median < 200 ? '✓' : '✗'
@@ -114,7 +114,8 @@ async function benchDataProcessing() {
     await bench(`Data:groupby_${count}_items`, () => {
       const groups: Record<string, typeof items> = {}
       for (const item of items) {
-        ;(groups[item.status] ??= []).push(item)
+        const st = item.status ?? ''
+        ;(groups[st] ??= []).push(item)
       }
     })
   }

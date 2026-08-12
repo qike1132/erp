@@ -258,48 +258,59 @@ async function searchProducts(q: string): Promise<any[]> {
 }
 
 function onProductInput(idx: number) {
-  const kw = form.details[idx].product_name.trim()
-  form.details[idx].product_id = 0
+  const d = form.details[idx]
+  if (!d) return
+  const kw = d.product_name.trim()
+  d.product_id = 0
   clearTimeout(_searchTimer)
   if (!kw) {
     productSuggestions[idx] = []
-    form.details[idx]._showSuggest = false
+    d._showSuggest = false
     return
   }
   _searchTimer = setTimeout(async () => {
     const list = await searchProducts(kw)
     productSuggestions[idx] = list.slice(0, 10)
-    form.details[idx]._showSuggest = list.length > 0
+    const d2 = form.details[idx]
+    if (d2) d2._showSuggest = list.length > 0
   }, 300)
 }
 
 function onProductFocus(idx: number) {
-  const kw = form.details[idx].product_name.trim()
+  const d = form.details[idx]
+  if (!d) return
+  const kw = d.product_name.trim()
   if (kw && !(productSuggestions[idx]?.length)) {
     searchProducts(kw).then(r => {
       productSuggestions[idx] = r.slice(0, 10)
-      form.details[idx]._showSuggest = r.length > 0
+      const d2 = form.details[idx]
+      if (d2) d2._showSuggest = r.length > 0
     })
   } else if (productSuggestions[idx]?.length) {
-    form.details[idx]._showSuggest = true
+    d._showSuggest = true
   }
 }
 
 function onProductBlur(idx: number) {
-  setTimeout(() => { form.details[idx]._showSuggest = false }, 150)
+  setTimeout(() => {
+    const d = form.details[idx]
+    if (d) d._showSuggest = false
+  }, 150)
 }
 
 function selectProduct(idx: number, p: any) {
-  form.details[idx].product_name = p.name || ''
-  form.details[idx].product_id = p.id || 0
-  form.details[idx].barcode = p.barcode || ''
-  form.details[idx]._showSuggest = false
+  const d = form.details[idx]
+  if (!d) return
+  d.product_name = p.name || ''
+  d.product_id = p.id || 0
+  d.barcode = p.barcode || ''
+  d._showSuggest = false
   productSuggestions[idx] = []
 }
 
 // 批量导入功能
-function onDrop(ev: DragEvent) { dragOver.value = false; const fs = ev.dataTransfer?.files; if (fs?.length) vfile(fs[0]) }
-function onFile(ev: Event) { const t2 = ev.target as HTMLInputElement; if (t2.files?.length) vfile(t2.files[0]); t2.value = '' }
+function onDrop(ev: DragEvent) { dragOver.value = false; const fs = ev.dataTransfer?.files; if (fs?.length && fs[0]) vfile(fs[0]) }
+function onFile(ev: Event) { const t2 = ev.target as HTMLInputElement; if (t2.files?.length && t2.files[0]) vfile(t2.files[0]); t2.value = '' }
 function vfile(f: File) { clearUpMsg(); const ext = '.' + (f.name.split('.').pop()?.toLowerCase() ?? ''); if (!['.xlsx', '.xls', '.csv'].includes(ext)) { showUpMsg('仅支持 .xlsx .xls .csv', false); return; } if (f.size > 10 * 1024 * 1024) { showUpMsg('文件超过 10MB', false); return; } if (f.size === 0) { showUpMsg('文件为空', false); return; } file.value = f }
 function clearFile() { file.value = null; clearUpMsg() }
 async function doUpload() { if (!file.value) return; uploading.value = true; clearUpMsg(); try { const fd = new FormData(); fd.append('file', file.value); const r = await planApi.upload(fd) as any; showUpMsg(`导入成功，共 ${r.total || 0} 条`, true); clearFile(); qc.invalidateQueries({ queryKey: ['pp-monthly'] }); qc.invalidateQueries({ queryKey: ['pp-summary'] }); emit('created') } catch (e: unknown) { showUpMsg(getErrorMessage(e, '导入失败'), false) } finally { uploading.value = false } }
@@ -310,6 +321,7 @@ async function dlTpl() { try { await planApi.downloadTemplate() } catch { showTo
 function validate(): string | null {
   for (let i = 0; i < form.details.length; i++) {
     const d = form.details[i]
+    if (!d) return `第 ${i + 1} 行：数据不完整`
     if (!d.customer_id) return `第 ${i + 1} 行：请选择客户`
     if (!d.product_name.trim()) return `第 ${i + 1} 行：产品名称不能为空`
     if (!d.plan_date) return `第 ${i + 1} 行：请选择出货日期`
@@ -337,7 +349,8 @@ async function handleSubmit() {
 
     for (const [cid, lines] of byCustomer) {
       const cname = customerMap.value.get(cid) || ''
-      const planMonth = lines[0].plan_date ? lines[0].plan_date.substring(0, 7) : ym
+      const firstLine = lines[0]
+      const planMonth = firstLine?.plan_date ? firstLine.plan_date.substring(0, 7) : ym
 
       const payload = {
         customer_id: cid,

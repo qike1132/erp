@@ -14,7 +14,7 @@
         :items="mergedItems"
         :itemHeight="90"
         :containerHeight="360"
-        :itemKey="(i: { material_name: string }) => i.material_name"
+        :itemKey="(i) => i.material_name"
       >
         <template #default="{ item: i }">
           <div class="mr-sku-row" style="margin-bottom:0;">

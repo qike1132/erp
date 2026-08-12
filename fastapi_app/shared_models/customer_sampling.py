@@ -23,6 +23,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     desc,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -47,6 +48,9 @@ CUSTOMER_SAMPLING_ACTIONS = {
     'delete_part': '删除部位',
     'upload_image': '上传产品图片',
     'create_version': '创建新版本',
+    'create_role': '新增角色',
+    'update_role': '编辑角色',
+    'delete_role': '删除角色',
 }
 
 # 变更类型常量
@@ -110,6 +114,13 @@ class CustomerSamplingProject(Base):
     customer: Mapped["Customer | None"] = relationship("Customer", lazy='selectin')
     product_image: Mapped["FileRecord | None"] = relationship("FileRecord", lazy='selectin')
     creator: Mapped["User | None"] = relationship("User", lazy='selectin')
+    roles: Mapped[list["CustomerSamplingRole"]] = relationship(
+        'CustomerSamplingRole',
+        back_populates='project',
+        cascade='all, delete-orphan',
+        lazy='selectin',
+        order_by='CustomerSamplingRole.sort_order',
+    )
     fabric_versions: Mapped[list["CustomerSamplingFabricVersion"]] = relationship(
         'CustomerSamplingFabricVersion',
         back_populates='project',
@@ -163,6 +174,83 @@ class CustomerSamplingProject(Base):
         return data
 
 
+class CustomerSamplingRole(Base):
+    """角色表（部位布料的角色维度）
+
+    每个打样项目下可有 1..N 个角色，每个角色独立维护部位布料与版本快照。
+    每个角色拥有独立的 current_version（最终版本），与其他角色完全隔离。
+    迁移时为每个旧项目自动创建一个 is_default=True 的"默认角色"，承载所有旧数据。
+    """
+    __tablename__ = 'customer_sampling_role'
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey('customer_sampling_project.id', ondelete='CASCADE'), nullable=False,
+    )
+    role_name: Mapped[str] = mapped_column(String(100), nullable=False, comment='角色名称')
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment='排序值')
+    is_default: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default='false', comment='是否默认角色（不可删除）',
+    )
+    current_version: Mapped[str] = mapped_column(
+        String(8), nullable=False, default='T1', server_default='T1', comment='该角色当前最终版本 T1/T2/T3...',
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+        comment='创建时间',
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+        comment='更新时间',
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment='乐观锁版本号')
+
+    project: Mapped["CustomerSamplingProject"] = relationship(
+        "CustomerSamplingProject", back_populates="roles",
+    )
+    parts: Mapped[list["CustomerSamplingPart"]] = relationship(
+        'CustomerSamplingPart',
+        back_populates='role',
+        cascade='all, delete-orphan',
+        lazy='selectin',
+        order_by='CustomerSamplingPart.sort_order',
+    )
+    fabric_versions: Mapped[list["CustomerSamplingFabricVersion"]] = relationship(
+        'CustomerSamplingFabricVersion',
+        back_populates='role',
+        cascade='all, delete-orphan',
+        lazy='selectin',
+        order_by='CustomerSamplingFabricVersion.version_no',
+    )
+
+    __table_args__ = (
+        # 项目内角色名唯一
+        UniqueConstraint('project_id', 'role_name', name='uq_cs_role_project_name'),
+        Index('idx_cs_role_project_sort', 'project_id', 'sort_order'),
+    )
+
+    def __repr__(self):
+        return f'<CustomerSamplingRole {self.project_id}:{self.role_name}>'
+
+    def to_dict(self) -> dict:
+        return {
+            'id': self.id,
+            'project_id': self.project_id,
+            'role_name': self.role_name,
+            'sort_order': self.sort_order,
+            'is_default': self.is_default,
+            'current_version': self.current_version,
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else '',
+            'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M:%S') if self.updated_at else '',
+            'version': self.version,
+        }
+
+
 class CustomerSamplingPart(Base):
     """部位表（当前工作布料数据）
 
@@ -175,6 +263,10 @@ class CustomerSamplingPart(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     project_id: Mapped[int] = mapped_column(
         Integer, ForeignKey('customer_sampling_project.id', ondelete='CASCADE'), nullable=False,
+    )
+    role_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey('customer_sampling_role.id', ondelete='CASCADE'), nullable=False,
+        comment='关联角色ID',
     )
     version_no: Mapped[str] = mapped_column(
         String(8), nullable=False, default='T1', server_default='T1', comment='版本号 T1/T2/T3...',
@@ -210,11 +302,14 @@ class CustomerSamplingPart(Base):
     project: Mapped["CustomerSamplingProject"] = relationship(
         "CustomerSamplingProject", back_populates="parts",
     )
+    role: Mapped["CustomerSamplingRole"] = relationship(
+        "CustomerSamplingRole", back_populates="parts",
+    )
     supplier: Mapped["Supplier | None"] = relationship("Supplier", lazy='selectin')
 
     __table_args__ = (
-        # 同项目 + 同版本下部位名称唯一（T1/T2/T3 各自独立）
-        Index('idx_csp_part_name_version', 'project_id', 'version_no', 'part_name'),
+        # 同角色 + 同版本下部位名称唯一（T1/T2/T3 各自独立）
+        Index('idx_csp_role_part_version', 'role_id', 'version_no', 'part_name', unique=True),
         Index('idx_csp_part_sort', 'project_id', 'sort_order'),
         # 单价非负、交期非负约束
         CheckConstraint('unit_price IS NULL OR unit_price >= 0', name='ck_csp_part_unit_price_nonneg'),
@@ -228,6 +323,7 @@ class CustomerSamplingPart(Base):
         return {
             'id': self.id,
             'project_id': self.project_id,
+            'role_id': self.role_id,
             'version_no': self.version_no,
             'part_name': self.part_name,
             'sort_order': self.sort_order,
@@ -253,6 +349,7 @@ class CustomerSamplingPart(Base):
         """
         return {
             'id': self.id,
+            'role_id': self.role_id,
             'version_no': self.version_no,
             'part_name': self.part_name,
             'sort_order': self.sort_order,
@@ -284,6 +381,10 @@ class CustomerSamplingFabricVersion(Base):
     project_id: Mapped[int] = mapped_column(
         Integer, ForeignKey('customer_sampling_project.id', ondelete='CASCADE'), nullable=False,
     )
+    role_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey('customer_sampling_role.id', ondelete='CASCADE'), nullable=False,
+        comment='关联角色ID',
+    )
     version_no: Mapped[str] = mapped_column(String(8), nullable=False, comment='版本号 T1/T2/T3...')
     snapshot_data: Mapped[list | None] = mapped_column(JSONB, nullable=False, comment='完整快照数据')
     change_summary: Mapped[list | None] = mapped_column(JSONB, comment='相对前一版本的字段级diff')
@@ -299,13 +400,17 @@ class CustomerSamplingFabricVersion(Base):
     project: Mapped["CustomerSamplingProject"] = relationship(
         "CustomerSamplingProject", back_populates="fabric_versions",
     )
+    role: Mapped["CustomerSamplingRole"] = relationship(
+        "CustomerSamplingRole", back_populates="fabric_versions",
+    )
     creator: Mapped["User | None"] = relationship("User", lazy='selectin')
 
     __table_args__ = (
         Index('idx_csfv_project_version', 'project_id', 'version_no'),
+        Index('idx_csfv_role_version', 'role_id', 'version_no'),
         Index('idx_csfv_created_at', 'created_at'),
-        # 同一项目同一版本唯一
-        Index('uq_csfv_project_version', 'project_id', 'version_no', unique=True),
+        # 同一角色同一版本唯一
+        Index('uq_csfv_role_version', 'role_id', 'version_no', unique=True),
     )
 
     def __repr__(self):
@@ -315,6 +420,7 @@ class CustomerSamplingFabricVersion(Base):
         return {
             'id': self.id,
             'project_id': self.project_id,
+            'role_id': self.role_id,
             'version_no': self.version_no,
             'snapshot_data': self.snapshot_data or [],
             'change_summary': self.change_summary,

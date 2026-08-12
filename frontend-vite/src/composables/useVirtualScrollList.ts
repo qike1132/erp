@@ -139,7 +139,6 @@ export function useVirtualScrollList<T>(opts: Options) {
 
   function resetFilters() {
     search.value = ''
-    dSearch.value = ''
     sortBy.value = ''
     sortOrder.value = 'desc'
     currentPageWindow.value = { start: 0, end: maxLoadedPages }

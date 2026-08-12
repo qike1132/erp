@@ -190,7 +190,8 @@ const dragOver = ref(false)
 
 function onFileSelect(e: Event) {
   const input = e.target as HTMLInputElement
-  if (input.files?.length) emit('file-select', input.files[0])
+  const file = input.files?.[0]
+  if (file) emit('file-select', file)
 }
 
 function handleDrop(e: DragEvent) {

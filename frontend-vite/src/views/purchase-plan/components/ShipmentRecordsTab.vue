@@ -14,7 +14,7 @@
       :items="records"
       :itemHeight="40"
       :containerHeight="460"
-      :itemKey="(r: { shipment_no: string }) => r.shipment_no"
+      :itemKey="(r) => r.shipment_no"
     >
       <template #default="{ item: rec }">
         <div class="sp-stockout-row">

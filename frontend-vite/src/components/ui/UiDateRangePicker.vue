@@ -29,7 +29,6 @@ const props = withDefaults(
     dateFormat?: string
   }>(),
   {
-    modelValue: () => null,
     placeholder: '选择日期范围',
     disabled: false,
     dateFormat: 'yy-mm-dd',
@@ -46,7 +45,7 @@ const dateRange = computed({
     return [new Date(props.modelValue[0]), new Date(props.modelValue[1])]
   },
   set: (val) => {
-    if (!val || !Array.isArray(val) || val.length < 2) {
+    if (!val || !Array.isArray(val) || val.length < 2 || val[0] == null || val[1] == null) {
       emit('update:modelValue', null)
       return
     }

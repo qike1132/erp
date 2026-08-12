@@ -47,8 +47,39 @@
               <input type="file" accept="image/jpeg,image/png,image/webp" class="pjf-file-input" @change="onFileChange" />
               <i class="fas fa-cloud-upload-alt" aria-hidden="true" />
               <span>点击或拖拽图片到此处上传</span>
-              <span class="pjf-upload-hint">支持 JPEG/PNG/WebP，≤10MB</span>
+              <span class="pjf-upload-hint">支持 JPEG/PNG/WebP，上传前自动压缩（≤1600px）</span>
             </label>
+          </div>
+        </div>
+
+        <!-- 角色配置（仅新增项目时显示） -->
+        <div v-if="!isEditing" class="pjf-field pjf-full">
+          <label class="pjf-label">
+            角色列表
+            <span class="pjf-hint">不添加则仅创建"默认"</span>
+          </label>
+          <div class="pjf-roles">
+            <div v-for="(role, idx) in roleNames" :key="idx" class="pjf-role-row">
+              <input
+                v-model="roleNames[idx]"
+                class="pjf-input pjf-role-input"
+                placeholder="角色名称"
+                maxlength="100"
+              />
+              <button
+                v-if="roleNames.length > 1"
+                type="button"
+                class="pjf-role-remove"
+                title="移除"
+                @click="roleNames.splice(idx, 1)"
+              >
+                <i class="fas fa-times" aria-hidden="true" />
+              </button>
+            </div>
+            <button type="button" class="pjf-role-add" @click="roleNames.push('')">
+              <i class="fas fa-plus" aria-hidden="true" />
+              添加角色
+            </button>
           </div>
         </div>
       </div>
@@ -65,7 +96,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, computed, watch } from 'vue'
+import { reactive, ref, computed, watch, onBeforeUnmount } from 'vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import { toast } from '@/composables/useToast'
@@ -95,8 +126,19 @@ const form = reactive({
   remark: '',
 })
 
+/** 角色名称列表（仅新增项目时使用，编辑模式不展示） */
+const roleNames = ref<string[]>([''])
+
 const previewUrl = ref<string | null>(null)
 const isDragOver = ref(false)
+
+/** 释放本地预览的 ObjectURL，避免 blob 内存泄漏。
+ * 仅对 blob: 协议生效，服务端 URL 无需释放。 */
+function revokePreview() {
+  if (previewUrl.value?.startsWith('blob:')) {
+    URL.revokeObjectURL(previewUrl.value)
+  }
+}
 
 watch(() => props.visible, (val) => {
   if (val) {
@@ -104,17 +146,70 @@ watch(() => props.visible, (val) => {
       form.product_name = props.project.product_name ?? ''
       form.customer_id = props.project.customer_id ?? null
       form.remark = props.project.remark ?? ''
+      // 切换项目前释放上一个本地预览的 blob
+      revokePreview()
       previewUrl.value = props.project.product_image_url ?? null
     } else {
       form.product_name = ''
       form.customer_id = null
       form.remark = ''
+      roleNames.value = ['']
+      revokePreview()
       previewUrl.value = null
     }
   }
 })
 
-function applyImageFile(file: File) {
+// 弹窗销毁时兜底释放，避免组件卸载残留 blob
+onBeforeUnmount(revokePreview)
+
+/** 上传前压缩图片：最长边 ≤1600px，转 WebP（不可用时回退 JPEG）。
+ * 手机原图通常 3000-5000px / 数 MB，压缩后体积下降 80%+，
+ * 既降低上传带宽，也保证列表缩略图与详情解码流畅。
+ * 压缩失败或已是小图时直接返回原文件，不阻断上传。 */
+const UPLOAD_MAX_EDGE = 1600
+const UPLOAD_QUALITY = 0.82
+
+async function compressImageFile(file: File): Promise<File> {
+  // 已是 WebP 且足够小：直接使用，避免无谓重编码
+  if (file.type === 'image/webp' && file.size <= 1.5 * 1024 * 1024) return file
+  try {
+    const bitmap = await createImageBitmap(file)
+    const { width, height } = bitmap
+    const scale = Math.min(1, UPLOAD_MAX_EDGE / Math.max(width, height))
+    // 已是小图且为 JPEG：无需重编码
+    if (scale === 1 && file.type === 'image/jpeg' && file.size <= 2 * 1024 * 1024) {
+      bitmap.close()
+      return file
+    }
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(width * scale))
+    canvas.height = Math.max(1, Math.round(height * scale))
+    const ctx = canvas.getContext('2d')
+    if (!ctx) {
+      bitmap.close()
+      return file
+    }
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+    bitmap.close()
+    const stem = file.name.replace(/\.(jpe?g|png|webp)$/i, '') || 'image'
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/webp', UPLOAD_QUALITY))
+    if (blob && blob.type === 'image/webp') {
+      return new File([blob], `${stem}.webp`, { type: 'image/webp' })
+    }
+    // WebP 不可用时回退 JPEG
+    const jpegBlob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', UPLOAD_QUALITY))
+    if (jpegBlob) {
+      return new File([jpegBlob], `${stem}.jpg`, { type: 'image/jpeg' })
+    }
+    return file
+  } catch (e) {
+    console.warn('[ProjectFormDialog] 图片压缩失败，使用原图:', e)
+    return file
+  }
+}
+
+async function applyImageFile(file: File) {
   // 校验
   const allowed = ['image/jpeg', 'image/png', 'image/webp']
   if (!allowed.includes(file.type)) {
@@ -126,19 +221,20 @@ function applyImageFile(file: File) {
     return
   }
 
+  // 上传前压缩（生成小体积 WebP/JPEG），失败时回退原图
+  const finalFile = await compressImageFile(file)
+
   // 释放旧预览的 ObjectURL，避免内存泄漏
-  if (previewUrl.value?.startsWith('blob:')) {
-    URL.revokeObjectURL(previewUrl.value)
-  }
-  previewUrl.value = URL.createObjectURL(file)
-  emit('upload-image', file)
+  revokePreview()
+  previewUrl.value = URL.createObjectURL(finalFile)
+  emit('upload-image', finalFile)
 }
 
 function onFileChange(e: Event) {
   const target = e.target as HTMLInputElement
   const file = target.files?.[0]
   if (!file) return
-  applyImageFile(file)
+  void applyImageFile(file)
   target.value = ''
 }
 
@@ -157,10 +253,11 @@ function onDrop(e: DragEvent) {
   isDragOver.value = false
   const file = e.dataTransfer?.files?.[0]
   if (!file) return
-  applyImageFile(file)
+  void applyImageFile(file)
 }
 
 function removeImage() {
+  revokePreview()
   previewUrl.value = null
   emit('remove-image')
 }
@@ -175,10 +272,16 @@ function handleSubmit() {
     }
     emit('submit-update', data)
   } else {
+    // 过滤空白角色名，去重
+    const trimmed = roleNames.value
+      .map(n => n.trim())
+      .filter(n => n.length > 0)
+    const uniqueRoles = Array.from(new Set(trimmed))
     const data: ProjectCreateRequest = {
       product_name: form.product_name,
       customer_id: form.customer_id,
       remark: form.remark || null,
+      initial_roles: uniqueRoles.length > 0 ? uniqueRoles : null,
     }
     emit('submit-create', data)
   }
@@ -295,5 +398,71 @@ function handleSubmit() {
   justify-content: flex-end;
   gap: 8px;
   padding-top: 8px;
+}
+
+.pjf-hint {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--color-text-muted, #94a3b8);
+  margin-left: 6px;
+}
+
+.pjf-roles {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pjf-role-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pjf-role-input {
+  flex: 1;
+}
+
+.pjf-role-remove {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--color-border-light, #e5e7eb);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--color-danger-500, #ef4444);
+  cursor: pointer;
+  font-size: 11px;
+  transition: all 0.15s ease;
+}
+
+.pjf-role-remove:hover {
+  background: var(--color-danger-50, #fef2f2);
+  border-color: var(--color-danger-300, #fca5a5);
+}
+
+.pjf-role-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px dashed var(--color-border-light, #e5e7eb);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-secondary, #6b7280);
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  align-self: flex-start;
+  transition: all 0.15s ease;
+}
+
+.pjf-role-add:hover {
+  border-color: var(--color-primary-400, #60a5fa);
+  color: var(--color-primary-600, #3b82f6);
+  background: var(--color-primary-50, #eff6ff);
 }
 </style>

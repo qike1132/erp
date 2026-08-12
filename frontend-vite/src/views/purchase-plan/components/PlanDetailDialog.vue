@@ -30,7 +30,7 @@
                 :items="customerList"
                 :itemHeight="72"
                 :containerHeight="460"
-                :itemKey="(c: { name: string }) => c.name"
+                :itemKey="(c) => c.name"
               >
                 <template #default="{ item: entry }">
                   <div
@@ -65,7 +65,7 @@
                   :items="modalSelGroup"
                   :itemHeight="54"
                   :containerHeight="420"
-                  :itemKey="(p: { detail_id: number | string }) => p.detail_id"
+                  :itemKey="(p) => p.detail_id"
                 >
                   <template #default="{ item: p }">
                     <div class="sp-plan-item" style="margin-bottom:0;">
@@ -122,7 +122,7 @@ const modalTab = ref<'plans' | 'records'>('plans');
 const modalSelCust = ref('');
 
 watch(() => props.detail, (d) => {
-  modalSelCust.value = d ? Object.keys(d._byCustomer)[0] : '';
+  modalSelCust.value = d ? (Object.keys(d._byCustomer)[0] ?? '') : '';
   modalTab.value = 'plans';
 });
 

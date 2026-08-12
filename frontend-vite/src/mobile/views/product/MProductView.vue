@@ -35,7 +35,7 @@
         </MCard>
       </div>
 
-      <MEmpty v-else :message="searchQuery ? '未找到匹配产品' : '暂无产品数据'" />
+      <MEmpty v-else :title="searchQuery ? '未找到匹配产品' : '暂无产品数据'" />
     </template>
   </div>
 </template>
@@ -79,9 +79,14 @@ function handleSearch(val: string) {
 async function loadProducts() {
   loading.value = true
   try {
-    const res = await productApi.getList({ page: 1, page_size: 200 })
-    products.value = ((res as { data?: { items?: Product[] } })?.data?.items ||
-      (res as unknown as Product[])) as Product[]
+    const res = await productApi.list({ page: 1, per_page: 200 })
+    products.value = (res.items ?? []).map((p) => ({
+      id: p.id,
+      product_code: p.barcode ?? '',
+      product_name: p.name,
+      spec: p.specification,
+      status: p.status === false ? '' : 'active',
+    }))
   } catch (e) {
     console.error('[MProductView] load failed:', e)
     products.value = []

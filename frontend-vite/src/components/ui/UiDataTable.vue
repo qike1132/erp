@@ -43,7 +43,8 @@
  *   </UiDataTable>
  */
 import { DataTable, Column, Paginator } from 'primevue'
-import type { DataTablePageEvent, DataTableSortEvent } from 'primevue'
+import type { DataTableSortEvent } from 'primevue'
+import type { PageState } from 'primevue/paginator'
 
 // ============================================================
 // Column definition
@@ -80,7 +81,6 @@ const props = withDefaults(
     paginator: false,
     rows: 20,
     totalRecords: 0,
-    selection: () => null,
     rowKey: 'id',
     striped: true,
     emptyMessage: '暂无数据',
@@ -110,7 +110,7 @@ const emit = defineEmits<{
 // ============================================================
 // Handlers
 // ============================================================
-function onPage(event: DataTablePageEvent) {
+function onPage(event: PageState) {
   emit('page', { page: event.page, rows: event.rows })
 }
 
@@ -130,7 +130,7 @@ function onRowSelect(event: { data: T[] }) {
       :value="data"
       :loading="loading"
       :paginator="false"
-      :selectionMode="selection !== null ? 'multiple' : undefined"
+      :selectionMode="selection != null ? 'multiple' : undefined"
       :selection="selection"
       :dataKey="rowKey"
       :stripedRows="striped"

@@ -97,8 +97,10 @@ const _prefixSums = computed(() => {
   void _itemCountRef.value
   const n = props.items.length
   const sums = new Float64Array(n + 1)
+  let acc = 0
   for (let i = 0; i < n; i++) {
-    sums[i + 1] = sums[i] + (_heightMap.get(i) || estimatedH.value)
+    acc += _heightMap.get(i) || estimatedH.value
+    sums[i + 1] = acc
   }
   return sums
 })
@@ -123,7 +125,7 @@ function findStartIndex(scrollPos: number): number {
 
 const totalHeight = computed(() => {
   if (!props.dynamicHeight) return props.items.length * props.itemHeight
-  if (_prefixSums.value) return _prefixSums.value[props.items.length]
+  if (_prefixSums.value) return _prefixSums.value[props.items.length]!
   return props.items.length * estimatedH.value
 })
 
@@ -146,7 +148,7 @@ const visibleItems = computed<VirtualItem<T>[]>(() => {
   const result: VirtualItem<T>[] = []
   for (let i = startIndex.value; i < endIndex.value; i++) {
     if (i < props.items.length) {
-      result.push({ raw: props.items[i], index: i })
+      result.push({ raw: props.items[i]!, index: i })
     }
   }
   return result
@@ -203,14 +205,14 @@ function scrollToTop() {
 
 function scrollToBottom() {
   if (containerRef.value) {
-    containerRef.value.scrollTop = totalHeight.value
+    containerRef.value.scrollTop = totalHeight.value ?? 0
   }
 }
 
 watch(() => props.items.length, (newLen, oldLen) => {
   if (newLen !== oldLen) {
     _itemCountRef.value = newLen
-    if (scrollTop.value > totalHeight.value) {
+    if (scrollTop.value > (totalHeight.value ?? 0)) {
       nextTick(() => scrollToTop())
     }
   }

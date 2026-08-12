@@ -52,7 +52,7 @@ describe('useCustomerSampling', () => {
 
     expect(patternRoomApi.getGroupedList).toHaveBeenCalledWith(undefined)
     expect(hook.groups.value).toHaveLength(1)
-    expect(hook.groups.value[0].customer_name).toBe('客户A')
+    expect(hook.groups.value[0]!.customer_name).toBe('客户A')
     expect(hook.totalProjects.value).toBe(2)
     expect(hook.error.value).toBeNull()
     expect(hook.hasData.value).toBe(true)
@@ -97,7 +97,7 @@ describe('useCustomerSampling', () => {
         project_count: 1,
         latest_update_time: '',
         projects: [
-          { id: 1, sequence_no: 'CS-001', product_name: '产品', current_version: 'T1', updated_at: '' },
+          { id: 1, sequence_no: 'CS-001', product_name: '产品', product_image_url: null, product_image_thumbnail_url: null, product_image_blur_url: null, current_version: 'T1', updated_at: '' },
         ],
       },
     ]

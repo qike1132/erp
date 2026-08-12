@@ -41,12 +41,22 @@ class LoginRequest(BaseModel):
     password: str = Field(max_length=128)
     remember: bool = False
 
+class UserInfoResponse(BaseModel):
+    user_id: int
+    username: str
+    is_super: bool
+    factory: str | None = None
+    permissions: list[str]
+
+
 class LoginResponse(BaseModel):
     success: bool
     message: str = ""
     error: str = ""
     access_token: str = ""
     token_type: str = ""
+    user: UserInfoResponse | None = None
+
 
 class FrontendErrorLogRequest(BaseModel):
     timestamp: str
@@ -55,13 +65,6 @@ class FrontendErrorLogRequest(BaseModel):
     context: dict = {}
     url: str = ""
     userAgent: str = ""
-
-class UserInfoResponse(BaseModel):
-    user_id: int
-    username: str
-    is_super: bool
-    factory: str | None = None
-    permissions: list[str]
 
 
 class LoginCheckResponse(BaseModel):
@@ -321,6 +324,13 @@ async def api_login(
         message="登录成功",
         access_token=access_token,
         token_type="bearer",  # nosec
+        user=UserInfoResponse(
+            user_id=user.id,
+            username=user.username,
+            is_super=user.is_super,
+            factory=user.factory,
+            permissions=[p.code for p in user.permissions] if user.permissions else [],
+        ),
     )
 
 

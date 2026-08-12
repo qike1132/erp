@@ -158,8 +158,8 @@ router.beforeEach(async (to: RouteLocationNormalized, _from: RouteLocationNormal
 
   if (!authStore.loaded) {
     try {
+      // init() 内部已并行加载 fetchUser + fetchNavSections，无需重复调用
       await authStore.init()
-      await authStore.fetchNavSections()
     } catch (error) {
       console.error('[Router] 用户初始化失败', error)
       return `/login?redirect=${encodeURIComponent(to.fullPath)}`

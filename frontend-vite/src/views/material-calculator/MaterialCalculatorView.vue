@@ -93,7 +93,7 @@
                 :items="filteredProducts"
                 :itemHeight="80"
                 :containerHeight="productListHeight"
-                :itemKey="(p: { id: number }) => p.id"
+                :itemKey="(p) => p.id"
               >
                 <template #default="{ item: p }">
                   <div

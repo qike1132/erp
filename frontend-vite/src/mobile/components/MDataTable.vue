@@ -24,7 +24,7 @@
       <div class="m-dt-body" role="rowgroup">
         <div
           v-for="(row, idx) in data"
-          :key="rowKey ? row[rowKey] : idx"
+          :key="rowKey ? (row[rowKey] as PropertyKey) : idx"
           :class="['m-dt-row', { 'm-dt-row--clickable': clickable }]"
           role="row"
           @click="clickable && $emit('rowClick', row)"
@@ -43,7 +43,7 @@
           </div>
         </div>
 
-        <MEmpty v-if="!data.length" message="暂无数据" />
+        <MEmpty v-if="!data.length" title="暂无数据" />
       </div>
     </template>
   </div>
@@ -53,7 +53,7 @@
 import MSkeleton from './MSkeleton.vue'
 import MEmpty from './MEmpty.vue'
 
-export interface MTableColumn {
+export interface MTableColumn<T extends Record<string, unknown> = Record<string, unknown>> {
   key: string
   label: string
   width?: string
@@ -62,7 +62,7 @@ export interface MTableColumn {
 }
 
 defineProps<{
-  columns: MTableColumn[]
+  columns: MTableColumn<T>[]
   data: T[]
   loading?: boolean
   clickable?: boolean

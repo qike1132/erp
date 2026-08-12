@@ -34,13 +34,17 @@ function onTouchStart(e: TouchEvent) {
   if (isRefreshing.value) return
   const scrollTop = containerRef.value?.scrollTop ?? 0
   if (scrollTop > 0) return
-  startY.value = e.touches[0].clientY
+  const touch = e.touches[0]
+  if (!touch) return
+  startY.value = touch.clientY
   pulling = true
 }
 
 function onTouchMove(e: TouchEvent) {
   if (!pulling || isRefreshing.value) return
-  const dy = e.touches[0].clientY - startY.value
+  const touch = e.touches[0]
+  if (!touch) return
+  const dy = touch.clientY - startY.value
   if (dy < 0) {
     pullDistance.value = 0
     return

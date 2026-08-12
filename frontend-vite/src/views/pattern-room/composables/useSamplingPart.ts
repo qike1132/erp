@@ -30,7 +30,10 @@ function resolvePartErrorMessage(err: unknown, fallback: string): string {
   return getErrorMessage(err, fallback)
 }
 
-export function useSamplingPart(projectId: Ref<number | null>) {
+export function useSamplingPart(
+  projectId: Ref<number | null>,
+  currentRoleId: Ref<number | null>,
+) {
   /** 当前项目的部位列表（当前版本） */
   const parts = ref<PartDetail[]>([])
   /** 跨版本部位汇总（所有版本扁平列表，带 version_no） */
@@ -49,11 +52,11 @@ export function useSamplingPart(projectId: Ref<number | null>) {
   /**
    * 加载部位列表
    */
-  async function fetchParts(id: number): Promise<void> {
+  async function fetchParts(id: number, roleId?: number): Promise<void> {
     loading.value = true
     error.value = null
     try {
-      const res = await patternRoomApi.listParts(id)
+      const res = await patternRoomApi.listParts(id, roleId)
       parts.value = res.items ?? []
     } catch (e) {
       console.error('[useSamplingPart] 查询部位列表失败:', e)
@@ -69,11 +72,11 @@ export function useSamplingPart(projectId: Ref<number | null>) {
   /**
    * 加载跨版本部位汇总（部位+版本二维表数据源）
    */
-  async function fetchPartsByVersion(id: number): Promise<void> {
+  async function fetchPartsByVersion(id: number, roleId?: number): Promise<void> {
     loading.value = true
     error.value = null
     try {
-      const res = await patternRoomApi.getPartsByVersion(id)
+      const res = await patternRoomApi.getPartsByVersion(id, roleId)
       partsByVersion.value = res.items ?? []
       versionList.value = res.versions ?? []
       finalVersion.value = res.final_version ?? 'T1'
@@ -96,8 +99,8 @@ export function useSamplingPart(projectId: Ref<number | null>) {
     error.value = null
     try {
       const res = await patternRoomApi.createPart(projectId.value, data)
-      // 刷新部位列表
-      await fetchParts(projectId.value)
+      // 刷新部位列表（按当前角色）
+      await fetchParts(projectId.value, currentRoleId.value ?? undefined)
       return res
     } catch (e) {
       console.error('[useSamplingPart] 新增部位失败:', e)
@@ -119,9 +122,9 @@ export function useSamplingPart(projectId: Ref<number | null>) {
     error.value = null
     try {
       const res = await patternRoomApi.updatePart(partId, data)
-      // 刷新部位列表
+      // 刷新部位列表（按当前角色）
       if (projectId.value != null) {
-        await fetchParts(projectId.value)
+        await fetchParts(projectId.value, currentRoleId.value ?? undefined)
       }
       return res
     } catch (e) {
@@ -131,7 +134,7 @@ export function useSamplingPart(projectId: Ref<number | null>) {
       toast.error(message)
       // 乐观锁冲突：自动刷新列表，让用户基于最新数据重试
       if (getErrorStatus(e) === 409 && projectId.value != null) {
-        await fetchParts(projectId.value)
+        await fetchParts(projectId.value, currentRoleId.value ?? undefined)
       }
       return null
     } finally {
@@ -147,9 +150,9 @@ export function useSamplingPart(projectId: Ref<number | null>) {
     error.value = null
     try {
       const res = await patternRoomApi.deletePart(partId)
-      // 刷新部位列表
+      // 刷新部位列表（按当前角色）
       if (projectId.value != null) {
-        await fetchParts(projectId.value)
+        await fetchParts(projectId.value, currentRoleId.value ?? undefined)
       }
       return res
     } catch (e) {
@@ -182,13 +185,14 @@ export function useSamplingPart(projectId: Ref<number | null>) {
     error.value = null
   }
 
-  // watch projectId 自动重新加载部位列表 + 跨版本汇总
+  // watch projectId + currentRoleId 自动重新加载部位列表 + 跨版本汇总
+  // 切换项目或切换角色都会触发，各角色数据完全独立
   watch(
-    projectId,
-    (newId) => {
+    [projectId, currentRoleId],
+    ([newId, newRoleId]) => {
       if (newId != null) {
-        fetchParts(newId)
-        fetchPartsByVersion(newId)
+        fetchParts(newId, newRoleId ?? undefined)
+        fetchPartsByVersion(newId, newRoleId ?? undefined)
       } else {
         clearParts()
       }

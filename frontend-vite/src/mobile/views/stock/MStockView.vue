@@ -8,7 +8,7 @@
     <!-- Filter Tabs -->
     <MFilterChips
       v-model="selectedTab"
-      :options="tabOptions"
+      :chips="tabOptions"
       class="m-stock-tabs"
     />
 
@@ -44,7 +44,7 @@
         </MCard>
       </div>
 
-      <MEmpty v-else :message="searchQuery ? '未找到匹配物料' : '暂无库存数据'" />
+      <MEmpty v-else :title="searchQuery ? '未找到匹配物料' : '暂无库存数据'" />
     </template>
   </div>
 </template>
@@ -77,9 +77,9 @@ const searchQuery = ref('')
 const selectedTab = ref('all')
 
 const tabOptions = [
-  { key: 'all', label: '全部' },
-  { key: 'active', label: '在库' },
-  { key: 'low', label: '低库存' },
+  { value: 'all', label: '全部' },
+  { value: 'active', label: '在库' },
+  { value: 'low', label: '低库存' },
 ]
 
 const filteredStock = computed(() => {
@@ -121,9 +121,14 @@ function getQtyClass(item: StockItem): string {
 async function loadStock() {
   loading.value = true
   try {
-    const res = await stockApi.getList({ page: 1, page_size: 200 })
-    stockItems.value = ((res as { data?: { items?: StockItem[] } })?.data?.items ||
-      (res as unknown as StockItem[])) as StockItem[]
+    const res = await stockApi.inventory({ page: 1, per_page: 200 })
+    stockItems.value = (res.data ?? []).map((it) => ({
+      id: it.product_id,
+      product_name: it.product_name,
+      product_code: it.barcode ?? it.product_barcode ?? '',
+      quantity: it.current_stock,
+      safety_stock: 0,
+    }))
   } catch (e) {
     console.error('[MStockView] load failed:', e)
     stockItems.value = []

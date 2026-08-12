@@ -49,11 +49,11 @@ const quickActionsVisible = ref(false)
 function createSvgIcon(svgString: string): Component {
   const m = svgString.match(/^<svg([^>]*)>([\s\S]*)<\/svg>$/)
   if (!m) throw new Error('Invalid SVG: ' + svgString.slice(0, 50))
-  const attrStr = m[1]
-  const innerHtml = m[2]
+  const attrStr = m[1] ?? ''
+  const innerHtml = m[2] ?? ''
   const attrs: Record<string, string> = {}
   for (const am of attrStr.matchAll(/([\w-]+)="([^"]*)"/g)) {
-    attrs[am[1]] = am[2]
+    if (am[1]) attrs[am[1]] = am[2] ?? ''
   }
   return markRaw(defineComponent({
     render() {
@@ -63,7 +63,9 @@ function createSvgIcon(svgString: string): Component {
 }
 
 // 响应式路由：移动端路径已统一在根级别，无需前缀
-const _tabDefs = [
+interface TabDef { name: string; label: string; path: string; template: string }
+
+const _tabDefs: TabDef[] = [
   { name: 'overview', label: '概览', path: '/dashboard', template: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>` },
   { name: 'shipment', label: '出货', path: '/shipment', template: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>` },
   { name: 'orders', label: '订单', path: '/customer-order', template: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>` },
@@ -72,12 +74,12 @@ const _tabDefs = [
 
 const _quickSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`
 
+const _tabToItem = (t: TabDef) => ({ name: t.name, label: t.label, to: t.path, icon: createSvgIcon(t.template) })
+
 const tabs = computed(() => [
-  { name: _tabDefs[0].name, label: _tabDefs[0].label, to: _tabDefs[0].path, icon: createSvgIcon(_tabDefs[0].template) },
-  { name: _tabDefs[1].name, label: _tabDefs[1].label, to: _tabDefs[1].path, icon: createSvgIcon(_tabDefs[1].template) },
+  ..._tabDefs.slice(0, 2).map(_tabToItem),
   { name: 'quick', label: '快捷', center: true, icon: createSvgIcon(_quickSvg) },
-  { name: _tabDefs[2].name, label: _tabDefs[2].label, to: _tabDefs[2].path, icon: createSvgIcon(_tabDefs[2].template) },
-  { name: _tabDefs[3].name, label: _tabDefs[3].label, to: _tabDefs[3].path, icon: createSvgIcon(_tabDefs[3].template) },
+  ..._tabDefs.slice(2).map(_tabToItem),
 ])
 
 interface QuickAction {

@@ -26,6 +26,8 @@ export interface LoginResponse {
   success: boolean
   access_token: string
   token_type: string
+  /** 登录接口直接返回的用户信息（避免登录后再发 GET /auth/me） */
+  user?: UserInfo
 }
 
 /** 异步任务响应 */
@@ -39,6 +41,7 @@ export interface ExportResponse {
   success: boolean
   filename: string
   html?: string
+  message?: string
 }
 
 /** 用户信息（登录响应内嵌） */
@@ -48,6 +51,8 @@ export interface UserInfo {
   username: string
   is_super: boolean
   permissions: string[]
+  /** 所属工厂：东莞/湖北/NULL（跨厂管理员为 null） */
+  factory?: string | null
 }
 
 /** 订单明细（SKU 粒度），对应后端 OrderItemSchema */
@@ -294,12 +299,16 @@ export interface User {
   status?: boolean
   create_time?: string
   permissions: string[]
+  /** 所属工厂：东莞/湖北/NULL（跨厂管理员为 null） */
+  factory?: string | null
 }
 
 export interface UserCreate {
   username: string
   password: string
   is_super?: boolean
+  /** 所属工厂：东莞/湖北/NULL（空字符串表示清除） */
+  factory?: string | null
 }
 
 export interface NavSection {
@@ -340,6 +349,10 @@ export interface Product {
   status?: boolean
   price?: number
   image?: string
+  /** 规格型号 */
+  specification?: string
+  /** 所属工厂：东莞/湖北 */
+  factory?: string
 }
 
 export interface ProductionCraft {
@@ -388,6 +401,7 @@ export interface MonthlyDayData {
   day: number
   filling: { quantity: number; value: number; sku_count: number }
   handcraft: { quantity: number; value: number; sku_count: number }
+  packaging: { quantity: number; value: number; sku_count: number }
   total: { quantity: number; value: number; sku_count: number }
 }
 

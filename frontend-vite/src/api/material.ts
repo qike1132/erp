@@ -49,7 +49,7 @@ export const materialApi = {
   distribution: () => get<Record<string, unknown>>('/material-registrations/stats/distribution'),
   registrations: (params?: QueryParams) => get<{ registrations: Registration[]; pages?: number; total_pages?: number; total?: number }>('/material-registrations/registrations', params),
   registrationDetail: (id: number) => get<{ registration?: Registration }>(`/material-registrations/registrations/${id}`),
-  history: (params?: QueryParams) => get<{ registrations: Registration[]; pages?: number; total_pages?: number }>('/material-registrations/history', params),
+  history: (params?: QueryParams) => get<{ registrations: Registration[]; pages?: number; total_pages?: number; total?: number }>('/material-registrations/history', params),
   receive: (id: number, data: { received_quantity: number; remark?: string }) => post<ApiResponse & { auto_completed?: boolean }>(`/material-registrations/items/${id}/receive`, data),
   export: (params?: QueryParams, filename = '来料登记汇总.xlsx') =>
     postDownload('/material-registrations/export', params ?? {}, filename),

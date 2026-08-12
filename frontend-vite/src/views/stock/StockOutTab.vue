@@ -331,7 +331,7 @@
           </div>
           <div class="so-detail-cell">
             <span class="so-detail-label">抵扣备货</span>
-            <span class="so-detail-value">{{ detailData.deduct_quantity > 0 ? `抵扣: ${detailData.deduct_quantity}` : '否' }}</span>
+            <span class="so-detail-value">{{ (detailData.deduct_quantity ?? 0) > 0 ? `抵扣: ${detailData.deduct_quantity}` : '否' }}</span>
           </div>
           <div class="so-detail-cell">
             <span class="so-detail-label">订单类型</span>
@@ -602,6 +602,7 @@ const editStagedForm = reactive({ customer: '', date: '', productName: '', quant
 function openEditStaged(idx: number) {
   editStagedIdx.value = idx
   const item = staged.value[idx]
+  if (!item) return
   editStagedForm.customer = item.customer || ''
   editStagedForm.date = item.date || ''
   editStagedForm.productName = item.product_name || ''
@@ -615,6 +616,7 @@ function openEditStaged(idx: number) {
 function saveEditStaged() {
   if (editStagedIdx.value < 0) return
   const item = staged.value[editStagedIdx.value]
+  if (!item) return
   item.customer = editStagedForm.customer
   item.date = editStagedForm.date
   item.quantity = editStagedForm.quantity
@@ -665,7 +667,7 @@ function onExcelDrop(event: DragEvent) {
 async function handleDownloadTemplate() {
   templateDownloading.value = true
   try {
-    await auxApi.downloadTemplate()
+    await stockApi.downloadTemplate()
   } catch {
     showToast('下载失败', 'error')
   } finally {
@@ -723,8 +725,8 @@ const filterOrderType = ref('')
 const filterStart = ref('')
 const filterEnd = ref('')
 const filterDateRange = computed<[string, string] | null>({
-  get: () => (filterStart.value && filterEnd.value ? [filterStart.value, filterEnd.value] : null),
-  set: (val) => {
+  get: () => (filterStart.value && filterEnd.value ? [filterStart.value, filterEnd.value] as [string, string] : null),
+  set: (val: [string, string] | null) => {
     if (val && val.length === 2) {
       filterStart.value = val[0]
       filterEnd.value = val[1]
@@ -771,7 +773,7 @@ async function fetchStockouts() {
     if (filterStart.value) params.start_date = filterStart.value
     if (filterEnd.value) params.end_date = filterEnd.value
     const res = await stockApi.stockouts(params)
-    const items = res.stockouts ?? res.items ?? (Array.isArray(res.data) ? res.data : []) ?? []
+    const items = res.stockouts ?? res.items ?? []
     stockoutRecords.value = items as typeof stockoutRecords.value
     const total = res.total ?? items.length
     totalPages.value = Math.ceil(total / 20) || 1

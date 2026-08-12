@@ -172,6 +172,152 @@ def _guess_content_type(filename: str) -> str:
     return ctype or "application/octet-stream"
 
 
+# 缩略图变体后缀（追加到原 storage_key 后，URL 派生无需额外元数据）
+_THUMBNAIL_SUFFIX = ".thumb.webp"
+_THUMBNAIL_MAX_SIZE = 400
+_THUMBNAIL_QUALITY = 80
+
+# 低质量模糊占位图（blur-up）：32px + 低质量，体积仅几百字节，
+# 列表滚动时先显示模糊图再淡入清晰缩略图，避免白块闪烁
+_BLUR_SUFFIX = ".blur.webp"
+_BLUR_MAX_SIZE = 32
+_BLUR_QUALITY = 20
+
+# 主图压缩参数（上传时同步压缩，避免原图过大导致列表/详情解码卡顿）
+_FULL_MAX_SIZE = 1600
+_FULL_QUALITY = 82
+
+
+def _open_image(content: bytes):
+    """PIL 打开图片字节流；失败返回 None"""
+    from io import BytesIO
+
+    try:
+        from PIL import Image
+    except ImportError:
+        logger.warning("Pillow 未安装，无法处理图片")
+        return None
+    try:
+        # 服务端处理受信用户上传（原图已通过大小/类型校验），
+        # 放宽解压炸弹阈值，避免大尺寸扫描件被误判拒绝
+        Image.MAX_IMAGE_PIXELS = 200_000_000
+        return Image.open(BytesIO(content))
+    except Exception as e:
+        logger.warning("图片解码失败: %s", e)
+        return None
+
+
+def make_thumbnail(content: bytes, max_size: int = _THUMBNAIL_MAX_SIZE, quality: int = _THUMBNAIL_QUALITY) -> bytes | None:
+    """生成 WebP 缩略图字节流（最长边不超过 max_size，等比缩放）
+
+    仅供列表场景使用，原图仍保留。失败返回 None（调用方应回退原图）。
+    注意：不能命名为 generate_thumbnail，避免与 save_upload 的同名布尔参数冲突。
+    """
+    from io import BytesIO
+
+    img = _open_image(content)
+    if img is None:
+        return None
+    try:
+        # 转为 RGB 丢弃 alpha，WebP/JPEG 编码更稳定
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        # 等比缩放（最长边 <= max_size）
+        w, h = img.size
+        if max(w, h) > max_size:
+            scale = max_size / max(w, h)
+            img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))))
+        buf = BytesIO()
+        img.save(buf, format="WEBP", quality=quality, method=4)
+        return buf.getvalue()
+    except Exception as e:
+        logger.warning("缩略图生成失败: %s", e)
+        return None
+
+
+def compress_image(content: bytes, max_size: int = _FULL_MAX_SIZE, quality: int = _FULL_QUALITY) -> bytes | None:
+    """压缩主图：最长边不超过 max_size，统一转 WebP（q82）
+
+    上传时对原始照片/截图执行，将数 MB 的手机原图压缩为适合详情展示的体积。
+    失败返回 None（调用方保留原图，不阻断上传）。
+    """
+    from io import BytesIO
+
+    img = _open_image(content)
+    if img is None:
+        return None
+    try:
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        w, h = img.size
+        if max(w, h) > max_size:
+            scale = max_size / max(w, h)
+            img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))))
+        buf = BytesIO()
+        img.save(buf, format="WEBP", quality=quality, method=4)
+        return buf.getvalue()
+    except Exception as e:
+        logger.warning("主图压缩失败: %s", e)
+        return None
+
+
+def get_thumbnail_key(storage_key: str) -> str:
+    """根据原图 storage_key 派生缩略图 storage_key（追加固定后缀）"""
+    return f"{storage_key}{_THUMBNAIL_SUFFIX}"
+
+
+def get_blur_key(storage_key: str) -> str:
+    """根据原图 storage_key 派生模糊占位图 storage_key（追加固定后缀）"""
+    return f"{storage_key}{_BLUR_SUFFIX}"
+
+
+def make_blur_placeholder(content: bytes, max_size: int = _BLUR_MAX_SIZE, quality: int = _BLUR_QUALITY) -> bytes | None:
+    """生成 32px WebP 低质量模糊占位图（blur-up）
+
+    体积通常 300-800 字节，作为列表缩略图的渐进式加载占位。
+    失败返回 None（调用方跳过，前端回退骨架屏）。
+    """
+    from io import BytesIO
+
+    img = _open_image(content)
+    if img is None:
+        return None
+    try:
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        # 缩小到 32px（保留比例），前端 CSS 放大 + blur 呈现
+        w, h = img.size
+        if max(w, h) > max_size:
+            scale = max_size / max(w, h)
+            img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))))
+        buf = BytesIO()
+        img.save(buf, format="WEBP", quality=quality, method=6)
+        return buf.getvalue()
+    except Exception as e:
+        logger.warning("模糊占位图生成失败: %s", e)
+        return None
+
+
+def _to_webp_key(storage_key: str) -> str:
+    """将存储 key 的扩展名替换为 .webp（主图压缩后使用）
+
+    纯字符串操作保持 / 分隔符（Windows 下 Path.with_suffix 会产出反斜杠，破坏 URL/S3 key）。
+    """
+    head, _, tail = storage_key.rpartition("/")
+    stem, _, _ext = tail.rpartition(".")
+    return f"{head}/{stem}.webp" if head else f"{stem}.webp"
+
+
+async def _upload_with_fallback(storage: StorageBackend, key: str, content: bytes, content_type: str) -> str:
+    """上传文件；S3 熔断时降级到本地存储"""
+    try:
+        return await storage.upload(key, content, content_type=content_type)
+    except CircuitBreakerOpenError as e:
+        logger.warning("S3 存储熔断中，降级到本地存储: %s", e)
+        local_backend = LocalStorageBackend()
+        return await local_backend.upload(key, content, content_type=content_type)
+
+
 async def save_upload(
     content: bytes,
     original_filename: str,
@@ -179,27 +325,42 @@ async def save_upload(
     uploader_id: int | None = None,
     prefix: str = "",
     extra: dict[str, Any] | None = None,
+    generate_thumbnail: bool = False,
 ) -> dict[str, Any]:
     """保存上传文件到对象存储并写入元数据
 
     返回 {"id": ..., "url": ..., "storage_key": ..., "size": ...}
+    若 generate_thumbnail=True：
+      - 主图同步压缩（最长边 ≤ 1600px，WebP q82，压缩后更小才替换原图）
+      - 额外生成 400px WebP 缩略图供列表使用，返回 {"thumbnail_url": ...}（生成失败则为 None）
+      - 生成 32px WebP 模糊占位图（blur-up），由派生 URL 提供
     """
     from fastapi_app.shared_models.file_record import FileRecord
 
     storage = get_storage()
     key = _generate_key(original_filename, prefix=prefix)
     content_type = _guess_content_type(original_filename)
+    thumbnail_url: str | None = None
 
-    # S3 熔断时降级到本地存储，保证业务可用性
-    try:
-        url = await storage.upload(key, content, content_type=content_type)
-    except CircuitBreakerOpenError as e:
-        logger.warning("S3 存储熔断中，降级到本地存储: %s", e)
-        local_backend = LocalStorageBackend()
-        url = await local_backend.upload(key, content, content_type=content_type)
-        storage_type_override = "local"
-    else:
-        storage_type_override = settings.STORAGE_TYPE.lower()
+    # 图片处理：先基于原始字节生成缩略图 + 模糊占位图（质量最好），再压缩主图
+    if generate_thumbnail and content_type and content_type.startswith("image/"):
+        thumb_bytes = make_thumbnail(content)
+        blur_bytes = make_blur_placeholder(content)
+        compressed = compress_image(content)
+        if compressed is not None and len(compressed) < len(content):
+            # 压缩后的 WebP 更小 → 替换为主图（扩展名同步改为 .webp）
+            key = _to_webp_key(key)
+            content = compressed
+            content_type = "image/webp"
+        if thumb_bytes is not None:
+            thumb_key = get_thumbnail_key(key)
+            thumbnail_url = await _upload_with_fallback(storage, thumb_key, thumb_bytes, "image/webp")
+        if blur_bytes is not None:
+            blur_key = get_blur_key(key)
+            await _upload_with_fallback(storage, blur_key, blur_bytes, "image/webp")
+
+    url = await _upload_with_fallback(storage, key, content, content_type)
+    storage_type_override = settings.STORAGE_TYPE.lower()
 
     record = FileRecord(
         original_filename=original_filename,
@@ -221,6 +382,8 @@ async def save_upload(
         storage_type=record.storage_type,
         size=record.size,
         key=record.storage_key,
+        content_type=record.content_type,
+        has_thumbnail=thumbnail_url is not None,
     )
     return {
         "id": record.id,
@@ -228,11 +391,12 @@ async def save_upload(
         "storage_key": record.storage_key,
         "size": record.size,
         "content_type": record.content_type,
+        "thumbnail_url": thumbnail_url,
     }
 
 
 async def delete_upload(record_id: int, db) -> bool:
-    """删除文件（对象存储 + 元数据）"""
+    """删除文件（对象存储 + 元数据，含缩略图变体）"""
     from fastapi_app.shared_models.file_record import FileRecord
 
     record = await db.get(FileRecord, record_id)
@@ -244,6 +408,14 @@ async def delete_upload(record_id: int, db) -> bool:
         await storage.delete(record.storage_key)
     except CircuitBreakerOpenError as e:
         logger.warning("S3 存储熔断中，跳过对象删除（元数据仍会删除）: %s", e)
+    # 顺带清理缩略图与模糊占位图变体（历史文件可能不存在，缺失时忽略）
+    for variant_key in (get_thumbnail_key(record.storage_key), get_blur_key(record.storage_key)):
+        try:
+            await storage.delete(variant_key)
+        except CircuitBreakerOpenError as e:
+            logger.warning("S3 存储熔断中，跳过变体删除: %s", e)
+        except OSError:
+            pass  # 本地变体不存在，忽略
     await db.delete(record)
     await db.flush()
     logger.info("文件已删除", file_id=record.id, key=record.storage_key)

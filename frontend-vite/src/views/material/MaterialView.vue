@@ -419,7 +419,7 @@ function switchToProgress() {
   activeTab.value = 'progress'
   if (!progressRows.value.length && !pIsLoading.value) {
     // 尝试从缓存恢复，实现即时渲染
-    const params: Record<string, unknown> = { page: 1, per_page: 20, exclude_completed: true }
+    const params: Record<string, string | number | boolean> = { page: 1, per_page: 20, exclude_completed: true }
     const { cached } = readMaterialCache('progress', params)
     if (cached) {
       progressRows.value = cached.registrations || []
@@ -435,7 +435,7 @@ function switchToProgress() {
 function switchToHistory() {
   activeTab.value = 'history'
   if (!hRegistrations.value.length && !hIsLoading.value) {
-    const params: Record<string, unknown> = { page: 1, per_page: 20 }
+    const params: Record<string, string | number> = { page: 1, per_page: 20 }
     const { cached } = readMaterialCache('history', params)
     if (cached) {
       hRegistrations.value = cached.registrations || []

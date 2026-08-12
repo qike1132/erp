@@ -1,5 +1,5 @@
 import { ref, watch, nextTick, onMounted, onUnmounted, type Ref, type ComputedRef } from 'vue'
-import type { ECharts } from 'echarts'
+import type { EChartsType } from 'echarts/core'
 import type { DailySummary, MonthlySummary, DepartmentSummary, MonthlyDayData } from '@/types'
 
 type EChartsCore = typeof import('echarts/core')
@@ -43,10 +43,10 @@ export function useProductionCharts(
   dailyChartRef: Ref<HTMLElement | undefined>,
   monthlyChartRef: Ref<HTMLElement | undefined>,
 ) {
-  let dailyChart: ECharts | null = null
-  let monthlyChart: ECharts | null = null
+  let dailyChart: EChartsType | null = null
+  let monthlyChart: EChartsType | null = null
 
-  function getChart(el: HTMLElement, existing: ECharts | null): ECharts | null {
+  function getChart(el: HTMLElement, existing: EChartsType | null): EChartsType | null {
     if (!echarts) return null
     return (existing && !existing.isDisposed()) ? existing : echarts!.init(el)
   }
@@ -112,17 +112,17 @@ export function useProductionCharts(
         {
           name: '充棉', type: 'bar', stack: 'dept',
           data: days.map((d: MonthlyDayData) => d.filling?.quantity ?? 0),
-          itemStyle: { color: deptColors.filling.main, borderRadius: [0, 0, 0, 0] },
+          itemStyle: { color: deptColors.filling!.main, borderRadius: [0, 0, 0, 0] },
         },
         {
           name: '手工', type: 'bar', stack: 'dept',
           data: days.map((d: MonthlyDayData) => d.handcraft?.quantity ?? 0),
-          itemStyle: { color: deptColors.handcraft.main },
+          itemStyle: { color: deptColors.handcraft!.main },
         },
         {
           name: '包装', type: 'bar', stack: 'dept',
           data: days.map((d: MonthlyDayData) => d.packaging?.quantity ?? 0),
-          itemStyle: { color: deptColors.packaging.main, borderRadius: [4, 4, 0, 0] },
+          itemStyle: { color: deptColors.packaging!.main, borderRadius: [4, 4, 0, 0] },
         },
         {
           name: '合计', type: 'line',

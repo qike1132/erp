@@ -122,7 +122,7 @@ const dateList = computed(() => {
     days.push({
       date: ds,
       day: d.getDate(),
-      weekday: WDS[d.getDay()],
+      weekday: WDS[d.getDay()] ?? '',
       count: plans.length,
     })
   }
@@ -179,7 +179,7 @@ async function loadData() {
     if (!plansByDate.value[selectedDate.value]) {
       const keys = Object.keys(plansByDate.value).sort()
       if (keys.length > 0) {
-        selectedDate.value = keys[0]
+        selectedDate.value = keys[0] ?? ''
       }
     }
   } catch {

@@ -30,7 +30,9 @@ export function useStockOutActions(
       // 预检：并行查询所有分组的可出货量，收集超额组统一展示
       const overLimitGroups: string[] = []
       const precheckTasks = Object.keys(uniqueKeys).map(async (key) => {
-        const { product_id, customer, order_type, country, stockouts } = uniqueKeys[key]
+        const group = uniqueKeys[key]
+        if (!group) return
+        const { product_id, customer, order_type, country, stockouts } = group
         try {
           const ot = order_type !== 'regular' ? order_type : undefined
           const co = order_type === 'custom' && country ? country : undefined

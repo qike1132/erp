@@ -308,6 +308,7 @@ async def dispatch_factory_notifications(
     order: Order,
     action: Literal['new_order', 'order_updated'],
     changed_items: list[OrderItem] | None = None,
+    skip_factory: str | None = None,
 ) -> int:
     """根据订单涉及的工厂，向对应工厂的启用用户派发系统内通知。
 
@@ -317,6 +318,9 @@ async def dispatch_factory_notifications(
     3. 为每个用户批量插入 Notification 记录（type/title/content/related_order_id/is_read）
     4. 写入 AuditLog（resource_type='notification', action='CREATE', resource_id=str(order.id), detail 含派发摘要）
     5. 返回派发的通知总数
+    6. skip_factory：跳过指定工厂的派发（湖北订单确认流程去重用：含湖北 SKU 的订单
+       由 dispatch_beile_unconfirmed_notifications 覆盖湖北用户，避免同一订单给同一
+       用户派发两条重复通知；其他地区工厂不受影响）
 
     注意：
     - 如果订单不涉及任何工厂（所有 product.factory 为 NULL），直接返回 0，不写 AuditLog
@@ -364,6 +368,10 @@ async def dispatch_factory_notifications(
     factory_user_counts: dict[str, int] = {}
 
     for factory, sku_list in factory_skus.items():
+        if skip_factory and factory == skip_factory:
+            # 被跳过的工厂记 0 人，保证 AuditLog 汇总不会 KeyError
+            factory_user_counts[factory] = 0
+            continue
         result = await session.execute(
             select(User.id).where(User.factory == factory, User.status.is_(True))
         )
@@ -413,4 +421,98 @@ async def dispatch_factory_notifications(
         }, ensure_ascii=False),
     ))
     await session.flush()
+    return len(notifications)
+
+
+# ==================== 湖北新订单未确认提醒（湖北订单确认流程） ====================
+
+BEILE_UNCONFIRMED_TYPE = 'beile_unconfirmed'
+BEILE_UNCONFIRMED_TITLE = '湖北新订单待确认'
+
+
+async def dispatch_beile_unconfirmed_notifications(
+    session: AsyncSession,
+    order: Order,
+    product_quantities: list[tuple[int, int]],
+) -> int:
+    """湖北新订单未确认提醒：向湖北工厂启用用户派发系统内通知。
+
+    湖北订单确认流程的提醒推送（独立于 dispatch_factory_notifications 的通用
+    工厂通知）：新到湖北订单需在 beile-order 页面人工确认，确认前通过通知中心
+    提醒相关用户。
+
+    逻辑：
+    1. 仅当订单包含 factory=湖北 的 SKU 时触发（其他地区订单不参与本流程）
+    2. 通知标题「湖北新订单待确认」，type=beile_unconfirmed
+    3. content 采用 v2 结构化 JSON（与 dispatch_factory_notifications 一致），
+       通知中心点击后跳转 /beile-order 并高亮该订单
+    4. 订单被确认时（order_crud.confirm_beile_order）自动将这些通知标记为已读
+    5. 派发失败不影响订单创建（由调用方 try/except 包裹）
+
+    Args:
+        session: 数据库会话
+        order: 新创建的订单
+        product_quantities: [(product_id, quantity), ...]（订单全部 SKU，
+            函数内部自行过滤 factory=湖北 的 SKU）
+
+    Returns:
+        派发的通知条数
+    """
+    if not product_quantities:
+        return 0
+
+    # 一次性查询所有 products（避免 N+1 与 lazy load）
+    product_ids = {pid for pid, _ in product_quantities}
+    result = await session.execute(
+        select(Product).where(Product.id.in_(product_ids))
+    )
+    products = {p.id: p for p in result.scalars().all()}
+
+    # 仅收集湖北 SKU 摘要
+    hubei_skus: list[tuple[str, int]] = []
+    for product_id, quantity in product_quantities:
+        product = products.get(product_id)
+        if product is not None and product.factory == '湖北':
+            hubei_skus.append((product.name, quantity))
+
+    if not hubei_skus:
+        return 0
+
+    # 派发给湖北工厂的启用用户
+    result = await session.execute(
+        select(User.id).where(User.factory == '湖北', User.status.is_(True))
+    )
+    user_ids = [row[0] for row in result.all()]
+    if not user_ids:
+        return 0
+
+    content = json.dumps({
+        'format_version': 2,
+        'order_type': '贝乐订单',
+        'order_no': order.order_no,
+        'customer': order.customer,
+        'factory': '湖北',
+        'products': [
+            {'name': name, 'quantity': qty}
+            for name, qty in hubei_skus
+        ],
+    }, ensure_ascii=False)
+
+    notifications = [
+        Notification(
+            user_id=uid,
+            type=BEILE_UNCONFIRMED_TYPE,
+            title=BEILE_UNCONFIRMED_TITLE,
+            content=content,
+            related_order_id=order.id,
+            is_read=False,
+        )
+        for uid in user_ids
+    ]
+    session.add_all(notifications)
+    await session.flush()
+    logger.info(
+        '湖北新订单未确认提醒派发 order_no=%s：%d 条（湖北用户 %d 人，SKU %d 个）',
+        order.order_no, len(notifications), len(user_ids), len(hubei_skus),
+    )
     return len(notifications)

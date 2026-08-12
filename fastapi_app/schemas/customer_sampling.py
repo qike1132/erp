@@ -27,6 +27,7 @@ class ActionResponse(BaseModel):
     version_no: str | None = None
     file_id: int | None = None
     url: str | None = None
+    thumbnail_url: str | None = None
 
 
 # ==================== 部位布料 ====================
@@ -37,6 +38,7 @@ class PartDetail(BaseModel):
 
     id: int | None = None
     project_id: int | None = None
+    role_id: int | None = None
     version_no: str | None = None
     part_name: str = Field(..., min_length=1, max_length=100, description='部位名称')
     sort_order: int = Field(0, ge=0, description='排序值')
@@ -53,7 +55,6 @@ class PartDetail(BaseModel):
     created_at: str = ''
     updated_at: str = ''
     version: int = 0
-    version_no: str | None = None
 
 
 class PartListResponse(BaseModel):
@@ -68,6 +69,41 @@ class PartsByVersionResponse(BaseModel):
     items: list[PartDetail] = Field(default_factory=list)
     versions: list[str] = Field(default_factory=list)
     final_version: str = 'T1'
+
+
+# ==================== 角色 ====================
+
+class RoleBrief(BaseModel):
+    """角色简要信息（列表展示）"""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    project_id: int
+    role_name: str
+    sort_order: int = 0
+    is_default: bool = False
+    current_version: str = 'T1'
+    created_at: str = ''
+    updated_at: str = ''
+    version: int = 0
+
+
+class RoleListResponse(BaseModel):
+    """角色列表响应"""
+    success: bool = True
+    items: list[RoleBrief] = Field(default_factory=list)
+
+
+class RoleCreateRequest(BaseModel):
+    """新增角色请求"""
+    role_name: str = Field(..., min_length=1, max_length=100, description='角色名称')
+
+
+class RoleUpdateRequest(BaseModel):
+    """编辑角色请求（role_name 可改，is_default 不可改）"""
+    role_name: str | None = Field(None, min_length=1, max_length=100, description='角色名称')
+    current_version: str | None = Field(None, max_length=8, description='当前最终版本 T1/T2/T3...')
+    version: int = Field(..., description='乐观锁版本号')
 
 
 # ==================== 版本 ====================
@@ -162,6 +198,8 @@ class ProjectSummary(BaseModel):
     sequence_no: str
     product_name: str
     product_image_url: str | None = None
+    product_image_thumbnail_url: str | None = None
+    product_image_blur_url: str | None = None
     current_version: str = 'T1'
     updated_at: str = ''
 
@@ -199,6 +237,8 @@ class ProjectDetailResponse(BaseModel):
     sequence_no: str
     product_name: str
     product_image_url: str | None = None
+    product_image_thumbnail_url: str | None = None
+    product_image_blur_url: str | None = None
     product_image_file_id: int | None = None
     customer_id: int | None = None
     customer_name: str = ''
@@ -210,6 +250,7 @@ class ProjectDetailResponse(BaseModel):
     version: int = 0
     parts: list[PartDetail] = Field(default_factory=list)
     versions: list[VersionBrief] = Field(default_factory=list)
+    roles: list[RoleBrief] = Field(default_factory=list)
 
 
 # ==================== 请求 Schema ====================
@@ -219,6 +260,9 @@ class ProjectCreateRequest(BaseModel):
     product_name: str = Field(..., min_length=1, max_length=200, description='产品名称')
     customer_id: int | None = None
     remark: str | None = Field(None, max_length=2000, description='备注')
+    initial_roles: list[str] | None = Field(
+        None, max_length=10, description='初始角色名称列表（不传时自动创建"默认"）',
+    )
 
 
 class ProjectUpdateRequest(BaseModel):

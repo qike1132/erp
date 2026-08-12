@@ -251,7 +251,7 @@ const sortedDepartments = computed(() => {
 
 // --- Rank helpers ---
 function rankLabel(idx: number): string {
-  return idx < 3 ? ['#1', '#2', '#3'][idx] : '#' + (idx + 1)
+  return idx < 3 ? (['#1', '#2', '#3'][idx] ?? '') : '#' + (idx + 1)
 }
 
 function rankClass(idx: number): string {

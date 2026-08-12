@@ -1,4 +1,4 @@
-<script setup lang="ts" generic="T extends Record<string, unknown>">
+<script setup lang="ts" generic="T extends object">
 /**
  * UiAutocomplete — 产品/资源搜索自动补全
  *
@@ -139,7 +139,7 @@ function triggerSearch(query: string) {
   if (props.suggestions && props.suggestions.length > 0) {
     const ql = q.toLowerCase()
     internalSuggestions.value = props.suggestions.filter((item) => {
-      const label = item[props.optionLabel!]
+      const label = (item as Record<string, unknown>)[props.optionLabel!]
       return typeof label === 'string' && label.toLowerCase().includes(ql)
     })
     emit('search', q)

@@ -221,7 +221,7 @@ async function handleOneClickGenerate() {
     return
   }
   try {
-    const res = await purchaseApi.oneClickGenerate({ composite_ids: validIds }) as ApiResponse
+    const res = await purchaseApi.oneClickGenerate({ composite_ids: validIds })
     if (res.success) {
       showToast(res.message || '审核成功', 'success')
       unprocessed.clearSelection()
@@ -252,7 +252,7 @@ async function handleQuickGenerate(compositeId: string) {
     return
   }
   try {
-    const res = await purchaseApi.oneClickGenerate({ composite_ids: [compositeId] }) as ApiResponse
+    const res = await purchaseApi.oneClickGenerate({ composite_ids: [compositeId] })
     if (res.success) {
       showToast(res.message || '审核成功', 'success')
       unprocessed.load()

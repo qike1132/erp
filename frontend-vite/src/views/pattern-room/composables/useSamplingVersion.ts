@@ -29,7 +29,10 @@ function resolveVersionErrorMessage(err: unknown, fallback: string): string {
   return getErrorMessage(err, fallback)
 }
 
-export function useSamplingVersion(projectId: Ref<number | null>) {
+export function useSamplingVersion(
+  projectId: Ref<number | null>,
+  currentRoleId: Ref<number | null> = ref(null),
+) {
   /** 版本列表（按 version_no 升序） */
   const versions = ref<VersionBrief[]>([])
   /** 当前选中版本 ID */
@@ -103,7 +106,11 @@ export function useSamplingVersion(projectId: Ref<number | null>) {
     submitting.value = true
     error.value = null
     try {
-      const res = await patternRoomApi.createVersion(projectId.value, { reason })
+      const res = await patternRoomApi.createVersion(
+        projectId.value,
+        { reason },
+        currentRoleId.value ?? undefined,
+      )
       // 刷新版本列表
       await fetchVersions(projectId.value)
       // 自动切换到新版本

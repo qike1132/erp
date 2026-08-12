@@ -581,8 +581,9 @@ function moveSearchIndex(delta: number) {
   if (searchActiveIndex.value >= searchResults.value.length) searchActiveIndex.value = 0
 }
 function confirmSearchSelection() {
-  if (searchActiveIndex.value >= 0 && searchResults.value[searchActiveIndex.value]) {
-    selectProduct(searchResults.value[searchActiveIndex.value])
+  const product = searchActiveIndex.value >= 0 ? searchResults.value[searchActiveIndex.value] : undefined
+  if (product) {
+    selectProduct(product)
   }
 }
 async function selectProduct(product: Product) {
@@ -709,7 +710,8 @@ async function confirmSubmit(opts: { keepOpen: boolean } = { keepOpen: false }) 
     queryClient.invalidateQueries({ queryKey: ['daily-production-daily-summary'] })
     queryClient.invalidateQueries({ queryKey: ['daily-production-monthly-summary'] })
   } catch (error: unknown) {
-    showToast(error?.response?.data?.detail ?? '录入失败', 'error')
+    const detail = (error as { response?: { data?: { detail?: string } } } | null)?.response?.data?.detail
+    showToast(detail ?? '录入失败', 'error')
   }
   finally { isSubmitting.value = false }
 }
@@ -794,8 +796,9 @@ function handleKeydown(event: KeyboardEvent) {
   }
   if (event.ctrlKey && ['1', '2'].includes(event.key)) {
     event.preventDefault()
-    const tabs = ['daily', 'monthly']
-    viewTab.value = tabs[parseInt(event.key) - 1]
+    const tabs = ['daily', 'monthly'] as const
+    const tab = tabs[parseInt(event.key) - 1]
+    if (tab) viewTab.value = tab
   }
 }
 

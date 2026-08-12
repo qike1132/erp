@@ -183,7 +183,7 @@ function _renderToast(msg: string, type: ToastType, options: Required<ToastOptio
     closeBtn = document.createElement('button')
     closeBtn.setAttribute('aria-label', '关闭通知')
     const closeIcon = icon(faTimes)
-    closeBtn.innerHTML = closeIcon.html
+    closeBtn.innerHTML = Array.isArray(closeIcon.html) ? closeIcon.html.join('') : closeIcon.html
     const closeSvg = closeBtn.querySelector('svg')
     if (closeSvg) {
       closeSvg.style.width = '12px'
@@ -248,7 +248,7 @@ function _renderToast(msg: string, type: ToastType, options: Required<ToastOptio
     // simultaneously-exiting toasts. Opacity will hide the resulting
     // flat background long before the user notices.
     wrap.style.backdropFilter = 'none'
-    wrap.style.WebkitBackdropFilter = 'none'
+    ;(wrap.style as CSSStyleDeclaration & { WebkitBackdropFilter?: string }).WebkitBackdropFilter = 'none'
     wrap.style.opacity = '0'
     wrap.style.transform = 'translateY(-8px) scale(0.94)'
     wrap.style.maxHeight = '0'

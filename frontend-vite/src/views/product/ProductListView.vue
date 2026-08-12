@@ -504,14 +504,14 @@ const {
   staleTime: 30_000,
 })
 
-function onSearchInput(e: Event) {
-  setSearchTerm((e.target as HTMLInputElement).value)
+function onSearchInput(q: string) {
+  setSearchTerm(q)
 }
 
 function onSortChange(e: Event) {
   const val = (e.target as HTMLSelectElement).value
   const [field, order] = val.split('-')
-  handleSort(field, order === 'asc' ? 'ascending' : 'descending')
+  handleSort(field ?? '', order === 'asc' ? 'ascending' : 'descending')
 }
 
 // ===== 添加产品 =====

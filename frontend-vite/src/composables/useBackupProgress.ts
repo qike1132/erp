@@ -81,7 +81,7 @@ export function useBackupProgress() {
   const { pause: pausePoll, resume: resumePoll, isActive: isIntervalActive } = useIntervalFn(
     () => { if (currentTaskId) fetchProgress(currentTaskId) },
     1000,
-    { immediate: false, controls: true },
+    { immediate: false },
   )
 
   function startPolling(taskId: string, intervalMs: number = 1000) {

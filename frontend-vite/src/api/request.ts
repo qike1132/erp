@@ -30,7 +30,7 @@ export function clearCsrfCache(): void {
  */
 function getCsrfFromCookie(): string {
   const match = document.cookie.match(/(?:^|;\s*)fastapi_csrf_token=([^;]*)/)
-  return match ? decodeURIComponent(match[1]) : ''
+  return match ? decodeURIComponent(match[1] ?? '') : ''
 }
 
 const service: AxiosInstance = axios.create({
@@ -215,7 +215,7 @@ export function download(url: string, filename: string, params?: Record<string, 
           const reader = new FileReader()
           reader.onload = () => {
             const dataUrl = reader.result as string
-            resolve(dataUrl.split(',')[1])
+            resolve(dataUrl.split(',')[1] ?? '')
           }
           reader.readAsDataURL(blob)
         })

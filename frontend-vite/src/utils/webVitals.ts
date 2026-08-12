@@ -69,7 +69,8 @@ export function initWebVitals() {
 export function getVitalsSummary(): Record<string, { value: number; rating: string }> {
   const summary: Record<string, { value: number; rating: string }> = {}
   for (const m of history) {
-    if (!summary[m.name] || m.value > summary[m.name].value) {
+    const cur = summary[m.name]
+    if (!cur || m.value > cur.value) {
       summary[m.name] = { value: m.value, rating: m.rating }
     }
   }

@@ -373,7 +373,8 @@ async def update_process_type(db: AsyncSession, pt_id: int, data: dict) -> dict:
 
     await db.flush()
     await db.refresh(pt)
-    return _serialize_process_type(pt)
+    product = await db.get(Product, pt.product_id)
+    return _serialize_process_type(pt, product)
 
 
 async def delete_process_type(db: AsyncSession, pt_id: int) -> None:

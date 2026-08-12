@@ -4,6 +4,27 @@
 
     <!-- 表格区 -->
     <div class="bo-card-main">
+      <!-- 确认状态筛选（湖北订单确认流程） -->
+      <div class="bo-confirm-filter">
+        <span class="bo-confirm-filter-label">确认状态</span>
+        <div class="bo-confirm-filter-seg">
+          <button
+            type="button"
+            :class="['bo-confirm-filter-btn', { 'is-active': confirmStatus === 'unconfirmed' }]"
+            @click="setConfirmStatus('unconfirmed')"
+          >未确认<span v-if="unconfirmedCount > 0" class="bo-confirm-filter-count">{{ unconfirmedCount }}</span></button>
+          <button
+            type="button"
+            :class="['bo-confirm-filter-btn', { 'is-active': confirmStatus === 'confirmed' }]"
+            @click="setConfirmStatus('confirmed')"
+          >已确认</button>
+        </div>
+      </div>
+      <!-- 湖北新订单未确认提醒横幅（全局未确认订单数，不受分页/筛选影响） -->
+      <div v-if="unconfirmedCount > 0" class="bo-unconfirmed-banner">
+        <FontAwesomeIcon icon="exclamation-triangle" aria-hidden="true" />
+        <span>湖北新订单提醒：共有 <strong>{{ unconfirmedCount }}</strong> 个订单待确认，请及时确认</span>
+      </div>
       <div v-if="isLoading && orders.length === 0" class="bo-empty">
         <UiSpinner />
       </div>
@@ -14,62 +35,97 @@
       <template v-else>
         <div v-if="isFetching" class="bo-fetching-bar"><div class="bo-fetching-progress" /></div>
         <div class="bo-table-wrap">
-          <table class="bo-table">
-          <thead>
-            <tr>
-              <th class="bo-th-center" style="white-space:nowrap; width: 170px;">下单时间</th>
-              <th class="bo-th-center" style="width: 170px;">客户名称</th>
-              <th v-if="showProductColumn" class="bo-th-center" style="width: 180px;">产品名称</th>
-              <th class="bo-th-center" style="width: 100px;">工厂</th>
-              <th class="bo-th-center" style="width: 130px;">数量</th>
-              <th class="bo-th-left">备注</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="item in displayOrders"
-              :key="item.id"
-              :class="{ 'bo-row-highlight': highlightId !== null && String(item.id) === highlightId, 'bo-row-multi-sku': (item.items?.length || 1) > 1 }"
-              class="bo-row-clickable"
-              @click="openDetail(item)"
+          <!-- 表头（独立于虚拟滚动，粘在顶部） -->
+          <div class="bo-grid bo-grid-header">
+            <div class="bo-th bo-th-center" style="width: 170px;">下单时间</div>
+            <div class="bo-th bo-th-center" style="width: 170px;">客户名称</div>
+            <div v-if="showProductColumn" class="bo-th bo-th-center" style="width: 180px;">产品名称</div>
+            <div class="bo-th bo-th-center" style="width: 100px;">工厂</div>
+            <div class="bo-th bo-th-center" style="width: 130px;">数量</div>
+            <div class="bo-th bo-th-center" style="width: 110px;">确认状态</div>
+            <div v-if="confirmStatus !== 'confirmed'" class="bo-th bo-th-center" style="width: 130px;">确认操作</div>
+            <div class="bo-th bo-th-left" style="width: 160px;">备注</div>
+          </div>
+
+          <!-- 虚拟滚动主体：只渲染视口附近的订单行（多 SKU 变高行自动测量） -->
+          <div ref="listAreaRef" class="bo-list-area">
+            <VirtualList
+              v-if="listAreaHeight > 0"
+              ref="virtualListRef"
+              :items="displayOrders"
+              :item-height="54"
+              :estimated-height="54"
+              dynamic-height
+              :container-height="listAreaHeight"
+              :item-key="(i: BeileOrderRow) => i.id"
+              class="bo-virtual-list"
             >
-              <td class="bo-td-center bo-td-nowrap" style="width: 170px;">
-                <div class="bo-order-meta-cell">
-                  <span v-if="item.record_type === 'stockin'" class="bo-type-badge bo-type-badge--stockin">备货</span>
-                  <span v-else class="bo-type-badge bo-type-badge--order">订单</span>
-                  <span class="bo-order-date" :title="item.order_date || ''">{{ item.order_date || '-' }}</span>
+              <template #default="{ item }">
+                <div
+                  :class="['bo-grid bo-grid-row bo-row-clickable', { 'bo-row-highlight': highlightId !== null && String(item.id) === highlightId, 'bo-row-multi-sku': (item.items?.length || 1) > 1 }]"
+                  @click="openDetail(item)"
+                >
+                  <div class="bo-td bo-td-center bo-td-middle bo-td-nowrap" style="width: 170px;">
+                    <div class="bo-order-meta-cell">
+                      <span v-if="item.record_type === 'stockin'" class="bo-type-badge bo-type-badge--stockin">备货</span>
+                      <span v-else class="bo-type-badge bo-type-badge--order">订单</span>
+                      <span class="bo-order-date" :title="item.order_date || ''">{{ item.order_date || '-' }}</span>
+                    </div>
+                  </div>
+                  <div class="bo-td bo-td-center bo-td-middle bo-customer-cell" style="width:170px">{{ item.customer || '-' }}</div>
+                  <div v-if="showProductColumn" class="bo-td bo-td-center bo-product-cell" style="width: 180px;">
+                    <template v-if="visibleSkus(item).length > 0">
+                      <div v-for="sku in visibleSkus(item)" :key="sku.id" class="bo-sku-line">
+                        <span class="bo-sku-name" :title="sku.product_name || ''">{{ sku.product_name || '-' }}</span>
+                      </div>
+                    </template>
+                    <span v-else class="bo-sku-name">{{ item.product_name || '-' }}</span>
+                  </div>
+                  <div class="bo-td bo-td-center bo-td-middle" style="width: 100px;"><span class="bo-cell-main">{{ item.factories?.join(', ') || '湖北' }}</span></div>
+                  <div class="bo-td bo-td-center bo-td-middle" style="width: 130px;">
+                    <template v-if="showProductColumn && visibleSkus(item).length > 0">
+                      <strong>{{ visibleSkus(item).reduce((sum, s) => sum + (s.quantity || 0), 0) }}</strong>
+                    </template>
+                    <template v-else-if="item.items && item.items.length > 0">
+                      <strong>{{ item.items.reduce((sum, s) => sum + (s.quantity || 0), 0) }}</strong>
+                    </template>
+                    <template v-else><strong>{{ item.quantity }}</strong></template>
+                  </div>
+                  <!-- 确认状态列：仅湖北订单参与确认流程，备货记录不适用 -->
+                  <div class="bo-td bo-td-center bo-td-middle" style="width: 110px;">
+                    <template v-if="item.record_type === 'order'">
+                      <span v-if="item.confirmed" class="bo-confirm-badge bo-confirm-badge--done">已确认</span>
+                      <span v-else class="bo-confirm-badge bo-confirm-badge--pending">未确认</span>
+                    </template>
+                    <span v-else class="bo-cell-muted">-</span>
+                  </div>
+                  <!-- 确认操作列：未确认订单显示确认按钮，已确认订单显示已确认徽章（已确认 TAB 隐藏整列） -->
+                  <div v-if="confirmStatus !== 'confirmed'" class="bo-td bo-td-center bo-td-middle" style="width: 130px;">
+                    <template v-if="item.record_type === 'order'">
+                      <button
+                        v-if="!item.confirmed"
+                        class="bo-confirm-btn"
+                        :disabled="confirmingIds.has(item.id)"
+                        @click.stop="handleConfirm(item)"
+                      >
+                        {{ confirmingIds.has(item.id) ? '确认中…' : '确认订单' }}
+                      </button>
+                      <span v-else class="bo-confirm-badge bo-confirm-badge--done">已确认</span>
+                    </template>
+                    <span v-else class="bo-cell-muted">-</span>
+                  </div>
+                  <div class="bo-td bo-td-left bo-td-middle" style="width: 160px;">
+                    <template v-if="visibleSkus(item).length > 0">
+                      <div v-for="sku in visibleSkus(item)" :key="sku.id" class="bo-sku-line">
+                        <span v-if="sku.note" class="bo-sku-note" :title="sku.note">{{ sku.note }}</span>
+                      </div>
+                    </template>
+                    <span v-if="item.note" class="bo-sku-note">{{ item.note }}</span>
+                  </div>
                 </div>
-              </td>
-              <td class="bo-td-center bo-td-middle bo-customer-cell" style="width:170px">{{ item.customer || '-' }}</td>
-              <td v-if="showProductColumn" class="bo-td-center bo-product-cell" style="width: 180px;">
-                <template v-if="visibleSkus(item).length > 0">
-                  <div v-for="sku in visibleSkus(item)" :key="sku.id" class="bo-sku-line">
-                    <span class="bo-sku-name" :title="sku.product_name || ''">{{ sku.product_name || '-' }}</span>
-                  </div>
-                </template>
-                <span v-else class="bo-sku-name">{{ item.product_name || '-' }}</span>
-              </td>
-              <td class="bo-td-center bo-td-middle" style="width: 100px;"><span class="bo-cell-main">{{ item.factories?.join(', ') || '湖北' }}</span></td>
-              <td class="bo-td-center" style="width: 130px;">
-                <template v-if="showProductColumn && visibleSkus(item).length > 0">
-                  <strong>{{ visibleSkus(item).reduce((sum, s) => sum + (s.quantity || 0), 0) }}</strong>
-                </template>
-                <template v-else-if="item.items && item.items.length > 0">
-                  <strong>{{ item.items.reduce((sum, s) => sum + (s.quantity || 0), 0) }}</strong>
-                </template>
-                <template v-else><strong>{{ item.quantity }}</strong></template>
-              </td>
-              <td class="bo-td-left">
-                <template v-if="visibleSkus(item).length > 0">
-                  <div v-for="sku in visibleSkus(item)" :key="sku.id" class="bo-sku-line">
-                    <span v-if="sku.note" class="bo-sku-note" :title="sku.note">{{ sku.note }}</span>
-                  </div>
-                </template>
-                <span v-if="item.note" class="bo-sku-note">{{ item.note }}</span>
-              </td>
-            </tr>
-          </tbody>
-          </table>
+              </template>
+            </VirtualList>
+          </div>
 
           <div v-if="displayOrders.length === 0" class="bo-empty bo-empty-inline">
             <FontAwesomeIcon icon="search-minus" aria-hidden="true" />
@@ -102,6 +158,19 @@
           <span class="bo-detail-meta-item"><span class="bo-detail-meta-label">工厂</span> {{ detailData.factories?.join(', ') || '湖北' }}</span>
           <span class="bo-detail-meta-sep">|</span>
           <span class="bo-detail-meta-item"><span class="bo-detail-meta-label">总数量</span> <strong class="bo-detail-meta-num">{{ detailTotalQuantity }}</strong></span>
+        </div>
+
+        <!-- 确认信息：仅湖北订单参与确认流程，备货记录不展示 -->
+        <div v-if="detailData.record_type === 'order'" class="bo-detail-meta-row">
+          <span class="bo-detail-meta-item">
+            <span class="bo-detail-meta-label">确认状态</span>
+            <span v-if="detailData.confirmed" class="bo-confirm-badge bo-confirm-badge--done">已确认</span>
+            <span v-else class="bo-confirm-badge bo-confirm-badge--pending">未确认</span>
+          </span>
+          <span class="bo-detail-meta-sep">|</span>
+          <span class="bo-detail-meta-item"><span class="bo-detail-meta-label">确认时间</span> {{ detailData.confirmed_at || '-' }}</span>
+          <span class="bo-detail-meta-sep">|</span>
+          <span class="bo-detail-meta-item"><span class="bo-detail-meta-label">确认人</span> {{ detailData.confirmed_by || '-' }}</span>
         </div>
 
         <!-- SKU 明细表格 -->
@@ -143,14 +212,17 @@
  * 职责：以表格展示 factory=湖北 的订单，支持订单号/客户筛选与分页。
  * 数据获取复用 orderApi.beileList，锁定 factory=湖北。
  */
-import { reactive, computed, ref, watch } from 'vue'
+import { reactive, computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { useQuery, keepPreviousData } from '@tanstack/vue-query'
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/vue-query'
 import { orderApi } from '@/api'
 import type { OrderItem } from '@/types'
+import type { OrderListApiResponse } from '@/api/order'
 import UiPagination from '@/components/ui/UiPagination.vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiButton from '@/components/ui/UiButton.vue'
+import VirtualList from '@/components/ui/VirtualList.vue'
+import { toast } from '@/composables/useToast'
 
 /** 每页条数选项（分页组件下拉可选） */
 const PAGE_SIZE_OPTIONS = [18, 30, 50, 100]
@@ -164,6 +236,12 @@ type BeileOrderRow = OrderItem & {
   customer?: string
   record_type?: 'order' | 'stockin'
   factories?: string[]
+  /** 后端 beile-list 返回的首个 SKU 产品图路径 */
+  product_image?: string | null
+  /** 湖北订单确认状态：confirmed=false 即「未确认订单」 */
+  confirmed?: boolean
+  confirmed_at?: string
+  confirmed_by?: string
   product?: { id: number; name: string; barcode: string; image: string }
 }
 
@@ -176,11 +254,19 @@ const filters = reactive({ orderNo: '', customer: '' })
 const appliedProduct = ref('')
 const appliedCustomer = ref('')
 
+/** 确认状态筛选：unconfirmed=未确认 / confirmed=已确认（默认未确认，湖北订单确认流程） */
+const confirmStatus = ref('unconfirmed')
+
 const page = ref(1)
 
 const currentPage = computed(() => page.value)
 const totalItems = computed(() => ordersData.value?.total ?? 0)
 const totalPages = computed(() => Math.max(1, Math.ceil(totalItems.value / perPage.value)))
+
+/** 湖北订单列表查询 key：随筛选/分页变化（乐观更新时复用同一 key） */
+const queryKey = computed(() =>
+  ['beile-orders', appliedCustomer.value, confirmStatus.value, page.value, perPage.value] as const,
+)
 
 const {
   data: ordersData,
@@ -188,20 +274,26 @@ const {
   isFetching,
   refetch,
 } = useQuery({
-  queryKey: ['beile-orders', appliedCustomer, () => page.value, () => perPage.value],
+  queryKey,
   queryFn: () =>
     orderApi.beileList({
       customer: appliedCustomer.value || undefined,
+      confirm_status: confirmStatus.value || undefined,
       page: page.value,
       per_page: perPage.value,
     }),
   staleTime: 30_000,
   gcTime: 60_000,
+  // 定时刷新：新到湖北订单（未确认提醒横幅）无需手动刷新即可出现
+  refetchInterval: 30_000,
   placeholderData: keepPreviousData,
 })
 
 /** 服务端返回的订单列表（已应用 customer 筛选与分页） */
 const orders = computed<BeileOrderRow[]>(() => (ordersData.value?.data ?? []) as BeileOrderRow[])
+
+/** 湖北订单确认流程：未确认订单总数（全局，列表顶部横幅用） */
+const unconfirmedCount = computed(() => ordersData.value?.unconfirmed_count ?? 0)
 
 /** 搜索产品时是否显示产品名称列：仅当已应用产品关键字筛选时显示 */
 const showProductColumn = computed(() => appliedProduct.value.trim() !== '')
@@ -275,6 +367,43 @@ function goPage(p: number) {
   page.value = p
 }
 
+// ==================== 虚拟滚动容器高度测量 ====================
+const listAreaRef = ref<HTMLElement | null>(null)
+const listAreaHeight = ref(0)
+// VirtualList 为泛型组件，InstanceType 无法推导，用结构化类型描述所需句柄
+const virtualListRef = ref<{ scrollToTop: () => void } | null>(null)
+
+let areaResizeObserver: ResizeObserver | null = null
+
+function measureListArea() {
+  if (listAreaRef.value) {
+    listAreaHeight.value = listAreaRef.value.clientHeight
+  }
+}
+
+onMounted(() => {
+  measureListArea()
+  if (listAreaRef.value && typeof ResizeObserver !== 'undefined') {
+    areaResizeObserver = new ResizeObserver(measureListArea)
+    areaResizeObserver.observe(listAreaRef.value)
+  }
+})
+
+onUnmounted(() => {
+  areaResizeObserver?.disconnect()
+})
+
+// 翻页 / 筛选变化时回到列表顶部（虚拟滚动不自动归位）
+watch([page, appliedProduct, appliedCustomer, confirmStatus], () => {
+  virtualListRef.value?.scrollToTop()
+})
+
+/** 切换确认状态筛选并回到第一页 */
+function setConfirmStatus(v: string) {
+  confirmStatus.value = v
+  page.value = 1
+}
+
 /** 订单详情弹窗状态 */
 const detailOpen = ref(false)
 const detailData = ref<BeileOrderRow | null>(null)
@@ -289,6 +418,49 @@ const detailTotalQuantity = computed(() => {
 function openDetail(item: BeileOrderRow) {
   detailData.value = item
   detailOpen.value = true
+}
+
+/** 确认中订单 id 集合（防止重复点击，按钮禁用态依赖） */
+const confirmingIds = ref<Set<number>>(new Set())
+
+const queryClient = useQueryClient()
+
+/**
+ * 确认湖北订单：仅未确认的订单记录可见按钮，确认后由后端落库
+ * confirmed_at。在「未确认」筛选下成功后立即从列表移除该行并递减
+ * 未确认计数，无需等待 30s 定时刷新；其他筛选下照常 refetch。
+ */
+async function handleConfirm(item: BeileOrderRow) {
+  if (item.record_type !== 'order' || item.confirmed) return
+  if (confirmingIds.value.has(item.id)) return
+  confirmingIds.value.add(item.id)
+  try {
+    const res = await orderApi.confirmBeileOrder(item.id)
+    toast.success(res.message || '订单已确认')
+    if (confirmStatus.value === 'unconfirmed') {
+      queryClient.setQueryData<OrderListApiResponse>(queryKey.value, (old) => {
+        if (!old) return old
+        const data = (old.data || []).filter((o) => o.id !== item.id)
+        return {
+          ...old,
+          data,
+          total: Math.max(0, (old.total ?? 0) - 1),
+          unconfirmed_count: Math.max(0, (old.unconfirmed_count ?? 0) - 1),
+        }
+      })
+      // 当前页被清空且不是第一页时回退一页
+      if (orders.value.length === 0 && page.value > 1) {
+        page.value -= 1
+      }
+    } else {
+      await refetch()
+    }
+  } catch (e) {
+    const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+    toast.error(msg || '确认订单失败')
+  } finally {
+    confirmingIds.value.delete(item.id)
+  }
 }
 
 /**
@@ -337,69 +509,79 @@ watch(perPage, () => {
 .bo-table-wrap {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
-.bo-table {
+/* 虚拟滚动表格：flex 网格布局，列宽与表头/行一致 */
+.bo-grid {
+  display: flex;
   width: 100%;
-  table-layout: fixed;
-  border-collapse: collapse;
   font-size: 13px;
 }
-.bo-table thead {
-  background: var(--color-surface, #f8fafc);
-  position: sticky;
-  top: 0;
-  z-index: 1;
+.bo-grid-header {
+  flex-shrink: 0;
 }
-.bo-table thead th {
+.bo-th,
+.bo-td {
+  box-sizing: border-box;
+  flex: 0 0 auto;
   padding: 10px 14px;
+  border-right: 1px solid #d8dce2;
+  overflow: hidden;
+}
+.bo-th:last-child,
+.bo-td:last-child {
+  flex: 1 1 auto;
+  min-width: 160px;
+  border-right: none;
+}
+.bo-th {
+  display: flex;
+  align-items: center;
+  background: var(--color-surface, #f8fafc);
   font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  border-right: 1px solid #d8dce2;
   border-bottom: 2px solid #b8bec6;
   color: var(--color-text-secondary);
-  text-align: center;
   white-space: nowrap;
 }
-.bo-table thead th:last-child {
-  border-right: none;
-}
-.bo-th-left {
-  text-align: left !important;
-}
-.bo-th-right {
-  text-align: right !important;
-}
-.bo-th-center {
-  text-align: center !important;
-}
-.bo-table tbody td {
-  padding: 10px 14px;
-  font-size: 13px;
-  border-right: 1px solid #d8dce2;
-  border-bottom: 1px solid #d8dce2;
-  text-align: center;
-  vertical-align: middle;
-  transition: background 0.2s ease;
-  color: var(--color-text);
-}
-.bo-table tbody td:last-child {
-  border-right: none;
-}
-.bo-table tbody tr:last-child td {
-  border-bottom: none;
-}
+.bo-th-left,
 .bo-td-left {
   text-align: left !important;
+  justify-content: flex-start;
 }
+.bo-th-right,
+.bo-td-right {
+  text-align: right !important;
+  justify-content: flex-end;
+}
+.bo-th-center,
 .bo-td-center {
   text-align: center !important;
+  justify-content: center;
 }
-.bo-table tbody tr:hover {
+.bo-grid-row {
+  align-items: center;
+  border-bottom: 1px solid #d8dce2;
+  color: var(--color-text);
+  transition: background 0.2s ease;
+}
+.bo-grid-row:hover {
   background: var(--color-primary-50);
+}
+.bo-grid-row.bo-row-multi-sku {
+  align-items: flex-start;
+}
+/* 缩略图列：紧凑内边距，容纳 56px 图 */
+.bo-td-thumb {
+  padding: 4px;
+}
+.bo-th-thumb {
+  padding: 10px 6px;
+  justify-content: center;
 }
 /* 通知跳转高亮行 */
 .bo-row-highlight {
@@ -412,6 +594,7 @@ watch(perPage, () => {
 }
 .bo-product-cell {
   text-align: left !important;
+  justify-content: flex-start;
 }
 .bo-product-cell .bo-sku-name {
   display: block;
@@ -429,10 +612,66 @@ watch(perPage, () => {
   font-size: 12px;
 }
 
-/* ===== 多 SKU 分行显示（对齐 purchase 页面风格） ===== */
-.bo-table tbody tr td {
-  vertical-align: top;
+/* ===== 虚拟滚动列表区 ===== */
+.bo-list-area {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
 }
+.bo-virtual-list {
+  height: 100%;
+}
+
+/* ===== 缩略图 blur-up（骨架屏 → 清晰图淡入） ===== */
+.bo-thumb {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--color-surface, #f3f4f6);
+  flex-shrink: 0;
+}
+.bo-thumb-skeleton {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(100deg, #f1f5f9 40%, #e2e8f0 50%, #f1f5f9 60%);
+  background-size: 200% 100%;
+  animation: bo-shimmer 1.4s linear infinite;
+  opacity: 1;
+  transition: opacity 0.3s ease;
+}
+.bo-thumb.is-loaded .bo-thumb-skeleton {
+  opacity: 0;
+}
+@keyframes bo-shimmer {
+  0% { background-position: 120% 0; }
+  100% { background-position: -120% 0; }
+}
+.bo-thumb-img {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.bo-thumb.is-loaded .bo-thumb-img {
+  opacity: 1;
+}
+.bo-thumb-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary, #94a3b8);
+  font-size: 16px;
+  opacity: 0.6;
+}
+
+/* ===== 多 SKU 分行显示（对齐 purchase 页面风格） ===== */
 .bo-td-middle {
   vertical-align: middle !important;
 }
@@ -506,42 +745,138 @@ watch(perPage, () => {
   vertical-align: middle;
 }
 
-/* ===== 状态徽章（配色对齐 customer-order co-status-*） ===== */
-.bo-status-badge {
-  display: inline-block;
+/* ===== 确认状态筛选（湖北订单确认流程） ===== */
+.bo-confirm-filter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex-shrink: 0;
+}
+.bo-confirm-filter-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+.bo-confirm-filter-seg {
+  display: inline-flex;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  border-radius: 9px;
+  overflow: hidden;
+  background: white;
+}
+.bo-confirm-filter-btn {
+  padding: 5px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  background: white;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+.bo-confirm-filter-btn + .bo-confirm-filter-btn {
+  border-left: 1px solid var(--color-border-light, #e2e8f0);
+}
+.bo-confirm-filter-btn:hover {
+  background: var(--color-primary-50);
+  color: var(--color-primary-600);
+}
+.bo-confirm-filter-btn.is-active {
+  background: var(--color-primary-500);
+  color: #fff;
+}
+/* 按钮内联 flex：保证角标与文字同行居中，不产生错位/溢出 */
+.bo-confirm-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.bo-confirm-filter-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  background: var(--color-warning-100);
+  color: var(--color-warning-700);
+}
+.bo-confirm-filter-btn.is-active .bo-confirm-filter-count {
+  background: rgba(255, 255, 255, 0.28);
+  color: #fff;
+}
+
+/* ===== 未确认订单提醒横幅（湖北订单确认流程） ===== */
+.bo-unconfirmed-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 10px 16px;
+  background: var(--color-warning-50);
+  border: 1px solid var(--color-warning-200);
+  border-radius: 10px;
+  color: var(--color-warning-700);
+  font-size: 13px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.bo-unconfirmed-banner svg {
+  flex-shrink: 0;
+}
+.bo-unconfirmed-banner strong {
+  color: var(--color-warning-800);
+  font-size: 15px;
+}
+
+/* ===== 确认状态（湖北订单确认流程） ===== */
+.bo-confirm-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 3px 10px;
   border-radius: 8px;
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
 }
-.bo-status-pending {
+.bo-confirm-badge--pending {
   background: var(--color-warning-50);
   color: var(--color-warning-600);
 }
-.bo-status-stocked {
-  background: var(--color-success-100);
-  color: var(--color-success-600);
-}
-.bo-status-partial {
-  background: var(--color-primary-50);
-  color: var(--color-primary-600);
-}
-.bo-status-shipping {
-  background: #e0e7ff;
-  color: #4338ca;
-}
-.bo-status-shipped {
+.bo-confirm-badge--done {
   background: var(--color-success-50);
   color: var(--color-success-700);
 }
-.bo-status-cancelled {
-  background: var(--color-danger-50);
-  color: var(--color-danger-500);
-}
-.bo-status-completed {
+.bo-confirm-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 3px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--color-primary-500);
+  border-radius: 8px;
   background: var(--color-primary-50);
-  color: var(--color-primary-700);
+  color: var(--color-primary-600);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.2s ease;
+}
+.bo-confirm-btn:hover:not(:disabled) {
+  background: var(--color-primary-100);
+}
+.bo-confirm-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* ===== 空/加载态 ===== */

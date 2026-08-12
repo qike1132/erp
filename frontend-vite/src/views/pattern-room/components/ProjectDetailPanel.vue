@@ -10,16 +10,18 @@
 
     <!-- 项目详情 -->
     <template v-else>
+      <!-- 角色切换 TAB -->
+      <RoleTabs
+        :roles="roles"
+        :current-role-id="currentRoleId"
+        :can-manage="canManage"
+        @select="$emit('select-role', $event)"
+        @add="$emit('add-role', $event)"
+        @remove="$emit('remove-role', $event)"
+      />
+
       <!-- 部位布料表格（跨版本二维表） -->
       <div class="pdp-section pdp-parts-section">
-        <div class="pdp-section-header">
-          <h3 class="pdp-section-title">
-            <i class="fas fa-layer-group" aria-hidden="true" />
-            部位布料
-            <span class="pdp-count-badge">{{ partsByVersion.length }}</span>
-          </h3>
-        </div>
-
         <div v-if="partLoading" class="pdp-loading">
           <UiSpinner size="sm" />
           <span>加载部位数据...</span>
@@ -180,8 +182,9 @@
 <script setup lang="ts">
 import UiSpinner from '@/components/ui/UiSpinner.vue'
 import EmptyState from './EmptyState.vue'
+import RoleTabs from './RoleTabs.vue'
 import { computed, ref, reactive, watch } from 'vue'
-import type { ProjectDetailResponse, PartDetail } from '@/api/patternRoom'
+import type { ProjectDetailResponse, PartDetail, RoleBrief } from '@/api/patternRoom'
 
 const props = defineProps<{
   project: ProjectDetailResponse | null
@@ -191,6 +194,8 @@ const props = defineProps<{
   versionLoading: boolean
   partLoading: boolean
   canManage: boolean
+  roles: RoleBrief[]
+  currentRoleId: number | null
 }>()
 
 const emit = defineEmits<{
@@ -199,6 +204,9 @@ const emit = defineEmits<{
   'edit-version': [part: PartDetail]
   'delete-version': [part: PartDetail]
   'save-edit': [part: PartDetail, data: { supplier_name: string; fabric_name: string; fabric_color_no: string }]
+  'select-role': [roleId: number]
+  'add-role': [roleName: string]
+  'remove-role': [role: RoleBrief]
 }>()
 
 /** 正在编辑的行 part_id（null = 无编辑中行）
@@ -242,9 +250,9 @@ watch(
   () => { editingPartId.value = undefined },
 )
 
-/** 切换项目时强制退出编辑，并重置版本筛选 */
+/** 切换项目或角色时强制退出编辑，并重置版本筛选 */
 watch(
-  () => props.project?.id ?? null,
+  [() => props.project?.id ?? null, () => props.currentRoleId],
   () => {
     editingPartId.value = undefined
     selectedVersion.value = {}
@@ -254,7 +262,7 @@ watch(
 
 /** finalVersion 变化时（刷新/更新后）自动折叠显示最终版本 */
 watch(
-  [() => props.finalVersion, () => props.partsByVersion, () => props.project?.id],
+  [() => props.finalVersion, () => props.partsByVersion, () => props.project?.id, () => props.currentRoleId],
   ([finalVersion, partsByVersion]) => {
     if (!finalVersion || !props.project) return
     const next: Record<string, string | null> = {}
@@ -372,40 +380,6 @@ const groupedRows = computed(() => {
 
 .pdp-section:last-child {
   border-bottom: none;
-}
-
-.pdp-section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-  gap: 8px;
-}
-
-.pdp-section-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text-primary, #1a1a2e);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0;
-  line-height: 1.4;
-}
-
-.pdp-section-title i {
-  font-size: 12px;
-  color: var(--color-text-secondary, #475569);
-}
-
-.pdp-count-badge {
-  font-size: 11px;
-  padding: 0 6px;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--color-text-muted, #94a3b8);
-  font-weight: 500;
-  line-height: 1.6;
 }
 
 /* ============ 加载 ============ */

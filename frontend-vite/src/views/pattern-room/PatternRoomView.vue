@@ -25,16 +25,14 @@
             class="pr-add-btn pr-add-btn--primary"
             @click="openCreateProjectDialog"
           >
-            <i class="fas fa-plus" aria-hidden="true" />
-            新增打样项目
+            新建打样
           </button>
           <button
             v-if="canManage && selectedProjectId"
             class="pr-add-btn"
             @click="openCreatePartDialog"
           >
-            <i class="fas fa-plus" aria-hidden="true" />
-            录入布料信息
+            录入信息
           </button>
         </div>
       </div>
@@ -87,10 +85,15 @@
               :version-loading="versionHook.loading.value"
               :part-loading="partHook.loading.value"
               :can-manage="canManage"
+              :roles="roleHook.roles.value"
+              :current-role-id="roleHook.currentRoleId.value"
               @set-final-version="onSetFinalVersion"
               @copy-version="onCopyPartVersion"
               @delete-version="onDeleteVersion"
               @save-edit="onSaveEdit"
+              @select-role="onSelectRole"
+              @add-role="onAddRole"
+              @remove-role="onRemoveRole"
             />
           </main>
         </div>
@@ -180,6 +183,7 @@ import { useCustomerSampling } from './composables/useCustomerSampling'
 import { useSamplingProject } from './composables/useSamplingProject'
 import { useSamplingPart } from './composables/useSamplingPart'
 import { useSamplingVersion } from './composables/useSamplingVersion'
+import { useSamplingRole } from './composables/useSamplingRole'
 
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { usePermission } from '@/composables/usePermission'
@@ -205,10 +209,12 @@ const canManage = computed(() => hasPermission('customer_sampling_manage'))
 const groupHook = useCustomerSampling()
 const projectHook = useSamplingProject()
 
-/** 当前选中项目 ID（响应式，传给 Part/Version Hook 自动 watch） */
+/** 当前选中项目 ID（响应式，传给 Role/Part/Version Hook 自动 watch） */
 const selectedProjectId = ref<number | null>(null)
-const partHook = useSamplingPart(selectedProjectId)
-const versionHook = useSamplingVersion(selectedProjectId)
+/** 角色管理 hook（先于 part/version 初始化，提供 currentRoleId） */
+const roleHook = useSamplingRole(selectedProjectId)
+const partHook = useSamplingPart(selectedProjectId, roleHook.currentRoleId)
+const versionHook = useSamplingVersion(selectedProjectId, roleHook.currentRoleId)
 
 // ==================== 客户列表（项目表单选项） ====================
 const customers = ref<Customer[]>([])
@@ -391,13 +397,20 @@ function openCreatePartDialog() {
 async function onPartSubmitBatch(data: BatchPartCreateRequest) {
   if (!selectedProjectId.value) return
   try {
-    const res = await patternRoomApi.batchCreateParts(selectedProjectId.value, data)
+    const res = await patternRoomApi.batchCreateParts(
+      selectedProjectId.value,
+      data,
+      roleHook.currentRoleId.value ?? undefined,
+    )
     if (res.success) {
       toast.success(res.message || `已创建 ${data.items.length} 个部位`)
       partFormVisible.value = false
       if (selectedProjectId.value) {
         await projectHook.fetchDetail(selectedProjectId.value)
-        await partHook.fetchPartsByVersion(selectedProjectId.value)
+        await partHook.fetchPartsByVersion(
+          selectedProjectId.value,
+          roleHook.currentRoleId.value ?? undefined,
+        )
       }
     } else {
       toast.error(res.message || '批量创建失败')
@@ -408,27 +421,27 @@ async function onPartSubmitBatch(data: BatchPartCreateRequest) {
   }
 }
 
-/** 设置最终版本：更新 project.current_version 并刷新列表 */
+/** 设置最终版本：更新当前角色的 current_version */
 async function onSetFinalVersion(versionNo: string) {
   if (!canManage.value) {
     toast.warning('无操作权限')
     return
   }
-  if (!selectedProjectId.value || !projectHook.currentProject.value) return
-  const proj = projectHook.currentProject.value
+  if (!selectedProjectId.value) return
+  const currentRole = roleHook.getCurrentRole()
+  if (!currentRole) {
+    toast.warning('请先选择角色')
+    return
+  }
   try {
-    const res = await projectHook.update(selectedProjectId.value, {
-      version: proj.version,
-      current_version: versionNo,
-    })
+    const res = await roleHook.setRoleCurrentVersion(currentRole.id, versionNo, currentRole.version)
     if (res) {
       toast.success(`已设置最终版本 ${versionNo}`)
-      await projectHook.fetchDetail(selectedProjectId.value)
       // 部位数据本身未变化，仅本地更新最终版本号，
       // 避免 fetchPartsByVersion 的 loading 态与数据整体替换导致整表闪烁
       partHook.setFinalVersion(versionNo)
     } else {
-      toast.error(projectHook.error.value || '设置失败')
+      toast.error(roleHook.error.value || '设置失败')
     }
   } catch (e) {
     console.error('[PatternRoomView] 设置最终版本失败:', e)
@@ -451,7 +464,10 @@ async function onCopyPartVersion(part: PartDetail) {
     if (res.success) {
       toast.success(res.message || `已复制版本 ${res.version_no ?? ''}`)
       if (selectedProjectId.value) {
-        await partHook.fetchPartsByVersion(selectedProjectId.value)
+        await partHook.fetchPartsByVersion(
+          selectedProjectId.value,
+          roleHook.currentRoleId.value ?? undefined,
+        )
       }
     } else {
       toast.error(res.message || '复制版本失败')
@@ -486,7 +502,10 @@ async function onSaveEdit(
     if (res.success) {
       toast.success('保存成功')
       if (selectedProjectId.value) {
-        await partHook.fetchPartsByVersion(selectedProjectId.value)
+        await partHook.fetchPartsByVersion(
+          selectedProjectId.value,
+          roleHook.currentRoleId.value ?? undefined,
+        )
       }
     } else {
       toast.error(res.message || '保存失败')
@@ -529,7 +548,10 @@ async function onDeleteVersion(part: PartDetail) {
     if (res.success) {
       toast.success(res.message || '删除成功')
       if (selectedProjectId.value) {
-        await partHook.fetchPartsByVersion(selectedProjectId.value)
+        await partHook.fetchPartsByVersion(
+          selectedProjectId.value,
+          roleHook.currentRoleId.value ?? undefined,
+        )
       }
     } else {
       toast.error(res.message || '删除失败')
@@ -556,14 +578,62 @@ async function onVersionCreateConfirm(reason: string | null) {
   if (res) {
     toast.success(res.message || `已创建版本 ${res.version_no ?? ''}`)
     versionCreateVisible.value = false
-    // 刷新项目详情（current_version 更新）
-    if (selectedProjectId.value) await projectHook.fetchDetail(selectedProjectId.value)
+    // 刷新角色列表（current_version 更新）+ 项目详情
+    if (selectedProjectId.value) {
+      await roleHook.fetchRoles(selectedProjectId.value)
+      await projectHook.fetchDetail(selectedProjectId.value)
+    }
     // 空快照提示
     if (partHook.parts.value.length === 0) {
       toast.warning('当前无部位布料信息，已创建空版本，建议先维护部位布料')
     }
   } else {
     toast.error(versionHook.error.value || '创建新版本失败')
+  }
+}
+
+// ==================== 角色 TAB 切换/增删 ====================
+function onSelectRole(roleId: number) {
+  roleHook.setCurrentRole(roleId)
+  // partHook / versionHook 会自动 watch currentRoleId 重新加载
+}
+
+async function onAddRole(roleName: string) {
+  if (!canManage.value) {
+    toast.warning('无操作权限')
+    return
+  }
+  if (!selectedProjectId.value) return
+  const res = await roleHook.createRole(roleName)
+  if (res) {
+    toast.success('角色创建成功')
+  } else {
+    toast.error(roleHook.error.value || '创建角色失败')
+  }
+}
+
+async function onRemoveRole(role: { id: number; role_name: string; is_default: boolean }) {
+  if (!canManage.value) {
+    toast.warning('无操作权限')
+    return
+  }
+  if (role.is_default) {
+    toast.warning('默认角色不可删除')
+    return
+  }
+  const ok = await confirmDialog.confirm(
+    '确认删除该角色？',
+    `角色「${role.role_name}」下所有部位布料和版本快照将被级联删除，且不可恢复。`,
+    'danger',
+  )
+  if (!ok) return
+  const res = await roleHook.deleteRole(role.id)
+  if (res) {
+    toast.success('删除成功')
+    // roleHook.fetchRoles 已自动调用，会自动切换 currentRoleId 到第一个角色
+    // partHook 会自动 watch 重新加载
+  } else {
+    toast.error(roleHook.error.value || '删除角色失败')
   }
 }
 

@@ -70,6 +70,10 @@ class Order(Base):
     batch_completed_at: Mapped[datetime | None] = mapped_column(DateTime, comment='批次完成时间')
     batch_completed_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id'), comment='批次完成操作人ID')
 
+    # 湖北订单确认流程（与派生状态机正交）
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, comment='订单确认时间（湖北订单确认流程）')
+    confirmed_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id'), comment='订单确认人ID')
+
     is_deleted: Mapped[bool | None] = mapped_column(Boolean, default=False, index=True, comment='是否已删除')
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, comment='删除时间')
     deleted_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id'), comment='删除人ID')
@@ -81,6 +85,7 @@ class Order(Base):
     locked_by: Mapped["User | None"] = relationship('User', foreign_keys=[locked_by_id], backref='locked_orders')
     deleted_by: Mapped["User | None"] = relationship('User', foreign_keys=[deleted_by_id], backref='deleted_orders')
     batch_completed_by: Mapped["User | None"] = relationship('User', foreign_keys=[batch_completed_by_id], backref='batch_completed_orders')
+    confirmed_by: Mapped["User | None"] = relationship('User', foreign_keys=[confirmed_by_id], backref='confirmed_orders')
     items: Mapped[list["OrderItem"]] = relationship(
         'OrderItem',
         cascade='all, delete-orphan',

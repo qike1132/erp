@@ -34,6 +34,7 @@ from fastapi_app.shared_models import (
     CustomerSamplingFabricVersion,
     CustomerSamplingPart,
     CustomerSamplingProject,
+    CustomerSamplingRole,
     FileRecord,
     Supplier,
     User,
@@ -180,7 +181,7 @@ async def _resolve_supplier_name(db: AsyncSession, supplier_id: int | None) -> s
     return row or ''
 
 
-async def _batch_get_image_urls(db: AsyncSession, file_ids: list[int]) -> dict[int, str]:
+async def _batch_get_image_urls(db: AsyncSession, file_ids: list[int]) -> dict[int, dict]:
     """批量获取文件存储 URL（单次 IN 查询，替代逐个查询，消除列表页 N+1）
 
     Args:
@@ -188,11 +189,12 @@ async def _batch_get_image_urls(db: AsyncSession, file_ids: list[int]) -> dict[i
         file_ids: FileRecord ID 列表（可含重复，内部去重）。
 
     Returns:
-        {file_id: url} 映射；存储后端异常或单条失败时对应条目缺失。
+        {file_id: {"url": ..., "thumbnail_url": ..., "blur_url": ...}} 映射；存储后端异常或单条失败时对应条目缺失。
+        thumbnail_url / blur_url 通过 storage_key 派生固定后缀，前端加载失败时回退到 url（兼容历史无变体文件）。
     """
     if not file_ids:
         return {}
-    from fastapi_app.services.storage_service import get_storage
+    from fastapi_app.services.storage_service import get_blur_key, get_storage, get_thumbnail_key
     result = await db.execute(
         select(FileRecord.id, FileRecord.storage_key).where(FileRecord.id.in_(set(file_ids)))
     )
@@ -204,19 +206,26 @@ async def _batch_get_image_urls(db: AsyncSession, file_ids: list[int]) -> dict[i
     except Exception as e:
         logger.warning('获取存储后端失败: %s', e)
         return {}
-    url_map: dict[int, str] = {}
+    url_map: dict[int, dict] = {}
     for fid, storage_key in rows:
         if not storage_key:
             continue
         try:
-            url_map[fid] = storage.get_url(storage_key)
+            url_map[fid] = {
+                'url': storage.get_url(storage_key),
+                'thumbnail_url': storage.get_url(get_thumbnail_key(storage_key)),
+                'blur_url': storage.get_url(get_blur_key(storage_key)),
+            }
         except Exception as e:
             logger.warning('获取产品图片 URL 失败: file_id=%s, error=%s', fid, e)
     return url_map
 
 
-async def _get_product_image_url(db: AsyncSession, file_id: int | None) -> str | None:
-    """通过 FileRecord.storage_key 拼接产品图片访问 URL（单条场景，复用批量实现）"""
+async def _get_product_image_urls(db: AsyncSession, file_id: int | None) -> dict | None:
+    """通过 FileRecord.storage_key 拼接产品图片访问 URL（单条场景，复用批量实现）
+
+    返回 {"url": ..., "thumbnail_url": ..., "blur_url": ...} 或 None
+    """
     if file_id is None:
         return None
     url_map = await _batch_get_image_urls(db, [file_id])
@@ -347,9 +356,9 @@ async def get_grouped_list(
     }
 
 
-def _project_to_summary(project: CustomerSamplingProject, image_url_map: dict[int, str]) -> dict:
+def _project_to_summary(project: CustomerSamplingProject, image_url_map: dict[int, dict]) -> dict:
     """将项目 ORM 对象转为 ProjectSummary dict（纯函数，图片 URL 由批量映射提供）"""
-    image_url = (
+    image_info = (
         image_url_map.get(project.product_image_file_id)
         if project.product_image_file_id else None
     )
@@ -357,7 +366,9 @@ def _project_to_summary(project: CustomerSamplingProject, image_url_map: dict[in
         'id': project.id,
         'sequence_no': project.sequence_no,
         'product_name': project.product_name,
-        'product_image_url': image_url,
+        'product_image_url': image_info.get('url') if image_info else None,
+        'product_image_thumbnail_url': image_info.get('thumbnail_url') if image_info else None,
+        'product_image_blur_url': image_info.get('blur_url') if image_info else None,
         'current_version': project.current_version,
         'updated_at': project.updated_at.strftime('%Y-%m-%d %H:%M:%S') if project.updated_at else '',
     }
@@ -432,6 +443,7 @@ async def get_project_detail(db: AsyncSession, project_id: int) -> dict:
             selectinload(CustomerSamplingProject.parts).selectinload(CustomerSamplingPart.supplier),
             selectinload(CustomerSamplingProject.fabric_versions),
             selectinload(CustomerSamplingProject.creator),
+            selectinload(CustomerSamplingProject.roles),
         )
         .where(CustomerSamplingProject.id == project_id)
     )
@@ -439,18 +451,22 @@ async def get_project_detail(db: AsyncSession, project_id: int) -> dict:
     if project is None:
         raise NotFoundError('打样项目不存在')
 
-    image_url = await _get_product_image_url(db, project.product_image_file_id)
+    image_info = await _get_product_image_urls(db, project.product_image_file_id)
 
     # 部位按 sort_order 升序（relationship 已配置 order_by，但显式排序更安全）
     parts_sorted = sorted(project.parts or [], key=lambda p: p.sort_order)
     # 版本按 version_no 升序
     versions_sorted = sorted(project.fabric_versions or [], key=lambda v: v.version_no)
+    # 角色按 sort_order 升序
+    roles_sorted = sorted(project.roles or [], key=lambda r: r.sort_order)
 
     return {
         'id': project.id,
         'sequence_no': project.sequence_no,
         'product_name': project.product_name,
-        'product_image_url': image_url,
+        'product_image_url': image_info.get('url') if image_info else None,
+        'product_image_thumbnail_url': image_info.get('thumbnail_url') if image_info else None,
+        'product_image_blur_url': image_info.get('blur_url') if image_info else None,
         'product_image_file_id': project.product_image_file_id,
         'customer_id': project.customer_id,
         'customer_name': project.customer_name or '',
@@ -470,6 +486,7 @@ async def get_project_detail(db: AsyncSession, project_id: int) -> dict:
             }
             for v in versions_sorted
         ],
+        'roles': [r.to_dict() for r in roles_sorted],
     }
 
 
@@ -479,12 +496,15 @@ async def create_project(
     product_name: str,
     customer_id: int | None = None,
     remark: str | None = None,
+    initial_roles: list[str] | None = None,
     user_id: int | None = None,
 ) -> dict:
     """新增打样项目
 
     - 自动生成序列号 CS-YYYYMMDD-XXXX
-    - 自动创建 T1 基线版本（snapshot_data=[], change_summary=null）
+    - 自动创建"默认角色"（is_default=true）
+    - 若传入 initial_roles，额外创建用户指定的角色（去重、去空白）
+    - 自动创建 T1 基线版本挂在默认角色下（snapshot_data=[], change_summary=null）
     - 校验 customer_id 存在性，冗余存储 customer_name
     """
     # 校验客户存在性
@@ -509,9 +529,42 @@ async def create_project(
     db.add(project)
     await db.flush()
 
-    # 自动创建 T1 基线版本（快照当前部位布料，初始为空数组）
+    # 创建默认角色（永远兜底，不可删除）
+    default_role = CustomerSamplingRole(
+        project_id=project.id,
+        role_name='默认',
+        sort_order=0,
+        is_default=True,
+        current_version='T1',
+    )
+    db.add(default_role)
+    await db.flush()
+
+    # 创建用户指定的额外角色（去重、去空白、不与"默认角色"重名）
+    extra_role_names: list[str] = []
+    seen = {'默认角色'}
+    if initial_roles:
+        for name in initial_roles:
+            n = (name or '').strip()
+            if n and n not in seen:
+                seen.add(n)
+                extra_role_names.append(n)
+
+    for idx, role_name in enumerate(extra_role_names, start=1):
+        role = CustomerSamplingRole(
+            project_id=project.id,
+            role_name=role_name,
+            sort_order=idx,
+            is_default=False,
+            current_version='T1',
+        )
+        db.add(role)
+        await db.flush()
+
+    # 自动创建 T1 基线版本挂在默认角色下（快照初始为空数组）
     t1_version = CustomerSamplingFabricVersion(
         project_id=project.id,
+        role_id=default_role.id,
         version_no='T1',
         snapshot_data=[],
         change_summary=None,
@@ -528,7 +581,10 @@ async def create_project(
         target_version='T1',
     )
 
-    logger.info('创建打样项目: id=%s, sequence_no=%s', project.id, sequence_no)
+    logger.info(
+        '创建打样项目: id=%s, sequence_no=%s, roles_count=%d',
+        project.id, sequence_no, 1 + len(extra_role_names),
+    )
     return {'id': project.id, 'sequence_no': sequence_no}
 
 
@@ -589,6 +645,15 @@ async def update_project(
     if current_version is not None and current_version != project.current_version:
         field_diffs.append({'field': 'current_version', 'old': project.current_version, 'new': current_version})
         project.current_version = current_version
+        # 同步更新默认角色的 current_version（保持向后兼容）
+        # 旧端点仍调 update_project 设置最终版本时，默认角色同步生效
+        default_role_id = await _get_default_role_id(db, project_id)
+        dr_result = await db.execute(
+            select(CustomerSamplingRole).where(CustomerSamplingRole.id == default_role_id)
+        )
+        default_role = dr_result.scalar_one_or_none()
+        if default_role is not None and default_role.current_version != current_version:
+            default_role.current_version = current_version
 
     # 乐观锁 +1
     project.version += 1
@@ -643,15 +708,23 @@ async def delete_project(
 
 # ==================== T06: 部位布料 CRUD + 产品图片上传 ====================
 
-async def list_parts(db: AsyncSession, project_id: int) -> dict:
-    """部位列表查询（按 sort_order 升序，含布料信息）"""
-    # 校验项目存在
+async def list_parts(db: AsyncSession, project_id: int, *, role_id: int | None = None) -> dict:
+    """部位列表查询（按 sort_order 升序，含布料信息）
+
+    Args:
+        role_id: 角色ID筛选；未传时自动解析项目的默认角色
+    """
     await _ensure_project_exists(db, project_id)
+    if role_id is None:
+        role_id = await _get_default_role_id(db, project_id)
 
     result = await db.execute(
         select(CustomerSamplingPart)
         .options(selectinload(CustomerSamplingPart.supplier))
-        .where(CustomerSamplingPart.project_id == project_id)
+        .where(
+            CustomerSamplingPart.project_id == project_id,
+            CustomerSamplingPart.role_id == role_id,
+        )
         .order_by(CustomerSamplingPart.sort_order)
     )
     parts = result.scalars().all()
@@ -669,6 +742,7 @@ async def create_part(
     sort_order: int = 0,
     fabric_name: str | None = None,
     fabric_spec: str | None = None,
+    fabric_color_no: str | None = None,
     supplier_id: int | None = None,
     contact_person: str | None = None,
     contact_phone: str | None = None,
@@ -729,6 +803,7 @@ async def batch_create_parts(
     project_id: int,
     *,
     items: list[dict],
+    role_id: int | None = None,
     user_id: int | None = None,
 ) -> dict:
     """批量新增部位
@@ -736,8 +811,16 @@ async def batch_create_parts(
     一次事务中创建多条部位记录。
     每项 item 包含: part_name (必填), version_no (默认 T1),
     supplier_id / fabric_name / fabric_color_no (可选)
+
+    Args:
+        role_id: 归属角色ID；未传时自动解析项目的默认角色
     """
     await _ensure_project_exists(db, project_id)
+    if role_id is None:
+        role_id = await _get_default_role_id(db, project_id)
+    else:
+        await _ensure_role_belongs_to_project(db, role_id, project_id)
+
     operator_name = await _get_user_name(db, user_id)
     created_ids: list[int] = []
 
@@ -748,8 +831,8 @@ async def batch_create_parts(
         fabric_name = item.get('fabric_name')
         fabric_color_no = item.get('fabric_color_no')
 
-        # 同版本下部位名称唯一
-        await _ensure_part_name_unique(db, project_id, part_name, version_no=version_no)
+        # 同角色同版本下部位名称唯一
+        await _ensure_part_name_unique(db, project_id, part_name, role_id=role_id, version_no=version_no)
 
         supplier_name = item.get('supplier_name') or ''
         if supplier_id is not None:
@@ -759,6 +842,7 @@ async def batch_create_parts(
 
         part = CustomerSamplingPart(
             project_id=project_id,
+            role_id=role_id,
             version_no=version_no,
             part_name=part_name,
             sort_order=0,
@@ -777,8 +861,8 @@ async def batch_create_parts(
         )
 
     logger.info(
-        '批量新增部位: project_id=%s, count=%d, ids=%s',
-        project_id, len(created_ids), created_ids,
+        '批量新增部位: project_id=%s, role_id=%s, count=%d, ids=%s',
+        project_id, role_id, len(created_ids), created_ids,
     )
     return {'ids': created_ids, 'count': len(created_ids)}
 
@@ -805,11 +889,11 @@ async def copy_part_version(
     if part is None:
         raise NotFoundError('部位不存在')
 
-    # 计算下一版本号：以项目下同部位名称所有行的最大版本号为准，
-    # 避免复制旧版本行时目标版本（如 T7 行的 T8）已存在而冲突
+    # 计算下一版本号：以该角色下同部位名称所有行的最大版本号为准
     ver_rows = (await db.execute(
         select(CustomerSamplingPart.version_no).where(
             CustomerSamplingPart.project_id == part.project_id,
+            CustomerSamplingPart.role_id == part.role_id,
             CustomerSamplingPart.part_name == part.part_name,
         )
     )).all()
@@ -819,12 +903,14 @@ async def copy_part_version(
 
     # 确保新版本号下同名称不重复（防御性检查）
     await _ensure_part_name_unique(
-        db, part.project_id, part.part_name, version_no=new_version_no,
+        db, part.project_id, part.part_name,
+        role_id=part.role_id, version_no=new_version_no,
     )
 
     # 创建新版本行：保留 part_name，清空布料信息
     new_part = CustomerSamplingPart(
         project_id=part.project_id,
+        role_id=part.role_id,
         version_no=new_version_no,
         part_name=part.part_name,
         sort_order=part.sort_order,
@@ -887,9 +973,12 @@ async def update_part(
     if part.version != version:
         raise ConflictError('该部位已被他人更新，请刷新后重试')
 
-    # 校验部位名称同项目下唯一（排除自身）
+    # 校验部位名称同角色同版本下唯一（排除自身）
     if part_name is not None and part_name != part.part_name:
-        await _ensure_part_name_unique(db, part.project_id, part_name, exclude_id=part_id)
+        await _ensure_part_name_unique(
+            db, part.project_id, part_name,
+            role_id=part.role_id, exclude_id=part_id,
+        )
         part.part_name = part_name
 
     # 解析供应商
@@ -957,17 +1046,17 @@ async def delete_part(
     if part is None:
         raise NotFoundError('部位不存在')
 
-    # 禁止删除项目当前最终版本，避免 current_version 悬空
-    proj_result = await db.execute(
-        select(CustomerSamplingProject).where(CustomerSamplingProject.id == part.project_id)
+    # 禁止删除所属角色的当前最终版本，避免 role.current_version 悬空
+    role_result = await db.execute(
+        select(CustomerSamplingRole).where(CustomerSamplingRole.id == part.role_id)
     )
-    project = proj_result.scalar_one_or_none()
+    role = role_result.scalar_one_or_none()
     if (
-        project is not None
+        role is not None
         and part.version_no is not None
-        and part.version_no == project.current_version
+        and part.version_no == role.current_version
     ):
-        raise BusinessError('该版本为项目最终版本，请先将其他版本设为最终版后再删除')
+        raise BusinessError('该版本为角色当前最终版本，请先将其他版本设为最终版后再删除')
 
     project_id = part.project_id
     part_name = part.part_name
@@ -1016,13 +1105,14 @@ async def upload_project_image(
     if len(content) > max_size:
         raise BusinessError('图片大小不能超过 10MB')
 
-    # 复用 storage_service 保存文件
+    # 复用 storage_service 保存文件（同步生成 400px WebP 缩略图供列表使用）
     upload_result = await save_upload(
         content=content,
         original_filename=original_filename,
         db=db,
         uploader_id=user_id,
         prefix='customer-sampling/',
+        generate_thumbnail=True,
     )
 
     # 更新项目的 product_image_file_id
@@ -1045,7 +1135,179 @@ async def upload_project_image(
         '上传产品图片: project_id=%s, file_id=%s, url=%s',
         project_id, upload_result['id'], upload_result['url'],
     )
-    return {'file_id': upload_result['id'], 'url': upload_result['url']}
+    return {
+        'file_id': upload_result['id'],
+        'url': upload_result['url'],
+        'thumbnail_url': upload_result.get('thumbnail_url'),
+    }
+
+
+# ==================== T06b: 角色 CRUD ====================
+
+async def list_roles(db: AsyncSession, project_id: int) -> dict:
+    """列出项目所有角色（按 sort_order 升序）"""
+    await _ensure_project_exists(db, project_id)
+    result = await db.execute(
+        select(CustomerSamplingRole)
+        .where(CustomerSamplingRole.project_id == project_id)
+        .order_by(CustomerSamplingRole.sort_order)
+    )
+    roles = result.scalars().all()
+    return {
+        'success': True,
+        'items': [r.to_dict() for r in roles],
+    }
+
+
+async def create_role(
+    db: AsyncSession,
+    project_id: int,
+    *,
+    role_name: str,
+    user_id: int | None = None,
+) -> dict:
+    """新增角色（项目内 role_name 唯一，默认角色不可重复创建）
+
+    - 新角色 sort_order = 当前最大 sort_order + 1
+    - 新角色 current_version='T1'，但不会自动创建 T1 版本快照（与项目级 T1 不同）
+      —— 用户在该角色下录入部位/创建版本时再生成快照
+    """
+    await _ensure_project_exists(db, project_id)
+
+    # 唯一性校验（应用层 + DB 唯一约束双重保障）
+    existing = await db.execute(
+        select(CustomerSamplingRole.id).where(
+            CustomerSamplingRole.project_id == project_id,
+            CustomerSamplingRole.role_name == role_name,
+        )
+    )
+    if existing.scalar_one_or_none() is not None:
+        raise BusinessError(f'角色名 "{role_name}" 在该项目中已存在')
+
+    # 计算 sort_order
+    max_sort_result = await db.execute(
+        select(func.max(CustomerSamplingRole.sort_order))
+        .where(CustomerSamplingRole.project_id == project_id)
+    )
+    max_sort = max_sort_result.scalar_one_or_none() or 0
+
+    role = CustomerSamplingRole(
+        project_id=project_id,
+        role_name=role_name,
+        sort_order=max_sort + 1,
+        is_default=False,
+        current_version='T1',
+    )
+    db.add(role)
+    await db.flush()
+
+    # 写审计日志
+    operator_name = await _get_user_name(db, user_id)
+    await _write_change_log(
+        db, project_id, 'create_role', user_id, operator_name,
+        part_name=role_name,
+    )
+
+    logger.info('新增角色: project_id=%s, role_id=%s, role_name=%s', project_id, role.id, role_name)
+    return {'id': role.id}
+
+
+async def update_role(
+    db: AsyncSession,
+    role_id: int,
+    *,
+    role_name: str | None = None,
+    current_version: str | None = None,
+    version: int,
+    user_id: int | None = None,
+) -> dict:
+    """编辑角色（乐观锁校验，is_default 不可改）
+
+    - role_name 修改时仍需保证项目内唯一
+    - current_version 修改用于"设置最终版本"场景
+    """
+    result = await db.execute(
+        select(CustomerSamplingRole).where(CustomerSamplingRole.id == role_id)
+    )
+    role = result.scalar_one_or_none()
+    if role is None:
+        raise NotFoundError('角色不存在')
+
+    # 乐观锁校验
+    if role.version != version:
+        raise ConflictError('该角色已被他人更新，请刷新后重试')
+
+    field_diffs: list[dict] = []
+
+    if role_name is not None and role_name != role.role_name:
+        # 唯一性校验（排除自身）
+        existing = await db.execute(
+            select(CustomerSamplingRole.id).where(
+                CustomerSamplingRole.project_id == role.project_id,
+                CustomerSamplingRole.role_name == role_name,
+                CustomerSamplingRole.id != role_id,
+            )
+        )
+        if existing.scalar_one_or_none() is not None:
+            raise BusinessError(f'角色名 "{role_name}" 在该项目中已存在')
+        field_diffs.append({'field': 'role_name', 'old': role.role_name, 'new': role_name})
+        role.role_name = role_name
+
+    if current_version is not None and current_version != role.current_version:
+        field_diffs.append({'field': 'current_version', 'old': role.current_version, 'new': current_version})
+        role.current_version = current_version
+
+    role.version += 1
+    await db.flush()
+
+    # 写审计日志
+    operator_name = await _get_user_name(db, user_id)
+    await _write_change_log(
+        db, role.project_id, 'update_role', user_id, operator_name,
+        field_diffs=field_diffs,
+    )
+
+    logger.info('编辑角色: role_id=%s, field_diffs=%s', role_id, field_diffs)
+    return {'id': role.id}
+
+
+async def delete_role(
+    db: AsyncSession,
+    role_id: int,
+    *,
+    user_id: int | None = None,
+) -> dict:
+    """删除角色（级联删 part + version + change_log 中关联该 role 的记录）
+
+    - 默认角色不可删除（is_default=True）
+    - 删除后变更日志 project_id 仍保留（SET NULL 行为不变）
+    """
+    result = await db.execute(
+        select(CustomerSamplingRole).where(CustomerSamplingRole.id == role_id)
+    )
+    role = result.scalar_one_or_none()
+    if role is None:
+        raise NotFoundError('角色不存在')
+
+    if role.is_default:
+        raise BusinessError('默认角色不可删除')
+
+    project_id = role.project_id
+    role_name = role.role_name
+
+    # 级联删除（ORM cascade='all, delete-orphan' 自动删 part + fabric_version）
+    await db.delete(role)
+    await db.flush()
+
+    # 写审计日志
+    operator_name = await _get_user_name(db, user_id)
+    await _write_change_log(
+        db, project_id, 'delete_role', user_id, operator_name,
+        part_name=role_name,
+    )
+
+    logger.info('删除角色: role_id=%s, role_name=%s', role_id, role_name)
+    return {'id': role_id}
 
 
 # ==================== T07: 版本创建 + 版本详情 + 变更日志 ====================
@@ -1079,37 +1341,47 @@ async def create_version(
     project_id: int,
     *,
     reason: str | None = None,
+    role_id: int | None = None,
     user_id: int | None = None,
 ) -> dict:
-    """创建新版本
+    """创建新版本（角色维度独立）
 
-    流程（design.md 2.1.3.2）：
-    1. 加载打样项目（FOR UPDATE 行锁）
-    2. 获取当前最大版本号 T_n，生成下一版本号 T_{n+1}
-    3. 快照当前所有部位布料信息（序列化为 JSONB）
+    流程（design.md 2.1.3.2 + 角色维度）：
+    1. 加载角色（FOR UPDATE 行锁），未传 role_id 时默认指向项目的默认角色
+    2. 获取该角色当前最大版本号 T_n，生成下一版本号 T_{n+1}
+    3. 快照该角色当前所有部位布料信息（序列化为 JSONB）
     4. 计算 T_{n+1} 相对 T_n 的字段级 diff
-    5. 写入 customer_sampling_fabric_version（snapshot_data + change_summary）
+    5. 写入 customer_sampling_fabric_version（snapshot_data + change_summary + role_id）
     6. 写入 customer_sampling_change_log（审计记录）
-    7. 更新项目 current_version = T_{n+1}，version 乐观锁 +1
+    7. 更新 role.current_version = T_{n+1}，role.version 乐观锁 +1
     """
-    # FOR UPDATE 锁项目行，防止并发创建版本冲突
-    result = await db.execute(
-        select(CustomerSamplingProject)
-        .where(CustomerSamplingProject.id == project_id)
+    await _ensure_project_exists(db, project_id)
+    if role_id is None:
+        role_id = await _get_default_role_id(db, project_id)
+    else:
+        await _ensure_role_belongs_to_project(db, role_id, project_id)
+
+    # FOR UPDATE 锁角色行，防止并发创建版本冲突
+    role_result = await db.execute(
+        select(CustomerSamplingRole)
+        .where(CustomerSamplingRole.id == role_id)
         .with_for_update()
     )
-    project = result.scalar_one_or_none()
-    if project is None:
-        raise NotFoundError('打样项目不存在')
+    role = role_result.scalar_one_or_none()
+    if role is None:
+        raise NotFoundError('角色不存在')
 
-    # 获取当前最大版本号
-    current_version = project.current_version or 'T1'
+    # 获取该角色当前最大版本号
+    current_version = role.current_version or 'T1'
     new_version_no = _next_version(current_version)
 
-    # 快照当前所有部位布料信息
+    # 快照该角色当前所有部位布料信息
     parts_result = await db.execute(
         select(CustomerSamplingPart)
-        .where(CustomerSamplingPart.project_id == project_id)
+        .where(
+            CustomerSamplingPart.project_id == project_id,
+            CustomerSamplingPart.role_id == role_id,
+        )
         .order_by(CustomerSamplingPart.sort_order)
     )
     parts = parts_result.scalars().all()
@@ -1119,7 +1391,7 @@ async def create_version(
     prev_version_result = await db.execute(
         select(CustomerSamplingFabricVersion)
         .where(
-            CustomerSamplingFabricVersion.project_id == project_id,
+            CustomerSamplingFabricVersion.role_id == role_id,
             CustomerSamplingFabricVersion.version_no == current_version,
         )
     )
@@ -1135,6 +1407,7 @@ async def create_version(
     # 写入新版本快照
     new_version = CustomerSamplingFabricVersion(
         project_id=project_id,
+        role_id=role_id,
         version_no=new_version_no,
         snapshot_data=snapshot_data,
         change_summary=change_summary,
@@ -1144,9 +1417,9 @@ async def create_version(
     db.add(new_version)
     await db.flush()
 
-    # 更新项目 current_version，乐观锁 +1
-    project.current_version = new_version_no
-    project.version += 1
+    # 更新角色 current_version，乐观锁 +1
+    role.current_version = new_version_no
+    role.version += 1
     await db.flush()
 
     # 写审计日志
@@ -1157,8 +1430,8 @@ async def create_version(
     )
 
     logger.info(
-        '创建新版本: project_id=%s, version_no=%s, parts_count=%d, diff_count=%s',
-        project_id, new_version_no, len(snapshot_data),
+        '创建新版本: project_id=%s, role_id=%s, version_no=%s, parts_count=%d, diff_count=%s',
+        project_id, role_id, new_version_no, len(snapshot_data),
         len(change_summary) if change_summary else 0,
     )
     return {'version_id': new_version.id, 'version_no': new_version_no}
@@ -1208,29 +1481,45 @@ async def get_version_detail(db: AsyncSession, version_id: int) -> dict:
     }
 
 
-async def get_parts_by_version(db: AsyncSession, project_id: int) -> dict:
-    """获取项目所有版本的部位布料数据（跨版本二维表数据源）
+async def get_parts_by_version(
+    db: AsyncSession,
+    project_id: int,
+    *,
+    role_id: int | None = None,
+) -> dict:
+    """获取指定角色所有版本的部位布料数据（跨版本二维表数据源）
 
     数据来源两级合并：
-    1. `customer_sampling_part` 表 — 所有版本号实时数据（优先，保证新增/编辑/删除立即可见）
-    2. `customer_sampling_fabric_version.snapshot_data` — 历史快照（补充 part 表未覆盖的版本）
+    1. `customer_sampling_part` 表 — 该角色所有版本号实时数据（优先，保证新增/编辑/删除立即可见）
+    2. `customer_sampling_fabric_version.snapshot_data` — 该角色历史快照（补充 part 表未覆盖的版本）
 
     按 part_name → version_no 排序后返回扁平列表。
+
+    Args:
+        role_id: 角色ID筛选；未传时自动解析项目的默认角色
 
     Returns:
         {
             'success': True,
             'items': [PartDetail + version_no, ...],
             'versions': ['T1', 'T2', ...],
+            'final_version': role.current_version,
         }
     """
     await _ensure_project_exists(db, project_id)
+    if role_id is None:
+        role_id = await _get_default_role_id(db, project_id)
+    else:
+        await _ensure_role_belongs_to_project(db, role_id, project_id)
 
-    # 1. 从 part 表读取所有版本化部件（带 supplier 关联）
+    # 1. 从 part 表读取该角色所有版本化部件（带 supplier 关联）
     parts_result = await db.execute(
         select(CustomerSamplingPart)
         .options(selectinload(CustomerSamplingPart.supplier))
-        .where(CustomerSamplingPart.project_id == project_id)
+        .where(
+            CustomerSamplingPart.project_id == project_id,
+            CustomerSamplingPart.role_id == role_id,
+        )
         .order_by(CustomerSamplingPart.sort_order)
     )
     all_parts = parts_result.scalars().all()
@@ -1249,10 +1538,13 @@ async def get_parts_by_version(db: AsyncSession, project_id: int) -> dict:
         part_copy = {**part.to_snapshot_dict(), 'version_no': part.version_no}
         items.append(part_copy)
 
-    # 2. 从历史版本快照补充 part 表未覆盖的版本
+    # 2. 从该角色历史版本快照补充 part 表未覆盖的版本
     versions_result = await db.execute(
         select(CustomerSamplingFabricVersion)
-        .where(CustomerSamplingFabricVersion.project_id == project_id)
+        .where(
+            CustomerSamplingFabricVersion.project_id == project_id,
+            CustomerSamplingFabricVersion.role_id == role_id,
+        )
         .order_by(CustomerSamplingFabricVersion.id.asc())
     )
     versions = versions_result.scalars().all()
@@ -1270,11 +1562,11 @@ async def get_parts_by_version(db: AsyncSession, project_id: int) -> dict:
 
     version_list = sorted(version_set, key=lambda v: (len(v), v))
 
-    # 加载项目 current_version 作为「最终版本」
-    project_result = await db.execute(
-        select(CustomerSamplingProject.current_version).where(CustomerSamplingProject.id == project_id)
+    # 加载角色 current_version 作为「最终版本」
+    role_result = await db.execute(
+        select(CustomerSamplingRole.current_version).where(CustomerSamplingRole.id == role_id)
     )
-    final_version = project_result.scalar_one_or_none() or 'T1'
+    final_version = role_result.scalar_one_or_none() or 'T1'
 
     return {
         'success': True,
@@ -1340,17 +1632,22 @@ async def _ensure_part_name_unique(
     project_id: int,
     part_name: str,
     *,
+    role_id: int | None = None,
     version_no: str = 'T1',
     exclude_id: int | None = None,
 ) -> None:
-    """校验部位名称同项目 + 同版本下唯一
+    """校验部位名称同角色 + 同版本下唯一
 
     Args:
-        version_no: 版本号，同一版本内部位名称唯一
+        role_id: 角色ID；未传时自动解析项目的默认角色
+        version_no: 版本号，同一角色同一版本内部位名称唯一
         exclude_id: 编辑时排除自身 ID
     """
+    if role_id is None:
+        role_id = await _get_default_role_id(db, project_id)
     query = select(CustomerSamplingPart.id).where(
         CustomerSamplingPart.project_id == project_id,
+        CustomerSamplingPart.role_id == role_id,
         CustomerSamplingPart.part_name == part_name,
         CustomerSamplingPart.version_no == version_no,
     )
@@ -1359,3 +1656,44 @@ async def _ensure_part_name_unique(
     result = await db.execute(query)
     if result.scalar_one_or_none() is not None:
         raise BusinessError(f'部位名称 "{part_name}" 在当前版本中已存在')
+
+
+async def _get_default_role_id(db: AsyncSession, project_id: int) -> int:
+    """获取项目的默认角色 ID（is_default=True）
+
+    若项目尚无默认角色（仅迁移前的旧项目可能发生，迁移已确保存在），
+    则主动创建一个默认角色并返回其 ID（防御性兜底）。
+    """
+    result = await db.execute(
+        select(CustomerSamplingRole.id).where(
+            CustomerSamplingRole.project_id == project_id,
+            CustomerSamplingRole.is_default == True,  # noqa: E712
+        )
+    )
+    role_id = result.scalar_one_or_none()
+    if role_id is not None:
+        return role_id
+
+    # 防御性兜底：旧库未跑迁移时主动补一个默认角色
+    role = CustomerSamplingRole(
+        project_id=project_id,
+        role_name='默认',
+        sort_order=0,
+        is_default=True,
+        current_version='T1',
+    )
+    db.add(role)
+    await db.flush()
+    return role.id
+
+
+async def _ensure_role_belongs_to_project(db: AsyncSession, role_id: int, project_id: int) -> None:
+    """校验 role_id 属于指定 project_id，否则抛 NotFoundError"""
+    result = await db.execute(
+        select(CustomerSamplingRole.id).where(
+            CustomerSamplingRole.id == role_id,
+            CustomerSamplingRole.project_id == project_id,
+        )
+    )
+    if result.scalar_one_or_none() is None:
+        raise NotFoundError('角色不存在或不属于该打样项目')

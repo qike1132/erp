@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { authApi, dashboardApi, clearCsrfCache } from '@/api'
-import type { User, NavSection } from '@/types'
+import type { User, UserInfo, NavSection } from '@/types'
 import { removeAccessToken } from '@/utils/secureStorage'
 
 export const useAuthStore = defineStore('auth', () => {
@@ -13,9 +13,8 @@ export const useAuthStore = defineStore('auth', () => {
   const isLoggedIn = computed(() => !!user.value)
   const permissionSet = computed(() => new Set(user.value?.permissions ?? []))
 
-  async function fetchUser() {
-    const res = await authApi.me()
-    const raw = res.user ?? res
+  /** 将 API 返回的用户信息映射为内部 User 类型 */
+  function setUserInfo(raw: UserInfo) {
     user.value = {
       id: raw.user_id ?? raw.id ?? 0,
       username: raw.username,
@@ -23,6 +22,12 @@ export const useAuthStore = defineStore('auth', () => {
       factory: raw.factory ?? null,
       permissions: raw.permissions ?? [],
     }
+    return user.value
+  }
+
+  async function fetchUser() {
+    const res = await authApi.me()
+    setUserInfo(res.user ?? res)
     return user.value
   }
 
@@ -48,18 +53,25 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  async function init(force = false) {
+  async function init(force = false, preloadedUserInfo?: UserInfo) {
     if (loaded.value && !force) return
     // 防止并发调用：多个导航同时触发时复用同一个 Promise
     if (_initPromise && !force) return _initPromise
 
     _initPromise = (async () => {
       try {
-        await fetchUser()
-        // 导航数据加载失败不应阻止用户进入系统
-        await fetchNavSections().catch((e) => {
-          console.error('[Auth] 导航数据加载失败:', e)
-        })
+        // 登录接口已返回用户信息时直接设置，跳过 GET /auth/me 额外请求
+        if (preloadedUserInfo) {
+          setUserInfo(preloadedUserInfo)
+        }
+        // 并行：用户信息（仅未预加载时才请求）+ 导航数据
+        await Promise.all([
+          preloadedUserInfo ? Promise.resolve() : fetchUser(),
+          // 导航数据加载失败不应阻止用户进入系统
+          fetchNavSections().catch((e) => {
+            console.error('[Auth] 导航数据加载失败:', e)
+          }),
+        ])
       } catch (error) {
         loaded.value = false
         throw error

@@ -70,7 +70,8 @@ export function useLogin() {
       if (isCapacitor && res.access_token) {
         setAccessToken(res.access_token)
       }
-      await authStore.init(true)
+      // 登录接口已返回用户信息，直接传入跳过 GET /auth/me 额外请求
+      await authStore.init(true, res.user)
       perf.markEnd('init-start')
       perf.measure('auth-store-init', 'init-start')
       const defaultRedirect = isCapacitor ? '/' : '/dashboard'

@@ -7,7 +7,7 @@
     <FontAwesomeIcon :icon="checkResult.failed > 0 ? 'exclamation-triangle' : 'check-circle'" />
     <span>
       巡检完成：{{ checkResult.passed }} 通过，{{ checkResult.failed }} 失败
-      <template v-if="checkResult.latest_backup"> · 最新备份: {{ checkResult.latest_backup }} ({{ formatSize(checkResult.latest_backup_size) }})</template>
+      <template v-if="checkResult.latest_backup"> · 最新备份: {{ checkResult.latest_backup }} ({{ formatSize(checkResult.latest_backup_size ?? 0) }})</template>
     </span>
     <button class="bk-check-close" @click="$emit('close')"><FontAwesomeIcon icon="times" /></button>
   </div>
