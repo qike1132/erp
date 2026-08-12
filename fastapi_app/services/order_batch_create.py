@@ -183,6 +183,16 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                     )
                     db.add(log)
 
+                # 返单自动带出外发工序：按 SKU 预设为订单生成湖北外发工序（失败不影响订单创建）
+                try:
+                    from fastapi_app.services.outsource_service import auto_generate_for_order
+                    await auto_generate_for_order(db, order)
+                except Exception as og_err:
+                    logger.warning(
+                        "自动生成外发工序失败 order_no=%s: %s", order.order_no, og_err,
+                        exc_info=True,
+                    )
+
                 # 处理抵扣备货（按 OrderItem 粒度）
                 # 保留原 deduct_quantity > 0 守卫：process_order_deduction 在
                 # custom_deduct_quantity<=0 时会回退到按 order_quantity 全量抵扣，

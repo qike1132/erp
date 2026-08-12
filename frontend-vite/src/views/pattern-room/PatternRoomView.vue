@@ -83,9 +83,11 @@
               :project="projectHook.currentProject.value"
               :parts-by-version="partHook.partsByVersion.value"
               :version-list="partHook.versionList.value"
+              :final-version="partHook.finalVersion.value"
               :version-loading="versionHook.loading.value"
               :part-loading="partHook.loading.value"
               :can-manage="canManage"
+              @set-final-version="onSetFinalVersion"
               @copy-version="onCopyPartVersion"
               @delete-version="onDeleteVersion"
               @save-edit="onSaveEdit"
@@ -182,6 +184,7 @@ import { useSamplingVersion } from './composables/useSamplingVersion'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { usePermission } from '@/composables/usePermission'
 import { toast } from '@/composables/useToast'
+import { getErrorMessage } from '@/types/errors'
 
 import { customerApi } from '@/api/customer'
 import type { Customer } from '@/types'
@@ -405,6 +408,34 @@ async function onPartSubmitBatch(data: BatchPartCreateRequest) {
   }
 }
 
+/** 设置最终版本：更新 project.current_version 并刷新列表 */
+async function onSetFinalVersion(versionNo: string) {
+  if (!canManage.value) {
+    toast.warning('无操作权限')
+    return
+  }
+  if (!selectedProjectId.value || !projectHook.currentProject.value) return
+  const proj = projectHook.currentProject.value
+  try {
+    const res = await projectHook.update(selectedProjectId.value, {
+      version: proj.version,
+      current_version: versionNo,
+    })
+    if (res) {
+      toast.success(`已设置最终版本 ${versionNo}`)
+      await projectHook.fetchDetail(selectedProjectId.value)
+      // 部位数据本身未变化，仅本地更新最终版本号，
+      // 避免 fetchPartsByVersion 的 loading 态与数据整体替换导致整表闪烁
+      partHook.setFinalVersion(versionNo)
+    } else {
+      toast.error(projectHook.error.value || '设置失败')
+    }
+  } catch (e) {
+    console.error('[PatternRoomView] 设置最终版本失败:', e)
+    toast.error('设置最终版本失败')
+  }
+}
+
 /** 复制部位版本：在该部位名称下新增一个版本号 +1 的空白记录 */
 async function onCopyPartVersion(part: PartDetail) {
   if (!canManage.value) {
@@ -427,7 +458,7 @@ async function onCopyPartVersion(part: PartDetail) {
     }
   } catch (e) {
     console.error('[PatternRoomView] 复制部位版本失败:', e)
-    toast.error('复制部位版本失败')
+    toast.error(getErrorMessage(e, '复制部位版本失败'))
   }
 }
 
@@ -479,11 +510,19 @@ async function onDeleteVersion(part: PartDetail) {
     toast.warning('该记录为历史快照，无法删除')
     return
   }
-  const ok = await confirmDialog.confirm(
-    '确认删除该部位版本？',
-    `部位「${part.part_name}」版本 ${part.version_no ?? '-'}，删除后不可恢复。`,
-    'danger',
-  )
+  // 删除最终版本时使用加强提示文案
+  const isFinalVersion = !!part.version_no && part.version_no === partHook.finalVersion.value
+  const ok = isFinalVersion
+    ? await confirmDialog.confirm(
+        '删除最终版本',
+        `版本 ${part.version_no} 是当前项目的最终版本，删除后将无法再设为最终版，请确认是否继续。`,
+        'danger',
+      )
+    : await confirmDialog.confirm(
+        '确认删除该部位版本？',
+        `部位「${part.part_name}」版本 ${part.version_no ?? '-'}，删除后不可恢复。`,
+        'danger',
+      )
   if (!ok) return
   try {
     const res = await patternRoomApi.deletePart(part.id)

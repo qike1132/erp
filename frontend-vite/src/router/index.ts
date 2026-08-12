@@ -27,7 +27,10 @@ const pcRoutes: RouteRecordRaw[] = [
       { path: 'product', name: 'Product', component: () => import('@/views/product/ProductListView.vue'), meta: { hideHeader: true } },
       { path: 'stock', name: 'Stock', component: () => import('@/views/stock/StockView.vue'), meta: { hideHeader: true } },
       { path: 'stock-out', name: 'StockOut', component: () => import('@/views/stock/StockOutView.vue'), meta: { hideHeader: true } },
-      { path: 'beile-order', name: 'BeileOrder', component: () => import('@/views/beile-order/BeileOrderView.vue'), meta: { hideHeader: true } },
+      // 湖北订单与湖北外发已合并为同一页面（两个 Tab）：
+      // /beile-order 渲染 HubeiView（默认湖北订单 Tab）；/outsource 重定向到 /beile-order（侧边栏仅保留一个入口）
+      { path: 'beile-order', name: 'BeileOrder', component: () => import('@/views/hubei/HubeiView.vue'), meta: { hideHeader: true } },
+      { path: 'outsource', redirect: '/beile-order' },
       { path: 'customer', name: 'Customer', component: () => import('@/views/customer/CustomerView.vue'), meta: { hideHeader: true } },
       {
         path: 'customer-order',

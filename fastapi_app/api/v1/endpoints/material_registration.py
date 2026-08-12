@@ -11,6 +11,7 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,7 +23,6 @@ from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.schemas.material_registration import (
     ActionResponse,
     AvailablePurchaseOrdersResponse,
-    ExportRegistrationsResponse,
     ExportRequest,
     MaterialRegistrationCreate,
     MaterialRegistrationUpdate,
@@ -365,13 +365,13 @@ async def get_purchase_order_items(
         raise HTTPException(status_code=404, detail=str(e)) from e
 
 
-@router.post('/export', response_model=ExportRegistrationsResponse)
+@router.post('/export')
 async def export_registrations(
     data: ExportRequest,
     user: User = Depends(require_permission('product_manage')),
     db: AsyncSession = Depends(get_async_read_db),
-) -> ExportRegistrationsResponse:
-    """导出来料登记数据。
+) -> StreamingResponse:
+    """导出来料登记数据（真 xlsx 文件下载）。
 
     Args:
         data: 导出筛选参数（POST body）。
@@ -379,19 +379,24 @@ async def export_registrations(
         db: 异步数据库会话（只读副本）。
 
     Returns:
-        ExportRegistrationsResponse: 包含导出数据的响应。
+        StreamingResponse: xlsx 文件流（含 Content-Disposition 头）。
 
     Raises:
         HTTPException: 导出失败时抛出 500。
     """
     try:
-        return await mr_service.export_registrations(
+        buffer = await mr_service.export_registrations(
             db, data.order_no, data.supplier, data.customer_name,
             data.material_category, data.start_date, data.end_date,
         )
     except (ValueError, OSError) as e:
         logger.warning('导出来料登记失败: %s', e)
         raise HTTPException(status_code=500, detail='导出来料登记失败') from e
+    return StreamingResponse(
+        buffer,
+        media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition': 'attachment; filename=material_registrations.xlsx'},
+    )
 
 
 @router.get('/history', response_model=RegistrationHistoryResponse)

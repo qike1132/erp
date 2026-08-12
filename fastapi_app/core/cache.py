@@ -12,6 +12,7 @@ import hashlib
 import inspect
 import json
 import logging
+import os
 import random
 from collections import OrderedDict
 from collections.abc import Callable
@@ -32,6 +33,14 @@ _redis_fail_count = 0
 _REDIS_CIRCUIT_THRESHOLD = 3
 _redis_circuit_open_until: datetime | None = None
 _REDIS_CIRCUIT_COOLDOWN = timedelta(seconds=30)
+
+# L1 缓存跨 worker 失效广播（Redis Pub/Sub），默认关闭。
+# 启用：CACHE_L1_BROADCAST_ENABLED=true，任一 worker 失效缓存时同步清理
+# 其他 worker 的 L1，消除多 worker 下最长 local_ttl 的脏数据窗口。
+_L1_BROADCAST_ENABLED = os.getenv('CACHE_L1_BROADCAST_ENABLED', '').lower() in ('1', 'true', 'yes')
+_L1_BROADCAST_CHANNEL = 'cache:l1:invalidate'
+_L1_RECONNECT_BACKOFF = 5  # 断线后重连退避秒数
+_broadcast_task: asyncio.Task | None = None
 
 
 class CacheDomain(Flag):
@@ -323,6 +332,9 @@ async def invalidate_cache(pattern: str) -> int:
             _cache_local.pop(k, None)
         deleted += len(keys_to_remove)
 
+        # 广播给其他 worker 同步失效 L1（开关默认关，失败不影响主流程）
+        await _publish_l1_invalidation(pattern)
+
         return deleted
     except (OSError, ValueError) as e:
         logger.error("缓存失效失败: %s", e, exc_info=True)
@@ -335,6 +347,87 @@ def invalidate_local_cache(pattern: str) -> int:
     for k in keys_to_remove:
         _cache_local.pop(k, None)
     return len(keys_to_remove)
+
+
+async def _publish_l1_invalidation(pattern: str) -> None:
+    """发布 L1 失效广播（fire-and-forget，失败仅告警不阻断主流程）"""
+    if not _L1_BROADCAST_ENABLED:
+        return
+    redis = _get_redis_cache()
+    client = getattr(redis, 'redis_client', None) if redis else None
+    if client is None:
+        return
+    try:
+        await asyncio.wait_for(
+            client.publish(redis._make_key(_L1_BROADCAST_CHANNEL), pattern),
+            timeout=CACHE_TIMEOUT,
+        )
+    except (TimeoutError, OSError, ConnectionError, ValueError) as e:
+        logger.warning("发布 L1 缓存失效广播失败: %s", e)
+
+
+async def _close_pubsub(pubsub, channel: str) -> None:
+    """安全关闭 pubsub（unsubscribe 与 aclose 独立容错，避免前者失败泄漏连接）"""
+    with contextlib.suppress(OSError, ConnectionError):
+        await pubsub.unsubscribe(channel)
+    with contextlib.suppress(OSError, ConnectionError):
+        await pubsub.aclose()
+
+
+async def _l1_broadcast_listener() -> None:
+    """订阅 L1 失效广播，同步清理本进程 L1（幂等，含自身发布的消息）
+
+    Redis 断线/重启后自动退避重连，避免监听静默永久失效。
+    """
+    while True:
+        redis = _get_redis_cache()
+        client = getattr(redis, 'redis_client', None) if redis else None
+        if client is None:
+            logger.warning("Redis 不可用，L1 失效广播监听器 %ss 后重试", _L1_RECONNECT_BACKOFF)
+            await asyncio.sleep(_L1_RECONNECT_BACKOFF)
+            continue
+        pubsub = client.pubsub()
+        channel = redis._make_key(_L1_BROADCAST_CHANNEL)
+        try:
+            await pubsub.subscribe(channel)
+            async for message in pubsub.listen():
+                if message.get('type') != 'message':
+                    continue
+                try:
+                    data = message['data']
+                    pattern = data.decode('utf-8', errors='replace') if isinstance(data, bytes) else str(data)
+                    removed = invalidate_local_cache(pattern)
+                    if removed:
+                        logger.debug("L1 缓存失效广播同步清理 %d 条: %s", removed, pattern)
+                except (KeyError, UnicodeDecodeError) as e:
+                    logger.warning("解析 L1 失效广播消息失败: %s", e)
+        except asyncio.CancelledError:
+            await _close_pubsub(pubsub, channel)
+            raise
+        except (OSError, ConnectionError) as e:
+            logger.warning("L1 失效广播监听断线，%ss 后重连: %s", _L1_RECONNECT_BACKOFF, e)
+            await _close_pubsub(pubsub, channel)
+            await asyncio.sleep(_L1_RECONNECT_BACKOFF)
+
+
+async def start_l1_broadcast_listener() -> None:
+    """启动 L1 失效广播监听器（仅 CACHE_L1_BROADCAST_ENABLED=true 时生效）"""
+    global _broadcast_task
+    if not _L1_BROADCAST_ENABLED:
+        return
+    if _broadcast_task is None or _broadcast_task.done():
+        _broadcast_task = asyncio.create_task(_l1_broadcast_listener(), name='l1-cache-broadcast')
+        logger.info("L1 缓存跨 worker 失效广播监听器已启动")
+
+
+async def stop_l1_broadcast_listener() -> None:
+    """停止 L1 失效广播监听器"""
+    global _broadcast_task
+    if _broadcast_task is not None and not _broadcast_task.done():
+        _broadcast_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await _broadcast_task
+    _broadcast_task = None
 
 
 def _match_pattern(key: str, pattern: str) -> bool:

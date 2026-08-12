@@ -64,12 +64,24 @@
               </div>
             </div>
             <div class="cgl-card-right">
-              <div class="cgl-card-title">{{ proj.product_name }}</div>
-              <div class="cgl-card-meta">
-                <span class="cgl-card-seq">{{ proj.sequence_no }}</span>
-                <span class="cgl-card-version">{{ proj.current_version }}</span>
+              <div class="cgl-card-info">
+                <div class="cgl-card-line">
+                  <span class="cgl-card-label">时间：</span>
+                  <span class="cgl-card-value">{{ formatTime(proj.updated_at) }}</span>
+                </div>
+                <div class="cgl-card-line">
+                  <span class="cgl-card-label">名称：</span>
+                  <span class="cgl-card-value">{{ proj.product_name }}</span>
+                </div>
+                <div class="cgl-card-line">
+                  <span class="cgl-card-label">客户：</span>
+                  <span class="cgl-card-value">{{ selectedGroup?.customer_name || '-' }}</span>
+                </div>
+                <div class="cgl-card-line">
+                  <span class="cgl-card-label">编号：</span>
+                  <span class="cgl-card-value">{{ projectDisplayNumbers.get(proj.id) }}</span>
+                </div>
               </div>
-              <div class="cgl-card-time">{{ formatTime(proj.updated_at) }}</div>
             </div>
           </button>
         </div>
@@ -116,6 +128,32 @@ function selectCustomer(customerId: number | null) {
 const selectedGroup = computed(() => {
   if (!selectedCustomerKey.value) return null
   return props.groups.find((g) => groupKey(g.customer_id) === selectedCustomerKey.value) ?? null
+})
+
+/** 按日期生成递增编号：YYYYMMDD + 两位序号（同天内按 updated_at 顺序递增） */
+const projectDisplayNumbers = computed(() => {
+  const group = selectedGroup.value
+  if (!group) return new Map<number, string>()
+
+  const sorted = [...group.projects].sort((a, b) => {
+    const ta = new Date(a.updated_at).getTime()
+    const tb = new Date(b.updated_at).getTime()
+    if (ta !== tb) return ta - tb
+    return a.id - b.id
+  })
+
+  const counter = new Map<string, number>()
+  const result = new Map<number, string>()
+
+  for (const proj of sorted) {
+    const dateKey = proj.updated_at.slice(0, 10)
+    const dateNum = dateKey.replace(/-/g, '')
+    const next = (counter.get(dateKey) ?? 0) + 1
+    counter.set(dateKey, next)
+    result.set(proj.id, `${dateNum}${String(next).padStart(2, '0')}`)
+  }
+
+  return result
 })
 
 function onSearchInput(e: Event) {
@@ -338,40 +376,30 @@ watch(
   min-width: 0;
 }
 
-.cgl-card-title {
+.cgl-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cgl-card-line {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
   font-size: 13px;
-  font-weight: 600;
+  line-height: 1.5;
+}
+
+.cgl-card-label {
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+}
+
+.cgl-card-value {
+  min-width: 0;
   color: var(--color-text-primary);
-  margin-bottom: 2px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.cgl-card-meta {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  margin-bottom: 2px;
-}
-
-.cgl-card-seq {
-  font-size: 11px;
-  color: var(--color-text-secondary);
-}
-
-.cgl-card-version {
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: #3b82f620;
-  color: #3b82f6;
-  font-weight: 600;
-}
-
-.cgl-card-time {
-  font-size: 11px;
-  color: var(--color-text-secondary);
-  opacity: 0.7;
 }
 </style>

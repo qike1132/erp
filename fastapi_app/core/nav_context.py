@@ -13,13 +13,22 @@ from sqlalchemy.exc import DisconnectionError, OperationalError
 logger = logging.getLogger(__name__)
 
 # 每个导航项仅根据自身权限码显示，不再做跨模块映射
-SPECIAL_PERMISSION_MAP = {}
+# 例外：湖北订单与湖北外发已合并为同一页面（两个 Tab），
+# 合并后的导航项（湖北订单）对两类权限用户均可见
+SPECIAL_PERMISSION_MAP = {
+    'beile_order_view': ['beile_order_view', 'outsource_manage', 'outsource_view'],
+}
+
+# 已合并/下线的导航项：不再显示独立导航入口，但权限保留（用户仍可访问页面与接口）
+HIDDEN_NAV_CODES = {'order_batch_manage', 'outsource_manage', 'outsource_view'}
 
 # 权限端点名 → 前端路由路径映射
 PERMISSION_URL_MAP = {
     'product.products': '/product',
     'customer_order.index': '/customer-order',
     'beile_order.index': '/beile-order',
+    'outsource_manage': '/outsource',
+    'outsource_view': '/outsource',
     'stock.stockins': '/stock',
     'stock.stockouts': '/stock-out',
     'stock.inventory': '/stock',
@@ -110,8 +119,8 @@ async def get_nav_sections_async() -> dict:
                     'items': []
                 }
 
-            # 订单批次号模块已下线，不再显示导航入口
-            if item.code == 'order_batch_manage' or item.url == 'order_batch.index':
+            # 已合并/下线的模块不再显示导航入口
+            if item.code in HIDDEN_NAV_CODES or item.url == 'order_batch.index':
                 continue
 
             perm_codes = SPECIAL_PERMISSION_MAP.get(item.code, [item.code])

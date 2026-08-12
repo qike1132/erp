@@ -37,6 +37,8 @@ export function useSamplingPart(projectId: Ref<number | null>) {
   const partsByVersion = ref<PartDetail[]>([])
   /** 版本号列表 */
   const versionList = ref<string[]>([])
+  /** 最终版本号（用户选中的当前版本） */
+  const finalVersion = ref<string>('T1')
   /** 加载中 */
   const loading = ref(false)
   /** 提交中（新增/编辑/删除） */
@@ -74,10 +76,12 @@ export function useSamplingPart(projectId: Ref<number | null>) {
       const res = await patternRoomApi.getPartsByVersion(id)
       partsByVersion.value = res.items ?? []
       versionList.value = res.versions ?? []
+      finalVersion.value = res.final_version ?? 'T1'
     } catch (e) {
       console.error('[useSamplingPart] 查询跨版本部位数据失败:', e)
       partsByVersion.value = []
       versionList.value = []
+      finalVersion.value = 'T1'
     } finally {
       loading.value = false
     }
@@ -159,11 +163,22 @@ export function useSamplingPart(projectId: Ref<number | null>) {
     }
   }
 
+  /**
+   * 本地更新最终版本号（不重新拉取数据）
+   * 用于“设置最终版本”场景：后端仅更新 project.current_version，
+   * 部位数据本身未变化，重新拉取会触发 loading 态与整体替换 partsByVersion，
+   * 导致表格闪烁；直接本地更新可保持数据引用稳定，仅触发局部折叠。
+   */
+  function setFinalVersion(versionNo: string): void {
+    finalVersion.value = versionNo
+  }
+
   /** 清空部位状态 */
   function clearParts() {
     parts.value = []
     partsByVersion.value = []
     versionList.value = []
+    finalVersion.value = 'T1'
     error.value = null
   }
 
@@ -190,9 +205,11 @@ export function useSamplingPart(projectId: Ref<number | null>) {
     error,
     fetchParts,
     fetchPartsByVersion,
+    setFinalVersion,
     create,
     update,
     remove,
+    finalVersion,
     clearParts,
   }
 }

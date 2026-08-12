@@ -52,13 +52,18 @@ _SNAPSHOT_FIELDS = (
 )
 
 
+def _version_num(version_no: str | None) -> int:
+    """解析版本号数值部分：T1 -> 1，解析失败返回 0"""
+    try:
+        return int((version_no or '').lstrip('Tt'))
+    except (ValueError, AttributeError):
+        return 0
+
+
 def _next_version(current: str) -> str:
     """T1 -> T2, T2 -> T3, ..."""
-    try:
-        n = int(current.lstrip('Tt'))
-        return f'T{n + 1}'
-    except (ValueError, AttributeError):
-        return 'T1'
+    n = _version_num(current)
+    return f'T{n + 1}' if n else 'T1'
 
 
 def _normalize_value(value: Any) -> Any:
@@ -175,21 +180,47 @@ async def _resolve_supplier_name(db: AsyncSession, supplier_id: int | None) -> s
     return row or ''
 
 
-async def _get_product_image_url(db: AsyncSession, file_id: int | None) -> str | None:
-    """通过 FileRecord.storage_key 拼接产品图片访问 URL"""
-    if file_id is None:
-        return None
+async def _batch_get_image_urls(db: AsyncSession, file_ids: list[int]) -> dict[int, str]:
+    """批量获取文件存储 URL（单次 IN 查询，替代逐个查询，消除列表页 N+1）
+
+    Args:
+        db: 数据库会话。
+        file_ids: FileRecord ID 列表（可含重复，内部去重）。
+
+    Returns:
+        {file_id: url} 映射；存储后端异常或单条失败时对应条目缺失。
+    """
+    if not file_ids:
+        return {}
     from fastapi_app.services.storage_service import get_storage
-    result = await db.execute(select(FileRecord.storage_key).where(FileRecord.id == file_id))
-    storage_key = result.scalar_one_or_none()
-    if not storage_key:
-        return None
+    result = await db.execute(
+        select(FileRecord.id, FileRecord.storage_key).where(FileRecord.id.in_(set(file_ids)))
+    )
+    rows = result.all()
+    if not rows:
+        return {}
     try:
         storage = get_storage()
-        return storage.get_url(storage_key)
     except Exception as e:
-        logger.warning('获取产品图片 URL 失败: file_id=%s, error=%s', file_id, e)
+        logger.warning('获取存储后端失败: %s', e)
+        return {}
+    url_map: dict[int, str] = {}
+    for fid, storage_key in rows:
+        if not storage_key:
+            continue
+        try:
+            url_map[fid] = storage.get_url(storage_key)
+        except Exception as e:
+            logger.warning('获取产品图片 URL 失败: file_id=%s, error=%s', fid, e)
+    return url_map
+
+
+async def _get_product_image_url(db: AsyncSession, file_id: int | None) -> str | None:
+    """通过 FileRecord.storage_key 拼接产品图片访问 URL（单条场景，复用批量实现）"""
+    if file_id is None:
         return None
+    url_map = await _batch_get_image_urls(db, [file_id])
+    return url_map.get(file_id)
 
 
 async def _write_change_log(
@@ -219,6 +250,10 @@ async def _write_change_log(
 
 
 # ==================== T05: 按客户分组聚合查询 + 项目 CRUD ====================
+
+# 分组列表单次查询的项目数上限（防护性截断，避免极端数据量下全量序列化）
+_GROUPED_LIST_MAX_PROJECTS = 2000
+
 
 async def get_grouped_list(
     db: AsyncSession,
@@ -254,10 +289,16 @@ async def get_grouped_list(
     )
     for cond in conditions:
         query = query.where(cond)
-    query = query.order_by(CustomerSamplingProject.updated_at.desc())
+    query = query.order_by(CustomerSamplingProject.updated_at.desc()).limit(_GROUPED_LIST_MAX_PROJECTS)
 
     result = await db.execute(query)
     projects = result.scalars().all()
+
+    # 批量预取产品图片 URL（单次 SQL，消除逐项目查询的 N+1）
+    image_url_map = await _batch_get_image_urls(
+        db, [p.product_image_file_id for p in projects if p.product_image_file_id]
+    )
+    summary_map = {p.id: _project_to_summary(p, image_url_map) for p in projects}
 
     # 应用层按 customer_id 分组
     groups_map: dict[int | None, list[CustomerSamplingProject]] = {}
@@ -281,7 +322,7 @@ async def get_grouped_list(
             'customer_name': customer_name or '未命名客户',
             'project_count': len(proj_list),
             'latest_update_time': latest_update.strftime('%Y-%m-%d %H:%M:%S') if latest_update else '',
-            'projects': [await _project_to_summary(db, p) for p in proj_list],
+            'projects': [summary_map[p.id] for p in proj_list],
         })
 
     # 分组间按组内最新更新时间倒序
@@ -296,7 +337,7 @@ async def get_grouped_list(
             'customer_name': '未分类',
             'project_count': len(unclassified),
             'latest_update_time': latest_update.strftime('%Y-%m-%d %H:%M:%S') if latest_update else '',
-            'projects': [await _project_to_summary(db, p) for p in unclassified],
+            'projects': [summary_map[p.id] for p in unclassified],
         })
 
     return {
@@ -306,9 +347,12 @@ async def get_grouped_list(
     }
 
 
-async def _project_to_summary(db: AsyncSession, project: CustomerSamplingProject) -> dict:
-    """将项目 ORM 对象转为 ProjectSummary dict"""
-    image_url = await _get_product_image_url(db, project.product_image_file_id)
+def _project_to_summary(project: CustomerSamplingProject, image_url_map: dict[int, str]) -> dict:
+    """将项目 ORM 对象转为 ProjectSummary dict（纯函数，图片 URL 由批量映射提供）"""
+    image_url = (
+        image_url_map.get(project.product_image_file_id)
+        if project.product_image_file_id else None
+    )
     return {
         'id': project.id,
         'sequence_no': project.sequence_no,
@@ -361,9 +405,14 @@ async def list_projects(
     result = await db.execute(query)
     rows = result.scalars().all()
 
+    # 批量预取产品图片 URL（单次 SQL，消除逐项目查询的 N+1）
+    image_url_map = await _batch_get_image_urls(
+        db, [p.product_image_file_id for p in rows if p.product_image_file_id]
+    )
+
     return {
         'success': True,
-        'items': [await _project_to_summary(db, p) for p in rows],
+        'items': [_project_to_summary(p, image_url_map) for p in rows],
         'total': total,
         'pages': pages,
         'current_page': page,
@@ -491,6 +540,7 @@ async def update_project(
     customer_id: int | None = None,
     remark: str | None = None,
     product_image_file_id: int | None = None,
+    current_version: str | None = None,
     version: int,
     user_id: int | None = None,
 ) -> dict:
@@ -535,6 +585,10 @@ async def update_project(
     if product_image_file_id is not None and product_image_file_id != project.product_image_file_id:
         field_diffs.append({'field': 'product_image_file_id', 'old': project.product_image_file_id, 'new': product_image_file_id})
         project.product_image_file_id = product_image_file_id
+
+    if current_version is not None and current_version != project.current_version:
+        field_diffs.append({'field': 'current_version', 'old': project.current_version, 'new': current_version})
+        project.current_version = current_version
 
     # 乐观锁 +1
     project.version += 1
@@ -751,9 +805,17 @@ async def copy_part_version(
     if part is None:
         raise NotFoundError('部位不存在')
 
-    # 计算下一版本号
+    # 计算下一版本号：以项目下同部位名称所有行的最大版本号为准，
+    # 避免复制旧版本行时目标版本（如 T7 行的 T8）已存在而冲突
+    ver_rows = (await db.execute(
+        select(CustomerSamplingPart.version_no).where(
+            CustomerSamplingPart.project_id == part.project_id,
+            CustomerSamplingPart.part_name == part.part_name,
+        )
+    )).all()
+    max_no = max((_version_num(v) for (v,) in ver_rows), default=0)
     current_ver = part.version_no or 'T1'
-    new_version_no = _next_version(current_ver)
+    new_version_no = f'T{max(max_no, _version_num(current_ver)) + 1}'
 
     # 确保新版本号下同名称不重复（防御性检查）
     await _ensure_part_name_unique(
@@ -894,6 +956,18 @@ async def delete_part(
     part = result.scalar_one_or_none()
     if part is None:
         raise NotFoundError('部位不存在')
+
+    # 禁止删除项目当前最终版本，避免 current_version 悬空
+    proj_result = await db.execute(
+        select(CustomerSamplingProject).where(CustomerSamplingProject.id == part.project_id)
+    )
+    project = proj_result.scalar_one_or_none()
+    if (
+        project is not None
+        and part.version_no is not None
+        and part.version_no == project.current_version
+    ):
+        raise BusinessError('该版本为项目最终版本，请先将其他版本设为最终版后再删除')
 
     project_id = part.project_id
     part_name = part.part_name
@@ -1196,10 +1270,17 @@ async def get_parts_by_version(db: AsyncSession, project_id: int) -> dict:
 
     version_list = sorted(version_set, key=lambda v: (len(v), v))
 
+    # 加载项目 current_version 作为「最终版本」
+    project_result = await db.execute(
+        select(CustomerSamplingProject.current_version).where(CustomerSamplingProject.id == project_id)
+    )
+    final_version = project_result.scalar_one_or_none() or 'T1'
+
     return {
         'success': True,
         'items': items,
         'versions': version_list,
+        'final_version': final_version,
     }
 
 

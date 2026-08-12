@@ -19,9 +19,9 @@ from fastapi_app.api.v1.endpoints.material_registration import router as materia
 from fastapi_app.api.v1.endpoints.monitoring import router as monitoring_router
 from fastapi_app.api.v1.endpoints.notification import router as notification_router
 from fastapi_app.api.v1.endpoints.ocr_import import router as ocr_import_router
+from fastapi_app.api.v1.endpoints.outsource import router as outsource_router
 from fastapi_app.api.v1.endpoints.order import router as order_router
 from fastapi_app.api.v1.endpoints.order_batch import router as order_batch_router
-from fastapi_app.api.v1.endpoints.pattern_room import router as pattern_room_router
 from fastapi_app.api.v1.endpoints.customer_sampling import router as customer_sampling_router
 from fastapi_app.api.v1.endpoints.permission import router as permission_router
 from fastapi_app.api.v1.endpoints.product import router as product_router
@@ -94,6 +94,14 @@ api_router.include_router(
     order_router,
     prefix="/orders",
     tags=["订单管理"],
+    dependencies=[Depends(get_current_user_id)],
+)
+
+# 湖北外发路由 - 前缀 /api/v1/outsource
+api_router.include_router(
+    outsource_router,
+    prefix="/outsource",
+    tags=["湖北外发"],
     dependencies=[Depends(get_current_user_id)],
 )
 
@@ -282,20 +290,12 @@ api_router.include_router(
 )
 
 # 按客户分类打样管理路由 - 前缀 /api/v1/pattern-room（保持路径不变，用户无感切换）
-# 新模块接管 /pattern-room 路径，旧 pattern_room_router 注册暂注释（T14 统一清理旧代码）
 api_router.include_router(
     customer_sampling_router,
     prefix="/pattern-room",
     tags=["板房管理"],
     dependencies=[Depends(get_current_user_id)],
 )
-# 旧 pattern_room 路由注册（已由 customer_sampling_router 接管，T14 将删除此注释与旧文件）
-# api_router.include_router(
-#     pattern_room_router,
-#     prefix="/pattern-room",
-#     tags=["板房管理"],
-#     dependencies=[Depends(get_current_user_id)],
-# )
 
 # 通知中心路由 - 前缀 /api/v1/notifications
 api_router.include_router(

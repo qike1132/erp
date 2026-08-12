@@ -4,6 +4,16 @@
 export { authApi } from './auth'
 export { clearCsrfCache } from './request'
 export { orderApi } from './order'
+export { outsourceApi } from './outsource'
+export type {
+  OutsourceProcessType,
+  OrderOutsourceProcess,
+  KanbanOrder,
+  KanbanResponse,
+  ProcessTypeListResponse,
+  OrderProcessListResponse,
+  GenerateProcessResponse,
+} from './outsource'
 export { bomApi, purchaseApi } from './purchase'
 export type {
   MaterialCalcProduct,

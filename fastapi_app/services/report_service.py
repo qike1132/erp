@@ -16,20 +16,11 @@ from fastapi_app.utils import calc_total_pages, parse_date_strict
 
 logger = logging.getLogger(__name__)
 
-_cached_dialect: str | None = None
-
-
-def _get_dialect_name() -> str:
-    """获取当前数据库方言名称（postgresql 或 mysql），启动后缓存"""
-    global _cached_dialect
-    if _cached_dialect is None:
-        from fastapi_app.core.database import async_engine
-        _cached_dialect = async_engine.dialect.name
-    return _cached_dialect
-
 
 def _quote_identifier(name: str) -> str:
-    """根据数据库方言引用标识符（PG 用双引号，MySQL 用反引号）
+    """引用 SQL 标识符（PostgreSQL 双引号）
+
+    系统仅支持 PostgreSQL，不再做方言分支。
 
     SECURITY: name 参数仅允许硬编码的表名/列名，禁止传入用户输入。
     """
@@ -39,18 +30,13 @@ def _quote_identifier(name: str) -> str:
     })
     if name not in _ALLOWED_IDENTIFIERS:
         raise ValueError(f"非法SQL标识符: {name!r}，仅允许预定义标识符")
-    dialect = _get_dialect_name()
-    if dialect == "postgresql":
-        return f'"{name}"'
-    else:
-        return f"`{name}`"
+    return f'"{name}"'
 
 
 def _string_agg(expr: str, separator: str, distinct: bool = True) -> str:
-    """根据数据库方言返回聚合字符串函数
+    """返回字符串聚合表达式（PostgreSQL STRING_AGG）
 
-    PostgreSQL: STRING_AGG(DISTINCT expr, separator)
-    MySQL: GROUP_CONCAT(DISTINCT expr ORDER BY expr SEPARATOR separator)
+    系统仅支持 PostgreSQL，不再保留 MySQL GROUP_CONCAT 分支。
 
     SECURITY: expr 参数仅允许硬编码的列引用，禁止传入用户输入。
     """
@@ -62,12 +48,8 @@ def _string_agg(expr: str, separator: str, distinct: bool = True) -> str:
         raise ValueError(f"非法SQL聚合表达式: {expr!r}，仅允许预定义表达式")
     if separator not in (', ', '; '):
         raise ValueError(f"非法SQL聚合分隔符: {separator!r}")
-    dialect = _get_dialect_name()
     distinct_kw = "DISTINCT " if distinct else ""
-    if dialect == "postgresql":
-        return f"STRING_AGG({distinct_kw}{expr}, '{separator}')"
-    else:
-        return f"GROUP_CONCAT({distinct_kw}{expr} ORDER BY {expr} SEPARATOR '{separator}')"
+    return f"STRING_AGG({distinct_kw}{expr}, '{separator}')"
 
 
 async def _query_logs_generic(

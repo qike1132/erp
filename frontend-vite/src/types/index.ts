@@ -63,6 +63,7 @@ export interface OrderSKU {
   deduct_stock: boolean
   deduct_quantity: number
   note: string | null
+  has_processes?: boolean
 }
 
 export interface OrderItem {

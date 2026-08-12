@@ -117,7 +117,7 @@ class TestCacheResultDecorator:
     @pytest.mark.asyncio
     async def test_fallback_on_decorator_error(self):
         """装饰器内部异常时降级到直接调用"""
-        @cache_result(key_prefix="err", key_builder=lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+        @cache_result(key_prefix="err", key_builder=lambda: (_ for _ in ()).throw(ConnectionError("boom")))
         async def my_fn():
             return "fallback_value"
 
@@ -137,8 +137,7 @@ class TestInvalidateCache:
         _cache_local["orders:a"] = ("v", datetime.now() + timedelta(seconds=60))
 
         mock_redis = AsyncMock()
-        mock_redis.keys = AsyncMock(return_value=["orders:a", "orders:b"])
-        mock_redis.delete = AsyncMock(return_value=2)
+        mock_redis.delete_pattern = AsyncMock(return_value=2)
 
         with patch("fastapi_app.core.cache._get_redis_cache", return_value=mock_redis):
             deleted = await invalidate_cache("orders:*")

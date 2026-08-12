@@ -1,14 +1,17 @@
 """来料登记服务层"""
+import io
 import json
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
+import xlsxwriter
 from sqlalchemy import func, select
 from sqlalchemy.exc import DisconnectionError, OperationalError
 from sqlalchemy.orm import joinedload, selectinload
 
 from fastapi_app.core.cache import cache_result
+from fastapi_app.core.exceptions import BusinessError
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.utils import calc_total_pages
 from fastapi_app.shared_models import (
@@ -20,6 +23,14 @@ from fastapi_app.shared_models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_filter_date(date_str: str, field_name: str) -> date:
+    """严格解析筛选日期，非法格式抛 400 业务异常（不再静默忽略）"""
+    try:
+        return datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        raise BusinessError(f'{field_name}格式错误，应为 YYYY-MM-DD') from None
 
 
 @cache_result(key_prefix="material:registrations", ttl=30, local_ttl=10,
@@ -47,17 +58,9 @@ async def get_registrations(db, page: int = 1, per_page: int = 20,
     if customer_name:
         conditions.append(PurchaseOrder.customer_name.ilike(f'%{escape_like(customer_name)}%'))
     if start_date:
-        try:
-            sd = datetime.strptime(start_date, '%Y-%m-%d').date()
-            conditions.append(MaterialRegistration.registration_date >= sd)
-        except ValueError:
-            pass
+        conditions.append(MaterialRegistration.registration_date >= _parse_filter_date(start_date, '开始日期'))
     if end_date:
-        try:
-            ed = datetime.strptime(end_date, '%Y-%m-%d').date()
-            conditions.append(MaterialRegistration.registration_date <= ed)
-        except ValueError:
-            pass
+        conditions.append(MaterialRegistration.registration_date <= _parse_filter_date(end_date, '结束日期'))
     if material_category:
         conditions.append(
             MaterialRegistration.items.any(MaterialRegistrationItem.material_category == material_category)
@@ -367,10 +370,22 @@ async def preview_purchase_order(db, order_no: str) -> dict:
     return {'success': True, 'order': order_dict}
 
 
+def _sanitize_xlsx_formula(val: str) -> str:
+    """防 xlsx 公式注入：以 =+-@ 开头的字符串前置撇号（供 merge_range 使用，
+    其内部按 write 语义会将 '=' 开头字符串当公式执行）"""
+    if val and val[0] in '=+-@':
+        return "'" + val
+    return val
+
+
 async def export_registrations(db, order_no: str = '', supplier: str = '',
                                customer_name: str = '', material_category: str = '',
-                               start_date: str = '', end_date: str = '') -> dict:
-    """导出来料登记数据（返回HTML用于Excel打开）"""
+                               start_date: str = '', end_date: str = '') -> io.BytesIO:
+    """导出来料登记数据（真 xlsx 格式，替代旧 HTML 伪装 Excel 方案）
+
+    Returns:
+        io.BytesIO: xlsx 文件字节流（已 seek(0)，可直接用于 StreamingResponse）。
+    """
     needs_po_join = bool(customer_name)
     base_query = select(MaterialRegistration)
     if needs_po_join:
@@ -386,17 +401,9 @@ async def export_registrations(db, order_no: str = '', supplier: str = '',
     if customer_name:
         query = query.where(PurchaseOrder.customer_name.ilike(f'%{escape_like(customer_name)}%'))
     if start_date:
-        try:
-            sd = datetime.strptime(start_date, '%Y-%m-%d').date()
-            query = query.where(MaterialRegistration.registration_date >= sd)
-        except ValueError:
-            pass
+        query = query.where(MaterialRegistration.registration_date >= _parse_filter_date(start_date, '开始日期'))
     if end_date:
-        try:
-            ed = datetime.strptime(end_date, '%Y-%m-%d').date()
-            query = query.where(MaterialRegistration.registration_date <= ed)
-        except ValueError:
-            pass
+        query = query.where(MaterialRegistration.registration_date <= _parse_filter_date(end_date, '结束日期'))
     if material_category:
         query = query.where(
             MaterialRegistration.items.any(MaterialRegistrationItem.material_category == material_category)
@@ -407,46 +414,59 @@ async def export_registrations(db, order_no: str = '', supplier: str = '',
     registrations = list(result.unique().scalars().all())
 
     status_map = {'pending': '待收货', 'partial': '部分收货', 'completed': '已完成'}
-    html_parts = []
-    html_parts.append('''<!DOCTYPE html>
-<html xmlns:o="urn:schemas-microsoft-com:office:office"
-      xmlns:x="urn:schemas-microsoft-com:office:excel"
-      xmlns="http://www.w3.org/TR/REC-html40">
-<head><meta charset="utf-8"><title>来料登记汇总</title>
-<style>
-@page { margin: 0in; }
-body { font-family: 宋体; margin: 0; padding: 0; }
-.header { text-align: center; margin-bottom: 10px; }
-.header h1 { margin: 0; color: #333; font-size: 24pt; }
-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-th, td { border: 1.0pt solid #000000; padding: 1px; text-align: center; vertical-align: middle; font-size: 10.5pt; }
-th { background: #E6E6E6; font-weight: bold; }
-</style></head><body>
-<div class="header"><h1>来料登记汇总</h1></div>
-<table><thead><tr><th>登记日期</th><th>订单号</th><th>供应商</th><th>物料名称</th><th>规格</th><th>采购数量</th><th>已收货</th><th>状态</th></tr></thead><tbody>''')
 
-    for reg in registrations:
-        items = list(reg.items)
-        computed_status = reg.computed_status
-        if not items:
-            html_parts.append(f'<tr><td>{reg.registration_date or "-"}</td><td>{reg.purchase_order_no}</td><td>{reg.supplier_name or "-"}</td><td>-</td><td>-</td><td>-</td><td>-</td><td>{status_map.get(computed_status, computed_status)}</td></tr>')
-        else:
-            for idx, item in enumerate(items):
-                html_parts.append('<tr>')
-                if idx == 0:
-                    html_parts.append(f'<td rowspan="{len(items)}">{reg.registration_date or "-"}</td>')
-                    html_parts.append(f'<td rowspan="{len(items)}">{reg.purchase_order_no}</td>')
-                    html_parts.append(f'<td rowspan="{len(items)}">{reg.supplier_name or "-"}</td>')
-                html_parts.append(f'<td>{item.material_name}</td>')
-                html_parts.append(f'<td>{item.specification or "-"}</td>')
-                html_parts.append(f'<td>{float(item.ordered_quantity or 0)}</td>')
-                html_parts.append(f'<td>{float(item.received_quantity or 0)}</td>')
-                if idx == 0:
-                    html_parts.append(f'<td rowspan="{len(items)}">{status_map.get(computed_status, computed_status)}</td>')
-                html_parts.append('</tr>')
+    output = io.BytesIO()
+    workbook = xlsxwriter.Workbook(output, {'in_memory': True})
+    try:
+        ws = workbook.add_worksheet('来料登记汇总')
+        header_fmt = workbook.add_format({
+            'bold': True, 'bg_color': '#E6E6E6', 'border': 1,
+            'align': 'center', 'valign': 'vcenter',
+        })
+        cell_fmt = workbook.add_format({'border': 1, 'align': 'center', 'valign': 'vcenter'})
 
-    html_parts.append('</tbody></table></body></html>')
-    return {'success': True, 'html': ''.join(html_parts)}
+        headers = ['登记日期', '订单号', '供应商', '物料名称', '规格', '采购数量', '已收货', '状态']
+        for col, title in enumerate(headers):
+            ws.write(0, col, title, header_fmt)
+
+        row = 1
+        for reg in registrations:
+            items = list(reg.items)
+            status_text = status_map.get(reg.computed_status, reg.computed_status)
+            date_text = reg.registration_date.strftime('%Y-%m-%d') if reg.registration_date else '-'
+            span = max(len(items), 1)
+
+            # 左侧固定列与状态列：多行明细时纵向合并（对齐旧版 rowspan 效果）
+            # 文本列统一 write_string / 合并前转义，防用户录入数据的公式注入
+            fixed_cols = [(0, date_text), (1, reg.purchase_order_no or '-'),
+                          (2, reg.supplier_name or '-'), (7, status_text)]
+            for col, val in fixed_cols:
+                text_val = str(val)
+                if span > 1:
+                    ws.merge_range(row, col, row + span - 1, col,
+                                   _sanitize_xlsx_formula(text_val), cell_fmt)
+                else:
+                    ws.write_string(row, col, text_val, cell_fmt)
+
+            if not items:
+                for col in (3, 4, 5, 6):
+                    ws.write(row, col, '-', cell_fmt)
+            else:
+                for idx, item in enumerate(items):
+                    r = row + idx
+                    ws.write_string(r, 3, item.material_name or '-', cell_fmt)
+                    ws.write_string(r, 4, item.specification or '-', cell_fmt)
+                    ws.write(r, 5, float(item.ordered_quantity or 0), cell_fmt)
+                    ws.write(r, 6, float(item.received_quantity or 0), cell_fmt)
+            row += span
+
+        for col, width in enumerate([12, 18, 20, 24, 16, 10, 10, 10]):
+            ws.set_column(col, col, width)
+    finally:
+        workbook.close()
+
+    output.seek(0)
+    return output
 
 
 async def get_history(db, page: int = 1, per_page: int = 20,
@@ -463,17 +483,9 @@ async def get_history(db, page: int = 1, per_page: int = 20,
     if customer_name:
         conditions.append(PurchaseOrder.customer_name.ilike(f'%{escape_like(customer_name)}%'))
     if start_date:
-        try:
-            sd = datetime.strptime(start_date, '%Y-%m-%d').date()
-            conditions.append(MaterialRegistration.registration_date >= sd)
-        except ValueError:
-            pass
+        conditions.append(MaterialRegistration.registration_date >= _parse_filter_date(start_date, '开始日期'))
     if end_date:
-        try:
-            ed = datetime.strptime(end_date, '%Y-%m-%d').date()
-            conditions.append(MaterialRegistration.registration_date <= ed)
-        except ValueError:
-            pass
+        conditions.append(MaterialRegistration.registration_date <= _parse_filter_date(end_date, '结束日期'))
     if material_category:
         conditions.append(
             MaterialRegistration.items.any(MaterialRegistrationItem.material_category == material_category)

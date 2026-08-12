@@ -71,11 +71,6 @@ class PurchaseOrderItemsResponse(BaseModel):
     items: list[dict[str, Any]] = []
 
 
-class ExportRegistrationsResponse(BaseModel):
-    success: bool = True
-    html: str = ""
-
-
 class ExportRequest(BaseModel):
     """导出来料登记的筛选参数（POST body）"""
     order_no: str = ''

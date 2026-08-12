@@ -20,7 +20,7 @@ from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.core.domain_events import DomainEvent, DomainEventType
 from fastapi_app.core.domain_events import publish as publish_domain_event
-from fastapi_app.core.exceptions import NotFoundError, db_transaction
+from fastapi_app.core.exceptions import AppError, NotFoundError, db_transaction
 from fastapi_app.schemas.order import (
     ApprovalCancelResponse,
     ApprovalListResponse,
@@ -85,6 +85,8 @@ async def list_orders(
                                                 status=status, order_type=order_type,
                                                 start_date=start_date, end_date=end_date,
                                                 factory=factory)
+    except AppError:
+        raise  # 业务异常（如非法日期 400）交由全局 handler，不被吞为 500
     except Exception as e:
         logger.exception("[OrderList] 获取订单列表失败: %s", e)
         raise HTTPException(status_code=500, detail=f"获取订单列表失败: {str(e)[:200]}")

@@ -14,6 +14,7 @@ WebSocket 实时通知端点
 import asyncio
 import json as _json
 import logging
+import time
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -75,11 +76,6 @@ def register_websocket(app: FastAPI) -> None:
         pending_message = None
 
         cookie_token = websocket.cookies.get("access_token")
-        # region debug-point DBG-1 cookie-auth-trace
-        _dbg_cookie_len = len(cookie_token) if cookie_token else 0
-        logger.info("[DBG-1] WebSocket auth start: cookie_present=%s cookie_len=%s",
-                    bool(cookie_token), _dbg_cookie_len)
-        # endregion
         if cookie_token:
             try:
                 from fastapi_app.core.deps import _decode_jwt_token, is_token_revoked
@@ -93,19 +89,11 @@ def register_websocket(app: FastAPI) -> None:
                     uid = payload.get("sub")
                     if uid:
                         user_id = int(uid)
-                # region debug-point DBG-2 cookie-auth-success
-                logger.info("[DBG-2] Cookie auth path done: user_id_set=%s uid=%s",
-                            user_id is not None, uid)
-                # endregion
             except (ValueError, TypeError) as e:
                 logger.warning("WebSocket Cookie认证失败: %s | exc_type=%s", e, type(e).__name__)
-            except Exception as e:  # noqa: BLE001  # debug-only: 捕获 HTTPException 等未处理异常以确认假设 H4
-                logger.error("[DBG-2] Cookie auth UNCAUGHT exception: exc_type=%s msg=%s",
-                             type(e).__name__, e)
+            except Exception as e:  # noqa: BLE001  # 认证流程异常（如 HTTPException）不应中断连接建立
+                logger.warning("WebSocket Cookie认证异常: exc_type=%s msg=%s", type(e).__name__, e)
 
-        # region debug-point DBG-3 message-auth-entry
-        logger.info("[DBG-3] Entering message-auth path: user_id_set=%s", user_id is not None)
-        # endregion
         if not user_id:
             try:
                 initial_data = await asyncio.wait_for(
@@ -131,10 +119,6 @@ def register_websocket(app: FastAPI) -> None:
             except TimeoutError:
                 logger.warning("WebSocket等待认证消息超时")
 
-        # region debug-point DBG-4 final-auth-result
-        logger.info("[DBG-4] Auth complete: user_id_set=%s final_uid=%s",
-                    user_id is not None, user_id)
-        # endregion
         if not user_id:
             await websocket.close(code=4001, reason="未认证")
             return
@@ -157,7 +141,6 @@ def register_websocket(app: FastAPI) -> None:
         from fastapi_app.services.notification_service import manager
         manager.connect_existing(websocket, int(user_id))
 
-        import time
         msg_count = 0
         msg_window_start = time.monotonic()
         last_verify_time = time.monotonic()

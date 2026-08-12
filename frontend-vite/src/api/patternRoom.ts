@@ -66,6 +66,7 @@ export interface PartsByVersionResponse {
   success: boolean
   items: PartDetail[]
   versions: string[]
+  final_version: string
 }
 
 /** 批量新增部位单项 */
@@ -231,6 +232,7 @@ export interface ProjectUpdateRequest {
   customer_id?: number | null
   remark?: string | null
   product_image_file_id?: number | null
+  current_version?: string | null
   version: number
 }
 

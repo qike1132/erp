@@ -220,15 +220,19 @@ async def save_bom(db: AsyncSession, product_id: int, data: dict, username: str)
         )
         to_delete = result.scalars().all()
         target_type, name_attr = _delete_meta[category]
-        for item in to_delete:
-            await db.delete(item)
-            db.add(ModificationLog(
-                target_type=target_type, target_id=item.id,
-                field_name='deleted',
-                old_value=getattr(item, name_attr, '') or '',
-                new_value='(已删除)',
-                modifier_name=username,
-            ))
+        if to_delete:
+            # 先采集审计日志所需字段，再单条批量 DELETE 替代逐条 session.delete
+            delete_ids = []
+            for item in to_delete:
+                delete_ids.append(item.id)
+                db.add(ModificationLog(
+                    target_type=target_type, target_id=item.id,
+                    field_name='deleted',
+                    old_value=getattr(item, name_attr, '') or '',
+                    new_value='(已删除)',
+                    modifier_name=username,
+                ))
+            await db.execute(delete(model_cls).where(model_cls.id.in_(delete_ids)))
 
     return 'BOM 保存成功'
 

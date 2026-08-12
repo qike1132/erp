@@ -139,6 +139,7 @@ async def api_update_project(
                 customer_id=data.customer_id,
                 remark=data.remark,
                 product_image_file_id=data.product_image_file_id,
+                current_version=data.current_version,
                 version=data.version,
                 user_id=current_user.id,
             )

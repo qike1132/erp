@@ -37,10 +37,16 @@
               <img :src="previewUrl" alt="预览" class="pjf-img" />
               <button class="pjf-img-remove" aria-label="移除图片" @click="removeImage">&times;</button>
             </div>
-            <label v-else class="pjf-upload-area">
+            <label
+              v-else
+              :class="['pjf-upload-area', { 'pjf-upload-area--dragover': isDragOver }]"
+              @dragover.prevent="onDragOver"
+              @dragleave.prevent="onDragLeave"
+              @drop.prevent="onDrop"
+            >
               <input type="file" accept="image/jpeg,image/png,image/webp" class="pjf-file-input" @change="onFileChange" />
               <i class="fas fa-cloud-upload-alt" aria-hidden="true" />
-              <span>点击上传产品图片</span>
+              <span>点击或拖拽图片到此处上传</span>
               <span class="pjf-upload-hint">支持 JPEG/PNG/WebP，≤10MB</span>
             </label>
           </div>
@@ -62,6 +68,7 @@
 import { reactive, ref, computed, watch } from 'vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiButton from '@/components/ui/UiButton.vue'
+import { toast } from '@/composables/useToast'
 import type { Customer } from '@/types'
 import type { ProjectDetailResponse, ProjectCreateRequest, ProjectUpdateRequest } from '@/api/patternRoom'
 
@@ -89,6 +96,7 @@ const form = reactive({
 })
 
 const previewUrl = ref<string | null>(null)
+const isDragOver = ref(false)
 
 watch(() => props.visible, (val) => {
   if (val) {
@@ -106,25 +114,50 @@ watch(() => props.visible, (val) => {
   }
 })
 
+function applyImageFile(file: File) {
+  // 校验
+  const allowed = ['image/jpeg', 'image/png', 'image/webp']
+  if (!allowed.includes(file.type)) {
+    toast.warning('仅支持 JPEG / PNG / WebP 格式')
+    return
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    toast.warning('图片大小不能超过 10MB')
+    return
+  }
+
+  // 释放旧预览的 ObjectURL，避免内存泄漏
+  if (previewUrl.value?.startsWith('blob:')) {
+    URL.revokeObjectURL(previewUrl.value)
+  }
+  previewUrl.value = URL.createObjectURL(file)
+  emit('upload-image', file)
+}
+
 function onFileChange(e: Event) {
   const target = e.target as HTMLInputElement
   const file = target.files?.[0]
   if (!file) return
+  applyImageFile(file)
+  target.value = ''
+}
 
-  // 校验
-  const allowed = ['image/jpeg', 'image/png', 'image/webp']
-  if (!allowed.includes(file.type)) {
-    alert('仅支持 JPEG / PNG / WebP 格式')
-    return
+function onDragOver(e: DragEvent) {
+  // 仅响应包含文件的拖拽
+  if (Array.from(e.dataTransfer?.types ?? []).includes('Files')) {
+    isDragOver.value = true
   }
-  if (file.size > 10 * 1024 * 1024) {
-    alert('图片大小不能超过 10MB')
-    return
-  }
+}
 
-  // 预览
-  previewUrl.value = URL.createObjectURL(file)
-  emit('upload-image', file)
+function onDragLeave() {
+  isDragOver.value = false
+}
+
+function onDrop(e: DragEvent) {
+  isDragOver.value = false
+  const file = e.dataTransfer?.files?.[0]
+  if (!file) return
+  applyImageFile(file)
 }
 
 function removeImage() {
@@ -241,6 +274,10 @@ function handleSubmit() {
 }
 .pjf-upload-area:hover {
   border-color: var(--color-primary-400);
+}
+.pjf-upload-area--dragover {
+  border-color: var(--color-primary-500);
+  background: color-mix(in srgb, var(--color-primary-500) 8%, transparent);
 }
 .pjf-upload-area i {
   font-size: 24px;

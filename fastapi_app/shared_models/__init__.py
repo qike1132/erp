@@ -35,6 +35,12 @@ from fastapi_app.shared_models.inventory_log import InventoryLog
 from fastapi_app.shared_models.material_registration import MaterialRegistration, MaterialRegistrationItem
 from fastapi_app.shared_models.order import Order
 from fastapi_app.shared_models.order_item import OrderItem
+from fastapi_app.shared_models.outsource import (
+    OUTSOURCE_PROCESS_STATUSES,
+    OUTSOURCE_PROCESS_STATUS_LABELS,
+    OrderOutsourceProcess,
+    OutsourceProcessType,
+)
 from fastapi_app.shared_models.order_batch_audit import OrderBatchAuditLog
 from fastapi_app.shared_models.order_status_log import OrderStatusLog
 from fastapi_app.shared_models.order_sync import OrderSyncConfig, OrderSyncRecord, SyncRetryQueue
@@ -62,15 +68,6 @@ from fastapi_app.shared_models.user import User, user_permission
 from fastapi_app.shared_models.audit_log import AuditLog
 from fastapi_app.shared_models.country import Country
 from fastapi_app.shared_models.file_record import FileRecord
-from fastapi_app.shared_models.pattern_room import (
-    PATTERN_ROOM_BOM_STATUSES,
-    PATTERN_ROOM_CATEGORIES,
-    PATTERN_ROOM_CHANGE_TYPES,
-    PatternRoomBom,
-    PatternRoomBomItem,
-    PatternRoomBomItemVersion,
-    PatternRoomChangeLog,
-)
 from fastapi_app.shared_models.customer_sampling import (
     CUSTOMER_SAMPLING_ACTIONS,
     CUSTOMER_SAMPLING_CHANGE_TYPES,
@@ -87,6 +84,10 @@ __all__ = [
     'Product',
     'Order',
     'OrderItem',
+    'OutsourceProcessType',
+    'OrderOutsourceProcess',
+    'OUTSOURCE_PROCESS_STATUSES',
+    'OUTSOURCE_PROCESS_STATUS_LABELS',
     'StockIn',
     'StockOut',
     'StockReturn',
@@ -134,13 +135,6 @@ __all__ = [
     'PackagingRecord',
     'AuditLog',
     'Country',
-    'PatternRoomBom',
-    'PatternRoomBomItem',
-    'PatternRoomBomItemVersion',
-    'PatternRoomChangeLog',
-    'PATTERN_ROOM_CATEGORIES',
-    'PATTERN_ROOM_BOM_STATUSES',
-    'PATTERN_ROOM_CHANGE_TYPES',
     'CustomerSamplingProject',
     'CustomerSamplingPart',
     'CustomerSamplingFabricVersion',

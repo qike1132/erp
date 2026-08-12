@@ -2,41 +2,42 @@
 数据查询 / 报表统计 单元测试
 
 覆盖：
-- 订单查询（多维度筛选、分页）
-- 订单流水
-- 入库流水
-- 出库流水
-- 报表统计汇总
-- 日期范围解析
-- SQL 标识符安全校验
-- 聚合函数方言选择
+- SQL 标识符安全校验（白名单）
+- 聚合函数安全校验（PostgreSQL STRING_AGG，白名单表达式/分隔符）
+- 通用日志查询 _query_logs_generic（分页 + COUNT(*) OVER() 合并计数）
+- 订单流水 / 备货流水 / 出货流水 / 抵扣流水 的筛选条件构建与严格日期解析
 """
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import date, datetime
 
+from fastapi_app.core.cache import _cache_local
 from fastapi_app.services.report_service import (
     _quote_identifier,
     _string_agg,
-    _get_dialect_name,
     _query_logs_generic,
-    query_order_logs,
-    query_order_flow,
-    query_stockin_logs,
-    query_stockout_logs,
-    query_inventory_summary,
+    get_order_logs,
+    get_stockin_logs,
+    get_stockout_logs,
+    get_deduction_logs,
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_redis_cache():
+    """隔离缓存：禁用 Redis（L2），清空进程内 L1"""
+    _cache_local.clear()
+    with patch('fastapi_app.core.cache._get_redis_cache', return_value=None):
+        yield
+    _cache_local.clear()
 
 
 class TestSQLHelpers:
     """SQL 安全辅助函数"""
 
     def test_quote_identifier_valid(self):
-        """合法标识符"""
-        # mock dialect as postgresql
-        with patch('fastapi_app.services.report_service._get_dialect_name', return_value='postgresql'):
-            result = _quote_identifier('order')
-            assert '"order"' == result
+        """合法标识符（仅支持 PostgreSQL 双引号）"""
+        result = _quote_identifier('order')
+        assert '"order"' == result
 
     def test_quote_identifier_invalid(self):
         """非法标识符"""
@@ -44,11 +45,16 @@ class TestSQLHelpers:
             _quote_identifier('users_table')  # 不在白名单中
 
     def test_string_agg_valid_expr(self):
-        """合法聚合表达式"""
-        with patch('fastapi_app.services.report_service._get_dialect_name', return_value='postgresql'):
-            result = _string_agg('o.order_no', ', ')
-            assert 'STRING_AGG' in result
-            assert 'o.order_no' in result
+        """合法聚合表达式（仅支持 PostgreSQL STRING_AGG）"""
+        result = _string_agg('o.order_no', ', ')
+        assert 'STRING_AGG' in result
+        assert 'o.order_no' in result
+        assert 'DISTINCT' in result
+
+    def test_string_agg_no_distinct(self):
+        """关闭 DISTINCT"""
+        result = _string_agg('o.order_no', ', ', distinct=False)
+        assert 'DISTINCT' not in result
 
     def test_string_agg_invalid_expr(self):
         """非法表达式"""
@@ -60,200 +66,142 @@ class TestSQLHelpers:
         with pytest.raises(ValueError, match='非法SQL聚合分隔符'):
             _string_agg('o.order_no', '--')
 
-    def test_string_agg_mysql_dialect(self):
-        """MySQL 方言"""
-        with patch('fastapi_app.services.report_service._get_dialect_name', return_value='mysql'):
-            result = _string_agg('o.order_no', ', ')
-            assert 'GROUP_CONCAT' in result
 
-
-class TestQueryOrderLogs:
-    """订单查询"""
+class TestQueryLogsGeneric:
+    """通用日志查询"""
 
     @pytest.mark.asyncio
-    async def test_query_order_logs_empty(self, mock_async_db):
-        """空订单日志"""
-        mock_async_db.execute = AsyncMock()
-        mock_async_db.execute.return_value.fetchall.return_value = []
+    async def test_empty_result(self, mock_async_db):
+        """空结果集"""
+        exec_result = MagicMock()
+        exec_result.fetchall.return_value = []
+        exec_result.scalar.return_value = 0
+        mock_async_db.execute = AsyncMock(return_value=exec_result)
 
-        result = await query_order_logs(mock_async_db, page=1, per_page=20)
+        result = await _query_logs_generic(
+            mock_async_db,
+            base_where=[],
+            data_sql_template='SELECT 1 {where_sql}',
+            qty_sql_template='SELECT 0 {where_sql}',
+            params={},
+            page=1,
+            per_page=20,
+            row_mapper=lambda r: {},
+        )
 
         assert result['success'] is True
         assert result['logs'] == []
+        assert result['stats']['total_count'] == 0
+        assert result['stats']['total_quantity'] == 0
+        assert result['pagination']['pages'] == 0
 
     @pytest.mark.asyncio
-    async def test_query_order_logs_with_filters(self, mock_async_db):
-        """带筛选条件"""
-        mock_async_db.execute = AsyncMock()
-        mock_async_db.execute.return_value.fetchall.return_value = []
+    async def test_where_clause_join(self, mock_async_db):
+        """多个 where 条件以 AND 拼接"""
+        exec_result = MagicMock()
+        exec_result.fetchall.return_value = []
+        exec_result.scalar.return_value = 0
+        mock_async_db.execute = AsyncMock(return_value=exec_result)
 
-        result = await query_order_logs(
-            mock_async_db, page=1, per_page=20,
-            customer='测试客户', product_id=1
+        await _query_logs_generic(
+            mock_async_db,
+            base_where=['a = :a', 'b = :b'],
+            data_sql_template='SELECT 1 {where_sql}',
+            qty_sql_template='SELECT 0 {where_sql}',
+            params={'a': 1, 'b': 2},
+            page=1,
+            per_page=20,
+            row_mapper=lambda r: {},
         )
 
-        assert result['success'] is True
+        executed_sql = mock_async_db.execute.call_args_list[0][0][0].text
+        assert 'a = :a AND b = :b' in executed_sql
+
+
+def _patch_generic(return_value=None):
+    """patch _query_logs_generic，仅验证调用参数"""
+    return patch(
+        'fastapi_app.services.report_service._query_logs_generic',
+        new=AsyncMock(return_value=return_value or {'success': True, 'logs': []}),
+    )
+
+
+class TestGetOrderLogs:
+    """订单流水"""
 
     @pytest.mark.asyncio
-    async def test_query_order_logs_pagination(self, mock_async_db):
-        """分页查询"""
-        mock_async_db.execute = AsyncMock()
-        mock_async_db.execute.return_value.fetchall.return_value = []
-
-        result = await query_order_logs(
-            mock_async_db, page=3, per_page=20
-        )
-
-        assert result['success'] is True
-
-    @pytest.mark.asyncio
-    async def test_query_order_logs_with_date_range(self, mock_async_db):
-        """日期范围筛选"""
-        mock_async_db.execute = AsyncMock()
-        mock_async_db.execute.return_value.fetchall.return_value = []
-
-        result = await query_order_logs(
-            mock_async_db, page=1, per_page=20,
-            start_date='2024-01-01', end_date='2024-12-31'
-        )
-
-        assert result['success'] is True
-
-
-class TestQueryOrderFlow:
-    """订单流水查询"""
+    async def test_filters_build_where(self, mock_async_db):
+        """客户/产品/状态筛选进入 where 条件"""
+        with _patch_generic() as m:
+            await get_order_logs(
+                mock_async_db, customer='测试客户', product='产品A',
+                status='已备货', page=1, per_page=20,
+            )
+        where = m.call_args.kwargs['base_where']
+        assert any('o.customer LIKE' in c for c in where)
+        assert any('p.name LIKE' in c for c in where)
+        assert any('o.status = :status' in c for c in where)
 
     @pytest.mark.asyncio
-    async def test_query_order_flow_empty(self, mock_async_db):
-        """空订单流水"""
-        mock_async_db.execute = AsyncMock()
-        mock_async_db.execute.return_value.fetchall.return_value = []
-
-        result = await query_order_flow(mock_async_db, page=1, per_page=20)
-
-        assert result['success'] is True
-        assert result['logs'] == []
+    async def test_invalid_status_ignored(self, mock_async_db):
+        """非法状态值被忽略（不进 where）"""
+        with _patch_generic() as m:
+            await get_order_logs(mock_async_db, status='非法状态')
+        where = m.call_args.kwargs['base_where']
+        assert not any('o.status' in c for c in where)
 
     @pytest.mark.asyncio
-    async def test_query_order_flow_with_product(self, mock_async_db):
-        """按产品查询流水"""
-        mock_async_db.execute = AsyncMock()
-        mock_async_db.execute.return_value.fetchall.return_value = []
-
-        result = await query_order_flow(
-            mock_async_db, page=1, per_page=20, product_id=1
-        )
-
-        assert result['success'] is True
+    async def test_per_page_clamped(self, mock_async_db):
+        """per_page 上限 100"""
+        with _patch_generic() as m:
+            await get_order_logs(mock_async_db, per_page=5000)
+        assert m.call_args.kwargs['per_page'] == 100
 
     @pytest.mark.asyncio
-    async def test_query_order_flow_with_status(self, mock_async_db):
-        """按状态查询流水"""
-        mock_async_db.execute = AsyncMock()
-        mock_async_db.execute.return_value.fetchall.return_value = []
-
-        result = await query_order_flow(
-            mock_async_db, page=1, per_page=20, status='已备货'
-        )
-
-        assert result['success'] is True
+    async def test_invalid_date_raises(self, mock_async_db):
+        """非法日期格式抛 ValueError（不再静默忽略）"""
+        with _patch_generic():
+            with pytest.raises(ValueError):
+                await get_order_logs(mock_async_db, start_date='2024/01/01')
 
 
-class TestQueryStockInLogs:
-    """入库流水查询"""
+class TestGetStockinLogs:
+    """备货流水"""
 
     @pytest.mark.asyncio
-    async def test_query_stockin_logs_empty(self, mock_async_db):
-        """空入库流水"""
-        mock_async_db.execute = AsyncMock()
-        mock_async_db.execute.return_value.fetchall.return_value = []
-
-        result = await query_stockin_logs(mock_async_db, page=1, per_page=20)
-
-        assert result['success'] is True
-        assert result['logs'] == []
-
-    @pytest.mark.asyncio
-    async def test_query_stockin_logs_with_customer(self, mock_async_db):
-        """按客户查询入库流水"""
-        mock_async_db.execute = AsyncMock()
-        mock_async_db.execute.return_value.fetchall.return_value = []
-
-        result = await query_stockin_logs(
-            mock_async_db, page=1, per_page=20, customer='测试客户'
-        )
-
-        assert result['success'] is True
+    async def test_filters_build_where(self, mock_async_db):
+        with _patch_generic() as m:
+            await get_stockin_logs(
+                mock_async_db, customer='客户X',
+                start_date='2024-01-01', end_date='2024-01-31',
+            )
+        where = m.call_args.kwargs['base_where']
+        assert any('s.stockin_date >= :start_date' in c for c in where)
+        assert any('s.stockin_date < :end_date' in c for c in where)
+        params = m.call_args.kwargs['params']
+        assert params['customer'] == '%客户X%'
 
 
-class TestQueryStockOutLogs:
-    """出库流水查询"""
+class TestGetStockoutLogs:
+    """出货流水"""
 
     @pytest.mark.asyncio
-    async def test_query_stockout_logs_empty(self, mock_async_db):
-        """空出库流水"""
-        mock_async_db.execute = AsyncMock()
-        mock_async_db.execute.return_value.fetchall.return_value = []
+    async def test_base_where_invariants(self, mock_async_db):
+        """固定条件：净出货量为正 + 非抵扣 + 关联订单未删除"""
+        with _patch_generic() as m:
+            await get_stockout_logs(mock_async_db)
+        where = m.call_args.kwargs['base_where']
+        assert '(so.quantity - so.returned_quantity) > 0' in where
+        assert 'so.stockin_id IS NULL' in where
 
-        result = await query_stockout_logs(mock_async_db, page=1, per_page=20)
 
-        assert result['success'] is True
-        assert result['logs'] == []
-
-    @pytest.mark.asyncio
-    async def test_query_stockout_logs_with_customer(self, mock_async_db):
-        """按客户查询出库流水"""
-        mock_async_db.execute = AsyncMock()
-        mock_async_db.execute.return_value.fetchall.return_value = []
-
-        result = await query_stockout_logs(
-            mock_async_db, page=1, per_page=20, customer='测试客户'
-        )
-
-        assert result['success'] is True
+class TestGetDeductionLogs:
+    """备货抵扣流水"""
 
     @pytest.mark.asyncio
-    async def test_query_stockout_logs_pagination(self, mock_async_db):
-        """分页查询出库流水"""
-        mock_async_db.execute = AsyncMock()
-        mock_async_db.execute.return_value.fetchall.return_value = []
-
-        result = await query_stockout_logs(
-            mock_async_db, page=2, per_page=30
-        )
-
-        assert result['success'] is True
-
-
-class TestQueryInventorySummary:
-    """库存汇总报表"""
-
-    @pytest.mark.asyncio
-    async def test_query_inventory_summary_empty(self, mock_async_db):
-        """空库存汇总"""
-        mock_async_db.execute = AsyncMock()
-        mock_async_db.execute.return_value.fetchall.return_value = []
-
-        result = await query_inventory_summary(mock_async_db)
-
-        assert result['success'] is True
-
-    @pytest.mark.asyncio
-    async def test_query_inventory_summary_with_data(self, mock_async_db):
-        """有数据汇总"""
-        mock_async_db.execute = AsyncMock()
-
-        row = MagicMock()
-        row.product_name = '产品A'
-        row.barcode = 'BAR001'
-        row.initial_stock = 100
-        row.current_stock = 150
-        row.total_in = 200
-        row.total_out = 150
-        row.order_quantity = 100
-
-        mock_async_db.execute.return_value.fetchall.return_value = [row]
-
-        result = await query_inventory_summary(mock_async_db)
-
-        assert result['success'] is True
+    async def test_base_where_invariants(self, mock_async_db):
+        """固定条件：stockin_id 非空（抵扣出货）"""
+        with _patch_generic() as m:
+            await get_deduction_logs(mock_async_db, customer='客户Y')
+        where = m.call_args.kwargs['base_where']
+        assert 'so.stockin_id IS NOT NULL' in where

@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -537,10 +537,10 @@ class BackupPolicyService:
                             except OSError as e:
                                 logger.error(f"删除备份文件失败 {record.filename}: {e}")
                 
-                # 删除数据库记录
+                # 删除数据库记录（单条批量 DELETE 替代逐条 session.delete）
                 if records_to_delete:
-                    for record in records_to_delete:
-                        await db.delete(record)
+                    delete_ids = [record.id for record in records_to_delete]
+                    await db.execute(delete(BackupRecord).where(BackupRecord.id.in_(delete_ids)))
                     await db.commit()  # independent-transaction
                 
                 result = {

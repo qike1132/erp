@@ -21,6 +21,7 @@ from sqlalchemy.orm import joinedload, selectinload
 from fastapi_app.core.cache import CacheDomain, cache_result
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
 from fastapi_app.core.event_bus import safe_publish_event as _safe_publish_event
+from fastapi_app.core.exceptions import BusinessError
 from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS
 from fastapi_app.core.state_machine import can_transition
 from fastapi_app.core.validators import validate_not_empty, validate_quantity_range
@@ -88,7 +89,11 @@ async def get_order_by_id(db: AsyncSession, order_id: int) -> dict | None:
 
 
 def _parse_date_condition(date_str: str | None, is_end: bool = False):
-    """解析日期字符串为 SQL 条件，失败返回 None。"""
+    """解析日期字符串为 SQL 条件。
+
+    空值返回 None（不筛选）；非法格式抛 BusinessError（HTTP 400），
+    不再静默忽略，避免用户误以为筛选已生效。
+    """
     if not date_str:
         return None
     try:
@@ -98,7 +103,7 @@ def _parse_date_condition(date_str: str | None, is_end: bool = False):
         start_dt = datetime.strptime(date_str, '%Y-%m-%d').replace(tzinfo=UTC)
         return Order.order_date >= start_dt
     except ValueError:
-        return None
+        raise BusinessError(f"{'结束' if is_end else '开始'}日期格式错误，应为 YYYY-MM-DD") from None
 
 
 def _build_order_filters(customer: str | None, product_id: int | None,
@@ -445,6 +450,11 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
 
         await db.flush()
     await db.refresh(order)
+
+    # 返单自动带出外发工序：根据 SKU 预设生成湖北外发工序（失败不影响订单创建）
+    from fastapi_app.services.outsource_service import auto_generate_for_order
+    await auto_generate_for_order(db, order)
+
     await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER)
     # dashboard 缓存失效已移至 endpoint 层（事务提交后），此处不再重复
     logger.info(f'订单添加成功：{order_no}，客户：{customer}，产品：{product.name}，数量：{quantity}')

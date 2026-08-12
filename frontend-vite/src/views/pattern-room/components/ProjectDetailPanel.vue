@@ -42,7 +42,7 @@
             </colgroup>
             <thead>
               <tr>
-                <th>部位名称</th>
+                <th class="pdp-part-name-th">部位名称</th>
                 <th>版本</th>
                 <th>供应商</th>
                 <th>布料名称</th>
@@ -61,7 +61,7 @@
                     <div class="pdp-part-name-cell">
                       <span>{{ group.part_name }}</span>
                       <button
-                        v-if="selectedVersion[group.part_name]"
+                        v-if="selectedVersion[group.part_name] && group.totalVersionCount > 1"
                         class="pdp-expand-btn"
                         :title="group.collapsed ? '展开所有版本' : '折叠其他版本'"
                         @click.stop="toggleExpand(group.part_name)"
@@ -77,8 +77,9 @@
                     <button
                       v-if="part.version_no"
                       class="pdp-vp-chip"
-                      :class="{ 'pdp-vp-chip--active': selectedVersion[group.part_name] === part.version_no }"
-                      :title="selectedVersion[group.part_name] === part.version_no ? '点击取消选择，显示所有版本' : '选择 ' + part.version_no + ' 为最终版本'"
+                      :class="{ 'pdp-vp-chip--active': selectedVersion[group.part_name] === part.version_no, 'pdp-vp-chip--disabled': group.totalVersionCount <= 1 }"
+                      :title="group.totalVersionCount <= 1 ? '该部位只有一个版本' : (selectedVersion[group.part_name] === part.version_no ? '点击取消选择，显示所有版本' : '选择 ' + part.version_no + ' 为最终版本')"
+                      :disabled="!canManage || group.totalVersionCount <= 1"
                       @click.stop="toggleVersion(group.part_name, part.version_no!)"
                     >
                       {{ part.version_no }}
@@ -136,8 +137,9 @@
                       </button>
                     </div>
                     <div v-else class="pdp-row-actions">
+                      <!-- 折叠态：可见行即最终版行，直接显示复制；展开态：仅最新版本行显示 -->
                       <button
-                        v-if="part.version_no === group.latestVersionNo"
+                        v-if="group.collapsed || part.version_no === group.latestVersionNo"
                         type="button"
                         class="pdp-action-btn pdp-action-btn--info"
                         title="复制版本"
@@ -185,12 +187,14 @@ const props = defineProps<{
   project: ProjectDetailResponse | null
   partsByVersion: PartDetail[]
   versionList: string[]
+  finalVersion: string
   versionLoading: boolean
   partLoading: boolean
   canManage: boolean
 }>()
 
 const emit = defineEmits<{
+  'set-final-version': [versionNo: string]
   'copy-version': [part: PartDetail]
   'edit-version': [part: PartDetail]
   'delete-version': [part: PartDetail]
@@ -206,6 +210,14 @@ const editForm = reactive({
   fabric_name: '',
   fabric_color_no: '',
 })
+
+// ==================== 版本筛选器 ====================
+
+/** 每个部位名称 → 选中的版本号 */
+const selectedVersion = ref<Record<string, string | null>>({})
+
+/** 已手动展开的部位名称集合（展开后显示所有版本，但芯片保持高亮） */
+const expandedParts = ref<Set<string>>(new Set())
 
 function startEdit(part: PartDetail) {
   if (part.id == null) return
@@ -240,17 +252,28 @@ watch(
   },
 )
 
-// ==================== 版本筛选器 ====================
-
-/** 每个部位名称 → 选中的版本号 */
-const selectedVersion = ref<Record<string, string | null>>({})
-
-/** 已手动展开的部位名称集合（展开后显示所有版本，但芯片保持高亮） */
-const expandedParts = ref<Set<string>>(new Set())
+/** finalVersion 变化时（刷新/更新后）自动折叠显示最终版本 */
+watch(
+  [() => props.finalVersion, () => props.partsByVersion, () => props.project?.id],
+  ([finalVersion, partsByVersion]) => {
+    if (!finalVersion || !props.project) return
+    const next: Record<string, string | null> = {}
+    for (const item of partsByVersion) {
+      if (item.part_name && !next[item.part_name]) {
+        if (item.version_no === finalVersion) {
+          next[item.part_name] = finalVersion
+        }
+      }
+    }
+    selectedVersion.value = next
+    expandedParts.value = new Set()
+  },
+  { immediate: true },
+)
 
 /**
  * 切换某个部位名称的版本筛选：
- * - 点击未选中版本 → 设为选中，折叠只显示该版本
+ * - 点击未选中版本 → 设为最终版本，折叠只显示该版本
  * - 点击已选中版本 → 取消选中，恢复显示所有版本
  */
 function toggleVersion(partName: string, versionNo: string) {
@@ -264,6 +287,8 @@ function toggleVersion(partName: string, versionNo: string) {
     selectedVersion.value = { ...selectedVersion.value, [partName]: versionNo }
     // 选择新版本时清除展开状态，重新折叠
     expandedParts.value.delete(partName)
+    // 同步到后端作为最终版本
+    emit('set-final-version', versionNo)
   }
 }
 
@@ -281,7 +306,7 @@ function toggleExpand(partName: string) {
 /** 按 part_name 分组后的行数据，已计算 rowSpan，支持版本筛选 */
 const groupedRows = computed(() => {
   const items = props.partsByVersion
-  const result: { part_name: string; rowSpan: number; items: PartDetail[]; latestVersionNo: string | null; collapsed: boolean }[] = []
+  const result: { part_name: string; rowSpan: number; items: PartDetail[]; latestVersionNo: string | null; collapsed: boolean; totalVersionCount: number }[] = []
   const seen = new Map<string, PartDetail[]>()
 
   for (const item of items) {
@@ -303,7 +328,7 @@ const groupedRows = computed(() => {
     // 版本筛选：如果选中了某个版本且未手动展开，只保留该版本的行
     const sel = selectedVersion.value[name]
     const versionExists = sel ? group.some(i => i.version_no === sel) : false
-    const shouldFold = versionExists && !expandedParts.value.has(name)
+    const shouldFold = Boolean(sel) && versionExists && !expandedParts.value.has(name)
     let filteredItems = shouldFold ? group.filter(i => i.version_no === sel) : group
 
     // 按版本号顺序排序（T1/T2/T3/.../T10 → 1,2,3,...,10）
@@ -320,6 +345,7 @@ const groupedRows = computed(() => {
       items: filteredItems,
       latestVersionNo,
       collapsed: shouldFold,
+      totalVersionCount: group.length,
     })
   }
   return result
@@ -470,22 +496,30 @@ const groupedRows = computed(() => {
 }
 
 /* 部位名称列 — rowSpan 合并后的左侧锚定列 */
+.pdp-part-name-th {
+  text-align: center !important;
+}
+
 .pdp-part-name-col {
   font-weight: 500;
   color: var(--color-text-primary, #1a1a2e);
   vertical-align: middle;
-  text-align: center;
+  text-align: center !important;
 }
 
 .pdp-part-name-cell {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
 }
 
-/* 折叠时展开按钮 */
+/* 折叠时展开按钮 — 绝对定位，避免挤占文字导致与表头错位 */
 .pdp-expand-btn {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -545,6 +579,17 @@ const groupedRows = computed(() => {
   color: #fff;
   background: linear-gradient(135deg, #ff8c1f, #e67e22);
   border-color: #e67e22;
+}
+
+/* 禁用态（部位只有一个版本时） */
+.pdp-vp-chip--disabled,
+.pdp-vp-chip--disabled:hover {
+  cursor: not-allowed;
+  opacity: 0.6;
+  color: var(--color-text-muted, #94a3b8);
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  box-shadow: none;
 }
 
 /* 版本号列 */

@@ -583,46 +583,30 @@ function updateDetailDialogLocally(newReceived: number) {
 async function exportData() {
   toast('正在导出...', 'info')
   try {
-    const res = await materialApi.export({
+    await materialApi.export({
       order_no: pFilters.orderNo,
       supplier: pFilters.supplier,
       customer_name: pFilters.customer,
       material_category: pFilters.category,
       start_date: pFilters.startDate,
       end_date: pFilters.endDate,
-    })
-    if (res.success && res.html) {
-      const blob = new Blob([res.html], { type: 'application/vnd.ms-excel' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url; a.download = '来料进度汇总.xls'
-      document.body.appendChild(a); a.click(); document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-      toast('导出成功', 'success')
-    } else toast('导出失败', 'error')
+    }, '来料进度汇总.xlsx')
+    toast('导出成功', 'success')
   } catch { toast('导出失败', 'error') }
 }
 
 async function exportHistory() {
   toast('正在导出...', 'info')
   try {
-    const res = await materialApi.export({
+    await materialApi.export({
       order_no: hFilters.orderNo,
       supplier: hFilters.supplier,
       customer_name: hFilters.customer,
       material_category: hFilters.category,
       start_date: hFilters.startDate,
       end_date: hFilters.endDate,
-    })
-    if (res.success && res.html) {
-      const blob = new Blob([res.html], { type: 'application/vnd.ms-excel' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url; a.download = '来料历史汇总.xls'
-      document.body.appendChild(a); a.click(); document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-      toast('导出成功', 'success')
-    } else toast('导出失败', 'error')
+    }, '来料历史汇总.xlsx')
+    toast('导出成功', 'success')
   } catch { toast('导出失败', 'error') }
 }
 

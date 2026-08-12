@@ -9,7 +9,7 @@
       </div>
       <div v-else-if="orders.length === 0" class="bo-empty">
         <FontAwesomeIcon icon="clipboard-list" aria-hidden="true" />
-        <span>暂无湖北订单</span>
+        <span>暂无外发工序</span>
       </div>
       <template v-else>
         <div v-if="isFetching" class="bo-fetching-bar"><div class="bo-fetching-progress" /></div>

@@ -43,7 +43,7 @@ Write-Host "  复制 SQL 文件到 PostgreSQL 容器..." -ForegroundColor Gray
 docker cp $sqlFile erp-postgres:/tmp/apply_material_trgm_indexes.sql
 
 Write-Host "  执行 pg_trgm 索引创建..." -ForegroundColor Gray
-$result = docker exec -e PGPASSWORD="$pgPassword" erp-postgres psql -U erp -d erp_system -f /tmp/apply_material_trgm_indexes.sql 2>&1
+$result = docker exec -e PGPASSWORD="$pgPassword" erp-postgres psql -U erp_app -d erp_system -f /tmp/apply_material_trgm_indexes.sql 2>&1
 Write-Host $result
 
 if ($LASTEXITCODE -eq 0) {
@@ -122,7 +122,7 @@ Write-Host "`n容器状态:" -ForegroundColor White
 docker ps --format "table {{.Names}}\t{{.Status}}" --filter name=erp-app --filter name=erp-nginx --filter name=erp-postgres
 
 Write-Host "`npg_trgm 索引确认:" -ForegroundColor White
-docker exec -e PGPASSWORD="$pgPassword" erp-postgres psql -U erp -d erp_system -c "SELECT indexname FROM pg_indexes WHERE tablename IN ('material_registration', 'purchase_order', 'material_registration_item') AND indexname LIKE '%trgm%';" 2>&1
+docker exec -e PGPASSWORD="$pgPassword" erp-postgres psql -U erp_app -d erp_system -c "SELECT indexname FROM pg_indexes WHERE tablename IN ('material_registration', 'purchase_order', 'material_registration_item') AND indexname LIKE '%trgm%';" 2>&1
 
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host " 部署完成！" -ForegroundColor Green

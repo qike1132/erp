@@ -1,5 +1,5 @@
-import { get, post } from './request'
-import type { ApiResponse, ExportResponse, QueryParams } from '@/types'
+import { get, post, postDownload } from './request'
+import type { ApiResponse, QueryParams } from '@/types'
 
 /** 来料登记物料项（对齐后端 MaterialRegistrationItem） */
 export interface RegItem {
@@ -51,5 +51,6 @@ export const materialApi = {
   registrationDetail: (id: number) => get<{ registration?: Registration }>(`/material-registrations/registrations/${id}`),
   history: (params?: QueryParams) => get<{ registrations: Registration[]; pages?: number; total_pages?: number }>('/material-registrations/history', params),
   receive: (id: number, data: { received_quantity: number; remark?: string }) => post<ApiResponse & { auto_completed?: boolean }>(`/material-registrations/items/${id}/receive`, data),
-  export: (params?: QueryParams) => post<ExportResponse>('/material-registrations/export', params),
+  export: (params?: QueryParams, filename = '来料登记汇总.xlsx') =>
+    postDownload('/material-registrations/export', params ?? {}, filename),
 }

@@ -81,7 +81,7 @@ services:
     command: celery -A fastapi_app.core.celery_app:celery_app worker -Q celery -c 4 --loglevel=info --without-heartbeat
     environment:
       <<: *common-env
-      DATABASE_URL: postgresql+asyncpg://erp:${POSTGRES_PASSWORD:?ERROR: POSTGRES_PASSWORD must be set}@postgres:5432/erp_system
+      DATABASE_URL: postgresql+asyncpg://erp_app:${POSTGRES_PASSWORD:?ERROR: POSTGRES_PASSWORD must be set}@postgres:5432/erp_system
     depends_on:
       postgres:
         condition: service_healthy
@@ -122,7 +122,7 @@ services:
     command: celery -A fastapi_app.celery_worker_io worker -Q io.reports,io.backup,io.batch,io.plan -P gevent -c 50 --loglevel=info --without-heartbeat
     environment:
       <<: *common-env
-      DATABASE_URL: postgresql+asyncpg://erp:${POSTGRES_PASSWORD:?ERROR: POSTGRES_PASSWORD must be set}@postgres:5432/erp_system
+      DATABASE_URL: postgresql+asyncpg://erp_app:${POSTGRES_PASSWORD:?ERROR: POSTGRES_PASSWORD must be set}@postgres:5432/erp_system
     depends_on:
       postgres:
         condition: service_healthy
@@ -159,7 +159,7 @@ services:
     command: celery -A fastapi_app.core.celery_app:celery_app beat --loglevel=info
     environment:
       <<: *common-env
-      DATABASE_URL: postgresql+asyncpg://erp:${POSTGRES_PASSWORD:?ERROR: POSTGRES_PASSWORD must be set}@postgres:5432/erp_system
+      DATABASE_URL: postgresql+asyncpg://erp_app:${POSTGRES_PASSWORD:?ERROR: POSTGRES_PASSWORD must be set}@postgres:5432/erp_system
     depends_on:
       redis-broker:
         condition: service_healthy
@@ -176,7 +176,7 @@ services:
       - "127.0.0.1:5432:5432"
     environment:
       POSTGRES_DB: erp_system
-      POSTGRES_USER: erp
+      POSTGRES_USER: erp_app
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?ERROR: POSTGRES_PASSWORD must be set}
     # PostgreSQL 性能参数调优
     command: >
@@ -192,7 +192,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U erp -d erp_system"]
+      test: ["CMD-SHELL", "pg_isready -U erp_app -d erp_system"]
       interval: 10s
       timeout: 5s
       retries: 5

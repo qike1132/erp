@@ -460,6 +460,10 @@ async def confirm_staging_orders(
                             product=product,
                         )
 
+                    # 返单自动带出外发工序：按 SKU 预设生成湖北外发工序（失败不影响订单创建）
+                    from fastapi_app.services.outsource_service import auto_generate_for_order
+                    await auto_generate_for_order(db, order)
+
                     staging.status = 'approved'
                     confirmed += 1
 

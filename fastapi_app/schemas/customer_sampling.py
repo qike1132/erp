@@ -67,6 +67,7 @@ class PartsByVersionResponse(BaseModel):
     success: bool = True
     items: list[PartDetail] = Field(default_factory=list)
     versions: list[str] = Field(default_factory=list)
+    final_version: str = 'T1'
 
 
 # ==================== 版本 ====================
@@ -230,6 +231,7 @@ class ProjectUpdateRequest(BaseModel):
     customer_id: int | None = None
     remark: str | None = Field(None, max_length=2000)
     product_image_file_id: int | None = None
+    current_version: str | None = Field(None, max_length=8, description='当前版本/最终版本 T1/T2/T3...')
     version: int = Field(..., description='乐观锁版本号')
 
 

@@ -154,12 +154,6 @@ async def generate_purchase_order_number(db: AsyncSession) -> str:
     return await generate_number_async('CG', PurchaseOrder, 'create_time', 'order_no', db)
 
 
-async def generate_pattern_room_bom_number(db: AsyncSession) -> str:
-    """生成板房打样编号 BF-YYYYMMDD-XXXX"""
-    from fastapi_app.shared_models import PatternRoomBom
-    return await generate_number_async('BF', PatternRoomBom, 'created_at', 'bom_no', db)
-
-
 async def generate_customer_sampling_number(db: AsyncSession) -> str:
     """生成按客户分类打样项目序列号 CS-YYYYMMDD-XXXX
 

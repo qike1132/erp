@@ -7,6 +7,7 @@ WebSocket → api/ws.py
 """
 
 # 1. 标准库
+import asyncio
 import os
 import pathlib
 import warnings
@@ -89,8 +90,6 @@ async def _setup_redis_caches():
 
     from utils.redis_cache import redis_cache
     try:
-        from fastapi_app.core.config import settings
-
         redis_url = (
             getattr(settings, 'REDIS_CACHE_URL', None)
             or os.getenv('REDIS_CACHE_URL')
@@ -123,7 +122,6 @@ async def _setup_redis_caches():
 
 async def _warm_inventory_cache():
     """启动时预热库存缓存，确保首次请求命中缓存"""
-    import asyncio
     await asyncio.sleep(2)  # 等待数据库连接池就绪
     try:
         from fastapi_app.core.database import get_async_db
@@ -155,8 +153,11 @@ async def lifespan(application: FastAPI):
     from fastapi_app.core.purchase_cache import start_purchase_cache_listener
     await start_purchase_cache_listener()
 
+    # L1 缓存跨 worker 失效广播（开关默认关，由 CACHE_L1_BROADCAST_ENABLED 启用）
+    from fastapi_app.core.cache import start_l1_broadcast_listener
+    await start_l1_broadcast_listener()
+
     # 预热库存缓存（后台执行，不阻塞启动）
-    import asyncio
     background_tasks = []
     task = asyncio.create_task(_warm_inventory_cache())
     background_tasks.append(task)
@@ -189,6 +190,8 @@ async def lifespan(application: FastAPI):
         await manager.stop_redis_listener()
         from fastapi_app.core.purchase_cache import stop_purchase_cache_listener
         await stop_purchase_cache_listener()
+        from fastapi_app.core.cache import stop_l1_broadcast_listener
+        await stop_l1_broadcast_listener()
         await db_health_checker.stop()
         from fastapi_app.core.telemetry import shutdown_telemetry
         shutdown_telemetry()
