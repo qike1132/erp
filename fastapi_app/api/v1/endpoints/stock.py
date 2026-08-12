@@ -349,7 +349,7 @@ def _build_inventory_excel(inventory_data: list, result: dict) -> tuple[bytes, s
 
 
 @router.get('/export-inventory')
-@limiter.limit("3/minute")
+@limiter.limit("100/minute")  # 内网宽松：导出接口取消严格限流
 async def export_inventory(
     request: Request,
     customer: str = Query('', description='客户名称筛选'),

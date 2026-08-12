@@ -27,10 +27,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# 登录限流常量
-LOGIN_BURST_LIMIT = 5          # 1 分钟内最大尝试次数
+# 登录限流常量（内网宽松配置：大幅提高阈值，避免正常操作被拦截）
+LOGIN_BURST_LIMIT = 100        # 1 分钟内最大尝试次数
 LOGIN_BURST_WINDOW = 60        # 突发窗口（秒）
-LOGIN_ATTEMPT_LIMIT = 10       # 5 分钟内最大尝试次数
+LOGIN_ATTEMPT_LIMIT = 300      # 5 分钟内最大尝试次数
 LOGIN_ATTEMPT_WINDOW = 300     # 持续窗口（秒）
 
 
@@ -167,7 +167,7 @@ async def log_frontend_error(
 # ==================== 登录 ====================
 
 @router.post("/login", response_model=LoginResponse)
-@limiter.limit("5/minute")
+@limiter.limit("100/minute")  # 内网宽松：登录接口取消严格限流
 async def api_login(
     request: Request,
     response: Response,
@@ -190,8 +190,11 @@ async def api_login(
         from fastapi_app.core.redis_wrapper import get_client
         _redis = get_client()
         if _redis:
-            # 分层限流：1 分钟内最多 5 次（快速连发保护）
-            _burst = await _redis.incr(_login_burst_key)
+            # 分层限流：批量发送 burst + window 两个计数器，省一次 Redis RTT
+            _pipe = _redis.pipeline()
+            _pipe.incr(_login_burst_key)
+            _pipe.incr(_login_rate_limit_key)
+            _burst, _attempts = await _pipe.execute()
             if _burst == 1:
                 await _redis.expire(_login_burst_key, LOGIN_BURST_WINDOW)
             if _burst > LOGIN_BURST_LIMIT:
@@ -201,8 +204,6 @@ async def api_login(
                     detail="登录尝试过于频繁，请1分钟后重试",
                     headers={"Retry-After": str(LOGIN_BURST_WINDOW)},
                 )
-            # 5 分钟内最多 10 次（持续暴力破解保护）
-            _attempts = await _redis.incr(_login_rate_limit_key)
             if _attempts == 1:
                 await _redis.expire(_login_rate_limit_key, LOGIN_ATTEMPT_WINDOW)
             if _attempts > LOGIN_ATTEMPT_LIMIT:

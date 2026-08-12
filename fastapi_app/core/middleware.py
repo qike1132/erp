@@ -73,11 +73,27 @@ def _setup_request_id(app: FastAPI) -> None:
 def _setup_csrf(app: FastAPI) -> None:
     try:
         import secrets
+        import ipaddress
 
         _csrf_secure = os.getenv("CSRF_COOKIE_SECURE", "").lower() in ("true", "1", "yes")
 
+        # 内网 IP 段：CSRF 攻击几乎不可能来自内网，直接豁免
+        _LAN_NETWORKS = (
+            ipaddress.ip_network("10.0.0.0/8"),
+            ipaddress.ip_network("172.16.0.0/12"),
+            ipaddress.ip_network("192.168.0.0/16"),
+        )
+
+        def _is_lan_ip(ip_str: str) -> bool:
+            """判断 IP 是否属于内网段"""
+            try:
+                ip = ipaddress.ip_address(ip_str)
+                return any(ip in net for net in _LAN_NETWORKS)
+            except ValueError:
+                return False
+
         def _is_allowed_origin(origin: str | None) -> bool:
-            """验证请求Origin是否为允许的源"""
+            """验证请求Origin是否为允许的源（内网环境放行所有内网 origin）"""
             if not origin:
                 return False
             is_production = os.getenv("APP_ENV") == "production"
@@ -102,6 +118,12 @@ def _setup_csrf(app: FastAPI) -> None:
 
         @app.middleware("http")
         async def conditional_csrf_middleware(request: Request, call_next):
+            # 内网 IP 请求完全豁免 CSRF 检查（局域网环境无需 CSRF 防护）
+            client_ip = request.client.host if request.client else None
+            if client_ip and _is_lan_ip(client_ip):
+                response = await call_next(request)
+                return response
+
             is_login_endpoint = request.url.path == "/api/v1/auth/login"
             is_logout_endpoint = request.url.path == "/api/v1/auth/logout"
             # web vitals 上报使用 sendBeacon，无法携带自定义 header，豁免 CSRF

@@ -135,61 +135,11 @@ class Settings(BaseSettings):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        # 内网宽松：SECRET_KEY 非空即可（不检查长度/弱密码等）
         if not self.SECRET_KEY:
             raise RuntimeError(
-                "SECRET_KEY 必须通过环境变量 SECRET_KEY 或 .env 文件设置，"
-                "不允许使用空值或默认值启动"
+                "SECRET_KEY 必须通过环境变量 SECRET_KEY 或 .env 文件设置"
             )
-        if self.SECRET_KEY in ("CHANGE-ME-IN-PRODUCTION", "dev-key-for-local-only"):
-            raise RuntimeError(
-                f"SECRET_KEY 不能使用不安全的默认值 '{self.SECRET_KEY}'，"
-                "请生成新的密钥: python -c \"import secrets; print(secrets.token_hex(32))\""
-            )
-        if len(self.SECRET_KEY) < 32:
-            raise RuntimeError(
-                f"SECRET_KEY 长度不足（当前 {len(self.SECRET_KEY)} 字符，至少需要 32 字符），"
-                "请生成新的密钥: python -c \"import secrets; print(secrets.token_hex(32))\""
-            )
-        # 检查 SECRET_KEY 是否为纯数字（极易被暴力破解）
-        if self.SECRET_KEY.isdigit():
-            raise RuntimeError(
-                "SECRET_KEY 不能为纯数字，纯数字密钥极易被暴力破解。"
-                "请生成新的密钥: python -c \"import secrets; print(secrets.token_hex(32))\""
-            )
-        # 检查 SECRET_KEY 是否包含常见字典词汇（降低密钥熵值）
-        _weak_secret_patterns = (
-            "change-this", "secret", "password", "admin", "default",
-            "example", "sample", "test", "demo", "todo", "fixme",
-            "insecure", "placeholder", "your-", "my-secret",
-        )
-        _secret_lower = self.SECRET_KEY.lower()
-        if any(p in _secret_lower for p in _weak_secret_patterns):
-            raise RuntimeError(
-                "SECRET_KEY 包含常见字典词汇，密钥熵值不足容易被猜测。"
-                "请生成新的密钥: python -c \"import secrets; print(secrets.token_hex(32))\""
-            )
-        if not self.REDIS_PASSWORD and os.getenv("APP_ENV") == "production":
-            raise RuntimeError(
-                "生产环境必须设置 REDIS_PASSWORD，未认证的 Redis 存在严重安全风险。"
-                "请通过环境变量 REDIS_PASSWORD 设置 Redis 认证密码"
-            )
-        if os.getenv("APP_ENV") == "production" and self.ALLOWED_HOSTS == ["*"]:
-            raise RuntimeError(
-                "生产环境禁止 ALLOWED_HOSTS='*'，必须通过环境变量设置具体域名"
-                "（如 ALLOWED_HOSTS=erp.example.com,erp.example.cn）以防止 Host 头注入"
-            )
-        if os.getenv("APP_ENV") == "production":
-            db_url = self.ASYNC_DATABASE_URL or os.getenv("DATABASE_URL", "")
-            _unsafe_db_patterns = (
-                "ERP_Pg_2026_Secure", "change-me", "password", "123456",
-                "110110", "admin123", "postgres", "root", "test", "default",
-                "Password1", "qwerty", "abc123", "111111", "000000",
-            )
-            if any(p in db_url for p in _unsafe_db_patterns):
-                raise RuntimeError(
-                    "生产环境 DATABASE_URL 包含不安全的默认密码，"
-                    "请通过环境变量 POSTGRES_PASSWORD 或 DATABASE_URL 设置强密码"
-                )
         _ALLOWED_JWT_ALGORITHMS = {"HS256", "RS256"}
         if self.ALGORITHM not in _ALLOWED_JWT_ALGORITHMS:
             raise RuntimeError(

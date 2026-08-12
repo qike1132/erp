@@ -211,7 +211,7 @@ async def monthly_summary(
 
 
 @router.get('/export')
-@limiter.limit("3/minute")
+@limiter.limit("100/minute")  # 内网宽松：导出接口取消严格限流
 async def export_records(
     request: Request,
     start_date: str = Query('', description='起始日期 (YYYY-MM-DD)'),

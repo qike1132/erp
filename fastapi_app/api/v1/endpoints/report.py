@@ -151,7 +151,7 @@ async def deduction_logs(
 
 
 @router.get('/export')
-@limiter.limit("3/minute")
+@limiter.limit("100/minute")  # 内网宽松：导出接口取消严格限流
 async def export_report(
     request: Request,
     report_type: str = Query(..., description='报表类型: order/stockin/stockout/deduction'),

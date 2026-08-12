@@ -171,7 +171,8 @@ router.beforeEach(async (to: RouteLocationNormalized, _from: RouteLocationNormal
   }
 
   // 权限检查：非超级用户只能访问 filteredNavSections 中可见的路径
-  if (authStore.user && !authStore.user.is_super) {
+  // navSections 未加载时放行（非阻塞门），导航加载完成后侧边栏自然过滤不可见项
+  if (authStore.user && !authStore.user.is_super && authStore.navSections.length > 0) {
     const targetPath = '/' + to.path.split('/').filter(Boolean)[0]
     const allowedPaths = authStore.filteredNavSections.flatMap((s) => s.items.map((i) => i.path))
     if (targetPath !== '/dashboard' && targetPath !== '/notifications' && targetPath !== '/' && !allowedPaths.includes(targetPath)) {

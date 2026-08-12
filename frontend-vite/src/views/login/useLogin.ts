@@ -59,6 +59,7 @@ export function useLogin() {
         password: form.password,
         remember: isCapacitor ? true : form.remember,
       })
+      console.log('[Login] API 响应成功, has_user:', !!res.user)
       perf.markEnd('auth-start')
       perf.measure('auth-api', 'auth-start')
       perf.mark('init-start')
@@ -70,8 +71,13 @@ export function useLogin() {
       if (isCapacitor && res.access_token) {
         setAccessToken(res.access_token)
       }
-      // 登录接口已返回用户信息，直接传入跳过 GET /auth/me 额外请求
-      await authStore.init(true, res.user)
+      // 登录接口返回了用户信息时，直接写入 store（避免登录后再 GET /auth/me）
+      if (res.user) {
+        authStore.setUserInfo(res.user)
+        console.log('[Login] 已通过登录响应设置用户信息, username:', res.user.username)
+      }
+      await authStore.init(true)
+      console.log('[Login] authStore.init 完成, loaded:', authStore.loaded, 'isLoggedIn:', authStore.isLoggedIn)
       perf.markEnd('init-start')
       perf.measure('auth-store-init', 'init-start')
       const defaultRedirect = isCapacitor ? '/' : '/dashboard'
@@ -79,9 +85,11 @@ export function useLogin() {
       const redirect = (typeof rawRedirect === 'string' && rawRedirect.startsWith('/') && !rawRedirect.startsWith('//'))
         ? rawRedirect
         : defaultRedirect
+      console.log('[Login] 跳转到:', redirect)
       loginSuccess = true
       router.push(redirect)
     } catch (err: unknown) {
+      console.error('[Login] 登录流程异常:', err)
       perf.markEnd('auth-start')
       perf.measure('auth-api-failed', 'auth-start')
       const msg = getErrorMessage(err, '登录失败，请检查用户名和密码')

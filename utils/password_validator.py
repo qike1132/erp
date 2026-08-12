@@ -15,29 +15,10 @@ class PasswordValidator:
     # 匹配常见特殊字符
     SPECIAL_CHAR_PATTERN = r'[!@#$%^&*(),.?":{}|<>\-_\[\]\\\/~`+=;]'
 
-    # 常见弱密码黑名单（即使满足复杂度规则也应拒绝）
+    # 弱密码黑名单（内网宽松：仅拒绝最明显的弱密码）
     WEAK_PASSWORDS = frozenset({
-        "Password1!", "Password12!", "Password123!", "Password1234!",
-        "Admin123!", "Admin1234!", "Administrator1!",
-        "Qwerty123!", "Qwerty1!", "Qwerty12!",
-        "Abc12345!", "Abcd1234!",
-        "Aa123456!", "Aa1234567!",
-        "P@ssw0rd!", "P@ssword1!", "P@ss1234!",
-        "Passw0rd!", "Passw0rd1!",
-        "Welcome1!", "Welcome123!",
-        "Changeme1!", "Changeme123!",
-        "Test1234!", "Test12345!",
-        "Root1234!", "Root12345!",
-        "User1234!", "User12345!",
+        "123456", "password", "admin", "Password1!", "Admin123!",
     })
-
-    # 连续重复字符模式（3个或以上相同字符）
-    REPEAT_PATTERN = re.compile(r'(.)\1{2,}')
-    # 键盘序列
-    KEYBOARD_SEQUENCES = (
-        "qwertyuiop", "asdfghjkl", "zxcvbnm",
-        "1234567890", "qwerty123",
-    )
 
     @classmethod
     def validate(cls, password: str) -> tuple[bool, str]:

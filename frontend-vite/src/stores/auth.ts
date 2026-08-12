@@ -14,13 +14,17 @@ export const useAuthStore = defineStore('auth', () => {
   const permissionSet = computed(() => new Set(user.value?.permissions ?? []))
 
   /** 将 API 返回的用户信息映射为内部 User 类型 */
-  function setUserInfo(raw: UserInfo) {
+  function setUserInfo(raw: UserInfo | null | undefined) {
+    if (!raw || typeof raw !== 'object') {
+      console.error('[Auth] setUserInfo 收到无效数据:', raw)
+      return null
+    }
     user.value = {
-      id: raw.user_id ?? raw.id ?? 0,
-      username: raw.username,
+      id: raw.user_id ?? (raw as any).id ?? 0,
+      username: raw.username || '',
       is_super: raw.is_super ?? false,
       factory: raw.factory ?? null,
-      permissions: raw.permissions ?? [],
+      permissions: Array.isArray(raw.permissions) ? raw.permissions : [],
     }
     return user.value
   }
@@ -53,30 +57,27 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  async function init(force = false, preloadedUserInfo?: UserInfo) {
+  async function init(force = false) {
     if (loaded.value && !force) return
     // 防止并发调用：多个导航同时触发时复用同一个 Promise
     if (_initPromise && !force) return _initPromise
 
     _initPromise = (async () => {
       try {
-        // 登录接口已返回用户信息时直接设置，跳过 GET /auth/me 额外请求
-        if (preloadedUserInfo) {
-          setUserInfo(preloadedUserInfo)
+        if (!user.value) {
+          await fetchUser()
         }
-        // 并行：用户信息（仅未预加载时才请求）+ 导航数据
-        await Promise.all([
-          preloadedUserInfo ? Promise.resolve() : fetchUser(),
-          // 导航数据加载失败不应阻止用户进入系统
-          fetchNavSections().catch((e) => {
-            console.error('[Auth] 导航数据加载失败:', e)
-          }),
-        ])
+        // 用户信息就绪后立即标记 loaded，导航可提前进行
+        // nav-sections 非关键路径，后台加载不阻塞路由跳转
+        loaded.value = true
+
+        fetchNavSections().catch((e) => {
+          console.error('[Auth] 导航数据加载失败:', e)
+        })
       } catch (error) {
         loaded.value = false
         throw error
       } finally {
-        if (user.value) loaded.value = true
         _initPromise = null
       }
     })()
@@ -116,5 +117,5 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  return { user, navSections, filteredNavSections, loaded, isLoggedIn, init, fetchUser, fetchNavSections, hasPermission, hasAnyPermission, logout }
+  return { user, navSections, filteredNavSections, loaded, isLoggedIn, setUserInfo, init, fetchUser, fetchNavSections, hasPermission, hasAnyPermission, logout }
 })

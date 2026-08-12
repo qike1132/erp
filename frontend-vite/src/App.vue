@@ -19,18 +19,28 @@
 
 <script setup lang="ts">
 import { ref, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, type RouteLocationNormalized } from 'vue-router'
 
-// 全局路由导航 loading：覆盖懒加载组件 chunk 下载期的空白
-// （如登录成功后跳转 /dashboard，DefaultLayout/DashboardView 首次加载时）
+// 全局路由导航 loading：仅覆盖懒加载组件 chunk 首次下载期的空白
+// - 已缓存的 chunk（二次导航）不显示 loading，避免闪烁
+// - 延迟 300ms 后再显示，过滤瞬时网络抖动
 const router = useRouter()
 const showRouteLoading = ref(false)
 let loadingTimer: ReturnType<typeof setTimeout> | null = null
 
-// 150ms 延迟：已缓存的路由切换（瞬时完成）不闪烁 loading
-const DELAY_MS = 150
+const DELAY_MS = 300
 
-function startRouteLoading() {
+/** 检查目标路由是否包含未解析的动态 import（即 chunk 尚未缓存） */
+function hasUnresolvedChunk(to: RouteLocationNormalized): boolean {
+  return to.matched.some((r) => {
+    const comp = r.components?.default
+    return typeof comp === 'function'
+  })
+}
+
+function startRouteLoading(to: RouteLocationNormalized) {
+  // 所有组件 chunk 已缓存 → 无需 loading，导航几乎瞬时完成
+  if (!hasUnresolvedChunk(to)) return
   if (loadingTimer) return
   loadingTimer = setTimeout(() => {
     showRouteLoading.value = true
@@ -47,12 +57,10 @@ function stopRouteLoading() {
 
 const removeBefore = router.beforeEach(startRouteLoading)
 const removeAfter = router.afterEach(stopRouteLoading)
-const removeError = router.onError(stopRouteLoading)
 
 onUnmounted(() => {
   removeBefore()
   removeAfter()
-  removeError()
 })
 </script>
 
