@@ -16,16 +16,19 @@ export const useTabStore = defineStore('tabs', () => {
 
   const activeTab = computed(() => tabs.value.find(t => t.path === activePath.value))
 
-  /** 从侧边栏 navSections 中查找标题和图标 */
+  /** 从侧边栏 navSections 中查找标题和图标（优先精确匹配，其次最长前缀匹配，如 /outsource/presets 归到 /outsource） */
   function findNavInfo(path: string): { title: string; icon: string } {
     const authStore = useAuthStore()
+    let best: { item: { title: string; icon?: string }; path: string } | null = null
     for (const section of authStore.navSections) {
-      const item = section.items.find(i => i.path === path)
-      if (item) {
-        return { title: item.title, icon: item.icon ?? '' }
+      for (const item of section.items) {
+        if (item.path === path) return { title: item.title, icon: item.icon ?? '' }
+        if (path.startsWith(item.path + '/') && (!best || item.path.length > best.path.length)) {
+          best = { item, path: item.path }
+        }
       }
     }
-    return { title: path.split('/').filter(Boolean).pop() ?? path, icon: '' }
+    return best ? { title: best.item.title, icon: best.item.icon ?? '' } : { title: path.split('/').filter(Boolean).pop() ?? path, icon: '' }
   }
 
   /** 路由切换时调用：添加或激活 tab */
@@ -64,6 +67,7 @@ export const useTabStore = defineStore('tabs', () => {
     if (activePath.value === path) {
       if (tabs.value.length === 0) return '/dashboard'
       const next = tabs.value[Math.min(idx, tabs.value.length - 1)]
+      if (!next) return null
       return next.path
     }
     return null
