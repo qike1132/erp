@@ -109,11 +109,11 @@ async def cs_api():
         await engine.dispose()
 
 
-async def _create_project_via_api(client, product_name="API测试产品", customer_id=None, remark=None):
+async def _create_project_via_api(client, product_name="API测试产品", pattern_maker_id=None, remark=None):
     """通过 API 创建项目，返回 (project_id, sequence_no)"""
     payload = {"product_name": product_name}
-    if customer_id is not None:
-        payload["customer_id"] = customer_id
+    if pattern_maker_id is not None:
+        payload["pattern_maker_id"] = pattern_maker_id
     if remark is not None:
         payload["remark"] = remark
     resp = await client.post(f"{API_PREFIX}/projects", json=payload)
@@ -150,7 +150,7 @@ class TestCustomerSamplingApi:
         assert data["total_projects"] == 2
         # 未分类分组
         assert len(data["groups"]) == 1
-        assert data["groups"][0]["customer_name"] == "未分类"
+        assert data["groups"][0]["pattern_maker_name"] == "未分类"
 
     async def test_grouped_list_keyword(self, cs_api):
         """GET /grouped-list 关键词搜索"""
@@ -285,6 +285,140 @@ class TestCustomerSamplingApi:
             json={"product_name": "x", "version": 0},
         )
         assert resp.status_code == 404
+
+    # ==================== 5b. 更新项目状态 ====================
+
+    async def test_update_project_status(self, cs_api):
+        """PUT /projects/{id}/status 置为已完成，分组摘要返回 status"""
+        client, _ = cs_api
+        pid, _ = await _create_project_via_api(client, "状态API测试")
+
+        resp = await client.put(
+            f"{API_PREFIX}/projects/{pid}/status",
+            json={"status": "completed"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+
+        # 详情与分组摘要均带 completed
+        detail = (await client.get(f"{API_PREFIX}/projects/{pid}")).json()
+        assert detail["status"] == "completed"
+        grouped = (await client.get(f"{API_PREFIX}/grouped-list")).json()
+        summary = next(
+            p for g in grouped["groups"] for p in g["projects"] if p["id"] == pid
+        )
+        assert summary["status"] == "completed"
+
+    async def test_update_project_status_invalid(self, cs_api):
+        """PUT /projects/{id}/status 非法状态 → 422"""
+        client, _ = cs_api
+        pid, _ = await _create_project_via_api(client, "状态API非法测试")
+        resp = await client.put(
+            f"{API_PREFIX}/projects/{pid}/status",
+            json={"status": "unknown"},
+        )
+        assert resp.status_code == 422
+
+    async def test_update_project_status_not_found(self, cs_api):
+        """PUT /projects/{id}/status 项目不存在 → 404"""
+        client, _ = cs_api
+        resp = await client.put(
+            f"{API_PREFIX}/projects/99999/status",
+            json={"status": "completed"},
+        )
+        assert resp.status_code == 404
+
+    # ==================== 5b. 已完成项目列表状态筛选 ====================
+
+    async def test_list_projects_status_filter(self, cs_api):
+        """GET /projects?status=completed 只返回已完成项目"""
+        client, _ = cs_api
+        pid, _ = await _create_project_via_api(client, "筛选已完成A")
+        pid_b, _ = await _create_project_via_api(client, "筛选进行中B")
+        # 将 pid 标记为完成
+        resp = await client.put(
+            f"{API_PREFIX}/projects/{pid}/status",
+            json={"status": "completed"},
+        )
+        assert resp.status_code == 200
+
+        resp = await client.get(
+            f"{API_PREFIX}/projects", params={"status": "completed"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        # 断言返回的都是已完成项目
+        assert all(item["status"] == "completed" for item in data["items"])
+        # 断言我们标记完成的项目在结果中，且 completed_at 已写入
+        target = next((item for item in data["items"] if item["id"] == pid), None)
+        assert target is not None
+        assert target["completed_at"] is not None
+        # 未完成的项目不应出现
+        assert all(item["id"] != pid_b for item in data["items"])
+
+    # ==================== 5c. 已完成项目表格查询 ====================
+
+    async def test_completed_table_endpoint(self, cs_api):
+        """GET /projects/completed-table 返回已完成项目表格数据"""
+        client, _ = cs_api
+        pid, _ = await _create_project_via_api(client, "表格已完成项目")
+        # 标记完成
+        resp = await client.put(
+            f"{API_PREFIX}/projects/{pid}/status",
+            json={"status": "completed"},
+        )
+        assert resp.status_code == 200
+
+        resp = await client.get(f"{API_PREFIX}/projects/completed-table")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["total"] >= 1
+        row = next((r for r in data["items"] if r["id"] == pid), None)
+        assert row is not None
+        assert row["status"] == "completed"
+        assert row["completed_at"] is not None
+        assert "parts_count" in row
+        assert row["sequence_no"] != ""
+
+    async def test_completed_table_endpoint_keyword(self, cs_api):
+        """GET /projects/completed-table 关键词筛选"""
+        client, _ = cs_api
+        pid, _ = await _create_project_via_api(client, "表格关键词产品")
+        await _create_project_via_api(client, "表格其他产品")
+        # 仅 pid 标记完成
+        resp = await client.put(
+            f"{API_PREFIX}/projects/{pid}/status",
+            json={"status": "completed"},
+        )
+        assert resp.status_code == 200
+
+        resp = await client.get(
+            f"{API_PREFIX}/projects/completed-table", params={"keyword": "关键词"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["id"] == pid
+
+    async def test_completed_table_export(self, cs_api):
+        """GET /projects/completed-table/export 导出 Excel"""
+        client, _ = cs_api
+        pid, _ = await _create_project_via_api(client, "导出产品")
+        resp = await client.put(
+            f"{API_PREFIX}/projects/{pid}/status",
+            json={"status": "completed"},
+        )
+        assert resp.status_code == 200
+
+        resp = await client.get(f"{API_PREFIX}/projects/completed-table/export")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        assert "attachment" in resp.headers.get("content-disposition", "")
+        # 内容非空
+        assert len(resp.content) > 0
 
     # ==================== 6. 删除打样项目 ====================
 

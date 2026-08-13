@@ -8,7 +8,7 @@
  * 保持导出名 `patternRoomApi` 不变以兼容 `api/index.ts`。
  * 内部完全重写为面向"客户分组 + 部位布料 + 版本快照"扁平结构的 15 个 API 方法。
  */
-import { get, post, put, del, upload } from './request'
+import { get, post, put, del, upload, download } from './request'
 
 // ==================== 类型别名 ====================
 
@@ -207,22 +207,24 @@ export interface ProjectSummary {
   product_image_thumbnail_url: string | null
   product_image_blur_url: string | null
   current_version: string
+  /** 状态：in_progress / completed / cancelled */
+  status: string
   updated_at: string
 }
 
-/** 客户分组 */
-export interface CustomerGroup {
-  customer_id: number | null
-  customer_name: string
+/** 版师分组 */
+export interface PatternMakerGroup {
+  pattern_maker_id: number | null
+  pattern_maker_name: string
   project_count: number
   latest_update_time: string
   projects: ProjectSummary[]
 }
 
-/** 按客户分组聚合查询响应 */
+/** 按版师分组聚合查询响应 */
 export interface GroupedListResponse {
   success: boolean
-  groups: CustomerGroup[]
+  groups: PatternMakerGroup[]
   total_projects: number
 }
 
@@ -235,6 +237,25 @@ export interface ProjectListResponse {
   current_page: number
 }
 
+/** 已完成打样项目表格行 */
+export interface CompletedTableRow {
+  id: number
+  sequence_no: string
+  product_name: string
+  pattern_maker_name: string
+  completed_at: string | null
+  parts_count: number
+  operator_name: string
+  status: string
+}
+
+/** 已完成打样项目表格查询响应 */
+export interface CompletedTableResponse {
+  success: boolean
+  items: CompletedTableRow[]
+  total: number
+}
+
 /** 打样项目详情响应 */
 export interface ProjectDetailResponse {
   id: number
@@ -244,9 +265,11 @@ export interface ProjectDetailResponse {
   product_image_thumbnail_url: string | null
   product_image_blur_url: string | null
   product_image_file_id: number | null
-  customer_id: number | null
-  customer_name: string
+  pattern_maker_id: number | null
+  pattern_maker_name: string
   current_version: string
+  /** 状态：in_progress / completed / cancelled */
+  status: string
   remark: string
   created_by_name: string | null
   created_at: string
@@ -263,7 +286,7 @@ export interface ProjectDetailResponse {
 /** 新增打样项目请求 */
 export interface ProjectCreateRequest {
   product_name: string
-  customer_id?: number | null
+  pattern_maker_id?: number | null
   remark?: string | null
   initial_roles?: string[] | null
 }
@@ -271,7 +294,7 @@ export interface ProjectCreateRequest {
 /** 编辑打样项目请求（version 为乐观锁版本号，必填） */
 export interface ProjectUpdateRequest {
   product_name?: string | null
-  customer_id?: number | null
+  pattern_maker_id?: number | null
   remark?: string | null
   product_image_file_id?: number | null
   current_version?: string | null
@@ -353,6 +376,14 @@ export const patternRoomApi = {
   listProjects: (params?: ProjectListParams) =>
     get<ProjectListResponse>('/pattern-room/projects', params as Record<string, unknown>),
 
+  // ---------- 2b. 已完成打样项目表格查询 ----------
+  getCompletedTable: (params?: { keyword?: string; pattern_maker_id?: number }) =>
+    get<CompletedTableResponse>('/pattern-room/projects/completed-table', params as Record<string, unknown>),
+
+  // ---------- 2c. 已完成打样项目表格导出（Excel） ----------
+  exportCompletedTable: (params?: { keyword?: string; pattern_maker_id?: number }) =>
+    download('/pattern-room/projects/completed-table/export', '已完成打样.xlsx', params),
+
   // ---------- 3. 打样项目详情 ----------
   getProject: (id: number) =>
     get<ProjectDetailResponse>(`/pattern-room/projects/${id}`),
@@ -364,6 +395,10 @@ export const patternRoomApi = {
   // ---------- 5. 编辑打样项目 ----------
   updateProject: (id: number, data: ProjectUpdateRequest) =>
     put<ActionResponse>(`/pattern-room/projects/${id}`, data),
+
+  // ---------- 5b. 更新项目状态（完成/进行中/取消） ----------
+  updateProjectStatus: (id: number, status: string) =>
+    put<ActionResponse>(`/pattern-room/projects/${id}/status`, { status }),
 
   // ---------- 6. 删除打样项目 ----------
   deleteProject: (id: number) =>

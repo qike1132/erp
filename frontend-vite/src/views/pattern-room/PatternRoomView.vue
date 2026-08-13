@@ -16,25 +16,16 @@
   -->
   <div class="pr-container">
     <div class="page-card page-card-main">
-      <!-- 顶部：HeaderTabs + 操作按钮 -->
+      <!-- 顶部：操作按钮 -->
       <div class="page-card-header pr-top-bar">
-        <div class="pr-top-left"><HeaderTabs /></div>
-        <div class="pr-top-right">
-          <button
-            v-if="canManage"
-            class="pr-add-btn pr-add-btn--primary"
-            @click="openCreateProjectDialog"
-          >
-            新建打样
-          </button>
-          <button
-            v-if="canManage && selectedProjectId"
-            class="pr-add-btn"
-            @click="openCreatePartDialog"
-          >
-            录入信息
-          </button>
-        </div>
+        <!-- 默认按钮：新建打样 -->
+        <button
+          v-if="canManage"
+          class="pr-add-btn pr-add-btn--primary"
+          @click="openCreateProjectDialog"
+        >
+          新建打样
+        </button>
       </div>
 
       <!-- 主体：左右分栏 -->
@@ -53,19 +44,26 @@
         <!-- 桌面端：左侧固定 + 右侧 flex -->
         <div class="pr-split-layout">
           <!-- 左侧：客户分组列表 -->
-          <aside v-if="!isNarrow" class="pr-left-pane" :class="{ 'pr-left-collapsed': leftCollapsed }">
-            <button class="pr-collapse-btn" :aria-label="leftCollapsed ? '展开' : '折叠'" @click="leftCollapsed = !leftCollapsed">
-              <i :class="['fas', leftCollapsed ? 'fa-chevron-right' : 'fa-chevron-left']" aria-hidden="true" />
-            </button>
-            <div v-show="!leftCollapsed" class="pr-left-content">
+          <aside v-if="!isNarrow" class="pr-left-pane">
+            <div class="pr-left-content">
               <CustomerGroupList
                 :groups="groupHook.groups.value"
                 :loading="groupHook.loading.value"
                 :has-data="groupHook.hasData.value"
                 :selected-project-id="selectedProjectId"
+                :can-manage="canManage"
+                :view-mode="viewMode"
+                :completed-items="completedItems"
+                :completed-loading="completedLoading"
                 @select-project="onSelectProject"
+                @edit-project="onEditProjectFromCard"
+                @complete-project="onCompleteProjectFromCard"
                 @search="onSearch"
                 @add-project="openCreateProjectDialog"
+                @status-change="onStatusChange"
+                @select-completed="onSelectProject"
+                @export-excel="onExportExcel"
+                @print-table="onPrintTable"
               />
             </div>
           </aside>
@@ -85,6 +83,7 @@
               :version-loading="versionHook.loading.value"
               :part-loading="partHook.loading.value"
               :can-manage="canManage"
+              :can-print="canPrint"
               :roles="roleHook.roles.value"
               :current-role-id="roleHook.currentRoleId.value"
               @set-final-version="onSetFinalVersion"
@@ -94,6 +93,8 @@
               @select-role="onSelectRole"
               @add-role="onAddRole"
               @remove-role="onRemoveRole"
+              @add-part="openCreatePartDialog"
+              @print="handlePrint"
             />
           </main>
         </div>
@@ -114,9 +115,19 @@
         :loading="groupHook.loading.value"
         :has-data="groupHook.hasData.value"
         :selected-project-id="selectedProjectId"
+        :can-manage="canManage"
+        :view-mode="viewMode"
+        :completed-items="completedItems"
+        :completed-loading="completedLoading"
         @select-project="onSelectProjectFromDrawer"
+        @edit-project="onEditProjectFromCard"
+        @complete-project="onCompleteProjectFromCard"
         @search="onSearch"
         @add-project="openCreateProjectDialog"
+        @status-change="onStatusChange"
+        @select-completed="onSelectProjectFromDrawer"
+        @export-excel="onExportExcel"
+        @print-table="onPrintTable"
       />
     </UiDrawer>
 
@@ -124,9 +135,13 @@
     <ProjectFormDialog
       :visible="projectFormVisible"
       :project="projectFormMode === 'edit' ? projectHook.currentProject.value : null"
-      :customers="customers"
+      :pattern-makers="patternMakers"
+      :pattern-maker-id="formPatternMakerId"
       :submitting="projectHook.submitting.value"
       @update:visible="projectFormVisible = $event"
+      @update:pattern-maker-id="formPatternMakerId = $event"
+      @add-pattern-maker="handleAddPatternMaker"
+      @delete-pattern-maker="handleDeletePatternMaker"
       @submit-create="onProjectSubmitCreate"
       @submit-update="onProjectSubmitUpdate"
       @upload-image="onProjectUploadImage"
@@ -150,6 +165,14 @@
       @confirm="onVersionCreateConfirm"
     />
 
+    <!-- 打印打样单内容（屏幕上隐藏，打印时仅显示） -->
+    <PrintDialog
+      ref="printDialogRef"
+      :project="projectHook.currentProject.value"
+      :parts="printParts"
+      :roles="printRoles"
+    />
+
 
     <!-- 删除确认对话框 -->
     <UiConfirmDialog
@@ -169,7 +192,6 @@
  * PatternRoomView — 按客户分类打样信息模块主容器
  */
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 import UiAlert from '@/components/ui/UiAlert.vue'
 import UiDrawer from '@/components/ui/UiDrawer.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
@@ -178,6 +200,7 @@ import ProjectDetailPanel from './components/ProjectDetailPanel.vue'
 import ProjectFormDialog from './components/ProjectFormDialog.vue'
 import PartFormDialog from './components/PartFormDialog.vue'
 import VersionCreateDialog from './components/VersionCreateDialog.vue'
+import PrintDialog from './components/PrintDialog.vue'
 
 import { useCustomerSampling } from './composables/useCustomerSampling'
 import { useSamplingProject } from './composables/useSamplingProject'
@@ -190,20 +213,138 @@ import { usePermission } from '@/composables/usePermission'
 import { toast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
 
-import { customerApi } from '@/api/customer'
-import type { Customer } from '@/types'
 import type {
   ProjectCreateRequest,
   ProjectUpdateRequest,
   BatchPartCreateRequest,
   PartDetail,
   PartUpdateRequest,
+  RoleBrief,
+  CompletedTableRow,
 } from '@/api/patternRoom'
 import { patternRoomApi } from '@/api/patternRoom'
+import { patternMakerApi } from '@/api/patternMaker'
+import type { PatternMaker } from '@/api/patternMaker'
 
 // ==================== 权限 ====================
 const { hasPermission } = usePermission()
 const canManage = computed(() => hasPermission('customer_sampling_manage'))
+
+// ==================== 已完成项目表格查询 ====================
+/** 左侧视图模式：group（分组卡片）| table（已完成表格） */
+const statusFilter = ref<string>('all')
+const viewMode = computed(() => statusFilter.value === 'completed' ? 'table' : 'group')
+const completedItems = ref<CompletedTableRow[]>([])
+const completedLoading = ref(false)
+/** 搜索关键词（用于表格查询时传递给 API） */
+const searchKeyword = ref('')
+
+async function loadCompletedTable() {
+  completedLoading.value = true
+  try {
+    const params: { keyword?: string; pattern_maker_id?: number } = {}
+    if (searchKeyword.value) params.keyword = searchKeyword.value
+    const res = await patternRoomApi.getCompletedTable(params)
+    completedItems.value = res.items ?? []
+  } catch (e) {
+    console.error('[PatternRoomView] 加载已完成表格失败:', e)
+    completedItems.value = []
+  } finally {
+    completedLoading.value = false
+  }
+}
+
+function onStatusChange(val: string) {
+  statusFilter.value = val
+  if (val === 'completed') {
+    loadCompletedTable()
+  }
+}
+
+async function onExportExcel() {
+  try {
+    const params: { keyword?: string; pattern_maker_id?: number } = {}
+    if (searchKeyword.value) params.keyword = searchKeyword.value
+    await patternRoomApi.exportCompletedTable(params)
+    toast.success('导出成功')
+  } catch (e) {
+    console.error('[PatternRoomView] 导出失败:', e)
+    toast.error('导出失败')
+  }
+}
+
+function onPrintTable() {
+  document.body.classList.remove('pct-printing')
+  document.body.classList.add('pct-printing')
+  const prevTitle = document.title
+  document.title = ''
+  requestAnimationFrame(() => {
+    window.print()
+  })
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('afterprint', () => {
+    document.body.classList.remove('pct-printing')
+    document.title = '滨发协同系统'
+  })
+}
+
+// ==================== 打印打样单 ====================
+/** 打印内容组件引用（用于打印前刷新打印时间） */
+const printDialogRef = ref<{ updatePrintTime: () => void } | null>(null)
+/** 打印用部位数据（全部角色，点击打印时才加载） */
+const printParts = ref<PartDetail[]>([])
+/** 打印用角色分组（role_id → role_name 映射） */
+const printRoles = ref<RoleBrief[]>([])
+/** 可打印：已选中产品且有部位数据 */
+const canPrint = computed(
+  () => selectedProjectId.value != null && partHook.partsByVersion.value.length > 0,
+)
+
+async function handlePrint() {
+  if (!canPrint.value || !selectedProjectId.value) return
+  const projectId = selectedProjectId.value
+  const roles = roleHook.roles.value
+  printRoles.value = roles
+  // 后端不支持不传 role_id 返回全部角色，需逐个角色加载
+  try {
+    const allParts: PartDetail[] = []
+    for (const role of roles) {
+      const res = await patternRoomApi.getPartsByVersion(projectId, role.id)
+      const items = res.items ?? []
+      // 确保每条数据带 role_id（用于 PrintDialog 按角色分组）
+      for (const item of items) {
+        if (item.role_id == null) item.role_id = role.id
+        allParts.push(item)
+      }
+    }
+    printParts.value = allParts
+  } catch {
+    // 降级：使用当前角色的数据
+    printParts.value = partHook.partsByVersion.value
+  }
+  // 打印前刷新打印时间
+  printDialogRef.value?.updatePrintTime()
+  // 给 body 加打印隔离类，仅显示打样单内容
+  document.body.classList.remove('pd-printing')
+  document.body.classList.add('pd-printing')
+  // 临时清空页面标题，避免浏览器打印预览页眉显示"滨发协同系统"
+  const prevTitle = document.title
+  document.title = ''
+  // 等待打印内容渲染后，直接调出浏览器打印预览
+  requestAnimationFrame(() => {
+    window.print()
+  })
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('afterprint', () => {
+    document.body.classList.remove('pd-printing')
+    // 恢复页面标题
+    document.title = '滨发协同系统'
+  })
+}
 
 // ==================== Hooks ====================
 const groupHook = useCustomerSampling()
@@ -216,21 +357,74 @@ const roleHook = useSamplingRole(selectedProjectId)
 const partHook = useSamplingPart(selectedProjectId, roleHook.currentRoleId)
 const versionHook = useSamplingVersion(selectedProjectId, roleHook.currentRoleId)
 
-// ==================== 客户列表（项目表单选项） ====================
-const customers = ref<Customer[]>([])
+// ==================== 版师列表（项目表单选项） ====================
+const patternMakers = ref<PatternMaker[]>([])
+/** 弹窗当前选中的版师 ID（v-model 双向绑定） */
+const formPatternMakerId = ref<number | null>(null)
 
-async function loadCustomers() {
+async function loadPatternMakers() {
   try {
-    const res = await customerApi.list({ per_page: 200 })
-    customers.value = res.customers ?? []
+    const res = await patternMakerApi.list()
+    patternMakers.value = res.items ?? []
   } catch (e) {
-    console.error('[PatternRoomView] 加载客户列表失败:', e)
+    console.error('[PatternRoomView] 加载版师列表失败:', e)
+  }
+}
+
+/** 新增版师：调用接口、刷新列表并选中新增项 */
+async function handleAddPatternMaker(name: string) {
+  if (!canManage.value) {
+    toast.warning('无操作权限')
+    return
+  }
+  try {
+    const res = await patternMakerApi.create({ name })
+    if (res.success) {
+      await loadPatternMakers()
+      if (res.id != null) {
+        formPatternMakerId.value = res.id
+      }
+      toast.success('版师添加成功')
+    } else {
+      toast.error(res.message || '版师添加失败')
+    }
+  } catch (e) {
+    console.error('[PatternRoomView] 新增版师失败:', e)
+    toast.error('版师添加失败')
+  }
+}
+
+/** 删除版师：调用接口、刷新列表，若删除的是当前选中项则清空选择 */
+async function handleDeletePatternMaker(id: number) {
+  if (!canManage.value) {
+    toast.warning('无操作权限')
+    return
+  }
+  const ok = await confirmDialog.confirm(
+    '确认删除该版师？',
+    '关联的打样项目将变为「未分类」，不会删除项目数据。',
+    'danger',
+  )
+  if (!ok) return
+  try {
+    const res = await patternMakerApi.delete(id)
+    if (res.success) {
+      if (formPatternMakerId.value === id) {
+        formPatternMakerId.value = null
+      }
+      await loadPatternMakers()
+      toast.success('版师删除成功')
+    } else {
+      toast.error(res.message || '版师删除失败')
+    }
+  } catch (e) {
+    console.error('[PatternRoomView] 删除版师失败:', e)
+    toast.error('版师删除失败')
   }
 }
 
 // ==================== 响应式布局 ====================
 const isNarrow = ref(false)
-const leftCollapsed = ref(false)
 const drawerOpen = ref(false)
 
 let _mediaQuery: MediaQueryList | null = null
@@ -246,7 +440,7 @@ onMounted(() => {
   }
   // 初始化加载
   groupHook.loadGrouped()
-  loadCustomers()
+  loadPatternMakers()
 })
 
 onUnmounted(() => {
@@ -256,9 +450,14 @@ onUnmounted(() => {
 // ==================== 搜索（防抖） ====================
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 function onSearch(keyword: string) {
+  searchKeyword.value = keyword
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(() => {
     groupHook.loadGrouped(keyword || undefined)
+    // 已完成表格视图下同步刷新表格
+    if (statusFilter.value === 'completed') {
+      loadCompletedTable()
+    }
   }, 300)
 }
 
@@ -298,6 +497,7 @@ function openCreateProjectDialog() {
     return
   }
   projectFormMode.value = 'create'
+  formPatternMakerId.value = null
   pendingProjectImage.value = null
   projectFormVisible.value = true
 }
@@ -309,8 +509,51 @@ function openEditProjectDialog() {
   }
   if (!projectHook.currentProject.value) return
   projectFormMode.value = 'edit'
+  formPatternMakerId.value = projectHook.currentProject.value.pattern_maker_id ?? null
   pendingProjectImage.value = null
   projectFormVisible.value = true
+}
+
+/** 从产品卡片点击「编辑」：加载该产品详情后打开编辑弹窗（支持编辑未选中卡片） */
+async function onEditProjectFromCard(id: number) {
+  if (!canManage.value) {
+    toast.warning('无操作权限')
+    return
+  }
+  selectedProjectId.value = id
+  const detail = await projectHook.fetchDetail(id)
+  if (!detail) return
+  projectFormMode.value = 'edit'
+  formPatternMakerId.value = detail.pattern_maker_id ?? null
+  pendingProjectImage.value = null
+  projectFormVisible.value = true
+  // 关闭窄屏抽屉，保证编辑弹窗可见
+  if (isNarrow.value) drawerOpen.value = false
+}
+
+/** 从产品卡片点击「完成」：确认后标记项目为已完成并刷新分组列表 */
+async function onCompleteProjectFromCard(id: number) {
+  if (!canManage.value) {
+    toast.warning('无操作权限')
+    return
+  }
+  const ok = await confirmDialog.confirm(
+    '确认将该打样项目标记为完成？',
+    '标记后项目状态变为「已完成」，仍可继续编辑。',
+  )
+  if (!ok) return
+  try {
+    const res = await patternRoomApi.updateProjectStatus(id, 'completed')
+    if (res.success) {
+      toast.success('已标记为完成')
+      await groupHook.loadGrouped()
+    } else {
+      toast.error(res.message || '标记完成失败')
+    }
+  } catch (e) {
+    console.error('[PatternRoomView] 标记完成失败:', e)
+    toast.error('标记完成失败')
+  }
 }
 
 function onProjectUploadImage(file: File) {
@@ -325,7 +568,6 @@ async function onProjectSubmitCreate(data: ProjectCreateRequest) {
       const upRes = await projectHook.uploadImage(res.id, pendingProjectImage.value)
       if (!upRes) toast.warning('图片上传失败，项目已创建，请稍后在编辑中重新上传')
     }
-    toast.success(`创建成功，序列号 ${res.sequence_no ?? ''}`)
     projectFormVisible.value = false
     pendingProjectImage.value = null
     // 刷新分组列表并选中新项目
@@ -663,30 +905,10 @@ watch(selectedProjectId, (newId, oldId) => {
   width: 100%;
 }
 
-.page-card-header :deep(.ht-bar) {
-  width: auto;
-  margin: 0;
-}
-
 .pr-top-bar {
   flex-wrap: wrap;
   gap: 12px;
   align-items: center;
-}
-
-.pr-top-left {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.pr-top-right {
-  display: inline-flex;
-  gap: 4px;
-  padding: 4px;
-  border-radius: 12px;
-  background: white;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
 }
 
 .pr-add-btn {
@@ -755,40 +977,12 @@ watch(selectedProjectId, (newId, oldId) => {
   flex-direction: column;
 }
 
-.pr-left-collapsed {
-  flex: 0 0 36px;
-}
-
 .pr-left-content {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-}
-
-.pr-collapse-btn {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 2;
-  width: 24px;
-  height: 24px;
-  border: 1px solid var(--color-border-light, #e5e7eb);
-  border-radius: 6px;
-  background: #fff;
-  color: var(--color-text-secondary, #6b7280);
-  cursor: pointer;
-  transition: all 0.2s ease;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
-}
-
-.pr-collapse-btn:hover {
-  border-color: #ff9f43;
-  color: #ff9f43;
 }
 
 /* 窄屏抽屉触发 */

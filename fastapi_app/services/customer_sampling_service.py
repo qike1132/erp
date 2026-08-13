@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import func, or_, select
@@ -29,13 +30,13 @@ from sqlalchemy.orm import selectinload
 from fastapi_app.core.exceptions import BusinessError, ConflictError, NotFoundError
 from fastapi_app.services.numbering import generate_customer_sampling_number
 from fastapi_app.shared_models import (
-    Customer,
     CustomerSamplingChangeLog,
     CustomerSamplingFabricVersion,
     CustomerSamplingPart,
     CustomerSamplingProject,
     CustomerSamplingRole,
     FileRecord,
+    PatternMaker,
     Supplier,
     User,
 )
@@ -160,14 +161,14 @@ async def _get_user_name(db: AsyncSession, user_id: int | None) -> str:
     return row or ''
 
 
-async def _resolve_customer_name(db: AsyncSession, customer_id: int | None) -> str:
-    """解析客户名称（冗余存储）
+async def _resolve_pattern_maker_name(db: AsyncSession, pattern_maker_id: int | None) -> str:
+    """解析版师姓名（冗余存储）
 
-    客户不存在时返回空字符串（降级展示，spec 5.1.3.1）
+    版师不存在时返回空字符串（降级展示）
     """
-    if customer_id is None:
+    if pattern_maker_id is None:
         return ''
-    result = await db.execute(select(Customer.name).where(Customer.id == customer_id))
+    result = await db.execute(select(PatternMaker.name).where(PatternMaker.id == pattern_maker_id))
     row = result.scalar_one_or_none()
     return row or ''
 
@@ -268,11 +269,11 @@ async def get_grouped_list(
     db: AsyncSession,
     *,
     keyword: str | None = None,
-    customer_id: int | None = None,
+    pattern_maker_id: int | None = None,
 ) -> dict:
-    """按客户分组聚合查询打样项目列表
+    """按版师分组聚合查询打样项目列表
 
-    - 未关联客户的项目归入"未分类"分组
+    - 未关联版师的项目归入"未分类"分组
     - 分组间按组内最新 updated_at 倒序，"未分类"始终最后
     - 组内项目按 updated_at 倒序
 
@@ -289,12 +290,12 @@ async def get_grouped_list(
                 CustomerSamplingProject.product_name.ilike(like),
             )
         )
-    if customer_id is not None:
-        conditions.append(CustomerSamplingProject.customer_id == customer_id)
+    if pattern_maker_id is not None:
+        conditions.append(CustomerSamplingProject.pattern_maker_id == pattern_maker_id)
 
-    # 查询所有项目（含客户关联，避免 N+1）
+    # 查询所有项目（含版师关联，避免 N+1）
     query = select(CustomerSamplingProject).options(
-        selectinload(CustomerSamplingProject.customer),
+        selectinload(CustomerSamplingProject.pattern_maker),
     )
     for cond in conditions:
         query = query.where(cond)
@@ -309,26 +310,26 @@ async def get_grouped_list(
     )
     summary_map = {p.id: _project_to_summary(p, image_url_map) for p in projects}
 
-    # 应用层按 customer_id 分组
+    # 应用层按 pattern_maker_id 分组
     groups_map: dict[int | None, list[CustomerSamplingProject]] = {}
     for p in projects:
-        key = p.customer_id
+        key = p.pattern_maker_id
         groups_map.setdefault(key, []).append(p)
 
     # 构建分组响应
     groups = []
-    for cid, proj_list in groups_map.items():
-        if cid is None:
+    for pmid, proj_list in groups_map.items():
+        if pmid is None:
             # "未分类"分组最后处理
             continue
-        # 获取客户名称（优先用冗余字段，降级用关联查询）
-        customer_name = proj_list[0].customer_name or ''
-        if not customer_name and proj_list[0].customer:
-            customer_name = proj_list[0].customer.name
+        # 获取版师姓名（优先用冗余字段，降级用关联查询）
+        pattern_maker_name = proj_list[0].pattern_maker_name or ''
+        if not pattern_maker_name and proj_list[0].pattern_maker:
+            pattern_maker_name = proj_list[0].pattern_maker.name
         latest_update = max(p.updated_at for p in proj_list)
         groups.append({
-            'customer_id': cid,
-            'customer_name': customer_name or '未命名客户',
+            'pattern_maker_id': pmid,
+            'pattern_maker_name': pattern_maker_name or '未命名版师',
             'project_count': len(proj_list),
             'latest_update_time': latest_update.strftime('%Y-%m-%d %H:%M:%S') if latest_update else '',
             'projects': [summary_map[p.id] for p in proj_list],
@@ -342,8 +343,8 @@ async def get_grouped_list(
     if unclassified:
         latest_update = max(p.updated_at for p in unclassified)
         groups.append({
-            'customer_id': None,
-            'customer_name': '未分类',
+            'pattern_maker_id': None,
+            'pattern_maker_name': '未分类',
             'project_count': len(unclassified),
             'latest_update_time': latest_update.strftime('%Y-%m-%d %H:%M:%S') if latest_update else '',
             'projects': [summary_map[p.id] for p in unclassified],
@@ -370,6 +371,10 @@ def _project_to_summary(project: CustomerSamplingProject, image_url_map: dict[in
         'product_image_thumbnail_url': image_info.get('thumbnail_url') if image_info else None,
         'product_image_blur_url': image_info.get('blur_url') if image_info else None,
         'current_version': project.current_version,
+        'status': project.status,
+        'completed_at': project.completed_at.strftime('%Y-%m-%d %H:%M:%S') if project.completed_at else None,
+        # 仅当 parts 已加载（get_project_detail 场景）时才有实际值；列表查询不加载 parts，保持 0
+        'parts_count': len(project.parts) if project.parts is not None else 0,
         'updated_at': project.updated_at.strftime('%Y-%m-%d %H:%M:%S') if project.updated_at else '',
     }
 
@@ -380,11 +385,13 @@ async def list_projects(
     page: int = 1,
     per_page: int = 20,
     keyword: str | None = None,
-    customer_id: int | None = None,
+    pattern_maker_id: int | None = None,
+    status: str | None = None,
 ) -> dict:
     """分页查询打样项目列表
 
-    keyword 匹配序列号与产品名称（ILIKE），customer_id 筛选客户
+    keyword 匹配序列号与产品名称（ILIKE），pattern_maker_id 筛选版师，
+    status 筛选状态（in_progress/completed/cancelled）
     """
     conditions = []
     if keyword:
@@ -395,8 +402,10 @@ async def list_projects(
                 CustomerSamplingProject.product_name.ilike(like),
             )
         )
-    if customer_id is not None:
-        conditions.append(CustomerSamplingProject.customer_id == customer_id)
+    if pattern_maker_id is not None:
+        conditions.append(CustomerSamplingProject.pattern_maker_id == pattern_maker_id)
+    if status is not None:
+        conditions.append(CustomerSamplingProject.status == status)
 
     # 计算总数
     count_query = select(func.count()).select_from(CustomerSamplingProject)
@@ -428,6 +437,95 @@ async def list_projects(
         'pages': pages,
         'current_page': page,
     }
+
+
+async def get_completed_table(
+    db: AsyncSession,
+    *,
+    keyword: str | None = None,
+    pattern_maker_id: int | None = None,
+) -> dict:
+    """查询已完成打样项目表格数据（含部位数量统计与操作人）
+
+    返回按 updated_at 倒序的已完成项目列表，每行含：
+    - 项目基本信息（id, sequence_no, product_name, pattern_maker_name）
+    - completed_at（完成时间）
+    - parts_count（该项目所有角色的部位总数）
+    - operator_name（最近一次标记为完成的操作人）
+
+    Args:
+        keyword: 关键词（序列号/产品名 ILIKE）
+        pattern_maker_id: 版师 ID 筛选
+    """
+    # 构建查询条件
+    conditions = [CustomerSamplingProject.status == 'completed']
+    if keyword:
+        like = f'%{keyword}%'
+        conditions.append(
+            or_(
+                CustomerSamplingProject.sequence_no.ilike(like),
+                CustomerSamplingProject.product_name.ilike(like),
+            )
+        )
+    if pattern_maker_id is not None:
+        conditions.append(CustomerSamplingProject.pattern_maker_id == pattern_maker_id)
+
+    # 查询项目（含版师关联）
+    query = (
+        select(CustomerSamplingProject)
+        .options(selectinload(CustomerSamplingProject.pattern_maker))
+        .where(*conditions)
+        .order_by(CustomerSamplingProject.updated_at.desc())
+    )
+    result = await db.execute(query)
+    projects = result.scalars().all()
+
+    if not projects:
+        return {'success': True, 'items': [], 'total': 0}
+
+    # 统计部位数量：按 project_id 聚合 count
+    project_ids = [p.id for p in projects]
+    parts_count_query = (
+        select(CustomerSamplingPart.project_id, func.count().label('cnt'))
+        .where(CustomerSamplingPart.project_id.in_(project_ids))
+        .group_by(CustomerSamplingPart.project_id)
+    )
+    parts_result = await db.execute(parts_count_query)
+    parts_count_map = {row.project_id: row.cnt for row in parts_result}
+
+    # 查询操作人：取每个项目最近一次状态更新（update_project_status）的操作人
+    # 已完成项目最近一次状态更新通常即标记完成操作，符合报表口径
+    operator_query = (
+        select(CustomerSamplingChangeLog.project_id, CustomerSamplingChangeLog.operator_name)
+        .where(
+            CustomerSamplingChangeLog.project_id.in_(project_ids),
+            CustomerSamplingChangeLog.action == 'update_project_status',
+        )
+        .order_by(CustomerSamplingChangeLog.created_at.desc())
+    )
+    op_result = await db.execute(operator_query)
+    operator_map: dict[int, str] = {}
+    for row in op_result:
+        if row.project_id not in operator_map:
+            operator_map[row.project_id] = row.operator_name or ''
+
+    # 构建响应
+    items = []
+    for p in projects:
+        pattern_maker_name = (p.pattern_maker_name or
+                              (p.pattern_maker.name if p.pattern_maker else ''))
+        items.append({
+            'id': p.id,
+            'sequence_no': p.sequence_no,
+            'product_name': p.product_name,
+            'pattern_maker_name': pattern_maker_name,
+            'completed_at': p.completed_at.strftime('%Y-%m-%d %H:%M:%S') if p.completed_at else None,
+            'parts_count': parts_count_map.get(p.id, 0),
+            'operator_name': operator_map.get(p.id, ''),
+            'status': 'completed',
+        })
+
+    return {'success': True, 'items': items, 'total': len(items)}
 
 
 async def get_project_detail(db: AsyncSession, project_id: int) -> dict:
@@ -468,9 +566,10 @@ async def get_project_detail(db: AsyncSession, project_id: int) -> dict:
         'product_image_thumbnail_url': image_info.get('thumbnail_url') if image_info else None,
         'product_image_blur_url': image_info.get('blur_url') if image_info else None,
         'product_image_file_id': project.product_image_file_id,
-        'customer_id': project.customer_id,
-        'customer_name': project.customer_name or '',
+        'pattern_maker_id': project.pattern_maker_id,
+        'pattern_maker_name': project.pattern_maker_name or '',
         'current_version': project.current_version,
+        'status': project.status,
         'remark': project.remark or '',
         'created_by_name': project.creator.username if project.creator else None,
         'created_at': project.created_at.strftime('%Y-%m-%d %H:%M:%S') if project.created_at else '',
@@ -494,7 +593,7 @@ async def create_project(
     db: AsyncSession,
     *,
     product_name: str,
-    customer_id: int | None = None,
+    pattern_maker_id: int | None = None,
     remark: str | None = None,
     initial_roles: list[str] | None = None,
     user_id: int | None = None,
@@ -505,14 +604,14 @@ async def create_project(
     - 自动创建"默认角色"（is_default=true）
     - 若传入 initial_roles，额外创建用户指定的角色（去重、去空白）
     - 自动创建 T1 基线版本挂在默认角色下（snapshot_data=[], change_summary=null）
-    - 校验 customer_id 存在性，冗余存储 customer_name
+    - 校验 pattern_maker_id 存在性，冗余存储 pattern_maker_name
     """
-    # 校验客户存在性
-    customer_name = ''
-    if customer_id is not None:
-        customer_name = await _resolve_customer_name(db, customer_id)
-        if not customer_name:
-            raise NotFoundError('所选客户不存在')
+    # 校验版师存在性
+    pattern_maker_name = ''
+    if pattern_maker_id is not None:
+        pattern_maker_name = await _resolve_pattern_maker_name(db, pattern_maker_id)
+        if not pattern_maker_name:
+            raise NotFoundError('所选版师不存在')
 
     # 生成序列号
     sequence_no = await generate_customer_sampling_number(db)
@@ -521,8 +620,8 @@ async def create_project(
     project = CustomerSamplingProject(
         sequence_no=sequence_no,
         product_name=product_name,
-        customer_id=customer_id,
-        customer_name=customer_name,
+        pattern_maker_id=pattern_maker_id,
+        pattern_maker_name=pattern_maker_name,
         remark=remark,
         created_by=user_id,
     )
@@ -593,7 +692,7 @@ async def update_project(
     project_id: int,
     *,
     product_name: str | None = None,
-    customer_id: int | None = None,
+    pattern_maker_id: int | None = None,
     remark: str | None = None,
     product_image_file_id: int | None = None,
     current_version: str | None = None,
@@ -603,7 +702,7 @@ async def update_project(
     """编辑打样项目
 
     - 乐观锁校验（version 不匹配抛 ConflictError 409）
-    - 可修改：product_name、customer_id、customer_name、remark、product_image_file_id
+    - 可修改：product_name、pattern_maker_id、pattern_maker_name、remark、product_image_file_id
     - 序列号与历史版本快照不可修改
     """
     result = await db.execute(
@@ -624,15 +723,15 @@ async def update_project(
         field_diffs.append({'field': 'product_name', 'old': project.product_name, 'new': product_name})
         project.product_name = product_name
 
-    if customer_id is not None and customer_id != project.customer_id:
-        # 校验新客户存在性
-        new_customer_name = await _resolve_customer_name(db, customer_id)
-        if customer_id is not None and not new_customer_name:
-            raise NotFoundError('所选客户不存在')
-        field_diffs.append({'field': 'customer_id', 'old': project.customer_id, 'new': customer_id})
-        field_diffs.append({'field': 'customer_name', 'old': project.customer_name, 'new': new_customer_name})
-        project.customer_id = customer_id
-        project.customer_name = new_customer_name
+    if pattern_maker_id is not None and pattern_maker_id != project.pattern_maker_id:
+        # 校验新版师存在性
+        new_pattern_maker_name = await _resolve_pattern_maker_name(db, pattern_maker_id)
+        if not new_pattern_maker_name:
+            raise NotFoundError('所选版师不存在')
+        field_diffs.append({'field': 'pattern_maker_id', 'old': project.pattern_maker_id, 'new': pattern_maker_id})
+        field_diffs.append({'field': 'pattern_maker_name', 'old': project.pattern_maker_name, 'new': new_pattern_maker_name})
+        project.pattern_maker_id = pattern_maker_id
+        project.pattern_maker_name = new_pattern_maker_name
 
     if remark is not None and remark != (project.remark or ''):
         field_diffs.append({'field': 'remark', 'old': project.remark, 'new': remark})
@@ -667,6 +766,45 @@ async def update_project(
     )
 
     logger.info('编辑打样项目: id=%s, field_diffs=%s', project_id, field_diffs)
+    return {'id': project.id}
+
+
+async def update_project_status(
+    db: AsyncSession,
+    project_id: int,
+    *,
+    status: str,
+    user_id: int | None = None,
+) -> dict:
+    """更新打样项目状态（in_progress / completed / cancelled）
+
+    - 不参与乐观锁（独立的状态标记操作，最后写入为准）
+    - 写审计日志
+    """
+    result = await db.execute(
+        select(CustomerSamplingProject).where(CustomerSamplingProject.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+    if project is None:
+        raise NotFoundError('打样项目不存在')
+
+    old_status = project.status
+    project.status = status
+    # 标记完成时记录完成时间；取消完成/改为进行中时清空
+    if status == 'completed' and old_status != 'completed':
+        project.completed_at = datetime.now(timezone.utc)
+    elif status != 'completed':
+        project.completed_at = None
+    await db.flush()
+
+    # 写审计日志
+    operator_name = await _get_user_name(db, user_id)
+    await _write_change_log(
+        db, project.id, 'update_project_status', user_id, operator_name,
+        field_diffs=[{'field': 'status', 'old': old_status, 'new': status}],
+    )
+
+    logger.info('更新打样项目状态: id=%s, %s → %s', project_id, old_status, status)
     return {'id': project.id}
 
 
@@ -756,8 +894,10 @@ async def create_part(
     - 校验项目存在
     - 校验 part_name 同项目下唯一（应用层校验 + DB 唯一索引双重保障）
     - 校验 supplier_id 存在性，冗余存储 supplier_name
+    - 未传 role_id 时归属项目的默认角色
     """
     await _ensure_project_exists(db, project_id)
+    role_id = await _get_default_role_id(db, project_id)
 
     # 校验部位名称同项目下唯一
     await _ensure_part_name_unique(db, project_id, part_name)
@@ -771,6 +911,7 @@ async def create_part(
 
     part = CustomerSamplingPart(
         project_id=project_id,
+        role_id=role_id,
         part_name=part_name,
         sort_order=sort_order,
         fabric_name=fabric_name,

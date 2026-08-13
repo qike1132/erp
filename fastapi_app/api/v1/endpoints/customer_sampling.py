@@ -6,9 +6,11 @@
 对应 design.md 2.2.2 的 15 个接口端点。
 """
 import logging
+from io import BytesIO
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +23,7 @@ from fastapi_app.schemas.customer_sampling import (
     ActionResponse,
     BatchPartCreateRequest,
     ChangeLogListResponse,
+    CompletedTableResponse,
     GroupedListResponse,
     PartCreateRequest,
     PartListResponse,
@@ -29,6 +32,7 @@ from fastapi_app.schemas.customer_sampling import (
     ProjectCreateRequest,
     ProjectDetailResponse,
     ProjectListResponse,
+    ProjectStatusUpdateRequest,
     ProjectUpdateRequest,
     RoleCreateRequest,
     RoleListResponse,
@@ -51,12 +55,12 @@ PERM = 'customer_sampling_manage'
 @router.get('/grouped-list', response_model=GroupedListResponse)
 async def api_get_grouped_list(
     keyword: str | None = Query(None, description='关键词(序列号/产品名)'),
-    customer_id: int | None = Query(None, description='客户ID筛选'),
+    pattern_maker_id: int | None = Query(None, description='版师ID筛选'),
     db: AsyncSession = Depends(get_read_db),
 ) -> dict[str, Any]:
-    """按客户分组聚合查询打样项目列表"""
+    """按版师分组聚合查询打样项目列表"""
     try:
-        return await svc.get_grouped_list(db, keyword=keyword, customer_id=customer_id)
+        return await svc.get_grouped_list(db, keyword=keyword, pattern_maker_id=pattern_maker_id)
     except SQLAlchemyError as e:
         logger.exception('查询分组列表失败')
         raise HTTPException(status_code=500, detail='查询失败') from e
@@ -69,17 +73,105 @@ async def api_list_projects(
     page: int = Query(1, ge=1, description='页码'),
     per_page: int = Query(20, ge=1, le=100, description='每页数量'),
     keyword: str | None = Query(None, description='关键词(序列号/产品名)'),
-    customer_id: int | None = Query(None, description='客户ID筛选'),
+    pattern_maker_id: int | None = Query(None, description='版师ID筛选'),
+    status: str | None = Query(None, description='状态筛选(in_progress/completed/cancelled)'),
     db: AsyncSession = Depends(get_read_db),
 ) -> dict[str, Any]:
     """分页查询打样项目列表"""
     try:
         return await svc.list_projects(
-            db, page=page, per_page=per_page, keyword=keyword, customer_id=customer_id,
+            db, page=page, per_page=per_page, keyword=keyword,
+            pattern_maker_id=pattern_maker_id, status=status,
         )
     except SQLAlchemyError as e:
         logger.exception('查询打样项目列表失败')
         raise HTTPException(status_code=500, detail='查询失败') from e
+
+
+# ==================== 2b. 已完成打样项目表格查询 ====================
+
+@router.get('/projects/completed-table', response_model=CompletedTableResponse)
+async def api_get_completed_table(
+    keyword: str | None = Query(None, description='关键词(序列号/产品名)'),
+    pattern_maker_id: int | None = Query(None, description='版师ID筛选'),
+    db: AsyncSession = Depends(get_read_db),
+) -> dict[str, Any]:
+    """查询已完成打样项目表格数据（含部位数量统计与操作人）"""
+    try:
+        return await svc.get_completed_table(
+            db, keyword=keyword, pattern_maker_id=pattern_maker_id,
+        )
+    except SQLAlchemyError as e:
+        logger.exception('查询已完成打样项目表格失败')
+        raise HTTPException(status_code=500, detail='查询失败') from e
+
+
+# ==================== 2c. 已完成打样项目表格导出（Excel） ====================
+
+@router.get('/projects/completed-table/export')
+async def api_export_completed_table(
+    keyword: str | None = Query(None, description='关键词(序列号/产品名)'),
+    pattern_maker_id: int | None = Query(None, description='版师ID筛选'),
+    db: AsyncSession = Depends(get_read_db),
+) -> StreamingResponse:
+    """导出已完成打样项目表格为 Excel（openpyxl）"""
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font
+        from openpyxl.utils import get_column_letter
+
+        data = await svc.get_completed_table(
+            db, keyword=keyword, pattern_maker_id=pattern_maker_id,
+        )
+        items = data.get('items', [])
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = '已完成打样'
+        headers = ['序列号', '产品名', '版师', '完成时间', '部位数量', '操作人', '状态']
+        # 表头样式
+        header_font = Font(bold=True)
+        for col_idx, header in enumerate(headers, start=1):
+            cell = ws.cell(row=1, column=col_idx, value=header)
+            cell.font = header_font
+        # 数据行
+        for row_idx, item in enumerate(items, start=2):
+            ws.cell(row=row_idx, column=1, value=item.get('sequence_no', ''))
+            ws.cell(row=row_idx, column=2, value=item.get('product_name', ''))
+            ws.cell(row=row_idx, column=3, value=item.get('pattern_maker_name', ''))
+            ws.cell(row=row_idx, column=4, value=item.get('completed_at') or '')
+            ws.cell(row=row_idx, column=5, value=item.get('parts_count', 0))
+            ws.cell(row=row_idx, column=6, value=item.get('operator_name', ''))
+            ws.cell(row=row_idx, column=7, value='已完成')
+        # 自适应列宽
+        for col_idx, header in enumerate(headers, start=1):
+            max_len = len(header)
+            for row in ws.iter_rows(min_col=col_idx, max_col=col_idx):
+                for cell in row:
+                    if cell.value is not None:
+                        max_len = max(max_len, len(str(cell.value)))
+            ws.column_dimensions[get_column_letter(col_idx)].width = min(max_len + 4, 40)
+
+        buf = BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+
+        from datetime import datetime
+        from urllib.parse import quote
+        filename = f'已完成打样_{datetime.now().strftime("%Y%m%d%H%M%S")}.xlsx'
+        # 中文文件名使用 RFC 5987 编码（filename*），避免 latin-1 编码错误
+        encoded = quote(filename)
+        headers_resp = {
+            'Content-Disposition': f"attachment; filename*=UTF-8''{encoded}",
+        }
+        return StreamingResponse(
+            buf,
+            media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            headers=headers_resp,
+        )
+    except SQLAlchemyError as e:
+        logger.exception('导出已完成打样项目表格失败')
+        raise HTTPException(status_code=500, detail='导出失败') from e
 
 
 # ==================== 3. 打样项目详情 ====================
@@ -111,7 +203,7 @@ async def api_create_project(
             result = await svc.create_project(
                 db,
                 product_name=data.product_name,
-                customer_id=data.customer_id,
+                pattern_maker_id=data.pattern_maker_id,
                 remark=data.remark,
                 initial_roles=data.initial_roles,
                 user_id=current_user.id,
@@ -140,7 +232,7 @@ async def api_update_project(
                 db,
                 project_id,
                 product_name=data.product_name,
-                customer_id=data.customer_id,
+                pattern_maker_id=data.pattern_maker_id,
                 remark=data.remark,
                 product_image_file_id=data.product_image_file_id,
                 current_version=data.current_version,
@@ -153,6 +245,29 @@ async def api_update_project(
     except SQLAlchemyError as e:
         logger.exception('编辑打样项目失败')
         raise HTTPException(status_code=500, detail='更新失败') from e
+
+
+# ==================== 5b. 更新项目状态（完成/进行中/取消） ====================
+
+@router.put('/projects/{project_id}/status', response_model=ActionResponse)
+async def api_update_project_status(
+    project_id: int,
+    data: ProjectStatusUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission(PERM)),
+) -> dict[str, Any]:
+    """更新打样项目状态（in_progress / completed / cancelled）"""
+    try:
+        async with db_transaction(db):
+            await svc.update_project_status(
+                db, project_id, status=data.status, user_id=current_user.id,
+            )
+        return {'success': True, 'message': '状态更新成功'}
+    except HTTPException:
+        raise
+    except SQLAlchemyError as e:
+        logger.exception('更新打样项目状态失败')
+        raise HTTPException(status_code=500, detail='状态更新失败') from e
 
 
 # ==================== 6. 删除打样项目 ====================

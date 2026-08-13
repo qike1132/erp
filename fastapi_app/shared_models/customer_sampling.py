@@ -32,8 +32,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from fastapi_app.shared_models import Base
 
 if TYPE_CHECKING:
-    from fastapi_app.shared_models.customer import Customer
     from fastapi_app.shared_models.file_record import FileRecord
+    from fastapi_app.shared_models.pattern_maker import PatternMaker
     from fastapi_app.shared_models.supplier import Supplier
     from fastapi_app.shared_models.user import User
 
@@ -77,10 +77,10 @@ class CustomerSamplingProject(Base):
     product_image_file_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey('file_records.id', ondelete='SET NULL'), comment='产品图片文件ID',
     )
-    customer_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey('customer.id', ondelete='SET NULL'), comment='关联客户ID',
+    pattern_maker_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey('pattern_maker.id', ondelete='SET NULL'), comment='关联版师ID',
     )
-    customer_name: Mapped[str | None] = mapped_column(String(200), comment='客户名称(冗余)')
+    pattern_maker_name: Mapped[str | None] = mapped_column(String(200), comment='版师姓名(冗余)')
     remark: Mapped[str | None] = mapped_column(Text, comment='备注')
     created_by: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id'), comment='创建人ID')
     created_at: Mapped[datetime] = mapped_column(
@@ -100,6 +100,10 @@ class CustomerSamplingProject(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment='乐观锁版本号')
     # 状态：in_progress/completed/cancelled
     status: Mapped[str] = mapped_column(String(20), nullable=False, default='in_progress', comment='状态')
+    # 完成时间（标记为 completed 时写入，取消完成时清空）
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), comment='完成时间',
+    )
     # 当前版本号
     current_version: Mapped[str] = mapped_column(String(8), nullable=False, default='T1', comment='当前版本 T1/T2/T3...')
 
@@ -111,7 +115,7 @@ class CustomerSamplingProject(Base):
         lazy='selectin',
         order_by='CustomerSamplingPart.sort_order',
     )
-    customer: Mapped["Customer | None"] = relationship("Customer", lazy='selectin')
+    pattern_maker: Mapped["PatternMaker | None"] = relationship("PatternMaker", lazy='selectin')
     product_image: Mapped["FileRecord | None"] = relationship("FileRecord", lazy='selectin')
     creator: Mapped["User | None"] = relationship("User", lazy='selectin')
     roles: Mapped[list["CustomerSamplingRole"]] = relationship(
@@ -136,13 +140,14 @@ class CustomerSamplingProject(Base):
     )
 
     __table_args__ = (
-        Index('idx_csp_customer', 'customer_id'),
+        Index('idx_csp_pattern_maker', 'pattern_maker_id'),
         Index('idx_csp_sequence_no', 'sequence_no'),
         # pg_trgm GIN 索引：使 ILIKE '%keyword%' 走索引（迁移脚本中创建）
         Index('idx_csp_product_name_trgm', 'product_name', postgresql_using='gin',
               postgresql_ops={'product_name': 'gin_trgm_ops'}),
         Index('idx_csp_updated_at_desc', desc('updated_at')),
         Index('idx_csp_created_at', 'created_at'),
+        Index('idx_csp_completed_at', desc('completed_at')),
     )
 
     def __repr__(self):
@@ -159,8 +164,8 @@ class CustomerSamplingProject(Base):
             'sequence_no': self.sequence_no,
             'product_name': self.product_name,
             'product_image_file_id': self.product_image_file_id,
-            'customer_id': self.customer_id,
-            'customer_name': self.customer_name or '',
+            'pattern_maker_id': self.pattern_maker_id,
+            'pattern_maker_name': self.pattern_maker_name or '',
             'remark': self.remark or '',
             'created_by': self.created_by,
             'created_by_name': self.creator.username if self.creator else None,
@@ -168,6 +173,7 @@ class CustomerSamplingProject(Base):
             'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M:%S') if self.updated_at else '',
             'version': self.version,
             'status': self.status,
+            'completed_at': self.completed_at.strftime('%Y-%m-%d %H:%M:%S') if self.completed_at else None,
         }
         if include_parts:
             data['parts'] = [p.to_dict() for p in (self.parts or [])]

@@ -6,15 +6,39 @@
       <input
         class="cgl-search-input"
         type="text"
-        placeholder="搜索客户或项目..."
+        placeholder="搜索版师或项目..."
         @input="onSearchInput"
       />
+    </div>
+
+    <!-- 状态筛选胶囊 -->
+    <div class="cgl-status-filter">
+      <button
+        v-for="opt in STATUS_OPTIONS"
+        :key="opt.value"
+        type="button"
+        :class="['cgl-status-btn', { active: statusFilter === opt.value }]"
+        @click="onStatusChange(opt.value)"
+      >
+        {{ opt.label }}
+      </button>
     </div>
 
     <!-- 加载中 -->
     <div v-if="loading" class="cgl-loading">
       <UiSpinner size="sm" />
       <span>加载中...</span>
+    </div>
+
+    <!-- 已完成表格视图 -->
+    <div v-else-if="viewMode === 'table'" class="cgl-table-mode">
+      <ProjectCompletedTable
+        :items="completedItems"
+        :loading="completedLoading"
+        @select="$emit('select-completed', $event)"
+        @export="$emit('export-excel')"
+        @print="$emit('print-table')"
+      />
     </div>
 
     <!-- 空状态 -->
@@ -25,17 +49,17 @@
       description="点击右上角「新增打样项目」创建第一个项目"
     />
 
-    <!-- 客户 + 项目双栏布局 -->
+    <!-- 版师 + 项目双栏布局 -->
     <div v-else class="cgl-body">
-      <!-- 左侧：客户名称列表 -->
+      <!-- 左侧：版师姓名列表 -->
       <div class="cgl-customer-list">
         <button
           v-for="group in groups"
-          :key="group.customer_id ?? '_unassigned'"
-          :class="['cgl-customer-item', { active: isCustomerSelected(group.customer_id) }]"
-          @click="selectCustomer(group.customer_id)"
+          :key="group.pattern_maker_id ?? '_unassigned'"
+          :class="['cgl-customer-item', { active: isMakerSelected(group.pattern_maker_id) }]"
+          @click="selectMaker(group.pattern_maker_id)"
         >
-          <span class="cgl-customer-name">{{ group.customer_name || '未分配客户' }}</span>
+          <span class="cgl-customer-name">{{ group.pattern_maker_name || '未分配版师' }}</span>
           <span class="cgl-customer-count">{{ group.project_count }}</span>
         </button>
       </div>
@@ -43,10 +67,10 @@
       <!-- 右侧：项目卡片（虚拟滚动，仅渲染视口附近的卡片） -->
       <div ref="projectAreaRef" class="cgl-project-area">
         <div v-if="!selectedGroup" class="cgl-project-empty">
-          <span>请选择一个客户</span>
+          <span>请选择一个版师</span>
         </div>
         <div v-else-if="selectedGroup.projects.length === 0" class="cgl-project-empty">
-          <span>该客户暂无项目</span>
+          <span>该版师暂无项目</span>
         </div>
         <VirtualList
           v-else-if="projectAreaHeight > 0"
@@ -58,9 +82,12 @@
           class="cgl-virtual-list"
         >
           <template #default="{ item: proj }">
-            <button
-              :class="['cgl-project-card', { active: selectedProjectId === proj.id }]"
+            <div
+              :class="['cgl-project-card', { active: selectedProjectId === proj.id, 'is-completed': proj.status === 'completed' }]"
+              role="button"
+              tabindex="0"
               @click="$emit('select-project', proj.id)"
+              @keyup.enter="$emit('select-project', proj.id)"
             >
               <div class="cgl-card-left">
                 <div
@@ -93,9 +120,15 @@
                     @error="onThumbError($event, proj)"
                     @load="onThumbLoad(proj.id)"
                   />
+                  <span v-if="proj.status === 'completed'" class="cgl-card-status-badge">
+                    <i class="fas fa-check-circle" aria-hidden="true" /> 已完成
+                  </span>
                 </div>
                 <div v-else class="cgl-card-thumb cgl-card-thumb-placeholder">
                   <i class="fas fa-tshirt" aria-hidden="true" />
+                  <span v-if="proj.status === 'completed'" class="cgl-card-status-badge">
+                    <i class="fas fa-check-circle" aria-hidden="true" /> 已完成
+                  </span>
                 </div>
               </div>
               <div class="cgl-card-right">
@@ -109,16 +142,35 @@
                     <span class="cgl-card-value">{{ proj.product_name }}</span>
                   </div>
                   <div class="cgl-card-line">
-                    <span class="cgl-card-label">客户：</span>
-                    <span class="cgl-card-value">{{ selectedGroup?.customer_name || '-' }}</span>
+                    <span class="cgl-card-label">版师：</span>
+                    <span class="cgl-card-value">{{ selectedGroup?.pattern_maker_name || '-' }}</span>
                   </div>
                   <div class="cgl-card-line">
                     <span class="cgl-card-label">编号：</span>
                     <span class="cgl-card-value">{{ projectDisplayNumbers.get(proj.id) }}</span>
                   </div>
                 </div>
+                <div v-if="canManage" class="cgl-card-actions">
+                  <button
+                    type="button"
+                    class="cgl-card-action cgl-card-action--edit"
+                    title="编辑该打样项目"
+                    @click.stop="$emit('edit-project', proj.id)"
+                  >
+                    <i class="fas fa-pen" aria-hidden="true" /> 编辑
+                  </button>
+                  <button
+                    v-if="proj.status !== 'completed'"
+                    type="button"
+                    class="cgl-card-action cgl-card-action--done"
+                    title="标记为已完成"
+                    @click.stop="$emit('complete-project', proj.id)"
+                  >
+                    <i class="fas fa-check" aria-hidden="true" /> 完成
+                  </button>
+                </div>
               </div>
-            </button>
+            </div>
           </template>
         </VirtualList>
         <!-- 兜底：测量高度失败时不显示空白，恢复后自动渲染 -->
@@ -136,20 +188,47 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import UiSpinner from '@/components/ui/UiSpinner.vue'
 import EmptyState from './EmptyState.vue'
 import VirtualList from '@/components/ui/VirtualList.vue'
-import type { CustomerGroup, ProjectSummary } from '@/api/patternRoom'
+import ProjectCompletedTable from './ProjectCompletedTable.vue'
+import type { PatternMakerGroup, ProjectSummary, CompletedTableRow } from '@/api/patternRoom'
 
 const props = defineProps<{
-  groups: CustomerGroup[]
+  groups: PatternMakerGroup[]
   loading: boolean
   hasData: boolean
   selectedProjectId: number | null
+  canManage: boolean
+  viewMode: 'group' | 'table'
+  completedItems: CompletedTableRow[]
+  completedLoading: boolean
 }>()
 
 const emit = defineEmits<{
   'select-project': [id: number]
+  'edit-project': [id: number]
+  'complete-project': [id: number]
   search: [keyword: string]
   'add-project': []
+  'status-change': [value: string]
+  'select-completed': [id: number]
+  'export-excel': []
+  'print-table': []
 }>()
+
+/** 状态筛选选项 */
+const STATUS_OPTIONS = [
+  { value: 'all', label: '全部' },
+  { value: 'in_progress', label: '进行中' },
+  { value: 'completed', label: '已完成' },
+  { value: 'cancelled', label: '已取消' },
+] as const
+
+/** 当前状态筛选（默认全部） */
+const statusFilter = ref<string>('all')
+
+function onStatusChange(value: string) {
+  statusFilter.value = value
+  emit('status-change', value)
+}
 
 /**
  * 项目卡片高度（200px 缩略图 + 上下 8px 内边距 = 216px），
@@ -159,25 +238,25 @@ const emit = defineEmits<{
 const PROJECT_CARD_H = 216
 const PROJECT_CARD_SLOT_H = PROJECT_CARD_H + 6
 
-/** 当前选中的客户 key */
-const selectedCustomerKey = ref<string | null>(null)
+/** 当前选中的版师 key */
+const selectedMakerKey = ref<string | null>(null)
 
-function groupKey(customerId: number | null): string {
-  return customerId != null ? String(customerId) : '_unassigned'
+function groupKey(makerId: number | null): string {
+  return makerId != null ? String(makerId) : '_unassigned'
 }
 
-function isCustomerSelected(customerId: number | null): boolean {
-  return selectedCustomerKey.value === groupKey(customerId)
+function isMakerSelected(makerId: number | null): boolean {
+  return selectedMakerKey.value === groupKey(makerId)
 }
 
-function selectCustomer(customerId: number | null) {
-  selectedCustomerKey.value = groupKey(customerId)
+function selectMaker(makerId: number | null) {
+  selectedMakerKey.value = groupKey(makerId)
 }
 
 /** 当前选中的分组 */
 const selectedGroup = computed(() => {
-  if (!selectedCustomerKey.value) return null
-  return props.groups.find((g) => groupKey(g.customer_id) === selectedCustomerKey.value) ?? null
+  if (!selectedMakerKey.value) return null
+  return props.groups.find((g) => groupKey(g.pattern_maker_id) === selectedMakerKey.value) ?? null
 })
 
 // ==================== 虚拟滚动容器高度测量 ====================
@@ -268,8 +347,8 @@ watch(
   },
 )
 
-// 切换客户时回到列表顶部
-watch(selectedCustomerKey, () => {
+// 切换版师时回到列表顶部
+watch(selectedMakerKey, () => {
   virtualListRef.value?.scrollToTop()
 })
 
@@ -340,15 +419,15 @@ function onThumbError(e: Event, proj: { product_image_url?: string | null }) {
 watch(
   () => props.groups,
   (g) => {
-    if (g && g.length > 0 && selectedCustomerKey.value === null) {
-      selectedCustomerKey.value = groupKey(g[0]!.customer_id)
+    if (g && g.length > 0 && selectedMakerKey.value === null) {
+      selectedMakerKey.value = groupKey(g[0]!.pattern_maker_id)
     }
   },
   { immediate: true },
 )
 
-// 选中项目变化时，自动切换到包含该项目的客户分组
-// 场景：新增项目后选中新项目，但新项目所属客户与当前选中分组不同，
+// 选中项目变化时，自动切换到包含该项目的版师分组
+// 场景：新增项目后选中新项目，但新项目所属版师与当前选中分组不同，
 // 若不切换分组，右侧卡片区域看不到新项目。
 watch(
   () => props.selectedProjectId,
@@ -359,7 +438,7 @@ watch(
     // 查找包含该项目的分组并切换
     const targetGroup = props.groups.find((g) => g.projects.some((p) => p.id === newId))
     if (targetGroup) {
-      selectedCustomerKey.value = groupKey(targetGroup.customer_id)
+      selectedMakerKey.value = groupKey(targetGroup.pattern_maker_id)
     }
   },
 )
@@ -396,7 +475,6 @@ watch(
   border: 1px solid var(--color-border-light, #e5e7eb);
   border-radius: 8px;
   font-size: 13px;
-  background: var(--color-surface, #f9fafb);
   color: var(--color-text-primary);
   outline: none;
   box-sizing: border-box;
@@ -404,6 +482,49 @@ watch(
 
 .cgl-search-input:focus {
   border-color: var(--color-primary-400);
+}
+
+/* 状态筛选胶囊 */
+.cgl-status-filter {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px 12px 0;
+  flex-shrink: 0;
+}
+
+.cgl-status-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-secondary, #6b7280);
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.cgl-status-btn:hover {
+  background: var(--color-primary-50);
+  color: var(--color-primary-600);
+}
+
+.cgl-status-btn.active {
+  background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
+  color: var(--color-primary-700);
+  border-color: var(--color-primary-200);
+  font-weight: 600;
+}
+
+/* 已完成表格视图 */
+.cgl-table-mode {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 8px;
 }
 
 /* 加载 */
@@ -610,6 +731,36 @@ watch(
   opacity: 0.5;
 }
 
+/* 已完成角标（叠加在缩略图右上角） */
+.cgl-card-status-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(22, 163, 74, 0.92);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.6;
+  pointer-events: none;
+}
+
+/* 已完成卡片：缩略图轻微去饱和 + 绿色边框 */
+.cgl-project-card.is-completed .cgl-card-thumb {
+  filter: saturate(0.55);
+}
+.cgl-project-card.is-completed {
+  border-color: #22c55e40;
+}
+.cgl-project-card.is-completed.active {
+  border-color: #16a34a;
+}
+
 .cgl-card-right {
   flex: 1;
   min-width: 0;
@@ -640,5 +791,39 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 卡片操作按钮（编辑 / 完成） */
+.cgl-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.cgl-card-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border: 1px solid var(--color-border-light, #e5e7eb);
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.cgl-card-action:hover {
+  border-color: #ff9f43;
+  color: #ff9f43;
+  background: #ff9f4308;
+}
+
+.cgl-card-action--done:hover {
+  border-color: #16a34a;
+  color: #16a34a;
+  background: #16a34a0a;
 }
 </style>

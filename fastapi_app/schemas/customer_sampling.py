@@ -201,22 +201,25 @@ class ProjectSummary(BaseModel):
     product_image_thumbnail_url: str | None = None
     product_image_blur_url: str | None = None
     current_version: str = 'T1'
+    status: str = 'in_progress'
+    completed_at: str | None = None
+    parts_count: int = 0
     updated_at: str = ''
 
 
-class CustomerGroup(BaseModel):
-    """客户分组"""
-    customer_id: int | None = None
-    customer_name: str
+class PatternMakerGroup(BaseModel):
+    """版师分组"""
+    pattern_maker_id: int | None = None
+    pattern_maker_name: str
     project_count: int = 0
     latest_update_time: str = ''
     projects: list[ProjectSummary] = Field(default_factory=list)
 
 
 class GroupedListResponse(BaseModel):
-    """按客户分组聚合查询响应"""
+    """按版师分组聚合查询响应"""
     success: bool = True
-    groups: list[CustomerGroup] = Field(default_factory=list)
+    groups: list[PatternMakerGroup] = Field(default_factory=list)
     total_projects: int = 0
 
 
@@ -227,6 +230,25 @@ class ProjectListResponse(BaseModel):
     total: int = 0
     pages: int = 1
     current_page: int = 1
+
+
+class CompletedTableRow(BaseModel):
+    """已完成打样项目表格行"""
+    id: int
+    sequence_no: str
+    product_name: str
+    pattern_maker_name: str = ''
+    completed_at: str | None = None
+    parts_count: int = 0
+    operator_name: str = ''
+    status: str = 'completed'
+
+
+class CompletedTableResponse(BaseModel):
+    """已完成打样项目表格查询响应"""
+    success: bool = True
+    items: list[CompletedTableRow] = Field(default_factory=list)
+    total: int = 0
 
 
 class ProjectDetailResponse(BaseModel):
@@ -240,9 +262,10 @@ class ProjectDetailResponse(BaseModel):
     product_image_thumbnail_url: str | None = None
     product_image_blur_url: str | None = None
     product_image_file_id: int | None = None
-    customer_id: int | None = None
-    customer_name: str = ''
+    pattern_maker_id: int | None = None
+    pattern_maker_name: str = ''
     current_version: str = 'T1'
+    status: str = 'in_progress'
     remark: str = ''
     created_by_name: str | None = None
     created_at: str = ''
@@ -255,10 +278,16 @@ class ProjectDetailResponse(BaseModel):
 
 # ==================== 请求 Schema ====================
 
+class ProjectStatusUpdateRequest(BaseModel):
+    """项目状态更新请求（in_progress/completed/cancelled）"""
+    status: Literal['in_progress', 'completed', 'cancelled'] = Field(
+        ..., description='项目状态',
+    )
+
 class ProjectCreateRequest(BaseModel):
     """新增打样项目请求"""
     product_name: str = Field(..., min_length=1, max_length=200, description='产品名称')
-    customer_id: int | None = None
+    pattern_maker_id: int | None = None
     remark: str | None = Field(None, max_length=2000, description='备注')
     initial_roles: list[str] | None = Field(
         None, max_length=10, description='初始角色名称列表（不传时自动创建"默认"）',
@@ -272,7 +301,7 @@ class ProjectUpdateRequest(BaseModel):
     version 为乐观锁版本号，必填。
     """
     product_name: str | None = Field(None, min_length=1, max_length=200)
-    customer_id: int | None = None
+    pattern_maker_id: int | None = None
     remark: str | None = Field(None, max_length=2000)
     product_image_file_id: int | None = None
     current_version: str | None = Field(None, max_length=8, description='当前版本/最终版本 T1/T2/T3...')
