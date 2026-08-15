@@ -4,6 +4,9 @@ import socket
 import subprocess
 import sys
 
+# 注意：此脚本为快速重启工具，生产建议改用 server_manager「生产托管」注册的
+# erp-prod / erp-arq Windows 服务（开机自启 + 崩溃自愈）。
+
 def kill_port_process(port):
     """找到占用指定端口的进程并杀掉"""
     try:
@@ -51,12 +54,18 @@ if __name__ == "__main__":
         print(f"等待端口释放... ({i+1}/5)")
         time.sleep(1)
     
-    # 3. 启动新后端
+    # 3. 启动新后端（多 worker 生产配置）
     print("\n步骤 3: 启动后端服务...")
     try:
-        # 使用 uvicorn 直接启动
+        # 使用 uvicorn 多 worker 直接启动
         os.chdir(os.path.dirname(os.path.abspath(__file__)))
-        print("执行: python -m fastapi_app.main")
-        subprocess.run([sys.executable, "-m", "fastapi_app.main"])
+        workers = os.getenv("UVICORN_WORKERS", "4")
+        print(f"执行: python -m uvicorn fastapi_app.main:app --workers {workers}")
+        subprocess.run([
+            sys.executable, "-m", "uvicorn", "fastapi_app.main:app",
+            "--host", "0.0.0.0", "--port", str(PORT),
+            "--workers", workers, "--http", "httptools",
+            "--no-access-log", "--proxy-headers", "--forwarded-allow-ips=*",
+        ])
     except KeyboardInterrupt:
         print("\n\n后端已停止。")

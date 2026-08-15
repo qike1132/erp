@@ -36,6 +36,13 @@ local.properties
 config/jwt/*.pem
 config/jwt/*.key
 
+# 备份加密密钥（敏感文件，不应提交到版本控制）
+backups/.backup_encryption.key
+backups/*.key
+
+# Redis 生产配置可能含密码，仅保留模板；真实配置由部署环境注入
+config/redis.production.conf
+
 # Android 签名密钥（敏感文件）
 frontend-vite/android/keystore.properties
 frontend-vite/android/app/*.jks
@@ -131,3 +138,42 @@ logs/
 test_reports/
 *.log
 .gstack/
+
+# === 2026-08-15 清理防护：根目录临时产物与工具残留 ===
+# 根目录调试/临时输出
+/*.out
+/*.err
+/_vue_tsc_*.txt
+/type-check-output.txt
+/bench_result.txt
+/debug_*.png
+/frontend-access-*.png
+# Python/测试缓存（任意层级）
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+/pytest-cache-files-*
+/.tmp_analysis/
+# Redis 快照副本
+*.rdb
+# 隔离区（清理过渡，不入库）
+/.archive/
+# AI/外部工具残留目录（根级锚定，防再次积累）
+/.freebuff/
+/.codeartsdoer/
+/.codebuddy/
+/.comate/
+/.lean-ctx/
+/.learnings/
+/.workbuddy/
+/.agents/
+/agents/
+/skills/
+/memory/
+/shots/
+/playbooks/
+/cli/
+/design-system/
+/dashboard-preview/
+/.claude.json
+/.windsurfignore
