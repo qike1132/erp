@@ -3,15 +3,10 @@
     <div class="page-card page-card-main">
       <!-- 卡片头部 -->
       <div class="page-card-header">
-        <div class="rp-header-left">
-          <HeaderTabs />
-        </div>
-        <div class="rp-header-right">
-          <div class="rp-tab-group" role="tablist">
-            <button v-for="tab in tabs" :key="tab.value" role="tab" :aria-selected="activeTab === tab.value" :class="['rp-tab-btn', { active: activeTab === tab.value }]" @click="activeTab = tab.value; handleTabChange()">
-              {{ tab.label }}
-            </button>
-          </div>
+        <div class="rp-tab-group" role="tablist">
+          <button v-for="tab in tabs" :key="tab.value" role="tab" :aria-selected="activeTab === tab.value" :class="['rp-tab-btn', { active: activeTab === tab.value }]" @click="activeTab = tab.value; handleTabChange()">
+            {{ tab.label }}
+          </button>
         </div>
       </div>
 
@@ -44,39 +39,39 @@
 
       <!-- 表格 -->
       <div class="rp-table-wrap">
-        <div v-if="isLoading && searched && !logs.length" class="rp-empty">
-          <UiSpinner />
-        </div>
-        <div v-else-if="!logs.length" class="rp-empty">
-          <FontAwesomeIcon icon="chart-line" aria-hidden="true" />
-          <span>{{ isFetching ? '加载中…' : '暂无数据' }}</span>
-        </div>
-        <template v-else>
         <div v-if="isFetching" class="rp-fetching-bar"><div class="rp-fetching-progress" /></div>
-        <table class="rp-table">
-          <thead>
-            <tr>
-              <th>{{ currentCfg.dateLabel }}</th>
-              <th>客户</th>
-              <th style="text-align: left">产品名称</th>
-              <th>{{ currentCfg.countLabel }}</th>
-              <th style="text-align: left">{{ activeTab === 'deduction' ? '订单备注' : '备注' }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(row, idx) in logs" :key="(row.id as string | number | undefined) ?? idx">
-              <td>{{ row[currentCfg.dateKey] || '-' }}</td>
-              <td>{{ row.customer || '-' }}</td>
-              <td style="text-align: left">{{ row.product_name || '-' }}</td>
-              <td>{{ row.quantity }}</td>
-              <td style="text-align: left"><span :title="String(row[currentCfg.noteKey] || '')">{{ row[currentCfg.noteKey] || '-' }}</span></td>
-            </tr>
-          </tbody>
-        </table>
-
-        <!-- 分页 -->
-        <UiPagination v-if="pagination && (pagination.pages ?? 0) > 1" :current-page="page" :total-pages="pagination.pages ?? 1" :total-items="pagination.total ?? 0" @update:current-page="handlePageChange" />
-        </template>
+        <UiDataTable
+          :data="logs"
+          :columns="reportColumns"
+          :loading="isLoading && searched && !logs.length"
+          :paginator="(pagination?.pages ?? 0) > 1"
+          :rows="perPage"
+          :total-records="pagination?.total ?? 0"
+          row-key="id"
+          @page="onPageChange"
+        >
+          <template #empty>
+            <div class="rp-empty">
+              <FontAwesomeIcon icon="chart-line" aria-hidden="true" />
+              <span>{{ isFetching ? '加载中…' : '暂无数据' }}</span>
+            </div>
+          </template>
+          <template #column-body-date="{ row }">
+            {{ (row as Record<string, any>)[currentCfg.dateKey] || '-' }}
+          </template>
+          <template #column-body-customer="{ row }">
+            {{ (row as Record<string, any>).customer || '-' }}
+          </template>
+          <template #column-body-product_name="{ row }">
+            {{ (row as Record<string, any>).product_name || '-' }}
+          </template>
+          <template #column-body-quantity="{ row }">
+            {{ (row as Record<string, any>).quantity }}
+          </template>
+          <template #column-body-note="{ row }">
+            <span :title="String((row as Record<string, any>)[currentCfg.noteKey] || '')">{{ (row as Record<string, any>)[currentCfg.noteKey] || '-' }}</span>
+          </template>
+        </UiDataTable>
       </div>
     </div>
   </div>
@@ -96,8 +91,8 @@ import { useQuery, keepPreviousData } from '@tanstack/vue-query'
 import { reportApi, customerApi } from '@/api'
 import UiSelect from '@/components/ui/UiSelect.vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
-import UiPagination from '@/components/ui/UiPagination.vue'
-import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
+import UiDataTable from '@/components/ui/UiDataTable.vue'
+import type { TableColumn } from '@/components/ui/UiDataTable.vue'
 
 /** 报表标签页类型 */
 type TabType = 'order' | 'stockin' | 'stockout' | 'deduction'
@@ -165,6 +160,8 @@ const tabs: { value: TabType; label: string }[] = [
 const activeTab = ref<TabType>('order')
 /** 当前页码 */
 const page = ref(1)
+/** 每页条数（可由分页器选择） */
+const perPage = ref(15)
 /** 是否已执行过搜索（控制空状态文案） */
 const searched = ref(true)
 
@@ -188,9 +185,9 @@ const customerOptions = computed(() =>
 
 /** 报表数据查询 */
 const { data: reportData, isLoading, isFetching } = useQuery({
-  queryKey: ['report-data', activeTab, page, filters],
+  queryKey: ['report-data', activeTab, page, perPage, filters],
   queryFn: async () => {
-    const params: Record<string, string | number> = { page: page.value, per_page: 15 }
+    const params: Record<string, string | number> = { page: page.value, per_page: perPage.value }
     if (filters.customer) params.customer = filters.customer
     if (filters.product) params.product = filters.product
     if (filters.startDate) params.start_date = filters.startDate
@@ -218,6 +215,15 @@ const logs = computed(() => reportData.value?.logs ?? [])
 /** 分页信息 */
 const pagination = computed(() => reportData.value?.pagination)
 
+/** UiDataTable 列定义（按当前标签页动态调整表头） */
+const reportColumns = computed<TableColumn[]>(() => [
+  { field: 'date', header: currentCfg.value.dateLabel, align: 'center' },
+  { field: 'customer', header: '客户', align: 'center' },
+  { field: 'product_name', header: '产品名称', align: 'left' },
+  { field: 'quantity', header: currentCfg.value.countLabel, align: 'center' },
+  { field: 'note', header: activeTab.value === 'deduction' ? '订单备注' : '备注', align: 'left' },
+])
+
 /** 执行搜索，重置到第一页 */
 function doSearch() {
   searched.value = true
@@ -235,9 +241,10 @@ function handleTabChange() {
   page.value = 1
 }
 
-/** 翻页 */
-function handlePageChange(p: number) {
-  page.value = p
+/** UiDataTable 分页变化处理（PrimeVue page 为 0 索引） */
+function onPageChange(event: { page: number; rows: number }) {
+  page.value = event.page + 1
+  perPage.value = event.rows
 }
 
 /** 导出当前报表为文件 */
@@ -264,22 +271,6 @@ function exportReport() {
 }
 
 /* Card Header */
-.rp-header-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex: 1;
-}
-.rp-header-right {
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
-  gap: 8px;
-}
-.page-card-header :deep(.ht-bar) {
-  width: auto;
-  margin: 0;
-}
 .rp-card-title-group {
   display: flex;
   align-items: center;
@@ -425,36 +416,6 @@ function exportReport() {
   overflow-y: auto;
   min-height: 0;
 }
-.rp-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-.rp-table thead th {
-  padding: 10px 14px;
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  background: var(--color-surface, #f8fafc);
-  border-bottom: 2px solid var(--color-border-light, #e2e8f0);
-  color: var(--color-text-secondary);
-  text-align: center;
-}
-.rp-table tbody td {
-  padding: 10px 14px;
-  font-size: 13px;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
-  text-align: center;
-  transition: background 0.2s ease;
-  color: var(--color-text);
-}
-.rp-table tbody tr:hover {
-  background: var(--color-primary-50);
-}
-
-/* Table Footer */
-
 
 /* Empty */
 .rp-empty {

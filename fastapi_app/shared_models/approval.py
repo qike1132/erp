@@ -3,7 +3,7 @@
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, ClassVar
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
@@ -19,7 +19,7 @@ _DATETIME_FMT = '%Y-%m-%d %H:%M:%S'
 
 
 def _utcnow() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+    return datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
 
 
 def _fmt_dt(value: datetime | None) -> str | None:

@@ -55,7 +55,7 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
     bomData.filling = []
     bomData.accessory = []
     try {
-      const res = (await productApi.loadBom(productId)) as any
+      const res = (await productApi.loadBom(productId)) as { success: boolean; materials?: unknown[] }
       if (res.success) {
         const materialsList = res.materials || []
         const grouped: { fabric: BomItem[]; filling: BomItem[]; accessory: BomItem[] } = { fabric: [], filling: [], accessory: [] }
@@ -156,7 +156,7 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
         })),
         packagings: [],
       }
-      const res = (await productApi.saveBom(currentProductId.value!, payload)) as any
+      const res = (await productApi.saveBom(currentProductId.value!, payload)) as { success: boolean; error?: string }
       if (res.success) {
         showToast('保存成功', 'success')
         bomDialogVisible.value = false

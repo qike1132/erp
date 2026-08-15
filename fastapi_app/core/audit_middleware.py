@@ -7,7 +7,7 @@
 import json
 import time
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -133,7 +133,7 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
             'user_agent': user_agent,
             'request_id': request_id,
             'status_code': response.status_code,
-            'created_at': datetime.now(UTC).replace(tzinfo=None),
+            'created_at': datetime.now(timezone.utc).replace(tzinfo=None),
         }
 
         await _buffer_audit_entry(audit_entry)
@@ -183,7 +183,7 @@ async def _write_audit_direct(entries: list[dict]):
                 # 兜底：无论来自 Redis 缓冲（JSON 反序列化会丢 datetime 类型）还是直接路径，
                 # 都保证 created_at 是 datetime 实例，asyncpg 不接受 timestamp 列的字符串
                 if not isinstance(entry.get('created_at'), datetime):
-                    entry['created_at'] = datetime.now(UTC).replace(tzinfo=None)
+                    entry['created_at'] = datetime.now(timezone.utc).replace(tzinfo=None)
                 await session.execute(sa_text("""
                     INSERT INTO audit_log (user_id, username, action, resource_type, resource_id,
                                           detail, ip_address, user_agent, request_id, status_code, created_at)

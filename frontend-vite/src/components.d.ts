@@ -57,6 +57,5 @@ declare module 'vue' {
     UiTabTrigger: typeof import('./components/ui/UiTabTrigger.vue')['default']
     UiUpload: typeof import('./components/ui/UiUpload.vue')['default']
     VirtualList: typeof import('./components/ui/VirtualList.vue')['default']
-    VirtualTable: typeof import('./components/ui/VirtualTable.vue')['default']
   }
 }

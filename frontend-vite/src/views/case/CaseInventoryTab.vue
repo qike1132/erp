@@ -32,46 +32,34 @@
       </div>
 
       <!-- 库存表格 -->
-      <div v-if="invIsLoading && inventoryList.length === 0" class="ci-loading"><UiSpinner /></div>
-      <div v-else-if="inventoryList.length === 0" class="ci-empty"><FontAwesomeIcon icon="warehouse" aria-hidden="true" /><span>暂无库存数据</span></div>
-      <template v-else>
       <div v-if="invIsFetching" class="ci-fetching-bar"><div class="ci-fetching-progress" /></div>
-      <table class="ci-table">
-        <thead>
-          <tr>
-            <th style="text-align: left">产品名称</th>
-            <th>69码</th>
-            <th style="text-align: right">初始库存</th>
-            <th style="text-align: right">累计入库</th>
-            <th style="text-align: right">累计出库</th>
-            <th style="text-align: right">当前库存</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="row in inventoryList" :key="row.id" style="cursor: pointer" @click="selectCaseRow(row)">
-            <td style="text-align: left"><strong>{{ row.name }}</strong></td>
-            <td><small>{{ row.barcode || '-' }}</small></td>
-            <td style="text-align: right">{{ row.initial_stock }}</td>
-            <td style="text-align: right"><span style="color: var(--color-success-500)">{{ row.total_in }}</span></td>
-            <td style="text-align: right"><span style="color: var(--color-danger-500)">{{ row.total_out }}</span></td>
-            <td style="text-align: right">
-              <strong :style="{ color: row.current_stock < 0 ? 'var(--color-danger-500)' : 'var(--color-primary-500)' }">{{ row.current_stock }}</strong>
-            </td>
-            <td>
-              <button class="ci-icon-btn ci-icon-info" @click.stop="selectCaseRow(row)">
-                <FontAwesomeIcon icon="history" style="margin-right: 2px"  aria-hidden="true" />流水
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <div v-if="invTotalPages > 1" class="ci-pagination">
-        <button class="ci-page-btn" :disabled="invPage <= 1" @click="invPage--" aria-label="上一页"><FontAwesomeIcon icon="chevron-left" aria-hidden="true" /></button>
-        <span class="ci-page-info">{{ invPage }} / {{ invTotalPages }}</span>
-        <button class="ci-page-btn" :disabled="invPage >= invTotalPages" @click="invPage++"><FontAwesomeIcon icon="chevron-right" aria-hidden="true" /></button>
-      </div>
-      </template>
+      <UiDataTable
+        :data="inventoryList"
+        :columns="inventoryColumns"
+        :loading="invIsLoading && inventoryList.length === 0"
+        :paginator="invTotalPages > 1"
+        :rows="invPerPage"
+        :total-records="invTotalPages * invPerPage"
+        row-key="id"
+        @page="onInvPageChange"
+        @rowClick="(row: any) => selectCaseRow(row)"
+      >
+        <template #empty>
+          <div class="ci-empty"><FontAwesomeIcon icon="warehouse" aria-hidden="true" /><span>暂无库存数据</span></div>
+        </template>
+        <template #column-body-name="{ row }"><strong>{{ (row as InventorySummaryItem).name }}</strong></template>
+        <template #column-body-barcode="{ row }"><small>{{ (row as InventorySummaryItem).barcode || '-' }}</small></template>
+        <template #column-body-total_in="{ row }"><span style="color: var(--color-success-500)">{{ (row as InventorySummaryItem).total_in }}</span></template>
+        <template #column-body-total_out="{ row }"><span style="color: var(--color-danger-500)">{{ (row as InventorySummaryItem).total_out }}</span></template>
+        <template #column-body-current_stock="{ row }">
+          <strong :style="{ color: (row as InventorySummaryItem).current_stock < 0 ? 'var(--color-danger-500)' : 'var(--color-primary-500)' }">{{ (row as InventorySummaryItem).current_stock }}</strong>
+        </template>
+        <template #column-body-actions="{ row }">
+          <button class="ci-icon-btn ci-icon-info" @click.stop="selectCaseRow(row as InventorySummaryItem)">
+            <FontAwesomeIcon icon="history" style="margin-right: 2px" aria-hidden="true" />流水
+          </button>
+        </template>
+      </UiDataTable>
     </div>
 
     <!-- 库存流水记录 -->
@@ -110,38 +98,32 @@
         </div>
       </div>
       <div v-if="logIsLoading && logList.length === 0" class="ci-loading"><UiSpinner /></div>
-      <div v-else-if="logList.length === 0" class="ci-empty"><FontAwesomeIcon icon="history" aria-hidden="true" /><span>暂无流水记录</span></div>
       <template v-else>
       <div v-if="logIsFetching" class="ci-fetching-bar"><div class="ci-fetching-progress" /></div>
-      <table class="ci-table">
-        <thead>
-          <tr>
-            <th>操作类型</th>
-            <th style="text-align: right">变化数量</th>
-            <th>客户</th>
-            <th>关联单号</th>
-            <th>时间</th>
-            <th>备注</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="row in logList" :key="row.id">
-            <td>
-              <span :class="['ci-badge', logBadgeClass(row.change_type)]">{{ row.change_type }}</span>
-            </td>
-            <td style="text-align: right">
-              <strong :style="{ color: row.change_quantity >= 0 ? 'var(--color-success-500)' : 'var(--color-danger-500)' }">
-                {{ row.change_quantity >= 0 ? '+' : '' }}{{ row.change_quantity }}
-              </strong>
-            </td>
-            <td>{{ row.customer || '-' }}</td>
-            <td>{{ row.related_id || '-' }}</td>
-            <td><small>{{ row.change_date }}</small></td>
-            <td><small>{{ row.note || '-' }}</small></td>
-          </tr>
-        </tbody>
-      </table>
-      <UiPagination v-if="logTotalPages > 1" :current-page="logPage" :total-pages="logTotalPages" @update:current-page="logPage = $event; logRefetch()" />
+      <UiDataTable
+        :data="logList"
+        :columns="logColumns"
+        :loading="logIsLoading"
+        :paginator="logTotalPages > 1"
+        :rows="logPerPage"
+        :total-records="logTotalPages * logPerPage"
+        row-key="id"
+        @page="onLogPageChange"
+      >
+        <template #empty><div class="ci-empty"><FontAwesomeIcon icon="history" aria-hidden="true" /><span>暂无流水记录</span></div></template>
+        <template #column-body-change_type="{ row }">
+          <span :class="['ci-badge', logBadgeClass((row as InventoryLogItem).change_type)]">{{ (row as InventoryLogItem).change_type }}</span>
+        </template>
+        <template #column-body-change_quantity="{ row }">
+          <strong :style="{ color: (row as InventoryLogItem).change_quantity >= 0 ? 'var(--color-success-500)' : 'var(--color-danger-500)' }">
+            {{ (row as InventoryLogItem).change_quantity >= 0 ? '+' : '' }}{{ (row as InventoryLogItem).change_quantity }}
+          </strong>
+        </template>
+        <template #column-body-customer="{ row }">{{ (row as InventoryLogItem).customer || '-' }}</template>
+        <template #column-body-related_id="{ row }">{{ (row as InventoryLogItem).related_id || '-' }}</template>
+        <template #column-body-change_date="{ row }"><small>{{ (row as InventoryLogItem).change_date }}</small></template>
+        <template #column-body-note="{ row }"><small>{{ (row as InventoryLogItem).note || '-' }}</small></template>
+      </UiDataTable>
       </template>
     </div>
 
@@ -169,7 +151,8 @@ import { useQuery, keepPreviousData } from '@tanstack/vue-query'
 import { get } from '@/api/request'
 import UiSelect from '@/components/ui/UiSelect.vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
-import UiPagination from '@/components/ui/UiPagination.vue'
+import UiDataTable from '@/components/ui/UiDataTable.vue'
+import type { TableColumn } from '@/components/ui/UiDataTable.vue'
 
 /** 库存汇总中单个产品的库存信息 */
 interface InventorySummaryItem {
@@ -219,8 +202,8 @@ const invSearch = ref('')
 const debouncedInvSearch = ref('')
 /** 当前页码 */
 const invPage = ref(1)
-/** 每页条数 */
-const invPerPage = 50
+/** 每页条数（可由分页器选择） */
+const invPerPage = ref(50)
 /** 当前选中的产品 ID */
 const selectedCaseId = ref<number | null>(null)
 /** 当前选中的产品名称（用于流水标题显示） */
@@ -246,8 +229,8 @@ const {
   isFetching: invIsFetching,
   refetch: invRefetch,
 } = useQuery({
-  queryKey: ['case-inventory', invPage, debouncedInvSearch],
-  queryFn: () => get<InventorySummaryResponse>('/cases/inventory-summary', { page: invPage.value, per_page: invPerPage, search: debouncedInvSearch.value }),
+  queryKey: ['case-inventory', invPage, debouncedInvSearch, invPerPage],
+  queryFn: () => get<InventorySummaryResponse>('/cases/inventory-summary', { page: invPage.value, per_page: invPerPage.value, search: debouncedInvSearch.value }),
   staleTime: 30_000,
   gcTime: 60_000,
   placeholderData: keepPreviousData,
@@ -285,6 +268,8 @@ const logFilterStart = ref('')
 const logFilterEnd = ref('')
 /** 流水当前页码 */
 const logPage = ref(1)
+/** 流水每页条数（可由分页器选择） */
+const logPerPage = ref(10)
 /** 流水总页数（由 queryFn 更新） */
 const logTotalPages = ref(1)
 
@@ -305,9 +290,9 @@ const {
   isFetching: logIsFetching,
   refetch: logRefetch,
 } = useQuery({
-  queryKey: ['case-inventory-logs', selectedCaseId, logPage, logFilterType, logFilterStart, logFilterEnd],
+  queryKey: ['case-inventory-logs', selectedCaseId, logPage, logFilterType, logFilterStart, logFilterEnd, logPerPage],
   queryFn: async () => {
-    const params: Record<string, string | number> = { page: logPage.value, per_page: 10 }
+    const params: Record<string, string | number> = { page: logPage.value, per_page: logPerPage.value }
     if (logFilterType.value) params.type = logFilterType.value
     if (logFilterStart.value) params.start_date = logFilterStart.value
     if (logFilterEnd.value) params.end_date = logFilterEnd.value
@@ -322,6 +307,35 @@ const {
 
 /** 流水记录列表 */
 const logList = computed<InventoryLogItem[]>(() => logData.value?.logs ?? [])
+
+/** UiDataTable 列定义 */
+const inventoryColumns: TableColumn[] = [
+  { field: 'name', header: '产品名称', align: 'left' },
+  { field: 'barcode', header: '69码', align: 'center' },
+  { field: 'initial_stock', header: '初始库存', align: 'right' },
+  { field: 'total_in', header: '累计入库', align: 'right' },
+  { field: 'total_out', header: '累计出库', align: 'right' },
+  { field: 'current_stock', header: '当前库存', align: 'right' },
+  { field: 'actions', header: '操作', align: 'center' },
+]
+const logColumns: TableColumn[] = [
+  { field: 'change_type', header: '操作类型', align: 'center' },
+  { field: 'change_quantity', header: '变化数量', align: 'right' },
+  { field: 'customer', header: '客户', align: 'center' },
+  { field: 'related_id', header: '关联单号', align: 'center' },
+  { field: 'change_date', header: '时间', align: 'center' },
+  { field: 'note', header: '备注', align: 'center' },
+]
+
+/** UiDataTable 分页变化处理（PrimeVue page 为 0 索引） */
+function onInvPageChange(event: { page: number; rows: number }) {
+  invPage.value = event.page + 1
+  invPerPage.value = event.rows
+}
+function onLogPageChange(event: { page: number; rows: number }) {
+  logPage.value = event.page + 1
+  logPerPage.value = event.rows
+}
 
 /** 清空流水筛选条件 */
 function clearLogFilter() {
@@ -473,34 +487,6 @@ function logBadgeClass(t: string): string {
 .ci-stat-danger { background: var(--color-danger-50); border-color: var(--color-danger-200); }
 .ci-stat-danger .ci-stat-value { color: var(--color-danger-600); }
 
-/* Table */
-.ci-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-.ci-table thead th {
-  padding: 10px 14px;
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  background: var(--color-surface, #f8fafc);
-  border-bottom: 2px solid var(--color-border-light, #e2e8f0);
-  color: var(--color-text-secondary);
-  text-align: center;
-}
-.ci-table tbody td {
-  padding: 10px 14px;
-  font-size: 13px;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
-  text-align: center;
-  vertical-align: middle;
-  transition: background 0.2s ease;
-  color: var(--color-text);
-}
-.ci-table tbody tr:hover { background: var(--color-primary-50); }
-
 /* Badge */
 .ci-badge {
   display: inline-block;
@@ -598,11 +584,4 @@ function logBadgeClass(t: string): string {
   display: block;
   margin-bottom: 8px;
 }
-
-/* Pagination */
-.ci-pagination { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 8px 16px; border-top: 1px solid var(--color-border-light, #f1f5f9); }
-.ci-page-btn { width: 28px; height: 28px; border: 1px solid var(--color-border, #e4e7ed); border-radius: 6px; background: white; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--color-text-secondary); transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease; }
-.ci-page-btn:hover:not(:disabled) { border-color: var(--color-primary-400); color: var(--color-primary-600); background: var(--color-primary-50); }
-.ci-page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.ci-page-info { font-size: 12px; font-weight: 600; color: var(--color-text-secondary); }
 </style>

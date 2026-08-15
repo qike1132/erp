@@ -8,7 +8,7 @@
 - 进度看板：聚合订单 + 工序，输出时间轴/进度条所需数据
 """
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -117,6 +117,38 @@ async def list_outsource_orders(
     return data
 
 
+def _summarize_process_progress(processes: list[OrderOutsourceProcess]) -> dict:
+    """计算工序进度统计（总数/完成数/开始数/进度/当前工序/状态标签）。"""
+    total = len(processes)
+    completed = sum(1 for p in processes if p.status == 'completed')
+    started = sum(1 for p in processes if p.status != 'pending')
+    progress = round(completed * 100 / total) if total else 0
+
+    current_process = None
+    for p in processes:
+        if p.status != 'completed':
+            current_process = p.process_type
+            break
+
+    if total == 0:
+        status_label = '未配置工序'
+    elif completed == total:
+        status_label = '外发完成'
+    elif started > 0:
+        status_label = f'进行中（{current_process}）'
+    else:
+        status_label = '待开始'
+
+    return {
+        'total_processes': total,
+        'completed_processes': completed,
+        'started_processes': started,
+        'progress': progress,
+        'current_process': current_process,
+        'status_label': status_label,
+    }
+
+
 def _matches_process_status(row: dict, status: str) -> bool:
     """按订单外发工序整体状态过滤。
 
@@ -178,33 +210,7 @@ async def _attach_progress_to_orders(db: AsyncSession, items: list[dict]) -> Non
             row['current_process'] = None
             row['status_label'] = '未配置工序'
             continue
-        processes = processes_by_order.get(row['id'], [])
-        total = len(processes)
-        completed = sum(1 for p in processes if p.status == 'completed')
-        started = sum(1 for p in processes if p.status != 'pending')
-        progress = round(completed * 100 / total) if total else 0
-
-        current_process = None
-        for p in processes:
-            if p.status != 'completed':
-                current_process = p.process_type
-                break
-
-        if total == 0:
-            status_label = '未配置工序'
-        elif completed == total:
-            status_label = '外发完成'
-        elif started > 0:
-            status_label = f'进行中（{current_process}）'
-        else:
-            status_label = '待开始'
-
-        row['total_processes'] = total
-        row['completed_processes'] = completed
-        row['started_processes'] = started
-        row['progress'] = progress
-        row['current_process'] = current_process
-        row['status_label'] = status_label
+        row.update(_summarize_process_progress(processes_by_order.get(row['id'], [])))
 
 
 # ==================== SKU 工序预设 ====================
@@ -585,7 +591,7 @@ async def start_order_process(db: AsyncSession, process_id: int, username: str |
         raise ValueError('该工序已完成，无法重复开始')
 
     p.status = 'in_progress'
-    p.actual_start_time = datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+    p.actual_start_time = datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
     p.remark = p.remark or (f'由 {username} 开始' if username else '')
     await db.flush()
     await db.refresh(p)
@@ -600,7 +606,7 @@ async def complete_order_process(db: AsyncSession, process_id: int, username: st
     if p.status == 'completed':
         raise ValueError('该工序已完成，无需重复操作')
 
-    now = datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+    now = datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
     if not p.actual_start_time:
         # 未点击开始时直接完成：视为开始即完成
         p.actual_start_time = now
@@ -657,25 +663,11 @@ async def get_kanban(
 
     for row in orders_data['items']:
         processes = processes_by_order.get(row['id'], [])
-        total = len(processes)
-        completed = sum(1 for p in processes if p.status == 'completed')
-        started = sum(1 for p in processes if p.status != 'pending')
-        progress = round(completed * 100 / total) if total else 0
-
-        current_process = None
-        for p in processes:
-            if p.status != 'completed':
-                current_process = p.process_type
-                break
-
-        if total == 0:
-            status_label = '未配置工序'
-        elif completed == total:
-            status_label = '外发完成'
-        elif started > 0:
-            status_label = f'进行中（{current_process}）'
-        else:
-            status_label = '待开始'
+        summary = _summarize_process_progress(processes)
+        total = summary['total_processes']
+        completed = summary['completed_processes']
+        current_process = summary['current_process']
+        status_label = summary['status_label']
 
         items.append({
             'id': row['id'],
@@ -691,7 +683,7 @@ async def get_kanban(
             'processes': [_serialize_order_process(p) for p in processes],
             'total_processes': total,
             'completed_processes': completed,
-            'progress': progress,
+            'progress': summary['progress'],
             'current_process': current_process,
             'status_label': status_label,
         })

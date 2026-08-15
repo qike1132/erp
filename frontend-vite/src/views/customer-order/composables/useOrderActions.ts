@@ -5,6 +5,7 @@ import { orderApi } from '@/api'
 import { showToast } from '@/composables/useToast'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { getErrorMessage } from '@/types/errors'
+import type { OrderItem } from '@/types'
 import type { FormState, StagedItem, AvailableStockinItem } from './types'
 
 /** 生成暂存项唯一标识（使用 crypto.randomUUID 确保无碰撞） */
@@ -188,7 +189,7 @@ export function useOrderActions(
       if (isOrder.value) {
         await post('/staging-orders/import', fd)
         showToast('导入成功', 'success')
-        const res = (await get('/staging-orders')) as any
+        const res = await get<{ staging_orders?: unknown[]; items?: unknown[] }>('/staging-orders')
         const items = res.staging_orders ?? res.items ?? []
         stagedItems.value.push(
           ...items.map((i: any): StagedItem => ({
@@ -209,7 +210,7 @@ export function useOrderActions(
       } else {
         await post('/staging-stockins/import', fd)
         showToast('导入成功', 'success')
-        const res = (await get('/staging-stockins')) as any
+        const res = await get<{ staging_stockins?: unknown[]; items?: unknown[] }>('/staging-stockins')
         const items = res.staging_stockins ?? res.items ?? []
         stagedItems.value.push(
           ...items.map((i: any): StagedItem => ({
@@ -247,8 +248,8 @@ export function useOrderActions(
 
   async function openDetail(item: any) {
     try {
-      const res = await orderApi.detail(item.id) as any
-      const data = res.data ?? res
+      const res = await orderApi.detail(item.id) as OrderItem & { product?: { id?: number }; customer?: string; data?: OrderItem }
+      const data = (res.data ?? res) as typeof res
       detailData.value = data
       editForm.quantity = data.quantity || 1
       editForm.deductQuantity = data.deduct_quantity || 0
@@ -256,7 +257,7 @@ export function useOrderActions(
       // 查询可用备货量
       if (data.product?.id && data.customer) {
         try {
-          const availRes = await get('/aux/available-stockins', { product_id: data.product.id, customer: data.customer }) as any
+          const availRes = await get<{ available_quantity?: number; available?: number; data?: { available_quantity?: number; available?: number } }>('/aux/available-stockins', { product_id: data.product.id, customer: data.customer })
           const availData = availRes.data ?? availRes
           availableStockin.value = (availData.available_quantity ?? availData.available ?? 0) + (data.deduct_quantity || 0)
         } catch {

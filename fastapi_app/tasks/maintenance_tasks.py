@@ -6,7 +6,6 @@
 """
 import logging
 
-from celery import shared_task
 from sqlalchemy import text
 
 from fastapi_app.core.database import get_async_db_context
@@ -27,13 +26,11 @@ async def _refresh_dashboard_materialized_views() -> None:
             raise
 
 
-@shared_task(name="refresh_dashboard_mv_task", bind=True, max_retries=3, default_retry_delay=60)
-def refresh_dashboard_mv_task(self) -> dict:
-    """Celery 任务入口：刷新仪表盘物化视图。"""
-    import asyncio
+async def refresh_dashboard_mv_task(ctx) -> dict:
+    """ARQ 任务入口：刷新仪表盘物化视图。"""
     try:
-        asyncio.run(_refresh_dashboard_materialized_views())
+        await _refresh_dashboard_materialized_views()
         return {"success": True, "message": "仪表盘物化视图刷新完成"}
     except Exception as exc:
         logger.exception("refresh_dashboard_mv_task 失败")
-        raise self.retry(exc=exc)
+        raise exc

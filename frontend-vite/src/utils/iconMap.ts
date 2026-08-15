@@ -1,4 +1,4 @@
-/** 图标名映射表 — 全局共享，AppSidebar / HeaderTabs 等组件统一引用 */
+/** 图标名映射表 — 全局共享，AppSidebar 等组件统一引用 */
 export const iconMap: Record<string, string> = {
   dashboard: 'fas fa-gauge',
   order: 'fas fa-cart-shopping',

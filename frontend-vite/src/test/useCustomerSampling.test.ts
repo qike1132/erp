@@ -13,6 +13,7 @@ vi.mock('@/api/patternRoom', () => ({
 }))
 
 import { patternRoomApi } from '@/api/patternRoom'
+import type { GroupedListResponse } from '@/api/patternRoom'
 import { useCustomerSampling } from '../views/pattern-room/composables/useCustomerSampling'
 
 describe('useCustomerSampling', () => {
@@ -33,8 +34,8 @@ describe('useCustomerSampling', () => {
     const mockResponse = {
       groups: [
         {
-          customer_id: 1,
-          customer_name: '客户A',
+          pattern_maker_id: 1,
+          pattern_maker_name: '版师A',
           project_count: 2,
           latest_update_time: '2026-08-08 10:00:00',
           projects: [
@@ -45,21 +46,21 @@ describe('useCustomerSampling', () => {
       ],
       total_projects: 2,
     }
-    vi.mocked(patternRoomApi.getGroupedList).mockResolvedValue(mockResponse as any)
+    vi.mocked(patternRoomApi.getGroupedList).mockResolvedValue(mockResponse as unknown as GroupedListResponse)
 
     const hook = useCustomerSampling()
     await hook.loadGrouped()
 
-    expect(patternRoomApi.getGroupedList).toHaveBeenCalledWith(undefined)
+    expect(patternRoomApi.getGroupedList).toHaveBeenCalledWith({})
     expect(hook.groups.value).toHaveLength(1)
-    expect(hook.groups.value[0]!.customer_name).toBe('客户A')
+    expect(hook.groups.value[0]!.pattern_maker_name).toBe('版师A')
     expect(hook.totalProjects.value).toBe(2)
     expect(hook.error.value).toBeNull()
     expect(hook.hasData.value).toBe(true)
   })
 
   it('loadGrouped 带 keyword：传递参数', async () => {
-    vi.mocked(patternRoomApi.getGroupedList).mockResolvedValue({ groups: [], total_projects: 0 } as any)
+    vi.mocked(patternRoomApi.getGroupedList).mockResolvedValue({ groups: [], total_projects: 0 } as unknown as GroupedListResponse)
 
     const hook = useCustomerSampling()
     await hook.loadGrouped('毛绒玩具')
@@ -68,12 +69,12 @@ describe('useCustomerSampling', () => {
   })
 
   it('loadGrouped 空白 keyword：不传递参数', async () => {
-    vi.mocked(patternRoomApi.getGroupedList).mockResolvedValue({ groups: [], total_projects: 0 } as any)
+    vi.mocked(patternRoomApi.getGroupedList).mockResolvedValue({ groups: [], total_projects: 0 } as unknown as GroupedListResponse)
 
     const hook = useCustomerSampling()
     await hook.loadGrouped('   ')
 
-    expect(patternRoomApi.getGroupedList).toHaveBeenCalledWith(undefined)
+    expect(patternRoomApi.getGroupedList).toHaveBeenCalledWith({})
   })
 
   it('loadGrouped 失败：设置 error 并清空数据', async () => {
@@ -92,12 +93,12 @@ describe('useCustomerSampling', () => {
     const hook = useCustomerSampling()
     hook.groups.value = [
       {
-        customer_id: null,
-        customer_name: '未分类',
+        pattern_maker_id: null,
+        pattern_maker_name: '未分类',
         project_count: 1,
         latest_update_time: '',
         projects: [
-          { id: 1, sequence_no: 'CS-001', product_name: '产品', product_image_url: null, product_image_thumbnail_url: null, product_image_blur_url: null, current_version: 'T1', updated_at: '' },
+          { id: 1, sequence_no: 'CS-001', product_name: '产品', product_image_url: null, product_image_thumbnail_url: null, product_image_blur_url: null, current_version: 'T1', status: 'in_progress', updated_at: '' },
         ],
       },
     ]
@@ -108,8 +109,8 @@ describe('useCustomerSampling', () => {
     const hook = useCustomerSampling()
     hook.groups.value = [
       {
-        customer_id: null,
-        customer_name: '未分类',
+        pattern_maker_id: null,
+        pattern_maker_name: '未分类',
         project_count: 0,
         latest_update_time: '',
         projects: [],

@@ -4,7 +4,7 @@ P2-15: 将仪表盘核心统计逻辑下沉到服务层，供 v1/v2 复用，保
 """
 import json
 import logging
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timezone, timedelta
 
 from pydantic import BaseModel
 from sqlalchemy import and_, extract, func, select, text
@@ -96,7 +96,7 @@ async def fetch_dashboard_stats(db: AsyncSession) -> dict:
     替代 2 条）、合并 MV 数据查询（3→1 UNION ALL）。总往返从 14~17 次降至 9~10 次。
     """
     try:
-        now = datetime.now(UTC).replace(tzinfo=None)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         today_start = datetime(now.year, now.month, now.day, 0, 0, 0)
         tomorrow = now + timedelta(days=1)
         today_end = datetime(tomorrow.year, tomorrow.month, tomorrow.day, 0, 0, 0)
@@ -394,7 +394,7 @@ def fetch_system_status() -> SystemStatusResponse:
         success=True,
         data=SystemStatus(
             is_running=True,
-            last_sync_time=str(datetime.now(UTC).date()),
+            last_sync_time=str(datetime.now(timezone.utc).date()),
             data_status="up_to_date",
         ),
     )

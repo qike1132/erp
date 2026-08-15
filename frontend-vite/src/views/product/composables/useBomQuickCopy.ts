@@ -26,8 +26,8 @@ export function useBomQuickCopy({ currentProductId, reloadBom }: UseBomQuickCopy
   async function searchProductsForBom(keyword: string): Promise<BomSearchProduct[]> {
     if (!keyword.trim()) return []
     try {
-      const res = (await productApi.searchProductsForBom(keyword)) as any
-      return res.success && res.products?.length > 0 ? res.products : []
+      const res = (await productApi.searchProductsForBom(keyword)) as unknown as { success: boolean; products?: BomSearchProduct[] }
+      return res.success && res.products && res.products.length > 0 ? res.products : []
     } catch {
       return []
     }
@@ -62,7 +62,7 @@ export function useBomQuickCopy({ currentProductId, reloadBom }: UseBomQuickCopy
     showProgress(10, '搜索产品中...')
 
     try {
-      const res = (await productApi.searchProductsForBom(keyword)) as any
+      const res = (await productApi.searchProductsForBom(keyword)) as unknown as { success: boolean; products?: BomSearchProduct[] }
       if (!res.success || !res.products?.length) {
         hideProgress()
         quickCopyLoading.value = false
@@ -76,7 +76,8 @@ export function useBomQuickCopy({ currentProductId, reloadBom }: UseBomQuickCopy
         showToast('找到的产品没有配置BOM表', 'warning')
         return
       }
-      return executeCopy(withBom[0].id, withBom[0].name)
+      const first = withBom[0]
+      if (first) return executeCopy(first.id, first.name)
     } catch {
       hideProgress()
       quickCopyLoading.value = false
@@ -89,7 +90,7 @@ export function useBomQuickCopy({ currentProductId, reloadBom }: UseBomQuickCopy
 
     try {
       showProgress(70, '执行复制...')
-      const res = (await productApi.copyBom(currentProductId.value!, sourceId, true)) as any
+      const res = (await productApi.copyBom(currentProductId.value!, sourceId, true)) as { success: boolean; error?: string }
       if (res.success) {
         showProgress(100, '复制成功！')
         setTimeout(() => {

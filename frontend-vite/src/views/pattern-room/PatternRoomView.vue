@@ -52,18 +52,17 @@
                 :has-data="groupHook.hasData.value"
                 :selected-project-id="selectedProjectId"
                 :can-manage="canManage"
-                :view-mode="viewMode"
-                :completed-items="completedItems"
-                :completed-loading="completedLoading"
+                :group-page="groupHook.currentPage.value"
+                :group-pages="groupHook.pages.value"
+                :group-total="groupHook.total.value"
                 @select-project="onSelectProject"
                 @edit-project="onEditProjectFromCard"
                 @complete-project="onCompleteProjectFromCard"
+                @cancel-project="onCancelProjectFromCard"
                 @search="onSearch"
                 @add-project="openCreateProjectDialog"
                 @status-change="onStatusChange"
-                @select-completed="onSelectProject"
-                @export-excel="onExportExcel"
-                @print-table="onPrintTable"
+                @update-group-page="onGroupPageChange"
               />
             </div>
           </aside>
@@ -116,18 +115,16 @@
         :has-data="groupHook.hasData.value"
         :selected-project-id="selectedProjectId"
         :can-manage="canManage"
-        :view-mode="viewMode"
-        :completed-items="completedItems"
-        :completed-loading="completedLoading"
+        :group-page="groupHook.currentPage.value"
+        :group-pages="groupHook.pages.value"
+        :group-total="groupHook.total.value"
         @select-project="onSelectProjectFromDrawer"
         @edit-project="onEditProjectFromCard"
         @complete-project="onCompleteProjectFromCard"
         @search="onSearch"
         @add-project="openCreateProjectDialog"
         @status-change="onStatusChange"
-        @select-completed="onSelectProjectFromDrawer"
-        @export-excel="onExportExcel"
-        @print-table="onPrintTable"
+        @update-group-page="onGroupPageChange"
       />
     </UiDrawer>
 
@@ -220,7 +217,6 @@ import type {
   PartDetail,
   PartUpdateRequest,
   RoleBrief,
-  CompletedTableRow,
 } from '@/api/patternRoom'
 import { patternRoomApi } from '@/api/patternRoom'
 import { patternMakerApi } from '@/api/patternMaker'
@@ -230,64 +226,22 @@ import type { PatternMaker } from '@/api/patternMaker'
 const { hasPermission } = usePermission()
 const canManage = computed(() => hasPermission('customer_sampling_manage'))
 
-// ==================== 已完成项目表格查询 ====================
-/** 左侧视图模式：group（分组卡片）| table（已完成表格） */
-const statusFilter = ref<string>('all')
-const viewMode = computed(() => statusFilter.value === 'completed' ? 'table' : 'group')
-const completedItems = ref<CompletedTableRow[]>([])
-const completedLoading = ref(false)
-/** 搜索关键词（用于表格查询时传递给 API） */
+// ==================== 状态筛选 ====================
+/** 状态筛选：in_progress/completed/cancelled */
+const statusFilter = ref<string>('in_progress')
+/** 搜索关键词 */
 const searchKeyword = ref('')
-
-async function loadCompletedTable() {
-  completedLoading.value = true
-  try {
-    const params: { keyword?: string; pattern_maker_id?: number } = {}
-    if (searchKeyword.value) params.keyword = searchKeyword.value
-    const res = await patternRoomApi.getCompletedTable(params)
-    completedItems.value = res.items ?? []
-  } catch (e) {
-    console.error('[PatternRoomView] 加载已完成表格失败:', e)
-    completedItems.value = []
-  } finally {
-    completedLoading.value = false
-  }
-}
 
 function onStatusChange(val: string) {
   statusFilter.value = val
-  if (val === 'completed') {
-    loadCompletedTable()
-  }
+  // 所有状态现在都用分组卡片视图 + 分页，所以直接加载
+  groupHook.loadGrouped(searchKeyword.value || undefined, val, 1)
 }
 
-async function onExportExcel() {
-  try {
-    const params: { keyword?: string; pattern_maker_id?: number } = {}
-    if (searchKeyword.value) params.keyword = searchKeyword.value
-    await patternRoomApi.exportCompletedTable(params)
-    toast.success('导出成功')
-  } catch (e) {
-    console.error('[PatternRoomView] 导出失败:', e)
-    toast.error('导出失败')
-  }
-}
-
-function onPrintTable() {
-  document.body.classList.remove('pct-printing')
-  document.body.classList.add('pct-printing')
-  const prevTitle = document.title
-  document.title = ''
-  requestAnimationFrame(() => {
-    window.print()
-  })
-}
-
-if (typeof window !== 'undefined') {
-  window.addEventListener('afterprint', () => {
-    document.body.classList.remove('pct-printing')
-    document.title = '滨发协同系统'
-  })
+/** 分组视图翻页 */
+function onGroupPageChange(page: number) {
+  if (page === groupHook.currentPage.value) return
+  groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, page)
 }
 
 // ==================== 打印打样单 ====================
@@ -438,8 +392,8 @@ onMounted(() => {
     updateNarrow()
     _mediaQuery.addEventListener('change', updateNarrow)
   }
-  // 初始化加载
-  groupHook.loadGrouped()
+  // 初始化加载（默认「进行中」，第 1 页）
+  groupHook.loadGrouped(searchKeyword.value || undefined, 'in_progress', 1)
   loadPatternMakers()
 })
 
@@ -453,11 +407,7 @@ function onSearch(keyword: string) {
   searchKeyword.value = keyword
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(() => {
-    groupHook.loadGrouped(keyword || undefined)
-    // 已完成表格视图下同步刷新表格
-    if (statusFilter.value === 'completed') {
-      loadCompletedTable()
-    }
+    groupHook.loadGrouped(keyword || undefined, statusFilter.value, 1)
   }, 300)
 }
 
@@ -546,13 +496,38 @@ async function onCompleteProjectFromCard(id: number) {
     const res = await patternRoomApi.updateProjectStatus(id, 'completed')
     if (res.success) {
       toast.success('已标记为完成')
-      await groupHook.loadGrouped()
+      await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value)
     } else {
       toast.error(res.message || '标记完成失败')
     }
   } catch (e) {
     console.error('[PatternRoomView] 标记完成失败:', e)
     toast.error('标记完成失败')
+  }
+}
+
+/** 从产品卡片点击「取消」：确认后将打样项目移至已取消 */
+async function onCancelProjectFromCard(id: number) {
+  if (!canManage.value) {
+    toast.warning('无操作权限')
+    return
+  }
+  const ok = await confirmDialog.confirm(
+    '确认取消该打样项目？',
+    '取消后项目将移至「已取消」TAB，仍可恢复为进行中。',
+  )
+  if (!ok) return
+  try {
+    const res = await patternRoomApi.updateProjectStatus(id, 'cancelled')
+    if (res.success) {
+      toast.success('已取消')
+      await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value)
+    } else {
+      toast.error(res.message || '取消失败')
+    }
+  } catch (e) {
+    console.error('[PatternRoomView] 取消项目失败:', e)
+    toast.error('取消失败')
   }
 }
 
@@ -570,8 +545,8 @@ async function onProjectSubmitCreate(data: ProjectCreateRequest) {
     }
     projectFormVisible.value = false
     pendingProjectImage.value = null
-    // 刷新分组列表并选中新项目
-    await groupHook.loadGrouped()
+    // 刷新分组列表并选中新项目（保持当前状态筛选）
+    await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value)
     onSelectProject(res.id)
   } else {
     toast.error(projectHook.error.value || '创建失败')
@@ -590,9 +565,9 @@ async function onProjectSubmitUpdate(data: ProjectUpdateRequest) {
     toast.success('更新成功')
     projectFormVisible.value = false
     pendingProjectImage.value = null
-    // 刷新详情与分组列表
+    // 刷新详情与分组列表（保持当前状态筛选）
     await projectHook.fetchDetail(selectedProjectId.value)
-    await groupHook.loadGrouped()
+    await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value)
   } else {
     toast.error(projectHook.error.value || '更新失败')
   }
@@ -619,7 +594,7 @@ async function confirmDeleteProject() {
     toast.success('删除成功')
     selectedProjectId.value = null
     projectHook.clearCurrent()
-    await groupHook.loadGrouped()
+    await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value)
   } else {
     toast.error(projectHook.error.value || '删除失败')
   }

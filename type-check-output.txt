@@ -1,1 +1,0 @@
-﻿src/views/stock/StockOutTab.vue(834,80): error TS2339: Property 'data' does not exist on type '{ stockouts?: StockOutRecord[] | undefined; items?: StockOutRecord[] | undefined; total?: number | undefined; }'.

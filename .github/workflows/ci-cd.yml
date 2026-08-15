@@ -207,16 +207,16 @@ if coverage < threshold:
   
   deploy-staging:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     if: github.ref == 'refs/heads/develop'
-    
+
     steps:
     - uses: actions/checkout@v4
-    
-    - name: Deploy to staging
+
+    - name: Deploy to staging (Windows native)
       run: |
-        echo "Deploying to staging environment..."
-        docker compose -f docker-compose.yml up -d --build app celery-worker celery-beat
+        echo "Deploying to staging environment (Windows native)..."
+        .\deploy-windows.ps1 -Env staging
       env:
         APP_ENV: staging
     

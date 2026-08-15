@@ -26,7 +26,7 @@ class Case(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    product_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('product.id'), nullable=True)
+    product_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('product.id', ondelete='SET NULL'), nullable=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     barcode: Mapped[str | None] = mapped_column(String(50))
     image: Mapped[str | None] = mapped_column(String(200))

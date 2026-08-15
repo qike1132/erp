@@ -6,7 +6,7 @@
 """
 import logging
 from collections import defaultdict
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timezone, timedelta
 
 from sqlalchemy import cast, desc, exists, func, literal, or_, select, union_all
 from sqlalchemy.dialects.postgresql import JSONB
@@ -613,7 +613,7 @@ def _apply_completed_quick_filter(query, count_query, quick_filter):
     days = _QUICK_FILTER_DAYS.get(quick_filter)
     if days is None:
         return query, count_query
-    threshold = datetime.now(UTC).replace(tzinfo=None).date() - timedelta(days=days)
+    threshold = datetime.now(timezone.utc).replace(tzinfo=None).date() - timedelta(days=days)
     query = query.where(PurchaseOrder.completed_at >= threshold)
     count_query = count_query.where(PurchaseOrder.completed_at >= threshold)
     return query, count_query
@@ -1416,7 +1416,7 @@ async def get_completed_order_suggestions(
 
 
 async def get_completed_order_quick_filters(db: AsyncSession) -> dict:
-    today = datetime.now(UTC).replace(tzinfo=None).date()
+    today = datetime.now(timezone.utc).replace(tzinfo=None).date()
     week_ago = today - timedelta(days=7)
     month_ago = today - timedelta(days=30)
     # 单次查询 + 条件聚合：3 个 COUNT 合并为 1 次 roundtrip

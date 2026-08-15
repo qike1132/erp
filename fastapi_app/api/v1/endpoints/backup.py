@@ -39,7 +39,7 @@ import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 _background_tasks: set[asyncio.Task] = set()
 
@@ -170,6 +170,105 @@ def _ensure_backup_dir():
     backup_service.ensure_backup_dir()
 
 
+async def _read_backup_file(file: UploadFile) -> tuple[bytes, bool, str]:
+    """读取并校验备份上传文件，返回 (content, is_zip, filename)。
+
+    校验扩展名、文件大小上限、空内容与格式识别，不合法直接抛 HTTPException。
+    从 import_backup / async_import_backup 中提取的公共逻辑。
+    """
+    filename = file.filename or ''
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ('.zip', '.json', '.gz'):
+        raise HTTPException(status_code=400, detail=f'不支持的文件类型: {ext}，仅支持 .zip / .json / .gz')
+    try:
+        content = await file.read()
+        if len(content) > backup_service.MAX_BACKUP_FILE_SIZE:
+            raise HTTPException(status_code=400, detail=f'备份文件超过大小限制({backup_service.MAX_BACKUP_FILE_SIZE // 1024 // 1024}MB)')
+    except HTTPException:
+        raise
+    except (OSError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=f'读取文件失败: {e}') from e
+    if not content:
+        raise HTTPException(status_code=400, detail='备份文件内容为空')
+    is_zip = filename.endswith('.zip') or content[:4] == b'PK\x03\x04'
+    is_json = filename.endswith('.json') or filename.endswith('.gz') or (content[:1] == b'{' and content.strip().endswith(b'}'))
+    if not is_zip and not is_json:
+        raise HTTPException(status_code=400, detail='无法识别的备份文件格式')
+    return content, is_zip, filename
+
+
+async def _export_backup_to_response(
+    db: AsyncSession,
+    user: User,
+    remark: str,
+    format: str,
+    encrypt: bool,
+    password: Optional[str],
+    x_backup_password: Optional[str],
+    register_temp: Callable[[Path], Path],
+) -> FileResponse:
+    """导出备份（JSON/ZIP）并返回 FileResponse。
+
+    公共逻辑从 export_backup / export_backup_enhanced 提取，
+    两个端点仅差异在权限名与临时文件清理方式（由 register_temp 登记）。
+    """
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+    if format == 'json':
+        try:
+            json_bytes = await backup_service.execute_legacy_backup_to_bytes(user, remark, db)
+        except Exception as e:
+            logger.error(f'JSON 备份导出失败: {e}')
+            raise HTTPException(status_code=500, detail='备份失败，请查看服务器日志') from e
+
+        if encrypt:
+            encryption_password = _get_encryption_password(password, x_backup_password)
+            json_bytes = _encrypt_backup_data(json_bytes, encryption_password)
+            filename = f'erp_backup_{timestamp}.json.enc'
+            media_type = 'application/octet-stream'
+        else:
+            filename = f'erp_backup_{timestamp}.json'
+            media_type = 'application/json'
+
+        fd, tmp_path = tempfile.mkstemp(suffix='.json', prefix='erp_backup_')
+        os.close(fd)
+        tmp_path_obj = register_temp(Path(tmp_path))
+        await asyncio.to_thread(tmp_path_obj.write_bytes, json_bytes)
+
+        return FileResponse(
+            path=str(tmp_path_obj),
+            filename=filename,
+            media_type=media_type,
+        )
+
+    # ZIP 格式：直接写入临时文件并按需加密，避免将完整文件读入内存
+    encryption_password = _get_encryption_password(password, x_backup_password) if encrypt else None
+    try:
+        zip_path, manifest = await backup_service.create_full_backup_to_file(
+            db, user, remark,
+            encrypt=encrypt,
+            encrypt_password=encryption_password,
+        )
+    except Exception as e:
+        logger.error(f'ZIP 备份导出失败: {e}')
+        raise HTTPException(status_code=500, detail='备份失败，请查看服务器日志') from e
+
+    register_temp(zip_path)
+
+    if encrypt:
+        filename = f'erp_backup_{timestamp}.zip.enc'
+        media_type = 'application/octet-stream'
+    else:
+        filename = f'erp_backup_{timestamp}.zip'
+        media_type = 'application/zip'
+
+    return FileResponse(
+        path=str(zip_path),
+        filename=filename,
+        media_type=media_type,
+    )
+
+
 # ---------------------------------------------------------------------------
 # 1. GET /ping
 # ---------------------------------------------------------------------------
@@ -207,7 +306,7 @@ async def list_backup_tables(
                 continue
             try:
                 qtname = backup_service.quote_table(name)
-                result = await db.execute(text(f'SELECT COUNT(*) FROM {qtname}'))
+                result = await db.execute(text(f'SELECT COUNT(*) FROM {qtname}'))  # nosec B608 — qtname 经 quote_table 白名单校验
                 count = result.scalar()
             except (SQLAlchemyError, OperationalError, OSError) as e:
                 await db.rollback()
@@ -252,7 +351,6 @@ async def export_backup(
 
     权限：backup_create
     """
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     temp_files: list[str] = []
 
     def _register_temp_file(path: Path) -> Path:
@@ -267,59 +365,8 @@ async def export_backup(
                 pass
 
     background_tasks.add_task(_cleanup_temp_files)
-
-    if format == 'json':
-        try:
-            json_bytes = await backup_service.execute_legacy_backup_to_bytes(user, remark, db)
-        except (BackupError, RuntimeError, OSError) as e:
-            logger.error(f'JSON 备份导出失败: {e}')
-            raise HTTPException(status_code=500, detail='备份失败，请查看服务器日志') from e
-
-        if encrypt:
-            encryption_password = _get_encryption_password(password, x_backup_password)
-            json_bytes = _encrypt_backup_data(json_bytes, encryption_password)
-            filename = f'erp_backup_{timestamp}.json.enc'
-            media_type = 'application/octet-stream'
-        else:
-            filename = f'erp_backup_{timestamp}.json'
-            media_type = 'application/json'
-
-        fd, tmp_path = tempfile.mkstemp(suffix='.json', prefix='erp_backup_')
-        os.close(fd)
-        tmp_path_obj = _register_temp_file(Path(tmp_path))
-        await asyncio.to_thread(tmp_path_obj.write_bytes, json_bytes)
-
-        return FileResponse(
-            path=str(tmp_path_obj),
-            filename=filename,
-            media_type=media_type,
-        )
-
-    # ZIP 格式：直接写入临时文件并按需加密，避免将完整文件读入内存
-    encryption_password = _get_encryption_password(password, x_backup_password) if encrypt else None
-    try:
-        zip_path, manifest = await backup_service.create_full_backup_to_file(
-            db, user, remark,
-            encrypt=encrypt,
-            encrypt_password=encryption_password,
-        )
-    except (BackupError, RuntimeError, OSError) as e:
-        logger.error(f'ZIP 备份导出失败: {e}')
-        raise HTTPException(status_code=500, detail='备份失败，请查看服务器日志') from e
-
-    _register_temp_file(zip_path)
-
-    if encrypt:
-        filename = f'erp_backup_{timestamp}.zip.enc'
-        media_type = 'application/octet-stream'
-    else:
-        filename = f'erp_backup_{timestamp}.zip'
-        media_type = 'application/zip'
-
-    return FileResponse(
-        path=str(zip_path),
-        filename=filename,
-        media_type=media_type,
+    return await _export_backup_to_response(
+        db, user, remark, format, encrypt, password, x_backup_password, _register_temp_file,
     )
 
 
@@ -336,25 +383,7 @@ async def import_backup(
     """一键恢复：从备份文件恢复全部数据"""
     if not confirm:
         raise HTTPException(status_code=400, detail='恢复操作需要二次确认，请传入 confirm=true')
-    filename = file.filename or ''
-    ext = os.path.splitext(filename)[1].lower()
-    if ext not in ('.zip', '.json', '.gz'):
-        raise HTTPException(status_code=400, detail=f'不支持的文件类型: {ext}，仅支持 .zip / .json / .gz')
-        try:
-            content = await file.read()
-            if len(content) > backup_service.MAX_BACKUP_FILE_SIZE:
-                raise HTTPException(status_code=400, detail=f'备份文件超过大小限制({backup_service.MAX_BACKUP_FILE_SIZE // 1024 // 1024}MB)')
-        except HTTPException:
-            raise
-        except (OSError, ValueError) as e:
-            raise HTTPException(status_code=400, detail=f'读取文件失败: {e}') from e
-        if not content:
-            raise HTTPException(status_code=400, detail='备份文件内容为空')
-
-    is_zip = filename.endswith('.zip') or content[:4] == b'PK\x03\x04'
-    is_json = filename.endswith('.json') or filename.endswith('.gz') or (content[:1] == b'{' and content.strip().endswith(b'}'))
-    if not is_zip and not is_json:
-        raise HTTPException(status_code=400, detail='无法识别的备份文件格式')
+    content, is_zip, _ = await _read_backup_file(file)
 
     try:
         pre_restore_info = await backup_service.create_pre_restore_backup(db)
@@ -726,24 +755,7 @@ async def async_import_backup(
     """异步恢复：从上传文件恢复"""
     if not confirm:
         raise HTTPException(status_code=400, detail='恢复操作需要二次确认，请传入 confirm=true')
-    filename = file.filename or ''
-    ext = os.path.splitext(filename)[1].lower()
-    if ext not in ('.zip', '.json', '.gz'):
-        raise HTTPException(status_code=400, detail=f'不支持的文件类型: {ext}，仅支持 .zip / .json / .gz')
-    try:
-        content = await file.read()
-        if len(content) > backup_service.MAX_BACKUP_FILE_SIZE:
-            raise HTTPException(status_code=400, detail=f'备份文件超过大小限制({backup_service.MAX_BACKUP_FILE_SIZE // 1024 // 1024}MB)')
-    except HTTPException:
-        raise
-    except (OSError, ValueError) as e:
-        raise HTTPException(status_code=400, detail=f'读取文件失败: {e}') from e
-    if not content:
-        raise HTTPException(status_code=400, detail='备份文件内容为空')
-    is_zip = filename.endswith('.zip') or content[:4] == b'PK\x03\x04'
-    is_json = filename.endswith('.json') or filename.endswith('.gz') or (content[:1] == b'{' and content.strip().endswith(b'}'))
-    if not is_zip and not is_json:
-        raise HTTPException(status_code=400, detail='无法识别的备份文件格式')
+    content, is_zip, filename = await _read_backup_file(file)
 
     # 并发检查：避免同时启动多个恢复任务
     if await backup_service.is_restore_in_progress():
@@ -945,19 +957,13 @@ async def get_backup_records(
 
 @router.get('/schedule', response_model=BackupScheduleOut)
 async def get_backup_schedule(user: User = Depends(require_backup_permission('get_backup_schedule'))):
-    """定时任务配置"""
-    from fastapi_app.core.celery_app import celery_app
+    """定时任务配置（ARQ cron_jobs）"""
+    from fastapi_app.core.arq_app import cron_schedules
     tasks = []
-    beat_schedule = celery_app.conf.get('beat_schedule', {})
-    for name, config in beat_schedule.items():
-        schedule = config.get('schedule')
-        if hasattr(schedule, 'hour') and hasattr(schedule, 'minute'):
-            schedule_str = f'{schedule.hour}:{schedule.minute:02d}'
-        else:
-            schedule_str = str(schedule)
+    for s in cron_schedules:
         tasks.append({
-            'name': name, 'task': config.get('task', ''),
-            'schedule': schedule_str, 'enabled': True,
+            'name': s['name'], 'task': s['func'].__name__,
+            'schedule': s['schedule'], 'enabled': True,
         })
     return {'success': True, 'tasks': tasks}
 
@@ -967,14 +973,15 @@ async def trigger_backup_schedule(
     task_name: str = Query(...),
     user: User = Depends(require_backup_permission('trigger_backup_schedule')),
 ):
-    """手动触发定时任务"""
-    from fastapi_app.core.celery_app import celery_app
-    beat_schedule = celery_app.conf.get('beat_schedule', {})
-    if task_name not in beat_schedule:
+    """手动触发定时任务（通过 ARQ 入队）"""
+    from fastapi_app.core.arq_app import cron_schedules, get_arq_pool
+    schedule = next((s for s in cron_schedules if s['name'] == task_name), None)
+    if schedule is None:
         raise HTTPException(status_code=404, detail=f'定时任务 {task_name} 不存在')
-    task_id_str = beat_schedule[task_name].get('task', '')
+    func_name = schedule['func'].__name__
     try:
-        celery_app.send_task(task_id_str)
+        pool = await get_arq_pool()
+        await pool.enqueue_job(func_name)
     except (RuntimeError, OSError, ConnectionError) as e:
         raise HTTPException(status_code=500, detail='触发任务失败，请查看服务器日志') from e
     return {'success': True, 'task_name': task_name, 'message': f'任务 {task_name} 已触发'}
@@ -1254,59 +1261,8 @@ async def export_backup_enhanced(
         return path
 
     background_tasks.add_task(lambda: [os.unlink(p) for p in temp_files if os.path.exists(p)])
-
-    if format == 'json':
-        try:
-            json_bytes = await backup_service.execute_legacy_backup_to_bytes(user, remark, db)
-        except Exception as e:
-            logger.error(f'JSON 备份导出失败: {e}')
-            raise HTTPException(status_code=500, detail='备份失败，请查看服务器日志') from e
-
-        if encrypt:
-            encryption_password = _get_encryption_password(password, x_backup_password)
-            json_bytes = _encrypt_backup_data(json_bytes, encryption_password)
-            filename = f'erp_backup_{timestamp}.json.enc'
-            media_type = 'application/octet-stream'
-        else:
-            filename = f'erp_backup_{timestamp}.json'
-            media_type = 'application/json'
-
-        fd, tmp_path = tempfile.mkstemp(suffix='.json', prefix='erp_backup_')
-        os.close(fd)
-        tmp_path_obj = _register_temp_file(Path(tmp_path))
-        await asyncio.to_thread(tmp_path_obj.write_bytes, json_bytes)
-
-        return FileResponse(
-            path=str(tmp_path_obj),
-            filename=filename,
-            media_type=media_type,
-        )
-
-    # ZIP 格式：由服务层按需加密并写入临时文件
-    encryption_password = _get_encryption_password(password, x_backup_password) if encrypt else None
-    try:
-        zip_path, manifest = await backup_service.create_full_backup_to_file(
-            db, user, remark,
-            encrypt=encrypt,
-            encrypt_password=encryption_password,
-        )
-    except Exception as e:
-        logger.error(f'ZIP 备份导出失败: {e}')
-        raise HTTPException(status_code=500, detail='备份失败，请查看服务器日志') from e
-
-    _register_temp_file(zip_path)
-
-    if encrypt:
-        filename = f'erp_backup_{timestamp}.zip.enc'
-        media_type = 'application/octet-stream'
-    else:
-        filename = f'erp_backup_{timestamp}.zip'
-        media_type = 'application/zip'
-
-    return FileResponse(
-        path=str(zip_path),
-        filename=filename,
-        media_type=media_type,
+    return await _export_backup_to_response(
+        db, user, remark, format, encrypt, password, x_backup_password, _register_temp_file,
     )
 
 
@@ -1658,7 +1614,7 @@ def _get_validation_cache_key(filename: str, password: Optional[str] = None) -> 
     if password:
         # 使用密码的哈希值，避免存储明文密码
         key_parts.append(hashlib.sha256(password.encode()).hexdigest()[:16])
-    return hashlib.md5('_'.join(key_parts).encode()).hexdigest()
+    return hashlib.md5('_'.join(key_parts).encode(), usedforsecurity=False).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -1874,7 +1830,8 @@ async def validate_backup_integrity(
         
         # 检查缓存
         cache_key = hashlib.md5(
-            '_'.join(sorted(f['name'] for f in backup_files)).encode()
+            '_'.join(sorted(f['name'] for f in backup_files)).encode(),
+            usedforsecurity=False
         ).hexdigest()
         
         cached_result = _validation_cache.get(cache_key)

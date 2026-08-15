@@ -17,11 +17,64 @@
         </div>
 
         <div class="pjf-field">
-          <label class="pjf-label">客户</label>
-          <select v-model="form.customer_id" class="pjf-select">
-            <option :value="null">-- 请选择 --</option>
-            <option v-for="c in customers" :key="c.id" :value="c.id">{{ c.name }}</option>
-          </select>
+          <label class="pjf-label">版师</label>
+          <div class="pjf-maker-row">
+            <div ref="makerDropdownRef" class="pjf-maker-dropdown">
+              <button
+                type="button"
+                class="pjf-select pjf-maker-trigger"
+                @click="makerDropdownOpen = !makerDropdownOpen"
+              >
+                <span>{{ selectedMakerName || '-- 请选择 --' }}</span>
+                <i :class="['fas', makerDropdownOpen ? 'fa-chevron-up' : 'fa-chevron-down']" aria-hidden="true" />
+              </button>
+              <div v-if="makerDropdownOpen" class="pjf-maker-options">
+                <button
+                  type="button"
+                  :class="['pjf-maker-option', { active: patternMakerId === null }]"
+                  @click="selectMaker(null)"
+                >
+                  <span>-- 请选择 --</span>
+                </button>
+                <div
+                  v-for="pm in patternMakers"
+                  :key="pm.id"
+                  :class="['pjf-maker-option', { active: patternMakerId === pm.id }]"
+                >
+                  <button type="button" class="pjf-maker-option-name" @click="selectMaker(pm.id)">
+                    <span>{{ pm.name }}</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="pjf-maker-del"
+                    title="删除"
+                    @click.stop="onDeleteMaker(pm.id, pm.name)"
+                  >
+                    <i class="fas fa-times" aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
+            </div>
+            <button type="button" class="pjf-role-add" @click="addMakerInputOpen = true">
+              <i class="fas fa-plus" aria-hidden="true" />
+              添加版师
+            </button>
+          </div>
+          <div v-if="addMakerInputOpen" class="pjf-maker-add-row">
+            <input
+              v-model="addMakerName"
+              class="pjf-input pjf-maker-add-input"
+              placeholder="输入版师姓名"
+              maxlength="100"
+              @keyup.enter="confirmAddMaker"
+            />
+            <button type="button" class="pjf-role-add" @click="confirmAddMaker">
+              确定
+            </button>
+            <button type="button" class="pjf-maker-cancel" @click="cancelAddMaker">
+              取消
+            </button>
+          </div>
         </div>
 
         <div class="pjf-field pjf-full">
@@ -96,38 +149,81 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, computed, watch, onBeforeUnmount } from 'vue'
+import { reactive, ref, computed, watch, onBeforeUnmount, onMounted } from 'vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import { toast } from '@/composables/useToast'
-import type { Customer } from '@/types'
+import type { PatternMaker } from '@/api/patternMaker'
 import type { ProjectDetailResponse, ProjectCreateRequest, ProjectUpdateRequest } from '@/api/patternRoom'
 
 const props = defineProps<{
   visible: boolean
   project: ProjectDetailResponse | null
-  customers: Customer[]
+  patternMakers: PatternMaker[]
+  patternMakerId: number | null
   submitting: boolean
 }>()
 
 const emit = defineEmits<{
   'update:visible': [value: boolean]
+  'update:patternMakerId': [value: number | null]
   'submit-create': [data: ProjectCreateRequest]
   'submit-update': [data: ProjectUpdateRequest]
   'upload-image': [file: File]
   'remove-image': []
+  'add-pattern-maker': [name: string]
+  'delete-pattern-maker': [id: number]
 }>()
 
 const isEditing = computed(() => props.project != null)
 
 const form = reactive({
   product_name: '',
-  customer_id: null as number | null,
   remark: '',
 })
 
 /** 角色名称列表（仅新增项目时使用，编辑模式不展示） */
 const roleNames = ref<string[]>([''])
+
+/** 内联新增版师 */
+const addMakerInputOpen = ref(false)
+const addMakerName = ref('')
+
+/** 版师自定义下拉 */
+const makerDropdownOpen = ref(false)
+const makerDropdownRef = ref<HTMLElement | null>(null)
+const selectedMakerName = computed(() => {
+  const pm = props.patternMakers.find((m) => m.id === props.patternMakerId)
+  return pm?.name ?? ''
+})
+
+function selectMaker(id: number | null) {
+  emit('update:patternMakerId', id)
+  makerDropdownOpen.value = false
+}
+
+function onDeleteMaker(id: number, name: string) {
+  emit('delete-pattern-maker', id)
+  // 如果删除的是当前选中的版师，清空选择
+  if (props.patternMakerId === id) {
+    emit('update:patternMakerId', null)
+  }
+  void name
+}
+
+/** 点击下拉外部关闭 */
+function onDocClick(e: MouseEvent) {
+  if (makerDropdownRef.value && !makerDropdownRef.value.contains(e.target as Node)) {
+    makerDropdownOpen.value = false
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('click', onDocClick)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onDocClick)
+})
 
 const previewUrl = ref<string | null>(null)
 const isDragOver = ref(false)
@@ -144,16 +240,16 @@ watch(() => props.visible, (val) => {
   if (val) {
     if (props.project) {
       form.product_name = props.project.product_name ?? ''
-      form.customer_id = props.project.customer_id ?? null
       form.remark = props.project.remark ?? ''
       // 切换项目前释放上一个本地预览的 blob
       revokePreview()
       previewUrl.value = props.project.product_image_url ?? null
     } else {
       form.product_name = ''
-      form.customer_id = null
       form.remark = ''
       roleNames.value = ['']
+      addMakerInputOpen.value = false
+      addMakerName.value = ''
       revokePreview()
       previewUrl.value = null
     }
@@ -262,11 +358,27 @@ function removeImage() {
   emit('remove-image')
 }
 
+function confirmAddMaker() {
+  const name = addMakerName.value.trim()
+  if (!name) {
+    toast.warning('请输入版师姓名')
+    return
+  }
+  emit('add-pattern-maker', name)
+  addMakerName.value = ''
+  addMakerInputOpen.value = false
+}
+
+function cancelAddMaker() {
+  addMakerInputOpen.value = false
+  addMakerName.value = ''
+}
+
 function handleSubmit() {
   if (isEditing.value) {
     const data: ProjectUpdateRequest = {
       product_name: form.product_name || null,
-      customer_id: form.customer_id,
+      pattern_maker_id: props.patternMakerId,
       remark: form.remark || null,
       version: props.project!.version,
     }
@@ -279,7 +391,7 @@ function handleSubmit() {
     const uniqueRoles = Array.from(new Set(trimmed))
     const data: ProjectCreateRequest = {
       product_name: form.product_name,
-      customer_id: form.customer_id,
+      pattern_maker_id: props.patternMakerId,
       remark: form.remark || null,
       initial_roles: uniqueRoles.length > 0 ? uniqueRoles : null,
     }
@@ -464,5 +576,142 @@ function handleSubmit() {
   border-color: var(--color-primary-400, #60a5fa);
   color: var(--color-primary-600, #3b82f6);
   background: var(--color-primary-50, #eff6ff);
+}
+
+.pjf-maker-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pjf-maker-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.pjf-maker-add-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.pjf-maker-add-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.pjf-maker-cancel {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 12px;
+  border: 1px solid var(--color-border-light, #e5e7eb);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-secondary, #6b7280);
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  transition: all 0.15s ease;
+}
+
+.pjf-maker-cancel:hover {
+  border-color: var(--color-danger-300, #fca5a5);
+  color: var(--color-danger-500, #ef4444);
+  background: var(--color-danger-50, #fef2f2);
+}
+
+/* 版师自定义下拉 */
+.pjf-maker-dropdown {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.pjf-maker-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  cursor: pointer;
+}
+
+.pjf-maker-trigger i {
+  font-size: 10px;
+  color: var(--color-text-secondary, #94a3b8);
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+
+.pjf-maker-options {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border-light, #e5e7eb);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.pjf-maker-option {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: #fff;
+  transition: background 0.15s;
+}
+
+.pjf-maker-option:hover {
+  background: var(--color-primary-50, #eff6ff);
+}
+
+.pjf-maker-option.active {
+  background: var(--color-primary-100, #dbeafe);
+}
+
+.pjf-maker-option-name {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pjf-maker-del {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-right: 4px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted, #94a3b8);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.15s ease;
+}
+
+.pjf-maker-del:hover {
+  background: var(--color-danger-50, #fef2f2);
+  color: var(--color-danger-500, #ef4444);
 }
 </style>

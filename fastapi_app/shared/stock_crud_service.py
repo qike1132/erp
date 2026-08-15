@@ -17,6 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from fastapi_app.core.number_generator import generate_number_sync
+from fastapi_app.shared.shipment_calc import build_shipment_summary
 from fastapi_app.shared.stock_concurrency import get_product_for_update_sync
 from fastapi_app.shared_models import InventoryLog, Order, Product, StockIn, StockOut, StockReturn
 
@@ -96,14 +97,7 @@ def calculate_available_shipment_quantity(
     orders = result.scalars().all()
 
     if not orders:
-        return {
-            'order_quantity': 0,
-            'shipped_quantity': 0,
-            'available_quantity': 0,
-            'regular_available': 0,
-            'custom_available': 0,
-            'orders': []
-        }
+        return build_shipment_summary([], {})
 
     # 单次查询获取所有订单的已出货量（扣除退货后的净出货量），加 FOR UPDATE 行锁
     order_ids = [o.id for o in orders]
@@ -116,49 +110,7 @@ def calculate_available_shipment_quantity(
         .group_by(StockOut.order_id)
     )
     shipped_map = dict(shipped_result.all())
-
-    total_order_quantity = 0
-    regular_order_quantity = 0
-    custom_order_quantity = 0
-    regular_shipped = 0
-    custom_shipped = 0
-    order_details = []
-
-    for order in orders:
-        # TODO(multi-sku-order): 遍历累加 order.quantity/order_type/country 在多 SKU 下语义变更，待后续 spec 改造为遍历 order.items；当前依赖兼容值。
-        total_order_quantity += order.quantity
-        _order_type = order.order_type or 'regular'
-        _country = order.country or ''
-        non_deduction_shipped = shipped_map.get(order.id, 0)
-
-        if _order_type in ('regular', 'normal'):  # 'normal' 为历史数据兼容
-            regular_order_quantity += order.quantity
-            regular_shipped += non_deduction_shipped
-        else:
-            custom_order_quantity += order.quantity
-            custom_shipped += non_deduction_shipped
-
-        order_details.append({
-            'order_id': order.id,
-            'order_no': order.order_no,
-            'quantity': order.quantity,
-            'shipped': non_deduction_shipped,
-            'available': order.quantity - non_deduction_shipped,
-            'order_type': _order_type,
-            'country': _country
-        })
-
-    total_shipped = sum(shipped_map.values())
-    available_quantity = max(0, total_order_quantity - total_shipped)
-
-    return {
-        'order_quantity': total_order_quantity,
-        'shipped_quantity': total_shipped,
-        'available_quantity': available_quantity,
-        'regular_available': max(0, regular_order_quantity - regular_shipped),
-        'custom_available': max(0, custom_order_quantity - custom_shipped),
-        'orders': order_details
-    }
+    return build_shipment_summary(orders, shipped_map)
 
 
 # ==================== 入库 CRUD ====================

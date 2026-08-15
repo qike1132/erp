@@ -35,6 +35,7 @@ from fastapi_app.shared_models.inventory_log import InventoryLog
 from fastapi_app.shared_models.material_registration import MaterialRegistration, MaterialRegistrationItem
 from fastapi_app.shared_models.order import Order
 from fastapi_app.shared_models.order_item import OrderItem
+from fastapi_app.shared_models.pattern_maker import PatternMaker
 from fastapi_app.shared_models.outsource import (
     OUTSOURCE_PROCESS_STATUSES,
     OUTSOURCE_PROCESS_STATUS_LABELS,
@@ -143,4 +144,5 @@ __all__ = [
     'CustomerSamplingChangeLog',
     'CUSTOMER_SAMPLING_ACTIONS',
     'CUSTOMER_SAMPLING_CHANGE_TYPES',
+    'PatternMaker',
 ]

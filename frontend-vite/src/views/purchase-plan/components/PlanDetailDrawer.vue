@@ -4,6 +4,32 @@ import { useQuery } from '@tanstack/vue-query'
 import { planApi } from '@/api'
 import { formatDateTime } from '@/utils/format'
 
+interface PlanInfo {
+  customer_name: string
+  plan_month: string
+  status: string
+  created_by: string
+  create_time: string
+  remark: string
+}
+
+interface PlanDetailItem {
+  id: number
+  shipment_status: string
+  product_name: string
+  barcode: string
+  plan_date: string
+  quantity: number
+  shipped_qty: number
+  remaining_qty: number
+  inventory_qty: number
+}
+
+interface PlanDetailResponse {
+  plan: PlanInfo
+  details: PlanDetailItem[]
+}
+
 const props = defineProps<{
   visible: boolean
   planId: number
@@ -19,9 +45,9 @@ const emit = defineEmits<{
 // ============================================================
 const { data: detailData, isLoading, isError } = useQuery({
   queryKey: ['plan-detail', () => props.planId],
-  queryFn: async () => {
+  queryFn: async (): Promise<PlanDetailResponse | null> => {
     if (!props.planId) return null
-    return (await planApi.detail(props.planId)) as any
+    return (await planApi.detail(props.planId)) as unknown as PlanDetailResponse
   },
   enabled: () => props.visible && props.planId > 0,
   staleTime: 10_000,

@@ -5,7 +5,7 @@
 """
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -76,7 +76,7 @@ async def use_saved_query(db: AsyncSession, query_id: int) -> dict | None:
     if not sq:
         return None
     sq.use_count += 1
-    sq.last_use_time = datetime.now(UTC).replace(tzinfo=None)
+    sq.last_use_time = datetime.now(timezone.utc).replace(tzinfo=None)
     return sq.to_dict()
 
 

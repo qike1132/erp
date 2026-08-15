@@ -7,8 +7,10 @@
 import json
 import logging
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from decimal import Decimal
+
+from typing import Sequence
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
@@ -25,6 +27,38 @@ from fastapi_app.shared_models import (
 from fastapi_app.services.numbering import generate_purchase_order_number
 
 logger = logging.getLogger(__name__)
+
+
+async def _create_material_registration(
+    db: AsyncSession, order: PurchaseOrder, items: Sequence[PurchaseOrderItem],
+) -> MaterialRegistration:
+    """创建来料登记及其明细行（由调用方负责最终 flush/commit）。"""
+    registration = MaterialRegistration(
+        purchase_order_id=order.id,
+        purchase_order_no=order.order_no,
+        supplier_id=order.supplier_id,
+        supplier_name=order.supplier_name or '',
+        registration_date=datetime.now(timezone.utc).replace(tzinfo=None).date(),
+        remark='',
+        status='pending',
+    )
+    db.add(registration)
+    await db.flush()
+
+    for item in items:
+        db.add(MaterialRegistrationItem(
+            registration_id=registration.id,
+            order_item_id=item.id,
+            material_code=item.material_code or '',
+            material_name=item.material_name,
+            specification=item.specification or '',
+            unit=item.unit or '',
+            ordered_quantity=item.quantity,
+            received_quantity=0,
+            material_category=item.material_category or '',
+            remark=item.remark or '',
+        ))
+    return registration
 
 
 async def create_purchase_order(db: AsyncSession, data: dict, include_summary: bool = False, _auto_commit: bool = True) -> dict:
@@ -235,35 +269,11 @@ async def complete_purchase_order(db: AsyncSession, order_id: int, username: str
     )
     items = items_result.scalars().all()
 
-    now = datetime.now(UTC).replace(tzinfo=None)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
 
-    registration = MaterialRegistration(
-        purchase_order_id=order_id,
-        purchase_order_no=order.order_no,
-        supplier_id=order.supplier_id,
-        supplier_name=order.supplier_name or '',
-        registration_date=now.date(),
-        remark='',
-        status='pending',
-    )
-    db.add(registration)
-    await db.flush()
+    registration = await _create_material_registration(db, order, items)
 
     for item in items:
-        reg_item = MaterialRegistrationItem(
-            registration_id=registration.id,
-            order_item_id=item.id,
-            material_code=item.material_code or '',
-            material_name=item.material_name,
-            specification=item.specification or '',
-            unit=item.unit or '',
-            ordered_quantity=item.quantity,
-            received_quantity=0,
-            material_category=item.material_category or '',
-            remark=item.remark or '',
-        )
-        db.add(reg_item)
-
         db.add(ModificationLog(
             target_type='purchase_item',
             target_id=item.id,
@@ -306,7 +316,7 @@ async def batch_complete_purchase_orders(db: AsyncSession, order_ids: list, user
 
     completed = 0
     errors = []
-    now = datetime.now(UTC).replace(tzinfo=None)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     for oid in order_ids:
         try:
@@ -320,32 +330,7 @@ async def batch_complete_purchase_orders(db: AsyncSession, order_ids: list, user
 
             items = items_by_order.get(oid, [])
 
-            registration = MaterialRegistration(
-                purchase_order_id=oid,
-                purchase_order_no=order.order_no,
-                supplier_id=order.supplier_id,
-                supplier_name=order.supplier_name or '',
-                registration_date=now.date(),
-                remark='',
-                status='pending',
-            )
-            db.add(registration)
-            await db.flush()
-
-            for item in items:
-                reg_item = MaterialRegistrationItem(
-                    registration_id=registration.id,
-                    order_item_id=item.id,
-                    material_code=item.material_code or '',
-                    material_name=item.material_name,
-                    specification=item.specification or '',
-                    unit=item.unit or '',
-                    ordered_quantity=item.quantity,
-                    received_quantity=0,
-                    material_category=item.material_category or '',
-                    remark=item.remark or '',
-                )
-                db.add(reg_item)
+            registration = await _create_material_registration(db, order, items)
 
             order.status = 'completed'
             order.completed_at = now

@@ -84,6 +84,10 @@ class RedisCacheManager:
         self.key_prefix = key_prefix
 
     def _make_key(self, key: str) -> str:
+        # 防止双前缀：cache_keys.py 的 build_cache_key 已生成 'erp:...' 键，
+        # 若直接传入则不再追加前缀；否则按 key_prefix 添加
+        if key.startswith(self.key_prefix):
+            return key
         return f"{self.key_prefix}{key}"
 
     def _cleanup_fallback(self):

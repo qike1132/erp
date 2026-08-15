@@ -12,7 +12,7 @@ order.country（update/delete/deduct 等函数）。多 SKU 模型下这些为�
 import asyncio
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import delete, desc, func, literal, select, tuple_, union_all, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -103,9 +103,9 @@ def _parse_date_condition(date_str: str | None, is_end: bool = False):
         return None
     try:
         if is_end:
-            end_dt = datetime.strptime(date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=UTC)
+            end_dt = datetime.strptime(date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
             return Order.order_date <= end_dt
-        start_dt = datetime.strptime(date_str, '%Y-%m-%d').replace(tzinfo=UTC)
+        start_dt = datetime.strptime(date_str, '%Y-%m-%d').replace(tzinfo=timezone.utc)
         return Order.order_date >= start_dt
     except ValueError:
         raise BusinessError(f"{'结束' if is_end else '开始'}日期格式错误，应为 YYYY-MM-DD") from None
@@ -474,7 +474,7 @@ async def confirm_beile_order(db: AsyncSession, order_id: int, current_user: Use
         logger.info('湖北订单重复确认（幂等）：order_id=%s，操作人：%s', order_id, current_user.username)
         return {'success': True, 'message': '订单已确认', 'already_confirmed': True}
 
-    order.confirmed_at = datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+    order.confirmed_at = datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
     order.confirmed_by_id = current_user.id
     await db.flush()
 
@@ -522,7 +522,7 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
         order = Order(
             order_no=order_no,
             customer=customer,
-            order_date=datetime.now(UTC).replace(tzinfo=None),  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+            order_date=datetime.now(timezone.utc).replace(tzinfo=None),  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
             product_id=product_id,
             quantity=quantity,
             note=note,
@@ -703,7 +703,7 @@ async def _increase_deduction(
         stockout_no = await generate_stockout_number(db)
         stockout = StockOut(
             stockout_no=stockout_no,
-            stockout_date=datetime.now(UTC).replace(tzinfo=None),
+            stockout_date=datetime.now(timezone.utc).replace(tzinfo=None),
             product_id=stockin.product_id,
             quantity=deduct_amount,
             customer=order.customer,
@@ -854,7 +854,7 @@ async def _submit_edit_approval(
 
     order.is_locked = True
     order.locked_by_id = current_user.id
-    order.lock_time = datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+    order.lock_time = datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
 
     operation_data = {
         'customer': customer,
@@ -871,7 +871,7 @@ async def _submit_edit_approval(
         operation_type=ApprovalRequest.OPERATION_EDIT,
         operation_data=json.dumps(operation_data, ensure_ascii=False),
         status=ApprovalRequest.STATUS_PENDING,
-        lock_time=datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+        lock_time=datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
     )
     db.add(approval_request)
     await db.flush()
@@ -952,7 +952,7 @@ async def _delete_order_directly(
 
     deleted_order_no = order.order_no
     order.is_deleted = True
-    order.deleted_at = datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+    order.deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
     order.deleted_by_id = current_user.id
 
     await db.flush()
@@ -984,7 +984,7 @@ async def _submit_delete_approval(
 
     order.is_locked = True
     order.locked_by_id = current_user.id
-    order.lock_time = datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+    order.lock_time = datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
 
     operation_data = {
         'order_no': order.order_no,
@@ -1000,7 +1000,7 @@ async def _submit_delete_approval(
         operation_type=ApprovalRequest.OPERATION_DELETE,
         operation_data=json.dumps(operation_data, ensure_ascii=False),
         status=ApprovalRequest.STATUS_PENDING,
-        lock_time=datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+        lock_time=datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
     )
     db.add(approval_request)
     await db.flush()

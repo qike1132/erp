@@ -62,7 +62,7 @@ async function load() {
       const chunk = planIds.slice(i, i + chunkSize);
       const responses = await Promise.all(chunk.map(pid => planApi.shipmentRecords(pid)));
       for (const res of responses) {
-        const recs = (res as any)?.records ?? res ?? [];
+        const recs = (res as { records?: unknown[] })?.records ?? res ?? [];
         allRecords.push(...recs);
       }
     }

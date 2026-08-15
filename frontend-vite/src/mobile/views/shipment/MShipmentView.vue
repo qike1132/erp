@@ -173,8 +173,8 @@ watch(selectedDate, async () => {
 async function loadData() {
   loading.value = true
   try {
-    const res = await planApi.monthly({ year: year.value, month: month.value }) as any
-    plansByDate.value = res?.plans_by_date || {}
+    const res = await planApi.monthly({ year: year.value, month: month.value })
+    plansByDate.value = (res?.plans_by_date ?? {}) as Record<string, Plan[]>
     // 若当前选中日期不在返回数据中且该月有数据，则选中第一个有数据的日期
     if (!plansByDate.value[selectedDate.value]) {
       const keys = Object.keys(plansByDate.value).sort()

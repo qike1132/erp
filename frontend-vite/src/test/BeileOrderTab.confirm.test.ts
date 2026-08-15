@@ -75,6 +75,9 @@ const stubs = {
   },
   VirtualList: {
     props: ['items'],
+    methods: {
+      scrollToTop() {},
+    },
     template: '<div class="vl-stub"><div v-for="item in items" :key="item.id" class="vl-row"><slot :item="item" /></div></div>',
   },
 }
@@ -173,20 +176,23 @@ describe('BeileOrderTab 状态列与确认按钮行为', () => {
   it('状态列：未确认订单显示「未确认」徽章，已确认订单显示「已确认」徽章，备货记录显示 "-"', async () => {
     const wrapper = await mountTab()
 
+    // 切换到「已确认」状态（确认状态 TAB 已迁至 HubeiView 头部，此处直接调用暴露方法）
+    ;(wrapper.vm as unknown as { setConfirmStatus: (v: string) => void }).setConfirmStatus('confirmed')
+    await nextTick()
+
     const rows = wrapper.findAll('.vl-row')
     expect(rows.length).toBe(3)
 
-    // 行内徽章分布：未确认订单(状态列) + 已确认订单(状态列+确认列)
+    // 已确认 TAB 下确认操作列隐藏，徽章仅出现在状态列：未确认订单 + 已确认订单各 1 个
     const pendingBadges = wrapper.findAll('.bo-confirm-badge--pending')
     expect(pendingBadges.length).toBe(1)
     expect(pendingBadges[0]!.text()).toBe('未确认')
 
     const doneBadges = wrapper.findAll('.bo-confirm-badge--done')
-    expect(doneBadges.length).toBe(2)
+    expect(doneBadges.length).toBe(1)
     expect(doneBadges[0]!.text()).toBe('已确认')
-    expect(doneBadges[1]!.text()).toBe('已确认')
 
-    // 备货记录两列均显示 "-"
+    // 备货记录状态列显示 "-"
     const stockinRow = rows[2]!
     expect(stockinRow.text()).toContain('-')
     expect(stockinRow.findAll('.bo-confirm-badge').length).toBe(0)
@@ -202,15 +208,14 @@ describe('BeileOrderTab 状态列与确认按钮行为', () => {
     const btn = unconfirmedRow.find('.bo-confirm-btn')
     expect(btn.exists()).toBe(true)
     expect(btn.text()).toBe('确认订单')
-    // 行内仅状态列一个 pending 徽章（文案「未确认」）；若旧版「未确认订单」标签回归会是 2 个
+    // 未确认 TAB 下「确认状态」列已隐藏，行内不应出现 pending 徽章
     const pendingBadges = unconfirmedRow.findAll('.bo-confirm-badge--pending')
-    expect(pendingBadges.length).toBe(1)
-    expect(pendingBadges[0]!.text()).toBe('未确认')
+    expect(pendingBadges.length).toBe(0)
 
-    // 已确认订单：确认列无按钮
+    // 已确认订单：确认列无按钮，仅一个 done 徽章（确认操作列）
     const confirmedRow = rows[1]!
     expect(confirmedRow.find('.bo-confirm-btn').exists()).toBe(false)
-    expect(confirmedRow.findAll('.bo-confirm-badge--done').length).toBe(2)
+    expect(confirmedRow.findAll('.bo-confirm-badge--done').length).toBe(1)
 
     // 备货记录：无按钮
     expect(rows[2]!.find('.bo-confirm-btn').exists()).toBe(false)

@@ -122,7 +122,10 @@ const router = createRouter({
 
 // ==================== Chunk 加载失败自动重试 ====================
 const CHUNK_LOAD_KEY = '__router_reload_count'
+const CHUNK_LOAD_TS_KEY = '__router_reload_ts'
 const MAX_RELOAD = 3
+// 计数器有效期：超时后重置，避免服务端恢复后用户因历史计数被永久卡在 loading
+const RESET_WINDOW_MS = 60_000
 
 function isChunkLoadError(msg: string): boolean {
   return (
@@ -134,18 +137,24 @@ function isChunkLoadError(msg: string): boolean {
 
 router.onError((error, to) => {
   if (!isChunkLoadError(error.message)) return
-  const count = Number(sessionStorage.getItem(CHUNK_LOAD_KEY) || 0) + 1
+  const lastTs = Number(sessionStorage.getItem(CHUNK_LOAD_TS_KEY) || 0)
+  let count = Number(sessionStorage.getItem(CHUNK_LOAD_KEY) || 0)
+  if (!lastTs || Date.now() - lastTs > RESET_WINDOW_MS) count = 0
+  count += 1
   if (count > MAX_RELOAD) {
     sessionStorage.removeItem(CHUNK_LOAD_KEY)
+    sessionStorage.removeItem(CHUNK_LOAD_TS_KEY)
     console.error('[Router] 动态导入连续失败，请检查网络或服务状态后刷新页面', error)
     return
   }
   sessionStorage.setItem(CHUNK_LOAD_KEY, String(count))
+  sessionStorage.setItem(CHUNK_LOAD_TS_KEY, String(Date.now()))
   window.location.href = to.fullPath
 })
 
 router.afterEach(() => {
   sessionStorage.removeItem(CHUNK_LOAD_KEY)
+  sessionStorage.removeItem(CHUNK_LOAD_TS_KEY)
 })
 
 // ==================== 路由守卫：认证 + 权限检查====================

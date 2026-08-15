@@ -18,7 +18,28 @@
         @select="$emit('select-role', $event)"
         @add="$emit('add-role', $event)"
         @remove="$emit('remove-role', $event)"
-      />
+      >
+        <template #actions>
+          <button
+            v-if="canManage"
+            type="button"
+            class="pdp-head-btn"
+            @click="$emit('add-part')"
+          >
+            录入信息
+          </button>
+          <button
+            type="button"
+            class="pdp-head-btn"
+            :disabled="!canPrint"
+            :title="!canPrint ? '当前产品暂无部位数据，无法打印' : '打印该产品全部部位明细'"
+            @click="$emit('print')"
+          >
+            <i class="fas fa-print" aria-hidden="true" />
+            打印打样单
+          </button>
+        </template>
+      </RoleTabs>
 
       <!-- 部位布料表格（跨版本二维表） -->
       <div class="pdp-section pdp-parts-section">
@@ -194,6 +215,7 @@ const props = defineProps<{
   versionLoading: boolean
   partLoading: boolean
   canManage: boolean
+  canPrint: boolean
   roles: RoleBrief[]
   currentRoleId: number | null
 }>()
@@ -207,6 +229,8 @@ const emit = defineEmits<{
   'select-role': [roleId: number]
   'add-role': [roleName: string]
   'remove-role': [role: RoleBrief]
+  'add-part': []
+  'print': []
 }>()
 
 /** 正在编辑的行 part_id（null = 无编辑中行）
@@ -370,6 +394,35 @@ const groupedRows = computed(() => {
   border: 1px solid var(--color-border-light, #f0f2f5);
   border-radius: 12px;
   background: #fff;
+}
+
+/* ============ 角色行操作按钮 ============ */
+.pdp-head-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  border: 1px solid var(--color-border-light, #e5e7eb);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--color-text-secondary, #6b7280);
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.pdp-head-btn:hover:not(:disabled) {
+  border-color: var(--color-primary-400, #60a5fa);
+  color: var(--color-primary-600, #3b82f6);
+  background: var(--color-primary-50, #eff6ff);
+}
+
+.pdp-head-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* ============ Section 通用 ============ */

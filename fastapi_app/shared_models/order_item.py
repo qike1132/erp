@@ -6,7 +6,7 @@
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text
@@ -25,10 +25,10 @@ class OrderItem(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     order_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey('order.id', ondelete='CASCADE'), nullable=False, index=True, comment='主订单ID'
+        Integer, ForeignKey('order.id', ondelete='CASCADE'), nullable=False, comment='主订单ID'
     )
     product_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey('product.id'), nullable=False, index=True, comment='产品ID'
+        Integer, ForeignKey('product.id'), nullable=False, comment='产品ID'
     )
     product_name: Mapped[str | None] = mapped_column(String(200), nullable=True, comment='冗余产品名称，便于历史查询')
     product_barcode: Mapped[str | None] = mapped_column(String(100), nullable=True, comment='冗余产品条码')
@@ -41,12 +41,12 @@ class OrderItem(Base):
     deduct_quantity: Mapped[int] = mapped_column(Integer, default=0, comment='扣减库存数量')
     note: Mapped[str | None] = mapped_column(Text, nullable=True, comment='备注')
     created_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间'
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), comment='创建时间'
     )
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(UTC),
-        onupdate=lambda: datetime.now(UTC),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
         comment='更新时间',
     )
 

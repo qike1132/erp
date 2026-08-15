@@ -13,31 +13,72 @@
 
     <!-- Navigation -->
     <nav class="sb-nav">
-      <div v-for="section in authStore.filteredNavSections" :key="section.title" class="sb-section">
-        <div v-if="!collapsed" class="sb-section-title">
-          {{ section.title }}
+      <!-- 折叠态：仅展示图标 -->
+      <template v-if="collapsed">
+        <div v-for="section in filteredSections" :key="'c' + section.title" class="sb-section">
+          <router-link
+            v-for="item in section.items"
+            :key="item.path"
+            :to="item.path"
+            :class="['sb-nav-item', 'sb-nav-item-icon-only', { active: isActive(item.path) }]"
+            @pointerenter="prefetchRoute(item.path)"
+          >
+            <div class="sb-nav-icon" :class="{ 'sb-nav-icon-active': isActive(item.path) }">
+              <i :class="resolveIcon(item.icon)" aria-hidden="true" />
+            </div>
+          </router-link>
         </div>
-        <router-link
-          v-for="item in section.items"
-          :key="item.path"
-          :to="item.path"
-          :class="['sb-nav-item', { active: isActive(item.path) }]"
-          @pointerenter="prefetchRoute(item.path)"
-        >
-          <div class="sb-nav-icon" :class="{ 'sb-nav-icon-active': isActive(item.path) }">
-            <i :class="resolveIcon(item.icon)" aria-hidden="true" />
+      </template>
+
+      <!-- 展开态：搜索框 + 手风琴折叠菜单 -->
+      <template v-else>
+        <div class="sb-search">
+          <span class="sb-search-icon" aria-hidden="true"></span>
+          <input
+            v-model="searchQuery"
+            type="text"
+            class="sb-search-input"
+            placeholder="搜索菜单..."
+            aria-label="搜索菜单"
+          />
+        </div>
+
+        <div v-for="section in filteredSections" :key="section.title" class="sb-section">
+          <button
+            type="button"
+            class="sb-section-header"
+            :class="{ open: sectionIsOpen(section.title) }"
+            :aria-expanded="sectionIsOpen(section.title)"
+            @click="toggleSection(section.title)"
+          >
+            <span class="sb-section-title">{{ section.title }}</span>
+            <span class="sb-chevron" aria-hidden="true"></span>
+          </button>
+          <div v-show="sectionIsOpen(section.title)" class="sb-section-body">
+            <router-link
+              v-for="item in section.items"
+              :key="item.path"
+              :to="item.path"
+              :class="['sb-nav-item', { active: isActive(item.path) }]"
+              @pointerenter="prefetchRoute(item.path)"
+            >
+              <div class="sb-nav-icon" :class="{ 'sb-nav-icon-active': isActive(item.path) }">
+                <i :class="resolveIcon(item.icon)" aria-hidden="true" />
+              </div>
+              <span class="sb-nav-label">{{ item.title }}</span>
+            </router-link>
           </div>
-          <span v-if="!collapsed" class="sb-nav-label">{{ item.title }}</span>
-        </router-link>
-      </div>
+        </div>
+      </template>
     </nav>
   </aside>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { iconMap } from '@/utils/iconMap'
 
 defineProps<{ collapsed: boolean }>()
 
@@ -65,14 +106,51 @@ function prefetchRoute(path: string) {
   }
 }
 
-import { iconMap } from '@/utils/iconMap'
-
 function resolveIcon(icon: string | undefined): string {
   if (!icon) return 'fas fa-circle'
   if (iconMap[icon]) return iconMap[icon]
   if (icon.startsWith('fa-')) return `fas ${icon}`
   return 'fas fa-circle'
 }
+
+/* ===== 搜索 ===== */
+const searchQuery = ref('')
+
+const filteredSections = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) return authStore.filteredNavSections
+  return authStore.filteredNavSections
+    .map((s) => ({ ...s, items: s.items.filter((i) => i.title.toLowerCase().includes(q)) }))
+    .filter((s) => s.items.length > 0)
+})
+
+/* ===== 手风琴折叠（同一时间仅展开一组） ===== */
+const openSection = ref<string | null>(null)
+const isSearching = computed(() => searchQuery.value.trim().length > 0)
+
+function toggleSection(title: string) {
+  openSection.value = openSection.value === title ? null : title
+}
+
+function sectionIsOpen(title: string) {
+  if (isSearching.value) return true // 搜索时自动展开所有命中分组
+  return openSection.value === title
+}
+
+// 路由变化 / 导航加载后，自动展开当前菜单所在分组
+watch(
+  () => [route.path, authStore.filteredNavSections],
+  () => {
+    if (isSearching.value) return
+    for (const s of authStore.filteredNavSections) {
+      if (s.items.some((i) => isActive(i.path))) {
+        openSection.value = s.title
+        return
+      }
+    }
+  },
+  { immediate: true },
+)
 </script>
 
 <style scoped>
@@ -191,19 +269,119 @@ function resolveIcon(icon: string | undefined): string {
   display: none;
 }
 
+/* ===== 搜索框 ===== */
+.sb-search {
+  position: relative;
+  margin-bottom: 12px;
+}
+
+.sb-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px 8px 34px;
+  border: 1px solid var(--color-border-light);
+  border-radius: 10px;
+  font-size: 13px;
+  color: var(--color-text);
+  background: var(--color-surface);
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.sb-search-input::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+.sb-search-input:focus {
+  border-color: var(--color-primary-300);
+  box-shadow: 0 0 0 3px var(--color-primary-50);
+}
+
+.sb-search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--color-text-secondary);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.sb-search-icon::after {
+  content: '';
+  position: absolute;
+  width: 7px;
+  height: 2px;
+  background: var(--color-text-secondary);
+  right: -5px;
+  bottom: -2px;
+  transform: rotate(45deg);
+  border-radius: 2px;
+}
+
+/* ===== 分组（手风琴） ===== */
 .sb-section {
-  margin-bottom: 16px;
+  margin-bottom: 8px;
+}
+
+.sb-section-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  margin-bottom: 4px;
+  border-radius: 12px;
+  border: 1px solid var(--color-border-light);
+  background: white;
+  color: var(--color-text-secondary);
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0;
+  cursor: pointer;
+  transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.sb-section-header:hover {
+  color: var(--color-primary-600);
+  border-color: var(--color-primary-200);
+  background: var(--color-primary-50);
+}
+
+.sb-section-header.open {
+  color: var(--color-primary-700);
+  border-color: var(--color-primary-300);
+  background: var(--color-primary-50);
 }
 
 .sb-section-title {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  color: var(--color-text-secondary);
-  padding: 0 8px 6px;
-  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
+.sb-chevron {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  margin-right: 2px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg); /* 指向右，表示可展开 */
+  transition: transform 0.25s ease;
+}
+
+.sb-section-header.open .sb-chevron {
+  transform: rotate(45deg); /* 指向下，表示已展开 */
+}
+
+.sb-section-body {
+  padding-left: 4px;
+}
+
+/* ===== 菜单项 ===== */
 .sb-nav-item {
   display: flex;
   align-items: center;

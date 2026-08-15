@@ -3,18 +3,13 @@
     <div class="page-card page-card-main">
       <!-- 卡片头部 -->
       <div class="page-card-header">
-        <div class="cs-header-left">
-          <HeaderTabs />
-        </div>
-        <div class="cs-header-right">
-          <div class="cs-tab-group" role="tablist">
-            <button role="tab" :aria-selected="activeTab === 'stock'" :class="['cs-tab-btn', { active: activeTab === 'stock' }]" @click="activeTab = 'stock'">
-              出入库
-            </button>
-            <button role="tab" :aria-selected="activeTab === 'inventory'" :class="['cs-tab-btn', { active: activeTab === 'inventory' }]" @click="activeTab = 'inventory'">
-              库存查询
-            </button>
-          </div>
+        <div class="cs-tab-group" role="tablist">
+          <button role="tab" :aria-selected="activeTab === 'stock'" :class="['cs-tab-btn', { active: activeTab === 'stock' }]" @click="activeTab = 'stock'">
+            出入库
+          </button>
+          <button role="tab" :aria-selected="activeTab === 'inventory'" :class="['cs-tab-btn', { active: activeTab === 'inventory' }]" @click="activeTab = 'inventory'">
+            库存查询
+          </button>
         </div>
       </div>
 
@@ -38,7 +33,6 @@
 import { ref } from 'vue'
 import CaseStockTab from './CaseStockTab.vue'
 import CaseInventoryTab from './CaseInventoryTab.vue'
-import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 
 /** 当前激活的标签页：stock（出入库）/ inventory（库存查询） */
 const activeTab = ref<'stock' | 'inventory'>('stock')
@@ -60,10 +54,6 @@ const activeTab = ref<'stock' | 'inventory'>('stock')
 
 /* Card Header */
 /* 卡片头部样式已迁移到全局 .page-card-header（src/styles/app.css） */
-.page-card-header :deep(.ht-bar) {
-  width: auto;
-  margin: 0;
-}
 .cs-card-title-group {
   display: flex;
   align-items: center;

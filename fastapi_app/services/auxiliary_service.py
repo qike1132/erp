@@ -7,7 +7,7 @@
 包含：批量订单/入库/出库提交的完整编排（创建 + 缓存失效 + 事件发布）。
 """
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -95,7 +95,7 @@ async def orchestrate_batch_stockouts(db: AsyncSession, stockouts_data: list[dic
                 select(Product.id, Product.name).where(Product.id.in_(unique_product_ids))
             )
             product_name_map = {row[0]: row[1] for row in product_result.all()}
-            now_month = datetime.now(UTC).strftime('%Y-%m')
+            now_month = datetime.now(timezone.utc).strftime('%Y-%m')
             for product_id, customer in successful_pairs:
                 product_name = product_name_map.get(product_id, '')
                 if product_name:

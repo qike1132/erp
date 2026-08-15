@@ -53,11 +53,13 @@ opentelemetry-instrumentation-fastapi==0.51b0
 opentelemetry-instrumentation-sqlalchemy==0.51b0
 opentelemetry-instrumentation-redis==0.51b0
 opentelemetry-instrumentation-requests==0.51b0
-opentelemetry-instrumentation-celery==0.51b0
 opentelemetry-exporter-otlp-proto-grpc==1.30.0
 
 # ----- 异步任务 -----
-celery[redis]==5.6.3
+# ARQ：原生 async 任务队列，与 FastAPI async 架构一致（替代 Celery）
+# 注意：arq 0.26.0 元数据要求 redis<5，但实测与 redis 7.4.1 导入/运行兼容；
+# 若需严格的 pip 解析一致性，可升级至 arq>=0.28（支持 redis 5+）或下调 redis 至 4.x。
+arq==0.26.0
 
 # ----- 错误追踪 -----
 sentry-sdk[fastapi]==2.29.1

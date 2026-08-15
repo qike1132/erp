@@ -2,38 +2,33 @@
   <div class="pc-container">
     <div class="page-card page-card-main">
       <div class="page-card-header">
-        <div class="pc-header-left">
-          <HeaderTabs />
-        </div>
-        <div class="pc-header-right">
-          <div class="pc-tab-group" role="tablist">
-            <button
-              role="tab"
-              :aria-selected="activeTab === 'pending'"
-              :class="['pc-tab-btn', { active: activeTab === 'pending' }]"
-              @click="switchTab('pending')"
-            >
-              待审核订单
-              <span v-if="unprocessed.total > 0" class="pc-tab-badge">{{ unprocessed.total }}</span>
-            </button>
-            <button
-              role="tab"
-              :aria-selected="activeTab === 'active'"
-              :class="['pc-tab-btn', { active: activeTab === 'active' }]"
-              @click="switchTab('active')"
-            >
-              待生产订单
-              <span v-if="purchaseOrders.total > 0" class="pc-tab-badge">{{ purchaseOrders.total }}</span>
-            </button>
-            <button
-              role="tab"
-              :aria-selected="activeTab === 'history'"
-              :class="['pc-tab-btn', { active: activeTab === 'history' }]"
-              @click="switchTab('history')"
-            >
-              下单查询
-            </button>
-          </div>
+        <div class="pc-tab-group" role="tablist">
+          <button
+            role="tab"
+            :aria-selected="activeTab === 'pending'"
+            :class="['pc-tab-btn', { active: activeTab === 'pending' }]"
+            @click="switchTab('pending')"
+          >
+            待审核订单
+            <span v-if="unprocessed.total > 0" class="pc-tab-badge">{{ unprocessed.total }}</span>
+          </button>
+          <button
+            role="tab"
+            :aria-selected="activeTab === 'active'"
+            :class="['pc-tab-btn', { active: activeTab === 'active' }]"
+            @click="switchTab('active')"
+          >
+            待生产订单
+            <span v-if="purchaseOrders.total > 0" class="pc-tab-badge">{{ purchaseOrders.total }}</span>
+          </button>
+          <button
+            role="tab"
+            :aria-selected="activeTab === 'history'"
+            :class="['pc-tab-btn', { active: activeTab === 'history' }]"
+            @click="switchTab('history')"
+          >
+            下单查询
+          </button>
         </div>
       </div>
 
@@ -153,7 +148,6 @@ import CompletedOrdersPanel from './components/CompletedOrdersPanel.vue'
 import OrderDetailModal from './components/OrderDetailModal.vue'
 import SummaryModal from './components/SummaryModal.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
-import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 
 import { usePurchaseOrders } from './composables/usePurchaseOrders'
 import { useUnprocessedOrders } from './composables/useUnprocessedOrders'
@@ -455,11 +449,6 @@ onBeforeUnmount(() => {
 /* 卡片样式已迁移到全局 .page-card 系列（src/styles/app.css）
    与 DashboardView 共用同一 .page-card.page-card-main，
    确保 border-radius(18px)、box-shadow、border 视觉参数严格一致 */
-
-.pc-card-header :deep(.ht-bar) {
-  width: auto;
-  margin: 0;
-}
 
 /* === Header Actions === */
 .pc-header-actions {

@@ -23,4 +23,4 @@ PyMuPDF==1.25.0
 
 # ----- 图像处理 -----
 numpy>=1.26.4
-opencv-python==4.10.0.84
+opencv-python-headless==4.10.0.84

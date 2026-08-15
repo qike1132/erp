@@ -21,11 +21,13 @@
         </MListItem>
       </MList>
 
-      <div v-if="total > perPage" class="m-pagination">
-        <button class="m-page-btn" :disabled="page <= 1" @click="page--">上一页</button>
-        <span class="m-page-info">{{ page }} / {{ Math.ceil(total / perPage) }}</span>
-        <button class="m-page-btn" :disabled="page >= Math.ceil(total / perPage)" @click="page++">下一页</button>
-      </div>
+      <UiPagination
+        v-if="total > perPage"
+        :current-page="page"
+        :total-pages="Math.ceil(total / perPage)"
+        :total-items="total"
+        @update:current-page="page = $event"
+      />
     </div>
   </div>
 </template>
@@ -86,8 +88,4 @@ function orderLabel(s: string) {
 .m-center { display: flex; justify-content: center; padding: 48px 0; }
 .m-icon-bg { width: 100%; height: 100%; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
 .m-badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; }
-.m-pagination { display: flex; justify-content: center; align-items: center; gap: 12px; margin-top: 16px; }
-.m-page-btn { padding: 6px 14px; border: 1px solid rgba(0,0,0,0.08); border-radius: 8px; background: var(--m-bg-surface); font-size: 13px; cursor: pointer; font-family: inherit; }
-.m-page-btn:disabled { opacity: 0.4; }
-.m-page-info { font-size: 13px; color: var(--m-text-secondary); }
 </style>

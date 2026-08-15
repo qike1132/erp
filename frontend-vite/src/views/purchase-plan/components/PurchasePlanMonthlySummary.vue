@@ -96,62 +96,13 @@ const emit = defineEmits<{
 }>();
 </script>
 
-<style scoped>
+<style scoped lang="scss">
+@use '../purchase-plan-common.scss' as *;
 .sp-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding: 20px 24px;
-}
-
-.sp-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 40px 20px;
-  color: var(--color-text-muted);
-  font-size: 14px;
-}
-
-.sp-empty i {
-  font-size: 28px;
-  opacity: 0.5;
-}
-
-/* Fetching progress bar */
-.sp-fetching-bar {
-  height: 2px;
-  background: var(--color-primary-100, #e0f2fe);
-  overflow: hidden;
-  border-radius: 1px;
-}
-.sp-fetching-progress {
-  height: 100%;
-  width: 30%;
-  background: var(--color-primary-500, #3b82f6);
-  border-radius: 1px;
-  animation: sp-progress-slide 1s ease-in-out infinite;
-}
-@keyframes sp-progress-slide {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(400%); }
-}
-
-.sp-retry-btn {
-  margin-top: 6px;
-  padding: 4px 16px;
-  border: 1px solid var(--color-border, #d0d5dd);
-  border-radius: 6px;
-  background: var(--color-bg, #fff);
-  color: var(--color-text, #344054);
-  font-size: 13px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.sp-retry-btn:hover {
-  background: var(--color-bg-hover, #f2f4f7);
 }
 
 .sp-customer-tags {

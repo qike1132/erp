@@ -124,14 +124,16 @@ async def retry_dead_letter_task(task_id: str, _user: User = Depends(require_per
         task_name = target_entry.get('task_name')
         args = _parse_dead_letter_args(target_entry.get('args', []))
         kwargs = _parse_dead_letter_kwargs(target_entry.get('kwargs', {}))
-        from fastapi_app.core.celery_app import celery_app
-        new_result = celery_app.send_task(task_name, args=args, kwargs=kwargs)
+        from fastapi_app.core.arq_app import get_arq_pool
+        pool = await get_arq_pool()
+        job = await pool.enqueue_job(task_name, *args, **kwargs)
+        new_id = job.job_id if job else ''
         await safe_lrem(DLQ_KEY, 1, entries_raw[target_idx], context="死信队列")
-        logger.info('重试死信任务: %s -> new_id=%s', task_id, new_result.id)
+        logger.info('重试死信任务: %s -> new_id=%s', task_id, new_id)
         return {
             'status': 'retried',
             'original_task_id': task_id,
-            'new_task_id': new_result.id,
+            'new_task_id': new_id,
             'task_name': task_name,
         }
     except HTTPException:

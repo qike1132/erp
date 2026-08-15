@@ -221,6 +221,9 @@ class GroupedListResponse(BaseModel):
     success: bool = True
     groups: list[PatternMakerGroup] = Field(default_factory=list)
     total_projects: int = 0
+    total: int = 0
+    pages: int = 1
+    current_page: int = 1
 
 
 class ProjectListResponse(BaseModel):
@@ -249,6 +252,8 @@ class CompletedTableResponse(BaseModel):
     success: bool = True
     items: list[CompletedTableRow] = Field(default_factory=list)
     total: int = 0
+    pages: int = 0
+    current_page: int = 1
 
 
 class ProjectDetailResponse(BaseModel):

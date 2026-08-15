@@ -1,17 +1,27 @@
 <template>
   <div class="hu-container">
     <div class="page-card page-card-main">
-      <!-- 卡片头部：HeaderTabs + 产品/客户筛选 -->
+      <!-- 卡片头部：确认状态TAB与产品搜索框（合并为一行） -->
       <div class="page-card-header">
-        <div class="hu-header-left">
-          <HeaderTabs />
+        <!-- 确认状态 TAB（未确认/已确认）放左上角 -->
+        <div class="bo-confirm-filter">
+          <button
+            type="button"
+            :class="['bo-confirm-filter-btn', { 'is-active': confirmStatus === 'unconfirmed' }]"
+            @click="confirmStatus = 'unconfirmed'"
+          >未确认</button>
+          <button
+            type="button"
+            :class="['bo-confirm-filter-btn', { 'is-active': confirmStatus === 'confirmed' }]"
+            @click="confirmStatus = 'confirmed'"
+          >已确认</button>
         </div>
         <HubeiSearchBar
           v-model:product-query="filterOrderNo"
           v-model:customer-query="filterCustomer"
+          :show-customer-search="false"
+          :show-actions="false"
           @select-product="onSelectProduct"
-          @select-customer="onSelectCustomer"
-          @search="onSearch"
           @reset="onReset"
         />
       </div>
@@ -34,11 +44,11 @@
  *
  * - 路由：/beile-order
  * - 筛选：产品/客户搜索状态在 BeileOrderTab 内部，本页面经 ref 桥接
- *   到 HeaderTabs 同行的筛选栏。
+ *   到头部筛选栏；确认状态 TAB（未确认/已确认）在左上角，
+ *   读写 BeileOrderTab 内部的确认状态。
  */
 import { ref, computed } from 'vue'
 import BeileOrderTab from '@/views/beile-order/BeileOrderTab.vue'
-import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 import HubeiSearchBar from '@/views/hubei/HubeiSearchBar.vue'
 
 /** 湖北订单筛选：状态在 BeileOrderTab 内部，经 ref 暴露 */
@@ -58,16 +68,16 @@ const filterCustomer = computed({
   },
 })
 
+/** 确认状态（未确认/已确认）TAB：读写 BeileOrderTab 内部 confirmStatus */
+const confirmStatus = computed({
+  get: () => beileTab.value?.confirmStatus ?? 'unconfirmed',
+  set: (v: string) => beileTab.value?.setConfirmStatus(v),
+})
+
+
+
 function onSelectProduct(name: string) {
   beileTab.value?.applyProductFilter(name)
-}
-
-function onSelectCustomer(name: string) {
-  beileTab.value?.applyCustomerFilter(name)
-}
-
-function onSearch() {
-  beileTab.value?.handleSearch()
 }
 
 function onReset() {
@@ -75,50 +85,70 @@ function onReset() {
 }
 </script>
 
-<style scoped>
-.hu-container {
-  padding: 0;
-  margin: 0 auto;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-  contain: layout style;
-  overflow-anchor: none;
-  overflow: hidden;
-}
+<style scoped lang="scss">
+@use '@/styles/hubei-page.scss' as *;
 
-.page-card-header :deep(.ht-bar) {
-  width: auto;
-  margin: 0;
-}
-.hu-header-left {
-  display: flex;
+/* ===== 确认状态筛选（未确认/已确认 TAB，湖北订单确认流程） ===== */
+/* 包裹容器：对齐板房管理 .pr-top-right 的分组按钮容器样式 */
+.bo-confirm-filter {
+  display: inline-flex;
   align-items: center;
-  gap: 12px;
-  flex: 1;
-  min-width: 0;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: white;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.06);
+  flex-shrink: 0;
 }
-
-/* 内容区 */
-.page-card-body {
-  padding: 0;
-  scrollbar-gutter: auto;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
+.bo-confirm-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary, #6b7280);
+  background: #fff;
+  border: 1px solid var(--color-border-light, #e5e7eb);
+  border-radius: 9px;
+  cursor: pointer;
+  font-family: inherit;
+  user-select: none;
+  transition: all 0.15s ease;
 }
-.hu-tab-content {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
+.bo-confirm-filter-btn:hover {
+  border-color: var(--color-primary-300, #93c5fd);
+  color: var(--color-primary-600, #3b82f6);
+  background: var(--color-primary-50, #eff6ff);
 }
-
-@media (max-width: 900px) {
-  .page-card-header {
-    flex-wrap: wrap;
-    gap: 8px;
-  }
+.bo-confirm-filter-btn.is-active {
+  color: #fff;
+  background: linear-gradient(135deg, var(--color-primary-500, #3b82f6), var(--color-primary-600, #2563eb));
+  border-color: var(--color-primary-600, #2563eb);
+  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.25);
+}
+.bo-confirm-filter-btn.is-active:hover {
+  color: #fff;
+  background: linear-gradient(135deg, var(--color-primary-600, #2563eb), var(--color-primary-700, #1d4ed8));
+}
+.bo-confirm-filter-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  background: var(--color-warning-100);
+  color: var(--color-warning-700);
+}
+.bo-confirm-filter-btn.is-active .bo-confirm-filter-count {
+  background: rgba(255, 255, 255, 0.28);
+  color: #fff;
 }
 </style>

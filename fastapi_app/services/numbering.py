@@ -18,7 +18,7 @@
 import asyncio
 import contextlib
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -52,7 +52,7 @@ class AsyncNumberGenerator:
     @classmethod
     def _cleanup_old_entries(cls):
         """清理非当日的计数器条目，防止内存泄漏"""
-        today_str = datetime.now(UTC).replace(tzinfo=None).strftime('%Y%m%d')
+        today_str = datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y%m%d')
         # 防御性清理：条目过多时强制清理（即使日期相同）
         if cls._last_cleanup_date == today_str and len(cls._counters) < 500:
             return
@@ -84,7 +84,7 @@ async def generate_number_async(prefix: str, model, date_field: str, number_fiel
     Returns:
         str: 生成的编号,格式为 PREFIX-YYYYMMDD-XXXX
     """
-    today = datetime.now(UTC).replace(tzinfo=None)
+    today = datetime.now(timezone.utc).replace(tzinfo=None)
     date_str = today.strftime('%Y%m%d')
 
     async with _async_number_generator._lock:

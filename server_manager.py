@@ -16,6 +16,7 @@ ERP 服务器管理器 GUI v5.5
   - 高端暗色 UI — Linear/Vercel 风格配色 + 微交互动画
 """
 import hashlib
+import json
 import locale
 import logging
 import math
@@ -47,11 +48,21 @@ import contextlib
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-_VERSION = 'v5.19'
+_VERSION = 'v5.22'
 _WINDOW_TITLE = f'ERP 服务器管理器 {_VERSION}'
 _REDIS_PORT = 6379
 _REDIS_EXE_PATHS = [Path(r'C:\Redis\redis-server.exe'), Path(r'C:\Program Files\Redis\redis-server.exe')]
 _REDIS_CONF_PATHS = [Path(r'C:\Redis\redis.windows.conf'), Path(r'C:\Redis\redis.conf')]
+# 生产模式：Windows 服务 (NSSM) 名称与 NSSM 常见安装位置
+_SVC_API = 'erp-prod'
+_SVC_ARQ = 'erp-arq'
+_NSSM_CANDIDATES = [
+    Path(r'C:\nssm\nssm.exe'),
+    Path(r'C:\Program Files\nssm\nssm.exe'),
+    Path(r'C:\Program Files (x86)\nssm\nssm.exe'),
+    Path(r'C:\tools\nssm\nssm.exe'),
+]
+_PROD_STATUS_FILE = Path(r'logs\prod_runner.json')
 
 _mutex_handle = None
 
@@ -378,7 +389,7 @@ def _create_tray_icon_image():
 
 
 class ServerManagerApp:
-    """ERP 服务器管理器 — 调试/生产双模式"""
+    """ERP 服务器管理器 — 开发/生产模式"""
 
     _PALETTE = {
         'bg_main': '#f2f4f8', 'bg_card': '#ffffff', 'bg_surface': '#e9edf4', 'bg_header': '#f7f9fc', 'bg_log': '#fbfcfe', 'bg_input': '#edf1f7',
@@ -414,6 +425,7 @@ class ServerManagerApp:
         self._redis_check_after_id = None
         self._run_env_checks()
         self.check_server_status()
+        self._refresh_hosting_status()
         self._schedule_log_cleanup()
         self._schedule_log_flush()
         self._poll_queue()
@@ -460,10 +472,34 @@ class ServerManagerApp:
         return redis_exe, redis_conf
 
     def _is_redis_running(self):
+        """检测 Redis 是否真正可用：TCP 连通 + 认证通过
+
+        仅做端口探测会误报（Redis 服务 Paused/停止或密码不匹配时，端口探测仍可能
+        短暂通过）。这里通过 RESP 协议发送 PING：
+        - 返回 +PONG ：无需密码，正常运行
+        - 返回 -NOAUTH：需密码，先 AUTH（用 .env 的 REDIS_PASSWORD）再 PING
+        - 其余情况：不可用
+        """
+        password = self._get_env_value('REDIS_PASSWORD')
         try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.settimeout(1)
-                return sock.connect_ex(('127.0.0.1', _REDIS_PORT)) == 0
+            with socket.create_connection(('127.0.0.1', _REDIS_PORT), timeout=1) as sock:
+                sock.sendall(b'*1\r\n$4\r\nPING\r\n')
+                resp = sock.recv(64)
+                if resp.startswith(b'+PONG'):
+                    return True
+                if resp.startswith(b'-NOAUTH'):
+                    if not password:
+                        return False
+                    auth_cmd = (
+                        f'*2\r\n$4\r\nAUTH\r\n${len(password)}\r\n{password}\r\n'
+                    ).encode()
+                    sock.sendall(auth_cmd)
+                    auth_resp = sock.recv(64)
+                    if not auth_resp.startswith(b'+OK'):
+                        return False
+                    sock.sendall(b'*1\r\n$4\r\nPING\r\n')
+                    return sock.recv(64).startswith(b'+PONG')
+            return False
         except Exception:
             return False
 
@@ -609,7 +645,7 @@ class ServerManagerApp:
             with contextlib.suppress(Exception):
                 self.root.after_cancel(aid)
         self._after_ids.clear()
-        for attr in ('dual_dev_status_dot', 'dual_prod_status_dot'):
+        for attr in ('dual_dev_status_dot',):
             dot = getattr(self, attr, None)
             if dot:
                 dot.stop_animation()
@@ -902,9 +938,9 @@ class ServerManagerApp:
             elif msg_type == 'started':
                 self._on_started(data['label'], data.get('mode_key', 'debug'))
             elif msg_type == 'dual_started':
-                self._on_dual_started(data['mode'], data['label'])
+                self._on_dual_started(data['label'])
             elif msg_type == 'dual_failed':
-                self._on_dual_failed(data['mode'], data['label'], data.get('reason', ''))
+                self._on_dual_failed(data['label'], data.get('reason', ''))
             elif msg_type == 'ui_update':
                 self._update_all_ui()
             elif msg_type == 'status':
@@ -912,32 +948,29 @@ class ServerManagerApp:
             elif msg_type == 'startup_progress':
                 self.status_bar_label.config(text=f"启动中: {data.get('step', '')} ({data.get('progress', 0)}/{data.get('total', 4)})")
                 self._startup_current_step, self._startup_progress = data.get('step', ''), data.get('progress', 0)
+            elif msg_type == 'hosting_refresh':
+                # 生产模式状态立即刷新（取消已排定的一轮，避免刷新链叠加）
+                try:
+                    pending = self._after_ids.pop('hosting', None)
+                    if pending:
+                        self.root.after_cancel(pending)
+                except Exception:
+                    pass
+                self._refresh_hosting_status()
             processed += 1
         self._after_ids['poll'] = self.root.after(200, self._poll_queue)
 
     def start_debug(self):
         self._start_server('run.py', '调试模式', mode_key='debug')
 
-    def start_production(self):
-        self._start_server('start_production_optimized.py', '生产模式', mode_key='production')
-
     def start_dual_dev(self):
-        self._start_dual_server(mode='dev', label='开发模式（前后端）')
-
-    def start_dual_prod(self):
-        self._start_dual_server(mode='prod', label='生产模式（前后端）')
+        self._start_dual_server('开发模式（前后端）')
 
     def stop_debug(self):
         self._stop_mode('debug', '调试模式')
 
-    def stop_production(self):
-        self._stop_mode('production', '生产模式')
-
     def stop_dual_dev(self):
         self._stop_dual_mode_async('dual_dev', '开发模式')
-
-    def stop_dual_prod(self):
-        self._stop_dual_mode_async('dual_prod', '生产模式')
 
     def _stop_mode(self, mode, label):
         if self._mode == mode:
@@ -1001,17 +1034,9 @@ class ServerManagerApp:
         self.log_message("正在重启调试模式...")
         threading.Thread(target=self._restart_thread, args=('debug',), daemon=True).start()
 
-    def restart_production(self):
-        self.log_message("正在重启生产模式...")
-        threading.Thread(target=self._restart_thread, args=('production',), daemon=True).start()
-
     def restart_dual_dev(self):
         self.log_message("正在重启开发模式...")
-        threading.Thread(target=self._restart_dual_thread, args=('dual_dev', 'dev'), daemon=True).start()
-
-    def restart_dual_prod(self):
-        self.log_message("正在重启生产模式...")
-        threading.Thread(target=self._restart_dual_thread, args=('dual_prod', 'prod'), daemon=True).start()
+        threading.Thread(target=self._restart_dual_thread, daemon=True).start()
 
     def _restart_thread(self, mode):
         self._mode = 'restarting'
@@ -1036,9 +1061,9 @@ class ServerManagerApp:
         self._kill_port_sync(_API_PORT)
         time.sleep(0.5)
         self._mode = 'restarting'
-        self._start_thread(str(_PROJECT_DIR / ('run.py' if mode == 'debug' else 'start_production_optimized.py')), '调试模式' if mode == 'debug' else '生产模式', mode_key=mode)
+        self._start_thread(str(_PROJECT_DIR / 'run.py'), '调试模式', mode_key='debug')
 
-    def _start_dual_server(self, mode, label):
+    def _start_dual_server(self, label):
         if self._mode != 'none':
             self.log_message(f"已有服务在运行或启动中，请先停止后再启动", 'WARNING')
             return
@@ -1052,14 +1077,14 @@ class ServerManagerApp:
             return
 
         self._mode = 'starting'
-        self._current_mode_key = 'dual_dev' if mode == 'dev' else 'dual_prod'
+        self._current_mode_key = 'dual_dev'
         self._startup_progress, self._startup_steps, self._startup_current_step = 0, ['检查Redis服务', '启动后端服务', '启动前端服务', '完成'], ''
         self._update_all_ui()
         self.log_message(f"正在启动{label}...")
         self.status_bar_label.config(text=f"正在启动{label}...")
-        threading.Thread(target=self._start_dual_thread, args=(mode, label), daemon=True).start()
+        threading.Thread(target=self._start_dual_thread, args=(label,), daemon=True).start()
 
-    def _start_dual_thread(self, mode, label):
+    def _start_dual_thread(self, label):
         try:
             creationflags = subprocess.CREATE_NO_WINDOW if _IS_WINDOWS else 0
 
@@ -1075,7 +1100,7 @@ class ServerManagerApp:
             self._msg_queue.put(('startup_progress', {'step': self._startup_current_step, 'progress': self._startup_progress, 'total': len(self._startup_steps)}))
             env = os.environ.copy()
             env.update({'PYTHONUNBUFFERED': '1', 'PYTHONIOENCODING': 'utf-8', 'PYTHONUTF8': '1', 'PYTHONPATH': str(_PROJECT_DIR)})
-            backend_cmd = [_PYTHON_EXE, '-u', '-m', 'uvicorn', 'fastapi_app.main:app', '--host', '0.0.0.0', '--port', str(_API_PORT), '--log-level', 'info'] + (['--reload', '--reload-dir', 'fastapi_app'] if mode == 'dev' else [])
+            backend_cmd = [_PYTHON_EXE, '-u', '-m', 'uvicorn', 'fastapi_app.main:app', '--host', '0.0.0.0', '--port', str(_API_PORT), '--log-level', 'info', '--reload', '--reload-dir', 'fastapi_app']
             self._process = subprocess.Popen(backend_cmd, cwd=str(_PROJECT_DIR), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=creationflags, text=False)
             self._msg_queue.put(('log', {'text': f"后端进程已启动 (PID: {self._process.pid})"}))
             threading.Thread(target=self._read_stdout, args=(self._process,), daemon=True).start()
@@ -1095,61 +1120,12 @@ class ServerManagerApp:
                     with contextlib.suppress(Exception):
                         self._process.wait(timeout=3)
                 self._process = None
-                self._msg_queue.put(('dual_failed', {'mode': 'dual_dev' if mode == 'dev' else 'dual_prod', 'label': label, 'reason': '后端未就绪'}))
+                self._msg_queue.put(('dual_failed', {'label': label, 'reason': '后端未就绪'}))
                 return
             self._startup_current_step, self._startup_progress = self._startup_steps[2], 3
             self._msg_queue.put(('startup_progress', {'step': self._startup_current_step, 'progress': self._startup_progress, 'total': len(self._startup_steps)}))
             npm_cmd = 'npm.cmd' if _IS_WINDOWS else 'npm'
-            # 生产模式下：使用 Vite preview 服务提供前端
-            if mode == 'prod':
-                if not (_FRONTEND_DIR / 'dist').is_dir():
-                    self._msg_queue.put(('log', {'text': '生产模式：未检测到 dist 构建产物，正在执行 vite build...', 'level': 'WARNING'}))
-                    build_proc = subprocess.Popen([npm_cmd, 'run', 'build'], cwd=str(_FRONTEND_DIR), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=creationflags, text=False)
-                    build_output = []
-                    while True:
-                        line = build_proc.stdout.readline()
-                        if not line:
-                            break
-                        text = line.decode('utf-8', errors='replace').rstrip('\n\r')
-                        if text:
-                            build_output.append(text)
-                    build_proc.wait(timeout=300)
-                    if build_proc.returncode != 0:
-                        self._msg_queue.put(('log', {'text': 'vite build 失败', 'level': 'ERROR'}))
-                    else:
-                        self._msg_queue.put(('log', {'text': 'vite build 完成'}))
-                else:
-                    self._msg_queue.put(('log', {'text': '前端构建产物已就绪'}))
-                # 启动 Vite preview 服务（使用 3000 端口）
-                preview_env = {**os.environ, 'BACKEND_INTERNAL_URL': f'http://127.0.0.1:{_API_PORT}'}
-                npx_cmd = 'npx.cmd' if _IS_WINDOWS else 'npx'
-                self._frontend_process = subprocess.Popen([npx_cmd, 'vite', 'preview', '--port', str(_WEB_PORT), '--host', '0.0.0.0'], cwd=str(_FRONTEND_DIR), env=preview_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=creationflags, text=False)
-                self._msg_queue.put(('log', {'text': f"前端预览进程已启动 (PID: {self._frontend_process.pid})"}))
-                threading.Thread(target=self._read_frontend_stdout, args=(self._frontend_process,), daemon=True).start()
-                frontend_ready = False
-                for _ in range(60):
-                    try:
-                        urllib.request.urlopen(f'http://127.0.0.1:{_WEB_PORT}/', timeout=2)
-                        frontend_ready = True
-                        break
-                    except Exception:
-                        time.sleep(1)
-                if not frontend_ready:
-                    self._msg_queue.put(('log', {'text': '前端预览服务启动失败或健康检查未通过', 'level': 'ERROR'}))
-                    for proc, name in [(self._frontend_process, '前端'), (self._process, '后端')]:
-                        if proc and proc.poll() is None:
-                            self._msg_queue.put(('log', {'text': f'正在终止未就绪的{name}进程 (PID: {proc.pid})...'}))
-                            self._kill_process_tree(proc.pid)
-                            with contextlib.suppress(Exception):
-                                proc.wait(timeout=3)
-                    self._process, self._frontend_process = None, None
-                    self._msg_queue.put(('dual_failed', {'mode': 'dual_prod', 'label': label, 'reason': '前端未就绪'}))
-                    return
-                self._startup_current_step, self._startup_progress = self._startup_steps[3], 4
-                self._msg_queue.put(('startup_progress', {'step': self._startup_current_step, 'progress': self._startup_progress, 'total': len(self._startup_steps)}))
-                self._msg_queue.put(('dual_started', {'mode': 'dual_prod', 'label': label}))
-                return
-            # 开发模式：启动 Vite dev server
+            # 启动 Vite dev server
             self._frontend_process = subprocess.Popen([npm_cmd, 'run', 'dev', '--', '--port', str(_WEB_PORT)], cwd=str(_FRONTEND_DIR), env={**os.environ, 'BACKEND_INTERNAL_URL': f'http://127.0.0.1:{_API_PORT}'}, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=creationflags, text=False)
             self._msg_queue.put(('log', {'text': f"前端进程已启动 (PID: {self._frontend_process.pid})"}))
             threading.Thread(target=self._read_frontend_stdout, args=(self._frontend_process,), daemon=True).start()
@@ -1170,14 +1146,14 @@ class ServerManagerApp:
                         with contextlib.suppress(Exception):
                             proc.wait(timeout=3)
                 self._process, self._frontend_process = None, None
-                self._msg_queue.put(('dual_failed', {'mode': 'dual_dev' if mode == 'dev' else 'dual_prod', 'label': label, 'reason': '前端未就绪'}))
+                self._msg_queue.put(('dual_failed', {'label': label, 'reason': '前端未就绪'}))
                 return
             self._startup_current_step, self._startup_progress = self._startup_steps[3], 4
             self._msg_queue.put(('startup_progress', {'step': self._startup_current_step, 'progress': self._startup_progress, 'total': len(self._startup_steps)}))
-            self._msg_queue.put(('dual_started', {'mode': 'dual_dev' if mode == 'dev' else 'dual_prod', 'label': label}))
+            self._msg_queue.put(('dual_started', {'label': label}))
         except Exception as e:
             self._process, self._frontend_process = None, None
-            self._msg_queue.put(('dual_failed', {'mode': 'dual_dev' if mode == 'dev' else 'dual_prod', 'label': label, 'reason': f'异常: {str(e)}'}))
+            self._msg_queue.put(('dual_failed', {'label': label, 'reason': f'异常: {str(e)}'}))
 
     def _read_frontend_stdout(self, proc):
         batch = []
@@ -1228,10 +1204,10 @@ class ServerManagerApp:
             self._msg_queue.put(('log', {'text': f"{label}已停止，端口已释放"}))
         threading.Thread(target=_stop_worker, daemon=True).start()
 
-    def _restart_dual_thread(self, mode_key, mode):
-        self._mode, self._current_mode_key = 'restarting', mode_key
+    def _restart_dual_thread(self):
+        self._mode, self._current_mode_key = 'restarting', 'dual_dev'
         self._msg_queue.put(('ui_update', {}))
-        label = '开发模式' if mode == 'dev' else '生产模式'
+        label = '开发模式'
         for proc, name in [(self._frontend_process, '前端'), (self._process, '后端')]:
             if proc and proc.poll() is None:
                 self._msg_queue.put(('log', {'text': f"重启：终止{name}进程树 (PID: {proc.pid})..."}))
@@ -1251,12 +1227,11 @@ class ServerManagerApp:
         self._kill_port_sync(_API_PORT)
         self._kill_port_sync(_WEB_PORT)
         time.sleep(0.5)
-        self._start_dual_thread(mode, label)
+        self._start_dual_thread(label)
 
-    def _on_dual_started(self, mode, label):
+    def _on_dual_started(self, label):
         backend_alive = self._process and self._process.poll() is None
         frontend_alive = self._frontend_process and self._frontend_process.poll() is None
-        is_prod = mode == 'dual_prod'
         if not backend_alive:
             self.log_message(f"{label}启动后后端进程已退出", 'ERROR')
             if frontend_alive:
@@ -1274,17 +1249,15 @@ class ServerManagerApp:
             self._update_all_ui()
             self.status_bar_label.config(text="前端启动失败，已停止")
             return
-        self._mode = mode
+        self._mode = 'dual_dev'
         self._update_all_ui()
         self.status_bar_label.config(text=f"{label}运行中")
         self.log_message(f"{label}启动成功")
         self.log_message(f"  → 后端: http://localhost:{_API_PORT}")
         if frontend_alive:
             self.log_message(f"  → 前端: http://localhost:{_WEB_PORT}")
-        elif is_prod:
-            self.log_message("  → 前端: 未检测到前端服务，请检查 dist 构建产物")
 
-    def _on_dual_failed(self, mode, label, reason):
+    def _on_dual_failed(self, label, reason):
         self.log_message(f"{label}启动失败: {reason}", 'ERROR')
         self._mode, self._process, self._frontend_process = 'none', None, None
         self._current_mode_key = ""
@@ -1292,7 +1265,7 @@ class ServerManagerApp:
         self.status_bar_label.config(text=f"{label}启动失败: {reason}")
 
     def _mode_label(self):
-        return {'debug': '调试模式', 'production': '生产模式', 'dual_dev': '开发模式（前后端）', 'dual_prod': '生产模式（前后端）', 'restarting': '重启中', 'starting': '启动中', 'stopping': '停止中'}.get(self._mode, '')
+        return {'debug': '调试模式', 'dual_dev': '开发模式（前后端）', 'restarting': '重启中', 'starting': '启动中', 'stopping': '停止中'}.get(self._mode, '')
 
     def _update_redis_status(self):
         if self._redis_check_after_id:
@@ -1319,16 +1292,15 @@ class ServerManagerApp:
         self._redis_check_after_id = self.root.after(500, lambda: threading.Thread(target=_check_and_update, daemon=True).start())
 
     def _update_all_ui(self):
-        is_dual_dev, is_dual_prod = self._mode == 'dual_dev', self._mode == 'dual_prod'
+        is_dual_dev = self._mode == 'dual_dev'
         is_starting, is_restarting, _is_stopping = self._mode == 'starting', self._mode == 'restarting', self._mode == 'stopping'
         is_none = self._mode == 'none'
         is_busy = not is_none
         current_mode_key = self._current_mode_key
         self._update_card_ui('dual_dev', is_dual_dev, is_none, is_starting and current_mode_key == 'dual_dev', is_restarting and current_mode_key == 'dual_dev')
-        self._update_card_ui('dual_prod', is_dual_prod, is_none, is_starting and current_mode_key == 'dual_prod', is_restarting and current_mode_key == 'dual_prod')
         # stop_all总是可用，作为紧急重置
         self.stop_all_btn.config(state='normal')
-        self._update_status_indicator(is_busy=is_busy, is_active=(is_dual_dev or is_dual_prod))
+        self._update_status_indicator(is_busy=is_busy, is_active=is_dual_dev)
         self._update_redis_status()
         if is_none:
             self.status_bar_label.config(text="就绪")
@@ -1347,7 +1319,7 @@ class ServerManagerApp:
         status_color = self._PALETTE[color_key]
         status.config(text=status_text, foreground=status_color)
         status_dot.set_color(status_color, active=dot_active)
-        if is_active and mode_key in ('dual_dev', 'dual_prod'):
+        if is_active and mode_key == 'dual_dev':
             backend_pid = self._process.pid if self._process else None
             frontend_pid = self._frontend_process.pid if self._frontend_process else None
             pid_text = f"B:{backend_pid} F:{frontend_pid}" if backend_pid and frontend_pid else f"B:{backend_pid}" if backend_pid else f"F:{frontend_pid}" if frontend_pid else "PID: —"
@@ -1364,7 +1336,7 @@ class ServerManagerApp:
             self._after_ids['status'] = self.root.after(self._check_interval, self.check_server_status)
             return
         backend_crashed = self._process and self._process.poll() is not None
-        frontend_crashed = self._mode in ('dual_dev', 'dual_prod') and self._frontend_process and self._frontend_process.poll() is not None
+        frontend_crashed = self._mode == 'dual_dev' and self._frontend_process and self._frontend_process.poll() is not None
         if backend_crashed or frontend_crashed:
             code = self._process.poll() if self._process else None
             label = self._mode_label()
@@ -1434,22 +1406,23 @@ class ServerManagerApp:
         content.columnconfigure(1, weight=1)
         content.rowconfigure(0, weight=0)
         content.rowconfigure(1, weight=0)
-        content.rowconfigure(2, weight=1)
-        self._build_server_card(content, 0, 0, '开发模式（前后端）', 'dual_dev', 'FastAPI + Vue3/Vite · 后端 5002 · 前端 3000', 'dual_dev', self.start_dual_dev, self.stop_dual_dev, self.restart_dual_dev)
-        self._build_server_card(content, 0, 1, '生产模式（前后端）', 'dual_prod', 'FastAPI + Uvicorn + Nginx/Vue3 · 后端 5002', 'dual_prod', self.start_dual_prod, self.stop_dual_prod, self.restart_dual_prod)
+        content.rowconfigure(2, weight=0)
+        content.rowconfigure(3, weight=1)
+        self._build_server_card(content, 0, 0, '开发模式（前后端）', 'dual_dev', 'FastAPI + Vue3/Vite · 后端 5002 · 前端 3000', 'dual_dev', self.start_dual_dev, self.stop_dual_dev, self.restart_dual_dev, columnspan=2)
+        self._build_hosting_panel(content)
         self._build_global_stop(content)
         self._build_log_section(content)
 
-    def _card(self, parent, row, col):
+    def _card(self, parent, row, col, columnspan=1):
         card = tk.Frame(parent, bg=self._PALETTE['bg_card'], highlightbackground=self._PALETTE['border_card'], highlightthickness=1)
-        card.grid(row=row, column=col, sticky='nsew', padx=(0, 12) if col == 0 else (0, 0))
+        card.grid(row=row, column=col, columnspan=columnspan, sticky='nsew', padx=(0, 12) if col == 0 else (0, 0))
         self._server_cards.append(card)
         return card
 
-    def _build_server_card(self, parent, row, col, title, script_label, desc, mode_key, start_cmd, stop_cmd, restart_cmd):
-        card = self._card(parent, row, col)
+    def _build_server_card(self, parent, row, col, title, script_label, desc, mode_key, start_cmd, stop_cmd, restart_cmd, columnspan=1):
+        card = self._card(parent, row, col, columnspan=columnspan)
         mode_color = self._PALETTE['info']
-        icon_text = 'FD' if mode_key in ('dual_dev', 'dual_prod') else 'D' if mode_key == 'debug' else 'P'
+        icon_text = 'FD' if mode_key == 'dual_dev' else 'D' if mode_key == 'debug' else 'P'
         tk.Frame(card, bg=mode_color, height=2).pack(fill=tk.X)
         hdr = tk.Frame(card, bg=self._PALETTE['bg_card'])
         hdr.pack(fill=tk.X, padx=22, pady=(14, 0))
@@ -1485,13 +1458,319 @@ class ServerManagerApp:
 
     def _build_global_stop(self, parent):
         frame = tk.Frame(parent, bg=self._PALETTE['bg_main'])
-        frame.grid(row=1, column=0, columnspan=2, pady=(10, 6))
+        frame.grid(row=2, column=0, columnspan=2, pady=(4, 6))
         self.stop_all_btn = RoundedButton(frame, text='  全部停止  ', fill=self._PALETTE['danger'], hover_fill=self._PALETTE['danger_h'], fg='#ffffff', command=self.stop_all, state='disabled', canvas_bg=self._PALETTE['bg_main'], padx=40, pady=9, radius=8, font=('Microsoft YaHei UI', 10, 'bold'))
         self.stop_all_btn.pack()
 
+    # ===================== 生产模式 (Windows 服务 + NSSM) =====================
+
+    def _find_nssm(self):
+        found = shutil.which('nssm')
+        if found:
+            return found
+        for cand in _NSSM_CANDIDATES:
+            if cand.is_file():
+                return str(cand)
+        return None
+
+    def _run_capture(self, args, timeout=20):
+        try:
+            result = subprocess.run(args, creationflags=subprocess.CREATE_NO_WINDOW if _IS_WINDOWS else 0,
+                                    capture_output=True, text=True, timeout=timeout)
+            return result.returncode, (result.stdout or '') + (result.stderr or '')
+        except Exception as e:
+            return -1, str(e)
+
+    def _svc_state(self, name):
+        code, out = self._run_capture(['sc', 'query', name], timeout=10)
+        if code != 0 or 'SERVICE_NAME' not in out:
+            return '未安装'
+        for line in out.splitlines():
+            if 'STATE' in line:
+                parts = line.split(':', 1)
+                if len(parts) > 1:
+                    return ' '.join(parts[1].split())[:28]
+        return '未知'
+
+    def _svc_pid(self, name):
+        """查询 Windows 服务当前进程 PID（sc queryex），未运行返回 None"""
+        code, out = self._run_capture(['sc', 'queryex', name], timeout=10)
+        if code != 0:
+            return None
+        for line in out.splitlines():
+            stripped = line.strip()
+            if stripped.startswith('PID'):
+                parts = stripped.split(':', 1)
+                if len(parts) > 1 and parts[1].strip().isdigit():
+                    return int(parts[1].strip())
+        return None
+
+    def _set_label(self, label, text, color=None):
+        try:
+            label.config(text=text, foreground=color if color else self._PALETTE['text_secondary'])
+        except Exception:
+            pass
+
+    def _build_hosting_panel(self, parent):
+        card = tk.Frame(parent, bg=self._PALETTE['bg_card'], highlightbackground=self._PALETTE['border_card'], highlightthickness=1)
+        card.grid(row=1, column=0, columnspan=2, sticky='nsew', pady=(4, 4))
+        accent = self._PALETTE['accent']
+        tk.Frame(card, bg=accent, height=2).pack(fill=tk.X)
+        inner = tk.Frame(card, bg=self._PALETTE['bg_card'])
+        inner.pack(fill=tk.X, padx=22, pady=(10, 12))
+
+        # 标题行
+        hdr = tk.Frame(inner, bg=self._PALETTE['bg_card'])
+        hdr.pack(fill=tk.X)
+        tk.Label(hdr, text='生产模式', font=('Microsoft YaHei UI', 13, 'bold'), fg=self._PALETTE['text_primary'], bg=self._PALETTE['bg_card']).pack(side=tk.LEFT)
+        tk.Label(hdr, text='Windows 服务 (NSSM) · 开机自启 · 崩溃自愈 · 前端/后端/ARQ/Redis 守护', font=('Microsoft YaHei UI', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_card']).pack(side=tk.LEFT, padx=(10, 0))
+
+        # 状态行
+        st = tk.Frame(inner, bg=self._PALETTE['bg_card'])
+        st.pack(fill=tk.X, pady=(10, 0))
+        self.hosting_nssm_lbl = tk.Label(st, text='NSSM: 检测中', font=('Microsoft YaHei UI', 9), fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_card'])
+        self.hosting_nssm_lbl.pack(side=tk.LEFT)
+        self.hosting_svc_lbl = tk.Label(st, text='服务: 检测中', font=('Microsoft YaHei UI', 9), fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_card'])
+        self.hosting_svc_lbl.pack(side=tk.LEFT, padx=(18, 0))
+        tk.Label(st, text='Worker 数:', font=('Microsoft YaHei UI', 9), fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_card']).pack(side=tk.LEFT, padx=(18, 4))
+        self.hosting_workers_var = tk.StringVar(value=str(int(os.getenv('UVICORN_WORKERS', '4'))))
+        workers_combo = ttk.Combobox(st, textvariable=self.hosting_workers_var, values=('2', '4', '6', '8'), width=4, state='readonly', font=('Microsoft YaHei UI', 9))
+        workers_combo.pack(side=tk.LEFT)
+        tk.Label(st, text='(安装服务时生效，8GB 内存建议 4)', font=('Microsoft YaHei UI', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_card']).pack(side=tk.LEFT, padx=(6, 0))
+
+        # 操作按钮行
+        btns = tk.Frame(inner, bg=self._PALETTE['bg_card'])
+        btns.pack(fill=tk.X, pady=(10, 0))
+        btn_specs = [
+            ('  安装服务  ', self._PALETTE['success'], self._install_services),
+            ('  卸载服务  ', self._PALETTE['danger'], self._uninstall_services),
+            ('  启动服务  ', self._PALETTE['accent'], self._start_services),
+            ('  停止服务  ', self._PALETTE['warning'], self._stop_services),
+            ('  重启服务  ', self._PALETTE['info'], self._restart_services),
+            ('  手动刷新  ', self._PALETTE['text_primary'], self._manual_refresh_hosting),
+            ('  打开日志  ', self._PALETTE['text_secondary'], self._open_logs_dir),
+        ]
+        for text, color, cmd in btn_specs:
+            btn = RoundedButton(btns, text=text, fill=color, hover_fill=_shift_color(color, -20), fg='#ffffff',
+                                command=cmd, canvas_bg=self._PALETTE['bg_card'], radius=8, pady=5)
+            btn.pack(side=tk.LEFT, padx=(0, 8))
+
+        # 明细行（来自 prod_runner.json）
+        det = tk.Frame(inner, bg=self._PALETTE['bg_card'])
+        det.pack(fill=tk.X, pady=(10, 0))
+        self.hosting_backend_lbl = tk.Label(det, text='后端: —', font=('Consolas', 9), fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_card'])
+        self.hosting_backend_lbl.pack(side=tk.LEFT)
+        self.hosting_arq_lbl = tk.Label(det, text='ARQ: —', font=('Consolas', 9), fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_card'])
+        self.hosting_arq_lbl.pack(side=tk.LEFT, padx=(16, 0))
+        self.hosting_frontend_lbl = tk.Label(det, text='前端: —', font=('Consolas', 9), fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_card'])
+        self.hosting_frontend_lbl.pack(side=tk.LEFT, padx=(16, 0))
+        self.hosting_redis_lbl = tk.Label(det, text='Redis: —', font=('Consolas', 9), fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_card'])
+        self.hosting_redis_lbl.pack(side=tk.LEFT, padx=(16, 0))
+        self.hosting_ready_lbl = tk.Label(det, text='就绪: —', font=('Consolas', 9), fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_card'])
+        self.hosting_ready_lbl.pack(side=tk.LEFT, padx=(16, 0))
+
+        # 诊断行：显示状态文件路径与读取结果（错误不再静默吞掉）
+        diag = tk.Frame(inner, bg=self._PALETTE['bg_card'])
+        diag.pack(fill=tk.X, pady=(6, 0))
+        self.hosting_diag_lbl = tk.Label(diag, text='状态文件: 读取中...', font=('Consolas', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_card'], anchor='w', justify='left')
+        self.hosting_diag_lbl.pack(fill=tk.X)
+
+    def _manual_refresh_hosting(self):
+        """手动刷新生产模式状态（用户点击「手动刷新」按钮触发）"""
+        self._set_label(self.hosting_diag_lbl, '状态文件: 手动刷新中...', self._PALETTE['text_dim'])
+        try:
+            self._refresh_hosting_status()
+        except Exception as e:
+            self._set_label(self.hosting_diag_lbl, f'手动刷新异常: {e}', self._PALETTE['danger'])
+        self.log_message('已手动刷新生产模式状态')
+
+    def _refresh_hosting_status(self):
+        try:
+            nssm = self._find_nssm()
+            nssm_text = '已找到' if nssm else '未找到(请安装 C:\\nssm)'
+            self._set_label(self.hosting_nssm_lbl, f'NSSM: {nssm_text}',
+                            self._PALETTE['success'] if nssm else self._PALETTE['danger'])
+            api_state = self._svc_state(_SVC_API)
+            arq_state = self._svc_state(_SVC_ARQ)
+            self._set_label(self.hosting_svc_lbl, f'服务: {_SVC_API}={api_state}  {_SVC_ARQ}={arq_state}')
+
+            col = self._PALETTE
+            def _detail(label, text, ok=None):
+                color = col['success'] if ok is True else col['danger'] if ok is False else col['text_secondary']
+                self._set_label(label, text, color)
+
+            status_file = _PROJECT_DIR / 'logs' / 'prod_runner.json'
+            api_running = 'RUNNING' in api_state.upper() if api_state else False
+
+            # 服务未运行：以 sc query 为权威，不读状态文件，避免残留旧数据（服务已 STOPPED 却仍显示 ready/pid）
+            if not api_running:
+                redis_ok = self._is_redis_running()
+                _detail(self.hosting_backend_lbl, '后端: 已停止 pid=—', False)
+                _detail(self.hosting_arq_lbl, 'ARQ: 未运行 pid=—', False)
+                _detail(self.hosting_frontend_lbl, '前端: 已停止 pid=—', False)
+                _detail(self.hosting_redis_lbl, f'Redis: {"ok" if redis_ok else "已停止"}', redis_ok)
+                _detail(self.hosting_ready_lbl, '就绪: —', None)
+                self._set_label(self.hosting_diag_lbl, f'状态文件: 服务未运行，不读取 {status_file}', col['text_dim'])
+                return
+
+            # 服务运行中：读取状态文件并校验新鲜度
+            status = {}
+            read_err = None
+            try:
+                if status_file.is_file():
+                    status = json.loads(status_file.read_text(encoding='utf-8'))
+                else:
+                    read_err = f'文件不存在: {status_file}'
+            except Exception as e:
+                read_err = f'读取失败: {type(e).__name__}: {e}'
+
+            mtime = status_file.stat().st_mtime if status_file.is_file() else 0
+            stale = bool(status_file.is_file()) and (time.time() - mtime) > 15
+            if read_err:
+                self._set_label(self.hosting_diag_lbl, f'状态文件: {read_err}', col['danger'])
+                self.log_message(f'[生产模式] {read_err}', 'WARNING')
+            elif stale:
+                mtime_str = datetime.fromtimestamp(mtime).strftime('%H:%M:%S')
+                self._set_label(self.hosting_diag_lbl, f'状态文件: 已过期 ({mtime_str}，>15s 未更新)', col['warning'])
+            else:
+                mtime_str = datetime.fromtimestamp(mtime).strftime('%H:%M:%S') if mtime else '—'
+                self._set_label(self.hosting_diag_lbl, f'状态文件: {status_file} (更新于 {mtime_str})', col['text_dim'])
+
+            svcs = status.get('services', {})
+            backend = svcs.get('backend', {})
+            _detail(self.hosting_backend_lbl, f'后端: {backend.get("status", "—")} pid={backend.get("pid")}', backend.get('status') == 'ready')
+            arq = svcs.get('arq', {})
+            arq_status = arq.get('status', '—')
+            arq_pid = arq.get('pid')
+            arq_ok = arq_status == 'running'
+            # ARQ 由独立 NSSM 服务托管时（--no-arq），从 erp-arq 服务查询真实 PID 与运行状态
+            if arq_status == 'external':
+                svc_pid = self._svc_pid(_SVC_ARQ)
+                if svc_pid:
+                    arq_pid = svc_pid
+                    arq_status = 'running'
+                    arq_ok = True
+                else:
+                    arq_status = '未运行'
+            _detail(self.hosting_arq_lbl, f'ARQ: {arq_status} pid={arq_pid}', arq_ok)
+            fe = svcs.get('frontend', {})
+            _detail(self.hosting_frontend_lbl, f'前端: {fe.get("type", "—")}/{fe.get("status", "—")} pid={fe.get("pid")}', fe.get('status') in ('running', 'ready'))
+            redis_ok = self._is_redis_running()
+            _detail(self.hosting_redis_lbl, f'Redis: {"ok" if redis_ok else "已停止"}', redis_ok)
+            ready = status.get('ready')
+            _detail(self.hosting_ready_lbl, f'就绪: {ready if ready is not None else "—"}', ready)
+        finally:
+            self._after_ids['hosting'] = self.root.after(5000, self._refresh_hosting_status)
+
+    def _nssm_install(self, nssm, name, app, params, env_extra):
+        # Step 1: 创建服务（仅注册应用路径，不传参数，避免 NSSM 弹 GUI）
+        code, out = self._run_capture([nssm, 'install', name, app], timeout=30)
+        if code != 0:
+            self.log_message(f'{name} 注册失败: {out}', 'ERROR')
+            return False
+        # Step 2: 设置启动参数（NSSM AppParameters 接受空格分隔的完整命令行）
+        if params:
+            self._run_capture([nssm, 'set', name, 'AppParameters', ' '.join(params)], timeout=15)
+        # Step 3: 设置其他属性
+        settings = [
+            ('AppDirectory', str(_PROJECT_DIR)),
+            ('AppStdout', str(_PROJECT_DIR / 'logs' / f'{name}.log')),
+            ('AppStderr', str(_PROJECT_DIR / 'logs' / f'{name}.log')),
+            ('AppRotateFiles', '1'),
+            ('AppRotateBytes', '10485760'),
+            ('AppExit', 'Default Restart'),
+            ('AppRestartDelay', '5000'),
+            ('Start', 'SERVICE_AUTO_START'),
+            ('AppEnvironmentExtra', env_extra),
+            ('AppNoConsole', '1'),
+        ]
+        for key, val in settings:
+            self._run_capture([nssm, 'set', name, key, val], timeout=15)
+        self.log_message(f'{name} 已注册为 Windows 服务（开机自启 + 崩溃自动重启）')
+        return True
+
+    def _install_services(self):
+        if self._mode not in ('none',):
+            self.log_message('请先停止当前手动运行的服务，再安装 Windows 服务', 'WARNING')
+            messagebox.showwarning('提示', '请先停止当前运行中的服务（开发/手动生产/调试），再安装 Windows 服务。')
+            return
+        nssm = self._find_nssm()
+        if not nssm:
+            self.log_message('未找到 NSSM，请下载 https://nssm.cc 解压到 C:\\nssm\\nssm.exe', 'ERROR')
+            messagebox.showerror('缺少 NSSM', '未找到 NSSM。\n请从 https://nssm.cc/download 下载并解压到 C:\\nssm\\nssm.exe。')
+            return
+        if not _PYTHON_EXE:
+            messagebox.showerror('缺少 Python', '未找到 Python 解释器，无法安装服务。')
+            return
+        workers = self.hosting_workers_var.get().strip() or '4'
+        env_extra = ('APP_ENV=production FASTAPI_DEBUG=false PYTHONPATH=' + str(_PROJECT_DIR) +
+                     ' PYTHONUTF8=1 PYTHONUNBUFFERED=1 UVICORN_WORKERS=' + workers)
+        def _worker():
+            self.log_message(f'正在安装生产服务 (worker={workers})...')
+            # erp-prod 监督器 --no-arq：ARQ 由独立 erp-arq 服务托管，避免双跑定时任务
+            ok1 = self._nssm_install(nssm, _SVC_API, _PYTHON_EXE, ['-m', 'fastapi_app.core.prod_runner', '--no-arq'], env_extra)
+            ok2 = self._nssm_install(nssm, _SVC_ARQ, _PYTHON_EXE, ['-m', 'arq', 'fastapi_app.core.arq_app.WorkerSettings'], env_extra)
+            if ok1 and ok2:
+                self._msg_queue.put(('log', {'text': '生产服务安装完成：erp-prod + erp-arq（开机自启）'}))
+            else:
+                self._msg_queue.put(('log', {'text': '生产服务安装未完全成功，请查看上方日志', 'level': 'WARNING'}))
+            self._msg_queue.put(('hosting_refresh', {}))
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _service_cmd(self, verb):
+        nssm = self._find_nssm()
+        def _worker():
+            for name in (_SVC_API, _SVC_ARQ):
+                if verb == 'restart' and nssm:
+                    self._run_capture([nssm, 'restart', name], timeout=30)
+                else:
+                    if nssm:
+                        self._run_capture([nssm, verb, name], timeout=30)
+                    else:
+                        self._run_capture(['sc', verb, name], timeout=30)
+                self.log_message(f'{name} {verb} 已执行')
+            self._msg_queue.put(('hosting_refresh', {}))
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _start_services(self):
+        self._service_cmd('start')
+
+    def _stop_services(self):
+        self._service_cmd('stop')
+
+    def _restart_services(self):
+        self._service_cmd('restart')
+
+    def _uninstall_services(self):
+        nssm = self._find_nssm()
+        if not nssm:
+            messagebox.showerror('缺少 NSSM', '未找到 NSSM，无法卸载服务。')
+            return
+        def _worker():
+            for name in (_SVC_API, _SVC_ARQ):
+                if nssm:
+                    self._run_capture([nssm, 'stop', name], timeout=30)
+                else:
+                    self._run_capture(['sc', 'stop', name], timeout=30)
+                code, out = self._run_capture([nssm, 'remove', name, 'confirm'], timeout=30)
+                if code == 0:
+                    self.log_message(f'{name} 已卸载')
+                else:
+                    self.log_message(f'{name} 卸载失败: {out}', 'WARNING')
+            self._msg_queue.put(('hosting_refresh', {}))
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _open_logs_dir(self):
+        log_dir = _PROJECT_DIR / 'logs'
+        log_dir.mkdir(exist_ok=True)
+        try:
+            os.startfile(str(log_dir))
+        except Exception as e:
+            self.log_message(f'打开日志目录失败: {e}', 'ERROR')
+
     def _build_log_section(self, parent):
         log_card = tk.Frame(parent, bg=self._PALETTE['bg_card'], highlightbackground=self._PALETTE['border_card'], highlightthickness=1)
-        log_card.grid(row=2, column=0, columnspan=2, sticky='nsew', pady=(4, 0))
+        log_card.grid(row=3, column=0, columnspan=2, sticky='nsew', pady=(4, 0))
         log_card.columnconfigure(0, weight=1)
         log_card.rowconfigure(1, weight=1)
         log_hdr = tk.Frame(log_card, bg=self._PALETTE['bg_card'])

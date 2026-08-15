@@ -10,6 +10,7 @@
           contentZClass,
           maxWidthClass,
         ]"
+        @interact-outside="onInteractOutside"
       >
         <!-- 始终渲染 DialogTitle（aria-labelledby 要求），无标题时隐藏但保持可访问性 -->
         <DialogTitle
@@ -52,20 +53,28 @@
 <script setup lang="ts">
 import { DialogRoot, DialogPortal, DialogOverlay, DialogContent, DialogTitle, DialogDescription, DialogClose } from 'reka-ui'
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     open: boolean
     title?: string
     maxWidthClass?: string
     overlayZClass?: string
     contentZClass?: string
+    /** 点击遮罩/空白处是否关闭弹窗（默认 true） */
+    closeOnOverlayClick?: boolean
   }>(),
   {
     maxWidthClass: 'max-w-[800px]',
     overlayZClass: 'z-[var(--z-overlay)]',
     contentZClass: 'z-[var(--z-modal)]',
+    closeOnOverlayClick: true,
   },
 )
 
 defineEmits<{ 'update:open': [value: boolean] }>()
+
+/** 阻止点击遮罩/空白处关闭：仅当 closeOnOverlayClick 为 false 时拦截 */
+function onInteractOutside(event: Event) {
+  if (props.closeOnOverlayClick === false) event.preventDefault()
+}
 </script>

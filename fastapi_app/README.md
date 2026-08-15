@@ -136,6 +136,6 @@ alembic -c migrations/alembic.ini revision --autogenerate -m "描述"  # 生成�
 
 ## 部署
 
-- **Docker Compose**：`docker compose up -d`（见根目录 `docker-compose.yml`，含 PostgreSQL/PgBouncer/Redis×3/Celery×3/Nginx/MinIO/监控全家桶）
+- **Windows 原生部署**：`.\deploy-windows.ps1 -Env production`（见根目录 `deploy-windows.ps1`，含 PostgreSQL 流复制/PgBouncer/Redis/Celery/Nginx/监控全家桶配置）
 - **Kubernetes**：`k8s/` 目录提供生产清单
 - **环境变量**：见根目录 `.env.example`

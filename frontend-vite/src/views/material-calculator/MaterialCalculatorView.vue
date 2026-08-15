@@ -2,7 +2,6 @@
   <div class="mc-container">
     <div class="page-card page-card-main">
       <div class="page-card-header">
-        <HeaderTabs />
         <div class="mc-header-actions">
           <span class="count-badge">已选 {{ selectedProductIds.length }} 个</span>
           <button class="mc-action-btn mc-action-btn-primary" :disabled="orderItems.length === 0" @click="showBatchModal = true">
@@ -191,24 +190,18 @@
                 </button>
 
                 <div v-if="!collapsed[cat.key] && calcResults[cat.key]?.length" class="mc-category-table">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th style="text-align: left">供应商</th>
-                        <th style="text-align: left">物料名称</th>
-                        <th style="text-align: left">规格</th>
-                        <th style="text-align: right">总采购量</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="(row, ri) in calcResults[cat.key]" :key="ri">
-                        <td>{{ row.supplier_name || '-' }}</td>
-                        <td>{{ row.material_name }}</td>
-                        <td>{{ row.specification || '-' }}</td>
-                        <td class="mc-qty-cell">{{ formatFillingQty(cat.key, row) }}</td>
-                      </tr>
-                    </tbody>
-                  </table>
+                  <UiDataTable
+                    :data="calcResults[cat.key] ?? []"
+                    :columns="calcColumns"
+                    row-key="material_name"
+                  >
+                    <template #column-body-supplier_name="{ row }">{{ (row as MaterialCalcRow).supplier_name || '-' }}</template>
+                    <template #column-body-material_name="{ row }">{{ (row as MaterialCalcRow).material_name }}</template>
+                    <template #column-body-specification="{ row }">{{ (row as MaterialCalcRow).specification || '-' }}</template>
+                    <template #column-body-total_quantity="{ row }">
+                      <span class="mc-qty-cell">{{ formatFillingQty(cat.key, row as MaterialCalcRow) }}</span>
+                    </template>
+                  </UiDataTable>
                 </div>
               </div>
             </div>
@@ -247,8 +240,9 @@ import {
 } from '@/composables/useMaterialCalculator'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
+import UiDataTable from '@/components/ui/UiDataTable.vue'
+import type { TableColumn } from '@/components/ui/UiDataTable.vue'
 import VirtualList from '@/components/ui/VirtualList.vue'
-import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 
 // 填充类总采购量按克自动换算为 kg：克/g → kg，其他单位原样显示
 function formatFillingQty(catKey: string, row: MaterialCalcRow): string {
@@ -262,6 +256,14 @@ function formatFillingQty(catKey: string, row: MaterialCalcRow): string {
   }
   return `${row.total_quantity} ${row.unit}`
 }
+
+/** UiDataTable 列定义 */
+const calcColumns: TableColumn[] = [
+  { field: 'supplier_name', header: '供应商', align: 'left' },
+  { field: 'material_name', header: '物料名称', align: 'left' },
+  { field: 'specification', header: '规格', align: 'left' },
+  { field: 'total_quantity', header: '总采购量', align: 'right' },
+]
 
 const {
   orderItems,
@@ -445,10 +447,6 @@ function applyBatch() {
 
 /* === Card Header === */
 /* 卡片头部样式已迁移到全局 .page-card-header（src/styles/app.css） */
-.page-card-header :deep(.ht-bar) {
-  width: auto;
-  margin: 0;
-}
 
 /* === Three Column Body === */
 /* 卡片主体样式已迁移到全局 .page-card-body（src/styles/app.css） */
@@ -1007,38 +1005,6 @@ function applyBatch() {
   border-radius: 10px;
   overflow: hidden;
   border: 1px solid var(--color-border-light, #e2e8f0);
-}
-
-.mc-category-table table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-.mc-category-table thead th {
-  padding: 10px 14px;
-  background: var(--color-surface, #f8fafc);
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  border-bottom: 2px solid var(--color-border-light, #e2e8f0);
-}
-
-.mc-category-table tbody td {
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
-  color: var(--color-text);
-  vertical-align: middle;
-}
-
-.mc-category-table tbody tr:last-child td {
-  border-bottom: none;
-}
-
-.mc-category-table tbody tr:hover {
-  background: var(--color-surface, #f8fafc);
 }
 
 .mc-qty-cell {

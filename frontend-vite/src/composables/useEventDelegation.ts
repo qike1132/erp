@@ -32,7 +32,7 @@ export function useThrottledScroll(
   const throttled = useThrottleFn(() => {
     if (containerRef.value) callback(containerRef.value.scrollTop)
   }, 16, true)
-  useEventListener(containerRef, 'scroll', throttled, { passive: true } as any)
+  useEventListener(containerRef, 'scroll', throttled, { passive: true })
 }
 
 /**

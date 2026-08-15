@@ -110,25 +110,8 @@ const mergedItems = computed<RegItem[]>(() => {
 function fillClass(item: { progress?: number; received_quantity: number | string; ordered_quantity: number | string }) { const pct = item.progress || 0; if (pct >= 100 || Number(item.received_quantity) >= Number(item.ordered_quantity)) return 'full'; return 'low' }
 </script>
 
-<style scoped>
-/* === Detail Grid === */
-.mr-det-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 20px; }
-.mr-det-lb { font-size: 12px; color: var(--color-text-muted); margin-bottom: 6px; }
-.mr-det-vl { font-size: 15px; font-weight: 600; color: var(--color-text); }
-
-/* === Badge === */
-.mr-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 5px 12px;
-  border-radius: 20px;
-  font-size: 13px;
-  font-weight: 500;
-}
-.mr-badge-pending { background: #FEF3C7; color: #D97706; }
-.mr-badge-partial { background: var(--color-primary-50, #E8F2FF); color: var(--color-primary-600, #4A7DE8); }
-.mr-badge-completed { background: #D1FAE5; color: #059669; }
-.mr-badge-overdue { background: #FEE2E2; color: #DC2626; }
+<style scoped lang="scss">
+@use '../material-dialogs.scss' as *;
 
 /* === Progress Bar === */
 .mr-pbar { width: 160px; height: 10px; background: #E5E7EB; border-radius: 8px; overflow: hidden; }
@@ -143,53 +126,4 @@ function fillClass(item: { progress?: number; received_quantity: number | string
 .mr-sku-fill.low { background: var(--color-warning-500, #FF9F43); }
 .mr-sku-fill.zero { background: #E5E7EB; }
 .mr-sku-bar { height: 10px; background: #E5E7EB; border-radius: 8px; overflow: hidden; margin-bottom: 10px; }
-
-/* === SKU Row (Dialog) === */
-.mr-sku-row {
-  background: #FAFBFC;
-  border-radius: 10px;
-  padding: 16px 20px;
-  margin-bottom: 12px;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-}
-.mr-sku-row:hover { border-color: var(--color-primary-300); background: var(--color-primary-50, #eff6ff); }
-.mr-sku-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-.mr-sku-name { font-weight: 600; color: var(--color-text); font-size: 15px; }
-.mr-sku-spec { font-size: 13px; color: var(--color-text-secondary); margin-left: 10px; }
-.mr-sku-pct { font-size: 14px; font-weight: 600; }
-.mr-sku-info { display: flex; gap: 20px; font-size: 13px; color: var(--color-text-secondary); flex-wrap: wrap; align-items: center; }
-.mr-sku-info span b { color: var(--color-text); font-weight: 600; }
-
-/* === Buttons === */
-.mr-btn {
-  padding: 7px 14px;
-  border-radius: 9px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  border: 2px solid var(--color-border-light, #e2e8f0);
-  background: white;
-  color: var(--color-text-secondary);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.mr-btn:hover {
-  border-color: var(--color-primary-300);
-  color: var(--color-primary-600);
-  background: var(--color-primary-50);
-  transform: translateY(-1px);
-}
-.mr-btn-success {
-  border-color: var(--color-success-200, #A7F3D0);
-  color: var(--color-success-600, #059669);
-  background: var(--color-success-50, #ECFDF5);
-}
-.mr-btn-success:hover {
-  background: var(--color-success-500, #28C76F);
-  color: white;
-  border-color: transparent;
-}
-.mr-btn-sm { padding: 5px 10px; font-size: 11px; }
 </style>

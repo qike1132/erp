@@ -148,26 +148,13 @@
           </li>
         </ul>
 
-        <!-- 分页 -->
-        <div v-if="totalPages > 1" class="nc-pagination">
-          <button
-            class="nc-page-btn"
-            :disabled="page <= 1"
-            @click="goToPage(page - 1)"
-            aria-label="上一页"
-          >
-            <FontAwesomeIcon icon="chevron-left" aria-hidden="true" />
-          </button>
-          <span class="nc-page-info">{{ page }} / {{ totalPages }}</span>
-          <button
-            class="nc-page-btn"
-            :disabled="page >= totalPages"
-            @click="goToPage(page + 1)"
-            aria-label="下一页"
-          >
-            <FontAwesomeIcon icon="chevron-right" aria-hidden="true" />
-          </button>
-        </div>
+        <UiPagination
+          v-if="totalPages > 1"
+          :current-page="page"
+          :total-pages="totalPages"
+          :total-items="total"
+          @update:current-page="goToPage"
+        />
       </div>
     </div>
   </div>
@@ -752,49 +739,6 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-/* ============ 分页 ============ */
-.nc-pagination {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 16px 0 8px;
-}
-
-.nc-page-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius-button);
-  border: 1px solid var(--color-border);
-  background: var(--color-surface-card);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  font-size: 13px;
-  transition: all 0.2s ease;
-}
-
-.nc-page-btn:hover:not(:disabled) {
-  background: var(--color-primary-50);
-  border-color: var(--color-primary-200);
-  color: var(--color-primary-600);
-}
-
-.nc-page-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.nc-page-info {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--color-text-secondary);
-  min-width: 60px;
-  text-align: center;
-}
-
 /* ============ 按钮 ============ */
 .nc-btn {
   display: inline-flex;
@@ -966,11 +910,6 @@ onUnmounted(() => {
 
   .nc-select-bar {
     padding: 6px 10px;
-  }
-
-  .nc-page-btn {
-    width: 32px;
-    height: 32px;
   }
 }
 </style>

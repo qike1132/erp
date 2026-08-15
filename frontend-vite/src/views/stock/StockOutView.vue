@@ -3,18 +3,13 @@
     <div class="page-card page-card-main">
       <!-- 卡片头部 -->
       <div class="page-card-header">
-        <div class="so-header-left">
-          <HeaderTabs />
-        </div>
-        <div class="so-header-right">
-          <div class="so-tab-bar">
-            <button :class="['so-tab-btn', activeTab === 'input' && 'active']" @click="activeTab = 'input'">
-              录入
-            </button>
-            <button :class="['so-tab-btn', activeTab === 'records' && 'active']" @click="activeTab = 'records'">
-              记录查询
-            </button>
-          </div>
+        <div class="so-tab-bar">
+          <button :class="['so-tab-btn', activeTab === 'input' && 'active']" @click="activeTab = 'input'">
+            录入
+          </button>
+          <button :class="['so-tab-btn', activeTab === 'records' && 'active']" @click="activeTab = 'records'">
+            记录查询
+          </button>
         </div>
       </div>
 
@@ -26,7 +21,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import StockOutTab from './StockOutTab.vue'
-import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 
 const activeTab = ref<'input' | 'records'>('input')
 </script>
@@ -39,22 +33,6 @@ const activeTab = ref<'input' | 'records'>('input')
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-}
-.page-card-header :deep(.ht-bar) {
-  width: auto;
-  margin: 0;
-}
-.so-header-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex: 1;
-}
-.so-header-right {
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
-  gap: 8px;
 }
 .so-tab-bar {
   display: inline-flex;

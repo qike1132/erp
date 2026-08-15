@@ -19,6 +19,10 @@ exporters:
     endpoint: http://prometheus:9090/api/v1/write
   otlphttp/loki:
     endpoint: http://loki:3100/otlp
+  # traces 导出到 Loki（通过 OTLP HTTP），使 trace 数据可查询、可关联、可留存
+  # 替代原 debug exporter（仅控制台输出，无法查询）
+  otlphttp/loki-traces:
+    endpoint: http://loki:3100/otlp
   debug:
     verbosity: basic
 
@@ -27,7 +31,7 @@ service:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [debug]
+      exporters: [otlphttp/loki-traces, debug]
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, batch]

@@ -182,37 +182,28 @@
         </div>
       </div>
       <div v-if="siIsLoading && siList.length === 0" class="cs-loading"><UiSpinner /></div>
-      <div v-else-if="siList.length === 0" class="cs-empty"><FontAwesomeIcon icon="inbox" /><span>暂无入库记录</span></div>
       <template v-else>
       <div v-if="siIsFetching" class="cs-fetching-bar"><div class="cs-fetching-progress" /></div>
-      <table class="cs-table">
-        <thead>
-          <tr>
-            <th>入库日期</th>
-            <th>客户</th>
-            <th style="text-align: left">产品名称</th>
-            <th>69码</th>
-            <th style="text-align: right">数量</th>
-            <th>备注</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="row in siList" :key="row.id">
-            <td>{{ row.stockin_date }}</td>
-            <td>{{ row.customer || '-' }}</td>
-            <td style="text-align: left">{{ row.case_name }}</td>
-            <td><small>{{ row.case_barcode || '-' }}</small></td>
-            <td style="text-align: right"><strong>{{ row.quantity }}</strong></td>
-            <td><small>{{ row.note || '-' }}</small></td>
-            <td>
-              <button class="cs-icon-btn cs-icon-warning" @click="openEditModal('stockin', row)" aria-label="编辑"><FontAwesomeIcon icon="edit" /></button>
-              <button class="cs-icon-btn cs-icon-danger" :disabled="actionId === row.id" @click="handleDelete('stockin', row)" aria-label="删除"><FontAwesomeIcon icon="trash" /></button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <UiPagination v-if="siTotalPages > 1" :current-page="siPage" :total-pages="siTotalPages" @update:current-page="siPage = $event; siRefetch()" />
+      <UiDataTable
+        :data="siList"
+        :columns="siColumns"
+        :loading="siIsLoading"
+        :paginator="siTotalPages > 1"
+        :rows="siPerPage"
+        :total-records="siTotalPages * siPerPage"
+        row-key="id"
+        @page="onSiPageChange"
+      >
+        <template #empty><div class="cs-empty"><FontAwesomeIcon icon="inbox" /><span>暂无入库记录</span></div></template>
+        <template #column-body-case_name="{ row }"><span style="text-align: left; display: inline-block">{{ row.case_name }}</span></template>
+        <template #column-body-case_barcode="{ row }"><small>{{ row.case_barcode || '-' }}</small></template>
+        <template #column-body-quantity="{ row }"><strong>{{ row.quantity }}</strong></template>
+        <template #column-body-note="{ row }"><small>{{ row.note || '-' }}</small></template>
+        <template #column-body-actions="{ row }">
+          <button class="cs-icon-btn cs-icon-warning" @click="openEditModal('stockin', row)" aria-label="编辑"><FontAwesomeIcon icon="edit" /></button>
+          <button class="cs-icon-btn cs-icon-danger" :disabled="actionId === row.id" @click="handleDelete('stockin', row)" aria-label="删除"><FontAwesomeIcon icon="trash" /></button>
+        </template>
+      </UiDataTable>
       </template>
     </div>
 
@@ -249,37 +240,28 @@
         </div>
       </div>
       <div v-if="soIsLoading && soList.length === 0" class="cs-loading"><UiSpinner /></div>
-      <div v-else-if="soList.length === 0" class="cs-empty"><FontAwesomeIcon icon="inbox" /><span>暂无出库记录</span></div>
       <template v-else>
       <div v-if="soIsFetching" class="cs-fetching-bar"><div class="cs-fetching-progress" /></div>
-      <table class="cs-table">
-        <thead>
-          <tr>
-            <th>出库日期</th>
-            <th>客户</th>
-            <th style="text-align: left">产品名称</th>
-            <th>69码</th>
-            <th style="text-align: right">数量</th>
-            <th>备注</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="row in soList" :key="row.id">
-            <td>{{ row.stockout_date }}</td>
-            <td>{{ row.customer || '-' }}</td>
-            <td style="text-align: left">{{ row.case_name }}</td>
-            <td><small>{{ row.case_barcode || '-' }}</small></td>
-            <td style="text-align: right"><strong style="color: var(--color-danger-500)">{{ row.quantity }}</strong></td>
-            <td><small>{{ row.note || '-' }}</small></td>
-            <td>
-              <button class="cs-icon-btn cs-icon-warning" @click="openEditModal('stockout', row)" aria-label="编辑"><FontAwesomeIcon icon="edit" /></button>
-              <button class="cs-icon-btn cs-icon-danger" :disabled="actionId === row.id" @click="handleDelete('stockout', row)" aria-label="删除"><FontAwesomeIcon icon="trash" /></button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <UiPagination v-if="soTotalPages > 1" :current-page="soPage" :total-pages="soTotalPages" @update:current-page="soPage = $event; soRefetch()" />
+      <UiDataTable
+        :data="soList"
+        :columns="soColumns"
+        :loading="soIsLoading"
+        :paginator="soTotalPages > 1"
+        :rows="soPerPage"
+        :total-records="soTotalPages * soPerPage"
+        row-key="id"
+        @page="onSoPageChange"
+      >
+        <template #empty><div class="cs-empty"><FontAwesomeIcon icon="inbox" /><span>暂无出库记录</span></div></template>
+        <template #column-body-case_name="{ row }"><span style="text-align: left; display: inline-block">{{ row.case_name }}</span></template>
+        <template #column-body-case_barcode="{ row }"><small>{{ row.case_barcode || '-' }}</small></template>
+        <template #column-body-quantity="{ row }"><strong style="color: var(--color-danger-500)">{{ row.quantity }}</strong></template>
+        <template #column-body-note="{ row }"><small>{{ row.note || '-' }}</small></template>
+        <template #column-body-actions="{ row }">
+          <button class="cs-icon-btn cs-icon-warning" @click="openEditModal('stockout', row)" aria-label="编辑"><FontAwesomeIcon icon="edit" /></button>
+          <button class="cs-icon-btn cs-icon-danger" :disabled="actionId === row.id" @click="handleDelete('stockout', row)" aria-label="删除"><FontAwesomeIcon icon="trash" /></button>
+        </template>
+      </UiDataTable>
       </template>
     </div>
 
@@ -332,11 +314,33 @@ import UiSelect from '@/components/ui/UiSelect.vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiUpload from '@/components/ui/UiUpload.vue'
-import UiPagination from '@/components/ui/UiPagination.vue'
+import UiDataTable from '@/components/ui/UiDataTable.vue'
+import type { TableColumn } from '@/components/ui/UiDataTable.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { showToast } from '@/composables/useToast'
 import { toISODate } from '@/utils/format'
 import { useCaseStockActions } from './composables/useCaseStockActions'
+
+/** 皮套入库/出库记录项 */
+interface CaseStockRecord {
+  id: number
+  stockin_date?: string
+  stockout_date?: string
+  customer?: string
+  case_name?: string
+  case_barcode?: string
+  quantity: number
+  note?: string
+}
+
+/** 皮套入库/出库列表响应 */
+interface CaseStockListResponse {
+  stockins?: CaseStockRecord[]
+  stockouts?: CaseStockRecord[]
+  items?: CaseStockRecord[]
+  pages?: number
+  total_pages?: number
+}
 
 // === 模式 ===
 const mode = ref<'stockin' | 'stockout'>('stockin')
@@ -358,7 +362,7 @@ function switchMode(nextMode: 'stockin' | 'stockout') {
 const { data: customersData } = useQuery({
   queryKey: ['case-customer-names'],
   queryFn: async () => {
-    const res = (await customerApi.activeNames()) as any
+    const res = (await customerApi.activeNames()) as unknown as { names?: string[] } & string[]
     return res.names ?? res ?? []
   },
   staleTime: 30_000,
@@ -456,6 +460,7 @@ const siFCustomer = ref('')
 const siFStart = ref('')
 const siFEnd = ref('')
 const siPage = ref(1)
+const siPerPage = ref(10)
 const siTotalPages = ref(1)
 
 const {
@@ -464,13 +469,13 @@ const {
   isFetching: siIsFetching,
   refetch: siRefetch,
 } = useQuery({
-  queryKey: ['case-stockins', siPage, siFCustomer, siFStart, siFEnd],
+  queryKey: ['case-stockins', siPage, siFCustomer, siFStart, siFEnd, siPerPage],
   queryFn: async () => {
-    const params: Record<string, any> = { page: siPage.value, per_page: 10 }
+    const params: Record<string, any> = { page: siPage.value, per_page: siPerPage.value }
     if (siFCustomer.value) params.customer = siFCustomer.value
     if (siFStart.value) params.start_date = siFStart.value
     if (siFEnd.value) params.end_date = siFEnd.value
-    const res = (await caseApi.stockins(params)) as any
+    const res = (await caseApi.stockins(params)) as CaseStockListResponse
     siTotalPages.value = res.pages ?? res.total_pages ?? 1
     return res
   },
@@ -485,6 +490,7 @@ const soFCustomer = ref('')
 const soFStart = ref('')
 const soFEnd = ref('')
 const soPage = ref(1)
+const soPerPage = ref(10)
 const soTotalPages = ref(1)
 
 const {
@@ -493,13 +499,13 @@ const {
   isFetching: soIsFetching,
   refetch: soRefetch,
 } = useQuery({
-  queryKey: ['case-stockouts', soPage, soFCustomer, soFStart, soFEnd],
+  queryKey: ['case-stockouts', soPage, soFCustomer, soFStart, soFEnd, soPerPage],
   queryFn: async () => {
-    const params: Record<string, any> = { page: soPage.value, per_page: 10 }
+    const params: Record<string, any> = { page: soPage.value, per_page: soPerPage.value }
     if (soFCustomer.value) params.customer = soFCustomer.value
     if (soFStart.value) params.start_date = soFStart.value
     if (soFEnd.value) params.end_date = soFEnd.value
-    const res = (await caseApi.stockouts(params)) as any
+    const res = (await caseApi.stockouts(params)) as CaseStockListResponse
     soTotalPages.value = res.pages ?? res.total_pages ?? 1
     return res
   },
@@ -507,6 +513,36 @@ const {
   placeholderData: keepPreviousData,
 })
 const soList = computed(() => soData.value?.stockouts ?? soData.value?.items ?? [])
+
+/** UiDataTable 列定义 */
+const siColumns: TableColumn[] = [
+  { field: 'stockin_date', header: '入库日期', align: 'center' },
+  { field: 'customer', header: '客户', align: 'center' },
+  { field: 'case_name', header: '产品名称', align: 'left' },
+  { field: 'case_barcode', header: '69码', align: 'center' },
+  { field: 'quantity', header: '数量', align: 'right' },
+  { field: 'note', header: '备注', align: 'center' },
+  { field: 'actions', header: '操作', align: 'center' },
+]
+const soColumns: TableColumn[] = [
+  { field: 'stockout_date', header: '出库日期', align: 'center' },
+  { field: 'customer', header: '客户', align: 'center' },
+  { field: 'case_name', header: '产品名称', align: 'left' },
+  { field: 'case_barcode', header: '69码', align: 'center' },
+  { field: 'quantity', header: '数量', align: 'right' },
+  { field: 'note', header: '备注', align: 'center' },
+  { field: 'actions', header: '操作', align: 'center' },
+]
+
+/** UiDataTable 分页变化处理（PrimeVue page 为 0 索引） */
+function onSiPageChange(event: { page: number; rows: number }) {
+  siPage.value = event.page + 1
+  siPerPage.value = event.rows
+}
+function onSoPageChange(event: { page: number; rows: number }) {
+  soPage.value = event.page + 1
+  soPerPage.value = event.rows
+}
 </script>
 
 <style scoped>
@@ -806,34 +842,6 @@ const soList = computed(() => soData.value?.stockouts ?? soData.value?.items ?? 
 .cs-filter-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
 .cs-filter-field { flex: 0 0 auto; }
 .cs-filter-action { display: flex; align-items: flex-end; }
-
-/* Table */
-.cs-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-.cs-table thead th {
-  padding: 10px 14px;
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  background: var(--color-surface, #f8fafc);
-  border-bottom: 2px solid var(--color-border-light, #e2e8f0);
-  color: var(--color-text-secondary);
-  text-align: center;
-}
-.cs-table tbody td {
-  padding: 10px 14px;
-  font-size: 13px;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
-  text-align: center;
-  vertical-align: middle;
-  transition: background 0.2s ease;
-  color: var(--color-text);
-}
-.cs-table tbody tr:hover { background: var(--color-primary-50); }
 
 /* Loading & Empty */
 .cs-loading, .cs-empty {

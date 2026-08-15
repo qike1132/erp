@@ -30,6 +30,24 @@ from fastapi_app.shared_models.backup_record import BackupRecord
 logger = logging.getLogger(__name__)
 
 
+def _backup_created_time(f: Path) -> datetime:
+    """获取备份文件的真实创建时间。
+
+    优先读取伴随的 ``.meta`` 文件中的 ``created_at``（加密备份的 mtime 可能被刷新）；
+    无 meta 时回退到文件系统 mtime。
+    """
+    meta_path = f.parent / (f.name + '.meta')
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text(encoding='utf-8'))
+            created_at = meta.get('created_at')
+            if created_at:
+                return datetime.strptime(created_at, '%Y-%m-%d %H:%M:%S')
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            pass
+    return datetime.fromtimestamp(f.stat().st_mtime)
+
+
 class BackupCleanupService:
     """备份清理服务类"""
     
@@ -181,7 +199,7 @@ class BackupCleanupService:
                 if not (file_path.name.startswith('erp_backup_') or 
                         file_path.name.startswith('erp_auto_') or 
                         file_path.name.startswith('erp_incremental_')) or \
-                   not (file_path.name.endswith('.zip') or file_path.name.endswith('.json')):
+                   not (file_path.name.endswith('.zip') or file_path.name.endswith('.json') or file_path.name.endswith('.zip.enc')):
                     continue
                 
                 file_info = {
@@ -189,7 +207,7 @@ class BackupCleanupService:
                     'name': file_path.name,
                     'size_bytes': file_path.stat().st_size,
                     'size_mb': round(file_path.stat().st_size / (1024 ** 2), 2),
-                    'mtime': datetime.fromtimestamp(file_path.stat().st_mtime),
+                    'mtime': _backup_created_time(file_path),
                     'is_incremental': 'incremental' in file_path.name,
                     'is_manual': file_path.name.startswith('erp_backup_'),
                     'is_auto': file_path.name.startswith('erp_auto_'),
@@ -199,8 +217,8 @@ class BackupCleanupService:
                     'recovery_test_passed': None
                 }
                 
-                # 尝试读取manifest获取更多信息
-                if file_path.name.endswith('.zip'):
+                # 尝试读取manifest获取更多信息（加密备份 .enc 无法直接读取，跳过）
+                if file_path.name.endswith('.zip') and not file_path.name.endswith('.zip.enc'):
                     try:
                         import zipfile
                         with zipfile.ZipFile(file_path, 'r') as zf:
@@ -301,7 +319,7 @@ class BackupCleanupService:
             for prefix in ['erp_backup_', 'erp_auto_daily_', 'erp_incremental_']:
                 ts_str = ts_str.replace(prefix, '')
             
-            for suffix in ['.zip', '.json']:
+            for suffix in ['.zip', '.json', '.enc']:
                 ts_str = ts_str.replace(suffix, '')
             
             # 检查是否为有效时间戳格式 (YYYYMMDD_HHMMSS)

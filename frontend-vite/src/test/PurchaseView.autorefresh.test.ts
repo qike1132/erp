@@ -63,7 +63,6 @@ const stubs = {
   OrderDetailModal: { template: '<div />' },
   SummaryModal: { template: '<div />' },
   UiConfirmDialog: { template: '<div />' },
-  HeaderTabs: { template: '<div />' },
 }
 
 import PurchaseView from '@/views/purchase/PurchaseView.vue'
@@ -93,7 +92,13 @@ describe('PurchaseView auto-refresh orders filter (regression for BUG-PURCHASE-C
 
   it('auto-refresh callback also includes status=pending,confirmed (BUG-PURCHASE-COUNT regression guard)', async () => {
     vi.useFakeTimers()
-    mount(PurchaseView, { global: { stubs } })
+    const wrapper = mount(PurchaseView, { global: { stubs } })
+    await flushPromises()
+
+    // Auto-refresh only calls purchaseApi.orders() on the "待生产订单" tab.
+    const activeTab = wrapper.findAll('button.pc-tab-btn').find((b) => b.text().includes('待生产订单'))
+    expect(activeTab, 'active tab button should exist').toBeTruthy()
+    await activeTab!.trigger('click')
     await flushPromises()
 
     // Isolate auto-refresh-driven calls

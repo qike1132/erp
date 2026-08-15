@@ -43,6 +43,11 @@
         @blur="onAddConfirm"
       />
     </div>
+
+    <!-- 行尾操作区（录入信息/打印等，推至最右） -->
+    <div v-if="$slots.actions" class="role-tabs-actions">
+      <slot name="actions" />
+    </div>
   </div>
 </template>
 
@@ -101,6 +106,14 @@ watch(adding, (v) => {
   padding: 4px;
   border-bottom: 1px solid var(--color-border-light, #f0f2f5);
   flex-wrap: wrap;
+}
+
+/* 行尾操作区：推至同一行最右边 */
+.role-tabs-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .role-tab {

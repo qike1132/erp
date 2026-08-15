@@ -270,16 +270,26 @@ async def get_grouped_list(
     *,
     keyword: str | None = None,
     pattern_maker_id: int | None = None,
+    status: str | None = None,
+    page: int = 1,
+    per_page: int = 20,
 ) -> dict:
-    """按版师分组聚合查询打样项目列表
+    """按版师分组聚合查询打样项目列表（分页）
 
     - 未关联版师的项目归入"未分类"分组
     - 分组间按组内最新 updated_at 倒序，"未分类"始终最后
     - 组内项目按 updated_at 倒序
+    - status 缺省（None）时默认仅返回"进行中"项目（前端漏传状态时的兜底）
+    - 显式传 'all' 返回全部状态的项目；传 in_progress/completed/cancelled 按对应状态过滤
+    - page/per_page 控制分页，对全部项目全局分页后再按版师分组
 
     Returns:
         GroupedListResponse dict
     """
+    # status 缺省时默认按"进行中"过滤（兜底），显式传 'all' 可返回全部状态
+    if status is None:
+        status = 'in_progress'
+
     # 构建查询条件
     conditions = []
     if keyword:
@@ -292,14 +302,26 @@ async def get_grouped_list(
         )
     if pattern_maker_id is not None:
         conditions.append(CustomerSamplingProject.pattern_maker_id == pattern_maker_id)
+    if status != 'all':
+        conditions.append(CustomerSamplingProject.status == status)
 
-    # 查询所有项目（含版师关联，避免 N+1）
+    # 计算总数
+    count_query = select(func.count()).select_from(CustomerSamplingProject)
+    for cond in conditions:
+        count_query = count_query.where(cond)
+    total = (await db.execute(count_query)).scalar_one()
+
+    # 分页
+    pages = max(1, (total + per_page - 1) // per_page)
+    page = max(1, min(page, pages))
+
+    # 查询当前页项目（含版师关联，避免 N+1）
     query = select(CustomerSamplingProject).options(
         selectinload(CustomerSamplingProject.pattern_maker),
     )
     for cond in conditions:
         query = query.where(cond)
-    query = query.order_by(CustomerSamplingProject.updated_at.desc()).limit(_GROUPED_LIST_MAX_PROJECTS)
+    query = query.order_by(CustomerSamplingProject.updated_at.desc()).offset((page - 1) * per_page).limit(per_page)
 
     result = await db.execute(query)
     projects = result.scalars().all()
@@ -354,6 +376,9 @@ async def get_grouped_list(
         'success': True,
         'groups': groups,
         'total_projects': len(projects),
+        'total': total,
+        'pages': pages,
+        'current_page': page,
     }
 
 
@@ -390,9 +415,14 @@ async def list_projects(
 ) -> dict:
     """分页查询打样项目列表
 
-    keyword 匹配序列号与产品名称（ILIKE），pattern_maker_id 筛选版师，
-    status 筛选状态（in_progress/completed/cancelled）
+    keyword 匹配序列号与产品名称（ILIKE），pattern_maker_id 筛选版师。
+    status 缺省（None）时默认仅返回"进行中"项目（与 grouped-list 一致，前端漏传状态时的兜底）；
+    显式传 'all' 返回全部状态的项目；传 in_progress/completed/cancelled 按对应状态过滤。
     """
+    # status 缺省时默认按"进行中"过滤（兜底），显式传 'all' 可返回全部状态
+    if status is None:
+        status = 'in_progress'
+
     conditions = []
     if keyword:
         like = f'%{keyword}%'
@@ -404,7 +434,7 @@ async def list_projects(
         )
     if pattern_maker_id is not None:
         conditions.append(CustomerSamplingProject.pattern_maker_id == pattern_maker_id)
-    if status is not None:
+    if status != 'all':
         conditions.append(CustomerSamplingProject.status == status)
 
     # 计算总数
@@ -444,10 +474,12 @@ async def get_completed_table(
     *,
     keyword: str | None = None,
     pattern_maker_id: int | None = None,
+    page: int = 1,
+    per_page: int = 20,
 ) -> dict:
     """查询已完成打样项目表格数据（含部位数量统计与操作人）
 
-    返回按 updated_at 倒序的已完成项目列表，每行含：
+    返回按 updated_at 倒序的已完成项目列表（分页），每行含：
     - 项目基本信息（id, sequence_no, product_name, pattern_maker_name）
     - completed_at（完成时间）
     - parts_count（该项目所有角色的部位总数）
@@ -456,6 +488,8 @@ async def get_completed_table(
     Args:
         keyword: 关键词（序列号/产品名 ILIKE）
         pattern_maker_id: 版师 ID 筛选
+        page: 页码（从 1 开始）
+        per_page: 每页条数
     """
     # 构建查询条件
     conditions = [CustomerSamplingProject.status == 'completed']
@@ -470,18 +504,24 @@ async def get_completed_table(
     if pattern_maker_id is not None:
         conditions.append(CustomerSamplingProject.pattern_maker_id == pattern_maker_id)
 
-    # 查询项目（含版师关联）
+    # 统计总条数（用于分页）
+    count_query = select(func.count()).select_from(CustomerSamplingProject).where(*conditions)
+    total = (await db.execute(count_query)).scalar_one()
+    if total == 0:
+        return {'success': True, 'items': [], 'total': 0, 'pages': 0, 'current_page': page}
+
+    # 查询项目（含版师关联），按页码分页
     query = (
         select(CustomerSamplingProject)
         .options(selectinload(CustomerSamplingProject.pattern_maker))
         .where(*conditions)
         .order_by(CustomerSamplingProject.updated_at.desc())
+        .offset((page - 1) * per_page)
+        .limit(per_page)
     )
     result = await db.execute(query)
     projects = result.scalars().all()
-
-    if not projects:
-        return {'success': True, 'items': [], 'total': 0}
+    pages = (total + per_page - 1) // per_page
 
     # 统计部位数量：按 project_id 聚合 count
     project_ids = [p.id for p in projects]
@@ -525,7 +565,13 @@ async def get_completed_table(
             'status': 'completed',
         })
 
-    return {'success': True, 'items': items, 'total': len(items)}
+    return {
+        'success': True,
+        'items': items,
+        'total': total,
+        'pages': pages,
+        'current_page': page,
+    }
 
 
 async def get_project_detail(db: AsyncSession, project_id: int) -> dict:

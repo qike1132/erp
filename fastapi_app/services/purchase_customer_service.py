@@ -4,7 +4,7 @@
 从 purchase_center_service.py 拆分，保留原始导入路径的向后兼容。
 """
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timezone, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -95,7 +95,7 @@ async def get_customers_statistics(db: AsyncSession) -> dict:
     if hasattr(Customer, 'update_time'):
         recent_result = await db.execute(
             select(func.count(Customer.id)).where(
-                Customer.update_time >= datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)
+                Customer.update_time >= datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             )
         )
         recently_updated = recent_result.scalar()

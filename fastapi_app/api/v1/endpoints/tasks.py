@@ -141,8 +141,10 @@ async def async_import_orders(
         tmp_path = tmp.name
 
     from fastapi_app.tasks.batch_tasks import batch_import_orders_task
-    task = batch_import_orders_task.delay(tmp_path, file.filename, user_id=current_user.id)
-    task_id_str = task.id
+    from fastapi_app.core.arq_app import get_arq_pool
+    pool = await get_arq_pool()
+    job = await pool.enqueue_job(batch_import_orders_task.__name__, tmp_path, file.filename, current_user.id)
+    task_id_str = job.job_id if job else ''
 
     return {
         "success": True,
@@ -166,8 +168,10 @@ async def async_import_stockins(
         tmp_path = tmp.name
 
     from fastapi_app.tasks.batch_tasks import batch_import_stockins_task
-    task = batch_import_stockins_task.delay(tmp_path, file.filename, user_id=current_user.id)
-    task_id_str = task.id
+    from fastapi_app.core.arq_app import get_arq_pool
+    pool = await get_arq_pool()
+    job = await pool.enqueue_job(batch_import_stockins_task.__name__, tmp_path, file.filename, current_user.id)
+    task_id_str = job.job_id if job else ''
 
     return {
         "success": True,
@@ -189,6 +193,7 @@ async def async_export_report(
         raise HTTPException(status_code=400, detail=f"不支持的报表类型: {request.report_type}")
 
     from fastapi_app.tasks.report_tasks import export_report_task
+    from fastapi_app.core.arq_app import get_arq_pool
 
     filters = {
         "customer": request.customer,
@@ -198,13 +203,15 @@ async def async_export_report(
         "end_date": request.end_date,
     }
 
-    task = export_report_task.delay(request.report_type, filters, user_id=current_user.id)
+    pool = await get_arq_pool()
+    job = await pool.enqueue_job(export_report_task.__name__, request.report_type, filters, current_user.id)
+    task_id = job.job_id if job else ''
 
     return {
         "success": True,
         "message": "报表导出任务已提交",
-        "task_id": task.id,
-        "status_url": f"/api/v1/tasks/status/{task.id}",
+        "task_id": task_id,
+        "status_url": f"/api/v1/tasks/status/{task_id}",
     }
 
 

@@ -2,9 +2,6 @@
   <div class="ap-container">
     <div class="page-card page-card-main">
       <!-- 卡片头部 -->
-      <div class="page-card-header">
-        <HeaderTabs />
-      </div>
 
       <!-- 统计卡片 -->
       <div v-if="stats" class="ap-stats">
@@ -91,15 +88,13 @@
           </tbody>
         </table>
 
-        <!-- Pagination -->
-        <div v-if="totalItems > perPage" class="ap-pagination">
-          <button class="ap-page-btn" :disabled="currentPage <= 1" @click="goPage(1)" aria-label="首页"><FontAwesomeIcon icon="angle-double-left" aria-hidden="true" /></button>
-          <button class="ap-page-btn" :disabled="currentPage <= 1" @click="goPage(currentPage - 1)" aria-label="上一页"><FontAwesomeIcon icon="angle-left" aria-hidden="true" /></button>
-          <span class="ap-page-info">{{ currentPage }} / {{ totalPages }}</span>
-          <button class="ap-page-btn" :disabled="currentPage >= totalPages" @click="goPage(currentPage + 1)" aria-label="下一页"><FontAwesomeIcon icon="angle-right" aria-hidden="true" /></button>
-          <button class="ap-page-btn" :disabled="currentPage >= totalPages" @click="goPage(totalPages)" aria-label="末页"><FontAwesomeIcon icon="angle-double-right" aria-hidden="true" /></button>
-          <span class="ap-page-total">共 {{ totalItems }} 条</span>
-        </div>
+        <UiPagination
+          v-if="totalItems > perPage"
+          :current-page="currentPage"
+          :total-pages="totalPages"
+          :total-items="totalItems"
+          @update:current-page="goPage"
+        />
       </div>
     </div>
 
@@ -134,7 +129,6 @@ import { ref, computed, onUnmounted } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { approvalApi } from '@/api'
 import UiDialog from '@/components/ui/UiDialog.vue'
-import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 import { showToast } from '@/composables/useToast'
 
 /** 审批记录行数据 */
@@ -323,10 +317,6 @@ async function handleReject() {
 
 /* Card Header */
 /* 卡片头部样式已迁移到全局 .page-card-header（src/styles/app.css） */
-.page-card-header :deep(.ht-bar) {
-  width: auto;
-  margin: 0;
-}
 .ap-card-title-group {
   display: flex;
   align-items: center;
@@ -598,45 +588,6 @@ async function handleReject() {
   box-shadow: 0 0 0 4px rgba(0, 148, 191, 0.1);
 }
 
-/* === Pagination === */
-.ap-pagination {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 12px 24px;
-  border-top: 1px solid var(--color-border-light, #f1f5f9);
-}
-.ap-page-btn {
-  padding: 6px 10px;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  border-radius: 6px;
-  background: white;
-  cursor: pointer;
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  transition: border-color 0.2s, color 0.2s;
-}
-.ap-page-btn:hover:not(:disabled) {
-  border-color: var(--color-primary-300);
-  color: var(--color-primary-600);
-}
-.ap-page-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-.ap-page-info {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text);
-  min-width: 80px;
-  text-align: center;
-}
-.ap-page-total {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  margin-left: 8px;
-}
 .ap-search-clear {
   position: absolute;
   right: 10px;

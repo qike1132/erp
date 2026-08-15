@@ -50,7 +50,7 @@ PERMISSION_URL_MAP = {
 }
 
 # 分区显示顺序
-SECTION_ORDER = ['purchase', 'purchase_tools', 'core', 'data', 'system']
+SECTION_ORDER = ['dev', 'hubei', 'purchase', 'purchase_tools', 'core', 'data', 'system']
 
 # 两级缓存
 _nav_local_cache = {"data": None, "cached_at": 0.0}

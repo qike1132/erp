@@ -8,7 +8,7 @@ Task 3（多 SKU 订单聚合）：按 customer 分组，同一客户的多个 S
 1 个主订单（Order）+ N 个 OrderItem，库存抵扣按 OrderItem 粒度执行。
 """
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -146,7 +146,7 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                     product_id=first_item['product_id'],  # NOT NULL 兼容，新代码应读 order.items
                     customer=customer,
                     quantity=total_quantity,  # 兼容旧代码读取 order.quantity
-                    order_date=datetime.now(UTC).replace(tzinfo=None),  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+                    order_date=datetime.now(timezone.utc).replace(tzinfo=None),  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
                     status='待备货',
                     note='',  # 主订单级 note 留空，SKU 级 note 在 OrderItem
                     order_type=first_item['order_type'],
@@ -179,7 +179,7 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                         product_id=it['product_id'],
                         change_type='订单创建',
                         change_quantity=it['quantity'],
-                        change_date=datetime.now(UTC).replace(tzinfo=None),  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+                        change_date=datetime.now(timezone.utc).replace(tzinfo=None),  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
                         customer=customer,
                         related_id=str(order.id),
                         note=f'批量创建订单 {order.order_no} - SKU {product.name}',

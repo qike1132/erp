@@ -269,17 +269,13 @@ type OutsourceOrderRow = OrderItem & {
 const props = defineProps<{
   productFilter: string
   customerFilter: string
-  /** 外发工序状态筛选：''=全部 / pending=待开始 / in_progress=进行中 / completed=已完成 */
-  processStatusFilter?: string
 }>()
 
 const appliedProduct = ref(props.productFilter)
 const appliedCustomer = ref(props.customerFilter)
-const appliedProcessStatus = ref(props.processStatusFilter ?? '')
 
 watch(() => props.productFilter, (v) => { appliedProduct.value = v })
 watch(() => props.customerFilter, (v) => { appliedCustomer.value = v; page.value = 1 })
-watch(() => props.processStatusFilter, (v) => { appliedProcessStatus.value = v ?? ''; page.value = 1 })
 
 const page = ref(1)
 const currentPage = computed(() => page.value)
@@ -290,11 +286,10 @@ const {
   isFetching,
   refetch,
 } = useQuery({
-  queryKey: ['outsource-orders', appliedCustomer, appliedProcessStatus, () => page.value, () => perPage.value],
+  queryKey: ['outsource-orders', appliedCustomer, () => page.value, () => perPage.value],
   queryFn: () =>
     outsourceApi.orders({
       customer: appliedCustomer.value || undefined,
-      process_status: appliedProcessStatus.value || undefined,
       page: page.value,
       per_page: perPage.value,
     }),

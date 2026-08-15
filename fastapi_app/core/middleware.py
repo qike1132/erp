@@ -118,11 +118,15 @@ def _setup_csrf(app: FastAPI) -> None:
 
         @app.middleware("http")
         async def conditional_csrf_middleware(request: Request, call_next):
-            # 内网 IP 请求完全豁免 CSRF 检查（局域网环境无需 CSRF 防护）
-            client_ip = request.client.host if request.client else None
-            if client_ip and _is_lan_ip(client_ip):
-                response = await call_next(request)
-                return response
+            # CSRF 内网豁免：仅开发环境保留（纯内网直连调试场景）
+            # 生产环境必须经过 Nginx/Ingress 反代，request.client.host 为真实客户端 IP，
+            # 内网豁免会使所有反代请求绕过 CSRF，导致全局失效。生产环境一律执行 CSRF 校验。
+            _is_production = os.getenv("APP_ENV") == "production"
+            if not _is_production:
+                client_ip = request.client.host if request.client else None
+                if client_ip and _is_lan_ip(client_ip):
+                    response = await call_next(request)
+                    return response
 
             is_login_endpoint = request.url.path == "/api/v1/auth/login"
             is_logout_endpoint = request.url.path == "/api/v1/auth/logout"

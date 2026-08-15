@@ -9,7 +9,7 @@ import logging
 import os
 import tempfile
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import delete, func, select
@@ -245,7 +245,7 @@ def _build_stockin_entity(
     fields: dict, session_id: str, product_id: int | None, qty: int,
     is_validated: bool, validation_error: str, product_name: str,
 ) -> StagingStockIn:
-    stockin_date = parse_date_value(fields.get('stockin_date')) or datetime.now(UTC).replace(tzinfo=None)
+    stockin_date = parse_date_value(fields.get('stockin_date')) or datetime.now(timezone.utc).replace(tzinfo=None)
     return StagingStockIn(
         session_id=session_id,
         customer=str(fields.get('customer', '')).strip(),
@@ -265,7 +265,7 @@ def _build_stockout_entity(
     fields: dict, session_id: str, product_id: int | None, qty: int,
     is_validated: bool, validation_error: str, product_name: str,
 ) -> StagingStockOut:
-    stockout_date = parse_date_value(fields.get('stockout_date')) or datetime.now(UTC).replace(tzinfo=None)
+    stockout_date = parse_date_value(fields.get('stockout_date')) or datetime.now(timezone.utc).replace(tzinfo=None)
     customer = str(fields.get('customer', '')).strip()
 
     country_val = fields.get('country', '')
@@ -315,14 +315,14 @@ def _stockout_extra_updates(entity, data: dict, _db: AsyncSession) -> None:
         # extra_updates runs after quantity is set; perform stock check here
         pass
     if 'stockout_date' in data:
-        entity.stockout_date = parse_date_value(data['stockout_date']) or datetime.now(UTC).replace(tzinfo=None)
+        entity.stockout_date = parse_date_value(data['stockout_date']) or datetime.now(timezone.utc).replace(tzinfo=None)
     if 'note' in data:
         entity.note = data['note']
 
 
 def _stockin_extra_updates(entity, data: dict, _db: AsyncSession) -> None:
     if 'stockin_date' in data:
-        entity.stockin_date = parse_date_value(data['stockin_date']) or datetime.now(UTC).replace(tzinfo=None)
+        entity.stockin_date = parse_date_value(data['stockin_date']) or datetime.now(timezone.utc).replace(tzinfo=None)
     if 'note' in data:
         entity.note = data['note']
 
@@ -425,7 +425,7 @@ async def confirm_staging_orders(
                     order = Order(
                         order_no=order_no,
                         customer=staging.customer,
-                        order_date=staging.order_date or datetime.now(UTC).replace(tzinfo=None),
+                        order_date=staging.order_date or datetime.now(timezone.utc).replace(tzinfo=None),
                         product_id=staging.product_id,
                         quantity=staging.quantity,
                         note=staging.note,
@@ -579,7 +579,7 @@ async def confirm_staging_stockins(
 
                 stockin = StockIn(
                     stockin_no=stockin_no,
-                    stockin_date=staging.stockin_date or datetime.now(UTC).replace(tzinfo=None),
+                    stockin_date=staging.stockin_date or datetime.now(timezone.utc).replace(tzinfo=None),
                     customer=staging.customer,
                     product_id=staging.product_id,
                     quantity=staging.quantity,
@@ -742,7 +742,7 @@ async def confirm_staging_stockouts(
                         stockout_no = await generate_stockout_number(db)
                         stockout = StockOut(
                             stockout_no=stockout_no,
-                            stockout_date=staging.stockout_date or datetime.now(UTC).replace(tzinfo=None),
+                            stockout_date=staging.stockout_date or datetime.now(timezone.utc).replace(tzinfo=None),
                             product_id=staging.product_id,
                             quantity=ship_qty,
                             customer=staging.customer,

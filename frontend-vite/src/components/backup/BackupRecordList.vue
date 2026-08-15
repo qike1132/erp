@@ -44,24 +44,13 @@
       </div>
     </div>
 
-    <!-- Pagination -->
-    <div v-if="total > pageSize" class="brl-pagination">
-      <button
-        class="brl-page-btn"
-        :disabled="page <= 1"
-        @click="$emit('page-change', page - 1)"
-       aria-label="上一页">
-        <FontAwesomeIcon icon="chevron-left" aria-hidden="true" />
-      </button>
-      <span class="brl-page-info">{{ page }} / {{ Math.ceil(total / pageSize) }}</span>
-      <button
-        class="brl-page-btn"
-        :disabled="page >= Math.ceil(total / pageSize)"
-        @click="$emit('page-change', page + 1)"
-      >
-        <FontAwesomeIcon icon="chevron-right" aria-hidden="true" />
-      </button>
-    </div>
+    <UiPagination
+      v-if="total > pageSize"
+      :current-page="page"
+      :total-pages="Math.ceil(total / pageSize)"
+      :total-items="total"
+      @update:current-page="$emit('page-change', $event)"
+    />
   </div>
 </template>
 
@@ -279,41 +268,4 @@ function formatSize(bytes: number): string {
   border-top: 1px solid var(--color-border-light);
 }
 
-.brl-pagination {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 8px 0;
-}
-
-.brl-page-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  border: 1px solid var(--color-border-light);
-  background: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: border-color 0.2s ease, color 0.2s ease;
-  font-size: 11px;
-  color: var(--color-text-secondary);
-}
-
-.brl-page-btn:hover:not(:disabled) {
-  border-color: var(--color-primary-400);
-  color: var(--color-primary-600);
-}
-
-.brl-page-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.brl-page-info {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-}
 </style>

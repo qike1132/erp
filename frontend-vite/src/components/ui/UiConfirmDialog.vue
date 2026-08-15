@@ -1,5 +1,5 @@
 <template>
-  <UiDialog :open="open" max-width-class="max-w-[420px]" @update:open="onOpenUpdate">
+  <UiDialog :open="open" max-width-class="max-w-[420px]" :close-on-overlay-click="closeOnOverlayClick" @update:open="onOpenUpdate">
     <div class="p-8">
       <div :class="['w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl', iconBgClass]">
         <i :class="iconClass" aria-hidden="true" />
@@ -29,9 +29,12 @@ const props = withDefaults(
     text: string
     sub?: string
     type?: 'danger' | 'warning'
+    /** 点击遮罩/空白处是否关闭弹窗（默认 true） */
+    closeOnOverlayClick?: boolean
   }>(),
   {
     type: 'danger',
+    closeOnOverlayClick: true,
   },
 )
 

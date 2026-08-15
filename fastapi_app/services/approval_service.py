@@ -11,7 +11,7 @@ order.country（审批同意/拒绝/撤销等逻辑）。多 SKU 模型下这些
 """
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, or_, select
@@ -45,7 +45,7 @@ _MAX_PER_PAGE = 100
 
 def _utcnow() -> datetime:
     """返回当前 UTC 时间（naive，匹配 DB 列类型 TIMESTAMP WITHOUT TIME ZONE）。"""
-    return datetime.now(UTC).replace(tzinfo=None)
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 async def get_approval_list(

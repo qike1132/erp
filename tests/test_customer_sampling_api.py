@@ -27,6 +27,9 @@ _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
+# 测试专用数据库（conftest 计算得出，与开发库 erp_system 隔离，避免种子数据污染）
+from conftest import TEST_DATABASE_URL
+
 
 # API 前缀
 API_PREFIX = "/api/v1/pattern-room"
@@ -45,7 +48,7 @@ async def cs_api():
     from fastapi_app.main import app
     from fastapi_app.shared_models import Base
 
-    engine = create_async_engine(settings.ASYNC_DATABASE_URL, echo=False, pool_pre_ping=True)
+    engine = create_async_engine(TEST_DATABASE_URL, echo=False, pool_pre_ping=True)
     try:
         # 确保表存在（幂等）
         async with engine.begin() as conn:
@@ -163,6 +166,31 @@ class TestCustomerSamplingApi:
         data = resp.json()
         assert data["total_projects"] == 1
 
+    async def test_grouped_list_default_in_progress(self, cs_api):
+        """GET /grouped-list status 缺省默认只返回进行中项目（前端漏传状态时的兜底）"""
+        client, _ = cs_api
+        pid_done, _ = await _create_project_via_api(client, "兜底已完成")
+        pid_active, _ = await _create_project_via_api(client, "兜底进行中")
+        resp = await client.put(
+            f"{API_PREFIX}/projects/{pid_done}/status",
+            json={"status": "completed"},
+        )
+        assert resp.status_code == 200
+
+        # 不传 status：只返回进行中项目
+        resp = await client.get(f"{API_PREFIX}/grouped-list")
+        assert resp.status_code == 200
+        data = resp.json()
+        projects = [p for g in data["groups"] for p in g["projects"]]
+        assert all(p["status"] == "in_progress" for p in projects)
+        assert all(p["id"] != pid_done for p in projects)
+        assert any(p["id"] == pid_active for p in projects)
+
+        # 显式 status=all：返回全部状态项目
+        resp_all = await client.get(f"{API_PREFIX}/grouped-list", params={"status": "all"})
+        assert resp_all.status_code == 200
+        assert resp_all.json()["total_projects"] == 2
+
     # ==================== 2. 打样项目列表 ====================
 
     async def test_list_projects(self, cs_api):
@@ -190,6 +218,30 @@ class TestCustomerSamplingApi:
         assert data["total"] == 3
         assert len(data["items"]) == 2
         assert data["pages"] == 2
+
+    async def test_list_projects_default_in_progress(self, cs_api):
+        """GET /projects status 缺省默认只返回进行中项目（与 grouped-list 一致）"""
+        client, _ = cs_api
+        pid_done, _ = await _create_project_via_api(client, "列表兜底已完成")
+        pid_active, _ = await _create_project_via_api(client, "列表兜底进行中")
+        resp = await client.put(
+            f"{API_PREFIX}/projects/{pid_done}/status",
+            json={"status": "completed"},
+        )
+        assert resp.status_code == 200
+
+        # 不传 status：只返回进行中项目
+        resp = await client.get(f"{API_PREFIX}/projects")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert all(item["status"] == "in_progress" for item in data["items"])
+        assert all(item["id"] != pid_done for item in data["items"])
+        assert any(item["id"] == pid_active for item in data["items"])
+
+        # 显式 status=all：返回全部状态项目
+        resp_all = await client.get(f"{API_PREFIX}/projects", params={"status": "all"})
+        assert resp_all.status_code == 200
+        assert resp_all.json()["total"] == 2
 
     # ==================== 3. 打样项目详情 ====================
 
@@ -300,10 +352,10 @@ class TestCustomerSamplingApi:
         assert resp.status_code == 200
         assert resp.json()["success"] is True
 
-        # 详情与分组摘要均带 completed
+        # 详情与分组摘要均带 completed（分组接口 status 缺省默认只返回进行中，此处显式传 status=all 才能看到已完成项目）
         detail = (await client.get(f"{API_PREFIX}/projects/{pid}")).json()
         assert detail["status"] == "completed"
-        grouped = (await client.get(f"{API_PREFIX}/grouped-list")).json()
+        grouped = (await client.get(f"{API_PREFIX}/grouped-list", params={"status": "all"})).json()
         summary = next(
             p for g in grouped["groups"] for p in g["projects"] if p["id"] == pid
         )
@@ -374,12 +426,52 @@ class TestCustomerSamplingApi:
         data = resp.json()
         assert data["success"] is True
         assert data["total"] >= 1
+        assert "pages" in data
+        assert "current_page" in data
         row = next((r for r in data["items"] if r["id"] == pid), None)
         assert row is not None
         assert row["status"] == "completed"
         assert row["completed_at"] is not None
         assert "parts_count" in row
         assert row["sequence_no"] != ""
+
+    async def test_completed_table_endpoint_pagination(self, cs_api):
+        """GET /projects/completed-table 服务端分页"""
+        client, _ = cs_api
+        for i in range(3):
+            pid, _ = await _create_project_via_api(client, f"表格分页产品{i}")
+            resp = await client.put(
+                f"{API_PREFIX}/projects/{pid}/status",
+                json={"status": "completed"},
+            )
+            assert resp.status_code == 200
+
+        # 默认返回全部（per_page=20），total 为已完成总数
+        resp = await client.get(f"{API_PREFIX}/projects/completed-table")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] >= 3
+
+        # per_page=1 时 items 长度受限，total/pages 反映总数据
+        resp = await client.get(
+            f"{API_PREFIX}/projects/completed-table",
+            params={"page": 1, "per_page": 1},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == data["pages"]  # 每页1条时 pages == total
+        assert len(data["items"]) == 1
+        assert data["current_page"] == 1
+
+        # 越界页返回空 items，但 total 不变
+        resp = await client.get(
+            f"{API_PREFIX}/projects/completed-table",
+            params={"page": 999, "per_page": 1},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] >= 1
+        assert data["items"] == []
 
     async def test_completed_table_endpoint_keyword(self, cs_api):
         """GET /projects/completed-table 关键词筛选"""
@@ -400,25 +492,6 @@ class TestCustomerSamplingApi:
         data = resp.json()
         assert data["total"] == 1
         assert data["items"][0]["id"] == pid
-
-    async def test_completed_table_export(self, cs_api):
-        """GET /projects/completed-table/export 导出 Excel"""
-        client, _ = cs_api
-        pid, _ = await _create_project_via_api(client, "导出产品")
-        resp = await client.put(
-            f"{API_PREFIX}/projects/{pid}/status",
-            json={"status": "completed"},
-        )
-        assert resp.status_code == 200
-
-        resp = await client.get(f"{API_PREFIX}/projects/completed-table/export")
-        assert resp.status_code == 200
-        assert resp.headers["content-type"].startswith(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-        assert "attachment" in resp.headers.get("content-disposition", "")
-        # 内容非空
-        assert len(resp.content) > 0
 
     # ==================== 6. 删除打样项目 ====================
 

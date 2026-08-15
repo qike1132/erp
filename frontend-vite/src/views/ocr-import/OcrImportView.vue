@@ -80,7 +80,7 @@ const { data: progressData } = useQuery({
   queryKey: ['ocr-progress', taskId],
   queryFn: async () => {
     if (!taskId.value) return null
-    const res = (await ocrApi.progress(taskId.value)) as any
+    const res = (await ocrApi.progress(taskId.value)) as { progress: number; status: string; percentage?: number; success_count?: number; errors?: string[] }
     progress.value = res.percentage ?? 0
     if (res.status === 'completed') {
       progressStatus.value = 'success'
@@ -97,7 +97,7 @@ const { data: progressData } = useQuery({
   },
   enabled: () => !!taskId.value && progressStatus.value === '',
   refetchInterval: (query) => {
-    const data = query.state.data as any
+    const data = query.state.data as { percentage?: number; status: string } | null
     if (data?.status === 'completed' || data?.status === 'failed') return false
     return 800
   },
@@ -105,7 +105,7 @@ const { data: progressData } = useQuery({
 
 async function handleUpload(options: UploadOptions) {
   try {
-    const createRes = (await ocrApi.createTask()) as any
+    const createRes = (await ocrApi.createTask()) as unknown as { task_id?: string; session_id?: string }
     const sid = createRes.task_id ?? createRes.session_id
     if (!sid) {
       showToast('创建任务失败', 'error')

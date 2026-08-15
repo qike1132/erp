@@ -103,6 +103,7 @@ class MaterialRegistration(Base):
             'product_name': self.purchase_order.product_name if self.purchase_order else None,
             'product_quantity': float(self.purchase_order.product_quantity) if self.purchase_order and self.purchase_order.product_quantity else None,
             'po_status': self.purchase_order.status if self.purchase_order else None,
+            'po_create_time': self.purchase_order.create_time.strftime('%Y-%m-%d %H:%M') if self.purchase_order and self.purchase_order.create_time else '',
             'item_count': len(items_list),
             'total_ordered': total_ordered,
             'total_received': total_received,

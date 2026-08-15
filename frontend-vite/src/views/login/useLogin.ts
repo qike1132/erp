@@ -59,6 +59,8 @@ export function useLogin() {
         password: form.password,
         remember: isCapacitor ? true : form.remember,
       })
+      // 登录成功清除贝乐未确认订单弹窗标记，实现「每登录会话弹一次」
+      sessionStorage.removeItem('beile_confirm_popup_shown')
       console.log('[Login] API 响应成功, has_user:', !!res.user)
       perf.markEnd('auth-start')
       perf.measure('auth-api', 'auth-start')

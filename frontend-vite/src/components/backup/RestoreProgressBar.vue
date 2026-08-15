@@ -168,7 +168,7 @@ function startPolling() {
 async function poll() {
   if (stopped || !props.taskId) return
   try {
-    const res = await backupApi.getProgress(props.taskId) as any
+    const res = await backupApi.getProgress(props.taskId) as { success?: boolean; task_id?: string; status?: 'failed' | 'running' | 'pending' | 'completed' | 'completed_with_warnings'; progress?: number; phase?: string; phase_label?: string; restore_type?: string; started_at?: string | null; completed_at?: string | null; result?: unknown; error?: string | null }
     if (res?.success) {
       progress.value = {
         task_id: res.task_id || '',

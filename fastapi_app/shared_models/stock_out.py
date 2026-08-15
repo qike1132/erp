@@ -27,7 +27,7 @@ class StockOut(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     stockout_no: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, comment='出货编号')
     stockout_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True, comment='出货时间')
-    product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id'), nullable=False, comment='产品ID')
+    product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id', ondelete='RESTRICT'), nullable=False, comment='产品ID')
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, comment='出货数量')
     returned_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default='0', comment='退货数量')
     customer: Mapped[str | None] = mapped_column(String(100), nullable=True, comment='客户名称')

@@ -218,7 +218,7 @@ watch(() => props.open, (val) => {
 const { data: namesData } = useQuery({
   queryKey: ['customer-active-names'],
   queryFn: async () => {
-    const r = (await customerApi.activeNames()) as any
+    const r = (await customerApi.activeNames()) as unknown as ({ id: number; name: string }[] & { names?: { id: number; name: string }[] })
     return r.names ?? r ?? []
   },
   staleTime: 60_000,
@@ -313,7 +313,7 @@ function onDrop(ev: DragEvent) { dragOver.value = false; const fs = ev.dataTrans
 function onFile(ev: Event) { const t2 = ev.target as HTMLInputElement; if (t2.files?.length && t2.files[0]) vfile(t2.files[0]); t2.value = '' }
 function vfile(f: File) { clearUpMsg(); const ext = '.' + (f.name.split('.').pop()?.toLowerCase() ?? ''); if (!['.xlsx', '.xls', '.csv'].includes(ext)) { showUpMsg('仅支持 .xlsx .xls .csv', false); return; } if (f.size > 10 * 1024 * 1024) { showUpMsg('文件超过 10MB', false); return; } if (f.size === 0) { showUpMsg('文件为空', false); return; } file.value = f }
 function clearFile() { file.value = null; clearUpMsg() }
-async function doUpload() { if (!file.value) return; uploading.value = true; clearUpMsg(); try { const fd = new FormData(); fd.append('file', file.value); const r = await planApi.upload(fd) as any; showUpMsg(`导入成功，共 ${r.total || 0} 条`, true); clearFile(); qc.invalidateQueries({ queryKey: ['pp-monthly'] }); qc.invalidateQueries({ queryKey: ['pp-summary'] }); emit('created') } catch (e: unknown) { showUpMsg(getErrorMessage(e, '导入失败'), false) } finally { uploading.value = false } }
+async function doUpload() { if (!file.value) return; uploading.value = true; clearUpMsg(); try { const fd = new FormData(); fd.append('file', file.value); const r = await planApi.upload(fd) as { total?: number }; showUpMsg(`导入成功，共 ${r.total || 0} 条`, true); clearFile(); qc.invalidateQueries({ queryKey: ['pp-monthly'] }); qc.invalidateQueries({ queryKey: ['pp-summary'] }); emit('created') } catch (e: unknown) { showUpMsg(getErrorMessage(e, '导入失败'), false) } finally { uploading.value = false } }
 function showUpMsg(msg: string, ok: boolean) { upMsg.value = msg; upOk.value = ok; clearTimeout(_ut); _ut = setTimeout(() => upMsg.value = '', 5000) }
 function clearUpMsg() { upMsg.value = ''; clearTimeout(_ut) }
 async function dlTpl() { try { await planApi.downloadTemplate() } catch { showToast('下载失败', 'error') } }
@@ -451,31 +451,40 @@ async function handleSubmit() {
   gap: 4px;
   padding: 4px;
   border-radius: 12px;
-  background: var(--color-surface, #f1f5f9);
+  background: white;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
   margin: 0 auto;
 }
 
 .csd-htab {
-  padding: 6px 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 14px;
   border-radius: 9px;
-  font-size: 18px;
+  font-size: 13px;
   font-weight: 600;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   cursor: pointer;
-  transition: color 0.2s ease, background 0.2s ease;
+  transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
   user-select: none;
   white-space: nowrap;
 }
 
 .csd-htab:hover {
-  color: var(--color-primary-500);
   background: var(--color-primary-50);
+  color: var(--color-primary-600);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  transform: translateY(-1px);
 }
 
 .csd-htab-active {
-  color: white;
-  background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-700));
-  box-shadow: 0 2px 6px rgba(91, 141, 239, 0.25);
+  background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
+  color: var(--color-primary-700);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 8px rgba(91,141,239,0.2);
+  transform: translateY(-1px);
 }
 
 .csd-upload-area {

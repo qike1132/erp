@@ -7,7 +7,7 @@
 """
 import hashlib
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.exc import SQLAlchemyError
@@ -436,13 +436,13 @@ async def get_stockouts(db: AsyncSession, page: int=1, per_page: int=50,
             conditions.append(Order.order_type == order_type)
     if start_date:
         try:
-            sd = datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=UTC)
+            sd = datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
             conditions.append(StockOut.stockout_date >= sd)
         except ValueError:
             pass
     if end_date:
         try:
-            ed = datetime.strptime(end_date, '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=UTC)
+            ed = datetime.strptime(end_date, '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
             conditions.append(StockOut.stockout_date <= ed)
         except ValueError:
             pass
@@ -1250,7 +1250,7 @@ def _parse_date_preserve_time(date_str: str, old_time: datetime | None=None) -> 
         base = datetime.strptime(date_str, '%Y-%m-%d')
     except ValueError:
         raise ValueError('日期格式不正确！') from None
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
     if old_time and (old_time.hour != 0 or old_time.minute != 0 or old_time.second != 0):
         return datetime(base.year, base.month, base.day, old_time.hour, old_time.minute, old_time.second)
     else:
@@ -1283,7 +1283,7 @@ async def batch_create_stockins(db: AsyncSession, stockins_data: list) -> dict:
             order_type = item.get('order_type', 'regular') or 'regular'
             country = item.get('country') or None
             stockin_date_str = item.get('stockin_date') or ''
-            stockin_date = _parse_date_preserve_time(stockin_date_str) if stockin_date_str else datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+            stockin_date = _parse_date_preserve_time(stockin_date_str) if stockin_date_str else datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
             try:
                 async with db.begin_nested():
                     stockin = await create_stockin_core(db, product_id, quantity, customer, stockin_date, note, order_type, country)
@@ -1337,7 +1337,7 @@ async def _create_stockout_records(db: AsyncSession, product_id: int, customer: 
         stockout_no = await generate_stockout_number(db)
         stockout = StockOut(
             stockout_no=stockout_no, product_id=product_id, quantity=ship_qty,
-            stockout_date=(_parse_date_preserve_time(stockout_date_str).replace(tzinfo=UTC)),
+            stockout_date=(_parse_date_preserve_time(stockout_date_str).replace(tzinfo=timezone.utc)),
             customer=customer, order_id=order_detail['order_id'], note=note
         )
         db.add(stockout)

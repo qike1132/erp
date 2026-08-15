@@ -20,7 +20,7 @@
         </template>
       </UiAutocomplete>
     </div>
-    <div class="hu-search-field">
+    <div v-if="showCustomerSearch" class="hu-search-field">
       <UiAutocomplete
         ref="customerAc"
         v-model="customerQuery"
@@ -33,16 +33,7 @@
         @select="onCustomerSelect($event as CustomerSuggestion)"
       />
     </div>
-    <!-- 工序状态筛选（仅外发工序页面显示） -->
-    <div v-if="showProcessStatus" class="hu-status-field">
-      <select v-model="processStatus" class="hu-status-select" title="按外发工序状态筛选">
-        <option value="">全部工序状态</option>
-        <option value="pending">待开始</option>
-        <option value="in_progress">进行中</option>
-        <option value="completed">已完成</option>
-      </select>
-    </div>
-    <div class="hu-filter-actions">
+    <div v-if="showActions" class="hu-filter-actions">
       <button class="hu-action-btn hu-action-primary" @click="handleSearch()">
         <FontAwesomeIcon icon="search" style="margin-right: 4px" aria-hidden="true" />查询
       </button>
@@ -58,13 +49,11 @@
  * HubeiSearchBar.vue — 湖北订单 / 外发工序 页面共用的筛选栏
  *
  * 原 HubeiView 内的筛选栏提取为独立组件：产品/客户自动补全
- * （+ 可选的工序状态下拉）+ 查询/重置按钮，通过 v-model 与事件解耦：
+ * + 查询/重置按钮，通过 v-model 与事件解耦：
  *
  * Props:
  *   productQuery     - v-model: 产品搜索词
  *   customerQuery    - v-model: 客户搜索词
- *   processStatus    - v-model: 工序状态（''=全部 / pending / in_progress / completed）
- *   showProcessStatus- 是否显示工序状态下拉（仅外发工序页面使用）
  *
  * Emits:
  *   selectProduct  - 下拉选中产品: (name: string) => void
@@ -75,15 +64,15 @@
  * 抑制逻辑（选中/查询后下拉不再自动展开，避免面板遮挡表格闪烁）
  * 在组件内部处理，父页面无需关心。
  */
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import UiAutocomplete from '@/components/ui/UiAutocomplete.vue'
 import { productApi, customerApi } from '@/api'
 
 const productQuery = defineModel<string>('productQuery', { required: true })
 const customerQuery = defineModel<string>('customerQuery', { required: true })
-const processStatus = defineModel<string>('processStatus', { default: '' })
-const props = defineProps<{ showProcessStatus?: boolean }>()
-const showProcessStatus = computed(() => props.showProcessStatus ?? false)
+const props = defineProps<{ showCustomerSearch?: boolean; showActions?: boolean }>()
+const showCustomerSearch = computed(() => props.showCustomerSearch ?? true)
+const showActions = computed(() => props.showActions ?? true)
 
 const emit = defineEmits<{
   selectProduct: [name: string]
@@ -113,6 +102,13 @@ function onCustomerSelect(item: CustomerSuggestion) {
   customerQuery.value = item.name
   emit('selectCustomer', item.name)
 }
+
+/** 自动重置：输入框被清空时（用户删除了所有关键字），触发重置效果恢复全量列表 */
+watch(productQuery, (newVal, oldVal) => {
+  if (newVal === '' && oldVal !== '') {
+    emit('reset')
+  }
+})
 
 // ===== 产品自动补全 =====
 type ProductSuggestion = { id: number; name: string; barcode?: string }
@@ -182,26 +178,6 @@ async function searchCustomers(q: string): Promise<CustomerSuggestion[]> {
   color: var(--color-text-muted);
   font-size: 12px;
   font-family: ui-monospace, Menlo, Consolas, monospace;
-}
-.hu-status-field {
-  display: flex;
-  align-items: center;
-}
-.hu-status-select {
-  height: 33px;
-  padding: 0 10px;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--color-text);
-  background: white;
-  border: 2px solid var(--color-border-light, #e2e8f0);
-  border-radius: 9px;
-  cursor: pointer;
-}
-.hu-status-select:focus {
-  outline: none;
-  border-color: var(--color-primary-400);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
 }
 .hu-filter-actions {
   display: flex;

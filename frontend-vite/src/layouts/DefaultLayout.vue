@@ -13,13 +13,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { useTabStore } from '@/stores/tabs'
 import { useSidebarStore } from '@/stores/sidebar'
 import AppSidebar from './components/AppSidebar.vue'
 
 const MOBILE_BREAKPOINT = 768
 
-const tabStore = useTabStore()
 const sidebarStore = useSidebarStore()
 const route = useRoute()
 const hideChrome = computed(() => !!route.meta.hideHeader)
@@ -34,14 +32,13 @@ function handleResize() {
   }
 }
 
-// 移动端路由切换时自动收起侧边栏 + 更新标签栏
+// 移动端路由切换时自动收起侧边栏
 watch(
   () => route.path,
   () => {
     if (windowWidth.value < MOBILE_BREAKPOINT) {
       sidebarStore.setCollapsed(true)
     }
-    tabStore.addOrActivate(route.path)
   },
   { immediate: true },
 )

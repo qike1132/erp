@@ -1,34 +1,5 @@
 <template>
   <div class="osp-inventory">
-    <!-- 工具条：产品搜索 -->
-    <div class="osp-toolbar">
-      <div class="osp-toolbar-left">
-        <div class="osp-search-field">
-          <UiAutocomplete
-            v-model="searchText"
-            :searchFn="searchProducts"
-            placeholder="搜索产品名称/条码，选中后为其配置工序"
-            appendTo="self"
-            suppress-after-select
-            :search-delay-ms="500"
-            :show-loading="false"
-            @select="onPickProduct($event as ProductSuggestion)"
-          >
-            <template #option="{ item }">
-              <div class="osp-ac-option">
-                <span class="osp-ac-name">{{ item.name }}</span>
-                <span v-if="item.barcode" class="osp-ac-barcode">{{ item.barcode }}</span>
-              </div>
-            </template>
-          </UiAutocomplete>
-        </div>
-        <button class="osp-action-btn" @click="searchText = ''; refetch()" aria-label="重置">
-          <FontAwesomeIcon icon="redo" aria-hidden="true" />
-        </button>
-        <span v-if="productCards.length > 0" class="osp-total-hint">共 {{ productCards.length }} 个产品</span>
-      </div>
-    </div>
-
     <!-- 产品表格：与订单列表同款样式 -->
     <div class="osp-card-main">
       <div v-if="isLoading && productCards.length === 0" class="osp-empty">
@@ -69,7 +40,6 @@
                         :key="pt.id"
                         :class="['osp-proc-chip', pt.is_active ? 'osp-proc-on' : 'osp-proc-off']"
                         :title="`${pt.process_type}${pt.remark ? ' · ' + pt.remark : ''}（顺序 ${pt.sort_order}）`"
-                        @click="canManage && openEdit(pt)"
                       >
                         <span class="osp-proc-name">{{ pt.process_type }}</span>
                         <button
@@ -139,34 +109,7 @@
       </template>
     </UiDialog>
 
-    <!-- 编辑工序弹窗 -->
-    <UiDialog v-model:open="editOpen" title="编辑工序" max-width-class="max-w-[480px]">
-      <div class="osp-form">
-        <div class="osp-form-row">
-          <label class="osp-form-label">工序名称<span class="osp-req">*</span></label>
-          <input v-model="editForm.processType" class="osp-text-input" maxlength="50" placeholder="输入工序名称" />
-        </div>
-        <div class="osp-form-row">
-          <label class="osp-form-label">工序顺序</label>
-          <UiInputNumber v-model="editForm.sortOrder" :min="0" :max="9999" />
-        </div>
-        <div class="osp-form-row">
-          <label class="osp-form-label">启用</label>
-          <UiSwitch v-model="editForm.isActive" />
-        </div>
-        <div class="osp-form-row">
-          <label class="osp-form-label">备注</label>
-          <input v-model="editForm.remark" class="osp-text-input" placeholder="选填" maxlength="200" />
-        </div>
-      </div>
-      <template #footer>
-        <UiButton variant="outline" @click="editOpen = false">取消</UiButton>
-        <UiButton variant="primary" :disabled="saving" @click="handleEditSave">
-          {{ saving ? '保存中…' : '保存' }}
-        </UiButton>
-      </template>
-    </UiDialog>
-  </div>
+    </div>
 </template>
 
 <script setup lang="ts">
@@ -176,27 +119,34 @@
  * 布局与订单列表一致（表格）：每行一个产品（名称/条码/工厂/工序数），
  * 最后一列为工序——chips 横向展示已配置工序 + 「添加工序」按钮，
  * 点击按钮弹出常用工序标签面板，点标签即添加；也支持输入自定义名称
- * （逗号分隔一次添加多道）。工序 chip 点击可编辑、× 删除。
+ * （逗号分隔一次添加多道）。工序 chip 展示已配置工序，× 删除。
  * 预设是「返单自动带出工序」的数据源。管理操作按 outsource_manage 权限控制。
  */
-import { computed, reactive, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
-import { outsourceApi, productApi } from '@/api'
+import { outsourceApi } from '@/api'
 import type { OutsourceProcessType } from '@/api/outsource'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiSpinner from '@/components/ui/UiSpinner.vue'
-import UiAutocomplete from '@/components/ui/UiAutocomplete.vue'
-import UiInputNumber from '@/components/ui/UiInputNumber.vue'
-import UiSwitch from '@/components/ui/UiSwitch.vue'
 import { useAuthStore } from '@/stores/auth'
 import { toast } from '@/composables/useToast'
+
+const props = defineProps<{
+  /** 搜索选中但尚无预设的产品（由页面头部搜索框维护，保证能直接为其配置） */
+  pendingProducts: { product_id: number; product_name: string; product_barcode: string | null }[]
+}>()
+
+const emit = defineEmits<{
+  /** 该产品已配置工序，通知父级从待选列表移除 */
+  removePending: [productId: number]
+}>()
 
 const authStore = useAuthStore()
 const canManage = computed(() => authStore.hasPermission('outsource_manage'))
 
 /** 常用外发工序标签 */
-const COMMON_PROCESSES = ['电绣', '转印', '配件', '裁剪', '缝制', '包装', '绣花', '质检']
+const COMMON_PROCESSES = ['电绣', '转印']
 
 // ===== 数据：拉取全部预设，按产品分组 =====
 const {
@@ -232,9 +182,6 @@ const byProduct = computed<Map<number, OutsourceProcessType[]>>(() => {
   return map
 })
 
-/** 已搜索选中但尚无预设的产品（保证能直接为其配置） */
-const pendingProducts = ref<{ product_id: number; product_name: string; product_barcode: string | null }[]>([])
-
 /** 产品行列表：全部已配置工序的产品 + 搜索选中无工序的产品，按名称排序 */
 const productCards = computed<ProductCard[]>(() => {
   const seen = new Set<number>()
@@ -250,7 +197,7 @@ const productCards = computed<ProductCard[]>(() => {
     })
     seen.add(pid)
   }
-  for (const p of pendingProducts.value) {
+  for (const p of props.pendingProducts) {
     if (!seen.has(p.product_id)) {
       cards.push({
         product_id: p.product_id,
@@ -264,37 +211,6 @@ const productCards = computed<ProductCard[]>(() => {
   }
   return cards.sort((a, b) => a.product_name.localeCompare(b.product_name, 'zh'))
 })
-
-// ===== 产品搜索 =====
-const searchText = ref('')
-
-type ProductSuggestion = { id: number; name: string; barcode?: string }
-
-async function searchProducts(q: string): Promise<ProductSuggestion[]> {
-  if (!q.trim()) return []
-  try {
-    const res = await productApi.search(q)
-    const list = Array.isArray(res) ? res : ((res as unknown as { items?: unknown[] }).items ?? [])
-    return (list as Array<Record<string, unknown>>).slice(0, 8).map((p) => ({
-      id: Number(p.id),
-      name: String(p.name ?? ''),
-      barcode: p.barcode ? String(p.barcode) : undefined,
-    }))
-  } catch {
-    return []
-  }
-}
-
-function onPickProduct(p: ProductSuggestion) {
-  if (!byProduct.value.has(p.id)) {
-    pendingProducts.value = [
-      ...pendingProducts.value.filter((x) => x.product_id !== p.id),
-      { product_id: p.id, product_name: p.name, product_barcode: p.barcode || null },
-    ]
-  }
-  searchText.value = ''
-  refetch()
-}
 
 // ===== 添加工序弹窗：常用标签 + 自定义输入 =====
 const addOpen = ref(false)
@@ -357,53 +273,10 @@ async function handleAdd() {
 
 async function refreshAfterAdd() {
   // 该产品已有预设后从 pending 移除，由 byProduct 接管；刷新后同步弹窗目标
-  pendingProducts.value = pendingProducts.value.filter((x) => x.product_id !== addTarget.value?.product_id)
+  emit('removePending', addTarget.value?.product_id ?? 0)
   await refetch()
   const refreshed = productCards.value.find((c) => c.product_id === addTarget.value?.product_id)
   if (refreshed) addTarget.value = refreshed
-}
-
-// ===== 编辑工序 =====
-const editOpen = ref(false)
-const editId = ref<number | null>(null)
-const editForm = reactive({
-  processType: '',
-  sortOrder: 0,
-  isActive: true,
-  remark: '',
-})
-
-function openEdit(pt: OutsourceProcessType) {
-  editId.value = pt.id
-  editForm.processType = pt.process_type
-  editForm.sortOrder = pt.sort_order ?? 0
-  editForm.isActive = pt.is_active
-  editForm.remark = pt.remark || ''
-  editOpen.value = true
-}
-
-async function handleEditSave() {
-  if (!editForm.processType.trim()) {
-    toast.warning('请填写工序名称')
-    return
-  }
-  saving.value = true
-  try {
-    await outsourceApi.updateProcessType(editId.value!, {
-      process_type: editForm.processType.trim(),
-      sort_order: editForm.sortOrder,
-      is_active: editForm.isActive,
-      remark: editForm.remark,
-    })
-    toast.success('工序已更新')
-    editOpen.value = false
-    refetch()
-  } catch (e) {
-    const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-    toast.error(msg || '保存失败')
-  } finally {
-    saving.value = false
-  }
 }
 
 async function handleDelete(pt: OutsourceProcessType) {
@@ -425,51 +298,6 @@ async function handleDelete(pt: OutsourceProcessType) {
   height: 100%;
   min-height: 0;
 }
-
-/* 工具条 */
-.osp-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  flex-shrink: 0;
-}
-.osp-toolbar-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.osp-search-field { width: 360px; max-width: 100%; }
-.osp-total-hint { font-size: 12.5px; color: var(--color-text-muted); font-weight: 600; }
-.osp-action-btn {
-  padding: 7px 14px;
-  border: 2px solid var(--color-border-light, #e2e8f0);
-  border-radius: 9px;
-  background: white;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.3s ease, border-color 0.3s ease, transform 0.3s ease;
-  color: var(--color-text-secondary);
-  display: inline-flex;
-  align-items: center;
-  font-family: inherit;
-  line-height: inherit;
-}
-.osp-action-btn:hover {
-  border-color: var(--color-primary-300);
-  color: var(--color-primary-600);
-  transform: translateY(-1px);
-}
-.osp-ac-option {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  align-items: flex-start;
-}
-.osp-ac-name { color: var(--color-text); font-weight: 500; font-size: 13px; }
-.osp-ac-barcode { color: var(--color-text-muted); font-size: 12px; font-family: ui-monospace, Menlo, Consolas, monospace; }
 
 /* 主体（与订单列表同款表格） */
 .osp-card-main {

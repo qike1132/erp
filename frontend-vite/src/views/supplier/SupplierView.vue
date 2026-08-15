@@ -2,14 +2,9 @@
   <div class="sp-container">
     <div class="page-card page-card-main">
       <div class="page-card-header">
-        <div class="sp-header-left">
-          <HeaderTabs />
-        </div>
-        <div class="sp-header-right">
-          <button class="sp-action-btn sp-action-btn-primary" @click="formOpen = true">
-            <FontAwesomeIcon icon="plus" aria-hidden="true" /> 添加供应商
-          </button>
-        </div>
+        <button class="sp-action-btn sp-action-btn-primary" @click="formOpen = true">
+          <FontAwesomeIcon icon="plus" aria-hidden="true" /> 添加供应商
+        </button>
       </div>
 
       <!-- Search bar -->
@@ -186,7 +181,6 @@ import UiButton from '@/components/ui/UiButton.vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
-import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 import { showToast } from '@/composables/useToast'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { formatDate } from '@/utils/format'
@@ -367,23 +361,6 @@ async function handleEdit() {
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-}
-
-.sp-header-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex: 1;
-}
-.sp-header-right {
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
-  gap: 8px;
-}
-.page-card-header :deep(.ht-bar) {
-  width: auto;
-  margin: 0;
 }
 
 .sp-card-title-group {

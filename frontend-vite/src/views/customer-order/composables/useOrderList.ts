@@ -1,10 +1,8 @@
 import { ref, computed } from 'vue'
 import { orderApi, stockApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
+import type { StockInRecord } from '@/types'
 import type { OrderRecord } from './types'
-
-/** 每页记录数 */
-const PER_PAGE = 20
 
 /** 工厂筛选选项（与后端 VALID_FACTORIES 保持一致） */
 const FACTORY_OPTIONS = [
@@ -26,6 +24,7 @@ export function useOrderList() {
   const filterStart = ref('')
   const filterEnd = ref('')
   const currentPage = ref(1)
+  const perPage = ref(20)
   const totalPages = ref(1)
   const isLoadingRecords = ref(false)
   const isFetchingRecords = ref(false)
@@ -89,31 +88,31 @@ export function useOrderList() {
   }
 
   async function fetchOrderRecords(seq: number) {
-    const params: Record<string, unknown> = { page: currentPage.value, per_page: PER_PAGE }
+    const params: Record<string, unknown> = { page: currentPage.value, per_page: perPage.value }
     if (filterCustomer.value) params.customer = filterCustomer.value
     if (filterOrderType.value) params.order_type = filterOrderType.value
     if (filterStatus.value) params.status = filterStatus.value
     if (filterFactory.value) params.factory = filterFactory.value
     if (filterStart.value) params.start_date = filterStart.value
     if (filterEnd.value) params.end_date = filterEnd.value
-    const res = await orderApi.list(params) as any
+    const res = await orderApi.list(params)
     // 丢弃过期响应：快速切换 tab/翻页时旧请求可能晚到
     if (seq !== requestSeq) return
-    const items: OrderRecord[] = (res.data ?? []).map((i: any) => ({ ...i, record_type: 'order' }) as OrderRecord)
+    const items: OrderRecord[] = (res.data ?? []).map((i) => ({ ...i, record_type: 'order' }) as OrderRecord)
     orderRecords.value = items
     const total = res.total ?? items.length
-    totalPages.value = Math.ceil(total / PER_PAGE) || 1
+    totalPages.value = Math.ceil(total / perPage.value) || 1
   }
 
   async function fetchStockins(seq: number) {
-    const params: Record<string, unknown> = { page: currentPage.value, per_page: PER_PAGE }
+    const params: Record<string, unknown> = { page: currentPage.value, per_page: perPage.value }
     if (filterCustomer.value) params.customer = filterCustomer.value
     if (filterOrderType.value) params.order_type = filterOrderType.value
     if (filterStart.value) params.start_date = filterStart.value
     if (filterEnd.value) params.end_date = filterEnd.value
-    const res = await stockApi.stockins(params) as any
+    const res = await stockApi.stockins(params) as unknown as { data?: StockInRecord[]; items?: StockInRecord[]; total?: number }
     if (seq !== requestSeq) return
-    const rawItems: any[] = res.data ?? res.items ?? []
+    const rawItems: StockInRecord[] = res.data ?? res.items ?? []
     orderRecords.value = rawItems.map((i) => ({
       ...i,
       record_type: 'stockin',
@@ -122,7 +121,7 @@ export function useOrderList() {
       deduct_quantity: i.deducted ?? 0,
     }) as OrderRecord)
     const total = res.total ?? rawItems.length
-    totalPages.value = Math.ceil(total / PER_PAGE) || 1
+    totalPages.value = Math.ceil(total / perPage.value) || 1
   }
 
   function resetFilter() {
@@ -146,6 +145,7 @@ export function useOrderList() {
     filterStart,
     filterEnd,
     currentPage,
+    perPage,
     totalPages,
     isLoadingRecords,
     isFetchingRecords,

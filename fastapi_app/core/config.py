@@ -146,6 +146,34 @@ class Settings(BaseSettings):
                 f"JWT_ALGORITHM 必须为 {_ALLOWED_JWT_ALGORITHMS} 之一，"
                 f"当前值 '{self.ALGORITHM}' 不在允许范围内"
             )
+        # 生产环境安全配置强校验：防止运维漏配导致安全控制失效
+        _is_production = os.getenv("APP_ENV") == "production"
+        if _is_production:
+            # ALLOWED_HOSTS 不得包含通配符，否则 TrustedHostMiddleware 形同虚设
+            if "*" in self.ALLOWED_HOSTS or not any(h.strip() for h in self.ALLOWED_HOSTS):
+                raise RuntimeError(
+                    "生产环境（APP_ENV=production）ALLOWED_HOSTS 必须设置为具体域名，"
+                    "禁止使用通配符 '*'。示例: erp.example.com,erp.example.cn"
+                )
+            # RS256 模式下私钥路径必须显式配置且文件存在（密钥已移出仓库，由部署环境注入）
+            if self.ALGORITHM == "RS256":
+                if not self.JWT_PRIVATE_KEY_PATH or not os.path.isfile(self.JWT_PRIVATE_KEY_PATH):
+                    raise RuntimeError(
+                        f"生产环境 RS256 模式要求 JWT_PRIVATE_KEY_PATH 指向真实私钥文件，"
+                        f"当前值 '{self.JWT_PRIVATE_KEY_PATH}' 不存在。"
+                        f"私钥不得提交到代码仓库，须由部署环境（K8s Secret/环境变量挂载）注入。"
+                    )
+                if not self.JWT_PUBLIC_KEY_PATH or not os.path.isfile(self.JWT_PUBLIC_KEY_PATH):
+                    raise RuntimeError(
+                        f"生产环境 RS256 模式要求 JWT_PUBLIC_KEY_PATH 指向真实公钥文件，"
+                        f"当前值 '{self.JWT_PUBLIC_KEY_PATH}' 不存在。"
+                    )
+            # 生产环境 CORS 不得包含 null 源（沙箱 iframe 逃逸风险）
+            if "null" in self.BACKEND_CORS_ORIGINS:
+                raise RuntimeError(
+                    "生产环境 CORS_ORIGINS 不得包含 'null' 源（沙箱 iframe 逃逸风险），"
+                    "请移除 null 并设置为具体 HTTPS 域名。"
+                )
 
     # 对象存储配置（P2-1：static/uploads 迁移至 MinIO/S3）
     # STORAGE_TYPE=local 时保持现有本地文件系统行为；=s3 时上传到对象存储

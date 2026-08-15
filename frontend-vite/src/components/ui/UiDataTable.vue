@@ -1,4 +1,4 @@
-<script setup lang="ts" generic="T extends Record<string, unknown>">
+<script setup lang="ts" generic="T extends Record<string, any>">
 /**
  * UiDataTable — 统一数据表格
  *
@@ -42,9 +42,9 @@
  *     </template>
  *   </UiDataTable>
  */
-import { DataTable, Column, Paginator } from 'primevue'
+import { DataTable, Column } from 'primevue'
 import type { DataTableSortEvent } from 'primevue'
-import type { PageState } from 'primevue/paginator'
+import { ref, watch, computed } from 'vue'
 
 // ============================================================
 // Column definition
@@ -70,6 +70,8 @@ const props = withDefaults(
     loading?: boolean
     paginator?: boolean
     rows?: number
+    /** 每页条数可选项（透传给 UiPagination 的每页条数选择器） */
+    pageSizeOptions?: number[]
     totalRecords?: number
     selection?: T[] | null
     rowKey?: string
@@ -80,6 +82,7 @@ const props = withDefaults(
     loading: false,
     paginator: false,
     rows: 20,
+    pageSizeOptions: () => [10, 20, 50, 100],
     totalRecords: 0,
     rowKey: 'id',
     striped: true,
@@ -108,10 +111,31 @@ const emit = defineEmits<{
 }>()
 
 // ============================================================
+// Pagination state
+// ============================================================
+const currentPage = ref(1)
+const totalPages = computed(() => {
+  const total = props.totalRecords || props.data.length
+  return Math.max(1, Math.ceil(total / props.rows))
+})
+
+watch(
+  () => props.totalRecords,
+  () => { currentPage.value = 1 },
+)
+
+// ============================================================
 // Handlers
 // ============================================================
-function onPage(event: PageState) {
-  emit('page', { page: event.page, rows: event.rows })
+function onPage(page: number) {
+  currentPage.value = page
+  emit('page', { page: page - 1, rows: props.rows })
+}
+
+/** 每页条数变化：回到首页并以新条数通知父级重新拉取 */
+function onPageSizeChange(size: number) {
+  currentPage.value = 1
+  emit('page', { page: 0, rows: size })
 }
 
 function onSort(event: DataTableSortEvent) {
@@ -185,13 +209,16 @@ function onRowSelect(event: { data: T[] }) {
       </template>
     </DataTable>
 
-    <!-- 分页器（独立渲染，样式完全受 PT 控制） -->
-    <Paginator
+    <!-- 统一分页器：与 outsource/beile-order 等视图共享 UiPagination 样式 -->
+    <UiPagination
       v-if="paginator"
-      :rows="rows"
-      :totalRecords="totalRecords || data.length"
-      :rowsPerPageOptions="[10, 20, 50, 100]"
-      @page="onPage"
+      :current-page="currentPage"
+      :total-pages="totalPages"
+      :total-items="totalRecords || data.length"
+      :page-size="rows"
+      :page-size-options="pageSizeOptions"
+      @update:current-page="onPage"
+      @update:page-size="onPageSizeChange"
     />
   </div>
 </template>

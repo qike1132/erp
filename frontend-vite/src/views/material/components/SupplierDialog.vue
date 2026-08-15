@@ -33,38 +33,7 @@
 
 <script setup lang="ts">
 import UiDialog from '@/components/ui/UiDialog.vue'
-
-interface SupMatItem {
-  id: number
-  ordered: number
-  received: number
-}
-
-interface SupMat {
-  name: string
-  ordered: number
-  received: number
-  remaining: number
-  pct: number
-  subItems: SupMatItem[]
-  unit: string
-  spec: string
-}
-
-interface SupGroup {
-  supplierName: string
-  items: SupMat[]
-  totalOrdered: number
-  totalReceived: number
-  pct: number
-}
-
-interface SupplierDetail {
-  supplierGroups: SupGroup[]
-  totalOrdered: number
-  totalReceived: number
-  totalPct: number
-}
+import type { SupMatItem, SupplierDetail } from '../material-types'
 
 defineProps<{
   open: boolean
@@ -79,53 +48,10 @@ defineEmits<{
 }>()
 </script>
 
-<style scoped>
-/* === Badge === */
-.mr-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 5px 12px;
-  border-radius: 20px;
-  font-size: 13px;
-  font-weight: 500;
-}
-.mr-badge-pending { background: #FEF3C7; color: #D97706; }
-.mr-badge-partial { background: var(--color-primary-50, #E8F2FF); color: var(--color-primary-600, #4A7DE8); }
-.mr-badge-completed { background: #D1FAE5; color: #059669; }
-.mr-badge-overdue { background: #FEE2E2; color: #DC2626; }
+<style scoped lang="scss">
+@use '../material-dialogs.scss' as *;
 
-/* === Source Card === */
-.mr-source-card {
-  padding: 14px 16px;
-  background: linear-gradient(135deg, var(--color-success-50, #ECFDF5), var(--color-surface, #f8fafc));
-  border: 1px solid var(--color-success-200, #A7F3D0);
-  border-radius: 12px;
-  margin-bottom: 8px;
-}
-.mr-source-card:last-child {
-  margin-bottom: 0;
-}
-
-/* === Material Detail Card (Dialog) === */
-.mr-det-mat-card {
-  margin-bottom: 10px;
-  background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
-  border-radius: 12px;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
-  transition: all 0.2s ease;
-  overflow: hidden;
-}
-.mr-det-mat-card:hover {
-  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-  border-color: var(--color-primary-200, #bfdbfe);
-}
-.mr-det-mat-row {
-  padding: 12px 16px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
+/* === Material Detail Card (Dialog) 特有部分 === */
 .mr-det-mat-info {
   display: flex;
   align-items: center;
@@ -133,27 +59,6 @@ defineEmits<{
   min-width: 0;
   flex: 0 0 auto;
   max-width: 180px;
-}
-.mr-det-mat-name {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--color-text, #1e293b);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  line-height: 1.3;
-}
-.mr-det-mat-spec {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--color-text-secondary, #64748b);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  background: var(--color-surface, #f1f5f9);
-  padding: 2px 8px;
-  border-radius: 6px;
-  width: fit-content;
 }
 .mr-det-mat-metrics {
   display: flex;
@@ -231,38 +136,10 @@ defineEmits<{
   justify-content: center;
 }
 
-/* === Buttons === */
-.mr-btn {
-  padding: 7px 14px;
-  border-radius: 9px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  border: 2px solid var(--color-border-light, #e2e8f0);
-  background: white;
-  color: var(--color-text-secondary);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.mr-btn:hover {
-  border-color: var(--color-primary-300);
-  color: var(--color-primary-600);
-  background: var(--color-primary-50);
-  transform: translateY(-1px);
-}
+/* === Buttons（覆盖公共版尺寸） === */
 .mr-btn-success {
-  border-color: var(--color-success-200, #A7F3D0);
-  color: var(--color-success-600, #059669);
-  background: var(--color-success-50, #ECFDF5);
   padding: 10px 16px;
   border-radius: 10px;
-}
-.mr-btn-success:hover {
-  background: var(--color-success-500, #28C76F);
-  color: white;
-  border-color: transparent;
 }
 
 /* === Responsive === */

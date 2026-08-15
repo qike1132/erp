@@ -16,6 +16,9 @@ interface BenchResult {
   max: number
 }
 
+/** Chrome 性能内存信息（非标准 API） */
+type PerformanceWithMemory = { memory?: { usedJSHeapSize: number; totalJSHeapSize: number } }
+
 const results: BenchResult[] = []
 
 function bench(label: string, fn: () => void | Promise<void>, iterations = 10): Promise<BenchResult> {
@@ -147,10 +150,10 @@ async function benchMemoryUsage() {
   for (const count of [1000, 5000, 10000, 20000, 50000]) {
     const items = generateMockItems(count)
 
-    if ((performance as any).memory) {
-      const before = (performance as any).memory.usedJSHeapSize
+    if ((performance as unknown as PerformanceWithMemory).memory) {
+      const before = (performance as unknown as PerformanceWithMemory).memory!.usedJSHeapSize
       const copy = JSON.parse(JSON.stringify(items))
-      const after = (performance as any).memory.usedJSHeapSize
+      const after = (performance as unknown as PerformanceWithMemory).memory!.usedJSHeapSize
       console.log(`  Memory:${count}_items: ${((after - before) / 1024 / 1024).toFixed(2)}MB`)
       void copy
     } else {

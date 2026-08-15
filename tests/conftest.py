@@ -148,9 +148,12 @@ async def test_engine():
     """
     engine = create_async_engine(TEST_DATABASE_URL, echo=False)
 
-    # 确保表存在（会话级，幂等操作，只执行一次）
+    # 清理 + 重建测试库 schema（会话级，幂等）：
+    # - drop_all 只删除 metadata 中存在的表，不存在则跳过，重复运行安全
+    # - 先清理再 create_all，避免旧表/旧索引残留（如重复索引）导致建表失败
     from fastapi_app.shared_models import Base
     async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
 
     yield engine

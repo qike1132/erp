@@ -2,9 +2,6 @@
   <div class="us-container">
     <div class="page-card page-card-main">
       <!-- 卡片头部 -->
-      <div class="page-card-header">
-        <HeaderTabs />
-      </div>
 
       <!-- 双栏主体 -->
       <div class="us-body">
@@ -48,65 +45,52 @@
         <!-- 右栏：用户列表 -->
         <div class="us-col">
           <div class="us-col-scroll">
-            <div v-if="isLoading" class="us-empty">
-              <UiSpinner />
-            </div>
-            <div v-else-if="users.length === 0" class="us-empty">
-              <FontAwesomeIcon icon="users" aria-hidden="true" />
-              <span>暂无用户</span>
-            </div>
-            <table v-else class="us-table">
-              <thead>
-                <tr>
-                  <th>用户名</th>
-                  <th>角色</th>
-                  <th>工厂</th>
-                  <th>状态</th>
-                  <th>创建时间</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="row in users" :key="row.id">
-                  <td>{{ row.username }}</td>
-                  <td>
-                    <span :class="['us-badge', row.is_super ? 'us-badge-danger' : 'us-badge-info']">
-                      {{ row.is_super ? '超级管理员' : '普通用户' }}
-                    </span>
-                  </td>
-                  <td>
-                    <span v-if="row.factory" :class="['us-badge', 'us-badge-factory']">{{ row.factory }}</span>
-                    <span v-else class="us-badge-muted-text">-</span>
-                  </td>
-                  <td>
-                    <span :class="['us-badge', row.status !== false ? 'us-badge-success' : 'us-badge-muted']">
-                      {{ row.status !== false ? '启用' : '禁用' }}
-                    </span>
-                  </td>
-                  <td>{{ formatDate(row.create_time) }}</td>
-                  <td style="white-space: nowrap">
-                    <button class="us-action-btn us-action-primary" @click="openPermissionDialog(row)">权限</button>
-                    <button class="us-action-btn us-action-primary" @click="openEditDialog(row)">编辑</button>
-                    <button class="us-action-btn us-action-primary" :disabled="actionId === row.id" @click="handleToggle(row)">
-                      {{ row.status !== false ? '禁用' : '启用' }}
-                    </button>
-                    <button class="us-action-btn us-action-danger" :disabled="actionId === row.id || row.is_super" @click="handleDelete(row)">
-                      删除
-                    </button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-
-            <!-- Pagination -->
-            <div v-if="totalItems > perPage" class="us-pagination">
-              <button class="us-page-btn" :disabled="currentPage <= 1" @click="goPage(1)" aria-label="首页"><FontAwesomeIcon icon="angle-double-left" aria-hidden="true" /></button>
-              <button class="us-page-btn" :disabled="currentPage <= 1" @click="goPage(currentPage - 1)" aria-label="上一页"><FontAwesomeIcon icon="angle-left" aria-hidden="true" /></button>
-              <span class="us-page-info">{{ currentPage }} / {{ totalPages }}</span>
-              <button class="us-page-btn" :disabled="currentPage >= totalPages" @click="goPage(currentPage + 1)" aria-label="下一页"><FontAwesomeIcon icon="angle-right" aria-hidden="true" /></button>
-              <button class="us-page-btn" :disabled="currentPage >= totalPages" @click="goPage(totalPages)" aria-label="末页"><FontAwesomeIcon icon="angle-double-right" aria-hidden="true" /></button>
-              <span class="us-page-total">共 {{ totalItems }} 条</span>
-            </div>
+            <UiDataTable
+              :data="users"
+              :columns="userColumns"
+              :loading="isLoading"
+              paginator
+              :rows="perPage"
+              :total-records="totalItems"
+              :row-key="'id'"
+              @page="onPageChange"
+            >
+              <template #empty>
+                <div class="us-empty">
+                  <FontAwesomeIcon icon="users" aria-hidden="true" />
+                  <span>暂无用户</span>
+                </div>
+              </template>
+              <template #column-body-is_super="{ row }">
+                <span :class="['us-badge', (row as UserRow).is_super ? 'us-badge-danger' : 'us-badge-info']">
+                  {{ (row as UserRow).is_super ? '超级管理员' : '普通用户' }}
+                </span>
+              </template>
+              <template #column-body-factory="{ row }">
+                <span v-if="(row as UserRow).factory" :class="['us-badge', 'us-badge-factory']">{{ (row as UserRow).factory }}</span>
+                <span v-else class="us-badge-muted-text">-</span>
+              </template>
+              <template #column-body-status="{ row }">
+                <span :class="['us-badge', (row as UserRow).status !== false ? 'us-badge-success' : 'us-badge-muted']">
+                  {{ (row as UserRow).status !== false ? '启用' : '禁用' }}
+                </span>
+              </template>
+              <template #column-body-create_time="{ row }">
+                {{ formatDate((row as UserRow).create_time) }}
+              </template>
+              <template #column-body-actions="{ row }">
+                <div class="us-action-group">
+                  <button class="us-action-btn us-action-primary" @click="openPermissionDialog(row as UserRow)">权限</button>
+                  <button class="us-action-btn us-action-primary" @click="openEditDialog(row as UserRow)">编辑</button>
+                  <button class="us-action-btn us-action-primary" :disabled="actionId === (row as UserRow).id" @click="handleToggle(row as UserRow)">
+                    {{ (row as UserRow).status !== false ? '禁用' : '启用' }}
+                  </button>
+                  <button class="us-action-btn us-action-danger" :disabled="actionId === (row as UserRow).id || (row as UserRow).is_super" @click="handleDelete(row as UserRow)">
+                    删除
+                  </button>
+                </div>
+              </template>
+            </UiDataTable>
           </div>
         </div>
       </div>
@@ -192,11 +176,12 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { userApi, permissionApi } from '@/api'
 import type { PermissionItem } from '@/types'
 import UiDialog from '@/components/ui/UiDialog.vue'
+import UiDataTable from '@/components/ui/UiDataTable.vue'
+import type { TableColumn } from '@/components/ui/UiDataTable.vue'
 import UiCheckbox from '@/components/ui/UiCheckbox.vue'
 import { showToast } from '@/composables/useToast'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
-import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 import { formatDate } from '@/utils/format'
 
 /** 用户列表行数据 */
@@ -229,12 +214,12 @@ const queryClient = useQueryClient()
 const confirmDialog = useConfirmDialog()
 
 const currentPage = ref(1)
-const perPage = 15
+const perPage = ref(15)
 
 /** 用户列表查询 */
 const { data: result, isLoading } = useQuery({
-  queryKey: ['users-list', () => currentPage.value],
-  queryFn: () => userApi.list({ page: currentPage.value, per_page: perPage }),
+  queryKey: ['users-list', () => currentPage.value, () => perPage.value],
+  queryFn: () => userApi.list({ page: currentPage.value, per_page: perPage.value }),
   staleTime: 30_000,
   gcTime: 60_000,
 })
@@ -242,12 +227,21 @@ const { data: result, isLoading } = useQuery({
 const users = computed(() => result.value?.users ?? [])
 /** 用户总数 */
 const totalItems = computed(() => result.value?.total ?? users.value.length)
-/** 总页数 */
-const totalPages = computed(() => Math.max(1, Math.ceil(totalItems.value / perPage)))
 
-/** 跳转到指定页码 */
-function goPage(p: number) {
-  currentPage.value = p
+/** UiDataTable 列定义 */
+const userColumns: TableColumn[] = [
+  { field: 'username', header: '用户名', align: 'left' },
+  { field: 'is_super', header: '角色', align: 'center' },
+  { field: 'factory', header: '工厂', align: 'center' },
+  { field: 'status', header: '状态', align: 'center' },
+  { field: 'create_time', header: '创建时间', align: 'left' },
+  { field: 'actions', header: '操作', align: 'right' },
+]
+
+/** UiDataTable 分页变化处理 */
+function onPageChange(event: { page: number; rows: number }) {
+  currentPage.value = event.page + 1
+  perPage.value = event.rows
 }
 
 // 添加用户
@@ -520,7 +514,6 @@ async function handleSavePermission() {
   flex-direction: column;
   box-sizing: border-box;
 }
-.page-card-header :deep(.ht-bar) { margin: 0; }
 
 /* Card Header */
 .us-card-title-group {
@@ -751,35 +744,13 @@ async function handleSavePermission() {
   border-bottom: 1px solid var(--color-border-light, #f1f5f9);
 }
 
-/* Table */
-.us-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-.us-table thead th {
-  padding: 10px 14px;
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  background: var(--color-surface, #f8fafc);
-  border-bottom: 2px solid var(--color-border-light, #e2e8f0);
-  color: var(--color-text-secondary);
-  text-align: left;
-}
-.us-table tbody td {
-  padding: 10px 14px;
-  font-size: 13px;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
-  transition: background 0.2s ease;
-  color: var(--color-text);
-}
-.us-table tbody tr:hover {
-  background: var(--color-primary-50);
-}
-
 /* Action Buttons */
+.us-action-group {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
 .us-action-btn {
   padding: 5px 10px;
   border: 2px solid var(--color-border-light, #e2e8f0);
@@ -958,45 +929,5 @@ async function handleSavePermission() {
   font-size: 13px;
   font-weight: 500;
   color: var(--color-text);
-}
-
-/* === Pagination === */
-.us-pagination {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 12px 24px;
-  border-top: 1px solid var(--color-border-light, #f1f5f9);
-}
-.us-page-btn {
-  padding: 6px 10px;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  border-radius: 6px;
-  background: white;
-  cursor: pointer;
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  transition: border-color 0.2s, color 0.2s;
-}
-.us-page-btn:hover:not(:disabled) {
-  border-color: var(--color-primary-300);
-  color: var(--color-primary-600);
-}
-.us-page-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-.us-page-info {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text);
-  min-width: 80px;
-  text-align: center;
-}
-.us-page-total {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  margin-left: 8px;
 }
 </style>

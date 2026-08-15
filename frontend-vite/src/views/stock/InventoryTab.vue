@@ -65,69 +65,56 @@
     </div>
 
     <div class="sk-card-main">
-      <div v-if="isLoading && inventory.length === 0" class="sk-empty">
-        <UiSpinner />
-      </div>
-      <div v-else-if="inventory.length === 0" class="sk-empty">
-        <FontAwesomeIcon icon="warehouse" aria-hidden="true" />
-        <span>暂无库存数据</span>
-      </div>
-      <template v-else>
-        <div v-if="isFetching" class="sk-fetching-bar"><div class="sk-fetching-progress" /></div>
-        <table class="sk-table">
-          <thead>
-            <tr>
-              <th>客户</th>
-              <th class="sk-th-left">产品名称</th>
-              <th>订单数量</th>
-              <th>定制订单</th>
-              <th>备货数量</th>
-              <th>总订单</th>
-              <th>实时可用库存</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="item in inventory" :key="`${item.customer}-${item.product_name}`">
-              <td>
-                <span class="sk-customer-cell">
-                  <FontAwesomeIcon icon="building" aria-hidden="true" />
-                  {{ item.customer }}
-                </span>
-              </td>
-              <td class="sk-td-left">
-                <span class="sk-product-cell">
-                  <FontAwesomeIcon icon="cube" aria-hidden="true" />
-                  <strong>{{ item.product_name }}</strong>
-                </span>
-              </td>
-              <td>{{ item.order_quantity }}</td>
-              <td>
-                <div v-if="item._custom_details && item._custom_details.length" class="sk-custom-orders">
-                  <template v-for="d in item._custom_details" :key="d.country">
-                    <span class="sk-custom-country">{{ d.country }}：</span><span>{{ d.qty }}</span>
-                  </template>
-                </div>
-              </td>
-              <td>{{ item.stockin_quantity }}</td>
-              <td>
-                <strong :class="(item.total_stock ?? 0) < 0 ? 'sk-text-negative' : 'sk-text-positive'">{{ item.total_stock ?? 0 }}</strong>
-              </td>
-              <td>
-                <div class="sk-available-cell">
-                  <strong :class="(item.available_stock ?? 0) < 0 ? 'sk-text-negative' : 'sk-text-positive'">{{ item.available_stock ?? 0 }}</strong>
-                  <div v-if="item._country_available && item._country_available.length" class="sk-country-share">
-                    <template v-for="d in item._country_available" :key="`${d.country}-${d.qty}`">
-                      <span class="sk-country-share-label">{{ d.country }}：</span><span>{{ d.qty }}</span>
-                    </template>
-                  </div>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-
-        <UiPagination v-if="totalItems > perPage" :current-page="currentPage" :total-pages="totalPages" :total-items="totalItems" @update:current-page="goPage" />
-      </template>
+      <div v-if="isFetching" class="sk-fetching-bar"><div class="sk-fetching-progress" /></div>
+      <UiDataTable
+        :data="inventory"
+        :columns="inventoryColumns"
+        :loading="isLoading && inventory.length === 0"
+        :paginator="totalItems > perPage"
+        :rows="perPage"
+        :total-records="totalItems"
+        row-key="_rowKey"
+        @page="onPageChange"
+      >
+        <template #empty>
+          <div class="sk-empty">
+            <FontAwesomeIcon icon="warehouse" aria-hidden="true" />
+            <span>暂无库存数据</span>
+          </div>
+        </template>
+        <template #column-body-customer="{ row }">
+          <span class="sk-customer-cell">
+            <FontAwesomeIcon icon="building" aria-hidden="true" />
+            {{ (row as InventoryItem).customer }}
+          </span>
+        </template>
+        <template #column-body-product_name="{ row }">
+          <span class="sk-product-cell">
+            <FontAwesomeIcon icon="cube" aria-hidden="true" />
+            <strong>{{ (row as InventoryItem).product_name }}</strong>
+          </span>
+        </template>
+        <template #column-body-custom_details="{ row }">
+          <div v-if="(row as InventoryItem)._custom_details?.length" class="sk-custom-orders">
+            <template v-for="d in (row as InventoryItem)._custom_details" :key="d.country">
+              <span class="sk-custom-country">{{ d.country }}：</span><span>{{ d.qty }}</span>
+            </template>
+          </div>
+        </template>
+        <template #column-body-total_stock="{ row }">
+          <strong :class="((row as InventoryItem).total_stock ?? 0) < 0 ? 'sk-text-negative' : 'sk-text-positive'">{{ (row as InventoryItem).total_stock ?? 0 }}</strong>
+        </template>
+        <template #column-body-available_stock="{ row }">
+          <div class="sk-available-cell">
+            <strong :class="((row as InventoryItem).available_stock ?? 0) < 0 ? 'sk-text-negative' : 'sk-text-positive'">{{ (row as InventoryItem).available_stock ?? 0 }}</strong>
+            <div v-if="(row as InventoryItem)._country_available?.length" class="sk-country-share">
+              <template v-for="d in (row as InventoryItem)._country_available" :key="`${d.country}-${d.qty}`">
+                <span class="sk-country-share-label">{{ d.country }}：</span><span>{{ d.qty }}</span>
+              </template>
+            </div>
+          </div>
+        </template>
+      </UiDataTable>
     </div>
   </div>
 </template>
@@ -136,16 +123,17 @@
 import { reactive, computed, watch, ref } from 'vue'
 import { useQuery, keepPreviousData } from '@tanstack/vue-query'
 import { stockApi } from '@/api'
-import UiPagination from '@/components/ui/UiPagination.vue'
+import type { InventoryItem } from '@/types'
+import UiDataTable from '@/components/ui/UiDataTable.vue'
+import type { TableColumn } from '@/components/ui/UiDataTable.vue'
 import { useDebouncedRef } from '@/composables/useDebouncedRef'
 
 const filters = reactive({ customer: '', product: '', country: '' })
 const debouncedProduct = useDebouncedRef(computed(() => filters.product), 300)
 const page = ref(1)
-const currentPage = computed(() => page.value)
-const perPage = computed(() => invData.value?.per_page ?? 15)
+/** 每页条数（可由分页器选择） */
+const perPage = ref(15)
 const totalItems = computed(() => invData.value?.total_items ?? 0)
-const totalPages = computed(() => Math.max(1, Math.ceil(totalItems.value / perPage.value)))
 
 const {
   data: invData,
@@ -153,14 +141,14 @@ const {
   isFetching,
   refetch,
 } = useQuery({
-  queryKey: ['inventory', () => filters.customer, debouncedProduct, () => filters.country, () => page.value],
+  queryKey: ['inventory', () => filters.customer, debouncedProduct, () => filters.country, () => page.value, () => perPage.value],
   queryFn: () =>
     stockApi.inventory({
       customer: filters.customer || undefined,
       product: debouncedProduct.value || undefined,
       country: filters.country || undefined,
       page: page.value,
-      per_page: 15,
+      per_page: perPage.value,
     }),
   staleTime: 30_000,
   gcTime: 60_000,
@@ -170,7 +158,8 @@ const {
 const inventory = computed(() => {
   const raw = invData.value?.data ?? []
   return raw.map((item) => {
-    if (item._custom_details) return item
+    const _rowKey = `${item.customer}-${item.product_name}`
+    if (item._custom_details) return { ...item, _rowKey }
     const co = item.country_orders ?? {}
     const details: { country: string; qty: number }[] = []
     for (const [k, v] of Object.entries(co)) {
@@ -181,9 +170,20 @@ const inventory = computed(() => {
     for (const [k, v] of Object.entries(abc)) {
       if (v) country_available.push({ country: k, qty: Number(v) })
     }
-    return { ...item, _custom_details: details, _country_available: country_available }
+    return { ...item, _rowKey, _custom_details: details, _country_available: country_available }
   })
 })
+
+/** UiDataTable 列定义 */
+const inventoryColumns: TableColumn[] = [
+  { field: 'customer', header: '客户', align: 'center' },
+  { field: 'product_name', header: '产品名称', align: 'left' },
+  { field: 'order_quantity', header: '订单数量', align: 'center' },
+  { field: 'custom_details', header: '定制订单', align: 'center' },
+  { field: 'stockin_quantity', header: '备货数量', align: 'center' },
+  { field: 'total_stock', header: '总订单', align: 'center' },
+  { field: 'available_stock', header: '实时可用库存', align: 'center' },
+]
 const allCustomers = computed(() => (invData.value?.all_customers ?? []) as string[])
 
 const totalOrderQty = computed(() => invData.value?.total_order_quantity ?? 0)
@@ -212,8 +212,10 @@ function handleReset() {
   filters.country = ''
   refetch()
 }
-function goPage(p: number) {
-  page.value = p
+/** UiDataTable 分页变化处理（PrimeVue page 为 0 索引） */
+function onPageChange(event: { page: number; rows: number }) {
+  page.value = event.page + 1
+  perPage.value = event.rows
 }
 async function handleExport() {
   try {
@@ -433,37 +435,6 @@ defineExpose({ inventory, filteredInventory: inventory, handleExport })
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
-}
-.sk-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-.sk-table thead th {
-  padding: 10px 14px;
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  background: var(--color-surface, #f8fafc);
-  border-bottom: 2px solid var(--color-border-light, #e2e8f0);
-  color: var(--color-text-secondary);
-  text-align: center;
-  white-space: nowrap;
-}
-.sk-th-left { text-align: left !important; }
-.sk-table tbody td {
-  padding: 10px 14px;
-  font-size: 13px;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
-  text-align: center;
-  vertical-align: middle;
-  transition: background 0.2s ease;
-  color: var(--color-text);
-}
-.sk-td-left { text-align: left !important; }
-.sk-table tbody tr:hover {
-  background: var(--color-primary-50);
 }
 .sk-customer-cell {
   display: flex;

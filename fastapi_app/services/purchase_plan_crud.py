@@ -12,7 +12,7 @@ import json
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timezone, timedelta
 
 import openpyxl
 from sqlalchemy import and_, delete, func, select, text
@@ -100,7 +100,7 @@ async def _generate_plan_no() -> str:
     from fastapi_app.core.database import _AsyncSessionLocal
     from fastapi_app.core.number_generator import _acquire_advisory_lock_async, _number_lock_key
 
-    today_str = datetime.now(UTC).strftime('%Y%m%d')
+    today_str = datetime.now(timezone.utc).strftime('%Y%m%d')
     prefix = f'PP-{today_str}-'
     async with _AsyncSessionLocal() as short_session:
         await _acquire_advisory_lock_async(short_session, _number_lock_key('PP', today_str))

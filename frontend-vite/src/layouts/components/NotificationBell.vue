@@ -2,7 +2,7 @@
   <div class="nb-root">
     <button
       type="button"
-      class="nb-bell"
+      class="nb-btn"
       :class="{ 'has-badge': unreadCount > 0 }"
       :aria-label="`通知中心，${unreadCount} 条未读`"
       @click="goToCenter"
@@ -43,42 +43,25 @@ onUnmounted(() => {
   align-items: center;
 }
 
-.nb-bell {
+/* 扁平图标按钮：用于融入统一工具栏胶囊，不单独成块 */
+.nb-btn {
   position: relative;
-  padding: 10px 16px;
-  height: auto;
-  min-height: 40px;
-  min-width: 44px;
-  border-radius: 14px;
-  border: 2px solid var(--color-primary-200);
-  background: linear-gradient(135deg, var(--color-primary-50) 0%, var(--color-primary-100) 100%);
-  color: var(--color-primary-700);
-  cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--color-text-secondary);
   font-size: 15px;
-  font-weight: 700;
-  box-shadow:
-    0 2px 6px color-mix(in srgb, var(--color-primary-200) 35%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6);
-  transition:
-    background 0.3s ease,
-    color 0.3s ease,
-    box-shadow 0.3s ease,
-    transform 0.3s ease,
-    border-color 0.3s ease;
-  -webkit-tap-highlight-color: transparent;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease;
 }
-
-.nb-bell:hover {
-  color: var(--color-primary-800);
-  border-color: var(--color-primary-300);
-  background: linear-gradient(135deg, var(--color-primary-100) 0%, var(--color-primary-200) 100%);
-  transform: translateY(-2px);
-  box-shadow:
-    0 6px 18px color-mix(in srgb, var(--color-primary-200) 45%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+.nb-btn:hover {
+  background: var(--color-ocean-light);
+  color: var(--color-ocean-text);
 }
 
 .nb-badge {

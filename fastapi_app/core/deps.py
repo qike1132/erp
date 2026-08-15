@@ -14,7 +14,7 @@ import threading
 import time
 import uuid
 from collections import OrderedDict
-from datetime import UTC
+from datetime import timezone
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import select
@@ -149,7 +149,7 @@ def create_access_token(data: dict, expires_delta=None) -> str:
 
     import jwt
     to_encode = data.copy()
-    expire = datetime.now(UTC) + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode['exp'] = expire
     to_encode['jti'] = uuid.uuid4().hex
     to_encode['type'] = 'access'
@@ -165,7 +165,7 @@ def create_refresh_token(data: dict) -> str:
 
     import jwt
     to_encode = data.copy()
-    expire = datetime.now(UTC) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    expire = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     to_encode['exp'] = expire
     to_encode['jti'] = uuid.uuid4().hex
     to_encode['type'] = 'refresh'
@@ -220,7 +220,7 @@ async def revoke_token(jti: str, exp: int) -> None:
     Redis 不可用时静默失败（token 仍会自然过期），但会同步写入本地 LRU 缓存作为降级。
     """
     from datetime import datetime
-    remaining = max(exp - int(datetime.now(UTC).timestamp()), 0)
+    remaining = max(exp - int(datetime.now(timezone.utc).timestamp()), 0)
     if remaining <= 0:
         return
     # 始终写入本地 LRU 缓存（无论 Redis 是否可用），作为后续 Redis 故障时的降级依据

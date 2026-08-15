@@ -8,7 +8,7 @@
  * 保持导出名 `patternRoomApi` 不变以兼容 `api/index.ts`。
  * 内部完全重写为面向"客户分组 + 部位布料 + 版本快照"扁平结构的 15 个 API 方法。
  */
-import { get, post, put, del, upload, download } from './request'
+import { get, post, put, del, upload } from './request'
 
 // ==================== 类型别名 ====================
 
@@ -226,6 +226,9 @@ export interface GroupedListResponse {
   success: boolean
   groups: PatternMakerGroup[]
   total_projects: number
+  total: number
+  pages: number
+  current_page: number
 }
 
 /** 打样项目列表响应（分页） */
@@ -254,6 +257,8 @@ export interface CompletedTableResponse {
   success: boolean
   items: CompletedTableRow[]
   total: number
+  pages: number
+  current_page: number
 }
 
 /** 打样项目详情响应 */
@@ -343,6 +348,9 @@ export interface VersionCreateRequest {
 export interface GroupedListParams {
   keyword?: string
   customer_id?: number
+  status?: string
+  page?: number
+  per_page?: number
 }
 
 /** 项目列表查询参数（分页） */
@@ -377,12 +385,8 @@ export const patternRoomApi = {
     get<ProjectListResponse>('/pattern-room/projects', params as Record<string, unknown>),
 
   // ---------- 2b. 已完成打样项目表格查询 ----------
-  getCompletedTable: (params?: { keyword?: string; pattern_maker_id?: number }) =>
+  getCompletedTable: (params?: { keyword?: string; pattern_maker_id?: number; page?: number; per_page?: number }) =>
     get<CompletedTableResponse>('/pattern-room/projects/completed-table', params as Record<string, unknown>),
-
-  // ---------- 2c. 已完成打样项目表格导出（Excel） ----------
-  exportCompletedTable: (params?: { keyword?: string; pattern_maker_id?: number }) =>
-    download('/pattern-room/projects/completed-table/export', '已完成打样.xlsx', params),
 
   // ---------- 3. 打样项目详情 ----------
   getProject: (id: number) =>

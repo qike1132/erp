@@ -118,8 +118,8 @@ export function useOrderForm() {
       return
     }
     try {
-      const res = (await get('/aux/available-stockins', { product_id: form.productId, customer: form.customer })) as any
-      const items: AvailableStockinItem[] = res.stockins ?? res.items ?? res ?? []
+      const res = await get<{ stockins?: AvailableStockinItem[]; items?: AvailableStockinItem[] } | AvailableStockinItem[]>('/aux/available-stockins', { product_id: form.productId, customer: form.customer })
+      const items: AvailableStockinItem[] = Array.isArray(res) ? res : (res.stockins ?? res.items ?? [])
       availableStock.value = items.reduce((s: number, i: AvailableStockinItem) => s + (i.available ?? i.quantity - (i.deducted || 0)), 0)
     } catch {
       availableStock.value = 0

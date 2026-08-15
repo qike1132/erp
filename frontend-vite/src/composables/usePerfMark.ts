@@ -93,7 +93,7 @@ export function usePerfMark(prefix: string) {
 }
 
 if (isDev) {
-  ;(window as any).__erp_perf_marks__ = { getEntries, getSummary, clear }
+  ;(window as unknown as Record<string, unknown>).__erp_perf_marks__ = { getEntries, getSummary, clear }
   console.log('[Perf Marks] window.__erp_perf_marks__')
 }
 

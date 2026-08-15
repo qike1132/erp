@@ -3,15 +3,10 @@
     <div class="page-card page-card-main">
       <!-- 卡片头部 -->
       <div class="page-card-header">
-        <div class="cu-header-left">
-          <HeaderTabs />
-        </div>
-        <div class="cu-header-right">
-          <div class="cu-tabs">
-            <button class="cu-tab-btn active" @click="openForm('add')">
-              <FontAwesomeIcon icon="plus" aria-hidden="true" /> 新建客户
-            </button>
-          </div>
+        <div class="cu-tabs">
+          <button class="cu-tab-btn active" @click="openForm('add')">
+            <FontAwesomeIcon icon="plus" aria-hidden="true" /> 新建客户
+          </button>
         </div>
       </div>
 
@@ -131,7 +126,6 @@ import type { Customer } from '@/types'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
-import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { formatDate } from '@/utils/format'
 
@@ -302,22 +296,6 @@ async function handleDelete(row: Customer) {
 
 /* Card Header */
 /* 卡片头部样式已迁移到全局 .page-card-header（src/styles/app.css） */
-.page-card-header :deep(.ht-bar) {
-  width: auto;
-  margin: 0;
-}
-.cu-header-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex: 1;
-}
-.cu-header-right {
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
-  gap: 8px;
-}
 .cu-card-title-group {
   display: flex;
   align-items: center;
@@ -377,37 +355,43 @@ async function handleDelete(row: Customer) {
 
 /* Tabs */
 .cu-tabs {
-  display: flex;
+  display: inline-flex;
   gap: 4px;
-  background: var(--color-surface, #f1f5f9);
   padding: 4px;
-  border-radius: 11px;
+  border-radius: 12px;
+  background: white;
+  border: 1px solid var(--color-border-light);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
 }
 
 .cu-tab-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  padding: 8px 18px;
+  padding: 8px 14px;
   border: none;
-  border-radius: 8px;
+  border-radius: 9px;
   font-size: 13px;
   font-weight: 600;
   color: var(--color-text-secondary);
   background: transparent;
   cursor: pointer;
-  transition: color 0.3s ease, background 0.3s ease;
+  transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
 }
 
 .cu-tab-btn:hover {
+  background: var(--color-primary-50);
   color: var(--color-primary-600);
-  background: rgba(255, 255, 255, 0.6);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  transform: translateY(-1px);
 }
 
 .cu-tab-btn.active {
-  background: white;
-  color: var(--color-primary-600);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
+  color: var(--color-primary-700);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 8px rgba(91,141,239,0.2);
+  transform: translateY(-1px);
 }
 
 /* Metrics */

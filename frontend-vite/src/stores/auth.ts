@@ -20,7 +20,7 @@ export const useAuthStore = defineStore('auth', () => {
       return null
     }
     user.value = {
-      id: raw.user_id ?? (raw as any).id ?? 0,
+      id: raw.user_id ?? (raw as { id?: number }).id ?? 0,
       username: raw.username || '',
       is_super: raw.is_super ?? false,
       factory: raw.factory ?? null,

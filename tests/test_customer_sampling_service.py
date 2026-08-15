@@ -32,6 +32,9 @@ _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
+# 测试专用数据库（conftest 计算得出，与开发库 erp_system 隔离，避免种子数据污染）
+from conftest import TEST_DATABASE_URL
+
 from fastapi_app.core.exceptions import BusinessError, ConflictError, NotFoundError
 from fastapi_app.services.customer_sampling_service import (
     _compute_diff,
@@ -51,6 +54,7 @@ from fastapi_app.services.customer_sampling_service import (
     list_versions,
     update_part,
     update_project,
+    update_project_status,
     upload_project_image,
 )
 
@@ -338,6 +342,12 @@ class TestServiceMockErrors:
             # 传入 version=3，与 5 不匹配
             await update_project(mock_async_db, 1, product_name='新名称', version=3)
 
+    async def test_update_project_status_not_found(self, mock_async_db):
+        """更新项目状态：项目不存在 → NotFoundError"""
+        mock_async_db.execute = AsyncMock(return_value=_mock_result(scalar_value=None))
+        with pytest.raises(NotFoundError):
+            await update_project_status(mock_async_db, 9999, status='completed')
+
     async def test_delete_project_not_found(self, mock_async_db):
         """删除项目：项目不存在 → NotFoundError"""
         mock_async_db.execute = AsyncMock(return_value=_mock_result(scalar_value=None))
@@ -432,14 +442,14 @@ class TestServiceMockErrors:
                 content_type='image/png',
             )
 
-    async def test_create_project_customer_not_found(self, mock_async_db):
-        """创建项目：客户不存在 → NotFoundError
+    async def test_create_project_pattern_maker_not_found(self, mock_async_db):
+        """创建项目：版师不存在 → NotFoundError
 
-        _resolve_customer_name 内部 execute 查客户名，返回 None（客户不存在）。
+        _resolve_pattern_maker_name 内部 execute 查版师名，返回 None（版师不存在）。
         """
         mock_async_db.execute = AsyncMock(return_value=_mock_result(scalar_value=None))
         with pytest.raises(NotFoundError):
-            await create_project(mock_async_db, product_name='测试', customer_id=9999)
+            await create_project(mock_async_db, product_name='测试', pattern_maker_id=9999)
 
 
 # ============================================================
@@ -462,7 +472,7 @@ async def cs_db():
     from fastapi_app.core.config import settings
     from fastapi_app.shared_models import Base
 
-    engine = create_async_engine(settings.ASYNC_DATABASE_URL, echo=False, pool_pre_ping=True)
+    engine = create_async_engine(TEST_DATABASE_URL, echo=False, pool_pre_ping=True)
     try:
         # 确保表存在（幂等：CREATE TABLE IF NOT EXISTS，已存在则跳过）
         async with engine.begin() as conn:
@@ -483,13 +493,13 @@ async def cs_db():
         await engine.dispose()
 
 
-async def _create_customer(db, name='测试客户A'):
-    """创建测试客户"""
-    from fastapi_app.shared_models import Customer
-    customer = Customer(name=name, contact='联系人', phone='13800138000', address='地址', status=True)
-    db.add(customer)
+async def _create_pattern_maker(db, name='测试版师A'):
+    """创建测试版师"""
+    from fastapi_app.shared_models import PatternMaker
+    maker = PatternMaker(name=name)
+    db.add(maker)
     await db.flush()
-    return customer
+    return maker
 
 
 async def _create_supplier(db, name='测试供应商A'):
@@ -513,8 +523,8 @@ class TestServiceIntegration:
         assert result['total_projects'] == 0
 
     async def test_grouped_list_with_unclassified(self, cs_db):
-        """分组查询：未关联客户的项目归入"未分类"分组"""
-        # 创建无客户的项目
+        """分组查询：未关联版师的项目归入"未分类"分组"""
+        # 创建无版师的项目
         r1 = await create_project(cs_db, product_name='未分类产品1')
         r2 = await create_project(cs_db, product_name='未分类产品2')
         await cs_db.flush()
@@ -523,31 +533,31 @@ class TestServiceIntegration:
         assert result['total_projects'] == 2
         assert len(result['groups']) == 1
         group = result['groups'][0]
-        assert group['customer_name'] == '未分类'
-        assert group['customer_id'] is None
+        assert group['pattern_maker_name'] == '未分类'
+        assert group['pattern_maker_id'] is None
         assert group['project_count'] == 2
 
-    async def test_grouped_list_by_customer(self, cs_db):
-        """分组查询：按客户分组聚合"""
-        customer = await _create_customer(cs_db, '分组测试客户')
+    async def test_grouped_list_by_pattern_maker(self, cs_db):
+        """分组查询：按版师分组聚合"""
+        maker = await _create_pattern_maker(cs_db, '分组测试版师')
         await cs_db.flush()
 
-        # 创建关联客户的项目
-        r1 = await create_project(cs_db, product_name='客户产品1', customer_id=customer.id)
-        # 创建无客户项目
+        # 创建关联版师的项目
+        r1 = await create_project(cs_db, product_name='版师产品1', pattern_maker_id=maker.id)
+        # 创建无版师项目
         r2 = await create_project(cs_db, product_name='未分类产品')
         await cs_db.flush()
 
         result = await get_grouped_list(cs_db)
         assert result['total_projects'] == 2
-        # 应有 2 个分组：客户分组 + 未分类
+        # 应有 2 个分组：版师分组 + 未分类
         assert len(result['groups']) == 2
         # 未分类始终最后
-        assert result['groups'][-1]['customer_name'] == '未分类'
-        # 客户分组在前
-        customer_group = result['groups'][0]
-        assert customer_group['customer_name'] == '分组测试客户'
-        assert customer_group['project_count'] == 1
+        assert result['groups'][-1]['pattern_maker_name'] == '未分类'
+        # 版师分组在前
+        maker_group = result['groups'][0]
+        assert maker_group['pattern_maker_name'] == '分组测试版师'
+        assert maker_group['project_count'] == 1
 
     async def test_grouped_list_keyword_search(self, cs_db):
         """分组查询：关键词搜索（序列号/产品名）"""
@@ -560,6 +570,26 @@ class TestServiceIntegration:
         assert result['total_projects'] == 2
         group = result['groups'][0]
         assert group['project_count'] == 2
+
+    async def test_grouped_list_default_in_progress(self, cs_db):
+        """分组查询：status 缺省默认只返回进行中项目（兜底，避免混入已完成项目）"""
+        r1 = await create_project(cs_db, product_name='进行中项目')
+        r2 = await create_project(cs_db, product_name='已完成项目')
+        await cs_db.flush()
+        await update_project_status(cs_db, r2['id'], status='completed')
+        await cs_db.flush()
+
+        # status 缺省：只返回进行中项目
+        result = await get_grouped_list(cs_db)
+        assert result['total_projects'] == 1
+        projects = [p for g in result['groups'] for p in g['projects']]
+        assert all(p['status'] == 'in_progress' for p in projects)
+        assert all(p['id'] != r2['id'] for p in projects)
+
+        # 显式传 'all'：返回全部状态的项目
+        result_all = await get_grouped_list(cs_db, status='all')
+        assert result_all['total_projects'] == 2
+        assert len(result_all['groups']) == 1
 
     async def test_project_create_auto_t1(self, cs_db):
         """创建项目：自动生成序列号 + T1 基线版本"""
@@ -618,19 +648,48 @@ class TestServiceIntegration:
         with pytest.raises(ConflictError):
             await update_project(cs_db, r['id'], product_name='冲突', version=current_version)
 
-    async def test_project_update_customer(self, cs_db):
-        """编辑项目：关联客户后冗余存储 customer_name"""
-        customer = await _create_customer(cs_db, '关联客户')
-        r = await create_project(cs_db, product_name='客户关联测试')
+    async def test_project_update_pattern_maker(self, cs_db):
+        """编辑项目：关联版师后冗余存储 pattern_maker_name"""
+        maker = await _create_pattern_maker(cs_db, '关联版师')
+        r = await create_project(cs_db, product_name='版师关联测试')
         await cs_db.flush()
 
         detail = await get_project_detail(cs_db, r['id'])
-        await update_project(cs_db, r['id'], customer_id=customer.id, version=detail['version'])
+        await update_project(cs_db, r['id'], pattern_maker_id=maker.id, version=detail['version'])
         await cs_db.flush()
 
         detail2 = await get_project_detail(cs_db, r['id'])
-        assert detail2['customer_id'] == customer.id
-        assert detail2['customer_name'] == '关联客户'
+        assert detail2['pattern_maker_id'] == maker.id
+        assert detail2['pattern_maker_name'] == '关联版师'
+
+    async def test_project_update_status(self, cs_db):
+        """更新项目状态：置为已完成，详情与分组摘要均带状态，审计日志可追溯"""
+        r = await create_project(cs_db, product_name='状态测试')
+        await cs_db.flush()
+
+        # 初始状态为进行中
+        detail = await get_project_detail(cs_db, r['id'])
+        assert detail['status'] == 'in_progress'
+
+        # 更新为已完成
+        await update_project_status(cs_db, r['id'], status='completed')
+        await cs_db.flush()
+
+        detail2 = await get_project_detail(cs_db, r['id'])
+        assert detail2['status'] == 'completed'
+
+        # 分组摘要同样带状态（status 缺省默认只返回进行中，此处显式传 'all' 才能看到已完成项目）
+        grouped = await get_grouped_list(cs_db, status='all')
+        summary = next(
+            p for g in grouped['groups'] for p in g['projects'] if p['id'] == r['id']
+        )
+        assert summary['status'] == 'completed'
+
+        # 审计日志记录状态变更
+        logs = await list_change_logs(cs_db, r['id'])
+        assert any(
+            log['action'] == 'update_project_status' for log in logs['items']
+        )
 
     async def test_part_crud_full_flow(self, cs_db):
         """部位 CRUD 完整流程"""
@@ -897,15 +956,15 @@ class TestServiceIntegration:
         with pytest.raises(NotFoundError):
             await get_project_detail(cs_db, project_id)
 
-    async def test_grouped_list_customer_filter(self, cs_db):
-        """分组查询：customer_id 筛选"""
-        customer = await _create_customer(cs_db, '筛选客户')
+    async def test_grouped_list_pattern_maker_filter(self, cs_db):
+        """分组查询：pattern_maker_id 筛选"""
+        maker = await _create_pattern_maker(cs_db, '筛选版师')
         await cs_db.flush()
 
-        r1 = await create_project(cs_db, product_name='客户项目', customer_id=customer.id)
+        r1 = await create_project(cs_db, product_name='版师项目', pattern_maker_id=maker.id)
         r2 = await create_project(cs_db, product_name='未分类项目')
         await cs_db.flush()
 
-        result = await get_grouped_list(cs_db, customer_id=customer.id)
+        result = await get_grouped_list(cs_db, pattern_maker_id=maker.id)
         assert result['total_projects'] == 1
-        assert result['groups'][0]['customer_name'] == '筛选客户'
+        assert result['groups'][0]['pattern_maker_name'] == '筛选版师'

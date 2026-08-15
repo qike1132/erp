@@ -1,0 +1,39 @@
+// ============================================================================
+// 湖北/外发页面共享布局样式
+// HubeiView.vue / OutsourceOrderView.vue / OutsourcePresetView.vue 共用。
+// 各组件以 `<style scoped lang="scss">` 中 `@use '@/styles/hubei-page.scss'` 引入。
+// ============================================================================
+
+.hu-container {
+  padding: 0;
+  margin: 0 auto;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  contain: layout style;
+  overflow-anchor: none;
+  overflow: hidden;
+}
+
+/* 内容区 */
+.page-card-body {
+  padding: 0;
+  scrollbar-gutter: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.hu-tab-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+@media (max-width: 900px) {
+  .page-card-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}

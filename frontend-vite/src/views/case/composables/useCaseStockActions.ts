@@ -42,7 +42,7 @@ export function useCaseStockActions(
               })),
             })
 
-      const res = result as any
+      const res = result as { failed?: Array<{ index: number; error: string }>; results?: Array<{ success?: boolean; error?: string }> }
       let failedList: Array<{ index: number; error: string }> = []
       if (mode.value === 'stockin') {
         failedList = res?.failed ?? []
@@ -111,7 +111,7 @@ export function useCaseStockActions(
     try {
       const formData = new FormData()
       formData.append('file', excelFile.value)
-      const res = (await (mode.value === 'stockin' ? caseApi.importStockins(formData) : caseApi.importStockouts(formData))) as any
+      const res = (await (mode.value === 'stockin' ? caseApi.importStockins(formData) : caseApi.importStockouts(formData))) as { success: boolean; imported?: number; message?: string }
       if (res.success) {
         showToast(`成功导入 ${res.imported} 条记录`, 'success')
         excelFile.value = null

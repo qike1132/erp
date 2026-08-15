@@ -15,7 +15,7 @@ import os
 import re
 import threading
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -820,7 +820,7 @@ async def import_staging_stockouts_from_file(db: AsyncSession, file_content: byt
                     validation_error = f'产品"{product_name}"不存在'
                 if match_info_parts:
                     note = note + '；' + '；'.join(match_info_parts) if note else '；'.join(match_info_parts)
-                staging_stockout = StagingStockOut(session_id=session_id, customer=customer, stockout_date=datetime.now(UTC).replace(tzinfo=None), product_name=product_name, product_barcode='', product_id=product_id, quantity=quantity, note=note, is_validated=is_validated, validation_error=validation_error, stock_check_passed=stock_check_passed, stock_check_message=stock_check_message, status='pending')
+                staging_stockout = StagingStockOut(session_id=session_id, customer=customer, stockout_date=datetime.now(timezone.utc).replace(tzinfo=None), product_name=product_name, product_barcode='', product_id=product_id, quantity=quantity, note=note, is_validated=is_validated, validation_error=validation_error, stock_check_passed=stock_check_passed, stock_check_message=stock_check_message, status='pending')
                 db.add(staging_stockout)
                 imported += 1
             except (ValueError, TypeError, OSError) as e:

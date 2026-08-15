@@ -2,7 +2,6 @@
   <div class="bk-container">
     <div class="page-card page-card-main">
       <div class="page-card-header">
-        <HeaderTabs />
         <div class="bk-card-title-group">
           <div class="bk-icon-box bk-icon-blue">
             <FontAwesomeIcon icon="database" />
@@ -16,20 +15,22 @@
 
       <!-- Tab bar -->
       <div class="bk-tab-bar">
-        <button
-          class="bk-tab-btn"
-          :class="{ 'bk-tab-active': activeTab === 'backup' }"
-          @click="handleTabChange('backup')"
-        >
-          <FontAwesomeIcon icon="database" /> 备份与恢复
-        </button>
-        <button
-          class="bk-tab-btn"
-          :class="{ 'bk-tab-active': activeTab === 'records' }"
-          @click="handleTabChange('records')"
-        >
-          <FontAwesomeIcon icon="history" /> 备份记录
-        </button>
+        <div class="bk-tab-group">
+          <button
+            class="bk-tab-btn"
+            :class="{ 'bk-tab-active': activeTab === 'backup' }"
+            @click="handleTabChange('backup')"
+          >
+            <FontAwesomeIcon icon="database" /> 备份与恢复
+          </button>
+          <button
+            class="bk-tab-btn"
+            :class="{ 'bk-tab-active': activeTab === 'records' }"
+            @click="handleTabChange('records')"
+          >
+            <FontAwesomeIcon icon="history" /> 备份记录
+          </button>
+        </div>
         <div class="bk-tab-actions">
           <button
             class="bk-action-btn bk-action-secondary"
@@ -197,7 +198,6 @@ import { backupApi } from '@/api'
 import type { ApiResponse, BackupRecord } from '@/types'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiButton from '@/components/ui/UiButton.vue'
-import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 import RestoreProgressBar from '@/components/backup/RestoreProgressBar.vue'
 import BackupRecordList from '@/components/backup/BackupRecordList.vue'
 import BackupModeSelector from '@/components/backup/BackupModeSelector.vue'
@@ -549,7 +549,7 @@ const recordsLoading = ref(false)
 async function loadRecords(page: number = 1) {
   recordsLoading.value = true
   try {
-    const res = await backupApi.getRecords(page, recordsPageSize) as any
+    const res = await backupApi.getRecords(page, recordsPageSize) as ApiResponse & { records?: BackupRecord[]; total?: number }
     if (res.success) {
       records.value = res.records ?? []
       recordsTotal.value = res.total ?? 0
@@ -570,7 +570,7 @@ async function handleIntegrityCheck() {
   checking.value = true
   checkResult.value = null
   try {
-    const res = await backupApi.integrityCheck() as any
+    const res = await backupApi.integrityCheck() as ApiResponse & { failed?: number }
     checkResult.value = res
     if (res.failed === 0) {
       showToast('备份完整性巡检通过', 'success')
@@ -602,7 +602,6 @@ function handleTabChange(tab: 'backup' | 'records') {
   flex-direction: column;
   box-sizing: border-box;
 }
-.page-card-header :deep(.ht-bar) { margin: 0; }
 
 /* === Header === */
 .bk-card-title-group {
@@ -697,9 +696,20 @@ function handleTabChange(tab: 'backup' | 'records') {
   flex-shrink: 0;
 }
 
+.bk-tab-group {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: white;
+  border: 1px solid var(--color-border-light);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
+}
+
 .bk-tab-btn {
-  display: flex;
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   padding: 8px 14px;
   border: none;
@@ -709,19 +719,20 @@ function handleTabChange(tab: 'backup' | 'records') {
   font-weight: 600;
   color: var(--color-text-secondary);
   cursor: pointer;
-  transition: background 0.3s ease, color 0.3s ease, transform 0.3s ease;
+  transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
 }
 
 .bk-tab-btn:hover {
   background: var(--color-primary-50);
   color: var(--color-primary-600);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
   transform: translateY(-1px);
 }
 
 .bk-tab-active {
   background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
   color: var(--color-primary-700);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(91, 141, 239, 0.2);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 8px rgba(91,141,239,0.2);
   transform: translateY(-1px);
 }
 

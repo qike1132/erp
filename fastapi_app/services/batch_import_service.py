@@ -7,7 +7,7 @@
 import asyncio
 import logging
 import os
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -247,7 +247,7 @@ async def import_orders_from_data(db: AsyncSession, data_list: list) -> tuple[in
         order = Order(
             order_no=order_no,
             customer=customer,
-            order_date=datetime.now(UTC).replace(tzinfo=None),
+            order_date=datetime.now(timezone.utc).replace(tzinfo=None),
             product_id=product_id,
             quantity=qty,
             note=str(note).strip() if note else '',
@@ -330,7 +330,7 @@ async def import_stockins_from_data(db: AsyncSession, data_list: list) -> tuple[
         except ValueError:
             return False
 
-        stockin_date = parse_date_value(stockin_date_val) or datetime.now(UTC).replace(tzinfo=None)
+        stockin_date = parse_date_value(stockin_date_val) or datetime.now(timezone.utc).replace(tzinfo=None)
         stockin_no = await generate_stockin_number(db)
         stockin = StockIn(
             stockin_no=stockin_no,
@@ -420,7 +420,7 @@ async def import_stockouts_from_data(db: AsyncSession, data_list: list) -> tuple
         if qty > shipment_info['available_quantity']:
             return False
 
-        stockout_date = parse_date_value(stockout_date_val) or datetime.now(UTC).replace(tzinfo=None)
+        stockout_date = parse_date_value(stockout_date_val) or datetime.now(timezone.utc).replace(tzinfo=None)
 
         remaining_qty = qty
         for order_detail in shipment_info['orders']:

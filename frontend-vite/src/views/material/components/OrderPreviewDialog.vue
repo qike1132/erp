@@ -72,47 +72,6 @@ defineEmits<{
 const CATEGORY_MAP: Record<string, string> = { fabric: '面料', filling: '填充', accessory: '辅料', packaging: '包装' }
 </script>
 
-<style scoped>
-/* === Detail Grid === */
-.mr-det-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 20px; }
-.mr-det-lb { font-size: 12px; color: var(--color-text-muted); margin-bottom: 6px; }
-.mr-det-vl { font-size: 15px; font-weight: 600; color: var(--color-text); }
-
-/* === Preview Dialog Sections === */
-.mr-preview-section-label {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--color-text);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 12px;
-}
-.mr-preview-section-label i {
-  font-size: 13px;
-  color: var(--color-primary-500);
-}
-.mr-preview-count {
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--color-text-muted);
-  margin-left: 4px;
-}
-.mr-source-section {
-  margin-bottom: 16px;
-}
-.mr-source-card {
-  padding: 14px 16px;
-  background: linear-gradient(135deg, var(--color-success-50, #ECFDF5), var(--color-surface, #f8fafc));
-  border: 1px solid var(--color-success-200, #A7F3D0);
-  border-radius: 12px;
-  margin-bottom: 8px;
-}
-.mr-source-card:last-child {
-  margin-bottom: 0;
-}
-
-.mr-item-tbl { width: 100%; border-collapse: collapse; }
-.mr-item-tbl th { background: var(--color-surface, #f8fafc); padding: 10px 12px; font-size: 12px; text-align: left; }
-.mr-item-tbl td { padding: 10px 12px; border-bottom: 1px solid var(--color-border-light, #e2e8f0); font-size: 13px; }
+<style scoped lang="scss">
+@use '../material-dialogs.scss' as *;
 </style>

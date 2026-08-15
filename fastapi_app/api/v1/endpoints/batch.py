@@ -133,6 +133,69 @@ def _build_batch_result(
     return BatchImportResult(success=False, message=fail_msg)
 
 
+def _parse_import_row(
+    row_data: dict, product_map: dict, quantity_field: str, qty_invalid_msg: str,
+) -> tuple[str, int, int] | tuple[None, str] | None:
+    """解析批量导入行的客户/产品/数量字段。
+
+    Args:
+        row_data: Excel 单行数据。
+        product_map: 产品映射（小写名称/条码 → Product）。
+        quantity_field: 数量列名（如 '订单数量'/'备货数量'）。
+        qty_invalid_msg: 数量非法时的错误消息。
+
+    Returns:
+        (customer, product_id, qty): 解析成功
+        (None, error_msg): 校验失败（调用方记录错误并跳过）
+        None: 关键字段缺失（调用方静默跳过）
+    """
+    customer = row_data.get('客户名称') or row_data.get('客户')
+    product_name = row_data.get('产品名称') or row_data.get('产品')
+    quantity = row_data.get(quantity_field) or row_data.get('数量')
+    if not customer or not product_name or (not quantity):
+        return None
+    customer = str(customer).strip()
+    product_name = str(product_name).strip()
+    is_valid, error_msg = validate_customer_name(customer)
+    if not is_valid:
+        return None, error_msg
+    product = product_map.get(product_name.lower().strip())
+    product = product or product_map.get(product_name)
+    if not product:
+        return None, f'产品不存在 - {product_name}'
+    try:
+        qty = int(quantity)
+    except (ValueError, TypeError):
+        return None, qty_invalid_msg
+    return str(customer), product.id, qty
+
+
+async def _find_case_locked(db: AsyncSession, identifier: str) -> tuple[Case | None, str | None]:
+    """按产品名/条码或皮套名/条码查找皮套并加行锁。
+
+    Returns:
+        (case, None): 成功；
+        (None, error_msg): 未找到或加锁失败。
+    """
+    result = await db.execute(select(Product).where((Product.name == identifier) | (Product.barcode == identifier)))
+    product = result.scalar_one_or_none()
+    case = None
+    if product:
+        result = await db.execute(select(Case).where(Case.product_id == product.id))
+        case = result.scalar_one_or_none()
+    if not case:
+        result = await db.execute(select(Case).where((Case.name == identifier) | (Case.barcode == identifier)))
+        case = result.scalar_one_or_none()
+    if not case:
+        return None, f'皮套 {identifier} 不存在'
+    # 行锁确保并发安全
+    result = await db.execute(select(Case).where(Case.id == case.id).with_for_update())
+    case = result.scalar_one_or_none()
+    if not case:
+        return None, f'皮套 {identifier} 加锁失败'
+    return case, None
+
+
 def _validate_xlsx_file(file: UploadFile) -> BatchImportResult | None:
     """校验上传文件是否为 .xlsx 格式。
 
@@ -368,34 +431,17 @@ async def batch_import_orders(
         errors = []
         for row_data in data_list:
             try:
-                customer = row_data.get('客户名称') or row_data.get('客户')
-                product_name = row_data.get('产品名称') or row_data.get('产品')
-                quantity = row_data.get('订单数量') or row_data.get('数量')
                 deduct_flag = row_data.get('抵扣备货')
                 note = row_data.get('备注')
-                if not customer or not product_name or (not quantity):
+                parsed = _parse_import_row(row_data, product_map, '订单数量', '订单数量无效')
+                if parsed is None:
                     skipped += 1
                     continue
-                customer = str(customer).strip()
-                product_name = str(product_name).strip()
-                is_valid, error_msg = validate_customer_name(customer)
-                if not is_valid:
-                    errors.append(error_msg)
+                if parsed[0] is None:
+                    errors.append(parsed[1])
                     skipped += 1
                     continue
-                product = product_map.get(product_name.lower().strip())
-                product = product or product_map.get(product_name)
-                if not product:
-                    errors.append(f'产品不存在 - {product_name}')
-                    skipped += 1
-                    continue
-                product_id = product.id
-                try:
-                    qty = int(quantity)
-                except (ValueError, TypeError):
-                    errors.append('订单数量无效')
-                    skipped += 1
-                    continue
+                customer, product_id, qty = parsed
                 order_no = await generate_order_number(db)
                 order = Order(
                     order_no=order_no, customer=customer, order_date=datetime.now(),
@@ -475,25 +521,9 @@ async def batch_import_case_stockouts(
                     errors.append('出库数量必须是整数')
                     skipped += 1
                     continue
-                # 先按产品名称/条码查找关联的皮套，再按皮套名称/条码查找
-                result = await db.execute(select(Product).where((Product.name == product_identifier) | (Product.barcode == product_identifier)))
-                product = result.scalar_one_or_none()
-                case = None
-                if product:
-                    result = await db.execute(select(Case).where(Case.product_id == product.id))
-                    case = result.scalar_one_or_none()
-                if not case:
-                    result = await db.execute(select(Case).where((Case.name == product_identifier) | (Case.barcode == product_identifier)))
-                    case = result.scalar_one_or_none()
-                if not case:
-                    errors.append(f'皮套 {product_identifier} 不存在')
-                    skipped += 1
-                    continue
-                # 行锁确保并发安全
-                result = await db.execute(select(Case).where(Case.id == case.id).with_for_update())
-                case = result.scalar_one_or_none()
-                if not case:
-                    errors.append(f'皮套 {product_identifier} 加锁失败')
+                case, case_err = await _find_case_locked(db, product_identifier)
+                if case_err:
+                    errors.append(case_err)
                     skipped += 1
                     continue
                 if case.current_stock < qty:
@@ -577,25 +607,9 @@ async def batch_import_case_stockins(
                     errors.append('入库数量必须是整数')
                     skipped += 1
                     continue
-                # 先按产品名称/条码查找关联的皮套，再按皮套名称/条码查找
-                result = await db.execute(select(Product).where((Product.name == product_identifier) | (Product.barcode == product_identifier)))
-                product = result.scalar_one_or_none()
-                case = None
-                if product:
-                    result = await db.execute(select(Case).where(Case.product_id == product.id))
-                    case = result.scalar_one_or_none()
-                if not case:
-                    result = await db.execute(select(Case).where((Case.name == product_identifier) | (Case.barcode == product_identifier)))
-                    case = result.scalar_one_or_none()
-                if not case:
-                    errors.append(f'皮套 {product_identifier} 不存在')
-                    skipped += 1
-                    continue
-                # 行锁确保并发安全
-                result = await db.execute(select(Case).where(Case.id == case.id).with_for_update())
-                case = result.scalar_one_or_none()
-                if not case:
-                    errors.append(f'皮套 {product_identifier} 加锁失败')
+                case, case_err = await _find_case_locked(db, product_identifier)
+                if case_err:
+                    errors.append(case_err)
                     skipped += 1
                     continue
                 stockin_date = parse_date_value(stockin_date_val) or datetime.now()
@@ -660,34 +674,17 @@ async def batch_import_stockins(
         errors = []
         for row_data in data_list:
             try:
-                customer = row_data.get('客户名称') or row_data.get('客户')
-                product_name = row_data.get('产品名称') or row_data.get('产品')
-                quantity = row_data.get('备货数量') or row_data.get('数量')
                 stockin_date_val = row_data.get('时间') or row_data.get('备货时间')
                 note = row_data.get('备注')
-                if not customer or not product_name or (not quantity):
+                parsed = _parse_import_row(row_data, product_map, '备货数量', '备货数量无效')
+                if parsed is None:
                     skipped += 1
                     continue
-                customer = str(customer).strip()
-                product_name = str(product_name).strip()
-                is_valid, error_msg = validate_customer_name(customer)
-                if not is_valid:
-                    errors.append(error_msg)
+                if parsed[0] is None:
+                    errors.append(parsed[1])
                     skipped += 1
                     continue
-                product = product_map.get(product_name.lower().strip())
-                product = product or product_map.get(product_name)
-                if not product:
-                    errors.append(f'产品不存在 - {product_name}')
-                    skipped += 1
-                    continue
-                product_id = product.id
-                try:
-                    qty = int(quantity)
-                except (ValueError, TypeError):
-                    errors.append('备货数量无效')
-                    skipped += 1
-                    continue
+                customer, product_id, qty = parsed
                 stockin_date = parse_date_value(stockin_date_val) or datetime.now()
                 stockin_no = await generate_stockin_number(db)
                 stockin = StockIn(

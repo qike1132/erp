@@ -2,24 +2,19 @@
   <div class="sp-container">
     <div class="page-card page-card-main">
       <div class="page-card-header">
-        <HeaderTabs />
-        <div class="sp-header-content">
-          <div class="sp-header-left">
-            <div class="sp-tab-group" role="tablist">
-              <button
-                role="tab"
-                :aria-selected="viewTab === 'daily'"
-                :class="['sp-tab', { 'sp-tab-active': viewTab === 'daily' }]"
-                @click="viewTab = 'daily'"
-              >每日计划</button>
-              <button
-                role="tab"
-                :aria-selected="viewTab === 'summary'"
-                :class="['sp-tab', { 'sp-tab-active': viewTab === 'summary' }]"
-                @click="viewTab = 'summary'"
-              >月度汇总</button>
-            </div>
-          </div>
+        <div class="sp-tab-group" role="tablist">
+          <button
+            role="tab"
+            :aria-selected="viewTab === 'daily'"
+            :class="['sp-tab', { 'sp-tab-active': viewTab === 'daily' }]"
+            @click="viewTab = 'daily'"
+          >每日计划</button>
+          <button
+            role="tab"
+            :aria-selected="viewTab === 'summary'"
+            :class="['sp-tab', { 'sp-tab-active': viewTab === 'summary' }]"
+            @click="viewTab = 'summary'"
+          >月度汇总</button>
         </div>
       </div>
 
@@ -122,7 +117,6 @@ import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/vue-query'
 import { planApi } from '@/api';
 import { showToast } from '@/composables/useToast';
 import { downloadCsv, buildCsvRow } from '@/utils/csv';
-import HeaderTabs from '@/layouts/components/HeaderTabs.vue';
 import PlanDetailDrawer from './components/PlanDetailDrawer.vue';
 import CreateShipmentPlanDialog from './components/CreateShipmentPlanDialog.vue';
 import PlanDetailDialog from './components/PlanDetailDialog.vue';
@@ -163,7 +157,7 @@ const WDS = ['日', '一', '二', '三', '四', '五', '六'];
 const { data: d, isLoading, isFetching, isError, refetch } = useQuery({
   queryKey: ['pp-monthly', () => y.value, () => m.value],
   queryFn: async () => {
-    const res = (await planApi.monthly({ year: y.value, month: m.value })) as any;
+    const res = await planApi.monthly({ year: y.value, month: m.value });
     // 冻结返回数据，阻止 Vue 对 20K+ 明细做深层响应式转换，降低内存和 CPU 开销
     return res ? Object.freeze(JSON.parse(JSON.stringify(res))) : res;
   },
@@ -178,7 +172,7 @@ function refetchAll() { refetch(); refetchSummary(); }
 
 const { data: sData, isLoading: sLoading, isFetching: sFetching, isError: sError, refetch: refetchSummary } = useQuery({
   queryKey: ['pp-summary', () => y.value, () => m.value],
-  queryFn: async () => (await planApi.customerSummary({ year: y.value, month: m.value })) as any,
+  queryFn: async () => await planApi.customerSummary({ year: y.value, month: m.value }),
   staleTime: 5 * 60 * 1000,
   gcTime: 30 * 60 * 1000,
   retry: 1,
@@ -430,33 +424,14 @@ function exportCSV() {
 }
 </script>
 
-<style scoped>
+<style scoped lang="scss">
+@use './purchase-plan-common.scss' as *;
 .sp-container {
   height: 100%;
   padding: 0;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-}
-
-.sp-header-content {
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 12px;
-  flex: 1;
-}
-
-.page-card-header :deep(.ht-bar) {
-  width: auto;
-  margin: 0;
-}
-
-.sp-header-left {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
 }
 
 .sp-toolbar {
@@ -886,56 +861,6 @@ function exportCSV() {
   font-size: 11px;
   font-weight: 500;
   color: var(--color-text-muted);
-}
-
-.sp-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 40px 20px;
-  color: var(--color-text-muted);
-  font-size: 14px;
-}
-
-.sp-empty i {
-  font-size: 28px;
-  opacity: 0.5;
-}
-
-/* Fetching progress bar */
-.sp-fetching-bar {
-  height: 2px;
-  background: var(--color-primary-100, #e0f2fe);
-  overflow: hidden;
-  border-radius: 1px;
-}
-.sp-fetching-progress {
-  height: 100%;
-  width: 30%;
-  background: var(--color-primary-500, #3b82f6);
-  border-radius: 1px;
-  animation: sp-progress-slide 1s ease-in-out infinite;
-}
-@keyframes sp-progress-slide {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(400%); }
-}
-
-.sp-retry-btn {
-  margin-top: 6px;
-  padding: 4px 16px;
-  border: 1px solid var(--color-border, #d0d5dd);
-  border-radius: 6px;
-  background: var(--color-bg, #fff);
-  color: var(--color-text, #344054);
-  font-size: 13px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.sp-retry-btn:hover {
-  background: var(--color-bg-hover, #f2f4f7);
 }
 
 .sp-modal-badge {

@@ -56,7 +56,7 @@ class Order(Base):
     order_no: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, comment='订单编号')
     customer: Mapped[str] = mapped_column(String(100), nullable=False, index=True, comment='客户名称')
     order_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True, comment='下单时间')
-    product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id'), nullable=False, index=True, comment='产品ID')
+    product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id', ondelete='RESTRICT'), nullable=False, index=True, comment='产品ID')
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, comment='订单数量')
     status: Mapped[str | None] = mapped_column(String(20), default=None, nullable=True, index=True, comment='订单状态')
     note: Mapped[str | None] = mapped_column(Text, comment='备注')
@@ -64,19 +64,19 @@ class Order(Base):
     order_type: Mapped[str] = mapped_column(String(20), default='regular', nullable=False, comment='订单类型：regular=常规订单, custom=定制订单')
     country: Mapped[str | None] = mapped_column(String(100), comment='国家名称（仅定制订单使用）')
     is_locked: Mapped[bool | None] = mapped_column(Boolean, default=False, comment='是否被审批锁定')
-    locked_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id'), comment='锁定人ID')
+    locked_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id', ondelete='SET NULL'), comment='锁定人ID')
     lock_time: Mapped[datetime | None] = mapped_column(DateTime, comment='锁定时间')
 
     batch_completed_at: Mapped[datetime | None] = mapped_column(DateTime, comment='批次完成时间')
-    batch_completed_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id'), comment='批次完成操作人ID')
+    batch_completed_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id', ondelete='SET NULL'), comment='批次完成操作人ID')
 
     # 湖北订单确认流程（与派生状态机正交）
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, comment='订单确认时间（湖北订单确认流程）')
-    confirmed_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id'), comment='订单确认人ID')
+    confirmed_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id', ondelete='SET NULL'), comment='订单确认人ID')
 
     is_deleted: Mapped[bool | None] = mapped_column(Boolean, default=False, index=True, comment='是否已删除')
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, comment='删除时间')
-    deleted_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id'), comment='删除人ID')
+    deleted_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id', ondelete='SET NULL'), comment='删除人ID')
     delete_reason: Mapped[str | None] = mapped_column(String(500), comment='删除原因')
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
 

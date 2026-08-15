@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiButton from '@/components/ui/UiButton.vue'
+import { toast } from '@/composables/useToast'
 import type { BatchPartCreateRequest } from '@/api/patternRoom'
 
 /** 批量新增部位表单行 */
@@ -62,15 +63,25 @@ const filledCount = computed(() => rows.value.filter((r) => r.part_name.trim().l
 const canSubmit = computed(() => filledCount.value > 0 && !props.submitting)
 
 function handleSubmit() {
-  const items = rows.value
-    .filter((r) => r.part_name.trim().length > 0)
-    .map((r) => ({
-      part_name: r.part_name.trim(),
-      supplier_id: r.supplier_id,
-      supplier_name: r.supplier_name.trim() || null,
-      fabric_name: r.fabric_name.trim() || null,
-      fabric_color_no: r.fabric_color_no.trim() || null,
-    }))
+  const filledRows = rows.value.filter((r) => r.part_name.trim().length > 0)
+
+  const seen = new Set<string>()
+  for (const row of filledRows) {
+    const name = row.part_name.trim()
+    if (seen.has(name)) {
+      toast.warning('存在重复部位')
+      return
+    }
+    seen.add(name)
+  }
+
+  const items = filledRows.map((r) => ({
+    part_name: r.part_name.trim(),
+    supplier_id: r.supplier_id,
+    supplier_name: r.supplier_name.trim() || null,
+    fabric_name: r.fabric_name.trim() || null,
+    fabric_color_no: r.fabric_color_no.trim() || null,
+  }))
 
   emit('submit-batch', { items })
 }

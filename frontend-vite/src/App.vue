@@ -57,10 +57,14 @@ function stopRouteLoading() {
 
 const removeBefore = router.beforeEach(startRouteLoading)
 const removeAfter = router.afterEach(stopRouteLoading)
+// 导航失败（如 chunk 加载失败、守卫抛错）时 afterEach 不会触发，
+// 必须同时在 onError 里关闭 loading，否则遮罩层会永久转圈
+const removeError = router.onError(() => stopRouteLoading())
 
 onUnmounted(() => {
   removeBefore()
   removeAfter()
+  removeError()
 })
 </script>
 

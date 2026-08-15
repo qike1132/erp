@@ -101,6 +101,7 @@ async def list_beile_orders(
     per_page: int = Query(50, ge=1, le=500, description="每页数量"),
     customer: str | None = Query(None, description="客户名筛选"),
     status: str | None = Query(None, description="状态筛选"),
+    confirm_status: str | None = Query(None, description="湖北订单确认状态筛选：unconfirmed=未确认 / confirmed=已确认"),
     db: AsyncSession = Depends(get_async_read_db),
     _user: User = Depends(require_permission("beile_order_view")),
 ) -> OrderListResponse:
@@ -109,9 +110,11 @@ async def list_beile_orders(
     专供湖北订单页面使用，权限要求 beile_order_view（而非 order_manage）。
     强制 factory='湖北'，忽略前端传参，确保数据隔离。
     同时包含订单（Order）和备货（StockIn）记录，通过 record_type 字段区分。
+    confirm_status 生效时仅返回对应确认状态的订单，备货记录一并排除。
     """
     result = await order_crud.get_beile_orders_with_stockins(
         db, page=page, per_page=per_page, customer=customer, factory='湖北',
+        confirm_status=confirm_status,
     )
 
     return OrderListResponse(data=result['items'], total=result['total'],

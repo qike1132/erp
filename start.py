@@ -31,7 +31,7 @@ def parse_args():
     )
     parser.add_argument(
         "--prod", action="store_true",
-        help="生产模式：FastAPI 无 reload"
+        help="生产模式：由 prod_runner 监督器统一拉起多 worker Uvicorn / ARQ / 前端"
     )
     parser.add_argument(
         "--backend-only", action="store_true",
@@ -43,6 +43,14 @@ def parse_args():
     )
     parser.add_argument("--api-port", type=int, default=5002, help="API 服务端口（默认 5002）")
     parser.add_argument("--web-port", type=int, default=3000, help="前端开发端口（默认 3000）")
+    parser.add_argument(
+        "--workers", type=int, default=0,
+        help="生产模式 worker 数（默认取 UVICORN_WORKERS 或 min(4, CPU)）"
+    )
+    parser.add_argument(
+        "--check", action="store_true",
+        help="生产模式环境自检（不拉起进程）"
+    )
     return parser.parse_args()
 
 
@@ -71,6 +79,25 @@ def start_backend(args: argparse.Namespace):
     )
 
 
+def start_production(args: argparse.Namespace):
+    """生产模式：由 prod_runner 监督器统一拉起多 worker Uvicorn / ARQ / 前端。
+
+    prod_runner 支持 --check 环境自检；worker 数通过 UVICORN_WORKERS 透传给子进程
+    （database.py 会按该值分摊数据库连接池）。
+    """
+    os.environ.setdefault("FASTAPI_DEBUG", "false")
+    os.environ.setdefault("APP_ENV", "production")
+    if args.workers > 0:
+        os.environ["UVICORN_WORKERS"] = str(args.workers)
+
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+    from fastapi_app.core import prod_runner
+
+    runner_args = ["--check"] if args.check else []
+    raise SystemExit(prod_runner.main(runner_args))
+
+
 def start_frontend(args: argparse.Namespace):
     """启动 Vue 前端开发服务器"""
     if not FRONTEND_DIR.is_dir():
@@ -97,6 +124,8 @@ def main():
         start_frontend(args)
     elif args.backend_only:
         start_backend(args)
+    elif args.prod:
+        start_production(args)
     else:
         # 完整启动：后端为主，提示前端路径
         print(f"[ERP] 前端开发服务器请手动启动:")

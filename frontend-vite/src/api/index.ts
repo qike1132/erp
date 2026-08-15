@@ -41,6 +41,7 @@ export { caseApi } from './case'
 export { orderBatchApi } from './orderBatch'
 export { countryApi } from './country'
 export { patternRoomApi } from './patternRoom'
+export { patternMakerApi } from './patternMaker'
 
 // 向后兼容：productApi 合并核心方法 + BOM 方法（BOM 实际属于采购中心域）
 // 新代码应分别使用 productApi（核心）和 bomApi（BOM 相关）

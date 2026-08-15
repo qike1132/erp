@@ -118,6 +118,37 @@ def _phase_map_for(progress_type: str) -> dict:
     return _RESTORE_PHASE_MAP
 
 
+async def _load_progress(task_id: str, client) -> tuple[str, str, dict] | None:
+    """探测 backup/restore 键并加载进度数据。
+
+    Returns:
+        (key, progress_type, data): 成功；
+        None: 未找到进度条目或数据损坏。
+
+    从 update_progress / complete_progress / fail_progress 提取的公共探测逻辑。
+    """
+    backup_key = f"{BACKUP_KEY_PREFIX}{task_id}"
+    restore_key = f"{RESTORE_KEY_PREFIX}{task_id}"
+
+    raw = await client.get(backup_key)
+    if raw is not None:
+        key = backup_key
+        progress_type = "backup"
+    else:
+        raw = await client.get(restore_key)
+        if raw is not None:
+            key = restore_key
+            progress_type = "restore"
+        else:
+            return None
+
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    return key, progress_type, data
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -182,21 +213,11 @@ async def update_progress(
         return
 
     # --- auto-detect progress type by probing keys ---
-    backup_key = f"{BACKUP_KEY_PREFIX}{task_id}"
-    restore_key = f"{RESTORE_KEY_PREFIX}{task_id}"
-
-    raw = await client.get(backup_key)
-    if raw is not None:
-        key = backup_key
-        progress_type = "backup"
-    else:
-        raw = await client.get(restore_key)
-        if raw is not None:
-            key = restore_key
-            progress_type = "restore"
-        else:
-            logger.warning(f"[进度] {task_id}: 未找到进度条目")
-            return
+    found = await _load_progress(task_id, client)
+    if found is None:
+        logger.warning(f"[进度] {task_id}: 未找到进度条目")
+        return
+    key, progress_type, data = found
 
     phase_map = _phase_map_for(progress_type)
     if phase not in phase_map:
@@ -208,11 +229,6 @@ async def update_progress(
     progress = round(min(progress, 100.0), 1)
 
     phase_label = f"{label} - {detail}" if detail else label
-
-    try:
-        data = json.loads(raw)
-    except (json.JSONDecodeError, ValueError):
-        return
 
     data["status"] = "running"
     data["progress"] = progress
@@ -244,25 +260,10 @@ async def complete_progress(
         return
 
     # Probe both keys.
-    backup_key = f"{BACKUP_KEY_PREFIX}{task_id}"
-    restore_key = f"{RESTORE_KEY_PREFIX}{task_id}"
-
-    raw = await client.get(backup_key)
-    if raw is not None:
-        key = backup_key
-        progress_type = "backup"
-    else:
-        raw = await client.get(restore_key)
-        if raw is not None:
-            key = restore_key
-            progress_type = "restore"
-        else:
-            return
-
-    try:
-        data = json.loads(raw)
-    except (json.JSONDecodeError, ValueError):
+    found = await _load_progress(task_id, client)
+    if found is None:
         return
+    key, progress_type, data = found
 
     data["status"] = status
     data["progress"] = 100
@@ -298,25 +299,10 @@ async def fail_progress(task_id: str, error: str) -> None:
         logger.error(f"[进度] {task_id}: 失败 - {sanitized}")
         return
 
-    backup_key = f"{BACKUP_KEY_PREFIX}{task_id}"
-    restore_key = f"{RESTORE_KEY_PREFIX}{task_id}"
-
-    raw = await client.get(backup_key)
-    if raw is not None:
-        key = backup_key
-        progress_type = "backup"
-    else:
-        raw = await client.get(restore_key)
-        if raw is not None:
-            key = restore_key
-            progress_type = "restore"
-        else:
-            return
-
-    try:
-        data = json.loads(raw)
-    except (json.JSONDecodeError, ValueError):
+    found = await _load_progress(task_id, client)
+    if found is None:
         return
+    key, progress_type, data = found
 
     # If the task is already in a terminal state, do not overwrite.
     if data.get("status") in ("completed", "completed_with_warnings", "failed"):

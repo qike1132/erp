@@ -4,24 +4,22 @@
 
       <!-- 卡片头部 -->
       <div class="page-card-header">
-        <HeaderTabs />
+        <span v-if="whitelistCustomers.length" class="bt-tab-group" role="tablist">
+          <button
+            v-for="c in whitelistCustomers"
+            :key="c"
+            role="tab"
+            :aria-selected="filters.customer === c"
+            class="bt-tab-btn"
+            :class="{ 'bt-tab-btn--active': filters.customer === c }"
+            @click="switchCustomer(c)"
+          >{{ c }}</button>
+        </span>
         <div class="bt-header-search">
           <UiInput v-model="filters.keyword" placeholder="搜索" style="width: 160px" />
           <UiButton variant="primary" @click="refetch()"> 查询 </UiButton>
         </div>
         <div class="bt-header-actions">
-          <span v-if="whitelistCustomers.length" class="bt-tab-group" role="tablist">
-            <button
-              v-for="c in whitelistCustomers"
-              :key="c"
-              role="tab"
-              :aria-selected="filters.customer === c"
-              class="bt-tab-btn"
-              :class="{ 'bt-tab-btn--active': filters.customer === c }"
-              @click="switchCustomer(c)"
-            >{{ c }}</button>
-          </span>
-
           <button class="bt-whitelist-btn" @click="showWhitelistModal = true" aria-label="设置">
             <FontAwesomeIcon icon="cog" aria-hidden="true" />
           </button>
@@ -138,7 +136,6 @@ import { ref, reactive, computed, watch } from 'vue'
 import { useQuery, keepPreviousData } from '@tanstack/vue-query'
 import { batchApi, orderBatchApi, customerApi } from '@/api'
 import type { BatchQueryItem } from '@/types'
-import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
 import UiInput from '@/components/ui/UiInput.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiSpinner from '@/components/ui/UiSpinner.vue'
@@ -386,10 +383,6 @@ async function confirmComplete() {
 
 /* ===== 卡片头部 (Section 4) ===== */
 /* 卡片头部样式已迁移到全局 .page-card-header（src/styles/app.css） */
-.page-card-header :deep(.ht-bar) {
-  width: auto;
-  margin: 0;
-}
 
 .bt-card-title-group {
   display: flex;

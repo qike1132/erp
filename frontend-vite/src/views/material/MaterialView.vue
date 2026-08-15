@@ -3,134 +3,123 @@
     <div class="page-card page-card-main">
     <!-- Unified Header + Tabs -->
     <div class="mr-top-bar">
-      <div class="mr-top-left">
-        <HeaderTabs />
-      </div>
-      <div class="mr-top-right">
-        <div class="mr-tabs">
-          <button :class="['mr-tab-btn', { active: activeTab === 'progress' }]" @click="switchToProgress">
-            来料进度 <span v-if="progressCount > 0" :class="['notification-badge', activeTab === 'progress' ? 'notification-badge-active' : '']">{{ progressCount }}</span>
-          </button>
-          <button :class="['mr-tab-btn', { active: activeTab === 'history' }]" @click="switchToHistory">
-            历史查询
-          </button>
-          <button v-if="canManage && activeTab === 'progress'" class="mr-btn mr-btn-ghost" @click="exportData" title="导出来料进度数据"><FontAwesomeIcon icon="file-export" /> 导出</button>
-          <button v-if="canManage && activeTab === 'history'" class="mr-btn mr-btn-ghost" @click="exportHistory" title="导出历史数据"><FontAwesomeIcon icon="file-export" /> 导出</button>
-        </div>
+      <div class="mr-tabs">
+        <button :class="['mr-tab-btn', { active: activeTab === 'progress' }]" @click="switchToProgress">
+          来料进度 <span v-if="progressCount > 0" :class="['notification-badge', activeTab === 'progress' ? 'notification-badge-active' : '']">{{ progressCount }}</span>
+        </button>
+        <button :class="['mr-tab-btn', { active: activeTab === 'history' }]" @click="switchToHistory">
+          历史查询
+        </button>
+        <button v-if="canManage && activeTab === 'progress'" class="mr-btn mr-btn-ghost" @click="exportData" title="导出来料进度数据"><FontAwesomeIcon icon="file-export" /> 导出</button>
+        <button v-if="canManage && activeTab === 'history'" class="mr-btn mr-btn-ghost" @click="exportHistory" title="导出历史数据"><FontAwesomeIcon icon="file-export" /> 导出</button>
       </div>
     </div>
 
     <!-- ========== 来料进度 ========== -->
     <div v-if="activeTab === 'progress'" class="mr-content">
-      <div class="mr-filters">
-        <div class="mr-fg"><label>供应商</label><input type="text" v-model="pFilters.supplier" placeholder="搜索..." @keyup.enter="loadProgress(1)"></div>
-        <div class="mr-fg"><label>订单号</label><input type="text" v-model="pFilters.orderNo" placeholder="搜索..." @keyup.enter="loadProgress(1)"></div>
-        <div class="mr-fg"><label>客户</label><input type="text" v-model="pFilters.customer" placeholder="搜索..." @keyup.enter="loadProgress(1)"></div>
-        <div class="mr-fg"><label>分类</label><select v-model="pFilters.category" @change="loadProgress(1)"><option value="">全部</option><option value="fabric">面料</option><option value="filling">填充</option><option value="accessory">辅料</option><option value="packaging">包装</option></select></div>
-        <div class="mr-fg"><label>日期</label><UiDatePicker v-model="pFilters.startDate" @update:model-value="loadProgress(1)" /><span class="mr-date-sep">~</span><UiDatePicker v-model="pFilters.endDate" @update:model-value="loadProgress(1)" /></div>
-        <button class="mr-btn mr-btn-ghost" @click="resetProgressFilters"><FontAwesomeIcon icon="redo" /> 重置</button>
-      </div>
       <div class="mr-card">
         <div class="mr-card-b mr-card-b--flush">
-          <table class="mr-tbl" style="min-width:1000px;">
-            <thead><tr><th style="width:110px;">订单时间</th><th style="width:120px;">客户</th><th>产品名称</th><th style="width:100px;">订单数量</th><th>物料进度（按供应商分组）</th><th style="width:200px;">总进度</th><th style="width:80px;">操作</th></tr></thead>
-            <tbody>
-              <!-- 骨架屏：首次加载且无缓存数据时显示 -->
-              <template v-if="pIsLoading && !progressRows.length">
-                <tr v-for="n in 5" :key="'skel-p-'+n" class="mr-skel-row">
-                  <td><div class="mr-skel-block" style="width:90px" /></td>
-                  <td><div class="mr-skel-block" style="width:70px" /></td>
-                  <td><div class="mr-skel-block" style="width:140px" /></td>
-                  <td><div class="mr-skel-block" style="width:60px" /></td>
-                  <td><div class="mr-skel-block" style="width:100%" /></td>
-                  <td><div class="mr-skel-block" style="width:160px" /></td>
-                  <td><div class="mr-skel-block" style="width:34px;height:34px;border-radius:9px" /></td>
-                </tr>
+          <div v-if="pIsFetching && progressRows.length" class="mr-fetching-bar"><div class="mr-fetching-progress" /></div>
+          <UiDataTable
+            :data="progressOrderRows"
+            :columns="progressColumns"
+            :loading="pIsLoading && !progressRows.length"
+            :paginator="true"
+            :rows="pPerPage"
+            :total-records="pPages * pPerPage"
+            row-key="order_no"
+            @page="onProgressPageChange"
+          >
+            <template #empty>
+              <div class="mr-empty"><FontAwesomeIcon icon="inbox" /><span>暂无进行中的来料登记</span></div>
+            </template>
+            <template #column-body-po_create_time="{ row }">
+              <span class="mr-td-date">{{ row.po_create_time || '-' }}</span>
+            </template>
+            <template #column-body-customer_name="{ row }">
+              {{ row.customer_name || '-' }}
+            </template>
+            <template #column-body-product_name="{ row }">
+              <template v-if="row.sku_items && row.sku_items.length > 1">
+                <div v-for="(sku, idx) in row.sku_items" :key="idx" class="mr-sku-line">{{ sku.product_name || '-' }}</div>
               </template>
-              <tr v-else-if="!pIsLoading && !progressRows.length"><td colspan="7" class="mr-empty"><FontAwesomeIcon icon="inbox" /><span>暂无进行中的来料登记</span></td></tr>
-              <tr v-if="pIsFetching && progressRows.length"><td colspan="7" class="mr-fetching-bar"><div class="mr-fetching-progress" /></td></tr>
-              <tr v-for="row in progressOrderRows" :key="row.order_no" class="mr-order-row">
-                <td class="mr-td-date">{{ row.po_create_time || '-' }}</td>
-                <td>{{ row.customer_name || '-' }}</td>
-                <td>
-                  <template v-if="row.sku_items && row.sku_items.length > 1">
-                    <div v-for="(sku, idx) in row.sku_items" :key="idx" class="mr-sku-line">{{ sku.product_name || '-' }}</div>
-                  </template>
-                  <span v-else class="mr-order-link">{{ row.product_name || '-' }}</span>
-                </td>
-                <td class="mr-td-qty">
-                  <template v-if="row.sku_items && row.sku_items.length > 1">
-                    <div v-for="(sku, idx) in row.sku_items" :key="idx" class="mr-sku-line">{{ sku.quantity != null ? sku.quantity : '-' }}</div>
-                  </template>
-                  <template v-else>{{ row.product_quantity != null ? row.product_quantity : '-' }}</template>
-                </td>
-                <td>
-                  <div class="mr-supplier-groups">
-                    <div v-for="grp in row.groupedItems" :key="grp.supplierName" class="mr-supplier-group">
-                      <div class="mr-supplier-label"><FontAwesomeIcon icon="truck" /><span>{{ grp.supplierName || '未指定' }}</span><span class="mr-supplier-count">{{ grp.items.length }} 项</span></div>
-                      <div class="mr-items-container">
-                        <div v-for="i in grp.items" :key="i.material_name" class="mr-list-item-row">
-                          <span class="mr-list-item-name" :title="i.material_name">{{ i.material_name }}</span>
-                          <span class="mr-list-item-qty">数量:<b>{{ parseFloat(String(i.ordered_quantity || 0)).toFixed(0) }}</b></span>
-                          <span class="mr-list-item-rcv">已到货:<b>{{ parseFloat(String(i.received_quantity || 0)).toFixed(0) }}</b></span>
-                          <div class="mr-list-item-bar"><div :class="['mr-sku-fill', fillClass(i)]" :style="{ width: (i.progress || 0) + '%', height: '100%', borderRadius: '5px' }"></div></div>
-                          <span class="mr-list-item-pct">{{ i.progress || 0 }}%</span>
-                        </div>
-                      </div>
+              <span v-else class="mr-order-link">{{ row.product_name || '-' }}</span>
+            </template>
+            <template #column-body-product_quantity="{ row }">
+              <span class="mr-td-qty">
+                <template v-if="row.sku_items && row.sku_items.length > 1">
+                  <div v-for="(sku, idx) in row.sku_items" :key="idx" class="mr-sku-line">{{ sku.quantity != null ? sku.quantity : '-' }}</div>
+                </template>
+                <template v-else>{{ row.product_quantity != null ? row.product_quantity : '-' }}</template>
+              </span>
+            </template>
+            <template #column-body-groupedItems="{ row }">
+              <div class="mr-supplier-groups">
+                <div v-for="grp in row.groupedItems" :key="grp.supplierName" class="mr-supplier-group">
+                  <div class="mr-supplier-label"><FontAwesomeIcon icon="truck" /><span>{{ grp.supplierName || '未指定' }}</span><span class="mr-supplier-count">{{ grp.items.length }} 项</span></div>
+                  <div class="mr-items-container">
+                    <div v-for="i in grp.items" :key="i.material_name" class="mr-list-item-row">
+                      <span class="mr-list-item-name" :title="i.material_name">{{ i.material_name }}</span>
+                      <span class="mr-list-item-qty">数量:<b>{{ parseFloat(String(i.ordered_quantity || 0)).toFixed(0) }}</b></span>
+                      <span class="mr-list-item-rcv">已到货:<b>{{ parseFloat(String(i.received_quantity || 0)).toFixed(0) }}</b></span>
+                      <div class="mr-list-item-bar"><div :class="['mr-sku-fill', fillClass(i)]" :style="{ width: (i.progress || 0) + '%', height: '100%', borderRadius: '5px' }"></div></div>
+                      <span class="mr-list-item-pct">{{ i.progress || 0 }}%</span>
                     </div>
                   </div>
-                </td>
-                <td><div class="mr-pbar-wrap"><div class="mr-pbar"><div :class="['mr-pfill', row.progress >= 100 ? 'completed' : 'pending']" :style="{ width: (row.progress || 0) + '%' }"></div></div><span class="mr-pbar-pct">{{ row.progress || 0 }}%</span></div></td>
-                <td><div class="mr-action-group"><button type="button" class="mr-action-btn mr-action-view" @click="viewSupplierDetail(row.supplier_name || '', row.order_no)" title="查看供应商详情"><FontAwesomeIcon icon="eye" /></button></div></td>
-              </tr>
-            </tbody>
-          </table>
-          <UiPagination v-if="pPages > 1" :current-page="pPage" :total-pages="pPages" @update:current-page="loadProgress" />
+                </div>
+              </div>
+            </template>
+            <template #column-body-progress="{ row }">
+              <div class="mr-pbar-wrap"><div class="mr-pbar"><div :class="['mr-pfill', row.progress >= 100 ? 'completed' : 'pending']" :style="{ width: (row.progress || 0) + '%' }"></div></div><span class="mr-pbar-pct">{{ row.progress || 0 }}%</span></div>
+            </template>
+            <template #column-body-actions="{ row }">
+              <div class="mr-action-group"><button type="button" class="mr-action-btn mr-action-view" @click="viewSupplierDetail(row.supplier_name || '', row.order_no)" title="查看供应商详情"><FontAwesomeIcon icon="eye" /></button></div>
+            </template>
+          </UiDataTable>
         </div>
       </div>
     </div>
 
     <!-- ========== 历史查询 ========== -->
     <div v-if="activeTab === 'history'" class="mr-content">
-      <div class="mr-filters">
-        <div class="mr-fg"><label>订单号</label><input type="text" v-model="hFilters.orderNo" placeholder="搜索..." @keyup.enter="loadHistory(1)"></div>
-        <div class="mr-fg"><label>供应商</label><input type="text" v-model="hFilters.supplier" placeholder="搜索..." @keyup.enter="loadHistory(1)"></div>
-        <div class="mr-fg"><label>客户</label><input type="text" v-model="hFilters.customer" placeholder="搜索..." @keyup.enter="loadHistory(1)"></div>
-        <div class="mr-fg"><label>分类</label><select v-model="hFilters.category" @change="loadHistory(1)"><option value="">全部</option><option value="fabric">面料</option><option value="filling">填充</option><option value="accessory">辅料</option><option value="packaging">包装</option></select></div>
-        <div class="mr-fg"><label>完成日期</label><UiDatePicker v-model="hFilters.startDate" @update:model-value="loadHistory(1)" /><span class="mr-date-sep">~</span><UiDatePicker v-model="hFilters.endDate" @update:model-value="loadHistory(1)" /></div>
-        <button class="mr-btn mr-btn-ghost" @click="resetHistoryFilters"><FontAwesomeIcon icon="redo" /> 重置</button>
-      </div>
       <div class="mr-card">
         <div class="mr-card-b mr-card-b--flush">
-          <table class="mr-tbl" style="min-width:900px;">
-            <thead><tr><th style="width:150px;">订单号</th><th style="width:100px;">客户</th><th style="width:120px;">产品/数量</th><th style="width:100px;">供应商</th><th>物料名称</th><th style="width:120px;">完成时间</th><th style="width:80px;">操作</th></tr></thead>
-            <tbody>
-              <!-- 骨架屏：首次加载且无缓存数据时显示 -->
-              <template v-if="hIsLoading && !hRegistrations.length">
-                <tr v-for="n in 5" :key="'skel-h-'+n" class="mr-skel-row">
-                  <td><div class="mr-skel-block" style="width:130px" /></td>
-                  <td><div class="mr-skel-block" style="width:70px" /></td>
-                  <td><div class="mr-skel-block" style="width:120px" /></td>
-                  <td><div class="mr-skel-block" style="width:80px" /></td>
-                  <td><div class="mr-skel-block" style="width:100%" /></td>
-                  <td><div class="mr-skel-block" style="width:100px" /></td>
-                  <td><div class="mr-skel-block" style="width:34px;height:34px;border-radius:9px" /></td>
-                </tr>
-              </template>
-              <tr v-else-if="!hIsLoading && !hRegistrations.length"><td colspan="7" class="mr-empty"><FontAwesomeIcon icon="archive" /><span>暂无历史记录</span></td></tr>
-              <tr v-if="hIsFetching && hRegistrations.length"><td colspan="7" class="mr-fetching-bar"><div class="mr-fetching-progress" /></td></tr>
-              <tr v-for="r in hRegistrations" :key="r.id">
-                <td class="mr-td-order">{{ r.purchase_order_no }}</td>
-                <td>{{ r.customer_name || '-' }}</td>
-                <td class="mr-td-small">{{ r.product_name || '-' }}{{ r.product_quantity ? ' x' + r.product_quantity : '' }}</td>
-                <td>{{ r.supplier_name || '-' }}</td>
-                <td class="mr-td-small">{{ materialSummary(r) }}</td>
-                <td class="mr-td-small mr-td-muted">{{ r.update_time || '-' }}</td>
-                <td><div class="mr-action-group"><button type="button" class="mr-action-btn mr-action-view" @click="viewDetail(r.id)" title="查看详情"><FontAwesomeIcon icon="eye" /></button></div></td>
-              </tr>
-            </tbody>
-          </table>
-          <UiPagination v-if="hPages > 1" :current-page="hPage" :total-pages="hPages" @update:current-page="loadHistory" />
+          <div v-if="hIsFetching && hRegistrations.length" class="mr-fetching-bar"><div class="mr-fetching-progress" /></div>
+          <UiDataTable
+            :data="hRegistrations"
+            :columns="historyColumns"
+            :loading="hIsLoading && !hRegistrations.length"
+            :paginator="true"
+            :rows="hPerPage"
+            :total-records="hPages * hPerPage"
+            row-key="id"
+            @page="onHistoryPageChange"
+          >
+            <template #empty>
+              <div class="mr-empty"><FontAwesomeIcon icon="archive" /><span>暂无历史记录</span></div>
+            </template>
+            <template #column-body-purchase_order_no="{ row }">
+              <span class="mr-td-order">{{ (row as Registration).purchase_order_no }}</span>
+            </template>
+            <template #column-body-customer_name="{ row }">
+              {{ (row as Registration).customer_name || '-' }}
+            </template>
+            <template #column-body-product="{ row }">
+              <span class="mr-td-small">{{ (row as Registration).product_name || '-' }}{{ (row as Registration).product_quantity ? ' x' + (row as Registration).product_quantity : '' }}</span>
+            </template>
+            <template #column-body-supplier_name="{ row }">
+              {{ (row as Registration).supplier_name || '-' }}
+            </template>
+            <template #column-body-materials="{ row }">
+              <span class="mr-td-small">{{ materialSummary(row as Registration) }}</span>
+            </template>
+            <template #column-body-update_time="{ row }">
+              <span class="mr-td-small mr-td-muted">{{ (row as Registration).update_time || '-' }}</span>
+            </template>
+            <template #column-body-actions="{ row }">
+              <div class="mr-action-group"><button type="button" class="mr-action-btn mr-action-view" @click="viewDetail((row as Registration).id)" title="查看详情"><FontAwesomeIcon icon="eye" /></button></div>
+            </template>
+          </UiDataTable>
         </div>
       </div>
     </div>
@@ -177,47 +166,15 @@ import { ref, reactive, computed, onMounted, onUnmounted, defineAsyncComponent }
 import { materialApi } from '@/api'
 import type { RegItem, Registration } from '@/api/material'
 import { useAuthStore } from '@/stores/auth'
-import UiPagination from '@/components/ui/UiPagination.vue'
-import HeaderTabs from '@/layouts/components/HeaderTabs.vue'
-import { readMaterialCache, writeMaterialCache, clearMaterialCache } from '@/composables/useMaterialCache'
+import UiDataTable from '@/components/ui/UiDataTable.vue'
+import type { TableColumn } from '@/components/ui/UiDataTable.vue'
+import { readMaterialCache, writeMaterialCache } from '@/composables/useMaterialCache'
+import type { SupMat, SupMatItem, SupGroup, SupplierDetail } from './material-types'
 const MaterialDetailDialog = defineAsyncComponent(() => import('./components/MaterialDetailDialog.vue'))
 const SupplierDialog = defineAsyncComponent(() => import('./components/SupplierDialog.vue'))
 const ReceiveDialog = defineAsyncComponent(() => import('./components/ReceiveDialog.vue'))
 
 // --- Internal Types ---
-
-interface SupMatItem {
-  id: number
-  ordered: number
-  received: number
-}
-
-interface SupMat {
-  name: string
-  ordered: number
-  received: number
-  remaining: number
-  pct: number
-  /** 同物料合并的所有 item 详情（含 id、ordered、received，用于按额度切分收货） */
-  subItems: SupMatItem[]
-  unit: string
-  spec: string
-}
-
-interface SupGroup {
-  supplierName: string
-  items: SupMat[]
-  totalOrdered: number
-  totalReceived: number
-  pct: number
-}
-
-interface SupplierDetail {
-  supplierGroups: SupGroup[]
-  totalOrdered: number
-  totalReceived: number
-  totalPct: number
-}
 
 const authStore = useAuthStore()
 const canManage = computed(() => authStore.hasPermission('product_manage'))
@@ -242,7 +199,7 @@ function computePct(ordered: number, received: number): number {
   return Math.min(Math.round(received / ordered * 100 * 10) / 10, 99.9)
 }
 
-const pPage = ref(1), pPages = ref(1), pIsLoading = ref(false), pIsFetching = ref(false)
+const pPage = ref(1), pPerPage = ref(20), pPages = ref(1), pIsLoading = ref(false), pIsFetching = ref(false)
 const progressRows = ref<Registration[]>([])
 const pTotal = ref(0)
 /** 待处理订单数（用于 tab 徽章，取后端 total 而非当前页行数） */
@@ -258,12 +215,9 @@ const progressOrderRows = computed(() =>
   progressRows.value.map(r => {
     // 只展示面料类(fabric)和辅料类(accessory)，填充类(filling)不显示
     const items = (r.items || []).filter(i => i.material_category !== 'filling')
-    const filteredItems = pFilters.category
-      ? items.filter(i => i.material_category === pFilters.category)
-      : items
     // 按 supplier_name 分组，保持供应商出现顺序
-    const groupMap = new Map<string, typeof filteredItems>()
-    for (const i of filteredItems) {
+    const groupMap = new Map<string, typeof items>()
+    for (const i of items) {
       const key = (i as { supplier_name?: string }).supplier_name || '未指定'
       if (!groupMap.has(key)) groupMap.set(key, [])
       groupMap.get(key)!.push(i)
@@ -292,27 +246,19 @@ const progressOrderRows = computed(() =>
     return {
       ...r,
       order_no: r.purchase_order_no,
-      items: filteredItems,
+      items,
       groupedItems: mergedGroupedItems,
     }
   })
 )
-const pFilters = reactive({ supplier: '', orderNo: '', customer: '', category: '', startDate: '', endDate: '' })
 
-const hPage = ref(1), hPages = ref(1), hIsLoading = ref(false), hIsFetching = ref(false)
+const hPage = ref(1), hPerPage = ref(20), hPages = ref(1), hIsLoading = ref(false), hIsFetching = ref(false)
 const hRegistrations = ref<Registration[]>([])
-const hFilters = reactive({ orderNo: '', supplier: '', customer: '', category: '', startDate: '', endDate: '' })
 
-/** 加载历史查询数据（服务端分页 + 筛选 + SWR 缓存） */
+/** 加载历史查询数据（服务端分页 + SWR 缓存） */
 async function loadHistory(page = 1) {
   hPage.value = page
-  const params: Record<string, string | number> = { page, per_page: 20 }
-  if (hFilters.orderNo) params.order_no = hFilters.orderNo
-  if (hFilters.supplier) params.supplier = hFilters.supplier
-  if (hFilters.customer) params.customer_name = hFilters.customer
-  if (hFilters.category) params.material_category = hFilters.category
-  if (hFilters.startDate) params.start_date = hFilters.startDate
-  if (hFilters.endDate) params.end_date = hFilters.endDate
+  const params: Record<string, string | number> = { page, per_page: hPerPage.value }
 
   // SWR: 先尝试从缓存渲染
   const { cached, fresh } = readMaterialCache('history', params)
@@ -348,9 +294,6 @@ async function loadHistoryFromApi(params: Record<string, string | number>) {
   } catch { toast('加载失败', 'error') } finally { hIsLoading.value = false; hIsFetching.value = false }
 }
 
-/** 重置历史筛选条件并重新加载 */
-function resetHistoryFilters() { Object.assign(hFilters, { orderNo: '', supplier: '', customer: '', category: '', startDate: '', endDate: '' }); loadHistory(1) }
-
 /** 拼接历史记录的物料名称摘要 */
 function materialSummary(r: Registration) {
   const items = r.items || []
@@ -367,16 +310,10 @@ function scheduleBackgroundRefresh(fn: () => Promise<void>) {
   }, 200)
 }
 
-/** 加载来料进度数据（服务端分页 + 筛选 + SWR 缓存） */
+/** 加载来料进度数据（服务端分页 + SWR 缓存） */
 async function loadProgress(page = 1) {
   pPage.value = page
-  const params: Record<string, string | number | boolean> = { page, per_page: 20, exclude_completed: true }
-  if (pFilters.supplier) params.supplier = pFilters.supplier
-  if (pFilters.orderNo) params.order_no = pFilters.orderNo
-  if (pFilters.customer) params.customer_name = pFilters.customer
-  if (pFilters.category) params.material_category = pFilters.category
-  if (pFilters.startDate) params.start_date = pFilters.startDate
-  if (pFilters.endDate) params.end_date = pFilters.endDate
+  const params: Record<string, string | number | boolean> = { page, per_page: pPerPage.value, exclude_completed: true }
 
   // SWR: 先尝试从缓存渲染
   const { cached, fresh } = readMaterialCache('progress', params)
@@ -414,7 +351,6 @@ async function loadProgressFromApi(params: Record<string, string | number | bool
   } catch { toast('加载失败', 'error') } finally { pIsLoading.value = false; pIsFetching.value = false }
 }
 
-function resetProgressFilters() { Object.assign(pFilters, { supplier: '', orderNo: '', customer: '', category: '', startDate: '', endDate: '' }); loadProgress(1) }
 function switchToProgress() {
   activeTab.value = 'progress'
   if (!progressRows.value.length && !pIsLoading.value) {
@@ -447,6 +383,36 @@ function switchToHistory() {
   }
 }
 function fillClass(item: { progress?: number; received_quantity: number | string; ordered_quantity: number | string }) { const pct = item.progress || 0; if (pct >= 100 || Number(item.received_quantity) >= Number(item.ordered_quantity)) return 'full'; return 'low' }
+
+/** UiDataTable 列定义 */
+const progressColumns: TableColumn[] = [
+  { field: 'po_create_time', header: '订单时间', width: '110px', align: 'center' },
+  { field: 'customer_name', header: '客户', width: '120px', align: 'center' },
+  { field: 'product_name', header: '产品名称', align: 'left' },
+  { field: 'product_quantity', header: '订单数量', width: '100px', align: 'center' },
+  { field: 'groupedItems', header: '物料进度（按供应商分组）', align: 'left' },
+  { field: 'progress', header: '总进度', width: '200px', align: 'center' },
+  { field: 'actions', header: '操作', width: '80px', align: 'center' },
+]
+const historyColumns: TableColumn[] = [
+  { field: 'purchase_order_no', header: '订单号', width: '150px', align: 'center' },
+  { field: 'customer_name', header: '客户', width: '100px', align: 'center' },
+  { field: 'product', header: '产品/数量', width: '120px', align: 'center' },
+  { field: 'supplier_name', header: '供应商', width: '100px', align: 'center' },
+  { field: 'materials', header: '物料名称', align: 'left' },
+  { field: 'update_time', header: '完成时间', width: '120px', align: 'center' },
+  { field: 'actions', header: '操作', width: '80px', align: 'center' },
+]
+
+/** UiDataTable 分页变化处理（PrimeVue page 为 0 索引） */
+function onProgressPageChange(event: { page: number; rows: number }) {
+  pPerPage.value = event.rows
+  loadProgress(event.page + 1)
+}
+function onHistoryPageChange(event: { page: number; rows: number }) {
+  hPerPage.value = event.rows
+  loadHistory(event.page + 1)
+}
 
 const showDetailDialog = ref(false), detailData = ref<Registration | null>(null)
 /** 查看来料登记详情 */
@@ -583,14 +549,7 @@ function updateDetailDialogLocally(newReceived: number) {
 async function exportData() {
   toast('正在导出...', 'info')
   try {
-    await materialApi.export({
-      order_no: pFilters.orderNo,
-      supplier: pFilters.supplier,
-      customer_name: pFilters.customer,
-      material_category: pFilters.category,
-      start_date: pFilters.startDate,
-      end_date: pFilters.endDate,
-    }, '来料进度汇总.xlsx')
+    await materialApi.export({}, '来料进度汇总.xlsx')
     toast('导出成功', 'success')
   } catch { toast('导出失败', 'error') }
 }
@@ -598,14 +557,7 @@ async function exportData() {
 async function exportHistory() {
   toast('正在导出...', 'info')
   try {
-    await materialApi.export({
-      order_no: hFilters.orderNo,
-      supplier: hFilters.supplier,
-      customer_name: hFilters.customer,
-      material_category: hFilters.category,
-      start_date: hFilters.startDate,
-      end_date: hFilters.endDate,
-    }, '来料历史汇总.xlsx')
+    await materialApi.export({}, '来料历史汇总.xlsx')
     toast('导出成功', 'success')
   } catch { toast('导出失败', 'error') }
 }
@@ -619,7 +571,8 @@ onUnmounted(() => {
 })
 </script>
 
-<style scoped>
+<style scoped lang="scss">
+@use './material-dialogs.scss' as *;
 /* === Layout === */
 .mr-container {
   padding: 0;
@@ -646,24 +599,6 @@ onUnmounted(() => {
   margin-bottom: 0;
   gap: 12px;
   flex-shrink: 0;
-}
-.mr-top-bar :deep(.ht-bar) {
-  width: auto;
-  margin: 0;
-}
-
-.mr-top-left {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  flex: 1;
-}
-
-.mr-top-right {
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
-  gap: 24px;
 }
 
 /* === Tabs === */
@@ -732,157 +667,16 @@ onUnmounted(() => {
   overflow-x: auto;
 }
 
-/* === Filters === */
-.mr-filters { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
-
-.mr-fg {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.mr-fg label { font-size: 12px; color: var(--color-text-secondary); white-space: nowrap; font-weight: 600; }
-
-.mr-fg select,
-.mr-fg input {
-  padding: 7px 12px;
-  border: 2px solid var(--color-border-light, #e2e8f0);
-  border-radius: 9px;
-  font-size: 13px;
-  min-width: 110px;
-  transition: all 0.3s ease;
-  background: white;
-  font-family: inherit;
-  color: var(--color-text);
-}
-
-.mr-fg select:focus,
-.mr-fg input:focus {
-  outline: none;
-  border-color: var(--color-primary-400);
-  box-shadow: 0 0 0 3px rgba(0, 148, 191, 0.1);
-}
-
-.mr-date-sep { color: var(--color-text-muted); font-size: 13px; }
-
-/* === Buttons === */
-.mr-btn {
-  padding: 7px 14px;
-  border-radius: 9px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  border: 2px solid var(--color-border-light, #e2e8f0);
-  background: white;
-  color: var(--color-text-secondary);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.mr-btn:hover {
-  border-color: var(--color-primary-300);
-  color: var(--color-primary-600);
-  background: var(--color-primary-50);
-  transform: translateY(-1px);
-}
-
-.mr-btn-ghost {
-  border-color: var(--color-border-light, #e2e8f0);
-  color: var(--color-text-secondary);
-}
-
-.mr-btn-ghost:hover {
-  border-color: var(--color-primary-300);
-  color: var(--color-primary-600);
-  background: var(--color-primary-50);
-}
-
-.mr-btn-success {
-  border-color: var(--color-success-200, #A7F3D0);
-  color: var(--color-success-600, #059669);
-  background: var(--color-success-50, #ECFDF5);
-}
-
-.mr-btn-success:hover {
-  background: var(--color-success-500, #28C76F);
-  color: white;
-  border-color: transparent;
-}
-
-.mr-btn-sm { padding: 5px 10px; font-size: 11px; }
-
 /* === Table === */
-.mr-tbl {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-  table-layout: auto;
-}
-
-.mr-tbl th {
-  background: var(--color-surface, #f8fafc);
-  padding: 10px 14px;
-  text-align: left;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  border-bottom: 2px solid var(--color-border-light, #e2e8f0);
-  white-space: nowrap;
-}
-
-.mr-tbl td {
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
-  color: var(--color-text);
-  vertical-align: middle;
-}
-
-.mr-tbl { border-collapse: separate; border-spacing: 0 8px; }
-
-.mr-tbl thead tr th { border-bottom: 2px solid var(--color-border-light, #e2e8f0); }
-
-.mr-tbl tbody tr.mr-order-row {
-  border: 1px solid var(--color-border-light);
-  border-radius: 12px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  background: white;
-  transition: box-shadow 0.15s ease, border-color 0.15s ease;
-}
-
-.mr-tbl tbody tr.mr-order-row:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 12px 32px rgba(0,0,0,0.1);
-  border-color: #93c5fd;
-}
-
-.mr-tbl tbody tr.mr-order-row:hover td:first-child {
-  border-left-color: #93c5fd;
-}
-
-.mr-tbl tbody tr.mr-order-row:hover td:last-child {
-  border-right-color: #93c5fd;
-}
-
-.mr-tbl tbody tr.mr-order-row td {
-  background: white;
-  border-top: none;
-  border-bottom: none;
-  border-left: none;
-  border-right: none;
-}
-
-.mr-tbl tbody tr.mr-order-row td:first-child { border-left: 1px solid var(--color-border-light); border-radius: 12px 0 0 12px; }
-.mr-tbl tbody tr.mr-order-row td:last-child { border-right: 1px solid var(--color-border-light); border-radius: 0 12px 12px 0; }
-
-.mr-tbl tbody tr:last-child td { border-bottom: none; }
-
 .mr-td-bold { font-size: 14px; font-weight: 600; }
 .mr-td-order { font-family: 'Courier New', monospace; font-weight: 600; color: var(--color-primary-500); font-size: 14px; }
 .mr-td-small { font-size: 13px; }
 .mr-td-muted { color: var(--color-text-muted); }
+
+/* 每个订单（行）之间显示分割线 */
+.mr-card-b--flush :deep(.p-datatable-tbody > tr) {
+  border-bottom: 1px solid var(--color-border-light, #e2e8f0);
+}
 
 .mr-order-link {
   font-size: 14px;
@@ -1082,141 +876,14 @@ onUnmounted(() => {
 }
 
 /* === Pagination === */
-/* === Dialog Form Fields === */
-.mr-fg2 { margin-bottom: 16px; }
-.mr-fg2 label { display: block; font-size: 12px; font-weight: 600; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
-.mr-fg2 input,
-.mr-fg2 select,
-.mr-fg2 textarea {
-  width: 100%;
-  padding: 8px 12px;
-  border: 2px solid var(--color-border-light, #e2e8f0);
-  border-radius: 10px;
-  font-size: 14px;
-  transition: all 0.3s ease;
-  background: white;
-  font-family: inherit;
-  color: var(--color-text);
-  box-sizing: border-box;
-}
 
-.mr-fg2 input:focus,
-.mr-fg2 select:focus,
-.mr-fg2 textarea:focus {
-  outline: none;
-  border-color: var(--color-primary-400);
-  background: white;
-  box-shadow: 0 0 0 3px rgba(0, 148, 191, 0.1);
-}
-
-/* === Detail Grid === */
-.mr-det-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 20px; }
-.mr-det-lb { font-size: 12px; color: var(--color-text-muted); margin-bottom: 6px; }
-.mr-det-vl { font-size: 15px; font-weight: 600; color: var(--color-text); }
-
-/* === Preview Dialog Sections === */
-.mr-preview-section-label {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--color-text);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 12px;
-}
-.mr-preview-section-label i {
-  font-size: 13px;
-  color: var(--color-primary-500);
-}
-.mr-preview-count {
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--color-text-muted);
-  margin-left: 4px;
-}
-.mr-source-section {
-  margin-bottom: 16px;
-}
-.mr-source-card {
-  padding: 14px 16px;
-  background: linear-gradient(135deg, var(--color-success-50, #ECFDF5), var(--color-surface, #f8fafc));
-  border: 1px solid var(--color-success-200, #A7F3D0);
-  border-radius: 12px;
-  margin-bottom: 8px;
-}
-.mr-source-card:last-child {
-  margin-bottom: 0;
-}
-
-.mr-item-tbl { width: 100%; border-collapse: collapse; }
-.mr-item-tbl th { background: var(--color-surface, #f8fafc); padding: 10px 12px; font-size: 12px; text-align: left; }
-.mr-item-tbl td { padding: 10px 12px; border-bottom: 1px solid var(--color-border-light, #e2e8f0); font-size: 13px; }
-
-/* === SKU Row (Dialog) === */
-.mr-sku-row {
-  background: #FAFBFC;
-  border-radius: 10px;
-  padding: 16px 20px;
-  margin-bottom: 12px;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-}
-
-.mr-sku-row:hover { border-color: var(--color-primary-300); background: var(--color-primary-50, #eff6ff); }
-
-.mr-sku-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-.mr-sku-name { font-weight: 600; color: var(--color-text); font-size: 15px; }
-.mr-sku-spec { font-size: 13px; color: var(--color-text-secondary); margin-left: 10px; }
-.mr-sku-pct { font-size: 14px; font-weight: 600; }
-.mr-sku-info { display: flex; gap: 20px; font-size: 13px; color: var(--color-text-secondary); flex-wrap: wrap; align-items: center; }
-.mr-sku-info span b { color: var(--color-text); font-weight: 600; }
-
-/* === Material Detail Card (Dialog) === */
-.mr-det-mat-card {
-  margin-bottom: 10px;
-  background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
-  border-radius: 12px;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
-  transition: all 0.2s ease;
-  overflow: hidden;
-}
-.mr-det-mat-card:hover {
-  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-  border-color: var(--color-primary-200, #bfdbfe);
-}
-.mr-det-mat-row {
-  padding: 12px 16px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
+/* === Material Detail Card (Dialog) 特有部分 === */
 .mr-det-mat-info {
   display: flex;
   flex-direction: column;
   gap: 4px;
   min-width: 0;
   flex: 0 0 140px;
-}
-.mr-det-mat-name {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--color-text, #1e293b);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  line-height: 1.3;
-}
-.mr-det-mat-spec {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--color-text-secondary, #64748b);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  background: var(--color-surface, #f1f5f9);
-  padding: 2px 8px;
-  border-radius: 6px;
-  width: fit-content;
 }
 .mr-det-mat-metrics {
   display: flex;
@@ -1320,8 +987,6 @@ onUnmounted(() => {
 
 /* === Responsive === */
 @media (max-width: 768px) {
-  .mr-filters { flex-direction: column; align-items: stretch; }
-  .mr-fg { width: 100%; }
   .mr-top-bar { flex-direction: column; gap: 12px; align-items: flex-start; }
   .mr-det-grid { grid-template-columns: 1fr; }
   .mr-det-mat-row { flex-wrap: wrap; gap: 12px; padding: 12px; }
@@ -1329,21 +994,5 @@ onUnmounted(() => {
   .mr-det-mat-metrics { flex-wrap: wrap; gap: 6px; }
   .mr-det-mat-metric { min-width: 65px; padding: 8px 12px; }
   .mr-det-mat-value { font-size: 16px; }
-}
-
-/* === Skeleton Screen === */
-.mr-skel-row td {
-  padding: 14px 14px;
-}
-.mr-skel-block {
-  height: 16px;
-  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
-  background-size: 200% 100%;
-  border-radius: 6px;
-  animation: mr-skel-shimmer 1.5s ease-in-out infinite;
-}
-@keyframes mr-skel-shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
 }
 </style>

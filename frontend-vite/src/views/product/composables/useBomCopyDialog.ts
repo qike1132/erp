@@ -28,8 +28,8 @@ export function useBomCopyDialog({ currentProductId, reloadBom }: UseBomCopyDial
     const keyword = copyBomSearchKeyword.value.trim()
     if (!keyword) { showToast('请输入产品名称或条码进行搜索', 'warning'); return }
     try {
-      const res = (await productApi.searchProductsForBom(keyword)) as any
-      if (res.success && res.products?.length > 0) {
+      const res = (await productApi.searchProductsForBom(keyword)) as unknown as { success: boolean; products?: BomSearchProduct[] }
+      if (res.success && res.products && res.products.length > 0) {
         copyBomProducts.value = res.products
         copyBomPreview.value = null
         copyBomSourceProductId.value = null
@@ -45,12 +45,12 @@ export function useBomCopyDialog({ currentProductId, reloadBom }: UseBomCopyDial
     copyBomSourceProductId.value = product.id
     copyBomPreview.value = null
     try {
-      const res = (await productApi.bomPreview(product.id)) as any
+      const res = (await productApi.bomPreview(product.id)) as { success: boolean; material_count?: number; bom?: { fabric?: unknown[]; filling?: unknown[]; accessory?: unknown[]; packaging?: unknown[] } }
       if (res.success) {
         copyBomPreview.value = {
           source_name: product.name,
           source_barcode: product.barcode || '',
-          material_count: res.material_count,
+          material_count: res.material_count ?? 0,
           fabric_count: res.bom?.fabric?.length || 0,
           filling_count: res.bom?.filling?.length || 0,
           accessory_count: (res.bom?.accessory?.length || 0) + (res.bom?.packaging?.length || 0),
@@ -64,7 +64,7 @@ export function useBomCopyDialog({ currentProductId, reloadBom }: UseBomCopyDial
     copyBomProgress.visible = true; copyBomProgress.percent = 0; copyBomProgress.text = '准备复制...'
     try {
       copyBomProgress.percent = 30; copyBomProgress.text = '正在复制BOM表...'
-      const res = (await productApi.copyBom(currentProductId.value!, copyBomSourceProductId.value, copyBomOverwrite.value)) as any
+      const res = (await productApi.copyBom(currentProductId.value!, copyBomSourceProductId.value, copyBomOverwrite.value)) as { success: boolean; error?: string }
       if (res.success) {
         copyBomProgress.percent = 100; copyBomProgress.text = '复制成功！'
         const id = setTimeout(() => {

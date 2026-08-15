@@ -11,7 +11,7 @@ import asyncio
 import contextlib
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Literal
 
 from sqlalchemy import select
@@ -87,6 +87,17 @@ EVENT_DISPLAY_MESSAGES = {
 
 _async_redis_client = None
 
+# Redis 自身异常基类（redis.exceptions.RedisError）与 Python 内置基础设施异常并集。
+# 注意：redis-py 的 ConnectionError/AuthenticationError 继承自 RedisError，
+# 而不是 Python 内置 ConnectionError，因此必须显式纳入，否则 Redis 不可用/认证失败
+# 会在启动预热时逃逸并导致整个应用启动崩溃。
+def _redis_infra_exceptions():
+    try:
+        import redis.exceptions as redis_exc
+        return (*INFRA_EXCEPTIONS, redis_exc.RedisError)
+    except Exception:
+        return INFRA_EXCEPTIONS
+
 
 async def _get_async_redis_client():
     """获取或创建模块级共享异步 Redis 客户端"""
@@ -106,7 +117,7 @@ async def _get_async_redis_client():
                 url = url.replace("redis://", f"redis://:{settings.REDIS_PASSWORD}@")
         _async_redis_client = aioredis.from_url(url)
         return _async_redis_client
-    except INFRA_EXCEPTIONS as e:
+    except _redis_infra_exceptions() as e:
         logger.warning("异步 Redis 客户端初始化失败: %s", e)
         return None
 
@@ -119,7 +130,7 @@ async def _warmup_async_redis():
         if client:
             await client.ping()
             logger.info("异步 Redis 客户端预热成功")
-    except INFRA_EXCEPTIONS as e:
+    except _redis_infra_exceptions() as e:
         logger.warning("异步 Redis 客户端预热失败: %s", e)
         _async_redis_client = None
 
@@ -137,7 +148,7 @@ async def publish_stock_event(event_type: str, data: dict, redis_client=None):
         event = {
             "type": event_type,
             "data": data,
-            "timestamp": datetime.now(UTC).replace(tzinfo=None).isoformat(),
+            "timestamp": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
         }
         await redis_client.publish("erp:stock_events", json.dumps(event, ensure_ascii=False))
         logger.debug("事件已发布: %s", event_type)

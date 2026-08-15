@@ -81,6 +81,13 @@ vi.mock('@/stores/country', () => ({
   }),
 }))
 
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({
+    user: { factory: '' },
+    loaded: true,
+  }),
+}))
+
 import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import CustomerOrderView from '@/views/customer-order/CustomerOrderView.vue'
@@ -89,7 +96,6 @@ import CustomerOrderView from '@/views/customer-order/CustomerOrderView.vue'
 // UiDialog must render its slot when `open` is true so we can inspect the
 // SKU details table that CustomerOrderView projects into it.
 const stubs = {
-  HeaderTabs: { template: '<div />' },
   UiInput: { template: '<input />' },
   UiDatePicker: { template: '<input />' },
   UiButton: { template: '<button><slot /></button>' },
@@ -97,9 +103,10 @@ const stubs = {
     template: '<div v-if="open" class="ui-dialog-stub"><slot /><slot name="footer" /></div>',
     props: ['open', 'title', 'maxWidthClass'],
   },
-  UiSelect: { template: '<select />' },
+  UiSelect: { template: '<div class="ui-select-stub" />' },
   UiPagination: { template: '<div />' },
   UiConfirmDialog: { template: '<div />' },
+  UiAutocomplete: { template: '<input />' },
 }
 
 // Helper: switch the mounted view to the "记录查询" tab so that

@@ -26,6 +26,9 @@ from fastapi_app.core.config import settings
 from fastapi_app.services import storage_service as svc
 from fastapi_app.shared_models.file_record import FileRecord
 
+# 测试专用数据库（conftest 计算得出，与开发库 erp_system 隔离，避免种子数据污染）
+from conftest import TEST_DATABASE_URL
+
 # ==================== 测试辅助 ====================
 
 
@@ -136,7 +139,7 @@ async def storage_db():
     """function-scoped 数据库会话（主库 + 外层事务回滚隔离），复用 test_customer_sampling_service 模式"""
     from fastapi_app.shared_models import Base
 
-    engine = create_async_engine(settings.ASYNC_DATABASE_URL, echo=False, pool_pre_ping=True)
+    engine = create_async_engine(TEST_DATABASE_URL, echo=False, pool_pre_ping=True)
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)

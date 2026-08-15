@@ -43,28 +43,27 @@
           </button>
         </div>
         <div class="page-toolbar-right">
-          <span class="header-clock">
-            <FontAwesomeIcon icon="clock" style="font-size: 13px" aria-hidden="true" />
-            {{ currentTime }}
-          </span>
-          <div class="user-info-header">
-            <div class="user-avatar-header">
-              {{ avatarLetter }}
-            </div>
-            <div class="user-info-details min-w-0">
-              <div class="user-name-header">
-                {{ authStore.user?.username || '用户' }}
+          <!-- 统一工具栏：时间 / 通知 / 用户 / 退出 聚合为单一视觉单元 -->
+          <div class="tb-cluster">
+            <span class="tb-time">
+              <FontAwesomeIcon icon="clock" aria-hidden="true" />
+              {{ currentTime }}
+            </span>
+            <span class="tb-divider" aria-hidden="true" />
+            <NotificationBell v-if="authStore.isLoggedIn" />
+            <span class="tb-divider" aria-hidden="true" />
+            <div class="tb-user">
+              <div class="tb-avatar" aria-hidden="true">{{ avatarLetter }}</div>
+              <div class="tb-user-text min-w-0">
+                <div class="tb-name">{{ authStore.user?.username || '用户' }}</div>
+                <div class="tb-role">{{ authStore.user?.is_super ? '超级管理员' : '普通用户' }}</div>
               </div>
-              <div class="user-role-header">
-                {{ authStore.user?.is_super ? '超级管理员' : '普通用户' }}
-              </div>
             </div>
+            <button class="tb-logout" @click="confirmLogout" aria-label="退出登录">
+              <FontAwesomeIcon icon="right-from-bracket" aria-hidden="true" />
+              <span>退出</span>
+            </button>
           </div>
-          <NotificationBell v-if="authStore.isLoggedIn" />
-          <button class="logout-btn-header" @click="confirmLogout">
-            <FontAwesomeIcon icon="right-from-bracket" style="font-size: 13px" aria-hidden="true" />
-            <span>退出</span>
-          </button>
         </div>
       </div>
 
@@ -128,6 +127,17 @@
       @confirm="logoutConfirm.onConfirm"
       @cancel="logoutConfirm.onCancel"
     />
+
+    <!-- 贝乐未确认订单提醒弹窗（登录后首次进 dashboard、存在未确认湖北订单时弹出一次） -->
+    <UiConfirmDialog
+      :open="beilePopupOpen"
+      :text="beilePopupText"
+      :sub="beilePopupSub"
+      type="warning"
+      :close-on-overlay-click="false"
+      @confirm="goConfirmBeileOrders"
+      @cancel="closeBeilePopup"
+    />
   </div>
 </template>
 
@@ -138,9 +148,8 @@ import UiCard from '@/components/ui/UiCard.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import NotificationBell from '@/layouts/components/NotificationBell.vue'
 import KpiCard from './components/KpiCard.vue'
-import { authApi, dashboardApi, stockApi } from '@/api'
+import { authApi, dashboardApi, stockApi, orderApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
-import { useTabStore } from '@/stores/tabs'
 import { useSidebarStore } from '@/stores/sidebar'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { usePerfMark } from '@/composables/usePerfMark'
@@ -166,7 +175,6 @@ const perf = usePerfMark('dashboard')
 
 // ===== 工具栏状态（合并自原 DefaultLayout 顶部 header）=====
 const authStore = useAuthStore()
-const tabStore = useTabStore()
 const sidebarStore = useSidebarStore()
 const logoutConfirm = useConfirmDialog()
 const router = useRouter()
@@ -183,6 +191,46 @@ const errorDetail = ref('')
 const lastSyncTime = ref('')
 const orderChartRef = ref<HTMLElement>()
 const stockChartRef = ref<HTMLElement>()
+
+// ===== 贝乐未确认订单提醒弹窗 =====
+const beilePopupOpen = ref(false)
+const beilePopupText = ref('')
+const beilePopupSub = ref('')
+// sessionStorage 标记：每登录会话仅弹一次（登录成功时在 useLogin 中清除）
+const BEILE_POPUP_KEY = 'beile_confirm_popup_shown'
+
+/** 登录后首次进 dashboard：贝乐用户（factory=湖北）+ 存在未确认湖北订单时弹出提醒 */
+async function checkBeileConfirmPopup() {
+  try {
+    // 仅贝乐用户（湖北工厂）弹出，其余用户（含超管）均不弹
+    // 与后端 dispatch_beile_unconfirmed_notifications 派发对象（User.factory == '湖北'）一致
+    if (authStore.user?.factory !== '湖北') return
+    if (sessionStorage.getItem(BEILE_POPUP_KEY)) return
+
+    const resp = await orderApi.beileList({ page: 1, per_page: 1 })
+    const unconfirmed = Number((resp as { unconfirmed_count?: number })?.unconfirmed_count ?? 0)
+    if (unconfirmed <= 0) return
+
+    beilePopupText.value = `湖北新订单待确认：${unconfirmed} 个`
+    beilePopupSub.value = '有订单尚未确认，请及时处理'
+    beilePopupOpen.value = true
+  } catch (err) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.warn('[Dashboard] 未确认订单提醒检查失败:', err)
+    }
+  }
+}
+
+function closeBeilePopup() {
+  beilePopupOpen.value = false
+  sessionStorage.setItem(BEILE_POPUP_KEY, '1')
+}
+
+function goConfirmBeileOrders() {
+  closeBeilePopup()
+  router.push('/beile-order')
+}
 
 // 图表 & resize 生命周期统一管理
 const _chartMeta: { chart: import('echarts/core').ECharts; handler: () => void }[] = []
@@ -592,7 +640,6 @@ async function handleLogout() {
     await authApi.logout()
   } finally {
     authStore.logout()
-    tabStore.clear()
     router.push('/login')
   }
 }
@@ -611,6 +658,8 @@ onMounted(() => {
       console.error('[Dashboard] onMounted loadStats failed:', err)
     }
   })
+  // 贝乐未确认订单提醒（登录后首次进 dashboard 弹一次）
+  checkBeileConfirmPopup()
   startAutoRefresh()
   updateTime()
   clockTimer = setInterval(updateTime, 60_000)
@@ -667,44 +716,59 @@ onUnmounted(() => {
   transform: scale(1.05);
 }
 
-.header-clock {
-  display: flex;
+/* 统一工具栏胶囊：时间 / 通知 / 用户 / 退出 聚合为单一视觉单元 */
+.tb-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px 4px 14px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(240, 244, 248, 0.95) 100%);
+  border: 2px solid var(--color-ocean-light);
+  box-shadow:
+    0 2px 12px color-mix(in srgb, var(--color-ocean) 22%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transition:
+    transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 0.3s ease,
+    box-shadow 0.3s ease;
+}
+.tb-cluster:hover {
+  transform: translateY(-1px);
+  border-color: var(--color-ocean-deep);
+  box-shadow:
+    0 6px 20px color-mix(in srgb, var(--color-ocean) 35%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 1);
+}
+
+.tb-time {
+  display: inline-flex;
   align-items: center;
   gap: 6px;
   color: var(--color-text-tertiary);
   font-size: 13px;
   font-weight: 500;
+  white-space: nowrap;
 }
 
-.user-info-header {
-  display: flex;
+.tb-divider {
+  width: 1px;
+  height: 22px;
+  margin: 0 4px;
+  background: var(--color-border-light);
+}
+
+.tb-user {
+  display: inline-flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 14px;
-  border-radius: 14px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(240, 244, 248, 0.9) 100%);
-  box-shadow:
-    0 2px 12px color-mix(in srgb, var(--color-ocean) 25%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, 0.9);
-  border: 2px solid var(--color-ocean-light);
-  transition:
-    transform 0.35s ease,
-    box-shadow 0.35s ease,
-    border-color 0.35s ease;
+  gap: 10px;
+  padding: 2px 4px;
 }
 
-.user-info-header:hover {
-  transform: translateY(-2px);
-  box-shadow:
-    0 6px 20px color-mix(in srgb, var(--color-ocean-deep) 35%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, 1);
-  border-color: var(--color-ocean-deep);
-}
-
-.user-avatar-header {
-  width: 36px;
-  height: 36px;
-  border-radius: 12px;
+.tb-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
   background: linear-gradient(135deg, var(--color-ocean) 0%, var(--color-ocean-deep) 100%);
   display: flex;
   align-items: center;
@@ -716,61 +780,49 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
-.user-info-details {
+.tb-user-text {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 
-.user-name-header {
+.tb-name {
   font-size: 14px;
   font-weight: 700;
   color: var(--color-text);
   line-height: 1.2;
 }
 
-.user-role-header {
+.tb-role {
   font-size: 11px;
   color: var(--color-text-tertiary);
   opacity: 0.85;
   line-height: 1.2;
 }
 
-.logout-btn-header {
+.tb-logout {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 10px 18px;
-  border-radius: 14px;
-  border: 2px solid var(--color-danger-200);
-  background: linear-gradient(135deg, var(--color-danger-50) 0%, var(--color-danger-100) 100%);
-  color: var(--color-danger-800);
+  gap: 5px;
+  padding: 7px 12px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: var(--color-danger-700);
   font-weight: 700;
   font-size: 13px;
   cursor: pointer;
-  transition:
-    transform 0.35s cubic-bezier(0.4, 0, 0.2, 1),
-    background 0.35s cubic-bezier(0.4, 0, 0.2, 1),
-    box-shadow 0.35s cubic-bezier(0.4, 0, 0.2, 1),
-    border-color 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow:
-    0 3px 10px color-mix(in srgb, var(--color-danger-200) 30%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, 0.8);
   white-space: nowrap;
+  transition: background 0.2s ease, color 0.2s ease;
 }
-
-.logout-btn-header:hover {
-  background: linear-gradient(135deg, var(--color-danger-100) 0%, var(--color-danger-200) 100%);
-  transform: translateY(-2px);
-  box-shadow:
-    0 6px 18px color-mix(in srgb, var(--color-danger-200) 45%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, 0.5);
-  border-color: var(--color-danger-300);
+.tb-logout:hover {
+  background: var(--color-danger-50);
+  color: var(--color-danger-800);
 }
 
 @media (max-width: 768px) {
-  .header-clock,
-  .user-info-header {
+  .tb-time {
     display: none;
   }
 }

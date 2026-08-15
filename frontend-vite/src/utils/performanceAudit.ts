@@ -33,10 +33,10 @@ export function auditDOM(): DOMAuditResult {
 export function monitorReflowRepaint(durationMs = 10000): void {
   let reflowCount = 0
   const orig = window.getComputedStyle
-  window.getComputedStyle = function (...args: any[]) { reflowCount++; return orig.apply(window, args as any) }
+  window.getComputedStyle = function (elt: Element, pseudoElt?: string | null) { reflowCount++; return orig.call(window, elt, pseudoElt ?? null) }
   if ('PerformanceObserver' in window) {
     try {
-      const obs = new PerformanceObserver((list) => { for (const e of list.getEntries()) if (!(e as any).hadRecentInput) reflowCount++ })
+      const obs = new PerformanceObserver((list) => { for (const e of list.getEntries()) if (!((e as { hadRecentInput?: boolean }).hadRecentInput)) reflowCount++ })
       obs.observe({ type: 'layout-shift', buffered: true })
     } catch {}
   }
@@ -48,7 +48,7 @@ export function auditEventListeners(): { eventType: string; count: number }[] {
   const results: { eventType: string; count: number }[] = []
   for (const t of types) {
     let total = 0
-    document.querySelectorAll('*').forEach((el) => { try { const l = (window as any).getEventListeners?.(el); if (l?.[t]) total += l[t].length } catch {} })
+    document.querySelectorAll('*').forEach((el) => { try { const l = (window as unknown as { getEventListeners?: (el: Element) => Record<string, Array<unknown>> }).getEventListeners?.(el); if (l?.[t]) total += l[t].length } catch {} })
     if (total > 0) { results.push({ eventType: t, count: total }); if (total > 50) console.warn(`[性能] ${t} 监听器过多: ${total}个，考虑事件委托`) }
   }
   return results
@@ -66,7 +66,7 @@ export function monitorLongTasks(durationMs = 30000): Promise<{ startTime: numbe
 
 export interface MemorySnapshot { timestamp: string; usedJSHeapSize: number; heapUtilization: number; domNodes: number }
 export function takeMemorySnapshot(): MemorySnapshot | null {
-  const m = (performance as any).memory
+  const m = (performance as unknown as { memory?: { usedJSHeapSize: number; totalJSHeapSize: number } }).memory
   if (!m) return null
   return { timestamp: new Date().toISOString(), usedJSHeapSize: m.usedJSHeapSize, heapUtilization: m.usedJSHeapSize / m.totalJSHeapSize, domNodes: document.querySelectorAll('*').length }
 }
@@ -86,6 +86,6 @@ export async function runFullDiagnosis(): Promise<void> {
 }
 
 if (import.meta.env?.DEV) {
-  (window as any).__erp_perf__ = { auditDOM, monitorReflowRepaint, auditEventListeners, monitorLongTasks, takeMemorySnapshot, runFullDiagnosis }
+  ;(window as unknown as Record<string, unknown>).__erp_perf__ = { auditDOM, monitorReflowRepaint, auditEventListeners, monitorLongTasks, takeMemorySnapshot, runFullDiagnosis }
   console.log('[ERP性能工具] window.__erp_perf__')
 }

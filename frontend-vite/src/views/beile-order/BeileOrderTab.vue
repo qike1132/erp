@@ -4,22 +4,7 @@
 
     <!-- 表格区 -->
     <div class="bo-card-main">
-      <!-- 确认状态筛选（湖北订单确认流程） -->
-      <div class="bo-confirm-filter">
-        <span class="bo-confirm-filter-label">确认状态</span>
-        <div class="bo-confirm-filter-seg">
-          <button
-            type="button"
-            :class="['bo-confirm-filter-btn', { 'is-active': confirmStatus === 'unconfirmed' }]"
-            @click="setConfirmStatus('unconfirmed')"
-          >未确认<span v-if="unconfirmedCount > 0" class="bo-confirm-filter-count">{{ unconfirmedCount }}</span></button>
-          <button
-            type="button"
-            :class="['bo-confirm-filter-btn', { 'is-active': confirmStatus === 'confirmed' }]"
-            @click="setConfirmStatus('confirmed')"
-          >已确认</button>
-        </div>
-      </div>
+      <!-- 确认状态筛选（未确认/已确认 TAB）已合并到 HubeiView 头部搜索栏位置 -->
       <!-- 湖北新订单未确认提醒横幅（全局未确认订单数，不受分页/筛选影响） -->
       <div v-if="unconfirmedCount > 0" class="bo-unconfirmed-banner">
         <FontAwesomeIcon icon="exclamation-triangle" aria-hidden="true" />
@@ -42,7 +27,7 @@
             <div v-if="showProductColumn" class="bo-th bo-th-center" style="width: 180px;">产品名称</div>
             <div class="bo-th bo-th-center" style="width: 100px;">工厂</div>
             <div class="bo-th bo-th-center" style="width: 130px;">数量</div>
-            <div class="bo-th bo-th-center" style="width: 110px;">确认状态</div>
+            <div v-if="confirmStatus !== 'unconfirmed'" class="bo-th bo-th-center" style="width: 110px;">确认状态</div>
             <div v-if="confirmStatus !== 'confirmed'" class="bo-th bo-th-center" style="width: 130px;">确认操作</div>
             <div class="bo-th bo-th-left" style="width: 160px;">备注</div>
           </div>
@@ -91,8 +76,8 @@
                     </template>
                     <template v-else><strong>{{ item.quantity }}</strong></template>
                   </div>
-                  <!-- 确认状态列：仅湖北订单参与确认流程，备货记录不适用 -->
-                  <div class="bo-td bo-td-center bo-td-middle" style="width: 110px;">
+                  <!-- 确认状态列：仅湖北订单参与确认流程，备货记录不适用；未确认 TAB 下整列隐藏（冗余） -->
+                  <div v-if="confirmStatus !== 'unconfirmed'" class="bo-td bo-td-center bo-td-middle" style="width: 110px;">
                     <template v-if="item.record_type === 'order'">
                       <span v-if="item.confirmed" class="bo-confirm-badge bo-confirm-badge--done">已确认</span>
                       <span v-else class="bo-confirm-badge bo-confirm-badge--pending">未确认</span>
@@ -185,11 +170,11 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(sku, idx) in (detailData.items || []).length > 0 ? detailData.items : [{}]" :key="(sku as any).id ?? idx">
-                <td class="bo-detail-td-name">{{ (sku as any).product_name || detailData.product_name || '-' }}</td>
-                <td class="bo-detail-td-barcode">{{ (sku as any).product_barcode || detailData.barcode || '-' }}</td>
-                <td class="bo-detail-td-qty"><strong>{{ (sku as any).quantity ?? detailData.quantity }}</strong></td>
-                <td class="bo-detail-td-note" :title="((sku as any).note || detailData.note || '')">{{ (sku as any).note || detailData.note || '-' }}</td>
+              <tr v-for="(sku, idx) in (detailData.items || []).length > 0 ? detailData.items! : ([{}] as OrderSKU[])" :key="sku.id ?? idx">
+                <td class="bo-detail-td-name">{{ sku.product_name || detailData.product_name || '-' }}</td>
+                <td class="bo-detail-td-barcode">{{ sku.product_barcode || detailData.barcode || '-' }}</td>
+                <td class="bo-detail-td-qty"><strong>{{ sku.quantity ?? detailData.quantity }}</strong></td>
+                <td class="bo-detail-td-note" :title="(sku.note || detailData.note || '')">{{ sku.note || detailData.note || '-' }}</td>
               </tr>
               <tr v-if="(detailData.items || []).length === 0 && !detailData.product_name">
                 <td colspan="4" class="bo-detail-td-empty">暂无 SKU 明细</td>
@@ -212,11 +197,11 @@
  * 职责：以表格展示 factory=湖北 的订单，支持订单号/客户筛选与分页。
  * 数据获取复用 orderApi.beileList，锁定 factory=湖北。
  */
-import { reactive, computed, ref, watch, onMounted, onUnmounted } from 'vue'
+import { reactive, computed, ref, watch, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/vue-query'
 import { orderApi } from '@/api'
-import type { OrderItem } from '@/types'
+import type { OrderItem, OrderSKU } from '@/types'
 import type { OrderListApiResponse } from '@/api/order'
 import UiPagination from '@/components/ui/UiPagination.vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
@@ -381,13 +366,19 @@ function measureListArea() {
   }
 }
 
-onMounted(() => {
+// bo-list-area 在 v-else 分支内，首次加载（isLoading）时该 DOM 不存在，
+// onMounted 无法测量其高度（listAreaHeight 恒为 0 → VirtualList 不渲染）。
+// 改为 watch template ref：元素出现后测量高度并挂载 ResizeObserver。
+watch(listAreaRef, (el) => {
+  areaResizeObserver?.disconnect()
+  areaResizeObserver = null
+  if (!el) return
   measureListArea()
-  if (listAreaRef.value && typeof ResizeObserver !== 'undefined') {
+  if (typeof ResizeObserver !== 'undefined') {
     areaResizeObserver = new ResizeObserver(measureListArea)
-    areaResizeObserver.observe(listAreaRef.value)
+    areaResizeObserver.observe(el)
   }
-})
+}, { flush: 'post' })
 
 onUnmounted(() => {
   areaResizeObserver?.disconnect()
@@ -464,8 +455,9 @@ async function handleConfirm(item: BeileOrderRow) {
 }
 
 /**
- * 暴露给父组件（BeileOrderView）使用。
+ * 暴露给父组件（HubeiView）使用。
  * 筛选 UI 已迁移到 header 右侧，但状态与方法仍在 Tab 内统一管控。
+ * 注意：必须同时传入实际 ref 值（仅写类型标注不会暴露任何东西）。
  */
 defineExpose({
   filters,
@@ -473,6 +465,9 @@ defineExpose({
   handleReset,
   applyProductFilter,
   applyCustomerFilter,
+  confirmStatus,
+  setConfirmStatus,
+  unconfirmedCount,
 })
 
 // 已确认的客户筛选变化时回到首页
@@ -743,74 +738,6 @@ watch(perPage, () => {
   font-size: 12px;
   word-break: break-word;
   vertical-align: middle;
-}
-
-/* ===== 确认状态筛选（湖北订单确认流程） ===== */
-.bo-confirm-filter {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 10px;
-  flex-shrink: 0;
-}
-.bo-confirm-filter-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-text-muted);
-}
-.bo-confirm-filter-seg {
-  display: inline-flex;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  border-radius: 9px;
-  overflow: hidden;
-  background: white;
-}
-.bo-confirm-filter-btn {
-  padding: 5px 14px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  background: white;
-  border: none;
-  cursor: pointer;
-  font-family: inherit;
-  transition: background 0.2s ease, color 0.2s ease;
-}
-.bo-confirm-filter-btn + .bo-confirm-filter-btn {
-  border-left: 1px solid var(--color-border-light, #e2e8f0);
-}
-.bo-confirm-filter-btn:hover {
-  background: var(--color-primary-50);
-  color: var(--color-primary-600);
-}
-.bo-confirm-filter-btn.is-active {
-  background: var(--color-primary-500);
-  color: #fff;
-}
-/* 按钮内联 flex：保证角标与文字同行居中，不产生错位/溢出 */
-.bo-confirm-filter-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-}
-.bo-confirm-filter-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1;
-  background: var(--color-warning-100);
-  color: var(--color-warning-700);
-}
-.bo-confirm-filter-btn.is-active .bo-confirm-filter-count {
-  background: rgba(255, 255, 255, 0.28);
-  color: #fff;
 }
 
 /* ===== 未确认订单提醒横幅（湖北订单确认流程） ===== */

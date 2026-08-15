@@ -23,6 +23,7 @@ from fastapi_app.api.v1.endpoints.outsource import router as outsource_router
 from fastapi_app.api.v1.endpoints.order import router as order_router
 from fastapi_app.api.v1.endpoints.order_batch import router as order_batch_router
 from fastapi_app.api.v1.endpoints.customer_sampling import router as customer_sampling_router
+from fastapi_app.api.v1.endpoints.pattern_maker import router as pattern_maker_router
 from fastapi_app.api.v1.endpoints.permission import router as permission_router
 from fastapi_app.api.v1.endpoints.product import router as product_router
 from fastapi_app.api.v1.endpoints.production_plan import router as production_plan_router
@@ -292,6 +293,14 @@ api_router.include_router(
 # 按客户分类打样管理路由 - 前缀 /api/v1/pattern-room（保持路径不变，用户无感切换）
 api_router.include_router(
     customer_sampling_router,
+    prefix="/pattern-room",
+    tags=["板房管理"],
+    dependencies=[Depends(get_current_user_id)],
+)
+
+# 版师管理路由 - 前缀 /api/v1/pattern-room/pattern-makers
+api_router.include_router(
+    pattern_maker_router,
     prefix="/pattern-room",
     tags=["板房管理"],
     dependencies=[Depends(get_current_user_id)],

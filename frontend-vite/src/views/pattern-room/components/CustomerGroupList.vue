@@ -30,17 +30,6 @@
       <span>加载中...</span>
     </div>
 
-    <!-- 已完成表格视图 -->
-    <div v-else-if="viewMode === 'table'" class="cgl-table-mode">
-      <ProjectCompletedTable
-        :items="completedItems"
-        :loading="completedLoading"
-        @select="$emit('select-completed', $event)"
-        @export="$emit('export-excel')"
-        @print="$emit('print-table')"
-      />
-    </div>
-
     <!-- 空状态 -->
     <EmptyState
       v-else-if="!hasData"
@@ -94,6 +83,9 @@
                   v-if="proj.product_image_url"
                   class="cgl-card-thumb"
                   :class="{ 'is-loaded': thumbLoaded.has(proj.id) }"
+                  role="button"
+                  title="点击查看大图"
+                  @click.stop="openImagePreview(proj.product_image_url!)"
                 >
                   <!-- 骨架屏：图片加载完成前显示微光动画占位 -->
                   <div class="cgl-thumb-skeleton" aria-hidden="true" />
@@ -160,13 +152,22 @@
                     <i class="fas fa-pen" aria-hidden="true" /> 编辑
                   </button>
                   <button
-                    v-if="proj.status !== 'completed'"
+                    v-if="proj.status === 'in_progress'"
                     type="button"
                     class="cgl-card-action cgl-card-action--done"
                     title="标记为已完成"
                     @click.stop="$emit('complete-project', proj.id)"
                   >
                     <i class="fas fa-check" aria-hidden="true" /> 完成
+                  </button>
+                  <button
+                    v-if="proj.status === 'in_progress'"
+                    type="button"
+                    class="cgl-card-action cgl-card-action--cancel"
+                    title="取消该打样项目"
+                    @click.stop="$emit('cancel-project', proj.id)"
+                  >
+                    <i class="fas fa-times" aria-hidden="true" /> 取消
                   </button>
                 </div>
               </div>
@@ -180,16 +181,41 @@
         </div>
       </div>
     </div>
+
+    <!-- 分页 -->
+    <UiPagination
+      v-if="groupPages > 1"
+      :current-page="groupPage"
+      :total-pages="groupPages"
+      :total-items="groupTotal"
+      @update:current-page="$emit('update-group-page', $event)"
+    />
+
+    <!-- 图片查看模态框（与 product 页面共享样式） -->
+    <Teleport to="body">
+      <div v-if="previewImage" class="pd-overlay" @click.self="previewImage = null">
+        <div class="pd-modal pd-modal-img-dialog">
+          <div class="pd-modal-header">
+            <h5 class="pd-modal-title">产品图片</h5>
+            <button class="pd-modal-close" @click="previewImage = null" aria-label="关闭"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
+          </div>
+          <div class="pd-modal-body">
+            <img :src="resolveStaticUrl(previewImage)" class="pd-modal-img-view" />
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import UiSpinner from '@/components/ui/UiSpinner.vue'
+import UiPagination from '@/components/ui/UiPagination.vue'
 import EmptyState from './EmptyState.vue'
 import VirtualList from '@/components/ui/VirtualList.vue'
-import ProjectCompletedTable from './ProjectCompletedTable.vue'
-import type { PatternMakerGroup, ProjectSummary, CompletedTableRow } from '@/api/patternRoom'
+import { resolveStaticUrl } from '@/api/request'
+import type { PatternMakerGroup, ProjectSummary } from '@/api/patternRoom'
 
 const props = defineProps<{
   groups: PatternMakerGroup[]
@@ -197,33 +223,31 @@ const props = defineProps<{
   hasData: boolean
   selectedProjectId: number | null
   canManage: boolean
-  viewMode: 'group' | 'table'
-  completedItems: CompletedTableRow[]
-  completedLoading: boolean
+  groupPage: number
+  groupPages: number
+  groupTotal: number
 }>()
 
 const emit = defineEmits<{
   'select-project': [id: number]
   'edit-project': [id: number]
   'complete-project': [id: number]
+  'cancel-project': [id: number]
   search: [keyword: string]
   'add-project': []
   'status-change': [value: string]
-  'select-completed': [id: number]
-  'export-excel': []
-  'print-table': []
+  'update-group-page': [page: number]
 }>()
 
-/** 状态筛选选项 */
+/** 状态筛选选项（默认进行中） */
 const STATUS_OPTIONS = [
-  { value: 'all', label: '全部' },
   { value: 'in_progress', label: '进行中' },
   { value: 'completed', label: '已完成' },
   { value: 'cancelled', label: '已取消' },
 ] as const
 
-/** 当前状态筛选（默认全部） */
-const statusFilter = ref<string>('all')
+/** 当前状态筛选（默认进行中） */
+const statusFilter = ref<string>('in_progress')
 
 function onStatusChange(value: string) {
   statusFilter.value = value
@@ -393,6 +417,14 @@ function formatTime(iso: string): string {
 /** 已加载清晰缩略图的项目 id 集合（驱动骨架屏/模糊图淡出与清晰图淡入） */
 const thumbLoaded = ref<Set<number>>(new Set())
 
+/** 图片大图预览 URL */
+const previewImage = ref<string | null>(null)
+
+/** 打开图片大图预览 */
+function openImagePreview(url: string) {
+  previewImage.value = url
+}
+
 /** 清晰缩略图加载完成：记录状态，触发 blur-up 过渡 */
 function onThumbLoad(projectId: number) {
   if (!thumbLoaded.value.has(projectId)) {
@@ -519,12 +551,10 @@ watch(
   font-weight: 600;
 }
 
-/* 已完成表格视图 */
-.cgl-table-mode {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-  padding: 8px;
+/* 分页栏 */
+.cgl-container > :deep(.ui-pagination) {
+  padding: 4px 12px;
+  flex-shrink: 0;
 }
 
 /* 加载 */
@@ -750,10 +780,7 @@ watch(
   pointer-events: none;
 }
 
-/* 已完成卡片：缩略图轻微去饱和 + 绿色边框 */
-.cgl-project-card.is-completed .cgl-card-thumb {
-  filter: saturate(0.55);
-}
+/* 已完成卡片：绿色边框 */
 .cgl-project-card.is-completed {
   border-color: #22c55e40;
 }
@@ -825,5 +852,46 @@ watch(
   border-color: #16a34a;
   color: #16a34a;
   background: #16a34a0a;
+}
+
+.cgl-card-action--cancel:hover {
+  border-color: #ef4444;
+  color: #ef4444;
+  background: #ef44440a;
+}
+</style>
+
+<!-- 非 scoped：Teleport 到 body 的图片模态框样式（与 product 页面共享） -->
+<style>
+.pd-overlay {
+  position: fixed; inset: 0; z-index: 1050; background: rgba(0,0,0,0.5);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+
+.pd-modal {
+  border-radius: 18px; border: none; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
+  background: white; overflow: hidden;
+}
+.pd-modal-img-dialog { max-width: 90vw; width: 800px; }
+.pd-modal-header {
+  padding: 14px 20px; background: transparent;
+  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
+  display: flex; justify-content: space-between; align-items: center;
+}
+.pd-modal-title { font-size: 14px; font-weight: 700; color: var(--color-text); }
+.pd-modal-close {
+  width: 32px; height: 32px; border-radius: 8px; border: none;
+  background: var(--color-surface, #f8fafc); color: var(--color-text-secondary);
+  display: flex; align-items: center; justify-content: center; font-size: 14px;
+  transition: background 0.2s ease, color 0.2s ease; cursor: pointer;
+}
+.pd-modal-close:hover { background: var(--color-border-light, #e2e8f0); color: var(--color-text); }
+.pd-modal-body {
+  padding: 20px; background: var(--color-surface, #f8fafc);
+  display: flex; align-items: center; justify-content: center; min-height: 50vh;
+}
+.pd-modal-img-view {
+  max-width: 100%; max-height: 80vh; object-fit: contain;
+  border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.15);
 }
 </style>

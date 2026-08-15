@@ -10,7 +10,7 @@
 库存计算的准确性；查询操作使用 joinedload 避免 N+1 问题。
 """
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timezone, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -629,7 +629,7 @@ async def create_case_stockout(db: AsyncSession, product_id: int, quantity: int,
     case_obj.current_stock -= quantity
 
     log = CaseInventoryLog(case_id=case_obj.id, change_type='出库', change_quantity=-quantity,
-                           change_date=datetime.now(UTC), customer=customer,
+                           change_date=datetime.now(timezone.utc), customer=customer,
                            related_id=stockout_no, note=f'出库 {stockout_no}')
     db.add(log)
     logger.info('皮套出库成功 case_id=%s quantity=%s stockout_no=%s', case_obj.id, quantity, stockout_no)

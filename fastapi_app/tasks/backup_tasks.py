@@ -1,5 +1,5 @@
 """
-备份相关 Celery 定时任务
+备份相关 ARQ 定时任务
 
 调用 backup_service 层函数，不再直接 import endpoint 模块。
 改进功能：
@@ -9,27 +9,17 @@
 4. 性能监控指标收集
 5. 智能清理优化
 6. 灾难恢复测试
+
+ARQ 任务为原生 async，原先在 Celery 同步 worker 中用 _run_async 包装的协程，
+现在直接 await。重试由 ARQ max_tries 控制（job_try < 3 时 raise 触发重试）。
 """
-import asyncio
 import logging
 from datetime import datetime
 
-from celery import shared_task
-
 logger = logging.getLogger(__name__)
 
-
-def _run_async(coro):
-    """在 Celery worker 中运行异步代码"""
-    try:
-        return asyncio.run(coro)
-    except RuntimeError:
-        # 如果已有事件循环，使用 new_event_loop
-        loop = asyncio.new_event_loop()
-        try:
-            return loop.run_until_complete(coro)
-        finally:
-            loop.close()
+# ARQ 重试上限（对应 Celery max_retries=2 → 总尝试 3 次）
+_MAX_TRIES = 3
 
 
 async def _send_backup_alert(task_name: str, error: str, task_type: str = 'backup', severity: str = 'error', additional_info: dict = None):
@@ -47,8 +37,8 @@ async def _send_backup_alert(task_name: str, error: str, task_type: str = 'backu
         logger.error(f'发送备份告警失败: {e}')
 
 
-async def _collect_backup_metrics(backup_type: str, start_time: datetime, end_time: datetime, 
-                                 backup_size: int, success: bool, error_message: str = None, 
+async def _collect_backup_metrics(backup_type: str, start_time: datetime, end_time: datetime,
+                                 backup_size: int, success: bool, error_message: str = None,
                                  additional_metrics: dict = None):
     """收集备份性能指标"""
     try:
@@ -66,42 +56,42 @@ async def _collect_backup_metrics(backup_type: str, start_time: datetime, end_ti
         logger.error(f'收集备份指标失败: {e}')
 
 
-@shared_task(bind=True, name='auto_daily_backup_task', queue='batch', time_limit=1800, soft_time_limit=1500, max_retries=2, default_retry_delay=120)
-def auto_daily_backup_task(self):
+async def auto_daily_backup_task(ctx):
     """每日自动全量备份（带告警和监控）"""
+    job_try = ctx.get('job_try', 1)
     logger.info('开始执行每日自动全量备份...')
     start_time = datetime.now()
-    
+
     try:
         # 使用指数退避重试机制
         from fastapi_app.services.backup_alert_service import alert_service
-        success, result = _run_async(alert_service.retry_with_backoff(
+        success, result = await alert_service.retry_with_backoff(
             _do_auto_backup_with_metrics,
             'daily',
             task_name='auto_daily_backup'
-        ))
-        
+        )
+
         if success:
             logger.info(f'每日自动备份完成: {result}')
-            
+
             # 发送成功通知（如果配置了）
             import os
             if os.environ.get('BACKUP_NOTIFY_SUCCESS', 'false').lower() == 'true':
-                _run_async(_send_backup_alert(
+                await _send_backup_alert(
                     task_name='auto_daily_backup',
                     error=f'每日自动备份成功: {result.get("filename", "未知文件")}',
                     task_type='backup',
                     severity='info',
                     additional_info=result
-                ))
-            
+                )
+
             return result
         else:
             error_msg = f'每日自动备份失败: {str(result)}'
             logger.error(error_msg)
-            
+
             # 发送失败告警
-            _run_async(_send_backup_alert(
+            await _send_backup_alert(
                 task_name='auto_daily_backup',
                 error=error_msg,
                 task_type='backup',
@@ -109,20 +99,20 @@ def auto_daily_backup_task(self):
                 additional_info={
                     'start_time': start_time.isoformat(),
                     'end_time': datetime.now().isoformat(),
-                    'retry_count': self.request.retries
+                    'retry_count': job_try - 1
                 }
-            ))
-            
-            if self.request.retries < self.max_retries:
-                raise self.retry(exc=result) from result
+            )
+
+            if job_try < _MAX_TRIES:
+                raise result if isinstance(result, BaseException) else RuntimeError(str(result))
             return {'status': 'error', 'error': str(result)}
-            
+
     except Exception as e:  # defensive: background task must log/alert failure instead of propagating
         error_msg = f'每日自动备份失败: {e}'
         logger.error(error_msg)
-        
+
         # 发送异常告警
-        _run_async(_send_backup_alert(
+        await _send_backup_alert(
             task_name='auto_daily_backup',
             error=error_msg,
             task_type='backup',
@@ -130,24 +120,24 @@ def auto_daily_backup_task(self):
             additional_info={
                 'start_time': start_time.isoformat(),
                 'end_time': datetime.now().isoformat(),
-                'retry_count': self.request.retries,
+                'retry_count': job_try - 1,
                 'exception_type': type(e).__name__
             }
-        ))
-        
-        if self.request.retries < self.max_retries:
-            raise self.retry(exc=e) from e
+        )
+
+        if job_try < _MAX_TRIES:
+            raise e
         return {'status': 'error', 'error': str(e)}
 
 
 async def _do_auto_backup_with_metrics(backup_type: str):
     """执行自动备份并收集指标"""
     start_time = datetime.now()
-    
+
     try:
         result = await _do_auto_backup(backup_type)
         end_time = datetime.now()
-        
+
         # 收集性能指标
         backup_size = result.get('size', 0)
         await _collect_backup_metrics(
@@ -162,11 +152,11 @@ async def _do_auto_backup_with_metrics(backup_type: str):
                 'total_rows': result.get('total_rows')
             }
         )
-        
+
         return result
     except Exception as e:  # defensive: collect failure metrics before re-raising
         end_time = datetime.now()
-        
+
         # 收集失败指标
         await _collect_backup_metrics(
             backup_type=backup_type,
@@ -176,46 +166,46 @@ async def _do_auto_backup_with_metrics(backup_type: str):
             success=False,
             error_message=str(e)
         )
-        
+
         raise e
 
 
-@shared_task(bind=True, name='auto_incremental_backup_task', queue='batch', time_limit=600, max_retries=2, default_retry_delay=60)
-def auto_incremental_backup_task(self):
+async def auto_incremental_backup_task(ctx):
     """自动增量备份（带告警和监控）"""
+    job_try = ctx.get('job_try', 1)
     logger.info('开始执行自动增量备份...')
     start_time = datetime.now()
-    
+
     try:
         # 使用指数退避重试机制
         from fastapi_app.services.backup_alert_service import alert_service
-        success, result = _run_async(alert_service.retry_with_backoff(
+        success, result = await alert_service.retry_with_backoff(
             _do_auto_backup_with_metrics,
             'incremental',
             task_name='auto_incremental_backup'
-        ))
-        
+        )
+
         if success:
             logger.info(f'自动增量备份完成: {result}')
-            
+
             # 发送成功通知（如果配置了）
             import os
             if os.environ.get('BACKUP_NOTIFY_SUCCESS', 'false').lower() == 'true':
-                _run_async(_send_backup_alert(
+                await _send_backup_alert(
                     task_name='auto_incremental_backup',
                     error=f'自动增量备份成功: {result.get("filename", "未知文件")}',
                     task_type='backup',
                     severity='info',
                     additional_info=result
-                ))
-            
+                )
+
             return result
         else:
             error_msg = f'自动增量备份失败: {str(result)}'
             logger.error(error_msg)
-            
+
             # 发送失败告警
-            _run_async(_send_backup_alert(
+            await _send_backup_alert(
                 task_name='auto_incremental_backup',
                 error=error_msg,
                 task_type='backup',
@@ -223,20 +213,20 @@ def auto_incremental_backup_task(self):
                 additional_info={
                     'start_time': start_time.isoformat(),
                     'end_time': datetime.now().isoformat(),
-                    'retry_count': self.request.retries
+                    'retry_count': job_try - 1
                 }
-            ))
-            
-            if self.request.retries < self.max_retries:
-                raise self.retry(exc=result) from result
+            )
+
+            if job_try < _MAX_TRIES:
+                raise result if isinstance(result, BaseException) else RuntimeError(str(result))
             return {'status': 'error', 'error': str(result)}
-            
+
     except Exception as e:  # defensive: background task must log/alert failure instead of propagating
         error_msg = f'自动增量备份失败: {e}'
         logger.error(error_msg)
-        
+
         # 发送异常告警
-        _run_async(_send_backup_alert(
+        await _send_backup_alert(
             task_name='auto_incremental_backup',
             error=error_msg,
             task_type='backup',
@@ -244,47 +234,47 @@ def auto_incremental_backup_task(self):
             additional_info={
                 'start_time': start_time.isoformat(),
                 'end_time': datetime.now().isoformat(),
-                'retry_count': self.request.retries,
+                'retry_count': job_try - 1,
                 'exception_type': type(e).__name__
             }
-        ))
-        
-        if self.request.retries < self.max_retries:
-            raise self.retry(exc=e) from e
+        )
+
+        if job_try < _MAX_TRIES:
+            raise e
         return {'status': 'error', 'error': str(e)}
 
 
-@shared_task(bind=True, name='backup_integrity_check_task', queue='batch', time_limit=600, max_retries=1, default_retry_delay=60)
-def backup_integrity_check_task(self):
+async def backup_integrity_check_task(ctx):
     """备份完整性巡检（带告警）"""
+    job_try = ctx.get('job_try', 1)
     logger.info('开始执行备份完整性巡检...')
     start_time = datetime.now()
-    
+
     try:
-        result = _run_async(_do_integrity_check())
-        
+        result = await _do_integrity_check()
+
         if result.get('failed', 0) > 0:
             warning_msg = f'备份完整性巡检发现 {result["failed"]} 个问题: {result.get("details", [])}'
             logger.warning(warning_msg)
-            
+
             # 发送警告告警
-            _run_async(_send_backup_alert(
+            await _send_backup_alert(
                 task_name='backup_integrity_check',
                 error=warning_msg,
                 task_type='integrity_check',
                 severity='warning',
                 additional_info=result
-            ))
+            )
         else:
             logger.info('备份完整性巡检通过')
-        
+
         return result
     except Exception as e:  # defensive: background task must log/alert failure instead of propagating
         error_msg = f'备份完整性巡检失败: {e}'
         logger.error(error_msg)
-        
+
         # 发送错误告警
-        _run_async(_send_backup_alert(
+        await _send_backup_alert(
             task_name='backup_integrity_check',
             error=error_msg,
             task_type='integrity_check',
@@ -293,43 +283,43 @@ def backup_integrity_check_task(self):
                 'start_time': start_time.isoformat(),
                 'end_time': datetime.now().isoformat()
             }
-        ))
-        
-        if self.request.retries < self.max_retries:
-            raise self.retry(exc=e) from e
+        )
+
+        if job_try < _MAX_TRIES:
+            raise e
         return {'status': 'error', 'error': str(e)}
 
 
-@shared_task(bind=True, name='backup_cleanup_task', queue='batch', time_limit=300, max_retries=1, default_retry_delay=30)
-def backup_cleanup_task(self):
+async def backup_cleanup_task(ctx):
     """备份清理任务（智能清理）"""
+    job_try = ctx.get('job_try', 1)
     logger.info('开始执行备份智能清理...')
     start_time = datetime.now()
-    
+
     try:
         from fastapi_app.services.backup_cleanup_service import cleanup_service
-        result = _run_async(cleanup_service.smart_cleanup())
-        
+        result = await cleanup_service.smart_cleanup()
+
         if result.get('success'):
             deleted_count = result.get('cleanup_result', {}).get('deleted_count', 0)
             kept_count = result.get('summary', {}).get('kept_files', 0)
             logger.info(f'备份智能清理完成: 删除 {deleted_count} 个文件，保留 {kept_count} 个文件')
-            
+
             # 如果有文件被删除，发送通知
             if deleted_count > 0:
-                _run_async(_send_backup_alert(
+                await _send_backup_alert(
                     task_name='backup_cleanup',
                     error=f'备份清理完成，删除 {deleted_count} 个文件，保留 {kept_count} 个文件',
                     task_type='cleanup',
                     severity='info',
                     additional_info=result
-                ))
+                )
         else:
             error_msg = f'备份智能清理失败: {result.get("error", "未知错误")}'
             logger.error(error_msg)
-            
+
             # 发送错误告警
-            _run_async(_send_backup_alert(
+            await _send_backup_alert(
                 task_name='backup_cleanup',
                 error=error_msg,
                 task_type='cleanup',
@@ -338,15 +328,15 @@ def backup_cleanup_task(self):
                     'start_time': start_time.isoformat(),
                     'end_time': datetime.now().isoformat()
                 }
-            ))
-            
+            )
+
         return result
     except Exception as e:  # defensive: background task must log/alert failure instead of propagating
         error_msg = f'备份智能清理失败: {e}'
         logger.error(error_msg)
-        
+
         # 发送异常告警
-        _run_async(_send_backup_alert(
+        await _send_backup_alert(
             task_name='backup_cleanup',
             error=error_msg,
             task_type='cleanup',
@@ -355,10 +345,10 @@ def backup_cleanup_task(self):
                 'start_time': start_time.isoformat(),
                 'end_time': datetime.now().isoformat()
             }
-        ))
-        
-        if self.request.retries < self.max_retries:
-            raise self.retry(exc=e) from e
+        )
+
+        if job_try < _MAX_TRIES:
+            raise e
         return {'status': 'error', 'error': str(e)}
 
 
@@ -487,40 +477,40 @@ async def _do_integrity_check() -> dict:
     return results
 
 
-@shared_task(bind=True, name='backup_health_check_task', queue='batch', time_limit=600, max_retries=1, default_retry_delay=60)
-def backup_health_check_task(self):
+async def backup_health_check_task(ctx):
     """备份健康检查任务"""
+    job_try = ctx.get('job_try', 1)
     logger.info('开始执行备份健康检查...')
     start_time = datetime.now()
-    
+
     try:
         from fastapi_app.services.backup_health_check_service import health_check_service
-        result = _run_async(health_check_service.perform_health_check())
-        
+        result = await health_check_service.perform_health_check()
+
         if result.get('overall_status') != 'healthy':
             issues = result.get('issues', [])
             warning_msg = f'备份健康检查发现问题: {issues}'
             logger.warning(warning_msg)
-            
+
             # 发送警告告警
             severity = 'error' if result.get('overall_status') == 'error' else 'warning'
-            _run_async(_send_backup_alert(
+            await _send_backup_alert(
                 task_name='backup_health_check',
                 error=warning_msg,
                 task_type='health_check',
                 severity=severity,
                 additional_info=result
-            ))
+            )
         else:
             logger.info(f'备份健康检查完成: {result.get("overall_status")}')
-        
+
         return result
     except Exception as e:  # defensive: background task must log/alert failure instead of propagating
         error_msg = f'备份健康检查失败: {e}'
         logger.error(error_msg)
-        
+
         # 发送错误告警
-        _run_async(_send_backup_alert(
+        await _send_backup_alert(
             task_name='backup_health_check',
             error=error_msg,
             task_type='health_check',
@@ -529,40 +519,40 @@ def backup_health_check_task(self):
                 'start_time': start_time.isoformat(),
                 'end_time': datetime.now().isoformat()
             }
-        ))
-        
-        if self.request.retries < self.max_retries:
-            raise self.retry(exc=e) from e
+        )
+
+        if job_try < _MAX_TRIES:
+            raise e
         return {'status': 'error', 'error': str(e)}
 
 
-@shared_task(bind=True, name='apply_backup_policy_task', queue='batch', time_limit=300, max_retries=1, default_retry_delay=30)
-def apply_backup_policy_task(self):
+async def apply_backup_policy_task(ctx):
     """应用备份策略任务"""
+    job_try = ctx.get('job_try', 1)
     logger.info('开始应用备份策略...')
     start_time = datetime.now()
-    
+
     try:
         from fastapi_app.services.backup_policy_service import policy_service
-        result = _run_async(policy_service.apply_backup_policy())
-        
+        result = await policy_service.apply_backup_policy()
+
         if result.get('success'):
             logger.info(f'备份策略应用成功: {result.get("message")}')
-            
+
             # 发送成功通知
-            _run_async(_send_backup_alert(
+            await _send_backup_alert(
                 task_name='apply_backup_policy',
                 error=f'备份策略应用成功: {result.get("message")}',
                 task_type='policy',
                 severity='info',
                 additional_info=result
-            ))
+            )
         else:
             error_msg = f'备份策略应用失败: {result.get("error")}'
             logger.error(error_msg)
-            
+
             # 发送错误告警
-            _run_async(_send_backup_alert(
+            await _send_backup_alert(
                 task_name='apply_backup_policy',
                 error=error_msg,
                 task_type='policy',
@@ -571,15 +561,15 @@ def apply_backup_policy_task(self):
                     'start_time': start_time.isoformat(),
                     'end_time': datetime.now().isoformat()
                 }
-            ))
-            
+            )
+
         return result
     except Exception as e:  # defensive: background task must log/alert failure instead of propagating
         error_msg = f'应用备份策略失败: {e}'
         logger.error(error_msg)
-        
+
         # 发送异常告警
-        _run_async(_send_backup_alert(
+        await _send_backup_alert(
             task_name='apply_backup_policy',
             error=error_msg,
             task_type='policy',
@@ -588,40 +578,40 @@ def apply_backup_policy_task(self):
                 'start_time': start_time.isoformat(),
                 'end_time': datetime.now().isoformat()
             }
-        ))
-        
-        if self.request.retries < self.max_retries:
-            raise self.retry(exc=e) from e
+        )
+
+        if job_try < _MAX_TRIES:
+            raise e
         return {'status': 'error', 'error': str(e)}
 
 
-@shared_task(bind=True, name='disaster_recovery_test_task', queue='batch', time_limit=1800, max_retries=1, default_retry_delay=300)
-def disaster_recovery_test_task(self):
+async def disaster_recovery_test_task(ctx):
     """灾难恢复测试任务"""
+    job_try = ctx.get('job_try', 1)
     logger.info('开始执行灾难恢复测试...')
     start_time = datetime.now()
-    
+
     try:
         from fastapi_app.services.backup_recovery_test_service import recovery_test_service
-        result = _run_async(recovery_test_service.perform_recovery_test())
-        
+        result = await recovery_test_service.perform_recovery_test()
+
         if result.get('overall_success'):
             logger.info(f'灾难恢复测试成功: {result.get("summary", {})}')
-            
+
             # 发送成功通知
-            _run_async(_send_backup_alert(
+            await _send_backup_alert(
                 task_name='disaster_recovery_test',
                 error=f'灾难恢复测试成功: 测试ID {result.get("test_id", "未知")}',
                 task_type='recovery_test',
                 severity='info',
                 additional_info=result
-            ))
+            )
         else:
             error_msg = f'灾难恢复测试失败: {result.get("error", "未知错误")}'
             logger.error(error_msg)
-            
+
             # 发送错误告警
-            _run_async(_send_backup_alert(
+            await _send_backup_alert(
                 task_name='disaster_recovery_test',
                 error=error_msg,
                 task_type='recovery_test',
@@ -631,15 +621,15 @@ def disaster_recovery_test_task(self):
                     'end_time': datetime.now().isoformat(),
                     'test_id': result.get('test_id', '未知')
                 }
-            ))
-            
+            )
+
         return result
     except Exception as e:  # defensive: background task must log/alert failure instead of propagating
         error_msg = f'灾难恢复测试失败: {e}'
         logger.error(error_msg)
-        
+
         # 发送错误告警
-        _run_async(_send_backup_alert(
+        await _send_backup_alert(
             task_name='disaster_recovery_test',
             error=error_msg,
             task_type='recovery_test',
@@ -648,43 +638,43 @@ def disaster_recovery_test_task(self):
                 'start_time': start_time.isoformat(),
                 'end_time': datetime.now().isoformat()
             }
-        ))
-        
-        if self.request.retries < self.max_retries:
-            raise self.retry(exc=e) from e
+        )
+
+        if job_try < _MAX_TRIES:
+            raise e
         return {'status': 'error', 'error': str(e)}
 
 
-@shared_task(bind=True, name='backup_metrics_report_task', queue='batch', time_limit=300, max_retries=1, default_retry_delay=60)
-def backup_metrics_report_task(self):
+async def backup_metrics_report_task(ctx):
     """备份性能指标报告任务"""
+    job_try = ctx.get('job_try', 1)
     logger.info('开始生成备份性能指标报告...')
     start_time = datetime.now()
-    
+
     try:
         from fastapi_app.services.backup_metrics_service import metrics_service
-        result = _run_async(metrics_service.export_metrics_report(days=7, format='json'))
-        
+        result = await metrics_service.export_metrics_report(days=7, format='json')
+
         if 'error' not in result:
             logger.info('备份性能指标报告生成成功')
-            
+
             # 检查性能告警
-            alerts = _run_async(metrics_service.get_performance_alerts())
+            alerts = await metrics_service.get_performance_alerts()
             if alerts:
                 for alert in alerts:
-                    _run_async(_send_backup_alert(
+                    await _send_backup_alert(
                         task_name='backup_metrics',
                         error=alert['message'],
                         task_type='metrics',
                         severity=alert['severity'],
                         additional_info=alert
-                    ))
+                    )
         else:
             error_msg = f'备份性能指标报告生成失败: {result.get("error")}'
             logger.error(error_msg)
-            
+
             # 发送错误告警
-            _run_async(_send_backup_alert(
+            await _send_backup_alert(
                 task_name='backup_metrics_report',
                 error=error_msg,
                 task_type='metrics',
@@ -693,15 +683,15 @@ def backup_metrics_report_task(self):
                     'start_time': start_time.isoformat(),
                     'end_time': datetime.now().isoformat()
                 }
-            ))
-            
+            )
+
         return result
     except Exception as e:  # defensive: background task must log/alert failure instead of propagating
         error_msg = f'备份性能指标报告生成失败: {e}'
         logger.error(error_msg)
-        
+
         # 发送告警
-        _run_async(_send_backup_alert(
+        await _send_backup_alert(
             task_name='backup_metrics_report',
             error=error_msg,
             task_type='metrics',
@@ -710,8 +700,8 @@ def backup_metrics_report_task(self):
                 'start_time': start_time.isoformat(),
                 'end_time': datetime.now().isoformat()
             }
-        ))
-        
-        if self.request.retries < self.max_retries:
-            raise self.retry(exc=e) from e
+        )
+
+        if job_try < _MAX_TRIES:
+            raise e
         return {'status': 'error', 'error': str(e)}

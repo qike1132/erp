@@ -7,7 +7,7 @@ JOIN OrderItem。当前依赖 Task 3 设置的兼容值。
 import contextlib
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -79,7 +79,7 @@ async def set_whitelist(db: AsyncSession, customers: list[str], user_id: int):
     if config:
         config.config_value = value
         config.updated_by_id = user_id
-        config.updated_at = datetime.now(UTC).replace(tzinfo=None)
+        config.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
     else:
         db.add(OrderSyncConfig(config_key="order_batch_whitelist", config_value=value, description="订单批次号白名单客户"))
 
@@ -435,7 +435,7 @@ async def complete_batch(
     if not orders:
         raise ValueError(f"批次 {batch_no} 没有可完成的订单")
 
-    now = datetime.now(UTC).replace(tzinfo=None)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     completed = []
     failed_orders = []
 
