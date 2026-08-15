@@ -16,9 +16,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, defineComponent, PropType } from 'vue'
+import { computed, h, defineComponent, PropType, type VNode } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { permissionApi } from '@/api'
+import type { PermissionItem } from '@/types'
 import UiCard from '@/components/ui/UiCard.vue'
 import UiBadge from '@/components/ui/UiBadge.vue'
 import UiSpinner from '@/components/ui/UiSpinner.vue'
@@ -27,11 +28,12 @@ import UiEmpty from '@/components/ui/UiEmpty.vue'
 const PermissionNode = defineComponent({
   name: 'PermissionNode',
   props: {
-    node: { type: Object as PropType<any>, required: true },
+    node: { type: Object as PropType<PermissionItem>, required: true },
     depth: { type: Number, default: 0 },
   },
   setup(props) {
-    return () => {
+    // 显式标注渲染函数返回类型，避免 PermissionNode 自引用导致循环推断
+    return (): VNode => {
       const children = props.node.children || []
       return h('div', { style: { paddingLeft: `${props.depth * 24}px` } }, [
         h(
@@ -54,7 +56,7 @@ const PermissionNode = defineComponent({
             ),
           ],
         ),
-        ...children.map((child: any) => h(PermissionNode, { node: child, depth: props.depth + 1, key: child.id })),
+        ...children.map((child) => h(PermissionNode, { node: child, depth: props.depth + 1, key: child.id })),
       ])
     }
   },
@@ -62,9 +64,13 @@ const PermissionNode = defineComponent({
 
 const { data: result, isLoading } = useQuery({
   queryKey: ['permissions-tree'],
-  queryFn: () => permissionApi.tree() as Promise<any>,
+  queryFn: () => permissionApi.tree(),
   staleTime: 60_000,
 })
 
-const permissionTree = computed(() => result.value?.tree ?? result.value ?? [])
+const permissionTree = computed(() => {
+  // 兼容历史 { tree: PermissionItem[] } 包裹结构；后端当前返回裸数组
+  const wrapped = result.value as unknown as { tree?: PermissionItem[] } | null | undefined
+  return wrapped?.tree ?? result.value ?? []
+})
 </script>

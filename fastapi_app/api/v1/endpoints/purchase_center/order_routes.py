@@ -553,12 +553,7 @@ async def api_get_orders_batch_print_data(
     Returns:
         dict[str, Any]: 包含 success 标志和 orders 列表的字典。
     """
-    from sqlalchemy import select
-    from sqlalchemy.orm import selectinload
-
-    from fastapi_app.shared_models import PurchaseOrder
-    result = await db.execute(select(PurchaseOrder).options(selectinload(PurchaseOrder.items)).where(PurchaseOrder.id.in_(data.ids)))
-    orders = result.scalars().unique().all()
+    orders = await svc.get_purchase_orders_with_items(db, data.ids)
     return {'success': True, 'orders': [o.to_dict() for o in orders]}
 
 

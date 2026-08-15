@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { authApi, dashboardApi, clearCsrfCache } from '@/api'
 import type { User, UserInfo, NavSection } from '@/types'
 import { removeAccessToken } from '@/utils/secureStorage'
+import { useCatalogStore } from './catalog'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
@@ -36,6 +37,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   type NavApiItem = { name: string; url: string; icon?: string; code: string; permission_codes: string[] }
+  type NavApiSection = { name?: string; items?: NavApiItem[] }
 
   async function fetchNavSections() {
     const res = await dashboardApi.navSections()
@@ -44,7 +46,7 @@ export const useAuthStore = defineStore('auth', () => {
     } else if (res && typeof res === 'object') {
       navSections.value = Object.entries(res)
         .filter(([_key, val]) => val && typeof val === 'object' && !Array.isArray(val))
-        .map(([_key, val]: [string, any]) => ({
+        .map(([_key, val]: [string, NavApiSection]) => ({
         title: val.name ?? _key,
         items: (val.items ?? []).map((item: NavApiItem) => ({
           title: item.name,
@@ -112,6 +114,8 @@ export const useAuthStore = defineStore('auth', () => {
     navSections.value = []
     loaded.value = false
     clearCsrfCache()
+    // 清空目录缓存（产品/客户/供应商下拉数据），避免跨账号残留
+    useCatalogStore().clear()
     if (import.meta.env.VITE_CAPACITOR) {
       removeAccessToken()
     }

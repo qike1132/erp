@@ -11,6 +11,7 @@ import os
 import re
 import threading
 import time
+from collections.abc import Mapping
 
 from sqlalchemy import event
 
@@ -53,6 +54,27 @@ def _get_threshold(statement: str) -> float:
     return SLOW_QUERY_THRESHOLD
 
 
+def _summarize_params(parameters) -> str:
+    """生成参数摘要（个数+类型），不记录参数值，防止密码哈希/token/PII 写入日志"""
+    if not parameters:
+        return ""
+    try:
+        if isinstance(parameters, Mapping):
+            values = list(parameters.values())
+        elif isinstance(parameters, (list, tuple)) and parameters and isinstance(parameters[0], (list, tuple, Mapping)):
+            # executemany 场景：参数为多组集合，摘要为批次数+首组参数摘要
+            first = parameters[0]
+            return f"batch={len(parameters)},first={_summarize_params(first) or '0()'}"
+        elif isinstance(parameters, (list, tuple)):
+            values = list(parameters)
+        else:
+            values = [parameters]
+        types = ",".join(type(v).__name__ for v in values[:5])
+        return f"{len(values)}({types}{',...' if len(values) > 5 else ''})"
+    except Exception:  # defensive: 摘要生成失败时兜底，不影响慢查询记录
+        return "?"
+
+
 def setup_slow_query_listener(engine):
     """为 SQLAlchemy 引擎注册慢查询监听器"""
 
@@ -78,7 +100,7 @@ def setup_slow_query_listener(engine):
                 threshold,
                 "report" if threshold == SLOW_QUERY_REPORT_THRESHOLD else "oltp",
                 truncated,
-                str(parameters)[:100] if parameters else "",
+                f"params={_summarize_params(parameters)}" if parameters else "",
             )
 
             try:

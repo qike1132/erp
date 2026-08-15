@@ -83,10 +83,17 @@ class TestOrderService:
 
         with patch('fastapi_app.services.order_crud.get_product_for_update', new_callable=AsyncMock, return_value=product):
             with patch('fastapi_app.services.order_crud._generate_order_number', new_callable=AsyncMock, return_value="PO-001"):
-                result = await order_service.create_order(
-                    mock_db, product_id=1, quantity=10,
-                    customer="客户", note="", current_user=MagicMock()
-                )
+                # 外发工序自动生成属于副作用（防御性封装，失败不影响主流程），单测中隔离
+                with patch('fastapi_app.services.outsource_service.auto_generate_for_order', new_callable=AsyncMock):
+                    # 缓存失效与事件发布（Redis/WS）同为副作用，单测中隔离，避免污染事件循环
+                    with patch('fastapi_app.services.order_crud.cache_mgr') as mock_cache_mgr, \
+                         patch('fastapi_app.services.order_crud._safe_invalidate_purchase_cache', new_callable=AsyncMock), \
+                         patch('fastapi_app.services.order_crud._safe_publish_event', new_callable=AsyncMock):
+                        mock_cache_mgr.invalidate = AsyncMock()
+                        result = await order_service.create_order(
+                            mock_db, product_id=1, quantity=10,
+                            customer="客户", note="", current_user=MagicMock()
+                        )
         assert result['order_no'] == 'PO-001'
 
     async def test_update_order_not_found(self, mock_db):
@@ -239,9 +246,16 @@ class TestOrderEndpoints:
 
         with patch('fastapi_app.services.order_crud.get_product_for_update', new_callable=AsyncMock, return_value=product):
             with patch('fastapi_app.services.order_crud._generate_order_number', new_callable=AsyncMock, return_value="PO-001"):
-                response = await client.post("/api/v1/orders/create", json={
-                    "product_id": 1, "quantity": 10, "customer": "测试客户"
-                })
+                # 外发工序自动生成属于副作用（防御性封装，失败不影响主流程），单测中隔离
+                with patch('fastapi_app.services.outsource_service.auto_generate_for_order', new_callable=AsyncMock):
+                    # 缓存失效与事件发布（Redis/WS）同为副作用，单测中隔离，避免污染事件循环
+                    with patch('fastapi_app.services.order_crud.cache_mgr') as mock_cache_mgr, \
+                         patch('fastapi_app.services.order_crud._safe_invalidate_purchase_cache', new_callable=AsyncMock), \
+                         patch('fastapi_app.services.order_crud._safe_publish_event', new_callable=AsyncMock):
+                        mock_cache_mgr.invalidate = AsyncMock()
+                        response = await client.post("/api/v1/orders/create", json={
+                            "product_id": 1, "quantity": 10, "customer": "测试客户"
+                        })
         assert response.status_code == 200
         assert response.json()['success'] is True
 

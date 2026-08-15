@@ -122,6 +122,8 @@ class CustomerSummaryResponse(BaseModel):
     total_shipped_qty: int = 0
     total_remaining_qty: int = 0
     warning_count: int = 0
+    # FIFO 出货量统计降级标记（服务异常时为 True，前端可提示数据可能不完整）
+    fifo_degraded: bool = False
 
 
 class InventoryCompareItem(BaseModel):
@@ -157,6 +159,8 @@ class ShipmentProgressItem(BaseModel):
 class ShipmentProgressResponse(BaseModel):
     """出货进度响应"""
     details: list[ShipmentProgressItem] = []
+    # FIFO 出货量统计降级标记（服务异常时为 True，前端可提示数据可能不完整）
+    fifo_degraded: bool = False
 
 
 class PurchasePlanActionResponse(BaseModel):
@@ -177,6 +181,8 @@ class PlanListResponse(BaseModel):
     """计划列表响应"""
     plans: list[PurchasePlanItem] = []
     total: int = 0
+    # FIFO 出货量统计降级标记（服务异常时为 True，前端可提示数据可能不完整）
+    fifo_degraded: bool = False
 
 
 class MonthlyCalendarResponse(BaseModel):
@@ -186,6 +192,8 @@ class MonthlyCalendarResponse(BaseModel):
     days_in_month: int
     plans_by_date: dict[str, list] = {}
     customers: list[dict] = []
+    # FIFO 出货量统计降级标记（服务异常时为 True，前端可提示数据可能不完整）
+    fifo_degraded: bool = False
 
 
 class CreatePlanResponse(BaseModel):

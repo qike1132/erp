@@ -146,13 +146,14 @@
  * - 点击产品行查看该产品的库存流水记录
  * - 支持按操作类型、日期范围筛选流水
  */
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, computed } from 'vue'
 import { useQuery, keepPreviousData } from '@tanstack/vue-query'
 import { get } from '@/api/request'
 import UiSelect from '@/components/ui/UiSelect.vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
 import UiDataTable from '@/components/ui/UiDataTable.vue'
 import type { TableColumn } from '@/components/ui/UiDataTable.vue'
+import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
 
 /** 库存汇总中单个产品的库存信息 */
 interface InventorySummaryItem {
@@ -209,18 +210,15 @@ const selectedCaseId = ref<number | null>(null)
 /** 当前选中的产品名称（用于流水标题显示） */
 const selectedCaseName = ref('')
 
-let invSearchTimer: ReturnType<typeof setTimeout> | null = null
+const { debounceSearch: debounceInvSearch } = useDebouncedSearch()
 
 /** 搜索输入防抖处理（300ms） */
 function onInvSearchInput() {
-  if (invSearchTimer) clearTimeout(invSearchTimer)
-  invSearchTimer = setTimeout(() => {
+  debounceInvSearch(() => {
     debouncedInvSearch.value = invSearch.value
     invPage.value = 1
-  }, 300)
+  })
 }
-
-onUnmounted(() => { if (invSearchTimer) clearTimeout(invSearchTimer) })
 
 /** 库存汇总查询（服务端分页 + 搜索） */
 const {

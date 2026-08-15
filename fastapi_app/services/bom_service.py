@@ -116,10 +116,19 @@ async def _save_material_bom_items(
     name_field = meta['name_field']
     log_type = meta['log_type']
 
+    # 批量预取待更新记录，避免循环内逐条 db.get 造成 N+1 查询
+    item_ids = [it.get('id') for it in items if it.get('id')]
+    existing_map: dict = {}
+    if item_ids:
+        existing_result = await db.execute(
+            select(model_class).where(model_class.id.in_(item_ids))
+        )
+        existing_map = {obj.id: obj for obj in existing_result.scalars().all()}
+
     for item_data in items:
         item_id = item_data.get('id')
         if item_id:
-            existing = await db.get(model_class, item_id)
+            existing = existing_map.get(item_id)
             if existing and existing.product_id == product_id:
                 old_val = getattr(existing, name_field)
                 setattr(existing, name_field, item_data.get(name_field, ''))

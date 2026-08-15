@@ -9,22 +9,34 @@
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
 from fastapi_app.core.cache import CacheDomain
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
 from fastapi_app.core.domain_events import DomainEvent, DomainEventType, publish as publish_domain_event
 from fastapi_app.core.exception_handler import safe_publish_event
 from fastapi_app.core.exceptions import db_transaction
+from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.services.notification_service import StockEvent, publish_stock_event
 from fastapi_app.services.order_service import batch_create_orders
 from fastapi_app.services.stock_service import (
     batch_create_stockins,
     batch_create_stockouts,
 )
-from fastapi_app.shared_models import Product
+from fastapi_app.shared_models import (
+    InventoryLog,
+    Product,
+    ProductAccessory,
+    ProductFabric,
+    ProductMaterial,
+    PurchaseOrder,
+    StockIn,
+    Supplier,
+)
+from fastapi_app.shared_models.country import Country
 
 logger = logging.getLogger(__name__)
 
@@ -136,3 +148,96 @@ async def orchestrate_batch_stockouts(db: AsyncSession, stockouts_data: list[dic
         logger.warning(f"出库后置操作部分失败（不影响出库结果）: {e}", exc_info=True)
 
     return result
+
+
+# ==================== 查询函数（自 auxiliary.py 端点下沉，纯查询搬移） ====================
+
+async def search_products_by_keyword(db: AsyncSession, query_str: str) -> list[Product]:
+    """产品搜索（支持名称、条码，限制 50 条）"""
+    result = await db.execute(
+        select(Product).where(
+            or_(Product.name.like(f'%{escape_like(query_str)}%'), Product.barcode.like(f'%{escape_like(query_str)}%'))
+        ).limit(50)
+    )
+    return list(result.scalars().all())
+
+
+async def get_product_by_id(db: AsyncSession, product_id: int) -> Product | None:
+    """按 ID 获取产品"""
+    return await db.get(Product, product_id)
+
+
+async def count_inventory_logs(db: AsyncSession, product_id: int) -> int:
+    """统计产品库存日志总数"""
+    count_result = await db.execute(
+        select(func.count(InventoryLog.id)).where(InventoryLog.product_id == product_id)
+    )
+    return count_result.scalar() or 0
+
+
+async def get_inventory_logs_page(db: AsyncSession, product_id: int, page: int, per_page: int) -> list[InventoryLog]:
+    """分页获取产品库存日志（按变更时间倒序）"""
+    result = await db.execute(
+        select(InventoryLog).where(InventoryLog.product_id == product_id)
+        .order_by(InventoryLog.change_date.desc())
+        .offset((page - 1) * per_page).limit(per_page)
+    )
+    return list(result.scalars().all())
+
+
+async def get_available_stockins(
+    db: AsyncSession, product_id: int | None, customer: str, limit: int,
+) -> list[StockIn]:
+    """获取可用入库记录（含出库关联与产品信息，按入库时间升序，限制返回数量）"""
+    query = select(StockIn).options(
+        joinedload(StockIn.stockin_stockouts), joinedload(StockIn.product)
+    )
+
+    if product_id:
+        query = query.where(StockIn.product_id == product_id)
+    if customer:
+        query = query.where(StockIn.customer == customer)
+
+    query = query.order_by(StockIn.stockin_date.asc()).limit(limit)
+    result = await db.execute(query)
+    return list(result.unique().scalars().all())
+
+
+async def get_stockin_by_id(db: AsyncSession, stockin_id: int) -> StockIn | None:
+    """按 ID 获取入库记录"""
+    return await db.get(StockIn, stockin_id)
+
+
+async def get_supplier_by_id(db: AsyncSession, supplier_id: int) -> Supplier | None:
+    """按 ID 获取供应商"""
+    result = await db.execute(select(Supplier).where(Supplier.id == supplier_id))
+    return result.scalar_one_or_none()
+
+
+async def supplier_has_bom_or_orders(db: AsyncSession, supplier_id: int) -> bool:
+    """检查供应商是否已关联 BOM（物料/面料/辅料）或采购订单数据"""
+    has_bom = (
+        (await db.execute(select(ProductMaterial.id).where(ProductMaterial.supplier_id == supplier_id).limit(1))).scalar() or
+        (await db.execute(select(ProductFabric.id).where(ProductFabric.supplier_id == supplier_id).limit(1))).scalar() or
+        (await db.execute(select(ProductAccessory.id).where(ProductAccessory.supplier_id == supplier_id).limit(1))).scalar()
+    )
+    has_orders = (await db.execute(select(PurchaseOrder.id).where(PurchaseOrder.supplier_id == supplier_id).limit(1))).scalar()
+    return bool(has_bom or has_orders)
+
+
+async def list_countries_ordered(db: AsyncSession) -> list[Country]:
+    """按名称排序列出全部国家"""
+    result = await db.execute(select(Country).order_by(Country.name))
+    return list(result.scalars().all())
+
+
+async def get_country_by_name(db: AsyncSession, name: str) -> Country | None:
+    """按名称精确查找国家"""
+    result = await db.execute(select(Country).where(Country.name == name))
+    return result.scalar_one_or_none()
+
+
+async def get_country_by_id(db: AsyncSession, country_id: int) -> Country | None:
+    """按 ID 查找国家"""
+    result = await db.execute(select(Country).where(Country.id == country_id))
+    return result.scalar_one_or_none()

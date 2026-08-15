@@ -15,7 +15,10 @@ from fastapi_app.services import purchase_supplier_service
 class TestToggleStatus:
     @pytest.mark.asyncio
     async def test_toggle_status_not_found(self, client, mock_db):
-        mock_db.get = AsyncMock(return_value=None)
+        # endpoint 使用 SELECT ... FOR UPDATE 取行锁，mock db.execute 而非 db.get
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
 
         resp = await client.post("/api/v1/suppliers/toggle-status/999")
 
@@ -28,7 +31,9 @@ class TestToggleStatus:
         supplier = MagicMock()
         supplier.id = 1
         supplier.status = None  # 旧数据边界
-        mock_db.get = AsyncMock(return_value=supplier)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = supplier
+        mock_db.execute = AsyncMock(return_value=mock_result)
         monkeypatch.setattr(supplier_module, "_invalidate_supplier_caches", AsyncMock())
 
         resp = await client.post("/api/v1/suppliers/toggle-status/1")
@@ -42,7 +47,9 @@ class TestToggleStatus:
         supplier = MagicMock()
         supplier.id = 1
         supplier.status = True
-        mock_db.get = AsyncMock(return_value=supplier)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = supplier
+        mock_db.execute = AsyncMock(return_value=mock_result)
         monkeypatch.setattr(supplier_module, "_invalidate_supplier_caches", AsyncMock())
 
         resp = await client.post("/api/v1/suppliers/toggle-status/1")
@@ -57,7 +64,9 @@ class TestToggleStatus:
         supplier = MagicMock()
         supplier.id = 1
         supplier.status = True
-        mock_db.get = AsyncMock(return_value=supplier)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = supplier
+        mock_db.execute = AsyncMock(return_value=mock_result)
         mock_db.commit = AsyncMock(side_effect=SQLAlchemyError("db down"))
         monkeypatch.setattr(supplier_module, "_invalidate_supplier_caches", AsyncMock())
 

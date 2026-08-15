@@ -166,7 +166,7 @@ import UiSelect from '@/components/ui/UiSelect.vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiAutocomplete from '@/components/ui/UiAutocomplete.vue'
-import type { FormState } from '../composables/types'
+import type { FormState, ProductSuggestion } from '../composables/types'
 
 defineProps<{
   form: FormState
@@ -181,8 +181,8 @@ defineProps<{
   excelFile: File | null
   importing: boolean
   isDragOver: boolean
-  searchProducts: (q: string) => Promise<any[]>
-  selectProduct: (item: any) => void
+  searchProducts: (q: string) => Promise<ProductSuggestion[]>
+  selectProduct: (item: ProductSuggestion) => void
   handleDeductPreview: () => void
   openDeductEdit: () => void
   openCountryDialog: () => void

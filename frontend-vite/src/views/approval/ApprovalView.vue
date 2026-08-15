@@ -125,11 +125,12 @@
  * - 支持按状态筛选和关键词搜索
  * - 审批通过操作与驳回弹窗（需填写驳回原因）
  */
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, computed } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { approvalApi } from '@/api'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import { showToast } from '@/composables/useToast'
+import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
 
 /** 审批记录行数据 */
 interface ApprovalRow {
@@ -171,15 +172,14 @@ const currentPage = ref(1)
 /** 每页条数 */
 const perPage = 20
 
-let searchTimer: ReturnType<typeof setTimeout> | null = null
+const { debounceSearch } = useDebouncedSearch()
 const debouncedSearch = ref('')
 /** 搜索输入防抖处理（300ms 延迟） */
 function onSearchInput() {
-  if (searchTimer) clearTimeout(searchTimer)
-  searchTimer = setTimeout(() => {
+  debounceSearch(() => {
     debouncedSearch.value = searchTerm.value
     currentPage.value = 1
-  }, 300)
+  })
 }
 
 /** 清除搜索条件并重置页码 */
@@ -188,10 +188,6 @@ function clearSearch() {
   debouncedSearch.value = ''
   currentPage.value = 1
 }
-
-onUnmounted(() => {
-  if (searchTimer) clearTimeout(searchTimer)
-})
 
 /** 状态筛选选项 */
 const statusOptions = [

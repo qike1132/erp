@@ -6,7 +6,7 @@
 interface CacheEntry<T> { data: T; expireAt: number; createdAt: number }
 
 export class MultiLevelCache {
-  private l1: Map<string, CacheEntry<any>> = new Map()
+  private l1: Map<string, CacheEntry<unknown>> = new Map()
   private l1Hits = 0; private l2Hits = 0; private misses = 0
   constructor(
     private l1MaxSize = 500,

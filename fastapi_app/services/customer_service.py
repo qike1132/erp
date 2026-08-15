@@ -1,11 +1,23 @@
 """客户管理服务层"""
 import logging
 
-from sqlalchemy import exists, func, or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
-from fastapi_app.shared_models import Customer, CustomerAccessLog, Order, PurchaseOrder, PurchasePlan, StockIn, StockOut
+from fastapi_app.shared_models import (
+    CaseStockIn,
+    CaseStockOut,
+    Customer,
+    CustomerAccessLog,
+    Order,
+    PackagingRecord,
+    ProductionPlan,
+    PurchaseOrder,
+    PurchasePlan,
+    StockIn,
+    StockOut,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -145,21 +157,47 @@ async def delete_customer(db: AsyncSession, customer_id: int) -> None:
     if not customer:
         raise ValueError("客户不存在")
 
-    # 单次查询检查所有关联数据，替代6次串行 EXISTS 查询
+    # 单次查询统计所有关联数据（计数明细而非仅 EXISTS），覆盖所有以客户名/客户ID 引用的表：
+    # - 名称字符串引用：Order/StockIn/StockOut/PackagingRecord/ProductionPlan/CaseStockIn/CaseStockOut
+    # - customer_id 外键引用（优先 ID 检查）：PurchaseOrder/PurchasePlan/CustomerAccessLog，
+    #   同时兜底匹配冗余的 customer_name 字段（历史数据 customer_id 可能为 NULL）
     checks = await db.execute(
         select(
-            exists(select(1).where(Order.customer == customer.name, Order.is_deleted == False)).label('has_orders'),
-            exists(select(1).where(StockIn.customer == customer.name)).label('has_stockins'),
-            exists(select(1).where(StockOut.customer == customer.name)).label('has_stockouts'),
-            exists(select(1).where(CustomerAccessLog.customer_id == customer_id)).label('has_access_logs'),
-            exists(select(1).where(PurchaseOrder.customer_id == customer_id)).label('has_purchase_orders'),
-            exists(select(1).where(PurchasePlan.customer_id == customer_id)).label('has_purchase_plans'),
+            select(func.count()).where(Order.customer == customer.name, Order.is_deleted == False).scalar_subquery().label('orders'),
+            select(func.count()).where(StockIn.customer == customer.name).scalar_subquery().label('stockins'),
+            select(func.count()).where(StockOut.customer == customer.name).scalar_subquery().label('stockouts'),
+            select(func.count()).where(
+                or_(CustomerAccessLog.customer_id == customer_id, CustomerAccessLog.customer_name == customer.name)
+            ).scalar_subquery().label('access_logs'),
+            select(func.count()).where(
+                or_(PurchaseOrder.customer_id == customer_id, PurchaseOrder.customer_name == customer.name)
+            ).scalar_subquery().label('purchase_orders'),
+            select(func.count()).where(
+                or_(PurchasePlan.customer_id == customer_id, PurchasePlan.customer_name == customer.name)
+            ).scalar_subquery().label('purchase_plans'),
+            select(func.count()).where(PackagingRecord.customer == customer.name).scalar_subquery().label('packaging_records'),
+            select(func.count()).where(ProductionPlan.customer_name == customer.name).scalar_subquery().label('production_plans'),
+            select(func.count()).where(CaseStockIn.customer == customer.name).scalar_subquery().label('case_stockins'),
+            select(func.count()).where(CaseStockOut.customer == customer.name).scalar_subquery().label('case_stockouts'),
         )
     )
     row = checks.one()
-    if any([row.has_orders, row.has_stockins, row.has_stockouts,
-            row.has_access_logs, row.has_purchase_orders, row.has_purchase_plans]):
-        raise ValueError("该客户已有相关单据，无法删除！建议禁用该客户。")
+    related_counts = {
+        '订单': row.orders,
+        '备货记录': row.stockins,
+        '出货记录': row.stockouts,
+        '客户访问日志': row.access_logs,
+        '采购订单': row.purchase_orders,
+        '采购计划': row.purchase_plans,
+        '包装记录': row.packaging_records,
+        '生产计划': row.production_plans,
+        '皮套入仓': row.case_stockins,
+        '皮套出仓': row.case_stockouts,
+    }
+    related = {label: cnt for label, cnt in related_counts.items() if cnt}
+    if related:
+        detail = '、'.join(f'{label} {cnt} 条' for label, cnt in related.items())
+        raise ValueError(f"该客户已有相关单据，无法删除！建议禁用该客户。关联明细：{detail}")
 
     await db.delete(customer)
     await db.flush()

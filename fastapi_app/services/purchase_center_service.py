@@ -119,3 +119,47 @@ def _register_order_event_subscriptions():
 
 # 模块加载时注册订阅
 _register_order_event_subscriptions()
+
+
+# ==================== 查询函数（自 purchase_center 路由下沉，纯查询搬移） ====================
+from sqlalchemy import select as _select
+from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
+from sqlalchemy.orm import selectinload as _selectinload
+
+from fastapi_app.shared_models import Order as _SysOrder
+from fastapi_app.shared_models import PurchaseOrder as _PurchaseOrder
+from fastapi_app.shared_models import PurchaseOrderItem as _PurchaseOrderItem
+
+
+async def get_purchase_orders_with_items(db: _AsyncSession, ids: list[int]) -> list[_PurchaseOrder]:
+    """按 ID 列表获取采购订单（预加载明细项）"""
+    result = await db.execute(
+        _select(_PurchaseOrder).where(_PurchaseOrder.id.in_(ids)).options(_selectinload(_PurchaseOrder.items))
+    )
+    return list(result.scalars().unique().all())
+
+
+async def get_purchase_orders_by_source_ids(db: _AsyncSession, source_order_ids: list[int]) -> list[_PurchaseOrder]:
+    """按系统订单来源 ID 列表获取关联采购订单（预加载明细项）"""
+    result = await db.execute(
+        _select(_PurchaseOrder).where(
+            _PurchaseOrder.source_order_id.in_(source_order_ids)
+        ).options(_selectinload(_PurchaseOrder.items))
+    )
+    return list(result.scalars().unique().all())
+
+
+async def get_purchase_order_items_by_order_ids(db: _AsyncSession, order_ids: list[int]) -> list[_PurchaseOrderItem]:
+    """按采购订单 ID 列表获取全部明细项"""
+    result = await db.execute(
+        _select(_PurchaseOrderItem).where(_PurchaseOrderItem.order_id.in_(order_ids))
+    )
+    return list(result.scalars().all())
+
+
+async def get_system_orders_by_ids(db: _AsyncSession, source_order_ids: list[int]) -> list[_SysOrder]:
+    """按 ID 列表获取系统订单（用于打印关联来源订单信息）"""
+    result = await db.execute(
+        _select(_SysOrder).where(_SysOrder.id.in_(source_order_ids))
+    )
+    return list(result.scalars().all())

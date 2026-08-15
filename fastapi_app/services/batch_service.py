@@ -8,6 +8,11 @@
 
 本模块保留 re-export 以保持向后兼容，现有代码无需修改导入路径。
 """
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from fastapi_app.shared_models import Case, Product
+
 # Re-export 以保持向后兼容
 from fastapi_app.services.batch_import_service import (
     cleanup_temp_file,
@@ -40,3 +45,50 @@ __all__ = [
     'read_excel_sheets_async',
     'validate_customer_name',
 ]
+
+
+# ==================== 查询函数（自 batch.py 端点下沉，纯查询搬移） ====================
+# 注意：均接收端点传入的同一 AsyncSession，行锁语义与事务边界保持在端点请求事务内
+
+async def find_case_locked(db: AsyncSession, identifier: str) -> tuple[Case | None, str | None]:
+    """按产品名/条码或皮套名/条码查找皮套并加行锁。
+
+    Returns:
+        (case, None): 成功；
+        (None, error_msg): 未找到或加锁失败。
+    """
+    result = await db.execute(select(Product).where((Product.name == identifier) | (Product.barcode == identifier)))
+    product = result.scalar_one_or_none()
+    case = None
+    if product:
+        result = await db.execute(select(Case).where(Case.product_id == product.id))
+        case = result.scalar_one_or_none()
+    if not case:
+        result = await db.execute(select(Case).where((Case.name == identifier) | (Case.barcode == identifier)))
+        case = result.scalar_one_or_none()
+    if not case:
+        return None, f'皮套 {identifier} 不存在'
+    # 行锁确保并发安全
+    result = await db.execute(select(Case).where(Case.id == case.id).with_for_update())
+    case = result.scalar_one_or_none()
+    if not case:
+        return None, f'皮套 {identifier} 加锁失败'
+    return case, None
+
+
+async def get_all_products(db: AsyncSession) -> list[Product]:
+    """获取全部产品列表（用于构建导入产品映射）"""
+    result = await db.execute(select(Product))
+    return list(result.scalars().all())
+
+
+async def get_product_by_identifier(db: AsyncSession, identifier: str) -> Product | None:
+    """按产品名称或条码精确查找产品"""
+    result = await db.execute(select(Product).where((Product.name == identifier) | (Product.barcode == identifier)))
+    return result.scalar_one_or_none()
+
+
+async def get_product_by_name_ci(db: AsyncSession, name: str) -> Product | None:
+    """按产品名称查找产品（忽略大小写）"""
+    result = await db.execute(select(Product).where(func.lower(Product.name) == func.lower(name)))
+    return result.scalar_one_or_none()

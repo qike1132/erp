@@ -127,6 +127,7 @@ import type { InventoryItem } from '@/types'
 import UiDataTable from '@/components/ui/UiDataTable.vue'
 import type { TableColumn } from '@/components/ui/UiDataTable.vue'
 import { useDebouncedRef } from '@/composables/useDebouncedRef'
+import { useExport } from '@/composables/useExport'
 
 const filters = reactive({ customer: '', product: '', country: '' })
 const debouncedProduct = useDebouncedRef(computed(() => filters.product), 300)
@@ -217,10 +218,11 @@ function onPageChange(event: { page: number; rows: number }) {
   page.value = event.page + 1
   perPage.value = event.rows
 }
-async function handleExport() {
-  try {
-    await stockApi.exportInventory({ customer: filters.customer, product: filters.product })
-  } catch (_e) { /* error handled by interceptor */ }
+// 原实现失败静默（拦截器仅提示 403），统一接入后失败会有 toast 兜底
+const { runExport } = useExport({ start: false, success: false })
+
+function handleExport() {
+  runExport(() => stockApi.exportInventory({ customer: filters.customer, product: filters.product }))
 }
 
 watch(() => [filters.customer, filters.country, debouncedProduct.value], () => {

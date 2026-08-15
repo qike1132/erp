@@ -76,8 +76,9 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, watch } from 'vue'
-import { useQueryClient, useQuery } from '@tanstack/vue-query'
-import { customerApi, stockApi } from '@/api'
+import { useQueryClient } from '@tanstack/vue-query'
+import { stockApi } from '@/api'
+import { useCatalogStore } from '@/stores/catalog'
 import { useCountryStore } from '@/stores/country'
 import type { ShipmentInfo, StagedStockout, Product } from '@/types'
 import { useStockWarning } from './composables/useStockWarning'
@@ -107,17 +108,13 @@ const confirmDialog = useConfirmDialog()
 // === 库存不足弹窗（逻辑抽离至 useStockWarning composable） ===
 const { stockWarningOpen, stockWarningData, checkCountryStock } = useStockWarning()
 
-// === 客户列表 ===
-const { data: namesData } = useQuery({
-  queryKey: ['customer-active-names'],
-  queryFn: async () => { const res = await customerApi.activeNames(); return res ?? [] },
-  staleTime: 30_000,
+// === 客户列表（目录 store 统一缓存，TTL 内跨视图复用） ===
+const catalogStore = useCatalogStore()
+catalogStore.ensureActiveCustomerNames().catch(() => {
+  // 加载失败保持空列表，下次进入视图时重试
 })
-const customerNames = computed(() => {
-  const arr = Array.isArray(namesData.value) ? namesData.value : []
-  return arr.map((entry: unknown) => (typeof entry === 'object' && entry !== null ? (entry as { name?: string }).name : entry))
-})
-const customerOptions = computed(() => customerNames.value.map((name: unknown) => ({ value: String(name), label: String(name) })))
+const customerNames = computed(() => catalogStore.activeCustomerNames.map((c) => c.name))
+const customerOptions = computed(() => customerNames.value.map((name) => ({ value: name, label: name })))
 
 // === 产品搜索 ===
 async function searchProductsForAutocomplete(q: string): Promise<Product[]> {

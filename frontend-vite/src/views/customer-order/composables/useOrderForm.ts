@@ -1,7 +1,6 @@
 import { ref, reactive, computed, watch } from 'vue'
 import { get } from '@/api/request'
-import { customerApi } from '@/api'
-import { useQuery } from '@tanstack/vue-query'
+import { useCatalogStore } from '@/stores/catalog'
 import { useCountryStore } from '@/stores/country'
 import { showToast } from '@/composables/useToast'
 import type { FormState, ProductSuggestion, AvailableStockinItem } from './types'
@@ -12,24 +11,20 @@ const MAX_QUANTITY = 9999999
 
 export function useOrderForm() {
   // ===== Data queries =====
-  const { data: customerData } = useQuery({
-    queryKey: ['customers-active-names'],
-    queryFn: () => customerApi.activeNames() as Promise<any>,
-    staleTime: 30_000,
-    gcTime: 60_000,
+  // 客户下拉选项：目录 store 统一缓存（TTL 内跨视图复用，组件卸载不清空）
+  const catalogStore = useCatalogStore()
+  catalogStore.ensureActiveCustomerNames().catch(() => {
+    // 加载失败保持空列表，下次进入视图时重试
   })
-  const customerList = computed(() => {
-    const raw = customerData.value?.names ?? customerData.value ?? []
-    return raw.map((c: any) => ({ name: c.name ?? c }))
-  })
+  const customerList = computed(() => catalogStore.activeCustomerNames.map((c) => ({ name: c.name })))
   const customerOptions = computed(() => customerList.value.map((c: { name: string }) => ({ value: c.name, label: c.name })))
 
   // ===== Product search (delegated to UiAutocomplete) =====
   async function searchProducts(q: string): Promise<ProductSuggestion[]> {
     if (!q.trim()) return []
     try {
-      const d = await get<any[]>('/aux/product-search', { q })
-      return (Array.isArray(d) ? d : []).map((p: any) => ({ value: p.name, id: p.id, name: p.name, barcode: p.barcode ?? '' }))
+      const d = await get<Array<{ id: number; name: string; barcode?: string | null }>>('/aux/product-search', { q })
+      return (Array.isArray(d) ? d : []).map((p) => ({ value: p.name, id: p.id, name: p.name, barcode: p.barcode ?? '' }))
     } catch {
       return []
     }

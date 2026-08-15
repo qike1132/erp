@@ -14,7 +14,6 @@ from contextlib import asynccontextmanager, suppress
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
-from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +22,10 @@ from fastapi_app.core.deps import require_permission
 from fastapi_app.schemas.batch import BatchImportResult, ComprehensiveImportResult
 from fastapi_app.services.batch_service import (
     calculate_available_shipment_quantity,
+    find_case_locked,
+    get_all_products,
+    get_product_by_identifier,
+    get_product_by_name_ci,
     import_orders_from_data,
     import_products_from_data,
     import_stockins_from_data,
@@ -42,7 +45,6 @@ from fastapi_app.services.numbering import (
 )
 from fastapi_app.shared.stock_concurrency import get_product_for_update
 from fastapi_app.shared_models import (
-    Case,
     CaseInventoryLog,
     CaseStockIn,
     CaseStockOut,
@@ -168,32 +170,6 @@ def _parse_import_row(
     except (ValueError, TypeError):
         return None, qty_invalid_msg
     return str(customer), product.id, qty
-
-
-async def _find_case_locked(db: AsyncSession, identifier: str) -> tuple[Case | None, str | None]:
-    """按产品名/条码或皮套名/条码查找皮套并加行锁。
-
-    Returns:
-        (case, None): 成功；
-        (None, error_msg): 未找到或加锁失败。
-    """
-    result = await db.execute(select(Product).where((Product.name == identifier) | (Product.barcode == identifier)))
-    product = result.scalar_one_or_none()
-    case = None
-    if product:
-        result = await db.execute(select(Case).where(Case.product_id == product.id))
-        case = result.scalar_one_or_none()
-    if not case:
-        result = await db.execute(select(Case).where((Case.name == identifier) | (Case.barcode == identifier)))
-        case = result.scalar_one_or_none()
-    if not case:
-        return None, f'皮套 {identifier} 不存在'
-    # 行锁确保并发安全
-    result = await db.execute(select(Case).where(Case.id == case.id).with_for_update())
-    case = result.scalar_one_or_none()
-    if not case:
-        return None, f'皮套 {identifier} 加锁失败'
-    return case, None
 
 
 def _validate_xlsx_file(file: UploadFile) -> BatchImportResult | None:
@@ -422,8 +398,7 @@ async def batch_import_orders(
         if err:
             return BatchImportResult(success=False, message=err)
         # 构建产品映射，支持按名称（小写）和条码查找
-        result = await db.execute(select(Product))
-        all_products = result.scalars().all()
+        all_products = await get_all_products(db)
         product_map = {prod.name.lower().strip(): prod for prod in all_products}
         product_map.update({prod.barcode: prod for prod in all_products if prod.barcode})
         imported = 0
@@ -431,36 +406,39 @@ async def batch_import_orders(
         errors = []
         for row_data in data_list:
             try:
-                deduct_flag = row_data.get('抵扣备货')
-                note = row_data.get('备注')
-                parsed = _parse_import_row(row_data, product_map, '订单数量', '订单数量无效')
-                if parsed is None:
-                    skipped += 1
-                    continue
-                if parsed[0] is None:
-                    errors.append(parsed[1])
-                    skipped += 1
-                    continue
-                customer, product_id, qty = parsed
-                order_no = await generate_order_number(db)
-                order = Order(
-                    order_no=order_no, customer=customer, order_date=datetime.now(),
-                    product_id=product_id, quantity=qty,
-                    note=str(note).strip() if note else '', status='待备货',
-                )
-                db.add(order)
-                await db.flush()
-                locked_product = await get_product_for_update(db, product_id)
-                log = InventoryLog(
-                    product_id=product_id, change_type='订单', change_quantity=qty,
-                    related_id=order_no, note=f'批量导入订单：{order_no}',
-                )
-                db.add(log)
-                if deduct_flag and str(deduct_flag).strip() == '是':
-                    await process_order_deduction(db, order, product_id, qty, deduct_stock=True, product=locked_product)
+                # savepoint 隔离单行：行内异常仅回滚本行，不影响循环内已成功的行
+                async with db.begin_nested():
+                    deduct_flag = row_data.get('抵扣备货')
+                    note = row_data.get('备注')
+                    parsed = _parse_import_row(row_data, product_map, '订单数量', '订单数量无效')
+                    if parsed is None:
+                        skipped += 1
+                        continue
+                    if parsed[0] is None:
+                        errors.append(parsed[1])
+                        skipped += 1
+                        continue
+                    customer, product_id, qty = parsed
+                    order_no = await generate_order_number(db)
+                    order = Order(
+                        order_no=order_no, customer=customer, order_date=datetime.now(),
+                        product_id=product_id, quantity=qty,
+                        note=str(note).strip() if note else '', status='待备货',
+                    )
+                    db.add(order)
+                    await db.flush()
+                    locked_product = await get_product_for_update(db, product_id)
+                    log = InventoryLog(
+                        product_id=product_id, change_type='订单', change_quantity=qty,
+                        related_id=order_no, note=f'批量导入订单：{order_no}',
+                    )
+                    db.add(log)
+                    if deduct_flag and str(deduct_flag).strip() == '是':
+                        await process_order_deduction(db, order, product_id, qty, deduct_stock=True, product=locked_product)
+                # savepoint 成功提交后才计数，失败行不计入 imported
                 imported += 1
             except (ValueError, TypeError, SQLAlchemyError) as exc:
-                await db.rollback()
+                # savepoint 已自动回滚本行，不再整体 rollback（避免误伤已成功的行）
                 logger.error(f'订单导入 - 行处理失败: {exc}', exc_info=True)
                 errors.append('行处理失败')
                 skipped += 1
@@ -501,52 +479,55 @@ async def batch_import_case_stockouts(
         errors = []
         for row_data in data_list:
             try:
-                product_identifier = row_data.get('产品名称') or row_data.get('产品') or row_data.get('皮套名称') or row_data.get('皮套')
-                quantity = row_data.get('出库数量') or row_data.get('数量')
-                customer = row_data.get('客户名称') or row_data.get('客户')
-                stockout_date_val = row_data.get('时间') or row_data.get('出库时间')
-                note = row_data.get('备注')
-                if not product_identifier or not quantity:
-                    skipped += 1
-                    continue
-                product_identifier = str(product_identifier).strip()
-                customer = str(customer).strip() if customer else ''
-                try:
-                    qty = int(quantity)
-                    if qty <= 0:
-                        errors.append('出库数量必须大于0')
+                # savepoint 隔离单行：行内异常仅回滚本行，不影响循环内已成功的行
+                async with db.begin_nested():
+                    product_identifier = row_data.get('产品名称') or row_data.get('产品') or row_data.get('皮套名称') or row_data.get('皮套')
+                    quantity = row_data.get('出库数量') or row_data.get('数量')
+                    customer = row_data.get('客户名称') or row_data.get('客户')
+                    stockout_date_val = row_data.get('时间') or row_data.get('出库时间')
+                    note = row_data.get('备注')
+                    if not product_identifier or not quantity:
                         skipped += 1
                         continue
-                except ValueError:
-                    errors.append('出库数量必须是整数')
-                    skipped += 1
-                    continue
-                case, case_err = await _find_case_locked(db, product_identifier)
-                if case_err:
-                    errors.append(case_err)
-                    skipped += 1
-                    continue
-                if case.current_stock < qty:
-                    errors.append(f'库存不足，当前库存: {case.current_stock}')
-                    skipped += 1
-                    continue
-                stockout_date = parse_date_value(stockout_date_val) or datetime.now()
-                stockout_no = await generate_case_stockout_number(db)
-                stockout = CaseStockOut(
-                    stockout_no=stockout_no, stockout_date=stockout_date, case_id=case.id,
-                    quantity=qty, customer=customer, note=str(note).strip() if note else '',
-                )
-                db.add(stockout)
-                case.current_stock -= qty
-                log = CaseInventoryLog(
-                    case_id=case.id, change_type='出库', change_quantity=-qty,
-                    related_id=stockout_no, customer=customer,
-                    note=f'批量导入出库：客户{customer}，数量{qty}' if customer else f'批量导入出库：数量{qty}',
-                )
-                db.add(log)
+                    product_identifier = str(product_identifier).strip()
+                    customer = str(customer).strip() if customer else ''
+                    try:
+                        qty = int(quantity)
+                        if qty <= 0:
+                            errors.append('出库数量必须大于0')
+                            skipped += 1
+                            continue
+                    except ValueError:
+                        errors.append('出库数量必须是整数')
+                        skipped += 1
+                        continue
+                    case, case_err = await find_case_locked(db, product_identifier)
+                    if case_err:
+                        errors.append(case_err)
+                        skipped += 1
+                        continue
+                    if case.current_stock < qty:
+                        errors.append(f'库存不足，当前库存: {case.current_stock}')
+                        skipped += 1
+                        continue
+                    stockout_date = parse_date_value(stockout_date_val) or datetime.now()
+                    stockout_no = await generate_case_stockout_number(db)
+                    stockout = CaseStockOut(
+                        stockout_no=stockout_no, stockout_date=stockout_date, case_id=case.id,
+                        quantity=qty, customer=customer, note=str(note).strip() if note else '',
+                    )
+                    db.add(stockout)
+                    case.current_stock -= qty
+                    log = CaseInventoryLog(
+                        case_id=case.id, change_type='出库', change_quantity=-qty,
+                        related_id=stockout_no, customer=customer,
+                        note=f'批量导入出库：客户{customer}，数量{qty}' if customer else f'批量导入出库：数量{qty}',
+                    )
+                    db.add(log)
+                # savepoint 成功提交后才计数，失败行不计入 imported
                 imported += 1
             except (ValueError, TypeError, SQLAlchemyError) as exc:
-                await db.rollback()
+                # savepoint 已自动回滚本行，不再整体 rollback（避免误伤已成功的行）
                 logger.error(f'皮套出库导入 - 行处理失败: {exc}', exc_info=True)
                 errors.append('行处理失败')
                 skipped += 1
@@ -587,48 +568,51 @@ async def batch_import_case_stockins(
         errors = []
         for row_data in data_list:
             try:
-                product_identifier = row_data.get('产品名称') or row_data.get('产品') or row_data.get('皮套名称') or row_data.get('皮套')
-                quantity = row_data.get('入库数量') or row_data.get('数量')
-                customer = row_data.get('客户名称') or row_data.get('客户')
-                stockin_date_val = row_data.get('时间') or row_data.get('入库时间')
-                note = row_data.get('备注')
-                if not product_identifier or not quantity:
-                    skipped += 1
-                    continue
-                product_identifier = str(product_identifier).strip()
-                customer = str(customer).strip() if customer else ''
-                try:
-                    qty = int(quantity)
-                    if qty <= 0:
-                        errors.append('入库数量必须大于0')
+                # savepoint 隔离单行：行内异常仅回滚本行，不影响循环内已成功的行
+                async with db.begin_nested():
+                    product_identifier = row_data.get('产品名称') or row_data.get('产品') or row_data.get('皮套名称') or row_data.get('皮套')
+                    quantity = row_data.get('入库数量') or row_data.get('数量')
+                    customer = row_data.get('客户名称') or row_data.get('客户')
+                    stockin_date_val = row_data.get('时间') or row_data.get('入库时间')
+                    note = row_data.get('备注')
+                    if not product_identifier or not quantity:
                         skipped += 1
                         continue
-                except ValueError:
-                    errors.append('入库数量必须是整数')
-                    skipped += 1
-                    continue
-                case, case_err = await _find_case_locked(db, product_identifier)
-                if case_err:
-                    errors.append(case_err)
-                    skipped += 1
-                    continue
-                stockin_date = parse_date_value(stockin_date_val) or datetime.now()
-                stockin_no = await generate_case_stockin_number(db)
-                stockin = CaseStockIn(
-                    stockin_no=stockin_no, stockin_date=stockin_date, case_id=case.id,
-                    quantity=qty, customer=customer, note=str(note).strip() if note else '',
-                )
-                db.add(stockin)
-                case.current_stock += qty
-                log = CaseInventoryLog(
-                    case_id=case.id, change_type='入库', change_quantity=qty,
-                    related_id=stockin_no, customer=customer,
-                    note=f'批量导入入库：客户{customer}，数量{qty}' if customer else f'批量导入入库：数量{qty}',
-                )
-                db.add(log)
+                    product_identifier = str(product_identifier).strip()
+                    customer = str(customer).strip() if customer else ''
+                    try:
+                        qty = int(quantity)
+                        if qty <= 0:
+                            errors.append('入库数量必须大于0')
+                            skipped += 1
+                            continue
+                    except ValueError:
+                        errors.append('入库数量必须是整数')
+                        skipped += 1
+                        continue
+                    case, case_err = await find_case_locked(db, product_identifier)
+                    if case_err:
+                        errors.append(case_err)
+                        skipped += 1
+                        continue
+                    stockin_date = parse_date_value(stockin_date_val) or datetime.now()
+                    stockin_no = await generate_case_stockin_number(db)
+                    stockin = CaseStockIn(
+                        stockin_no=stockin_no, stockin_date=stockin_date, case_id=case.id,
+                        quantity=qty, customer=customer, note=str(note).strip() if note else '',
+                    )
+                    db.add(stockin)
+                    case.current_stock += qty
+                    log = CaseInventoryLog(
+                        case_id=case.id, change_type='入库', change_quantity=qty,
+                        related_id=stockin_no, customer=customer,
+                        note=f'批量导入入库：客户{customer}，数量{qty}' if customer else f'批量导入入库：数量{qty}',
+                    )
+                    db.add(log)
+                # savepoint 成功提交后才计数，失败行不计入 imported
                 imported += 1
             except (ValueError, TypeError, SQLAlchemyError) as exc:
-                await db.rollback()
+                # savepoint 已自动回滚本行，不再整体 rollback（避免误伤已成功的行）
                 logger.error(f'皮套入库导入 - 行处理失败: {exc}', exc_info=True)
                 errors.append('行处理失败')
                 skipped += 1
@@ -665,8 +649,7 @@ async def batch_import_stockins(
         if err:
             return BatchImportResult(success=False, message=err)
         # 构建产品映射，支持按名称（小写）和条码查找
-        result = await db.execute(select(Product))
-        all_products = result.scalars().all()
+        all_products = await get_all_products(db)
         product_map = {prod.name.lower().strip(): prod for prod in all_products}
         product_map.update({prod.barcode: prod for prod in all_products if prod.barcode})
         imported = 0
@@ -674,34 +657,37 @@ async def batch_import_stockins(
         errors = []
         for row_data in data_list:
             try:
-                stockin_date_val = row_data.get('时间') or row_data.get('备货时间')
-                note = row_data.get('备注')
-                parsed = _parse_import_row(row_data, product_map, '备货数量', '备货数量无效')
-                if parsed is None:
-                    skipped += 1
-                    continue
-                if parsed[0] is None:
-                    errors.append(parsed[1])
-                    skipped += 1
-                    continue
-                customer, product_id, qty = parsed
-                stockin_date = parse_date_value(stockin_date_val) or datetime.now()
-                stockin_no = await generate_stockin_number(db)
-                stockin = StockIn(
-                    stockin_no=stockin_no, stockin_date=stockin_date, customer=customer,
-                    product_id=product_id, quantity=qty, note=str(note).strip() if note else '',
-                )
-                db.add(stockin)
-                locked_product = await get_product_for_update(db, product_id)
-                locked_product.current_stock += qty
-                log = InventoryLog(
-                    product_id=product_id, change_type='备货', change_quantity=qty,
-                    related_id=stockin_no, note=f'批量导入备货：{stockin_no}',
-                )
-                db.add(log)
+                # savepoint 隔离单行：行内异常仅回滚本行，不影响循环内已成功的行
+                async with db.begin_nested():
+                    stockin_date_val = row_data.get('时间') or row_data.get('备货时间')
+                    note = row_data.get('备注')
+                    parsed = _parse_import_row(row_data, product_map, '备货数量', '备货数量无效')
+                    if parsed is None:
+                        skipped += 1
+                        continue
+                    if parsed[0] is None:
+                        errors.append(parsed[1])
+                        skipped += 1
+                        continue
+                    customer, product_id, qty = parsed
+                    stockin_date = parse_date_value(stockin_date_val) or datetime.now()
+                    stockin_no = await generate_stockin_number(db)
+                    stockin = StockIn(
+                        stockin_no=stockin_no, stockin_date=stockin_date, customer=customer,
+                        product_id=product_id, quantity=qty, note=str(note).strip() if note else '',
+                    )
+                    db.add(stockin)
+                    locked_product = await get_product_for_update(db, product_id)
+                    locked_product.current_stock += qty
+                    log = InventoryLog(
+                        product_id=product_id, change_type='备货', change_quantity=qty,
+                        related_id=stockin_no, note=f'批量导入备货：{stockin_no}',
+                    )
+                    db.add(log)
+                # savepoint 成功提交后才计数，失败行不计入 imported
                 imported += 1
             except (ValueError, TypeError, SQLAlchemyError) as exc:
-                await db.rollback()
+                # savepoint 已自动回滚本行，不再整体 rollback（避免误伤已成功的行）
                 logger.error(f'备货导入 - 行处理失败: {exc}', exc_info=True)
                 errors.append('行处理失败')
                 skipped += 1
@@ -742,68 +728,70 @@ async def batch_import_stockouts(
         errors = []
         for row_data in data_list:
             try:
-                product_identifier = row_data.get('产品名称') or row_data.get('产品')
-                quantity = row_data.get('出货数量') or row_data.get('数量')
-                customer = row_data.get('客户名称') or row_data.get('客户')
-                stockout_date_val = row_data.get('时间') or row_data.get('出货时间')
-                note = row_data.get('备注')
-                country_val = row_data.get('国家') or row_data.get('国家名称')
-                country_parsed = _parse_country_value(country_val)
-                order_type_parsed = 'custom' if country_parsed else 'regular'
-                if not product_identifier or not quantity:
-                    skipped += 1
-                    continue
-                product_identifier = str(product_identifier).strip()
-                customer = str(customer).strip() if customer else ''
-                if not customer:
-                    errors.append('出货必须选择客户')
-                    skipped += 1
-                    continue
-                result = await db.execute(select(Product).where((Product.name == product_identifier) | (Product.barcode == product_identifier)))
-                product = result.scalar_one_or_none()
-                if not product:
-                    errors.append(f'产品 {product_identifier} 不存在')
-                    skipped += 1
-                    continue
-                product = await get_product_for_update(db, product.id)
-                try:
-                    qty = int(quantity)
-                    if qty <= 0:
-                        errors.append('出库数量必须大于0')
+                # savepoint 隔离单行：行内异常仅回滚本行，不影响循环内已成功的行
+                async with db.begin_nested():
+                    product_identifier = row_data.get('产品名称') or row_data.get('产品')
+                    quantity = row_data.get('出货数量') or row_data.get('数量')
+                    customer = row_data.get('客户名称') or row_data.get('客户')
+                    stockout_date_val = row_data.get('时间') or row_data.get('出货时间')
+                    note = row_data.get('备注')
+                    country_val = row_data.get('国家') or row_data.get('国家名称')
+                    country_parsed = _parse_country_value(country_val)
+                    order_type_parsed = 'custom' if country_parsed else 'regular'
+                    if not product_identifier or not quantity:
                         skipped += 1
                         continue
-                except ValueError:
-                    errors.append('出库数量必须是整数')
-                    skipped += 1
-                    continue
-                if product.current_stock < qty:
-                    errors.append(f'库存不足，当前库存: {product.current_stock}')
-                    skipped += 1
-                    continue
-                # 校验可出货量（基于订单支持）
-                shipment_info = await calculate_available_shipment_quantity(
-                    db, product.id, customer, order_type=order_type_parsed, country=country_parsed or None,
-                )
-                if shipment_info['available_quantity'] <= 0:
-                    errors.append(f'客户{customer}没有可用的订单支持出货')
-                    skipped += 1
-                    continue
-                if qty > shipment_info['available_quantity']:
-                    errors.append(f"出货数量{qty}超过可出货量{shipment_info['available_quantity']}")
-                    skipped += 1
-                    continue
-                stockout_date = parse_date_value(stockout_date_val) or datetime.now()
-                # 按订单可用量分配出货，直到出货数量耗尽
-                await _allocate_stockout_to_orders(db, product, qty, customer, stockout_date, note, shipment_info)
-                product.current_stock -= qty
-                log = InventoryLog(
-                    product_id=product.id, change_type='出库', change_quantity=-qty,
-                    related_id='', note=f'批量导入出库：客户{customer}，数量{qty}',
-                )
-                db.add(log)
+                    product_identifier = str(product_identifier).strip()
+                    customer = str(customer).strip() if customer else ''
+                    if not customer:
+                        errors.append('出货必须选择客户')
+                        skipped += 1
+                        continue
+                    product = await get_product_by_identifier(db, product_identifier)
+                    if not product:
+                        errors.append(f'产品 {product_identifier} 不存在')
+                        skipped += 1
+                        continue
+                    product = await get_product_for_update(db, product.id)
+                    try:
+                        qty = int(quantity)
+                        if qty <= 0:
+                            errors.append('出库数量必须大于0')
+                            skipped += 1
+                            continue
+                    except ValueError:
+                        errors.append('出库数量必须是整数')
+                        skipped += 1
+                        continue
+                    if product.current_stock < qty:
+                        errors.append(f'库存不足，当前库存: {product.current_stock}')
+                        skipped += 1
+                        continue
+                    # 校验可出货量（基于订单支持）
+                    shipment_info = await calculate_available_shipment_quantity(
+                        db, product.id, customer, order_type=order_type_parsed, country=country_parsed or None,
+                    )
+                    if shipment_info['available_quantity'] <= 0:
+                        errors.append(f'客户{customer}没有可用的订单支持出货')
+                        skipped += 1
+                        continue
+                    if qty > shipment_info['available_quantity']:
+                        errors.append(f"出货数量{qty}超过可出货量{shipment_info['available_quantity']}")
+                        skipped += 1
+                        continue
+                    stockout_date = parse_date_value(stockout_date_val) or datetime.now()
+                    # 按订单可用量分配出货，直到出货数量耗尽
+                    await _allocate_stockout_to_orders(db, product, qty, customer, stockout_date, note, shipment_info)
+                    product.current_stock -= qty
+                    log = InventoryLog(
+                        product_id=product.id, change_type='出库', change_quantity=-qty,
+                        related_id='', note=f'批量导入出库：客户{customer}，数量{qty}',
+                    )
+                    db.add(log)
+                # savepoint 成功提交后才计数，失败行不计入 imported
                 imported += 1
             except (ValueError, TypeError, SQLAlchemyError) as exc:
-                await db.rollback()
+                # savepoint 已自动回滚本行，不再整体 rollback（避免误伤已成功的行）
                 logger.error(f'出库导入 - 行处理失败: {exc}', exc_info=True)
                 errors.append('行处理失败')
                 skipped += 1
@@ -844,36 +832,38 @@ async def batch_import_products(
         errors = []
         for row_data in data_list:
             try:
-                name = row_data.get('产品名称') or row_data.get('名称')
-                barcode = row_data.get('69码') or row_data.get('条码')
-                price = row_data.get('产品价格') or row_data.get('价格')
-                initial_stock = row_data.get('初始库存') or 0
-                if not name:
-                    skipped += 1
-                    continue
-                name = str(name).strip()
-                # 检查产品是否已存在（按名称忽略大小写）
-                result = await db.execute(select(Product).where(func.lower(Product.name) == func.lower(name)))
-                existing = result.scalar_one_or_none()
-                if existing:
-                    skipped += 1
-                    continue
-                try:
-                    stock = int(initial_stock) if initial_stock else 0
-                except ValueError:
-                    stock = 0
-                try:
-                    price_val = float(price) if price else 0
-                except (ValueError, TypeError):
-                    price_val = 0
-                product = Product(
-                    name=name, barcode=str(barcode).strip() if barcode else '',
-                    price=price_val, initial_stock=stock, current_stock=stock,
-                )
-                db.add(product)
+                # savepoint 隔离单行：行内异常仅回滚本行，不影响循环内已成功的行
+                async with db.begin_nested():
+                    name = row_data.get('产品名称') or row_data.get('名称')
+                    barcode = row_data.get('69码') or row_data.get('条码')
+                    price = row_data.get('产品价格') or row_data.get('价格')
+                    initial_stock = row_data.get('初始库存') or 0
+                    if not name:
+                        skipped += 1
+                        continue
+                    name = str(name).strip()
+                    # 检查产品是否已存在（按名称忽略大小写）
+                    existing = await get_product_by_name_ci(db, name)
+                    if existing:
+                        skipped += 1
+                        continue
+                    try:
+                        stock = int(initial_stock) if initial_stock else 0
+                    except ValueError:
+                        stock = 0
+                    try:
+                        price_val = float(price) if price else 0
+                    except (ValueError, TypeError):
+                        price_val = 0
+                    product = Product(
+                        name=name, barcode=str(barcode).strip() if barcode else '',
+                        price=price_val, initial_stock=stock, current_stock=stock,
+                    )
+                    db.add(product)
+                # savepoint 成功提交后才计数，失败行不计入 imported
                 imported += 1
             except (ValueError, TypeError, SQLAlchemyError) as exc:
-                await db.rollback()
+                # savepoint 已自动回滚本行，不再整体 rollback（避免误伤已成功的行）
                 logger.error(f'产品导入 - 行处理失败: {exc}', exc_info=True)
                 errors.append('行处理失败')
                 skipped += 1

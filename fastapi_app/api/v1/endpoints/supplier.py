@@ -8,6 +8,7 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,7 +25,7 @@ from fastapi_app.schemas.supplier import (
     SupplierUpdate,
 )
 from fastapi_app.services import purchase_supplier_service
-from fastapi_app.shared_models import Supplier, User
+from fastapi_app.shared_models import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -276,7 +277,8 @@ async def toggle_status(
         HTTPException 404: 供应商不存在。
         HTTPException 500: 数据库操作异常。
     """
-    supplier = await db.get(Supplier, supplier_id)
+    # SELECT ... FOR UPDATE 取行锁后再修改状态，防止并发 toggle 互相覆盖（锁逻辑下沉在 service 层）
+    supplier = await purchase_supplier_service.get_supplier_for_update(db, supplier_id)
     if not supplier:
         raise HTTPException(status_code=404, detail='供应商不存在')
     # status 字段可为 None（旧数据），用 bool() 规范化后取反

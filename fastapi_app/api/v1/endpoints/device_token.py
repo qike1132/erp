@@ -4,12 +4,16 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db
 from fastapi_app.core.deps import get_current_user_id
 from fastapi_app.core.exceptions import db_transaction
+from fastapi_app.services.notification_service import (
+    deactivate_device_token,
+    deactivate_device_tokens_by_platform,
+    get_device_token_by_token,
+)
 from fastapi_app.shared_models.device_token import DeviceToken
 
 logger = logging.getLogger(__name__)
@@ -34,10 +38,7 @@ async def register_device(
 ):
     """注册或更新设备 FCM 令牌（upsert）"""
     async with db_transaction(db):
-        result = await db.execute(
-            select(DeviceToken).where(DeviceToken.token == req.token)
-        )
-        existing = result.scalar_one_or_none()
+        existing = await get_device_token_by_token(db, req.token)
 
         if existing:
             if existing.user_id != user_id:
@@ -46,11 +47,7 @@ async def register_device(
             existing.platform = req.platform
             existing.updated_at = datetime.now()
         else:
-            await db.execute(
-                update(DeviceToken)
-                .where(DeviceToken.user_id == user_id, DeviceToken.platform == req.platform)
-                .values(is_active=False, updated_at=datetime.now())
-            )
+            await deactivate_device_tokens_by_platform(db, user_id, req.platform)
             db.add(DeviceToken(
                 user_id=user_id,
                 token=req.token,
@@ -70,10 +67,6 @@ async def unregister_device(
 ):
     """注销设备 FCM 令牌"""
     async with db_transaction(db):
-        await db.execute(
-            update(DeviceToken)
-            .where(DeviceToken.token == token, DeviceToken.user_id == user_id)
-            .values(is_active=False, updated_at=datetime.now())
-        )
+        await deactivate_device_token(db, token, user_id)
     logger.info("设备令牌已注销: user_id=%s", user_id)
     return DeviceTokenResponse(success=True, message="设备令牌已注销")

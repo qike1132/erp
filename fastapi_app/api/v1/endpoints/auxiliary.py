@@ -3,18 +3,28 @@ import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
 
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.core.exceptions import db_transaction
-from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.schemas.order import OrderItemSchema
-from fastapi_app.shared_models import InventoryLog, Product, StockIn, User
+from fastapi_app.services.auxiliary_service import (
+    count_inventory_logs,
+    get_available_stockins,
+    get_country_by_id,
+    get_country_by_name,
+    get_inventory_logs_page,
+    get_product_by_id,
+    get_stockin_by_id,
+    get_supplier_by_id,
+    list_countries_ordered,
+    search_products_by_keyword,
+    supplier_has_bom_or_orders,
+)
+from fastapi_app.shared_models import User
 from fastapi_app.shared_models.country import Country
 
 class HealthCheckResponse(BaseModel):
@@ -162,12 +172,7 @@ async def product_search(
         return []
 
     query_str = q.strip()
-    result = await db.execute(
-        select(Product).where(
-            or_(Product.name.like(f'%{escape_like(query_str)}%'), Product.barcode.like(f'%{escape_like(query_str)}%'))
-        ).limit(50)
-    )
-    products = list(result.scalars().all())
+    products = await search_products_by_keyword(db, query_str)
 
     return [{
         'id': p.id, 'name': p.name, 'barcode': p.barcode,
@@ -183,7 +188,7 @@ async def product_available_stock(
     db: AsyncSession = Depends(get_async_read_db),
 ):
     """获取产品可用库存"""
-    product = await db.get(Product, product_id)
+    product = await get_product_by_id(db, product_id)
     if not product:
         raise HTTPException(status_code=404, detail="产品不存在")
 
@@ -204,17 +209,8 @@ async def get_inventory_logs(
     db: AsyncSession = Depends(get_async_read_db),
 ):
     """获取产品库存日志（分页）"""
-    from sqlalchemy import func
-    count_result = await db.execute(
-        select(func.count(InventoryLog.id)).where(InventoryLog.product_id == product_id)
-    )
-    total = count_result.scalar() or 0
-    result = await db.execute(
-        select(InventoryLog).where(InventoryLog.product_id == product_id)
-        .order_by(InventoryLog.change_date.desc())
-        .offset((page - 1) * per_page).limit(per_page)
-    )
-    logs = list(result.scalars().all())
+    total = await count_inventory_logs(db, product_id)
+    logs = await get_inventory_logs_page(db, product_id, page, per_page)
 
     return {
         'items': [{
@@ -237,18 +233,7 @@ async def available_stockins(
     db: AsyncSession = Depends(get_async_read_db),
 ):
     """获取可用入库记录（限制返回数量）"""
-    query = select(StockIn).options(
-        joinedload(StockIn.stockin_stockouts), joinedload(StockIn.product)
-    )
-
-    if product_id:
-        query = query.where(StockIn.product_id == product_id)
-    if customer:
-        query = query.where(StockIn.customer == customer)
-
-    query = query.order_by(StockIn.stockin_date.asc()).limit(limit)
-    result = await db.execute(query)
-    stockins = list(result.unique().scalars().all())
+    stockins = await get_available_stockins(db, product_id, customer, limit)
 
     return [{
         'id': s.id, 'product_id': s.product_id,
@@ -266,7 +251,7 @@ async def stockin_info(
     db: AsyncSession = Depends(get_async_read_db),
 ):
     """获取入库信息详情"""
-    stockin = await db.get(StockIn, stockin_id)
+    stockin = await get_stockin_by_id(db, stockin_id)
     if not stockin:
         raise HTTPException(status_code=404, detail="入库记录不存在")
 
@@ -358,29 +343,13 @@ async def delete_supplier_api(
     db: AsyncSession = Depends(get_async_db),
 ):
     """删除供应商（API方式）"""
-    from sqlalchemy import select
-
-    from fastapi_app.shared_models import (
-        ProductAccessory,
-        ProductFabric,
-        ProductMaterial,
-        PurchaseOrder,
-        Supplier,
-    )
     try:
         async with db_transaction(db):
-            supplier = (await db.execute(select(Supplier).where(Supplier.id == id))).scalar_one_or_none()
+            supplier = await get_supplier_by_id(db, id)
             if not supplier:
                 raise HTTPException(status_code=404, detail="供应商不存在")
 
-            has_bom = (
-                (await db.execute(select(ProductMaterial.id).where(ProductMaterial.supplier_id == id).limit(1))).scalar() or
-                (await db.execute(select(ProductFabric.id).where(ProductFabric.supplier_id == id).limit(1))).scalar() or
-                (await db.execute(select(ProductAccessory.id).where(ProductAccessory.supplier_id == id).limit(1))).scalar()
-            )
-            has_orders = (await db.execute(select(PurchaseOrder.id).where(PurchaseOrder.supplier_id == id).limit(1))).scalar()
-
-            if has_bom or has_orders:
+            if await supplier_has_bom_or_orders(db, id):
                 raise HTTPException(status_code=400, detail="该供应商已有相关BOM或采购订单数据，无法删除")
 
             await db.delete(supplier)
@@ -509,8 +478,7 @@ async def list_countries(
     user: User = Depends(require_permission("order_manage")),
     db: AsyncSession = Depends(get_async_read_db),
 ):
-    result = await db.execute(select(Country).order_by(Country.name))
-    countries = result.scalars().all()
+    countries = await list_countries_ordered(db)
     return [{'id': c.id, 'name': c.name} for c in countries]
 
 @router.post("/countries", response_model=CountryResponse)
@@ -522,8 +490,7 @@ async def create_country(
     name = data.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="国家名称不能为空")
-    existing = await db.execute(select(Country).where(Country.name == name))
-    if existing.scalar_one_or_none():
+    if await get_country_by_name(db, name):
         raise HTTPException(status_code=409, detail="该国家已存在")
     country = Country(name=name)
     db.add(country)
@@ -537,8 +504,7 @@ async def delete_country(
     user: User = Depends(require_permission("order_manage")),
     db: AsyncSession = Depends(get_async_db),
 ):
-    result = await db.execute(select(Country).where(Country.id == country_id))
-    country = result.scalar_one_or_none()
+    country = await get_country_by_id(db, country_id)
     if not country:
         raise HTTPException(status_code=404, detail="国家不存在")
     await db.delete(country)

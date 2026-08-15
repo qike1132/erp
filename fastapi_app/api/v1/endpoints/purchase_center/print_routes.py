@@ -9,10 +9,8 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
 from sqlalchemy.exc import DisconnectionError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from fastapi_app.api.v1.endpoints.purchase_center.export_utils import (
     create_supplier_workbook,
@@ -34,36 +32,20 @@ async def api_summary_print(data: SummaryPrintRequest, db: AsyncSession=Depends(
     ids = data.ids
     format_type = data.format
     try:
-        from fastapi_app.shared_models import PurchaseOrder, PurchaseOrderItem
-
-        result = await db.execute(
-            select(PurchaseOrder).where(PurchaseOrder.id.in_(ids)).options(selectinload(PurchaseOrder.items))
-        )
-        orders = result.scalars().unique().all()
+        orders = await svc.get_purchase_orders_with_items(db, ids)
 
         if format_type in ['factory', 'supplier']:
             source_order_ids = list({o.source_order_id for o in orders if o.source_order_id})
             if source_order_ids:
-                related_result = await db.execute(
-                    select(PurchaseOrder).where(
-                        PurchaseOrder.source_order_id.in_(source_order_ids)
-                    ).options(selectinload(PurchaseOrder.items))
-                )
-                related = related_result.scalars().unique().all()
+                related = await svc.get_purchase_orders_by_source_ids(db, source_order_ids)
                 all_order_ids = list(set(ids) | {o.id for o in related})
             else:
                 all_order_ids = list(ids)
             if len(all_order_ids) != len(ids):
-                result2 = await db.execute(
-                    select(PurchaseOrder).where(PurchaseOrder.id.in_(all_order_ids)).options(selectinload(PurchaseOrder.items))
-                )
-                orders = result2.scalars().unique().all()
+                orders = await svc.get_purchase_orders_with_items(db, all_order_ids)
                 ids = all_order_ids
 
-        items_result = await db.execute(
-            select(PurchaseOrderItem).where(PurchaseOrderItem.order_id.in_(ids))
-        )
-        items = items_result.scalars().all()
+        items = await svc.get_purchase_order_items_by_order_ids(db, ids)
         order_items_map = {}
         for item in items:
             order_items_map.setdefault(item.order_id, []).append(item)
@@ -72,11 +54,7 @@ async def api_summary_print(data: SummaryPrintRequest, db: AsyncSession=Depends(
             source_order_ids = [o.source_order_id for o in orders if o.source_order_id]
             source_orders = None
             if source_order_ids:
-                from fastapi_app.shared_models import Order as SysOrder
-                src_result = await db.execute(
-                    select(SysOrder).where(SysOrder.id.in_(source_order_ids))
-                )
-                source_orders = src_result.scalars().all()
+                source_orders = await svc.get_system_orders_by_ids(db, source_order_ids)
             html = generate_factory_summary_print(orders, order_items_map, source_orders)
             return {'success': True, 'html': html, 'order_count': len(orders)}
         elif format_type == 'supplier':

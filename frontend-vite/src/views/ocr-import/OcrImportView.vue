@@ -51,9 +51,18 @@ import { getErrorMessage } from '@/types/errors'
 
 type UploadOptions = { file: File; onProgress?: (e: { percent: number }) => void }
 
+/** /ocr-import/progress 轮询响应 */
+interface OcrProgressResult {
+  progress: number
+  status: string
+  percentage?: number
+  success_count?: number
+  errors?: string[]
+}
+
 const taskId = ref('')
 const progress = ref(0)
-const ocrResult = ref<any>(null)
+const ocrResult = ref<OcrProgressResult | null>(null)
 
 const progressStatus = ref<'' | 'success' | 'exception' | 'warning'>('')
 const progressText = ref('处理中…')
@@ -80,7 +89,7 @@ const { data: progressData } = useQuery({
   queryKey: ['ocr-progress', taskId],
   queryFn: async () => {
     if (!taskId.value) return null
-    const res = (await ocrApi.progress(taskId.value)) as { progress: number; status: string; percentage?: number; success_count?: number; errors?: string[] }
+    const res = (await ocrApi.progress(taskId.value)) as OcrProgressResult
     progress.value = res.percentage ?? 0
     if (res.status === 'completed') {
       progressStatus.value = 'success'

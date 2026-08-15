@@ -149,6 +149,12 @@ class Settings(BaseSettings):
         # 生产环境安全配置强校验：防止运维漏配导致安全控制失效
         _is_production = os.getenv("APP_ENV") == "production"
         if _is_production:
+            # SECRET_KEY 必须为高强度密钥（长度 >= 32 字符），防止弱密钥被暴力破解后伪造 JWT
+            if len(self.SECRET_KEY) < 32:
+                raise RuntimeError(
+                    "生产环境 SECRET_KEY 长度不足 32 字符，"
+                    "请使用高强度随机密钥（如 openssl rand -hex 32 生成后注入）"
+                )
             # ALLOWED_HOSTS 不得包含通配符，否则 TrustedHostMiddleware 形同虚设
             if "*" in self.ALLOWED_HOSTS or not any(h.strip() for h in self.ALLOWED_HOSTS):
                 raise RuntimeError(

@@ -72,7 +72,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Ref } from 'vue'
+import type { ComponentPublicInstance, Ref } from 'vue'
 import UiDataTable from '@/components/ui/UiDataTable.vue'
 import type { TableColumn } from '@/components/ui/UiDataTable.vue'
 import type { DailySummary } from '@/types'
@@ -85,7 +85,7 @@ defineProps<{
   formatCurrency: (v: number) => string
   formatMoney: (v: number) => string
   deptIcon: (d: string) => string
-  setChartRef: (el: any) => void
+  setChartRef: (el: Element | ComponentPublicInstance | null) => void
 }>()
 </script>
 

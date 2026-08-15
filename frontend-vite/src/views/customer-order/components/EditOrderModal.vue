@@ -43,9 +43,9 @@
         </div>
       </div>
 
-      <div v-if="detailData.items?.length > 1" class="oe-section">
+      <div v-if="(detailData.items?.length ?? 0) > 1" class="oe-section">
         <div class="oe-section-title">
-          <FontAwesomeIcon icon="list-ul" aria-hidden="true" /> 订单明细（{{ detailData.items.length }} 个 SKU）
+          <FontAwesomeIcon icon="list-ul" aria-hidden="true" /> 订单明细（{{ detailData.items?.length ?? 0 }} 个 SKU）
         </div>
         <table class="oe-sku-table">
           <thead>
@@ -125,6 +125,7 @@
 import { computed } from 'vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiButton from '@/components/ui/UiButton.vue'
+import type { OrderDetailData } from '../composables/types'
 
 interface EditFormState {
   quantity: number
@@ -134,9 +135,9 @@ interface EditFormState {
 
 const props = defineProps<{
   open: boolean
-  // 详情数据由 useOrderActions 返回，API 实际包含 batch_no / items 等字段，
-  // 与 OrderRecord 类型不完全匹配；原主视图直接访问，此处保持一致。
-  detailData: any
+  // 详情数据由 useOrderActions 返回，API 实际包含 batch_no / items 等扩展字段，
+  // 类型见 composables/types.ts 的 OrderDetailData。
+  detailData: OrderDetailData | null
   editForm: EditFormState
   availableStockin: number
   saving: boolean

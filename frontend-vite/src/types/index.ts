@@ -412,6 +412,9 @@ export interface MonthlySummary {
   monthly_departments: DepartmentSummary[]
   monthly_total_quantity: number
   monthly_total_value: number
+  /** 历史兼容字段：后端实际不返回（月报面板模板仍按可选字段访问，undefined 时由 ?? 0 兜底） */
+  overall_quantity?: number
+  overall_value?: number
 }
 
 export interface MaterialRegistration {

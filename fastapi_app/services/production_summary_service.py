@@ -20,6 +20,9 @@ from fastapi_app.utils import parse_date_with_fallback
 
 logger = logging.getLogger(__name__)
 
+# 导出最大行数（仿 report_data_service），防止 openpyxl 全量内存构建导致 OOM
+_MAX_EXPORT_ROWS = 10000
+
 def _last_day_of_month(year: int, month: int) -> date:
     return date(year, month, calendar.monthrange(year, month)[1])
 
@@ -260,8 +263,13 @@ async def export_packaging_records(db: AsyncSession, start_date: str='', end_dat
     query = select(PackagingRecord).order_by(PackagingRecord.pack_date, PackagingRecord.id)
     if conditions:
         query = query.where(*conditions)
+    # 多取 1 条用于判断是否截断，避免全量加载后内存切片
+    query = query.limit(_MAX_EXPORT_ROWS + 1)
     result = await db.execute(query)
     records = list(result.scalars().all())
+    if len(records) > _MAX_EXPORT_ROWS:
+        logger.warning('包装部数据导出超过最大行数 %d，已截断', _MAX_EXPORT_ROWS)
+        records = records[:_MAX_EXPORT_ROWS]
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = '包装部生产数据'

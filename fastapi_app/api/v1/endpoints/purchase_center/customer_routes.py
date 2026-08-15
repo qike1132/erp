@@ -8,7 +8,6 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
 from sqlalchemy.exc import DisconnectionError, OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -87,14 +86,8 @@ async def api_sync_customers(
     Raises:
         HTTPException 500: 数据库操作异常。
     """
-    from fastapi_app.shared_models import Customer
-
     try:
-        query = select(Customer)
-        if data.customer_ids:
-            query = query.where(Customer.id.in_(data.customer_ids))
-        result = await db.execute(query)
-        customers = result.scalars().all()
+        customers = await svc.get_customers_for_sync(db, data.customer_ids)
     except (OperationalError, DisconnectionError, SQLAlchemyError) as e:
         logger.exception('同步客户数据失败')
         raise HTTPException(status_code=500, detail='操作失败，请稍后重试') from e

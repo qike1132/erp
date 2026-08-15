@@ -16,6 +16,10 @@ export default defineConfig(({ mode }) => {
     define: {
       __CAPACITOR_BUILD__: JSON.stringify(isCapacitor),
     },
+    // 生产构建移除 console.* 调用与 debugger 语句（已确认无依赖 console 副作用的代码）
+    esbuild: {
+      drop: mode === 'production' ? ['console', 'debugger'] : [],
+    },
     plugins: [
       vue(),
       tailwindcss(),

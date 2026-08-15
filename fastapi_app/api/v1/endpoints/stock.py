@@ -13,7 +13,6 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache import cache_result
@@ -31,7 +30,7 @@ from fastapi_app.schemas.stock import (
     StockOutUpdate,
 )
 from fastapi_app.services import stock_service
-from fastapi_app.shared_models import Order, StockIn, StockOut, User
+from fastapi_app.shared_models import StockIn, StockOut, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -420,28 +419,7 @@ class StockStatsResponse(BaseModel):
               key_builder=lambda *args, **kwargs: "global")
 async def _fetch_stock_stats(db: AsyncSession) -> dict:
     """库存统计数据（60s 缓存）：3 个全量聚合查询，数据变更频率低。"""
-    # TODO(multi-sku-order): 此处按 Order.order_type 分组 sum(Order.quantity) 在多 SKU 下结果错误
-    # （order_type 为首 item 兼容值，quantity 为 sum of items），属 A 类统计待改造为 JOIN OrderItem。
-    order_regular = int((await db.execute(
-        select(func.coalesce(func.sum(Order.quantity), 0)).where(
-            and_(Order.order_type == 'regular', Order.is_deleted.isnot(True)))
-    )).scalar() or 0)
-
-    order_custom = int((await db.execute(
-        select(func.coalesce(func.sum(Order.quantity), 0)).where(
-            and_(Order.order_type == 'custom', Order.is_deleted.isnot(True)))
-    )).scalar() or 0)
-
-    stockin_quantity = int((await db.execute(
-        select(func.coalesce(func.sum(StockIn.quantity), 0))
-    )).scalar() or 0)
-
-    return {
-        'order_quantity': order_regular + order_custom,
-        'order_regular_quantity': order_regular,
-        'order_custom_quantity': order_custom,
-        'stockin_quantity': stockin_quantity,
-    }
+    return await stock_service.get_stock_overview_stats(db)
 
 
 @router.get('/stats', response_model=StockStatsResponse)

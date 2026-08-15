@@ -14,10 +14,11 @@ import logging
 from datetime import datetime, timezone
 from typing import Literal
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.shared_models import AuditLog, Notification, Order, OrderItem, Product, User
+from fastapi_app.shared_models.device_token import DeviceToken
 
 logger = logging.getLogger(__name__)
 
@@ -527,3 +528,74 @@ async def dispatch_beile_unconfirmed_notifications(
         order.order_no, len(notifications), len(user_ids), len(hubei_skus),
     )
     return len(notifications)
+
+
+# ==================== 通知/设备令牌查询函数（自 notification.py / device_token.py 端点下沉） ====================
+
+async def count_unread_notifications(db: AsyncSession, user_id: int) -> int:
+    """统计指定用户的未读通知数"""
+    count = await db.scalar(
+        select(func.count())
+        .select_from(Notification)
+        .where(Notification.user_id == user_id, Notification.is_read == False)  # noqa: E712
+    )
+    return int(count or 0)
+
+
+async def get_notifications_page(
+    db: AsyncSession, user_id: int, page: int, page_size: int, only_unread: bool = False,
+) -> tuple[list[Notification], int]:
+    """分页获取指定用户的通知列表（按 created_at 倒序），返回 (通知列表, 总数)"""
+    base_filters = [Notification.user_id == user_id]
+    if only_unread:
+        base_filters.append(Notification.is_read == False)  # noqa: E712
+
+    total = await db.scalar(
+        select(func.count()).select_from(Notification).where(*base_filters)
+    )
+    total = int(total or 0)
+
+    result = await db.execute(
+        select(Notification)
+        .where(*base_filters)
+        .order_by(Notification.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    return list(result.scalars().all()), total
+
+
+async def mark_all_notifications_read(db: AsyncSession, user_id: int) -> int:
+    """将指定用户所有未读通知标记为已读，返回更新条数（事务由调用方管理）"""
+    result = await db.execute(
+        update(Notification)
+        .where(Notification.user_id == user_id, Notification.is_read == False)  # noqa: E712
+        .values(is_read=True)
+    )
+    return result.rowcount or 0
+
+
+async def get_device_token_by_token(db: AsyncSession, token: str) -> DeviceToken | None:
+    """按 FCM 令牌查找设备注册记录"""
+    result = await db.execute(
+        select(DeviceToken).where(DeviceToken.token == token)
+    )
+    return result.scalar_one_or_none()
+
+
+async def deactivate_device_tokens_by_platform(db: AsyncSession, user_id: int, platform: str) -> None:
+    """将指定用户指定平台的旧设备令牌全部置为 inactive（事务由调用方管理）"""
+    await db.execute(
+        update(DeviceToken)
+        .where(DeviceToken.user_id == user_id, DeviceToken.platform == platform)
+        .values(is_active=False, updated_at=datetime.now())
+    )
+
+
+async def deactivate_device_token(db: AsyncSession, token: str, user_id: int) -> None:
+    """注销指定用户的指定 FCM 设备令牌（事务由调用方管理）"""
+    await db.execute(
+        update(DeviceToken)
+        .where(DeviceToken.token == token, DeviceToken.user_id == user_id)
+        .values(is_active=False, updated_at=datetime.now())
+    )

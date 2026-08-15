@@ -10,7 +10,9 @@ Task 3（多 SKU 订单聚合）：按 customer 分组，同一客户的多个 S
 import logging
 from datetime import datetime, timezone
 
+from fastapi import HTTPException
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.business_rules import MAX_QUANTITY
@@ -284,6 +286,11 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                 'error': str(e) or '订单处理失败，请稍后重试',
                 'customer': customer,
             })
+        except SQLAlchemyError as e:
+            # 数据库异常会污染 session（savepoint 仅自动回滚嵌套事务），必须整体回滚并终止批量流程
+            logger.error(f"批量创建订单时数据库异常: {e}", exc_info=True)
+            await db.rollback()
+            raise HTTPException(status_code=500, detail='批量创建订单时数据库异常') from e
 
     return {
         'success': True,

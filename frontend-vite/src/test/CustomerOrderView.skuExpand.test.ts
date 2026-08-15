@@ -90,6 +90,7 @@ vi.mock('@/stores/auth', () => ({
 
 import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
 import CustomerOrderView from '@/views/customer-order/CustomerOrderView.vue'
 
 // Stub child components that aren't relevant to SKU expand behavior.
@@ -121,6 +122,8 @@ async function switchToRecordsTab(wrapper: ReturnType<typeof mount>) {
 
 describe('CustomerOrderView SKU expand behavior (SubTask 7.4)', () => {
   beforeEach(() => {
+    // useOrderForm 内使用 useCatalogStore()，需提供活跃 Pinia 实例
+    setActivePinia(createPinia())
     mocks.orderListMock.mockReset()
     mocks.orderDetailMock.mockReset()
     mocks.customerActiveNamesMock.mockReset()

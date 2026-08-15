@@ -11,6 +11,7 @@ import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -519,10 +520,10 @@ async def auto_generate_for_order(
                 "订单 %s 自动生成外发工序 %d 道（跳过 %d）",
                 getattr(order, 'order_no', order.id), created, skipped,
             )
-    except Exception:  # defensive: 外发工序生成失败不影响订单创建
-        logger.warning(
+    except (SQLAlchemyError, OSError):  # defensive: 外发工序生成失败不影响订单创建
+        # 仅捕获基础设施异常；编程错误（KeyError 等）自然抛出，避免被静默吞噬
+        logger.exception(
             "订单 %s 自动生成外发工序失败", getattr(order, 'order_no', order.id),
-            exc_info=True,
         )
 
 

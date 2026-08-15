@@ -119,7 +119,8 @@ async def sync_order_delete(db: AsyncSession, order_id: int) -> dict:
                     po.source_order_ids = json.dumps(ids)
                     updated_count += 1
         except (json.JSONDecodeError, TypeError):
-            pass
+            # 数据脏污时记录告警后跳过该 PO，不再静默丢弃关联信息
+            logger.warning('采购订单 %s source_order_ids 解析失败: %s', po.id, po.source_order_ids)
 
     return {'deleted_purchase_orders': deleted_count, 'updated_purchase_orders': updated_count}
 

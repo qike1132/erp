@@ -177,3 +177,17 @@ test_reports/
 /dashboard-preview/
 /.claude.json
 /.windsurfignore
+
+# === 前端构建/调试残留（frontend-vite 治理防护） ===
+# 构建输出日志与错误转储
+build_*.txt
+build.err
+# TypeScript 增量构建缓存
+*.tsbuildinfo
+# 浏览器/脚本调试残留
+cookies.txt
+# aria 修复脚本残留
+fix-aria*
+# 临时修复脚本残留
+_fix*.cjs
+_fix*.js

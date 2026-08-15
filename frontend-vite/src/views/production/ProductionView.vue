@@ -66,13 +66,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, type ComponentPublicInstance } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { dailyProductionApi } from '@/api'
 import { showToast } from '@/composables/useToast'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import type { TableColumn } from '@/components/ui/UiDataTable.vue'
+import type { DailySummary, MonthlySummary } from '@/types'
 import { formatCurrency, formatNumber } from '@/utils/format'
 import { useProductionCharts } from './composables/useProductionCharts'
 
@@ -108,17 +109,27 @@ const dateRef = computed({
 // ===== 数据查询 =====
 const { data: reportSummaryData } = useQuery({
   queryKey: ['daily-production-daily-summary', reportDate],
-  queryFn: () => dailyProductionApi.dailySummary(reportDate.value) as Promise<any>,
+  queryFn: () => dailyProductionApi.dailySummary(reportDate.value) as Promise<{ data?: DailySummary } | DailySummary>,
   staleTime: 30_000,
 })
-const reportSummary = computed(() => reportSummaryData.value?.data ?? reportSummaryData.value ?? null)
+const reportSummary = computed<DailySummary | null>(() => {
+  const raw = reportSummaryData.value ?? null
+  // 兼容 { data } 包裹结构；后端当前裸返回
+  const wrapped = raw as { data?: DailySummary }
+  return wrapped.data ?? (raw as DailySummary | null)
+})
 
 const { data: monthlySummaryData } = useQuery({
   queryKey: ['daily-production-monthly-summary', monthlyYear, monthlyMonth],
-  queryFn: () => dailyProductionApi.monthlySummary({ year: monthlyYear.value, month: monthlyMonth.value }) as Promise<any>,
+  queryFn: () => dailyProductionApi.monthlySummary({ year: monthlyYear.value, month: monthlyMonth.value }) as Promise<{ data?: MonthlySummary } | MonthlySummary>,
   staleTime: 60_000,
 })
-const monthlySummary = computed(() => monthlySummaryData.value?.data ?? monthlySummaryData.value ?? null)
+const monthlySummary = computed<MonthlySummary | null>(() => {
+  const raw = monthlySummaryData.value ?? null
+  // 兼容 { data } 包裹结构；后端当前裸返回
+  const wrapped = raw as { data?: MonthlySummary }
+  return wrapped.data ?? (raw as MonthlySummary | null)
+})
 
 const deptSummaryColumns: TableColumn[] = [
   { field: 'department', header: '部门', align: 'center' },
@@ -211,10 +222,10 @@ function handleKeydown(event: KeyboardEvent) {
 // ===== ECharts =====
 const dailyChartRef = ref<HTMLElement | undefined>()
 const monthlyChartRef = ref<HTMLElement | undefined>()
-function setDailyChartRef(el: Element | null) {
+function setDailyChartRef(el: Element | ComponentPublicInstance | null) {
   dailyChartRef.value = (el as HTMLElement | null) ?? undefined
 }
-function setMonthlyChartRef(el: Element | null) {
+function setMonthlyChartRef(el: Element | ComponentPublicInstance | null) {
   monthlyChartRef.value = (el as HTMLElement | null) ?? undefined
 }
 

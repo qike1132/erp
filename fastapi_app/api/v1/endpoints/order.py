@@ -87,7 +87,8 @@ async def list_orders(
                                                 factory=factory)
     except AppError:
         raise  # 业务异常（如非法日期 400）交由全局 handler，不被吞为 500
-    except Exception as e:
+    except (SQLAlchemyError, OSError) as e:
+        # 仅捕获基础设施异常并转 500；编程错误（KeyError 等）自然抛给全局 handler 暴露真实堆栈
         logger.exception("[OrderList] 获取订单列表失败: %s", e)
         raise HTTPException(status_code=500, detail=f"获取订单列表失败: {str(e)[:200]}")
 

@@ -102,7 +102,7 @@ async def invalidate_user_permission_cache(user_id: int | None=None) -> None:
             await _USER_ACTIVE_CACHE.clear()
         except AttributeError:
             pass
-__all__ = ['get_current_user_id', 'require_permission', 'require_superuser', 'create_access_token', 'create_refresh_token', 'get_async_db', 'get_user_identity', 'revoke_token']
+__all__ = ['get_current_user_id', 'get_current_user_id_strict', 'get_current_user_strict', 'require_permission', 'require_superuser', 'create_access_token', 'create_refresh_token', 'get_async_db', 'get_user_identity', 'revoke_token', 'is_token_revoked']
 
 
 def get_user_identity(user: User) -> tuple[str, str]:
@@ -171,16 +171,22 @@ def create_refresh_token(data: dict) -> str:
     to_encode['type'] = 'refresh'
     return jwt.encode(to_encode, _get_signing_key(), algorithm=settings.ALGORITHM)
 
-def _decode_jwt_token(token: str) -> dict:
-    """解码并验证JWT Token，返回payload或抛出异常"""
+def _decode_jwt_token(token: str, expected_type: str | None = None) -> dict:
+    """解码并验证JWT Token，返回payload或抛出异常
+
+    expected_type 不为 None 时额外校验 payload 的 type claim，
+    防止 refresh token（长效）被当作 access token 用于请求认证，或反向混用。
+    """
     import jwt
     try:
         payload = jwt.decode(token, _get_verify_key(), algorithms=[settings.ALGORITHM])
-        return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='JWT Token已过期') from None
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='JWT Token无效') from None
+    if expected_type is not None and payload.get('type') != expected_type:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='JWT Token类型错误')
+    return payload
 
 
 class _LRUSet:
@@ -234,12 +240,32 @@ async def revoke_token(jti: str, exp: int) -> None:
         logger.debug("token 黑名单写入失败", exc_info=True)
 
 
-async def is_token_revoked(jti: str | None) -> bool:
+# fail-open 降级 critical 日志的上次记录时间（monotonic），用于限频避免刷屏
+_last_revocation_critical_at = 0.0
+_REVOCATION_CRITICAL_INTERVAL = 60.0  # 限频时间窗（秒）
+
+
+def _log_revocation_degraded(exc_info: bool = False) -> None:
+    """Redis 黑名单校验降级（fail-open）时记录 critical 日志（60 秒时间窗限频）"""
+    global _last_revocation_critical_at
+    now = time.monotonic()
+    if now - _last_revocation_critical_at < _REVOCATION_CRITICAL_INTERVAL:
+        return
+    _last_revocation_critical_at = now
+    logger.critical(
+        "Redis 黑名单校验不可用，token 撤销检查降级为本地缓存（fail-open），已撤销的 token 可能被放行",
+        exc_info=exc_info,
+    )
+
+
+async def is_token_revoked(jti: str | None, *, fail_closed: bool = False) -> bool:
     """检查 token 是否已被撤销（在黑名单中）
 
     Redis 不可用时降级到本地 LRU 缓存：
     - 本地缓存命中则返回 True（已撤销）
-    - 本地缓存未命中则返回 False（允许通过）并记录 WARNING 日志
+    - 本地缓存未命中：
+      - fail_closed=True（敏感端点）：抛出 401 拒绝请求（fail-closed）
+      - fail_closed=False（默认）：返回 False 放行（fail-open），并记录限频 critical 日志
     本地缓存是进程级的，多 worker 间不共享，作为降级方案可接受。
     """
     if not jti:
@@ -252,12 +278,20 @@ async def is_token_revoked(jti: str | None) -> bool:
         # Redis 客户端未初始化，降级到本地 LRU 缓存
         if _LOCAL_REVOKED_JTIS.contains(jti):
             return True
+        if fail_closed:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='令牌状态校验不可用，请重新登录')
+        _log_revocation_degraded()
+        return False
+    except HTTPException:
+        raise
     except Exception:  # defensive: Redis 不可用时降级到本地 LRU 缓存
-        logger.warning("Redis unavailable, token revocation check degraded to local cache", exc_info=True)
         # Redis 故障时降级到本地 LRU 缓存
         if _LOCAL_REVOKED_JTIS.contains(jti):
             return True
-    return False
+        if fail_closed:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='令牌状态校验不可用，请重新登录')
+        _log_revocation_degraded(exc_info=True)
+        return False
 
 def _get_user_id_from_jwt(request: Request) -> int | None:
     """
@@ -271,7 +305,7 @@ def _get_user_id_from_jwt(request: Request) -> int | None:
     if not token:
         return None
     try:
-        payload = _decode_jwt_token(token)
+        payload = _decode_jwt_token(token, expected_type='access')
         user_id = payload.get('sub')
         if user_id:
             return int(user_id)
@@ -290,7 +324,7 @@ def _get_user_id_from_cookie(request: Request) -> int | None:
     if not cookie_token:
         return None
     try:
-        payload = _decode_jwt_token(cookie_token)
+        payload = _decode_jwt_token(cookie_token, expected_type='access')
         user_id = payload.get('sub')
         if user_id:
             return int(user_id)
@@ -315,7 +349,7 @@ def _resolve_token_jti(request: Request) -> str | None:
     if not token:
         return None
     try:
-        payload = _decode_jwt_token(token)
+        payload = _decode_jwt_token(token, expected_type='access')
         return payload.get('jti')
     except HTTPException:
         return None
@@ -332,17 +366,11 @@ async def _verify_user_active(user_id: int, db: AsyncSession) -> bool:
     await _USER_ACTIVE_CACHE.set(user_id, is_active)
     return is_active
 
-async def get_current_user_id(request: Request, db: AsyncSession=Depends(get_async_db)) -> int:
-    """
-    获取当前用户ID（双认证模式）。
+async def _authenticate_user_id(request: Request, db: AsyncSession, *, fail_closed: bool = False) -> int:
+    """认证并返回当前用户ID，get_current_user_id / get_current_user_id_strict 的内部实现
 
-    优先级：
-    1. Authorization: Bearer <token>（JWT方式，适用于API客户端）
-    2. httpOnly cookie 中的 access_token（浏览器Web端）
-
-    验证用户仍存在且处于启用状态，防止已禁用/删除用户的token继续有效。
-    检查 token 是否已被撤销（黑名单）。
-    返回 user_id: int。
+    校验 token 类型必须为 access，用户仍存在且处于启用状态，token 未被撤销（黑名单）。
+    fail_closed=True 时，黑名单校验在 Redis 故障且本地缓存未命中的情况下拒绝请求。
     """
     cached_payload = getattr(request.state, '_jwt_payload', None)
     if cached_payload is not None:
@@ -362,7 +390,7 @@ async def get_current_user_id(request: Request, db: AsyncSession=Depends(get_asy
 
     if token:
         try:
-            payload = _decode_jwt_token(token)
+            payload = _decode_jwt_token(token, expected_type='access')
             request.state._jwt_payload = payload
             jti = payload.get('jti')
         except HTTPException:
@@ -370,21 +398,39 @@ async def get_current_user_id(request: Request, db: AsyncSession=Depends(get_asy
     else:
         jti = _resolve_token_jti(request)
 
-    if await is_token_revoked(jti):
+    if await is_token_revoked(jti, fail_closed=fail_closed):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Token已失效')
 
     if not await _verify_user_active(user_id, db):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='用户不存在或已被禁用')
     return user_id
 
-async def _get_user_with_permissions(request: Request, db: AsyncSession=Depends(get_async_db)) -> User:
-    """
-    解析认证信息并从数据库查询用户，同时预加载权限列表。
 
-    使用 L1 进程内缓存（TTL 10s）避免每次请求都查询数据库。
-    expunge 使 User 对象可在任何上下文安全使用。
+async def get_current_user_id(request: Request, db: AsyncSession=Depends(get_async_db)) -> int:
     """
-    user_id = await get_current_user_id(request, db)
+    获取当前用户ID（双认证模式）。
+
+    优先级：
+    1. Authorization: Bearer <token>（JWT方式，适用于API客户端）
+    2. httpOnly cookie 中的 access_token（浏览器Web端）
+
+    验证 token 类型为 access、用户仍存在且处于启用状态、token 未被撤销（黑名单）。
+    返回 user_id: int。
+    """
+    return await _authenticate_user_id(request, db)
+
+
+async def get_current_user_id_strict(request: Request, db: AsyncSession=Depends(get_async_db)) -> int:
+    """
+    严格版 get_current_user_id：token 黑名单校验 fail-closed。
+
+    Redis 故障且本地 LRU 缓存未命中时直接拒绝（401），供敏感端点使用，
+    防止已撤销的 token 在 Redis 故障期间被放行。
+    """
+    return await _authenticate_user_id(request, db, fail_closed=True)
+
+async def _load_user_with_permissions(user_id: int, db: AsyncSession) -> User:
+    """按 user_id 查询用户并预加载权限列表（带 L1 缓存）"""
     cached_user = await _get_cached_user(user_id)
     if cached_user is not None:
         return cached_user
@@ -395,6 +441,27 @@ async def _get_user_with_permissions(request: Request, db: AsyncSession=Depends(
     db.expunge(user)
     await _set_cached_user(user_id, user)
     return user
+
+async def _get_user_with_permissions(request: Request, db: AsyncSession=Depends(get_async_db)) -> User:
+    """
+    解析认证信息并从数据库查询用户，同时预加载权限列表。
+
+    使用 L1 进程内缓存（TTL 10s）避免每次请求都查询数据库。
+    expunge 使 User 对象可在任何上下文安全使用。
+    """
+    user_id = await get_current_user_id(request, db)
+    return await _load_user_with_permissions(user_id, db)
+
+
+async def get_current_user_strict(request: Request, db: AsyncSession=Depends(get_async_db)) -> User:
+    """
+    严格版认证依赖：返回当前用户（含权限），token 黑名单校验 fail-closed。
+
+    Redis 故障且本地 LRU 缓存未命中时直接拒绝（401），供敏感端点使用，
+    防止已撤销的 token 在 Redis 故障期间被放行。
+    """
+    user_id = await get_current_user_id_strict(request, db)
+    return await _load_user_with_permissions(user_id, db)
 
 def require_permission(permission_name: str):
     """

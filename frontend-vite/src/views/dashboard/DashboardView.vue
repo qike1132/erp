@@ -70,52 +70,10 @@
       <!-- 卡片主体 -->
       <div class="page-card-body">
         <!-- KPI 指标卡片区 -->
-        <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4 mb-6">
-          <KpiCard
-            v-for="(card, index) in kpiCards"
-            :key="card.key"
-            :label="card.label"
-            :value="card.value"
-            :trend="card.trend"
-            :trend-text="card.trendText"
-            :icon="card.icon"
-            :accent="card.accent"
-            :delay="index * 80"
-            :is-loading="isLoading"
-          />
-        </div>
+        <DashboardKpiSection :stats="stats" :is-loading="isLoading" />
 
         <!-- 图表区 -->
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <!-- 订单趋势图 -->
-          <UiCard class="lg:col-span-2" header-gradient>
-            <template #header>
-              <div class="flex items-center justify-between w-full">
-                <div class="flex items-center gap-2">
-                  <div class="w-8 h-8 rounded-[var(--radius-md)] bg-primary-50 flex items-center justify-center">
-                    <FontAwesomeIcon icon="chart-line" class="text-primary-500 text-sm" />
-                  </div>
-                  <span class="text-sm font-semibold text-text">订单趋势（近7日）</span>
-                </div>
-                <span class="text-xs text-text-muted">单位：件</span>
-              </div>
-            </template>
-            <div ref="orderChartRef" class="h-[260px] md:h-[300px]" />
-          </UiCard>
-
-          <!-- 订单与备货分布图 -->
-          <UiCard header-gradient>
-            <template #header>
-              <div class="flex items-center gap-2">
-                <div class="w-8 h-8 rounded-[var(--radius-md)] bg-purple-50 flex items-center justify-center">
-                  <FontAwesomeIcon icon="chart-pie" class="text-purple-500 text-sm" />
-                </div>
-                <span class="text-sm font-semibold text-text">订单与备货分布</span>
-              </div>
-            </template>
-            <div ref="stockChartRef" class="h-[260px] md:h-[300px]" />
-          </UiCard>
-        </div>
+        <DashboardChartsSection ref="chartsRef" :stats="stats" :stock-stats="stockStats" :perf="perf" />
       </div>
     </div>
 
@@ -142,34 +100,28 @@
 </template>
 
 <script setup lang="ts">
-import { ref, shallowRef, onMounted, onUnmounted, nextTick, computed } from 'vue'
+/**
+ * DashboardView — 仪表盘主容器
+ * 拆分后职责：工具栏/弹窗/生命周期编排。
+ *  - KPI 指标卡片区 → DashboardKpiSection（复用既有 KpiCard/CountUp）
+ *  - 图表区（渲染/更新/销毁）→ DashboardChartsSection
+ *  - 数据加载 → useDashboardStats
+ *  - 自动刷新 / 时钟 → useDashboardAutoRefresh / useDashboardClock
+ */
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-import UiCard from '@/components/ui/UiCard.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import NotificationBell from '@/layouts/components/NotificationBell.vue'
-import KpiCard from './components/KpiCard.vue'
-import { authApi, dashboardApi, stockApi, orderApi } from '@/api'
+import DashboardKpiSection from './components/DashboardKpiSection.vue'
+import DashboardChartsSection from './components/DashboardChartsSection.vue'
+import { useDashboardStats } from './composables/useDashboardStats'
+import { useDashboardAutoRefresh } from './composables/useDashboardAutoRefresh'
+import { useDashboardClock } from './composables/useDashboardClock'
+import { authApi, orderApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { useSidebarStore } from '@/stores/sidebar'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { usePerfMark } from '@/composables/usePerfMark'
-import { toast } from '@/composables/useToast'
-
-// ECharts 懒加载：避免在首屏（dashboard 为落地页）加载 ~1MB 的图表库
-// 🟢 改为共享预加载模块：登录成功后即开始下载，dashboard 挂载时直接复用缓存
-import { ensureEcharts, getEchartsModule } from '@/utils/echartsPreload'
-type EChartsModule = typeof import('echarts/core')
-
-/**
- * 安全初始化图表：若 DOM 已有旧实例则先 dispose。
- * 消除 "There is a chart instance already initialized on the dom" 警告，
- * 杜绝自动刷新时的实例堆积与内存泄露。
- */
-function safeInit(dom: HTMLElement, echarts: EChartsModule): ReturnType<EChartsModule['init']> {
-  const existing = echarts.getInstanceByDom(dom)
-  if (existing) existing.dispose()
-  return echarts.init(dom)
-}
 
 const perf = usePerfMark('dashboard')
 
@@ -178,19 +130,40 @@ const authStore = useAuthStore()
 const sidebarStore = useSidebarStore()
 const logoutConfirm = useConfirmDialog()
 const router = useRouter()
-const currentTime = ref('')
 const avatarLetter = computed(() => (authStore.user?.username || 'U').charAt(0).toUpperCase())
 
-// ===== 数据状态 =====
-// shallowRef：API 响应整体替换（不逐属性变更），避免深层响应式开销
-const stats = shallowRef<Record<string, number> | null>(null)
-const stockStats = shallowRef<{ order_quantity: number; order_regular_quantity: number; order_custom_quantity: number; stockin_quantity: number } | null>(null)
-const isLoading = ref(false)
-const errorMessage = ref('')
-const errorDetail = ref('')
-const lastSyncTime = ref('')
-const orderChartRef = ref<HTMLElement>()
-const stockChartRef = ref<HTMLElement>()
+// ===== 时钟 =====
+const { currentTime, startClock, stopClock } = useDashboardClock()
+
+// ===== 数据状态（加载/错误/降级）=====
+const {
+  stats,
+  stockStats,
+  isLoading,
+  errorMessage,
+  errorDetail,
+  loadStats: loadStatsData,
+} = useDashboardStats()
+
+// ===== 图表区引用（渲染时机由本组件在数据加载后驱动）=====
+const chartsRef = ref<InstanceType<typeof DashboardChartsSection> | null>(null)
+
+// ===== 数据加载 + 图表渲染（保持原有时序：数据 → nextTick → 首渲/仅更新数据） =====
+async function loadStats(showLoading = true) {
+  await loadStatsData(showLoading)
+  await nextTick()
+  // 🟢 首次完整渲染图表；后续自动刷新仅更新数据（不复建实例）
+  try {
+    await chartsRef.value?.renderOrUpdate()
+  } catch (chartErr) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.warn('[Dashboard] 图表渲染失败:', chartErr)
+    }
+  }
+  perf.markMountEnd()
+  perf.measureFromMount('full-interactive')
+}
 
 // ===== 贝乐未确认订单提醒弹窗 =====
 const beilePopupOpen = ref(false)
@@ -232,368 +205,9 @@ function goConfirmBeileOrders() {
   router.push('/beile-order')
 }
 
-// 图表 & resize 生命周期统一管理
-const _chartMeta: { chart: import('echarts/core').ECharts; handler: () => void }[] = []
-/** 图表具名引用：消除 _chartMeta[0]/[1] 硬编码，支持任意图表增删 */
-let _orderChart: import('echarts/core').ECharts | null = null
-let _stockChart: import('echarts/core').ECharts | null = null
-let refreshTimer: ReturnType<typeof setInterval> | null = null
-
-/** 销毁所有图表实例并移除 resize 监听，确保零泄露 */
-function disposeAllCharts() {
-  for (const { chart, handler } of _chartMeta) {
-    window.removeEventListener('resize', handler)
-    chart.dispose()
-  }
-  _chartMeta.length = 0
-  _orderChart = null
-  _stockChart = null
-}
-
-/** 注册图表到生命周期管理器（resize + dispose 由 disposeAllCharts 统一处理） */
-function registerChart(chart: import('echarts/core').ECharts) {
-  const handler = () => chart.resize()
-  window.addEventListener('resize', handler)
-  _chartMeta.push({ chart, handler })
-}
-
-// ===== KPI 卡片数据 =====
-const kpiCards = computed(() => [
-  {
-    key: 'orders',
-    label: '今日订单',
-    value: stats.value?.order_today ?? 0,
-    trend: trendValue(stats.value?.order_today, stats.value?.order_yesterday),
-    trendText: trendText(stats.value?.order_today, stats.value?.order_yesterday),
-    icon: 'fa-cart-shopping',
-    accent: 'blue' as const,
-  },
-  {
-    key: 'stockin',
-    label: '今日备货',
-    value: stats.value?.stockin_today ?? 0,
-    trend: trendValue(stats.value?.stockin_today, stats.value?.stockin_yesterday),
-    trendText: trendText(stats.value?.stockin_today, stats.value?.stockin_yesterday),
-    icon: 'fa-warehouse',
-    accent: 'green' as const,
-  },
-  {
-    key: 'stockout',
-    label: '今日出货',
-    value: stats.value?.stockout_today ?? 0,
-    trend: trendValue(stats.value?.stockout_today, stats.value?.stockout_yesterday),
-    trendText: trendText(stats.value?.stockout_today, stats.value?.stockout_yesterday),
-    icon: 'fa-truck-fast',
-    accent: 'amber' as const,
-  },
-  {
-    key: 'pending',
-    label: '待审批',
-    value: stats.value?.pending_approvals ?? 0,
-    trend: 0,
-    trendText: '',
-    icon: 'fa-clipboard-check',
-    accent: 'red' as const,
-  },
-  {
-    key: 'material',
-    label: '待备料',
-    value: stats.value?.pending_materials ?? 0,
-    trend: 0,
-    trendText: '',
-    icon: 'fa-cubes',
-    accent: 'ocean' as const,
-  },
-])
-
-// ===== 趋势计算 =====
-function trendValue(today?: number, yesterday?: number): number {
-  if (today == null || yesterday == null || yesterday === 0) return 0
-  return Math.round(((today - yesterday) / yesterday) * 100)
-}
-
-function trendText(today?: number, yesterday?: number): string {
-  if (today == null || yesterday == null) return ''
-  if (yesterday === 0) return today > 0 ? '↑ 新增' : '— 持平'
-  const pct = Math.round(((today - yesterday) / yesterday) * 100)
-  if (pct > 0) return `↑ ${pct}%`
-  if (pct < 0) return `↓ ${Math.abs(pct)}%`
-  return '— 持平'
-}
-
-// ===== 图表渲染 =====
-/** 标记图表是否已完成首次完整渲染（之后仅更新数据，不复建实例） */
-let _chartsRendered = false
-
-/** 构建折线图 option（数据和日期可变，样式固定） */
-function buildOrderChartOption(echarts: EChartsModule) {
-  const days: string[] = []
-  const now = new Date()
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date(now)
-    d.setDate(d.getDate() - i)
-    days.push(`${d.getMonth() + 1}/${d.getDate()}`)
-  }
-  const data = [0, 0, 0, 0, 0, 0, stats.value?.order_today ?? 0]
-  return {
-    tooltip: {
-      trigger: 'axis' as const,
-      backgroundColor: 'rgba(255,255,255,0.95)',
-      borderColor: '#e2e8f0',
-      borderWidth: 1,
-      textStyle: { color: '#1a1a2e', fontSize: 12 },
-      extraCssText: 'box-shadow: 0 4px 16px rgba(0,0,0,0.08); border-radius: 12px;',
-    },
-    grid: { top: 24, right: 20, bottom: 32, left: 48 },
-    xAxis: {
-      type: 'category' as const, data: days,
-      axisLine: { lineStyle: { color: '#e2e8f0' } },
-      axisLabel: { color: '#64748b', fontSize: 11 },
-      axisTick: { show: false },
-    },
-    yAxis: {
-      type: 'value' as const,
-      splitLine: { lineStyle: { color: '#f1f5f9', type: 'dashed' as const } },
-      axisLabel: { color: '#64748b', fontSize: 11 },
-      axisLine: { show: false }, axisTick: { show: false },
-    },
-    series: [{
-      type: 'line' as const, smooth: true, symbol: 'circle' as const, symbolSize: 8,
-      showSymbol: false, data,
-      lineStyle: { color: '#5b8def', width: 3, cap: 'round' as const },
-      itemStyle: { color: '#5b8def', borderWidth: 2, borderColor: '#fff' },
-      areaStyle: {
-        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-          { offset: 0, color: 'rgba(91,141,239,0.2)' },
-          { offset: 1, color: 'rgba(91,141,239,0.01)' },
-        ]),
-      },
-      emphasis: { showSymbol: true, itemStyle: { shadowBlur: 8, shadowColor: 'rgba(91,141,239,0.4)' } },
-    }],
-  }
-}
-
-/** 构建饼图 option（数据可变，样式固定） */
-function buildStockChartOption() {
-  const orderTotal = stockStats.value?.order_quantity ?? 0
-  const stockinTotal = stockStats.value?.stockin_quantity ?? 0
-  return {
-    tooltip: {
-      trigger: 'item' as const, formatter: '{b}: {c}件 ({d}%)',
-      backgroundColor: 'rgba(255,255,255,0.95)',
-      borderColor: '#e2e8f0', borderWidth: 1,
-      textStyle: { color: '#1a1a2e', fontSize: 12 },
-      extraCssText: 'box-shadow: 0 4px 16px rgba(0,0,0,0.08); border-radius: 12px;',
-    },
-    legend: {
-      bottom: 0, itemWidth: 10, itemHeight: 10, itemGap: 20,
-      textStyle: { color: '#64748b', fontSize: 12 },
-    },
-    series: [{
-      type: 'pie' as const, radius: ['42%', '68%'], center: ['50%', '46%'],
-      avoidLabelOverlap: true, padAngle: 0, minAngle: 15,
-      itemStyle: { borderColor: '#fff', borderWidth: 0 },
-      label: {
-        show: true, fontSize: 12, fontWeight: 'bold' as const,
-        formatter: '{b}\n{c}件 ({d}%)', overflow: 'break' as const, width: 100,
-      },
-      labelLayout: { hideOverlap: true },
-      emphasis: {
-        label: { show: true, fontSize: 13, fontWeight: 'bold' as const, formatter: '{b}\n{c}件 ({d}%)' },
-        scaleSize: 6,
-      },
-      data: [
-        { value: orderTotal, name: '订单数量', itemStyle: { color: '#28c76f' } },
-        { value: stockinTotal, name: '备货数量', itemStyle: { color: '#5b8def' } },
-      ],
-    }],
-  }
-}
-
-async function renderOrderChart() {
-  if (!orderChartRef.value) return
-  perf.mark('chart-order-start')
-  const echarts = await ensureEcharts()
-  const chart = safeInit(orderChartRef.value, echarts)
-  chart.setOption(buildOrderChartOption(echarts))
-  perf.markEnd('chart-order-start')
-  perf.measure('chart-order-render', 'chart-order-start')
-  registerChart(chart)
-  _orderChart = chart
-}
-
-async function renderStockChart() {
-  if (!stockChartRef.value) return
-  perf.mark('chart-stock-start')
-  const echarts = await ensureEcharts()
-  const chart = safeInit(stockChartRef.value, echarts)
-  chart.setOption(buildStockChartOption())
-  perf.markEnd('chart-stock-start')
-  perf.measure('chart-stock-render', 'chart-stock-start')
-  registerChart(chart)
-  _stockChart = chart
-}
-
-/** 仅更新图表数据（不复建实例）：用于自动刷新，近乎零开销 */
-function updateOrderChart() {
-  if (!_orderChart) return
-  _orderChart.setOption(buildOrderChartOption(getEchartsModule()!))
-}
-
-function updateStockChart() {
-  if (!_stockChart) return
-  _stockChart.setOption(buildStockChartOption())
-}
-
-// ===== 数据加载（含错误处理和日志） =====
-async function loadStats(showLoading = true) {
-  if (showLoading) isLoading.value = true
-  errorMessage.value = ''
-  errorDetail.value = ''
-  perf.mark('api-start')
-
-  // 先加载仪表盘统计，再加载库存统计（库存失败时可用仪表盘数据降级）
-  await loadDashboardStats()
-  await loadStockStats()
-
-  if (showLoading) isLoading.value = false
-  perf.markEnd('api-start')
-  perf.measure('api-stats', 'api-start')
-
-  await nextTick()
-  // 🟢 首次完整渲染图表；后续自动刷新仅更新数据（不复建实例）
-  try {
-    if (!_chartsRendered) {
-      await renderOrderChart()
-      await renderStockChart()
-      _chartsRendered = true
-    } else {
-      updateOrderChart()
-      updateStockChart()
-    }
-  } catch (chartErr) {
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.warn('[Dashboard] 图表渲染失败:', chartErr)
-    }
-  }
-  perf.markMountEnd()
-  perf.measureFromMount('full-interactive')
-}
-
-async function loadDashboardStats() {
-  try {
-    const resp = await dashboardApi.stats() as { success?: boolean; data?: Record<string, number> } | Record<string, number>
-
-    let raw: Record<string, number> | undefined
-    if (resp && typeof resp === 'object') {
-      if ('data' in resp && resp.data && typeof resp.data === 'object') {
-        raw = resp.data as Record<string, number>
-      } else if ('order_today' in resp || 'stockin_today' in resp || 'pending_approvals' in resp) {
-        raw = resp as Record<string, number>
-      }
-    }
-
-    if (!raw) {
-      throw new Error('API 返回数据格式异常：data 字段缺失或非对象类型')
-    }
-
-    const validated: Record<string, number> = {
-      order_today: Number(raw.order_today) || 0,
-      order_yesterday: Number(raw.order_yesterday) || 0,
-      stockin_today: Number(raw.stockin_today) || 0,
-      stockin_yesterday: Number(raw.stockin_yesterday) || 0,
-      stockout_today: Number(raw.stockout_today) || 0,
-      stockout_yesterday: Number(raw.stockout_yesterday) || 0,
-      pending_approvals: Number(raw.pending_approvals) || 0,
-      low_stock_count: Number(raw.low_stock_count) || 0,
-      pending_purchases: Number(raw.pending_purchases) || 0,
-      pending_materials: Number(raw.pending_materials) || 0,
-    }
-
-    stats.value = validated
-    lastSyncTime.value = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.log('[Dashboard] 数据加载成功:', validated)
-    }
-  } catch (err: unknown) {
-    const axiosError = err as { response?: { status?: number; data?: unknown }; message?: string; code?: string }
-
-    let msg = '数据加载失败'
-    let detail = ''
-
-    if (axiosError.response) {
-      const status = axiosError.response.status ?? 0
-      if (status === 401) {
-        msg = '登录已过期，正在跳转...'
-        detail = '请重新登录后查看数据'
-      } else if (status === 403) {
-        msg = '权限不足，无法访问仪表盘数据'
-      } else if (status >= 500) {
-        msg = '服务器内部错误，请稍后重试'
-        detail = `HTTP ${status}`
-      } else {
-        msg = `请求失败 (HTTP ${status})`
-      }
-      if (axiosError.response.data && typeof axiosError.response.data === 'object') {
-        const data = axiosError.response.data as Record<string, unknown>
-        if (data.detail) detail = String(data.detail)
-        else if (data.message) detail = String(data.message)
-      }
-    } else if (axiosError.code === 'ECONNABORTED') {
-      msg = '请求超时，请检查网络连接'
-    } else if (axiosError.code === 'ERR_NETWORK') {
-      msg = '网络连接失败，请检查网络状态'
-    } else if (axiosError.message) {
-      msg = axiosError.message
-    }
-
-    errorMessage.value = msg
-    errorDetail.value = detail
-    if (!axiosError.response || axiosError.response.status !== 401) {
-      toast.error(msg, { duration: 4000, closable: true })
-    }
-
-    stats.value = {
-      order_today: 0, order_yesterday: 0,
-      stockin_today: 0, stockin_yesterday: 0,
-      stockout_today: 0, stockout_yesterday: 0,
-      pending_approvals: 0, low_stock_count: 0,
-      pending_purchases: 0, pending_materials: 0,
-    }
-
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.error('[Dashboard] 数据加载失败:', err)
-    }
-  }
-}
-
-async function loadStockStats() {
-  try {
-    const resp = await stockApi.stats()
-    if (resp) {
-      stockStats.value = resp
-    }
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.log('[Dashboard] 库存统计数据加载成功:', stockStats.value)
-    }
-  } catch (err) {
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.warn('[Dashboard] 库存统计数据加载失败，使用降级数据:', err)
-    }
-    stockStats.value = { order_quantity: stats.value?.order_today ?? 0, order_regular_quantity: 0, order_custom_quantity: 0, stockin_quantity: stats.value?.stockin_today ?? 0 }
-  }
-}
-
-// ===== 重试加载 =====
+// ===== 重试加载（销毁全部图表实例后重新加载并完整渲染） =====
 function retryLoad() {
-  _chartsRendered = false
-  disposeAllCharts()
+  chartsRef.value?.resetCharts()
   loadStats(true).catch((err) => {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
@@ -602,37 +216,15 @@ function retryLoad() {
   })
 }
 
-// ===== 自动刷新机制（每 30 秒，确保"今日备货/今日出货/待审批/待备料"等模块实时显示） =====
-function startAutoRefresh() {
-  refreshTimer = setInterval(() => {
+// ===== 自动刷新（每 30 秒，确保"今日备货/今日出货/待审批/待备料"等模块实时显示） =====
+const { startAutoRefresh, stopAutoRefresh } = useDashboardAutoRefresh(() => {
+  loadStats(false).catch((err) => {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      console.log('[Dashboard] 自动刷新数据...')
+      console.error('[Dashboard] 自动刷新加载失败:', err)
     }
-    loadStats(false)
-  }, 30 * 1000)
-}
-
-function stopAutoRefresh() {
-  if (refreshTimer) {
-    clearInterval(refreshTimer)
-    refreshTimer = null
-  }
-}
-
-// ===== 工具栏：时钟 =====
-let clockTimer: ReturnType<typeof setInterval> | null = null
-
-function updateTime() {
-  const now = new Date()
-  currentTime.value = now.toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
   })
-}
+})
 
 // ===== 工具栏：退出登录 =====
 async function handleLogout() {
@@ -661,18 +253,14 @@ onMounted(() => {
   // 贝乐未确认订单提醒（登录后首次进 dashboard 弹一次）
   checkBeileConfirmPopup()
   startAutoRefresh()
-  updateTime()
-  clockTimer = setInterval(updateTime, 60_000)
+  startClock()
 })
 
 onUnmounted(() => {
   stopAutoRefresh()
-  if (clockTimer) {
-    clearInterval(clockTimer)
-    clockTimer = null
-  }
-  _chartsRendered = false
-  disposeAllCharts()
+  stopClock()
+  // 图表实例（_chartsRendered/disposeAllCharts）由 DashboardChartsSection
+  // 的 onUnmounted 清理，接线保留
 })
 </script>
 

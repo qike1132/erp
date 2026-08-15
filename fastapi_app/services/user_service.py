@@ -206,3 +206,37 @@ async def update_user_permissions(db: AsyncSession, user_id: int, permission_ids
     await db.refresh(user)
     logger.info(f"Permissions updated successfully for user {user_id}")
     return user
+
+
+# ==================== 认证/管理查询函数（自 auth.py / user.py 端点下沉，纯查询搬移） ====================
+
+async def get_user_with_permissions_by_id(db: AsyncSession, user_id: int) -> User | None:
+    """按 ID 获取用户（预加载权限列表）"""
+    result = await db.execute(
+        select(User).options(selectinload(User.permissions)).where(User.id == user_id)
+    )
+    return result.unique().scalar_one_or_none()
+
+
+async def get_user_with_permissions_by_username(db: AsyncSession, username: str) -> User | None:
+    """按用户名获取用户（预加载权限列表，用于登录认证）"""
+    result = await db.execute(
+        select(User).where(User.username == username).options(
+            selectinload(User.permissions)
+        )
+    )
+    return result.unique().scalar_one_or_none()
+
+
+async def get_user_auth_row_by_id(db: AsyncSession, user_id: int):
+    """按 ID 获取用户认证状态行（id/status/username，用于令牌刷新校验）"""
+    result = await db.execute(select(User.id, User.status, User.username).where(User.id == user_id))
+    return result.first()
+
+
+async def count_super_users(db: AsyncSession) -> int:
+    """统计超级管理员数量（用于保护最后一个超管）"""
+    super_count = await db.scalar(
+        select(func.count()).select_from(User).where(User.is_super == True)  # noqa: E712
+    )
+    return int(super_count or 0)

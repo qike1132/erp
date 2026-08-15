@@ -117,11 +117,12 @@
  * - 新增 / 编辑 / 删除客户，切换启用/停用状态
  * - 使用 useApiMutation 统一管理增删改操作
  */
-import { ref, reactive, computed, onUnmounted } from 'vue'
+import { ref, reactive, computed } from 'vue'
 import { useQuery, keepPreviousData } from '@tanstack/vue-query'
 import { showToast } from '@/composables/useToast'
 import { customerApi } from '@/api'
 import { useApiMutation } from '@/composables/useApiMutation'
+import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
 import type { Customer } from '@/types'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
@@ -139,22 +140,17 @@ const currentPage = ref(1)
 /** 每页条数 */
 const perPage = 15
 
-let searchTimer: ReturnType<typeof setTimeout> | null = null
+const { debounceSearch } = useDebouncedSearch()
 /** 防抖后的搜索关键词，用于触发查询 */
 const debouncedSearch = ref('')
 
 /** 搜索输入防抖处理（300ms），避免频繁请求 */
 function onSearchInput() {
-  if (searchTimer) clearTimeout(searchTimer)
-  searchTimer = setTimeout(() => {
+  debounceSearch(() => {
     debouncedSearch.value = searchTerm.value
     currentPage.value = 1
-  }, 300)
+  })
 }
-
-onUnmounted(() => {
-  if (searchTimer) clearTimeout(searchTimer)
-})
 
 /** 客户列表查询（服务端分页 + 搜索 + 状态筛选） */
 const { data: result, isLoading, isFetching } = useQuery({

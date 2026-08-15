@@ -4,7 +4,7 @@
       <div v-if="monthlySummary" class="pr-kpi-row">
         <KpiCard icon="cubes" color-class="pr-kpi-blue" label="月总产量" :value="monthlySummary.overall_quantity ?? 0" unit="件" />
         <KpiCard icon="yen-sign" color-class="pr-kpi-green" label="月总产值" :value="formatCurrency(monthlySummary.overall_value ?? 0)" />
-        <KpiCard icon="calendar-check" color-class="pr-kpi-amber" label="生产天数" :value="monthlySummary.daily_data?.filter((d: any) => d.total.quantity > 0).length || 0" unit="天" />
+        <KpiCard icon="calendar-check" color-class="pr-kpi-amber" label="生产天数" :value="monthlySummary.daily_data?.filter((d) => d.total.quantity > 0).length || 0" unit="天" />
       </div>
     </section>
 
@@ -81,20 +81,21 @@
 </template>
 
 <script setup lang="ts">
+import type { ComponentPublicInstance } from 'vue'
 import UiDataTable from '@/components/ui/UiDataTable.vue'
 import type { TableColumn } from '@/components/ui/UiDataTable.vue'
+import type { MonthlySummary } from '@/types'
 import KpiCard from './KpiCard.vue'
 
 defineProps<{
-  // 月报 API 实际返回 overall_quantity / overall_value / daily_data / monthly_departments，
-  // 与 @/types 的 MonthlySummary（monthly_total_quantity 等）字段名不一致；
-  // 原主视图 useQuery 返回 any 直接访问，此处保持一致以避免类型回归。
-  monthlySummary: any
+  // 月报数据类型见 @/types 的 MonthlySummary：
+  // overall_quantity / overall_value 为历史兼容的可选字段（后端实际不返回，?? 0 兜底）。
+  monthlySummary: MonthlySummary | null
   dailyDetailColumns: TableColumn[]
   formatCurrency: (v: number) => string
   formatMoney: (v: number) => string
   deptIcon: (d: string) => string
-  setChartRef: (el: any) => void
+  setChartRef: (el: Element | ComponentPublicInstance | null) => void
 }>()
 </script>
 

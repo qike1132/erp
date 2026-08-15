@@ -23,6 +23,14 @@ from fastapi_app.shared_models import (
 logger = logging.getLogger(__name__)
 
 
+async def get_supplier_for_update(db: AsyncSession, supplier_id: int) -> Supplier | None:
+    """按 ID 取供应商行锁（SELECT ... FOR UPDATE），供切换启用状态等写操作防并发覆盖。"""
+    result = await db.execute(
+        select(Supplier).where(Supplier.id == supplier_id).with_for_update()
+    )
+    return result.scalar_one_or_none()
+
+
 async def get_suppliers(db: AsyncSession, page: int = 1, per_page: int = 50, search: str = '') -> dict:
     query = select(Supplier)
     count_query = select(func.count(Supplier.id))

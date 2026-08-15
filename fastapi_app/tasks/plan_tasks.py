@@ -121,11 +121,14 @@ async def batch_import_plans_task(ctx, file_path: str, original_filename: str, u
                         elif row_month != detected_month:
                             errors.append(f'第{i}行: 月份不一致')
                             continue
-                        record = StagingPurchasePlan(session_id=session_id, customer_name=customer_name, product_name=product_name, barcode=barcode, quantity=quantity, plan_date=plan_date_val, plan_month=detected_month, remark=remark, is_validated=False, upload_batch_id=batch_id)
-                        session.add(record)
+                        # savepoint 隔离单行：行内异常仅回滚本行，不影响已 add 的行
+                        with session.begin_nested():
+                            record = StagingPurchasePlan(session_id=session_id, customer_name=customer_name, product_name=product_name, barcode=barcode, quantity=quantity, plan_date=plan_date_val, plan_month=detected_month, remark=remark, is_validated=False, upload_batch_id=batch_id)
+                            session.add(record)
+                        # savepoint 成功提交后才计数，失败行不计入 success_count
                         success_count += 1
-                    except (ValueError, TypeError, OSError) as e:
-                        session.rollback()
+                    except (ValueError, TypeError, OSError, SQLAlchemyError) as e:
+                        # savepoint 已自动回滚本行，不再整体 rollback（避免误伤已成功的行）
                         errors.append(f'第{i}行: {str(e)}')
                 session.commit()
                 return {'success': True, 'batch_id': batch_id, 'row_count': len(rows), 'success_count': success_count, 'error_count': len(errors), 'errors': errors[:50], 'task_id': job_id}

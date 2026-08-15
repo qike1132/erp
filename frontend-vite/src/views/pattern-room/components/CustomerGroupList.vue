@@ -71,107 +71,21 @@
           class="cgl-virtual-list"
         >
           <template #default="{ item: proj }">
-            <div
-              :class="['cgl-project-card', { active: selectedProjectId === proj.id, 'is-completed': proj.status === 'completed' }]"
-              role="button"
-              tabindex="0"
+            <ProjectCardItem
+              :proj="proj"
+              :selected="selectedProjectId === proj.id"
+              :maker-name="selectedGroup?.pattern_maker_name"
+              :display-number="projectDisplayNumbers.get(proj.id)"
+              :can-manage="canManage"
+              :thumb-loaded="thumbLoaded"
               @click="$emit('select-project', proj.id)"
               @keyup.enter="$emit('select-project', proj.id)"
-            >
-              <div class="cgl-card-left">
-                <div
-                  v-if="proj.product_image_url"
-                  class="cgl-card-thumb"
-                  :class="{ 'is-loaded': thumbLoaded.has(proj.id) }"
-                  role="button"
-                  title="点击查看大图"
-                  @click.stop="openImagePreview(proj.product_image_url!)"
-                >
-                  <!-- 骨架屏：图片加载完成前显示微光动画占位 -->
-                  <div class="cgl-thumb-skeleton" aria-hidden="true" />
-                  <!-- 模糊占位图（32px，blur-up）：滚动即见，清晰图加载后淡出 -->
-                  <img
-                    v-if="proj.product_image_blur_url"
-                    :src="proj.product_image_blur_url"
-                    class="cgl-thumb-blur"
-                    alt=""
-                    aria-hidden="true"
-                    decoding="async"
-                    fetchpriority="low"
-                  />
-                  <!-- 清晰缩略图：加载完成后淡入 -->
-                  <img
-                    :src="proj.product_image_thumbnail_url || proj.product_image_url"
-                    class="cgl-thumb-img"
-                    alt=""
-                    width="200"
-                    height="200"
-                    loading="lazy"
-                    decoding="async"
-                    fetchpriority="low"
-                    @error="onThumbError($event, proj)"
-                    @load="onThumbLoad(proj.id)"
-                  />
-                  <span v-if="proj.status === 'completed'" class="cgl-card-status-badge">
-                    <i class="fas fa-check-circle" aria-hidden="true" /> 已完成
-                  </span>
-                </div>
-                <div v-else class="cgl-card-thumb cgl-card-thumb-placeholder">
-                  <i class="fas fa-tshirt" aria-hidden="true" />
-                  <span v-if="proj.status === 'completed'" class="cgl-card-status-badge">
-                    <i class="fas fa-check-circle" aria-hidden="true" /> 已完成
-                  </span>
-                </div>
-              </div>
-              <div class="cgl-card-right">
-                <div class="cgl-card-info">
-                  <div class="cgl-card-line">
-                    <span class="cgl-card-label">时间：</span>
-                    <span class="cgl-card-value">{{ formatTime(proj.updated_at) }}</span>
-                  </div>
-                  <div class="cgl-card-line">
-                    <span class="cgl-card-label">名称：</span>
-                    <span class="cgl-card-value">{{ proj.product_name }}</span>
-                  </div>
-                  <div class="cgl-card-line">
-                    <span class="cgl-card-label">版师：</span>
-                    <span class="cgl-card-value">{{ selectedGroup?.pattern_maker_name || '-' }}</span>
-                  </div>
-                  <div class="cgl-card-line">
-                    <span class="cgl-card-label">编号：</span>
-                    <span class="cgl-card-value">{{ projectDisplayNumbers.get(proj.id) }}</span>
-                  </div>
-                </div>
-                <div v-if="canManage" class="cgl-card-actions">
-                  <button
-                    type="button"
-                    class="cgl-card-action cgl-card-action--edit"
-                    title="编辑该打样项目"
-                    @click.stop="$emit('edit-project', proj.id)"
-                  >
-                    <i class="fas fa-pen" aria-hidden="true" /> 编辑
-                  </button>
-                  <button
-                    v-if="proj.status === 'in_progress'"
-                    type="button"
-                    class="cgl-card-action cgl-card-action--done"
-                    title="标记为已完成"
-                    @click.stop="$emit('complete-project', proj.id)"
-                  >
-                    <i class="fas fa-check" aria-hidden="true" /> 完成
-                  </button>
-                  <button
-                    v-if="proj.status === 'in_progress'"
-                    type="button"
-                    class="cgl-card-action cgl-card-action--cancel"
-                    title="取消该打样项目"
-                    @click.stop="$emit('cancel-project', proj.id)"
-                  >
-                    <i class="fas fa-times" aria-hidden="true" /> 取消
-                  </button>
-                </div>
-              </div>
-            </div>
+              @preview="openImagePreview"
+              @thumb-load="onThumbLoad"
+              @edit="$emit('edit-project', $event)"
+              @complete="$emit('complete-project', $event)"
+              @cancel="$emit('cancel-project', $event)"
+            />
           </template>
         </VirtualList>
         <!-- 兜底：测量高度失败时不显示空白，恢复后自动渲染 -->
@@ -209,13 +123,23 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+/**
+ * CustomerGroupList — 版师分组列表（搜索 + 状态筛选 + 双栏 + 虚拟滚动）
+ * 拆分后职责：
+ *  - 卡片行渲染 → ProjectCardItem
+ *  - 虚拟滚动容器高度测量 → useVirtualAreaMeasure
+ *  - 分组选择与项目编号 → useProjectGrouping
+ */
+import { ref, watch, toRef, nextTick } from 'vue'
 import UiSpinner from '@/components/ui/UiSpinner.vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
 import EmptyState from './EmptyState.vue'
 import VirtualList from '@/components/ui/VirtualList.vue'
+import ProjectCardItem from './ProjectCardItem.vue'
 import { resolveStaticUrl } from '@/api/request'
 import type { PatternMakerGroup, ProjectSummary } from '@/api/patternRoom'
+import { useVirtualAreaMeasure } from '../composables/useVirtualAreaMeasure'
+import { useProjectGrouping } from '../composables/useProjectGrouping'
 
 const props = defineProps<{
   groups: PatternMakerGroup[]
@@ -262,104 +186,21 @@ function onStatusChange(value: string) {
 const PROJECT_CARD_H = 216
 const PROJECT_CARD_SLOT_H = PROJECT_CARD_H + 6
 
-/** 当前选中的版师 key */
-const selectedMakerKey = ref<string | null>(null)
-
-function groupKey(makerId: number | null): string {
-  return makerId != null ? String(makerId) : '_unassigned'
-}
-
-function isMakerSelected(makerId: number | null): boolean {
-  return selectedMakerKey.value === groupKey(makerId)
-}
-
-function selectMaker(makerId: number | null) {
-  selectedMakerKey.value = groupKey(makerId)
-}
-
-/** 当前选中的分组 */
-const selectedGroup = computed(() => {
-  if (!selectedMakerKey.value) return null
-  return props.groups.find((g) => groupKey(g.pattern_maker_id) === selectedMakerKey.value) ?? null
-})
+// ==================== 分组选择与项目编号 ====================
+const groupsRef = toRef(props, 'groups')
+const selectedProjectIdRef = toRef(props, 'selectedProjectId')
+const {
+  selectedMakerKey,
+  isMakerSelected,
+  selectMaker,
+  selectedGroup,
+  projectDisplayNumbers,
+} = useProjectGrouping(groupsRef, selectedProjectIdRef)
 
 // ==================== 虚拟滚动容器高度测量 ====================
-const projectAreaRef = ref<HTMLElement | null>(null)
-/**
- * 容器高度。初始为 0，模板靠 `v-else-if="projectAreaHeight > 0"` 守卫 VirtualList 渲染。
- * 由于父级 flex 链可能在数据加载后才完成布局，单次 onMounted 测量经常得到 0，
- * 这里采用多策略保证最终能拿到正确高度：
- *   1. onMounted 同步测量（best-effort）
- *   2. nextTick 后再次测量（父级 v-if/v-else 切换后）
- *   3. requestAnimationFrame 后测量（最终布局稳定）
- *   4. 监听自身 + 父级尺寸变化（ResizeObserver，仅在变化时触发）
- *   5. 监听 window resize（视口变化）
- *   6. 监听 groups 数据变化（分组重新渲染可能影响布局）
- */
-const projectAreaHeight = ref(0)
+const { areaRef: projectAreaRef, height: projectAreaHeight, measure: measureProjectArea } = useVirtualAreaMeasure()
 // VirtualList 为泛型组件，InstanceType 无法推导，用结构化类型描述所需句柄
 const virtualListRef = ref<{ scrollToTop: () => void } | null>(null)
-
-let areaResizeObserver: ResizeObserver | null = null
-let parentResizeObserver: ResizeObserver | null = null
-let windowResizeHandler: (() => void) | null = null
-
-function measureProjectArea() {
-  if (!projectAreaRef.value) return
-  // getBoundingClientRect 比 clientHeight 更可靠：不受 box-sizing 影响
-  const rect = projectAreaRef.value.getBoundingClientRect()
-  // 使用 offsetHeight 优先（已包含 padding），若为 0 则降级到 rect.height
-  const h = projectAreaRef.value.offsetHeight || Math.round(rect.height)
-  if (h > 0 && h !== projectAreaHeight.value) {
-    projectAreaHeight.value = h
-  }
-}
-
-function tryMeasureWithRetry() {
-  // 同步测量（此时通常 onMounted 刚执行）
-  measureProjectArea()
-  if (projectAreaHeight.value > 0) return
-  // nextTick 后再试（父级 v-if/v-else 切换可能影响布局）
-  nextTick(() => {
-    measureProjectArea()
-    if (projectAreaHeight.value > 0) return
-    // rAF 后再试（最终布局稳定阶段）
-    requestAnimationFrame(() => {
-      measureProjectArea()
-    })
-  })
-}
-
-onMounted(() => {
-  tryMeasureWithRetry()
-  if (projectAreaRef.value && typeof ResizeObserver !== 'undefined') {
-    areaResizeObserver = new ResizeObserver(measureProjectArea)
-    areaResizeObserver.observe(projectAreaRef.value)
-    // 同时监听父级（cgl-body / pr-left-pane）尺寸变化，
-    // 解决父级从 0 → 有数据时自身尺寸可能不变导致漏触发的问题
-    // 只需追踪最近一层 flex 父级即可，过深会增加无意义的回调
-    const parent = projectAreaRef.value.parentElement
-    if (parent) {
-      parentResizeObserver = new ResizeObserver(measureProjectArea)
-      parentResizeObserver.observe(parent)
-    }
-  }
-  // 监听 window resize（窄屏/宽屏切换、抽屉展开/收起等场景）
-  windowResizeHandler = () => {
-    // rAF 延迟，避免 resize 期间反复触发
-    requestAnimationFrame(measureProjectArea)
-  }
-  window.addEventListener('resize', windowResizeHandler)
-})
-
-onUnmounted(() => {
-  areaResizeObserver?.disconnect()
-  parentResizeObserver?.disconnect()
-  if (windowResizeHandler) {
-    window.removeEventListener('resize', windowResizeHandler)
-    windowResizeHandler = null
-  }
-})
 
 // groups 数据变化时（首次加载 / 新增后刷新 / 删除后刷新），
 // 父级布局可能因 v-else 分支从"空状态"切换到"双栏布局"而高度变化，
@@ -376,45 +217,15 @@ watch(selectedMakerKey, () => {
   virtualListRef.value?.scrollToTop()
 })
 
-/** 按日期生成递增编号：YYYYMMDD + 两位序号（同天内按 updated_at 顺序递增） */
-const projectDisplayNumbers = computed(() => {
-  const group = selectedGroup.value
-  if (!group) return new Map<number, string>()
-
-  const sorted = [...group.projects].sort((a, b) => {
-    const ta = new Date(a.updated_at).getTime()
-    const tb = new Date(b.updated_at).getTime()
-    if (ta !== tb) return ta - tb
-    return a.id - b.id
-  })
-
-  const counter = new Map<string, number>()
-  const result = new Map<number, string>()
-
-  for (const proj of sorted) {
-    const dateKey = proj.updated_at.slice(0, 10)
-    const dateNum = dateKey.replace(/-/g, '')
-    const next = (counter.get(dateKey) ?? 0) + 1
-    counter.set(dateKey, next)
-    result.set(proj.id, `${dateNum}${String(next).padStart(2, '0')}`)
-  }
-
-  return result
-})
-
+// ==================== 搜索 ====================
 function onSearchInput(e: Event) {
   const target = e.target as HTMLInputElement
   emit('search', target.value)
 }
 
-function formatTime(iso: string): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
-/** 已加载清晰缩略图的项目 id 集合（驱动骨架屏/模糊图淡出与清晰图淡入） */
+// ==================== 缩略图加载状态与大图预览 ====================
+/** 已加载清晰缩略图的项目 id 集合（驱动骨架屏/模糊图淡出与清晰图淡入）
+ *  由父级持有：虚拟滚动销毁/重建行组件后仍保留淡入状态，避免骨架动画重放 */
 const thumbLoaded = ref<Set<number>>(new Set())
 
 /** 图片大图预览 URL */
@@ -431,49 +242,6 @@ function onThumbLoad(projectId: number) {
     thumbLoaded.value = new Set(thumbLoaded.value).add(projectId)
   }
 }
-
-/**
- * 缩略图加载失败时回退到原图。
- * - 历史数据（缩略图未生成）会出现 404，需要回退
- * - 设置 data-fallback 标记位防止反复重试；回退图加载成功同样触发淡入
- */
-function onThumbError(e: Event, proj: { product_image_url?: string | null }) {
-  const img = e.target as HTMLImageElement
-  if (img.dataset.fallback || !proj.product_image_url) {
-    img.src = ''
-    return
-  }
-  img.dataset.fallback = '1'
-  img.src = proj.product_image_url
-}
-
-// 默认选中第一个分组
-watch(
-  () => props.groups,
-  (g) => {
-    if (g && g.length > 0 && selectedMakerKey.value === null) {
-      selectedMakerKey.value = groupKey(g[0]!.pattern_maker_id)
-    }
-  },
-  { immediate: true },
-)
-
-// 选中项目变化时，自动切换到包含该项目的版师分组
-// 场景：新增项目后选中新项目，但新项目所属版师与当前选中分组不同，
-// 若不切换分组，右侧卡片区域看不到新项目。
-watch(
-  () => props.selectedProjectId,
-  (newId) => {
-    if (newId == null) return
-    // 当前分组已包含该项目，无需切换
-    if (selectedGroup.value?.projects.some((p) => p.id === newId)) return
-    // 查找包含该项目的分组并切换
-    const targetGroup = props.groups.find((g) => g.projects.some((p) => p.id === newId))
-    if (targetGroup) {
-      selectedMakerKey.value = groupKey(targetGroup.pattern_maker_id)
-    }
-  },
-)
 </script>
 
 <style scoped>
@@ -654,210 +422,6 @@ watch(
 /* 虚拟滚动列表：滚动容器自身高度由 JS 测量注入 */
 .cgl-virtual-list {
   height: 100%;
-}
-
-/* 项目卡片（固定高度，配合虚拟滚动） */
-.cgl-project-card {
-  display: flex;
-  gap: 10px;
-  width: 100%;
-  height: 216px;
-  margin-bottom: 6px;
-  padding: 8px;
-  box-sizing: border-box;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: #fff;
-  cursor: pointer;
-  text-align: left;
-  transition: border-color 0.15s, background 0.15s;
-}
-
-.cgl-project-card:hover {
-  border-color: #ff9f4340;
-  background: #ff9f4308;
-}
-
-.cgl-project-card.active {
-  border-color: #ff9f43;
-  background: #ff9f4310;
-}
-
-.cgl-card-left {
-  flex-shrink: 0;
-}
-
-.cgl-card-thumb {
-  position: relative;
-  width: 200px;
-  height: 200px;
-  border-radius: 8px;
-  overflow: hidden;
-  background: var(--color-surface, #f3f4f6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-/* 骨架屏：微光扫过动画，清晰图加载完成后淡出 */
-.cgl-thumb-skeleton {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  background: linear-gradient(100deg, #f1f5f9 40%, #e2e8f0 50%, #f1f5f9 60%);
-  background-size: 200% 100%;
-  animation: cgl-shimmer 1.4s linear infinite;
-  opacity: 1;
-  transition: opacity 0.3s ease;
-}
-
-.cgl-card-thumb.is-loaded .cgl-thumb-skeleton {
-  opacity: 0;
-}
-
-@keyframes cgl-shimmer {
-  0% { background-position: 120% 0; }
-  100% { background-position: -120% 0; }
-}
-
-/* 模糊占位图（blur-up）：铺满 + CSS 模糊放大，清晰图加载后淡出 */
-.cgl-thumb-blur {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  filter: blur(10px);
-  transform: scale(1.15);
-  opacity: 1;
-  transition: opacity 0.3s ease;
-  pointer-events: none;
-}
-
-.cgl-card-thumb.is-loaded .cgl-thumb-blur {
-  opacity: 0;
-}
-
-/* 清晰缩略图：默认透明，加载完成后淡入（避免占位闪烁） */
-.cgl-thumb-img {
-  position: relative;
-  z-index: 3;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  opacity: 0;
-  transition: opacity 0.3s ease;
-}
-
-.cgl-card-thumb.is-loaded .cgl-thumb-img {
-  opacity: 1;
-}
-
-.cgl-card-thumb-placeholder i {
-  font-size: 48px;
-  color: var(--color-text-secondary);
-  opacity: 0.5;
-}
-
-/* 已完成角标（叠加在缩略图右上角） */
-.cgl-card-status-badge {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  z-index: 4;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  border-radius: 10px;
-  background: rgba(22, 163, 74, 0.92);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.6;
-  pointer-events: none;
-}
-
-/* 已完成卡片：绿色边框 */
-.cgl-project-card.is-completed {
-  border-color: #22c55e40;
-}
-.cgl-project-card.is-completed.active {
-  border-color: #16a34a;
-}
-
-.cgl-card-right {
-  flex: 1;
-  min-width: 0;
-}
-
-.cgl-card-info {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.cgl-card-line {
-  display: flex;
-  align-items: baseline;
-  gap: 4px;
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.cgl-card-label {
-  flex-shrink: 0;
-  color: var(--color-text-secondary);
-}
-
-.cgl-card-value {
-  min-width: 0;
-  color: var(--color-text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* 卡片操作按钮（编辑 / 完成） */
-.cgl-card-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.cgl-card-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 10px;
-  border: 1px solid var(--color-border-light, #e5e7eb);
-  border-radius: 6px;
-  background: #fff;
-  font-size: 12px;
-  color: var(--color-text-primary);
-  cursor: pointer;
-  transition: border-color 0.15s, color 0.15s, background 0.15s;
-}
-
-.cgl-card-action:hover {
-  border-color: #ff9f43;
-  color: #ff9f43;
-  background: #ff9f4308;
-}
-
-.cgl-card-action--done:hover {
-  border-color: #16a34a;
-  color: #16a34a;
-  background: #16a34a0a;
-}
-
-.cgl-card-action--cancel:hover {
-  border-color: #ef4444;
-  color: #ef4444;
-  background: #ef44440a;
 }
 </style>
 

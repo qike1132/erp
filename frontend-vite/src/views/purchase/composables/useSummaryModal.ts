@@ -3,16 +3,16 @@ import { purchaseApi } from '@/api'
 import { printHtml } from '@/utils/print'
 import { fmtQty } from '@/utils/formatQty'
 
-function buildFactoryHtml(data: { groups?: any[] }): string {
+function buildFactoryHtml(data: FactorySummaryData): string {
   let tableHtml = ''
-  data.groups?.forEach((group: any) => {
-    const suppliers = group.suppliers || []
+  data.groups?.forEach((group) => {
+    const suppliers: SupplierGroup[] = group.suppliers || []
     let globalFabricIdx = 0
-    suppliers.forEach((supplier: any) => {
-      supplier.fabrics?.forEach((fabric: any) => {
+    suppliers.forEach((supplier) => {
+      supplier.fabrics?.forEach((fabric) => {
         tableHtml += '<tr>'
         if (globalFabricIdx === 0) {
-          const rowCount = suppliers.reduce((s: number, sup: any) => s + (sup.fabrics?.length || 0), 0)
+          const rowCount = suppliers.reduce((s: number, sup: SupplierGroup) => s + (sup.fabrics?.length || 0), 0)
           tableHtml += `<td rowspan="${rowCount}" style="border:1px solid #333;padding:8px;text-align:center;font-weight:bold;">${group.customer_name}</td>`
           tableHtml += `<td rowspan="${rowCount}" style="border:1px solid #333;padding:8px;text-align:center;">${group.product_name}</td>`
           const qty = parseFloat(String(group.product_quantity || group.order_quantity || 0))
@@ -31,10 +31,10 @@ function buildFactoryHtml(data: { groups?: any[] }): string {
   return tableHtml
 }
 
-function buildSupplierHtml(groups: { supplierName: string; materials: any[] }[]): string {
+function buildSupplierHtml(groups: { supplierName: string; materials: MaterialItem[] }[]): string {
   let tableHtml = ''
   groups.forEach((g) => {
-    g.materials.forEach((m: any, mi: number) => {
+    g.materials.forEach((m: MaterialItem, mi: number) => {
       tableHtml += '<tr>'
       if (mi === 0)
         tableHtml += `<td rowspan="${g.materials.length}" style="border:1px solid #333;padding:8px;text-align:center;font-weight:bold;">${g.supplierName}</td>`
@@ -84,13 +84,17 @@ interface FactoryGroup {
   suppliers: SupplierGroup[]
 }
 
-interface FactorySummaryData {
+/** 工厂内部采购汇总响应（/purchase/factory-summary） */
+export interface FactorySummaryData {
   success: boolean
   message?: string
+  /** 选中订单数（模板展示用） */
+  order_count?: number
   groups: FactoryGroup[]
 }
 
-interface MaterialItem {
+/** 供应商采购汇总响应中的物料行（/purchase/supplier-summary） */
+export interface MaterialItem {
   material_name: string
   specification?: string
   total_quantity: number
@@ -98,9 +102,12 @@ interface MaterialItem {
   supplier_name?: string
 }
 
-interface SupplierSummaryData {
+/** 供应商采购汇总响应（/purchase/supplier-summary） */
+export interface SupplierSummaryData {
   success: boolean
   message?: string
+  /** 选中订单数（模板展示用） */
+  order_count?: number
   materials: MaterialItem[]
 }
 

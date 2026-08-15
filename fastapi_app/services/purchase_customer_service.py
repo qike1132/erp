@@ -106,3 +106,12 @@ async def get_customers_statistics(db: AsyncSession) -> dict:
         'inactive': total - active,
         'recently_updated': recently_updated,
     }
+
+
+async def get_customers_for_sync(db: AsyncSession, customer_ids: list[int] | None) -> list[Customer]:
+    """获取参与同步的客户列表（customer_ids 为空时返回全部，自 customer_routes.py 下沉）"""
+    query = select(Customer)
+    if customer_ids:
+        query = query.where(Customer.id.in_(customer_ids))
+    result = await db.execute(query)
+    return list(result.scalars().all())

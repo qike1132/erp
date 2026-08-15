@@ -4,6 +4,21 @@
  * OrderItem / StockInRecord 等通用类型从 @/types 复用，
  * 此处仅定义模块内部使用的类型。
  */
+import type { OrderItem } from '@/types'
+
+/**
+ * 订单详情数据（orderApi.detail 返回）
+ *
+ * API 实际包含 order_no / batch_no / customer / product 等扩展字段，
+ * 且兼容裸返回与 { data } 包裹两种结构；与 OrderItem 取交集描述。
+ */
+export type OrderDetailData = OrderItem & {
+  order_no?: string
+  batch_no?: string
+  customer?: string
+  product?: { id?: number; name?: string; barcode?: string; image?: string }
+  data?: OrderItem
+}
 
 /** 暂存列表项（录入页右栏） */
 export interface StagedItem {

@@ -246,11 +246,11 @@ async def delete_purchase_order(db: AsyncSession, order_id: int) -> dict:
     if not order:
         raise ValueError('采购订单不存在')
 
-    items_result = await db.execute(
-        select(PurchaseOrderItem).where(PurchaseOrderItem.order_id == order_id)
+    # 批量删除明细（单条 DELETE ... WHERE 语句），替代逐条 db.delete 的 N+1；
+    # order.items 关系为 lazy='raise'，不做集合赋空，后续 delete(order)+flush 不再访问该集合
+    await db.execute(
+        delete(PurchaseOrderItem).where(PurchaseOrderItem.order_id == order_id)
     )
-    for item in items_result.scalars().all():
-        await db.delete(item)
 
     await db.delete(order)
     await db.flush()

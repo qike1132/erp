@@ -157,6 +157,7 @@ import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { useAutoRefresh } from './composables/useAutoRefresh'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { showToast } from '@/composables/useToast'
+import { useExport } from '@/composables/useExport'
 
 // --- Composables ---
 const queryClient = useQueryClient()
@@ -361,14 +362,14 @@ function handleCompletedSearch() {
   completed.load()
 }
 
-async function handleExport() {
-  showToast('正在导出...', 'info')
-  try {
+// useCompletedOrders.exportOrders 返回 boolean，false 视为失败抛出以触发统一错误提示
+const { runExport } = useExport({ success: '已导出 下单查询汇总.xls' })
+
+function handleExport() {
+  runExport(async () => {
     const ok = await completed.exportOrders()
-    if (ok) showToast('已导出 下单查询汇总.xls', 'success')
-  } catch (err: unknown) {
-    showToast((err as Error).message || '导出失败', 'error')
-  }
+    if (!ok) throw new Error('导出失败')
+  })
 }
 
 function handleCompletedPageChange(page: number) {

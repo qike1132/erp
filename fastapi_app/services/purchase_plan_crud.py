@@ -52,6 +52,23 @@ INVENTORY_CACHE_TTL = 300
 SHIPMENT_RECORD_LOOKBACK_MONTHS = 12
 
 
+async def _get_shipped_fifo_map_safe(
+    db: AsyncSession, details: list, customer_name_map: dict | None = None, plan_month: str = '',
+) -> tuple[dict[int, int], bool]:
+    """FIFO 分配的读路径包装：查询不可用时返回显式降级标记，而非全 0 误导值。
+
+    fifo_allocation 在超时/异常时抛 RuntimeError('FIFO_ALLOCATION_UNAVAILABLE')；
+    读路径（列表/详情/进度/日历/汇总）在此捕获并降级：
+    返回空映射（不预填 0 值，调用方 .get(id, 0) 兜底）+ fifo_degraded=True 标记，
+    由响应显式告知前端数据不可信。写路径（_update_shipped_qty）不经过本包装，
+    保持异常传播以中止事务，避免把错误的 0 写入 shipped_qty。
+    """
+    try:
+        return await _get_shipped_fifo_map(db, details, customer_name_map, plan_month), False
+    except RuntimeError:
+        return {}, True
+
+
 def _schedule_post_commit(db: AsyncSession, callback: Callable[[], Awaitable[None]]) -> None:
     """注册事务提交成功后执行的异步回调。
 
@@ -135,14 +152,14 @@ async def get_plan_list(db: AsyncSession, year: int, month: int, customer_id: in
     # FIFO 分配出货数量
     all_details = [d for p in plans for d in p.details]
     customer_name_map = {p.id: p.customer_name for p in plans}
-    shipped_fifo_map = await _get_shipped_fifo_map(db, all_details, customer_name_map)
+    shipped_fifo_map, fifo_degraded = await _get_shipped_fifo_map_safe(db, all_details, customer_name_map)
     plan_list = []
     for plan in plans:
         detail_count = len(plan.details)
         total_quantity = sum(d.quantity for d in plan.details)
         total_shipped = sum(shipped_fifo_map.get(d.id, 0) for d in plan.details)
         plan_list.append({**plan.to_dict(), 'detail_count': detail_count, 'total_quantity': total_quantity, 'total_shipped': total_shipped, 'total_remaining': total_quantity - total_shipped})
-    return {'plans': plan_list, 'total': len(plan_list)}
+    return {'plans': plan_list, 'total': len(plan_list), 'fifo_degraded': fifo_degraded}
 
 async def get_plan_detail(db: AsyncSession, plan_id: int) -> dict:
     """获取主单 + 明细 + 库存对比 + 出货进度"""
@@ -155,7 +172,7 @@ async def get_plan_detail(db: AsyncSession, plan_id: int) -> dict:
     inventory_map = await _get_inventory_map(db)
     # FIFO 分配出货数量，覆盖缓存的 shipped_qty
     customer_name_map = {plan.id: plan.customer_name}
-    shipped_fifo_map = await _get_shipped_fifo_map(db, details, customer_name_map)
+    shipped_fifo_map, fifo_degraded = await _get_shipped_fifo_map_safe(db, details, customer_name_map)
     detail_list = []
     for d in details:
         key = (plan.customer_name, d.product_name)
@@ -547,14 +564,14 @@ async def get_shipment_progress(db: AsyncSession, plan_id: int) -> dict:
     details = detail_result.scalars().all()
     # FIFO 分配出货数量
     customer_name_map = {plan.id: plan.customer_name}
-    shipped_fifo_map = await _get_shipped_fifo_map(db, details, customer_name_map)
+    shipped_fifo_map, fifo_degraded = await _get_shipped_fifo_map_safe(db, details, customer_name_map)
     progress_list = []
     for d in details:
         shp_qty = shipped_fifo_map.get(d.id, 0)
         remaining = d.quantity - shp_qty
         percent = round(shp_qty / d.quantity * 100, 1) if d.quantity > 0 else 0
         progress_list.append({'detail_id': d.id, 'product_name': d.product_name, 'barcode': d.barcode, 'plan_qty': d.quantity, 'shipped_qty': shp_qty, 'remaining_qty': remaining, 'percent': percent, 'shipment_status': calc_shipment_status(d.quantity, shp_qty)})
-    return {'details': progress_list}
+    return {'details': progress_list, 'fifo_degraded': fifo_degraded}
 
 async def get_shipment_records(db: AsyncSession, plan_id: int) -> list[dict]:
     """获取指定计划关联的出货流水记录（直接从 stock_out 实时查询）"""
@@ -694,6 +711,7 @@ async def get_monthly_calendar(db: AsyncSession, year: int, month: int, customer
     rows = result.all()
 
     detail_shipped_map: dict[int, int] = {}
+    fifo_degraded = False
     if rows:
         detail_ids = list({row.detail_id for row in rows})
         detail_result = await db.execute(
@@ -711,7 +729,7 @@ async def get_monthly_calendar(db: AsyncSession, year: int, month: int, customer
         for row in rows:
             if row.plan_id not in customer_name_map:
                 customer_name_map[row.plan_id] = row.customer_name
-        shipped_fifo_map = await _get_shipped_fifo_map(db, all_details, customer_name_map, plan_month=plan_month)
+        shipped_fifo_map, fifo_degraded = await _get_shipped_fifo_map_safe(db, all_details, customer_name_map, plan_month=plan_month)
         detail_shipped_map = {d.id: shipped_fifo_map.get(d.id, 0) for d in all_details}
 
     plans_by_date: dict[str, list[dict]] = {}
@@ -737,7 +755,7 @@ async def get_monthly_calendar(db: AsyncSession, year: int, month: int, customer
         if row.customer_id not in customer_set:
             customer_set[row.customer_id] = {'id': row.customer_id, 'name': row.customer_name, 'icon_url': None}
 
-    return {'year': year, 'month': month, 'days_in_month': days_in_month, 'plans_by_date': plans_by_date, 'customers': await _enrich_customer_icon_urls(db, list(customer_set.values()))}
+    return {'year': year, 'month': month, 'days_in_month': days_in_month, 'plans_by_date': plans_by_date, 'customers': await _enrich_customer_icon_urls(db, list(customer_set.values())), 'fifo_degraded': fifo_degraded}
 
 
 async def _enrich_customer_icon_urls(db: AsyncSession, customers: list[dict]) -> list[dict]:
@@ -773,7 +791,7 @@ async def get_customer_summary(db: AsyncSession, year: int, month: int) -> dict:
     # FIFO 分配出货数量
     all_details = [d for plan in plans for d in plan.details]
     customer_name_map = {plan.id: plan.customer_name for plan in plans}
-    shipped_fifo_map = await _get_shipped_fifo_map(db, all_details, customer_name_map, plan_month=plan_month)
+    shipped_fifo_map, fifo_degraded = await _get_shipped_fifo_map_safe(db, all_details, customer_name_map, plan_month=plan_month)
     # 按 (customer_id, product_name) 聚合，避免同客户不同产品的重复计数
     product_summary: dict[tuple, dict] = {}
     for plan in plans:
@@ -803,7 +821,7 @@ async def get_customer_summary(db: AsyncSession, year: int, month: int) -> dict:
         s['remaining_qty'] += ps['remaining_qty']
         if ps['warning']:
             s['warning_count'] += 1
-    return {'customers': list(summary.values()), 'total_plan_qty': sum(s['plan_qty'] for s in summary.values()), 'total_inventory_qty': sum(s['inventory_qty'] for s in summary.values()), 'total_shipped_qty': sum(s['shipped_qty'] for s in summary.values()), 'total_remaining_qty': sum(s['remaining_qty'] for s in summary.values()), 'warning_count': sum(s['warning_count'] for s in summary.values())}
+    return {'customers': list(summary.values()), 'total_plan_qty': sum(s['plan_qty'] for s in summary.values()), 'total_inventory_qty': sum(s['inventory_qty'] for s in summary.values()), 'total_shipped_qty': sum(s['shipped_qty'] for s in summary.values()), 'total_remaining_qty': sum(s['remaining_qty'] for s in summary.values()), 'warning_count': sum(s['warning_count'] for s in summary.values()), 'fifo_degraded': fifo_degraded}
 
 async def get_inventory_compare(db: AsyncSession, year: int, month: int, customer_id: int=0) -> dict:
     """库存对比数据：每个计划明细的库存状态，单次 eager loading 查询"""

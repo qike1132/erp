@@ -9,7 +9,7 @@ import hashlib
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
@@ -24,7 +24,7 @@ from fastapi_app.services.numbering import generate_stockin_number, generate_sto
 from fastapi_app.services.notification_service import StockEvent, publish_stock_event
 from fastapi_app.shared.stock_concurrency import get_product_for_update
 from fastapi_app.core.business_rules import MAX_QUANTITY
-from fastapi_app.shared_models import Product, StockIn, StockOut, StockReturn
+from fastapi_app.shared_models import Order, Product, StockIn, StockOut, StockReturn
 from fastapi_app.utils import log_inventory_change
 # 领域事件总线：出库单创建时发布跨域事件
 from fastapi_app.core.domain_events import DomainEvent, DomainEventType, publish_with_retry as publish_domain_event
@@ -717,12 +717,16 @@ async def delete_stockreturn(db: AsyncSession, stockreturn_id: int) -> None:
 async def get_stockreturns(db: AsyncSession, stockout_id: int | None = None,
                            page: int = 1, per_page: int = 50) -> dict:
     """获取退货列表（支持按出货ID筛选，支持分页）"""
-    query = select(StockReturn)
+    # 构建共享过滤条件：stockout_id 为空时不加条件
+    # （此前 `== stockout_id if stockout_id else True` 在无筛选时退化为 `== True` 恒假，导致 total 恒为 0）
+    conditions = []
     if stockout_id:
-        query = query.where(StockReturn.stockout_id == stockout_id)
-    total = (await db.execute(select(func.count(StockReturn.id)).where(StockReturn.stockout_id == stockout_id if stockout_id else True))).scalar() or 0
+        conditions.append(StockReturn.stockout_id == stockout_id)
+    total = (await db.execute(select(func.count(StockReturn.id)).where(*conditions))).scalar() or 0
     result = await db.execute(
-        query.options(joinedload(StockReturn.product), joinedload(StockReturn.stockout))
+        select(StockReturn)
+        .where(*conditions)
+        .options(joinedload(StockReturn.product), joinedload(StockReturn.stockout))
         .order_by(StockReturn.return_date.desc())
         .offset((page - 1) * per_page).limit(per_page)
     )
@@ -1395,3 +1399,29 @@ async def batch_create_stockouts(db: AsyncSession, stockouts_data: list) -> dict
         results[orig_idx] = await _process_single_stockout(db, item)
     all_success = all(result is not None and result.get('success') for result in results)
     return {'success': all_success, 'results': results}
+
+
+async def get_stock_overview_stats(db: AsyncSession) -> dict:
+    """库存统计聚合（自 stock.py 端点下沉）：订单数量（常规+定制）与备货数量"""
+    # TODO(multi-sku-order): 此处按 Order.order_type 分组 sum(Order.quantity) 在多 SKU 下结果错误
+    # （order_type 为首 item 兼容值，quantity 为 sum of items），属 A 类统计待改造为 JOIN OrderItem。
+    order_regular = int((await db.execute(
+        select(func.coalesce(func.sum(Order.quantity), 0)).where(
+            and_(Order.order_type == 'regular', Order.is_deleted.isnot(True)))
+    )).scalar() or 0)
+
+    order_custom = int((await db.execute(
+        select(func.coalesce(func.sum(Order.quantity), 0)).where(
+            and_(Order.order_type == 'custom', Order.is_deleted.isnot(True)))
+    )).scalar() or 0)
+
+    stockin_quantity = int((await db.execute(
+        select(func.coalesce(func.sum(StockIn.quantity), 0))
+    )).scalar() or 0)
+
+    return {
+        'order_quantity': order_regular + order_custom,
+        'order_regular_quantity': order_regular,
+        'order_custom_quantity': order_custom,
+        'stockin_quantity': stockin_quantity,
+    }

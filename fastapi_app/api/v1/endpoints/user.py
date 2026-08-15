@@ -4,7 +4,6 @@
 所有端点均要求超级管理员权限（require_superuser）。
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -187,10 +186,7 @@ async def delete_user(
         raise HTTPException(status_code=404, detail='用户不存在')
     # 保护最后一个超级管理员，防止系统无法管理
     if target_user.is_super:
-        super_count = await db.scalar(
-            select(func.count()).select_from(User).where(User.is_super == True)  # noqa: E712
-        )
-        if super_count <= 1:
+        if await user_service.count_super_users(db) <= 1:
             raise HTTPException(status_code=400, detail='无法删除最后一个超级用户')
     async with db_transaction(db):
         await user_service.delete_user(db, user_id)

@@ -6,7 +6,43 @@ import { showToast } from '@/composables/useToast'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { getErrorMessage } from '@/types/errors'
 import type { OrderItem } from '@/types'
-import type { FormState, StagedItem, AvailableStockinItem } from './types'
+import type { FormState, StagedItem, AvailableStockinItem, OrderRecord, OrderDetailData } from './types'
+
+/** /aux/batch-submit-orders 批量提交响应（兼容裸返回与 { data } 包裹两种结构） */
+interface BatchSubmitOrdersResponse {
+  created_count?: number
+  results?: { success: boolean; error?: string }[]
+  data?: BatchSubmitOrdersResponse
+}
+
+/** /aux/available-stockins 响应（兼容数组与 { stockins } / { items } 包裹两种结构） */
+type AvailableStockinsResponse = { stockins?: AvailableStockinItem[]; items?: AvailableStockinItem[] } | AvailableStockinItem[]
+
+/** 暂存订单条目（/staging-orders 返回的原始结构） */
+interface StagingOrderItem {
+  order_type?: string
+  customer: string
+  product_id: number
+  product_name: string
+  quantity: number
+  order_date: string
+  note: string
+  deduct_stock: boolean
+  deduct_quantity?: number
+  country?: string
+}
+
+/** 暂存备货条目（/staging-stockins 返回的原始结构） */
+interface StagingStockinItem {
+  order_type?: string
+  customer: string
+  product_id: number
+  product_name: string
+  quantity: number
+  stockin_date: string
+  note: string
+  country?: string
+}
 
 /** 生成暂存项唯一标识（使用 crypto.randomUUID 确保无碰撞） */
 function genUid(): string {
@@ -67,11 +103,11 @@ export function useOrderActions(
 
       let orderFailed = false
       let stockinFailed = false
-      let orderRes: any = null
+      let orderRes: BatchSubmitOrdersResponse | null = null
 
       if (orderPayload.length) {
         try {
-          orderRes = await post('/aux/batch-submit-orders', { orders: orderPayload })
+          orderRes = await post<BatchSubmitOrdersResponse>('/aux/batch-submit-orders', { orders: orderPayload })
         } catch (e: unknown) {
           showToast(getErrorMessage(e, '订单提交失败'), 'error')
           orderFailed = true
@@ -101,12 +137,12 @@ export function useOrderActions(
         showToast(`订单已提交成功，但备货提交失败，请重新提交备货`, 'warning')
       } else if (!orderFailed && !stockinFailed) {
         if (orderPayload.length && orderRes) {
-          const resData: any = orderRes.data ?? orderRes
+          const resData = orderRes.data ?? orderRes
           const createdCount = resData?.created_count ?? 0
           const skuCount = orderPayload.length
           if (createdCount === 0) {
             // 订单全部失败：提取后端返回的错误详情
-            const failedResults = (resData?.results ?? []).filter((r: any) => !r.success)
+            const failedResults = (resData?.results ?? []).filter((r) => !r.success)
             const firstError = failedResults[0]?.error || '未知原因'
             showToast(`订单创建失败（0/${skuCount}）：${firstError}`, 'error')
           } else {
@@ -138,12 +174,12 @@ export function useOrderActions(
     editStagedData.value = data
     editStagedVisible.value = true
     if (data.type === 'order' && data.productId && data.customer) {
-      get('/aux/available-stockins', {
+      get<AvailableStockinsResponse>('/aux/available-stockins', {
         product_id: data.productId,
         customer: data.customer,
       })
-        .then((res: any) => {
-          const items: AvailableStockinItem[] = res.stockins ?? res.items ?? res ?? []
+        .then((res) => {
+          const items: AvailableStockinItem[] = Array.isArray(res) ? res : (res.stockins ?? res.items ?? [])
           editAvailableStock.value = items.reduce(
             (s: number, i: AvailableStockinItem) => s + (i.available ?? i.quantity - (i.deducted || 0)),
             0,
@@ -189,10 +225,10 @@ export function useOrderActions(
       if (isOrder.value) {
         await post('/staging-orders/import', fd)
         showToast('导入成功', 'success')
-        const res = await get<{ staging_orders?: unknown[]; items?: unknown[] }>('/staging-orders')
+        const res = await get<{ staging_orders?: StagingOrderItem[]; items?: StagingOrderItem[] }>('/staging-orders')
         const items = res.staging_orders ?? res.items ?? []
         stagedItems.value.push(
-          ...items.map((i: any): StagedItem => ({
+          ...items.map((i): StagedItem => ({
             uid: genUid(),
             type: 'order',
             orderType: i.order_type === 'custom' ? 'custom' : 'normal',
@@ -210,10 +246,10 @@ export function useOrderActions(
       } else {
         await post('/staging-stockins/import', fd)
         showToast('导入成功', 'success')
-        const res = await get<{ staging_stockins?: unknown[]; items?: unknown[] }>('/staging-stockins')
+        const res = await get<{ staging_stockins?: StagingStockinItem[]; items?: StagingStockinItem[] }>('/staging-stockins')
         const items = res.staging_stockins ?? res.items ?? []
         stagedItems.value.push(
-          ...items.map((i: any): StagedItem => ({
+          ...items.map((i): StagedItem => ({
             uid: genUid(),
             type: 'stockin',
             orderType: i.order_type === 'custom' ? 'custom' : 'normal',
@@ -239,17 +275,17 @@ export function useOrderActions(
 
   // ===== Detail dialog & edit order =====
   const detailOpen = ref(false)
-  const detailData = ref<any>(null)
+  const detailData = ref<OrderDetailData | null>(null)
   const editForm = reactive({ quantity: 1, deductQuantity: 0, note: '' })
   const availableStockin = ref(0)
   const saving = ref(false)
   /** 标记抵扣更新是否待重试（第一次成功、第二次失败时） */
   const deductRetryPending = ref(false)
 
-  async function openDetail(item: any) {
+  async function openDetail(item: OrderRecord) {
     try {
-      const res = await orderApi.detail(item.id) as OrderItem & { product?: { id?: number }; customer?: string; data?: OrderItem }
-      const data = (res.data ?? res) as typeof res
+      const res = await orderApi.detail(item.id) as OrderDetailData
+      const data = (res.data ?? res) as OrderDetailData
       detailData.value = data
       editForm.quantity = data.quantity || 1
       editForm.deductQuantity = data.deduct_quantity || 0

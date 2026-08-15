@@ -4,7 +4,8 @@ import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
 import type { ApiResponse, PurchaseOrder } from '@/types'
 
-interface QuickFilter {
+/** 快速筛选配置（/purchase/quick-filters 返回） */
+export interface QuickFilter {
   id: string
   name?: string
   filters?: { start_date?: string; end_date?: string }

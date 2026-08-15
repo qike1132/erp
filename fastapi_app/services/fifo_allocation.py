@@ -85,15 +85,17 @@ async def _get_shipped_fifo_map(db: AsyncSession, plan_details: list, customer_n
             await db.execute(text("RESET statement_timeout"))
         except (SQLAlchemyError, OSError):
             logger.warning("RESET statement_timeout 失败，连接可能被污染", exc_info=True)
-        logger.error(f'FIFO查询超时 plan_month={plan_month}，返回空映射降级')
-        return {d.id: 0 for d in plan_details}
-    except Exception as e:  # defensive: FIFO查询异常时返回空分配降级
+        logger.exception('FIFO查询超时 plan_month=%s', plan_month)
+        # 不再返回全 0 降级值（会被业务误读为"无出货"），改为抛出明确异常，
+        # 由调用方决定降级策略（显式标记或失败）
+        raise RuntimeError('FIFO_ALLOCATION_UNAVAILABLE') from None
+    except Exception as e:  # defensive: FIFO查询异常时抛出明确异常，由调用方决定降级策略
         try:
             await db.execute(text("RESET statement_timeout"))
         except (SQLAlchemyError, OSError):
             pass
-        logger.error(f'FIFO查询异常: {e}，返回空映射降级', exc_info=True)
-        return {d.id: 0 for d in plan_details}
+        logger.exception('FIFO查询异常: %s', e)
+        raise RuntimeError('FIFO_ALLOCATION_UNAVAILABLE') from e
 
 
 async def _fifo_query_with_timeout(db: AsyncSession, plan_details: list, customer_name_map: dict | None, plan_month: str) -> dict[int, int]:

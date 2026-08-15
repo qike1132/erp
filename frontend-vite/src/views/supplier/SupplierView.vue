@@ -174,7 +174,7 @@
  * - 新增 / 编辑 / 删除供应商
  * - 使用 TanStack Vue Query 管理服务端状态
  */
-import { ref, reactive, computed, onUnmounted } from 'vue'
+import { ref, reactive, computed } from 'vue'
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/vue-query'
 import { supplierApi } from '@/api'
 import UiButton from '@/components/ui/UiButton.vue'
@@ -182,6 +182,7 @@ import UiDialog from '@/components/ui/UiDialog.vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { showToast } from '@/composables/useToast'
+import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { formatDate } from '@/utils/format'
 import type { Supplier } from '@/types'
@@ -198,17 +199,16 @@ const currentPage = ref(1)
 /** 每页条数 */
 const perPage = 20
 
-let searchTimer: ReturnType<typeof setTimeout> | null = null
+const { debounceSearch } = useDebouncedSearch()
 /** 防抖后的搜索关键词，用于触发查询 */
 const debouncedSearch = ref('')
 
 /** 搜索输入防抖处理（300ms），避免频繁请求 */
 function onSearchInput() {
-  if (searchTimer) clearTimeout(searchTimer)
-  searchTimer = setTimeout(() => {
+  debounceSearch(() => {
     debouncedSearch.value = searchTerm.value
     currentPage.value = 1
-  }, 300)
+  })
 }
 
 /** 清空搜索条件并重置到第一页 */
@@ -217,10 +217,6 @@ function clearSearch() {
   debouncedSearch.value = ''
   currentPage.value = 1
 }
-
-onUnmounted(() => {
-  if (searchTimer) clearTimeout(searchTimer)
-})
 
 /** 供应商列表查询（服务端分页 + 搜索） */
 const { data: result, isLoading, isFetching } = useQuery({

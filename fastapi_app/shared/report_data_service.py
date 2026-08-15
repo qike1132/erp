@@ -79,13 +79,14 @@ def _apply_date_filters(query, date_field, start_date, end_date):
             start = datetime.strptime(start_date, '%Y-%m-%d')
             query = query.filter(date_field >= start)
         except ValueError:
-            pass
+            # 非法日期参数被忽略时留痕，避免静默过滤失败难以排查
+            logger.warning('非法日期参数被忽略: start_date=%r', start_date)
     if end_date:
         try:
             end = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
             query = query.filter(date_field < end)
         except ValueError:
-            pass
+            logger.warning('非法日期参数被忽略: end_date=%r', end_date)
     return query
 
 

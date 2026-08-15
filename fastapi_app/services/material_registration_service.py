@@ -410,6 +410,18 @@ async def export_registrations(db, order_no: str = '', supplier: str = '',
         )
 
     query = query.order_by(MaterialRegistration.create_time.desc()).limit(5000)
+
+    # 独立 COUNT 查询总数，检测 limit(5000) 截断并向日志留痕（本函数返回 BytesIO 文件流，
+    # 响应头需由 endpoint 层设置，故此处以 WARNING 日志标注截断事实与筛选条件）
+    count_query = select(func.count()).select_from(query.order_by(None).limit(None).subquery())
+    total_count = (await db.execute(count_query)).scalar() or 0
+    if total_count > 5000:
+        logger.warning(
+            '来料登记导出被截断：符合条件的记录共 %d 条，仅导出前 5000 条 '
+            '（order_no=%r, supplier=%r, customer_name=%r, category=%r, %s~%s）',
+            total_count, order_no, supplier, customer_name, material_category, start_date, end_date,
+        )
+
     result = await db.execute(query)
     registrations = list(result.unique().scalars().all())
 

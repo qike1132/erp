@@ -1,0 +1,368 @@
+<template>
+  <div
+    :class="['cgl-project-card', { active: selected, 'is-completed': proj.status === 'completed' }]"
+    role="button"
+    tabindex="0"
+  >
+    <div class="cgl-card-left">
+      <div
+        v-if="proj.product_image_url"
+        class="cgl-card-thumb"
+        :class="{ 'is-loaded': thumbLoaded.has(proj.id) }"
+        role="button"
+        title="点击查看大图"
+        @click.stop="emit('preview', proj.product_image_url!)"
+      >
+        <!-- 骨架屏：图片加载完成前显示微光动画占位 -->
+        <div class="cgl-thumb-skeleton" aria-hidden="true" />
+        <!-- 模糊占位图（32px，blur-up）：滚动即见，清晰图加载后淡出 -->
+        <img
+          v-if="proj.product_image_blur_url"
+          :src="proj.product_image_blur_url"
+          class="cgl-thumb-blur"
+          alt=""
+          aria-hidden="true"
+          decoding="async"
+          fetchpriority="low"
+        />
+        <!-- 清晰缩略图：加载完成后淡入 -->
+        <img
+          :src="proj.product_image_thumbnail_url || proj.product_image_url"
+          class="cgl-thumb-img"
+          alt=""
+          width="200"
+          height="200"
+          loading="lazy"
+          decoding="async"
+          fetchpriority="low"
+          @error="onThumbError($event, proj)"
+          @load="emit('thumb-load', proj.id)"
+        />
+        <span v-if="proj.status === 'completed'" class="cgl-card-status-badge">
+          <i class="fas fa-check-circle" aria-hidden="true" /> 已完成
+        </span>
+      </div>
+      <div v-else class="cgl-card-thumb cgl-card-thumb-placeholder">
+        <i class="fas fa-tshirt" aria-hidden="true" />
+        <span v-if="proj.status === 'completed'" class="cgl-card-status-badge">
+          <i class="fas fa-check-circle" aria-hidden="true" /> 已完成
+        </span>
+      </div>
+    </div>
+    <div class="cgl-card-right">
+      <div class="cgl-card-info">
+        <div class="cgl-card-line">
+          <span class="cgl-card-label">时间：</span>
+          <span class="cgl-card-value">{{ formatTime(proj.updated_at) }}</span>
+        </div>
+        <div class="cgl-card-line">
+          <span class="cgl-card-label">名称：</span>
+          <span class="cgl-card-value">{{ proj.product_name }}</span>
+        </div>
+        <div class="cgl-card-line">
+          <span class="cgl-card-label">版师：</span>
+          <span class="cgl-card-value">{{ makerName || '-' }}</span>
+        </div>
+        <div class="cgl-card-line">
+          <span class="cgl-card-label">编号：</span>
+          <span class="cgl-card-value">{{ displayNumber }}</span>
+        </div>
+      </div>
+      <div v-if="canManage" class="cgl-card-actions">
+        <button
+          type="button"
+          class="cgl-card-action cgl-card-action--edit"
+          title="编辑该打样项目"
+          @click.stop="emit('edit', proj.id)"
+        >
+          <i class="fas fa-pen" aria-hidden="true" /> 编辑
+        </button>
+        <button
+          v-if="proj.status === 'in_progress'"
+          type="button"
+          class="cgl-card-action cgl-card-action--done"
+          title="标记为已完成"
+          @click.stop="emit('complete', proj.id)"
+        >
+          <i class="fas fa-check" aria-hidden="true" /> 完成
+        </button>
+        <button
+          v-if="proj.status === 'in_progress'"
+          type="button"
+          class="cgl-card-action cgl-card-action--cancel"
+          title="取消该打样项目"
+          @click.stop="emit('cancel', proj.id)"
+        >
+          <i class="fas fa-times" aria-hidden="true" /> 取消
+        </button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+/**
+ * ProjectCardItem — 打样项目卡片（虚拟列表行）
+ * 模板与样式自 CustomerGroupList.vue 原样搬移。
+ * 注意：卡片根元素的 click / keyup.enter（选中项目）由父组件通过
+ * attrs 透传绑定（保持原 VirtualList 插槽内联写法），本组件不再重复绑定。
+ */
+import type { ProjectSummary } from '@/api/patternRoom'
+
+defineProps<{
+  /** 项目摘要数据 */
+  proj: ProjectSummary
+  /** 是否为当前选中项目（原 selectedProjectId === proj.id） */
+  selected: boolean
+  /** 版师姓名（原 selectedGroup?.pattern_maker_name） */
+  makerName: string | undefined
+  /** 展示编号（原 projectDisplayNumbers.get(proj.id)） */
+  displayNumber: string | undefined
+  /** 是否可管理（显示操作按钮） */
+  canManage: boolean
+  /** 已加载清晰缩略图的项目 id 集合（父级持有，保证虚拟滚动重建后淡入状态不丢） */
+  thumbLoaded: Set<number>
+}>()
+
+const emit = defineEmits<{
+  /** 点击缩略图查看大图 */
+  preview: [url: string]
+  /** 清晰缩略图加载完成（父级记录进 thumbLoaded，驱动 blur-up 过渡） */
+  'thumb-load': [projectId: number]
+  /** 编辑项目 */
+  edit: [id: number]
+  /** 标记项目完成 */
+  complete: [id: number]
+  /** 取消项目 */
+  cancel: [id: number]
+}>()
+
+/** 时间格式化（原组件内 formatTime 原样搬移） */
+function formatTime(iso: string): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+/**
+ * 缩略图加载失败时回退到原图。
+ * - 历史数据（缩略图未生成）会出现 404，需要回退
+ * - 设置 data-fallback 标记位防止反复重试；回退图加载成功同样触发淡入
+ */
+function onThumbError(e: Event, proj: { product_image_url?: string | null }) {
+  const img = e.target as HTMLImageElement
+  if (img.dataset.fallback || !proj.product_image_url) {
+    img.src = ''
+    return
+  }
+  img.dataset.fallback = '1'
+  img.src = proj.product_image_url
+}
+</script>
+
+<style scoped>
+/* 项目卡片（固定高度，配合虚拟滚动） */
+.cgl-project-card {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  height: 216px;
+  margin-bottom: 6px;
+  padding: 8px;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.cgl-project-card:hover {
+  border-color: #ff9f4340;
+  background: #ff9f4308;
+}
+
+.cgl-project-card.active {
+  border-color: #ff9f43;
+  background: #ff9f4310;
+}
+
+.cgl-card-left {
+  flex-shrink: 0;
+}
+
+.cgl-card-thumb {
+  position: relative;
+  width: 200px;
+  height: 200px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--color-surface, #f3f4f6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* 骨架屏：微光扫过动画，清晰图加载完成后淡出 */
+.cgl-thumb-skeleton {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(100deg, #f1f5f9 40%, #e2e8f0 50%, #f1f5f9 60%);
+  background-size: 200% 100%;
+  animation: cgl-shimmer 1.4s linear infinite;
+  opacity: 1;
+  transition: opacity 0.3s ease;
+}
+
+.cgl-card-thumb.is-loaded .cgl-thumb-skeleton {
+  opacity: 0;
+}
+
+@keyframes cgl-shimmer {
+  0% { background-position: 120% 0; }
+  100% { background-position: -120% 0; }
+}
+
+/* 模糊占位图（blur-up）：铺满 + CSS 模糊放大，清晰图加载后淡出 */
+.cgl-thumb-blur {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(10px);
+  transform: scale(1.15);
+  opacity: 1;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+
+.cgl-card-thumb.is-loaded .cgl-thumb-blur {
+  opacity: 0;
+}
+
+/* 清晰缩略图：默认透明，加载完成后淡入（避免占位闪烁） */
+.cgl-thumb-img {
+  position: relative;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.cgl-card-thumb.is-loaded .cgl-thumb-img {
+  opacity: 1;
+}
+
+.cgl-card-thumb-placeholder i {
+  font-size: 48px;
+  color: var(--color-text-secondary);
+  opacity: 0.5;
+}
+
+/* 已完成角标（叠加在缩略图右上角） */
+.cgl-card-status-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(22, 163, 74, 0.92);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.6;
+  pointer-events: none;
+}
+
+/* 已完成卡片：绿色边框 */
+.cgl-project-card.is-completed {
+  border-color: #22c55e40;
+}
+.cgl-project-card.is-completed.active {
+  border-color: #16a34a;
+}
+
+.cgl-card-right {
+  flex: 1;
+  min-width: 0;
+}
+
+.cgl-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cgl-card-line {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.cgl-card-label {
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+}
+
+.cgl-card-value {
+  min-width: 0;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 卡片操作按钮（编辑 / 完成） */
+.cgl-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.cgl-card-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border: 1px solid var(--color-border-light, #e5e7eb);
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.cgl-card-action:hover {
+  border-color: #ff9f43;
+  color: #ff9f43;
+  background: #ff9f4308;
+}
+
+.cgl-card-action--done:hover {
+  border-color: #16a34a;
+  color: #16a34a;
+  background: #16a34a0a;
+}
+
+.cgl-card-action--cancel:hover {
+  border-color: #ef4444;
+  color: #ef4444;
+  background: #ef44440a;
+}
+</style>

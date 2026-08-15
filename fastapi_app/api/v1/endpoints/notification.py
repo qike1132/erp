@@ -6,12 +6,16 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import get_current_user_id
 from fastapi_app.core.exceptions import db_transaction
+from fastapi_app.services.notification_service import (
+    count_unread_notifications,
+    get_notifications_page,
+    mark_all_notifications_read,
+)
 from fastapi_app.shared_models import Notification
 
 logger = logging.getLogger(__name__)
@@ -24,12 +28,8 @@ async def get_unread_count(
     db: AsyncSession = Depends(get_async_read_db),
 ) -> dict:
     """返回当前用户的未读通知数。"""
-    count = await db.scalar(
-        select(func.count())
-        .select_from(Notification)
-        .where(Notification.user_id == user_id, Notification.is_read == False)  # noqa: E712
-    )
-    return {"count": int(count or 0)}
+    count = await count_unread_notifications(db, user_id)
+    return {"count": count}
 
 
 @router.get("")
@@ -41,23 +41,7 @@ async def list_notifications(
     db: AsyncSession = Depends(get_async_read_db),
 ) -> dict:
     """获取当前用户的通知分页列表（按 created_at desc）。"""
-    base_filters = [Notification.user_id == user_id]
-    if only_unread:
-        base_filters.append(Notification.is_read == False)  # noqa: E712
-
-    total = await db.scalar(
-        select(func.count()).select_from(Notification).where(*base_filters)
-    )
-    total = int(total or 0)
-
-    result = await db.execute(
-        select(Notification)
-        .where(*base_filters)
-        .order_by(Notification.created_at.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-    )
-    notifications = result.scalars().all()
+    notifications, total = await get_notifications_page(db, user_id, page, page_size, only_unread)
 
     return {
         "total": total,
@@ -94,10 +78,5 @@ async def mark_all_as_read(
 ) -> dict:
     """标记当前用户所有未读通知为已读。"""
     async with db_transaction(db):
-        result = await db.execute(
-            update(Notification)
-            .where(Notification.user_id == user_id, Notification.is_read == False)  # noqa: E712
-            .values(is_read=True)
-        )
-        updated = result.rowcount or 0
+        updated = await mark_all_notifications_read(db, user_id)
     return {"success": True, "marked_count": int(updated)}

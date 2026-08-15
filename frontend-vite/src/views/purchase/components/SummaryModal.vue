@@ -243,15 +243,16 @@
 import { ref, computed } from 'vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import { fmtQty as formatQty } from '@/utils/formatQty'
+import type { FactorySummaryData, SupplierSummaryData, MaterialItem } from '../composables/useSummaryModal'
 
 const props = defineProps<{
   open: boolean
-  factoryData: any
-  supplierData: any
+  factoryData: FactorySummaryData | null
+  supplierData: SupplierSummaryData | null
   editMode: boolean
   lossRate: number
   orderCount: number
-  supplierGroups: { supplierName: string; materials: any[] }[]
+  supplierGroups: { supplierName: string; materials: MaterialItem[] }[]
 }>()
 
 const emit = defineEmits<{
@@ -279,15 +280,15 @@ function onLossRateInput(e: Event) {
 
 const factoryGrandTotal = computed(() => {
   let t = 0
-  props.factoryData?.groups?.forEach((g: any) =>
-    g.suppliers?.forEach((s: any) => s.fabrics?.forEach((f: any) => (t += parseFloat(f.quantity) || 0))),
+  props.factoryData?.groups?.forEach((g) =>
+    g.suppliers?.forEach((s) => s.fabrics?.forEach((f) => (t += parseFloat(String(f.quantity)) || 0))),
   )
   return t
 })
 
 const supplierGrandTotal = computed(() => {
   let t = 0
-  props.supplierGroups.forEach((g) => g.materials.forEach((m) => (t += parseFloat(m.total_quantity) || 0)))
+  props.supplierGroups.forEach((g) => g.materials.forEach((m) => (t += parseFloat(String(m.total_quantity)) || 0)))
   return t
 })
 
@@ -298,7 +299,7 @@ function isFirstFabricRow(gi: number | string, si: number | string, fi: number |
 function getGroupFabricCount(gi: number | string): number {
   const group = props.factoryData?.groups?.[Number(gi)]
   if (!group) return 1
-  return (group.suppliers || []).reduce((sum: number, s: any) => sum + (s.fabrics?.length || 0), 0)
+  return group.suppliers.reduce((sum: number, s) => sum + (s.fabrics?.length || 0), 0)
 }
 </script>
 

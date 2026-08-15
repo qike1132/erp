@@ -157,7 +157,7 @@ defineEmits<{
   toggleSelection: [compositeId: string]
   oneClickGenerate: []
   quickGenerate: [compositeId: string]
-  noBomError: [order: any]
+  noBomError: [order: UnprocessedOrder]
   changePage: [page: number]
 }>()
 </script>

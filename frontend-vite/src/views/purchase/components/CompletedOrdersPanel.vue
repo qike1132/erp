@@ -207,6 +207,7 @@ import UiDatePicker from '@/components/ui/UiDatePicker.vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
 import type { PurchaseOrder } from '@/types'
 import { formatDate, formatNumber } from '@/utils/format'
+import type { QuickFilter } from '../composables/useCompletedOrders'
 
 defineProps<{
   orders: PurchaseOrder[]
@@ -216,7 +217,7 @@ defineProps<{
   currentPage: number
   totalPages: number
   filters: Record<string, string>
-  quickFilters: any[]
+  quickFilters: QuickFilter[]
   currentQuickFilterId: string | null
 }>()
 

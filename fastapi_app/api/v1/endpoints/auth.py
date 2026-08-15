@@ -10,18 +10,15 @@ from datetime import timedelta
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 from starlette.concurrency import run_in_threadpool
 
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import create_access_token, create_refresh_token, get_current_user_id
 from fastapi_app.core.exceptions import db_transaction
-from fastapi_app.core.limiter import limiter
-from fastapi_app.shared_models import User
+from fastapi_app.core.limiter import limiter, memory_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -113,10 +110,9 @@ async def get_current_user_info(
     前端在初始化时调用此接口获取用户详情和权限，
     用于前端路由守卫和导航菜单渲染。
     """
-    result = await db.execute(
-        select(User).options(selectinload(User.permissions)).where(User.id == user_id)
-    )
-    user = result.scalar_one_or_none()
+    from fastapi_app.services import user_service
+
+    user = await user_service.get_user_with_permissions_by_id(db, user_id)
     if not user or not user.status:
         raise HTTPException(status_code=401, detail="用户不存在或已禁用")
 
@@ -215,8 +211,23 @@ async def api_login(
                 )
     except HTTPException:
         raise
-    except Exception:  # defensive: Redis限流不可用时降级允许登录
-        logger.warning("[Login] Redis 限流不可用，降级为允许登录: IP=%s", key)
+    except Exception:  # defensive: Redis限流不可用时降级到进程内存滑动窗口限流
+        # 内存降级：多 worker 间不共享，仅进程级防护，但不再无条件放行
+        if not memory_limiter.hit(f"login_burst:{key}", LOGIN_BURST_WINDOW, LOGIN_BURST_LIMIT):
+            logger.warning("[Login] 登录尝试过快（内存限流），1分钟内超过%d次: IP=%s", LOGIN_BURST_LIMIT, key)
+            raise HTTPException(
+                status_code=429,
+                detail="登录尝试过于频繁，请1分钟后重试",
+                headers={"Retry-After": str(LOGIN_BURST_WINDOW)},
+            )
+        if not memory_limiter.hit(f"login_attempt:{key}", LOGIN_ATTEMPT_WINDOW, LOGIN_ATTEMPT_LIMIT):
+            logger.warning("[Login] 登录尝试过多（内存限流），暂时锁定: IP=%s", key)
+            raise HTTPException(
+                status_code=429,
+                detail="登录尝试过多，请5分钟后重试",
+                headers={"Retry-After": str(LOGIN_ATTEMPT_WINDOW)},
+            )
+        logger.warning("[Login] Redis 限流不可用，已降级为进程内存限流: IP=%s", key)
 
     username = data.username.strip()
     password = data.password
@@ -229,12 +240,9 @@ async def api_login(
         logger.info(f"[Login] 登录失败: 密码过长, IP={key}")
         raise HTTPException(status_code=400, detail="密码长度不能超过128位")
 
-    result = await db.execute(
-        select(User).where(User.username == username).options(
-            selectinload(User.permissions)
-        )
-    )
-    user = result.scalar_one_or_none()
+    from fastapi_app.services import user_service
+
+    user = await user_service.get_user_with_permissions_by_username(db, username)
 
     from fastapi_app.core.security import verify_password as _vp
     dummy_hash = "$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
@@ -423,12 +431,10 @@ async def api_refresh_token(
         raise HTTPException(status_code=401, detail="缺少刷新令牌")
 
     try:
-        payload = _decode_jwt_token(refresh_token)
+        # 类型校验（type == 'refresh'）由 _decode_jwt_token 的 expected_type 参数统一处理
+        payload = _decode_jwt_token(refresh_token, expected_type='refresh')
     except HTTPException:
         raise HTTPException(status_code=401, detail="刷新令牌无效或已过期")
-
-    if payload.get("type") != "refresh":
-        raise HTTPException(status_code=401, detail="令牌类型错误")
 
     jti = payload.get("jti")
     if await is_token_revoked(jti):
@@ -438,8 +444,9 @@ async def api_refresh_token(
     if not user_id:
         raise HTTPException(status_code=401, detail="刷新令牌无效")
 
-    result = await db.execute(select(User.id, User.status, User.username).where(User.id == int(user_id)))
-    user_row = result.first()
+    from fastapi_app.services import user_service
+
+    user_row = await user_service.get_user_auth_row_by_id(db, int(user_id))
     if not user_row or not user_row.status:
         raise HTTPException(status_code=401, detail="用户不存在或已被禁用")
 

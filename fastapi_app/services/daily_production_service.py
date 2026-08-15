@@ -127,7 +127,8 @@ async def get_records(
     )
     rows = result.all()
     records = [r[0] for r in rows]
-    total = rows[0][1] if rows else 0
+    # total 用独立 COUNT 查询获取：请求页越界时 rows 为空，此前从 rows[0] 取值会误报 0
+    total = int((await db.execute(select(func.count(DailyProductionRecord.id)).where(*conditions))).scalar() or 0)
     total_qty = rows[0][2] if rows else 0
     total_val = rows[0][3] if rows else 0
     total_sku = rows[0][4] if rows else 0

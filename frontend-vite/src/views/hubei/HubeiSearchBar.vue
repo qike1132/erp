@@ -66,7 +66,8 @@
  */
 import { ref, computed, watch } from 'vue'
 import UiAutocomplete from '@/components/ui/UiAutocomplete.vue'
-import { productApi, customerApi } from '@/api'
+import { productApi } from '@/api'
+import { useCatalogStore } from '@/stores/catalog'
 
 const productQuery = defineModel<string>('productQuery', { required: true })
 const customerQuery = defineModel<string>('customerQuery', { required: true })
@@ -128,23 +129,18 @@ async function searchProducts(q: string): Promise<ProductSuggestion[]> {
   }
 }
 
-// ===== 客户自动补全 =====
+// ===== 客户自动补全（目录 store 统一缓存，TTL 内跨视图复用） =====
 type CustomerSuggestion = { id: number; name: string }
 
-let cachedCustomerNames: CustomerSuggestion[] | null = null
+const catalogStore = useCatalogStore()
 
 async function searchCustomers(q: string): Promise<CustomerSuggestion[]> {
   try {
-    if (!cachedCustomerNames) {
-      const names = await customerApi.activeNames()
-      cachedCustomerNames = (Array.isArray(names) ? names : []).map((c: unknown) => {
-        const entry = c as Record<string, unknown>
-        return { id: Number(entry.id), name: String(entry.name ?? '') }
-      })
-    }
+    await catalogStore.ensureActiveCustomerNames()
+    const all = catalogStore.activeCustomerNames
     const kw = q.trim().toLowerCase()
-    if (!kw) return cachedCustomerNames.slice(0, 8)
-    return cachedCustomerNames.filter((c) => c.name.toLowerCase().includes(kw)).slice(0, 8)
+    if (!kw) return all.slice(0, 8)
+    return all.filter((c) => c.name.toLowerCase().includes(kw)).slice(0, 8)
   } catch {
     return []
   }

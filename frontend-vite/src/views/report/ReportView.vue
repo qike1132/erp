@@ -88,7 +88,8 @@
  */
 import { ref, reactive, computed } from 'vue'
 import { useQuery, keepPreviousData } from '@tanstack/vue-query'
-import { reportApi, customerApi } from '@/api'
+import { reportApi } from '@/api'
+import { useCatalogStore } from '@/stores/catalog'
 import UiSelect from '@/components/ui/UiSelect.vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
 import UiDataTable from '@/components/ui/UiDataTable.vue'
@@ -171,16 +172,15 @@ const filters = reactive({ customer: '', product: '', startDate: '', endDate: ''
 /** 当前标签页的列配置 */
 const currentCfg = computed(() => TAB_CONFIG[activeTab.value])
 
-/** 活跃客户名称列表 */
-const { data: namesData } = useQuery({
-  queryKey: ['customer-active-names'],
-  queryFn: () => customerApi.activeNames(),
-  staleTime: 30_000,
+/** 活跃客户名称列表（目录 store 统一缓存，TTL 内跨视图复用） */
+const catalogStore = useCatalogStore()
+catalogStore.ensureActiveCustomerNames().catch(() => {
+  // 加载失败保持空列表，下次进入视图时重试
 })
 
 /** 客户名称下拉选项 */
 const customerOptions = computed(() =>
-  (namesData.value ?? []).map((c) => ({ value: c.name, label: c.name })),
+  catalogStore.activeCustomerNames.map((c) => ({ value: c.name, label: c.name })),
 )
 
 /** 报表数据查询 */

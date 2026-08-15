@@ -10,6 +10,21 @@ interface ProductLike {
   name: string
 }
 
+/** loadBom 返回的物料原始记录 */
+interface BomMaterialRecord {
+  id?: number
+  category?: string
+  material_name?: string
+  name?: string
+  specification?: string
+  unit?: string
+  supplier_id?: number | null
+  supplier_name?: string
+  unit_usage?: number
+  quantity?: number
+  remark?: string
+}
+
 /**
  * 产品列表中 BOM 相关操作的统一入口。
  *
@@ -55,11 +70,11 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
     bomData.filling = []
     bomData.accessory = []
     try {
-      const res = (await productApi.loadBom(productId)) as { success: boolean; materials?: unknown[] }
+      const res = (await productApi.loadBom(productId)) as { success: boolean; materials?: BomMaterialRecord[] }
       if (res.success) {
         const materialsList = res.materials || []
         const grouped: { fabric: BomItem[]; filling: BomItem[]; accessory: BomItem[] } = { fabric: [], filling: [], accessory: [] }
-        materialsList.forEach((item: any) => {
+        materialsList.forEach((item) => {
           const category = item.category || 'accessory'
           if (category === 'packaging') return // 包装类不在BOM配置中管理
           if (grouped[category as keyof typeof grouped]) {
