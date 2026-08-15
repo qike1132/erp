@@ -1,1 +1,0 @@
-﻿[*] 20 fixable with the `--fix` option (9 hidden fixes can be enabled with the `--unsafe-fixes` option).

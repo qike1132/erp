@@ -1,7 +1,0 @@
-D:\erp_system\fastapi_app\api\v1\endpoints\case_endpoint.py:65:31 F821 Undefined name `select`
-D:\erp_system\fastapi_app\api\v1\endpoints\case_endpoint.py:108:31 F821 Undefined name `select`
-D:\erp_system\fastapi_app\services\order_service.py:91:5 I001 Import block is un-sorted or un-formatted
-D:\erp_system\fastapi_app\services\order_service.py:146:5 I001 Import block is un-sorted or un-formatted
-D:\erp_system\fastapi_app\services\order_service.py:598:7 N818 Exception name `_SavepointRollbackSignal` should be named with an Error suffix
-
-Total: 5 issues
