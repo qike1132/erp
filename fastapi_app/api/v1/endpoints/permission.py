@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.database import get_async_db, get_async_read_db
+from fastapi_app.core.database import get_async_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.schemas.user import PermissionResponse
 from fastapi_app.services import user_service

@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import json
 import mimetypes
-import os
 import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
@@ -20,7 +19,7 @@ from typing import Any
 
 from fastapi_app.core.config import settings
 from fastapi_app.core.logger import get_logger
-from fastapi_app.core.circuit_breaker import circuit, CircuitBreakerOpenError, get_breaker
+from fastapi_app.core.circuit_breaker import CircuitBreakerOpenError, get_breaker
 
 logger = get_logger(__name__)
 

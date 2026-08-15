@@ -250,7 +250,6 @@ class TestPurchaseCenterService:
         from datetime import datetime
         from types import SimpleNamespace
         from fastapi_app.core.cache import _cache_local
-        from fastapi_app.services.purchase_order_query import get_unprocessed_orders
 
         _cache_local.clear()
         from utils.redis_cache import redis_cache
@@ -394,7 +393,6 @@ class TestPurchaseCenterService:
         from datetime import datetime
         from types import SimpleNamespace
         from fastapi_app.core.cache import _cache_local
-        from fastapi_app.services.purchase_order_query import get_unprocessed_orders
 
         _cache_local.clear()
         from utils.redis_cache import redis_cache

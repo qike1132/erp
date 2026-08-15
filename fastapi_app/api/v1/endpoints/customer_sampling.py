@@ -5,7 +5,6 @@
 
 对应 design.md 2.2.2 的 15 个接口端点。
 """
-import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile

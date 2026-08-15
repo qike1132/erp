@@ -142,8 +142,6 @@ import type {
 defineProps<{
   /** 当前模式：入库 / 出库 */
   mode: 'stockin' | 'stockout'
-  /** 录入表单（reactive 对象，属性由本组件直接 v-model 修改） */
-  form: CaseStockFormState
   /** 暂存列表 */
   staged: StagedStockItem[]
   /** 出库模式下的当前库存 */
@@ -164,6 +162,9 @@ defineProps<{
 
 /** 批量导入面板折叠状态（v-model:show-batch-upload） */
 const showBatchUpload = defineModel<boolean>('showBatchUpload', { default: false })
+
+/** 录入表单（reactive 对象，属性由本组件直接 v-model 修改） */
+const form = defineModel<CaseStockFormState>('form', { required: true })
 
 const emit = defineEmits<{
   /** 选中产品搜索候选项 */

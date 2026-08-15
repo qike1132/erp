@@ -10,7 +10,6 @@ from __future__ import annotations
 import io
 import logging
 import zipfile
-from typing import Any
 
 from fastapi_app.services.backup.ports import (
     BackupArchive,

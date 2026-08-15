@@ -93,7 +93,7 @@ async def create_incremental_backup(
         # 默认加密（根据环境变量配置）
         encryption_password = encrypt_password or get_backup_encryption_password()
         if encryption_password:
-            from fastapi_app.core.backup_encryption import encrypt_backup, create_meta_file
+            from fastapi_app.core.backup_encryption import encrypt_backup
             try:
                 encrypted_bytes, meta_dict = encrypt_backup(zip_bytes, encryption_password)
                 # 更新 manifest 以标记加密

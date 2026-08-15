@@ -99,9 +99,7 @@ async def health_check(
     4. 最近备份时间（不超过24小时）
     5. 备份文件完整性
     """
-    from datetime import datetime, timedelta
-    import os
-    from pathlib import Path
+    from datetime import datetime
 
     checks = {}
     issues = []

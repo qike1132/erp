@@ -35,4 +35,27 @@ from fastapi_app.services.order_crud import (
     update_order,
 )
 
+# Facade 显式 re-export 清单：防止 ruff F401 误删兼容层导入
+__all__ = [
+    'PermissionDeniedError',
+    '_SavepointRollbackSignal',
+    '_check_order_lock',
+    '_create_approval_log_obj',
+    '_ensure_no_pending_request',
+    '_generate_order_number',
+    '_safe_invalidate_purchase_cache',
+    '_submit_delete_approval',
+    '_submit_edit_approval',
+    '_update_order_directly',
+    'batch_create_orders',
+    'cancel_approval',
+    'create_order',
+    'delete_order',
+    'get_my_approvals',
+    'get_order_by_id',
+    'get_orders',
+    'update_deduct_quantity',
+    'update_order',
+]
+
 logger = logging.getLogger(__name__)

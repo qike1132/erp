@@ -30,7 +30,6 @@ from ._constants import (
     UPLOADS_DIR,
     _backup_in_progress,
 )
-from .cache_restore import restore_meilisearch, restore_redis_rdb
 from .crypto import get_backup_encryption_password, sha256_file
 from .dump import run_pg_dump
 from .exceptions import (
@@ -38,7 +37,7 @@ from .exceptions import (
     BackupLockError,
     DatabaseSnapshotError,
 )
-from .filestore import restore_config, restore_filestore, should_exclude_file
+from .filestore import should_exclude_file
 from .json_backup import execute_legacy_backup_to_bytes
 from .records import cleanup_pre_restore_backups, ensure_pre_restore_dir
 from .snapshot import get_postgres_snapshot
@@ -296,7 +295,7 @@ async def _do_create_full_backup(
         else:
             effective_encryption_password = encrypt_password or get_backup_encryption_password()
         if effective_encryption_password:
-            from fastapi_app.core.backup_encryption import encrypt_backup, create_meta_file
+            from fastapi_app.core.backup_encryption import encrypt_backup
             try:
                 encrypted_bytes, meta_dict = encrypt_backup(zip_bytes, effective_encryption_password)
                 manifest['encrypted'] = True

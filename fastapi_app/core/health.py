@@ -11,7 +11,7 @@ import json
 import logging
 import time
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, Request, Response
 from sqlalchemy import text
 from sqlalchemy.exc import DisconnectionError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession

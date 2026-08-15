@@ -1,0 +1,1 @@
+import{g as e,f as o,p as s,h as c}from"./index-DW_OskF1.js";const m={list:t=>e("/customers/list",t),create:t=>s("/customers/create",t),update:(t,a)=>c(`/customers/edit/${t}`,a),toggleStatus:t=>s(`/customers/toggle-status/${t}`),delete:t=>o(`/customers/delete/${t}`),activeNames:()=>e("/customers/active-names")};export{m as c};

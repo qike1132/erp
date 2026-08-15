@@ -1,0 +1,1 @@
+import{a9 as r,r as t}from"./vendor-vue-DtlUukac.js";const n=r("sidebar",()=>{const e=t(!1);function a(){e.value=!e.value}function o(s){e.value=s}return{isCollapsed:e,toggle:a,setCollapsed:o}});export{n as u};

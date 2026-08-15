@@ -5,8 +5,7 @@
 
 from __future__ import annotations
 
-from typing import Any, BinaryIO, Protocol, Sequence
-import zipfile
+from typing import Any, Protocol, Sequence
 
 from sqlalchemy.ext.asyncio import AsyncSession
 

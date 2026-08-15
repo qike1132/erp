@@ -15,17 +15,14 @@ import html
 import json
 import logging
 import smtplib
-import time
 from datetime import datetime, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlparse
+from typing import Any, Dict, Optional, Tuple
 
 import httpx
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db_context
 from fastapi_app.shared_models.backup_record import BackupRecord

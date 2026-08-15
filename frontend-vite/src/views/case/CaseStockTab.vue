@@ -14,7 +14,7 @@
     <CaseStockEntryPanel
       v-model:show-batch-upload="showBatchUpload"
       :mode="mode"
-      :form="form"
+      v-model:form="form"
       :staged="staged"
       :current-stock="currentStock"
       :customer-options="customerOptions"

@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import select, func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.exceptions import BusinessError
-from fastapi_app.shared_models import PatternMaker, CustomerSamplingProject
+from fastapi_app.shared_models import PatternMaker
 
 logger = logging.getLogger(__name__)
 

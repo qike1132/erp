@@ -14,7 +14,6 @@
 import asyncio
 import logging
 import time
-from collections import defaultdict
 from functools import wraps
 from typing import Any, Callable
 

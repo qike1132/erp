@@ -10,7 +10,6 @@ import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import and_, func, or_, select, text
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -1341,7 +1340,7 @@ async def _create_stockout_records(db: AsyncSession, product_id: int, customer: 
         stockout_no = await generate_stockout_number(db)
         stockout = StockOut(
             stockout_no=stockout_no, product_id=product_id, quantity=ship_qty,
-            stockout_date=(_parse_date_preserve_time(stockout_date_str).replace(tzinfo=timezone.utc)),
+            stockout_date=(_parse_date_preserve_time(stockout_date_str).replace(tzinfo=timezone.utc) if stockout_date_str else datetime.now(timezone.utc)),
             customer=customer, order_id=order_detail['order_id'], note=note
         )
         db.add(stockout)

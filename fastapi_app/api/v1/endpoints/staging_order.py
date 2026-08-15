@@ -3,7 +3,7 @@
 """
 import logging
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db, get_async_read_db

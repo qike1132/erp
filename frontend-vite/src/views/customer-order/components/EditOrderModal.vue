@@ -138,7 +138,6 @@ const props = defineProps<{
   // 详情数据由 useOrderActions 返回，API 实际包含 batch_no / items 等扩展字段，
   // 类型见 composables/types.ts 的 OrderDetailData。
   detailData: OrderDetailData | null
-  editForm: EditFormState
   availableStockin: number
   saving: boolean
   deductRetryPending: boolean
@@ -146,6 +145,8 @@ const props = defineProps<{
   saveEditOrder: () => void
   retryDeductUpdate: () => void
 }>()
+
+const editForm = defineModel<EditFormState>('editForm', { required: true })
 
 const emit = defineEmits<{
   'update:open': [value: boolean]

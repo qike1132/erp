@@ -1,0 +1,1 @@
+import{A as n,H as a,Q as r,aj as o,a5 as t}from"./vendor-vue-DtlUukac.js";import{_ as i}from"./index-DW_OskF1.js";const p=n({__name:"MSpinner",props:{size:{}},setup(s){return(m,e)=>(a(),r("div",{class:o(["m-spinner",s.size])},[...e[0]||(e[0]=[t("div",{class:"m-spinner-ring"},null,-1)])],2))}}),_=i(p,[["__scopeId","data-v-532e37e5"]]);export{_ as M};

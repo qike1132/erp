@@ -6,7 +6,7 @@ select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "C4", "S", "RUF"]
 ignore = ["E501", "B008", "SIM108"]
 
 [lint.per-file-ignores]
-"tests/**/*.py" = ["S101", "S311"]
+"**/tests/**/*.py" = ["S101", "S311"]
 "migrations/**/*.py" = ["A003"]
 # S608: stock_service.py 的库存聚合查询使用模块级常量片段 + 绑定参数（:sc/:pids），
 # 不含用户输入；bandit.yaml 已全局跳过 B608，此处保持一致避免误报。

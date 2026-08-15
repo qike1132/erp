@@ -32,7 +32,7 @@ import json
 import logging
 from decimal import Decimal
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 

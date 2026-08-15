@@ -2,11 +2,8 @@
 备份性能监控服务单元测试
 """
 
-import json
 import os
-import tempfile
 from datetime import datetime, timedelta
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

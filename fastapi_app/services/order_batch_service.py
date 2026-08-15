@@ -9,7 +9,7 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import func, literal, nullslast, or_, select, update
+from sqlalchemy import func, literal, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 

@@ -2,10 +2,7 @@
 备份告警服务单元测试
 """
 
-import asyncio
-import json
 import os
-import tempfile
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 

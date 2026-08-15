@@ -7,7 +7,7 @@ Redis 缓存操作统一包装器
 import logging
 from typing import Any
 
-from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS, safe_call
+from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS
 
 logger = logging.getLogger(__name__)
 

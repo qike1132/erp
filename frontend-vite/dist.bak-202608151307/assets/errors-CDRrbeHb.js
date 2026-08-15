@@ -1,0 +1,1 @@
+function t(s){if(typeof s!="object"||s===null)return!1;const e=s;return"response"in e||"message"in e}function n(s,e="操作失败，请重试"){return t(s)?s.response?.data?.detail||s.response?.data?.message||s.message||e:s instanceof Error?s.message:e}function o(s){if(t(s))return s.response?.status}export{o as a,n as g};

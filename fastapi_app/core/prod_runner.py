@@ -289,6 +289,26 @@ class _FrontendNginx:
         self.next_start = 0.0
         self.status = "stopped"
 
+    def _kill_all(self) -> None:
+        """彻底停止本项目所有 nginx 进程（仅 Windows 逻辑）。
+
+        Windows 下 `nginx -s stop` 只停最新 master，且杀 master 不会连带结束
+        worker，会在重启循环中泄漏孤儿进程（worker 的父进程已消失仍存活），
+        导致端口与连接混乱、进程数爆炸。因此先优雅停 master，再按镜像名
+        强制结束所有 nginx.exe（含孤儿 worker），确保干净重启。
+        """
+        subprocess.run(
+            [str(self.nginx), "-s", "stop"],
+            creationflags=_CREATE_NO_WINDOW,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15,
+        )
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/IM", "nginx.exe"],
+                creationflags=_CREATE_NO_WINDOW,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15,
+            )
+
     def _ensure_started(self) -> None:
         LOGS_DIR.mkdir(exist_ok=True)
         subprocess.run(
@@ -316,13 +336,11 @@ class _FrontendNginx:
 
     def maybe_restart(self) -> None:
         if self.status == "crashed" and self.next_start <= time.monotonic():
-            subprocess.run([str(self.nginx), "-s", "stop"], creationflags=_CREATE_NO_WINDOW,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
+            self._kill_all()
             self._ensure_started()
 
     def stop(self) -> None:
-        subprocess.run([str(self.nginx), "-s", "stop"], creationflags=_CREATE_NO_WINDOW,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
+        self._kill_all()
 
 
 class Supervisor:

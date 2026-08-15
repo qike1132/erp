@@ -50,11 +50,12 @@ import type { StagedItem } from '../composables/types'
 
 const props = defineProps<{
   open: boolean
-  editStagedData: StagedItem | null
   editAvailableStock: number
   customerOptions: { label: string; value: string }[]
   saveEditStaged: () => void
 }>()
+
+const editStagedData = defineModel<StagedItem | null>('editStagedData')
 
 const emit = defineEmits<{
   'update:open': [value: boolean]

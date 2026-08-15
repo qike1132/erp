@@ -14,7 +14,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from fastapi_app.shared_models import Base
 
 if TYPE_CHECKING:
-    from fastapi_app.shared_models.product import Product
     from fastapi_app.shared_models.supplier import Supplier
 
 

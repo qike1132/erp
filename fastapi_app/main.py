@@ -10,7 +10,6 @@ WebSocket → api/ws.py
 import asyncio
 import os
 import pathlib
-import warnings
 from contextlib import asynccontextmanager, suppress
 
 # 2. 第三方库

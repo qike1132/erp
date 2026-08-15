@@ -16,8 +16,6 @@ from fastapi_app.shared_models import Base
 if TYPE_CHECKING:
     from fastapi_app.shared_models.order import Order
     from fastapi_app.shared_models.product import Product
-    from fastapi_app.shared_models.purchase_order import PurchaseOrder
-    from fastapi_app.shared_models.stock_in import StockIn
 
 
 class StockOut(Base):

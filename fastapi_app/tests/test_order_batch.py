@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from fastapi_app.services import order_batch_service
-from fastapi_app.shared_models import Order, OrderBatchAuditLog, OrderSyncConfig, User
+from fastapi_app.shared_models import Order, User
 
 
 @pytest.fixture

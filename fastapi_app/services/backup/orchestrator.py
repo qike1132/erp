@@ -13,7 +13,6 @@ import logging
 import zipfile
 from typing import Any
 
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.services.backup.ports import (
     AdvisoryLock,

@@ -6,12 +6,12 @@
 import calendar
 import io
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date
 from typing import Iterable
 
 import openpyxl
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.business_rules import MAX_QUANTITY
@@ -94,8 +94,7 @@ async def get_records(
     offset = (page - 1) * per_page
 
     # Single query: paginated data + total count via window function + stats via cross join
-    from sqlalchemy import literal_column, true
-    from sqlalchemy.orm import aliased
+    from sqlalchemy import true
 
     stats_cte = (
         select(

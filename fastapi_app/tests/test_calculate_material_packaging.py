@@ -1,7 +1,4 @@
 """calculate_material packaging 类别专项单元测试"""
-import asyncio
-from collections import defaultdict
-from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest

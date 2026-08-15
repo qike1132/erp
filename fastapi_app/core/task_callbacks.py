@@ -6,7 +6,6 @@ Celery 任务回调
 - on_success: 记录任务成功耗时
 """
 import json
-import time
 from datetime import datetime
 
 from fastapi_app.core.logger import logger

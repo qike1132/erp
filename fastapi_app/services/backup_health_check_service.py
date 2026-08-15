@@ -9,20 +9,17 @@
 5. 健康报告生成和存储
 """
 
-import asyncio
 import json
 import logging
-import shutil
 import tempfile
 import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import psutil
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db_context
 from fastapi_app.services.backup_alert_service import alert_service

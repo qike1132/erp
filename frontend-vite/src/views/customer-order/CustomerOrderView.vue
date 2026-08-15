@@ -19,7 +19,7 @@
           <!-- 左栏：录入表单 -->
           <OrderInputPanel
             v-model:is-drag-over="isDragOver"
-            :form="form"
+            v-model:form="form"
             :is-order="isOrder"
             :is-custom-order="isCustomOrder"
             :order-type-options="orderTypeOptions"
@@ -89,8 +89,8 @@
     <!-- 订单详情弹窗 -->
     <EditOrderModal
       v-model:open="detailOpen"
+      v-model:edit-form="editForm"
       :detail-data="detailData"
-      :edit-form="editForm"
       :available-stockin="availableStockin"
       :saving="saving"
       :deduct-retry-pending="deductRetryPending"
@@ -102,7 +102,7 @@
     <!-- 编辑暂存弹窗 -->
     <EditStagedModal
       v-model:open="editStagedVisible"
-      :edit-staged-data="editStagedData"
+      v-model:edit-staged-data="editStagedData"
       :edit-available-stock="editAvailableStock"
       :customer-options="customerOptions"
       :save-edit-staged="saveEditStaged"

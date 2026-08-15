@@ -13,7 +13,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from fastapi_app.services.order_batch_create import (
-    _SavepointRollbackSignal,
     batch_create_orders,
 )
 

@@ -4,7 +4,6 @@
 定期从备份中恢复测试数据到临时环境，验证恢复数据的完整性和可用性
 """
 
-import asyncio
 import json
 import logging
 import shutil
@@ -12,18 +11,15 @@ import tempfile
 import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
-from fastapi_app.core.database import get_async_db_context
 from fastapi_app.services.backup_alert_service import alert_service
-from fastapi_app.services.backup_health_check_service import health_check_service
 from fastapi_app.services.backup_service import BACKUP_DIR, ensure_backup_dir, quote_table
-from fastapi_app.shared_models.backup_record import BackupRecord
 
 logger = logging.getLogger(__name__)
 

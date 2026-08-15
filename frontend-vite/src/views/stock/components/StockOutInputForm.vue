@@ -179,8 +179,7 @@ interface StockOutForm {
   country: string
 }
 
-const props = defineProps<{
-  form: StockOutForm
+defineProps<{
   customerOptions: { value: string; label: string }[]
   countryOptions: { value: string; label: string }[]
   orderTypeOptions: { value: string; label: string }[]
@@ -189,6 +188,8 @@ const props = defineProps<{
   stagedCount: number
   searchFn: (q: string) => Promise<Product[]>
 }>()
+
+const form = defineModel<StockOutForm>('form', { required: true })
 
 const emit = defineEmits<{
   'add-staged': []
@@ -202,7 +203,7 @@ function onSelect(product: Product) {
 }
 
 function onSearchInput() {
-  props.form.productId = ''
+  form.value.productId = ''
   emit('clear-shipment')
 }
 

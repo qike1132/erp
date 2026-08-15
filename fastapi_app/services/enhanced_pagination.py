@@ -5,9 +5,9 @@
 OFFSET深翻页随页码线性衰减，keyset分页保持O(1)。
 """
 import logging
-from typing import Any, Sequence
+from typing import Any
 
-from sqlalchemy import Select, func, select, text
+from sqlalchemy import Select, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)

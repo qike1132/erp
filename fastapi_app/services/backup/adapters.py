@@ -17,7 +17,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.services.backup.ports import (
-    AdvisoryLock,
     ArchiveDecryptor,
     BackupArchive,
     CacheInvalidator,

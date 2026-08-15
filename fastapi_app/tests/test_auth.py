@@ -50,10 +50,15 @@ class TestAuthEndpoints:
         mock_user.id = 1
         mock_user.username = "admin"
         mock_user.status = True
+        mock_user.is_super = True
+        mock_user.factory = None
         mock_user.password = "$2b$12$test_hash"
         mock_user.permissions = []
 
+        # get_user_with_permissions_by_username 经 result.unique().scalar_one_or_none()
+        # 取用户，需 mock unique() 返回自身，否则取到的是自动生成的 MagicMock
         mock_result = MagicMock()
+        mock_result.unique.return_value = mock_result
         mock_result.scalar_one_or_none.return_value = mock_user
         mock_db.execute = AsyncMock(return_value=mock_result)
 

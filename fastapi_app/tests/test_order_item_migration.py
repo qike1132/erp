@@ -2,9 +2,10 @@
 Alembic 迁移脚本结构测试 — multi-SKU order_item 表功能 (SubTask 7.3)
 
 本测试不执行真实的 alembic upgrade/downgrade（代码库无 PostgreSQL 测试库与
-迁移测试基础设施，且迁移链存在多 head）。改为加载迁移 Python 文件并校验其
-结构正确性：revision/down_revision、upgrade/downgrade 可调用性、SQL 操作、
-数据回填语句，以及必需列与索引。
+迁移测试基础设施；历史上的多 head 已通过 merge_resolve_all_heads 合并为单一
+head，merge_heads_for_order_item 迁移已不存在）。改为加载迁移 Python 文件并
+校验其结构正确性：revision/down_revision、upgrade/downgrade 可调用性、SQL
+操作、数据回填语句、必需列与索引，以及迁移链健康性（单一 head、无分叉）。
 
 通过 stub `alembic` / `alembic.op` 让 `from alembic import op` 在 alembic
 上下文之外可导入；函数体不会被执行，因此 `sa` / `op` 调用不会真正运行。
@@ -111,8 +112,10 @@ class TestOrderItemMigration:
         # 历史上本代码库曾出现 down_revision=None 造成孤儿分支的 bug
         assert migration.down_revision is not None
 
-    def test_down_revision_points_to_merge(self, migration):
-        assert migration.down_revision == "merge_heads_for_order_item"
+    def test_down_revision_points_to_rebuild_po_dedup_index(self, migration):
+        # merge_heads_for_order_item 已删除（迁移链已合并为单一 head），
+        # 014 的实际父迁移为 rebuild_po_dedup_index
+        assert migration.down_revision == "rebuild_po_dedup_index"
 
     def test_upgrade_is_callable(self, migration):
         assert callable(migration.upgrade)
@@ -145,21 +148,29 @@ class TestOrderItemMigration:
             assert pattern in upgrade_source, f"缺失列定义: {col}"
 
 
-class TestMergeHeadsMigration:
-    """校验 merge_heads_for_order_item.py 正确合并两个 head。"""
+class TestMigrationChainHealth:
+    """校验迁移链健康性：单一 head、无分叉，order_item 迁移位于主链。
+
+    取代旧的 TestMergeHeadsMigration（其依赖的 merge_heads_for_order_item.py
+    已删除）。迁移链已由 merge_resolve_all_heads 合并为单一 head，此处验证
+    该健康状态持续成立。
+    """
 
     @pytest.fixture(scope="class")
-    def migration(self):
-        return _load_migration_module("merge_heads_for_order_item.py")
+    def script_dir(self):
+        from alembic.script import ScriptDirectory
+        return ScriptDirectory(str(_MIGRATIONS_DIR.parent))
 
-    def test_revision_is_nonempty_string(self, migration):
-        assert isinstance(migration.revision, str)
-        assert len(migration.revision) > 0
+    @pytest.fixture(scope="class")
+    def chain_revisions(self, script_dir):
+        return {rev.revision for rev in script_dir.walk_revisions()}
 
-    def test_down_revision_is_tuple_of_two(self, migration):
-        assert isinstance(migration.down_revision, tuple)
-        assert len(migration.down_revision) == 2
+    def test_single_head_no_fork(self, script_dir):
+        heads = script_dir.get_heads()
+        assert len(heads) == 1, f"迁移链分叉，存在多个 head: {heads}"
 
-    def test_down_revision_contains_both_heads(self, migration):
-        assert "add_file_records_table" in migration.down_revision
-        assert "partition_order_by_year" in migration.down_revision
+    def test_order_item_migration_in_chain(self, chain_revisions):
+        assert "pg_standalone_014_create_order_item" in chain_revisions
+
+    def test_order_item_parent_in_chain(self, chain_revisions):
+        assert "rebuild_po_dedup_index" in chain_revisions

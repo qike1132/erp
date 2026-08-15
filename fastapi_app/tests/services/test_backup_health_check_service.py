@@ -8,7 +8,7 @@ import tempfile
 import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi_app.services.backup_health_check_service import BackupHealthCheckService

@@ -48,7 +48,7 @@ import contextlib
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-_VERSION = 'v5.22'
+_VERSION = 'v5.31'
 _WINDOW_TITLE = f'ERP 服务器管理器 {_VERSION}'
 _REDIS_PORT = 6379
 _REDIS_EXE_PATHS = [Path(r'C:\Redis\redis-server.exe'), Path(r'C:\Program Files\Redis\redis-server.exe')]
@@ -238,7 +238,7 @@ class RoundedButton(tk.Canvas):
 
     def __init__(self, parent, text='', fill='#89b4fa', fg='#1e1e2e',
                  hover_fill=None, command=None, font=('Microsoft YaHei UI', 10),
-                 padx=24, pady=8, radius=14, state='normal', canvas_bg=None, **kw):
+                 padx=24, pady=8, radius=14, state='normal', canvas_bg=None, border=None, **kw):
         import tkinter.font as tkfont
         f = tkfont.Font(font=font)
         w, h = f.measure(text) + padx * 2, f.metrics('linespace') + pady * 2
@@ -247,6 +247,7 @@ class RoundedButton(tk.Canvas):
         self._text, self._fill, self._fg = text, fill, fg
         self._hover_fill = hover_fill or _shift_color(fill, -20)
         self._font, self._radius, self._command = font, radius, command
+        self._border = border
         self._state, self._hover, self._press = state, False, False
         self._anim_after_id = None
         self.bind('<Configure>', self._draw)
@@ -266,16 +267,19 @@ class RoundedButton(tk.Canvas):
             return
         r = min(self._radius, w // 2, h // 2)
         if self._state == 'disabled':
-            bg, fg = '#2a2a35', '#4a4a58'
-        elif self._press:
-            bg, fg = _lerp_color(self._fill, self._hover_fill, 0.6), self._fg
-        elif self._hover:
-            bg, fg = self._hover_fill, self._fg
+            bg, fg = '#eef0f4', '#aeaeb2'
+            outline = self._border or '#e2e2e8'
         else:
-            bg, fg = self._fill, self._fg
+            if self._press:
+                bg, fg = _lerp_color(self._fill, self._hover_fill, 0.6), self._fg
+            elif self._hover:
+                bg, fg = self._hover_fill, self._fg
+            else:
+                bg, fg = self._fill, self._fg
+            outline = self._border or ''
         offset = 1 if self._press else 0
-        self._round_rect(offset, offset, w - offset, h - offset, r, fill=bg, outline='')
-        if self._hover and self._state != 'disabled':
+        self._round_rect(offset, offset, w - offset, h - offset, r, fill=bg, outline=outline)
+        if self._hover and self._state != 'disabled' and not self._border:
             self._round_rect(2, h - 3, w - 2, h - 1, 1, fill=_shift_color(bg, 20), outline='')
         self.create_text(w // 2, h // 2, text=self._text, fill=fg, font=self._font)
 
@@ -300,7 +304,7 @@ class RoundedButton(tk.Canvas):
             w, h = self.winfo_width(), self.winfo_height()
             if w < 4 or h < 4:
                 return
-            self._round_rect(0, 0, w, h, min(self._radius, w // 2, h // 2), fill=_lerp_color(start_color, end_color, t), outline='')
+            self._round_rect(0, 0, w, h, min(self._radius, w // 2, h // 2), fill=_lerp_color(start_color, end_color, t), outline=self._border or '')
             self.create_text(w // 2, h // 2, text=self._text, fill=self._fg, font=self._font)
             self._anim_after_id = self.after(50, step)
         step()
@@ -391,21 +395,24 @@ def _create_tray_icon_image():
 class ServerManagerApp:
     """ERP 服务器管理器 — 开发/生产模式"""
 
+    # Apple/iOS 风格设计令牌：浅色分组卡片 + 系统色板 + 克制留白
     _PALETTE = {
-        'bg_main': '#f2f4f8', 'bg_card': '#ffffff', 'bg_surface': '#e9edf4', 'bg_header': '#f7f9fc', 'bg_log': '#fbfcfe', 'bg_input': '#edf1f7',
-        'text_primary': '#1f2a3d', 'text_secondary': '#4f5f7a', 'text_dim': '#7b889f',
-        'border': '#d7deea', 'border_card': '#dce3ef',
-        'accent': '#3f7cff', 'accent_h': '#5d92ff', 'success': '#21b573', 'success_h': '#38c689',
-        'danger': '#e3576d', 'danger_h': '#f06d83', 'warning': '#f0a542', 'info': '#36a8ce',
-        'log_fg': '#25324a', 'log_info': '#3f7cff', 'log_error': '#e3576d', 'log_warn': '#f0a542', 'log_success': '#21b573',
+        'bg_main': '#f5f5f7', 'bg_card': '#ffffff', 'bg_surface': '#f2f2f7', 'bg_header': '#fbfbfd', 'bg_log': '#f9f9fb', 'bg_input': '#f2f2f7',
+        'text_primary': '#1d1d1f', 'text_secondary': '#48484d', 'text_dim': '#8e8e93',
+        'border': '#e5e5ea', 'border_card': '#e8e8ed',
+        'accent': '#007aff', 'accent_h': '#2d96ff', 'accent_tint': '#e8f1ff',
+        'success': '#34c759', 'success_h': '#4fd06a', 'success_tint': '#e6f9ec',
+        'danger': '#ff3b30', 'danger_h': '#ff5548', 'danger_tint': '#ffece9',
+        'warning': '#ff9500', 'info': '#30b0c7',
+        'log_fg': '#1d1d1f', 'log_info': '#007aff', 'log_error': '#ff3b30', 'log_warn': '#ff9500', 'log_success': '#34c759',
     }
     MAX_LOG_LINES, LOG_KEEP_LINES, LOG_CLEANUP_MS, LOG_FLUSH_MS = 500, 300, 120000, 500
 
     def __init__(self, root):
         self.root = root
         self.root.title(_WINDOW_TITLE)
-        self.root.geometry("960x720")
-        self.root.minsize(800, 600)
+        self.root.geometry("1080x760")
+        self.root.minsize(960, 680)
         self.root.resizable(True, True)
         self.root.withdraw()
         self._mode, self._process, self._frontend_process, self._redis_process = 'none', None, None, None
@@ -414,6 +421,7 @@ class ServerManagerApp:
         self._server_cards = []
         self._status_anim_after_id, self._status_pulse_step = None, 0
         self._startup_progress, self._startup_steps, self._startup_current_step, self._current_mode_key = 0, [], "", ""
+        self._hosting_collecting, self._hosting_refresh_requested = False, False
         self.setup_logging()
         self._build_ui()
         self._set_window_icon()
@@ -957,6 +965,9 @@ class ServerManagerApp:
                 except Exception:
                     pass
                 self._refresh_hosting_status()
+            elif msg_type == 'hosting_apply':
+                # 后台收集完成 → 主线程应用（UI 更新）
+                self._apply_hosting_data(data['data'])
             processed += 1
         self._after_ids['poll'] = self.root.after(200, self._poll_queue)
 
@@ -1064,8 +1075,12 @@ class ServerManagerApp:
         self._start_thread(str(_PROJECT_DIR / 'run.py'), '调试模式', mode_key='debug')
 
     def _start_dual_server(self, label):
+        # 互斥守卫：开发模式正在启动/重启中则不操作
+        if self._mode in ('starting', 'restarting'):
+            self.log_message(f"开发模式正在启动/重启中，请稍候", 'WARNING')
+            return
         if self._mode != 'none':
-            self.log_message(f"已有服务在运行或启动中，请先停止后再启动", 'WARNING')
+            self.log_message(f"已有服务在运行，请先停止后再启动", 'WARNING')
             return
         if not _PYTHON_EXE:
             self.log_message("无法启动: 未找到 Python 解释器，请安装 Python 并确保在 PATH 中", 'ERROR')
@@ -1078,11 +1093,25 @@ class ServerManagerApp:
 
         self._mode = 'starting'
         self._current_mode_key = 'dual_dev'
-        self._startup_progress, self._startup_steps, self._startup_current_step = 0, ['检查Redis服务', '启动后端服务', '启动前端服务', '完成'], ''
+        self._startup_progress, self._startup_steps, self._startup_current_step = 0, ['停止生产模式', '检查Redis服务', '启动后端服务', '启动前端服务', '完成'], ''
         self._update_all_ui()
         self.log_message(f"正在启动{label}...")
         self.status_bar_label.config(text=f"正在启动{label}...")
-        threading.Thread(target=self._start_dual_thread, args=(label,), daemon=True).start()
+        # 互斥切换（停生产+清端口）含子进程调用，必须放后台线程，否则阻塞 Tk 主线程导致 GUI 卡死
+        threading.Thread(target=self._start_dual_worker, args=(label,), daemon=True).start()
+
+    def _start_dual_worker(self, label):
+        """后台执行互斥切换（停生产 + 清端口），随后复用现有启动流程"""
+        self._msg_queue.put(('startup_progress', {'step': self._startup_steps[0], 'progress': 1, 'total': len(self._startup_steps)}))
+        ok, reason, stopped_any = self._ensure_production_stopped()
+        if not ok:
+            self._msg_queue.put(('log', {'text': f"切换失败: {reason}", 'level': 'ERROR'}))
+            self._msg_queue.put(('dual_failed', {'label': label, 'reason': reason}))
+            return
+        if stopped_any:
+            self._msg_queue.put(('log', {'text': '已自动停止生产模式', 'level': 'INFO'}))
+        self._release_ports()
+        self._start_dual_thread(label)
 
     def _start_dual_thread(self, label):
         try:
@@ -1092,11 +1121,11 @@ class ServerManagerApp:
             self._kill_port_sync(_API_PORT)
             self._kill_port_sync(_WEB_PORT)
 
-            self._startup_current_step, self._startup_progress = self._startup_steps[0], 1
+            self._startup_current_step, self._startup_progress = self._startup_steps[1], 2
             self._msg_queue.put(('startup_progress', {'step': self._startup_current_step, 'progress': self._startup_progress, 'total': len(self._startup_steps)}))
             if not self._start_redis():
                 self._msg_queue.put(('log', {'text': '警告: Redis 未启动，部分功能可能不可用', 'level': 'WARNING'}))
-            self._startup_current_step, self._startup_progress = self._startup_steps[1], 2
+            self._startup_current_step, self._startup_progress = self._startup_steps[2], 3
             self._msg_queue.put(('startup_progress', {'step': self._startup_current_step, 'progress': self._startup_progress, 'total': len(self._startup_steps)}))
             env = os.environ.copy()
             env.update({'PYTHONUNBUFFERED': '1', 'PYTHONIOENCODING': 'utf-8', 'PYTHONUTF8': '1', 'PYTHONPATH': str(_PROJECT_DIR)})
@@ -1122,7 +1151,7 @@ class ServerManagerApp:
                 self._process = None
                 self._msg_queue.put(('dual_failed', {'label': label, 'reason': '后端未就绪'}))
                 return
-            self._startup_current_step, self._startup_progress = self._startup_steps[2], 3
+            self._startup_current_step, self._startup_progress = self._startup_steps[3], 4
             self._msg_queue.put(('startup_progress', {'step': self._startup_current_step, 'progress': self._startup_progress, 'total': len(self._startup_steps)}))
             npm_cmd = 'npm.cmd' if _IS_WINDOWS else 'npm'
             # 启动 Vite dev server
@@ -1148,7 +1177,7 @@ class ServerManagerApp:
                 self._process, self._frontend_process = None, None
                 self._msg_queue.put(('dual_failed', {'label': label, 'reason': '前端未就绪'}))
                 return
-            self._startup_current_step, self._startup_progress = self._startup_steps[3], 4
+            self._startup_current_step, self._startup_progress = self._startup_steps[4], 5
             self._msg_queue.put(('startup_progress', {'step': self._startup_current_step, 'progress': self._startup_progress, 'total': len(self._startup_steps)}))
             self._msg_queue.put(('dual_started', {'label': label}))
         except Exception as e:
@@ -1162,7 +1191,7 @@ class ServerManagerApp:
                 line = proc.stdout.readline()
                 if not line:
                     break
-                text = line.decode('utf-8', errors='replace').rstrip('\n\r')
+                text = self._decode_line(line)  # GBK/UTF-8 级联解码，修复中文 Windows 前端输出乱码
                 if text:
                     level = 'ERROR' if any(k in text.lower() for k in ['error', 'exception', 'failed']) else 'INFO'
                     batch.append((f'[WEB] {text}', level))
@@ -1206,6 +1235,7 @@ class ServerManagerApp:
 
     def _restart_dual_thread(self):
         self._mode, self._current_mode_key = 'restarting', 'dual_dev'
+        self._startup_progress, self._startup_steps, self._startup_current_step = 0, ['停止生产模式', '检查Redis服务', '启动后端服务', '启动前端服务', '完成'], ''
         self._msg_queue.put(('ui_update', {}))
         label = '开发模式'
         for proc, name in [(self._frontend_process, '前端'), (self._process, '后端')]:
@@ -1380,87 +1410,93 @@ class ServerManagerApp:
 
     def _build_ui(self):
         self.root.configure(bg=self._PALETTE['bg_main'])
-        header = tk.Frame(self.root, bg=self._PALETTE['bg_header'], height=64)
+        # ---- 顶栏 ----
+        header = tk.Frame(self.root, bg=self._PALETTE['bg_header'], height=58)
         header.pack(fill=tk.X)
         header.pack_propagate(False)
-        hdr_inner = tk.Frame(header, bg=self._PALETTE['bg_header'])
-        hdr_inner.pack(fill=tk.X, padx=28, pady=(16, 0))
-        brand = tk.Frame(hdr_inner, bg=self._PALETTE['bg_header'])
-        brand.pack(side=tk.LEFT)
-        tk.Label(brand, text='ERP', font=('Segoe UI', 16, 'bold'), fg=self._PALETTE['accent'], bg=self._PALETTE['bg_header']).pack(side=tk.LEFT)
-        tk.Label(brand, text='Server Manager', font=('Segoe UI', 16), fg=self._PALETTE['text_primary'], bg=self._PALETTE['bg_header']).pack(side=tk.LEFT, padx=(6, 0))
-        ver_frame = tk.Frame(hdr_inner, bg=self._PALETTE['bg_input'], highlightbackground=self._PALETTE['border'], highlightthickness=1)
-        ver_frame.pack(side=tk.LEFT, padx=(12, 0))
+        hdr = tk.Frame(header, bg=self._PALETTE['bg_header'])
+        hdr.pack(fill=tk.X, padx=24)
+        logo = tk.Frame(hdr, bg=self._PALETTE['accent'], width=32, height=32)
+        logo.pack(side=tk.LEFT, pady=(13, 0))
+        logo.pack_propagate(False)
+        tk.Label(logo, text='E', font=('Segoe UI', 15, 'bold'), fg='#ffffff', bg=self._PALETTE['accent']).place(relx=0.5, rely=0.5, anchor='center')
+        brand = tk.Frame(hdr, bg=self._PALETTE['bg_header'])
+        brand.pack(side=tk.LEFT, padx=(11, 0), pady=(11, 0))
+        tk.Label(brand, text='ERP 服务器管理器', font=('Microsoft YaHei UI', 14, 'bold'), fg=self._PALETTE['text_primary'], bg=self._PALETTE['bg_header']).pack(anchor='w')
+        tk.Label(brand, text='开发 / 生产一键切换 · 互斥托管', font=('Microsoft YaHei UI', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_header']).pack(anchor='w')
+        ver_frame = tk.Frame(hdr, bg=self._PALETTE['bg_input'], highlightbackground=self._PALETTE['border'], highlightthickness=1)
+        ver_frame.pack(side=tk.LEFT, padx=(12, 0), pady=(22, 0))
         tk.Label(ver_frame, text=_VERSION, font=('Consolas', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_input']).pack(padx=8, pady=1)
-        port_frame = tk.Frame(hdr_inner, bg=self._PALETTE['bg_header'])
-        port_frame.pack(side=tk.RIGHT)
-        for label, port, color in [('API', _API_PORT, 'accent'), ('WEB', _WEB_PORT, 'success')]:
-            tk.Label(port_frame, text=label, font=('Consolas', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_header']).pack(side=tk.LEFT)
-            tk.Label(port_frame, text=str(port), font=('Consolas', 11, 'bold'), fg=self._PALETTE[color], bg=self._PALETTE['bg_header']).pack(side=tk.LEFT, padx=(4, 8 if label == 'API' else 0))
-        tk.Frame(self.root, bg=self._PALETTE['accent'], height=1).pack(fill=tk.X)
+        ports = tk.Frame(hdr, bg=self._PALETTE['bg_header'])
+        ports.pack(side=tk.RIGHT, pady=(18, 0))
+        for label, port, tint, fg_c in [('API', _API_PORT, self._PALETTE['accent_tint'], self._PALETTE['accent']), ('WEB', _WEB_PORT, self._PALETTE['success_tint'], self._PALETTE['success'])]:
+            pill = tk.Frame(ports, bg=tint)
+            pill.pack(side=tk.LEFT, padx=(6, 0))
+            tk.Label(pill, text=f'{label} {port}', font=('Consolas', 9, 'bold'), fg=fg_c, bg=tint).pack(padx=10, pady=3)
         tk.Frame(self.root, bg=self._PALETTE['border'], height=1).pack(fill=tk.X)
         self._build_status_bar()
+        # ---- 内容区：开发/生产双卡并排 + 底部日志 ----
         content = tk.Frame(self.root, bg=self._PALETTE['bg_main'])
-        content.pack(fill=tk.BOTH, expand=True, padx=24, pady=(16, 12))
-        content.columnconfigure(0, weight=1)
-        content.columnconfigure(1, weight=1)
+        content.pack(fill=tk.BOTH, expand=True, padx=20, pady=(14, 12))
+        content.columnconfigure(0, weight=1, uniform='mode_cards')
+        content.columnconfigure(1, weight=1, uniform='mode_cards')
         content.rowconfigure(0, weight=0)
-        content.rowconfigure(1, weight=0)
-        content.rowconfigure(2, weight=0)
-        content.rowconfigure(3, weight=1)
-        self._build_server_card(content, 0, 0, '开发模式（前后端）', 'dual_dev', 'FastAPI + Vue3/Vite · 后端 5002 · 前端 3000', 'dual_dev', self.start_dual_dev, self.stop_dual_dev, self.restart_dual_dev, columnspan=2)
-        self._build_hosting_panel(content)
-        self._build_global_stop(content)
+        content.rowconfigure(1, weight=1)
+        self._build_server_card(content, 0, 0, '开发模式', 'DEV', 'FastAPI + Vue3 / Vite · 热重载 · 自动切换', 'dual_dev', self.start_dual_dev, self.stop_dual_dev, self.restart_dual_dev)
+        self._build_prod_card(content, 0, 1)
         self._build_log_section(content)
 
     def _card(self, parent, row, col, columnspan=1):
         card = tk.Frame(parent, bg=self._PALETTE['bg_card'], highlightbackground=self._PALETTE['border_card'], highlightthickness=1)
-        card.grid(row=row, column=col, columnspan=columnspan, sticky='nsew', padx=(0, 12) if col == 0 else (0, 0))
+        card.grid(row=row, column=col, columnspan=columnspan, sticky='nsew', padx=(0, 10) if col == 0 else (10, 0))
         self._server_cards.append(card)
         return card
 
+    def _card_head(self, card, icon_text, icon_tint, icon_fg, title, desc):
+        """卡片统一头部：圆角图标 + 标题/副标题（iOS 分组列表风格）"""
+        body = tk.Frame(card, bg=self._PALETTE['bg_card'])
+        body.pack(fill=tk.BOTH, expand=True, padx=20, pady=(15, 16))
+        head = tk.Frame(body, bg=self._PALETTE['bg_card'])
+        head.pack(fill=tk.X)
+        icon = tk.Frame(head, bg=icon_tint, width=34, height=34)
+        icon.pack(side=tk.LEFT)
+        icon.pack_propagate(False)
+        tk.Label(icon, text=icon_text, font=('Segoe UI', 9, 'bold'), fg=icon_fg, bg=icon_tint).place(relx=0.5, rely=0.5, anchor='center')
+        tcol = tk.Frame(head, bg=self._PALETTE['bg_card'])
+        tcol.pack(side=tk.LEFT, padx=(10, 0), fill=tk.X, expand=True)
+        tk.Label(tcol, text=title, font=('Microsoft YaHei UI', 13, 'bold'), fg=self._PALETTE['text_primary'], bg=self._PALETTE['bg_card'], anchor='w').pack(anchor='w')
+        tk.Label(tcol, text=desc, font=('Microsoft YaHei UI', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_card'], anchor='w').pack(anchor='w')
+        tk.Frame(body, bg=self._PALETTE['border'], height=1).pack(fill=tk.X, pady=(13, 0))
+        return body
+
     def _build_server_card(self, parent, row, col, title, script_label, desc, mode_key, start_cmd, stop_cmd, restart_cmd, columnspan=1):
         card = self._card(parent, row, col, columnspan=columnspan)
-        mode_color = self._PALETTE['info']
-        icon_text = 'FD' if mode_key == 'dual_dev' else 'D' if mode_key == 'debug' else 'P'
-        tk.Frame(card, bg=mode_color, height=2).pack(fill=tk.X)
-        hdr = tk.Frame(card, bg=self._PALETTE['bg_card'])
-        hdr.pack(fill=tk.X, padx=22, pady=(14, 0))
-        icon_frame = tk.Frame(hdr, bg=mode_color, width=28, height=28)
-        icon_frame.pack(side=tk.LEFT, padx=(0, 10))
-        icon_frame.pack_propagate(False)
-        tk.Label(icon_frame, text=icon_text, font=('Consolas', 11, 'bold'), fg='#0a0a0f', bg=mode_color).place(relx=0.5, rely=0.5, anchor='center')
-        title_col = tk.Frame(hdr, bg=self._PALETTE['bg_card'])
-        title_col.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        tk.Label(title_col, text=title, font=('Microsoft YaHei UI', 13, 'bold'), fg=self._PALETTE['text_primary'], bg=self._PALETTE['bg_card'], anchor='w').pack(anchor='w')
-        tk.Label(title_col, text=desc, font=('Microsoft YaHei UI', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_card'], anchor='w').pack(anchor='w')
-        tk.Label(hdr, text=script_label, font=('Consolas', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_card']).pack(side=tk.RIGHT)
-        tk.Frame(card, bg=self._PALETTE['border'], height=1).pack(fill=tk.X, padx=22, pady=(12, 0))
-        st = tk.Frame(card, bg=self._PALETTE['bg_card'])
-        st.pack(fill=tk.X, padx=22, pady=(10, 0))
+        body = self._card_head(card, 'DEV', self._PALETTE['success_tint'], self._PALETTE['success'], title, desc)
+        # 状态行
+        st = tk.Frame(body, bg=self._PALETTE['bg_card'])
+        st.pack(fill=tk.X, pady=(11, 0))
         status_dot = StatusDot(st, size=10, color=self._PALETTE['danger'], canvas_bg=self._PALETTE['bg_card'])
-        status_dot.pack(side=tk.LEFT, padx=(0, 8))
+        status_dot.pack(side=tk.LEFT, padx=(0, 7))
         status_label = tk.Label(st, text='已停止', font=('Microsoft YaHei UI', 10, 'bold'), fg=self._PALETTE['danger'], bg=self._PALETTE['bg_card'])
         status_label.pack(side=tk.LEFT)
-        pid_label = tk.Label(st, text='PID: —', font=('Consolas', 9), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_card'])
+        pid_label = tk.Label(st, text='PID —', font=('Consolas', 9), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_card'])
         pid_label.pack(side=tk.RIGHT)
-        btns = tk.Frame(card, bg=self._PALETTE['bg_card'])
-        btns.pack(fill=tk.X, padx=22, pady=(14, 18))
-        start_btn = RoundedButton(btns, text='  启动  ', fill=self._PALETTE['success'], hover_fill=self._PALETTE['success_h'], fg='#ffffff', command=start_cmd, canvas_bg=self._PALETTE['bg_card'], radius=8, pady=7)
-        start_btn.pack(side=tk.LEFT, padx=(0, 8))
-        restart_btn = RoundedButton(btns, text='  重启  ', fill=self._PALETTE['accent'], hover_fill=self._PALETTE['accent_h'], fg='#ffffff', command=restart_cmd, state='disabled', canvas_bg=self._PALETTE['bg_card'], radius=8, pady=7)
-        restart_btn.pack(side=tk.LEFT)
+        # 访问地址（内嵌信息条）
+        info = tk.Frame(body, bg=self._PALETTE['bg_input'])
+        info.pack(fill=tk.X, pady=(11, 0))
+        tk.Label(info, text=f'后端  localhost:{_API_PORT}      前端  localhost:{_WEB_PORT}', font=('Consolas', 9), fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_input'], anchor='w').pack(fill=tk.X, padx=12, pady=7)
+        # 操作按钮：主操作实心 + 次操作浅底
+        btns = tk.Frame(body, bg=self._PALETTE['bg_card'])
+        btns.pack(fill=tk.X, pady=(13, 0))
+        start_btn = RoundedButton(btns, text=' 启动开发 ', fill=self._PALETTE['success'], hover_fill=self._PALETTE['success_h'], fg='#ffffff', command=start_cmd, canvas_bg=self._PALETTE['bg_card'], radius=10, pady=8, font=('Microsoft YaHei UI', 10, 'bold'))
+        start_btn.pack(side=tk.LEFT)
+        restart_btn = RoundedButton(btns, text=' 重启 ', fill=self._PALETTE['accent_tint'], hover_fill='#d5e8ff', fg=self._PALETTE['accent'], command=restart_cmd, state='disabled', canvas_bg=self._PALETTE['bg_card'], radius=10, pady=8, font=('Microsoft YaHei UI', 10, 'bold'))
+        restart_btn.pack(side=tk.LEFT, padx=(8, 0))
         setattr(self, f'{mode_key}_status', status_label)
         setattr(self, f'{mode_key}_pid', pid_label)
         setattr(self, f'{mode_key}_start_btn', start_btn)
         setattr(self, f'{mode_key}_restart_btn', restart_btn)
         setattr(self, f'{mode_key}_status_dot', status_dot)
-
-    def _build_global_stop(self, parent):
-        frame = tk.Frame(parent, bg=self._PALETTE['bg_main'])
-        frame.grid(row=2, column=0, columnspan=2, pady=(4, 6))
-        self.stop_all_btn = RoundedButton(frame, text='  全部停止  ', fill=self._PALETTE['danger'], hover_fill=self._PALETTE['danger_h'], fg='#ffffff', command=self.stop_all, state='disabled', canvas_bg=self._PALETTE['bg_main'], padx=40, pady=9, radius=8, font=('Microsoft YaHei UI', 10, 'bold'))
-        self.stop_all_btn.pack()
 
     # ===================== 生产模式 (Windows 服务 + NSSM) =====================
 
@@ -1482,7 +1518,7 @@ class ServerManagerApp:
             return -1, str(e)
 
     def _svc_state(self, name):
-        code, out = self._run_capture(['sc', 'query', name], timeout=10)
+        code, out = self._run_capture(['sc', 'query', name], timeout=5)
         if code != 0 or 'SERVICE_NAME' not in out:
             return '未安装'
         for line in out.splitlines():
@@ -1494,7 +1530,7 @@ class ServerManagerApp:
 
     def _svc_pid(self, name):
         """查询 Windows 服务当前进程 PID（sc queryex），未运行返回 None"""
-        code, out = self._run_capture(['sc', 'queryex', name], timeout=10)
+        code, out = self._run_capture(['sc', 'queryex', name], timeout=5)
         if code != 0:
             return None
         for line in out.splitlines():
@@ -1505,106 +1541,225 @@ class ServerManagerApp:
                     return int(parts[1].strip())
         return None
 
+    def _wait_service_stopped(self, name, timeout=45):
+        """发出 nssm stop 后轮询服务状态直到 STOPPED；超时返回 False。
+
+        NSSM stop 立即返回，服务进入 STOP_PENDING，优雅关闭需数秒。
+        若在 STOP_PENDING 期间强杀被管进程，会被 AppExit Default Restart
+        判定为崩溃而自动重启，与目标模式抢占端口。因此必须等待确认 STOPPED。
+        """
+        self._run_capture([self._find_nssm(), 'stop', name], timeout=15)
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            state = self._svc_state(name)
+            if 'STOPPED' in state:
+                return True
+            time.sleep(1)
+        return False
+
+    def _ensure_production_stopped(self):
+        """切换前停止生产模式：停 NSSM 服务 + 清残留 prod_runner 进程树。
+
+        返回 (ok, fail_reason)：ok=True 且曾停止过生产则须由调用方提示用户。
+        手动启动的 prod_runner 不受 NSSM 控制，需按命令行特征扫描清理。
+        """
+        stopped_any = False
+        nssm = self._find_nssm()
+        if nssm:
+            for name in (_SVC_API, _SVC_ARQ):
+                state = self._svc_state(name)
+                if 'STOPPED' in state or '未安装' in state:
+                    continue
+                self._msg_queue.put(('log', {'text': f'正在停止生产服务 {name}...'}))
+                if not self._wait_service_stopped(name):
+                    return False, f'{name} 停止超时（STOP_PENDING 未确认），已中止切换'
+                stopped_any = True
+        # 清理手动启动的残留 prod_runner 进程树（不受 NSSM 控制）
+        try:
+            out = subprocess.run(
+                ['powershell', '-NoProfile', '-Command',
+                 "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
+                 "Where-Object { $_.CommandLine -match 'prod_runner' } | "
+                 "Select-Object -ExpandProperty ProcessId"],
+                creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True,
+                text=True, timeout=15,
+            ).stdout
+            for line in out.splitlines():
+                line = line.strip()
+                if line.isdigit():
+                    self._kill_process_tree(int(line))
+                    self._msg_queue.put(('log', {'text': f'已清理残留 prod_runner 进程 (PID: {line})'}))
+                    stopped_any = True
+        except Exception:
+            pass
+        return True, None, stopped_any
+
+    def _ensure_development_stopped(self):
+        """切换前停止开发模式：只停开发子进程，不动 Redis，重置 GUI 状态。
+
+        与 _stop_dual_mode_async 的区别：不调用 _stop_redis()，保留共享基础设施。
+        """
+        stopped_any = False
+        for proc, name in [(self._frontend_process, '前端'), (self._process, '后端')]:
+            if proc and proc.poll() is None:
+                self._msg_queue.put(('log', {'text': f'正在终止开发{name}进程树 (PID: {proc.pid})...'}))
+                self._kill_process_tree(proc.pid)
+                try:
+                    proc.wait(timeout=5)
+                except Exception:
+                    with contextlib.suppress(Exception):
+                        proc.kill()
+                self._msg_queue.put(('log', {'text': f'开发{name}进程已终止 (PID: {proc.pid})'}))
+                stopped_any = True
+        self._process = None
+        self._frontend_process = None
+        self._mode = 'none'
+        self._current_mode_key = ""
+        self._msg_queue.put(('ui_update', {}))
+        self._msg_queue.put(('hosting_refresh', {}))
+        if stopped_any:
+            self._msg_queue.put(('log', {'text': '开发模式已停止'}))
+        return stopped_any
+
+    def _release_ports(self):
+        """清理 5002 与 3000 端口占用（复用 _kill_port_sync，其内部对多 PID 有 3 轮重试）。"""
+        self._kill_port_sync(_API_PORT)
+        self._kill_port_sync(_WEB_PORT)
+
     def _set_label(self, label, text, color=None):
         try:
             label.config(text=text, foreground=color if color else self._PALETTE['text_secondary'])
         except Exception:
             pass
 
-    def _build_hosting_panel(self, parent):
-        card = tk.Frame(parent, bg=self._PALETTE['bg_card'], highlightbackground=self._PALETTE['border_card'], highlightthickness=1)
-        card.grid(row=1, column=0, columnspan=2, sticky='nsew', pady=(4, 4))
-        accent = self._PALETTE['accent']
-        tk.Frame(card, bg=accent, height=2).pack(fill=tk.X)
-        inner = tk.Frame(card, bg=self._PALETTE['bg_card'])
-        inner.pack(fill=tk.X, padx=22, pady=(10, 12))
-
-        # 标题行
-        hdr = tk.Frame(inner, bg=self._PALETTE['bg_card'])
-        hdr.pack(fill=tk.X)
-        tk.Label(hdr, text='生产模式', font=('Microsoft YaHei UI', 13, 'bold'), fg=self._PALETTE['text_primary'], bg=self._PALETTE['bg_card']).pack(side=tk.LEFT)
-        tk.Label(hdr, text='Windows 服务 (NSSM) · 开机自启 · 崩溃自愈 · 前端/后端/ARQ/Redis 守护', font=('Microsoft YaHei UI', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_card']).pack(side=tk.LEFT, padx=(10, 0))
-
-        # 状态行
-        st = tk.Frame(inner, bg=self._PALETTE['bg_card'])
-        st.pack(fill=tk.X, pady=(10, 0))
+    def _build_prod_card(self, parent, row, col):
+        """生产模式卡片（与开发卡并排）— Windows 服务 (NSSM) 托管"""
+        card = self._card(parent, row, col)
+        body = self._card_head(card, 'PROD', self._PALETTE['accent_tint'], self._PALETTE['accent'], '生产模式', 'Windows 服务 (NSSM) · 开机自启 · 崩溃自愈')
+        # 服务状态行
+        st = tk.Frame(body, bg=self._PALETTE['bg_card'])
+        st.pack(fill=tk.X, pady=(11, 0))
+        self.hosting_svc_lbl = tk.Label(st, text='服务: 检测中', font=('Consolas', 9), fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_card'])
+        self.hosting_svc_lbl.pack(side=tk.LEFT)
         self.hosting_nssm_lbl = tk.Label(st, text='NSSM: 检测中', font=('Microsoft YaHei UI', 9), fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_card'])
-        self.hosting_nssm_lbl.pack(side=tk.LEFT)
-        self.hosting_svc_lbl = tk.Label(st, text='服务: 检测中', font=('Microsoft YaHei UI', 9), fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_card'])
-        self.hosting_svc_lbl.pack(side=tk.LEFT, padx=(18, 0))
-        tk.Label(st, text='Worker 数:', font=('Microsoft YaHei UI', 9), fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_card']).pack(side=tk.LEFT, padx=(18, 4))
+        self.hosting_nssm_lbl.pack(side=tk.RIGHT)
+        # 组件状态网格（内嵌面板，iOS 分组表格风格）
+        grid = tk.Frame(body, bg=self._PALETTE['bg_input'])
+        grid.pack(fill=tk.X, pady=(11, 0))
+        grid.columnconfigure(0, weight=1)
+        grid.columnconfigure(1, weight=1)
+        detail_font = ('Microsoft YaHei UI', 9)
+        self.hosting_backend_lbl = tk.Label(grid, text='后端 —', font=detail_font, fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_input'], anchor='w')
+        self.hosting_backend_lbl.grid(row=0, column=0, sticky='ew', padx=(12, 6), pady=(8, 2))
+        self.hosting_arq_lbl = tk.Label(grid, text='ARQ —', font=detail_font, fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_input'], anchor='w')
+        self.hosting_arq_lbl.grid(row=0, column=1, sticky='ew', padx=(6, 12), pady=(8, 2))
+        self.hosting_frontend_lbl = tk.Label(grid, text='前端 —', font=detail_font, fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_input'], anchor='w')
+        self.hosting_frontend_lbl.grid(row=1, column=0, sticky='ew', padx=(12, 6), pady=2)
+        self.hosting_redis_lbl = tk.Label(grid, text='Redis —', font=detail_font, fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_input'], anchor='w')
+        self.hosting_redis_lbl.grid(row=1, column=1, sticky='ew', padx=(6, 12), pady=2)
+        self.hosting_ready_lbl = tk.Label(grid, text='就绪 —', font=detail_font, fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_input'], anchor='w')
+        self.hosting_ready_lbl.grid(row=2, column=0, sticky='ew', padx=(12, 6), pady=(2, 8))
+        # Worker 数（安装服务时生效）
+        wk = tk.Frame(grid, bg=self._PALETTE['bg_input'])
+        wk.grid(row=2, column=1, sticky='e', padx=(6, 12), pady=(2, 8))
+        tk.Label(wk, text='Worker', font=('Microsoft YaHei UI', 9), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_input']).pack(side=tk.LEFT, padx=(0, 4))
         self.hosting_workers_var = tk.StringVar(value=str(int(os.getenv('UVICORN_WORKERS', '4'))))
-        workers_combo = ttk.Combobox(st, textvariable=self.hosting_workers_var, values=('2', '4', '6', '8'), width=4, state='readonly', font=('Microsoft YaHei UI', 9))
-        workers_combo.pack(side=tk.LEFT)
-        tk.Label(st, text='(安装服务时生效，8GB 内存建议 4)', font=('Microsoft YaHei UI', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_card']).pack(side=tk.LEFT, padx=(6, 0))
-
-        # 操作按钮行
-        btns = tk.Frame(inner, bg=self._PALETTE['bg_card'])
-        btns.pack(fill=tk.X, pady=(10, 0))
-        btn_specs = [
-            ('  安装服务  ', self._PALETTE['success'], self._install_services),
-            ('  卸载服务  ', self._PALETTE['danger'], self._uninstall_services),
-            ('  启动服务  ', self._PALETTE['accent'], self._start_services),
-            ('  停止服务  ', self._PALETTE['warning'], self._stop_services),
-            ('  重启服务  ', self._PALETTE['info'], self._restart_services),
-            ('  手动刷新  ', self._PALETTE['text_primary'], self._manual_refresh_hosting),
-            ('  打开日志  ', self._PALETTE['text_secondary'], self._open_logs_dir),
-        ]
-        for text, color, cmd in btn_specs:
-            btn = RoundedButton(btns, text=text, fill=color, hover_fill=_shift_color(color, -20), fg='#ffffff',
-                                command=cmd, canvas_bg=self._PALETTE['bg_card'], radius=8, pady=5)
-            btn.pack(side=tk.LEFT, padx=(0, 8))
-
-        # 明细行（来自 prod_runner.json）
-        det = tk.Frame(inner, bg=self._PALETTE['bg_card'])
-        det.pack(fill=tk.X, pady=(10, 0))
-        self.hosting_backend_lbl = tk.Label(det, text='后端: —', font=('Consolas', 9), fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_card'])
-        self.hosting_backend_lbl.pack(side=tk.LEFT)
-        self.hosting_arq_lbl = tk.Label(det, text='ARQ: —', font=('Consolas', 9), fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_card'])
-        self.hosting_arq_lbl.pack(side=tk.LEFT, padx=(16, 0))
-        self.hosting_frontend_lbl = tk.Label(det, text='前端: —', font=('Consolas', 9), fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_card'])
-        self.hosting_frontend_lbl.pack(side=tk.LEFT, padx=(16, 0))
-        self.hosting_redis_lbl = tk.Label(det, text='Redis: —', font=('Consolas', 9), fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_card'])
-        self.hosting_redis_lbl.pack(side=tk.LEFT, padx=(16, 0))
-        self.hosting_ready_lbl = tk.Label(det, text='就绪: —', font=('Consolas', 9), fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_card'])
-        self.hosting_ready_lbl.pack(side=tk.LEFT, padx=(16, 0))
-
-        # 诊断行：显示状态文件路径与读取结果（错误不再静默吞掉）
-        diag = tk.Frame(inner, bg=self._PALETTE['bg_card'])
-        diag.pack(fill=tk.X, pady=(6, 0))
-        self.hosting_diag_lbl = tk.Label(diag, text='状态文件: 读取中...', font=('Consolas', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_card'], anchor='w', justify='left')
-        self.hosting_diag_lbl.pack(fill=tk.X)
+        ttk.Combobox(wk, textvariable=self.hosting_workers_var, values=('2', '4', '6', '8'), width=4, state='readonly', font=('Microsoft YaHei UI', 9)).pack(side=tk.LEFT)
+        # 主操作行：启动(实心蓝) 停止(实心红) 重启(描边蓝) 刷新(描边灰)
+        btns = tk.Frame(body, bg=self._PALETTE['bg_card'])
+        btns.pack(fill=tk.X, pady=(13, 0))
+        RoundedButton(btns, text=' 启动服务 ', fill=self._PALETTE['accent'], hover_fill=self._PALETTE['accent_h'], fg='#ffffff', command=self._start_services, canvas_bg=self._PALETTE['bg_card'], radius=10, pady=6, font=('Microsoft YaHei UI', 9, 'bold')).pack(side=tk.LEFT)
+        RoundedButton(btns, text=' 停止 ', fill=self._PALETTE['danger'], hover_fill=self._PALETTE['danger_h'], fg='#ffffff', command=self._stop_services, canvas_bg=self._PALETTE['bg_card'], radius=10, pady=6, font=('Microsoft YaHei UI', 9, 'bold')).pack(side=tk.LEFT, padx=(7, 0))
+        RoundedButton(btns, text=' 重启 ', fill=self._PALETTE['accent_tint'], hover_fill='#d5e8ff', fg=self._PALETTE['accent'], command=self._restart_services, canvas_bg=self._PALETTE['bg_card'], radius=10, pady=6, font=('Microsoft YaHei UI', 9, 'bold')).pack(side=tk.LEFT, padx=(7, 0))
+        RoundedButton(btns, text=' 刷新 ', fill=self._PALETTE['bg_input'], hover_fill='#e8e8ed', fg=self._PALETTE['text_primary'], command=self._manual_refresh_hosting, canvas_bg=self._PALETTE['bg_card'], radius=10, pady=6, font=('Microsoft YaHei UI', 9, 'bold')).pack(side=tk.LEFT, padx=(7, 0))
+        # 次操作行：安装(实心绿) 卸载(描边红) 日志(描边灰)
+        btns2 = tk.Frame(body, bg=self._PALETTE['bg_card'])
+        btns2.pack(fill=tk.X, pady=(8, 0))
+        RoundedButton(btns2, text=' 安装服务 ', fill=self._PALETTE['success'], hover_fill=self._PALETTE['success_h'], fg='#ffffff', command=self._install_services, canvas_bg=self._PALETTE['bg_card'], radius=10, pady=5, font=('Microsoft YaHei UI', 9, 'bold')).pack(side=tk.LEFT)
+        RoundedButton(btns2, text=' 卸载 ', fill=self._PALETTE['danger_tint'], hover_fill='#ffd9d5', fg=self._PALETTE['danger'], command=self._uninstall_services, canvas_bg=self._PALETTE['bg_card'], radius=10, pady=5, font=('Microsoft YaHei UI', 9, 'bold')).pack(side=tk.LEFT, padx=(7, 0))
+        RoundedButton(btns2, text=' 打开日志 ', fill=self._PALETTE['bg_input'], hover_fill='#e8e8ed', fg=self._PALETTE['text_primary'], command=self._open_logs_dir, canvas_bg=self._PALETTE['bg_card'], radius=10, pady=5, font=('Microsoft YaHei UI', 9, 'bold')).pack(side=tk.LEFT, padx=(7, 0))
+        # 诊断行
+        self.hosting_diag_lbl = tk.Label(body, text='状态文件: 读取中...', font=('Consolas', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_card'], anchor='w', justify='left')
+        self.hosting_diag_lbl.pack(fill=tk.X, pady=(9, 0))
 
     def _manual_refresh_hosting(self):
-        """手动刷新生产模式状态（用户点击「手动刷新」按钮触发）"""
+        """手动刷新生产模式状态（后台收集 + 主线程应用，不阻塞 UI）"""
         self._set_label(self.hosting_diag_lbl, '状态文件: 手动刷新中...', self._PALETTE['text_dim'])
-        try:
-            self._refresh_hosting_status()
-        except Exception as e:
-            self._set_label(self.hosting_diag_lbl, f'手动刷新异常: {e}', self._PALETTE['danger'])
+        self._refresh_hosting_status()
         self.log_message('已手动刷新生产模式状态')
 
     def _refresh_hosting_status(self):
-        try:
-            nssm = self._find_nssm()
-            nssm_text = '已找到' if nssm else '未找到(请安装 C:\\nssm)'
-            self._set_label(self.hosting_nssm_lbl, f'NSSM: {nssm_text}',
-                            self._PALETTE['success'] if nssm else self._PALETTE['danger'])
-            api_state = self._svc_state(_SVC_API)
-            arq_state = self._svc_state(_SVC_ARQ)
-            self._set_label(self.hosting_svc_lbl, f'服务: {_SVC_API}={api_state}  {_SVC_ARQ}={arq_state}')
+        """调度后台线程收集生产模式状态，收集完成后经消息队列回主线程应用。
 
+        sc query / 状态文件 IO / Redis 探测均为阻塞操作，绝不能在 Tk 主线程执行，
+        否则周期刷新（5s）会让 GUI 持续卡顿。收集期间重复调用只标记待刷新。
+        """
+        if getattr(self, '_hosting_collecting', False):
+            self._hosting_refresh_requested = True
+            return
+        self._hosting_collecting = True
+
+        def _collect():
+            try:
+                data = self._collect_hosting_data()
+            except Exception:
+                data = {'collect_error': True}
+            self._msg_queue.put(('hosting_apply', {'data': data}))
+        threading.Thread(target=_collect, daemon=True).start()
+
+    def _collect_hosting_data(self):
+        """纯数据收集（后台线程执行）——不触碰任何 UI 组件"""
+        data = {
+            'nssm': self._find_nssm(),
+            'api_state': self._svc_state(_SVC_API),
+            'arq_state': self._svc_state(_SVC_ARQ),
+        }
+        data['api_running'] = 'RUNNING' in data['api_state'].upper() if data['api_state'] else False
+        data['redis_ok'] = self._is_redis_running()
+        status_file = _PROJECT_DIR / 'logs' / 'prod_runner.json'
+        data['status_file'] = status_file
+        data['status'], data['read_err'], data['mtime'], data['stale'], data['mtime_str'] = {}, None, 0, False, '—'
+        if not data['api_running']:
+            return data
+        # 服务运行中：读取状态文件并校验新鲜度
+        try:
+            if status_file.is_file():
+                data['status'] = json.loads(status_file.read_text(encoding='utf-8'))
+            else:
+                data['read_err'] = f'文件不存在: {status_file}'
+        except Exception as e:
+            data['read_err'] = f'读取失败: {type(e).__name__}: {e}'
+        mtime = status_file.stat().st_mtime if status_file.is_file() else 0
+        data['mtime'] = mtime
+        data['stale'] = bool(status_file.is_file()) and (time.time() - mtime) > 15
+        data['mtime_str'] = datetime.fromtimestamp(mtime).strftime('%H:%M:%S') if mtime else '—'
+        # ARQ 由独立 NSSM 服务托管时（--no-arq），从 erp-arq 服务查询真实 PID（IO 归入收集阶段）
+        if data['status'].get('services', {}).get('arq', {}).get('status') == 'external':
+            data['arq_svc_pid'] = self._svc_pid(_SVC_ARQ)
+        else:
+            data['arq_svc_pid'] = None
+        return data
+
+    def _apply_hosting_data(self, data):
+        """主线程应用收集到的生产模式状态（仅 UI 更新，无阻塞 IO）"""
+        try:
+            if data.get('collect_error'):
+                self._set_label(self.hosting_diag_lbl, '状态收集异常，将在下轮重试', self._PALETTE['warning'])
+                return
             col = self._PALETTE
+            nssm = data['nssm']
+            self._set_label(self.hosting_nssm_lbl, f'NSSM: {"已找到" if nssm else "未找到(请安装 C:\\nssm)"}',
+                            col['success'] if nssm else col['danger'])
+            self._set_label(self.hosting_svc_lbl, f"服务: {_SVC_API}={data['api_state']}  {_SVC_ARQ}={data['arq_state']}")
+
             def _detail(label, text, ok=None):
                 color = col['success'] if ok is True else col['danger'] if ok is False else col['text_secondary']
                 self._set_label(label, text, color)
 
-            status_file = _PROJECT_DIR / 'logs' / 'prod_runner.json'
-            api_running = 'RUNNING' in api_state.upper() if api_state else False
-
-            # 服务未运行：以 sc query 为权威，不读状态文件，避免残留旧数据（服务已 STOPPED 却仍显示 ready/pid）
-            if not api_running:
-                redis_ok = self._is_redis_running()
+            status_file = data['status_file']
+            # 服务未运行：以 sc query 为权威，不读状态文件，避免残留旧数据
+            if not data['api_running']:
+                redis_ok = data['redis_ok']
                 _detail(self.hosting_backend_lbl, '后端: 已停止 pid=—', False)
                 _detail(self.hosting_arq_lbl, 'ARQ: 未运行 pid=—', False)
                 _detail(self.hosting_frontend_lbl, '前端: 已停止 pid=—', False)
@@ -1613,54 +1768,41 @@ class ServerManagerApp:
                 self._set_label(self.hosting_diag_lbl, f'状态文件: 服务未运行，不读取 {status_file}', col['text_dim'])
                 return
 
-            # 服务运行中：读取状态文件并校验新鲜度
-            status = {}
-            read_err = None
-            try:
-                if status_file.is_file():
-                    status = json.loads(status_file.read_text(encoding='utf-8'))
-                else:
-                    read_err = f'文件不存在: {status_file}'
-            except Exception as e:
-                read_err = f'读取失败: {type(e).__name__}: {e}'
-
-            mtime = status_file.stat().st_mtime if status_file.is_file() else 0
-            stale = bool(status_file.is_file()) and (time.time() - mtime) > 15
+            read_err, stale = data['read_err'], data['stale']
             if read_err:
                 self._set_label(self.hosting_diag_lbl, f'状态文件: {read_err}', col['danger'])
                 self.log_message(f'[生产模式] {read_err}', 'WARNING')
             elif stale:
-                mtime_str = datetime.fromtimestamp(mtime).strftime('%H:%M:%S')
-                self._set_label(self.hosting_diag_lbl, f'状态文件: 已过期 ({mtime_str}，>15s 未更新)', col['warning'])
+                self._set_label(self.hosting_diag_lbl, f"状态文件: 已过期 ({data['mtime_str']}，>15s 未更新)", col['warning'])
             else:
-                mtime_str = datetime.fromtimestamp(mtime).strftime('%H:%M:%S') if mtime else '—'
-                self._set_label(self.hosting_diag_lbl, f'状态文件: {status_file} (更新于 {mtime_str})', col['text_dim'])
+                self._set_label(self.hosting_diag_lbl, f'状态文件: {status_file} (更新于 {data["mtime_str"]})', col['text_dim'])
 
+            status = data['status']
             svcs = status.get('services', {})
             backend = svcs.get('backend', {})
             _detail(self.hosting_backend_lbl, f'后端: {backend.get("status", "—")} pid={backend.get("pid")}', backend.get('status') == 'ready')
             arq = svcs.get('arq', {})
-            arq_status = arq.get('status', '—')
-            arq_pid = arq.get('pid')
+            arq_status, arq_pid = arq.get('status', '—'), arq.get('pid')
             arq_ok = arq_status == 'running'
-            # ARQ 由独立 NSSM 服务托管时（--no-arq），从 erp-arq 服务查询真实 PID 与运行状态
             if arq_status == 'external':
-                svc_pid = self._svc_pid(_SVC_ARQ)
+                svc_pid = data.get('arq_svc_pid')
                 if svc_pid:
-                    arq_pid = svc_pid
-                    arq_status = 'running'
-                    arq_ok = True
+                    arq_pid, arq_status, arq_ok = svc_pid, 'running', True
                 else:
                     arq_status = '未运行'
             _detail(self.hosting_arq_lbl, f'ARQ: {arq_status} pid={arq_pid}', arq_ok)
             fe = svcs.get('frontend', {})
             _detail(self.hosting_frontend_lbl, f'前端: {fe.get("type", "—")}/{fe.get("status", "—")} pid={fe.get("pid")}', fe.get('status') in ('running', 'ready'))
-            redis_ok = self._is_redis_running()
+            redis_ok = data['redis_ok']
             _detail(self.hosting_redis_lbl, f'Redis: {"ok" if redis_ok else "已停止"}', redis_ok)
             ready = status.get('ready')
             _detail(self.hosting_ready_lbl, f'就绪: {ready if ready is not None else "—"}', ready)
         finally:
-            self._after_ids['hosting'] = self.root.after(5000, self._refresh_hosting_status)
+            self._hosting_collecting = False
+            # 收集期间有刷新请求 → 立即补一轮；否则按 5s 周期继续
+            delay = 50 if self._hosting_refresh_requested else 5000
+            self._hosting_refresh_requested = False
+            self._after_ids['hosting'] = self.root.after(delay, self._refresh_hosting_status)
 
     def _nssm_install(self, nssm, name, app, params, env_extra):
         # Step 1: 创建服务（仅注册应用路径，不传参数，避免 NSSM 弹 GUI）
@@ -1717,23 +1859,35 @@ class ServerManagerApp:
             self._msg_queue.put(('hosting_refresh', {}))
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _service_cmd(self, verb):
+    def _service_cmd_sync(self, verb):
         nssm = self._find_nssm()
-        def _worker():
-            for name in (_SVC_API, _SVC_ARQ):
-                if verb == 'restart' and nssm:
-                    self._run_capture([nssm, 'restart', name], timeout=30)
+        for name in (_SVC_API, _SVC_ARQ):
+            if verb == 'restart' and nssm:
+                self._run_capture([nssm, 'restart', name], timeout=30)
+            else:
+                if nssm:
+                    self._run_capture([nssm, verb, name], timeout=30)
                 else:
-                    if nssm:
-                        self._run_capture([nssm, verb, name], timeout=30)
-                    else:
-                        self._run_capture(['sc', verb, name], timeout=30)
-                self.log_message(f'{name} {verb} 已执行')
-            self._msg_queue.put(('hosting_refresh', {}))
-        threading.Thread(target=_worker, daemon=True).start()
+                    self._run_capture(['sc', verb, name], timeout=30)
+            self.log_message(f'{name} {verb} 已执行')
+        self._msg_queue.put(('hosting_refresh', {}))
+
+    def _service_cmd(self, verb):
+        threading.Thread(target=self._service_cmd_sync, args=(verb,), daemon=True).start()
 
     def _start_services(self):
-        self._service_cmd('start')
+        # 互斥守卫：开发模式正在启动/重启中则拒绝（防 TOCTOU 双后端抢 5002）
+        if self._mode in ('starting', 'restarting'):
+            self.log_message('开发模式正在启动中，请稍候', 'WARNING')
+            return
+
+        def _worker():
+            # 互斥切换：停开发模式 + 清端口（含进程树终止等阻塞操作，放后台线程避免卡死 UI）
+            if self._ensure_development_stopped():
+                self._msg_queue.put(('log', {'text': '已自动停止开发模式', 'level': 'INFO'}))
+            self._release_ports()
+            self._service_cmd_sync('start')
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _stop_services(self):
         self._service_cmd('stop')
@@ -1770,22 +1924,30 @@ class ServerManagerApp:
 
     def _build_log_section(self, parent):
         log_card = tk.Frame(parent, bg=self._PALETTE['bg_card'], highlightbackground=self._PALETTE['border_card'], highlightthickness=1)
-        log_card.grid(row=3, column=0, columnspan=2, sticky='nsew', pady=(4, 0))
+        log_card.grid(row=1, column=0, columnspan=2, sticky='nsew', pady=(10, 0))
         log_card.columnconfigure(0, weight=1)
         log_card.rowconfigure(1, weight=1)
         log_hdr = tk.Frame(log_card, bg=self._PALETTE['bg_card'])
         log_hdr.grid(row=0, column=0, sticky='ew', padx=20, pady=(12, 0))
-        tk.Label(log_hdr, text='控制台', font=('Microsoft YaHei UI', 11, 'bold'), fg=self._PALETTE['text_primary'], bg=self._PALETTE['bg_card']).pack(side=tk.LEFT)
+        tk.Label(log_hdr, text='运行日志', font=('Microsoft YaHei UI', 11, 'bold'), fg=self._PALETTE['text_primary'], bg=self._PALETTE['bg_card']).pack(side=tk.LEFT)
         tk.Label(log_hdr, text='实时输出', font=('Microsoft YaHei UI', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_card']).pack(side=tk.LEFT, padx=(8, 0))
         log_btns = tk.Frame(log_hdr, bg=self._PALETTE['bg_card'])
         log_btns.pack(side=tk.RIGHT)
         for txt, cmd in [('导出', self.export_log), ('清空', self.clear_log)]:
-            tk.Button(log_btns, text=txt, font=('Microsoft YaHei UI', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_input'], activebackground=self._PALETTE['border'], activeforeground=self._PALETTE['text_primary'], relief=tk.FLAT, bd=0, cursor='hand2', padx=10, pady=2, command=cmd).pack(side=tk.RIGHT, padx=(4, 0))
-        log_body = tk.Frame(log_card, bg=self._PALETTE['bg_log'], highlightbackground=self._PALETTE['border'], highlightthickness=1)
+            pill = tk.Frame(log_btns, bg=self._PALETTE['bg_card'], cursor='hand2', highlightbackground=self._PALETTE['border'], highlightthickness=1)
+            pill.pack(side=tk.RIGHT, padx=(4, 0))
+            tk.Label(pill, text=txt, font=('Microsoft YaHei UI', 8), fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_card'], padx=12, pady=3, cursor='hand2').pack()
+            for w in (pill, pill.winfo_children()[0]):
+                w.bind('<Button-1>', lambda e, c=cmd: c())
+                w.bind('<Enter>', lambda e, p=pill: p.config(bg=self._PALETTE['bg_input']))
+                w.bind('<Leave>', lambda e, p=pill: p.config(bg=self._PALETTE['bg_card']))
+                w.bind('<Enter>', lambda e, l=pill.winfo_children()[0]: l.config(bg=self._PALETTE['bg_input']), add='+')
+                w.bind('<Leave>', lambda e, l=pill.winfo_children()[0]: l.config(bg=self._PALETTE['bg_card']), add='+')
+        log_body = tk.Frame(log_card, bg=self._PALETTE['bg_input'], highlightbackground=self._PALETTE['border'], highlightthickness=1)
         log_body.grid(row=1, column=0, sticky='nsew', padx=14, pady=(8, 14))
         log_body.columnconfigure(0, weight=1)
         log_body.rowconfigure(0, weight=1)
-        log_font = ('Microsoft YaHei UI', 9)
+        log_font = ('Consolas', 9)
         self.log_text = tk.Text(log_body, bg=self._PALETTE['bg_log'], fg=self._PALETTE['log_fg'], insertbackground=self._PALETTE['log_fg'], selectbackground=self._PALETTE['bg_input'], font=log_font, wrap=tk.WORD, state=tk.DISABLED, relief=tk.FLAT, padx=14, pady=10, cursor='arrow')
         self.log_text.grid(row=0, column=0, sticky='nsew')
         self.log_text.tag_configure('INFO', foreground=self._PALETTE['log_info'])
@@ -1807,6 +1969,9 @@ class ServerManagerApp:
         self.status_bar_label.pack(side=tk.LEFT)
         right = tk.Frame(bar, bg=self._PALETTE['bg_surface'])
         right.pack(side=tk.RIGHT, padx=20, pady=5)
+        # 紧急停止（危险浅底）：强杀全部进程并释放端口
+        self.stop_all_btn = RoundedButton(right, text=' 紧急停止 ', fill=self._PALETTE['danger_tint'], hover_fill='#ffd9d5', fg=self._PALETTE['danger'], command=self.stop_all, canvas_bg=self._PALETTE['bg_surface'], radius=8, pady=2, font=('Microsoft YaHei UI', 8, 'bold'))
+        self.stop_all_btn.pack(side=tk.RIGHT, padx=(10, 0))
         self._redis_status_label = tk.Label(right, text='Redis: 检查中', font=('Consolas', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_surface'])
         self._redis_status_label.pack(side=tk.RIGHT, padx=(8, 0))
         tk.Label(right, text=f'API:{_API_PORT} WEB:{_WEB_PORT}', font=('Consolas', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_surface']).pack(side=tk.RIGHT)

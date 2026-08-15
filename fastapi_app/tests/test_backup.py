@@ -5,11 +5,9 @@
 """
 import json
 import os
-import tempfile
 import zipfile
 from datetime import datetime, timedelta
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -18,7 +16,6 @@ from fastapi_app.services.backup_service import (
     BackupFileError,
     BackupLockError,
     RestoreError,
-    BACKUP_DIR,
     BACKUP_FORMAT_VERSION,
     BACKUP_MAX_COUNT,
     BACKUP_RETENTION_DAYS,
@@ -27,7 +24,6 @@ from fastapi_app.services.backup_service import (
     delete_backup_file,
     deserialize_value,
     ensure_backup_dir,
-    find_last_backup_timestamp,
     get_checksum_tables,
     list_backup_files,
     quote_table,

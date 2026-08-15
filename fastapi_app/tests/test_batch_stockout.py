@@ -14,7 +14,6 @@
 """
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 
 from fastapi_app.services import stock_service
 

@@ -7,7 +7,7 @@ import calendar
 import io
 import logging
 import uuid
-from datetime import date, datetime
+from datetime import date
 
 import openpyxl
 from sqlalchemy import and_, extract, func, select

@@ -51,7 +51,7 @@ describe('useCustomerSampling', () => {
     const hook = useCustomerSampling()
     await hook.loadGrouped()
 
-    expect(patternRoomApi.getGroupedList).toHaveBeenCalledWith({})
+    expect(patternRoomApi.getGroupedList).toHaveBeenCalledWith({ per_page: 20 })
     expect(hook.groups.value).toHaveLength(1)
     expect(hook.groups.value[0]!.pattern_maker_name).toBe('版师A')
     expect(hook.totalProjects.value).toBe(2)
@@ -65,7 +65,7 @@ describe('useCustomerSampling', () => {
     const hook = useCustomerSampling()
     await hook.loadGrouped('毛绒玩具')
 
-    expect(patternRoomApi.getGroupedList).toHaveBeenCalledWith({ keyword: '毛绒玩具' })
+    expect(patternRoomApi.getGroupedList).toHaveBeenCalledWith({ keyword: '毛绒玩具', per_page: 20 })
   })
 
   it('loadGrouped 空白 keyword：不传递参数', async () => {
@@ -74,7 +74,7 @@ describe('useCustomerSampling', () => {
     const hook = useCustomerSampling()
     await hook.loadGrouped('   ')
 
-    expect(patternRoomApi.getGroupedList).toHaveBeenCalledWith({})
+    expect(patternRoomApi.getGroupedList).toHaveBeenCalledWith({ per_page: 20 })
   })
 
   it('loadGrouped 失败：设置 error 并清空数据', async () => {

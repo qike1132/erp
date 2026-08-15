@@ -168,8 +168,9 @@ import UiButton from '@/components/ui/UiButton.vue'
 import UiAutocomplete from '@/components/ui/UiAutocomplete.vue'
 import type { FormState, ProductSuggestion } from '../composables/types'
 
+const form = defineModel<FormState>('form', { required: true })
+
 defineProps<{
-  form: FormState
   isOrder: boolean
   isCustomOrder: boolean
   orderTypeOptions: { label: string; value: string }[]

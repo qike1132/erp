@@ -4,7 +4,6 @@
 从 purchase_center_service.py 拆分，包含产品查询、BOM 保存和物料计算。
 """
 import logging
-from collections import defaultdict
 from decimal import Decimal
 
 from sqlalchemy import func, or_, select, union_all

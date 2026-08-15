@@ -10,18 +10,15 @@
 6. 趋势分析
 """
 
-import asyncio
 import json
 import logging
-import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import psutil
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db_context
 from fastapi_app.services.backup_service import BACKUP_DIR

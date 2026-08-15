@@ -17,7 +17,6 @@ from starlette.concurrency import run_in_threadpool
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import create_access_token, create_refresh_token, get_current_user_id
-from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.limiter import limiter, memory_limiter
 
 logger = logging.getLogger(__name__)

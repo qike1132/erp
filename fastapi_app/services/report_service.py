@@ -5,7 +5,7 @@ SECURITY NOTE: where_clauses 列表仅包含硬编码的 SQL 片段，
 必须通过 :param 参数绑定传递，以防止 SQL 注入。
 """
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession

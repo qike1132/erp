@@ -13,7 +13,6 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ._constants import BACKUP_FORMAT_VERSION
 from .exceptions import RestoreError
 from .verify import quote_table
 

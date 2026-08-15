@@ -8,23 +8,19 @@
 4. 生成清理报告和通知
 """
 
-import asyncio
 import json
 import logging
-import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set
 
 import psutil
-from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db_context
 from fastapi_app.services.backup_alert_service import alert_service
 from fastapi_app.services.backup_health_check_service import health_check_service
-from fastapi_app.services.backup_service import BACKUP_DIR, cleanup_old_backups as original_cleanup
+from fastapi_app.services.backup_service import BACKUP_DIR
 from fastapi_app.shared_models.backup_record import BackupRecord
 
 logger = logging.getLogger(__name__)

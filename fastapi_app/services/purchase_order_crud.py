@@ -12,7 +12,7 @@ from decimal import Decimal
 
 from typing import Sequence
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 

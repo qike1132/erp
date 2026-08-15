@@ -10,6 +10,8 @@ ARQ 是原生 async 任务队列，与 FastAPI async 架构一致，
 from arq import cron, create_pool
 from arq.connections import RedisSettings
 
+import os
+
 from fastapi_app.core.config import settings
 
 # 队列名称（保持与 Celery 一致的路由语义，供 _queue_name 使用）
@@ -18,13 +20,21 @@ QUEUE_REPORTS = 'io.reports'
 QUEUE_BACKUP = 'io.backup'
 QUEUE_PLAN = 'io.plan'
 
-# Redis 配置（复用应用 Redis 实例）
-redis_settings = RedisSettings(
-    host=settings.REDIS_HOST,
-    port=settings.REDIS_PORT,
-    password=settings.REDIS_PASSWORD or None,
-    database=settings.REDIS_DB or 0,
-)
+# Redis 配置（独立 broker 实例，与缓存实例隔离）
+# 优先使用 REDIS_BROKER_URL；未配置时回退到通用 REDIS_HOST/PORT/DB
+def _build_redis_settings() -> RedisSettings:
+    broker_url = getattr(settings, 'REDIS_BROKER_URL', '') or os.getenv('REDIS_BROKER_URL', '')
+    if broker_url:
+        return RedisSettings.from_dsn(broker_url)
+    return RedisSettings(
+        host=settings.REDIS_HOST,
+        port=settings.REDIS_PORT,
+        password=settings.REDIS_PASSWORD or None,
+        database=settings.REDIS_DB or 0,
+    )
+
+
+redis_settings = _build_redis_settings()
 
 # 任务注册：ARQ 通过 functions 列表注册，按函数 __name__ 派发
 from fastapi_app.tasks.batch_tasks import (  # noqa: E402

@@ -12,10 +12,10 @@ import json
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
-from datetime import date, datetime, timezone, timedelta
+from datetime import date, datetime, timezone
 
 import openpyxl
-from sqlalchemy import and_, delete, func, select, text
+from sqlalchemy import and_, delete, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only, selectinload

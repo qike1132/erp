@@ -9,7 +9,7 @@ import tempfile
 
 from fastapi_app.core.database import get_sync_engine
 from fastapi_app.core.logger import logger
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
 
 _SyncSession = sessionmaker(
     autocommit=False, autoflush=False, bind=get_sync_engine()

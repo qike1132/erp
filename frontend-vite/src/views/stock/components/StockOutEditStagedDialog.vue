@@ -55,13 +55,14 @@ interface EditStagedForm {
 }
 
 defineProps<{
-  form: EditStagedForm
   customerOptions: { value: string; label: string }[]
   countryOptions: { value: string; label: string }[]
   orderTypeOptions: { value: string; label: string }[]
 }>()
 
 const openModel = defineModel<boolean>('open', { default: false })
+
+const form = defineModel<EditStagedForm>('form', { required: true })
 
 const emit = defineEmits<{
   save: []

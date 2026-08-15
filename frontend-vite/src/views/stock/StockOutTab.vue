@@ -6,7 +6,7 @@
         <!-- 左栏：出货信息录入 -->
         <div class="so-col">
           <StockOutInputForm
-            :form="form"
+            v-model:form="form"
             :customer-options="customerOptions"
             :country-options="countryStore.countryOptions"
             :order-type-options="orderTypeOptions"
@@ -54,7 +54,7 @@
     <!-- 编辑暂存出货弹窗 -->
     <StockOutEditStagedDialog
       v-model:open="editStagedOpen"
-      :form="editStagedForm"
+      v-model:form="editStagedForm"
       :customer-options="customerOptions"
       :country-options="countryStore.countryOptions"
       :order-type-options="orderTypeOptions"
