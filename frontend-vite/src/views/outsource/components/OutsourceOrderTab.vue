@@ -334,7 +334,7 @@ function statusClass(label: string): string {
 }
 .oso-progress-fill--done { background: var(--color-success-500); }
 .oso-progress-fill--run { background: var(--color-warning-400); }
-.oso-progress-fill--wait { background: var(--color-primary-400); }
+.oso-progress-fill--wait { background: var(--color-warning-400); }
 .oso-cell-muted { color: var(--color-text-muted); font-size: 12px; }
 
 .oso-status-badge {

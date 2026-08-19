@@ -196,11 +196,13 @@ async def import_products_from_data(db: AsyncSession, data_list: list) -> int:
         try:
             stock = int(initial_stock) if initial_stock else 0
         except ValueError:
+            logger.warning("产品导入：initial_stock 解析失败，使用默认值 0 (name=%s, value=%r)", name, initial_stock)
             stock = 0
 
         try:
             price_val = float(price) if price else 0
         except (ValueError, TypeError):
+            logger.warning("产品导入：price 解析失败，使用默认值 0 (name=%s, value=%r)", name, price)
             price_val = 0
 
         product = Product(
@@ -256,6 +258,7 @@ async def import_orders_from_data(db: AsyncSession, data_list: list) -> tuple[in
             if qty <= 0:
                 return False
         except ValueError:
+            logger.warning("订单导入：quantity 解析失败，跳过该行 (product=%s, customer=%s, value=%r)", product_name, customer, quantity)
             return False
 
         order_no = await generate_order_number(db)
@@ -343,6 +346,7 @@ async def import_stockins_from_data(db: AsyncSession, data_list: list) -> tuple[
             if qty <= 0:
                 return False
         except ValueError:
+            logger.warning("备货导入：quantity 解析失败，跳过该行 (product=%s, customer=%s, value=%r)", product_name, customer, quantity)
             return False
 
         stockin_date = parse_date_value(stockin_date_val) or datetime.now(UTC).replace(tzinfo=None)
@@ -420,6 +424,7 @@ async def import_stockouts_from_data(db: AsyncSession, data_list: list) -> tuple
             if qty <= 0:
                 return False
         except ValueError:
+            logger.warning("出货导入：quantity 解析失败，跳过该行 (product=%s, customer=%s, value=%r)", product_identifier, customer, quantity)
             return False
 
         if product.current_stock < qty:

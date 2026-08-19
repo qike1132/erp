@@ -4,7 +4,7 @@
     <!-- Unified Header + Tabs -->
     <div class="mr-top-bar">
       <div class="mr-tabs">
-        <button :class="['mr-tab-btn', { active: activeTab === 'progress' }]" @click="switchToProgress" aria-label="来料进度 0' :class='['notification-badge', a">
+        <button :class="['mr-tab-btn', { active: activeTab === 'progress' }]" @click="switchToProgress" aria-label="来料进度">
           来料进度 <span v-if="progressCount > 0" :class="['notification-badge', activeTab === 'progress' ? 'notification-badge-active' : '']">{{ progressCount }}</span>
         </button>
         <button :class="['mr-tab-btn', { active: activeTab === 'history' }]" @click="switchToHistory" aria-label="历史查询">

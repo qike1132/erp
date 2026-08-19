@@ -231,7 +231,7 @@ const progressColumns: TableColumn[] = [
 
 .mr-pfill { height: 100%; border-radius: 8px; transition: width 0.5s ease; }
 .mr-pfill.pending { background: var(--color-warning-500, #FF9F43); }
-.mr-pfill.partial { background: var(--color-primary-500, #5B8DEF); }
+.mr-pfill.partial { background: var(--color-warning-500, #FF9F43); }
 .mr-pfill.completed { background: var(--color-success-500, #28C76F); }
 
 .mr-pbar-pct { font-size: 13px; color: var(--color-text-secondary); }

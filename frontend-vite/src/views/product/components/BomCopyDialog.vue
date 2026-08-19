@@ -188,7 +188,7 @@ const emit = defineEmits<{
 
 /* 进度条 */
 .pd-progress { height: 16px; border-radius: 8px; background: var(--color-border-light, #e2e8f0); overflow: hidden; }
-.pd-progress-bar { height: 100%; background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-600)); border-radius: 8px; transition: width 0.3s ease; }
+.pd-progress-bar { height: 100%; background: linear-gradient(135deg, var(--color-warning-400), var(--color-warning-600)); border-radius: 8px; transition: width 0.3s ease; }
 .pd-progress-text { margin-top: 6px; font-size: 12px; color: var(--color-text-secondary); text-align: center; }
 
 /* 复制BOM模态框 */

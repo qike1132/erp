@@ -87,7 +87,7 @@ export function useOutsourceProcess(detailDataProp: Ref<OutsourceOrderRow | null
   function progressVariant(progress: number): 'primary' | 'success' | 'warning' | 'danger' {
     if (progress === 100) return 'success'
     if (progress > 0) return 'warning'
-    return 'primary'
+    return 'warning'
   }
 
   async function loadProcesses(orderId: number) {

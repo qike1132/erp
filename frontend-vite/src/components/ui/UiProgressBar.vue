@@ -22,7 +22,7 @@ const props = withDefaults(
     percent: number
     variant?: 'primary' | 'success' | 'warning' | 'danger'
   }>(),
-  { variant: 'primary' },
+  { variant: 'warning' },
 )
 
 const colorClass = computed(

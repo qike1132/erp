@@ -197,7 +197,7 @@ function detailStatusTxt(s: string) { return DETAIL_STATUS_TEXT[s] || '待出货
 .progress-fill {
   height: 100%;
   border-radius: 3px;
-  background: var(--gradient-primary);
+  background: var(--gradient-warning);
   transition: width 0.4s;
 }
 .fill-done { background: var(--gradient-success); }

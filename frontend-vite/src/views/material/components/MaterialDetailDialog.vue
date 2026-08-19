@@ -117,7 +117,7 @@ function fillClass(item: { progress?: number; received_quantity: number | string
 .mr-pbar { width: 160px; height: 10px; background: #E5E7EB; border-radius: 8px; overflow: hidden; }
 .mr-pfill { height: 100%; border-radius: 8px; transition: width 0.5s ease; }
 .mr-pfill.pending { background: var(--color-warning-500, #FF9F43); }
-.mr-pfill.partial { background: var(--color-primary-500, #5B8DEF); }
+.mr-pfill.partial { background: var(--color-warning-500, #FF9F43); }
 .mr-pfill.completed { background: var(--color-success-500, #28C76F); }
 
 /* === SKU Fill Colors === */
