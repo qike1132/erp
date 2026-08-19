@@ -3,7 +3,7 @@
 
 提供测试用的 FastAPI 客户端和 mock 数据库会话。
 """
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
@@ -125,7 +125,32 @@ async def override_deps(mock_db, mock_current_user):
     app.dependency_overrides[_get_user_with_permissions] = override_get_user_with_permissions
     app.dependency_overrides[get_current_user_id] = override_get_current_user_id
 
-    yield
+    # 避免 /api/health 等端点触发真实 DB/Redis 连接：
+    # verify_db_connectivity / _get_async_redis_client 不走 FastAPI 依赖注入，
+    # 若走真实连接会在测试进程中创建 asyncpg/redis 连接，污染 event loop
+    # 导致后续测试报 "Event loop is closed" / "'NoneType' object has no attribute 'send'"。
+    async def _fake_verify_db_connectivity() -> bool:
+        return True
+
+    async def _fake_get_async_redis_client():
+        return None
+
+    # 审计日志直接写入真实库（_write_audit_direct 用 async_engine）在测试环境无意义，
+    # 且会触发真实 asyncpg 连接导致 event loop 污染。测试中审计写入置为 no-op。
+    async def _noop_write_audit_direct(entries):
+        return None
+
+    with patch(
+        'fastapi_app.core.database.verify_db_connectivity',
+        side_effect=_fake_verify_db_connectivity,
+    ), patch(
+        'fastapi_app.services.notification_service._get_async_redis_client',
+        side_effect=_fake_get_async_redis_client,
+    ), patch(
+        'fastapi_app.core.audit_middleware._write_audit_direct',
+        side_effect=_noop_write_audit_direct,
+    ):
+        yield
 
     app.dependency_overrides.clear()
 

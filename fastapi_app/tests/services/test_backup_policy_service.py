@@ -583,7 +583,7 @@ class TestBackupPolicyService:
         """测试获取策略合规性报告"""
         with patch.object(policy_service, 'get_current_policy') as mock_get_policy, \
              patch('psutil.disk_usage') as mock_disk_usage, \
-             patch('fastapi_app.services.backup_policy_service.get_async_db_context') as mock_context:
+             patch('fastapi_app.services.backup.orchestration.policy_service.get_async_db_context') as mock_context:
 
             # 模拟策略
             mock_get_policy.return_value = {

@@ -272,7 +272,7 @@ class TestBackupMetricsService:
             }
         }
 
-        with patch('fastapi_app.services.backup_metrics_service.logger') as mock_logger:
+        with patch('fastapi_app.services.backup.metrics.service.logger') as mock_logger:
             await metrics_service._check_performance_thresholds(metrics)
 
             # 所有指标都在阈值内，不应该记录警告
@@ -290,7 +290,7 @@ class TestBackupMetricsService:
             }
         }
 
-        with patch('fastapi_app.services.backup_metrics_service.logger') as mock_logger:
+        with patch('fastapi_app.services.backup.metrics.service.logger') as mock_logger:
             await metrics_service._check_performance_thresholds(metrics)
 
             # 应该记录警告
@@ -304,7 +304,7 @@ class TestBackupMetricsService:
     @pytest.mark.asyncio
     async def test_get_performance_summary(self, metrics_service, mock_backup_record):
         """测试获取性能摘要"""
-        with patch('fastapi_app.services.backup_metrics_service.get_async_db_context') as mock_context:
+        with patch('fastapi_app.services.backup.metrics.service.get_async_db_context') as mock_context:
             mock_session = AsyncMock()
             mock_result = MagicMock()
 
@@ -363,7 +363,7 @@ class TestBackupMetricsService:
     @pytest.mark.asyncio
     async def test_get_performance_summary_by_type(self, metrics_service, mock_backup_record):
         """测试按类型获取性能摘要"""
-        with patch('fastapi_app.services.backup_metrics_service.get_async_db_context') as mock_context:
+        with patch('fastapi_app.services.backup.metrics.service.get_async_db_context') as mock_context:
             mock_session = AsyncMock()
             mock_result = MagicMock()
 
@@ -388,7 +388,7 @@ class TestBackupMetricsService:
     @pytest.mark.asyncio
     async def test_get_performance_summary_no_data(self, metrics_service):
         """测试获取性能摘要（无数据）"""
-        with patch('fastapi_app.services.backup_metrics_service.get_async_db_context') as mock_context:
+        with patch('fastapi_app.services.backup.metrics.service.get_async_db_context') as mock_context:
             mock_session = AsyncMock()
             mock_result = MagicMock()
 
@@ -407,7 +407,7 @@ class TestBackupMetricsService:
     @pytest.mark.asyncio
     async def test_get_trend_analysis(self, metrics_service, mock_backup_record):
         """测试获取趋势分析"""
-        with patch('fastapi_app.services.backup_metrics_service.get_async_db_context') as mock_context:
+        with patch('fastapi_app.services.backup.metrics.service.get_async_db_context') as mock_context:
             mock_session = AsyncMock()
             mock_result = MagicMock()
 

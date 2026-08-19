@@ -135,8 +135,8 @@ class TestBackupHealthCheckService:
     @pytest.mark.asyncio
     async def test_check_backup_age(self, health_check_service, mock_backup_dir):
         """测试检查备份时间"""
-        with patch('fastapi_app.services.backup_health_check_service.BACKUP_DIR', mock_backup_dir), \
-             patch('fastapi_app.services.backup_health_check_service.ensure_backup_dir'):
+        with patch('fastapi_app.services.backup.verify.health_check_service.BACKUP_DIR', mock_backup_dir), \
+             patch('fastapi_app.services.backup.verify.health_check_service.ensure_backup_dir'):
 
             # 创建一些备份文件
             for i in range(3):
@@ -164,8 +164,8 @@ class TestBackupHealthCheckService:
         with tempfile.TemporaryDirectory() as temp_dir:
             empty_dir = Path(temp_dir)
 
-            with patch('fastapi_app.services.backup_health_check_service.BACKUP_DIR', empty_dir), \
-                 patch('fastapi_app.services.backup_health_check_service.ensure_backup_dir'):
+            with patch('fastapi_app.services.backup.verify.health_check_service.BACKUP_DIR', empty_dir), \
+                 patch('fastapi_app.services.backup.verify.health_check_service.ensure_backup_dir'):
 
                 result = await health_check_service._check_backup_age()
 
@@ -177,8 +177,8 @@ class TestBackupHealthCheckService:
     @pytest.mark.asyncio
     async def test_check_backup_age_old_backup(self, health_check_service, mock_backup_dir):
         """测试检查备份时间（旧备份）"""
-        with patch('fastapi_app.services.backup_health_check_service.BACKUP_DIR', mock_backup_dir), \
-             patch('fastapi_app.services.backup_health_check_service.ensure_backup_dir'):
+        with patch('fastapi_app.services.backup.verify.health_check_service.BACKUP_DIR', mock_backup_dir), \
+             patch('fastapi_app.services.backup.verify.health_check_service.ensure_backup_dir'):
 
             # 清理 fixture 创建的近期备份，确保目录中仅有旧备份场景
             for f in mock_backup_dir.glob('erp_backup_*.zip'):
@@ -273,8 +273,8 @@ class TestBackupHealthCheckService:
     @pytest.mark.asyncio
     async def test_check_backup_integrity(self, health_check_service, mock_backup_dir):
         """测试检查备份文件完整性"""
-        with patch('fastapi_app.services.backup_health_check_service.BACKUP_DIR', mock_backup_dir), \
-             patch('fastapi_appాలు.services.backup_health_check_service.ensure_backup_dir'):
+        with patch('fastapi_app.services.backup.verify.health_check_service.BACKUP_DIR', mock_backup_dir), \
+             patch('fastapi_app.services.backup.verify.health_check_service.ensure_backup_dir'):
 
             # 创建一些备份文件
             for i in range(5):
@@ -312,8 +312,8 @@ class TestBackupHealthCheckService:
     @pytest.mark.asyncio
     async def test_check_backup_integrity_with_corrupted(self, health_check_service, mock_backup_dir):
         """测试检查备份文件完整性（有损坏文件）"""
-        with patch('fastapi_app.services.backup_health_check_service.BACKUP_DIR', mock_backup_dir), \
-             patch('fastapi_app.services.backup_health_check_service.ensure_backup_dir'):
+        with patch('fastapi_app.services.backup.verify.health_check_service.BACKUP_DIR', mock_backup_dir), \
+             patch('fastapi_app.services.backup.verify.health_check_service.ensure_backup_dir'):
 
             # 创建有效备份文件
             valid_backup = mock_backup_dir / 'valid_backup.zip'

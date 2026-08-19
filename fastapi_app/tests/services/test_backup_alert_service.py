@@ -87,8 +87,8 @@ class TestBackupAlertService:
         """测试是否应该发送告警"""
         task_name = "test_task"
 
-        # 初始状态应该发送（没有冷却时间）
-        assert alert_service._should_send_alert(task_name, 'error') is False  # 未达到阈值
+        # 无失败记录时首次告警应发送（无冷却时间、无阈值限制）
+        assert alert_service._should_send_alert(task_name, 'error') is True
 
         # 设置失败计数达到阈值
         alert_service.failure_counts[task_name] = {
@@ -194,7 +194,7 @@ class TestBackupAlertService:
         mock_result.scalar_one_or_none.return_value = None
         mock_session.execute.return_value = mock_result
 
-        with patch('fastapi_app.services.backup_alert_service.get_async_db_context') as mock_context:
+        with patch('fastapi_app.services.backup.metrics.alert_service.get_async_db_context') as mock_context:
             mock_context.return_value.__aenter__.return_value = mock_session
 
             # 发送告警
@@ -234,7 +234,7 @@ class TestBackupAlertService:
         mock_result.scalar_one_or_none.return_value = None
         mock_session.execute.return_value = mock_result
 
-        with patch('fastapi_app.services.backup_alert_service.get_async_db_context') as mock_context, \
+        with patch('fastapi_app.services.backup.metrics.alert_service.get_async_db_context') as mock_context, \
              patch('smtplib.SMTP') as mock_smtp:
 
             mock_context.return_value.__aenter__.return_value = mock_session
@@ -272,7 +272,7 @@ class TestBackupAlertService:
         mock_result.scalar_one_or_none.return_value = None
         mock_session.execute.return_value = mock_result
 
-        with patch('fastapi_app.services.backup_alert_service.get_async_db_context') as mock_context, \
+        with patch('fastapi_app.services.backup.metrics.alert_service.get_async_db_context') as mock_context, \
              patch('httpx.AsyncClient') as mock_client:
 
             mock_context.return_value.__aenter__.return_value = mock_session
@@ -375,7 +375,7 @@ class TestBackupAlertService:
         mock_result.scalars.return_value.all.return_value = mock_records
         mock_db_session.execute.return_value = mock_result
 
-        with patch('fastapi_app.services.backup_alert_service.get_async_db_context') as mock_context:
+        with patch('fastapi_app.services.backup.metrics.alert_service.get_async_db_context') as mock_context:
             mock_context.return_value.__aenter__.return_value = mock_db_session
 
             stats = await alert_service.get_alert_statistics(days=7)

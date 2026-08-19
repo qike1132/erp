@@ -169,7 +169,7 @@ class BackupMetricsService:
 
             return metrics
 
-        except OSError as e:
+        except Exception as e:  # defensive: psutil 可能抛任意运行时异常，系统指标收集失败不影响备份主流程
             logger.error(f"收集系统指标失败: {e}")
             return {
                 'error': str(e),

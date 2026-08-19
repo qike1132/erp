@@ -18,7 +18,7 @@ class TestBuildBeileUnifiedQuery:
     def test_returns_subquery_with_order_part(self):
         """无确认状态筛选时应包含 Order + StockIn 两部分"""
         subq = order_crud._build_beile_unified_query(
-            confirm_condition=None, customer=None, factory="湖北",
+            confirm_condition=None, unconfirmed_only=False, customer=None, factory="湖北",
         )
         compiled = str(subq.compile())
         assert 'record_type' in compiled
@@ -29,7 +29,7 @@ class TestBuildBeileUnifiedQuery:
         from fastapi_app.shared_models import Order
         confirm_cond = Order.confirmed_at.is_(None)
         subq = order_crud._build_beile_unified_query(
-            confirm_condition=confirm_cond, customer=None, factory="湖北",
+            confirm_condition=confirm_cond, unconfirmed_only=False, customer=None, factory="湖北",
         )
         compiled = str(subq.compile())
         assert 'confirmed_at' in compiled
@@ -37,7 +37,7 @@ class TestBuildBeileUnifiedQuery:
     def test_with_customer_filter_applies_to_both_parts(self):
         """customer 非空时应同时筛选 Order 和 StockIn 的 customer"""
         subq = order_crud._build_beile_unified_query(
-            confirm_condition=None, customer="MINISO", factory="湖北",
+            confirm_condition=None, unconfirmed_only=False, customer="MINISO", factory="湖北",
         )
         compiled = str(subq.compile())
         assert 'customer' in compiled
@@ -45,7 +45,7 @@ class TestBuildBeileUnifiedQuery:
     def test_factory_filter_applied(self):
         """factory 应作为 Product.factory 筛选条件"""
         subq = order_crud._build_beile_unified_query(
-            confirm_condition=None, customer=None, factory="深圳",
+            confirm_condition=None, unconfirmed_only=False, customer=None, factory="深圳",
         )
         compiled = str(subq.compile())
         assert 'factory' in compiled
@@ -53,7 +53,7 @@ class TestBuildBeileUnifiedQuery:
     def test_no_customer_no_confirm_includes_both_parts(self):
         """无 customer、无 confirm_condition 时应包含 Order + StockIn 两部分（UNION ALL）"""
         subq = order_crud._build_beile_unified_query(
-            confirm_condition=None, customer=None, factory="湖北",
+            confirm_condition=None, unconfirmed_only=False, customer=None, factory="湖北",
         )
         # subquery 应可编译
         compiled = str(subq.compile())
