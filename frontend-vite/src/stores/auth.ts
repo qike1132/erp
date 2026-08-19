@@ -47,6 +47,7 @@ export const useAuthStore = defineStore('auth', () => {
       navSections.value = Object.entries(res)
         .filter(([_key, val]) => val && typeof val === 'object' && !Array.isArray(val))
         .map(([_key, val]: [string, NavApiSection]) => ({
+        key: _key,
         title: val.name ?? _key,
         items: (val.items ?? []).map((item: NavApiItem) => ({
           title: item.name,

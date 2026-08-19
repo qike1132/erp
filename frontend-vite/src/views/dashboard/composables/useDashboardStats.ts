@@ -30,6 +30,58 @@ const CACHE_TTL = 30_000
 let _statsCache: { data: Record<string, number>; ts: number } | null = null
 let _stockStatsCache: { data: StockStats; ts: number } | null = null
 
+/**
+ * 预取 Dashboard 数据（登录成功后调用，填充模块级缓存）
+ * 与路由跳转并行执行，用户到达 Dashboard 时数据已就绪 → 首次加载 0ms
+ * 失败静默处理，Dashboard 挂载时会正常 fetch
+ */
+export async function prefetchDashboardData(): Promise<void> {
+  const now = Date.now()
+  if (_statsCache && now - _statsCache.ts < CACHE_TTL && _stockStatsCache && now - _stockStatsCache.ts < CACHE_TTL) {
+    return
+  }
+
+  try {
+    const [statsResp, stockResp] = await Promise.all([
+      dashboardApi.stats(),
+      stockApi.stats(),
+    ])
+
+    const r = statsResp as { data?: Record<string, number> } & Record<string, number>
+    let raw: Record<string, number> | undefined
+    if (r && typeof r === 'object') {
+      if ('data' in r && r.data && typeof r.data === 'object') {
+        raw = r.data as Record<string, number>
+      } else if ('order_today' in r || 'stockin_today' in r || 'pending_approvals' in r) {
+        raw = r as Record<string, number>
+      }
+    }
+    if (raw) {
+      _statsCache = {
+        data: {
+          order_today: Number(raw.order_today) || 0,
+          order_yesterday: Number(raw.order_yesterday) || 0,
+          stockin_today: Number(raw.stockin_today) || 0,
+          stockin_yesterday: Number(raw.stockin_yesterday) || 0,
+          stockout_today: Number(raw.stockout_today) || 0,
+          stockout_yesterday: Number(raw.stockout_yesterday) || 0,
+          pending_approvals: Number(raw.pending_approvals) || 0,
+          low_stock_count: Number(raw.low_stock_count) || 0,
+          pending_purchases: Number(raw.pending_purchases) || 0,
+          pending_materials: Number(raw.pending_materials) || 0,
+        },
+        ts: Date.now(),
+      }
+    }
+
+    if (stockResp) {
+      _stockStatsCache = { data: stockResp, ts: Date.now() }
+    }
+  } catch {
+    // 预取失败静默处理，Dashboard 挂载时正常 fetch
+  }
+}
+
 export function useDashboardStats() {
   const perf = usePerfMark('dashboard')
 
@@ -44,16 +96,18 @@ export function useDashboardStats() {
   const lastSyncTime = ref('')
 
   // ===== 数据加载（含错误处理和日志） =====
-  async function loadStats(showLoading = true) {
-    // 缓存有效时直接返回，零延迟
-    const now = Date.now()
-    const statsValid = _statsCache && now - _statsCache.ts < CACHE_TTL
-    const stockValid = _stockStatsCache && now - _stockStatsCache.ts < CACHE_TTL
-    if (statsValid && stockValid) {
-      stats.value = _statsCache!.data
-      stockStats.value = _stockStatsCache!.data
-      devLog('[Dashboard] 命中缓存，跳过请求')
-      return
+  async function loadStats(showLoading = true, force = false) {
+    // 缓存有效且非强制刷新时直接返回，零延迟
+    if (!force) {
+      const now = Date.now()
+      const statsValid = _statsCache && now - _statsCache.ts < CACHE_TTL
+      const stockValid = _stockStatsCache && now - _stockStatsCache.ts < CACHE_TTL
+      if (statsValid && stockValid) {
+        stats.value = _statsCache!.data
+        stockStats.value = _stockStatsCache!.data
+        devLog('[Dashboard] 命中缓存，跳过请求')
+        return
+      }
     }
 
     // 有缓存数据时静默刷新（不显示 loading），仅首次加载或错误重试时显示骨架屏

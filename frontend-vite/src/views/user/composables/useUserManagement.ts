@@ -7,6 +7,7 @@
 import { ref, computed } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { userApi, permissionApi } from '@/api'
+import { useAuthStore } from '@/stores/auth'
 import type { PermissionItem } from '@/types'
 import { showToast } from '@/composables/useToast'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
@@ -39,6 +40,7 @@ export function useUserManagement() {
   const actionId = ref<number | ''>(0)
   const queryClient = useQueryClient()
   const confirmDialog = useConfirmDialog()
+  const authStore = useAuthStore()
 
   const currentPage = ref(1)
   const perPage = ref(15)
@@ -116,28 +118,38 @@ export function useUserManagement() {
   const permTargetUserId = ref(0)
   const permTargetName = ref('')
 
-  /** 权限模块分区排序优先级 */
-  const sectionOrder = ['purchase', 'purchase_tools', 'core', 'data', 'system']
-
-  /** 按模块分区对权限树进行分组 */
+  /** 按模块分区对权限树进行分组，section 顺序/命名以导航栏为权威源 */
   const permissionSections = computed(() => {
-    const map = new Map<string, { key: string; name: string; items: PermissionItem[] }>()
+    // 1. 权限树按 section_key 分组
+    const permBySection = new Map<string, PermissionItem[]>()
     for (const node of permissionTree.value) {
       const secKey = node.section || 'other'
-      const secName = node.section_name || secKey
-      if (!map.has(secKey)) map.set(secKey, { key: secKey, name: secName, items: [] })
-      map.get(secKey)!.items.push(node)
+      if (!permBySection.has(secKey)) permBySection.set(secKey, [])
+      permBySection.get(secKey)!.push(node)
     }
-    const sections = [...map.values()]
-    sections.sort((a, b) => {
-      const ai = sectionOrder.indexOf(a.key)
-      const bi = sectionOrder.indexOf(b.key)
-      if (ai !== -1 && bi !== -1) return ai - bi
-      if (ai !== -1) return -1
-      if (bi !== -1) return 1
-      return a.key.localeCompare(b.key)
-    })
-    return sections
+
+    // 2. 以导航栏的 section 顺序为基准构建结果
+    const result: { key: string; name: string; items: PermissionItem[] }[] = []
+    const usedKeys = new Set<string>()
+
+    // 导航栏中存在的 section，按导航栏顺序排列，使用导航栏的命名
+    for (const navSec of authStore.navSections) {
+      const secKey = navSec.key || navSec.title
+      const items = permBySection.get(secKey)
+      if (items && items.length > 0) {
+        result.push({ key: secKey, name: navSec.title, items })
+        usedKeys.add(secKey)
+      }
+    }
+
+    // 权限树中存在但导航栏中没有的 section（如只含 is_nav=False 非导航权限的 section），追加到末尾
+    for (const [secKey, items] of permBySection) {
+      if (usedKeys.has(secKey)) continue
+      const secName = items[0]?.section_name || secKey
+      result.push({ key: secKey, name: secName, items })
+    }
+
+    return result
   })
 
   /** 判断权限节点是否展开 */
@@ -243,6 +255,12 @@ export function useUserManagement() {
     permTargetUserId.value = row.id
     permTargetName.value = row.username
     try {
+      // 确保导航栏 section 数据已就绪且包含 key 字段（作为权限分区的权威源）
+      // 若 navSections 为空或缺少 key 字段（如 HMR 前的旧数据残留），重新加载
+      const needReloadNav = authStore.navSections.length === 0 || !authStore.navSections[0]?.key
+      if (needReloadNav) {
+        await authStore.fetchNavSections().catch(() => {})
+      }
       const [permRes, userPermRes] = await Promise.all([
         permissionApi.tree(),
         userApi.getPermission(row.id),
@@ -262,6 +280,8 @@ export function useUserManagement() {
     try {
       await userApi.savePermission(permTargetUserId.value, permCheckedKeys.value)
       showToast('权限保存成功', 'success')
+      // 权限变更可能影响导航栏结构，异步刷新以保持同步
+      authStore.fetchNavSections().catch(() => {})
       permDialogVisible.value = false
     } catch (err: unknown) {
       showToast(extractErrorMessage(err, '保存失败'), 'error')

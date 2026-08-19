@@ -83,8 +83,8 @@ const {
 
 const chartsRef = ref<InstanceType<typeof DashboardChartsSection> | null>(null)
 
-async function loadStats(showLoading = true) {
-  await loadStatsData(showLoading)
+async function loadStats(showLoading = true, force = false) {
+  await loadStatsData(showLoading, force)
   await nextTick()
   try {
     await chartsRef.value?.renderOrUpdate()
@@ -118,7 +118,7 @@ function retryLoad() {
 }
 
 const { startAutoRefresh, stopAutoRefresh } = useDashboardAutoRefresh(() => {
-  loadStats(false).catch((err) => {
+  loadStats(false, true).catch((err) => {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
       console.error('[Dashboard] 自动刷新加载失败:', err)

@@ -158,19 +158,50 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
     pendingProjectImage.value = file
   }
 
+  /**
+   * 后台上传暂存图片（不阻塞保存成功的即时反馈）
+   *
+   * 成功：用上传接口返回的 URL 本地打补丁（详情图片即时显示，无需二次请求），
+   * 并刷新分组列表让卡片缩略图更新；失败：仅提示，不打扰主流程。
+   */
+  function uploadPendingImage(projectId: number, image: File, failMessage: string) {
+    void patternRoomApi.uploadProjectImage(projectId, image)
+      .then((upRes) => {
+        if (upRes?.success) {
+          // 本地打补丁：详情图片即时显示（上传接口已返回 URL/缩略图 URL）
+          const proj = projectHook.currentProject.value
+          if (proj && proj.id === projectId) {
+            if (upRes.url) proj.product_image_url = upRes.url
+            if (upRes.thumbnail_url) proj.product_image_thumbnail_url = upRes.thumbnail_url
+            if (upRes.file_id != null) proj.product_image_file_id = upRes.file_id
+          }
+          // 刷新分组列表，让卡片缩略图显示新图片
+          void groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value)
+        } else {
+          toast.warning(failMessage)
+        }
+      })
+      .catch(() => {
+        toast.warning(failMessage)
+      })
+  }
+
   async function onProjectSubmitCreate(data: ProjectCreateRequest) {
     const res = await projectHook.create(data)
     if (res && res.id) {
-      // 上传暂存图片
-      if (pendingProjectImage.value) {
-        const upRes = await projectHook.uploadImage(res.id, pendingProjectImage.value)
-        if (!upRes) toast.warning('图片上传失败，项目已创建，请稍后在编辑中重新上传')
-      }
+      const newProjectId = res.id
+      const pendingImage = pendingProjectImage.value
+      // 创建成功：立即反馈并关闭弹窗，图片改为后台异步上传，避免用户等待上传完成
+      toast.success('创建成功')
       projectFormVisible.value = false
       pendingProjectImage.value = null
       // 刷新分组列表并选中新项目（保持当前状态筛选）
       await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value)
-      onSelectProject(res.id)
+      onSelectProject(newProjectId)
+      // 后台上传暂存图片（不阻塞成功反馈）
+      if (pendingImage) {
+        uploadPendingImage(newProjectId, pendingImage, '图片上传失败，项目已创建，请稍后在编辑中重新上传')
+      }
     } else {
       toast.error(projectHook.error.value || '创建失败')
     }
@@ -178,19 +209,21 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
 
   async function onProjectSubmitUpdate(data: ProjectUpdateRequest) {
     if (!selectedProjectId.value) return
-    const res = await projectHook.update(selectedProjectId.value, data)
+    const projectId = selectedProjectId.value
+    const res = await projectHook.update(projectId, data)
     if (res) {
-      // 上传暂存图片
-      if (pendingProjectImage.value) {
-        const upRes = await projectHook.uploadImage(selectedProjectId.value, pendingProjectImage.value)
-        if (!upRes) toast.warning('图片上传失败，其他信息已更新')
-      }
+      const pendingImage = pendingProjectImage.value
+      // 更新成功：立即反馈并关闭弹窗，图片改为后台异步上传，避免用户等待上传完成
       toast.success('更新成功')
       projectFormVisible.value = false
       pendingProjectImage.value = null
       // 刷新详情与分组列表（保持当前状态筛选）
-      await projectHook.fetchDetail(selectedProjectId.value)
+      await projectHook.fetchDetail(projectId)
       await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value)
+      // 后台上传暂存图片（不阻塞成功反馈）
+      if (pendingImage) {
+        uploadPendingImage(projectId, pendingImage, '图片上传失败，其他信息已更新')
+      }
     } else {
       toast.error(projectHook.error.value || '更新失败')
     }

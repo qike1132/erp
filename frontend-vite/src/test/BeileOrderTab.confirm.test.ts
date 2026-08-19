@@ -49,7 +49,16 @@ vi.mock('@/composables/useToast', () => ({
   toast: {
     success: vi.fn(),
     error: vi.fn(),
+    warning: vi.fn(),
+    info: vi.fn(),
   },
+  showToast: vi.fn(),
+}))
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({
+    hasPermission: () => true,
+  }),
 }))
 
 import { mount, flushPromises } from '@vue/test-utils'
@@ -287,7 +296,7 @@ describe('BeileOrderTab 状态列与确认按钮行为', () => {
 
     const btn = wrapper.find('.vl-row .bo-confirm-btn')
     expect(btn.exists()).toBe(true)
-    expect(btn.text()).toBe('确认备货')
+    expect(btn.text()).toBe('确认订单')
 
     await btn.trigger('click')
     await flushPromises()

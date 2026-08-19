@@ -5,6 +5,7 @@ import { usePerfMark } from '@/composables/usePerfMark'
 import { setAccessToken } from '@/utils/secureStorage'
 import { getErrorMessage } from '@/types/errors'
 import { preloadEcharts } from '@/utils/echartsPreload'
+import { prefetchDashboardData } from '@/views/dashboard/composables/useDashboardStats'
 import { devLog } from '@/utils/devLog'
 
 /**
@@ -70,6 +71,9 @@ export function useLogin() {
       // 🟢 提前触发 ECharts 预加载：与 authStore.init 并行，
       // 利用路由跳转 + Dashboard 组件挂载的时间窗口下载 ~1MB 图表库
       preloadEcharts()
+      // 🟢 并行预取 Dashboard 数据：登录成功后立即发起 stats + stock 请求，
+      // 填充模块级缓存，用户到达 Dashboard 时命中缓存 → 首次加载 0ms
+      prefetchDashboardData()
 
       if (isCapacitor && res.access_token) {
         setAccessToken(res.access_token)

@@ -19,7 +19,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import noload, selectinload
 
-from fastapi_app.core.exceptions import BusinessError, ConflictError, NotFoundError
+from fastapi_app.core.exceptions import ConflictError, NotFoundError
 from fastapi_app.services.numbering import generate_customer_sampling_number
 from fastapi_app.shared_models import (
     CustomerSamplingFabricVersion,
@@ -619,6 +619,9 @@ async def delete_part(
     """删除部位
 
     - 历史版本快照中该部位数据保留（快照不可变，spec 5.5.1.6）
+    - 允许删除任意版本（含角色当前最终版本）：
+      快照不可变，diff 基于快照计算，删除后 create_version 会正确记录为 delete 变更；
+      最终版本删除的强确认提示由前端 onDeleteVersion 承担，后端不做硬性拦截。
     """
     result = await db.execute(
         select(CustomerSamplingPart).where(CustomerSamplingPart.id == part_id)
@@ -626,18 +629,6 @@ async def delete_part(
     part = result.scalar_one_or_none()
     if part is None:
         raise NotFoundError('部位不存在')
-
-    # 禁止删除所属角色的当前最终版本，避免 role.current_version 悬空
-    role_result = await db.execute(
-        select(CustomerSamplingRole).where(CustomerSamplingRole.id == part.role_id)
-    )
-    role = role_result.scalar_one_or_none()
-    if (
-        role is not None
-        and part.version_no is not None
-        and part.version_no == role.current_version
-    ):
-        raise BusinessError('该版本为角色当前最终版本，请先将其他版本设为最终版后再删除')
 
     project_id = part.project_id
     part_name = part.part_name

@@ -1,4 +1,4 @@
-﻿﻿$files = @(
+﻿﻿﻿$files = @(
   'D:\erp_system\fastapi_app\services\stock_service.py',
   'D:\erp_system\fastapi_app\services\case_service.py',
   'D:\erp_system\fastapi_app\services\staging_service.py',

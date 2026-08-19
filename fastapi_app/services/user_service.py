@@ -149,14 +149,28 @@ async def delete_user(db: AsyncSession, user_id: int) -> None:
 
 
 async def get_permissions(db) -> list[Permission]:
-    """获取所有权限（树形结构）"""
+    """获取所有权限（树形结构），section 排序与导航栏 SECTION_ORDER 保持一致"""
     result = await db.execute(
         select(Permission).options(
             joinedload(Permission.children)
         ).where(Permission.parent_id.is_(None))
         .order_by(Permission.sort_order)
     )
-    return list(result.unique().scalars().all())
+    permissions = list(result.unique().scalars().all())
+
+    # 按 SECTION_ORDER 对 section 排序，与导航栏保持一致
+    from fastapi_app.core.nav_context import SECTION_ORDER
+    order_map = {sec: i for i, sec in enumerate(SECTION_ORDER)}
+
+    def section_rank(p: Permission) -> int:
+        return order_map.get(p.section or 'other', len(SECTION_ORDER))
+
+    permissions.sort(key=lambda p: (section_rank(p), p.sort_order))
+    # children 也按 sort_order 排序，确保子权限顺序稳定
+    for p in permissions:
+        if p.children:
+            p.children.sort(key=lambda c: c.sort_order)
+    return permissions
 
 
 async def get_permissions_with_user_ids(db, target_user: User) -> tuple[list[Permission], list[int]]:

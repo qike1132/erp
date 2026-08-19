@@ -312,6 +312,8 @@ export interface UserCreate {
 }
 
 export interface NavSection {
+  /** section_key，用于权限选择模块与导航栏建立关联 */
+  key?: string
   title: string
   items: NavItem[]
 }

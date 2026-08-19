@@ -15,6 +15,7 @@
           <table class="oso-table">
             <thead>
               <tr>
+                <th class="oso-th-center" style="width: 90px;">订单类型</th>
                 <th class="oso-th-center" style="white-space:nowrap; width: 170px;">下单时间</th>
                 <th class="oso-th-center" style="width: 160px;">客户名称</th>
                 <th class="oso-th-center" style="width: 360px;">产品名称</th>
@@ -32,12 +33,12 @@
                 class="oso-row-clickable"
                 @click="openDetail(item)"
               >
+                <td class="oso-td-center oso-td-nowrap" style="width: 90px;">
+                  <span v-if="item.record_type === 'stockin'" class="oso-type-badge oso-type-badge--stockin">备货</span>
+                  <span v-else class="oso-type-badge oso-type-badge--order">订单</span>
+                </td>
                 <td class="oso-td-center oso-td-nowrap" style="width: 170px;">
-                  <div class="oso-order-meta-cell">
-                    <span v-if="item.record_type === 'stockin'" class="oso-type-badge oso-type-badge--stockin">备货</span>
-                    <span v-else class="oso-type-badge oso-type-badge--order">订单</span>
-                    <span class="oso-order-date" :title="item.order_date || ''">{{ item.order_date || '-' }}</span>
-                  </div>
+                  <span class="oso-order-date" :title="item.order_date || ''">{{ item.order_date || '-' }}</span>
                 </td>
                 <td class="oso-td-center oso-td-middle oso-customer-cell" style="width:170px">{{ item.customer || '-' }}</td>
                 <td class="oso-td-center oso-product-cell" style="width: 360px;">

@@ -206,32 +206,69 @@ def _open_image(content: bytes):
         return None
 
 
+def _image_to_rgb(img):
+    """转为 RGB 丢弃 alpha，WebP/JPEG 编码更稳定（不改动原图，返回新对象或原对象）"""
+    return img.convert("RGB") if img.mode not in ("RGB", "L") else img
+
+
+def _resize_to_max(img, max_size: int):
+    """等比缩放（最长边 <= max_size），返回新对象或原对象"""
+    w, h = img.size
+    if max(w, h) > max_size:
+        scale = max_size / max(w, h)
+        return img.resize((max(1, int(w * scale)), max(1, int(h * scale))))
+    return img
+
+
+def _encode_webp(img, quality: int, method: int) -> bytes:
+    """WebP 编码为字节流"""
+    from io import BytesIO
+
+    buf = BytesIO()
+    img.save(buf, format="WEBP", quality=quality, method=method)
+    return buf.getvalue()
+
+
+def _thumbnail_from_image(img, max_size: int = _THUMBNAIL_MAX_SIZE, quality: int = _THUMBNAIL_QUALITY) -> bytes | None:
+    """基于已解码 Image 生成 400px WebP 缩略图；失败返回 None"""
+    try:
+        return _encode_webp(_resize_to_max(_image_to_rgb(img), max_size), quality, method=4)
+    except Exception as e:  # broad-except: 服务层容错，记录异常并返回安全默认值
+        logger.warning("缩略图生成失败: %s", e)
+        return None
+
+
+def _blur_from_image(img, max_size: int = _BLUR_MAX_SIZE, quality: int = _BLUR_QUALITY) -> bytes | None:
+    """基于已解码 Image 生成 32px WebP 模糊占位图；失败返回 None"""
+    try:
+        return _encode_webp(_resize_to_max(_image_to_rgb(img), max_size), quality, method=6)
+    except Exception as e:  # broad-except: 服务层容错，记录异常并返回安全默认值
+        logger.warning("模糊占位图生成失败: %s", e)
+        return None
+
+
+def _compress_from_image(img, max_size: int = _FULL_MAX_SIZE, quality: int = _FULL_QUALITY) -> bytes | None:
+    """基于已解码 Image 压缩主图（最长边 <=1600px，WebP q82）；失败返回 None"""
+    try:
+        return _encode_webp(_resize_to_max(_image_to_rgb(img), max_size), quality, method=4)
+    except Exception as e:  # broad-except: 服务层容错，记录异常并返回安全默认值
+        logger.warning("主图压缩失败: %s", e)
+        return None
+
+
 def make_thumbnail(content: bytes, max_size: int = _THUMBNAIL_MAX_SIZE, quality: int = _THUMBNAIL_QUALITY) -> bytes | None:
     """生成 WebP 缩略图字节流（最长边不超过 max_size，等比缩放）
 
     仅供列表场景使用，原图仍保留。失败返回 None（调用方应回退原图）。
     注意：不能命名为 generate_thumbnail，避免与 save_upload 的同名布尔参数冲突。
     """
-    from io import BytesIO
-
     img = _open_image(content)
     if img is None:
         return None
     try:
-        # 转为 RGB 丢弃 alpha，WebP/JPEG 编码更稳定
-        if img.mode not in ("RGB", "L"):
-            img = img.convert("RGB")
-        # 等比缩放（最长边 <= max_size）
-        w, h = img.size
-        if max(w, h) > max_size:
-            scale = max_size / max(w, h)
-            img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))))
-        buf = BytesIO()
-        img.save(buf, format="WEBP", quality=quality, method=4)
-        return buf.getvalue()
-    except Exception as e:  # broad-except: 服务层容错，记录异常并返回安全默认值
-        logger.warning("缩略图生成失败: %s", e)
-        return None
+        return _thumbnail_from_image(img, max_size, quality)
+    finally:
+        img.close()
 
 
 def compress_image(content: bytes, max_size: int = _FULL_MAX_SIZE, quality: int = _FULL_QUALITY) -> bytes | None:
@@ -240,24 +277,13 @@ def compress_image(content: bytes, max_size: int = _FULL_MAX_SIZE, quality: int 
     上传时对原始照片/截图执行，将数 MB 的手机原图压缩为适合详情展示的体积。
     失败返回 None（调用方保留原图，不阻断上传）。
     """
-    from io import BytesIO
-
     img = _open_image(content)
     if img is None:
         return None
     try:
-        if img.mode not in ("RGB", "L"):
-            img = img.convert("RGB")
-        w, h = img.size
-        if max(w, h) > max_size:
-            scale = max_size / max(w, h)
-            img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))))
-        buf = BytesIO()
-        img.save(buf, format="WEBP", quality=quality, method=4)
-        return buf.getvalue()
-    except Exception as e:  # broad-except: 服务层容错，记录异常并返回安全默认值
-        logger.warning("主图压缩失败: %s", e)
-        return None
+        return _compress_from_image(img, max_size, quality)
+    finally:
+        img.close()
 
 
 def get_thumbnail_key(storage_key: str) -> str:
@@ -276,25 +302,13 @@ def make_blur_placeholder(content: bytes, max_size: int = _BLUR_MAX_SIZE, qualit
     体积通常 300-800 字节，作为列表缩略图的渐进式加载占位。
     失败返回 None（调用方跳过，前端回退骨架屏）。
     """
-    from io import BytesIO
-
     img = _open_image(content)
     if img is None:
         return None
     try:
-        if img.mode not in ("RGB", "L"):
-            img = img.convert("RGB")
-        # 缩小到 32px（保留比例），前端 CSS 放大 + blur 呈现
-        w, h = img.size
-        if max(w, h) > max_size:
-            scale = max_size / max(w, h)
-            img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))))
-        buf = BytesIO()
-        img.save(buf, format="WEBP", quality=quality, method=6)
-        return buf.getvalue()
-    except Exception as e:  # broad-except: 服务层容错，记录异常并返回安全默认值
-        logger.warning("模糊占位图生成失败: %s", e)
-        return None
+        return _blur_from_image(img, max_size, quality)
+    finally:
+        img.close()
 
 
 def _to_webp_key(storage_key: str) -> str:
@@ -305,6 +319,31 @@ def _to_webp_key(storage_key: str) -> str:
     head, _, tail = storage_key.rpartition("/")
     stem, _, _ext = tail.rpartition(".")
     return f"{head}/{stem}.webp" if head else f"{stem}.webp"
+
+
+def _generate_image_variants(content: bytes) -> tuple[bytes | None, bytes | None, bytes | None, bool]:
+    """同步生成缩略图 + 模糊占位图 + 主图压缩（CPU 密集型，供 asyncio.to_thread 调用）
+
+    - 解码一次，三个变体复用同一 Image 对象（避免每个变体重复解码原图）
+    - 上传内容已是 ≤1600px 的 WebP（前端已压缩）时跳过主图重压缩：
+      重编码既耗时又几乎不缩小体积，属于冗余操作。
+
+    返回 (thumb_bytes, blur_bytes, compressed, is_webp)；
+    compressed 为 None 表示主图无需替换；is_webp 表示上传内容本身是 WebP（用于修正元数据）。
+    """
+    img = _open_image(content)
+    if img is None:
+        return None, None, None, False
+    try:
+        w, h = img.size
+        is_webp = content[:4] == b"RIFF"
+        already_optimized = is_webp and max(w, h) <= _FULL_MAX_SIZE and len(content) <= 2 * 1024 * 1024
+        thumb = _thumbnail_from_image(img)
+        blur = _blur_from_image(img)
+        compressed = None if already_optimized else _compress_from_image(img)
+        return thumb, blur, compressed, is_webp
+    finally:
+        img.close()
 
 
 async def _upload_with_fallback(storage: StorageBackend, key: str, content: bytes, content_type: str) -> str:
@@ -342,14 +381,18 @@ async def save_upload(
     thumbnail_url: str | None = None
 
     # 图片处理：先基于原始字节生成缩略图 + 模糊占位图（质量最好），再压缩主图
+    # CPU 密集的 PIL 处理放入线程池，避免阻塞事件循环
     if generate_thumbnail and content_type and content_type.startswith("image/"):
-        thumb_bytes = make_thumbnail(content)
-        blur_bytes = make_blur_placeholder(content)
-        compressed = compress_image(content)
+        thumb_bytes, blur_bytes, compressed, is_webp_content = await asyncio.to_thread(
+            _generate_image_variants, content
+        )
         if compressed is not None and len(compressed) < len(content):
             # 压缩后的 WebP 更小 → 替换为主图（扩展名同步改为 .webp）
             key = _to_webp_key(key)
             content = compressed
+            content_type = "image/webp"
+        elif is_webp_content:
+            # 上传内容本身是 WebP（前端已压缩）：修正元数据，避免 .jpg 等文件名存成错误 content_type
             content_type = "image/webp"
         if thumb_bytes is not None:
             thumb_key = get_thumbnail_key(key)

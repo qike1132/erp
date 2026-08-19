@@ -39,25 +39,35 @@ export function useSamplingProject() {
   /** 错误信息 */
   const error = ref<string | null>(null)
 
+  /** 详情查询序号：并发 fetchDetail 时仅应用最新一次结果，避免旧响应覆盖新数据 */
+  let detailFetchSeq = 0
+
   /**
    * 获取打样项目详情（含部位布料 + 版本列表）
    */
   async function fetchDetail(id: number): Promise<ProjectDetailResponse | null> {
+    const seq = ++detailFetchSeq
     loading.value = true
     error.value = null
     try {
       const res = await patternRoomApi.getProject(id)
-      currentProject.value = res
+      if (seq === detailFetchSeq) {
+        currentProject.value = res
+      }
       return res
     } catch (e) {
       console.error('[useSamplingProject] 查询详情失败:', e)
       const message = resolveProjectErrorMessage(e, '加载打样详情失败')
-      error.value = message
+      if (seq === detailFetchSeq) {
+        error.value = message
+        currentProject.value = null
+      }
       toast.error(message)
-      currentProject.value = null
       return null
     } finally {
-      loading.value = false
+      if (seq === detailFetchSeq) {
+        loading.value = false
+      }
     }
   }
 

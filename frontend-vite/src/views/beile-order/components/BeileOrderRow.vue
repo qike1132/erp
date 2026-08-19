@@ -3,12 +3,15 @@
     :class="['bo-grid bo-grid-row bo-row-clickable', { 'bo-row-highlight': highlightId !== null && String(item.id) === highlightId, 'bo-row-multi-sku': (item.items?.length || 1) > 1 }]"
     @click="openDetail(item)"
   >
+    <div v-if="selectable" class="bo-td bo-td-center bo-td-middle bo-td-select" style="width: 40px;" @click.stop>
+      <UiCheckbox :checked="selected" @update:checked="$emit('toggleSelect', item.id)" />
+    </div>
+    <div class="bo-td bo-td-center bo-td-middle bo-td-nowrap" style="width: 90px;">
+      <span v-if="item.record_type === 'stockin'" class="bo-type-badge bo-type-badge--stockin">备货</span>
+      <span v-else class="bo-type-badge bo-type-badge--order">订单</span>
+    </div>
     <div class="bo-td bo-td-center bo-td-middle bo-td-nowrap" style="width: 170px;">
-      <div class="bo-order-meta-cell">
-        <span v-if="item.record_type === 'stockin'" class="bo-type-badge bo-type-badge--stockin">备货</span>
-        <span v-else class="bo-type-badge bo-type-badge--order">订单</span>
-        <span class="bo-order-date" :title="item.order_date || ''">{{ item.order_date || '-' }}</span>
-      </div>
+      <span class="bo-order-date" :title="item.order_date || ''">{{ item.order_date || '-' }}</span>
     </div>
     <div class="bo-td bo-td-center bo-td-middle bo-customer-cell" style="width:170px">{{ item.customer || '-' }}</div>
     <div v-if="showProductColumn" class="bo-td bo-td-center bo-product-cell" style="width: 180px;">
@@ -42,7 +45,7 @@
         :disabled="confirmingIds.has(item.id)"
         @click.stop="handleConfirm(item)"
       >
-        {{ confirmingIds.has(item.id) ? '确认中…' : (item.record_type === 'stockin' ? '确认备货' : '确认订单') }}
+        {{ confirmingIds.has(item.id) ? '确认中…' : '确认订单' }}
       </button>
       <span v-else class="bo-confirm-badge bo-confirm-badge--done">已确认</span>
     </div>
@@ -65,6 +68,7 @@
  * 确认状态/确认操作/备注。行点击与确认按钮通过 emit 交回父组件处理。
  */
 import type { BeileOrderRow as BeileOrderRowType } from '@/views/beile-order/composables/useBeileOrders'
+import UiCheckbox from '@/components/ui/UiCheckbox.vue'
 
 const props = defineProps<{
   /** 当前行数据 */
@@ -79,6 +83,10 @@ const props = defineProps<{
   highlightId: string | null
   /** 已应用的产品关键字（行内 SKU 过滤用） */
   keyword: string
+  /** 是否显示行选择复选框 */
+  selectable: boolean
+  /** 当前行是否被选中 */
+  selected: boolean
 }>()
 
 const emit = defineEmits<{
@@ -86,6 +94,8 @@ const emit = defineEmits<{
   open: [item: BeileOrderRowType]
   /** 确认订单 */
   confirm: [item: BeileOrderRowType]
+  /** 切换行选中状态 */
+  toggleSelect: [id: number]
 }>()
 
 /** SKU 是否匹配关键字（产品名称或条码） */
@@ -129,6 +139,10 @@ function handleConfirm(item: BeileOrderRowType) {
   padding: 10px 14px;
   border-right: 1px solid #d8dce2;
   overflow: hidden;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 .bo-td:last-child {
   flex: 1 1 auto;
@@ -137,13 +151,14 @@ function handleConfirm(item: BeileOrderRowType) {
 }
 .bo-td-left {
   text-align: left !important;
-  justify-content: flex-start;
+  align-items: flex-start;
 }
 .bo-td-center {
   text-align: center !important;
-  justify-content: center;
+  align-items: center;
 }
 .bo-grid-row {
+  height: 100%;
   align-items: center;
   border-bottom: 1px solid #d8dce2;
   color: var(--color-text);
@@ -154,6 +169,9 @@ function handleConfirm(item: BeileOrderRowType) {
 }
 .bo-grid-row.bo-row-multi-sku {
   align-items: flex-start;
+}
+.bo-grid-row.bo-row-multi-sku .bo-td {
+  justify-content: flex-start;
 }
 /* 通知跳转高亮行 */
 .bo-row-highlight {
@@ -166,7 +184,7 @@ function handleConfirm(item: BeileOrderRowType) {
 }
 .bo-product-cell {
   text-align: left !important;
-  justify-content: flex-start;
+  align-items: flex-start;
 }
 .bo-product-cell .bo-sku-name {
   display: block;
@@ -188,6 +206,9 @@ function handleConfirm(item: BeileOrderRowType) {
 }
 .bo-td-nowrap {
   white-space: nowrap;
+}
+.bo-td-select {
+  padding: 10px 8px;
 }
 /* 下单时间列：标签 + 日期（对齐 purchase） */
 .bo-order-meta-cell {
