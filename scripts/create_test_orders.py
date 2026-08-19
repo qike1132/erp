@@ -1,8 +1,8 @@
 """批量创建 30 个 MINISO 白名单客户订单，用于测试批次号查询"""
 
+import os
 import random
 import sys
-import os
 from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -67,7 +67,7 @@ def main():
             prod = session.query(Product).get(o.product_id)
             print(f'  {o.order_no} | {o.customer:12s} | {prod.name if prod else "?":16s} | qty={o.quantity:3d} | {o.order_date.strftime("%Y-%m-%d %H:%M")}')
 
-        print(f'\n[OK] 所有订单状态: 待备货（白名单客户自动进入批次号查询）')
+        print('\n[OK] 所有订单状态: 待备货（白名单客户自动进入批次号查询）')
 
     finally:
         session.close()

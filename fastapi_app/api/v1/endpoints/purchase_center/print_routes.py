@@ -65,7 +65,7 @@ async def api_summary_print(data: SummaryPrintRequest, db: AsyncSession=Depends(
             html = generate_normal_summary_print(orders, order_items_map)
             return {'success': True, 'html': html, 'order_count': len(orders)}
     except (OperationalError, DisconnectionError, ValueError, RuntimeError) as e:
-        logger.exception(f'汇总打印失败: {str(e)}')
+        logger.exception(f'汇总打印失败: {e!s}')
         raise HTTPException(status_code=500, detail='操作失败，请稍后重试') from e
 
 @router.post('/orders/supplier-summary-export')
@@ -141,5 +141,5 @@ async def export_supplier_summary_excel(data: OrderIdsRequest, db: AsyncSession=
     except HTTPException:
         raise
     except (OSError, ValueError, RuntimeError) as e:
-        logger.exception(f'导出供应商汇总Excel失败: {str(e)}')
+        logger.exception(f'导出供应商汇总Excel失败: {e!s}')
         raise HTTPException(status_code=500, detail='导出失败，请稍后重试') from e

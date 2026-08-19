@@ -3,7 +3,7 @@
 
 映射到 'customer' 表。
 """
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, DateTime, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -24,8 +24,8 @@ class Customer(Base):
     note: Mapped[str | None] = mapped_column(Text, comment='备注')
     icon_url: Mapped[str | None] = mapped_column(String(200), comment='客户图标URL')
     status: Mapped[bool] = mapped_column(Boolean, default=True, comment='是否启用')
-    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), comment='创建时间')
-    update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
+    update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 
     __table_args__ = (
         # pg_trgm GIN 索引：使 ILIKE '%keyword%' 和 % 运算符走索引

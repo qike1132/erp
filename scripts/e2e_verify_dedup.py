@@ -1,10 +1,12 @@
 """端到端验证：模拟一键审核流程，确认只生成 1 个采购单（而非 4 个）。"""
 import asyncio
+
 from sqlalchemy import select
+
 from fastapi_app.core.database import _AsyncSessionLocal
+from fastapi_app.services.purchase_order_generate import generate_purchase_orders_from_customer_orders
 from fastapi_app.shared_models import PurchaseOrder
 from fastapi_app.shared_models.order import Order
-from fastapi_app.services.purchase_order_generate import generate_purchase_orders_from_customer_orders
 
 
 async def main():

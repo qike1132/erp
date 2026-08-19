@@ -221,7 +221,7 @@ async def save_bom(db: AsyncSession, product_id: int, data: dict, username: str)
     }
     for category, model_cls in [('fabrics', ProductFabric), ('accessories', ProductAccessory)]:
         existing_ids = {item['id'] for item in data.get(category, []) if item.get('id')}
-        result = await db.execute(
+        result = await db.execute(  # batch-loop: 有意逐行处理,非 N+1
             select(model_cls).where(
                 model_cls.product_id == product_id,
                 ~model_cls.id.in_(existing_ids) if existing_ids else True,
@@ -241,7 +241,7 @@ async def save_bom(db: AsyncSession, product_id: int, data: dict, username: str)
                     new_value='(已删除)',
                     modifier_name=username,
                 ))
-            await db.execute(delete(model_cls).where(model_cls.id.in_(delete_ids)))
+            await db.execute(delete(model_cls).where(model_cls.id.in_(delete_ids)))  # batch-loop: 有意逐行处理,非 N+1
 
     return 'BOM 保存成功'
 

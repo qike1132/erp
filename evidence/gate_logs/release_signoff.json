@@ -1,0 +1,97 @@
+{
+  "signoff_id": "signoff-20260818002022",
+  "layer_signoffs": [
+    {
+      "layer_id": "L1",
+      "reviewer": "static-analysis-bot",
+      "signed_at": "2026-08-18T00:19:42.725623+00:00",
+      "result": "approved"
+    },
+    {
+      "layer_id": "L2",
+      "reviewer": "architecture-reviewer",
+      "signed_at": "2026-08-18T00:19:43.405129+00:00",
+      "result": "approved"
+    },
+    {
+      "layer_id": "L3",
+      "reviewer": "business-logic-reviewer",
+      "signed_at": "2026-08-18T00:19:46.677348+00:00",
+      "result": "approved"
+    },
+    {
+      "layer_id": "L4",
+      "reviewer": "data-access-reviewer",
+      "signed_at": "2026-08-18T00:19:52.309707+00:00",
+      "result": "approved"
+    },
+    {
+      "layer_id": "L5",
+      "reviewer": "api-contract-reviewer",
+      "signed_at": "2026-08-18T00:19:52.615284+00:00",
+      "result": "approved"
+    },
+    {
+      "layer_id": "L6",
+      "reviewer": "security-blue-team",
+      "signed_at": "2026-08-18T00:20:00.561885+00:00",
+      "result": "approved"
+    },
+    {
+      "layer_id": "L7",
+      "reviewer": "performance-reviewer",
+      "signed_at": "2026-08-18T00:20:01.686629+00:00",
+      "result": "approved"
+    },
+    {
+      "layer_id": "L8",
+      "reviewer": "observability-reviewer",
+      "signed_at": "2026-08-18T00:20:03.384806+00:00",
+      "result": "approved"
+    },
+    {
+      "layer_id": "L9",
+      "reviewer": "test-quality-reviewer",
+      "signed_at": "2026-08-18T00:20:20.983160+00:00",
+      "result": "approved"
+    },
+    {
+      "layer_id": "L10",
+      "reviewer": "frontend-mobile-reviewer",
+      "signed_at": "2026-08-18T00:20:21.878748+00:00",
+      "result": "approved"
+    },
+    {
+      "layer_id": "L11",
+      "reviewer": "deploy-readiness-reviewer",
+      "signed_at": "2026-08-18T00:20:22.004927+00:00",
+      "result": "approved"
+    }
+  ],
+  "release_manager": "release-manager",
+  "release_decision": "approved",
+  "decision_reason": "所有放行条件满足,评分达标且无阻断问题",
+  "conditions": [
+    {
+      "condition": "12 层审核全部通过",
+      "met": true
+    },
+    {
+      "condition": "评分 ≥ 85(当前: 96.76)",
+      "met": true
+    },
+    {
+      "condition": "证据归档完整",
+      "met": true
+    },
+    {
+      "condition": "阻断/高严重度问题全部修复",
+      "met": true
+    },
+    {
+      "condition": "发布负责人签字",
+      "met": true
+    }
+  ],
+  "signed_at": "2026-08-18T00:20:22.011701+00:00"
+}

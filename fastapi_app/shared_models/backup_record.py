@@ -1,7 +1,7 @@
 """备份记录模型 - 纯 SQLAlchemy 2.0 声明式"""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import BigInteger, DateTime, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -34,8 +34,8 @@ class BackupRecord(Base):
     ip_address: Mapped[str | None] = mapped_column(String(45), comment='操作者IP地址')
     user_agent: Mapped[str | None] = mapped_column(Text, comment='浏览器UA')
     parent_record_id: Mapped[int | None] = mapped_column(Integer, comment='父备份记录ID(增量备份指向全量备份)')
-    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), comment='创建时间')
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 
     def __repr__(self):
         return f'<BackupRecord {self.id} {self.type} {self.status}>'

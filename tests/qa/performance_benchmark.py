@@ -1,7 +1,11 @@
 """性能基准测试 - 对比优化前后关键API响应时间"""
-import os, sys, time
+import os
+import sys
+import time
+
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 from sqlalchemy import create_engine, text
+
 from fastapi_app.core.config import settings
 
 engine = create_engine(settings.DATABASE_URL, pool_size=5, max_overflow=10)
@@ -44,7 +48,9 @@ for name, sql in tests:
 print("\n" + "=" * 60)
 print("SQL聚合版库存查询测试...")
 from sqlalchemy.orm import Session
+
 from fastapi_app.shared.stock_crud_service import get_inventory
+
 session = Session(bind=engine)
 start = time.time()
 inv = get_inventory(session, '', '')

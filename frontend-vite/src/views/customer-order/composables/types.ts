@@ -100,6 +100,8 @@ export interface OrderListResponse {
   total: number
   page: number
   per_page: number
+  /** 未确认湖北订单总数（beile-list 专用，列表顶部横幅使用） */
+  unconfirmed_count?: number
 }
 
 /** 备货列表 API 响应 */

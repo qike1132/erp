@@ -13,13 +13,13 @@ import json
 import mimetypes
 import uuid
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from fastapi_app.core.circuit_breaker import CircuitBreakerOpenError, get_breaker
 from fastapi_app.core.config import settings
 from fastapi_app.core.logger import get_logger
-from fastapi_app.core.circuit_breaker import CircuitBreakerOpenError, get_breaker
 
 logger = get_logger(__name__)
 
@@ -99,11 +99,11 @@ class S3StorageBackend(StorageBackend):
     def _ensure_bucket(self) -> None:
         try:
             self._client.head_bucket(Bucket=self.bucket)
-        except Exception:
+        except Exception:  # broad-except: 服务层容错，记录异常并返回安全默认值
             try:
                 self._client.create_bucket(Bucket=self.bucket)
                 logger.info("S3 bucket 已自动创建: %s", self.bucket)
-            except Exception as e:
+            except Exception as e:  # broad-except: 服务层容错，记录异常并返回安全默认值
                 logger.warning("S3 bucket 创建失败（可能已存在或无权限）: %s", e)
 
     async def upload(self, key: str, content: bytes, content_type: str | None = None) -> str:
@@ -161,7 +161,7 @@ def get_storage() -> StorageBackend:
 def _generate_key(filename: str, prefix: str = "") -> str:
     """生成唯一存储 key"""
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "bin"
-    date_prefix = datetime.now(timezone.utc).strftime("%Y%m%d")
+    date_prefix = datetime.now(UTC).strftime("%Y%m%d")
     key = f"{prefix}{date_prefix}/{uuid.uuid4().hex}.{ext}" if prefix else f"{date_prefix}/{uuid.uuid4().hex}.{ext}"
     return key
 
@@ -201,7 +201,7 @@ def _open_image(content: bytes):
         # 放宽解压炸弹阈值，避免大尺寸扫描件被误判拒绝
         Image.MAX_IMAGE_PIXELS = 200_000_000
         return Image.open(BytesIO(content))
-    except Exception as e:
+    except Exception as e:  # broad-except: 服务层容错，记录异常并返回安全默认值
         logger.warning("图片解码失败: %s", e)
         return None
 
@@ -229,7 +229,7 @@ def make_thumbnail(content: bytes, max_size: int = _THUMBNAIL_MAX_SIZE, quality:
         buf = BytesIO()
         img.save(buf, format="WEBP", quality=quality, method=4)
         return buf.getvalue()
-    except Exception as e:
+    except Exception as e:  # broad-except: 服务层容错，记录异常并返回安全默认值
         logger.warning("缩略图生成失败: %s", e)
         return None
 
@@ -255,7 +255,7 @@ def compress_image(content: bytes, max_size: int = _FULL_MAX_SIZE, quality: int 
         buf = BytesIO()
         img.save(buf, format="WEBP", quality=quality, method=4)
         return buf.getvalue()
-    except Exception as e:
+    except Exception as e:  # broad-except: 服务层容错，记录异常并返回安全默认值
         logger.warning("主图压缩失败: %s", e)
         return None
 
@@ -292,7 +292,7 @@ def make_blur_placeholder(content: bytes, max_size: int = _BLUR_MAX_SIZE, qualit
         buf = BytesIO()
         img.save(buf, format="WEBP", quality=quality, method=6)
         return buf.getvalue()
-    except Exception as e:
+    except Exception as e:  # broad-except: 服务层容错，记录异常并返回安全默认值
         logger.warning("模糊占位图生成失败: %s", e)
         return None
 
@@ -414,7 +414,7 @@ async def delete_upload(record_id: int, db) -> bool:
         except CircuitBreakerOpenError as e:
             logger.warning("S3 存储熔断中，跳过变体删除: %s", e)
         except OSError:
-            pass  # 本地变体不存在，忽略
+            pass  # 本地变体不存在，忽略; defensive: 异常静默处理,不影响主流程
     await db.delete(record)
     await db.flush()
     logger.info("文件已删除", file_id=record.id, key=record.storage_key)

@@ -12,7 +12,7 @@
   - 总数量: 1000
 """
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,7 +56,7 @@ async def create_multi_sku_order():
         order_no = f"PO-20260626-{seq:04d}"
         print(f"\nNew order_no: {order_no}")
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         first_product_id = TEST_SKUS[0]["product_id"]
         total_qty = sum(s["quantity"] for s in TEST_SKUS)
 

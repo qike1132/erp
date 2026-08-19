@@ -1,9 +1,11 @@
 """检查 order_type 字段的实际情况"""
 import asyncio
 import sys
+
 sys.path.insert(0, r'd:\erp_system')
 
-from sqlalchemy import select, func, text
+from sqlalchemy import select, text
+
 from fastapi_app.core.database import _AsyncSessionLocal
 from fastapi_app.shared_models import Order, Product
 
@@ -27,7 +29,7 @@ async def main():
         p = r.scalar_one_or_none()
         if p:
             r = await db.execute(
-                select(Order).where(Order.product_id == p.id, Order.customer == 'MINISO国际', Order.is_deleted == False)
+                select(Order).where(Order.product_id == p.id, Order.customer == 'MINISO国际', not Order.is_deleted)
             )
             orders = r.scalars().all()
             print(f'  共 {len(orders)} 条')

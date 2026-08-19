@@ -36,7 +36,7 @@ def generate_encryption_key() -> str:
     return secrets.token_urlsafe(32)
 
 
-def get_backup_encryption_password() -> str | None:
+def get_backup_encryption_password() -> str | None:  # log-context: internal helper 无请求上下文
     """获取备份加密密码
 
     优先级：

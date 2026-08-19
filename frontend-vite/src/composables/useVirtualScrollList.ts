@@ -22,7 +22,7 @@ interface Options {
   perPage?: number
   staleTime?: number
   debounceMs?: number
-  extraParams?: () => Record<string, any>
+  extraParams?: () => Record<string, unknown>
   maxLoadedPages?: number
 }
 

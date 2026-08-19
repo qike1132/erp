@@ -48,10 +48,7 @@ SUSPICIOUS_PATTERNS = [
 
 
 def is_allowed(line: str) -> bool:
-    for pattern in ALLOWED_PATTERNS:
-        if re.search(pattern, line):
-            return True
-    return False
+    return any(re.search(pattern, line) for pattern in ALLOWED_PATTERNS)
 
 
 def find_suspicious_commits(file_path: Path) -> list[tuple[int, str]]:

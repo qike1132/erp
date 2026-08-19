@@ -10,11 +10,13 @@ import asyncio
 import contextlib
 import os
 import tempfile
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
+
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import sessionmaker
 
 from fastapi_app.core.database import get_sync_engine
 from fastapi_app.core.logger import logger
-from sqlalchemy.orm import sessionmaker
 
 _SyncSession = sessionmaker(
     autocommit=False, autoflush=False, bind=get_sync_engine()
@@ -33,7 +35,7 @@ async def sync_shipment_records_task(ctx):
             from sqlalchemy import text
             session = _SyncSession()
             try:
-                target_date = datetime.now(timezone.utc).replace(tzinfo=None).date() - timedelta(days=1)
+                target_date = datetime.now(UTC).replace(tzinfo=None).date() - timedelta(days=1)
                 rows = session.execute(text("\n                SELECT so.id, so.stockout_no, so.customer, so.product_id,\n                       so.quantity, so.returned_quantity, DATE(so.stockout_date) as stockout_date,\n                       p.name as product_name\n                FROM stock_out so\n                JOIN product p ON so.product_id = p.id\n                WHERE DATE(so.stockout_date) = :target_date\n                  AND so.customer IS NOT NULL AND so.customer != ''\n            "), {'target_date': target_date}).fetchall()
                 customers = session.execute(text('SELECT id, name FROM customer')).fetchall()
                 customer_id_map = {c.name: c.id for c in customers}
@@ -129,7 +131,7 @@ async def batch_import_plans_task(ctx, file_path: str, original_filename: str, u
                         success_count += 1
                     except (ValueError, TypeError, OSError, SQLAlchemyError) as e:
                         # savepoint 已自动回滚本行，不再整体 rollback（避免误伤已成功的行）
-                        errors.append(f'第{i}行: {str(e)}')
+                        errors.append(f'第{i}行: {e!s}')
                 session.commit()
                 return {'success': True, 'batch_id': batch_id, 'row_count': len(rows), 'success_count': success_count, 'error_count': len(errors), 'errors': errors[:50], 'task_id': job_id}
             finally:

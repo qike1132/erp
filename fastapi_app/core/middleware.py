@@ -72,8 +72,8 @@ def _setup_request_id(app: FastAPI) -> None:
 
 def _setup_csrf(app: FastAPI) -> None:
     try:
-        import secrets
         import ipaddress
+        import secrets
 
         _csrf_secure = os.getenv("CSRF_COOKIE_SECURE", "").lower() in ("true", "1", "yes")
 

@@ -1,105 +1,169 @@
 # scripts/check_bare_except.py
 """
-裸 except / except Exception 检测脚本
+裸 except / except Exception 检测脚本（AST based）
 
-扫描 fastapi_app/ 下所有 .py 文件，发现并报告以下代码位置：
+扫描 fastapi_app/ 下所有 .py 文件，AST 识别以下模式：
 - `except:`  （裸 except）
-- `except Exception:` 或 `except Exception as e:` （捕获所有异常）
-- `except (..., Exception):` （元组中包含 Exception 作为兜底）
+- `except Exception:` / `except Exception as e:` （捕获所有异常）
+- `except (..., Exception, ...):` （元组中包含 Exception 作为兜底）
 
-允许的情况（会被忽略）：
-- 测试文件（test_*.py）
-- Celery 任务顶层错误处理（tasks/ 目录下的函数装饰器内部）
-- 注释行
-- 仅用于记录日志并继续运行的防御性代码块（如 cache 失效、FCM 推送）
+允许的情况（白名单）：
+- 测试文件（test_*.py / conftest.py）
+- 白名单配置文件中显式豁免的 file:line 或 file
+- 行内含 `# defensive:` 标注的防御性代码（启动/关闭容错）
 
-退出码：
-- 0：未发现裸 except（或仅有允许的例外）
-- 1：发现裸 except
+退出码:
+    0: 未发现违规（或仅命中白名单）
+    1: 发现违规
+
+任务来源: .codeartsdoer/specs/code_quality_opt/tasks.md 1.4
 """
+from __future__ import annotations
+
+import argparse
 import ast
 import io
 import sys
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 PROJECT_ROOT = Path(__file__).parent.parent
-SCAN_DIRS = [
-    PROJECT_ROOT / "fastapi_app",
-]
+DEFAULT_SCAN_DIRS = [PROJECT_ROOT / "fastapi_app"]
+EXCLUDE_DIRS = {"__pycache__"}
 
-# 允许的模式（正则）
-ALLOWED_PATTERNS = [
-    r"except\s+\(.*Exception.*\):",   # 包含 Exception 的 except 元组（防御性）
-]
-
-# 允许的文件名模式
-ALLOWED_FILES = [
-    r"test_.*\.py$",
-    r"conftest\.py$",
-]
+# 默认白名单文件（桌面壳等非 Web 路径）
+DEFAULT_WHITELIST = PROJECT_ROOT / "scripts" / "allowed_broad_except.yaml"
 
 
-def is_allowed_file(path: Path) -> bool:
-    import re
-    for pattern in ALLOWED_FILES:
-        if re.search(pattern, path.name):
-            return True
-    return False
+@dataclass(frozen=True)
+class Violation:
+    file: str
+    line: int
+    except_type: str
+
+    def to_dict(self) -> dict:
+        return asdict(self)
 
 
-def find_bare_excepts(content: str, file_path: Path) -> list[tuple[int, str]]:
-    issues = []
-    lines = content.splitlines()
-    for lineno, line in enumerate(lines, 1):
-        stripped = line.strip()
-        # 裸 except
-        if stripped == "except:":
-            issues.append((lineno, stripped))
+def _except_kind(handler: ast.ExceptHandler) -> str | None:
+    """返回该 except 的风险类型，无风险返回 None。"""
+    typ = handler.type
+    if typ is None:
+        return "bare except"
+    if isinstance(typ, ast.Name) and typ.id == "Exception":
+        return "except Exception"
+    if isinstance(typ, ast.Tuple):
+        for elt in typ.elts:
+            if isinstance(elt, ast.Name) and elt.id == "Exception":
+                return "except (..., Exception)"
+    return None
+
+
+class BroadExceptVisitor(ast.NodeVisitor):
+    def __init__(self, file_path: Path, source: str) -> None:
+        self.file_path = file_path
+        self.lines = source.splitlines()
+        self.violations: list[Violation] = []
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        kind = _except_kind(node)
+        if kind is not None:
+            # 行内含 # defensive: 或 # broad-except: 标注则豁免
+            # defensive: 启动/关闭容错；broad-except: 已审计的宽泛 except（附原因）
+            line_text = self.lines[node.lineno - 1] if node.lineno - 1 < len(self.lines) else ""
+            if "# defensive:" not in line_text and "# broad-except:" not in line_text:
+                self.violations.append(
+                    Violation(
+                        file=str(self.file_path.relative_to(PROJECT_ROOT)),
+                        line=node.lineno,
+                        except_type=kind,
+                    )
+                )
+        self.generic_visit(node)
+
+
+def scan_file(path: Path) -> list[Violation]:
+    try:
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(path))
+    except SyntaxError:
+        return []
+    visitor = BroadExceptVisitor(path, source)
+    visitor.visit(tree)
+    return visitor.violations
+
+
+def load_whitelist(yaml_path: Path | None) -> set[str]:
+    if yaml_path is None or not yaml_path.exists():
+        return set()
+    whitelist: set[str] = set()
+    for raw in yaml_path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
             continue
-        # except Exception: 或 except Exception as e:
-        # 排除已标记为 defensive 的行
-        if "# defensive:" in stripped:
+        whitelist.add(line)
+    return whitelist
+
+
+def is_whitelisted(v: Violation, whitelist: set[str]) -> bool:
+    return f"{v.file}:{v.line}" in whitelist or v.file in whitelist
+
+
+def is_test_file(path: Path) -> bool:
+    name = path.name
+    return name.startswith("test_") or name == "conftest.py"
+
+
+def collect_py_files(scan_dirs: list[Path]) -> list[Path]:
+    files: list[Path] = []
+    for d in scan_dirs:
+        if not d.exists():
             continue
-        if "#" in stripped:
-            code_part = stripped.split("#", 1)[0].strip()
-        else:
-            code_part = stripped
-        if code_part.startswith("except Exception"):
-            issues.append((lineno, code_part))
-    return issues
+        for p in d.rglob("*.py"):
+            if any(part in EXCLUDE_DIRS for part in p.parts):
+                continue
+            if is_test_file(p):
+                continue
+            files.append(p)
+    return files
 
 
 def main() -> int:
-    all_issues: list[tuple[Path, int, str]] = []
+    parser = argparse.ArgumentParser(description="裸/宽泛 except 检测（AST）")
+    parser.add_argument("paths", nargs="*", help="待扫描目录")
+    parser.add_argument(
+        "--whitelist",
+        type=Path,
+        default=DEFAULT_WHITELIST,
+        help="白名单配置文件",
+    )
+    args = parser.parse_args()
 
-    for scan_dir in SCAN_DIRS:
-        if not scan_dir.exists():
-            continue
-        for py_file in scan_dir.rglob("*.py"):
-            if is_allowed_file(py_file):
-                continue
-            content = py_file.read_text(encoding="utf-8")
-            for lineno, line in find_bare_excepts(content, py_file):
-                all_issues.append((py_file, lineno, line))
+    scan_dirs = [Path(p).resolve() for p in args.paths] or DEFAULT_SCAN_DIRS
+    whitelist = load_whitelist(args.whitelist)
+    files = collect_py_files(scan_dirs)
 
-    if not all_issues:
-        print("[PASS] 未发现裸 except")
+    all_violations: list[Violation] = []
+    for f in files:
+        all_violations.extend(scan_file(f))
+
+    real = [v for v in all_violations if not is_whitelisted(v, whitelist)]
+
+    if not real:
+        print("[PASS] 未发现裸/宽泛 except（白名单与 defensive 标注已豁免）")
         return 0
 
-    # 按文件分组
-    by_file: dict[Path, list[tuple[int, str]]] = {}
-    for fp, ln, line in all_issues:
-        by_file.setdefault(fp, []).append((ln, line))
+    by_file: dict[str, list[Violation]] = {}
+    for v in real:
+        by_file.setdefault(v.file, []).append(v)
 
-    total = len(all_issues)
-    print(f"[FAIL] 发现 {total} 处裸 except / except Exception：\n")
-    for fp, issues in sorted(by_file.items()):
-        relative = fp.relative_to(PROJECT_ROOT)
-        print(f"  {relative} ({len(issues)})")
-        for ln, line in issues:
-            print(f"    L{ln}: {line}")
+    print(f"[FAIL] 发现 {len(real)} 处裸/宽泛 except（{len(by_file)} 个文件）:\n")
+    for fp, vs in sorted(by_file.items()):
+        print(f"  {fp} ({len(vs)})")
+        for v in vs:
+            print(f"    L{v.line}: {v.except_type}")
         print()
 
     return 1

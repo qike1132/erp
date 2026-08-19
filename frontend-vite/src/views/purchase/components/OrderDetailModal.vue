@@ -35,7 +35,7 @@
     </div>
 
     <template #footer>
-      <button class="odm-close" @click="$emit('close')">
+      <button class="odm-close" @click="$emit('close')" aria-label="关闭">
         关闭
       </button>
     </template>

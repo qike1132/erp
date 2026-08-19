@@ -4,11 +4,17 @@
  * 封装仪表盘统计与库存统计的请求、校验、错误处理与降级。
  * 逻辑自 DashboardView.vue 原样搬移（图表渲染时机由调用方在
  * loadStats 返回后接管，保持原有 nextTick 后渲染的时序）。
+ *
+ * 性能优化：
+ * - 两个 API 并行请求（Promise.all），延迟从 d1+d2 降至 max(d1,d2)
+ * - 模块级缓存（TTL 30s），短时间内再次进入 Dashboard 零延迟
+ * - 有缓存数据时静默刷新，不显示全屏 loading 遮罩
  */
 import { ref, shallowRef } from 'vue'
 import { dashboardApi, stockApi } from '@/api'
 import { toast } from '@/composables/useToast'
 import { usePerfMark } from '@/composables/usePerfMark'
+import { devLog } from '@/utils/devLog'
 
 /** 库存统计响应结构 */
 export interface StockStats {
@@ -18,13 +24,20 @@ export interface StockStats {
   stockin_quantity: number
 }
 
+// ===== 模块级缓存（TTL 30s） =====
+// 跨 composable 实例共享，避免短时间内重复请求
+const CACHE_TTL = 30_000
+let _statsCache: { data: Record<string, number>; ts: number } | null = null
+let _stockStatsCache: { data: StockStats; ts: number } | null = null
+
 export function useDashboardStats() {
   const perf = usePerfMark('dashboard')
 
   // ===== 数据状态 =====
   // shallowRef：API 响应整体替换（不逐属性变更），避免深层响应式开销
-  const stats = shallowRef<Record<string, number> | null>(null)
-  const stockStats = shallowRef<StockStats | null>(null)
+  // 初始化时从缓存恢复，避免首次渲染空白
+  const stats = shallowRef<Record<string, number> | null>(_statsCache?.data ?? null)
+  const stockStats = shallowRef<StockStats | null>(_stockStatsCache?.data ?? null)
   const isLoading = ref(false)
   const errorMessage = ref('')
   const errorDetail = ref('')
@@ -32,16 +45,32 @@ export function useDashboardStats() {
 
   // ===== 数据加载（含错误处理和日志） =====
   async function loadStats(showLoading = true) {
-    if (showLoading) isLoading.value = true
+    // 缓存有效时直接返回，零延迟
+    const now = Date.now()
+    const statsValid = _statsCache && now - _statsCache.ts < CACHE_TTL
+    const stockValid = _stockStatsCache && now - _stockStatsCache.ts < CACHE_TTL
+    if (statsValid && stockValid) {
+      stats.value = _statsCache!.data
+      stockStats.value = _stockStatsCache!.data
+      devLog('[Dashboard] 命中缓存，跳过请求')
+      return
+    }
+
+    // 有缓存数据时静默刷新（不显示 loading），仅首次加载或错误重试时显示骨架屏
+    // 使用 _statsCache 而非 stats.value 判断：错误路径会设 stats.value 为全零对象但不清除缓存
+    const shouldShowLoading = showLoading && !_statsCache
+    if (shouldShowLoading) isLoading.value = true
     errorMessage.value = ''
     errorDetail.value = ''
     perf.mark('api-start')
 
-    // 先加载仪表盘统计，再加载库存统计（库存失败时可用仪表盘数据降级）
-    await loadDashboardStats()
-    await loadStockStats()
+    // 并行加载：延迟取 max(d1, d2) 而非 d1+d2
+    await Promise.all([
+      loadDashboardStats(),
+      loadStockStats(),
+    ])
 
-    if (showLoading) isLoading.value = false
+    if (shouldShowLoading) isLoading.value = false
     perf.markEnd('api-start')
     perf.measure('api-stats', 'api-start')
   }
@@ -77,12 +106,10 @@ export function useDashboardStats() {
       }
 
       stats.value = validated
+      _statsCache = { data: validated, ts: Date.now() }
       lastSyncTime.value = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 
-      if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
-        console.log('[Dashboard] 数据加载成功:', validated)
-      }
+      devLog('[Dashboard] 数据加载成功:', validated)
     } catch (err: unknown) {
       const axiosError = err as { response?: { status?: number; data?: unknown }; message?: string; code?: string }
 
@@ -141,11 +168,9 @@ export function useDashboardStats() {
       const resp = await stockApi.stats()
       if (resp) {
         stockStats.value = resp
+        _stockStatsCache = { data: resp, ts: Date.now() }
       }
-      if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
-        console.log('[Dashboard] 库存统计数据加载成功:', stockStats.value)
-      }
+      devLog('[Dashboard] 库存统计数据加载成功:', stockStats.value)
     } catch (err) {
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
@@ -159,6 +184,7 @@ export function useDashboardStats() {
     stats,
     stockStats,
     isLoading,
+
     errorMessage,
     errorDetail,
     lastSyncTime,

@@ -1,5 +1,6 @@
 """审批状态机单元测试"""
 import pytest
+
 from fastapi_app.core.state_machine import (
     ApprovalAction,
     ApprovalState,

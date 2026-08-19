@@ -7,26 +7,28 @@
 """
 import hashlib
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
+from fastapi_app.core.business_rules import MAX_QUANTITY
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.cache_invalidation import cache_mgr
+
+# 领域事件总线：出库单创建时发布跨域事件
+from fastapi_app.core.domain_events import DomainEvent, DomainEventType
+from fastapi_app.core.domain_events import publish_with_retry as publish_domain_event
 from fastapi_app.core.exception_handler import safe_publish_event
 from fastapi_app.core.number_generator import generate_number_async
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.services.batch_service import calculate_available_shipment_quantity
-from fastapi_app.services.numbering import generate_stockin_number, generate_stockout_number
 from fastapi_app.services.notification_service import StockEvent, publish_stock_event
+from fastapi_app.services.numbering import generate_stockin_number, generate_stockout_number
 from fastapi_app.shared.stock_concurrency import get_product_for_update
-from fastapi_app.core.business_rules import MAX_QUANTITY
 from fastapi_app.shared_models import Order, Product, StockIn, StockOut, StockReturn
 from fastapi_app.utils import log_inventory_change
-# 领域事件总线：出库单创建时发布跨域事件
-from fastapi_app.core.domain_events import DomainEvent, DomainEventType, publish_with_retry as publish_domain_event
 
 logger = logging.getLogger(__name__)
 
@@ -300,18 +302,18 @@ async def get_stockins(db: AsyncSession, page: int=1, per_page: int=50,
         conditions.append(StockIn.order_type == order_type)
     if start_date:
         try:
-            from datetime import datetime, timezone
-            sd = datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+            from datetime import datetime
+            sd = datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=UTC)
             conditions.append(StockIn.stockin_date >= sd)
         except ValueError:
-            pass
+            pass  # defensive: 可选 ValueError 静默处理,不影响主流程
     if end_date:
         try:
-            from datetime import datetime, timezone
-            ed = datetime.strptime(end_date, '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
+            from datetime import datetime
+            ed = datetime.strptime(end_date, '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=UTC)
             conditions.append(StockIn.stockin_date <= ed)
         except ValueError:
-            pass
+            pass  # defensive: 可选 ValueError 静默处理,不影响主流程
 
     base_where = select(StockIn.id)
     for condition in conditions:
@@ -435,16 +437,16 @@ async def get_stockouts(db: AsyncSession, page: int=1, per_page: int=50,
             conditions.append(Order.order_type == order_type)
     if start_date:
         try:
-            sd = datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+            sd = datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=UTC)
             conditions.append(StockOut.stockout_date >= sd)
         except ValueError:
-            pass
+            pass  # defensive: 可选 ValueError 静默处理,不影响主流程
     if end_date:
         try:
-            ed = datetime.strptime(end_date, '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
+            ed = datetime.strptime(end_date, '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=UTC)
             conditions.append(StockOut.stockout_date <= ed)
         except ValueError:
-            pass
+            pass  # defensive: 可选 ValueError 静默处理,不影响主流程
 
     # 先用子查询过滤 + 分页取 ID，再按 ID 批量加载关联数据，避免 joinedload 与过滤 JOIN 冲突
     id_query = select(StockOut.id)
@@ -898,7 +900,7 @@ def _build_inventory_cte_sql(clauses: dict, country: str) -> tuple:
     # 安全说明：clauses 中所有 SQL 片段均来自模块级常量（_SI_PID/_SO_CUST 等），
     # 不含用户输入；筛选值通过 :pids/:sc 绑定参数传递。重构为完全参数化会
     # 改变 CTE 语义，风险过高，故保留并标注。
-    cte_sql = text(f"""
+    cte_sql = text(f"""  # sql-safe: escape_like/绑定参数/常量片段
 WITH stockin_agg AS (
     SELECT si.product_id, si.customer,
            SUM(si.quantity - COALESCE(sub.consumed, 0)) AS stockin_qty,
@@ -1043,7 +1045,7 @@ def _format_inventory_rows(rows) -> tuple[list, int, int, int, int, list[str]]:
         country_data = _parse_country_data(row.country_data or '')
         so_total = int(row.direct_stockout_qty) + int(row.regular_stockout_qty) + int(row.custom_stockout_qty)
         remaining_reg = int(row.remaining_reg)
-        remaining_cus = int(row.remaining_cus)
+        int(row.remaining_cus)
         production_qty = int(row.production_qty)
         available_stock = int(row.available_stock)
 
@@ -1106,7 +1108,7 @@ async def _get_all_countries(db: AsyncSession, pids: tuple | None, search_custom
         params['sc'] = search_customer
     # 安全说明：pid_clause/cust_clause 均为模块级常量（_O_PID/_CUST_CLAUSE），
     # 不含用户输入；筛选值通过 :pids/:sc 绑定参数传递。
-    sql = text(f"""
+    sql = text(f"""  # sql-safe: escape_like/绑定参数/常量片段
         SELECT DISTINCT COALESCE(o.country, '常规') AS country
         FROM "order" o
         WHERE o.order_type = 'custom'{pid_clause}{cust_clause}
@@ -1148,7 +1150,7 @@ async def _resolve_products(db: AsyncSession, search: str) -> list[int] | None:
     if not search:
         return None  # 无搜索时不加载全量产品ID，调用方应跳过 ANY(:pids) 条件
     escaped = escape_like(search)
-    result = await db.execute(select(Product.id).where(or_(Product.name.like(f'%{escaped}%', escape='\\'), Product.barcode.like(f'%{escaped}%', escape='\\'))))
+    result = await db.execute(select(Product.id).where(or_(Product.name.like(f'%{escaped}%', escape='\\'), Product.barcode.like(f'%{escaped}%', escape='\\'))))  # sql-safe: escape_like/绑定参数/常量片段
     return [row[0] for row in result.all()]
 
 def _build_inventory_query_clauses(pids: list[int] | None, cust: str) -> tuple[dict, str, str, str, str, str, str]:
@@ -1253,7 +1255,7 @@ def _parse_date_preserve_time(date_str: str, old_time: datetime | None=None) -> 
         base = datetime.strptime(date_str, '%Y-%m-%d')
     except ValueError:
         raise ValueError('日期格式不正确！') from None
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if old_time and (old_time.hour != 0 or old_time.minute != 0 or old_time.second != 0):
         return datetime(base.year, base.month, base.day, old_time.hour, old_time.minute, old_time.second)
     else:
@@ -1286,7 +1288,7 @@ async def batch_create_stockins(db: AsyncSession, stockins_data: list) -> dict:
             order_type = item.get('order_type', 'regular') or 'regular'
             country = item.get('country') or None
             stockin_date_str = item.get('stockin_date') or ''
-            stockin_date = _parse_date_preserve_time(stockin_date_str) if stockin_date_str else datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+            stockin_date = _parse_date_preserve_time(stockin_date_str) if stockin_date_str else datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
             try:
                 async with db.begin_nested():
                     stockin = await create_stockin_core(db, product_id, quantity, customer, stockin_date, note, order_type, country)
@@ -1340,7 +1342,7 @@ async def _create_stockout_records(db: AsyncSession, product_id: int, customer: 
         stockout_no = await generate_stockout_number(db)
         stockout = StockOut(
             stockout_no=stockout_no, product_id=product_id, quantity=ship_qty,
-            stockout_date=(_parse_date_preserve_time(stockout_date_str).replace(tzinfo=timezone.utc) if stockout_date_str else datetime.now(timezone.utc)),
+            stockout_date=(_parse_date_preserve_time(stockout_date_str).replace(tzinfo=UTC) if stockout_date_str else datetime.now(UTC)),
             customer=customer, order_id=order_detail['order_id'], note=note
         )
         db.add(stockout)

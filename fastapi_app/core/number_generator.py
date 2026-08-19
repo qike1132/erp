@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 def _number_lock_key(prefix: str, date_str: str) -> int:
     """为(prefix, date_str)生成64位PostgreSQL advisory lock key。"""
-    raw = f"{prefix}:{date_str}".encode("utf-8")
+    raw = f"{prefix}:{date_str}".encode()
     # 取md5前15位十六进制，保证在PostgreSQL bigint范围内
     hex_key = hashlib.md5(raw, usedforsecurity=False).hexdigest()[:15]
     return int(hex_key, 16)

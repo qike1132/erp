@@ -5,7 +5,7 @@
 """
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -76,7 +76,7 @@ async def use_saved_query(db: AsyncSession, query_id: int) -> dict | None:
     if not sq:
         return None
     sq.use_count += 1
-    sq.last_use_time = datetime.now(timezone.utc).replace(tzinfo=None)
+    sq.last_use_time = datetime.now(UTC).replace(tzinfo=None)
     return sq.to_dict()
 
 
@@ -91,8 +91,8 @@ async def get_status_logs(db: AsyncSession, *, target_type: str = '', target_id:
         query = query.where(OrderStatusLog.target_id == target_id)
         count_query = count_query.where(OrderStatusLog.target_id == target_id)
     if order_no:
-        query = query.where(OrderStatusLog.order_no.ilike(f'%{escape_like(order_no)}%'))
-        count_query = count_query.where(OrderStatusLog.order_no.ilike(f'%{escape_like(order_no)}%'))
+        query = query.where(OrderStatusLog.order_no.ilike(f'%{escape_like(order_no)}%'))  # sql-safe: escape_like/绑定参数/常量片段
+        count_query = count_query.where(OrderStatusLog.order_no.ilike(f'%{escape_like(order_no)}%'))  # sql-safe: escape_like/绑定参数/常量片段
     query = query.order_by(OrderStatusLog.action_time.desc())
 
     total_result = await db.execute(count_query)

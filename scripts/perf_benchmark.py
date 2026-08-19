@@ -15,18 +15,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from sqlalchemy import select, func, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import _AsyncSessionLocal, _init_async_engine
-
 
 results: dict[str, dict] = {}
 
 
 async def bench(label: str, fn, iterations: int = 3):
     times = []
-    for i in range(iterations):
+    for _i in range(iterations):
         t0 = time.perf_counter()
         result = await fn()
         elapsed = (time.perf_counter() - t0) * 1000
@@ -41,8 +40,7 @@ async def bench(label: str, fn, iterations: int = 3):
 
 
 async def bench_product_list(session: AsyncSession, count: int, iterations: int):
-    from fastapi_app.shared_models import Product
-    from fastapi_app.services.product_service import get_products_page, get_products
+    from fastapi_app.services.product_service import get_products, get_products_page
 
     print("\n=== 产品列表查询 ===")
 
@@ -132,7 +130,7 @@ async def main():
 
     passed = sum(1 for v in results.values() if v["median_ms"] < 200)
     total = len(results)
-    print(f"\n=== 结果汇总 ===")
+    print("\n=== 结果汇总 ===")
     print(f"通过: {passed}/{total} (目标: median < 200ms)")
     if passed < total:
         print("未通过:")

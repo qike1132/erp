@@ -10,7 +10,6 @@
 - 客户 "测试客户A" 有对应的订单（数量 >= 50）
 """
 import asyncio
-import sys
 import json
 from datetime import datetime
 
@@ -283,7 +282,7 @@ async def main():
         # 获取出库前库存
         try:
             resp = await client.get(
-                f"http://192.168.0.95:8000/api/v1/auxiliary/product-available-stock?product_id=1",
+                "http://192.168.0.95:8000/api/v1/auxiliary/product-available-stock?product_id=1",
                 headers=await get_headers(),
             )
             before_stock = resp.json().get("current_stock", "N/A") if resp.status_code == 200 else "N/A"

@@ -41,7 +41,7 @@ class TestTasksEndpoints:
         mock_result.status = "SUCCESS"
         mock_result.ready.return_value = True
         mock_result.successful.return_value = True
-        mock_result.result = {"file_path": "/tmp/export.xlsx", "filename": "export.xlsx"}
+        mock_result.result = {"file_path": "/tmp/export.xlsx", "filename": "export.xlsx"}  # noqa: S108 测试 mock 路径
         mock_celery.AsyncResult.return_value = mock_result
 
         with patch("fastapi_app.api.v1.endpoints.tasks._celery_available", True):

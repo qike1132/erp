@@ -1,7 +1,7 @@
 <template>
   <div class="sp-body">
     <div v-if="isLoading && !d" class="sp-empty"><UiSpinner /></div>
-    <div v-else-if="isError" class="sp-empty"><FontAwesomeIcon icon="exclamation-circle" aria-hidden="true" />加载失败 <button class="sp-retry-btn" @click="emit('refetch')">重试</button></div>
+    <div v-else-if="isError" class="sp-empty"><FontAwesomeIcon icon="exclamation-circle" aria-hidden="true" />加载失败 <button class="sp-retry-btn" @click="emit('refetch')" aria-label="重试">重试</button></div>
     <div v-else-if="!rows.length" class="sp-empty"><FontAwesomeIcon icon="inbox" aria-hidden="true" />本月暂无出货计划</div>
     <template v-else>
     <div v-if="isFetching" class="sp-fetching-bar"><div class="sp-fetching-progress" /></div>

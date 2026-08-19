@@ -11,7 +11,7 @@ from .exceptions import BackupError
 logger = logging.getLogger(__name__)
 
 
-def split_backup_into_chunks(
+def split_backup_into_chunks(  # log-context: internal helper 无请求上下文
     backup_bytes: bytes,
     chunk_size: int = BACKUP_CHUNK_SIZE,
     max_chunks: int = BACKUP_MAX_CHUNKS,
@@ -47,7 +47,7 @@ def split_backup_into_chunks(
     return chunks
 
 
-def combine_backup_chunks(
+def combine_backup_chunks(  # log-context: internal helper 无请求上下文
     chunks: list[tuple[int, bytes]],
     total_size: int | None = None,
 ) -> bytes:
@@ -68,7 +68,7 @@ def combine_backup_chunks(
 
     # 验证索引连续性
     expected_index = 0
-    for chunk_index, chunk_data in chunks:
+    for chunk_index, _chunk_data in chunks:
         if chunk_index != expected_index:
             raise BackupError(f"Chunk 索引不连续，期望 {expected_index}，实际 {chunk_index}")
         expected_index += 1
@@ -177,7 +177,7 @@ async def restore_from_chunks(
         raise BackupError("没有提供任何 chunk")
 
     # 验证所有 chunk 属于同一个备份
-    backup_ids = set(chunk['metadata'].get('backup_id') for chunk in chunks_metadata)
+    backup_ids = {chunk['metadata'].get('backup_id') for chunk in chunks_metadata}
     if len(backup_ids) != 1:
         raise BackupError(f"chunk 属于不同的备份: {backup_ids}")
 

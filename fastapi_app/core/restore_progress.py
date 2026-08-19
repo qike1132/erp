@@ -34,7 +34,7 @@ async def _get_redis():
         client = await _get_async_redis_client()
         return client
     except (ImportError, OSError, RuntimeError):
-        pass
+        pass  # defensive: 异常静默处理,不影响主流程
     from fastapi_app.core.redis_wrapper import get_client
     return get_client()
 

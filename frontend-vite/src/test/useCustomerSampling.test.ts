@@ -98,7 +98,7 @@ describe('useCustomerSampling', () => {
         project_count: 1,
         latest_update_time: '',
         projects: [
-          { id: 1, sequence_no: 'CS-001', product_name: '产品', product_image_url: null, product_image_thumbnail_url: null, product_image_blur_url: null, current_version: 'T1', status: 'in_progress', updated_at: '' },
+          { id: 1, sequence_no: 'CS-001', product_name: '产品', product_image_url: null, product_image_thumbnail_url: null, product_image_blur_url: null, current_version: 'T1', status: 'in_progress', completed_at: null, parts_count: 0, updated_at: '' },
         ],
       },
     ]

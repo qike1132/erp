@@ -1,6 +1,7 @@
 """订单状态派生计算单元测试"""
-import pytest
 from datetime import datetime
+
+import pytest
 
 from fastapi_app.shared_models.order import (
     VALID_ORDER_STATUSES,

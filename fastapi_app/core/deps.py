@@ -8,12 +8,13 @@ FastAPI 依赖注入
 已迁移到全异步数据库操作，移除同步引擎依赖。
 """
 import asyncio
+import contextlib
 import logging
 import threading
 import time
 import uuid
 from collections import OrderedDict
-from datetime import timezone
+from datetime import UTC
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import select
@@ -75,8 +76,8 @@ async def _get_cached_user(user_id: int) -> User | None:
         else:
             PERM_CACHE_MISSES.inc()
     except ImportError:
-        pass
-    return cached
+        pass  # defensive: 可选依赖未安装,优雅降级
+    return cached  # type: ignore[return-value]
 
 
 async def _set_cached_user(user_id: int, user: User) -> None:
@@ -85,23 +86,19 @@ async def _set_cached_user(user_id: int, user: User) -> None:
         from fastapi_app.core.metrics import PERM_CACHE_SIZE
         PERM_CACHE_SIZE.set(len(_PERMISSION_CACHE._data))
     except ImportError:
-        pass
+        pass  # defensive: 可选依赖未安装,优雅降级
 
 
 async def invalidate_user_permission_cache(user_id: int | None=None) -> None:
     if user_id is not None:
         await _PERMISSION_CACHE.pop(user_id)
-        try:
+        with contextlib.suppress(KeyError, AttributeError):
             await _USER_ACTIVE_CACHE.pop(user_id)
-        except (KeyError, AttributeError):
-            pass
     else:
         await _PERMISSION_CACHE.clear()
-        try:
+        with contextlib.suppress(AttributeError):
             await _USER_ACTIVE_CACHE.clear()
-        except AttributeError:
-            pass
-__all__ = ['get_current_user_id', 'get_current_user_id_strict', 'get_current_user_strict', 'require_permission', 'require_superuser', 'create_access_token', 'create_refresh_token', 'get_async_db', 'get_user_identity', 'revoke_token', 'is_token_revoked']
+__all__ = ['create_access_token', 'create_refresh_token', 'get_async_db', 'get_current_user_id', 'get_current_user_id_strict', 'get_current_user_strict', 'get_user_identity', 'is_token_revoked', 'require_permission', 'require_superuser', 'revoke_token']
 
 
 def get_user_identity(user: User) -> tuple[str, str]:
@@ -148,7 +145,7 @@ def create_access_token(data: dict, expires_delta=None) -> str:
 
     import jwt
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
+    expire = datetime.now(UTC) + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode['exp'] = expire
     to_encode['jti'] = uuid.uuid4().hex
     to_encode['type'] = 'access'
@@ -164,7 +161,7 @@ def create_refresh_token(data: dict) -> str:
 
     import jwt
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    expire = datetime.now(UTC) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     to_encode['exp'] = expire
     to_encode['jti'] = uuid.uuid4().hex
     to_encode['type'] = 'refresh'
@@ -225,7 +222,7 @@ async def revoke_token(jti: str, exp: int) -> None:
     Redis 不可用时静默失败（token 仍会自然过期），但会同步写入本地 LRU 缓存作为降级。
     """
     from datetime import datetime
-    remaining = max(exp - int(datetime.now(timezone.utc).timestamp()), 0)
+    remaining = max(exp - int(datetime.now(UTC).timestamp()), 0)
     if remaining <= 0:
         return
     # 始终写入本地 LRU 缓存（无论 Redis 是否可用），作为后续 Redis 故障时的降级依据
@@ -288,7 +285,7 @@ async def is_token_revoked(jti: str | None, *, fail_closed: bool = False) -> boo
         if _LOCAL_REVOKED_JTIS.contains(jti):
             return True
         if fail_closed:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='令牌状态校验不可用，请重新登录')
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='令牌状态校验不可用，请重新登录') from None
         _log_revocation_degraded(exc_info=True)
         return False
 
@@ -309,7 +306,7 @@ def _get_user_id_from_jwt(request: Request) -> int | None:
         if user_id:
             return int(user_id)
     except (HTTPException, ValueError):
-        pass
+        pass  # defensive: 异常静默处理,不影响主流程
     return None
 
 def _get_user_id_from_cookie(request: Request) -> int | None:
@@ -328,7 +325,7 @@ def _get_user_id_from_cookie(request: Request) -> int | None:
         if user_id:
             return int(user_id)
     except (HTTPException, ValueError):
-        pass
+        pass  # defensive: 异常静默处理,不影响主流程
     return None
 
 def _resolve_user_id(request: Request) -> int | None:
@@ -358,7 +355,7 @@ async def _verify_user_active(user_id: int, db: AsyncSession) -> bool:
     """验证用户仍存在且处于启用状态（带 L1 缓存，TTL 30s）"""
     cached = await _USER_ACTIVE_CACHE.get(user_id)
     if cached is not None:
-        return cached
+        return cached  # type: ignore[return-value]
     result = await db.execute(select(User.id, User.status).where(User.id == user_id))
     user = result.first()
     is_active = user is not None and bool(user.status)

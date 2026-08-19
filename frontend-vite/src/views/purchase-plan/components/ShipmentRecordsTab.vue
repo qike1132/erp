@@ -35,6 +35,15 @@ import { planApi } from '@/api';
 import VirtualList from '@/components/ui/VirtualList.vue';
 import type { Plan } from './types';
 
+/** 出货记录行（扩展后端返回的字段） */
+interface ShipmentRecordRow {
+  shipment_no: string
+  shipment_date?: string
+  customer_name?: string
+  product_name?: string
+  quantity?: number
+}
+
 const props = defineProps<{
   date: string;
   plans: Plan[];
@@ -42,7 +51,7 @@ const props = defineProps<{
 
 const loading = ref(false);
 const error = ref(false);
-const records = ref<any[]>([]);
+const records = ref<ShipmentRecordRow[]>([]);
 
 async function load() {
   if (!props.date) return;
@@ -57,18 +66,18 @@ async function load() {
     }
     // 并行请求所有 plan 的出货记录，替代串行 N+1
     const chunkSize = 10;
-    const allRecords: any[] = [];
+    const allRecords: ShipmentRecordRow[] = [];
     for (let i = 0; i < planIds.length; i += chunkSize) {
       const chunk = planIds.slice(i, i + chunkSize);
       const responses = await Promise.all(chunk.map(pid => planApi.shipmentRecords(pid)));
       for (const res of responses) {
-        const recs = (res as { records?: unknown[] })?.records ?? res ?? [];
+        const recs = (res as { records?: ShipmentRecordRow[] })?.records ?? (res as unknown as ShipmentRecordRow[]) ?? [];
         allRecords.push(...recs);
       }
     }
     // 去重 by shipment_no（同一出货记录可能被多个计划匹配到）
     const seen = new Set<string>();
-    records.value = allRecords.filter((r: any) => {
+    records.value = allRecords.filter((r: ShipmentRecordRow) => {
       if (!r.shipment_no || seen.has(r.shipment_no)) return false;
       seen.add(r.shipment_no);
       return true;

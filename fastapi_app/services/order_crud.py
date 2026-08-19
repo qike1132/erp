@@ -12,7 +12,7 @@ order.country（update/delete/deduct 等函数）。多 SKU 模型下这些为�
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import delete, desc, func, literal, select, tuple_, union_all, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,8 +21,8 @@ from sqlalchemy.orm import joinedload, selectinload
 from fastapi_app.core.cache import CacheDomain, cache_result
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
 from fastapi_app.core.domain_events import DomainEvent, DomainEventType, publish_with_retry
-from fastapi_app.core.exceptions import BusinessError, NotFoundError
 from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS
+from fastapi_app.core.exceptions import BusinessError, NotFoundError
 from fastapi_app.core.state_machine import can_transition
 from fastapi_app.core.validators import validate_not_empty, validate_quantity_range
 from fastapi_app.services import escape_like
@@ -71,7 +71,7 @@ _STOCK_TO_DOMAIN_EVENT_MAP = {
 }
 
 
-async def _safe_publish_event(event_type: str, data: dict, fcm_title: str = None, fcm_body: str = None) -> None:
+async def _safe_publish_event(event_type: str, data: dict, fcm_title: str | None = None, fcm_body: str | None = None) -> None:
     """安全发布库存事件（WebSocket/FCM 实时通知 + 领域事件总线）。
 
     core/event_bus.safe_publish_event 的等价实现：
@@ -135,9 +135,9 @@ def _parse_date_condition(date_str: str | None, is_end: bool = False):
         return None
     try:
         if is_end:
-            end_dt = datetime.strptime(date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
+            end_dt = datetime.strptime(date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=UTC)
             return Order.order_date <= end_dt
-        start_dt = datetime.strptime(date_str, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+        start_dt = datetime.strptime(date_str, '%Y-%m-%d').replace(tzinfo=UTC)
         return Order.order_date >= start_dt
     except ValueError:
         raise BusinessError(f"{'结束' if is_end else '开始'}日期格式错误，应为 YYYY-MM-DD") from None
@@ -263,37 +263,7 @@ async def get_orders(db: AsyncSession, page: int = 1, per_page: int = 50,
     return {'items': orders_data, 'total': total, 'page': page, 'per_page': per_page}
 
 
-@cache_result(
-    key_prefix="orders:beile:list",
-    ttl=60,
-    local_ttl=15,
-    key_builder=lambda *args, **kwargs: f"p{kwargs.get('page', 1)}:pp{kwargs.get('per_page', 50)}:c{kwargs.get('customer', '')}:f{kwargs.get('factory', '')}:cs{kwargs.get('confirm_status', '')}",
-)
-async def get_beile_orders_with_stockins(
-    db: AsyncSession, *, page: int = 1, per_page: int = 50,
-    customer: str | None = None, factory: str = '湖北',
-    confirm_status: str | None = None,
-) -> dict:
-    """获取湖北工厂订单+备货合并列表。
-
-    通过 UNION ALL 合并查询 Order（订单）和 StockIn（备货），
-    按产品工厂筛选，确保订单和备货记录都能在同一列表中展示。
-
-    湖北订单确认流程筛选：
-    - confirm_status='unconfirmed'：仅返回 confirmed_at IS NULL 的订单
-    - confirm_status='confirmed'：仅返回已确认（confirmed_at 非空）的订单
-    - 设置确认状态筛选时，备货（StockIn）记录不参与（无确认概念），一并排除
-    - 其他取值（含 None）不生效，返回完整订单+备货列表
-
-    参考 purchase_order_query.get_unprocessed_orders 的实现方案。
-    """
-    # 确认状态条件：仅订单参与确认流程
-    confirm_condition = None
-    if confirm_status == 'unconfirmed':
-        confirm_condition = Order.confirmed_at.is_(None)
-    elif confirm_status == 'confirmed':
-        confirm_condition = Order.confirmed_at.isnot(None)
-
+def _build_beile_unified_query(confirm_condition, unconfirmed_only, customer, factory):
     # ---- 构建 UNION ALL 子查询 ----
     # Order 部分：未删除订单，通过 order_item.product.factory 筛选
     order_part = select(
@@ -311,7 +281,7 @@ async def get_beile_orders_with_stockins(
     if customer:
         order_part = order_part.where(Order.customer.like(f'%{escape_like(customer)}%'))
 
-    # StockIn 部分：通过 product.factory 筛选（按确认状态筛选时不参与）
+    # StockIn 部分：通过 product.factory 筛选（备货同样参与确认状态筛选）
     stockin_part = select(
         literal('stockin').label('record_type'),
         StockIn.id.label('source_id'),
@@ -321,25 +291,99 @@ async def get_beile_orders_with_stockins(
     ).where(
         StockIn.product.has(Product.factory == factory),
     )
+    if confirm_condition is not None:
+        stockin_part = stockin_part.where(
+            StockIn.confirmed_at.is_(None) if unconfirmed_only else StockIn.confirmed_at.isnot(None)
+        )
     if customer:
         stockin_part = stockin_part.where(StockIn.customer.like(f'%{escape_like(customer)}%'))
 
-    # 按确认状态筛选时仅查询订单，排除备货记录
-    parts = [order_part]
-    if confirm_condition is None:
-        parts.append(stockin_part)
-    unified = union_all(*parts).subquery()
+    parts = [order_part, stockin_part]
+    return union_all(*parts).subquery()
 
-    # ---- 0. 未确认湖北订单总数（湖北订单确认流程，列表顶部横幅使用） ----
-    # 全局统计（不受分页/客户筛选影响），仅统计 confirmed_at IS NULL 的订单
-    unconfirmed_count_result = await db.execute(
+
+async def _fetch_beile_records_by_ids(db: AsyncSession, order_ids: list[int], stockin_ids: list[int]) -> tuple:
+    orders_map: dict[int, Order] = {}
+    if order_ids:
+        order_result = await db.execute(
+            select(Order)
+            .options(
+                joinedload(Order.product),
+                joinedload(Order.confirmed_by),
+                selectinload(Order.items),
+            )
+            .where(Order.id.in_(order_ids))
+        )
+        for o in order_result.scalars().unique():
+            orders_map[o.id] = o
+
+    stockins_map: dict[int, StockIn] = {}
+    if stockin_ids:
+        stockin_result = await db.execute(
+            select(StockIn)
+            .options(
+                joinedload(StockIn.product),
+                joinedload(StockIn.confirmed_by),
+            )
+            .where(StockIn.id.in_(stockin_ids))
+        )
+        for s in stockin_result.scalars():
+            stockins_map[s.id] = s
+
+    return orders_map, stockins_map
+
+
+@cache_result(
+    key_prefix="orders:beile:list",
+    ttl=60,
+    local_ttl=15,
+    key_builder=lambda *args, **kwargs: f"p{kwargs.get('page', 1)}:pp{kwargs.get('per_page', 50)}:c{kwargs.get('customer', '')}:f{kwargs.get('factory', '')}:cs{kwargs.get('confirm_status', '')}",
+)
+async def get_beile_orders_with_stockins(
+    db: AsyncSession, *, page: int = 1, per_page: int = 50,
+    customer: str | None = None, factory: str = '湖北',
+    confirm_status: str | None = None,
+) -> dict:
+    """获取湖北工厂订单+备货合并列表。
+
+    通过 UNION ALL 合并查询 Order（订单）和 StockIn（备货），
+    按产品工厂筛选，确保订单和备货记录都能在同一列表中展示。
+
+    湖北确认流程筛选（订单与备货对齐，均按各自表的 confirmed_at 过滤）：
+    - confirm_status='unconfirmed'：仅返回 confirmed_at IS NULL 的订单+备货
+    - confirm_status='confirmed'：仅返回已确认（confirmed_at 非空）的订单+备货
+    - 其他取值（含 None）不生效，返回完整订单+备货列表
+
+    参考 purchase_order_query.get_unprocessed_orders 的实现方案。
+    """
+    # 确认状态条件：订单与备货均参与确认流程
+    confirm_condition = None
+    unconfirmed_only = None
+    if confirm_status == 'unconfirmed':
+        confirm_condition = Order.confirmed_at.is_(None)
+        unconfirmed_only = True
+    elif confirm_status == 'confirmed':
+        confirm_condition = Order.confirmed_at.isnot(None)
+        unconfirmed_only = False
+
+    unified = _build_beile_unified_query(confirm_condition, unconfirmed_only, customer, factory)
+
+    # ---- 0. 未确认湖北记录总数（订单+备货，列表顶部横幅使用） ----
+    # 全局统计（不受分页/客户筛选影响），统计 confirmed_at IS NULL 的订单与备货
+    unconfirmed_orders_result = await db.execute(
         select(func.count(Order.id)).where(
             Order.is_deleted.isnot(True),
             Order.confirmed_at.is_(None),
             Order.items.any(OrderItem.product.has(Product.factory == factory)),
         )
     )
-    unconfirmed_count = unconfirmed_count_result.scalar() or 0
+    unconfirmed_stockins_result = await db.execute(
+        select(func.count(StockIn.id)).where(
+            StockIn.confirmed_at.is_(None),
+            StockIn.product.has(Product.factory == factory),
+        )
+    )
+    unconfirmed_count = (unconfirmed_orders_result.scalar() or 0) + (unconfirmed_stockins_result.scalar() or 0)
 
     # ---- 1. COUNT 总数 ----
     count_result = await db.execute(select(func.count()).select_from(unified))
@@ -373,29 +417,7 @@ async def get_beile_orders_with_stockins(
     order_ids = [r.source_id for r in rows if r.record_type == 'order']
     stockin_ids = [r.source_id for r in rows if r.record_type == 'stockin']
 
-    orders_map: dict[int, Order] = {}
-    if order_ids:
-        order_result = await db.execute(
-            select(Order)
-            .options(
-                joinedload(Order.product),
-                joinedload(Order.confirmed_by),
-                selectinload(Order.items),
-            )
-            .where(Order.id.in_(order_ids))
-        )
-        for o in order_result.scalars().unique():
-            orders_map[o.id] = o
-
-    stockins_map: dict[int, StockIn] = {}
-    if stockin_ids:
-        stockin_result = await db.execute(
-            select(StockIn)
-            .options(joinedload(StockIn.product))
-            .where(StockIn.id.in_(stockin_ids))
-        )
-        for s in stockin_result.scalars():
-            stockins_map[s.id] = s
+    orders_map, stockins_map = await _fetch_beile_records_by_ids(db, order_ids, stockin_ids)
 
     # ---- 4. 构建 records（保持 SQL 排序顺序）----
     items: list[dict] = []
@@ -476,6 +498,10 @@ def _build_beile_stockin_record(stockin: StockIn, factory: str) -> dict:
         'record_type': 'stockin',
         'items': items_data,
         'factories': [factory],
+        # 湖北备货确认状态（与订单确认流程对齐）：confirmed_at IS NULL 视为「未确认备货」
+        'confirmed': stockin.confirmed_at is not None,
+        'confirmed_at': stockin.confirmed_at.strftime('%Y-%m-%d %H:%M') if stockin.confirmed_at else '',
+        'confirmed_by': stockin.confirmed_by.username if stockin.confirmed_by else None,
     }
 
 
@@ -506,7 +532,7 @@ async def confirm_beile_order(db: AsyncSession, order_id: int, current_user: Use
         logger.info('湖北订单重复确认（幂等）：order_id=%s，操作人：%s', order_id, current_user.username)
         return {'success': True, 'message': '订单已确认', 'already_confirmed': True}
 
-    order.confirmed_at = datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+    order.confirmed_at = datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
     order.confirmed_by_id = current_user.id
     await db.flush()
 
@@ -526,6 +552,42 @@ async def confirm_beile_order(db: AsyncSession, order_id: int, current_user: Use
 
     logger.info('湖北订单确认成功：order_no=%s，操作人：%s', order.order_no, current_user.username)
     return {'success': True, 'message': '订单已确认', 'already_confirmed': False}
+
+
+async def confirm_beile_stockin(db: AsyncSession, stockin_id: int, current_user: User) -> dict:
+    """确认湖北备货（beile-order 页面，与订单确认流程对齐）。
+
+    业务规则：
+    - 仅允许确认 factory=湖北 的备货记录，与其他地区独立隔离：
+      非湖北工厂备货通过本接口一律返回 404，防止跨区域串改。
+    - 幂等：备货已确认时直接返回成功，不重复记录确认人。
+    - 只写入 confirmed_at / confirmed_by_id，不影响库存业务数据。
+    """
+    result = await db.execute(
+        select(StockIn)
+        .where(
+            StockIn.id == stockin_id,
+            StockIn.product.has(Product.factory == '湖北'),
+        )
+        .with_for_update()
+    )
+    stockin = result.scalar_one_or_none()
+    if not stockin:
+        raise NotFoundError('备货记录不存在或非湖北工厂备货')
+
+    if stockin.confirmed_at is not None:
+        logger.info('湖北备货重复确认（幂等）：stockin_id=%s，操作人：%s', stockin_id, current_user.username)
+        return {'success': True, 'message': '备货已确认', 'already_confirmed': True}
+
+    stockin.confirmed_at = datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+    stockin.confirmed_by_id = current_user.id
+    await db.flush()
+
+    await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER)
+    await _safe_invalidate_purchase_cache()
+
+    logger.info('湖北备货确认成功：stockin_no=%s，操作人：%s', stockin.stockin_no, current_user.username)
+    return {'success': True, 'message': '备货已确认', 'already_confirmed': False}
 
 
 async def create_order(db: AsyncSession, product_id: int, quantity: int,
@@ -554,7 +616,7 @@ async def create_order(db: AsyncSession, product_id: int, quantity: int,
         order = Order(
             order_no=order_no,
             customer=customer,
-            order_date=datetime.now(timezone.utc).replace(tzinfo=None),  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+            order_date=datetime.now(UTC).replace(tzinfo=None),  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
             product_id=product_id,
             quantity=quantity,
             note=note,
@@ -642,7 +704,7 @@ async def _update_order_directly(
 
     if quantity != old_quantity:
         # TODO(multi-sku-order): order.product_id 在多 SKU 下为首 item 兼容值，库存调整需按 OrderItem 维度；待后续 spec 改造。
-        product = await get_product_for_update(db, order.product_id)
+        await get_product_for_update(db, order.product_id)
         log = InventoryLog(
             product_id=order.product_id,
             change_type='订单修改',
@@ -660,7 +722,7 @@ async def _update_order_directly(
     # 通知失败不应影响订单修改，捕获异常仅记录日志。
     try:
         await dispatch_factory_notifications(db, order, 'order_updated', None)
-    except Exception as notify_err:
+    except Exception as notify_err:  # broad-except: 服务层容错，记录异常并返回安全默认值
         logger.warning(
             "工厂通知派发失败 order_no=%s: %s", order.order_no, notify_err,
             exc_info=True,
@@ -696,8 +758,8 @@ async def _increase_deduction(
     Raises:
         ValueError: 可用备货不足
     """
-    from fastapi_app.shared_models import StockIn
     from fastapi_app.services.numbering import generate_stockout_number
+    from fastapi_app.shared_models import StockIn
 
     stockins_result = await db.execute(
         select(StockIn)
@@ -735,7 +797,7 @@ async def _increase_deduction(
         stockout_no = await generate_stockout_number(db)
         stockout = StockOut(
             stockout_no=stockout_no,
-            stockout_date=datetime.now(timezone.utc).replace(tzinfo=None),
+            stockout_date=datetime.now(UTC).replace(tzinfo=None),
             product_id=stockin.product_id,
             quantity=deduct_amount,
             customer=order.customer,
@@ -886,7 +948,7 @@ async def _submit_edit_approval(
 
     order.is_locked = True
     order.locked_by_id = current_user.id
-    order.lock_time = datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+    order.lock_time = datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
 
     operation_data = {
         'customer': customer,
@@ -903,7 +965,7 @@ async def _submit_edit_approval(
         operation_type=ApprovalRequest.OPERATION_EDIT,
         operation_data=json.dumps(operation_data, ensure_ascii=False),
         status=ApprovalRequest.STATUS_PENDING,
-        lock_time=datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+        lock_time=datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
     )
     db.add(approval_request)
     await db.flush()
@@ -984,7 +1046,7 @@ async def _delete_order_directly(
 
     deleted_order_no = order.order_no
     order.is_deleted = True
-    order.deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+    order.deleted_at = datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
     order.deleted_by_id = current_user.id
 
     await db.flush()
@@ -1017,7 +1079,7 @@ async def _submit_delete_approval(
 
     order.is_locked = True
     order.locked_by_id = current_user.id
-    order.lock_time = datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+    order.lock_time = datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
 
     operation_data = {
         'order_no': order.order_no,
@@ -1033,7 +1095,7 @@ async def _submit_delete_approval(
         operation_type=ApprovalRequest.OPERATION_DELETE,
         operation_data=json.dumps(operation_data, ensure_ascii=False),
         status=ApprovalRequest.STATUS_PENDING,
-        lock_time=datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+        lock_time=datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
     )
     db.add(approval_request)
     await db.flush()

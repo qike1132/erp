@@ -14,9 +14,7 @@
 """
 from unittest.mock import AsyncMock, MagicMock, patch
 
-
 from fastapi_app.services import stock_service
-
 
 # ==================== 辅助函数 ====================
 
@@ -302,7 +300,8 @@ class TestBatchCreateStockoutsPartial:
             ]
             result = await stock_service.batch_create_stockouts(mock_db, data)
 
-        assert result['success'] is True
+        # 顶层 success 仅在全部单项成功时为 True（all_success 语义），部分失败时为 False
+        assert result['success'] is False
         assert result['results'][0]['success'] is True
         assert result['results'][1]['success'] is False
         assert '库存不足' in result['results'][1]['error']
@@ -349,7 +348,8 @@ class TestBatchCreateStockoutsEmpty:
             {'product_id': 1, 'customer': '', 'id': '3'},     # 无客户
         ]
         result = await stock_service.batch_create_stockouts(mock_db, data)
-        assert result['success'] is True
+        # 全部校验失败时顶层 success 为 False（all_success 语义）
+        assert result['success'] is False
         assert all(not r['success'] for r in result['results'])
 
 

@@ -1,0 +1,40 @@
+# scripts/allowed_n_plus_one.yaml
+# N+1 查询扫描白名单
+# 每行一条豁免，支持 file:line 或 file 两种形式。
+# 仅豁免经评审确认可接受的循环内 await db.execute 模式，Web 业务请求路径不得豁免。
+
+# === 备份/恢复操作：按固定表名集合遍历（表数量固定 ~30，非数据量 N+1）===
+fastapi_app/services/backup/verify/core.py
+fastapi_app/services/backup/verify/query_service.py
+fastapi_app/services/backup/json_backup.py
+fastapi_app/services/backup/orchestration/core.py
+fastapi_app/services/backup/orchestration/recovery_test_service.py
+fastapi_app/services/backup/incremental.py
+
+# === 启动预热：固定 5 次连接池预热，非请求路径 ===
+fastapi_app/main.py
+
+# === 审计中间件缓冲区刷写：按缓冲条目遍历，批写场景 ===
+fastapi_app/core/audit_middleware.py
+
+# === 乐观锁重试循环：冲突时重试，非数据量 N+1 ===
+fastapi_app/shared/stock_concurrency.py
+fastapi_app/services/purchase_plan_crud.py
+
+# === BOM 保存：按固定物料类别集合遍历（类别数固定）===
+fastapi_app/services/bom_service.py
+
+# === 供应商信息同步：按固定模型类集合遍历 ===
+fastapi_app/services/purchase_supplier_service.py
+
+# === 以下为"每组批查"模式（循环内已用 IN 批量查询，非逐条 N+1）===
+# staging_service.L760: 按 affected_order_ids IN 批量查（注释已标注避免N+1）
+fastapi_app/services/staging_service.py:760
+# purchase_order_crud.L358: 按 item_ids IN 批量预取（注释已标注避免N+1）
+fastapi_app/services/purchase_order_crud.py:358
+# order_batch_create.L74: 批量创建订单，每客户需独立 insert（业务必需）
+fastapi_app/services/order_batch_create.py:74
+# purchase_bom_copy_service.L35: 批量删除采购订单，每订单独立 delete（业务必需）
+fastapi_app/services/purchase_bom_copy_service.py:35
+# notification_service.L387: 按工厂分组派发通知，每工厂独立推送（业务必需）
+fastapi_app/services/notification_service.py:387

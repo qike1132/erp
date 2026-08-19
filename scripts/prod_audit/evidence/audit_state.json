@@ -1,0 +1,20 @@
+{
+  "audit_run_id": "audit-ae59a62d3103",
+  "current_layer": "L1",
+  "layer_states": {
+    "L1": {
+      "layer_id": "L1",
+      "layer_name": "静态分析门禁审核",
+      "status": "failed",
+      "issues": [],
+      "evidence_path": null,
+      "started_at": "2026-08-16T23:02:05.284247Z",
+      "finished_at": "2026-08-16T23:02:59.790979Z",
+      "error": "Failed to archive evidence for layer L1 to 'scripts\\prod_audit\\evidence\\gate_logs\\L1\\ruff.log': [Errno 2] No such file or directory: 'scripts\\\\prod_audit\\\\evidence\\\\gate_logs\\\\L1\\\\ruff.log'",
+      "layer_score": 0.0,
+      "weight": 0.1
+    }
+  },
+  "started_at": "2026-08-16T23:02:05.281909Z",
+  "last_updated": "2026-08-16T23:02:59.791046Z"
+}

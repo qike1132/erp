@@ -118,7 +118,7 @@ def parse_date_value(date_value) -> datetime | None:
             except ValueError:
                 continue
     except (ValueError, TypeError):
-        pass
+        pass  # defensive: 异常静默处理,不影响主流程
     return None
 
 

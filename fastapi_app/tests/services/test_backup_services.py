@@ -73,12 +73,12 @@ def test_service_interactions():
     """测试服务间交互"""
     # 测试服务可以相互导入而不冲突
     from fastapi_app.services.backup_alert_service import alert_service
-    from fastapi_app.services.backup_health_check_service import health_check_service
-    from fastapi_app.services.backup_policy_service import policy_service
-    from fastapi_app.services.backup_metrics_service import metrics_service
     from fastapi_app.services.backup_cleanup_service import cleanup_service
+    from fastapi_app.services.backup_health_check_service import health_check_service
+    from fastapi_app.services.backup_metrics_service import metrics_service
+    from fastapi_app.services.backup_policy_service import policy_service
     from fastapi_app.services.backup_recovery_test_service import recovery_test_service
-    
+
     assert alert_service is not None
     assert health_check_service is not None
     assert policy_service is not None
@@ -91,7 +91,7 @@ def test_config_loading():
     """测试配置加载"""
     import os
     from unittest.mock import patch
-    
+
     # 测试环境变量加载
     with patch.dict(os.environ, {
         'BACKUP_ALERT_FAILURE_THRESHOLD': '5',
@@ -102,19 +102,19 @@ def test_config_loading():
         'BACKUP_RECOVERY_TEST_FREQUENCY': '14'
     }):
         from fastapi_app.services.backup_alert_service import BackupAlertService
-        from fastapi_app.services.backup_health_check_service import BackupHealthCheckService
-        from fastapi_app.services.backup_policy_service import BackupPolicyService
-        from fastapi_app.services.backup_metrics_service import BackupMetricsService
         from fastapi_app.services.backup_cleanup_service import BackupCleanupService
+        from fastapi_app.services.backup_health_check_service import BackupHealthCheckService
+        from fastapi_app.services.backup_metrics_service import BackupMetricsService
+        from fastapi_app.services.backup_policy_service import BackupPolicyService
         from fastapi_app.services.backup_recovery_test_service import DisasterRecoveryTestService
-        
+
         alert_service = BackupAlertService()
         health_service = BackupHealthCheckService()
         policy_service = BackupPolicyService()
         metrics_service = BackupMetricsService()
         cleanup_service = BackupCleanupService()
         recovery_service = DisasterRecoveryTestService()
-        
+
         # 验证配置已加载
         assert alert_service.alert_config['failure_threshold'] == 5
         assert health_service.health_config['disk_space_threshold'] == 15.0

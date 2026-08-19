@@ -140,8 +140,8 @@ async def async_import_orders(
         shutil.copyfileobj(file.file, tmp)
         tmp_path = tmp.name
 
-    from fastapi_app.tasks.batch_tasks import batch_import_orders_task
     from fastapi_app.core.arq_app import get_arq_pool
+    from fastapi_app.tasks.batch_tasks import batch_import_orders_task
     pool = await get_arq_pool()
     job = await pool.enqueue_job(batch_import_orders_task.__name__, tmp_path, file.filename, current_user.id)
     task_id_str = job.job_id if job else ''
@@ -167,8 +167,8 @@ async def async_import_stockins(
         shutil.copyfileobj(file.file, tmp)
         tmp_path = tmp.name
 
-    from fastapi_app.tasks.batch_tasks import batch_import_stockins_task
     from fastapi_app.core.arq_app import get_arq_pool
+    from fastapi_app.tasks.batch_tasks import batch_import_stockins_task
     pool = await get_arq_pool()
     job = await pool.enqueue_job(batch_import_stockins_task.__name__, tmp_path, file.filename, current_user.id)
     task_id_str = job.job_id if job else ''
@@ -192,8 +192,8 @@ async def async_export_report(
     if request.report_type not in ("order", "stockin", "stockout", "deduction"):
         raise HTTPException(status_code=400, detail=f"不支持的报表类型: {request.report_type}")
 
-    from fastapi_app.tasks.report_tasks import export_report_task
     from fastapi_app.core.arq_app import get_arq_pool
+    from fastapi_app.tasks.report_tasks import export_report_task
 
     filters = {
         "customer": request.customer,
@@ -255,4 +255,4 @@ def _cleanup_file(file_path: str):
         if os.path.exists(file_path):
             os.unlink(file_path)
     except OSError:
-        pass
+        pass  # defensive: 异常静默处理,不影响主流程

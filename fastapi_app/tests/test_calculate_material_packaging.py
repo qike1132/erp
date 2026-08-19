@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from fastapi_app.services.purchase_product_service import calculate_material, aggregate_materials
+from fastapi_app.services.purchase_product_service import aggregate_materials, calculate_material
 
 
 class TestCalculateMaterialPackaging:

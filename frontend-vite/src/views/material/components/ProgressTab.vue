@@ -56,7 +56,7 @@
             <div class="mr-pbar-wrap"><div class="mr-pbar"><div :class="['mr-pfill', row.progress >= 100 ? 'completed' : 'pending']" :style="{ width: (row.progress || 0) + '%' }"></div></div><span class="mr-pbar-pct">{{ row.progress || 0 }}%</span></div>
           </template>
           <template #column-body-actions="{ row }">
-            <div class="mr-action-group"><button type="button" class="mr-action-btn mr-action-view" @click="emit('view-supplier', row.supplier_name || '', row.order_no)" title="查看供应商详情"><FontAwesomeIcon icon="eye" /></button></div>
+            <div class="mr-action-group"><button type="button" class="mr-action-btn mr-action-view" @click="emit('view-supplier', row.supplier_name || '', row.order_no)" title="查看供应商详情" aria-label="查看供应商详情"><FontAwesomeIcon icon="eye" /></button></div>
           </template>
         </UiDataTable>
       </div>

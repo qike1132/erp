@@ -8,8 +8,9 @@
 - 审批拒绝
 - 待审批数量统计
 """
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 
 class TestApprovalService:

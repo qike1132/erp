@@ -1,6 +1,7 @@
 """诊断 DB 中各 head 迁移对应的 schema 元素"""
-from fastapi_app.core.database import get_sync_engine
 from sqlalchemy import text
+
+from fastapi_app.core.database import get_sync_engine
 
 eng = get_sync_engine()
 conn = eng.connect()

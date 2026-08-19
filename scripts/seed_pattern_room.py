@@ -17,12 +17,12 @@ import asyncio
 import random
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from sqlalchemy import select, func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import _AsyncSessionLocal, _init_async_engine
@@ -114,7 +114,7 @@ async def seed_pattern_room(session: AsyncSession, count: int, maker_name: str |
         makers = await _ensure_makers(session, min(8, count))
     else:
         makers = None
-    today = datetime.now(timezone.utc)
+    today = datetime.now(UTC)
 
     stats = {'projects': 0, 'parts': 0, 'roles': 0, 'versions': 0}
     base_date = today - timedelta(days=90)

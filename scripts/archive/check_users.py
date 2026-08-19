@@ -1,6 +1,9 @@
 import asyncio
+
 from sqlalchemy import text
-from fastapi_app.core.database import _init_async_engine, _AsyncSessionLocal
+
+from fastapi_app.core.database import _AsyncSessionLocal, _init_async_engine
+
 
 async def main():
     _init_async_engine()

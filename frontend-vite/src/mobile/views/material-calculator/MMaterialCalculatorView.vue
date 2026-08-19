@@ -2,7 +2,7 @@
   <div class="m-page">
     <MobileNavBar title="物料计算器" :show-back="true">
       <template #right>
-        <button class="m-nav-btn" @click="handleCalculate" :disabled="calculating">
+        <button class="m-nav-btn" @click="handleCalculate" :disabled="calculating" :aria-label="calculating ? '计算中...' : '计算'">
           {{ calculating ? '计算中...' : '计算' }}
         </button>
       </template>

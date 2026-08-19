@@ -7,7 +7,7 @@
 4. 异常响应 request_id 与响应头一致
 5. rebuild_pool 后慢查询监听器重新注册
 """
-import asyncio
+import contextlib
 import os
 import sys
 import threading
@@ -20,7 +20,7 @@ class TestSlowQueryLogger:
 
     def test_slow_query_counter_thread_safety(self):
         """测试计数器线程安全"""
-        from fastapi_app.core.slow_query import _counter, reset_slow_query_count, get_slow_query_count
+        from fastapi_app.core.slow_query import _counter, get_slow_query_count, reset_slow_query_count
 
         reset_slow_query_count()
 
@@ -39,7 +39,7 @@ class TestSlowQueryLogger:
 
     def test_reset_slow_query_count(self):
         """测试计数器重置"""
-        from fastapi_app.core.slow_query import _counter, reset_slow_query_count, get_slow_query_count
+        from fastapi_app.core.slow_query import _counter, get_slow_query_count, reset_slow_query_count
 
         _counter.inc()
         _counter.inc()
@@ -49,7 +49,7 @@ class TestSlowQueryLogger:
 
     def test_get_threshold(self):
         """测试按语句类型返回阈值"""
-        from fastapi_app.core.slow_query import _get_threshold, SLOW_QUERY_THRESHOLD, SLOW_QUERY_REPORT_THRESHOLD
+        from fastapi_app.core.slow_query import SLOW_QUERY_REPORT_THRESHOLD, SLOW_QUERY_THRESHOLD, _get_threshold
 
         assert _get_threshold("SELECT * FROM orders WHERE id = $1") == SLOW_QUERY_THRESHOLD
         assert _get_threshold("SELECT COUNT(*) FROM orders GROUP BY status") == SLOW_QUERY_REPORT_THRESHOLD
@@ -62,9 +62,10 @@ class TestRequestIdMiddleware:
 
     def test_response_has_request_id_header(self):
         """测试响应包含 X-Request-ID 头"""
-        from fastapi.testclient import TestClient
         from fastapi import FastAPI
         from fastapi.responses import JSONResponse
+        from fastapi.testclient import TestClient
+
         from fastapi_app.core.middleware import setup_middleware
 
         app = FastAPI()
@@ -83,9 +84,10 @@ class TestRequestIdMiddleware:
 
     def test_request_id_propagates_from_header(self):
         """测试请求头传入的 X-Request-ID 被复用"""
-        from fastapi.testclient import TestClient
         from fastapi import FastAPI, Request
         from fastapi.responses import JSONResponse
+        from fastapi.testclient import TestClient
+
         from fastapi_app.core.middleware import setup_middleware
 
         app = FastAPI()
@@ -105,16 +107,12 @@ class TestRequestIdMiddleware:
 
     def test_error_response_request_id_matches_header(self):
         """测试异常响应中的 request_id 与响应头一致"""
-        from fastapi.testclient import TestClient
-        from fastapi import FastAPI, HTTPException
-        from fastapi.responses import JSONResponse
-        from fastapi_app.core.middleware import setup_middleware
-        from fastapi_app.core.exceptions import (
-            AppError, BusinessError, current_iso_timestamp, new_request_id
-        )
-        from fastapi_app.core.logger import logger
-        from msgspec import Struct
+        from fastapi import FastAPI
         from fastapi.responses import JSONResponse as _JSONResp
+        from fastapi.testclient import TestClient
+
+        from fastapi_app.core.exceptions import AppError, BusinessError, current_iso_timestamp, new_request_id
+        from fastapi_app.core.middleware import setup_middleware
 
         class MsgspecResponse(_JSONResp):
             media_type = "application/json"
@@ -167,10 +165,9 @@ class TestDatabaseSlowQueryRegistration:
     def test_slow_query_setup_function_exists(self):
         """测试 slow_query 模块导出必要函数"""
         from fastapi_app.core.slow_query import (
-            setup_slow_query_listener,
             get_slow_query_count,
             reset_slow_query_count,
-            _get_threshold,
+            setup_slow_query_listener,
         )
         assert callable(setup_slow_query_listener)
         assert callable(get_slow_query_count)
@@ -180,10 +177,12 @@ class TestDatabaseSlowQueryRegistration:
 
     def test_rebuild_pool_registers_listeners(self):
         """测试 setup_slow_query_listener 函数可正常调用（验证不抛出异常）"""
-        from fastapi_app.core.slow_query import setup_slow_query_listener
-        from sqlalchemy import create_engine
-        import tempfile
         import os
+        import tempfile
+
+        from sqlalchemy import create_engine
+
+        from fastapi_app.core.slow_query import setup_slow_query_listener
 
         with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
             db_path = f.name
@@ -196,14 +195,13 @@ class TestDatabaseSlowQueryRegistration:
         finally:
             if engine is not None:
                 engine.dispose()
-            try:
+            with contextlib.suppress(PermissionError, OSError):
                 os.unlink(db_path)
-            except (PermissionError, OSError):
-                pass
 
     def test_database_rebuild_pool_re_registers(self):
         """测试 database.py 中 rebuild_pool 能访问 setup_slow_query_listener"""
         import inspect
+
         from fastapi_app.core import database
         source = inspect.getsource(database.rebuild_pool)
         assert "setup_slow_query_listener" in source, "rebuild_pool 应重新注册慢查询监听器"

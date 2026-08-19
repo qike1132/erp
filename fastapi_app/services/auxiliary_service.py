@@ -7,8 +7,9 @@
 包含：批量订单/入库/出库提交的完整编排（创建 + 缓存失效 + 事件发布）。
 """
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
+from fastapi import HTTPException
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,7 +17,9 @@ from sqlalchemy.orm import joinedload
 
 from fastapi_app.core.cache import CacheDomain
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
-from fastapi_app.core.domain_events import DomainEvent, DomainEventType, publish as publish_domain_event
+from fastapi_app.core.config import settings
+from fastapi_app.core.domain_events import DomainEvent, DomainEventType
+from fastapi_app.core.domain_events import publish as publish_domain_event
 from fastapi_app.core.exception_handler import safe_publish_event
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.sanitizer import escape_like
@@ -107,7 +110,7 @@ async def orchestrate_batch_stockouts(db: AsyncSession, stockouts_data: list[dic
                 select(Product.id, Product.name).where(Product.id.in_(unique_product_ids))
             )
             product_name_map = {row[0]: row[1] for row in product_result.all()}
-            now_month = datetime.now(timezone.utc).strftime('%Y-%m')
+            now_month = datetime.now(UTC).strftime('%Y-%m')
             for product_id, customer in successful_pairs:
                 product_name = product_name_map.get(product_id, '')
                 if product_name:
@@ -156,7 +159,7 @@ async def search_products_by_keyword(db: AsyncSession, query_str: str) -> list[P
     """产品搜索（支持名称、条码，限制 50 条）"""
     result = await db.execute(
         select(Product).where(
-            or_(Product.name.like(f'%{escape_like(query_str)}%'), Product.barcode.like(f'%{escape_like(query_str)}%'))
+            or_(Product.name.like(f'%{escape_like(query_str)}%'), Product.barcode.like(f'%{escape_like(query_str)}%'))  # sql-safe: escape_like/绑定参数/常量片段
         ).limit(50)
     )
     return list(result.scalars().all())
@@ -241,3 +244,91 @@ async def get_country_by_id(db: AsyncSession, country_id: int) -> Country | None
     """按 ID 查找国家"""
     result = await db.execute(select(Country).where(Country.id == country_id))
     return result.scalar_one_or_none()
+
+
+# ==================== 写操作（自 auxiliary.py 端点下沉） ====================
+
+async def delete_supplier(db: AsyncSession, supplier_id: int) -> None:
+    """删除供应商（含 BOM/采购订单关联检查）。
+
+    Args:
+        db: 异步数据库会话。
+        supplier_id: 供应商 ID。
+
+    Raises:
+        HTTPException: 404 供应商不存在；400 存在关联数据；500 删除失败。
+    """
+    try:
+        async with db_transaction(db):
+            supplier = await get_supplier_by_id(db, supplier_id)
+            if not supplier:
+                raise HTTPException(status_code=404, detail="供应商不存在")
+
+            if await supplier_has_bom_or_orders(db, supplier_id):
+                raise HTTPException(status_code=400, detail="该供应商已有相关BOM或采购订单数据，无法删除")
+
+            await db.delete(supplier)
+    except HTTPException:
+        raise
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail=f"删除失败: {settings.sanitize_error(e)}") from e
+
+
+async def create_country(db: AsyncSession, name: str) -> Country:
+    """创建国家。
+
+    Args:
+        db: 异步数据库会话。
+        name: 国家名称（已 strip）。
+
+    Returns:
+        Country: 创建后的国家对象（含 ID）。
+
+    Raises:
+        HTTPException: 400 名称为空；409 国家已存在。
+    """
+    if not name:
+        raise HTTPException(status_code=400, detail="国家名称不能为空")
+    if await get_country_by_name(db, name):
+        raise HTTPException(status_code=409, detail="该国家已存在")
+    country = Country(name=name)
+    db.add(country)
+    await db.flush()
+    await db.refresh(country)
+    return country
+
+
+async def delete_country(db: AsyncSession, country_id: int) -> None:
+    """删除国家。
+
+    Args:
+        db: 异步数据库会话。
+        country_id: 国家 ID。
+
+    Raises:
+        HTTPException: 404 国家不存在。
+    """
+    country = await get_country_by_id(db, country_id)
+    if not country:
+        raise HTTPException(status_code=404, detail="国家不存在")
+    await db.delete(country)
+
+
+async def get_system_stats() -> dict:
+    """获取系统统计信息（缓存命中率/性能数据）。
+
+    Returns:
+        dict: 包含 cache 和 performance 统计的字典。
+    """
+    try:
+        from utils.performance_monitor import performance_monitor, query_tracker
+
+        return {
+            'cache': {},
+            'performance': {
+                **performance_monitor.get_stats(),
+                'queries': query_tracker.get_stats()
+            }
+        }
+    except ImportError:
+        return {'cache': {}, 'performance': {}}

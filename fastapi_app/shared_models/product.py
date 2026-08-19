@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, Index, Integer, Numeric, String, desc
@@ -35,8 +35,8 @@ class Product(Base):
     initial_stock: Mapped[int] = mapped_column(Integer, default=0, comment='初始库存')
     current_stock: Mapped[int] = mapped_column(Integer, default=0, comment='当前库存')
     version: Mapped[int] = mapped_column(Integer, default=0, server_default='0', comment='乐观锁版本号')
-    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True, comment='创建时间')
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True, comment='创建时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 
 
     __table_args__ = (
@@ -49,18 +49,18 @@ class Product(Base):
     )
 
     # 皮套关联（由 Case 模型 backref 自动创建，此处显式声明以确保类型检查）
-    cases: Mapped[list["Case"]] = relationship("Case", back_populates="product")
+    cases: Mapped[list[Case]] = relationship("Case", back_populates="product")
 
     # BOM 物料关联（lazy="raise" 强制显式 selectinload，避免不需要 BOM 的查询产生 N+1）
-    material: Mapped["ProductMaterial | None"] = relationship(
+    material: Mapped[ProductMaterial | None] = relationship(
         "ProductMaterial", back_populates="product", uselist=False, cascade="all, delete-orphan",
         lazy="raise",
     )
-    fabrics: Mapped[list["ProductFabric"]] = relationship(
+    fabrics: Mapped[list[ProductFabric]] = relationship(
         "ProductFabric", back_populates="product", cascade="all, delete-orphan",
         lazy="raise",
     )
-    accessories: Mapped[list["ProductAccessory"]] = relationship(
+    accessories: Mapped[list[ProductAccessory]] = relationship(
         "ProductAccessory", back_populates="product", cascade="all, delete-orphan",
         lazy="raise",
     )

@@ -8,9 +8,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-from fastapi_app.core.config import settings
 import psycopg
 
+from fastapi_app.core.config import settings
 
 INDEXES = [
     {

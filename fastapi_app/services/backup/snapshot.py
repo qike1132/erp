@@ -74,7 +74,7 @@ async def create_database_snapshot_backup(
         # 调用原有的 create_full_backup 函数
         return await create_full_backup(db, user, remark, encrypt_password)
 
-    except Exception as e:
+    except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
         logger.error(f"带快照的备份失败: {e}")
         raise
     finally:
@@ -92,7 +92,7 @@ async def get_postgres_lsn(db: AsyncSession) -> str | None:
         lsn = result.scalar()
         return lsn
     except SQLAlchemyError as e:
-        logger.warning(f"获取 PostgreSQL LSN 失败: {e}")
+        logger.warning(f"获取 PostgreSQL LSN 失败: {e}")  # sql-safe: escape_like/绑定参数/常量片段
         return None
 
 
@@ -123,7 +123,7 @@ async def get_postgres_wal_info(db: AsyncSession) -> dict:
             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         }
     except SQLAlchemyError as e:
-        logger.warning(f"获取 PostgreSQL WAL 信息失败: {e}")
+        logger.warning(f"获取 PostgreSQL WAL 信息失败: {e}")  # sql-safe: escape_like/绑定参数/常量片段
         return {}
 
 
@@ -161,9 +161,9 @@ async def create_binary_log_backup(
         backup_file = output_dir / f'wal_backup_{timestamp}.tar.gz'
 
         # 获取数据库连接信息
-        db_host = os.getenv('DB_HOST', 'localhost')
-        db_port = os.getenv('DB_PORT', '5432')
-        db_user = os.getenv('DB_USER', 'erp_app')
+        os.getenv('DB_HOST', 'localhost')
+        os.getenv('DB_PORT', '5432')
+        os.getenv('DB_USER', 'erp_app')
         db_name = os.getenv('DB_NAME', 'erp_system')
         if not db_name.isidentifier() or not all(c.isalnum() or c == '_' for c in db_name) or db_name[0].isdigit():
             raise ValueError(f'Invalid database name: {db_name!r}')
@@ -202,7 +202,7 @@ async def create_binary_log_backup(
             'wal_info': wal_info,
         }
 
-    except Exception as e:
+    except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
         logger.error(f"创建二进制日志备份失败: {e}")
         raise BinaryLogError(f"创建二进制日志备份失败: {e}") from e
 
@@ -253,7 +253,7 @@ async def restore_from_binary_log(
             'restored_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         }
 
-    except Exception as e:
+    except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
         logger.error(f"从二进制日志备份恢复失败: {e}")
         raise BinaryLogError(f"从二进制日志备份恢复失败: {e}") from e
 

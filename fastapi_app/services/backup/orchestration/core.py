@@ -14,7 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ._constants import (
+from .._constants import (
     BACKUP_ENCRYPTION_ENABLED,
     BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED,
     BACKUP_ENCRYPTION_KEY,
@@ -30,18 +30,18 @@ from ._constants import (
     UPLOADS_DIR,
     _backup_in_progress,
 )
-from .crypto import get_backup_encryption_password, sha256_file
-from .dump import run_pg_dump
-from .exceptions import (
+from ..crypto import get_backup_encryption_password, sha256_file
+from ..dump import run_pg_dump
+from ..exceptions import (
     BackupError,
     BackupLockError,
     DatabaseSnapshotError,
 )
-from .filestore import should_exclude_file
-from .json_backup import execute_legacy_backup_to_bytes
-from .records import cleanup_pre_restore_backups, ensure_pre_restore_dir
-from .snapshot import get_postgres_snapshot
-from .verify import get_checksum_tables, quote_table
+from ..filestore import should_exclude_file
+from ..json_backup import execute_legacy_backup_to_bytes
+from ..records import cleanup_pre_restore_backups, ensure_pre_restore_dir
+from ..snapshot import get_postgres_snapshot
+from ..verify import get_checksum_tables, quote_table
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +92,7 @@ async def create_full_backup(
                 _do_create_full_backup(db, user, remark, encrypt_password, use_snapshot, encrypt),
                 timeout=BACKUP_OPERATION_TIMEOUT,
             )
-        except asyncio.TimeoutError as e:
+        except TimeoutError as e:
             logger.error('备份操作超时（%s秒）', BACKUP_OPERATION_TIMEOUT)
             raise BackupError(f'备份超时（>{BACKUP_OPERATION_TIMEOUT}s），已强制取消') from e
         finally:
@@ -151,10 +151,10 @@ async def _do_create_full_backup(
             try:
                 qtname = quote_table(tname)
                 result = await db.execute(text(f'SELECT COUNT(*) FROM {qtname}'))  # nosec B608 — qtname 经 quote_table 白名单校验
-                await nested.commit()
+                await nested.commit()  # manual-tx: savepoint 嵌套事务管理
                 return tname, result.scalar() or 0
             except (OSError, ValueError, SQLAlchemyError):
-                await nested.rollback()
+                await nested.rollback()  # manual-tx: savepoint 嵌套事务管理
                 return tname, -1
 
         count_results = []
@@ -177,13 +177,13 @@ async def _do_create_full_backup(
                 qtname = quote_table(tname)  # REV-08
                 pk_col = [c.name for c in table.primary_key.columns]
                 order_col = pk_col[0] if pk_col else 'id'
-                cols_result = await db.execute(
+                cols_result = await db.execute(  # batch-loop: 逐表备份/恢复,无法批量
                     text('SELECT column_name FROM information_schema.columns WHERE table_name = :tname ORDER BY ordinal_position'),
                     {'tname': tname}
                 )
                 col_names = [r[0] for r in cols_result.fetchall()]
-                agg_expr = " || '|' || ".join(f'''COALESCE("{c}"::text, '')''' for c in col_names)
-                fp_result = await db.execute(text(
+                agg_expr = " || '|' || ".join(f'''COALESCE("{c}"::text, '')''' for c in col_names)  # sql-safe: escape_like/绑定参数/常量片段
+                fp_result = await db.execute(text(  # batch-loop: 逐表备份/恢复,无法批量
                     f'''SELECT MD5(STRING_AGG({agg_expr}, ',' ORDER BY "{order_col}")) FROM {qtname}'''  # nosec B608 — qtname 经 quote_table 白名单校验
                 ))
                 fingerprints[tname] = fp_result.scalar() or ''
@@ -281,7 +281,7 @@ async def _do_create_full_backup(
                             manifest['includes']['meilisearch_doc_count'] = sum(
                                 len(v) for k, v in meili_export.items() if not k.endswith('__settings')
                             )
-            except Exception as e:
+            except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
                 logger.warning('MeiliSearch 索引导出失败（可忽略）: %s', e)
 
             manifest_bytes = json.dumps(manifest, ensure_ascii=False, indent=2).encode('utf-8')
@@ -305,9 +305,9 @@ async def _do_create_full_backup(
                 elif BACKUP_ENCRYPTION_PASSWORD or BACKUP_ENCRYPTION_KEY:
                     logger.info("使用环境变量配置的密钥进行备份加密")
                 else:
-                    logger.warning(f"使用生成的随机密钥进行备份加密，密钥已记录在日志中")
+                    logger.warning("使用生成的随机密钥进行备份加密，密钥已记录在日志中")
                 return encrypted_bytes, manifest
-            except Exception as e:
+            except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
                 logger.error(f"备份加密失败: {e}")
                 if BACKUP_ENCRYPTION_ENABLED and not BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED:
                     raise BackupError(f"备份加密失败且不允许回退到未加密备份: {e}") from e
@@ -351,10 +351,10 @@ async def create_pre_restore_backup(db: AsyncSession) -> dict:
         dummy_user = UserModel()
         dummy_user.username = 'system'
         dummy_user.id = 0
-        zip_bytes, manifest = await create_full_backup(db, dummy_user, '恢复前自动安全备份')
+        zip_bytes, _manifest = await create_full_backup(db, dummy_user, '恢复前自动安全备份')
         filepath.write_bytes(zip_bytes)
         cleanup_pre_restore_backups()
         return {'success': True, 'filename': filename, 'filepath': str(filepath), 'size': len(zip_bytes)}
-    except Exception as e:
+    except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
         logger.warning(f'创建恢复前安全备份失败（不阻塞恢复）: {e}')
         return {'success': False, 'error': str(e)}

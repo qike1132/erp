@@ -9,6 +9,7 @@ import {
   type UseRealTimeSyncOptions,
   type UseRealTimeSyncReturn,
 } from '@/types/realtimeSync'
+import { devLog } from '@/utils/devLog'
 
 const isCap = !!import.meta.env.VITE_CAPACITOR
 
@@ -114,7 +115,7 @@ export function useRealTimeSync(options: UseRealTimeSyncOptions = {}): UseRealTi
         state.reconnectAttempts = 0
         state.error = null
         setStatus('connected')
-        console.log('[RealTimeSync] WebSocket connected')
+        devLog('[RealTimeSync] WebSocket connected')
       }
 
       ws.onmessage = (event) => {

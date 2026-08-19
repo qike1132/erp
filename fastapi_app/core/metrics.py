@@ -26,10 +26,10 @@ except ImportError:
         def observe(self, value):
             pass
 
-    Counter = Histogram = Gauge = _NoOpMetric
+    Counter = Histogram = Gauge = _NoOpMetric  # type: ignore[misc,assignment]
     CONTENT_TYPE_LATEST = "text/plain"
 
-    def generate_latest():
+    def generate_latest() -> bytes:  # type: ignore[misc]
         return b""
 
 
@@ -39,7 +39,7 @@ except ImportError:
 def _get_or_create_counter(name, doc, labelnames=None):
     """获取或创建 Counter，避免热重载时 ValueError: Duplicated timeseries"""
     if not METRICS_AVAILABLE:
-        return Counter()
+        return _NoOpMetric()  # type: ignore[return-value]
     from prometheus_client import REGISTRY
     try:
         return Counter(name, doc, labelnames or [])
@@ -53,7 +53,7 @@ def _get_or_create_counter(name, doc, labelnames=None):
 def _get_or_create_histogram(name, doc, labelnames=None, buckets=None):
     """获取或创建 Histogram，避免热重载时 ValueError: Duplicated timeseries"""
     if not METRICS_AVAILABLE:
-        return Histogram()
+        return _NoOpMetric()  # type: ignore[return-value]
     from prometheus_client import REGISTRY
     kwargs = {}
     if buckets:
@@ -69,7 +69,7 @@ def _get_or_create_histogram(name, doc, labelnames=None, buckets=None):
 def _get_or_create_gauge(name, doc, labelnames=None):
     """获取或创建 Gauge，避免热重载时 ValueError: Duplicated timeseries"""
     if not METRICS_AVAILABLE:
-        return Gauge()
+        return _NoOpMetric()  # type: ignore[return-value]
     from prometheus_client import REGISTRY
     try:
         return Gauge(name, doc, labelnames or [])
@@ -182,6 +182,60 @@ PERM_CACHE_MISSES = _get_or_create_counter(
 USER_ACTIVE_CACHE_SIZE = _get_or_create_gauge(
     'erp_user_active_cache_size',
     '用户活跃状态缓存当前大小'
+)
+
+
+# ==================== 系统资源指标 ====================
+
+SYSTEM_CPU_USAGE = _get_or_create_gauge(
+    'system_cpu_usage_percent',
+    'CPU使用率(百分比)'
+)
+
+SYSTEM_MEMORY_USAGE = _get_or_create_gauge(
+    'system_memory_usage_percent',
+    '内存使用率(百分比)'
+)
+
+SYSTEM_DISK_USAGE = _get_or_create_gauge(
+    'system_disk_usage_percent',
+    '磁盘使用率(百分比)'
+)
+
+CONNECTION_POOL_UTILIZATION = _get_or_create_gauge(
+    'connection_pool_utilization_percent',
+    '连接池使用率(百分比)'
+)
+
+# ==================== 业务关键指标 ====================
+
+ERROR_RATE = _get_or_create_gauge(
+    'error_rate',
+    '错误率(请求错误数/总请求数)'
+)
+
+RESPONSE_TIME_P95 = _get_or_create_histogram(
+    'response_time_p95_seconds',
+    'P95响应时间(秒)',
+    ['endpoint'],
+    buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0]
+)
+
+ORDER_COUNT = _get_or_create_counter(
+    'order_count_total',
+    '订单总数',
+    ['status']
+)
+
+STOCK_LEVEL = _get_or_create_gauge(
+    'stock_level_current',
+    '当前库存水平',
+    ['product_id']
+)
+
+BACKUP_STATUS = _get_or_create_gauge(
+    'backup_status',
+    '备份状态(0=失败 1=成功 2=进行中)'
 )
 
 

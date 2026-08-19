@@ -1,6 +1,6 @@
 """解析 pytest junit XML 并输出回归测试摘要"""
-import xml.etree.ElementTree as ET
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 xml_path = Path(__file__).resolve().parent.parent / 'regression_report.xml'
@@ -8,7 +8,7 @@ if not xml_path.exists():
     print('regression_report.xml not found')
     sys.exit(1)
 
-tree = ET.parse(xml_path)
+tree = ET.parse(xml_path)  # noqa: S314 解析自生成的 junit 报告，非外部数据
 root = tree.getroot()
 stats = root.attrib
 

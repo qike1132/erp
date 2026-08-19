@@ -3,7 +3,7 @@
   <UiDialog :open="permDialogVisible" title="分配权限" max-width-class="max-w-[640px]" @update:open="permDialogVisible = $event">
     <div class="us-perm-header">
       <div class="us-perm-user">{{ permTargetName }}</div>
-      <button class="us-perm-toggle-all" @click="toggleAllPerms">{{ permIsAllChecked ? '取消全选' : '全选' }}</button>
+      <button class="us-perm-toggle-all" @click="toggleAllPerms" :aria-label="permIsAllChecked ? '取消全选' : '全选'">{{ permIsAllChecked ? '取消全选' : '全选' }}</button>
     </div>
     <div class="us-perm-tree">
       <div v-for="sec in permissionSections" :key="sec.key" class="us-perm-section">
@@ -28,8 +28,8 @@
       </div>
     </div>
     <template #footer>
-      <button class="us-action-btn" @click="permDialogVisible = false">取消</button>
-      <button class="us-action-btn us-action-primary" :disabled="permSubmitting" @click="handleSavePermission">
+      <button class="us-action-btn" @click="permDialogVisible = false" aria-label="取消">取消</button>
+      <button class="us-action-btn us-action-primary" :disabled="permSubmitting" @click="handleSavePermission" :aria-label="permSubmitting ? '保存中…' : '保存'">
         {{ permSubmitting ? '保存中…' : '保存' }}
       </button>
     </template>

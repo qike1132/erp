@@ -3,7 +3,6 @@ Locust 压力测试脚本 - ERP系统API
 """
 from locust import HttpUser, between, task
 
-
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "admin123"
 

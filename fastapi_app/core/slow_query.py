@@ -106,8 +106,8 @@ def setup_slow_query_listener(engine):
             try:
                 from fastapi_app.core.metrics import SLOW_QUERY_TOTAL
                 SLOW_QUERY_TOTAL.inc()
-            except (ImportError, ValueError, Exception):
-                pass
+            except (ImportError, ValueError, Exception):  # broad-except: 慢查询监控容错，不影响业务逻辑
+                logger.debug('慢查询计数器指标更新失败', exc_info=True)
 
 
 def get_slow_query_count() -> int:

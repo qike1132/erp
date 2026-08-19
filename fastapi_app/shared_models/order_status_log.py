@@ -1,7 +1,7 @@
 """
 订单状态日志模型 - 纯 SQLAlchemy 2.0 声明式
 """
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -23,11 +23,11 @@ class OrderStatusLog(Base):
     action_label: Mapped[str | None] = mapped_column(String(100), comment='操作标签(中文)')
     operator_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id'), comment='操作人ID')
     operator_name: Mapped[str | None] = mapped_column(String(100), comment='操作人姓名')
-    action_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True, comment='操作时间')
+    action_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True, comment='操作时间')
     action_result: Mapped[str | None] = mapped_column(String(20), default='success', comment='操作结果: success/failed')
     remark: Mapped[str | None] = mapped_column(Text, comment='备注说明')
     related_data: Mapped[str | None] = mapped_column(Text, comment='关联数据JSON')
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 
     __table_args__ = (
         Index('idx_status_target', 'target_type', 'target_id'),

@@ -5,8 +5,8 @@
     from fastapi_app.services.backup_service import create_full_backup
     from fastapi_app.services.backup_service import BACKUP_DIR, ensure_backup_dir, quote_table
 """
-from fastapi_app.services.backup import *  # noqa: F401,F403
-from fastapi_app.services.backup import __all__ as _backup_all  # noqa: F401
+from fastapi_app.services.backup import *  # noqa: F403
+from fastapi_app.services.backup import __all__ as _backup_all
 
 # 重新导出 __all__，确保 from backup_service import * 可用
 __all__ = _backup_all

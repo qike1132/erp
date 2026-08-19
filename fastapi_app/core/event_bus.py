@@ -11,7 +11,7 @@ from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS
 logger = logging.getLogger(__name__)
 
 
-async def safe_publish_event(event_type: str, data: dict, fcm_title: str = None, fcm_body: str = None):
+async def safe_publish_event(event_type: str, data: dict, fcm_title: str | None = None, fcm_body: str | None = None):
     """安全发布库存事件（WebSocket + FCM），同时通过领域事件总线发布解耦事件
 
     调用链：
@@ -28,8 +28,9 @@ async def safe_publish_event(event_type: str, data: dict, fcm_title: str = None,
 
     # 通过领域事件总线发布，实现跨域通信解耦
     # 事件映射：StockEvent → DomainEventType
+    from fastapi_app.core.domain_events import DomainEvent, DomainEventType
+    from fastapi_app.core.domain_events import publish as publish_domain_event
     from fastapi_app.services.notification_service import StockEvent
-    from fastapi_app.core.domain_events import DomainEvent, DomainEventType, publish as publish_domain_event
 
     _stock_to_domain_map = {
         StockEvent.ORDER_CREATED: DomainEventType.ORDER_CREATED,

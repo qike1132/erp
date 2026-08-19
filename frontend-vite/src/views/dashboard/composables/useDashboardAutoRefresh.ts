@@ -5,16 +5,15 @@
  * 等模块实时显示。逻辑自 DashboardView.vue 原样搬移；
  * 启动/停止由组件生命周期接线（onUnmounted 清理 refreshTimer）。
  */
+import { devLog } from '@/utils/devLog'
+
 export function useDashboardAutoRefresh(onTick: () => void) {
   let refreshTimer: ReturnType<typeof setInterval> | null = null
 
   /** 启动自动刷新（每 30 秒） */
   function startAutoRefresh() {
     refreshTimer = setInterval(() => {
-      if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
-        console.log('[Dashboard] 自动刷新数据...')
-      }
+      devLog('[Dashboard] 自动刷新数据...')
       onTick()
     }, 30 * 1000)
   }

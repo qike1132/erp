@@ -117,7 +117,7 @@ def calculate_available_shipment_quantity(
 
 def create_stockin(session: Session, product_id: int, quantity: int,
                    customer: str, stockin_date: datetime, note: str,
-                   stockin_no: str = None) -> StockIn:
+                   stockin_no: str | None = None) -> StockIn:
     """
     创建入库记录，同时更新库存和写入日志。
     不做 commit，由调用方控制事务。
@@ -220,7 +220,7 @@ def delete_stockin(session: Session, stockin: StockIn) -> None:
 def create_stockout(session: Session, product_id: int, quantity: int,
                     customer: str, stockout_date: datetime, note: str,
                     order_type: str = 'regular',
-                    country: str = None) -> list[StockOut]:
+                    country: str | None = None) -> list[StockOut]:
     """
     创建出库记录（含 FIFO 订单分配），扣减库存和写入日志。
     不做 commit，由调用方控制事务。

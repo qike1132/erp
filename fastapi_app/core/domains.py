@@ -16,10 +16,10 @@ ERP系统领域边界定义
 9. 报表域(report) - 跨域只读聚合，依赖所有业务域
 """
 
-from enum import Enum
+from enum import StrEnum
 
 
-class Domain(str, Enum):
+class Domain(StrEnum):
     AUTH = 'auth'
     PRODUCT = 'product'
     INVENTORY = 'inventory'

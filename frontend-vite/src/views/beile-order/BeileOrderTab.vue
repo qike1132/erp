@@ -5,10 +5,10 @@
     <!-- 表格区 -->
     <div class="bo-card-main">
       <!-- 确认状态筛选（未确认/已确认 TAB）已合并到 HubeiView 头部搜索栏位置 -->
-      <!-- 湖北新订单未确认提醒横幅（全局未确认订单数，不受分页/筛选影响） -->
+      <!-- 湖北未确认提醒横幅（全局未确认订单+备货数，不受分页/筛选影响） -->
       <div v-if="unconfirmedCount > 0" class="bo-unconfirmed-banner">
         <FontAwesomeIcon icon="exclamation-triangle" aria-hidden="true" />
-        <span>湖北新订单提醒：共有 <strong>{{ unconfirmedCount }}</strong> 个订单待确认，请及时确认</span>
+        <span>湖北待确认提醒：共有 <strong>{{ unconfirmedCount }}</strong> 条记录（订单+备货）待确认，请及时确认</span>
       </div>
       <div v-if="isLoading && orders.length === 0" class="bo-empty">
         <UiSpinner />

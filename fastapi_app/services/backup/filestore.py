@@ -5,9 +5,9 @@ import logging
 import zipfile
 
 from ._constants import (
+    _SENSITIVE_AND_EXCLUDED_FILES,
     CONFIG_DIR,
     UPLOADS_DIR,
-    _SENSITIVE_AND_EXCLUDED_FILES,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,12 +41,12 @@ def should_exclude_file(file_path, relative_path: str) -> bool:
             logger.warning(f"文件过大，跳过备份: {relative_path} ({file_path.stat().st_size} bytes)")
             return True
     except OSError:
-        pass
+        pass  # defensive: 异常静默处理,不影响主流程
 
     return False
 
 
-def restore_filestore(zf: zipfile.ZipFile) -> dict:
+def restore_filestore(zf: zipfile.ZipFile) -> dict:  # log-context: internal helper 无请求上下文
     """恢复附件文件到 static/uploads/"""
     restored = 0
     errors = []
@@ -72,7 +72,7 @@ def restore_filestore(zf: zipfile.ZipFile) -> dict:
     return {'status': 'ok' if not errors else 'partial', 'restored': restored, 'errors': errors}
 
 
-def restore_config(zf: zipfile.ZipFile, confirm_sensitive: bool = False) -> dict:
+def restore_config(zf: zipfile.ZipFile, confirm_sensitive: bool = False) -> dict:  # log-context: internal helper 无请求上下文
     """恢复配置文件到 config/ 目录（REV-09: 敏感文件白名单校验）"""
     restored = []
     errors = []

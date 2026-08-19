@@ -75,9 +75,9 @@
             <div class="bk-col-title"><FontAwesomeIcon icon="upload" /> 一键恢复</div>
             <FileRestorePanel
               :selected-file="selectedFile"
-              :validation-result="validationResult"
+              :validation-result="validationResultTyped"
               :importing="importing"
-              :restore-result="restoreResult"
+              :restore-result="restoreResultTyped"
               :restore-task-id="restoreTaskId"
               :missing-tables="missingTables"
               @file-select="setFile"
@@ -133,7 +133,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import BackupRecordList from '@/components/backup/BackupRecordList.vue'
 import BackupModeSelector from '@/components/backup/BackupModeSelector.vue'
 import FileRestorePanel from '@/components/backup/FileRestorePanel.vue'
@@ -141,6 +141,8 @@ import IntegrityCheckPanel from '@/components/backup/IntegrityCheckPanel.vue'
 import ServerBackupList from './components/ServerBackupList.vue'
 import RestoreConfirmDialog from './components/RestoreConfirmDialog.vue'
 import { useBackupCenter } from './composables/useBackupCenter'
+import type { RestoreResult } from '@/components/backup/composables/useRestorePolling'
+import type { BackupValidationResult } from '@/components/backup/FileRestorePanel.vue'
 
 // 全部业务逻辑（备份导出 / 服务器备份 / 文件恢复 / 增量 / 记录 / 巡检）抽至 composables/useBackupCenter.ts
 const {
@@ -156,6 +158,10 @@ const {
   records, recordsTotal, recordsPage, recordsPageSize, recordsLoading, loadRecords,
   checking, checkResult, handleIntegrityCheck,
 } = useBackupCenter()
+
+// 类型断言：useBackupCenter 返回可选属性，FileRestorePanel 期望非可选属性（模板中已用 ?. 兜底）
+const restoreResultTyped = computed(() => restoreResult.value as Required<RestoreResult> | null)
+const validationResultTyped = computed(() => validationResult.value as BackupValidationResult | null)
 
 // --- Tab 切换 ---
 const activeTab = ref<'backup' | 'records'>('backup')

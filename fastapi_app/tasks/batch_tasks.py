@@ -10,12 +10,13 @@ import contextlib
 import os
 import tempfile
 
-from sqlalchemy import or_, select as sa_select
+from sqlalchemy import or_
+from sqlalchemy import select as sa_select
+from sqlalchemy.orm import Session, sessionmaker
 
 from fastapi_app.core.database import get_sync_engine
 from fastapi_app.core.logger import logger
 from fastapi_app.shared_models import Product
-from sqlalchemy.orm import Session, sessionmaker
 
 _SyncSession = sessionmaker(
     autocommit=False, autoflush=False, bind=get_sync_engine()

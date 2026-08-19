@@ -62,7 +62,7 @@ async def worker(worker_id, token, stop_event, session, results):
             try:
                 r = await make_request(session, token, ep)
                 results.append(r)
-            except Exception:
+            except Exception:  # noqa: S110
                 pass
             await asyncio.sleep(0.3)
 

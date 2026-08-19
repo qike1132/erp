@@ -18,7 +18,7 @@
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Generic, TypeVar
+from typing import TypeVar
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,7 +55,7 @@ class BatchImportResult:
         }
 
 
-class BatchImportPipeline(ABC, Generic[T]):
+class BatchImportPipeline[T](ABC):
     """批量导入三阶段 Pipeline 基类"""
 
     async def execute(
@@ -101,9 +101,9 @@ class BatchImportPipeline(ABC, Generic[T]):
 
             await db.flush()
         except (ValueError, TypeError, OSError, RuntimeError) as e:
-            await db.rollback()
+            await db.rollback()  # manual-tx: try/except 内显式事务控制
             logger.exception(f"批量导入失败: {e}")
-            result.errors.append(f"导入失败: {str(e)}")
+            result.errors.append(f"导入失败: {e!s}")
             result.error_count += 1
 
         return result

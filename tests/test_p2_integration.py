@@ -1,16 +1,20 @@
 """P2级修复的集成验证测试"""
-import pytest
 
-from fastapi_app.main import app
-from fastapi_app.api.v1.endpoints import customer, supplier, backup
-from fastapi_app.services import backup_service
-from fastapi_app.core.cache_keys import build_cache_key, CacheNamespace
-from fastapi_app.core.sanitizer import sanitize_for_log, safe_exception_message, SanitizingFilter
+from fastapi_app.api.v1.endpoints import backup, customer, supplier
+from fastapi_app.core.cache_keys import CacheNamespace, build_cache_key
 from fastapi_app.core.exceptions import (
-    AppError, NotFoundError, BusinessError, PermissionDeniedError,
-    ConflictError, InternalError, http_error, make_error_response,
-    new_request_id, current_iso_timestamp,
+    ConflictError,
+    InternalError,
+    NotFoundError,
+    PermissionDeniedError,
+    current_iso_timestamp,
+    http_error,
+    make_error_response,
+    new_request_id,
 )
+from fastapi_app.core.sanitizer import safe_exception_message
+from fastapi_app.main import app
+from fastapi_app.services import backup_service
 
 
 def test_all_modules_imported():
@@ -72,7 +76,7 @@ def test_timestamp_format():
 
 def test_backup_chunk_size_imported():
     """P2-2: BACKUP_CHUNK_SIZE正确从backup_service导入到endpoints"""
-    from fastapi_app.api.v1.endpoints.backup import _get_chunk_size, BACKUP_CHUNK_SIZE
+    from fastapi_app.api.v1.endpoints.backup import BACKUP_CHUNK_SIZE, _get_chunk_size
     assert _get_chunk_size() == BACKUP_CHUNK_SIZE
     assert BACKUP_CHUNK_SIZE > 0
 

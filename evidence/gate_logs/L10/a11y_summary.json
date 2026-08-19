@@ -1,0 +1,1064 @@
+{
+  "frontend-vite/src/App.vue": [
+    [
+      2,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/components/RealTimeSyncExample.vue": [
+    [
+      32,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      35,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      38,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/batch/BatchView.vue": [
+    [
+      38,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/case/CaseInventoryTab.vue": [
+    [
+      12,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      58,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      72,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      91,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/case/CaseStockTab.vue": [
+    [
+      5,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      8,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      101,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      105,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      109,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      113,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      114,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/case/CaseView.vue": [
+    [
+      7,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      10,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/customer/CustomerView.vue": [
+    [
+      6,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/customer-order/CustomerOrderView.vue": [
+    [
+      7,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      10,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/hubei/HubeiSearchBar.vue": [
+    [
+      37,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/login/LoginFormMobile.vue": [
+    [
+      58,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/login/LoginFormPc.vue": [
+    [
+      103,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/material/MaterialView.vue": [
+    [
+      7,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      10,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      13,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      14,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/material-calculator/MaterialCalculatorView.vue": [
+    [
+      7,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      11,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      54,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/notifications/NotificationCenterView.vue": [
+    [
+      19,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      23,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/pattern-room/PatternRoomView.vue": [
+    [
+      47,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/product/ProductListView.vue": [
+    [
+      35,
+      "<img> 标签缺少 alt 属性"
+    ]
+  ],
+  "frontend-vite/src/views/purchase-plan/PurchasePlanView.vue": [
+    [
+      29,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      30,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/report/ReportView.vue": [
+    [
+      7,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      21,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      32,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      33,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      34,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/stock/InventoryTab.vue": [
+    [
+      6,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      9,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/stock/StockOutView.vue": [
+    [
+      7,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      10,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/stock/StockView.vue": [
+    [
+      6,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/supplier/SupplierView.vue": [
+    [
+      5,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/user/components/UserCreateForm.vue": [
+    [
+      7,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      12,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      30,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/user/components/UserEditDialog.vue": [
+    [
+      15,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      16,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/user/components/UserPermissionDialog.vue": [
+    [
+      6,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      31,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      32,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/user/components/UserTable.vue": [
+    [
+      38,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      39,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      40,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      43,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/supplier/components/SupplierFormDialog.vue": [
+    [
+      6,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      11,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      15,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      20,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      24,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/stock/components/StockOutEditStagedDialog.vue": [
+    [
+      18,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      30,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/stock/components/StockOutInputForm.vue": [
+    [
+      47,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      84,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      87,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      119,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      122,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/purchase-plan/components/CreateShipmentPlanDialog.vue": [
+    [
+      49,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      53,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      56,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/purchase-plan/components/ImportPanel.vue": [
+    [
+      17,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      18,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      26,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/purchase-plan/components/PlanDetailDialog.vue": [
+    [
+      9,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      10,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      20,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/purchase-plan/components/PurchasePlanDailyTab.vue": [
+    [
+      4,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/purchase-plan/components/PurchasePlanMonthlySummary.vue": [
+    [
+      4,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/purchase/components/CompletedOrdersAdvancedFilter.vue": [
+    [
+      35,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/purchase/components/CompletedOrdersSearchBar.vue": [
+    [
+      65,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/purchase/components/CompletedOrdersToolbar.vue": [
+    [
+      8,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      12,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/purchase/components/OrderDetailModal.vue": [
+    [
+      38,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/production/components/EntrySidebar.vue": [
+    [
+      2,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      6,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/production/components/ProductionEntryDrawer.vue": [
+    [
+      21,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      22,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      23,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      105,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      106,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      153,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      160,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      161,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/production/components/ProductionToolbar.vue": [
+    [
+      5,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      6,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      11,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      13,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      22,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      25,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/product/components/BomCopyDialog.vue": [
+    [
+      16,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      18,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      35,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      46,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      47,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/product/components/BomEditor.vue": [
+    [
+      13,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      46,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      47,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      71,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      72,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      74,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      79,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      80,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      81,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      99,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      100,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/product/components/ProductEditDialog.vue": [
+    [
+      17,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      24,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      31,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      38,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      58,
+      "<img> 标签缺少 alt 属性"
+    ],
+    [
+      64,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      70,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      71,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/product/components/ProductForm.vue": [
+    [
+      11,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      18,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      25,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      32,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      52,
+      "<img> 标签缺少 alt 属性"
+    ],
+    [
+      58,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      80,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      81,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      85,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      88,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/product/components/ProductTable.vue": [
+    [
+      6,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/pattern-room/components/CustomerGroupList.vue": [
+    [
+      117,
+      "<img> 标签缺少 alt 属性"
+    ]
+  ],
+  "frontend-vite/src/views/pattern-room/components/PartFormDialog.vue": [
+    [
+      168,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/pattern-room/components/PatternMakerSelect.vue": [
+    [
+      25,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      39,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      52,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      55,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/pattern-room/components/ProjectCardItem.vue": [
+    [
+      116,
+      "<img> 标签缺少 alt 属性"
+    ]
+  ],
+  "frontend-vite/src/views/pattern-room/components/ProjectFormDialog.vue": [
+    [
+      32,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/pattern-room/components/ProjectImageUpload.vue": [
+    [
+      14,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/pattern-room/components/RoleListEditor.vue": [
+    [
+      20,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/outsource/components/OutsourcePresetTab.vue": [
+    [
+      58,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/material-calculator/components/CalcResultColumn.vue": [
+    [
+      20,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/material/components/HistoryTab.vue": [
+    [
+      38,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/material/components/MaterialDetailDialog.vue": [
+    [
+      28,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/material/components/ProgressTab.vue": [
+    [
+      59,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/material/components/ReceiveDialog.vue": [
+    [
+      10,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      11,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      13,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      14,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/material/components/SupplierDialog.vue": [
+    [
+      25,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/customer-order/components/EditOrderModal.vue": [
+    [
+      27,
+      "<img> 标签缺少 alt 属性"
+    ],
+    [
+      86,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      98,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      108,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/customer-order/components/EditStagedModal.vue": [
+    [
+      21,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      25,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      32,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/customer-order/components/OrderInputPanel.vue": [
+    [
+      6,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      9,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      81,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      141,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      142,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/customer/components/CustomerFormDialog.vue": [
+    [
+      6,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      9,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      10,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      12,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      15,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      19,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      20,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/customer/components/CustomerTable.vue": [
+    [
+      10,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/case/components/CaseStockEntryPanel.vue": [
+    [
+      46,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      52,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      117,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      120,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/case/components/CaseStockRecordSection.vue": [
+    [
+      9,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      28,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/batch/components/BatchWhitelistModal.vue": [
+    [
+      7,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      11,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/backup/components/ServerBackupList.vue": [
+    [
+      28,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      31,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/approval/components/ApprovalTable.vue": [
+    [
+      36,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      39,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/views/approval/components/RejectDialog.vue": [
+    [
+      10,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      11,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/mobile/components/MActionSheet.vue": [
+    [
+      16,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/mobile/components/MFilePicker.vue": [
+    [
+      3,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      22,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/mobile/components/MSearchBar.vue": [
+    [
+      15,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/mobile/views/case/MCaseView.vue": [
+    [
+      12,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      23,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      27,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      29,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/mobile/views/dashboard/DashboardMobile.vue": [
+    [
+      24,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      33,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/mobile/views/login/MLoginView.vue": [
+    [
+      39,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/mobile/views/material-calculator/MMaterialCalculatorView.vue": [
+    [
+      5,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      15,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      26,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      27,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      28,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      29,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/mobile/views/production/MProductionView.vue": [
+    [
+      8,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      10,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/mobile/views/purchase/MPurchaseView.vue": [
+    [
+      48,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/mobile/views/shipment/MShipmentView.vue": [
+    [
+      7,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      9,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/layouts/components/AppSidebar.vue": [
+    [
+      2,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/components/backup/FileRestorePanel.vue": [
+    [
+      30,
+      "交互元素缺少 aria-label"
+    ],
+    [
+      75,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/components/backup/IntegrityCheckPanel.vue": [
+    [
+      12,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/components/ui/UiButton.vue": [
+    [
+      2,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/components/ui/UiPagination.vue": [
+    [
+      20,
+      "交互元素缺少 aria-label"
+    ]
+  ],
+  "frontend-vite/src/components/ui/UiUpload.vue": [
+    [
+      14,
+      "交互元素缺少 aria-label"
+    ]
+  ]
+}

@@ -4,10 +4,10 @@
       <!-- 卡片头部 -->
       <div class="page-card-header">
         <div class="cs-tab-group" role="tablist">
-          <button role="tab" :aria-selected="activeTab === 'stock'" :class="['cs-tab-btn', { active: activeTab === 'stock' }]" @click="activeTab = 'stock'">
+          <button role="tab" :aria-selected="activeTab === 'stock'" :class="['cs-tab-btn', { active: activeTab === 'stock' }]" @click="activeTab = 'stock'" aria-label="出入库">
             出入库
           </button>
-          <button role="tab" :aria-selected="activeTab === 'inventory'" :class="['cs-tab-btn', { active: activeTab === 'inventory' }]" @click="activeTab = 'inventory'">
+          <button role="tab" :aria-selected="activeTab === 'inventory'" :class="['cs-tab-btn', { active: activeTab === 'inventory' }]" @click="activeTab = 'inventory'" aria-label="库存查询">
             库存查询
           </button>
         </div>

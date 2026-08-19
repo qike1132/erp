@@ -1,6 +1,5 @@
 <template>
   <div class="osp-inventory">
-    <!-- 产品表格：与订单列表同款样式 -->
     <div class="osp-card-main">
       <div v-if="isLoading && productCards.length === 0" class="osp-empty">
         <UiSpinner />
@@ -31,7 +30,6 @@
                   <span v-else>-</span>
                 </td>
                 <td class="osp-td-center" style="width: 90px;"><strong class="osp-count-num">{{ card.processes.length }}</strong></td>
-                <!-- 工序列：chips 横向展示 + 添加工序按钮 -->
                 <td class="osp-td-left osp-proc-cell">
                   <div class="osp-proc-inner">
                     <div class="osp-proc-chips">
@@ -53,9 +51,8 @@
                       </div>
                       <span v-if="card.processes.length === 0" class="osp-no-proc">未配置</span>
                     </div>
-                    <!-- 添加工序按钮 -->
                     <div v-if="canManage" class="osp-add-bar">
-                      <button class="osp-add-btn" :disabled="saving" @click="openAddDialog(card)">
+                      <button class="osp-add-btn" :disabled="saving" @click="openAddDialog(card)" aria-label="添加工序">
                         <FontAwesomeIcon icon="plus" aria-hidden="true" /> 添加工序
                       </button>
                     </div>
@@ -68,87 +65,37 @@
       </template>
     </div>
 
-    <!-- 添加工序弹窗：常用工序标签一键添加 -->
-    <UiDialog v-model:open="addOpen" :title="`为「${addTarget?.product_name || ''}」添加工序`" max-width-class="max-w-[560px]">
-      <div class="osp-form">
-        <div class="osp-form-row">
-          <label class="osp-form-label">常用工序（点击即添加）</label>
-          <div class="osp-quick-tags">
-            <button
-              v-for="tag in COMMON_PROCESSES"
-              :key="tag"
-              type="button"
-              class="osp-quick-tag"
-              :class="{ 'osp-quick-tag--added': isAdded(tag), 'osp-quick-tag--disabled': isAdded(tag) }"
-              :disabled="isAdded(tag) || saving"
-              @click="quickAdd(tag)"
-            >
-              <FontAwesomeIcon v-if="isAdded(tag)" icon="check" aria-hidden="true" />
-              {{ tag }}
-            </button>
-          </div>
-        </div>
-        <div class="osp-form-row">
-          <label class="osp-form-label">或输入自定义工序名称</label>
-          <div class="osp-add-row">
-            <input
-              v-model="addInput"
-              class="osp-text-input"
-              placeholder="输入工序名称，多个用逗号分隔"
-              maxlength="200"
-              @keyup.enter="handleAdd()"
-            />
-            <UiButton variant="primary" :disabled="saving" @click="handleAdd()">
-              {{ saving ? '添加中…' : '添加' }}
-            </UiButton>
-          </div>
-        </div>
-      </div>
-      <template #footer>
-        <UiButton variant="outline" @click="addOpen = false">关闭</UiButton>
-      </template>
-    </UiDialog>
-
-    </div>
+    <OutsourceAddProcessDialog
+      v-model:open="addOpen"
+      v-model:target="addTarget"
+      :product-cards="productCards"
+      :refresh="refreshAfterAdd"
+      @remove-pending="emit('removePending', $event)"
+    />
+  </div>
 </template>
 
 <script setup lang="ts">
-/**
- * OutsourcePresetTab.vue — SKU 外发工序预设管理
- *
- * 布局与订单列表一致（表格）：每行一个产品（名称/条码/工厂/工序数），
- * 最后一列为工序——chips 横向展示已配置工序 + 「添加工序」按钮，
- * 点击按钮弹出常用工序标签面板，点标签即添加；也支持输入自定义名称
- * （逗号分隔一次添加多道）。工序 chip 展示已配置工序，× 删除。
- * 预设是「返单自动带出工序」的数据源。管理操作按 outsource_manage 权限控制。
- */
 import { computed, ref } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { outsourceApi } from '@/api'
 import type { OutsourceProcessType } from '@/api/outsource'
-import UiDialog from '@/components/ui/UiDialog.vue'
-import UiButton from '@/components/ui/UiButton.vue'
 import UiSpinner from '@/components/ui/UiSpinner.vue'
+import OutsourceAddProcessDialog from './OutsourceAddProcessDialog.vue'
 import { useAuthStore } from '@/stores/auth'
 import { toast } from '@/composables/useToast'
 
 const props = defineProps<{
-  /** 搜索选中但尚无预设的产品（由页面头部搜索框维护，保证能直接为其配置） */
   pendingProducts: { product_id: number; product_name: string; product_barcode: string | null }[]
 }>()
 
 const emit = defineEmits<{
-  /** 该产品已配置工序，通知父级从待选列表移除 */
   removePending: [productId: number]
 }>()
 
 const authStore = useAuthStore()
 const canManage = computed(() => authStore.hasPermission('outsource_manage'))
 
-/** 常用外发工序标签 */
-const COMMON_PROCESSES = ['电绣', '转印']
-
-// ===== 数据：拉取全部预设，按产品分组 =====
 const {
   data: listData,
   isLoading,
@@ -161,7 +108,6 @@ const {
 
 const presets = computed<OutsourceProcessType[]>(() => listData.value?.data ?? [])
 
-/** 产品行：产品信息 + 工序列表 */
 interface ProductCard {
   product_id: number
   product_name: string
@@ -182,7 +128,6 @@ const byProduct = computed<Map<number, OutsourceProcessType[]>>(() => {
   return map
 })
 
-/** 产品行列表：全部已配置工序的产品 + 搜索选中无工序的产品，按名称排序 */
 const productCards = computed<ProductCard[]>(() => {
   const seen = new Set<number>()
   const cards: ProductCard[] = []
@@ -212,71 +157,22 @@ const productCards = computed<ProductCard[]>(() => {
   return cards.sort((a, b) => a.product_name.localeCompare(b.product_name, 'zh'))
 })
 
-// ===== 添加工序弹窗：常用标签 + 自定义输入 =====
 const addOpen = ref(false)
 const addTarget = ref<ProductCard | null>(null)
-const addInput = ref('')
 const saving = ref(false)
 
 function openAddDialog(card: ProductCard) {
   addTarget.value = card
-  addInput.value = ''
   addOpen.value = true
 }
 
-/** 判断常用标签是否已为该产品配置（置灰 + 勾选） */
-function isAdded(tag: string): boolean {
-  if (!addTarget.value) return false
-  return addTarget.value.processes.some((p) => p.process_type === tag)
-}
-
-/** 点击常用标签：直接为该产品添加该工序 */
-async function quickAdd(tag: string) {
-  if (!addTarget.value || isAdded(tag)) return
-  saving.value = true
-  try {
-    const res = await outsourceApi.batchCreateProcessTypes(addTarget.value.product_id, [tag])
-    toast.success(res.message || `已添加「${tag}」`)
-    await refreshAfterAdd()
-  } catch (e) {
-    const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-    toast.error(msg || '添加失败')
-  } finally {
-    saving.value = false
-  }
-}
-
-/** 自定义输入：逗号分隔一次添加多道 */
-async function handleAdd() {
-  if (!addTarget.value) return
-  const names = addInput.value
-    .split(/[,，\n]/)
-    .map((n) => n.trim())
-    .filter(Boolean)
-  if (names.length === 0) {
-    toast.warning('请输入工序名称')
-    return
-  }
-  saving.value = true
-  try {
-    const res = await outsourceApi.batchCreateProcessTypes(addTarget.value.product_id, names)
-    toast.success(res.message || '工序已添加')
-    addInput.value = ''
-    await refreshAfterAdd()
-  } catch (e) {
-    const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-    toast.error(msg || '添加失败')
-  } finally {
-    saving.value = false
-  }
-}
-
 async function refreshAfterAdd() {
-  // 该产品已有预设后从 pending 移除，由 byProduct 接管；刷新后同步弹窗目标
-  emit('removePending', addTarget.value?.product_id ?? 0)
-  await refetch()
-  const refreshed = productCards.value.find((c) => c.product_id === addTarget.value?.product_id)
-  if (refreshed) addTarget.value = refreshed
+  saving.value = true
+  try {
+    await refetch()
+  } finally {
+    saving.value = false
+  }
 }
 
 async function handleDelete(pt: OutsourceProcessType) {
@@ -299,7 +195,6 @@ async function handleDelete(pt: OutsourceProcessType) {
   min-height: 0;
 }
 
-/* 主体（与订单列表同款表格） */
 .osp-card-main {
   flex: 1;
   display: flex;
@@ -368,7 +263,6 @@ async function handleDelete(pt: OutsourceProcessType) {
 }
 .osp-count-num { color: var(--color-primary-600); font-size: 15px; }
 
-/* 工序列 */
 .osp-proc-cell { vertical-align: top; }
 .osp-proc-inner {
   display: flex;
@@ -413,7 +307,6 @@ async function handleDelete(pt: OutsourceProcessType) {
 .osp-chip-del:hover { color: var(--color-danger-500); background: rgba(239, 68, 68, 0.1); }
 .osp-no-proc { font-size: 12.5px; color: var(--color-text-muted); }
 
-/* 添加工序按钮 */
 .osp-add-bar { flex-shrink: 0; }
 .osp-add-btn {
   display: inline-flex;
@@ -434,45 +327,6 @@ async function handleDelete(pt: OutsourceProcessType) {
 .osp-add-btn:hover { background: var(--color-primary-50); border-color: var(--color-primary-400); transform: translateY(-1px); }
 .osp-add-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
-/* 常用工序标签 */
-.osp-quick-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 4px 0;
-}
-.osp-quick-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 7px 16px;
-  border-radius: 999px;
-  border: 1.5px solid var(--color-primary-300);
-  background: var(--color-primary-50);
-  color: var(--color-primary-700);
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: background 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
-  font-family: inherit;
-}
-.osp-quick-tag:hover:not(:disabled) {
-  background: var(--color-primary-100);
-  transform: translateY(-1px);
-}
-.osp-quick-tag--added {
-  background: var(--color-success-50);
-  border-color: var(--color-success-300);
-  color: var(--color-success-700);
-}
-.osp-quick-tag--disabled { cursor: default; opacity: 0.85; }
-
-.osp-add-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
 .osp-empty {
   flex: 1;
   display: flex;
@@ -485,26 +339,4 @@ async function handleDelete(pt: OutsourceProcessType) {
 }
 .osp-empty span { font-size: 14px; }
 .osp-empty-sub { font-size: 12px; opacity: 0.85; }
-
-/* 表单 */
-.osp-form { display: flex; flex-direction: column; gap: 14px; }
-.osp-form-row { display: flex; flex-direction: column; gap: 6px; }
-.osp-form-label { font-size: 12.5px; font-weight: 600; color: var(--color-text-secondary); }
-.osp-req { color: var(--color-danger-500); margin-left: 2px; }
-.osp-text-input {
-  width: 100%;
-  padding: 8px 12px;
-  font-size: 13px;
-  color: var(--color-text);
-  background: white;
-  border: 2px solid var(--color-border-light, #e2e8f0);
-  border-radius: 9px;
-  box-sizing: border-box;
-  font-family: inherit;
-}
-.osp-text-input:focus {
-  outline: none;
-  border-color: var(--color-primary-400);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
-}
 </style>

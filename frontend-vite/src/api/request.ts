@@ -1,6 +1,7 @@
 import axios from 'axios'
 import type { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse, AxiosError } from 'axios'
-import { getAccessToken } from '@/utils/secureStorage'
+import { getAccessToken, setAccessToken } from '@/utils/secureStorage'
+import { devLog } from '@/utils/devLog'
 
 // TODO(技术栈优化): 本模块可考虑用原生 fetch 替代 axios 以减小打包体积。
 // 当前深度依赖 axios 特性（请求/响应拦截器、isAxiosError 类型守卫、retry 退避逻辑、
@@ -16,6 +17,9 @@ let isShowing403 = false
 // CSRF Token 内存缓存：优先从缓存读取，避免 document.cookie 被 XSS 窃取
 // 首次请求时从响应头 x-csrf-token 获取并缓存，后续请求直接使用
 let _csrfCache: string | null = null
+
+// 401 刷新令牌单飞：并发多个 401 共享同一个 refresh 请求，避免重复刷新
+let _refreshPromise: Promise<boolean> | null = null
 
 /** 清空 CSRF 缓存（注销时调用） */
 export function clearCsrfCache(): void {
@@ -39,6 +43,39 @@ const service: AxiosInstance = axios.create({
   withCredentials: true,
 })
 
+/** 带扩展标记的请求配置（用于 401 刷新重放控制） */
+type RetryableAxiosConfig = InternalAxiosRequestConfig & {
+  _retried?: boolean
+  _skipAuthRefresh?: boolean
+}
+
+/**
+ * 尝试用 refresh_token 刷新 access_token（单飞）。
+ * - Web 端：后端用 refresh_token cookie 校验并自动回写新 access_token cookie
+ * - 移动端：响应体带新 access_token，需同步更新内存中的 Bearer token
+ * 成功返回 true，失败返回 false（由调用方决定是否登出）。
+ */
+async function refreshAccessToken(): Promise<boolean> {
+  if (!_refreshPromise) {
+    _refreshPromise = (async () => {
+      try {
+        const res = (await service.post('/auth/refresh', {}, {
+          _skipAuthRefresh: true,
+        } as RetryableAxiosConfig)) as { access_token?: string } | null | undefined
+        if (isCap && res?.access_token) {
+          setAccessToken(res.access_token)
+        }
+        return true
+      } catch {
+        return false
+      } finally {
+        _refreshPromise = null
+      }
+    })()
+  }
+  return _refreshPromise
+}
+
 service.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   const method = config.method?.toLowerCase()
   if (method && ['post', 'put', 'delete', 'patch'].includes(method)) {
@@ -60,7 +97,7 @@ service.interceptors.request.use((config: InternalAxiosRequestConfig) => {
       config.headers['Authorization'] = `Bearer ${accessToken}`
     }
     if (import.meta.env.DEV) {
-      console.log(`[API] ${method?.toUpperCase()} ${config.baseURL}${config.url}`)
+      devLog(`[API] ${method?.toUpperCase()} ${config.baseURL}${config.url}`)
     }
   }
   return config
@@ -87,6 +124,19 @@ service.interceptors.response.use(
       })
     }
     if (error.response?.status === 401) {
+      const config = error.config as RetryableAxiosConfig | undefined
+      const isLoginRequest = config?.url?.includes('/auth/login') ?? false
+      // 首次 401：用 refresh_token 刷新 access_token 后重放原请求（登录接口除外）
+      if (config && !config._retried && !config._skipAuthRefresh && !isLoginRequest) {
+        config._retried = true
+        if (await refreshAccessToken()) {
+          try {
+            return await service(config)
+          } catch {
+            // 重放仍失败：继续走登出逻辑
+          }
+        }
+      }
       if (!isRedirecting401) {
         isRedirecting401 = true
         window.dispatchEvent(new CustomEvent('auth:expired'))

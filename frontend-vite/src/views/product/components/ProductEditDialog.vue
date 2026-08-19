@@ -14,28 +14,28 @@
               <label class="pd-label">产品名称 <span class="required">*</span></label>
               <div class="pd-input-wrap">
                 <FontAwesomeIcon icon="tag" class="pd-input-icon" aria-hidden="true" />
-                <input v-model="editForm.name" type="text" class="pd-input" required placeholder="请输入产品名称" name="product-name" autocomplete="off" />
+                <input v-model="editForm.name" type="text" class="pd-input" required placeholder="请输入产品名称" name="product-name" autocomplete="off" aria-label="请输入产品名称" />
               </div>
             </div>
             <div class="pd-form-group">
               <label class="pd-label">69码/商品条码</label>
               <div class="pd-input-wrap">
                 <FontAwesomeIcon icon="barcode" class="pd-input-icon" aria-hidden="true" />
-                <input v-model="editForm.barcode" type="text" class="pd-input" placeholder="例如：6958085574210" name="barcode" autocomplete="off" />
+                <input v-model="editForm.barcode" type="text" class="pd-input" placeholder="例如：6958085574210" name="barcode" autocomplete="off" aria-label="例如：6958085574210" />
               </div>
             </div>
             <div class="pd-form-group">
               <label class="pd-label">产品价格</label>
               <div class="pd-input-wrap">
                 <FontAwesomeIcon icon="yen-sign" class="pd-input-icon" aria-hidden="true" />
-                <input v-model.number="editForm.price" type="number" class="pd-input" step="0.01" min="0" placeholder="请输入产品价格" name="price" autocomplete="off" />
+                <input v-model.number="editForm.price" type="number" class="pd-input" step="0.01" min="0" placeholder="请输入产品价格" name="price" autocomplete="off" aria-label="请输入产品价格" />
               </div>
             </div>
             <div class="pd-form-group">
               <label class="pd-label">工厂</label>
               <div class="pd-input-wrap">
                 <FontAwesomeIcon icon="industry" class="pd-input-icon" aria-hidden="true" />
-                <select v-model="editForm.factory" class="pd-input pd-select" name="edit-factory">
+                <select v-model="editForm.factory" class="pd-input pd-select" name="edit-factory" aria-label="工厂">
                   <option value="" disabled>请选择工厂</option>
                   <option v-for="f in factoryOptions" :key="f" :value="f">{{ f }}</option>
                 </select>
@@ -55,7 +55,7 @@
                   <FontAwesomeIcon icon="image" class="label-icon" aria-hidden="true" />
                   <template v-if="editForm.image">
                     <span class="pd-file-inline pd-file-inline-success">
-                      <img :src="resolveStaticUrl(editForm.image)" class="pd-thumb-preview" @click.stop="emit('open-image', editForm.image)" />
+                      <img loading="lazy" :src="resolveStaticUrl(editForm.image)" class="pd-thumb-preview" @click.stop="emit('open-image', editForm.image)" alt="产品图片" />
                       <button type="button" class="pd-thumb-remove" @click.stop="editForm.image = ''" aria-label="关闭"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
                     </span>
                   </template>

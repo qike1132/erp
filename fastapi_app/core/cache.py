@@ -228,10 +228,8 @@ def cache_result(
                                     _redis_circuit_open_until = datetime.now() + _REDIS_CIRCUIT_COOLDOWN
                                     logger.warning("Redis 断路器开启: %s", e)
                     finally:
-                        try:
-                            await redis.delete(lock_key)
-                        except (TimeoutError, OSError, ConnectionError):
-                            pass
+                        with contextlib.suppress(TimeoutError, OSError, ConnectionError):
+                            await redis.delete(lock_key)  # type: ignore[union-attr]
                     return result
                 elif redis and redis_available and getattr(redis, 'redis_client', None):
                     # 未获得锁：轮询缓存（最多 10s = lock TTL），等待持锁 worker 回填
@@ -267,18 +265,14 @@ def cache_result(
                             _cache_local[cache_key] = (result, datetime.now() + timedelta(seconds=local_ttl))
                             _evict_local_cache()
                             if redis and redis_available:
-                                try:
+                                with contextlib.suppress(TimeoutError, OSError, ConnectionError, ValueError):
                                     await asyncio.wait_for(
                                         redis.set(cache_key, result, timeout=int(ttl)),
                                         timeout=CACHE_TIMEOUT
                                     )
-                                except (TimeoutError, OSError, ConnectionError, ValueError):
-                                    pass
                         finally:
-                            try:
+                            with contextlib.suppress(TimeoutError, OSError, ConnectionError):
                                 await redis.delete(lock_key)
-                            except (TimeoutError, OSError, ConnectionError):
-                                pass
                         return result
 
                 result = await func(*args, **kwargs)
@@ -295,7 +289,7 @@ def cache_result(
                             timeout=CACHE_TIMEOUT
                         )
                         _redis_fail_count = 0
-                    except (TimeoutError, OSError, ConnectionError, ValueError) as e:
+                    except (TimeoutError, OSError, ConnectionError, ValueError):
                         _redis_fail_count += 1
                         if _redis_fail_count >= _REDIS_CIRCUIT_THRESHOLD:
                             _redis_circuit_open_until = datetime.now() + _REDIS_CIRCUIT_COOLDOWN

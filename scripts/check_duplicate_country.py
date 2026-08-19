@@ -1,9 +1,11 @@
 """检查同一客户+产品的 country_orders 是否有重复国家"""
 import asyncio
 import sys
+
 sys.path.insert(0, r'd:\erp_system')
 
 from sqlalchemy import text
+
 from fastapi_app.core.database import _AsyncSessionLocal
 
 

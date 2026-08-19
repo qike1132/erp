@@ -29,28 +29,22 @@
       </template>
       <template v-else><strong>{{ item.quantity }}</strong></template>
     </div>
-    <!-- 确认状态列：仅湖北订单参与确认流程，备货记录不适用；未确认 TAB 下整列隐藏（冗余） -->
+    <!-- 确认状态列：订单与备货均参与确认流程；未确认 TAB 下整列隐藏（冗余） -->
     <div v-if="confirmStatus !== 'unconfirmed'" class="bo-td bo-td-center bo-td-middle" style="width: 110px;">
-      <template v-if="item.record_type === 'order'">
-        <span v-if="item.confirmed" class="bo-confirm-badge bo-confirm-badge--done">已确认</span>
-        <span v-else class="bo-confirm-badge bo-confirm-badge--pending">未确认</span>
-      </template>
-      <span v-else class="bo-cell-muted">-</span>
+      <span v-if="item.confirmed" class="bo-confirm-badge bo-confirm-badge--done">已确认</span>
+      <span v-else class="bo-confirm-badge bo-confirm-badge--pending">未确认</span>
     </div>
-    <!-- 确认操作列：未确认订单显示确认按钮，已确认订单显示已确认徽章（已确认 TAB 隐藏整列） -->
+    <!-- 确认操作列：未确认记录显示确认按钮，已确认记录显示已确认徽章（已确认 TAB 隐藏整列） -->
     <div v-if="confirmStatus !== 'confirmed'" class="bo-td bo-td-center bo-td-middle" style="width: 130px;">
-      <template v-if="item.record_type === 'order'">
-        <button
-          v-if="!item.confirmed"
-          class="bo-confirm-btn"
-          :disabled="confirmingIds.has(item.id)"
-          @click.stop="handleConfirm(item)"
-        >
-          {{ confirmingIds.has(item.id) ? '确认中…' : '确认订单' }}
-        </button>
-        <span v-else class="bo-confirm-badge bo-confirm-badge--done">已确认</span>
-      </template>
-      <span v-else class="bo-cell-muted">-</span>
+      <button
+        v-if="!item.confirmed"
+        class="bo-confirm-btn"
+        :disabled="confirmingIds.has(item.id)"
+        @click.stop="handleConfirm(item)"
+      >
+        {{ confirmingIds.has(item.id) ? '确认中…' : (item.record_type === 'stockin' ? '确认备货' : '确认订单') }}
+      </button>
+      <span v-else class="bo-confirm-badge bo-confirm-badge--done">已确认</span>
     </div>
     <div class="bo-td bo-td-left bo-td-middle" style="width: 160px;">
       <template v-if="visibleSkus(item).length > 0">

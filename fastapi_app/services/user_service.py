@@ -137,8 +137,8 @@ async def delete_user(db: AsyncSession, user_id: int) -> None:
     locked_order_count = await db.scalar(
         select(func.count()).select_from(Order).where(
             Order.locked_by_id == user_id,
-            Order.is_locked == True,
-            Order.is_deleted == False,
+            Order.is_locked,
+            not Order.is_deleted,
         )
     )
     if locked_order_count and locked_order_count > 0:

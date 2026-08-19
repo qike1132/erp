@@ -70,7 +70,7 @@ def fix_purchase_center_nav():
             if not perm.is_nav:
                 perm.is_nav = True
                 changed = True
-                print(f"  更新 is_nav: False -> True")
+                print("  更新 is_nav: False -> True")
 
             if changed:
                 session.commit()
@@ -121,8 +121,9 @@ def _clear_nav_cache():
 
     # 清除 Redis 缓存
     try:
-        from utils.redis_cache import redis_cache
         import asyncio
+
+        from utils.redis_cache import redis_cache
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:

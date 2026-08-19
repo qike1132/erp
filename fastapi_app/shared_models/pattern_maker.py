@@ -4,7 +4,7 @@
 映射到 'pattern_maker' 表。
 版师为板房打样（/pattern-room）模块的分类维度，替代原「客户」。
 """
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import DateTime, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
@@ -20,14 +20,14 @@ class PatternMaker(Base):
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, comment='版师姓名')
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         nullable=False,
         comment='创建时间',
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
         nullable=False,
         comment='更新时间',
     )

@@ -1,5 +1,5 @@
 import { computed, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import { useQuery } from '@tanstack/vue-query'
 import { refDebounced } from '@vueuse/core'
 import { get } from '@/api/request'
@@ -11,7 +11,7 @@ import type { PageResult } from '@/types'
  * - 自动 VueQuery useQuery
  * - search 防抖 300ms
  */
-export function useListQuery<T>(key: string, url: string, extraParams?: () => Record<string, any>) {
+export function useListQuery<T>(key: string, url: string, extraParams?: () => Record<string, unknown>) {
   const route = useRoute()
   const router = useRouter()
 
@@ -24,7 +24,7 @@ export function useListQuery<T>(key: string, url: string, extraParams?: () => Re
   const dSearch = refDebounced(search, 300)
 
   watch([page, perPage, dSearch, sortBy, sortOrder], () => {
-    const query: Record<string, any> = { ...route.query }
+    const query: LocationQueryRaw = { ...route.query }
     query.page = String(page.value)
     query.per_page = String(perPage.value)
     if (dSearch.value) query.search = dSearch.value

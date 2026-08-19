@@ -288,8 +288,8 @@ def create_sentinel_client(
             )
     """
     try:
-        from redis.sentinel import Sentinel
         import redis.asyncio as aioredis
+        from redis.sentinel import Sentinel
 
         sentinel_nodes = [
             (h.strip(), int(p.strip()))
@@ -322,7 +322,7 @@ def create_sentinel_client(
     except ImportError:
         logger.warning("redis.sentinel 不可用，请安装 redis[hiredis]")
         return None
-    except Exception as e:
+    except Exception as e:  # broad-except: Redis 连接容错，失败时降级处理
         logger.error("Redis Sentinel 客户端创建失败: %s", e)
         return None
 

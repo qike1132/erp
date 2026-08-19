@@ -6,7 +6,7 @@ import { showToast } from '@/composables/useToast'
  * - 自动成功/失败提示
  * - 自动 invalidation
  */
-export function useApiMutation<TData = any, TVariables = any>(
+export function useApiMutation<TData = unknown, TVariables = unknown>(
   mutationFn: (vars: TVariables) => Promise<TData>,
   options?: {
     invalidateKeys?: string[]

@@ -6,7 +6,7 @@
 """
 import logging
 from collections import defaultdict
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import cast, desc, exists, func, literal, or_, select, union_all
 from sqlalchemy.dialects.postgresql import JSONB
@@ -16,7 +16,6 @@ from sqlalchemy.orm import selectinload
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.services.purchase_utils import parse_source_order_ids
-from fastapi_app.utils import calc_total_pages
 from fastapi_app.shared_models import (
     MaterialRegistration,
     MaterialRegistrationItem,
@@ -30,6 +29,7 @@ from fastapi_app.shared_models import (
 )
 from fastapi_app.shared_models.order import Order
 from fastapi_app.shared_models.order_item import OrderItem
+from fastapi_app.utils import calc_total_pages
 
 logger = logging.getLogger(__name__)
 
@@ -587,8 +587,8 @@ def _apply_completed_filters(
         query = query.where(PurchaseOrder.completed_at >= start_date)
         count_query = count_query.where(PurchaseOrder.completed_at >= start_date)
     if end_date:
-        query = query.where(PurchaseOrder.completed_at <= f'{end_date} 23:59:59')
-        count_query = count_query.where(PurchaseOrder.completed_at <= f'{end_date} 23:59:59')
+        query = query.where(PurchaseOrder.completed_at <= f'{end_date} 23:59:59')  # sql-safe: escape_like/绑定参数/常量片段
+        count_query = count_query.where(PurchaseOrder.completed_at <= f'{end_date} 23:59:59')  # sql-safe: escape_like/绑定参数/常量片段
     # barcode / material_name 需要 EXISTS 子查询 purchase_order_item
     if barcode:
         barcode_pattern = f'%{escape_like(barcode)}%'
@@ -613,7 +613,7 @@ def _apply_completed_quick_filter(query, count_query, quick_filter):
     days = _QUICK_FILTER_DAYS.get(quick_filter)
     if days is None:
         return query, count_query
-    threshold = datetime.now(timezone.utc).replace(tzinfo=None).date() - timedelta(days=days)
+    threshold = datetime.now(UTC).replace(tzinfo=None).date() - timedelta(days=days)
     query = query.where(PurchaseOrder.completed_at >= threshold)
     count_query = count_query.where(PurchaseOrder.completed_at >= threshold)
     return query, count_query
@@ -1000,7 +1000,7 @@ def _serialize_factory_groups(group_map: dict[tuple, dict]) -> list:
         suppliers = []
         for skey in sorted(group['_supplier_map'].keys()):
             supplier = group['_supplier_map'][skey]
-            fabrics = [f for f in sorted(supplier['_fabric_map'].values(), key=lambda x: x['fabric_name'])]
+            fabrics = sorted(supplier['_fabric_map'].values(), key=lambda x: x['fabric_name'])
             suppliers.append({'supplier_name': supplier['supplier_name'], 'fabrics': fabrics})
         groups.append({
             'customer_name': group['customer_name'],
@@ -1054,7 +1054,7 @@ async def export_completed_orders(
     if date_from:
         query = query.where(PurchaseOrder.completed_at >= date_from)
     if date_to:
-        query = query.where(PurchaseOrder.completed_at <= f'{date_to} 23:59:59')
+        query = query.where(PurchaseOrder.completed_at <= f'{date_to} 23:59:59')  # sql-safe: escape_like/绑定参数/常量片段
     query = query.order_by(PurchaseOrder.completed_at.desc())
 
     result = await db.execute(query)
@@ -1416,7 +1416,7 @@ async def get_completed_order_suggestions(
 
 
 async def get_completed_order_quick_filters(db: AsyncSession) -> dict:
-    today = datetime.now(timezone.utc).replace(tzinfo=None).date()
+    today = datetime.now(UTC).replace(tzinfo=None).date()
     week_ago = today - timedelta(days=7)
     month_ago = today - timedelta(days=30)
     # 单次查询 + 条件聚合：3 个 COUNT 合并为 1 次 roundtrip

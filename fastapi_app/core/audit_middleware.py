@@ -7,7 +7,7 @@
 import json
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -71,7 +71,7 @@ def _extract_resource_id(path: str) -> str | None:
                 int(part)
                 return part
             except ValueError:
-                pass
+                pass  # defensive: 可选 ValueError 静默处理,不影响主流程
     return None
 
 
@@ -102,8 +102,8 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
             try:
                 from fastapi_app.core.deps import _resolve_user_id
                 user_id = _resolve_user_id(request)
-            except Exception:  # defensive: 用户 ID 解析失败不影响审计记录
-                pass
+            except Exception:  # defensive: 用户 ID 解析失败不影响审计记录  # noqa: S110  # nosec B110
+                pass  # defensive: 异常静默处理,不影响主流程
 
         action = METHOD_ACTION_MAP.get(request.method, request.method)
         resource_type = _resolve_resource_type(request.scope['path'])
@@ -133,7 +133,7 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
             'user_agent': user_agent,
             'request_id': request_id,
             'status_code': response.status_code,
-            'created_at': datetime.now(timezone.utc).replace(tzinfo=None),
+            'created_at': datetime.now(UTC).replace(tzinfo=None),
         }
 
         await _buffer_audit_entry(audit_entry)
@@ -141,7 +141,7 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
 
 async def _buffer_audit_entry(entry: dict):
     try:
-        from fastapi_app.core.redis_wrapper import safe_rpush, safe_llen
+        from fastapi_app.core.redis_wrapper import safe_llen, safe_rpush
         pushed = await safe_rpush(AUDIT_BUFFER_KEY, json.dumps(entry, ensure_ascii=False), context="审计缓冲")
         if pushed > 0:
             buf_len = await safe_llen(AUDIT_BUFFER_KEY, context="审计缓冲")
@@ -170,9 +170,10 @@ async def _write_audit_direct(entries: list[dict]):
     if not entries:
         return
     try:
-        from fastapi_app.core.database import async_engine
         from sqlalchemy import text as sa_text
         from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+        from fastapi_app.core.database import async_engine
 
         if async_engine is None:
             return
@@ -183,7 +184,7 @@ async def _write_audit_direct(entries: list[dict]):
                 # 兜底：无论来自 Redis 缓冲（JSON 反序列化会丢 datetime 类型）还是直接路径，
                 # 都保证 created_at 是 datetime 实例，asyncpg 不接受 timestamp 列的字符串
                 if not isinstance(entry.get('created_at'), datetime):
-                    entry['created_at'] = datetime.now(timezone.utc).replace(tzinfo=None)
+                    entry['created_at'] = datetime.now(UTC).replace(tzinfo=None)
                 await session.execute(sa_text("""
                     INSERT INTO audit_log (user_id, username, action, resource_type, resource_id,
                                           detail, ip_address, user_agent, request_id, status_code, created_at)

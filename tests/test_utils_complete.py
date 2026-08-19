@@ -3,7 +3,8 @@
 测试范围：验证器、缓存、装饰器、编号生成器、Excel处理等
 
 注意：utils.validators 模块已移除，验证逻辑已迁移至 Pydantic schemas 和 FastAPI 依赖注入。
-"""  # noqa: D205
+"""
+# ruff: noqa: F821
 import time
 from datetime import datetime
 

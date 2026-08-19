@@ -1,0 +1,32 @@
+[
+  {
+    "issue_id": "L11-001",
+    "layer_id": "L11",
+    "severity": "medium",
+    "file": ".env.example",
+    "line": 1,
+    "description": ".env.example 缺少必需变量 DATABASE_URL",
+    "suggestion": "添加 DATABASE_URL 及说明",
+    "rule_id": "L11-CONFIG-MISSING-001",
+    "owner": "deploy-readiness-reviewer",
+    "due_date": "2026-09-30",
+    "status": "open",
+    "linked_pr": null,
+    "retest_result": "pending"
+  },
+  {
+    "issue_id": "L11-002",
+    "layer_id": "L11",
+    "severity": "medium",
+    "file": ".env.example",
+    "line": 1,
+    "description": ".env.example 缺少必需变量 ENVIRONMENT",
+    "suggestion": "添加 ENVIRONMENT 及说明",
+    "rule_id": "L11-CONFIG-MISSING-001",
+    "owner": "deploy-readiness-reviewer",
+    "due_date": "2026-09-30",
+    "status": "open",
+    "linked_pr": null,
+    "retest_result": "pending"
+  }
+]

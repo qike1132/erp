@@ -18,9 +18,9 @@
             <div class="pr-entry-group">
               <label class="pr-entry-label">生产日期</label>
               <div class="pr-entry-date-row">
-                <button type="button" :class="['pr-date-chip', { active: selectedDate === todayLocal() }]" @click="selectedDateModel = todayLocal()">今日</button>
-                <button type="button" :class="['pr-date-chip', { active: selectedDate === prevDay(todayLocal()) }]" @click="selectedDateModel = prevDay(todayLocal())">昨日</button>
-                <input v-model="selectedDateModel" type="date" class="pr-entry-input pr-entry-date-input" />
+                <button type="button" :class="['pr-date-chip', { active: selectedDate === todayLocal() }]" @click="selectedDateModel = todayLocal()" aria-label="今日">今日</button>
+                <button type="button" :class="['pr-date-chip', { active: selectedDate === prevDay(todayLocal()) }]" @click="selectedDateModel = prevDay(todayLocal())" aria-label="昨日">昨日</button>
+                <input v-model="selectedDateModel" type="date" class="pr-entry-input pr-entry-date-input" aria-label="生产日期" />
               </div>
             </div>
 
@@ -63,33 +63,14 @@
                 <button v-if="searchQuery" type="button" class="pr-entry-search-clear" @click="clearProduct" aria-label="清除">
                   <FontAwesomeIcon icon="times" aria-hidden="true" />
                 </button>
-                <div v-if="showDropdown" class="pr-entry-dropdown">
-                  <div v-if="searchLoading" class="pr-entry-dropdown-state">
-                    <UiSpinner /></div>
-                  <div v-else-if="searchError" class="pr-entry-dropdown-state pr-entry-dropdown-error">
-                    <FontAwesomeIcon icon="exclamation-circle" aria-hidden="true" /> {{ searchError }}
-                  </div>
-                  <div v-else-if="!searchResults.length" class="pr-entry-dropdown-state">
-                    <FontAwesomeIcon icon="inbox" aria-hidden="true" /> 无匹配产品
-                  </div>
-                  <button
-                    v-for="(p, idx) in searchResults"
-                    :key="p.id"
-                    type="button"
-                    :class="['pr-entry-dropdown-item', { active: idx === searchActiveIndex }]"
-                    @mousedown.prevent="selectProduct(p)"
-                  >
-                    <span class="pr-entry-dropdown-icon"><FontAwesomeIcon icon="box" aria-hidden="true" /></span>
-                    <span class="pr-entry-dropdown-content">
-                      <span class="pr-entry-dropdown-name">{{ p.name }}</span>
-                      <span class="pr-entry-dropdown-meta">
-                        <span v-if="p.barcode" class="pr-entry-dropdown-barcode"><FontAwesomeIcon icon="barcode" aria-hidden="true" /> {{ p.barcode }}</span>
-                        <span v-if="p.specification" class="pr-entry-dropdown-spec">{{ p.specification }}</span>
-                      </span>
-                    </span>
-                    <FontAwesomeIcon v-if="idx === searchActiveIndex" icon="arrow-right" class="pr-entry-dropdown-enter" aria-hidden="true" />
-                  </button>
-                </div>
+                <ProductSearchDropdown
+                  v-if="showDropdown"
+                  :search-loading="searchLoading"
+                  :search-error="searchError"
+                  :search-results="searchResults"
+                  :search-active-index="searchActiveIndex"
+                  @select="selectProduct"
+                />
               </div>
               <div v-if="form.product_name" class="pr-entry-selected">
                 <span class="pr-entry-selected-icon"><FontAwesomeIcon icon="check-circle" aria-hidden="true" /></span>
@@ -121,8 +102,8 @@
                   </button>
                 </div>
                 <div class="pr-entry-qty-btns">
-                  <button type="button" class="pr-entry-qty-pill" @click="adjustQty(-1)">−1</button>
-                  <button type="button" class="pr-entry-qty-pill" @click="adjustQty(1)">+1</button>
+                  <button type="button" class="pr-entry-qty-pill" @click="adjustQty(-1)" aria-label="减1">−1</button>
+                  <button type="button" class="pr-entry-qty-pill" @click="adjustQty(1)" aria-label="+1">+1</button>
                 </div>
               </div>
               <div v-if="formErrors.quantity" class="pr-entry-error">{{ formErrors.quantity }}</div>
@@ -164,61 +145,20 @@
             </div>
           </div>
 
-          <aside class="pr-entry-sidebar">
-            <div class="pr-entry-side-card">
-              <div class="pr-entry-side-head">
-                <span><FontAwesomeIcon icon="clock-rotate-left" aria-hidden="true" /> 最近使用</span>
-                <button v-if="recentProducts.length" type="button" class="pr-entry-side-clear" @click="clearRecent">清空</button>
-              </div>
-              <div v-if="recentProducts.length" class="pr-entry-recent-list">
-                <button
-                  v-for="p in recentProducts"
-                  :key="p.id"
-                  type="button"
-                  class="pr-entry-recent-item"
-                  :title="p.barcode || ''"
-                  @click="selectProduct(p)"
-                >
-                  <span class="pr-entry-recent-bullet" />
-                  <span class="pr-entry-recent-content">
-                    <span class="pr-entry-recent-name">{{ p.name }}</span>
-                    <span v-if="p.barcode" class="pr-entry-recent-barcode">{{ p.barcode }}</span>
-                  </span>
-                  <FontAwesomeIcon icon="chevron-right" class="pr-entry-recent-arrow" aria-hidden="true" />
-                </button>
-              </div>
-              <div v-else class="pr-entry-empty-small">
-                <FontAwesomeIcon icon="inbox" aria-hidden="true" />
-                <span>暂无最近使用</span>
-                <small>录入后会自动记录</small>
-              </div>
-            </div>
-
-            <div class="pr-entry-side-card">
-              <div class="pr-entry-side-head">
-                <span><FontAwesomeIcon icon="keyboard" aria-hidden="true" /> 快捷键</span>
-              </div>
-              <div class="pr-entry-shortcuts">
-                <div class="pr-entry-shortcut"><kbd>↑</kbd><kbd>↓</kbd><span>选择产品</span></div>
-                <div class="pr-entry-shortcut"><kbd>Enter</kbd><span>确认选择 / 提交</span></div>
-                <div class="pr-entry-shortcut"><kbd>Ctrl</kbd>+<kbd>Enter</kbd><span>直接提交</span></div>
-                <div class="pr-entry-shortcut"><kbd>Esc</kbd><span>关闭</span></div>
-              </div>
-            </div>
-          </aside>
+          <EntrySidebar :recent-products="recentProducts" @select="selectProduct" @clear="clearRecent" />
         </div>
 
         <footer class="pr-entry-footer">
           <label class="pr-entry-continue" :class="{ active: keepAdding }">
-            <input v-model="keepAdding" type="checkbox" />
+            <input v-model="keepAdding" type="checkbox" aria-label="勾选项" />
             <span class="pr-entry-continue-box" aria-hidden="true">
               <FontAwesomeIcon icon="check" />
             </span>
             <span>保存后继续录入下一条</span>
           </label>
           <div class="pr-entry-footer-btns">
-            <button type="button" class="pr-entry-btn-cancel" @click="closeEntryDrawer">取消</button>
-            <button type="button" class="pr-entry-btn-submit" :disabled="isSubmitting" @click="handleSubmit">
+            <button type="button" class="pr-entry-btn-cancel" @click="closeEntryDrawer" aria-label="取消">取消</button>
+            <button type="button" class="pr-entry-btn-submit" :disabled="isSubmitting" @click="handleSubmit" aria-label="确认录入 Ctrl+Enter">
               <UiLoadingIcon :loading="isSubmitting" icon="check" />
               <span>确认录入</span>
               <span class="pr-entry-btn-hint">Ctrl+Enter</span>
@@ -231,12 +171,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch, nextTick, onUnmounted } from 'vue'
-import { useQueryClient } from '@tanstack/vue-query'
-import { dailyProductionApi, productApi } from '@/api'
-import { showToast } from '@/composables/useToast'
+import { computed } from 'vue'
 import { formatCurrency } from '@/utils/format'
-import type { Product } from '@/types'
+import EntrySidebar from './EntrySidebar.vue'
+import ProductSearchDropdown from './ProductSearchDropdown.vue'
+import { useProductionEntry } from '@/views/production/composables/useProductionEntry'
 
 const props = defineProps<{
   open: boolean
@@ -257,235 +196,37 @@ const selectedDateModel = computed({
   set: (v: string) => emit('update:selectedDate', v),
 })
 
-const queryClient = useQueryClient()
-const _timers: ReturnType<typeof setTimeout>[] = []
-
-const departments = [
-  { value: 'filling', label: '充棉部', icon: 'fas fa-cloud' },
-  { value: 'handcraft', label: '手工部', icon: 'fas fa-hand-sparkles' },
-  { value: 'packaging', label: '包装部', icon: 'fas fa-box' },
-]
-
-const formDept = ref('filling')
-const isSubmitting = ref(false)
-const keepAdding = ref(false)
-
-const RECENT_PRODUCTS_KEY = 'production.recentProducts'
-const MAX_RECENT = 6
-const recentProducts = ref<Product[]>(loadRecent())
-
-function loadRecent(): Product[] {
-  try {
-    const raw = localStorage.getItem(RECENT_PRODUCTS_KEY)
-    const arr = raw ? JSON.parse(raw) : []
-    return Array.isArray(arr) ? arr.slice(0, MAX_RECENT) : []
-  } catch { return [] }
-}
-function saveRecent() {
-  try {
-    localStorage.setItem(RECENT_PRODUCTS_KEY, JSON.stringify(recentProducts.value.slice(0, MAX_RECENT)))
-  } catch { /* localStorage 不可用时静默忽略 */ }
-}
-function pushRecent(product: Product) {
-  if (!product || product.id == null) return
-  const filtered = recentProducts.value.filter(x => x.id !== product.id)
-  filtered.unshift(product)
-  recentProducts.value = filtered.slice(0, MAX_RECENT)
-  saveRecent()
-}
-function clearRecent() {
-  recentProducts.value = []
-  saveRecent()
-}
-
-function adjustQty(delta: number) {
-  const cur = Number(form.quantity) || 0
-  form.quantity = Math.max(0, cur + delta)
-}
-
-const form = reactive({
-  product_id: null as number | null,
-  product_name: '',
-  barcode: '',
-  unit_price: 0,
-  quantity: 0,
-  remark: '',
-})
-const formErrors = reactive<Record<string, string>>({})
-const computedValue = computed(() => (form.quantity || 0) * (form.unit_price || 0))
-
-const searchQuery = ref('')
-const searchResults = ref<Product[]>([])
-const showDropdown = ref(false)
-const searchLoading = ref(false)
-const searchError = ref('')
-const searchActiveIndex = ref(-1)
-const productSearchRef = ref<HTMLInputElement>()
-let searchTimer: ReturnType<typeof setTimeout> | null = null
-
-function onSearchInput() {
-  if (searchTimer) clearTimeout(searchTimer)
-  searchError.value = ''
-  if (form.product_name && searchQuery.value !== form.product_name) {
-    form.product_id = null; form.product_name = ''; form.barcode = ''; form.unit_price = 0
-  }
-  if (!searchQuery.value.trim()) { searchResults.value = []; showDropdown.value = false; return }
-  searchLoading.value = true
-  showDropdown.value = true
-  searchActiveIndex.value = -1
-  searchTimer = setTimeout(async () => {
-    try {
-      const res = (await productApi.search(searchQuery.value.trim())) as unknown as Product[] & { products?: Product[] }
-      searchResults.value = res.products ?? res ?? []
-      searchError.value = ''
-    } catch {
-      searchError.value = '产品搜索失败，请重试'
-      searchResults.value = []
-    } finally {
-      searchLoading.value = false
-    }
-  }, 300)
-}
-function onSearchFocus() {
-  if (searchQuery.value.trim() && (searchResults.value.length || searchError.value)) {
-    showDropdown.value = true
-  }
-}
-function onSearchBlur() {
-  const _t = setTimeout(() => { showDropdown.value = false; searchActiveIndex.value = -1 }, 150)
-  _timers.push(_t)
-}
-function moveSearchIndex(delta: number) {
-  if (!searchResults.value.length) return
-  searchActiveIndex.value += delta
-  if (searchActiveIndex.value < 0) searchActiveIndex.value = searchResults.value.length - 1
-  if (searchActiveIndex.value >= searchResults.value.length) searchActiveIndex.value = 0
-}
-function confirmSearchSelection() {
-  const product = searchActiveIndex.value >= 0 ? searchResults.value[searchActiveIndex.value] : undefined
-  if (product) selectProduct(product)
-}
-async function selectProduct(product: Product) {
-  form.product_id = product.id
-  form.product_name = product.name
-  form.barcode = product.barcode || ''
-  searchQuery.value = product.name
-  searchResults.value = []
-  showDropdown.value = false
-  searchActiveIndex.value = -1
-  pushRecent(product)
-  try {
-    const infoRes = await dailyProductionApi.productInfo(product.id)
-    if (infoRes?.data?.price) {
-      form.unit_price = infoRes.data.price
-    }
-  } catch {
-    // 获取单价失败不影响主流程
-  }
-}
-function clearProduct() {
-  form.product_id = null; form.product_name = ''; form.barcode = ''; searchQuery.value = ''; form.unit_price = 0
-}
-
-function toLocalDate(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-function todayLocal(): string { return toLocalDate(new Date()) }
-function prevDay(d: string) { const dt = new Date(d + 'T00:00:00'); dt.setDate(dt.getDate() - 1); return toLocalDate(dt) }
-
-function validateField(field: string): boolean {
-  formErrors[field] = ''
-  if (field === 'quantity') {
-    if (!form.quantity || form.quantity <= 0) {
-      formErrors.quantity = '生产数量必须大于0'
-      return false
-    }
-    if (form.quantity > 999999) {
-      formErrors.quantity = '生产数量不能超过999999'
-      return false
-    }
-  }
-  if (field === 'product_name' && !form.product_name) {
-    formErrors.product_name = '请选择产品'
-    return false
-  }
-  return true
-}
-
-function validateForm(): boolean {
-  let valid = true
-  if (!validateField('product_name')) valid = false
-  if (!validateField('quantity')) valid = false
-  if (!formDept.value) {
-    showToast('请选择生产部门', 'warning')
-    valid = false
-  }
-  return valid
-}
-
-function closeEntryDrawer() {
-  openModel.value = false
-  resetForm()
-}
-
-async function handleSubmit() {
-  if (!validateForm()) return
-  if (keepAdding.value) {
-    await confirmSubmit({ keepOpen: true })
-  } else {
-    await confirmSubmit({ keepOpen: false })
-  }
-}
-
-async function confirmSubmit(opts: { keepOpen: boolean } = { keepOpen: false }) {
-  isSubmitting.value = true
-  try {
-    await dailyProductionApi.createRecord({
-      department: formDept.value, product_id: form.product_id, product_name: form.product_name,
-      barcode: form.barcode, unit_price: form.unit_price || 0, quantity: form.quantity,
-      production_value: Number(computedValue.value), production_date: props.selectedDate, remark: form.remark,
-    } as Record<string, unknown>)
-    showToast('录入成功', 'success')
-    if (opts.keepOpen) {
-      resetFormForContinue()
-      nextTick(() => productSearchRef.value?.focus())
-    } else {
-      resetForm()
-      openModel.value = false
-    }
-    queryClient.invalidateQueries({ queryKey: ['daily-production-records'] })
-    queryClient.invalidateQueries({ queryKey: ['daily-production-daily-summary'] })
-    queryClient.invalidateQueries({ queryKey: ['daily-production-monthly-summary'] })
-  } catch (error: unknown) {
-    const detail = (error as { response?: { data?: { detail?: string } } } | null)?.response?.data?.detail
-    showToast(detail ?? '录入失败', 'error')
-  } finally { isSubmitting.value = false }
-}
-
-function resetForm() {
-  form.product_id = null; form.product_name = ''; form.barcode = ''
-  form.unit_price = 0; form.quantity = 0; form.remark = ''; searchQuery.value = ''
-  formDept.value = 'filling'
-  keepAdding.value = false
-  Object.keys(formErrors).forEach(k => formErrors[k] = '')
-}
-
-function resetFormForContinue() {
-  form.product_id = null; form.product_name = ''; form.barcode = ''
-  form.quantity = 0; searchQuery.value = ''
-  Object.keys(formErrors).forEach(k => formErrors[k] = '')
-}
-
-watch(() => props.open, (v) => {
-  if (v) {
-    nextTick(() => productSearchRef.value?.focus())
-  }
-})
-
-onUnmounted(() => {
-  if (searchTimer) clearTimeout(searchTimer)
-  _timers.forEach(clearTimeout)
-})
+const {
+  departments,
+  formDept,
+  isSubmitting,
+  keepAdding,
+  recentProducts,
+  clearRecent,
+  form,
+  formErrors,
+  computedValue,
+  adjustQty,
+  searchQuery,
+  searchResults,
+  showDropdown,
+  searchLoading,
+  searchError,
+  searchActiveIndex,
+  productSearchRef,
+  onSearchInput,
+  onSearchFocus,
+  onSearchBlur,
+  moveSearchIndex,
+  confirmSearchSelection,
+  selectProduct,
+  clearProduct,
+  validateField,
+  closeEntryDrawer,
+  handleSubmit,
+  todayLocal,
+  prevDay,
+} = useProductionEntry(openModel, selectedDateModel)
 
 defineExpose({ handleSubmit, closeEntryDrawer })
 </script>
@@ -550,20 +291,6 @@ defineExpose({ handleSubmit, closeEntryDrawer })
 .pr-entry-search-icon { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: #94a3b8; font-size: 15px; pointer-events: none; }
 .pr-entry-search-clear { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 28px; height: 28px; border: none; background: #f1f5f9; border-radius: 50%; cursor: pointer; color: #64748b; font-size: 11px; display: flex; align-items: center; justify-content: center; transition: all 0.15s ease; }
 .pr-entry-search-clear:hover { background: #e2e8f0; color: #1e293b; }
-.pr-entry-dropdown { position: absolute; top: 100%; left: 0; right: 0; margin-top: 6px; background: white; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 12px 40px rgba(15, 23, 42, 0.15); max-height: 260px; overflow-y: auto; z-index: 20; padding: 4px; }
-.pr-entry-dropdown-state { padding: 16px; font-size: 13px; color: #64748b; text-align: center; display: flex; align-items: center; justify-content: center; gap: 6px; }
-.pr-entry-dropdown-state i { font-size: 14px; }
-.pr-entry-dropdown-error { color: #dc2626; }
-.pr-entry-dropdown-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; border: none; background: transparent; text-align: left; cursor: pointer; border-radius: 8px; font-family: inherit; color: inherit; transition: background 0.15s ease; }
-.pr-entry-dropdown-item:hover, .pr-entry-dropdown-item.active { background: #eff6ff; }
-.pr-entry-dropdown-icon { width: 32px; height: 32px; border-radius: 8px; background: #f1f5f9; color: #64748b; display: flex; align-items: center; justify-content: center; font-size: 13px; flex-shrink: 0; }
-.pr-entry-dropdown-item.active .pr-entry-dropdown-icon { background: #dbeafe; color: #1e40af; }
-.pr-entry-dropdown-content { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.pr-entry-dropdown-name { font-size: 13px; font-weight: 700; color: #1e293b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pr-entry-dropdown-meta { display: flex; align-items: center; gap: 8px; font-size: 11px; color: #64748b; }
-.pr-entry-dropdown-barcode { display: inline-flex; align-items: center; gap: 3px; }
-.pr-entry-dropdown-barcode i { font-size: 10px; }
-.pr-entry-dropdown-enter { color: #1e40af; font-size: 12px; }
 .pr-entry-selected { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; font-size: 13px; font-weight: 600; color: #1e40af; }
 .pr-entry-selected-icon { color: #1e40af; font-size: 15px; flex-shrink: 0; }
 .pr-entry-selected-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -592,32 +319,6 @@ defineExpose({ handleSubmit, closeEntryDrawer })
 .pr-entry-value-display { display: flex; align-items: center; gap: 8px; padding: 10px 14px; min-height: 44px; background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border: 1px solid #bfdbfe; border-radius: 10px; font-size: 18px; font-weight: 800; color: #1e40af; font-variant-numeric: tabular-nums; }
 .pr-entry-value-display i { font-size: 14px; opacity: 0.7; }
 
-.pr-entry-sidebar { padding: 22px 20px; background: #f8fafc; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; }
-.pr-entry-side-card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
-.pr-entry-side-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; background: #f8fafc; border-bottom: 1px solid #f1f5f9; font-size: 12px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.04em; }
-.pr-entry-side-head span { display: inline-flex; align-items: center; gap: 6px; }
-.pr-entry-side-head i { color: #1e40af; font-size: 11px; }
-.pr-entry-side-clear { border: none; background: transparent; color: #94a3b8; font-size: 11px; font-weight: 600; cursor: pointer; padding: 2px 4px; font-family: inherit; text-transform: none; letter-spacing: 0; transition: color 0.15s ease; }
-.pr-entry-side-clear:hover { color: #dc2626; }
-.pr-entry-recent-list { display: flex; flex-direction: column; padding: 6px; }
-.pr-entry-recent-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border: none; background: transparent; text-align: left; cursor: pointer; border-radius: 8px; font-family: inherit; color: inherit; transition: all 0.15s ease; }
-.pr-entry-recent-item:hover { background: #eff6ff; transform: translateX(2px); }
-.pr-entry-recent-bullet { width: 6px; height: 6px; border-radius: 50%; background: #cbd5e1; flex-shrink: 0; transition: background 0.15s ease, transform 0.15s ease; }
-.pr-entry-recent-item:hover .pr-entry-recent-bullet { background: #3b82f6; transform: scale(1.4); }
-.pr-entry-recent-content { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.pr-entry-recent-name { font-size: 13px; font-weight: 600; color: #1e293b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pr-entry-recent-barcode { font-size: 11px; color: #64748b; font-family: 'SF Mono', 'Consolas', monospace; }
-.pr-entry-recent-arrow { font-size: 10px; color: #cbd5e1; transition: all 0.15s ease; }
-.pr-entry-recent-item:hover .pr-entry-recent-arrow { color: #1e40af; transform: translateX(2px); }
-.pr-entry-empty-small { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 24px 12px; color: #94a3b8; text-align: center; }
-.pr-entry-empty-small i { font-size: 22px; opacity: 0.5; }
-.pr-entry-empty-small span { font-size: 12px; font-weight: 600; }
-.pr-entry-empty-small small { font-size: 11px; color: #cbd5e1; }
-.pr-entry-shortcuts { padding: 10px 14px 12px; display: flex; flex-direction: column; gap: 8px; }
-.pr-entry-shortcut { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #475569; }
-.pr-entry-shortcut span { margin-left: auto; font-weight: 500; }
-.pr-entry-shortcut kbd { display: inline-block; min-width: 22px; padding: 2px 6px; background: #f1f5f9; border: 1px solid #e2e8f0; border-bottom-width: 2px; border-radius: 5px; font-size: 10px; font-weight: 700; color: #475569; font-family: 'SF Mono', 'Consolas', monospace; text-align: center; }
-
 .pr-entry-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 24px; background: #f8fafc; border-top: 1px solid #f1f5f9; flex-shrink: 0; flex-wrap: wrap; }
 .pr-entry-continue { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; font-weight: 600; color: #475569; user-select: none; padding: 4px 0; }
 .pr-entry-continue input { position: absolute; opacity: 0; pointer-events: none; }
@@ -643,7 +344,6 @@ defineExpose({ handleSubmit, closeEntryDrawer })
   .pr-entry-modal { border-radius: 16px; }
   .pr-entry-body { grid-template-columns: 1fr; }
   .pr-entry-form { border-right: none; border-bottom: 1px solid #f1f5f9; max-height: 55vh; }
-  .pr-entry-sidebar { padding: 16px; max-height: 40vh; }
   .pr-entry-dept-grid { grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .pr-entry-dept-card { padding: 10px 6px; }
   .pr-entry-dept-icon { width: 36px; height: 36px; font-size: 16px; }
@@ -655,7 +355,6 @@ defineExpose({ handleSubmit, closeEntryDrawer })
   .pr-entry-modal { width: 100%; height: 100%; max-height: 100%; border-radius: 0; }
   .pr-entry-header { padding: 14px 16px; }
   .pr-entry-form { padding: 16px; gap: 14px; }
-  .pr-entry-sidebar { padding: 14px; }
   .pr-entry-footer { padding: 12px 16px; flex-direction: column; align-items: stretch; }
   .pr-entry-footer-btns { width: 100%; }
   .pr-entry-btn-cancel, .pr-entry-btn-submit { flex: 1; }

@@ -6,6 +6,7 @@ import { ref, nextTick } from 'vue'
 const mocks = vi.hoisted(() => ({
   beileListMock: vi.fn(),
   confirmBeileOrderMock: vi.fn(),
+  confirmBeileStockinMock: vi.fn(),
   refetchMock: vi.fn(),
   setQueryDataMock: vi.fn(),
   // 由 @tanstack/vue-query mock 工厂在导入时赋值为真实 ref（供测试内修改数据）
@@ -16,6 +17,7 @@ vi.mock('@/api', () => ({
   orderApi: {
     beileList: mocks.beileListMock,
     confirmBeileOrder: mocks.confirmBeileOrderMock,
+    confirmBeileStockin: mocks.confirmBeileStockinMock,
   },
 }))
 
@@ -132,6 +134,9 @@ function makeListResponse(overrides: Partial<OrderListApiResponse> = {}): OrderL
       {
         id: 201,
         record_type: 'stockin',
+        confirmed: true,
+        confirmed_at: '2026-08-10 08:00:00',
+        confirmed_by: 'admin',
         customer: '备货客户',
         order_date: '2026-08-10',
         product_name: '产品C',
@@ -161,6 +166,7 @@ describe('BeileOrderTab 状态列与确认按钮行为', () => {
   beforeEach(() => {
     mocks.beileListMock.mockReset()
     mocks.confirmBeileOrderMock.mockReset()
+    mocks.confirmBeileStockinMock.mockReset()
     mocks.refetchMock.mockReset()
     mocks.setQueryDataMock.mockReset()
     // setQueryData 真实应用 updater，让乐观移除可以在 DOM 上观察到
@@ -171,9 +177,10 @@ describe('BeileOrderTab 状态列与确认按钮行为', () => {
     })
     mocks.queryData.value = makeListResponse()
     mocks.confirmBeileOrderMock.mockResolvedValue({ success: true, message: '订单已确认' })
+    mocks.confirmBeileStockinMock.mockResolvedValue({ success: true, message: '备货已确认' })
   })
 
-  it('状态列：未确认订单显示「未确认」徽章，已确认订单显示「已确认」徽章，备货记录显示 "-"', async () => {
+  it('状态列：未确认记录显示「未确认」徽章，已确认订单/备货显示「已确认」徽章', async () => {
     const wrapper = await mountTab()
 
     // 切换到「已确认」状态（确认状态 TAB 已迁至 HubeiView 头部，此处直接调用暴露方法）
@@ -183,23 +190,24 @@ describe('BeileOrderTab 状态列与确认按钮行为', () => {
     const rows = wrapper.findAll('.vl-row')
     expect(rows.length).toBe(3)
 
-    // 已确认 TAB 下确认操作列隐藏，徽章仅出现在状态列：未确认订单 + 已确认订单各 1 个
+    // 已确认 TAB 下确认操作列隐藏，徽章仅出现在状态列：未确认订单 + 已确认订单/备货
     const pendingBadges = wrapper.findAll('.bo-confirm-badge--pending')
     expect(pendingBadges.length).toBe(1)
     expect(pendingBadges[0]!.text()).toBe('未确认')
 
     const doneBadges = wrapper.findAll('.bo-confirm-badge--done')
-    expect(doneBadges.length).toBe(1)
-    expect(doneBadges[0]!.text()).toBe('已确认')
+    expect(doneBadges.length).toBe(2)
+    expect(doneBadges.every((b) => b.text() === '已确认')).toBe(true)
 
-    // 备货记录状态列显示 "-"
+    // 备货记录状态列显示「已确认」徽章
     const stockinRow = rows[2]!
-    expect(stockinRow.text()).toContain('-')
-    expect(stockinRow.findAll('.bo-confirm-badge').length).toBe(0)
+    expect(stockinRow.findAll('.bo-confirm-badge--done').length).toBe(1)
   })
 
   it('确认列：未确认订单仅显示「确认订单」按钮（无「未确认订单」标签），已确认订单无按钮', async () => {
     const wrapper = await mountTab()
+    ;(wrapper.vm as unknown as { setConfirmStatus: (v: string) => void }).setConfirmStatus('unconfirmed')
+    await nextTick()
 
     const rows = wrapper.findAll('.vl-row')
 
@@ -217,12 +225,14 @@ describe('BeileOrderTab 状态列与确认按钮行为', () => {
     expect(confirmedRow.find('.bo-confirm-btn').exists()).toBe(false)
     expect(confirmedRow.findAll('.bo-confirm-badge--done').length).toBe(1)
 
-    // 备货记录：无按钮
+    // 已确认备货记录：无按钮
     expect(rows[2]!.find('.bo-confirm-btn').exists()).toBe(false)
   })
 
   it('点击「确认订单」调用 confirmBeileOrder、提示成功，并在未确认筛选下乐观移除该行', async () => {
     const wrapper = await mountTab()
+    ;(wrapper.vm as unknown as { setConfirmStatus: (v: string) => void }).setConfirmStatus('unconfirmed')
+    await nextTick()
     const btn = wrapper.find('.vl-row .bo-confirm-btn')
     expect(btn.exists()).toBe(true)
 
@@ -244,6 +254,57 @@ describe('BeileOrderTab 状态列与确认按钮行为', () => {
     expect(rows.map((r) => r.text())).not.toContain(expect.stringContaining('未确认客户'))
   })
 
+  it('未确认备货显示「确认备货」按钮，点击调用 confirmBeileStockin、提示成功并乐观移除', async () => {
+    // 列表仅含一条未确认备货记录
+    mocks.queryData.value = makeListResponse({
+      total: 1,
+      unconfirmed_count: 1,
+      data: [
+        {
+          id: 201,
+          record_type: 'stockin',
+          confirmed: false,
+          confirmed_at: null,
+          confirmed_by: null,
+          customer: '备货客户',
+          order_date: '2026-08-10',
+          product_name: '产品C',
+          product_id: 3,
+          quantity: 3,
+          deduct_quantity: 0,
+          deduct_stock: false,
+          note: '',
+          status: '已入库',
+          factories: ['湖北'],
+          items: [],
+        },
+      ] as unknown as OrderListApiResponse['data'],
+    })
+
+    const wrapper = await mountTab()
+    ;(wrapper.vm as unknown as { setConfirmStatus: (v: string) => void }).setConfirmStatus('unconfirmed')
+    await nextTick()
+
+    const btn = wrapper.find('.vl-row .bo-confirm-btn')
+    expect(btn.exists()).toBe(true)
+    expect(btn.text()).toBe('确认备货')
+
+    await btn.trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    // 调用备货确认接口（而非订单确认接口）
+    expect(mocks.confirmBeileStockinMock).toHaveBeenCalledTimes(1)
+    expect(mocks.confirmBeileStockinMock).toHaveBeenCalledWith(201)
+    expect(mocks.confirmBeileOrderMock).not.toHaveBeenCalled()
+
+    const { toast } = await import('@/composables/useToast')
+    expect(toast.success).toHaveBeenCalledWith('备货已确认')
+
+    // 未确认筛选下：行被乐观移除
+    expect(wrapper.findAll('.vl-row').length).toBe(0)
+  })
+
   it('确认中：按钮禁用并显示「确认中…」，请求完成后恢复', async () => {
     // 挂起确认请求
     let resolveConfirm!: (v: { success: boolean; message: string }) => void
@@ -252,6 +313,8 @@ describe('BeileOrderTab 状态列与确认按钮行为', () => {
     )
 
     const wrapper = await mountTab()
+    ;(wrapper.vm as unknown as { setConfirmStatus: (v: string) => void }).setConfirmStatus('unconfirmed')
+    await nextTick()
     const btn = wrapper.find('.vl-row .bo-confirm-btn')
 
     await btn.trigger('click')
@@ -273,10 +336,25 @@ describe('BeileOrderTab 状态列与确认按钮行为', () => {
 
   it('已确认订单不显示确认按钮，因此不存在误触发确认的场景', async () => {
     const wrapper = await mountTab()
+    ;(wrapper.vm as unknown as { setConfirmStatus: (v: string) => void }).setConfirmStatus('unconfirmed')
+    await nextTick()
     // 已确认订单行（第 2 行）内没有任何 .bo-confirm-btn
     const confirmedRow = wrapper.findAll('.vl-row')[1]!
     expect(confirmedRow.find('.bo-confirm-btn').exists()).toBe(false)
     // 全表只有一个确认按钮（仅未确认订单）
     expect(wrapper.findAll('.bo-confirm-btn').length).toBe(1)
+  })
+
+  it('默认 TAB 为「未确认」：初始 confirmStatus 为 unconfirmed（「全部」TAB 已移除）', async () => {
+    const wrapper = await mountTab()
+
+    // 默认确认状态为未确认
+    const vm = wrapper.vm as unknown as { confirmStatus: string }
+    expect(vm.confirmStatus).toBe('unconfirmed')
+
+    // 未确认 TAB 下确认状态列隐藏、确认操作列显示
+    const headers = wrapper.findAll('.bo-th').map((h) => h.text())
+    expect(headers).toContain('确认操作')
+    expect(headers).not.toContain('确认状态')
   })
 })

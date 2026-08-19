@@ -19,13 +19,16 @@ ERP 生产模式监督器 (Windows 原生)。
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import shutil
 import socket
-import subprocess
+import subprocess  # nosec B404
 import sys
 import time
+import urllib.error
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -53,7 +56,7 @@ def _load_dotenv() -> None:
         from dotenv import load_dotenv
         load_dotenv(PROJECT_ROOT / ".env", override=False)
     except ImportError:
-        pass
+        pass  # defensive: 可选依赖未安装,优雅降级
 
 
 def _get_int_env(name: str, default: int) -> int:
@@ -91,9 +94,9 @@ def _is_redis_up(port: int) -> bool:
 
 def _http_ok(url: str, timeout: float = 2.0) -> bool:
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:  # nosec B310
             return resp.status == 200
-    except Exception:
+    except (urllib.error.URLError, OSError, TimeoutError):
         return False
 
 
@@ -104,7 +107,7 @@ def _iso_now() -> str:
 def _cmd_uvicorn(api_port: int, workers: int) -> list[str]:
     return [
         _PY, "-m", "uvicorn", "fastapi_app.main:app",
-        "--host", "0.0.0.0",
+        "--host", "0.0.0.0",  # nosec B104
         "--port", str(api_port),
         "--workers", str(workers),
         "--http", "httptools",
@@ -121,7 +124,7 @@ def _cmd_arq() -> list[str]:
 
 def _cmd_vite_preview(web_port: int) -> list[str]:
     npx = "npx.cmd" if os.name == "nt" else "npx"
-    return [npx, "vite", "preview", "--port", str(web_port), "--host", "0.0.0.0"]
+    return [npx, "vite", "preview", "--port", str(web_port), "--host", "0.0.0.0"]  # nosec B104
 
 
 # ---------------------------------------------------------------------------
@@ -178,7 +181,7 @@ class _Managed:
         self.health_url = health_url
         self.start_grace = start_grace
         self.proc: subprocess.Popen | None = None
-        self._logf = None
+        self._logf: io.BufferedWriter | None = None
         self.delay = 2.0
         self.next_start = 0.0
         self.status = "stopped"
@@ -194,8 +197,8 @@ class _Managed:
         LOGS_DIR.mkdir(exist_ok=True)
         log_path = LOGS_DIR / f"{self.name}.out.log"
         try:
-            self._logf = open(log_path, "ab")
-            self.proc = subprocess.Popen(
+            self._logf = open(log_path, "ab")  # noqa: SIM115 需保持打开作为子进程 stdout
+            self.proc = subprocess.Popen(  # nosec B603
                 self.cmd, cwd=str(self.cwd), env=env,
                 stdout=self._logf, stderr=subprocess.STDOUT,
                 creationflags=_CREATE_NO_WINDOW,
@@ -205,7 +208,7 @@ class _Managed:
             self.status = "running"
             self.delay = 2.0
             print(f"[prod_runner] {self.name} 已启动 (PID {self.proc.pid}, 日志 {log_path.name})")
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             self.status = "failed"
             print(f"[prod_runner] {self.name} 启动失败: {e}")
 
@@ -218,7 +221,7 @@ class _Managed:
             return
         pid = self.proc.pid
         if os.name == "nt":
-            subprocess.run(
+            subprocess.run(  # nosec B603 B607
                 ["taskkill", "/F", "/T", "/PID", str(pid)],
                 creationflags=_CREATE_NO_WINDOW,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15,
@@ -226,18 +229,14 @@ class _Managed:
         else:
             import signal
             try:
-                os.killpg(os.getpgid(pid), signal.SIGTERM)
-            except Exception:
+                os.killpg(os.getpgid(pid), signal.SIGTERM)  # type: ignore[attr-defined]
+            except (ProcessLookupError, OSError):
                 self.proc.terminate()
-        try:
+        with contextlib.suppress(subprocess.TimeoutExpired):
             self.proc.wait(timeout=5)
-        except Exception:
-            pass
         if self._logf:
-            try:
+            with contextlib.suppress(OSError):
                 self._logf.close()
-            except Exception:
-                pass
         self._logf = None
         self.proc = None
 
@@ -297,26 +296,38 @@ class _FrontendNginx:
         导致端口与连接混乱、进程数爆炸。因此先优雅停 master，再按镜像名
         强制结束所有 nginx.exe（含孤儿 worker），确保干净重启。
         """
-        subprocess.run(
+        subprocess.run(  # nosec B603
             [str(self.nginx), "-s", "stop"],
             creationflags=_CREATE_NO_WINDOW,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15,
         )
         if os.name == "nt":
-            subprocess.run(
+            subprocess.run(  # nosec B603 B607
                 ["taskkill", "/F", "/T", "/IM", "nginx.exe"],
                 creationflags=_CREATE_NO_WINDOW,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15,
             )
 
     def _ensure_started(self) -> None:
+        # 启动前先彻底清理历史遗留的 nginx 进程（含孤儿 worker）。
+        # 否则端口 3000 被旧 master 占用，新 master 无法绑定。
+        self._kill_all()
         LOGS_DIR.mkdir(exist_ok=True)
-        subprocess.run(
+        # Windows 上 nginx.exe 本身就是 master 进程，启动后不会退出返回，
+        # 绝不能用 subprocess.run（会阻塞到 timeout 抛 TimeoutExpired，拖垮
+        # prod_runner 主流程，导致 NSSM 反复重启监督器、nginx 被周期性
+        # kill/重建，全站连接每 ~35 秒被切断一次，前端所有请求 502 重试）。
+        # 改用 Popen 派生后立即返回，再通过 /nginx-health 探测确认就绪。
+        subprocess.Popen(  # nosec B603
             [str(self.nginx), "-p", str(PROJECT_ROOT), "-c", str(NGINX_CONF),
              "-e", str(LOGS_DIR / "nginx-error.log")],
             cwd=str(PROJECT_ROOT), creationflags=_CREATE_NO_WINDOW,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
+        for _ in range(10):
+            if self.alive():
+                break
+            time.sleep(0.5)
         self.status = "running"
         self.delay = 5.0
         print(f"[prod_runner] 前端 Nginx 已启动 (port {self.web_port})")
@@ -336,8 +347,7 @@ class _FrontendNginx:
 
     def maybe_restart(self) -> None:
         if self.status == "crashed" and self.next_start <= time.monotonic():
-            self._kill_all()
-            self._ensure_started()
+            self._ensure_started()  # _ensure_started 内部已先 _kill_all()
 
     def stop(self) -> None:
         self._kill_all()
@@ -447,7 +457,7 @@ class Supervisor:
                 if not self.ready and self.backend.status == "ready":
                     print("[prod_runner] 后端就绪 (/api/health 200)")
                 self.write_status()
-            except Exception as e:
+            except Exception as e:  # defensive: supervisor main loop must not exit
                 print(f"[prod_runner] 主循环异常（已吞掉，不退出）: {type(e).__name__}: {e}")
             time.sleep(3)
 
@@ -476,8 +486,8 @@ def _install_signal_handlers(sup: Supervisor) -> None:
             HANDLER_ROUTINE = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_uint)
             _handler_ref = HANDLER_ROUTINE(_win_handler)  # 防止 GC 回收
             ctypes.windll.kernel32.SetConsoleCtrlHandler(_handler_ref, True)
-        except Exception:
-            pass
+        except (OSError, AttributeError):
+            pass  # defensive: 异常静默处理,不影响主流程
     else:
         import signal
 

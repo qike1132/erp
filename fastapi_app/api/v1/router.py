@@ -11,6 +11,7 @@ from fastapi_app.api.v1.endpoints.backup import router as backup_router
 from fastapi_app.api.v1.endpoints.batch import router as batch_router
 from fastapi_app.api.v1.endpoints.case_endpoint import router as case_router
 from fastapi_app.api.v1.endpoints.customer import router as customer_router
+from fastapi_app.api.v1.endpoints.customer_sampling import router as customer_sampling_router
 from fastapi_app.api.v1.endpoints.daily_production import router as daily_production_router
 from fastapi_app.api.v1.endpoints.dashboard import router as dashboard_router
 from fastapi_app.api.v1.endpoints.dead_letter import router as dead_letter_router
@@ -19,10 +20,9 @@ from fastapi_app.api.v1.endpoints.material_registration import router as materia
 from fastapi_app.api.v1.endpoints.monitoring import router as monitoring_router
 from fastapi_app.api.v1.endpoints.notification import router as notification_router
 from fastapi_app.api.v1.endpoints.ocr_import import router as ocr_import_router
-from fastapi_app.api.v1.endpoints.outsource import router as outsource_router
 from fastapi_app.api.v1.endpoints.order import router as order_router
 from fastapi_app.api.v1.endpoints.order_batch import router as order_batch_router
-from fastapi_app.api.v1.endpoints.customer_sampling import router as customer_sampling_router
+from fastapi_app.api.v1.endpoints.outsource import router as outsource_router
 from fastapi_app.api.v1.endpoints.pattern_maker import router as pattern_maker_router
 from fastapi_app.api.v1.endpoints.permission import router as permission_router
 from fastapi_app.api.v1.endpoints.product import router as product_router

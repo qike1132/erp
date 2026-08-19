@@ -10,17 +10,17 @@
 - 每日/月度汇总
 - 边界条件（无效部门、负数数量、超大数量、空产品名）
 """
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
 from fastapi_app.services.daily_production_service import (
-    validate_record_data,
-    get_records,
-    create_record,
-    update_record,
-    delete_record,
-    get_daily_summary,
-    get_monthly_summary,
     DEPARTMENT_LABELS,
+    create_record,
+    delete_record,
+    get_records,
+    update_record,
+    validate_record_data,
 )
 
 

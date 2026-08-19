@@ -3,12 +3,11 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
-from sqlalchemy import inspect as sa_inspect
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, desc, func
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
@@ -39,16 +38,16 @@ class PurchaseOrder(Base):
     product_name: Mapped[str | None] = mapped_column(String(200), comment='产品名称')
     product_quantity: Mapped[float | None] = mapped_column(Numeric(12, 2), comment='订单数量')
     total_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), default=0, comment='订单总金额')
-    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), comment='创建时间')
-    update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
+    update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
     created_by: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id'), comment='创建人')
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, comment='完成时间')
     completed_by: Mapped[str | None] = mapped_column(String(50), comment='完成人')
 
-    items: Mapped[list["PurchaseOrderItem"]] = relationship(
+    items: Mapped[list[PurchaseOrderItem]] = relationship(
         'PurchaseOrderItem', backref='order', cascade='all, delete-orphan', lazy='raise'
     )
-    supplier_rel: Mapped["Supplier | None"] = relationship(
+    supplier_rel: Mapped[Supplier | None] = relationship(
         "Supplier", back_populates="purchase_orders", lazy="raise"
     )
 
@@ -144,8 +143,8 @@ class PurchaseOrderItem(Base):
     material_category: Mapped[str | None] = mapped_column(String(20), comment='物料分类')
     remark: Mapped[str | None] = mapped_column(Text, comment='备注')
     supplier_name: Mapped[str | None] = mapped_column(String(100), comment='供应商名称(明细级)')
-    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), comment='创建时间')
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 
 
     __table_args__ = (

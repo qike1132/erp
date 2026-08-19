@@ -18,19 +18,19 @@
 import asyncio
 import contextlib
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import ClassVar
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+# 向后兼容：re-export core 的同步实现（本模块无同步版本，直接复用 core 的实现是安全的）
 from fastapi_app.core.number_generator import (
     _acquire_advisory_lock_async,
     _number_lock_key,
+    generate_number_sync,  # noqa: F401
 )
 from fastapi_app.shared_models import Order, PurchaseOrder, StockIn, StockOut
-
-# 向后兼容：re-export core 的同步实现（本模块无同步版本，直接复用 core 的实现是安全的）
-from fastapi_app.core.number_generator import generate_number_sync  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 class AsyncNumberGenerator:
     """异步编号生成器，在批量操作中维护序号计数器"""
     _instance = None
-    _counters = {}
+    _counters: ClassVar[dict] = {}
     _lock = asyncio.Lock()
     _last_cleanup_date = None
 
@@ -52,7 +52,7 @@ class AsyncNumberGenerator:
     @classmethod
     def _cleanup_old_entries(cls):
         """清理非当日的计数器条目，防止内存泄漏"""
-        today_str = datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y%m%d')
+        today_str = datetime.now(UTC).replace(tzinfo=None).strftime('%Y%m%d')
         # 防御性清理：条目过多时强制清理（即使日期相同）
         if cls._last_cleanup_date == today_str and len(cls._counters) < 500:
             return
@@ -84,7 +84,7 @@ async def generate_number_async(prefix: str, model, date_field: str, number_fiel
     Returns:
         str: 生成的编号,格式为 PREFIX-YYYYMMDD-XXXX
     """
-    today = datetime.now(timezone.utc).replace(tzinfo=None)
+    today = datetime.now(UTC).replace(tzinfo=None)
     date_str = today.strftime('%Y%m%d')
 
     async with _async_number_generator._lock:
@@ -108,7 +108,7 @@ async def generate_number_async(prefix: str, model, date_field: str, number_fiel
                 .with_for_update()
             )
             record = result.scalar_one_or_none()
-            await short_session.commit()
+            await short_session.commit()  # manual-tx: 独立短会话事务
 
         db_max = 0
         if record:

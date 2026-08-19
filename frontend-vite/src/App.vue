@@ -1,5 +1,5 @@
 <template>
-  <a href="#main-content" class="skip-link">跳到主内容</a>
+  <a href="#main-content" class="skip-link" aria-label="跳到主内容">跳到主内容</a>
   <router-view />
   <Transition name="route-loading-fade">
     <div

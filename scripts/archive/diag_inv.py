@@ -1,5 +1,7 @@
-from fastapi_app.core.database import get_sync_engine
 from sqlalchemy import text
+
+from fastapi_app.core.database import get_sync_engine
+
 eng = get_sync_engine()
 conn = eng.connect()
 print("=== inventory_log columns ===")

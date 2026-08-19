@@ -22,7 +22,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sqlalchemy import text
-from fastapi_app.core.database import _init_async_engine, _AsyncSessionLocal
+
+from fastapi_app.core.database import _AsyncSessionLocal, _init_async_engine
 
 PARTITION_YEARS = [2024, 2025, 2026, 2027, 2028]
 

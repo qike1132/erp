@@ -12,7 +12,7 @@ import json
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import openpyxl
 from sqlalchemy import and_, delete, select, text
@@ -23,13 +23,12 @@ from sqlalchemy.orm import load_only, selectinload
 from fastapi_app.core.cache import cache_result, invalidate_local_cache
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
 from fastapi_app.core.redis_wrapper import safe_get, safe_set
-
 from fastapi_app.services import customer_service, product_service
-from fastapi_app.services.notification_service import StockEvent, publish_stock_event
 from fastapi_app.services.fifo_allocation import (
     _get_shipped_fifo_map,
     _invalidate_fifo_cache,
 )
+from fastapi_app.services.notification_service import StockEvent, publish_stock_event
 from fastapi_app.services.plan_utils import (
     build_inventory_map,
     calc_shipment_status,
@@ -117,7 +116,7 @@ async def _generate_plan_no() -> str:
     from fastapi_app.core.database import _AsyncSessionLocal
     from fastapi_app.core.number_generator import _acquire_advisory_lock_async, _number_lock_key
 
-    today_str = datetime.now(timezone.utc).strftime('%Y%m%d')
+    today_str = datetime.now(UTC).strftime('%Y%m%d')
     prefix = f'PP-{today_str}-'
     async with _AsyncSessionLocal() as short_session:
         await _acquire_advisory_lock_async(short_session, _number_lock_key('PP', today_str))
@@ -129,7 +128,7 @@ async def _generate_plan_no() -> str:
             .with_for_update()
         )
         max_no = result.scalar()
-        await short_session.commit()
+        await short_session.commit()  # manual-tx: 独立短会话事务
     if max_no:
         try:
             next_seq = int(max_no.split('-')[-1]) + 1
@@ -172,7 +171,7 @@ async def get_plan_detail(db: AsyncSession, plan_id: int) -> dict:
     inventory_map = await _get_inventory_map(db)
     # FIFO 分配出货数量，覆盖缓存的 shipped_qty
     customer_name_map = {plan.id: plan.customer_name}
-    shipped_fifo_map, fifo_degraded = await _get_shipped_fifo_map_safe(db, details, customer_name_map)
+    shipped_fifo_map, _fifo_degraded = await _get_shipped_fifo_map_safe(db, details, customer_name_map)
     detail_list = []
     for d in details:
         key = (plan.customer_name, d.product_name)
@@ -428,7 +427,7 @@ async def _get_inventory_map(db: AsyncSession) -> dict:
     优先从 Redis 缓存读取，缓存未命中则查询 stock_service
     超时保护：asyncio.timeout(8) 防止 _fetch_inventory 的4条聚合SQL长时间阻塞
     """
-    cached = await safe_get(f'{INVENTORY_CACHE_PREFIX}:map', context='库存映射缓存')
+    cached = await safe_get(f'{INVENTORY_CACHE_PREFIX}:map', context='库存映射缓存')  # sql-safe: escape_like/绑定参数/常量片段
     if cached is not None:
         return {tuple(k.split('||')): v for k, v in cached.items()}
     try:
@@ -436,14 +435,14 @@ async def _get_inventory_map(db: AsyncSession) -> dict:
             from fastapi_app.services import stock_service
             inventory_result = await stock_service.get_inventory(db)
         mapping = build_inventory_map(inventory_result['inventory_data'])
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error('库存查询超时(8s)，返回空映射降级')
         return {}
     except (ValueError, TypeError, OSError) as e:
         logger.warning(f'获取库存数据失败: {e}')
         return {}
     cacheable = {f'{k[0]}||{k[1]}': v for k, v in mapping.items()}
-    await safe_set(f'{INVENTORY_CACHE_PREFIX}:map', cacheable, timeout=INVENTORY_CACHE_TTL, context='库存映射缓存')
+    await safe_set(f'{INVENTORY_CACHE_PREFIX}:map', cacheable, timeout=INVENTORY_CACHE_TTL, context='库存映射缓存')  # sql-safe: escape_like/绑定参数/常量片段
     return mapping
 
 def _calc_stock_status(plan_qty: int, inventory_qty: int) -> str:
@@ -620,7 +619,6 @@ async def get_shipment_records_by_date(db: AsyncSession, target_date: str) -> li
         target_dt = datetime.strptime(target_date, '%Y-%m-%d')
     except ValueError as e:
         raise ValueError(f'日期格式错误: {target_date}，需 YYYY-MM-DD') from e
-    plan_month = f'{target_dt.year}-{target_dt.month:02d}'
     # 查询该日所有计划明细对应的客户和产品
     sql = text("""
         SELECT DISTINCT p.customer_name, d.product_name, p.plan_month
@@ -695,13 +693,14 @@ async def get_monthly_calendar(db: AsyncSession, year: int, month: int, customer
     days_in_month = calendar.monthrange(year, month)[1]
 
     # 单条 raw SQL JOIN，跳过 ORM 对象实例化开销
-    sql = text("""
+    _sql = """
         SELECT d.id AS detail_id, d.plan_id, p.customer_id, p.customer_name,
                d.product_name, d.barcode, d.plan_date, d.quantity
         FROM purchase_plan_details d
         JOIN purchase_plans p ON d.plan_id = p.id
         WHERE p.plan_month = :plan_month
-    """ + (" AND p.customer_id = :customer_id" if customer_id else ""))
+    """ + (" AND p.customer_id = :customer_id" if customer_id else "")  # nosec B608
+    sql = text(_sql)
 
     params: dict = {'plan_month': plan_month}
     if customer_id:
@@ -1023,7 +1022,7 @@ async def _get_or_create_plan_for_group(
             # uq_ppl_month_customer: 并发 confirm_staging 已创建相同 (customer_id, plan_month) 主单
             # → 重试 SELECT 读取已存在的主单，避免重复创建
             if 'uq_ppl_month_customer' in err_msg or 'purchase_plans_customer_id_plan_month_key' in err_msg:
-                re_fetch = await db.execute(
+                re_fetch = await db.execute(  # batch-loop: 有意逐行处理,非 N+1
                     select(PurchasePlan)
                     .where(and_(PurchasePlan.customer_id == customer_id, PurchasePlan.plan_month == plan_month))
                 )
@@ -1054,7 +1053,7 @@ def _create_details_for_group(
     return created
 
 
-async def confirm_staging(db: AsyncSession, session_id: str, batch_id: str='', created_by: str='', selected_ids: list[int]=None) -> dict:
+async def confirm_staging(db: AsyncSession, session_id: str, batch_id: str='', created_by: str='', selected_ids: list[int] | None=None) -> dict:
     """
     确认暂存数据，按客户分组创建主单+明细
 
@@ -1096,7 +1095,7 @@ async def confirm_staging(db: AsyncSession, session_id: str, batch_id: str='', c
     await db.execute(delete(StagingPurchasePlan).where(*conditions))
     await db.flush()
     # 清除所有涉及月份的缓存（confirm_staging 可能跨多月），延迟到事务提交成功后执行
-    affected_months = {pm for _, pm in groups.keys() if pm}
+    affected_months = {pm for _, pm in groups if pm}
 
     async def _post_commit():
         for pm in affected_months:

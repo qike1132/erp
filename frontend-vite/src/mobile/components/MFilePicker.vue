@@ -1,6 +1,6 @@
 <template>
   <div class="m-file-picker">
-    <button class="m-file-trigger" @click="triggerInput">
+    <button class="m-file-trigger" @click="triggerInput" :aria-label="label">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="24" height="24">
         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
         <polyline points="17 8 12 3 7 8" />
@@ -19,7 +19,7 @@
     <div v-if="files.length" class="m-file-list">
       <div v-for="(file, i) in files" :key="i" class="m-file-item">
         <span class="m-file-name">{{ file.name }}</span>
-        <button class="m-file-remove" @click="removeFile(i)">&times;</button>
+        <button class="m-file-remove" @click="removeFile(i)" aria-label="关闭">&times;</button>
       </div>
     </div>
   </div>

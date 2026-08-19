@@ -9,7 +9,7 @@
         <div class="m-form-card">
           <div class="m-form-group">
             <label class="m-form-label">客户</label>
-            <select v-model="form.customer" class="m-select">
+            <select v-model="form.customer" class="m-select" aria-label="客户">
               <option value="">请选择客户</option>
               <option v-for="c in customers" :key="c" :value="c">{{ c }}</option>
             </select>
@@ -20,13 +20,13 @@
           </div>
           <div class="m-form-group">
             <label class="m-form-label">数量</label>
-            <input v-model.number="form.quantity" type="number" min="1" class="m-input" />
+            <input v-model.number="form.quantity" type="number" min="1" class="m-input" aria-label="数量" />
           </div>
           <div class="m-form-group">
             <label class="m-form-label">备注</label>
-            <input v-model="form.note" type="text" class="m-input" placeholder="可选" />
+            <input v-model="form.note" type="text" class="m-input" placeholder="可选" aria-label="可选" />
           </div>
-          <button class="m-submit-btn" @click="handleStockSubmit">{{ stockMode === 'stockin' ? '入库' : '出库' }}</button>
+          <button class="m-submit-btn" @click="handleStockSubmit" :aria-label="stockMode === 'stockin' ? '入库' : '出库'">{{ stockMode === 'stockin' ? '入库' : '出库' }}</button>
         </div>
       </template>
 
@@ -63,14 +63,14 @@ const productSearch = ref('')
 const form = ref({ customer: '', quantity: 1, note: '' })
 
 const invKeyword = ref('')
-const inventory = ref<any[]>([])
+const inventory = ref<Array<{ product_id: number; product_name?: string; customer?: string; current_stock?: number }>>([])
 const invLoading = ref(false)
 
 async function loadCustomers() {
   try {
     const res = await customerApi.activeNames()
     // 后端返回 [{ id, name }, ...]，只需名称列表供下拉框使用
-    customers.value = (res || []).map((c: any) => c.name).filter(Boolean)
+    customers.value = (res || []).map((c: { id?: number; name?: string }) => c.name).filter(Boolean) as string[]
   } catch { /* */ }
 }
 async function loadInventory() {

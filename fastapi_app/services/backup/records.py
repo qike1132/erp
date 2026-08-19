@@ -12,11 +12,11 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ._constants import (
+    _MAX_PRE_RESTORE_BACKUPS,
     BACKUP_DIR,
     BACKUP_MAX_COUNT,
     BACKUP_RETENTION_DAYS,
     PRE_RESTORE_DIR,
-    _MAX_PRE_RESTORE_BACKUPS,
 )
 from .crypto import sha256_bytes
 from .exceptions import BackupFileError
@@ -24,12 +24,12 @@ from .exceptions import BackupFileError
 logger = logging.getLogger(__name__)
 
 
-def ensure_backup_dir():
+def ensure_backup_dir():  # log-context: internal helper 无请求上下文
     """确保备份目录存在"""
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def ensure_pre_restore_dir():
+def ensure_pre_restore_dir():  # log-context: internal helper 无请求上下文
     """确保恢复前安全备份目录存在"""
     PRE_RESTORE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -69,7 +69,7 @@ async def write_backup_record(
         logger.warning(f'写入备份记录失败（不阻塞主流程）: {e}')
 
 
-def list_backup_files() -> list[dict]:
+def list_backup_files() -> list[dict]:  # log-context: internal helper 无请求上下文
     """列出服务器上的所有备份文件"""
     backups = []
     if BACKUP_DIR.exists():
@@ -117,7 +117,7 @@ def list_backup_files() -> list[dict]:
     return backups
 
 
-def get_backup_status() -> dict:
+def get_backup_status() -> dict:  # log-context: internal helper 无请求上下文
     """获取备份系统状态概览"""
     from .verify import get_checksum_tables
     last_full: dict | None = None
@@ -157,14 +157,14 @@ def get_backup_status() -> dict:
     }
 
 
-def validate_backup_file(content: bytes, filename: str) -> dict:
+def validate_backup_file(content: bytes, filename: str) -> dict:  # log-context: internal helper 无请求上下文
     """验证备份文件，不执行恢复，仅返回摘要信息"""
     is_zip = filename.endswith('.zip') or content[:4] == b'PK\x03\x04'
     if is_zip:
         try:
             zf = zipfile.ZipFile(io.BytesIO(content))
         except zipfile.BadZipFile:
-            raise BackupFileError('无效的 ZIP 文件')
+            raise BackupFileError('无效的 ZIP 文件') from None
         if 'manifest.json' not in zf.namelist():
             raise BackupFileError('ZIP 备份缺少 manifest.json')
         manifest = json.loads(zf.read('manifest.json'))
@@ -202,7 +202,7 @@ def validate_backup_file(content: bytes, filename: str) -> dict:
     try:
         backup_data = json.loads(content)
     except json.JSONDecodeError:
-        raise BackupFileError('备份文件格式无效（非 ZIP 亦非有效 JSON）')
+        raise BackupFileError('备份文件格式无效（非 ZIP 亦非有效 JSON）') from None
     if 'tables' not in backup_data:
         raise BackupFileError('JSON 备份文件缺少 tables 字段')
     from fastapi_app.shared_models import Base
@@ -226,7 +226,7 @@ def validate_backup_file(content: bytes, filename: str) -> dict:
     return summary
 
 
-def delete_backup_file(filename: str) -> str:
+def delete_backup_file(filename: str) -> str:  # log-context: internal helper 无请求上下文
     """删除服务器上的指定备份文件"""
     safe_name = Path(filename).name
     if safe_name != filename:
@@ -241,7 +241,7 @@ def delete_backup_file(filename: str) -> str:
     return safe_name
 
 
-def cleanup_pre_restore_backups():
+def cleanup_pre_restore_backups():  # log-context: internal helper 无请求上下文
     """清理旧的恢复前安全备份（保留最近 5 个）"""
     if not PRE_RESTORE_DIR.exists():
         return
@@ -257,7 +257,7 @@ def cleanup_pre_restore_backups():
             logger.warning(f'清理旧安全备份失败: {old_backup.name}: {e}')
 
 
-def _backup_created_time(f: Path) -> datetime:
+def _backup_created_time(f: Path) -> datetime:  # log-context: internal helper 无请求上下文
     """获取备份文件的真实创建时间。
 
     优先读取伴随的 ``.meta`` 文件中的 ``created_at``（加密备份的 mtime 可能被刷新，
@@ -271,11 +271,11 @@ def _backup_created_time(f: Path) -> datetime:
             if created_at:
                 return datetime.strptime(created_at, '%Y-%m-%d %H:%M:%S')
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
-            pass
+            pass  # defensive: 异常静默处理,不影响主流程
     return datetime.fromtimestamp(f.stat().st_mtime)
 
 
-def cleanup_old_backups() -> dict:
+def cleanup_old_backups() -> dict:  # log-context: internal helper 无请求上下文
     """清理过期备份文件
 
     策略：
@@ -314,7 +314,7 @@ def cleanup_old_backups() -> dict:
                         manifest = json.loads(zf.read('manifest.json'))
                         base_timestamp = manifest.get('base_timestamp')
             except (OSError, zipfile.BadZipFile, ValueError):
-                pass
+                pass  # defensive: 异常静默处理,不影响主流程
 
         backups.append({
             'path': f, 'name': f.name, 'mtime': mtime, 'size': size,
@@ -351,7 +351,7 @@ def cleanup_old_backups() -> dict:
                 ts_str = b['name'].replace('erp_backup_', '').replace('erp_auto_daily_', '').replace('.zip', '').replace('.json', '').replace('.enc', '')
                 full_backup_timestamps.add(ts_str)
             except (ValueError, IndexError):
-                pass
+                pass  # defensive: 异常静默处理,不影响主流程
 
     # 检查增量备份的基础全量备份是否还在
     for b in backups:

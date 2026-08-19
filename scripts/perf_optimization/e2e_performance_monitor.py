@@ -5,7 +5,11 @@ ERP 端到端性能监测脚本
 
 运行: python scripts/perf_optimization/e2e_performance_monitor.py
 """
-import asyncio, json, os, sys, time
+import asyncio
+import json
+import os
+import sys
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -98,7 +102,7 @@ async def run():
         print("[认证] 成功\n")
 
         all_results = []
-        for method, ep, name in ENDPOINTS:
+        for _method, ep, name in ENDPOINTS:
             r = await monitor_endpoint(session, ep, token)
             r.name = name
             all_results.append(r)

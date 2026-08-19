@@ -11,10 +11,10 @@ ERP APK 版本号自动管理器
     python scripts/version_manager.py set 2.1  # 设置指定版本号
 """
 
+import hashlib
+import json
 import re
 import sys
-import json
-import hashlib
 from datetime import datetime
 from pathlib import Path
 

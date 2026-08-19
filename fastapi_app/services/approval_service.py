@@ -11,7 +11,7 @@ order.country（审批同意/拒绝/撤销等逻辑）。多 SKU 模型下这些
 """
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, or_, select
@@ -24,7 +24,6 @@ from fastapi_app.core.state_machine import (
     get_allowed_actions,
 )
 from fastapi_app.core.validators import validate_not_empty, validate_quantity_range
-from fastapi_app.utils import calc_total_pages
 from fastapi_app.services.approval_log_service import create_approval_log as _create_approval_log
 from fastapi_app.shared.stock_concurrency import get_product_for_update
 from fastapi_app.shared_models import (
@@ -36,6 +35,7 @@ from fastapi_app.shared_models import (
     StockOut,
     User,
 )
+from fastapi_app.utils import calc_total_pages
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ _MAX_PER_PAGE = 100
 
 def _utcnow() -> datetime:
     """返回当前 UTC 时间（naive，匹配 DB 列类型 TIMESTAMP WITHOUT TIME ZONE）。"""
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 async def get_approval_list(

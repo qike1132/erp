@@ -5,7 +5,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol, Sequence
+from collections.abc import Sequence
+from typing import Any, Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
 

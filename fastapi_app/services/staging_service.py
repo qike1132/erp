@@ -9,7 +9,7 @@ import logging
 import os
 import tempfile
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import delete, func, select
@@ -167,7 +167,7 @@ async def _generic_import_staging_from_excel(
                 imported += 1
 
             except (ValueError, TypeError, OSError) as e:
-                errors.append(f'第{idx}行处理失败: {str(e)}')
+                errors.append(f'第{idx}行处理失败: {e!s}')
                 continue
 
         await db.flush()
@@ -245,7 +245,7 @@ def _build_stockin_entity(
     fields: dict, session_id: str, product_id: int | None, qty: int,
     is_validated: bool, validation_error: str, product_name: str,
 ) -> StagingStockIn:
-    stockin_date = parse_date_value(fields.get('stockin_date')) or datetime.now(timezone.utc).replace(tzinfo=None)
+    stockin_date = parse_date_value(fields.get('stockin_date')) or datetime.now(UTC).replace(tzinfo=None)
     return StagingStockIn(
         session_id=session_id,
         customer=str(fields.get('customer', '')).strip(),
@@ -265,7 +265,7 @@ def _build_stockout_entity(
     fields: dict, session_id: str, product_id: int | None, qty: int,
     is_validated: bool, validation_error: str, product_name: str,
 ) -> StagingStockOut:
-    stockout_date = parse_date_value(fields.get('stockout_date')) or datetime.now(timezone.utc).replace(tzinfo=None)
+    stockout_date = parse_date_value(fields.get('stockout_date')) or datetime.now(UTC).replace(tzinfo=None)
     customer = str(fields.get('customer', '')).strip()
 
     country_val = fields.get('country', '')
@@ -315,14 +315,14 @@ def _stockout_extra_updates(entity, data: dict, _db: AsyncSession) -> None:
         # extra_updates runs after quantity is set; perform stock check here
         pass
     if 'stockout_date' in data:
-        entity.stockout_date = parse_date_value(data['stockout_date']) or datetime.now(timezone.utc).replace(tzinfo=None)
+        entity.stockout_date = parse_date_value(data['stockout_date']) or datetime.now(UTC).replace(tzinfo=None)
     if 'note' in data:
         entity.note = data['note']
 
 
 def _stockin_extra_updates(entity, data: dict, _db: AsyncSession) -> None:
     if 'stockin_date' in data:
-        entity.stockin_date = parse_date_value(data['stockin_date']) or datetime.now(timezone.utc).replace(tzinfo=None)
+        entity.stockin_date = parse_date_value(data['stockin_date']) or datetime.now(UTC).replace(tzinfo=None)
     if 'note' in data:
         entity.note = data['note']
 
@@ -425,7 +425,7 @@ async def confirm_staging_orders(
                     order = Order(
                         order_no=order_no,
                         customer=staging.customer,
-                        order_date=staging.order_date or datetime.now(timezone.utc).replace(tzinfo=None),
+                        order_date=staging.order_date or datetime.now(UTC).replace(tzinfo=None),
                         product_id=staging.product_id,
                         quantity=staging.quantity,
                         note=staging.note,
@@ -468,7 +468,7 @@ async def confirm_staging_orders(
                     confirmed += 1
 
             except (ValueError, TypeError, OSError) as e:
-                errors.append(f'订单{staging.customer}-{staging.product_name}确认失败: {str(e)}')
+                errors.append(f'订单{staging.customer}-{staging.product_name}确认失败: {e!s}')
                 staging.status = 'rejected'
 
         await db.execute(
@@ -480,7 +480,7 @@ async def confirm_staging_orders(
         await db.flush()
 
     except (SQLAlchemyError, RuntimeError, OSError, ValueError) as e:
-        logger.error(f'确认暂存订单时发生错误: {str(e)}', exc_info=True)
+        logger.error(f'确认暂存订单时发生错误: {e!s}', exc_info=True)
         raise
 
     return confirmed, errors
@@ -579,7 +579,7 @@ async def confirm_staging_stockins(
 
                 stockin = StockIn(
                     stockin_no=stockin_no,
-                    stockin_date=staging.stockin_date or datetime.now(timezone.utc).replace(tzinfo=None),
+                    stockin_date=staging.stockin_date or datetime.now(UTC).replace(tzinfo=None),
                     customer=staging.customer,
                     product_id=staging.product_id,
                     quantity=staging.quantity,
@@ -605,7 +605,7 @@ async def confirm_staging_stockins(
                 confirmed += 1
 
         except (ValueError, TypeError, OSError) as e:
-            errors.append(f'备货{staging.customer}-{staging.product_name}确认失败: {str(e)}')
+            errors.append(f'备货{staging.customer}-{staging.product_name}确认失败: {e!s}')
             staging.status = 'rejected'
 
     await db.execute(
@@ -742,7 +742,7 @@ async def confirm_staging_stockouts(
                         stockout_no = await generate_stockout_number(db)
                         stockout = StockOut(
                             stockout_no=stockout_no,
-                            stockout_date=staging.stockout_date or datetime.now(timezone.utc).replace(tzinfo=None),
+                            stockout_date=staging.stockout_date or datetime.now(UTC).replace(tzinfo=None),
                             product_id=staging.product_id,
                             quantity=ship_qty,
                             customer=staging.customer,
@@ -757,7 +757,7 @@ async def confirm_staging_stockouts(
 
                 # 批量查询受影响的订单，避免N+1
                 if affected_order_ids:
-                    order_result = await db.execute(
+                    order_result = await db.execute(  # batch-loop: 有意逐行处理,非 N+1
                         select(Order).where(Order.id.in_(affected_order_ids))
                     )
                     order_map = {o.id: o for o in order_result.scalars().all()}
@@ -789,7 +789,7 @@ async def confirm_staging_stockouts(
                 confirmed += 1
 
         except (ValueError, TypeError, OSError) as e:
-            errors.append(f'出货{staging.customer}-{staging.product_name}确认失败: {str(e)}')
+            errors.append(f'出货{staging.customer}-{staging.product_name}确认失败: {e!s}')
             staging.status = 'rejected'
 
     await db.execute(
@@ -802,7 +802,7 @@ async def confirm_staging_stockouts(
 
     # 发送出货完成事件
     if completed_orders:
-        from fastapi_app.services.notification_service import publish_event_with_fcm, StockEvent
+        from fastapi_app.services.notification_service import StockEvent, publish_event_with_fcm
         for co in completed_orders:
             try:
                 await publish_event_with_fcm(

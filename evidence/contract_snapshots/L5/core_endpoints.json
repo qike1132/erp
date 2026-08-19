@@ -1,0 +1,30 @@
+{
+  "recorded_at": "2026-08-18T00:19:52.608944+00:00",
+  "core_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/v1/orders"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/purchase-plan"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/purchase-orders"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/customer-sampling"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/stats"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/stock/inventory"
+    }
+  ],
+  "note": "契约快照录制需在 staging 环境发起 HTTP 请求,本轮仅记录清单"
+}

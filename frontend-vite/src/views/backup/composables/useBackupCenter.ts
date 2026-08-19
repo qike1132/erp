@@ -8,6 +8,7 @@ import { showToast } from '@/composables/useToast'
 import { useExport } from '@/composables/useExport'
 import { getErrorMessage } from '@/types/errors'
 import type { IntegrityCheckResult } from '@/components/backup/IntegrityCheckPanel.vue'
+import type { RestoreResult } from '@/components/backup/composables/useRestorePolling'
 
 // 备份文件校验摘要（/backup/validate 返回 summary）
 export interface BackupValidateSummary {
@@ -124,7 +125,7 @@ export function useBackupCenter() {
   const selectedFile = ref<File | null>(null)
   const validationResult = ref<BackupValidateSummary | null>(null)
   const importing = ref(false)
-  const restoreResult = ref<RestoreSummary | null>(null)
+  const restoreResult = ref<RestoreResult | null>(null)
   const restorePhase = ref('')
   const restoreTaskId = ref<string | null>(null)
 
@@ -261,7 +262,7 @@ export function useBackupCenter() {
     }
   }
 
-  function onRestoreProgressCompleted(result: RestoreSummary | null) {
+  function onRestoreProgressCompleted(result: RestoreResult | null) {
     importing.value = false
     restoringFile.value = ''
     restorePhase.value = ''
@@ -350,7 +351,7 @@ export function useBackupCenter() {
     restorePhase.value = '正在增量恢复数据...'
     try {
       const res = await backupApi.restoreIncremental(pendingRestoreFilename)
-      restoreResult.value = res as RestoreSummary
+      restoreResult.value = res as unknown as RestoreResult
       if (res.success) {
         const msg = `增量恢复成功，共更新 ${res.total_upserted || 0} 条记录`
         showToast(msg, 'success')

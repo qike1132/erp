@@ -12,21 +12,21 @@
 - 湖北订单合并列表
 - 边界条件（负数数量、不存在的产品、锁定冲突、审批状态检查）
 """
-import pytest
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime, timezone
+
+import pytest
 
 from fastapi_app.services.order_crud import (
-    get_orders,
-    get_order_by_id,
-    create_order,
-    update_order,
-    delete_order,
-    update_deduct_quantity,
     cancel_approval,
-    get_my_approvals,
+    create_order,
+    delete_order,
     get_beile_orders_with_stockins,
-    PermissionDeniedError,
+    get_my_approvals,
+    get_order_by_id,
+    get_orders,
+    update_deduct_quantity,
+    update_order,
 )
 
 
@@ -50,7 +50,7 @@ def make_mock_order(id_val=1, order_no='ORD-001', customer='测试客户',
     order.product.barcode = 'TEST001'
     order.locked_by = None
     order.items = []
-    order.order_date = datetime.now(timezone.utc)
+    order.order_date = datetime.now(UTC)
     return order
 
 

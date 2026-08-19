@@ -10,6 +10,7 @@
 import json
 import logging
 import time
+from typing import Any
 
 from fastapi import Depends, FastAPI, Request, Response
 from sqlalchemy import text
@@ -137,7 +138,7 @@ def register_health_routes(app: FastAPI) -> None:
         user_id: int = Depends(get_current_user_id),
         db: AsyncSession = Depends(get_async_db),
     ):
-        result = {
+        result: dict[str, Any] = {
             "pool_status": db_health_checker.get_pool_status(),
             "health_stats": db_health_checker.get_stats(),
         }
@@ -178,7 +179,7 @@ def register_health_routes(app: FastAPI) -> None:
                     return JSONResponse(status_code=401, content={'detail': '未授权访问'})
             return Response(content=get_metrics(), media_type=get_content_type())
     except (ImportError, AttributeError):
-        pass
+        pass  # defensive: 异常静默处理,不影响主流程
 
     @app.get("/api/health/live", tags=["健康检查"])
     async def liveness_probe():
@@ -232,7 +233,7 @@ def register_health_routes(app: FastAPI) -> None:
             if db_ok:
                 return {"status": "started"}
         except (OperationalError, DisconnectionError):
-            pass
+            pass  # defensive: 异常静默处理,不影响主流程
         return Response(
             content=json.dumps({"status": "starting"}, ensure_ascii=False),
             status_code=503,

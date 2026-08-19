@@ -9,7 +9,7 @@ import io
 import json
 import logging
 import uuid
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import openpyxl
 from sqlalchemy import and_, delete, extract, func, select
@@ -69,7 +69,7 @@ async def update_plan(db: AsyncSession, plan_id: int, *, created_by: str='', **k
                 plan.plan_date = normalize_plan_date(kwargs[field])
             else:
                 setattr(plan, field, kwargs[field])
-    plan.update_time = datetime.now(timezone.utc).replace(tzinfo=None)
+    plan.update_time = datetime.now(UTC).replace(tzinfo=None)
     await db.flush()
     await db.refresh(plan)
     await _log_action(db, plan.id, 'update', old_data, plan.to_dict(), created_by)

@@ -1,0 +1,510 @@
+{
+  "exported_at": "2026-08-16T13:17:11.943291",
+  "purpose": "P0 清理 customer_sampling 失效图片引用前的数据备份",
+  "projects_with_image_ref": [
+    {
+      "id": 1106,
+      "sequence_no": "CS-20260813-0002",
+      "product_name": "你大爷",
+      "product_image_file_id": 34,
+      "status": "completed",
+      "updated_at": "2026-08-13 13:41:09.150605+00:00"
+    },
+    {
+      "id": 380,
+      "sequence_no": "CS-20260808-0001",
+      "product_name": "刚刚",
+      "product_image_file_id": 17,
+      "status": "cancelled",
+      "updated_at": "2026-08-09 10:57:50.757957+00:00"
+    },
+    {
+      "id": 384,
+      "sequence_no": "MINISO国际002",
+      "product_name": "19寸企鹅(蓝色)",
+      "product_image_file_id": 18,
+      "status": "in_progress",
+      "updated_at": "2026-08-11 00:14:04.722313+00:00"
+    },
+    {
+      "id": 810,
+      "sequence_no": "CS-20260812-0012",
+      "product_name": "哈哈哈哈",
+      "product_image_file_id": 21,
+      "status": "in_progress",
+      "updated_at": "2026-08-12 02:16:26.731391+00:00"
+    },
+    {
+      "id": 397,
+      "sequence_no": "CS-20260810-0001",
+      "product_name": "齐天大圣",
+      "product_image_file_id": 19,
+      "status": "in_progress",
+      "updated_at": "2026-08-12 02:17:52.728921+00:00"
+    },
+    {
+      "id": 1105,
+      "sequence_no": "CS-20260813-0001",
+      "product_name": "你大爷",
+      "product_image_file_id": 33,
+      "status": "in_progress",
+      "updated_at": "2026-08-13 11:27:26.343061+00:00"
+    },
+    {
+      "id": 382,
+      "sequence_no": "MINISO国际001",
+      "product_name": "企鹅",
+      "product_image_file_id": 7,
+      "status": "completed",
+      "updated_at": "2026-08-10 14:18:56.738941+00:00"
+    },
+    {
+      "id": 426,
+      "sequence_no": "CS-20260811-0001",
+      "product_name": "什么",
+      "product_image_file_id": 20,
+      "status": "in_progress",
+      "updated_at": "2026-08-11 00:09:49.050208+00:00"
+    },
+    {
+      "id": 383,
+      "sequence_no": "MINISO国内001",
+      "product_name": "狗狗狗",
+      "product_image_file_id": 11,
+      "status": "in_progress",
+      "updated_at": "2026-08-08 04:07:34.531209+00:00"
+    },
+    {
+      "id": 1247,
+      "sequence_no": "CS-20260813-0003",
+      "product_name": "企鹅刚刚",
+      "product_image_file_id": 35,
+      "status": "in_progress",
+      "updated_at": "2026-08-13 13:21:12.332896+00:00"
+    },
+    {
+      "id": 1523,
+      "sequence_no": "CS-20260814-0217",
+      "product_name": "钥匙扣_217",
+      "product_image_file_id": 42,
+      "status": "completed",
+      "updated_at": "2026-08-14 09:43:22.885371+00:00"
+    },
+    {
+      "id": 3486,
+      "sequence_no": "CS-20260814-1880",
+      "product_name": "手机气囊支架_1880",
+      "product_image_file_id": 36,
+      "status": "in_progress",
+      "updated_at": "2026-08-13 14:17:36.707571+00:00"
+    },
+    {
+      "id": 2154,
+      "sequence_no": "CS-20260814-0548",
+      "product_name": "化妆收纳包_548",
+      "product_image_file_id": 37,
+      "status": "in_progress",
+      "updated_at": "2026-08-13 14:17:45.566556+00:00"
+    },
+    {
+      "id": 4977,
+      "sequence_no": "CS-20260814-2847",
+      "product_name": "齐天大圣",
+      "product_image_file_id": 38,
+      "status": "in_progress",
+      "updated_at": "2026-08-14 00:13:16.233718+00:00"
+    },
+    {
+      "id": 4978,
+      "sequence_no": "CS-20260814-2848",
+      "product_name": "刚刚",
+      "product_image_file_id": 39,
+      "status": "in_progress",
+      "updated_at": "2026-08-14 00:13:36.695039+00:00"
+    },
+    {
+      "id": 5018,
+      "sequence_no": "CS-20260814-2849",
+      "product_name": "你打野",
+      "product_image_file_id": 43,
+      "status": "completed",
+      "updated_at": "2026-08-14 09:34:15.688708+00:00"
+    },
+    {
+      "id": 4153,
+      "sequence_no": "CS-20260814-2547",
+      "product_name": "钥匙扣_2547",
+      "product_image_file_id": 41,
+      "status": "completed",
+      "updated_at": "2026-08-14 09:43:46.556409+00:00"
+    }
+  ],
+  "file_records_all": [
+    {
+      "id": 3,
+      "original_filename": "ScreenShot_2026-07-30_160645_315.png",
+      "storage_key": "20260731/bf942c0d68dd49b492669f34c4e01772.png",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 48578,
+      "content_type": "image/png",
+      "uploader_id": 20034,
+      "extra": null,
+      "created_at": "2026-07-31 06:00:21.244983+00:00"
+    },
+    {
+      "id": 4,
+      "original_filename": "ScreenShot_2026-07-22_103900_487.png",
+      "storage_key": "20260731/7a1a666c26004540ad544166f158b7c9.png",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 92056,
+      "content_type": "image/png",
+      "uploader_id": 20034,
+      "extra": null,
+      "created_at": "2026-07-31 06:00:27.735171+00:00"
+    },
+    {
+      "id": 5,
+      "original_filename": "img_v3_02143_0081e509-a69b-4c2c-bbc8-d186cb9a98dg.jpg",
+      "storage_key": "20260801/8d1078122eda416cad21bdd463f3cb87.jpg",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 239704,
+      "content_type": "image/jpeg",
+      "uploader_id": 23,
+      "extra": null,
+      "created_at": "2026-08-01 01:55:49.157827+00:00"
+    },
+    {
+      "id": 6,
+      "original_filename": "9557fb59a765b072ebfc355c3f193ac8.png",
+      "storage_key": "customer-sampling/20260808/4b917685aeca452a9cd05ef8dc234da3.png",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 723189,
+      "content_type": "image/png",
+      "uploader_id": 23,
+      "extra": null,
+      "created_at": "2026-08-08 00:25:43.657616+00:00"
+    },
+    {
+      "id": 7,
+      "original_filename": "墩墩比音-1.png",
+      "storage_key": "customer-sampling/20260808/17df58a2732d48fcb236cbb107286f33.png",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 151866,
+      "content_type": "image/png",
+      "uploader_id": 23,
+      "extra": null,
+      "created_at": "2026-08-08 02:11:03.428024+00:00"
+    },
+    {
+      "id": 8,
+      "original_filename": "ScreenShot_2026-07-22_103900_487.png",
+      "storage_key": "customer-sampling/20260808/89919f32a3c84dde9d130f7b2ce0b7d7.png",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 92056,
+      "content_type": "image/png",
+      "uploader_id": 23,
+      "extra": null,
+      "created_at": "2026-08-08 02:28:39.161171+00:00"
+    },
+    {
+      "id": 9,
+      "original_filename": "墩墩比音-1.png",
+      "storage_key": "20260808/91defa6bac2341c4ad9d7233f4c99f8f.png",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 151866,
+      "content_type": "image/png",
+      "uploader_id": 23,
+      "extra": null,
+      "created_at": "2026-08-08 04:00:22.596017+00:00"
+    },
+    {
+      "id": 10,
+      "original_filename": "1cf8720d758aba8d9a1b99f449dd1de7.png",
+      "storage_key": "20260808/40e8283a16d348dbbc2582900c26274b.png",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 48559,
+      "content_type": "image/png",
+      "uploader_id": 23,
+      "extra": null,
+      "created_at": "2026-08-08 04:07:02.610699+00:00"
+    },
+    {
+      "id": 11,
+      "original_filename": "1cf8720d758aba8d9a1b99f449dd1de7.png",
+      "storage_key": "customer-sampling/20260808/2511d812183e40f29d5cec81f14d3240.png",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 48559,
+      "content_type": "image/png",
+      "uploader_id": 23,
+      "extra": null,
+      "created_at": "2026-08-08 04:07:34.467565+00:00"
+    },
+    {
+      "id": 12,
+      "original_filename": "1cf8720d758aba8d9a1b99f449dd1de7.png",
+      "storage_key": "20260808/3fd5967817fd44879c4c710055e4e020.png",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 48559,
+      "content_type": "image/png",
+      "uploader_id": 23,
+      "extra": null,
+      "created_at": "2026-08-08 05:14:41.688397+00:00"
+    },
+    {
+      "id": 13,
+      "original_filename": "1cf8720d758aba8d9a1b99f449dd1de7.png",
+      "storage_key": "20260808/0aa951b96c764e4e898f1fc9244a9396.png",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 48559,
+      "content_type": "image/png",
+      "uploader_id": 23,
+      "extra": null,
+      "created_at": "2026-08-08 05:15:16.504877+00:00"
+    },
+    {
+      "id": 14,
+      "original_filename": "1cf8720d758aba8d9a1b99f449dd1de7.png",
+      "storage_key": "20260808/7423efc8614948e0b6dba6d4c80f6bf7.png",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 48559,
+      "content_type": "image/png",
+      "uploader_id": 23,
+      "extra": null,
+      "created_at": "2026-08-08 05:15:32.309573+00:00"
+    },
+    {
+      "id": 15,
+      "original_filename": "8dfc24a6918f40e9c7e44bc6be107fc8.png",
+      "storage_key": "20260808/b306f04f868c4c0dbafb2dc50cf9394c.png",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 1444338,
+      "content_type": "image/png",
+      "uploader_id": 23,
+      "extra": null,
+      "created_at": "2026-08-08 05:17:59.269983+00:00"
+    },
+    {
+      "id": 16,
+      "original_filename": "墩墩比音-1.png",
+      "storage_key": "20260808/8dc57e4e7feb4d8f967f537f211a7441.png",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 151866,
+      "content_type": "image/png",
+      "uploader_id": 23,
+      "extra": null,
+      "created_at": "2026-08-08 05:18:00.611391+00:00"
+    },
+    {
+      "id": 17,
+      "original_filename": "生成毛绒公司风格LOGO.png",
+      "storage_key": "customer-sampling/20260808/866af38588d14cac8eb48e44ac03ab6a.png",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 1774153,
+      "content_type": "image/png",
+      "uploader_id": 23,
+      "extra": null,
+      "created_at": "2026-08-08 07:31:09.901177+00:00"
+    },
+    {
+      "id": 18,
+      "original_filename": "ScreenShot_2026-07-22_103900_487.png",
+      "storage_key": "customer-sampling/20260808/e36e17514bbc4a34be7a71c4fb563232.png",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 92056,
+      "content_type": "image/png",
+      "uploader_id": 23,
+      "extra": null,
+      "created_at": "2026-08-08 07:36:10.870369+00:00"
+    },
+    {
+      "id": 19,
+      "original_filename": "微信图片_20210618103806_4822_80.png",
+      "storage_key": "customer-sampling/20260810/ac4eeaf81f25493ca7af3c40cbcaa637.png",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 2409093,
+      "content_type": "image/png",
+      "uploader_id": 23,
+      "extra": null,
+      "created_at": "2026-08-10 06:35:34.614531+00:00"
+    },
+    {
+      "id": 20,
+      "original_filename": "7b098a2439dbb3cfe268ad6f729cad84.jpg",
+      "storage_key": "customer-sampling/20260811/941e7bb1ea7b4ae589bd627bfc531289.jpg",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 2375944,
+      "content_type": "image/jpeg",
+      "uploader_id": 23,
+      "extra": null,
+      "created_at": "2026-08-11 00:09:49.003662+00:00"
+    },
+    {
+      "id": 21,
+      "original_filename": "c3e90cc6affcc0f84ab56684f4ddb987.jpg",
+      "storage_key": "customer-sampling/20260812/426b9bbc1c74426ca6e87051332f6f0f.jpg",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 4591752,
+      "content_type": "image/jpeg",
+      "uploader_id": 23,
+      "extra": null,
+      "created_at": "2026-08-12 02:16:26.714995+00:00"
+    },
+    {
+      "id": 33,
+      "original_filename": "9557fb59a765b072ebfc355c3f193ac8.webp",
+      "storage_key": "customer-sampling/20260813/702e9f6347324d4cbeba8541d92efe74.webp",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 40960,
+      "content_type": "image/webp",
+      "uploader_id": 23,
+      "extra": null,
+      "created_at": "2026-08-13 11:27:26.283843+00:00"
+    },
+    {
+      "id": 34,
+      "original_filename": "9557fb59a765b072ebfc355c3f193ac8.webp",
+      "storage_key": "customer-sampling/20260813/efcfd24c2efd4591a1f70d3079a9d961.webp",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 40960,
+      "content_type": "image/webp",
+      "uploader_id": 23,
+      "extra": null,
+      "created_at": "2026-08-13 11:27:26.698599+00:00"
+    },
+    {
+      "id": 35,
+      "original_filename": "ScreenShot_2026-08-06_143131_699.webp",
+      "storage_key": "customer-sampling/20260813/c29f7f51fa644294826eccaf8a65e66c.webp",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 40520,
+      "content_type": "image/webp",
+      "uploader_id": 23,
+      "extra": null,
+      "created_at": "2026-08-13 13:21:12.306901+00:00"
+    },
+    {
+      "id": 36,
+      "original_filename": "4d21dac4c402df535f4456603455f31b.jpg",
+      "storage_key": "customer-sampling/20260813/d8feadba6b0b4b4e8486fb1d5805088f.webp",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 143876,
+      "content_type": "image/webp",
+      "uploader_id": 23,
+      "extra": null,
+      "created_at": "2026-08-13 14:17:36.677287+00:00"
+    },
+    {
+      "id": 37,
+      "original_filename": "2874c8052b9f2706a3dcc7efdfe4ecd9.webp",
+      "storage_key": "customer-sampling/20260813/46d78a077b4543498df01aeeaa4715ae.webp",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 138494,
+      "content_type": "image/webp",
+      "uploader_id": 23,
+      "extra": null,
+      "created_at": "2026-08-13 14:17:45.552440+00:00"
+    },
+    {
+      "id": 38,
+      "original_filename": "1cf8720d758aba8d9a1b99f449dd1de7.webp",
+      "storage_key": "customer-sampling/20260814/7a2ec7af6d474a059656077fb8976340.webp",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 8970,
+      "content_type": "image/webp",
+      "uploader_id": 23,
+      "extra": null,
+      "created_at": "2026-08-14 00:13:16.203588+00:00"
+    },
+    {
+      "id": 39,
+      "original_filename": "1cf8720d758aba8d9a1b99f449dd1de7.webp",
+      "storage_key": "customer-sampling/20260814/7307cff2e3be421ab44aed5d6501ca43.webp",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 8970,
+      "content_type": "image/webp",
+      "uploader_id": 23,
+      "extra": null,
+      "created_at": "2026-08-14 00:13:36.612727+00:00"
+    },
+    {
+      "id": 40,
+      "original_filename": "1cf8720d758aba8d9a1b99f449dd1de7.webp",
+      "storage_key": "customer-sampling/20260814/3dec55fcdc844dd59fc2b05be1eefd86.webp",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 8970,
+      "content_type": "image/webp",
+      "uploader_id": 23,
+      "extra": null,
+      "created_at": "2026-08-14 09:21:52.710311+00:00"
+    },
+    {
+      "id": 41,
+      "original_filename": "墩墩比音-1.webp",
+      "storage_key": "customer-sampling/20260814/8213205b66794181af172de842c7df75.webp",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 8934,
+      "content_type": "image/webp",
+      "uploader_id": 23,
+      "extra": null,
+      "created_at": "2026-08-14 09:27:26.214003+00:00"
+    },
+    {
+      "id": 42,
+      "original_filename": "7b098a2439dbb3cfe268ad6f729cad84.webp",
+      "storage_key": "customer-sampling/20260814/98fc9ae50ec94b999371eab56de90edf.webp",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 564624,
+      "content_type": "image/webp",
+      "uploader_id": 23,
+      "extra": null,
+      "created_at": "2026-08-14 09:32:13.158386+00:00"
+    },
+    {
+      "id": 43,
+      "original_filename": "微信图片_20210618103806_4822_80.webp",
+      "storage_key": "customer-sampling/20260814/fbd9eb63a78941cbac1c6eaa8e93c607.webp",
+      "bucket": "local",
+      "storage_type": "local",
+      "size": 110690,
+      "content_type": "image/webp",
+      "uploader_id": 23,
+      "extra": null,
+      "created_at": "2026-08-14 09:33:52.147550+00:00"
+    }
+  ],
+  "fk_tables_referencing_file_records": [
+    {
+      "table_name": "customer_sampling_project",
+      "column_name": "product_image_file_id"
+    }
+  ]
+}

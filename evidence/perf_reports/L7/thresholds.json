@@ -1,0 +1,13 @@
+{
+  "p95_list_ms": 300,
+  "p95_agg_ms": 500,
+  "min_rps": 500,
+  "max_error_rate": 0.001,
+  "cold_start_limit_s": 10,
+  "memory_limit_mb": 1024,
+  "conn_pool_limit_pct": 80,
+  "lcp_limit_ms": 2500,
+  "fid_limit_ms": 100,
+  "cls_limit": 0.1,
+  "bundle_size_limit_mb": 2
+}

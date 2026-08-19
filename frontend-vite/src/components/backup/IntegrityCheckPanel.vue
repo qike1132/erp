@@ -9,7 +9,7 @@
       巡检完成：{{ checkResult.passed }} 通过，{{ checkResult.failed }} 失败
       <template v-if="checkResult.latest_backup"> · 最新备份: {{ checkResult.latest_backup }} ({{ formatSize(checkResult.latest_backup_size ?? 0) }})</template>
     </span>
-    <button class="bk-check-close" @click="$emit('close')"><FontAwesomeIcon icon="times" /></button>
+    <button class="bk-check-close" @click="$emit('close')" aria-label="操作按钮"><FontAwesomeIcon icon="times" /></button>
   </div>
 </template>
 

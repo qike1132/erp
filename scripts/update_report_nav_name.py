@@ -29,7 +29,7 @@ def update_nav_name():
             print("\n未找到代码为 'report_manage' 的权限记录")
             return
 
-        print(f"\n找到记录：")
+        print("\n找到记录：")
         print(f"  - ID: {perm.id}, 名称: {perm.name}, 代码: {perm.code}")
 
         # 更新名称

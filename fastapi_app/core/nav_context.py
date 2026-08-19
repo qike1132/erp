@@ -7,6 +7,7 @@
 import asyncio
 import logging
 import time
+from typing import Any
 
 from sqlalchemy.exc import DisconnectionError, OperationalError
 
@@ -53,7 +54,7 @@ PERMISSION_URL_MAP = {
 SECTION_ORDER = ['dev', 'hubei', 'purchase', 'purchase_tools', 'core', 'data', 'system']
 
 # 两级缓存
-_nav_local_cache = {"data": None, "cached_at": 0.0}
+_nav_local_cache: dict[str, Any] = {"data": None, "cached_at": 0.0}
 _nav_local_ttl = 60
 _nav_redis_ttl = 300
 _nav_cache_lock = asyncio.Lock()
@@ -98,7 +99,7 @@ async def get_nav_sections_async() -> dict:
         from fastapi_app.core.database import _AsyncSessionLocal
         from fastapi_app.shared_models import Permission
 
-        async with _AsyncSessionLocal() as session:
+        async with _AsyncSessionLocal() as session:  # type: ignore[misc]
             result = await session.execute(
                 select(Permission)
                 .where(
@@ -110,7 +111,7 @@ async def get_nav_sections_async() -> dict:
             )
             nav_items = result.scalars().all()
 
-        sections = {}
+        sections: dict[str, dict[str, Any]] = {}
         for item in nav_items:
             section_key = item.section or 'other'
             if section_key not in sections:
@@ -128,13 +129,13 @@ async def get_nav_sections_async() -> dict:
                 perm_codes = [perm_codes]
             # 确保自身 code 也包含在内，这样分配了具体权限（如 supplier_manage）的用户也能看到对应导航项
             if item.code not in perm_codes:
-                perm_codes = [item.code] + perm_codes
+                perm_codes = [item.code, *perm_codes]
 
-            mapped_url = PERMISSION_URL_MAP.get(item.url)
+            mapped_url = PERMISSION_URL_MAP.get(item.url)  # type: ignore[arg-type]
             if mapped_url is None:
                 if item.url and not item.url.startswith('/'):
                     logger.warning("Unmapped permission endpoint: %s (code=%s)", item.url, item.code)
-                url = item.url if item.url.startswith('/') else f'/{item.url}'
+                url = item.url if item.url.startswith('/') else f'/{item.url}'  # type: ignore[union-attr]
             else:
                 url = mapped_url
 

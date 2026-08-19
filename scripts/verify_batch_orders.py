@@ -1,5 +1,7 @@
 """验证批次号查询 API 是否正常返回测试订单"""
-import sys, os
+import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi_app.core.database import SyncSessionLocal

@@ -3,10 +3,8 @@ import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.core.exceptions import db_transaction
@@ -14,18 +12,14 @@ from fastapi_app.schemas.order import OrderItemSchema
 from fastapi_app.services.auxiliary_service import (
     count_inventory_logs,
     get_available_stockins,
-    get_country_by_id,
-    get_country_by_name,
     get_inventory_logs_page,
     get_product_by_id,
     get_stockin_by_id,
-    get_supplier_by_id,
     list_countries_ordered,
     search_products_by_keyword,
-    supplier_has_bom_or_orders,
 )
 from fastapi_app.shared_models import User
-from fastapi_app.shared_models.country import Country
+
 
 class HealthCheckResponse(BaseModel):
     status: str
@@ -139,6 +133,24 @@ async def health_check():
         "status": "ok",
         "timestamp": time.time(),
     }
+
+
+@router.get("/ready", response_model=HealthCheckResponse)
+async def readiness_check():
+    """K8s readiness probe alias"""
+    return await health_check()
+
+
+@router.get("/healthz", response_model=HealthCheckResponse)
+async def healthz_check():
+    """K8s healthz probe alias"""
+    return await health_check()
+
+
+@router.get("/readyz", response_model=HealthCheckResponse)
+async def readyz_check():
+    """K8s readyz probe alias"""
+    return await health_check()
 
 
 @router.get("/cache/stats", response_model=dict)
@@ -343,21 +355,9 @@ async def delete_supplier_api(
     db: AsyncSession = Depends(get_async_db),
 ):
     """删除供应商（API方式）"""
-    try:
-        async with db_transaction(db):
-            supplier = await get_supplier_by_id(db, id)
-            if not supplier:
-                raise HTTPException(status_code=404, detail="供应商不存在")
-
-            if await supplier_has_bom_or_orders(db, id):
-                raise HTTPException(status_code=400, detail="该供应商已有相关BOM或采购订单数据，无法删除")
-
-            await db.delete(supplier)
-        return {'success': True, 'message': '供应商删除成功'}
-    except HTTPException:
-        raise
-    except SQLAlchemyError as e:
-        raise HTTPException(status_code=500, detail=f"删除失败: {settings.sanitize_error(e)}") from e
+    from fastapi_app.services.auxiliary_service import delete_supplier
+    await delete_supplier(db, id)
+    return {'success': True, 'message': '供应商删除成功'}
 
 
 # ==================== 批量提交 Pydantic 模型 ====================
@@ -449,19 +449,8 @@ async def system_stats(
     db: AsyncSession = Depends(get_async_read_db),
 ):
     """系统统计信息（缓存命中率/性能数据）"""
-    try:
-        from utils.performance_monitor import performance_monitor, query_tracker
-
-        stats = {
-            'cache': {},
-            'performance': {
-                **performance_monitor.get_stats(),
-                'queries': query_tracker.get_stats()
-            }
-        }
-        return stats
-    except ImportError:
-        return {'cache': {}, 'performance': {}}
+    from fastapi_app.services.auxiliary_service import get_system_stats
+    return await get_system_stats()
 
 
 # ==================== 国家管理 API ====================
@@ -487,15 +476,8 @@ async def create_country(
     user: User = Depends(require_permission("order_manage")),
     db: AsyncSession = Depends(get_async_db),
 ):
-    name = data.name.strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="国家名称不能为空")
-    if await get_country_by_name(db, name):
-        raise HTTPException(status_code=409, detail="该国家已存在")
-    country = Country(name=name)
-    db.add(country)
-    await db.flush()
-    await db.refresh(country)
+    from fastapi_app.services.auxiliary_service import create_country as create_country_service
+    country = await create_country_service(db, data.name.strip())
     return {'id': country.id, 'name': country.name}
 
 @router.delete("/countries/{country_id}")
@@ -504,8 +486,6 @@ async def delete_country(
     user: User = Depends(require_permission("order_manage")),
     db: AsyncSession = Depends(get_async_db),
 ):
-    country = await get_country_by_id(db, country_id)
-    if not country:
-        raise HTTPException(status_code=404, detail="国家不存在")
-    await db.delete(country)
+    from fastapi_app.services.auxiliary_service import delete_country as delete_country_service
+    await delete_country_service(db, country_id)
     return {'success': True, 'message': '国家删除成功'}

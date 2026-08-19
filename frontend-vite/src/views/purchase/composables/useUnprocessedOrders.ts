@@ -5,10 +5,13 @@ import { getErrorMessage } from '@/types/errors'
 import type { UnprocessedOrder } from '@/types'
 
 interface UnprocessedOrdersResponse {
+  success?: boolean
   orders: UnprocessedOrder[]
   total: number
   pages: number
   current_page: number
+  /** 最近一次同步时间 */
+  latest_sync_time?: string | null
 }
 
 interface OneClickGenerateResponse {

@@ -69,7 +69,7 @@ def get_all_logs_data(
             return [], {}
 
     except (ValueError, TypeError, OSError) as e:
-        logger.error(f'获取报表数据错误: {str(e)}', exc_info=True)
+        logger.error(f'获取报表数据错误: {e!s}', exc_info=True)
         return [], {}
 
 

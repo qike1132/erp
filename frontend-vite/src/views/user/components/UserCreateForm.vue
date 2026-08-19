@@ -4,12 +4,12 @@
     <form @submit.prevent="handleAdd" class="us-form">
       <div class="us-form-group">
         <label>用户名 <span class="us-required">*</span></label>
-        <input v-model="form.username" class="us-input" placeholder="请输入用户名" />
+        <input v-model="form.username" class="us-input" placeholder="请输入用户名" aria-label="请输入用户名" />
       </div>
       <div class="us-form-group">
         <label>密码 <span class="us-required">*</span></label>
         <div class="us-input-wrapper">
-          <input v-model="form.password" :type="showPwd1 ? 'text' : 'password'" class="us-input" placeholder="至少6位" />
+          <input v-model="form.password" :type="showPwd1 ? 'text' : 'password'" class="us-input" placeholder="至少6位" aria-label="至少6位" />
           <button type="button" class="us-pwd-toggle" @click="showPwd1 = !showPwd1" aria-label="查看">
             <FontAwesomeIcon :icon="showPwd1 ? 'eye-slash' : 'eye'" aria-hidden="true" />
           </button>
@@ -27,7 +27,7 @@
         </select>
       </div>
       <p v-if="formError" class="us-form-error">{{ formError }}</p>
-      <button type="submit" class="us-submit-btn" :disabled="submitting">
+      <button type="submit" class="us-submit-btn" :disabled="submitting" :aria-label="submitting ? '添加中…' : '添加用户'">
         {{ submitting ? '添加中…' : '添加用户' }}
       </button>
     </form>

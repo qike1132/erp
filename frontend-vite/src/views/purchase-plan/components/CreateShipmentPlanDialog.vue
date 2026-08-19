@@ -46,14 +46,14 @@
     </div>
 
     <template #footer>
-      <button v-if="mode === 'manual'" class="csd-btn csd-btn-add" @click="addDetail">
+      <button v-if="mode === 'manual'" class="csd-btn csd-btn-add" @click="addDetail" aria-label="添加明细">
         <FontAwesomeIcon icon="plus" aria-hidden="true" /> 添加明细
       </button>
       <span style="flex:1"></span>
-      <button class="csd-btn csd-btn-cancel" @click="$emit('update:open', false)">
+      <button class="csd-btn csd-btn-cancel" @click="$emit('update:open', false)" aria-label="取消">
         取消
       </button>
-      <button v-if="mode === 'manual'" class="csd-btn csd-btn-submit" :disabled="submitting" @click="handleSubmit">
+      <button v-if="mode === 'manual'" class="csd-btn csd-btn-submit" :disabled="submitting" @click="handleSubmit" :aria-label="submitting ? '保存中…' : '确认创建'">
         <FontAwesomeIcon v-if="submitting" icon="spinner" spin />
         <FontAwesomeIcon v-else icon="check" />
         {{ submitting ? '保存中…' : '确认创建' }}

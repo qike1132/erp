@@ -1,4 +1,4 @@
-"""
+r"""
 实时可用库存计算 - Mock 数据验证脚本
 
 使用方法：
@@ -14,14 +14,13 @@
   available_stock = SUM(daily_production_record.quantity) - SUM(stock_out.quantity - stock_out.returned_quantity)
 """
 import asyncio
-import sys
 import os
+import sys
 
 # 确保项目根目录在 sys.path 中
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from datetime import date, datetime, UTC
-
+from datetime import UTC, date, datetime
 
 # ============ Mock 数据定义 ============
 
@@ -79,15 +78,18 @@ EXPECTED = {
 
 
 async def run_test():
-    from sqlalchemy import text, select, delete
-    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy import delete, select, text
 
-    from fastapi_app.core.database import async_engine, _AsyncSessionLocal
+    from fastapi_app.core.database import _AsyncSessionLocal, async_engine
+    from fastapi_app.services.stock_service import get_inventory_paginated
     from fastapi_app.shared_models import (
-        Product, StockIn, StockOut, Order, InventoryLog,
+        InventoryLog,
+        Order,
+        Product,
+        StockIn,
+        StockOut,
     )
     from fastapi_app.shared_models.daily_production_record import DailyProductionRecord
-    from fastapi_app.services.stock_service import get_inventory_paginated
 
     product_ids: list[int] = []
     order_ids: list[int] = []
@@ -286,7 +288,7 @@ async def run_test():
             )
             await db.execute(
                 delete(InventoryLog).where(
-                    InventoryLog.note.like(f'%入库ID：%')
+                    InventoryLog.note.like('%入库ID：%')
                     if False else text('1=0')  # 日志无客户字段，跳过
                 )
             )

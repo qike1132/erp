@@ -14,8 +14,8 @@
         <span v-else>拖拽文件到此处或点击选择 · 支持 .xlsx .xls .csv</span>
       </div>
       <div class="csd-upload-buttons">
-        <button class="csd-inline-btn" @click.stop="dlTpl">模板</button>
-        <button class="csd-inline-btn csd-inline-btn-primary" :disabled="!file || uploading" @click.stop="doUpload">
+        <button class="csd-inline-btn" @click.stop="dlTpl" aria-label="模板">模板</button>
+        <button class="csd-inline-btn csd-inline-btn-primary" :disabled="!file || uploading" @click.stop="doUpload" aria-label="导入">
           <FontAwesomeIcon v-if="!uploading" icon="upload" aria-hidden="true" />
           <FontAwesomeIcon v-else icon="spinner" spin /> 导入
         </button>
@@ -23,7 +23,7 @@
           <FontAwesomeIcon icon="trash" aria-hidden="true" />
         </button>
       </div>
-      <input ref="fileInp" type="file" accept=".xlsx,.xls,.csv" hidden @change="onFile" />
+      <input ref="fileInp" type="file" accept=".xlsx,.xls,.csv" hidden @change="onFile" aria-label="上传文件" />
     </div>
     <div v-if="upMsg" class="csd-upload-message" :class="{ 'csd-upload-success': upOk, 'csd-upload-error': !upOk }">
       <FontAwesomeIcon :icon="upOk ? 'check-circle' : 'exclamation-circle'" aria-hidden="true" />

@@ -29,8 +29,7 @@ from fastapi_app.schemas.backup import (
     BackupTablesResponse,
     BackupTriggerOut,
 )
-from fastapi_app.services import backup_query_service
-from fastapi_app.services import backup_service
+from fastapi_app.services import backup_query_service, backup_service
 from fastapi_app.services.backup_service import BackupFileError
 from fastapi_app.shared_models import User
 

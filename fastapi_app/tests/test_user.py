@@ -53,6 +53,7 @@ def _make_perm(code, parent_id=None, children=None):
 def _make_user(permissions, is_super=False):
     """构造轻量级用户桩对象，绑定真实的 has_permission 方法"""
     from types import MethodType
+
     from fastapi_app.shared_models.user import User
     stub = SimpleNamespace(is_super=is_super, permissions=permissions)
     stub.has_permission = MethodType(User.has_permission, stub)
@@ -183,7 +184,7 @@ class TestUserService:
         mock_result.scalars.return_value = mock_scalars
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        users, total = await get_users(mock_db)
+        users, _total = await get_users(mock_db)
         assert len(users) == 1
 
     @pytest.mark.asyncio
@@ -329,6 +330,9 @@ class TestUserEndpoints:
         db.add = MagicMock()
         db.execute = AsyncMock()
         db.get = AsyncMock()
+        # db.info 必须是真实 dict（与 conftest.mock_db 一致），否则
+        # db_transaction 的 db.info.pop(...) 会返回 coroutine 导致迭代失败
+        db.info = {}
         return db
 
     @pytest.mark.asyncio
@@ -338,6 +342,7 @@ class TestUserEndpoints:
         mock_user.username = "admin"
         mock_user.is_super = True
         mock_user.status = True
+        mock_user.factory = None
         mock_user.create_time = MagicMock()
         mock_user.create_time.strftime.return_value = "2024-01-01 00:00"
         mock_user.permissions = []
@@ -347,6 +352,7 @@ class TestUserEndpoints:
         mock_scalars.all.return_value = [mock_user]
         mock_result.unique.return_value = mock_result
         mock_result.scalars.return_value = mock_scalars
+        mock_result.scalar_one.return_value = 1
         mock_db.execute = AsyncMock(return_value=mock_result)
 
         response = await client.get("/api/v1/users/list")
@@ -399,7 +405,8 @@ class TestUserEndpoints:
         mock_user = MagicMock()
         mock_user.is_super = False
         mock_db.get = AsyncMock(return_value=mock_user)
-        mock_db.scalar = AsyncMock(side_effect=[2, 0, 0])
+        # 两次 scalar 依次为：待处理审批数、锁定订单数，均为 0 才允许删除
+        mock_db.scalar = AsyncMock(side_effect=[0, 0])
 
         response = await client.delete("/api/v1/users/delete/2")
         assert response.status_code == 200

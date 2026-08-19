@@ -181,7 +181,7 @@ class DatabaseManager:
         except subprocess.TimeoutExpired:
             return False, "pg_dump 执行超时（超过 3600 秒）", None
         except Exception as e:
-            return False, f"PostgreSQL 备份失败: {str(e)}", None
+            return False, f"PostgreSQL 备份失败: {e!s}", None
 
     def backup_mysql(self, backup_dir: Path, compress: bool = True) -> tuple[bool, str, Path | None]:
         config = self.get_db_config()
@@ -222,7 +222,7 @@ class DatabaseManager:
         except FileNotFoundError:
             return False, "mysqldump 命令未找到，请确保 MySQL 已安装", None
         except Exception as e:
-            return False, f"MySQL 备份失败: {str(e)}", None
+            return False, f"MySQL 备份失败: {e!s}", None
 
     def backup(self, backup_type: str = 'manual', compress: bool = True) -> tuple[bool, str]:
         self.log("=" * 60)
@@ -408,7 +408,7 @@ class DatabaseManager:
         except FileNotFoundError:
             return False, "psql 命令未找到，请确保 PostgreSQL 客户端工具已安装"
         except Exception as e:
-            return False, f"数据库恢复失败: {str(e)}"
+            return False, f"数据库恢复失败: {e!s}"
 
     def restore_mysql(self, backup_file: Path) -> tuple[bool, str]:
         config = self.get_db_config()
@@ -437,7 +437,7 @@ class DatabaseManager:
         except FileNotFoundError:
             return False, "mysql 命令未找到，请确保 MySQL 已安装"
         except Exception as e:
-            return False, f"MySQL 恢复失败: {str(e)}"
+            return False, f"MySQL 恢复失败: {e!s}"
 
     def restore(self, backup_file: str) -> tuple[bool, str]:
         file_path = Path(backup_file)
@@ -490,7 +490,7 @@ class DatabaseManager:
         try:
             with open(log_file, 'w', encoding='utf-8') as f:
                 json.dump(log_entry, f, indent=2, ensure_ascii=False)
-        except Exception:
+        except Exception:  # noqa: S110  # defensive: 恢复日志写入失败不影响恢复主流程
             pass
 
     # ============================================================

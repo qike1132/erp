@@ -25,7 +25,7 @@
               <span>数量: <b>{{ i.ordered_quantity }}</b> {{ i.unit || '' }}</span>
               <span>已到货: <b style="color:var(--color-success-500);">{{ i.received_quantity }}</b></span>
               <span>未到: <b style="color:var(--color-warning-500);">{{ i.remaining_quantity }}</b></span>
-              <button v-if="canManage && i.received_quantity < i.ordered_quantity" class="mr-btn mr-btn-success mr-btn-sm" @click="$emit('openReceive', i)" title="登记收货数量"><FontAwesomeIcon icon="box" /> 收货</button>
+              <button v-if="canManage && i.received_quantity < i.ordered_quantity" class="mr-btn mr-btn-success mr-btn-sm" @click="$emit('openReceive', i)" title="登记收货数量" aria-label="收货"><FontAwesomeIcon icon="box" /> 收货</button>
               <span v-else-if="i.received_quantity >= i.ordered_quantity" style="color:var(--color-success-500);font-weight:600;">&#10003; 已完成</span>
             </div>
           </div>

@@ -1,9 +1,11 @@
 """检查11寸企鹅的生产记录是否有 product_id"""
 import asyncio
 import sys
+
 sys.path.insert(0, r'd:\erp_system')
 
 from sqlalchemy import select, text
+
 from fastapi_app.core.database import _AsyncSessionLocal
 from fastapi_app.shared_models import Product
 from fastapi_app.shared_models.daily_production_record import DailyProductionRecord

@@ -1,0 +1,539 @@
+{
+  "endpoints:fastapi_app/api/v1/endpoints/approval.py": [
+    "core",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/auth.py": [
+    "core"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/auxiliary.py": [
+    "core",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/batch.py": [
+    "core",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/case_endpoint.py": [
+    "core",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/customer.py": [
+    "core",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/customer_sampling.py": [
+    "core",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/daily_production.py": [
+    "core",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/dashboard.py": [
+    "core",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/dead_letter.py": [
+    "core"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/device_token.py": [
+    "core",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/material_registration.py": [
+    "core",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/monitoring.py": [
+    "core"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/notification.py": [
+    "core",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/ocr_import.py": [
+    "core",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/order.py": [
+    "core",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/order_batch.py": [
+    "core",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/outsource.py": [
+    "core",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/pattern_maker.py": [
+    "core",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/permission.py": [
+    "core",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/product.py": [
+    "core",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/production_plan.py": [
+    "core",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/production_summary.py": [
+    "core",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/purchase_plan.py": [
+    "core",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/report.py": [
+    "core",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/staging_order.py": [
+    "core",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/staging_stockin.py": [
+    "core",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/staging_stockout.py": [
+    "core",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/stock.py": [
+    "core",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/supplier.py": [
+    "core",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/tasks.py": [
+    "core"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/user.py": [
+    "core",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/__init__.py": [],
+  "endpoints:fastapi_app/api/v1/endpoints/backup/export.py": [
+    "core",
+    "endpoints",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/backup/records.py": [
+    "core",
+    "endpoints",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/backup/restore.py": [
+    "core",
+    "endpoints",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/backup/validation.py": [
+    "core",
+    "endpoints",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/backup/_deps.py": [
+    "core",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/backup/__init__.py": [
+    "endpoints",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/purchase_center/customer_routes.py": [
+    "core",
+    "endpoints",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/purchase_center/export_utils.py": [
+    "core"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/purchase_center/misc_routes.py": [
+    "core",
+    "endpoints",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/purchase_center/order_routes.py": [
+    "core",
+    "endpoints",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/purchase_center/print_routes.py": [
+    "core",
+    "endpoints",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/purchase_center/product_routes.py": [
+    "core",
+    "endpoints",
+    "services"
+  ],
+  "endpoints:fastapi_app/api/v1/endpoints/purchase_center/schemas.py": [],
+  "endpoints:fastapi_app/api/v1/endpoints/purchase_center/__init__.py": [
+    "endpoints"
+  ],
+  "services:fastapi_app/services/approval_log_service.py": [],
+  "services:fastapi_app/services/approval_service.py": [
+    "core",
+    "services"
+  ],
+  "services:fastapi_app/services/auth_service.py": [
+    "core"
+  ],
+  "services:fastapi_app/services/auxiliary_service.py": [
+    "core",
+    "services"
+  ],
+  "services:fastapi_app/services/backup_alert_service.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/backup_cleanup_service.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/backup_health_check_service.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/backup_metrics_service.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/backup_policy_service.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/backup_query_service.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/backup_recovery_test_service.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/backup_service.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/base_search_service.py": [
+    "core"
+  ],
+  "services:fastapi_app/services/batch_import_service.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/batch_pipeline.py": [],
+  "services:fastapi_app/services/batch_service.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/bom_service.py": [],
+  "services:fastapi_app/services/case_service.py": [
+    "core"
+  ],
+  "services:fastapi_app/services/customer_sampling_service.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/customer_search_service.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/customer_service.py": [
+    "core"
+  ],
+  "services:fastapi_app/services/daily_production_service.py": [
+    "core"
+  ],
+  "services:fastapi_app/services/dashboard_service.py": [
+    "core"
+  ],
+  "services:fastapi_app/services/enhanced_pagination.py": [],
+  "services:fastapi_app/services/fcm_service.py": [
+    "core"
+  ],
+  "services:fastapi_app/services/fifo_allocation.py": [
+    "core"
+  ],
+  "services:fastapi_app/services/inventory_service.py": [],
+  "services:fastapi_app/services/material_registration_service.py": [
+    "core"
+  ],
+  "services:fastapi_app/services/notification_service.py": [
+    "core"
+  ],
+  "services:fastapi_app/services/numbering.py": [
+    "core"
+  ],
+  "services:fastapi_app/services/ocr_fuzzy_match.py": [],
+  "services:fastapi_app/services/ocr_service.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/order_batch_create.py": [
+    "core",
+    "services"
+  ],
+  "services:fastapi_app/services/order_batch_service.py": [
+    "core",
+    "services"
+  ],
+  "services:fastapi_app/services/order_crud.py": [
+    "core",
+    "services"
+  ],
+  "services:fastapi_app/services/order_deduction_service.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/order_purchase_sync.py": [],
+  "services:fastapi_app/services/order_service.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/order_utils.py": [],
+  "services:fastapi_app/services/outsource_service.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/pattern_maker_service.py": [
+    "core"
+  ],
+  "services:fastapi_app/services/plan_utils.py": [],
+  "services:fastapi_app/services/production_plan_service.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/production_summary_service.py": [
+    "core"
+  ],
+  "services:fastapi_app/services/product_search_service.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/product_service.py": [
+    "core",
+    "services"
+  ],
+  "services:fastapi_app/services/purchase_bom_copy_service.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/purchase_center_service.py": [
+    "core",
+    "services"
+  ],
+  "services:fastapi_app/services/purchase_customer_service.py": [
+    "core"
+  ],
+  "services:fastapi_app/services/purchase_history_service.py": [
+    "core"
+  ],
+  "services:fastapi_app/services/purchase_order_crud.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/purchase_order_generate.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/purchase_order_query.py": [
+    "core",
+    "services"
+  ],
+  "services:fastapi_app/services/purchase_order_service.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/purchase_plan_crud.py": [
+    "core",
+    "services"
+  ],
+  "services:fastapi_app/services/purchase_plan_service.py": [
+    "core",
+    "services"
+  ],
+  "services:fastapi_app/services/purchase_product_service.py": [
+    "core",
+    "services"
+  ],
+  "services:fastapi_app/services/purchase_supplier_service.py": [
+    "core"
+  ],
+  "services:fastapi_app/services/purchase_utils.py": [],
+  "services:fastapi_app/services/report_service.py": [
+    "core"
+  ],
+  "services:fastapi_app/services/staging_service.py": [
+    "core",
+    "services"
+  ],
+  "services:fastapi_app/services/staging_utils.py": [],
+  "services:fastapi_app/services/stock_service.py": [
+    "core",
+    "services"
+  ],
+  "services:fastapi_app/services/storage_service.py": [
+    "core"
+  ],
+  "services:fastapi_app/services/user_service.py": [],
+  "services:fastapi_app/services/__init__.py": [
+    "core"
+  ],
+  "services:fastapi_app/services/backup/adapters.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/backup/cache_restore.py": [],
+  "services:fastapi_app/services/backup/chunks.py": [],
+  "services:fastapi_app/services/backup/crypto.py": [],
+  "services:fastapi_app/services/backup/dump.py": [],
+  "services:fastapi_app/services/backup/exceptions.py": [],
+  "services:fastapi_app/services/backup/filestore.py": [],
+  "services:fastapi_app/services/backup/format_storage.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/backup/format_strategy.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/backup/format_types.py": [],
+  "services:fastapi_app/services/backup/incremental.py": [],
+  "services:fastapi_app/services/backup/json_backup.py": [],
+  "services:fastapi_app/services/backup/orchestrator.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/backup/ports.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/backup/records.py": [],
+  "services:fastapi_app/services/backup/restore.py": [],
+  "services:fastapi_app/services/backup/snapshot.py": [],
+  "services:fastapi_app/services/backup/strategies.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/backup/types.py": [],
+  "services:fastapi_app/services/backup/_constants.py": [],
+  "services:fastapi_app/services/backup/__init__.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/customer_sampling/common.py": [
+    "core"
+  ],
+  "services:fastapi_app/services/customer_sampling/crud.py": [
+    "core",
+    "services"
+  ],
+  "services:fastapi_app/services/customer_sampling/grouping.py": [],
+  "services:fastapi_app/services/customer_sampling/roles.py": [
+    "core"
+  ],
+  "services:fastapi_app/services/customer_sampling/upload.py": [
+    "core"
+  ],
+  "services:fastapi_app/services/customer_sampling/version_diff.py": [
+    "core"
+  ],
+  "services:fastapi_app/services/customer_sampling/__init__.py": [],
+  "services:fastapi_app/services/serializers/order_serializer.py": [],
+  "services:fastapi_app/services/serializers/__init__.py": [],
+  "services:fastapi_app/services/backup/cleanup/service.py": [
+    "core",
+    "services"
+  ],
+  "services:fastapi_app/services/backup/cleanup/__init__.py": [],
+  "services:fastapi_app/services/backup/metrics/alert_service.py": [
+    "core"
+  ],
+  "services:fastapi_app/services/backup/metrics/service.py": [
+    "core",
+    "services"
+  ],
+  "services:fastapi_app/services/backup/metrics/__init__.py": [],
+  "services:fastapi_app/services/backup/orchestration/core.py": [],
+  "services:fastapi_app/services/backup/orchestration/policy_service.py": [
+    "core",
+    "services"
+  ],
+  "services:fastapi_app/services/backup/orchestration/recovery_test_service.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/backup/orchestration/__init__.py": [],
+  "services:fastapi_app/services/backup/orchestration_dir/core.py": [],
+  "services:fastapi_app/services/backup/orchestration_dir/policy_service.py": [
+    "core",
+    "services"
+  ],
+  "services:fastapi_app/services/backup/orchestration_dir/recovery_test_service.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/backup/verify/core.py": [],
+  "services:fastapi_app/services/backup/verify/health_check_service.py": [
+    "core",
+    "services"
+  ],
+  "services:fastapi_app/services/backup/verify/query_service.py": [
+    "services"
+  ],
+  "services:fastapi_app/services/backup/verify/__init__.py": [],
+  "services:fastapi_app/services/backup/verify_dir/core.py": [],
+  "services:fastapi_app/services/backup/verify_dir/health_check_service.py": [
+    "core",
+    "services"
+  ],
+  "services:fastapi_app/services/backup/verify_dir/query_service.py": [
+    "services"
+  ],
+  "core:fastapi_app/core/alert_rules.py": [],
+  "core:fastapi_app/core/arq_app.py": [
+    "core"
+  ],
+  "core:fastapi_app/core/audit_middleware.py": [
+    "core"
+  ],
+  "core:fastapi_app/core/backup_encryption.py": [],
+  "core:fastapi_app/core/backup_progress.py": [],
+  "core:fastapi_app/core/business_rules.py": [],
+  "core:fastapi_app/core/cache.py": [],
+  "core:fastapi_app/core/cache_invalidation.py": [
+    "core"
+  ],
+  "core:fastapi_app/core/cache_keys.py": [],
+  "core:fastapi_app/core/celery_app.py": [],
+  "core:fastapi_app/core/circuit_breaker.py": [],
+  "core:fastapi_app/core/config.py": [],
+  "core:fastapi_app/core/database.py": [
+    "core"
+  ],
+  "core:fastapi_app/core/db_health.py": [],
+  "core:fastapi_app/core/deps.py": [
+    "core"
+  ],
+  "core:fastapi_app/core/domains.py": [],
+  "core:fastapi_app/core/domain_events.py": [],
+  "core:fastapi_app/core/event_bus.py": [
+    "core"
+  ],
+  "core:fastapi_app/core/exceptions.py": [],
+  "core:fastapi_app/core/exception_handler.py": [],
+  "core:fastapi_app/core/health.py": [
+    "core"
+  ],
+  "core:fastapi_app/core/limiter.py": [],
+  "core:fastapi_app/core/logger.py": [],
+  "core:fastapi_app/core/metrics.py": [],
+  "core:fastapi_app/core/middleware.py": [
+    "core"
+  ],
+  "core:fastapi_app/core/nav_context.py": [],
+  "core:fastapi_app/core/number_generator.py": [],
+  "core:fastapi_app/core/prod_runner.py": [],
+  "core:fastapi_app/core/purchase_cache.py": [
+    "core"
+  ],
+  "core:fastapi_app/core/redis_wrapper.py": [
+    "core"
+  ],
+  "core:fastapi_app/core/restore_progress.py": [],
+  "core:fastapi_app/core/sanitizer.py": [],
+  "core:fastapi_app/core/security.py": [],
+  "core:fastapi_app/core/slow_query.py": [],
+  "core:fastapi_app/core/state_machine.py": [],
+  "core:fastapi_app/core/task_callbacks.py": [
+    "core"
+  ],
+  "core:fastapi_app/core/telemetry.py": [],
+  "core:fastapi_app/core/validators.py": [
+    "core"
+  ],
+  "core:fastapi_app/core/__init__.py": []
+}

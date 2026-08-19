@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text
@@ -24,7 +24,7 @@ class StagingStockOut(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     session_id: Mapped[str] = mapped_column(String(64), index=True, comment='会话ID，用于标识同一批导入')
     customer: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True, comment='客户名称')
-    stockout_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), comment='出货时间')
+    stockout_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='出货时间')
     product_name: Mapped[str] = mapped_column(String(200), nullable=False, comment='产品名称（冗余存储）')
     product_barcode: Mapped[str | None] = mapped_column(String(50), comment='产品69码（冗余存储）')
     product_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('product.id'), comment='产品ID（确认后填充）')
@@ -37,10 +37,10 @@ class StagingStockOut(Base):
     validation_error: Mapped[str | None] = mapped_column(String(500), comment='验证错误信息')
     stock_check_passed: Mapped[bool | None] = mapped_column(Boolean, default=False, comment='库存检查是否通过')
     stock_check_message: Mapped[str | None] = mapped_column(String(500), comment='库存检查信息')
-    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), comment='创建时间')
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 
-    product: Mapped["Product | None"] = relationship('Product', backref='staging_stockouts')
+    product: Mapped[Product | None] = relationship('Product', backref='staging_stockouts')
 
     __table_args__ = (
         Index('idx_staging_stockout_session', 'session_id'),

@@ -6,9 +6,9 @@ from pathlib import Path
 # 添加项目根目录到 sys.path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import joinedload
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
+
 
 async def main():
     url = "postgresql+asyncpg://erp_app:110110@localhost:5432/erp_system"
@@ -25,7 +25,7 @@ async def main():
             LIMIT 10
         """))
         rows = result.fetchall()
-        print(f"\n=== 湖北工厂备货记录 (stock_in) ===")
+        print("\n=== 湖北工厂备货记录 (stock_in) ===")
         print(f"共 {len(rows)} 条:")
         for r in rows:
             print(f"  ID={r[0]} NO={r[1]} 客户={r[2]} 数量={r[3]} 日期={r[4]} 产品={r[5]} 工厂={r[6]} 条码={r[7]}")
@@ -41,7 +41,7 @@ async def main():
             LIMIT 10
         """))
         rows = result.fetchall()
-        print(f"\n=== 湖北工厂订单 (order) ===")
+        print("\n=== 湖北工厂订单 (order) ===")
         print(f"共 {len(rows)} 条:")
         for r in rows:
             print(f"  ID={r[0]} NO={r[1]} 客户={r[2]} 日期={r[3]} 状态={r[4]}")

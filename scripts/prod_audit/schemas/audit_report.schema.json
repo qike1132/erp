@@ -1,0 +1,324 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://erp_system.local/schemas/audit_report.schema.json",
+  "title": "ERP 生产代码审核报告 Schema",
+  "description": "12 层生产代码审核 pipeline 的统一报告数据结构。定义 AuditLayer / AuditIssue / ProductionReadinessScore / ReleaseSignOff / AuditRunResult / AuditDiff / AuditState。",
+  "definitions": {
+    "Severity": {
+      "type": "string",
+      "enum": ["critical", "high", "medium", "low", "info"],
+      "description": "问题严重度。critical=阻断上线, high=阻断上线, medium=限期修复, low=跟进, info=提示。"
+    },
+    "LayerStatus": {
+      "type": "string",
+      "enum": ["pending", "in_progress", "passed", "failed", "blocked"],
+      "description": "审核层执行状态。"
+    },
+    "IssueStatus": {
+      "type": "string",
+      "enum": ["open", "in_progress", "fixed", "verified", "wontfix"],
+      "description": "问题修复状态。"
+    },
+    "RetestResult": {
+      "type": "string",
+      "enum": ["pass", "fail", "pending"],
+      "description": "复测结果。"
+    },
+    "ReleaseDecision": {
+      "type": "string",
+      "enum": ["approved", "rejected"],
+      "description": "上线决策。"
+    },
+    "LayerId": {
+      "type": "string",
+      "enum": ["L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9", "L10", "L11", "L12"],
+      "description": "审核层唯一标识。"
+    },
+    "IssueId": {
+      "type": "string",
+      "pattern": "^L([1-9]|1[0-2])-\\d{3}$",
+      "description": "问题唯一标识，格式 L{层号}-{3位序号}，如 L3-001。"
+    },
+    "Weight": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "层权重，0-1 之间。"
+    },
+    "Score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "得分，0-100。"
+    },
+    "ISO8601Timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 时间戳。"
+    },
+    "AuditIssue": {
+      "type": "object",
+      "description": "审核问题。",
+      "required": [
+        "issue_id",
+        "layer_id",
+        "severity",
+        "file",
+        "line",
+        "description",
+        "suggestion",
+        "rule_id",
+        "owner",
+        "due_date",
+        "status",
+        "retest_result"
+      ],
+      "properties": {
+        "issue_id": { "$ref": "#/definitions/IssueId" },
+        "layer_id": { "$ref": "#/definitions/LayerId" },
+        "severity": { "$ref": "#/definitions/Severity" },
+        "file": { "type": "string", "minLength": 1, "description": "问题所在文件路径。" },
+        "line": { "type": "integer", "minimum": 1, "description": "问题所在行号。" },
+        "description": { "type": "string", "minLength": 1, "description": "问题描述。" },
+        "suggestion": { "type": "string", "minLength": 1, "description": "修复建议。" },
+        "rule_id": { "type": "string", "minLength": 1, "description": "关联规则 ID，如 L3-BROAD-EXCEPT-001。" },
+        "owner": { "type": "string", "minLength": 1, "description": "责任研发。" },
+        "due_date": { "type": "string", "format": "date", "description": "修复期限（ISO 日期）。" },
+        "status": { "$ref": "#/definitions/IssueStatus" },
+        "linked_pr": {
+          "type": ["string", "null"],
+          "description": "关联修复 PR，修复后必填。"
+        },
+        "retest_result": { "$ref": "#/definitions/RetestResult" }
+      },
+      "additionalProperties": false
+    },
+    "AuditLayer": {
+      "type": "object",
+      "description": "审核层执行记录。",
+      "required": [
+        "layer_id",
+        "layer_name",
+        "reviewer",
+        "status",
+        "issues",
+        "evidence_path",
+        "started_at",
+        "weight"
+      ],
+      "properties": {
+        "layer_id": { "$ref": "#/definitions/LayerId" },
+        "layer_name": { "type": "string", "minLength": 1, "description": "审核层名称。" },
+        "reviewer": { "type": "string", "minLength": 1, "description": "负责审核员。" },
+        "status": { "$ref": "#/definitions/LayerStatus" },
+        "issues": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/AuditIssue" },
+          "description": "审核发现问题列表。"
+        },
+        "evidence_path": { "type": "string", "minLength": 1, "description": "审核证据归档路径。" },
+        "started_at": { "$ref": "#/definitions/ISO8601Timestamp" },
+        "finished_at": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "审核完成时间，完成后必填。"
+        },
+        "weight": { "$ref": "#/definitions/Weight" }
+      },
+      "additionalProperties": false
+    },
+    "LayerScoreEntry": {
+      "type": "object",
+      "description": "单层得分条目。",
+      "required": ["layer_id", "score", "basis"],
+      "properties": {
+        "layer_id": { "$ref": "#/definitions/LayerId" },
+        "score": { "$ref": "#/definitions/Score" },
+        "basis": { "type": "string", "minLength": 1, "description": "得分依据说明。" }
+      },
+      "additionalProperties": false
+    },
+    "WeightEntry": {
+      "type": "object",
+      "description": "单层权重条目。",
+      "required": ["layer_id", "weight"],
+      "properties": {
+        "layer_id": { "$ref": "#/definitions/LayerId" },
+        "weight": { "$ref": "#/definitions/Weight" }
+      },
+      "additionalProperties": false
+    },
+    "ProductionReadinessScore": {
+      "type": "object",
+      "description": "生产就绪评分。",
+      "required": ["total_score", "layer_scores", "weights", "calculation_time", "is_ready", "score_basis"],
+      "properties": {
+        "total_score": { "$ref": "#/definitions/Score" },
+        "layer_scores": {
+          "type": "array",
+          "minItems": 12,
+          "maxItems": 12,
+          "items": { "$ref": "#/definitions/LayerScoreEntry" },
+          "description": "各层得分（共 12 项）。"
+        },
+        "weights": {
+          "type": "array",
+          "minItems": 12,
+          "maxItems": 12,
+          "items": { "$ref": "#/definitions/WeightEntry" },
+          "description": "各层权重（共 12 项，Σweight = 1）。",
+          "allOf": [
+            {
+              "description": "权重之和必须等于 1.0（允许浮点误差 1e-9）。",
+              "properties": {
+                "weights": {
+                  "type": "array",
+                  "items": { "$ref": "#/definitions/WeightEntry" }
+                }
+              }
+            }
+          ]
+        },
+        "calculation_time": { "$ref": "#/definitions/ISO8601Timestamp" },
+        "is_ready": {
+          "type": "boolean",
+          "description": "是否就绪：total_score ≥ 85 且无 critical/high 阻断问题。"
+        },
+        "score_basis": {
+          "type": "string",
+          "minLength": 1,
+          "description": "评分依据说明（含扣分明细）。"
+        }
+      },
+      "additionalProperties": false
+    },
+    "LayerSignOff": {
+      "type": "object",
+      "description": "单层签字。",
+      "required": ["layer_id", "reviewer", "signed_at", "result"],
+      "properties": {
+        "layer_id": { "$ref": "#/definitions/LayerId" },
+        "reviewer": { "type": "string", "minLength": 1 },
+        "signed_at": { "$ref": "#/definitions/ISO8601Timestamp" },
+        "result": {
+          "type": "string",
+          "enum": ["approved", "rejected", "conditional"],
+          "description": "该层签字结果。"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ReleaseSignOff": {
+      "type": "object",
+      "description": "上线就绪签字单。",
+      "required": [
+        "signoff_id",
+        "audit_run_id",
+        "layer_signoffs",
+        "release_manager",
+        "release_decision",
+        "decision_reason",
+        "conditions"
+      ],
+      "properties": {
+        "signoff_id": { "type": "string", "minLength": 1, "description": "签字单唯一标识。" },
+        "audit_run_id": { "type": "string", "minLength": 1, "description": "关联审核运行 ID。" },
+        "layer_signoffs": {
+          "type": "array",
+          "minItems": 12,
+          "maxItems": 12,
+          "items": { "$ref": "#/definitions/LayerSignOff" },
+          "description": "各层审核员签字（共 12 项）。"
+        },
+        "release_manager": { "type": "string", "minLength": 1, "description": "发布负责人。" },
+        "release_decision": { "$ref": "#/definitions/ReleaseDecision" },
+        "decision_reason": { "type": "string", "minLength": 1, "description": "决策理由。" },
+        "signed_at": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "签字时间，签字后必填。"
+        },
+        "conditions": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "放行条件列表。"
+        }
+      },
+      "additionalProperties": false
+    },
+    "AuditDiff": {
+      "type": "object",
+      "description": "审核差异（与上次运行对比）。",
+      "required": ["new_issues", "fixed_issues", "remaining_issues"],
+      "properties": {
+        "new_issues": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/AuditIssue" },
+          "description": "本次新增问题。"
+        },
+        "fixed_issues": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "已修复问题 issue_id 列表。"
+        },
+        "remaining_issues": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "遗留问题 issue_id 列表。"
+        }
+      },
+      "additionalProperties": false
+    },
+    "AuditState": {
+      "type": "object",
+      "description": "审核运行状态（支持断点恢复）。",
+      "required": ["audit_run_id", "current_layer", "layer_states", "started_at", "last_updated"],
+      "properties": {
+        "audit_run_id": { "type": "string", "minLength": 1 },
+        "current_layer": {
+          "type": ["string", "null"],
+          "description": "当前正在执行或即将执行的层 ID。"
+        },
+        "layer_states": {
+          "type": "object",
+          "description": "各层状态快照，key 为 layer_id。",
+          "patternProperties": {
+            "^L([1-9]|1[0-2])$": { "$ref": "#/definitions/AuditLayer" }
+          },
+          "additionalProperties": false
+        },
+        "started_at": { "$ref": "#/definitions/ISO8601Timestamp" },
+        "last_updated": { "$ref": "#/definitions/ISO8601Timestamp" }
+      },
+      "additionalProperties": false
+    },
+    "AuditRunResult": {
+      "type": "object",
+      "description": "审核运行最终结果。",
+      "required": ["audit_run_id", "layer_results", "score", "signoff", "diff", "started_at", "finished_at"],
+      "properties": {
+        "audit_run_id": { "type": "string", "minLength": 1, "description": "审核运行唯一标识。" },
+        "layer_results": {
+          "type": "array",
+          "minItems": 12,
+          "maxItems": 12,
+          "items": { "$ref": "#/definitions/AuditLayer" },
+          "description": "12 层审核结果。"
+        },
+        "score": { "$ref": "#/definitions/ProductionReadinessScore" },
+        "signoff": { "$ref": "#/definitions/ReleaseSignOff" },
+        "diff": { "$ref": "#/definitions/AuditDiff" },
+        "started_at": { "$ref": "#/definitions/ISO8601Timestamp" },
+        "finished_at": { "$ref": "#/definitions/ISO8601Timestamp" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "type": "object",
+  "$ref": "#/definitions/AuditRunResult",
+  "weights_sum_constraint": {
+    "description": "ProductionReadinessScore.weights 中所有 weight 之和必须等于 1.0（浮点误差 ≤ 1e-9）。此约束在 ConfigLoader 与 Orchestrator 中以代码校验强制执行。",
+    "sum": 1.0,
+    "tolerance": 1.0e-9
+  }
+}

@@ -11,12 +11,13 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from fastapi_app.services.backup_health_check_service import BackupHealthCheckService
 
 
 class TestBackupHealthCheckService:
     """备份健康检查服务测试类"""
-    
+
     @pytest.fixture
     def health_check_service(self):
         """创建健康检查服务实例"""
@@ -32,14 +33,14 @@ class TestBackupHealthCheckService:
         }):
             service.__init__()
             return service
-    
+
     @pytest.fixture
     def mock_backup_dir(self):
         """创建模拟备份目录"""
         with tempfile.TemporaryDirectory() as temp_dir:
             backup_dir = Path(temp_dir) / 'backups'
             backup_dir.mkdir(parents=True)
-            
+
             # 创建一些模拟备份文件
             for i in range(3):
                 backup_file = backup_dir / f'erp_backup_2024010{i+1}_120000.zip'
@@ -57,37 +58,37 @@ class TestBackupHealthCheckService:
                         }
                     }
                     zf.writestr('manifest.json', json.dumps(manifest))
-                    
+
                     # 添加metadata.json
                     metadata = {
                         'backup_time': '2024-01-01 12:00:00',
                         'backup_type': 'full'
                     }
                     zf.writestr('metadata.json', json.dumps(metadata))
-                    
+
                     # 添加数据文件
                     zf.writestr('database/dump.json', json.dumps({'test': 'data'}))
-            
+
             yield backup_dir
-    
+
     def test_load_health_config(self, health_check_service):
         """测试加载健康检查配置"""
         config = health_check_service._load_health_config()
-        
+
         assert 'disk_space_threshold' in config
         assert 'backup_age_threshold' in config
         assert 'integrity_sample_rate' in config
         assert 'recovery_test_frequency' in config
         assert 'health_check_interval' in config
         assert 'report_retention_days' in config
-        
+
         assert config['disk_space_threshold'] == 10.0
         assert config['backup_age_threshold'] == 24
         assert config['integrity_sample_rate'] == 10.0
         assert config['recovery_test_frequency'] == 7
         assert config['health_check_interval'] == 60
         assert config['report_retention_days'] == 30
-    
+
     @pytest.mark.asyncio
     async def test_check_disk_space(self, health_check_service):
         """测试检查磁盘空间"""
@@ -99,9 +100,9 @@ class TestBackupHealthCheckService:
                 free=20 * 1024 ** 3,      # 20GB
                 percent=80.0
             )
-            
+
             result = await health_check_service._check_disk_space()
-            
+
             assert 'healthy' in result
             assert 'path' in result
             assert 'total_gb' in result
@@ -110,11 +111,11 @@ class TestBackupHealthCheckService:
             assert 'used_percent' in result
             assert 'free_percent' in result
             assert 'threshold_percent' in result
-            
+
             assert result['healthy'] is True
             assert result['free_percent'] == 20.0
             assert result['threshold_percent'] == 10.0
-        
+
         with patch('psutil.disk_usage') as mock_disk_usage:
             # 模拟磁盘使用情况（空间不足）
             mock_disk_usage.return_value = MagicMock(
@@ -123,20 +124,20 @@ class TestBackupHealthCheckService:
                 free=5 * 1024 ** 3,      # 5GB
                 percent=95.0
             )
-            
+
             result = await health_check_service._check_disk_space()
-            
+
             assert result['healthy'] is False
             assert result['free_percent'] == 5.0
             assert 'issue' in result
             assert '磁盘空间不足' in result['issue']
-    
+
     @pytest.mark.asyncio
     async def test_check_backup_age(self, health_check_service, mock_backup_dir):
         """测试检查备份时间"""
         with patch('fastapi_app.services.backup_health_check_service.BACKUP_DIR', mock_backup_dir), \
              patch('fastapi_app.services.backup_health_check_service.ensure_backup_dir'):
-            
+
             # 创建一些备份文件
             for i in range(3):
                 backup_file = mock_backup_dir / f'test_backup_{i}.zip'
@@ -144,53 +145,57 @@ class TestBackupHealthCheckService:
                 # 设置不同的修改时间
                 mtime = (datetime.now() - timedelta(hours=i*12)).timestamp()
                 os.utime(backup_file, (mtime, mtime))
-            
+
             result = await health_check_service._check_backup_age()
-            
+
             assert 'healthy' in result
             assert 'latest_backup' in result
             assert 'latest_backup_time' in result
             assert 'age_hours' in result
             assert 'threshold_hours' in result
-            
+
             # 最新备份应该小于24小时
             assert result['age_hours'] <= 24
             assert result['healthy'] is True
-    
+
     @pytest.mark.asyncio
     async def test_check_backup_age_no_backups(self, health_check_service):
         """测试检查备份时间（无备份文件）"""
         with tempfile.TemporaryDirectory() as temp_dir:
             empty_dir = Path(temp_dir)
-            
+
             with patch('fastapi_app.services.backup_health_check_service.BACKUP_DIR', empty_dir), \
                  patch('fastapi_app.services.backup_health_check_service.ensure_backup_dir'):
-                
+
                 result = await health_check_service._check_backup_age()
-                
+
                 assert result['healthy'] is False
                 assert result['latest_backup'] is None
                 assert result['age_hours'] is None
                 assert '未找到备份文件' in result['issue']
-    
+
     @pytest.mark.asyncio
     async def test_check_backup_age_old_backup(self, health_check_service, mock_backup_dir):
         """测试检查备份时间（旧备份）"""
         with patch('fastapi_app.services.backup_health_check_service.BACKUP_DIR', mock_backup_dir), \
              patch('fastapi_app.services.backup_health_check_service.ensure_backup_dir'):
-            
+
+            # 清理 fixture 创建的近期备份，确保目录中仅有旧备份场景
+            for f in mock_backup_dir.glob('erp_backup_*.zip'):
+                f.unlink()
+
             # 创建一个很旧的备份文件
             old_backup = mock_backup_dir / 'old_backup.zip'
             old_backup.touch()
             mtime = (datetime.now() - timedelta(days=2)).timestamp()
             os.utime(old_backup, (mtime, mtime))
-            
+
             result = await health_check_service._check_backup_age()
-            
+
             assert result['healthy'] is False
             assert result['age_hours'] > 24
             assert '备份文件过旧' in result['issue']
-    
+
     @pytest.mark.asyncio
     async def test_check_single_backup_integrity_valid(self, health_check_service, mock_backup_dir):
         """测试检查单个备份文件完整性（有效文件）"""
@@ -206,14 +211,14 @@ class TestBackupHealthCheckService:
             zf.writestr('manifest.json', json.dumps(manifest))
             zf.writestr('metadata.json', json.dumps({'backup_time': '2024-01-01 12:00:00'}))
             zf.writestr('database/dump.json', json.dumps({'test': 'data'}))
-        
+
         result = await health_check_service._check_single_backup_integrity(backup_file)
-        
+
         assert result['filename'] == 'valid_backup.zip'
         assert result['healthy'] is True
         assert 'file_size_mb' in result
         assert 'last_modified' in result
-    
+
     @pytest.mark.asyncio
     async def test_check_single_backup_integrity_missing_manifest(self, health_check_service, mock_backup_dir):
         """测试检查单个备份文件完整性（缺少manifest）"""
@@ -221,56 +226,56 @@ class TestBackupHealthCheckService:
         backup_file = mock_backup_dir / 'invalid_backup.zip'
         with zipfile.ZipFile(backup_file, 'w') as zf:
             zf.writestr('database/dump.json', json.dumps({'test': 'data'}))
-        
+
         result = await health_check_service._check_single_backup_integrity(backup_file)
-        
+
         assert result['filename'] == 'invalid_backup.zip'
         assert result['healthy'] is False
         assert '缺少必要文件' in result['issue']
-    
+
     @pytest.mark.asyncio
     async def test_check_single_backup_integrity_corrupted(self, health_check_service, mock_backup_dir):
         """测试检查单个备份文件完整性（损坏文件）"""
         # 创建损坏的备份文件
         backup_file = mock_backup_dir / 'corrupted_backup.zip'
         backup_file.write_bytes(b'invalid zip data')
-        
+
         result = await health_check_service._check_single_backup_integrity(backup_file)
-        
+
         assert result['filename'] == 'corrupted_backup.zip'
         assert result['healthy'] is False
         assert 'ZIP文件损坏' in result['issue'] or '完整性检查异常' in result['issue']
-    
+
     @pytest.mark.asyncio
     async def test_check_single_backup_integrity_empty_file(self, health_check_service, mock_backup_dir):
         """测试检查单个备份文件完整性（空文件）"""
         # 创建空文件
         backup_file = mock_backup_dir / 'empty_backup.zip'
         backup_file.touch()
-        
+
         result = await health_check_service._check_single_backup_integrity(backup_file)
-        
+
         assert result['filename'] == 'empty_backup.zip'
         assert result['healthy'] is False
         assert '文件大小为0' in result['issue']
-    
+
     @pytest.mark.asyncio
     async def test_check_single_backup_integrity_nonexistent(self, health_check_service, mock_backup_dir):
         """测试检查单个备份文件完整性（不存在文件）"""
         backup_file = mock_backup_dir / 'nonexistent_backup.zip'
-        
+
         result = await health_check_service._check_single_backup_integrity(backup_file)
-        
+
         assert result['filename'] == 'nonexistent_backup.zip'
         assert result['healthy'] is False
         assert '文件不存在' in result['issue']
-    
+
     @pytest.mark.asyncio
     async def test_check_backup_integrity(self, health_check_service, mock_backup_dir):
         """测试检查备份文件完整性"""
         with patch('fastapi_app.services.backup_health_check_service.BACKUP_DIR', mock_backup_dir), \
              patch('fastapi_appాలు.services.backup_health_check_service.ensure_backup_dir'):
-            
+
             # 创建一些备份文件
             for i in range(5):
                 backup_file = mock_backup_dir / f'backup_{i}.zip'
@@ -287,29 +292,29 @@ class TestBackupHealthCheckService:
                     zf.writestr('manifest.json', json.dumps(manifest))
                     zf.writestr('metadata.json', json.dumps({'backup_time': '2024-01-01 12:00:00'}))
                     zf.writestr('database/dump.json', json.dumps({'test': 'data'}))
-            
+
             result = await health_check_service._check_backup_integrity()
-            
+
             assert 'healthy' in result
             assert 'checked_files' in result
             assert 'passed_files' in result
             assert 'failed_files' in result
             assert 'issues' in result
             assert 'details' in result
-            
+
             # 应该检查所有文件
             assert result['checked_files'] > 0
             # 所有文件应该通过检查
             assert result['passed_files'] == result['checked_files']
             assert result['failed_files'] == 0
             assert result['healthy'] is True
-    
+
     @pytest.mark.asyncio
     async def test_check_backup_integrity_with_corrupted(self, health_check_service, mock_backup_dir):
         """测试检查备份文件完整性（有损坏文件）"""
         with patch('fastapi_app.services.backup_health_check_service.BACKUP_DIR', mock_backup_dir), \
              patch('fastapi_app.services.backup_health_check_service.ensure_backup_dir'):
-            
+
             # 创建有效备份文件
             valid_backup = mock_backup_dir / 'valid_backup.zip'
             with zipfile.ZipFile(valid_backup, 'w') as zf:
@@ -325,24 +330,24 @@ class TestBackupHealthCheckService:
                 zf.writestr('manifest.json', json.dumps(manifest))
                 zf.writestr('metadata.json', json.dumps({'backup_time': '2024-01-01 12:00:00'}))
                 zf.writestr('database/dump.json', json.dumps({'test': 'data'}))
-            
+
             # 创建损坏备份文件
             corrupted_backup = mock_backup_dir / 'corrupted_backup.zip'
             corrupted_backup.write_bytes(b'invalid zip data')
-            
+
             result = await health_check_service._check_backup_integrity()
-            
+
             assert result['healthy'] is False
             assert result['failed_files'] > 0
             assert len(result['issues']) > 0
-    
+
     @pytest.mark.asyncio
     async def test_check_system_resources(self, health_check_service):
         """测试检查系统资源"""
         with patch('psutil.cpu_percent') as mock_cpu_percent, \
              patch('psutil.virtual_memory') as mock_virtual_memory, \
              patch('psutil.disk_io_counters') as mock_disk_io:
-            
+
             # 模拟正常系统资源
             mock_cpu_percent.return_value = 50.0
             mock_virtual_memory.return_value = MagicMock(
@@ -354,9 +359,9 @@ class TestBackupHealthCheckService:
             mock_disk_io.return_value = MagicMock(
                 busy_time=1000
             )
-            
+
             result = await health_check_service._check_system_resources()
-            
+
             assert 'healthy' in result
             assert 'cpu_percent' in result
             assert 'memory_percent' in result
@@ -365,7 +370,7 @@ class TestBackupHealthCheckService:
             assert 'memory_total_gb' in result
             assert 'disk_busy_time' in result
             assert 'issues' in result
-            
+
             assert result['healthy'] is True
             assert result['cpu_percent'] == 50.0
             assert result['memory_percent'] == 60.0
@@ -374,10 +379,10 @@ class TestBackupHealthCheckService:
             assert result['memory_total_gb'] == 20.0
             assert result['disk_busy_time'] == 1000
             assert len(result['issues']) == 0
-        
+
         with patch('psutil.cpu_percent') as mock_cpu_percent, \
              patch('psutil.virtual_memory') as mock_virtual_memory:
-            
+
             # 模拟高CPU使用率
             mock_cpu_percent.return_value = 95.0
             mock_virtual_memory.return_value = MagicMock(
@@ -386,12 +391,12 @@ class TestBackupHealthCheckService:
                 used=12 * 1024 ** 3,
                 total=20 * 1024 ** 3
             )
-            
+
             result = await health_check_service._check_system_resources()
-            
+
             assert result['healthy'] is False
             assert 'CPU使用率过高' in '; '.join(result['issues'])
-    
+
     def test_generate_recommendations(self, health_check_service):
         """测试生成建议"""
         # 测试正常情况
@@ -405,74 +410,74 @@ class TestBackupHealthCheckService:
                 'system_resources': {'healthy': True, 'cpu_percent': 50.0, 'memory_percent': 60.0}
             }
         }
-        
+
         recommendations = health_check_service._generate_recommendations(results)
-        
+
         # 所有检查都正常，应该有正面反馈
         assert len(recommendations) == 1
         assert '运行良好' in recommendations[0]
-        
+
         # 测试磁盘空间不足
         results['checks']['disk_space'] = {
-            'healthy': False, 
-            'free_percent': 5.0, 
+            'healthy': False,
+            'free_percent': 5.0,
             'threshold_percent': 10.0
         }
         results['overall_status'] = 'warning'
-        
+
         recommendations = health_check_service._generate_recommendations(results)
-        
+
         assert len(recommendations) >= 1
         assert any('磁盘空间不足' in rec for rec in recommendations)
-        
+
         # 测试备份文件过旧
         results['checks']['backup_age'] = {
-            'healthy': False, 
-            'age_hours': 48.0, 
+            'healthy': False,
+            'age_hours': 48.0,
             'threshold_hours': 24
         }
-        
+
         recommendations = health_check_service._generate_recommendations(results)
-        
+
         assert len(recommendations) >= 2
         assert any('备份文件过旧' in rec for rec in recommendations)
-        
+
         # 测试备份完整性检查失败
         results['checks']['backup_integrity'] = {
-            'healthy': False, 
+            'healthy': False,
             'failed_files': 2
         }
         results['overall_status'] = 'error'
-        
+
         recommendations = health_check_service._generate_recommendations(results)
-        
+
         assert len(recommendations) >= 3
         assert any('完整性检查失败' in rec for rec in recommendations)
-        
+
         # 测试备份记录问题
         results['checks']['backup_records'] = {
-            'healthy': False, 
-            'failed_count': 3, 
+            'healthy': False,
+            'failed_count': 3,
             'success_rate': 70.0
         }
-        
+
         recommendations = health_check_service._generate_recommendations(results)
-        
+
         assert len(recommendations) >= 4
         assert any('备份成功率较低' in rec for rec in recommendations)
-        
+
         # 测试系统资源紧张
         results['checks']['system_resources'] = {
-            'healthy': False, 
-            'cpu_percent': 95.0, 
+            'healthy': False,
+            'cpu_percent': 95.0,
             'memory_percent': 90.0
         }
-        
+
         recommendations = health_check_service._generate_recommendations(results)
-        
+
         assert len(recommendations) >= 5
         assert any('系统资源紧张' in rec for rec in recommendations)
-    
+
     @pytest.mark.asyncio
     async def test_perform_health_check(self, health_check_service):
         """测试执行健康检查"""
@@ -483,26 +488,26 @@ class TestBackupHealthCheckService:
              patch.object(health_check_service, '_check_system_resources') as mock_system, \
              patch.object(health_check_service, '_store_health_report') as mock_store, \
              patch.object(health_check_service, '_alert_on_issues') as mock_alert:
-            
+
             # 模拟所有检查都通过
             mock_disk.return_value = {'healthy': True, 'free_percent': 30.0}
             mock_age.return_value = {'healthy': True, 'age_hours': 12.0}
             mock_integrity.return_value = {'healthy': True, 'failed_files': 0}
             mock_records.return_value = {'healthy': True, 'failed_count': 0, 'success_rate': 100.0}
             mock_system.return_value = {'healthy': True, 'cpu_percent': 50.0, 'memory_percent': 60.0}
-            
+
             result = await health_check_service.perform_health_check()
-            
+
             assert 'check_time' in result
             assert 'overall_status' in result
             assert 'checks' in result
             assert 'issues' in result
             assert 'recommendations' in result
-            
+
             assert result['overall_status'] == 'healthy'
             assert len(result['issues']) == 0
             assert len(result['recommendations']) == 1  # 正面反馈
-            
+
             # 验证方法被调用
             mock_disk.assert_called_once()
             mock_age.assert_called_once()
@@ -511,7 +516,7 @@ class TestBackupHealthCheckService:
             mock_system.assert_called_once()
             mock_store.assert_called_once()
             mock_alert.assert_not_called()  # 没有问题，不发送告警
-        
+
         with patch.object(health_check_service, '_check_disk_space') as mock_disk, \
              patch.object(health_check_service, '_check_backup_age') as mock_age, \
              patch.object(health_check_service, '_check_backup_integrity') as mock_integrity, \
@@ -519,29 +524,29 @@ class TestBackupHealthCheckService:
              patch.object(health_check_service, '_check_system_resources') as mock_system, \
              patch.object(health_check_service, '_store_health_report') as mock_store, \
              patch.object(health_check_service, '_alert_on_issues') as mock_alert:
-            
+
             # 模拟有问题的检查
             mock_disk.return_value = {'healthy': False, 'free_percent': 5.0, 'issue': '磁盘空间不足'}
             mock_age.return_value = {'healthy': True, 'age_hours': 12.0}
             mock_integrity.return_value = {'healthy': True, 'failed_files': 0}
             mock_records.return_value = {'healthy': True, 'failed_count': 0, 'success_rate': 100.0}
             mock_system.return_value = {'healthy': True, 'cpu_percent': 50.0, 'memory_percent': 60.0}
-            
+
             result = await health_check_service.perform_health_check()
-            
+
             assert result['overall_status'] == 'warning'
             assert len(result['issues']) > 0
             assert '磁盘空间不足' in result['issues'][0]
             mock_alert.assert_called_once()  # 有问题，发送告警
-    
+
     @pytest.mark.asyncio
     async def test_perform_health_check_exception(self, health_check_service):
         """测试执行健康检查（异常情况）"""
         with patch.object(health_check_service, '_check_disk_space') as mock_disk:
             mock_disk.side_effect = Exception("测试异常")
-            
+
             result = await health_check_service.perform_health_check()
-            
+
             assert result['overall_status'] == 'error'
             assert 'error' in result
             assert '测试异常' in result['error']

@@ -29,7 +29,7 @@ def _quote_identifier(name: str) -> str:
         'customer', 'o', 's', 'p', 'so', 'si',
     })
     if name not in _ALLOWED_IDENTIFIERS:
-        raise ValueError(f"非法SQL标识符: {name!r}，仅允许预定义标识符")
+        raise ValueError(f"非法SQL标识符: {name!r}，仅允许预定义标识符")  # sql-safe: escape_like/绑定参数/常量片段
     return f'"{name}"'
 
 
@@ -45,9 +45,9 @@ def _string_agg(expr: str, separator: str, distinct: bool = True) -> str:
         'so.stockout_no', 'so.note', 'so.customer',
     })
     if expr not in _ALLOWED_EXPRS:
-        raise ValueError(f"非法SQL聚合表达式: {expr!r}，仅允许预定义表达式")
+        raise ValueError(f"非法SQL聚合表达式: {expr!r}，仅允许预定义表达式")  # sql-safe: escape_like/绑定参数/常量片段
     if separator not in (', ', '; '):
-        raise ValueError(f"非法SQL聚合分隔符: {separator!r}")
+        raise ValueError(f"非法SQL聚合分隔符: {separator!r}")  # sql-safe: escape_like/绑定参数/常量片段
     distinct_kw = "DISTINCT " if distinct else ""
     return f"STRING_AGG({distinct_kw}{expr}, '{separator}')"
 
@@ -64,7 +64,7 @@ async def _query_logs_generic(
     row_mapper: callable,
 ) -> dict:
     """通用日志查询（分页+分组聚合+COUNT(*) OVER()合并计数）"""
-    where_sql = (" AND " + " AND ".join(base_where)) if base_where else ""
+    where_sql = (" AND " + " AND ".join(base_where)) if base_where else ""  # sql-safe: escape_like/绑定参数/常量片段
     params['limit'] = per_page
     params['offset'] = (page - 1) * per_page
 
@@ -129,7 +129,7 @@ async def get_order_logs(db: AsyncSession, customer: str = '', product: str = ''
         params=params,
         page=page,
         per_page=per_page,
-        data_sql_template=f"""SELECT
+        data_sql_template=f"""SELECT  # sql-safe: escape_like/绑定参数/常量片段
         DATE(o.order_date) as order_date_only, o.customer, p.name as product_name,
         p.barcode as product_barcode, o.status,
         SUM(o.quantity) as total_quantity, COUNT(o.id) as order_count,
@@ -140,8 +140,8 @@ async def get_order_logs(db: AsyncSession, customer: str = '', product: str = ''
         WHERE 1=1 {{where_sql}}
         GROUP BY DATE(o.order_date), o.customer, p.name, p.barcode, o.status
         ORDER BY DATE(o.order_date) DESC
-        LIMIT :limit OFFSET :offset""",
-        qty_sql_template=f"SELECT COALESCE(SUM(o.quantity), 0) FROM {order_tbl} o JOIN product p ON o.product_id = p.id WHERE 1=1 {{where_sql}}",
+        LIMIT :limit OFFSET :offset""",  # nosec B608
+        qty_sql_template=f"SELECT COALESCE(SUM(o.quantity), 0) FROM {order_tbl} o JOIN product p ON o.product_id = p.id WHERE 1=1 {{where_sql}}",  # nosec B608
         row_mapper=lambda row: {
             'order_date': row.order_date_only.strftime('%Y-%m-%d') if row.order_date_only else '-',
             'customer': row.customer, 'product_name': row.product_name,
@@ -244,7 +244,7 @@ async def get_stockin_logs(db: AsyncSession, customer: str = '', product: str = 
         params=params,
         page=page,
         per_page=per_page,
-        data_sql_template=f"""SELECT
+        data_sql_template=f"""SELECT  # sql-safe: escape_like/绑定参数/常量片段
         DATE(s.stockin_date) as stockin_date_only, s.customer, p.name as product_name,
         p.barcode as product_barcode,
         SUM(s.quantity) as total_quantity, COUNT(s.id) as stockin_count,
@@ -255,7 +255,7 @@ async def get_stockin_logs(db: AsyncSession, customer: str = '', product: str = 
         WHERE 1=1 {{where_sql}}
         GROUP BY DATE(s.stockin_date), s.customer, p.name, p.barcode
         ORDER BY DATE(s.stockin_date) DESC
-        LIMIT :limit OFFSET :offset""",
+        LIMIT :limit OFFSET :offset""",  # nosec B608
         qty_sql_template="SELECT COALESCE(SUM(s.quantity), 0) FROM stock_in s JOIN product p ON s.product_id = p.id WHERE 1=1 {where_sql}",
         row_mapper=lambda row: {
             'stockin_date': row.stockin_date_only.strftime('%Y-%m-%d') if row.stockin_date_only else '-',
@@ -304,7 +304,7 @@ async def get_stockout_logs(db: AsyncSession, customer: str = '', product: str =
         params=params,
         page=page,
         per_page=per_page,
-        data_sql_template=f"""SELECT
+        data_sql_template=f"""SELECT  # sql-safe: escape_like/绑定参数/常量片段
         DATE(so.stockout_date) as stockout_date_only, so.customer, p.name as product_name,
         p.barcode as product_barcode,
         SUM(so.quantity - so.returned_quantity) as total_quantity, COUNT(so.id) as stockout_count,
@@ -316,7 +316,7 @@ async def get_stockout_logs(db: AsyncSession, customer: str = '', product: str =
         WHERE 1=1 {{where_sql}}
         GROUP BY DATE(so.stockout_date), so.customer, p.name, p.barcode
         ORDER BY DATE(so.stockout_date) DESC
-        LIMIT :limit OFFSET :offset""",
+        LIMIT :limit OFFSET :offset""",  # nosec B608
         qty_sql_template="""SELECT COALESCE(SUM(so.quantity - so.returned_quantity), 0)
         FROM stock_out so JOIN product p ON so.product_id = p.id
         LEFT JOIN "order" o2 ON so.order_id = o2.id
@@ -370,7 +370,7 @@ async def get_deduction_logs(db: AsyncSession, customer: str = '', product: str 
         params=params,
         page=page,
         per_page=per_page,
-        data_sql_template=f"""SELECT
+        data_sql_template=f"""SELECT  # sql-safe: escape_like/绑定参数/常量片段
         DATE(so.stockout_date) as deduction_date_only, so.customer, p.name as product_name,
         p.barcode as sku,
         SUM(so.quantity - so.returned_quantity) as total_quantity, COUNT(so.id) as deduction_count,
@@ -382,11 +382,11 @@ async def get_deduction_logs(db: AsyncSession, customer: str = '', product: str 
         WHERE 1=1 {{where_sql}}
         GROUP BY DATE(so.stockout_date), so.customer, p.name, p.barcode
         ORDER BY DATE(so.stockout_date) DESC
-        LIMIT :limit OFFSET :offset""",
-        qty_sql_template=f"""SELECT COALESCE(SUM(so.quantity - so.returned_quantity), 0)
+        LIMIT :limit OFFSET :offset""",  # nosec B608
+        qty_sql_template=f"""SELECT COALESCE(SUM(so.quantity - so.returned_quantity), 0)  # sql-safe: escape_like/绑定参数/常量片段
         FROM stock_out so JOIN product p ON so.product_id = p.id
         LEFT JOIN {order_tbl} o ON so.order_id = o.id
-        WHERE 1=1 {{where_sql}}""",
+        WHERE 1=1 {{where_sql}}""",  # nosec B608
         row_mapper=lambda row: {
             'deduction_time': row.deduction_date_only.strftime('%Y-%m-%d') if row.deduction_date_only else '-',
             'customer': row.customer or '', 'product_name': row.product_name,

@@ -36,6 +36,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { batchApi } from '@/api'
+import type { BatchQueryItem } from '@/types'
 import MobileNavBar from '@/mobile/layouts/components/MobileNavBar.vue'
 import MSearchBar from '@/mobile/components/MSearchBar.vue'
 import MFilterChips from '@/mobile/components/MFilterChips.vue'
@@ -43,6 +44,8 @@ import MList from '@/mobile/components/MList.vue'
 import MListItem from '@/mobile/components/MListItem.vue'
 import MEmpty from '@/mobile/components/MEmpty.vue'
 import MSpinner from '@/mobile/components/MSpinner.vue'
+
+type BatchItem = BatchQueryItem & { order_id?: number }
 
 const keyword = ref('')
 const statusFilter = ref('all')
@@ -52,12 +55,12 @@ const statusChips = [
   { label: '已备货', value: 'stocked' },
   { label: '已出货', value: 'shipped' },
 ]
-const rawList = ref<any[]>([])
+const rawList = ref<BatchItem[]>([])
 const loading = ref(false)
 
 const groups = computed(() => {
   // 后端返回的是扁平 BatchQueryItem[]，按客户分组以保留原 UI 结构
-  const map = new Map<string, { key: string; customer: string; items: any[] }>()
+  const map = new Map<string, { key: string; customer: string; items: BatchItem[] }>()
   for (const item of rawList.value) {
     const key = item.customer || '未知客户'
     if (!map.has(key)) map.set(key, { key, customer: key, items: [] })
@@ -76,15 +79,15 @@ async function handleSearch() {
 
 onMounted(handleSearch)
 
-function batchColor(s: string) {
+function batchColor(s: string | null | undefined) {
   if (s === 'shipped') return 'var(--m-accent-emerald)'
   if (s === 'stocked') return 'var(--m-accent)'
   if (s === 'partial') return 'var(--m-accent-amber)'
   return 'var(--m-text-secondary)'
 }
-function batchLabel(s: string) {
+function batchLabel(s: string | null | undefined) {
   const map: Record<string, string> = { pending: '待备货', partial: '部分备货', stocked: '已备货', shipped: '已出货', completed: '已完成' }
-  return map[s] || s || '—'
+  return (s && map[s]) || s || '—'
 }
 </script>
 

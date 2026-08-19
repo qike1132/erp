@@ -1,11 +1,13 @@
 """检查11寸企鹅是否有入库/订单"""
 import asyncio
 import sys
+
 sys.path.insert(0, r'd:\erp_system')
 
-from sqlalchemy import select, func, text
+from sqlalchemy import func, select
+
 from fastapi_app.core.database import _AsyncSessionLocal
-from fastapi_app.shared_models import Product, StockIn, StockOut, Order
+from fastapi_app.shared_models import Order, Product, StockIn, StockOut
 
 
 async def main():
@@ -36,7 +38,7 @@ async def main():
 
         # 订单数
         od_count = (await db.execute(
-            select(func.count()).select_from(Order).where(Order.product_id == pid, Order.is_deleted == False)
+            select(func.count()).select_from(Order).where(Order.product_id == pid, not Order.is_deleted)
         )).scalar()
         print(f'订单: count={od_count}')
 

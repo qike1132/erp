@@ -105,9 +105,9 @@ async def create_incremental_backup(
                 elif BACKUP_ENCRYPTION_PASSWORD or BACKUP_ENCRYPTION_KEY:
                     logger.info("使用环境变量配置的密钥进行增量备份加密")
                 else:
-                    logger.warning(f"使用生成的随机密钥进行增量备份加密，密钥已记录在日志中")
+                    logger.warning("使用生成的随机密钥进行增量备份加密，密钥已记录在日志中")
                 zip_bytes = encrypted_bytes
-            except Exception as e:
+            except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
                 logger.error(f"增量备份加密失败: {e}")
                 if BACKUP_ENCRYPTION_ENABLED and not BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED:
                     raise BackupError(f"增量备份加密失败且不允许回退到未加密备份: {e}") from e
@@ -231,12 +231,12 @@ async def create_wal_incremental_backup(
             elif BACKUP_ENCRYPTION_PASSWORD or BACKUP_ENCRYPTION_KEY:
                 logger.info("使用环境变量配置的密钥进行 WAL 增量备份加密")
             else:
-                logger.warning(f"使用生成的随机密钥进行 WAL 增量备份加密，密钥已记录在日志中")
+                logger.warning("使用生成的随机密钥进行 WAL 增量备份加密，密钥已记录在日志中")
 
             # 注意：不再重新写入明文 JSON，避免覆盖加密数据
             # 加密后的元数据信息记录在 backup_info 字典中返回给调用方
 
-        except Exception as e:
+        except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
             logger.error(f"WAL 增量备份加密失败: {e}")
             if BACKUP_ENCRYPTION_ENABLED and not BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED:
                 raise BackupError(f"WAL 增量备份加密失败且不允许回退到未加密备份: {e}") from e
@@ -251,7 +251,7 @@ async def create_wal_incremental_backup(
         'end_lsn': current_lsn,
         'exported_at': backup_info['exported_at'],
         'remark': remark,
-        'encrypted': encryption_password is not None,
+        'encrypted': effective_encryption_password is not None,
         'wal_backup_result': wal_backup_result,
     }
 
@@ -266,7 +266,7 @@ async def restore_incremental(
     try:
         zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
     except zipfile.BadZipFile:
-        raise RestoreError('无效的 ZIP 文件')
+        raise RestoreError('无效的 ZIP 文件') from None
     if 'manifest.json' not in zf.namelist():
         raise RestoreError('增量备份缺少 manifest.json')
     manifest = json.loads(zf.read('manifest.json'))
@@ -280,6 +280,7 @@ async def restore_incremental(
         raise RestoreError(f'读取增量备份数据失败: {e}') from e
 
     from fastapi_app.shared_models import Base
+
     from .orchestration import create_pre_restore_backup
     table_map = {str(t.name): t for t in Base.metadata.sorted_tables}
     total_upserted = 0
@@ -333,17 +334,17 @@ async def restore_incremental(
                         update_cols = [c for c in valid_cols if c not in pk_cols]
                         if pk_cols and update_cols:
                             update_str = ', '.join(f'"{c}" = EXCLUDED."{c}"' for c in update_cols)
-                            await db.execute(text(
+                            await db.execute(text(  # batch-loop: 逐表备份/恢复,无法批量
                                 f'INSERT INTO {qtname} ({col_str}) VALUES ({val_str}) ON CONFLICT ({", ".join(pk_cols)}) DO UPDATE SET {update_str}'  # nosec B608 — qtname 经 quote_table 白名单校验
                             ), params)
                         else:
-                            await db.execute(text(
+                            await db.execute(text(  # batch-loop: 逐表备份/恢复,无法批量
                                 f'INSERT INTO {qtname} ({col_str}) VALUES ({val_str}) ON CONFLICT DO NOTHING'  # nosec B608 — qtname 经 quote_table 白名单校验
                             ), params)
                         upserted += 1
-                    await nested.commit()
+                    await nested.commit()  # manual-tx: savepoint 嵌套事务管理
                 except (SQLAlchemyError, ValueError, TypeError) as e:
-                    await nested.rollback()
+                    await nested.rollback()  # manual-tx: savepoint 嵌套事务管理
                     batch_errors.append(f'批次 {batch_start // BATCH_SIZE + 1}: {e}')
                     logger.warning(f'增量恢复表 {tname} 批次 {batch_start // BATCH_SIZE + 1} 失败: {e}')
             if batch_errors:
@@ -357,7 +358,7 @@ async def restore_incremental(
             await db.execute(text("SET session_replication_role = 'origin'"))
         except (SQLAlchemyError, OSError) as e:
             logger.warning(f'重新启用外键约束失败: {e}')
-        await db.commit()
+        await db.commit()  # manual-tx: try/except 内显式事务控制
         try:
             from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
             await invalidate_related_caches(CacheDomain.ALL)
@@ -372,7 +373,7 @@ async def restore_incremental(
         raise
     except (SQLAlchemyError, ValueError, OSError) as e:
         try:
-            await db.rollback()
+            await db.rollback()  # manual-tx: try/except 内显式事务控制
         except (OSError, SQLAlchemyError):
             logger.warning('恢复异常后回滚失败')
         raise RestoreError(f'增量恢复过程中出错: {e}') from e

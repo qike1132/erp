@@ -1,6 +1,7 @@
 """恢复后验证 + 工具函数。"""
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -11,10 +12,10 @@ from sqlalchemy import text
 from sqlalchemy.exc import DataError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ._constants import (
-    BACKUP_DIR,
+from .._constants import (
     _CHECKSUM_EXCLUDE_TABLES,
     _TIMESTAMP_CANDIDATES,
+    BACKUP_DIR,
     _ts_col_cache,
 )
 
@@ -57,35 +58,31 @@ async def find_timestamp_column(tname: str, db: AsyncSession) -> str | None:
 
 async def query_table_rows(tname: str, db: AsyncSession, since: str | None = None) -> list[dict]:
     """查询表数据，支持按时间戳增量查询"""
-    from .json_backup import serialize_value
+    from ..json_backup import serialize_value
     ts_col = await find_timestamp_column(tname, db) if since else None
     qtname = quote_table(tname)  # REV-08
     if ts_col:
         # 列可能是 timestamptz（需 datetime）也可能是 varchar（需 string），先尝试字符串
         since_dt = since
         if isinstance(since_dt, str):
-            try:
+            with contextlib.suppress(TypeError, ValueError):
                 since_dt = datetime.strptime(since_dt, '%Y-%m-%d %H:%M:%S')
-            except (TypeError, ValueError):
-                pass
         # 优先尝试 datetime（timestamptz 列需要）；失败时回退到字符串
         try:
             result = await db.execute(
-                text(f'SELECT * FROM {qtname} WHERE "{ts_col}" >= :since'),  # nosec B608 — qtname 经 quote_table 白名单校验
+                text(f'SELECT * FROM {qtname} WHERE "{ts_col}" >= :since'),  # nosec B608 — qtname 经 quote_table 白名单校验; select-all: backup/restore 需要全表动态导出
                 {'since': since_dt},
             )
         except DataError:
             # 事务已失败，必须先 rollback 才能在新事务中重试
-            try:
-                await db.rollback()
-            except SQLAlchemyError:
-                pass
+            with contextlib.suppress(SQLAlchemyError):
+                await db.rollback()  # manual-tx: try/except 内显式事务控制
             result = await db.execute(
-                text(f'SELECT * FROM {qtname} WHERE "{ts_col}" >= :since'),  # nosec B608 — qtname 经 quote_table 白名单校验
+                text(f'SELECT * FROM {qtname} WHERE "{ts_col}" >= :since'),  # nosec B608 — qtname 经 quote_table 白名单校验; select-all: backup/restore 需要全表动态导出
                 {'since': since},
             )
     else:
-        result = await db.execute(text(f'SELECT * FROM {qtname}'))  # nosec B608 — qtname 经 quote_table 白名单校验
+        result = await db.execute(text(f'SELECT * FROM {qtname}'))  # nosec B608 — qtname 经 quote_table 白名单校验; select-all: backup/restore 需要全表动态导出
     rows = result.mappings().all()
     columns = list(result.keys())
     serialized_rows = []
@@ -136,7 +133,7 @@ async def verify_restore(db: AsyncSession, manifest_tables: dict[str, dict], man
         expected = manifest_tables.get(tname, {})
         expected_rows = expected.get('rows', -1)
         try:
-            result = await db.execute(text(f'SELECT COUNT(*) FROM {qtname}'))  # nosec B608 — qtname 经 quote_table 白名单校验
+            result = await db.execute(text(f'SELECT COUNT(*) FROM {qtname}'))  # nosec B608 — qtname 经 quote_table 白名单校验; batch-loop: 逐表备份/恢复,无法批量 # batch-loop: 有意逐行处理,非 N+1
             actual_rows = result.scalar() or 0
             table_exists = True
         except (RuntimeError, OSError, ValueError) as e:
@@ -159,13 +156,13 @@ async def verify_restore(db: AsyncSession, manifest_tables: dict[str, dict], man
             try:
                 pk_col = [c.name for c in table.primary_key.columns]
                 order_col = pk_col[0] if pk_col else 'id'
-                cols_result = await db.execute(
+                cols_result = await db.execute(  # batch-loop: 逐表备份/恢复,无法批量
                     text('SELECT column_name FROM information_schema.columns WHERE table_name = :tname ORDER BY ordinal_position'),
                     {'tname': tname}
                 )
                 col_names = [r[0] for r in cols_result.fetchall()]
-                agg = " || '|' || ".join(f'''COALESCE("{c}"::text, '')''' for c in col_names)
-                row = await db.execute(text(
+                agg = " || '|' || ".join(f'''COALESCE("{c}"::text, '')''' for c in col_names)  # sql-safe: escape_like/绑定参数/常量片段
+                row = await db.execute(text(  # batch-loop: 逐表备份/恢复,无法批量
                     f'''SELECT MD5(STRING_AGG(MD5({agg}), ',' ORDER BY "{order_col}")) FROM {qtname}'''  # nosec B608 — qtname 经 quote_table 白名单校验
                 ))
                 t_hash = row.scalar()
@@ -179,13 +176,13 @@ async def verify_restore(db: AsyncSession, manifest_tables: dict[str, dict], man
             try:
                 pk_col = [c.name for c in table.primary_key.columns]
                 order_col = pk_col[0] if pk_col else 'id'
-                cols_result = await db.execute(
+                cols_result = await db.execute(  # batch-loop: 逐表备份/恢复,无法批量
                     text('SELECT column_name FROM information_schema.columns WHERE table_name = :tname ORDER BY ordinal_position'),
                     {'tname': tname}
                 )
                 col_names = [r[0] for r in cols_result.fetchall()]
-                agg_expr = " || '|' || ".join(f'''COALESCE("{c}"::text, '')''' for c in col_names)
-                fp_result = await db.execute(text(
+                agg_expr = " || '|' || ".join(f'''COALESCE("{c}"::text, '')''' for c in col_names)  # sql-safe: escape_like/绑定参数/常量片段
+                fp_result = await db.execute(text(  # batch-loop: 逐表备份/恢复,无法批量
                     f'''SELECT MD5(STRING_AGG({agg_expr}, ',' ORDER BY "{order_col}")) FROM {qtname}'''  # nosec B608 — qtname 经 quote_table 白名单校验
                 ))
                 fingerprint = fp_result.scalar() or ''
@@ -200,7 +197,7 @@ async def verify_restore(db: AsyncSession, manifest_tables: dict[str, dict], man
             try:
                 pk_col_sample = [c.name for c in table.primary_key.columns]
                 sample_col = pk_col_sample[0] if pk_col_sample else 'id'
-                sample_result = await db.execute(text(
+                sample_result = await db.execute(text(  # batch-loop: 逐表备份/恢复,无法批量
                     f'SELECT "{sample_col}" FROM {qtname} ORDER BY "{sample_col}" LIMIT 3'  # nosec B608 — qtname 经 quote_table 白名单校验
                 ))
                 found_ids = [r[0] for r in sample_result.fetchall()]
@@ -229,7 +226,7 @@ async def verify_restore(db: AsyncSession, manifest_tables: dict[str, dict], man
 
     l1_all_pass = len(l1_mismatch) == 0
     l2_all_pass = len(l2_mismatch) == 0
-    all_passed = l1_all_pass
+    all_passed = l1_all_pass and l2_all_pass
 
     return {
         'overall_pass': all_passed,

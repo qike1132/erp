@@ -1,7 +1,7 @@
 """订单批次审计日志模型"""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -21,7 +21,7 @@ class OrderBatchAuditLog(Base):
     old_value: Mapped[str | None] = mapped_column(String(100), comment='变更前值')
     new_value: Mapped[str | None] = mapped_column(String(100), comment='变更后值')
     detail: Mapped[str | None] = mapped_column(Text, comment='详细信息')
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True, comment='创建时间')
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False, index=True, comment='创建时间')
 
     __table_args__ = (
         Index('idx_batch_audit_batch_action', 'batch_no', 'action'),

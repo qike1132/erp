@@ -8,7 +8,7 @@
 - 进度看板：聚合订单 + 工序，输出时间轴/进度条所需数据
 """
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -592,7 +592,7 @@ async def start_order_process(db: AsyncSession, process_id: int, username: str |
         raise ValueError('该工序已完成，无法重复开始')
 
     p.status = 'in_progress'
-    p.actual_start_time = datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+    p.actual_start_time = datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
     p.remark = p.remark or (f'由 {username} 开始' if username else '')
     await db.flush()
     await db.refresh(p)
@@ -607,7 +607,7 @@ async def complete_order_process(db: AsyncSession, process_id: int, username: st
     if p.status == 'completed':
         raise ValueError('该工序已完成，无需重复操作')
 
-    now = datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+    now = datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
     if not p.actual_start_time:
         # 未点击开始时直接完成：视为开始即完成
         p.actual_start_time = now

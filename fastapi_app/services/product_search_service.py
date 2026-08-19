@@ -48,8 +48,9 @@ class ProductSearchService(BaseSearchService[Product]):
         if not keyword:
             return []
 
-        from fastapi_app.services.product_service import product_has_bom
         from sqlalchemy.orm import selectinload
+
+        from fastapi_app.services.product_service import product_has_bom
 
         query = self.build_search_query_sync(db, keyword)
         query = query.options(

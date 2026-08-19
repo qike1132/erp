@@ -11,8 +11,6 @@
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.shared_models import Case, Product
-
 # Re-export 以保持向后兼容
 from fastapi_app.services.batch_import_service import (
     cleanup_temp_file,
@@ -28,7 +26,8 @@ from fastapi_app.services.batch_import_service import (
     validate_customer_name,
 )
 from fastapi_app.services.inventory_service import calculate_available_shipment_quantity
-from fastapi_app.services.order_deduction_service import process_order_deduction  # noqa: F401
+from fastapi_app.services.order_deduction_service import process_order_deduction
+from fastapi_app.shared_models import Case, Product
 
 __all__ = [
     'calculate_available_shipment_quantity',

@@ -5,6 +5,7 @@ const config: CapacitorConfig = {
   appName: '滨发ERP',
   webDir: 'dist',
   server: {
+    url: 'http://192.168.0.95:5002',
     androidScheme: 'http',
     hostname: 'localhost',
     allowNavigation: ['192.168.0.95:*'],

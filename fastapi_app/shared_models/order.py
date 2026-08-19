@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, desc, text
@@ -55,7 +55,7 @@ class Order(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     order_no: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, comment='订单编号')
     customer: Mapped[str] = mapped_column(String(100), nullable=False, index=True, comment='客户名称')
-    order_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True, comment='下单时间')
+    order_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True, comment='下单时间')
     product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id', ondelete='RESTRICT'), nullable=False, index=True, comment='产品ID')
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, comment='订单数量')
     status: Mapped[str | None] = mapped_column(String(20), default=None, nullable=True, index=True, comment='订单状态')
@@ -78,15 +78,15 @@ class Order(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, comment='删除时间')
     deleted_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id', ondelete='SET NULL'), comment='删除人ID')
     delete_reason: Mapped[str | None] = mapped_column(String(500), comment='删除原因')
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 
 
-    product: Mapped["Product"] = relationship('Product', backref='orders')
-    locked_by: Mapped["User | None"] = relationship('User', foreign_keys=[locked_by_id], backref='locked_orders')
-    deleted_by: Mapped["User | None"] = relationship('User', foreign_keys=[deleted_by_id], backref='deleted_orders')
-    batch_completed_by: Mapped["User | None"] = relationship('User', foreign_keys=[batch_completed_by_id], backref='batch_completed_orders')
-    confirmed_by: Mapped["User | None"] = relationship('User', foreign_keys=[confirmed_by_id], backref='confirmed_orders')
-    items: Mapped[list["OrderItem"]] = relationship(
+    product: Mapped[Product] = relationship('Product', backref='orders')
+    locked_by: Mapped[User | None] = relationship('User', foreign_keys=[locked_by_id], backref='locked_orders')
+    deleted_by: Mapped[User | None] = relationship('User', foreign_keys=[deleted_by_id], backref='deleted_orders')
+    batch_completed_by: Mapped[User | None] = relationship('User', foreign_keys=[batch_completed_by_id], backref='batch_completed_orders')
+    confirmed_by: Mapped[User | None] = relationship('User', foreign_keys=[confirmed_by_id], backref='confirmed_orders')
+    items: Mapped[list[OrderItem]] = relationship(
         'OrderItem',
         cascade='all, delete-orphan',
         back_populates='order',

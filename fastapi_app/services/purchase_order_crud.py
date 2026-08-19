@@ -7,15 +7,15 @@
 import json
 import logging
 from collections import defaultdict
-from datetime import datetime, timezone
+from collections.abc import Sequence
+from datetime import UTC, datetime
 from decimal import Decimal
-
-from typing import Sequence
 
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.services.numbering import generate_purchase_order_number
 from fastapi_app.shared_models import (
     MaterialRegistration,
     MaterialRegistrationItem,
@@ -23,8 +23,6 @@ from fastapi_app.shared_models import (
     PurchaseOrder,
     PurchaseOrderItem,
 )
-
-from fastapi_app.services.numbering import generate_purchase_order_number
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +36,7 @@ async def _create_material_registration(
         purchase_order_no=order.order_no,
         supplier_id=order.supplier_id,
         supplier_name=order.supplier_name or '',
-        registration_date=datetime.now(timezone.utc).replace(tzinfo=None).date(),
+        registration_date=datetime.now(UTC).replace(tzinfo=None).date(),
         remark='',
         status='pending',
     )
@@ -269,9 +267,9 @@ async def complete_purchase_order(db: AsyncSession, order_id: int, username: str
     )
     items = items_result.scalars().all()
 
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(UTC).replace(tzinfo=None)
 
-    registration = await _create_material_registration(db, order, items)
+    await _create_material_registration(db, order, items)
 
     for item in items:
         db.add(ModificationLog(
@@ -316,7 +314,7 @@ async def batch_complete_purchase_orders(db: AsyncSession, order_ids: list, user
 
     completed = 0
     errors = []
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(UTC).replace(tzinfo=None)
 
     for oid in order_ids:
         try:
@@ -330,13 +328,13 @@ async def batch_complete_purchase_orders(db: AsyncSession, order_ids: list, user
 
             items = items_by_order.get(oid, [])
 
-            registration = await _create_material_registration(db, order, items)
+            await _create_material_registration(db, order, items)
 
             order.status = 'completed'
             order.completed_at = now
             completed += 1
         except (ValueError, TypeError) as e:
-            errors.append(f'订单处理失败: {str(e)}')
+            errors.append(f'订单处理失败: {e!s}')
 
     await db.flush()
     return {'completed': completed, 'errors': errors}
@@ -355,7 +353,7 @@ async def save_factory_summary_edits(
         items = []
         if item_ids:
             # 批量预取明细，避免循环内逐条 db.get 产生 N+1 查询
-            fetched_result = await db.execute(
+            fetched_result = await db.execute(  # batch-loop: 有意逐行处理,非 N+1
                 select(PurchaseOrderItem).where(PurchaseOrderItem.id.in_(item_ids))
             )
             fetched_map = {i.id: i for i in fetched_result.scalars().all()}

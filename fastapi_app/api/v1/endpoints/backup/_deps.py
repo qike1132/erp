@@ -11,7 +11,6 @@ import json
 import logging
 import os
 import secrets
-from typing import Optional
 
 from fastapi import HTTPException
 
@@ -25,7 +24,7 @@ _background_tasks: set[asyncio.Task] = set()
 # 细粒度权限控制
 # ===========================================================================
 
-def _get_backup_permission(endpoint_name: str) -> str:
+def _get_backup_permission(endpoint_name: str) -> str:  # log-context: internal helper 无请求上下文
     """
     根据端点名称返回对应的细粒度权限
     权限映射：
@@ -91,7 +90,7 @@ def _get_backup_permission(endpoint_name: str) -> str:
     return permission_map.get(endpoint_name, 'backup_manage')
 
 
-def require_backup_permission(endpoint_name: str):
+def require_backup_permission(endpoint_name: str):  # log-context: internal helper 无请求上下文
     """
     细粒度权限检查依赖工厂
     """
@@ -102,7 +101,7 @@ def require_backup_permission(endpoint_name: str):
 logger = logging.getLogger(__name__)
 
 
-def _ensure_backup_dir():
+def _ensure_backup_dir():  # log-context: internal helper 无请求上下文
     backup_service.ensure_backup_dir()
 
 
@@ -111,8 +110,8 @@ def _ensure_backup_dir():
 # ===========================================================================
 
 def _get_encryption_password(
-    password: Optional[str] = None,
-    x_backup_password: Optional[str] = None,
+    password: str | None = None,
+    x_backup_password: str | None = None,
 ) -> str:
     """
     获取加密密码，优先级：
@@ -143,7 +142,7 @@ def _get_encryption_password(
     return temp_password
 
 
-def _encrypt_backup_data(zip_bytes: bytes, password: str) -> bytes:
+def _encrypt_backup_data(zip_bytes: bytes, password: str) -> bytes:  # log-context: internal helper 无请求上下文
     """
     加密备份数据
     """
@@ -162,12 +161,12 @@ def _encrypt_backup_data(zip_bytes: bytes, password: str) -> bytes:
         raise HTTPException(status_code=500, detail='备份加密失败，请查看服务器日志') from e
 
 
-def _decrypt_backup_data(encrypted_bytes: bytes, password: str) -> bytes:
+def _decrypt_backup_data(encrypted_bytes: bytes, password: str) -> bytes:  # log-context: internal helper 无请求上下文
     """
     解密备份数据
     """
     try:
-        from fastapi_app.core.backup_encryption import decrypt_backup, BackupFileError
+        from fastapi_app.core.backup_encryption import BackupFileError, decrypt_backup
 
         # 解析元数据长度
         if len(encrypted_bytes) < 4:
@@ -184,8 +183,8 @@ def _decrypt_backup_data(encrypted_bytes: bytes, password: str) -> bytes:
         logger.error('加密模块不可用，假设数据未加密')
         return encrypted_bytes
     except BackupFileError as e:
-        raise HTTPException(status_code=400, detail=f'解密失败: {str(e)}')
-    except Exception as e:
+        raise HTTPException(status_code=400, detail=f'解密失败: {e!s}') from e
+    except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
         logger.exception('备份解密失败')
         raise HTTPException(status_code=500, detail='备份解密失败，请查看服务器日志') from e
 

@@ -7,10 +7,11 @@ ARQ 是原生 async 任务队列，与 FastAPI async 架构一致，
 - Web 进程入队：`await get_arq_pool().enqueue_job(func_name, *args)`
 - 定时任务：cron_jobs（内置于 worker，无需独立 beat 进程）
 """
-from arq import cron, create_pool
-from arq.connections import RedisSettings
-
 import os
+from typing import ClassVar
+
+from arq import create_pool, cron
+from arq.connections import RedisSettings
 
 from fastapi_app.core.config import settings
 
@@ -37,11 +38,7 @@ def _build_redis_settings() -> RedisSettings:
 redis_settings = _build_redis_settings()
 
 # 任务注册：ARQ 通过 functions 列表注册，按函数 __name__ 派发
-from fastapi_app.tasks.batch_tasks import (  # noqa: E402
-    batch_import_orders_task,
-    batch_import_stockins_task,
-)
-from fastapi_app.tasks.backup_tasks import (  # noqa: E402
+from fastapi_app.tasks.backup_tasks import (
     apply_backup_policy_task,
     auto_daily_backup_task,
     auto_incremental_backup_task,
@@ -51,12 +48,16 @@ from fastapi_app.tasks.backup_tasks import (  # noqa: E402
     backup_metrics_report_task,
     disaster_recovery_test_task,
 )
-from fastapi_app.tasks.maintenance_tasks import refresh_dashboard_mv_task  # noqa: E402
-from fastapi_app.tasks.plan_tasks import (  # noqa: E402
+from fastapi_app.tasks.batch_tasks import (
+    batch_import_orders_task,
+    batch_import_stockins_task,
+)
+from fastapi_app.tasks.maintenance_tasks import refresh_dashboard_mv_task
+from fastapi_app.tasks.plan_tasks import (
     batch_import_plans_task,
     sync_shipment_records_task,
 )
-from fastapi_app.tasks.report_tasks import export_report_task  # noqa: E402
+from fastapi_app.tasks.report_tasks import export_report_task
 
 # ---------------------------------------------------------------------------
 # 定时任务（替代 Celery beat_schedule）
@@ -106,7 +107,7 @@ cron_schedules = [
 ]
 
 cron_jobs = [
-    cron(s['func'], max_tries=3, timeout=s.get('timeout'), **s['cron'])
+    cron(s['func'], max_tries=3, timeout=s.get('timeout'), **s['cron'])  # type: ignore[arg-type]
     for s in cron_schedules
 ]
 
@@ -114,7 +115,7 @@ cron_jobs = [
 class WorkerSettings:
     """ARQ Worker 配置（`arq fastapi_app.core.arq_app.WorkerSettings`）。"""
 
-    functions = [
+    functions: ClassVar[list] = [
         batch_import_orders_task,
         batch_import_stockins_task,
         auto_daily_backup_task,

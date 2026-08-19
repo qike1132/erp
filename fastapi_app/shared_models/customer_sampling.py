@@ -10,7 +10,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
@@ -85,14 +85,14 @@ class CustomerSamplingProject(Base):
     created_by: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id'), comment='创建人ID')
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         nullable=False,
         comment='创建时间',
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
         nullable=False,
         comment='更新时间',
     )
@@ -108,31 +108,31 @@ class CustomerSamplingProject(Base):
     current_version: Mapped[str] = mapped_column(String(8), nullable=False, default='T1', comment='当前版本 T1/T2/T3...')
 
     # 关联关系
-    parts: Mapped[list["CustomerSamplingPart"]] = relationship(
+    parts: Mapped[list[CustomerSamplingPart]] = relationship(
         'CustomerSamplingPart',
         back_populates='project',
         cascade='all, delete-orphan',
         lazy='selectin',
         order_by='CustomerSamplingPart.sort_order',
     )
-    pattern_maker: Mapped["PatternMaker | None"] = relationship("PatternMaker", lazy='selectin')
-    product_image: Mapped["FileRecord | None"] = relationship("FileRecord", lazy='selectin')
-    creator: Mapped["User | None"] = relationship("User", lazy='selectin')
-    roles: Mapped[list["CustomerSamplingRole"]] = relationship(
+    pattern_maker: Mapped[PatternMaker | None] = relationship("PatternMaker", lazy='selectin')
+    product_image: Mapped[FileRecord | None] = relationship("FileRecord", lazy='selectin')
+    creator: Mapped[User | None] = relationship("User", lazy='selectin')
+    roles: Mapped[list[CustomerSamplingRole]] = relationship(
         'CustomerSamplingRole',
         back_populates='project',
         cascade='all, delete-orphan',
         lazy='selectin',
         order_by='CustomerSamplingRole.sort_order',
     )
-    fabric_versions: Mapped[list["CustomerSamplingFabricVersion"]] = relationship(
+    fabric_versions: Mapped[list[CustomerSamplingFabricVersion]] = relationship(
         'CustomerSamplingFabricVersion',
         back_populates='project',
         cascade='all, delete-orphan',
         lazy='selectin',
         order_by='CustomerSamplingFabricVersion.version_no',
     )
-    change_logs: Mapped[list["CustomerSamplingChangeLog"]] = relationship(
+    change_logs: Mapped[list[CustomerSamplingChangeLog]] = relationship(
         'CustomerSamplingChangeLog',
         back_populates='project',
         lazy='selectin',
@@ -203,30 +203,30 @@ class CustomerSamplingRole(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         nullable=False,
         comment='创建时间',
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
         nullable=False,
         comment='更新时间',
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment='乐观锁版本号')
 
-    project: Mapped["CustomerSamplingProject"] = relationship(
+    project: Mapped[CustomerSamplingProject] = relationship(
         "CustomerSamplingProject", back_populates="roles",
     )
-    parts: Mapped[list["CustomerSamplingPart"]] = relationship(
+    parts: Mapped[list[CustomerSamplingPart]] = relationship(
         'CustomerSamplingPart',
         back_populates='role',
         cascade='all, delete-orphan',
         lazy='selectin',
         order_by='CustomerSamplingPart.sort_order',
     )
-    fabric_versions: Mapped[list["CustomerSamplingFabricVersion"]] = relationship(
+    fabric_versions: Mapped[list[CustomerSamplingFabricVersion]] = relationship(
         'CustomerSamplingFabricVersion',
         back_populates='role',
         cascade='all, delete-orphan',
@@ -293,25 +293,25 @@ class CustomerSamplingPart(Base):
     remark: Mapped[str | None] = mapped_column(Text, comment='备注')
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
         nullable=False,
     )
     # 乐观锁
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment='乐观锁版本号')
 
-    project: Mapped["CustomerSamplingProject"] = relationship(
+    project: Mapped[CustomerSamplingProject] = relationship(
         "CustomerSamplingProject", back_populates="parts",
     )
-    role: Mapped["CustomerSamplingRole"] = relationship(
+    role: Mapped[CustomerSamplingRole] = relationship(
         "CustomerSamplingRole", back_populates="parts",
     )
-    supplier: Mapped["Supplier | None"] = relationship("Supplier", lazy='selectin')
+    supplier: Mapped[Supplier | None] = relationship("Supplier", lazy='selectin')
 
     __table_args__ = (
         # 同角色 + 同版本下部位名称唯一（T1/T2/T3 各自独立）
@@ -398,18 +398,18 @@ class CustomerSamplingFabricVersion(Base):
     created_by: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id'), comment='创建人ID')
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         nullable=False,
         comment='创建时间',
     )
 
-    project: Mapped["CustomerSamplingProject"] = relationship(
+    project: Mapped[CustomerSamplingProject] = relationship(
         "CustomerSamplingProject", back_populates="fabric_versions",
     )
-    role: Mapped["CustomerSamplingRole"] = relationship(
+    role: Mapped[CustomerSamplingRole] = relationship(
         "CustomerSamplingRole", back_populates="fabric_versions",
     )
-    creator: Mapped["User | None"] = relationship("User", lazy='selectin')
+    creator: Mapped[User | None] = relationship("User", lazy='selectin')
 
     __table_args__ = (
         Index('idx_csfv_project_version', 'project_id', 'version_no'),
@@ -459,15 +459,15 @@ class CustomerSamplingChangeLog(Base):
     operator_name: Mapped[str | None] = mapped_column(String(100), comment='操作人姓名(冗余)')
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         nullable=False,
         comment='操作时间',
     )
 
-    project: Mapped["CustomerSamplingProject | None"] = relationship(
+    project: Mapped[CustomerSamplingProject | None] = relationship(
         "CustomerSamplingProject", back_populates="change_logs",
     )
-    operator: Mapped["User | None"] = relationship("User", lazy='selectin')
+    operator: Mapped[User | None] = relationship("User", lazy='selectin')
 
     __table_args__ = (
         Index('idx_cscl_project_time', 'project_id', desc('created_at')),

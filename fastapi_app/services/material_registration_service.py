@@ -2,7 +2,7 @@
 import io
 import json
 import logging
-from datetime import date, datetime, timezone, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import xlsxwriter
@@ -13,7 +13,6 @@ from sqlalchemy.orm import joinedload, selectinload
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.exceptions import BusinessError
 from fastapi_app.core.sanitizer import escape_like
-from fastapi_app.utils import calc_total_pages
 from fastapi_app.shared_models import (
     MaterialRegistration,
     MaterialRegistrationItem,
@@ -21,6 +20,7 @@ from fastapi_app.shared_models import (
     PurchaseOrder,
     PurchaseOrderItem,
 )
+from fastapi_app.utils import calc_total_pages
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +123,7 @@ async def create_registration(db, purchase_order_id: int, user_id: int | None = 
         purchase_order_no=po.order_no,
         supplier_id=po.supplier_id,
         supplier_name=po.supplier_name,
-        registration_date=datetime.now(timezone.utc).replace(tzinfo=None).date(),
+        registration_date=datetime.now(UTC).replace(tzinfo=None).date(),
         status='pending',
         remark=remark,
         created_by=user_id,
@@ -289,7 +289,7 @@ async def get_stats_overview(db) -> dict:
     total_ordered = totals_row[0] or 0
     total_received = totals_row[1] or 0
 
-    today = datetime.now(timezone.utc).replace(tzinfo=None).date()
+    today = datetime.now(UTC).replace(tzinfo=None).date()
     week_ago = today - timedelta(days=7)
 
     recent = (await db.execute(
@@ -344,7 +344,7 @@ async def preview_purchase_order(db, order_no: str) -> dict:
                 if sid:
                     source_order_ids.add(sid)
         except (json.JSONDecodeError, TypeError):
-            pass
+            pass  # defensive: 异常静默处理,不影响主流程
     if source_order_ids:
         so_result = await db.execute(
             select(Order).options(joinedload(Order.product)).where(Order.id.in_(source_order_ids))
@@ -395,11 +395,11 @@ async def export_registrations(db, order_no: str = '', supplier: str = '',
         selectinload(MaterialRegistration.purchase_order),
     )
     if order_no:
-        query = query.where(MaterialRegistration.purchase_order_no.ilike(f'%{escape_like(order_no)}%'))
+        query = query.where(MaterialRegistration.purchase_order_no.ilike(f'%{escape_like(order_no)}%'))  # sql-safe: escape_like/绑定参数/常量片段
     if supplier:
-        query = query.where(MaterialRegistration.supplier_name.ilike(f'%{escape_like(supplier)}%'))
+        query = query.where(MaterialRegistration.supplier_name.ilike(f'%{escape_like(supplier)}%'))  # sql-safe: escape_like/绑定参数/常量片段
     if customer_name:
-        query = query.where(PurchaseOrder.customer_name.ilike(f'%{escape_like(customer_name)}%'))
+        query = query.where(PurchaseOrder.customer_name.ilike(f'%{escape_like(customer_name)}%'))  # sql-safe: escape_like/绑定参数/常量片段
     if start_date:
         query = query.where(MaterialRegistration.registration_date >= _parse_filter_date(start_date, '开始日期'))
     if end_date:
@@ -587,7 +587,7 @@ async def get_stats_distribution(db) -> dict:
     partial = status_counts.get('partial', 0)
     completed = status_counts.get('completed', 0)
 
-    month_ago = datetime.now(timezone.utc).replace(tzinfo=None).date() - timedelta(days=30)
+    month_ago = datetime.now(UTC).replace(tzinfo=None).date() - timedelta(days=30)
     overdue_items = (await db.execute(
         select(func.count(MaterialRegistrationItem.id)).where(
             MaterialRegistrationItem.ordered_quantity > MaterialRegistrationItem.received_quantity,
@@ -610,7 +610,7 @@ async def get_stats_distribution(db) -> dict:
              key_builder=lambda **kwargs: str(kwargs.get('days', 30)))
 async def get_stats_trend(db, days: int = 30) -> dict:
     """趋势数据（SQL GROUP BY 替代全量 ORM 加载，L1 15s + L2 60s 缓存）"""
-    end_date = datetime.now(timezone.utc).replace(tzinfo=None).date()
+    end_date = datetime.now(UTC).replace(tzinfo=None).date()
     start_date = end_date - timedelta(days=days)
 
     # 生成完整日期骨架

@@ -10,7 +10,8 @@
 - INFRA_EXCEPTIONS: 统一的基础设施异常类型元组
 """
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 

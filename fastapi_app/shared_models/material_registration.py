@@ -1,7 +1,7 @@
 """来料登记模型"""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, desc
@@ -22,18 +22,18 @@ class MaterialRegistration(Base):
     purchase_order_no: Mapped[str] = mapped_column(String(30), nullable=False)
     supplier_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('supplier.id'))
     supplier_name: Mapped[str | None] = mapped_column(String(100))
-    registration_date: Mapped[datetime | None] = mapped_column(Date, nullable=False, default=lambda: datetime.now(timezone.utc).date())
+    registration_date: Mapped[datetime | None] = mapped_column(Date, nullable=False, default=lambda: datetime.now(UTC).date())
     remark: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), default='pending')
-    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
     created_by: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id'))
 
-    items: Mapped[list["MaterialRegistrationItem"]] = relationship(
+    items: Mapped[list[MaterialRegistrationItem]] = relationship(
         "MaterialRegistrationItem", back_populates="registration",
         cascade="all, delete-orphan"
     )
-    purchase_order: Mapped["PurchaseOrder"] = relationship("PurchaseOrder", backref="registrations")
+    purchase_order: Mapped[PurchaseOrder] = relationship("PurchaseOrder", backref="registrations")
 
     __table_args__ = (
         Index('idx_material_reg_purchase_order', 'purchase_order_id'),
@@ -61,7 +61,7 @@ class MaterialRegistration(Base):
     @property
     def computed_status(self) -> str:
         """计算状态 - 必须每个物料项 individually 完成才算 completed"""
-        items_list, total_ordered, total_received, all_complete = self._calc_items_stats()
+        items_list, _total_ordered, total_received, all_complete = self._calc_items_stats()
         if not items_list:
             return 'pending'
         if all_complete:
@@ -73,7 +73,7 @@ class MaterialRegistration(Base):
     @property
     def progress(self) -> float:
         """完成进度百分比，未全部完成时上限99.9%"""
-        items_list, total_ordered, total_received, all_complete = self._calc_items_stats()
+        _items_list, total_ordered, total_received, all_complete = self._calc_items_stats()
         if not total_ordered:
             return 0.0
         if all_complete:
@@ -126,9 +126,9 @@ class MaterialRegistrationItem(Base):
     received_quantity: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
     material_category: Mapped[str | None] = mapped_column(String(20))
     remark: Mapped[str | None] = mapped_column(Text)
-    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
-    registration: Mapped["MaterialRegistration"] = relationship(
+    registration: Mapped[MaterialRegistration] = relationship(
         "MaterialRegistration", back_populates="items"
     )
 

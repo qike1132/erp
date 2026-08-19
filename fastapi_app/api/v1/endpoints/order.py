@@ -90,7 +90,7 @@ async def list_orders(
     except (SQLAlchemyError, OSError) as e:
         # 仅捕获基础设施异常并转 500；编程错误（KeyError 等）自然抛给全局 handler 暴露真实堆栈
         logger.exception("[OrderList] 获取订单列表失败: %s", e)
-        raise HTTPException(status_code=500, detail=f"获取订单列表失败: {str(e)[:200]}")
+        raise HTTPException(status_code=500, detail=f"获取订单列表失败: {str(e)[:200]}") from e
 
     return OrderListResponse(data=result['items'], total=result['total'],
                              page=result['page'], per_page=result['per_page'])
@@ -111,7 +111,7 @@ async def list_beile_orders(
     专供湖北订单页面使用，权限要求 beile_order_view（而非 order_manage）。
     强制 factory='湖北'，忽略前端传参，确保数据隔离。
     同时包含订单（Order）和备货（StockIn）记录，通过 record_type 字段区分。
-    confirm_status 生效时仅返回对应确认状态的订单，备货记录一并排除。
+    confirm_status 生效时订单与备货均按各自 confirmed_at 过滤后合并返回。
     """
     result = await order_crud.get_beile_orders_with_stockins(
         db, page=page, per_page=per_page, customer=customer, factory='湖北',
@@ -134,6 +134,20 @@ async def confirm_beile_order(
     仅允许确认 factory=湖北 的订单，幂等（已确认直接返回成功）。
     """
     result = await order_crud.confirm_beile_order(db, order_id, user)
+    return OrderActionResponse(**result)
+
+
+@router.post("/stockin/{stockin_id}/confirm", response_model=OrderActionResponse)
+async def confirm_beile_stockin(
+    stockin_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    user: User = Depends(require_permission("beile_order_view")),
+) -> OrderActionResponse:
+    """确认湖北备货（beile-order 页面，与订单确认流程对齐）。
+
+    仅允许确认 factory=湖北 的备货记录，幂等（已确认直接返回成功）。
+    """
+    result = await order_crud.confirm_beile_stockin(db, stockin_id, user)
     return OrderActionResponse(**result)
 
 

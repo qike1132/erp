@@ -54,8 +54,9 @@ def main():
         print("[OK] 已清除进程内导航缓存")
 
         try:
-            from utils.redis_cache import redis_cache
             import asyncio
+
+            from utils.redis_cache import redis_cache
             try:
                 loop = asyncio.get_running_loop()
             except RuntimeError:

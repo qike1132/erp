@@ -3,7 +3,7 @@
     <span><FontAwesomeIcon icon="list" aria-hidden="true" /> 产品列表</span>
     <div class="pd-col-actions">
       <UiSearchInput :modelValue="searchTerm" placeholder="搜索产品名称或69码..." @search="onSearchInput" @update:modelValue="searchTerm = $event" />
-      <select :value="`${sortBy}-${sortOrder}`" class="pd-sort" @change="onSortChange">
+      <select :value="`${sortBy}-${sortOrder}`" class="pd-sort" @change="onSortChange" aria-label="select输入">
         <option value="name-asc">名称 A-Z</option>
         <option value="name-desc">名称 Z-A</option>
       </select>
@@ -29,7 +29,7 @@
         </template>
         <template #column-body-image="{ row }">
           <div v-if="(row as Product).image && !failedImageIds.has((row as Product).id)" class="pd-thumb-box" @click="emit('open-image', (row as Product).image!)">
-            <img :src="resolveStaticUrl((row as Product).image!)" class="pd-thumb-img" :alt="(row as Product).name" @error="handleImageError(row as Product)" />
+            <img loading="lazy" :src="resolveStaticUrl((row as Product).image!)" class="pd-thumb-img" :alt="(row as Product).name" @error="handleImageError(row as Product)" />
           </div>
           <div v-else class="pd-thumb-box">
             <div class="pd-no-image"><FontAwesomeIcon icon="image" aria-hidden="true" /></div>

@@ -35,7 +35,7 @@
             <div class="bt-whitelist-modal">
               <div class="bt-whitelist-header">
                 <span>确认完成批次</span>
-                <button class="bt-whitelist-close" @click="showCompleteModal = false">&times;</button>
+                <button class="bt-whitelist-close" @click="showCompleteModal = false" aria-label="关闭">&times;</button>
               </div>
               <div class="bt-whitelist-body" style="padding: 20px; font-size: 14px; color: var(--color-text);">
                 确定要完成批次 <strong>{{ completingBatchNo }}</strong> 吗？完成后该批次将不再显示。

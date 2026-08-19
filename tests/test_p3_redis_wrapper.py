@@ -7,8 +7,6 @@ P3-3: Redis统一封装迁移测试
 import inspect
 from pathlib import Path
 
-import pytest
-
 
 def test_redis_wrapper_has_all_safe_functions():
     """验证 redis_wrapper 导出所有需要的安全函数"""

@@ -1,7 +1,7 @@
 """
 包装部生产记录模型 - 纯 SQLAlchemy 2.0 声明式
 """
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import Date, DateTime, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -26,9 +26,9 @@ class PackagingRecord(Base):
     pack_date: Mapped[datetime] = mapped_column(Date, nullable=False, comment='包装日期')
     remark: Mapped[str | None] = mapped_column(Text, nullable=True, comment='备注')
     upload_batch: Mapped[str | None] = mapped_column(String(64), nullable=True, comment='上传批次ID')
-    create_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), comment='创建时间')
+    create_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
     created_by: Mapped[str | None] = mapped_column(String(50), nullable=True, comment='创建人')
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 
     def to_dict(self):
         return {

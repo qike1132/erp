@@ -6,10 +6,7 @@ P1 修复回归验证脚本
 2. 时区一致性（datetime.now(UTC).replace(tzinfo=None)）
 3. 并发锁（with_for_update）
 """
-import ast
-import inspect
 import re
-from datetime import UTC, datetime
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -52,6 +49,7 @@ print('=' * 70)
 
 # 1a. MATERIAL_CATEGORIES 包含 packaging
 from fastapi_app.shared_models.product_material import MATERIAL_CATEGORIES
+
 check(
     'MATERIAL_CATEGORIES 包含 packaging 键',
     'packaging' in MATERIAL_CATEGORIES,
@@ -65,6 +63,7 @@ check(
 
 # 1b. calculate_material result 字典包含 packaging
 import ast as _ast
+
 pps_path = FASTAPI_APP / 'services' / 'purchase_product_service.py'
 pps_src = pps_path.read_text(encoding='utf-8')
 pps_tree = _ast.parse(pps_src)
@@ -84,6 +83,7 @@ check(
 
 # 1c. ProductAccessory.material_category 支持 packaging
 from fastapi_app.shared_models.product_material import ProductAccessory
+
 check(
     'ProductAccessory.material_category 列存在',
     hasattr(ProductAccessory, 'material_category'),
@@ -92,6 +92,7 @@ check(
 
 # 1d. get_all_materials 返回的物料包含 category 字段
 from fastapi_app.shared_models.product import Product
+
 check(
     'Product.get_all_materials 方法存在',
     hasattr(Product, 'get_all_materials'),
@@ -129,7 +130,7 @@ for rel_path in TIMEZONE_FIXED_FILES:
     src = abs_path.read_text(encoding='utf-8')
     lines = src.splitlines()
     bare_count = 0
-    for i, line in enumerate(lines, 1):
+    for _i, line in enumerate(lines, 1):
         if naive_now_pattern.search(line) and not display_pattern.search(line):
             # 排除注释行
             stripped = line.lstrip()
@@ -228,7 +229,7 @@ pt_tree = _ast.parse(pt_src)
 cleanup_in_finally = False
 for node in _ast.walk(pt_tree):
     if isinstance(node, _ast.Try):
-        for handler in node.handlers:
+        for _handler in node.handlers:
             pass  # except handlers
         if node.finalbody:
             for final_node in node.finalbody:
@@ -237,7 +238,7 @@ for node in _ast.walk(pt_tree):
                     if isinstance(func, _ast.Attribute) and func.attr == 'unlink':
                         cleanup_in_finally = True
                 if isinstance(final_node, _ast.With):
-                    for item in final_node.items:
+                    for _item in final_node.items:
                         # contextlib.suppress(OSError) + os.unlink
                         for body_node in final_node.body:
                             if isinstance(body_node, _ast.Expr) and isinstance(body_node.value, _ast.Call):
@@ -274,7 +275,7 @@ print('=' * 70)
 print('5. 修复文件语法完整性')
 print('=' * 70)
 
-ALL_FIXED_PATHS = sorted(set(f[1] for f in FIXED_FILES))
+ALL_FIXED_PATHS = sorted({f[1] for f in FIXED_FILES})
 for rel_path in ALL_FIXED_PATHS:
     abs_path = PROJECT_ROOT / rel_path
     try:

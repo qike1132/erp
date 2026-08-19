@@ -1,7 +1,7 @@
 """皮套模型 - 纯 SQLAlchemy 2.0 声明式"""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String
@@ -33,10 +33,10 @@ class Case(Base):
     initial_stock: Mapped[int] = mapped_column(Integer, default=0)
     current_stock: Mapped[int] = mapped_column(Integer, default=0)
     version: Mapped[int] = mapped_column(Integer, default=0, server_default='0')
-    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 
-    product: Mapped["Product | None"] = relationship('Product', back_populates='cases')
+    product: Mapped[Product | None] = relationship('Product', back_populates='cases')
 
     @property
     def sync_name(self) -> str:

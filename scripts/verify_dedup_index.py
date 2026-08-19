@@ -1,6 +1,8 @@
 """验证 uq_po_pending_dedup 索引是否已成功创建（COALESCE 版本）"""
 import sys
+
 from sqlalchemy import text
+
 from fastapi_app.core.database import get_sync_engine
 
 engine = get_sync_engine()

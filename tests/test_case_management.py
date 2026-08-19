@@ -9,15 +9,16 @@
 - 库存流水查询
 - 数据校验（日期格式、分页参数、数量范围）
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import date
+from unittest.mock import MagicMock, patch
 
-from fastapi_app.services.case_service import (
-    _parse_date,
-    _normalize_pagination,
-)
+import pytest
+
 from fastapi_app.core.exceptions import BusinessError, NotFoundError
+from fastapi_app.services.case_service import (
+    _normalize_pagination,
+    _parse_date,
+)
 
 
 class TestHelpers:
@@ -41,22 +42,22 @@ class TestHelpers:
 
     def test_normalize_pagination_page_zero(self):
         """页码为0修正为1"""
-        page, per_page = _normalize_pagination(0, 20, 100)
+        page, _per_page = _normalize_pagination(0, 20, 100)
         assert page == 1
 
     def test_normalize_pagination_page_negative(self):
         """页码为负修正为1"""
-        page, per_page = _normalize_pagination(-5, 20, 100)
+        page, _per_page = _normalize_pagination(-5, 20, 100)
         assert page == 1
 
     def test_normalize_pagination_exceed_max(self):
         """每页数超过上限"""
-        page, per_page = _normalize_pagination(1, 300, 100)
+        _page, per_page = _normalize_pagination(1, 300, 100)
         assert per_page == 100
 
     def test_normalize_pagination_per_page_zero(self):
         """每页数为0修正为1"""
-        page, per_page = _normalize_pagination(1, 0, 100)
+        _page, per_page = _normalize_pagination(1, 0, 100)
         assert per_page == 1
 
 

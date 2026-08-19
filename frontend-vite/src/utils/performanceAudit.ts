@@ -3,6 +3,7 @@
  * DOM审计 / 重排重绘监测 / 事件监听器审计 / 长任务检测 / 内存快照
  * 开发模式挂载到 window.__erp_perf__
  */
+import { devLog, devGroup, devGroupEnd } from '@/utils/devLog'
 
 export interface DOMAuditResult {
   totalNodes: number
@@ -40,7 +41,7 @@ export function monitorReflowRepaint(durationMs = 10000): void {
       obs.observe({ type: 'layout-shift', buffered: true })
     } catch {}
   }
-  setTimeout(() => { window.getComputedStyle = orig; console.log(`[性能] 重排次数: ${reflowCount}`); if (reflowCount > 100) console.warn('[性能] 重排过多，建议用transform替代top/left') }, durationMs)
+  setTimeout(() => { window.getComputedStyle = orig; devLog(`[性能] 重排次数: ${reflowCount}`); if (reflowCount > 100) console.warn('[性能] 重排过多，建议用transform替代top/left') }, durationMs)
 }
 
 export function auditEventListeners(): { eventType: string; count: number }[] {
@@ -72,20 +73,20 @@ export function takeMemorySnapshot(): MemorySnapshot | null {
 }
 
 export async function runFullDiagnosis(): Promise<void> {
-  console.group('[ERP 性能诊断]')
+  devGroup('[ERP 性能诊断]')
   const dom = auditDOM()
-  console.log(`DOM节点: ${dom.totalNodes}, 深度: ${dom.depth}`, dom.heavyElements)
+  devLog(`DOM节点: ${dom.totalNodes}, 深度: ${dom.depth}`, dom.heavyElements)
   if (dom.totalNodes > 3000) console.warn(`DOM节点过多(${dom.totalNodes})，建议虚拟滚动`)
   const evt = auditEventListeners()
-  for (const e of evt) console.log(`${e.eventType}: ${e.count}个监听器`)
+  for (const e of evt) devLog(`${e.eventType}: ${e.count}个监听器`)
   const mem = takeMemorySnapshot()
-  if (mem) console.log(`堆: ${(mem.usedJSHeapSize/1024/1024).toFixed(1)}MB 利用率: ${(mem.heapUtilization*100).toFixed(1)}%`)
+  if (mem) devLog(`堆: ${(mem.usedJSHeapSize/1024/1024).toFixed(1)}MB 利用率: ${(mem.heapUtilization*100).toFixed(1)}%`)
   const lt = await monitorLongTasks(5000)
-  console.log(`长任务: ${lt.length}个`)
-  console.groupEnd()
+  devLog(`长任务: ${lt.length}个`)
+  devGroupEnd()
 }
 
 if (import.meta.env?.DEV) {
   ;(window as unknown as Record<string, unknown>).__erp_perf__ = { auditDOM, monitorReflowRepaint, auditEventListeners, monitorLongTasks, takeMemorySnapshot, runFullDiagnosis }
-  console.log('[ERP性能工具] window.__erp_perf__')
+  devLog('[ERP性能工具] window.__erp_perf__')
 }

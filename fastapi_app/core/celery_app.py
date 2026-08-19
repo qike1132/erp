@@ -10,4 +10,4 @@
 回退路径）会得到 ``None``，从而触发 503 优雅降级，提示调用方改用 ARQ API。
 """
 # Celery 已移除（见 requirements/base.txt），celery_app 置为 None 以触发调用方降级。
-celery_app = None  # noqa: F841
+celery_app = None

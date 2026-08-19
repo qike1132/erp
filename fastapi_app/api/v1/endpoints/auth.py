@@ -10,13 +10,11 @@ from datetime import timedelta
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.concurrency import run_in_threadpool
 
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
-from fastapi_app.core.deps import create_access_token, create_refresh_token, get_current_user_id
+from fastapi_app.core.deps import create_access_token, get_current_user_id
 from fastapi_app.core.limiter import limiter, memory_limiter
 
 logger = logging.getLogger(__name__)
@@ -161,6 +159,58 @@ async def log_frontend_error(
 
 # ==================== 登录 ====================
 
+async def _check_login_rate_limit(key: str) -> None:
+    """分层限流：Redis burst + window 双计数器，不可用时降级到进程内存滑动窗口"""
+    _login_rate_limit_key = f"login_attempt:{key}"
+    _login_burst_key = f"login_burst:{key}"
+    try:
+        from fastapi_app.core.redis_wrapper import get_client
+        _redis = get_client()
+        if _redis:
+            _pipe = _redis.pipeline()
+            _pipe.incr(_login_burst_key)
+            _pipe.incr(_login_rate_limit_key)
+            _burst, _attempts = await _pipe.execute()
+            if _burst == 1:
+                await _redis.expire(_login_burst_key, LOGIN_BURST_WINDOW)
+            if _burst > LOGIN_BURST_LIMIT:
+                logger.warning("[Login] 登录尝试过快，1分钟内超过%d次: IP=%s", LOGIN_BURST_LIMIT, key)
+                raise HTTPException(status_code=429, detail="登录尝试过于频繁，请1分钟后重试", headers={"Retry-After": str(LOGIN_BURST_WINDOW)})
+            if _attempts == 1:
+                await _redis.expire(_login_rate_limit_key, LOGIN_ATTEMPT_WINDOW)
+            if _attempts > LOGIN_ATTEMPT_LIMIT:
+                logger.warning("[Login] 登录尝试过多，暂时锁定: IP=%s", key)
+                raise HTTPException(status_code=429, detail="登录尝试过多，请5分钟后重试", headers={"Retry-After": str(LOGIN_ATTEMPT_WINDOW)})
+    except HTTPException:
+        raise
+    except Exception:  # defensive: Redis限流不可用时降级到进程内存滑动窗口限流
+        if not memory_limiter.hit(f"login_burst:{key}", LOGIN_BURST_WINDOW, LOGIN_BURST_LIMIT):
+            logger.warning("[Login] 登录尝试过快（内存限流），1分钟内超过%d次: IP=%s", LOGIN_BURST_LIMIT, key)
+            raise HTTPException(status_code=429, detail="登录尝试过于频繁，请1分钟后重试", headers={"Retry-After": str(LOGIN_BURST_WINDOW)}) from None
+        if not memory_limiter.hit(f"login_attempt:{key}", LOGIN_ATTEMPT_WINDOW, LOGIN_ATTEMPT_LIMIT):
+            logger.warning("[Login] 登录尝试过多（内存限流），暂时锁定: IP=%s", key)
+            raise HTTPException(status_code=429, detail="登录尝试过多，请5分钟后重试", headers={"Retry-After": str(LOGIN_ATTEMPT_WINDOW)}) from None
+        logger.warning("[Login] Redis 限流不可用，已降级为进程内存限流: IP=%s", key)
+
+
+def _set_login_cookies(  # log-context: internal helper 无请求上下文
+    response: Response, request: Request,
+    access_token: str, refresh_token: str,
+    token_max_age: int, refresh_max_age: int,
+) -> None:
+    """设置 httpOnly cookie（浏览器 Web 端自动携带），根据 HTTPS/Capacitor 自适应 SameSite/Secure"""
+    _is_https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
+    _is_capacitor = request.headers.get("x-client-type") == "capacitor" or request.headers.get("origin", "").startswith("http://localhost")
+    if _is_capacitor and not _is_https:
+        _samesite, _secure = "lax", False
+    elif _is_https:
+        _samesite, _secure = "none", True
+    else:
+        _samesite, _secure = "lax", False
+    response.set_cookie(key="access_token", value=access_token, max_age=token_max_age, httponly=True, samesite=_samesite, secure=_secure, path="/")
+    response.set_cookie(key="refresh_token", value=refresh_token, max_age=refresh_max_age, httponly=True, samesite=_samesite, secure=_secure, path="/")
+
+
 @router.post("/login", response_model=LoginResponse)
 @limiter.limit("100/minute")  # 内网宽松：登录接口取消严格限流
 async def api_login(
@@ -174,59 +224,12 @@ async def api_login(
     返回JWT Token（移动端通过 Authorization: Bearer <token> 使用），
     同时设置 httpOnly cookie（浏览器自动携带）。
     """
-    from fastapi_app.core.security import check_needs_rehash, hash_password, needs_migration, verify_password
     from slowapi.util import get_remote_address
 
-    key = get_remote_address(request)
+    from fastapi_app.services.auth_service import authenticate_login
 
-    _login_rate_limit_key = f"login_attempt:{key}"
-    _login_burst_key = f"login_burst:{key}"
-    try:
-        from fastapi_app.core.redis_wrapper import get_client
-        _redis = get_client()
-        if _redis:
-            # 分层限流：批量发送 burst + window 两个计数器，省一次 Redis RTT
-            _pipe = _redis.pipeline()
-            _pipe.incr(_login_burst_key)
-            _pipe.incr(_login_rate_limit_key)
-            _burst, _attempts = await _pipe.execute()
-            if _burst == 1:
-                await _redis.expire(_login_burst_key, LOGIN_BURST_WINDOW)
-            if _burst > LOGIN_BURST_LIMIT:
-                logger.warning("[Login] 登录尝试过快，1分钟内超过%d次: IP=%s", LOGIN_BURST_LIMIT, key)
-                raise HTTPException(
-                    status_code=429,
-                    detail="登录尝试过于频繁，请1分钟后重试",
-                    headers={"Retry-After": str(LOGIN_BURST_WINDOW)},
-                )
-            if _attempts == 1:
-                await _redis.expire(_login_rate_limit_key, LOGIN_ATTEMPT_WINDOW)
-            if _attempts > LOGIN_ATTEMPT_LIMIT:
-                logger.warning("[Login] 登录尝试过多，暂时锁定: IP=%s", key)
-                raise HTTPException(
-                    status_code=429,
-                    detail="登录尝试过多，请5分钟后重试",
-                    headers={"Retry-After": str(LOGIN_ATTEMPT_WINDOW)},
-                )
-    except HTTPException:
-        raise
-    except Exception:  # defensive: Redis限流不可用时降级到进程内存滑动窗口限流
-        # 内存降级：多 worker 间不共享，仅进程级防护，但不再无条件放行
-        if not memory_limiter.hit(f"login_burst:{key}", LOGIN_BURST_WINDOW, LOGIN_BURST_LIMIT):
-            logger.warning("[Login] 登录尝试过快（内存限流），1分钟内超过%d次: IP=%s", LOGIN_BURST_LIMIT, key)
-            raise HTTPException(
-                status_code=429,
-                detail="登录尝试过于频繁，请1分钟后重试",
-                headers={"Retry-After": str(LOGIN_BURST_WINDOW)},
-            )
-        if not memory_limiter.hit(f"login_attempt:{key}", LOGIN_ATTEMPT_WINDOW, LOGIN_ATTEMPT_LIMIT):
-            logger.warning("[Login] 登录尝试过多（内存限流），暂时锁定: IP=%s", key)
-            raise HTTPException(
-                status_code=429,
-                detail="登录尝试过多，请5分钟后重试",
-                headers={"Retry-After": str(LOGIN_ATTEMPT_WINDOW)},
-            )
-        logger.warning("[Login] Redis 限流不可用，已降级为进程内存限流: IP=%s", key)
+    key = get_remote_address(request)
+    await _check_login_rate_limit(key)
 
     username = data.username.strip()
     password = data.password
@@ -239,99 +242,22 @@ async def api_login(
         logger.info(f"[Login] 登录失败: 密码过长, IP={key}")
         raise HTTPException(status_code=400, detail="密码长度不能超过128位")
 
-    from fastapi_app.services import user_service
+    result = await authenticate_login(db, username, password, data.remember, key)
+    user = result['user']
 
-    user = await user_service.get_user_with_permissions_by_username(db, username)
-
-    from fastapi_app.core.security import verify_password as _vp
-    dummy_hash = "$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-
-    if not user:
-        await run_in_threadpool(_vp, "timing_sidechannel_dummy", dummy_hash)
-        logger.warning("[Login] 登录失败: IP=%s", key)
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
-    if not user.status:
-        await run_in_threadpool(_vp, "timing_sidechannel_dummy", dummy_hash)
-        logger.warning("[Login] 登录失败: IP=%s", key)
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
-    if not await run_in_threadpool(verify_password, password, user.password):
-        logger.warning("[Login] 登录失败: IP=%s", key)
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
-
-    if needs_migration(user.password):
-        try:
-            new_hash = await run_in_threadpool(hash_password, password)
-            user.password = new_hash
-            await db.commit()
-            logger.info(f"[Login] 密码哈希已迁移到 Argon2id: user_id={user.id}")
-        except (ValueError, TypeError, OSError, SQLAlchemyError) as e:
-            logger.warning(f"[Login] 密码哈希迁移失败（不影响登录）: {e}")
-            await db.rollback()
-    elif check_needs_rehash(user.password):
-        try:
-            new_hash = await run_in_threadpool(hash_password, password)
-            user.password = new_hash
-            await db.commit()
-            logger.info(f"[Login] 密码哈希参数已升级: user_id={user.id}")
-        except (ValueError, TypeError, OSError, SQLAlchemyError) as e:
-            logger.warning(f"[Login] 密码哈希升级失败（不影响登录）: {e}")
-            await db.rollback()
-
-    # 生成JWT Token（仅存储最小必要信息，权限通过数据库实时查询）
-    token_data = {
-        "sub": str(user.id),
-        "username": user.username,
-    }
-
-    # Cookie/JWT 有效期：记住我24小时，否则1小时
-    token_max_age = 86400 if data.remember else 3600
-    access_token = create_access_token(
-        token_data,
-        expires_delta=timedelta(seconds=token_max_age),
+    _set_login_cookies(
+        response, request,
+        result['access_token'], result['refresh_token'],
+        result['token_max_age'], result['refresh_max_age'],
     )
-    refresh_token = create_refresh_token(token_data)
-    refresh_max_age = settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400
-
-    # 设置 httpOnly cookie（浏览器Web端自动携带）
-    _is_https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
-    _is_capacitor = request.headers.get("x-client-type") == "capacitor" or request.headers.get("origin", "").startswith("http://localhost")
-    if _is_capacitor and not _is_https:
-        _samesite = "lax"
-        _secure = False
-    elif _is_https:
-        _samesite = "none"
-        _secure = True
-    else:
-        _samesite = "lax"
-        _secure = False
-    response.set_cookie(
-        key="access_token",
-        value=access_token,
-        max_age=token_max_age,
-        httponly=True,
-        samesite=_samesite,
-        secure=_secure,
-        path="/",
-    )
-    response.set_cookie(
-        key="refresh_token",
-        value=refresh_token,
-        max_age=refresh_max_age,
-        httponly=True,
-        samesite=_samesite,
-        secure=_secure,
-        path="/",
-    )
-
-    # auth_status cookie 已移除，前端请使用 GET /api/v1/auth/check 检查登录状态
 
     logger.info("[Login] 登录成功: IP=%s, user_id=%s", key, user.id)
 
     return LoginResponse(
         success=True,
         message="登录成功",
-        access_token=access_token,
-        token_type="bearer",  # nosec
+        access_token=result['access_token'],
+        token_type="bearer",  # nosec  # noqa: S106  # OAuth2 token type, not a password
         user=UserInfoResponse(
             user_id=user.id,
             username=user.username,
@@ -364,7 +290,7 @@ async def api_logout(request: Request):
                 r_exp = r_payload.get('exp')
                 if r_jti and r_exp:
                     await revoke_token(r_jti, r_exp)
-            except Exception as e:
+            except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
                 logger.warning("[Logout] 撤销刷新令牌失败（不影响登出）: %s", e)
         # Bearer token 也尝试撤销
         auth_header = request.headers.get('authorization', '')
@@ -433,7 +359,7 @@ async def api_refresh_token(
         # 类型校验（type == 'refresh'）由 _decode_jwt_token 的 expected_type 参数统一处理
         payload = _decode_jwt_token(refresh_token, expected_type='refresh')
     except HTTPException:
-        raise HTTPException(status_code=401, detail="刷新令牌无效或已过期")
+        raise HTTPException(status_code=401, detail="刷新令牌无效或已过期") from None
 
     jti = payload.get("jti")
     if await is_token_revoked(jti):

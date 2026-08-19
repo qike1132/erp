@@ -97,8 +97,10 @@ class DBHealthChecker:
         """更新连接池 Prometheus 指标"""
         try:
             from fastapi_app.core.metrics import (
-                DB_POOL_SIZE, DB_POOL_CHECKED_OUT,
-                DB_POOL_OVERFLOW, DB_POOL_CHECKEDIN,
+                DB_POOL_CHECKED_OUT,
+                DB_POOL_CHECKEDIN,
+                DB_POOL_OVERFLOW,
+                DB_POOL_SIZE,
             )
             pool = engine.pool
             DB_POOL_SIZE.labels(pool='async_main').set(pool.size())
@@ -109,12 +111,12 @@ class DBHealthChecker:
             from fastapi_app.core.database import _read_engine
             if _read_engine is not None:
                 rpool = _read_engine.pool
-                DB_POOL_SIZE.labels(pool='async_read').set(rpool.size())
-                DB_POOL_CHECKED_OUT.labels(pool='async_read').set(rpool.checkedout())
-                DB_POOL_OVERFLOW.labels(pool='async_read').set(rpool.overflow())
-                DB_POOL_CHECKEDIN.labels(pool='async_read').set(rpool.checkedin())
-        except Exception:  # defensive: metrics collection failure must not interrupt health checks
-            pass
+                DB_POOL_SIZE.labels(pool='async_read').set(rpool.size())  # type: ignore[attr-defined]
+                DB_POOL_CHECKED_OUT.labels(pool='async_read').set(rpool.checkedout())  # type: ignore[attr-defined]
+                DB_POOL_OVERFLOW.labels(pool='async_read').set(rpool.overflow())  # type: ignore[attr-defined]
+                DB_POOL_CHECKEDIN.labels(pool='async_read').set(rpool.checkedin())  # type: ignore[attr-defined]
+        except Exception:  # defensive: metrics collection failure must not interrupt health checks  # noqa: S110  # nosec B110
+            pass  # defensive: 异常静默处理,不影响主流程
 
     async def _check_async_engine(self, engine) -> bool:
         """检查异步引擎连接"""
@@ -137,10 +139,10 @@ class DBHealthChecker:
             if async_engine is not None:
                 async_pool = async_engine.pool
                 status["async_pool"] = {
-                    "size": async_pool.size(),
-                    "checked_in": async_pool.checkedin(),
-                    "checked_out": async_pool.checkedout(),
-                    "overflow": async_pool.overflow(),
+                    "size": async_pool.size(),  # type: ignore[attr-defined]
+                    "checked_in": async_pool.checkedin(),  # type: ignore[attr-defined]
+                    "checked_out": async_pool.checkedout(),  # type: ignore[attr-defined]
+                    "overflow": async_pool.overflow(),  # type: ignore[attr-defined]
                 }
             else:
                 status["async_pool"] = {"status": "not_initialized"}

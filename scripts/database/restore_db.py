@@ -34,7 +34,7 @@ env['PGPASSWORD'] = DB_PASSWORD
 
 def terminate_connections():
     try:
-        proc = subprocess.run(
+        subprocess.run(
             ['psql', '-h', DB_HOST, '-p', DB_PORT, '-U', DB_USER, '-d', 'postgres',
              '-c', f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
                    f"WHERE datname = '{DB_NAME}' AND pid <> pg_backend_pid();"],

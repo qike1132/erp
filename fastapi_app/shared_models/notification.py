@@ -5,7 +5,7 @@ MVP 阶段仅做系统内消息，后续可扩展 channel 分发器接入 FCM/�
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
@@ -44,13 +44,13 @@ class Notification(Base):
     is_read: Mapped[bool] = mapped_column(Boolean, default=False, server_default='false', nullable=False, comment='是否已读')
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         nullable=False,
         comment='创建时间',
     )
 
-    user: Mapped["User"] = relationship('User')
-    order: Mapped["Order | None"] = relationship('Order')
+    user: Mapped[User] = relationship('User')
+    order: Mapped[Order | None] = relationship('Order')
 
     def to_dict(self) -> dict:
         """返回所有字段的字典表示"""

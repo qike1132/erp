@@ -5,6 +5,7 @@ import { usePerfMark } from '@/composables/usePerfMark'
 import { setAccessToken } from '@/utils/secureStorage'
 import { getErrorMessage } from '@/types/errors'
 import { preloadEcharts } from '@/utils/echartsPreload'
+import { devLog } from '@/utils/devLog'
 
 /**
  * 登录页共享逻辑（PC / Mobile 复用）
@@ -61,7 +62,7 @@ export function useLogin() {
       })
       // 登录成功清除贝乐未确认订单弹窗标记，实现「每登录会话弹一次」
       sessionStorage.removeItem('beile_confirm_popup_shown')
-      console.log('[Login] API 响应成功, has_user:', !!res.user)
+      devLog('[Login] API 响应成功, has_user:', !!res.user)
       perf.markEnd('auth-start')
       perf.measure('auth-api', 'auth-start')
       perf.mark('init-start')
@@ -76,10 +77,10 @@ export function useLogin() {
       // 登录接口返回了用户信息时，直接写入 store（避免登录后再 GET /auth/me）
       if (res.user) {
         authStore.setUserInfo(res.user)
-        console.log('[Login] 已通过登录响应设置用户信息, username:', res.user.username)
+        devLog('[Login] 已通过登录响应设置用户信息, username:', res.user.username)
       }
       await authStore.init(true)
-      console.log('[Login] authStore.init 完成, loaded:', authStore.loaded, 'isLoggedIn:', authStore.isLoggedIn)
+      devLog('[Login] authStore.init 完成, loaded:', authStore.loaded, 'isLoggedIn:', authStore.isLoggedIn)
       perf.markEnd('init-start')
       perf.measure('auth-store-init', 'init-start')
       const defaultRedirect = isCapacitor ? '/' : '/dashboard'
@@ -87,7 +88,7 @@ export function useLogin() {
       const redirect = (typeof rawRedirect === 'string' && rawRedirect.startsWith('/') && !rawRedirect.startsWith('//'))
         ? rawRedirect
         : defaultRedirect
-      console.log('[Login] 跳转到:', redirect)
+      devLog('[Login] 跳转到:', redirect)
       loginSuccess = true
       router.push(redirect)
     } catch (err: unknown) {

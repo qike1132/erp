@@ -1,7 +1,7 @@
 """皮套入库模型"""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
@@ -24,11 +24,11 @@ class CaseStockIn(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     stockin_no: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
-    stockin_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+    stockin_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
     customer: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     case_id: Mapped[int] = mapped_column(Integer, ForeignKey('case.id'), nullable=False, index=True)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     note: Mapped[str | None] = mapped_column(Text)
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 
-    case: Mapped["Case"] = relationship('Case', backref='stockins')
+    case: Mapped[Case] = relationship('Case', backref='stockins')

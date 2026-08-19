@@ -4,6 +4,7 @@
  * 运行方式: 在浏览器控制台执行 import('/src/utils/perfBenchmark.ts')
  * 或在 Vitest 中 import { runBenchmark } from '@/utils/perfBenchmark'
  */
+import { devLog } from '@/utils/devLog'
 
 interface BenchResult {
   label: string
@@ -48,7 +49,7 @@ function bench(label: string, fn: () => void | Promise<void>, iterations = 10): 
         }
         results.push(result)
         const status = result.median < 200 ? '✓' : '✗'
-        console.log(`${status} ${label}: avg=${result.avg.toFixed(1)}ms median=${result.median.toFixed(1)}ms p95=${result.p95.toFixed(1)}ms`)
+        devLog(`${status} ${label}: avg=${result.avg.toFixed(1)}ms median=${result.median.toFixed(1)}ms p95=${result.p95.toFixed(1)}ms`)
         resolve(result)
       }
     }
@@ -70,7 +71,7 @@ function generateMockItems(count: number) {
 }
 
 async function benchDOMRendering() {
-  console.log('\n=== DOM 渲染性能 ===')
+  devLog('\n=== DOM 渲染性能 ===')
 
   const container = document.createElement('div')
   container.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:800px;height:600px;overflow:auto;'
@@ -97,7 +98,7 @@ async function benchDOMRendering() {
 }
 
 async function benchDataProcessing() {
-  console.log('\n=== 数据处理性能 ===')
+  devLog('\n=== 数据处理性能 ===')
 
   for (const count of [1000, 5000, 10000, 20000, 50000]) {
     const items = generateMockItems(count)
@@ -125,7 +126,7 @@ async function benchDataProcessing() {
 }
 
 async function benchVirtualScrollCalc() {
-  console.log('\n=== 虚拟滚动计算性能 ===')
+  devLog('\n=== 虚拟滚动计算性能 ===')
 
   const ITEM_HEIGHT = 48
   const CONTAINER_HEIGHT = 600
@@ -145,7 +146,7 @@ async function benchVirtualScrollCalc() {
 }
 
 async function benchMemoryUsage() {
-  console.log('\n=== 内存占用 ===')
+  devLog('\n=== 内存占用 ===')
 
   for (const count of [1000, 5000, 10000, 20000, 50000]) {
     const items = generateMockItems(count)
@@ -154,27 +155,27 @@ async function benchMemoryUsage() {
       const before = (performance as unknown as PerformanceWithMemory).memory!.usedJSHeapSize
       const copy = JSON.parse(JSON.stringify(items))
       const after = (performance as unknown as PerformanceWithMemory).memory!.usedJSHeapSize
-      console.log(`  Memory:${count}_items: ${((after - before) / 1024 / 1024).toFixed(2)}MB`)
+      devLog(`  Memory:${count}_items: ${((after - before) / 1024 / 1024).toFixed(2)}MB`)
       void copy
     } else {
       const jsonSize = new Blob([JSON.stringify(items)]).size
-      console.log(`  Memory:${count}_items: ${(jsonSize / 1024 / 1024).toFixed(2)}MB (JSON size)`)
+      devLog(`  Memory:${count}_items: ${(jsonSize / 1024 / 1024).toFixed(2)}MB (JSON size)`)
     }
   }
 }
 
 export async function runBenchmark() {
-  console.log('前端性能基准测试')
-  console.log('='.repeat(60))
+  devLog('前端性能基准测试')
+  devLog('='.repeat(60))
 
   await benchDOMRendering()
   await benchDataProcessing()
   await benchVirtualScrollCalc()
   await benchMemoryUsage()
 
-  console.log('\n=== 汇总 ===')
+  devLog('\n=== 汇总 ===')
   const passed = results.filter((r) => r.median < 200).length
-  console.log(`通过: ${passed}/${results.length} (目标: median < 200ms)`)
+  devLog(`通过: ${passed}/${results.length} (目标: median < 200ms)`)
 
   return results
 }

@@ -1,6 +1,7 @@
-import psycopg2
 import os
 from datetime import datetime
+
+import psycopg2
 
 # 数据库配置
 db_config = {

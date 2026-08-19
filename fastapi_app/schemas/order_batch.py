@@ -77,6 +77,7 @@ class BatchQueryItem(BaseModel):
     batch_no: str | None = None
     batch_completed_at: str | None = None
     is_locked: bool | None = None
+    record_type: str | None = None
 
     model_config = {'from_attributes': True}
 

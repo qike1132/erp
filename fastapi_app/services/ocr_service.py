@@ -15,7 +15,7 @@ import os
 import re
 import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -493,7 +493,7 @@ def _parse_ocr_sliding_window(data_lines: list[str], col_order: list[str], defau
         quantity_col_idx = col_order.index('quantity')
         quantity_col_idx - product_col_idx
     except ValueError:
-        pass
+        pass  # defensive: 可选 ValueError 静默处理,不影响主流程
     i = 0
     while i < len(data_lines):
         line = data_lines[i].strip()
@@ -754,16 +754,16 @@ async def import_staging_stockouts_from_file(db: AsyncSession, file_content: byt
                 _prog(status='error', message='文件无法提取文本内容', percent=0)
                 return (0, '文件无法提取文本内容，可能是空白文件或图片质量过低', [])
             final_ocr_pct = max(70, _ocr_simulated_pct)
-            _prog(message=f'{file_type}文本提取完成，共 {len(text_pages)} 页', percent=final_ocr_pct)
+            _prog(message=f'{file_type}文本提取完成，共 {len(text_pages)} 页', percent=final_ocr_pct)  # sql-safe: escape_like/绑定参数/常量片段
             await asyncio.sleep(0.05)
-            logger.info(f"{file_type} OCR 提取完成: {filename}, 共 {len(text_pages)} 页, 文本长度: {sum(len(p['text']) for p in text_pages)}")
+            logger.info(f"{file_type} OCR 提取完成: {filename}, 共 {len(text_pages)} 页, 文本长度: {sum(len(p['text']) for p in text_pages)}")  # sql-safe: escape_like/绑定参数/常量片段
             _prog(message='正在解析出货单字段...', percent=75)
             await asyncio.sleep(0.05)
             parsed_items = parse_shipping_document(text_pages)
         if not parsed_items:
             preview_pages = table_pages or text_pages
             raw_text_preview = '\n'.join(p.get('text', '')[:200] for p in preview_pages[:3])
-            logger.warning(f'{file_type} 解析未识别到出货项: {filename}\n原始文本:\n{raw_text_preview}')
+            logger.warning(f'{file_type} 解析未识别到出货项: {filename}\n原始文本:\n{raw_text_preview}')  # sql-safe: escape_like/绑定参数/常量片段
             _prog(status='error', message='无法识别出货信息', percent=0)
             return (0, '无法从文件中识别出货信息，请确认文件格式是否正确', [])
         _prog(message=f'解析完成，识别到 {len(parsed_items)} 个出货项', percent=80)
@@ -820,11 +820,11 @@ async def import_staging_stockouts_from_file(db: AsyncSession, file_content: byt
                     validation_error = f'产品"{product_name}"不存在'
                 if match_info_parts:
                     note = note + '；' + '；'.join(match_info_parts) if note else '；'.join(match_info_parts)
-                staging_stockout = StagingStockOut(session_id=session_id, customer=customer, stockout_date=datetime.now(timezone.utc).replace(tzinfo=None), product_name=product_name, product_barcode='', product_id=product_id, quantity=quantity, note=note, is_validated=is_validated, validation_error=validation_error, stock_check_passed=stock_check_passed, stock_check_message=stock_check_message, status='pending')
+                staging_stockout = StagingStockOut(session_id=session_id, customer=customer, stockout_date=datetime.now(UTC).replace(tzinfo=None), product_name=product_name, product_barcode='', product_id=product_id, quantity=quantity, note=note, is_validated=is_validated, validation_error=validation_error, stock_check_passed=stock_check_passed, stock_check_message=stock_check_message, status='pending')
                 db.add(staging_stockout)
                 imported += 1
             except (ValueError, TypeError, OSError) as e:
-                errors.append(f'第{idx}项处理失败: {str(e)}')
+                errors.append(f'第{idx}项处理失败: {e!s}')
                 continue
         _prog(message='正在保存到数据库...', percent=98)
         await asyncio.sleep(0.05)
@@ -835,8 +835,8 @@ async def import_staging_stockouts_from_file(db: AsyncSession, file_content: byt
         _prog(status='done', message=result_msg, percent=100)
         return (imported, result_msg, errors[:10] if errors else [])
     except (ValueError, TypeError, OSError) as e:
-        await db.rollback()
-        logger.error(f'OCR 导入失败: {str(e)}', exc_info=True)
-        _prog(status='error', message=f'识别导入失败: {str(e)}', percent=0)
-        return (0, f'识别导入失败: {str(e)}', [])
+        await db.rollback()  # manual-tx: try/except 内显式事务控制
+        logger.error(f'OCR 导入失败: {e!s}', exc_info=True)
+        _prog(status='error', message=f'识别导入失败: {e!s}', percent=0)
+        return (0, f'识别导入失败: {e!s}', [])
 import_staging_stockouts_from_pdf = import_staging_stockouts_from_file

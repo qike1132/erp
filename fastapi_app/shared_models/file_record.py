@@ -4,7 +4,7 @@
 P2-1：static/uploads 迁移至 MinIO/S3 后，数据库仅保存文件元数据，
 实际二进制数据存放在对象存储或本地文件系统中。
 """
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -27,7 +27,7 @@ class FileRecord(Base):
     extra: Mapped[str | None] = mapped_column(Text, nullable=True, comment='额外 JSON 元数据')
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         comment='创建时间',
     )
 

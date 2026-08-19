@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
-from datetime import date, datetime, time as time_type
+from datetime import date, datetime
+from datetime import time as time_type
 from decimal import Decimal
 from uuid import UUID
 
@@ -61,7 +63,7 @@ def deserialize_value(val, col_type):
                 try:
                     return datetime.fromisoformat(val)
                 except ValueError:
-                    pass
+                    pass  # defensive: 可选 ValueError 静默处理,不影响主流程
         return val
     if isinstance(col_type, Date):
         if isinstance(val, str):
@@ -71,7 +73,7 @@ def deserialize_value(val, col_type):
                 try:
                     return date.fromisoformat(val)
                 except ValueError:
-                    pass
+                    pass  # defensive: 可选 ValueError 静默处理,不影响主流程
         return val
     if isinstance(col_type, Time):
         if isinstance(val, str):
@@ -81,7 +83,7 @@ def deserialize_value(val, col_type):
                 try:
                     return time_type.fromisoformat(val)
                 except ValueError:
-                    pass
+                    pass  # defensive: 可选 ValueError 静默处理,不影响主流程
         return val
     if isinstance(col_type, Boolean):
         if isinstance(val, (int, float)):
@@ -128,7 +130,7 @@ async def execute_legacy_backup_to_bytes(user, remark: str, db: AsyncSession) ->
             qtname = quote_table(name)
             nested = await db.begin_nested()
             try:
-                result = await db.execute(text(f'SELECT * FROM {qtname}'))  # nosec B608 — qtname 经 quote_table 白名单校验
+                result = await db.execute(text(f'SELECT * FROM {qtname}'))  # nosec B608 — qtname 经 quote_table 白名单校验; batch-loop: 逐表备份/恢复,无法批量; select-all: backup/restore 需要全表动态导出
                 rows = result.mappings().all()
                 columns = list(result.keys())
                 serialized_rows = []
@@ -138,9 +140,9 @@ async def execute_legacy_backup_to_bytes(user, remark: str, db: AsyncSession) ->
                         serialized_row[col] = serialize_value(row[col])
                     serialized_rows.append(serialized_row)
                 backup_data['tables'][name] = {'columns': columns, 'rows': serialized_rows, 'count': len(serialized_rows)}
-                await nested.commit()
+                await nested.commit()  # manual-tx: savepoint 嵌套事务管理
             except (SQLAlchemyError, ValueError, OSError) as e:
-                await nested.rollback()
+                await nested.rollback()  # manual-tx: savepoint 嵌套事务管理
                 logger.error('备份表 %s 失败: %s', name, e)
                 backup_data['tables'][name] = {'error': str(e), 'count': 0, 'rows': []}
         except (SQLAlchemyError, ValueError, OSError) as e:
@@ -149,7 +151,7 @@ async def execute_legacy_backup_to_bytes(user, remark: str, db: AsyncSession) ->
     return json.dumps(backup_data, ensure_ascii=False, indent=2).encode('utf-8')
 
 
-async def restore_database_from_json(zf, db: AsyncSession, task_id: str = None) -> dict:
+async def restore_database_from_json(zf, db: AsyncSession, task_id: str | None = None) -> dict:
     """从 dump.json 恢复数据库（Legacy JSON 格式）"""
     try:
         json_bytes = zf.read('database/dump.json')
@@ -167,10 +169,11 @@ async def restore_database_from_json(zf, db: AsyncSession, task_id: str = None) 
     }
 
 
-async def restore_legacy_json(backup_data: dict, db: AsyncSession, task_id: str = None) -> dict:
+async def restore_legacy_json(backup_data: dict, db: AsyncSession, task_id: str | None = None) -> dict:
     """从 Legacy JSON 格式备份恢复数据库 (v1.0)"""
-    from fastapi_app.shared_models import Base
     from fastapi_app.core.backup_progress import update_progress as _upd_prog
+    from fastapi_app.shared_models import Base
+
     from .verify import verify_restore
 
     async def _report(sub: float, detail: str = ''):
@@ -206,10 +209,10 @@ async def restore_legacy_json(backup_data: dict, db: AsyncSession, task_id: str 
             qtname = quote_table(table_name)  # REV-08
             nested = await db.begin_nested()
             try:
-                await db.execute(text(f'DELETE FROM {qtname}'))  # nosec
-                await nested.commit()
+                await db.execute(text(f'DELETE FROM {qtname}'))  # nosec; batch-loop: 逐表备份/恢复,无法批量 # sql-safe: escape_like/绑定参数/常量片段
+                await nested.commit()  # manual-tx: savepoint 嵌套事务管理
             except (SQLAlchemyError, ValueError, OSError) as e:
-                await nested.rollback()
+                await nested.rollback()  # manual-tx: savepoint 嵌套事务管理
                 logger.warning(f'清空表 {table_name} 失败（外键约束）: {e}')
 
         processed_tables = 0
@@ -247,17 +250,17 @@ async def restore_legacy_json(backup_data: dict, db: AsyncSession, task_id: str 
                         update_cols = [c for c in valid_cols if c not in pk_cols]
                         if pk_cols and update_cols:
                             update_str = ', '.join(f'"{c}" = EXCLUDED."{c}"' for c in update_cols)
-                            await db.execute(text(
+                            await db.execute(text(  # batch-loop: 逐表备份/恢复,无法批量
                                 f'INSERT INTO {qtname} ({col_str}) VALUES ({val_str}) ON CONFLICT ({", ".join(pk_cols)}) DO UPDATE SET {update_str}'  # nosec B608 — qtname 经 quote_table 白名单校验
                             ), params)
                         else:
-                            await db.execute(text(
+                            await db.execute(text(  # batch-loop: 逐表备份/恢复,无法批量
                                 f'INSERT INTO {qtname} ({col_str}) VALUES ({val_str}) ON CONFLICT DO NOTHING'  # nosec B608 — qtname 经 quote_table 白名单校验
                             ), params)
                         inserted += 1
-                    await nested.commit()
+                    await nested.commit()  # manual-tx: savepoint 嵌套事务管理
                 except (SQLAlchemyError, ValueError, TypeError) as e:
-                    await nested.rollback()
+                    await nested.rollback()  # manual-tx: savepoint 嵌套事务管理
                     batch_errors.append(f'批次 {batch_start // BATCH_SIZE + 1}: {e}')
                     logger.warning(f'恢复表 {table_name} 批次 {batch_start // BATCH_SIZE + 1} 失败: {e}')
             if batch_errors:
@@ -304,15 +307,13 @@ async def restore_legacy_json(backup_data: dict, db: AsyncSession, task_id: str 
                 verification = await verify_restore(verify_db or db, manifest_tables)
             finally:
                 if verify_db is not None:
-                    try:
+                    with contextlib.suppress(OSError, ValueError, SQLAlchemyError):
                         await verify_db.close()
-                    except (OSError, ValueError, SQLAlchemyError):
-                        pass
         except (SQLAlchemyError, ValueError, OSError) as e:
             logger.warning(f'恢复后验证失败: {e}')
             verification = {'overall_pass': False, 'error': str(e)}
     except (SQLAlchemyError, ValueError, OSError) as e:
-        await db.rollback()
+        await db.rollback()  # manual-tx: try/except 内显式事务控制
         raise RestoreError(f'恢复过程中出错: {e}') from e
 
     result_dict = {

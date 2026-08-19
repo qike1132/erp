@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete
@@ -22,13 +22,12 @@ from fastapi_app.core.deps import get_current_user_id
 from fastapi_app.main import app
 from fastapi_app.shared_models import Order, Product, StockIn, StockOut
 
-
-TS = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+TS = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
 
 
 async def _seed(session: AsyncSession) -> dict[str, int]:
     """插入最小 mock 数据并返回主键，供测试后清理。"""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     product = Product(
         name=f"测试产品-{TS}",
@@ -116,7 +115,7 @@ async def main() -> None:
                     print(resp.json())
                     assert resp.status_code == 200, f"{ep} 返回 {resp.status_code}"
                     assert resp.headers.get("API-Version") == "2.0.0", "缺少 API-Version 头"
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     print(f"请求失败: {exc}")
         print("\n所有 /api/v2/dashboard 端点 mock 测试通过")
     finally:

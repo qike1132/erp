@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import datetime, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
@@ -37,10 +36,10 @@ from conftest import TEST_DATABASE_URL
 
 from fastapi_app.core.exceptions import BusinessError, ConflictError, NotFoundError
 from fastapi_app.services.customer_sampling_service import (
+    _SNAPSHOT_FIELDS,
     _compute_diff,
     _next_version,
     _normalize_value,
-    _SNAPSHOT_FIELDS,
     create_part,
     create_project,
     create_version,
@@ -57,7 +56,6 @@ from fastapi_app.services.customer_sampling_service import (
     update_project_status,
     upload_project_image,
 )
-
 
 # ============================================================
 # 1. 纯函数测试 — _next_version
@@ -469,7 +467,6 @@ async def cs_db():
     service 层用 flush() 不 commit()，事务由端点层 db_transaction 控制。
     首次运行时通过 Base.metadata.create_all 幂等创建缺失表（开发环境安全）。
     """
-    from fastapi_app.core.config import settings
     from fastapi_app.shared_models import Base
 
     engine = create_async_engine(TEST_DATABASE_URL, echo=False, pool_pre_ping=True)
@@ -525,8 +522,8 @@ class TestServiceIntegration:
     async def test_grouped_list_with_unclassified(self, cs_db):
         """分组查询：未关联版师的项目归入"未分类"分组"""
         # 创建无版师的项目
-        r1 = await create_project(cs_db, product_name='未分类产品1')
-        r2 = await create_project(cs_db, product_name='未分类产品2')
+        await create_project(cs_db, product_name='未分类产品1')
+        await create_project(cs_db, product_name='未分类产品2')
         await cs_db.flush()
 
         result = await get_grouped_list(cs_db)
@@ -543,9 +540,9 @@ class TestServiceIntegration:
         await cs_db.flush()
 
         # 创建关联版师的项目
-        r1 = await create_project(cs_db, product_name='版师产品1', pattern_maker_id=maker.id)
+        await create_project(cs_db, product_name='版师产品1', pattern_maker_id=maker.id)
         # 创建无版师项目
-        r2 = await create_project(cs_db, product_name='未分类产品')
+        await create_project(cs_db, product_name='未分类产品')
         await cs_db.flush()
 
         result = await get_grouped_list(cs_db)
@@ -561,9 +558,9 @@ class TestServiceIntegration:
 
     async def test_grouped_list_keyword_search(self, cs_db):
         """分组查询：关键词搜索（序列号/产品名）"""
-        r1 = await create_project(cs_db, product_name='毛绒玩具A')
-        r2 = await create_project(cs_db, product_name='毛绒玩具B')
-        r3 = await create_project(cs_db, product_name='其他产品')
+        await create_project(cs_db, product_name='毛绒玩具A')
+        await create_project(cs_db, product_name='毛绒玩具B')
+        await create_project(cs_db, product_name='其他产品')
         await cs_db.flush()
 
         result = await get_grouped_list(cs_db, keyword='毛绒玩具')
@@ -573,7 +570,7 @@ class TestServiceIntegration:
 
     async def test_grouped_list_default_in_progress(self, cs_db):
         """分组查询：status 缺省默认只返回进行中项目（兜底，避免混入已完成项目）"""
-        r1 = await create_project(cs_db, product_name='进行中项目')
+        await create_project(cs_db, product_name='进行中项目')
         r2 = await create_project(cs_db, product_name='已完成项目')
         await cs_db.flush()
         await update_project_status(cs_db, r2['id'], status='completed')
@@ -603,8 +600,9 @@ class TestServiceIntegration:
         assert len(result['sequence_no'].split('-')) == 3
 
         # 验证 T1 基线版本自动创建
-        from fastapi_app.shared_models import CustomerSamplingFabricVersion
         from sqlalchemy import select
+
+        from fastapi_app.shared_models import CustomerSamplingFabricVersion
         ver_result = await cs_db.execute(
             select(CustomerSamplingFabricVersion)
             .where(CustomerSamplingFabricVersion.project_id == result['id'])
@@ -816,8 +814,9 @@ class TestServiceIntegration:
         await cs_db.flush()
 
         # 查询 T1
-        from fastapi_app.shared_models import CustomerSamplingFabricVersion
         from sqlalchemy import select
+
+        from fastapi_app.shared_models import CustomerSamplingFabricVersion
         ver_result = await cs_db.execute(
             select(CustomerSamplingFabricVersion)
             .where(CustomerSamplingFabricVersion.project_id == r['id'])
@@ -839,7 +838,7 @@ class TestServiceIntegration:
         # 新增部位 → T2
         await create_part(cs_db, r['id'], part_name='身体', fabric_name='绒布', unit_price=10)
         await cs_db.flush()
-        v2 = await create_version(cs_db, r['id'])
+        await create_version(cs_db, r['id'])
         await cs_db.flush()
 
         # 修改部位布料 → T3
@@ -870,7 +869,7 @@ class TestServiceIntegration:
         await create_part(cs_db, r['id'], part_name='身体')
         await create_part(cs_db, r['id'], part_name='头部')
         await cs_db.flush()
-        v2 = await create_version(cs_db, r['id'])
+        await create_version(cs_db, r['id'])
         await cs_db.flush()
 
         # 删除"头部" → T3
@@ -961,8 +960,8 @@ class TestServiceIntegration:
         maker = await _create_pattern_maker(cs_db, '筛选版师')
         await cs_db.flush()
 
-        r1 = await create_project(cs_db, product_name='版师项目', pattern_maker_id=maker.id)
-        r2 = await create_project(cs_db, product_name='未分类项目')
+        await create_project(cs_db, product_name='版师项目', pattern_maker_id=maker.id)
+        await create_project(cs_db, product_name='未分类项目')
         await cs_db.flush()
 
         result = await get_grouped_list(cs_db, pattern_maker_id=maker.id)

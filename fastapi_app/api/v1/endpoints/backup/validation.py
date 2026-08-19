@@ -17,7 +17,6 @@ import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -86,6 +85,166 @@ async def run_integrity_check(user: User = Depends(require_backup_permission('ru
 # ---------------------------------------------------------------------------
 # GET /health
 # ---------------------------------------------------------------------------
+async def _check_backup_dir() -> tuple[dict, list[str]]:
+    """检查备份目录可写性"""
+    issues: list[str] = []
+    try:
+        backup_dir = backup_service.BACKUP_DIR
+        test_file = backup_dir / ".health_check"
+        if not backup_dir.exists():
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            return {'status': 'warning', 'message': '备份目录不存在，已自动创建', 'path': str(backup_dir)}, issues
+        try:
+            test_file.touch()
+            test_file.unlink()
+            return {'status': 'healthy', 'message': '备份目录可写', 'path': str(backup_dir), 'writable': True}, issues
+        except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
+            issues.append(f'备份目录不可写: {e!s}')
+            return {'status': 'unhealthy', 'message': f'备份目录不可写: {e!s}', 'path': str(backup_dir), 'writable': False}, issues
+    except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
+        issues.append(f'备份目录检查失败: {e!s}')
+        return {'status': 'unhealthy', 'message': f'备份目录检查失败: {e!s}', 'error': str(e)}, issues
+
+
+async def _check_database() -> tuple[dict, list[str]]:
+    """检查数据库连接状态"""
+    issues: list[str] = []
+    try:
+        from fastapi_app.services import backup_query_service
+        db_ok = await backup_query_service.check_database_alive()
+        if not db_ok:
+            issues.append('数据库连接失败')
+        return {'status': 'healthy' if db_ok else 'unhealthy', 'message': '数据库连接正常' if db_ok else '数据库连接失败', 'connected': db_ok}, issues
+    except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
+        issues.append(f'数据库连接检查失败: {e!s}')
+        return {'status': 'unhealthy', 'message': f'数据库连接检查失败: {e!s}', 'error': str(e)}, issues
+
+
+async def _check_redis() -> tuple[dict, list[str]]:
+    """检查 Redis 连接状态"""
+    issues: list[str] = []
+    try:
+        from utils.redis_cache import redis_cache
+        redis_ok = False
+        try:
+            redis_client = redis_cache.redis_client
+            if redis_client:
+                redis_ok = await redis_client.ping()
+            else:
+                issues.append('Redis客户端未初始化')
+        except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
+            logger.warning(f'Redis ping 失败: {e}')
+        if not redis_ok:
+            issues.append('Redis连接不可用，进度追踪功能可能受限')
+        return {'status': 'healthy' if redis_ok else 'warning', 'message': 'Redis连接正常' if redis_ok else 'Redis连接不可用（不影响核心功能）', 'connected': redis_ok}, issues
+    except ImportError:
+        issues.append('Redis模块未安装')
+        return {'status': 'warning', 'message': 'Redis模块未安装，进度追踪功能不可用', 'connected': False}, issues
+    except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
+        issues.append(f'Redis连接检查失败: {e!s}')
+        return {'status': 'warning', 'message': f'Redis连接检查失败: {e!s}', 'error': str(e)}, issues
+
+
+def _check_last_backup() -> tuple[dict, list[str]]:  # log-context: internal helper 无请求上下文
+    """检查最近备份时间"""
+    issues: list[str] = []
+    try:
+        backup_files = backup_service.list_backup_files()
+        if backup_files:
+            latest_backup = max(backup_files, key=lambda x: x.get('mtime', 0))
+            latest_time = datetime.fromtimestamp(latest_backup.get('mtime', 0))
+            hours_since = (datetime.now() - latest_time).total_seconds() / 3600
+            if hours_since > 24:
+                issues.append(f'最近备份时间超过24小时（{round(hours_since, 1)}小时前）')
+            return {
+                'status': 'healthy' if hours_since <= 24 else 'warning',
+                'message': f'最近备份时间: {latest_time.strftime("%Y-%m-%d %H:%M:%S")}',
+                'latest_backup_time': latest_time.isoformat(),
+                'hours_since_last_backup': round(hours_since, 2),
+                'within_24h': hours_since <= 24,
+            }, issues
+        issues.append('未找到任何备份文件')
+        return {'status': 'warning', 'message': '未找到备份文件', 'latest_backup_time': None, 'hours_since_last_backup': None, 'within_24h': False}, issues
+    except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
+        issues.append(f'检查最近备份时间失败: {e!s}')
+        return {'status': 'unhealthy', 'message': f'检查最近备份时间失败: {e!s}', 'error': str(e)}, issues
+
+
+def _check_backup_integrity() -> tuple[dict, list[str]]:  # log-context: internal helper 无请求上下文
+    """抽样检查备份文件完整性"""
+    import random
+    issues: list[str] = []
+    try:
+        backup_files = backup_service.list_backup_files()
+        if not backup_files:
+            return {'status': 'warning', 'message': '没有备份文件可检查', 'sample_size': 0, 'results': []}, issues
+        sample_files = random.sample(backup_files, min(3, len(backup_files)))  # nosec B311
+        integrity_results = []
+        for file_info in sample_files:
+            filename = file_info.get('name', '')
+            filepath = backup_service.BACKUP_DIR / filename
+            try:
+                if filepath.exists() and filepath.is_file():
+                    integrity_results.append({'filename': filename, 'status': 'healthy', 'size': filepath.stat().st_size, 'readable': True, 'message': '文件完整可读'})
+                else:
+                    integrity_results.append({'filename': filename, 'status': 'unhealthy', 'size': 0, 'readable': False, 'message': '文件不存在或不是普通文件'})
+                    issues.append(f'备份文件异常: {filename}')
+            except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
+                integrity_results.append({'filename': filename, 'status': 'unhealthy', 'size': 0, 'readable': False, 'message': f'文件检查失败: {e!s}', 'error': str(e)})
+                issues.append(f'备份文件检查失败 {filename}: {e!s}')
+        return {
+            'status': 'healthy' if all(r['status'] == 'healthy' for r in integrity_results) else 'degraded',
+            'message': f'抽样检查了 {len(integrity_results)} 个备份文件',
+            'sample_size': len(integrity_results),
+            'results': integrity_results,
+        }, issues
+    except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
+        issues.append(f'备份文件完整性检查失败: {e!s}')
+        return {'status': 'unhealthy', 'message': f'备份文件完整性检查失败: {e!s}', 'error': str(e)}, issues
+
+
+def _check_disk_space() -> tuple[dict, list[str]]:
+    """检查磁盘空间"""
+    import shutil
+    issues: list[str] = []
+    try:
+        backup_dir = backup_service.BACKUP_DIR
+        if not backup_dir.exists():
+            return {'status': 'warning', 'message': '备份目录不存在，无法检查磁盘空间', 'sufficient': None}, issues
+        disk_usage = shutil.disk_usage(backup_dir)
+        total_gb = disk_usage.total / (1024**3)
+        used_gb = disk_usage.used / (1024**3)
+        free_gb = disk_usage.free / (1024**3)
+        free_percent = (disk_usage.free / disk_usage.total) * 100
+        if free_percent <= 5:
+            issues.append(f'磁盘空间严重不足: 仅剩 {free_percent:.1f}% 可用空间')
+        elif free_percent <= 10:
+            issues.append(f'磁盘空间不足: 仅剩 {free_percent:.1f}% 可用空间')
+        return {
+            'status': 'healthy' if free_percent > 10 else 'warning',
+            'message': f'磁盘空间: {free_gb:.1f}GB 可用 ({free_percent:.1f}%)',
+            'total_gb': round(total_gb, 2),
+            'used_gb': round(used_gb, 2),
+            'free_gb': round(free_gb, 2),
+            'free_percent': round(free_percent, 2),
+            'sufficient': free_percent > 10,
+        }, issues
+    except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
+        issues.append(f'磁盘空间检查失败: {e!s}')
+        return {'status': 'warning', 'message': f'磁盘空间检查失败: {e!s}', 'error': str(e)}, issues
+
+
+def _aggregate_health_status(checks: dict) -> str:
+    """根据各项检查结果聚合总体健康状态"""
+    status_priority = {'unhealthy': 3, 'degraded': 2, 'warning': 1, 'healthy': 0}
+    worst = 'healthy'
+    for check in checks.values():
+        check_status = check.get('status', 'healthy')
+        if status_priority.get(check_status, 0) > status_priority.get(worst, 0):
+            worst = check_status
+    return worst
+
+
 @router.get('/health', response_model=BackupHealthCheckResponse)
 async def health_check(
     user: User = Depends(require_backup_permission('health_check')),
@@ -98,283 +257,36 @@ async def health_check(
     3. Redis连接状态（用于进度追踪）
     4. 最近备份时间（不超过24小时）
     5. 备份文件完整性
+    6. 磁盘空间
     """
-    from datetime import datetime
+    checks: dict = {}
+    issues: list[str] = []
 
-    checks = {}
-    issues = []
-    overall_status = "healthy"
+    checks['backup_dir'], dir_issues = await _check_backup_dir()
+    issues.extend(dir_issues)
 
-    # 1. 检查备份目录可写性
-    try:
-        backup_dir = backup_service.BACKUP_DIR
-        test_file = backup_dir / ".health_check"
+    checks['database'], db_issues = await _check_database()
+    issues.extend(db_issues)
 
-        # 检查目录是否存在
-        if not backup_dir.exists():
-            backup_dir.mkdir(parents=True, exist_ok=True)
-            checks['backup_dir'] = {
-                'status': 'warning',
-                'message': '备份目录不存在，已自动创建',
-                'path': str(backup_dir)
-            }
-        else:
-            # 检查目录可写性
-            try:
-                test_file.touch()
-                test_file.unlink()
-                checks['backup_dir'] = {
-                    'status': 'healthy',
-                    'message': '备份目录可写',
-                    'path': str(backup_dir),
-                    'writable': True
-                }
-            except Exception as e:
-                checks['backup_dir'] = {
-                    'status': 'unhealthy',
-                    'message': f'备份目录不可写: {str(e)}',
-                    'path': str(backup_dir),
-                    'writable': False
-                }
-                issues.append(f'备份目录不可写: {str(e)}')
-                overall_status = "degraded"
-    except Exception as e:
-        checks['backup_dir'] = {
-            'status': 'unhealthy',
-            'message': f'备份目录检查失败: {str(e)}',
-            'error': str(e)
-        }
-        issues.append(f'备份目录检查失败: {str(e)}')
-        overall_status = "unhealthy"
+    checks['redis'], redis_issues = await _check_redis()
+    issues.extend(redis_issues)
 
-    # 2. 检查数据库连接状态
-    try:
-        from fastapi_app.services import backup_query_service
+    checks['last_backup'], backup_issues = _check_last_backup()
+    issues.extend(backup_issues)
 
-        db_ok = await backup_query_service.check_database_alive()
-        checks['database'] = {
-            'status': 'healthy' if db_ok else 'unhealthy',
-            'message': '数据库连接正常' if db_ok else '数据库连接失败',
-            'connected': db_ok
-        }
-        if not db_ok:
-            issues.append('数据库连接失败')
-            overall_status = "unhealthy"
-    except Exception as e:
-        checks['database'] = {
-            'status': 'unhealthy',
-            'message': f'数据库连接检查失败: {str(e)}',
-            'error': str(e)
-        }
-        issues.append(f'数据库连接检查失败: {str(e)}')
-        overall_status = "unhealthy"
+    checks['backup_integrity'], integrity_issues = _check_backup_integrity()
+    issues.extend(integrity_issues)
 
-    # 3. 检查Redis连接状态
-    try:
-        from utils.redis_cache import redis_cache
+    checks['disk_space'], disk_issues = _check_disk_space()
+    issues.extend(disk_issues)
 
-        redis_ok = False
-        try:
-            redis_client = redis_cache.redis_client
-            if redis_client:
-                # 检查Redis连接
-                ping_result = await redis_client.ping()
-                redis_ok = ping_result == True
-            else:
-                redis_ok = False
-                issues.append('Redis客户端未初始化')
-        except Exception as e:
-            redis_ok = False
-            logger.warning(f'Redis ping 失败: {e}')
-
-        checks['redis'] = {
-            'status': 'healthy' if redis_ok else 'warning',
-            'message': 'Redis连接正常' if redis_ok else 'Redis连接不可用（不影响核心功能）',
-            'connected': redis_ok
-        }
-        if not redis_ok:
-            issues.append('Redis连接不可用，进度追踪功能可能受限')
-            if overall_status == "healthy":
-                overall_status = "degraded"
-    except ImportError:
-        checks['redis'] = {
-            'status': 'warning',
-            'message': 'Redis模块未安装，进度追踪功能不可用',
-            'connected': False
-        }
-        issues.append('Redis模块未安装')
-        if overall_status == "healthy":
-            overall_status = "degraded"
-    except Exception as e:
-        checks['redis'] = {
-            'status': 'warning',
-            'message': f'Redis连接检查失败: {str(e)}',
-            'error': str(e)
-        }
-        issues.append(f'Redis连接检查失败: {str(e)}')
-        if overall_status == "healthy":
-            overall_status = "degraded"
-
-    # 4. 检查最近备份时间
-    try:
-        backup_files = backup_service.list_backup_files()
-        if backup_files:
-            # 获取最新的备份文件
-            latest_backup = max(backup_files, key=lambda x: x.get('mtime', 0))
-            latest_time = datetime.fromtimestamp(latest_backup.get('mtime', 0))
-            now = datetime.now()
-            hours_since_last_backup = (now - latest_time).total_seconds() / 3600
-
-            checks['last_backup'] = {
-                'status': 'healthy' if hours_since_last_backup <= 24 else 'warning',
-                'message': f'最近备份时间: {latest_time.strftime("%Y-%m-%d %H:%M:%S")}',
-                'latest_backup_time': latest_time.isoformat(),
-                'hours_since_last_backup': round(hours_since_last_backup, 2),
-                'within_24h': hours_since_last_backup <= 24
-            }
-
-            if hours_since_last_backup > 24:
-                issues.append(f'最近备份时间超过24小时（{round(hours_since_last_backup, 1)}小时前）')
-                if overall_status == "healthy":
-                    overall_status = "degraded"
-        else:
-            checks['last_backup'] = {
-                'status': 'warning',
-                'message': '未找到备份文件',
-                'latest_backup_time': None,
-                'hours_since_last_backup': None,
-                'within_24h': False
-            }
-            issues.append('未找到任何备份文件')
-            if overall_status == "healthy":
-                overall_status = "degraded"
-    except Exception as e:
-        checks['last_backup'] = {
-            'status': 'unhealthy',
-            'message': f'检查最近备份时间失败: {str(e)}',
-            'error': str(e)
-        }
-        issues.append(f'检查最近备份时间失败: {str(e)}')
-        overall_status = "unhealthy"
-
-    # 5. 检查备份文件完整性（抽样检查）
-    try:
-        backup_files = backup_service.list_backup_files()
-        if backup_files:
-            # 随机选择1个文件进行检查（避免性能问题）
-            import random
-            sample_files = random.sample(backup_files, min(3, len(backup_files)))
-
-            integrity_results = []
-            for file_info in sample_files:
-                filename = file_info.get('name', '')
-                filepath = backup_service.BACKUP_DIR / filename
-
-                try:
-                    # 检查文件是否存在且可读
-                    if filepath.exists() and filepath.is_file():
-                        # 检查文件大小
-                        file_size = filepath.stat().st_size
-                        integrity_results.append({
-                            'filename': filename,
-                            'status': 'healthy',
-                            'size': file_size,
-                            'readable': True,
-                            'message': '文件完整可读'
-                        })
-                    else:
-                        integrity_results.append({
-                            'filename': filename,
-                            'status': 'unhealthy',
-                            'size': 0,
-                            'readable': False,
-                            'message': '文件不存在或不是普通文件'
-                        })
-                        issues.append(f'备份文件异常: {filename}')
-                        overall_status = "degraded"
-                except Exception as e:
-                    integrity_results.append({
-                        'filename': filename,
-                        'status': 'unhealthy',
-                        'size': 0,
-                        'readable': False,
-                        'message': f'文件检查失败: {str(e)}',
-                        'error': str(e)
-                    })
-                    issues.append(f'备份文件检查失败 {filename}: {str(e)}')
-                    overall_status = "degraded"
-
-            checks['backup_integrity'] = {
-                'status': 'healthy' if all(r['status'] == 'healthy' for r in integrity_results) else 'degraded',
-                'message': f'抽样检查了 {len(integrity_results)} 个备份文件',
-                'sample_size': len(integrity_results),
-                'results': integrity_results
-            }
-        else:
-            checks['backup_integrity'] = {
-                'status': 'warning',
-                'message': '没有备份文件可检查',
-                'sample_size': 0,
-                'results': []
-            }
-    except Exception as e:
-        checks['backup_integrity'] = {
-            'status': 'unhealthy',
-            'message': f'备份文件完整性检查失败: {str(e)}',
-            'error': str(e)
-        }
-        issues.append(f'备份文件完整性检查失败: {str(e)}')
-        overall_status = "unhealthy"
-
-    # 6. 检查磁盘空间
-    try:
-        import shutil
-        backup_dir = backup_service.BACKUP_DIR
-        if backup_dir.exists():
-            disk_usage = shutil.disk_usage(backup_dir)
-            total_gb = disk_usage.total / (1024**3)
-            used_gb = disk_usage.used / (1024**3)
-            free_gb = disk_usage.free / (1024**3)
-            free_percent = (disk_usage.free / disk_usage.total) * 100
-
-            checks['disk_space'] = {
-                'status': 'healthy' if free_percent > 10 else 'warning',
-                'message': f'磁盘空间: {free_gb:.1f}GB 可用 ({free_percent:.1f}%)',
-                'total_gb': round(total_gb, 2),
-                'used_gb': round(used_gb, 2),
-                'free_gb': round(free_gb, 2),
-                'free_percent': round(free_percent, 2),
-                'sufficient': free_percent > 10
-            }
-
-            if free_percent <= 10:
-                issues.append(f'磁盘空间不足: 仅剩 {free_percent:.1f}% 可用空间')
-                if overall_status == "healthy":
-                    overall_status = "degraded"
-            elif free_percent <= 5:
-                issues.append(f'磁盘空间严重不足: 仅剩 {free_percent:.1f}% 可用空间')
-                overall_status = "unhealthy"
-        else:
-            checks['disk_space'] = {
-                'status': 'warning',
-                'message': '备份目录不存在，无法检查磁盘空间',
-                'sufficient': None
-            }
-    except Exception as e:
-        checks['disk_space'] = {
-            'status': 'warning',
-            'message': f'磁盘空间检查失败: {str(e)}',
-            'error': str(e)
-        }
-        issues.append(f'磁盘空间检查失败: {str(e)}')
-        if overall_status == "healthy":
-            overall_status = "degraded"
+    overall_status = _aggregate_health_status(checks)
 
     return {
         'status': overall_status,
         'timestamp': datetime.now().isoformat(),
         'checks': checks,
-        'issues': issues
+        'issues': issues,
     }
 
 
@@ -416,7 +328,7 @@ class ValidationCache:
 _validation_cache = ValidationCache()
 
 
-def _get_validation_cache_key(filename: str, password: Optional[str] = None) -> str:
+def _get_validation_cache_key(filename: str, password: str | None = None) -> str:
     """生成验证缓存键"""
     key_parts = [filename]
     if password:
@@ -431,8 +343,8 @@ def _get_validation_cache_key(filename: str, password: Optional[str] = None) -> 
 @router.get('/validate/{filename}', response_model=BackupValidationResponse)
 async def validate_backup_file(
     filename: str,
-    password: Optional[str] = Query(None, description="加密备份的解密密码"),
-    x_backup_password: Optional[str] = Header(None, alias='X-Backup-Password'),
+    password: str | None = Query(None, description="加密备份的解密密码"),
+    x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('validate_backup_file')),
 ):
     """
@@ -489,8 +401,7 @@ async def validate_backup_file(
             try:
                 decrypted_content = _decrypt_backup_data(content, password_to_use)
                 content = decrypted_content
-                encryption_status = 'decrypted'
-            except Exception:
+            except Exception:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
                 logger.exception('验证备份文件时解密失败: %s', filename)
                 return {
                     'success': True,
@@ -506,7 +417,7 @@ async def validate_backup_file(
                     'issues': ['解密失败']
                 }
         else:
-            encryption_status = 'not_encrypted'
+            pass
 
         # 计算校验和
         checksum = hashlib.sha256(content).hexdigest()
@@ -530,8 +441,8 @@ async def validate_backup_file(
                         try:
                             with zip_file.open(zip_info.filename) as f:
                                 f.read()  # 尝试读取文件
-                        except Exception as e:
-                            issues.append(f'文件 {zip_info.filename} 损坏: {str(e)}')
+                        except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
+                            issues.append(f'文件 {zip_info.filename} 损坏: {e!s}')
                             valid = False
 
             # 尝试解析为JSON文件
@@ -542,7 +453,7 @@ async def validate_backup_file(
                         issues.append('JSON文件缺少tables字段')
                         valid = False
                 except json.JSONDecodeError as e:
-                    issues.append(f'JSON解析失败: {str(e)}')
+                    issues.append(f'JSON解析失败: {e!s}')
                     valid = False
 
             else:
@@ -550,10 +461,10 @@ async def validate_backup_file(
                 valid = False
 
         except zipfile.BadZipFile as e:
-            issues.append(f'ZIP文件损坏: {str(e)}')
+            issues.append(f'ZIP文件损坏: {e!s}')
             valid = False
-        except Exception as e:
-            issues.append(f'文件验证失败: {str(e)}')
+        except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
+            issues.append(f'文件验证失败: {e!s}')
             valid = False
 
         # 尝试提取元数据
@@ -580,7 +491,7 @@ async def validate_backup_file(
                     total_rows = sum(len(table_data.get('data', [])) for table_data in backup_data.get('tables', {}).values())
                     created_at = backup_data.get('exported_at')
             except (ValueError, TypeError, OSError, KeyError, json.JSONDecodeError, UnicodeDecodeError):
-                pass  # 元数据提取失败不影响验证结果
+                pass  # 元数据提取失败不影响验证结果; defensive: 异常静默处理,不影响主流程
 
         # 构建响应
         result = {
@@ -605,7 +516,7 @@ async def validate_backup_file(
 
         return result
 
-    except Exception as e:
+    except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
         logger.exception('验证备份文件失败')
         raise HTTPException(status_code=500, detail='验证备份文件失败，请查看服务器日志') from e
 
@@ -713,7 +624,7 @@ async def validate_backup_integrity(
                                     corrupted_files.append(filename)
                         except zipfile.BadZipFile as e:
                             valid = False
-                            message = f'ZIP文件格式错误: {str(e)}'
+                            message = f'ZIP文件格式错误: {e!s}'
                             corrupted_files.append(filename)
 
                     elif filename.endswith('.json'):
@@ -721,7 +632,7 @@ async def validate_backup_integrity(
                             json.loads(content.decode('utf-8'))
                         except json.JSONDecodeError as e:
                             valid = False
-                            message = f'JSON格式错误: {str(e)}'
+                            message = f'JSON格式错误: {e!s}'
                             corrupted_files.append(filename)
 
                     details.append({
@@ -733,21 +644,21 @@ async def validate_backup_integrity(
                         'valid': valid
                     })
 
-                except Exception as e:
+                except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
                     corrupted_files.append(filename)
                     details.append({
                         'filename': filename,
                         'status': 'corrupted',
-                        'message': f'读取失败: {str(e)}',
+                        'message': f'读取失败: {e!s}',
                         'size': file_size,
                         'error': str(e)
                     })
 
-            except Exception as e:
+            except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
                 details.append({
                     'filename': filename,
                     'status': 'error',
-                    'message': f'检查过程中发生错误: {str(e)}',
+                    'message': f'检查过程中发生错误: {e!s}',
                     'error': str(e)
                 })
 
@@ -771,7 +682,7 @@ async def validate_backup_integrity(
 
         return result
 
-    except Exception as e:
+    except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
         logger.exception('完整性检查失败')
         raise HTTPException(status_code=500, detail='完整性检查失败，请查看服务器日志') from e
 
@@ -829,7 +740,7 @@ async def get_backup_statistics(
                     'used_percent': (disk_usage.used / disk_usage.total * 100) if disk_usage.total > 0 else 0,
                     'free_percent': (disk_usage.free / disk_usage.total * 100) if disk_usage.total > 0 else 0,
                 }
-            except Exception as e:
+            except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
                 logger.warning(f'无法获取磁盘使用情况: {e}')
                 storage_usage = {'error': str(e)}
 
@@ -885,6 +796,6 @@ async def get_backup_statistics(
             }
         }
 
-    except Exception as e:
+    except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
         logger.exception('获取备份统计信息失败')
         raise HTTPException(status_code=500, detail='获取备份统计信息失败，请查看服务器日志') from e

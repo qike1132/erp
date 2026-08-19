@@ -1,9 +1,11 @@
 """复现"定制订单美国"库存未显示问题"""
 import asyncio
 import sys
+
 sys.path.insert(0, r'd:\erp_system')
 
-from sqlalchemy import select, func, text
+from sqlalchemy import text
+
 from fastapi_app.core.database import _AsyncSessionLocal
 from fastapi_app.services.stock_service import get_inventory_paginated
 

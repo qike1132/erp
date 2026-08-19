@@ -24,10 +24,10 @@ ERP系统全板块测试数据生成器 v3 - 直接写入数据库
  17. cases              皮套管理（依赖 products）
 """
 import os
+import random
 import sys
 import time
-import random
-from datetime import datetime, timedelta, date
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
@@ -45,14 +45,23 @@ from sqlalchemy.orm import sessionmaker
 from fastapi_app.core.config import settings
 from fastapi_app.core.security import hash_password
 from fastapi_app.shared_models import (
-    Product, Customer, Supplier, User,
-    Order, StockIn, StockOut,
-    ApprovalRequest, ApprovalLog,
-    PurchaseOrder, PurchaseOrderItem,
-    MaterialRegistration, MaterialRegistrationItem,
-    PurchasePlan, PurchasePlanDetail,
-    DailyProductionRecord, ProductionPlan,
+    ApprovalRequest,
     Case,
+    Customer,
+    DailyProductionRecord,
+    MaterialRegistration,
+    MaterialRegistrationItem,
+    Order,
+    Product,
+    ProductionPlan,
+    PurchaseOrder,
+    PurchaseOrderItem,
+    PurchasePlan,
+    PurchasePlanDetail,
+    StockIn,
+    StockOut,
+    Supplier,
+    User,
 )
 
 engine = create_engine(settings.DATABASE_URL, pool_size=5, max_overflow=10)
@@ -277,7 +286,7 @@ def insert_approvals(session, count, order_ids, user_ids):
         batch_count = min(BATCH_SIZE, count - batch_start)
         objs = []
         for i in range(batch_count):
-            idx = batch_start + i
+            batch_start + i
             status = random.choice(statuses)
             objs.append(ApprovalRequest(
                 order_id=random.choice(order_ids),
@@ -377,7 +386,7 @@ def insert_material_registrations(session, count, po_ids, supplier_ids, user_ids
         batch_count = min(BATCH_SIZE, count - batch_start)
         objs = []
         for i in range(batch_count):
-            idx = batch_start + i
+            batch_start + i
             sid = random.choice(supplier_ids) if random.random() < 0.7 else None
             objs.append(MaterialRegistration(
                 purchase_order_id=random.choice(po_ids),
@@ -459,7 +468,7 @@ def insert_purchase_plan_details(session, count, plan_ids, product_ids):
         batch_count = min(BATCH_SIZE, count - batch_start)
         objs = []
         for i in range(batch_count):
-            idx = batch_start + i
+            batch_start + i
             objs.append(PurchasePlanDetail(
                 plan_id=random.choice(plan_ids),
                 product_id=random.choice(product_ids),
@@ -482,7 +491,7 @@ def insert_daily_production_records(session, count, product_ids):
         batch_count = min(BATCH_SIZE, count - batch_start)
         objs = []
         for i in range(batch_count):
-            idx = batch_start + i
+            batch_start + i
             objs.append(DailyProductionRecord(
                 department=random.choice(departments),
                 product_id=random.choice(product_ids) if random.random() < 0.8 else None,
@@ -506,7 +515,7 @@ def insert_production_plans(session, count):
         batch_count = min(BATCH_SIZE, count - batch_start)
         objs = []
         for i in range(batch_count):
-            idx = batch_start + i
+            batch_start + i
             qty = random.randint(100, 50000)
             objs.append(ProductionPlan(
                 customer_name=fake.company()[:100],
@@ -528,8 +537,6 @@ def insert_cases(session, count, product_ids):
     print(f"  生成 {count} 条皮套记录...")
     materials = ["PU", "真皮", "硅胶", "TPU", "PC", "凯夫拉", "尼龙", "帆布"]
     colors = ["黑色", "白色", "红色", "蓝色", "绿色", "紫色", "粉色", "灰色", "棕色", "透明"]
-    models = ["iPhone 15", "iPhone 15 Pro", "iPhone 16", "iPhone 16 Pro",
-              "Samsung S24", "华为 Mate 60", "小米 14", "OPPO Find X7"]
     for batch_start in range(0, count, BATCH_SIZE):
         batch_count = min(BATCH_SIZE, count - batch_start)
         objs = []

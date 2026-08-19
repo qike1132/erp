@@ -209,6 +209,10 @@ export interface ProjectSummary {
   current_version: string
   /** 状态：in_progress / completed / cancelled */
   status: string
+  /** 完成时间（状态为 completed 时有值） */
+  completed_at: string | null
+  /** 部位数量 */
+  parts_count: number
   updated_at: string
 }
 
@@ -312,6 +316,8 @@ export interface PartCreateRequest {
   sort_order?: number
   fabric_name?: string | null
   fabric_spec?: string | null
+  /** 色号 */
+  fabric_color_no?: string | null
   supplier_id?: number | null
   contact_person?: string | null
   contact_phone?: string | null

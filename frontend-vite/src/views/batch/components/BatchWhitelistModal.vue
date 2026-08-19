@@ -4,11 +4,11 @@
     <div class="bt-whitelist-modal">
       <div class="bt-whitelist-header">
         <span>白名单客户</span>
-        <button class="bt-whitelist-close" @click="showWhitelistModal = false">&times;</button>
+        <button class="bt-whitelist-close" @click="showWhitelistModal = false" aria-label="关闭">&times;</button>
       </div>
       <div class="bt-whitelist-body">
         <label v-for="c in allCustomers" :key="c" class="bt-whitelist-item">
-          <input type="checkbox" :value="c" v-model="whitelistEdit" />
+          <input type="checkbox" :value="c" v-model="whitelistEdit" aria-label="勾选项" />
           <span>{{ c }}</span>
         </label>
       </div>

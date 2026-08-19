@@ -95,7 +95,7 @@ async def import_staging_stockouts(
     if len(content) > MAX_STAGING_FILE_SIZE:
         return StagingStockOutImportResult(success=False, message='文件大小超过10MB限制')
     # 校验文件头魔数，防止非 xlsx 文件伪装上传
-    if not content[:4] == XLSX_MAGIC_BYTES:
+    if content[:4] != XLSX_MAGIC_BYTES:
         return StagingStockOutImportResult(success=False, message='文件内容不是有效的Excel格式')
     async with db_transaction(db):
         imported, message, errors = await svc.import_staging_stockouts_from_excel(db, content, scoped_session)

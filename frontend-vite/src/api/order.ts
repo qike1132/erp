@@ -30,6 +30,7 @@ export const orderApi = {
   deductStock: (id: number) => post(`/orders/deduct-stock/${id}`),
   updateDeduct: (id: number, deductQuantity: number) => put(`/orders/deduct/${id}?deduct_quantity=${deductQuantity}`),
   confirmBeileOrder: (id: number) => post<ConfirmOrderResponse>(`/orders/${id}/confirm`),
+  confirmBeileStockin: (id: number) => post<ConfirmOrderResponse>(`/orders/stockin/${id}/confirm`),
   staging: {
     add: (data: Partial<StagingOrder>) => post<StagingOrder>('/staging-orders/add', data),
     list: () => get<StagingOrder[]>('/staging-orders/list'),

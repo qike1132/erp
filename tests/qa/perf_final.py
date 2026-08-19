@@ -1,7 +1,11 @@
 """ERP系统性能基准测试 - 最终版"""
-import sys, os, time
+import os
+import sys
+import time
+
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 from sqlalchemy import create_engine, text
+
 from fastapi_app.core.config import settings
 
 e = create_engine(settings.DATABASE_URL, pool_size=5, max_overflow=10)
@@ -46,7 +50,9 @@ for name, sql in tests:
 print("\n" + "=" * 60)
 print("  同步版库存查询（SQL聚合优化后）...")
 from sqlalchemy.orm import Session
+
 from fastapi_app.shared.stock_crud_service import get_inventory
+
 session = Session(bind=e)
 t0 = time.time()
 inv = get_inventory(session, '', '')

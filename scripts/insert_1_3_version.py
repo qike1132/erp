@@ -1,8 +1,9 @@
-import psycopg2
-import os
 import hashlib
+import os
 from datetime import datetime
 from pathlib import Path
+
+import psycopg2
 
 # 数据库配置
 db_config = {
@@ -60,7 +61,7 @@ try:
 
     now = datetime.now()
     size = os.path.getsize(test_apk)
-    
+
     # 计算简单的 MD5
     md5_hash = hashlib.md5()
     with open(test_apk, "rb") as f:
@@ -76,40 +77,40 @@ try:
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id
     """, ('android', 77, '1.3', '/static/releases/erp-v1.3.apk', changelog, size, md5, False, False, False, now))
-    
+
     version_id = cur.fetchone()[0]
     conn.commit()
-    
+
     print(f"  [OK] 插入成功, ID={version_id}")
-    
+
     print("[3/4] 激活版本...")
     cur.execute("""
-        UPDATE app_version 
+        UPDATE app_version
         SET is_active = %s, updated_at = %s
         WHERE id = %s
     """, (True, datetime.now(), version_id))
     conn.commit()
     print("  [OK] 版本已激活")
-    
+
     print("[4/4] 标记为已推送...")
     cur.execute("""
-        UPDATE app_version 
+        UPDATE app_version
         SET is_pushed = %s, pushed_at = %s, updated_at = %s
         WHERE id = %s
     """, (True, datetime.now(), datetime.now(), version_id))
     conn.commit()
     print("  [OK] 已标记推送")
-    
+
     print()
     print("=" * 60)
     print("  1.3 版本测试完成!")
     print("=" * 60)
     print()
-    print(f"  版本: v1.3 (code=77)")
+    print("  版本: v1.3 (code=77)")
     print(f"  ID: {version_id}")
     print(f"  APK: {test_apk} ({size} bytes)")
     print(f"  MD5: {md5}")
-    print(f"  状态: 已发布")
+    print("  状态: 已发布")
     print()
     print("  访问:")
     print("  - 管理页: http://192.168.0.95:3000/app-update")

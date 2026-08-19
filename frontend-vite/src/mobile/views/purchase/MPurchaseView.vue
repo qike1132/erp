@@ -105,14 +105,29 @@ const tabChips = [
 
 const keyword = ref('')
 const completedKeyword = ref('')
-const orders = ref<any>(null)
+
+interface PurchaseOrderItem {
+  id: number
+  product_name?: string
+  supplier_name?: string
+  customer_name?: string
+  quantity?: number
+  status?: string
+  created_at?: string
+}
+interface PurchaseOrderList {
+  orders?: PurchaseOrderItem[]
+  total?: number
+}
+
+const orders = ref<PurchaseOrderList | null>(null)
 const ordersLoading = ref(false)
-const unprocessed = ref<any>(null)
+const unprocessed = ref<PurchaseOrderList | null>(null)
 const unprocessedLoading = ref(false)
-const completedOrders = ref<any>(null)
+const completedOrders = ref<PurchaseOrderList | null>(null)
 const completedLoading = ref(false)
 const detailVisible = ref(false)
-const detailOrder = ref<any>(null)
+const detailOrder = ref<PurchaseOrderItem | null>(null)
 
 async function refetchOrders() {
   ordersLoading.value = true
@@ -129,13 +144,13 @@ async function loadCompleted() {
   try { completedOrders.value = await purchaseApi.completed({ page: 1, per_page: 50 }) } finally { completedLoading.value = false }
 }
 
-function showOrderDetail(order: any) {
+function showOrderDetail(order: PurchaseOrderItem) {
   detailOrder.value = order
   detailVisible.value = true
 }
 
 async function handleOneClick() {
-  const ids = (unprocessed.value?.orders || []).map((o: any) => `order:${o.id}`)
+  const ids = (unprocessed.value?.orders || []).map((o: PurchaseOrderItem) => `order:${o.id}`)
   if (!ids.length) return
   try {
     await purchaseApi.oneClickGenerate({ composite_ids: ids })
@@ -144,15 +159,15 @@ async function handleOneClick() {
   } catch { /* toast handled by request.ts */ }
 }
 
-function statusColor(s: string) {
+function statusColor(s: string | undefined) {
   if (s === 'completed') return 'var(--m-accent-emerald)'
   if (s === 'pending') return 'var(--m-accent-amber)'
   if (s === 'cancelled') return 'var(--m-accent-rose)'
   return 'var(--m-text-secondary)'
 }
-function statusLabel(s: string) {
+function statusLabel(s: string | undefined) {
   const map: Record<string, string> = { completed: '已完成', pending: '待处理', processing: '采购中', cancelled: '已取消' }
-  return map[s] || s || '—'
+  return (s && map[s]) || s || '—'
 }
 
 refetchOrders()

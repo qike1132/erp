@@ -11,7 +11,11 @@
 
 # 显式 re-export（替代 import *）：与 purchase_center_service 的公共导出面逐项对齐，
 # 便于静态检查与未来收窄
-from fastapi_app.services.purchase_center_service import (  # noqa: F401
+# 下划线私有符号不随 import * 转发，显式补充
+from fastapi_app.services.purchase_center_service import (  # noqa: F401  # noqa: F401
+    _build_order_summary,
+    _fetch_bom_data,
+    _parse_source_order_ids,
     batch_complete_purchase_orders,
     batch_delete_purchase_orders,
     batch_get_customers,
@@ -58,10 +62,4 @@ from fastapi_app.services.purchase_center_service import (  # noqa: F401
     update_purchase_order,
     update_supplier,
     use_saved_query,
-)
-# 下划线私有符号不随 import * 转发，显式补充
-from fastapi_app.services.purchase_center_service import (  # noqa: F401
-    _build_order_summary,
-    _fetch_bom_data,
-    _parse_source_order_ids,
 )

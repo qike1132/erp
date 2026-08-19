@@ -6,7 +6,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, Text
@@ -39,12 +39,12 @@ class ProductFabric(Base):
     supplier_name: Mapped[str | None] = mapped_column(String(100), comment='供应商名称(冗余)')
     unit: Mapped[str | None] = mapped_column(String(20), default='码', comment='单位')
     remark: Mapped[str | None] = mapped_column(Text, comment='备注')
-    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), comment='创建时间')
-    update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
+    update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 
     material_category = 'fabric'
 
-    product: Mapped["Product"] = relationship("Product", back_populates="fabrics")
+    product: Mapped[Product] = relationship("Product", back_populates="fabrics")
 
     __table_args__ = (
         Index('idx_product_fabric_product', 'product_id'),
@@ -85,12 +85,12 @@ class ProductMaterial(Base):
     supplier_name: Mapped[str | None] = mapped_column(String(100), comment='供应商名称(冗余)')
     unit: Mapped[str | None] = mapped_column(String(20), default='克', comment='单位')
     remark: Mapped[str | None] = mapped_column(Text, comment='备注')
-    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), comment='创建时间')
-    update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
+    update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 
     material_category = 'filling'
 
-    product: Mapped["Product"] = relationship("Product", back_populates="material")
+    product: Mapped[Product] = relationship("Product", back_populates="material")
 
     __table_args__ = (
         Index('idx_product_material_product', 'product_id'),
@@ -135,10 +135,10 @@ class ProductAccessory(Base):
     unit: Mapped[str | None] = mapped_column(String(20), default='个', comment='单位')
     material_category: Mapped[str | None] = mapped_column(String(20), default='accessory', comment='物料分类: accessory/packaging')
     remark: Mapped[str | None] = mapped_column(Text, comment='备注')
-    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), comment='创建时间')
-    update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
+    update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 
-    product: Mapped["Product"] = relationship("Product", back_populates="accessories")
+    product: Mapped[Product] = relationship("Product", back_populates="accessories")
 
     __table_args__ = (
         Index('idx_product_accessory_product', 'product_id'),

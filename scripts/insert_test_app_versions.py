@@ -4,19 +4,19 @@
 import asyncio
 import hashlib
 import os
+import sys
 from datetime import datetime
-
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 
 # 导入模型（需要确保路径正确）
 from pathlib import Path
-import sys
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 sys.path.insert(0, str(Path(__file__).parent))
-from fastapi_app.core.config import Settings
 from fastapi_app.shared_models.app_version import AppVersion
+
+from fastapi_app.core.config import Settings
 
 settings = Settings()
 

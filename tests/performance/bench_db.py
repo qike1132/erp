@@ -9,9 +9,9 @@
 """
 import asyncio
 import os
+import statistics
 import sys
 import time
-import statistics
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, project_root)
@@ -68,7 +68,7 @@ async def bench_inventory_service():
         if sample_customer:
             for i in range(5):
                 start = time.perf_counter()
-                result2 = await stock_service.get_inventory_paginated(db, search_customer=sample_customer, page=1, per_page=50)
+                await stock_service.get_inventory_paginated(db, search_customer=sample_customer, page=1, per_page=50)
                 elapsed = (time.perf_counter() - start) * 1000
                 latencies.append(elapsed)
                 print(f'  第{i+1}次: {elapsed:.1f}ms')
@@ -83,7 +83,7 @@ async def bench_inventory_service():
         latencies = []
         for i in range(5):
             start = time.perf_counter()
-            result3 = await stock_service.get_inventory_paginated(db, page=5, per_page=50)
+            await stock_service.get_inventory_paginated(db, page=5, per_page=50)
             elapsed = (time.perf_counter() - start) * 1000
             latencies.append(elapsed)
             print(f'  第{i+1}次: {elapsed:.1f}ms')
@@ -99,7 +99,7 @@ async def bench_inventory_service():
 async def bench_other_services():
     """测试其他服务层性能"""
     from fastapi_app.core.database import async_session_factory
-    from fastapi_app.services import order_service, product_service, case_service
+    from fastapi_app.services import case_service, order_service, product_service
 
     results = {}
 
@@ -107,7 +107,7 @@ async def bench_other_services():
         # 订单列表
         print('测试 order_service.get_orders...')
         latencies = []
-        for i in range(5):
+        for _i in range(5):
             start = time.perf_counter()
             result = await order_service.get_orders(db, page=1, per_page=50)
             elapsed = (time.perf_counter() - start) * 1000
@@ -123,7 +123,7 @@ async def bench_other_services():
         # 产品列表
         print('测试 product_service.get_products_page...')
         latencies = []
-        for i in range(5):
+        for _i in range(5):
             start = time.perf_counter()
             result = await product_service.get_products_page(db, page=1, per_page=50)
             elapsed = (time.perf_counter() - start) * 1000
@@ -138,7 +138,7 @@ async def bench_other_services():
         # 皮套库存汇总
         print('测试 case_service.get_case_inventory_summary...')
         latencies = []
-        for i in range(5):
+        for _i in range(5):
             start = time.perf_counter()
             result = await case_service.get_case_inventory_summary(db, page=1, per_page=50)
             elapsed = (time.perf_counter() - start) * 1000

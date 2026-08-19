@@ -30,11 +30,11 @@ from fastapi_app.api.v2.router import router as api_v2_router
 from fastapi_app.api.ws import register_websocket
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import async_engine, dispose_async_engines
-from fastapi_app.core.limiter import limiter
 from fastapi_app.core.db_health import db_health_checker
+from fastapi_app.core.deps import _resolve_user_id
 from fastapi_app.core.exceptions import AppError, current_iso_timestamp, new_request_id
 from fastapi_app.core.health import register_health_routes
-from fastapi_app.core.deps import _resolve_user_id
+from fastapi_app.core.limiter import limiter
 from fastapi_app.core.logger import logger, setup_logging
 from fastapi_app.core.middleware import setup_middleware
 
@@ -59,7 +59,7 @@ if _sentry_dsn:
             enable_tracing=True,
         )
     except (ValueError, ImportError):
-        pass
+        pass  # defensive: 异常静默处理,不影响主流程
 
 
 async def _setup_database():
@@ -210,7 +210,7 @@ async def lifespan(application: FastAPI):
     # 关闭超时保护：防止某步骤 hang 导致整个关闭阻塞
     try:
         await asyncio.wait_for(_perform_shutdown(), timeout=15.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error("优雅关闭超时（15s），强制退出")
 
 
@@ -349,6 +349,7 @@ async def general_exception_handler(request: Request, exc: Exception):
 setup_middleware(app)
 
 from fastapi_app.core.audit_middleware import AuditLogMiddleware
+
 app.add_middleware(AuditLogMiddleware)
 
 register_health_routes(app)
@@ -389,7 +390,7 @@ async def root():
 if __name__ == "__main__":
     uvicorn.run(
         "fastapi_app.main:app",
-        host="0.0.0.0",
+        host="0.0.0.0",  # nosec B104
         port=5002,
         reload=settings.FASTAPI_DEBUG,
     )

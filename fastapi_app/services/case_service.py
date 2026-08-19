@@ -10,7 +10,7 @@
 库存计算的准确性；查询操作使用 joinedload 避免 N+1 问题。
 """
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -87,7 +87,7 @@ def _apply_date_filter(query, column, start_date: str, end_date: str, field_labe
     if start_date:
         query = query.where(column >= _parse_date(start_date, field_label))
     if end_date:
-        query = query.where(column < _parse_date(end_date, field_label) + timedelta(days=1))
+        query = query.where(column < _parse_date(end_date, field_label) + timedelta(days=1))  # sql-safe: escape_like/绑定参数/常量片段
     return query
 
 
@@ -271,8 +271,8 @@ async def search_cases(db: AsyncSession, query: str = '') -> list[dict]:
     )
     if query:
         q = q.where(
-            Product.name.like(f'%{escape_like(query)}%')
-            | Product.barcode.like(f'%{escape_like(query)}%')
+            Product.name.like(f'%{escape_like(query)}%')  # sql-safe: escape_like/绑定参数/常量片段
+            | Product.barcode.like(f'%{escape_like(query)}%')  # sql-safe: escape_like/绑定参数/常量片段
         )
     else:
         q = q.limit(DEFAULT_SEARCH_LIMIT)
@@ -312,7 +312,7 @@ async def get_case_stockins(db: AsyncSession, page: int = 1, per_page: int = 20,
     query = select(CaseStockIn).options(joinedload(CaseStockIn.case).joinedload(Case.product))
 
     if customer:
-        query = query.where(CaseStockIn.customer.like(f'%{escape_like(customer)}%'))
+        query = query.where(CaseStockIn.customer.like(f'%{escape_like(customer)}%'))  # sql-safe: escape_like/绑定参数/常量片段
     query = _apply_date_filter(query, CaseStockIn.stockin_date, start_date, end_date, '开始日期')
     query = _apply_quantity_filter(query, CaseStockIn.quantity, quantity_min, quantity_max)
 
@@ -358,7 +358,7 @@ async def get_case_stockout_list(db: AsyncSession, page: int = 1, per_page: int 
     query = select(CaseStockOut).options(joinedload(CaseStockOut.case).joinedload(Case.product))
 
     if customer:
-        query = query.where(CaseStockOut.customer.like(f'%{escape_like(customer)}%'))
+        query = query.where(CaseStockOut.customer.like(f'%{escape_like(customer)}%'))  # sql-safe: escape_like/绑定参数/常量片段
     query = _apply_date_filter(query, CaseStockOut.stockout_date, start_date, end_date, '开始日期')
     query = _apply_quantity_filter(query, CaseStockOut.quantity, quantity_min, quantity_max)
 
@@ -629,7 +629,7 @@ async def create_case_stockout(db: AsyncSession, product_id: int, quantity: int,
     case_obj.current_stock -= quantity
 
     log = CaseInventoryLog(case_id=case_obj.id, change_type='出库', change_quantity=-quantity,
-                           change_date=datetime.now(timezone.utc), customer=customer,
+                           change_date=datetime.now(UTC), customer=customer,
                            related_id=stockout_no, note=f'出库 {stockout_no}')
     db.add(log)
     logger.info('皮套出库成功 case_id=%s quantity=%s stockout_no=%s', case_obj.id, quantity, stockout_no)

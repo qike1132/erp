@@ -5,9 +5,9 @@
       <MFilterChips v-model="viewTab" :chips="viewChips" />
 
       <div class="m-date-nav">
-        <button class="m-date-btn" @click="prevDate">&lsaquo;</button>
+        <button class="m-date-btn" @click="prevDate" aria-label="上一页">&lsaquo;</button>
         <span class="m-date-text">{{ viewTab === 'monthly' ? `${monthlyYear}年${monthlyMonth}月` : selectedDate }}</span>
-        <button class="m-date-btn" @click="nextDate">&rsaquo;</button>
+        <button class="m-date-btn" @click="nextDate" aria-label="下一页">&rsaquo;</button>
       </div>
 
       <div v-if="loading" class="m-center"><MSpinner size="lg" /></div>
@@ -43,7 +43,17 @@ const viewChips = [{ label: '日报', value: 'daily' }, { label: '月报', value
 const selectedDate = ref(new Date().toISOString().slice(0, 10))
 const monthlyYear = ref(new Date().getFullYear())
 const monthlyMonth = ref(new Date().getMonth() + 1)
-const summary = ref<any>(null)
+interface ProductionSummary {
+  departments?: Array<{ department: string; department_label?: string; total_quantity?: number }>
+  monthly_departments?: Array<{ department: string; department_label?: string; total_quantity?: number }>
+  monthly_total_quantity?: number
+  overall_quantity?: number
+  monthly_total_value?: number
+  overall_value?: number
+  [key: string]: unknown
+}
+
+const summary = ref<ProductionSummary | null>(null)
 const loading = ref(false)
 
 const DEPARTMENT_LABELS: Record<string, string> = {
@@ -58,7 +68,7 @@ const departments = computed(() => {
   const list = viewTab.value === 'monthly'
     ? (summary.value?.monthly_departments || [])
     : (summary.value?.departments || [])
-  return list.map((d: any) => {
+  return list.map((d: { department: string; department_label?: string; total_quantity?: number }) => {
     const key = d.department
     return {
       key,
@@ -101,11 +111,11 @@ function nextDate() {
 
 async function loadDaily() {
   loading.value = true
-  try { summary.value = await dailyProductionApi.dailySummary(selectedDate.value) } finally { loading.value = false }
+  try { summary.value = await dailyProductionApi.dailySummary(selectedDate.value) as ProductionSummary } finally { loading.value = false }
 }
 async function loadMonthly() {
   loading.value = true
-  try { summary.value = await dailyProductionApi.monthlySummary({ year: monthlyYear.value, month: monthlyMonth.value }) } finally { loading.value = false }
+  try { summary.value = await dailyProductionApi.monthlySummary({ year: monthlyYear.value, month: monthlyMonth.value }) as ProductionSummary } finally { loading.value = false }
 }
 
 watch(viewTab, (v) => { if (v === 'daily') loadDaily(); else loadMonthly() })

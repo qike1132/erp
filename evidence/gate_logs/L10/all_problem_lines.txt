@@ -1,0 +1,309 @@
+=== frontend-vite/src/App.vue ===
+  L2 [交互元素缺少 aria-lab]: <a href="#main-content" class="skip-link">跳到主内容</a>
+=== frontend-vite/src/components/RealTimeSyncExample.vue ===
+  L32 [交互元素缺少 aria-lab]: <button @click="sync.refresh" :disabled="sync.state.isManualRefresh" class="btn">
+  L35 [交互元素缺少 aria-lab]: <button @click="sync.connect" :disabled="sync.state.status === 'connected'" class="btn">
+  L38 [交互元素缺少 aria-lab]: <button @click="sync.disconnect" :disabled="sync.state.status === 'disconnected'" class="btn btn--danger">
+=== frontend-vite/src/views/batch/BatchView.vue ===
+  L38 [交互元素缺少 aria-lab]: <button class="bt-whitelist-close" @click="showCompleteModal = false">&times;</button>
+=== frontend-vite/src/views/case/CaseInventoryTab.vue ===
+  L12 [交互元素缺少 aria-lab]: :inv-total-out="invTotalOut"
+  L58 [交互元素缺少 aria-lab]: */
+  L72 [交互元素缺少 aria-lab]: invTotalIn,
+  L91 [交互元素缺少 aria-lab]: logBadgeClass,
+=== frontend-vite/src/views/case/CaseStockTab.vue ===
+  L5 [交互元素缺少 aria-lab]: <button role="tab" :aria-selected="mode === 'stockin'" :class="['cs-mode-btn', { active: mode === 'stockin' }]" @click="switchMode('stockin'
+  L8 [交互元素缺少 aria-lab]: <button role="tab" :aria-selected="mode === 'stockout'" :class="['cs-mode-btn', { active: mode === 'stockout', 'out-mode': mode === 'stockou
+  L101 [交互元素缺少 aria-lab]: <input class="cs-input" :value="editForm.productName" disabled />
+  L105 [交互元素缺少 aria-lab]: <input type="number" class="cs-input" v-model.number="editForm.quantity" min="1" step="1" />
+  L109 [交互元素缺少 aria-lab]: <textarea v-model="editForm.note" class="cs-textarea" rows="2" />
+  L113 [交互元素缺少 aria-lab]: <button class="cs-action-btn cs-action-outline" @click="editDialogOpen = false">取消</button>
+  L114 [交互元素缺少 aria-lab]: <button class="cs-action-btn cs-action-primary" @click="saveEdit">保存</button>
+=== frontend-vite/src/views/case/CaseView.vue ===
+  L7 [交互元素缺少 aria-lab]: <button role="tab" :aria-selected="activeTab === 'stock'" :class="['cs-tab-btn', { active: activeTab === 'stock' }]" @click="activeTab = 'st
+  L10 [交互元素缺少 aria-lab]: <button role="tab" :aria-selected="activeTab === 'inventory'" :class="['cs-tab-btn', { active: activeTab === 'inventory' }]" @click="activeT
+=== frontend-vite/src/views/customer/CustomerView.vue ===
+  L6 [交互元素缺少 aria-lab]: <button class="cu-tab-btn active" @click="openForm('add')">
+=== frontend-vite/src/views/customer-order/CustomerOrderView.vue ===
+  L7 [交互元素缺少 aria-lab]: <button :class="['co-tab-btn', activeTab === 'input' && 'active']" @click="activeTab = 'input'">
+  L10 [交互元素缺少 aria-lab]: <button :class="['co-tab-btn', activeTab === 'records' && 'active']" @click="activeTab = 'records'">
+=== frontend-vite/src/views/hubei/HubeiSearchBar.vue ===
+  L37 [交互元素缺少 aria-lab]: <button class="hu-action-btn hu-action-primary" @click="handleSearch()">
+=== frontend-vite/src/views/login/LoginFormMobile.vue ===
+  L58 [交互元素缺少 aria-lab]: <button type="submit" class="m-login-btn" :disabled="loading">
+=== frontend-vite/src/views/login/LoginFormPc.vue ===
+  L103 [交互元素缺少 aria-lab]: OUT_OF_RANGE (file has 41 lines)
+=== frontend-vite/src/views/material/MaterialView.vue ===
+  L7 [交互元素缺少 aria-lab]: <button :class="['mr-tab-btn', { active: activeTab === 'progress' }]" @click="switchToProgress">
+  L10 [交互元素缺少 aria-lab]: <button :class="['mr-tab-btn', { active: activeTab === 'history' }]" @click="switchToHistory">
+  L13 [交互元素缺少 aria-lab]: <button v-if="canManage && activeTab === 'progress'" class="mr-btn mr-btn-ghost" @click="exportData" title="导出来料进度数据"><FontAwesomeIcon icon=
+  L14 [交互元素缺少 aria-lab]: <button v-if="canManage && activeTab === 'history'" class="mr-btn mr-btn-ghost" @click="exportHistory" title="导出历史数据"><FontAwesomeIcon icon=
+=== frontend-vite/src/views/material-calculator/MaterialCalculatorView.vue ===
+  L7 [交互元素缺少 aria-lab]: <button class="mc-action-btn mc-action-btn-primary" :disabled="orderItems.length === 0" @click="showBatchModal = true">
+  L11 [交互元素缺少 aria-lab]: <button class="mc-action-btn mc-action-btn-danger" :disabled="orderItems.length === 0" @click="clearAll">
+  L54 [交互元素缺少 aria-lab]: <input type="number" class="form-number-input" v-model.number="batchQuantity" min="1" step="1" style="width: 100%" />
+=== frontend-vite/src/views/notifications/NotificationCenterView.vue ===
+  L19 [交互元素缺少 aria-lab]: <button class="nc-btn nc-btn--primary-sm" @click="handleBatchMarkRead">
+  L23 [交互元素缺少 aria-lab]: <button class="nc-btn nc-btn--ghost-sm" @click="clearSelection">
+=== frontend-vite/src/views/pattern-room/PatternRoomView.vue ===
+  L47 [交互元素缺少 aria-lab]: @update-group-page="onGroupPageChange"
+=== frontend-vite/src/views/product/ProductListView.vue ===
+  L35 [<img> 标签缺少 alt ]: <img :src="resolveStaticUrl(imageModalSrc)" class="pd-modal-img-view" />
+=== frontend-vite/src/views/purchase-plan/PurchasePlanView.vue ===
+  L29 [交互元素缺少 aria-lab]: @next-month="nextMonth"
+  L30 [交互元素缺少 aria-lab]: @export="viewTab === 'daily' ? exportCSV() : exportSkuCSV()"
+=== frontend-vite/src/views/report/ReportView.vue ===
+  L7 [交互元素缺少 aria-lab]: <button v-for="tab in tabs" :key="tab.value" role="tab" :aria-selected="activeTab === tab.value" :class="['rp-tab-btn', { active: activeTab 
+  L21 [交互元素缺少 aria-lab]: <input v-model="filters.product" class="rp-filter-input" placeholder="输入产品名称或SKU" />
+  L32 [交互元素缺少 aria-lab]: <button class="rp-action-btn rp-action-primary" @click="doSearch">查询</button>
+  L33 [交互元素缺少 aria-lab]: <button class="rp-action-btn rp-action-outline" @click="doReset">重置</button>
+  L34 [交互元素缺少 aria-lab]: <button v-if="searched" class="rp-action-btn rp-action-success" @click="exportReport">
+=== frontend-vite/src/views/stock/InventoryTab.vue ===
+  L6 [交互元素缺少 aria-lab]: <input v-model="filters.product" class="sk-filter-input" placeholder="输入产品名称或69码" @keyup.enter="handleSearch()" />
+  L9 [交互元素缺少 aria-lab]: <button class="sk-action-btn sk-action-primary" @click="handleSearch()">
+=== frontend-vite/src/views/stock/StockOutView.vue ===
+  L7 [交互元素缺少 aria-lab]: <button :class="['so-tab-btn', activeTab === 'input' && 'active']" @click="activeTab = 'input'">
+  L10 [交互元素缺少 aria-lab]: <button :class="['so-tab-btn', activeTab === 'records' && 'active']" @click="activeTab = 'records'">
+=== frontend-vite/src/views/stock/StockView.vue ===
+  L6 [交互元素缺少 aria-lab]: <button v-if="itemCount" class="sk-action-btn sk-action-success" @click="handleExport">
+=== frontend-vite/src/views/supplier/SupplierView.vue ===
+  L5 [交互元素缺少 aria-lab]: <button class="sp-action-btn sp-action-btn-primary" @click="formOpen = true">
+=== frontend-vite/src/views/user/components/UserCreateForm.vue ===
+  L7 [交互元素缺少 aria-lab]: <input v-model="form.username" class="us-input" placeholder="请输入用户名" />
+  L12 [交互元素缺少 aria-lab]: <input v-model="form.password" :type="showPwd1 ? 'text' : 'password'" class="us-input" placeholder="至少6位" />
+  L30 [交互元素缺少 aria-lab]: <button type="submit" class="us-submit-btn" :disabled="submitting">
+=== frontend-vite/src/views/user/components/UserEditDialog.vue ===
+  L15 [交互元素缺少 aria-lab]: <button class="us-action-btn" @click="editDialogVisible = false">取消</button>
+  L16 [交互元素缺少 aria-lab]: <button class="us-action-btn us-action-primary" :disabled="editSubmitting" @click="handleSaveEdit">
+=== frontend-vite/src/views/user/components/UserPermissionDialog.vue ===
+  L6 [交互元素缺少 aria-lab]: <button class="us-perm-toggle-all" @click="toggleAllPerms">{{ permIsAllChecked ? '取消全选' : '全选' }}</button>
+  L31 [交互元素缺少 aria-lab]: <button class="us-action-btn" @click="permDialogVisible = false">取消</button>
+  L32 [交互元素缺少 aria-lab]: <button class="us-action-btn us-action-primary" :disabled="permSubmitting" @click="handleSavePermission">
+=== frontend-vite/src/views/user/components/UserTable.vue ===
+  L38 [交互元素缺少 aria-lab]: <button class="us-action-btn us-action-primary" @click="openPermissionDialog(row as UserRow)">权限</button>
+  L39 [交互元素缺少 aria-lab]: <button class="us-action-btn us-action-primary" @click="openEditDialog(row as UserRow)">编辑</button>
+  L40 [交互元素缺少 aria-lab]: <button class="us-action-btn us-action-primary" :disabled="actionId === (row as UserRow).id" @click="handleToggle(row as UserRow)">
+  L43 [交互元素缺少 aria-lab]: <button class="us-action-btn us-action-danger" :disabled="actionId === (row as UserRow).id || (row as UserRow).is_super" @click="handleDelet
+=== frontend-vite/src/views/supplier/components/SupplierFormDialog.vue ===
+  L6 [交互元素缺少 aria-lab]: <input v-model="form.name" type="text" class="sp-form-input" required :placeholder="mode === 'add' ? '例如：广州面料有限公司' : '请输入供应商名称'" name="suppl
+  L11 [交互元素缺少 aria-lab]: <input v-model="form.contact_person" type="text" class="sp-form-input" :placeholder="mode === 'add' ? '例如：李经理' : ''" name="contact" autocomp
+  L15 [交互元素缺少 aria-lab]: <input v-model="form.phone" type="text" class="sp-form-input" :placeholder="mode === 'add' ? '例如：13800138000' : ''" name="phone" autocomplet
+  L20 [交互元素缺少 aria-lab]: <input v-model="form.address" type="text" class="sp-form-input" :placeholder="mode === 'add' ? '例如：广州市白云区' : ''" name="address" autocomplete
+  L24 [交互元素缺少 aria-lab]: <textarea v-model="form.remark" rows="2" class="sp-form-input" :placeholder="mode === 'add' ? '例如：长期合作供应商' : ''" />
+=== frontend-vite/src/views/stock/components/StockOutEditStagedDialog.vue ===
+  L18 [交互元素缺少 aria-lab]: <input type="number" class="form-input" v-model.number="form.quantity" min="1" step="1" name="quantity" autocomplete="off" />
+  L30 [交互元素缺少 aria-lab]: <textarea v-model="form.note" class="form-input" rows="2" />
+=== frontend-vite/src/views/stock/components/StockOutInputForm.vue ===
+  L47 [交互元素缺少 aria-lab]: <input type="number" class="form-input" v-model.number="form.quantity" min="1" step="1" name="quantity" autocomplete="off" />
+  L84 [交互元素缺少 aria-lab]: import UiSelect from '@/components/ui/UiSelect.vue'
+  L87 [交互元素缺少 aria-lab]: import UiBadge from '@/components/ui/UiBadge.vue'
+  L119 [交互元素缺少 aria-lab]: 
+  L122 [交互元素缺少 aria-lab]: }
+=== frontend-vite/src/views/purchase-plan/components/CreateShipmentPlanDialog.vue ===
+  L49 [交互元素缺少 aria-lab]: <button v-if="mode === 'manual'" class="csd-btn csd-btn-add" @click="addDetail">
+  L53 [交互元素缺少 aria-lab]: <button class="csd-btn csd-btn-cancel" @click="$emit('update:open', false)">
+  L56 [交互元素缺少 aria-lab]: <button v-if="mode === 'manual'" class="csd-btn csd-btn-submit" :disabled="submitting" @click="handleSubmit">
+=== frontend-vite/src/views/purchase-plan/components/ImportPanel.vue ===
+  L17 [交互元素缺少 aria-lab]: <button class="csd-inline-btn" @click.stop="dlTpl">模板</button>
+  L18 [交互元素缺少 aria-lab]: <button class="csd-inline-btn csd-inline-btn-primary" :disabled="!file || uploading" @click.stop="doUpload">
+  L26 [交互元素缺少 aria-lab]: <input ref="fileInp" type="file" accept=".xlsx,.xls,.csv" hidden @change="onFile" />
+=== frontend-vite/src/views/purchase-plan/components/PlanDetailDialog.vue ===
+  L9 [交互元素缺少 aria-lab]: <button :class="['sp-modal-tab', { 'sp-modal-tab-active': modalTab === 'plans' }]" @click="modalTab = 'plans'">计划明细</button>
+  L10 [交互元素缺少 aria-lab]: <button :class="['sp-modal-tab', { 'sp-modal-tab-active': modalTab === 'records' }]" @click="modalTab = 'records'">出货记录</button>
+  L20 [交互元素缺少 aria-lab]: <button class="sp-modal-export-btn" @click="exportDayCSV"><FontAwesomeIcon icon="download" aria-hidden="true" /> 导出当日</button>
+=== frontend-vite/src/views/purchase-plan/components/PurchasePlanDailyTab.vue ===
+  L4 [交互元素缺少 aria-lab]: <div v-else-if="isError" class="sp-empty"><FontAwesomeIcon icon="exclamation-circle" aria-hidden="true" />加载失败 <button class="sp-retry-btn" 
+=== frontend-vite/src/views/purchase-plan/components/PurchasePlanMonthlySummary.vue ===
+  L4 [交互元素缺少 aria-lab]: <div v-else-if="error" class="sp-empty"><FontAwesomeIcon icon="exclamation-circle" aria-hidden="true" />加载失败 <button class="sp-retry-btn" @c
+=== frontend-vite/src/views/purchase/components/CompletedOrdersAdvancedFilter.vue ===
+  L35 [交互元素缺少 aria-lab]: <button class="coq-btn coq-btn-ghost coq-advanced-reset" @click="$emit('resetFilters')">
+=== frontend-vite/src/views/purchase/components/CompletedOrdersSearchBar.vue ===
+  L65 [交互元素缺少 aria-lab]: <button class="coq-btn coq-btn-primary coq-search-go" @click="$emit('search')">
+=== frontend-vite/src/views/purchase/components/CompletedOrdersToolbar.vue ===
+  L8 [交互元素缺少 aria-lab]: <button class="coq-btn coq-btn-ghost" @click="$emit('toggleFilter')">
+  L12 [交互元素缺少 aria-lab]: <button class="coq-btn coq-btn-primary" @click="$emit('export')">
+=== frontend-vite/src/views/purchase/components/OrderDetailModal.vue ===
+  L38 [交互元素缺少 aria-lab]: <button class="odm-close" @click="$emit('close')">
+=== frontend-vite/src/views/production/components/EntrySidebar.vue ===
+  L2 [交互元素缺少 aria-lab]: <aside class="pr-entry-sidebar">
+  L6 [交互元素缺少 aria-lab]: <button v-if="recentProducts.length" type="button" class="pr-entry-side-clear" @click="emit('clear')">清空</button>
+=== frontend-vite/src/views/production/components/ProductionEntryDrawer.vue ===
+  L21 [交互元素缺少 aria-lab]: <button type="button" :class="['pr-date-chip', { active: selectedDate === todayLocal() }]" @click="selectedDateModel = todayLocal()">今日</but
+  L22 [交互元素缺少 aria-lab]: <button type="button" :class="['pr-date-chip', { active: selectedDate === prevDay(todayLocal()) }]" @click="selectedDateModel = prevDay(toda
+  L23 [交互元素缺少 aria-lab]: <input v-model="selectedDateModel" type="date" class="pr-entry-input pr-entry-date-input" />
+  L105 [交互元素缺少 aria-lab]: <button type="button" class="pr-entry-qty-pill" @click="adjustQty(-1)">−1</button>
+  L106 [交互元素缺少 aria-lab]: <button type="button" class="pr-entry-qty-pill" @click="adjustQty(1)">+1</button>
+  L153 [交互元素缺少 aria-lab]: <input v-model="keepAdding" type="checkbox" />
+  L160 [交互元素缺少 aria-lab]: <button type="button" class="pr-entry-btn-cancel" @click="closeEntryDrawer">取消</button>
+  L161 [交互元素缺少 aria-lab]: <button type="button" class="pr-entry-btn-submit" :disabled="isSubmitting" @click="handleSubmit">
+=== frontend-vite/src/views/production/components/ProductionToolbar.vue ===
+  L5 [交互元素缺少 aria-lab]: <button role="tab" :aria-selected="viewTab === 'daily'" :class="['pr-tab', { 'pr-tab-active': viewTab === 'daily' }]" @click="emit('update:v
+  L6 [交互元素缺少 aria-lab]: <button role="tab" :aria-selected="viewTab === 'monthly'" :class="['pr-tab', { 'pr-tab-active': viewTab === 'monthly' }]" @click="emit('upda
+  L11 [交互元素缺少 aria-lab]: <input v-model="dateRefModel" type="date" class="pr-date-input" />
+  L13 [交互元素缺少 aria-lab]: <button class="pr-today-btn" @click="emit('today')">今天</button>
+  L22 [交互元素缺少 aria-lab]: <button class="pr-action-btn pr-action-primary" @click="emit('open-entry')">
+  L25 [交互元素缺少 aria-lab]: <button class="pr-action-btn" @click="emit('export')">
+=== frontend-vite/src/views/product/components/BomCopyDialog.vue ===
+  L16 [交互元素缺少 aria-lab]: <input v-model="searchKeyword" type="text" class="pd-input" placeholder="输入产品名称或条码进行搜索" name="search" autocomplete="off" @keydown.enter="emi
+  L18 [交互元素缺少 aria-lab]: <div class="mt-2"><button class="pd-btn pd-btn-primary pd-btn-sm" @click="emit('search')"><FontAwesomeIcon icon="search" class="me-2" aria-h
+  L35 [交互元素缺少 aria-lab]: <input v-model="overwrite" type="checkbox" class="form-check-input" />
+  L46 [交互元素缺少 aria-lab]: <button class="bom-btn-cancel" @click="open = false">取消</button>
+  L47 [交互元素缺少 aria-lab]: <button class="bom-btn-save" :disabled="!sourceProductId" @click="emit('confirm')"><FontAwesomeIcon icon="check" class="me-2" aria-hidden="t
+=== frontend-vite/src/views/product/components/BomEditor.vue ===
+  L13 [交互元素缺少 aria-lab]: <button v-for="tab in bomTabs" :key="tab.key" class="bom-tab-v2" :class="{ active: currentBomCategory === tab.key }" @click="switchBomTab(ta
+  L46 [交互元素缺少 aria-lab]: <button class="bom-btn-copy-v2" :disabled="quickCopyLoading" @click="quickCopyBom"><FontAwesomeIcon icon="copy" aria-hidden="true" />复制BOM</
+  L47 [交互元素缺少 aria-lab]: <button class="bom-btn-add-v2" @click="addBomItem"><FontAwesomeIcon icon="plus" aria-hidden="true" />添加物料</button>
+  L71 [交互元素缺少 aria-lab]: <td><input v-model="item.name" type="text" class="bom-table-input" placeholder="输入物料名称" name="material-name" autocomplete="off" /></td>
+  L72 [交互元素缺少 aria-lab]: <td><input v-model="item.specification" type="text" class="bom-table-input" placeholder="输入规格型号" name="specification" autocomplete="off" /><
+  L74 [交互元素缺少 aria-lab]: <select v-model="item.unit" class="bom-table-select">
+  L79 [交互元素缺少 aria-lab]: <td><input v-model="item.supplier_name" type="text" class="bom-table-input" placeholder="输入供应商名称" name="supplier-name" autocomplete="off" />
+  L80 [交互元素缺少 aria-lab]: <td><input v-model.number="item.usage" type="number" class="bom-table-input" step="0.01" min="0" name="quantity" autocomplete="off" /></td>
+  L81 [交互元素缺少 aria-lab]: <td><input v-model="item.remark" type="text" class="bom-table-input" placeholder="输入备注" name="remark" autocomplete="off" /></td>
+  L99 [交互元素缺少 aria-lab]: <button class="bom-btn-cancel" @click="bomDialogVisible = false">取消</button>
+  L100 [交互元素缺少 aria-lab]: <button class="bom-btn-save" @click="saveBom"><FontAwesomeIcon icon="save" aria-hidden="true" />保存BOM</button>
+=== frontend-vite/src/views/product/components/ProductEditDialog.vue ===
+  L17 [交互元素缺少 aria-lab]: <input v-model="editForm.name" type="text" class="pd-input" required placeholder="请输入产品名称" name="product-name" autocomplete="off" />
+  L24 [交互元素缺少 aria-lab]: <input v-model="editForm.barcode" type="text" class="pd-input" placeholder="例如：6958085574210" name="barcode" autocomplete="off" />
+  L31 [交互元素缺少 aria-lab]: <input v-model.number="editForm.price" type="number" class="pd-input" step="0.01" min="0" placeholder="请输入产品价格" name="price" autocomplete="o
+  L38 [交互元素缺少 aria-lab]: <select v-model="editForm.factory" class="pd-input pd-select" name="edit-factory">
+  L58 [<img> 标签缺少 alt ]: <img :src="resolveStaticUrl(editForm.image)" class="pd-thumb-preview" @click.stop="emit('open-image', editForm.image)" />
+  L64 [交互元素缺少 aria-lab]: <input ref="editImageInputRef" type="file" style="display: none" accept="image/*" name="image" @change="onEditImageSelect" />
+  L70 [交互元素缺少 aria-lab]: <button class="bom-btn-cancel" @click="editDialogVisible = false">取消</button>
+  L71 [交互元素缺少 aria-lab]: <button class="bom-btn-save" :disabled="editSubmitting" @click="handleEditSave">
+=== frontend-vite/src/views/product/components/ProductForm.vue ===
+  L11 [交互元素缺少 aria-lab]: <input v-model="form.name" type="text" class="pd-input" required placeholder="例如：小熊毛绒玩具" name="product-name" autocomplete="off" />
+  L18 [交互元素缺少 aria-lab]: <input v-model="form.barcode" type="text" class="pd-input" placeholder="例如：6958085574210" name="barcode" autocomplete="off" />
+  L25 [交互元素缺少 aria-lab]: <input v-model.number="form.price" type="number" class="pd-input" step="0.01" min="0" placeholder="请输入产品价格" name="price" autocomplete="off" 
+  L32 [交互元素缺少 aria-lab]: <select v-model="form.factory" class="pd-input pd-select" name="factory">
+  L52 [<img> 标签缺少 alt ]: <img :src="resolveStaticUrl(form.image)" class="pd-thumb-preview" @click.stop="emit('open-image', form.image)" />
+  L58 [交互元素缺少 aria-lab]: <input ref="imageInputRef" type="file" style="display: none" accept="image/*" name="image" @change="onImageSelect" />
+  L80 [交互元素缺少 aria-lab]: import { getErrorMessage } from '@/types/errors'
+  L81 [交互元素缺少 aria-lab]: import ProductBatchImport from './ProductBatchImport.vue'
+  L85 [交互元素缺少 aria-lab]: }>()
+  L88 [交互元素缺少 aria-lab]: 'open-image': [src: string]
+=== frontend-vite/src/views/product/components/ProductTable.vue ===
+  L6 [交互元素缺少 aria-lab]: <select :value="`${sortBy}-${sortOrder}`" class="pd-sort" @change="onSortChange">
+=== frontend-vite/src/views/pattern-room/components/CustomerGroupList.vue ===
+  L117 [<img> 标签缺少 alt ]: }>()
+=== frontend-vite/src/views/pattern-room/components/PartFormDialog.vue ===
+  L168 [交互元素缺少 aria-lab]: <button type="button" class="add-row-btn" @click="addRow">
+=== frontend-vite/src/views/pattern-room/components/PatternMakerSelect.vue ===
+  L25 [交互元素缺少 aria-lab]: <button type="button" class="pjf-maker-option-name" @click="emit('select', pm.id)">
+  L39 [交互元素缺少 aria-lab]: <button type="button" class="pjf-role-add" @click="addMakerInputOpen = true">
+  L52 [交互元素缺少 aria-lab]: <button type="button" class="pjf-role-add" @click="confirmAddMaker">
+  L55 [交互元素缺少 aria-lab]: <button type="button" class="pjf-maker-cancel" @click="cancelAddMaker">
+=== frontend-vite/src/views/pattern-room/components/ProjectCardItem.vue ===
+  L116 [<img> 标签缺少 alt ]: * 不再对同一 URL 重复发起 <img> 请求（避免每次进入页面重复打 404）。
+=== frontend-vite/src/views/pattern-room/components/ProjectFormDialog.vue ===
+  L32 [交互元素缺少 aria-lab]: <textarea v-model="form.remark" class="pjf-textarea" rows="3" placeholder="项目备注..." />
+=== frontend-vite/src/views/pattern-room/components/ProjectImageUpload.vue ===
+  L14 [交互元素缺少 aria-lab]: <input type="file" accept="image/jpeg,image/png,image/webp" class="pjf-file-input" @change="onFileChange" />
+=== frontend-vite/src/views/pattern-room/components/RoleListEditor.vue ===
+  L20 [交互元素缺少 aria-lab]: <button type="button" class="pjf-role-add" @click="roleNames.push('')">
+=== frontend-vite/src/views/outsource/components/OutsourcePresetTab.vue ===
+  L58 [交互元素缺少 aria-lab]: <button class="osp-add-btn" :disabled="saving" @click="openAddDialog(card)">
+=== frontend-vite/src/views/material-calculator/components/CalcResultColumn.vue ===
+  L20 [交互元素缺少 aria-lab]: <button class="mc-category-header" @click="collapsed[cat.key] = !collapsed[cat.key]">
+=== frontend-vite/src/views/material/components/HistoryTab.vue ===
+  L38 [交互元素缺少 aria-lab]: <div class="mr-action-group"><button type="button" class="mr-action-btn mr-action-view" @click="emit('view-detail', (row as Registration).id
+=== frontend-vite/src/views/material/components/MaterialDetailDialog.vue ===
+  L28 [交互元素缺少 aria-lab]: <button v-if="canManage && i.received_quantity < i.ordered_quantity" class="mr-btn mr-btn-success mr-btn-sm" @click="$emit('openReceive', i)
+=== frontend-vite/src/views/material/components/ProgressTab.vue ===
+  L59 [交互元素缺少 aria-lab]: <div class="mr-action-group"><button type="button" class="mr-action-btn mr-action-view" @click="emit('view-supplier', row.supplier_name || '
+=== frontend-vite/src/views/material/components/ReceiveDialog.vue ===
+  L10 [交互元素缺少 aria-lab]: <div class="mr-fg2"><label>本次收货数量</label><input type="number" v-model.number="qty" min="0.01" step="0.01" placeholder="输入本次收货数量"></div>
+  L11 [交互元素缺少 aria-lab]: <div class="mr-fg2"><label>备注</label><textarea v-model="remark" rows="2" placeholder="可选备注..."></textarea></div>
+  L13 [交互元素缺少 aria-lab]: <button class="mr-btn mr-btn-ghost" @click="$emit('update:open', false)">取消</button>
+  L14 [交互元素缺少 aria-lab]: <button class="mr-btn mr-btn-success" @click="onSubmit"><FontAwesomeIcon icon="check" /> 确认收货</button>
+=== frontend-vite/src/views/material/components/SupplierDialog.vue ===
+  L25 [交互元素缺少 aria-lab]: <button v-if="canManage && m.received < m.ordered && m.subItems.length" class="mr-btn mr-btn-success" @click="$emit('openReceiveBySubItems',
+=== frontend-vite/src/views/customer-order/components/EditOrderModal.vue ===
+  L27 [<img> 标签缺少 alt ]: <img v-if="detailData.product?.image" :src="detailData.product.image" class="oe-product-thumb" />
+  L86 [交互元素缺少 aria-lab]: <input type="number" class="oe-stepper-input" v-model.number="editForm.quantity" min="1" step="1" autocomplete="off" />
+  L98 [交互元素缺少 aria-lab]: <input type="number" class="oe-stepper-input" v-model.number="editForm.deductQuantity" min="0" step="1" autocomplete="off" />
+  L108 [交互元素缺少 aria-lab]: <textarea class="oe-textarea" v-model="editForm.note" rows="2" placeholder="输入备注信息…" />
+=== frontend-vite/src/views/customer-order/components/EditStagedModal.vue ===
+  L21 [交互元素缺少 aria-lab]: <input type="number" class="form-number-input" v-model.number="editStagedData.quantity" min="1" max="9999999" step="1" style="width: 100%" n
+  L25 [交互元素缺少 aria-lab]: <input type="number" class="form-number-input" v-model.number="editStagedData.deductQuantity" min="0" :max="Math.min(editStagedData.quantity
+  L32 [交互元素缺少 aria-lab]: <textarea v-model="editStagedData.note" rows="2" class="co-textarea" />
+=== frontend-vite/src/views/customer-order/components/OrderInputPanel.vue ===
+  L6 [交互元素缺少 aria-lab]: <button :class="['co-type-btn', isOrder && 'active']" @click="form.type = 'order'">
+  L9 [交互元素缺少 aria-lab]: <button :class="['co-type-btn', !isOrder && 'active']" @click="form.type = 'stockin'">
+  L81 [交互元素缺少 aria-lab]: <input type="number" class="form-number-input" v-model.number="form.quantity" min="1" max="9999999" step="1" style="width: 100%" name="quant
+  L141 [交互元素缺少 aria-lab]: </div>
+  L142 [交互元素缺少 aria-lab]: </div>
+=== frontend-vite/src/views/customer/components/CustomerFormDialog.vue ===
+  L6 [交互元素缺少 aria-lab]: <input v-model="form.name" class="cu-form-input" required placeholder="请输入客户名称" name="customer-name" autocomplete="off" />
+  L9 [交互元素缺少 aria-lab]: <div class="cu-form-group"><label>联系人</label><input v-model="form.contact" class="cu-form-input" placeholder="联系人姓名" name="contact" autocomp
+  L10 [交互元素缺少 aria-lab]: <div class="cu-form-group"><label>联系电话</label><input v-model="form.phone" class="cu-form-input" placeholder="联系电话" name="phone" autocomplete
+  L12 [交互元素缺少 aria-lab]: <div class="cu-form-group"><label>地址</label><input v-model="form.address" class="cu-form-input" placeholder="详细地址" name="address" autocomple
+  L15 [交互元素缺少 aria-lab]: <textarea v-model="form.note" rows="3" placeholder="选填" class="cu-form-textarea" style="resize: none" />
+  L19 [交互元素缺少 aria-lab]: <button class="cu-action-btn" @click="emit('update:open', false)">取消</button>
+  L20 [交互元素缺少 aria-lab]: <button class="cu-action-btn cu-action-primary" :disabled="submitting" @click="emit('submit')">
+=== frontend-vite/src/views/customer/components/CustomerTable.vue ===
+  L10 [交互元素缺少 aria-lab]: <button class="cu-action-btn cu-action-primary" @click="emit('add')">立即添加</button>
+=== frontend-vite/src/views/case/components/CaseStockEntryPanel.vue ===
+  L46 [交互元素缺少 aria-lab]: <input type="number" class="cs-input" v-model.number="form.quantity" min="1" step="1" />
+  L52 [交互元素缺少 aria-lab]: <textarea v-model="form.note" class="cs-textarea" rows="2" :placeholder="mode === 'stockin' ? '例如：批量入库' : '例如：批量出库'" />
+  L117 [交互元素缺少 aria-lab]: const showBatchUpload = defineModel<boolean>('showBatchUpload', { default: false })
+  L120 [交互元素缺少 aria-lab]: const form = defineModel<CaseStockFormState>('form', { required: true })
+=== frontend-vite/src/views/case/components/CaseStockRecordSection.vue ===
+  L9 [交互元素缺少 aria-lab]: <button class="cs-action-btn cs-action-outline" @click="showFilter = !showFilter">
+  L28 [交互元素缺少 aria-lab]: <button class="cs-action-btn cs-action-primary" @click="emit('search')">
+=== frontend-vite/src/views/batch/components/BatchWhitelistModal.vue ===
+  L7 [交互元素缺少 aria-lab]: <button class="bt-whitelist-close" @click="showWhitelistModal = false">&times;</button>
+  L11 [交互元素缺少 aria-lab]: <input type="checkbox" :value="c" v-model="whitelistEdit" />
+=== frontend-vite/src/views/backup/components/ServerBackupList.vue ===
+  L28 [交互元素缺少 aria-lab]: <button class="bk-icon-btn bk-icon-btn-primary" :disabled="restoringFile === b.filename" @click="emit('restore', b.filename)" title="恢复">
+  L31 [交互元素缺少 aria-lab]: <button class="bk-icon-btn bk-icon-btn-danger" :disabled="deletingFile === b.filename" @click="emit('delete', b.filename)" title="删除">
+=== frontend-vite/src/views/approval/components/ApprovalTable.vue ===
+  L36 [交互元素缺少 aria-lab]: <button class="ap-action-btn ap-action-success" :disabled="actionId === row.id" @click="emit('approve', row)">
+  L39 [交互元素缺少 aria-lab]: <button class="ap-action-btn ap-action-danger" @click="emit('reject', row)">驳回</button>
+=== frontend-vite/src/views/approval/components/RejectDialog.vue ===
+  L10 [交互元素缺少 aria-lab]: <button class="ap-action-btn" @click="emit('update:open', false)">取消</button>
+  L11 [交互元素缺少 aria-lab]: <button class="ap-action-btn ap-action-danger" :disabled="saving" @click="emit('confirm')">
+=== frontend-vite/src/mobile/components/MActionSheet.vue ===
+  L16 [交互元素缺少 aria-lab]: <button class="m-action-cancel" @click="handleCancel">取消</button>
+=== frontend-vite/src/mobile/components/MFilePicker.vue ===
+  L3 [交互元素缺少 aria-lab]: <button class="m-file-trigger" @click="triggerInput">
+  L22 [交互元素缺少 aria-lab]: <button class="m-file-remove" @click="removeFile(i)">&times;</button>
+=== frontend-vite/src/mobile/components/MSearchBar.vue ===
+  L15 [交互元素缺少 aria-lab]: <button v-if="modelValue" class="m-search-clear" @click="handleClear">
+=== frontend-vite/src/mobile/views/case/MCaseView.vue ===
+  L12 [交互元素缺少 aria-lab]: <select v-model="form.customer" class="m-select">
+  L23 [交互元素缺少 aria-lab]: <input v-model.number="form.quantity" type="number" min="1" class="m-input" />
+  L27 [交互元素缺少 aria-lab]: <input v-model="form.note" type="text" class="m-input" placeholder="可选" />
+  L29 [交互元素缺少 aria-lab]: <button class="m-submit-btn" @click="handleStockSubmit">{{ stockMode === 'stockin' ? '入库' : '出库' }}</button>
+=== frontend-vite/src/mobile/views/dashboard/DashboardMobile.vue ===
+  L24 [交互元素缺少 aria-lab]: <button class="m-refresh-btn" @click="refresh">
+  L33 [交互元素缺少 aria-lab]: <button class="m-error-retry" @click="loadData">重试</button>
+=== frontend-vite/src/mobile/views/login/MLoginView.vue ===
+  L39 [交互元素缺少 aria-lab]: <button type="submit" class="m-login-btn" :disabled="submitting || !username || !password">
+=== frontend-vite/src/mobile/views/material-calculator/MMaterialCalculatorView.vue ===
+  L5 [交互元素缺少 aria-lab]: <button class="m-nav-btn" @click="handleCalculate" :disabled="calculating">
+  L15 [交互元素缺少 aria-lab]: <button v-if="orderItems.length" class="m-text-btn" @click="clearAll">清空</button>
+  L26 [交互元素缺少 aria-lab]: <button class="m-qty-btn" @click="decQty(item)">−</button>
+  L27 [交互元素缺少 aria-lab]: <input v-model.number="item.quantity" type="number" min="0" class="m-qty-input" @input="onQtyInput(item)" />
+  L28 [交互元素缺少 aria-lab]: <button class="m-qty-btn" @click="incQty(item)">+</button>
+  L29 [交互元素缺少 aria-lab]: <button class="m-del-btn" @click="removeProduct(item.product_id)">✕</button>
+=== frontend-vite/src/mobile/views/production/MProductionView.vue ===
+  L8 [交互元素缺少 aria-lab]: <button class="m-date-btn" @click="prevDate">&lsaquo;</button>
+  L10 [交互元素缺少 aria-lab]: <button class="m-date-btn" @click="nextDate">&rsaquo;</button>
+=== frontend-vite/src/mobile/views/purchase/MPurchaseView.vue ===
+  L48 [交互元素缺少 aria-lab]: <button v-if="unprocessed?.orders?.length" class="m-fab" @click="handleOneClick">
+=== frontend-vite/src/mobile/views/shipment/MShipmentView.vue ===
+  L7 [交互元素缺少 aria-lab]: <button class="m-date-btn" @click="prevMonth">&laquo;</button>
+  L9 [交互元素缺少 aria-lab]: <button class="m-date-btn" @click="nextMonth">&raquo;</button>
+=== frontend-vite/src/layouts/components/AppSidebar.vue ===
+  L2 [交互元素缺少 aria-lab]: <aside :class="['sb-sidebar', { collapsed }]">
+=== frontend-vite/src/components/backup/FileRestorePanel.vue ===
+  L30 [交互元素缺少 aria-lab]: import type { RestoreResult } from '@/components/backup/RestoreProgressBar.vue'
+  L75 [交互元素缺少 aria-lab]: </style>
+=== frontend-vite/src/components/backup/IntegrityCheckPanel.vue ===
+  L12 [交互元素缺少 aria-lab]: <button class="bk-check-close" @click="$emit('close')"><FontAwesomeIcon icon="times" /></button>
+=== frontend-vite/src/components/ui/UiButton.vue ===
+  L2 [交互元素缺少 aria-lab]: <button :class="buttonClasses" :disabled="disabled" :type="htmlType">
+=== frontend-vite/src/components/ui/UiPagination.vue ===
+  L20 [交互元素缺少 aria-lab]: <button class="ui-page-btn" :disabled="currentPage >= totalPages" aria-label="下一页" @click="go(currentPage + 1)">
+=== frontend-vite/src/components/ui/UiUpload.vue ===
+  L14 [交互元素缺少 aria-lab]: <button type="button" class="w-full text-left" :disabled="disabled" @click="triggerUpload">

@@ -1,7 +1,8 @@
-import os
 import hashlib
+import os
 import time
 from datetime import datetime
+
 import psycopg2
 
 print("=" * 50)

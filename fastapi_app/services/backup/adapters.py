@@ -67,7 +67,7 @@ class PostgresAdvisoryLockAdapter:
                     text("SELECT pg_advisory_unlock(:lock_id)"),
                     {"lock_id": self.RESTORE_LOCK_ID},
                 )
-            except Exception as unlock_exc:  # noqa: BLE001
+            except Exception as unlock_exc:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
                 logger.warning("释放 advisory lock 失败: %s", unlock_exc)
         return None
 
@@ -93,8 +93,8 @@ class ExistingComponentRestoreAdapter(ComponentRestorePort):
         confirm_sensitive: bool,
         reporter: ProgressReporter | None,
     ) -> ComponentsRestoreResult:
-        from fastapi_app.services.backup_service import restore_non_dependent_components
         from fastapi_app.services.backup.types import RestorePhase
+        from fastapi_app.services.backup_service import restore_non_dependent_components
 
         if reporter is not None:
             await reporter.report(RestorePhase.RESTORE_COMPONENTS, 0.0, "开始恢复非依赖组件...")
@@ -130,7 +130,7 @@ class ExistingEngineLifecycleAdapter(EngineLifecycle):
         if _async_engine is not None:
             try:
                 await _async_engine.dispose()
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
                 logger.warning("释放数据库引擎失败: %s", exc)
 
     async def rebuild_pool(self) -> None:
@@ -154,14 +154,14 @@ class ExistingCacheInvalidatorAdapter(CacheInvalidator):
             from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
 
             await invalidate_related_caches(CacheDomain.ALL)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
             logger.warning("恢复后通用缓存清除失败: %s", exc)
 
         try:
             from fastapi_app.core.purchase_cache import invalidate_purchase_caches
 
             invalidate_purchase_caches()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
             logger.warning("恢复后采购缓存清除失败: %s", exc)
 
 
@@ -191,7 +191,7 @@ class BackupProgressReporterAdapter(ProgressReporter):
         phase_name = phase.value if isinstance(phase, RestorePhase) else phase
         try:
             await update_progress(self._task_id, phase_name, sub, detail)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
             logger.warning("进度上报失败: %s", exc)
 
 

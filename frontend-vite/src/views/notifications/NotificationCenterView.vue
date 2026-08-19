@@ -16,11 +16,11 @@
           已选 <strong>{{ selectedCount }}</strong> 条
         </div>
         <div class="nc-batch-actions">
-          <button class="nc-btn nc-btn--primary-sm" @click="handleBatchMarkRead">
+          <button class="nc-btn nc-btn--primary-sm" @click="handleBatchMarkRead" aria-label="标记已读">
             <FontAwesomeIcon icon="envelope-open-text" aria-hidden="true" />
             标记已读
           </button>
-          <button class="nc-btn nc-btn--ghost-sm" @click="clearSelection">
+          <button class="nc-btn nc-btn--ghost-sm" @click="clearSelection" aria-label="取消选择">
             取消选择
           </button>
         </div>

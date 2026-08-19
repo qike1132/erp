@@ -1,6 +1,7 @@
 """手动执行未应用的 schema 变更（stamp 前确保 DB 状态正确）"""
-from fastapi_app.core.database import get_sync_engine
 from sqlalchemy import text
+
+from fastapi_app.core.database import get_sync_engine
 
 eng = get_sync_engine()
 conn = eng.connect()

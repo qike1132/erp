@@ -14,20 +14,18 @@ storage_service 图片处理变体（压缩主图 / 缩略图 / 模糊占位图 
 from __future__ import annotations
 
 from io import BytesIO
-from pathlib import Path
 
 import pytest
 import pytest_asyncio
+
+# 测试专用数据库（conftest 计算得出，与开发库 erp_system 隔离，避免种子数据污染）
+from conftest import TEST_DATABASE_URL
 from PIL import Image
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from fastapi_app.core.config import settings
 from fastapi_app.services import storage_service as svc
 from fastapi_app.shared_models.file_record import FileRecord
-
-# 测试专用数据库（conftest 计算得出，与开发库 erp_system 隔离，避免种子数据污染）
-from conftest import TEST_DATABASE_URL
 
 # ==================== 测试辅助 ====================
 

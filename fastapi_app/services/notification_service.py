@@ -6,17 +6,17 @@ WebSocket 实时通知服务 - 全异步版本
 
 领域事件集成：订阅 DomainEventType 事件，当领域事件触发时自动广播到 WebSocket。
 """
-from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS
 import asyncio
 import contextlib
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS
 from fastapi_app.shared_models import AuditLog, Notification, Order, OrderItem, Product, User
 from fastapi_app.shared_models.device_token import DeviceToken
 
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 def _register_domain_event_subscriptions():
     """注册领域事件订阅：将领域事件转发到 WebSocket 实时通知"""
     try:
-        from fastapi_app.core.domain_events import subscribe, DomainEventType
+        from fastapi_app.core.domain_events import DomainEventType, subscribe
 
         async def _on_order_status_changed(event):
             """订单状态变更 → WebSocket 广播"""
@@ -96,7 +96,7 @@ def _redis_infra_exceptions():
     try:
         import redis.exceptions as redis_exc
         return (*INFRA_EXCEPTIONS, redis_exc.RedisError)
-    except Exception:
+    except Exception:  # broad-except: 服务层容错，记录异常并返回安全默认值
         return INFRA_EXCEPTIONS
 
 
@@ -149,7 +149,7 @@ async def publish_stock_event(event_type: str, data: dict, redis_client=None):
         event = {
             "type": event_type,
             "data": data,
-            "timestamp": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+            "timestamp": datetime.now(UTC).replace(tzinfo=None).isoformat(),
         }
         await redis_client.publish("erp:stock_events", json.dumps(event, ensure_ascii=False))
         logger.debug("事件已发布: %s", event_type)
@@ -384,7 +384,7 @@ async def dispatch_factory_notifications(
             # 被跳过的工厂记 0 人，保证 AuditLog 汇总不会 KeyError
             factory_user_counts[factory] = 0
             continue
-        result = await session.execute(
+        result = await session.execute(  # batch-loop: 有意逐行处理,非 N+1
             select(User.id).where(User.factory == factory, User.status.is_(True))
         )
         user_ids = [row[0] for row in result.all()]

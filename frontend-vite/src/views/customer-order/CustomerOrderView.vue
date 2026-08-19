@@ -4,10 +4,10 @@
       <!-- 卡片头部 -->
       <div class="page-card-header">
         <div class="co-tab-bar">
-          <button :class="['co-tab-btn', activeTab === 'input' && 'active']" @click="activeTab = 'input'">
+          <button :class="['co-tab-btn', activeTab === 'input' && 'active']" @click="activeTab = 'input'" aria-label="录入">
             录入
           </button>
-          <button :class="['co-tab-btn', activeTab === 'records' && 'active']" @click="activeTab = 'records'">
+          <button :class="['co-tab-btn', activeTab === 'records' && 'active']" @click="activeTab = 'records'" aria-label="记录查询">
             记录查询
           </button>
         </div>

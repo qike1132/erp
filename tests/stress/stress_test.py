@@ -155,7 +155,7 @@ class ResourceMonitor:
 
                 self.cpu_samples.append(cpu_percent)
                 self.memory_samples.append(memory.used / (1024 * 1024))  # MB
-            except Exception:
+            except Exception:  # noqa: S110
                 pass
 
             time.sleep(1)
@@ -375,7 +375,7 @@ class StressTestExecutor:
             error_message = str(e)
         except Exception as e:
             success = False
-            error_message = f"未知错误: {str(e)}"
+            error_message = f"未知错误: {e!s}"
 
         elapsed_ms = (time.time() - start_time) * 1000
 

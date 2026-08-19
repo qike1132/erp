@@ -65,7 +65,7 @@ class OutsourceProcessType(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), comment='更新时间'
     )
 
-    product: Mapped["Product"] = relationship('Product')
+    product: Mapped[Product] = relationship('Product')
 
     __table_args__ = (
         UniqueConstraint('product_id', 'process_type', name='uq_outsource_pt_product_process'),
@@ -119,9 +119,9 @@ class OrderOutsourceProcess(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), comment='更新时间'
     )
 
-    order: Mapped["Order"] = relationship('Order')
-    order_item: Mapped["OrderItem | None"] = relationship('OrderItem')
-    product: Mapped["Product"] = relationship('Product')
+    order: Mapped[Order] = relationship('Order')
+    order_item: Mapped[OrderItem | None] = relationship('OrderItem')
+    product: Mapped[Product] = relationship('Product')
 
     __table_args__ = (
         Index('ix_oosp_order_sort', 'order_id', 'sort_order'),

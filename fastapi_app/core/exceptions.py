@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, AsyncIterator
+from typing import Any
 
 from fastapi import HTTPException
 from sqlalchemy.exc import SQLAlchemyError
@@ -193,5 +194,5 @@ async def db_transaction(db: AsyncSession, *, commit: bool = True) -> AsyncItera
             for callback in callbacks:
                 try:
                     await callback()
-                except Exception as e:
+                except Exception as e:  # broad-except: 异常处理框架内部兜底
                     logger.error("post-commit 回调执行失败: %s", e, exc_info=True)

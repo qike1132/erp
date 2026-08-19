@@ -11,18 +11,19 @@
 - 退货创建（退货数量校验、并发安全）
 - 边界条件（负数数量、库存不足、超大数量）
 """
-import pytest
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime, timezone
+
+import pytest
 
 from fastapi_app.services.stock_service import (
     create_stockin_core,
-    update_stockin_core,
-    delete_stockin_core,
     create_stockout_core,
-    update_stockout_core,
-    delete_stockout_core,
     create_stockreturn_core,
+    delete_stockin_core,
+    delete_stockout_core,
+    update_stockin_core,
+    update_stockout_core,
 )
 
 
@@ -33,7 +34,7 @@ def make_mock_stockin(id_val=1, quantity=100):
     si.product_id = 1
     si.quantity = quantity
     si.customer = '测试客户'
-    si.stockin_date = datetime.now(timezone.utc)
+    si.stockin_date = datetime.now(UTC)
     si.note = ''
     si.order_type = 'regular'
     si.country = None
@@ -49,7 +50,7 @@ def make_mock_stockout(id_val=1, quantity=50):
     so.product_id = 1
     so.quantity = quantity
     so.customer = '测试客户'
-    so.stockout_date = datetime.now(timezone.utc)
+    so.stockout_date = datetime.now(UTC)
     so.note = ''
     so.order_type = 'regular'
     so.country = None
@@ -82,7 +83,7 @@ class TestCreateStockIn:
             product_id=1,
             quantity=50,
             customer='测试客户',
-            stockin_date=datetime.now(timezone.utc),
+            stockin_date=datetime.now(UTC),
             note='入库测试'
         )
 
@@ -96,7 +97,7 @@ class TestCreateStockIn:
         with pytest.raises(ValueError, match='入库数量必须大于 0'):
             await create_stockin_core(
                 mock_async_db, product_id=1, quantity=0,
-                customer='客户', stockin_date=datetime.now(timezone.utc), note=''
+                customer='客户', stockin_date=datetime.now(UTC), note=''
             )
 
     @pytest.mark.asyncio
@@ -105,7 +106,7 @@ class TestCreateStockIn:
         with pytest.raises(ValueError, match='入库数量必须大于 0'):
             await create_stockin_core(
                 mock_async_db, product_id=1, quantity=-10,
-                customer='客户', stockin_date=datetime.now(timezone.utc), note=''
+                customer='客户', stockin_date=datetime.now(UTC), note=''
             )
 
     @pytest.mark.asyncio
@@ -114,7 +115,7 @@ class TestCreateStockIn:
         with pytest.raises(ValueError, match='入库数量不能超过'):
             await create_stockin_core(
                 mock_async_db, product_id=1, quantity=100000000,
-                customer='客户', stockin_date=datetime.now(timezone.utc), note=''
+                customer='客户', stockin_date=datetime.now(UTC), note=''
             )
 
     @pytest.mark.asyncio
@@ -132,7 +133,7 @@ class TestCreateStockIn:
 
         result = await create_stockin_core(
             mock_async_db, product_id=1, quantity=100,
-            customer='海外客户', stockin_date=datetime.now(timezone.utc),
+            customer='海外客户', stockin_date=datetime.now(UTC),
             note='定制入库', order_type='custom', country='美国'
         )
 
@@ -162,7 +163,7 @@ class TestUpdateStockIn:
 
         result = await update_stockin_core(
             mock_async_db, stockin, quantity=80,
-            customer='新客户', stockin_date=datetime.now(timezone.utc),
+            customer='新客户', stockin_date=datetime.now(UTC),
             note='修改入库'
         )
 
@@ -181,7 +182,7 @@ class TestUpdateStockIn:
         with pytest.raises(ValueError, match='入库记录不存在'):
             await update_stockin_core(
                 mock_async_db, stockin, quantity=50,
-                customer='客户', stockin_date=datetime.now(timezone.utc), note=''
+                customer='客户', stockin_date=datetime.now(UTC), note=''
             )
 
     @pytest.mark.asyncio
@@ -198,7 +199,7 @@ class TestUpdateStockIn:
 
         result = await update_stockin_core(
             mock_async_db, stockin, quantity=100,
-            customer='客户', stockin_date=datetime.now(timezone.utc), note='不变'
+            customer='客户', stockin_date=datetime.now(UTC), note='不变'
         )
 
         assert result.quantity == 100
@@ -284,7 +285,7 @@ class TestCreateStockOut:
 
         result = await create_stockout_core(
             mock_async_db, product_id=1, quantity=50,
-            customer='测试客户', stockout_date=datetime.now(timezone.utc),
+            customer='测试客户', stockout_date=datetime.now(UTC),
             note='出库测试'
         )
 
@@ -303,7 +304,7 @@ class TestCreateStockOut:
         with pytest.raises(ValueError, match='库存不足'):
             await create_stockout_core(
                 mock_async_db, product_id=1, quantity=100,
-                customer='客户', stockout_date=datetime.now(timezone.utc), note=''
+                customer='客户', stockout_date=datetime.now(UTC), note=''
             )
 
     @pytest.mark.asyncio
@@ -327,7 +328,7 @@ class TestCreateStockOut:
             with pytest.raises(ValueError, match='没有可用的订单支持出货'):
                 await create_stockout_core(
                     mock_async_db, product_id=1, quantity=10,
-                    customer='客户', stockout_date=datetime.now(timezone.utc), note=''
+                    customer='客户', stockout_date=datetime.now(UTC), note=''
                 )
 
     @pytest.mark.asyncio
@@ -351,7 +352,7 @@ class TestCreateStockOut:
             with pytest.raises(ValueError, match='出货数量超过可出货量'):
                 await create_stockout_core(
                     mock_async_db, product_id=1, quantity=50,
-                    customer='客户', stockout_date=datetime.now(timezone.utc), note=''
+                    customer='客户', stockout_date=datetime.now(UTC), note=''
                 )
 
     @pytest.mark.asyncio
@@ -367,7 +368,7 @@ class TestCreateStockOut:
         with pytest.raises(ValueError, match='定制订单必须填写国家名称'):
             await create_stockout_core(
                 mock_async_db, product_id=1, quantity=10,
-                customer='客户', stockout_date=datetime.now(timezone.utc),
+                customer='客户', stockout_date=datetime.now(UTC),
                 note='', order_type='custom', country=None
             )
 
@@ -384,7 +385,7 @@ class TestUpdateStockOut:
         with pytest.raises(ValueError, match='订单抵扣的出货记录不能直接编辑'):
             await update_stockout_core(
                 mock_async_db, stockout, new_quantity=60,
-                customer='客户', stockout_date=datetime.now(timezone.utc), note=''
+                customer='客户', stockout_date=datetime.now(UTC), note=''
             )
 
     @pytest.mark.asyncio
@@ -410,7 +411,7 @@ class TestUpdateStockOut:
 
         result = await update_stockout_core(
             mock_async_db, stockout, new_quantity=30,
-            customer='新客户', stockout_date=datetime.now(timezone.utc), note='修改'
+            customer='新客户', stockout_date=datetime.now(UTC), note='修改'
         )
 
         assert result.quantity == 30
@@ -424,7 +425,7 @@ class TestUpdateStockOut:
         with pytest.raises(ValueError, match='出货数量不能小于已退货数量'):
             await update_stockout_core(
                 mock_async_db, stockout, new_quantity=30,
-                customer='客户', stockout_date=datetime.now(timezone.utc), note=''
+                customer='客户', stockout_date=datetime.now(UTC), note=''
             )
 
 
@@ -496,7 +497,7 @@ class TestCreateStockReturn:
 
         result = await create_stockreturn_core(
             mock_async_db, stockout_id=1, quantity=30,
-            return_date=datetime.now(timezone.utc), reason='质量问题', note='退货备注'
+            return_date=datetime.now(UTC), reason='质量问题', note='退货备注'
         )
 
         assert result is not None
@@ -508,7 +509,7 @@ class TestCreateStockReturn:
         with pytest.raises(ValueError, match='退货数量必须大于0'):
             await create_stockreturn_core(
                 mock_async_db, stockout_id=1, quantity=0,
-                return_date=datetime.now(timezone.utc)
+                return_date=datetime.now(UTC)
             )
 
     @pytest.mark.asyncio
@@ -517,7 +518,7 @@ class TestCreateStockReturn:
         with pytest.raises(ValueError, match='退货数量必须大于0'):
             await create_stockreturn_core(
                 mock_async_db, stockout_id=1, quantity=-5,
-                return_date=datetime.now(timezone.utc)
+                return_date=datetime.now(UTC)
             )
 
     @pytest.mark.asyncio
@@ -530,7 +531,7 @@ class TestCreateStockReturn:
         with pytest.raises(ValueError, match='出货记录不存在'):
             await create_stockreturn_core(
                 mock_async_db, stockout_id=999, quantity=10,
-                return_date=datetime.now(timezone.utc)
+                return_date=datetime.now(UTC)
             )
 
     @pytest.mark.asyncio
@@ -546,7 +547,7 @@ class TestCreateStockReturn:
         with pytest.raises(ValueError, match='订单抵扣的出货记录不能直接退货'):
             await create_stockreturn_core(
                 mock_async_db, stockout_id=1, quantity=10,
-                return_date=datetime.now(timezone.utc)
+                return_date=datetime.now(UTC)
             )
 
     @pytest.mark.asyncio
@@ -563,5 +564,5 @@ class TestCreateStockReturn:
         with pytest.raises(ValueError, match='退货数量超过可退数量'):
             await create_stockreturn_core(
                 mock_async_db, stockout_id=1, quantity=30,
-                return_date=datetime.now(timezone.utc)
+                return_date=datetime.now(UTC)
             )

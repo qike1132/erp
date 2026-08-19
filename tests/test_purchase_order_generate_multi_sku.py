@@ -16,8 +16,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
-import pytest
-
 from fastapi_app.services.purchase_order_generate import _iter_source_skus
 
 

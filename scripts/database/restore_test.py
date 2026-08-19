@@ -309,7 +309,7 @@ class DatabaseRestoreTest:
             try:
                 step()
             except Exception as e:
-                self.log(f'步骤执行出错: {str(e)}', 'ERROR')
+                self.log(f'步骤执行出错: {e!s}', 'ERROR')
                 self.results['failed'].append(step.__name__)
                 self.results['errors'].append(str(e))
 

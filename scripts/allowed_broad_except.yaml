@@ -1,0 +1,8 @@
+# scripts/allowed_broad_except.yaml
+# 裸/宽泛 except 白名单
+# 每行一条豁免，支持 file:line 或 file 两种形式。
+# 仅豁免非 Web 请求路径（桌面壳、迁移等），Web 业务代码不得豁免。
+
+# 桌面服务壳（server_manager.exe，非 Web 请求路径，39 处降级保留）
+fastapi_app/services/server_manager.py
+server_manager.py

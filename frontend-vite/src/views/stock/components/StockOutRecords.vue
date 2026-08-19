@@ -74,52 +74,7 @@
     </UiDataTable>
   </div>
 
-  <!-- 出货详情弹窗 -->
-  <UiDialog v-model:open="detailOpen" title="出货详情" max-width-class="max-w-[500px]">
-    <div v-if="detailData" class="so-detail-dialog">
-      <div class="so-detail-grid">
-        <div class="so-detail-cell">
-          <span class="so-detail-label">出货时间</span>
-          <span class="so-detail-value">{{ detailData.stockout_date || '-' }}</span>
-        </div>
-        <div class="so-detail-cell">
-          <span class="so-detail-label">客户</span>
-          <span class="so-detail-value">{{ detailData.customer || '-' }}</span>
-        </div>
-        <div class="so-detail-cell">
-          <span class="so-detail-label">产品</span>
-          <span class="so-detail-value">{{ detailData.product_name || detailData.product?.name || '-' }}</span>
-        </div>
-        <div class="so-detail-cell">
-          <span class="so-detail-label">69码</span>
-          <span class="so-detail-value so-detail-mono">{{ detailData.barcode || detailData.product?.barcode || '-' }}</span>
-        </div>
-        <div class="so-detail-cell">
-          <span class="so-detail-label">数量</span>
-          <span class="so-detail-value"><strong>{{ detailData.quantity }}</strong></span>
-        </div>
-        <div class="so-detail-cell">
-          <span class="so-detail-label">抵扣备货</span>
-          <span class="so-detail-value">{{ (detailData.deduct_quantity ?? 0) > 0 ? `抵扣: ${detailData.deduct_quantity}` : '否' }}</span>
-        </div>
-        <div class="so-detail-cell">
-          <span class="so-detail-label">订单类型</span>
-          <span class="so-detail-value">{{ detailData.order_type === 'custom' ? '定制' : '常规' }}</span>
-        </div>
-        <div v-if="detailData.country" class="so-detail-cell">
-          <span class="so-detail-label">国家</span>
-          <span class="so-detail-value">{{ detailData.country }}</span>
-        </div>
-      </div>
-      <div v-if="detailData.note" class="so-detail-note">
-        <span class="so-detail-label">备注</span>
-        <span class="so-detail-value">{{ detailData.note }}</span>
-      </div>
-    </div>
-    <template #footer>
-      <UiButton variant="outline" @click="detailOpen = false">关闭</UiButton>
-    </template>
-  </UiDialog>
+  <StockOutDetailDialog v-model:open="detailOpen" :data="detailData" />
 </template>
 
 <script setup lang="ts">
@@ -129,7 +84,7 @@ import UiSelect from '@/components/ui/UiSelect.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiDataTable from '@/components/ui/UiDataTable.vue'
 import type { TableColumn } from '@/components/ui/UiDataTable.vue'
-import UiDialog from '@/components/ui/UiDialog.vue'
+import StockOutDetailDialog from './StockOutDetailDialog.vue'
 
 interface StockoutRecord {
   id?: number
@@ -151,7 +106,6 @@ defineProps<{
   customerOptions: { value: string; label: string }[]
 }>()
 
-// === 出货记录列表 ===
 const showFilter = ref(false)
 const filterCustomer = ref('')
 const filterOrderType = ref('')
@@ -171,7 +125,6 @@ const filterDateRange = computed<[string, string] | null>({
   },
 })
 const currentPage = ref(1)
-/** 每页条数（可由分页器选择） */
 const perPage = ref(20)
 const totalPages = ref(1)
 const isLoading = ref(false)
@@ -183,7 +136,6 @@ const filterOrderTypeOptions = [
   { value: 'custom', label: '定制订单' },
 ]
 
-/** UiDataTable 列定义 */
 const stockoutColumns: TableColumn[] = [
   { field: 'stockout_date', header: '出货时间', align: 'center' },
   { field: 'customer', header: '客户', align: 'center' },
@@ -192,7 +144,6 @@ const stockoutColumns: TableColumn[] = [
   { field: 'actions', header: '操作', align: 'center' },
 ]
 
-/** UiDataTable 分页变化处理（PrimeVue page 为 0 索引） */
 function onPageChange(event: { page: number; rows: number }) {
   currentPage.value = event.page + 1
   perPage.value = event.rows
@@ -231,7 +182,6 @@ function resetFilter() {
   fetchStockouts()
 }
 
-// === 详情弹窗 ===
 const detailOpen = ref(false)
 const detailData = ref<StockoutRecord | null>(null)
 
@@ -240,7 +190,6 @@ function openDetail(item: StockoutRecord) {
   detailOpen.value = true
 }
 
-// === 暴露给父组件的方法 ===
 function loadIfEmpty() {
   if (stockoutRecords.value.length === 0) {
     fetchStockouts()
@@ -251,7 +200,6 @@ defineExpose({ loadIfEmpty, refresh: fetchStockouts })
 </script>
 
 <style scoped>
-/* ===== Records TAB ===== */
 .so-records-header {
   display: flex;
   align-items: center;
@@ -278,7 +226,6 @@ defineExpose({ loadIfEmpty, refresh: fetchStockouts })
   min-height: 0;
 }
 
-/* ===== Filter Panel ===== */
 .so-filter-panel {
   padding: 12px 20px;
   border-bottom: 1px solid var(--color-border, #cbd5e1);
@@ -312,7 +259,6 @@ defineExpose({ loadIfEmpty, refresh: fetchStockouts })
   color: var(--color-text-secondary);
 }
 
-/* ===== Table ===== */
 .so-cell-main {
   font-weight: 500;
   color: var(--color-text);
@@ -322,7 +268,6 @@ defineExpose({ loadIfEmpty, refresh: fetchStockouts })
   font-size: 12px;
 }
 
-/* ===== Action Buttons (records) ===== */
 .so-action-group {
   display: flex;
   gap: 4px;
@@ -349,7 +294,6 @@ defineExpose({ loadIfEmpty, refresh: fetchStockouts })
   transform: translateY(-1px);
 }
 
-/* ===== Loading & Empty States ===== */
 .so-state-placeholder {
   text-align: center;
   padding: 60px 20px;
@@ -372,7 +316,6 @@ defineExpose({ loadIfEmpty, refresh: fetchStockouts })
   color: var(--color-text-muted);
 }
 
-/* ===== Fetching Progress Bar ===== */
 .so-fetching-bar {
   height: 3px;
   background: var(--color-border-light);
@@ -389,72 +332,12 @@ defineExpose({ loadIfEmpty, refresh: fetchStockouts })
   100% { transform: translateX(400%); }
 }
 
-/* ===== Detail Dialog ===== */
-.so-detail-dialog {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.so-detail-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  border-radius: 12px;
-  overflow: hidden;
-}
-.so-detail-cell {
-  padding: 10px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  border-bottom: 1px solid var(--color-border-light, #e2e8f0);
-}
-.so-detail-cell:nth-child(odd) {
-  border-right: 1px solid var(--color-border-light, #e2e8f0);
-}
-.so-detail-cell:nth-last-child(-n+2) {
-  border-bottom: none;
-}
-.so-detail-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.so-detail-value {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--color-text);
-}
-.so-detail-mono {
-  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
-  font-size: 13px;
-  letter-spacing: 0.02em;
-}
-.so-detail-note {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 10px 16px;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  border-radius: 12px;
-}
-
-/* ===== Responsive ===== */
 @media (max-width: 767.98px) {
   .so-filter-row {
     flex-direction: column;
   }
   .so-filter-field {
     min-width: 100%;
-  }
-  .so-detail-grid {
-    grid-template-columns: 1fr;
-  }
-  .so-detail-cell:nth-child(odd) {
-    border-right: none;
   }
 }
 </style>

@@ -9,7 +9,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 # ==================== 类型别名 ====================
 
 ChangeType = Literal['add', 'modify', 'delete']

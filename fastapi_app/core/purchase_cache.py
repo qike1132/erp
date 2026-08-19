@@ -6,12 +6,13 @@
 - 跨进程失效：通过 Redis Pub/Sub 广播失效信号，各 worker 订阅并清除本地缓存
 """
 
-from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS
 import asyncio
 import contextlib
 import json
 import logging
 from urllib.parse import urlparse, urlunparse
+
+from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ async def invalidate_purchase_caches() -> int:
         from fastapi_app.core.cache import invalidate_local_cache
         count += invalidate_local_cache("orders:*")
     except (RuntimeError, *INFRA_EXCEPTIONS):
-        pass
+        pass  # defensive: 异常静默处理,不影响主流程
 
     await _async_publish_invalidation_signal()
 
@@ -56,7 +57,7 @@ async def _async_publish_invalidation_signal() -> None:
             return
         await client.publish(_CHANNEL, json.dumps({"scope": "purchase_caches"}))
     except (RuntimeError, *INFRA_EXCEPTIONS):
-        pass
+        pass  # defensive: 异常静默处理,不影响主流程
 
 
 def _clear_all_local_caches() -> int:
@@ -69,7 +70,7 @@ def _clear_all_local_caches() -> int:
         from fastapi_app.core.cache import invalidate_local_cache
         count += invalidate_local_cache("orders:*")
     except (RuntimeError, *INFRA_EXCEPTIONS):
-        pass
+        pass  # defensive: 异常静默处理,不影响主流程
     return count
 
 
@@ -130,7 +131,7 @@ async def _listen_loop() -> None:
                             if cleared:
                                 logger.debug("跨进程缓存失效：已清除 %d 条本地缓存", cleared)
                     except (json.JSONDecodeError, TypeError):
-                        pass
+                        pass  # defensive: 异常静默处理,不影响主流程
 
         except asyncio.CancelledError:
             break
@@ -143,9 +144,9 @@ async def _listen_loop() -> None:
                     await pubsub.unsubscribe(_CHANNEL)
                     await pubsub.close()
             except (RuntimeError, *INFRA_EXCEPTIONS):
-                pass
+                pass  # defensive: 异常静默处理,不影响主流程
             try:
                 if redis_client:
                     await redis_client.close()
             except (RuntimeError, *INFRA_EXCEPTIONS):
-                pass
+                pass  # defensive: 异常静默处理,不影响主流程

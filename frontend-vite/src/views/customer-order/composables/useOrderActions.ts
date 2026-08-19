@@ -44,9 +44,16 @@ interface StagingStockinItem {
   country?: string
 }
 
-/** 生成暂存项唯一标识（使用 crypto.randomUUID 确保无碰撞） */
+/**
+ * 生成暂存项唯一标识。
+ * crypto.randomUUID 仅在安全上下文（HTTPS/localhost）可用；
+ * 内网 HTTP 部署下它未定义，降级为「时间戳 + 随机数」以避免崩溃。
+ */
 function genUid(): string {
-  return crypto.randomUUID()
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}-${Math.random().toString(36).slice(2, 10)}`
 }
 
 export function useOrderActions(

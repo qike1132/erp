@@ -13,9 +13,10 @@ import os
 import struct
 import tempfile
 import zipfile
-from datetime import datetime, timezone
+from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from fastapi_app.services.backup.format_storage import BackupStorage
 from fastapi_app.services.backup.format_types import (
@@ -188,7 +189,7 @@ class DefaultBackupFormatStrategy(BackupFormatStrategy):
             {
                 "version": BACKUP_FORMAT_VERSION,
                 "backup_id": backup_id,
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(UTC).isoformat(),
                 "zip_size": total_size,
                 "encrypted": do_encrypt,
                 "format_version": BACKUP_FORMAT_VERSION,
@@ -355,7 +356,7 @@ class DefaultBackupFormatStrategy(BackupFormatStrategy):
                         raise BackupFormatError("备份已加密，需要提供解密密码")
                     return decrypt_backup(encrypted_bytes, password), True
                 except (json.JSONDecodeError, ValueError):
-                    pass
+                    pass  # defensive: 异常静默处理,不影响主流程
 
         # 尝试作为旧版裸密文解密
         try:
@@ -365,10 +366,10 @@ class DefaultBackupFormatStrategy(BackupFormatStrategy):
                     with zipfile.ZipFile(io.BytesIO(data)):
                         return data, False
                 except zipfile.BadZipFile:
-                    raise BackupFormatError("备份已加密，需要提供解密密码")
+                    raise BackupFormatError("备份已加密，需要提供解密密码") from None
             decrypted = decrypt_backup(data, password)
             return decrypted, True
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
             if isinstance(exc, BackupFormatError):
                 raise
             # 解密失败，尝试直接作为 ZIP 打开

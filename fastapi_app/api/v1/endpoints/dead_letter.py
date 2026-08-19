@@ -101,9 +101,9 @@ async def list_dead_letter(
         return {'total': total, 'offset': offset, 'limit': limit, 'entries': entries}
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
         logger.error('查询死信队列失败: %s', e)
-        raise HTTPException(500, f'查询失败: {e}')
+        raise HTTPException(500, f'查询失败: {e}') from e
 
 
 @router.post('/dead-letter/{task_id}/retry', response_model=DeadLetterRetryResponse, summary='重试死信队列中的失败任务')
@@ -138,9 +138,9 @@ async def retry_dead_letter_task(task_id: str, _user: User = Depends(require_per
         }
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
         logger.error('重试死信任务失败: %s', e)
-        raise HTTPException(500, f'重试失败: {e}')
+        raise HTTPException(500, f'重试失败: {e}') from e
 
 
 @router.delete('/dead-letter/{task_id}', response_model=DeadLetterRemoveResponse, summary='从死信队列中移除失败任务')
@@ -160,9 +160,9 @@ async def remove_dead_letter_task(task_id: str, _user: User = Depends(require_pe
         return {'status': 'removed', 'task_id': task_id}
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
         logger.error('移除死信任务失败: %s', e)
-        raise HTTPException(500, f'移除失败: {e}')
+        raise HTTPException(500, f'移除失败: {e}') from e
 
 
 @router.get('/dead-letter/stats', response_model=DeadLetterStatsResponse, summary='死信队列统计')
@@ -173,6 +173,6 @@ async def dead_letter_stats(_user: User = Depends(require_permission('admin'))):
         return {'total_failed': total, 'queue_key': DLQ_KEY}
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
         logger.error('死信队列统计失败: %s', e)
-        raise HTTPException(500, f'统计失败: {e}')
+        raise HTTPException(500, f'统计失败: {e}') from e

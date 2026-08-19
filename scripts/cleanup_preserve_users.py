@@ -4,13 +4,14 @@
 保留: user, permission, user_permission, device_token
 清除: 所有其他数据库表、Redis缓存、日志文件、临时文件、文件缓存
 """
-import os
 import shutil
 import sys
 from pathlib import Path
 
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
+
+import contextlib
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
@@ -98,7 +99,7 @@ def clear_database(db: Session):
             print(f'  ERR  {table:<40} {str(e)[:60]}')
 
     if failed_tables:
-        print(f'\n  重试失败的表 (TRUNCATE CASCADE)...')
+        print('\n  重试失败的表 (TRUNCATE CASCADE)...')
         for table in failed_tables:
             try:
                 db.execute(text(f'TRUNCATE TABLE {table} CASCADE'))
@@ -185,14 +186,12 @@ def clear_logs():
                 file_count += 1
         for d in sorted(log_dir.rglob('*'), reverse=True):
             if d.is_dir():
-                try:
+                with contextlib.suppress(OSError):
                     d.rmdir()
-                except OSError:
-                    pass
         if file_count > 0:
-            print(f'  OK   {str(log_dir.relative_to(project_root)):<50} {file_count:>5} files')
+            print(f'  OK   {log_dir.relative_to(project_root)!s:<50} {file_count:>5} files')
         else:
-            print(f'  -    {str(log_dir.relative_to(project_root)):<50}     0 files (empty)')
+            print(f'  -    {log_dir.relative_to(project_root)!s:<50}     0 files (empty)')
 
     if skipped_files:
         print(f'  (跳过 {skipped_files} 个被占用的文件)')
@@ -217,17 +216,17 @@ def clear_temp_files():
 
     for td in temp_dirs:
         if not td.exists():
-            print(f'  -    {str(td.relative_to(project_root)):<50} (not exists)')
+            print(f'  -    {td.relative_to(project_root)!s:<50} (not exists)')
             continue
         files = list(td.rglob('*'))
         file_count = sum(1 for f in files if f.is_file())
         if file_count > 0:
             shutil.rmtree(td)
             td.mkdir(parents=True, exist_ok=True)
-            print(f'  OK   {str(td.relative_to(project_root)):<50} {file_count:>5} files cleared')
+            print(f'  OK   {td.relative_to(project_root)!s:<50} {file_count:>5} files cleared')
             total_files += file_count
         else:
-            print(f'  -    {str(td.relative_to(project_root)):<50}     0 files (empty)')
+            print(f'  -    {td.relative_to(project_root)!s:<50}     0 files (empty)')
 
     root_files = list(project_root.iterdir())
     for pattern in temp_patterns:
@@ -276,7 +275,7 @@ def main():
     print('  ERP 数据清理工具 - 保留用户管理数据')
     print('=' * 70)
     print(f'  保留: {", ".join(sorted(KEEP_TABLES))}')
-    print(f'  清除: 其他所有数据库表、Redis缓存、日志、临时文件')
+    print('  清除: 其他所有数据库表、Redis缓存、日志、临时文件')
 
     engine = get_engine()
 

@@ -22,7 +22,7 @@
             <div class="mr-det-mat-right">
               <span v-if="m.received >= m.ordered" class="mr-status-completed"><FontAwesomeIcon icon="check-circle" /> 已完成</span>
               <span v-else class="mr-status-pending">未完成</span>
-              <button v-if="canManage && m.received < m.ordered && m.subItems.length" class="mr-btn mr-btn-success" @click="$emit('openReceiveBySubItems', m.subItems, m.name, m.ordered, m.received)" title="登记收货"><FontAwesomeIcon icon="box" /> 登记收货</button>
+              <button v-if="canManage && m.received < m.ordered && m.subItems.length" class="mr-btn mr-btn-success" @click="$emit('openReceiveBySubItems', m.subItems, m.name, m.ordered, m.received)" title="登记收货" aria-label="登记收货"><FontAwesomeIcon icon="box" /> 登记收货</button>
             </div>
           </div>
         </div>

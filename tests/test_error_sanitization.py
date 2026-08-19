@@ -2,7 +2,6 @@
 import os
 from unittest.mock import patch
 
-import pytest
 from fastapi_app.core.config import settings
 
 

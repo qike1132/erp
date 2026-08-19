@@ -35,12 +35,12 @@
       </template>
       <template #column-body-actions="{ row }">
         <div class="us-action-group">
-          <button class="us-action-btn us-action-primary" @click="openPermissionDialog(row as UserRow)">权限</button>
-          <button class="us-action-btn us-action-primary" @click="openEditDialog(row as UserRow)">编辑</button>
-          <button class="us-action-btn us-action-primary" :disabled="actionId === (row as UserRow).id" @click="handleToggle(row as UserRow)">
+          <button class="us-action-btn us-action-primary" @click="openPermissionDialog(row as UserRow)" aria-label="权限">权限</button>
+          <button class="us-action-btn us-action-primary" @click="openEditDialog(row as UserRow)" aria-label="编辑">编辑</button>
+          <button class="us-action-btn us-action-primary" :disabled="actionId === (row as UserRow).id" @click="handleToggle(row as UserRow)" :aria-label="(row as UserRow).status !== false ? '禁用' : '启用'">
             {{ (row as UserRow).status !== false ? '禁用' : '启用' }}
           </button>
-          <button class="us-action-btn us-action-danger" :disabled="actionId === (row as UserRow).id || (row as UserRow).is_super" @click="handleDelete(row as UserRow)">
+          <button class="us-action-btn us-action-danger" :disabled="actionId === (row as UserRow).id || (row as UserRow).is_super" @click="handleDelete(row as UserRow)" aria-label="删除">
             删除
           </button>
         </div>

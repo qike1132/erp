@@ -1,5 +1,6 @@
 from pathlib import Path
-from audit_tx_patterns import iter_handlers, detect_mode
+
+from audit_tx_patterns import detect_mode, iter_handlers
 
 path = Path("d:/erp_system/fastapi_app/api/v1/endpoints/auth.py")
 source = path.read_text(encoding="utf-8")

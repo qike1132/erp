@@ -6,11 +6,11 @@
 import calendar
 import io
 import logging
+from collections.abc import Iterable
 from datetime import date
-from typing import Iterable
 
 import openpyxl
-from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 

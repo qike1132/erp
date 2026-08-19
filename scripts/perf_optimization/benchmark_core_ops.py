@@ -5,7 +5,12 @@
 
 运行: python scripts/perf_optimization/benchmark_core_ops.py
 """
-import asyncio, json, os, sys, time, statistics
+import asyncio
+import json
+import os
+import statistics
+import sys
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -46,7 +51,6 @@ async def get_token(session):
         return token
 
 async def bench(session, method, path, token, body=None, rounds=ROUNDS):
-    import aiohttp
     headers = {"Authorization": f"Bearer {token}"}
     if body: headers["Content-Type"] = "application/json"
     result = BenchResult(name=path, category="")
@@ -152,7 +156,7 @@ async def run():
         # === 删除 ===
         print("\n--- 删除操作 ---")
         r = BenchResult(name="删除订单(最新)", category="删除")
-        for i in range(min(ROUNDS, 3)):
+        for _i in range(min(ROUNDS, 3)):
             start = time.perf_counter()
             try:
                 async with session.get(f"{API_BASE}/orders/list?page=1&per_page=1", headers={"Authorization":f"Bearer {token}"}) as resp:

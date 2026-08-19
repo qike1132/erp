@@ -1,6 +1,7 @@
 """检查新字段 available_stock_by_country"""
 import asyncio
 import sys
+
 sys.path.insert(0, r'd:\erp_system')
 
 from fastapi_app.core.database import _AsyncSessionLocal

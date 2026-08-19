@@ -7,7 +7,7 @@ JOIN OrderItem。当前依赖 Task 3 设置的兼容值。
 import contextlib
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import func, literal, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -84,7 +84,7 @@ async def set_whitelist(db: AsyncSession, customers: list[str], user_id: int):
     if config:
         config.config_value = value
         config.updated_by_id = user_id
-        config.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        config.updated_at = datetime.now(UTC).replace(tzinfo=None)
     else:
         db.add(OrderSyncConfig(config_key="order_batch_whitelist", config_value=value, description="订单批次号白名单客户"))
 
@@ -102,25 +102,7 @@ async def is_whitelisted(db: AsyncSession, customer: str) -> bool:
 
 
 
-async def get_batch_query_list(
-    db: AsyncSession,
-    *,
-    page: int = 1,
-    per_page: int = 50,
-    batch_no: str | None = None,
-    status: str | None = None,
-    customer: str | None = None,
-    keyword: str | None = None,
-) -> dict:
-    whitelist = await get_whitelist(db)
-
-    # ---- SQL 层 UNION ALL 分页 ----
-    # 修复：此前订单/备货两支各 LIMIT 5000 后内存合并排序，任一支超 5000 条即被截断，
-    # 导致分页窗口失真。现改为两支仅投影（排序日期 + 类型标记 + 主键），由数据库
-    # UNION ALL 统一 ORDER BY + OFFSET/LIMIT 确定页内记录，再按主键回表序列化，
-    # 过滤条件、字段映射与响应结构均与原实现保持一致。
-
-    # 支 1：订单（过滤条件与原实现逐条一致）
+def _build_batch_order_branch(whitelist, batch_no, status, customer, keyword):
     order_branch = select(
         Order.order_date.label('sort_date'),
         literal('order').label('record_type'),
@@ -140,8 +122,10 @@ async def get_batch_query_list(
         order_branch = order_branch.join(Product, Order.product_id == Product.id).where(
             or_(Order.order_no.ilike(kw), Product.name.ilike(kw), Product.barcode.ilike(kw))
         )
+    return order_branch
 
-    # 支 2：备货（无 is_deleted/batch_no/status 过滤，与原实现一致）
+
+def _build_batch_stockin_branch(whitelist, customer, keyword):
     stockin_branch = select(
         StockIn.stockin_date.label('sort_date'),
         literal('stockin').label('record_type'),
@@ -157,36 +141,10 @@ async def get_batch_query_list(
         stockin_branch = stockin_branch.join(Product, StockIn.product_id == Product.id).where(
             or_(StockIn.stockin_no.ilike(kw), Product.name.ilike(kw), Product.barcode.ilike(kw))
         )
+    return stockin_branch
 
-    # total = 两支各自 COUNT 之和（复用同一分支查询，过滤条件绝对一致，不受分页影响）
-    order_total = int((await db.execute(
-        select(func.count()).select_from(order_branch.subquery())
-    )).scalar() or 0)
-    stockin_total = int((await db.execute(
-        select(func.count()).select_from(stockin_branch.subquery())
-    )).scalar() or 0)
-    total = order_total + stockin_total
 
-    # UNION ALL 外层统一排序分页：
-    # - sort_date DESC NULLS LAST（与原内存排序"空日期排最后"一致）
-    # - 并列时 record_type 升序使订单在前（与原稳定排序"orders 先于 stockins"一致）、
-    #   record_id DESC 保证同键时结果稳定可复现
-    union_sq = order_branch.union_all(stockin_branch).subquery()
-    page_rows = (await db.execute(
-        select(union_sq.c.record_type, union_sq.c.record_id)
-        .order_by(
-            union_sq.c.sort_date.desc().nullslast(),
-            union_sq.c.record_type.asc(),
-            union_sq.c.record_id.desc(),
-        )
-        .offset((page - 1) * per_page)
-        .limit(per_page)
-    )).all()
-
-    page_order_ids = [rid for rtype, rid in page_rows if rtype == 'order']
-    page_stockin_ids = [rid for rtype, rid in page_rows if rtype == 'stockin']
-
-    # ---- 订单回表序列化（仅取页内记录，字段映射与原实现一致）----
+async def _serialize_batch_orders(db: AsyncSession, page_order_ids: list[int]) -> dict[int, dict]:
     serialized_orders: dict[int, dict] = {}
     if page_order_ids:
         orders = (await db.execute(
@@ -227,8 +185,10 @@ async def get_batch_query_list(
                 'record_type': 'order',
             })
             serialized_orders[o.id] = base_data
+    return serialized_orders
 
-    # ---- 备货回表序列化（字段映射与原实现一致）----
+
+async def _serialize_batch_stockins(db: AsyncSession, page_stockin_ids: list[int]) -> dict[int, dict]:
     serialized_stockins: dict[int, dict] = {}
     if page_stockin_ids:
         stockins = (await db.execute(
@@ -253,6 +213,66 @@ async def get_batch_query_list(
                 'is_locked': None,
                 'record_type': 'stockin',
             }
+    return serialized_stockins
+
+
+async def get_batch_query_list(
+    db: AsyncSession,
+    *,
+    page: int = 1,
+    per_page: int = 50,
+    batch_no: str | None = None,
+    status: str | None = None,
+    customer: str | None = None,
+    keyword: str | None = None,
+) -> dict:
+    whitelist = await get_whitelist(db)
+
+    # ---- SQL 层 UNION ALL 分页 ----
+    # 修复：此前订单/备货两支各 LIMIT 5000 后内存合并排序，任一支超 5000 条即被截断，
+    # 导致分页窗口失真。现改为两支仅投影（排序日期 + 类型标记 + 主键），由数据库
+    # UNION ALL 统一 ORDER BY + OFFSET/LIMIT 确定页内记录，再按主键回表序列化，
+    # 过滤条件、字段映射与响应结构均与原实现保持一致。
+
+    # 支 1：订单（过滤条件与原实现逐条一致）
+    order_branch = _build_batch_order_branch(whitelist, batch_no, status, customer, keyword)
+
+    # 支 2：备货（无 is_deleted/batch_no/status 过滤，与原实现一致）
+    stockin_branch = _build_batch_stockin_branch(whitelist, customer, keyword)
+
+    # total = 两支各自 COUNT 之和（复用同一分支查询，过滤条件绝对一致，不受分页影响）
+    order_total = int((await db.execute(
+        select(func.count()).select_from(order_branch.subquery())
+    )).scalar() or 0)
+    stockin_total = int((await db.execute(
+        select(func.count()).select_from(stockin_branch.subquery())
+    )).scalar() or 0)
+    total = order_total + stockin_total
+
+    # UNION ALL 外层统一排序分页：
+    # - sort_date DESC NULLS LAST（与原内存排序"空日期排最后"一致）
+    # - 并列时 record_type 升序使订单在前（与原稳定排序"orders 先于 stockins"一致）、
+    #   record_id DESC 保证同键时结果稳定可复现
+    union_sq = order_branch.union_all(stockin_branch).subquery()
+    page_rows = (await db.execute(
+        select(union_sq.c.record_type, union_sq.c.record_id)
+        .order_by(
+            union_sq.c.sort_date.desc().nullslast(),
+            union_sq.c.record_type.asc(),
+            union_sq.c.record_id.desc(),
+        )
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+    )).all()
+
+    page_order_ids = [rid for rtype, rid in page_rows if rtype == 'order']
+    page_stockin_ids = [rid for rtype, rid in page_rows if rtype == 'stockin']
+
+    # ---- 订单回表序列化（仅取页内记录，字段映射与原实现一致）----
+    serialized_orders = await _serialize_batch_orders(db, page_order_ids)
+
+    # ---- 备货回表序列化（字段映射与原实现一致）----
+    serialized_stockins = await _serialize_batch_stockins(db, page_stockin_ids)
 
     # ---- 按 UNION 页序组装，保持数据库排序结果 ----
     items = []
@@ -384,7 +404,7 @@ async def update_batch_no(
                     Order.is_deleted.isnot(True),
                 )
             )
-            updated_ids = [order_id] + list(sync_ids_result.scalars().all())
+            updated_ids = [order_id, *list(sync_ids_result.scalars().all())]
 
     effective_batch = batch_no or old_batch_no or ''
     _write_audit_log(
@@ -448,7 +468,7 @@ async def complete_batch(
     if not orders:
         raise ValueError(f"批次 {batch_no} 没有可完成的订单")
 
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(UTC).replace(tzinfo=None)
     completed = []
     failed_orders = []
 

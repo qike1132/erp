@@ -8,6 +8,7 @@ import App from './App.vue'
 import router from './router'
 import { initTokenCache } from './utils/secureStorage'
 import { isMobileDevice } from './composables/useDevice'
+import { devLog } from './utils/devLog'
 
 // 静默 Chrome 扩展导致的 runtime.lastError 噪音
 // 根因：Manifest V3 扩展的 content script 向已休眠的 background service worker
@@ -31,13 +32,13 @@ const app = createApp(App)
 const isMobile = isMobileDevice()
 
 if (import.meta.env.DEV) {
-  console.log(`[App] 启动模式: ${isMobile ? '移动端 UI' : 'PC端 UI'}`)
+  devLog(`[App] 启动模式: ${isMobile ? '移动端 UI' : 'PC端 UI'}`)
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.getRegistrations().then((regs) => {
       if (regs.length > 0) {
         console.warn(`[App] 检测到 ${regs.length} 个残留 Service Worker，开发模式下自动注销`)
-        regs.forEach((reg) => reg.unregister().then(() => console.log('[App] Service Worker 已注销:', reg.scope)))
+        regs.forEach((reg) => reg.unregister().then(() => devLog('[App] Service Worker 已注销:', reg.scope)))
       }
     }).catch(() => {})
   }

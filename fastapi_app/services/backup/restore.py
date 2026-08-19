@@ -66,7 +66,7 @@ async def restore_non_dependent_components(
                     *[task for _, task in async_tasks],
                     return_exceptions=True
                 )
-                for (component_name, _), result in zip(async_tasks, async_results):
+                for (component_name, _), result in zip(async_tasks, async_results, strict=False):
                     if isinstance(result, Exception):
                         results[component_name] = {'status': 'error', 'error': str(result)}
                         results['errors'].append(f'{component_name}: {result}')
@@ -80,7 +80,7 @@ async def restore_non_dependent_components(
                     *[loop.run_in_executor(None, lambda t=t: t[1]) for t in sync_tasks],
                     return_exceptions=True
                 )
-                for (component_name, _), result in zip(sync_tasks, sync_results):
+                for (component_name, _), result in zip(sync_tasks, sync_results, strict=False):
                     if isinstance(result, Exception):
                         results[component_name] = {'status': 'error', 'error': str(result)}
                         results['errors'].append(f'{component_name}: {result}')
@@ -90,7 +90,7 @@ async def restore_non_dependent_components(
 
             logger.info("非依赖组件并行恢复完成")
 
-        except Exception as e:
+        except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
             logger.error(f"并行恢复失败: {e}")
             results['errors'].append(f'并行恢复失败: {e}')
 
@@ -112,7 +112,8 @@ async def restore_from_zip(
         zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
     except zipfile.BadZipFile:
         if decrypt_password:
-            from fastapi_app.core.backup_encryption import decrypt_backup, BackupFileError as EncFileError
+            from fastapi_app.core.backup_encryption import BackupFileError as EncFileError
+            from fastapi_app.core.backup_encryption import decrypt_backup
             try:
                 zip_bytes = decrypt_backup(zip_bytes, decrypt_password)
                 zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
@@ -123,7 +124,7 @@ async def restore_from_zip(
                 if zip_bytes[:4] != b'PK\x03\x04':
                     raise RestoreError('备份文件已加密，需要提供解密密码')
             except (RestoreError, IndexError, TypeError):
-                raise RestoreError('无效的 ZIP 备份文件或加密文件需要密码')
+                raise RestoreError('无效的 ZIP 备份文件或加密文件需要密码') from None
 
     if 'manifest.json' not in zf.namelist():
         raise RestoreError('备份文件缺少 manifest.json')
@@ -136,7 +137,8 @@ async def restore_from_zip(
         if zip_bytes[:4] == b'PK\x03\x04':
             pass
         else:
-            from fastapi_app.core.backup_encryption import decrypt_backup, BackupFileError as EncFileError
+            from fastapi_app.core.backup_encryption import BackupFileError as EncFileError
+            from fastapi_app.core.backup_encryption import decrypt_backup
             try:
                 zip_bytes = decrypt_backup(zip_bytes, decrypt_password)
                 zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
@@ -233,7 +235,7 @@ async def restore_from_zip(
             await rebuild_pool()
             await _prog('rebuild_pool', 1.0, '连接池已重建')
         else:
-            await db.commit()
+            await db.commit()  # manual-tx: try/except 内显式事务控制
 
         try:
             from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
@@ -278,7 +280,7 @@ async def restore_from_zip(
     except (RuntimeError, OSError, ValueError) as e:
         if not psql_attempted:
             try:
-                await db.rollback()
+                await db.rollback()  # manual-tx: try/except 内显式事务控制
             except (OSError, SQLAlchemyError):
                 logger.warning('恢复异常后回滚失败')
         raise RestoreError(f'恢复过程中出错: {e}') from e
@@ -305,7 +307,7 @@ async def acquire_restore_lock(task_id: str) -> bool:
             nx=True, ex=_RESTORE_LOCK_TTL
         )
         return result is not None
-    except Exception as e:
+    except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
         logger.warning(f'获取恢复锁失败: {e}')
         return True  # Redis 故障时允许恢复（降级）
 
@@ -317,7 +319,7 @@ async def release_restore_lock():
         client = await _get_redis()
         if client is not None:
             await client.delete(_RESTORE_LOCK_KEY)
-    except Exception as e:
+    except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
         logger.warning(f'释放恢复锁失败: {e}')
 
 
@@ -329,5 +331,5 @@ async def is_restore_in_progress() -> bool:
         if client is None:
             return False
         return await client.exists(_RESTORE_LOCK_KEY) > 0
-    except Exception:
+    except Exception:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
         return False

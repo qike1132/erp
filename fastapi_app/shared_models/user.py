@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Table
@@ -36,10 +36,10 @@ class User(Base):
     is_super: Mapped[bool] = mapped_column(Boolean, default=False, comment='是否超级用户')
     status: Mapped[bool] = mapped_column(Boolean, default=True, comment='是否启用')
     factory: Mapped[str | None] = mapped_column(String(20), nullable=True, comment='所属工厂：东莞/湖北/NULL')
-    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), comment='创建时间')
-    update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
+    update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 
-    permissions: Mapped[list["Permission"]] = relationship('Permission', secondary=user_permission, backref='users')
+    permissions: Mapped[list[Permission]] = relationship('Permission', secondary=user_permission, backref='users')
 
     def has_permission(self, permission_code: str) -> bool:
         """检查用户是否拥有指定权限

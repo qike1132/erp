@@ -4,12 +4,12 @@
 测试范围：入库、出库、库存查看等完整流程。
 从 Flask test_client 迁移至 httpx AsyncClient。
 """
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import select
 
-from fastapi_app.shared_models import InventoryLog, Order, Product, StockIn, StockOut
+from fastapi_app.shared_models import InventoryLog, Order, StockIn, StockOut
 
 MARK = pytest.mark.integration
 
@@ -38,7 +38,7 @@ class TestStockInRoutes:
             "product_id": test_product.id,
             "customer": test_customer.name,
             "quantity": 50,
-            "stockin_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "stockin_date": datetime.now(UTC).strftime("%Y-%m-%d"),
             "note": "测试入库",
         }
         resp = await async_client.post("/api/v1/stock/in/create", headers=auth_headers, json=payload)
@@ -54,7 +54,7 @@ class TestStockInRoutes:
         payload = {
             "customer": test_customer.name,
             "quantity": 50,
-            "stockin_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "stockin_date": datetime.now(UTC).strftime("%Y-%m-%d"),
         }
         resp = await async_client.post("/api/v1/stock/in/create", headers=auth_headers, json=payload)
         assert resp.status_code in (200, 400, 422)
@@ -66,7 +66,7 @@ class TestStockInRoutes:
             "product_id": 99999,
             "customer": test_customer.name,
             "quantity": 50,
-            "stockin_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "stockin_date": datetime.now(UTC).strftime("%Y-%m-%d"),
         }
         resp = await async_client.post("/api/v1/stock/in/create", headers=auth_headers, json=payload)
         assert resp.status_code in (200, 400, 422, 404)
@@ -86,7 +86,7 @@ class TestStockInRoutes:
         payload = {
             "customer": test_customer.name,
             "quantity": new_quantity,
-            "stockin_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "stockin_date": datetime.now(UTC).strftime("%Y-%m-%d"),
             "note": "更新后的入库",
         }
         resp = await async_client.put(
@@ -107,7 +107,7 @@ class TestStockInRoutes:
         payload = {
             "customer": test_customer.name,
             "quantity": new_quantity,
-            "stockin_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "stockin_date": datetime.now(UTC).strftime("%Y-%m-%d"),
             "note": "更新",
         }
         await async_client.put(
@@ -155,7 +155,7 @@ class TestStockInRoutes:
             customer=test_customer.name,
             quantity=10,
             stockin_id=test_stockin.id,
-            stockout_date=datetime.now(timezone.utc),
+            stockout_date=datetime.now(UTC),
         )
         async_db_session.add(stockout)
         await async_db_session.flush()
@@ -191,7 +191,7 @@ class TestStockOutRoutes:
         payload = {
             "product_id": test_product.id,
             "quantity": 20,
-            "stockout_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "stockout_date": datetime.now(UTC).strftime("%Y-%m-%d"),
             "note": "测试出库",
         }
         resp = await async_client.post("/api/v1/stock/out/create", headers=auth_headers, json=payload)
@@ -209,7 +209,7 @@ class TestStockOutRoutes:
         payload = {
             "product_id": test_product.id,
             "quantity": 100,
-            "stockout_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "stockout_date": datetime.now(UTC).strftime("%Y-%m-%d"),
         }
         resp = await async_client.post("/api/v1/stock/out/create", headers=auth_headers, json=payload)
         assert resp.status_code in (200, 400)
@@ -222,7 +222,7 @@ class TestStockOutRoutes:
         payload = {
             "product_id": 99999,
             "quantity": 20,
-            "stockout_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "stockout_date": datetime.now(UTC).strftime("%Y-%m-%d"),
         }
         resp = await async_client.post("/api/v1/stock/out/create", headers=auth_headers, json=payload)
         assert resp.status_code in (200, 400, 422, 404)
@@ -244,7 +244,7 @@ class TestStockOutRoutes:
 
         payload = {
             "quantity": new_quantity,
-            "stockout_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "stockout_date": datetime.now(UTC).strftime("%Y-%m-%d"),
             "note": "更新后的出库",
         }
         resp = await async_client.put(
@@ -263,7 +263,7 @@ class TestStockOutRoutes:
 
         payload = {
             "quantity": 100,
-            "stockout_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "stockout_date": datetime.now(UTC).strftime("%Y-%m-%d"),
         }
         resp = await async_client.put(
             f"/api/v1/stock/out/edit/{test_stockout.id}", headers=auth_headers, json=payload
@@ -319,7 +319,7 @@ class TestInventoryRoutes:
             product_id=test_product.id,
             customer=test_customer.name,
             quantity=20,
-            order_date=datetime.now(timezone.utc),
+            order_date=datetime.now(UTC),
             status="待备货",
         )
         async_db_session.add(order)
@@ -330,7 +330,7 @@ class TestInventoryRoutes:
             product_id=test_product.id,
             customer=test_customer.name,
             quantity=50,
-            stockin_date=datetime.now(timezone.utc),
+            stockin_date=datetime.now(UTC),
         )
         async_db_session.add(stockin)
         await async_db_session.flush()
@@ -353,7 +353,7 @@ class TestStockBusinessLogic:
             "product_id": test_product.id,
             "customer": test_customer.name,
             "quantity": 30,
-            "stockin_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "stockin_date": datetime.now(UTC).strftime("%Y-%m-%d"),
         }
         await async_client.post("/api/v1/stock/in/create", headers=auth_headers, json=payload)
 
@@ -375,7 +375,7 @@ class TestStockBusinessLogic:
         payload = {
             "product_id": test_product.id,
             "quantity": 25,
-            "stockout_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "stockout_date": datetime.now(UTC).strftime("%Y-%m-%d"),
         }
         await async_client.post("/api/v1/stock/out/create", headers=auth_headers, json=payload)
 
@@ -397,7 +397,7 @@ class TestStockBusinessLogic:
         payload = {
             "customer": test_customer.name,
             "quantity": new_quantity,
-            "stockin_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "stockin_date": datetime.now(UTC).strftime("%Y-%m-%d"),
         }
         await async_client.put(
             f"/api/v1/stock/in/edit/{test_stockin.id}", headers=auth_headers, json=payload
@@ -427,7 +427,7 @@ class TestStockEdgeCases:
             "product_id": test_product.id,
             "customer": test_customer.name,
             "quantity": 0,
-            "stockin_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "stockin_date": datetime.now(UTC).strftime("%Y-%m-%d"),
         }
         resp = await async_client.post("/api/v1/stock/in/create", headers=auth_headers, json=payload)
         assert resp.status_code in (200, 400, 422)
@@ -438,7 +438,7 @@ class TestStockEdgeCases:
         payload = {
             "product_id": test_product.id,
             "quantity": 0,
-            "stockout_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "stockout_date": datetime.now(UTC).strftime("%Y-%m-%d"),
         }
         resp = await async_client.post("/api/v1/stock/out/create", headers=auth_headers, json=payload)
         assert resp.status_code in (200, 400, 422)
@@ -452,7 +452,7 @@ class TestStockEdgeCases:
         payload = {
             "product_id": test_product.id,
             "quantity": 50,
-            "stockout_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "stockout_date": datetime.now(UTC).strftime("%Y-%m-%d"),
         }
         resp = await async_client.post("/api/v1/stock/out/create", headers=auth_headers, json=payload)
         assert resp.status_code in (200, 201)
@@ -501,7 +501,7 @@ class TestStockPerformance:
                 product_id=test_product.id,
                 customer=test_customer.name,
                 quantity=10,
-                stockin_date=datetime.now(timezone.utc),
+                stockin_date=datetime.now(UTC),
             )
             async_db_session.add(stockin)
         await async_db_session.flush()
@@ -520,7 +520,7 @@ class TestStockPerformance:
                 stockout_no=f"SO-PERF-{i:04d}",
                 product_id=test_product.id,
                 quantity=5,
-                stockout_date=datetime.now(timezone.utc),
+                stockout_date=datetime.now(UTC),
             )
             async_db_session.add(stockout)
         await async_db_session.flush()

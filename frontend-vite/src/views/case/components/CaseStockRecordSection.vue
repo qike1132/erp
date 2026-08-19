@@ -6,7 +6,7 @@
         <FontAwesomeIcon :icon="kind === 'stockin' ? 'truck-loading' : 'shipping-fast'" :style="{ color: kind === 'stockin' ? 'var(--color-primary-500)' : 'var(--color-danger-500)' }" />
         {{ kind === 'stockin' ? '入库记录列表' : '出库记录列表' }}
       </div>
-      <button class="cs-action-btn cs-action-outline" @click="showFilter = !showFilter">
+      <button class="cs-action-btn cs-action-outline" @click="showFilter = !showFilter" aria-label="筛选">
         <FontAwesomeIcon icon="filter" style="margin-right: 4px" />筛选
       </button>
     </div>
@@ -25,7 +25,7 @@
           <UiDatePicker v-model="fEnd" style="width: 100%" />
         </div>
         <div class="cs-filter-action">
-          <button class="cs-action-btn cs-action-primary" @click="emit('search')">
+          <button class="cs-action-btn cs-action-primary" @click="emit('search')" aria-label="查询">
             <FontAwesomeIcon icon="search" style="margin-right: 4px" />查询
           </button>
         </div>

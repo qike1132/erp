@@ -7,15 +7,16 @@
 import asyncio
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
-from typing import Any, Callable
+from enum import StrEnum
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-class DomainEventType(str, Enum):
+class DomainEventType(StrEnum):
     ORDER_CREATED = 'order.created'
     ORDER_STATUS_CHANGED = 'order.status_changed'
     ORDER_DELETED = 'order.deleted'
@@ -166,7 +167,7 @@ async def start_event_listener():
                 try:
                     await pubsub.unsubscribe()
                     await pubsub.aclose()
-                except Exception:  # defensive: 清理失败不影响重连
-                    pass
+                except Exception:  # defensive: 清理失败不影响重连  # noqa: S110  # nosec B110
+                    pass  # defensive: 异常静默处理,不影响主流程
         logger.info('领域事件监听器将在5秒后重连...')
         await asyncio.sleep(5)

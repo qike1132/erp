@@ -30,11 +30,11 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from sqlalchemy import select  # noqa: E402
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from fastapi_app.core.config import settings  # noqa: E402
-from fastapi_app.services.storage_service import (  # noqa: E402
+from fastapi_app.core.config import settings
+from fastapi_app.services.storage_service import (
     LocalStorageBackend,
     get_blur_key,
     get_storage,
@@ -42,8 +42,8 @@ from fastapi_app.services.storage_service import (  # noqa: E402
     make_blur_placeholder,
     make_thumbnail,
 )
-from fastapi_app.shared_models.customer_sampling import CustomerSamplingProject  # noqa: E402
-from fastapi_app.shared_models.file_record import FileRecord  # noqa: E402
+from fastapi_app.shared_models.customer_sampling import CustomerSamplingProject
+from fastapi_app.shared_models.file_record import FileRecord
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("backfill_pattern_room_thumbnails")

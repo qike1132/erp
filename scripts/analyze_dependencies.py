@@ -294,7 +294,7 @@ def main():
     analyzer = DependencyAnalyzer(args.path)
     analyzer.parse_requirements(args.requirements)
     analyzer.analyze_all_imports()
-    unused, used = analyzer.analyze_unused_dependencies()
+    unused, _used = analyzer.analyze_unused_dependencies()
     analyzer.print_report()
 
     return 0 if not unused else 1

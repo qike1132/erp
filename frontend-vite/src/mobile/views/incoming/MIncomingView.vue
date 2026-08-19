@@ -52,9 +52,9 @@ import MSpinner from '@/mobile/components/MSpinner.vue'
 const activeTab = ref('overview')
 const tabChips = [{ label: '概览', value: 'overview' }, { label: '记录', value: 'records' }]
 const keyword = ref('')
-const overview = ref<any>(null)
+const overview = ref<{ total?: number; pending?: number } | null>(null)
 const loading = ref(false)
-const records = ref<any[]>([])
+const records = ref<Array<{ id: number; purchase_order_no?: string; product_name?: string; supplier_name?: string; product_quantity?: number; status?: string }>>([])
 const recordsLoading = ref(false)
 
 async function loadOverview() {

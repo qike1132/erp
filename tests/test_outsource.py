@@ -7,23 +7,24 @@
 - 工序状态流转（开始/完成）
 - 进度看板聚合（progress / current_process / status_label）
 """
-import pytest
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime, timezone
+
+import pytest
 
 from fastapi_app.services.outsource_service import (
-    create_process_type,
     batch_create_process_types,
-    update_process_type,
-    delete_process_type,
-    sync_outsource_processes_for_order,
-    generate_order_processes,
-    start_order_process,
     complete_order_process,
+    create_process_type,
     delete_order_process,
+    delete_process_type,
+    generate_order_processes,
     get_kanban,
-    list_process_types,
     list_order_processes,
+    list_process_types,
+    start_order_process,
+    sync_outsource_processes_for_order,
+    update_process_type,
 )
 
 
@@ -37,8 +38,8 @@ def make_preset(product_id=1, process_type='电绣', sort_order=0, is_active=Tru
     pt.is_active = is_active
     pt.remark = None
     pt.created_by = 'admin'
-    pt.create_time = datetime.now(timezone.utc)
-    pt.update_time = datetime.now(timezone.utc)
+    pt.create_time = datetime.now(UTC)
+    pt.update_time = datetime.now(UTC)
     pt.product = MagicMock()
     pt.product.name = '测试产品'
     pt.product.barcode = 'TEST001'
@@ -64,8 +65,8 @@ def make_order_process(pid=1, order_id=1, item_id=None, product_id=1,
     p.actual_end_time = None
     p.remark = None
     p.created_by = 'admin'
-    p.create_time = datetime.now(timezone.utc)
-    p.update_time = datetime.now(timezone.utc)
+    p.create_time = datetime.now(UTC)
+    p.update_time = datetime.now(UTC)
     return p
 
 

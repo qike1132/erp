@@ -15,6 +15,6 @@
 
 <script setup lang="ts">
 defineProps<{
-  rows: { label: string; key: string; value: any }[]
+  rows: { label: string; key: string; value: unknown }[]
 }>()
 </script>

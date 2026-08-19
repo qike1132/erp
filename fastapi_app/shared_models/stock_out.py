@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, desc, text
@@ -24,7 +24,7 @@ class StockOut(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     stockout_no: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, comment='出货编号')
-    stockout_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True, comment='出货时间')
+    stockout_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True, comment='出货时间')
     product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id', ondelete='RESTRICT'), nullable=False, comment='产品ID')
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, comment='出货数量')
     returned_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default='0', comment='退货数量')
@@ -32,10 +32,10 @@ class StockOut(Base):
     order_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('order.id', ondelete='CASCADE'), nullable=True, comment='关联订单ID')
     stockin_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('stock_in.id', ondelete='SET NULL'), comment='关联备货ID')
     note: Mapped[str | None] = mapped_column(Text, comment='备注')
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 
-    product: Mapped["Product"] = relationship('Product', backref='stockouts')
-    order: Mapped["Order | None"] = relationship('Order', backref=backref('order_stockouts', passive_deletes=True))
+    product: Mapped[Product] = relationship('Product', backref='stockouts')
+    order: Mapped[Order | None] = relationship('Order', backref=backref('order_stockouts', passive_deletes=True))
 
     __table_args__ = (
         Index('idx_stockout_stockin', 'stockin_id'),

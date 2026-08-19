@@ -17,7 +17,7 @@
         <FontAwesomeIcon icon="angle-left" aria-hidden="true" />
       </button>
       <span class="ui-page-info">{{ currentPage }} / {{ totalPages }}</span>
-      <button class="ui-page-btn" :disabled="currentPage >= totalPages" aria-label="下一页" @click="go(currentPage + 1)">
+      <button class="ui-page-btn" aria-label="下一页" :disabled="currentPage >= totalPages" @click="go(currentPage + 1)">
         <FontAwesomeIcon icon="angle-right" aria-hidden="true" />
       </button>
     </div>

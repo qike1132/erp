@@ -1,5 +1,5 @@
-// 物料计算器产品列表：产品查询 / 搜索建议 / BOM 过滤 / 虚拟列表高度测量（从 MaterialCalculatorView.vue 抽出，行为不变）
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+// 物料计算器产品列表：产品查询 / 搜索建议 / BOM 过滤（从 MaterialCalculatorView.vue 抽出，行为不变）
+import { ref, computed, onUnmounted } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { purchaseApi, type MaterialCalcProduct } from '@/api'
 import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
@@ -13,24 +13,8 @@ export function useMaterialCalc() {
   const { debounceSearch } = useDebouncedSearch(250)
   let hideSuggestionsTimer: ReturnType<typeof setTimeout> | null = null
 
-  // S6: 动态测量产品列表高度，替代硬编码 600px
-  const productListRef = ref<HTMLElement | null>(null)
-  const productListHeight = ref(600)
-  let resizeObserver: ResizeObserver | null = null
-
-  onMounted(() => {
-    if (productListRef.value) {
-      resizeObserver = new ResizeObserver((entries) => {
-        const h = entries[0]?.contentRect.height
-        if (h && h > 0) productListHeight.value = Math.floor(h)
-      })
-      resizeObserver.observe(productListRef.value)
-    }
-  })
-
   onUnmounted(() => {
     if (hideSuggestionsTimer) clearTimeout(hideSuggestionsTimer)
-    resizeObserver?.disconnect()
   })
 
   const { data: productsQueryData, isLoading: loadingProducts } = useQuery({
@@ -93,8 +77,7 @@ export function useMaterialCalc() {
     loadingProducts,
     productCapHint,
     filteredProducts,
-    productListRef,
-    productListHeight,
+
     onSearchInput,
     onMcSearchFocus,
     hideMcSuggestions,

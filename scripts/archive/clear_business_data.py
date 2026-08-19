@@ -4,8 +4,10 @@
 """
 import asyncio
 import sys
+
 from sqlalchemy import text
-from fastapi_app.core.database import _init_async_engine, _AsyncSessionLocal
+
+from fastapi_app.core.database import _AsyncSessionLocal, _init_async_engine
 
 # 需要清空的业务表（按依赖关系排序，使用 TRUNCATE CASCADE）
 BUSINESS_TABLES = [

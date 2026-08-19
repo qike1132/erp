@@ -10,7 +10,7 @@
         </div>
         <div class="bom-modal-body">
           <div class="bom-tabs-container">
-            <button v-for="tab in bomTabs" :key="tab.key" class="bom-tab-v2" :class="{ active: currentBomCategory === tab.key }" @click="switchBomTab(tab.key)">
+            <button v-for="tab in bomTabs" :key="tab.key" class="bom-tab-v2" :class="{ active: currentBomCategory === tab.key }" @click="switchBomTab(tab.key)" :aria-label="tab.label">
               <i :class="tab.icon" aria-hidden="true"></i> {{ tab.label }}
             </button>
           </div>

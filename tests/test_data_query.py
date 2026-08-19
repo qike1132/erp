@@ -8,8 +8,9 @@
 - 抵扣流水查询
 - 报表导出
 """
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 
 class TestOrderLogs:

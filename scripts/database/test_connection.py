@@ -72,9 +72,9 @@ class DatabaseConnectionTester:
             self.results['connection_info']['pymysql_version'] = pymysql.__version__
             return True
         except Exception as e:
-            self.log(f"连接失败: {str(e)}", 'ERROR')
+            self.log(f"连接失败: {e!s}", 'ERROR')
             self.results['failed'].append('PyMySQL直连测试')
-            self.results['errors'].append(f"PyMySQL: {str(e)}")
+            self.results['errors'].append(f"PyMySQL: {e!s}")
             return False
 
     def test_2_sqlalchemy_connection(self):
@@ -109,9 +109,9 @@ class DatabaseConnectionTester:
             self.results['passed'].append('SQLAlchemy连接测试')
             return True
         except Exception as e:
-            self.log(f"SQLAlchemy连接失败: {str(e)}", 'ERROR')
+            self.log(f"SQLAlchemy连接失败: {e!s}", 'ERROR')
             self.results['failed'].append('SQLAlchemy连接测试')
-            self.results['errors'].append(f"SQLAlchemy: {str(e)}")
+            self.results['errors'].append(f"SQLAlchemy: {e!s}")
             return False
 
     def test_3_read_operations(self):
@@ -139,15 +139,15 @@ class DatabaseConnectionTester:
                         self.log(f"  - {table}: {count} 条记录")
                         self.results['connection_info'][f'{table}_count'] = count
                     except Exception as e:
-                        self.log(f"  - {table}: 表不存在或查询失败 ({str(e)})", 'WARNING')
+                        self.log(f"  - {table}: 表不存在或查询失败 ({e!s})", 'WARNING')
 
             engine.dispose()
             self.results['passed'].append('数据读取操作测试')
             return True
         except Exception as e:
-            self.log(f"读取操作失败: {str(e)}", 'ERROR')
+            self.log(f"读取操作失败: {e!s}", 'ERROR')
             self.results['failed'].append('数据读取操作测试')
-            self.results['errors'].append(f"Read: {str(e)}")
+            self.results['errors'].append(f"Read: {e!s}")
             return False
 
     def test_4_write_operations(self):
@@ -192,9 +192,9 @@ class DatabaseConnectionTester:
             self.results['passed'].append('数据写入操作测试')
             return True
         except Exception as e:
-            self.log(f"写入操作失败: {str(e)}", 'ERROR')
+            self.log(f"写入操作失败: {e!s}", 'ERROR')
             self.results['failed'].append('数据写入操作测试')
-            self.results['errors'].append(f"Write: {str(e)}")
+            self.results['errors'].append(f"Write: {e!s}")
             return False
 
     def test_5_connection_pool(self):
@@ -231,9 +231,9 @@ class DatabaseConnectionTester:
             self.results['passed'].append('连接池功能测试')
             return True
         except Exception as e:
-            self.log(f"连接池测试失败: {str(e)}", 'ERROR')
+            self.log(f"连接池测试失败: {e!s}", 'ERROR')
             self.results['failed'].append('连接池功能测试')
-            self.results['errors'].append(f"Pool: {str(e)}")
+            self.results['errors'].append(f"Pool: {e!s}")
             return False
 
     def test_6_error_handling(self):
@@ -347,7 +347,7 @@ class DatabaseConnectionTester:
             try:
                 test()
             except Exception as e:
-                self.log(f'测试执行出错: {str(e)}', 'ERROR')
+                self.log(f'测试执行出错: {e!s}', 'ERROR')
                 self.results['failed'].append(test.__name__)
 
         return self.generate_report()

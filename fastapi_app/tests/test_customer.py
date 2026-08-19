@@ -179,8 +179,9 @@ class TestCustomerEndpoints:
     @pytest.mark.asyncio
     async def test_delete_customer_integrity_error(self, client, mock_db):
         """DELETE /api/v1/customers/delete/{id} 触发外键约束时应返回 400"""
-        from sqlalchemy.exc import IntegrityError
         from unittest.mock import AsyncMock
+
+        from sqlalchemy.exc import IntegrityError
 
         async def _raise_integrity(*_args, **_kwargs):
             raise IntegrityError("fk constraint", params=None, orig=Exception("fk"))

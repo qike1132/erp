@@ -48,7 +48,7 @@ import contextlib
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-_VERSION = 'v5.31'
+_VERSION = 'v5.33'
 _WINDOW_TITLE = f'ERP 服务器管理器 {_VERSION}'
 _REDIS_PORT = 6379
 _REDIS_EXE_PATHS = [Path(r'C:\Redis\redis-server.exe'), Path(r'C:\Program Files\Redis\redis-server.exe')]
@@ -183,6 +183,33 @@ def _lerp_color(c1, c2, t):
     r2, g2, b2 = int(c2[1:3], 16), int(c2[3:5], 16), int(c2[5:7], 16)
     return f'#{int(r1+(r2-r1)*t):02x}{int(g1+(g2-g1)*t):02x}{int(b1+(b2-b1)*t):02x}'
 
+# 按钮视觉变体调色板 - 与 ServerManagerApp._PALETTE 严格对齐
+# solid    状态：fill=fill（实色）/hover=fill_h（加深）/fg=#ffffff
+# outlined 状态：fill=#ffffff /hover=tint_h（淡染色）/fg=fill / 边框=fill
+# subtle   状态：fill=tint（极浅色）/hover=tint_h /fg=fill / 边框=subtle_border
+_BUTTON_VARIANT_PALETTE = {
+    'accent': {
+        'fill': '#007aff', 'fill_h': '#0064d1', 'tint': '#e8f1ff', 'tint_h': '#d5e8ff',
+        'fg': '#ffffff', 'subtle_border': '#c8dcfb',
+        'transparent_fill': '#ffffff',
+    },
+    'success': {
+        'fill': '#34c759', 'fill_h': '#2ba847', 'tint': '#e6f9ec', 'tint_h': '#d3f3dc',
+        'fg': '#ffffff', 'subtle_border': '#bbe6c5',
+        'transparent_fill': '#ffffff',
+    },
+    'danger': {
+        'fill': '#ff3b30', 'fill_h': '#d92d22', 'tint': '#ffece9', 'tint_h': '#ffdad3',
+        'fg': '#ffffff', 'subtle_border': '#f5b8b1',
+        'transparent_fill': '#ffffff',
+    },
+    'neutral': {
+        'fill': '#f2f2f7', 'fill_h': '#e5e5ea', 'tint': '#f2f2f7', 'tint_h': '#e5e5ea',
+        'fg': '#1d1d1f', 'subtle_border': '#e5e5ea',
+        'transparent_fill': '#ffffff',
+    },
+}
+
 def _taskkill(pid, force=True, tree=True):
     """统一的进程终止函数"""
     if not _IS_WINDOWS:
@@ -190,6 +217,26 @@ def _taskkill(pid, force=True, tree=True):
     cmd = ['taskkill', '/F' if force else '', '/T' if tree else '', '/PID', str(pid)]
     cmd = [c for c in cmd if c]
     subprocess.run(cmd, creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, timeout=10)
+
+def _taskkill_many(pids, force=True, tree=True):
+    """批量终止多个 PID — 一次 taskkill 调用处理多个 /PID。
+
+    为什么必须批量：taskkill 单进程约 100ms+，若端口被大量残留进程占用
+    （例如数百个 nginx worker），逐个调用会耗时数十秒甚至分钟，导致启动流程
+    卡死在"清理端口"阶段。taskkill 原生支持多个 /PID 参数，分批 40 个/次即可。
+    """
+    if not _IS_WINDOWS or not pids:
+        return
+    pids = [str(p) for p in pids]
+    for i in range(0, len(pids), 40):
+        cmd = ['taskkill', '/F' if force else '', '/T' if tree else '']
+        for pid in pids[i:i + 40]:
+            cmd += ['/PID', pid]
+        cmd = [c for c in cmd if c]
+        try:
+            subprocess.run(cmd, creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, timeout=30)
+        except Exception:
+            pass
 
 def _kill_port_process(port, msg_queue=None):
     """终止占用指定端口的进程"""
@@ -234,20 +281,91 @@ def _get_port_occupier(port):
     return occupiers
 
 class RoundedButton(tk.Canvas):
-    """基于 Canvas 的圆角按钮 — 14px 大圆角，hover 动画过渡"""
+    """基于 Canvas 的圆角按钮 — 三种视觉变体：solid / outlined / subtle。
 
-    def __init__(self, parent, text='', fill='#89b4fa', fg='#1e1e2e',
-                 hover_fill=None, command=None, font=('Microsoft YaHei UI', 10),
-                 padx=24, pady=8, radius=14, state='normal', canvas_bg=None, border=None, **kw):
+    设计规格（统一）：
+        高度    36px (padx=16, pady=6 + font linespace ≈ 36)；mini 26px (pady=2)
+        圆角    10px (mini 8px)
+        字号    9pt bold (mini 8pt)
+        间距    水平 8px（在调用方以 padx=(8,0) 实施）
+        Hover   180ms 平滑过渡到 +12 加深色（solid） / 主色 12% 透明染（outlined / subtle）
+        Press   立即下沉 1px、背景再加深 6%
+        Disabled 背景 #f2f2f7 / 文字 #aeaeb2 / 边框 #e5e5ea / cursor not-allowed
+    """
+
+    _DISABLED_BG = '#f2f2f7'
+    _DISABLED_FG = '#aeaeb2'
+    _DISABLED_BORDER = '#e5e5ea'
+
+    def __init__(self, parent, text='', variant='solid', tone='accent',
+                 command=None, font=('Microsoft YaHei UI', 9, 'bold'),
+                 padx=16, pady=6, radius=10, state='normal', canvas_bg=None,
+                 hover_fill=None, fg=None, fill=None, **kw):
+        """variant: 'solid'(实色填充) / 'outlined'(边框+透明) / 'subtle'(淡色填充)
+        tone:    'accent' / 'success' / 'danger' / 'neutral'
+        其余旧参数（fill/hover_fill/fg）保留向后兼容。"""
+        # 兼容旧 API：若调用方显式给了 fill 但未给 variant/toner，按旧模式当 solid 处理
+        legacy = fill is not None and variant == 'solid' and tone == 'accent'
+        if fill is not None and (fg is not None or hover_fill is not None):
+            legacy = True
+
+        palette = _BUTTON_VARIANT_PALETTE
+        if legacy:
+            # 老路子：fill/hover_fill 直接用调用方传入的；fg 走调用方
+            cfg_fill = fill
+            cfg_hover = hover_fill or _shift_color(fill, 18)
+            cfg_fg = fg or '#ffffff'
+            cfg_outline = ''
+            cfg_outline_hover = ''
+            cfg_outline_w = 0
+            eff_variant = 'solid-legacy'
+        else:
+            tone_cfg = palette.get(tone, palette['accent'])
+            if variant == 'solid':
+                cfg_fill = tone_cfg['fill']
+                cfg_hover = tone_cfg['fill_h']
+                cfg_fg = tone_cfg['fg']
+                cfg_outline = ''
+                cfg_outline_hover = ''
+                cfg_outline_w = 0
+                eff_variant = 'solid'
+            elif variant == 'outlined':
+                cfg_fill = tone_cfg.get('transparent_fill', '#ffffff')
+                cfg_hover = tone_cfg['tint_h']
+                cfg_fg = tone_cfg['fill']
+                cfg_outline = tone_cfg['fill']
+                cfg_outline_hover = tone_cfg['fill_h']
+                cfg_outline_w = 1
+                eff_variant = 'outlined'
+            elif variant == 'subtle':
+                cfg_fill = tone_cfg['tint']
+                cfg_hover = tone_cfg['tint_h']
+                cfg_fg = tone_cfg['fill']
+                cfg_outline = tone_cfg.get('subtle_border', _shift_color(tone_cfg['tint'], -12))
+                cfg_outline_hover = tone_cfg['fill']
+                cfg_outline_w = 1
+                eff_variant = 'subtle'
+            else:
+                cfg_fill = tone_cfg['fill']; cfg_hover = tone_cfg['fill_h']; cfg_fg = tone_cfg['fg']
+                cfg_outline = ''; cfg_outline_hover = ''; cfg_outline_w = 0
+                eff_variant = 'solid'
+
         import tkinter.font as tkfont
         f = tkfont.Font(font=font)
-        w, h = f.measure(text) + padx * 2, f.metrics('linespace') + pady * 2
-        canvas_bg = canvas_bg or '#141419'
-        super().__init__(parent, width=w, height=h, highlightthickness=0, cursor='hand2', bg=canvas_bg, **kw)
-        self._text, self._fill, self._fg = text, fill, fg
-        self._hover_fill = hover_fill or _shift_color(fill, -20)
+        text_w = f.measure(text)
+        # 最小宽度 80：避免窄按钮在小屏上挤成"重启"二字团
+        w = max(80, text_w + padx * 2 + cfg_outline_w * 2)
+        h = f.metrics('linespace') + pady * 2
+        canvas_bg = canvas_bg or '#ffffff'
+        cursor = 'hand2' if state == 'normal' else 'arrow'
+        super().__init__(parent, width=w, height=h, highlightthickness=0, cursor=cursor, bg=canvas_bg, **kw)
+        self._text = text
+        self._fill, self._hover_fill, self._fg = cfg_fill, cfg_hover, cfg_fg
+        self._outline = cfg_outline
+        self._outline_hover = cfg_outline_hover
+        self._outline_w = cfg_outline_w
+        self._variant = eff_variant
         self._font, self._radius, self._command = font, radius, command
-        self._border = border
         self._state, self._hover, self._press = state, False, False
         self._anim_after_id = None
         self.bind('<Configure>', self._draw)
@@ -255,6 +373,8 @@ class RoundedButton(tk.Canvas):
         self.bind('<Leave>', lambda e: self._hover_out())
         self.bind('<ButtonPress-1>', lambda e: self._press_in())
         self.bind('<ButtonRelease-1>', lambda e: self._press_out())
+        # 初始立即绘制（不依赖 <Configure>），避免按钮首次显示为空白、鼠标移上才出现
+        self._draw()
 
     def _round_rect(self, x1, y1, x2, y2, r, **kw):
         pts = [x1+r, y1, x2-r, y1, x2, y1, x2, y1+r, x2, y2-r, x2, y2, x2-r, y2, x1+r, y2, x1, y2, x1, y2-r, x1, y1+r, x1, y1]
@@ -263,24 +383,40 @@ class RoundedButton(tk.Canvas):
     def _draw(self, _=None):
         self.delete('all')
         w, h = self.winfo_width(), self.winfo_height()
+        # widget 尚未映射时 winfo_width/height 会返回 1，回退到显式请求的尺寸
+        if w < 4:
+            w = self.winfo_reqwidth()
+        if h < 4:
+            h = self.winfo_reqheight()
         if w < 4 or h < 4:
             return
         r = min(self._radius, w // 2, h // 2)
         if self._state == 'disabled':
-            bg, fg = '#eef0f4', '#aeaeb2'
-            outline = self._border or '#e2e2e8'
+            bg, fg = self._DISABLED_BG, self._DISABLED_FG
+            outline, outline_w = self._DISABLED_BORDER, 1
         else:
             if self._press:
-                bg, fg = _lerp_color(self._fill, self._hover_fill, 0.6), self._fg
+                bg = _lerp_color(self._fill, self._hover_fill, 0.7)
+                outline = _lerp_color(self._outline, self._outline_hover, 0.7) if self._outline else ''
+                fg = self._fg
             elif self._hover:
-                bg, fg = self._hover_fill, self._fg
+                bg = self._hover_fill
+                outline = self._outline_hover if self._outline else ''
+                fg = self._fg
             else:
-                bg, fg = self._fill, self._fg
-            outline = self._border or ''
+                bg = self._fill
+                outline = self._outline
+                fg = self._fg
+            outline_w = self._outline_w
         offset = 1 if self._press else 0
-        self._round_rect(offset, offset, w - offset, h - offset, r, fill=bg, outline=outline)
-        if self._hover and self._state != 'disabled' and not self._border:
-            self._round_rect(2, h - 3, w - 2, h - 1, 1, fill=_shift_color(bg, 20), outline='')
+        if outline_w and outline:
+            # 双层圆角矩形模拟边框：外层用 outline 色实心填圆角，内层缩小 outline_w 后填 bg 色
+            self._round_rect(offset, offset, w - offset, h - offset, r, fill=outline, outline='')
+            self._round_rect(offset + outline_w, offset + outline_w,
+                             w - offset - outline_w, h - offset - outline_w,
+                             max(0, r - outline_w), fill=bg, outline='')
+        else:
+            self._round_rect(offset, offset, w - offset, h - offset, r, fill=bg, outline='')
         self.create_text(w // 2, h // 2, text=self._text, fill=fg, font=self._font)
 
     def _animate_hover(self, target_hover):
@@ -290,12 +426,15 @@ class RoundedButton(tk.Canvas):
         if self._anim_after_id:
             self.after_cancel(self._anim_after_id)
             self._anim_after_id = None
-        start_color = self._fill if not target_hover else self._hover_fill
-        end_color = self._hover_fill if target_hover else self._fill
+        start_bg = self._fill if not target_hover else self._hover_fill
+        end_bg = self._hover_fill if target_hover else self._fill
+        start_outline = self._outline if not target_hover else self._outline_hover
+        end_outline = self._outline_hover if target_hover else self._outline
         step_idx = [0]
+        steps = 4
         def step():
             step_idx[0] += 1
-            t = step_idx[0] / 3
+            t = step_idx[0] / steps
             if t >= 1.0:
                 self._hover = target_hover
                 self._draw()
@@ -304,9 +443,16 @@ class RoundedButton(tk.Canvas):
             w, h = self.winfo_width(), self.winfo_height()
             if w < 4 or h < 4:
                 return
-            self._round_rect(0, 0, w, h, min(self._radius, w // 2, h // 2), fill=_lerp_color(start_color, end_color, t), outline=self._border or '')
+            r = min(self._radius, w // 2, h // 2)
+            if self._outline_w and self._outline:
+                self._round_rect(0, 0, w, h, r, fill=_lerp_color(start_outline, end_outline, t), outline='')
+                bg = _lerp_color(start_bg, end_bg, t)
+                self._round_rect(self._outline_w, self._outline_w, w - self._outline_w, h - self._outline_w,
+                                 max(0, r - self._outline_w), fill=bg, outline='')
+            else:
+                self._round_rect(0, 0, w, h, r, fill=_lerp_color(start_bg, end_bg, t), outline='')
             self.create_text(w // 2, h // 2, text=self._text, fill=self._fg, font=self._font)
-            self._anim_after_id = self.after(50, step)
+            self._anim_after_id = self.after(45, step)
         step()
 
     def _hover_in(self):
@@ -339,47 +485,149 @@ class RoundedButton(tk.Canvas):
         self._draw()
 
 
-class StatusDot(tk.Canvas):
-    """带呼吸动画的状态指示灯"""
+# 状态徽章：统一状态枚举 → 文案/颜色/点样式/动画（大厂 Status Tag 设计规范）
+_STATUS_META = {
+    'running':       {'text': '运行中', 'color': 'success',     'tint': 'success_tint', 'dot': 'dot',   'anim': 'breath'},
+    'stopped':       {'text': '已停止', 'color': 'text_dim',    'tint': 'bg_input',     'dot': 'ring',  'anim': None},
+    'error':         {'text': '异常',   'color': 'danger',      'tint': 'danger_tint',  'dot': 'cross', 'anim': 'pulse'},
+    'restarting':    {'text': '重启中', 'color': 'warning',     'tint': 'warning_tint', 'dot': 'dot',   'anim': 'blink'},
+    'deploying':     {'text': '部署中', 'color': 'accent',      'tint': 'accent_tint',  'dot': 'arc',   'anim': 'spin'},
+    'not_installed': {'text': '未安装', 'color': 'text_dim',    'tint': 'bg_input',     'dot': 'ring',  'anim': None},
+}
 
-    def __init__(self, parent, size=12, color='#ff6b81', **kw):
-        bg = kw.pop('canvas_bg', '#141419')
-        super().__init__(parent, width=size, height=size, highlightthickness=0, bg=bg, **kw)
-        self._size, self._color, self._bg = size, color, bg
-        self._anim_after_id, self._is_active = None, False
-        self._draw_dot()
+_STATUS_SIZE = {
+    'lg': {'padx': 10, 'pady': 4, 'dot': 8, 'gap': 6, 'font': ('Microsoft YaHei UI', 9, 'bold'), 'radius': 10},
+    'md': {'padx': 8,  'pady': 3, 'dot': 7, 'gap': 5, 'font': ('Microsoft YaHei UI', 9, 'bold'), 'radius': 9},
+    'sm': {'padx': 6,  'pady': 2, 'dot': 6, 'gap': 4, 'font': ('Microsoft YaHei UI', 8),         'radius': 7},
+}
 
-    def set_color(self, color, active=False):
-        self._color, self._is_active = color, active
-        if self._anim_after_id:
-            self.after_cancel(self._anim_after_id)
-            self._anim_after_id = None
-        if active:
-            self._start_breathing()
-        else:
-            self._draw_dot()
 
-    def _draw_dot(self, alpha=1.0):
+class StatusBadge(tk.Canvas):
+    """圆角胶囊状态徽章：状态点 + 文字 + 语义色容器（大厂 Status Tag 风格）。
+
+    与旧版"裸圆点 + 裸文字"的区别：统一状态枚举、彩色胶囊容器、
+    四种点样式（实心/空心/叉/旋转弧）、四种动画（呼吸/闪烁/脉冲/旋转）。
+    用于三种场景：状态栏(lg) / 卡片详情(md) / 监控面板组件(sm)。
+    """
+
+    def __init__(self, parent, state='stopped', text=None, size='md', palette=None, canvas_bg=None):
+        self._palette = palette or {}
+        self._size = size
+        self._spec = _STATUS_SIZE[size]
+        self._state = state
+        self._custom_text = text
+        self._anim_after_id = None
+        self._phase = 0
+        self._meta = _STATUS_META.get(state, _STATUS_META['stopped'])
+        self._anim_kind = self._meta['anim']
+        import tkinter.font as tkfont
+        self._font_obj = tkfont.Font(font=self._spec['font'])
+        w = self._calc_width()
+        h = self._font_obj.metrics('linespace') + self._spec['pady'] * 2
+        super().__init__(parent, width=w, height=h, highlightthickness=0, bg=canvas_bg or '#ffffff')
+        self._draw()
+        if self._anim_kind:
+            self._tick()
+
+    def _text(self):
+        return self._custom_text if self._custom_text is not None else self._meta['text']
+
+    def _calc_width(self):
+        text_w = self._font_obj.measure(self._text())
+        return self._spec['padx'] * 2 + self._spec['dot'] + self._spec['gap'] + text_w
+
+    def set_state(self, state, text=None, color_key=None, tint_key=None):
+        prev_state = self._state
+        self._state = state
+        if text is not None:
+            self._custom_text = text
+        elif state != prev_state:
+            self._custom_text = None
+        base = _STATUS_META.get(state, _STATUS_META['stopped'])
+        self._meta = dict(base)
+        if color_key is not None:
+            self._meta['color'] = color_key
+        if tint_key is not None:
+            self._meta['tint'] = tint_key
+        new_anim = self._meta['anim']
+        if new_anim != self._anim_kind:
+            self._anim_kind = new_anim
+            if self._anim_after_id:
+                self.after_cancel(self._anim_after_id)
+                self._anim_after_id = None
+            self._phase = 0
+            if self._anim_kind:
+                self._tick()
+        self.configure(width=self._calc_width())
+        self._draw()
+
+    def _round_rect(self, x1, y1, x2, y2, r, **kw):
+        pts = [x1+r, y1, x2-r, y1, x2, y1, x2, y1+r, x2, y2-r, x2, y2, x2-r, y2, x1+r, y2, x1, y2, x1, y2-r, x1, y1+r, x1, y1]
+        return self.create_polygon(pts, smooth=True, **kw)
+
+    def _colors(self):
+        color = self._palette.get(self._meta['color'], '#8e8e93')
+        tint = self._palette.get(self._meta['tint'], '#f2f2f7')
+        if self._anim_kind == 'blink' and (self._phase // 90) % 2 == 0:
+            color = tint
+        return color, tint
+
+    def _draw(self):
         self.delete('all')
-        s, r = self._size, self._size // 2 - 1
-        if self._is_active and alpha < 1.0:
-            glow_r = int(r + 2 * (1 - alpha))
-            self.create_oval(s//2 - glow_r, s//2 - glow_r, s//2 + glow_r, s//2 + glow_r, fill=_shift_color(self._color, int(30 * (1 - alpha))), outline='')
-        self.create_oval(s//2 - r, s//2 - r, s//2 + r, s//2 + r, fill=self._color, outline='')
+        w, h = self.winfo_width(), self.winfo_height()
+        if w < 4:
+            w = self.winfo_reqwidth()
+        if h < 4:
+            h = self.winfo_reqheight()
+        if w < 4 or h < 4:
+            return
+        color, tint = self._colors()
+        # 胶囊容器（圆角 + 同色描边）
+        self._round_rect(0, 0, w, h, self._spec['radius'], fill=tint, outline=color, width=1)
+        # 状态点
+        cy = h // 2
+        dx = self._spec['padx'] + self._spec['dot'] // 2
+        self._draw_dot(dx, cy, self._spec['dot'], color, self._meta['dot'])
+        # 文字
+        tx = self._spec['padx'] + self._spec['dot'] + self._spec['gap']
+        self.create_text(tx, cy, text=self._text(), fill=color, font=self._spec['font'], anchor='w')
 
-    def _start_breathing(self):
-        step = [0]
-        def tick():
-            step[0] = (step[0] + 1) % 60
-            self._draw_dot(0.7 + 0.3 * math.sin(step[0] / 60.0 * 2 * math.pi))
-            self._anim_after_id = self.after(200, tick)
-        tick()
+    def _draw_dot(self, cx, cy, d, color, style):
+        r = max(2, d // 2)
+        phase = self._phase
+        if style == 'ring':
+            self.create_oval(cx-r, cy-r, cx+r, cy+r, outline=color, width=1)
+        elif style == 'cross':
+            self.create_oval(cx-r, cy-r, cx+r, cy+r, fill=color, outline='')
+            k = max(1, r - 1)
+            self.create_line(cx-k, cy-k, cx+k, cy+k, fill='#ffffff', width=1)
+            self.create_line(cx+k, cy-k, cx-k, cy+k, fill='#ffffff', width=1)
+        elif style == 'arc':
+            self.create_arc(cx-r, cy-r, cx+r, cy+r, start=phase % 360, extent=270, style='arc', outline=color, width=2)
+        else:
+            if self._anim_kind == 'breath':
+                glow = int((math.sin(phase / 360.0 * 2 * math.pi) * 0.5 + 0.5) * (r // 2))
+                if glow:
+                    self.create_oval(cx-r-glow, cy-r-glow, cx+r+glow, cy+r+glow, fill=_shift_color(color, 40), outline='')
+            elif self._anim_kind == 'pulse':
+                ring_r = (phase % 60) / 60.0 * (r + 3)
+                if ring_r > 0.5:
+                    self.create_oval(cx-ring_r, cy-ring_r, cx+ring_r, cy+ring_r, outline=color, width=1)
+            self.create_oval(cx-r, cy-r, cx+r, cy+r, fill=color, outline='')
+
+    def _tick(self):
+        self._phase = (self._phase + 6) % 360
+        self._draw()
+        delay = {'breath': 200, 'blink': 120, 'pulse': 150, 'spin': 80}.get(self._anim_kind, 200)
+        self._anim_after_id = self.after(delay, self._tick)
 
     def stop_animation(self):
         if self._anim_after_id:
             self.after_cancel(self._anim_after_id)
             self._anim_after_id = None
-        self._draw_dot()
+        self._anim_kind = None
+        self._phase = 0
+        self._draw()
 
 
 def _create_tray_icon_image():
@@ -403,7 +651,7 @@ class ServerManagerApp:
         'accent': '#007aff', 'accent_h': '#2d96ff', 'accent_tint': '#e8f1ff',
         'success': '#34c759', 'success_h': '#4fd06a', 'success_tint': '#e6f9ec',
         'danger': '#ff3b30', 'danger_h': '#ff5548', 'danger_tint': '#ffece9',
-        'warning': '#ff9500', 'info': '#30b0c7',
+        'warning': '#ff9500', 'warning_tint': '#fff4e0', 'info': '#30b0c7',
         'log_fg': '#1d1d1f', 'log_info': '#007aff', 'log_error': '#ff3b30', 'log_warn': '#ff9500', 'log_success': '#34c759',
     }
     MAX_LOG_LINES, LOG_KEEP_LINES, LOG_CLEANUP_MS, LOG_FLUSH_MS = 500, 300, 120000, 500
@@ -419,8 +667,8 @@ class ServerManagerApp:
         self._log_buffer, self._flush_pending = [], False
         self._msg_queue = queue.Queue()
         self._server_cards = []
-        self._status_anim_after_id, self._status_pulse_step = None, 0
         self._startup_progress, self._startup_steps, self._startup_current_step, self._current_mode_key = 0, [], "", ""
+        self._prod_running = False
         self._hosting_collecting, self._hosting_refresh_requested = False, False
         self.setup_logging()
         self._build_ui()
@@ -430,7 +678,6 @@ class ServerManagerApp:
         self._fade_in()
         self._animate_cards_intro()
         self._check_interval, self._after_ids = 5000, {}
-        self._redis_check_after_id = None
         self._run_env_checks()
         self.check_server_status()
         self._refresh_hosting_status()
@@ -641,22 +888,14 @@ class ServerManagerApp:
             self._stop_process()
             self._mode = 'none'
         self._kill_tray()
-        if self._status_anim_after_id:
-            with contextlib.suppress(Exception):
-                self.root.after_cancel(self._status_anim_after_id)
-            self._status_anim_after_id = None
-        if self._redis_check_after_id:
-            with contextlib.suppress(Exception):
-                self.root.after_cancel(self._redis_check_after_id)
-            self._redis_check_after_id = None
         for aid in self._after_ids.values():
             with contextlib.suppress(Exception):
                 self.root.after_cancel(aid)
         self._after_ids.clear()
-        for attr in ('dual_dev_status_dot',):
-            dot = getattr(self, attr, None)
-            if dot:
-                dot.stop_animation()
+        for attr in ('_mode_badge', 'dual_dev_status'):
+            badge = getattr(self, attr, None)
+            if badge is not None and hasattr(badge, 'stop_animation'):
+                badge.stop_animation()
         global _mutex_handle
         if _mutex_handle and _IS_WINDOWS:
             try:
@@ -814,11 +1053,12 @@ class ServerManagerApp:
 
     def _kill_port_sync(self, port):
         for _ in range(3):
-            if not self._find_port_pids(port):
+            pids = self._find_port_pids(port)
+            if not pids:
                 return
-            for opid in self._find_port_pids(port):
-                with contextlib.suppress(Exception):
-                    _taskkill(opid)
+            # 批量终止：端口被海量进程占用时（如数百 nginx worker），
+            # 逐个 taskkill 会耗时数十秒，批量可秒级完成。
+            _taskkill_many(pids)
             time.sleep(0.5)
 
     def _find_port_pids(self, port):
@@ -887,6 +1127,9 @@ class ServerManagerApp:
         try:
             if proc.stdout:
                 try:
+                    # 按行读取（readline 迭代器）：读到 '\n' 即返回，不会像 read(4096) 那样
+                    # 阻塞凑块导致 uvicorn 启动日志延迟显示；'\n' 是 ASCII 字节，UTF-8 中文
+                    # 不会跨行被切断，_decode_line 的多编码回退已足够处理乱码。
                     batch = []
                     for raw_line in proc.stdout:
                         line = self._decode_line(raw_line) if isinstance(raw_line, bytes) else str(raw_line).strip()
@@ -901,6 +1144,22 @@ class ServerManagerApp:
                     proc.stdout.close()
         except Exception as e:
             self._msg_queue.put(('log', {'text': f"读取日志异常: {str(e)}", 'level': 'ERROR'}))
+
+    @staticmethod
+    def _pick_log_font():
+        """选择日志字体：优先 Microsoft YaHei Mono（等宽+CJK），回落到 Microsoft YaHei UI，
+        最后落到系统默认。Consolas 不带 CJK 字形，会让中文渲染成方块。"""
+        import tkinter.font as tkfont
+        candidates = ('Microsoft YaHei Mono', 'Microsoft YaHei UI', 'NSimSun', 'SimSun', 'Consolas')
+        for fam in candidates:
+            try:
+                f = tkfont.Font(family=fam, size=9, exists=False)
+                # exists=False 不会抛错，用 families() 进一步确认系统接受了字体
+                if fam.lower() in (x.lower() for x in tkfont.families()):
+                    return (fam, 9)
+            except Exception:
+                continue
+        return ('Microsoft YaHei UI', 9)
 
     @staticmethod
     def _decode_line(raw_line):
@@ -938,36 +1197,40 @@ class ServerManagerApp:
                 msg_type, data = self._msg_queue.get_nowait()
             except queue.Empty:
                 break
-            if msg_type == 'log':
-                self.log_message(data['text'], data.get('level', 'INFO'))
-            elif msg_type == 'log_batch':
-                for line in data['lines']:
-                    self.log_message(line, data.get('level', 'INFO'))
-            elif msg_type == 'started':
-                self._on_started(data['label'], data.get('mode_key', 'debug'))
-            elif msg_type == 'dual_started':
-                self._on_dual_started(data['label'])
-            elif msg_type == 'dual_failed':
-                self._on_dual_failed(data['label'], data.get('reason', ''))
-            elif msg_type == 'ui_update':
-                self._update_all_ui()
-            elif msg_type == 'status':
-                self.status_bar_label.config(text=data['text'])
-            elif msg_type == 'startup_progress':
-                self.status_bar_label.config(text=f"启动中: {data.get('step', '')} ({data.get('progress', 0)}/{data.get('total', 4)})")
-                self._startup_current_step, self._startup_progress = data.get('step', ''), data.get('progress', 0)
-            elif msg_type == 'hosting_refresh':
-                # 生产模式状态立即刷新（取消已排定的一轮，避免刷新链叠加）
-                try:
-                    pending = self._after_ids.pop('hosting', None)
-                    if pending:
-                        self.root.after_cancel(pending)
-                except Exception:
-                    pass
-                self._refresh_hosting_status()
-            elif msg_type == 'hosting_apply':
-                # 后台收集完成 → 主线程应用（UI 更新）
-                self._apply_hosting_data(data['data'])
+            try:
+                if msg_type == 'log':
+                    self.log_message(data['text'], data.get('level', 'INFO'))
+                elif msg_type == 'log_batch':
+                    for line in data['lines']:
+                        self.log_message(line, data.get('level', 'INFO'))
+                elif msg_type == 'started':
+                    self._on_started(data['label'], data.get('mode_key', 'debug'))
+                elif msg_type == 'dual_started':
+                    self._on_dual_started(data['label'])
+                elif msg_type == 'dual_failed':
+                    self._on_dual_failed(data['label'], data.get('reason', ''))
+                elif msg_type == 'ui_update':
+                    self._update_all_ui()
+                elif msg_type == 'status':
+                    self.status_bar_label.config(text=data['text'])
+                elif msg_type == 'startup_progress':
+                    self.status_bar_label.config(text=f"启动中: {data.get('step', '')} ({data.get('progress', 0)}/{data.get('total', 4)})")
+                    self._startup_current_step, self._startup_progress = data.get('step', ''), data.get('progress', 0)
+                elif msg_type == 'hosting_refresh':
+                    # 生产模式状态立即刷新（取消已排定的一轮，避免刷新链叠加）
+                    try:
+                        pending = self._after_ids.pop('hosting', None)
+                        if pending:
+                            self.root.after_cancel(pending)
+                    except Exception:
+                        pass
+                    self._refresh_hosting_status()
+                elif msg_type == 'hosting_apply':
+                    # 后台收集完成 → 主线程应用（UI 更新）
+                    self._apply_hosting_data(data['data'])
+            except Exception:
+                # 单条消息处理失败不能中断 poll 调度链，否则日志/状态更新全部停摆
+                pass
             processed += 1
         self._after_ids['poll'] = self.root.after(200, self._poll_queue)
 
@@ -1102,16 +1365,22 @@ class ServerManagerApp:
 
     def _start_dual_worker(self, label):
         """后台执行互斥切换（停生产 + 清端口），随后复用现有启动流程"""
-        self._msg_queue.put(('startup_progress', {'step': self._startup_steps[0], 'progress': 1, 'total': len(self._startup_steps)}))
-        ok, reason, stopped_any = self._ensure_production_stopped()
-        if not ok:
-            self._msg_queue.put(('log', {'text': f"切换失败: {reason}", 'level': 'ERROR'}))
-            self._msg_queue.put(('dual_failed', {'label': label, 'reason': reason}))
-            return
-        if stopped_any:
-            self._msg_queue.put(('log', {'text': '已自动停止生产模式', 'level': 'INFO'}))
-        self._release_ports()
-        self._start_dual_thread(label)
+        try:
+            self._msg_queue.put(('startup_progress', {'step': self._startup_steps[0], 'progress': 1, 'total': len(self._startup_steps)}))
+            ok, reason, stopped_any = self._ensure_production_stopped()
+            if not ok:
+                self._msg_queue.put(('log', {'text': f"切换失败: {reason}", 'level': 'ERROR'}))
+                self._msg_queue.put(('dual_failed', {'label': label, 'reason': reason}))
+                return
+            if stopped_any:
+                self._msg_queue.put(('log', {'text': '已自动停止生产模式', 'level': 'INFO'}))
+            self._release_ports()
+            self._start_dual_thread(label)
+        except Exception as e:
+            # 后台线程无 try/except 会静默终止，导致启动流程卡在 'starting' 且无任何日志；
+            # 这里兜底记录并重置状态，让用户能看到失败原因。
+            self._msg_queue.put(('log', {'text': f"启动流程异常: {str(e)}", 'level': 'ERROR'}))
+            self._msg_queue.put(('dual_failed', {'label': label, 'reason': str(e)}))
 
     def _start_dual_thread(self, label):
         try:
@@ -1297,41 +1566,15 @@ class ServerManagerApp:
     def _mode_label(self):
         return {'debug': '调试模式', 'dual_dev': '开发模式（前后端）', 'restarting': '重启中', 'starting': '启动中', 'stopping': '停止中'}.get(self._mode, '')
 
-    def _update_redis_status(self):
-        if self._redis_check_after_id:
-            with contextlib.suppress(Exception):
-                self.root.after_cancel(self._redis_check_after_id)
-        def _check_and_update():
-            try:
-                is_running = self._is_redis_running()
-                redis_exe, _ = self._find_redis()
-                def _do_update():
-                    try:
-                        if is_running:
-                            self._redis_status_label.config(text='Redis: 运行中', fg=self._PALETTE['success'])
-                        elif redis_exe:
-                            self._redis_status_label.config(text='Redis: 已停止', fg=self._PALETTE['danger'])
-                        else:
-                            self._redis_status_label.config(text='Redis: 未安装', fg=self._PALETTE['text_dim'])
-                    except Exception:
-                        pass
-                    self._redis_check_after_id = None
-                self.root.after(0, _do_update)
-            except Exception:
-                self._redis_check_after_id = None
-        self._redis_check_after_id = self.root.after(500, lambda: threading.Thread(target=_check_and_update, daemon=True).start())
-
     def _update_all_ui(self):
         is_dual_dev = self._mode == 'dual_dev'
         is_starting, is_restarting, _is_stopping = self._mode == 'starting', self._mode == 'restarting', self._mode == 'stopping'
         is_none = self._mode == 'none'
-        is_busy = not is_none
         current_mode_key = self._current_mode_key
         self._update_card_ui('dual_dev', is_dual_dev, is_none, is_starting and current_mode_key == 'dual_dev', is_restarting and current_mode_key == 'dual_dev')
         # stop_all总是可用，作为紧急重置
         self.stop_all_btn.config(state='normal')
-        self._update_status_indicator(is_busy=is_busy, is_active=is_dual_dev)
-        self._update_redis_status()
+        self._update_mode_badge()
         if is_none:
             self.status_bar_label.config(text="就绪")
         elif self._mode in ('restarting', 'starting', 'stopping'):
@@ -1339,25 +1582,12 @@ class ServerManagerApp:
 
     def _update_card_ui(self, mode_key, is_active, is_none, is_starting=False, is_restarting=False):
         status = getattr(self, f'{mode_key}_status')
-        pid = getattr(self, f'{mode_key}_pid')
         start_btn = getattr(self, f'{mode_key}_start_btn')
         restart_btn = getattr(self, f'{mode_key}_restart_btn')
-        status_dot = getattr(self, f'{mode_key}_status_dot')
-        state = 'starting' if is_starting else 'restarting' if is_restarting else 'active' if is_active else 'stopped'
-        state_config = {'starting': ('启动中...', 'accent', True), 'restarting': ('重启中...', 'accent', True), 'active': ('运行中', 'success', True), 'stopped': ('已停止', 'danger', False)}
-        status_text, color_key, dot_active = state_config[state]
-        status_color = self._PALETTE[color_key]
-        status.config(text=status_text, foreground=status_color)
-        status_dot.set_color(status_color, active=dot_active)
-        if is_active and mode_key == 'dual_dev':
-            backend_pid = self._process.pid if self._process else None
-            frontend_pid = self._frontend_process.pid if self._frontend_process else None
-            pid_text = f"B:{backend_pid} F:{frontend_pid}" if backend_pid and frontend_pid else f"B:{backend_pid}" if backend_pid else f"F:{frontend_pid}" if frontend_pid else "PID: —"
-        elif is_active and self._process:
-            pid_text = f"PID: {self._process.pid}"
-        else:
-            pid_text = "PID: —"
-        pid.config(text=pid_text)
+        # 统一状态枚举：starting→部署中(蓝弧) / restarting→重启中(橙闪) / active→运行中(绿呼吸) / stopped→已停止(灰空心)
+        state = 'deploying' if is_starting else 'restarting' if is_restarting else 'running' if is_active else 'stopped'
+        state_text = '启动中' if is_starting else '重启中' if is_restarting else '运行中' if is_active else '已停止'
+        status.set_state(state, state_text)
         start_btn.config(state='disabled' if (is_starting or is_restarting) else 'normal')
         restart_btn.config(state='disabled' if (not is_active or is_starting or is_restarting) else 'normal')
 
@@ -1472,31 +1702,21 @@ class ServerManagerApp:
     def _build_server_card(self, parent, row, col, title, script_label, desc, mode_key, start_cmd, stop_cmd, restart_cmd, columnspan=1):
         card = self._card(parent, row, col, columnspan=columnspan)
         body = self._card_head(card, 'DEV', self._PALETTE['success_tint'], self._PALETTE['success'], title, desc)
-        # 状态行
+        # 状态行：胶囊状态徽章（详情页场景）
         st = tk.Frame(body, bg=self._PALETTE['bg_card'])
         st.pack(fill=tk.X, pady=(11, 0))
-        status_dot = StatusDot(st, size=10, color=self._PALETTE['danger'], canvas_bg=self._PALETTE['bg_card'])
-        status_dot.pack(side=tk.LEFT, padx=(0, 7))
-        status_label = tk.Label(st, text='已停止', font=('Microsoft YaHei UI', 10, 'bold'), fg=self._PALETTE['danger'], bg=self._PALETTE['bg_card'])
-        status_label.pack(side=tk.LEFT)
-        pid_label = tk.Label(st, text='PID —', font=('Consolas', 9), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_card'])
-        pid_label.pack(side=tk.RIGHT)
-        # 访问地址（内嵌信息条）
-        info = tk.Frame(body, bg=self._PALETTE['bg_input'])
-        info.pack(fill=tk.X, pady=(11, 0))
-        tk.Label(info, text=f'后端  localhost:{_API_PORT}      前端  localhost:{_WEB_PORT}', font=('Consolas', 9), fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_input'], anchor='w').pack(fill=tk.X, padx=12, pady=7)
+        status_badge = StatusBadge(st, state='stopped', text='已停止', size='md', palette=self._PALETTE, canvas_bg=self._PALETTE['bg_card'])
+        status_badge.pack(side=tk.LEFT)
         # 操作按钮：主操作实心 + 次操作浅底
         btns = tk.Frame(body, bg=self._PALETTE['bg_card'])
         btns.pack(fill=tk.X, pady=(13, 0))
-        start_btn = RoundedButton(btns, text=' 启动开发 ', fill=self._PALETTE['success'], hover_fill=self._PALETTE['success_h'], fg='#ffffff', command=start_cmd, canvas_bg=self._PALETTE['bg_card'], radius=10, pady=8, font=('Microsoft YaHei UI', 10, 'bold'))
+        start_btn = RoundedButton(btns, text='启动开发', variant='solid', tone='success', command=start_cmd, canvas_bg=self._PALETTE['bg_card'])
         start_btn.pack(side=tk.LEFT)
-        restart_btn = RoundedButton(btns, text=' 重启 ', fill=self._PALETTE['accent_tint'], hover_fill='#d5e8ff', fg=self._PALETTE['accent'], command=restart_cmd, state='disabled', canvas_bg=self._PALETTE['bg_card'], radius=10, pady=8, font=('Microsoft YaHei UI', 10, 'bold'))
+        restart_btn = RoundedButton(btns, text='重启', variant='outlined', tone='accent', command=restart_cmd, state='disabled', canvas_bg=self._PALETTE['bg_card'])
         restart_btn.pack(side=tk.LEFT, padx=(8, 0))
-        setattr(self, f'{mode_key}_status', status_label)
-        setattr(self, f'{mode_key}_pid', pid_label)
+        setattr(self, f'{mode_key}_status', status_badge)
         setattr(self, f'{mode_key}_start_btn', start_btn)
         setattr(self, f'{mode_key}_restart_btn', restart_btn)
-        setattr(self, f'{mode_key}_status_dot', status_dot)
 
     # ===================== 生产模式 (Windows 服务 + NSSM) =====================
 
@@ -1626,65 +1846,51 @@ class ServerManagerApp:
         self._kill_port_sync(_API_PORT)
         self._kill_port_sync(_WEB_PORT)
 
-    def _set_label(self, label, text, color=None):
-        try:
-            label.config(text=text, foreground=color if color else self._PALETTE['text_secondary'])
-        except Exception:
-            pass
-
     def _build_prod_card(self, parent, row, col):
         """生产模式卡片（与开发卡并排）— Windows 服务 (NSSM) 托管"""
         card = self._card(parent, row, col)
         body = self._card_head(card, 'PROD', self._PALETTE['accent_tint'], self._PALETTE['accent'], '生产模式', 'Windows 服务 (NSSM) · 开机自启 · 崩溃自愈')
-        # 服务状态行
+        # 服务状态行：胶囊徽章(整体状态)
         st = tk.Frame(body, bg=self._PALETTE['bg_card'])
         st.pack(fill=tk.X, pady=(11, 0))
-        self.hosting_svc_lbl = tk.Label(st, text='服务: 检测中', font=('Consolas', 9), fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_card'])
-        self.hosting_svc_lbl.pack(side=tk.LEFT)
-        self.hosting_nssm_lbl = tk.Label(st, text='NSSM: 检测中', font=('Microsoft YaHei UI', 9), fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_card'])
-        self.hosting_nssm_lbl.pack(side=tk.RIGHT)
-        # 组件状态网格（内嵌面板，iOS 分组表格风格）
+        self.hosting_svc_badge = StatusBadge(st, state='stopped', text='服务停止', size='md', palette=self._PALETTE, canvas_bg=self._PALETTE['bg_card'])
+        self.hosting_svc_badge.pack(side=tk.LEFT, padx=(0, 8))
+        # 组件状态网格：胶囊状态徽章（监控面板场景）
         grid = tk.Frame(body, bg=self._PALETTE['bg_input'])
         grid.pack(fill=tk.X, pady=(11, 0))
         grid.columnconfigure(0, weight=1)
         grid.columnconfigure(1, weight=1)
-        detail_font = ('Microsoft YaHei UI', 9)
-        self.hosting_backend_lbl = tk.Label(grid, text='后端 —', font=detail_font, fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_input'], anchor='w')
-        self.hosting_backend_lbl.grid(row=0, column=0, sticky='ew', padx=(12, 6), pady=(8, 2))
-        self.hosting_arq_lbl = tk.Label(grid, text='ARQ —', font=detail_font, fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_input'], anchor='w')
-        self.hosting_arq_lbl.grid(row=0, column=1, sticky='ew', padx=(6, 12), pady=(8, 2))
-        self.hosting_frontend_lbl = tk.Label(grid, text='前端 —', font=detail_font, fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_input'], anchor='w')
-        self.hosting_frontend_lbl.grid(row=1, column=0, sticky='ew', padx=(12, 6), pady=2)
-        self.hosting_redis_lbl = tk.Label(grid, text='Redis —', font=detail_font, fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_input'], anchor='w')
-        self.hosting_redis_lbl.grid(row=1, column=1, sticky='ew', padx=(6, 12), pady=2)
-        self.hosting_ready_lbl = tk.Label(grid, text='就绪 —', font=detail_font, fg=self._PALETTE['text_secondary'], bg=self._PALETTE['bg_input'], anchor='w')
-        self.hosting_ready_lbl.grid(row=2, column=0, sticky='ew', padx=(12, 6), pady=(2, 8))
+        self.hosting_backend_badge = StatusBadge(grid, state='stopped', text='后端', size='sm', palette=self._PALETTE, canvas_bg=self._PALETTE['bg_input'])
+        self.hosting_backend_badge.grid(row=0, column=0, sticky='w', padx=(12, 6), pady=(8, 2))
+        self.hosting_arq_badge = StatusBadge(grid, state='stopped', text='ARQ', size='sm', palette=self._PALETTE, canvas_bg=self._PALETTE['bg_input'])
+        self.hosting_arq_badge.grid(row=0, column=1, sticky='w', padx=(6, 12), pady=(8, 2))
+        self.hosting_frontend_badge = StatusBadge(grid, state='stopped', text='前端', size='sm', palette=self._PALETTE, canvas_bg=self._PALETTE['bg_input'])
+        self.hosting_frontend_badge.grid(row=1, column=0, sticky='w', padx=(12, 6), pady=2)
+        self.hosting_redis_badge = StatusBadge(grid, state='stopped', text='Redis', size='sm', palette=self._PALETTE, canvas_bg=self._PALETTE['bg_input'])
+        self.hosting_redis_badge.grid(row=1, column=1, sticky='w', padx=(6, 12), pady=2)
+        self.hosting_ready_badge = StatusBadge(grid, state='stopped', text='就绪', size='sm', palette=self._PALETTE, canvas_bg=self._PALETTE['bg_input'])
+        self.hosting_ready_badge.grid(row=2, column=0, sticky='w', padx=(12, 6), pady=(2, 8))
         # Worker 数（安装服务时生效）
         wk = tk.Frame(grid, bg=self._PALETTE['bg_input'])
         wk.grid(row=2, column=1, sticky='e', padx=(6, 12), pady=(2, 8))
         tk.Label(wk, text='Worker', font=('Microsoft YaHei UI', 9), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_input']).pack(side=tk.LEFT, padx=(0, 4))
         self.hosting_workers_var = tk.StringVar(value=str(int(os.getenv('UVICORN_WORKERS', '4'))))
         ttk.Combobox(wk, textvariable=self.hosting_workers_var, values=('2', '4', '6', '8'), width=4, state='readonly', font=('Microsoft YaHei UI', 9)).pack(side=tk.LEFT)
-        # 主操作行：启动(实心蓝) 停止(实心红) 重启(描边蓝) 刷新(描边灰)
+        # 主操作行：启动(实心蓝) 停止(描边红) 重启(描边蓝) 刷新(描边蓝)  — 统一 36px / pady=6 / radius=10
         btns = tk.Frame(body, bg=self._PALETTE['bg_card'])
         btns.pack(fill=tk.X, pady=(13, 0))
-        RoundedButton(btns, text=' 启动服务 ', fill=self._PALETTE['accent'], hover_fill=self._PALETTE['accent_h'], fg='#ffffff', command=self._start_services, canvas_bg=self._PALETTE['bg_card'], radius=10, pady=6, font=('Microsoft YaHei UI', 9, 'bold')).pack(side=tk.LEFT)
-        RoundedButton(btns, text=' 停止 ', fill=self._PALETTE['danger'], hover_fill=self._PALETTE['danger_h'], fg='#ffffff', command=self._stop_services, canvas_bg=self._PALETTE['bg_card'], radius=10, pady=6, font=('Microsoft YaHei UI', 9, 'bold')).pack(side=tk.LEFT, padx=(7, 0))
-        RoundedButton(btns, text=' 重启 ', fill=self._PALETTE['accent_tint'], hover_fill='#d5e8ff', fg=self._PALETTE['accent'], command=self._restart_services, canvas_bg=self._PALETTE['bg_card'], radius=10, pady=6, font=('Microsoft YaHei UI', 9, 'bold')).pack(side=tk.LEFT, padx=(7, 0))
-        RoundedButton(btns, text=' 刷新 ', fill=self._PALETTE['bg_input'], hover_fill='#e8e8ed', fg=self._PALETTE['text_primary'], command=self._manual_refresh_hosting, canvas_bg=self._PALETTE['bg_card'], radius=10, pady=6, font=('Microsoft YaHei UI', 9, 'bold')).pack(side=tk.LEFT, padx=(7, 0))
-        # 次操作行：安装(实心绿) 卸载(描边红) 日志(描边灰)
+        RoundedButton(btns, text='启动服务', variant='solid', tone='accent', command=self._start_services, canvas_bg=self._PALETTE['bg_card']).pack(side=tk.LEFT)
+        RoundedButton(btns, text='停止', variant='outlined', tone='danger', command=self._stop_services, canvas_bg=self._PALETTE['bg_card']).pack(side=tk.LEFT, padx=(8, 0))
+        RoundedButton(btns, text='重启', variant='outlined', tone='accent', command=self._restart_services, canvas_bg=self._PALETTE['bg_card']).pack(side=tk.LEFT, padx=(8, 0))
+        RoundedButton(btns, text='刷新', variant='outlined', tone='neutral', command=self._manual_refresh_hosting, canvas_bg=self._PALETTE['bg_card']).pack(side=tk.LEFT, padx=(8, 0))
+        # 次操作行：安装(实心绿) 卸载(描边红) 日志(描边蓝)  — 同上规格，垂直间距 8px
         btns2 = tk.Frame(body, bg=self._PALETTE['bg_card'])
         btns2.pack(fill=tk.X, pady=(8, 0))
-        RoundedButton(btns2, text=' 安装服务 ', fill=self._PALETTE['success'], hover_fill=self._PALETTE['success_h'], fg='#ffffff', command=self._install_services, canvas_bg=self._PALETTE['bg_card'], radius=10, pady=5, font=('Microsoft YaHei UI', 9, 'bold')).pack(side=tk.LEFT)
-        RoundedButton(btns2, text=' 卸载 ', fill=self._PALETTE['danger_tint'], hover_fill='#ffd9d5', fg=self._PALETTE['danger'], command=self._uninstall_services, canvas_bg=self._PALETTE['bg_card'], radius=10, pady=5, font=('Microsoft YaHei UI', 9, 'bold')).pack(side=tk.LEFT, padx=(7, 0))
-        RoundedButton(btns2, text=' 打开日志 ', fill=self._PALETTE['bg_input'], hover_fill='#e8e8ed', fg=self._PALETTE['text_primary'], command=self._open_logs_dir, canvas_bg=self._PALETTE['bg_card'], radius=10, pady=5, font=('Microsoft YaHei UI', 9, 'bold')).pack(side=tk.LEFT, padx=(7, 0))
-        # 诊断行
-        self.hosting_diag_lbl = tk.Label(body, text='状态文件: 读取中...', font=('Consolas', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_card'], anchor='w', justify='left')
-        self.hosting_diag_lbl.pack(fill=tk.X, pady=(9, 0))
-
+        RoundedButton(btns2, text='安装服务', variant='solid', tone='success', command=self._install_services, canvas_bg=self._PALETTE['bg_card']).pack(side=tk.LEFT)
+        RoundedButton(btns2, text='卸载', variant='outlined', tone='danger', command=self._uninstall_services, canvas_bg=self._PALETTE['bg_card']).pack(side=tk.LEFT, padx=(8, 0))
+        RoundedButton(btns2, text='打开日志', variant='outlined', tone='neutral', command=self._open_logs_dir, canvas_bg=self._PALETTE['bg_card']).pack(side=tk.LEFT, padx=(8, 0))
     def _manual_refresh_hosting(self):
         """手动刷新生产模式状态（后台收集 + 主线程应用，不阻塞 UI）"""
-        self._set_label(self.hosting_diag_lbl, '状态文件: 手动刷新中...', self._PALETTE['text_dim'])
         self._refresh_hosting_status()
         self.log_message('已手动刷新生产模式状态')
 
@@ -1743,62 +1949,54 @@ class ServerManagerApp:
     def _apply_hosting_data(self, data):
         """主线程应用收集到的生产模式状态（仅 UI 更新，无阻塞 IO）"""
         try:
+            self._prod_running = data.get('api_running', False)
             if data.get('collect_error'):
-                self._set_label(self.hosting_diag_lbl, '状态收集异常，将在下轮重试', self._PALETTE['warning'])
                 return
-            col = self._PALETTE
-            nssm = data['nssm']
-            self._set_label(self.hosting_nssm_lbl, f'NSSM: {"已找到" if nssm else "未找到(请安装 C:\\nssm)"}',
-                            col['success'] if nssm else col['danger'])
-            self._set_label(self.hosting_svc_lbl, f"服务: {_SVC_API}={data['api_state']}  {_SVC_ARQ}={data['arq_state']}")
 
-            def _detail(label, text, ok=None):
-                color = col['success'] if ok is True else col['danger'] if ok is False else col['text_secondary']
-                self._set_label(label, text, color)
+            def _detail(badge, state, text):
+                badge.set_state(state, text)
 
-            status_file = data['status_file']
             # 服务未运行：以 sc query 为权威，不读状态文件，避免残留旧数据
             if not data['api_running']:
+                self.hosting_svc_badge.set_state('stopped', '服务停止')
                 redis_ok = data['redis_ok']
-                _detail(self.hosting_backend_lbl, '后端: 已停止 pid=—', False)
-                _detail(self.hosting_arq_lbl, 'ARQ: 未运行 pid=—', False)
-                _detail(self.hosting_frontend_lbl, '前端: 已停止 pid=—', False)
-                _detail(self.hosting_redis_lbl, f'Redis: {"ok" if redis_ok else "已停止"}', redis_ok)
-                _detail(self.hosting_ready_lbl, '就绪: —', None)
-                self._set_label(self.hosting_diag_lbl, f'状态文件: 服务未运行，不读取 {status_file}', col['text_dim'])
+                _detail(self.hosting_backend_badge, 'stopped', '后端 已停止')
+                _detail(self.hosting_arq_badge, 'stopped', 'ARQ 未运行')
+                _detail(self.hosting_frontend_badge, 'stopped', '前端 已停止')
+                _detail(self.hosting_redis_badge, 'running' if redis_ok else 'stopped', f'Redis {"运行中" if redis_ok else "已停止"}')
+                _detail(self.hosting_ready_badge, 'stopped', '就绪 —')
                 return
 
-            read_err, stale = data['read_err'], data['stale']
+            read_err = data['read_err']
             if read_err:
-                self._set_label(self.hosting_diag_lbl, f'状态文件: {read_err}', col['danger'])
                 self.log_message(f'[生产模式] {read_err}', 'WARNING')
-            elif stale:
-                self._set_label(self.hosting_diag_lbl, f"状态文件: 已过期 ({data['mtime_str']}，>15s 未更新)", col['warning'])
-            else:
-                self._set_label(self.hosting_diag_lbl, f'状态文件: {status_file} (更新于 {data["mtime_str"]})', col['text_dim'])
 
             status = data['status']
             svcs = status.get('services', {})
+            self.hosting_svc_badge.set_state('running', '服务运行')
             backend = svcs.get('backend', {})
-            _detail(self.hosting_backend_lbl, f'后端: {backend.get("status", "—")} pid={backend.get("pid")}', backend.get('status') == 'ready')
+            backend_ok = backend.get('status') == 'ready'
+            _detail(self.hosting_backend_badge, 'running' if backend_ok else 'error', f'后端 {"运行中" if backend_ok else "已停止"}')
             arq = svcs.get('arq', {})
-            arq_status, arq_pid = arq.get('status', '—'), arq.get('pid')
+            arq_status = arq.get('status', '—')
             arq_ok = arq_status == 'running'
             if arq_status == 'external':
                 svc_pid = data.get('arq_svc_pid')
                 if svc_pid:
-                    arq_pid, arq_status, arq_ok = svc_pid, 'running', True
+                    arq_status, arq_ok = 'running', True
                 else:
                     arq_status = '未运行'
-            _detail(self.hosting_arq_lbl, f'ARQ: {arq_status} pid={arq_pid}', arq_ok)
+            _detail(self.hosting_arq_badge, 'running' if arq_ok else 'error', f'ARQ {"运行中" if arq_ok else "未运行"}')
             fe = svcs.get('frontend', {})
-            _detail(self.hosting_frontend_lbl, f'前端: {fe.get("type", "—")}/{fe.get("status", "—")} pid={fe.get("pid")}', fe.get('status') in ('running', 'ready'))
+            fe_ok = fe.get('status') in ('running', 'ready')
+            _detail(self.hosting_frontend_badge, 'running' if fe_ok else 'error', f'前端 {"运行中" if fe_ok else "已停止"}')
             redis_ok = data['redis_ok']
-            _detail(self.hosting_redis_lbl, f'Redis: {"ok" if redis_ok else "已停止"}', redis_ok)
+            _detail(self.hosting_redis_badge, 'running' if redis_ok else 'error', f'Redis {"运行中" if redis_ok else "已停止"}')
             ready = status.get('ready')
-            _detail(self.hosting_ready_lbl, f'就绪: {ready if ready is not None else "—"}', ready)
+            _detail(self.hosting_ready_badge, 'running' if ready else 'error', f'就绪 {"是" if ready else "—"}')
         finally:
             self._hosting_collecting = False
+            self._update_mode_badge()
             # 收集期间有刷新请求 → 立即补一轮；否则按 5s 周期继续
             delay = 50 if self._hosting_refresh_requested else 5000
             self._hosting_refresh_requested = False
@@ -1947,7 +2145,7 @@ class ServerManagerApp:
         log_body.grid(row=1, column=0, sticky='nsew', padx=14, pady=(8, 14))
         log_body.columnconfigure(0, weight=1)
         log_body.rowconfigure(0, weight=1)
-        log_font = ('Consolas', 9)
+        log_font = self._pick_log_font()
         self.log_text = tk.Text(log_body, bg=self._PALETTE['bg_log'], fg=self._PALETTE['log_fg'], insertbackground=self._PALETTE['log_fg'], selectbackground=self._PALETTE['bg_input'], font=log_font, wrap=tk.WORD, state=tk.DISABLED, relief=tk.FLAT, padx=14, pady=10, cursor='arrow')
         self.log_text.grid(row=0, column=0, sticky='nsew')
         self.log_text.tag_configure('INFO', foreground=self._PALETTE['log_info'])
@@ -1962,44 +2160,34 @@ class ServerManagerApp:
         bar.pack(fill=tk.X, side=tk.BOTTOM)
         left = tk.Frame(bar, bg=self._PALETTE['bg_surface'])
         left.pack(side=tk.LEFT, padx=20, pady=5)
-        self._status_dot_bar = tk.Canvas(left, width=8, height=8, highlightthickness=0, bg=self._PALETTE['bg_surface'])
-        self._status_dot_bar.pack(side=tk.LEFT, padx=(0, 6))
-        self._status_dot_item = self._status_dot_bar.create_oval(1, 1, 7, 7, fill=self._PALETTE['success'], outline='')
+        # 运行模式徽章：一眼识别当前是开发模式 / 生产模式 / 未运行（大厂 Status Tag 风格）
+        self._mode_badge = StatusBadge(left, state='stopped', text='未运行', size='lg', palette=self._PALETTE, canvas_bg=self._PALETTE['bg_surface'])
+        self._mode_badge.pack(side=tk.LEFT, padx=(0, 10))
         self.status_bar_label = tk.Label(left, text='就绪', font=('Microsoft YaHei UI', 9), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_surface'])
         self.status_bar_label.pack(side=tk.LEFT)
         right = tk.Frame(bar, bg=self._PALETTE['bg_surface'])
         right.pack(side=tk.RIGHT, padx=20, pady=5)
         # 紧急停止（危险浅底）：强杀全部进程并释放端口
-        self.stop_all_btn = RoundedButton(right, text=' 紧急停止 ', fill=self._PALETTE['danger_tint'], hover_fill='#ffd9d5', fg=self._PALETTE['danger'], command=self.stop_all, canvas_bg=self._PALETTE['bg_surface'], radius=8, pady=2, font=('Microsoft YaHei UI', 8, 'bold'))
+        self.stop_all_btn = RoundedButton(right, text='紧急停止', variant='subtle', tone='danger', command=self.stop_all, canvas_bg=self._PALETTE['bg_surface'], pady=2, radius=8, font=('Microsoft YaHei UI', 8, 'bold'))
         self.stop_all_btn.pack(side=tk.RIGHT, padx=(10, 0))
-        self._redis_status_label = tk.Label(right, text='Redis: 检查中', font=('Consolas', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_surface'])
-        self._redis_status_label.pack(side=tk.RIGHT, padx=(8, 0))
-        tk.Label(right, text=f'API:{_API_PORT} WEB:{_WEB_PORT}', font=('Consolas', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_surface']).pack(side=tk.RIGHT)
 
-    def _update_status_indicator(self, is_busy, is_active):
-        color = self._PALETTE['success'] if is_active else self._PALETTE['warning'] if is_busy else self._PALETTE['info']
-        if self._status_anim_after_id:
-            with contextlib.suppress(Exception):
-                self.root.after_cancel(self._status_anim_after_id)
-            self._status_anim_after_id = None
-        self._status_pulse_step = 0
+    def _update_mode_badge(self):
+        """更新运行模式徽章：未运行 / 开发模式 / 生产模式（含过渡态）。"""
         try:
-            self._status_dot_bar.coords(self._status_dot_item, 1, 1, 7, 7)
-            self._status_dot_bar.itemconfig(self._status_dot_item, fill=color)
+            mode = self._mode
+            if mode == 'starting':
+                self._mode_badge.set_state('deploying', f'开发模式 · {self._mode_label()}')
+            elif mode in ('restarting', 'stopping'):
+                self._mode_badge.set_state('restarting', f'开发模式 · {self._mode_label()}')
+            elif mode == 'dual_dev':
+                self._mode_badge.set_state('running', '开发模式')
+            elif getattr(self, '_prod_running', False):
+                # 生产模式用品牌蓝，与开发模式(绿)区分，体现环境语义
+                self._mode_badge.set_state('running', '生产模式', color_key='accent', tint_key='accent_tint')
+            else:
+                self._mode_badge.set_state('stopped', '未运行')
         except Exception:
-            return
-        if is_busy or is_active:
-            speed_ms = 500 if is_active else 300
-            def pulse():
-                self._status_pulse_step = (self._status_pulse_step + 1) % 60
-                inset = 1 + int((math.sin(self._status_pulse_step / 60.0 * 2 * math.pi) + 1) * 0.8)
-                try:
-                    self._status_dot_bar.coords(self._status_dot_item, inset, inset, 8 - inset, 8 - inset)
-                    self._status_dot_bar.itemconfig(self._status_dot_item, fill=color)
-                except Exception:
-                    return
-                self._status_anim_after_id = self.root.after(speed_ms, pulse)
-            pulse()
+            pass
 
 
 def main():

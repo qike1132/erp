@@ -89,10 +89,13 @@ class TestAuthEndpoints:
         mock_user.id = 1
         mock_user.username = "admin"
         mock_user.status = True
+        mock_user.is_super = True
+        mock_user.factory = None
         mock_user.password = "$2b$12$test_hash"
         mock_user.permissions = []
 
         mock_result = MagicMock()
+        mock_result.unique.return_value = mock_result
         mock_result.scalar_one_or_none.return_value = mock_user
         mock_db.execute = AsyncMock(return_value=mock_result)
 
@@ -116,20 +119,21 @@ class TestAuthEndpoints:
 
     @pytest.mark.asyncio
     async def test_login_rate_limit_burst(self, client, mock_db):
-        """POST /api/v1/auth/login 同一 IP 1 分钟内超过 5 次应返回 429"""
+        """POST /api/v1/auth/login 同一 IP 1 分钟内超过 100 次（内网宽松阈值）应返回 429"""
         from unittest.mock import AsyncMock
 
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = None
         mock_db.execute = AsyncMock(return_value=mock_result)
 
+        # 现行实现：redis_wrapper.get_client() + pipeline 批量 incr burst/window 两个计数器
         mock_redis = MagicMock()
-        mock_redis.incr = AsyncMock(return_value=6)
+        mock_pipe = MagicMock()
+        mock_pipe.execute = AsyncMock(return_value=(101, 1))
+        mock_redis.pipeline = MagicMock(return_value=mock_pipe)
         mock_redis.expire = AsyncMock()
-        mock_cache = MagicMock()
-        mock_cache.redis_client = mock_redis
 
-        with patch("fastapi_app.api.v1.endpoints.auth.utils.redis_cache", mock_cache):
+        with patch("fastapi_app.core.redis_wrapper.get_client", return_value=mock_redis):
             response = await client.post("/api/v1/auth/login", json={
                 "username": "wronguser",
                 "password": "wrongpass",
@@ -140,7 +144,7 @@ class TestAuthEndpoints:
 
     @pytest.mark.asyncio
     async def test_login_rate_limit_window(self, client, mock_db):
-        """POST /api/v1/auth/login 同一 IP 5 分钟内超过 10 次应返回 429"""
+        """POST /api/v1/auth/login 同一 IP 5 分钟内超过 300 次（内网宽松阈值）应返回 429"""
         from unittest.mock import AsyncMock
 
         mock_result = MagicMock()
@@ -148,13 +152,13 @@ class TestAuthEndpoints:
         mock_db.execute = AsyncMock(return_value=mock_result)
 
         mock_redis = MagicMock()
-        # burst 计数正常（<=5），但 5 分钟窗口计数超过 10
-        mock_redis.incr = AsyncMock(side_effect=[3, 11])
+        # burst 计数正常（<=100），但 5 分钟窗口计数超过 300
+        mock_pipe = MagicMock()
+        mock_pipe.execute = AsyncMock(return_value=(3, 301))
+        mock_redis.pipeline = MagicMock(return_value=mock_pipe)
         mock_redis.expire = AsyncMock()
-        mock_cache = MagicMock()
-        mock_cache.redis_client = mock_redis
 
-        with patch("fastapi_app.api.v1.endpoints.auth.utils.redis_cache", mock_cache):
+        with patch("fastapi_app.core.redis_wrapper.get_client", return_value=mock_redis):
             response = await client.post("/api/v1/auth/login", json={
                 "username": "wronguser",
                 "password": "wrongpass",

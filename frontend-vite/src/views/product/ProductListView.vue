@@ -32,7 +32,7 @@
             <button class="pd-modal-close" @click="imageModalVisible = false" aria-label="关闭"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
           </div>
           <div class="pd-modal-body">
-            <img :src="resolveStaticUrl(imageModalSrc)" class="pd-modal-img-view" />
+            <img loading="lazy" :src="resolveStaticUrl(imageModalSrc)" class="pd-modal-img-view" alt="产品图片" />
           </div>
         </div>
       </div>

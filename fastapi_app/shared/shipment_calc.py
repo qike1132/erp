@@ -7,7 +7,7 @@
 """
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 from fastapi_app.shared_models import Order
 

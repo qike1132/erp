@@ -2,11 +2,9 @@
 20000条测试数据生成器
 生成覆盖所有核心数据库表的批量测试数据，用于数据库完整性测试。
 """
-import os
-import sys
 import random
-import hashlib
-from datetime import datetime, timedelta
+import sys
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -48,7 +46,7 @@ def generate_products(count):
 
 def generate_customers(count):
     rows = []
-    for i in range(count):
+    for _i in range(count):
         rows.append({
             "customer_name": fake.company(),
             "contact_person": fake.name(),
@@ -61,7 +59,7 @@ def generate_customers(count):
 
 def generate_suppliers(count):
     rows = []
-    for i in range(count):
+    for _i in range(count):
         rows.append({
             "supplier_name": fake.company(),
             "contact_person": fake.name(),
@@ -120,7 +118,7 @@ def generate_approvals(count):
     rows = []
     types = ["订单审批", "入库审批", "出库审批", "采购审批", "退款审批"]
     statuses = ["待审批", "已通过", "已驳回"]
-    for i in range(count):
+    for _i in range(count):
         rows.append({
             "approval_type": random.choice(types),
             "status": random.choice(statuses),

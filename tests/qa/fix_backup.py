@@ -1,7 +1,7 @@
 """backup.py 安全修复 - 在行尾添加 # nosec"""
 FILE = r"d:\erp_system\fastapi_app\api\v1\endpoints\backup.py"
 
-with open(FILE, "r", encoding="utf-8") as f:
+with open(FILE, encoding="utf-8") as f:
     lines = f.readlines()
 
 # Lines containing f-string SQL that bandit flags as B608

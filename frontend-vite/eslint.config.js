@@ -60,12 +60,19 @@ export default tseslint.config(
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/no-unused-expressions': 'off',
+      'no-console': ['error', { allow: ['warn', 'error'] }],
       'vue/multi-word-component-names': 'off',
       'vue/max-attributes-per-line': 'off',
       'vue/singleline-html-element-content-newline': 'off',
       'vue/multiline-html-element-content-newline': 'off',
       'vue/first-attribute-linebreak': 'off',
       'vue/html-self-closing': ['warn', { html: { void: 'always', normal: 'always', component: 'always' } }],
+    },
+  },
+  {
+    files: ['src/utils/devLog.ts'],
+    rules: {
+      'no-console': 'off',
     },
   },
   {

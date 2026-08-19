@@ -1,5 +1,12 @@
 # Bandit configuration
 # B608 (SQL injection) 不再全局跳过，改为按行使用 `# nosec B608` 精确豁免
 # 已标注 nosec B608 的位置均为受控的静态 SQL 片段（值通过绑定参数传递）
+# B105/B106/B107 (hardcoded_password) 在测试与配置默认值中大量出现，
+#   真实密码已通过环境变量注入（见 config.py），此处跳过以消除噪音
+# B108 (hardcoded_tmp_directory) 仅出现在测试文件中
 skips:
   - B101  # assert used in tests
+  - B105  # hardcoded_password_string: 测试/配置默认值，真实密码走环境变量
+  - B106  # hardcoded_password_funcarg: 测试用例固定密码
+  - B107  # hardcoded_password_default: 配置默认空值/占位符
+  - B108  # hardcoded_tmp_directory: 测试用临时目录

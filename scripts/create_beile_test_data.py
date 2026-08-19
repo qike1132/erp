@@ -11,7 +11,7 @@
 """
 import asyncio
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,7 +43,7 @@ RECORD_TYPES = ["regular"] * 8 + ["custom"] * 2  # 80% regular, 20% custom
 COUNTRIES = [None, None, None, None, "日本", "泰国", "越南", "新加坡"]
 
 # 下单日期范围
-BASE_DATE = datetime(2026, 8, 1, tzinfo=timezone.utc)
+BASE_DATE = datetime(2026, 8, 1, tzinfo=UTC)
 
 
 async def get_hubei_products(db: AsyncSession):
@@ -88,7 +88,7 @@ async def create_orders():
         products = await get_hubei_products(db)
 
         # 用时间戳毫秒生成唯一序号，避免复杂SQL
-        now_utc = datetime.now(timezone.utc)
+        now_utc = datetime.now(UTC)
         base_seq = int(now_utc.timestamp() * 1000) % 100000
 
         # 50 条订单：30 单 SKU + 15 双 SKU + 5 三 SKU

@@ -44,7 +44,7 @@ export function useBeileOrders() {
   const appliedProduct = ref('')
   const appliedCustomer = ref('')
 
-  /** 确认状态筛选：unconfirmed=未确认 / confirmed=已确认（默认未确认，湖北订单确认流程） */
+  /** 确认状态筛选：unconfirmed=未确认 / confirmed=已确认（默认未确认） */
   const confirmStatus = ref('unconfirmed')
 
   const page = ref(1)
@@ -179,21 +179,26 @@ export function useBeileOrders() {
   )
 
   /**
-   * 确认湖北订单：仅未确认的订单记录可见按钮，确认后由后端落库
-   * confirmed_at。在「未确认」筛选下成功后立即从列表移除该行并递减
-   * 未确认计数，无需等待 30s 定时刷新；其他筛选下照常 refetch。
+   * 确认湖北订单/备货：未确认的订单与备货记录均显示确认按钮，
+   * 确认后由后端落库 confirmed_at。在「未确认」筛选下成功后立即
+   * 从列表移除该行并递减未确认计数，无需等待 30s 定时刷新；
+   * 其他筛选下照常 refetch。
    */
   async function handleConfirm(item: BeileOrderRow) {
-    if (item.record_type !== 'order' || item.confirmed) return
+    if (item.confirmed) return
     if (confirmingIds.value.has(item.id)) return
     confirmingIds.value.add(item.id)
     try {
-      const res = await orderApi.confirmBeileOrder(item.id)
-      toast.success(res.message || '订单已确认')
+      const isStockin = item.record_type === 'stockin'
+      const res = isStockin
+        ? await orderApi.confirmBeileStockin(item.id)
+        : await orderApi.confirmBeileOrder(item.id)
+      toast.success(res.message || (isStockin ? '备货已确认' : '订单已确认'))
       if (confirmStatus.value === 'unconfirmed') {
         queryClient.setQueryData<OrderListApiResponse>(queryKey.value, (old) => {
           if (!old) return old
-          const data = (old.data || []).filter((o) => o.id !== item.id)
+          // 订单与备货来自不同表，id 可能撞号，需同时匹配 record_type
+          const data = ((old.data || []) as BeileOrderRow[]).filter((o) => !(o.id === item.id && o.record_type === item.record_type))
           return {
             ...old,
             data,
@@ -210,7 +215,7 @@ export function useBeileOrders() {
       }
     } catch (e) {
       const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      toast.error(msg || '确认订单失败')
+      toast.error(msg || '确认失败')
     } finally {
       confirmingIds.value.delete(item.id)
     }

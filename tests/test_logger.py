@@ -3,7 +3,6 @@
 
 验证日志系统在无 Flask 依赖下正常工作。
 """
-import pytest
 
 
 def test_logger_import():

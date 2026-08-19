@@ -9,13 +9,14 @@
 - GET  /export-enhanced         支持 Range 请求头的增强备份导出
 """
 import asyncio
+import contextlib
 import hashlib
 import logging
 import os
 import tempfile
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -46,8 +47,8 @@ async def _export_backup_to_response(
     remark: str,
     format: str,
     encrypt: bool,
-    password: Optional[str],
-    x_backup_password: Optional[str],
+    password: str | None,
+    x_backup_password: str | None,
     register_temp: Callable[[Path], Path],
 ) -> FileResponse:
     """导出备份（JSON/ZIP）并返回 FileResponse。
@@ -60,7 +61,7 @@ async def _export_backup_to_response(
     if format == 'json':
         try:
             json_bytes = await backup_service.execute_legacy_backup_to_bytes(user, remark, db)
-        except Exception as e:
+        except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
             logger.error(f'JSON 备份导出失败: {e}')
             raise HTTPException(status_code=500, detail='备份失败，请查看服务器日志') from e
 
@@ -87,12 +88,12 @@ async def _export_backup_to_response(
     # ZIP 格式：直接写入临时文件并按需加密，避免将完整文件读入内存
     encryption_password = _get_encryption_password(password, x_backup_password) if encrypt else None
     try:
-        zip_path, manifest = await backup_service.create_full_backup_to_file(
+        zip_path, _manifest = await backup_service.create_full_backup_to_file(
             db, user, remark,
             encrypt=encrypt,
             encrypt_password=encryption_password,
         )
-    except Exception as e:
+    except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
         logger.error(f'ZIP 备份导出失败: {e}')
         raise HTTPException(status_code=500, detail='备份失败，请查看服务器日志') from e
 
@@ -121,8 +122,8 @@ async def export_backup(
     remark: str = '',
     format: str = 'zip',
     encrypt: bool = Query(True, description="是否启用加密"),
-    password: Optional[str] = Query(None, description="加密密码，为空时使用环境变量或生成临时密码"),
-    x_backup_password: Optional[str] = Header(None, alias='X-Backup-Password'),
+    password: str | None = Query(None, description="加密密码，为空时使用环境变量或生成临时密码"),
+    x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('export_backup')),
     db: AsyncSession = Depends(get_async_db),
 ):
@@ -152,10 +153,8 @@ async def export_backup(
 
     def _cleanup_temp_files():
         for p in temp_files:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(p)
-            except OSError:
-                pass
 
     background_tasks.add_task(_cleanup_temp_files)
     return await _export_backup_to_response(
@@ -170,8 +169,8 @@ async def export_backup(
 async def save_backup_to_server(
     remark: str = '',
     encrypt: bool = Query(True, description="是否启用加密"),
-    password: Optional[str] = Query(None, description="加密密码，为空时使用环境变量或生成临时密码"),
-    x_backup_password: Optional[str] = Header(None, alias='X-Backup-Password'),
+    password: str | None = Query(None, description="加密密码，为空时使用环境变量或生成临时密码"),
+    x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('save_backup_to_server')),
     db: AsyncSession = Depends(get_async_db),
 ):
@@ -271,8 +270,8 @@ async def get_backup_info(
     background_tasks: BackgroundTasks,
     remark: str = '',
     encrypt: bool = Query(True, description="是否启用加密"),
-    password: Optional[str] = Query(None, description="加密密码，为空时使用环境变量或生成临时密码"),
-    x_backup_password: Optional[str] = Header(None, alias='X-Backup-Password'),
+    password: str | None = Query(None, description="加密密码，为空时使用环境变量或生成临时密码"),
+    x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('get_backup_info')),
     db: AsyncSession = Depends(get_async_db),
 ):
@@ -289,12 +288,12 @@ async def get_backup_info(
 
     encryption_password = _get_encryption_password(password, x_backup_password) if encrypt else None
     try:
-        backup_path, manifest = await backup_service.create_full_backup_to_file(
+        backup_path, _manifest = await backup_service.create_full_backup_to_file(
             db, user, remark,
             encrypt=encrypt,
             encrypt_password=encryption_password,
         )
-    except Exception as e:
+    except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
         logger.error(f'获取备份信息失败: {e}')
         raise HTTPException(status_code=500, detail='获取备份信息失败') from e
 
@@ -305,7 +304,7 @@ async def get_backup_info(
         chunk_size = _get_chunk_size()
         total_chunks = (total_size + chunk_size - 1) // chunk_size
         checksum = await asyncio.to_thread(_sha256_file, backup_path)
-    except Exception as e:
+    except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
         logger.error(f'计算备份文件信息失败: {e}')
         raise HTTPException(status_code=500, detail='计算备份文件信息失败') from e
 
@@ -335,8 +334,8 @@ async def export_backup_chunk(
     background_tasks: BackgroundTasks,
     remark: str = '',
     encrypt: bool = Query(True, description="是否启用加密"),
-    password: Optional[str] = Query(None, description="加密密码，为空时使用环境变量或生成临时密码"),
-    x_backup_password: Optional[str] = Header(None, alias='X-Backup-Password'),
+    password: str | None = Query(None, description="加密密码，为空时使用环境变量或生成临时密码"),
+    x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('export_backup_chunk')),
     db: AsyncSession = Depends(get_async_db),
 ):
@@ -348,12 +347,12 @@ async def export_backup_chunk(
 
     encryption_password = _get_encryption_password(password, x_backup_password) if encrypt else None
     try:
-        backup_path, manifest = await backup_service.create_full_backup_to_file(
+        backup_path, _manifest = await backup_service.create_full_backup_to_file(
             db, user, remark,
             encrypt=encrypt,
             encrypt_password=encryption_password,
         )
-    except Exception as e:
+    except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
         logger.error(f'生成备份分片失败: {e}')
         raise HTTPException(status_code=500, detail='生成备份分片失败') from e
 
@@ -378,7 +377,7 @@ async def export_backup_chunk(
         chunk_data = await asyncio.to_thread(_read_chunk, backup_path, start, end - start + 1)
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
         logger.error(f'下载备份分片失败: {e}')
         raise HTTPException(status_code=500, detail='下载备份分片失败') from e
 
@@ -402,8 +401,8 @@ async def export_backup_enhanced(
     remark: str = '',
     format: str = 'zip',
     encrypt: bool = Query(True, description="是否启用加密"),
-    password: Optional[str] = Query(None, description="加密密码，为空时使用环境变量或生成临时密码"),
-    x_backup_password: Optional[str] = Header(None, alias='X-Backup-Password'),
+    password: str | None = Query(None, description="加密密码，为空时使用环境变量或生成临时密码"),
+    x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('export_backup_enhanced')),
     db: AsyncSession = Depends(get_async_db),
 ):
@@ -411,7 +410,7 @@ async def export_backup_enhanced(
     增强的备份导出端点，支持Range请求头和分片下载
     基于 FileResponse 磁盘流式传输，由 Starlette 自动处理 Range 请求。
     """
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    datetime.now().strftime('%Y%m%d_%H%M%S')
     temp_files: list[str] = []
 
     def _register_temp_file(path: Path) -> Path:

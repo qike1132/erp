@@ -37,6 +37,7 @@ from fastapi_app.services.purchase_history_service import (  # noqa: F401
     save_query,
     use_saved_query,
 )
+
 # 直接从 crud/query/generate 三个子模块导入，移除 purchase_order_service 中间层
 from fastapi_app.services.purchase_order_crud import (  # noqa: F401
     _build_order_summary,

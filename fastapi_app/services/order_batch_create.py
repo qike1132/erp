@@ -8,7 +8,7 @@ Task 3（多 SKU 订单聚合）：按 customer 分组，同一客户的多个 S
 1 个主订单（Order）+ N 个 OrderItem，库存抵扣按 OrderItem 粒度执行。
 """
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -31,7 +31,7 @@ from fastapi_app.shared_models import (
 logger = logging.getLogger(__name__)
 
 
-class _SavepointRollbackSignal(Exception):
+class _SavepointRollbackSignalError(Exception):
     """批量处理单项业务校验失败，用于触发 savepoint 回滚但不作为真实错误"""
 
 
@@ -55,7 +55,7 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
             if pid > 0:
                 product_ids.append(pid)
         except (TypeError, ValueError):
-            pass
+            pass  # defensive: 异常静默处理,不影响主流程
     product_ids = sorted(set(product_ids))
 
     # 按 customer 分组（dict 保持首次出现顺序）
@@ -71,7 +71,7 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
             async with db.begin_nested():
                 # 加锁查询所有相关 Product（仅首次进入时执行）
                 if product_ids and not product_map:
-                    lock_result = await db.execute(
+                    lock_result = await db.execute(  # batch-loop: 有意逐行处理,非 N+1
                         select(Product).where(Product.id.in_(product_ids)).with_for_update()
                     )
                     product_map = {p.id: p for p in lock_result.scalars().all()}
@@ -86,7 +86,7 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                             'success': False, 'error': '无效的产品ID',
                             'customer': customer,
                         })
-                        raise _SavepointRollbackSignal()
+                        raise _SavepointRollbackSignalError() from None
                     try:
                         quantity = int(order_data.get('quantity', 0))
                     except (TypeError, ValueError):
@@ -94,14 +94,14 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                             'success': False, 'error': '无效的订单数量',
                             'customer': customer,
                         })
-                        raise _SavepointRollbackSignal()
+                        raise _SavepointRollbackSignalError() from None
 
                     if not product_id or not customer or quantity <= 0:
                         results.append({
                             'success': False, 'error': '缺少必填字段',
                             'customer': customer,
                         })
-                        raise _SavepointRollbackSignal()
+                        raise _SavepointRollbackSignalError()
 
                     if quantity > MAX_QUANTITY:
                         results.append({
@@ -109,7 +109,7 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                             'error': f'订单数量必须在 1-{MAX_QUANTITY} 之间',
                             'customer': customer,
                         })
-                        raise _SavepointRollbackSignal()
+                        raise _SavepointRollbackSignalError()
 
                     product = product_map.get(product_id)
                     if not product:
@@ -117,7 +117,7 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                             'success': False, 'error': '产品不存在',
                             'customer': customer,
                         })
-                        raise _SavepointRollbackSignal()
+                        raise _SavepointRollbackSignalError()
 
                     # 工厂校验：product.factory 为空时仅记录警告，不阻断订单创建
                     # 旧产品可能尚未回填 factory 字段，强制拦截会导致大量订单无法录入
@@ -148,7 +148,7 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                     product_id=first_item['product_id'],  # NOT NULL 兼容，新代码应读 order.items
                     customer=customer,
                     quantity=total_quantity,  # 兼容旧代码读取 order.quantity
-                    order_date=datetime.now(timezone.utc).replace(tzinfo=None),  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+                    order_date=datetime.now(UTC).replace(tzinfo=None),  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
                     status='待备货',
                     note='',  # 主订单级 note 留空，SKU 级 note 在 OrderItem
                     order_type=first_item['order_type'],
@@ -181,7 +181,7 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                         product_id=it['product_id'],
                         change_type='订单创建',
                         change_quantity=it['quantity'],
-                        change_date=datetime.now(timezone.utc).replace(tzinfo=None),  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+                        change_date=datetime.now(UTC).replace(tzinfo=None),  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
                         customer=customer,
                         related_id=str(order.id),
                         note=f'批量创建订单 {order.order_no} - SKU {product.name}',
@@ -192,7 +192,7 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                 try:
                     from fastapi_app.services.outsource_service import auto_generate_for_order
                     await auto_generate_for_order(db, order)
-                except Exception as og_err:
+                except Exception as og_err:  # broad-except: 服务层容错，记录异常并返回安全默认值
                     logger.warning(
                         "自动生成外发工序失败 order_no=%s: %s", order.order_no, og_err,
                         exc_info=True,
@@ -202,7 +202,7 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                 # 保留原 deduct_quantity > 0 守卫：process_order_deduction 在
                 # custom_deduct_quantity<=0 时会回退到按 order_quantity 全量抵扣，
                 # 必须显式跳过 deduct_quantity=0 的项以避免误扣库存。
-                for order_item, it in zip(created_items, validated_items):
+                for _order_item, it in zip(created_items, validated_items, strict=False):
                     if it['deduct_stock'] and it['deduct_quantity'] > 0:
                         try:
                             await process_order_deduction(
@@ -217,7 +217,7 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                                 'success': False, 'error': '抵扣处理失败，请稍后重试',
                                 'customer': customer,
                             })
-                            raise _SavepointRollbackSignal() from ded_err
+                            raise _SavepointRollbackSignalError() from ded_err
 
                 results.append({
                     'success': True,
@@ -260,7 +260,7 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                         db, order, 'new_order', created_items,
                         skip_factory='湖北' if has_hubei_sku else None,
                     )
-                except Exception as notify_err:
+                except Exception as notify_err:  # broad-except: 服务层容错，记录异常并返回安全默认值
                     logger.warning(
                         "工厂通知派发失败 order_no=%s: %s", order.order_no, notify_err,
                         exc_info=True,
@@ -271,13 +271,13 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                     await dispatch_beile_unconfirmed_notifications(
                         db, order, [(it.product_id, it.quantity) for it in created_items]
                     )
-                except Exception as notify_err:
+                except Exception as notify_err:  # broad-except: 服务层容错，记录异常并返回安全默认值
                     logger.warning(
                         "湖北未确认提醒派发失败 order_no=%s: %s", order.order_no, notify_err,
                         exc_info=True,
                     )
-        except _SavepointRollbackSignal:
-            pass  # 业务校验失败，savepoint 已自动回滚，继续下一组
+        except _SavepointRollbackSignalError:
+            pass  # 业务校验失败，savepoint 已自动回滚，继续下一组; defensive: 异常静默处理,不影响主流程
         except (ValueError, TypeError, OSError) as e:
             # 数据库异常，begin_nested 已自动回滚 savepoint，session 恢复有效状态
             logger.error(f"批量订单分组失败: {e}", exc_info=True)
@@ -289,7 +289,7 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
         except SQLAlchemyError as e:
             # 数据库异常会污染 session（savepoint 仅自动回滚嵌套事务），必须整体回滚并终止批量流程
             logger.error(f"批量创建订单时数据库异常: {e}", exc_info=True)
-            await db.rollback()
+            await db.rollback()  # manual-tx: try/except 内显式事务控制
             raise HTTPException(status_code=500, detail='批量创建订单时数据库异常') from e
 
     return {

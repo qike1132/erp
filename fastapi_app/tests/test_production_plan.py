@@ -137,7 +137,13 @@ class TestProductionPlanEndpoints:
     @pytest.mark.asyncio
     async def test_timeline_success(self, client, mock_db):
         mock_timeline_data = {
-            '2026-04-15': [{'customer_name': '测试客户', 'quantity': 100}],
+            'year': 2026,
+            'month': 4,
+            'days_in_month': 30,
+            'timeline': [
+                {'date': '2026-04-15', 'day': 15, 'plans': [], 'total_plan_qty': 100, 'has_warning': False},
+            ],
+            'customers': ['测试客户'],
         }
         with patch('fastapi_app.api.v1.endpoints.production_plan.production_plan_service') as mock_svc:
             mock_svc.get_timeline = AsyncMock(return_value=mock_timeline_data)
@@ -147,18 +153,28 @@ class TestProductionPlanEndpoints:
             )
         assert response.status_code == 200
         data = response.json()
-        assert '2026-04-15' in data
+        assert data['year'] == 2026
+        assert data['month'] == 4
+        assert any(d['date'] == '2026-04-15' for d in data['timeline'])
 
     @pytest.mark.asyncio
     async def test_customer_summary_success(self, client, mock_db):
         mock_summary = {
-            '测试客户': {
-                'plan_qty': 100,
-                'inventory_qty': 50,
-                'shipped_qty': 20,
-                'remaining_qty': 80,
-                'warning_count': 0,
-            }
+            'total_plan_qty': 100,
+            'total_inventory_qty': 50,
+            'total_shipped_qty': 20,
+            'total_remaining_qty': 80,
+            'total_diff': -30,
+            'warning_count': 0,
+            'customer_summary': {
+                '测试客户': {
+                    'plan_qty': 100,
+                    'inventory_qty': 50,
+                    'shipped_qty': 20,
+                    'remaining_qty': 80,
+                    'warning_count': 0,
+                }
+            },
         }
         with patch('fastapi_app.api.v1.endpoints.production_plan.production_plan_service') as mock_svc:
             mock_svc.get_customer_summary = AsyncMock(return_value=mock_summary)
@@ -168,7 +184,8 @@ class TestProductionPlanEndpoints:
             )
         assert response.status_code == 200
         data = response.json()
-        assert '测试客户' in data
+        assert '测试客户' in data['customer_summary']
+        assert data['total_plan_qty'] == 100
 
     @pytest.mark.asyncio
     async def test_validate_barcode_found(self, client, mock_db):

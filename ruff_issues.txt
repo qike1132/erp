@@ -1,0 +1,53 @@
+﻿fastapi_app\api\v1\endpoints\auth.py:189:13: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+fastapi_app\api\v1\endpoints\auth.py:192:13: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+fastapi_app\api\v1\endpoints\auth.py:260:9: S106 Possible hardcoded password assigned to argument: "token_type"
+fastapi_app\api\v1\endpoints\auth.py:362:9: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+fastapi_app\api\v1\endpoints\backup\_deps.py:186:9: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+fastapi_app\api\v1\endpoints\dead_letter.py:106:9: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+fastapi_app\api\v1\endpoints\dead_letter.py:143:9: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+fastapi_app\api\v1\endpoints\dead_letter.py:165:9: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+fastapi_app\api\v1\endpoints\dead_letter.py:178:9: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+fastapi_app\api\v1\endpoints\order.py:93:9: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+fastapi_app\core\arq_app.py:117:17: RUF012 Mutable default value for class attribute
+fastapi_app\core\audit_middleware.py:105:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+fastapi_app\core\database.py:37:35: SIM112 Use capitalized environment variable `PGBOUNCER_ENABLED` instead of `PGBouncer_ENABLED`
+fastapi_app\core\db_health.py:118:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+fastapi_app\core\deps.py:288:13: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+fastapi_app\core\domain_events.py:170:17: S110 `try`-`except`-`pass` detected, consider logging the exception
+fastapi_app\core\prod_runner.py:199:26: SIM115 Use a context manager for opening files
+fastapi_app\core\slow_query.py:109:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+fastapi_app\core\task_callbacks.py:83:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+fastapi_app\services\backup\format_strategy.py:369:21: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+fastapi_app\services\backup\incremental.py:269:9: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+fastapi_app\services\backup\metrics\service.py:458:21: B007 Loop control variable `date_key` not used within loop body
+fastapi_app\services\backup\records.py:167:13: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+fastapi_app\services\backup\records.py:205:9: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+fastapi_app\services\backup\restore.py:127:17: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+fastapi_app\services\backup\verify\core.py:228:5: B015 Pointless comparison. Did you mean to assign a value? Otherwise, prepend `assert` or remove it.
+fastapi_app\services\backup\verify_dir\core.py:228:5: B015 Pointless comparison. Did you mean to assign a value? Otherwise, prepend `assert` or remove it.
+fastapi_app\services\numbering.py:42:17: RUF012 Mutable default value for class attribute
+fastapi_app\services\order_batch_create.py:34:7: N818 Exception name `_SavepointRollbackSignal` should be named with an Error suffix
+fastapi_app\services\order_batch_create.py:89:25: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+fastapi_app\services\order_batch_create.py:97:25: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+fastapi_app\services\order_batch_create.py:205:21: B007 Loop control variable `order_item` not used within loop body
+fastapi_app\services\serializers\order_serializer.py:143:41: RUF012 Mutable default value for class attribute
+fastapi_app\tests\test_tasks.py:44:44: S108 Probable insecure usage of temporary file or directory: "/tmp/export.xlsx"
+scripts\build_and_release.py:179:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+scripts\database\db_manager.py:493:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+scripts\mock_dashboard_v2_test.py:116:21: S101 Use of `assert` detected
+scripts\mock_dashboard_v2_test.py:117:21: S101 Use of `assert` detected
+scripts\parse_test_results.py:11:8: S314 Using `xml` to parse untrusted data is known to be vulnerable to XML attacks; use `defusedxml` equivalents
+scripts\perf_optimization\benchmark_core_ops.py:159:13: B007 Loop control variable `i` not used within loop body
+scripts\restart_backend.py:37:5: E722 Do not use bare `except`
+scripts\test_batch_stockout_api.py:58:5: S101 Use of `assert` detected
+scripts\test_batch_stockout_api.py:60:5: S101 Use of `assert` detected
+scripts\test_batch_stockout_api.py:61:5: S101 Use of `assert` detected
+scripts\test_batch_stockout_api.py:98:9: S101 Use of `assert` detected
+scripts\test_batch_stockout_api.py:99:9: S101 Use of `assert` detected
+scripts\test_batch_stockout_api.py:140:9: S101 Use of `assert` detected
+scripts\test_batch_stockout_api.py:179:9: S101 Use of `assert` detected
+scripts\test_batch_stockout_api.py:180:9: S101 Use of `assert` detected
+scripts\upload_nginx.py:10:15: S108 Probable insecure usage of temporary file or directory: "/tmp/nginx.conf.new"
+scripts\upload_nginx.py:28:37: S507 Paramiko call with policy set to automatically trust the unknown host key
+scripts\verify_perf_cache_v2.py:14:12: S113 Probable use of `requests` call without timeout
+Found 52 errors.

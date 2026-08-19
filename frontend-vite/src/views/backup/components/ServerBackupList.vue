@@ -25,10 +25,10 @@
             <span>{{ b.filename }}</span>
           </div>
           <div class="bk-backup-actions">
-            <button class="bk-icon-btn bk-icon-btn-primary" :disabled="restoringFile === b.filename" @click="emit('restore', b.filename)" title="恢复">
+            <button class="bk-icon-btn bk-icon-btn-primary" :disabled="restoringFile === b.filename" @click="emit('restore', b.filename)" title="恢复" aria-label="恢复">
               <UiLoadingIcon :loading="restoringFile === b.filename" icon="undo-alt" />
             </button>
-            <button class="bk-icon-btn bk-icon-btn-danger" :disabled="deletingFile === b.filename" @click="emit('delete', b.filename)" title="删除">
+            <button class="bk-icon-btn bk-icon-btn-danger" :disabled="deletingFile === b.filename" @click="emit('delete', b.filename)" title="删除" aria-label="删除">
               <UiLoadingIcon :loading="deletingFile === b.filename" icon="trash-alt" />
             </button>
           </div>
@@ -64,7 +64,8 @@
 <script setup lang="ts">
 // 服务器备份列表面板（从 BackupView.vue 抽出，模板原样搬移）
 import RestoreProgressBar from '@/components/backup/RestoreProgressBar.vue'
-import type { ServerBackupItem, RestoreSummary } from '../composables/useBackupCenter'
+import type { ServerBackupItem } from '../composables/useBackupCenter'
+import type { RestoreResult } from '@/components/backup/composables/useRestorePolling'
 
 defineProps<{
   backups: ServerBackupItem[]
@@ -78,7 +79,7 @@ defineProps<{
 const emit = defineEmits<{
   restore: [filename: string]
   delete: [filename: string]
-  'restore-completed': [result: RestoreSummary | null]
+  'restore-completed': [result: RestoreResult | null]
   'restore-failed': [error: string]
 }>()
 

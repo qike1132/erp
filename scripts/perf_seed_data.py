@@ -11,7 +11,6 @@
 import argparse
 import asyncio
 import random
-import string
 import sys
 import time
 from datetime import datetime, timedelta
@@ -19,11 +18,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from sqlalchemy import select, func, text
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import _AsyncSessionLocal, _init_async_engine
-
 
 BATCH_SIZE = 500
 CUSTOMERS = [f"客户_{i:04d}" for i in range(200)]
@@ -70,7 +68,7 @@ async def seed_orders(session: AsyncSession, count: int) -> int:
     product_ids = (await session.execute(select(Product.id))).scalars().all()
     if not product_ids:
         print("  无产品数据，先创建产品...")
-        product_ids_count = await seed_products(session, 500)
+        await seed_products(session, 500)
         product_ids = (await session.execute(select(Product.id))).scalars().all()
 
     existing = (await session.execute(select(func.count(Order.id)))).scalar() or 0
@@ -86,7 +84,7 @@ async def seed_orders(session: AsyncSession, count: int) -> int:
         batch = min(BATCH_SIZE, need - offset)
         orders = []
         for j in range(batch):
-            idx = offset + j
+            offset + j
             order_date = base_date + timedelta(days=random.randint(0, 730))
             orders.append(Order(
                 customer_name=random.choice(CUSTOMERS),
@@ -105,11 +103,11 @@ async def seed_orders(session: AsyncSession, count: int) -> int:
 
 
 async def seed_stockins(session: AsyncSession, count: int) -> int:
-    from fastapi_app.shared_models import StockIn, Product
+    from fastapi_app.shared_models import Product, StockIn
 
     product_ids = (await session.execute(select(Product.id))).scalars().all()
     if not product_ids:
-        product_ids_count = await seed_products(session, 500)
+        await seed_products(session, 500)
         product_ids = (await session.execute(select(Product.id))).scalars().all()
 
     existing = (await session.execute(select(func.count(StockIn.id)))).scalar() or 0
@@ -125,7 +123,7 @@ async def seed_stockins(session: AsyncSession, count: int) -> int:
         batch = min(BATCH_SIZE, need - offset)
         stockins = []
         for j in range(batch):
-            idx = offset + j
+            offset + j
             si_date = base_date + timedelta(days=random.randint(0, 730))
             stockins.append(StockIn(
                 product_id=random.choice(product_ids),

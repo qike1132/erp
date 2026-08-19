@@ -1,12 +1,13 @@
 """精确检查哪些带美国定制订单的产品被过滤了"""
 import asyncio
 import sys
+
 sys.path.insert(0, r'd:\erp_system')
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
+
 from fastapi_app.core.database import _AsyncSessionLocal
-from fastapi_app.shared_models import Product, StockIn, Order, StockOut
-from sqlalchemy import func
+from fastapi_app.shared_models import Order, Product, StockIn, StockOut
 
 
 async def main():
@@ -31,7 +32,7 @@ async def main():
             # 查订单
             od_count = (await db.execute(
                 select(func.count()).select_from(Order)
-                .where(Order.product_id == pid, Order.customer == cust, Order.is_deleted == False)
+                .where(Order.product_id == pid, Order.customer == cust, not Order.is_deleted)
             )).scalar()
             # 出库
             so_count = (await db.execute(

@@ -131,5 +131,5 @@ async def preview_shipping_doc(file: UploadFile=File(..., description='PDF 或�
             return OcrPdfPreviewResult(success=False, message='无法提取文本内容', filename=filename, page_count=0, pages=[], parsed_items=[])
         return OcrPdfPreviewResult(success=True, message=f'识别完成，共 {len(pages)} 页，识别到 {len(parsed_items)} 个出货项', filename=filename, page_count=len(pages), pages=[{'page': p.get('page', 0), 'text': p.get('text', '')[:500]} for p in pages], parsed_items=parsed_items)
     except (OperationalError, DisconnectionError) as e:
-        logger.error(f'OCR 预览失败: {str(e)}', exc_info=True)
+        logger.error(f'OCR 预览失败: {e!s}', exc_info=True)
         raise HTTPException(status_code=500, detail=f'识别失败: {settings.sanitize_error(e)}') from e

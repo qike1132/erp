@@ -71,28 +71,28 @@ def setup_telemetry(app=None):
             from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
             SQLAlchemyInstrumentor().instrument()
         except ImportError:
-            pass
+            pass  # defensive: 可选依赖未安装,优雅降级
 
         # Redis Instrumentation
         try:
             from opentelemetry.instrumentation.redis import RedisInstrumentor
             RedisInstrumentor().instrument()
         except ImportError:
-            pass
+            pass  # defensive: 可选依赖未安装,优雅降级
 
         # Requests Instrumentation (outgoing HTTP)
         try:
             from opentelemetry.instrumentation.requests import RequestsInstrumentor
             RequestsInstrumentor().instrument()
         except ImportError:
-            pass
+            pass  # defensive: 可选依赖未安装,优雅降级
 
         # Celery Instrumentation：在 FastAPI → Celery → DB 链路中自动注入/提取 trace 上下文
         try:
             from opentelemetry.instrumentation.celery import CeleryInstrumentor
             CeleryInstrumentor().instrument()
         except ImportError:
-            pass
+            pass  # defensive: 可选依赖未安装,优雅降级
 
         logger.info("OpenTelemetry 已启用: service=%s, exporter=%s", service_name, exporter_type)
 
@@ -117,12 +117,12 @@ def get_trace_context() -> dict:
     适用于在自定义消息/任务调用中手动传递 traceparent，
     配合 :func:`attach_trace_context` 在消费端恢复上下文。
     """
-    carrier = {}
+    carrier: dict[str, str] = {}
     try:
         from opentelemetry.propagate import inject
         inject(carrier)
     except ImportError:
-        pass
+        pass  # defensive: 可选依赖未安装,优雅降级
     return carrier
 
 
@@ -136,7 +136,7 @@ def attach_trace_context(carrier: dict):
 
         attach(extract(carrier))
     except ImportError:
-        pass
+        pass  # defensive: 可选依赖未安装,优雅降级
 
 
 def shutdown_telemetry():

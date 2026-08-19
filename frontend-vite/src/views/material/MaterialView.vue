@@ -4,14 +4,14 @@
     <!-- Unified Header + Tabs -->
     <div class="mr-top-bar">
       <div class="mr-tabs">
-        <button :class="['mr-tab-btn', { active: activeTab === 'progress' }]" @click="switchToProgress">
+        <button :class="['mr-tab-btn', { active: activeTab === 'progress' }]" @click="switchToProgress" aria-label="来料进度 0' :class='['notification-badge', a">
           来料进度 <span v-if="progressCount > 0" :class="['notification-badge', activeTab === 'progress' ? 'notification-badge-active' : '']">{{ progressCount }}</span>
         </button>
-        <button :class="['mr-tab-btn', { active: activeTab === 'history' }]" @click="switchToHistory">
+        <button :class="['mr-tab-btn', { active: activeTab === 'history' }]" @click="switchToHistory" aria-label="历史查询">
           历史查询
         </button>
-        <button v-if="canManage && activeTab === 'progress'" class="mr-btn mr-btn-ghost" @click="exportData" title="导出来料进度数据"><FontAwesomeIcon icon="file-export" /> 导出</button>
-        <button v-if="canManage && activeTab === 'history'" class="mr-btn mr-btn-ghost" @click="exportHistory" title="导出历史数据"><FontAwesomeIcon icon="file-export" /> 导出</button>
+        <button v-if="canManage && activeTab === 'progress'" class="mr-btn mr-btn-ghost" @click="exportData" title="导出来料进度数据" aria-label="导出"><FontAwesomeIcon icon="file-export" /> 导出</button>
+        <button v-if="canManage && activeTab === 'history'" class="mr-btn mr-btn-ghost" @click="exportHistory" title="导出历史数据" aria-label="导出"><FontAwesomeIcon icon="file-export" /> 导出</button>
       </div>
     </div>
 

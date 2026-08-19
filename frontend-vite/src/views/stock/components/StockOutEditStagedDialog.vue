@@ -15,7 +15,7 @@
       </div>
       <div class="form-field">
         <label class="form-label">出货数量</label>
-        <input type="number" class="form-input" v-model.number="form.quantity" min="1" step="1" name="quantity" autocomplete="off" />
+        <input type="number" class="form-input" v-model.number="form.quantity" min="1" step="1" name="quantity" autocomplete="off" aria-label="出货数量" />
       </div>
       <div class="form-field">
         <label class="form-label">订单类型</label>
@@ -27,7 +27,7 @@
       </div>
       <div class="form-field">
         <label class="form-label">备注</label>
-        <textarea v-model="form.note" class="form-input" rows="2" />
+        <textarea v-model="form.note" class="form-input" rows="2" aria-label="备注" />
       </div>
     </div>
     <template #footer>

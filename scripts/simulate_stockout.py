@@ -15,18 +15,17 @@ import argparse
 import asyncio
 import datetime
 import logging
-import sys
-from typing import Optional
 
 # 添加项目根目录到 Python 路径
 import os
+import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from fastapi_app.core.database import _AsyncSessionLocal
 from fastapi_app.core.cache import invalidate_cache
+from fastapi_app.core.database import _AsyncSessionLocal
 from fastapi_app.services import stock_service
-from fastapi_app.services.notification_service import publish_stock_event, StockEvent
+from fastapi_app.services.notification_service import StockEvent, publish_stock_event
 from fastapi_app.shared_models import Product
 
 # 配置日志
@@ -37,7 +36,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def get_available_product(db) -> Optional[Product]:
+async def get_available_product(db) -> Product | None:
     """获取一个可用的产品（有库存的）"""
     result = await db.execute(Product.__table__.select().where(Product.current_stock > 0).limit(1))
     product = result.first()
@@ -45,14 +44,14 @@ async def get_available_product(db) -> Optional[Product]:
 
 
 async def simulate_stockout(
-    product_id: Optional[int] = None,
+    product_id: int | None = None,
     quantity: int = 10,
     customer: str = "测试客户",
     note: str = "实时同步测试出库"
 ):
     """
     模拟出库操作
-    
+
     Args:
         product_id: 产品 ID（可选，不指定则自动选择）
         quantity: 出库数量
@@ -62,7 +61,7 @@ async def simulate_stockout(
     logger.info("=" * 60)
     logger.info("开始模拟出库操作...")
     logger.info("=" * 60)
-    
+
     async with _AsyncSessionLocal() as db:
         try:
             # Step 1: 获取产品信息
@@ -82,10 +81,10 @@ async def simulate_stockout(
                     logger.error(f"找不到产品 ID={product_id}")
                     return
                 logger.info(f"使用指定产品: ID={product.id}, 名称={product.name}, 当前库存={product.current_stock}")
-            
+
             # Step 2: 生成日期（今天）
             stockout_date_str = datetime.datetime.now().strftime('%Y-%m-%d')
-            
+
             # Step 3: 显示出库信息预览
             logger.info("-" * 60)
             logger.info("出库信息预览:")
@@ -95,7 +94,7 @@ async def simulate_stockout(
             logger.info(f"  日期: {stockout_date_str}")
             logger.info(f"  备注: {note}")
             logger.info("-" * 60)
-            
+
             # Step 4: 执行出库
             logger.info("执行出库操作...")
             result = await stock_service.create_stockout(
@@ -106,11 +105,11 @@ async def simulate_stockout(
                 stockout_date_str=stockout_date_str,
                 note=note
             )
-            
+
             # Step 5: 显示结果
             logger.info("✓ 出库操作完成！")
             logger.info(f"结果: {result}")
-            
+
             # Step 6: 验证缓存失效（手动再次清理，确保万无一失）
             logger.info("")
             logger.info("清理 Dashboard 缓存...")
@@ -118,7 +117,7 @@ async def simulate_stockout(
             await invalidate_cache('dashboard:stats')
             await invalidate_cache('dashboard:activities')
             logger.info("✓ Dashboard 缓存已清理")
-            
+
             # Step 7: 再次发布事件（双重保险）
             logger.info("")
             logger.info("发布 WebSocket 实时通知...")
@@ -126,7 +125,7 @@ async def simulate_stockout(
                 # 重新获取产品信息（可能库存已更新）
                 result = await db.execute(Product.__table__.select().where(Product.id == product_id))
                 updated_product = result.first()
-                
+
                 await publish_stock_event(
                     event_type=StockEvent.STOCK_CHANGED,
                     data={
@@ -141,7 +140,7 @@ async def simulate_stockout(
                 logger.info("✓ WebSocket 事件已发布")
             except Exception as e:
                 logger.warning(f"发布事件时出错（不影响数据）: {e}")
-            
+
             # Step 8: 完成
             logger.info("")
             logger.info("=" * 60)
@@ -153,7 +152,7 @@ async def simulate_stockout(
             logger.info("  2. 出库总览数据是否更新")
             logger.info("  3. 浏览器控制台是否显示 '[WebSocket] 检测到数据变更'")
             logger.info("")
-            
+
         except Exception as e:
             logger.error(f"出库操作失败: {e}", exc_info=True)
             await db.rollback()
@@ -163,14 +162,14 @@ async def simulate_stockout(
 async def simulate_multiple_stockouts(count: int = 3):
     """
     模拟多次出库操作（用于测试连续同步）
-    
+
     Args:
         count: 出库次数
     """
     logger.info("=" * 60)
     logger.info(f"开始模拟 {count} 次出库操作...")
     logger.info("=" * 60)
-    
+
     for i in range(count):
         logger.info("")
         logger.info(f"--- 第 {i+1} 次出库 ---")
@@ -182,7 +181,7 @@ async def simulate_multiple_stockouts(count: int = 3):
         )
         if i < count - 1:
             # 每次出库间隔 3 秒
-            logger.info(f"等待 3 秒后继续...")
+            logger.info("等待 3 秒后继续...")
             await asyncio.sleep(3)
 
 
@@ -194,18 +193,18 @@ def main():
 使用示例:
   # 基本用法（自动选择产品）
   python scripts/simulate_stockout.py
-  
+
   # 指定产品
   python scripts/simulate_stockout.py --product-id 20409
-  
+
   # 指定数量和客户
   python scripts/simulate_stockout.py --quantity 100 --customer "大客户A"
-  
+
   # 批量测试（3次出库）
   python scripts/simulate_stockout.py --batch 3
         """
     )
-    
+
     parser.add_argument(
         '--product-id', type=int, default=None,
         help='产品 ID（不指定则自动选择有库存的产品）'
@@ -230,12 +229,12 @@ def main():
         '--verbose', '-v', action='store_true',
         help='显示详细日志'
     )
-    
+
     args = parser.parse_args()
-    
+
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
-    
+
     try:
         if args.batch:
             # 批量模式

@@ -4,7 +4,7 @@
 主从表结构：purchase_plans（主表）+ purchase_plan_details（明细表）
 出货同步表：shipment_records
 """
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -25,8 +25,8 @@ class PurchasePlan(Base):
     remark: Mapped[str | None] = mapped_column(Text, nullable=True, comment='备注')
     upload_batch: Mapped[str | None] = mapped_column(String(64), nullable=True, comment='上传批次ID')
     created_by: Mapped[str | None] = mapped_column(String(50), nullable=True, comment='创建人')
-    create_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), comment='创建时间')
-    update_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    create_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
+    update_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 
     # 关系
     details: Mapped[list["PurchasePlanDetail"]] = relationship(
@@ -119,9 +119,9 @@ class ShipmentRecord(Base):
     shipment_date: Mapped[datetime] = mapped_column(Date, nullable=False, comment='出货日期')
     source_type: Mapped[str] = mapped_column(String(20), default='stockout', comment='来源类型')
     source_id: Mapped[int | None] = mapped_column(Integer, nullable=True, comment='来源记录ID')
-    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), comment='同步时间')
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), comment='创建时间')
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC), comment='同步时间')
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 
     __table_args__ = (
         Index('idx_sr_customer_product_date', 'customer_id', 'product_id', 'shipment_date'),

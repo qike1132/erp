@@ -71,7 +71,7 @@ class LocalBackupStorage:
     def __init__(self, base_dir: Path | str) -> None:
         self._base_dir = Path(base_dir)
 
-    def _backup_dir(self, backup_id: str) -> Path:
+    def _backup_dir(self, backup_id: str) -> Path:  # log-context: internal helper 无请求上下文
         return self._base_dir / backup_id
 
     def _chunk_path(self, backup_id: str, index: int) -> Path:

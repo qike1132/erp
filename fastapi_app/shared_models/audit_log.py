@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import DateTime, Index, Integer, String, Text, desc, text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -29,7 +29,7 @@ class AuditLog(Base):
     request_id: Mapped[str | None] = mapped_column(String(36), comment='请求追踪ID')
     status_code: Mapped[int | None] = mapped_column(Integer, comment='响应状态码')
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True, comment='操作时间',
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False, index=True, comment='操作时间',
     )
 
     __table_args__ = (

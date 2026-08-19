@@ -17,7 +17,7 @@
           class="mc-category-block"
           :class="'mc-cat-' + cat.key"
         >
-          <button class="mc-category-header" @click="collapsed[cat.key] = !collapsed[cat.key]">
+          <button class="mc-category-header" @click="collapsed[cat.key] = !collapsed[cat.key]" aria-label="{{ cat.label }} ({{ calcResults[cat.key]">
             <i :class="['mc-cat-icon', cat.icon]"  aria-hidden="true" />
             <span class="mc-cat-label">{{ cat.label }}</span>
             <span class="mc-cat-count">({{ calcResults[cat.key]?.length ?? 0 }} 项)</span>

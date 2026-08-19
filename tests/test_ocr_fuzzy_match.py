@@ -140,7 +140,7 @@ class TestFuzzyMatchProduct:
         p2 = _make_product("蓝色毛绒熊", pid=2)
         p3 = _make_product("蓝色毛绒熊大号", pid=3)
         products = [p1, p2, p3]
-        matched, score = fuzzy_match_product("蓝色毛绒熊", products, {})
+        matched, _score = fuzzy_match_product("蓝色毛绒熊", products, {})
         # 应精确匹配 p2 或通过子串匹配 p3
         assert matched is not None
         assert matched.id in (2, 3)
@@ -203,6 +203,6 @@ class TestFuzzyMatchCustomer:
         c1 = _make_customer("北京华为技术有限公司", cid=1)
         c2 = _make_customer("深圳华为终端有限公司", cid=2)
         c3 = _make_customer("上海小米科技有限公司", cid=3)
-        matched, score = fuzzy_match_customer("华为技术", [c1, c2, c3])
+        matched, _score = fuzzy_match_customer("华为技术", [c1, c2, c3])
         assert matched is not None
         assert matched.id == 1  # 应匹配 c1

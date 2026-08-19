@@ -10,22 +10,21 @@
 - 产品库存查询
 - 边界条件（负数库存、空名称、重复名称）
 """
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from fastapi_app.services.product_service import (
-    get_products,
-    get_products_page,
-    get_product_by_id,
-    create_product,
-    update_product,
-    delete_product,
-    search_products,
-    get_product_stock,
-    ProductNotFoundError,
     ProductHasRelatedOrdersError,
     ProductHasRelatedStockInsError,
     ProductHasRelatedStockOutsError,
+    ProductNotFoundError,
+    create_product,
+    get_product_by_id,
+    get_product_stock,
+    get_products,
+    get_products_page,
+    update_product,
 )
 
 
@@ -306,7 +305,7 @@ class TestUpdateProduct:
 
         mock_async_db.execute = AsyncMock()
 
-        result = await update_product(
+        await update_product(
             mock_async_db, product_id=1,
             name=None, barcode=None, image=None,
             initial_stock=None, factory=''

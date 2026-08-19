@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 _MAX_TRIES = 3
 
 
-async def _send_backup_alert(task_name: str, error: str, task_type: str = 'backup', severity: str = 'error', additional_info: dict = None):
+async def _send_backup_alert(task_name: str, error: str, task_type: str = 'backup', severity: str = 'error', additional_info: dict | None = None):
     """发送备份告警"""
     try:
         from fastapi_app.services.backup_alert_service import alert_service
@@ -38,8 +38,8 @@ async def _send_backup_alert(task_name: str, error: str, task_type: str = 'backu
 
 
 async def _collect_backup_metrics(backup_type: str, start_time: datetime, end_time: datetime,
-                                 backup_size: int, success: bool, error_message: str = None,
-                                 additional_metrics: dict = None):
+                                 backup_size: int, success: bool, error_message: str | None = None,
+                                 additional_metrics: dict | None = None):
     """收集备份性能指标"""
     try:
         from fastapi_app.services.backup_metrics_service import metrics_service
@@ -87,7 +87,7 @@ async def auto_daily_backup_task(ctx):
 
             return result
         else:
-            error_msg = f'每日自动备份失败: {str(result)}'
+            error_msg = f'每日自动备份失败: {result!s}'
             logger.error(error_msg)
 
             # 发送失败告警
@@ -201,7 +201,7 @@ async def auto_incremental_backup_task(ctx):
 
             return result
         else:
-            error_msg = f'自动增量备份失败: {str(result)}'
+            error_msg = f'自动增量备份失败: {result!s}'
             logger.error(error_msg)
 
             # 发送失败告警
@@ -355,8 +355,8 @@ async def backup_cleanup_task(ctx):
 async def _do_auto_backup(backup_type: str) -> dict:
     """执行自动备份（全量或增量）"""
     from fastapi_app.core.database import get_async_db_context
-    from fastapi_app.shared_models import User as UserModel
     from fastapi_app.services import backup_service
+    from fastapi_app.shared_models import User as UserModel
 
     backup_service.ensure_backup_dir()
 
@@ -404,6 +404,7 @@ async def _do_integrity_check() -> dict:
     import hashlib
     import json
     import zipfile
+
     from fastapi_app.services import backup_service
 
     results = {

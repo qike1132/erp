@@ -6,7 +6,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.api.v1.endpoints.purchase_center.schemas import SaveQueryRequest
-from fastapi_app.core.database import get_async_db as get_db, get_async_read_db as get_read_db
+from fastapi_app.core.database import get_async_db as get_db
+from fastapi_app.core.database import get_async_read_db as get_read_db
 from fastapi_app.core.deps import require_permission
 from fastapi_app.schemas.purchase_center import (
     ActionResponse,

@@ -3,7 +3,7 @@
 
 purchase_plan_service 和 production_plan_service 共用的日期处理、库存映射、出货状态函数。
 """
-__all__ = ['last_day_of_month', 'normalize_plan_date', 'build_inventory_map', 'calc_shipment_status']
+__all__ = ['build_inventory_map', 'calc_shipment_status', 'last_day_of_month', 'normalize_plan_date']
 
 import calendar
 from datetime import date, datetime

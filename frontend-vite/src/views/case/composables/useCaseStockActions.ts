@@ -4,12 +4,24 @@ import { caseApi } from '@/api'
 import { showToast } from '@/composables/useToast'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { getErrorMessage } from '@/types/errors'
+import type { StagedStockItem } from './useCaseStockEntry'
 
 type StockMode = 'stockin' | 'stockout'
 
+/** 出入库记录行（列表/详情通用） */
+interface StockRecordRow {
+  id: number
+  customer?: string
+  stockin_date?: string
+  stockout_date?: string
+  case_name?: string
+  quantity?: number
+  note?: string
+}
+
 export function useCaseStockActions(
   mode: Ref<StockMode>,
-  staged: Ref<any[]>,
+  staged: Ref<StagedStockItem[]>,
   currentStock: Ref<number>,
 ) {
   const queryClient = useQueryClient()
@@ -129,7 +141,7 @@ export function useCaseStockActions(
   // ===== Delete record =====
   const actionId = ref<number | ''>(0)
 
-  async function handleDelete(type: StockMode, row: any) {
+  async function handleDelete(type: StockMode, row: StockRecordRow) {
     if (!(await confirmDialog.confirm(`确定要删除这条${type === 'stockin' ? '入库' : '出库'}记录吗？`))) return
     actionId.value = row.id
     try {
@@ -148,7 +160,7 @@ export function useCaseStockActions(
   const editMode = ref<StockMode>('stockin')
   const editForm = reactive({ id: 0, customer: '', date: '', productName: '', quantity: 1, note: '' })
 
-  function openEditModal(type: StockMode, row: any) {
+  function openEditModal(type: StockMode, row: StockRecordRow) {
     editMode.value = type
     editForm.id = row.id
     editForm.customer = row.customer || ''
@@ -159,19 +171,20 @@ export function useCaseStockActions(
     editDialogOpen.value = true
     const detailPromise = type === 'stockin' ? caseApi.getStockin(row.id) : caseApi.getStockout(row.id)
     detailPromise
-      .then((data: any) => {
-        editForm.customer = data.customer || ''
-        editForm.date = type === 'stockin' ? data.stockin_date || '' : data.stockout_date || ''
-        editForm.productName = data.case_name || ''
-        editForm.quantity = data.quantity || 1
-        editForm.note = data.note || ''
+      .then((data: unknown) => {
+        const detail = data as StockRecordRow
+        editForm.customer = detail.customer || ''
+        editForm.date = type === 'stockin' ? detail.stockin_date || '' : detail.stockout_date || ''
+        editForm.productName = detail.case_name || ''
+        editForm.quantity = detail.quantity || 1
+        editForm.note = detail.note || ''
       })
       .catch(() => {})
   }
 
   async function saveEdit() {
     try {
-      const payload: Record<string, any> = {
+      const payload: Record<string, unknown> = {
         customer: editForm.customer,
         quantity: editForm.quantity,
         note: editForm.note,

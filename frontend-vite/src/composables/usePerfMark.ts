@@ -1,4 +1,5 @@
 import { onMounted, onUnmounted } from 'vue'
+import { devLog, devGroup, devGroupEnd } from '@/utils/devLog'
 
 interface PerfEntry {
   name: string
@@ -25,7 +26,7 @@ function measure(name: string, startMark: string, endMark?: string) {
       const record: PerfEntry = { name, duration: Math.round(entry.duration * 100) / 100, timestamp: Date.now() }
       entries.push(record)
       const status = entry.duration < 500 ? '✓' : entry.duration < 1000 ? '⚠' : '✗'
-      console.log(`[Perf] ${status} ${name}: ${entry.duration.toFixed(1)}ms`)
+      devLog(`[Perf] ${status} ${name}: ${entry.duration.toFixed(1)}ms`)
     }
   } catch {
     console.warn(`[Perf] measure failed: ${name}`)
@@ -73,12 +74,12 @@ export function usePerfMark(prefix: string) {
     if (isDev && entries.length > 0) {
       const pageEntries = entries.filter((e) => e.name.startsWith(prefix))
       if (pageEntries.length > 0) {
-        console.group(`[Perf Summary] ${prefix}`)
+        devGroup(`[Perf Summary] ${prefix}`)
         for (const e of pageEntries) {
           const status = e.duration < 500 ? '✓' : e.duration < 1000 ? '⚠' : '✗'
-          console.log(`  ${status} ${e.name}: ${e.duration.toFixed(1)}ms`)
+          devLog(`  ${status} ${e.name}: ${e.duration.toFixed(1)}ms`)
         }
-        console.groupEnd()
+        devGroupEnd()
       }
     }
   })
@@ -94,7 +95,7 @@ export function usePerfMark(prefix: string) {
 
 if (isDev) {
   ;(window as unknown as Record<string, unknown>).__erp_perf_marks__ = { getEntries, getSummary, clear }
-  console.log('[Perf Marks] window.__erp_perf_marks__')
+  devLog('[Perf Marks] window.__erp_perf_marks__')
 }
 
 export { mark, markEnd, measure, getEntries, getSummary, clear }

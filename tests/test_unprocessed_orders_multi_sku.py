@@ -6,7 +6,7 @@ in the purchase approval page (http://192.168.0.95:3000/purchase 审核订单).
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from fastapi_app.services.purchase_order_query import (
@@ -53,7 +53,7 @@ def _make_order(
         id=order_id,
         order_no=order_no,
         customer=customer,
-        order_date=datetime(2026, 7, 20, 10, 30, tzinfo=timezone.utc) if order_date is _DATE_UNSET else order_date,
+        order_date=datetime(2026, 7, 20, 10, 30, tzinfo=UTC) if order_date is _DATE_UNSET else order_date,
         items=items,
     )
 
@@ -156,7 +156,7 @@ class TestBuildUnprocessedOrderRecordMultiSku:
             order_no='DD20260720001',
             customer='客户A',
             items=[_make_order_item(10, 100, '产品X', '69000001', 50)],
-            order_date=datetime(2026, 7, 20, 14, 30, tzinfo=timezone.utc),
+            order_date=datetime(2026, 7, 20, 14, 30, tzinfo=UTC),
         )
 
         record = _build_unprocessed_order_record(order)
@@ -191,7 +191,7 @@ class TestBuildUnprocessedStockinRecord:
             customer='客户D',
             product_id=200,
             quantity=100,
-            stockin_date=datetime(2026, 7, 20, 9, 0, tzinfo=timezone.utc),
+            stockin_date=datetime(2026, 7, 20, 9, 0, tzinfo=UTC),
             order_type='regular',
             country=None,
             note='备货备注',

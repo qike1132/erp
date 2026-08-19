@@ -7,18 +7,19 @@
 - 通用日志查询 _query_logs_generic（分页 + COUNT(*) OVER() 合并计数）
 - 订单流水 / 备货流水 / 出货流水 / 抵扣流水 的筛选条件构建与严格日期解析
 """
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from fastapi_app.core.cache import _cache_local
 from fastapi_app.services.report_service import (
+    _query_logs_generic,
     _quote_identifier,
     _string_agg,
-    _query_logs_generic,
+    get_deduction_logs,
     get_order_logs,
     get_stockin_logs,
     get_stockout_logs,
-    get_deduction_logs,
 )
 
 
@@ -37,7 +38,7 @@ class TestSQLHelpers:
     def test_quote_identifier_valid(self):
         """合法标识符（仅支持 PostgreSQL 双引号）"""
         result = _quote_identifier('order')
-        assert '"order"' == result
+        assert result == '"order"'
 
     def test_quote_identifier_invalid(self):
         """非法标识符"""

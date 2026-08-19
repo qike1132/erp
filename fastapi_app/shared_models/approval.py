@@ -3,7 +3,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, ClassVar
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
@@ -19,7 +19,7 @@ _DATETIME_FMT = '%Y-%m-%d %H:%M:%S'
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
+    return datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
 
 
 def _fmt_dt(value: datetime | None) -> str | None:
@@ -60,9 +60,9 @@ class ApprovalRequest(Base):
     lock_time: Mapped[datetime | None] = mapped_column(DateTime, comment='锁定时间')
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
 
-    order: Mapped["Order"] = relationship('Order', backref=backref('approval_requests', passive_deletes=True))
-    requester: Mapped["User"] = relationship('User', foreign_keys=[requester_id], backref='approval_requests_made')
-    approver: Mapped["User | None"] = relationship('User', foreign_keys=[approver_id], backref='approval_requests_handled')
+    order: Mapped[Order] = relationship('Order', backref=backref('approval_requests', passive_deletes=True))
+    requester: Mapped[User] = relationship('User', foreign_keys=[requester_id], backref='approval_requests_made')
+    approver: Mapped[User | None] = relationship('User', foreign_keys=[approver_id], backref='approval_requests_handled')
 
     __table_args__ = (
         Index('idx_approval_status_time', 'status', 'request_time'),
@@ -129,8 +129,8 @@ class ApprovalLog(Base):
     details: Mapped[str | None] = mapped_column(Text, comment='操作详情JSON')
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
 
-    approval_request: Mapped["ApprovalRequest"] = relationship('ApprovalRequest', backref='logs')
-    actor: Mapped["User | None"] = relationship('User', backref='approval_logs')
+    approval_request: Mapped[ApprovalRequest] = relationship('ApprovalRequest', backref='logs')
+    actor: Mapped[User | None] = relationship('User', backref='approval_logs')
 
     __table_args__ = (
         Index('idx_approval_log_request', 'approval_request_id'),

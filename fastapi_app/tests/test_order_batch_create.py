@@ -6,7 +6,7 @@
 - 单 SKU 等价旧逻辑
 - 按 OrderItem 粒度的库存抵扣
 - 分组级校验失败隔离
-- _SavepointRollbackSignal 触发 savepoint 回滚并继续下一组
+- _SavepointRollbackSignalError 触发 savepoint 回滚并继续下一组
 """
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -50,7 +50,7 @@ class _NestedCM:
     async def __aexit__(self, exc_type, exc, tb):
         if exc is not None:
             self.rolled_back = True
-        return False  # 不吞异常，让 _SavepointRollbackSignal 向外传播
+        return False  # 不吞异常，让 _SavepointRollbackSignalError 向外传播
 
 
 def _make_db(products):
@@ -188,7 +188,7 @@ class TestBatchCreateOrdersAggregation:
 
     @pytest.mark.asyncio
     async def test_savepoint_rollback_signal_rolls_back_and_continues(self):
-        # product 999 不在 map → 触发 _SavepointRollbackSignal
+        # product 999 不在 map → 触发 _SavepointRollbackSignalError
         products = [_make_product(2)]
         db = _make_db(products)
         orders_data = [

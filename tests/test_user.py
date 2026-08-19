@@ -10,8 +10,9 @@
 - 权限查询（树形结构）
 - 权限分配（敏感权限过滤）
 """
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 
 class TestGetUsers:

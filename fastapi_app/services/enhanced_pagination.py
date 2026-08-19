@@ -37,7 +37,7 @@ async def optimized_count(db: AsyncSession, base_query: Select, table_name: str 
             approx = approx_result.scalar()
             if approx and approx > 1000:
                 return approx
-        except Exception as e:
+        except Exception as e:  # broad-except: 服务层容错，记录异常并返回安全默认值
             logger.debug("近似计数查询失败，回退精确计数: %s", e)
     result = await db.execute(base_query)
     return result.scalar() or 0
@@ -113,7 +113,7 @@ class CursorPage:
         cursor_column: Any,
         cursor_value: Any | None = None,
     ) -> dict:
-        query = base_query.limit(self.per_page + 1)
+        query = base_query.limit(self.per_page + 1)  # sql-safe: escape_like/绑定参数/常量片段
         if cursor_value is not None:
             query = query.where(cursor_column < cursor_value)
 

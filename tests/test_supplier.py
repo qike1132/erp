@@ -10,15 +10,14 @@
 
 使用 mock_async_db + mock_user fixtures，无需数据库。
 """
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, call, patch
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.services.purchase_supplier_service import (
-    get_suppliers,
     create_supplier,
+    get_suppliers,
     update_supplier,
-    delete_supplier,
 )
 
 

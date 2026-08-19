@@ -1,7 +1,6 @@
 """审计 v1 endpoints 事务控制模式，输出 CSV 清单。"""
 import ast
 import csv
-import sys
 from pathlib import Path
 
 ENDPOINTS_DIR = Path("d:/erp_system/fastapi_app/api/v1/endpoints")
@@ -15,9 +14,8 @@ def _extract_path_and_method(call: ast.Call):
     if isinstance(call.func, ast.Attribute):
         if call.func.attr in HTTP_METHODS:
             func_name = call.func.attr
-    elif isinstance(call.func, ast.Name):
-        if call.func.id in HTTP_METHODS:
-            func_name = call.func.id
+    elif isinstance(call.func, ast.Name) and call.func.id in HTTP_METHODS:
+        func_name = call.func.id
     if not func_name:
         return None, None
 
@@ -26,9 +24,8 @@ def _extract_path_and_method(call: ast.Call):
     for kw in call.keywords:
         if kw.arg == "methods" and isinstance(kw.value, (ast.List, ast.Tuple)):
             methods_kw = kw.value
-        elif kw.arg == "path":
-            if isinstance(kw.value, ast.Constant):
-                path_arg = kw.value.value
+        elif kw.arg == "path" and isinstance(kw.value, ast.Constant):
+            path_arg = kw.value.value
     if func_name == "api_route":
         method = ",".join(
             elt.value for elt in getattr(methods_kw, "elts", []) if isinstance(elt, ast.Constant)

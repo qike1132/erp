@@ -6,6 +6,7 @@
 import { createRouter, createWebHistory, type RouteRecordRaw, type RouteLocationNormalized } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { isMobileDevice, isCapacitor } from '@/composables/useDevice'
+import { devLog } from '@/utils/devLog'
 
 // ==================== PC 端路由====================
 const pcRoutes: RouteRecordRaw[] = [
@@ -111,7 +112,7 @@ const useMobile = _isCapBuild || isMobileDevice()
 const routes: RouteRecordRaw[] = useMobile ? mobileRoutes : pcRoutes
 
 if (import.meta.env.DEV) {
-  console.log(`[Router] 设备类型: ${useMobile ? '移动端' : 'PC端'}${_isCapBuild ? ' (Capacitor)' : ''}`)
+  devLog(`[Router] 设备类型: ${useMobile ? '移动端' : 'PC端'}${_isCapBuild ? ' (Capacitor)' : ''}`)
 }
 
 // ==================== 创建路由实例 ====================

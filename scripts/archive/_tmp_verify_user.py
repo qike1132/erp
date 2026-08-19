@@ -1,9 +1,10 @@
 """临时验证脚本：创建临时用户验证登录后 /outsource 跳转，用完即删"""
 import asyncio
 
-from fastapi_app.core.database import _init_async_engine, _AsyncSessionLocal
-from fastapi_app.core.security import hash_password
 from sqlalchemy import text
+
+from fastapi_app.core.database import _AsyncSessionLocal, _init_async_engine
+from fastapi_app.core.security import hash_password
 
 
 async def main():

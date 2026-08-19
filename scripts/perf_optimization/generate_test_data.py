@@ -5,7 +5,10 @@
 
 运行: python scripts/perf_optimization/generate_test_data.py [--target 25000]
 """
-import asyncio, os, sys, random
+import asyncio
+import os
+import random
+import sys
 from datetime import date, datetime, timedelta
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -13,8 +16,9 @@ sys.path.insert(0, project_root)
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from fastapi_app.core.database import _AsyncSessionLocal
-from fastapi_app.shared_models import Customer, Order, Product, StockIn, StockOut, PurchasePlan, PurchasePlanDetail
+from fastapi_app.shared_models import Customer, Order, Product, PurchasePlan, PurchasePlanDetail, StockIn, StockOut
 
 TARGET = int(sys.argv[sys.argv.index("--target")+1]) if "--target" in sys.argv else 25000
 

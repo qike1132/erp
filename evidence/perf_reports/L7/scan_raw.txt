@@ -1,0 +1,18 @@
+=== query_patterns ===
+scanned_files: 115
+
+=== index_hints ===
+suggested_tables: ['1', '2', '3', '4', '5', '6']
+scanned_files: 115
+
+=== pagination ===
+scanned_files: 47
+
+=== caching ===
+scanned_files: 115
+
+=== frontend_perf ===
+scanned_files: 283
+
+=== bundle_size ===
+dist/ 不存在,跳过产物体积校验(需先执行构建)

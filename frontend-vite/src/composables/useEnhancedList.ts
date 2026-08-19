@@ -6,7 +6,7 @@ import type { PaginatedResponse } from '@/types'
 
 interface Options {
   key: string; url: string; perPage?: number; staleTime?: number
-  prefetchPages?: number; debounceMs?: number; extraParams?: () => Record<string, any>
+  prefetchPages?: number; debounceMs?: number; extraParams?: () => Record<string, unknown>
   enableKeyset?: boolean
 }
 

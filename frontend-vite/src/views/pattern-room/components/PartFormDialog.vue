@@ -165,7 +165,7 @@ function closeDialog() {
         </div>
       </div>
 
-      <button type="button" class="add-row-btn" @click="addRow">
+      <button type="button" class="add-row-btn" @click="addRow" aria-label="添加行">
         <i class="fas fa-plus" aria-hidden="true" />
         添加行
       </button>

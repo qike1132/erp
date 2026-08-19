@@ -13,9 +13,9 @@ from fastapi_app.core.cache import CacheDomain, cache_result
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.core.validators import validate_not_empty
+from fastapi_app.services.bom_service import has_bom as product_has_bom  # noqa: F401
 from fastapi_app.shared.stock_concurrency import get_product_for_update
 from fastapi_app.shared_models import InventoryLog, Order, OrderItem, Product, StockIn, StockOut
-from fastapi_app.services.bom_service import has_bom as product_has_bom  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +102,7 @@ async def get_product_barcode_map(db: AsyncSession, limit: int | None = None, ba
             if remaining <= 0:
                 break
             batch_limit = min(batch_size, remaining)
-        result = await db.execute(
+        result = await db.execute(  # batch-loop: 分页批量拉取(offset/limit 游标),非 N+1
             select(Product.barcode, Product.name)
             .where(Product.barcode.isnot(None), Product.barcode != '')
             .limit(batch_limit)

@@ -401,7 +401,7 @@ async def inventory_summary(page: int = Query(1, ge=1),
 async def inventory_logs(case_id: int,
                          page: int = Query(1, ge=1),
                          per_page: int = Query(20, ge=1, le=100),
-                         type: str = Query(''),  # noqa: A002 保留 query 参数名以兼容前端
+                         type: str = Query(''),
                          start_date: str = Query(''),
                          end_date: str = Query(''),
                          user: User = Depends(require_permission('case_manage')),

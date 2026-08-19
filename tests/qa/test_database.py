@@ -17,13 +17,6 @@ from sqlalchemy import text
 from fastapi_app.core.database import _AsyncSessionLocal
 from tests.qa.data_generator import (
     generate_products,
-    generate_customers,
-    generate_suppliers,
-    generate_orders,
-    generate_stock_in,
-    generate_stock_out,
-    generate_cases,
-    generate_material_registration,
 )
 
 
@@ -46,7 +39,7 @@ class TestDatabaseConnection:
         from sqlalchemy import inspect
         async with db.bind.connect() as conn:
             tables = await conn.run_sync(lambda sync_conn: inspect(sync_conn).get_table_names())
-        
+
         core_tables = ["users", "orders", "products", "customers", "suppliers",
                        "stock_in", "stock_out", "approvals", "cases",
                        "material_registration", "purchase_order", "purchase_plan"]
@@ -65,7 +58,7 @@ class TestBatchInsert:
             "price": p["price"],
             "spec": p.get("spec", ""),
         } for p in products]
-        
+
         start = time.time()
         for item in values:
             await db.execute(
@@ -75,7 +68,7 @@ class TestBatchInsert:
             )
         await db.flush()
         elapsed = time.time() - start
-        
+
         count_result = await db.execute(text("SELECT COUNT(*) FROM products"))
         total = count_result.scalar()
         assert total >= 100, f"Expected >=100 rows, got {total}"
@@ -113,12 +106,12 @@ class TestTransactionIntegrity:
     async def test_update_rollback(self, db):
         get_before = await db.execute(text("SELECT COUNT(*) FROM products"))
         before = get_before.scalar()
-        
+
         await db.execute(
             text("UPDATE products SET price = 999.99 WHERE id = (SELECT MIN(id) FROM products)")
         )
         await db.flush()
-        
+
         get_mid = await db.execute(text("SELECT COUNT(*) FROM products"))
         mid = get_mid.scalar()
         assert mid == before, f"UPDATE不应改变行数: {before} vs {mid}"
@@ -127,27 +120,27 @@ class TestTransactionIntegrity:
     @pytest.mark.asyncio
     async def test_insert_rollback(self, db):
         get_before = await db.execute(text("SELECT COUNT(*) FROM products"))
-        before = get_before.scalar()
-        
+        get_before.scalar()
+
         await db.execute(text(
             "INSERT INTO products (product_code, product_name, unit, price, spec) "
             "VALUES ('TXN_ROLLBACK_001', '回滚测试', '个', 0.01, 'test')"
         ))
         await db.flush()
-        print(f"\n  插入回滚: 操作已回滚")
+        print("\n  插入回滚: 操作已回滚")
 
     @pytest.mark.asyncio
     async def test_nested_transaction(self, db):
         get_before = await db.execute(text("SELECT COUNT(*) FROM products"))
         before = get_before.scalar()
-        
+
         async with db.begin_nested() as nested:
             await db.execute(text(
                 "INSERT INTO products (product_code, product_name, unit, price, spec) "
                 "VALUES ('NESTED_001', '嵌套事务测试', '个', 1.0, 'test')"
             ))
             await nested.rollback()
-        
+
         get_after = await db.execute(text("SELECT COUNT(*) FROM products"))
         after = get_after.scalar()
         assert after == before, f"嵌套事务回滚后行数不一致: {before} vs {after}"
@@ -160,15 +153,15 @@ class TestTransactionIntegrity:
             "VALUES ('DEL_TEST_001', '删除测试', '个', 1.0, 'test')"
         ))
         await db.flush()
-        
+
         get_before = await db.execute(text("SELECT COUNT(*) FROM products"))
-        before = get_before.scalar()
-        
+        get_before.scalar()
+
         await db.execute(text("DELETE FROM products WHERE product_code = 'DEL_TEST_001'"))
         await db.flush()
-        
+
         get_mid = await db.execute(
             text("SELECT COUNT(*) FROM products WHERE product_code = 'DEL_TEST_001'")
         )
         assert get_mid.scalar() == 0, "DELETE后应无此记录"
-        print(f"\n  删除回滚: 完成")
+        print("\n  删除回滚: 完成")

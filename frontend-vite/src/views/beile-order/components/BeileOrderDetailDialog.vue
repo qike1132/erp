@@ -13,8 +13,8 @@
         <span class="bo-detail-meta-item"><span class="bo-detail-meta-label">总数量</span> <strong class="bo-detail-meta-num">{{ detailTotalQuantity }}</strong></span>
       </div>
 
-      <!-- 确认信息：仅湖北订单参与确认流程，备货记录不展示 -->
-      <div v-if="detailData.record_type === 'order'" class="bo-detail-meta-row">
+      <!-- 确认信息：订单与备货均参与确认流程 -->
+      <div class="bo-detail-meta-row">
         <span class="bo-detail-meta-item">
           <span class="bo-detail-meta-label">确认状态</span>
           <span v-if="detailData.confirmed" class="bo-confirm-badge bo-confirm-badge--done">已确认</span>

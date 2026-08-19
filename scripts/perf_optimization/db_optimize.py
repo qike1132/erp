@@ -6,7 +6,8 @@
   不带 --apply: 仅输出将要执行的SQL（干跑模式）
   带 --apply: 实际执行
 """
-import os, sys
+import os
+import sys
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, project_root)
@@ -134,11 +135,11 @@ def main():
                 if apply:
                     try:
                         cur.execute(idx["sql"])
-                        print(f"    [OK] 创建成功")
+                        print("    [OK] 创建成功")
                     except Exception as e:
                         print(f"    [错误] {e}")
                 else:
-                    print(f"    [干跑] 未执行")
+                    print("    [干跑] 未执行")
     finally:
         conn.close()
 

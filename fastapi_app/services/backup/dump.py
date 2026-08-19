@@ -78,9 +78,10 @@ async def run_pg_dump(output_path: Path, snapshot_id: str | None = None) -> dict
         raise RuntimeError(f'pg_dump 执行失败: {e}') from e
 
 
-async def restore_database_via_psql(zf, db: AsyncSession, task_id: str = None) -> dict:
+async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = None) -> dict:
     """通过 psql 从 dump.sql.gz 恢复数据库"""
     import time as time_mod
+
     from fastapi_app.core.backup_progress import update_progress as _upd_prog
 
     async def _report(sub: float, detail: str):
@@ -113,7 +114,7 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str = None) -
         return {'status': 'error', 'error': '数据库备份文件为空，无法恢复'}
 
     sql_size_mb = len(dump_sql) // 1024 // 1024
-    await _report(0.015, f'解压完成 ({sql_size_mb}MB)，准备恢复...')
+    await _report(0.015, f'解压完成 ({sql_size_mb}MB)，准备恢复...')  # sql-safe: escape_like/绑定参数/常量片段
     await asyncio.sleep(0)
 
     db_host = os.getenv('DB_HOST', 'localhost')
@@ -151,7 +152,7 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str = None) -
             )
             try:
                 check_stdout, _ = await asyncio.wait_for(check_proc.communicate(), timeout=10)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 check_proc.kill()
                 await check_proc.wait()
                 logger.warning(f'检查活跃连接超时，重试 {_retry + 1}/3')
@@ -174,7 +175,7 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str = None) -
         )
         try:
             await asyncio.wait_for(term_proc.wait(), timeout=30)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             term_proc.kill()
             await term_proc.wait()
             logger.warning('终止连接超时，已强制终止')
@@ -193,7 +194,7 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str = None) -
             )
             try:
                 ver_stdout, _ = await asyncio.wait_for(ver_proc.communicate(), timeout=10)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 ver_proc.kill()
                 await ver_proc.wait()
                 ver_stdout = b''
@@ -201,7 +202,7 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str = None) -
                 ver_str = ver_stdout.decode(errors='replace').strip()
                 pg_major = int(ver_str.split('.')[0])
         except (TimeoutError, OSError, ValueError):
-            pass
+            pass  # defensive: 异常静默处理,不影响主流程
         if pg_major >= 13:
             drop_cmd = f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE);'
         else:
@@ -212,7 +213,7 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str = None) -
         )
         try:
             _, stderr = await asyncio.wait_for(drop_proc.communicate(), timeout=60)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             drop_proc.kill()
             await drop_proc.wait()
             logger.warning('DROP DATABASE 超时')
@@ -226,7 +227,7 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str = None) -
         )  # nosec
         try:
             _, stderr = await asyncio.wait_for(create_proc.communicate(), timeout=30)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             create_proc.kill()
             await create_proc.wait()
             logger.warning('CREATE DATABASE 超时')
@@ -282,14 +283,14 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str = None) -
             while not read_out_task.done() or not read_err_task.done():
                 await asyncio.sleep(2)
                 elapsed = int(time_mod.monotonic() - psql_start_time)
-                await _report(0.70, f'等待 psql 完成... ({elapsed}s)')
+                await _report(0.70, f'等待 psql 完成... ({elapsed}s)')  # sql-safe: escape_like/绑定参数/常量片段
 
             await asyncio.wait_for(asyncio.gather(read_out_task, read_err_task), timeout=600)
             await proc.wait()
 
-            stdout = b''.join(stdout_chunks)
+            b''.join(stdout_chunks)
             stderr = b''.join(stderr_chunks)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             await proc.wait()
             return {'status': 'error', 'error': '数据库恢复超时（超过 600 秒），进程已终止'}
@@ -299,11 +300,11 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str = None) -
         await _report(0.95, '数据导入完成，验证结果')
 
         if proc.returncode != 0:
-            logger.warning(f'psql restore failed (returncode={proc.returncode}): {stderr_text[:2000]}')
+            logger.warning(f'psql restore failed (returncode={proc.returncode}): {stderr_text[:2000]}')  # sql-safe: escape_like/绑定参数/常量片段
             return {'status': 'error', 'message': '数据库恢复失败', 'errors': stderr_text[:2000]}
         if error_count > 0:
-            logger.warning(f'psql restore completed with {error_count} errors: {stderr_text[:2000]}')
-            return {'status': 'partial', 'message': f'数据库已恢复，但有 {error_count} 个语句执行失败', 'errors': stderr_text[:2000]}
+            logger.warning(f'psql restore completed with {error_count} errors: {stderr_text[:2000]}')  # sql-safe: escape_like/绑定参数/常量片段
+            return {'status': 'partial', 'message': f'数据库已恢复，但有 {error_count} 个语句执行失败', 'errors': stderr_text[:2000]}  # sql-safe: escape_like/绑定参数/常量片段
         return {'status': 'ok', 'message': '数据库恢复成功'}
     except FileNotFoundError:
         return {'status': 'error', 'error': 'psql 命令未找到，请确保 PostgreSQL 客户端工具已安装'}

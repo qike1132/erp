@@ -13,6 +13,7 @@ FIFO 分配算法
 从 purchase_plan_service.py 拆分而来，保持函数签名不变。
 """
 import asyncio
+import contextlib
 import logging
 from datetime import date, datetime
 
@@ -78,7 +79,7 @@ async def _get_shipped_fifo_map(db: AsyncSession, plan_details: list, customer_n
     try:
         result = await _fifo_query_with_timeout(db, plan_details, customer_name_map, plan_month)
         return result
-    except asyncio.TimeoutError:
+    except TimeoutError:
         # SET LOCAL 在 ROLLBACK 后自动重置，但异常路径下连接可能未正确 ROLLBACK
         # 显式 RESET 防止 statement_timeout 污染后续查询
         try:
@@ -90,12 +91,91 @@ async def _get_shipped_fifo_map(db: AsyncSession, plan_details: list, customer_n
         # 由调用方决定降级策略（显式标记或失败）
         raise RuntimeError('FIFO_ALLOCATION_UNAVAILABLE') from None
     except Exception as e:  # defensive: FIFO查询异常时抛出明确异常，由调用方决定降级策略
-        try:
+        with contextlib.suppress(SQLAlchemyError, OSError):
             await db.execute(text("RESET statement_timeout"))
-        except (SQLAlchemyError, OSError):
-            pass
         logger.exception('FIFO查询异常: %s', e)
         raise RuntimeError('FIFO_ALLOCATION_UNAVAILABLE') from e
+
+
+async def _build_fifo_plan_id_to_customer(db: AsyncSession, customer_name_map: dict | None, plan_details: list, customers: list, earliest_plan_date) -> dict:
+    plan_ids_in_details = {d.plan_id for d in plan_details}
+    if customer_name_map and plan_ids_in_details.issubset(customer_name_map.keys()):
+        plan_id_to_customer = {pid: customer_name_map[pid] for pid in plan_ids_in_details if customer_name_map.get(pid)}
+    else:
+        # 查询相关主单 — 只取 id + customer_name，限制时间范围避免全表扫描
+        plan_result = await db.execute(
+            select(PurchasePlan.id, PurchasePlan.customer_name)
+            .where(
+                PurchasePlan.customer_name.in_(customers),
+                PurchasePlan.plan_month >= f"{earliest_plan_date.year - 1}-{earliest_plan_date.month:02d}",
+            )
+        )
+        all_plan_rows = plan_result.all()
+        plan_id_to_customer = {r.id: r.customer_name for r in all_plan_rows}
+    return plan_id_to_customer
+
+
+def _group_fifo_details_by_key(all_details: list, plan_id_to_customer: dict, keys_needed: set) -> dict[tuple, list]:
+    details_by_key: dict[tuple, list] = {}
+    for d in all_details:
+        cname = plan_id_to_customer.get(d.plan_id, '')
+        if not cname or not d.product_name:
+            continue
+        key = (cname, d.product_name)
+        if key not in keys_needed:
+            continue
+        if key not in details_by_key:
+            details_by_key[key] = []
+        details_by_key[key].append(d)
+    return details_by_key
+
+
+async def _query_fifo_stockout_rows(db: AsyncSession, keys_needed: set, customers: list, product_ids: list, stockout_date_limit) -> tuple:
+    # 查出这些客户+产品的出货记录
+    # 双分支是有意识的性能优化，非冗余：
+    #   - product_id 路径：用 product_id IN(...) 避免 JOIN Product，命中
+    #     idx_stockout_product_customer_type 索引，适合明细已关联 product_id 的常规场景。
+    #   - JOIN 降级路径：仅当所有明细 product_id=0（历史脏数据）时触发，用
+    #     Product.name IN(...) 兜底匹配。
+    # 统一为单一路径会牺牲常规场景性能，请勿合并。
+    pid_to_name: dict[int, str] = {}
+    if not product_ids:
+        # 降级：无 product_id 时 JOIN Product 按 name 匹配
+        product_names = list({k[1] for k in keys_needed})
+        stockout_result = await db.execute(
+            select(StockOut.customer, Product.name.label('product_name'), StockOut.quantity, StockOut.returned_quantity, StockOut.stockout_date)
+            .join(Product, StockOut.product_id == Product.id)
+            .where(
+                and_(
+                    StockOut.customer.in_(customers),
+                    Product.name.in_(product_names),
+                    StockOut.customer.isnot(None),
+                    StockOut.customer != '',
+                    StockOut.stockout_date >= stockout_date_limit,
+                )
+            )
+            .order_by(StockOut.stockout_date, StockOut.id)
+        )
+    else:
+        # 优先用 product_id 查询，避免 JOIN Product 表的额外开销
+        # 先查 stock_out，再在内存中用 product_id → product_name 映射关联
+        stockout_result = await db.execute(
+            select(StockOut.customer, StockOut.product_id, StockOut.quantity, StockOut.returned_quantity, StockOut.stockout_date)
+            .where(
+                and_(
+                    StockOut.customer.in_(customers),
+                    StockOut.product_id.in_(product_ids),
+                    StockOut.customer.isnot(None),
+                    StockOut.customer != '',
+                    StockOut.stockout_date >= stockout_date_limit,
+                )
+            )
+            .order_by(StockOut.stockout_date, StockOut.id)
+        )
+        # 构建 product_id → product_name 映射
+        pid_result = await db.execute(select(Product.id, Product.name).where(Product.id.in_(product_ids)))
+        pid_to_name = {r.id: r.name for r in pid_result.all()}
+    return stockout_result, pid_to_name
 
 
 async def _fifo_query_with_timeout(db: AsyncSession, plan_details: list, customer_name_map: dict | None, plan_month: str) -> dict[int, int]:
@@ -133,27 +213,11 @@ async def _fifo_query_with_timeout(db: AsyncSession, plan_details: list, custome
         stockout_date_limit = datetime(limit_date.year, limit_date.month, limit_date.day)
 
         # 设置服务端查询超时：SET LOCAL 仅在当前事务内生效，COMMIT/ROLLBACK 后自动重置
-        try:
+        with contextlib.suppress(SQLAlchemyError, OSError):
             await db.execute(text("SET LOCAL statement_timeout = '8s'"))
-        except (SQLAlchemyError, OSError):
-            pass
 
         # S3: 若调用方已传入 customer_name_map 且覆盖了所有 plan_id，跳过本次 PurchasePlan 查询
-        # 检查 customer_name_map 是否覆盖了所有 plan_details 的 plan_id
-        plan_ids_in_details = {d.plan_id for d in plan_details}
-        if customer_name_map and plan_ids_in_details.issubset(customer_name_map.keys()):
-            plan_id_to_customer = {pid: customer_name_map[pid] for pid in plan_ids_in_details if customer_name_map.get(pid)}
-        else:
-            # 查询相关主单 — 只取 id + customer_name，限制时间范围避免全表扫描
-            plan_result = await db.execute(
-                select(PurchasePlan.id, PurchasePlan.customer_name)
-                .where(
-                    PurchasePlan.customer_name.in_(customers),
-                    PurchasePlan.plan_month >= f"{earliest_plan_date.year - 1}-{earliest_plan_date.month:02d}",
-                )
-            )
-            all_plan_rows = plan_result.all()
-            plan_id_to_customer = {r.id: r.customer_name for r in all_plan_rows}
+        plan_id_to_customer = await _build_fifo_plan_id_to_customer(db, customer_name_map, plan_details, customers, earliest_plan_date)
 
         # 查询相关主单的所有明细 — 只取 FIFO 需要的字段
         relevant_plan_ids = list(plan_id_to_customer.keys())
@@ -173,62 +237,9 @@ async def _fifo_query_with_timeout(db: AsyncSession, plan_details: list, custome
         all_details = detail_result.scalars().all()
 
         # 按 (customer_name, product_name) 分组，保持 plan_date ASC 顺序
-        details_by_key: dict[tuple, list] = {}
-        for d in all_details:
-            cname = plan_id_to_customer.get(d.plan_id, '')
-            if not cname or not d.product_name:
-                continue
-            key = (cname, d.product_name)
-            if key not in keys_needed:
-                continue
-            if key not in details_by_key:
-                details_by_key[key] = []
-            details_by_key[key].append(d)
+        details_by_key = _group_fifo_details_by_key(all_details, plan_id_to_customer, keys_needed)
 
-        # 查出这些客户+产品的出货记录
-        # 双分支是有意识的性能优化，非冗余：
-        #   - product_id 路径：用 product_id IN(...) 避免 JOIN Product，命中
-        #     idx_stockout_product_customer_type 索引，适合明细已关联 product_id 的常规场景。
-        #   - JOIN 降级路径：仅当所有明细 product_id=0（历史脏数据）时触发，用
-        #     Product.name IN(...) 兜底匹配。
-        # 统一为单一路径会牺牲常规场景性能，请勿合并。
-        pid_to_name: dict[int, str] = {}
-        if not product_ids:
-            # 降级：无 product_id 时 JOIN Product 按 name 匹配
-            product_names = list({k[1] for k in keys_needed})
-            stockout_result = await db.execute(
-                select(StockOut.customer, Product.name.label('product_name'), StockOut.quantity, StockOut.returned_quantity, StockOut.stockout_date)
-                .join(Product, StockOut.product_id == Product.id)
-                .where(
-                    and_(
-                        StockOut.customer.in_(customers),
-                        Product.name.in_(product_names),
-                        StockOut.customer.isnot(None),
-                        StockOut.customer != '',
-                        StockOut.stockout_date >= stockout_date_limit,
-                    )
-                )
-                .order_by(StockOut.stockout_date, StockOut.id)
-            )
-        else:
-            # 优先用 product_id 查询，避免 JOIN Product 表的额外开销
-            # 先查 stock_out，再在内存中用 product_id → product_name 映射关联
-            stockout_result = await db.execute(
-                select(StockOut.customer, StockOut.product_id, StockOut.quantity, StockOut.returned_quantity, StockOut.stockout_date)
-                .where(
-                    and_(
-                        StockOut.customer.in_(customers),
-                        StockOut.product_id.in_(product_ids),
-                        StockOut.customer.isnot(None),
-                        StockOut.customer != '',
-                        StockOut.stockout_date >= stockout_date_limit,
-                    )
-                )
-                .order_by(StockOut.stockout_date, StockOut.id)
-            )
-            # 构建 product_id → product_name 映射
-            pid_result = await db.execute(select(Product.id, Product.name).where(Product.id.in_(product_ids)))
-            pid_to_name = {r.id: r.name for r in pid_result.all()}
+        stockout_result, pid_to_name = await _query_fifo_stockout_rows(db, keys_needed, customers, product_ids, stockout_date_limit)
 
         stockout_rows = stockout_result.all()
 

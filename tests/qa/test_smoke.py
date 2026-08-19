@@ -11,8 +11,9 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-from fastapi_app.main import app
 from fastapi_app.core.config import settings
+from fastapi_app.main import app
+
 if "test" not in settings.ALLOWED_HOSTS:
     settings.ALLOWED_HOSTS.append("test")
 

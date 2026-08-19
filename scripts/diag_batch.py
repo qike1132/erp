@@ -1,9 +1,12 @@
 """批次号查询诊断 — 逐环节检查数据链路"""
-import sys, os, json, asyncio
+import asyncio
+import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi_app.core.database import SyncSessionLocal
-from fastapi_app.shared_models import Order, Permission, User, OrderSyncConfig
+from fastapi_app.shared_models import Order, OrderSyncConfig, Permission, User
 
 session = SyncSessionLocal()
 try:
@@ -32,7 +35,7 @@ try:
     print('=' * 60)
     async def test_query():
         from fastapi_app.core.database import get_async_read_db
-        from fastapi_app.services.order_batch_service import get_whitelist, get_batch_query_list
+        from fastapi_app.services.order_batch_service import get_batch_query_list, get_whitelist
         async for db in get_async_read_db():
             whitelist = await get_whitelist(db)
             print(f'   白名单: {whitelist}')

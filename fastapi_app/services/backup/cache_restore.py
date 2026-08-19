@@ -37,8 +37,8 @@ async def _reload_redis() -> bool:
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=cli_env
         )
         try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
-        except asyncio.TimeoutError:
+            _stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
+        except TimeoutError:
             proc.kill()
             await proc.wait()
             logger.warning('Redis DEBUG RELOAD 超时')
@@ -49,25 +49,25 @@ async def _reload_redis() -> bool:
         stderr_text = stderr.decode(errors='replace')
         logger.warning('Redis DEBUG RELOAD 失败: %s', stderr_text)
         try:
-            shutdown_cmd = cmd[:-2] + ['SHUTDOWN', 'NOSAVE']
+            shutdown_cmd = [*cmd[:-2], 'SHUTDOWN', 'NOSAVE']
             shutdown_proc = await asyncio.create_subprocess_exec(
                 *shutdown_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=cli_env
             )
             try:
                 await asyncio.wait_for(shutdown_proc.communicate(), timeout=5)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 shutdown_proc.kill()
                 await shutdown_proc.wait()
             logger.info('Redis SHUTDOWN NOSAVE 已发送，等待自动重启')
             await asyncio.sleep(2)
-            ping_cmd = cmd[:-2] + ['PING']
+            ping_cmd = [*cmd[:-2], 'PING']
             for _ in range(5):
                 ping_proc = await asyncio.create_subprocess_exec(
                     *ping_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=cli_env
                 )
                 try:
                     await asyncio.wait_for(ping_proc.communicate(), timeout=3)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     ping_proc.kill()
                     await ping_proc.wait()
                     await asyncio.sleep(1)
@@ -78,10 +78,10 @@ async def _reload_redis() -> bool:
                 await asyncio.sleep(1)
             logger.warning('Redis 重启后未能响应 PING')
             return False
-        except (OSError, asyncio.TimeoutError) as e2:
+        except (TimeoutError, OSError) as e2:
             logger.warning('Redis SHUTDOWN 尝试失败: %s', e2)
             return False
-    except (OSError, asyncio.TimeoutError) as e:
+    except (TimeoutError, OSError) as e:
         logger.warning('Redis 重新加载失败: %s', e)
         return False
 

@@ -1,7 +1,7 @@
 <template>
   <div class="m-login-page">
     <div class="m-login-logo-area">
-      <img class="m-login-logo" src="/logo_plush.png" alt="滨发协同系统" />
+      <img loading="lazy" class="m-login-logo" src="/logo_plush.png" alt="滨发协同系统" />
       <div class="m-login-title">滨发协同系统</div>
       <div class="m-login-sub">Binfa Collaboration System</div>
     </div>
@@ -55,7 +55,7 @@
         </div>
         <div v-if="errorMsg" id="m-login-error-msg" class="m-login-error-msg show">{{ errorMsg }}</div>
         <div class="m-login-btn-area">
-          <button type="submit" class="m-login-btn" :disabled="loading">
+          <button type="submit" class="m-login-btn" :disabled="loading" aria-label="登录">
             <span v-if="!loading">登录</span>
             <span v-else class="m-login-spinner"></span>
           </button>

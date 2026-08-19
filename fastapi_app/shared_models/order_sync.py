@@ -3,7 +3,7 @@
 
 映射到 'order_sync_record', 'sync_retry_queue', 'order_sync_config' 表。
 """
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -20,7 +20,7 @@ class OrderSyncRecord(Base):
     order_no: Mapped[str] = mapped_column(String(20), nullable=False, comment='订单编号')
     sync_type: Mapped[str] = mapped_column(String(20), default='create', comment='同步类型')
     sync_status: Mapped[str] = mapped_column(String(20), default='pending', index=True, comment='同步状态')
-    sync_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True, comment='同步时间')
+    sync_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True, comment='同步时间')
     retry_count: Mapped[int] = mapped_column(Integer, default=0, comment='重试次数')
     max_retries: Mapped[int] = mapped_column(Integer, default=3, comment='最大重试次数')
     next_retry_time: Mapped[datetime | None] = mapped_column(DateTime, comment='下次重试时间')
@@ -28,7 +28,7 @@ class OrderSyncRecord(Base):
     sync_data: Mapped[str | None] = mapped_column(Text, comment='同步数据JSON')
     operator_id: Mapped[int | None] = mapped_column(Integer, comment='操作人ID')
     operator_name: Mapped[str | None] = mapped_column(String(100), comment='操作人姓名')
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 
     __table_args__ = (
         Index('idx_sync_status_time', 'sync_status', 'sync_time'),
@@ -92,9 +92,9 @@ class SyncRetryQueue(Base):
     next_retry_time: Mapped[datetime | None] = mapped_column(DateTime, index=True, comment='下次重试时间')
     last_retry_time: Mapped[datetime | None] = mapped_column(DateTime, comment='上次重试时间')
     last_error: Mapped[str | None] = mapped_column(Text, comment='最后错误信息')
-    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), comment='创建时间')
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
     priority: Mapped[int] = mapped_column(Integer, default=0, comment='优先级')
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 
     __table_args__ = (
         Index('idx_retry_status_time', 'status', 'next_retry_time'),
@@ -156,7 +156,7 @@ class OrderSyncConfig(Base):
     config_value: Mapped[str | None] = mapped_column(Text, comment='配置值')
     description: Mapped[str | None] = mapped_column(String(255), comment='配置描述')
     updated_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id'), comment='更新人ID')
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 
     __table_args__ = (
         Index('idx_order_sync_config_updated_by', 'updated_by_id'),

@@ -13,7 +13,6 @@
 """
 from __future__ import annotations
 
-import io
 import os
 import sys
 from unittest.mock import MagicMock
@@ -21,7 +20,7 @@ from unittest.mock import MagicMock
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _project_root not in sys.path:
@@ -29,7 +28,6 @@ if _project_root not in sys.path:
 
 # 测试专用数据库（conftest 计算得出，与开发库 erp_system 隔离，避免种子数据污染）
 from conftest import TEST_DATABASE_URL
-
 
 # API 前缀
 API_PREFIX = "/api/v1/pattern-room"
@@ -42,7 +40,6 @@ async def cs_api():
     Yields:
         (client, db): httpx AsyncClient 与事务隔离的 AsyncSession
     """
-    from fastapi_app.core.config import settings
     from fastapi_app.core.database import get_async_db, get_async_read_db
     from fastapi_app.core.deps import _get_user_with_permissions, get_current_user_id
     from fastapi_app.main import app

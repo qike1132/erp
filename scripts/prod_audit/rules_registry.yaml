@@ -1,0 +1,431 @@
+# 审核规则注册表
+# 统一注册 12 层全部审核规则。每条规则含：
+#   rule_id    - 规则唯一标识，格式 L{层号}-{类别}-{序号}
+#   version    - 规则版本号
+#   source     - 来源依据（ruff / bandit / mypy / vue-tsc / eslint / spec.md 章节）
+#   severity   - 默认严重度（critical / high / medium / low / info）
+#   description - 规则描述
+#
+# 加载时校验 rule_id 唯一；重复 ID 会导致 RulesRegistry.load 抛 AuditConfigError。
+schema_version: "1.0"
+
+rules:
+  # =========================================================================
+  # L1 静态分析门禁审核
+  # =========================================================================
+  - rule_id: "L1-RUFF-001"
+    version: "1.0"
+    source: "ruff"
+    severity: "high"
+    description: "ruff 静态分析零告警（E/F/W/I/N/UP/B/SIM/C4/S/RUF 规则集）"
+
+  - rule_id: "L1-BANDIT-001"
+    version: "1.0"
+    source: "bandit"
+    severity: "high"
+    description: "bandit 安全静态扫描零中/高危告警"
+
+  - rule_id: "L1-MYPY-001"
+    version: "1.0"
+    source: "mypy"
+    severity: "high"
+    description: "mypy 严格类型检查零 error"
+
+  - rule_id: "L1-VUE-TSC-001"
+    version: "1.0"
+    source: "vue-tsc"
+    severity: "high"
+    description: "vue-tsc 前端类型检查零 error"
+
+  - rule_id: "L1-ESLINT-001"
+    version: "1.0"
+    source: "eslint"
+    severity: "medium"
+    description: "eslint 前端 lint 零 error 级告警"
+
+  - rule_id: "L1-FUNC-LEN-001"
+    version: "1.0"
+    source: "spec.md 5.1"
+    severity: "medium"
+    description: "后端函数体行数 ≤ 80 行（含 docstring）"
+
+  - rule_id: "L1-COMP-LEN-001"
+    version: "1.0"
+    source: "spec.md 5.1"
+    severity: "medium"
+    description: "Vue 单文件组件行数 ≤ 300 行"
+
+  - rule_id: "L1-BROAD-EXCEPT-001"
+    version: "1.0"
+    source: "spec.md 5.1"
+    severity: "medium"
+    description: "禁止裸 except / except Exception（白名单除外）"
+
+  - rule_id: "L1-PROD-CONSOLE-001"
+    version: "1.0"
+    source: "spec.md 5.1"
+    severity: "medium"
+    description: "生产产物中禁止残留 console.log / console.debug"
+
+  - rule_id: "L1-PROD-ANY-001"
+    version: "1.0"
+    source: "spec.md 5.1"
+    severity: "medium"
+    description: "生产产物中禁止残留 TypeScript any 类型"
+
+  # =========================================================================
+  # L2 架构与分层审核
+  # =========================================================================
+  - rule_id: "L2-REV-DEP-001"
+    version: "1.0"
+    source: "spec.md 5.2"
+    severity: "high"
+    description: "禁止反向依赖（下层模块引用上层模块）"
+
+  - rule_id: "L2-CYC-DEP-001"
+    version: "1.0"
+    source: "spec.md 5.2"
+    severity: "high"
+    description: "禁止模块循环依赖"
+
+  - rule_id: "L2-SVC-LEN-001"
+    version: "1.0"
+    source: "spec.md 5.2"
+    severity: "medium"
+    description: "Service 类行数 ≤ 500 行"
+
+  - rule_id: "L2-ENDPOINT-SLIM-001"
+    version: "1.0"
+    source: "spec.md 5.2"
+    severity: "medium"
+    description: "Router 端点方法体 ≤ 30 行，业务逻辑下沉 Service"
+
+  # =========================================================================
+  # L3 业务逻辑与正确性审核
+  # =========================================================================
+  - rule_id: "L3-BROAD-EXCEPT-001"
+    version: "1.0"
+    source: "spec.md 5.3"
+    severity: "medium"
+    description: "业务层禁止宽泛 except（须捕获具体异常）"
+
+  - rule_id: "L3-EMPTY-EXCEPT-001"
+    version: "1.0"
+    source: "spec.md 5.3"
+    severity: "high"
+    description: "禁止空 except pass（须记录日志或 re-raise）"
+
+  - rule_id: "L3-MANUAL-COMMIT-001"
+    version: "1.0"
+    source: "spec.md 5.3"
+    severity: "high"
+    description: "禁止业务代码手动调用 commit/rollback（须由事务上下文管理）"
+
+  - rule_id: "L3-LOOP-QUERY-001"
+    version: "1.0"
+    source: "spec.md 5.3"
+    severity: "high"
+    description: "禁止循环内执行数据库查询"
+
+  # =========================================================================
+  # L4 数据访问层审核
+  # =========================================================================
+  - rule_id: "L4-N-PLUS-1-001"
+    version: "1.0"
+    source: "spec.md 5.4"
+    severity: "high"
+    description: "检测 N+1 查询模式（循环内单条查询，白名单除外）"
+
+  - rule_id: "L4-SQL-CONCAT-001"
+    version: "1.0"
+    source: "spec.md 5.4"
+    severity: "critical"
+    description: "禁止 SQL 字符串拼接（须使用参数绑定）"
+
+  - rule_id: "L4-SEQ-SCAN-001"
+    version: "1.0"
+    source: "spec.md 5.4"
+    severity: "medium"
+    description: "检测 Seq Scan 全表扫描执行计划"
+
+  - rule_id: "L4-BIG-TX-001"
+    version: "1.0"
+    source: "spec.md 5.4"
+    severity: "medium"
+    description: "大事务检测（单事务影响行数 > 1000 或耗时 > 1s）"
+
+  # =========================================================================
+  # L5 API 契约与版本兼容审核
+  # =========================================================================
+  - rule_id: "L5-API-MISALIGN-001"
+    version: "1.0"
+    source: "spec.md 5.5"
+    severity: "high"
+    description: "OpenAPI 规范与实际实现路由/参数/响应不一致"
+
+  - rule_id: "L5-ROUTE-MISALIGN-001"
+    version: "1.0"
+    source: "spec.md 5.5"
+    severity: "high"
+    description: "前端调用路由与后端实际路由不对齐"
+
+  - rule_id: "L5-CONTRACT-DIFF-001"
+    version: "1.0"
+    source: "spec.md 5.5"
+    severity: "high"
+    description: "API 契约快照 diff 检测破坏性变更"
+
+  - rule_id: "L5-ERR-CODE-001"
+    version: "1.0"
+    source: "spec.md 5.5"
+    severity: "medium"
+    description: "错误码未统一使用标准错误码枚举"
+
+  - rule_id: "L5-VERSION-BREAK-001"
+    version: "1.0"
+    source: "spec.md 5.5"
+    severity: "critical"
+    description: "API 版本破坏性变更未遵循语义化版本"
+
+  # =========================================================================
+  # L6 安全审核（蓝队 + 红队）
+  # =========================================================================
+  - rule_id: "L6-NO-AUTH-001"
+    version: "1.0"
+    source: "spec.md 5.6"
+    severity: "critical"
+    description: "敏感端点缺少鉴权装饰器"
+
+  - rule_id: "L6-HARDCODED-SECRET-001"
+    version: "1.0"
+    source: "spec.md 5.6"
+    severity: "critical"
+    description: "源码中硬编码密钥/密码/token"
+
+  - rule_id: "L6-BARE-DICT-001"
+    version: "1.0"
+    source: "spec.md 5.6"
+    severity: "high"
+    description: "接口返回裸 dict（须使用 Pydantic 响应模型）"
+
+  - rule_id: "L6-DEP-VULN-001"
+    version: "1.0"
+    source: "spec.md 5.6"
+    severity: "high"
+    description: "Python/Node 依赖存在已知安全漏洞（pip-audit / npm audit）"
+
+  - rule_id: "L6-IMAGE-VULN-001"
+    version: "1.0"
+    source: "spec.md 5.6"
+    severity: "high"
+    description: "容器镜像存在已知安全漏洞（Trivy 扫描）"
+
+  # =========================================================================
+  # L7 性能与可扩展性审核
+  # =========================================================================
+  - rule_id: "L7-P95-001"
+    version: "1.0"
+    source: "spec.md 5.7"
+    severity: "high"
+    description: "核心列表 P95 ≤ 300ms / 聚合查询 P95 ≤ 500ms"
+
+  - rule_id: "L7-RPS-001"
+    version: "1.0"
+    source: "spec.md 5.7"
+    severity: "high"
+    description: "并发吞吐量 ≥ 500 RPS"
+
+  - rule_id: "L7-COLD-START-001"
+    version: "1.0"
+    source: "spec.md 5.7"
+    severity: "medium"
+    description: "冷启动时间 ≤ 10s"
+
+  - rule_id: "L7-RESOURCE-001"
+    version: "1.0"
+    source: "spec.md 5.7"
+    severity: "medium"
+    description: "内存 ≤ 1GB / 连接池利用率 ≤ 80%"
+
+  - rule_id: "L7-LCP-001"
+    version: "1.0"
+    source: "spec.md 5.7"
+    severity: "medium"
+    description: "前端 LCP ≤ 2.5s"
+
+  - rule_id: "L7-FID-001"
+    version: "1.0"
+    source: "spec.md 5.7"
+    severity: "medium"
+    description: "前端 FID ≤ 100ms"
+
+  - rule_id: "L7-CLS-001"
+    version: "1.0"
+    source: "spec.md 5.7"
+    severity: "medium"
+    description: "前端 CLS ≤ 0.1"
+
+  - rule_id: "L7-BUNDLE-SIZE-001"
+    version: "1.0"
+    source: "spec.md 5.7"
+    severity: "medium"
+    description: "前端产物体积 ≤ 2MB"
+
+  # =========================================================================
+  # L8 可观测性审核
+  # =========================================================================
+  - rule_id: "L8-LOG-CTX-001"
+    version: "1.0"
+    source: "spec.md 5.8"
+    severity: "medium"
+    description: "日志缺少上下文字段（request_id / user_id 等）"
+
+  - rule_id: "L8-LOG-LEAK-001"
+    version: "1.0"
+    source: "spec.md 5.8"
+    severity: "high"
+    description: "日志泄露敏感信息（密码/token/密钥）"
+
+  - rule_id: "L8-MONITOR-MISSING-001"
+    version: "1.0"
+    source: "spec.md 5.8"
+    severity: "high"
+    description: "核心指标监控缺失（Prometheus metric）"
+
+  - rule_id: "L8-TRACE-MISSING-001"
+    version: "1.0"
+    source: "spec.md 5.8"
+    severity: "medium"
+    description: "分布式追踪 span 缺失"
+
+  - rule_id: "L8-ALERT-MISSING-001"
+    version: "1.0"
+    source: "spec.md 5.8"
+    severity: "high"
+    description: "关键告警规则缺失"
+
+  # =========================================================================
+  # L9 测试质量审核
+  # =========================================================================
+  - rule_id: "L9-COVERAGE-001"
+    version: "1.0"
+    source: "spec.md 5.9"
+    severity: "high"
+    description: "覆盖率不达标（核心 85% / 备份 80% / 来料 75% / 仪表盘 70%）"
+
+  - rule_id: "L9-CRITICAL-PATH-001"
+    version: "1.0"
+    source: "spec.md 5.9"
+    severity: "high"
+    description: "关键业务路径缺少测试用例"
+
+  - rule_id: "L9-SKIP-001"
+    version: "1.0"
+    source: "spec.md 5.9"
+    severity: "medium"
+    description: "测试中存在 skip / xfail 且无说明"
+
+  - rule_id: "L9-EMPTY-ASSERT-001"
+    version: "1.0"
+    source: "spec.md 5.9"
+    severity: "medium"
+    description: "测试用例空断言或仅 assert True"
+
+  - rule_id: "L9-TEST-DEP-001"
+    version: "1.0"
+    source: "spec.md 5.9"
+    severity: "medium"
+    description: "测试间存在隐式依赖（执行顺序敏感）"
+
+  # =========================================================================
+  # L10 前端与移动端审核
+  # =========================================================================
+  - rule_id: "L10-COMP-LEN-001"
+    version: "1.0"
+    source: "spec.md 5.10"
+    severity: "medium"
+    description: "Vue 组件超长（> 300 行）"
+
+  - rule_id: "L10-ANY-001"
+    version: "1.0"
+    source: "spec.md 5.10"
+    severity: "medium"
+    description: "前端代码使用 any 类型"
+
+  - rule_id: "L10-CONSOLE-001"
+    version: "1.0"
+    source: "spec.md 5.10"
+    severity: "medium"
+    description: "前端代码残留 console.log"
+
+  - rule_id: "L10-A11Y-001"
+    version: "1.0"
+    source: "spec.md 5.10"
+    severity: "medium"
+    description: "可访问性（a11y）问题检测"
+
+  - rule_id: "L10-APK-CONTRACT-001"
+    version: "1.0"
+    source: "spec.md 5.10"
+    severity: "high"
+    description: "APK 版本契约与后端 OTA 契约不一致"
+
+  # =========================================================================
+  # L11 部署就绪与配置审核
+  # =========================================================================
+  - rule_id: "L11-CONFIG-MISSING-001"
+    version: "1.0"
+    source: "spec.md 5.11"
+    severity: "high"
+    description: "生产环境配置项缺失"
+
+  - rule_id: "L11-HARDCODED-SECRET-001"
+    version: "1.0"
+    source: "spec.md 5.11"
+    severity: "critical"
+    description: "部署配置中硬编码密钥/密码"
+
+  - rule_id: "L11-DEP-UNLOCKED-001"
+    version: "1.0"
+    source: "spec.md 5.11"
+    severity: "high"
+    description: "依赖未锁定版本（缺少 lockfile 或使用浮动版本）"
+
+  - rule_id: "L11-CONTAINER-001"
+    version: "1.0"
+    source: "spec.md 5.11"
+    severity: "high"
+    description: "容器配置不合规（非 root / 多阶段构建 / 健康检查）"
+
+  - rule_id: "L11-ROLLBACK-MISSING-001"
+    version: "1.0"
+    source: "spec.md 5.11"
+    severity: "high"
+    description: "回滚策略缺失"
+
+  - rule_id: "L11-HEALTH-CHECK-001"
+    version: "1.0"
+    source: "spec.md 5.11"
+    severity: "high"
+    description: "健康检查端点缺失或未正确配置"
+
+  # =========================================================================
+  # L12 审核报告与上线决策
+  # =========================================================================
+  - rule_id: "L12-SCORE-CALC-001"
+    version: "1.0"
+    source: "spec.md 5.12"
+    severity: "high"
+    description: "生产就绪评分计算一致性校验"
+
+  - rule_id: "L12-SIGNOFF-001"
+    version: "1.0"
+    source: "spec.md 5.12"
+    severity: "high"
+    description: "上线签字单完整性校验（12 层签字齐全）"
+
+  - rule_id: "L12-DECISION-001"
+    version: "1.0"
+    source: "spec.md 5.12"
+    severity: "critical"
+    description: "上线决策与阻断问题一致性校验（有 critical/high 则必须 rejected）"

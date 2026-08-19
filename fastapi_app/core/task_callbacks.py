@@ -59,18 +59,18 @@ def _push_to_dead_letter(entry: dict):
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                     pool.submit(
                         lambda: asyncio.run(
-                            redis_cache.redis_client.lpush(
+                            redis_cache.redis_client.lpush(  # type: ignore[union-attr]
                                 'celery:dead_letter',
                                 json.dumps(entry, ensure_ascii=False, default=str),
-                            )
+                            )  # type: ignore[arg-type]
                         )
                     )
             else:
                 asyncio.run(
-                    redis_cache.redis_client.lpush(
+                    redis_cache.redis_client.lpush(  # type: ignore[union-attr]
                         'celery:dead_letter',
                         json.dumps(entry, ensure_ascii=False, default=str),
-                    )
+                    )  # type: ignore[arg-type]
                 )
     except Exception as e:  # defensive: dead-letter persistence failure must not mask original task failure
         logger.warning('死信队列写入失败: %s', e)
@@ -80,8 +80,8 @@ def _send_failure_alert(task_name: str, task_id: str, exc):
     try:
         from fastapi_app.core.metrics import TASK_FAILURE_TOTAL
         TASK_FAILURE_TOTAL.labels(task=task_name).inc()
-    except Exception:  # defensive: metrics emission failure must not interrupt failure alerting
-        pass
+    except Exception:  # defensive: metrics emission failure must not interrupt failure alerting  # noqa: S110  # nosec B110
+        pass  # defensive: 异常静默处理,不影响主流程
     logger.critical(
         'ALERT: Celery任务失败需人工介入 task=%s id=%s exc=%s',
         task_name, task_id, exc,

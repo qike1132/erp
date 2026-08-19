@@ -6,11 +6,13 @@ Locust配置 - 模拟50并发用户持续30分钟
 运行: locust -f scripts/perf_optimization/stress_test.py --host=http://127.0.0.1:5002
   或无头模式: locust -f scripts/perf_optimization/stress_test.py --host=http://127.0.0.1:5002 --headless -u 50 -r 10 -t 30m
 """
-import os, json, random, time
+import json
+import os
+import random
 from datetime import datetime
 
 try:
-    from locust import HttpUser, task, between, events
+    from locust import HttpUser, between, events, task
 except ImportError:
     print("请安装 locust: pip install locust")
     raise

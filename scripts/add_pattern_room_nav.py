@@ -10,8 +10,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from fastapi_app.core.database import SyncSessionLocal
-from fastapi_app.shared_models import Permission, User, user_permission
-
+from fastapi_app.shared_models import Permission, user_permission
 
 PERM_CODE = 'pattern_room_manage'
 PERM_NAME = '板房管理'

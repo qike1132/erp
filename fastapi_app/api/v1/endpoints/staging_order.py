@@ -46,7 +46,7 @@ async def import_staging_orders(file: UploadFile=File(...), session_id: str=Quer
     content = await file.read()
     if len(content) > 10 * 1024 * 1024:
         return StagingOrderImportResult(success=False, message='文件大小超过10MB限制')
-    if not content[:4] == b'\x50\x4b\x03\x04':
+    if content[:4] != b'PK\x03\x04':
         return StagingOrderImportResult(success=False, message='文件内容不是有效的Excel格式')
     scoped_session = f'u{current_user.id}:{session_id}'
     async with db_transaction(db):

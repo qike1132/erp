@@ -32,7 +32,9 @@ from fastapi_app.schemas.backup import (
 )
 from fastapi_app.services import backup_service
 from fastapi_app.services.backup_service import (
-    BackupError, BackupLockError, RestoreError,
+    BackupError,
+    BackupLockError,
+    RestoreError,
 )
 from fastapi_app.shared_models import User
 
@@ -285,7 +287,7 @@ async def async_import_backup(
     if await backup_service.is_restore_in_progress():
         raise HTTPException(status_code=409, detail='另一个恢复操作正在执行中，请稍后重试')
 
-    from fastapi_app.core.backup_progress import generate_task_id, create_progress
+    from fastapi_app.core.backup_progress import create_progress, generate_task_id
     task_id = generate_task_id()
     await create_progress(task_id, 'file_import')
     await backup_service.acquire_restore_lock(task_id)
@@ -323,7 +325,7 @@ async def async_restore_server_backup(
     except (OSError, ValueError) as e:
         raise HTTPException(status_code=400, detail=f'读取备份文件失败: {e}') from e
 
-    from fastapi_app.core.backup_progress import generate_task_id, create_progress
+    from fastapi_app.core.backup_progress import create_progress, generate_task_id
     task_id = generate_task_id()
     await create_progress(task_id, 'server_restore')
     await backup_service.acquire_restore_lock(task_id)
@@ -341,7 +343,9 @@ async def async_restore_server_backup(
 async def _run_async_file_restore(task_id: str, content: bytes, is_zip: bool, filename: str):
     """异步恢复后台执行"""
     from fastapi_app.core.backup_progress import (
-        update_progress, complete_progress, fail_progress,
+        complete_progress,
+        fail_progress,
+        update_progress,
     )
     from fastapi_app.core.database import get_async_db_context
 
@@ -418,10 +422,10 @@ async def _run_async_file_restore(task_id: str, content: bytes, is_zip: bool, fi
 
             except HTTPException as e:
                 await fail_progress(task_id, e.detail)
-            except Exception as e:
+            except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
                 # fail_progress 内部经 _sanitize_error 清洗（去除路径并截断），可安全写入 str(e)
                 await fail_progress(task_id, str(e))
-    except Exception as e:
+    except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
         logger.error(f'异步恢复任务异常: {e}')
         await fail_progress(task_id, str(e))
     finally:

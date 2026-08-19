@@ -160,7 +160,7 @@ def print_report(results: list[dict]):
     print("\n" + "=" * 80)
     print("  性能基准测试报告")
     print(f"  测试时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"  目标: 所有操作平均响应时间 < 200ms")
+    print("  目标: 所有操作平均响应时间 < 200ms")
     print("=" * 80)
 
     passed = sum(1 for r in results if r.get("status") == "PASS")

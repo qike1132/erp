@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import io
 import logging
 import zipfile
@@ -74,7 +75,7 @@ class PsqlRestoreStrategy(DatabaseRestoreStrategy):
         finally:
             try:
                 await db.close()
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
                 logger.warning("psql 策略关闭临时会话失败: %s", exc)
 
         # 把旧函数的返回值转换为新结果对象
@@ -92,7 +93,7 @@ class PsqlRestoreStrategy(DatabaseRestoreStrategy):
         # 阶段进度报告
         await phase_reporter.report(
             1.0,
-            f"psql 数据库恢复{'完成' if result.status != 'error' else '失败'}",
+            f"psql 数据库恢复{'完成' if result.status != 'error' else '失败'}",  # sql-safe: escape_like/绑定参数/常量片段
         )
         return result
 
@@ -129,12 +130,10 @@ class JsonRestoreStrategy(DatabaseRestoreStrategy):
                     task_id=task_id,
                 )
             # JSON 恢复后需要提交
-            await db.commit()
-        except Exception as exc:  # noqa: BLE001
-            try:
-                await db.rollback()
-            except Exception:  # noqa: BLE001
-                pass
+            await db.commit()  # manual-tx: try/except 内显式事务控制
+        except Exception as exc:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
+            with contextlib.suppress(Exception):
+                await db.rollback()  # manual-tx: try/except 内显式事务控制
             logger.exception("JSON 数据库恢复异常")
             return DatabaseRestoreResult(
                 status="error",
@@ -145,7 +144,7 @@ class JsonRestoreStrategy(DatabaseRestoreStrategy):
         finally:
             try:
                 await db.close()
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
                 logger.warning("JSON 策略关闭临时会话失败: %s", exc)
 
         result = DatabaseRestoreResult(

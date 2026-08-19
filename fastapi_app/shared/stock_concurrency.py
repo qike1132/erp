@@ -85,9 +85,10 @@ async def update_stock_with_optimistic_lock(
         StockConcurrentError: 重试耗尽仍冲突
         ValueError: 库存不足
     """
+    product: Product | None = None
     for attempt in range(retries):
         async with db.begin_nested():
-            if attempt > 0:
+            if attempt > 0 and product is not None:
                 db.expunge(product)
             result = await db.execute(select(Product).where(Product.id == product_id))
             product = result.scalar_one_or_none()

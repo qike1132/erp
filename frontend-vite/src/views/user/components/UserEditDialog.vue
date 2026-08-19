@@ -12,8 +12,8 @@
       </div>
     </div>
     <template #footer>
-      <button class="us-action-btn" @click="editDialogVisible = false">取消</button>
-      <button class="us-action-btn us-action-primary" :disabled="editSubmitting" @click="handleSaveEdit">
+      <button class="us-action-btn" @click="editDialogVisible = false" aria-label="取消">取消</button>
+      <button class="us-action-btn us-action-primary" :disabled="editSubmitting" @click="handleSaveEdit" :aria-label="editSubmitting ? '保存中…' : '保存'">
         {{ editSubmitting ? '保存中…' : '保存' }}
       </button>
     </template>

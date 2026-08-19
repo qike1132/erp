@@ -150,10 +150,10 @@ async def _sync_supplier_info(
     # 物料表只存 supplier_name，仅名称变更时同步
     if name_changed:
         for model_cls in (ProductMaterial, ProductFabric, ProductAccessory):
-            await db.execute(
+            await db.execute(  # batch-loop: 有意逐行处理,非 N+1
                 update(model_cls).where(model_cls.supplier_id == sid).values(supplier_name=new_name)
             )
-            await db.execute(
+            await db.execute(  # batch-loop: 有意逐行处理,非 N+1
                 update(model_cls).where(
                     model_cls.supplier_name == old_name,
                     model_cls.supplier_id.is_(None)

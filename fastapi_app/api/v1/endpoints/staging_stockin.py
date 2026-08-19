@@ -38,7 +38,7 @@ async def import_staging_stockins(file: UploadFile=File(...), session_id: str=Qu
     content = await file.read()
     if len(content) > 10 * 1024 * 1024:
         return StagingStockInImportResult(success=False, message='文件大小超过10MB限制')
-    if not content[:4] == b'\x50\x4b\x03\x04':
+    if content[:4] != b'PK\x03\x04':
         return StagingStockInImportResult(success=False, message='文件内容不是有效的Excel格式')
     async with db_transaction(db):
         imported, message, errors = await svc.import_staging_stockins_from_excel(db, content, scoped_session)

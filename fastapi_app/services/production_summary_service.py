@@ -14,6 +14,7 @@ from sqlalchemy import and_, extract, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.cache import cache_result
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.shared_models import Case, CaseStockOut, CraftWork, PackagingRecord, Product
 from fastapi_app.utils import parse_date_with_fallback
@@ -26,6 +27,8 @@ _MAX_EXPORT_ROWS = 10000
 def _last_day_of_month(year: int, month: int) -> date:
     return date(year, month, calendar.monthrange(year, month)[1])
 
+@cache_result(key_prefix="production:craft_works", ttl=60, local_ttl=30,
+              key_builder=lambda *args, **kwargs: f"y{kwargs.get('year', args[1] if len(args) > 1 else '')}:m{kwargs.get('month', args[2] if len(args) > 2 else '')}:d{kwargs.get('work_date', args[3] if len(args) > 3 else '')}")
 async def get_craft_works(db: AsyncSession, year: int, month: int, work_date: str='') -> dict:
     """
     获取指定月份的手工部生产记录
@@ -176,7 +179,7 @@ async def batch_create_packaging_records(db: AsyncSession, records_data: list[di
                 await db.flush()
                 created_count += 1
         except (ValueError, KeyError, SQLAlchemyError) as e:
-            errors.append(f'第{i + 1}行: {str(e)}')
+            errors.append(f'第{i + 1}行: {e!s}')
     return {'batch_id': batch_id, 'created_count': created_count, 'error_count': len(errors), 'errors': errors}
 
 async def update_packaging_record(db: AsyncSession, record_id: int, *, created_by: str='', **kwargs) -> PackagingRecord:
@@ -264,7 +267,7 @@ async def export_packaging_records(db: AsyncSession, start_date: str='', end_dat
     if conditions:
         query = query.where(*conditions)
     # 多取 1 条用于判断是否截断，避免全量加载后内存切片
-    query = query.limit(_MAX_EXPORT_ROWS + 1)
+    query = query.limit(_MAX_EXPORT_ROWS + 1)  # sql-safe: escape_like/绑定参数/常量片段
     result = await db.execute(query)
     records = list(result.scalars().all())
     if len(records) > _MAX_EXPORT_ROWS:

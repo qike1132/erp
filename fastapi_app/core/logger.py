@@ -90,7 +90,7 @@ def _get_renderer():
         return structlog.dev.ConsoleRenderer(colors=True)
 
 
-def get_logger(name: str = None) -> structlog.stdlib.BoundLogger:
+def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:
     """获取结构化 logger"""
     return structlog.get_logger(name)
 

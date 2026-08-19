@@ -32,9 +32,7 @@ _WS_AUTH_TIMEOUT = 5
 
 def _origin_allowed(origin: str | None) -> bool:
     if not origin:
-        if "*" in settings.ALLOWED_HOSTS:
-            return True
-        return False
+        return "*" in settings.ALLOWED_HOSTS
     try:
         host = urlparse(origin).hostname
         if not host:
@@ -46,9 +44,7 @@ def _origin_allowed(origin: str | None) -> bool:
                 return True
             if host == allowed:
                 return True
-        if settings.FASTAPI_DEBUG:
-            return True
-        return False
+        return bool(settings.FASTAPI_DEBUG)
     except (ValueError, TypeError):
         return False
 
@@ -91,7 +87,7 @@ def register_websocket(app: FastAPI) -> None:
                         user_id = int(uid)
             except (ValueError, TypeError) as e:
                 logger.warning("WebSocket Cookie认证失败: %s | exc_type=%s", e, type(e).__name__)
-            except Exception as e:  # noqa: BLE001  # 认证流程异常（如 HTTPException）不应中断连接建立
+            except Exception as e:  # 认证流程异常（如 HTTPException）不应中断连接建立  # broad-except: WebSocket 连接容错，异常时关闭连接
                 logger.warning("WebSocket Cookie认证异常: exc_type=%s msg=%s", type(e).__name__, e)
 
         if not user_id:
@@ -144,10 +140,9 @@ def register_websocket(app: FastAPI) -> None:
         msg_count = 0
         msg_window_start = time.monotonic()
         last_verify_time = time.monotonic()
-        last_recv_time = time.monotonic()
+        time.monotonic()
         MSG_RATE_LIMIT = 30  # max messages per minute
         VERIFY_INTERVAL = 60  # verify user active every 60s
-        HEARTBEAT_INTERVAL = 30  # 服务端主动 ping 间隔（秒）
         HEARTBEAT_TIMEOUT = 60  # 60s 无响应则断开（stale 连接清理）
 
         try:
@@ -164,7 +159,6 @@ def register_websocket(app: FastAPI) -> None:
                     await websocket.close(code=4008, reason="心跳超时")
                     break
                 now = time.monotonic()
-                last_recv_time = now
 
                 # Rate limiting
                 if now - msg_window_start > 60:

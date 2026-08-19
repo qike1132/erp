@@ -142,7 +142,7 @@ class TestConfigSecurityValidation:
                 del os.environ['APP_ENV']
 
     def test_secret_key_default_empty_raises(self):
-        import subprocess
+        import subprocess  # nosec B404
         import sys
 
         # 创建一个独立的Python脚本来测试配置验证
@@ -159,7 +159,7 @@ except RuntimeError as e:
     print(f"ERROR_RAISED:{str(e)}")
 '''
 
-        result = subprocess.run([sys.executable, '-c', test_script],
+        result = subprocess.run([sys.executable, '-c', test_script],  # nosec B603
                               capture_output=True, text=True, cwd='.')
         assert "ERROR_RAISED" in result.stdout
         assert "必须通过环境变量" in result.stdout
@@ -167,13 +167,21 @@ except RuntimeError as e:
     def test_secret_key_weak_value_raises(self):
         import os
         orig = os.environ.get('SECRET_KEY')
+        orig_env = os.environ.get('APP_ENV')
         try:
             os.environ['SECRET_KEY'] = 'CHANGE-ME-IN-PRODUCTION'
+            # 现行策略为内网宽松：非生产环境不检查弱默认值；
+            # 生产环境下该弱默认值（21 字符）因长度不足 32 被拦截
+            os.environ['APP_ENV'] = 'production'
             from fastapi_app.core.config import Settings
-            with pytest.raises(RuntimeError, match="不能使用不安全的默认值"):
+            with pytest.raises(RuntimeError, match="长度不足"):
                 Settings()
         finally:
             if orig is not None:
                 os.environ['SECRET_KEY'] = orig
             elif 'SECRET_KEY' in os.environ:
                 del os.environ['SECRET_KEY']
+            if orig_env is not None:
+                os.environ['APP_ENV'] = orig_env
+            elif 'APP_ENV' in os.environ:
+                del os.environ['APP_ENV']

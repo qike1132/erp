@@ -10,26 +10,13 @@
 - 统计概览和趋势
 - 边界条件
 """
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from decimal import Decimal
+
+import pytest
 
 from fastapi_app.services.material_registration_service import (
-    get_registrations,
-    get_registration,
     create_registration,
-    update_registration,
     delete_registration,
-    receive_material,
-    get_stats_overview,
-    get_stats_trend,
-    get_stats_distribution,
-    get_available_purchase_orders,
-    get_history,
-    get_suggestions,
-    preview_purchase_order,
-    export_registrations,
-    get_purchase_order_items,
 )
 
 

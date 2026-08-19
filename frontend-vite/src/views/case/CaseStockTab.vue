@@ -2,10 +2,10 @@
   <div class="cs-stock">
     <!-- 模式切换 -->
     <div class="cs-mode-toggle" role="tablist">
-      <button role="tab" :aria-selected="mode === 'stockin'" :class="['cs-mode-btn', { active: mode === 'stockin' }]" @click="switchMode('stockin')">
+      <button role="tab" :aria-selected="mode === 'stockin'" :class="['cs-mode-btn', { active: mode === 'stockin' }]" @click="switchMode('stockin')" aria-label="入库">
         <FontAwesomeIcon icon="truck-loading" />入库
       </button>
-      <button role="tab" :aria-selected="mode === 'stockout'" :class="['cs-mode-btn', { active: mode === 'stockout', 'out-mode': mode === 'stockout' }]" @click="switchMode('stockout')">
+      <button role="tab" :aria-selected="mode === 'stockout'" :class="['cs-mode-btn', { active: mode === 'stockout', 'out-mode': mode === 'stockout' }]" @click="switchMode('stockout')" aria-label="出库">
         <FontAwesomeIcon icon="shipping-fast" />出库
       </button>
     </div>
@@ -98,20 +98,20 @@
         </div>
         <div class="cs-form-field">
           <label class="cs-form-label">产品名称</label>
-          <input class="cs-input" :value="editForm.productName" disabled />
+          <input class="cs-input" :value="editForm.productName" disabled aria-label="产品名称" />
         </div>
         <div class="cs-form-field">
           <label class="cs-form-label">{{ editMode === 'stockin' ? '入库数量' : '出库数量' }}</label>
-          <input type="number" class="cs-input" v-model.number="editForm.quantity" min="1" step="1" />
+          <input type="number" class="cs-input" v-model.number="editForm.quantity" min="1" step="1" :aria-label="editMode === 'stockin' ? '入库数量' : '出库数量'" />
         </div>
         <div class="cs-form-field">
           <label class="cs-form-label">备注</label>
-          <textarea v-model="editForm.note" class="cs-textarea" rows="2" />
+          <textarea v-model="editForm.note" class="cs-textarea" rows="2" aria-label="备注" />
         </div>
       </div>
       <template #footer>
-        <button class="cs-action-btn cs-action-outline" @click="editDialogOpen = false">取消</button>
-        <button class="cs-action-btn cs-action-primary" @click="saveEdit">保存</button>
+        <button class="cs-action-btn cs-action-outline" @click="editDialogOpen = false" aria-label="取消">取消</button>
+        <button class="cs-action-btn cs-action-primary" @click="saveEdit" aria-label="保存">保存</button>
       </template>
     </UiDialog>
 

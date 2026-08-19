@@ -46,7 +46,7 @@ import MSpinner from '@/mobile/components/MSpinner.vue'
 const activeTab = ref('all')
 const tabChips = [{ label: '全部', value: 'all' }, { label: '待处理', value: 'pending' }, { label: '已完成', value: 'completed' }]
 const keyword = ref('')
-const orders = ref<any[]>([])
+const orders = ref<Array<{ id: number; product_name?: string; customer_name?: string; quantity?: number; date?: string; status?: string }>>([])
 const loading = ref(false)
 const page = ref(1)
 const perPage = 20
@@ -64,21 +64,21 @@ async function handleSearch() {
 watch([activeTab, page], handleSearch)
 onMounted(handleSearch)
 
-function orderColor(s: string) {
+function orderColor(s: string | undefined) {
   if (s === 'completed' || s === 'done') return 'var(--m-accent-emerald)'
   if (s === 'pending') return 'var(--m-accent-amber)'
   if (s === 'cancelled') return 'var(--m-accent-rose)'
   return 'var(--m-accent)'
 }
-function orderBg(s: string) {
+function orderBg(s: string | undefined) {
   if (s === 'completed' || s === 'done') return 'rgba(48,209,88,0.1)'
   if (s === 'pending') return 'rgba(255,149,0,0.1)'
   if (s === 'cancelled') return 'rgba(255,45,85,0.1)'
   return 'rgba(0,113,227,0.1)'
 }
-function orderLabel(s: string) {
+function orderLabel(s: string | undefined) {
   const map: Record<string, string> = { pending: '待处理', processing: '处理中', completed: '已完成', done: '已完成', cancelled: '已取消' }
-  return map[s] || s || '—'
+  return (s && map[s]) || s || '—'
 }
 </script>
 

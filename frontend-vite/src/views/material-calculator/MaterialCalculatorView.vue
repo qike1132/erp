@@ -4,11 +4,11 @@
       <div class="page-card-header">
         <div class="mc-header-actions">
           <span class="count-badge">已选 {{ selectedProductIds.length }} 个</span>
-          <button class="mc-action-btn mc-action-btn-primary" :disabled="orderItems.length === 0" @click="showBatchModal = true">
+          <button class="mc-action-btn mc-action-btn-primary" :disabled="orderItems.length === 0" @click="showBatchModal = true" aria-label="批量录入">
             <FontAwesomeIcon icon="layer-group" aria-hidden="true" />
             批量录入
           </button>
-          <button class="mc-action-btn mc-action-btn-danger" :disabled="orderItems.length === 0" @click="clearAll">
+          <button class="mc-action-btn mc-action-btn-danger" :disabled="orderItems.length === 0" @click="clearAll" aria-label="清空">
             <FontAwesomeIcon icon="eraser" aria-hidden="true" />
             清空
           </button>

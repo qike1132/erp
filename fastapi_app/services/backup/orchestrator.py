@@ -13,7 +13,6 @@ import logging
 import zipfile
 from typing import Any
 
-
 from fastapi_app.services.backup.ports import (
     AdvisoryLock,
     ArchiveDecryptor,
@@ -166,7 +165,7 @@ class DatabaseRestoreOrchestrator:
             outcome.errors.append(str(exc))
             outcome.journal = ctx.journal
             logger.error("恢复失败: %s", exc)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
             outcome.status = RestoreStatus.ERROR
             outcome.phase = RestorePhase.FAILED
             outcome.message = f"恢复过程中发生意外错误: {exc}"
@@ -188,7 +187,7 @@ class DatabaseRestoreOrchestrator:
             ctx.log(RestorePhase.PRE_RESTORE_BACKUP, "create", True, str(result.get("filename", "")))
             await reporter.report(RestorePhase.PRE_RESTORE_BACKUP, 1.0, "安全备份创建完成")
             return result
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
             ctx.log(RestorePhase.PRE_RESTORE_BACKUP, "create", False, str(exc))
             await reporter.report(RestorePhase.PRE_RESTORE_BACKUP, 1.0, f"安全备份创建失败: {exc}")
             logger.warning("恢复前安全备份创建失败（不阻塞恢复）: %s", exc)
@@ -314,7 +313,7 @@ class DatabaseRestoreOrchestrator:
                 f"数据库恢复完成（{strategy.name}, {result.status}）",
             )
             return result
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
             ctx.log(RestorePhase.RESTORE_DATABASE, "restore", False, str(exc))
             await reporter.report(RestorePhase.RESTORE_DATABASE, 1.0, f"数据库恢复异常: {exc}")
             logger.exception("数据库恢复异常")
@@ -346,7 +345,7 @@ class DatabaseRestoreOrchestrator:
             )
             await reporter.report(RestorePhase.RESTORE_COMPONENTS, 1.0, "非依赖组件恢复完成")
             return result
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
             ctx.log(RestorePhase.RESTORE_COMPONENTS, "restore", False, str(exc))
             await reporter.report(RestorePhase.RESTORE_COMPONENTS, 1.0, f"非依赖组件恢复异常: {exc}")
             logger.exception("非依赖组件恢复异常")
@@ -368,7 +367,7 @@ class DatabaseRestoreOrchestrator:
             await self._engine_lifecycle.rebuild_pool()
             ctx.log(RestorePhase.REBUILD_POOL, "rebuild", True, "连接池重建成功")
             await reporter.report(RestorePhase.REBUILD_POOL, 1.0, "连接池重建完成")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
             ctx.log(RestorePhase.REBUILD_POOL, "rebuild", False, str(exc))
             await reporter.report(RestorePhase.REBUILD_POOL, 1.0, f"连接池重建失败: {exc}")
             raise RestoreError(f"数据库连接池重建失败: {exc}") from exc
@@ -384,7 +383,7 @@ class DatabaseRestoreOrchestrator:
             await self._cache_invalidator.invalidate_all()
             ctx.log(RestorePhase.INVALIDATE_CACHES, "invalidate", True, "缓存清理完成")
             await reporter.report(RestorePhase.INVALIDATE_CACHES, 1.0, "缓存清理完成")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
             ctx.log(RestorePhase.INVALIDATE_CACHES, "invalidate", False, str(exc))
             await reporter.report(RestorePhase.INVALIDATE_CACHES, 1.0, f"缓存清理失败: {exc}")
             logger.warning("恢复后缓存失效失败: %s", exc)
@@ -426,7 +425,7 @@ class DatabaseRestoreOrchestrator:
                 return verification
             finally:
                 await db.close()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
             ctx.log(RestorePhase.VERIFY, "verify", False, str(exc))
             await reporter.report(RestorePhase.VERIFY, 1.0, f"验证异常: {exc}")
             logger.warning("恢复后验证失败: %s", exc)

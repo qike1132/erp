@@ -4,15 +4,15 @@
 跨模块业务流程测试：订单流程、库存流程、审批流程、数据一致性。
 从 Flask unittest 迁移至 pytest-asyncio。
 """
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import select
 
+from fastapi_app.core.security import hash_password
 from fastapi_app.shared_models import Order, Product, StockIn, StockOut
 from fastapi_app.shared_models.approval import ApprovalRequest
 from fastapi_app.shared_models.user import User
-from fastapi_app.core.security import hash_password
 
 MARK = pytest.mark.integration
 
@@ -32,7 +32,7 @@ class TestOrderFlow:
             product_id=product.id,
             customer="测试客户",
             quantity=10,
-            order_date=datetime.now(timezone.utc),
+            order_date=datetime.now(UTC),
             status="待备货",
         )
         async_db_session.add(order)
@@ -70,7 +70,7 @@ class TestStockFlow:
             product_id=product.id,
             customer="测试",
             quantity=50,
-            stockin_date=datetime.now(timezone.utc),
+            stockin_date=datetime.now(UTC),
         )
         async_db_session.add(stock_in)
         product.current_stock += 50
@@ -83,7 +83,7 @@ class TestStockFlow:
             product_id=product.id,
             customer="测试",
             quantity=30,
-            stockout_date=datetime.now(timezone.utc),
+            stockout_date=datetime.now(UTC),
         )
         async_db_session.add(stock_out)
         product.current_stock -= 30
@@ -113,7 +113,7 @@ class TestStockFlow:
             product_id=product.id,
             customer="测试",
             quantity=100,
-            stockin_date=datetime.now(timezone.utc),
+            stockin_date=datetime.now(UTC),
         )
         async_db_session.add(stock_in)
         product.current_stock += 100
@@ -148,7 +148,7 @@ class TestApprovalFlow:
             product_id=product.id,
             customer="测试客户",
             quantity=10,
-            order_date=datetime.now(timezone.utc),
+            order_date=datetime.now(UTC),
             status="待备货",
         )
         async_db_session.add(order)

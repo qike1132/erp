@@ -13,9 +13,9 @@
             <label class="pd-label mb-2"><FontAwesomeIcon icon="search" class="me-2" aria-hidden="true" />搜索源产品</label>
             <div class="pd-input-wrap">
               <FontAwesomeIcon icon="tag" class="pd-input-icon" aria-hidden="true" />
-              <input v-model="searchKeyword" type="text" class="pd-input" placeholder="输入产品名称或条码进行搜索" name="search" autocomplete="off" @keydown.enter="emit('search')" />
+              <input v-model="searchKeyword" type="text" class="pd-input" placeholder="输入产品名称或条码进行搜索" name="search" autocomplete="off" @keydown.enter="emit('search')" aria-label="输入产品名称或条码进行搜索" />
             </div>
-            <div class="mt-2"><button class="pd-btn pd-btn-primary pd-btn-sm" @click="emit('search')"><FontAwesomeIcon icon="search" class="me-2" aria-hidden="true" />搜索</button></div>
+            <div class="mt-2"><button class="pd-btn pd-btn-primary pd-btn-sm" @click="emit('search')" aria-label="搜索"><FontAwesomeIcon icon="search" class="me-2" aria-hidden="true" />搜索</button></div>
           </div>
           <div v-if="products.length > 0" class="mb-4">
             <label class="pd-label mb-2"><FontAwesomeIcon icon="box" class="me-2" aria-hidden="true" />选择源产品</label>
@@ -32,7 +32,7 @@
           <BomPreview :preview="preview" />
           <div v-if="preview" class="mb-4">
             <label class="form-check-label">
-              <input v-model="overwrite" type="checkbox" class="form-check-input" />
+              <input v-model="overwrite" type="checkbox" class="form-check-input" aria-label="勾选项" />
               <strong>覆盖现有BOM表</strong>
               <span class="text-muted block text-sm">如果目标产品已有BOM表，勾选此项将覆盖原数据</span>
             </label>
@@ -43,8 +43,8 @@
           </div>
         </div>
         <div class="bom-modal-footer">
-          <button class="bom-btn-cancel" @click="open = false">取消</button>
-          <button class="bom-btn-save" :disabled="!sourceProductId" @click="emit('confirm')"><FontAwesomeIcon icon="check" class="me-2" aria-hidden="true" />确认复制</button>
+          <button class="bom-btn-cancel" @click="open = false" aria-label="取消">取消</button>
+          <button class="bom-btn-save" :disabled="!sourceProductId" @click="emit('confirm')" aria-label="确认复制"><FontAwesomeIcon icon="check" class="me-2" aria-hidden="true" />确认复制</button>
         </div>
       </div>
     </div>

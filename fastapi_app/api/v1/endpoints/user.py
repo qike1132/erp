@@ -185,9 +185,8 @@ async def delete_user(
     if not target_user:
         raise HTTPException(status_code=404, detail='用户不存在')
     # 保护最后一个超级管理员，防止系统无法管理
-    if target_user.is_super:
-        if await user_service.count_super_users(db) <= 1:
-            raise HTTPException(status_code=400, detail='无法删除最后一个超级用户')
+    if target_user.is_super and await user_service.count_super_users(db) <= 1:
+        raise HTTPException(status_code=400, detail='无法删除最后一个超级用户')
     async with db_transaction(db):
         await user_service.delete_user(db, user_id)
         await invalidate_user_permission_cache(user_id)

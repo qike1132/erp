@@ -1,0 +1,20 @@
+=== logging_context ===
+scanned_files: 162
+
+=== logging_no_secrets ===
+scanned_files: 201
+
+=== monitoring ===
+found_health_endpoints: ['/health', '/healthz', '/ready', '/readyz']
+
+=== tracing ===
+has_trace_indicators: True
+has_db_span: True
+
+=== alerting ===
+alert_files: 2
+metrics_in_alerts: ['connection_pool', 'cpu', 'disk', 'error_rate', 'memory', 'response_time']
+
+=== metrics ===
+defined_metrics: []
+metrics_endpoint_found: True

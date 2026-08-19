@@ -12,7 +12,7 @@
 import logging
 
 from fastapi_app.services.order_batch_create import (
-    _SavepointRollbackSignal,
+    _SavepointRollbackSignalError,
     batch_create_orders,
 )
 from fastapi_app.services.order_crud import (
@@ -38,7 +38,7 @@ from fastapi_app.services.order_crud import (
 # Facade 显式 re-export 清单：防止 ruff F401 误删兼容层导入
 __all__ = [
     'PermissionDeniedError',
-    '_SavepointRollbackSignal',
+    '_SavepointRollbackSignalError',
     '_check_order_lock',
     '_create_approval_log_obj',
     '_ensure_no_pending_request',

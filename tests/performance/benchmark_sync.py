@@ -12,9 +12,9 @@ from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-from fastapi_app.core.config import settings
-
 import psycopg
+
+from fastapi_app.core.config import settings
 
 
 def get_sync_conn():
@@ -101,7 +101,7 @@ def benchmark_monthly_calendar(conn: psycopg.Connection) -> BenchmarkResult:
         t0 = time.perf_counter()
         with conn.cursor() as cur:
             cur.execute(sql, (plan_month,))
-            rows = cur.fetchall()
+            cur.fetchall()
         t1 = time.perf_counter()
         result.add(t1 - t0)
 
@@ -134,7 +134,7 @@ def benchmark_customer_summary(conn: psycopg.Connection) -> BenchmarkResult:
         t0 = time.perf_counter()
         with conn.cursor() as cur:
             cur.execute(sql, (plan_month,))
-            rows = cur.fetchall()
+            cur.fetchall()
         t1 = time.perf_counter()
         result.add(t1 - t0)
 
@@ -192,7 +192,7 @@ def benchmark_inventory(conn: psycopg.Connection) -> BenchmarkResult:
         t0 = time.perf_counter()
         with conn.cursor() as cur:
             cur.execute(sql)
-            rows = cur.fetchall()
+            cur.fetchall()
         t1 = time.perf_counter()
         result.add(t1 - t0)
 
@@ -225,7 +225,7 @@ def benchmark_stockins(conn: psycopg.Connection) -> BenchmarkResult:
         t0 = time.perf_counter()
         with conn.cursor() as cur:
             cur.execute(sql)
-            rows = cur.fetchall()
+            cur.fetchall()
         t1 = time.perf_counter()
         result.add(t1 - t0)
 
@@ -257,7 +257,7 @@ def benchmark_stockouts(conn: psycopg.Connection) -> BenchmarkResult:
         t0 = time.perf_counter()
         with conn.cursor() as cur:
             cur.execute(sql)
-            rows = cur.fetchall()
+            cur.fetchall()
         t1 = time.perf_counter()
         result.add(t1 - t0)
 
@@ -285,7 +285,7 @@ def benchmark_orders(conn: psycopg.Connection) -> BenchmarkResult:
         t0 = time.perf_counter()
         with conn.cursor() as cur:
             cur.execute(sql)
-            rows = cur.fetchall()
+            cur.fetchall()
         t1 = time.perf_counter()
         result.add(t1 - t0)
 
@@ -310,7 +310,7 @@ def main():
             stockout_count = cur.fetchone()[0]
             cur.execute("SELECT COUNT(*) FROM \"order\"")
             order_count = cur.fetchone()[0]
-            print(f"\n当前数据库数据量:")
+            print("\n当前数据库数据量:")
             print(f"  - 采购计划明细: {plan_details_count:,} 条")
             print(f"  - 入库记录:     {stockin_count:,} 条")
             print(f"  - 出库记录:     {stockout_count:,} 条")

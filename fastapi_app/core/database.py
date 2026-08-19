@@ -13,9 +13,9 @@ import os
 
 logger = logging.getLogger(__name__)
 
-from sqlalchemy import create_engine
+from sqlalchemy import Engine, create_engine
 from sqlalchemy.exc import DisconnectionError, OperationalError, SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from fastapi_app.core.config import settings
@@ -24,7 +24,7 @@ from fastapi_app.core.config import settings
 def _get_pool_config() -> dict:
     """根据 Worker 数动态计算连接池大小，防止超出 PostgreSQL max_connections。
 
-    PgBouncer 启用时（PGBouncer_ENABLED=true），应用侧连接池显著缩小：
+    PgBouncer 启用时（PGBOUNCER_ENABLED=true），应用侧连接池显著缩小：
     PgBouncer 负责连接复用，应用侧只需少量连接到 PgBouncer 即可，
     避免应用侧连接池与 PgBouncer 连接池叠加导致连接数膨胀。
     """
@@ -34,7 +34,7 @@ def _get_pool_config() -> dict:
     available = int(os.getenv("DB_MAX_CONNECTIONS", "100")) - 20
 
     # PgBouncer 启用时减小应用侧连接池（PgBouncer 负责连接复用）
-    pgbouncer_enabled = os.getenv("PGBouncer_ENABLED", "false").lower() in ("true", "1", "yes")
+    pgbouncer_enabled = os.getenv("PGBOUNCER_ENABLED", "false").lower() in ("true", "1", "yes")
     if pgbouncer_enabled:
         # PgBouncer transaction 模式下，应用侧每个 worker 只需少量连接
         # 除数更大（workers*4 / workers*6），使单 worker 连接数更少
@@ -55,9 +55,9 @@ def _get_pool_config() -> dict:
 
 _pool_config = _get_pool_config()
 
-_async_engine = None
-_AsyncSessionLocal = None
-async_engine = None
+_async_engine: AsyncEngine | None = None
+_AsyncSessionLocal: async_sessionmaker | None = None
+async_engine: AsyncEngine | None = None
 _rebuild_lock = asyncio.Lock()
 
 
@@ -85,6 +85,7 @@ _init_async_engine()
 
 try:
     from fastapi_app.core.slow_query import setup_slow_query_listener
+    assert _async_engine is not None  # noqa: S101
     setup_slow_query_listener(_async_engine.sync_engine)
 except ImportError as e:
     logger.warning('慢查询监听器初始化失败: %s', e)
@@ -97,12 +98,12 @@ def _register_slow_listener_for_read_engine():
             from fastapi_app.core.slow_query import setup_slow_query_listener
             setup_slow_query_listener(_read_engine.sync_engine)
             logger.debug("只读引擎慢查询监听器已注册")
-        except (ImportError, Exception) as e:
+        except (ImportError, Exception) as e:  # broad-except: 数据库连接容错，初始化失败不应阻断启动
             logger.warning('只读引擎慢查询监听器注册失败: %s', e)
 
 
-_sync_engine = None
-_SyncSessionLocal = None
+_sync_engine: Engine | None = None
+_SyncSessionLocal: sessionmaker | None = None
 
 
 def _init_sync_engine():
@@ -282,6 +283,7 @@ async def rebuild_pool() -> bool:
             _init_read_engine()
 
             from fastapi_app.core.slow_query import setup_slow_query_listener
+            assert _async_engine is not None  # noqa: S101
             setup_slow_query_listener(_async_engine.sync_engine)
             _register_slow_listener_for_read_engine()
             logger.info("慢查询监听器已重新注册")
@@ -297,6 +299,7 @@ async def verify_db_connectivity() -> bool:
     """验证数据库连接可用性，返回 True/False"""
     from sqlalchemy import text
     try:
+        assert _async_engine is not None  # noqa: S101
         async with _async_engine.connect() as conn:
             await conn.execute(text('SELECT 1'))
         return True
@@ -338,6 +341,7 @@ def __getattr__(name):
 
         def get_sync_db() -> Generator[Session, None, None]:
             _init_sync_engine()
+            assert _SyncSessionLocal is not None  # noqa: S101
             db = _SyncSessionLocal()
             try:
                 yield db

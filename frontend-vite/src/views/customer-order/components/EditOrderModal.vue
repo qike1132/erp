@@ -24,7 +24,7 @@
           <div class="oe-info-cell">
             <span class="oe-info-label">产品</span>
             <span class="oe-info-value oe-info-product">
-              <img v-if="detailData.product?.image" :src="detailData.product.image" class="oe-product-thumb" />
+              <img loading="lazy" v-if="detailData.product?.image" :src="detailData.product.image" class="oe-product-thumb" alt="产品图片" />
               <span>{{ detailData.product?.name || '-' }}</span>
             </span>
           </div>
@@ -83,7 +83,7 @@
               <button class="oe-stepper-btn" @click="editForm.quantity = Math.max(1, editForm.quantity - 1)" aria-label="减少">
                 <FontAwesomeIcon icon="minus" aria-hidden="true" />
               </button>
-              <input type="number" class="oe-stepper-input" v-model.number="editForm.quantity" min="1" step="1" autocomplete="off" />
+              <input type="number" class="oe-stepper-input" v-model.number="editForm.quantity" min="1" step="1" autocomplete="off" aria-label="数值输入" />
               <button class="oe-stepper-btn" @click="editForm.quantity = editForm.quantity + 1" aria-label="增加">
                 <FontAwesomeIcon icon="plus" aria-hidden="true" />
               </button>
@@ -95,7 +95,7 @@
               <button class="oe-stepper-btn" @click="editForm.deductQuantity = Math.max(0, editForm.deductQuantity - 1)" aria-label="减少抵扣">
                 <FontAwesomeIcon icon="minus" aria-hidden="true" />
               </button>
-              <input type="number" class="oe-stepper-input" v-model.number="editForm.deductQuantity" min="0" step="1" autocomplete="off" />
+              <input type="number" class="oe-stepper-input" v-model.number="editForm.deductQuantity" min="0" step="1" autocomplete="off" aria-label="数值输入" />
               <button class="oe-stepper-btn" @click="editForm.deductQuantity = editForm.deductQuantity + 1" aria-label="增加抵扣">
                 <FontAwesomeIcon icon="plus" aria-hidden="true" />
               </button>
@@ -105,7 +105,7 @@
         </div>
         <div class="oe-edit-full">
           <label class="oe-edit-label">备注</label>
-          <textarea class="oe-textarea" v-model="editForm.note" rows="2" placeholder="输入备注信息…" />
+          <textarea class="oe-textarea" v-model="editForm.note" rows="2" placeholder="输入备注信息…" aria-label="输入备注信息…" />
         </div>
       </div>
     </div>

@@ -19,33 +19,45 @@ class Base(DeclarativeBase):
 
 
 # 全量导入所有模型，确保 Base.metadata 注册所有表（详见模块文档字符串）
-from fastapi_app.shared_models.backup_record import BackupRecord
 from fastapi_app.shared_models.approval import ApprovalLog, ApprovalRequest
+from fastapi_app.shared_models.audit_log import AuditLog
+from fastapi_app.shared_models.backup_record import BackupRecord
 from fastapi_app.shared_models.case import Case
 from fastapi_app.shared_models.case_inventory_log import CaseInventoryLog
 from fastapi_app.shared_models.case_stock_in import CaseStockIn
 from fastapi_app.shared_models.case_stock_out import CaseStockOut
+from fastapi_app.shared_models.country import Country
 from fastapi_app.shared_models.craft_work import CraftWork
-from fastapi_app.shared_models.daily_production_record import DailyProductionRecord
 from fastapi_app.shared_models.customer import Customer
-from fastapi_app.shared_models.device_token import DeviceToken
-from fastapi_app.shared_models.notification import Notification
 from fastapi_app.shared_models.customer_access_log import CustomerAccessLog
+from fastapi_app.shared_models.customer_sampling import (
+    CUSTOMER_SAMPLING_ACTIONS,
+    CUSTOMER_SAMPLING_CHANGE_TYPES,
+    CustomerSamplingChangeLog,
+    CustomerSamplingFabricVersion,
+    CustomerSamplingPart,
+    CustomerSamplingProject,
+    CustomerSamplingRole,
+)
+from fastapi_app.shared_models.daily_production_record import DailyProductionRecord
+from fastapi_app.shared_models.device_token import DeviceToken
+from fastapi_app.shared_models.file_record import FileRecord
 from fastapi_app.shared_models.inventory_log import InventoryLog
 from fastapi_app.shared_models.material_registration import MaterialRegistration, MaterialRegistrationItem
+from fastapi_app.shared_models.notification import Notification
 from fastapi_app.shared_models.order import Order
+from fastapi_app.shared_models.order_batch_audit import OrderBatchAuditLog
 from fastapi_app.shared_models.order_item import OrderItem
-from fastapi_app.shared_models.pattern_maker import PatternMaker
+from fastapi_app.shared_models.order_status_log import OrderStatusLog
+from fastapi_app.shared_models.order_sync import OrderSyncConfig, OrderSyncRecord, SyncRetryQueue
 from fastapi_app.shared_models.outsource import (
-    OUTSOURCE_PROCESS_STATUSES,
     OUTSOURCE_PROCESS_STATUS_LABELS,
+    OUTSOURCE_PROCESS_STATUSES,
     OrderOutsourceProcess,
     OutsourceProcessType,
 )
-from fastapi_app.shared_models.order_batch_audit import OrderBatchAuditLog
-from fastapi_app.shared_models.order_status_log import OrderStatusLog
-from fastapi_app.shared_models.order_sync import OrderSyncConfig, OrderSyncRecord, SyncRetryQueue
 from fastapi_app.shared_models.packaging_record import PackagingRecord
+from fastapi_app.shared_models.pattern_maker import PatternMaker
 from fastapi_app.shared_models.permission import Permission
 from fastapi_app.shared_models.product import Product
 from fastapi_app.shared_models.product_material import (
@@ -66,83 +78,71 @@ from fastapi_app.shared_models.stock_out import StockOut
 from fastapi_app.shared_models.stock_return import StockReturn
 from fastapi_app.shared_models.supplier import Supplier
 from fastapi_app.shared_models.user import User, user_permission
-from fastapi_app.shared_models.audit_log import AuditLog
-from fastapi_app.shared_models.country import Country
-from fastapi_app.shared_models.file_record import FileRecord
-from fastapi_app.shared_models.customer_sampling import (
-    CUSTOMER_SAMPLING_ACTIONS,
-    CUSTOMER_SAMPLING_CHANGE_TYPES,
-    CustomerSamplingChangeLog,
-    CustomerSamplingFabricVersion,
-    CustomerSamplingPart,
-    CustomerSamplingProject,
-    CustomerSamplingRole,
-)
 
 __all__ = [
-    'FileRecord',
-    'BackupRecord',
-    'Base',
-    'Product',
-    'Order',
-    'OrderItem',
-    'OutsourceProcessType',
-    'OrderOutsourceProcess',
+    'CUSTOMER_SAMPLING_ACTIONS',
+    'CUSTOMER_SAMPLING_CHANGE_TYPES',
+    'MATERIAL_CATEGORIES',
     'OUTSOURCE_PROCESS_STATUSES',
     'OUTSOURCE_PROCESS_STATUS_LABELS',
+    'ApprovalLog',
+    'ApprovalRequest',
+    'AuditLog',
+    'BackupRecord',
+    'Base',
+    'Case',
+    'CaseInventoryLog',
+    'CaseStockIn',
+    'CaseStockOut',
+    'Country',
+    'CraftWork',
+    'Customer',
+    'CustomerAccessLog',
+    'CustomerSamplingChangeLog',
+    'CustomerSamplingFabricVersion',
+    'CustomerSamplingPart',
+    'CustomerSamplingProject',
+    'CustomerSamplingRole',
+    'DailyProductionRecord',
+    'DeviceToken',
+    'FileRecord',
+    'InventoryLog',
+    'MaterialRegistration',
+    'MaterialRegistrationItem',
+    'ModificationLog',
+    'Notification',
+    'Order',
+    'OrderBatchAuditLog',
+    'OrderItem',
+    'OrderOutsourceProcess',
+    'OrderStatusLog',
+    'OrderSyncConfig',
+    'OrderSyncRecord',
+    'OutsourceProcessType',
+    'PackagingRecord',
+    'PatternMaker',
+    'Permission',
+    'Product',
+    'ProductAccessory',
+    'ProductFabric',
+    'ProductMaterial',
+    'ProductionPlan',
+    'ProductionPlanLog',
+    'PurchaseOrder',
+    'PurchaseOrderItem',
+    'PurchasePlan',
+    'PurchasePlanDetail',
+    'SavedQuery',
+    'ShipmentRecord',
+    'StagingOrder',
+    'StagingPurchasePlan',
+    'StagingStockIn',
+    'StagingStockOut',
     'StockIn',
     'StockOut',
     'StockReturn',
-    'InventoryLog',
+    'Supplier',
+    'SyncRetryQueue',
     'User',
     'user_permission',
-    'Permission',
-    'PurchaseOrder',
-    'PurchaseOrderItem',
-    'StagingOrder',
-    'StagingStockIn',
-    'StagingStockOut',
-    'Customer',
-    'DeviceToken',
-    'ApprovalRequest',
-    'ApprovalLog',
-    'OrderSyncRecord',
-    'SyncRetryQueue',
-    'OrderSyncConfig',
-    'Case',
-    'CaseStockIn',
-    'CaseStockOut',
-    'CaseInventoryLog',
-    'MaterialRegistration',
-    'MaterialRegistrationItem',
-    'Notification',
-    'Supplier',
-    'ProductMaterial',
-    'ProductFabric',
-    'ProductAccessory',
-    'MATERIAL_CATEGORIES',
-    'ModificationLog',
-    'SavedQuery',
-    'OrderStatusLog',
-    'OrderBatchAuditLog',
-    'CustomerAccessLog',
-    'ProductionPlan',
-    'ProductionPlanLog',
-    'StagingPurchasePlan',
-    'PurchasePlan',
-    'PurchasePlanDetail',
-    'ShipmentRecord',
-    'CraftWork',
-    'DailyProductionRecord',
-    'PackagingRecord',
-    'AuditLog',
-    'Country',
-    'CustomerSamplingProject',
-    'CustomerSamplingRole',
-    'CustomerSamplingPart',
-    'CustomerSamplingFabricVersion',
-    'CustomerSamplingChangeLog',
-    'CUSTOMER_SAMPLING_ACTIONS',
-    'CUSTOMER_SAMPLING_CHANGE_TYPES',
-    'PatternMaker',
 ]

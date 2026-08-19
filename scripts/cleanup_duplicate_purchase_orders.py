@@ -29,20 +29,19 @@ import argparse
 import asyncio
 import json
 import sys
+from collections.abc import Iterable
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Iterable
 
 # 允许在项目根目录运行
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from sqlalchemy import delete, select  # noqa: E402
-from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.database import get_async_db_context  # noqa: E402
-from fastapi_app.shared_models import PurchaseOrder, PurchaseOrderItem  # noqa: E402
-
+from fastapi_app.core.database import get_async_db_context
+from fastapi_app.shared_models import PurchaseOrder, PurchaseOrderItem
 
 REPEAT_WINDOW_SECONDS = 60  # 同一业务组内"重复"判定时间窗
 
@@ -91,7 +90,7 @@ async def find_duplicate_groups(db: AsyncSession, since: datetime) -> list[list[
 
     # 仅保留真正的重复组：组内 ≥ 2 条且创建时间差均在窗口内
     duplicates: list[list[PurchaseOrder]] = []
-    for key, items in groups.items():
+    for _key, items in groups.items():
         if len(items) < 2:
             continue
         # 取最早一条作为"基准"，其余与基准比较
@@ -157,7 +156,7 @@ async def main_async(args: argparse.Namespace) -> int:
 
     print('-' * 60)
     if args.dry_run:
-        print(f'[cleanup] DRY-RUN 完成。如需实际删除，请加 --apply 参数。')
+        print('[cleanup] DRY-RUN 完成。如需实际删除，请加 --apply 参数。')
     else:
         print(f'[cleanup] 实际删除：{total_deleted} 条采购订单')
     return 0

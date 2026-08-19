@@ -20,11 +20,9 @@ ERP系统全板块测试数据生成器 v2
  13. 出货计划       production_summaries 20,000
  14. 皮套管理       cases               20,000
 """
-import os
-import sys
 import json
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -270,7 +268,7 @@ def generate_purchase_plans(count: int) -> list[dict[str, Any]]:
         details_count = fake.random_int(min=1, max=8)
         details = []
         total_qty = 0
-        for d in range(details_count):
+        for _d in range(details_count):
             qty = fake.random_int(min=10, max=50000)
             total_qty += qty
             details.append({
@@ -379,11 +377,11 @@ def save_jsonl(data: list[dict], name: str) -> str:
 
 
 def print_table(rows: list[tuple]):
-    widths = [max(len(str(c)) for c in col) for col in zip(*rows)]
+    widths = [max(len(str(c)) for c in col) for col in zip(*rows, strict=False)]
     sep = "+" + "+".join("-" * (w + 2) for w in widths) + "+"
     lines = [sep]
     for i, row in enumerate(rows):
-        cells = "| " + " | ".join(str(c).ljust(w) for c, w in zip(row, widths)) + " |"
+        cells = "| " + " | ".join(str(c).ljust(w) for c, w in zip(row, widths, strict=False)) + " |"
         lines.append(cells)
         if i == 0:
             lines.append(sep)
@@ -436,7 +434,7 @@ if __name__ == "__main__":
     total_elapsed = time.time() - total_start
 
     log("=" * 70)
-    log(f"  ERP系统全板块测试数据生成器 v2")
+    log("  ERP系统全板块测试数据生成器 v2")
     log(f"  每板块: {PER_MODULE:,} 条 | 共 {len(modules)} 个板块")
     log("=" * 70)
     log(print_table(table_rows))

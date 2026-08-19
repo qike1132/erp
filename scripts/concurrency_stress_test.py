@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# ruff: noqa: E402, RUF001, RUF002, RUF003
 """高并发压测脚本：多进程同时生成编号并扣减库存
 
 用法示例：

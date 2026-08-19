@@ -8,8 +8,9 @@
 - 备份锁管理
 - 备份策略/健康检查/指标/告警服务存在性
 """
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 
 class TestBackupLock:
@@ -71,7 +72,7 @@ class TestCreateFullBackup:
     @patch('fastapi_app.services.backup_service.create_full_backup')
     async def test_create_full_backup_disk_full(self, mock_backup):
         """磁盘空间不足"""
-        mock_backup.side_effect = IOError('磁盘空间不足')
+        mock_backup.side_effect = OSError('磁盘空间不足')
 
         with pytest.raises(IOError, match='磁盘空间不足'):
             await mock_backup(db=MagicMock(), user_name='admin')

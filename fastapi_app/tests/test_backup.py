@@ -12,13 +12,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fastapi_app.services.backup_service import (
+    BACKUP_FORMAT_VERSION,
+    BACKUP_MAX_COUNT,
+    BACKUP_RETENTION_DAYS,
     BackupError,
     BackupFileError,
     BackupLockError,
     RestoreError,
-    BACKUP_FORMAT_VERSION,
-    BACKUP_MAX_COUNT,
-    BACKUP_RETENTION_DAYS,
     build_column_type_map,
     cleanup_old_backups,
     delete_backup_file,
@@ -32,7 +32,6 @@ from fastapi_app.services.backup_service import (
     sha256_file,
     validate_backup_file,
 )
-
 
 # ---------------------------------------------------------------------------
 # 工具函数测试
@@ -155,7 +154,7 @@ class TestBuildColumnTypeMap:
 
 class TestEnsureBackupDir:
     def test_creates_directory(self, tmp_path):
-        with patch('fastapi_app.services.backup_service.BACKUP_DIR', tmp_path / 'backups'):
+        with patch('fastapi_app.services.backup.records.BACKUP_DIR', tmp_path / 'backups'):
             ensure_backup_dir()
             assert (tmp_path / 'backups').exists()
 
@@ -220,13 +219,13 @@ class TestDeleteBackupFile:
     def test_delete_success(self, tmp_path):
         test_file = tmp_path / 'erp_backup_20240115_103000.zip'
         test_file.write_bytes(b'dummy')
-        with patch('fastapi_app.services.backup_service.BACKUP_DIR', tmp_path):
+        with patch('fastapi_app.services.backup.records.BACKUP_DIR', tmp_path):
             result = delete_backup_file('erp_backup_20240115_103000.zip')
             assert result == 'erp_backup_20240115_103000.zip'
             assert not test_file.exists()
 
     def test_delete_not_found(self, tmp_path):
-        with patch('fastapi_app.services.backup_service.BACKUP_DIR', tmp_path):
+        with patch('fastapi_app.services.backup.records.BACKUP_DIR', tmp_path):
             with pytest.raises(BackupFileError, match='不存在'):
                 delete_backup_file('nonexistent.zip')
 
@@ -237,7 +236,7 @@ class TestDeleteBackupFile:
 
 class TestListBackupFiles:
     def test_empty_directory(self, tmp_path):
-        with patch('fastapi_app.services.backup_service.BACKUP_DIR', tmp_path):
+        with patch('fastapi_app.services.backup.records.BACKUP_DIR', tmp_path):
             result = list_backup_files()
             assert result == []
 
@@ -247,7 +246,7 @@ class TestListBackupFiles:
         (tmp_path / 'erp_incremental_20240115_120000.zip').write_bytes(b'dummy')
         (tmp_path / 'other_file.txt').write_bytes(b'dummy')  # 不应被列出
 
-        with patch('fastapi_app.services.backup_service.BACKUP_DIR', tmp_path):
+        with patch('fastapi_app.services.backup.records.BACKUP_DIR', tmp_path):
             result = list_backup_files()
             assert len(result) == 2
             filenames = [b['filename'] for b in result]
@@ -262,7 +261,7 @@ class TestListBackupFiles:
 
 class TestCleanupOldBackups:
     def test_cleanup_empty_directory(self, tmp_path):
-        with patch('fastapi_app.services.backup_service.BACKUP_DIR', tmp_path):
+        with patch('fastapi_app.services.backup.records.BACKUP_DIR', tmp_path):
             result = cleanup_old_backups()
             assert result['deleted_count'] == 0
             assert result['kept_count'] == 0
@@ -279,7 +278,7 @@ class TestCleanupOldBackups:
         new_file = tmp_path / 'erp_backup_20240115_000000.zip'
         new_file.write_bytes(b'dummy')
 
-        with patch('fastapi_app.services.backup_service.BACKUP_DIR', tmp_path):
+        with patch('fastapi_app.services.backup.records.BACKUP_DIR', tmp_path):
             result = cleanup_old_backups()
             assert result['deleted_count'] == 1
             assert result['kept_count'] == 1
@@ -292,7 +291,7 @@ class TestCleanupOldBackups:
             f = tmp_path / f'erp_backup_202401{i:02d}_000000.zip'
             f.write_bytes(b'dummy')
 
-        with patch('fastapi_app.services.backup_service.BACKUP_DIR', tmp_path):
+        with patch('fastapi_app.services.backup.records.BACKUP_DIR', tmp_path):
             result = cleanup_old_backups()
             assert result['deleted_count'] == 5
             assert result['kept_count'] == BACKUP_MAX_COUNT

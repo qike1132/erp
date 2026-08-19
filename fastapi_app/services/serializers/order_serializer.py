@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
     from fastapi_app.shared_models import Order
@@ -140,7 +140,7 @@ class OrderSerializer:
     )
 
     # 基础字段到模型属性的映射
-    _FIELD_MAP: dict[OrderField, str] = {
+    _FIELD_MAP: ClassVar[dict[OrderField, str]] = {
         OrderField.ID: "id",
         OrderField.ORDER_NO: "order_no",
         OrderField.CUSTOMER: "customer",
@@ -158,7 +158,7 @@ class OrderSerializer:
 
     @classmethod
     def serialize(
-        cls, order: "Order", config: SerializerConfig, **context
+        cls, order: Order, config: SerializerConfig, **context
     ) -> dict:
         """序列化订单对象
 

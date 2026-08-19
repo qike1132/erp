@@ -47,7 +47,6 @@ from version_manager import (
     compute_md5,
     log_changelog,
     read_version,
-    write_version,
 )
 
 
@@ -69,8 +68,8 @@ def find_apk() -> Path | None:
 
 
 def upload_apk(apk_path: Path, version: VersionInfo, changelog: str, force_update: bool, retries: int = 3) -> dict:
-    import urllib.request
     import urllib.error
+    import urllib.request
 
     url = f"{API_BASE_URL}/app/upload"
     boundary = "----ERPUploadBoundary" + hashlib.md5(str(time.time()).encode()).hexdigest()
@@ -98,7 +97,7 @@ def upload_apk(apk_path: Path, version: VersionInfo, changelog: str, force_updat
         f"Content-Type: application/vnd.android.package-archive\r\n\r\n"
     )
 
-    body = "".join(parts).encode("utf-8") + apk_content + f"\r\n--{boundary}--\r\n".encode("utf-8")
+    body = "".join(parts).encode("utf-8") + apk_content + f"\r\n--{boundary}--\r\n".encode()
 
     headers = {
         "Content-Type": f"multipart/form-data; boundary={boundary}",
@@ -136,8 +135,8 @@ def upload_apk(apk_path: Path, version: VersionInfo, changelog: str, force_updat
 
 
 def publish_version(version_id: int, retries: int = 3) -> dict:
-    import urllib.request
     import urllib.error
+    import urllib.request
 
     url = f"{API_BASE_URL}/app/{version_id}/publish"
     headers = {"Content-Type": "application/json"}
@@ -163,8 +162,8 @@ def publish_version(version_id: int, retries: int = 3) -> dict:
 
 
 def verify_version_sync(version_code: int, timeout: int = 10) -> bool:
-    import urllib.request
     import urllib.error
+    import urllib.request
 
     url = f"{API_BASE_URL}/app/latest?current_version_code=0"
     start = time.time()
@@ -177,7 +176,7 @@ def verify_version_sync(version_code: int, timeout: int = 10) -> bool:
                     elapsed = time.time() - start
                     print(f"  [OK] 版本同步验证通过 ({elapsed:.1f}s)")
                     return True
-        except Exception:
+        except Exception:  # noqa: S110  # defensive: 轮询验证失败时重试，最终超时由下方 [FAIL] 处理
             pass
         time.sleep(1)
 
@@ -300,7 +299,7 @@ def main():
 
     # === 汇总 ===
     print("\n" + "=" * 60)
-    print(f"  发布完成!")
+    print("  发布完成!")
     print(f"  版本: v{new_version.name} (code={new_version.code})")
     print(f"  MD5:  {md5_hash}")
     print(f"  同步: {sync_status}")

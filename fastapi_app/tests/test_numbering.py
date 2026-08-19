@@ -6,7 +6,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from fastapi_app.services.numbering import generate_order_number, generate_purchase_order_number, generate_stockin_number
+from fastapi_app.services.numbering import (
+    generate_order_number,
+    generate_purchase_order_number,
+    generate_stockin_number,
+)
 
 
 class TestNumberingFormat:

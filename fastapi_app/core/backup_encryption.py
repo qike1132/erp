@@ -3,7 +3,7 @@
 import hashlib
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -80,10 +80,10 @@ def encrypt_backup(
 
     encrypted_bytes = salt + nonce + ct_with_tag
 
-    backup_id = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    backup_id = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
     meta_dict = {
         "backup_id": backup_id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "type": "encrypted",
         "encrypted": True,
         "algorithm": "AES-256-GCM",

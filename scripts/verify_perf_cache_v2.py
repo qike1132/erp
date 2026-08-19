@@ -11,7 +11,7 @@ API_BASE = "/api/v1"
 
 def get_fresh_token():
     url = "http://localhost:5002/api/v1/auth/login"
-    resp = requests.post(url, json={"username": "admin", "password": "admin123"})
+    resp = requests.post(url, json={"username": "admin", "password": "admin123"}, timeout=10)
     if resp.status_code == 200:
         return resp.json().get("access_token", "")
     raise RuntimeError(f"Login failed: {resp.status_code} {resp.text}")

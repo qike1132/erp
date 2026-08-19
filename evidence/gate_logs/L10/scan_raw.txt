@@ -1,0 +1,19 @@
+=== component_split ===
+scanned_vue_files: 282
+refactored_components_status: all_split
+
+=== no_any ===
+scanned_ts_vue_files: 435
+
+=== no_console ===
+scanned_ts_vue_files: 438
+
+=== accessibility ===
+scanned_vue_files: 282
+
+=== capacitor_config ===
+appId: com.binfa.erp
+appName: 滨发ERP
+webDir: dist
+server_url: http://192.168.0.95:5002
+env_capacitor_lines: 10

@@ -163,7 +163,7 @@ async def delete_customer(db: AsyncSession, customer_id: int) -> None:
     #   同时兜底匹配冗余的 customer_name 字段（历史数据 customer_id 可能为 NULL）
     checks = await db.execute(
         select(
-            select(func.count()).where(Order.customer == customer.name, Order.is_deleted == False).scalar_subquery().label('orders'),
+            select(func.count()).where(Order.customer == customer.name, not Order.is_deleted).scalar_subquery().label('orders'),
             select(func.count()).where(StockIn.customer == customer.name).scalar_subquery().label('stockins'),
             select(func.count()).where(StockOut.customer == customer.name).scalar_subquery().label('stockouts'),
             select(func.count()).where(

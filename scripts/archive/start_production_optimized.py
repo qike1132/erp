@@ -24,7 +24,7 @@ if __name__ == '__main__':
 
     # 清理并重建参数：替换为 --prod，保留额外参数
     extra_args = [a for a in sys.argv[1:] if a not in ('--prod',)]
-    sys.argv = [sys.argv[0], '--prod'] + extra_args
+    sys.argv = [sys.argv[0], '--prod', *extra_args]
 
     from start import main
     main()

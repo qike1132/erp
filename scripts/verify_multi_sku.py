@@ -3,12 +3,11 @@ import asyncio
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import sessionmaker, selectinload
+from sqlalchemy.orm import selectinload, sessionmaker
 
 from fastapi_app.core.database import async_engine
-from fastapi_app.shared_models.order import Order
-from fastapi_app.shared_models.order_item import OrderItem
 from fastapi_app.services.purchase_order_query import get_unprocessed_orders
+from fastapi_app.shared_models.order import Order
 
 async_session = sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -26,7 +25,7 @@ async def verify():
                 break
 
         if target_order:
-            print(f"\n✅ 在未处理列表中找到测试订单:")
+            print("\n✅ 在未处理列表中找到测试订单:")
             print(f"  order_no: {target_order['order_no']}")
             print(f"  customer: {target_order['customer']}")
             print(f"  product_id (首SKU): {target_order['product_id']}")

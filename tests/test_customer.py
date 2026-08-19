@@ -11,18 +11,16 @@
 - 启用客户名称列表（缓存）
 - 边界条件（不存在客户、重复名称、有关联数据）
 """
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from fastapi_app.services.customer_service import (
-    get_customers,
-    get_customer,
-    search_customers,
-    get_active_customer_names,
     create_customer,
-    update_customer,
+    get_customer,
+    get_customers,
     toggle_customer_status,
-    delete_customer,
+    update_customer,
 )
 
 
@@ -263,7 +261,7 @@ class TestUpdateCustomer:
         mock_async_db.flush = AsyncMock()
         mock_async_db.refresh = AsyncMock()
 
-        result = await update_customer(
+        await update_customer(
             mock_async_db, customer_id=1,
             name='新名称', contact='新联系人',
             phone='新电话', address='新地址',
@@ -318,7 +316,7 @@ class TestUpdateCustomer:
         mock_async_db.flush = AsyncMock()
         mock_async_db.refresh = AsyncMock()
 
-        result = await update_customer(
+        await update_customer(
             mock_async_db, customer_id=1, name=None,
             contact=None, phone=None, address=None,
             note=None, status=False
@@ -341,7 +339,7 @@ class TestToggleCustomerStatus:
         mock_async_db.flush = AsyncMock()
         mock_async_db.refresh = AsyncMock()
 
-        result = await toggle_customer_status(mock_async_db, 1)
+        await toggle_customer_status(mock_async_db, 1)
 
         assert customer.status is False
 

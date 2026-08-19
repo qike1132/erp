@@ -14,7 +14,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sqlalchemy import text
-from fastapi_app.core.database import _init_async_engine, _AsyncSessionLocal
+
+from fastapi_app.core.database import _AsyncSessionLocal, _init_async_engine
 
 INDEXES = [
     ("orders", "idx_perf_order_status_date_covering", """
@@ -54,7 +55,7 @@ INDEXES = [
 async def main():
     _init_async_engine()
     async with _AsyncSessionLocal() as session:
-        for table, idx_name, ddl in INDEXES:
+        for _table, idx_name, ddl in INDEXES:
             t0 = time.perf_counter()
             try:
                 await session.execute(text(ddl))
@@ -69,7 +70,7 @@ async def main():
                     print(f"✗ {idx_name}: {e}")
 
         print("\n验证索引:")
-        for table, idx_name, _ in INDEXES:
+        for _table, idx_name, _ in INDEXES:
             r = await session.execute(text("""
                 SELECT indexname, idx_scan, idx_tup_read, idx_tup_fetch
                 FROM pg_stat_user_indexes

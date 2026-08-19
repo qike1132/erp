@@ -1,4 +1,5 @@
 import { library } from '@fortawesome/fontawesome-svg-core'
+import type { IconDefinition } from '@fortawesome/fontawesome-common-types'
 import * as solidIcons from '@fortawesome/free-solid-svg-icons'
 
 /**
@@ -187,7 +188,7 @@ const SOLID_ICONS = [
 
 library.add(...SOLID_ICONS)
 
-const FA5_ALIASES: { fa5Name: string; icon: any }[] = [
+const FA5_ALIASES: { fa5Name: string; icon: IconDefinition }[] = [
   { fa5Name: 'sync-alt', icon: solidIcons.faArrowsRotate },
   { fa5Name: 'truck-loading', icon: solidIcons.faTruckRampBox },
   { fa5Name: 'shipping-fast', icon: solidIcons.faTruckFast },

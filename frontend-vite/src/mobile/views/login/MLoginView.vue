@@ -36,7 +36,7 @@
 
       <p v-if="errorMsg" class="m-login-error">{{ errorMsg }}</p>
 
-      <button type="submit" class="m-login-btn" :disabled="submitting || !username || !password">
+      <button type="submit" class="m-login-btn" :disabled="submitting || !username || !password" aria-label="登录中… 登 录">
         <template v-if="submitting">
           <span class="m-login-spinner" />
           登录中…

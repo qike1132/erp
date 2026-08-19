@@ -154,7 +154,7 @@ async def create_plan(data: PurchasePlanCreate, db: AsyncSession=Depends(get_asy
         for callback in callbacks:
             try:
                 await callback()
-            except Exception as e:
+            except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
                 logger.error("post-commit 回调执行失败: %s", e, exc_info=True)
     return {'success': True, 'data': result}
 
@@ -272,7 +272,7 @@ async def monthly_calendar(year: int=Query(..., description='年份'), month: in
     except (OperationalError, DisconnectionError) as e:
         logger.error(f'获取月度日历数据失败: {e}', exc_info=True)
         raise HTTPException(status_code=500, detail=f'获取月度数据失败: {settings.sanitize_error(e)}') from e
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error(f'获取月度日历数据超时: year={year} month={month}')
         raise HTTPException(status_code=504, detail='获取月度数据超时，请稍后重试') from None
     except Exception as e:  # defensive: 未预期异常统一返回 500，避免内部信息泄露
@@ -301,7 +301,7 @@ async def customer_summary(year: int=Query(..., description='年份'), month: in
     except (OperationalError, DisconnectionError) as e:
         logger.error(f'获取客户汇总失败: {e}', exc_info=True)
         raise HTTPException(status_code=500, detail=f'获取汇总数据失败: {settings.sanitize_error(e)}') from e
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error(f'获取客户汇总超时: year={year} month={month}')
         raise HTTPException(status_code=504, detail='获取汇总数据超时，请稍后重试') from None
     except Exception as e:  # defensive: 未预期异常统一返回 500，避免内部信息泄露
@@ -496,7 +496,7 @@ async def staging_confirm(data: ConfirmStagingRequest, db: AsyncSession=Depends(
         for callback in callbacks:
             try:
                 await callback()
-            except Exception as e:
+            except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
                 logger.error("post-commit 回调执行失败: %s", e, exc_info=True)
     return {'success': True, **result}
 

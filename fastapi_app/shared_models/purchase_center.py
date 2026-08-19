@@ -1,7 +1,7 @@
 """
 修改日志 & 保存查询模型 - 纯 SQLAlchemy 2.0 声明式
 """
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -21,9 +21,9 @@ class ModificationLog(Base):
     new_value: Mapped[str | None] = mapped_column(Text, comment='修改后值')
     modifier_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id'), comment='修改人ID')
     modifier_name: Mapped[str | None] = mapped_column(String(100), comment='修改人姓名')
-    modify_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True, comment='修改时间')
+    modify_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True, comment='修改时间')
     modify_reason: Mapped[str | None] = mapped_column(Text, comment='修改原因')
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 
     __table_args__ = (
         Index('idx_mod_target', 'target_type', 'target_id'),
@@ -56,10 +56,10 @@ class SavedQuery(Base):
     conditions: Mapped[str] = mapped_column(Text, nullable=False, comment='查询条件JSON')
     creator_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id'), comment='创建人ID')
     creator_name: Mapped[str | None] = mapped_column(String(100), comment='创建人姓名')
-    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), comment='创建时间')
+    create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
     use_count: Mapped[int | None] = mapped_column(Integer, default=0, comment='使用次数')
     last_use_time: Mapped[datetime | None] = mapped_column(DateTime, comment='最后使用时间')
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 
     __table_args__ = (
         Index('idx_saved_query_type', 'query_type'),

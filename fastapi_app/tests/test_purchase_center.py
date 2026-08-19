@@ -158,6 +158,7 @@ class TestPurchaseCenterService:
         """P-5 集成测试：验证列查询的 Row 属性访问与 dict 字段映射正确"""
         from datetime import datetime
         from types import SimpleNamespace
+
         from fastapi_app.services.purchase_center_service import export_completed_orders
 
         # 模拟订单列查询返回的 Row（属性访问）
@@ -249,6 +250,7 @@ class TestPurchaseCenterService:
         """P-1：验证 UNION ALL 混合页（order + stockin）的字段映射与排序"""
         from datetime import datetime
         from types import SimpleNamespace
+
         from fastapi_app.core.cache import _cache_local
 
         _cache_local.clear()
@@ -392,6 +394,7 @@ class TestPurchaseCenterService:
         """
         from datetime import datetime
         from types import SimpleNamespace
+
         from fastapi_app.core.cache import _cache_local
 
         _cache_local.clear()
@@ -849,8 +852,8 @@ class TestPurchaseCenterModels:
 
 class TestOneClickGenerateGrouping:
     @pytest.mark.asyncio
-    async def test_groups_by_supplier_id_with_null_as_zero(self):
-        """supplier_id 为 NULL 但 supplier_name 不同时，应合并为一个 PO"""
+    async def test_single_po_with_supplier_details(self):
+        """1 个客户订单 = 1 个采购订单：所有供应商的物料作为该订单的明细"""
         from fastapi_app.services.purchase_order_generate import one_click_generate_order
 
         db = MagicMock()
@@ -870,10 +873,12 @@ class TestOneClickGenerateGrouping:
                 db, items, customer_name='客户1', source_order_ids=[1]
             )
 
-        assert result['count'] == 2
-        assert len(created) == 2
-        null_group = next(g for g in created if g['items'][0]['supplier_id'] is None)
-        assert len(null_group['items']) == 2
+        assert result['count'] == 1
+        assert len(created) == 1
+        # 供应商信息保留在明细级：3 条明细（含 supplier_id 为 None 的项）全部在同一 PO 内
+        po_items = created[0]['items']
+        assert len(po_items) == 3
+        assert sum(1 for it in po_items if it['supplier_id'] is None) == 2
 
 
 # ============================================================

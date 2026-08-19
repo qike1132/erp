@@ -7,11 +7,11 @@
       <div class="mr-fg2"><label>已收货</label><div style="font-size:17px;color:var(--color-success-500);">{{ item.received }}</div></div>
       <div class="mr-fg2"><label>待收货</label><div style="font-size:17px;color:var(--color-warning-500);">{{ item.remaining }}</div></div>
     </div>
-    <div class="mr-fg2"><label>本次收货数量</label><input type="number" v-model.number="qty" min="0.01" step="0.01" placeholder="输入本次收货数量"></div>
-    <div class="mr-fg2"><label>备注</label><textarea v-model="remark" rows="2" placeholder="可选备注..."></textarea></div>
+    <div class="mr-fg2"><label>本次收货数量</label><input type="number" v-model.number="qty" min="0.01" step="0.01" placeholder="输入本次收货数量" aria-label="输入本次收货数量"></div>
+    <div class="mr-fg2"><label>备注</label><textarea v-model="remark" rows="2" placeholder="可选备注..." aria-label="可选备注..."></textarea></div>
     <template #footer>
-      <button class="mr-btn mr-btn-ghost" @click="$emit('update:open', false)">取消</button>
-      <button class="mr-btn mr-btn-success" @click="onSubmit"><FontAwesomeIcon icon="check" /> 确认收货</button>
+      <button class="mr-btn mr-btn-ghost" @click="$emit('update:open', false)" aria-label="取消">取消</button>
+      <button class="mr-btn mr-btn-success" @click="onSubmit" aria-label="确认收货"><FontAwesomeIcon icon="check" /> 确认收货</button>
     </template>
   </UiDialog>
 </template>

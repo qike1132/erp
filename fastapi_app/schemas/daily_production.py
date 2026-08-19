@@ -6,7 +6,6 @@
 
 from pydantic import BaseModel, Field
 
-
 # ==================== 生产记录 CRUD ====================
 
 class ProductionRecordCreate(BaseModel):

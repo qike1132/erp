@@ -1,17 +1,13 @@
 <template>
   <div class="rp-container">
-    <div class="rp-header">
-      <div class="rp-header-left">
-        <div class="rp-icon" :class="iconClass">
-          <i :class="iconName" />
-        </div>
-        <div class="rp-header-text">
-          <div class="rp-title">{{ statusTitle }}</div>
-          <div v-if="progress.phase_label" class="rp-phase">{{ progress.phase_label }}</div>
-        </div>
-      </div>
-      <div class="rp-percent" :class="percentClass">{{ displayPercent }}%</div>
-    </div>
+    <RestoreProgressHeader
+      :status-title="statusTitle"
+      :phase-label="progress.phase_label"
+      :display-percent="displayPercent"
+      :icon-class="iconClass"
+      :icon-name="iconName"
+      :percent-class="percentClass"
+    />
 
     <div class="rp-bar-track">
       <div
@@ -26,53 +22,41 @@
       <FontAwesomeIcon icon="exclamation-circle" /> {{ progress.error }}
     </div>
 
-    <div v-if="isCompleted && progress.result" class="rp-result-summary" :class="resultSummaryClass">
-      <i :class="resultIcon" />
-      {{ resultText }}
-      <span v-if="progress.result.total_inserted && !hasDbError"> · {{ progress.result.total_inserted }} 条记录</span>
-      <span v-if="(progress.result.format === 'zip' || progress.result.database) && !hasDbError"> · ZIP完整备份</span>
-    </div>
+    <RestoreProgressResult
+      v-if="isCompleted && progress.result"
+      :result="progress.result"
+      :has-db-error="hasDbError"
+      :result-summary-class="resultSummaryClass"
+      :result-icon="resultIcon"
+      :result-text="resultText"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, onUnmounted } from 'vue'
-import { backupApi } from '@/api'
+import { computed } from 'vue'
+import RestoreProgressHeader from './components/RestoreProgressHeader.vue'
+import RestoreProgressResult from './components/RestoreProgressResult.vue'
+import { useRestoreProgressPolling, type RestoreProgressData } from './composables/useRestoreProgressPolling'
+import type { RestoreResult } from './composables/useRestorePolling'
 
-export interface RestoreProgressData {
-  task_id: string
-  status: 'pending' | 'running' | 'completed' | 'completed_with_warnings' | 'failed'
-  progress: number
-  phase: string
-  phase_label: string
-  restore_type: string
-  started_at: string | null
-  completed_at: string | null
-  result: any | null
-  error: string | null
-}
+export type { RestoreResult }
+export type { RestoreProgressData }
 
 const props = defineProps<{
   taskId: string | null
 }>()
 
 const emit = defineEmits<{
-  (e: 'completed', result: any): void
+  (e: 'completed', result: RestoreResult): void
   (e: 'failed', error: string): void
 }>()
 
-const progress = ref<RestoreProgressData>({
-  task_id: '',
-  status: 'pending',
-  progress: 0,
-  phase: 'init',
-  phase_label: '初始化',
-  restore_type: '',
-  started_at: null,
-  completed_at: null,
-  result: null,
-  error: null,
-})
+const { progress } = useRestoreProgressPolling(
+  () => props.taskId,
+  (result) => emit('completed', result),
+  (error) => emit('failed', error),
+)
 
 const displayPercent = computed(() => {
   const p = Math.round(progress.value.progress)
@@ -155,79 +139,6 @@ const resultText = computed(() => {
   if (hasWarnings.value) return '恢复完成（验证未通过）'
   return '恢复完成'
 })
-
-let pollTimer: ReturnType<typeof setTimeout> | null = null
-let stopped = false
-
-function startPolling() {
-  stopPolling()
-  if (!props.taskId) return
-  poll()
-}
-
-async function poll() {
-  if (stopped || !props.taskId) return
-  try {
-    const res = await backupApi.getProgress(props.taskId) as { success?: boolean; task_id?: string; status?: 'failed' | 'running' | 'pending' | 'completed' | 'completed_with_warnings'; progress?: number; phase?: string; phase_label?: string; restore_type?: string; started_at?: string | null; completed_at?: string | null; result?: unknown; error?: string | null }
-    if (res?.success) {
-      progress.value = {
-        task_id: res.task_id || '',
-        status: res.status || 'pending',
-        progress: res.progress ?? 0,
-        phase: res.phase || '',
-        phase_label: res.phase_label || '',
-        restore_type: res.restore_type || '',
-        started_at: res.started_at || null,
-        completed_at: res.completed_at || null,
-        result: res.result || null,
-        error: res.error || null,
-      }
-      if (res.status === 'completed' || res.status === 'completed_with_warnings') {
-        emit('completed', res.result)
-        return
-      }
-      if (res.status === 'failed') {
-        emit('failed', res.error || '恢复失败')
-        return
-      }
-    }
-  } catch {
-    // ignore poll errors
-  }
-  pollTimer = setTimeout(poll, 800)
-}
-
-function stopPolling() {
-  if (pollTimer !== null) {
-    clearTimeout(pollTimer)
-    pollTimer = null
-  }
-}
-
-watch(() => props.taskId, (newId) => {
-  if (newId) {
-    progress.value = {
-      task_id: '',
-      status: 'pending',
-      progress: 0,
-      phase: 'init',
-      phase_label: '初始化',
-      restore_type: '',
-      started_at: null,
-      completed_at: null,
-      result: null,
-      error: null,
-    }
-    startPolling()
-  } else {
-    stopPolling()
-  }
-}, { immediate: true })
-
-onUnmounted(() => {
-  stopped = true
-  stopPolling()
-})
 </script>
 
 <style scoped>
@@ -237,90 +148,6 @@ onUnmounted(() => {
   border: 1px solid var(--color-primary-200, #bfdbfe);
   border-radius: 12px;
   margin-bottom: 16px;
-}
-
-.rp-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.rp-header-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.rp-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
-  flex-shrink: 0;
-}
-
-.rp-icon-pending {
-  background: var(--color-primary-100, #dbeafe);
-  color: var(--color-primary-600, #2563eb);
-}
-
-.rp-icon-running {
-  background: var(--color-primary-100, #dbeafe);
-  color: var(--color-primary-600, #2563eb);
-}
-
-.rp-icon-completed {
-  background: var(--color-success-100, #dcfce7);
-  color: var(--color-success-600, #16a34a);
-}
-
-.rp-icon-warning {
-  background: var(--color-warning-100, #fef9c3);
-  color: var(--color-warning-600, #ca8a04);
-}
-
-.rp-icon-failed {
-  background: var(--color-danger-100, #fee2e2);
-  color: var(--color-danger-600, #dc2626);
-}
-
-.rp-title {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--color-text, #1e293b);
-}
-
-.rp-phase {
-  font-size: 12px;
-  color: var(--color-text-secondary, #64748b);
-  margin-top: 2px;
-}
-
-.rp-percent {
-  font-size: 28px;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-}
-
-.rp-percent-primary {
-  color: var(--color-primary-600, #2563eb);
-}
-
-.rp-percent-success {
-  color: var(--color-success-600, #16a34a);
-}
-
-.rp-percent-warning {
-  color: var(--color-warning-600, #ca8a04);
-}
-
-.rp-percent-danger {
-  color: var(--color-danger-600, #dc2626);
 }
 
 .rp-bar-track {
@@ -384,25 +211,5 @@ onUnmounted(() => {
   border-radius: 8px;
   font-size: 12px;
   color: var(--color-danger-600, #dc2626);
-}
-
-.rp-result-summary {
-  margin-top: 10px;
-  padding: 8px 12px;
-  background: var(--color-success-50, #f0fdf4);
-  border-radius: 8px;
-  font-size: 13px;
-  color: var(--color-success-700, #15803d);
-  font-weight: 500;
-}
-
-.rp-result-failed {
-  background: var(--color-danger-50, #fef2f2);
-  color: var(--color-danger-700, #b91c1c);
-}
-
-.rp-result-warning {
-  background: var(--color-warning-50, #fefce8);
-  color: var(--color-warning-700, #a16207);
 }
 </style>

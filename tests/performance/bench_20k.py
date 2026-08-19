@@ -14,9 +14,9 @@ ERP系统性能基准测试 - 20K+ 数据量场景
 import asyncio
 import json
 import os
+import statistics
 import sys
 import time
-import statistics
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -67,7 +67,6 @@ class BenchResult:
 
 async def _request(session, method: str, path: str, **kwargs):
     """发起 HTTP 请求并返回 (status_code, json_body, elapsed_ms)"""
-    import aiohttp
     url = f'{API_BASE}{path}'
     start = time.perf_counter()
     async with session.request(method, url, **kwargs) as resp:
@@ -84,28 +83,28 @@ async def bench_inventory_paginated(session, token: str) -> list[BenchResult]:
     # 1. 首页加载（缓存冷启动）
     r = BenchResult('库存首页(冷启动)')
     for _ in range(ROUNDS):
-        status, _, ms = await _request(session, 'GET', '/stock/inventory?page=1&per_page=50', headers=headers)
+        _status, _, ms = await _request(session, 'GET', '/stock/inventory?page=1&per_page=50', headers=headers)
         r.latencies_ms.append(ms)
     results.append(r)
 
     # 2. 翻页（缓存命中）
     r = BenchResult('库存翻页(第5页)')
     for _ in range(ROUNDS):
-        status, _, ms = await _request(session, 'GET', '/stock/inventory?page=5&per_page=50', headers=headers)
+        _status, _, ms = await _request(session, 'GET', '/stock/inventory?page=5&per_page=50', headers=headers)
         r.latencies_ms.append(ms)
     results.append(r)
 
     # 3. 客户筛选
     r = BenchResult('库存客户筛选')
     for _ in range(ROUNDS):
-        status, _, ms = await _request(session, 'GET', '/stock/inventory?customer=测试客户&per_page=50', headers=headers)
+        _status, _, ms = await _request(session, 'GET', '/stock/inventory?customer=测试客户&per_page=50', headers=headers)
         r.latencies_ms.append(ms)
     results.append(r)
 
     # 4. 国家筛选（之前在Python层过滤，现在SQL层）
     r = BenchResult('库存国家筛选')
     for _ in range(ROUNDS):
-        status, _, ms = await _request(session, 'GET', '/stock/inventory?country=日本&per_page=50', headers=headers)
+        _status, _, ms = await _request(session, 'GET', '/stock/inventory?country=日本&per_page=50', headers=headers)
         r.latencies_ms.append(ms)
     results.append(r)
 
@@ -119,13 +118,13 @@ async def bench_order_list(session, token: str) -> list[BenchResult]:
 
     r = BenchResult('订单首页')
     for _ in range(ROUNDS):
-        status, _, ms = await _request(session, 'GET', '/orders/list?page=1&per_page=50', headers=headers)
+        _status, _, ms = await _request(session, 'GET', '/orders/list?page=1&per_page=50', headers=headers)
         r.latencies_ms.append(ms)
     results.append(r)
 
     r = BenchResult('订单翻页(第10页)')
     for _ in range(ROUNDS):
-        status, _, ms = await _request(session, 'GET', '/orders/list?page=10&per_page=50', headers=headers)
+        _status, _, ms = await _request(session, 'GET', '/orders/list?page=10&per_page=50', headers=headers)
         r.latencies_ms.append(ms)
     results.append(r)
 
@@ -139,13 +138,13 @@ async def bench_stock_in_out(session, token: str) -> list[BenchResult]:
 
     r = BenchResult('入库列表首页')
     for _ in range(ROUNDS):
-        status, _, ms = await _request(session, 'GET', '/stock/in/list?page=1&per_page=50', headers=headers)
+        _status, _, ms = await _request(session, 'GET', '/stock/in/list?page=1&per_page=50', headers=headers)
         r.latencies_ms.append(ms)
     results.append(r)
 
     r = BenchResult('出库列表首页')
     for _ in range(ROUNDS):
-        status, _, ms = await _request(session, 'GET', '/stock/out/list?page=1&per_page=50', headers=headers)
+        _status, _, ms = await _request(session, 'GET', '/stock/out/list?page=1&per_page=50', headers=headers)
         r.latencies_ms.append(ms)
     results.append(r)
 
@@ -159,19 +158,19 @@ async def bench_case_endpoints(session, token: str) -> list[BenchResult]:
 
     r = BenchResult('皮套库存汇总')
     for _ in range(ROUNDS):
-        status, _, ms = await _request(session, 'GET', '/cases/inventory-summary?page=1&per_page=50', headers=headers)
+        _status, _, ms = await _request(session, 'GET', '/cases/inventory-summary?page=1&per_page=50', headers=headers)
         r.latencies_ms.append(ms)
     results.append(r)
 
     r = BenchResult('皮套产品列表(分页)')
     for _ in range(ROUNDS):
-        status, _, ms = await _request(session, 'GET', '/cases/products?page=1&per_page=50', headers=headers)
+        _status, _, ms = await _request(session, 'GET', '/cases/products?page=1&per_page=50', headers=headers)
         r.latencies_ms.append(ms)
     results.append(r)
 
     r = BenchResult('皮套入库列表')
     for _ in range(ROUNDS):
-        status, _, ms = await _request(session, 'GET', '/cases/in/list?page=1&per_page=20', headers=headers)
+        _status, _, ms = await _request(session, 'GET', '/cases/in/list?page=1&per_page=20', headers=headers)
         r.latencies_ms.append(ms)
     results.append(r)
 
@@ -185,13 +184,13 @@ async def bench_product_list(session, token: str) -> list[BenchResult]:
 
     r = BenchResult('产品列表首页')
     for _ in range(ROUNDS):
-        status, _, ms = await _request(session, 'GET', '/products/list?page=1&per_page=50', headers=headers)
+        _status, _, ms = await _request(session, 'GET', '/products/list?page=1&per_page=50', headers=headers)
         r.latencies_ms.append(ms)
     results.append(r)
 
     r = BenchResult('产品搜索')
     for _ in range(ROUNDS):
-        status, _, ms = await _request(session, 'GET', '/products/list?page=1&per_page=50&search=测试', headers=headers)
+        _status, _, ms = await _request(session, 'GET', '/products/list?page=1&per_page=50&search=测试', headers=headers)
         r.latencies_ms.append(ms)
     results.append(r)
 
@@ -200,7 +199,6 @@ async def bench_product_list(session, token: str) -> list[BenchResult]:
 
 async def get_auth_token(session) -> str:
     """获取认证 token"""
-    import aiohttp
     # 尝试用测试账号登录
     login_data = {'username': os.getenv('TEST_USER', 'admin'), 'password': os.getenv('TEST_PASS', 'admin123')}
     async with session.post(f'{API_BASE}/auth/login', json=login_data) as resp:

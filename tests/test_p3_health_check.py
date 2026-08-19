@@ -45,14 +45,14 @@ def test_health_check_endpoint_uses_await():
 @pytest.mark.asyncio
 async def test_health_check_runner_is_callable():
     """P3-2: health_check 端点的 check_runners 中的 runner 可以被 await"""
-    from fastapi_app.api.v1.endpoints.backup import _check_database, _check_redis
+    from fastapi_app.api.v1.endpoints.backup import _check_database
     # 由于数据库/Redis可能未连接，使用短超时来限制等待时间
     try:
         result = await asyncio.wait_for(_check_database(), timeout=5.0)
         assert len(result) == 3
-        check_result, issues, severity = result
+        check_result, _issues, _severity = result
         assert 'status' in check_result
-    except (asyncio.TimeoutError, OSError):
+    except (TimeoutError, OSError):
         # 数据库不可用是允许的（开发环境无DB），验证函数能被await即可
         pass
 

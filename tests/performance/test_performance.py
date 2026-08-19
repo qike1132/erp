@@ -142,13 +142,13 @@ class MemoryMonitor:
 
     def get_current_memory_kb(self) -> float:
         if tracemalloc.is_tracing():
-            current, peak = tracemalloc.get_traced_memory()
+            current, _peak = tracemalloc.get_traced_memory()
             return current / 1024
         return 0.0
 
     def get_peak_memory_kb(self) -> float:
         if tracemalloc.is_tracing():
-            current, peak = tracemalloc.get_traced_memory()
+            _current, peak = tracemalloc.get_traced_memory()
             return peak / 1024
         return 0.0
 
@@ -239,7 +239,7 @@ class PerformanceTestBase(unittest.TestCase):
         cls.test_customers = customers
 
     def measure_performance(self, operation_name: str, func: Callable,
-                           iterations: int = None, *args, **kwargs) -> PerformanceMetric:
+                           iterations: int | None = None, *args, **kwargs) -> PerformanceMetric:
         """测量操作性能"""
         iterations = iterations or self.DEFAULT_ITERATIONS
         module_name = self.__class__.__name__.replace('PerformanceTest', '')
@@ -415,7 +415,7 @@ class PerformanceTestBase(unittest.TestCase):
 class PerformanceTestRunner:
     """性能测试运行器"""
 
-    def __init__(self, output_dir: str = None):
+    def __init__(self, output_dir: str | None = None):
         self.output_dir = output_dir or os.path.join(
             os.path.dirname(__file__), 'reports'
         )

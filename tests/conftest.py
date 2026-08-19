@@ -31,23 +31,22 @@ Fixtures:
 """
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from unittest.mock import AsyncMock, MagicMock
 
 # 项目根目录
 _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _project_root)
 
-from fastapi_app.main import app
 from fastapi_app.core.config import settings
 from fastapi_app.core.security import hash_password
-
+from fastapi_app.main import app
 
 # ============================================================
 # 测试配置：注入测试专用主机名
@@ -213,8 +212,9 @@ async def auth_headers(async_client, admin_user):
 @pytest_asyncio.fixture
 async def admin_user(async_db_session):
     """创建或查询管理员用户"""
-    from fastapi_app.shared_models.user import User
     from sqlalchemy import select
+
+    from fastapi_app.shared_models.user import User
 
     result = await async_db_session.execute(
         select(User).where(User.username == "admin")
@@ -235,8 +235,9 @@ async def admin_user(async_db_session):
 @pytest_asyncio.fixture
 async def normal_user(async_db_session):
     """创建或查询普通用户"""
-    from fastapi_app.shared_models.user import User
     from sqlalchemy import select
+
+    from fastapi_app.shared_models.user import User
 
     result = await async_db_session.execute(
         select(User).where(User.username == "testuser")
@@ -337,7 +338,7 @@ async def test_order(async_db_session, test_product, test_customer):
             product_id=test_product.id,
             customer=test_customer.name,
             quantity=10,
-            order_date=datetime.now(timezone.utc),
+            order_date=datetime.now(UTC),
             status="待备货",
         )
         async_db_session.add(order)
@@ -360,7 +361,7 @@ async def test_stockin(async_db_session, test_product, test_customer):
             product_id=test_product.id,
             customer=test_customer.name,
             quantity=50,
-            stockin_date=datetime.now(timezone.utc),
+            stockin_date=datetime.now(UTC),
         )
         async_db_session.add(stockin)
         await async_db_session.flush()
@@ -382,7 +383,7 @@ async def test_stockout(async_db_session, test_product, test_customer):
             product_id=test_product.id,
             customer=test_customer.name,
             quantity=20,
-            stockout_date=datetime.now(timezone.utc),
+            stockout_date=datetime.now(UTC),
         )
         async_db_session.add(stockout)
         await async_db_session.flush()

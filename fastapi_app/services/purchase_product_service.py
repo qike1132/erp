@@ -12,22 +12,22 @@ from sqlalchemy.orm import selectinload
 
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.sanitizer import escape_like
-from fastapi_app.utils import calc_total_pages
 from fastapi_app.shared_models import (
     Product,
     ProductAccessory,
     ProductFabric,
     ProductMaterial,
 )
+from fastapi_app.utils import calc_total_pages
 
 logger = logging.getLogger(__name__)
 
 
 # BOM 领域逻辑已聚合到 bom_service.py，此处重新导出以保持向后兼容
 # （purchase_bom_copy_service、purchase_center_service 等仍从此处导入）
-from fastapi_app.services.bom_service import has_bom as product_has_bom  # noqa: E402,F401
-from fastapi_app.services.bom_service import get_bom as get_product_bom  # noqa: E402,F401
-from fastapi_app.services.bom_service import save_bom as save_product_bom  # noqa: E402,F401
+from fastapi_app.services.bom_service import get_bom as get_product_bom  # noqa: F401
+from fastapi_app.services.bom_service import has_bom as product_has_bom
+from fastapi_app.services.bom_service import save_bom as save_product_bom  # noqa: F401
 
 
 async def _batch_check_bom_exists(db: AsyncSession, product_ids: list[int]) -> set[int]:

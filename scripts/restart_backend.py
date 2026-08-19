@@ -1,8 +1,8 @@
 import os
-import time
 import socket
 import subprocess
 import sys
+import time
 
 # 注意：此脚本为快速重启工具，生产建议改用 server_manager「生产托管」注册的
 # erp-prod / erp-arq Windows 服务（开机自启 + 崩溃自愈）。
@@ -34,17 +34,17 @@ def is_port_free(port):
         result = sock.connect_ex(('127.0.0.1', port))
         sock.close()
         return result != 0
-    except:
+    except Exception:
         return True
 
 if __name__ == "__main__":
     PORT = 5002
     print(f"=== 正在重启后端服务 (端口 {PORT}) ===\n")
-    
+
     # 1. 杀掉旧进程
     print("步骤 1: 尝试终止占用端口的进程...")
     kill_port_process(PORT)
-    
+
     # 2. 等待端口释放
     print("\n步骤 2: 等待端口释放...")
     for i in range(5):
@@ -53,7 +53,7 @@ if __name__ == "__main__":
             break
         print(f"等待端口释放... ({i+1}/5)")
         time.sleep(1)
-    
+
     # 3. 启动新后端（多 worker 生产配置）
     print("\n步骤 3: 启动后端服务...")
     try:

@@ -5,7 +5,7 @@
 本模块为 order 领域与 stockin 领域的共享工具层，单向依赖 shared_models 和 order_utils。
 """
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -86,7 +86,7 @@ async def process_order_deduction(
 
         stockout = StockOut(
             stockout_no=stockout_no,
-            stockout_date=datetime.now(timezone.utc).replace(tzinfo=None),
+            stockout_date=datetime.now(UTC).replace(tzinfo=None),
             product_id=stockin.product_id,
             quantity=deduct_amount,
             customer=order.customer,
@@ -126,8 +126,8 @@ async def process_order_deduction(
         return deduct_amount, deduction_details
 
     except SQLAlchemyError as e:
-        logger.error(f'订单抵扣数据库错误：{str(e)}', exc_info=True)
+        logger.error(f'订单抵扣数据库错误：{e!s}', exc_info=True)
         raise
     except (ValueError, TypeError, ArithmeticError) as e:
-        logger.error(f'订单抵扣处理错误：{str(e)}', exc_info=True)
+        logger.error(f'订单抵扣处理错误：{e!s}', exc_info=True)
         raise

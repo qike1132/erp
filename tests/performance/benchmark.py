@@ -18,9 +18,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.database import _AsyncSessionLocal
 from fastapi_app.services import (
     purchase_plan_service as pps,
+)
+from fastapi_app.services import (
     stock_service,
 )
-
 
 # ============= 配置 =============
 WARMUP_RUNS = 3

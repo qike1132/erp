@@ -29,13 +29,13 @@
     <div class="example-section">
       <h4>操作</h4>
       <div class="button-group">
-        <button @click="sync.refresh" :disabled="sync.state.isManualRefresh" class="btn">
+        <button @click="sync.refresh" :disabled="sync.state.isManualRefresh" class="btn" :aria-label="sync.state.isManualRefresh ? '刷新中...' : '手动刷新'">
           {{ sync.state.isManualRefresh ? '刷新中...' : '手动刷新' }}
         </button>
-        <button @click="sync.connect" :disabled="sync.state.status === 'connected'" class="btn">
+        <button @click="sync.connect" :disabled="sync.state.status === 'connected'" class="btn" aria-label="连接">
           连接
         </button>
-        <button @click="sync.disconnect" :disabled="sync.state.status === 'disconnected'" class="btn btn--danger">
+        <button @click="sync.disconnect" :disabled="sync.state.status === 'disconnected'" class="btn btn--danger" aria-label="断开">
           断开
         </button>
       </div>
@@ -60,6 +60,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { useRealTimeSync } from '@/composables/useRealTimeSync'
 import SyncStatusIndicator from './SyncStatusIndicator.vue'
 import { get } from '@/api/request'
+import { devLog } from '@/utils/devLog'
 
 interface Order {
   id: string
@@ -74,7 +75,7 @@ interface DashboardData {
 const data = ref<DashboardData>({})
 const loading = ref(false)
 const error = ref<string | null>(null)
-const eventLog = ref<{ time: Date; type: string; data: any }[]>([])
+const eventLog = ref<{ time: Date; type: string; data: unknown }[]>([])
 const stockChanges = ref(0)
 
 const loadData = async () => {
@@ -108,18 +109,18 @@ const sync = useRealTimeSync({
     console.error('同步错误:', err)
   },
   onStatusChange: (status) => {
-    console.log('同步状态变化:', status)
+    devLog('同步状态变化:', status)
   },
 })
 
 // 订阅特定事件
 const unsubscribeStock = sync.subscribe('stock_changed', (event) => {
   stockChanges.value++
-  console.log('库存变化:', event)
+  devLog('库存变化:', event)
 })
 
 const unsubscribeOrder = sync.subscribe(['order_created', 'order_updated'], (event) => {
-  console.log('订单变化:', event)
+  devLog('订单变化:', event)
 })
 
 const formatDate = (date: Date) => {
