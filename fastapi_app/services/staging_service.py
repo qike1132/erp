@@ -5,6 +5,7 @@
 """
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import tempfile
@@ -16,6 +17,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.cache import cache_result
 from fastapi_app.core.exceptions import NotFoundError
 from fastapi_app.core.validators import validate_quantity_range
 from fastapi_app.services.batch_service import (
@@ -53,11 +55,35 @@ async def _find_product_by_name_or_barcode(db: AsyncSession, name_or_barcode: st
     return result.scalar_one_or_none()
 
 
+@cache_result(key_prefix='products:staging_map', ttl=300, local_ttl=60, key_builder=lambda **kwargs: 'v1')
+async def _cached_product_id_map(db: AsyncSession) -> dict:
+    """产品名称/条码 → id 映射（纯数据，可序列化）。
+
+    产品变更低频（变更时经 CacheDomain.PRODUCT 的 products:* 模式失效），
+    避免每次 Excel 导入全表加载 Product。缓存返回 dict[str, int]。
+    """
+    result = await db.execute(select(Product.id, Product.name, Product.barcode))
+    id_map: dict[str, int] = {}
+    for pid, name, barcode in result.all():
+        if name:
+            id_map.setdefault(name.lower().strip(), pid)
+        if barcode:
+            id_map.setdefault(barcode, pid)
+    return id_map
+
+
 async def _build_product_map(db: AsyncSession) -> dict[str, Product]:
-    result = await db.execute(select(Product))
-    all_products = result.scalars().all()
-    product_map: dict[str, Product] = {p.name.lower().strip(): p for p in all_products}
-    product_map.update({p.barcode: p for p in all_products if p.barcode})
+    """构建 name/barcode → Product 对象映射（数据来自缓存的产品 id 映射）。
+
+    仅当 Excel 中存在缓存中未命中的产品时回退全表查询，避免常见场景的全表加载。
+    """
+    id_map = await _cached_product_id_map(db)
+    ids = set(id_map.values())
+    products = {}
+    if ids:
+        result = await db.execute(select(Product).where(Product.id.in_(ids)))
+        products = {p.id: p for p in result.scalars().all()}
+    product_map: dict[str, Product] = {name: products[pid] for name, pid in id_map.items() if pid in products}
     return product_map
 
 

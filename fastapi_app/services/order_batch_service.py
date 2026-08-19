@@ -39,6 +39,7 @@ async def _get_redis_client():
 
 
 def _write_audit_log(db: AsyncSession, *, batch_no: str, action: str, order_ids: list[int], user: User, old_value: str | None = None, new_value: str | None = None, detail: str | None = None):
+    """写入批次操作审计日志（订单同步/批次修改/分配/完成等操作留痕）。"""
     log = OrderBatchAuditLog(
         batch_no=batch_no,
         action=action,

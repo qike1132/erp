@@ -54,15 +54,16 @@
         </div>
       </Transition>
     </div>
+
+    <UiConfirmDialog
+      :open="confirmDialog.open"
+      :text="confirmDialog.text"
+      :sub="confirmDialog.sub"
+      :type="confirmDialog.type"
+      @confirm="confirmDialog.onConfirm"
+      @cancel="confirmDialog.onCancel"
+    />
   </div>
-  <UiConfirmDialog
-    :open="confirmDialog.open"
-    :text="confirmDialog.text"
-    :sub="confirmDialog.sub"
-    :type="confirmDialog.type"
-    @confirm="confirmDialog.onConfirm"
-    @cancel="confirmDialog.onCancel"
-  />
 </template>
 
 <script setup lang="ts">

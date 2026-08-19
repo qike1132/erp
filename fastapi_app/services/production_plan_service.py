@@ -263,8 +263,8 @@ async def validate_staging(db: AsyncSession, session_id: str) -> dict:
     """验证暂存数据：检查客户和产品是否存在"""
     result = await db.execute(select(StagingPurchasePlan).where(StagingPurchasePlan.session_id == session_id))
     records = result.scalars().all()
-    all_customers = await customer_service.get_customers(db)
-    customer_names = {c.name for c in all_customers}
+    all_customers = await customer_service.get_active_customer_names(db)
+    customer_names = {c['name'] for c in all_customers}
     product_name_map = await product_service.get_product_barcode_map(db)
     barcode_set = set(product_name_map.keys())
     valid_count = 0

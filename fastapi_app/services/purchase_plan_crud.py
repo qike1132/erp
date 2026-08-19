@@ -933,8 +933,8 @@ async def validate_staging(db: AsyncSession, session_id: str) -> dict:
     """验证暂存数据：检查客户和产品是否存在"""
     result = await db.execute(select(StagingPurchasePlan).where(StagingPurchasePlan.session_id == session_id))
     records = result.scalars().all()
-    all_customers = await customer_service.get_customers(db)
-    customer_map = {c.name: c for c in all_customers}
+    all_customers = await customer_service.get_active_customer_names(db)
+    customer_map = {c['name']: c for c in all_customers}
     barcode_map = await product_service.get_product_barcode_map(db)
     barcode_set = set(barcode_map.keys())
     valid_count = 0
@@ -944,7 +944,7 @@ async def validate_staging(db: AsyncSession, session_id: str) -> dict:
         if record.validation_error:
             errors_list.append(record.validation_error)
         if record.customer_name not in customer_map:
-            fuzzy = [c.name for c in all_customers if record.customer_name in c.name]
+            fuzzy = [c['name'] for c in all_customers if record.customer_name in c['name']]
             hint = f"，相似: {', '.join(fuzzy[:3])}" if fuzzy else ''
             errors_list.append(f"客户 '{record.customer_name}' 不存在{hint}")
         if record.barcode not in barcode_set:
@@ -1076,8 +1076,8 @@ async def confirm_staging(db: AsyncSession, session_id: str, batch_id: str='', c
         errors = '; '.join(f"产品 {it['barcode']}({it['product_name']}) 当前库存 {it['current_stock']} 库存不足 {it['total_quantity'] - it['current_stock']}" for it in insufficient)
         raise ValueError(f'库存不足，无法确认：{errors}')
     groups = _group_staging_records(valid_records)
-    all_customers = await customer_service.get_customers(db)
-    customer_id_map = {c.name: c.id for c in all_customers}
+    all_customers = await customer_service.get_active_customer_names(db)
+    customer_id_map = {c['name']: c['id'] for c in all_customers}
     barcodes = list({r.barcode for r in valid_records if r.barcode})
     product_result = await db.execute(select(Product).where(Product.barcode.in_(barcodes)))
     barcode_to_product = {p.barcode: p for p in product_result.scalars().all()}
