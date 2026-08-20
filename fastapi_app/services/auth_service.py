@@ -3,7 +3,6 @@
 将 auth.py endpoint 中的登录核心业务逻辑（密码校验、哈希迁移、令牌生成）
 下沉到此层，使 endpoint 只负责参数校验、限流、cookie 设置和响应构造。
 """
-import asyncio
 import logging
 from datetime import timedelta
 
@@ -84,16 +83,12 @@ async def authenticate_login(
 
     # Cookie/JWT 有效期：记住我24小时，否则1小时
     token_max_age = 86400 if remember else 3600
-    # RS256 签名是 CPU 密集的同步操作，放入线程池并行执行，避免阻塞事件循环
-    # （一次登录生成 access+refresh 两个 token，若串行同步执行会卡住事件循环 ~500ms）
-    access_token, refresh_token = await asyncio.gather(
-        run_in_threadpool(
-            create_access_token,
-            token_data,
-            expires_delta=timedelta(seconds=token_max_age),
-        ),
-        run_in_threadpool(create_refresh_token, token_data),
+    # ES256 单次签名 ~0.2ms，串行签发即可，无需线程池/并行
+    access_token = create_access_token(
+        token_data,
+        expires_delta=timedelta(seconds=token_max_age),
     )
+    refresh_token = create_refresh_token(token_data)
     refresh_max_age = settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400
 
     return {
