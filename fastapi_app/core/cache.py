@@ -20,7 +20,9 @@ from enum import Flag, auto
 from functools import wraps
 from typing import Any
 
-CACHE_TIMEOUT = 1.0
+# Redis 操作超时（秒）：内网 Redis 单次操作 <1ms，0.3s 足够；
+# 故障时快速失败（叠加 get+lock+set 最多 ~0.9s），避免每次失败累积 1s 阻塞
+CACHE_TIMEOUT = 0.3
 
 logger = logging.getLogger(__name__)
 

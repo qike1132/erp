@@ -75,7 +75,8 @@ export default defineConfig(({ mode }) => {
                 cacheName: 'api-cache',
                 expiration: { maxEntries: 50, maxAgeSeconds: 60 },
                 cacheableResponse: { statuses: [0, 200] },
-                networkTimeoutSeconds: 5,
+                // 后端故障时 1.5s 内回退到缓存，避免停留在"加载中"等待过久
+                networkTimeoutSeconds: 1.5,
               },
             },
           ],

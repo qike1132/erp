@@ -13,7 +13,7 @@ import os
 
 logger = logging.getLogger(__name__)
 
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.exc import DisconnectionError, OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import sessionmaker
@@ -209,24 +209,45 @@ def _init_read_engine():
     _register_slow_listener_for_read_engine()
 
 
+# 只读副本连接快速失败阈值（秒）：副本不可达/连接池耗尽/断连时，
+# 超过该阈值即降级主库，避免请求因副本故障长时间阻塞（pool_timeout 默认 30s）
+_READ_REPLICA_CHECKOUT_TIMEOUT = 2.0
+
+
 async def get_async_read_db():
     """只读数据库会话依赖（用于报表/列表查询，走只读副本）
 
     - 未配置副本时自动回退到主库
+    - 副本连接在阈值内未就绪（不可达/池耗尽/断连）时快速降级主库，
+      防止副本故障把请求拖入数秒级等待
     - 无 commit/rollback（只读操作无需事务控制）
     """
     _init_read_engine()
 
-    if _ReadSessionLocal is not None:
-        async with _ReadSessionLocal() as session:
-            try:
-                yield session
-            finally:
-                await session.close()
-    else:
-        # 回退到主库
+    if _ReadSessionLocal is None:
+        # 未配置副本：回退到主库
         async for session in get_async_db():
             yield session
+        return
+
+    session = _ReadSessionLocal()
+    try:
+        # 主动触发连接检出（含 pool_pre_ping）并施加快速失败超时
+        async with asyncio.timeout(_READ_REPLICA_CHECKOUT_TIMEOUT):
+            await session.execute(text("SELECT 1"))
+    except (TimeoutError, SQLAlchemyError, OSError) as e:
+        logger.warning("只读副本连接不可用（%.1fs），降级到主库: %s", _READ_REPLICA_CHECKOUT_TIMEOUT, e)
+        try:
+            await session.close()
+        except (RuntimeError, OSError, ValueError, SQLAlchemyError):
+            pass
+        async for primary_session in get_async_db():
+            yield primary_session
+        return
+    try:
+        yield session
+    finally:
+        await session.close()
 
 
 async def dispose_async_engines():

@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.config import settings
-from fastapi_app.core.database import get_async_db, get_async_read_db
+from fastapi_app.core.database import get_async_db
 from fastapi_app.core.deps import create_access_token, get_current_user_id
 from fastapi_app.core.limiter import limiter, memory_limiter
 
@@ -100,7 +100,7 @@ async def check_login_status(
 @router.get("/me", response_model=UserInfoResponse)
 async def get_current_user_info(
     user_id: int = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_async_read_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """获取当前登录用户信息（含权限列表）
 
