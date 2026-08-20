@@ -109,13 +109,13 @@ _signing_key_cache = None
 _verify_key_cache = None
 
 def _get_signing_key() -> str:
-    """获取 JWT 签名密钥（支持 HS256 和 RS256）"""
+    """获取 JWT 签名密钥（支持 HS256 / RS256 / ES256）"""
     global _signing_key_cache
     if _signing_key_cache is not None:
         return _signing_key_cache
-    if settings.ALGORITHM.startswith('RS'):
+    if settings.ALGORITHM in ("RS256", "ES256"):
         if not settings.JWT_PRIVATE_KEY_PATH:
-            raise RuntimeError('RS256 模式必须设置 JWT_PRIVATE_KEY_PATH 环境变量')
+            raise RuntimeError(f'{settings.ALGORITHM} 模式必须设置 JWT_PRIVATE_KEY_PATH 环境变量')
         with open(settings.JWT_PRIVATE_KEY_PATH) as f:
             _signing_key_cache = f.read()
             return _signing_key_cache
@@ -123,13 +123,13 @@ def _get_signing_key() -> str:
     return _signing_key_cache
 
 def _get_verify_key() -> str:
-    """获取 JWT 验证密钥（支持 HS256 和 RS256）"""
+    """获取 JWT 验证密钥（支持 HS256 / RS256 / ES256）"""
     global _verify_key_cache
     if _verify_key_cache is not None:
         return _verify_key_cache
-    if settings.ALGORITHM.startswith('RS'):
+    if settings.ALGORITHM in ("RS256", "ES256"):
         if not settings.JWT_PUBLIC_KEY_PATH:
-            raise RuntimeError('RS256 模式必须设置 JWT_PUBLIC_KEY_PATH 环境变量')
+            raise RuntimeError(f'{settings.ALGORITHM} 模式必须设置 JWT_PUBLIC_KEY_PATH 环境变量')
         with open(settings.JWT_PUBLIC_KEY_PATH) as f:
             _verify_key_cache = f.read()
             return _verify_key_cache

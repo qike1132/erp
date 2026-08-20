@@ -140,7 +140,7 @@ class Settings(BaseSettings):
             raise RuntimeError(
                 "SECRET_KEY 必须通过环境变量 SECRET_KEY 或 .env 文件设置"
             )
-        _ALLOWED_JWT_ALGORITHMS = {"HS256", "RS256"}
+        _ALLOWED_JWT_ALGORITHMS = {"HS256", "RS256", "ES256"}
         if self.ALGORITHM not in _ALLOWED_JWT_ALGORITHMS:
             raise RuntimeError(
                 f"JWT_ALGORITHM 必须为 {_ALLOWED_JWT_ALGORITHMS} 之一，"
@@ -161,17 +161,17 @@ class Settings(BaseSettings):
                     "生产环境（APP_ENV=production）ALLOWED_HOSTS 必须设置为具体域名，"
                     "禁止使用通配符 '*'。示例: erp.example.com,erp.example.cn"
                 )
-            # RS256 模式下私钥路径必须显式配置且文件存在（密钥已移出仓库，由部署环境注入）
-            if self.ALGORITHM == "RS256":
+            # 非对称模式（RS256/ES256）下私钥/公钥路径必须显式配置且文件存在（密钥移出仓库，由部署环境注入）
+            if self.ALGORITHM in ("RS256", "ES256"):
                 if not self.JWT_PRIVATE_KEY_PATH or not os.path.isfile(self.JWT_PRIVATE_KEY_PATH):
                     raise RuntimeError(
-                        f"生产环境 RS256 模式要求 JWT_PRIVATE_KEY_PATH 指向真实私钥文件，"
+                        f"生产环境 {self.ALGORITHM} 模式要求 JWT_PRIVATE_KEY_PATH 指向真实私钥文件，"
                         f"当前值 '{self.JWT_PRIVATE_KEY_PATH}' 不存在。"
                         f"私钥不得提交到代码仓库，须由部署环境（K8s Secret/环境变量挂载）注入。"
                     )
                 if not self.JWT_PUBLIC_KEY_PATH or not os.path.isfile(self.JWT_PUBLIC_KEY_PATH):
                     raise RuntimeError(
-                        f"生产环境 RS256 模式要求 JWT_PUBLIC_KEY_PATH 指向真实公钥文件，"
+                        f"生产环境 {self.ALGORITHM} 模式要求 JWT_PUBLIC_KEY_PATH 指向真实公钥文件，"
                         f"当前值 '{self.JWT_PUBLIC_KEY_PATH}' 不存在。"
                     )
             # 生产环境 CORS 不得包含 null 源（沙箱 iframe 逃逸风险）
