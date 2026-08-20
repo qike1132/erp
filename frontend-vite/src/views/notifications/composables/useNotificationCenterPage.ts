@@ -124,7 +124,7 @@ export function useNotificationCenterPage() {
       await markAllAsRead()
       fetchUnreadCount()
       toast.success('已全部标记为已读')
-      await fetchList(true)
+      await fetchList(true, true)
     } catch {
       toast.error('操作失败，请重试')
     }

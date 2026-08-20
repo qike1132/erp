@@ -675,8 +675,8 @@ async def create_part(
     await _ensure_project_exists(db, project_id)
     role_id = await _get_default_role_id(db, project_id)
 
-    # 校验部位名称同项目下唯一
-    await _ensure_part_name_unique(db, project_id, part_name)
+    # 校验部位名称同默认角色、同版本下唯一；默认角色已在上方解析，避免重复查询
+    await _ensure_part_name_unique(db, project_id, part_name, role_id=role_id)
 
     # 解析供应商名称
     supplier_name = ''

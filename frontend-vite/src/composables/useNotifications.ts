@@ -8,7 +8,12 @@
  * 多个组件同时挂载时各自轮询，去重由 request.ts 的 GET inflight 缓存兜底。
  */
 import { ref, readonly } from 'vue'
-import { notificationApi, type Notification } from '@/api/notification'
+import { notificationApi, type Notification, type NotificationListParams } from '@/api/notification'
+import {
+  clearNotificationMemoryCache,
+  fetchNotificationList,
+  getNotificationMemorySnapshot,
+} from './notificationMemoryCache'
 
 const POLL_INTERVAL_MS = 30_000
 
@@ -18,6 +23,7 @@ export function useNotifications() {
   const total = ref(0)
   const loading = ref(false)
   const marking = ref(false)
+  let listRequestId = 0
 
   let timer: number | null = null
 
@@ -32,19 +38,43 @@ export function useNotifications() {
     }
   }
 
-  /** 拉取通知列表（默认仅未读，最多 20 条） */
-  async function fetchList(onlyUnread = true) {
+  /**
+   * 拉取通知列表（默认仅未读，最多 20 条）。
+   * 只使用 5 秒 JS 内存 SWR，不写入 sessionStorage；未读数轮询不受影响。
+   */
+  async function fetchList(onlyUnread = true, force = false) {
+    const params: NotificationListParams = { page: 1, page_size: 20, only_unread: onlyUnread }
+    const requestId = ++listRequestId
+    if (!force) {
+      const snapshot = getNotificationMemorySnapshot(params)
+      if (snapshot) {
+        list.value = snapshot.response.data ?? []
+        total.value = snapshot.response.total ?? 0
+        loading.value = false
+        // 新鲜快照直接复用；过期快照才后台静默刷新。
+        if (snapshot.fresh) return
+        void fetchNotificationList(params).then((response) => {
+          if (requestId !== listRequestId) return
+          list.value = response.data ?? []
+          total.value = response.total ?? 0
+        }).catch(() => { /* 内存快照已可用 */ })
+        return
+      }
+    }
+
     loading.value = true
     try {
-      const res = await notificationApi.list({ page: 1, page_size: 20, only_unread: onlyUnread })
-      list.value = res?.data ?? []
-      total.value = res?.total ?? 0
+      const response = await fetchNotificationList(params)
+      if (requestId !== listRequestId) return
+      list.value = response.data ?? []
+      total.value = response.total ?? 0
     } catch (e) {
       if (import.meta.env.DEV) console.warn('[notifications] list failed', e)
+      if (requestId !== listRequestId) return
       list.value = []
       total.value = 0
     } finally {
-      loading.value = false
+      if (requestId === listRequestId) loading.value = false
     }
   }
 
@@ -52,7 +82,10 @@ export function useNotifications() {
   async function markAsRead(id: number) {
     const notification = list.value.find((n) => n.id === id)
     if (!notification || notification.is_read) return
+    // 使正在进行的列表刷新失效，避免旧响应覆盖乐观更新。
+    listRequestId += 1
     // 乐观更新（操作内部非 readonly 的 ref）
+    clearNotificationMemoryCache()
     notification.is_read = true
     unreadCount.value = Math.max(0, unreadCount.value - 1)
     try {
@@ -71,6 +104,8 @@ export function useNotifications() {
     if (marking.value || unreadCount.value === 0) return
     marking.value = true
     const prevCount = unreadCount.value
+    listRequestId += 1
+    clearNotificationMemoryCache()
     try {
       await notificationApi.markAllAsRead()
       unreadCount.value = 0

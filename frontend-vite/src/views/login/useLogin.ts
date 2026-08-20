@@ -1,6 +1,8 @@
 import { useRouter, useRoute } from 'vue-router'
+import { useQueryClient } from '@tanstack/vue-query'
 import { authApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
+import { usePatternRoomStore } from '@/stores/patternRoom'
 import { usePerfMark } from '@/composables/usePerfMark'
 import { setAccessToken } from '@/utils/secureStorage'
 import { getErrorMessage } from '@/types/errors'
@@ -20,6 +22,7 @@ export function useLogin() {
   const route = useRoute()
   const authStore = useAuthStore()
   const perf = usePerfMark('login')
+  const queryClient = useQueryClient()
 
   const loading = ref(false)
   const showPassword = ref(false)
@@ -71,12 +74,18 @@ export function useLogin() {
       // 🟢 提前触发 ECharts 预加载：与 authStore.init 并行，
       // 利用路由跳转 + Dashboard 组件挂载的时间窗口下载 ~1MB 图表库
       preloadEcharts()
-      // 🟢 并行预取 Dashboard 数据：登录成功后立即发起 stats + stock 请求，
-      // 填充模块级缓存，用户到达 Dashboard 时命中缓存 → 首次加载 0ms
-      prefetchDashboardData()
 
       if (isCapacitor && res.access_token) {
         setAccessToken(res.access_token)
+      }
+      // 🟢 并行预取 Dashboard 数据：登录成功后立即发起 stats + stock 请求，
+      // 填充 Vue Query 缓存，用户到达 Dashboard 时命中缓存 → 首次加载 0ms
+      // 必须在 setAccessToken 之后调用，确保 Capacitor Bearer token 已就绪
+      prefetchDashboardData(queryClient)
+      // 🟢 并行预取 Pattern-Room 数据（分组列表 + 版师列表），填充 patternRoom Store 缓存，
+      // 首次进入 /pattern-room 命中缓存 → 0ms 渲染、无「加载中...」（移动端无此模块，跳过）
+      if (!isCapacitor) {
+        usePatternRoomStore().prefetch().catch(() => { /* 预取失败静默 */ })
       }
       // 登录接口返回了用户信息时，直接写入 store（避免登录后再 GET /auth/me）
       if (res.user) {

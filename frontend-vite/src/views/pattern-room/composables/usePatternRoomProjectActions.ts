@@ -119,7 +119,7 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
       const res = await patternRoomApi.updateProjectStatus(id, 'completed')
       if (res.success) {
         toast.success('已标记为完成')
-        await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value)
+        await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, true)
       } else {
         toast.error(res.message || '标记完成失败')
       }
@@ -144,7 +144,7 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
       const res = await patternRoomApi.updateProjectStatus(id, 'cancelled')
       if (res.success) {
         toast.success('已取消')
-        await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value)
+        await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, true)
       } else {
         toast.error(res.message || '取消失败')
       }
@@ -176,7 +176,7 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
             if (upRes.file_id != null) proj.product_image_file_id = upRes.file_id
           }
           // 刷新分组列表，让卡片缩略图显示新图片
-          void groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value)
+          void groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, true)
         } else {
           toast.warning(failMessage)
         }
@@ -196,7 +196,7 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
       projectFormVisible.value = false
       pendingProjectImage.value = null
       // 刷新分组列表并选中新项目（保持当前状态筛选）
-      await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value)
+      await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, true)
       onSelectProject(newProjectId)
       // 后台上传暂存图片（不阻塞成功反馈）
       if (pendingImage) {
@@ -219,7 +219,7 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
       pendingProjectImage.value = null
       // 刷新详情与分组列表（保持当前状态筛选）
       await projectHook.fetchDetail(projectId)
-      await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value)
+      await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, true)
       // 后台上传暂存图片（不阻塞成功反馈）
       if (pendingImage) {
         uploadPendingImage(projectId, pendingImage, '图片上传失败，其他信息已更新')
@@ -248,7 +248,7 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
       toast.success('删除成功')
       selectedProjectId.value = null
       projectHook.clearCurrent()
-      await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value)
+      await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, true)
     } else {
       toast.error(projectHook.error.value || '删除失败')
     }

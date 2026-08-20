@@ -4,7 +4,13 @@
     <AppSidebar :collapsed="sidebarStore.isCollapsed" />
     <div class="main-content" :class="{ 'no-header': hideChrome, 'immersive': hideChrome }">
       <div id="main-content" class="content-container" :class="{ 'no-padding': hideChrome }">
-        <router-view />
+        <!-- keep-alive 仅缓存 PatternRoomView：离开再进入不销毁组件，数据与滚动位置保留，
+             二次进入零请求零加载；其它路由（含带计时器的 Dashboard）不缓存，避免残留后台任务 -->
+        <router-view v-slot="{ Component }">
+          <keep-alive :include="['PatternRoomView']">
+            <component :is="Component" />
+          </keep-alive>
+        </router-view>
       </div>
     </div>
   </div>

@@ -1,6 +1,8 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import { VueQueryPlugin } from '@tanstack/vue-query'
+import { persistQueryClient } from '@tanstack/query-persist-client-core'
+import { queryClient, queryPersister, shouldPersistQuery } from './utils/queryClient'
 import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome'
 import './styles/app.css'
 import './icons'
@@ -73,20 +75,31 @@ window.addEventListener('unhandledrejection', (event) => {
 app.use(createPinia())
 app.use(router)
 app.component('FontAwesomeIcon', FontAwesomeIcon)
-app.use(VueQueryPlugin, {
-  queryClientConfig: {
-    defaultOptions: {
-      queries: {
-        staleTime: 30_000,
-        retry: (failureCount, error) => {
-          if ((error as { response?: { status?: number } })?.response?.status === 401) return false
-          return failureCount < 1
-        },
-        refetchOnWindowFocus: false,
-      },
+app.use(VueQueryPlugin, { queryClient })
+
+// ===== Vue Query 缓存持久化（sessionStorage）=====
+// 组件级 SWR 缓存（staleTime）只在本会话生效：F5 刷新/重新登录后内存缓存清空，
+// 所有页面需重新加载。这里把查询缓存持久化到 sessionStorage（官方 persistQueryClient）：
+// - 刷新后恢复缓存 → 页面先渲染缓存数据（秒开），超过 staleTime 的查询挂载后后台静默刷新
+// - buster 版本号：前端数据结构变更时自动清空旧缓存，避免新旧数据错位
+if (queryPersister) {
+  // persistQueryClient 返回 [unsubscribe, restorePromise]：await 第二项等待
+  // 缓存恢复完成，此后 cache 变更会持续写盘（含 throttle 节流）
+  const [, restorePromise] = persistQueryClient({
+    queryClient,
+    persister: queryPersister,
+    buster: 'binfa-erp-v1',
+    // 24h 上限；sessionStorage 随标签页关闭自动清除
+    maxAge: 1000 * 60 * 60 * 24,
+    // 实时任务、用户/权限、审计流水不落盘；普通列表/报表继续享受跨刷新 SWR。
+    dehydrateOptions: {
+      shouldDehydrateQuery: (query) => shouldPersistQuery(query.queryKey),
     },
-  },
-})
+  })
+  void restorePromise.catch(() => {
+    console.warn('[QueryCache] 持久化缓存恢复失败，已自动丢弃旧缓存')
+  })
+}
 
 // 尽快挂载应用，不阻塞在 PrimeVue / 图标 / Token 缓存等异步初始化上
 app.mount('#app')

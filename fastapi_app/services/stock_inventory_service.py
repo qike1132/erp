@@ -394,7 +394,7 @@ def _build_inventory_cte_sql(clauses: dict, country: str) -> tuple:
     # 安全说明：clauses 中所有 SQL 片段均来自模块级常量（_SI_PID/_SO_CUST 等），
     # 不含用户输入；筛选值通过 :pids/:sc 绑定参数传递。重构为完全参数化会
     # 改变 CTE 语义，风险过高，故保留并标注。
-    cte_sql = text(f"""  # sql-safe: escape_like/绑定参数/常量片段
+    cte_sql = text(f"""
 WITH stockin_agg AS (
     SELECT si.product_id, si.customer,
            SUM(si.quantity - COALESCE(sub.consumed, 0)) AS stockin_qty,
@@ -602,7 +602,7 @@ async def _get_all_countries(db: AsyncSession, pids: tuple | None, search_custom
         params['sc'] = search_customer
     # 安全说明：pid_clause/cust_clause 均为模块级常量（_O_PID/_CUST_CLAUSE），
     # 不含用户输入；筛选值通过 :pids/:sc 绑定参数传递。
-    sql = text(f"""  # sql-safe: escape_like/绑定参数/常量片段
+    sql = text(f"""
         SELECT DISTINCT COALESCE(o.country, '常规') AS country
         FROM "order" o
         WHERE o.order_type = 'custom'{pid_clause}{cust_clause}

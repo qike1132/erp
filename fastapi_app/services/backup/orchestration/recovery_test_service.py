@@ -835,7 +835,7 @@ class DisasterRecoveryTestService:
                     f't.{c} = f.{fc}' for c, fc in zip(columns, foreign_columns, strict=False)
                 )
                 not_null_clause = ' AND '.join(f't.{c} IS NOT NULL' for c in columns)
-                orphan_sql = text(f"""  # sql-safe: escape_like/绑定参数/常量片段
+                orphan_sql = text(f"""
                     SELECT COUNT(*) FROM {table} t
                     LEFT JOIN {foreign_table} f ON {join_clause}
                     WHERE {not_null_clause} AND f.{foreign_columns[0]} IS NULL
@@ -857,7 +857,7 @@ class DisasterRecoveryTestService:
                 table = _safe_ident(group['table'])
                 columns = _safe_idents(group['columns'])
                 col_list = ', '.join(columns)
-                dup_sql = text(f"""  # sql-safe: escape_like/绑定参数/常量片段
+                dup_sql = text(f"""
                     SELECT COUNT(*) FROM (
                         SELECT {col_list} FROM {table}
                         WHERE {' AND '.join(f'{c} IS NOT NULL' for c in columns)}

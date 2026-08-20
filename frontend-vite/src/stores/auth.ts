@@ -4,43 +4,105 @@ import { authApi, dashboardApi, clearCsrfCache } from '@/api'
 import type { User, UserInfo, NavSection } from '@/types'
 import { removeAccessToken } from '@/utils/secureStorage'
 import { useCatalogStore } from './catalog'
+import { usePatternRoomStore } from './patternRoom'
+import { queryClient, queryPersister } from '@/utils/queryClient'
+import { clearNotificationMemoryCache } from '@/composables/notificationMemoryCache'
+
+/**
+ * 用户信息会话快照：登录成功后写入 sessionStorage（仅当前标签页，关闭即失效），
+ * 页面刷新（F5）后 init() 先命中快照、跳过阻塞导航的 /auth/me 请求，
+ * 再后台静默刷新校验权限；登出时清除，不影响安全。
+ */
+const USER_SNAPSHOT_KEY = 'fb_auth_user_snapshot_v1'
+
+function readUserSnapshot(): User | null {
+  try {
+    const raw = sessionStorage.getItem(USER_SNAPSHOT_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<User> | null
+    if (!parsed || typeof parsed !== 'object') return null
+    // 完整性校验：字段不完整视为无效快照（与 setUserInfo 的产出结构一致）
+    if (typeof parsed.username !== 'string' || typeof parsed.id !== 'number') return null
+    return parsed as User
+  } catch {
+    return null
+  }
+}
+
+function writeUserSnapshot(user: User | null | undefined): void {
+  try {
+    if (!user) {
+      sessionStorage.removeItem(USER_SNAPSHOT_KEY)
+      return
+    }
+    sessionStorage.setItem(USER_SNAPSHOT_KEY, JSON.stringify(user))
+  } catch {
+    // 隐私模式 / 容量不足时静默降级（不影响主流程）
+  }
+}
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
   const navSections = ref<NavSection[]>([])
   const loaded = ref(false)
   let _initPromise: Promise<void> | null = null
+  // 防止登出/切换账号后，旧的用户信息或导航请求回写当前 store。
+  let authGeneration = 0
 
   const isLoggedIn = computed(() => !!user.value)
   const permissionSet = computed(() => new Set(user.value?.permissions ?? []))
 
-  /** 将 API 返回的用户信息映射为内部 User 类型 */
-  function setUserInfo(raw: UserInfo | null | undefined) {
+  function clearUserCaches(): void {
+    // 清空目录缓存（产品/客户/供应商下拉数据），避免跨账号残留
+    useCatalogStore().clear()
+    // 清空打样间数据缓存，避免跨账号残留
+    usePatternRoomStore().clear()
+    // 通知只使用 JS 内存 SWR，登出时显式清空，避免跨账号复用
+    clearNotificationMemoryCache()
+    // 清空 Vue Query 缓存及其 sessionStorage 持久化，避免跨账号数据串用
+    queryClient.clear()
+    if (queryPersister) {
+      // removeClient() 返回 Promisable<void>，用 Promise.resolve 统一包装吞掉失败
+      void Promise.resolve(queryPersister.removeClient()).catch(() => { /* 静默 */ })
+    }
+  }
+
+  /** 将 API 返回的用户信息映射为内部 User 类型（兼容已归一化的内部 User 快照） */
+  function setUserInfo(raw: UserInfo | User | null | undefined) {
     if (!raw || typeof raw !== 'object') {
       console.error('[Auth] setUserInfo 收到无效数据:', raw)
       return null
     }
-    user.value = {
-      id: raw.user_id ?? (raw as { id?: number }).id ?? 0,
+    const rawUser = raw as UserInfo | { id?: number; user_id?: number; username?: string; is_super?: boolean; factory?: string | null; permissions?: string[] }
+    const nextUser: User = {
+      id: rawUser.user_id ?? (rawUser as { id?: number }).id ?? 0,
       username: raw.username || '',
       is_super: raw.is_super ?? false,
       factory: raw.factory ?? null,
       permissions: Array.isArray(raw.permissions) ? raw.permissions : [],
     }
-    return user.value
+    // 同一标签页切换账号时，先清掉旧账号的内存和持久化查询。
+    if (user.value && user.value.id !== nextUser.id) clearUserCaches()
+    authGeneration += 1
+    user.value = nextUser
+    return nextUser
   }
 
   async function fetchUser() {
+    const requestGeneration = authGeneration
     const res = await authApi.me()
-    setUserInfo(res.user ?? res)
-    return user.value
+    // 请求可能在 logout() 或另一账号登录后才完成，不能再写回旧响应。
+    if (requestGeneration !== authGeneration) return null
+    return setUserInfo(res.user ?? res)
   }
 
   type NavApiItem = { name: string; url: string; icon?: string; code: string; permission_codes: string[] }
   type NavApiSection = { name?: string; items?: NavApiItem[] }
 
   async function fetchNavSections() {
+    const requestGeneration = authGeneration
     const res = await dashboardApi.navSections()
+    if (requestGeneration !== authGeneration) return
     if (Array.isArray(res)) {
       navSections.value = res
     } else if (res && typeof res === 'object') {
@@ -68,8 +130,29 @@ export const useAuthStore = defineStore('auth', () => {
     _initPromise = (async () => {
       try {
         if (!user.value) {
-          await fetchUser()
+          // 优先命中会话快照：跳过阻塞导航的 /auth/me，立即放行路由
+          const snapshot = force ? null : readUserSnapshot()
+          if (snapshot) {
+            setUserInfo(snapshot)
+            // 后台静默刷新用户信息（校验会话有效性/权限变更），
+            // 失败（如 401）由 request 拦截器的 auth:expired 统一登出处理
+            void fetchUser()
+              .then((u) => writeUserSnapshot(u))
+              .catch(() => {
+                /* 静默：路线转移给 auth:expired 事件 */
+              })
+          } else {
+            await fetchUser()
+          }
         }
+        // 登出可能发生在 /auth/me 请求期间；此时不要把未登录状态标记为已加载。
+        if (!user.value) {
+          loaded.value = false
+          return
+        }
+        // 用户信息就绪：统一写入会话快照（覆盖快照命中、接口拉取、登录预置三种路径），
+        // 页面刷新后首次导航可直接命中，跳过 /auth/me 阻塞
+        writeUserSnapshot(user.value)
         // 用户信息就绪后立即标记 loaded，导航可提前进行
         // nav-sections 非关键路径，后台加载不阻塞路由跳转
         loaded.value = true
@@ -111,12 +194,15 @@ export const useAuthStore = defineStore('auth', () => {
   })
 
   function logout() {
+    authGeneration += 1
     user.value = null
     navSections.value = []
     loaded.value = false
     clearCsrfCache()
-    // 清空目录缓存（产品/客户/供应商下拉数据），避免跨账号残留
-    useCatalogStore().clear()
+    try {
+      sessionStorage.removeItem(USER_SNAPSHOT_KEY)
+    } catch { /* 静默 */ }
+    clearUserCaches()
     if (import.meta.env.VITE_CAPACITOR) {
       removeAccessToken()
     }

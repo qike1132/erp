@@ -46,6 +46,7 @@ from .upload import (
     upload_project_image,
 )
 from .version_diff import (
+    _SNAPSHOT_FIELDS,
     _compute_diff,
     _next_version,
     _normalize_value,
@@ -58,6 +59,7 @@ from .version_diff import (
 )
 
 __all__ = [
+    '_SNAPSHOT_FIELDS',
     '_batch_get_image_urls',
     '_compute_diff',
     '_ensure_part_name_unique',

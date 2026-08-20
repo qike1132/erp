@@ -12,6 +12,7 @@ import logging
 import time
 from typing import Any
 
+import redis.exceptions
 from fastapi import Depends, FastAPI, Request, Response
 from sqlalchemy import text
 from sqlalchemy.exc import DisconnectionError, OperationalError
@@ -97,11 +98,11 @@ def register_health_routes(app: FastAPI) -> None:
             if client:
                 try:
                     await client.ping()
-                except (OSError, ConnectionError):
+                except (OSError, ConnectionError, redis.exceptions.RedisError):
                     redis_ok = False
             else:
                 redis_ok = False
-        except (OSError, ImportError):
+        except (OSError, ImportError, redis.exceptions.RedisError):
             redis_ok = False
 
         internal_checks = {
@@ -205,7 +206,7 @@ def register_health_routes(app: FastAPI) -> None:
                 await client.ping()
             else:
                 redis_ok = False
-        except (OSError, ConnectionError, ImportError):
+        except (OSError, ConnectionError, ImportError, redis.exceptions.RedisError):
             redis_ok = False
 
         ready = db_ok and redis_ok

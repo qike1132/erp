@@ -129,7 +129,7 @@ async def get_order_logs(db: AsyncSession, customer: str = '', product: str = ''
         params=params,
         page=page,
         per_page=per_page,
-        data_sql_template=f"""SELECT  # sql-safe: escape_like/绑定参数/常量片段
+        data_sql_template=f"""SELECT
         DATE(o.order_date) as order_date_only, o.customer, p.name as product_name,
         p.barcode as product_barcode, o.status,
         SUM(o.quantity) as total_quantity, COUNT(o.id) as order_count,
@@ -244,7 +244,7 @@ async def get_stockin_logs(db: AsyncSession, customer: str = '', product: str = 
         params=params,
         page=page,
         per_page=per_page,
-        data_sql_template=f"""SELECT  # sql-safe: escape_like/绑定参数/常量片段
+        data_sql_template=f"""SELECT
         DATE(s.stockin_date) as stockin_date_only, s.customer, p.name as product_name,
         p.barcode as product_barcode,
         SUM(s.quantity) as total_quantity, COUNT(s.id) as stockin_count,
@@ -304,7 +304,7 @@ async def get_stockout_logs(db: AsyncSession, customer: str = '', product: str =
         params=params,
         page=page,
         per_page=per_page,
-        data_sql_template=f"""SELECT  # sql-safe: escape_like/绑定参数/常量片段
+        data_sql_template=f"""SELECT
         DATE(so.stockout_date) as stockout_date_only, so.customer, p.name as product_name,
         p.barcode as product_barcode,
         SUM(so.quantity - so.returned_quantity) as total_quantity, COUNT(so.id) as stockout_count,
@@ -370,7 +370,7 @@ async def get_deduction_logs(db: AsyncSession, customer: str = '', product: str 
         params=params,
         page=page,
         per_page=per_page,
-        data_sql_template=f"""SELECT  # sql-safe: escape_like/绑定参数/常量片段
+        data_sql_template=f"""SELECT
         DATE(so.stockout_date) as deduction_date_only, so.customer, p.name as product_name,
         p.barcode as sku,
         SUM(so.quantity - so.returned_quantity) as total_quantity, COUNT(so.id) as deduction_count,
@@ -383,7 +383,7 @@ async def get_deduction_logs(db: AsyncSession, customer: str = '', product: str 
         GROUP BY DATE(so.stockout_date), so.customer, p.name, p.barcode
         ORDER BY DATE(so.stockout_date) DESC
         LIMIT :limit OFFSET :offset""",  # nosec B608
-        qty_sql_template=f"""SELECT COALESCE(SUM(so.quantity - so.returned_quantity), 0)  # sql-safe: escape_like/绑定参数/常量片段
+        qty_sql_template=f"""SELECT COALESCE(SUM(so.quantity - so.returned_quantity), 0)
         FROM stock_out so JOIN product p ON so.product_id = p.id
         LEFT JOIN {order_tbl} o ON so.order_id = o.id
         WHERE 1=1 {{where_sql}}""",  # nosec B608

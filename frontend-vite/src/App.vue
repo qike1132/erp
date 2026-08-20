@@ -1,19 +1,15 @@
 <template>
   <a href="#main-content" class="skip-link" aria-label="跳到主内容">跳到主内容</a>
   <router-view />
+  <!-- 路由 chunk 加载指示：顶部细进度条，不再全屏遮罩阻塞交互 -->
   <Transition name="route-loading-fade">
     <div
       v-if="showRouteLoading"
-      class="route-loading-overlay"
+      class="route-loading-bar"
       role="status"
       aria-live="polite"
       aria-label="页面加载中"
-    >
-      <div class="route-loading-box">
-        <div class="route-loading-spinner" />
-        <span class="route-loading-text">正在进入系统…</span>
-      </div>
-    </div>
+    />
   </Transition>
 </template>
 
@@ -23,12 +19,12 @@ import { useRouter, type RouteLocationNormalized } from 'vue-router'
 
 // 全局路由导航 loading：仅覆盖懒加载组件 chunk 首次下载期的空白
 // - 已缓存的 chunk（二次导航）不显示 loading，避免闪烁
-// - 延迟 300ms 后再显示，过滤瞬时网络抖动
+// - 延迟 800ms 后再显示，只对真正缓慢的 chunk 下载提示（本地开发/缓存命中几乎不出现）
 const router = useRouter()
 const showRouteLoading = ref(false)
 let loadingTimer: ReturnType<typeof setTimeout> | null = null
 
-const DELAY_MS = 300
+const DELAY_MS = 800
 
 /** 检查目标路由是否包含未解析的动态 import（即 chunk 尚未缓存） */
 function hasUnresolvedChunk(to: RouteLocationNormalized): boolean {
@@ -87,41 +83,33 @@ onUnmounted(() => {
   top: 0;
 }
 
-.route-loading-overlay {
+.route-loading-bar {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
   z-index: 9999;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-surface, #f7f9fc);
+  overflow: hidden;
+  pointer-events: none;
 }
 
-.route-loading-box {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 14px;
+.route-loading-bar::after {
+  content: '';
+  display: block;
+  height: 100%;
+  width: 40%;
+  background: linear-gradient(90deg, var(--color-ocean-deep, #1e6b8c), var(--color-ocean, #2a8bb8));
+  border-radius: 0 2px 2px 0;
+  animation: route-loading-slide 1s ease-in-out infinite;
 }
 
-.route-loading-spinner {
-  width: 40px;
-  height: 40px;
-  border: 3px solid var(--color-border, #e2e8f0);
-  border-top-color: var(--color-ocean-deep, #1e6b8c);
-  border-radius: 50%;
-  animation: route-loading-spin 0.7s linear infinite;
-}
-
-.route-loading-text {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--color-text-secondary, #64748b);
-}
-
-@keyframes route-loading-spin {
-  to {
-    transform: rotate(360deg);
+@keyframes route-loading-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(350%);
   }
 }
 

@@ -1,9 +1,10 @@
 /**
  * useCustomerSampling Hook 单元测试
  *
- * 覆盖：初始状态、loadGrouped 成功/失败路径、hasData computed
+ * 覆盖：初始状态、loadGrouped 成功/失败路径、SWR 缓存命中/过期刷新、hasData computed
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
 
 // mock patternRoomApi
 vi.mock('@/api/patternRoom', () => ({
@@ -19,6 +20,9 @@ import { useCustomerSampling } from '../views/pattern-room/composables/useCustom
 describe('useCustomerSampling', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // 每个用例独立 Pinia + 清空 sessionStorage 快照，避免缓存跨用例污染
+    setActivePinia(createPinia())
+    if (typeof sessionStorage !== 'undefined') sessionStorage.clear()
   })
 
   it('初始状态正确', () => {
@@ -117,5 +121,71 @@ describe('useCustomerSampling', () => {
       },
     ]
     expect(hook.hasData.value).toBe(false)
+  })
+
+  it('SWR：新鲜缓存命中时不再发起请求，且无 loading', async () => {
+    vi.mocked(patternRoomApi.getGroupedList).mockResolvedValue({ groups: [], total_projects: 0 } as unknown as GroupedListResponse)
+
+    const hook = useCustomerSampling()
+    // 首次加载：真实请求
+    await hook.loadGrouped()
+    expect(patternRoomApi.getGroupedList).toHaveBeenCalledTimes(1)
+
+    // 30s 内二次加载：命中新鲜缓存，直接返回，不发请求、不触发 loading
+    await hook.loadGrouped()
+    expect(patternRoomApi.getGroupedList).toHaveBeenCalledTimes(1)
+    expect(hook.loading.value).toBe(false)
+    expect(hook.error.value).toBeNull()
+  })
+
+  it('SWR：缓存过期时先渲染旧数据并后台静默刷新（无 loading）', async () => {
+    vi.useFakeTimers()
+    try {
+      const base = new Date('2026-01-01T00:00:00Z')
+      vi.setSystemTime(base)
+      const mockData = {
+        groups: [
+          {
+            pattern_maker_id: null,
+            pattern_maker_name: '未分类',
+            project_count: 1,
+            latest_update_time: '',
+            projects: [
+              { id: 1, sequence_no: 'CS-001', product_name: '产品', current_version: 'T1', updated_at: '' },
+            ],
+          },
+        ],
+        total_projects: 1,
+      }
+      vi.mocked(patternRoomApi.getGroupedList).mockResolvedValue(mockData as unknown as GroupedListResponse)
+
+      const hook = useCustomerSampling()
+      await hook.loadGrouped()
+      expect(patternRoomApi.getGroupedList).toHaveBeenCalledTimes(1)
+
+      // 31s 后过期：再次加载应同步渲染旧数据（不发请求前数据已就绪）
+      vi.advanceTimersByTime(31_000)
+      await hook.loadGrouped()
+      expect(hook.groups.value).toHaveLength(1)
+      expect(hook.loading.value).toBe(false)
+      // 后台静默刷新已发起
+      expect(patternRoomApi.getGroupedList).toHaveBeenCalledTimes(2)
+      // 刷新完成后数据仍就绪
+      await Promise.resolve()
+      expect(hook.groups.value).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('force=true：跳过缓存强制请求', async () => {
+    vi.mocked(patternRoomApi.getGroupedList).mockResolvedValue({ groups: [], total_projects: 0 } as unknown as GroupedListResponse)
+
+    const hook = useCustomerSampling()
+    await hook.loadGrouped()
+    await hook.loadGrouped(undefined, undefined, 1, true)
+
+    expect(patternRoomApi.getGroupedList).toHaveBeenCalledTimes(2)
+    expect(hook.loading.value).toBe(false)
   })
 })

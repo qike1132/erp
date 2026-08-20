@@ -404,14 +404,16 @@ class TestServiceMockErrors:
         """新增部位：部位名重复 → BusinessError
 
         _ensure_project_exists 通过后，_ensure_part_name_unique 查到已存在记录。
-        用 side_effect 模拟两次 execute 返回不同结果。
+        用 side_effect 模拟三次 execute 返回不同结果。
         """
         # 第一次 execute（_ensure_project_exists）返回项目存在
-        # 第二次 execute（_ensure_part_name_unique）返回已存在 id
+        # 第二次 execute（_get_default_role_id）返回默认角色 id=1
+        # 第三次 execute（_ensure_part_name_unique）返回已存在 id=2
         project_exists_result = _mock_result(scalar_value=1)
+        default_role_result = _mock_result(scalar_value=1)
         duplicate_result = _mock_result(scalar_value=2)  # 查到已存在部位 id=2
         mock_async_db.execute = AsyncMock(
-            side_effect=[project_exists_result, duplicate_result]
+            side_effect=[project_exists_result, default_role_result, duplicate_result]
         )
         with pytest.raises(BusinessError):
             await create_part(mock_async_db, 1, part_name='身体')

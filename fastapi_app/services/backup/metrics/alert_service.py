@@ -282,7 +282,7 @@ class BackupAlertService:
 
     def _generate_email_text(self, alert_data: dict[str, Any]) -> str:
         """生成邮件纯文本内容"""
-        text = f"""  # sql-safe: escape_like/绑定参数/常量片段
+        text = f"""
 备份告警通知
 
 任务名称: {alert_data['task_name']}

@@ -6,6 +6,11 @@
  */
 import { ref, readonly, computed } from 'vue'
 import { notificationApi, type Notification, type NotificationListParams } from '@/api/notification'
+import {
+  clearNotificationMemoryCache,
+  fetchNotificationList,
+  getNotificationMemorySnapshot,
+} from './notificationMemoryCache'
 
 const DEFAULT_PAGE_SIZE = 20
 
@@ -17,6 +22,7 @@ export function useNotificationCenter() {
   const pageSize = ref(DEFAULT_PAGE_SIZE)
   const loading = ref(false)
   const marking = ref(false)
+  let loadRequestId = 0
 
   // 多选状态
   const selectedIds = ref<Set<number>>(new Set())
@@ -34,30 +40,79 @@ export function useNotificationCenter() {
     () => selectedIds.value.size > 0 && selectedIds.value.size < list.value.length,
   )
 
-  /** 拉取通知列表（仅返回当前用户的未读通知） */
-  async function fetchList(resetPage = true) {
+  function applyListResponse(
+    response: { data?: Notification[]; total?: number },
+    resetSelection: boolean,
+  ) {
+    list.value = response.data ?? []
+    total.value = response.total ?? 0
+    if (resetSelection) {
+      selectedIds.value = new Set()
+    } else {
+      // 后台刷新不打断用户当前选择，只保留仍存在于新列表的 id
+      const visibleIds = new Set(list.value.map((notification) => notification.id))
+      selectedIds.value = new Set(
+        [...selectedIds.value].filter((id) => visibleIds.has(id)),
+      )
+    }
+  }
+
+  /** 实际请求；silent=true 时失败不清空当前已渲染的旧列表 */
+  async function loadListFromApi(
+    params: NotificationListParams,
+    silent: boolean,
+    requestId: number,
+  ) {
+    try {
+      const response = await fetchNotificationList(params)
+      // 翻页或重新加载后，旧响应不能覆盖当前页面。
+      if (requestId !== loadRequestId) return
+      applyListResponse(response, !silent)
+    } catch (e) {
+      if (import.meta.env.DEV) console.warn('[notification-center] list failed', e)
+      if (requestId !== loadRequestId || silent) return
+      list.value = []
+      total.value = 0
+    }
+  }
+
+  /**
+   * 拉取通知列表（仅返回当前用户的未读通知）。
+   *
+   * 注意：通知列表只使用 5 秒的 JS 内存 SWR，不写入 sessionStorage；
+   * 未读数仍由 useNotifications 每次挂载/每 30 秒实时请求。
+   * force=true 用于「全部已读」等必须立即向服务端确认的场景。
+   */
+  async function fetchList(resetPage = true, force = false) {
     if (resetPage) {
       page.value = 1
     }
+    const params: NotificationListParams = {
+      page: page.value,
+      page_size: pageSize.value,
+      only_unread: true,
+    }
+    const requestId = ++loadRequestId
+
+    if (!force) {
+      const snapshot = getNotificationMemorySnapshot(params)
+      if (snapshot) {
+        // 先显示内存快照，避免快速返回通知页时出现 loading。
+        applyListResponse(snapshot.response, true)
+        loading.value = false
+        // 新鲜快照不再重复请求；过期快照才后台静默校验。
+        if (!snapshot.fresh) {
+          void loadListFromApi(params, true, requestId)
+        }
+        return
+      }
+    }
+
     loading.value = true
     try {
-      const params: NotificationListParams = {
-        page: page.value,
-        page_size: pageSize.value,
-        only_unread: true,
-      }
-
-      const res = await notificationApi.list(params)
-      list.value = res?.data ?? []
-      total.value = res?.total ?? 0
-      // 清除已选（分页切换后重置）
-      selectedIds.value = new Set()
-    } catch (e) {
-      if (import.meta.env.DEV) console.warn('[notification-center] list failed', e)
-      list.value = []
-      total.value = 0
+      await loadListFromApi(params, false, requestId)
     } finally {
-      loading.value = false
+      if (requestId === loadRequestId) loading.value = false
     }
   }
 
@@ -83,6 +138,8 @@ export function useNotificationCenter() {
   async function markAsRead(id: number) {
     const notification = list.value.find((n) => n.id === id)
     if (!notification || notification.is_read) return
+    loadRequestId += 1
+    clearNotificationMemoryCache()
     notification.is_read = true
     try {
       await notificationApi.markAsRead(id)
@@ -99,6 +156,8 @@ export function useNotificationCenter() {
   async function dismissFromList(id: number) {
     const notification = list.value.find((n) => n.id === id)
     const wasRead = notification?.is_read
+    loadRequestId += 1
+    clearNotificationMemoryCache()
     if (notification && !notification.is_read) {
       notification.is_read = true
     }
@@ -123,11 +182,16 @@ export function useNotificationCenter() {
   /** 批量标记已读（页面仅展示未读，标记后立即从列表移除） */
   async function markBatchAsRead(ids: number[]) {
     if (ids.length === 0 || marking.value) return
+    loadRequestId += 1
+    clearNotificationMemoryCache()
     marking.value = true
     // 乐观更新：记录受影响项并先从列表移除
     const affected = list.value.filter((n) => ids.includes(n.id) && !n.is_read)
+    const affectedIds = new Set(affected.map((n) => n.id))
     affected.forEach((n) => { n.is_read = true })
-    list.value = list.value.filter((n) => !ids.includes(n.id) || n.is_read)
+    // 只移除实际受影响的未读项；不能在设置 is_read=true 后再用状态判断，
+    // 否则刚标记的项目会被错误地保留在列表中。
+    list.value = list.value.filter((n) => !affectedIds.has(n.id))
     total.value = Math.max(0, total.value - affected.length)
     try {
       await notificationApi.markBatchAsRead(ids)
@@ -146,6 +210,8 @@ export function useNotificationCenter() {
   /** 全部标记已读 */
   async function markAllAsRead() {
     if (marking.value) return
+    loadRequestId += 1
+    clearNotificationMemoryCache()
     marking.value = true
     const unreadItems = list.value.filter((n) => !n.is_read)
     unreadItems.forEach((n) => { n.is_read = true })

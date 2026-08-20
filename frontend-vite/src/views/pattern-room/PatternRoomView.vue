@@ -121,7 +121,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+/**
+ * 组件名用于 DefaultLayout 的 <keep-alive :include="['PatternRoomView']"> 匹配。
+ * 开启缓存后组件不随路由切换销毁，onMounted 仅执行一次，
+ * 二次进入不再重复发起 grouped-list / pattern-makers 等请求，消除「加载中...」闪烁。
+ */
+defineOptions({ name: 'PatternRoomView' })
+
+import { ref, computed, watch, onMounted, onActivated } from 'vue'
 import UiAlert from '@/components/ui/UiAlert.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import CustomerGroupList from './components/CustomerGroupList.vue'
@@ -181,6 +188,17 @@ const { isNarrow, drawerOpen } = usePatternRoomLayout()
 
 onMounted(() => {
   groupHook.loadGrouped(searchKeyword.value || undefined, 'in_progress', 1)
+  loadPatternMakers()
+})
+
+// keep-alive 场景下的返回静默校验（不替代 onMounted，而是互补）：
+// - 离开期间数据未变（缓存 ≤30s 新鲜）→ 零请求零加载，纯内存恢复
+// - 离开期间数据有变（缓存已过期）→ 先用旧数据渲染，后台静默刷新，无「加载中」闪烁
+// - 首次挂载时 onActivated 同样触发，但 loadGrouped 命中 store 的并发去重/新鲜缓存，
+//   不会与 onMounted 的加载产生重复请求
+onActivated(() => {
+  // 保留用户当前筛选/页码（keep-alive 已存续），仅做新鲜度校验
+  groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value)
   loadPatternMakers()
 })
 

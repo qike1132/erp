@@ -9,6 +9,7 @@ import { toast } from '@/composables/useToast'
 import type { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { patternMakerApi } from '@/api/patternMaker'
 import type { PatternMaker } from '@/api/patternMaker'
+import { usePatternRoomStore } from '@/stores/patternRoom'
 
 type ConfirmDialog = ReturnType<typeof useConfirmDialog>
 
@@ -21,10 +22,37 @@ export function usePatternRoomPatternMakers(
   /** 弹窗当前选中的版师 ID（v-model 双向绑定） */
   const formPatternMakerId = ref<number | null>(null)
 
-  async function loadPatternMakers() {
+  const store = usePatternRoomStore()
+  /** 前台加载序号：后台静默刷新结果仅在无新加载时应用 */
+  let seq = 0
+
+  /**
+   * 加载版师列表（SWR 缓存）
+   * @param force 跳过缓存强制请求（新增/删除版师后传 true）
+   */
+  async function loadPatternMakers(force = false): Promise<void> {
+    if (!force) {
+      const snapshot = store.getMakersSnapshot()
+      if (snapshot) {
+        patternMakers.value = snapshot.data
+        if (snapshot.isFresh) return
+        // 过期缓存：先展示旧数据，后台静默刷新
+        const seqAtStart = seq
+        void store.fetchMakers()
+          .then((data) => {
+            if (data && seq === seqAtStart) patternMakers.value = data
+          })
+          .catch((e) => {
+            console.error('[PatternRoomView] 后台刷新版师列表失败:', e)
+          })
+        return
+      }
+    }
+
+    seq += 1
     try {
-      const res = await patternMakerApi.list()
-      patternMakers.value = res.items ?? []
+      const data = await store.fetchMakers()
+      if (data) patternMakers.value = data
     } catch (e) {
       console.error('[PatternRoomView] 加载版师列表失败:', e)
     }
@@ -39,7 +67,8 @@ export function usePatternRoomPatternMakers(
     try {
       const res = await patternMakerApi.create({ name })
       if (res.success) {
-        await loadPatternMakers()
+        store.invalidateMakers()
+        await loadPatternMakers(true)
         if (res.id != null) {
           formPatternMakerId.value = res.id
         }
@@ -71,7 +100,8 @@ export function usePatternRoomPatternMakers(
         if (formPatternMakerId.value === id) {
           formPatternMakerId.value = null
         }
-        await loadPatternMakers()
+        store.invalidateMakers()
+        await loadPatternMakers(true)
         toast.success('版师删除成功')
       } else {
         toast.error(res.message || '版师删除失败')

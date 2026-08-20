@@ -18,14 +18,14 @@ export function usePatternRoomGroupFilter(groupHook: GroupHook) {
 
   function onStatusChange(val: string) {
     statusFilter.value = val
-    // 所有状态现在都用分组卡片视图 + 分页，所以直接加载
-    groupHook.loadGrouped(searchKeyword.value || undefined, val, 1)
+    // 所有状态现在都用分组卡片视图 + 分页，所以直接加载（用户主动筛选 → 强制刷新）
+    groupHook.loadGrouped(searchKeyword.value || undefined, val, 1, true)
   }
 
   /** 分组视图翻页 */
   function onGroupPageChange(page: number) {
     if (page === groupHook.currentPage.value) return
-    groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, page)
+    groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, page, true)
   }
 
   /** 搜索（防抖） */
@@ -33,7 +33,7 @@ export function usePatternRoomGroupFilter(groupHook: GroupHook) {
   function onSearch(keyword: string) {
     searchKeyword.value = keyword
     debounceSearch(() => {
-      groupHook.loadGrouped(keyword || undefined, statusFilter.value, 1)
+      groupHook.loadGrouped(keyword || undefined, statusFilter.value, 1, true)
     })
   }
 

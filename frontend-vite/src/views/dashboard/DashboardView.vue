@@ -1,6 +1,5 @@
 <template>
   <div class="dashboard">
-
     <DashboardErrorBanner
       v-if="errorMessage"
       :message="errorMessage"
@@ -46,16 +45,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
-
 import DashboardErrorBanner from './components/DashboardErrorBanner.vue'
 import DashboardToolbarSection from './components/DashboardToolbarSection.vue'
 import DashboardKpiSection from './components/DashboardKpiSection.vue'
 import DashboardChartsSection from './components/DashboardChartsSection.vue'
 import { useDashboardStats } from './composables/useDashboardStats'
-import { useDashboardAutoRefresh } from './composables/useDashboardAutoRefresh'
 import { useDashboardClock } from './composables/useDashboardClock'
 import { useBeileConfirmPopup } from './composables/useBeileConfirmPopup'
 import { authApi } from '@/api'
@@ -78,25 +75,29 @@ const {
   isLoading,
   errorMessage,
   errorDetail,
-  loadStats: loadStatsData,
+  loadStats,
 } = useDashboardStats()
 
 const chartsRef = ref<InstanceType<typeof DashboardChartsSection> | null>(null)
 
-async function loadStats(showLoading = true, force = false) {
-  await loadStatsData(showLoading, force)
+// ===== 图表渲染：数据变化时自动更新 =====
+// Vue Query SWR 后台刷新、refetchInterval 自动刷新均触发此 watch
+async function renderCharts() {
+  if (!stats.value || !stockStats.value) return
   await nextTick()
   try {
     await chartsRef.value?.renderOrUpdate()
   } catch (chartErr) {
     if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
+
       console.warn('[Dashboard] 图表渲染失败:', chartErr)
     }
   }
   perf.markMountEnd()
   perf.measureFromMount('full-interactive')
 }
+
+watch([stats, stockStats], renderCharts)
 
 const {
   beilePopupOpen,
@@ -109,22 +110,13 @@ const {
 
 function retryLoad() {
   chartsRef.value?.resetCharts()
-  loadStats(true).catch((err) => {
+  loadStats().catch((err) => {
     if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
+
       console.error('[Dashboard] retryLoad failed:', err)
     }
   })
 }
-
-const { startAutoRefresh, stopAutoRefresh } = useDashboardAutoRefresh(() => {
-  loadStats(false, true).catch((err) => {
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.error('[Dashboard] 自动刷新加载失败:', err)
-    }
-  })
-})
 
 async function handleLogout() {
   try {
@@ -140,20 +132,17 @@ async function confirmLogout() {
   if (ok) handleLogout()
 }
 
-onMounted(() => {
-  loadStats(true).catch((err) => {
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.error('[Dashboard] onMounted loadStats failed:', err)
-    }
-  })
+onMounted(async () => {
+  // Vue Query 自动发起首次 fetch，无需手动调用 loadStats
+  // 若 prefetch 已填充缓存，数据立即可用 → 渲染图表
+  if (stats.value && stockStats.value) {
+    await renderCharts()
+  }
   checkBeileConfirmPopup()
-  startAutoRefresh()
   startClock()
 })
 
 onUnmounted(() => {
-  stopAutoRefresh()
   stopClock()
 })
 </script>
