@@ -322,6 +322,10 @@ async def get_parts_by_version(
     )
     versions = versions_result.scalars().all()
 
+    # part 表中仍存在的部位名：快照补充仅为「该部位仍存在、但某版本列未复制到
+    # part 表」的情况服务；已删除的部位不因历史快照而复活（spec 5.5.1.6 删除级联）
+    live_part_names = {p.part_name for p in all_parts}
+
     for ver in versions:
         version_set.add(ver.version_no)
         snapshot: list[dict] = ver.snapshot_data or []
@@ -329,6 +333,8 @@ async def get_parts_by_version(
             key = (part.get('part_name', ''), ver.version_no)
             if key in seen_keys:
                 continue  # part 表已有此版本数据，跳过快照
+            if part.get('part_name', '') not in live_part_names:
+                continue  # 部位已从 part 表删除，快照不复活
             seen_keys.add(key)
             part_copy = {**part, 'version_no': ver.version_no}
             items.append(part_copy)

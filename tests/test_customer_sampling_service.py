@@ -46,6 +46,7 @@ from fastapi_app.services.customer_sampling_service import (
     delete_part,
     delete_project,
     get_grouped_list,
+    get_parts_by_version,
     get_project_detail,
     get_version_detail,
     list_change_logs,
@@ -889,6 +890,45 @@ class TestServiceIntegration:
         assert 'delete' in types
         delete_record = next(d for d in detail_v3['change_summary'] if d['change_type'] == 'delete')
         assert delete_record['part_name'] == '头部'
+
+    async def test_deleted_part_not_resurrected_from_snapshot(self, cs_db):
+        """删除部位后，跨版本二维表不应从历史快照复活已删除部位"""
+        r = await create_project(cs_db, product_name='删除复活回归')
+        await cs_db.flush()
+
+        # 添加部位并创建版本 T2，使该部位被 T2 快照记录
+        await create_part(cs_db, r['id'], part_name='袖口')
+        await cs_db.flush()
+        await create_version(cs_db, r['id'])
+        await cs_db.flush()
+
+        view_before = await get_parts_by_version(cs_db, r['id'])
+        assert any(p['part_name'] == '袖口' for p in view_before['items'])
+
+        # 删除该部位（part 表完全移除）
+        parts = await list_parts(cs_db, r['id'])
+        cuff = next(p for p in parts['items'] if p['part_name'] == '袖口')
+        await delete_part(cs_db, cuff['id'])
+        await cs_db.flush()
+
+        # 二维表不应从 T2 快照复活"袖口"
+        view_after = await get_parts_by_version(cs_db, r['id'])
+        assert not any(p['part_name'] == '袖口' for p in view_after['items'])
+
+    async def test_snapshot_backfill_still_works_for_missing_version(self, cs_db):
+        """快照补充仍生效：创建版本后未复制到 part 表的版本列由快照补充"""
+        r = await create_project(cs_db, product_name='快照补充回归')
+        await cs_db.flush()
+
+        await create_part(cs_db, r['id'], part_name='身体')
+        await cs_db.flush()
+        await create_version(cs_db, r['id'])
+        await cs_db.flush()
+
+        # T2 列数据来自 T2 快照补充（part 表仍只有 T1 行）
+        view = await get_parts_by_version(cs_db, r['id'])
+        assert any(p['part_name'] == '身体' and p['version_no'] == 'T2' for p in view['items'])
+        assert 'T2' in view['versions']
 
     async def test_version_list_ordered(self, cs_db):
         """版本列表按 version_no 升序"""
