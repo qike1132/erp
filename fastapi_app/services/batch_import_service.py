@@ -14,12 +14,10 @@
 import asyncio
 import logging
 import os
-import tempfile
-from contextlib import asynccontextmanager, suppress
-from datetime import UTC, datetime
+from collections.abc import Callable
+from datetime import datetime
 
 from fastapi import HTTPException, Response, UploadFile
-from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,7 +42,7 @@ from fastapi_app.shared_models import (
     StockIn,
     StockOut,
 )
-from fastapi_app.utils import parse_date_value as _shared_parse_date_value
+from fastapi_app.shared_models.order import ORDER_STATUS_PENDING_STOCK
 from fastapi_app.utils import validate_customer_name as _shared_validate_customer_name
 
 logger = logging.getLogger(__name__)
@@ -152,41 +150,24 @@ async def _process_comprehensive_sheet(
         data_list: 解析后的行数据列表。
         results: 综合导入结果对象，原地更新。
     """
+    entry = _SHEET_IMPORTERS.get(sheet_type)
+    if entry is None:
+        results.errors.append(f'Sheet {sheet_name} 类型未知: {sheet_type}')
+        return
+    importer, count_key = entry
     try:
-        if sheet_type == 'product':
-            count = await import_products_from_data(db, data_list)
-            results.imported['products'] += count
-        elif sheet_type == 'order':
-            try:
-                count, _ = await import_orders_from_data(db, data_list)
-                results.imported['orders'] += count
-            except (ValueError, TypeError, SQLAlchemyError) as order_e:
-                await db.rollback()  # manual-tx: try/except 内显式事务控制
-                await db.begin_nested()
-                logger.error(f'综合导入 - 订单Sheet {sheet_name} 导入失败: {order_e}', exc_info=True)
-                results.errors.append(f'Sheet {sheet_name} 导入失败')
-        elif sheet_type == 'stockin':
-            try:
-                count, _ = await import_stockins_from_data(db, data_list)
-                results.imported['stockins'] += count
-            except (ValueError, TypeError, SQLAlchemyError) as stockin_e:
-                await db.rollback()  # manual-tx: try/except 内显式事务控制
-                await db.begin_nested()
-                logger.error(f'综合导入 - 备货Sheet {sheet_name} 导入失败: {stockin_e}', exc_info=True)
-                results.errors.append(f'Sheet {sheet_name} 导入失败')
-        elif sheet_type == 'stockout':
-            try:
-                count, _ = await import_stockouts_from_data(db, data_list)
-                results.imported['stockouts'] += count
-            except (ValueError, TypeError, SQLAlchemyError) as stockout_e:
-                await db.rollback()  # manual-tx: try/except 内显式事务控制
-                await db.begin_nested()
-                logger.error(f'综合导入 - 出货Sheet {sheet_name} 导入失败: {stockout_e}', exc_info=True)
-                results.errors.append(f'Sheet {sheet_name} 导入失败')
-    except (ValueError, TypeError, SQLAlchemyError) as exc:
-        await db.rollback()  # manual-tx: try/except 内显式事务控制
-        await db.begin_nested()
-        logger.error(f'综合导入 - Sheet {sheet_name} 处理失败: {exc}', exc_info=True)
+        # savepoint 隔离单个 Sheet：失败仅回滚本 Sheet 未提交行，不影响其他 Sheet；
+        # 计数在 savepoint 成功退出后才累加，保证上报数与实际落库一致
+        async with db.begin_nested():
+            if count_key == 'products':
+                # 产品导入返回成功计数（单值）
+                count = await importer(db, data_list)
+            else:
+                count, _ = await importer(db, data_list)
+        results.imported[count_key] += count
+    except (ValueError, TypeError, SQLAlchemyError) as e:
+        # savepoint 上下文退出时已回滚本 Sheet 的未提交行
+        logger.error(f'综合导入 - Sheet {sheet_name} 导入失败: {e}', exc_info=True)
         results.errors.append(f'Sheet {sheet_name} 导入失败')
 
 
@@ -281,7 +262,7 @@ async def import_orders_service(db: AsyncSession, file: UploadFile) -> BatchImpo
                     order = Order(
                         order_no=order_no, customer=customer, order_date=datetime.now(),
                         product_id=product_id, quantity=qty,
-                        note=str(note).strip() if note else '', status='待备货',
+                        note=str(note).strip() if note else '', status=ORDER_STATUS_PENDING_STOCK,
                     )
                     db.add(order)
                     await db.flush()
@@ -301,8 +282,7 @@ async def import_orders_service(db: AsyncSession, file: UploadFile) -> BatchImpo
                 errors.append('行处理失败')
                 skipped += 1
                 continue
-        if imported > 0:
-            await db.commit()  # manual-tx: try/except 内显式事务控制
+        # 提交交给请求级事务（get_async_db），服务层不再手动 commit
         return _build_batch_result(imported, skipped, errors, success_msg='成功导入', fail_msg='没有成功导入任何订单')
     except (OSError, ValueError) as exc:
         await db.rollback()  # manual-tx: try/except 内显式事务控制
@@ -387,8 +367,7 @@ async def import_case_stockouts_service(db: AsyncSession, file: UploadFile) -> B
                 errors.append('行处理失败')
                 skipped += 1
                 continue
-        if imported > 0:
-            await db.commit()  # manual-tx: try/except 内显式事务控制
+        # 提交交给请求级事务（get_async_db），服务层不再手动 commit
         return _build_batch_result(imported, skipped, errors, success_msg='成功导入皮套出库', fail_msg='没有成功导入任何皮套出库')
     except (OSError, ValueError) as exc:
         await db.rollback()  # manual-tx: try/except 内显式事务控制
@@ -469,8 +448,7 @@ async def import_case_stockins_service(db: AsyncSession, file: UploadFile) -> Ba
                 errors.append('行处理失败')
                 skipped += 1
                 continue
-        if imported > 0:
-            await db.commit()  # manual-tx: try/except 内显式事务控制
+        # 提交交给请求级事务（get_async_db），服务层不再手动 commit
         return _build_batch_result(imported, skipped, errors, success_msg='成功导入皮套入库', fail_msg='没有成功导入任何皮套入库')
     except (OSError, ValueError) as exc:
         await db.rollback()  # manual-tx: try/except 内显式事务控制
@@ -541,8 +519,7 @@ async def import_stockins_service(db: AsyncSession, file: UploadFile) -> BatchIm
                 errors.append('行处理失败')
                 skipped += 1
                 continue
-        if imported > 0:
-            await db.commit()  # manual-tx: try/except 内显式事务控制
+        # 提交交给请求级事务（get_async_db），服务层不再手动 commit
         return _build_batch_result(imported, skipped, errors, success_msg='成功导入备货', fail_msg='没有成功导入任何备货')
     except (OSError, ValueError) as exc:
         await db.rollback()  # manual-tx: try/except 内显式事务控制
@@ -642,8 +619,7 @@ async def import_stockouts_service(db: AsyncSession, file: UploadFile) -> BatchI
                 errors.append('行处理失败')
                 skipped += 1
                 continue
-        if imported > 0:
-            await db.commit()  # manual-tx: try/except 内显式事务控制
+        # 提交交给请求级事务（get_async_db），服务层不再手动 commit
         return _build_batch_result(imported, skipped, errors, success_msg='成功导入出货', fail_msg='没有成功导入任何出货')
     except (OSError, ValueError) as exc:
         await db.rollback()  # manual-tx: try/except 内显式事务控制
@@ -711,8 +687,7 @@ async def import_products_service(db: AsyncSession, file: UploadFile) -> BatchIm
                 errors.append('行处理失败')
                 skipped += 1
                 continue
-        if imported > 0:
-            await db.commit()  # manual-tx: try/except 内显式事务控制
+        # 提交交给请求级事务（get_async_db），服务层不再手动 commit
         return _build_batch_result(imported, skipped, errors, success_msg='成功导入产品', fail_msg='没有找到需要导入的产品数据（可能都已存在）')
     except (OSError, ValueError) as exc:
         await db.rollback()  # manual-tx: try/except 内显式事务控制
@@ -744,7 +719,6 @@ async def import_comprehensive_service(db: AsyncSession, file: UploadFile) -> Co
         results = ComprehensiveImportResult()
         # Sheet 名称到类型的映射
         sheet_mapping = {'产品管理': 'product', '订单管理': 'order', '备货管理': 'stockin', '出货管理': 'stockout'}
-        await db.begin_nested()
         for sheet_name in sheets:
             sheet_type = _identify_sheet_type(sheet_name, sheet_mapping)
             if not sheet_type:
@@ -757,7 +731,8 @@ async def import_comprehensive_service(db: AsyncSession, file: UploadFile) -> Co
                 continue
             await _process_comprehensive_sheet(db, sheet_type, sheet_name, data_list, results)
         results.message = '导入完成！'
-        await db.commit()  # manual-tx: try/except 内显式事务控制
+        # 提交交给请求级事务（get_async_db）：全部 Sheet 在同一事务内原子落库，
+        # 单 Sheet 失败已被 savepoint 隔离，无需在此手动 commit
         return results
     except (OSError, ValueError) as exc:
         await db.rollback()  # manual-tx: try/except 内显式事务控制
@@ -768,7 +743,15 @@ async def import_comprehensive_service(db: AsyncSession, file: UploadFile) -> Co
 # ==================== re-export 兼容层 ====================
 # 从子模块导入全部被迁移的函数，保持 from fastapi_app.services.batch_import_service import X 兼容
 # （X 为任意原公开/私有函数名）。调用方无需修改导入路径。
-from fastapi_app.services.batch_import_parser import (  # noqa: E402,F401
+from fastapi_app.services.batch_import_core import (  # noqa: F401
+    _import_data_generic,
+    _pre_load_product_map,
+    import_orders_from_data,
+    import_products_from_data,
+    import_stockins_from_data,
+    import_stockouts_from_data,
+)
+from fastapi_app.services.batch_import_parser import (  # noqa: F401
     _build_batch_result,
     _find_target_sheet,
     _identify_sheet_type,
@@ -782,11 +765,14 @@ from fastapi_app.services.batch_import_parser import (  # noqa: E402,F401
     parse_excel_file_async,
     read_excel_sheets_async,
 )
-from fastapi_app.services.batch_import_core import (  # noqa: E402,F401
-    _import_data_generic,
-    _pre_load_product_map,
-    import_orders_from_data,
-    import_products_from_data,
-    import_stockins_from_data,
-    import_stockouts_from_data,
-)
+
+
+# ==================== Sheet 类型分派注册表（OCP） ====================
+# 定义在 re-export 之后，确保引用的导入函数已解析。
+# 新增 Sheet 类型时：注册一行即可，_process_comprehensive_sheet 主流程无需改动。
+_SHEET_IMPORTERS: dict[str, tuple[Callable, str]] = {
+    'product': (import_products_from_data, 'products'),
+    'order': (import_orders_from_data, 'orders'),
+    'stockin': (import_stockins_from_data, 'stockins'),
+    'stockout': (import_stockouts_from_data, 'stockouts'),
+}

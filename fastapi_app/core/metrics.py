@@ -99,6 +99,12 @@ REQUESTS_IN_PROGRESS = _get_or_create_gauge(
     ['method', 'endpoint']
 )
 
+DOMAIN_EVENT_PUBLISH_FAILURES = _get_or_create_counter(
+    'domain_event_publish_failures_total',
+    '领域事件发布失败次数（按事件类型）',
+    ['event_type']
+)
+
 
 # ==================== 业务指标 ====================
 

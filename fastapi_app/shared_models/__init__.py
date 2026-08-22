@@ -45,6 +45,7 @@ from fastapi_app.shared_models.file_record import FileRecord
 from fastapi_app.shared_models.inventory_log import InventoryLog
 from fastapi_app.shared_models.material_registration import MaterialRegistration, MaterialRegistrationItem
 from fastapi_app.shared_models.notification import Notification
+from fastapi_app.shared_models.numbering_counter import NumberingCounter
 from fastapi_app.shared_models.order import Order
 from fastapi_app.shared_models.order_batch_audit import OrderBatchAuditLog
 from fastapi_app.shared_models.order_item import OrderItem
@@ -69,7 +70,7 @@ from fastapi_app.shared_models.product_material import (
 )
 from fastapi_app.shared_models.production_plan import ProductionPlan, ProductionPlanLog, StagingPurchasePlan
 from fastapi_app.shared_models.purchase_center import ModificationLog, SavedQuery
-from fastapi_app.shared_models.purchase_order import PurchaseOrder, PurchaseOrderItem
+from fastapi_app.shared_models.purchase_order import PurchaseOrder, PurchaseOrderItem, PurchaseOrderStatus
 from fastapi_app.shared_models.purchase_plan import PurchasePlan, PurchasePlanDetail, ShipmentRecord
 from fastapi_app.shared_models.staging_order import StagingOrder
 from fastapi_app.shared_models.staging_stock_in import StagingStockIn
@@ -112,6 +113,7 @@ __all__ = [
     'MaterialRegistrationItem',
     'ModificationLog',
     'Notification',
+    'NumberingCounter',
     'Order',
     'OrderBatchAuditLog',
     'OrderItem',
@@ -132,6 +134,7 @@ __all__ = [
     'ProductionPlanLog',
     'PurchaseOrder',
     'PurchaseOrderItem',
+    'PurchaseOrderStatus',
     'PurchasePlan',
     'PurchasePlanDetail',
     'SavedQuery',

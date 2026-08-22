@@ -64,40 +64,34 @@ async def _generate_plan_no() -> str:
     """
     生成计划编号：PP-YYYYMMDD-NNNN
 
-    使用独立短事务执行 pg_advisory_xact_lock + SELECT ... FOR UPDATE，
-    查询后立即 commit 释放锁，避免在调用方长事务（含 Redis 缓存失效、
-    pub/sub 推送等 I/O）期间持锁导致并发请求串行化。
-
-    事务边界策略与 services.numbering.generate_number_async 一致（短事务 + 立即 commit），
-    但未引入 asyncio.Lock 进程内串行化与内存计数器补偿层，并发冲突由 plan_no 唯一约束
-    + 调用方 _persist_plan_with_retry 的 3 次重试兜底处理。若未来高并发场景冲突频繁，
-    可参考 numbering.py 补充 asyncio.Lock + _counters 内存计数器。
+    通过 numbering_counter 表原子 upsert 分配序号（见 services.numbering.
+    allocate_sequence）：计数独立短事务提交，多 worker 下无重号，业务回滚
+    仅产生跳号。plan_no 唯一约束与调用方 _persist_plan_with_retry 的重试
+    保留作为二道防线。
 
     N2 修复：移除未使用的 db 参数。
     """
+    from contextlib import suppress
+
     from fastapi_app.core.database import _AsyncSessionLocal
-    from fastapi_app.core.number_generator import _acquire_advisory_lock_async, _number_lock_key
+    from fastapi_app.services.numbering import allocate_sequence
 
     today_str = datetime.now(UTC).strftime('%Y%m%d')
     prefix = f'PP-{today_str}-'
-    async with _AsyncSessionLocal() as short_session:
-        await _acquire_advisory_lock_async(short_session, _number_lock_key('PP', today_str))
-        result = await short_session.execute(
+    # 种子：当日已落库最大编号（无锁读，保证首次分配与历史连续）
+    async with _AsyncSessionLocal() as seed_session:
+        result = await seed_session.execute(
             select(PurchasePlan.plan_no)
             .where(PurchasePlan.plan_no.like(f'{prefix}%'))
             .order_by(PurchasePlan.plan_no.desc())
             .limit(1)
-            .with_for_update()
         )
         max_no = result.scalar()
-        await short_session.commit()  # manual-tx: 独立短会话事务
+    seed = 0
     if max_no:
-        try:
-            next_seq = int(max_no.split('-')[-1]) + 1
-        except (ValueError, IndexError):
-            next_seq = 1
-    else:
-        next_seq = 1
+        with suppress(ValueError, IndexError):
+            seed = int(max_no.split('-')[-1])
+    next_seq = await allocate_sequence('PP', today_str, seed=seed)
     return f'{prefix}{next_seq:04d}'
 
 

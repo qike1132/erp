@@ -295,21 +295,17 @@ async def delete_order(
     """
     try:
         result = await order_service.delete_order(db, order_id, user)
-        await db.commit()
     except IntegrityError as e:
-        await db.rollback()
         logger.warning("删除订单完整性约束冲突: %s", e)
         raise HTTPException(status_code=409, detail='订单存在关联数据，无法删除') from e
     except PermissionDeniedError as e:
-        await db.rollback()
         raise HTTPException(status_code=403, detail=settings.sanitize_business_error(e)) from e
     except (ValueError, NotFoundError) as e:
-        await db.rollback()
         raise HTTPException(status_code=400, detail=str(e)) from e
     except SQLAlchemyError as e:
-        await db.rollback()
         logger.error("删除订单数据库异常: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail='数据库操作失败') from e
+    # 提交/回滚统一交给 get_async_db 请求级事务，端点只做异常翻译
 
     await cache_mgr.invalidate_dashboard()
     # 领域事件：ORDER_DELETED 在事务提交后发布（订阅者使用独立 session，需可见已提交变更）
@@ -322,6 +318,8 @@ async def delete_order(
             ))
         except Exception:  # defensive: 领域事件发布失败不影响删除操作结果
             logger.warning("ORDER_DELETED 领域事件发布失败", exc_info=True)
+            from fastapi_app.core.metrics import DOMAIN_EVENT_PUBLISH_FAILURES
+            DOMAIN_EVENT_PUBLISH_FAILURES.labels(event_type='order_deleted').inc()
     return OrderActionResponse(success=result['success'], message=result['message'])
 
 

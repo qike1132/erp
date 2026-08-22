@@ -5,7 +5,9 @@
 依赖 batch_import_parser 中的解析函数（parse_date_value、validate_customer_name）。
 """
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Callable
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -27,8 +29,33 @@ from fastapi_app.shared_models import (
     StockIn,
     StockOut,
 )
+from fastapi_app.shared_models.order import ORDER_STATUS_PENDING_STOCK
 
 logger = logging.getLogger(__name__)
+
+
+# ==================== 显式依赖包（DIP） ====================
+
+@dataclass(frozen=True)
+class ImportDeps:
+    """批量导入核心依赖的显式打包。
+
+    将模块级静态 import 的其他服务函数收敛为可注入依赖，
+    调用方/测试可传入替换实现，消除跨服务静态强耦合。
+    默认使用 default_import_deps() 解析的模块级实现，完全向后兼容。
+    """
+
+    generate_order_number: Callable = generate_order_number
+    generate_stockin_number: Callable = generate_stockin_number
+    generate_stockout_number: Callable = generate_stockout_number
+    process_order_deduction: Callable = process_order_deduction
+    calculate_available_shipment_quantity: Callable = calculate_available_shipment_quantity
+    get_product_for_update: Callable = get_product_for_update
+
+
+def default_import_deps() -> ImportDeps:
+    """返回默认依赖包（模块级单例函数）。"""
+    return ImportDeps()
 
 
 # ==================== 综合导入子函数 ====================
@@ -152,8 +179,14 @@ async def import_products_from_data(db: AsyncSession, data_list: list) -> int:
     )
 
 
-async def import_orders_from_data(db: AsyncSession, data_list: list) -> tuple[int, list]:
-    """从数据列表导入订单"""
+async def import_orders_from_data(db: AsyncSession, data_list: list, *, deps: ImportDeps | None = None) -> tuple[int, list]:
+    """从数据列表导入订单
+
+    Args:
+        deps: 可注入的依赖包（默认解析模块级实现）。
+    """
+    deps = deps or default_import_deps()
+
     async def _row_handler(db, row_data, idx, context, debug_messages):
         product_map = context['product_map']
         customer = row_data.get('客户名称') or row_data.get('客户')
@@ -189,7 +222,7 @@ async def import_orders_from_data(db: AsyncSession, data_list: list) -> tuple[in
             logger.warning("订单导入：quantity 解析失败，跳过该行 (product=%s, customer=%s, value=%r)", product_name, customer, quantity)
             return False
 
-        order_no = await generate_order_number(db)
+        order_no = await deps.generate_order_number(db)
         order = Order(
             order_no=order_no,
             customer=customer,
@@ -197,13 +230,13 @@ async def import_orders_from_data(db: AsyncSession, data_list: list) -> tuple[in
             product_id=product_id,
             quantity=qty,
             note=str(note).strip() if note else '',
-            status='待备货'
+            status=ORDER_STATUS_PENDING_STOCK
         )
         db.add(order)
         await db.flush()
 
         # 使用悲观锁更新产品库存，防止并发修改
-        locked_product = await get_product_for_update(db, product_id)
+        locked_product = await deps.get_product_for_update(db, product_id)
         locked_product.current_stock += qty
 
         log = InventoryLog(
@@ -226,7 +259,7 @@ async def import_orders_from_data(db: AsyncSession, data_list: list) -> tuple[in
                     deduct_value = 1
 
                 if deduct_value > 0:
-                    await process_order_deduction(db, order, product_id, deduct_value, deduct_stock=True, product=product)
+                    await deps.process_order_deduction(db, order, product_id, deduct_value, deduct_stock=True, product=product)
             except (ValueError, TypeError, SQLAlchemyError) as e:
                 logger.error(f"订单导入 - 行{idx}: 抵扣处理异常: {e}", exc_info=True)
 
@@ -243,8 +276,14 @@ async def import_orders_from_data(db: AsyncSession, data_list: list) -> tuple[in
     return count, debug_messages
 
 
-async def import_stockins_from_data(db: AsyncSession, data_list: list) -> tuple[int, list]:
-    """从数据列表导入备货"""
+async def import_stockins_from_data(db: AsyncSession, data_list: list, *, deps: ImportDeps | None = None) -> tuple[int, list]:
+    """从数据列表导入备货
+
+    Args:
+        deps: 可注入的依赖包（默认解析模块级实现）。
+    """
+    deps = deps or default_import_deps()
+
     async def _row_handler(db, row_data, idx, context, debug_messages):
         product_map = context['product_map']
         customer = row_data.get('客户名称') or row_data.get('客户')
@@ -278,7 +317,7 @@ async def import_stockins_from_data(db: AsyncSession, data_list: list) -> tuple[
             return False
 
         stockin_date = parse_date_value(stockin_date_val) or datetime.now(UTC).replace(tzinfo=None)
-        stockin_no = await generate_stockin_number(db)
+        stockin_no = await deps.generate_stockin_number(db)
         stockin = StockIn(
             stockin_no=stockin_no,
             stockin_date=stockin_date,
@@ -290,7 +329,7 @@ async def import_stockins_from_data(db: AsyncSession, data_list: list) -> tuple[
         db.add(stockin)
 
         # 使用悲观锁更新产品库存，防止并发修改
-        locked_product = await get_product_for_update(db, product_id)
+        locked_product = await deps.get_product_for_update(db, product_id)
         locked_product.current_stock += qty
 
         log = InventoryLog(
@@ -313,8 +352,14 @@ async def import_stockins_from_data(db: AsyncSession, data_list: list) -> tuple[
     )
 
 
-async def import_stockouts_from_data(db: AsyncSession, data_list: list) -> tuple[int, list]:
-    """从数据列表导入出货"""
+async def import_stockouts_from_data(db: AsyncSession, data_list: list, *, deps: ImportDeps | None = None) -> tuple[int, list]:
+    """从数据列表导入出货
+
+    Args:
+        deps: 可注入的依赖包（默认解析模块级实现）。
+    """
+    deps = deps or default_import_deps()
+
     async def _row_handler(db, row_data, idx, context, debug_messages):
         product_identifier = row_data.get('产品名称') or row_data.get('产品') or row_data.get('69码') or row_data.get('条码')
         quantity = row_data.get('数量') or row_data.get('出货数量')
@@ -358,7 +403,7 @@ async def import_stockouts_from_data(db: AsyncSession, data_list: list) -> tuple
         if product.current_stock < qty:
             return False
 
-        shipment_info = await calculate_available_shipment_quantity(
+        shipment_info = await deps.calculate_available_shipment_quantity(
             db, product.id, customer,
             order_type=order_type_parsed, country=country_parsed or None
         )
@@ -376,7 +421,7 @@ async def import_stockouts_from_data(db: AsyncSession, data_list: list) -> tuple
                 break
             if order_detail['available'] > 0:
                 ship_qty = min(remaining_qty, order_detail['available'])
-                stockout_no = await generate_stockout_number(db)
+                stockout_no = await deps.generate_stockout_number(db)
                 stockout = StockOut(
                     stockout_no=stockout_no,
                     stockout_date=stockout_date,
@@ -390,7 +435,7 @@ async def import_stockouts_from_data(db: AsyncSession, data_list: list) -> tuple
                 remaining_qty -= ship_qty
 
         # 使用悲观锁更新产品库存，防止并发修改
-        locked_product = await get_product_for_update(db, product.id)
+        locked_product = await deps.get_product_for_update(db, product.id)
         locked_product.current_stock -= qty
 
         log = InventoryLog(

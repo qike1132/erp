@@ -16,19 +16,21 @@
 结合数据库 FOR UPDATE 行锁确保跨进程安全。
 """
 import asyncio
-import contextlib
 import logging
 from datetime import UTC, datetime
 from typing import ClassVar
 
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # 向后兼容：re-export core 的同步实现（本模块无同步版本，直接复用 core 的实现是安全的）
 from fastapi_app.core.number_generator import (
-    _acquire_advisory_lock_async,
-    _number_lock_key,
+    _acquire_advisory_lock_async,  # noqa: F401 - 兼容 re-export，旧调用方可能经本模块引用
+    _number_lock_key,  # noqa: F401 - 同上
     generate_number_sync,  # noqa: F401
+)
+from fastapi_app.services.numbering_sequence import (  # noqa: F401 - 兼容 re-export
+    allocate_sequence,
+    read_daily_max,
 )
 from fastapi_app.shared_models import Order, PurchaseOrder, StockIn, StockOut
 
@@ -70,56 +72,29 @@ async def generate_number_async(prefix: str, model, date_field: str, number_fiel
     异步编号生成器（跨进程安全）
 
     生成策略：
-    1. 协程内用 asyncio.Lock 保证同进程内串行
-    2. 每次均使用独立短事务执行 FOR UPDATE 查询当日最大编号，查询后立即提交释放行锁，
-       避免跨进程内存缓存导致序号重复
+    1. 协程内 asyncio.Lock 串行化同进程调用，降低计数表争用
+    2. 以当日已落库最大编号为种子（无锁读，仅保证首日连续性），通过
+       numbering_counter 表原子递增分配序号，多 worker 下无重号
+    3. 计数独立短事务提交，业务事务回滚仅产生跳号（见 numbering_sequence）
 
     Args:
         prefix: 编号前缀 (如 'PO', 'BH', 'SO')
         model: 数据模型类
         date_field: 日期字段名称
         number_field: 编号字段名称
-        db: 异步数据库会话（不再用于 FOR UPDATE 查询，避免长事务持锁）
+        db: 异步数据库会话（用于种子读取，可见本事务内未提交编号）
 
     Returns:
-        str: 生成的编号,格式为 PREFIX-YYYYMMDD-XXXX
+        str: 生成的编号,格式: PREFIX-YYYYMMDD-XXXX
     """
-    today = datetime.now(UTC).replace(tzinfo=None)
-    date_str = today.strftime('%Y%m%d')
+    date_str = datetime.now(UTC).strftime('%Y%m%d')
 
     async with _async_number_generator._lock:
         _async_number_generator._cleanup_old_entries()
 
-        counter_key = f"{prefix}:{date_str}"
-
-        # 使用独立短事务执行 FOR UPDATE 查询，避免行锁被调用方长事务持有
-        from fastapi_app.core.database import _AsyncSessionLocal
-        async with _AsyncSessionLocal() as short_session:
-            # advisory lock 保证跨进程互斥; FOR UPDATE 在空表时无法阻止并发
-            await _acquire_advisory_lock_async(
-                short_session, _number_lock_key(prefix, date_str)
-            )
-
-            result = await short_session.execute(
-                select(model)
-                .where(func.date(getattr(model, date_field)) == today.date())
-                .order_by(getattr(model, number_field).desc())
-                .limit(1)
-                .with_for_update()
-            )
-            record = result.scalar_one_or_none()
-            await short_session.commit()  # manual-tx: 独立短会话事务
-
-        db_max = 0
-        if record:
-            last_number = getattr(record, number_field)
-            with contextlib.suppress(ValueError, IndexError):
-                db_max = int(last_number.split('-')[-1])
-
-        current_seq = max(db_max, _async_number_generator._counters.get(counter_key, 0)) + 1
-        _async_number_generator._counters[counter_key] = current_seq
-
-        return f"{prefix}-{date_str}-{str(current_seq).zfill(4)}"
+        db_max = await read_daily_max(db, model, date_field, number_field)
+        current_seq = await allocate_sequence(prefix, date_str, seed=db_max)
+        return '-'.join((prefix, date_str, str(current_seq).zfill(4)))
 
 
 async def generate_order_number(db: AsyncSession) -> str:
