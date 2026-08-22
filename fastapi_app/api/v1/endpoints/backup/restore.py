@@ -28,6 +28,8 @@ from fastapi_app.schemas.backup import (
     AsyncTaskResponse,
     BackupImportResponse,
     BackupProgressOut,
+    BackupRestorePlanOut,
+    BackupRestorePlanRequest,
     IncrementalRestoreResponse,
 )
 from fastapi_app.services import backup as backup_service
@@ -36,6 +38,7 @@ from fastapi_app.services.backup import (
     BackupLockError,
     RestoreError,
 )
+from fastapi_app.services.backup import restore_plan as restore_plan_service
 from fastapi_app.shared_models import User
 
 logger = logging.getLogger(__name__)
@@ -431,3 +434,28 @@ async def _run_async_file_restore(task_id: str, content: bytes, is_zip: bool, fi
     finally:
         # 释放恢复锁
         await backup_service.release_restore_lock()
+
+
+# ---------------------------------------------------------------------------
+# POST /restore/plan  还原差异预览（只读，原型向导第 2 步数据源）
+# ---------------------------------------------------------------------------
+@router.post('/restore/plan', response_model=BackupRestorePlanOut)
+async def restore_plan(
+    payload: BackupRestorePlanRequest,
+    user: User = Depends(require_backup_permission('restore_plan')),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """还原差异预览：manifest 行数 vs 当前库实时 COUNT(*)。
+
+    权限:backup_read。仅做只读探测，不触发任何写/还原。
+    """
+    try:
+        manifest = restore_plan_service.read_manifest_from_backup(payload.filename)
+    except (FileNotFoundError, ValueError) as e:
+        return BackupRestorePlanOut(success=False, filename=payload.filename, error=str(e))
+    try:
+        plan = await restore_plan_service.build_restore_plan(db, manifest)
+    except Exception as e:  # broad-except: 预览失败返回 message，不中断请求
+        logger.warning(f'还原差异预览失败: {e}')
+        return BackupRestorePlanOut(success=False, filename=payload.filename, error=str(e))
+    return BackupRestorePlanOut(success=True, filename=payload.filename, **plan)

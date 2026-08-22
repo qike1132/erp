@@ -256,7 +256,12 @@ async def restore_from_zip(
                 verify_db = _AsyncSessionLocal()
         try:
             target_db = verify_db or db
-            verification = await verify_restore(target_db, manifest.get('tables', {}), manifest.get('fingerprints'))
+            verification = await verify_restore(
+                target_db,
+                manifest.get('tables', {}),
+                manifest.get('fingerprints'),
+                manifest.get('schema_snapshot'),
+            )
             results['verification'] = verification
             if not verification.get('overall_pass', True):
                 results['_verification_failed'] = True
@@ -295,21 +300,25 @@ async def restore_from_zip(
 
 
 async def acquire_restore_lock(task_id: str) -> bool:
-    """尝试获取恢复锁（Redis 分布式锁，支持多 worker）"""
+    """尝试获取恢复锁（Redis 分布式锁，支持多 worker）
+
+    fail-closed（M3）:Redis 不可用时返回 False，拒绝还原执行——高危域不允许在
+    无法确认锁的情况下放行，避免两个还原在 4 worker 间并发覆盖数据。
+    """
     try:
         from fastapi_app.core.backup_progress import _get_redis
         client = await _get_redis()
         if client is None:
-            logger.warning('Redis 不可用，跳过分布式锁检查')
-            return True
+            logger.warning('Redis 不可用，拒绝获取恢复锁（fail-closed）')
+            return False
         result = await client.set(
             _RESTORE_LOCK_KEY, task_id,
             nx=True, ex=_RESTORE_LOCK_TTL
         )
         return result is not None
     except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
-        logger.warning(f'获取恢复锁失败: {e}')
-        return True  # Redis 故障时允许恢复（降级）
+        logger.warning(f'获取恢复锁失败: {e}（fail-closed，拒绝还原）')
+        return False
 
 
 async def release_restore_lock():
@@ -324,12 +333,14 @@ async def release_restore_lock():
 
 
 async def is_restore_in_progress() -> bool:
-    """检查是否有恢复任务正在执行"""
+    """检查是否有恢复任务正在执行（fail-closed:Redis 不可用时保守视为有任务）"""
     try:
         from fastapi_app.core.backup_progress import _get_redis
         client = await _get_redis()
         if client is None:
-            return False
+            logger.warning('Redis 不可用，is_restore_in_progress 保守返回 True（fail-closed）')
+            return True
         return await client.exists(_RESTORE_LOCK_KEY) > 0
-    except Exception:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
-        return False
+    except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
+        logger.warning(f'检查恢复锁失败: {e}（fail-closed，视为有任务）')
+        return True

@@ -41,6 +41,9 @@ class DisasterRecoveryTestService:
             # 测试频率（天）
             'test_frequency_days': int(os.environ.get('BACKUP_RECOVERY_TEST_FREQUENCY', '7')),
 
+            # M3: 加密备份演练密码（也可逐次传入），用于解密历史 .enc 包
+            'test_password': os.environ.get('BACKUP_TEST_PASSWORD', ''),
+
             # 测试数据库配置
             'test_db_host': os.environ.get('BACKUP_TEST_DB_HOST', 'localhost'),
             'test_db_port': int(os.environ.get('BACKUP_TEST_DB_PORT', '5432')),
@@ -229,10 +232,12 @@ class DisasterRecoveryTestService:
                     return backup_info
                 return None
 
-            # 选择最新的备份文件
+            # 选择最新的备份文件（含加密包；无密码时由 _get_backup_info 报出需密码）
             backup_files = []
-            for ext in ['.zip']:
+            for ext in ['.zip', '.enc']:
                 backup_files.extend(BACKUP_DIR.glob(f'*{ext}'))
+            # 排除孤儿 .enc.meta（仅元数据，无对应加密包）
+            backup_files = [f for f in backup_files if f.is_file() and not f.name.endswith('.enc.meta')]
 
             if not backup_files:
                 logger.warning("没有找到备份文件")
@@ -279,25 +284,32 @@ class DisasterRecoveryTestService:
 
             # 读取manifest
             try:
-                with zipfile.ZipFile(backup_path, 'r') as zf:
-                    if 'manifest.json' in zf.namelist():
-                        manifest = json.loads(zf.read('manifest.json'))
-                        backup_info.update({
-                            'manifest': manifest,
-                            'backup_type': manifest.get('type', 'unknown'),
-                            'backup_version': manifest.get('version', 'unknown'),
-                            'exported_at': manifest.get('exported_at'),
-                            'exported_by': manifest.get('exported_by'),
-                            'table_count': manifest.get('table_count', 0),
-                            'total_rows': manifest.get('total_rows', 0),
-                            'base_timestamp': manifest.get('base_timestamp'),
-                        })
-
-                        # 检查完整性
-                        backup_info['integrity_check'] = self._check_backup_integrity(zf, manifest)
-                    else:
-                        backup_info['integrity_check'] = {'passed': False, 'error': '缺少manifest.json'}
-            except (zipfile.BadZipFile, OSError, json.JSONDecodeError) as e:
+                readable = self._open_backup_content(backup_path)
+                try:
+                    with zipfile.ZipFile(readable, 'r') as zf:
+                        if 'manifest.json' in zf.namelist():
+                            manifest = json.loads(zf.read('manifest.json'))
+                            backup_info.update({
+                                'manifest': manifest,
+                                'backup_type': manifest.get('type', 'unknown'),
+                                'backup_version': manifest.get('version', 'unknown'),
+                                'exported_at': manifest.get('exported_at'),
+                                'exported_by': manifest.get('exported_by'),
+                                'table_count': manifest.get('table_count', 0),
+                                'total_rows': manifest.get('total_rows', 0),
+                                'base_timestamp': manifest.get('base_timestamp'),
+                            })
+                            backup_info['integrity_check'] = self._check_backup_integrity(zf, manifest)
+                        else:
+                            backup_info['integrity_check'] = {'passed': False, 'error': '缺少manifest.json'}
+                finally:
+                    if readable != backup_path:
+                        readable.unlink(missing_ok=True)
+            except zipfile.BadZipFile:
+                backup_info['integrity_check'] = {'passed': False, 'error': 'ZIP 文件损坏(或加密包未成功解密)'}
+            except ValueError as e:
+                backup_info['integrity_check'] = {'passed': False, 'error': str(e)}
+            except (OSError, json.JSONDecodeError) as e:
                 backup_info['integrity_check'] = {'passed': False, 'error': str(e)}
 
             return backup_info
@@ -305,6 +317,32 @@ class DisasterRecoveryTestService:
         except OSError as e:
             logger.error(f"获取备份信息失败 {backup_path.name}: {e}")
             return None
+
+    def _open_backup_content(self, backup_path: Path) -> Path:
+        """返回可读取的明文 ZIP 路径；加密备份(.enc/.zip.enc)先解密。
+
+        - 明文 ZIP：原样返回。
+        - 加密包：需 BACKUP_TEST_PASSWORD，解密后写入临时文件返回；
+          未提供密码时抛明确的 KeyboardInterrupt 之外的 ValueError，供上层报「需密码」。
+        """
+        name = backup_path.name
+        if not (name.endswith('.enc') or '.enc' in name):
+            return backup_path
+        try:
+            from fastapi_app.core.backup_encryption import decrypt_backup
+            password = self.test_config.get('test_password', '')
+            if not password:
+                raise ValueError(f'备份 {name} 已加密，但未配置 BACKUP_TEST_PASSWORD，无法解密还原')
+            encrypted_bytes = backup_path.read_bytes()
+            plain_bytes = decrypt_backup(encrypted_bytes, password)
+            tmp_path = tempfile.NamedTemporaryFile(prefix='dr_decrypt_', suffix='.zip', delete=False)
+            tmp_path.write(plain_bytes)
+            tmp_path.close()
+            return Path(tmp_path.name)
+        except ValueError:
+            raise
+        except Exception as e:  # defensive: 解密失败给出明确原因
+            raise ValueError(f'解密备份 {name} 失败，请核对密码: {e}') from e
 
     def _check_backup_integrity(self, zip_file: zipfile.ZipFile, manifest: dict[str, Any]) -> dict[str, Any]:  # log-context: internal helper 无请求上下文
         """检查备份完整性"""
@@ -370,13 +408,16 @@ class DisasterRecoveryTestService:
         try:
             backup_path = Path(backup_info['path'])
 
-            # 提取备份文件
+            # 提取备份文件（加密包先解密）
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_path = Path(temp_dir)
-
-                # 解压备份文件
-                with zipfile.ZipFile(backup_path, 'r') as zf:
-                    zf.extractall(temp_path)
+                readable = self._open_backup_content(backup_path)
+                try:
+                    with zipfile.ZipFile(readable, 'r') as zf:
+                        zf.extractall(temp_path)
+                finally:
+                    if readable != backup_path:
+                        readable.unlink(missing_ok=True)
 
                 # 读取manifest
                 manifest_path = temp_path / 'manifest.json'

@@ -22,6 +22,8 @@ class Base(DeclarativeBase):
 from fastapi_app.shared_models.approval import ApprovalLog, ApprovalRequest
 from fastapi_app.shared_models.audit_log import AuditLog
 from fastapi_app.shared_models.backup_record import BackupRecord
+from fastapi_app.shared_models.backup_schedule import BackupSchedule
+from fastapi_app.shared_models.backup_settings import BackupSettings
 from fastapi_app.shared_models.case import Case
 from fastapi_app.shared_models.case_inventory_log import CaseInventoryLog
 from fastapi_app.shared_models.case_stock_in import CaseStockIn
@@ -91,6 +93,8 @@ __all__ = [
     'ApprovalRequest',
     'AuditLog',
     'BackupRecord',
+    'BackupSchedule',
+    'BackupSettings',
     'Base',
     'Case',
     'CaseInventoryLog',

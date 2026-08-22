@@ -28,7 +28,7 @@
 """
 from fastapi import APIRouter
 
-from fastapi_app.api.v1.endpoints.backup import export, records, restore, validation
+from fastapi_app.api.v1.endpoints.backup import actions, export, records, restore, settings, validation
 from fastapi_app.services import backup as backup_service
 
 router = APIRouter()
@@ -36,6 +36,8 @@ router.include_router(records.router)
 router.include_router(export.router)
 router.include_router(restore.router)
 router.include_router(validation.router)
+router.include_router(actions.router)
+router.include_router(settings.router)
 
 # 兼容常量（供 Celery 旧导入过渡期使用，后续可移除）
 BACKUP_DIR = backup_service.BACKUP_DIR

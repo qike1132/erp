@@ -16,10 +16,191 @@ ARQ 任务为原生 async，原先在 Celery 同步 worker 中用 _run_async 包
 import logging
 from datetime import datetime
 
+from fastapi_app.core.backup_progress import (
+    complete_progress,
+    create_progress,
+    fail_progress,
+    generate_task_id,
+    update_progress,
+)
+
 logger = logging.getLogger(__name__)
 
 # ARQ 重试上限（对应 Celery max_retries=2 → 总尝试 3 次）
 _MAX_TRIES = 3
+
+
+async def manual_full_backup_task(ctx, *, task_id: str | None = None, remark: str = '', encrypt: bool = True, password: str | None = None):
+    """手动全量备份（ARQ 异步任务，M1 新增）。
+
+    由 POST /api/v1/backup/full 入队触发；写 Redis 进度(8 阶段)，
+    完成后落 backup_record(trigger_type='manual', encrypted 反映实际加密)。
+    任务名在 WorkerSettings.functions 注册，与自动备份共用 _do_auto_backup 骨架。
+
+    注意:task_id 由入口端点生成并传入(与前端 POST /full 返回的 task_id 一致),
+    任务不再自行生成,否则前端轮询 GET /progress/{task_id} 将取不到进度。
+    """
+    task_id = task_id or generate_task_id()
+    await create_progress(task_id, operation_type='full', progress_type='backup')
+    job_try = ctx.get('job_try', 1)
+    start_time = datetime.now()
+    operator = 'manual_user'
+
+    try:
+        await update_progress(task_id, 'init', 0.1, '开始全量备份')
+        from fastapi_app.core.database import get_async_db_context
+        from fastapi_app.services import backup as backup_service
+        from fastapi_app.shared_models import User as UserModel
+
+        backup_service.ensure_backup_dir()
+
+        async with get_async_db_context() as db:
+            dummy_user = UserModel()
+            dummy_user.username = operator
+            dummy_user.id = 0
+
+            # 加密 fail-safe:与端点 _resolve_encryption 一致——
+            # 请求加密但未配置任何密码(参数/头/环境变量)时,降级为不加密,禁止随机密钥回退
+            if not encrypt:
+                effective_password = None
+            else:
+                effective_password = password or backup_service.BACKUP_ENCRYPTION_PASSWORD or None
+                if not effective_password:
+                    logger.warning(
+                        '请求加密全量备份但未配置密码（参数/环境变量均无），本次备份将以未加密形式保存'
+                    )
+            await update_progress(task_id, 'export_db', 0.1, '导出数据库')
+            zip_bytes, manifest = await backup_service.create_full_backup(
+                db, dummy_user, remark or '手动全量备份',
+                encrypt_password=effective_password,
+                encrypt=bool(effective_password),
+            )
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f'erp_backup_{timestamp}.zip'
+            filepath = backup_service.BACKUP_DIR / filename
+
+            await update_progress(task_id, 'write_file', 0.5, f'写入 {filename}')
+            filepath.write_bytes(zip_bytes)
+
+            # 写入 BackupRecord
+            await backup_service.write_backup_record(
+                db, record_type='full', trigger_type='manual',
+                filename=filename, size=len(zip_bytes),
+                table_count=manifest.get('table_count'),
+                total_rows=manifest.get('total_rows'),
+                operator=operator, remark=remark or '手动全量备份',
+                encrypted=manifest.get('encrypted', False),
+                manifest_summary={
+                    'checksums': manifest.get('checksums'),
+                    'schema_snapshot': manifest.get('schema_snapshot'),
+                },
+            )
+
+        result = {
+            'status': 'ok', 'type': 'full', 'filename': filename,
+            'size': len(zip_bytes),
+            'table_count': manifest.get('table_count'),
+            'total_rows': manifest.get('total_rows'),
+        }
+        await complete_progress(task_id, result=result)
+        logger.info(f'手动全量备份完成: {filename}')
+        return result
+
+    except Exception as e:  # defensive: background task must log/alert failure instead of propagating
+        error_msg = f'手动全量备份失败: {e}'
+        logger.error(error_msg)
+        await fail_progress(task_id, error=str(e))
+        await _send_backup_alert(
+            task_name='manual_full_backup',
+            error=error_msg,
+            task_type='backup',
+            severity='error',
+            additional_info={
+                'start_time': start_time.isoformat(),
+                'end_time': datetime.now().isoformat(),
+                'retry_count': job_try - 1,
+                'exception_type': type(e).__name__,
+            },
+        )
+        if job_try < _MAX_TRIES:
+            raise e
+        return {'status': 'error', 'error': str(e)}
+
+
+async def manual_incremental_backup_task(ctx, *, task_id: str | None = None, remark: str = '', since: str = ''):
+    """手动增量备份（ARQ 异步任务，M1 新增）。
+
+    由 POST /api/v1/backup/incremental 入队触发；写 Redis 进度，
+    完成后落 backup_record(trigger_type='manual', record_type='incremental')。
+
+    注意:task_id 由入口端点生成并传入(与前端 POST /incremental 返回的 task_id 一致)。
+    """
+    task_id = task_id or generate_task_id()
+    await create_progress(task_id, operation_type='incremental', progress_type='backup')
+    job_try = ctx.get('job_try', 1)
+    start_time = datetime.now()
+    operator = 'manual_user'
+
+    try:
+        await update_progress(task_id, 'init', 0.1, '开始增量备份')
+        from fastapi_app.core.database import get_async_db_context
+        from fastapi_app.services import backup as backup_service
+        from fastapi_app.shared_models import User as UserModel
+
+        backup_service.ensure_backup_dir()
+
+        async with get_async_db_context() as db:
+            dummy_user = UserModel()
+            dummy_user.username = operator
+            dummy_user.id = 0
+
+            await update_progress(task_id, 'export_db', 0.2, '扫描增量变更')
+            result = await backup_service.create_incremental_backup(
+                db, dummy_user, remark or '手动增量备份', since,
+                encrypt=False,  # 手动增量不隐式加密(fail-safe,避免随机密钥)
+            )
+
+            if result.get('filename'):
+                await update_progress(task_id, 'write_file', 0.9, f'写入 {result["filename"]}')
+                await backup_service.write_backup_record(
+                    db, record_type='incremental', trigger_type='manual',
+                    filename=result['filename'], size=result.get('size'),
+                    table_count=result.get('table_count'),
+                    total_rows=result.get('total_rows'),
+                    operator=operator, remark=remark or '手动增量备份',
+                    encrypted=result.get('encrypted', False),
+                    manifest_summary={
+                        'base_timestamp': result.get('base_timestamp'),
+                        'checksums': result.get('checksums'),
+                    },
+                )
+            else:
+                logger.info('手动增量备份: 无变更数据')
+
+        result_out = {'status': 'ok', 'type': 'incremental', 'result': result}
+        await complete_progress(task_id, result=result_out)
+        logger.info(f'手动增量备份完成: {result}')
+        return result_out
+
+    except Exception as e:  # defensive: background task must log/alert failure instead of propagating
+        error_msg = f'手动增量备份失败: {e}'
+        logger.error(error_msg)
+        await fail_progress(task_id, error=str(e))
+        await _send_backup_alert(
+            task_name='manual_incremental_backup',
+            error=error_msg,
+            task_type='backup',
+            severity='error',
+            additional_info={
+                'start_time': start_time.isoformat(),
+                'end_time': datetime.now().isoformat(),
+                'retry_count': job_try - 1,
+                'exception_type': type(e).__name__,
+            },
+        )
+        if job_try < _MAX_TRIES:
+            raise e
+        return {'status': 'error', 'error': str(e)}
 
 
 async def _send_backup_alert(task_name: str, error: str, task_type: str = 'backup', severity: str = 'error', additional_info: dict | None = None):
@@ -54,6 +235,38 @@ async def _collect_backup_metrics(backup_type: str, start_time: datetime, end_ti
         )
     except Exception as e:  # defensive: metrics collection must not crash the caller
         logger.error(f'收集备份指标失败: {e}')
+
+
+async def scheduler_poller(ctx):
+    """扫描 backup_schedule 表，把到期任务入队（M2）。
+
+    每 5 分钟由 ARQ cron 触发；命中「enabled 且 cron 匹配当前分钟且未在本小时窗口
+    执行过」的调度，按 task_type 映射到 auto_* 任务函数入队并更新 last_run_at/status。
+    幂等：last_run_at 按小时窗口判断；跨进程唯一性由目标任务内部既有 advisory lock 兜底。
+    """
+    try:
+        from fastapi_app.core.arq_app import get_arq_pool
+        from fastapi_app.core.database import get_async_db_context
+        from fastapi_app.services.backup import schedule_service
+
+        now = datetime.now()
+        async with get_async_db_context() as db:
+            due = await schedule_service.due_schedules(db, now)
+            if not due:
+                return
+            pool = await get_arq_pool()
+            for sch in due:
+                func_name = schedule_service.TASK_TYPE_TO_FUNC.get(sch.task_type)
+                if not func_name:
+                    logger.warning('调度任务 id=%s 类型 %s 无映射任务函数，跳过', sch.id, sch.task_type)
+                    continue
+                await pool.enqueue_job(func_name, _job_timeout=1800)
+                sch.last_run_at = now
+                sch.last_status = 'running'
+                await db.commit()
+                logger.info('调度入队 schedule_id=%s name=%s -> %s', sch.id, sch.name, func_name)
+    except Exception as e:  # defensive: 调度轮询不得中断 worker
+        logger.error('调度轮询失败: %s', e)
 
 
 async def auto_daily_backup_task(ctx):

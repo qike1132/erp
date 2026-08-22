@@ -41,7 +41,4 @@ export const backupApi = {
   integrityCheck: () => post<{ success: boolean } & ApiResponse>('/backup/integrity-check'),
   getRecords: (page: number = 1, pageSize: number = 20) =>
     get<ApiResponse>(`/backup/records?page=${page}&page_size=${pageSize}`),
-  getSchedule: () => get<ApiResponse>('/backup/schedule'),
-  triggerSchedule: (taskName: string) => post<ApiResponse>(`/backup/schedule/trigger?task_name=${encodeURIComponent(taskName)}`),
-  getStatus: () => get<ApiResponse>('/backup/status'),
 }

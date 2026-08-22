@@ -51,6 +51,9 @@ async def write_backup_record(
     ip_address: str | None = None,
     user_agent: str | None = None,
     parent_record_id: int | None = None,
+    manifest_summary: dict | None = None,
+    schedule_id: int | None = None,
+    encrypted: bool | None = None,
 ) -> None:
     """写入备份操作记录到 BackupRecord 表"""
     try:
@@ -62,6 +65,9 @@ async def write_backup_record(
             error_message=error_message, duration_seconds=duration_seconds,
             ip_address=ip_address, user_agent=user_agent,
             parent_record_id=parent_record_id,
+            manifest_summary=manifest_summary,
+            schedule_id=schedule_id,
+            encrypted=encrypted,
         )
         db.add(record)
         await db.flush()

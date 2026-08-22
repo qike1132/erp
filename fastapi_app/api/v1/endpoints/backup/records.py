@@ -18,18 +18,21 @@ from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.api.v1.endpoints.backup._deps import require_backup_permission
-from fastapi_app.core.database import get_async_read_db
+from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.schemas.backup import (
     BackupDeleteResponse,
     BackupListResponse,
     BackupPingResponse,
     BackupRecordListOut,
+    BackupScheduleCreate,
     BackupScheduleOut,
+    BackupScheduleUpdate,
     BackupStatusOut,
     BackupTablesResponse,
     BackupTriggerOut,
 )
 from fastapi_app.services import backup as backup_service
+from fastapi_app.services.backup import schedule_service
 from fastapi_app.services.backup.verify import query_service as backup_query_service
 from fastapi_app.services.backup import BackupFileError
 from fastapi_app.shared_models import User
@@ -141,16 +144,98 @@ async def get_backup_records(
 # GET /schedule
 # ---------------------------------------------------------------------------
 @router.get('/schedule', response_model=BackupScheduleOut)
-async def get_backup_schedule(user: User = Depends(require_backup_permission('get_backup_schedule'))):
-    """定时任务配置（ARQ cron_jobs）"""
-    from fastapi_app.core.arq_app import cron_schedules
-    tasks = []
-    for s in cron_schedules:
-        tasks.append({
-            'name': s['name'], 'task': s['func'].__name__,
-            'schedule': s['schedule'], 'enabled': True,
-        })
+async def get_backup_schedule(
+    user: User = Depends(require_backup_permission('get_backup_schedule')),
+    db: AsyncSession = Depends(get_async_read_db),
+):
+    """定时任务配置（M2 起读 backup_schedule 表）"""
+    rows = await schedule_service.list_schedules(db)
+    tasks = [
+        {
+            'id': r.id,
+            'name': r.name,
+            'task': schedule_service.TASK_TYPE_TO_FUNC.get(r.task_type, ''),
+            'task_type': r.task_type,
+            'cron_expr': r.cron_expr,
+            'schedule': r.cron_expr,
+            'enabled': r.enabled,
+            'last_run': r.last_run_at,
+            'last_status': r.last_status,
+        }
+        for r in rows
+    ]
     return {'success': True, 'tasks': tasks}
+
+
+# ---------------------------------------------------------------------------
+# POST /schedule  新增
+# PUT /schedule/{id}  更新
+# DELETE /schedule/{id}  删除
+# ---------------------------------------------------------------------------
+@router.post('/schedule', response_model=BackupScheduleOut, status_code=201)
+async def create_backup_schedule(
+    payload: BackupScheduleCreate,
+    user: User = Depends(require_backup_permission('create_backup_schedule')),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """新增定时任务（backup_manage）"""
+    try:
+        row = await schedule_service.create_schedule(
+            db, name=payload.name, task_type=payload.task_type,
+            cron_expr=payload.cron_expr, enabled=payload.enabled,
+        )
+    except schedule_service.BackupSettingsError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {
+        'success': True,
+        'tasks': [{
+            'id': row.id, 'name': row.name,
+            'task': schedule_service.TASK_TYPE_TO_FUNC.get(row.task_type, ''),
+            'task_type': row.task_type, 'cron_expr': row.cron_expr,
+            'schedule': row.cron_expr, 'enabled': row.enabled,
+            'last_run': row.last_run_at, 'last_status': row.last_status,
+        }],
+    }
+
+
+@router.put('/schedule/{schedule_id}', response_model=BackupScheduleOut)
+async def update_backup_schedule(
+    schedule_id: int,
+    payload: BackupScheduleUpdate,
+    user: User = Depends(require_backup_permission('update_backup_schedule')),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """更新定时任务（backup_manage）"""
+    try:
+        row = await schedule_service.update_schedule(
+            db, schedule_id, name=payload.name, task_type=payload.task_type,
+            cron_expr=payload.cron_expr, enabled=payload.enabled,
+        )
+    except schedule_service.BackupSettingsError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {
+        'success': True,
+        'tasks': [{
+            'id': row.id, 'name': row.name,
+            'task': schedule_service.TASK_TYPE_TO_FUNC.get(row.task_type, ''),
+            'task_type': row.task_type, 'cron_expr': row.cron_expr,
+            'schedule': row.cron_expr, 'enabled': row.enabled,
+            'last_run': row.last_run_at, 'last_status': row.last_status,
+        }],
+    }
+
+
+@router.delete('/schedule/{schedule_id}', response_model=BackupTriggerOut)
+async def delete_backup_schedule(
+    schedule_id: int,
+    user: User = Depends(require_backup_permission('delete_backup_schedule')),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """删除定时任务（backup_manage）"""
+    deleted = await schedule_service.delete_schedule(db, schedule_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f'调度任务 {schedule_id} 不存在')
+    return {'success': True, 'task_name': str(schedule_id), 'message': '调度任务已删除'}
 
 
 # ---------------------------------------------------------------------------
@@ -161,12 +246,34 @@ async def trigger_backup_schedule(
     task_name: str = Query(...),
     user: User = Depends(require_backup_permission('trigger_backup_schedule')),
 ):
-    """手动触发定时任务（通过 ARQ 入队）"""
+    """手动触发定时任务（通过 ARQ 入队）
+
+    M2 起优先匹配 backup_schedule 表（按 name），再回退到内置 cron_schedules。
+    """
     from fastapi_app.core.arq_app import cron_schedules, get_arq_pool
+
+    # 1) 内置 cron_schedules（sync-shipment/级联等）
     schedule = next((s for s in cron_schedules if s['name'] == task_name), None)
-    if schedule is None:
-        raise HTTPException(status_code=404, detail=f'定时任务 {task_name} 不存在')
-    func_name = schedule['func'].__name__
+    if schedule is not None:
+        func_name = schedule['func'].__name__
+        try:
+            pool = await get_arq_pool()
+            await pool.enqueue_job(func_name)
+        except (RuntimeError, OSError, ConnectionError) as e:
+            raise HTTPException(status_code=500, detail='触发任务失败，请查看服务器日志') from e
+        return {'success': True, 'task_name': task_name, 'message': f'任务 {task_name} 已触发'}
+
+    # 2) backup_schedule 表（M2 起定时备份走这里）
+    from fastapi_app.core.database import get_async_db_context
+
+    async with get_async_db_context() as db:
+        rows = await schedule_service.list_schedules(db)
+        row = next((r for r in rows if r.name == task_name), None)
+        if row is None:
+            raise HTTPException(status_code=404, detail=f'定时任务 {task_name} 不存在')
+        func_name = schedule_service.TASK_TYPE_TO_FUNC.get(row.task_type, '')
+    if not func_name:
+        raise HTTPException(status_code=400, detail=f'任务类型 {row.task_type} 无对应任务函数')
     try:
         pool = await get_arq_pool()
         await pool.enqueue_job(func_name)

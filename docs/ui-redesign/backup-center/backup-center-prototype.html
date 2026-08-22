@@ -1,0 +1,1029 @@
+<!DOCTYPE html>
+<!--
+  滨发 ERP · 数据备份中心 — 高保真前端原型
+  设计系统:Stripe 结构秩序 + Linear 操作反馈 + 既有 ERP 品牌蓝(#2F7BFF)
+  令牌来源:D:\erp_system\docs\ui-redesign\backup-center\DESIGN.md(Phase 2 产出)
+  说明:单文件、内联 CSS + 内联 JS、无外部依赖、双击即可运行
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数据备份中心 · 滨发 ERP</title>
+<style>
+:root{
+  /* 主色 · 品牌蓝 */
+  --color-primary:#2F7BFF; --color-primary-hover:#1F66E6; --color-primary-active:#1853BF;
+  --color-primary-soft:#E6F0FF; --color-primary-border:#9DBEFF;
+  /* 中性色阶 */
+  --color-bg-page:#F5F7FA; --color-surface:#FFFFFF; --color-surface-hover:#F7F8FA; --color-surface-muted:#F2F3F5;
+  --color-border:#E5E6EB; --color-border-strong:#C9CDD4;
+  --color-text-primary:#1D2129; --color-text-secondary:#4E5969; --color-text-tertiary:#86909C; --color-text-disabled:#C9CDD4;
+  /* 语义色 */
+  --color-success:#10B981; --color-success-soft:#E6FAF1; --color-success-border:#A7F3D0;
+  --color-processing:#6366F1; --color-processing-soft:#E9EAFE;
+  --color-warning:#F59E0B; --color-warning-soft:#FEF6E6; --color-warning-strong:#B45309;
+  --color-danger:#EF4444; --color-danger-hover:#DC2626; --color-danger-soft:#FFECE8; --color-danger-border:#FECACA;
+  /* 字体 */
+  --font-sans:"PingFang SC","Microsoft YaHei UI",-apple-system,BlinkMacSystemFont,"Segoe UI","Helvetica Neue",Arial,sans-serif;
+  --font-mono:"JetBrains Mono","Cascadia Mono",Consolas,Menlo,monospace;
+  --font-num:"DIN Pro","Inter","Helvetica Neue","PingFang SC",sans-serif;
+  /* 字号 */
+  --fs-display:28px; --fs-h1:22px; --fs-h2:18px; --fs-h3:16px; --fs-body-lg:15px;
+  --fs-body:14px; --fs-small:13px; --fs-caption:12px; --fs-micro:11px; --fs-stat-lg:28px; --fs-stat:20px;
+  /* 间距 */
+  --spacing-1:4px; --spacing-2:8px; --spacing-3:12px; --spacing-4:16px; --spacing-5:20px;
+  --spacing-6:24px; --spacing-8:32px; --spacing-10:40px; --spacing-12:48px;
+  /* 圆角 */
+  --radius-xs:4px; --radius-sm:6px; --radius-md:8px; --radius-lg:12px; --radius-pill:999px;
+  /* 阴影 */
+  --shadow-xs:0 1px 2px rgba(0,0,0,.04); --shadow-sm:0 2px 8px rgba(0,0,0,.06);
+  --shadow-md:0 6px 20px rgba(0,0,0,.10); --shadow-lg:0 16px 40px rgba(0,0,0,.14);
+  --shadow-focus:0 0 0 3px rgba(47,123,255,.25); --shadow-danger:0 0 0 3px rgba(239,68,68,.25);
+}
+*{ margin:0; padding:0; box-sizing:border-box; }
+html{ -webkit-text-size-adjust:100%; }
+body{ font-family:var(--font-sans); background:var(--color-bg-page); color:var(--color-text-primary); font-size:var(--fs-body); line-height:1.6; -webkit-font-smoothing:antialiased; }
+button{ font-family:inherit; cursor:pointer; }
+input,select{ font-family:inherit; }
+svg{ display:block; flex:none; }
+.mono{ font-family:var(--font-mono); }
+
+/* ---------- 布局 ---------- */
+.page{ max-width:1440px; margin:0 auto; padding:var(--spacing-6); }
+.page-header{ margin-bottom:var(--spacing-6); }
+.page-title{ font-size:var(--fs-display); font-weight:600; line-height:36px; letter-spacing:-.01em; }
+.page-sub{ margin-top:6px; font-size:var(--fs-small); color:var(--color-text-secondary); display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.sync-dot{ width:6px; height:6px; border-radius:50%; background:var(--color-success); flex:none; }
+.module{ margin-bottom:var(--spacing-6); }
+.section-head{ display:flex; align-items:flex-end; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:16px; }
+.section-title{ font-size:var(--fs-h1); font-weight:600; line-height:30px; }
+.section-desc{ margin-top:4px; font-size:var(--fs-small); color:var(--color-text-tertiary); }
+.section-actions{ display:flex; gap:12px; flex-wrap:wrap; }
+.card{ background:var(--color-surface); border:1px solid var(--color-border); border-radius:var(--radius-md); box-shadow:var(--shadow-xs); padding:var(--spacing-5); }
+.card-title{ font-size:var(--fs-h2); font-weight:600; line-height:26px; margin-bottom:4px; }
+.card-sub{ font-size:var(--fs-small); color:var(--color-text-tertiary); margin-bottom:16px; }
+.two-col{ display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:start; }
+
+/* ---------- 模块1 · 概览状态卡 ---------- */
+.stats-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:16px; }
+.stat-card{ background:var(--color-surface); border:1px solid var(--color-border); border-radius:var(--radius-md); box-shadow:var(--shadow-xs); padding:16px 20px; transition:box-shadow .15s ease, border-color .15s ease; }
+.stat-card:hover{ box-shadow:var(--shadow-sm); border-color:var(--color-border-strong); }
+.stat-head{ display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+.stat-label{ font-size:var(--fs-caption); font-weight:500; color:#6B7280; letter-spacing:.02em; }
+.dot{ width:8px; height:8px; border-radius:50%; flex:none; }
+.dot-success{ background:var(--color-success); }
+.dot-processing{ background:var(--color-processing); }
+.dot-warning{ background:var(--color-warning); }
+.dot-danger{ background:var(--color-danger); }
+.dot-muted{ background:var(--color-border-strong); }
+.stat-value{ font-family:var(--font-num); font-size:var(--fs-stat); font-weight:600; line-height:1.3; color:var(--color-text-primary); }
+.stat-value .unit{ font-size:13px; font-weight:500; color:var(--color-text-tertiary); margin-left:2px; font-family:var(--font-sans); }
+.stat-value.stat-lg{ font-size:var(--fs-stat-lg); font-weight:700; }
+.stat-desc{ margin-top:6px; font-size:var(--fs-small); color:var(--color-text-secondary); display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.chip{ display:inline-flex; align-items:center; gap:6px; padding:2px 10px; border-radius:var(--radius-pill); font-size:var(--fs-caption); font-weight:500; line-height:20px; }
+.chip-success{ background:var(--color-success-soft); color:var(--color-success); }
+
+/* ---------- 进度条 ---------- */
+.progress{ height:8px; background:var(--color-surface-muted); border-radius:var(--radius-pill); overflow:hidden; margin-top:10px; }
+.progress-bar{ height:100%; width:0; background:var(--color-processing); border-radius:var(--radius-pill); transition:width .2s ease; }
+.progress-bar.success{ background:var(--color-success); }
+.progress-bar.danger{ background:var(--color-danger); }
+.progress-row{ display:flex; align-items:center; gap:12px; }
+.progress-row .progress{ flex:1; margin-top:0; }
+.progress-text{ font-family:var(--font-mono); font-size:var(--fs-body); font-weight:500; color:var(--color-text-secondary); white-space:nowrap; min-width:44px; text-align:right; }
+
+/* ---------- 徽章 / 胶囊 ---------- */
+.badge{ display:inline-flex; align-items:center; gap:4px; padding:2px 10px; border-radius:var(--radius-pill); font-size:var(--fs-caption); font-weight:500; line-height:20px; white-space:nowrap; }
+.badge-success{ background:var(--color-success-soft); color:#047857; border:1px solid var(--color-success-border); }
+.badge-processing{ background:var(--color-processing-soft); color:#4338CA; }
+.badge-warning{ background:var(--color-warning-soft); color:var(--color-warning-strong); }
+.badge-danger{ background:var(--color-danger-soft); color:#B91C1C; border:1px solid var(--color-danger-border); }
+.badge-neutral{ background:var(--color-surface-muted); color:#6B7280; }
+
+/* ---------- 按钮 ---------- */
+.btn{ display:inline-flex; align-items:center; justify-content:center; gap:8px; height:40px; padding:0 24px; border-radius:var(--radius-md); border:1px solid transparent; font-size:var(--fs-body-lg); font-weight:500; line-height:1; white-space:nowrap; transition:background .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease; }
+.btn svg{ width:16px; height:16px; }
+.btn-primary{ background:var(--color-primary); color:#fff; }
+.btn-primary:hover{ background:var(--color-primary-hover); }
+.btn-primary:active{ background:var(--color-primary-active); }
+.btn-primary:focus-visible{ outline:none; box-shadow:var(--shadow-focus); }
+.btn-outline{ background:var(--color-surface); border-color:var(--color-border-strong); color:var(--color-primary); }
+.btn-outline:hover{ background:var(--color-primary-soft); border-color:var(--color-primary-border); }
+.btn-outline:active{ background:var(--color-primary-border); }
+.btn-outline:focus-visible{ outline:none; box-shadow:var(--shadow-focus); }
+.btn-outline .amber{ color:var(--color-warning); }
+.btn-danger{ background:var(--color-danger); color:#fff; }
+.btn-danger:hover{ background:var(--color-danger-hover); }
+.btn-danger:focus-visible{ outline:none; box-shadow:var(--shadow-danger); }
+.btn-sm{ height:32px; padding:0 16px; border-radius:var(--radius-sm); font-size:var(--fs-body); }
+.btn:disabled{ background:var(--color-surface-muted); color:var(--color-text-disabled); border-color:transparent; box-shadow:none; cursor:not-allowed; }
+.btn-ghost{ background:transparent; border-color:var(--color-border); color:var(--color-text-secondary); height:28px; padding:0 12px; border-radius:var(--radius-sm); font-size:var(--fs-small); }
+.btn-ghost:hover{ background:var(--color-surface-hover); color:var(--color-text-primary); }
+.tooltip-wrap{ position:relative; display:inline-flex; }
+.tooltip-wrap[data-tooltip]:hover::after{ content:attr(data-tooltip); position:absolute; bottom:calc(100% + 8px); left:50%; transform:translateX(-50%); background:var(--color-text-primary); color:#fff; font-size:var(--fs-micro); font-weight:500; line-height:1.4; padding:6px 10px; border-radius:var(--radius-sm); white-space:nowrap; box-shadow:var(--shadow-md); z-index:100; pointer-events:none; }
+.tooltip-wrap[data-tooltip]:hover::before{ content:''; position:absolute; bottom:calc(100% + 3px); left:50%; transform:translateX(-50%); border:5px solid transparent; border-top-color:var(--color-text-primary); z-index:100; pointer-events:none; }
+
+/* ---------- 模块2 · 任务执行卡片 ---------- */
+.task-card{ margin-top:16px; border:1px solid var(--color-border); border-radius:var(--radius-md); background:var(--color-surface); padding:16px; }
+.task-head{ display:flex; align-items:center; gap:12px; margin-bottom:12px; }
+.task-title{ font-size:var(--fs-body); font-weight:500; color:var(--color-text-primary); flex:1; }
+.task-meta{ display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-top:8px; }
+.task-stage{ font-size:var(--fs-small); color:var(--color-text-secondary); }
+.task-remain{ font-size:var(--fs-small); color:var(--color-text-tertiary); font-family:var(--font-mono); }
+
+/* ---------- 表单 ---------- */
+.form-row{ display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 0; border-bottom:1px solid #F2F3F5; }
+.form-row:first-of-type{ padding-top:4px; }
+.form-row:last-of-type{ border-bottom:none; }
+.form-label{ font-size:var(--fs-body); color:var(--color-text-primary); }
+.form-hint{ font-size:var(--fs-micro); color:var(--color-text-tertiary); margin-top:2px; }
+.form-actions{ display:flex; gap:12px; margin-top:16px; flex-wrap:wrap; }
+.input{ height:32px; padding:0 12px; border:1px solid var(--color-border-strong); border-radius:var(--radius-sm); background:var(--color-surface); font-size:var(--fs-body); color:var(--color-text-primary); outline:none; transition:border-color .15s ease, box-shadow .15s ease; }
+.input::placeholder{ color:var(--color-text-tertiary); }
+.input:focus{ border-color:var(--color-primary); box-shadow:var(--shadow-focus); }
+.input.error{ border-color:var(--color-danger); box-shadow:var(--shadow-danger); }
+.select{ height:32px; padding:0 30px 0 12px; border:1px solid var(--color-border-strong); border-radius:var(--radius-sm); background:var(--color-surface); font-size:var(--fs-body); color:var(--color-text-primary); outline:none; cursor:pointer; appearance:none; -webkit-appearance:none; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2386909C' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 8px center; }
+.select:focus{ border-color:var(--color-primary); box-shadow:var(--shadow-focus); }
+.switch{ position:relative; width:36px; height:20px; border-radius:var(--radius-pill); background:var(--color-border-strong); border:none; transition:background .15s ease; flex:none; }
+.switch::after{ content:''; position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:#fff; box-shadow:var(--shadow-sm); transition:left .15s ease; }
+.switch.on{ background:var(--color-primary); }
+.switch.on::after{ left:18px; }
+.radio-row{ padding:8px 0; }
+.radio{ display:flex; align-items:center; gap:8px; font-size:var(--fs-body); color:var(--color-text-primary); cursor:pointer; }
+.radio input{ accent-color:var(--color-primary); width:14px; height:14px; cursor:pointer; flex:none; }
+.path-box{ margin-top:8px; margin-left:22px; background:var(--color-surface-muted); border-radius:var(--radius-sm); padding:8px 12px; font-family:var(--font-mono); font-size:var(--fs-small); color:var(--color-text-secondary); overflow-x:auto; white-space:nowrap; }
+.path-input-row{ margin-left:22px; margin-top:8px; }
+.path-input-row .input{ width:100%; }
+.path-feedback{ display:flex; align-items:center; gap:6px; margin-top:6px; font-size:var(--fs-caption); }
+.path-feedback .ok{ color:var(--color-success); }
+.path-feedback .err{ color:var(--color-danger); }
+.path-feedback svg{ width:14px; height:14px; }
+.path-current{ margin-top:16px; border-top:1px solid #F2F3F5; padding-top:16px; }
+.path-current .path-label{ font-size:var(--fs-caption); font-weight:500; color:var(--color-text-tertiary); }
+.path-space{ margin-top:6px; font-size:var(--fs-small); color:var(--color-text-secondary); font-family:var(--font-mono); }
+
+/* ---------- 模块5 · 筛选条 / 表格 / 分页 ---------- */
+.filter-bar{ display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:16px; }
+.search{ position:relative; display:flex; align-items:center; }
+.search svg{ position:absolute; left:10px; width:14px; height:14px; color:var(--color-text-tertiary); }
+.search .input{ padding-left:30px; width:220px; }
+.table-wrap{ border:1px solid var(--color-border); border-radius:var(--radius-md); overflow-x:auto; background:var(--color-surface); }
+table{ width:100%; border-collapse:collapse; min-width:720px; }
+thead th{ background:var(--color-surface-hover); text-align:left; font-size:var(--fs-caption); font-weight:500; color:#6B7280; padding:12px; white-space:nowrap; }
+tbody td{ padding:0 12px; height:44px; font-size:var(--fs-body); color:var(--color-text-secondary); border-top:1px solid #F2F3F5; white-space:nowrap; }
+tbody tr:first-child td{ border-top:none; }
+tbody tr:hover{ background:var(--color-surface-hover); }
+td .name{ font-family:var(--font-mono); font-size:var(--fs-small); color:var(--color-text-primary); }
+.table-actions{ text-align:right; }
+.link{ background:none; border:none; padding:0; font-size:var(--fs-body); color:var(--color-primary); cursor:pointer; }
+.link + .link{ margin-left:16px; }
+.restore-tip + .link{ margin-left:16px; }
+.link:hover{ text-decoration:underline; }
+.link-danger{ color:var(--color-danger); }
+.link-danger:hover{ text-decoration:underline; }
+.link[disabled]{ color:var(--color-text-disabled); cursor:not-allowed; text-decoration:none; }
+.pagination{ display:flex; align-items:center; justify-content:flex-end; gap:12px; margin-top:16px; font-size:var(--fs-small); color:var(--color-text-secondary); }
+.page-btn{ height:28px; padding:0 12px; border:1px solid var(--color-border-strong); border-radius:var(--radius-sm); background:var(--color-surface); color:var(--color-text-secondary); font-size:var(--fs-small); cursor:pointer; }
+.page-btn:hover:not(:disabled){ border-color:var(--color-primary); color:var(--color-primary); }
+.page-btn:disabled{ color:var(--color-text-disabled); background:var(--color-surface-muted); cursor:not-allowed; }
+
+/* ---------- 还原向导浮层 ---------- */
+.overlay{ position:fixed; inset:0; background:rgba(0,0,0,.32); z-index:300; display:flex; align-items:center; justify-content:center; padding:16px; }
+.overlay[hidden], .modal-overlay[hidden]{ display:none; }
+.restore-dialog{ width:100%; max-width:860px; max-height:calc(100vh - 32px); background:var(--color-surface); border-radius:var(--radius-lg); box-shadow:var(--shadow-md); display:flex; flex-direction:column; overflow:hidden; }
+.restore-head{ display:flex; align-items:center; justify-content:space-between; padding:20px 24px 0; }
+.icon-btn{ width:28px; height:28px; border:1px solid var(--color-border); border-radius:var(--radius-sm); background:var(--color-surface); color:var(--color-text-secondary); display:inline-flex; align-items:center; justify-content:center; cursor:pointer; }
+.icon-btn:hover{ background:var(--color-surface-hover); }
+.icon-btn svg{ width:14px; height:14px; }
+.icon-btn:disabled{ opacity:.5; cursor:not-allowed; }
+.stepper{ display:flex; align-items:center; padding:20px 24px 8px; overflow-x:auto; }
+.step{ display:flex; align-items:center; flex:none; }
+.step-dot{ width:24px; height:24px; border-radius:50%; border:2px solid var(--color-border-strong); background:var(--color-surface); color:var(--color-text-tertiary); font-size:var(--fs-caption); font-weight:500; display:flex; align-items:center; justify-content:center; flex:none; }
+.step-dot svg{ width:12px; height:12px; }
+.step-label{ margin-left:8px; font-size:var(--fs-body); font-weight:500; color:var(--color-text-tertiary); white-space:nowrap; }
+.step.done .step-dot{ background:var(--color-success); border-color:var(--color-success); color:#fff; }
+.step.done .step-label{ color:var(--color-text-primary); }
+.step.current .step-dot{ background:var(--color-primary); border-color:var(--color-primary); color:#fff; }
+.step.current .step-label{ color:var(--color-primary); }
+.step-line{ width:32px; height:2px; background:var(--color-border); margin:0 8px; flex:none; }
+.step-line.done{ background:var(--color-success); }
+.step-body{ padding:8px 24px 24px; overflow-y:auto; }
+.panel{ animation:fade .2s ease; }
+.panel[hidden]{ display:none; }
+@keyframes fade{ from{ opacity:0; transform:translateY(4px);} to{ opacity:1; transform:none;} }
+.panel-desc{ font-size:var(--fs-body); color:var(--color-text-secondary); margin-bottom:16px; }
+.point-list{ display:flex; flex-direction:column; gap:8px; }
+.point{ display:flex; align-items:center; gap:12px; border:1px solid var(--color-border); border-radius:var(--radius-md); padding:12px 16px; cursor:pointer; transition:border-color .15s ease, box-shadow .15s ease, background .15s ease; }
+.point:hover{ background:var(--color-surface-hover); }
+.point.checked{ border-color:var(--color-primary); box-shadow:var(--shadow-focus); background:var(--color-primary-soft); }
+.point input{ accent-color:var(--color-primary); width:14px; height:14px; flex:none; }
+.point-name{ font-family:var(--font-mono); font-size:var(--fs-small); color:var(--color-text-primary); }
+.point-meta{ font-family:var(--font-mono); font-size:var(--fs-small); color:var(--color-text-tertiary); margin-left:auto; }
+.impact-list{ display:flex; gap:16px; flex-wrap:wrap; margin-bottom:16px; }
+.impact-item{ display:flex; align-items:center; gap:8px; border:1px solid var(--color-danger-border); background:var(--color-danger-soft); border-radius:var(--radius-md); padding:10px 14px; font-size:var(--fs-body); color:var(--color-danger); }
+.impact-item svg{ width:16px; height:16px; }
+.impact-item b{ font-family:var(--font-mono); font-size:var(--fs-body-lg); font-weight:600; }
+.diff-summary{ margin-top:12px; font-size:var(--fs-small); color:var(--color-warning-strong); display:flex; align-items:center; gap:6px; }
+.check-list{ list-style:none; display:flex; flex-direction:column; gap:12px; margin-bottom:16px; }
+.check-item{ display:flex; align-items:center; gap:12px; border:1px solid var(--color-border); border-radius:var(--radius-md); padding:12px 16px; font-size:var(--fs-body); color:var(--color-text-secondary); }
+.check-item .check-state{ margin-left:auto; font-size:var(--fs-small); color:var(--color-text-tertiary); font-family:var(--font-mono); }
+.check-icon{ width:20px; height:20px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex:none; }
+.check-icon svg{ width:12px; height:12px; }
+.check-icon.pending{ border:2px solid var(--color-border-strong); color:var(--color-text-tertiary); }
+.check-icon.running{ border:2px solid var(--color-processing); color:var(--color-processing); }
+.check-icon.running svg{ animation:spin 1s linear infinite; }
+.check-icon.ok{ background:var(--color-success); color:#fff; }
+.check-icon.fail{ background:var(--color-danger); color:#fff; }
+@keyframes spin{ to{ transform:rotate(360deg); } }
+.check-result{ font-size:var(--fs-body); color:var(--color-success); display:flex; align-items:center; gap:8px; }
+.restore-progress{ display:flex; align-items:center; gap:12px; margin:16px 0; }
+.restore-progress .progress{ flex:1; }
+.report-success{ text-align:center; padding:16px 0 8px; }
+.report-icon{ width:48px; height:48px; border-radius:50%; background:var(--color-success-soft); color:var(--color-success); display:inline-flex; align-items:center; justify-content:center; margin-bottom:12px; }
+.report-icon svg{ width:24px; height:24px; stroke:var(--color-success); }
+.report-title{ font-size:var(--fs-h2); font-weight:600; color:var(--color-text-primary); }
+.report-sub{ margin-top:6px; font-size:var(--fs-body); color:var(--color-text-secondary); }
+.report-sub b{ font-family:var(--font-mono); color:var(--color-text-primary); font-weight:600; }
+.suggest{ margin-top:20px; border-top:1px solid #F2F3F5; padding-top:16px; }
+.suggest-title{ font-size:var(--fs-caption); font-weight:500; color:var(--color-text-tertiary); margin-bottom:8px; }
+.suggest ul{ list-style:none; display:flex; flex-direction:column; gap:6px; }
+.suggest li{ font-size:var(--fs-body); color:var(--color-text-secondary); padding-left:16px; position:relative; }
+.suggest li::before{ content:''; position:absolute; left:0; top:9px; width:6px; height:6px; border-radius:2px; background:var(--color-primary); }
+.restore-foot{ display:flex; align-items:center; justify-content:space-between; padding:16px 24px; border-top:1px solid #F2F3F5; }
+.restore-foot .right{ display:flex; gap:12px; margin-left:auto; }
+
+/* ---------- 危险确认弹层 ---------- */
+.modal-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.32); z-index:400; display:flex; align-items:center; justify-content:center; padding:16px; }
+.danger-modal{ width:100%; max-width:480px; background:var(--color-surface); border-radius:var(--radius-lg); box-shadow:var(--shadow-lg); overflow:hidden; }
+.danger-bar{ display:flex; align-items:center; gap:8px; background:var(--color-danger-soft); padding:8px 20px; font-size:var(--fs-caption); font-weight:500; color:var(--color-danger); }
+.danger-bar svg{ width:16px; height:16px; }
+.danger-body{ padding:20px; }
+.danger-title{ font-size:var(--fs-h1); font-weight:600; color:var(--color-text-primary); line-height:30px; }
+.danger-sub{ margin-top:8px; font-size:var(--fs-body); color:var(--color-text-secondary); }
+.danger-list{ list-style:none; margin:16px 0; display:flex; flex-direction:column; gap:8px; }
+.danger-list li{ display:flex; align-items:flex-start; gap:8px; font-size:var(--fs-body); color:var(--color-danger); }
+.danger-list li::before{ content:''; width:6px; height:6px; border-radius:50%; background:var(--color-danger); margin-top:8px; flex:none; }
+.danger-input-row{ margin:16px 0; }
+.danger-input-row .input{ width:100%; }
+.danger-actions{ display:flex; justify-content:flex-end; gap:12px; }
+
+/* ---------- Toast ---------- */
+.toast-container{ position:fixed; top:16px; right:16px; z-index:500; display:flex; flex-direction:column; gap:8px; align-items:flex-end; }
+.toast{ display:flex; align-items:center; gap:8px; background:var(--color-text-primary); color:#fff; font-size:var(--fs-body); padding:10px 16px; border-radius:var(--radius-md); box-shadow:var(--shadow-md); animation:toastIn .2s ease; max-width:320px; }
+.toast svg{ width:16px; height:16px; }
+.toast.success svg{ color:var(--color-success); }
+.toast.error svg{ color:var(--color-danger); }
+.toast.out{ opacity:0; transform:translateY(-6px); transition:all .2s ease; }
+@keyframes toastIn{ from{ opacity:0; transform:translateY(-8px);} to{ opacity:1; transform:none;} }
+
+/* ---------- 响应式 ---------- */
+@media (max-width:1279px){ .stats-grid{ grid-template-columns:repeat(2,1fr); } }
+@media (max-width:1023px){ .two-col{ grid-template-columns:1fr; } }
+@media (max-width:767px){
+  .page{ padding:16px; }
+  .stats-grid{ grid-template-columns:1fr; }
+  .section-actions{ width:100%; }
+  .module-actions .btn{ flex:1; }
+  .search .input{ width:100%; }
+  .restore-dialog{ max-width:calc(100vw - 32px); }
+  .restore-foot{ flex-wrap:wrap; gap:8px; }
+  .progress-text{ min-width:40px; }
+}
+</style>
+</head>
+<body>
+
+<!-- 内联图标库 -->
+<svg style="display:none" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="i-save" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M17 21v-8H7v8M7 3v5h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2 20h20L12 3z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 10v5M12 18h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M20 20l-4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m0 0 5-5m-5 5-5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M4 19h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+  <symbol id="i-restore" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 4v4h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+  <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14m0 0-6-6m6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+</svg>
+
+<div class="page">
+  <!-- 页面标题 -->
+  <header class="page-header">
+    <h1 class="page-title">数据备份中心</h1>
+    <div class="page-sub"><span class="sync-dot"></span>滨发 ERP · 生产环境（prod-bf-erp）&nbsp;｜&nbsp;上次同步：<span class="mono">08-21 04:58</span></div>
+  </header>
+
+  <main>
+    <!-- ============ 模块1 · 备份概览 ============ -->
+    <section class="module">
+      <div class="section-head">
+        <div>
+          <h2 class="section-title">备份概览</h2>
+          <p class="section-desc">当前数据库备份状态总览</p>
+        </div>
+      </div>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-head"><span class="dot dot-success"></span><span class="stat-label">上次备份</span></div>
+          <div class="stat-value" id="lastBackupTime">08-21 02:00</div>
+          <div class="stat-desc" id="lastBackupDesc">18 小时前 · 全量</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-head"><span class="dot dot-muted"></span><span class="stat-label">下次备份</span></div>
+          <div class="stat-value">+1 <span class="unit">天</span></div>
+          <div class="stat-desc">每日 <span class="mono">02:00</span> 定时全量</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-head"><span class="dot dot-muted"></span><span class="stat-label">空间占用</span></div>
+          <div class="stat-value" id="spaceValue">128.6 <span class="unit">GB</span></div>
+          <div class="progress"><div class="progress-bar" id="spaceBar" style="width:64%"></div></div>
+          <div class="stat-desc">已用 <span class="mono">64%</span> · 共 200 GB</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-head"><span class="dot dot-success"></span><span class="stat-label">健康度</span></div>
+          <div class="stat-value stat-lg">96<span class="unit">%</span></div>
+          <div class="stat-desc"><span class="chip chip-success">状态良好</span> 最近 7 次全量备份成功</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 模块2 · 一键备份操作 ============ -->
+    <section class="module">
+      <div class="card">
+        <div class="section-head">
+          <div>
+            <h2 class="section-title">一键备份</h2>
+            <p class="section-desc">同一时刻至多执行一个备份任务</p>
+          </div>
+          <div class="section-actions module-actions">
+            <span class="tooltip-wrap" id="wrapFull">
+              <button class="btn btn-primary" id="btnFull"><svg><use href="#i-save"/></svg>一键全量备份</button>
+            </span>
+            <span class="tooltip-wrap" id="wrapIncr">
+              <button class="btn btn-outline" id="btnIncr"><svg class="amber"><use href="#i-plus"/></svg>增量备份</button>
+            </span>
+          </div>
+        </div>
+
+        <!-- 任务执行卡片 -->
+        <div class="task-card" id="taskCard" hidden>
+          <div class="task-head">
+            <span class="badge badge-processing" id="taskBadge">进行中</span>
+            <span class="task-title" id="taskTitle">全量备份 · 正在执行</span>
+            <button class="btn btn-ghost" id="taskCancel">取消</button>
+          </div>
+          <div class="progress-row">
+            <div class="progress"><div class="progress-bar" id="taskBar"></div></div>
+            <span class="progress-text" id="taskPct">0%</span>
+          </div>
+          <div class="task-meta">
+            <span class="task-stage" id="taskStage">正在初始化备份任务…</span>
+            <span class="task-remain" id="taskRemain">预计剩余 —</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 模块3+4 · 定时任务配置 / 备份路径设置 ============ -->
+    <section class="module">
+      <div class="two-col">
+        <!-- 定时任务配置 -->
+        <div class="card">
+          <h3 class="card-title">定时任务配置</h3>
+          <p class="card-sub">设置自动备份的执行计划</p>
+          <div class="form-row">
+            <div><div class="form-label">启用定时备份</div><div class="form-hint">关闭后不再自动执行</div></div>
+            <button class="switch on" id="switchEnable" role="switch" aria-checked="true"></button>
+          </div>
+          <div class="form-row">
+            <div class="form-label">备份周期</div>
+            <select class="select" id="selectPeriod">
+              <option value="每日">每日</option>
+              <option value="每周">每周</option>
+              <option value="每月">每月</option>
+              <option value="自定义">自定义 cron</option>
+            </select>
+          </div>
+          <div class="form-row" id="cronRow" hidden>
+            <div class="form-label">cron 表达式</div>
+            <input class="input mono" id="cronInput" value="0 2 * * *" style="width:160px">
+          </div>
+          <div class="form-row">
+            <div class="form-label">执行时间</div>
+            <input type="time" class="input" id="timeInput" value="02:00" style="width:120px">
+          </div>
+          <div class="form-row">
+            <div class="form-label">最近执行结果</div>
+            <span class="badge badge-success">成功 · <span class="mono">08-21 02:00</span></span>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-primary btn-sm" id="btnSaveConfig">保存配置</button>
+            <button class="btn btn-outline btn-sm" id="btnTriggerNow">立即触发一次</button>
+          </div>
+        </div>
+
+        <!-- 备份路径设置 -->
+        <div class="card">
+          <h3 class="card-title">备份路径设置</h3>
+          <p class="card-sub">备份文件的存储位置</p>
+          <div class="radio-row">
+            <label class="radio"><input type="radio" name="pathMode" value="default" checked><span>默认系统路径</span></label>
+            <div class="path-box">D:\erp_data\backups</div>
+          </div>
+          <div class="radio-row">
+            <label class="radio"><input type="radio" name="pathMode" value="custom"><span>自定义路径</span></label>
+          </div>
+          <div class="path-input-row" id="customRow" hidden>
+            <input class="input mono" id="pathInput" placeholder="D:\erp_data\backups\custom">
+            <div class="path-feedback" id="pathFeedback"></div>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-outline btn-sm" id="btnCheckPath">校验路径</button>
+            <button class="btn btn-primary btn-sm" id="btnSavePath">保存设置</button>
+          </div>
+          <div class="path-current">
+            <div class="path-label">当前备份存储路径</div>
+            <div class="path-box" id="currentPath">D:\erp_data\backups</div>
+            <div class="path-space" id="pathSpace">可用空间 71.4 GB</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 模块5 · 备份记录 ============ -->
+    <section class="module">
+      <div class="card">
+        <div class="section-head">
+          <div>
+            <h2 class="section-title">备份记录</h2>
+            <p class="section-desc">历史备份任务明细，可执行还原 / 下载</p>
+          </div>
+        </div>
+        <div class="filter-bar">
+          <select class="select" id="filterType">
+            <option value="">全部类型</option><option value="全量">全量</option><option value="增量">增量</option>
+          </select>
+          <select class="select" id="filterStatus">
+            <option value="">全部状态</option><option value="成功">成功</option><option value="失败">失败</option><option value="进行中">进行中</option>
+          </select>
+          <select class="select" id="filterRange">
+            <option value="7">近 7 天</option><option value="30">近 30 天</option><option value="all">全部时间</option>
+          </select>
+          <div class="search">
+            <svg><use href="#i-search"/></svg>
+            <input class="input" id="searchInput" placeholder="搜索备份名称">
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>备份名称</th><th>类型</th><th>大小</th><th>备份时间</th><th>状态</th><th class="table-actions" style="text-align:right">操作</th></tr>
+            </thead>
+            <tbody id="recordBody">
+              <tr data-type="增量" data-status="进行中" data-name="incr-20250821-0400">
+                <td><span class="name">incr-20250821-0400</span></td>
+                <td><span class="badge badge-warning">增量</span></td>
+                <td class="mono">0.6 GB</td>
+                <td class="mono">08-21 04:00</td>
+                <td><span class="badge badge-processing">进行中</span></td>
+                <td class="table-actions"><button class="link link-danger" disabled>还原</button><button class="link">下载</button></td>
+              </tr>
+              <tr data-type="全量" data-status="成功" data-name="full-20250821-0200">
+                <td><span class="name">full-20250821-0200</span></td>
+                <td><span class="badge badge-neutral">全量</span></td>
+                <td class="mono">128.6 GB</td>
+                <td class="mono">08-21 02:00</td>
+                <td><span class="badge badge-success">成功</span></td>
+                <td class="table-actions"><span class="tooltip-wrap restore-tip"><button class="link link-danger restore-link">还原</button></span><button class="link">下载</button></td>
+              </tr>
+              <tr data-type="增量" data-status="成功" data-name="incr-20250821-0300">
+                <td><span class="name">incr-20250821-0300</span></td>
+                <td><span class="badge badge-warning">增量</span></td>
+                <td class="mono">2.4 GB</td>
+                <td class="mono">08-21 03:00</td>
+                <td><span class="badge badge-success">成功</span></td>
+                <td class="table-actions"><span class="tooltip-wrap restore-tip"><button class="link link-danger restore-link">还原</button></span><button class="link">下载</button></td>
+              </tr>
+              <tr data-type="全量" data-status="成功" data-name="full-20250820-0200">
+                <td><span class="name">full-20250820-0200</span></td>
+                <td><span class="badge badge-neutral">全量</span></td>
+                <td class="mono">127.9 GB</td>
+                <td class="mono">08-20 02:00</td>
+                <td><span class="badge badge-success">成功</span></td>
+                <td class="table-actions"><span class="tooltip-wrap restore-tip"><button class="link link-danger restore-link">还原</button></span><button class="link">下载</button></td>
+              </tr>
+              <tr data-type="增量" data-status="失败" data-name="incr-20250820-0300">
+                <td><span class="name">incr-20250820-0300</span></td>
+                <td><span class="badge badge-warning">增量</span></td>
+                <td class="mono">1.8 GB</td>
+                <td class="mono">08-20 03:00</td>
+                <td><span class="badge badge-danger">失败</span></td>
+                <td class="table-actions"><span class="tooltip-wrap restore-tip"><button class="link link-danger restore-link">还原</button></span><button class="link">下载</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pagination">
+          <span>共 128 条</span>
+          <button class="page-btn" id="pagePrev" disabled>上一页</button>
+          <span class="mono">第 1 / 26 页</span>
+          <button class="page-btn" id="pageNext">下一页</button>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- ============ 模块6 · 还原向导浮层 ============ -->
+<div class="overlay" id="restoreOverlay" hidden>
+  <div class="restore-dialog">
+    <div class="restore-head">
+      <h3 class="card-title">还原向导</h3>
+      <button class="icon-btn" id="btnCloseWizard" title="关闭"><svg><use href="#i-x"/></svg></button>
+    </div>
+    <div class="stepper" id="stepper"></div>
+    <div class="step-body">
+      <!-- 第1步 选择备份点 -->
+      <div class="panel" id="panel1">
+        <p class="panel-desc">选择一个备份点用于还原。还原将把该备份点数据覆盖到当前数据库。</p>
+        <div class="point-list">
+          <label class="point checked"><input type="radio" name="point" value="full-20250821-0200" checked>
+            <span class="point-name">full-20250821-0200</span><span class="badge badge-neutral">全量</span>
+            <span class="point-meta">128.6 GB · 08-21 02:00</span>
+          </label>
+          <label class="point"><input type="radio" name="point" value="full-20250820-0200">
+            <span class="point-name">full-20250820-0200</span><span class="badge badge-neutral">全量</span>
+            <span class="point-meta">127.9 GB · 08-20 02:00</span>
+          </label>
+          <label class="point"><input type="radio" name="point" value="incr-20250821-0300">
+            <span class="point-name">incr-20250821-0300</span><span class="badge badge-warning">增量</span>
+            <span class="point-meta">2.4 GB · 08-21 03:00</span>
+          </label>
+        </div>
+      </div>
+      <!-- 第2步 差异预览 -->
+      <div class="panel" id="panel2" hidden>
+        <p class="panel-desc">还原将覆盖以下数据，请确认影响范围。</p>
+        <div class="impact-list">
+          <div class="impact-item"><svg><use href="#i-db"/></svg>将覆盖 <b>12</b> 张表</div>
+          <div class="impact-item"><svg><use href="#i-db"/></svg>共 <b>1,286,400</b> 条记录</div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>表名</th><th>备份记录数</th><th>当前记录数</th><th>差异</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">users</td><td class="mono">128,640</td><td class="mono">128,640</td><td>—</td></tr>
+              <tr><td class="mono">orders</td><td class="mono">512,300</td><td class="mono">518,900</td><td><span class="badge badge-warning">+6,600</span></td></tr>
+              <tr><td class="mono">products</td><td class="mono">45,120</td><td class="mono">45,120</td><td>—</td></tr>
+              <tr><td class="mono">inventory</td><td class="mono">88,400</td><td class="mono">92,150</td><td><span class="badge badge-warning">+3,750</span></td></tr>
+              <tr><td class="mono">audit_logs</td><td class="mono">511,940</td><td class="mono">511,940</td><td>—</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="diff-summary"><svg width="14" height="14"><use href="#i-alert"/></svg>检测到 2 张表存在差异，还原后这些表的未备份数据将丢失。</div>
+      </div>
+      <!-- 第3步 一致性校验 -->
+      <div class="panel" id="panel3" hidden>
+        <p class="panel-desc">对备份点执行一致性校验，全部通过后方可继续。</p>
+        <ul class="check-list" id="checkList">
+          <li class="check-item"><span class="check-icon pending"></span>表结构一致性<span class="check-state">等待校验</span></li>
+          <li class="check-item"><span class="check-icon pending"></span>记录数一致性<span class="check-state">等待校验</span></li>
+          <li class="check-item"><span class="check-icon pending"></span>路由数据哈希<span class="check-state">等待校验</span></li>
+          <li class="check-item"><span class="check-icon pending"></span>索引完整性<span class="check-state">等待校验</span></li>
+        </ul>
+        <div class="check-result" id="checkResult" hidden><svg width="14" height="14"><use href="#i-check"/></svg>全部校验通过，可以安全执行还原。</div>
+      </div>
+      <!-- 第4步 执行还原 -->
+      <div class="panel" id="panel4" hidden>
+        <p class="panel-desc">正在执行还原，此过程不可中断。</p>
+        <div class="restore-progress">
+          <div class="progress"><div class="progress-bar danger" id="restoreBar"></div></div>
+          <span class="progress-text" id="restorePct">0%</span>
+        </div>
+        <div class="task-meta">
+          <span class="task-stage" id="restoreStage">正在准备还原环境…</span>
+          <span class="task-remain">此操作不可中途取消</span>
+        </div>
+      </div>
+      <!-- 第5步 结果报告 -->
+      <div class="panel" id="panel5" hidden>
+        <div class="report-success">
+          <div class="report-icon"><svg><use href="#i-check"/></svg></div>
+          <div class="report-title">还原完成</div>
+          <p class="report-sub">已还原 <b>12</b> 张表 · <b>1,286,400</b> 条记录，耗时 <b class="mono">4 分 12 秒</b></p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>表名</th><th>还原后记录数</th><th>校验结果</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">users</td><td class="mono">128,640</td><td><span class="badge badge-success">一致</span></td></tr>
+              <tr><td class="mono">orders</td><td class="mono">512,300</td><td><span class="badge badge-success">一致</span></td></tr>
+              <tr><td class="mono">products</td><td class="mono">45,120</td><td><span class="badge badge-success">一致</span></td></tr>
+              <tr><td class="mono">inventory</td><td class="mono">88,400</td><td><span class="badge badge-success">一致</span></td></tr>
+              <tr><td class="mono">audit_logs</td><td class="mono">511,940</td><td><span class="badge badge-success">一致</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="suggest">
+          <div class="suggest-title">建议操作</div>
+          <ul>
+            <li>还原后建议立即执行一次全量备份，固化当前状态</li>
+            <li>检查 orders / inventory 表新增记录是否已重新备份</li>
+            <li>确认应用连接串已指向还原后的数据库</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <div class="restore-foot">
+      <button class="btn btn-outline btn-sm" id="wizPrev">上一步</button>
+      <div class="right">
+        <button class="btn btn-primary btn-sm" id="wizNext">下一步</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 危险确认弹层 ============ -->
+<div class="modal-overlay" id="dangerModal" hidden>
+  <div class="danger-modal">
+    <div class="danger-bar"><svg><use href="#i-alert"/></svg>高危操作 · 二次确认</div>
+    <div class="danger-body">
+      <h3 class="danger-title">确认执行还原？</h3>
+      <p class="danger-sub">此操作将覆盖当前数据库全部数据，且无法撤销。</p>
+      <ul class="danger-list">
+        <li>将覆盖当前数据库全部数据</li>
+        <li>执行期间系统停止写入</li>
+        <li>未备份的新增数据将丢失</li>
+      </ul>
+      <div class="danger-input-row">
+        <input class="input" id="confirmInput" placeholder="输入「确认还原」以继续" autocomplete="off">
+      </div>
+      <div class="danger-actions">
+        <button class="btn btn-outline btn-sm" id="btnCancelDanger">取消</button>
+        <button class="btn btn-danger btn-sm" id="btnConfirmRestore" disabled>确认还原</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast 容器 -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+(function(){
+  'use strict';
+  var $ = function(s){ return document.querySelector(s); };
+  var $$ = function(s){ return Array.prototype.slice.call(document.querySelectorAll(s)); };
+
+  /* ---------- Toast ---------- */
+  function toast(msg, type){
+    type = type || 'info';
+    var box = $('#toastContainer');
+    var el = document.createElement('div');
+    el.className = 'toast ' + (type==='success' ? 'success' : type==='error' ? 'error' : '');
+    var icon = type==='success'
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>'
+      : type==='error'
+        ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>'
+        : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 8v5M12 17h.01"/></svg>';
+    el.innerHTML = icon;
+    el.appendChild(document.createTextNode(msg));
+    box.appendChild(el);
+    setTimeout(function(){ el.classList.add('out'); setTimeout(function(){ el.remove(); }, 220); }, 2500);
+  }
+
+  /* ---------- 模块2 · 一键备份(任务模拟 + 互斥) ---------- */
+  var runningTask = null;
+  var uiLock = 0;
+
+  function setBackupButtonsLocked(locked){
+    uiLock = Math.max(0, uiLock + (locked ? 1 : -1));
+    renderLockUI(uiLock > 0);
+  }
+  function renderLockUI(locked){
+    $('#btnFull').disabled = locked;
+    $('#btnIncr').disabled = locked;
+    $('#btnTriggerNow').disabled = locked;
+    ['wrapFull','wrapIncr'].forEach(function(id){
+      var w = $('#'+id);
+      if(locked){ w.setAttribute('data-tooltip','有任务执行中'); } else { w.removeAttribute('data-tooltip'); }
+    });
+    // 备份任务执行中 / 还原向导打开:禁用全部还原入口 + tooltip
+    $$('.restore-tip').forEach(function(w){
+      var btn = w.querySelector('.restore-link');
+      if(btn) btn.disabled = locked;
+      if(locked){ w.setAttribute('data-tooltip','有任务执行中'); } else { w.removeAttribute('data-tooltip'); }
+    });
+  }
+
+  function fullStage(p){
+    if(p<8) return '正在初始化备份任务…';
+    if(p<30) return '正在备份 users 表 3/12';
+    if(p<55) return '正在备份 orders 表 7/12';
+    if(p<78) return '正在备份 inventory 表 10/12';
+    if(p<94) return '正在压缩并校验数据…';
+    return '正在写入备份元数据…';
+  }
+  function incrStage(p){
+    if(p<12) return '正在扫描增量变更…';
+    if(p<50) return '正在备份增量数据 1/4';
+    if(p<86) return '正在校验增量记录…';
+    return '正在写入备份元数据…';
+  }
+  function fmtRemain(s){
+    var m = Math.floor(s/60), ss = s%60;
+    return (m>0 ? m+' 分 ' : '') + ss + ' 秒';
+  }
+  function renderTask(pct, isFull, totalSec, start){
+    $('#taskBar').style.width = pct + '%';
+    $('#taskPct').textContent = Math.round(pct) + '%';
+    $('#taskStage').textContent = isFull ? fullStage(pct) : incrStage(pct);
+    var remain = Math.max(0, Math.round((100-pct)/100*totalSec));
+    $('#taskRemain').textContent = '预计剩余 ' + fmtRemain(remain);
+  }
+  function startBackup(type){
+    if(runningTask || uiLock > 0) return;
+    var isFull = type === 'full';
+    $('#taskCard').hidden = false;
+    $('#taskBadge').className = 'badge badge-processing';
+    $('#taskBadge').textContent = '进行中';
+    $('#taskBar').className = 'progress-bar';
+    $('#taskBar').style.width = '0%';
+    $('#taskPct').textContent = '0%';
+    $('#taskStage').textContent = isFull ? '正在初始化备份任务…' : '正在扫描增量变更…';
+    $('#taskRemain').textContent = '预计剩余 —';
+    $('#taskTitle').textContent = (isFull?'全量备份':'增量备份') + ' · 正在执行';
+    setBackupButtonsLocked(true);
+    var pct = 0, totalSec = isFull ? 200 : 70, start = Date.now();
+    var task = { type:type, cancelled:false };
+    runningTask = task;
+    task.timer = setInterval(function(){
+      if(task.cancelled) return;
+      pct += Math.random()*2.2 + 1.1;
+      if(pct >= 100) pct = 100;
+      renderTask(pct, isFull, totalSec, start);
+      if(pct >= 100){
+        clearInterval(task.timer);
+        finishTask(isFull, start);
+      }
+    }, 120);
+    $('#taskCancel').onclick = function(){ cancelTask(isFull); };
+  }
+  function finishTask(isFull, start){
+    $('#taskBar').className = 'progress-bar success';
+    $('#taskBadge').className = 'badge badge-success';
+    $('#taskBadge').textContent = '成功';
+    $('#taskStage').textContent = (isFull?'全量':'增量') + '备份完成';
+    $('#taskRemain').textContent = '耗时 ' + fmtRemain(Math.round((Date.now()-start)/1000));
+    $('#taskTitle').textContent = (isFull?'全量备份':'增量备份') + ' · 已完成';
+    runningTask = null;
+    setBackupButtonsLocked(false);
+    var now = new Date();
+    var pad = function(n){ return String(n).padStart(2,'0'); };
+    $('#lastBackupTime').textContent = pad(now.getMonth()+1) + '-' + pad(now.getDate()) + ' ' + pad(now.getHours()) + ':' + pad(now.getMinutes());
+    $('#lastBackupDesc').textContent = '刚刚 · ' + (isFull?'全量':'增量');
+    toast((isFull?'全量':'增量') + '备份已完成', 'success');
+  }
+  function cancelTask(isFull){
+    if(!runningTask) return;
+    runningTask.cancelled = true;
+    clearInterval(runningTask.timer);
+    $('#taskBadge').className = 'badge badge-neutral';
+    $('#taskBadge').textContent = '已取消';
+    $('#taskStage').textContent = (isFull?'全量':'增量') + '备份任务已取消';
+    $('#taskRemain').textContent = '';
+    $('#taskTitle').textContent = (isFull?'全量备份':'增量备份') + ' · 已取消';
+    runningTask = null;
+    setBackupButtonsLocked(false);
+    toast('备份任务已取消');
+  }
+  $('#btnFull').addEventListener('click', function(){ startBackup('full'); });
+  $('#btnIncr').addEventListener('click', function(){ startBackup('incr'); });
+  $('#btnTriggerNow').addEventListener('click', function(){ startBackup('incr'); });
+
+  /* ---------- 模块3 · 定时任务配置 ---------- */
+  $('#switchEnable').addEventListener('click', function(){
+    this.classList.toggle('on');
+    this.setAttribute('aria-checked', this.classList.contains('on'));
+  });
+  $('#selectPeriod').addEventListener('change', function(){
+    $('#cronRow').hidden = this.value !== '自定义';
+  });
+  $('#btnSaveConfig').addEventListener('click', function(){
+    toast('配置已保存', 'success');
+  });
+
+  /* ---------- 模块4 · 备份路径设置 ---------- */
+  var pathInput = $('#pathInput'), pathFeedback = $('#pathFeedback');
+  function validatePath(){
+    var v = pathInput.value.trim();
+    pathInput.classList.remove('error');
+    if(!v){ pathFeedback.innerHTML = ''; return {ok:false, reason:'empty'}; }
+    var ok = true, reason = '';
+    if(!/^(d|c):\\/i.test(v)){ ok = false; reason = '路径需以 D:\\ 或 C:\\ 开头'; }
+    else if(/[<>:"|?*\u0000-\u001f]/.test(v)){ ok = false; reason = '包含非法字符（<>:"|?*）'; }
+    else if(v.length > 240){ ok = false; reason = '路径过长'; }
+    if(ok){
+      pathFeedback.innerHTML = '<svg class="ok" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg><span class="ok">路径可写</span>';
+    } else {
+      pathInput.classList.add('error');
+      pathFeedback.innerHTML = '<svg class="err" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg><span class="err">' + reason + '</span>';
+    }
+    return {ok:ok, reason:reason};
+  }
+  pathInput.addEventListener('input', validatePath);
+  $$('input[name="pathMode"]').forEach(function(r){
+    r.addEventListener('change', function(){
+      var custom = this.value === 'custom';
+      $('#customRow').hidden = !custom;
+      if(!custom){ pathInput.value = ''; pathInput.classList.remove('error'); pathFeedback.innerHTML = ''; }
+    });
+  });
+  $('#btnCheckPath').addEventListener('click', function(){
+    var r = validatePath();
+    if(r.ok && r.reason !== 'empty'){ toast('路径校验通过，路径可写', 'success'); }
+    else if(r.reason === 'empty'){ toast('请输入自定义路径', 'error'); }
+    else { toast('路径校验失败：' + r.reason, 'error'); }
+  });
+  $('#btnSavePath').addEventListener('click', function(){
+    var r = validatePath();
+    if(r.ok && r.reason !== 'empty'){
+      $('#currentPath').textContent = pathInput.value.trim();
+      $('#pathSpace').textContent = '可用空间 — GB（模拟）';
+      toast('路径设置已保存', 'success');
+    } else if(r.reason === 'empty'){
+      toast('请先输入自定义路径', 'error');
+    } else {
+      toast('路径不合法，无法保存', 'error');
+    }
+  });
+
+  /* ---------- 模块5 · 备份记录筛选 ---------- */
+  function applyFilters(){
+    var t = $('#filterType').value, s = $('#filterStatus').value, q = $('#searchInput').value.trim().toLowerCase();
+    $$('#recordBody tr').forEach(function(tr){
+      var show = true;
+      if(t && tr.dataset.type !== t) show = false;
+      if(s && tr.dataset.status !== s) show = false;
+      if(q && tr.dataset.name.indexOf(q) < 0) show = false;
+      tr.hidden = !show;
+    });
+  }
+  $('#filterType').addEventListener('change', applyFilters);
+  $('#filterStatus').addEventListener('change', applyFilters);
+  $('#searchInput').addEventListener('input', applyFilters);
+  $('#pagePrev').addEventListener('click', function(){ toast('已是第一页'); });
+  $('#pageNext').addEventListener('click', function(){ toast('已跳转到第 2 页'); });
+  $$('#recordBody .link').forEach(function(btn){
+    if(btn.textContent === '下载'){
+      btn.addEventListener('click', function(){ toast('开始下载备份文件'); });
+    }
+  });
+
+  /* ---------- 模块6 · 还原向导 ---------- */
+  var steps = ['选择备份点','差异预览','一致性校验','执行还原','结果报告'];
+  var wizStep = 1, restoring = false, checksPassed = false, checkTimers = [];
+
+  function openWizard(){
+    wizStep = 1; restoring = false;
+    $('#restoreOverlay').hidden = false;
+    $('#btnCloseWizard').disabled = false;
+    setBackupButtonsLocked(true);   // 还原流程中禁用备份按钮(含第4步执行中)
+    renderStepper(); showPanel(1);
+  }
+  function closeWizard(){
+    if(restoring) return;
+    $('#restoreOverlay').hidden = true;
+    setBackupButtonsLocked(false);  // 向导关闭/完成后解锁备份按钮
+  }
+  function renderStepper(){
+    var el = $('#stepper'), html = '';
+    steps.forEach(function(s, i){
+      var n = i + 1;
+      var cls = n < wizStep ? 'done' : (n === wizStep ? 'current' : '');
+      var icon = cls === 'done'
+        ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>'
+        : n;
+      html += '<div class="step '+cls+'"><span class="step-dot">'+icon+'</span><span class="step-label">'+s+'</span></div>';
+      if(i < steps.length-1) html += '<div class="step-line '+(n<wizStep?'done':'')+'"></div>';
+    });
+    el.innerHTML = html;
+  }
+  function showPanel(n){
+    for(var i=1; i<=5; i++) $('#panel'+i).hidden = (i !== n);
+    $('#wizPrev').hidden = (n===1 || n===4 || n===5);
+    if(n===5){ $('#wizNext').hidden = false; $('#wizNext').textContent = '完成'; }
+    else if(n===4){ $('#wizNext').hidden = true; }
+    else { $('#wizNext').hidden = false; $('#wizNext').textContent = n===3 ? '下一步：执行还原' : '下一步'; }
+  }
+  function goStep(n){
+    wizStep = n;
+    renderStepper(); showPanel(n);
+    if(n === 3) runChecks();
+    if(n === 4) runRestore();
+  }
+  function setCheck(item, state, text){
+    var icon = item.querySelector('.check-icon'), st = item.querySelector('.check-state');
+    icon.className = 'check-icon ' + state;
+    if(state === 'ok'){ icon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>'; }
+    else if(state === 'running'){ icon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-dasharray="40 60" stroke-linecap="round"><circle cx="12" cy="12" r="9"/></svg>'; }
+    else { icon.innerHTML = ''; }
+    st.textContent = text;
+  }
+  function runChecks(){
+    checksPassed = false;
+    $('#checkResult').hidden = true;
+    var items = $$('#checkList .check-item');
+    checkTimers.forEach(clearTimeout); checkTimers = [];
+    items.forEach(function(it){ setCheck(it, 'pending', '等待校验'); });
+    items.forEach(function(it, i){
+      checkTimers.push(setTimeout(function(){ setCheck(it,'running','校验中…'); }, 300 + i*700));
+      checkTimers.push(setTimeout(function(){ setCheck(it,'ok','通过'); }, 950 + i*700));
+    });
+    checkTimers.push(setTimeout(function(){
+      checksPassed = true;
+      $('#checkResult').hidden = false;
+      toast('一致性校验通过', 'success');
+    }, 950 + items.length*700));
+  }
+  function restoreStage(p){
+    if(p<10) return '正在准备还原环境…';
+    if(p<35) return '正在删除当前表数据 4/12';
+    if(p<65) return '正在导入备份数据 8/12';
+    if(p<90) return '正在重建索引与约束…';
+    return '正在写入还原报告…';
+  }
+  function runRestore(){
+    restoring = true;
+    $('#btnCloseWizard').disabled = true;
+    $('#restoreBar').style.width = '0%';
+    $('#restorePct').textContent = '0%';
+    $('#restoreStage').textContent = '正在准备还原环境…';
+    var pct = 0;
+    var timer = setInterval(function(){
+      pct += Math.random()*1.8 + 0.8;
+      if(pct >= 100) pct = 100;
+      $('#restoreBar').style.width = pct + '%';
+      $('#restorePct').textContent = Math.round(pct) + '%';
+      $('#restoreStage').textContent = restoreStage(pct);
+      if(pct >= 100){
+        clearInterval(timer);
+        restoring = false;
+        $('#btnCloseWizard').disabled = false;
+        goStep(5);
+        toast('还原执行完成', 'success');
+      }
+    }, 110);
+  }
+  $('#btnCloseWizard').addEventListener('click', closeWizard);
+  $('#wizPrev').addEventListener('click', function(){
+    if(wizStep === 4 || restoring) return;
+    goStep(wizStep - 1);
+  });
+  $('#wizNext').addEventListener('click', function(){
+    if(wizStep === 3){
+      if(!checksPassed){ toast('请等待一致性校验完成', 'error'); return; }
+      openDangerModal(); return;
+    }
+    if(wizStep === 4) return;
+    if(wizStep === 5){ closeWizard(); return; }
+    goStep(wizStep + 1);
+  });
+  $$('input[name="point"]').forEach(function(r){
+    r.addEventListener('change', function(){
+      $$('.point').forEach(function(p){ p.classList.remove('checked'); });
+      this.closest('.point').classList.add('checked');
+    });
+  });
+  $$('.restore-link').forEach(function(btn){
+    btn.addEventListener('click', openWizard);
+  });
+
+  /* ---------- 危险确认弹层 ---------- */
+  function openDangerModal(){
+    $('#dangerModal').hidden = false;
+    $('#confirmInput').value = '';
+    $('#btnConfirmRestore').disabled = true;
+    $('#confirmInput').focus();
+  }
+  function closeDangerModal(){ $('#dangerModal').hidden = true; }
+  $('#confirmInput').addEventListener('input', function(){
+    $('#btnConfirmRestore').disabled = this.value !== '确认还原';
+  });
+  $('#btnCancelDanger').addEventListener('click', closeDangerModal);
+  $('#btnConfirmRestore').addEventListener('click', function(){
+    if(this.disabled) return;
+    closeDangerModal();
+    goStep(4);
+  });
+  // 遮罩点击 / Esc 不关闭危险弹层
+  document.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && !$('#dangerModal').hidden) e.preventDefault();
+  });
+})();
+</script>
+</body>
+</html>

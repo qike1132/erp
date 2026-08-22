@@ -265,6 +265,12 @@ async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
 
 app.add_middleware(SlowAPIMiddleware)
 
+# 维护模式（M3）：还原执行期间拒绝非备份域写请求
+from fastapi_app.core.maintenance import maintenance_middleware
+from starlette.middleware.base import BaseHTTPMiddleware
+
+app.add_middleware(BaseHTTPMiddleware, dispatch=maintenance_middleware)
+
 
 @app.exception_handler(AppError)
 async def app_error_handler(request: Request, exc: AppError):

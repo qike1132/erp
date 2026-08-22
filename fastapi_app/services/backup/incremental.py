@@ -37,10 +37,15 @@ async def create_incremental_backup(
     remark: str = '',
     since: str = '',
     encrypt_password: str | bytearray | None = None,
+    encrypt: bool | None = None,
 ) -> dict:
     """执行增量备份
 
     如果提供 encrypt_password 或配置了环境变量，则使用 AES-256-GCM 加密备份。
+    encrypt 参数(M1 新增,向后兼容):
+    - None(默认):保持原有行为(encrypt_password 或环境变量,无则随机密钥回退)
+    - True:必须提供密码,否则抛错
+    - False:强制不加密(即使有环境变量)——手动任务 fail-safe 用
     """
     ensure_backup_dir()
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -91,7 +96,12 @@ async def create_incremental_backup(
         zip_bytes = zip_path.read_bytes()
 
         # 默认加密（根据环境变量配置）
-        encryption_password = encrypt_password or get_backup_encryption_password()
+        if encrypt is False:
+            encryption_password = None
+        elif encrypt is True and not (encrypt_password or get_backup_encryption_password()):
+            raise BackupError('请求加密增量备份但未配置密码（encrypt=True 必须提供密码）')
+        else:
+            encryption_password = encrypt_password or get_backup_encryption_password()
         if encryption_password:
             from fastapi_app.core.backup_encryption import encrypt_backup
             try:

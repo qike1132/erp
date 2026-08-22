@@ -304,7 +304,11 @@ async def restore_legacy_json(backup_data: dict, db: AsyncSession, task_id: str 
             if _AsyncSessionLocal is not None:
                 verify_db = _AsyncSessionLocal()
             try:
-                verification = await verify_restore(verify_db or db, manifest_tables)
+                verification = await verify_restore(
+                    verify_db or db, manifest_tables,
+                    manifest_fingerprints=backup_data.get('fingerprints'),
+                    manifest_schema=backup_data.get('schema_snapshot'),
+                )
             finally:
                 if verify_db is not None:
                     with contextlib.suppress(OSError, ValueError, SQLAlchemyError):

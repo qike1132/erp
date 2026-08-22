@@ -173,23 +173,37 @@ async def _do_create_full_backup(
             tname = str(table.name)
             if tname not in get_checksum_tables():
                 continue
+            if tname not in existing_tables:
+                # 模型存在但库中尚无表(待迁移):发一条 SELECT 会因列集合为空拼出病态 SQL,
+                # 且错误会中止整个会话事务,连带后续指纹/schema 采集全灭 → 直接跳过
+                continue
             try:
-                qtname = quote_table(tname)  # REV-08
-                pk_col = [c.name for c in table.primary_key.columns]
-                order_col = pk_col[0] if pk_col else 'id'
-                cols_result = await db.execute(  # batch-loop: 逐表备份/恢复,无法批量
-                    text('SELECT column_name FROM information_schema.columns WHERE table_name = :tname ORDER BY ordinal_position'),
-                    {'tname': tname}
-                )
-                col_names = [r[0] for r in cols_result.fetchall()]
-                agg_expr = " || '|' || ".join(f'''COALESCE("{c}"::text, '')''' for c in col_names)  # sql-safe: escape_like/绑定参数/常量片段
-                fp_result = await db.execute(text(  # batch-loop: 逐表备份/恢复,无法批量
-                    f'''SELECT MD5(STRING_AGG({agg_expr}, ',' ORDER BY "{order_col}")) FROM {qtname}'''  # nosec B608 — qtname 经 quote_table 白名单校验
-                ))
-                fingerprints[tname] = fp_result.scalar() or ''
+                async with db.begin_nested():  # savepoint: 单表失败只回滚该表,不影响整笔事务
+                    qtname = quote_table(tname)  # REV-08
+                    pk_col = [c.name for c in table.primary_key.columns]
+                    order_col = pk_col[0] if pk_col else 'id'
+                    cols_result = await db.execute(  # batch-loop: 逐表备份/恢复,无法批量
+                        text('SELECT column_name FROM information_schema.columns WHERE table_name = :tname ORDER BY ordinal_position'),
+                        {'tname': tname}
+                    )
+                    col_names = [r[0] for r in cols_result.fetchall()]
+                    agg_expr = " || '|' || ".join(f'''COALESCE("{c}"::text, '')''' for c in col_names)  # sql-safe: escape_like/绑定参数/常量片段
+                    fp_result = await db.execute(text(  # batch-loop: 逐表备份/恢复,无法批量
+                        f'''SELECT MD5(STRING_AGG({agg_expr}, ',' ORDER BY "{order_col}")) FROM {qtname}'''  # nosec B608 — qtname 经 quote_table 白名单校验
+                    ))
+                    fingerprints[tname] = fp_result.scalar() or ''
             except (SQLAlchemyError, ValueError, OSError) as e:
                 logger.warning(f'计算表 {tname} 指纹失败: {e}')
                 fingerprints[tname] = ''
+
+        # M3: 采集表结构快照，供还原后 L4 DDL 比对（旧备份/失败时置空并跳过比对）
+        snapshot_schema: dict[str, list[dict]] = {}
+        try:
+            from fastapi_app.services.backup.verify.core import build_schema_snapshot
+            async with db.begin_nested():  # savepoint: schema 采集失败不影响整笔事务
+                snapshot_schema = await build_schema_snapshot(db)
+        except Exception as e:  # broad-except: 备份容错，快照失败不影响备份主体
+            logger.warning(f'采集表结构快照失败，schema_snapshot 置空: {e}')
 
         manifest = {
             'version': BACKUP_FORMAT_VERSION, 'type': 'full', 'app_version': '2.0',
@@ -205,6 +219,7 @@ async def _do_create_full_backup(
             'snapshot_id': dump_info.get('snapshot_id'),
             'tables': {k: {'rows': v} for k, v in table_stats.items()},
             'includes': {}, 'checksums': checksums, 'fingerprints': fingerprints,
+            'schema_snapshot': snapshot_schema,
         }
 
         zip_path = tmpdir_path / 'backup.zip'

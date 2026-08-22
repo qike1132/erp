@@ -36,6 +36,26 @@ def get_checksum_tables() -> set[str]:
     return {str(t.name) for t in Base.metadata.sorted_tables if str(t.name) not in _CHECKSUM_EXCLUDE_TABLES}
 
 
+async def build_schema_snapshot(db: AsyncSession) -> dict[str, list[dict]]:
+    """采集表结构快照：public schema 各表列名/类型（供 L4 还原后 DDL 比对）。
+
+    备份时写入 manifest['schema_snapshot']，还原后据此逐表比对列是否存在。
+    """
+    rows = (await db.execute(text(  # batch-loop: 逐表采集列定义,无法批量
+        "SELECT table_name, column_name, data_type, is_nullable "
+        "FROM information_schema.columns WHERE table_schema = 'public' "
+        "ORDER BY table_name, ordinal_position"
+    ))).fetchall()
+    snapshot: dict[str, list[dict]] = {}
+    for table_name, column_name, data_type, is_nullable in rows:
+        snapshot.setdefault(table_name, []).append({
+            'column': column_name,
+            'type': data_type,
+            'nullable': is_nullable == 'YES',
+        })
+    return snapshot
+
+
 async def find_timestamp_column(tname: str, db: AsyncSession) -> str | None:
     """查找表的时间戳列（REV-33: 添加缓存）"""
     if tname in _ts_col_cache:
@@ -110,13 +130,19 @@ async def find_last_backup_timestamp() -> str | None:
     return None
 
 
-async def verify_restore(db: AsyncSession, manifest_tables: dict[str, dict], manifest_fingerprints: dict[str, str] | None = None) -> dict:
+async def verify_restore(
+    db: AsyncSession,
+    manifest_tables: dict[str, dict],
+    manifest_fingerprints: dict[str, str] | None = None,
+    manifest_schema: dict[str, list[dict]] | None = None,
+) -> dict:
     """四层恢复后验证
 
     L0 — 全局校验和: MD5 hash 跨所有表数据
     L1 — 行数: SELECT COUNT(*) 与 manifest 比对
     L2 — 数据指纹: MD5 聚合关键业务表
     L3 — ID 抽样: 检查备份中前 3 个 ID 恢复后是否存在
+    L4 — 表结构(DDL)比对: manifest['schema_snapshot'] vs 当前 info_schema.columns（M3 新增）
     """
     from fastapi_app.shared_models import Base
     checksum_tables = get_checksum_tables()
@@ -125,6 +151,7 @@ async def verify_restore(db: AsyncSession, manifest_tables: dict[str, dict], man
     l1_results: list[dict] = []
     l2_results: list[dict] = []
     l3_results: list[dict] = []
+    l4_results: list[dict] = []
     l0_parts: list[str] = []
 
     for table in Base.metadata.sorted_tables:
@@ -214,6 +241,28 @@ async def verify_restore(db: AsyncSession, manifest_tables: dict[str, dict], man
             'note': '恢复后数据库全局 MD5（可与备份时比对，全量备份 manifest 中可附带此值）',
         }
 
+    # L4 表结构（DDL）比对（M3 新增）
+    l4_note = ''
+    if manifest_schema:
+        try:
+            current_schema = await build_schema_snapshot(db)
+            for tname in sorted(set(manifest_schema) | set(current_schema)):
+                expected = {c['column'] for c in manifest_schema.get(tname, [])}
+                actual = {c['column'] for c in current_schema.get(tname, [])}
+                missing = sorted(expected - actual)
+                extra = sorted(actual - expected)
+                l4_results.append({
+                    'table': tname, 'pass': (not missing and not extra),
+                    'missing_columns': missing, 'extra_columns': extra,
+                })
+        except (ValueError, TypeError, OSError, SQLAlchemyError) as e:
+            l4_note = f'L4 表结构比对失败: {e}'
+            logger.warning(l4_note)
+    else:
+        l4_note = 'manifest 无 schema_snapshot（旧备份），跳过 L4 表结构比对'
+    l4_mismatch = [r for r in l4_results if not r['pass']]
+    l4_all_pass = len(l4_mismatch) == 0 and not l4_note.startswith('L4 表结构比对失败')
+
     l1_match = sum(1 for r in l1_results if r['pass'] is True)
     l1_indeterminate = sum(1 for r in l1_results if r['pass'] is None)
     l1_mismatch = [r for r in l1_results if r['pass'] is False]
@@ -226,7 +275,7 @@ async def verify_restore(db: AsyncSession, manifest_tables: dict[str, dict], man
 
     l1_all_pass = len(l1_mismatch) == 0
     l2_all_pass = len(l2_mismatch) == 0
-    all_passed = l1_all_pass and l2_all_pass
+    all_passed = l1_all_pass and l2_all_pass and l4_all_pass
 
     return {
         'overall_pass': all_passed,
@@ -244,4 +293,8 @@ async def verify_restore(db: AsyncSession, manifest_tables: dict[str, dict], man
             'summary': f'指纹匹配: {l2_match}/{l2_total}' if l2_total > 0 else '无业务表需校验',
         },
         'l3_sampling': {'tables_checked': len(l3_results), 'results': l3_results},
+        'l4_schema': {
+            'tables_checked': len(l4_results), 'mismatch': l4_mismatch, 'results': l4_results,
+            'note': l4_note or ('表结构一致' if l4_all_pass else '存在表结构差异'),
+        },
     }

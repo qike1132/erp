@@ -113,6 +113,12 @@ from .restore import (
     restore_from_zip,
     restore_non_dependent_components,
 )
+from .settings_service import (
+    BackupSettingsError,
+    get_settings,
+    save_settings,
+    validate_path,
+)
 from .snapshot import *  # noqa: F403
 from .verify import *  # noqa: F403
 
@@ -197,6 +203,11 @@ __all__ = [
     "VerificationResult",
     "ZipBackupArchive",
     "ZipBackupArchiveView",
+    # settings_service (M1)
+    "BackupSettingsError",
+    "get_settings",
+    "save_settings",
+    "validate_path",
     # orchestration
     "acquire_backup_lock",
     "acquire_restore_lock",

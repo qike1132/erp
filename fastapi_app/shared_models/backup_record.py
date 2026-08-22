@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import BigInteger, DateTime, Index, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, Index, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from fastapi_app.shared_models import Base
@@ -34,6 +35,10 @@ class BackupRecord(Base):
     ip_address: Mapped[str | None] = mapped_column(String(45), comment='操作者IP地址')
     user_agent: Mapped[str | None] = mapped_column(Text, comment='浏览器UA')
     parent_record_id: Mapped[int | None] = mapped_column(Integer, comment='父备份记录ID(增量备份指向全量备份)')
+    # M1 新增:manifest 摘要(schema 快照/校验指纹)、调度任务关联、加密标志
+    manifest_summary: Mapped[dict | None] = mapped_column(JSONB, comment='manifest 摘要(行数/SHA-256 指纹/schema 快照)')
+    schedule_id: Mapped[int | None] = mapped_column(Integer, comment='关联 backup_schedule 任务ID(手动触发为 NULL)')
+    encrypted: Mapped[bool | None] = mapped_column(Boolean, default=False, comment='备份文件是否加密')
     created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 

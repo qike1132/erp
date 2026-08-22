@@ -55,10 +55,14 @@
               :can-print="canPrint"
               :roles="roleHook.roles.value"
               :current-role-id="roleHook.currentRoleId.value"
+              :editing-part-id="inlineEditingPartId"
+              :edit-form="inlineEditForm"
               @set-final-version="onSetFinalVersion"
               @copy-version="onCopyPartVersion"
               @delete-version="onDeleteVersion"
-              @save-edit="onSaveEdit"
+              @start-edit="inlineEdit.startEdit"
+              @cancel-edit="inlineEdit.cancelEdit"
+              @save-edit="inlineEdit.saveEdit"
               @select-role="onSelectRole"
               @add-role="onAddRole"
               @remove-role="onRemoveRole"
@@ -147,6 +151,7 @@ import { useSamplingProject } from './composables/useSamplingProject'
 import { useSamplingPart } from './composables/useSamplingPart'
 import { useSamplingVersion } from './composables/useSamplingVersion'
 import { useSamplingRole } from './composables/useSamplingRole'
+import { usePartInlineEdit } from './composables/usePartInlineEdit'
 
 import { usePatternRoomPrint } from './composables/usePatternRoomPrint'
 import { usePatternRoomPatternMakers } from './composables/usePatternRoomPatternMakers'
@@ -270,6 +275,17 @@ const {
   versionHook,
   roleHook,
 })
+
+// 内联编辑状态统一由 usePartInlineEdit 承接：提供 editingPartId/editForm，并封装 start/cancel/save
+const inlineEdit = usePartInlineEdit(
+  partHook.partsByVersion,
+  selectedProjectId,
+  roleHook.currentRoleId,
+  onSaveEdit,
+)
+// 顶层解包 ref/reactive，供模板 v-bind 自动解包
+const inlineEditingPartId = inlineEdit.editingPartId
+const inlineEditForm = inlineEdit.editForm
 
 watch(selectedProjectId, (newId) => {
   if (newId == null) {

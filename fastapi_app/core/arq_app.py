@@ -48,6 +48,9 @@ from fastapi_app.tasks.backup_tasks import (
     backup_integrity_check_task,
     backup_metrics_report_task,
     disaster_recovery_test_task,
+    manual_full_backup_task,
+    manual_incremental_backup_task,
+    scheduler_poller,
 )
 from fastapi_app.tasks.batch_tasks import (
     batch_import_orders_task,
@@ -74,29 +77,13 @@ cron_schedules = [
         'schedule': '1:00',
     },
     {
-        'name': 'backup-integrity-check',
-        'func': backup_integrity_check_task,
-        'cron': {'hour': 3, 'minute': 0},
-        'schedule': '3:00',
-    },
-    {
-        'name': 'auto-daily-full-backup',
-        'func': auto_daily_backup_task,
-        'cron': {'hour': 2, 'minute': 0},
-        'schedule': '2:00',
-        'timeout': 1800,  # 原 Celery time_limit=1800（全量备份耗时较长）
-    },
-    {
-        'name': 'auto-incremental-backup',
-        'func': auto_incremental_backup_task,
-        'cron': {'hour': {6, 10, 14, 18, 22}, 'minute': 0},
-        'schedule': '6,10,14,18,22:00',
-    },
-    {
-        'name': 'backup-cleanup',
-        'func': backup_cleanup_task,
-        'cron': {'hour': 4, 'minute': 0},
-        'schedule': '4:00',
+        # M2: 备份 4 项定时（完整性巡检/全量/增量/清理）已迁入 backup_schedule 表，
+        # 由下方 scheduler_poller 每 5 分钟扫描调度执行，保持 02:00/06-22/03:00/04:00 等价。
+        'name': 'backup-schedule-poller',
+        'func': scheduler_poller,
+        'cron': {'minute': set(range(0, 60, 5))},
+        'schedule': 'every 5m',
+        'timeout': 300,
     },
     {
         # 原 Celery beat: 300.0（每 5 分钟）。ARQ cron 不支持步进值，用 minute 集合表达。
@@ -119,8 +106,11 @@ class WorkerSettings:
     functions: ClassVar[list] = [
         batch_import_orders_task,
         batch_import_stockins_task,
+        scheduler_poller,
         auto_daily_backup_task,
         auto_incremental_backup_task,
+        manual_full_backup_task,
+        manual_incremental_backup_task,
         backup_integrity_check_task,
         backup_cleanup_task,
         backup_health_check_task,

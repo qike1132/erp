@@ -41,12 +41,31 @@ class BackupRecordListOut(BaseModel):
 
 class BackupScheduleTask(BaseModel):
     """定时任务信息"""
+    id: int | None = None
     name: str = Field(description="任务名称")
     task: str = Field(description="ARQ 任务名")
+    task_type: str | None = None
+    cron_expr: str | None = None
     schedule: str = Field(description="调度表达式")
     enabled: bool = True
     last_run: datetime | None = None
     last_status: str | None = None
+
+
+class BackupScheduleCreate(BaseModel):
+    """定时任务新增"""
+    name: str = Field(description="任务名称")
+    task_type: str = Field(default='incremental', description="full/incremental/integrity_check/cleanup")
+    cron_expr: str = Field(description="cron 表达式(如 0 2 * * *)")
+    enabled: bool = True
+
+
+class BackupScheduleUpdate(BaseModel):
+    """定时任务更新"""
+    name: str | None = None
+    task_type: str | None = None
+    cron_expr: str | None = None
+    enabled: bool | None = None
 
 
 class BackupScheduleOut(BaseModel):
@@ -86,6 +105,32 @@ class BackupTriggerOut(BaseModel):
     success: bool = True
     task_name: str = ""
     message: str = ""
+
+
+class BackupRestorePlanRequest(BaseModel):
+    """还原差异预览请求"""
+    filename: str = Field(description="备份文件名（服务器默认路径下）")
+
+
+class BackupRestorePlanItem(BaseModel):
+    table: str
+    backup_rows: int | None = None
+    current_rows: int | None = None
+    diff: int | None = None
+
+
+class BackupRestorePlanOut(BaseModel):
+    """还原差异预览响应"""
+    success: bool = True
+    filename: str = ""
+    table_count: int = 0
+    total_backup_rows: int = 0
+    affected_count: int = 0
+    affected_tables: list[dict] = []
+    tables: list[BackupRestorePlanItem] = []
+    encrypted: bool = False
+    exported_at: str | None = None
+    error: str | None = None
 
 
 class BackupEncryptRequest(BaseModel):
@@ -281,3 +326,61 @@ class BackupStatisticsResponse(BaseModel):
     backup_distribution: dict[str, int] = {}
     storage_usage: dict[str, Any] = {}
     recent_backups: list[dict[str, Any]] = []
+
+
+# ===========================================================================
+# M1 备份任务化:手动触发 / settings / validate-path
+# ===========================================================================
+
+class BackupTaskTriggerOut(BaseModel):
+    """手动触发备份任务响应(202 Accepted)"""
+    success: bool = True
+    task_id: str = Field(description="任务ID,用于轮询 /progress/{task_id}")
+    message: str = Field(default="", description="提示信息")
+    task_name: str = Field(default="", description="ARQ 任务名")
+
+
+class BackupFullRequest(BaseModel):
+    """全量备份触发请求"""
+    remark: str = Field(default="", max_length=200, description="备份备注")
+    encrypt: bool = Field(default=True, description="是否启用加密(未配置密码时降级为不加密)")
+    password: str | None = Field(default=None, description="加密密码,为空时依次使用请求头/环境变量")
+
+
+class BackupIncrementalRequest(BaseModel):
+    """增量备份触发请求"""
+    remark: str = Field(default="", max_length=200, description="备份备注")
+    since: str = Field(default="", description="增量基线时间戳,为空时自动取上次备份时间")
+
+
+class BackupSettingsOut(BaseModel):
+    """备份设置响应"""
+    success: bool = True
+    backup_dir: str = Field(default="", description="当前生效的备份路径")
+    retention_days: int = Field(default=30, description="保留天数")
+    max_count: int = Field(default=50, description="最大备份数量")
+    encryption_mode: str = Field(default="env", description="加密模式: off/password/key/env")
+    updated_by: str | None = None
+    updated_at: str | None = None
+    initialized: bool = Field(default=False, description="表是否已初始化(未初始化时使用环境变量默认值)")
+
+
+class BackupSettingsUpdate(BaseModel):
+    """备份设置更新请求"""
+    backup_dir: str | None = Field(default=None, max_length=500, description="自定义备份路径(须先通过 validate-path 校验)")
+    retention_days: int | None = Field(default=None, ge=1, le=3650, description="保留天数")
+    max_count: int | None = Field(default=None, ge=1, le=10000, description="最大备份数量")
+    encryption_mode: str | None = Field(default=None, description="加密模式: off/password/key/env")
+
+
+class BackupPathValidateRequest(BaseModel):
+    """路径预校验请求"""
+    path: str = Field(min_length=1, max_length=500, description="待校验的备份路径")
+
+
+class BackupPathValidateResponse(BaseModel):
+    """路径预校验响应"""
+    valid: bool = Field(default=False, description="路径是否可用")
+    error: str | None = Field(default=None, description="校验失败原因")
+    message: str | None = Field(default=None, description="成功提示(如: 路径可写,空间充足)")
+    path: str | None = Field(default=None, description="规范化后的路径")
