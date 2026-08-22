@@ -192,4 +192,4 @@ async def delete_stockreturn(db: AsyncSession, stockreturn_id: int) -> None:
 
 
 # 底部引入 stock_service 以提供命名空间解析（延迟到调用期，避免循环依赖）
-from fastapi_app.services import stock_service  # noqa: E402
+from fastapi_app.services import stock_service

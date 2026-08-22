@@ -70,28 +70,12 @@ class Settings(BaseSettings):
     # 为空时使用单机模式（REDIS_HOST/REDIS_PORT）；非空时通过 Sentinel 发现 master
     REDIS_SENTINEL_HOSTS: str = os.getenv("REDIS_SENTINEL_HOSTS", "")
 
-    # Redis 独立实例拆分（缓存 / Celery Broker / Celery Results）
+    # Redis 独立实例拆分（缓存 / ARQ Broker）
     # 推荐生产环境使用独立实例或独立 Redis 数据库，避免单实例混用导致相互影响
     REDIS_CACHE_URL: str = os.getenv("REDIS_CACHE_URL", "")
     REDIS_BROKER_URL: str = os.getenv("REDIS_BROKER_URL", "")
+    # ARQ 结果存储沿用 broker 实例（REDIS_BROKER_URL），未配置时使用通用 Redis
     REDIS_RESULT_URL: str = os.getenv("REDIS_RESULT_URL", "")
-
-    # Celery 配置 - Redis 密码使用 quote_plus 编码，防止含特殊字符(@:/)时破坏 URI
-    # 优先使用独立 broker/result URL，回退到兼容配置
-    CELERY_BROKER_URL: str = os.getenv(
-        "CELERY_BROKER_URL",
-        os.getenv(
-            "REDIS_BROKER_URL",
-            f"redis://:{quote_plus(os.getenv('REDIS_PASSWORD', ''))}@{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', '6379')}/1",
-        ),
-    )
-    CELERY_RESULT_BACKEND: str = os.getenv(
-        "CELERY_RESULT_BACKEND",
-        os.getenv(
-            "REDIS_RESULT_URL",
-            f"redis://:{quote_plus(os.getenv('REDIS_PASSWORD', ''))}@{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', '6379')}/2",
-        ),
-    )
 
     # FCM 推送配置（可选，未设置时降级为仅 WebSocket 通知）
     FCM_SERVICE_ACCOUNT_PATH: str = os.getenv("FCM_SERVICE_ACCOUNT_PATH", "")
@@ -155,11 +139,12 @@ class Settings(BaseSettings):
                     "生产环境 SECRET_KEY 长度不足 32 字符，"
                     "请使用高强度随机密钥（如 openssl rand -hex 32 生成后注入）"
                 )
-            # ALLOWED_HOSTS 不得包含通配符，否则 TrustedHostMiddleware 形同虚设
-            if "*" in self.ALLOWED_HOSTS or not any(h.strip() for h in self.ALLOWED_HOSTS):
+            # ALLOWED_HOSTS 允许通配 "*"（家庭/内网 + 动态 IPv6 公网访问场景），
+            # 但必须显式配置至少一项，禁止为空，防止 TrustedHost 校验完全失效。
+            if not any(h.strip() for h in self.ALLOWED_HOSTS):
                 raise RuntimeError(
-                    "生产环境（APP_ENV=production）ALLOWED_HOSTS 必须设置为具体域名，"
-                    "禁止使用通配符 '*'。示例: erp.example.com,erp.example.cn"
+                    "生产环境（APP_ENV=production）ALLOWED_HOSTS 不能为空。"
+                    "允许所有主机用 \"*\"；需限定域名用 erp.example.com,erp.example.cn"
                 )
             # 非对称模式（RS256/ES256）下私钥/公钥路径必须显式配置且文件存在（密钥移出仓库，由部署环境注入）
             if self.ALGORITHM in ("RS256", "ES256"):

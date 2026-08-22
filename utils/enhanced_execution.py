@@ -184,7 +184,7 @@ class ResultCache:
             if entry is None:
                 self.stats['misses'] += 1
                 return None
-            value, expires_at, created_at = entry
+            value, expires_at, _ = entry
             if time.time() > expires_at:
                 del self._cache[cache_key]
                 self.stats['misses'] += 1
@@ -410,7 +410,7 @@ class ErrorDiagnoser:
     提取根因、给出具体修复建议。
     """
 
-    SSL_ERROR_CODES = {
+    SSL_ERROR_CODES: dict = {  # noqa: RUF012 - read-only 常量映射，供诊断提示
         'UNABLE_TO_VERIFY_LEAF_SIGNATURE': '证书验证失败',
         'UNABLE_TO_GET_ISSUER_CERT': '无法获取颁发者证书',
         'CERT_SIGNATURE_FAILURE': '证书签名无效',
@@ -432,7 +432,7 @@ class ErrorDiagnoser:
         'EACCES': '权限被拒绝'
     }
 
-    NETWORK_FIXES = {
+    NETWORK_FIXES: dict = {  # noqa: RUF012 - read-only 常量映射，供诊断提示
         'ECONNREFUSED': '目标服务未启动或端口被防火墙阻止。请检查服务状态和防火墙规则。',
         'ECONNRESET': '连接被远程主机强制关闭。可能是网络不稳定或服务端过载。',
         'ETIMEDOUT': '网络请求超时。请检查网络连接和服务端响应时间。',
@@ -508,7 +508,7 @@ class ErrorDiagnoser:
         ssl_desc = self.SSL_ERROR_CODES.get(code, '')
         if ssl_desc:
             return f"SSL/TLS证书错误 ({ssl_desc})。如果使用了代理或防火墙，可能需要配置CA证书。"
-        base_msg = f"{type(error).__name__}: {str(error)}"
+        base_msg = f"{type(error).__name__}: {error!s}"
         if category == 'certificate_error':
             return base_msg + " 企业代理环境下请配置正确的CA证书。"
         return base_msg
@@ -649,7 +649,7 @@ class SkillHotReloader:
     FILE_STABILITY_THRESHOLD_MS = 1000
     RELOAD_DEBOUNCE_MS = 300
 
-    def __init__(self, watch_paths: list[str] = None):
+    def __init__(self, watch_paths: list[str] | None = None):
         self.watch_paths = watch_paths or ['.trae/rules', '.trae/skills']
         self._last_reload = 0.0
         self._pending_changes = False

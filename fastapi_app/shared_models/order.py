@@ -18,7 +18,24 @@ if TYPE_CHECKING:
     from fastapi_app.shared_models.product import Product
     from fastapi_app.shared_models.user import User
 
-VALID_ORDER_STATUSES = {'待备货', '已备货', '部分备货', '待出货', '已出货', '已取消', '批次已完成'}
+# 订单状态的唯一权威定义：业务代码一律引用这些常量，禁止新增字面量（保持单一来源）
+ORDER_STATUS_PENDING_STOCK = '待备货'
+ORDER_STATUS_PARTIAL_STOCK = '部分备货'
+ORDER_STATUS_STOCKED = '已备货'
+ORDER_STATUS_PENDING_SHIPMENT = '待出货'
+ORDER_STATUS_SHIPPED = '已出货'
+ORDER_STATUS_CANCELLED = '已取消'
+ORDER_STATUS_BATCH_COMPLETED = '批次已完成'
+
+VALID_ORDER_STATUSES = frozenset({
+    ORDER_STATUS_PENDING_STOCK,
+    ORDER_STATUS_PARTIAL_STOCK,
+    ORDER_STATUS_STOCKED,
+    ORDER_STATUS_PENDING_SHIPMENT,
+    ORDER_STATUS_SHIPPED,
+    ORDER_STATUS_CANCELLED,
+    ORDER_STATUS_BATCH_COMPLETED,
+})
 
 
 def compute_status_from_stockouts(order, deducted_qty: int, shipped_qty: int) -> str:
@@ -33,17 +50,17 @@ def compute_status_from_stockouts(order, deducted_qty: int, shipped_qty: int) ->
     语义需重新设计（按 OrderItem 维度还是按聚合 quantity？），待后续 spec 改造。
     """
     if order.batch_completed_at:
-        result = '批次已完成'
+        result = ORDER_STATUS_BATCH_COMPLETED
     elif shipped_qty >= order.quantity:
-        result = '已出货'
+        result = ORDER_STATUS_SHIPPED
     elif shipped_qty > 0:
-        result = '待出货'
+        result = ORDER_STATUS_PENDING_SHIPMENT
     elif deducted_qty >= order.quantity:
-        result = '已备货'
+        result = ORDER_STATUS_STOCKED
     elif deducted_qty > 0:
-        result = '部分备货'
+        result = ORDER_STATUS_PARTIAL_STOCK
     else:
-        result = '待备货'
+        result = ORDER_STATUS_PENDING_STOCK
     Order.validate_status(result)
     return result
 

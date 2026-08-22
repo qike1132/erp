@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.sanitizer import escape_like
+from fastapi_app.shared_models.order import VALID_ORDER_STATUSES
 from fastapi_app.utils import calc_total_pages, parse_date_strict
 
 logger = logging.getLogger(__name__)
@@ -110,7 +111,7 @@ async def get_order_logs(db: AsyncSession, customer: str = '', product: str = ''
         where_clauses.append("(p.name LIKE :product OR p.barcode LIKE :product)")
         params['product'] = f'%{escape_like(product)}%'
     if status:
-        valid = ['待备货', '部分备货', '已备货', '待出货', '已出货', '已取消']
+        valid = VALID_ORDER_STATUSES
         if status in valid:
             where_clauses.append("o.status = :status")
             params['status'] = status

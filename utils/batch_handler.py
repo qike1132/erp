@@ -92,7 +92,7 @@ def batch_import_unified_template(file, session, models, process_row_func):
                     skipped += 1
 
             except Exception as e:
-                errors.append(f'第{row}行处理失败:{str(e)}')
+                errors.append(f'第{row}行处理失败:{e!s}')
                 skipped += 1
                 continue
 
@@ -179,7 +179,7 @@ def _do_batch_import(file, expected_headers, row_processor, model_name, session)
                     skipped += 1
 
             except Exception as e:
-                errors.append(f'第{row}行处理失败:{str(e)}')
+                errors.append(f'第{row}行处理失败:{e!s}')
                 skipped += 1
                 continue
 

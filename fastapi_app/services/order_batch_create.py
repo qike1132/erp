@@ -27,6 +27,7 @@ from fastapi_app.shared_models import (
     OrderItem,
     Product,
 )
+from fastapi_app.shared_models.order import ORDER_STATUS_PENDING_STOCK
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +150,7 @@ async def batch_create_orders(db: AsyncSession, orders_data: list) -> dict:
                     customer=customer,
                     quantity=total_quantity,  # 兼容旧代码读取 order.quantity
                     order_date=datetime.now(UTC).replace(tzinfo=None),  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
-                    status='待备货',
+                    status=ORDER_STATUS_PENDING_STOCK,
                     note='',  # 主订单级 note 留空，SKU 级 note 在 OrderItem
                     order_type=first_item['order_type'],
                     country=first_item['country'] if first_item['order_type'] == 'custom' else None,

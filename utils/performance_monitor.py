@@ -51,7 +51,7 @@ class PerformanceMiddleware(BaseHTTPMiddleware):
             elapsed = time.time() - start_time
             self.stats['errors'] += 1
             logger.error(
-                f"应用错误: {type(e).__name__} - {str(e)} - "
+                f"应用错误: {type(e).__name__} - {e!s} - "
                 f"路径: {request.url.path} - "
                 f"方法: {request.method} - "
                 f"IP: {request.client.host if request.client else 'unknown'}",
@@ -125,7 +125,7 @@ def monitor_performance(f):
             elapsed = time.time() - start_time
             logger.error(
                 f"函数执行错误: {f.__name__} - 耗时: {elapsed:.3f}s - "
-                f"错误: {str(e)}",
+                f"错误: {e!s}",
                 exc_info=True
             )
             raise

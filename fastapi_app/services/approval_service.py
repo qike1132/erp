@@ -11,6 +11,7 @@ order.country（审批同意/拒绝/撤销等逻辑）。多 SKU 模型下这些
 """
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
 from sqlalchemy import delete as sa_delete
@@ -182,15 +183,12 @@ async def approve_request(db: AsyncSession, approval_id: int, current_user: User
     if order.is_deleted:
         raise ValueError("关联订单已被删除，无法审批")
 
-    if approval.operation_type == ApprovalRequest.OPERATION_EDIT:
-        await _handle_edit_approval(db, approval, order)
-    elif approval.operation_type == ApprovalRequest.OPERATION_DELETE:
-        await _handle_delete_approval(db, approval, order)
-    else:
-        raise ValueError(f"不支持的操作类型：{approval.operation_type}")
-
     # 注意：_handle_delete_approval 会删除该订单的其他 ApprovalRequest 记录（排除当前审批），
     # 当前审批保留以便设置状态和创建日志。
+    handler = _OPERATION_HANDLERS.get(approval.operation_type)
+    if handler is None:
+        raise ValueError(f"不支持的操作类型：{approval.operation_type}")
+    await handler(db, approval, order)
     approval.status = ApprovalRequest.STATUS_APPROVED
     approval.approver_id = current_user.id
     approval.approval_time = _utcnow()
@@ -423,3 +421,11 @@ async def _handle_delete_approval(db: AsyncSession, approval: ApprovalRequest, o
 
     # 领域事件 ORDER_DELETED 已移至 endpoint 层（approval.py）事务提交后发布，
     # 订阅者使用独立 session，需可见已提交变更。
+
+
+# 审批操作类型 → handler 策略注册表（OCP）
+# 新增操作类型时：新增 handler 函数并在此注册一行，approve_request 主流程无需改动。
+_OPERATION_HANDLERS: dict[str, Callable[[AsyncSession, ApprovalRequest, Order], Awaitable[None]]] = {
+    ApprovalRequest.OPERATION_EDIT: _handle_edit_approval,
+    ApprovalRequest.OPERATION_DELETE: _handle_delete_approval,
+}

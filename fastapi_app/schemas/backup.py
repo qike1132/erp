@@ -42,7 +42,7 @@ class BackupRecordListOut(BaseModel):
 class BackupScheduleTask(BaseModel):
     """定时任务信息"""
     name: str = Field(description="任务名称")
-    task: str = Field(description="Celery 任务名")
+    task: str = Field(description="ARQ 任务名")
     schedule: str = Field(description="调度表达式")
     enabled: bool = True
     last_run: datetime | None = None

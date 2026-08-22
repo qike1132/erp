@@ -5,13 +5,14 @@
 """
 
 import re
+from collections.abc import Callable
 from datetime import datetime
 from functools import wraps
 from typing import Any
 
 try:
+    import openpyxl  # noqa: F401 - 依赖可用性探测（与 polars 同组导入）
     import polars as pl
-    from openpyxl import load_workbook
 except ImportError as err:
     raise ImportError("请安装 polars 和 openpyxl: pip install polars openpyxl") from err
 
@@ -26,7 +27,7 @@ from sqlalchemy.orm import Session
 
 class BatchUploadError(Exception):
     """批量上传异常类"""
-    def __init__(self, message: str, errors: list[dict[str, Any]] = None):
+    def __init__(self, message: str, errors: list[dict[str, Any]] | None = None):
         super().__init__(message)
         self.message = message
         self.errors = errors or []
@@ -60,7 +61,7 @@ def validate_customer_name(customer_name: str) -> tuple[bool, str]:
     return True, ""
 
 
-def validate_product(product_identifier: str, db_session: Session, Product_model=None) -> tuple[bool, int | None, str]:
+def validate_product(product_identifier: str, db_session: Session, product_model=None) -> tuple[bool, int | None, str]:
     """
     验证产品名称并返回产品 ID
 
@@ -84,7 +85,7 @@ def validate_product(product_identifier: str, db_session: Session, Product_model
         return False, None, "产品名称过长（最大200字符）"
 
     try:
-        if Product_model is None:
+        if product_model is None:
             from fastapi_app.shared_models.product import Product as Product_model
 
         product = db_session.query(Product_model).filter(
@@ -98,9 +99,9 @@ def validate_product(product_identifier: str, db_session: Session, Product_model
         return True, product.id, ""
 
     except SQLAlchemyError as e:
-        return False, None, f"数据库查询失败：{str(e)}"
+        return False, None, f"数据库查询失败：{e!s}"
     except Exception as e:
-        return False, None, f"验证产品时发生错误：{str(e)}"
+        return False, None, f"验证产品时发生错误：{e!s}"
 
 
 def validate_quantity(quantity: Any, field_name: str = "数量") -> tuple[bool, int | None, str]:
@@ -119,11 +120,11 @@ def validate_quantity(quantity: Any, field_name: str = "数量") -> tuple[bool, 
     except ValueError:
         return False, None, f"{field_name}必须是有效的整数"
     except Exception as e:
-        return False, None, f"验证{field_name}时发生错误：{str(e)}"
+        return False, None, f"验证{field_name}时发生错误：{e!s}"
 
 
 def validate_date(date_value: Any, field_name: str = "日期",
-                  date_format: str = None) -> tuple[bool, datetime | None, str]:
+                  date_format: str | None = None) -> tuple[bool, datetime | None, str]:
     """验证日期格式"""
     if date_value is None or (isinstance(date_value, str) and not date_value.strip()):
         return False, None, f"{field_name}不能为空"
@@ -187,7 +188,7 @@ def validate_date(date_value: Any, field_name: str = "日期",
         return False, None, f"{field_name}格式不正确，支持格式：YYYY-MM-DD, YYYY/MM/DD 等"
 
     except Exception as e:
-        return False, None, f"验证{field_name}时发生错误：{str(e)}"
+        return False, None, f"验证{field_name}时发生错误：{e!s}"
 
 
 def detect_file_encoding(file_path: str) -> str:
@@ -213,7 +214,7 @@ def detect_file_encoding(file_path: str) -> str:
         return 'utf-8'
 
 
-def parse_excel_file(file_path: str, sheet_name: str = None) -> tuple[bool, list[dict[str, Any]], str]:
+def parse_excel_file(file_path: str, sheet_name: str | None = None) -> tuple[bool, list[dict[str, Any]], str]:
     """解析 Excel 文件返回数据列表（Polars 引擎）"""
     import math
     try:
@@ -238,7 +239,7 @@ def parse_excel_file(file_path: str, sheet_name: str = None) -> tuple[bool, list
     except FileNotFoundError:
         return False, [], f"文件不存在：{file_path}"
     except Exception as e:
-        return False, [], f"解析 Excel 文件失败：{str(e)}"
+        return False, [], f"解析 Excel 文件失败：{e!s}"
 
 
 def generate_error_report(errors: list[dict[str, Any]],
@@ -331,7 +332,7 @@ def transactional(func):
             return result
         except Exception as e:
             db_session.rollback()
-            raise BatchUploadError(f"批量保存失败：{str(e)}") from e
+            raise BatchUploadError(f"批量保存失败：{e!s}") from e
 
     return wrapper
 
@@ -340,7 +341,7 @@ def batch_save_with_transaction(data_list: list[dict[str, Any]],
                                 db_session: Session,
                                 model_class: Any,
                                 mapping: dict[str, str],
-                                validate_func: callable = None) -> tuple[bool, list[dict[str, Any]], str]:
+                                validate_func: Callable | None = None) -> tuple[bool, list[dict[str, Any]], str]:
     """使用事务处理批量保存数据"""
     errors = []
     success_count = 0
@@ -409,7 +410,7 @@ def batch_save_with_transaction(data_list: list[dict[str, Any]],
         raise
     except Exception as e:
         db_session.rollback()
-        return False, [], f"批量保存失败：{str(e)}"
+        return False, [], f"批量保存失败：{e!s}"
 
 
 def validate_batch_data(data_list: list[dict[str, Any]],
@@ -491,7 +492,7 @@ def validate_batch_data(data_list: list[dict[str, Any]],
                     'row': idx,
                     'field': field,
                     'value': value,
-                    'message': f"验证出错：{str(e)}"
+                    'message': f"验证出错：{e!s}"
                 })
 
     if errors:

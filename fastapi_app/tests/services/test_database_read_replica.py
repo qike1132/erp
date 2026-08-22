@@ -6,7 +6,6 @@
 
 全部通过 mock 注入，不触发真实数据库/事件循环连接。
 """
-import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -27,7 +26,7 @@ class TestGetAsyncReadDbFallback:
     async def test_replica_checkout_timeout_falls_back_to_primary(self, monkeypatch, caplog):
         """副本连接检出超时 → 降级主库，并关闭副本会话"""
         fake_replica = AsyncMock()
-        fake_replica.execute = AsyncMock(side_effect=asyncio.TimeoutError())
+        fake_replica.execute = AsyncMock(side_effect=TimeoutError())
         fake_replica.close = AsyncMock()
 
         async def fake_get_async_db():
@@ -51,11 +50,11 @@ class TestGetAsyncReadDbFallback:
     async def test_empty_primary_fallback_has_no_leak(self, monkeypatch):
         """副本降级后主库无可用会话产出时，不产出会话且副本已归还（无泄漏）"""
         fake_replica = AsyncMock()
-        fake_replica.execute = AsyncMock(side_effect=asyncio.TimeoutError())
+        fake_replica.execute = AsyncMock(side_effect=TimeoutError())
 
         async def fake_get_async_db_empty():
             return
-            yield  # noqa: B027  # 空 field-generator（无主库回退源）
+            yield  # 空 field-generator（无主库回退源）
 
         monkeypatch.setattr(database, "_init_read_engine", lambda: None)
         monkeypatch.setattr(database, "_ReadSessionLocal", lambda: fake_replica)

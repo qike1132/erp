@@ -57,9 +57,9 @@ class AuditService:
     """审计服务"""
 
     @staticmethod
-    def log(action: str, model: str = None, model_id: int = None,
+    def log(action: str, model: str | None = None, model_id: int | None = None,
            old_value: Any = None, new_value: Any = None,
-           description: str = None) -> AuditLog:
+           description: str | None = None) -> AuditLog:
         """
         记录审计日志
 
@@ -98,8 +98,8 @@ class AuditService:
         return audit_log
 
     @staticmethod
-    def get_logs(user_id: int = None, model: str = None,
-                action: str = None, limit: int = 100) -> list:
+    def get_logs(user_id: int | None = None, model: str | None = None,
+                action: str | None = None, limit: int = 100) -> list:
         """查询审计日志"""
         with SyncSession() as session:
             query = session.query(AuditLog)
@@ -123,7 +123,7 @@ class AuditService:
             ).order_by(AuditLog.create_time.desc()).all()
 
 
-def audit_action(action: str, model: str = None):
+def audit_action(action: str, model: str | None = None):
     """审计装饰器"""
     def decorator(f):
         @wraps(f)

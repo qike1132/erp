@@ -34,8 +34,8 @@ class RedisCacheManager:
         self._fallback_timestamps: dict[str, float] = {}
         self._lock = asyncio.Lock()
 
-    async def init_app(self, app=None, redis_url: str = None, redis_host: str = 'localhost',
-                       redis_port: int = 6379, redis_db: int = 0, redis_password: str = None,
+    async def init_app(self, app=None, redis_url: str | None = None, redis_host: str = 'localhost',
+                       redis_port: int = 6379, redis_db: int = 0, redis_password: str | None = None,
                        default_timeout: int = 300, key_prefix: str = 'erp:'):
         if app is not None:
             redis_url = redis_url or app.config.get('REDIS_CACHE_URL') or app.config.get('REDIS_URL') or os.getenv('REDIS_CACHE_URL') or os.getenv('REDIS_URL')
@@ -128,7 +128,7 @@ class RedisCacheManager:
                 return None
             return self._fallback_cache.get(full_key)
 
-    async def set(self, key: str, value: Any, timeout: int = None) -> bool:
+    async def set(self, key: str, value: Any, timeout: int | None = None) -> bool:
         full_key = self._make_key(key)
         timeout = timeout or self.default_timeout
 
@@ -260,7 +260,7 @@ class RedisCacheManager:
 redis_cache = RedisCacheManager()
 
 
-def redis_cached(timeout: int = 300, key_prefix: str = None):
+def redis_cached(timeout: int = 300, key_prefix: str | None = None):
     """异步 Redis 缓存装饰器，支持 async 和 sync 函数"""
     def decorator(f):
         is_async = asyncio.iscoroutinefunction(f)
@@ -391,8 +391,9 @@ async def warmup_cache():
     try:
         from fastapi_app.core.database import get_async_db_context
         async with get_async_db_context() as db:
-            from sqlalchemy import select, func
-            from fastapi_app.shared_models import Product, User, Permission, user_permission
+            from sqlalchemy import select
+
+            from fastapi_app.shared_models import Permission, Product, User, user_permission
 
             try:
                 # 批量 JOIN 查询：一次获取所有活跃用户及其权限，消除 N+1 问题
@@ -400,7 +401,7 @@ async def warmup_cache():
                     select(User.id, Permission.code)
                     .join(user_permission, User.id == user_permission.c.user_id)
                     .join(Permission, Permission.id == user_permission.c.permission_id)
-                    .where(User.status == True)
+                    .where(User.status.is_(True))  # SQLAlchemy 表达式，语义为 SQL 布尔比较
                 )
                 user_perms: dict[int, list[str]] = {}
                 for uid, code in result.all():

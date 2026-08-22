@@ -163,7 +163,7 @@ class SmartCacheManager:
                 self._redis_client = redis_cache
                 self._is_redis_available = True
                 return self._redis_client
-        except Exception:
+        except Exception:  # noqa: S110 - defensive: Redis 不可用时静默降级为本地缓存
             pass
 
         self._is_redis_available = False
@@ -438,7 +438,7 @@ warmup_manager = CacheWarmupManager()
 
 
 def auto_refresh_cache(ttl: int = 3600, interval: int = 300,
-                       name: str = None, priority: int = 10):
+                       name: str | None = None, priority: int = 10):
     """自动刷新缓存装饰器"""
     def decorator(func: Callable) -> Callable:
         task_name = name or f"{func.__module__}:{func.__qualname__}"

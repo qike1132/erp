@@ -60,6 +60,7 @@ def _get_audit_session_factory():
     global _audit_session_factory
     if _audit_session_factory is None:
         from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
         from fastapi_app.core.database import async_engine
         if async_engine is not None:
             _audit_session_factory = async_sessionmaker(

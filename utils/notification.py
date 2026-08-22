@@ -45,9 +45,9 @@ class NotificationService:
     @staticmethod
     def create_notification(title: str, content: str,
                           notification_type: str = 'info',
-                          category: str = None,
-                          user_id: int = None,
-                          link: str = None) -> Notification:
+                          category: str | None = None,
+                          user_id: int | None = None,
+                          link: str | None = None) -> Notification:
         """
         创建通知
 

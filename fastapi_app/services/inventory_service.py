@@ -2,7 +2,7 @@
 库存可发数量计算服务
 
 从 batch_service.py 提取，职责单一：异步可出货量计算。
-同步版本位于 shared/stock_crud_service.py。
+可出货量的汇总构建逻辑统一在 shared/shipment_calc.py（同步/异步共用）。
 
 TODO(multi-sku-order): 本模块多处 SQL 直接引用 Order.product_id/Order.quantity/
 Order.order_type/Order.country（where 条件、累加逻辑）。多 SKU 模型下这些为首 item
@@ -19,6 +19,17 @@ from fastapi_app.shared_models import Order, StockOut
 
 logger = logging.getLogger(__name__)
 
+# 常规订单类型的历史别名集合（'normal' 在数据库中与 'regular' 等价）
+# 集中定义，避免 magic value 散落，新增别名只需改此常量。
+REGULAR_ORDER_TYPE_ALIASES: frozenset[str] = frozenset({'regular', 'normal'})
+
+
+def normalize_order_type(order_type: str | None) -> str | None:
+    """归一化订单类型：'normal' → 'regular'，其余原样返回。"""
+    if order_type in REGULAR_ORDER_TYPE_ALIASES:
+        return 'regular'
+    return order_type
+
 
 async def calculate_available_shipment_quantity(
     db: AsyncSession, product_id: int, customer: str,
@@ -34,13 +45,12 @@ async def calculate_available_shipment_quantity(
     4. 当指定 order_type 时，仅计算该类型订单（逻辑隔离）
     """
     # 历史兼容：'normal' 在数据库中与 'regular' 等价
-    if order_type == 'normal':
-        order_type = 'regular'
+    order_type = normalize_order_type(order_type)
 
     where_clause = [Order.product_id == product_id, Order.customer == customer]
     if order_type:
         if order_type == 'regular':
-            where_clause.append(Order.order_type.in_(['regular', 'normal']))
+            where_clause.append(Order.order_type.in_(REGULAR_ORDER_TYPE_ALIASES))
         else:
             where_clause.append(Order.order_type == order_type)
             if country:

@@ -16,6 +16,16 @@ if TYPE_CHECKING:
     from fastapi_app.shared_models.supplier import Supplier
 
 
+class PurchaseOrderStatus:
+    """采购订单状态唯一权威定义：业务代码引用常量，禁止新增字面量。
+
+    DB 存在历史 'confirmed' 数据（见 uq_po_pending_dedup 索引注释），
+    现行代码路径只产生 pending / completed 两种状态。
+    """
+    PENDING = 'pending'
+    COMPLETED = 'completed'
+
+
 class PurchaseOrder(Base):
     """采购订单主表"""
     __tablename__ = 'purchase_order'

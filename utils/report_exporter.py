@@ -168,7 +168,7 @@ class ReportExporter:
 
         # 动态构建表头：客户、产品名称、订单数量、[国家列...]、备货数量、总库存
         all_countries = stats.get('all_countries', [])
-        headers = ['客户', '产品名称', '订单数量'] + all_countries + ['备货数量', '总库存']
+        headers = ['客户', '产品名称', '订单数量', *all_countries, '备货数量', '总库存']
 
         self._write_inventory_sheet(ws, headers, inventory_data, all_countries)
 

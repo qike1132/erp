@@ -332,13 +332,19 @@ async def get_product_by_id(db: AsyncSession, product_id: int) -> dict:
     return product.to_dict()
 
 
-async def search_products(db: AsyncSession, query: str) -> list[dict]:
+async def search_products(db: AsyncSession, query: str, *, search_service=None) -> list[dict]:
     """搜索产品（按名称或条码模糊匹配，大小写不敏感）
 
     委托至 product_search_service 统一实现，保持原有返回格式。
+
+    Args:
+        search_service: 可注入的搜索服务实例（测试时可替换），
+            默认 None 时从容器解析模块级单例。
     """
-    from fastapi_app.services.product_search_service import product_search_service as _search_svc
-    return await _search_svc.search_async_with_cache(db, query, limit=20)
+    if search_service is None:
+        from fastapi_app.core.container import get_product_search_service
+        search_service = get_product_search_service()
+    return await search_service.search_async_with_cache(db, query, limit=20)
 
 
 async def get_product_stock(db: AsyncSession, product_id: int) -> dict:

@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only, selectinload
 
 from fastapi_app.core.cache import cache_result
-from fastapi_app.services.plan_utils import calc_shipment_status, normalize_plan_date
+from fastapi_app.services.plan_utils import calc_shipment_status
 from fastapi_app.services.purchase_plan_inventory import _get_inventory_map
 from fastapi_app.services.purchase_plan_shipment import _get_shipped_fifo_map_safe
 from fastapi_app.shared_models import (

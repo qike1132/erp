@@ -22,6 +22,7 @@ from fastapi_app.core.event_bus import safe_publish_event as _safe_publish_event
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.services.serializers.order_serializer import OrderSerializer
 from fastapi_app.shared_models import Order, OrderBatchAuditLog, OrderSyncConfig, Product, StockIn, StockOut, User
+from fastapi_app.shared_models.order import ORDER_STATUS_BATCH_COMPLETED, ORDER_STATUS_SHIPPED
 
 logger = logging.getLogger(__name__)
 
@@ -301,7 +302,7 @@ async def get_batch_orders(
 
     stmt = select(Order).options(joinedload(Order.product)).where(
         Order.customer.in_(whitelist),
-        Order.status != '批次已完成',
+        Order.status != ORDER_STATUS_BATCH_COMPLETED,
         Order.is_deleted.isnot(True),
     )
 
@@ -343,7 +344,7 @@ async def get_batch_history(
 
     stmt = select(Order).options(joinedload(Order.product), joinedload(Order.batch_completed_by)).where(
         Order.customer.in_(whitelist),
-        Order.status == '批次已完成',
+        Order.status == ORDER_STATUS_BATCH_COMPLETED,
         Order.is_deleted.isnot(True),
     )
 
@@ -393,7 +394,7 @@ async def update_batch_no(
         sync_stmt = update(Order).where(
             Order.batch_no == old_batch_no,
             Order.id != order_id,
-            Order.status != '批次已完成',
+            Order.status != ORDER_STATUS_BATCH_COMPLETED,
             Order.is_deleted.isnot(True),
         ).values(batch_no=batch_no)
         sync_result = await db.execute(sync_stmt)
@@ -460,7 +461,7 @@ async def complete_batch(
 ) -> dict:
     stmt = select(Order).where(
         Order.batch_no == batch_no,
-        Order.status != '批次已完成',
+        Order.status != ORDER_STATUS_BATCH_COMPLETED,
         Order.is_deleted.isnot(True),
     ).with_for_update()
     result = await db.execute(stmt)
@@ -477,7 +478,7 @@ async def complete_batch(
 
     for o in orders:
         # 批次完成仅适用于已出货的订单
-        if o.status != '已出货':
+        if o.status != ORDER_STATUS_SHIPPED:
             failed_orders.append({'id': o.id, 'order_no': o.order_no, 'status': o.status})
             continue
         o.batch_completed_at = now

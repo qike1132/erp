@@ -21,13 +21,8 @@ async def get_customers(db: AsyncSession, *, page: int = 1, per_page: int = 20,
                         sort_by: str = 'name', sort_order: str = 'asc') -> dict:
     query = select(Customer)
     count_query = select(func.count(Customer.id))
-
-    if status == 'active':
-        query = query.where(Customer.status)
-        count_query = count_query.where(Customer.status)
-    elif status == 'inactive':
-        query = query.where(~Customer.status)
-        count_query = count_query.where(~Customer.status)
+    from fastapi_app.shared.customer_status import apply_customer_status_filter
+    query, count_query = apply_customer_status_filter(query, count_query, status)
 
     if keyword:
         query = query.where(Customer.name.ilike(f'%{escape_like(keyword)}%'))  # sql-safe: escape_like/绑定参数/常量片段

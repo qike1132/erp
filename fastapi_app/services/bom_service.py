@@ -400,13 +400,15 @@ async def preview_bom(db: AsyncSession, source_product_id: int) -> dict:
     }
 
 
-async def search_for_bom_copy(db: AsyncSession, keyword: str) -> list:
-    from fastapi_app.services.product_search_service import product_search_service
+async def search_for_bom_copy(db: AsyncSession, keyword: str, *, search_service=None) -> list:
+    if search_service is None:
+        from fastapi_app.core.container import get_product_search_service
+        search_service = get_product_search_service()
 
     if not keyword:
         return []
 
-    query = product_search_service.build_search_query_async(db, keyword)
+    query = search_service.build_search_query_async(db, keyword)
     query = query.options(
         selectinload(Product.material),
         selectinload(Product.fabrics),

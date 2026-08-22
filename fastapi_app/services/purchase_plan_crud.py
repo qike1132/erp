@@ -16,6 +16,7 @@
 FIFO 分配算法已拆分至 fifo_allocation.py。
 从 purchase_plan_service.py 拆分而来，保持函数签名不变。
 """
+# ruff: noqa: F401  (本文件为 re-export 兼容层，导入名称供外部调用方使用)
 import logging
 
 from fastapi_app.services.purchase_plan_common import (
@@ -23,18 +24,7 @@ from fastapi_app.services.purchase_plan_common import (
     _invalidate_plan_caches,
     _log_action,
     _schedule_post_commit,
-)  # noqa: F401
-from fastapi_app.services.purchase_plan_inventory import (
-    INVENTORY_CACHE_PREFIX,
-    INVENTORY_CACHE_TTL,
-    _aggregate_barcode_demand,
-    _aggregate_name_demand,
-    _check_inventory_realtime,
-    _collect_insufficient,
-    _fetch_barcode_stock,
-    _fetch_name_stock,
-    _get_inventory_map,
-)  # noqa: F401
+)
 from fastapi_app.services.purchase_plan_crud_ops import (
     PlanExistsError,
     _format_insufficient_error,
@@ -48,18 +38,18 @@ from fastapi_app.services.purchase_plan_crud_ops import (
     delete_plan,
     update_detail,
     update_plan,
-)  # noqa: F401
-from fastapi_app.services.purchase_plan_shipment import (
-    _build_recalc_log_values,
-    _fetch_affected_plans_and_details,
-    _get_shipped_fifo_map_safe,
-    _recalc_plan_status,
-    _recalc_plan_statuses,
-    _recalc_plans_common,
-    _update_shipped_qty,
-    recalc_plans_after_stockout_create,
-    recalc_plans_after_stockout_delete,
-)  # noqa: F401
+)
+from fastapi_app.services.purchase_plan_inventory import (
+    INVENTORY_CACHE_PREFIX,
+    INVENTORY_CACHE_TTL,
+    _aggregate_barcode_demand,
+    _aggregate_name_demand,
+    _check_inventory_realtime,
+    _collect_insufficient,
+    _fetch_barcode_stock,
+    _fetch_name_stock,
+    _get_inventory_map,
+)
 from fastapi_app.services.purchase_plan_queries import (
     SHIPMENT_RECORD_LOOKBACK_MONTHS,
     _calc_stock_status,
@@ -75,7 +65,18 @@ from fastapi_app.services.purchase_plan_queries import (
     get_shipment_progress,
     get_shipment_records,
     get_shipment_records_by_date,
-)  # noqa: F401
+)
+from fastapi_app.services.purchase_plan_shipment import (
+    _build_recalc_log_values,
+    _fetch_affected_plans_and_details,
+    _get_shipped_fifo_map_safe,
+    _recalc_plan_status,
+    _recalc_plan_statuses,
+    _recalc_plans_common,
+    _update_shipped_qty,
+    recalc_plans_after_stockout_create,
+    recalc_plans_after_stockout_delete,
+)
 from fastapi_app.services.purchase_plan_staging import (
     _create_details_for_group,
     _get_or_create_plan_for_group,
@@ -89,7 +90,7 @@ from fastapi_app.services.purchase_plan_staging import (
     upload_excel,
     validate_barcode,
     validate_staging,
-)  # noqa: F401
+)
 
 # 保留本模块级 logger 定义（与子模块共享同一实例），供外部按原方式引用
 logger = logging.getLogger(__name__)

@@ -108,13 +108,14 @@ async def plan_detail(plan_id: int, db: AsyncSession=Depends(get_async_read_db),
 async def create_plan(data: PurchasePlanCreate, db: AsyncSession=Depends(get_async_db), user: User=Depends(require_permission('production_plan_manage'))) -> CreatePlanResponse:
     """创建采购计划主单+明细。
 
-    事务模式：手动 commit + 显式异常分支。
-    原因：db_transaction 会将 IntegrityError 转为 HTTP 500，无法对外层提供 409 提示。
+    事务模式：db_transaction + error_map 异常映射（commit/rollback/post-commit
+    回调由 db_transaction 统一执行，端点只声明 HTTP 语义）。
 
     异常映射：
         - PlanExistsError（uq_ppl_month_customer 冲突）→ 409 "该客户当月已存在采购计划"
-        - ValueError（业务校验失败 / plan_no 冲突耗尽）→ 400
-        - IntegrityError（仅理论上可达：detail INSERT 异常）→ 500
+        - IntegrityError（仅理论上可达：detail INSERT 异常）→ 409 单号冲突
+        - OperationalError/DisconnectionError → 500（detail 含脱敏错误信息）
+        - ValueError（业务校验失败 / plan_no 冲突耗尽）→ 400（db_transaction 默认）
 
     Args:
         data: 采购计划创建请求体（含客户、计划月份、明细列表等）。
@@ -128,36 +129,27 @@ async def create_plan(data: PurchasePlanCreate, db: AsyncSession=Depends(get_asy
         HTTPException: 业务校验失败返回 400；单号冲突返回 409；数据库异常返回 500。
     """
     from fastapi_app.services.purchase_plan_crud import PlanExistsError
-    try:
-        _, created_by = get_user_identity(user)
-        result = await purchase_plan_service.create_plan(db, customer_id=data.customer_id, customer_name=data.customer_name, plan_month=data.plan_month, details=[d.model_dump() for d in data.details], remark=data.remark, created_by=created_by)
-        await db.commit()
-    except PlanExistsError as e:
-        await db.rollback()
+
+    def _plan_exists(e: PlanExistsError) -> HTTPException:
         # 该客户当月已有计划：冲突不可重试，提示用户编辑现有计划
         logger.warning(f'创建计划被拒：{e}')
-        raise HTTPException(status_code=409, detail=str(e)) from e
-    except IntegrityError as e:
-        await db.rollback()
+        return HTTPException(status_code=409, detail=str(e))
+
+    def _plan_no_conflict(e: IntegrityError) -> HTTPException:
         logger.error(f'创建计划单号冲突: {e}', exc_info=True)
-        raise HTTPException(status_code=409, detail='单号已存在，请勿重复提交') from e
-    except ValueError as e:
-        await db.rollback()
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except (OperationalError, DisconnectionError) as e:
-        await db.rollback()
+        return HTTPException(status_code=409, detail='单号已存在，请勿重复提交')
+
+    def _db_failure(e: OperationalError | DisconnectionError) -> HTTPException:
         logger.error(f'创建计划失败: {e}', exc_info=True)
-        raise HTTPException(status_code=500, detail=f'创建计划失败: {settings.sanitize_error(e)}') from e
-    else:
-        # 手动执行 post-commit 回调（缓存失效、事件发布等），与 db_transaction 保持一致
-        callbacks = []
-        if hasattr(db, 'info') and isinstance(db.info, dict) and 'post_commit_callbacks' in db.info:
-            callbacks = db.info.pop('post_commit_callbacks', [])
-        for callback in callbacks:
-            try:
-                await callback()
-            except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
-                logger.error("post-commit 回调执行失败: %s", e, exc_info=True)
+        return HTTPException(status_code=500, detail=f'创建计划失败: {settings.sanitize_error(e)}')
+
+    async with db_transaction(db, error_map={
+        PlanExistsError: _plan_exists,
+        IntegrityError: _plan_no_conflict,
+        (OperationalError, DisconnectionError): _db_failure,
+    }):
+        _, created_by = get_user_identity(user)
+        result = await purchase_plan_service.create_plan(db, customer_id=data.customer_id, customer_name=data.customer_name, plan_month=data.plan_month, details=[d.model_dump() for d in data.details], remark=data.remark, created_by=created_by)
     return {'success': True, 'data': result}
 
 @router.put('/edit/{plan_id}', response_model=PurchasePlanActionResponse)
@@ -533,8 +525,8 @@ async def staging_validate(db: AsyncSession=Depends(get_async_db), _user: User=D
 async def staging_confirm(data: ConfirmStagingRequest, db: AsyncSession=Depends(get_async_db), user: User=Depends(require_permission('production_plan_manage'))) -> PurchasePlanStagingConfirmResponse:
     """确认暂存数据，批量写入正式表。
 
-    事务模式：手动 commit + catch IntegrityError。
-    原因：db_transaction 会将 IntegrityError 转为 HTTP 500，无法对外层提供 409 单号冲突提示。
+    事务模式：db_transaction + error_map 异常映射（commit/rollback/post-commit
+    回调由 db_transaction 统一执行）。
 
     Args:
         data: 确认请求体（含 batch_id 与 selected_ids）。
@@ -545,26 +537,16 @@ async def staging_confirm(data: ConfirmStagingRequest, db: AsyncSession=Depends(
         PurchasePlanStagingConfirmResponse: 确认结果。
 
     Raises:
-        HTTPException: 单号冲突返回 409。
+        HTTPException: 单号冲突返回 409；业务校验失败返回 400。
     """
     session_id, created_by = get_user_identity(user)
-    try:
-        result = await purchase_plan_service.confirm_staging(db, session_id, batch_id=data.batch_id, created_by=created_by, selected_ids=data.selected_ids)
-        await db.commit()
-    except IntegrityError as e:
-        await db.rollback()
+
+    def _confirm_no_conflict(e: IntegrityError) -> HTTPException:
         logger.error(f'确认计划单号冲突: {e}')
-        raise HTTPException(status_code=409, detail='单号已存在，请勿重复提交') from e
-    else:
-        # 手动执行 post-commit 回调（缓存失效、事件发布等），与 db_transaction 保持一致
-        callbacks = []
-        if hasattr(db, 'info') and isinstance(db.info, dict) and 'post_commit_callbacks' in db.info:
-            callbacks = db.info.pop('post_commit_callbacks', [])
-        for callback in callbacks:
-            try:
-                await callback()
-            except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
-                logger.error("post-commit 回调执行失败: %s", e, exc_info=True)
+        return HTTPException(status_code=409, detail='单号已存在，请勿重复提交')
+
+    async with db_transaction(db, error_map={IntegrityError: _confirm_no_conflict}):
+        result = await purchase_plan_service.confirm_staging(db, session_id, batch_id=data.batch_id, created_by=created_by, selected_ids=data.selected_ids)
     return {'success': True, **result}
 
 @router.delete('/staging/clear', response_model=PurchasePlanActionResponse)

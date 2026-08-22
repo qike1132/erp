@@ -8,7 +8,7 @@
 
 从 purchase_plan_crud.py 拆分而来，保持函数签名不变。
 """
-from sqlalchemy import and_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.services.fifo_allocation import _get_shipped_fifo_map

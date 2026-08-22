@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
@@ -147,7 +147,12 @@ def app_error_to_http(app_error: AppError) -> HTTPException:
 
 
 @asynccontextmanager
-async def db_transaction(db: AsyncSession, *, commit: bool = True) -> AsyncIterator[None]:
+async def db_transaction(
+    db: AsyncSession,
+    *,
+    commit: bool = True,
+    error_map: Mapping[type[Exception] | tuple[type[Exception], ...], _ErrorMapValue] | None = None,
+) -> AsyncIterator[None]:
     """数据库事务上下文管理器，统一处理 commit/rollback 和异常转换。
 
     用法：
@@ -155,16 +160,18 @@ async def db_transaction(db: AsyncSession, *, commit: bool = True) -> AsyncItera
             await some_service.create(db, ...)
         return ActionResponse(message='操作成功')
 
-    异常处理：
+    异常处理（默认）：
         - ValueError → HTTP 400（业务校验失败）
         - SQLAlchemyError → HTTP 500（数据库异常，自动 rollback）
 
-    注意：
-        该上下文会捕获 SQLAlchemyError（含 IntegrityError）并统一转换为 HTTP 500。
-        如需在端点层根据唯一约束/外键冲突返回 400/409 等特定状态码，请不要使用
-        db_transaction，改为在端点内手动 `await db.commit()` 并 catch IntegrityError。
-        参考：customer.py delete_customer、order.py delete_order、
-        purchase_plan.py create_plan/staging_confirm、supplier.py delete_supplier。
+    异常处理（error_map，优先于默认规则）：
+        需要将唯一约束冲突映射为 409 等特定状态码时，传入 error_map 声明
+        异常类型 → HTTP 响应的映射，无需在端点内手动 commit/catch：
+            - 值为 (status_code, detail) 元组：固定响应；
+            - 值为 callable(exc) -> HTTPException：可记录日志、拼接动态 detail。
+        按字典注册顺序取首个 isinstance 命中；未命中走默认规则。
+        注意被映射类型若为 ValueError 子类（如 PlanExistsError），
+        也必须通过 error_map 声明才能覆盖默认的 400 转换。
 
     Post-commit 回调：
         服务层可将需要在事务提交成功后执行的异步回调注册到
@@ -173,9 +180,16 @@ async def db_transaction(db: AsyncSession, *, commit: bool = True) -> AsyncItera
         适用于缓存失效、事件发布等必须在持久化完成后才执行的操作。
     """
     try:
-        yield
-        if commit:
-            await db.commit()
+        try:
+            yield
+            if commit:
+                await db.commit()
+        except Exception as e:
+            mapped = _match_error_map(error_map, e)
+            if mapped is not None:
+                await db.rollback()
+                raise mapped from e
+            raise
     except NotFoundError as e:
         await db.rollback()
         raise HTTPException(status_code=e.status_code, detail=e.message) from e
@@ -196,3 +210,23 @@ async def db_transaction(db: AsyncSession, *, commit: bool = True) -> AsyncItera
                     await callback()
                 except Exception as e:  # broad-except: 异常处理框架内部兜底
                     logger.error("post-commit 回调执行失败: %s", e, exc_info=True)
+
+
+# error_map 的值：固定 (状态码, 响应文本) 或根据异常实例构造 HTTPException 的工厂
+_ErrorMapValue = tuple[int, str] | Callable[[Exception], HTTPException]
+
+
+def _match_error_map(
+    error_map: Mapping[type[Exception] | tuple[type[Exception], ...], _ErrorMapValue] | None,
+    exc: Exception,
+) -> HTTPException | None:
+    """按注册顺序返回首个 isinstance 命中的映射结果；未命中返回 None。"""
+    if not error_map:
+        return None
+    for exc_types, handler in error_map.items():
+        if isinstance(exc, exc_types):
+            if isinstance(handler, tuple):
+                status_code, detail = handler
+                return HTTPException(status_code=status_code, detail=detail)
+            return handler(exc)
+    return None

@@ -194,7 +194,7 @@ class SafetyClassifier:
     将工具调用分为 safe / risky / dangerous 三个等级。
     """
 
-    DANGEROUS_PATTERNS = [
+    DANGEROUS_PATTERNS: list = [  # noqa: RUF012 - read-only 正则常量
         r'\brm\s+-rf\b',
         r'\bdrop\s+(database|table)\b',
         r'\bDELETE\s+FROM\s+\w+\s*WHERE\s+1\s*=\s*1',
@@ -209,7 +209,7 @@ class SafetyClassifier:
         r'\b__import__\s*\(',
     ]
 
-    RISKY_PATTERNS = [
+    RISKY_PATTERNS: list = [  # noqa: RUF012 - read-only 正则常量
         r'\bUPDATE\s+\w+\s+SET\b',
         r'\bDELETE\s+FROM\b',
         r'\bINSERT\s+INTO\b',

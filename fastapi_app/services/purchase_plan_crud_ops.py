@@ -8,7 +8,6 @@
 
 从 purchase_plan_crud.py 拆分而来，保持函数签名不变。
 """
-import logging
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError

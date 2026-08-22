@@ -17,8 +17,8 @@ class ReportGenerator:
 
     # ==================== 订单报表 ====================
 
-    def get_order_report(self, start_date: datetime = None,
-                        end_date: datetime = None) -> dict[str, Any]:
+    def get_order_report(self, start_date: datetime | None = None,
+                        end_date: datetime | None = None) -> dict[str, Any]:
         """
         订单报表
 
@@ -100,8 +100,8 @@ class ReportGenerator:
 
     # ==================== 备货报表 ====================
 
-    def get_stockin_report(self, start_date: datetime = None,
-                          end_date: datetime = None) -> dict[str, Any]:
+    def get_stockin_report(self, start_date: datetime | None = None,
+                          end_date: datetime | None = None) -> dict[str, Any]:
         """
         备货报表
 
@@ -173,8 +173,8 @@ class ReportGenerator:
 
     # ==================== 出货报表 ====================
 
-    def get_stockout_report(self, start_date: datetime = None,
-                           end_date: datetime = None) -> dict[str, Any]:
+    def get_stockout_report(self, start_date: datetime | None = None,
+                           end_date: datetime | None = None) -> dict[str, Any]:
         """
         出货报表
 
@@ -246,8 +246,8 @@ class ReportGenerator:
 
     # ==================== 综合报表 ====================
 
-    def get_comprehensive_report(self, start_date: datetime = None,
-                                end_date: datetime = None) -> dict[str, Any]:
+    def get_comprehensive_report(self, start_date: datetime | None = None,
+                                end_date: datetime | None = None) -> dict[str, Any]:
         """
         综合报表
         包含订单、备货、出货的综合分析

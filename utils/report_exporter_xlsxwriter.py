@@ -88,8 +88,8 @@ class XlsxWriterExporter:
 
     def export_with_chart(self, data: list[dict], title: str = 'Sheet1',
                           chart_type: str = 'column',
-                          categories_col: str = None,
-                          values_col: str = None) -> bytes:
+                          categories_col: str | None = None,
+                          values_col: str | None = None) -> bytes:
         """
         导出带图表的Excel
 

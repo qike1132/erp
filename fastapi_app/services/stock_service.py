@@ -12,9 +12,10 @@
 本文件保留全部对外函数名的 re-export，历史调用方
 `from fastapi_app.services.stock_service import X` 保持不变，可直接使用。
 
-核心 CRUD 和库存计算已统一至 fastapi_app.shared.stock_crud_service。
-本服务负责异步适配层：将同步 shared 函数包装为异步调用，
-并处理事件发布等 FastAPI 特有逻辑。
+库存 CRUD 的异步实现位于 stock_*_service 子模块（本文件下方各 import）；
+编号生成统一至 core/number_generator.py（同步/异步双实现）。
+原 shared/stock_crud_service.py 的同步 CRUD 双轨已消除（死代码移除），
+该模块仅保留同步编号便捷别名供 ARQ 同步任务使用。
 """
 import logging
 
@@ -34,69 +35,69 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # 全部对外名称 re-export（保持历史 import 兼容）
 # ---------------------------------------------------------------------------
-from fastapi_app.services.stock_common import _parse_date_preserve_time  # noqa: E402, F401
-from fastapi_app.services.stock_event_service import (  # noqa: E402, F401
-    recalc_order_status_after_return,
-    _recalc_shipment_order_statuses,
+from fastapi_app.services.stock_common import _parse_date_preserve_time  # noqa: F401
+from fastapi_app.services.stock_event_service import (  # noqa: F401
     _publish_shipment_completed_events,
+    _recalc_shipment_order_statuses,
+    recalc_order_status_after_return,
 )
-from fastapi_app.services.stock_in_service import (  # noqa: E402, F401
+from fastapi_app.services.stock_in_service import (  # noqa: F401
     MAX_STOCK_QUANTITY,
-    create_stockin_core,
-    update_stockin_core,
-    delete_stockin_core,
-    create_stockin,
-    update_stockin,
-    delete_stockin,
     batch_create_stockins,
+    create_stockin,
+    create_stockin_core,
+    delete_stockin,
+    delete_stockin_core,
+    update_stockin,
+    update_stockin_core,
 )
-from fastapi_app.services.stock_inventory_service import (  # noqa: E402, F401
-    get_stockins,
-    get_stockouts,
-    get_stockreturns,
+from fastapi_app.services.stock_inventory_service import (  # noqa: F401
+    _CUST_CLAUSE,
+    _O_CUST,
+    _O_PID,
+    _PID_CLAUSE,
+    _PROD_PID,
+    _SI_CUST,
+    _SI_PID,
+    _SO_CUST,
+    _SO_PID,
+    _build_country_data_dict,
+    _build_inventory_cte_sql,
+    _build_inventory_filter_params,
+    _build_inventory_query_clauses,
+    _empty_inventory_response,
+    _fetch_inventory,
+    _format_inventory_rows,
+    _get_all_countries,
+    _get_all_customers,
+    _get_prod_names,
+    _merge_inventory_rows,
+    _parse_country_data,
+    _resolve_products,
+    _run_sql,
     get_inventory,
     get_inventory_paginated,
     get_stock_overview_stats,
-    _build_inventory_filter_params,
-    _build_inventory_cte_sql,
-    _format_inventory_rows,
-    _empty_inventory_response,
-    _parse_country_data,
-    _get_all_countries,
-    _get_all_customers,
-    _resolve_products,
-    _build_inventory_query_clauses,
-    _build_country_data_dict,
-    _merge_inventory_rows,
-    _fetch_inventory,
-    _run_sql,
-    _get_prod_names,
-    _CUST_CLAUSE,
-    _SI_CUST,
-    _SO_CUST,
-    _O_CUST,
-    _PID_CLAUSE,
-    _SI_PID,
-    _SO_PID,
-    _O_PID,
-    _PROD_PID,
+    get_stockins,
+    get_stockouts,
+    get_stockreturns,
 )
-from fastapi_app.services.stock_out_service import (  # noqa: E402, F401
-    create_stockout_core,
-    update_stockout_core,
-    delete_stockout_core,
-    create_stockout,
-    update_stockout,
-    delete_stockout,
-    batch_create_stockouts,
-    _validate_stockout_batch,
+from fastapi_app.services.stock_out_service import (  # noqa: F401
     _create_stockout_records,
     _process_single_stockout,
+    _validate_stockout_batch,
+    batch_create_stockouts,
+    create_stockout,
+    create_stockout_core,
+    delete_stockout,
+    delete_stockout_core,
+    update_stockout,
+    update_stockout_core,
 )
-from fastapi_app.services.stock_return_service import (  # noqa: E402, F401
-    generate_stockreturn_number,
-    create_stockreturn_core,
-    delete_stockreturn_core,
+from fastapi_app.services.stock_return_service import (  # noqa: F401
     create_stockreturn,
+    create_stockreturn_core,
     delete_stockreturn,
+    delete_stockreturn_core,
+    generate_stockreturn_number,
 )

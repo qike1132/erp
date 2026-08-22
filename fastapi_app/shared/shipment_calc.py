@@ -1,7 +1,7 @@
 """
 库存可发量汇总计算（同步/异步版本共用纯函数）
 
-从 inventory_service.py（异步）与 shared/stock_crud_service.py（同步）中提取，
+从 inventory_service.py（异步）与 shared/stock_crud_service.py（同步，已移除）中提取，
 两份实现曾各自维护一份相同的累加逻辑，容易在修改时漂移。
 本模块只做纯计算，不依赖任何 Web 框架与数据库会话。
 """
@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from fastapi_app.shared_models import Order
 
 
-def build_shipment_summary(orders: Sequence[Order], shipped_map: dict[int, float]) -> dict:
+def build_shipment_summary(orders: Sequence[Order], shipped_map: dict[int, int]) -> dict:
     """根据订单列表与已出货映射，组装可出货量汇总与订单明细。
 
     Args:

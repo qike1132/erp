@@ -47,7 +47,7 @@ def _make_order(
     order_no: str,
     customer: str,
     items: list,
-    order_date: datetime | None | object = _DATE_UNSET,
+    order_date: datetime | object | None = _DATE_UNSET,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         id=order_id,

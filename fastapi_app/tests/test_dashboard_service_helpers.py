@@ -99,7 +99,8 @@ class TestResolveYesterdayFromMv:
         """部分 MV 缺失时应逐个查询降级"""
         db = AsyncMock()
         # _mv_or_base 对缺失 MV 直接返回 base，对存在 MV 查询
-        with patch.object(dashboard_service, '_mv_or_base', new=AsyncMock(side_effect=[100, 20, 5])):
+        # 注:重构后 _mv_or_base 定义于 services/dashboard/stats 子模块,需 patch 其真实位置
+        with patch('fastapi_app.services.dashboard.stats._mv_or_base', new=AsyncMock(side_effect=[100, 20, 5])):
             result = await dashboard_service._resolve_yesterday_from_mv(
                 db, mv_order_ok=True, mv_stockin_ok=False, mv_stockout_ok=False,
                 yesterday_date=date(2026, 1, 1),

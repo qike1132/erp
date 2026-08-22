@@ -327,7 +327,7 @@ class ExcelReader:
                 os.close(self.temp_fd)
             if self.temp_path and os.path.exists(self.temp_path):
                 os.unlink(self.temp_path)
-        except Exception:
+        except Exception:  # noqa: S110 - defensive: 临时文件清理尽力而为，失败不影响主流程
             pass
 
     @staticmethod
@@ -340,7 +340,7 @@ class ExcelReader:
         elif 'unsupported format' in error_msg or 'corrupt' in error_msg:
             return 'Excel文件格式无效或已损坏,请使用Microsoft Excel重新保存'
         else:
-            return f'Excel文件错误: {str(error)}'
+            return f'Excel文件错误: {error!s}'
 
 
 def validate_required_field(value, field_name, row_num=None):

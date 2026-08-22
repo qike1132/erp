@@ -24,11 +24,6 @@ from fastapi_app.core.exception_handler import safe_publish_event
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.services.notification_service import StockEvent, publish_stock_event
-from fastapi_app.services.order_service import batch_create_orders
-from fastapi_app.services.stock_service import (
-    batch_create_stockins,
-    batch_create_stockouts,
-)
 from fastapi_app.shared_models import (
     InventoryLog,
     Product,
@@ -46,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 async def orchestrate_batch_orders(db: AsyncSession, orders_data: list[dict]) -> dict:
     """编排批量订单提交：创建订单 → 缓存失效 → 事件发布"""
+    from fastapi_app.services.order_service import batch_create_orders
     try:
         async with db_transaction(db):
             result = await batch_create_orders(db, orders_data)
@@ -73,6 +69,7 @@ async def orchestrate_batch_orders(db: AsyncSession, orders_data: list[dict]) ->
 
 async def orchestrate_batch_stockins(db: AsyncSession, stockins_data: list[dict]) -> dict:
     """编排批量入库提交：创建入库 → 缓存失效"""
+    from fastapi_app.services.stock_service import batch_create_stockins
     try:
         async with db_transaction(db):
             result = await batch_create_stockins(db, stockins_data)
@@ -89,6 +86,7 @@ async def orchestrate_batch_stockins(db: AsyncSession, stockins_data: list[dict]
 
 async def orchestrate_batch_stockouts(db: AsyncSession, stockouts_data: list[dict]) -> dict:
     """编排批量出库提交：创建出库 → 缓存失效 → 采购计划重算 → 事件发布"""
+    from fastapi_app.services.stock_service import batch_create_stockouts
     async with db_transaction(db):
         result = await batch_create_stockouts(db, stockouts_data)
 

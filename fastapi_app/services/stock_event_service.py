@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.services.notification_service import StockEvent
+from fastapi_app.shared_models.order import ORDER_STATUS_CANCELLED, ORDER_STATUS_SHIPPED
 
 logger = logging.getLogger(__name__)
 
@@ -28,14 +29,14 @@ async def recalc_order_status_after_return(db: AsyncSession, order_id: int) -> d
     order = order_result.scalar_one_or_none()
     if not order:
         return None
-    if order.status in (None, '已取消'):
+    if order.status in (None, ORDER_STATUS_CANCELLED):
         return None
 
     old_status = order.status
     from fastapi_app.services.order_utils import compute_order_status_from_db
     order.status = await compute_order_status_from_db(db, order)
 
-    if order.status == '已出货' and old_status != '已出货':
+    if order.status == ORDER_STATUS_SHIPPED and old_status != ORDER_STATUS_SHIPPED:
         return {'order_id': order.id, 'order_no': order.order_no, 'customer': order.customer}
     return None
 
@@ -54,13 +55,13 @@ async def _recalc_shipment_order_statuses(db: AsyncSession, created_stockouts: l
     shipment_completed_orders = []
     for oid in affected_order_ids:
         order = order_map.get(oid)
-        if not order or order.status == '已出货':
+        if not order or order.status == ORDER_STATUS_SHIPPED:
             continue
         old_status = order.status
         new_status = await compute_order_status_from_db(db, order)
         if new_status != old_status:
             order.status = new_status
-        if new_status == '已出货' and old_status != '已出货':
+        if new_status == ORDER_STATUS_SHIPPED and old_status != ORDER_STATUS_SHIPPED:
             shipment_completed_orders.append({'order_id': order.id, 'order_no': order.order_no, 'customer': order.customer})
     return shipment_completed_orders
 

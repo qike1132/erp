@@ -16,6 +16,11 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, selectinload
 
 from fastapi_app.shared_models import Order, Product, StockIn, StockOut
+from fastapi_app.shared_models.order import (
+    ORDER_STATUS_PENDING_STOCK,
+    ORDER_STATUS_SHIPPED,
+    VALID_ORDER_STATUSES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +115,7 @@ def _get_order_logs(session, customer, product, status, start_date, end_date):
         query = query.filter(Order.customer.like(f'%{escape_like(customer)}%'))
     query = _apply_product_filter(query, product)
     if status:
-        valid_statuses = ['待备货', '部分备货', '已备货', '待出货', '已出货', '已取消']
+        valid_statuses = VALID_ORDER_STATUSES
         if status in valid_statuses:
             query = query.filter(Order.status == status)
     query = _apply_date_filters(query, Order.order_date, start_date, end_date)
@@ -118,19 +123,19 @@ def _get_order_logs(session, customer, product, status, start_date, end_date):
     stats_query = session.query(
         func.count(Order.id),
         func.coalesce(func.sum(Order.quantity), 0),
-        func.count(Order.id).filter(Order.status == '待备货'),
-        func.count(Order.id).filter(Order.status == '已出货'),
+        func.count(Order.id).filter(Order.status == ORDER_STATUS_PENDING_STOCK),
+        func.count(Order.id).filter(Order.status == ORDER_STATUS_SHIPPED),
     ).join(Product, Order.product_id == Product.id)
     if customer:
         stats_query = stats_query.filter(Order.customer.like(f'%{escape_like(customer)}%'))
     stats_query = _apply_product_filter(stats_query, product)
-    if status and status in ['待备货', '部分备货', '已备货', '待出货', '已出货', '已取消']:
+    if status and status in VALID_ORDER_STATUSES:
         stats_query = stats_query.filter(Order.status == status)
     stats_query = _apply_date_filters(stats_query, Order.order_date, start_date, end_date)
     total, total_quantity, pending_count, completed_count = stats_query.one()
 
     logger.info(f'订单查询结果数: {total}')
-    logs = []
+    logs: list[dict[str, Any]] = []
     for order in query.order_by(Order.order_date.desc()).yield_per(_YIELD_PER_BATCH):
         if len(logs) >= _MAX_EXPORT_ROWS:
             logger.warning('订单报表导出达到最大行数 %d，已截断', _MAX_EXPORT_ROWS)
@@ -189,7 +194,7 @@ def _get_stockin_logs(session, customer, product, start_date, end_date):
     total, total_quantity = stats_query.one()
 
     logger.info(f'备货查询结果数: {total}')
-    logs = []
+    logs: list[dict[str, Any]] = []
     total_remaining = 0
     for stockin in query.order_by(StockIn.stockin_date.desc()).yield_per(_YIELD_PER_BATCH):
         if len(logs) >= _MAX_EXPORT_ROWS:
@@ -245,7 +250,7 @@ def _get_stockout_logs(session, customer, product, start_date, end_date):
     total, total_quantity = stats_query.one()
 
     logger.info(f'出货查询结果数: {total}')
-    logs = []
+    logs: list[dict[str, Any]] = []
     for so in query.order_by(StockOut.stockout_date.desc()).yield_per(_YIELD_PER_BATCH):
         if len(logs) >= _MAX_EXPORT_ROWS:
             logger.warning('出货报表导出达到最大行数 %d，已截断', _MAX_EXPORT_ROWS)
@@ -295,7 +300,7 @@ def _get_deduction_logs(session, customer, product, start_date, end_date):
     total, total_quantity, total_orders = stats_query.one()
 
     logger.info(f'抵扣查询结果数: {total}')
-    logs = []
+    logs: list[dict[str, Any]] = []
     for so in query.order_by(StockOut.stockout_date.desc()).yield_per(_YIELD_PER_BATCH):
         if len(logs) >= _MAX_EXPORT_ROWS:
             logger.warning('抵扣报表导出达到最大行数 %d，已截断', _MAX_EXPORT_ROWS)

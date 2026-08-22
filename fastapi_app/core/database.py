@@ -30,7 +30,7 @@ def _get_pool_config() -> dict:
     """
     workers = int(os.getenv("UVICORN_WORKERS", "4"))
     # 确保: workers × (pool_size + max_overflow) < PG max_connections (默认100)
-    # 留 20 连接给 Celery/迁移/管理工具
+    # 留 20 连接给 ARQ/迁移/管理工具
     available = int(os.getenv("DB_MAX_CONNECTIONS", "100")) - 20
 
     # PgBouncer 启用时减小应用侧连接池（PgBouncer 负责连接复用）
@@ -126,6 +126,19 @@ def get_sync_engine():
     return _sync_engine
 
 
+def SyncSession():  # noqa: N802 - 兼容遗留调用方（utils.audit 等）依赖的公开 API 名称
+    """获取同步数据库会话（兼容历史 API 名称，lazy 初始化）。
+
+    用法：with SyncSession() as session: ...（返回 SQLAlchemy Session 实例，
+    支持上下文管理器语义，自动关闭连接）。
+    此名称为 utils.audit 等遗留调用方依赖的公开接口。
+    """
+    _init_sync_engine()
+    if _SyncSessionLocal is None:
+        raise RuntimeError('同步数据库引擎初始化失败')
+    return _SyncSessionLocal()
+
+
 async def get_async_db():
     """异步数据库会话依赖（Unit of Work 模式）
 
@@ -151,7 +164,7 @@ async def get_async_db():
             raise
 
 
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 
 @asynccontextmanager
@@ -237,10 +250,9 @@ async def get_async_read_db():
             await session.execute(text("SELECT 1"))
     except (TimeoutError, SQLAlchemyError, OSError) as e:
         logger.warning("只读副本连接不可用（%.1fs），降级到主库: %s", _READ_REPLICA_CHECKOUT_TIMEOUT, e)
-        try:
+        # 资源清理尽力而为：关闭失败不影响降级路径
+        with suppress(RuntimeError, OSError, ValueError, SQLAlchemyError):
             await session.close()
-        except (RuntimeError, OSError, ValueError, SQLAlchemyError):
-            pass
         async for primary_session in get_async_db():
             yield primary_session
         return

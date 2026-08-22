@@ -12,8 +12,8 @@ class NumberGenerator:
     """编号生成器类，用于在批量操作中维护序号计数器"""
 
     _instance = None
-    _counters = {}
-    _initialized = {}
+    _counters: dict = {}  # noqa: RUF012 - singleton: 编号计数器跨实例共享，属有意设计
+    _initialized: dict = {}  # noqa: RUF012 - singleton: 初始化标记跨实例共享，属有意设计
 
     def __new__(cls):
         if cls._instance is None:
@@ -101,13 +101,13 @@ def generate_number(prefix, model, date_field, number_field, db):
     return new_number
 
 
-def generate_order_number(db, Order):
+def generate_order_number(db, order_model):
     """
     生成订单编号
 
     Args:
         db: SQLAlchemy Session 实例
-        Order: Order模型类
+        Order: order_model 模型类
 
     Returns:
         str: 订单编号,格式为 PO-YYYYMMDD-XXXX
@@ -116,16 +116,16 @@ def generate_order_number(db, Order):
         >>> generate_order_number(session, Order)
         'PO-20260321-0001'
     """
-    return generate_number('PO', Order, 'order_date', 'order_no', db)
+    return generate_number('PO', order_model, 'order_date', 'order_no', db)
 
 
-def generate_stockin_number(db, StockIn):
+def generate_stockin_number(db, stockin_model):
     """
     生成备货编号
 
     Args:
         db: SQLAlchemy Session 实例
-        StockIn: StockIn模型类
+        StockIn: stockin_model 模型类
 
     Returns:
         str: 备货编号,格式为 SI-YYYYMMDD-XXXX
@@ -134,16 +134,16 @@ def generate_stockin_number(db, StockIn):
         >>> generate_stockin_number(session, StockIn)
         'SI-20260321-0001'
     """
-    return generate_number('SI', StockIn, 'stockin_date', 'stockin_no', db)
+    return generate_number('SI', stockin_model, 'stockin_date', 'stockin_no', db)
 
 
-def generate_stockout_number(db, StockOut):
+def generate_stockout_number(db, stockout_model):
     """
     生成出货编号
 
     Args:
         db: SQLAlchemy Session 实例
-        StockOut: StockOut模型类
+        StockOut: stockout_model 模型类
 
     Returns:
         str: 出货编号,格式为 SO-YYYYMMDD-XXXX
@@ -152,10 +152,10 @@ def generate_stockout_number(db, StockOut):
         >>> generate_stockout_number(session, StockOut)
         'SO-20260321-0001'
     """
-    return generate_number('SO', StockOut, 'stockout_date', 'stockout_no', db)
+    return generate_number('SO', stockout_model, 'stockout_date', 'stockout_no', db)
 
 
-def generate_case_stockin_number(db, CaseStockIn):
+def generate_case_stockin_number(db, case_stockin_model):
     """
     生成皮套入库编号
 
@@ -166,10 +166,10 @@ def generate_case_stockin_number(db, CaseStockIn):
     Returns:
         str: 皮套入库编号,格式为 CSI-YYYYMMDD-XXXX
     """
-    return generate_number('CSI', CaseStockIn, 'stockin_date', 'stockin_no', db)
+    return generate_number('CSI', case_stockin_model, 'stockin_date', 'stockin_no', db)
 
 
-def generate_case_stockout_number(db, CaseStockOut):
+def generate_case_stockout_number(db, case_stockout_model):
     """
     生成皮套出库编号
 
@@ -180,4 +180,4 @@ def generate_case_stockout_number(db, CaseStockOut):
     Returns:
         str: 皮套出库编号,格式为 CSO-YYYYMMDD-XXXX
     """
-    return generate_number('CSO', CaseStockOut, 'stockout_date', 'stockout_no', db)
+    return generate_number('CSO', case_stockout_model, 'stockout_date', 'stockout_no', db)

@@ -96,7 +96,7 @@ class BatchImportHandler:
             df = pl.read_excel(file_path)
             return df
         except Exception as e:
-            self.errors.append(f'Excel文件解析失败: {str(e)}')
+            self.errors.append(f'Excel文件解析失败: {e!s}')
             return None
 
     def validate_data(self, df):
@@ -215,7 +215,7 @@ class BatchImportHandler:
                         self.db.session.add(instance)
                         self.success_count += 1
                 except Exception as e:
-                    self.errors.append(f'处理数据时出错: {str(e)}')
+                    self.errors.append(f'处理数据时出错: {e!s}')
                     self.failed_count += 1
                     self.db.session.rollback()
                     continue
@@ -234,7 +234,7 @@ class BatchImportHandler:
             self.db.session.rollback()
             return {
                 'success': False,
-                'message': f'导入失败: {str(e)}',
+                'message': f'导入失败: {e!s}',
                 'success_count': self.success_count,
                 'failed_count': self.failed_count,
                 'errors': self.errors
@@ -248,10 +248,10 @@ class BatchImportHandler:
 class OrderImportHandler(BatchImportHandler):
     """订单批量导入处理器"""
 
-    def __init__(self, db, Product, Order):
-        super().__init__(Order, ['客户名称', '产品名称', '数量'], db)
-        self.Product = Product
-        self.Order = Order
+    def __init__(self, db, product_model, order_model):
+        super().__init__(order_model, ['客户名称', '产品名称', '数量'], db)
+        self.Product = product_model
+        self.Order = order_model
 
     def custom_validate(self, row_data, index):
         # 验证数量是否为数字
@@ -286,10 +286,10 @@ class OrderImportHandler(BatchImportHandler):
 class StockInImportHandler(BatchImportHandler):
     """备货批量导入处理器"""
 
-    def __init__(self, db, Product, StockIn):
-        super().__init__(StockIn, ['客户名称', '产品名称', '数量'], db)
-        self.Product = Product
-        self.StockIn = StockIn
+    def __init__(self, db, product_model, stockin_model):
+        super().__init__(stockin_model, ['客户名称', '产品名称', '数量'], db)
+        self.Product = product_model
+        self.StockIn = stockin_model
 
     def custom_validate(self, row_data, index):
         try:
