@@ -35,6 +35,7 @@ local.properties
 # JWT 密钥（敏感文件，不应提交到版本控制）
 config/jwt/*.pem
 config/jwt/*.key
+config/jwt/*.pem.bak-*
 
 # 备份加密密钥（敏感文件，不应提交到版本控制）
 backups/.backup_encryption.key
@@ -191,3 +192,12 @@ fix-aria*
 # 临时修复脚本残留
 _fix*.cjs
 _fix*.js
+
+# === 2026-08-22 审计治理：工具产物/备份不入库 ===
+.mimosa/
+*.stale-*
+*.bak_ipv6
+*.bak-2026*
+temp/
+build_v6/
+dist_v6/
