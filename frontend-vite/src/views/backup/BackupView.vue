@@ -1,369 +1,271 @@
 <template>
-  <div class="bk-container">
-    <div class="page-card page-card-main">
-      <div class="page-card-header">
-        <div class="bk-card-title-group">
-          <div class="bk-icon-box bk-icon-blue">
-            <FontAwesomeIcon icon="database" />
-          </div>
-          <div>
-            <h3>数据备份与恢复</h3>
-            <small>备份系统全部数据，或从备份文件恢复</small>
-          </div>
-        </div>
-      </div>
-
-      <!-- Tab bar -->
-      <div class="bk-tab-bar">
-        <div class="bk-tab-group">
-          <button
-            class="bk-tab-btn"
-            :class="{ 'bk-tab-active': activeTab === 'backup' }"
-            @click="handleTabChange('backup')"
-          >
-            <FontAwesomeIcon icon="database" /> 备份与恢复
-          </button>
-          <button
-            class="bk-tab-btn"
-            :class="{ 'bk-tab-active': activeTab === 'records' }"
-            @click="handleTabChange('records')"
-          >
-            <FontAwesomeIcon icon="history" /> 备份记录
-          </button>
-        </div>
-        <div class="bk-tab-actions">
-          <button
-            class="bk-action-btn bk-action-secondary"
-            :disabled="checking"
-            title="备份完整性巡检"
-            @click="handleIntegrityCheck"
-          >
-            <UiLoadingIcon :loading="checking" icon="shield-alt" />
-            {{ checking ? '巡检中...' : '完整性巡检' }}
-          </button>
-        </div>
-      </div>
-
-      <!-- Integrity check result -->
-      <IntegrityCheckPanel :check-result="checkResult" @close="checkResult = null" />
-
-      <div v-show="activeTab === 'backup'" class="bk-body">
-        <!-- 左栏：一键备份 -->
-        <div class="bk-col">
-          <div class="bk-col-title"><FontAwesomeIcon icon="download" /> 一键备份</div>
-          <BackupModeSelector
-            :tables="tables"
-            :tables-loading="tablesLoading"
-            :backup-mode="backupMode"
-            :backup-remark="backupRemark"
-            :exporting="exporting"
-            :saving-to-server="savingToServer"
-            :saving-incremental="savingIncremental"
-            :save-result="saveResult"
-            @update:backup-remark="backupRemark = $event"
-            @mode-change="handleModeChange"
-            @export="handleExport"
-            @save-to-server="handleSaveToServer"
-            @save-incremental="handleSaveIncremental"
-          />
-        </div>
-
-        <!-- 右栏 -->
-        <div class="bk-col">
-          <!-- 自定义路径模式：文件上传恢复 -->
-          <template v-if="backupMode === 'custom'">
-            <div class="bk-col-title"><FontAwesomeIcon icon="upload" /> 一键恢复</div>
-            <FileRestorePanel
-              :selected-file="selectedFile"
-              :validation-result="validationResultTyped"
-              :importing="importing"
-              :restore-result="restoreResultTyped"
-              :restore-task-id="restoreTaskId"
-              :missing-tables="missingTables"
-              @file-select="setFile"
-              @file-clear="clearFile"
-              @restore="handleRestore"
-              @restore-completed="onRestoreProgressCompleted"
-              @restore-failed="onRestoreProgressFailed"
-            />
-          </template>
-
-          <!-- 默认路径模式：服务器备份列表（子组件化，模板原样搬移） -->
-          <ServerBackupList
-            v-if="backupMode === 'default'"
-            :backups="serverBackups"
-            :loading="serverBackupsLoading"
-            :restoring-file="restoringFile"
-            :deleting-file="deletingFile"
-            :backup-mode="backupMode"
-            :restore-task-id="restoreTaskId"
-            @restore="handleServerRestore"
-            @delete="handleServerDelete"
-            @restore-completed="onRestoreProgressCompleted"
-            @restore-failed="onRestoreProgressFailed"
-          />
-        </div>
-      </div>
-
-      <!-- Records tab -->
-      <div v-show="activeTab === 'records'" class="bk-records-body">
-        <div class="bk-records-content">
-          <BackupRecordList
-            :records="records"
-            :total="recordsTotal"
-            :page="recordsPage"
-            :page-size="recordsPageSize"
-            :loading="recordsLoading"
-            @page-change="loadRecords"
-          />
-        </div>
-      </div>
+  <div class="bk-center">
+    <div class="bk-head">
+      <div class="bk-head-title">数据备份中心</div>
+      <div class="bk-head-sub">生产环境 · 数据备份与恢复</div>
     </div>
 
-    <!-- 确认恢复弹窗（子组件化，模板原样搬移） -->
-    <RestoreConfirmDialog
-      v-model:open="showConfirmDialog"
-      :confirm-target="confirmTarget"
-      :importing="importing"
-      :restoring-file="restoringFile"
-      :restore-phase="restorePhase"
-      @confirm="confirmRestoreAction"
-    />
+    <section class="bk-section">
+      <BackupOverviewCards :status="status" :loading="statusLoading" />
+    </section>
+
+    <section class="bk-section">
+      <BackupActions
+        :busy="busy"
+        :task="taskState"
+        :on-full="triggerFull"
+        :on-incremental="triggerIncremental"
+        no-task-hint="选择全量或增量，同一时刻至多执行一个任务"
+      />
+    </section>
+
+    <section class="bk-section bk-grid-two">
+      <ScheduleConfig
+        :schedules="schedules"
+        :saving="saving"
+        :on-save="saveSchedule"
+        :on-delete="deleteSchedule"
+        :on-trigger="triggerScheduleNow"
+      />
+      <PathSettings
+        :settings="settings"
+        :saving="saving"
+        :on-validate="validatePath"
+        :on-save="savePath"
+      />
+    </section>
+
+    <section class="bk-section">
+      <RestoreWizard
+        :open="wizardOpen"
+        :server-backups="serverBackups"
+        :plan="plan"
+        :task="taskState"
+        :on-preview="previewPlan"
+        :on-execute="executeRestore"
+        @close="wizardOpen = false"
+      />
+      <div class="bk-actions-row">
+        <button class="bk-btn-primary" @click="openWizard">一键还原向导</button>
+        <label class="bk-btn-outline">
+          从文件上传还原
+          <input type="file" accept=".zip,.json,.gz" hidden @change="onUploadRestore" />
+        </label>
+      </div>
+      <div v-if="uploadRestoring" class="bk-upload-note">上传文件还原中：{{ (taskState?.phaseLabel) || '处理中…' }}</div>
+    </section>
+
+    <section class="bk-section">
+      <BackupRecordTable
+        :rows="records"
+        :total="recordsTotal"
+        :page="recordsPage"
+        :page-size="recordsPageSize"
+        :loading="recordsLoading"
+        :on-page-change="loadRecords"
+        @restore="onRecordRestore"
+        @download="onRecordDownload"
+      />
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import BackupRecordList from '@/components/backup/BackupRecordList.vue'
-import BackupModeSelector from '@/components/backup/BackupModeSelector.vue'
-import FileRestorePanel from '@/components/backup/FileRestorePanel.vue'
-import IntegrityCheckPanel from '@/components/backup/IntegrityCheckPanel.vue'
-import ServerBackupList from './components/ServerBackupList.vue'
-import RestoreConfirmDialog from './components/RestoreConfirmDialog.vue'
-import { useBackupCenter } from './composables/useBackupCenter'
-import type { RestoreResult } from '@/components/backup/composables/useRestorePolling'
-import type { BackupValidationResult } from '@/components/backup/FileRestorePanel.vue'
+import { onMounted, ref } from 'vue'
+import { backupApi } from '@/api'
+import type { BackupRestorePlan, BackupScheduleItem, BackupSettings } from '@/api/backup'
+import BackupOverviewCards from '@/components/backup/BackupOverviewCards.vue'
+import BackupActions from '@/components/backup/BackupActions.vue'
+import ScheduleConfig from '@/components/backup/ScheduleConfig.vue'
+import PathSettings from '@/components/backup/PathSettings.vue'
+import RestoreWizard, { type ServerBackupSummary } from '@/components/backup/RestoreWizard.vue'
+import BackupRecordTable, { type BackupRecordRow } from '@/components/backup/BackupRecordTable.vue'
+import { useBackupTask } from '@/components/backup/composables/useBackupTask'
 
-// 全部业务逻辑（备份导出 / 服务器备份 / 文件恢复 / 增量 / 记录 / 巡检）抽至 composables/useBackupCenter.ts
-const {
-  tables, tablesLoading,
-  backupMode, backupRemark, handleModeChange, exporting, handleExport,
-  savingToServer, saveResult, handleSaveToServer, savingIncremental, handleSaveIncremental,
-  selectedFile, validationResult, importing, restoreResult, restorePhase, restoreTaskId,
-  setFile, clearFile, missingTables, handleRestore,
-  serverBackups, serverBackupsLoading, restoringFile, deletingFile,
-  handleServerRestore, handleServerDelete,
-  showConfirmDialog, confirmTarget, confirmRestoreAction,
-  onRestoreProgressCompleted, onRestoreProgressFailed,
-  records, recordsTotal, recordsPage, recordsPageSize, recordsLoading, loadRecords,
-  checking, checkResult, handleIntegrityCheck,
-} = useBackupCenter()
+/* ---------- 概览 / 调度 / 设置 ---------- */
+const status = ref<Record<string, unknown> | null>(null)
+const statusLoading = ref(false)
+const schedules = ref<BackupScheduleItem[]>([])
+const settings = ref<BackupSettings | null>(null)
+const saving = ref(false)
 
-// 类型断言：useBackupCenter 返回可选属性，FileRestorePanel 期望非可选属性（模板中已用 ?. 兜底）
-const restoreResultTyped = computed(() => restoreResult.value as Required<RestoreResult> | null)
-const validationResultTyped = computed(() => validationResult.value as BackupValidationResult | null)
+/* ---------- 任务进度（备份 + 还原 + 上传共用统一轮询） ---------- */
+const activeTaskId = ref<string | null>(null)
+const busy = ref(false)
+const { state: taskState } = useBackupTask(
+  () => activeTaskId.value,
+  () => { busy.value = false },
+  () => { busy.value = false },
+)
 
-// --- Tab 切换 ---
-const activeTab = ref<'backup' | 'records'>('backup')
+/* ---------- 记录 ---------- */
+const records = ref<BackupRecordRow[]>([])
+const recordsTotal = ref(0)
+const recordsPage = ref(1)
+const recordsPageSize = ref(20)
+const recordsLoading = ref(false)
 
-function handleTabChange(tab: 'backup' | 'records') {
-  activeTab.value = tab
-  if (tab === 'records' && !records.value.length) {
-    loadRecords()
+/* ---------- 还原向导 ---------- */
+const wizardOpen = ref(false)
+const serverBackups = ref<ServerBackupSummary[]>([])
+const plan = ref<BackupRestorePlan | null>(null)
+const uploadRestoring = ref(false)
+
+async function loadStatus() {
+  statusLoading.value = true
+  try {
+    const s = await backupApi.getStatus()
+    status.value = s as unknown as Record<string, unknown>
+  } catch {
+    status.value = null
+  } finally {
+    statusLoading.value = false
   }
 }
+async function loadSchedules() {
+  try {
+    const res = await backupApi.listSchedules()
+    schedules.value = res.tasks ?? []
+  } catch { schedules.value = [] }
+}
+async function loadSettings() {
+  try {
+    settings.value = await backupApi.getSettings()
+  } catch { settings.value = null }
+}
+async function loadServerBackups() {
+  try {
+    const res = await backupApi.listServerBackups()
+    serverBackups.value = (res.backups ?? []).map((b) => ({
+      filename: b.filename, size: b.size, created_at: b.created_at,
+    }))
+  } catch { serverBackups.value = [] }
+}
+
+async function triggerFull() {
+  busy.value = true
+  try {
+    const res = await backupApi.triggerFull({ remark: '手动全量备份' })
+    activeTaskId.value = res.task_id
+  } catch { busy.value = false; activeTaskId.value = null }
+}
+async function triggerIncremental() {
+  busy.value = true
+  try {
+    const res = await backupApi.triggerIncremental({ remark: '手动增量备份' })
+    activeTaskId.value = res.task_id
+  } catch { busy.value = false; activeTaskId.value = null }
+}
+
+async function saveSchedule(data: { name: string; task_type: string; cron_expr: string; enabled: boolean }) {
+  saving.value = true
+  try {
+    await backupApi.createSchedule(data)
+    await loadSchedules()
+  } finally { saving.value = false }
+}
+async function deleteSchedule(id: number) {
+  try {
+    await backupApi.deleteSchedule(id)
+    await loadSchedules()
+  } catch { /* ignore */ }
+}
+async function triggerScheduleNow() {
+  const first = schedules.value.find((s) => s.enabled)
+  if (first?.name) {
+    await backupApi.triggerSchedule(first.name)
+  } else {
+    await triggerIncremental()
+  }
+}
+
+async function validatePath(path: string) {
+  try {
+    const res = await backupApi.validatePath(path)
+    return { valid: res.valid, error: res.error }
+  } catch {
+    return { valid: false, error: '校验失败' }
+  }
+}
+async function savePath(path: string) {
+  saving.value = true
+  try {
+    await backupApi.saveSettings({ backup_dir: path || undefined })
+    await loadSettings()
+  } finally { saving.value = false }
+}
+
+async function loadRecords(page = recordsPage.value) {
+  recordsLoading.value = true
+  try {
+    const res = (await backupApi.getRecords(page, recordsPageSize.value)) as unknown as Record<string, unknown>
+    const body = res as { records?: BackupRecordRow[]; data?: { records?: BackupRecordRow[] }; total?: number }
+    records.value = (body.records ?? (body.data?.records as BackupRecordRow[] | undefined) ?? []) as BackupRecordRow[]
+    recordsTotal.value = (typeof body.total === 'number' ? body.total : records.value.length)
+    recordsPage.value = page
+  } catch { records.value = [] } finally { recordsLoading.value = false }
+}
+function onRecordRestore(filename: string) {
+  wizardOpen.value = true
+  previewPlan(filename)
+}
+function onRecordDownload(filename: string) {
+  // 下载沿用后端按名导出；此处仅保留入口占位
+}
+
+function openWizard() {
+  wizardOpen.value = true
+}
+async function previewPlan(filename: string) {
+  try {
+    plan.value = await backupApi.restorePlan(filename)
+  } catch {
+    plan.value = { success: false, filename, error: '预览失败' }
+  }
+}
+async function executeRestore(filename: string) {
+  busy.value = true
+  try {
+    const res = await backupApi.asyncRestoreByName(filename)
+    activeTaskId.value = res.task_id ?? null
+  } catch { busy.value = false }
+}
+async function onUploadRestore(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  const fd = new FormData()
+  fd.append('file', file)
+  uploadRestoring.value = true
+  busy.value = true
+  try {
+    const res = await backupApi.asyncImport(fd)
+    activeTaskId.value = res.task_id ?? null
+  } catch {
+    uploadRestoring.value = false
+    busy.value = false
+  }
+}
+
+onMounted(() => {
+  void loadStatus()
+  void loadSchedules()
+  void loadSettings()
+  void loadServerBackups()
+  void loadRecords(1)
+})
 </script>
 
 <style scoped>
-/* === Layout === */
-.bk-container {
-  padding: 0;
-  margin: 0 auto;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-}
-
-/* === Header === */
-.bk-card-title-group {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.bk-card-title-group h3 {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--color-text);
-  margin: 0;
-}
-
-.bk-card-title-group small {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  display: block;
-  margin-top: 2px;
-}
-
-/* === Icon Box === */
-.bk-icon-box {
-  width: 46px;
-  height: 46px;
-  border-radius: 13px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 19px;
-  flex-shrink: 0;
-}
-
-.bk-icon-blue {
-  background: linear-gradient(135deg, var(--color-primary-100), var(--color-primary-200));
-  color: var(--color-primary-700);
-}
-
-/* === Body (Two columns) === */
-.bk-body {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-}
-
-/* === Column === */
-.bk-col {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.bk-col + .bk-col {
-  border-left: 1px solid var(--color-border-light);
-}
-
-.bk-col-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 20px;
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--color-text);
-  border-bottom: 1px solid var(--color-border-light);
-  flex-shrink: 0;
-}
-
-.bk-col-title i {
-  font-size: 14px;
-  color: var(--color-primary-500);
-}
-
-/* === Tab Bar === */
-.bk-tab-bar {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 8px 20px;
-  border-bottom: 1px solid var(--color-border-light);
-  flex-shrink: 0;
-}
-
-.bk-tab-group {
-  display: inline-flex;
-  gap: 4px;
-  padding: 4px;
-  border-radius: 12px;
-  background: white;
-  border: 1px solid var(--color-border-light);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-}
-
-.bk-tab-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 8px 14px;
-  border: none;
-  border-radius: 9px;
-  background: transparent;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
-}
-
-.bk-tab-btn:hover {
-  background: var(--color-primary-50);
-  color: var(--color-primary-600);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-  transform: translateY(-1px);
-}
-
-.bk-tab-active {
-  background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
-  color: var(--color-primary-700);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 8px rgba(91,141,239,0.2);
-  transform: translateY(-1px);
-}
-
-.bk-tab-actions {
-  margin-left: auto;
-  display: flex;
-  gap: 8px;
-}
-
-/* === Action Buttons (for integrity check button in tab bar) === */
-.bk-action-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: 100%;
-  padding: 12px 18px;
-  border: 2px solid var(--color-border-light);
-  border-radius: var(--radius-button);
-  background: white;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.3s ease, border-color 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease;
-}
-
-.bk-action-secondary {
-  background: var(--color-neutral-100);
-  color: var(--color-neutral-700);
-  border: 1px solid var(--color-border-light);
-  margin-top: 8px;
-}
-
-.bk-action-secondary:hover:not(:disabled) {
-  background: var(--color-neutral-200);
-}
-
-.bk-action-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-  transform: none;
-}
-
-/* === Records Body === */
-.bk-records-body {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-.bk-records-content {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 16px 20px;
-}
+.bk-center { max-width: 1440px; margin: 0 auto; padding: 24px; }
+.bk-head { margin-bottom: 24px; }
+.bk-head-title { font-size: 28px; font-weight: 600; line-height: 36px; }
+.bk-head-sub { margin-top: 6px; font-size: 13px; color: var(--color-text-secondary, #4e5969); }
+.bk-section { margin-bottom: 24px; }
+.bk-grid-two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+@media (max-width: 1023px) { .bk-grid-two { grid-template-columns: 1fr; } }
+.bk-actions-row { display: flex; gap: 12px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+.bk-btn-primary { height: 40px; padding: 0 24px; border-radius: 8px; border: none; background: var(--color-primary, #2f7bff); color: #fff; font-size: 15px; font-weight: 500; cursor: pointer; }
+.bk-btn-outline { height: 40px; padding: 0 24px; border-radius: 8px; border: 1px solid var(--color-border-strong, #c9cdd4); background: var(--color-surface, #fff); color: var(--color-primary, #2f7bff); font-size: 15px; cursor: pointer; display: inline-flex; align-items: center; }
+.bk-upload-note { margin-top: 8px; font-size: 13px; color: var(--color-text-tertiary, #86909c); }
 </style>

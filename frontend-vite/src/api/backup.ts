@@ -1,4 +1,4 @@
-import { get, post, del, upload, download } from './request'
+import { get, post, put, del, upload, download } from './request'
 import type { ApiResponse } from '@/types'
 
 /** 备份保存到服务器的响应（顶层字段，与后端 /backup/save 对齐） */
@@ -17,6 +17,59 @@ export interface BackupSaveResult {
     redis_rdb?: boolean
   }
   remark?: string
+}
+
+/** 定时任务项（与后端 BackupSchedule 对齐） */
+export interface BackupScheduleItem {
+  id?: number | null
+  name: string
+  task?: string
+  task_type?: string | null
+  cron_expr?: string | null
+  schedule: string
+  enabled: boolean
+  last_run?: string | null
+  last_status?: string | null
+}
+
+/** 备份系统设置（单行） */
+export interface BackupSettings {
+  success?: boolean
+  backup_dir: string
+  retention_days: number
+  max_count: number
+  encryption_mode: string
+  initialized?: boolean
+  updated_by?: string | null
+  updated_at?: string | null
+}
+
+/** 路径预检结果 */
+export interface BackupPathValidate {
+  valid: boolean
+  path?: string
+  message?: string
+  error?: string
+}
+
+/** 还原差异预览（第 2 步数据源） */
+export interface BackupRestorePlanItem {
+  table: string
+  backup_rows: number | null
+  current_rows: number | null
+  diff: number | null
+}
+export interface BackupRestorePlan {
+  success: boolean
+  filename?: string
+  table_count?: number
+  total_backup_rows?: number
+  affected_count?: number
+  affected_tables?: { table: string; diff: number }[]
+  tables?: BackupRestorePlanItem[]
+  encrypted?: boolean
+  exported_at?: string | null
+  error?: string | null
 }
 
 export const backupApi = {
@@ -41,4 +94,22 @@ export const backupApi = {
   integrityCheck: () => post<{ success: boolean } & ApiResponse>('/backup/integrity-check'),
   getRecords: (page: number = 1, pageSize: number = 20) =>
     get<ApiResponse>(`/backup/records?page=${page}&page_size=${pageSize}`),
+  // --- M4 六模块新增绑定（任务化 / 调度 / settings / 概览 / 差异预览） ---
+  triggerFull: (payload?: { remark?: string; encrypt?: boolean; password?: string }) =>
+    post<{ success: boolean; task_id: string; task_name: string; message?: string }>('/backup/full', payload ?? {}),
+  triggerIncremental: (payload?: { remark?: string; since?: string }) =>
+    post<{ success: boolean; task_id: string; task_name: string; message?: string }>('/backup/incremental', payload ?? {}),
+  getStatus: () => get<ApiResponse & { backup_dir?: string; total_backups?: number; last_full_backup?: unknown; disk_usage_percent?: number | null; last_incremental?: unknown }>('/backup/status'),
+  listSchedules: () => get<{ success: boolean; tasks: BackupScheduleItem[] }>('/backup/schedule'),
+  createSchedule: (body: { name: string; task_type: string; cron_expr: string; enabled?: boolean }) =>
+    post<{ success: boolean; tasks: BackupScheduleItem[] }>('/backup/schedule', body),
+  updateSchedule: (id: number, body: { name?: string; task_type?: string; cron_expr?: string; enabled?: boolean }) =>
+    put<{ success: boolean; tasks: BackupScheduleItem[] }>(`/backup/schedule/${id}`, body),
+  deleteSchedule: (id: number) => del<{ success: boolean }>(`/backup/schedule/${id}`),
+  triggerSchedule: (taskName: string) => post<{ success: boolean }>(`/backup/schedule/trigger?task_name=${encodeURIComponent(taskName)}`),
+  getSettings: () => get<BackupSettings>('/backup/settings'),
+  saveSettings: (body: { backup_dir?: string; retention_days?: number; max_count?: number; encryption_mode?: string }) =>
+    post<BackupSettings>('/backup/settings', body),
+  validatePath: (path: string) => post<BackupPathValidate>('/backup/settings/validate-path', { path }),
+  restorePlan: (filename: string) => post<BackupRestorePlan>('/backup/restore/plan', { filename }),
 }

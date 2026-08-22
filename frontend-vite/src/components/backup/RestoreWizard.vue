@@ -1,0 +1,229 @@
+<template>
+  <div v-if="open" class="rw-overlay" @click.self="onTryClose">
+    <div class="rw-dialog">
+      <div class="rw-head">
+        <h3 class="rw-title">还原向导</h3>
+        <button class="rw-icon-btn" :disabled="step === 4" @click="onTryClose">×</button>
+      </div>
+
+      <div class="rw-stepper">
+        <template v-for="(s, i) in steps" :key="s">
+          <div class="rw-step" :class="stepCls(i + 1)">
+            <span class="rw-step-dot">{{ stepDone(i + 1) ? '✓' : i + 1 }}</span>
+            <span class="rw-step-label">{{ s }}</span>
+          </div>
+          <div v-if="i < steps.length - 1" class="rw-step-line" :class="{ done: step > i + 1 }"></div>
+        </template>
+      </div>
+
+      <div class="rw-body">
+        <!-- Step 1 选择备份点 -->
+        <div v-show="step === 1">
+          <p class="rw-desc">选择一个备份点用于还原。还原将把该备份点数据覆盖到当前数据库。</p>
+          <label v-for="f in serverBackups" :key="f.filename" class="rw-point" :class="{ checked: selected === f.filename }">
+            <input type="radio" :checked="selected === f.filename" @change="selectPoint(f.filename)" />
+            <span class="mono rw-point-name">{{ f.filename }}</span>
+            <span class="mono rw-point-meta">{{ fmtSize(f.size) }} · {{ f.created_at?.slice(0, 16) }}</span>
+          </label>
+          <div v-if="serverBackups.length === 0" class="rw-empty">暂无服务器备份可还原</div>
+        </div>
+
+        <!-- Step 2 差异预览 -->
+        <div v-show="step === 2">
+          <p class="rw-desc">还原将覆盖以下数据，请确认影响范围。</p>
+          <div class="rw-impact" v-if="plan">
+            <span>覆盖 <b>{{ plan.table_count }}</b> 张表 · <b>{{ plan.encrypted ? '加密包' : '明文包' }}</b></span>
+            <span v-if="plan.affected_count" class="rw-affected">检测到 {{ plan.affected_count }} 张表有差异</span>
+          </div>
+          <div class="rw-table-wrap" v-if="plan?.tables?.length">
+            <table class="rw-table">
+              <thead><tr><th>表名</th><th>备份行数</th><th>当前行数</th><th>差异</th></tr></thead>
+              <tbody>
+                <tr v-for="t in plan.tables" :key="t.table">
+                  <td class="mono">{{ t.table }}</td>
+                  <td class="mono">{{ t.backup_rows ?? '—' }}</td>
+                  <td class="mono">{{ t.current_rows ?? '—' }}</td>
+                  <td class="mono">{{ t.diff == null ? '—' : t.diff === 0 ? '一致' : (t.diff > 0 ? '+' + t.diff : String(t.diff)) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-if="plan && !plan.success" class="rw-error">{{ plan.error }}</div>
+        </div>
+
+        <!-- Step 3 危险确认 -->
+        <div v-show="step === 3">
+          <p class="rw-desc">确认执行还原？此操作将覆盖当前数据库，且无法撤销。</p>
+          <ul class="rw-danger-list">
+            <li>将覆盖当前数据库全部数据</li>
+            <li>执行期间系统停止写入</li>
+            <li>未备份的新增数据将丢失</li>
+          </ul>
+          <input v-model="confirmText" class="rw-confirm-input" placeholder="输入「确认还原」以继续" autocomplete="off" />
+        </div>
+
+        <!-- Step 4 执行进度 -->
+        <div v-show="step === 4">
+          <p class="rw-desc">正在执行还原，此过程不可中断。</p>
+          <div class="rw-progress-row">
+            <div class="rw-progress">
+              <div class="rw-progress-fill" :class="task?.status === 'failed' ? 'rw-fill-danger' : 'rw-fill-danger'" :style="{ width: pct + '%' }"></div>
+            </div>
+            <span class="rw-pct mono">{{ pct }}%</span>
+          </div>
+          <div class="rw-stage">{{ (task?.status ?? '') === 'failed' ? (task?.error || '还原失败') : (task?.phaseLabel || '准备还原环境…') }}</div>
+        </div>
+
+        <!-- Step 5 结果报告 -->
+        <div v-show="step === 5" class="rw-report">
+          <div class="rw-report-icon">✓</div>
+          <div class="rw-report-title">还原{{ (task?.status ?? '') === 'completed_with_warnings' ? '完成（有警告）' : (task?.status ?? '') === 'failed' ? '失败' : '完成' }}</div>
+          <p class="rw-report-sub">{{ task?.error || '还原流程已结束，请核对校验结果' }}</p>
+        </div>
+      </div>
+
+      <div class="rw-foot">
+        <button class="rw-btn" :disabled="step <= 1 || step === 4" @click="prev">上一步</button>
+        <div class="rw-foot-right">
+          <button v-if="step < 3 && step !== 4" class="rw-btn rw-btn-primary" :disabled="canNextDisabled" @click="next">下一步</button>
+          <button v-if="step === 3" class="rw-btn rw-btn-danger" :disabled="confirmText !== '确认还原'" @click="doExecute">确认还原</button>
+          <button v-if="step === 5" class="rw-btn rw-btn-primary" @click="close">完成</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed, ref, watch } from 'vue'
+import type { BackupRestorePlan } from '@/api/backup'
+import type { BackupTaskState } from './composables/useBackupTask'
+
+export interface ServerBackupSummary {
+  filename: string
+  size?: number
+  created_at?: string | null
+}
+
+const props = defineProps<{
+  open: boolean
+  serverBackups: ServerBackupSummary[]
+  plan: BackupRestorePlan | null
+  task: BackupTaskState | null
+  onPreview: (filename: string) => void
+  onExecute: (filename: string) => void
+}>()
+
+const emit = defineEmits<{ close: [] }>()
+
+const steps = ['选择备份点', '差异预览', '还原确认', '执行还原', '结果报告']
+const step = ref(1)
+const selected = ref('')
+const confirmText = ref('')
+
+watch(() => props.open, (o) => { if (o) { step.value = 1; confirmText.value = '' } })
+
+watch(() => props.task, (t) => {
+  if (!t) return
+  if (t.status === 'completed' || t.status === 'completed_with_warnings' || t.status === 'failed') {
+    step.value = 5
+  }
+})
+
+const pct = computed(() => Math.round(props.task?.progress ?? 0))
+const canNextDisabled = computed(() => (step.value === 1 && !selected.value) || (step.value === 2 && (!props.plan || !props.plan.success)))
+
+function stepCls(n: number) {
+  if (step.value > n) return 'done'
+  if (step.value === n) return 'current'
+  return ''
+}
+function stepDone(n: number) {
+  return step.value > n
+}
+function selectPoint(f: string) {
+  selected.value = f
+}
+function next() {
+  if (step.value === 1 && selected.value) {
+    step.value = 2
+    props.onPreview(selected.value)
+  } else if (step.value === 2) {
+    step.value = 3
+  }
+}
+function prev() {
+  step.value = Math.max(1, step.value - 1)
+}
+function doExecute() {
+  if (confirmText.value === '确认还原' && selected.value) {
+    step.value = 4
+    props.onExecute(selected.value)
+  }
+}
+function close() {
+  emit('close')
+}
+function onTryClose() {
+  if (step.value !== 4) close()
+}
+function fmtSize(n?: number) {
+  if (n == null) return '—'
+  const gb = n / 1024 / 1024 / 1024
+  return gb >= 1 ? `${gb.toFixed(1)} GB` : `${Math.round(n / 1024 / 1024)} MB`
+}
+</script>
+
+<style scoped>
+.rw-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.32); z-index: 300; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.rw-dialog { width: 100%; max-width: 720px; max-height: calc(100vh - 32px); background: var(--color-surface, #fff); border-radius: 12px; box-shadow: 0 16px 40px rgba(0,0,0,.14); display: flex; flex-direction: column; overflow: hidden; }
+.rw-head { display: flex; align-items: center; justify-content: space-between; padding: 20px 24px 0; }
+.rw-title { font-size: 18px; font-weight: 600; margin: 0; }
+.rw-icon-btn { width: 28px; height: 28px; border: 1px solid var(--color-border, #e5e6eb); border-radius: 6px; background: var(--color-surface, #fff); cursor: pointer; }
+.rw-icon-btn:disabled { opacity: .5; }
+.rw-stepper { display: flex; align-items: center; padding: 20px 24px 8px; overflow-x: auto; }
+.rw-step { display: flex; align-items: center; flex: none; }
+.rw-step-dot { width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--color-border-strong, #c9cdd4); color: var(--color-text-tertiary, #86909c); display: flex; align-items: center; justify-content: center; font-size: 12px; }
+.rw-step.done .rw-step-dot { background: var(--color-success, #10b981); border-color: var(--color-success, #10b981); color: #fff; }
+.rw-step.current .rw-step-dot { background: var(--color-primary, #2f7bff); border-color: var(--color-primary, #2f7bff); color: #fff; }
+.rw-step-label { margin-left: 8px; font-size: 14px; white-space: nowrap; }
+.rw-step.current .rw-step-label { color: var(--color-primary, #2f7bff); font-weight: 500; }
+.rw-step.done .rw-step-label { color: var(--color-text-primary, #1d2129); }
+.rw-step-line { width: 32px; height: 2px; background: var(--color-border, #e5e6eb); margin: 0 8px; flex: none; }
+.rw-step-line.done { background: var(--color-success, #10b981); }
+.rw-body { padding: 8px 24px 24px; overflow-y: auto; }
+.rw-desc { font-size: 14px; color: var(--color-text-secondary, #4e5969); margin-bottom: 16px; }
+.rw-point { display: flex; align-items: center; gap: 12px; border: 1px solid var(--color-border, #e5e6eb); border-radius: 8px; padding: 12px 16px; margin-bottom: 8px; cursor: pointer; }
+.rw-point.checked { border-color: var(--color-primary, #2f7bff); background: #e6f0ff; }
+.rw-point-name { flex: 1; font-size: 13px; }
+.rw-point-meta { font-size: 13px; color: var(--color-text-tertiary, #86909c); }
+.mono { font-family: var(--font-mono, Consolas, monospace); }
+.rw-empty { color: var(--color-text-tertiary, #86909c); font-size: 13px; }
+.rw-impact { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; font-size: 14px; }
+.rw-affected { color: #b45309; }
+.rw-table-wrap { overflow-x: auto; border: 1px solid var(--color-border, #e5e6eb); border-radius: 8px; }
+.rw-table { width: 100%; border-collapse: collapse; min-width: 480px; }
+.rw-table th { text-align: left; font-size: 12px; font-weight: 500; color: var(--color-text-tertiary, #86909c); padding: 12px; }
+.rw-table td { padding: 0 12px; height: 40px; font-size: 13px; border-top: 1px solid var(--color-surface-muted, #f2f3f5); }
+.rw-error { margin-top: 12px; color: var(--color-danger, #ef4444); font-size: 13px; }
+.rw-danger-list { list-style: none; margin: 0 0 16px; padding: 0; }
+.rw-danger-list li { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--color-danger, #ef4444); margin-bottom: 8px; }
+.rw-danger-list li::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--color-danger, #ef4444); }
+.rw-confirm-input { width: 100%; height: 32px; padding: 0 12px; border: 1px solid var(--color-border-strong, #c9cdd4); border-radius: 6px; font-size: 14px; }
+.rw-progress-row { display: flex; align-items: center; gap: 12px; margin: 16px 0; }
+.rw-progress { flex: 1; height: 8px; background: var(--color-surface-muted, #f2f3f5); border-radius: 999px; overflow: hidden; }
+.rw-progress-fill { height: 100%; border-radius: 999px; transition: width .2s ease; }
+.rw-fill-danger { background: var(--color-danger, #ef4444); }
+.rw-pct { min-width: 44px; text-align: right; }
+.rw-stage { font-size: 13px; color: var(--color-text-secondary, #4e5969); }
+.rw-report { text-align: center; padding: 24px 0 8px; }
+.rw-report-icon { width: 48px; height: 48px; border-radius: 50%; background: #e6faf1; color: var(--color-success, #10b981); display: inline-flex; align-items: center; justify-content: center; font-size: 24px; margin-bottom: 12px; }
+.rw-report-title { font-size: 18px; font-weight: 600; }
+.rw-report-sub { margin-top: 6px; font-size: 14px; color: var(--color-text-secondary, #4e5969); }
+.rw-foot { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; border-top: 1px solid var(--color-border, #e5e6eb); }
+.rw-foot-right { display: flex; gap: 12px; }
+.rw-btn { height: 32px; padding: 0 16px; border-radius: 6px; font-size: 14px; cursor: pointer; border: 1px solid var(--color-border, #e5e6eb); background: var(--color-surface, #fff); }
+.rw-btn:disabled { opacity: .5; cursor: not-allowed; }
+.rw-btn-primary { background: var(--color-primary, #2f7bff); color: #fff; border-color: transparent; }
+.rw-btn-danger { background: var(--color-danger, #ef4444); color: #fff; border-color: transparent; }
+</style>
