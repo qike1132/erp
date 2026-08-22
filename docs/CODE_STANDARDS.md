@@ -1,6 +1,6 @@
 # ERP 系统代码规范准则
 
-> 基于生产级代码审核实践制定 | 版本 1.0 | 2026-08-18
+> 基于生产级代码审核实践制定 | 版本 1.1 | 2026-08-22（新增 2.5 SOLID 设计原则，修复审核层表格与覆盖率清单）
 
 ---
 
@@ -78,9 +78,16 @@ async def get_order(db: AsyncSession, order_id: int) -> Order:
 ### 2.1 分层架构
 
 ```
-api/v1/endpoints  →  services  →  core  →  shared_models + schemas
-    (端点层)         (服务层)    (核心层)     (数据层)
+api/v1|v2/endpoints  →  services  →  core  →  shared_models + schemas
+     (端点层)          (服务层)      (核心层)     (数据层)
+                         │             ├─ core/auth/（认证子包）
+                         │             ├─ core/container.py（服务容器）
+                         │             └─ core/domain_events.py（事件总线）
+                        tasks/（ARQ 异步任务）
+                       shared/（跨域纯函数/辅助）
 ```
+
+**服务层子包结构**：职责混杂的大模块必须按 CQS/主题拆为 `services/<域>/` 子包，原文件保留 Facade re-export（现有：`order/` `case/` `dashboard/` `purchase/` `staging/` `ocr/` `outsource/` `material_registration/` `backup/`）。
 
 **依赖方向约束（禁止反向）**：
 
@@ -100,6 +107,8 @@ api/v1/endpoints  →  services  →  core  →  shared_models + schemas
 | Vue 组件行数 | ≤400 行 | 提取子组件 + composable |
 | Python 服务文件 | ≤800 行 | 按功能域拆分为多个服务模块 |
 | Python 类方法数 | ≤20 个 | 按职责拆分为多个类 |
+
+> **既有超限模块**：按增量治理原则渐进拆分，新代码不得新增超限模块（当前待治理：`backup/orchestration/recovery_test_service.py` 单类 26 方法，属单一职责内的高内聚实现，拆分需评估风险收益）。
 
 **Vue 组件拆分模式**：
 ```
@@ -136,6 +145,38 @@ api/v1/endpoints  →  services  →  core  →  shared_models + schemas
 - 参数校验与转换
 - 调用 service 层函数
 - 构造响应对象
+
+### 2.5 SOLID 设计原则（强制）
+
+> 新增代码、新项目模块必须遵守；已有代码按本原则渐进治理。
+
+#### S — 单一职责原则（SRP）
+- 每个函数/类/模块只承担一项职责；**职责混杂时必须拆分**。
+- 硬性指标：函数 ≤80 行；服务文件 ≤800 行；类方法 ≤20 个。
+- 超限处理：按 CQS（命令/查询分离）或业务主题拆分为 `services/<域>/` 子包，原文件保留为 **Facade re-export**（`__all__` 显式管理）以保持向后兼容。
+- Schema 类禁止定义在服务模块中，必须归位 `schemas/`。
+
+#### O — 开闭原则（OCP）
+- 新增业务类型（订单类型/操作类型/Sheet 类型等）**禁止**修改已有 if/elif 主流程。
+- 必须使用**策略注册表/分派表**：`{type: handler}` 字典 + 查表分派（参考 `approval_service._OPERATION_HANDLERS`、`batch_import_service._SHEET_IMPORTERS`）。
+- 业务类型常量集中定义（参考 `inventory_service.REGULAR_ORDER_TYPE_ALIASES`），禁止 magic value 散落。
+- 状态转换用状态机（`core/state_machine.py`）；跨域通知用事件总线（`core/domain_events.py`）。
+
+#### L — 里氏替换原则（LSP）
+- 子类实现抽象方法必须保持基类契约（签名、返回类型、行为语义）；覆写 `__init__` 必须调用 `super().__init__()`。
+- 抽象基类用 `ABC` + `@abstractmethod`（参考 `BaseSearchService`）；基础设施依赖用 `Protocol` 小端口（参考 `backup/ports.py`）。
+- **禁止** `from xxx import *` 通配导入；Facade re-export 必须显式列出符号并配 `__all__`。
+
+#### I — 接口隔离原则（ISP）
+- 接口必须小而聚焦，禁止"上帝接口"；用多个小 Protocol 替代一个大接口。
+- 禁止 Mixin 滥用；禁止定义实现类用不到的抽象方法（pass 桩）。
+- 服务层以函数模块为主，避免巨型类。
+
+#### D — 依赖倒置原则（DIP）
+- 高层依赖抽象，不依赖具体实现；类服务通过 `core/container.py` 容器获取（`get_xxx_service()`），测试用 `container.override()` 替换。
+- 跨服务调用：优先走**领域事件**；域内复用走**显式依赖参数注入**（参考 `batch_import_core.ImportDeps`、`search_service` 注入参数）。
+- 服务间**禁止模块顶层互 import**（形成静态耦合）；确需跨域调用时在函数体内延迟 import。
+- 基础设施（DB/Redis）通过 `Depends()` / 容器注入，禁止在服务内部直接构造连接。
 
 ---
 
@@ -231,7 +272,7 @@ devLog.error('错误信息')
 
 **加密**：
 - 密码哈希使用 bcrypt/argon2，禁止 MD5/SHA1
-- JWT 使用 RS256 非对称签名
+- JWT 签名算法可配置（HS256/RS256/ES256），生产环境推荐 RS256 非对称签名
 - 文件校验和可使用 MD5（非安全用途）
 
 ---
@@ -292,7 +333,7 @@ const data: unknown = JSON.parse(raw)
 |------|-----------|
 | 核心模块（core/） | ≥85% |
 | 备份模块（backup/） | ≥80% |
-| 来料模块（inbound/） | ≥75% |
+| 物料登记模块（material_registration/） | ≥75% |
 | 仪表盘（dashboard/） | ≥70% |
 
 **测试规范**：
@@ -327,7 +368,6 @@ const data: unknown = JSON.parse(raw)
 | 6 | 宽泛 except 已标注 | `python scripts/check_bare_except.py fastapi_app` |
 | 7 | 单元测试通过 | `python -m pytest fastapi_app/tests/ -x -q` |
 | 8 | 无硬编码密钥 | 检查 `.env.production` 使用 `${VAR}` 占位符 |
-G
 
 **ruff 配置基准（`ruff.toml`）**：
 ```toml
@@ -368,7 +408,10 @@ ignore = [
 |----|------|---------|
 | L1 | 0.10 | 静态分析（ruff/bandit/mypy/函数行数/组件行数） |
 | L2 | 0.08 | 架构分层（反向依赖/循环依赖/服务文件长度/端点瘦身） |
-| L3 | 0.12 | 业务逻辑（宽泛except/空except/手动事务/循环6 | 0.15 | 安全审核（红队SQL注入/缺失maxlength） |
+| L3 | 0.12 | 业务逻辑（宽泛except/空except/手动事务/循环查询） |
+| L4 | 0.10 | 数据访问（N+1 查询/`# batch-loop:` 标注/`# nosec B608` SQL 安全） |
+| L5 | 0.08 | API 契约与版本兼容（v1/v2 行为一致/字段契约/破坏性变更） |
+| L6 | 0.15 | 安全审核（红队SQL注入/缺失maxlength） |
 | L7 | 0.10 | 性能（N+1查询/SELECT*/懒加载/缓存/产物体积） |
 | L8 | 0.07 | 可观测性（日志上下文/健康端点/指标端点/告警） |
 | L9 | 0.08 | 测试质量（覆盖率/测试依赖/重复测试） |
