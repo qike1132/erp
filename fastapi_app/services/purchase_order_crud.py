@@ -22,6 +22,7 @@ from fastapi_app.shared_models import (
     ModificationLog,
     PurchaseOrder,
     PurchaseOrderItem,
+    PurchaseOrderStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -74,7 +75,7 @@ async def create_purchase_order(db: AsyncSession, data: dict, include_summary: b
         supplier_name=supplier_name,
         supplier_id=supplier_id,
         customer_name=customer_name,
-        status='pending',
+        status=PurchaseOrderStatus.PENDING,
         remark=data.get('note', ''),
         source_order_ids=data.get('source_order_ids'),
         product_name=data.get('product_name'),
@@ -284,7 +285,7 @@ async def complete_purchase_order(db: AsyncSession, order_id: int, username: str
             modifier_name=username,
         ))
 
-    order.status = 'completed'
+    order.status = PurchaseOrderStatus.COMPLETED
     order.completed_at = now
     await db.flush()
     return {'id': order.id, 'order_no': order.order_no, 'status': 'completed'}
@@ -330,7 +331,7 @@ async def batch_complete_purchase_orders(db: AsyncSession, order_ids: list, user
 
             await _create_material_registration(db, order, items)
 
-            order.status = 'completed'
+            order.status = PurchaseOrderStatus.COMPLETED
             order.completed_at = now
             completed += 1
         except (ValueError, TypeError) as e:
@@ -438,7 +439,7 @@ async def cleanup_orphan_pending_purchase_orders(
     result2 = await db.execute(
         select(PurchaseOrder.id, PurchaseOrder.source_order_ids).where(
             PurchaseOrder.source_order_ids.isnot(None),
-            PurchaseOrder.status == 'pending',
+            PurchaseOrder.status == PurchaseOrderStatus.PENDING,
         )
     )
     json_match_ids: list[int] = []
@@ -454,7 +455,7 @@ async def cleanup_orphan_pending_purchase_orders(
     # 2) 合并匹配：source_order_id 列直接命中 + JSON 数组命中
     result = await db.execute(
         select(PurchaseOrder).where(
-            PurchaseOrder.status == 'pending',
+            PurchaseOrder.status == PurchaseOrderStatus.PENDING,
             (
                 PurchaseOrder.source_order_id.in_(source_ids)
             ) | (

@@ -18,6 +18,8 @@ from sqlalchemy.orm import selectinload
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.shared_models import PurchaseOrder, PurchaseOrderItem
+from fastapi_app.shared_models.order import ORDER_STATUS_PENDING_STOCK
+from fastapi_app.shared_models.purchase_order import PurchaseOrderStatus
 from fastapi_app.utils import calc_total_pages
 
 
@@ -118,8 +120,8 @@ async def get_completed_purchase_orders(
     quick_filter: str = '', is_arrived: str = '',
     sort_by: str = 'completed_at', sort_order: str = 'desc',
 ) -> dict:
-    query = select(PurchaseOrder).where(PurchaseOrder.status == 'completed')
-    count_query = select(func.count(PurchaseOrder.id)).where(PurchaseOrder.status == 'completed')
+    query = select(PurchaseOrder).where(PurchaseOrder.status == PurchaseOrderStatus.COMPLETED)
+    count_query = select(func.count(PurchaseOrder.id)).where(PurchaseOrder.status == PurchaseOrderStatus.COMPLETED)
     query, count_query = _apply_completed_filters(
         query, count_query, supplier_id=supplier_id, keyword=keyword,
         date_from=date_from, date_to=date_to,
@@ -217,7 +219,7 @@ async def export_completed_orders(
         PurchaseOrder.id, PurchaseOrder.order_no, PurchaseOrder.supplier_name,
         PurchaseOrder.customer_name, PurchaseOrder.completed_at,
     )
-    query = select(*order_cols).where(PurchaseOrder.status == 'completed')
+    query = select(*order_cols).where(PurchaseOrder.status == PurchaseOrderStatus.COMPLETED)
     if supplier_id:
         query = query.where(PurchaseOrder.supplier_id == supplier_id)
     if date_from:
@@ -301,7 +303,7 @@ async def get_unprocessed_orders(
         CustomerOrder.customer.label('customer'),
         CustomerOrder.order_date.label('sort_date'),
     ).where(
-        CustomerOrder.status == '待备货',
+        CustomerOrder.status == ORDER_STATUS_PENDING_STOCK,
         CustomerOrder.is_deleted == False,  # noqa: E712
         _build_not_processed_filter(CustomerOrder.id),
     )
@@ -467,7 +469,7 @@ async def get_completed_order_suggestions(
     like_pattern = f'%{escape_like(keyword)}%'
     result = await db.execute(
         select(PurchaseOrder.order_no, PurchaseOrder.id).where(
-            PurchaseOrder.status == 'completed',
+            PurchaseOrder.status == PurchaseOrderStatus.COMPLETED,
             or_(
                 PurchaseOrder.order_no.ilike(like_pattern),
                 PurchaseOrder.supplier_name.ilike(like_pattern),
@@ -494,7 +496,7 @@ async def get_completed_order_quick_filters(db: AsyncSession) -> dict:
             func.count(PurchaseOrder.id).filter(
                 PurchaseOrder.completed_at >= month_ago,
             ).label('month'),
-        ).where(PurchaseOrder.status == 'completed')
+        ).where(PurchaseOrder.status == PurchaseOrderStatus.COMPLETED)
     )
     row = result.one()
     return {
@@ -511,7 +513,7 @@ async def query_supplier_groups(db: AsyncSession, keyword: str = '') -> list:
         PurchaseOrder.supplier_id,
         func.count(PurchaseOrder.id).label('order_count'),
         func.sum(PurchaseOrder.total_amount).label('total_amount'),
-    ).where(PurchaseOrder.status == 'completed')
+    ).where(PurchaseOrder.status == PurchaseOrderStatus.COMPLETED)
 
     if keyword:
         like_pattern = f'%{escape_like(keyword)}%'

@@ -79,6 +79,37 @@ async def _set_cached_supplier_list(per_page: int, items: list[dict], total: int
     )
 
 
+async def _run_supplier_write(db: AsyncSession, action, success_msg: str) -> SupplierActionResponse:
+    """供应商写操作统一的事务 + 缓存失效编排（批次1 收敛原 4 处端点样板）。
+
+    服务层 flush-only，以 ValueError 表达业务校验（'不存在'→404，其余→400）；
+    缓存失效在提交前后各执行一次，覆盖"提交窗口期内并发读回填旧缓存"的竞态。
+    """
+    try:
+        await action()
+        await _invalidate_supplier_caches()  # 提交前失效，避免并发读回填旧缓存
+        await db.commit()
+    except ValueError as e:
+        await db.rollback()
+        msg = str(e)
+        if '不存在' in msg:
+            logger.warning('供应商写操作失败（不存在）: %s', msg)
+            raise HTTPException(status_code=404, detail='供应商不存在') from e
+        logger.warning('供应商写操作失败（业务校验）: %s', msg)
+        raise HTTPException(status_code=400, detail=msg) from e
+    except IntegrityError:
+        # 兜底：服务层未覆盖到的外键引用（如 MaterialRegistration）
+        await db.rollback()
+        logger.info('供应商写操作被拒（存在关联单据）')
+        raise HTTPException(status_code=400, detail='该供应商已有相关单据，无法删除！建议禁用该供应商。') from None
+    except SQLAlchemyError:
+        await db.rollback()
+        logger.exception('供应商写操作失败')
+        raise HTTPException(status_code=500, detail='操作失败，请稍后重试') from None
+    await _invalidate_supplier_caches()  # 提交后再失效一次，确保窗口期内回填的旧缓存被清除
+    return SupplierActionResponse(message=success_msg)
+
+
 @router.get('/list', response_model=SupplierListResponse)
 async def list_suppliers(
     page: int = Query(1, ge=1, description='页码'),
@@ -143,23 +174,14 @@ async def create_supplier(
         HTTPException 400: 供应商名称已存在等业务校验失败。
         HTTPException 500: 数据库操作异常。
     """
-    try:
-        await purchase_supplier_service.create_supplier(db, {
+    return await _run_supplier_write(
+        db,
+        lambda: purchase_supplier_service.create_supplier(db, {
             'name': data.name, 'contact_person': data.contact_person,
             'phone': data.phone, 'address': data.address, 'remark': data.remark,
-        })
-        await _invalidate_supplier_caches()  # 提交前失效，避免并发读回填旧缓存
-        await db.commit()
-    except ValueError as e:
-        await db.rollback()
-        logger.warning('创建供应商失败（业务校验）: %s', e)
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except SQLAlchemyError as e:
-        await db.rollback()
-        logger.exception('创建供应商失败')
-        raise HTTPException(status_code=500, detail='供应商添加失败，请稍后重试') from e
-    await _invalidate_supplier_caches()  # 提交后再失效一次，确保窗口期内回填的旧缓存被清除
-    return SupplierActionResponse(message='供应商添加成功')
+        }),
+        '供应商添加成功',
+    )
 
 
 @router.put('/edit/{supplier_id}', response_model=SupplierActionResponse)
@@ -185,26 +207,14 @@ async def edit_supplier(
         HTTPException 400: 供应商名称已存在等业务校验失败。
         HTTPException 500: 数据库操作异常。
     """
-    try:
-        await purchase_supplier_service.update_supplier(db, supplier_id, {
+    return await _run_supplier_write(
+        db,
+        lambda: purchase_supplier_service.update_supplier(db, supplier_id, {
             'name': data.name, 'contact_person': data.contact_person,
             'phone': data.phone, 'address': data.address, 'remark': data.remark,
-        })
-        await _invalidate_supplier_caches()  # 提交前失效
-        await db.commit()
-    except ValueError as e:
-        await db.rollback()
-        if '不存在' in str(e):
-            logger.warning('编辑供应商失败（不存在）: supplier_id=%s', supplier_id)
-            raise HTTPException(status_code=404, detail='供应商不存在') from e
-        logger.warning('编辑供应商失败（业务校验）: supplier_id=%s, %s', supplier_id, e)
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except SQLAlchemyError as e:
-        await db.rollback()
-        logger.exception('编辑供应商失败: supplier_id=%s', supplier_id)
-        raise HTTPException(status_code=500, detail='供应商编辑失败，请稍后重试') from e
-    await _invalidate_supplier_caches()  # 提交后再失效
-    return SupplierActionResponse(message='供应商编辑成功')
+        }),
+        '供应商编辑成功',
+    )
 
 
 @router.delete('/delete/{supplier_id}', response_model=SupplierActionResponse)
@@ -230,30 +240,11 @@ async def delete_supplier(
         HTTPException 400: 该供应商已有相关单据，无法删除。
         HTTPException 500: 数据库操作异常。
     """
-    try:
-        await purchase_supplier_service.delete_supplier(db, supplier_id)
-        await _invalidate_supplier_caches()  # 提交前失效
-        await db.commit()
-    except ValueError as e:
-        # 服务层抛出：供应商不存在（404）或已关联 BOM/订单（400）
-        await db.rollback()
-        msg = str(e)
-        if '不存在' in msg:
-            logger.warning('删除供应商失败（不存在）: supplier_id=%s', supplier_id)
-            raise HTTPException(status_code=404, detail='供应商不存在') from e
-        logger.info('删除供应商被拒（存在关联单据）: supplier_id=%s', supplier_id)
-        raise HTTPException(status_code=400, detail=msg) from e
-    except IntegrityError:
-        # 兜底：服务层未覆盖到的外键引用（如 MaterialRegistration）
-        await db.rollback()
-        logger.info('删除供应商被拒（存在关联单据）: supplier_id=%s', supplier_id)
-        raise HTTPException(status_code=400, detail='该供应商已有相关单据，无法删除！建议禁用该供应商。') from None
-    except SQLAlchemyError as e:
-        await db.rollback()
-        logger.exception('删除供应商失败: supplier_id=%s', supplier_id)
-        raise HTTPException(status_code=500, detail='数据库操作失败') from e
-    await _invalidate_supplier_caches()  # 提交后再失效
-    return SupplierActionResponse(message='供应商删除成功')
+    return await _run_supplier_write(
+        db,
+        lambda: purchase_supplier_service.delete_supplier(db, supplier_id),
+        '供应商删除成功',
+    )
 
 
 @router.post('/toggle-status/{supplier_id}', response_model=SupplierToggleResponse)
@@ -277,6 +268,7 @@ async def toggle_status(
         HTTPException 500: 数据库操作异常。
     """
     # SELECT ... FOR UPDATE 取行锁后再修改状态，防止并发 toggle 互相覆盖（锁逻辑下沉在 service 层）
+    # manual-tx: 提交后需 refresh 取新状态返回，保留手动事务；缓存失效语义与 _run_supplier_write 一致
     supplier = await purchase_supplier_service.get_supplier_for_update(db, supplier_id)
     if not supplier:
         raise HTTPException(status_code=404, detail='供应商不存在')

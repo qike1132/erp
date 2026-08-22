@@ -22,8 +22,8 @@ from fastapi_app.shared_models import (
     ProductFabric,
     ProductMaterial,
 )
-from fastapi_app.shared_models.order import Order
-from fastapi_app.shared_models.purchase_order import PurchaseOrder
+from fastapi_app.shared_models.order import ORDER_STATUS_PENDING_STOCK, ORDER_STATUS_STOCKED, Order
+from fastapi_app.shared_models.purchase_order import PurchaseOrder, PurchaseOrderStatus
 
 logger = logging.getLogger(__name__)
 
@@ -92,9 +92,9 @@ async def generate_purchase_orders_from_customer_orders(
         stockins = stockin_result.scalars().all()
 
     # 验证订单状态
-    invalid_orders = [o for o in cust_orders if o.status != '待备货']
+    invalid_orders = [o for o in cust_orders if o.status != ORDER_STATUS_PENDING_STOCK]
     if invalid_orders:
-        raise ValueError(f'订单 {invalid_orders[0].order_no} 当前状态为"{invalid_orders[0].status}"，仅"待备货"状态可审核')
+        raise ValueError(f'订单 {invalid_orders[0].order_no} 当前状态为"{invalid_orders[0].status}"，仅"{ORDER_STATUS_PENDING_STOCK}"状态可审核')
 
     # 合并所有记录（Order + StockIn）用于物料计算
     all_source_records = list(cust_orders) + list(stockins)
@@ -241,7 +241,7 @@ async def generate_purchase_orders_from_customer_orders(
 
     # 更新订单状态
     for o in cust_orders:
-        o.status = '已备货'
+        o.status = ORDER_STATUS_STOCKED
 
     # 不在此处 commit，由外层 db_transaction 统一管理事务原子性
     await db.flush()
@@ -315,7 +315,7 @@ async def fetch_existing_pending_for_composite_ids(
         .options(selectinload(PurchaseOrder.items))
         .where(
             PurchaseOrder.source_order_ids.isnot(None),
-            PurchaseOrder.status == 'pending',
+            PurchaseOrder.status == PurchaseOrderStatus.PENDING,
         )
     )
     matched: list[dict] = []

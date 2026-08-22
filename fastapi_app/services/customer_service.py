@@ -29,12 +29,8 @@ async def get_customers(db: AsyncSession, status: str | None = None, page: int =
     """获取客户列表（支持分页和搜索）"""
     query = select(Customer)
     count_query = select(func.count(Customer.id))
-    if status == 'active':
-        query = query.where(Customer.status)
-        count_query = count_query.where(Customer.status)
-    elif status == 'inactive':
-        query = query.where(Customer.status.is_(False))
-        count_query = count_query.where(Customer.status.is_(False))
+    from fastapi_app.shared.customer_status import apply_customer_status_filter
+    query, count_query = apply_customer_status_filter(query, count_query, status)
     if search:
         escaped = search.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
         like_pattern = f'%{escaped}%'
@@ -53,15 +49,21 @@ async def get_customer(db: AsyncSession, customer_id: int) -> Customer | None:
     return result.scalar_one_or_none()
 
 
-async def search_customers(db: AsyncSession, query_str: str) -> list[Customer]:
+async def search_customers(db: AsyncSession, query_str: str, *, search_service=None) -> list[Customer]:
     """搜索客户（按名称/联系人/电话模糊匹配，仅返回启用状态）
 
     委托至 customer_search_service 统一实现，再根据 ID 回查 ORM 对象
     以保持原有返回类型（list[Customer]）的向后兼容。
-    """
-    from fastapi_app.services.customer_search_service import customer_search_service
 
-    results = await customer_search_service.search_active_customers(db, query_str, limit=20)
+    Args:
+        search_service: 可注入的搜索服务实例（测试时可替换），
+            默认 None 时从容器解析模块级单例。
+    """
+    if search_service is None:
+        from fastapi_app.core.container import get_customer_search_service
+        search_service = get_customer_search_service()
+
+    results = await search_service.search_active_customers(db, query_str, limit=20)
 
     if not results:
         return []
@@ -81,7 +83,8 @@ async def get_active_customer_names(db: AsyncSession) -> list[dict]:
         return cached
 
     result = await db.execute(
-        select(Customer).where(Customer.status).order_by(Customer.name)
+        # limit(2000)：下拉全量名单的内存/响应上界（批次1 防护，超出属异常数据量）
+        select(Customer).where(Customer.status).order_by(Customer.name).limit(2000)
     )
     data = [{'id': c.id, 'name': c.name} for c in result.scalars().all()]
 
