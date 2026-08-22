@@ -2,7 +2,7 @@
 # 滨发协同系统（ERP）Windows 原生生产部署脚本
 # ============================================================
 # 替代原 docker-compose.yml，适用于 Windows Server 原生部署
-# 前置条件：PostgreSQL 16 / Redis 7 / Python 3.12 / Node 20 已安装
+# 前置条件：PostgreSQL 16 / Redis 7 / Python 3.13 / Node 20 已安装
 # ============================================================
 
 param(

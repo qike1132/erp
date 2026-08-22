@@ -40,7 +40,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.12'
+        python-version: '3.13'
     
     - name: Cache dependencies
       uses: actions/cache@v4
@@ -123,7 +123,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.12'
+        python-version: '3.13'
     
     - name: Install linters
       run: |
@@ -190,7 +190,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.12'
+        python-version: '3.13'
     
     - name: Validate source tree
       run: |
