@@ -15,7 +15,7 @@ import secrets
 from fastapi import HTTPException
 
 from fastapi_app.core.deps import require_permission
-from fastapi_app.services import backup_service
+from fastapi_app.services import backup as backup_service
 
 _background_tasks: set[asyncio.Task] = set()
 

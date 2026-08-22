@@ -35,8 +35,8 @@ from fastapi_app.schemas.backup import (
     BackupValidationResponse,
     IntegrityCheckResponse,
 )
-from fastapi_app.services import backup_service
-from fastapi_app.services.backup_service import BackupFileError
+from fastapi_app.services import backup as backup_service
+from fastapi_app.services.backup import BackupFileError
 from fastapi_app.shared_models import User
 
 logger = logging.getLogger(__name__)
@@ -110,7 +110,7 @@ async def _check_database() -> tuple[dict, list[str]]:
     """检查数据库连接状态"""
     issues: list[str] = []
     try:
-        from fastapi_app.services import backup_query_service
+        from fastapi_app.services.backup.verify import query_service as backup_query_service
         db_ok = await backup_query_service.check_database_alive()
         if not db_ok:
             issues.append('数据库连接失败')
@@ -715,7 +715,7 @@ async def get_backup_statistics(
             last_backup_time = datetime.fromtimestamp(latest_backup.get('mtime', 0)).isoformat()
 
         # 4. 计算备份成功率（从备份记录中获取）
-        from fastapi_app.services import backup_query_service
+        from fastapi_app.services.backup.verify import query_service as backup_query_service
 
         # 获取最近30天的备份记录
         thirty_days_ago = datetime.now() - timedelta(days=30)

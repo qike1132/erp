@@ -25,7 +25,7 @@ _MAX_TRIES = 3
 async def _send_backup_alert(task_name: str, error: str, task_type: str = 'backup', severity: str = 'error', additional_info: dict | None = None):
     """发送备份告警"""
     try:
-        from fastapi_app.services.backup_alert_service import alert_service
+        from fastapi_app.services.backup.metrics.alert_service import alert_service
         await alert_service.send_alert(
             task_name=task_name,
             error=error,
@@ -42,7 +42,7 @@ async def _collect_backup_metrics(backup_type: str, start_time: datetime, end_ti
                                  additional_metrics: dict | None = None):
     """收集备份性能指标"""
     try:
-        from fastapi_app.services.backup_metrics_service import metrics_service
+        from fastapi_app.services.backup.metrics.service import metrics_service
         await metrics_service.collect_backup_metrics(
             backup_type=backup_type,
             start_time=start_time,
@@ -64,7 +64,7 @@ async def auto_daily_backup_task(ctx):
 
     try:
         # 使用指数退避重试机制
-        from fastapi_app.services.backup_alert_service import alert_service
+        from fastapi_app.services.backup.metrics.alert_service import alert_service
         success, result = await alert_service.retry_with_backoff(
             _do_auto_backup_with_metrics,
             'daily',
@@ -178,7 +178,7 @@ async def auto_incremental_backup_task(ctx):
 
     try:
         # 使用指数退避重试机制
-        from fastapi_app.services.backup_alert_service import alert_service
+        from fastapi_app.services.backup.metrics.alert_service import alert_service
         success, result = await alert_service.retry_with_backoff(
             _do_auto_backup_with_metrics,
             'incremental',
@@ -297,7 +297,7 @@ async def backup_cleanup_task(ctx):
     start_time = datetime.now()
 
     try:
-        from fastapi_app.services.backup_cleanup_service import cleanup_service
+        from fastapi_app.services.backup.cleanup.service import cleanup_service
         result = await cleanup_service.smart_cleanup()
 
         if result.get('success'):
@@ -355,7 +355,7 @@ async def backup_cleanup_task(ctx):
 async def _do_auto_backup(backup_type: str) -> dict:
     """执行自动备份（全量或增量）"""
     from fastapi_app.core.database import get_async_db_context
-    from fastapi_app.services import backup_service
+    from fastapi_app.services import backup as backup_service
     from fastapi_app.shared_models import User as UserModel
 
     backup_service.ensure_backup_dir()
@@ -405,7 +405,7 @@ async def _do_integrity_check() -> dict:
     import json
     import zipfile
 
-    from fastapi_app.services import backup_service
+    from fastapi_app.services import backup as backup_service
 
     results = {
         'checked_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -485,7 +485,7 @@ async def backup_health_check_task(ctx):
     start_time = datetime.now()
 
     try:
-        from fastapi_app.services.backup_health_check_service import health_check_service
+        from fastapi_app.services.backup.verify.health_check_service import health_check_service
         result = await health_check_service.perform_health_check()
 
         if result.get('overall_status') != 'healthy':
@@ -534,7 +534,7 @@ async def apply_backup_policy_task(ctx):
     start_time = datetime.now()
 
     try:
-        from fastapi_app.services.backup_policy_service import policy_service
+        from fastapi_app.services.backup.orchestration.policy_service import policy_service
         result = await policy_service.apply_backup_policy()
 
         if result.get('success'):
@@ -593,7 +593,7 @@ async def disaster_recovery_test_task(ctx):
     start_time = datetime.now()
 
     try:
-        from fastapi_app.services.backup_recovery_test_service import recovery_test_service
+        from fastapi_app.services.backup.orchestration.recovery_test_service import recovery_test_service
         result = await recovery_test_service.perform_recovery_test()
 
         if result.get('overall_success'):
@@ -653,7 +653,7 @@ async def backup_metrics_report_task(ctx):
     start_time = datetime.now()
 
     try:
-        from fastapi_app.services.backup_metrics_service import metrics_service
+        from fastapi_app.services.backup.metrics.service import metrics_service
         result = await metrics_service.export_metrics_report(days=7, format='json')
 
         if 'error' not in result:

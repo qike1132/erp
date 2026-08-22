@@ -29,7 +29,7 @@
 from fastapi import APIRouter
 
 from fastapi_app.api.v1.endpoints.backup import export, records, restore, validation
-from fastapi_app.services import backup_service
+from fastapi_app.services import backup as backup_service
 
 router = APIRouter()
 router.include_router(records.router)

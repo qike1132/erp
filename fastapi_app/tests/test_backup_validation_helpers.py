@@ -54,7 +54,7 @@ class TestCheckDatabase:
     @pytest.mark.asyncio
     async def test_check_database_alive_returns_healthy(self):
         """数据库连通正常时应返回 healthy"""
-        with patch('fastapi_app.services.backup_query_service.check_database_alive',
+        with patch('fastapi_app.services.backup.verify.query_service.check_database_alive',
                     new=AsyncMock(return_value=True)):
             result, issues = await validation._check_database()
         assert result['status'] == 'healthy'
@@ -64,7 +64,7 @@ class TestCheckDatabase:
     @pytest.mark.asyncio
     async def test_check_database_down_returns_unhealthy(self):
         """数据库连接失败时应返回 unhealthy 并记录 issue"""
-        with patch('fastapi_app.services.backup_query_service.check_database_alive',
+        with patch('fastapi_app.services.backup.verify.query_service.check_database_alive',
                     new=AsyncMock(return_value=False)):
             result, issues = await validation._check_database()
         assert result['status'] == 'unhealthy'
@@ -74,7 +74,7 @@ class TestCheckDatabase:
     @pytest.mark.asyncio
     async def test_check_database_exception_returns_unhealthy(self):
         """check_database_alive 抛异常时应捕获并返回 unhealthy"""
-        with patch('fastapi_app.services.backup_query_service.check_database_alive',
+        with patch('fastapi_app.services.backup.verify.query_service.check_database_alive',
                     new=AsyncMock(side_effect=RuntimeError("conn refused"))):
             result, issues = await validation._check_database()
         assert result['status'] == 'unhealthy'

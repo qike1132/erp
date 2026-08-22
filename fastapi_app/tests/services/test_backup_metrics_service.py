@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from fastapi_app.services.backup_metrics_service import BackupMetricsService
+from fastapi_app.services.backup.metrics.service import BackupMetricsService
 
 
 class TestBackupMetricsService:

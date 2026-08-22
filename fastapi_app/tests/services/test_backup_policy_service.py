@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from fastapi_app.services.backup_policy_service import BackupPolicyService
+from fastapi_app.services.backup.orchestration.policy_service import BackupPolicyService
 
 
 class TestBackupPolicyService:

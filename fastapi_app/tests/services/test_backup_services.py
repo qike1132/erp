@@ -9,7 +9,7 @@ import pytest
 
 def test_backup_alert_service_import():
     """测试备份告警服务导入"""
-    from fastapi_app.services.backup_alert_service import BackupAlertService
+    from fastapi_app.services.backup.metrics.alert_service import BackupAlertService
     service = BackupAlertService()
     assert service is not None
     assert hasattr(service, 'send_alert')
@@ -19,7 +19,7 @@ def test_backup_alert_service_import():
 
 def test_backup_health_check_service_import():
     """测试健康检查服务导入"""
-    from fastapi_app.services.backup_health_check_service import BackupHealthCheckService
+    from fastapi_app.services.backup.verify.health_check_service import BackupHealthCheckService
     service = BackupHealthCheckService()
     assert service is not None
     assert hasattr(service, 'perform_health_check')
@@ -29,7 +29,7 @@ def test_backup_health_check_service_import():
 
 def test_backup_policy_service_import():
     """测试备份策略服务导入"""
-    from fastapi_app.services.backup_policy_service import BackupPolicyService
+    from fastapi_app.services.backup.orchestration.policy_service import BackupPolicyService
     service = BackupPolicyService()
     assert service is not None
     assert hasattr(service, 'get_current_policy')
@@ -40,7 +40,7 @@ def test_backup_policy_service_import():
 
 def test_backup_metrics_service_import():
     """测试性能监控服务导入"""
-    from fastapi_app.services.backup_metrics_service import BackupMetricsService
+    from fastapi_app.services.backup.metrics.service import BackupMetricsService
     service = BackupMetricsService()
     assert service is not None
     assert hasattr(service, 'collect_backup_metrics')
@@ -52,7 +52,7 @@ def test_backup_metrics_service_import():
 
 def test_backup_cleanup_service_import():
     """测试备份清理服务导入"""
-    from fastapi_app.services.backup_cleanup_service import BackupCleanupService
+    from fastapi_app.services.backup.cleanup.service import BackupCleanupService
     service = BackupCleanupService()
     assert service is not None
     assert hasattr(service, 'smart_cleanup')
@@ -61,7 +61,7 @@ def test_backup_cleanup_service_import():
 
 def test_backup_recovery_test_service_import():
     """测试灾难恢复测试服务导入"""
-    from fastapi_app.services.backup_recovery_test_service import DisasterRecoveryTestService
+    from fastapi_app.services.backup.orchestration.recovery_test_service import DisasterRecoveryTestService
     service = DisasterRecoveryTestService()
     assert service is not None
     assert hasattr(service, 'perform_recovery_test')
@@ -72,12 +72,12 @@ def test_backup_recovery_test_service_import():
 def test_service_interactions():
     """测试服务间交互"""
     # 测试服务可以相互导入而不冲突
-    from fastapi_app.services.backup_alert_service import alert_service
-    from fastapi_app.services.backup_cleanup_service import cleanup_service
-    from fastapi_app.services.backup_health_check_service import health_check_service
-    from fastapi_app.services.backup_metrics_service import metrics_service
-    from fastapi_app.services.backup_policy_service import policy_service
-    from fastapi_app.services.backup_recovery_test_service import recovery_test_service
+    from fastapi_app.services.backup.metrics.alert_service import alert_service
+    from fastapi_app.services.backup.cleanup.service import cleanup_service
+    from fastapi_app.services.backup.verify.health_check_service import health_check_service
+    from fastapi_app.services.backup.metrics.service import metrics_service
+    from fastapi_app.services.backup.orchestration.policy_service import policy_service
+    from fastapi_app.services.backup.orchestration.recovery_test_service import recovery_test_service
 
     assert alert_service is not None
     assert health_check_service is not None
@@ -101,12 +101,12 @@ def test_config_loading():
         'BACKUP_SMART_CLEANUP': 'false',
         'BACKUP_RECOVERY_TEST_FREQUENCY': '14'
     }):
-        from fastapi_app.services.backup_alert_service import BackupAlertService
-        from fastapi_app.services.backup_cleanup_service import BackupCleanupService
-        from fastapi_app.services.backup_health_check_service import BackupHealthCheckService
-        from fastapi_app.services.backup_metrics_service import BackupMetricsService
-        from fastapi_app.services.backup_policy_service import BackupPolicyService
-        from fastapi_app.services.backup_recovery_test_service import DisasterRecoveryTestService
+        from fastapi_app.services.backup.metrics.alert_service import BackupAlertService
+        from fastapi_app.services.backup.cleanup.service import BackupCleanupService
+        from fastapi_app.services.backup.verify.health_check_service import BackupHealthCheckService
+        from fastapi_app.services.backup.metrics.service import BackupMetricsService
+        from fastapi_app.services.backup.orchestration.policy_service import BackupPolicyService
+        from fastapi_app.services.backup.orchestration.recovery_test_service import DisasterRecoveryTestService
 
         alert_service = BackupAlertService()
         health_service = BackupHealthCheckService()

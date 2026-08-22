@@ -30,8 +30,8 @@ from fastapi_app.schemas.backup import (
     BackupProgressOut,
     IncrementalRestoreResponse,
 )
-from fastapi_app.services import backup_service
-from fastapi_app.services.backup_service import (
+from fastapi_app.services import backup as backup_service
+from fastapi_app.services.backup import (
     BackupError,
     BackupLockError,
     RestoreError,
@@ -89,7 +89,7 @@ async def import_backup(
     except (BackupError, OSError):
         pre_restore_info = {'success': False, 'error': '创建安全备份失败'}
 
-    from fastapi_app.services import backup_query_service
+    from fastapi_app.services.backup.verify import query_service as backup_query_service
     lock_acquired = False
     try:
         if not await backup_query_service.try_acquire_restore_lock(db):
@@ -188,7 +188,7 @@ async def restore_server_backup(
     if 'tables' not in backup_data:
         raise HTTPException(status_code=400, detail='JSON 备份文件缺少 tables 字段')
 
-    from fastapi_app.services import backup_query_service
+    from fastapi_app.services.backup.verify import query_service as backup_query_service
     lock_acquired = False
     try:
         if not await backup_query_service.try_acquire_restore_lock(db):
@@ -372,7 +372,7 @@ async def _run_async_file_restore(task_id: str, content: bytes, is_zip: bool, fi
                         await fail_progress(task_id, 'JSON 备份文件缺少 tables 字段')
                         return
                     # JSON 恢复路径（带进度报告的简化版）
-                    from fastapi_app.services import backup_query_service
+                    from fastapi_app.services.backup.verify import query_service as backup_query_service
                     lock_acquired = False
                     try:
                         if not await backup_query_service.try_acquire_restore_lock(db):

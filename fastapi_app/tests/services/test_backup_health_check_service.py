@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fastapi_app.services.backup_health_check_service import BackupHealthCheckService
+from fastapi_app.services.backup.verify.health_check_service import BackupHealthCheckService
 
 
 class TestBackupHealthCheckService:

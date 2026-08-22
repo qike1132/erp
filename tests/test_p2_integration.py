@@ -14,7 +14,7 @@ from fastapi_app.core.exceptions import (
 )
 from fastapi_app.core.sanitizer import safe_exception_message
 from fastapi_app.main import app
-from fastapi_app.services import backup_service
+from fastapi_app.services import backup as backup_service
 
 
 def test_all_modules_imported():

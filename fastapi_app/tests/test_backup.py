@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fastapi_app.services.backup_service import (
+from fastapi_app.services.backup import (
     BACKUP_FORMAT_VERSION,
     BACKUP_MAX_COUNT,
     BACKUP_RETENTION_DAYS,

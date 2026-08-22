@@ -33,8 +33,8 @@ from fastapi_app.schemas.backup import (
     BackupSaveResponse,
     IncrementalBackupResponse,
 )
-from fastapi_app.services import backup_service
-from fastapi_app.services.backup_service import BackupError
+from fastapi_app.services import backup as backup_service
+from fastapi_app.services.backup import BackupError
 from fastapi_app.shared_models import User
 
 logger = logging.getLogger(__name__)
