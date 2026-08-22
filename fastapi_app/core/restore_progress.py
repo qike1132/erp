@@ -30,8 +30,8 @@ def generate_task_id() -> str:
 
 async def _get_redis():
     try:
-        from fastapi_app.services.notification_service import _get_async_redis_client
-        client = await _get_async_redis_client()
+        from fastapi_app.core.redis_client import get_async_redis_client
+        client = await get_async_redis_client()
         return client
     except (ImportError, OSError, RuntimeError):
         pass  # defensive: 异常静默处理,不影响主流程

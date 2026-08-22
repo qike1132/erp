@@ -51,8 +51,8 @@ async def invalidate_purchase_caches() -> int:
 async def _async_publish_invalidation_signal() -> None:
     """向 Redis Pub/Sub 发布缓存失效信号（异步版）"""
     try:
-        from fastapi_app.services.notification_service import _get_async_redis_client
-        client = await _get_async_redis_client()
+        from fastapi_app.core.redis_client import get_async_redis_client
+        client = await get_async_redis_client()
         if client is None:
             return
         await client.publish(_CHANNEL, json.dumps({"scope": "purchase_caches"}))

@@ -16,7 +16,11 @@ from typing import Literal
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS
+from fastapi_app.core.redis_client import (
+    get_async_redis_client,
+    redis_infra_exceptions as _redis_infra_exceptions,
+    reset_async_redis_client,
+)
 from fastapi_app.shared_models import AuditLog, Notification, Order, OrderItem, Product, User
 from fastapi_app.shared_models.device_token import DeviceToken
 
@@ -50,8 +54,7 @@ def _register_domain_event_subscriptions():
         logger.warning("领域事件订阅注册失败（可忽略）: %s", e)
 
 
-# 模块加载时注册订阅
-_register_domain_event_subscriptions()
+# 注册时机：由 main.py lifespan 显式调用（批次1 消除模块导入期副作用）
 
 
 class StockEvent:
@@ -86,54 +89,25 @@ EVENT_DISPLAY_MESSAGES = {
     "case_stock_changed": "皮套仓储数据已更新",
 }
 
-_async_redis_client = None
-
-# Redis 自身异常基类（redis.exceptions.RedisError）与 Python 内置基础设施异常并集。
-# 注意：redis-py 的 ConnectionError/AuthenticationError 继承自 RedisError，
-# 而不是 Python 内置 ConnectionError，因此必须显式纳入，否则 Redis 不可用/认证失败
-# 会在启动预热时逃逸并导致整个应用启动崩溃。
-def _redis_infra_exceptions():
-    try:
-        import redis.exceptions as redis_exc
-        return (*INFRA_EXCEPTIONS, redis_exc.RedisError)
-    except Exception:  # broad-except: 服务层容错，记录异常并返回安全默认值
-        return INFRA_EXCEPTIONS
+# 共享异步 Redis 客户端已上提至 core.redis_client（批次1 解耦 core↔services）：
+# 本模块保留兼容转发供既有调用方渐进迁移；新代码请直接使用 core.redis_client。
 
 
 async def _get_async_redis_client():
-    """获取或创建模块级共享异步 Redis 客户端"""
-    global _async_redis_client
-    if _async_redis_client is not None:
-        return _async_redis_client
-
-    try:
-        import redis.asyncio as aioredis
-
-        from fastapi_app.core.config import settings
-        url = settings.REDIS_URL
-        if settings.REDIS_PASSWORD and settings.REDIS_PASSWORD not in url:
-            if url.startswith("rediss://"):
-                url = url.replace("rediss://", f"rediss://:{settings.REDIS_PASSWORD}@")
-            elif url.startswith("redis://"):
-                url = url.replace("redis://", f"redis://:{settings.REDIS_PASSWORD}@")
-        _async_redis_client = aioredis.from_url(url)
-        return _async_redis_client
-    except _redis_infra_exceptions() as e:
-        logger.warning("异步 Redis 客户端初始化失败: %s", e)
-        return None
+    """兼容转发：获取共享异步 Redis 客户端（见 core.redis_client）"""
+    return await get_async_redis_client()
 
 
 async def _warmup_async_redis():
     """预热异步 Redis 客户端"""
-    global _async_redis_client
     try:
-        client = await _get_async_redis_client()
+        client = await get_async_redis_client()
         if client:
             await client.ping()
             logger.info("异步 Redis 客户端预热成功")
     except _redis_infra_exceptions() as e:
         logger.warning("异步 Redis 客户端预热失败: %s", e)
-        _async_redis_client = None
+        reset_async_redis_client()
 
 
 async def publish_stock_event(event_type: str, data: dict, redis_client=None):

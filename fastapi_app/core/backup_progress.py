@@ -88,8 +88,8 @@ def _sanitize_error(error: str, max_len: int = 200) -> str:
 async def _get_redis():
     """Resolve an async Redis client using the same fallback chain as restore_progress.py."""
     try:
-        from fastapi_app.services.notification_service import _get_async_redis_client
-        client = await _get_async_redis_client()
+        from fastapi_app.core.redis_client import get_async_redis_client
+        client = await get_async_redis_client()
         return client
     except (ImportError, OSError, RuntimeError):
         pass  # defensive: 异常静默处理,不影响主流程

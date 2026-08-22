@@ -146,8 +146,10 @@ async def lifespan(application: FastAPI):
 
     await _setup_redis_caches()
 
-    from fastapi_app.services.notification_service import manager
+    from fastapi_app.services.notification_service import _register_domain_event_subscriptions, manager
     await manager.start_redis_listener()
+    # 领域事件订阅注册（原为 notification_service 模块导入期副作用，批次1 迁移至此显式执行）
+    _register_domain_event_subscriptions()
 
     from fastapi_app.core.purchase_cache import start_purchase_cache_listener
     await start_purchase_cache_listener()
@@ -390,7 +392,7 @@ async def root():
 if __name__ == "__main__":
     uvicorn.run(
         "fastapi_app.main:app",
-        host="0.0.0.0",  # nosec B104
+        host="::",  # nosec B104
         port=5002,
         reload=settings.FASTAPI_DEBUG,
     )

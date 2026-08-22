@@ -93,8 +93,8 @@ def register_health_routes(app: FastAPI) -> None:
 
         redis_ok = True
         try:
-            from fastapi_app.services.notification_service import _get_async_redis_client
-            client = await _get_async_redis_client()
+            from fastapi_app.core.redis_client import get_async_redis_client
+            client = await get_async_redis_client()
             if client:
                 try:
                     await client.ping()
@@ -200,8 +200,8 @@ def register_health_routes(app: FastAPI) -> None:
         db_ok = await verify_db_connectivity()
         redis_ok = True
         try:
-            from fastapi_app.services.notification_service import _get_async_redis_client
-            client = await _get_async_redis_client()
+            from fastapi_app.core.redis_client import get_async_redis_client
+            client = await get_async_redis_client()
             if client:
                 await client.ping()
             else:
