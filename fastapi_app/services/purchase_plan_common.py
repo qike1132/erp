@@ -52,9 +52,13 @@ async def _invalidate_plan_caches(plan_month: str = '') -> None:
         invalidate_local_cache(f'plan_fifo:{plan_month}')
     await cache_mgr.invalidate(InvalidationStrategy.PATTERN, 'pp:monthly:*')
     await cache_mgr.invalidate(InvalidationStrategy.PATTERN, 'pp:summary:*')
-    # L1 本地缓存：pp:monthly 和 pp:summary 都用 cache_result 装饰，键形如 `pp:monthly:...`
+    await cache_mgr.invalidate(InvalidationStrategy.PATTERN, 'pp:agg:*')
+    await cache_mgr.invalidate(InvalidationStrategy.PATTERN, 'pp:day:*')
+    # L1 本地缓存：pp:monthly/pp:summary/pp:agg/pp:day 都用 cache_result 装饰，键形如 `pp:monthly:...`
     invalidate_local_cache('pp:monthly:*')
     invalidate_local_cache('pp:summary:*')
+    invalidate_local_cache('pp:agg:*')
+    invalidate_local_cache('pp:day:*')
 
 async def _generate_plan_no() -> str:
     """

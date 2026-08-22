@@ -1,0 +1,53 @@
+﻿python : Traceback (most recent call last):
+At line:15 char:2458
++ ... NG="utf-8"; python -m alembic current *> ..\temp\mig_cur.txt 2>&1; $c ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\site-packages\alembic\__main__.py", line 4, 
+in <module>
+    main(prog="alembic")
+    ~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\site-packages\alembic\config.py", line 988, 
+in main
+    CommandLine(prog=prog).main(argv=argv)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\site-packages\alembic\config.py", line 978, 
+in main
+    self.run_cmd(cfg, options)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\site-packages\alembic\config.py", line 912, 
+in run_cmd
+    fn(
+    ~~^
+        config,
+        ^^^^^^^
+        *[getattr(options, k, None) for k in positional],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        **{k: getattr(options, k, None) for k in kwarg},
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\site-packages\alembic\command.py", line 709,
+ in current
+    script.run_env()
+    ~~~~~~~~~~~~~~^^
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\site-packages\alembic\script\base.py", line 
+551, in run_env
+    util.load_python_file(self.dir, "env.py")
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\site-packages\alembic\util\pyfiles.py", line
+ 114, in load_python_file
+    module = load_module_py(module_id, path)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\site-packages\alembic\util\pyfiles.py", line
+ 134, in load_module_py
+    spec.loader.exec_module(module)  # type: ignore
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "<frozen importlib._bootstrap_external>", line 1023, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "D:\erp_system\migrations\env.py", line 32, in <module>
+    from fastapi_app.shared_models import Base
+ModuleNotFoundError: No module named 'fastapi_app'

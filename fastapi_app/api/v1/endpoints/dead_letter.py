@@ -3,8 +3,8 @@
 
 提供失败任务查看、重试、清除等操作
 
-注意：task_callbacks.py 使用 _safe_repr() 存储 args/kwargs 为 repr 字符串，
-因此读取时需要 ast.literal_eval 反序列化，以便 send_task 收到正确的参数类型。
+注意：失败任务的 args/kwargs 以 repr 字符串存储，
+因此读取时需要 ast.literal_eval 反序列化，以便 enqueue_job 收到正确的参数类型。
 """
 import ast
 import json
@@ -19,7 +19,7 @@ from fastapi_app.shared_models import User
 
 router = APIRouter()
 
-DLQ_KEY = 'celery:dead_letter'
+DLQ_KEY = 'arq:dead_letter'
 
 
 class DeadLetterListResponse(BaseModel):
@@ -43,7 +43,7 @@ class DeadLetterRemoveResponse(BaseModel):
 
 class DeadLetterStatsResponse(BaseModel):
     total_failed: int = 0
-    queue_key: str = "celery:dead_letter"
+    queue_key: str = "arq:dead_letter"
 
 
 def _require_redis():
@@ -54,9 +54,9 @@ def _require_redis():
 
 
 def _parse_dead_letter_args(args_raw) -> list:
-    """将 _safe_repr 存储的 repr 字符串还原为参数列表。
+    """将 repr 存储的 args 字符串还原为参数列表。
 
-    task_callbacks.py 使用 repr() 序列化 args/kwargs，
+    失败任务使用 repr() 序列化 args/kwargs，
     ast.literal_eval 可安全地将 repr 字符串还原为原始 Python 对象。
     """
     if isinstance(args_raw, (list, tuple)):
@@ -74,7 +74,7 @@ def _parse_dead_letter_args(args_raw) -> list:
 
 
 def _parse_dead_letter_kwargs(kwargs_raw) -> dict:
-    """将 _safe_repr 存储的 repr 字符串还原为参数字典。"""
+    """将 repr 存储的 kwargs 字符串还原为参数字典。"""
     if isinstance(kwargs_raw, dict):
         return kwargs_raw
     if not isinstance(kwargs_raw, str):

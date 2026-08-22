@@ -356,6 +356,288 @@ async def get_customer_summary(db: AsyncSession, year: int, month: int) -> dict:
             s['warning_count'] += 1
     return {'customers': list(summary.values()), 'total_plan_qty': sum(s['plan_qty'] for s in summary.values()), 'total_inventory_qty': sum(s['inventory_qty'] for s in summary.values()), 'total_shipped_qty': sum(s['shipped_qty'] for s in summary.values()), 'total_remaining_qty': sum(s['remaining_qty'] for s in summary.values()), 'warning_count': sum(s['warning_count'] for s in summary.values()), 'fifo_degraded': fifo_degraded}
 
+
+# 星期缩写（与前端 WDS 对齐，index by JS getDay(): Sunday=0..Saturday=6）
+_PP_WDS = ['日', '一', '二', '三', '四', '五', '六']
+
+
+def _py_weekday_to_js(py_wd: int) -> str:
+    """Python weekday()(Mon=0..Sun=6) → 前端 WDS 字符串(Sun=0..Sat=6)"""
+    return _PP_WDS[(py_wd + 1) % 7]
+
+
+@cache_result(
+    key_prefix="pp:agg",
+    ttl=120,
+    local_ttl=30,
+    key_builder=lambda **kwargs: f"v1:y{kwargs.get('year', 0)}:m{kwargs.get('month', 0)}:c{kwargs.get('customer_id', 0)}",
+)
+async def get_monthly_aggregated(db: AsyncSession, year: int, month: int, customer_id: int=0) -> dict:
+    """月度聚合数据：在后端完成 rows + sku_summary + sku_date_index + customers 聚合，
+    避免向前端传输 20K+ 明细并在前端聚合（6.9 + 6.10）。
+
+    返回结构:
+      rows: 按日期聚合的列表（不含明细 plans）
+      sku_summary: 按 customer|product 聚合的 SKU 列表
+      sku_date_index: {customer|product: [{date,day,weekday,qty,customer,status}]}
+      customers: 客户汇总列表（合并原 customer-summary 逻辑）
+      customer_totals: 客户汇总总量
+    """
+    plan_month = f'{year}-{month:02d}'
+    days_in_month = calendar.monthrange(year, month)[1]
+
+    _sql = """
+        SELECT d.id AS detail_id, d.plan_id, p.customer_id, p.customer_name,
+               d.product_name, d.barcode, d.plan_date, d.quantity
+        FROM purchase_plan_details d
+        JOIN purchase_plans p ON d.plan_id = p.id
+        WHERE p.plan_month = :plan_month
+    """ + (" AND p.customer_id = :customer_id" if customer_id else "")  # nosec B608
+    sql = text(_sql)
+
+    params: dict = {'plan_month': plan_month}
+    if customer_id:
+        params['customer_id'] = customer_id
+
+    result = await db.execute(sql, params)
+    rows = result.all()
+
+    detail_shipped_map: dict[int, int] = {}
+    fifo_degraded = False
+    if rows:
+        detail_ids = list({row.detail_id for row in rows})
+        detail_result = await db.execute(
+            select(PurchasePlanDetail)
+            .options(load_only(
+                PurchasePlanDetail.id, PurchasePlanDetail.plan_id,
+                PurchasePlanDetail.product_name, PurchasePlanDetail.product_id,
+                PurchasePlanDetail.plan_date, PurchasePlanDetail.quantity,
+            ))
+            .where(PurchasePlanDetail.id.in_(detail_ids))
+            .order_by(PurchasePlanDetail.plan_date, PurchasePlanDetail.id)
+        )
+        all_details = detail_result.scalars().all()
+        customer_name_map: dict[int, str] = {}
+        for row in rows:
+            if row.plan_id not in customer_name_map:
+                customer_name_map[row.plan_id] = row.customer_name
+        shipped_fifo_map, fifo_degraded = await _get_shipped_fifo_map_safe(db, all_details, customer_name_map, plan_month=plan_month)
+        detail_shipped_map = {d.id: shipped_fifo_map.get(d.id, 0) for d in all_details}
+
+    inventory_map = await _get_inventory_map(db)
+
+    # ---- 单次遍历完成全部聚合 ----
+    by_date: dict[str, dict] = {}
+    by_key: dict[str, dict] = {}
+    _prod_cust_date_map: dict[str, dict[str, dict]] = {}
+    product_summary: dict[tuple, dict] = {}
+
+    for row in rows:
+        dt = row.plan_date
+        date_str = dt.isoformat() if dt else ''
+        shp_qty = detail_shipped_map.get(row.detail_id, 0)
+        qty = row.quantity
+        remain = qty - shp_qty
+        status = 'completed' if shp_qty >= qty else ('partial' if shp_qty > 0 else 'pending')
+        customer_name = row.customer_name or '未知客户'
+        product_name = row.product_name or '—'
+        py_wd = dt.weekday() if dt else 0
+
+        # 日期聚合
+        if date_str not in by_date:
+            by_date[date_str] = {
+                'date': date_str, 'day_num': dt.day if dt else 0,
+                'weekday': _py_weekday_to_js(py_wd),
+                '_cust_set': set(), 'plan_count': 0, 'total_qty': 0,
+                'shipped_qty': 0, 'shipped_count': 0, 'pending_count': 0,
+            }
+        d = by_date[date_str]
+        d['_cust_set'].add(customer_name)
+        d['plan_count'] += 1
+        d['total_qty'] += qty
+        d['shipped_qty'] += shp_qty
+        if status == 'completed':
+            d['shipped_count'] += 1
+        else:
+            d['pending_count'] += 1
+
+        # SKU 聚合
+        sku_key = f'{customer_name}|{product_name}'
+        if sku_key not in by_key:
+            by_key[sku_key] = {'barcode': row.barcode or '—', 'product_name': product_name,
+                               'plan_qty': 0, 'shipped_qty': 0, 'remain_qty': 0, 'customer_name': customer_name}
+        sk = by_key[sku_key]
+        sk['plan_qty'] += qty
+        sk['shipped_qty'] += shp_qty
+        sk['remain_qty'] += remain
+
+        # SKU 日期索引
+        if sku_key not in _prod_cust_date_map:
+            _prod_cust_date_map[sku_key] = {}
+        date_map = _prod_cust_date_map[sku_key]
+        if date_str not in date_map:
+            date_map[date_str] = {'date': date_str, 'day': dt.day if dt else 0,
+                                  'weekday': _py_weekday_to_js(py_wd),
+                                  'qty': 0, 'customer': customer_name, 'status': status}
+        date_map[date_str]['qty'] += qty
+
+        # 客户汇总（产品级）
+        inv_qty = inventory_map.get((customer_name, product_name), 0)
+        product_key = (row.customer_id, product_name)
+        if product_key not in product_summary:
+            product_summary[product_key] = {'customer_id': row.customer_id, 'customer_name': customer_name,
+                                            'plan_qty': 0, 'inventory_qty': inv_qty, 'shipped_qty': 0,
+                                            'remaining_qty': 0, 'warning': False}
+        ps = product_summary[product_key]
+        ps['plan_qty'] += qty
+        ps['shipped_qty'] += shp_qty
+        ps['remaining_qty'] += remain
+        if _calc_stock_status(qty, inv_qty) != 'sufficient':
+            ps['warning'] = True
+
+    # 构建 rows 列表（字段名与前端 Row 类型对齐）
+    rows_list = []
+    for date_str, d in by_date.items():
+        rows_list.append({
+            'date': date_str, '_dayNum': d['day_num'], '_weekday': d['weekday'],
+            'customerCount': len(d['_cust_set']), 'planCount': d['plan_count'],
+            'totalQty': d['total_qty'], '_shippedCount': d['shipped_count'],
+            '_pendingCount': d['pending_count'],
+            '_shippedPct': int(d['shipped_qty'] / d['total_qty'] * 1000) / 10 if d['total_qty'] > 0 else 0,
+            'customerNames': sorted(d['_cust_set']),
+            '_fullDate': f'{month}月{d["day_num"]}日', '_isPeak': False,
+        })
+    rows_list.sort(key=lambda r: r['date'])
+    max_plan = max((r['planCount'] for r in rows_list), default=0)
+    for r in rows_list:
+        r['_isPeak'] = r['planCount'] == max_plan and max_plan > 0
+
+    # sku_summary 列表（字段名与前端 SkuRow 类型对齐）
+    sku_summary = []
+    for sk in by_key.values():
+        sku_summary.append({
+            'barcode': sk['barcode'], 'product_name': sk['product_name'],
+            'plan_qty': sk['plan_qty'], 'shipped_qty': sk['shipped_qty'],
+            'remain_qty': sk['remain_qty'], 'customer_name': sk['customer_name'],
+            '_pct': int(sk['shipped_qty'] / sk['plan_qty'] * 1000) / 10 if sk['plan_qty'] > 0 else 0,
+            '_odd': False,
+        })
+    sku_summary.sort(key=lambda s: (s['customer_name'], s['barcode']))
+
+    # sku_date_index
+    sku_date_index = {}
+    for k, dm in _prod_cust_date_map.items():
+        sku_date_index[k] = sorted(dm.values(), key=lambda x: x['date'])
+
+    # 客户汇总
+    summary: dict[int, dict] = {}
+    for ps in product_summary.values():
+        cid = ps['customer_id']
+        if cid not in summary:
+            summary[cid] = {'customer_id': cid, 'customer_name': ps['customer_name'],
+                            'plan_qty': 0, 'inventory_qty': 0, 'shipped_qty': 0,
+                            'remaining_qty': 0, 'warning_count': 0}
+        s = summary[cid]
+        s['plan_qty'] += ps['plan_qty']
+        s['inventory_qty'] += ps['inventory_qty']
+        s['shipped_qty'] += ps['shipped_qty']
+        s['remaining_qty'] += ps['remaining_qty']
+        if ps['warning']:
+            s['warning_count'] += 1
+    customers = list(summary.values())
+    customer_totals = {
+        'total_plan_qty': sum(s['plan_qty'] for s in customers),
+        'total_inventory_qty': sum(s['inventory_qty'] for s in customers),
+        'total_shipped_qty': sum(s['shipped_qty'] for s in customers),
+        'total_remaining_qty': sum(s['remaining_qty'] for s in customers),
+        'warning_count': sum(s['warning_count'] for s in customers),
+    }
+
+    return {
+        'year': year, 'month': month, 'days_in_month': days_in_month,
+        'rows': rows_list, 'sku_summary': sku_summary, 'sku_date_index': sku_date_index,
+        'customers': customers, 'customer_totals': customer_totals, 'fifo_degraded': fifo_degraded,
+    }
+
+
+@cache_result(
+    key_prefix="pp:day",
+    ttl=120,
+    local_ttl=30,
+    key_builder=lambda **kwargs: f"v1:y{kwargs.get('year', 0)}:m{kwargs.get('month', 0)}:d{kwargs.get('day', 0)}:c{kwargs.get('customer_id', 0)}",
+)
+async def get_day_details(db: AsyncSession, year: int, month: int, day: int, customer_id: int=0) -> dict:
+    """指定日期的明细列表（按需加载，供日期详情弹窗使用，避免全量传输）"""
+    plan_month = f'{year}-{month:02d}'
+    target_date = date(year, month, day)
+    date_str = target_date.isoformat()
+
+    _sql = """
+        SELECT d.id AS detail_id, d.plan_id, p.customer_id, p.customer_name,
+               d.product_name, d.barcode, d.plan_date, d.quantity
+        FROM purchase_plan_details d
+        JOIN purchase_plans p ON d.plan_id = p.id
+        WHERE p.plan_month = :plan_month AND d.plan_date = :plan_date
+    """ + (" AND p.customer_id = :customer_id" if customer_id else "")  # nosec B608
+    sql = text(_sql)
+
+    params: dict = {'plan_month': plan_month, 'plan_date': target_date}
+    if customer_id:
+        params['customer_id'] = customer_id
+
+    result = await db.execute(sql, params)
+    rows = result.all()
+
+    detail_shipped_map: dict[int, int] = {}
+    fifo_degraded = False
+    if rows:
+        detail_ids = list({row.detail_id for row in rows})
+        detail_result = await db.execute(
+            select(PurchasePlanDetail)
+            .options(load_only(
+                PurchasePlanDetail.id, PurchasePlanDetail.plan_id,
+                PurchasePlanDetail.product_name, PurchasePlanDetail.product_id,
+                PurchasePlanDetail.plan_date, PurchasePlanDetail.quantity,
+            ))
+            .where(PurchasePlanDetail.id.in_(detail_ids))
+        )
+        all_details = detail_result.scalars().all()
+        customer_name_map: dict[int, str] = {}
+        for row in rows:
+            if row.plan_id not in customer_name_map:
+                customer_name_map[row.plan_id] = row.customer_name
+        shipped_fifo_map, fifo_degraded = await _get_shipped_fifo_map_safe(db, all_details, customer_name_map, plan_month=plan_month)
+        detail_shipped_map = {d.id: shipped_fifo_map.get(d.id, 0) for d in all_details}
+
+    plans = []
+    by_customer: dict[str, list] = {}
+    total_qty = 0
+    shipped_qty = 0
+    for row in rows:
+        shp = detail_shipped_map.get(row.detail_id, 0)
+        qty = row.quantity
+        plan = {
+            'detail_id': row.detail_id, 'plan_id': row.plan_id,
+            'customer_name': row.customer_name, 'product_name': row.product_name,
+            'barcode': row.barcode, 'quantity': qty, 'shipped_qty': shp,
+            'remaining_qty': qty - shp, 'plan_date': date_str,
+        }
+        plans.append(plan)
+        cn = row.customer_name or '未知'
+        if cn not in by_customer:
+            by_customer[cn] = []
+        by_customer[cn].append(plan)
+        total_qty += qty
+        shipped_qty += shp
+
+    return {
+        'date': date_str, 'weekday': _py_weekday_to_js(target_date.weekday()),
+        'plans': plans, 'by_customer': by_customer,
+        'shipped_pct': int(shipped_qty / total_qty * 1000) / 10 if total_qty > 0 else 0,
+        'fifo_degraded': fifo_degraded,
+    }
+
+
 async def get_inventory_compare(db: AsyncSession, year: int, month: int, customer_id: int=0) -> dict:
     """库存对比数据：每个计划明细的库存状态，单次 eager loading 查询"""
     plan_month = f'{year}-{month:02d}'

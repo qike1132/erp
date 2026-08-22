@@ -54,11 +54,20 @@ groups:
           summary: "PostgreSQL 连接数过高"
           description: "数据库连接使用率为 {{ $value | humanizePercentage }}。"
 
-      - alert: ERP_CeleryTasksFailing
-        expr: increase(celery_task_failed_total[5m]) > 10
+      - alert: ERP_ArqTasksFailing
+        expr: increase(arq_task_failure_total[5m]) > 10
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: "Celery 任务失败数增加"
-          description: "最近 5 分钟 Celery 失败任务数 > 10。"
+          summary: "ARQ 任务失败数增加"
+          description: "最近 5 分钟 ARQ 失败任务数 > 10，请检查死信队列。"
+
+      - alert: ERP_DeadLetterQueueGrowing
+        expr: arq_dead_letter_queue_depth > 10
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "死信队列堆积超过 10 条"
+          description: "当前死信队列深度: {{ $value }}，需人工介入处理。"

@@ -33,14 +33,14 @@ if TYPE_CHECKING:
     from fastapi_app.shared_models.order_item import OrderItem
     from fastapi_app.shared_models.product import Product
 
-# 外发工序状态
-OUTSOURCE_PROCESS_STATUSES = ('pending', 'in_progress', 'completed')
+# 外发工序状态：待发货 -> 已发货（待收货）-> 已收货
+OUTSOURCE_PROCESS_STATUSES = ('pending', 'shipped', 'received')
 
 # 状态显示文案
 OUTSOURCE_PROCESS_STATUS_LABELS = {
-    'pending': '待开始',
-    'in_progress': '进行中',
-    'completed': '已完成',
+    'pending': '待发货',
+    'shipped': '已发货',
+    'received': '已收货',
 }
 
 
@@ -96,7 +96,13 @@ class OrderOutsourceProcess(Base):
     process_type: Mapped[str] = mapped_column(String(50), nullable=False, comment='工序类型：电绣/转印/配件等')
     sort_order: Mapped[int] = mapped_column(Integer, default=0, comment='工序顺序，数值越小越靠前')
     status: Mapped[str] = mapped_column(
-        String(20), default='pending', nullable=False, index=True, comment='状态：pending/in_progress/completed'
+        String(20), default='pending', nullable=False, index=True, comment='状态：pending/shipped/received'
+    )
+    shipped_quantity: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, comment='发货数量（发货时录入，每道工序独立）'
+    )
+    received_quantity: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, comment='收货数量（确认收货时默认等于发货数量）'
     )
     planned_start_time: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, comment='计划开始时间'
@@ -105,10 +111,10 @@ class OrderOutsourceProcess(Base):
         DateTime(timezone=True), nullable=True, comment='计划完成时间'
     )
     actual_start_time: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, comment='实际开始时间'
+        DateTime(timezone=True), nullable=True, comment='实际发货时间'
     )
     actual_end_time: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, comment='实际完成时间'
+        DateTime(timezone=True), nullable=True, comment='实际收货时间'
     )
     remark: Mapped[str | None] = mapped_column(Text, nullable=True, comment='备注')
     created_by: Mapped[str | None] = mapped_column(String(50), nullable=True, comment='创建人')
@@ -131,3 +137,30 @@ class OrderOutsourceProcess(Base):
 
     def __repr__(self):
         return f'<OrderOutsourceProcess order_id={self.order_id} type={self.process_type} status={self.status}>'
+
+
+class OrderOutsourceProcessFlow(Base):
+    """外发工序发货/收货流水：每次发/收一条记录，用于台账审计（时间+工序+数量+操作人）。"""
+
+    __tablename__ = 'order_outsource_process_flow'
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    process_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey('order_outsource_process.id', ondelete='CASCADE'), nullable=False, index=True,
+        comment='工序ID'
+    )
+    action: Mapped[str] = mapped_column(String(10), nullable=False, comment='动作：ship=发货 / receive=收货')
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, comment='本次数量')
+    operator: Mapped[str | None] = mapped_column(String(50), nullable=True, comment='操作人')
+    create_time: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True, comment='操作时间'
+    )
+
+    process: Mapped[OrderOutsourceProcess] = relationship('OrderOutsourceProcess')
+
+    __table_args__ = (
+        Index('ix_oospf_process_time', 'process_id', 'create_time'),
+    )
+
+    def __repr__(self):
+        return f'<OrderOutsourceProcessFlow process_id={self.process_id} action={self.action} qty={self.quantity}>'

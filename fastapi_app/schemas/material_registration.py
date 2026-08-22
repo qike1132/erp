@@ -97,3 +97,36 @@ class SuggestionsResponse(BaseModel):
 class StatsDistributionResponse(BaseModel):
     success: bool = True
     distribution: list[dict[str, Any]] = []
+
+
+class SupplierDetailSubItem(BaseModel):
+    id: int
+    ordered: float
+    received: float
+
+
+class SupplierDetailMat(BaseModel):
+    name: str
+    ordered: float
+    received: float
+    remaining: float
+    pct: float
+    sub_items: list[SupplierDetailSubItem]
+    unit: str
+    spec: str
+
+
+class SupplierDetailGroup(BaseModel):
+    supplier_name: str
+    items: list[SupplierDetailMat]
+    total_ordered: float
+    total_received: float
+    pct: float
+
+
+class SupplierDetailResponse(BaseModel):
+    success: bool = True
+    supplier_groups: list[SupplierDetailGroup] = []
+    total_ordered: float = 0
+    total_received: float = 0
+    total_pct: float = 0

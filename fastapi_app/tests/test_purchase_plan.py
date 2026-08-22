@@ -374,3 +374,141 @@ class TestPurchasePlanEndpoints:
         assert response.status_code == 200
         data = response.json()
         assert data['days_in_month'] == 30
+
+    @pytest.mark.asyncio
+    async def test_monthly_aggregated_success(self, client, mock_db):
+        mock_aggregated = {
+            'year': 2026,
+            'month': 4,
+            'days_in_month': 30,
+            'rows': [
+                {
+                    'date': '2026-04-15',
+                    'dayNum': 15,
+                    'weekday': '周三',
+                    '_dayNum': 15,
+                    'totalQty': 200,
+                    'customerCount': 1,
+                    'customers': [{'customer_id': 1, 'customer_name': '测试客户', 'quantity': 200}],
+                    '_pct': 0.0,
+                }
+            ],
+            'sku_summary': [
+                {'product_id': 1, 'product_name': '测试产品A', 'barcode': '6901234567890', 'total_qty': 200, 'shipped_qty': 50}
+            ],
+            'sku_date_index': {'1': ['2026-04-15']},
+            'customers': [{'customer_id': 1, 'customer_name': '测试客户', 'plan_qty': 200, 'shipped_qty': 50, 'remaining_qty': 150}],
+            'customer_totals': {'1': 200},
+            'fifo_degraded': False,
+        }
+        with patch('fastapi_app.api.v1.endpoints.purchase_plan.purchase_plan_service') as mock_svc:
+            mock_svc.get_monthly_aggregated = AsyncMock(return_value=mock_aggregated)
+            response = await client.get(
+                "/api/v1/plans/monthly-aggregated",
+                params={"year": 2026, "month": 4},
+            )
+        assert response.status_code == 200
+        data = response.json()
+        assert data['days_in_month'] == 30
+        assert len(data['rows']) == 1
+        assert data['rows'][0]['totalQty'] == 200
+        assert len(data['sku_summary']) == 1
+        assert len(data['customers']) == 1
+
+    @pytest.mark.asyncio
+    async def test_monthly_aggregated_with_customer_filter(self, client, mock_db):
+        mock_aggregated = {
+            'year': 2026,
+            'month': 4,
+            'days_in_month': 30,
+            'rows': [],
+            'sku_summary': [],
+            'sku_date_index': {},
+            'customers': [],
+            'customer_totals': {},
+            'fifo_degraded': False,
+        }
+        with patch('fastapi_app.api.v1.endpoints.purchase_plan.purchase_plan_service') as mock_svc:
+            mock_svc.get_monthly_aggregated = AsyncMock(return_value=mock_aggregated)
+            response = await client.get(
+                "/api/v1/plans/monthly-aggregated",
+                params={"year": 2026, "month": 4, "customer_id": 1},
+            )
+        assert response.status_code == 200
+        assert mock_svc.get_monthly_aggregated.call_args[0][3] == 1
+
+    @pytest.mark.asyncio
+    async def test_monthly_aggregated_error(self, client, mock_db):
+        with patch('fastapi_app.api.v1.endpoints.purchase_plan.purchase_plan_service') as mock_svc:
+            mock_svc.get_monthly_aggregated = AsyncMock(side_effect=RuntimeError("DB error"))
+            response = await client.get(
+                "/api/v1/plans/monthly-aggregated",
+                params={"year": 2026, "month": 4},
+            )
+        assert response.status_code == 500
+
+    @pytest.mark.asyncio
+    async def test_day_details_success(self, client, mock_db):
+        mock_day_details = {
+            'date': '2026-04-15',
+            'weekday': '周三',
+            'plans': [
+                {
+                    'detail_id': 1,
+                    'product_id': 1,
+                    'product_name': '测试产品A',
+                    'barcode': '6901234567890',
+                    'customer_id': 1,
+                    'customer_name': '测试客户',
+                    'quantity': 100,
+                    'shipped_qty': 20,
+                    'remaining_qty': 80,
+                    'remark': '',
+                }
+            ],
+            'by_customer': {'测试客户': [{'detail_id': 1, 'product_name': '测试产品A', 'quantity': 100}]},
+            'shipped_pct': 20.0,
+            'fifo_degraded': False,
+        }
+        with patch('fastapi_app.api.v1.endpoints.purchase_plan.purchase_plan_service') as mock_svc:
+            mock_svc.get_day_details = AsyncMock(return_value=mock_day_details)
+            response = await client.get(
+                "/api/v1/plans/day-details",
+                params={"year": 2026, "month": 4, "day": 15},
+            )
+        assert response.status_code == 200
+        data = response.json()
+        assert data['date'] == '2026-04-15'
+        assert len(data['plans']) == 1
+        assert data['plans'][0]['product_name'] == '测试产品A'
+        assert len(data['by_customer']) == 1
+        assert data['shipped_pct'] == 20.0
+
+    @pytest.mark.asyncio
+    async def test_day_details_with_customer_filter(self, client, mock_db):
+        mock_day_details = {
+            'date': '2026-04-15',
+            'weekday': '周三',
+            'plans': [],
+            'by_customer': {},
+            'shipped_pct': 0.0,
+            'fifo_degraded': False,
+        }
+        with patch('fastapi_app.api.v1.endpoints.purchase_plan.purchase_plan_service') as mock_svc:
+            mock_svc.get_day_details = AsyncMock(return_value=mock_day_details)
+            response = await client.get(
+                "/api/v1/plans/day-details",
+                params={"year": 2026, "month": 4, "day": 15, "customer_id": 2},
+            )
+        assert response.status_code == 200
+        assert mock_svc.get_day_details.call_args[0][4] == 2
+
+    @pytest.mark.asyncio
+    async def test_day_details_error(self, client, mock_db):
+        with patch('fastapi_app.api.v1.endpoints.purchase_plan.purchase_plan_service') as mock_svc:
+            mock_svc.get_day_details = AsyncMock(side_effect=RuntimeError("DB error"))
+            response = await client.get(
+                "/api/v1/plans/day-details",
+                params={"year": 2026, "month": 4, "day": 15},
+            )
+        assert response.status_code == 500

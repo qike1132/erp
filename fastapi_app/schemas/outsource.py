@@ -63,6 +63,16 @@ class OrderProcessUpdate(BaseModel):
     remark: str | None = Field(None, max_length=500, description="备注")
 
 
+class OrderProcessShip(BaseModel):
+    """订单外发工序发货请求：录入发货数量（每道工序独立）。"""
+    shipped_quantity: int = Field(..., gt=0, le=9999999, description="发货数量")
+
+
+class OrderProcessReceive(BaseModel):
+    """订单外发工序收货请求：收货数量可选，缺省等于发货数量。"""
+    received_quantity: int | None = Field(None, gt=0, le=9999999, description="收货数量")
+
+
 class OrderProcessResponse(BaseModel):
     """订单外发工序响应"""
     id: int
@@ -73,6 +83,8 @@ class OrderProcessResponse(BaseModel):
     process_type: str
     sort_order: int = 0
     status: str = 'pending'
+    shipped_quantity: int | None = None
+    received_quantity: int | None = None
     planned_start_time: datetime | None = None
     planned_end_time: datetime | None = None
     actual_start_time: datetime | None = None
@@ -87,6 +99,24 @@ class OrderProcessListResponse(BaseModel):
     """订单外发工序列表响应"""
     success: bool = True
     data: list[dict]
+    total: int = 0
+
+
+class OrderProcessFlowResponse(BaseModel):
+    """外发工序流水（发货/收货记录）"""
+    id: int
+    process_id: int
+    process_type: str | None = None
+    action: str
+    quantity: int
+    operator: str | None = None
+    create_time: datetime | None = None
+
+
+class OrderProcessFlowListResponse(BaseModel):
+    """订单外发工序流水列表响应（台账）"""
+    success: bool = True
+    data: list[OrderProcessFlowResponse] = []
     total: int = 0
 
 
@@ -113,6 +143,8 @@ class KanbanOrderProcess(BaseModel):
     process_type: str
     sort_order: int = 0
     status: str = 'pending'
+    shipped_quantity: int | None = None
+    received_quantity: int | None = None
     planned_start_time: datetime | None = None
     planned_end_time: datetime | None = None
     actual_start_time: datetime | None = None

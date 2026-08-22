@@ -23,7 +23,10 @@ from fastapi_app.schemas.outsource import (
     GenerateProcessResponse,
     KanbanResponse,
     OrderActionResponse,
+    OrderProcessFlowListResponse,
     OrderProcessListResponse,
+    OrderProcessReceive,
+    OrderProcessShip,
     OrderProcessUpdate,
     ProcessTypeBatchCreate,
     ProcessTypeCreate,
@@ -164,6 +167,17 @@ async def list_order_processes(
     return OrderProcessListResponse(data=items, total=len(items))
 
 
+@router.get("/orders/{order_id}/flows", response_model=OrderProcessFlowListResponse)
+async def list_order_process_flows(
+    order_id: int,
+    db: AsyncSession = Depends(get_async_read_db),
+    _user: User = Depends(require_permission("outsource_view")),
+) -> OrderProcessFlowListResponse:
+    """查询订单外发工序流水（发货/收货记录，台账用）。"""
+    items = await outsource_service.list_order_flows(db, order_id)
+    return OrderProcessFlowListResponse(data=items, total=len(items))
+
+
 @router.post("/orders/{order_id}/processes/generate", response_model=GenerateProcessResponse)
 async def generate_order_processes(
     order_id: int,
@@ -202,32 +216,39 @@ async def update_order_process(
     return OrderProcessListResponse(data=[item], total=1)
 
 
-@router.post("/processes/{process_id}/start", response_model=OrderProcessListResponse)
-async def start_order_process(
+@router.post("/processes/{process_id}/ship", response_model=OrderProcessListResponse)
+async def ship_order_process(
     process_id: int,
+    data: OrderProcessShip,
     db: AsyncSession = Depends(get_async_db),
     user: User = Depends(require_permission("outsource_manage")),
 ) -> OrderProcessListResponse:
-    """开始外发工序：记录实际开始时间。"""
+    """发货外发工序：录入发货数量，状态 pending → shipped。贝乐用户不可发货。"""
+    if user.username == '贝乐':
+        raise HTTPException(status_code=403, detail='贝乐用户不可发货，由其他用户发货')
     try:
-        item = await outsource_service.start_order_process(
-            db, process_id, username=user.username,
+        item = await outsource_service.ship_order_process(
+            db, process_id, shipped_quantity=data.shipped_quantity, username=user.username,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return OrderProcessListResponse(data=[item], total=1)
 
 
-@router.post("/processes/{process_id}/complete", response_model=OrderProcessListResponse)
-async def complete_order_process(
+@router.post("/processes/{process_id}/receive", response_model=OrderProcessListResponse)
+async def receive_order_process(
     process_id: int,
+    data: OrderProcessReceive | None = None,
     db: AsyncSession = Depends(get_async_db),
     user: User = Depends(require_permission("outsource_manage")),
 ) -> OrderProcessListResponse:
-    """完成外发工序：记录实际完成时间。"""
+    """确认收货外发工序：状态 shipped → received。仅贝乐用户可确认收货。收货数量可选，缺省等于发货数量。"""
+    if user.username != '贝乐':
+        raise HTTPException(status_code=403, detail='仅贝乐用户可确认收货')
     try:
-        item = await outsource_service.complete_order_process(
+        item = await outsource_service.receive_order_process(
             db, process_id, username=user.username,
+            received_quantity=data.received_quantity if data else None,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

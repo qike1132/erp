@@ -149,14 +149,14 @@ SLOW_QUERY_TOTAL = _get_or_create_counter(
 )
 
 TASK_FAILURE_TOTAL = _get_or_create_counter(
-    'celery_task_failure_total',
-    'Celery任务失败总数（重试耗尽后计入）',
+    'arq_task_failure_total',
+    'ARQ任务失败总数（重试耗尽后计入）',
     ['task']
 )
 
 TASK_RUNTIME_SECONDS = _get_or_create_histogram(
-    'celery_task_runtime_seconds',
-    'Celery任务运行耗时（秒）',
+    'arq_task_runtime_seconds',
+    'ARQ任务运行耗时（秒）',
     ['task'],
     buckets=[1, 5, 10, 30, 60, 120, 300, 600]
 )

@@ -13,6 +13,7 @@ from typing import ClassVar
 from arq import create_pool, cron
 from arq.connections import RedisSettings
 
+from fastapi_app.core.arq_callbacks import on_job_end, on_job_failed, on_job_started
 from fastapi_app.core.config import settings
 
 # 队列名称（保持与 Celery 一致的路由语义，供 _queue_name 使用）
@@ -136,6 +137,9 @@ class WorkerSettings:
     max_jobs = 10
     job_timeout = 600
     max_tries = 3
+    on_job_started = on_job_started
+    on_job_end = on_job_end
+    on_job_failed = on_job_failed
 
 
 # ---------------------------------------------------------------------------

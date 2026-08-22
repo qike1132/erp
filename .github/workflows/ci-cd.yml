@@ -112,18 +112,7 @@ jobs:
     
     - name: Check coverage threshold
       run: |
-        python -c "
-import os
-import xml.etree.ElementTree as ET
-tree = ET.parse('coverage.xml')
-root = tree.getroot()
-coverage = float(root.attrib['line-rate']) * 100
-print(f'Coverage: {coverage:.2f}%')
-threshold = float(os.getenv('COVERAGE_MIN', '20'))
-if coverage < threshold:
-    print(f'Coverage below threshold: {coverage:.2f}% < {threshold:.2f}%')
-    raise SystemExit(1)
-        "
+        python -c "import os; import xml.etree.ElementTree as ET; tree = ET.parse('coverage.xml'); root = tree.getroot(); coverage = float(root.attrib['line-rate']) * 100; print(f'Coverage: {coverage:.2f}%'); threshold = float(os.getenv('COVERAGE_MIN', '20')); (print(f'Coverage below threshold: {coverage:.2f}% < {threshold:.2f}%') or exit(1)) if coverage < threshold else None"
     
   lint:
     runs-on: ubuntu-latest
@@ -222,14 +211,15 @@ if coverage < threshold:
     
   deploy-production:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     if: github.ref == 'refs/heads/main'
-    
+
     steps:
     - uses: actions/checkout@v4
-    
-    - name: Deploy to production
+
+    - name: Deploy to production (Windows native)
       run: |
-        echo "Deploying to production environment..."
-        kubectl apply -f k8s/configmap.yaml -f k8s/infra.yaml -f k8s/deployment.yaml -f k8s/celery.yaml -f k8s/hpa.yaml -f k8s/ingress.yaml
-        kubectl rollout status deployment/erp-app -n erp-system --timeout=300s
+        echo "Deploying to production environment (Windows native)..."
+        .\deploy-windows.ps1 -Env production
+      env:
+        APP_ENV: production

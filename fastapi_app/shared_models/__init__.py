@@ -54,6 +54,7 @@ from fastapi_app.shared_models.outsource import (
     OUTSOURCE_PROCESS_STATUS_LABELS,
     OUTSOURCE_PROCESS_STATUSES,
     OrderOutsourceProcess,
+    OrderOutsourceProcessFlow,
     OutsourceProcessType,
 )
 from fastapi_app.shared_models.packaging_record import PackagingRecord
@@ -115,6 +116,7 @@ __all__ = [
     'OrderBatchAuditLog',
     'OrderItem',
     'OrderOutsourceProcess',
+    'OrderOutsourceProcessFlow',
     'OrderStatusLog',
     'OrderSyncConfig',
     'OrderSyncRecord',

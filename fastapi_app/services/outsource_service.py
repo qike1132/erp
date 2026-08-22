@@ -20,6 +20,7 @@ from fastapi_app.shared_models import (
     Order,
     OrderItem,
     OrderOutsourceProcess,
+    OrderOutsourceProcessFlow,
     OutsourceProcessType,
     Product,
 )
@@ -64,6 +65,8 @@ def _serialize_order_process(p: OrderOutsourceProcess) -> dict:
         'process_type': p.process_type,
         'sort_order': p.sort_order or 0,
         'status': p.status,
+        'shipped_quantity': p.shipped_quantity,
+        'received_quantity': p.received_quantity,
         'planned_start_time': _fmt_dt(p.planned_start_time),
         'planned_end_time': _fmt_dt(p.planned_end_time),
         'actual_start_time': _fmt_dt(p.actual_start_time),
@@ -73,6 +76,39 @@ def _serialize_order_process(p: OrderOutsourceProcess) -> dict:
         'create_time': _fmt_dt(p.create_time),
         'update_time': _fmt_dt(p.update_time),
     }
+
+
+def _is_fully_received(p: OrderOutsourceProcess) -> bool:
+    """是否已收齐：有收货记录且收货累计 >= 发货累计。"""
+    return (p.received_quantity or 0) > 0 and (p.received_quantity or 0) >= (p.shipped_quantity or 0)
+
+
+def _derive_status(p: OrderOutsourceProcess) -> str:
+    """按累计数量派生状态：pending=未发；shipped=已发未收齐；received=已收齐。"""
+    if (p.shipped_quantity or 0) == 0:
+        return 'pending'
+    if _is_fully_received(p):
+        return 'received'
+    return 'shipped'
+
+
+async def _process_target_quantity(db: AsyncSession, p: OrderOutsourceProcess) -> int:
+    """工序目标数量：优先 SKU(order_item) 数量，无明细用订单数量；解析失败返回 0（不设上限）。"""
+    try:
+        if p.order_item_id is not None:
+            item = await db.get(OrderItem, p.order_item_id)
+            if item is not None:
+                qty = getattr(item, 'quantity', None)
+                if isinstance(qty, int) and qty > 0:
+                    return int(qty)
+        order = await db.get(Order, p.order_id)
+        if order is not None:
+            qty = getattr(order, 'quantity', None)
+            if isinstance(qty, int) and qty > 0:
+                return int(qty)
+    except Exception:  # defensive: 目标解析失败不阻断发货（按无上限处理）
+        logger.warning('解析外发工序目标数量失败: process_id=%s', getattr(p, 'id', None), exc_info=True)
+    return 0
 
 
 # ==================== 湖北外发订单列表 ====================
@@ -119,15 +155,15 @@ async def list_outsource_orders(
 
 
 def _summarize_process_progress(processes: list[OrderOutsourceProcess]) -> dict:
-    """计算工序进度统计（总数/完成数/开始数/进度/当前工序/状态标签）。"""
+    """计算工序进度统计（总数/已收齐数/已开始数/进度/当前工序/状态标签）。"""
     total = len(processes)
-    completed = sum(1 for p in processes if p.status == 'completed')
-    started = sum(1 for p in processes if p.status != 'pending')
+    completed = sum(1 for p in processes if _is_fully_received(p))
+    started = sum(1 for p in processes if (p.shipped_quantity or 0) > 0)
     progress = round(completed * 100 / total) if total else 0
 
     current_process = None
     for p in processes:
-        if p.status != 'completed':
+        if not _is_fully_received(p):
             current_process = p.process_type
             break
 
@@ -138,7 +174,7 @@ def _summarize_process_progress(processes: list[OrderOutsourceProcess]) -> dict:
     elif started > 0:
         status_label = f'进行中（{current_process}）'
     else:
-        status_label = '待开始'
+        status_label = '待发货'
 
     return {
         'total_processes': total,
@@ -153,9 +189,9 @@ def _summarize_process_progress(processes: list[OrderOutsourceProcess]) -> dict:
 def _matches_process_status(row: dict, status: str) -> bool:
     """按订单外发工序整体状态过滤。
 
-    - pending 待开始：已配置工序且全部未开始
-    - in_progress 进行中：有工序已开始但未全部完成
-    - completed 已完成：全部工序完成
+    - pending 待发货：已配置工序且全部未发货
+    - in_progress 进行中：有工序已发货但未全部收货
+    - completed 已完成：全部工序已收货
     未配置工序（total=0）不属于任何状态。
     """
     total = row.get('total_processes', 0)
@@ -583,39 +619,88 @@ async def update_order_process(db: AsyncSession, process_id: int, data: dict) ->
     return _serialize_order_process(p)
 
 
-async def start_order_process(db: AsyncSession, process_id: int, username: str | None = None) -> dict:
-    """开始外发工序：记录实际开始时间，状态 → in_progress。"""
+async def ship_order_process(db: AsyncSession, process_id: int, shipped_quantity: int, username: str | None = None) -> dict:
+    """发货（分批）：每次发货追加流水并累加数量，校验不超过剩余目标数量。"""
     p = await db.get(OrderOutsourceProcess, process_id)
     if not p:
         raise ValueError('外发工序不存在')
-    if p.status == 'completed':
-        raise ValueError('该工序已完成，无法重复开始')
+    if shipped_quantity <= 0:
+        raise ValueError('发货数量必须大于 0')
+    if (p.received_quantity or 0) > 0:
+        raise ValueError('该工序已收货，无法再发货')
 
-    p.status = 'in_progress'
-    p.actual_start_time = datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
-    p.remark = p.remark or (f'由 {username} 开始' if username else '')
+    shipped_now = p.shipped_quantity or 0
+    target = await _process_target_quantity(db, p)
+    if target > 0:
+        remaining = target - shipped_now
+        if remaining <= 0:
+            raise ValueError('该工序已全部发货，无需重复操作')
+        if shipped_quantity > remaining:
+            raise ValueError(f'发货数量超过剩余数量（剩余 {remaining}）')
+
+    p.shipped_quantity = shipped_now + shipped_quantity
+    if p.actual_start_time is None:
+        p.actual_start_time = datetime.now(UTC).replace(tzinfo=None)  # naive UTC
+    p.status = _derive_status(p)
+    db.add(OrderOutsourceProcessFlow(
+        process_id=p.id, action='ship', quantity=shipped_quantity,
+        operator=username or p.created_by,
+    ))
     await db.flush()
     await db.refresh(p)
     return _serialize_order_process(p)
 
 
-async def complete_order_process(db: AsyncSession, process_id: int, username: str | None = None) -> dict:
-    """完成外发工序：记录实际完成时间，状态 → completed。"""
+async def receive_order_process(db: AsyncSession, process_id: int, username: str | None = None, received_quantity: int | None = None) -> dict:
+    """确认收货（分批）：每次收货追加流水并累加数量，缺省=剩余待收，不超过已发货数量。"""
     p = await db.get(OrderOutsourceProcess, process_id)
     if not p:
         raise ValueError('外发工序不存在')
-    if p.status == 'completed':
-        raise ValueError('该工序已完成，无需重复操作')
+    if _is_fully_received(p):
+        raise ValueError('该工序已收货，无需重复操作')
+    shipped = p.shipped_quantity or 0
+    if shipped <= 0:
+        raise ValueError('该工序尚未发货，请先发货')
 
-    now = datetime.now(UTC).replace(tzinfo=None)  # naive UTC: DB列类型为 TIMESTAMP WITHOUT TIME ZONE
-    if not p.actual_start_time:
-        # 未点击开始时直接完成：视为开始即完成
-        p.actual_start_time = now
-    p.actual_end_time = now
-    p.status = 'completed'
+    received_now = p.received_quantity or 0
+    remaining = shipped - received_now
+    qty = received_quantity if received_quantity is not None else remaining
+    if qty <= 0 or qty > remaining:
+        raise ValueError(f'收货数量需在 1-{remaining} 之间')
+
+    p.received_quantity = received_now + qty
+    if p.actual_end_time is None:
+        p.actual_end_time = datetime.now(UTC).replace(tzinfo=None)  # naive UTC
+    p.status = _derive_status(p)
+    db.add(OrderOutsourceProcessFlow(
+        process_id=p.id, action='receive', quantity=qty,
+        operator=username or p.created_by,
+    ))
     await db.flush()
     await db.refresh(p)
     return _serialize_order_process(p)
+
+
+async def list_order_flows(db: AsyncSession, order_id: int) -> list[dict]:
+    """查询订单全部外发工序流水（含工序名，按时间倒序），供台账展示。"""
+    result = await db.execute(
+        select(OrderOutsourceProcessFlow, OrderOutsourceProcess.process_type)
+        .join(OrderOutsourceProcess, OrderOutsourceProcess.id == OrderOutsourceProcessFlow.process_id)
+        .where(OrderOutsourceProcess.order_id == order_id)
+        .order_by(OrderOutsourceProcessFlow.create_time.desc(), OrderOutsourceProcessFlow.id.desc())
+    )
+    return [
+        {
+            'id': flow.id,
+            'process_id': flow.process_id,
+            'process_type': process_type,
+            'action': flow.action,
+            'quantity': flow.quantity,
+            'operator': flow.operator,
+            'create_time': _fmt_dt(flow.create_time),
+        }
+        for flow, process_type in result.all()
+    ]
 
 
 async def delete_order_process(db: AsyncSession, process_id: int) -> None:

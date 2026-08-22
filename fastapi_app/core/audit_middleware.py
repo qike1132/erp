@@ -52,6 +52,21 @@ AUDIT_BUFFER_KEY = 'audit_log_buffer'
 AUDIT_FLUSH_SIZE = 50
 AUDIT_FLUSH_INTERVAL = 5
 
+_audit_session_factory = None
+
+
+def _get_audit_session_factory():
+    """懒创建并复用 audit session factory，避免每次刷写都新建"""
+    global _audit_session_factory
+    if _audit_session_factory is None:
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+        from fastapi_app.core.database import async_engine
+        if async_engine is not None:
+            _audit_session_factory = async_sessionmaker(
+                bind=async_engine, class_=AsyncSession, expire_on_commit=False,
+            )
+    return _audit_session_factory
+
 
 def _resolve_resource_type(path: str) -> str:
     for prefix, resource in RESOURCE_MAP.items():
@@ -171,14 +186,11 @@ async def _write_audit_direct(entries: list[dict]):
         return
     try:
         from sqlalchemy import text as sa_text
-        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-        from fastapi_app.core.database import async_engine
-
-        if async_engine is None:
+        session_factory = _get_audit_session_factory()
+        if session_factory is None:
             return
 
-        session_factory = async_sessionmaker(bind=async_engine, class_=AsyncSession, expire_on_commit=False)
         async with session_factory() as session:
             for entry in entries:
                 # 兜底：无论来自 Redis 缓冲（JSON 反序列化会丢 datetime 类型）还是直接路径，

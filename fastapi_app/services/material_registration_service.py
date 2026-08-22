@@ -110,6 +110,100 @@ async def get_registration(db, reg_id: int) -> dict:
     return {'success': True, 'registration': reg.to_dict()}
 
 
+def _compute_pct(ordered: float, received: float) -> float:
+    """计算完成百分比：全部到货返回 100，否则上限 99.9（与前端 computePct 对齐）"""
+    if ordered <= 0:
+        return 0.0
+    if received >= ordered:
+        return 100.0
+    return min(round(received / ordered * 100 * 10) / 10, 99.9)
+
+
+@cache_result(key_prefix="material:supplier_detail", ttl=30, local_ttl=10,
+             key_builder=lambda **kw: kw.get('order_no', ''))
+async def get_supplier_detail(db, order_no: str) -> dict:
+    """获取按供应商分组的来料聚合详情（服务端预聚合，消除前端 60+ 行同步计算）。
+
+    查询指定 order_no 的未完成登记，遍历所有 items（排除 filling 类），
+    按 reg.supplier_name 分组，组内按 material_name 合并数量并计算进度。
+    L1 10s + L2 30s 缓存，写操作时通过 MATERIAL 域失效。
+    """
+    query = (
+        select(MaterialRegistration)
+        .options(selectinload(MaterialRegistration.items))
+        .where(
+            MaterialRegistration.purchase_order_no == order_no,
+            MaterialRegistration.status != 'completed',
+        )
+    )
+    result = await db.execute(query)
+    registrations = list(result.scalars().all())
+
+    # supplier_name -> {material_name -> mat_info}
+    supplier_map: dict[str, dict[str, dict]] = {}
+
+    for reg in registrations:
+        sup_name = reg.supplier_name or '未指定'
+        mat_map = supplier_map.setdefault(sup_name, {})
+        for item in reg.items:
+            if (item.material_category or '') == 'filling':
+                continue
+            ordered = float(item.ordered_quantity or 0)
+            received = float(item.received_quantity or 0)
+            mat_name = item.material_name
+            existing = mat_map.get(mat_name)
+            if existing:
+                existing['ordered'] += ordered
+                existing['received'] += received
+                existing['remaining'] = existing['ordered'] - existing['received']
+                existing['pct'] = _compute_pct(existing['ordered'], existing['received'])
+                existing['sub_items'].append({'id': item.id, 'ordered': ordered, 'received': received})
+            else:
+                mat_map[mat_name] = {
+                    'name': mat_name,
+                    'ordered': ordered,
+                    'received': received,
+                    'remaining': ordered - received,
+                    'pct': _compute_pct(ordered, received),
+                    'sub_items': [{'id': item.id, 'ordered': ordered, 'received': received}],
+                    'unit': item.unit or '',
+                    'spec': item.specification or '',
+                }
+
+    all_ordered = 0.0
+    all_received = 0.0
+    supplier_groups = []
+    for sup_name, mat_map in supplier_map.items():
+        items = list(mat_map.values())
+        o_total = sum(m['ordered'] for m in items)
+        r_total = sum(m['received'] for m in items)
+        all_ordered += o_total
+        all_received += r_total
+        all_complete = all(m['received'] >= m['ordered'] for m in items)
+        supplier_groups.append({
+            'supplier_name': sup_name,
+            'items': items,
+            'total_ordered': o_total,
+            'total_received': r_total,
+            'pct': _compute_pct(o_total, o_total if all_complete else r_total),
+        })
+
+    all_complete = all(
+        m['received'] >= m['ordered']
+        for g in supplier_groups
+        for m in g['items']
+    )
+    total_pct = _compute_pct(all_ordered, all_ordered if all_complete else all_received)
+
+    return {
+        'success': True,
+        'supplier_groups': supplier_groups,
+        'total_ordered': all_ordered,
+        'total_received': all_received,
+        'total_pct': total_pct,
+    }
+
+
 async def create_registration(db, purchase_order_id: int, user_id: int | None = None,
                               username: str = '未知', remark: str = '',
                               items_data: list[dict] | None = None) -> dict:

@@ -87,12 +87,6 @@ def setup_telemetry(app=None):
         except ImportError:
             pass  # defensive: 可选依赖未安装,优雅降级
 
-        # Celery Instrumentation：在 FastAPI → Celery → DB 链路中自动注入/提取 trace 上下文
-        try:
-            from opentelemetry.instrumentation.celery import CeleryInstrumentor
-            CeleryInstrumentor().instrument()
-        except ImportError:
-            pass  # defensive: 可选依赖未安装,优雅降级
 
         logger.info("OpenTelemetry 已启用: service=%s, exporter=%s", service_name, exporter_type)
 

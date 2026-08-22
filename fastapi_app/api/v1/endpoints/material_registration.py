@@ -34,6 +34,7 @@ from fastapi_app.schemas.material_registration import (
     StatsDistributionResponse,
     StatsOverviewResponse,
     SuggestionsResponse,
+    SupplierDetailResponse,
     TrendResponse,
 )
 from fastapi_app.services import material_registration_service as mr_service
@@ -108,6 +109,28 @@ async def get_registration(
         return await mr_service.get_registration(db, reg_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+
+
+@router.get('/supplier-detail', response_model=SupplierDetailResponse)
+async def get_supplier_detail(
+    order_no: str = Query(..., min_length=1),
+    user: User = Depends(require_permission('product_manage')),
+    db: AsyncSession = Depends(get_async_read_db),
+) -> SupplierDetailResponse:
+    """获取按供应商分组的来料聚合详情（服务端预聚合）。
+
+    查询指定订单号的未完成登记，在服务端按供应商分组、按物料型号合并数量，
+    直接返回前端可用的聚合结构，消除客户端 60+ 行同步计算。
+
+    Args:
+        order_no: 采购订单号（精确匹配）。
+        user: 当前登录用户（仅需通过权限校验）。
+        db: 异步数据库会话（只读副本）。
+
+    Returns:
+        SupplierDetailResponse: 按供应商分组的聚合详情。
+    """
+    return await mr_service.get_supplier_detail(db, order_no)
 
 
 @router.post('/registrations', response_model=RegistrationDetailResponse)

@@ -14,18 +14,20 @@ import pytest
 
 from fastapi_app.services.outsource_service import (
     batch_create_process_types,
-    complete_order_process,
     create_process_type,
     delete_order_process,
     delete_process_type,
     generate_order_processes,
     get_kanban,
+    list_order_flows,
     list_order_processes,
     list_process_types,
-    start_order_process,
+    receive_order_process,
+    ship_order_process,
     sync_outsource_processes_for_order,
     update_process_type,
 )
+from fastapi_app.shared_models import OrderItem
 
 
 def make_preset(product_id=1, process_type='电绣', sort_order=0, is_active=True, pt_id=1):
@@ -49,7 +51,7 @@ def make_preset(product_id=1, process_type='电绣', sort_order=0, is_active=Tru
 
 def make_order_process(pid=1, order_id=1, item_id=None, product_id=1,
                        process_type='电绣', sort_order=0, status='pending'):
-    """构造 mock 订单外发工序对象"""
+    """构造 mock 订单外发工序对象（数量按状态派生：received=收齐，shipped=已发未收）"""
     p = MagicMock()
     p.id = pid
     p.order_id = order_id
@@ -59,6 +61,15 @@ def make_order_process(pid=1, order_id=1, item_id=None, product_id=1,
     p.process_type = process_type
     p.sort_order = sort_order
     p.status = status
+    if status == 'received':
+        p.shipped_quantity = 100
+        p.received_quantity = 100
+    elif status == 'shipped':
+        p.shipped_quantity = 100
+        p.received_quantity = None
+    else:
+        p.shipped_quantity = None
+        p.received_quantity = None
     p.planned_start_time = None
     p.planned_end_time = None
     p.actual_start_time = None
@@ -379,46 +390,150 @@ class TestSyncOrderProcesses:
 
 
 class TestProcessStatusFlow:
-    """工序状态流转"""
+    """工序状态流转（发货 → 确认收货）"""
 
     @pytest.mark.asyncio
-    async def test_start_process(self, mock_async_db):
-        """开始工序"""
+    async def test_ship_process(self, mock_async_db):
+        """发货工序：记录发货数量，状态 → shipped"""
         p = make_order_process(pid=1)
         mock_async_db.get = AsyncMock(return_value=p)
 
-        result = await start_order_process(mock_async_db, 1, 'admin')
+        result = await ship_order_process(mock_async_db, 1, 50, 'admin')
 
-        assert result['status'] == 'in_progress'
+        assert result['status'] == 'shipped'
+        assert p.shipped_quantity == 50
         assert p.actual_start_time is not None
 
     @pytest.mark.asyncio
-    async def test_start_completed_process(self, mock_async_db):
-        """已完成工序无法再开始"""
-        p = make_order_process(pid=1, status='completed')
+    async def test_ship_received_process(self, mock_async_db):
+        """已收货工序无法再发货"""
+        p = make_order_process(pid=1, status='received')
         mock_async_db.get = AsyncMock(return_value=p)
 
-        with pytest.raises(ValueError, match='已完成'):
-            await start_order_process(mock_async_db, 1)
+        with pytest.raises(ValueError, match='已收货'):
+            await ship_order_process(mock_async_db, 1, 50)
 
     @pytest.mark.asyncio
-    async def test_complete_process(self, mock_async_db):
-        """完成工序"""
+    async def test_receive_process(self, mock_async_db):
+        """确认收货：状态 → received，收货数量默认等于发货数量"""
+        p = make_order_process(pid=1, status='shipped')
+        p.shipped_quantity = 50
+        mock_async_db.get = AsyncMock(return_value=p)
+
+        result = await receive_order_process(mock_async_db, 1, 'admin')
+
+        assert result['status'] == 'received'
+        assert p.received_quantity == 50
+        assert p.actual_end_time is not None
+
+    @pytest.mark.asyncio
+    async def test_receive_process_custom_quantity(self, mock_async_db):
+        """确认收货：传入 received_quantity 时按自定义收货数量记录（部分收货状态仍为 shipped）"""
+        p = make_order_process(pid=1, status='shipped')
+        p.shipped_quantity = 50
+        mock_async_db.get = AsyncMock(return_value=p)
+
+        result = await receive_order_process(mock_async_db, 1, 'admin', received_quantity=30)
+
+        assert result['status'] == 'shipped'
+        assert p.received_quantity == 30
+
+    @pytest.mark.asyncio
+    async def test_ship_batch_accumulate(self, mock_async_db):
+        """分批发货：多次发货数量累加，且每次追加流水"""
         p = make_order_process(pid=1)
         mock_async_db.get = AsyncMock(return_value=p)
 
-        result = await complete_order_process(mock_async_db, 1, 'admin')
+        await ship_order_process(mock_async_db, 1, 50, 'admin')
+        result = await ship_order_process(mock_async_db, 1, 30, 'admin')
 
-        assert result['status'] == 'completed'
-        assert p.actual_end_time is not None
-        assert p.actual_start_time is not None  # 未开始直接完成时视为开始即完成
+        assert p.shipped_quantity == 80
+        assert result['status'] == 'shipped'
+        # 两次发货各追加一条 ship 流水
+        flows = [c.args[0] for c in mock_async_db.add.call_args_list]
+        ship_flows = [f for f in flows if getattr(f, 'action', None) == 'ship']
+        assert len(ship_flows) == 2
+        assert ship_flows[0].quantity == 50
+        assert ship_flows[1].quantity == 30
 
     @pytest.mark.asyncio
-    async def test_complete_process_not_found(self, mock_async_db):
-        """完成不存在的工序"""
+    async def test_ship_exceed_remaining(self, mock_async_db):
+        """分批发货：超过剩余目标数量被拒绝"""
+        p = make_order_process(pid=1, item_id=1)
+        p.shipped_quantity = 80
+        item = MagicMock()
+        item.quantity = 100
+        # db.get：进程返回 p，OrderItem 返回带数量的 item
+        async def fake_get(model, pk):
+            return item if model is OrderItem else p
+        mock_async_db.get = AsyncMock(side_effect=fake_get)
+
+        with pytest.raises(ValueError, match='超过剩余数量'):
+            await ship_order_process(mock_async_db, 1, 30)
+
+    @pytest.mark.asyncio
+    async def test_receive_batch_accumulate(self, mock_async_db):
+        """分批收货：多次收货数量累加，未收齐前状态仍为 shipped"""
+        p = make_order_process(pid=1, status='shipped')
+        p.shipped_quantity = 100
+        p.received_quantity = None
+        mock_async_db.get = AsyncMock(return_value=p)
+
+        first = await receive_order_process(mock_async_db, 1, '贝乐', received_quantity=30)
+        assert first['status'] == 'shipped'
+        assert p.received_quantity == 30
+
+        second = await receive_order_process(mock_async_db, 1, '贝乐', received_quantity=70)
+        assert second['status'] == 'received'
+        assert p.received_quantity == 100
+
+    @pytest.mark.asyncio
+    async def test_receive_exceed_shipped(self, mock_async_db):
+        """分批收货：超过已发货数量被拒绝"""
+        p = make_order_process(pid=1, status='shipped')
+        p.shipped_quantity = 50
+        p.received_quantity = None
+        mock_async_db.get = AsyncMock(return_value=p)
+
+        with pytest.raises(ValueError, match='收货数量需在'):
+            await receive_order_process(mock_async_db, 1, '贝乐', received_quantity=60)
+
+    @pytest.mark.asyncio
+    async def test_list_order_flows(self, mock_async_db):
+        """流水列表：返回工序名/动作/数量/操作人/时间"""
+        flow = MagicMock()
+        flow.id = 1
+        flow.process_id = 1
+        flow.action = 'ship'
+        flow.quantity = 50
+        flow.operator = 'admin'
+        flow.create_time = datetime.now(UTC)
+        proc_result = MagicMock()
+        proc_result.all.return_value = [(flow, '电绣')]
+        mock_async_db.execute = AsyncMock(return_value=proc_result)
+
+        result = await list_order_flows(mock_async_db, 1)
+
+        assert result[0]['process_type'] == '电绣'
+        assert result[0]['action'] == 'ship'
+        assert result[0]['quantity'] == 50
+        assert result[0]['operator'] == 'admin'
+
+    @pytest.mark.asyncio
+    async def test_receive_not_shipped_process(self, mock_async_db):
+        """未发货工序无法确认收货"""
+        p = make_order_process(pid=1, status='pending')
+        mock_async_db.get = AsyncMock(return_value=p)
+
+        with pytest.raises(ValueError, match='尚未发货'):
+            await receive_order_process(mock_async_db, 1)
+
+    @pytest.mark.asyncio
+    async def test_receive_process_not_found(self, mock_async_db):
+        """收货不存在的工序"""
         mock_async_db.get = AsyncMock(return_value=None)
         with pytest.raises(ValueError, match='外发工序不存在'):
-            await complete_order_process(mock_async_db, 999)
+            await receive_order_process(mock_async_db, 999)
 
     @pytest.mark.asyncio
     async def test_delete_process(self, mock_async_db):
@@ -462,10 +577,10 @@ class TestOrderListProgress:
         }
         proc_result = MagicMock()
         proc_result.scalars.return_value.all.return_value = [
-            make_order_process(pid=1, order_id=1, process_type='电绣', status='completed'),
-            make_order_process(pid=2, order_id=1, process_type='转印', status='completed'),
+            make_order_process(pid=1, order_id=1, process_type='电绣', status='received'),
+            make_order_process(pid=2, order_id=1, process_type='转印', status='received'),
             make_order_process(pid=3, order_id=1, process_type='配件', status='pending'),
-            make_order_process(pid=4, order_id=2, process_type='裁剪', status='completed'),
+            make_order_process(pid=4, order_id=2, process_type='裁剪', status='received'),
         ]
         mock_async_db.execute = AsyncMock(return_value=proc_result)
 
@@ -512,9 +627,9 @@ class TestOrderListProgress:
         from fastapi_app.services.outsource_service import list_outsource_orders
         mock_beile.return_value = {
             'items': [
-                {'id': 1, 'record_type': 'order', 'order_no': 'PO-1'},   # 全部 pending → 待开始
-                {'id': 2, 'record_type': 'order', 'order_no': 'PO-2'},   # 部分完成 → 进行中
-                {'id': 3, 'record_type': 'order', 'order_no': 'PO-3'},   # 全部完成 → 已完成
+                {'id': 1, 'record_type': 'order', 'order_no': 'PO-1'},   # 全部 pending → 待发货
+                {'id': 2, 'record_type': 'order', 'order_no': 'PO-2'},   # 部分收货 → 进行中
+                {'id': 3, 'record_type': 'order', 'order_no': 'PO-3'},   # 全部收货 → 已完成
                 {'id': 4, 'record_type': 'order', 'order_no': 'PO-4'},   # 无工序 → 未配置
                 {'id': 5, 'record_type': 'stockin', 'stockin_no': 'BH-1'},
             ],
@@ -524,10 +639,10 @@ class TestOrderListProgress:
         proc_result.scalars.return_value.all.return_value = [
             make_order_process(pid=1, order_id=1, process_type='裁剪', status='pending'),
             make_order_process(pid=2, order_id=1, process_type='电绣', status='pending'),
-            make_order_process(pid=3, order_id=2, process_type='裁剪', status='completed'),
+            make_order_process(pid=3, order_id=2, process_type='裁剪', status='received'),
             make_order_process(pid=4, order_id=2, process_type='电绣', status='pending'),
-            make_order_process(pid=5, order_id=3, process_type='裁剪', status='completed'),
-            make_order_process(pid=6, order_id=3, process_type='电绣', status='completed'),
+            make_order_process(pid=5, order_id=3, process_type='裁剪', status='received'),
+            make_order_process(pid=6, order_id=3, process_type='电绣', status='received'),
         ]
         mock_async_db.execute = AsyncMock(return_value=proc_result)
 
@@ -537,7 +652,7 @@ class TestOrderListProgress:
 
         assert [r['id'] for r in pending['items']] == [1]
         assert pending['total'] == 1
-        assert pending['items'][0]['status_label'] == '待开始'
+        assert pending['items'][0]['status_label'] == '待发货'
         assert [r['id'] for r in in_progress['items']] == [2]
         assert in_progress['total'] == 1
         assert in_progress['items'][0]['status_label'] == '进行中（电绣）'
@@ -596,8 +711,8 @@ class TestKanban:
         }
         proc_result = MagicMock()
         proc_result.scalars.return_value.all.return_value = [
-            make_order_process(pid=1, process_type='电绣', status='completed'),
-            make_order_process(pid=2, process_type='转印', status='in_progress'),
+            make_order_process(pid=1, process_type='电绣', status='received'),
+            make_order_process(pid=2, process_type='转印', status='shipped'),
             make_order_process(pid=3, process_type='配件', status='pending'),
         ]
         mock_async_db.execute = AsyncMock(return_value=proc_result)
@@ -659,8 +774,8 @@ class TestKanban:
         }
         proc_result = MagicMock()
         proc_result.scalars.return_value.all.return_value = [
-            make_order_process(pid=1, order_id=3, process_type='电绣', status='completed'),
-            make_order_process(pid=2, order_id=3, process_type='转印', status='completed'),
+            make_order_process(pid=1, order_id=3, process_type='电绣', status='received'),
+            make_order_process(pid=2, order_id=3, process_type='转印', status='received'),
         ]
         mock_async_db.execute = AsyncMock(return_value=proc_result)
 

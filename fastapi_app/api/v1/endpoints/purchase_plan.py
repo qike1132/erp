@@ -28,7 +28,9 @@ from fastapi_app.schemas.purchase_plan import (
     ConfirmStagingRequest,
     CreatePlanResponse,
     CustomerSummaryResponse,
+    DayDetailsResponse,
     InventoryCompareResponse,
+    MonthlyAggregatedResponse,
     MonthlyCalendarResponse,
     PlanListResponse,
     PurchasePlanActionResponse,
@@ -307,6 +309,71 @@ async def customer_summary(year: int=Query(..., description='年份'), month: in
     except Exception as e:  # defensive: 未预期异常统一返回 500，避免内部信息泄露
         logger.error(f'获取客户汇总异常: {e}', exc_info=True)
         raise HTTPException(status_code=500, detail='获取汇总数据失败，请稍后重试') from e
+
+@router.get('/monthly-aggregated', response_model=MonthlyAggregatedResponse)
+async def monthly_aggregated(year: int=Query(..., description='年份'), month: int=Query(..., ge=1, le=12, description='月份'), customer_id: int=Query(0, description='客户ID筛选'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('production_plan_view'))) -> MonthlyAggregatedResponse:
+    """月度聚合数据（6.9+6.10：后端完成 rows/sku_summary/sku_date_index/customers 聚合，不传输全量明细）。
+
+    Args:
+        year: 年份。
+        month: 月份（1-12）。
+        customer_id: 客户 ID 筛选，0 表示不筛选。
+        db: 只读数据库会话。
+        _user: 当前操作用户（用于权限校验）。
+
+    Returns:
+        MonthlyAggregatedResponse: 月度聚合数据（含客户汇总，替代 monthly + customer-summary 两个接口）。
+
+    Raises:
+        HTTPException: 数据库异常返回 500；查询超时返回 504。
+    """
+    import time as _t
+    _t0 = _t.perf_counter()
+    try:
+        async with asyncio.timeout(MONTHLY_QUERY_TIMEOUT_SECONDS):
+            result = await purchase_plan_service.get_monthly_aggregated(db, year, month, customer_id)
+        logger.info(f'[PERF] monthly_aggregated query took {(_t.perf_counter()-_t0)*1000:.0f}ms')
+        return result
+    except (OperationalError, DisconnectionError) as e:
+        logger.error(f'获取月度聚合数据失败: {e}', exc_info=True)
+        raise HTTPException(status_code=500, detail=f'获取月度数据失败: {settings.sanitize_error(e)}') from e
+    except TimeoutError:
+        logger.error(f'获取月度聚合数据超时: year={year} month={month}')
+        raise HTTPException(status_code=504, detail='获取月度数据超时，请稍后重试') from None
+    except Exception as e:
+        logger.error(f'获取月度聚合数据异常: {e}', exc_info=True)
+        raise HTTPException(status_code=500, detail='获取月度数据失败，请稍后重试') from e
+
+@router.get('/day-details', response_model=DayDetailsResponse)
+async def day_details(year: int=Query(..., description='年份'), month: int=Query(..., ge=1, le=12, description='月份'), day: int=Query(..., ge=1, le=31, description='日期'), customer_id: int=Query(0, description='客户ID筛选'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('production_plan_view'))) -> DayDetailsResponse:
+    """指定日期明细（6.9：按需加载当日明细，供日期详情弹窗使用）。
+
+    Args:
+        year: 年份。
+        month: 月份（1-12）。
+        day: 日期（1-31）。
+        customer_id: 客户 ID 筛选，0 表示不筛选。
+        db: 只读数据库会话。
+        _user: 当前操作用户（用于权限校验）。
+
+    Returns:
+        DayDetailsResponse: 当日明细列表 + 按客户分组。
+
+    Raises:
+        HTTPException: 数据库异常返回 500；查询超时返回 504。
+    """
+    try:
+        async with asyncio.timeout(MONTHLY_QUERY_TIMEOUT_SECONDS):
+            return await purchase_plan_service.get_day_details(db, year, month, day, customer_id)
+    except (OperationalError, DisconnectionError) as e:
+        logger.error(f'获取日期明细失败: {e}', exc_info=True)
+        raise HTTPException(status_code=500, detail=f'获取日期明细失败: {settings.sanitize_error(e)}') from e
+    except TimeoutError:
+        logger.error(f'获取日期明细超时: year={year} month={month} day={day}')
+        raise HTTPException(status_code=504, detail='获取日期明细超时，请稍后重试') from None
+    except Exception as e:
+        logger.error(f'获取日期明细异常: {e}', exc_info=True)
+        raise HTTPException(status_code=500, detail='获取日期明细失败，请稍后重试') from e
 
 @router.get('/inventory-compare', response_model=InventoryCompareResponse)
 async def inventory_compare(year: int=Query(..., description='年份'), month: int=Query(..., ge=1, le=12, description='月份'), customer_id: int=Query(0, description='客户ID筛选'), db: AsyncSession=Depends(get_async_read_db), _user: User=Depends(require_permission('production_plan_view'))) -> InventoryCompareResponse:
