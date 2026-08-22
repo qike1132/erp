@@ -1,8 +1,8 @@
 """数据库恢复策略实现。
 
-当前实现作为新 orchestrator 与旧 `backup_service.py` 之间的桥接，
-直接复用 `restore_database_via_psql` 和 `restore_database_from_json`。
-后续可逐步替换为不依赖旧代码的独立实现。
+直接复用包内 `dump.restore_database_via_psql` 和
+`json_backup.restore_database_from_json`（均由原 backup_service.py 拆分而来），
+后续可逐步替换为独立实现。
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ class PsqlRestoreStrategy(DatabaseRestoreStrategy):
         reporter: ProgressReporter | None = None,
         task_id: str | None = None,
     ) -> DatabaseRestoreResult:
-        from fastapi_app.services.backup_service import restore_database_via_psql
+        from fastapi_app.services.backup.dump import restore_database_via_psql
 
         phase_reporter = _PhaseReporter(reporter, RestorePhase.RESTORE_DATABASE)
 
@@ -117,7 +117,7 @@ class JsonRestoreStrategy(DatabaseRestoreStrategy):
         reporter: ProgressReporter | None = None,
         task_id: str | None = None,
     ) -> DatabaseRestoreResult:
-        from fastapi_app.services.backup_service import restore_database_from_json
+        from fastapi_app.services.backup.json_backup import restore_database_from_json
 
         phase_reporter = _PhaseReporter(reporter, RestorePhase.RESTORE_DATABASE)
 

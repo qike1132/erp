@@ -3,14 +3,13 @@
 从原 backup.py 拆分出的跨子模块共享逻辑：
 - 权限工厂：_get_backup_permission / require_backup_permission
 - 全局后台任务句柄：_background_tasks
-- 加密辅助：_get_encryption_password / _encrypt_backup_data /
-  _decrypt_backup_data / _is_encrypted_data
+- 加密辅助：_resolve_encryption / _get_encryption_password /
+  _encrypt_backup_data / _decrypt_backup_data / _is_encrypted_data
 """
 import asyncio
 import json
 import logging
 import os
-import secrets
 
 from fastapi import HTTPException
 
@@ -112,13 +111,15 @@ def _ensure_backup_dir():  # log-context: internal helper 无请求上下文
 def _get_encryption_password(
     password: str | None = None,
     x_backup_password: str | None = None,
-) -> str:
+) -> str | None:
     """
     获取加密密码，优先级：
     1. 请求参数中的 password
     2. 请求头 X-Backup-Password
     3. 环境变量 BACKUP_ENCRYPTION_PASSWORD
-    4. 生成临时密码并记录到日志
+
+    均未配置时返回 None。禁止生成随机密码：随机密码无法可靠找回，
+    会导致加密后的备份文件永久不可还原。
     """
     # 1. 检查请求参数
     if password:
@@ -133,13 +134,30 @@ def _get_encryption_password(
     if env_password:
         return env_password
 
-    # 4. 生成临时密码
-    temp_password = secrets.token_urlsafe(32)
-    logger.warning(
-        f'未提供加密密码，使用临时密码：{temp_password[:8]}... '
-        f'建议设置 BACKUP_ENCRYPTION_PASSWORD 环境变量或通过请求头/参数提供密码'
-    )
-    return temp_password
+    return None
+
+
+def _resolve_encryption(
+    encrypt: bool,
+    password: str | None = None,
+    x_backup_password: str | None = None,
+) -> tuple[bool, str | None]:
+    """
+    解析端点的加密意图，返回 (是否实际加密, 密码)。
+
+    请求加密但未配置任何密码时，明确降级为不加密并记录告警，
+    绝不退化为随机密码加密（fail-safe：宁可明文可还原，不可密文打不开）。
+    """
+    if not encrypt:
+        return False, None
+    resolved = _get_encryption_password(password, x_backup_password)
+    if not resolved:
+        logger.warning(
+            '请求加密备份但未配置密码（password 参数 / X-Backup-Password 头 / '
+            'BACKUP_ENCRYPTION_PASSWORD 环境变量均未提供），本次备份将以未加密形式保存'
+        )
+        return False, None
+    return True, resolved
 
 
 def _encrypt_backup_data(zip_bytes: bytes, password: str) -> bytes:  # log-context: internal helper 无请求上下文

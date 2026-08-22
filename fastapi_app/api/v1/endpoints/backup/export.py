@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.api.v1.endpoints.backup._deps import (
     _encrypt_backup_data,
-    _get_encryption_password,
+    _resolve_encryption,
     require_backup_permission,
 )
 from fastapi_app.core.database import get_async_db
@@ -57,6 +57,7 @@ async def _export_backup_to_response(
     两个端点仅差异在权限名与临时文件清理方式（由 register_temp 登记）。
     """
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    effective_encrypt, encryption_password = _resolve_encryption(encrypt, password, x_backup_password)
 
     if format == 'json':
         try:
@@ -65,8 +66,7 @@ async def _export_backup_to_response(
             logger.error(f'JSON 备份导出失败: {e}')
             raise HTTPException(status_code=500, detail='备份失败，请查看服务器日志') from e
 
-        if encrypt:
-            encryption_password = _get_encryption_password(password, x_backup_password)
+        if effective_encrypt:
             json_bytes = _encrypt_backup_data(json_bytes, encryption_password)
             filename = f'erp_backup_{timestamp}.json.enc'
             media_type = 'application/octet-stream'
@@ -86,11 +86,10 @@ async def _export_backup_to_response(
         )
 
     # ZIP 格式：直接写入临时文件并按需加密，避免将完整文件读入内存
-    encryption_password = _get_encryption_password(password, x_backup_password) if encrypt else None
     try:
         zip_path, _manifest = await backup_service.create_full_backup_to_file(
             db, user, remark,
-            encrypt=encrypt,
+            encrypt=effective_encrypt,
             encrypt_password=encryption_password,
         )
     except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
@@ -99,7 +98,7 @@ async def _export_backup_to_response(
 
     register_temp(zip_path)
 
-    if encrypt:
+    if effective_encrypt:
         filename = f'erp_backup_{timestamp}.zip.enc'
         media_type = 'application/octet-stream'
     else:
@@ -122,7 +121,7 @@ async def export_backup(
     remark: str = '',
     format: str = 'zip',
     encrypt: bool = Query(True, description="是否启用加密"),
-    password: str | None = Query(None, description="加密密码，为空时使用环境变量或生成临时密码"),
+    password: str | None = Query(None, description="加密密码，为空时依次使用请求头/环境变量，均未配置时不加密"),
     x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('export_backup')),
     db: AsyncSession = Depends(get_async_db),
@@ -141,7 +140,7 @@ async def export_backup(
     1. password查询参数
     2. X-Backup-Password请求头
     3. BACKUP_ENCRYPTION_PASSWORD环境变量
-    4. 生成临时密码（记录到日志）
+    4. 均未配置时不加密（记录告警日志）
 
     权限：backup_create
     """
@@ -169,7 +168,7 @@ async def export_backup(
 async def save_backup_to_server(
     remark: str = '',
     encrypt: bool = Query(True, description="是否启用加密"),
-    password: str | None = Query(None, description="加密密码，为空时使用环境变量或生成临时密码"),
+    password: str | None = Query(None, description="加密密码，为空时依次使用请求头/环境变量，均未配置时不加密"),
     x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('save_backup_to_server')),
     db: AsyncSession = Depends(get_async_db),
@@ -187,7 +186,7 @@ async def save_backup_to_server(
     1. password查询参数
     2. X-Backup-Password请求头
     3. BACKUP_ENCRYPTION_PASSWORD环境变量
-    4. 生成临时密码（记录到日志）
+    4. 均未配置时不加密（记录告警日志）
 
     权限：backup_create
     """
@@ -200,9 +199,9 @@ async def save_backup_to_server(
         logger.error(f'服务端备份失败: {e}')
         raise HTTPException(status_code=500, detail='备份失败，请查看服务器日志') from e
 
-    # 应用加密
-    if encrypt:
-        encryption_password = _get_encryption_password(password, x_backup_password)
+    # 应用加密（未配置密码时降级为不加密，禁止随机密码）
+    effective_encrypt, encryption_password = _resolve_encryption(encrypt, password, x_backup_password)
+    if effective_encrypt:
         encrypted_bytes = _encrypt_backup_data(zip_bytes, encryption_password)
         filename = f'erp_backup_{timestamp}.zip.enc'
         file_bytes = encrypted_bytes
@@ -270,7 +269,7 @@ async def get_backup_info(
     background_tasks: BackgroundTasks,
     remark: str = '',
     encrypt: bool = Query(True, description="是否启用加密"),
-    password: str | None = Query(None, description="加密密码，为空时使用环境变量或生成临时密码"),
+    password: str | None = Query(None, description="加密密码，为空时依次使用请求头/环境变量，均未配置时不加密"),
     x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('get_backup_info')),
     db: AsyncSession = Depends(get_async_db),
@@ -286,11 +285,11 @@ async def get_backup_info(
                 h.update(chunk)
         return h.hexdigest()
 
-    encryption_password = _get_encryption_password(password, x_backup_password) if encrypt else None
+    effective_encrypt, encryption_password = _resolve_encryption(encrypt, password, x_backup_password)
     try:
         backup_path, _manifest = await backup_service.create_full_backup_to_file(
             db, user, remark,
-            encrypt=encrypt,
+            encrypt=effective_encrypt,
             encrypt_password=encryption_password,
         )
     except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
@@ -310,7 +309,7 @@ async def get_backup_info(
 
     filename = (
         f'erp_backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.zip.enc'
-        if encrypt else
+        if effective_encrypt else
         f'erp_backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.zip'
     )
 
@@ -319,7 +318,7 @@ async def get_backup_info(
         'total_size': total_size,
         'chunk_size': chunk_size,
         'total_chunks': total_chunks,
-        'encrypted': encrypt,
+        'encrypted': effective_encrypt,
         'checksum': checksum,
         'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
     }
@@ -334,7 +333,7 @@ async def export_backup_chunk(
     background_tasks: BackgroundTasks,
     remark: str = '',
     encrypt: bool = Query(True, description="是否启用加密"),
-    password: str | None = Query(None, description="加密密码，为空时使用环境变量或生成临时密码"),
+    password: str | None = Query(None, description="加密密码，为空时依次使用请求头/环境变量，均未配置时不加密"),
     x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('export_backup_chunk')),
     db: AsyncSession = Depends(get_async_db),
@@ -345,11 +344,11 @@ async def export_backup_chunk(
     if chunk_index < 0:
         raise HTTPException(status_code=400, detail='分片索引不能为负数')
 
-    encryption_password = _get_encryption_password(password, x_backup_password) if encrypt else None
+    effective_encrypt, encryption_password = _resolve_encryption(encrypt, password, x_backup_password)
     try:
         backup_path, _manifest = await backup_service.create_full_backup_to_file(
             db, user, remark,
-            encrypt=encrypt,
+            encrypt=effective_encrypt,
             encrypt_password=encryption_password,
         )
     except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
@@ -401,7 +400,7 @@ async def export_backup_enhanced(
     remark: str = '',
     format: str = 'zip',
     encrypt: bool = Query(True, description="是否启用加密"),
-    password: str | None = Query(None, description="加密密码，为空时使用环境变量或生成临时密码"),
+    password: str | None = Query(None, description="加密密码，为空时依次使用请求头/环境变量，均未配置时不加密"),
     x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('export_backup_enhanced')),
     db: AsyncSession = Depends(get_async_db),

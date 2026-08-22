@@ -268,7 +268,7 @@ class DatabaseRestoreOrchestrator:
         ctx: RestoreContext,
     ) -> None:
         """校验备份中数据库文件的 checksum。不匹配时抛出 RestoreError。"""
-        from fastapi_app.services.backup_service import sha256_bytes
+        from fastapi_app.services.backup.crypto import sha256_bytes
 
         for db_file in ("database/dump.sql.gz", "database/dump.json"):
             expected = manifest.checksums.get(db_file)

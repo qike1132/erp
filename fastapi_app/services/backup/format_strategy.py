@@ -471,7 +471,7 @@ class DefaultBackupFormatStrategy(BackupFormatStrategy):
         if BACKUP_ENCRYPTION_KEY:
             return BACKUP_ENCRYPTION_KEY
         if BACKUP_ENCRYPTION_ENABLED and BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED:
-            from fastapi_app.services.backup_service import generate_encryption_key
+            from fastapi_app.services.backup.crypto import generate_encryption_key
 
             generated = generate_encryption_key()
             logger.warning("使用生成的随机密钥进行备份加密，请安全保存完整密钥用于恢复")

@@ -1,7 +1,7 @@
 """数据库恢复生命周期的默认适配器实现。
 
-这些实现作为新 orchestrator 与旧 `backup_service.py` 之间的桥接，
-便于逐步迁移。后续可将具体适配器替换为不依赖旧代码的独立实现。
+这些实现复用包内各子模块函数（由原 backup_service.py 拆分而来），
+便于逐步迁移。后续可将具体适配器替换为独立的实现。
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ class ExistingSafetyBackupAdapter(SafetyBackupProvider):
         self._db = db
 
     async def create(self) -> dict[str, Any]:
-        from fastapi_app.services.backup_service import create_pre_restore_backup
+        from fastapi_app.services.backup.orchestration.core import create_pre_restore_backup
 
         return await create_pre_restore_backup(self._db)
 
@@ -94,7 +94,7 @@ class ExistingComponentRestoreAdapter(ComponentRestorePort):
         reporter: ProgressReporter | None,
     ) -> ComponentsRestoreResult:
         from fastapi_app.services.backup.types import RestorePhase
-        from fastapi_app.services.backup_service import restore_non_dependent_components
+        from fastapi_app.services.backup.restore import restore_non_dependent_components
 
         if reporter is not None:
             await reporter.report(RestorePhase.RESTORE_COMPONENTS, 0.0, "开始恢复非依赖组件...")
@@ -174,7 +174,7 @@ class ExistingRestoreVerifierAdapter(RestoreVerifier):
         expected_tables: dict[str, dict[str, Any]],
         fingerprints: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        from fastapi_app.services.backup_service import verify_restore
+        from fastapi_app.services.backup.verify.core import verify_restore
 
         return await verify_restore(db, expected_tables, fingerprints)
 

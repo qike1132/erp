@@ -4,10 +4,8 @@
 1. 原有新架构：数据库恢复生命周期相关类型与编排器（ports/adapters 模式）。
 2. 从原 backup_service.py 拆分而来的 12 个子模块（加密/分块/快照/dump/JSON/文件存储/缓存恢复/验证/增量/编排/记录/异常）。
 
-通过重新导出保持调用方兼容：
-    from fastapi_app.services.backup_service import create_full_backup
+调用方统一从包根导入（原 backup_service.py 薄壳已在域收敛提交中删除）：
     from fastapi_app.services.backup import create_full_backup
-两者均可工作。
 """
 
 # ---------------------------------------------------------------------------
