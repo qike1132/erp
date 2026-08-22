@@ -1,6 +1,6 @@
 <template>
   <div role="alert" :class="['rounded-lg px-4 py-3 flex items-start gap-3', variantClass]">
-    <i :class="[iconClass, 'mt-0.5']" aria-hidden="true" />
+    <FontAwesomeIcon :icon="iconName" class="mt-0.5" aria-hidden="true" />
     <div class="flex-1 min-w-0 text-sm">
       <div v-if="title" class="font-semibold mb-0.5">
         {{ title }}
@@ -42,16 +42,16 @@ const variantClass = computed(() => {
   }
 })
 
-const iconClass = computed(() => {
+const iconName = computed(() => {
   switch (props.variant) {
     case 'success':
-      return 'fas fa-check-circle'
+      return 'check-circle'
     case 'warning':
-      return 'fas fa-exclamation-triangle'
+      return 'triangle-exclamation'
     case 'danger':
-      return 'fas fa-times-circle'
+      return 'circle-xmark'
     default:
-      return 'fas fa-info-circle'
+      return 'circle-info'
   }
 })
 </script>

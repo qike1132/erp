@@ -1,5 +1,5 @@
 <template>
-  <div class="m-pull-refresh" ref="containerRef" @touchstart="onTouchStart" @touchmove="onTouchMove" @touchend="onTouchEnd">
+  <div ref="containerRef" class="m-pull-refresh" @touchstart="onTouchStart" @touchmove="onTouchMove" @touchend="onTouchEnd">
     <!-- 下拉指示器 -->
     <div class="m-pr-indicator" :style="{ height: pullDistance + 'px', opacity: pullDistance / threshold }">
       <div class="m-pr-spinner" :class="{ loading: isRefreshing }">

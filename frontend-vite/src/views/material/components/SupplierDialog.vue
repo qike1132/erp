@@ -1,5 +1,5 @@
 <template>
-  <UiDialog :open="open" @update:open="$emit('update:open', $event)" :title="`来料详情 - ${supplierDetailOrderNo}`" title-icon="" max-width-class="max-w-[1000px]">
+  <UiDialog :open="open" :title="`来料详情 - ${supplierDetailOrderNo}`" title-icon="" max-width-class="max-w-[1000px]" @update:open="$emit('update:open', $event)">
     <template #title-icon><FontAwesomeIcon icon="clipboard-list" style="color:var(--color-primary-500);" /></template>
     <div v-if="supplierDetail">
       <div v-for="g in supplierDetail.supplierGroups" :key="g.supplierName" class="mr-source-card" style="margin-bottom:16px;">
@@ -22,11 +22,14 @@
             <div class="mr-det-mat-right">
               <span v-if="m.received >= m.ordered" class="mr-status-completed"><FontAwesomeIcon icon="check-circle" /> 已完成</span>
               <span v-else class="mr-status-pending">未完成</span>
-              <button v-if="canManage && m.received < m.ordered && m.subItems.length" class="mr-btn mr-btn-success" @click="$emit('openReceiveBySubItems', m.subItems, m.name, m.ordered, m.received)" title="登记收货" aria-label="登记收货"><FontAwesomeIcon icon="box" /> 登记收货</button>
+              <button v-if="canManage && m.received < m.ordered && m.subItems.length" class="mr-btn mr-btn-success" title="登记收货" aria-label="登记收货" @click="$emit('openReceiveBySubItems', m.subItems, m.name, m.ordered, m.received)"><FontAwesomeIcon icon="box" /> 登记收货</button>
             </div>
           </div>
         </div>
       </div>
+    </div>
+    <div v-else-if="open" class="mr-detail-loading">
+      <FontAwesomeIcon icon="spinner" spin /> 加载中...
     </div>
   </UiDialog>
 </template>
@@ -50,6 +53,18 @@ defineEmits<{
 
 <style scoped lang="scss">
 @use '../material-dialogs.scss' as *;
+
+/* === Loading State === */
+.mr-detail-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 48px 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--color-text-secondary, #64748b);
+}
 
 /* === Material Detail Card (Dialog) 特有部分 === */
 .mr-det-mat-info {

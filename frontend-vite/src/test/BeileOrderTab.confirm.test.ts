@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { ref, nextTick } from 'vue'
+import { ref, nextTick, defineComponent, h } from 'vue'
 
 // Hoisted mock state — vi.mock factories are hoisted to the top of the file,
 // so we keep mutable mocks inside vi.hoisted() and reference them by name.
@@ -63,6 +63,7 @@ vi.mock('@/stores/auth', () => ({
 
 import { mount, flushPromises } from '@vue/test-utils'
 import BeileOrderTab from '@/views/beile-order/BeileOrderTab.vue'
+import { provideBeileOrders, type BeileOrdersHandle } from '@/views/beile-order/composables/useBeileOrders'
 import type { OrderListApiResponse } from '@/api/order'
 
 // jsdom 中元素 clientHeight 恒为 0，导致 listAreaHeight=0、VirtualList 不渲染。
@@ -163,9 +164,18 @@ function makeListResponse(overrides: Partial<OrderListApiResponse> = {}): OrderL
   } as OrderListApiResponse
 }
 
+/** 测试包装组件：在 setup 中调用 provideBeileOrders 创建状态实例并 provide 给 BeileOrderTab */
+let boHandle: BeileOrdersHandle
+const TestHost = defineComponent({
+  setup() {
+    boHandle = provideBeileOrders()
+    return () => h(BeileOrderTab)
+  },
+})
+
 /** 挂载组件并等待初始查询渲染 */
 async function mountTab() {
-  const wrapper = mount(BeileOrderTab, { global: { stubs } })
+  const wrapper = mount(TestHost, { global: { stubs } })
   await flushPromises()
   await nextTick()
   return wrapper
@@ -193,7 +203,7 @@ describe('BeileOrderTab 状态列与确认按钮行为', () => {
     const wrapper = await mountTab()
 
     // 切换到「已确认」状态（确认状态 TAB 已迁至 HubeiView 头部，此处直接调用暴露方法）
-    ;(wrapper.vm as unknown as { setConfirmStatus: (v: string) => void }).setConfirmStatus('confirmed')
+    ;boHandle.setConfirmStatus('confirmed')
     await nextTick()
 
     const rows = wrapper.findAll('.vl-row')
@@ -215,7 +225,7 @@ describe('BeileOrderTab 状态列与确认按钮行为', () => {
 
   it('确认列：未确认订单仅显示「确认订单」按钮（无「未确认订单」标签），已确认订单无按钮', async () => {
     const wrapper = await mountTab()
-    ;(wrapper.vm as unknown as { setConfirmStatus: (v: string) => void }).setConfirmStatus('unconfirmed')
+    ;boHandle.setConfirmStatus('unconfirmed')
     await nextTick()
 
     const rows = wrapper.findAll('.vl-row')
@@ -240,7 +250,7 @@ describe('BeileOrderTab 状态列与确认按钮行为', () => {
 
   it('点击「确认订单」调用 confirmBeileOrder、提示成功，并在未确认筛选下乐观移除该行', async () => {
     const wrapper = await mountTab()
-    ;(wrapper.vm as unknown as { setConfirmStatus: (v: string) => void }).setConfirmStatus('unconfirmed')
+    ;boHandle.setConfirmStatus('unconfirmed')
     await nextTick()
     const btn = wrapper.find('.vl-row .bo-confirm-btn')
     expect(btn.exists()).toBe(true)
@@ -291,7 +301,7 @@ describe('BeileOrderTab 状态列与确认按钮行为', () => {
     })
 
     const wrapper = await mountTab()
-    ;(wrapper.vm as unknown as { setConfirmStatus: (v: string) => void }).setConfirmStatus('unconfirmed')
+    ;boHandle.setConfirmStatus('unconfirmed')
     await nextTick()
 
     const btn = wrapper.find('.vl-row .bo-confirm-btn')
@@ -322,7 +332,7 @@ describe('BeileOrderTab 状态列与确认按钮行为', () => {
     )
 
     const wrapper = await mountTab()
-    ;(wrapper.vm as unknown as { setConfirmStatus: (v: string) => void }).setConfirmStatus('unconfirmed')
+    ;boHandle.setConfirmStatus('unconfirmed')
     await nextTick()
     const btn = wrapper.find('.vl-row .bo-confirm-btn')
 
@@ -345,7 +355,7 @@ describe('BeileOrderTab 状态列与确认按钮行为', () => {
 
   it('已确认订单不显示确认按钮，因此不存在误触发确认的场景', async () => {
     const wrapper = await mountTab()
-    ;(wrapper.vm as unknown as { setConfirmStatus: (v: string) => void }).setConfirmStatus('unconfirmed')
+    ;boHandle.setConfirmStatus('unconfirmed')
     await nextTick()
     // 已确认订单行（第 2 行）内没有任何 .bo-confirm-btn
     const confirmedRow = wrapper.findAll('.vl-row')[1]!
@@ -358,8 +368,7 @@ describe('BeileOrderTab 状态列与确认按钮行为', () => {
     const wrapper = await mountTab()
 
     // 默认确认状态为未确认
-    const vm = wrapper.vm as unknown as { confirmStatus: string }
-    expect(vm.confirmStatus).toBe('unconfirmed')
+    expect(boHandle.confirmStatus.value).toBe('unconfirmed')
 
     // 未确认 TAB 下确认状态列隐藏、确认操作列显示
     const headers = wrapper.findAll('.bo-th').map((h) => h.text())

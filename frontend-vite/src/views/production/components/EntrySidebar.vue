@@ -3,7 +3,7 @@
     <div class="pr-entry-side-card">
       <div class="pr-entry-side-head">
         <span><FontAwesomeIcon icon="clock-rotate-left" aria-hidden="true" /> 最近使用</span>
-        <button v-if="recentProducts.length" type="button" class="pr-entry-side-clear" @click="emit('clear')" aria-label="清空 {{ p.name }} {{ p.barcode }}">清空</button>
+        <button v-if="recentProducts.length" type="button" class="pr-entry-side-clear" aria-label="清空 {{ p.name }} {{ p.barcode }}" @click="emit('clear')">清空</button>
       </div>
       <div v-if="recentProducts.length" class="pr-entry-recent-list">
         <button

@@ -25,7 +25,7 @@
         <span>拖拽 .zip / .json / .gz 备份文件到此处，或点击选择</span>
       </div>
     </div>
-    <input ref="fileInputRef" type="file" accept=".zip,.json,.gz" style="display: none" @change="onFileSelect" aria-label="上传文件" />
+    <input ref="fileInputRef" type="file" accept=".zip,.json,.gz" style="display: none" aria-label="上传文件" @change="onFileSelect" />
   </div>
 </template>
 

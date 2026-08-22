@@ -9,7 +9,8 @@
  *   3. requestAnimationFrame 后测量（最终布局稳定）
  *   4. 监听自身 + 父级尺寸变化（ResizeObserver，仅在变化时触发）
  *   5. 监听 window resize（视口变化）
- * 逻辑自 CustomerGroupList.vue 原样搬移。
+ * 性能优化：ResizeObserver / window resize 回调通过 rAF 去抖，
+ * 避免高频触发导致连续重排。
  */
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 
@@ -22,6 +23,7 @@ export function useVirtualAreaMeasure() {
   let areaResizeObserver: ResizeObserver | null = null
   let parentResizeObserver: ResizeObserver | null = null
   let windowResizeHandler: (() => void) | null = null
+  let _rafId: number | null = null
 
   function measure() {
     if (!areaRef.value) return
@@ -32,6 +34,15 @@ export function useVirtualAreaMeasure() {
     if (h > 0 && h !== height.value) {
       height.value = h
     }
+  }
+
+  /** rAF 去抖测量：高频回调（ResizeObserver / resize）合并到单帧 */
+  function measureRaf() {
+    if (_rafId !== null) return
+    _rafId = requestAnimationFrame(() => {
+      _rafId = null
+      measure()
+    })
   }
 
   function tryMeasureWithRetry() {
@@ -52,22 +63,18 @@ export function useVirtualAreaMeasure() {
   onMounted(() => {
     tryMeasureWithRetry()
     if (areaRef.value && typeof ResizeObserver !== 'undefined') {
-      areaResizeObserver = new ResizeObserver(measure)
+      areaResizeObserver = new ResizeObserver(measureRaf)
       areaResizeObserver.observe(areaRef.value)
       // 同时监听父级（cgl-body / pr-left-pane）尺寸变化，
       // 解决父级从 0 → 有数据时自身尺寸可能不变导致漏触发的问题
-      // 只需追踪最近一层 flex 父级即可，过深会增加无意义的回调
       const parent = areaRef.value.parentElement
       if (parent) {
-        parentResizeObserver = new ResizeObserver(measure)
+        parentResizeObserver = new ResizeObserver(measureRaf)
         parentResizeObserver.observe(parent)
       }
     }
     // 监听 window resize（窄屏/宽屏切换、抽屉展开/收起等场景）
-    windowResizeHandler = () => {
-      // rAF 延迟，避免 resize 期间反复触发
-      requestAnimationFrame(measure)
-    }
+    windowResizeHandler = measureRaf
     window.addEventListener('resize', windowResizeHandler)
   })
 
@@ -77,6 +84,10 @@ export function useVirtualAreaMeasure() {
     if (windowResizeHandler) {
       window.removeEventListener('resize', windowResizeHandler)
       windowResizeHandler = null
+    }
+    if (_rafId !== null) {
+      cancelAnimationFrame(_rafId)
+      _rafId = null
     }
   })
 

@@ -8,7 +8,7 @@
       </div>
 
       <div class="brand-info">
-        <h1 class="brand-title">东莞玩具协同系统</h1>
+        <h1 class="brand-title">滨发玩具协同系统</h1>
         <p class="brand-tagline">专业的毛绒玩具企业供应链管理平台<br />智能、高效、可靠的数字化管理解决方案</p>
       </div>
 

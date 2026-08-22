@@ -1,20 +1,28 @@
 <template>
-  <div class="m-card">
-    <div class="m-card-header">
-      <div class="m-card-icon">
-        <span class="m-card-emoji">📋</span>
+  <div class="ios-card">
+    <div class="ios-card-head">
+      <div class="ios-card-icon ios-icon-blue">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="5" y="4" width="14" height="17" rx="2" />
+          <path d="M9 4a3 3 0 0 1 6 0" />
+          <path d="M9 10h6M9 14h6M9 18h4" />
+        </svg>
       </div>
-      <span class="m-card-title">订单总览</span>
+      <div class="ios-card-title-wrap">
+        <span class="ios-card-title">订单总览</span>
+        <span class="ios-card-sub">Orders</span>
+      </div>
     </div>
-    <div class="m-card-gap-14"></div>
-    <div class="m-metric-grid-2">
-      <div class="m-metric-block">
-        <span class="m-metric-label">📋 总订单数量</span>
-        <span class="m-metric-value">{{ fmtNum(data?.orders?.total_qty) }}</span>
+
+    <div class="ios-rows">
+      <div class="ios-row">
+        <span class="ios-row-label">总订单数量</span>
+        <span class="ios-row-value">{{ fmtNum(data?.orders?.total_qty) }}</span>
       </div>
-      <div class="m-metric-block">
-        <span class="m-metric-label">💰 总订单金额</span>
-        <span class="m-metric-value">{{ fmtMoney(data?.orders?.total_amount) }}</span>
+      <div class="ios-hairline" />
+      <div class="ios-row">
+        <span class="ios-row-label">总订单金额</span>
+        <span class="ios-row-value ios-accent">{{ fmtMoney(data?.orders?.total_amount) }}</span>
       </div>
     </div>
   </div>
@@ -31,48 +39,48 @@ defineProps<{
 </script>
 
 <style scoped>
-.m-card {
-  background: #FFFFFF;
-  border-radius: 22px;
-  padding: 20px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.03);
-  border: 1px solid rgba(0, 0, 0, 0.04);
+.ios-card {
+  background: #ffffff;
+  border-radius: 20px;
+  padding: 16px 0 4px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.04);
+  border: 0.5px solid rgba(0, 0, 0, 0.04);
+  overflow: hidden;
 }
-.m-card-header { display: flex; align-items: center; gap: 10px; }
-.m-card-icon {
-  width: 38px;
-  height: 38px;
-  border-radius: 12px;
-  background: rgba(0, 113, 227, 0.08);
+.ios-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+}
+.ios-card-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
-.m-card-emoji { font-size: 16px; line-height: 1; }
-.m-card-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: #86868B;
-  letter-spacing: -0.1px;
-}
-.m-card-gap-14 { height: 14px; }
-.m-metric-grid-2 { display: flex; gap: 12px; }
-.m-metric-block {
-  flex: 1;
-  background: #F8FAFC;
-  border-radius: 12px;
-  padding: 14px;
+.ios-card-icon svg { width: 20px; height: 20px; }
+.ios-icon-blue { background: rgba(0, 113, 227, 0.1); color: #0071E3; }
+.ios-card-title-wrap { display: flex; flex-direction: column; }
+.ios-card-title { font-size: 15px; font-weight: 600; color: #1d1d1f; letter-spacing: -0.2px; }
+.ios-card-sub { font-size: 11px; color: #aeaeb2; margin-top: 1px; }
+.ios-rows { margin-top: 12px; }
+.ios-row {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 4px;
+  justify-content: space-between;
+  padding: 13px 16px;
 }
-.m-metric-label { font-size: 11px; font-weight: 500; color: #AEAEB2; }
-.m-metric-value {
-  font-size: 20px;
-  font-weight: 800;
-  color: #0071E3;
-  letter-spacing: -0.3px;
+.ios-row-label { font-size: 14px; color: #86868b; }
+.ios-row-value { font-size: 17px; font-weight: 700; color: #1d1d1f; letter-spacing: -0.3px; }
+.ios-accent { color: #0071e3; }
+.ios-hairline {
+  height: 0.5px;
+  background: rgba(60, 60, 67, 0.29);
+  margin: 0 16px;
+  transform: scaleY(0.5);
 }
 </style>

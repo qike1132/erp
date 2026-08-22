@@ -1,69 +1,69 @@
 <template>
   <div class="sp-body">
     <div v-if="loading" class="sp-empty"><UiSpinner /></div>
-    <div v-else-if="error" class="sp-empty"><FontAwesomeIcon icon="exclamation-circle" aria-hidden="true" />加载失败 <button class="sp-retry-btn" @click="emit('refetch')" aria-label="重试">重试</button></div>
+    <div v-else-if="error" class="sp-empty"><FontAwesomeIcon icon="exclamation-circle" aria-hidden="true" />加载失败 <button class="sp-retry-btn" aria-label="重试" @click="emit('refetch')">重试</button></div>
     <div v-else-if="!hasData" class="sp-empty"><FontAwesomeIcon icon="inbox" aria-hidden="true" />本月暂无数据</div>
     <template v-else>
-    <div v-if="fetching" class="sp-fetching-bar"><div class="sp-fetching-progress" /></div>
-    <div>
-      <div class="sp-customer-tags">
-        <button
-          :class="['sp-tag', { 'sp-tag-active': !custFilter }]"
-          @click="emit('update:custFilter', '')"
-        >全部</button>
-        <button
-          v-for="c in customers"
-          :key="c.customer_id"
-          :class="['sp-tag', { 'sp-tag-active': custFilter === c.customer_name }]"
-          :title="c.customer_name"
-          @click="emit('update:custFilter', custFilter === c.customer_name ? '' : c.customer_name)"
-        >{{ c.customer_name }}</button>
-      </div>
-      <div class="sp-sku-table-container">
-        <div class="sp-sku-table-wrapper">
-          <table class="sp-sku-table">
-            <thead>
-              <tr>
-                <th class="sp-sku-th-customer">客户名称</th>
-                <th class="sp-sku-th-product">产品名称</th>
-                <th class="sp-sku-th-barcode">
-                  商品条码
-                </th>
-                <th class="sp-sku-th-number sp-sku-th-sortable" @click="emit('toggle-sku-sort', 'plan')">
-                  <span class="sp-sku-th-text">计划数量
-                    <FontAwesomeIcon v-if="skuSortField === 'plan'" :icon="skuSortDir === 'asc' ? 'sort-up' : 'sort-down'" />
-                    <FontAwesomeIcon v-else icon="sort" class="sp-sort-muted" />
-                  </span>
-                </th>
-                <th class="sp-sku-th-number sp-sku-th-sortable" @click="emit('toggle-sku-sort', 'shipped')">
-                  <span class="sp-sku-th-text">已出货
-                    <FontAwesomeIcon v-if="skuSortField === 'shipped'" :icon="skuSortDir === 'asc' ? 'sort-up' : 'sort-down'" />
-                    <FontAwesomeIcon v-else icon="sort" class="sp-sort-muted" />
-                  </span>
-                </th>
-                <th class="sp-sku-th-number sp-sku-th-sortable" @click="emit('toggle-sku-sort', 'remain')">
-                  <span class="sp-sku-th-text">待出货
-                    <FontAwesomeIcon v-if="skuSortField === 'remain'" :icon="skuSortDir === 'asc' ? 'sort-up' : 'sort-down'" />
-                    <FontAwesomeIcon v-else icon="sort" class="sp-sort-muted" />
-                  </span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(s, i) in paginatedSkuList" :key="`${s.customer_name}|${s.product_name}`" :class="{ 'sp-sku-row-odd': i % 2 === 1 }" class="sp-sku-row-clickable" @click="emit('open-sku-detail', { barcode: s.barcode, name: s.product_name, customer: s.customer_name })">
-                <td class="sp-sku-td-customer">{{ s.customer_name }}</td>
-                <td class="sp-sku-td-product"><span class="sp-sku-product-name">{{ s.product_name }}</span></td>
-                <td class="sp-sku-td-barcode"><code class="sp-sku-barcode">{{ s.barcode }}</code></td>
-                <td class="sp-sku-td-number">{{ s.plan_qty }}</td>
-                <td class="sp-sku-td-number sp-sku-td-success">{{ s.shipped_qty }}</td>
-                <td class="sp-sku-td-number sp-sku-td-warning">{{ s.remain_qty }}</td>
-              </tr>
-            </tbody>
-          </table>
+      <div v-if="fetching" class="sp-fetching-bar"><div class="sp-fetching-progress" /></div>
+      <div>
+        <div class="sp-customer-tags">
+          <button
+            :class="['sp-tag', { 'sp-tag-active': !custFilter }]"
+            @click="emit('update:custFilter', '')"
+          >全部</button>
+          <button
+            v-for="c in customers"
+            :key="c.customer_id"
+            :class="['sp-tag', { 'sp-tag-active': custFilter === c.customer_name }]"
+            :title="c.customer_name"
+            @click="emit('update:custFilter', custFilter === c.customer_name ? '' : c.customer_name)"
+          >{{ c.customer_name }}</button>
         </div>
+        <div class="sp-sku-table-container">
+          <div class="sp-sku-table-wrapper">
+            <table class="sp-sku-table">
+              <thead>
+                <tr>
+                  <th class="sp-sku-th-customer">客户名称</th>
+                  <th class="sp-sku-th-product">产品名称</th>
+                  <th class="sp-sku-th-barcode">
+                    商品条码
+                  </th>
+                  <th class="sp-sku-th-number sp-sku-th-sortable" @click="emit('toggle-sku-sort', 'plan')">
+                    <span class="sp-sku-th-text">计划数量
+                      <FontAwesomeIcon v-if="skuSortField === 'plan'" :icon="skuSortDir === 'asc' ? 'sort-up' : 'sort-down'" />
+                      <FontAwesomeIcon v-else icon="sort" class="sp-sort-muted" />
+                    </span>
+                  </th>
+                  <th class="sp-sku-th-number sp-sku-th-sortable" @click="emit('toggle-sku-sort', 'shipped')">
+                    <span class="sp-sku-th-text">已出货
+                      <FontAwesomeIcon v-if="skuSortField === 'shipped'" :icon="skuSortDir === 'asc' ? 'sort-up' : 'sort-down'" />
+                      <FontAwesomeIcon v-else icon="sort" class="sp-sort-muted" />
+                    </span>
+                  </th>
+                  <th class="sp-sku-th-number sp-sku-th-sortable" @click="emit('toggle-sku-sort', 'remain')">
+                    <span class="sp-sku-th-text">待出货
+                      <FontAwesomeIcon v-if="skuSortField === 'remain'" :icon="skuSortDir === 'asc' ? 'sort-up' : 'sort-down'" />
+                      <FontAwesomeIcon v-else icon="sort" class="sp-sort-muted" />
+                    </span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(s, i) in paginatedSkuList" :key="`${s.customer_name}|${s.product_name}`" :class="{ 'sp-sku-row-odd': i % 2 === 1 }" class="sp-sku-row-clickable" @click="emit('open-sku-detail', { barcode: s.barcode, name: s.product_name, customer: s.customer_name })">
+                  <td class="sp-sku-td-customer">{{ s.customer_name }}</td>
+                  <td class="sp-sku-td-product"><span class="sp-sku-product-name">{{ s.product_name }}</span></td>
+                  <td class="sp-sku-td-barcode"><code class="sp-sku-barcode">{{ s.barcode }}</code></td>
+                  <td class="sp-sku-td-number">{{ s.plan_qty }}</td>
+                  <td class="sp-sku-td-number sp-sku-td-success">{{ s.shipped_qty }}</td>
+                  <td class="sp-sku-td-number sp-sku-td-warning">{{ s.remain_qty }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <UiPagination v-if="skuTotalPages > 1" :current-page="skuPage" :total-pages="skuTotalPages" :total-items="sortedSkuList.length" @update:current-page="emit('update:skuPage', $event)" />
       </div>
-      <UiPagination v-if="skuTotalPages > 1" :current-page="skuPage" :total-pages="skuTotalPages" :total-items="sortedSkuList.length" @update:current-page="emit('update:skuPage', $event)" />
-    </div>
     </template>
   </div>
 </template>
@@ -114,6 +114,7 @@ const emit = defineEmits<{
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
   scrollbar-color: var(--color-border-light, #e2e8f0) transparent;
+  contain: layout style;
 }
 
 .sp-customer-tags::-webkit-scrollbar {
@@ -138,7 +139,7 @@ const emit = defineEmits<{
   font-weight: 500;
   color: var(--color-text-secondary);
   cursor: pointer;
-  transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
   font-family: inherit;
   user-select: none;
   white-space: nowrap;
@@ -152,8 +153,6 @@ const emit = defineEmits<{
   border-color: var(--color-primary-300);
   color: var(--color-primary-500);
   background: var(--color-primary-50);
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
 }
 
 .sp-tag-active {

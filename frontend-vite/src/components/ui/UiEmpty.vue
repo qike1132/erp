@@ -1,6 +1,6 @@
 <template>
   <div class="text-center py-12 text-text-muted">
-    <i :class="['text-5xl mb-3 opacity-30 block', icon]" aria-hidden="true" />
+    <FontAwesomeIcon :icon="icon" class="text-5xl mb-3 opacity-30 block" aria-hidden="true" />
     <p class="text-sm m-0 mb-2">
       <slot>{{ text }}</slot>
     </p>

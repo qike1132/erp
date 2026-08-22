@@ -2,15 +2,24 @@
  * useBeileOrders.ts — 湖北订单列表数据逻辑
  *
  * 从 BeileOrderTab.vue 下沉的逻辑：查询（vue-query）、筛选、分页、
- * 确认状态切换、订单确认（乐观更新）与详情弹窗状态。
+ * 确认状态切换、订单确认（乐观更新）、详情弹窗状态、
+ * 选中/导出/打印（原 BeileOrderTab 头部桥接逻辑上提至此）。
+ *
+ * HubeiView 调用 provideBeileOrders() 创建唯一实例并 provide，
+ * BeileOrderTab 通过 injectBeileOrders() 注入同一实例，
+ * 消除 ref 反向桥接导致的父子联动重渲染。
  */
-import { reactive, computed, ref, watch } from 'vue'
+import { reactive, computed, ref, watch, provide, inject, type InjectionKey } from 'vue'
 import { useRoute } from 'vue-router'
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/vue-query'
 import { orderApi } from '@/api'
-import type { OrderItem, OrderSKU } from '@/types'
+import type { OrderItem } from '@/types'
 import type { OrderListApiResponse } from '@/api/order'
 import { toast } from '@/composables/useToast'
+import { useAuthStore } from '@/stores/auth'
+import { useExport } from '@/composables/useExport'
+import { downloadXls } from '@/utils/xls'
+import { printHtml } from '@/utils/print'
 
 /** 每页条数选项（分页组件下拉可选） */
 export const PAGE_SIZE_OPTIONS = [18, 30, 50, 100]
@@ -30,7 +39,13 @@ export type BeileOrderRow = OrderItem & {
   product?: { id: number; name: string; barcode: string; image: string }
 }
 
-/** 湖北订单列表：查询 + 筛选 + 分页 + 确认流程 */
+/** SKU 是否匹配关键字（产品名称或条码） */
+function skuMatchesKeyword(sku: { product_name?: string | null; product_barcode?: string | null }, kw: string): boolean {
+  return (sku.product_name || '').toLowerCase().includes(kw)
+    || (sku.product_barcode || '').toLowerCase().includes(kw)
+}
+
+/** 湖北订单列表：查询 + 筛选 + 分页 + 确认流程 + 选中/导出/打印 */
 export function useBeileOrders() {
   /** 当前每页条数，可由分页组件修改 */
   const perPage = ref(18)
@@ -68,8 +83,8 @@ export function useBeileOrders() {
       }),
     staleTime: 30_000,
     gcTime: 60_000,
-    // 定时刷新：新到湖北订单（未确认提醒横幅）无需手动刷新即可出现
-    refetchInterval: 30_000,
+    // 不再使用 refetchInterval 定时刷新（会在用户交互时打断渲染）；
+    // 依赖 vue-query 默认的 refetchOnWindowFocus + staleTime，仅在页面重新可见且数据过期时刷新。
     placeholderData: keepPreviousData,
   })
 
@@ -83,23 +98,6 @@ export function useBeileOrders() {
 
   /** 搜索产品时是否显示产品名称列：仅当已应用产品关键字筛选时显示 */
   const showProductColumn = computed(() => appliedProduct.value.trim() !== '')
-
-  /** SKU 是否匹配关键字（产品名称或条码） */
-  function skuMatchesKeyword(sku: { product_name?: string | null; product_barcode?: string | null }, kw: string): boolean {
-    return (sku.product_name || '').toLowerCase().includes(kw)
-      || (sku.product_barcode || '').toLowerCase().includes(kw)
-  }
-
-  /**
-   * 行内展示的 SKU：应用产品筛选时仅返回名称/条码匹配关键字的 SKU，
-   * 使产品名称、数量、备注只对应搜索到的那个产品；未筛选时返回全部。
-   */
-  function visibleSkus(item: BeileOrderRow): NonNullable<BeileOrderRow['items']> {
-    const kw = appliedProduct.value.trim().toLowerCase()
-    if (!kw) return item.items || []
-    const matched = (item.items || []).filter((s) => skuMatchesKeyword(s, kw))
-    return matched.length > 0 ? matched : (item.items || [])
-  }
 
   /**
    * 客户端二次过滤：当前页订单中 product_name/barcode 模糊匹配。
@@ -181,7 +179,7 @@ export function useBeileOrders() {
   /**
    * 确认湖北订单/备货：未确认的订单与备货记录均显示确认按钮，
    * 确认后由后端落库 confirmed_at。在「未确认」筛选下成功后立即
-   * 从列表移除该行并递减未确认计数，无需等待 30s 定时刷新；
+   * 从列表移除该行并递减未确认计数，无需等待定时刷新；
    * 其他筛选下照常 refetch。
    */
   async function handleConfirm(item: BeileOrderRow) {
@@ -221,6 +219,122 @@ export function useBeileOrders() {
     }
   }
 
+  // ==================== 选中（批量打印） ====================
+  /** 选中的订单 id 集合 */
+  const selectedIds = ref<Set<number>>(new Set())
+  const selectedCount = computed(() => selectedIds.value.size)
+
+  /** 当前展示列表是否有数据（导出按钮启用条件） */
+  const hasDisplayOrders = computed(() => displayOrders.value.length > 0)
+
+  /** 当前页是否全选 */
+  const isAllSelected = computed(() =>
+    displayOrders.value.length > 0 && displayOrders.value.every((o) => selectedIds.value.has(o.id)),
+  )
+
+  /** 切换单行选中（直接 mutate reactive Set，避免 O(n) 拷贝） */
+  function toggleSelect(id: number) {
+    if (selectedIds.value.has(id)) selectedIds.value.delete(id)
+    else selectedIds.value.add(id)
+  }
+
+  /** 全选 / 取消全选当前页 */
+  function toggleSelectAll(checked: boolean) {
+    if (checked) {
+      displayOrders.value.forEach((o) => selectedIds.value.add(o.id))
+    } else {
+      displayOrders.value.forEach((o) => selectedIds.value.delete(o.id))
+    }
+  }
+
+  // ==================== 导出 / 打印 ====================
+  const authStore = useAuthStore()
+  const { exporting, runExport } = useExport()
+
+  /** 权限：导出 / 打印（超级管理员自动放行） */
+  const canExport = computed(() => authStore.hasPermission('beile_order_export'))
+  const canPrint = computed(() => authStore.hasPermission('beile_order_print'))
+
+  /** 汇总表列头（含产品明细） */
+  const SUMMARY_HEADERS = [
+    '订单类型', '下单时间', '客户名称', '工厂', '产品名称', '数量', '备注',
+  ]
+
+  /** 汇总表各列宽度（px），用于导出 XLS 列宽分配 */
+  const SUMMARY_COL_WIDTHS = [90, 120, 130, 80, 220, 80, 180]
+
+  /** HTML 特殊字符转义 */
+  function escapeHtml(str: string): string {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  }
+
+  /**
+   * 构建汇总表 tbody HTML。
+   * 同一订单的订单类型/下单时间/客户名称/工厂列用 rowspan 合并单元格，
+   * 产品名称/数量/备注每行独立输出。
+   */
+  function buildSummaryTbody(items: BeileOrderRow[]): string {
+    let html = ''
+    for (const item of items) {
+      const type = item.record_type === 'stockin' ? '备货' : '订单'
+      const factory = (item.factories || ['湖北']).join(', ')
+      const orderCells = [type, item.order_date || '', item.customer || '', factory]
+      const note = item.note || ''
+
+      const skus = (item.items && item.items.length > 0)
+        ? item.items
+        : [{ product_name: item.product_name, quantity: item.quantity }]
+
+      const rowspan = skus.length
+      skus.forEach((sku, idx) => {
+        const cells: string[] = []
+        if (idx === 0) {
+          for (const c of orderCells) {
+            cells.push(`<td${rowspan > 1 ? ` rowspan="${rowspan}"` : ''}>${escapeHtml(c)}</td>`)
+          }
+        }
+        cells.push(`<td>${escapeHtml(sku.product_name || '-')}</td>`)
+        cells.push(`<td>${escapeHtml(String(sku.quantity || 0))}</td>`)
+        cells.push(`<td>${idx === 0 ? escapeHtml(note) : ''}</td>`)
+        html += `<tr>${cells.join('')}</tr>`
+      })
+    }
+    return html
+  }
+
+  /** 导出当前页数据为 XLS */
+  function handleExport() {
+    runExport(() => {
+      const thead = `<tr>${SUMMARY_HEADERS.map((h, i) => `<th style="width:${SUMMARY_COL_WIDTHS[i]}px">${h}</th>`).join('')}</tr>`
+      const tbody = buildSummaryTbody(displayOrders.value)
+      const statusLabel = confirmStatus.value === 'unconfirmed' ? '未确认' : '已确认'
+      const title = `湖北订单汇总（${statusLabel}）`
+      const html = `<div style="text-align:center;margin-bottom:20px;"><h2>${title}</h2></div><table><thead>${thead}</thead><tbody>${tbody}</tbody></table>`
+      const date = new Date().toISOString().slice(0, 10)
+      downloadXls(html, `湖北订单_${statusLabel}_${date}.xls`)
+    })
+  }
+
+  /** 批量打印选中订单汇总表 */
+  function handlePrint() {
+    const targets = displayOrders.value.filter((o) => selectedIds.value.has(o.id))
+    if (targets.length === 0) {
+      toast.warning('请先勾选要打印的订单')
+      return
+    }
+    const thead = `<tr>${SUMMARY_HEADERS.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr>`
+    const tbody = buildSummaryTbody(targets)
+    const printStyle = `
+      body { font-family: SimSun, 宋体; padding: 20px; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border: 1px solid #333; padding: 8px; font-size: 13px; text-align: center; }
+      th { background: #e6e6e6; }
+    `
+    printHtml(`湖北订单汇总（${targets.length} 条）`, `<table><thead>${thead}</thead><tbody>${tbody}</tbody></table>`, printStyle)
+    toast.success(`已发送 ${targets.length} 条订单至打印预览`)
+  }
+
+  // ==================== watchers ====================
   // 已确认的客户筛选变化时回到首页
   watch(() => appliedCustomer.value, () => {
     page.value = 1
@@ -229,6 +343,11 @@ export function useBeileOrders() {
   // 每页条数变化时回到第一页
   watch(perPage, () => {
     page.value = 1
+  })
+
+  // 翻页 / 筛选变化时清空选中（滚动归位由 BeileOrderTab 处理）
+  watch([page, appliedProduct, appliedCustomer, confirmStatus], () => {
+    selectedIds.value = new Set()
   })
 
   return {
@@ -248,7 +367,6 @@ export function useBeileOrders() {
     orders,
     unconfirmedCount,
     showProductColumn,
-    visibleSkus,
     displayOrders,
     highlightId,
     applyProductFilter,
@@ -262,5 +380,36 @@ export function useBeileOrders() {
     openDetail,
     confirmingIds,
     handleConfirm,
+    // 选中
+    selectedIds,
+    selectedCount,
+    hasDisplayOrders,
+    isAllSelected,
+    toggleSelect,
+    toggleSelectAll,
+    // 导出 / 打印
+    canExport,
+    canPrint,
+    exporting,
+    handleExport,
+    handlePrint,
   }
+}
+
+// ==================== provide/inject：HubeiView 与 BeileOrderTab 共享同一状态实例 ====================
+export type BeileOrdersHandle = ReturnType<typeof useBeileOrders>
+export const BEILE_ORDERS_KEY: InjectionKey<BeileOrdersHandle> = Symbol('beile-orders')
+
+/** 在父组件（HubeiView）调用：创建状态实例并 provide 给子组件 */
+export function provideBeileOrders(): BeileOrdersHandle {
+  const bo = useBeileOrders()
+  provide(BEILE_ORDERS_KEY, bo)
+  return bo
+}
+
+/** 在子组件（BeileOrderTab）调用：注入父组件 provide 的状态实例 */
+export function injectBeileOrders(): BeileOrdersHandle {
+  const bo = inject(BEILE_ORDERS_KEY)
+  if (!bo) throw new Error('injectBeileOrders 必须在调用了 provideBeileOrders 的组件树内使用')
+  return bo
 }

@@ -28,7 +28,6 @@
         :selected-group="selectedGroup"
         :selected-project-id="selectedProjectId"
         :can-manage="canManage"
-        :thumb-loaded="thumbLoaded"
         :groups="groups"
         :selected-maker-key="selectedMakerKey"
         :project-display-numbers="projectDisplayNumbers"
@@ -37,7 +36,6 @@
         @complete-project="$emit('complete-project', $event)"
         @cancel-project="$emit('cancel-project', $event)"
         @preview="openImagePreview"
-        @thumb-load="onThumbLoad"
       />
     </div>
 
@@ -97,17 +95,10 @@ const {
   projectDisplayNumbers,
 } = useProjectGrouping(groupsRef, selectedProjectIdRef)
 
-const thumbLoaded = ref<Set<number>>(new Set())
 const previewImage = ref<string | null>(null)
 
 function openImagePreview(url: string) {
   previewImage.value = url
-}
-
-function onThumbLoad(projectId: number) {
-  if (!thumbLoaded.value.has(projectId)) {
-    thumbLoaded.value = new Set(thumbLoaded.value).add(projectId)
-  }
 }
 </script>
 

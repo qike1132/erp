@@ -1,16 +1,15 @@
 // SKU 月度汇总的排序 / 分页 / 明细弹窗逻辑（从 PurchasePlanView.vue 抽出，行为不变）
 import { ref, computed, watch, type Ref, type ComputedRef } from 'vue';
-import type { Plan, SkuRow, SkuDateItem } from '../components/types';
-import { WDS, getShipmentStatus } from './usePurchasePlanData';
+import type { SkuRow, SkuDateItem } from '../components/types';
 
 export function useSkuSummary(opts: {
-  d: Ref<Record<string, unknown> | undefined>;
   skuSummary: ComputedRef<SkuRow[]>;
+  skuDateIndex: ComputedRef<Record<string, SkuDateItem[]>>;
   custFilter: Ref<string>;
   globalKw: Ref<string>;
   viewTab: Ref<'daily' | 'summary'>;
 }) {
-  const { d, skuSummary, custFilter, globalKw, viewTab } = opts;
+  const { skuSummary, skuDateIndex, custFilter, globalKw, viewTab } = opts;
 
   const skuSortField = ref('customer');
   const skuSortDir = ref<'asc' | 'desc'>('desc');
@@ -70,26 +69,10 @@ export function useSkuSummary(opts: {
   // Reset page when filters/sort/search change
   watch([custFilter, skuSortField, skuSortDir, globalKw], () => { skuPage.value = 1; });
 
+  // O(1) 索引查找，替代原来打开详情时遍历全量 plans_by_date
   const skuDateDetail = computed<SkuDateItem[]>(() => {
-    const pbd = (d.value?.plans_by_date ?? {}) as Record<string, Plan[]>;
-    const pn = skuDetailName.value;
-    const cn = skuDetailCustomer.value;
-    if (!pn) return [];
-    const byDate: Record<string, SkuDateItem> = {};
-    for (const [dateStr, plans] of Object.entries(pbd)) {
-      if (!plans?.length) continue;
-      for (const p of plans) {
-        if (p.product_name !== pn || p.customer_name !== cn) continue;
-        if (!byDate[dateStr]) {
-          const dt = new Date(dateStr + 'T00:00:00');
-          byDate[dateStr] = { date: dateStr, day: dt.getDate(), weekday: WDS[dt.getDay()] || '?', qty: 0, customer: p.customer_name || '未知客户', status: getShipmentStatus(p.quantity, p.shipped_qty) };
-        }
-        byDate[dateStr].qty += Number(p.quantity || 0);
-      }
-    }
-    const result = Object.values(byDate);
-    result.sort((a, b) => a.date.localeCompare(b.date));
-    return result;
+    const key = `${skuDetailCustomer.value}|${skuDetailName.value}`;
+    return skuDateIndex.value[key] ?? [];
   });
 
   function openSkuDetail(payload: { barcode: string; name: string; customer: string }) {

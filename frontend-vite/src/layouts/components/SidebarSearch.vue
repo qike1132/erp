@@ -1,6 +1,6 @@
 <template>
   <div class="sb-search">
-    <span class="sb-search-icon" aria-hidden="true"></span>
+    <span class="sb-search-icon" aria-hidden="true" />
     <input
       v-model="model"
       type="text"

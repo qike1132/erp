@@ -55,10 +55,10 @@
           <label class="co-label">产品名称 <span class="co-required">*</span></label>
           <UiAutocomplete
             v-model="form.productSearch"
-            :searchFn="searchProducts"
+            :search-fn="searchProducts"
             placeholder="输入产品名称搜索"
             @select="selectProduct"
-            @update:modelValue="form.productId = 0"
+            @update:model-value="form.productId = 0"
           >
             <template #option="{ item }">
               {{ item.name }}
@@ -68,10 +68,8 @@
 
         <div class="co-form-row">
           <div class="co-form-group">
-            <label class="co-label"
-              >{{ isOrder ? '订单数量' : '备货数量' }} <span class="co-required">*</span></label
-            >
-            <input type="number" class="form-number-input" v-model.number="form.quantity" min="1" max="9999999" step="1" style="width: 100%" name="quantity" autocomplete="off" />
+            <label class="co-label">{{ isOrder ? '订单数量' : '备货数量' }} <span class="co-required">*</span></label>
+            <input v-model.number="form.quantity" type="number" class="form-number-input" min="1" max="9999999" step="1" style="width: 100%" name="quantity" autocomplete="off" />
           </div>
           <OrderDeductControl
             v-if="isOrder"

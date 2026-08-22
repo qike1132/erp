@@ -15,7 +15,7 @@
         :style="{ borderColor: form.deductQuantity > 0 ? 'var(--color-ocean-deep)' : 'var(--color-text-muted)' }"
         @click="openDeductEdit"
       >
-        <FontAwesomeIcon icon="edit" style="font-size: 11px"  aria-hidden="true" />抵扣: <strong>{{ form.deductQuantity }}</strong>
+        <FontAwesomeIcon icon="edit" style="font-size: 11px" aria-hidden="true" />抵扣: <strong>{{ form.deductQuantity }}</strong>
       </button>
     </div>
     <div v-if="deductInfoVisible" class="co-deduct-info">

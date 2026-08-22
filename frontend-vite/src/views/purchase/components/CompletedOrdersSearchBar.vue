@@ -62,7 +62,7 @@
           @update:model-value="$emit('updateFilter', { key: 'end_date', value: $event })"
         />
       </div>
-      <button class="coq-btn coq-btn-primary coq-search-go" @click="$emit('search')" aria-label="查询">
+      <button class="coq-btn coq-btn-primary coq-search-go" aria-label="查询" @click="$emit('search')">
         <FontAwesomeIcon icon="search" aria-hidden="true" />
         <span>查询</span>
       </button>

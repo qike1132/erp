@@ -7,7 +7,7 @@
         @click="dropdownOpen = !dropdownOpen"
       >
         <span>{{ selectedName || '-- 请选择 --' }}</span>
-        <i :class="['fas', dropdownOpen ? 'fa-chevron-up' : 'fa-chevron-down']" aria-hidden="true" />
+        <FontAwesomeIcon :icon="dropdownOpen ? 'chevron-up' : 'chevron-down'" aria-hidden="true" />
       </button>
       <div v-if="dropdownOpen" class="dms-options">
         <button
@@ -22,7 +22,7 @@
           :key="pm.id"
           :class="['dms-option', { active: patternMakerId === pm.id }]"
         >
-          <button type="button" class="dms-option-name" @click="selectMaker(pm.id)" :aria-label="pm.name">
+          <button type="button" class="dms-option-name" :aria-label="pm.name" @click="selectMaker(pm.id)">
             <span>{{ pm.name }}</span>
           </button>
           <button
@@ -31,13 +31,13 @@
             title="删除"
             @click.stop="onDeleteMaker(pm.id)"
           >
-            <i class="fas fa-times" aria-hidden="true" />
+            <FontAwesomeIcon icon="times" aria-hidden="true" />
           </button>
         </div>
       </div>
     </div>
-    <button type="button" class="dms-add-btn" @click="addInputOpen = true" aria-label="添加版师">
-      <i class="fas fa-plus" aria-hidden="true" />
+    <button type="button" class="dms-add-btn" aria-label="添加版师" @click="addInputOpen = true">
+      <FontAwesomeIcon icon="plus" aria-hidden="true" />
       添加版师
     </button>
   </div>
@@ -49,10 +49,10 @@
       maxlength="100"
       @keyup.enter="confirmAdd"
     />
-    <button type="button" class="dms-add-btn" @click="confirmAdd" aria-label="确定">
+    <button type="button" class="dms-add-btn" aria-label="确定" @click="confirmAdd">
       确定
     </button>
-    <button type="button" class="dms-cancel" @click="cancelAdd" aria-label="取消">
+    <button type="button" class="dms-cancel" aria-label="取消" @click="cancelAdd">
       取消
     </button>
   </div>

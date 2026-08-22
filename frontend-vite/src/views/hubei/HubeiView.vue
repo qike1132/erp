@@ -8,12 +8,12 @@
           <button
             type="button"
             :class="['bo-confirm-filter-btn', { 'is-active': confirmStatus === 'unconfirmed' }]"
-            @click="confirmStatus = 'unconfirmed'"
+            @click="setConfirmStatus('unconfirmed')"
           >未确认</button>
           <button
             type="button"
             :class="['bo-confirm-filter-btn', { 'is-active': confirmStatus === 'confirmed' }]"
-            @click="confirmStatus = 'confirmed'"
+            @click="setConfirmStatus('confirmed')"
           >已确认</button>
         </div>
         <!-- 未确认提醒：位于「已确认」TAB 右侧 -->
@@ -55,7 +55,7 @@
       <!-- 内容区：湖北订单 -->
       <div class="page-card-body">
         <div class="hu-tab-content">
-          <BeileOrderTab ref="beileTab" />
+          <BeileOrderTab />
         </div>
       </div>
     </div>
@@ -69,62 +69,49 @@
  * 湖北订单页面：展示湖北工厂生产订单（BeileOrderTab，含详情弹窗/通知跳转高亮）。
  *
  * - 路由：/beile-order
- * - 筛选：产品/客户搜索状态在 BeileOrderTab 内部，本页面经 ref 桥接
- *   到头部筛选栏；确认状态 TAB（未确认/已确认）在左上角，
- *   读写 BeileOrderTab 内部的确认状态。
+ * - 状态管理：调用 provideBeileOrders() 创建唯一状态实例并 provide 给
+ *   BeileOrderTab，消除原先经 defineExpose + template ref 的反向桥接，
+ *   避免子组件状态变化触发父组件 computed 重算与联动重渲染。
+ * - 筛选：产品搜索状态经 computed 双向绑定到 composable 的 filters；
+ *   确认状态 TAB（未确认/已确认）调用 setConfirmStatus（含回到首页）。
  */
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
 import BeileOrderTab from '@/views/beile-order/BeileOrderTab.vue'
 import HubeiSearchBar from '@/views/hubei/HubeiSearchBar.vue'
+import { provideBeileOrders } from '@/views/beile-order/composables/useBeileOrders'
 
-/** 湖北订单筛选：状态在 BeileOrderTab 内部，经 ref 暴露 */
-const beileTab = ref<InstanceType<typeof BeileOrderTab> | null>(null)
+const {
+  filters,
+  confirmStatus,
+  unconfirmedCount,
+  setConfirmStatus,
+  applyProductFilter,
+  handleReset,
+  canExport,
+  canPrint,
+  exporting,
+  selectedCount,
+  hasDisplayOrders,
+  handleExport,
+  handlePrint,
+} = provideBeileOrders()
 
-/** 筛选栏 v-model：桥接到 BeileOrderTab 内部 filters */
+/** 筛选栏 v-model：双向绑定到 composable 的 filters（reactive） */
 const filterOrderNo = computed({
-  get: () => beileTab.value?.filters.orderNo ?? '',
-  set: (v: string) => {
-    if (beileTab.value) beileTab.value.filters.orderNo = v
-  },
+  get: () => filters.orderNo,
+  set: (v: string) => { filters.orderNo = v },
 })
 const filterCustomer = computed({
-  get: () => beileTab.value?.filters.customer ?? '',
-  set: (v: string) => {
-    if (beileTab.value) beileTab.value.filters.customer = v
-  },
+  get: () => filters.customer,
+  set: (v: string) => { filters.customer = v },
 })
-
-/** 确认状态（未确认/已确认）TAB：读写 BeileOrderTab 内部 confirmStatus */
-const confirmStatus = computed({
-  get: () => beileTab.value?.confirmStatus ?? 'unconfirmed',
-  set: (v: string) => beileTab.value?.setConfirmStatus(v),
-})
-
-/** 未确认订单数（提醒横幅用） */
-const unconfirmedCount = computed(() => beileTab.value?.unconfirmedCount ?? 0)
-
-// ===== 导出 / 打印（按钮在头部搜索框右侧，状态经 ref 桥接自 BeileOrderTab） =====
-const canExport = computed(() => beileTab.value?.canExport ?? false)
-const canPrint = computed(() => beileTab.value?.canPrint ?? false)
-const exporting = computed(() => beileTab.value?.exporting ?? false)
-const selectedCount = computed(() => beileTab.value?.selectedCount ?? 0)
-const hasDisplayOrders = computed(() => beileTab.value?.hasDisplayOrders ?? false)
-
-function handleExport() {
-  beileTab.value?.handleExport()
-}
-function handlePrint() {
-  beileTab.value?.handlePrint()
-}
-
-
 
 function onSelectProduct(name: string) {
-  beileTab.value?.applyProductFilter(name)
+  applyProductFilter(name)
 }
 
 function onReset() {
-  beileTab.value?.handleReset()
+  handleReset()
 }
 </script>
 

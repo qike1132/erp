@@ -73,16 +73,16 @@ function onClear() {
       v-if="modelValue"
       type="button"
       class="absolute right-8 top-1/2 -translate-y-1/2 text-text-muted hover:text-danger transition-colors p-1"
-      @click="onClear"
       aria-label="清空"
+      @click="onClear"
     >
       <FontAwesomeIcon icon="times" class="text-xs" aria-hidden="true" />
     </button>
     <button
       type="button"
       class="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-primary transition-colors p-1"
-      @click="onSearchClick"
       aria-label="搜索"
+      @click="onSearchClick"
     >
       <FontAwesomeIcon icon="search" class="text-sm" aria-hidden="true" />
     </button>

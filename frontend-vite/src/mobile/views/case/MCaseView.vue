@@ -26,7 +26,7 @@
             <label class="m-form-label">备注</label>
             <input v-model="form.note" type="text" class="m-input" placeholder="可选" aria-label="可选" />
           </div>
-          <button class="m-submit-btn" @click="handleStockSubmit" :aria-label="stockMode === 'stockin' ? '入库' : '出库'">{{ stockMode === 'stockin' ? '入库' : '出库' }}</button>
+          <button class="m-submit-btn" :aria-label="stockMode === 'stockin' ? '入库' : '出库'" @click="handleStockSubmit">{{ stockMode === 'stockin' ? '入库' : '出库' }}</button>
         </div>
       </template>
 

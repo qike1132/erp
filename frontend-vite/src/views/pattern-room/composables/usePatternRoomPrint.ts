@@ -5,7 +5,7 @@
  * （打印时间刷新、body 打印隔离类、临时清空页面标题）。
  * 逻辑自 PatternRoomView.vue 原样搬移。
  */
-import { ref, computed, type Ref } from 'vue'
+import { ref, computed, onScopeDispose, type Ref } from 'vue'
 import { patternRoomApi } from '@/api/patternRoom'
 import type { PartDetail, RoleBrief } from '@/api/patternRoom'
 
@@ -37,6 +37,13 @@ export function usePatternRoomPrint(options: UsePatternRoomPrintOptions) {
     () => selectedProjectId.value != null && partsByVersion.value.length > 0,
   )
 
+  /** 打印前页面标题（afterprint 时恢复，避免硬编码覆盖 SPA 动态标题） */
+  let titleBeforePrint = typeof document !== 'undefined' ? document.title : ''
+  const onAfterPrint = () => {
+    document.body.classList.remove('pd-printing')
+    document.title = titleBeforePrint
+  }
+
   async function handlePrint() {
     if (!canPrint.value || !selectedProjectId.value) return
     const projectId = selectedProjectId.value
@@ -65,7 +72,7 @@ export function usePatternRoomPrint(options: UsePatternRoomPrintOptions) {
     document.body.classList.remove('pd-printing')
     document.body.classList.add('pd-printing')
     // 临时清空页面标题，避免浏览器打印预览页眉显示"滨发协同系统"
-    const prevTitle = document.title
+    titleBeforePrint = document.title
     document.title = ''
     // 等待打印内容渲染后，直接调出浏览器打印预览
     requestAnimationFrame(() => {
@@ -73,14 +80,11 @@ export function usePatternRoomPrint(options: UsePatternRoomPrintOptions) {
     })
   }
 
-  // 打印结束后移除隔离类并恢复页面标题
-  // （原逻辑在组件 setup 时注册、不清理，此处保持行为一致）
+  // 打印结束后移除隔离类并恢复打印前页面标题
+  // （具名 handler + onScopeDispose 注销，避免多次调用累积监听器）
   if (typeof window !== 'undefined') {
-    window.addEventListener('afterprint', () => {
-      document.body.classList.remove('pd-printing')
-      // 恢复页面标题
-      document.title = '滨发协同系统'
-    })
+    window.addEventListener('afterprint', onAfterPrint)
+    onScopeDispose(() => window.removeEventListener('afterprint', onAfterPrint))
   }
 
   return {

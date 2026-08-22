@@ -6,19 +6,19 @@
     </div>
 
     <div v-else-if="partsByVersion.length === 0" class="pvt-empty-parts">
-      <i class="fas fa-cubes" aria-hidden="true" />
+      <FontAwesomeIcon icon="cubes" aria-hidden="true" />
       <span>暂无部位布料信息</span>
     </div>
 
     <div v-else class="pvt-table-wrap">
       <table class="pvt-table pvt-table--version">
         <colgroup>
-          <col style="width: 100px">
-          <col style="width: 60px">
-          <col style="width: 110px">
-          <col style="width: 110px">
-          <col style="width: 110px">
-          <col style="width: 110px">
+          <col style="width: 100px" />
+          <col style="width: 60px" />
+          <col style="width: 110px" />
+          <col style="width: 110px" />
+          <col style="width: 110px" />
+          <col style="width: 110px" />
         </colgroup>
         <thead>
           <tr>
@@ -40,9 +40,9 @@
               :selected-version="selectedVersion"
               @toggle-expand="toggleExpand"
               @toggle-version="toggleVersion"
-              @start-edit="startEdit"
-              @save-edit="saveEdit"
-              @cancel-edit="cancelEdit"
+              @start-edit="$emit('start-edit', $event)"
+              @save-edit="$emit('save-edit', $event)"
+              @cancel-edit="$emit('cancel-edit')"
               @copy-version="$emit('copy-version', $event)"
               @delete-version="$emit('delete-version', $event)"
             />
@@ -58,8 +58,8 @@ import { computed, toRef } from 'vue'
 import UiSpinner from '@/components/ui/UiSpinner.vue'
 import PartsVersionRowV2 from './PartsVersionRowV2.vue'
 import type { PartDetail } from '@/api/patternRoom'
+import type { PartEditData } from '../composables/usePartInlineEdit'
 import { usePartsVersionFilter } from '../composables/usePartsVersionFilter'
-import { usePartInlineEdit, type PartEditData } from '../composables/usePartInlineEdit'
 
 const props = defineProps<{
   partsByVersion: PartDetail[]
@@ -68,13 +68,19 @@ const props = defineProps<{
   currentRoleId: number | null
   partLoading: boolean
   canManage: boolean
+  /** 正在编辑的部位 ID（内联编辑状态由父级上移管理） */
+  editingPartId: number | undefined
+  /** 内联编辑表单 */
+  editForm: PartEditData
 }>()
 
 const emit = defineEmits<{
   'set-final-version': [versionNo: string]
   'copy-version': [part: PartDetail]
   'delete-version': [part: PartDetail]
-  'save-edit': [part: PartDetail, data: PartEditData]
+  'start-edit': [part: PartDetail]
+  'cancel-edit': []
+  'save-edit': [part: PartDetail]
 }>()
 
 const partsByVersionRef = toRef(props, 'partsByVersion')
@@ -88,13 +94,6 @@ const { selectedVersion, toggleVersion, toggleExpand, groupedRows } = usePartsVe
   projectIdRef,
   currentRoleIdRef,
   (v) => emit('set-final-version', v),
-)
-
-const { editingPartId, editForm, startEdit, cancelEdit, saveEdit } = usePartInlineEdit(
-  partsByVersionRef,
-  projectIdRef,
-  currentRoleIdRef,
-  (part, data) => emit('save-edit', part, data),
 )
 </script>
 
@@ -124,7 +123,7 @@ const { editingPartId, editForm, startEdit, cancelEdit, saveEdit } = usePartInli
   color: var(--color-text-muted, #94a3b8);
   font-size: 13px;
 }
-.pvt-empty-parts i {
+.pvt-empty-parts svg {
   font-size: 32px;
   opacity: 0.4;
   color: var(--color-text-secondary, #475569);
@@ -139,8 +138,18 @@ const { editingPartId, editForm, startEdit, cancelEdit, saveEdit } = usePartInli
   font-size: 13px;
   table-layout: fixed;
 }
-.pvt-table th,
-.pvt-table td {
+.pvt-table th {
+  padding: 10px 12px;
+  text-align: left;
+  border: 1px solid #d9dce3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-text-primary, #1a1a2e);
+  vertical-align: middle;
+}
+/* td 在子组件 PartsVersionRowV2 内渲染，需 :deep() 穿透 scoped 作用域 */
+:deep(.pvt-table td) {
   padding: 10px 12px;
   text-align: left;
   border: 1px solid #d9dce3;
@@ -166,7 +175,8 @@ const { editingPartId, editForm, startEdit, cancelEdit, saveEdit } = usePartInli
 .pvt-table--version th {
   text-align: center;
 }
-.pvt-table--version td {
+/* td 在子组件内渲染，需穿透 scoped */
+:deep(.pvt-table--version td) {
   text-align: center;
 }
 .pvt-part-name-th {

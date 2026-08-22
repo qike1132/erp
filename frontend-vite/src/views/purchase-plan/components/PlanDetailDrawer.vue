@@ -70,7 +70,7 @@ function planStatusTxt(s: string) { return STATUS_TEXT[s] || '待确认' }
 </script>
 
 <template>
-  <UiDrawer :visible="visible" @update:visible="emit('update:visible', $event)" title="计划详情">
+  <UiDrawer :visible="visible" title="计划详情" @update:visible="emit('update:visible', $event)">
     <div v-if="isLoading" class="flex items-center justify-center py-12 text-text-muted">
       <UiSpinner />
     </div>

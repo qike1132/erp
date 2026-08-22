@@ -14,8 +14,8 @@
       <button
         v-if="model"
         class="mc-search-clear"
-        @click="model = ''; emit('search-input')"
         aria-label="关闭"
+        @click="model = ''; emit('search-input')"
       >
         <FontAwesomeIcon icon="times" aria-hidden="true" />
       </button>

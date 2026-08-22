@@ -32,7 +32,7 @@
             :title="!canPrint ? '当前产品暂无部位数据，无法打印' : '打印该产品全部部位明细'"
             @click="$emit('print')"
           >
-            <i class="fas fa-print" aria-hidden="true" />
+            <FontAwesomeIcon icon="print" aria-hidden="true" />
             打印打样单
           </button>
         </template>
@@ -45,10 +45,14 @@
         :current-role-id="currentRoleId"
         :part-loading="partLoading"
         :can-manage="canManage"
+        :editing-part-id="editingPartId"
+        :edit-form="editForm"
         @set-final-version="$emit('set-final-version', $event)"
         @copy-version="$emit('copy-version', $event)"
         @delete-version="$emit('delete-version', $event)"
-        @save-edit="(part, data) => $emit('save-edit', part, data)"
+        @start-edit="$emit('start-edit', $event)"
+        @cancel-edit="$emit('cancel-edit')"
+        @save-edit="$emit('save-edit', $event)"
       />
     </template>
   </div>
@@ -59,6 +63,7 @@ import EmptyState from './EmptyState.vue'
 import RoleTabs from './RoleTabs.vue'
 import PartsVersionTableV2 from './PartsVersionTableV2.vue'
 import type { ProjectDetailResponse, PartDetail, RoleBrief } from '@/api/patternRoom'
+import type { PartEditData } from '../composables/usePartInlineEdit'
 
 defineProps<{
   project: ProjectDetailResponse | null
@@ -71,6 +76,8 @@ defineProps<{
   canPrint: boolean
   roles: RoleBrief[]
   currentRoleId: number | null
+  editingPartId: number | undefined
+  editForm: PartEditData
 }>()
 
 defineEmits<{
@@ -78,7 +85,9 @@ defineEmits<{
   'copy-version': [part: PartDetail]
   'edit-version': [part: PartDetail]
   'delete-version': [part: PartDetail]
-  'save-edit': [part: PartDetail, data: { supplier_name: string; fabric_name: string; fabric_color_no: string }]
+  'start-edit': [part: PartDetail]
+  'cancel-edit': []
+  'save-edit': [part: PartDetail]
   'select-role': [roleId: number]
   'add-role': [roleName: string]
   'remove-role': [role: RoleBrief]

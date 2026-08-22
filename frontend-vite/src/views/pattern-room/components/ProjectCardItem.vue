@@ -8,7 +8,7 @@
       <div
         v-if="proj.product_image_url"
         class="cgl-card-thumb"
-        :class="{ 'is-loaded': thumbLoaded.has(proj.id) }"
+        :class="{ 'is-loaded': thumbLoaded }"
         role="button"
         title="点击查看大图"
         @click.stop="emit('preview', proj.product_image_url!)"
@@ -36,16 +36,16 @@
           decoding="async"
           fetchpriority="low"
           @error="onThumbError($event, proj)"
-          @load="emit('thumb-load', proj.id)"
+          @load="thumbLoaded = true"
         />
         <span v-if="proj.status === 'completed'" class="cgl-card-status-badge">
-          <i class="fas fa-check-circle" aria-hidden="true" /> 已完成
+          <FontAwesomeIcon icon="check-circle" aria-hidden="true" /> 已完成
         </span>
       </div>
       <div v-else class="cgl-card-thumb cgl-card-thumb-placeholder">
-        <i class="fas fa-tshirt" aria-hidden="true" />
+        <FontAwesomeIcon icon="tshirt" aria-hidden="true" />
         <span v-if="proj.status === 'completed'" class="cgl-card-status-badge">
-          <i class="fas fa-check-circle" aria-hidden="true" /> 已完成
+          <FontAwesomeIcon icon="check-circle" aria-hidden="true" /> 已完成
         </span>
       </div>
     </div>
@@ -75,7 +75,7 @@
           title="编辑该打样项目"
           @click.stop="emit('edit', proj.id)"
         >
-          <i class="fas fa-pen" aria-hidden="true" /> 编辑
+          <FontAwesomeIcon icon="pen" aria-hidden="true" /> 编辑
         </button>
         <button
           v-if="proj.status === 'in_progress'"
@@ -84,7 +84,7 @@
           title="标记为已完成"
           @click.stop="emit('complete', proj.id)"
         >
-          <i class="fas fa-check" aria-hidden="true" /> 完成
+          <FontAwesomeIcon icon="check" aria-hidden="true" /> 完成
         </button>
         <button
           v-if="proj.status === 'in_progress'"
@@ -93,7 +93,7 @@
           title="取消该打样项目"
           @click.stop="emit('cancel', proj.id)"
         >
-          <i class="fas fa-times" aria-hidden="true" /> 取消
+          <FontAwesomeIcon icon="times" aria-hidden="true" /> 取消
         </button>
       </div>
     </div>
@@ -107,6 +107,7 @@
  * 注意：卡片根元素的 click / keyup.enter（选中项目）由父组件通过
  * attrs 透传绑定（保持原 VirtualList 插槽内联写法），本组件不再重复绑定。
  */
+import { ref } from 'vue'
 import type { ProjectSummary } from '@/api/patternRoom'
 
 defineProps<{
@@ -120,15 +121,11 @@ defineProps<{
   displayNumber: string | undefined
   /** 是否可管理（显示操作按钮） */
   canManage: boolean
-  /** 已加载清晰缩略图的项目 id 集合（父级持有，保证虚拟滚动重建后淡入状态不丢） */
-  thumbLoaded: Set<number>
 }>()
 
 const emit = defineEmits<{
   /** 点击缩略图查看大图 */
   preview: [url: string]
-  /** 清晰缩略图加载完成（父级记录进 thumbLoaded，驱动 blur-up 过渡） */
-  'thumb-load': [projectId: number]
   /** 编辑项目 */
   edit: [id: number]
   /** 标记项目完成 */
@@ -137,12 +134,21 @@ const emit = defineEmits<{
   cancel: [id: number]
 }>()
 
-/** 时间格式化（原组件内 formatTime 原样搬移） */
+/** 本卡片缩略图加载完成状态（内部管理，避免父级 Set 更新引发全量卡片重渲染） */
+const thumbLoaded = ref(false)
+
+/** 时间格式化缓存（同一 ISO 字符串多次渲染复用结果） */
+const _timeFormatCache = new Map<string, string>()
 function formatTime(iso: string): string {
   if (!iso) return ''
+  const cached = _timeFormatCache.get(iso)
+  if (cached) return cached
   const d = new Date(iso)
   const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  const result = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  if (_timeFormatCache.size > 500) _timeFormatCache.clear()
+  _timeFormatCache.set(iso, result)
+  return result
 }
 
 /**

@@ -9,6 +9,7 @@ import { getErrorMessage } from '@/types/errors'
 import { preloadEcharts } from '@/utils/echartsPreload'
 import { prefetchDashboardData } from '@/views/dashboard/composables/useDashboardStats'
 import { devLog } from '@/utils/devLog'
+import { isMobileDevice } from '@/composables/useDevice'
 
 /**
  * 登录页共享逻辑（PC / Mobile 复用）
@@ -72,8 +73,9 @@ export function useLogin() {
       perf.mark('init-start')
 
       // 🟢 提前触发 ECharts 预加载：与 authStore.init 并行，
-      // 利用路由跳转 + Dashboard 组件挂载的时间窗口下载 ~1MB 图表库
-      preloadEcharts()
+      // 利用路由跳转 + Dashboard 组件挂载的时间窗口下载 ~1MB 图表库。
+      // 仅 PC 端：移动端 Dashboard 不含图表，避免白白下载 560KB chunk
+      if (!isMobileDevice()) preloadEcharts()
 
       if (isCapacitor && res.access_token) {
         setAccessToken(res.access_token)

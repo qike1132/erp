@@ -4,10 +4,10 @@
       <!-- 卡片头部 -->
       <div class="page-card-header">
         <div class="co-tab-bar">
-          <button :class="['co-tab-btn', activeTab === 'input' && 'active']" @click="activeTab = 'input'" aria-label="录入">
+          <button :class="['co-tab-btn', activeTab === 'input' && 'active']" aria-label="录入" @click="activeTab = 'input'">
             录入
           </button>
-          <button :class="['co-tab-btn', activeTab === 'records' && 'active']" @click="activeTab = 'records'" aria-label="记录查询">
+          <button :class="['co-tab-btn', activeTab === 'records' && 'active']" aria-label="记录查询" @click="activeTab = 'records'">
             记录查询
           </button>
         </div>
@@ -58,24 +58,24 @@
         <OrderRecordQuery
           :record-type="recordType"
           :record-type-options="recordTypeOptions"
+          v-model:per-page="perPage"
           :customer-options="customerOptions"
+          v-model:show-filter="showFilter"
           :filter-order-type-options="filterOrderTypeOptions"
+          v-model:filter-customer="filterCustomer"
           :factory-options="factoryOptions"
+          v-model:filter-order-type="filterOrderType"
           :factory-disabled="factoryDisabled"
+          v-model:filter-status="filterStatus"
           :status-options="statusOptions"
+          v-model:filter-factory="filterFactory"
           :order-records="orderRecords"
+          v-model:filter-start="filterStart"
           :is-loading-records="isLoadingRecords"
+          v-model:filter-end="filterEnd"
           :is-fetching-records="isFetchingRecords"
           :current-page="currentPage"
           :total-pages="totalPages"
-          v-model:per-page="perPage"
-          v-model:show-filter="showFilter"
-          v-model:filter-customer="filterCustomer"
-          v-model:filter-order-type="filterOrderType"
-          v-model:filter-status="filterStatus"
-          v-model:filter-factory="filterFactory"
-          v-model:filter-start="filterStart"
-          v-model:filter-end="filterEnd"
           :fetch-orders="fetchOrders"
           :reset-filter="resetFilter"
           @change-record-type="handleChangeRecordType"

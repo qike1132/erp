@@ -5,7 +5,7 @@
         <FontAwesomeIcon icon="history" style="color: var(--color-primary-500)" aria-hidden="true" />
         库存流水记录 <small style="color: var(--color-text-muted)">- {{ selectedCaseName }}</small>
       </div>
-      <button class="ci-action-btn ci-action-outline" @click="showLogFilterModel = !showLogFilterModel" aria-label="筛选">
+      <button class="ci-action-btn ci-action-outline" aria-label="筛选" @click="showLogFilterModel = !showLogFilterModel">
         <FontAwesomeIcon icon="filter" style="margin-right: 4px" aria-hidden="true" />筛选
       </button>
     </div>
@@ -24,10 +24,10 @@
           <UiDatePicker v-model="logFilterEndModel" style="width: 100%" />
         </div>
         <div class="ci-filter-action">
-          <button class="ci-action-btn ci-action-primary" @click="logPageModel = 1; logRefetch()" aria-label="查询">
+          <button class="ci-action-btn ci-action-primary" aria-label="查询" @click="logPageModel = 1; logRefetch()">
             <FontAwesomeIcon icon="search" style="margin-right: 4px" aria-hidden="true" />查询
           </button>
-          <button class="ci-action-btn ci-action-outline" style="margin-left: 8px" @click="clearLogFilter" aria-label="关闭">
+          <button class="ci-action-btn ci-action-outline" style="margin-left: 8px" aria-label="关闭" @click="clearLogFilter">
             <FontAwesomeIcon icon="times" aria-hidden="true" />
           </button>
         </div>

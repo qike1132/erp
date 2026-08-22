@@ -15,10 +15,10 @@
       <span v-else>拖拽文件到标题栏 · 支持 .xlsx / .xls</span>
     </label>
     <div class="so-inline-actions">
-      <button class="so-inline-btn" :disabled="templateDownloading" @click.stop="handleDownloadTemplate" aria-label="模板">
+      <button class="so-inline-btn" :disabled="templateDownloading" aria-label="模板" @click.stop="handleDownloadTemplate">
         <UiLoadingIcon :loading="templateDownloading" icon="download" />模板
       </button>
-      <button class="so-inline-btn so-inline-btn-success" :disabled="!excelFile || importing" @click.stop="handleImportExcel" :aria-label="importing ? '导入中' : '导入'">
+      <button class="so-inline-btn so-inline-btn-success" :disabled="!excelFile || importing" :aria-label="importing ? '导入中' : '导入'" @click.stop="handleImportExcel">
         <UiLoadingIcon :loading="importing" icon="upload" />{{
           importing ? '导入中' : '导入'
         }}
@@ -50,10 +50,10 @@
       <span v-else>拖拽文件到标题栏 · 支持 PDF / PNG / JPG / BMP / TIFF</span>
     </label>
     <div class="so-inline-actions">
-      <button class="so-inline-btn" :disabled="!pdfFiles.length || ocrPreviewing" @click.stop="handleOcrPreview" aria-label="预览">
+      <button class="so-inline-btn" :disabled="!pdfFiles.length || ocrPreviewing" aria-label="预览" @click.stop="handleOcrPreview">
         <UiLoadingIcon :loading="ocrPreviewing" icon="eye" />预览
       </button>
-      <button class="so-inline-btn so-inline-btn-danger" :disabled="!pdfFiles.length || ocrImporting" @click.stop="handleOcrImport" aria-label="导入">
+      <button class="so-inline-btn so-inline-btn-danger" :disabled="!pdfFiles.length || ocrImporting" aria-label="导入" @click.stop="handleOcrImport">
         <UiLoadingIcon :loading="ocrImporting" icon="magic" />导入
       </button>
     </div>

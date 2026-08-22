@@ -46,8 +46,8 @@
             <FontAwesomeIcon icon="image" class="label-icon" aria-hidden="true" />
             <template v-if="form.image">
               <span class="pd-file-inline pd-file-inline-success">
-                <img loading="lazy" :src="resolveStaticUrl(form.image)" class="pd-thumb-preview" @click.stop="emit('open-image', form.image)" alt="产品图片" />
-                <button type="button" class="pd-thumb-remove" @click.stop="form.image = ''" aria-label="关闭"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
+                <img loading="lazy" :src="resolveStaticUrl(form.image)" class="pd-thumb-preview" alt="产品图片" @click.stop="emit('open-image', form.image)" />
+                <button type="button" class="pd-thumb-remove" aria-label="关闭" @click.stop="form.image = ''"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
               </span>
             </template>
             <span v-else>拖拽文件到标题栏 · 支持 JPG / PNG / GIF</span>

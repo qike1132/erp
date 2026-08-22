@@ -204,6 +204,10 @@ export const usePatternRoomStore = defineStore('patternRoom', () => {
     }
     const makers = getMakersSnapshot()
     if (!makers || !makers.isFresh) {
+      // 版师列表接口要求 customer_sampling_manage 权限，无权限用户不预取，避免每次登录产生 403 噪音
+      // 动态 import 避免与 auth store 形成循环依赖（auth store 顶部引用了本 store 的 clear）
+      const { useAuthStore } = await import('@/stores/auth')
+      if (!useAuthStore().hasPermission('customer_sampling_manage')) return
       void fetchMakers().catch(() => { /* 预取失败静默 */ })
     }
   }

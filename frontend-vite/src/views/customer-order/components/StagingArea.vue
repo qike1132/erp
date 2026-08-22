@@ -22,17 +22,17 @@
                 <FontAwesomeIcon :icon="item.type === 'order' ? 'shopping-cart' : 'cubes'" :style="{ color: item.type === 'order' ? 'var(--color-ocean-text)' : 'var(--color-success-700)' }" />
                 {{ item.productName }}
 
-              <span class="count-badge-subtle">数量: {{ item.quantity }}</span>
-              <span v-if="item.deductQuantity > 0" class="count-badge-subtle">抵扣: {{ item.deductQuantity }}</span>
-              <span v-if="item.country" class="count-badge-subtle"><FontAwesomeIcon icon="globe" aria-hidden="true" /> {{ item.country }}</span>
-              <span v-if="item.note" class="count-badge-subtle">备注: {{ item.note }}</span>
-          </span>
+                <span class="count-badge-subtle">数量: {{ item.quantity }}</span>
+                <span v-if="item.deductQuantity > 0" class="count-badge-subtle">抵扣: {{ item.deductQuantity }}</span>
+                <span v-if="item.country" class="count-badge-subtle"><FontAwesomeIcon icon="globe" aria-hidden="true" /> {{ item.country }}</span>
+                <span v-if="item.note" class="count-badge-subtle">备注: {{ item.note }}</span>
+              </span>
             </div>
             <div class="co-staged-actions">
-              <button class="co-btn-icon co-btn-warn" @click="emit('edit-staged', item.uid)" aria-label="编辑">
+              <button class="co-btn-icon co-btn-warn" aria-label="编辑" @click="emit('edit-staged', item.uid)">
                 <FontAwesomeIcon icon="edit" aria-hidden="true" />
               </button>
-              <button class="co-btn-icon co-btn-danger" @click="emit('remove-staged', item.uid)" aria-label="删除">
+              <button class="co-btn-icon co-btn-danger" aria-label="删除" @click="emit('remove-staged', item.uid)">
                 <FontAwesomeIcon icon="trash" aria-hidden="true" />
               </button>
             </div>

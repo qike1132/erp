@@ -6,8 +6,8 @@
       role="tab"
       :aria-selected="modelValue === tab.value"
       :class="['rp-tab-btn', { active: modelValue === tab.value }]"
-      @click="emit('change', tab.value)"
       :aria-label="tab.label"
+      @click="emit('change', tab.value)"
     >
       {{ tab.label }}
     </button>

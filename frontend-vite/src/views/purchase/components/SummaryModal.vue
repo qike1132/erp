@@ -78,59 +78,55 @@
           <table class="w-full border-collapse font-[SimSun,_宋体] text-[13px] bg-white">
             <thead>
               <tr class="bg-border-light">
-                <th class="w-[10%]">客户</th>
-                <th class="w-[16%]">产品名称</th>
+                <th class="w-[9%]">客户</th>
+                <th class="w-[15%]">产品名称</th>
                 <th class="w-[7%]">订单数量</th>
                 <th class="w-[10%]">供应商</th>
-                <th class="w-[25%]">布料名称</th>
+                <th class="w-[24%]">布料名称</th>
                 <th class="w-[17%]">规格型号</th>
-                <th class="w-[15%]">数量</th>
+                <th class="w-[10%]">数量</th>
+                <th class="w-[8%]">单位</th>
               </tr>
             </thead>
             <tbody>
-              <template v-for="(group, gi) in factoryData.groups || []" :key="gi">
-                <template v-for="(supplier, si) in group.suppliers || []" :key="si">
-                  <tr v-for="(fabric, fi) in supplier.fabrics || []" :key="fi">
-                    <td v-if="isFirstFabricRow(gi, si, fi)" :rowspan="getGroupFabricCount(gi)" class="font-bold">
-                      {{ group.customer_name }}
-                    </td>
-                    <td v-if="isFirstFabricRow(gi, si, fi)" :rowspan="getGroupFabricCount(gi)">
-                      {{ group.product_name }}
-                    </td>
-                    <td v-if="isFirstFabricRow(gi, si, fi)" :rowspan="getGroupFabricCount(gi)">
-                      {{ formatQty(group.product_quantity || group.order_quantity) }}
-                    </td>
-                    <td v-if="fi === 0" :rowspan="supplier.fabrics.length">
-                      {{ supplier.supplier_name }}
-                    </td>
-                    <td>{{ fabric.fabric_name }}</td>
-                    <td>{{ fabric.specification || '' }}</td>
-                    <td class="text-right">
-                      <template v-if="editMode">
-                        <input
-                          type="number"
-                          class="w-20 text-right py-1 px-1.5 text-[13px] inline-block border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
-                          :value="fabric.quantity"
-                          min="0"
-                          @change="$emit('updateQty', gi, si, fi, ($event.target as HTMLInputElement).value)"
-                          @focus="($event.target as HTMLInputElement).select()"
-                        />
-                        <span class="text-xs ml-0.5">{{ fabric.unit || '' }}</span>
-                      </template>
-                      <template v-else>
-                        {{ formatQty(fabric.quantity) }} {{ fabric.unit || '' }}
-                      </template>
-                    </td>
-                  </tr>
-                </template>
-              </template>
+              <tr v-for="row in flatFactoryRows" :key="`${row.gi}-${row.si}-${row.fi}`">
+                <td v-if="row.isFirstFabricRow" :rowspan="row.groupFabricCount" class="font-bold">
+                  {{ row.group.customer_name }}
+                </td>
+                <td v-if="row.isFirstFabricRow" :rowspan="row.groupFabricCount">
+                  {{ row.group.product_name }}
+                </td>
+                <td v-if="row.isFirstFabricRow" :rowspan="row.groupFabricCount">
+                  {{ formatQty(row.group.product_quantity || row.group.order_quantity) }}
+                </td>
+                <td v-if="row.isFirstSupplier" :rowspan="row.supplierFabricCount">
+                  {{ row.supplier.supplier_name }}
+                </td>
+                <td>{{ row.fabric.fabric_name }}</td>
+                <td>{{ row.fabric.specification || '' }}</td>
+                <td>
+                  <template v-if="editMode">
+                    <input
+                      type="number"
+                      class="w-20 text-right py-1 px-1.5 text-[13px] inline-block border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
+                      :value="row.fabric.quantity"
+                      min="0"
+                      @change="$emit('updateQty', row.gi, row.si, row.fi, ($event.target as HTMLInputElement).value)"
+                      @focus="($event.target as HTMLInputElement).select()"
+                    />
+                  </template>
+                  <template v-else>
+                    {{ formatQty(row.fabric.quantity) }}
+                  </template>
+                </td>
+                <td>{{ row.fabric.unit || '' }}</td>
+              </tr>
               <tr class="bg-border-light font-bold">
-                <td colspan="4" class="text-center">合计</td>
-                <td />
-                <td />
-                <td class="text-right">
+                <td colspan="6" class="text-center">合计</td>
+                <td>
                   {{ formatQty(factoryGrandTotal) }}
                 </td>
+                <td />
               </tr>
             </tbody>
           </table>
@@ -195,14 +191,14 @@
                   </td>
                   <td>{{ m.material_name }}</td>
                   <td>{{ m.specification || '' }}</td>
-                  <td class="text-right">{{ formatQty(m.total_quantity) }} {{ m.unit || '' }}</td>
+                  <td>{{ formatQty(m.total_quantity) }} {{ m.unit || '' }}</td>
                 </tr>
               </template>
               <tr class="bg-border-light font-bold">
                 <td class="text-center">合计</td>
                 <td />
                 <td />
-                <td class="text-right">
+                <td>
                   {{ formatQty(supplierGrandTotal) }}
                 </td>
               </tr>
@@ -241,9 +237,10 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { useDebounceFn } from '@vueuse/core'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import { fmtQty as formatQty } from '@/utils/formatQty'
-import type { FactorySummaryData, SupplierSummaryData, MaterialItem } from '../composables/useSummaryModal'
+import type { FactorySummaryData, SupplierSummaryData, MaterialItem, FactoryGroup, SupplierGroup, FabricItem } from '../composables/useSummaryModal'
 
 const props = defineProps<{
   open: boolean
@@ -269,13 +266,16 @@ const emit = defineEmits<{
 
 const activeTab = ref<'factory' | 'supplier'>('factory')
 
+// P1-4: 防抖 300ms，避免损耗率输入每次按键触发全量 groups×suppliers×fabrics×materials 重算
+const applyLossRateDebounced = useDebounceFn((v: number) => emit('applyLossRate', v), 300)
+
 function onLossRateInput(e: Event) {
   const val = parseFloat((e.target as HTMLInputElement).value)
   if (isNaN(val) || val < 0) {
-    emit('applyLossRate', 0)
+    applyLossRateDebounced(0)
     return
   }
-  emit('applyLossRate', Math.min(val, 1000))
+  applyLossRateDebounced(Math.min(val, 1000))
 }
 
 const factoryGrandTotal = computed(() => {
@@ -292,15 +292,37 @@ const supplierGrandTotal = computed(() => {
   return t
 })
 
-function isFirstFabricRow(gi: number | string, si: number | string, fi: number | string): boolean {
-  return Number(fi) === 0 && Number(si) === 0
-}
-
-function getGroupFabricCount(gi: number | string): number {
-  const group = props.factoryData?.groups?.[Number(gi)]
-  if (!group) return 1
-  return group.suppliers.reduce((sum: number, s) => sum + (s.fabrics?.length || 0), 0)
-}
+// P1-7: 预计算 flatFactoryRows，避免模板内每行调用 isFirstFabricRow/getGroupFabricCount
+const flatFactoryRows = computed(() => {
+  const rows: {
+    gi: number; si: number; fi: number
+    group: FactoryGroup
+    supplier: SupplierGroup
+    fabric: FabricItem
+    isFirstFabricRow: boolean
+    groupFabricCount: number
+    isFirstSupplier: boolean
+    supplierFabricCount: number
+  }[] = []
+  const groups = props.factoryData?.groups || []
+  groups.forEach((group, gi) => {
+    const suppliers = group.suppliers || []
+    const groupFabricCount = suppliers.reduce((s, sup) => s + (sup.fabrics?.length || 0), 0)
+    suppliers.forEach((supplier, si) => {
+      const fabrics = supplier.fabrics || []
+      fabrics.forEach((fabric, fi) => {
+        rows.push({
+          gi, si, fi, group, supplier, fabric,
+          isFirstFabricRow: fi === 0 && si === 0,
+          groupFabricCount,
+          isFirstSupplier: fi === 0,
+          supplierFabricCount: fabrics.length,
+        })
+      })
+    })
+  })
+  return rows
+})
 </script>
 
 <style scoped>
@@ -351,9 +373,9 @@ table td {
   border: 1px solid var(--color-text);
   padding: 8px;
   vertical-align: middle;
+  text-align: center;
 }
 table th {
   font-weight: bold;
-  text-align: center;
 }
 </style>

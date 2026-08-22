@@ -5,7 +5,7 @@
       v-model:show-password="showPassword"
       :loading="loading"
       :error-msg="errorMsg"
-      :form="form"
+      v-model:form="form"
       :handle-login="handleLogin"
     />
   </div>

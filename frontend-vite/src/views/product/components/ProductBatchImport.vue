@@ -14,12 +14,12 @@
       <span v-else>拖拽文件到标题栏 · 支持 .xlsx / .xls</span>
     </label>
     <div class="pd-inline-actions">
-      <button class="pd-inline-btn" @click.stop="downloadTemplate" aria-label="模板 {{ importing ? '导入中…' : '导入' }}">模板</button>
-      <button class="pd-inline-btn pd-inline-btn-success" :disabled="!excelFile" @click.stop="handleBatchImport" :aria-label="importing ? '导入中…' : '导入'">
+      <button class="pd-inline-btn" aria-label="模板 {{ importing ? '导入中…' : '导入' }}" @click.stop="downloadTemplate">模板</button>
+      <button class="pd-inline-btn pd-inline-btn-success" :disabled="!excelFile" :aria-label="importing ? '导入中…' : '导入'" @click.stop="handleBatchImport">
         {{ importing ? '导入中…' : '导入' }}
       </button>
     </div>
-    <input ref="excelInputRef" type="file" style="display: none" accept=".xlsx,.xls" name="file" @change="onExcelSelect" aria-label="file" />
+    <input ref="excelInputRef" type="file" style="display: none" accept=".xlsx,.xls" name="file" aria-label="file" @change="onExcelSelect" />
   </div>
 </template>
 

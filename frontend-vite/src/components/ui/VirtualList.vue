@@ -17,9 +17,9 @@
       <div
         v-for="item in visibleItems"
         :key="getItemKey(item)"
+        :ref="el => setItemRef(el, item.index)"
         class="virtual-list-item"
         role="listitem"
-        :ref="el => setItemRef(el, item.index)"
         :style="getItemStyle(item.index)"
       >
         <slot :item="item.raw" :index="item.index" />
@@ -60,9 +60,11 @@ const scrollTop = ref(0)
 const bufferCount = computed(() => props.buffer ?? 10)
 const estimatedH = computed(() => props.dynamicHeight ? props.estimatedHeight : props.itemHeight)
 
-// Non-reactive height cache — avoids triggering full prefix-sum recomputation on every measurement
+// Non-reactive height cache — avoids triggering full prefix-sum recomputation on every measurement.
+// _heightVersion bumps only when a measured height actually changes, driving _prefixSums recompute.
 const _heightMap = new Map<number, number>()
 const _itemCountRef = ref(0)
+const _heightVersion = ref(0)
 const itemRefs: Map<number, HTMLElement> = new Map()
 let itemRefGeneration = 0
 
@@ -77,12 +79,18 @@ function setItemRef(el: unknown, index: number) {
 function measureItems() {
   if (!props.dynamicHeight) return
   const currentGen = ++itemRefGeneration
+  let changed = false
   for (const [idx, el] of itemRefs) {
     if (itemRefGeneration !== currentGen) return
     const h = el.getBoundingClientRect().height
-    _heightMap.set(idx, h)
+    if (_heightMap.get(idx) !== h) {
+      _heightMap.set(idx, h)
+      changed = true
+    }
   }
   itemRefs.clear()
+  // 仅在实际高度变化时才触发前缀和重算，高度稳定后零开销
+  if (changed) _heightVersion.value++
 }
 
 function _getItemHeight(index: number): number {
@@ -92,9 +100,10 @@ function _getItemHeight(index: number): number {
 
 const _prefixSums = computed(() => {
   if (!props.dynamicHeight) return null
-  // Only recompute when item count changes, not on every height measurement.
-  // Height measurements update _heightMap (non-reactive) and don't trigger this.
+  // Recompute when item count changes OR when a measured height actually changes.
+  // _heightMap is non-reactive; _heightVersion bumps on real changes to trigger recompute.
   void _itemCountRef.value
+  void _heightVersion.value
   const n = props.items.length
   const sums = new Float64Array(n + 1)
   let acc = 0
@@ -225,11 +234,14 @@ watch([startIndex, endIndex], ([s, e]) => {
 let resizeObserver: ResizeObserver | null = null
 
 onMounted(() => {
-  if (containerRef.value && typeof ResizeObserver !== 'undefined') {
+  // 仅动态高度模式需要 ResizeObserver（触发 measureItems + 同步 scrollTop）
+  // 固定高度模式由父级 useVirtualAreaMeasure 监听容器尺寸变化，此处不再重复监听
+  if (props.dynamicHeight && containerRef.value && typeof ResizeObserver !== 'undefined') {
     resizeObserver = new ResizeObserver(() => {
       if (containerRef.value) {
         scrollTop.value = containerRef.value.scrollTop
       }
+      measureItems()
     })
     resizeObserver.observe(containerRef.value)
   }

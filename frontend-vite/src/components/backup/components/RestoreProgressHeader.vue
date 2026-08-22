@@ -2,7 +2,7 @@
   <div class="rp-header">
     <div class="rp-header-left">
       <div class="rp-icon" :class="iconClass">
-        <i :class="iconName" />
+        <FontAwesomeIcon :icon="iconName.replace(' fa-spin', '')" :spin="!!iconClass['rp-icon-running']" aria-hidden="true" />
       </div>
       <div class="rp-header-text">
         <div class="rp-title">{{ statusTitle }}</div>

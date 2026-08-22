@@ -57,13 +57,13 @@
         <div class="m-login-btn-area">
           <button type="submit" class="m-login-btn" :disabled="loading" aria-label="登录">
             <span v-if="!loading">登录</span>
-            <span v-else class="m-login-spinner"></span>
+            <span v-else class="m-login-spinner" />
           </button>
         </div>
       </form>
     </div>
 
-    <div class="m-login-footer">东莞玩具供应链管理系统</div>
+    <div class="m-login-footer">滨发玩具供应链管理系统</div>
   </div>
 </template>
 
@@ -148,7 +148,7 @@ const { loading, showPassword, errorMsg, form, handleLogin } = useLogin()
   background: #F9F9FB;
   outline: none;
   transition: border-color 0.2s, box-shadow 0.2s;
-  font-family: -apple-system, 'SF Pro Text', 'Inter', 'Noto Sans SC', sans-serif;
+  font-family: -apple-system, 'SF Pro Text', 'Inter', 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
 
 .m-login-field input:focus {
@@ -213,7 +213,7 @@ const { loading, showPassword, errorMsg, form, handleLogin } = useLogin()
   cursor: pointer;
   transition: transform 0.3s var(--m-ease-spring, cubic-bezier(0.175, 0.885, 0.32, 1.275)),
               box-shadow 0.3s var(--m-ease-smooth, cubic-bezier(0.25, 0.1, 0.25, 1));
-  font-family: -apple-system, 'SF Pro Text', 'Inter', 'Noto Sans SC', sans-serif;
+  font-family: -apple-system, 'SF Pro Text', 'Inter', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   display: flex;
   align-items: center;
   justify-content: center;

@@ -7,7 +7,7 @@
       </div>
       <div class="ci-header-actions">
         <UiSearchInput v-model="invSearchModel" placeholder="搜索产品名称或69码..." @search="onInvSearchInput" />
-        <button class="ci-action-btn ci-action-primary" @click="invRefetch()" aria-label="刷新">
+        <button class="ci-action-btn ci-action-primary" aria-label="刷新" @click="invRefetch()">
           <FontAwesomeIcon icon="sync-alt" style="margin-right: 4px" aria-hidden="true" />刷新
         </button>
       </div>
@@ -40,7 +40,7 @@
       :total-records="invTotalPages * invPerPage"
       row-key="id"
       @page="onInvPageChange"
-      @rowClick="(row: InventorySummaryItem) => selectCaseRow(row)"
+      @row-click="(row: InventorySummaryItem) => selectCaseRow(row)"
     >
       <template #empty>
         <div class="ci-empty"><FontAwesomeIcon icon="warehouse" aria-hidden="true" /><span>暂无库存数据</span></div>
@@ -53,7 +53,7 @@
         <strong :style="{ color: (row as InventorySummaryItem).current_stock < 0 ? 'var(--color-danger-500)' : 'var(--color-primary-500)' }">{{ (row as InventorySummaryItem).current_stock }}</strong>
       </template>
       <template #column-body-actions="{ row }">
-        <button class="ci-icon-btn ci-icon-info" @click.stop="selectCaseRow(row as InventorySummaryItem)" aria-label="流水">
+        <button class="ci-icon-btn ci-icon-info" aria-label="流水" @click.stop="selectCaseRow(row as InventorySummaryItem)">
           <FontAwesomeIcon icon="history" style="margin-right: 2px" aria-hidden="true" />流水
         </button>
       </template>

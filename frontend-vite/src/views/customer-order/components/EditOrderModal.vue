@@ -4,7 +4,7 @@
       <div class="oe-header">
         <div class="oe-header-left">
           <span class="oe-order-no">{{ detailData.order_no }}</span>
-          <span :class="['oe-status-dot', getStatusClass(detailData.status)]"></span>
+          <span :class="['oe-status-dot', getStatusClass(detailData.status)]" />
           <span class="oe-status-text">{{ detailData.status }}</span>
         </div>
         <span class="oe-date">{{ detailData.order_date }}</span>
@@ -24,7 +24,7 @@
           <div class="oe-info-cell">
             <span class="oe-info-label">产品</span>
             <span class="oe-info-value oe-info-product">
-              <img loading="lazy" v-if="detailData.product?.image" :src="detailData.product.image" class="oe-product-thumb" alt="产品图片" />
+              <img v-if="detailData.product?.image" loading="lazy" :src="detailData.product.image" class="oe-product-thumb" alt="产品图片" />
               <span>{{ detailData.product?.name || '-' }}</span>
             </span>
           </div>
@@ -32,11 +32,11 @@
             <span class="oe-info-label">69码</span>
             <span class="oe-info-value oe-mono">{{ detailData.product?.barcode || '-' }}</span>
           </div>
-          <div class="oe-info-cell" v-if="detailData.country">
+          <div v-if="detailData.country" class="oe-info-cell">
             <span class="oe-info-label">国家</span>
             <span class="oe-info-value">{{ detailData.country }}</span>
           </div>
-          <div class="oe-info-cell" v-if="detailData.batch_no">
+          <div v-if="detailData.batch_no" class="oe-info-cell">
             <span class="oe-info-label">批次号</span>
             <span class="oe-info-value oe-mono">{{ detailData.batch_no }}</span>
           </div>
@@ -80,11 +80,11 @@
           <div class="oe-edit-cell">
             <label class="oe-edit-label">数量</label>
             <div class="oe-edit-control">
-              <button class="oe-stepper-btn" @click="editForm.quantity = Math.max(1, editForm.quantity - 1)" aria-label="减少">
+              <button class="oe-stepper-btn" aria-label="减少" @click="editForm.quantity = Math.max(1, editForm.quantity - 1)">
                 <FontAwesomeIcon icon="minus" aria-hidden="true" />
               </button>
-              <input type="number" class="oe-stepper-input" v-model.number="editForm.quantity" min="1" step="1" autocomplete="off" aria-label="数值输入" />
-              <button class="oe-stepper-btn" @click="editForm.quantity = editForm.quantity + 1" aria-label="增加">
+              <input v-model.number="editForm.quantity" type="number" class="oe-stepper-input" min="1" step="1" autocomplete="off" aria-label="数值输入" />
+              <button class="oe-stepper-btn" aria-label="增加" @click="editForm.quantity = editForm.quantity + 1">
                 <FontAwesomeIcon icon="plus" aria-hidden="true" />
               </button>
             </div>
@@ -92,11 +92,11 @@
           <div class="oe-edit-cell">
             <label class="oe-edit-label">抵扣备货</label>
             <div class="oe-edit-control">
-              <button class="oe-stepper-btn" @click="editForm.deductQuantity = Math.max(0, editForm.deductQuantity - 1)" aria-label="减少抵扣">
+              <button class="oe-stepper-btn" aria-label="减少抵扣" @click="editForm.deductQuantity = Math.max(0, editForm.deductQuantity - 1)">
                 <FontAwesomeIcon icon="minus" aria-hidden="true" />
               </button>
-              <input type="number" class="oe-stepper-input" v-model.number="editForm.deductQuantity" min="0" step="1" autocomplete="off" aria-label="数值输入" />
-              <button class="oe-stepper-btn" @click="editForm.deductQuantity = editForm.deductQuantity + 1" aria-label="增加抵扣">
+              <input v-model.number="editForm.deductQuantity" type="number" class="oe-stepper-input" min="0" step="1" autocomplete="off" aria-label="数值输入" />
+              <button class="oe-stepper-btn" aria-label="增加抵扣" @click="editForm.deductQuantity = editForm.deductQuantity + 1">
                 <FontAwesomeIcon icon="plus" aria-hidden="true" />
               </button>
               <span v-if="availableStockin > 0" class="oe-available-hint">可用: {{ availableStockin }}</span>
@@ -105,7 +105,7 @@
         </div>
         <div class="oe-edit-full">
           <label class="oe-edit-label">备注</label>
-          <textarea class="oe-textarea" v-model="editForm.note" rows="2" placeholder="输入备注信息…" aria-label="输入备注信息…" />
+          <textarea v-model="editForm.note" class="oe-textarea" rows="2" placeholder="输入备注信息…" aria-label="输入备注信息…" />
         </div>
       </div>
     </div>

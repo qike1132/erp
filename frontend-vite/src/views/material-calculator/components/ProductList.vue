@@ -10,9 +10,9 @@
     <template v-else>
       <VirtualList
         :items="products"
-        :itemHeight="80"
-        :containerHeight="productListHeight"
-        :itemKey="(p) => p.id"
+        :item-height="80"
+        :container-height="productListHeight"
+        :item-key="(p) => p.id"
       >
         <template #default="{ item: p }">
           <div

@@ -1,7 +1,7 @@
 <template>
   <!-- 搜索框 -->
   <div class="cgl-search">
-    <i class="fas fa-search cgl-search-icon" aria-hidden="true" />
+    <FontAwesomeIcon icon="search" class="cgl-search-icon" aria-hidden="true" />
     <input
       class="cgl-search-input"
       type="text"

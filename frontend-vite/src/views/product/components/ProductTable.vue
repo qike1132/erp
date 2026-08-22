@@ -2,8 +2,8 @@
   <div class="pd-col-title">
     <span><FontAwesomeIcon icon="list" aria-hidden="true" /> 产品列表</span>
     <div class="pd-col-actions">
-      <UiSearchInput :modelValue="searchTerm" placeholder="搜索产品名称或69码..." @search="onSearchInput" @update:modelValue="searchTerm = $event" />
-      <select :value="`${sortBy}-${sortOrder}`" class="pd-sort" @change="onSortChange" aria-label="select输入">
+      <UiSearchInput :model-value="searchTerm" placeholder="搜索产品名称或69码..." @search="onSearchInput" @update:model-value="searchTerm = $event" />
+      <select :value="`${sortBy}-${sortOrder}`" class="pd-sort" aria-label="select输入" @change="onSortChange">
         <option value="name-asc">名称 A-Z</option>
         <option value="name-desc">名称 Z-A</option>
       </select>
@@ -41,13 +41,13 @@
         <template #column-body-factory="{ row }"><span class="pd-factory">{{ (row as Product).factory || '-' }}</span></template>
         <template #column-body-actions="{ row }">
           <div class="pd-actions">
-            <button class="pd-act-btn pd-act-bom" title="配置BOM表" @click="emit('open-bom', row as Product)" aria-label="设置">
+            <button class="pd-act-btn pd-act-bom" title="配置BOM表" aria-label="设置" @click="emit('open-bom', row as Product)">
               <FontAwesomeIcon icon="cogs" aria-hidden="true" />
             </button>
-            <button class="pd-act-btn pd-act-edit" title="编辑" @click="emit('open-edit', row as Product)" aria-label="编辑">
+            <button class="pd-act-btn pd-act-edit" title="编辑" aria-label="编辑" @click="emit('open-edit', row as Product)">
               <FontAwesomeIcon icon="edit" aria-hidden="true" />
             </button>
-            <button class="pd-act-btn pd-act-delete" title="删除" :disabled="actionId === (row as Product).id" @click="emit('delete', row as Product)" aria-label="删除">
+            <button class="pd-act-btn pd-act-delete" title="删除" :disabled="actionId === (row as Product).id" aria-label="删除" @click="emit('delete', row as Product)">
               <FontAwesomeIcon icon="trash" aria-hidden="true" />
             </button>
           </div>

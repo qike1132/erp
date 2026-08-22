@@ -35,8 +35,8 @@
           <button
             class="bk-action-btn bk-action-secondary"
             :disabled="checking"
-            @click="handleIntegrityCheck"
             title="备份完整性巡检"
+            @click="handleIntegrityCheck"
           >
             <UiLoadingIcon :loading="checking" icon="shield-alt" />
             {{ checking ? '巡检中...' : '完整性巡检' }}

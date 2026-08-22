@@ -117,7 +117,7 @@
   --z-toast: 50;
 
   /* Font */
-  --font-sans: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Roboto, sans-serif;
   --font-mono: 'Courier New', monospace;
 
   /* Radius - Plush Cute style: generous rounding for soft feel */
@@ -185,7 +185,7 @@ body {
 }
 
 /* ============ Typography Hierarchy ============ */
-/* H1 鈥?Page title: primary color + largest + heaviest */
+/* H1 –Page title: primary color + largest + heaviest */
 h1 {
   font-size: 1.5rem;
   font-weight: 800;
@@ -194,7 +194,7 @@ h1 {
   letter-spacing: -0.02em;
 }
 
-/* H2 鈥?Section title: heading color + heavy */
+/* H2 –Section title: heading color + heavy */
 h2 {
   font-size: 1.25rem;
   font-weight: 700;
@@ -203,7 +203,7 @@ h2 {
   letter-spacing: -0.01em;
 }
 
-/* H3 鈥?Subsection: slightly smaller, still distinct from body */
+/* H3 –Subsection: slightly smaller, still distinct from body */
 h3 {
   font-size: 1.0625rem;
   font-weight: 700;
@@ -211,7 +211,7 @@ h3 {
   line-height: 1.4;
 }
 
-/* H4 鈥?Card/title: same size as body, distinguished by weight + color */
+/* H4 –Card/title: same size as body, distinguished by weight + color */
 h4 {
   font-size: 0.9375rem;
   font-weight: 700;
@@ -228,7 +228,7 @@ h5, h6 {
 h5 { font-size: 0.875rem; }
 h6 { font-size: 0.8125rem; }
 
-/* Subtitle 鈥?descriptive text below headings */
+/* Subtitle –descriptive text below headings */
 .subtitle {
   font-size: 0.875rem;
   font-weight: 500;
@@ -236,7 +236,7 @@ h6 { font-size: 0.8125rem; }
   line-height: 1.5;
 }
 
-/* Label 鈥?form labels, field names */
+/* Label –form labels, field names */
 .text-label {
   font-size: 0.75rem;
   font-weight: 600;
@@ -244,7 +244,7 @@ h6 { font-size: 0.8125rem; }
   line-height: 1.4;
 }
 
-/* Auxiliary 鈥?hints, timestamps, metadata */
+/* Auxiliary –hints, timestamps, metadata */
 .text-aux {
   font-size: 0.75rem;
   font-weight: 400;
@@ -367,7 +367,7 @@ h6 { font-size: 0.8125rem; }
     color: inherit;
   }
 
-  /* Count badge - primary gradient pill for informational counts (e.g. "3 瀹?, "5 涓鍗?) */
+  /* Count badge - primary gradient pill for informational counts (e.g. "3 个", "5 条订单") */
   .count-badge {
     display: inline-flex;
     align-items: center;
@@ -380,7 +380,7 @@ h6 { font-size: 0.8125rem; }
     white-space: nowrap;
   }
 
-  /* Count badge subtle - lightweight neutral pill for metadata (e.g. "鍏?3 涓?, "鏁伴噺: 5") */
+  /* Count badge subtle - lightweight neutral pill for metadata (e.g. "共 3 个", "数量: 5") */
   .count-badge-subtle {
     display: inline-flex;
     align-items: center;

@@ -1,6 +1,6 @@
-import { computed, ref, toRef, watch, type Ref } from 'vue'
+import { computed, reactive, ref, toRef, watch, type Ref } from 'vue'
 import { outsourceApi } from '@/api/outsource'
-import type { OrderOutsourceProcess } from '@/api/outsource'
+import type { OrderOutsourceProcess, OutsourceProcessFlow } from '@/api/outsource'
 import { useAuthStore } from '@/stores/auth'
 import { toast } from '@/composables/useToast'
 import type { OutsourceOrderRow } from '@/views/outsource/composables/useOutsourceOrders'
@@ -17,24 +17,31 @@ export interface ProcessGroup {
 export function useOutsourceProcess(detailDataProp: Ref<OutsourceOrderRow | null>, emit: (event: 'refresh') => void) {
   const authStore = useAuthStore()
   const canManage = computed(() => authStore.hasPermission('outsource_manage'))
+  /** 贝乐用户：仅确认收货，不可发货 */
+  const isBeile = computed(() => authStore.user?.username === '贝乐')
+  /** 发货权限：非贝乐用户可发货 */
+  const canShip = computed(() => canManage.value && !isBeile.value)
+  /** 确认收货权限：仅贝乐用户 */
+  const canReceive = computed(() => canManage.value && isBeile.value)
 
   const processes = ref<OrderOutsourceProcess[]>([])
   const loadingProcesses = ref(false)
-  const generating = ref(false)
+  /** 外发工序流水（发货/收货记录，台账用） */
+  const flows = ref<OutsourceProcessFlow[]>([])
+
+  /** 每道工序可编辑的本批发货数量草稿（缺省=剩余待发） */
+  const shipQtyDrafts = reactive<Record<number, string>>({})
+  /** 每道工序可编辑的本批收货数量草稿（缺省=剩余待收） */
+  const receiveQtyDrafts = reactive<Record<number, string>>({})
+  const bulkShipping = ref(false)
+  const bulkReceiving = ref(false)
 
   const detailData = toRef(detailDataProp, 'value')
 
   const isStockinRecord = computed(() => detailData.value?.record_type === 'stockin')
 
-  const detailTotalQuantity = computed(() => {
-    if (!detailData.value) return 0
-    const items = detailData.value.items || []
-    if (items.length === 0) return detailData.value.quantity || 0
-    return items.reduce((sum, s) => sum + (s.quantity || 0), 0)
-  })
-
   const totalProcesses = computed(() => processes.value.length)
-  const completedProcesses = computed(() => processes.value.filter((p) => p.status === 'completed').length)
+  const completedProcesses = computed(() => processes.value.filter((p) => p.status === 'received').length)
   const detailProgress = computed(() => {
     const total = totalProcesses.value
     if (!total) return 0
@@ -45,8 +52,8 @@ export function useOutsourceProcess(detailDataProp: Ref<OutsourceOrderRow | null
     if (!total) return '未配置工序'
     if (completedProcesses.value === total) return '外发完成'
     const started = processes.value.filter((p) => p.status !== 'pending').length
-    const cur = processes.value.find((p) => p.status !== 'completed')
-    return started > 0 ? `进行中（${cur?.process_type || ''}）` : '待开始'
+    const cur = processes.value.find((p) => p.status !== 'received')
+    return started > 0 ? `进行中（${cur?.process_type || ''}）` : '待发货'
   })
   const detailStatusClass = computed(() => {
     if (detailProgress.value === 100) return 'completed'
@@ -84,6 +91,55 @@ export function useOutsourceProcess(detailDataProp: Ref<OutsourceOrderRow | null
 
   const processRows = computed(() => processes.value)
 
+  /** 某道工序的目标数量（所属 SKU/订单数量） */
+  function skuQtyOf(p: OrderOutsourceProcess): number {
+    const group = processGroups.value.find((g) => g.processes.some((x) => x.id === p.id))
+    return group?.skuQty || detailData.value?.quantity || 0
+  }
+
+  /** 某道工序剩余待发数量（目标 - 已发，下限 0） */
+  function remainingShipQty(p: OrderOutsourceProcess): number {
+    return Math.max(0, skuQtyOf(p) - (p.shipped_quantity || 0))
+  }
+
+  /** 某道工序剩余待收数量（已发 - 已收，下限 0） */
+  function remainingReceiveQty(p: OrderOutsourceProcess): number {
+    return Math.max(0, (p.shipped_quantity || 0) - (p.received_quantity || 0))
+  }
+
+  /** 可一键发货的工序数（有待发剩余且未开始收货） */
+  const pendingCount = computed(
+    () => processes.value.filter((p) => remainingShipQty(p) > 0 && (p.received_quantity || 0) === 0).length,
+  )
+  /** 可一键收货的工序数（有待收剩余） */
+  const shippedCount = computed(() => processes.value.filter((p) => remainingReceiveQty(p) > 0).length)
+
+  // ==================== 台账（只读汇总） ====================
+
+  /** 订单总数量（SKU 合计） */
+  const totalQty = computed(() => processGroups.value.reduce((sum, g) => sum + (g.skuQty || 0), 0))
+  /** 已发货合计（累计） */
+  const shippedTotal = computed(() => processes.value.reduce((sum, p) => sum + (p.shipped_quantity || 0), 0))
+  /** 已收货合计（累计） */
+  const receivedTotal = computed(() => processes.value.reduce((sum, p) => sum + (p.received_quantity || 0), 0))
+  /** 未发货合计 */
+  const remainingTotal = computed(() => Math.max(0, totalQty.value - shippedTotal.value))
+  /** 发货记录（流水，时间倒序） */
+  const shipRecords = computed(() => flows.value.filter((f) => f.action === 'ship'))
+  /** 收货记录（流水，时间倒序） */
+  const receiveRecords = computed(() => flows.value.filter((f) => f.action === 'receive'))
+  /** 未发货清单：工序 / 目标 / 已发 / 剩余 */
+  const remainingList = computed(() =>
+    processes.value
+      .filter((p) => remainingShipQty(p) > 0)
+      .map((p) => ({
+        process_type: p.process_type,
+        target: skuQtyOf(p),
+        shipped: p.shipped_quantity || 0,
+        remaining: remainingShipQty(p),
+      })),
+  )
+
   function progressVariant(progress: number): 'primary' | 'success' | 'warning' | 'danger' {
     if (progress === 100) return 'success'
     if (progress > 0) return 'warning'
@@ -93,6 +149,9 @@ export function useOutsourceProcess(detailDataProp: Ref<OutsourceOrderRow | null
   async function loadProcesses(orderId: number) {
     loadingProcesses.value = true
     processes.value = []
+    // 清空数量草稿，避免跨订单/重载后残留旧值
+    for (const k of Object.keys(shipQtyDrafts)) delete shipQtyDrafts[Number(k)]
+    for (const k of Object.keys(receiveQtyDrafts)) delete receiveQtyDrafts[Number(k)]
     try {
       const res = await outsourceApi.orderProcesses(orderId)
       processes.value = res.data ?? []
@@ -103,97 +162,122 @@ export function useOutsourceProcess(detailDataProp: Ref<OutsourceOrderRow | null
     }
   }
 
+  async function loadFlows(orderId: number) {
+    try {
+      const res = await outsourceApi.orderFlows(orderId)
+      flows.value = res.data ?? []
+    } catch {
+      flows.value = []
+    }
+  }
+
   function reloadDetail() {
-    if (detailData.value) loadProcesses(detailData.value.id)
+    if (detailData.value) {
+      loadProcesses(detailData.value.id)
+      loadFlows(detailData.value.id)
+    }
     emit('refresh')
   }
 
-  async function handleGenerate() {
-    if (!detailData.value) return
-    generating.value = true
-    try {
-      const res = await outsourceApi.generateProcesses(detailData.value.id)
-      toast.success(res.message || '工序已生成')
-      await loadProcesses(detailData.value.id)
-    } catch (e) {
-      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      toast.error(msg || '生成工序失败')
-    } finally {
-      generating.value = false
-    }
+  /** 写入某道工序的本批发货数量草稿（表格输入） */
+  function setShipQty(id: number, value: string) {
+    shipQtyDrafts[id] = value
   }
 
-  async function handleStart(p: OrderOutsourceProcess) {
-    try {
-      if (p.status === 'in_progress') {
-        await outsourceApi.completeProcess(p.id)
-        toast.success(`「${p.process_type}」已完成`)
-      } else {
-        await outsourceApi.startProcess(p.id)
-        toast.success(`「${p.process_type}」已开始`)
+  /** 写入某道工序的本批收货数量草稿（表格输入） */
+  function setReceiveQty(id: number, value: string) {
+    receiveQtyDrafts[id] = value
+  }
+
+  /** 一键发货：所有有待发剩余且未开始收货的工序按剩余发货（数量取各行输入，缺省剩余） */
+  async function handleBulkShip() {
+    const targets = processes.value.filter((p) => remainingShipQty(p) > 0 && (p.received_quantity || 0) === 0)
+    if (targets.length === 0) {
+      toast.info('没有待发货的工序')
+      return
+    }
+    bulkShipping.value = true
+    let ok = 0
+    const errors: string[] = []
+    for (const p of targets) {
+      const qty = Number(shipQtyDrafts[p.id]) || remainingShipQty(p)
+      try {
+        await outsourceApi.shipProcess(p.id, qty)
+        delete shipQtyDrafts[p.id]
+        ok += 1
+      } catch (e) {
+        const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+        errors.push(`「${p.process_type}」${msg || '发货失败'}`)
       }
-      reloadDetail()
-    } catch (e) {
-      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      toast.error(msg || '操作失败')
     }
+    bulkShipping.value = false
+    if (errors.length === 0) {
+      toast.success(`全部 ${ok} 道工序已发货`)
+    } else {
+      toast.error(`${ok} 道发货成功，${errors.length} 道失败：${errors.join('；')}`)
+    }
+    reloadDetail()
   }
 
-  async function handleCompleteDirect(p: OrderOutsourceProcess) {
-    try {
-      await outsourceApi.completeProcess(p.id)
-      toast.success(`「${p.process_type}」已完成`)
-      reloadDetail()
-    } catch (e) {
-      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      toast.error(msg || '操作失败')
+  /** 一键收货：所有有待收剩余的工序按剩余收货（数量取各行输入，缺省剩余） */
+  async function handleBulkReceive() {
+    const targets = processes.value.filter((p) => remainingReceiveQty(p) > 0)
+    if (targets.length === 0) {
+      toast.info('没有待收货的工序')
+      return
     }
-  }
-
-  async function handleDeleteProcess(p: OrderOutsourceProcess) {
-    try {
-      await outsourceApi.deleteProcess(p.id)
-      toast.success(`已删除工序「${p.process_type}」`)
-      reloadDetail()
-    } catch {
-      toast.error('删除失败')
+    bulkReceiving.value = true
+    let ok = 0
+    const errors: string[] = []
+    for (const p of targets) {
+      const qty = receiveQtyDrafts[p.id] ? Number(receiveQtyDrafts[p.id]) : remainingReceiveQty(p)
+      try {
+        await outsourceApi.receiveProcess(p.id, qty)
+        delete receiveQtyDrafts[p.id]
+        ok += 1
+      } catch (e) {
+        const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+        errors.push(`「${p.process_type}」${msg || '确认收货失败'}`)
+      }
     }
-  }
-
-  async function updatePlanned(p: OrderOutsourceProcess, field: 'planned_start_time' | 'planned_end_time', value: string) {
-    try {
-      const iso = value ? new Date(value).toISOString() : null
-      await outsourceApi.updateProcess(p.id, { [field]: iso })
-      toast.success('计划时间已更新')
-      if (detailData.value) await loadProcesses(detailData.value.id)
-    } catch {
-      toast.error('更新失败')
+    bulkReceiving.value = false
+    if (errors.length === 0) {
+      toast.success(`全部 ${ok} 道工序已确认收货`)
+    } else {
+      toast.error(`${ok} 道收货成功，${errors.length} 道失败：${errors.join('；')}`)
     }
-  }
-
-  function toDateTimeLocal(v?: string | null): string {
-    if (!v) return ''
-    const [datePart, timePart] = v.split(' ')
-    if (!timePart) return datePart || ''
-    return `${datePart}T${timePart}`
+    reloadDetail()
   }
 
   function statusLabel(status: string): string {
-    return ({ pending: '待开始', in_progress: '进行中', completed: '已完成' } as Record<string, string>)[status] || status
-  }
-
-  function shortDate(v?: string | null): string {
-    if (!v) return '-'
-    return v.length > 16 ? v.slice(0, 16) : v
+    return ({ pending: '待发货', shipped: '已发货', received: '已收货' } as Record<string, string>)[status] || status
   }
 
   return {
-    canManage,
+    canShip,
+    canReceive,
     processes,
     loadingProcesses,
-    generating,
+    flows,
+    shipQtyDrafts,
+    receiveQtyDrafts,
+    bulkShipping,
+    bulkReceiving,
+    pendingCount,
+    shippedCount,
+    totalQty,
+    shippedTotal,
+    receivedTotal,
+    remainingTotal,
+    shipRecords,
+    receiveRecords,
+    remainingList,
+    remainingShipQty,
+    remainingReceiveQty,
+    setShipQty,
+    setReceiveQty,
+    loadFlows,
     isStockinRecord,
-    detailTotalQuantity,
     totalProcesses,
     completedProcesses,
     detailProgress,
@@ -203,13 +287,8 @@ export function useOutsourceProcess(detailDataProp: Ref<OutsourceOrderRow | null
     processRows,
     progressVariant,
     loadProcesses,
-    handleGenerate,
-    handleStart,
-    handleCompleteDirect,
-    handleDeleteProcess,
-    updatePlanned,
-    toDateTimeLocal,
+    handleBulkShip,
+    handleBulkReceive,
     statusLabel,
-    shortDate,
   }
 }

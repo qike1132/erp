@@ -4,17 +4,17 @@
     <div class="bt-whitelist-modal">
       <div class="bt-whitelist-header">
         <span>白名单客户</span>
-        <button class="bt-whitelist-close" @click="showWhitelistModal = false" aria-label="关闭">&times;</button>
+        <button class="bt-whitelist-close" aria-label="关闭" @click="showWhitelistModal = false">&times;</button>
       </div>
       <div class="bt-whitelist-body">
         <label v-for="c in allCustomers" :key="c" class="bt-whitelist-item">
-          <input type="checkbox" :value="c" v-model="whitelistEdit" aria-label="勾选项" />
+          <input v-model="whitelistEdit" type="checkbox" :value="c" aria-label="勾选项" />
           <span>{{ c }}</span>
         </label>
       </div>
       <div class="bt-whitelist-footer">
         <UiButton variant="outline" @click="showWhitelistModal = false">取消</UiButton>
-        <UiButton variant="primary" @click="saveWhitelist" :disabled="whitelistSaving">保存</UiButton>
+        <UiButton variant="primary" :disabled="whitelistSaving" @click="saveWhitelist">保存</UiButton>
       </div>
     </div>
   </div>

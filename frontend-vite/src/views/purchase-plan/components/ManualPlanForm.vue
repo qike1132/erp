@@ -5,69 +5,69 @@
       <span class="csd-field-flex">产品名称 <span class="csd-required">*</span></span>
       <span class="csd-field-xs">数量 <span class="csd-required">*</span></span>
       <span class="csd-field-sm">出货日期 <span class="csd-required">*</span></span>
-      <span class="csd-field-action"></span>
+      <span class="csd-field-action" />
     </div>
-    <div class="csd-detail-item" v-for="(d, idx) in details" :key="idx">
-        <div class="csd-detail-row">
-          <div class="csd-field csd-field-cust">
-            <UiSelect
-              v-model="d.customer_id"
-              placeholder="选择客户"
-              :options="customerOptions"
-              style="width: 100%"
-            />
-          </div>
-          <div class="csd-field csd-field-flex csd-field-product">
-            <input
-              v-model="d.product_name"
-              type="text"
-              class="csd-input"
-              placeholder="输入产品名称"
-              @input="emit('product-input', idx)"
-              @focus="emit('product-focus', idx)"
-              @blur="emit('product-blur', idx)"
-            />
-            <div v-if="d._showSuggest && productSuggestions[idx]?.length" class="csd-suggest-list">
-              <div
-                v-for="p in productSuggestions[idx]"
-                :key="p.id"
-                class="csd-suggest-item"
-                @mousedown.prevent="emit('select-product', idx, p)"
-              >
-                <span class="csd-suggest-name">{{ p.name }}</span>
-                <span class="csd-suggest-meta">
-                  <span v-if="p.barcode" class="csd-suggest-barcode">{{ p.barcode }}</span>
-                  <span v-if="p.current_stock != null" class="csd-suggest-stock">库存 {{ p.current_stock }}</span>
-                </span>
-              </div>
+    <div v-for="(d, idx) in details" :key="idx" class="csd-detail-item">
+      <div class="csd-detail-row">
+        <div class="csd-field csd-field-cust">
+          <UiSelect
+            v-model="d.customer_id"
+            placeholder="选择客户"
+            :options="customerOptions"
+            style="width: 100%"
+          />
+        </div>
+        <div class="csd-field csd-field-flex csd-field-product">
+          <input
+            v-model="d.product_name"
+            type="text"
+            class="csd-input"
+            placeholder="输入产品名称"
+            @input="emit('product-input', idx)"
+            @focus="emit('product-focus', idx)"
+            @blur="emit('product-blur', idx)"
+          />
+          <div v-if="d._showSuggest && productSuggestions[idx]?.length" class="csd-suggest-list">
+            <div
+              v-for="p in productSuggestions[idx]"
+              :key="p.id"
+              class="csd-suggest-item"
+              @mousedown.prevent="emit('select-product', idx, p)"
+            >
+              <span class="csd-suggest-name">{{ p.name }}</span>
+              <span class="csd-suggest-meta">
+                <span v-if="p.barcode" class="csd-suggest-barcode">{{ p.barcode }}</span>
+                <span v-if="p.current_stock != null" class="csd-suggest-stock">库存 {{ p.current_stock }}</span>
+              </span>
             </div>
           </div>
-          <div class="csd-field csd-field-xs">
-            <input
-              v-model.number="d.quantity"
-              type="number"
-              class="csd-input csd-input-num"
-              min="1"
-              placeholder="0"
-            />
-          </div>
-          <div class="csd-field csd-field-sm">
-            <input
-              type="date"
-              class="csd-input csd-input-date"
-              :value="d.plan_date"
-              @input="d.plan_date = ($event.target as HTMLInputElement).value"
-              @click="($event.target as HTMLInputElement).showPicker()"
-            />
-          </div>
-          <button
-            v-if="details.length > 1"
-            class="csd-remove-btn"
-            title="移除此行"
-            @click="emit('remove', idx)"
-          >
-            <FontAwesomeIcon icon="trash" aria-hidden="true" />
-          </button>
+        </div>
+        <div class="csd-field csd-field-xs">
+          <input
+            v-model.number="d.quantity"
+            type="number"
+            class="csd-input csd-input-num"
+            min="1"
+            placeholder="0"
+          />
+        </div>
+        <div class="csd-field csd-field-sm">
+          <input
+            type="date"
+            class="csd-input csd-input-date"
+            :value="d.plan_date"
+            @input="d.plan_date = ($event.target as HTMLInputElement).value"
+            @click="($event.target as HTMLInputElement).showPicker()"
+          />
+        </div>
+        <button
+          v-if="details.length > 1"
+          class="csd-remove-btn"
+          title="移除此行"
+          @click="emit('remove', idx)"
+        >
+          <FontAwesomeIcon icon="trash" aria-hidden="true" />
+        </button>
       </div>
     </div>
     <div v-if="errorMsg" class="csd-error">

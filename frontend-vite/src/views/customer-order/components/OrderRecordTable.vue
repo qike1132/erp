@@ -53,7 +53,7 @@
       </template>
       <template #column-body-actions="{ row }">
         <div class="co-action-group">
-          <button class="co-btn-icon co-btn-info" @click="emit('view-detail', row as OrderRecord)" aria-label="详情">
+          <button class="co-btn-icon co-btn-info" aria-label="详情" @click="emit('view-detail', row as OrderRecord)">
             <FontAwesomeIcon icon="eye" aria-hidden="true" />
           </button>
         </div>

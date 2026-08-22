@@ -2,7 +2,7 @@
   <div class="m-page">
     <MobileNavBar title="物料计算器" :show-back="true">
       <template #right>
-        <button class="m-nav-btn" @click="handleCalculate" :disabled="calculating" :aria-label="calculating ? '计算中...' : '计算'">
+        <button class="m-nav-btn" :disabled="calculating" :aria-label="calculating ? '计算中...' : '计算'" @click="handleCalculate">
           {{ calculating ? '计算中...' : '计算' }}
         </button>
       </template>
@@ -36,7 +36,7 @@
         <div v-for="(rows, category) in calcResults" :key="category" class="m-result-group">
           <div class="m-result-cat" @click="toggleCategory(category as string)">
             <span>{{ categoryLabel(category as string) }} ({{ rows.length }})</span>
-            <svg :style="{ transform: collapsed[category as string] ? '' : 'rotate(90deg)' }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="9 18 15 12 9 6"/></svg>
+            <svg :style="{ transform: collapsed[category as string] ? '' : 'rotate(90deg)' }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="9 18 15 12 9 6" /></svg>
           </div>
           <template v-if="!collapsed[category as string]">
             <div v-for="row in rows" :key="row.material_name" class="m-result-row">

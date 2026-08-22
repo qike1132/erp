@@ -1,6 +1,6 @@
 <template>
   <div class="bo-inventory">
-    <!-- 筛选区已迁移到 BeileOrderView 的 .page-card-header 右侧 -->
+    <!-- 筛选区在 HubeiView 的 .page-card-header 右侧 -->
 
     <!-- 表格区 -->
     <div class="bo-card-main">
@@ -20,14 +20,7 @@
           <div class="bo-toolbar-left">
             <span v-if="canPrint && selectedCount > 0" class="bo-selected-count">已选 {{ selectedCount }} 条</span>
           </div>
-          <div class="bo-toolbar-right">
-            <button v-if="canExport" type="button" class="bo-toolbar-btn bo-toolbar-btn--export" :disabled="exporting || displayOrders.length === 0" @click="handleExport">
-              <FontAwesomeIcon icon="file-csv" aria-hidden="true" /> 导出
-            </button>
-            <button v-if="canPrint" type="button" class="bo-toolbar-btn bo-toolbar-btn--print" :disabled="selectedCount === 0" @click="handlePrint">
-              <FontAwesomeIcon icon="print" aria-hidden="true" /> 打印
-            </button>
-          </div>
+          <div class="bo-toolbar-right" />
         </div>
         <div class="bo-table-wrap">
           <!-- 表头（独立于虚拟滚动，粘在顶部） -->
@@ -56,7 +49,7 @@
               :estimated-height="54"
               dynamic-height
               :container-height="listAreaHeight"
-              :item-key="(i: BeileOrderRow) => i.id"
+              :item-key="(i: BeileOrderRowType) => i.id"
               class="bo-virtual-list"
             >
               <template #default="{ item }">
@@ -64,7 +57,7 @@
                   :item="item"
                   :show-product-column="showProductColumn"
                   :confirm-status="confirmStatus"
-                  :confirming-ids="confirmingIds"
+                  :is-confirming="confirmingIds.has(item.id)"
                   :highlight-id="highlightId"
                   :keyword="appliedProduct"
                   :selectable="canPrint"
@@ -105,32 +98,25 @@
 /**
  * BeileOrderTab.vue — 湖北订单列表子组件
  *
- * 职责：以表格展示 factory=湖北 的订单，支持订单号/客户筛选与分页。
- * 数据获取复用 orderApi.beileList，锁定 factory=湖北。
- * 数据/确认逻辑下沉到 composables/useBeileOrders.ts，
- * 列表行拆分为 components/BeileOrderRow.vue，
- * 详情弹窗拆分为 components/BeileOrderDetailDialog.vue。
+ * 职责：以虚拟滚动表格展示 factory=湖北 的订单。
+ * 数据/筛选/分页/确认/选中/导出/打印逻辑全部下沉到
+ * composables/useBeileOrders.ts，由父组件 HubeiView 通过
+ * provide/inject 共享同一状态实例，本组件仅注入并负责
+ * 虚拟滚动容器高度测量与滚动归位。
  */
-import { ref, computed, watch, onUnmounted } from 'vue'
+import { ref, watch, onUnmounted } from 'vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
 import UiSpinner from '@/components/ui/UiSpinner.vue'
 import UiCheckbox from '@/components/ui/UiCheckbox.vue'
 import VirtualList from '@/components/ui/VirtualList.vue'
 import BeileOrderRow from '@/views/beile-order/components/BeileOrderRow.vue'
 import BeileOrderDetailDialog from '@/views/beile-order/components/BeileOrderDetailDialog.vue'
-import { useBeileOrders } from '@/views/beile-order/composables/useBeileOrders'
+import { injectBeileOrders } from '@/views/beile-order/composables/useBeileOrders'
 import type { BeileOrderRow as BeileOrderRowType } from '@/views/beile-order/composables/useBeileOrders'
-import { useAuthStore } from '@/stores/auth'
-import { downloadXls } from '@/utils/xls'
-import { printHtml } from '@/utils/print'
-import { useExport } from '@/composables/useExport'
-import { toast } from '@/composables/useToast'
 
-// ==================== 列表：查询 + 筛选 + 分页 + 确认流程（useBeileOrders） ====================
 const {
   PAGE_SIZE_OPTIONS,
   perPage,
-  filters,
   appliedProduct,
   appliedCustomer,
   confirmStatus,
@@ -141,150 +127,22 @@ const {
   isLoading,
   isFetching,
   orders,
-  unconfirmedCount,
   showProductColumn,
   displayOrders,
   highlightId,
-  applyProductFilter,
-  applyCustomerFilter,
-  handleSearch,
-  handleReset,
   goPage,
-  setConfirmStatus,
   detailOpen,
   detailData,
   openDetail,
   confirmingIds,
   handleConfirm,
-} = useBeileOrders()
-
-/** 模板内 item-key 的行类型别名（保持泛型推断） */
-type BeileOrderRow = BeileOrderRowType
-
-// ==================== 导出 / 打印 ====================
-const authStore = useAuthStore()
-const { exporting, runExport } = useExport()
-
-/** 权限：导出 / 打印（超级管理员自动放行） */
-const canExport = computed(() => authStore.hasPermission('beile_order_export'))
-const canPrint = computed(() => authStore.hasPermission('beile_order_print'))
-
-/** 选中的订单 id 集合（批量打印用） */
-const selectedIds = ref<Set<number>>(new Set())
-const selectedCount = computed(() => selectedIds.value.size)
-
-/** 当前展示列表是否有数据（导出按钮启用条件） */
-const hasDisplayOrders = computed(() => displayOrders.value.length > 0)
-
-/** 当前页是否全选（复选框 indeterminate 由 UiCheckbox 内部处理） */
-const isAllSelected = computed(() =>
-  displayOrders.value.length > 0 && displayOrders.value.every((o) => selectedIds.value.has(o.id)),
-)
-
-/** 切换单行选中 */
-function toggleSelect(id: number) {
-  const next = new Set(selectedIds.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
-  selectedIds.value = next
-}
-
-/** 全选 / 取消全选当前页 */
-function toggleSelectAll(checked: boolean) {
-  const next = new Set(selectedIds.value)
-  if (checked) {
-    displayOrders.value.forEach((o) => next.add(o.id))
-  } else {
-    displayOrders.value.forEach((o) => next.delete(o.id))
-  }
-  selectedIds.value = next
-}
-
-/** 计算行总数量（多 SKU 汇总） */
-function rowQuantity(item: BeileOrderRowType): number {
-  const items = item.items || []
-  if (items.length > 0) return items.reduce((sum, s) => sum + (s.quantity || 0), 0)
-  return item.quantity || 0
-}
-
-/** 汇总表列头（含产品明细） */
-const SUMMARY_HEADERS = [
-  '订单类型', '下单时间', '客户名称', '工厂', '产品名称', '数量', '备注',
-]
-
-/** 汇总表各列宽度（px），用于导出 XLS 列宽分配 */
-const SUMMARY_COL_WIDTHS = [90, 120, 130, 80, 220, 80, 180]
-
-/** HTML 特殊字符转义 */
-function escapeHtml(str: string): string {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-}
-
-/**
- * 构建汇总表 tbody HTML。
- * 同一订单的订单类型/下单时间/客户名称/工厂列用 rowspan 合并单元格，
- * 产品名称/数量/备注每行独立输出。
- */
-function buildSummaryTbody(items: BeileOrderRowType[]): string {
-  let html = ''
-  for (const item of items) {
-    const type = item.record_type === 'stockin' ? '备货' : '订单'
-    const factory = (item.factories || ['湖北']).join(', ')
-    const orderCells = [type, item.order_date || '', item.customer || '', factory]
-    const note = item.note || ''
-
-    const skus = (item.items && item.items.length > 0)
-      ? item.items
-      : [{ product_name: item.product_name, quantity: item.quantity }]
-
-    const rowspan = skus.length
-    skus.forEach((sku, idx) => {
-      const cells: string[] = []
-      if (idx === 0) {
-        for (const c of orderCells) {
-          cells.push(`<td${rowspan > 1 ? ` rowspan="${rowspan}"` : ''}>${escapeHtml(c)}</td>`)
-        }
-      }
-      cells.push(`<td>${escapeHtml(sku.product_name || '-')}</td>`)
-      cells.push(`<td>${escapeHtml(String(sku.quantity || 0))}</td>`)
-      cells.push(`<td>${idx === 0 ? escapeHtml(note) : ''}</td>`)
-      html += `<tr>${cells.join('')}</tr>`
-    })
-  }
-  return html
-}
-
-/** 导出当前页数据为 XLS */
-function handleExport() {
-  runExport(() => {
-    const thead = `<tr>${SUMMARY_HEADERS.map((h, i) => `<th style="width:${SUMMARY_COL_WIDTHS[i]}px">${h}</th>`).join('')}</tr>`
-    const tbody = buildSummaryTbody(displayOrders.value)
-    const statusLabel = confirmStatus.value === 'unconfirmed' ? '未确认' : '已确认'
-    const title = `湖北订单汇总（${statusLabel}）`
-    const html = `<div style="text-align:center;margin-bottom:20px;"><h2>${title}</h2></div><table><thead>${thead}</thead><tbody>${tbody}</tbody></table>`
-    const date = new Date().toISOString().slice(0, 10)
-    downloadXls(html, `湖北订单_${statusLabel}_${date}.xls`)
-  })
-}
-
-/** 批量打印选中订单汇总表 */
-function handlePrint() {
-  const targets = displayOrders.value.filter((o) => selectedIds.value.has(o.id))
-  if (targets.length === 0) {
-    toast.warning('请先勾选要打印的订单')
-    return
-  }
-  const thead = `<tr>${SUMMARY_HEADERS.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr>`
-  const tbody = buildSummaryTbody(targets)
-  const printStyle = `
-    body { font-family: SimSun, 宋体; padding: 20px; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { border: 1px solid #333; padding: 8px; font-size: 13px; text-align: center; }
-    th { background: #e6e6e6; }
-  `
-  printHtml(`湖北订单汇总（${targets.length} 条）`, `<table><thead>${thead}</thead><tbody>${tbody}</tbody></table>`, printStyle)
-  toast.success(`已发送 ${targets.length} 条订单至打印预览`)
-}
+  selectedIds,
+  selectedCount,
+  isAllSelected,
+  toggleSelect,
+  toggleSelectAll,
+  canPrint,
+} = injectBeileOrders()
 
 
 // ==================== 虚拟滚动容器高度测量 ====================
@@ -319,35 +177,9 @@ onUnmounted(() => {
   areaResizeObserver?.disconnect()
 })
 
-// 翻页 / 筛选变化时清空选中并回到列表顶部（虚拟滚动不自动归位）
+// 翻页 / 筛选变化时回到列表顶部（选中清空已在 composable 处理）
 watch([page, appliedProduct, appliedCustomer, confirmStatus], () => {
-  selectedIds.value = new Set()
   virtualListRef.value?.scrollToTop()
-})
-
-/**
- * 暴露给父组件（HubeiView）使用。
- * 筛选 UI 已迁移到 header 右侧，但状态与方法仍在 Tab 内统一管控。
- * 导出/打印按钮也迁移到 header 搜索框右侧，相关状态与方法经 ref 暴露。
- * 注意：必须同时传入实际 ref 值（仅写类型标注不会暴露任何东西）。
- */
-defineExpose({
-  filters,
-  handleSearch,
-  handleReset,
-  applyProductFilter,
-  applyCustomerFilter,
-  confirmStatus,
-  setConfirmStatus,
-  unconfirmedCount,
-  // 导出 / 打印（头部按钮使用）
-  canExport,
-  canPrint,
-  exporting,
-  selectedCount,
-  hasDisplayOrders,
-  handleExport,
-  handlePrint,
 })
 </script>
 

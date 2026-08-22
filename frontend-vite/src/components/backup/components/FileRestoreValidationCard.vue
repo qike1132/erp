@@ -37,7 +37,7 @@
         <FontAwesomeIcon icon="exclamation-triangle" /> {{ validationResult.checksum_errors.join('; ') }}
       </div>
     </div>
-    <button class="bk-action-btn bk-action-danger" :disabled="importing" @click="$emit('restore')" :aria-label="importing ? '正在恢复...' : '一键恢复全部数据'">
+    <button class="bk-action-btn bk-action-danger" :disabled="importing" :aria-label="importing ? '正在恢复...' : '一键恢复全部数据'" @click="$emit('restore')">
       <UiLoadingIcon :loading="importing" icon="undo-alt" />
       {{ importing ? '正在恢复...' : '一键恢复全部数据' }}
     </button>

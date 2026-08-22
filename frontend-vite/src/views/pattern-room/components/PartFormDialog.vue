@@ -159,14 +159,14 @@ function closeDialog() {
               title="删除此行"
               @click="removeRow(index)"
             >
-              <i class="fas fa-times" aria-hidden="true" />
+              <FontAwesomeIcon icon="times" aria-hidden="true" />
             </button>
           </div>
         </div>
       </div>
 
-      <button type="button" class="add-row-btn" @click="addRow" aria-label="添加行">
-        <i class="fas fa-plus" aria-hidden="true" />
+      <button type="button" class="add-row-btn" aria-label="添加行" @click="addRow">
+        <FontAwesomeIcon icon="plus" aria-hidden="true" />
         添加行
       </button>
     </div>

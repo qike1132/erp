@@ -31,10 +31,10 @@
         <label class="form-label">产品名称</label>
         <UiAutocomplete
           v-model="form.search"
-          :searchFn="searchFn"
+          :search-fn="searchFn"
           placeholder="输入产品名称或69码搜索"
           @select="onSelect"
-          @update:modelValue="onSearchInput"
+          @update:model-value="onSearchInput"
         >
           <template #option="{ item }">
             {{ item.name }}
@@ -44,9 +44,9 @@
 
       <div class="form-field">
         <label class="form-label">出货数量</label>
-        <input type="number" class="form-input" v-model.number="form.quantity" min="1" step="1" name="quantity" autocomplete="off" />
+        <input v-model.number="form.quantity" type="number" class="form-input" min="1" step="1" name="quantity" autocomplete="off" />
         <small v-if="shipmentInfo" class="shipment-info">
-          <FontAwesomeIcon icon="info-circle" style="margin-right: 4px"  aria-hidden="true" />
+          <FontAwesomeIcon icon="info-circle" style="margin-right: 4px" aria-hidden="true" />
           订单量: {{ shipmentInfo.order_quantity }} | 已出货: {{ shipmentInfo.shipped_quantity }} | 可出货:
           <strong style="color: var(--color-primary-500)">{{ shipmentInfo.available_quantity }}</strong>
           <template v-if="shipmentInfo.regular_available != null || shipmentInfo.custom_available != null">
@@ -70,8 +70,8 @@
       <UiButton
         :variant="canAdd ? 'danger' : 'outline'"
         :disabled="!canAdd"
-        @click="emit('add-staged')"
         style="margin-top: 15px"
+        @click="emit('add-staged')"
       >
         <FontAwesomeIcon icon="plus-circle" aria-hidden="true" />新增出货
       </UiButton>

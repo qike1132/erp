@@ -2,7 +2,7 @@
   <UiDialog :open="open" max-width-class="max-w-[420px]" :close-on-overlay-click="closeOnOverlayClick" @update:open="onOpenUpdate">
     <div class="p-8">
       <div :class="['w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl', iconBgClass]">
-        <i :class="iconClass" aria-hidden="true" />
+        <FontAwesomeIcon :icon="iconName" aria-hidden="true" />
       </div>
       <div class="text-center text-base text-text mb-2">
         {{ text }}
@@ -53,7 +53,7 @@ const iconBgClass = computed(() =>
   props.type === 'danger' ? 'bg-danger-50 text-danger-500' : 'bg-warning-50 text-warning-500',
 )
 
-const iconClass = computed(() => (props.type === 'danger' ? 'fas fa-trash-alt' : 'fas fa-exclamation-triangle'))
+const iconName = computed(() => (props.type === 'danger' ? 'trash-alt' : 'triangle-exclamation'))
 
 const confirmVariant = computed(() => (props.type === 'danger' ? 'danger' : 'primary'))
 </script>

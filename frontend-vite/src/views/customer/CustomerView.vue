@@ -4,7 +4,7 @@
       <!-- 卡片头部 -->
       <div class="page-card-header">
         <div class="cu-tabs">
-          <button class="cu-tab-btn active" @click="openForm('add')" aria-label="新建客户">
+          <button class="cu-tab-btn active" aria-label="新建客户" @click="openForm('add')">
             <FontAwesomeIcon icon="plus" aria-hidden="true" /> 新建客户
           </button>
         </div>
@@ -32,7 +32,7 @@
       :open="formVisible"
       :mode="formMode"
       :submitting="submitting"
-      :form="form"
+      v-model:form="form"
       @update:open="formVisible = $event"
       @submit="handleSubmit"
     />

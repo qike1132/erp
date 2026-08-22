@@ -1,7 +1,24 @@
-import { ref, computed, reactive } from 'vue'
+import { ref, computed, reactive, toRaw } from 'vue'
 import { purchaseApi } from '@/api'
 import { printHtml } from '@/utils/print'
 import { fmtQty } from '@/utils/formatQty'
+
+// structuredClone 无法克隆 Vue 响应式 Proxy（报 "could not be cloned"）。
+// 先 toRaw 取回原始纯对象，再做结构化深克隆；传入纯对象时 toRaw 原样返回，同样安全。
+function cloneRaw<T>(v: T): T {
+  return structuredClone(toRaw(v) as T)
+}
+
+// 打印时间标签（本地时间，YYYY-MM-DD HH:mm:ss）
+function formatNowTime(): string {
+  const d = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
+function printTimeLabel(): string {
+  return `<div style="text-align:right;font-size:12px;color:#555;margin-bottom:10px;">打印时间：${formatNowTime()}</div>`
+}
 
 function buildFactoryHtml(data: FactorySummaryData): string {
   let tableHtml = ''
@@ -62,7 +79,7 @@ function downloadAsXls(html: string, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 10000)
 }
 
-interface FabricItem {
+export interface FabricItem {
   fabric_name: string
   specification?: string
   quantity: number
@@ -71,12 +88,12 @@ interface FabricItem {
   item_id?: number
 }
 
-interface SupplierGroup {
+export interface SupplierGroup {
   supplier_name: string
   fabrics: FabricItem[]
 }
 
-interface FactoryGroup {
+export interface FactoryGroup {
   customer_name: string
   product_name: string
   product_quantity?: number
@@ -172,10 +189,10 @@ export function useSummaryModal() {
       purchaseApi.supplierSummary(ids) as unknown as SupplierSummaryData,
     ])
     if (!fRes.success || !sRes.success) throw new Error(fRes.message || sRes.message || '汇总失败')
-    factoryData.value = JSON.parse(JSON.stringify(fRes))
-    factoryOriginalData.value = JSON.parse(JSON.stringify(fRes))
-    supplierData.value = JSON.parse(JSON.stringify(sRes))
-    supplierOriginalData.value = JSON.parse(JSON.stringify(sRes))
+    factoryData.value = structuredClone(fRes)
+    factoryOriginalData.value = structuredClone(fRes)
+    supplierData.value = structuredClone(sRes)
+    supplierOriginalData.value = structuredClone(sRes)
     const initOrder: string[] = []
     sRes.materials?.forEach((m) => {
       const s = m.supplier_name || '未指定供应商'
@@ -189,8 +206,8 @@ export function useSummaryModal() {
 
   function toggleEditMode(enable: boolean) {
     if (!enable) {
-      factoryData.value = JSON.parse(JSON.stringify(factoryOriginalData.value))
-      supplierData.value = JSON.parse(JSON.stringify(supplierOriginalData.value))
+      factoryData.value = cloneRaw(factoryOriginalData.value)
+      supplierData.value = cloneRaw(supplierOriginalData.value)
       lossRate.value = 0
     }
     editMode.value = enable
@@ -283,12 +300,12 @@ export function useSummaryModal() {
           })
         })
       })
-      factoryOriginalData.value = JSON.parse(JSON.stringify(factoryData.value))
+      factoryOriginalData.value = cloneRaw(factoryData.value)
       try {
         const sRes = await purchaseApi.supplierSummary(orderIds.value) as unknown as SupplierSummaryData
         if (sRes.success) {
-          supplierData.value = JSON.parse(JSON.stringify(sRes))
-          supplierOriginalData.value = JSON.parse(JSON.stringify(sRes))
+          supplierData.value = structuredClone(sRes)
+          supplierOriginalData.value = structuredClone(sRes)
         }
       } catch { /* 非关键，忽略 */ }
       editMode.value = false
@@ -306,13 +323,13 @@ export function useSummaryModal() {
   function printFactory() {
     if (!factoryData.value) return
     const tableHtml = buildFactoryHtml(factoryData.value)
-    printHtml('工厂内部采购订单汇总', `<table><thead><tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>数量</th></tr></thead><tbody>${tableHtml}</tbody></table>`)
+    printHtml('工厂内部采购订单汇总', `${printTimeLabel()}<table><thead><tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>数量</th></tr></thead><tbody>${tableHtml}</tbody></table>`)
   }
 
   function printSupplier() {
     if (!supplierData.value) return
     const tableHtml = buildSupplierHtml(supplierGroups.value)
-    printHtml('供应商采购订单汇总', `<table><thead><tr><th>供应商</th><th>物料名称</th><th>规格型号</th><th>数量</th></tr></thead><tbody>${tableHtml}</tbody></table>`)
+    printHtml('供应商采购订单汇总', `${printTimeLabel()}<table><thead><tr><th>供应商</th><th>物料名称</th><th>规格型号</th><th>数量</th></tr></thead><tbody>${tableHtml}</tbody></table>`)
   }
 
   function exportFactory() {

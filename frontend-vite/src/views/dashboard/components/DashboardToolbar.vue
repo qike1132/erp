@@ -21,7 +21,7 @@
             <div class="tb-role">{{ authStore.user?.is_super ? '超级管理员' : '普通用户' }}</div>
           </div>
         </div>
-        <button class="tb-logout" @click="confirmLogout" aria-label="退出登录">
+        <button class="tb-logout" aria-label="退出登录" @click="confirmLogout">
           <FontAwesomeIcon icon="right-from-bracket" aria-hidden="true" />
           <span>退出</span>
         </button>

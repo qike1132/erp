@@ -1,8 +1,8 @@
 <template>
   <div class="date-picker-wrap">
     <input
-      ref="inputRef"
       :id="inputId"
+      ref="inputRef"
       type="date"
       :value="modelValue"
       :disabled="disabled"
@@ -13,7 +13,7 @@
       @input="$emit('update:modelValue', ($event.target as HTMLInputElement).value)"
       @click="openPicker"
     />
-    <button type="button" class="date-icon" @click="openPicker" aria-label="选择日期"><FontAwesomeIcon icon="calendar-alt" aria-hidden="true" /></button>
+    <button type="button" class="date-icon" aria-label="选择日期" @click="openPicker"><FontAwesomeIcon icon="calendar-alt" aria-hidden="true" /></button>
   </div>
 </template>
 

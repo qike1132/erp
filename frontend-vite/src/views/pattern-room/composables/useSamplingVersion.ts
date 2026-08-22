@@ -46,12 +46,17 @@ export function useSamplingVersion(
   /** 错误信息 */
   const error = ref<string | null>(null)
 
+  /** 竞态保护：快速切换项目时忽略旧响应 */
+  let _requestId = 0
+
   /** 加载版本列表 */
   async function fetchVersions(id: number): Promise<void> {
+    const reqId = ++_requestId
     loading.value = true
     error.value = null
     try {
       const res = await patternRoomApi.listVersions(id)
+      if (reqId !== _requestId) return
       versions.value = res.items ?? []
       // 默认选中最新版本（列表按 version_no 升序，取最后一个）
       if (versions.value.length > 0 && currentVersionId.value == null) {
@@ -59,13 +64,14 @@ export function useSamplingVersion(
         if (latest) currentVersionId.value = latest.id
       }
     } catch (e) {
+      if (reqId !== _requestId) return
       console.error('[useSamplingVersion] 查询版本列表失败:', e)
       const message = resolveVersionErrorMessage(e, '加载版本列表失败')
       error.value = message
       toast.error(message)
       versions.value = []
     } finally {
-      loading.value = false
+      if (reqId === _requestId) loading.value = false
     }
   }
 
@@ -76,14 +82,17 @@ export function useSamplingVersion(
    * - 降级（degraded=true）：返回 full_snapshot + 警告
    */
   async function fetchVersionDetail(versionId: number): Promise<VersionDetailResponse | null> {
+    const reqId = ++_requestId
     loading.value = true
     error.value = null
     try {
       const res = await patternRoomApi.getVersionDetail(versionId)
+      if (reqId !== _requestId) return null
       versionDetail.value = res
       currentVersionId.value = versionId
       return res
     } catch (e) {
+      if (reqId !== _requestId) return null
       console.error('[useSamplingVersion] 查询版本详情失败:', e)
       const message = resolveVersionErrorMessage(e, '加载版本详情失败')
       error.value = message
@@ -91,7 +100,7 @@ export function useSamplingVersion(
       versionDetail.value = null
       return null
     } finally {
-      loading.value = false
+      if (reqId === _requestId) loading.value = false
     }
   }
 

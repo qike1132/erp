@@ -5,9 +5,9 @@
       <MFilterChips v-model="viewTab" :chips="viewChips" />
 
       <div class="m-date-nav">
-        <button class="m-date-btn" @click="prevDate" aria-label="上一页">&lsaquo;</button>
+        <button class="m-date-btn" aria-label="上一页" @click="prevDate">&lsaquo;</button>
         <span class="m-date-text">{{ viewTab === 'monthly' ? `${monthlyYear}年${monthlyMonth}月` : selectedDate }}</span>
-        <button class="m-date-btn" @click="nextDate" aria-label="下一页">&rsaquo;</button>
+        <button class="m-date-btn" aria-label="下一页" @click="nextDate">&rsaquo;</button>
       </div>
 
       <div v-if="loading" class="m-center"><MSpinner size="lg" /></div>

@@ -31,10 +31,24 @@ export default defineConfig(({ mode }) => {
         dts: 'src/components.d.ts',
         resolvers: [PrimeVueResolver()],
       }),
+      // 浏览器构建移除缩放限制（WCAG 1.4.4 文本缩放）；
+      // Capacitor WebView 保留禁缩放，避免 iOS 输入框聚焦时自动放大页面
+      {
+        name: 'viewport-accessibility',
+        transformIndexHtml: (html) =>
+          isCapacitor
+            ? html
+            : html.replace(', maximum-scale=1.0, user-scalable=no', ''),
+      },
       VitePWA({
+        // registerType: autoUpdate + skipWaiting: SW 更新后旧页面尽快切换到新版本，
+        // 缩短"旧 shell 引用旧 chunk"的时间窗口。
         registerType: 'autoUpdate',
         workbox: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+          // 已失效的旧预缓存条目会被 workbox 自动清理(cleanupOutdatedCaches)，
+          // 从源头减少旧 chunk 残留。
+          cleanupOutdatedCaches: true,
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
@@ -130,6 +144,7 @@ export default defineConfig(({ mode }) => {
               'vendor-fontawesome': ['@fortawesome/fontawesome-svg-core', '@fortawesome/free-solid-svg-icons'],
               'vendor-reka-ui': ['reka-ui'],
               'vendor-axios': ['axios'],
+              'vendor-primevue': ['primevue'],
             }
             for (const [name, deps] of Object.entries(chunks)) {
               for (const dep of deps) {
@@ -143,13 +158,14 @@ export default defineConfig(({ mode }) => {
     server: {
       host: '0.0.0.0',
       port: 3000,
+      allowedHosts: true,
       headers: {
         'Content-Security-Policy': [
           "default-src 'self'",
           "script-src 'self' 'unsafe-inline'",
-          "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+          "style-src 'self' 'unsafe-inline'",
           "img-src 'self' data: blob: http://127.0.0.1:5002 http://192.168.0.95:3000 http://192.168.0.95:5002",
-          "font-src 'self' https://fonts.gstatic.com",
+          "font-src 'self'",
           "connect-src 'self' ws: wss: http://127.0.0.1:5002 https:",
           "frame-ancestors 'none'",
           "base-uri 'self'",

@@ -1,6 +1,6 @@
 <template>
   <div class="rp-result-summary" :class="resultSummaryClass">
-    <i :class="resultIcon" />
+    <FontAwesomeIcon :icon="resultIcon" aria-hidden="true" />
     {{ resultText }}
     <span v-if="result.total_inserted && !hasDbError"> · {{ result.total_inserted }} 条记录</span>
     <span v-if="(result.format === 'zip' || result.database) && !hasDbError"> · ZIP完整备份</span>

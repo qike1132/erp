@@ -6,16 +6,16 @@
           <div class="bom-modal-header-left">
             <h5 class="bom-modal-title"><FontAwesomeIcon icon="copy" aria-hidden="true" /><span>复制BOM表</span></h5>
           </div>
-          <button class="bom-modal-close" @click="open = false" aria-label="关闭"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
+          <button class="bom-modal-close" aria-label="关闭" @click="open = false"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
         </div>
         <div class="bom-modal-body">
           <div class="mb-4">
             <label class="pd-label mb-2"><FontAwesomeIcon icon="search" class="me-2" aria-hidden="true" />搜索源产品</label>
             <div class="pd-input-wrap">
               <FontAwesomeIcon icon="tag" class="pd-input-icon" aria-hidden="true" />
-              <input v-model="searchKeyword" type="text" class="pd-input" placeholder="输入产品名称或条码进行搜索" name="search" autocomplete="off" @keydown.enter="emit('search')" aria-label="输入产品名称或条码进行搜索" />
+              <input v-model="searchKeyword" type="text" class="pd-input" placeholder="输入产品名称或条码进行搜索" name="search" autocomplete="off" aria-label="输入产品名称或条码进行搜索" @keydown.enter="emit('search')" />
             </div>
-            <div class="mt-2"><button class="pd-btn pd-btn-primary pd-btn-sm" @click="emit('search')" aria-label="搜索"><FontAwesomeIcon icon="search" class="me-2" aria-hidden="true" />搜索</button></div>
+            <div class="mt-2"><button class="pd-btn pd-btn-primary pd-btn-sm" aria-label="搜索" @click="emit('search')"><FontAwesomeIcon icon="search" class="me-2" aria-hidden="true" />搜索</button></div>
           </div>
           <div v-if="products.length > 0" class="mb-4">
             <label class="pd-label mb-2"><FontAwesomeIcon icon="box" class="me-2" aria-hidden="true" />选择源产品</label>
@@ -38,13 +38,13 @@
             </label>
           </div>
           <div v-if="progress.visible" class="mb-4">
-            <div class="pd-progress"><div class="pd-progress-bar" :style="{ width: progress.percent + '%' }"></div></div>
+            <div class="pd-progress"><div class="pd-progress-bar" :style="{ width: progress.percent + '%' }" /></div>
             <p class="pd-progress-text">{{ progress.text }}</p>
           </div>
         </div>
         <div class="bom-modal-footer">
-          <button class="bom-btn-cancel" @click="open = false" aria-label="取消">取消</button>
-          <button class="bom-btn-save" :disabled="!sourceProductId" @click="emit('confirm')" aria-label="确认复制"><FontAwesomeIcon icon="check" class="me-2" aria-hidden="true" />确认复制</button>
+          <button class="bom-btn-cancel" aria-label="取消" @click="open = false">取消</button>
+          <button class="bom-btn-save" :disabled="!sourceProductId" aria-label="确认复制" @click="emit('confirm')"><FontAwesomeIcon icon="check" class="me-2" aria-hidden="true" />确认复制</button>
         </div>
       </div>
     </div>

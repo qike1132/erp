@@ -8,7 +8,7 @@
       @click="emit('toggle')"
     >
       <span class="sb-section-title">{{ section.title }}</span>
-      <span class="sb-chevron" aria-hidden="true"></span>
+      <span class="sb-chevron" aria-hidden="true" />
     </button>
     <div v-show="isOpen" class="sb-section-body">
       <router-link
@@ -19,7 +19,7 @@
         @pointerenter="prefetchRoute(item.path)"
       >
         <div class="sb-nav-icon" :class="{ 'sb-nav-icon-active': isActive(item.path) }">
-          <i :class="resolveIcon(item.icon)" aria-hidden="true" />
+          <FontAwesomeIcon :icon="resolveIcon(item.icon)" aria-hidden="true" />
         </div>
         <span class="sb-nav-label">{{ item.title }}</span>
       </router-link>

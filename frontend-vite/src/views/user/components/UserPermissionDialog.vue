@@ -6,7 +6,7 @@
         <span class="us-perm-user-label">目标用户</span>
         <span class="us-perm-user-name">{{ permTargetName }}</span>
       </div>
-      <button class="us-perm-toggle-all" @click="toggleAllPerms" :aria-label="permIsAllChecked ? '取消全选' : '全选'">
+      <button class="us-perm-toggle-all" :aria-label="permIsAllChecked ? '取消全选' : '全选'" @click="toggleAllPerms">
         {{ permIsAllChecked ? '取消全选' : '全选' }}
       </button>
     </div>
@@ -22,7 +22,7 @@
         >
           <span class="us-perm-section-title">{{ sec.name }}</span>
           <span class="us-perm-section-count" :class="{ 'all-checked': isSectionAllChecked(sec) }">{{ getSectionCount(sec) }}</span>
-          <span class="us-perm-section-chevron" aria-hidden="true"></span>
+          <span class="us-perm-section-chevron" aria-hidden="true" />
         </button>
         <div v-show="isSectionOpen(sec.key)" class="us-perm-section-body">
           <!-- 一级权限项 -->
@@ -52,8 +52,8 @@
       </div>
     </div>
     <template #footer>
-      <button class="us-action-btn" @click="permDialogVisible = false" aria-label="取消">取消</button>
-      <button class="us-action-btn us-action-primary" :disabled="permSubmitting" @click="handleSavePermission" :aria-label="permSubmitting ? '保存中…' : '保存'">
+      <button class="us-action-btn" aria-label="取消" @click="permDialogVisible = false">取消</button>
+      <button class="us-action-btn us-action-primary" :disabled="permSubmitting" :aria-label="permSubmitting ? '保存中…' : '保存'" @click="handleSavePermission">
         {{ permSubmitting ? '保存中…' : '保存' }}
       </button>
     </template>

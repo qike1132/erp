@@ -35,12 +35,12 @@
       </template>
       <template #column-body-actions="{ row }">
         <div class="us-action-group">
-          <button class="us-action-btn us-action-primary" @click="openPermissionDialog(row as UserRow)" aria-label="权限">权限</button>
-          <button class="us-action-btn us-action-primary" @click="openEditDialog(row as UserRow)" aria-label="编辑">编辑</button>
-          <button class="us-action-btn us-action-primary" :disabled="actionId === (row as UserRow).id" @click="handleToggle(row as UserRow)" :aria-label="(row as UserRow).status !== false ? '禁用' : '启用'">
+          <button class="us-action-btn us-action-primary" aria-label="权限" @click="openPermissionDialog(row as UserRow)">权限</button>
+          <button class="us-action-btn us-action-primary" aria-label="编辑" @click="openEditDialog(row as UserRow)">编辑</button>
+          <button class="us-action-btn us-action-primary" :disabled="actionId === (row as UserRow).id" :aria-label="(row as UserRow).status !== false ? '禁用' : '启用'" @click="handleToggle(row as UserRow)">
             {{ (row as UserRow).status !== false ? '禁用' : '启用' }}
           </button>
-          <button class="us-action-btn us-action-danger" :disabled="actionId === (row as UserRow).id || (row as UserRow).is_super" @click="handleDelete(row as UserRow)" aria-label="删除">
+          <button class="us-action-btn us-action-danger" :disabled="actionId === (row as UserRow).id || (row as UserRow).is_super" aria-label="删除" @click="handleDelete(row as UserRow)">
             删除
           </button>
         </div>

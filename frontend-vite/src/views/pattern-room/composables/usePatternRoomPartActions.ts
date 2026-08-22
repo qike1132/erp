@@ -5,7 +5,7 @@
  * 内联编辑保存、角色 TAB 切换与增删。
  * 逻辑自 PatternRoomView.vue 原样搬移。
  */
-import { ref, type Ref } from 'vue'
+import { ref, nextTick, type Ref } from 'vue'
 import { toast } from '@/composables/useToast'
 import type { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { patternRoomApi } from '@/api/patternRoom'
@@ -15,6 +15,7 @@ import type { useSamplingProject } from './useSamplingProject'
 import type { useSamplingPart } from './useSamplingPart'
 import type { useSamplingVersion } from './useSamplingVersion'
 import type { useSamplingRole } from './useSamplingRole'
+import { usePartInlineEdit, type PartEditData } from './usePartInlineEdit'
 
 type ProjectHook = ReturnType<typeof useSamplingProject>
 type PartHook = ReturnType<typeof useSamplingPart>
@@ -62,6 +63,26 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
   /** 版本创建弹窗可见性 */
   const versionCreateVisible = ref(false)
 
+  /**
+   * 复制版本后待自动编辑的目标版本号。
+   * 复制 T2 → T3 后，自动打开 T3 的修改模式；保存成功后自动将 T3 设为最终版本。
+   */
+  const pendingCopyVersionNo = ref<string | null>(null)
+
+  /** 内联编辑状态：上移到此 Composable，复制处理可在刷新后自动触发编辑 */
+  const {
+    editingPartId,
+    editForm,
+    startEdit,
+    cancelEdit,
+    saveEdit,
+  } = usePartInlineEdit(
+    partHook.partsByVersion,
+    selectedProjectId,
+    roleHook.currentRoleId,
+    onSaveEdit,
+  )
+
   function openCreatePartDialog() {
     if (!canManage.value) {
       toast.warning('无操作权限')
@@ -82,11 +103,13 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
         toast.success(res.message || `已创建 ${data.items.length} 个部位`)
         partFormVisible.value = false
         if (selectedProjectId.value) {
-          await projectHook.fetchDetail(selectedProjectId.value)
-          await partHook.fetchPartsByVersion(
-            selectedProjectId.value,
-            roleHook.currentRoleId.value ?? undefined,
-          )
+          await Promise.all([
+            projectHook.fetchDetail(selectedProjectId.value),
+            partHook.fetchPartsByVersion(
+              selectedProjectId.value,
+              roleHook.currentRoleId.value ?? undefined,
+            ),
+          ])
         }
       } else {
         toast.error(res.message || '批量创建失败')
@@ -125,7 +148,7 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
     }
   }
 
-  /** 复制部位版本：在该部位名称下新增一个版本号 +1 的空白记录 */
+  /** 复制部位版本：新增版本号 +1 的空白记录，并自动打开修改模式、保存后设为最终版本 */
   async function onCopyPartVersion(part: PartDetail) {
     if (!canManage.value) {
       toast.warning('无操作权限')
@@ -138,12 +161,26 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
     try {
       const res = await patternRoomApi.copyPartVersion(part.id)
       if (res.success) {
-        toast.success(res.message || `已复制版本 ${res.version_no ?? ''}`)
+        const newVersionNo = res.version_no ?? null
+        toast.success(res.message || `已复制版本 ${newVersionNo ?? ''}`)
         if (selectedProjectId.value) {
           await partHook.fetchPartsByVersion(
             selectedProjectId.value,
             roleHook.currentRoleId.value ?? undefined,
           )
+        }
+        if (newVersionNo) {
+          pendingCopyVersionNo.value = newVersionNo
+          // 局部设为最终版本，使新版本行默认展开被选中，便于随后自动进入修改模式
+          partHook.setFinalVersion(newVersionNo)
+        }
+        // 等 partsByVersion 刷新与折叠计算完成后，自动打开新版本行的修改模式
+        await nextTick()
+        const newPart = partHook.partsByVersion.value.find(
+          (p) => p.version_no === newVersionNo && p.part_name === part.part_name,
+        )
+        if (newPart?.id != null) {
+          startEdit(newPart)
         }
       } else {
         toast.error(res.message || '复制版本失败')
@@ -177,21 +214,31 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
       const res = await patternRoomApi.updatePart(part.id, payload)
       if (res.success) {
         toast.success('保存成功')
-        if (selectedProjectId.value) {
-          await partHook.fetchPartsByVersion(
-            selectedProjectId.value,
-            roleHook.currentRoleId.value ?? undefined,
-          )
+        partHook.patchPart(part.id, {
+          supplier_name: data.supplier_name || '',
+          fabric_name: data.fabric_name || '',
+          fabric_color_no: data.fabric_color_no || '',
+        })
+        // 若保存的正是本次复制生成的新版本，自动将其设为最终版本
+        if (pendingCopyVersionNo.value && part.version_no === pendingCopyVersionNo.value) {
+          pendingCopyVersionNo.value = null
+          await onSetFinalVersion(part.version_no!)
         }
       } else {
         toast.error(res.message || '保存失败')
       }
     } catch (e) {
       console.error('[PatternRoomView] 保存部位编辑失败:', e)
-      const errMsg = (e as { response?: { status?: number } })?.response?.status === 409
-        ? '数据已被他人更新，请刷新后重试'
-        : '保存失败'
+      const status = (e as { response?: { status?: number } })?.response?.status
+      const errMsg = status === 409 ? '数据已被他人更新，请刷新后重试' : '保存失败'
       toast.error(errMsg)
+      // 409 乐观锁冲突：局部 patch 未更新 version，需全量刷新获取最新数据
+      if (status === 409 && selectedProjectId.value) {
+        await partHook.fetchPartsByVersion(
+          selectedProjectId.value,
+          roleHook.currentRoleId.value ?? undefined,
+        )
+      }
     }
   }
 
@@ -223,12 +270,7 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
       const res = await patternRoomApi.deletePart(part.id)
       if (res.success) {
         toast.success(res.message || '删除成功')
-        if (selectedProjectId.value) {
-          await partHook.fetchPartsByVersion(
-            selectedProjectId.value,
-            roleHook.currentRoleId.value ?? undefined,
-          )
-        }
+        partHook.removePartLocal(part.id)
       } else {
         toast.error(res.message || '删除失败')
       }
@@ -263,13 +305,15 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
     if (res) {
       toast.success(res.message || `已创建版本 ${res.version_no ?? ''}`)
       versionCreateVisible.value = false
-      // 刷新角色列表（current_version 更新）+ 项目详情
+      // 并行刷新角色列表 + 项目详情（原串行 await）
       if (selectedProjectId.value) {
-        await roleHook.fetchRoles(selectedProjectId.value)
-        await projectHook.fetchDetail(selectedProjectId.value)
+        await Promise.all([
+          roleHook.fetchRoles(selectedProjectId.value),
+          projectHook.fetchDetail(selectedProjectId.value),
+        ])
       }
       // 空快照提示
-      if (partHook.parts.value.length === 0) {
+      if (partHook.partsByVersion.value.length === 0) {
         toast.warning('当前无部位布料信息，已创建空版本，建议先维护部位布料')
       }
     } else {
@@ -337,5 +381,10 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
     onSelectRole,
     onAddRole,
     onRemoveRole,
+    editingPartId,
+    editForm,
+    startEdit,
+    cancelEdit,
+    saveEdit,
   }
 }

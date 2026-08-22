@@ -6,7 +6,7 @@
       </div>
     </aside>
     <button v-if="isNarrow" class="prs-drawer-trigger" aria-label="打开分组列表" @click="drawerOpen = true">
-      <i class="fas fa-bars" aria-hidden="true" />
+      <FontAwesomeIcon icon="bars" aria-hidden="true" />
     </button>
     <main class="prs-right-pane">
       <slot name="detail-panel" />

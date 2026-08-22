@@ -5,7 +5,7 @@
     <UiCard>
       <UiUpload accept=".pdf,.png,.jpg,.jpeg,.bmp,.tiff,.webp" multiple @change="handleFileChange">
         <div class="upload-dragger-content">
-          <FontAwesomeIcon icon="cloud-upload-alt" style="font-size: 48px; color: var(--color-text-muted)"  aria-hidden="true" />
+          <FontAwesomeIcon icon="cloud-upload-alt" style="font-size: 48px; color: var(--color-text-muted)" aria-hidden="true" />
           <p style="margin-top: 12px">拖拽文件到这里，或点击上传</p>
           <p style="color: var(--color-text-muted); font-size: 12px">支持 PDF/PNG/JPG/BMP/TIFF/WEBP</p>
         </div>

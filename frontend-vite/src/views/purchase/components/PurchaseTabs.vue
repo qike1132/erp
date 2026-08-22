@@ -5,8 +5,7 @@
       <span
         v-if="unprocessedCount > 0"
         :class="['notification-badge', modelValue === 'orders' ? 'notification-badge-active' : '']"
-        >{{ unprocessedCount }}</span
-      >
+      >{{ unprocessedCount }}</span>
     </UiTabTrigger>
     <UiTabTrigger value="history" class="flex-1"> <FontAwesomeIcon icon="check-circle" aria-hidden="true" /> 下单查询 </UiTabTrigger>
   </UiTabs>

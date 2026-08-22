@@ -3,8 +3,8 @@
     <div class="page-card page-card-main">
       <!-- 卡片头部 -->
       <div class="page-card-header">
-        <button v-if="itemCount" class="sk-action-btn sk-action-success" @click="handleExport" aria-label="导出">
-          <FontAwesomeIcon icon="file-excel" style="margin-right: 4px"  aria-hidden="true" />导出
+        <button v-if="itemCount" class="sk-action-btn sk-action-success" aria-label="导出" @click="handleExport">
+          <FontAwesomeIcon icon="file-excel" style="margin-right: 4px" aria-hidden="true" />导出
         </button>
       </div>
 

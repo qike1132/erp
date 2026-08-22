@@ -11,7 +11,7 @@
       aria-label="文件上传"
       @change="handleFileChange"
     />
-    <button type="button" class="w-full text-left" :disabled="disabled" @click="triggerUpload" :aria-label="placeholder">
+    <button type="button" class="w-full text-left" :disabled="disabled" :aria-label="placeholder" @click="triggerUpload">
       <slot>
         <div
           :class="[

@@ -25,10 +25,10 @@
             <span>{{ b.filename }}</span>
           </div>
           <div class="bk-backup-actions">
-            <button class="bk-icon-btn bk-icon-btn-primary" :disabled="restoringFile === b.filename" @click="emit('restore', b.filename)" title="恢复" aria-label="恢复">
+            <button class="bk-icon-btn bk-icon-btn-primary" :disabled="restoringFile === b.filename" title="恢复" aria-label="恢复" @click="emit('restore', b.filename)">
               <UiLoadingIcon :loading="restoringFile === b.filename" icon="undo-alt" />
             </button>
-            <button class="bk-icon-btn bk-icon-btn-danger" :disabled="deletingFile === b.filename" @click="emit('delete', b.filename)" title="删除" aria-label="删除">
+            <button class="bk-icon-btn bk-icon-btn-danger" :disabled="deletingFile === b.filename" title="删除" aria-label="删除" @click="emit('delete', b.filename)">
               <UiLoadingIcon :loading="deletingFile === b.filename" icon="trash-alt" />
             </button>
           </div>

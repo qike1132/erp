@@ -4,11 +4,11 @@
       <div class="page-card-header">
         <div class="mc-header-actions">
           <span class="count-badge">已选 {{ selectedProductIds.length }} 个</span>
-          <button class="mc-action-btn mc-action-btn-primary" :disabled="orderItems.length === 0" @click="showBatchModal = true" aria-label="批量录入">
+          <button class="mc-action-btn mc-action-btn-primary" :disabled="orderItems.length === 0" aria-label="批量录入" @click="showBatchModal = true">
             <FontAwesomeIcon icon="layer-group" aria-hidden="true" />
             批量录入
           </button>
-          <button class="mc-action-btn mc-action-btn-danger" :disabled="orderItems.length === 0" @click="clearAll" aria-label="清空">
+          <button class="mc-action-btn mc-action-btn-danger" :disabled="orderItems.length === 0" aria-label="清空" @click="clearAll">
             <FontAwesomeIcon icon="eraser" aria-hidden="true" />
             清空
           </button>
@@ -48,10 +48,8 @@
         <h3 class="text-base font-semibold text-text m-0">批量录入数量</h3>
       </template>
       <div class="py-2">
-        <label class="block text-xs font-semibold text-text-secondary mb-1.5 uppercase tracking-wider"
-          >统一订单数量</label
-        >
-        <input type="number" class="form-number-input" v-model.number="batchQuantity" min="1" step="1" style="width: 100%" />
+        <label class="block text-xs font-semibold text-text-secondary mb-1.5 uppercase tracking-wider">统一订单数量</label>
+        <input v-model.number="batchQuantity" type="number" class="form-number-input" min="1" step="1" style="width: 100%" />
       </div>
       <template #footer>
         <UiButton variant="ghost" size="sm" @click="showBatchModal = false"> 取消 </UiButton>

@@ -63,9 +63,9 @@ function onHide() {
     :visible="visible"
     :position="position"
     :style="{ width }"
-    :showCloseIcon="true"
+    :show-close-icon="true"
     :dismissable="true"
-    :closeOnEscape="true"
+    :close-on-escape="true"
     @update:visible="onHide"
   >
     <!-- 头部 -->

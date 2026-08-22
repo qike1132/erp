@@ -52,7 +52,7 @@
                       <span v-if="card.processes.length === 0" class="osp-no-proc">未配置</span>
                     </div>
                     <div v-if="canManage" class="osp-add-bar">
-                      <button class="osp-add-btn" :disabled="saving" @click="openAddDialog(card)" aria-label="添加工序">
+                      <button class="osp-add-btn" :disabled="saving" aria-label="添加工序" @click="openAddDialog(card)">
                         <FontAwesomeIcon icon="plus" aria-hidden="true" /> 添加工序
                       </button>
                     </div>

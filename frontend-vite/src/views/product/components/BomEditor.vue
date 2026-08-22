@@ -6,12 +6,12 @@
           <div class="bom-modal-header-left">
             <h5 class="bom-modal-title"><FontAwesomeIcon icon="cogs" aria-hidden="true" /><span>BOM表配置 - {{ bomProductName }}</span></h5>
           </div>
-          <button class="bom-modal-close" @click="bomDialogVisible = false" aria-label="关闭"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
+          <button class="bom-modal-close" aria-label="关闭" @click="bomDialogVisible = false"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
         </div>
         <div class="bom-modal-body">
           <div class="bom-tabs-container">
-            <button v-for="tab in bomTabs" :key="tab.key" class="bom-tab-v2" :class="{ active: currentBomCategory === tab.key }" @click="switchBomTab(tab.key)" :aria-label="tab.label">
-              <i :class="tab.icon" aria-hidden="true"></i> {{ tab.label }}
+            <button v-for="tab in bomTabs" :key="tab.key" class="bom-tab-v2" :class="{ active: currentBomCategory === tab.key }" :aria-label="tab.label" @click="switchBomTab(tab.key)">
+              <FontAwesomeIcon :icon="tab.icon" aria-hidden="true" /> {{ tab.label }}
             </button>
           </div>
           <div class="bom-main-content">
@@ -24,7 +24,7 @@
                 <div class="pd-input-wrap autocomplete-wrapper">
                   <UiAutocomplete
                     v-model="quickCopyKeyword"
-                    :searchFn="searchProductsForBom"
+                    :search-fn="searchProductsForBom"
                     placeholder="输入产品名称或条码，直接复制BOM"
                     @select="selectAutocompleteItem"
                   >
@@ -48,7 +48,7 @@
               </div>
             </div>
             <div v-if="quickCopyProgress.visible" class="mb-3">
-              <div class="pd-progress"><div class="pd-progress-bar" :style="{ width: quickCopyProgress.percent + '%' }"></div></div>
+              <div class="pd-progress"><div class="pd-progress-bar" :style="{ width: quickCopyProgress.percent + '%' }" /></div>
               <p class="pd-progress-text">{{ quickCopyProgress.text }}</p>
             </div>
             <div class="bom-content-area">
@@ -79,7 +79,7 @@
                         <td><input v-model="item.supplier_name" type="text" class="bom-table-input" placeholder="输入供应商名称" name="supplier-name" autocomplete="off" /></td>
                         <td><input v-model.number="item.usage" type="number" class="bom-table-input" step="0.01" min="0" name="quantity" autocomplete="off" /></td>
                         <td><input v-model="item.remark" type="text" class="bom-table-input" placeholder="输入备注" name="remark" autocomplete="off" /></td>
-                        <td><button class="bom-table-action-btn delete" @click="deleteBomItem(idx)" aria-label="删除"><FontAwesomeIcon icon="trash" aria-hidden="true" /></button></td>
+                        <td><button class="bom-table-action-btn delete" aria-label="删除" @click="deleteBomItem(idx)"><FontAwesomeIcon icon="trash" aria-hidden="true" /></button></td>
                       </tr>
                     </tbody>
                   </table>

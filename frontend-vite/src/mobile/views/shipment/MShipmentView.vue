@@ -4,13 +4,13 @@
     <div class="m-page-body">
       <!-- 月份导航 -->
       <div class="m-month-nav">
-        <button class="m-date-btn" @click="prevMonth" aria-label="上一月">&laquo;</button>
+        <button class="m-date-btn" aria-label="上一月" @click="prevMonth">&laquo;</button>
         <span class="m-month-text">{{ year }}年{{ String(month).padStart(2, '0') }}月</span>
-        <button class="m-date-btn" @click="nextMonth" aria-label="下一月">&raquo;</button>
+        <button class="m-date-btn" aria-label="下一月" @click="nextMonth">&raquo;</button>
       </div>
 
       <!-- 日期横滑选择器 -->
-      <div class="m-date-scroll" ref="dateScrollRef">
+      <div ref="dateScrollRef" class="m-date-scroll">
         <button
           v-for="d in dateList"
           :key="d.date"

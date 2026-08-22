@@ -11,9 +11,9 @@
     <div v-if="items" class="sp-modal-main-list">
       <VirtualList
         :items="items"
-        :itemHeight="54"
-        :containerHeight="420"
-        :itemKey="(p) => p.detail_id"
+        :item-height="54"
+        :container-height="420"
+        :item-key="(p) => p.detail_id"
       >
         <template #default="{ item: p }">
           <div class="sp-plan-item" style="margin-bottom:0;">

@@ -33,10 +33,10 @@
           </td>
           <td>
             <template v-if="row.status === 'pending'">
-              <button class="ap-action-btn ap-action-success" :disabled="actionId === row.id" @click="emit('approve', row)" :aria-label="actionId === row.id ? '处理中…' : '通过'">
+              <button class="ap-action-btn ap-action-success" :disabled="actionId === row.id" :aria-label="actionId === row.id ? '处理中…' : '通过'" @click="emit('approve', row)">
                 {{ actionId === row.id ? '处理中…' : '通过' }}
               </button>
-              <button class="ap-action-btn ap-action-danger" @click="emit('reject', row)" aria-label="驳回">驳回</button>
+              <button class="ap-action-btn ap-action-danger" aria-label="驳回" @click="emit('reject', row)">驳回</button>
             </template>
             <span v-else class="ap-text-muted">已处理</span>
           </td>

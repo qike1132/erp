@@ -40,7 +40,7 @@
           :disabled="submitting"
           @click="submitBatch"
         >
-          <FontAwesomeIcon icon="paper-plane" style="margin-right: 6px"  aria-hidden="true" />
+          <FontAwesomeIcon icon="paper-plane" style="margin-right: 6px" aria-hidden="true" />
           {{ submitting ? '提交中…' : '添加出货' }}
         </UiButton>
       </div>

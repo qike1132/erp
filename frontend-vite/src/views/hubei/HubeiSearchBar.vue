@@ -4,9 +4,9 @@
       <UiAutocomplete
         ref="productAc"
         v-model="productQuery"
-        :searchFn="searchProducts"
+        :search-fn="searchProducts"
         placeholder="输入关键字，下拉选择产品"
-        appendTo="self"
+        append-to="self"
         suppress-after-select
         :search-delay-ms="500"
         :show-loading="false"
@@ -24,9 +24,9 @@
       <UiAutocomplete
         ref="customerAc"
         v-model="customerQuery"
-        :searchFn="searchCustomers"
+        :search-fn="searchCustomers"
         placeholder="输入关键字，下拉选择客户"
-        appendTo="self"
+        append-to="self"
         suppress-after-select
         :search-delay-ms="500"
         :show-loading="false"
@@ -37,7 +37,7 @@
       <button class="hu-action-btn hu-action-primary" @click="handleSearch()">
         <FontAwesomeIcon icon="search" style="margin-right: 4px" aria-hidden="true" />查询
       </button>
-      <button class="hu-action-btn" @click="emit('reset')" aria-label="重置">
+      <button class="hu-action-btn" aria-label="重置" @click="emit('reset')">
         <FontAwesomeIcon icon="redo" aria-hidden="true" />
       </button>
     </div>

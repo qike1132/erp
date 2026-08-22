@@ -11,16 +11,16 @@
           <FontAwesomeIcon icon="th-large" aria-hidden="true" />全部
         </button>
         <button
-          type="button"
           v-for="c in customers"
           :key="c"
+          type="button"
           :class="['sk-customer-chip', { active: selected === c }]"
           @click="$emit('select', c)"
         >{{ c }}</button>
       </div>
       <Transition name="sk-bar-fade">
         <div v-if="loading" class="sk-customer-loading">
-          <FontAwesomeIcon icon="circle-notch" class="fa-spin" aria-hidden="true" />
+          <FontAwesomeIcon icon="circle-notch" spin aria-hidden="true" />
         </div>
       </Transition>
     </div>
@@ -59,7 +59,7 @@ defineEmits<{ select: [name: string] }>();
   gap: 5px;
   flex-shrink: 0;
 }
-.sk-customer-bar-label i { color: var(--color-primary-500); font-size: 13px; }
+.sk-customer-bar-label svg { color: var(--color-primary-500); font-size: 13px; }
 .sk-customer-scroll {
   display: flex;
   gap: 6px;
@@ -92,7 +92,7 @@ defineEmits<{ select: [name: string] }>();
   flex-shrink: 0;
   position: relative;
 }
-.sk-customer-chip i { font-size: 11px; transition: transform 0.25s ease; }
+.sk-customer-chip svg { font-size: 11px; transition: transform 0.25s ease; }
 .sk-customer-chip:hover {
   border-color: var(--color-primary-300);
   color: var(--color-primary-600);
@@ -100,7 +100,7 @@ defineEmits<{ select: [name: string] }>();
   transform: translateY(-1px);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
-.sk-customer-chip:hover i { transform: scale(1.15); }
+.sk-customer-chip:hover svg { transform: scale(1.15); }
 .sk-customer-chip.active {
   background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-700));
   color: white;

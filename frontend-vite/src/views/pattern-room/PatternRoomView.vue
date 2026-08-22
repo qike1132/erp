@@ -22,7 +22,7 @@
           {{ groupHook.error.value }}
         </UiAlert>
 
-        <PatternRoomSplitBody :is-narrow="isNarrow" v-model:drawer-open="drawerOpen">
+        <PatternRoomSplitBody v-model:drawer-open="drawerOpen" :is-narrow="isNarrow">
           <template #group-list>
             <CustomerGroupList
               :groups="groupHook.groups.value"
@@ -55,10 +55,14 @@
               :can-print="canPrint"
               :roles="roleHook.roles.value"
               :current-role-id="roleHook.currentRoleId.value"
+              :editing-part-id="editingPartId"
+              :edit-form="editForm"
               @set-final-version="onSetFinalVersion"
               @copy-version="onCopyPartVersion"
               @delete-version="onDeleteVersion"
-              @save-edit="onSaveEdit"
+              @start-edit="startEdit"
+              @cancel-edit="cancelEdit"
+              @save-edit="saveEdit"
               @select-role="onSelectRole"
               @add-role="onAddRole"
               @remove-role="onRemoveRole"
@@ -252,12 +256,16 @@ const {
   onPartSubmitBatch,
   onSetFinalVersion,
   onCopyPartVersion,
-  onSaveEdit,
   onDeleteVersion,
   onVersionCreateConfirm,
   onSelectRole,
   onAddRole,
   onRemoveRole,
+  editingPartId,
+  editForm,
+  startEdit,
+  cancelEdit,
+  saveEdit,
 } = usePatternRoomPartActions({
   canManage,
   confirmDialog,

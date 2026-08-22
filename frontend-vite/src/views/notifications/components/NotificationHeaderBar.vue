@@ -1,7 +1,7 @@
 <template>
   <div class="nc-header">
     <div class="nc-header-left">
-      <button class="nc-back-btn" @click="goBack" :aria-label="'返回上一页'">
+      <button class="nc-back-btn" :aria-label="'返回上一页'" @click="goBack">
         <FontAwesomeIcon icon="arrow-left" aria-hidden="true" />
       </button>
       <div class="nc-title-group">

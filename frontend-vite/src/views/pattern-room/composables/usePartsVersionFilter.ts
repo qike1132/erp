@@ -71,31 +71,44 @@ export function usePartsVersionFilter(
     const seen = new Map<string, PartDetail[]>()
     for (const item of items) {
       const key = item.part_name
-      if (!seen.has(key)) seen.set(key, [])
-      seen.get(key)!.push(item)
-    }
-    for (const [name, group] of seen) {
-      const versionNums = group
-        .map(i => i.version_no)
-        .filter(Boolean)
-        .map(v => parseInt((v as string).replace(/^T/i, ''), 10))
-        .filter(n => !isNaN(n))
-      const maxNum = versionNums.length > 0 ? Math.max(...versionNums) : null
-      const latestVersionNo = maxNum != null ? `T${maxNum}` : null
-      const sel = selectedVersion.value[name]
-      const versionExists = sel ? group.some(i => i.version_no === sel) : false
-      const shouldFold = Boolean(sel) && versionExists && !expandedParts.value.has(name)
-      let filteredItems = shouldFold ? group.filter(i => i.version_no === sel) : group
-      const versionNum = (v?: string | null) => {
-        if (!v) return Number.MAX_SAFE_INTEGER
-        const n = parseInt(v.replace(/^T/i, ''), 10)
-        return isNaN(n) ? Number.MAX_SAFE_INTEGER : n
+      let group = seen.get(key)
+      if (!group) {
+        group = []
+        seen.set(key, group)
       }
-      filteredItems = [...filteredItems].sort((a, b) => versionNum(a.version_no) - versionNum(b.version_no))
+      group.push(item)
+    }
+
+    const expanded = expandedParts.value
+    const selVer = selectedVersion.value
+
+    for (const [name, group] of seen) {
+      // 循环求最大版本号（避免 Math.max(...arr) 大数组栈溢出）
+      let maxNum = -1
+      for (const item of group) {
+        if (item.version_no) {
+          const n = parseInt(item.version_no.replace(/^T/i, ''), 10)
+          if (!isNaN(n) && n > maxNum) maxNum = n
+        }
+      }
+      const latestVersionNo = maxNum >= 0 ? `T${maxNum}` : null
+
+      const sel = selVer[name]
+      const versionExists = sel ? group.some((i) => i.version_no === sel) : false
+      const shouldFold = Boolean(sel) && versionExists && !expanded.has(name)
+      const filteredItems = shouldFold ? group.filter((i) => i.version_no === sel) : group
+
+      // 排序：按版本号数值升序，无版本号排最后
+      const sorted = [...filteredItems].sort((a, b) => {
+        const va = a.version_no ? parseInt(a.version_no.replace(/^T/i, ''), 10) : Number.MAX_SAFE_INTEGER
+        const vb = b.version_no ? parseInt(b.version_no.replace(/^T/i, ''), 10) : Number.MAX_SAFE_INTEGER
+        return (isNaN(va) ? Number.MAX_SAFE_INTEGER : va) - (isNaN(vb) ? Number.MAX_SAFE_INTEGER : vb)
+      })
+
       result.push({
         part_name: name,
-        rowSpan: filteredItems.length,
-        items: filteredItems,
+        rowSpan: sorted.length,
+        items: sorted,
         latestVersionNo,
         collapsed: shouldFold,
         totalVersionCount: group.length,

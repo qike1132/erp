@@ -33,9 +33,48 @@ vi.mock('@/api', () => ({
   },
 }))
 
-vi.mock('@tanstack/vue-query', () => ({
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
-}))
+vi.mock('@tanstack/vue-query', async () => {
+  const { ref, onScopeDispose, watchEffect } = await import('vue')
+  // 模拟真实 Vue Query：挂载即执行 queryFn（否则 purchaseApi.orders 永远不会被调用），
+  // 并用 watchEffect 响应式处理 refetchInterval（模拟 auto-refresh 行为）。
+  const useQuery = (opts: {
+    queryFn?: () => unknown
+    refetchInterval?: () => number | false
+  }) => {
+    const data = ref<unknown>(null)
+    const isLoading = ref(true)
+    const isFetching = ref(false)
+    const refetch = vi.fn(() => {
+      if (typeof opts?.queryFn !== 'function') return Promise.resolve()
+      isFetching.value = true
+      return Promise.resolve()
+        .then(() => opts.queryFn!())
+        .then((res) => { data.value = res; isLoading.value = false; isFetching.value = false })
+        .catch(() => { isLoading.value = false; isFetching.value = false })
+    })
+    if (typeof opts?.queryFn === 'function') {
+      void refetch()
+    }
+    // refetchInterval: 响应式跟踪返回值，返回数字时按间隔周期调用 refetch
+    if (typeof opts?.refetchInterval === 'function') {
+      let timer: ReturnType<typeof setInterval> | null = null
+      watchEffect(() => {
+        if (timer) { clearInterval(timer); timer = null }
+        const interval = opts.refetchInterval!()
+        if (typeof interval === 'number' && interval > 0) {
+          timer = setInterval(() => void refetch(), interval)
+        }
+      })
+      onScopeDispose(() => { if (timer) clearInterval(timer) })
+    }
+    return { data, isLoading, isFetching, refetch }
+  }
+  return {
+    useQueryClient: () => ({ invalidateQueries: vi.fn(), prefetchQuery: vi.fn() }),
+    useQuery,
+    keepPreviousData: {},
+  }
+})
 
 vi.mock('@/composables/useToast', () => ({
   showToast: vi.fn(),

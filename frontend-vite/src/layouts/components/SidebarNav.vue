@@ -11,7 +11,7 @@
           @pointerenter="prefetchRoute(item.path)"
         >
           <div class="sb-nav-icon" :class="{ 'sb-nav-icon-active': isActive(item.path) }">
-            <i :class="resolveIcon(item.icon)" aria-hidden="true" />
+            <FontAwesomeIcon :icon="resolveIcon(item.icon)" aria-hidden="true" />
           </div>
         </router-link>
       </div>
@@ -20,7 +20,7 @@
     <!-- 展开态：搜索框 + 手风琴折叠菜单 -->
     <template v-else>
       <div class="sb-search">
-        <span class="sb-search-icon" aria-hidden="true"></span>
+        <span class="sb-search-icon" aria-hidden="true" />
         <input
           v-model="searchQuery"
           type="text"
@@ -39,7 +39,7 @@
           @click="toggleSection(section.title)"
         >
           <span class="sb-section-title">{{ section.title }}</span>
-          <span class="sb-chevron" aria-hidden="true"></span>
+          <span class="sb-chevron" aria-hidden="true" />
         </button>
         <div v-show="sectionIsOpen(section.title)" class="sb-section-body">
           <router-link
@@ -50,7 +50,7 @@
             @pointerenter="prefetchRoute(item.path)"
           >
             <div class="sb-nav-icon" :class="{ 'sb-nav-icon-active': isActive(item.path) }">
-              <i :class="resolveIcon(item.icon)" aria-hidden="true" />
+              <FontAwesomeIcon :icon="resolveIcon(item.icon)" aria-hidden="true" />
             </div>
             <span class="sb-nav-label">{{ item.title }}</span>
           </router-link>

@@ -17,9 +17,9 @@
       <UiDatePicker v-model="filters.endDate" style="width: 160px" />
     </div>
     <div class="rp-filter-actions">
-      <button class="rp-action-btn rp-action-primary" @click="emit('search')" aria-label="查询">查询</button>
-      <button class="rp-action-btn rp-action-outline" @click="emit('reset')" aria-label="重置">重置</button>
-      <button v-if="searched" class="rp-action-btn rp-action-success" @click="emit('export')" aria-label="导出">
+      <button class="rp-action-btn rp-action-primary" aria-label="查询" @click="emit('search')">查询</button>
+      <button class="rp-action-btn rp-action-outline" aria-label="重置" @click="emit('reset')">重置</button>
+      <button v-if="searched" class="rp-action-btn rp-action-success" aria-label="导出" @click="emit('export')">
         <FontAwesomeIcon icon="download" style="margin-right: 4px" aria-hidden="true" />导出
       </button>
     </div>
@@ -31,10 +31,12 @@ import UiSelect from '@/components/ui/UiSelect.vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
 
 defineProps<{
-  filters: { customer: string; product: string; startDate: string; endDate: string }
   customerOptions: { value: string; label: string }[]
   searched: boolean
 }>()
+
+// 显式双向绑定：父组件 v-model:filters 传入，筛选条件就地编辑
+const filters = defineModel<{ customer: string; product: string; startDate: string; endDate: string }>('filters', { required: true })
 
 const emit = defineEmits<{
   'search': []

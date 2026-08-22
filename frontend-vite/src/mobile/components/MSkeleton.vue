@@ -41,7 +41,7 @@
         <div class="m-sk-line m-sk-line--sm" />
       </div>
       <div class="m-sk-chart-area">
-        <div class="m-sk-chart-bar" v-for="i in 6" :key="i" :style="{ height: 20 + Math.random() * 50 + '%' }" />
+        <div v-for="i in 6" :key="i" class="m-sk-chart-bar" :style="{ height: 20 + Math.random() * 50 + '%' }" />
       </div>
       <div class="m-sk-report-rows">
         <div v-for="i in 3" :key="i" class="m-sk-line m-sk-line--full" />

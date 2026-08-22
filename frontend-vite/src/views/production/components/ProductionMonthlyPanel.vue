@@ -14,7 +14,7 @@
         <div v-for="d in monthlySummary.monthly_departments" :key="d.department" :class="['pr-dept-card', `pr-dept-${d.department}`]">
           <div class="pr-dept-content">
             <div class="pr-dept-head">
-              <div :class="['pr-dept-icon-sm', `pr-dept-icon-${d.department}`]"><i :class="deptIcon(d.department)" aria-hidden="true" /></div>
+              <div :class="['pr-dept-icon-sm', `pr-dept-icon-${d.department}`]"><FontAwesomeIcon :icon="deptIcon(d.department)" aria-hidden="true" /></div>
               <span class="pr-dept-name">{{ d.department_label }}</span>
             </div>
             <div class="pr-dept-qty">

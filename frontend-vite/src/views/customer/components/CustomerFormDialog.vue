@@ -16,8 +16,8 @@
       </div>
     </form>
     <template #footer>
-      <button class="cu-action-btn" @click="emit('update:open', false)" aria-label="取消">取消</button>
-      <button class="cu-action-btn cu-action-primary" :disabled="submitting" @click="emit('submit')" :aria-label="submitting ? '提交中…' : mode === 'add' ? '创建' : '保存修改'">
+      <button class="cu-action-btn" aria-label="取消" @click="emit('update:open', false)">取消</button>
+      <button class="cu-action-btn cu-action-primary" :disabled="submitting" :aria-label="submitting ? '提交中…' : mode === 'add' ? '创建' : '保存修改'" @click="emit('submit')">
         {{ submitting ? '提交中…' : mode === 'add' ? '创建' : '保存修改' }}
       </button>
     </template>
@@ -32,8 +32,10 @@ defineProps<{
   open: boolean
   mode: 'add' | 'edit'
   submitting: boolean
-  form: CustomerFormData
 }>()
+
+// 显式双向绑定：父组件 v-model:form 传入，表单字段就地编辑
+const form = defineModel<CustomerFormData>('form', { required: true })
 
 const emit = defineEmits<{
   'update:open': [value: boolean]

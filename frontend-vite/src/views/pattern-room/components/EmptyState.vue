@@ -1,7 +1,7 @@
 <template>
   <div class="empty-state">
     <div class="empty-icon">
-      <i :class="icon" aria-hidden="true" />
+      <FontAwesomeIcon :icon="icon" aria-hidden="true" />
     </div>
     <h3 class="empty-title">{{ title }}</h3>
     <p v-if="description" class="empty-desc">{{ description }}</p>

@@ -29,7 +29,7 @@
         <div class="pd-modal pd-modal-img-dialog">
           <div class="pd-modal-header">
             <h5 class="pd-modal-title">产品图片</h5>
-            <button class="pd-modal-close" @click="imageModalVisible = false" aria-label="关闭"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
+            <button class="pd-modal-close" aria-label="关闭" @click="imageModalVisible = false"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
           </div>
           <div class="pd-modal-body">
             <img loading="lazy" :src="resolveStaticUrl(imageModalSrc)" class="pd-modal-img-view" alt="产品图片" />

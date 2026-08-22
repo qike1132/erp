@@ -13,7 +13,7 @@
       <div v-for="r in records" :key="r.id" class="brl-item" :class="`brl-${r.status}`">
         <div class="brl-item-header">
           <div class="brl-item-icon" :class="iconClass(r)">
-            <i :class="iconName(r)"  aria-hidden="true" />
+            <FontAwesomeIcon :icon="iconName(r)" aria-hidden="true" />
           </div>
           <div class="brl-item-info">
             <div class="brl-item-name">

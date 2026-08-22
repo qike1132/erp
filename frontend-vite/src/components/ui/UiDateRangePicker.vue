@@ -67,11 +67,11 @@ function _formatDate(d: string | Date): string {
 <template>
   <DatePicker
     v-model="dateRange"
-    selectionMode="range"
+    selection-mode="range"
     :placeholder="placeholder"
     :disabled="disabled"
-    :dateFormat="dateFormat"
-    showIcon
-    iconDisplay="input"
+    :date-format="dateFormat"
+    show-icon
+    icon-display="input"
   />
 </template>

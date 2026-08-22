@@ -205,17 +205,17 @@ defineExpose({ setSuppressed })
 
 <template>
   <AutoComplete
-    :modelValue="modelValue"
+    :model-value="modelValue"
     :suggestions="internalSuggestions"
-    :optionLabel="(optionLabel as string)"
+    :option-label="(optionLabel as string)"
     :placeholder="placeholder"
     :disabled="disabled"
     :loading="showLoading ? loading : false"
     :delay="searchDelayMs"
-    :minLength="minQueryLength"
-    :appendTo="(appendTo as string | undefined)"
-    :showEmptyMessage="!suppressSearch"
-    @update:modelValue="onInputChange"
+    :min-length="minQueryLength"
+    :append-to="(appendTo as string | undefined)"
+    :show-empty-message="!suppressSearch"
+    @update:model-value="onInputChange"
     @complete="onComplete"
     @item-select="onItemSelect"
   >

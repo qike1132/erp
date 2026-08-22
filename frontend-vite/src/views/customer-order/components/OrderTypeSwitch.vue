@@ -1,9 +1,9 @@
 <template>
   <div class="co-type-switch">
-    <button :class="['co-type-btn', isOrder && 'active']" @click="form.type = 'order'" aria-label="订单">
+    <button :class="['co-type-btn', isOrder && 'active']" aria-label="订单" @click="form.type = 'order'">
       <FontAwesomeIcon icon="clipboard-list" aria-hidden="true" />订单
     </button>
-    <button :class="['co-type-btn', !isOrder && 'active']" @click="form.type = 'stockin'" aria-label="备货">
+    <button :class="['co-type-btn', !isOrder && 'active']" aria-label="备货" @click="form.type = 'stockin'">
       <FontAwesomeIcon icon="truck-loading" aria-hidden="true" />备货
     </button>
   </div>

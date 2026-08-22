@@ -6,7 +6,7 @@
         <FontAwesomeIcon :icon="kind === 'stockin' ? 'truck-loading' : 'shipping-fast'" :style="{ color: kind === 'stockin' ? 'var(--color-primary-500)' : 'var(--color-danger-500)' }" />
         {{ kind === 'stockin' ? '入库记录列表' : '出库记录列表' }}
       </div>
-      <button class="cs-action-btn cs-action-outline" @click="showFilter = !showFilter" aria-label="筛选">
+      <button class="cs-action-btn cs-action-outline" aria-label="筛选" @click="showFilter = !showFilter">
         <FontAwesomeIcon icon="filter" style="margin-right: 4px" />筛选
       </button>
     </div>
@@ -25,7 +25,7 @@
           <UiDatePicker v-model="fEnd" style="width: 100%" />
         </div>
         <div class="cs-filter-action">
-          <button class="cs-action-btn cs-action-primary" @click="emit('search')" aria-label="查询">
+          <button class="cs-action-btn cs-action-primary" aria-label="查询" @click="emit('search')">
             <FontAwesomeIcon icon="search" style="margin-right: 4px" />查询
           </button>
         </div>
@@ -50,8 +50,8 @@
         <template #column-body-quantity="{ row }"><strong :style="kind === 'stockout' ? 'color: var(--color-danger-500)' : undefined">{{ row.quantity }}</strong></template>
         <template #column-body-note="{ row }"><small>{{ row.note || '-' }}</small></template>
         <template #column-body-actions="{ row }">
-          <button class="cs-icon-btn cs-icon-warning" @click="emit('edit', row)" aria-label="编辑"><FontAwesomeIcon icon="edit" /></button>
-          <button class="cs-icon-btn cs-icon-danger" :disabled="actionId === row.id" @click="emit('delete', row)" aria-label="删除"><FontAwesomeIcon icon="trash" /></button>
+          <button class="cs-icon-btn cs-icon-warning" aria-label="编辑" @click="emit('edit', row)"><FontAwesomeIcon icon="edit" /></button>
+          <button class="cs-icon-btn cs-icon-danger" :disabled="actionId === row.id" aria-label="删除" @click="emit('delete', row)"><FontAwesomeIcon icon="trash" /></button>
         </template>
       </UiDataTable>
     </template>

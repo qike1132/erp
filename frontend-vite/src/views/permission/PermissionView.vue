@@ -6,7 +6,7 @@
       <div v-if="isLoading" class="flex items-center justify-center py-10 text-gray-400 gap-2">
         <UiSpinner /></div>
       <template v-else-if="permissionTree.length === 0">
-        <UiEmpty description="暂无权限数据" />
+        <UiEmpty text="暂无权限数据" />
       </template>
       <div v-else class="py-2">
         <PermissionNode v-for="node in permissionTree" :key="node.id" :node="node" :depth="0" />
@@ -18,6 +18,7 @@
 <script setup lang="ts">
 import { computed, h, defineComponent, PropType, type VNode } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
+import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome'
 import { permissionApi } from '@/api'
 import type { PermissionItem } from '@/types'
 import UiCard from '@/components/ui/UiCard.vue'
@@ -42,9 +43,11 @@ const PermissionNode = defineComponent({
             class: 'flex items-center gap-2 py-1.5 px-2 rounded hover:bg-gray-50',
           },
           [
-            h('i', {
-              class: children.length > 0 ? 'fas fa-folder text-amber-500' : 'fas fa-file text-gray-400',
+            h(FontAwesomeIcon, {
+              icon: children.length > 0 ? 'fas fa-folder' : 'fas fa-file',
+              class: children.length > 0 ? 'text-amber-500' : 'text-gray-400',
               style: { fontSize: '14px', width: '18px', textAlign: 'center' },
+              'aria-hidden': true,
             }),
             h('span', { class: 'text-sm text-gray-700' }, props.node.name),
             h(

@@ -28,27 +28,27 @@
             </tr>
           </thead>
           <tbody
-            v-for="o in orders"
-            :key="o.id"
+            v-for="row in flatRows"
+            :key="row.o.id"
             class="coq-po-group"
-            @click="$emit('viewDetail', o.id)"
+            @click="$emit('viewDetail', row.o.id)"
           >
             <tr
-              v-for="(sku, idx) in getSkuRows(o)"
-              :key="o.id + '-' + idx"
+              v-for="(sku, idx) in row.skus"
+              :key="row.o.id + '-' + idx"
               class="coq-row"
             >
-              <td v-if="idx === 0" class="coq-td coq-td-muted" :rowspan="getSkuRows(o).length">
-                {{ formatDate(o.completed_at) || '—' }}
+              <td v-if="idx === 0" class="coq-td coq-td-muted" :rowspan="row.skuCount">
+                {{ formatDate(row.o.completed_at) || '—' }}
               </td>
-              <td v-if="idx === 0" class="coq-td" :rowspan="getSkuRows(o).length">
-                {{ o.customer_name || '—' }}
+              <td v-if="idx === 0" class="coq-td" :rowspan="row.skuCount">
+                {{ row.o.customer_name || '—' }}
               </td>
               <td class="coq-td coq-td-product" :title="sku.product_name">{{ sku.product_name || '—' }}</td>
               <td class="coq-td coq-td-num">{{ formatNumber(sku.quantity) }}</td>
-              <td v-if="idx === 0" class="coq-td" :rowspan="getSkuRows(o).length">
-                <span :class="['coq-badge', getStatusClass(o.status)]">
-                  {{ getStatusLabel(o.status) }}
+              <td v-if="idx === 0" class="coq-td" :rowspan="row.skuCount">
+                <span :class="['coq-badge', getStatusClass(row.o.status)]">
+                  {{ getStatusLabel(row.o.status) }}
                 </span>
               </td>
             </tr>
@@ -70,11 +70,12 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
 import type { PurchaseOrder } from '@/types'
 import { formatDate, formatNumber } from '@/utils/format'
 
-defineProps<{
+const props = defineProps<{
   orders: PurchaseOrder[]
   loading: boolean
   fetching?: boolean
@@ -109,6 +110,14 @@ function getSkuRows(o: PurchaseOrder): { product_name: string; quantity: number 
   }
   return [{ product_name: o.product_name || '', quantity: o.quantity || 0 }]
 }
+
+// P1-6: 预计算 flatRows，避免模板内每行多次调用 getSkuRows(o)
+const flatRows = computed(() =>
+  props.orders.map((o) => {
+    const skus = getSkuRows(o)
+    return { o, skus, skuCount: skus.length }
+  }),
+)
 </script>
 
 <style scoped>

@@ -45,7 +45,7 @@
 
         <div class="remember-row">
           <label class="remember-label">
-            <UiCheckbox :checked="form.remember" @update:checked="form.remember = $event" />
+            <UiCheckbox v-model:checked="form.remember" />
             <span>记住我</span>
           </label>
         </div>
@@ -59,7 +59,7 @@
       </form>
 
       <div class="login-footer">
-        <p class="footer-text">东莞玩具供应链管理系统</p>
+        <p class="footer-text">滨发玩具供应链管理系统</p>
         <p class="footer-version">v2.0</p>
       </div>
     </div>
@@ -72,9 +72,11 @@ import UiCheckbox from '@/components/ui/UiCheckbox.vue'
 defineProps<{
   loading: boolean
   errorMsg: string
-  form: { username: string; password: string; remember: boolean }
   handleLogin: () => Promise<void> | void
 }>()
+
+// 显式双向绑定：父组件 v-model:form 传入，子组件就地编辑表单字段（合法替代直接改 props）
+const form = defineModel<{ username: string; password: string; remember: boolean }>('form', { required: true })
 
 const showPassword = defineModel<boolean>('showPassword', { default: false })
 </script>

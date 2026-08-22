@@ -32,7 +32,7 @@
             @input="$emit('updateFilter', { key: 'material_name', value: ($event.target as HTMLInputElement).value })"
           />
         </div>
-        <button class="coq-btn coq-btn-ghost coq-advanced-reset" @click="$emit('resetFilters')" aria-label="重置">
+        <button class="coq-btn coq-btn-ghost coq-advanced-reset" aria-label="重置" @click="$emit('resetFilters')">
           <FontAwesomeIcon icon="undo" aria-hidden="true" />
           <span>重置</span>
         </button>

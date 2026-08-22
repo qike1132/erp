@@ -2,27 +2,27 @@
   <header class="pr-toolbar">
     <div class="pr-toolbar-row pr-toolbar-row-right">
       <div class="pr-tab-group" role="tablist">
-        <button role="tab" :aria-selected="viewTab === 'daily'" :class="['pr-tab', { 'pr-tab-active': viewTab === 'daily' }]" @click="emit('update:viewTab', 'daily')" aria-label="日报">日报</button>
-        <button role="tab" :aria-selected="viewTab === 'monthly'" :class="['pr-tab', { 'pr-tab-active': viewTab === 'monthly' }]" @click="emit('update:viewTab', 'monthly')" aria-label="月报">月报</button>
+        <button role="tab" :aria-selected="viewTab === 'daily'" :class="['pr-tab', { 'pr-tab-active': viewTab === 'daily' }]" aria-label="日报" @click="emit('update:viewTab', 'daily')">日报</button>
+        <button role="tab" :aria-selected="viewTab === 'monthly'" :class="['pr-tab', { 'pr-tab-active': viewTab === 'monthly' }]" aria-label="月报" @click="emit('update:viewTab', 'monthly')">月报</button>
       </div>
       <div class="pr-toolbar-controls">
         <div v-if="viewTab !== 'monthly'" class="pr-date-nav">
-          <button class="pr-date-btn" @click="emit('prev-day')" aria-label="上一页"><FontAwesomeIcon icon="chevron-left" aria-hidden="true" /></button>
+          <button class="pr-date-btn" aria-label="上一页" @click="emit('prev-day')"><FontAwesomeIcon icon="chevron-left" aria-hidden="true" /></button>
           <input v-model="dateRefModel" type="date" class="pr-date-input" aria-label="日期选择" />
-          <button class="pr-date-btn" @click="emit('next-day')" aria-label="下一页"><FontAwesomeIcon icon="chevron-right" aria-hidden="true" /></button>
-          <button class="pr-today-btn" @click="emit('today')" aria-label="今天">今天</button>
+          <button class="pr-date-btn" aria-label="下一页" @click="emit('next-day')"><FontAwesomeIcon icon="chevron-right" aria-hidden="true" /></button>
+          <button class="pr-today-btn" aria-label="今天" @click="emit('today')">今天</button>
         </div>
         <div v-else class="pr-date-nav">
-          <button class="pr-date-btn" @click="emit('prev-month')" aria-label="上一月"><FontAwesomeIcon icon="chevron-left" aria-hidden="true" /></button>
+          <button class="pr-date-btn" aria-label="上一月" @click="emit('prev-month')"><FontAwesomeIcon icon="chevron-left" aria-hidden="true" /></button>
           <span class="pr-month-label">{{ monthlyYear }}年{{ monthlyMonth }}月</span>
-          <button class="pr-date-btn" @click="emit('next-month')" aria-label="下一月"><FontAwesomeIcon icon="chevron-right" aria-hidden="true" /></button>
+          <button class="pr-date-btn" aria-label="下一月" @click="emit('next-month')"><FontAwesomeIcon icon="chevron-right" aria-hidden="true" /></button>
         </div>
         <div class="pr-divider" />
         <div class="pr-actions-group">
-          <button class="pr-action-btn pr-action-primary" @click="emit('open-entry')" aria-label="录入">
+          <button class="pr-action-btn pr-action-primary" aria-label="录入" @click="emit('open-entry')">
             <FontAwesomeIcon icon="plus" aria-hidden="true" /> 录入
           </button>
-          <button class="pr-action-btn" @click="emit('export')" aria-label="导出">
+          <button class="pr-action-btn" aria-label="导出" @click="emit('export')">
             <FontAwesomeIcon icon="download" aria-hidden="true" /> 导出
           </button>
         </div>

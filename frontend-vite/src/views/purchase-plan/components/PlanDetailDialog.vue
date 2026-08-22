@@ -6,24 +6,25 @@
           <div class="sp-modal-header-info">
             <span class="sp-modal-title">{{ detail.date }} · 周{{ detail._weekday }}</span>
             <div class="sp-modal-tabs">
-              <button :class="['sp-modal-tab', { 'sp-modal-tab-active': modalTab === 'plans' }]" @click="modalTab = 'plans'" aria-label="计划明细">计划明细</button>
-              <button :class="['sp-modal-tab', { 'sp-modal-tab-active': modalTab === 'records' }]" @click="modalTab = 'records'" aria-label="出货记录">出货记录</button>
+              <button :class="['sp-modal-tab', { 'sp-modal-tab-active': modalTab === 'plans' }]" aria-label="计划明细" @click="modalTab = 'plans'">计划明细</button>
+              <button :class="['sp-modal-tab', { 'sp-modal-tab-active': modalTab === 'records' }]" aria-label="出货记录" @click="modalTab = 'records'">出货记录</button>
             </div>
           </div>
-          <div class="sp-modal-header-progress" v-if="modalTab === 'plans'">
+          <div v-if="modalTab === 'plans'" class="sp-modal-header-progress">
             <div class="sp-modal-progress-bar">
-              <div class="sp-modal-progress-fill" :style="{ width: detail._shippedPct + '%' }"></div>
-              <span class="sp-modal-progress-text">{{ detail._shippedPct }}%</span>
+              <div class="sp-modal-progress-fill" :style="{ width: shippedPct + '%' }" />
+              <span class="sp-modal-progress-text">{{ shippedPct }}%</span>
             </div>
           </div>
           <div class="sp-modal-header-actions">
-            <button class="sp-modal-export-btn" @click="exportDayCSV" aria-label="导出当日"><FontAwesomeIcon icon="download" aria-hidden="true" /> 导出当日</button>
-            <button class="sp-modal-btn sp-modal-btn-close" @click="close" aria-label="关闭"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
+            <button class="sp-modal-export-btn" aria-label="导出当日" @click="exportDayCSV"><FontAwesomeIcon icon="download" aria-hidden="true" /> 导出当日</button>
+            <button class="sp-modal-btn sp-modal-btn-close" aria-label="关闭" @click="close"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
           </div>
         </div>
 
         <div v-if="modalTab === 'plans'" class="sp-modal-body">
-          <div class="sp-modal-split">
+          <div v-if="dayLoading" class="sp-modal-loading"><UiSpinner /></div>
+          <div v-else class="sp-modal-split">
             <PlanDialogCustomerList
               :customer-list="customerList"
               :selected="modalSelCust"
@@ -34,7 +35,8 @@
         </div>
 
         <div v-else class="sp-modal-body">
-          <ShipmentRecordsTab :date="detail.date" :plans="detail.plans" />
+          <div v-if="dayLoading" class="sp-modal-loading"><UiSpinner /></div>
+          <ShipmentRecordsTab v-else :date="detail.date" :plans="dayPlans" />
         </div>
 
       </div>
@@ -44,6 +46,8 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
+import { useQuery } from '@tanstack/vue-query';
+import { planApi } from '@/api';
 import { showToast } from '@/composables/useToast';
 import { downloadCsv } from '@/utils/csv';
 import ShipmentRecordsTab from './ShipmentRecordsTab.vue';
@@ -54,6 +58,8 @@ import type { Row, Plan } from './types';
 const props = defineProps<{
   open: boolean;
   detail: Row | null;
+  y: number;
+  m: number;
 }>();
 
 const emit = defineEmits<{
@@ -63,19 +69,40 @@ const emit = defineEmits<{
 const modalTab = ref<'plans' | 'records'>('plans');
 const modalSelCust = ref('');
 
-watch(() => props.detail, (d) => {
-  modalSelCust.value = d ? (Object.keys(d._byCustomer)[0] ?? '') : '';
+// 按需加载当日明细（6.9：弹窗打开时才请求，避免全量传输）
+const { data: dayData, isLoading: dayLoading } = useQuery({
+  queryKey: ['pp-day', () => props.y, () => props.m, () => props.detail?._dayNum ?? 0],
+  queryFn: async () => {
+    const day = props.detail?._dayNum;
+    if (!day) return null;
+    return await planApi.dayDetails({ year: props.y, month: props.m, day });
+  },
+  enabled: () => props.open && !!props.detail,
+  staleTime: 60_000,
+});
+
+const dayPlans = computed<Plan[]>(() => (dayData.value?.plans ?? []) as unknown as Plan[]);
+const dayByCustomer = computed<Record<string, Plan[]>>(() => (dayData.value?.by_customer ?? {}) as unknown as Record<string, Plan[]>);
+const shippedPct = computed(() => (dayData.value?.shipped_pct as number) ?? props.detail?._shippedPct ?? 0);
+
+watch(() => props.detail, () => {
+  modalSelCust.value = '';
   modalTab.value = 'plans';
 });
 
+watch(dayByCustomer, (bc) => {
+  if (props.open && props.detail && !modalSelCust.value && Object.keys(bc).length > 0) {
+    modalSelCust.value = Object.keys(bc)[0] ?? '';
+  }
+});
+
 const customerList = computed(() => {
-  if (!props.detail) return [];
-  return Object.entries(props.detail._byCustomer).map(([name, plans]) => ({ name, plans }));
+  return Object.entries(dayByCustomer.value).map(([name, plans]) => ({ name, plans }));
 });
 
 const modalSelGroup = computed(() => {
-  if (!modalSelCust.value || !props.detail) return null;
-  return props.detail._byCustomer[modalSelCust.value] ?? null;
+  if (!modalSelCust.value) return null;
+  return dayByCustomer.value[modalSelCust.value] ?? null;
 });
 
 function getShipmentStatus(quantity: number, shippedQty: number): string {
@@ -85,15 +112,15 @@ function getShipmentStatus(quantity: number, shippedQty: number): string {
 }
 
 function exportDayCSV() {
-  if (!props.detail) return;
-  const r = props.detail;
+  const plans = dayPlans.value;
+  if (!plans.length) { showToast('无数据', 'error'); return; }
   const h = '客户,产品,条码,数量,已出,待出,状态';
   const ls = [h];
-  for (const p of r.plans) {
+  for (const p of plans) {
     const st = getShipmentStatus(p.quantity, p.shipped_qty);
     ls.push([p.customer_name, p.product_name, p.barcode, p.quantity, p.shipped_qty, p.remaining_qty, st === 'completed' ? '已出货' : st === 'partial' ? '部分出货' : '待出货'].join(','));
   }
-  downloadCsv(ls, `出货计划_${r.date}_详情.csv`);
+  downloadCsv(ls, `出货计划_${props.detail?.date ?? ''}_详情.csv`);
   showToast('导出成功', 'success');
 }
 
@@ -126,6 +153,15 @@ function close() {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  transform: translateZ(0);
+  contain: layout style paint;
+}
+
+.sp-modal-loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .sp-modal-header {

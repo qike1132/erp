@@ -4,18 +4,19 @@
       <FontAwesomeIcon icon="search" class="mc-search-icon" aria-hidden="true" />
       <input
         :value="searchQuery"
-        @input="$emit('update:searchQuery', ($event.target as HTMLInputElement).value); $emit('search-input')"
         type="text"
         placeholder="搜索产品名称或69码..."
         class="mc-search-input"
+        @input="$emit('update:searchQuery', ($event.target as HTMLInputElement).value); $emit('search-input')"
         @focus="$emit('focus')"
         @blur="$emit('blur')"
       />
       <button
         v-if="searchQuery"
         class="mc-search-clear"
+        aria-label="关闭"
         @click="$emit('update:searchQuery', ''); $emit('search-input')"
-        aria-label="关闭">
+      >
         <FontAwesomeIcon icon="times" aria-hidden="true" />
       </button>
     </div>

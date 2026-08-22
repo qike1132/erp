@@ -14,11 +14,11 @@
         title="移除"
         @click="roleNames.splice(idx, 1)"
       >
-        <i class="fas fa-times" aria-hidden="true" />
+        <FontAwesomeIcon icon="times" aria-hidden="true" />
       </button>
     </div>
-    <button type="button" class="pjf-role-add" @click="roleNames.push('')" aria-label="添加角色">
-      <i class="fas fa-plus" aria-hidden="true" />
+    <button type="button" class="pjf-role-add" aria-label="添加角色" @click="roleNames.push('')">
+      <FontAwesomeIcon icon="plus" aria-hidden="true" />
       添加角色
     </button>
   </div>

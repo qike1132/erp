@@ -13,7 +13,7 @@
               {{ action.label }}
             </button>
           </div>
-          <button class="m-action-cancel" @click="handleCancel" aria-label="取消">取消</button>
+          <button class="m-action-cancel" aria-label="取消" @click="handleCancel">取消</button>
         </div>
       </div>
     </Transition>

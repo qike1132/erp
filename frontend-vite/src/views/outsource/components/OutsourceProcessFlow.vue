@@ -1,248 +1,170 @@
 <template>
-  <!-- 工序步骤卡片流：直观展示状态流转 -->
-  <div v-for="group in processGroups" :key="String(group.itemId)" class="oso-flow">
-    <div class="oso-flow-head">
-      <span class="oso-flow-sku">{{ group.skuName || 'SKU' }}</span>
-      <span class="oso-flow-qty">× {{ group.skuQty }}</span>
+  <!-- 工序紧凑分组表格：每 SKU 一组表头行 + 工序行（工序/发货数量/收货数量/状态） -->
+  <div v-for="group in processGroups" :key="String(group.itemId)" class="oso-proc-group">
+    <div class="oso-proc-group-head">
+      <span class="oso-proc-sku">{{ group.skuName || 'SKU' }}</span>
+      <span class="oso-proc-qty">× {{ group.skuQty }}</span>
+      <span class="oso-proc-count">{{ group.processes.length }} 道工序</span>
     </div>
-    <div class="oso-flow-row">
-      <template v-for="(p, idx) in group.processes" :key="p.id">
-        <div v-if="idx > 0" class="oso-flow-arrow">
-          <FontAwesomeIcon icon="angle-right" aria-hidden="true" />
-        </div>
-        <div :class="['oso-flow-card', `oso-flow-card--${p.status}`]">
-          <div class="oso-flow-card-top">
-            <span class="oso-flow-seq">{{ idx + 1 }}</span>
-            <span class="oso-flow-name">{{ p.process_type }}</span>
+    <table class="oso-proc-table">
+      <thead>
+        <tr>
+          <th class="oso-col-proc">工序</th>
+          <th class="oso-col-qty">发货数量</th>
+          <th class="oso-col-qty">收货数量</th>
+          <th class="oso-col-status">状态</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="(p, idx) in group.processes" :key="p.id" :class="`oso-proc-row--${p.status}`">
+          <td class="oso-col-proc">
+            <span class="oso-proc-seq">{{ idx + 1 }}</span>
+            <span class="oso-proc-name">{{ p.process_type }}</span>
+            <span v-if="(p.shipped_quantity || 0) > 0" class="oso-proc-cum">已发 {{ p.shipped_quantity }}</span>
+          </td>
+          <td class="oso-col-qty">
+            <template v-if="canShip && remainingShipQty(p) > 0 && (p.received_quantity || 0) === 0">
+              <input
+                class="oso-qty-input"
+                type="number"
+                min="1"
+                placeholder="本批发货"
+                :value="shipQtyDrafts[p.id] ?? remainingShipQty(p)"
+                :title="`本次发货数量（剩余 ${remainingShipQty(p)}）`"
+                @input="setShipQty(p.id, ($event.target as HTMLInputElement).value)"
+              />
+            </template>
+            <template v-else>
+              <span class="oso-qty-val">{{ p.shipped_quantity || '-' }}</span>
+            </template>
+          </td>
+          <td class="oso-col-qty">
+            <template v-if="canReceive && remainingReceiveQty(p) > 0">
+              <input
+                class="oso-qty-input"
+                type="number"
+                min="1"
+                placeholder="本批收货"
+                :value="receiveQtyDrafts[p.id] ?? remainingReceiveQty(p)"
+                :title="`本次收货数量（剩余 ${remainingReceiveQty(p)}）`"
+                @input="setReceiveQty(p.id, ($event.target as HTMLInputElement).value)"
+              />
+            </template>
+            <template v-else>
+              <span class="oso-qty-val">{{ p.received_quantity || '-' }}</span>
+            </template>
+          </td>
+          <td class="oso-col-status">
             <span :class="['oso-status-badge', `oso-status-${p.status}`]">{{ statusLabel(p.status) }}</span>
-          </div>
-          <div class="oso-flow-start">
-            <span class="oso-flow-start-label">
-              <FontAwesomeIcon icon="play-circle" aria-hidden="true" /> 开始
-            </span>
-            <span class="oso-flow-start-time" :class="p.actual_start_time ? 'oso-flow-start-time--actual' : ''">
-              {{ shortDate(p.actual_start_time || p.planned_start_time || '待排期') }}
-            </span>
-            <span v-if="canManage" class="oso-flow-start-edit">
-              <input
-                class="oso-dt-input"
-                type="datetime-local"
-                :value="toDateTimeLocal(p.planned_start_time)"
-                title="设置计划开始时间"
-                @change="updatePlanned(p, 'planned_start_time', ($event.target as HTMLInputElement).value)"
-              />
-            </span>
-          </div>
-          <div class="oso-flow-times">
-            <div class="oso-flow-time-row">
-              <span class="oso-flow-time-label">完成</span>
-              <span class="oso-flow-time-val">
-                {{ shortDate(p.actual_end_time || p.planned_end_time || '-') }}
-              </span>
-              <input
-                v-if="canManage"
-                class="oso-dt-input oso-dt-input--end"
-                type="datetime-local"
-                :value="toDateTimeLocal(p.planned_end_time)"
-                title="设置计划完成时间"
-                @change="updatePlanned(p, 'planned_end_time', ($event.target as HTMLInputElement).value)"
-              />
-            </div>
-          </div>
-          <div class="oso-flow-card-actions">
-            <UiButton v-if="canManage && p.status !== 'completed'" variant="success" size="sm" @click="handleStart(p)">
-              {{ p.status === 'in_progress' ? '完成' : '开始' }}
-            </UiButton>
-            <UiButton v-if="canManage && p.status !== 'in_progress' && p.status !== 'completed'" variant="outline" size="sm" @click="handleCompleteDirect(p)">
-              直接完成
-            </UiButton>
-            <UiButton v-if="canManage" variant="ghost" size="sm" @click="handleDeleteProcess(p)">
-              <FontAwesomeIcon icon="trash" aria-hidden="true" />
-            </UiButton>
-          </div>
-        </div>
-      </template>
-    </div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
   </div>
 </template>
 
 <script setup lang="ts">
 import type { OrderOutsourceProcess } from '@/api/outsource'
-import UiButton from '@/components/ui/UiButton.vue'
 import type { ProcessGroup } from '@/views/outsource/composables/useOutsourceProcess'
 
 defineProps<{
   processGroups: ProcessGroup[]
-  canManage: boolean
+  canShip: boolean
+  canReceive: boolean
   statusLabel: (status: string) => string
-  shortDate: (v?: string | null) => string
-  toDateTimeLocal: (v?: string | null) => string
-  updatePlanned: (p: OrderOutsourceProcess, field: 'planned_start_time' | 'planned_end_time', value: string) => Promise<void>
-  handleStart: (p: OrderOutsourceProcess) => Promise<void>
-  handleCompleteDirect: (p: OrderOutsourceProcess) => Promise<void>
-  handleDeleteProcess: (p: OrderOutsourceProcess) => Promise<void>
+  shipQtyDrafts: Record<number, string>
+  receiveQtyDrafts: Record<number, string>
+  setShipQty: (id: number, value: string) => void
+  setReceiveQty: (id: number, value: string) => void
+  remainingShipQty: (p: OrderOutsourceProcess) => number
+  remainingReceiveQty: (p: OrderOutsourceProcess) => number
 }>()
 </script>
 
 <style scoped>
-.oso-flow {
+.oso-proc-group {
   border: 1px solid #e8ecf1;
   border-radius: 12px;
-  padding: 12px 14px;
   background: #fcfdfe;
+  overflow: hidden;
 }
-.oso-flow-head {
+.oso-proc-group + .oso-proc-group {
+  margin-top: 12px;
+}
+.oso-proc-group-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 12px;
+  padding: 9px 14px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e8ecf1;
 }
-.oso-flow-sku { font-weight: 700; font-size: 13.5px; color: var(--color-text); }
-.oso-flow-qty { font-size: 12px; color: var(--color-text-muted); }
-.oso-flow-row {
-  display: flex;
-  align-items: stretch;
-  gap: 0;
-  overflow-x: auto;
-  padding-bottom: 4px;
+.oso-proc-sku { font-weight: 700; font-size: 13.5px; color: var(--color-text); }
+.oso-proc-qty { font-size: 12px; color: var(--color-text-muted); }
+.oso-proc-count { margin-left: auto; font-size: 11.5px; color: var(--color-text-muted); }
+
+.oso-proc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
 }
-.oso-flow-arrow {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #cbd5e1;
-  font-size: 16px;
-  padding: 0 6px;
-  flex-shrink: 0;
+.oso-proc-table th,
+.oso-proc-table td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid #eef1f5;
 }
-.oso-flow-card {
-  flex-shrink: 0;
-  width: 220px;
-  border: 1.5px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 10px 12px;
-  background: white;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  transition: box-shadow 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+.oso-proc-table tbody tr:last-child td { border-bottom: none; }
+.oso-proc-table th {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  background: #fafbfc;
+  white-space: nowrap;
 }
-.oso-flow-card:hover { box-shadow: 0 2px 10px rgba(0,0,0,0.08); transform: translateY(-1px); }
-.oso-flow-card--pending { border-color: #e2e8f0; }
-.oso-flow-card--in_progress {
-  border-color: var(--color-primary-400);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.10);
-}
-.oso-flow-card--completed {
-  border-color: var(--color-success-400);
-  background: #f6fdf8;
-}
-.oso-flow-card-top {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-.oso-flow-seq {
-  width: 22px;
-  height: 22px;
+.oso-proc-table tbody tr:hover { background: #fafbfc; }
+
+.oso-col-proc { width: 45%; }
+.oso-col-qty { width: 20%; }
+.oso-col-status { width: 15%; }
+
+.oso-proc-seq {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 7px;
+  min-width: 20px;
+  height: 20px;
+  margin-right: 8px;
+  padding: 0 4px;
+  border-radius: 6px;
   background: #f1f5f9;
   color: var(--color-text-muted);
   font-size: 11.5px;
   font-weight: 700;
-  flex-shrink: 0;
 }
-.oso-flow-card--in_progress .oso-flow-seq { background: var(--color-primary-50); color: var(--color-primary-600); }
-.oso-flow-card--completed .oso-flow-seq { background: var(--color-success-100); color: var(--color-success-700); }
-.oso-flow-name {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--color-text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.oso-flow-start {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 3px;
-  padding: 8px 10px;
-  background: var(--color-primary-50);
-  border-radius: 9px;
-  border: 1px solid var(--color-primary-100);
-}
-.oso-flow-card--completed .oso-flow-start {
-  background: var(--color-success-50);
-  border-color: var(--color-success-100);
-}
-.oso-flow-start-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 10.5px;
-  font-weight: 700;
-  color: var(--color-primary-600);
-}
-.oso-flow-card--completed .oso-flow-start-label { color: var(--color-success-700); }
-.oso-flow-start-time {
-  font-size: 16px;
-  font-weight: 800;
-  color: var(--color-primary-700);
-  line-height: 1.2;
-  white-space: nowrap;
-}
-.oso-flow-card--completed .oso-flow-start-time { color: var(--color-success-700); }
-.oso-flow-start-time--actual { color: var(--color-text); }
-.oso-flow-start-edit { width: 100%; }
-
-.oso-flow-times {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.oso-flow-time-row {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11.5px;
-}
-.oso-flow-time-label {
-  color: var(--color-text-muted);
-  font-size: 10.5px;
+.oso-proc-row--shipped .oso-proc-seq { background: var(--color-primary-50); color: var(--color-primary-600); }
+.oso-proc-row--received .oso-proc-seq { background: var(--color-success-100); color: var(--color-success-700); }
+.oso-proc-name {
   font-weight: 600;
-  flex-shrink: 0;
-  width: 24px;
+  color: var(--color-text);
 }
-.oso-flow-time-val {
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  flex: 1;
-}
-.oso-dt-input {
-  flex: 1;
-  min-width: 0;
-  padding: 3px 6px;
+.oso-proc-cum {
+  margin-left: 8px;
   font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.oso-qty-val { font-weight: 700; color: var(--color-text); }
+.oso-qty-input {
+  width: 88px;
+  padding: 4px 8px;
+  font-size: 12px;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   background: white;
   color: var(--color-text);
-  box-sizing: border-box;
 }
-.oso-dt-input--end { max-width: 105px; }
-.oso-dt-input:focus { outline: 2px solid var(--color-primary-500); outline-offset: 1px; border-color: var(--color-primary-400); }
-.oso-flow-card-actions {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-top: auto;
-}
+.oso-qty-input:focus { outline: 2px solid var(--color-primary-500); outline-offset: 1px; border-color: var(--color-primary-400); }
 
 .oso-status-badge {
   display: inline-block;
@@ -253,6 +175,6 @@ defineProps<{
   white-space: nowrap;
 }
 .oso-status-pending { background: var(--color-warning-50); color: var(--color-warning-600); }
-.oso-status-in_progress { background: var(--color-primary-50); color: var(--color-primary-600); }
-.oso-status-completed { background: var(--color-success-50); color: var(--color-success-700); }
+.oso-status-shipped { background: var(--color-primary-50); color: var(--color-primary-600); }
+.oso-status-received { background: var(--color-success-50); color: var(--color-success-700); }
 </style>

@@ -30,74 +30,83 @@
             下单查询
           </button>
         </div>
+
+        <div v-if="activeTab === 'pending'" class="pc-header-actions">
+          <button
+            class="pc-btn pc-btn-success"
+            :disabled="unprocessed.validSelectedCompositeIds.length === 0 || isSubmitting"
+            @click="handleOneClickGenerate"
+          >
+            <UiLoadingIcon :loading="isSubmitting" icon="magic" /> 一键审核订单 ({{
+              unprocessed.validSelectedCompositeIds.length
+            }})
+          </button>
+        </div>
       </div>
 
       <div class="page-card-body">
+        <!-- P1-9: v-if 替代 v-show，非当前 tab 卸载 DOM 减轻 paint；
+             数据层在 usePurchaseHandlers 顶层 composable（不随 Panel 卸载），
+             配合 Vue Query 缓存切回秒出 -->
         <!-- 待审核订单面板 -->
-        <div v-show="activeTab === 'pending'" class="pc-tab-content">
-          <PendingOrdersPanel
-            :orders="unprocessed.orders"
-            :loading="unprocessed.loading"
-            :fetching="unprocessed.fetching"
-            :total="unprocessed.total"
-            :current-page="unprocessed.currentPage"
-            :total-pages="unprocessed.totalPages"
-            :selected-composite-ids="unprocessed.selectedCompositeIds"
-            :selected-count="unprocessed.selectedCompositeIds.length"
-            :valid-selected-count="unprocessed.validSelectedCompositeIds.length"
-            :all-selected="unprocessed.allSelected"
-            :submitting="isSubmitting"
-            @toggle-all="unprocessed.toggleAll"
-            @toggle-selection="unprocessed.toggleSelection"
-            @one-click-generate="handleOneClickGenerate"
-            @quick-generate="handleQuickGenerate"
-            @no-bom-error="handleNoBomError"
-            @change-page="unprocessed.load"
-          />
-        </div>
+        <PendingOrdersPanel
+          v-if="activeTab === 'pending'"
+          :orders="unprocessed.orders"
+          :loading="unprocessed.loading"
+          :fetching="unprocessed.fetching"
+          :total="unprocessed.total"
+          :current-page="unprocessed.currentPage"
+          :total-pages="unprocessed.totalPages"
+          :selected-composite-ids="unprocessed.selectedCompositeIds"
+          :selected-count="unprocessed.selectedCompositeIds.length"
+          :all-selected="unprocessed.allSelected"
+          @toggle-all="unprocessed.toggleAll"
+          @toggle-selection="unprocessed.toggleSelection"
+          @quick-generate="handleQuickGenerate"
+          @no-bom-error="handleNoBomError"
+          @change-page="unprocessed.load"
+        />
 
         <!-- 待下订单面板 -->
-        <div v-show="activeTab === 'active'" class="pc-tab-content">
-          <ActiveOrdersPanel
-            :orders="purchaseOrders.orders"
-            :loading="purchaseOrders.loading"
-            :fetching="purchaseOrders.fetching"
-            :total="purchaseOrders.total"
-            :current-page="purchaseOrders.page"
-            :total-pages="purchaseOrders.pages"
-            :selected-ids="purchaseOrders.selectedIds"
-            :all-selected="purchaseOrders.allSelected"
-            @toggle-all="purchaseOrders.toggleAll"
-            @toggle-selection="purchaseOrders.toggleSelection"
-            @summary="handleSummary"
-            @batch-complete="handleBatchComplete"
-            @complete-order="handleCompleteOrder"
-            @update:current-page="handleOrderPageChange"
-          />
-        </div>
+        <ActiveOrdersPanel
+          v-else-if="activeTab === 'active'"
+          :orders="purchaseOrders.orders"
+          :loading="purchaseOrders.loading"
+          :fetching="purchaseOrders.fetching"
+          :total="purchaseOrders.total"
+          :current-page="purchaseOrders.page"
+          :total-pages="purchaseOrders.pages"
+          :selected-ids="purchaseOrders.selectedIds"
+          :all-selected="purchaseOrders.allSelected"
+          @toggle-all="purchaseOrders.toggleAll"
+          @toggle-selection="purchaseOrders.toggleSelection"
+          @summary="handleSummary"
+          @batch-complete="handleBatchComplete"
+          @complete-order="handleCompleteOrder"
+          @update:current-page="handleOrderPageChange"
+        />
 
         <!-- 下单查询面板 -->
-        <div v-show="activeTab === 'history'" class="pc-tab-content">
-          <CompletedOrdersPanel
-            v-model:filter-expanded="completed.filterExpanded"
-            :orders="completed.orders"
-            :loading="completed.loading"
-            :fetching="completed.fetching"
-            :total="completed.total"
-            :current-page="completed.page"
-            :total-pages="completed.totalPages"
-            :filters="completed.filters"
-            :quick-filters="completed.quickFilters"
-            :current-quick-filter-id="completed.currentQuickFilterId"
-            @update-filter="handleFilterUpdate"
-            @reset-filters="completed.resetFilters"
-            @search="handleCompletedSearch"
-            @export="handleExport"
-            @apply-quick-filter="completed.applyQuickFilter"
-            @view-detail="handleViewDetail"
-            @update:current-page="handleCompletedPageChange"
-          />
-        </div>
+        <CompletedOrdersPanel
+          v-else
+          v-model:filter-expanded="completed.filterExpanded"
+          :orders="completed.orders"
+          :loading="completed.loading"
+          :fetching="completed.fetching"
+          :total="completed.total"
+          :current-page="completed.page"
+          :total-pages="completed.totalPages"
+          :filters="completed.filters"
+          :quick-filters="completed.quickFilters"
+          :current-quick-filter-id="completed.currentQuickFilterId"
+          @update-filter="handleFilterUpdate"
+          @reset-filters="completed.resetFilters"
+          @search="handleCompletedSearch"
+          @export="handleExport"
+          @apply-quick-filter="completed.applyQuickFilter"
+          @view-detail="handleViewDetail"
+          @update:current-page="handleCompletedPageChange"
+        />
       </div>
     </div>
 
@@ -137,12 +146,14 @@
 </template>
 
 <script setup lang="ts">
+import { defineAsyncComponent } from 'vue'
 import PendingOrdersPanel from './components/PendingOrdersPanel.vue'
 import ActiveOrdersPanel from './components/ActiveOrdersPanel.vue'
 import CompletedOrdersPanel from './components/CompletedOrdersPanel.vue'
-import OrderDetailModal from './components/OrderDetailModal.vue'
-import SummaryModal from './components/SummaryModal.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
+// P1-5: 模态框懒加载，减小 purchase 主 chunk（用户不点开则不加载）
+const OrderDetailModal = defineAsyncComponent(() => import('./components/OrderDetailModal.vue'))
+const SummaryModal = defineAsyncComponent(() => import('./components/SummaryModal.vue'))
 import { usePurchaseHandlers } from './composables/usePurchaseHandlers'
 
 const {
@@ -173,7 +184,9 @@ const {
 } = usePurchaseHandlers()
 </script>
 
-<style scoped>
+<style scoped lang="scss">
+@use './components/order-panels.scss' as *;
+
 /* === Layout === */
 /* 与 DashboardView 的 .dashboard 保持完全一致：
    - width: 100% 确保撑满主区宽度

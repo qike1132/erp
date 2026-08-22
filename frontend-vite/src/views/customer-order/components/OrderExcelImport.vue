@@ -14,8 +14,8 @@
       <span v-else>拖拽文件到标题栏 · 支持 .xlsx / .xls</span>
     </label>
     <div class="co-inline-actions">
-      <button class="co-inline-btn" @click.stop="downloadTemplate" aria-label="模板 {{ importing ? '导入中…' : '导入' }}">模板</button>
-      <button class="co-inline-btn co-inline-btn-success" :disabled="!excelFile" @click.stop="handleImport" :aria-label="importing ? '导入中…' : '导入'">
+      <button class="co-inline-btn" aria-label="模板 {{ importing ? '导入中…' : '导入' }}" @click.stop="downloadTemplate">模板</button>
+      <button class="co-inline-btn co-inline-btn-success" :disabled="!excelFile" :aria-label="importing ? '导入中…' : '导入'" @click.stop="handleImport">
         {{ importing ? '导入中…' : '导入' }}
       </button>
     </div>

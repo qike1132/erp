@@ -15,8 +15,8 @@
     </div>
     <div class="bo-td bo-td-center bo-td-middle bo-customer-cell" style="width:170px">{{ item.customer || '-' }}</div>
     <div v-if="showProductColumn" class="bo-td bo-td-center bo-product-cell" style="width: 180px;">
-      <template v-if="visibleSkus(item).length > 0">
-        <div v-for="sku in visibleSkus(item)" :key="sku.id" class="bo-sku-line">
+      <template v-if="visibleSkus.length > 0">
+        <div v-for="sku in visibleSkus" :key="sku.id" class="bo-sku-line">
           <span class="bo-sku-name" :title="sku.product_name || ''">{{ sku.product_name || '-' }}</span>
         </div>
       </template>
@@ -24,8 +24,8 @@
     </div>
     <div class="bo-td bo-td-center bo-td-middle" style="width: 100px;"><span class="bo-cell-main">{{ item.factories?.join(', ') || '湖北' }}</span></div>
     <div class="bo-td bo-td-center bo-td-middle" style="width: 130px;">
-      <template v-if="showProductColumn && visibleSkus(item).length > 0">
-        <strong>{{ visibleSkus(item).reduce((sum, s) => sum + (s.quantity || 0), 0) }}</strong>
+      <template v-if="showProductColumn && visibleSkus.length > 0">
+        <strong>{{ visibleSkus.reduce((sum, s) => sum + (s.quantity || 0), 0) }}</strong>
       </template>
       <template v-else-if="item.items && item.items.length > 0">
         <strong>{{ item.items.reduce((sum, s) => sum + (s.quantity || 0), 0) }}</strong>
@@ -42,16 +42,16 @@
       <button
         v-if="!item.confirmed"
         class="bo-confirm-btn"
-        :disabled="confirmingIds.has(item.id)"
+        :disabled="isConfirming"
         @click.stop="handleConfirm(item)"
       >
-        {{ confirmingIds.has(item.id) ? '确认中…' : '确认订单' }}
+        {{ isConfirming ? '确认中…' : '确认订单' }}
       </button>
       <span v-else class="bo-confirm-badge bo-confirm-badge--done">已确认</span>
     </div>
     <div class="bo-td bo-td-left bo-td-middle" style="width: 160px;">
-      <template v-if="visibleSkus(item).length > 0">
-        <div v-for="sku in visibleSkus(item)" :key="sku.id" class="bo-sku-line">
+      <template v-if="visibleSkus.length > 0">
+        <div v-for="sku in visibleSkus" :key="sku.id" class="bo-sku-line">
           <span v-if="sku.note" class="bo-sku-note" :title="sku.note">{{ sku.note }}</span>
         </div>
       </template>
@@ -67,6 +67,7 @@
  * 从 BeileOrderTab.vue 拆出的列表行：展示下单时间/客户/产品/数量/
  * 确认状态/确认操作/备注。行点击与确认按钮通过 emit 交回父组件处理。
  */
+import { computed } from 'vue'
 import type { BeileOrderRow as BeileOrderRowType } from '@/views/beile-order/composables/useBeileOrders'
 import UiCheckbox from '@/components/ui/UiCheckbox.vue'
 
@@ -77,8 +78,8 @@ const props = defineProps<{
   showProductColumn: boolean
   /** 确认状态筛选：unconfirmed / confirmed */
   confirmStatus: string
-  /** 确认中订单 id 集合（按钮禁用态依赖） */
-  confirmingIds: Set<number>
+  /** 当前行是否处于确认中（按钮禁用态依赖） */
+  isConfirming: boolean
   /** 通知跳转高亮的订单 id（URL order_id） */
   highlightId: string | null
   /** 已应用的产品关键字（行内 SKU 过滤用） */
@@ -107,16 +108,22 @@ function skuMatchesKeyword(sku: { product_name?: string | null; product_barcode?
 /**
  * 行内展示的 SKU：应用产品筛选时仅返回名称/条码匹配关键字的 SKU，
  * 使产品名称、数量、备注只对应搜索到的那个产品；未筛选时返回全部。
+ * 缓存为 computed，避免模板内多次调用重复计算。
  */
-function visibleSkus(item: BeileOrderRowType): NonNullable<BeileOrderRowType['items']> {
+const visibleSkus = computed<NonNullable<BeileOrderRowType['items']>>(() => {
   const kw = props.keyword.trim().toLowerCase()
-  if (!kw) return item.items || []
-  const matched = (item.items || []).filter((s) => skuMatchesKeyword(s, kw))
-  return matched.length > 0 ? matched : (item.items || [])
-}
+  const items = props.item.items || []
+  if (!kw) return items
+  const matched = items.filter((s) => skuMatchesKeyword(s, kw))
+  return matched.length > 0 ? matched : items
+})
 
-/** 行点击：交给父组件打开详情弹窗 */
+/** 行点击：交给父组件打开详情弹窗（300ms 防连点） */
+let lastOpenAt = 0
 function openDetail(item: BeileOrderRowType) {
+  const now = Date.now()
+  if (now - lastOpenAt < 300) return
+  lastOpenAt = now
   emit('open', item)
 }
 

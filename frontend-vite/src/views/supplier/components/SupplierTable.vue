@@ -43,15 +43,16 @@
             </td>
             <td>
               <div class="sp-action-group">
-                <button class="sp-action-btn sp-action-edit" title="编辑" @click="emit('edit', row)" aria-label="编辑">
+                <button class="sp-action-btn sp-action-edit" title="编辑" aria-label="编辑" @click="emit('edit', row)">
                   <FontAwesomeIcon icon="edit" aria-hidden="true" />
                 </button>
                 <button
                   class="sp-action-btn sp-action-delete"
                   title="删除"
                   :disabled="actionId === row.id"
+                  aria-label="删除"
                   @click="emit('delete', row)"
-                 aria-label="删除">
+                >
                   <FontAwesomeIcon icon="trash-alt" aria-hidden="true" />
                 </button>
               </div>

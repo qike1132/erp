@@ -65,7 +65,6 @@ interface StockoutRecord {
 }
 
 defineProps<{
-  open: boolean
   data: StockoutRecord | null
 }>()
 

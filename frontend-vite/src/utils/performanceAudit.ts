@@ -39,7 +39,7 @@ export function monitorReflowRepaint(durationMs = 10000): void {
     try {
       const obs = new PerformanceObserver((list) => { for (const e of list.getEntries()) if (!((e as { hadRecentInput?: boolean }).hadRecentInput)) reflowCount++ })
       obs.observe({ type: 'layout-shift', buffered: true })
-    } catch {}
+    } catch { /* 浏览器不支持 layout-shift 观察时降级忽略 */ }
   }
   setTimeout(() => { window.getComputedStyle = orig; devLog(`[性能] 重排次数: ${reflowCount}`); if (reflowCount > 100) console.warn('[性能] 重排过多，建议用transform替代top/left') }, durationMs)
 }
@@ -49,7 +49,7 @@ export function auditEventListeners(): { eventType: string; count: number }[] {
   const results: { eventType: string; count: number }[] = []
   for (const t of types) {
     let total = 0
-    document.querySelectorAll('*').forEach((el) => { try { const l = (window as unknown as { getEventListeners?: (el: Element) => Record<string, Array<unknown>> }).getEventListeners?.(el); if (l?.[t]) total += l[t].length } catch {} })
+    document.querySelectorAll('*').forEach((el) => { try { const l = (window as unknown as { getEventListeners?: (el: Element) => Record<string, Array<unknown>> }).getEventListeners?.(el); if (l?.[t]) total += l[t].length } catch { /* 非 Chrome 环境无 getEventListeners，忽略 */ } })
     if (total > 0) { results.push({ eventType: t, count: total }); if (total > 50) console.warn(`[性能] ${t} 监听器过多: ${total}个，考虑事件委托`) }
   }
   return results

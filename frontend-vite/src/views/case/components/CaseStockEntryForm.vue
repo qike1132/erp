@@ -10,7 +10,7 @@
       </span>
     </div>
 
-    <form @submit.prevent class="cs-form">
+    <form class="cs-form" @submit.prevent>
       <div class="cs-form-row">
         <div class="cs-form-field">
           <label class="cs-form-label">客户名称</label>
@@ -27,7 +27,7 @@
           <label class="cs-form-label">产品名称</label>
           <UiAutocomplete
             v-model="form.search"
-            :searchFn="searchFn"
+            :search-fn="searchFn"
             placeholder="输入产品名称或69码搜索"
             @select="onProductSelect"
           >
@@ -40,7 +40,7 @@
         </div>
         <div class="cs-form-field">
           <label class="cs-form-label">{{ mode === 'stockin' ? '入库数量' : '出库数量' }}</label>
-          <input type="number" class="cs-input" v-model.number="form.quantity" min="1" step="1" />
+          <input v-model.number="form.quantity" type="number" class="cs-input" min="1" step="1" />
         </div>
       </div>
 

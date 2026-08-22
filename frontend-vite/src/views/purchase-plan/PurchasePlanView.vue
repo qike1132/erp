@@ -33,37 +33,37 @@
 
       <PurchasePlanDailyTab
         v-if="viewTab === 'daily'"
+        v-model:sel="sel"
         :is-loading="isLoading"
         :d="d"
         :is-error="isError"
         :is-fetching="isFetching"
         :rows="rows"
         :filtered="filtered"
-        v-model:sel="sel"
         @refetch="refetch()"
       />
 
       <PurchasePlanMonthlySummary
         v-else
-        :loading="sLoading && !sData"
-        :error="sError"
-        :fetching="sFetching"
+        v-model:cust-filter="custFilter"
+        v-model:sku-page="skuPage"
+        :loading="isLoading && !d"
+        :error="isError"
+        :fetching="isFetching"
         :has-data="summaryCustomers.length > 0"
         :customers="allCustomers"
-        v-model:cust-filter="custFilter"
         :sorted-sku-list="sortedSkuList"
         :paginated-sku-list="paginatedSkuList"
-        v-model:sku-page="skuPage"
         :sku-total-pages="skuTotalPages"
         :sku-sort-field="skuSortField"
         :sku-sort-dir="skuSortDir"
         @toggle-sku-sort="toggleSkuSort"
         @open-sku-detail="openSkuDetail"
-        @refetch="refetchSummary"
+        @refetch="refetch"
       />
     </div>
 
-    <PlanDetailDialog v-model:open="planDialogOpen" :detail="selDetail" />
+    <PlanDetailDialog v-model:open="planDialogOpen" :detail="selDetail" :y="y" :m="m" />
     <SkuDetailDialog v-model:open="skuDetailOpen" :barcode="skuDetailBarcode" :name="skuDetailName" :date-detail="skuDateDetail" />
   </div>
 
@@ -72,21 +72,24 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, defineAsyncComponent } from 'vue';
 import { useQueryClient } from '@tanstack/vue-query';
+import { useDebounceFn } from '@vueuse/core';
 import { showToast } from '@/composables/useToast';
 import { useExport } from '@/composables/useExport';
 import { downloadCsv, buildCsvRow } from '@/utils/csv';
-import PlanDetailDrawer from './components/PlanDetailDrawer.vue';
-import CreateShipmentPlanDialog from './components/CreateShipmentPlanDialog.vue';
-import PlanDetailDialog from './components/PlanDetailDialog.vue';
-import SkuDetailDialog from './components/SkuDetailDialog.vue';
 import PurchasePlanMonthlySummary from './components/PurchasePlanMonthlySummary.vue';
 import PurchasePlanDailyTab from './components/PurchasePlanDailyTab.vue';
 import PurchasePlanToolbar from './components/PurchasePlanToolbar.vue';
 import { usePurchasePlanData } from './composables/usePurchasePlanData';
 import { useSkuSummary } from './composables/useSkuSummary';
-import type { Row, CustSumItem } from './components/types';
+import type { CustSumItem } from './components/types';
+
+// 弹窗/抽屉组件懒加载，减少首屏 chunk 体积（仅在用户交互时才加载）
+const PlanDetailDrawer = defineAsyncComponent(() => import('./components/PlanDetailDrawer.vue'));
+const CreateShipmentPlanDialog = defineAsyncComponent(() => import('./components/CreateShipmentPlanDialog.vue'));
+const PlanDetailDialog = defineAsyncComponent(() => import('./components/PlanDetailDialog.vue'));
+const SkuDetailDialog = defineAsyncComponent(() => import('./components/SkuDetailDialog.vue'));
 
 const qc = useQueryClient();
 
@@ -94,6 +97,10 @@ const t = new Date();
 const y = ref(t.getFullYear());
 const m = ref(t.getMonth() + 1);
 const globalKw = ref('');
+// 搜索防抖：250ms 内连续按键只触发一次 computed 重算，避免每次输入全量过滤
+const debouncedKw = ref('');
+const _flushDebounced = useDebounceFn((v: string) => { debouncedKw.value = v; }, 250);
+watch(globalKw, (v) => _flushDebounced(v));
 const sel = ref('');
 const showCreate = ref(false);
 const drwOpen = ref(false);
@@ -107,14 +114,13 @@ const planDialogOpen = computed({
 });
 
 watch(globalKw, () => { if (viewTab.value === 'daily') sel.value = ''; });
-watch([y, m], () => { sel.value = ''; globalKw.value = ''; });
-watch(viewTab, () => { globalKw.value = ''; });
+watch([y, m], () => { sel.value = ''; globalKw.value = ''; debouncedKw.value = ''; });
+watch(viewTab, () => { globalKw.value = ''; debouncedKw.value = ''; });
 
-const { d, isLoading, isFetching, isError, refetch, sData, sLoading, sFetching, sError, refetchSummary, rows, skuSummary } = usePurchasePlanData(y, m, viewTab);
+const { d, isLoading, isFetching, isError, refetch, rows, skuSummary, skuDateIndex, customers } = usePurchasePlanData(y, m, viewTab);
 
 const allCustomers = computed<CustSumItem[]>(() => {
-  const arr = (sData.value?.customers ?? []) as CustSumItem[];
-  return [...arr].sort((a, b) => b.remaining_qty - a.remaining_qty);
+  return [...customers.value].sort((a, b) => b.remaining_qty - a.remaining_qty);
 });
 
 const summaryCustomers = computed<CustSumItem[]>(() => {
@@ -126,9 +132,12 @@ const sKpi = computed(() => {
   const cs = summaryCustomers.value;
   const kpi0 = custFilter.value ? String(cs[0]?.plan_qty || 0) + ' 件' : cs.length + ' 客户';
   const lbl0 = custFilter.value ? cs[0]?.customer_name || '—' : '客户合计';
-  const planQty = cs.reduce((s, c) => s + Number(c.plan_qty || 0), 0);
-  const shipQty = cs.reduce((s, c) => s + Number(c.shipped_qty || 0), 0);
-  const remainQty = cs.reduce((s, c) => s + Number(c.remaining_qty || 0), 0);
+  let planQty = 0, shipQty = 0, remainQty = 0;
+  for (const c of cs) {
+    planQty += Number(c.plan_qty || 0);
+    shipQty += Number(c.shipped_qty || 0);
+    remainQty += Number(c.remaining_qty || 0);
+  }
   const pct = planQty > 0 ? Math.floor(shipQty / planQty * 1000) / 10 : 0;
   return {
     kpi0,
@@ -144,21 +153,20 @@ const {
   skuSortField, skuSortDir, skuPage, skuTotalPages, paginatedSkuList, sortedSkuList,
   skuDateDetail, skuDetailOpen, skuDetailBarcode, skuDetailName, skuDetailCustomer,
   openSkuDetail, toggleSkuSort,
-} = useSkuSummary({ d, skuSummary, custFilter, globalKw, viewTab });
+} = useSkuSummary({ skuSummary, skuDateIndex, custFilter, globalKw: debouncedKw, viewTab });
 
+// 使用防抖后的搜索值，避免每次按键触发全量过滤
 const filtered = computed(() => {
-  if (!globalKw.value || viewTab.value !== 'daily') return rows.value;
-  const k = globalKw.value.toLowerCase();
+  if (!debouncedKw.value || viewTab.value !== 'daily') return rows.value;
+  const k = debouncedKw.value.toLowerCase();
   return rows.value.filter(r => r.date.includes(k) || r.customerNames.some(n => n.toLowerCase().includes(k)));
 });
 
-const rowMap = computed(() => {
-  const mp = new Map<string, Row>();
-  for (const r of rows.value) mp.set(r.date, r);
-  return mp;
+// 按需查找，避免每次 rows 变化都预建 Map（rows 通常 ≤31 条，find 开销可忽略）
+const selDetail = computed(() => {
+  if (!sel.value) return null;
+  return rows.value.find(r => r.date === sel.value) ?? null;
 });
-
-const selDetail = computed(() => sel.value ? rowMap.value.get(sel.value) ?? null : null);
 
 function exportSkuCSV() {
   const list = sortedSkuList.value;
@@ -172,8 +180,8 @@ function exportSkuCSV() {
 
 function prevMonth() { m.value = m.value === 1 ? 12 : m.value - 1; if (m.value === 12) y.value--; }
 function nextMonth() { m.value = m.value === 12 ? 1 : m.value + 1; if (m.value === 1) y.value++; }
-function onEdited() { qc.invalidateQueries({ queryKey: ['pp-monthly'] }); qc.invalidateQueries({ queryKey: ['pp-summary'] }); }
-function onCreated() { showCreate.value = false; qc.invalidateQueries({ queryKey: ['pp-monthly'] }); qc.invalidateQueries({ queryKey: ['pp-summary'] }); }
+function onEdited() { qc.invalidateQueries({ queryKey: ['pp-agg'] }); qc.invalidateQueries({ queryKey: ['pp-day'] }); }
+function onCreated() { showCreate.value = false; qc.invalidateQueries({ queryKey: ['pp-agg'] }); qc.invalidateQueries({ queryKey: ['pp-day'] }); }
 
 const { runExport } = useExport({ start: false });
 

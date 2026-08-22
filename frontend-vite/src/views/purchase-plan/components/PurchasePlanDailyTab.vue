@@ -1,37 +1,37 @@
 <template>
   <div class="sp-body">
     <div v-if="isLoading && !d" class="sp-empty"><UiSpinner /></div>
-    <div v-else-if="isError" class="sp-empty"><FontAwesomeIcon icon="exclamation-circle" aria-hidden="true" />加载失败 <button class="sp-retry-btn" @click="emit('refetch')" aria-label="重试">重试</button></div>
+    <div v-else-if="isError" class="sp-empty"><FontAwesomeIcon icon="exclamation-circle" aria-hidden="true" />加载失败 <button class="sp-retry-btn" aria-label="重试" @click="emit('refetch')">重试</button></div>
     <div v-else-if="!rows.length" class="sp-empty"><FontAwesomeIcon icon="inbox" aria-hidden="true" />本月暂无出货计划</div>
     <template v-else>
-    <div v-if="isFetching" class="sp-fetching-bar"><div class="sp-fetching-progress" /></div>
-    <div>
-      <div class="sp-day-grid">
-        <div
-          v-for="(r, idx) in filtered"
-          :key="r.date"
-          class="sp-day-card"
-          :class="{
-            'sp-day-selected': sel === r.date,
-          }"
-          @click="emit('update:sel', sel === r.date ? '' : r.date)"
-        >
-          <div class="sp-day-header">
-            <span class="sp-day-badge">{{ r._fullDate }}：{{ fmtQty(r.totalQty) }}</span>
-            <span v-if="r._pendingCount > 0" class="sp-day-alert" :class="getAlertClass(r.date)">{{ getAlertLabel(r.date) }}</span>
-            <span v-else-if="r._shippedPct === 100" class="sp-day-alert sp-day-done"><FontAwesomeIcon icon="check" aria-hidden="true" /> 完成</span>
-          </div>
+      <div v-if="isFetching" class="sp-fetching-bar"><div class="sp-fetching-progress" /></div>
+      <div>
+        <div class="sp-day-grid">
+          <div
+            v-for="r in filtered"
+            :key="r.date"
+            class="sp-day-card"
+            :class="{
+              'sp-day-selected': sel === r.date,
+            }"
+            @click="emit('update:sel', sel === r.date ? '' : r.date)"
+          >
+            <div class="sp-day-header">
+              <span class="sp-day-badge">{{ r._fullDate }}：{{ fmtQty(r.totalQty) }}</span>
+              <span v-if="r._pendingCount > 0" class="sp-day-alert" :class="getAlertClass(r.date)">{{ getAlertLabel(r.date) }}</span>
+              <span v-else-if="r._shippedPct === 100" class="sp-day-alert sp-day-done"><FontAwesomeIcon icon="check" aria-hidden="true" /> 完成</span>
+            </div>
 
-          <div class="sp-day-body">
-            <span v-for="(cn, i) in r.customerNames.slice(0, 5)" :key="cn" class="sp-day-customer-tag">
-              {{ cn }}
-            </span>
-            <span v-if="r.customerNames.length > 5" class="sp-day-more-tag">
-              +{{ r.customerNames.length - 5 }}家客户
-            </span>            </div>
+            <div class="sp-day-body">
+              <span v-for="cn in r.customerNames.slice(0, 5)" :key="cn" class="sp-day-customer-tag">
+                {{ cn }}
+              </span>
+              <span v-if="r.customerNames.length > 5" class="sp-day-more-tag">
+                +{{ r.customerNames.length - 5 }}家客户
+              </span>            </div>
+          </div>
+        </div>
       </div>
-      </div>
-    </div>
     </template>
   </div>
 </template>
@@ -59,11 +59,14 @@ function fmtQty(n: number): string {
   return String(n);
 }
 
+// 组件级缓存：today 在单次渲染中对所有卡片相同，避免每个卡片都 new Date()
+const TODAY = new Date();
+TODAY.setHours(0, 0, 0, 0);
+const DAY_MS = 86400000;
+
 function getDaysDiff(dateStr: string): number {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
   const target = new Date(dateStr + 'T00:00:00');
-  return Math.ceil((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  return Math.ceil((target.getTime() - TODAY.getTime()) / DAY_MS);
 }
 
 function getAlertClass(dateStr: string): string {

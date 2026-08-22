@@ -49,7 +49,7 @@
       <!-- ============ 导出进度提示 ============ -->
       <Transition name="pr-toast">
         <div v-if="exportStatus.show" :class="['pr-export-toast', exportStatus.type]">
-          <i :class="exportStatus.icon" aria-hidden="true" />
+          <FontAwesomeIcon :icon="exportStatus.icon.replace(' fa-spin', '')" :spin="exportStatus.icon.includes('fa-spin')" aria-hidden="true" />
           <span>{{ exportStatus.message }}</span>
         </div>
       </Transition>
@@ -115,9 +115,10 @@ const { data: reportSummaryData } = useQuery({
 })
 const reportSummary = computed<DailySummary | null>(() => {
   const raw = reportSummaryData.value ?? null
+  if (!raw) return null
   // 兼容 { data } 包裹结构；后端当前裸返回
   const wrapped = raw as { data?: DailySummary }
-  return wrapped.data ?? (raw as DailySummary | null)
+  return wrapped.data ?? (raw as DailySummary)
 })
 
 const { data: monthlySummaryData } = useQuery({
@@ -127,9 +128,10 @@ const { data: monthlySummaryData } = useQuery({
 })
 const monthlySummary = computed<MonthlySummary | null>(() => {
   const raw = monthlySummaryData.value ?? null
+  if (!raw) return null
   // 兼容 { data } 包裹结构；后端当前裸返回
   const wrapped = raw as { data?: MonthlySummary }
-  return wrapped.data ?? (raw as MonthlySummary | null)
+  return wrapped.data ?? (raw as MonthlySummary)
 })
 
 const deptSummaryColumns: TableColumn[] = [

@@ -31,7 +31,7 @@ export class MultiLevelCache {
         }
         localStorage.removeItem(this.l2Prefix + key)
       }
-    } catch {}
+    } catch { /* localStorage 不可用或数据损坏，降级忽略 */ }
     this.misses++; return null
   }
 
@@ -48,7 +48,7 @@ export class MultiLevelCache {
 
   invalidate(key: string): void {
     this.l1.delete(key)
-    try { localStorage.removeItem(this.l2Prefix + key) } catch {}
+    try { localStorage.removeItem(this.l2Prefix + key) } catch { /* localStorage 不可用或数据损坏，降级忽略 */ }
   }
 
   invalidatePattern(pattern: string): number {
@@ -61,7 +61,7 @@ export class MultiLevelCache {
         const sk = localStorage.key(i)
         if (sk?.startsWith(p) && regex.test(sk.slice(p.length))) { localStorage.removeItem(sk); count++ }
       }
-    } catch {}
+    } catch { /* localStorage 不可用或数据损坏，降级忽略 */ }
     return count
   }
 
@@ -75,7 +75,7 @@ export class MultiLevelCache {
     try {
       const p = this.l2Prefix
       for (let i = localStorage.length - 1; i >= 0; i--) { const k = localStorage.key(i); if (k?.startsWith(p)) localStorage.removeItem(k) }
-    } catch {}
+    } catch { /* localStorage 不可用或数据损坏，降级忽略 */ }
     this.l1Hits = 0; this.l2Hits = 0; this.misses = 0
   }
 
@@ -97,14 +97,14 @@ export class MultiLevelCache {
       const p = this.l2Prefix; const items: { k: string; t: number }[] = []
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i)
-        if (k?.startsWith(p)) { try { items.push({ k, t: JSON.parse(localStorage.getItem(k) ?? '{}').createdAt ?? 0 }) } catch {} }
+        if (k?.startsWith(p)) { try { items.push({ k, t: JSON.parse(localStorage.getItem(k) ?? '{}').createdAt ?? 0 }) } catch { /* localStorage 不可用或数据损坏，降级忽略 */ } }
       }
       items.sort((a, b) => a.t - b.t)
       for (let i = 0; i < Math.max(1, Math.floor(items.length * 0.25)); i++) {
         const item = items[i]
         if (item) localStorage.removeItem(item.k)
       }
-    } catch {}
+    } catch { /* localStorage 不可用或数据损坏，降级忽略 */ }
   }
 }
 

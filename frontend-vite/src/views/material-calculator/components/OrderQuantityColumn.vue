@@ -16,15 +16,15 @@
         </div>
         <div class="mc-order-inputs">
           <input
+            v-model.number="item.quantity"
             type="number"
             class="form-number-input mc-qty-input"
-            v-model.number="item.quantity"
             min="0"
             step="1"
             @input="emit('qty-input', item)"
           />
         </div>
-        <button class="mc-delete-btn" @click="emit('remove', item.product_id)" aria-label="删除">
+        <button class="mc-delete-btn" aria-label="删除" @click="emit('remove', item.product_id)">
           <FontAwesomeIcon icon="trash-alt" aria-hidden="true" />
         </button>
       </div>

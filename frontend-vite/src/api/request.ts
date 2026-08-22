@@ -205,7 +205,9 @@ export function get<T>(url: string, params?: Record<string, unknown>): Promise<T
   if (existing) return existing as Promise<T>
   const p = executeWithRetry(() => service.get(url, { params }) as Promise<T>)
   _inflightGet.set(key, p)
-  p.finally(() => _inflightGet.delete(key))
+  // finally 会派生一个与原 Promise 同状态的新 Promise；若原请求失败（403/401/网络错误），
+  // 必须 catch 这个派生 Promise，否则每次失败 GET 都会产生一次未处理的 Promise 拒绝（Uncaught (in promise) AxiosError）
+  p.finally(() => _inflightGet.delete(key)).catch(() => { /* 错误已由调用方处理 */ })
   return p
 }
 

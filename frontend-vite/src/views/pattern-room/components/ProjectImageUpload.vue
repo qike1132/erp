@@ -11,8 +11,8 @@
       @dragleave.prevent="onDragLeave"
       @drop.prevent="onDrop"
     >
-      <input type="file" accept="image/jpeg,image/png,image/webp" class="pjf-file-input" @change="onFileChange" aria-label="上传文件" />
-      <i class="fas fa-cloud-upload-alt" aria-hidden="true" />
+      <input type="file" accept="image/jpeg,image/png,image/webp" class="pjf-file-input" aria-label="上传文件" @change="onFileChange" />
+      <FontAwesomeIcon icon="cloud-upload-alt" aria-hidden="true" />
       <span>点击或拖拽图片到此处上传</span>
       <span class="pjf-upload-hint">支持 JPEG/PNG/WebP，上传前自动压缩（≤1600px）</span>
     </label>

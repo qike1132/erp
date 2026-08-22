@@ -12,7 +12,7 @@
       @input="$emit('update:modelValue', ($event.target as HTMLInputElement).value)"
       @keydown.enter="$emit('search', modelValue)"
     />
-    <button v-if="modelValue" class="m-search-clear" @click="handleClear" aria-label="操作按钮">
+    <button v-if="modelValue" class="m-search-clear" aria-label="操作按钮" @click="handleClear">
       <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
         <circle cx="12" cy="12" r="10" fill="currentColor" opacity="0.2" />
         <path d="M15 9l-6 6M9 9l6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" />

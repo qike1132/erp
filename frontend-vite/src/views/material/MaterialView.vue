@@ -1,70 +1,70 @@
- <template>
+<template>
   <div class="mr-container">
     <div class="page-card page-card-main">
-    <!-- Unified Header + Tabs -->
-    <div class="mr-top-bar">
-      <div class="mr-tabs">
-        <button :class="['mr-tab-btn', { active: activeTab === 'progress' }]" @click="switchToProgress" aria-label="来料进度">
-          来料进度 <span v-if="progressCount > 0" :class="['notification-badge', activeTab === 'progress' ? 'notification-badge-active' : '']">{{ progressCount }}</span>
-        </button>
-        <button :class="['mr-tab-btn', { active: activeTab === 'history' }]" @click="switchToHistory" aria-label="历史查询">
-          历史查询
-        </button>
-        <button v-if="canManage && activeTab === 'progress'" class="mr-btn mr-btn-ghost" @click="exportData" title="导出来料进度数据" aria-label="导出"><FontAwesomeIcon icon="file-export" /> 导出</button>
-        <button v-if="canManage && activeTab === 'history'" class="mr-btn mr-btn-ghost" @click="exportHistory" title="导出历史数据" aria-label="导出"><FontAwesomeIcon icon="file-export" /> 导出</button>
+      <!-- Unified Header + Tabs -->
+      <div class="mr-top-bar">
+        <div class="mr-tabs">
+          <button :class="['mr-tab-btn', { active: activeTab === 'progress' }]" aria-label="来料进度" @click="switchToProgress">
+            来料进度 <span v-if="progressCount > 0" :class="['notification-badge', activeTab === 'progress' ? 'notification-badge-active' : '']">{{ progressCount }}</span>
+          </button>
+          <button :class="['mr-tab-btn', { active: activeTab === 'history' }]" aria-label="历史查询" @click="switchToHistory">
+            历史查询
+          </button>
+          <button v-if="canManage && activeTab === 'progress'" class="mr-btn mr-btn-ghost" title="导出来料进度数据" aria-label="导出" @click="exportData"><FontAwesomeIcon icon="file-export" /> 导出</button>
+          <button v-if="canManage && activeTab === 'history'" class="mr-btn mr-btn-ghost" title="导出历史数据" aria-label="导出" @click="exportHistory"><FontAwesomeIcon icon="file-export" /> 导出</button>
+        </div>
       </div>
-    </div>
 
-    <!-- ========== 来料进度（子组件化，模板与列定义原样搬移） ========== -->
-    <ProgressTab
-      v-if="activeTab === 'progress'"
-      :progress-order-rows="progressOrderRows"
-      :progress-rows="progressRows"
-      :p-is-loading="pIsLoading"
-      :p-is-fetching="pIsFetching"
-      :p-per-page="pPerPage"
-      :p-pages="pPages"
-      @page="onProgressPageChange"
-      @view-supplier="viewSupplierDetail"
-    />
+      <!-- ========== 来料进度（子组件化，模板与列定义原样搬移） ========== -->
+      <ProgressTab
+        v-if="activeTab === 'progress'"
+        :progress-order-rows="progressOrderRows"
+        :progress-rows="progressRows"
+        :p-is-loading="pIsLoading"
+        :p-is-fetching="pIsFetching"
+        :p-per-page="pPerPage"
+        :p-pages="pPages"
+        @page="onProgressPageChange"
+        @view-supplier="viewSupplierDetail"
+      />
 
-    <!-- ========== 历史查询（子组件化，模板与列定义原样搬移） ========== -->
-    <HistoryTab
-      v-if="activeTab === 'history'"
-      :h-registrations="hRegistrations"
-      :h-is-loading="hIsLoading"
-      :h-is-fetching="hIsFetching"
-      :h-per-page="hPerPage"
-      :h-pages="hPages"
-      @page="onHistoryPageChange"
-      @view-detail="viewDetail"
-    />
+      <!-- ========== 历史查询（子组件化，模板与列定义原样搬移） ========== -->
+      <HistoryTab
+        v-if="activeTab === 'history'"
+        :h-registrations="hRegistrations"
+        :h-is-loading="hIsLoading"
+        :h-is-fetching="hIsFetching"
+        :h-per-page="hPerPage"
+        :h-pages="hPages"
+        @page="onHistoryPageChange"
+        @view-detail="viewDetail"
+      />
 
-    <!-- Detail Dialog -->
-    <MaterialDetailDialog
-      v-model:open="showDetailDialog"
-      :detail-data="detailData"
-      :can-manage="canManage"
-      @open-receive="openReceive"
-    />
+      <!-- Detail Dialog -->
+      <MaterialDetailDialog
+        v-model:open="showDetailDialog"
+        :detail-data="detailData"
+        :can-manage="canManage"
+        @open-receive="openReceive"
+      />
 
-    <!-- Supplier Detail Dialog -->
-    <SupplierDialog
-      v-model:open="showSupplierDialog"
-      :supplier-detail="supplierDetail"
-      :supplier-detail-order-no="supplierDetailOrderNo"
-      :can-manage="canManage"
-      @open-receive-by-sub-items="openReceiveBySubItems"
-    />
+      <!-- Supplier Detail Dialog -->
+      <SupplierDialog
+        v-model:open="showSupplierDialog"
+        :supplier-detail="supplierDetail"
+        :supplier-detail-order-no="supplierDetailOrderNo"
+        :can-manage="canManage"
+        @open-receive-by-sub-items="openReceiveBySubItems"
+      />
 
-    <!-- Receive Dialog -->
-    <ReceiveDialog
-      v-model:open="showReceiveDialog"
-      :item="receiveItem"
-      @submit="submitReceive"
-    />
+      <!-- Receive Dialog -->
+      <ReceiveDialog
+        v-model:open="showReceiveDialog"
+        :item="receiveItem"
+        @submit="submitReceive"
+      />
 
-    <div :class="['mr-toast', { show: toastMsg }, toastType]"><FontAwesomeIcon :icon="toastIcon" /> {{ toastMsg }}</div>
+      <div :class="['mr-toast', { show: toastMsg }, toastType]"><FontAwesomeIcon :icon="toastIcon" /> {{ toastMsg }}</div>
     </div>
   </div>
 </template>
@@ -79,13 +79,14 @@
  * - 收货登记、供应商详情、数据导出
  * - 数据加载 / SWR 缓存逻辑抽至 composables/useMaterialRegistrations.ts
  */
-import { ref, reactive, computed, onMounted, defineAsyncComponent } from 'vue'
+import { ref, computed, onMounted, defineAsyncComponent } from 'vue'
 import { materialApi } from '@/api'
 import type { RegItem, Registration } from '@/api/material'
 import { useAuthStore } from '@/stores/auth'
 import { useExport } from '@/composables/useExport'
-import type { SupMat, SupMatItem, SupGroup, SupplierDetail } from './material-types'
+import type { SupMatItem, SupplierDetail } from './material-types'
 import { useMaterialRegistrations } from './composables/useMaterialRegistrations'
+import { mapSupplierDetail, updateSupplierDialogLocally, updateDetailDialogLocally } from './composables/useSupplierDetailTransform'
 import ProgressTab from './components/ProgressTab.vue'
 import HistoryTab from './components/HistoryTab.vue'
 const MaterialDetailDialog = defineAsyncComponent(() => import('./components/MaterialDetailDialog.vue'))
@@ -106,14 +107,7 @@ const {
   hPerPage, hPages, hIsLoading, hIsFetching, hRegistrations,
   loadProgress, ensureProgressLoaded, ensureHistoryLoaded,
   onProgressPageChange, onHistoryPageChange,
-} = useMaterialRegistrations()
-
-/** 计算完成百分比：全部到货返回 100，否则上限 99.9 */
-function computePct(ordered: number, received: number): number {
-  if (ordered <= 0) return 0
-  if (received >= ordered) return 100
-  return Math.min(Math.round(received / ordered * 100 * 10) / 10, 99.9)
-}
+} = useMaterialRegistrations(activeTab)
 
 function switchToProgress() {
   activeTab.value = 'progress'
@@ -129,74 +123,31 @@ const showDetailDialog = ref(false), detailData = ref<Registration | null>(null)
 async function viewDetail(regId: number) { try { const res = await materialApi.registrationDetail(regId); if (res.registration === undefined) { toast('加载失败', 'error'); return }; detailData.value = res.registration ?? null; showDetailDialog.value = true } catch { toast('加载失败', 'error') } }
 
 const showSupplierDialog = ref(false), supplierDetail = ref<SupplierDetail | null>(null), supplierDetailOrderNo = ref('')
-/** 查看来料详情（按供应商分组，组内按物料型号汇总） */
+/** 查看来料详情（方案3B：调用服务端聚合接口，前端零计算；立即打开 dialog 显示 loading） */
 async function viewSupplierDetail(_supplierName: string, orderNo: string) {
+  showSupplierDialog.value = true
+  supplierDetailOrderNo.value = orderNo
+  supplierDetail.value = null
   try {
-    const data = await materialApi.registrations({ order_no: orderNo, per_page: 50, exclude_completed: true })
-    if (!data.registrations) { toast('加载失败', 'error'); return }
-    const regList: Registration[] = data.registrations
-    if (!regList.length) { toast('无采购中数据', 'warning'); return }
-    // 跨所有登记收集 items（过滤填充类），按 supplier_name 分组，组内按 material_name 汇总
-    const supplierMap = new Map<string, Map<string, SupMat>>()
-    for (const r of regList) {
-      for (const i of (r.items || [])) {
-        if (i.material_category === 'filling') continue
-        const supName = (i as RegItem & { supplier_name?: string }).supplier_name || '未指定'
-        if (!supplierMap.has(supName)) supplierMap.set(supName, new Map())
-        const matMap = supplierMap.get(supName)!
-        const ordered = parseFloat(String(i.ordered_quantity || 0))
-        const received = parseFloat(String(i.received_quantity || 0))
-        const existing = matMap.get(i.material_name)
-        if (existing) {
-          existing.ordered += ordered
-          existing.received += received
-          existing.remaining = existing.ordered - existing.received
-          existing.pct = computePct(existing.ordered, existing.received)
-          existing.subItems.push({ id: i.id, ordered, received })
-        } else {
-          matMap.set(i.material_name, {
-            name: i.material_name,
-            ordered,
-            received,
-            remaining: ordered - received,
-            pct: computePct(ordered, received),
-            subItems: [{ id: i.id, ordered, received }],
-            unit: i.unit || '',
-            spec: i.specification || '',
-          })
-        }
-      }
-    }
-    let allOrdered = 0, allReceived = 0
-    const supplierGroups: SupGroup[] = []
-    for (const [supName, matMap] of supplierMap) {
-      const items = Array.from(matMap.values())
-      const oTotal = items.reduce((s, m) => s + m.ordered, 0)
-      const rTotal = items.reduce((s, m) => s + m.received, 0)
-      allOrdered += oTotal; allReceived += rTotal
-      const allComplete = items.every(m => m.received >= m.ordered)
-      supplierGroups.push({ supplierName: supName, items, totalOrdered: oTotal, totalReceived: rTotal, pct: computePct(oTotal, allComplete ? oTotal : rTotal) })
-    }
-    const allComplete = supplierGroups.every(g => g.items.every(m => m.received >= m.ordered))
-    const totalPct = computePct(allOrdered, allComplete ? allOrdered : allReceived)
-    supplierDetailOrderNo.value = orderNo
-    supplierDetail.value = { supplierGroups, totalOrdered: allOrdered, totalReceived: allReceived, totalPct }; showSupplierDialog.value = true
-  } catch { toast('加载失败', 'error') }
+    const data = await materialApi.supplierDetail(orderNo)
+    if (!data.supplier_groups || !data.supplier_groups.length) { toast('无采购中数据', 'warning'); showSupplierDialog.value = false; return }
+    supplierDetail.value = mapSupplierDetail(data)
+  } catch { toast('加载失败', 'error'); showSupplierDialog.value = false }
 }
 
 const showReceiveDialog = ref(false)
-const receiveItem = reactive({ id: 0, subItems: [] as SupMatItem[], name: '', ordered: 0, received: 0, remaining: 0 })
-function openReceive(item: RegItem) { receiveItem.id = item.id; receiveItem.subItems = [{ id: item.id, ordered: parseFloat(String(item.ordered_quantity || 0)), received: parseFloat(String(item.received_quantity || 0)) }]; receiveItem.name = item.material_name; receiveItem.ordered = parseFloat(String(item.ordered_quantity || 0)); receiveItem.received = parseFloat(String(item.received_quantity || 0)); receiveItem.remaining = receiveItem.ordered - receiveItem.received; showReceiveDialog.value = true }
-function openReceiveBySubItems(subItems: SupMatItem[], name: string, ordered: number, received: number) { receiveItem.id = subItems[0]?.id || 0; receiveItem.subItems = subItems; receiveItem.name = name; receiveItem.ordered = ordered; receiveItem.received = received; receiveItem.remaining = ordered - received; showReceiveDialog.value = true }
+const receiveItem = ref({ id: 0, subItems: [] as SupMatItem[], name: '', ordered: 0, received: 0, remaining: 0 })
+function openReceive(item: RegItem) { receiveItem.value = { id: item.id, subItems: [{ id: item.id, ordered: parseFloat(String(item.ordered_quantity || 0)), received: parseFloat(String(item.received_quantity || 0)) }], name: item.material_name, ordered: parseFloat(String(item.ordered_quantity || 0)), received: parseFloat(String(item.received_quantity || 0)), remaining: parseFloat(String(item.ordered_quantity || 0)) - parseFloat(String(item.received_quantity || 0)) }; showReceiveDialog.value = true }
+function openReceiveBySubItems(subItems: SupMatItem[], name: string, ordered: number, received: number) { receiveItem.value = { id: subItems[0]?.id || 0, subItems, name, ordered, received, remaining: ordered - received }; showReceiveDialog.value = true }
 
-/** 收货登记提交：按每条 item 的剩余额度切分，依次调用 API */
+/** 收货登记提交：按每条 item 的剩余额度切分，依次调用 API（串行保证 registration status 一致性） */
 async function submitReceive(payload: { qty: number | null; remark: string }) {
   if (!payload.qty || payload.qty <= 0) { toast('请输入有效的收货数量', 'warning'); return }
   let remainingToReceive = payload.qty
   let totalDelta = 0
   let lastAutoCompleted = false
   try {
-    for (const sub of receiveItem.subItems) {
+    for (const sub of receiveItem.value.subItems) {
       if (remainingToReceive <= 0) break
       const itemRemaining = sub.ordered - sub.received
       if (itemRemaining <= 0) continue
@@ -211,48 +162,11 @@ async function submitReceive(payload: { qty: number | null; remark: string }) {
     if (remainingToReceive > 0) { toast('收货数量超过采购总量', 'warning') }
     toast(lastAutoCompleted ? '收货完成，该订单已全部到货，已转入历史记录' : '收货登记成功', lastAutoCompleted ? 'success' : 'info')
     showReceiveDialog.value = false
-    const newReceived = receiveItem.received + totalDelta
-    updateSupplierDialogLocally(newReceived)
-    updateDetailDialogLocally(newReceived)
+    const newReceived = receiveItem.value.received + totalDelta
+    updateSupplierDialogLocally(supplierDetail, showSupplierDialog, receiveItem.value, newReceived)
+    updateDetailDialogLocally(detailData, showDetailDialog, receiveItem.value.id, newReceived)
     loadProgress(pPage.value)
   } catch { toast('操作失败', 'error') }
-}
-
-/** 乐观更新供应商详情对话框中对应物料的收货数量与进度（含供应商级与全局汇总） */
-function updateSupplierDialogLocally(newReceived: number) {
-  if (!showSupplierDialog.value || !supplierDetail.value) return
-  const delta = newReceived - receiveItem.received
-  if (delta <= 0) return
-  for (const g of supplierDetail.value.supplierGroups) {
-    let groupChanged = false
-    for (const m of g.items) {
-      if (m.name === receiveItem.name && m.subItems.some(s => receiveItem.subItems.some(rs => rs.id === s.id))) {
-        m.received += delta
-        m.remaining = m.ordered - m.received
-        m.pct = computePct(m.ordered, m.received)
-        groupChanged = true
-      }
-    }
-    if (groupChanged) {
-      g.totalReceived = g.items.reduce((s, m) => s + m.received, 0)
-      const gComplete = g.items.every(m => m.received >= m.ordered)
-      g.pct = computePct(g.totalOrdered, gComplete ? g.totalOrdered : g.totalReceived)
-    }
-  }
-  const allComplete = supplierDetail.value.supplierGroups.every(g => g.items.every(m => m.received >= m.ordered))
-  supplierDetail.value.totalReceived = supplierDetail.value.supplierGroups.reduce((s, g) => s + g.items.reduce((s2, m) => s2 + m.received, 0), 0)
-  supplierDetail.value.totalPct = computePct(supplierDetail.value.totalOrdered, allComplete ? supplierDetail.value.totalOrdered : supplierDetail.value.totalReceived)
-}
-
-/** 乐观更新登记详情对话框中对应物料的收货数量与进度 */
-function updateDetailDialogLocally(newReceived: number) {
-  if (!showDetailDialog.value || !detailData.value) return
-  const dItem = (detailData.value.items || []).find((i: RegItem) => i.id === receiveItem.id)
-  if (!dItem) return
-  dItem.received_quantity = newReceived
-  const dOrdered = parseFloat(String(dItem.ordered_quantity || 0))
-  dItem.remaining_quantity = dOrdered - newReceived
-  dItem.progress = computePct(dOrdered, newReceived)
 }
 
 const { runExport } = useExport()

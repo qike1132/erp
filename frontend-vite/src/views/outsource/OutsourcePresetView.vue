@@ -10,9 +10,9 @@
           <div class="preset-search-field">
             <UiAutocomplete
               v-model="searchText"
-              :searchFn="searchProducts"
+              :search-fn="searchProducts"
               placeholder="搜索产品名称/条码，选中后为其配置工序"
-              appendTo="self"
+              append-to="self"
               suppress-after-select
               :search-delay-ms="500"
               :show-loading="false"
@@ -26,7 +26,7 @@
               </template>
             </UiAutocomplete>
           </div>
-          <button class="preset-reset-btn" @click="searchText = ''" aria-label="重置">
+          <button class="preset-reset-btn" aria-label="重置" @click="searchText = ''">
             <FontAwesomeIcon icon="redo" aria-hidden="true" />
           </button>
         </div>

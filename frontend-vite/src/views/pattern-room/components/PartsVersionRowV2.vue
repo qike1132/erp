@@ -13,10 +13,8 @@
           :title="group.collapsed ? '展开所有版本' : '折叠其他版本'"
           @click.stop="$emit('toggle-expand', group.part_name)"
         >
-          <i
-            :class="['fas', group.collapsed ? 'fa-chevron-down' : 'fa-chevron-up']"
-            aria-hidden="true"
-          />
+          <FontAwesomeIcon :icon="group.collapsed ? 'chevron-down' : 'chevron-up'"
+            aria-hidden="true" />
         </button>
       </div>
     </td>
@@ -68,7 +66,7 @@
           title="保存"
           @click="$emit('save-edit', part)"
         >
-          <i class="fas fa-check" aria-hidden="true" />
+          <FontAwesomeIcon icon="check" aria-hidden="true" />
         </button>
         <button
           type="button"
@@ -76,7 +74,7 @@
           title="取消"
           @click="$emit('cancel-edit')"
         >
-          <i class="fas fa-times" aria-hidden="true" />
+          <FontAwesomeIcon icon="times" aria-hidden="true" />
         </button>
       </div>
       <div v-else class="pvt-row-actions">
@@ -87,7 +85,7 @@
           title="复制版本"
           @click="$emit('copy-version', part)"
         >
-          <i class="fas fa-copy" aria-hidden="true" />
+          <FontAwesomeIcon icon="copy" aria-hidden="true" />
         </button>
         <span v-else class="pvt-action-placeholder" />
         <button
@@ -97,7 +95,7 @@
           :disabled="!canManage || part.id == null"
           @click="$emit('start-edit', part)"
         >
-          <i class="fas fa-pen" aria-hidden="true" />
+          <FontAwesomeIcon icon="pen" aria-hidden="true" />
         </button>
         <button
           type="button"
@@ -105,7 +103,7 @@
           title="删除版本"
           @click="$emit('delete-version', part)"
         >
-          <i class="fas fa-trash-alt" aria-hidden="true" />
+          <FontAwesomeIcon icon="trash-alt" aria-hidden="true" />
         </button>
       </div>
     </td>
@@ -120,10 +118,12 @@ import type { PartEditData } from '../composables/usePartInlineEdit'
 defineProps<{
   group: GroupedRow
   editingPartId: number | undefined
-  editForm: PartEditData
   canManage: boolean
   selectedVersion: Record<string, string | null>
 }>()
+
+// 行内编辑表单：父组件 v-model:edit-form 传入，就地编辑字段
+const editForm = defineModel<PartEditData>('editForm', { required: true })
 
 defineEmits<{
   'toggle-expand': [partName: string]

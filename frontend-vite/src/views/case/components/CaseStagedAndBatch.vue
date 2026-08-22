@@ -29,7 +29,7 @@
               <span class="cs-badge-tag cs-tag-secondary">{{ item.date }}</span>
             </div>
           </div>
-          <button class="cs-icon-btn cs-icon-danger" @click="emit('remove-staged', idx)" aria-label="删除"><FontAwesomeIcon icon="trash" /></button>
+          <button class="cs-icon-btn cs-icon-danger" aria-label="删除" @click="emit('remove-staged', idx)"><FontAwesomeIcon icon="trash" /></button>
         </div>
       </div>
     </div>
@@ -49,11 +49,11 @@
           <FontAwesomeIcon icon="file-excel" style="color: var(--color-success-500); margin-right: 6px" />{{ excelFile.name }}
         </div>
         <div class="cs-batch-actions">
-          <button class="cs-action-btn cs-action-outline" :disabled="templateDownloading" @click="emit('download-template')" aria-label="下载模板">
+          <button class="cs-action-btn cs-action-outline" :disabled="templateDownloading" aria-label="下载模板" @click="emit('download-template')">
             <UiLoadingIcon :loading="templateDownloading" icon="file-excel" />下载模板
           </button>
-          <button :class="['cs-action-btn', mode === 'stockin' ? 'cs-action-primary' : 'cs-action-danger']" :disabled="!excelFile || importing" @click="emit('import-excel')" :aria-label="importing ? '导入中…' : '开始导入'">
-            <i :loading="importing" icon="upload" style="margin-right: 4px" />{{ importing ? '导入中…' : '开始导入' }}
+          <button :class="['cs-action-btn', mode === 'stockin' ? 'cs-action-primary' : 'cs-action-danger']" :disabled="!excelFile || importing" :aria-label="importing ? '导入中…' : '开始导入'" @click="emit('import-excel')">
+            <UiLoadingIcon :loading="importing" icon="upload" style="margin-right: 4px" />{{ importing ? '导入中…' : '开始导入' }}
           </button>
         </div>
       </div>

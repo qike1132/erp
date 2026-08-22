@@ -31,6 +31,8 @@ export function usePatternRoomPatternMakers(
    * @param force 跳过缓存强制请求（新增/删除版师后传 true）
    */
   async function loadPatternMakers(force = false): Promise<void> {
+    // 无管理权限不请求版师列表：接口要求 customer_sampling_manage，避免导航竞态下触发 403
+    if (!canManage.value) return
     if (!force) {
       const snapshot = store.getMakersSnapshot()
       if (snapshot) {

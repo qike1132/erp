@@ -7,8 +7,8 @@
       class="ap-form-textarea"
     />
     <template #footer>
-      <button class="ap-action-btn" @click="emit('update:open', false)" aria-label="取消 {{ saving ? '提交中…' : '确认驳回' }}">取消</button>
-      <button class="ap-action-btn ap-action-danger" :disabled="saving" @click="emit('confirm')" :aria-label="saving ? '提交中…' : '确认驳回'">
+      <button class="ap-action-btn" aria-label="取消 {{ saving ? '提交中…' : '确认驳回' }}" @click="emit('update:open', false)">取消</button>
+      <button class="ap-action-btn ap-action-danger" :disabled="saving" :aria-label="saving ? '提交中…' : '确认驳回'" @click="emit('confirm')">
         {{ saving ? '提交中…' : '确认驳回' }}
       </button>
     </template>

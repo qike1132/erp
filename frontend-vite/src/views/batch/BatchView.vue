@@ -20,7 +20,7 @@
           <UiButton variant="primary" @click="refetch()"> 查询 </UiButton>
         </div>
         <div class="bt-header-actions">
-          <button class="bt-whitelist-btn" @click="showWhitelistModal = true" aria-label="设置">
+          <button class="bt-whitelist-btn" aria-label="设置" @click="showWhitelistModal = true">
             <FontAwesomeIcon icon="cog" aria-hidden="true" />
           </button>
           <!-- 白名单设置弹窗（拆分为子组件） -->
@@ -35,7 +35,7 @@
             <div class="bt-whitelist-modal">
               <div class="bt-whitelist-header">
                 <span>确认完成批次</span>
-                <button class="bt-whitelist-close" @click="showCompleteModal = false" aria-label="关闭">&times;</button>
+                <button class="bt-whitelist-close" aria-label="关闭" @click="showCompleteModal = false">&times;</button>
               </div>
               <div class="bt-whitelist-body" style="padding: 20px; font-size: 14px; color: var(--color-text);">
                 确定要完成批次 <strong>{{ completingBatchNo }}</strong> 吗？完成后该批次将不再显示。

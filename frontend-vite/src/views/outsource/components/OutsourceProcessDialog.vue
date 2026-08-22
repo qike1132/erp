@@ -5,8 +5,6 @@
         <div class="oso-detail-meta">
           <span class="oso-detail-no">{{ detailData.order_no || '-' }}</span>
           <span class="oso-detail-meta-item"><span class="oso-detail-meta-label">客户</span>{{ detailData.customer || '-' }}</span>
-          <span class="oso-detail-meta-item"><span class="oso-detail-meta-label">下单</span>{{ detailData.order_date || '-' }}</span>
-          <span class="oso-detail-meta-item"><span class="oso-detail-meta-label">数量</span><strong class="oso-detail-meta-num">{{ detailTotalQuantity }}</strong></span>
         </div>
         <div class="oso-detail-overview">
           <div class="oso-detail-progress">
@@ -23,12 +21,6 @@
       <div v-if="isStockinRecord" class="oso-detail-actions">
         <span class="oso-detail-hint">备货记录不参与外发工序管理，请在订单记录上操作</span>
       </div>
-      <div v-else-if="canManage" class="oso-detail-actions">
-        <UiButton variant="primary" size="sm" :disabled="generating" @click="handleGenerate">
-          <FontAwesomeIcon icon="wand-magic-sparkles" aria-hidden="true" /> {{ generating ? '生成中…' : '按SKU预设生成工序' }}
-        </UiButton>
-        <span class="oso-detail-hint">返单时系统已按 SKU 预设自动带出工序，可在此补生成</span>
-      </div>
 
       <div v-if="loadingProcesses" class="oso-empty">
         <UiSpinner />
@@ -37,35 +29,81 @@
         <div v-if="processRows.length === 0" class="oso-empty">
           <FontAwesomeIcon icon="route" aria-hidden="true" />
           <span v-if="isStockinRecord">备货记录无外发工序，仅订单参与外发流程</span>
-          <span v-else>该订单尚未配置外发工序{{ canManage ? '，可点击上方按钮按 SKU 预设生成' : '' }}</span>
+          <span v-else>该订单尚未配置外发工序</span>
         </div>
-        <OutsourceProcessFlow
-          v-else
-          :process-groups="processGroups"
-          :can-manage="canManage"
-          :status-label="statusLabel"
-          :short-date="shortDate"
-          :to-date-time-local="toDateTimeLocal"
-          :update-planned="updatePlanned"
-          :handle-start="handleStart"
-          :handle-complete-direct="handleCompleteDirect"
-          :handle-delete-process="handleDeleteProcess"
-        />
+        <template v-else>
+          <div class="oso-tabs" role="tablist" aria-label="外发工序视图">
+            <button
+              :class="['oso-tab', { 'oso-tab--active': activeTab === 'progress' }]"
+              type="button"
+              role="tab"
+              :aria-selected="activeTab === 'progress'"
+              @click="activeTab = 'progress'"
+            >进度</button>
+            <button
+              :class="['oso-tab', { 'oso-tab--active': activeTab === 'ledger' }]"
+              type="button"
+              role="tab"
+              :aria-selected="activeTab === 'ledger'"
+              @click="activeTab = 'ledger'"
+            >台账</button>
+          </div>
+          <OutsourceProcessFlow
+            v-if="activeTab === 'progress'"
+            :process-groups="processGroups"
+            :can-ship="canShip"
+            :can-receive="canReceive"
+            :status-label="statusLabel"
+            :ship-qty-drafts="shipQtyDrafts"
+            :receive-qty-drafts="receiveQtyDrafts"
+            :set-ship-qty="setShipQty"
+            :set-receive-qty="setReceiveQty"
+            :remaining-ship-qty="remainingShipQty"
+            :remaining-receive-qty="remainingReceiveQty"
+          />
+          <OutsourceProcessLedger
+            v-else
+            :total-qty="totalQty"
+            :shipped-total="shippedTotal"
+            :received-total="receivedTotal"
+            :remaining-total="remainingTotal"
+            :ship-records="shipRecords"
+            :receive-records="receiveRecords"
+            :remaining-list="remainingList"
+          />
+        </template>
       </template>
     </div>
     <template #footer>
       <UiButton variant="outline" @click="detailOpen = false">关闭</UiButton>
+      <UiButton
+        v-if="canShip"
+        variant="primary"
+        :disabled="bulkShipping || pendingCount === 0"
+        @click="handleBulkShip"
+      >
+        {{ bulkShipping ? '发货中…' : '一键发货' }}
+      </UiButton>
+      <UiButton
+        v-if="canReceive"
+        variant="success"
+        :disabled="bulkReceiving || shippedCount === 0"
+        @click="handleBulkReceive"
+      >
+        {{ bulkReceiving ? '收货中…' : '一键收货' }}
+      </UiButton>
     </template>
   </UiDialog>
 </template>
 
 <script setup lang="ts">
-import { toRef, watch } from 'vue'
+import { ref, toRef, watch } from 'vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import UiSpinner from '@/components/ui/UiSpinner.vue'
 import UiProgressBar from '@/components/ui/UiProgressBar.vue'
 import OutsourceProcessFlow from './OutsourceProcessFlow.vue'
+import OutsourceProcessLedger from './OutsourceProcessLedger.vue'
 import { useOutsourceProcess } from '@/views/outsource/composables/useOutsourceProcess'
 import type { OutsourceOrderRow } from '@/views/outsource/composables/useOutsourceOrders'
 
@@ -81,12 +119,31 @@ const detailOpen = defineModel<boolean>('open', { default: false })
 
 const detailDataRef = toRef(props, 'detailData')
 
+/** 当前视图：进度 / 台账 */
+const activeTab = ref<'progress' | 'ledger'>('progress')
+
 const {
-  canManage,
+  canShip,
+  canReceive,
   loadingProcesses,
-  generating,
+  shipQtyDrafts,
+  receiveQtyDrafts,
+  bulkShipping,
+  bulkReceiving,
+  pendingCount,
+  shippedCount,
+  totalQty,
+  shippedTotal,
+  receivedTotal,
+  remainingTotal,
+  shipRecords,
+  receiveRecords,
+  remainingList,
+  remainingShipQty,
+  remainingReceiveQty,
+  setShipQty,
+  setReceiveQty,
   isStockinRecord,
-  detailTotalQuantity,
   totalProcesses,
   completedProcesses,
   detailProgress,
@@ -96,18 +153,18 @@ const {
   processRows,
   progressVariant,
   loadProcesses,
-  handleGenerate,
-  handleStart,
-  handleCompleteDirect,
-  handleDeleteProcess,
-  updatePlanned,
-  toDateTimeLocal,
+  loadFlows,
+  handleBulkShip,
+  handleBulkReceive,
   statusLabel,
-  shortDate,
 } = useOutsourceProcess(detailDataRef, emit)
 
 watch([detailOpen, detailDataRef], ([open, data]) => {
-  if (open && data) loadProcesses(data.id)
+  if (open && data) {
+    activeTab.value = 'progress'
+    loadProcesses(data.id)
+    loadFlows(data.id)
+  }
 })
 </script>
 
@@ -166,6 +223,31 @@ watch([detailOpen, detailDataRef], ([open, data]) => {
 
 .oso-detail-actions { display: flex; align-items: center; gap: 12px; }
 .oso-detail-hint { font-size: 12px; color: var(--color-text-muted); }
+
+.oso-tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: #eef1f5;
+  border-radius: 9px;
+}
+.oso-tab {
+  padding: 5px 18px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text-secondary, #475569);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.oso-tab:hover { color: var(--color-text); }
+.oso-tab--active {
+  background: white;
+  color: var(--color-primary-600);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
 
 .oso-empty {
   display: flex;

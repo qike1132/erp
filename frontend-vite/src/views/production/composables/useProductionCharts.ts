@@ -1,6 +1,7 @@
 import { ref, watch, nextTick, onMounted, onUnmounted, type Ref, type ComputedRef } from 'vue'
 import type { EChartsType } from 'echarts/core'
 import type { DailySummary, MonthlySummary, DepartmentSummary, MonthlyDayData } from '@/types'
+import { ensureEcharts } from '@/utils/echartsPreload'
 
 type EChartsCore = typeof import('echarts/core')
 
@@ -9,25 +10,11 @@ let echartsLoaded = false
 
 async function loadEcharts(): Promise<EChartsCore> {
   if (echartsLoaded && echarts) return echarts
-  const [ec, { BarChart, LineChart }, { GridComponent, TooltipComponent, TitleComponent, LegendComponent, DatasetComponent }, { CanvasRenderer }] = await Promise.all([
-    import('echarts/core'),
-    import('echarts/charts'),
-    import('echarts/components'),
-    import('echarts/renderers'),
-  ])
-  ec.use([
-    BarChart,
-    LineChart,
-    GridComponent,
-    TooltipComponent,
-    TitleComponent,
-    LegendComponent,
-    DatasetComponent,
-    CanvasRenderer,
-  ])
-  echarts = ec
+  // 复用 echartsPreload 的统一按需注册（静态命名导入，tree-shaking 生效），
+  // 避免此处再次 import('echarts/charts') 整模块导入导致全量图表进包
+  echarts = await ensureEcharts()
   echartsLoaded = true
-  return ec
+  return echarts
 }
 
 const deptColors: Record<string, { main: string; light: string; gradient: string[] }> = {

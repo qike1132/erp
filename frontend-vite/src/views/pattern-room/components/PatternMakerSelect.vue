@@ -7,7 +7,7 @@
         @click="makerDropdownOpen = !makerDropdownOpen"
       >
         <span>{{ selectedMakerName || '-- 请选择 --' }}</span>
-        <i :class="['fas', makerDropdownOpen ? 'fa-chevron-up' : 'fa-chevron-down']" aria-hidden="true" />
+        <FontAwesomeIcon :icon="makerDropdownOpen ? 'chevron-up' : 'chevron-down'" aria-hidden="true" />
       </button>
       <div v-if="makerDropdownOpen" class="pjf-maker-options">
         <button
@@ -22,7 +22,7 @@
           :key="pm.id"
           :class="['pjf-maker-option', { active: patternMakerId === pm.id }]"
         >
-          <button type="button" class="pjf-maker-option-name" @click="emit('select', pm.id)" :aria-label="pm.name">
+          <button type="button" class="pjf-maker-option-name" :aria-label="pm.name" @click="emit('select', pm.id)">
             <span>{{ pm.name }}</span>
           </button>
           <button
@@ -31,13 +31,13 @@
             title="删除"
             @click.stop="emit('delete', pm.id)"
           >
-            <i class="fas fa-times" aria-hidden="true" />
+            <FontAwesomeIcon icon="times" aria-hidden="true" />
           </button>
         </div>
       </div>
     </div>
-    <button type="button" class="pjf-role-add" @click="addMakerInputOpen = true" aria-label="添加版师">
-      <i class="fas fa-plus" aria-hidden="true" />
+    <button type="button" class="pjf-role-add" aria-label="添加版师" @click="addMakerInputOpen = true">
+      <FontAwesomeIcon icon="plus" aria-hidden="true" />
       添加版师
     </button>
   </div>
@@ -49,10 +49,10 @@
       maxlength="100"
       @keyup.enter="confirmAddMaker"
     />
-    <button type="button" class="pjf-role-add" @click="confirmAddMaker" aria-label="确定">
+    <button type="button" class="pjf-role-add" aria-label="确定" @click="confirmAddMaker">
       确定
     </button>
-    <button type="button" class="pjf-maker-cancel" @click="cancelAddMaker" aria-label="取消">
+    <button type="button" class="pjf-maker-cancel" aria-label="取消" @click="cancelAddMaker">
       取消
     </button>
   </div>

@@ -1,33 +1,41 @@
 <template>
-  <div class="m-card">
-    <div class="m-card-header">
-      <div class="m-card-icon">
-        <span class="m-card-emoji">🏭</span>
+  <div class="ios-card">
+    <div class="ios-card-head">
+      <div class="ios-card-icon ios-icon-teal">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="4" rx="1" />
+          <path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8" />
+          <path d="M10 12h4" />
+        </svg>
       </div>
-      <span class="m-card-title">皮套仓储</span>
+      <div class="ios-card-title-wrap">
+        <span class="ios-card-title">皮套仓储</span>
+        <span class="ios-card-sub">Warehouse</span>
+      </div>
     </div>
-    <div class="m-card-gap-14"></div>
 
-    <div class="m-wh-grid">
-      <div class="m-wh-block">
-        <span class="m-wh-label">📥 进仓数量</span>
-        <span class="m-wh-value">{{ fmtNum(data?.warehouse?.in_qty) }}</span>
-        <span class="m-wh-sub">{{ fmtMoney(data?.warehouse?.in_amount) }} 元</span>
+    <div class="ios-wh-grid">
+      <div class="ios-wh-block">
+        <div class="ios-wh-label">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 19V5" />
+            <path d="M5 12l7-7 7 7" />
+          </svg>
+          进仓数量
+        </div>
+        <div class="ios-wh-value">{{ fmtNum(data?.warehouse?.in_qty) }}</div>
+        <div class="ios-wh-sub">{{ fmtMoney(data?.warehouse?.in_amount) }} 元</div>
       </div>
-      <div class="m-wh-block">
-        <span class="m-wh-label">💸 进仓金额</span>
-        <span class="m-wh-value">{{ fmtMoney(data?.warehouse?.in_amount) }}</span>
-        <span class="m-wh-sub">总金额</span>
-      </div>
-      <div class="m-wh-block">
-        <span class="m-wh-label">📤 出仓数量</span>
-        <span class="m-wh-value">{{ fmtNum(data?.warehouse?.out_qty) }}</span>
-        <span class="m-wh-sub">{{ fmtMoney(data?.warehouse?.out_amount) }} 元</span>
-      </div>
-      <div class="m-wh-block">
-        <span class="m-wh-label">💸 出仓金额</span>
-        <span class="m-wh-value">{{ fmtMoney(data?.warehouse?.out_amount) }}</span>
-        <span class="m-wh-sub">总金额</span>
+      <div class="ios-wh-block">
+        <div class="ios-wh-label">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 5v14" />
+            <path d="M19 12l-7 7-7-7" />
+          </svg>
+          出仓数量
+        </div>
+        <div class="ios-wh-value">{{ fmtNum(data?.warehouse?.out_qty) }}</div>
+        <div class="ios-wh-sub">{{ fmtMoney(data?.warehouse?.out_amount) }} 元</div>
       </div>
     </div>
   </div>
@@ -44,51 +52,56 @@ defineProps<{
 </script>
 
 <style scoped>
-.m-card {
-  background: #FFFFFF;
-  border-radius: 22px;
-  padding: 20px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.03);
-  border: 1px solid rgba(0, 0, 0, 0.04);
+.ios-card {
+  background: #ffffff;
+  border-radius: 20px;
+  padding: 16px 16px 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.04);
+  border: 0.5px solid rgba(0, 0, 0, 0.04);
+  overflow: hidden;
 }
-.m-card-header { display: flex; align-items: center; gap: 10px; }
-.m-card-icon {
-  width: 38px;
-  height: 38px;
-  border-radius: 12px;
-  background: rgba(0, 113, 227, 0.08);
+.ios-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 0 16px;
+}
+.ios-card-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
-.m-card-emoji { font-size: 16px; line-height: 1; }
-.m-card-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: #86868B;
-  letter-spacing: -0.1px;
-}
-.m-card-gap-14 { height: 14px; }
-.m-wh-grid {
+.ios-card-icon svg { width: 20px; height: 20px; }
+.ios-icon-teal { background: rgba(90, 200, 250, 0.15); color: #0a84ff; }
+.ios-card-title-wrap { display: flex; flex-direction: column; }
+.ios-card-title { font-size: 15px; font-weight: 600; color: #1d1d1f; letter-spacing: -0.2px; }
+.ios-card-sub { font-size: 11px; color: #aeaeb2; margin-top: 1px; }
+.ios-wh-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 12px;
 }
-.m-wh-block {
-  background: #F8FAFC;
-  border-radius: 12px;
-  padding: 12px 10px;
+.ios-wh-block {
+  background: #f5f5f7;
+  border-radius: 14px;
+  padding: 14px;
   display: flex;
   flex-direction: column;
-  align-items: center;
   gap: 3px;
 }
-.m-wh-label { font-size: 10px; font-weight: 500; color: #AEAEB2; }
-.m-wh-value {
-  font-size: 16px;
-  font-weight: 800;
-  color: #0071E3;
+.ios-wh-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #86868b;
 }
-.m-wh-sub { font-size: 11px; font-weight: 500; color: #AEAEB2; }
+.ios-wh-label svg { width: 13px; height: 13px; }
+.ios-wh-value { font-size: 20px; font-weight: 800; color: #1d1d1f; letter-spacing: -0.4px; }
+.ios-wh-sub { font-size: 11px; font-weight: 500; color: #aeaeb2; }
 </style>

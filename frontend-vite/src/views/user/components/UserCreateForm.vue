@@ -1,7 +1,7 @@
 <template>
   <div class="us-col-title"><FontAwesomeIcon icon="user-plus" aria-hidden="true" /> 添加新用户</div>
   <div class="us-col-scroll">
-    <form @submit.prevent="handleAdd" class="us-form">
+    <form class="us-form" @submit.prevent="handleAdd">
       <div class="us-form-group">
         <label>用户名 <span class="us-required">*</span></label>
         <input v-model="form.username" class="us-input" placeholder="请输入用户名" aria-label="请输入用户名" />
@@ -10,7 +10,7 @@
         <label>密码 <span class="us-required">*</span></label>
         <div class="us-input-wrapper">
           <input v-model="form.password" :type="showPwd1 ? 'text' : 'password'" class="us-input" placeholder="至少6位" aria-label="至少6位" />
-          <button type="button" class="us-pwd-toggle" @click="showPwd1 = !showPwd1" aria-label="查看">
+          <button type="button" class="us-pwd-toggle" aria-label="查看" @click="showPwd1 = !showPwd1">
             <FontAwesomeIcon :icon="showPwd1 ? 'eye-slash' : 'eye'" aria-hidden="true" />
           </button>
         </div>

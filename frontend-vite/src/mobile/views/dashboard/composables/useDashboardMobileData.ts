@@ -5,6 +5,7 @@ import type { MobileDashboardData } from '@/api/dashboard'
 /** 移动端仪表盘数据加载与状态管理 */
 export function useDashboardMobileData() {
   const loading = ref(true)
+  const refreshing = ref(false)
   const error = ref<string | null>(null)
   const data = ref<MobileDashboardData | null>(null)
   const lastRefreshTime = ref<number>(0)
@@ -43,10 +44,6 @@ export function useDashboardMobileData() {
 
   function rankLabel(idx: number): string {
     return idx < 3 ? (['#1', '#2', '#3'][idx] ?? '') : '#' + (idx + 1)
-  }
-
-  function rankClass(idx: number): string {
-    return idx === 0 ? 'm-rank-1' : 'm-rank-other'
   }
 
   function fmtNum(n: number | null | undefined): string {
@@ -91,6 +88,18 @@ export function useDashboardMobileData() {
     }
   }
 
+  /** 下拉刷新：静默更新数据，不重置卡片入场动画，避免刷新时闪烁 */
+  async function onPullRefresh() {
+    if (refreshing.value) return
+    refreshing.value = true
+    error.value = null
+    try {
+      await loadData()
+    } finally {
+      refreshing.value = false
+    }
+  }
+
   onMounted(async () => {
     await loadData()
     if (!loading.value) {
@@ -100,6 +109,7 @@ export function useDashboardMobileData() {
 
   return {
     loading,
+    refreshing,
     error,
     data,
     visibleCards,
@@ -107,10 +117,10 @@ export function useDashboardMobileData() {
     lastUpdateText,
     sortedDepartments,
     rankLabel,
-    rankClass,
     fmtNum,
     fmtMoney,
     loadData,
     refresh,
+    onPullRefresh,
   }
 }

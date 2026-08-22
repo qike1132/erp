@@ -16,11 +16,11 @@
           已选 <strong>{{ selectedCount }}</strong> 条
         </div>
         <div class="nc-batch-actions">
-          <button class="nc-btn nc-btn--primary-sm" @click="handleBatchMarkRead" aria-label="标记已读">
+          <button class="nc-btn nc-btn--primary-sm" aria-label="标记已读" @click="handleBatchMarkRead">
             <FontAwesomeIcon icon="envelope-open-text" aria-hidden="true" />
             标记已读
           </button>
-          <button class="nc-btn nc-btn--ghost-sm" @click="clearSelection" aria-label="取消选择">
+          <button class="nc-btn nc-btn--ghost-sm" aria-label="取消选择" @click="clearSelection">
             取消选择
           </button>
         </div>
@@ -59,7 +59,7 @@
             />
             <span class="nc-checkbox-text">全选</span>
           </label>
-          <span class="nc-select-count" v-if="list.length > 0">
+          <span v-if="list.length > 0" class="nc-select-count">
             共 {{ total }} 条通知
           </span>
         </div>

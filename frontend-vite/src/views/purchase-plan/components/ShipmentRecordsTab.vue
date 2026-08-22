@@ -12,9 +12,9 @@
     </div>
     <VirtualList
       :items="records"
-      :itemHeight="40"
-      :containerHeight="460"
-      :itemKey="(r) => r.shipment_no"
+      :item-height="40"
+      :container-height="460"
+      :item-key="(r) => r.shipment_no"
     >
       <template #default="{ item: rec }">
         <div class="sp-stockout-row">

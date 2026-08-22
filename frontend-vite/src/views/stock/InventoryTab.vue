@@ -3,13 +3,13 @@
     <div class="sk-filter-bar">
       <div class="sk-filter-field">
         <label class="sk-filter-label">产品名称/69码</label>
-        <input v-model="filters.product" class="sk-filter-input" placeholder="输入产品名称或69码" @keyup.enter="handleSearch()" aria-label="输入产品名称或69码" />
+        <input v-model="filters.product" class="sk-filter-input" placeholder="输入产品名称或69码" aria-label="输入产品名称或69码" @keyup.enter="handleSearch()" />
       </div>
       <div class="sk-filter-actions">
-        <button class="sk-action-btn sk-action-primary" @click="handleSearch()" aria-label="查询">
-          <FontAwesomeIcon icon="search" style="margin-right: 4px"  aria-hidden="true" />查询
+        <button class="sk-action-btn sk-action-primary" aria-label="查询" @click="handleSearch()">
+          <FontAwesomeIcon icon="search" style="margin-right: 4px" aria-hidden="true" />查询
         </button>
-        <button class="sk-action-btn" @click="handleReset()" aria-label="刷新">
+        <button class="sk-action-btn" aria-label="刷新" @click="handleReset()">
           <FontAwesomeIcon icon="redo" aria-hidden="true" />
         </button>
       </div>

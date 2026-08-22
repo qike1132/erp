@@ -17,16 +17,15 @@
     >
       <template #default="{ item: proj }">
         <ProjectCardItem
+          v-memo="[proj.id, proj.updated_at, proj.status, proj.product_name, proj.product_image_url, proj.product_image_thumbnail_url, proj.product_image_blur_url, selectedProjectId === proj.id, projectDisplayNumbers.get(proj.id), canManage, selectedGroup?.pattern_maker_name]"
           :proj="proj"
           :selected="selectedProjectId === proj.id"
           :maker-name="selectedGroup?.pattern_maker_name"
           :display-number="projectDisplayNumbers.get(proj.id)"
           :can-manage="canManage"
-          :thumb-loaded="thumbLoaded"
           @click="$emit('select-project', proj.id)"
           @keyup.enter="$emit('select-project', proj.id)"
           @preview="$emit('preview', $event)"
-          @thumb-load="$emit('thumb-load', $event)"
           @edit="$emit('edit-project', $event)"
           @complete="$emit('complete-project', $event)"
           @cancel="$emit('cancel-project', $event)"
@@ -52,7 +51,6 @@ const props = defineProps<{
   selectedGroup: PatternMakerGroup | null
   selectedProjectId: number | null
   canManage: boolean
-  thumbLoaded: Set<number>
   groups: PatternMakerGroup[]
   selectedMakerKey: string | null
   projectDisplayNumbers: Map<number, string>
@@ -64,7 +62,6 @@ defineEmits<{
   'complete-project': [id: number]
   'cancel-project': [id: number]
   preview: [url: string]
-  'thumb-load': [projectId: number]
 }>()
 
 const PROJECT_CARD_H = 216
@@ -76,7 +73,7 @@ const virtualListRef = ref<{ scrollToTop: () => void } | null>(null)
 watch(
   () => props.groups,
   () => {
-    nextTick(() => nextTick(measureProjectArea))
+    nextTick(() => requestAnimationFrame(measureProjectArea))
   },
 )
 

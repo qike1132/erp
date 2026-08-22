@@ -18,11 +18,11 @@
       </div>
       <div class="co-form-group">
         <label class="co-label">{{ editStagedData.type === 'order' ? '订单数量' : '备货数量' }}</label>
-        <input type="number" class="form-number-input" v-model.number="editStagedData.quantity" min="1" max="9999999" step="1" style="width: 100%" name="quantity" autocomplete="off" :aria-label="editStagedData.type === 'order' ? '订单数量' : '备货数量'" />
+        <input v-model.number="editStagedData.quantity" type="number" class="form-number-input" min="1" max="9999999" step="1" style="width: 100%" name="quantity" autocomplete="off" :aria-label="editStagedData.type === 'order' ? '订单数量' : '备货数量'" />
       </div>
       <div v-if="editStagedData.type === 'order'" class="co-form-group">
         <label class="co-label">抵扣备货数量</label>
-        <input type="number" class="form-number-input" v-model.number="editStagedData.deductQuantity" min="0" :max="Math.min(editStagedData.quantity, editAvailableStock)" step="1" style="width: 100%" name="deduct-quantity" autocomplete="off" aria-label="抵扣备货数量" />
+        <input v-model.number="editStagedData.deductQuantity" type="number" class="form-number-input" min="0" :max="Math.min(editStagedData.quantity, editAvailableStock)" step="1" style="width: 100%" name="deduct-quantity" autocomplete="off" aria-label="抵扣备货数量" />
         <small v-if="editAvailableStock > 0" style="color: var(--color-success-700); margin-top: 4px; display: block">
           <FontAwesomeIcon icon="check-circle" aria-hidden="true" /> 可用备货: <strong>{{ editAvailableStock }}</strong> 件
         </small>

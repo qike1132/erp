@@ -30,10 +30,10 @@
             </div>
           </div>
           <div class="so-staged-actions">
-            <button class="action-btn action-edit" @click="emit('edit-item', idx)" aria-label="编辑">
+            <button class="action-btn action-edit" aria-label="编辑" @click="emit('edit-item', idx)">
               <FontAwesomeIcon icon="edit" aria-hidden="true" />
             </button>
-            <button class="action-btn action-delete" @click="emit('remove-item', idx)" aria-label="删除">
+            <button class="action-btn action-delete" aria-label="删除" @click="emit('remove-item', idx)">
               <FontAwesomeIcon icon="trash" aria-hidden="true" />
             </button>
           </div>

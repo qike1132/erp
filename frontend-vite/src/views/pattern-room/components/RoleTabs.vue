@@ -8,7 +8,7 @@
     >
       <span class="role-tab-name">
         {{ role.role_name }}
-        <i v-if="role.is_default" class="fas fa-thumbtack role-tab-pin" aria-label="默认角色" title="默认角色" />
+        <FontAwesomeIcon v-if="role.is_default" icon="fas fa-thumbtack" class="role-tab-pin" aria-label="默认角色" title="默认角色" />
       </span>
       <button
         v-if="canManage && !role.is_default"
@@ -17,7 +17,7 @@
         title="删除角色"
         @click.stop="$emit('remove', role)"
       >
-        <i class="fas fa-times" aria-hidden="true" />
+        <FontAwesomeIcon icon="times" aria-hidden="true" />
       </button>
     </div>
     <button
@@ -27,7 +27,7 @@
       title="新增角色"
       @click="onAddClick"
     >
-      <i class="fas fa-plus" aria-hidden="true" />
+      <FontAwesomeIcon icon="plus" aria-hidden="true" />
     </button>
 
     <!-- 新增角色内联输入 -->

@@ -2,9 +2,9 @@
   <div class="sp-modal-sidebar">
     <VirtualList
       :items="customerList"
-      :itemHeight="72"
-      :containerHeight="460"
-      :itemKey="(c) => c.name"
+      :item-height="72"
+      :container-height="460"
+      :item-key="(c) => c.name"
     >
       <template #default="{ item: entry }">
         <div

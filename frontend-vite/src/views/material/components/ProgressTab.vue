@@ -24,14 +24,14 @@
           </template>
           <template #column-body-product_name="{ row }">
             <template v-if="row.sku_items && row.sku_items.length > 1">
-              <div v-for="(sku, idx) in row.sku_items" :key="idx" class="mr-sku-line">{{ sku.product_name || '-' }}</div>
+              <div v-for="(sku, idx) in row.sku_items" :key="sku.barcode || sku.product_name || idx" class="mr-sku-line">{{ sku.product_name || '-' }}</div>
             </template>
             <span v-else class="mr-order-link">{{ row.product_name || '-' }}</span>
           </template>
           <template #column-body-product_quantity="{ row }">
             <span class="mr-td-qty">
               <template v-if="row.sku_items && row.sku_items.length > 1">
-                <div v-for="(sku, idx) in row.sku_items" :key="idx" class="mr-sku-line">{{ sku.quantity != null ? sku.quantity : '-' }}</div>
+                <div v-for="(sku, idx) in row.sku_items" :key="sku.barcode || sku.product_name || idx" class="mr-sku-line">{{ sku.quantity != null ? sku.quantity : '-' }}</div>
               </template>
               <template v-else>{{ row.product_quantity != null ? row.product_quantity : '-' }}</template>
             </span>
@@ -39,13 +39,13 @@
           <template #column-body-groupedItems="{ row }">
             <div class="mr-supplier-groups">
               <div v-for="grp in row.groupedItems" :key="grp.supplierName" class="mr-supplier-group">
-                <div class="mr-supplier-label"><FontAwesomeIcon icon="truck" /><span>{{ grp.supplierName || '未指定' }}</span><span class="mr-supplier-count">{{ grp.items.length }} 项</span></div>
-                <div class="mr-items-container">
+                <div class="mr-supplier-label" @click="toggleExpand(row.order_no + '|' + grp.supplierName)"><FontAwesomeIcon icon="truck" /><span>{{ grp.supplierName || '未指定' }}</span><span class="mr-supplier-count">{{ grp.items.length }} 项</span><span class="mr-expand-icon">{{ expandedGroups.has(row.order_no + '|' + grp.supplierName) ? '▼' : '▶' }}</span></div>
+                <div v-if="expandedGroups.has(row.order_no + '|' + grp.supplierName)" class="mr-items-container">
                   <div v-for="i in grp.items" :key="i.material_name" class="mr-list-item-row">
                     <span class="mr-list-item-name" :title="i.material_name">{{ i.material_name }}</span>
-                    <span class="mr-list-item-qty">数量:<b>{{ parseFloat(String(i.ordered_quantity || 0)).toFixed(0) }}</b></span>
-                    <span class="mr-list-item-rcv">已到货:<b>{{ parseFloat(String(i.received_quantity || 0)).toFixed(0) }}</b></span>
-                    <div class="mr-list-item-bar"><div :class="['mr-sku-fill', fillClass(i)]" :style="{ width: (i.progress || 0) + '%', height: '100%', borderRadius: '5px' }"></div></div>
+                    <span class="mr-list-item-qty">数量:<b>{{ i.ordered_display }}</b></span>
+                    <span class="mr-list-item-rcv">已到货:<b>{{ i.received_display }}</b></span>
+                    <div class="mr-list-item-bar"><div :class="['mr-sku-fill', fillClass(i)]" :style="{ width: (i.progress || 0) + '%', height: '100%', borderRadius: '5px' }" /></div>
                     <span class="mr-list-item-pct">{{ i.progress || 0 }}%</span>
                   </div>
                 </div>
@@ -53,10 +53,10 @@
             </div>
           </template>
           <template #column-body-progress="{ row }">
-            <div class="mr-pbar-wrap"><div class="mr-pbar"><div :class="['mr-pfill', row.progress >= 100 ? 'completed' : 'pending']" :style="{ width: (row.progress || 0) + '%' }"></div></div><span class="mr-pbar-pct">{{ row.progress || 0 }}%</span></div>
+            <div class="mr-pbar-wrap"><div class="mr-pbar"><div :class="['mr-pfill', row.progress >= 100 ? 'completed' : 'pending']" :style="{ width: (row.progress || 0) + '%' }" /></div><span class="mr-pbar-pct">{{ row.progress || 0 }}%</span></div>
           </template>
           <template #column-body-actions="{ row }">
-            <div class="mr-action-group"><button type="button" class="mr-action-btn mr-action-view" @click="emit('view-supplier', row.supplier_name || '', row.order_no)" title="查看供应商详情" aria-label="查看供应商详情"><FontAwesomeIcon icon="eye" /></button></div>
+            <div class="mr-action-group"><button type="button" class="mr-action-btn mr-action-view" title="查看供应商详情" aria-label="查看供应商详情" @click="emit('view-supplier', row.supplier_name || '', row.order_no)"><FontAwesomeIcon icon="eye" /></button></div>
           </template>
         </UiDataTable>
       </div>
@@ -70,6 +70,7 @@ import UiDataTable from '@/components/ui/UiDataTable.vue'
 import type { TableColumn } from '@/components/ui/UiDataTable.vue'
 import type { Registration } from '@/api/material'
 import type { ProgressOrderRow } from '../composables/useMaterialRegistrations'
+import { reactive } from 'vue'
 
 defineProps<{
   progressOrderRows: ProgressOrderRow[]
@@ -86,6 +87,13 @@ const emit = defineEmits<{
 }>()
 
 function fillClass(item: { progress?: number; received_quantity: number | string; ordered_quantity: number | string }) { const pct = item.progress || 0; if (pct >= 100 || Number(item.received_quantity) >= Number(item.ordered_quantity)) return 'full'; return 'low' }
+
+// 方案2：供应商分组默认折叠，点击展开才渲染物料明细，大幅减少初始 DOM 节点
+const expandedGroups = reactive(new Set<string>())
+function toggleExpand(key: string) {
+  if (expandedGroups.has(key)) expandedGroups.delete(key)
+  else expandedGroups.add(key)
+}
 
 /** UiDataTable 列定义 */
 const progressColumns: TableColumn[] = [
@@ -184,6 +192,8 @@ const progressColumns: TableColumn[] = [
   font-size: 12px;
   font-weight: 600;
   color: var(--color-primary-700, #1d4ed8);
+  cursor: pointer;
+  user-select: none;
 }
 
 .mr-supplier-label i {
@@ -195,6 +205,13 @@ const progressColumns: TableColumn[] = [
   font-size: 11px;
   font-weight: 500;
   color: var(--color-text-muted, #94a3b8);
+}
+
+.mr-expand-icon {
+  margin-left: 4px;
+  font-size: 10px;
+  color: var(--color-text-muted, #94a3b8);
+  flex-shrink: 0;
 }
 
 .mr-supplier-group .mr-items-container {

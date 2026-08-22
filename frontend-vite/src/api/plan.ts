@@ -11,6 +11,8 @@ export const planApi = {
   deleteDetail: (detailId: number) => del(`/plans/details/${detailId}`),
   addDetails: (planId: number, details: Record<string, unknown>[]) => post(`/plans/details/add?plan_id=${planId}`, { details }),
   monthly: (params?: QueryParams) => get<Record<string, unknown>>('/plans/monthly', params),
+  monthlyAggregated: (params?: QueryParams) => get<Record<string, unknown>>('/plans/monthly-aggregated', params),
+  dayDetails: (params?: QueryParams) => get<Record<string, unknown>>('/plans/day-details', params),
   customerSummary: (params?: QueryParams) => get<Record<string, unknown>>('/plans/customer-summary', params),
   inventoryCompare: (params?: QueryParams) => get<Record<string, unknown>>('/plans/inventory-compare', params),
   shipmentProgress: (planId: number) => get<ShipmentRecord[]>(`/plans/shipment/progress?plan_id=${planId}`),

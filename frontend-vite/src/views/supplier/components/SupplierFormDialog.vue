@@ -1,33 +1,33 @@
 <template>
   <UiDialog :open="open" :title="mode === 'add' ? '添加新供应商' : '编辑供应商'" max-width-class="max-w-[560px]" @update:open="emit('update:open', $event)">
-    <form @submit.prevent="emit('submit')" class="sp-dialog-form">
+    <form class="sp-dialog-form" @submit.prevent="emit('submit')">
       <div class="sp-form-field">
         <label class="sp-form-label"><FontAwesomeIcon icon="building" aria-hidden="true" /> 供应商名称 <span class="sp-required">*</span></label>
-        <input v-model="form.name" type="text" class="sp-form-input" required :placeholder="mode === 'add' ? '例如：广州面料有限公司' : '请输入供应商名称'" name="supplier-name" autocomplete="off" aria-label="mode ===" />
+        <input v-model="form.name" type="text" class="sp-form-input" required :placeholder="mode === 'add' ? '例如：广州面料有限公司' : '请输入供应商名称'" name="supplier-name" autocomplete="off" aria-label="供应商名称" />
       </div>
       <div class="sp-form-row">
         <div class="sp-form-field">
           <label class="sp-form-label"><FontAwesomeIcon icon="user" aria-hidden="true" /> 联系人</label>
-          <input v-model="form.contact_person" type="text" class="sp-form-input" :placeholder="mode === 'add' ? '例如：李经理' : ''" name="contact" autocomplete="off" aria-label="mode ===" />
+          <input v-model="form.contact_person" type="text" class="sp-form-input" :placeholder="mode === 'add' ? '例如：李经理' : ''" name="contact" autocomplete="off" aria-label="联系人" />
         </div>
         <div class="sp-form-field">
           <label class="sp-form-label"><FontAwesomeIcon icon="phone" aria-hidden="true" /> 联系电话</label>
-          <input v-model="form.phone" type="text" class="sp-form-input" :placeholder="mode === 'add' ? '例如：13800138000' : ''" name="phone" autocomplete="tel" aria-label="mode ===" />
+          <input v-model="form.phone" type="text" class="sp-form-input" :placeholder="mode === 'add' ? '例如：13800138000' : ''" name="phone" autocomplete="tel" aria-label="联系电话" />
         </div>
       </div>
       <div class="sp-form-field">
-        <label class="sp-form-label"><FontAwesomeIcon icon="map-marker-alt" aria-hidden="true" /> 地址</label>
-        <input v-model="form.address" type="text" class="sp-form-input" :placeholder="mode === 'add' ? '例如：广州市白云区' : ''" name="address" autocomplete="off" aria-label="mode ===" />
+        <label class="sp-form-label"><FontAwesomeIcon icon="location-dot" aria-hidden="true" /> 地址</label>
+        <input v-model="form.address" type="text" class="sp-form-input" :placeholder="mode === 'add' ? '例如：广州市白云区' : ''" name="address" autocomplete="off" aria-label="地址" />
       </div>
       <div class="sp-form-field">
-        <label class="sp-form-label"><FontAwesomeIcon icon="sticky-note" aria-hidden="true" /> 备注</label>
-        <textarea v-model="form.remark" rows="2" class="sp-form-input" :placeholder="mode === 'add' ? '例如：长期合作供应商' : ''" aria-label="mode ===" />
+        <label class="sp-form-label"><FontAwesomeIcon icon="note-sticky" aria-hidden="true" /> 备注</label>
+        <textarea v-model="form.remark" rows="2" class="sp-form-input" :placeholder="mode === 'add' ? '例如：长期合作供应商' : ''" aria-label="备注" />
       </div>
     </form>
     <template #footer>
       <UiButton variant="ghost" size="sm" @click="emit('update:open', false)">取消</UiButton>
       <UiButton variant="primary" size="sm" :disabled="disabled" @click="emit('submit')">
-        <FontAwesomeIcon :icon="mode === 'add' ? 'plus' : 'save'" aria-hidden="true" />
+        <FontAwesomeIcon :icon="mode === 'add' ? 'plus' : 'floppy-disk'" aria-hidden="true" />
         {{ submitting ? (mode === 'add' ? '提交中…' : '保存中…') : (mode === 'add' ? '添加供应商' : '保存') }}
       </UiButton>
     </template>
@@ -44,15 +44,17 @@ const props = defineProps<{
   open: boolean
   mode: 'add' | 'edit'
   submitting: boolean
-  form: SupplierFormData
 }>()
+
+// 显式双向绑定：父组件 v-model:form 传入，表单字段就地编辑
+const form = defineModel<SupplierFormData>('form', { required: true })
 
 const emit = defineEmits<{
   'update:open': [value: boolean]
   submit: []
 }>()
 
-const disabled = computed(() => (props.mode === 'add' ? !props.form.name || props.submitting : props.submitting))
+const disabled = computed(() => (props.mode === 'add' ? !form.value.name || props.submitting : props.submitting))
 </script>
 
 <style scoped>

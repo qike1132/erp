@@ -7,7 +7,7 @@
       <div class="cu-empty">
         <FontAwesomeIcon icon="building" aria-hidden="true" />
         <span>暂无客户数据</span>
-        <button class="cu-action-btn cu-action-primary" @click="emit('add')" aria-label="立即添加">立即添加</button>
+        <button class="cu-action-btn cu-action-primary" aria-label="立即添加" @click="emit('add')">立即添加</button>
       </div>
     </template>
     <template v-else>
@@ -46,9 +46,9 @@
             <td><span class="cu-text-muted">{{ formatDate(row.create_time) }}</span></td>
             <td>
               <div class="cu-actions">
-                <button class="cu-icon-btn cu-icon-edit" title="编辑" @click="emit('edit', row)" aria-label="编辑"><FontAwesomeIcon icon="pen-to-square" aria-hidden="true" /></button>
-                <button class="cu-icon-btn cu-icon-toggle" title="切换状态" @click="emit('toggle', row)" aria-label="切换状态"><FontAwesomeIcon :icon="row.status ? 'lock' : 'lock-open'" aria-hidden="true" /></button>
-                <button class="cu-icon-btn cu-icon-delete" title="删除" @click="emit('delete', row)" aria-label="删除"><FontAwesomeIcon icon="trash" aria-hidden="true" /></button>
+                <button class="cu-icon-btn cu-icon-edit" title="编辑" aria-label="编辑" @click="emit('edit', row)"><FontAwesomeIcon icon="pen-to-square" aria-hidden="true" /></button>
+                <button class="cu-icon-btn cu-icon-toggle" title="切换状态" aria-label="切换状态" @click="emit('toggle', row)"><FontAwesomeIcon :icon="row.status ? 'lock' : 'lock-open'" aria-hidden="true" /></button>
+                <button class="cu-icon-btn cu-icon-delete" title="删除" aria-label="删除" @click="emit('delete', row)"><FontAwesomeIcon icon="trash" aria-hidden="true" /></button>
               </div>
             </td>
           </tr>

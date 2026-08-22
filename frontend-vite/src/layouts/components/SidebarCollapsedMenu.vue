@@ -8,7 +8,7 @@
       @pointerenter="prefetchRoute(item.path)"
     >
       <div class="sb-nav-icon" :class="{ 'sb-nav-icon-active': isActive(item.path) }">
-        <i :class="resolveIcon(item.icon)" aria-hidden="true" />
+        <FontAwesomeIcon :icon="resolveIcon(item.icon)" aria-hidden="true" />
       </div>
     </router-link>
   </div>

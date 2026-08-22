@@ -43,12 +43,36 @@ export interface Registration {
   update_time?: string
 }
 
+/** 后端供应商聚合接口响应（snake_case，对齐 SupplierDetailResponse schema） */
+export interface SupplierDetailApiResponse {
+  supplier_groups: Array<{
+    supplier_name: string
+    items: Array<{
+      name: string
+      ordered: number
+      received: number
+      remaining: number
+      pct: number
+      sub_items: Array<{ id: number; ordered: number; received: number }>
+      unit: string
+      spec: string
+    }>
+    total_ordered: number
+    total_received: number
+    pct: number
+  }>
+  total_ordered: number
+  total_received: number
+  total_pct: number
+}
+
 export const materialApi = {
   overview: () => get<Record<string, unknown>>('/material-registrations/stats/overview'),
   trend: (days: number) => get<Record<string, unknown>>('/material-registrations/stats/trend', { days }),
   distribution: () => get<Record<string, unknown>>('/material-registrations/stats/distribution'),
   registrations: (params?: QueryParams) => get<{ registrations: Registration[]; pages?: number; total_pages?: number; total?: number }>('/material-registrations/registrations', params),
   registrationDetail: (id: number) => get<{ registration?: Registration }>(`/material-registrations/registrations/${id}`),
+  supplierDetail: (orderNo: string) => get<SupplierDetailApiResponse>('/material-registrations/supplier-detail', { order_no: orderNo }),
   history: (params?: QueryParams) => get<{ registrations: Registration[]; pages?: number; total_pages?: number; total?: number }>('/material-registrations/history', params),
   receive: (id: number, data: { received_quantity: number; remark?: string }) => post<ApiResponse & { auto_completed?: boolean }>(`/material-registrations/items/${id}/receive`, data),
   export: (params?: QueryParams, filename = '来料登记汇总.xlsx') =>

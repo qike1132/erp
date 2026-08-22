@@ -4,23 +4,23 @@
       :total="total"
       :filter-expanded="filterExpanded"
       @toggle-filter="filterExpanded = !filterExpanded"
-      @export="$emit('export')"
+      @export="onExport"
     />
 
     <CompletedOrdersSearchBar
       :filters="filters"
       :quick-filters="quickFilters"
       :current-quick-filter-id="currentQuickFilterId"
-      @update-filter="(p) => $emit('updateFilter', p)"
-      @search="$emit('search')"
-      @apply-quick-filter="(id) => $emit('applyQuickFilter', id)"
+      @update-filter="onUpdateFilter"
+      @search="onSearch"
+      @apply-quick-filter="onApplyQuickFilter"
     />
 
     <CompletedOrdersAdvancedFilter
       :filters="filters"
       :filter-expanded="filterExpanded"
-      @update-filter="(p) => $emit('updateFilter', p)"
-      @reset-filters="$emit('resetFilters')"
+      @update-filter="onUpdateFilter"
+      @reset-filters="onResetFilters"
     />
 
     <CompletedOrdersTable
@@ -30,8 +30,8 @@
       :total="total"
       :current-page="currentPage"
       :total-pages="totalPages"
-      @view-detail="(id) => $emit('viewDetail', id)"
-      @update:current-page="(p) => $emit('update:currentPage', p)"
+      @view-detail="onViewDetail"
+      @update:current-page="onUpdateCurrentPage"
     />
   </div>
 </template>
@@ -58,7 +58,7 @@ defineProps<{
 
 const filterExpanded = defineModel<boolean>('filterExpanded', { default: false })
 
-defineEmits<{
+const emit = defineEmits<{
   updateFilter: [payload: { key: string; value: string }]
   resetFilters: []
   search: []
@@ -67,6 +67,28 @@ defineEmits<{
   viewDetail: [id: number]
   'update:currentPage': [page: number]
 }>()
+
+function onUpdateFilter(payload: { key: string; value: string }) {
+  emit('updateFilter', payload)
+}
+function onApplyQuickFilter(id: string) {
+  emit('applyQuickFilter', id)
+}
+function onViewDetail(id: number) {
+  emit('viewDetail', id)
+}
+function onUpdateCurrentPage(page: number) {
+  emit('update:currentPage', page)
+}
+function onSearch() {
+  emit('search')
+}
+function onResetFilters() {
+  emit('resetFilters')
+}
+function onExport() {
+  emit('export')
+}
 </script>
 
 <style scoped>

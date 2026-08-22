@@ -2,7 +2,7 @@
   <div class="sp-container">
     <div class="page-card page-card-main">
       <div class="page-card-header">
-        <button class="sp-action-btn sp-action-btn-primary" @click="formOpen = true" aria-label="添加供应商">
+        <button class="sp-action-btn sp-action-btn-primary" aria-label="添加供应商" @click="formOpen = true">
           <FontAwesomeIcon icon="plus" aria-hidden="true" /> 添加供应商
         </button>
       </div>
@@ -33,7 +33,7 @@
       :open="formOpen"
       mode="add"
       :submitting="submitting"
-      :form="form"
+      v-model:form="form"
       @update:open="formOpen = $event"
       @submit="handleAdd"
     />
@@ -42,7 +42,7 @@
       :open="editDialogVisible"
       mode="edit"
       :submitting="editSubmitting"
-      :form="editForm"
+      v-model:form="editForm"
       @update:open="editDialogVisible = $event"
       @submit="handleEdit"
     />

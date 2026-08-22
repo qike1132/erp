@@ -35,7 +35,7 @@
             <span class="mr-td-small mr-td-muted">{{ (row as Registration).update_time || '-' }}</span>
           </template>
           <template #column-body-actions="{ row }">
-            <div class="mr-action-group"><button type="button" class="mr-action-btn mr-action-view" @click="emit('view-detail', (row as Registration).id)" title="查看详情" aria-label="查看详情"><FontAwesomeIcon icon="eye" /></button></div>
+            <div class="mr-action-group"><button type="button" class="mr-action-btn mr-action-view" title="查看详情" aria-label="查看详情" @click="emit('view-detail', (row as Registration).id)"><FontAwesomeIcon icon="eye" /></button></div>
           </template>
         </UiDataTable>
       </div>

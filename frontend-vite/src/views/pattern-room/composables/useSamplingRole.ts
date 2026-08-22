@@ -32,12 +32,17 @@ export function useSamplingRole(projectId: Ref<number | null>) {
   /** 错误信息 */
   const error = ref<string | null>(null)
 
+  /** 竞态保护：快速切换项目时忽略旧响应 */
+  let _requestId = 0
+
   /** 加载角色列表 */
   async function fetchRoles(id: number): Promise<void> {
+    const reqId = ++_requestId
     loading.value = true
     error.value = null
     try {
       const res = await patternRoomApi.listRoles(id)
+      if (reqId !== _requestId) return
       roles.value = res.items ?? []
       // 默认选中第一个角色（sort_order=0 通常是默认角色）
       if (roles.value.length > 0 && currentRoleId.value == null) {
@@ -56,13 +61,14 @@ export function useSamplingRole(projectId: Ref<number | null>) {
         currentRoleId.value = null
       }
     } catch (e) {
+      if (reqId !== _requestId) return
       console.error('[useSamplingRole] 查询角色列表失败:', e)
       const message = resolveRoleErrorMessage(e, '加载角色列表失败')
       error.value = message
       toast.error(message)
       roles.value = []
     } finally {
-      loading.value = false
+      if (reqId === _requestId) loading.value = false
     }
   }
 
@@ -124,8 +130,12 @@ export function useSamplingRole(projectId: Ref<number | null>) {
     error.value = null
     try {
       const res = await patternRoomApi.updateRole(roleId, { current_version: versionNo, version })
-      if (projectId.value != null) {
-        await fetchRoles(projectId.value)
+      // 局部 patch：仅更新对应角色的 current_version 并同步递增乐观锁 version，
+      // 避免全量 fetchRoles 闪烁，也避免下次设置最终版本时用过期 version 触发 409
+      const idx = roles.value.findIndex((r) => r.id === roleId)
+      if (idx > -1) {
+        const prev = roles.value[idx]!
+        roles.value[idx] = { ...prev, current_version: versionNo, version: prev.version + 1 }
       }
       return res
     } catch (e) {

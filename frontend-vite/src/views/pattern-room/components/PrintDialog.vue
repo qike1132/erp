@@ -31,7 +31,7 @@
               class="pd-image"
             />
             <div v-else class="pd-image-placeholder">
-              <i class="fas fa-tshirt" aria-hidden="true" />
+              <FontAwesomeIcon icon="tshirt" aria-hidden="true" />
               <span>暂无图片</span>
             </div>
           </div>

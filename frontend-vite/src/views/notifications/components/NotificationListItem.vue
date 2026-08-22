@@ -49,9 +49,9 @@
               <span class="nc-sku-text">{{ p.name }} ×{{ p.quantity }}</span>
             </template>
 
-          <span v-if="item._parsed.products.length > 1" class="nc-sku-badge">
-            {{ item._parsed.products.length }} SKU
-          </span>
+            <span v-if="item._parsed.products.length > 1" class="nc-sku-badge">
+              {{ item._parsed.products.length }} SKU
+            </span>
           </span>
 
         </div>

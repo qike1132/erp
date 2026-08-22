@@ -6,7 +6,7 @@
       </div>
 
       <ReportFilterBar
-        :filters="filters"
+        v-model:filters="filters"
         :customer-options="customerOptions"
         :searched="searched"
         @search="doSearch"

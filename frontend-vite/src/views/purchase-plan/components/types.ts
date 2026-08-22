@@ -23,8 +23,8 @@ export interface Row {
   _pendingCount: number;
   _shippedPct: number;
   customerNames: string[];
-  plans: Plan[];
-  _byCustomer: Record<string, Plan[]>;
+  plans?: Plan[];
+  _byCustomer?: Record<string, Plan[]>;
   _fullDate: string;
 }
 

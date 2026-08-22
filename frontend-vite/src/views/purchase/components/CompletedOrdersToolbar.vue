@@ -5,11 +5,11 @@
       <span v-if="total > 0" class="coq-count">{{ total }}</span>
     </div>
     <div class="coq-toolbar-right">
-      <button class="coq-btn coq-btn-ghost" @click="$emit('toggleFilter')" :aria-label="filterExpanded ? '收起' : '高级'">
+      <button class="coq-btn coq-btn-ghost" :aria-label="filterExpanded ? '收起' : '高级'" @click="$emit('toggleFilter')">
         <FontAwesomeIcon icon="sliders-h" aria-hidden="true" />
         <span>{{ filterExpanded ? '收起' : '高级' }}</span>
       </button>
-      <button class="coq-btn coq-btn-primary" @click="$emit('export')" aria-label="导出">
+      <button class="coq-btn coq-btn-primary" aria-label="导出" @click="$emit('export')">
         <FontAwesomeIcon icon="file-export" aria-hidden="true" />
         <span>导出</span>
       </button>

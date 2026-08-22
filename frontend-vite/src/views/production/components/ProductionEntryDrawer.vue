@@ -10,7 +10,7 @@
               <span class="pr-entry-sub">{{ selectedDate }} · 快捷键 <kbd>Ctrl</kbd>+<kbd>N</kbd></span>
             </div>
           </div>
-          <button class="pr-entry-close" @click="closeEntryDrawer" aria-label="关闭"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
+          <button class="pr-entry-close" aria-label="关闭" @click="closeEntryDrawer"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
         </header>
 
         <div class="pr-entry-body">
@@ -18,8 +18,8 @@
             <div class="pr-entry-group">
               <label class="pr-entry-label">生产日期</label>
               <div class="pr-entry-date-row">
-                <button type="button" :class="['pr-date-chip', { active: selectedDate === todayLocal() }]" @click="selectedDateModel = todayLocal()" aria-label="今日">今日</button>
-                <button type="button" :class="['pr-date-chip', { active: selectedDate === prevDay(todayLocal()) }]" @click="selectedDateModel = prevDay(todayLocal())" aria-label="昨日">昨日</button>
+                <button type="button" :class="['pr-date-chip', { active: selectedDate === todayLocal() }]" aria-label="今日" @click="selectedDateModel = todayLocal()">今日</button>
+                <button type="button" :class="['pr-date-chip', { active: selectedDate === prevDay(todayLocal()) }]" aria-label="昨日" @click="selectedDateModel = prevDay(todayLocal())">昨日</button>
                 <input v-model="selectedDateModel" type="date" class="pr-entry-input pr-entry-date-input" aria-label="生产日期" />
               </div>
             </div>
@@ -34,7 +34,7 @@
                   :class="['pr-entry-dept-card', `pr-entry-dept-${dept.value}`, { active: formDept === dept.value }]"
                   @click="formDept = dept.value"
                 >
-                  <span :class="['pr-entry-dept-icon', `pr-entry-dept-icon-${dept.value}`]"><i :class="dept.icon" aria-hidden="true" /></span>
+                  <span :class="['pr-entry-dept-icon', `pr-entry-dept-icon-${dept.value}`]"><FontAwesomeIcon :icon="dept.icon" aria-hidden="true" /></span>
                   <span class="pr-entry-dept-name">{{ dept.label }}</span>
                   <span class="pr-entry-dept-mark"><FontAwesomeIcon icon="circle-check" aria-hidden="true" /></span>
                 </button>
@@ -60,7 +60,7 @@
                   @keydown.enter.prevent="confirmSearchSelection"
                   @keydown.esc="showDropdown = false"
                 />
-                <button v-if="searchQuery" type="button" class="pr-entry-search-clear" @click="clearProduct" aria-label="清除">
+                <button v-if="searchQuery" type="button" class="pr-entry-search-clear" aria-label="清除" @click="clearProduct">
                   <FontAwesomeIcon icon="times" aria-hidden="true" />
                 </button>
                 <ProductSearchDropdown
@@ -102,8 +102,8 @@
                   </button>
                 </div>
                 <div class="pr-entry-qty-btns">
-                  <button type="button" class="pr-entry-qty-pill" @click="adjustQty(-1)" aria-label="减1">−1</button>
-                  <button type="button" class="pr-entry-qty-pill" @click="adjustQty(1)" aria-label="+1">+1</button>
+                  <button type="button" class="pr-entry-qty-pill" aria-label="减1" @click="adjustQty(-1)">−1</button>
+                  <button type="button" class="pr-entry-qty-pill" aria-label="+1" @click="adjustQty(1)">+1</button>
                 </div>
               </div>
               <div v-if="formErrors.quantity" class="pr-entry-error">{{ formErrors.quantity }}</div>
@@ -157,8 +157,8 @@
             <span>保存后继续录入下一条</span>
           </label>
           <div class="pr-entry-footer-btns">
-            <button type="button" class="pr-entry-btn-cancel" @click="closeEntryDrawer" aria-label="取消">取消</button>
-            <button type="button" class="pr-entry-btn-submit" :disabled="isSubmitting" @click="handleSubmit" aria-label="确认录入 Ctrl+Enter">
+            <button type="button" class="pr-entry-btn-cancel" aria-label="取消" @click="closeEntryDrawer">取消</button>
+            <button type="button" class="pr-entry-btn-submit" :disabled="isSubmitting" aria-label="确认录入 Ctrl+Enter" @click="handleSubmit">
               <UiLoadingIcon :loading="isSubmitting" icon="check" />
               <span>确认录入</span>
               <span class="pr-entry-btn-hint">Ctrl+Enter</span>

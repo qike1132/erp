@@ -2,13 +2,13 @@
   <div class="sp-toolbar">
     <div class="sp-toolbar-actions">
       <div class="sp-nav">
-        <button class="sp-nav-btn" @click="emit('prev-month')" aria-label="上一页"><FontAwesomeIcon icon="chevron-left" aria-hidden="true" /></button>
+        <button class="sp-nav-btn" aria-label="上一页" @click="emit('prev-month')"><FontAwesomeIcon icon="chevron-left" aria-hidden="true" /></button>
         <span class="sp-nav-label">{{ y }}年{{ String(m).padStart(2, '0') }}月</span>
-        <button class="sp-nav-btn" @click="emit('next-month')" aria-label="下一页"><FontAwesomeIcon icon="chevron-right" aria-hidden="true" /></button>
+        <button class="sp-nav-btn" aria-label="下一页" @click="emit('next-month')"><FontAwesomeIcon icon="chevron-right" aria-hidden="true" /></button>
       </div>
       <UiSearchInput v-model="kw" :placeholder="viewTab === 'daily' ? '搜索日期、客户...' : '搜索产品、SKU、客户...'" @clear="kw = ''" />
-      <button class="sp-action-btn" @click="emit('export')" aria-label="导出">导出</button>
-      <button class="sp-action-btn sp-action-btn-primary" @click="emit('create')" aria-label="新建"><FontAwesomeIcon icon="plus" aria-hidden="true" />新建</button>
+      <button class="sp-action-btn" aria-label="导出" @click="emit('export')">导出</button>
+      <button class="sp-action-btn sp-action-btn-primary" aria-label="新建" @click="emit('create')"><FontAwesomeIcon icon="plus" aria-hidden="true" />新建</button>
     </div>
     <div v-if="hasSummary" class="sp-toolbar-stats-wrapper">
       <div class="sp-toolbar-stats">

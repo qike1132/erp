@@ -2,7 +2,7 @@
   <div class="so-records-header">
     <span class="so-records-title"><FontAwesomeIcon icon="list-alt" aria-hidden="true" /> 出货记录列表</span>
     <UiButton variant="outline" size="sm" @click="showFilter = !showFilter">
-      <FontAwesomeIcon icon="filter" style="margin-right: 4px"  aria-hidden="true" />筛选
+      <FontAwesomeIcon icon="filter" style="margin-right: 4px" aria-hidden="true" />筛选
     </UiButton>
   </div>
 
@@ -22,10 +22,10 @@
       </div>
       <div class="so-filter-field so-filter-action">
         <UiButton variant="primary" size="sm" @click="fetchStockouts">
-          <FontAwesomeIcon icon="search" style="margin-right: 4px"  aria-hidden="true" />查询
+          <FontAwesomeIcon icon="search" style="margin-right: 4px" aria-hidden="true" />查询
         </UiButton>
         <UiButton variant="outline" size="sm" @click="resetFilter">
-          <FontAwesomeIcon icon="undo" style="margin-right: 4px"  aria-hidden="true" />重置
+          <FontAwesomeIcon icon="undo" style="margin-right: 4px" aria-hidden="true" />重置
         </UiButton>
       </div>
     </div>
@@ -66,7 +66,7 @@
       </template>
       <template #column-body-actions="{ row }">
         <div class="so-action-group">
-          <button class="so-btn-icon so-btn-info" @click="openDetail(row)" aria-label="详情">
+          <button class="so-btn-icon so-btn-info" aria-label="详情" @click="openDetail(row)">
             <FontAwesomeIcon icon="eye" aria-hidden="true" />
           </button>
         </div>

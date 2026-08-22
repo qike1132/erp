@@ -14,7 +14,7 @@
         <span v-if="restoreResult.results?.config?.restored?.length" class="bk-result-cfg-status">配置: {{ restoreResult.results?.config?.restored?.length }} 个文件</span>
       </div>
       <div v-if="(restoreResult.database || restoreResult.results?.database)?.errors" class="bk-result-errors" style="color: var(--color-danger-500);">
-        <div class="bk-result-err-item" v-for="e in normalizeErrors((restoreResult.database || restoreResult.results?.database)?.errors)" :key="e">{{ e }}</div>
+        <div v-for="e in normalizeErrors((restoreResult.database || restoreResult.results?.database)?.errors)" :key="e" class="bk-result-err-item">{{ e }}</div>
       </div>
       <div v-if="(restoreResult.database || restoreResult.results?.database)?.error" class="bk-result-errors">
         <div class="bk-result-err-item">{{ (restoreResult.database || restoreResult.results?.database)?.error }}</div>

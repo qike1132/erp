@@ -21,7 +21,7 @@ const PRINT_STYLE = `
  * @param style 自定义 CSS（默认使用项目打印样式）
  */
 export function printHtml(title: string, bodyHtml: string, style: string = PRINT_STYLE) {
-  if (!!import.meta.env.VITE_CAPACITOR) return
+  if (import.meta.env.VITE_CAPACITOR) return
   const iframe = document.createElement('iframe')
   iframe.style.position = 'fixed'
   iframe.style.right = '0'
