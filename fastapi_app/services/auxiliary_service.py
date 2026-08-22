@@ -10,7 +10,7 @@ import logging
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
@@ -22,7 +22,6 @@ from fastapi_app.core.domain_events import DomainEvent, DomainEventType
 from fastapi_app.core.domain_events import publish as publish_domain_event
 from fastapi_app.core.exception_handler import safe_publish_event
 from fastapi_app.core.exceptions import db_transaction
-from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.services.notification_service import StockEvent, publish_stock_event
 from fastapi_app.shared_models import (
     InventoryLog,
@@ -152,15 +151,7 @@ async def orchestrate_batch_stockouts(db: AsyncSession, stockouts_data: list[dic
 
 
 # ==================== 查询函数（自 auxiliary.py 端点下沉，纯查询搬移） ====================
-
-async def search_products_by_keyword(db: AsyncSession, query_str: str) -> list[Product]:
-    """产品搜索（支持名称、条码，限制 50 条）"""
-    result = await db.execute(
-        select(Product).where(
-            or_(Product.name.like(f'%{escape_like(query_str)}%'), Product.barcode.like(f'%{escape_like(query_str)}%'))  # sql-safe: escape_like/绑定参数/常量片段
-        ).limit(50)
-    )
-    return list(result.scalars().all())
+# 产品搜索已统一委托 core.container 的 ProductSearchService（2026-08-22 批次 2-4）
 
 
 async def get_product_by_id(db: AsyncSession, product_id: int) -> Product | None:

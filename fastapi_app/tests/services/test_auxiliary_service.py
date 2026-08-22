@@ -1,13 +1,15 @@
 """auxiliary_service.py - 单元测试
 
 覆盖 P1-3 从 auxiliary.py endpoint 下沉的系统配置 CRUD 与编排逻辑：
-- search_products_by_keyword / get_product_by_id
+- get_product_by_id
 - count_inventory_logs / get_inventory_logs_page
 - get_available_stockins / get_stockin_by_id
 - get_supplier_by_id / supplier_has_bom_or_orders / delete_supplier
 - list_countries_ordered / get_country_by_name / get_country_by_id
 - create_country / delete_country
 - get_system_stats
+
+注：产品搜索已统一委托 ProductSearchService（批次 2-4），相关测试见其自身用例。
 """
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -15,36 +17,6 @@ import pytest
 from fastapi import HTTPException
 
 from fastapi_app.services import auxiliary_service
-
-
-# ============================================================================
-# search_products_by_keyword
-# ============================================================================
-class TestSearchProductsByKeyword:
-    @pytest.mark.asyncio
-    async def test_returns_matching_products(self):
-        """应返回按关键词匹配的产品列表"""
-        p1 = MagicMock()
-        p2 = MagicMock()
-        result_mock = MagicMock()
-        result_mock.scalars.return_value.all.return_value = [p1, p2]
-        db = AsyncMock()
-        db.execute = AsyncMock(return_value=result_mock)
-
-        products = await auxiliary_service.search_products_by_keyword(db, "测试")
-        assert products == [p1, p2]
-        assert db.execute.await_count == 1
-
-    @pytest.mark.asyncio
-    async def test_no_matches_returns_empty_list(self):
-        """无匹配时应返回空列表"""
-        result_mock = MagicMock()
-        result_mock.scalars.return_value.all.return_value = []
-        db = AsyncMock()
-        db.execute = AsyncMock(return_value=result_mock)
-
-        products = await auxiliary_service.search_products_by_keyword(db, "不存在的产品")
-        assert products == []
 
 
 # ============================================================================

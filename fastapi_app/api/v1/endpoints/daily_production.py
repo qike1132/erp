@@ -241,9 +241,12 @@ async def export_records(
         )
         return Response(
             content=content,
-            media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.xlsx',
             headers={'Content-Disposition': 'attachment; filename=production_report.xlsx'},
         )
+    except ValueError as e:
+        # 服务层行数上界保护：超限时引导用户缩小筛选范围（批次 2）
+        raise HTTPException(status_code=413, detail=str(e)) from e
     except (OperationalError, DisconnectionError) as e:
         raise HTTPException(status_code=500, detail=f'导出失败: {settings.sanitize_error(e)}') from e
 

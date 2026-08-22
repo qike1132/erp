@@ -430,6 +430,10 @@ async def export_records(
     if conditions:
         query = query.where(*conditions)
 
+    # 行数上界保护（批次 2）：超限抛 ValueError，端点转 413 引导缩小范围
+    from fastapi_app.services.export_limits import ensure_within_export_limit
+    await ensure_within_export_limit(db, select(func.count()).select_from(query.subquery()))
+
     result = await db.execute(query)
     records = list(result.scalars().all())
     price_fallback = await _build_product_price_fallback(db, records)

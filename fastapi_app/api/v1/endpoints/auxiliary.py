@@ -16,7 +16,6 @@ from fastapi_app.services.auxiliary_service import (
     get_product_by_id,
     get_stockin_by_id,
     list_countries_ordered,
-    search_products_by_keyword,
 )
 from fastapi_app.shared_models import User
 
@@ -179,18 +178,12 @@ async def product_search(
     user: User = Depends(require_permission("product_view")),
     db: AsyncSession = Depends(get_async_read_db),
 ):
-    """产品搜索（支持名称、条码）"""
+    """产品搜索（支持名称、条码）——统一委托 ProductSearchService（与产品清单共用实现与缓存）"""
     if not q.strip():
         return []
-
-    query_str = q.strip()
-    products = await search_products_by_keyword(db, query_str)
-
-    return [{
-        'id': p.id, 'name': p.name, 'barcode': p.barcode,
-        'price': float(p.price) if p.price else 0,
-        'current_stock': p.current_stock,
-    } for p in products]
+    from fastapi_app.core.container import get_product_search_service
+    svc = get_product_search_service()
+    return await svc.search_async_with_cache(db, q.strip(), limit=50)
 
 
 @router.get("/product-available-stock", response_model=ProductAvailableStockResponse)
