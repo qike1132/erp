@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from fastapi_app.core.database import get_sync_engine
 from fastapi_app.core.logger import logger
 from fastapi_app.shared_models import Product
+from fastapi_app.shared_models.order import ORDER_STATUS_PENDING_STOCK
 
 _SyncSession = sessionmaker(
     autocommit=False, autoflush=False, bind=get_sync_engine()
@@ -92,7 +93,7 @@ async def batch_import_orders_task(ctx, file_path: str, original_filename: str, 
                         if not product:
                             errors.append({'row': i, 'error': f"产品 '{product_identifier}' 不存在"})
                             continue
-                        order = Order(order_no=generate_order_number_sync(session), product_id=product.id, customer=customer, quantity=int(quantity), order_date=datetime.now(), status='待备货', note=row.get('备注', ''))
+                        order = Order(order_no=generate_order_number_sync(session), product_id=product.id, customer=customer, quantity=int(quantity), order_date=datetime.now(), status=ORDER_STATUS_PENDING_STOCK, note=row.get('备注', ''))
                         session.add(order)
                         session.flush()
                         log = InventoryLog(product_id=product.id, change_type='订单创建', change_quantity=int(quantity), change_date=datetime.now(), customer=customer, related_id=str(order.id), note=f'批量导入订单 {order.order_no}')

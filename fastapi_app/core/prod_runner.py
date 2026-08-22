@@ -11,6 +11,9 @@ ERP 生产模式监督器 (Windows 原生)。
      对后端按 /api/health 做健康判定，主进程存活但 worker 崩溃循环时强制重启整棵进程树
   6. 状态落盘 logs/prod_runner.json，供 server_manager GUI 展示
   7. 子进程 stdout/stderr 落盘 logs/<name>.out.log，便于排障
+  8. 日志轮转：子进程 .out.log 与 Nginx access/error 日志超过阈值
+     （默认 50MB，PROD_LOG_ROTATE_MB 可调）时 copytruncate 轮转，保留一代 .1 副本，
+     防止长期运行后磁盘被日志占满
 
 用法:
   python -m fastapi_app.core.prod_runner --check       # 环境自检（不拉起进程）
@@ -49,6 +52,15 @@ _NGINX_CANDIDATES = [
 
 _PY = sys.executable
 _CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+
+# 日志轮转：检查间隔与阈值。NSSM 只轮转监督器自身的 stdout（logs/erp-*.log），
+# 子进程 .out.log 与 Nginx access/error 日志由本模块负责轮转。
+LOG_ROTATE_CHECK_INTERVAL = 60.0
+
+
+def _log_rotate_bytes() -> int:
+    """轮转阈值（字节），默认 50MB，PROD_LOG_ROTATE_MB 覆盖，下限 5MB。"""
+    return max(5, _get_int_env("PROD_LOG_ROTATE_MB", 50)) * 1024 * 1024
 
 
 def _load_dotenv() -> None:
@@ -104,9 +116,34 @@ def _iso_now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+def _rotate_file_copytruncate(path: Path, max_bytes: int) -> bool:
+    """日志超阈值时 copytruncate 轮转，保留一代 .1 副本，返回是否执行了轮转。
+
+    Windows 下日志文件被子进程（或 nginx）以共享读写 + 追加方式长期占用，
+    无法 rename，只能先复制再原地截断；截断瞬间与追加写之间的少量行丢失
+    对运维日志可接受。追加语义保证持有方后续写入落在新的文件尾。
+    """
+    try:
+        if not path.is_file() or path.stat().st_size < max_bytes:
+            return False
+        rotated = path.with_name(path.name + ".1")
+        with open(path, "rb") as src, open(rotated, "wb") as dst:
+            shutil.copyfileobj(src, dst, length=1024 * 1024)
+        with open(path, "r+b") as f:
+            f.truncate(0)
+        print(f"[prod_runner] 日志 {path.name} 超过 {max_bytes // (1024 * 1024)}MB，已轮转到 {rotated.name}")
+        return True
+    except OSError as e:
+        print(f"[prod_runner] 日志 {path.name} 轮转失败（下一轮重试）: {e}")
+        return False
+
+
 def _cmd_uvicorn(api_port: int, workers: int) -> list[str]:
     return [
         _PY, "-m", "uvicorn", "fastapi_app.main:app",
+        # 绑定 IPv4（回环/局域网/nginx 反代可达）。避免使用 "--host ::"：
+        # Windows 下会生成 IPv6-only socket，HTTP 探针与 nginx 反代的
+        # IPv4 127.0.0.1:5002 无法连接，导致 502 且健康门永不就绪。
         "--host", "0.0.0.0",  # nosec B104
         "--port", str(api_port),
         "--workers", str(workers),
@@ -277,6 +314,10 @@ class _Managed:
         if self.status == "crashed" and self.next_start <= time.monotonic():
             self.start()
 
+    def rotate_log_if_needed(self, max_bytes: int) -> None:
+        """子进程 stdout 日志轮转（服务停止期间同样清理历史大文件）。"""
+        _rotate_file_copytruncate(LOGS_DIR / f"{self.name}.out.log", max_bytes)
+
 
 class _FrontendNginx:
     """Nginx 前端托管：nginx 为独立守护进程，按端口存活情况重启。"""
@@ -352,6 +393,15 @@ class _FrontendNginx:
     def stop(self) -> None:
         self._kill_all()
 
+    def rotate_logs_if_needed(self, max_bytes: int) -> None:
+        """Nginx access/error 日志轮转。
+
+        nginx 以共享读写 + 原子追加方式持有日志句柄，外部截断后其后续
+        写入仍落在新的文件尾，无需发送 -s reopen 信号。
+        """
+        for name in ("nginx-access.log", "nginx-error.log"):
+            _rotate_file_copytruncate(LOGS_DIR / name, max_bytes)
+
 
 class Supervisor:
     def __init__(self, workers: int, api_port: int, web_port: int, with_arq: bool = True):
@@ -361,6 +411,7 @@ class Supervisor:
         self.with_arq = with_arq
         self.redis_port = _get_int_env("REDIS_PORT", 6379)
         self.ready = False
+        self._last_log_check = 0.0
 
         self.backend = _Managed(
             "后端(uvicorn)", _cmd_uvicorn(api_port, workers), PROJECT_ROOT,
@@ -456,10 +507,24 @@ class Supervisor:
                     self.nginx.maybe_restart()
                 if not self.ready and self.backend.status == "ready":
                     print("[prod_runner] 后端就绪 (/api/health 200)")
+                self._rotate_logs_if_due()
                 self.write_status()
             except Exception as e:  # defensive: supervisor main loop must not exit
                 print(f"[prod_runner] 主循环异常（已吞掉，不退出）: {type(e).__name__}: {e}")
             time.sleep(3)
+
+    # -- 日志轮转 -----------------------------------------------------------
+    def _rotate_logs_if_due(self) -> None:
+        """按 LOG_ROTATE_CHECK_INTERVAL 节流，检查并轮转子进程与 Nginx 日志。"""
+        if time.monotonic() - self._last_log_check < LOG_ROTATE_CHECK_INTERVAL:
+            return
+        self._last_log_check = time.monotonic()
+        max_bytes = _log_rotate_bytes()
+        for svc in (self.backend, self.arq, self.vite):
+            if svc:
+                svc.rotate_log_if_needed(max_bytes)
+        if self.nginx:
+            self.nginx.rotate_logs_if_needed(max_bytes)
 
     # -- 优雅关闭 -----------------------------------------------------------
     def shutdown(self) -> None:

@@ -40,7 +40,9 @@ polars==1.35.2
 Pillow>=10.4.0
 
 # ----- 缓存 -----
-redis[hiredis]==7.4.1
+# redis 5.3.1：与 arq 0.28 的 redis<6 元数据约束完全一致（pip 解析无冲突）
+# hiredis 加速器保持（hiredis 3.x 与 redis-py 5.x 兼容）
+redis[hiredis]==5.3.1
 
 # ----- 监控 -----
 prometheus-client==0.21.0
@@ -57,9 +59,7 @@ opentelemetry-exporter-otlp-proto-grpc==1.30.0
 
 # ----- 异步任务 -----
 # ARQ：原生 async 任务队列，与 FastAPI async 架构一致（替代 Celery）
-# 注意：arq 0.26.0 元数据要求 redis<5，但实测与 redis 7.4.1 导入/运行兼容；
-# 若需严格的 pip 解析一致性，可升级至 arq>=0.28（支持 redis 5+）或下调 redis 至 4.x。
-arq==0.26.0
+arq==0.28.0
 
 # ----- 错误追踪 -----
 sentry-sdk[fastapi]==2.29.1
@@ -83,6 +83,6 @@ boto3==1.36.0
 # python-dateutil==2.9.0 — 代码中未 import
 # rapidfuzz==3.12.1 — 代码中未 import（如需模糊搜索可按需安装）
 # starlette-csrf==3.0.0 — 代码中未 import（已有自定义 CSRF 中间件）
-# flower==2.0.0     — 移至 requirements/dev.txt（非 Web 服务依赖）
+# flower==2.0.0     — 已废弃（ARQ 无对应 UI，任务监控改用日志/指标）
 # pystray==0.19.0   — 移至 requirements/desktop.txt（仅 server_manager.exe 使用）
 # Pillow>=10.4.0    — 已移至上方"数据处理"段，缩略图生成亦使用

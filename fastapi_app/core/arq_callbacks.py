@@ -35,7 +35,7 @@ async def on_job_end(ctx):
     try:
         from fastapi_app.core.metrics import TASK_RUNTIME_SECONDS
         TASK_RUNTIME_SECONDS.labels(task=func_name).observe(runtime)
-    except Exception:
+    except Exception:  # noqa: S110 - defensive: metrics 未启用/初始化失败时任务指标静默降级，不影响任务执行
         pass
 
     if runtime > 60:
@@ -96,7 +96,7 @@ def _emit_failure_metric(task_name: str):
     try:
         from fastapi_app.core.metrics import TASK_FAILURE_TOTAL
         TASK_FAILURE_TOTAL.labels(task=task_name).inc()
-    except Exception:
+    except Exception:  # noqa: S110 - defensive: 失败指标上报静默降级，不影响告警主链路
         pass
 
 

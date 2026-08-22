@@ -7,6 +7,8 @@ PGDATA="${PGDATA:-/var/lib/postgresql/data}"
 PRIMARY_HOST="postgres"
 PRIMARY_PORT="5432"
 REPL_USER="erp_replicator"
+# 凭据一律来自环境变量注入，未设置时快速失败，避免空密码静默发起 basebackup
+: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be provided via environment}"
 REPL_PASSWORD="${POSTGRES_PASSWORD}"
 REPL_SLOT="erp_replica_slot"
 

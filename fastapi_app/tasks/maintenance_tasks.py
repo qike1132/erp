@@ -17,48 +17,52 @@ logger = logging.getLogger(__name__)
 async def _refresh_single_mv(db, mv_name: str) -> None:
     """刷新单个物化视图（CONCURRENTLY 不阻塞读）。
 
-    独立 session 中执行，3 个 MV 之间无表关联，可安全并行 asyncio.gather。
-    CONCURRENTLY 要求 MV 有唯一索引（已在 migration pg_standalone_016 中创建）。
+    独立 session 中执行，各 MV 之间无表关联，可安全并行 asyncio.gather。
+    CONCURRENTLY 要求 MV 有唯一索引（已在对应 migration 中创建）。
+    视图不存在时（迁移未执行）记录警告并跳过，不影响其他视图。
     """
+    exists = (await db.execute(
+        text("SELECT to_regclass(:name)"), {"name": mv_name}
+    )).scalar()
+    if exists is None:
+        logger.warning("物化视图 %s 不存在，跳过刷新（请确认迁移 pg_standalone_017 已执行）", mv_name)
+        return
     await db.execute(text(f"REFRESH MATERIALIZED VIEW CONCURRENTLY {mv_name}"))  # nosec B608: 常量字符串
     await db.commit()
 
 
-async def _refresh_dashboard_materialized_views() -> None:
-    """刷新仪表盘每日统计物化视图（3 个 MV 并行刷新，CONCURRENTLY 不阻塞读）。
+# 全部物化视图（含日统计 + 产品聚合）
+_DASHBOARD_MV_NAMES = [
+    "mv_daily_order_quantity",
+    "mv_daily_stockin_quantity",
+    "mv_daily_stockout_quantity",
+]
+_PRODUCT_MV_NAMES = [
+    "mv_product_aggregate",
+]
 
-    优化：原串行刷新 3 个 MV（单 session 顺序执行），改为 3 个独立 session 并行
-    asyncio.gather。3 个 MV 基于不同基表（order/stock_in/stock_out），CONCURRENTLY
-    刷新不互斥，可安全并行。刷新总耗时从 3×T 降至 max(T)。
+
+async def _refresh_materialized_views(mv_names: list[str], label: str) -> None:
+    """并行刷新一组物化视图（CONCURRENTLY 不阻塞读）。
+
+    mv_names 内各 MV 基于不同基表或不同聚合维度，CONCURRENTLY 刷新互不
+    冲突（产品聚合 MV 与日统计 MV 无共享写锁），可安全并行。
+    每个 MV 使用独立 session（get_async_db_context），通过 asyncio.gather 并行。
     """
-    mv_names = [
-        "mv_daily_order_quantity",
-        "mv_daily_stockin_quantity",
-        "mv_daily_stockout_quantity",
-    ]
-    try:
-        # 每个MV使用独立session，并行刷新
-        async with (
-            get_async_db_context() as db1,
-            get_async_db_context() as db2,
-            get_async_db_context() as db3,
-        ):
-            await asyncio.gather(
-                _refresh_single_mv(db1, mv_names[0]),
-                _refresh_single_mv(db2, mv_names[1]),
-                _refresh_single_mv(db3, mv_names[2]),
-            )
-        logger.info("仪表盘物化视图刷新完成（3 个并行）")
-    except Exception:  # broad-except: 定时任务容错，异常不传播以避免调度器崩溃
-        logger.exception("仪表盘物化视图刷新失败")
-        raise
+    async def _refresh_one(mv_name: str) -> None:
+        async with get_async_db_context() as db:
+            await _refresh_single_mv(db, mv_name)
+
+    await asyncio.gather(*(_refresh_one(name) for name in mv_names))
+    logger.info("%s物化视图刷新完成（%d 个并行）", label, len(mv_names))
 
 
 async def refresh_dashboard_mv_task(ctx) -> dict:
-    """ARQ 任务入口：刷新仪表盘物化视图。"""
+    """ARQ 任务入口：刷新全部物化视图（日统计 + 产品聚合）。"""
     try:
-        await _refresh_dashboard_materialized_views()
-        return {"success": True, "message": "仪表盘物化视图刷新完成"}
+        await _refresh_materialized_views(_DASHBOARD_MV_NAMES, "仪表盘")
+        await _refresh_materialized_views(_PRODUCT_MV_NAMES, "产品聚合")
+        return {"success": True, "message": "物化视图刷新完成"}
     except Exception as exc:  # broad-except: 定时任务容错，异常不传播以避免调度器崩溃
         logger.exception("refresh_dashboard_mv_task 失败")
         raise exc

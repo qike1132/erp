@@ -136,6 +136,9 @@ jobs:
     - name: Run scoped mypy gate
       run: python -m mypy --config-file mypy.ini
 
+    - name: Run file size gate (block new god-classes)
+      run: python scripts/file_size_gate.py --threshold 1200
+
   frontend:
     runs-on: ubuntu-latest
 
