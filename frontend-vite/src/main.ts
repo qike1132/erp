@@ -49,100 +49,8 @@ if (import.meta.env.DEV) {
 let sentryErrorCount = 0
 const MAX_SENTRY_REPORTS = 10
 
-/**
- * 检测"陈旧缓存导致的动态 chunk 加载失败"。
- *
- * 根因：PWA Service Worker 的 precache 缓存了旧的 index.html 与旧 chunk。
- * 每次构建 JS 文件 hash 名变化后，已运行的旧页面仍引用已被清理的旧 chunk，
- * SPA 导航到懒加载页面时触发 Failed to fetch dynamically imported module。
- * 此时页面本身无 bug，只是缓存陈旧——应自动自愈而非让用户看到"渲染异常"死胡同。
- */
-const CHUNK_ERROR_PATTERNS = [
-  /Failed to fetch dynamically imported module/i,
-  /Unable to preload CSS/i,
-  /Error loading dynamically imported module/i,
-  /Importing a module script failed/i,
-  /Loading chunk/i,
-  /ChunkLoadError/i,
-  /Loading .* chunk .* failed/i,
-]
-
-function isChunkLoadError(value: unknown): boolean {
-  if (value instanceof Error) {
-    return CHUNK_ERROR_PATTERNS.some((re) => re.test(value.message))
-  }
-  if (typeof value === 'string') {
-    return CHUNK_ERROR_PATTERNS.some((re) => re.test(value))
-  }
-  return false
-}
-
-let _chunkRecoveryTimer: ReturnType<typeof setTimeout> | null = null
-
-// 自愈收敛计数：单次 reload 仍可能被仍然控制的陈旧 SW 再次喂回旧 shell，
-// 因此在时间窗内允许多次自愈，直到装上新版本；超过上限即停止，避免死循环。
-// 与 router/index.ts 的路由级 chunk 重试逻辑保持一致。
-const RECOVER_KEY = '__app_recover_count'
-const RECOVER_TS_KEY = '__app_recover_ts'
-const MAX_RECOVER = 3
-// 计数有效期：超时后重置，避免服务端恢复后用户因历史计数被永久卡死
-const RECOVER_WINDOW_MS = 60_000
-
-function shouldRecover(): boolean {
-  const lastTs = Number(sessionStorage.getItem(RECOVER_TS_KEY) || 0)
-  let count = Number(sessionStorage.getItem(RECOVER_KEY) || 0)
-  if (!lastTs || Date.now() - lastTs > RECOVER_WINDOW_MS) count = 0
-  count += 1
-  sessionStorage.setItem(RECOVER_KEY, String(count))
-  sessionStorage.setItem(RECOVER_TS_KEY, String(Date.now()))
-  return count <= MAX_RECOVER
-}
-
-/** 陈旧缓存自愈：注销旧 SW + 清缓存 + 强制重载，多次重载直到装上新版本 */
-async function recoverFromStaleCache(): Promise<boolean> {
-  if (!shouldRecover()) return false
-  try {
-    if ('serviceWorker' in navigator) {
-      const regs = await navigator.serviceWorker.getRegistrations()
-      await Promise.all(regs.map((reg) => reg.unregister()))
-    }
-    if (typeof caches !== 'undefined') {
-      const keys = await caches.keys()
-      await Promise.all(keys.map((key) => caches.delete(key)))
-    }
-  } catch (e) {
-    console.warn('[App] 陈旧缓存清理失败，直接重载', e)
-  }
-  location.reload()
-  return true
-}
-
-/** 触发自愈（防抖，避免导航时连续触发多次 reload） */
-function triggerChunkRecovery() {
-  if (_chunkRecoveryTimer) return
-  _chunkRecoveryTimer = setTimeout(() => {
-    _chunkRecoveryTimer = null
-    void recoverFromStaleCache()
-  }, 300)
-}
-
-// 非 chunk 渲染错误的一次性自愈标记：仅在首次错误时空上触发一次，
-// 避免掩盖持续存在的真实 bug（真实 bug 会在 reload 后复现并被计数上限拦截）。
-let _genericSelfHealOnce = false
-
 app.config.errorHandler = (err, _instance, info) => {
-  if (isChunkLoadError(err)) {
-    console.error('[Vue Error] 动态模块加载失败(疑似陈旧SW缓存)，正在自动自愈', info, err)
-    triggerChunkRecovery()
-    return
-  }
   console.error('[Vue Error]', info, err)
-  // 非 chunk 的渲染错误：若属于“首次进入某页面才报错、手动刷新即恢复”的场景
-  // （常由 SW 陈旧缓存/被清理的旧 chunk 间接引起），也自动自愈一次，免去手动刷新。
-  if (!_genericSelfHealOnce) {
-    _genericSelfHealOnce = true
-    void recoverFromStaleCache()
-  }
   if (sentryErrorCount < MAX_SENTRY_REPORTS) {
     sentryErrorCount++
     try {
@@ -162,9 +70,6 @@ app.config.errorHandler = (err, _instance, info) => {
 
 window.addEventListener('unhandledrejection', (event) => {
   console.error('[Unhandled Rejection]', event.reason)
-  if (isChunkLoadError(event.reason)) {
-    triggerChunkRecovery()
-  }
 })
 
 app.use(createPinia())

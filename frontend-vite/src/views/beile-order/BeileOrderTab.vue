@@ -20,7 +20,14 @@
           <div class="bo-toolbar-left">
             <span v-if="canPrint && selectedCount > 0" class="bo-selected-count">已选 {{ selectedCount }} 条</span>
           </div>
-          <div class="bo-toolbar-right" />
+          <div class="bo-toolbar-right">
+            <button v-if="canExport" type="button" class="bo-toolbar-btn bo-toolbar-btn--export" :disabled="exporting || displayOrders.length === 0" @click="handleExport">
+              <FontAwesomeIcon icon="file-csv" aria-hidden="true" /> 导出
+            </button>
+            <button v-if="canPrint" type="button" class="bo-toolbar-btn bo-toolbar-btn--print" :disabled="selectedCount === 0" @click="handlePrint">
+              <FontAwesomeIcon icon="print" aria-hidden="true" /> 打印
+            </button>
+          </div>
         </div>
         <div class="bo-table-wrap">
           <!-- 表头（独立于虚拟滚动，粘在顶部） -->
@@ -141,7 +148,11 @@ const {
   isAllSelected,
   toggleSelect,
   toggleSelectAll,
+  canExport,
   canPrint,
+  exporting,
+  handleExport,
+  handlePrint,
 } = injectBeileOrders()
 
 

@@ -39,13 +39,13 @@
           @load="thumbLoaded = true"
         />
         <span v-if="proj.status === 'completed'" class="cgl-card-status-badge">
-          <FontAwesomeIcon icon="check-circle" aria-hidden="true" /> 已完成
+          <i class="fas fa-check-circle" aria-hidden="true" /> 已完成
         </span>
       </div>
       <div v-else class="cgl-card-thumb cgl-card-thumb-placeholder">
-        <FontAwesomeIcon icon="tshirt" aria-hidden="true" />
+        <i class="fas fa-tshirt" aria-hidden="true" />
         <span v-if="proj.status === 'completed'" class="cgl-card-status-badge">
-          <FontAwesomeIcon icon="check-circle" aria-hidden="true" /> 已完成
+          <i class="fas fa-check-circle" aria-hidden="true" /> 已完成
         </span>
       </div>
     </div>
@@ -75,7 +75,7 @@
           title="编辑该打样项目"
           @click.stop="emit('edit', proj.id)"
         >
-          <FontAwesomeIcon icon="pen" aria-hidden="true" /> 编辑
+          <i class="fas fa-pen" aria-hidden="true" /> 编辑
         </button>
         <button
           v-if="proj.status === 'in_progress'"
@@ -84,7 +84,7 @@
           title="标记为已完成"
           @click.stop="emit('complete', proj.id)"
         >
-          <FontAwesomeIcon icon="check" aria-hidden="true" /> 完成
+          <i class="fas fa-check" aria-hidden="true" /> 完成
         </button>
         <button
           v-if="proj.status === 'in_progress'"
@@ -93,7 +93,7 @@
           title="取消该打样项目"
           @click.stop="emit('cancel', proj.id)"
         >
-          <FontAwesomeIcon icon="times" aria-hidden="true" /> 取消
+          <i class="fas fa-times" aria-hidden="true" /> 取消
         </button>
       </div>
     </div>

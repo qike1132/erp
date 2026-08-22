@@ -22,7 +22,7 @@
           {{ groupHook.error.value }}
         </UiAlert>
 
-        <PatternRoomSplitBody v-model:drawer-open="drawerOpen" :is-narrow="isNarrow">
+        <PatternRoomSplitBody :is-narrow="isNarrow" v-model:drawer-open="drawerOpen">
           <template #group-list>
             <CustomerGroupList
               :groups="groupHook.groups.value"
@@ -55,14 +55,10 @@
               :can-print="canPrint"
               :roles="roleHook.roles.value"
               :current-role-id="roleHook.currentRoleId.value"
-              :editing-part-id="editingPartId"
-              :edit-form="editForm"
               @set-final-version="onSetFinalVersion"
               @copy-version="onCopyPartVersion"
               @delete-version="onDeleteVersion"
-              @start-edit="startEdit"
-              @cancel-edit="cancelEdit"
-              @save-edit="saveEdit"
+              @save-edit="onSaveEdit"
               @select-role="onSelectRole"
               @add-role="onAddRole"
               @remove-role="onRemoveRole"
@@ -131,6 +127,9 @@
  * 二次进入不再重复发起 grouped-list / pattern-makers 等请求，消除「加载中...」闪烁。
  */
 defineOptions({ name: 'PatternRoomView' })
+
+// 本页使用 <i class="fas fa-xxx"> CSS 图标，按需加载 Font Awesome 全量 CSS（仅此页 chunk 承载）
+import '@fortawesome/fontawesome-free/css/all.min.css'
 
 import { ref, computed, watch, onMounted, onActivated } from 'vue'
 import UiAlert from '@/components/ui/UiAlert.vue'
@@ -256,16 +255,12 @@ const {
   onPartSubmitBatch,
   onSetFinalVersion,
   onCopyPartVersion,
+  onSaveEdit,
   onDeleteVersion,
   onVersionCreateConfirm,
   onSelectRole,
   onAddRole,
   onRemoveRole,
-  editingPartId,
-  editForm,
-  startEdit,
-  cancelEdit,
-  saveEdit,
 } = usePatternRoomPartActions({
   canManage,
   confirmDialog,

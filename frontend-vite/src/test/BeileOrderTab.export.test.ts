@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   queryData: null as unknown as ReturnType<typeof ref<unknown>>,
   downloadCsvMock: vi.fn(),
   printHtmlMock: vi.fn(),
+
   downloadXlsMock: vi.fn(),
   hasPermissionMock: vi.fn((_code: string) => true),
 }))
@@ -68,11 +69,12 @@ vi.mock('@/utils/xls', () => ({
 
 vi.mock('@/utils/print', () => ({
   printHtml: mocks.printHtmlMock,
+
 }))
 
 import { mount, flushPromises } from '@vue/test-utils'
-import { createPinia } from 'pinia'
-import HubeiView from '@/views/hubei/HubeiView.vue'
+import BeileOrderTab from '@/views/beile-order/BeileOrderTab.vue'
+import { provideBeileOrders } from '@/views/beile-order/composables/useBeileOrders'
 import type { OrderListApiResponse } from '@/api/order'
 
 Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
@@ -86,11 +88,6 @@ const stubs = {
   UiSpinner: { template: '<span class="ui-spinner-stub" />' },
   UiPagination: { template: '<div class="ui-pagination-stub" />' },
   UiButton: { template: '<button type="button"><slot /></button>' },
-  UiCheckbox: {
-    props: ['checked'],
-    emits: ['update:checked'],
-    template: '<input type="checkbox" :checked="checked" @change="$emit(\'update:checked\', $event.target.checked)" />',
-  },
   UiDialog: {
     props: ['open', 'title', 'maxWidthClass'],
     template: '<div v-if="open" class="ui-dialog-stub"><slot /><slot name="footer" /></div>',
@@ -102,10 +99,6 @@ const stubs = {
     },
     template: '<div class="vl-stub"><div v-for="item in items" :key="item.id" class="vl-row"><slot :item="item" /></div></div>',
   },
-  FontAwesomeIcon: { template: '<span class="fa-stub" />' },
-  // HubeiSearchBar 内部含 PrimeVue AutoComplete，jsdom 渲染失败，整体 stub 掉
-  HubeiSearchBar: { template: '<div class="hubei-searchbar-stub" />' },
-  UiAutocomplete: { template: '<input class="ui-autocomplete-stub" />' },
 }
 
 function makeListResponse(overrides: Partial<OrderListApiResponse> = {}): OrderListApiResponse {
@@ -158,14 +151,22 @@ function makeListResponse(overrides: Partial<OrderListApiResponse> = {}): OrderL
   } as OrderListApiResponse
 }
 
-async function mountView() {
-  const wrapper = mount(HubeiView, { global: { plugins: [createPinia()], stubs } })
+/** 测试包装组件：在 setup 中调用 provideBeileOrders 创建状态实例并 provide 给 BeileOrderTab */
+const TestHost = defineComponent({
+  setup() {
+    provideBeileOrders()
+    return () => h(BeileOrderTab)
+  },
+})
+
+async function mountTab() {
+  const wrapper = mount(TestHost, { global: { stubs } })
   await flushPromises()
   await nextTick()
   return wrapper
 }
 
-describe('BeileOrderTab 导出与打印功能（HubeiView 头部按钮）', () => {
+describe('BeileOrderTab 导出与打印功能', () => {
   beforeEach(() => {
     mocks.beileListMock.mockReset()
     mocks.confirmBeileOrderMock.mockReset()
@@ -187,32 +188,31 @@ describe('BeileOrderTab 导出与打印功能（HubeiView 头部按钮）', () =
   })
 
   it('有权限时显示导出和打印按钮', async () => {
-    const wrapper = await mountView()
-    const exportBtn = wrapper.find('.bo-header-btn--export')
-    const printBtn = wrapper.find('.bo-header-btn--print')
+    const wrapper = await mountTab()
+    const exportBtn = wrapper.find('.bo-toolbar-btn--export')
+    const printBtn = wrapper.find('.bo-toolbar-btn--print')
     expect(exportBtn.exists()).toBe(true)
     expect(printBtn.exists()).toBe(true)
   })
 
   it('无导出权限时隐藏导出按钮', async () => {
     mocks.hasPermissionMock.mockImplementation((code: string) => code !== 'beile_order_export')
-    const wrapper = await mountView()
-    expect(wrapper.find('.bo-header-btn--export').exists()).toBe(false)
-    expect(wrapper.find('.bo-header-btn--print').exists()).toBe(true)
+    const wrapper = await mountTab()
+    expect(wrapper.find('.bo-toolbar-btn--export').exists()).toBe(false)
+    expect(wrapper.find('.bo-toolbar-btn--print').exists()).toBe(true)
   })
 
   it('无打印权限时隐藏打印按钮和复选框列', async () => {
     mocks.hasPermissionMock.mockImplementation((code: string) => code !== 'beile_order_print')
-    const wrapper = await mountView()
-    expect(wrapper.find('.bo-header-btn--print').exists()).toBe(false)
+    const wrapper = await mountTab()
+    expect(wrapper.find('.bo-toolbar-btn--print').exists()).toBe(false)
     expect(wrapper.find('.bo-th-select').exists()).toBe(false)
     expect(wrapper.findAll('.bo-td-select').length).toBe(0)
   })
 
   it('点击导出按钮调用 downloadXls，文件名含状态与日期，HTML 含居中标题', async () => {
-    const wrapper = await mountView()
-    await wrapper.find('.bo-header-btn--export').trigger('click')
-    await flushPromises()
+    const wrapper = await mountTab()
+    await wrapper.find('.bo-toolbar-btn--export').trigger('click')
     await flushPromises()
     expect(mocks.downloadXlsMock).toHaveBeenCalledTimes(1)
     const [html, filename] = mocks.downloadXlsMock.mock.calls[0]!
@@ -229,18 +229,18 @@ describe('BeileOrderTab 导出与打印功能（HubeiView 头部按钮）', () =
   })
 
   it('打印按钮在未选中时禁用', async () => {
-    const wrapper = await mountView()
-    const printBtn = wrapper.find('.bo-header-btn--print')
+    const wrapper = await mountTab()
+    const printBtn = wrapper.find('.bo-toolbar-btn--print')
     expect(printBtn.attributes('disabled')).toBeDefined()
   })
 
   it('勾选订单后打印按钮启用，点击调用 printTable 汇总表', async () => {
-    const wrapper = await mountView()
+    const wrapper = await mountTab()
     const checkboxes = wrapper.findAll('.bo-td-select input, .bo-td-select [role="checkbox"]')
     expect(checkboxes.length).toBeGreaterThan(0)
-    await checkboxes[0]!.setValue(true)
+    await checkboxes[0]!.trigger('click')
     await nextTick()
-    const printBtn = wrapper.find('.bo-header-btn--print')
+    const printBtn = wrapper.find('.bo-toolbar-btn--print')
     expect(printBtn.attributes('disabled')).toBeUndefined()
     await printBtn.trigger('click')
     await flushPromises()
@@ -255,13 +255,13 @@ describe('BeileOrderTab 导出与打印功能（HubeiView 头部按钮）', () =
   })
 
   it('表头全选复选框勾选后选中所有当前页订单', async () => {
-    const wrapper = await mountView()
-    const headerCheckbox = wrapper.find('.bo-th-select input')
+    const wrapper = await mountTab()
+    const headerCheckbox = wrapper.find('.bo-th-select [role="checkbox"]')
     expect(headerCheckbox.exists()).toBe(true)
-    await headerCheckbox.setValue(true)
+    await headerCheckbox.trigger('click')
     await nextTick()
     expect(wrapper.find('.bo-selected-count').text()).toContain('2')
-    await wrapper.find('.bo-header-btn--print').trigger('click')
+    await wrapper.find('.bo-toolbar-btn--print').trigger('click')
     await flushPromises()
     expect(mocks.printHtmlMock).toHaveBeenCalledTimes(1)
     const [title, bodyHtml] = mocks.printHtmlMock.mock.calls[0]!
@@ -298,11 +298,10 @@ describe('BeileOrderTab 导出与打印功能（HubeiView 头部按钮）', () =
         },
       ] as unknown as OrderListApiResponse['data'],
     })
-    const wrapper = await mountView()
+    const wrapper = await mountTab()
 
     // 导出：HTML tbody 应含 2 行（2 个 SKU）
-    await wrapper.find('.bo-header-btn--export').trigger('click')
-    await flushPromises()
+    await wrapper.find('.bo-toolbar-btn--export').trigger('click')
     await flushPromises()
     const [exportHtml, exportFilename] = mocks.downloadXlsMock.mock.calls[0]!
     expect(exportFilename).toMatch(/\.xls$/)
@@ -311,10 +310,10 @@ describe('BeileOrderTab 导出与打印功能（HubeiView 头部按钮）', () =
     expect(exportTrCount).toBe(3)
 
     // 打印：勾选后 printHtml bodyHtml 应含 rowspan 合并
-    const checkbox = wrapper.find('.bo-td-select input')
-    await checkbox.setValue(true)
+    const checkbox = wrapper.find('.bo-td-select [role="checkbox"]')
+    await checkbox.trigger('click')
     await nextTick()
-    await wrapper.find('.bo-header-btn--print').trigger('click')
+    await wrapper.find('.bo-toolbar-btn--print').trigger('click')
     await flushPromises()
     const [, printBody] = mocks.printHtmlMock.mock.calls[0]!
     // 2 个 SKU → tbody 2 行 + thead 1 行 = 3 <tr>

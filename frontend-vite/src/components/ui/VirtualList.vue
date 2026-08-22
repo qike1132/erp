@@ -17,9 +17,9 @@
       <div
         v-for="item in visibleItems"
         :key="getItemKey(item)"
-        :ref="el => setItemRef(el, item.index)"
         class="virtual-list-item"
         role="listitem"
+        :ref="el => setItemRef(el, item.index)"
         :style="getItemStyle(item.index)"
       >
         <slot :item="item.raw" :index="item.index" />
