@@ -1,0 +1,71 @@
+{
+  "$schema": "ERP Server Manager v3 Design Tokens (Ant Design Pro / Arco Design / Apple HIG 融合)",
+  "version": "3.0.0",
+
+  "color": {
+    "brand": {
+      "50":  "#E6F0FF", "100": "#C2D8FF", "200": "#9DBEFF", "300": "#76A3FF",
+      "400": "#5490FF", "500": "#2F7BFF", "600": "#1F66E6", "700": "#1853BF",
+      "800": "#114199", "900": "#0A2E73"
+    },
+    "semantic": {
+      "success":   { "value": "#10B981", "soft": "rgba(16,185,129,0.14)" },
+      "warning":   { "value": "#F59E0B", "soft": "rgba(245,158,11,0.16)" },
+      "danger":    { "value": "#EF4444", "soft": "rgba(239,68,68,0.14)" },
+      "info":      { "value": "#06B6D4", "soft": "rgba(6,182,212,0.14)" },
+      "processing":{ "value": "#6366F1", "soft": "rgba(99,102,241,0.16)" }
+    },
+    "surface": {
+      "bg_page":        "#0B0E14",
+      "bg_sider":       "#0F1320",
+      "bg_header":      "#11151F",
+      "bg_panel":       "#161B26",
+      "bg_panel_hover": "#1B2230",
+      "bg_elevated":    "#1E2533",
+      "bg_input":       "#0E1219",
+      "border":         "#232A39",
+      "border_strong":  "#2F3849"
+    },
+    "text": {
+      "primary":   "rgba(255,255,255,0.96)",
+      "secondary": "rgba(255,255,255,0.72)",
+      "tertiary":  "rgba(255,255,255,0.48)",
+      "disabled":  "rgba(255,255,255,0.30)",
+      "on_brand":  "#FFFFFF"
+    }
+  },
+
+  "font": {
+    "family_sans": "\"PingFang SC\",\"Microsoft YaHei UI\",-apple-system,BlinkMacSystemFont,\"Segoe UI\",\"Helvetica Neue\",Arial,sans-serif",
+    "family_mono": "\"JetBrains Mono\",\"Cascadia Mono\",\"Microsoft YaHei Mono\",\"SF Mono\",Consolas,Menlo,monospace",
+    "family_num":  "\"DIN Pro\",\"Inter\",\"Helvetica Neue\",\"PingFang SC\",sans-serif",
+    "size": {
+      "display": 28, "h1": 22, "h2": 18, "h3": 16,
+      "body_lg": 15, "body": 14, "body_sm": 13, "caption": 12, "micro": 11
+    },
+    "weight": { "regular": 400, "medium": 500, "semibold": 600, "bold": 700 }
+  },
+
+  "radius": { "xs": 4, "sm": 6, "md": 8, "lg": 12, "xl": 16, "pill": 999 },
+  "spacing": { "1": 4, "2": 8, "3": 12, "4": 16, "5": 20, "6": 24, "7": 28, "8": 32, "10": 40, "12": 48, "16": 64 },
+  "shadow": {
+    "xs":     "0 1px 2px rgba(0,0,0,.16)",
+    "sm":     "0 2px 6px rgba(0,0,0,.20), 0 0 0 1px #232A39",
+    "md":     "0 6px 16px rgba(0,0,0,.28), 0 0 0 1px #232A39",
+    "lg":     "0 12px 32px rgba(0,0,0,.36), 0 0 0 1px #232A39",
+    "focus":  "0 0 0 3px rgba(47,123,255,0.25)"
+  },
+
+  "motion": {
+    "ease_out":    "cubic-bezier(0.16,1,0.3,1)",
+    "ease_in_out": "cubic-bezier(0.4,0,0.2,1)",
+    "duration":    { "fast": 120, "base": 200, "slow": 320 }
+  },
+
+  "layout": {
+    "sider_width": 232,
+    "sider_collapsed_width": 64,
+    "header_height": 56,
+    "footer_height": 40
+  }
+}

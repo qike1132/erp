@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ERP 服务器管理器 — 通用一键操作组件原型</title>
+<style>
+:root{
+  --bg-app:#F5F7FA; --bg-panel:#FFFFFF; --bg-hover:#F3F5F8; --bg-active:#EBEFF5;
+  --bg-input:#F5F7FA; --bg-mask:rgba(31,35,41,.45);
+  --border-1:#E4E7ED; --border-2:#C9CDD4;
+  --text-1:#1F2329; --text-2:#4E5969; --text-3:#86909C; --text-4:#C9CDD4;
+  --brand:#1668DC; --brand-hover:#1460CC; --brand-active:#0E4FB0; --brand-tint:#E8F1FB;
+  --success:#00A870; --success-tint:#E8FFEA;
+  --warning:#FF8800; --warning-tint:#FFF7E8;
+  --danger:#D54941; --danger-tint:#FDECEA;
+  --sh-1:0 1px 2px rgba(31,35,41,.05); --sh-2:0 6px 20px rgba(31,35,41,.10);
+  --font-main:-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei UI','PingFang SC',sans-serif;
+  --font-mono:'Cascadia Mono',Consolas,'SF Mono',monospace;
+}
+.dark{
+  --bg-app:#101216; --bg-panel:#171A20; --bg-hover:#1E222A; --bg-active:#242933;
+  --bg-input:#131519; --bg-mask:rgba(0,0,0,.55);
+  --border-1:#2A2F38; --border-2:#3C434F;
+  --text-1:#E6E8EB; --text-2:#A9B0BA; --text-3:#767E8B; --text-4:#4A5058;
+  --brand:#3B82F6; --brand-hover:#5B96F7; --brand-active:#2A6FE0; --brand-tint:rgba(59,130,246,.14);
+  --success:#2FBF85; --success-tint:rgba(47,191,133,.12);
+  --warning:#F59E0B; --warning-tint:rgba(245,158,11,.12);
+  --danger:#F87171; --danger-tint:rgba(248,113,113,.12);
+  --sh-1:0 1px 2px rgba(0,0,0,.30); --sh-2:0 6px 20px rgba(0,0,0,.40);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{font-family:var(--font-main);background:var(--bg-app);color:var(--text-1);font-size:13px;line-height:1.6;-webkit-font-smoothing:antialiased}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:var(--border-2);border-radius:4px}
+button{font-family:inherit;border:none;background:none;color:inherit;cursor:pointer}
+.app{display:flex;height:100vh;overflow:hidden}
+
+.side{width:208px;min-width:208px;background:var(--bg-panel);border-right:1px solid var(--border-1);display:flex;flex-direction:column;transition:width .2s ease,min-width .2s ease;overflow:hidden}
+.side.collapsed{width:52px;min-width:52px}
+.side-brand{display:flex;align-items:center;gap:8px;height:52px;padding:0 16px;border-bottom:1px solid var(--border-1);white-space:nowrap;flex-shrink:0}
+.side-brand .mark{width:24px;height:24px;border-radius:5px;background:var(--brand);display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:600;flex-shrink:0}
+.side-brand .name{font-size:14px;font-weight:600}
+.side-nav{flex:1;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:2px}
+.nav-cat{font-size:11px;color:var(--text-3);padding:12px 8px 4px;white-space:nowrap}
+.nav-item{display:flex;align-items:center;gap:8px;height:36px;padding:0 10px;border-radius:6px;color:var(--text-2);font-size:13px;white-space:nowrap;transition:background .15s,color .15s}
+.nav-item:hover{background:var(--bg-hover);color:var(--text-1)}
+.nav-item.active{background:var(--brand-tint);color:var(--brand);font-weight:500}
+.nav-item .ico{width:16px;height:16px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+.nav-item .ico svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.nav-item .cnt{margin-left:auto;font-size:11px;color:var(--text-3);font-family:var(--font-mono)}
+.side.collapsed .side-brand{justify-content:center;padding:0}
+.side.collapsed .name,.side.collapsed .nav-cat,.side.collapsed .nav-item span:not(.ico){display:none}
+.side.collapsed .nav-item{justify-content:center;padding:0}
+
+.top{height:52px;min-height:52px;background:var(--bg-panel);border-bottom:1px solid var(--border-1);display:flex;align-items:center;gap:8px;padding:0 16px;flex-shrink:0}
+.icon-btn{width:32px;height:32px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--text-2);transition:background .15s,color .15s}
+.icon-btn:hover{background:var(--bg-hover);color:var(--text-1)}
+.icon-btn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.crumb{display:flex;align-items:center;gap:6px;font-size:13px;margin-left:4px;white-space:nowrap}
+.crumb .sep{color:var(--text-4)}
+.crumb .cur{font-weight:500}
+.top-right{margin-left:auto;display:flex;align-items:center;gap:12px}
+.mode-tag{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:4px;font-size:12px;font-weight:500;white-space:nowrap}
+.mode-tag .dot{width:6px;height:6px;border-radius:50%}
+.mt-none{background:var(--bg-hover);color:var(--text-2)} .mt-none .dot{background:var(--text-4)}
+.mt-dev{background:var(--success-tint);color:var(--success)} .mt-dev .dot{background:var(--success)}
+.mt-devbusy{background:var(--warning-tint);color:var(--warning)} .mt-devbusy .dot{background:var(--warning)}
+.mt-prod{background:var(--brand-tint);color:var(--brand)} .mt-prod .dot{background:var(--brand)}
+.mt-prodbusy{background:var(--warning-tint);color:var(--warning)} .mt-prodbusy .dot{background:var(--warning)}
+.port-list{display:flex;gap:12px;color:var(--text-3);font-size:12px;font-family:var(--font-mono);white-space:nowrap}
+.port-list span{cursor:pointer;transition:color .15s}
+.port-list span:hover{color:var(--brand)}
+.top-divider{width:1px;height:16px;background:var(--border-1)}
+
+.content{flex:1;overflow-y:auto;padding:20px 24px 40px}
+.page{display:none}
+.page.active{display:block;animation:fadeIn .2s ease}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.page-head{display:flex;align-items:flex-start;gap:12px;margin-bottom:20px}
+.page-head h1{font-size:18px;font-weight:600;line-height:1.4}
+.page-head .desc{font-size:12px;color:var(--text-3);margin-top:2px}
+.page-head .head-actions{margin-left:auto;display:flex;gap:8px;align-items:center}
+
+.btn{height:32px;padding:0 14px;border-radius:6px;font-size:13px;display:inline-flex;align-items:center;gap:6px;transition:all .15s;white-space:nowrap}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn-primary{background:var(--brand);color:#fff}
+.btn-primary:hover:not(:disabled){background:var(--brand-hover)}
+.btn-success{background:var(--success);color:#fff}
+.btn-success:hover:not(:disabled){opacity:.9}
+.btn-default{background:var(--bg-panel);color:var(--text-1);border:1px solid var(--border-2)}
+.btn-default:hover:not(:disabled){border-color:var(--brand);color:var(--brand)}
+.btn-danger{background:var(--danger);color:#fff}
+.btn-danger:hover:not(:disabled){opacity:.9}
+.btn-sm{height:28px;padding:0 10px;font-size:12px;border-radius:5px}
+.btn .spin{width:13px;height:13px;border:1.5px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:rot .7s linear infinite}
+.btn-default .spin{border-color:var(--border-2);border-top-color:var(--text-2)}
+@keyframes rot{to{transform:rotate(360deg)}}
+
+.card{background:var(--bg-panel);border:1px solid var(--border-1);border-radius:8px}
+.card-hd{display:flex;align-items:center;padding:14px 16px 0;gap:8px}
+.card-hd .t{font-size:14px;font-weight:500}
+.card-hd .s{font-size:12px;color:var(--text-3)}
+.card-hd .right{margin-left:auto;display:flex;gap:8px;align-items:center}
+
+.tbl{width:100%;border-collapse:collapse}
+.tbl th{font-size:12px;color:var(--text-3);font-weight:400;text-align:left;padding:0 12px 10px;border-bottom:1px solid var(--border-1);white-space:nowrap}
+.tbl td{padding:12px;border-bottom:1px solid var(--border-1);font-size:13px;vertical-align:middle}
+.tbl tbody tr{transition:background .12s}
+.tbl tbody tr:hover{background:var(--bg-hover)}
+.tbl .mono{font-family:var(--font-mono);font-size:12px;color:var(--text-2)}
+.svc .nm{font-weight:500}
+.svc .sb{font-size:12px;color:var(--text-3);font-family:var(--font-mono)}
+.st{display:inline-flex;align-items:center;gap:6px;font-size:12px}
+.st .p{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.st-running .p{background:var(--success)}
+.st-stopped .p{background:var(--text-4)}
+.st-error .p{background:var(--danger)}
+.st-starting{color:var(--text-2)}
+.st-starting .sp{width:11px;height:11px;border:1.5px solid var(--border-2);border-top-color:var(--brand);border-radius:50%;animation:rot .8s linear infinite;flex-shrink:0}
+
+.op-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+.op-card .env-hd{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border-1)}
+.env-ico{width:26px;height:26px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:600;flex-shrink:0}
+.op-card .env-hd .en{font-size:14px;font-weight:500}
+.op-card .env-hd .en-st{margin-left:8px}
+.op-body{padding:14px 16px}
+.op-row{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.op-row:last-child{margin-bottom:0}
+.op-row .op-lb{width:52px;font-size:12px;color:var(--text-2);flex-shrink:0}
+.op-row .op-btns{display:flex;gap:8px}
+.op-desc{font-size:12px;color:var(--text-3);margin-top:10px;padding-top:10px;border-top:1px dashed var(--border-1)}
+.progress{margin-top:12px}
+.progress .p-track{height:4px;background:var(--bg-input);border-radius:2px;overflow:hidden;margin-top:6px}
+.progress .p-bar{height:100%;background:var(--brand);border-radius:2px;transition:width .4s ease}
+.progress .p-step{font-size:12px;color:var(--text-2);font-family:var(--font-mono)}
+.fault-switch{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-3);cursor:pointer;user-select:none}
+.fault-switch input{accent-color:var(--danger);cursor:pointer}
+
+.log-tb{display:flex;align-items:center;gap:10px;padding:12px 16px;flex-wrap:wrap;border-bottom:1px solid var(--border-1)}
+.log-tb .right{margin-left:auto;display:flex;gap:8px;align-items:center}
+.log-body{height:440px;overflow-y:auto;padding:8px 0;font-family:var(--font-mono);font-size:12px;line-height:1.9}
+.lg{display:flex;padding:0 16px;white-space:pre-wrap;word-break:break-all}
+.lg .lt{color:var(--text-4);margin-right:12px;flex-shrink:0}
+.lg .lv{width:56px;flex-shrink:0;margin-right:12px}
+.lg .msg{color:var(--text-2)}
+.lg.info .lv{color:var(--text-3)} .lg.info .msg{color:var(--text-2)}
+.lg.warn .lv{color:var(--warning)} .lg.warn .msg{color:var(--warning)}
+.lg.error .lv{color:var(--danger)} .lg.error .msg{color:var(--danger)}
+.lg.success .lv{color:var(--success)} .lg.success .msg{color:var(--success)}
+
+.empty{padding:40px 0;text-align:center;color:var(--text-3)}
+.empty .ic{width:40px;height:40px;margin:0 auto 8px;opacity:.4}
+.empty .ic svg{width:40px;height:40px;stroke:var(--text-3);fill:none;stroke-width:1.2;stroke-linecap:round;stroke-linejoin:round}
+.empty p{font-size:12px}
+
+#toasts{position:fixed;top:60px;right:16px;z-index:100;display:flex;flex-direction:column;gap:8px;width:320px}
+.toast{background:var(--bg-panel);border:1px solid var(--border-1);border-radius:8px;box-shadow:var(--sh-2);padding:10px 12px;display:flex;gap:8px;align-items:flex-start;animation:fadeIn .2s ease}
+.toast .ic{width:16px;height:16px;flex-shrink:0;margin-top:1px}
+.toast .ic svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.toast.ok .ic{color:var(--success)}.toast.fail .ic{color:var(--danger)}.toast.warn .ic{color:var(--warning)}.toast.info .ic{color:var(--brand)}
+.toast .tt{font-size:13px;font-weight:500;color:var(--text-1)}
+.toast .ds{font-size:12px;color:var(--text-3);margin-top:1px}
+.mask{position:fixed;inset:0;background:var(--bg-mask);opacity:0;pointer-events:none;transition:opacity .2s;z-index:80}
+.mask.open{opacity:1;pointer-events:auto}
+.modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-48%) scale(.98);width:400px;max-width:92vw;background:var(--bg-panel);border-radius:12px;box-shadow:var(--sh-2);opacity:0;pointer-events:none;transition:all .2s;z-index:81;padding:20px}
+.modal.open{opacity:1;pointer-events:auto;transform:translate(-50%,-50%) scale(1)}
+.modal h3{font-size:15px;font-weight:500;margin-bottom:8px}
+.modal .desc{font-size:13px;color:var(--text-2);margin-bottom:16px;line-height:1.7}
+.modal .acts{display:flex;justify-content:flex-end;gap:8px}
+
+.statusbar{height:30px;min-height:30px;background:var(--bg-panel);border-top:1px solid var(--border-1);display:flex;align-items:center;gap:12px;padding:0 16px;font-size:12px;color:var(--text-3);flex-shrink:0}
+.statusbar .right{margin-left:auto;display:flex;gap:8px}
+.al-count{color:var(--danger);cursor:pointer;font-size:12px}
+.al-count:hover{text-decoration:underline}
+
+.al-item{display:flex;gap:12px;padding:14px 16px;border-bottom:1px solid var(--border-1);align-items:flex-start}
+.al-item:last-child{border-bottom:none}
+.al-item .p{width:6px;height:6px;border-radius:50%;margin-top:7px;flex-shrink:0}
+.al-item.severe .p{background:var(--danger)}
+.al-item.warn .p{background:var(--warning)}
+.al-item.info .p{background:var(--brand)}
+.al-item .bd{flex:1;min-width:0}
+.al-item .tt{font-size:13px;font-weight:500;display:flex;align-items:center;gap:8px}
+.al-item .ds{font-size:12px;color:var(--text-2);margin-top:2px}
+.al-item .tm{font-size:12px;color:var(--text-3);font-family:var(--font-mono);margin-top:2px}
+.al-item.done{opacity:.55}
+.al-item .right{display:flex;gap:8px;align-items:center}
+.al-tag{font-size:11px;height:20px;padding:0 8px;border-radius:4px;display:inline-flex;align-items:center}
+.al-tag.severe{background:var(--danger-tint);color:var(--danger)}
+.al-tag.warn{background:var(--warning-tint);color:var(--warning)}
+.al-tag.info{background:var(--brand-tint);color:var(--brand)}
+
+@media (max-width:1180px){.op-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="app">
+
+<aside class="side" id="side">
+  <div class="side-brand"><div class="mark">E</div><span class="name">ERP 控制台</span></div>
+  <nav class="side-nav">
+    <div class="nav-cat">总览</div>
+    <button class="nav-item active" data-p="overview"><span class="ico"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></span><span>运行监控</span></button>
+    <div class="nav-cat">管理</div>
+    <button class="nav-item" data-p="services"><span class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/></svg></span><span>服务管理</span></button>
+    <button class="nav-item" data-p="logs"><span class="ico"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg></span><span>日志中心</span></button>
+    <button class="nav-item" data-p="config"><span class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.01A1.7 1.7 0 0 0 10.09 3V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56h.01a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.01a1.7 1.7 0 0 0 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.03z"/></svg></span><span>配置管理</span></button>
+    <div class="nav-cat">运维</div>
+    <button class="nav-item" data-p="deploy"><span class="ico"><svg viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg></span><span>部署发布</span></button>
+    <button class="nav-item" data-p="alerts"><span class="ico"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></span><span>告警中心</span><span class="cnt" id="navAlCnt">0</span></button>
+  </nav>
+</aside>
+
+<div class="main-col" style="flex:1;display:flex;flex-direction:column;min-width:0">
+  <header class="top">
+    <button class="icon-btn" id="collapseBtn"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+    <div class="crumb">ERP 控制台<span class="sep">/</span><span class="cur" id="crumbCur">运行监控</span></div>
+    <div class="top-right">
+      <span class="mode-tag mt-none" id="modeTag"><span class="dot"></span><span id="modeTagTxt">未运行</span></span>
+      <div class="port-list"><span>API 5002</span><span>WEB 3000</span><span>REDIS 6379</span></div>
+      <div class="top-divider"></div>
+      <button class="icon-btn" id="themeBtn" title="切换主题"><svg id="themeIco" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></button>
+    </div>
+  </header>
+
+  <main class="content">
+
+    <!-- ===== 运行监控 ===== -->
+    <section class="page active" id="pg-overview">
+      <div class="page-head">
+        <div><h1>运行监控</h1><div class="desc">服务健康与资源占用总览 · 数据为演示模拟</div></div>
+        <div class="head-actions"><button class="btn btn-primary" onclick="goPage('services')">前往一键操作</button></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
+        <div class="card" style="padding:16px"><div style="font-size:12px;color:var(--text-3)">后端服务</div><div style="font-size:22px;font-weight:500;font-family:var(--font-mono);margin-top:8px" id="ovApi">已停止</div><div style="font-size:12px;color:var(--text-3);margin-top:8px">端口 5002</div></div>
+        <div class="card" style="padding:16px"><div style="font-size:12px;color:var(--text-3)">Redis</div><div style="font-size:22px;font-weight:500;font-family:var(--font-mono);margin-top:8px" id="ovRedis">已停止</div><div style="font-size:12px;color:var(--text-3);margin-top:8px">端口 6379</div></div>
+        <div class="card" style="padding:16px"><div style="font-size:12px;color:var(--text-3)">前端服务</div><div style="font-size:22px;font-weight:500;font-family:var(--font-mono);margin-top:8px" id="ovWeb">已停止</div><div style="font-size:12px;color:var(--text-3);margin-top:8px">端口 3000</div></div>
+        <div class="card" style="padding:16px"><div style="font-size:12px;color:var(--text-3)">全局模式</div><div style="font-size:22px;font-weight:500;margin-top:8px" id="ovMode">未运行</div><div style="font-size:12px;color:var(--text-3);margin-top:8px">开发/生产互斥</div></div>
+      </div>
+      <div class="card" style="padding:20px 24px;color:var(--text-3)">
+        <p style="font-size:13px"><b style="color:var(--brand)">组件化说明</b>：下方两个面板（开发/生产）由同一个 <span style="font-family:var(--font-mono);font-size:12px">OneClickPanel</span> 组件渲染，仅通过 <span style="font-family:var(--font-mono);font-size:12px">spec</span> 配置区分——HTML 中只有两个空容器，全部按钮/状态/确认/loading 由组件生成。</p>
+        <p style="font-size:12px;margin-top:6px">体验：启动 → 重启 → 关闭；勾选「模拟端口冲突」看失败分支；开发运行时点「启动生产」看互斥切换。</p>
+      </div>
+    </section>
+
+    <!-- ===== 服务管理（组件渲染区） ===== -->
+    <section class="page" id="pg-services">
+      <div class="page-head">
+        <div><h1>服务管理</h1><div class="desc">通用组件一键操作 · 开发/生产共用同一组件，仅配置不同</div></div>
+      </div>
+      <!-- 两个空容器：由 OneClickPanel 组件渲染（零重复） -->
+      <div class="op-grid">
+        <div id="devPanel"></div>
+        <div id="prodPanel"></div>
+      </div>
+      <div class="card">
+        <div class="card-hd" style="padding-bottom:10px">
+          <span class="t">服务列表</span>
+          <span class="s">状态随一键操作联动</span>
+          <div class="right">
+            <label class="fault-switch" title="开启后下一次启动操作将模拟端口冲突失败">
+              <input type="checkbox" id="faultSwitch"> 模拟端口冲突（演示失败分支）
+            </label>
+          </div>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="tbl">
+            <thead><tr><th>服务</th><th>状态</th><th>环境</th><th>端口 / PID</th></tr></thead>
+            <tbody>
+              <tr id="row-api"><td><div class="svc"><div><div class="nm">FastAPI 后端</div><div class="sb">uvicorn fastapi_app.main:app</div></div></div></td><td><span class="st st-stopped"><span class="p"></span>已停止</span></td><td><span style="font-size:12px;color:var(--text-2)">开发</span></td><td class="mono" id="pid-api">5002 · —</td></tr>
+              <tr id="row-web"><td><div class="svc"><div><div class="nm">Vite 前端</div><div class="sb">vite dev · 3000</div></div></div></td><td><span class="st st-stopped"><span class="p"></span>已停止</span></td><td><span style="font-size:12px;color:var(--text-2)">开发</span></td><td class="mono" id="pid-web">3000 · —</td></tr>
+              <tr id="row-redis"><td><div class="svc"><div><div class="nm">Redis</div><div class="sb">redis-server · 6379</div></div></div></td><td><span class="st st-stopped"><span class="p"></span>已停止</span></td><td><span style="font-size:12px;color:var(--text-2)">独立</span></td><td class="mono" id="pid-redis">6379 · —</td></tr>
+              <tr id="row-prod"><td><div class="svc"><div><div class="nm">erp-prod 服务</div><div class="sb">prod_runner · NSSM 托管</div></div></div></td><td><span class="st st-stopped"><span class="p"></span>已停止</span></td><td><span style="font-size:12px;color:var(--text-2)">生产</span></td><td class="mono" id="pid-prod">5002 · —</td></tr>
+              <tr id="row-arq"><td><div class="svc"><div><div class="nm">erp-arq 服务</div><div class="sb">arq Worker · NSSM 托管</div></div></div></td><td><span class="st st-stopped"><span class="p"></span>已停止</span></td><td><span style="font-size:12px;color:var(--text-2)">生产</span></td><td class="mono" id="pid-arq">— · —</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 日志中心 ===== -->
+    <section class="page" id="pg-logs">
+      <div class="page-head">
+        <div><h1>日志中心</h1><div class="desc">一键操作的每一步都会实时写入此处</div></div>
+      </div>
+      <div class="card">
+        <div class="log-tb">
+          <div class="right">
+            <button class="btn btn-default btn-sm" onclick="toast('ok','日志已导出','logs/server_manager.log')">导出</button>
+            <button class="btn btn-default btn-sm" onclick="LOGS.length=0;renderLogs()">清空</button>
+          </div>
+        </div>
+        <div class="log-body" id="logBody"></div>
+      </div>
+    </section>
+
+    <!-- ===== 配置管理（占位） ===== -->
+    <section class="page" id="pg-config">
+      <div class="page-head"><div><h1>配置管理</h1><div class="desc">修改后需重启对应服务生效（占位页）</div></div></div>
+      <div class="card"><div class="card-bd">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px 24px">
+          <div><label style="display:block;font-size:12px;color:var(--text-2);margin-bottom:6px">API 服务名</label><input class="input mono" value="erp-prod" style="width:100%;height:32px;padding:0 10px;border-radius:6px;background:var(--bg-input);border:1px solid var(--border-1);color:var(--text-1)"></div>
+          <div><label style="display:block;font-size:12px;color:var(--text-2);margin-bottom:6px">ARQ 服务名</label><input class="input mono" value="erp-arq" style="width:100%;height:32px;padding:0 10px;border-radius:6px;background:var(--bg-input);border:1px solid var(--border-1);color:var(--text-1)"></div>
+          <div><label style="display:block;font-size:12px;color:var(--text-2);margin-bottom:6px">NSSM 路径</label><input class="input mono" value="C:\nssm\nssm.exe" style="width:100%;height:32px;padding:0 10px;border-radius:6px;background:var(--bg-input);border:1px solid var(--border-1);color:var(--text-1)"></div>
+          <div><label style="display:block;font-size:12px;color:var(--text-2);margin-bottom:6px">项目目录</label><input class="input mono" value="D:\erp_system" style="width:100%;height:32px;padding:0 10px;border-radius:6px;background:var(--bg-input);border:1px solid var(--border-1);color:var(--text-1)"></div>
+        </div>
+      </div></div>
+    </section>
+
+    <!-- ===== 部署发布（占位） ===== -->
+    <section class="page" id="pg-deploy">
+      <div class="page-head"><div><h1>部署发布</h1><div class="desc">发布流程：校验 → 备份 → 部署 → 健康检查（占位页）</div></div></div>
+      <div class="card"><div class="card-bd"><div style="padding:32px;text-align:center;color:var(--text-3);font-size:13px">部署发布流程演示（占位）</div></div></div>
+    </section>
+
+    <!-- ===== 告警中心 ===== -->
+    <section class="page" id="pg-alerts">
+      <div class="page-head">
+        <div><h1>告警中心</h1><div class="desc">一键操作失败自动上报 · 确认后不再提示</div></div>
+        <div class="head-actions"><button class="btn btn-default" onclick="confirmAllAlerts()">全部确认</button></div>
+      </div>
+      <div class="card" id="alList"></div>
+    </section>
+  </main>
+
+  <footer class="statusbar">
+    <span class="mode-tag mt-none" id="sbMode" style="height:20px;font-size:11px"><span class="dot"></span><span id="sbModeTxt">未运行</span></span>
+    <span id="statusMsg">就绪 · 等待操作</span>
+    <div class="right">
+      <span class="al-count" id="alCount" onclick="goPage('alerts')">0 项告警</span>
+      <button class="btn btn-danger btn-sm" onclick="openKillModal()">紧急停止</button>
+    </div>
+  </footer>
+  </div>
+</div>
+
+<!-- 通用确认 Modal（组件二次确认） -->
+<div class="mask" id="cfMask" onclick="closeConfirm()"></div>
+<div class="modal" id="cfModal">
+  <h3 id="cfTitle">确认操作？</h3>
+  <div class="desc" id="cfDesc"></div>
+  <div class="acts">
+    <button class="btn btn-default" onclick="closeConfirm()">取消</button>
+    <button class="btn btn-danger" id="cfOk">确认</button>
+  </div>
+</div>
+
+<!-- 紧急停止确认 Modal -->
+<div class="mask" id="killMask" onclick="closeKill()"></div>
+<div class="modal" id="killModal">
+  <h3>确认紧急停止？</h3>
+  <div class="desc">将终止开发/生产全部相关进程并释放端口：<br>· 后端 / 前端 / Redis 进程树<br>· erp-prod / erp-arq 服务（nssm stop）<br>· psutil 残留扫描 + 端口 5002/3000/6379<br>该操作不可撤销。</div>
+  <div class="acts">
+    <button class="btn btn-default" onclick="closeKill()">取消</button>
+    <button class="btn btn-danger" onclick="doKill()">确认停止</button>
+  </div>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+/* ============================================================
+   通用『一键启动 / 重启 / 关闭』组件（开发/生产共用，零重复）
+   与 one_click_action_component.py 同构：
+   ActionLock → OneClickController（校验/幂等/并发/收口）
+             → OneClickPanel（UI：按钮 + 确认 + loading + 进度）
+   spec 收敛两种模式的全部差异。
+   ============================================================ */
+
+/* ---------- 1. ActionLock：全局在途锁（开发/生产共享，防并发/重复） ---------- */
+class ActionLock{
+  constructor(){this.owner=null;}
+  acquire(who){ if(this.owner)return false; this.owner=who; return true; }
+  release(who){ if(who===undefined||this.owner===who)this.owner=null; }
+}
+
+/* ---------- 2. OneClickController：统一状态校验 / 幂等 / 结果收口 ---------- */
+class OneClickController{
+  constructor(app,spec,lock){
+    this.app=app;this.spec=spec;this.lock=lock;
+    this.busyKind=null;            // 'start' | 'restart' | 'stop' | null
+    this.ui=null;                  // 绑定的 OneClickPanel（用于同步）
+  }
+  /* 按钮可用性（幂等：状态不满足即拒绝，不产生副作用） */
+  can(kind){
+    const running=this.spec.running();
+    if(kind==='start')return !running&&!this.inflight();
+    return running&&!this.inflight();
+  }
+  inflight(){return this.lock.owner===this.spec.key;}
+  /* 触发入口：校验 → 原子占用 → 后台执行 → 收口 */
+  request(kind){
+    const actName={start:'启动',restart:'重启',stop:'关闭'}[kind];
+    if(!this.can(kind)){
+      this.app.toast('warn','操作被拒绝',this.spec.display+'当前状态不允许'+actName+'（运行中或已有操作在途）');
+      return false;
+    }
+    if(!this.lock.acquire(this.spec.key)){
+      this.app.toast('warn','操作被拒绝','已有操作进行中，请稍候');
+      return false;
+    }
+    this.busyKind=kind;this.ui.sync();
+    this.spec.exec[kind]()
+      .then(()=>this.finish(true,''))
+      .catch(e=>this.finish(false,(e&&e.message)||'执行失败'));
+    return true;
+  }
+  /* 收口：释放锁 + 复位在途 + 反馈 + 刷新（顺序固定保证幂等，永不卡死） */
+  finish(ok,msg){
+    const kind=this.busyKind||'操作';
+    this.lock.release(this.spec.key);
+    this.busyKind=null;
+    const actName={start:'启动',restart:'重启',stop:'关闭'}[kind]||'操作';
+    if(ok){this.app.toast('ok',this.spec.display+'·'+actName+'成功',msg||'');}
+    else{this.app.toast('fail',this.spec.display+'·'+actName+'失败',msg);
+         this.app.addAlert('severe',this.spec.display+'·'+actName+'失败',msg);}
+    this.ui.sync();this.app.refresh();
+  }
+}
+
+/* ---------- 3. OneClickPanel：通用面板组件（同一组件渲染两个模式） ---------- */
+class OneClickPanel{
+  constructor(box,app,controller,spec){
+    this.box=box;this.app=app;this.ctrl=controller;this.spec=spec;
+    controller.ui=this;
+    this.build();
+  }
+  /* 组件模板：按钮/徽章/进度全部由组件生成，HTML 仅留空容器 */
+  build(){
+    const s=this.spec;
+    const startCls=s.key==='dev'?'btn-success':'btn-primary';
+    this.box.innerHTML=
+      '<div class="card op-card">'+
+        '<div class="env-hd">'+
+          '<div class="env-ico" style="background:'+s.color+'">'+s.icon+'</div>'+
+          '<span class="en">'+s.display+'</span>'+
+          '<span class="en-st mode-tag mt-none" data-tag><span class="dot"></span><span data-tag-txt>未运行</span></span>'+
+        '</div>'+
+        '<div class="op-body">'+
+          '<div class="op-row"><span class="op-lb">一键启动</span><div class="op-btns">'+
+            '<button class="btn '+startCls+'" data-act="start">'+s.startText+'</button></div></div>'+
+          '<div class="op-row"><span class="op-lb">一键重启</span><div class="op-btns">'+
+            '<button class="btn btn-default" data-act="restart" disabled>重启</button></div></div>'+
+          '<div class="op-row"><span class="op-lb">一键关闭</span><div class="op-btns">'+
+            '<button class="btn btn-default" data-act="stop" disabled>关闭</button></div></div>'+
+          '<div class="progress" data-progress style="display:none">'+
+            '<div class="p-step" data-step>—</div><div class="p-track"><div class="p-bar" data-bar style="width:0%"></div></div>'+
+          '</div>'+
+          '<div class="op-desc">'+s.desc+'</div>'+
+        '</div>'+
+      '</div>';
+    this.btnStart=this.box.querySelector('[data-act="start"]');
+    this.btnRestart=this.box.querySelector('[data-act="restart"]');
+    this.btnStop=this.box.querySelector('[data-act="stop"]');
+    this.tagEl=this.box.querySelector('[data-tag]');
+    this.progressEl=this.box.querySelector('[data-progress]');
+    this.stepEl=this.box.querySelector('[data-step]');
+    this.barEl=this.box.querySelector('[data-bar]');
+    this.box.querySelector('.op-btns').addEventListener('click',e=>{
+      const b=e.target.closest('[data-act]');if(b)this.onClick(b.dataset.act);
+    });
+  }
+  /* 点击：按 spec.confirm 决定是否二次确认 */
+  onClick(kind){
+    const s=this.spec,actName={start:'启动',restart:'重启',stop:'关闭'}[kind];
+    const askMap={start:s.confirmStart,restart:s.confirmRestart,stop:s.confirmStop};
+    const descMap={start:s.descStart,restart:s.descRestart,stop:s.descStop};
+    if(askMap[kind]){
+      askConfirm('确认'+actName+s.display+'？',descMap[kind],()=>this.ctrl.request(kind));
+    }else{
+      this.ctrl.request(kind);
+    }
+  }
+  /* 进度条 */
+  setStep(pct,txt){this.progressEl.style.display='block';this.barEl.style.width=pct+'%';this.stepEl.textContent=txt;}
+  /* 状态同步：按钮可用性 + loading + 徽章 + 进度显隐（宿主 refresh 时调用） */
+  sync(){
+    const c=this.ctrl,s=this.spec,kind=c.busyKind;
+    const busyTxt={start:s.busyStart,restart:s.busyRestart,stop:s.busyStop};
+    // 按钮
+    this.setBtn(this.btnStart,kind==='start',busyTxt.start,c.can('start'));
+    this.setBtn(this.btnRestart,kind==='restart',busyTxt.restart,c.can('restart'));
+    this.setBtn(this.btnStop,kind==='stop',busyTxt.stop,c.can('stop'));
+    // 进度条：仅在途显示
+    if(kind){this.progressEl.style.display='block';}else{this.progressEl.style.display='none';}
+    // 环境徽章
+    const st=this.envState();
+    this.tagEl.className='en-st mode-tag '+st.cls;
+    const tt=this.box.querySelector('[data-tag-txt]');
+    if(tt)tt.textContent=st.txt;
+  }
+  setBtn(btn,loading,txt,enabled){
+    if(loading){
+      if(!btn.dataset.orig)btn.dataset.orig=btn.innerHTML;   /* 首次 loading 前保存原文案 */
+      btn.disabled=true;btn.innerHTML='<span class="spin"></span>'+txt;
+    }else{
+      btn.disabled=!enabled;btn.innerHTML=btn.dataset.orig||btn.textContent;
+    }
+  }
+  envState(){
+    const s=this.spec,key=s.key;
+    if(s.running())return {cls:'mt-'+key,txt:'运行中'};
+    const busy={start:'启动中',restart:'重启中',stop:'停止中'};
+    if(this.ctrl.busyKind)return {cls:'mt-'+key+'busy',txt:busy[this.ctrl.busyKind]};
+    return {cls:'mt-none',txt:'未运行'};
+  }
+}
+
+/* ---------- 4. 通用确认 Modal ---------- */
+let confirmCb=null;
+function askConfirm(title,desc,cb){
+  document.getElementById('cfTitle').textContent=title;
+  document.getElementById('cfDesc').innerHTML=desc;
+  confirmCb=cb;
+  document.getElementById('cfModal').classList.add('open');
+  document.getElementById('cfMask').classList.add('open');
+}
+function closeConfirm(){
+  document.getElementById('cfModal').classList.remove('open');
+  document.getElementById('cfMask').classList.remove('open');
+  confirmCb=null;
+}
+document.getElementById('cfOk').onclick=()=>{const cb=confirmCb;closeConfirm();if(cb)cb();};
+
+/* ============================================================
+   全局状态（状态机） + 基础工具
+   ============================================================ */
+const S={mode:'none',prodUp:false,apiPid:0,webPid:0,redisPid:0};
+const TRANS=['dev_starting','dev_stopping','dev_restarting','prod_starting','prod_stopping','prod_restarting'];
+const busy=()=>TRANS.includes(S.mode);
+const devRunning=()=>S.mode==='dev_running';
+const prodRunning=()=>S.mode==='prod_running';
+const now=()=>new Date().toTimeString().slice(0,8);
+const $=id=>document.getElementById(id);
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+function toast(type,title,desc){
+  const ic={ok:'<path d="M20 6L9 17l-5-5"/>',fail:'<circle cx="12" cy="12" r="9"/><path d="M15 9l-6 6M9 9l6 6"/>',warn:'<path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',info:'<circle cx="12" cy="12" r="9"/><path d="M12 8h.01M12 12v4"/>'};
+  const el=document.createElement('div');el.className='toast '+type;
+  el.innerHTML='<span class="ic"><svg viewBox="0 0 24 24">'+ic[type]+'</svg></span><div><div class="tt">'+title+'</div>'+(desc?'<div class="ds">'+desc+'</div>':'')+'</div>';
+  $('toasts').appendChild(el);
+  setTimeout(()=>{el.style.transition='opacity .3s';el.style.opacity='0';setTimeout(()=>el.remove(),300)},3200);
+}
+const LOGS=[];
+function pushLog(level,msg){
+  const L={INFO:'info',WARNING:'warn',ERROR:'error',SUCCESS:'success'};
+  LOGS.unshift([now(),level,msg,L[level]||'info']);
+  if(LOGS.length>200)LOGS.pop();
+  renderLogs();
+}
+function renderLogs(){
+  const body=$('logBody');
+  if(!LOGS.length){body.innerHTML='<div class="empty"><div class="ic"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg></div><p>暂无日志 · 执行一键操作后此处实时展示</p></div>';return;}
+  body.innerHTML=LOGS.map(l=>'<div class="lg '+l[3]+'"><span class="lt">'+l[0]+'</span><span class="lv">'+l[1]+'</span><span class="msg">'+l[2]+'</span></div>').join('');
+}
+let ALERTS=[];
+function addAlert(lvl,title,desc){
+  ALERTS.unshift({lvl,title,desc,tm:now(),done:false});
+  if(ALERTS.length>20)ALERTS.pop();
+  renderAlerts();
+}
+function renderAlerts(){
+  const box=$('alList');
+  const lc={severe:'severe',warn:'warn',info:'info'},lt={severe:'严重',warn:'警告',info:'提示'};
+  box.innerHTML=ALERTS.length?ALERTS.map((a,i)=>
+    '<div class="al-item '+(a.done?'done ':'')+lc[a.lvl]+'"><span class="p"></span><div class="bd">'+
+    '<div class="tt">'+a.title+' <span class="al-tag '+lc[a.lvl]+'">'+lt[a.lvl]+'</span></div>'+
+    '<div class="ds">'+a.desc+'</div><div class="tm">'+a.tm+(a.done?' · 已确认':'')+'</div></div>'+
+    '<div class="right"><button class="btn btn-default btn-sm" data-i="'+i+'" onclick="ackAlert(this)">'+(a.done?'已确认':'确认')+'</button></div></div>'
+  ).join(''):'<div class="empty"><div class="ic"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/></svg></div><p>暂无告警</p></div>';
+  const open=ALERTS.filter(a=>!a.done).length;
+  $('alCount').textContent=open+' 项告警';
+  $('navAlCnt').textContent=open;
+}
+function ackAlert(btn){ALERTS[+btn.dataset.i].done=true;renderAlerts();}
+function confirmAllAlerts(){ALERTS.forEach(a=>a.done=true);renderAlerts();toast('ok','已确认全部告警',ALERTS.length+' 条');}
+
+function setRow(id,st,pidTxt){
+  const tr=$(id);if(!tr)return;
+  const map={
+    running:'<span class="st st-running"><span class="p"></span>运行中</span>',
+    stopped:'<span class="st st-stopped"><span class="p"></span>已停止</span>',
+    error:'<span class="st st-error"><span class="p"></span>异常</span>',
+    starting:'<span class="st st-starting"><span class="sp"></span>启动中</span>',
+    stopping:'<span class="st st-starting"><span class="sp"></span>停止中</span>',
+  };
+  tr.querySelector('.st').outerHTML=map[st];
+  const pidId='pid-'+id.replace('row-','');
+  if(pidTxt!==undefined&&$(pidId))$(pidId).textContent=pidTxt;
+}
+
+/* ============================================================
+   执行体（spec 注入，async；失败 throw 由控制器统一收口）
+   ============================================================ */
+const faultOn=()=>$('faultSwitch').checked;
+
+async function devStart(panel){
+  if(S.prodUp){
+    toast('info','已自动停止生产模式','开发/生产互斥托管');pushLog('INFO','已自动停止生产模式（互斥切换）');
+    S.prodUp=false;setRow('row-prod','stopped');setRow('row-arq','stopped');
+  }
+  panel.setStep(10,'互斥检查：停生产模式…');await sleep(600);
+  panel.setStep(30,'清理端口 5002/3000…');pushLog('INFO','正在清理端口...');await sleep(500);
+  panel.setStep(45,'启动 Redis 服务…');setRow('row-redis','starting');await sleep(500);
+  setRow('row-redis','running','6379 · 8841');S.redisPid=8841;pushLog('SUCCESS','Redis 启动成功 (PID: 8841)');
+  panel.setStep(62,'启动后端（健康检查）…');setRow('row-api','starting');pushLog('INFO','后端进程已启动 (PID: 8932)');
+  await sleep(700);
+  if(faultOn()){setRow('row-api','stopped');setRow('row-web','stopped');setRow('row-redis','stopped');S.apiPid=S.webPid=S.redisPid=0;throw new Error('端口 5002 被 PID 7841 占用，健康检查未通过');}
+  setRow('row-api','running','5002 · 8932');S.apiPid=8932;pushLog('SUCCESS','后端健康检查通过 /api/health · 12ms');
+  panel.setStep(82,'启动前端（就绪检查）…');setRow('row-web','starting');pushLog('INFO','前端进程已启动 (PID: 9210)');
+  await sleep(700);
+  setRow('row-web','running','3000 · 9210');S.webPid=9210;pushLog('SUCCESS','前端就绪 http://127.0.0.1:3000');
+  panel.setStep(100,'完成');await sleep(300);
+  S.mode='dev_running';pushLog('SUCCESS','开发模式启动成功');
+}
+async function devRestart(panel){
+  panel.setStep(15,'优雅停止：前端/后端进程树…');pushLog('INFO','正在重启开发模式（优雅停止 → 重新启动）...');
+  setRow('row-web','stopping');setRow('row-api','stopping');await sleep(600);
+  setRow('row-web','stopped');setRow('row-api','stopped');setRow('row-redis','stopped');
+  S.apiPid=S.webPid=S.redisPid=0;pushLog('INFO','开发进程已停止，释放端口 5002/3000/6379 ...');
+  panel.setStep(35,'清理端口 + 静置…');await sleep(500);
+  pushLog('INFO','重新启动（Redis → 后端 → 前端）...');
+  await devStart(panel);
+}
+async function devStop(){
+  pushLog('INFO','正在停止开发模式...');
+  setRow('row-web','stopping');setRow('row-api','stopping');await sleep(500);
+  setRow('row-web','stopped');setRow('row-api','stopped');setRow('row-redis','stopped');
+  S.apiPid=S.webPid=S.redisPid=0;await sleep(300);
+  pushLog('SUCCESS','开发模式已停止，端口 5002/3000/6379 已释放');
+}
+async function prodStart(panel){
+  if(devRunning()){
+    toast('info','已自动停止开发模式','开发/生产互斥托管');pushLog('INFO','已自动停止开发模式（互斥切换）');
+    setRow('row-api','stopped');setRow('row-web','stopped');setRow('row-redis','stopped');
+    S.apiPid=S.webPid=S.redisPid=0;
+  }
+  panel.setStep(18,'互斥检查：停开发模式…');await sleep(600);
+  panel.setStep(38,'清理端口 5002/3000…');await sleep(500);
+  panel.setStep(60,'nssm start erp-prod / erp-arq…');pushLog('INFO','正在启动 erp-prod ...');pushLog('INFO','正在启动 erp-arq ...');
+  await sleep(800);
+  if(faultOn()){setRow('row-prod','stopped');setRow('row-arq','stopped');throw new Error('nssm start 后服务未达 RUNNING（疑似端口冲突）');}
+  panel.setStep(85,'等待 RUNNING + 健康检查…');setRow('row-prod','starting');setRow('row-arq','starting');
+  await sleep(700);
+  setRow('row-prod','running','5002 · 1204');setRow('row-arq','running','— · 1206');S.prodUp=true;
+  panel.setStep(100,'完成');await sleep(300);
+  pushLog('SUCCESS','生产服务已启动（RUNNING + /api/health 通过）');
+}
+async function prodRestart(panel){
+  panel.setStep(25,'nssm stop → 等待 STOPPED…');pushLog('INFO','正在重启生产服务（等 STOPPED → start → 等 RUNNING）...');
+  setRow('row-prod','stopping');setRow('row-arq','stopping');await sleep(800);
+  if(faultOn()){setRow('row-prod','stopped');setRow('row-arq','stopped');throw new Error('erp-prod 停止超时（STOP_PENDING 未确认），已中止重启');}
+  setRow('row-prod','stopped');setRow('row-arq','stopped');S.prodUp=false;
+  pushLog('SUCCESS','服务已确认 STOPPED（避免 AppExit 自动重启抢端口）');
+  panel.setStep(45,'清理端口…');await sleep(400);
+  panel.setStep(70,'nssm start → 等待 RUNNING…');pushLog('INFO','正在启动 erp-prod / erp-arq ...');
+  setRow('row-prod','starting');setRow('row-arq','starting');await sleep(800);
+  setRow('row-prod','running','5002 · 1208');setRow('row-arq','running','— · 1210');S.prodUp=true;
+  panel.setStep(100,'完成');await sleep(300);
+  pushLog('SUCCESS','生产服务重启完成');
+}
+async function prodStop(){
+  pushLog('INFO','正在停止生产服务（nssm stop ×2 → 等 STOPPED）...');
+  setRow('row-prod','stopping');setRow('row-arq','stopping');await sleep(800);
+  setRow('row-prod','stopped');setRow('row-arq','stopped');S.prodUp=false;await sleep(300);
+  pushLog('SUCCESS','生产服务已停止（保留 NSSM 注册）');
+}
+
+/* ============================================================
+   spec 配置（两种模式的全部差异收敛于此 —— 组件零修改）
+   ============================================================ */
+const devSpec={
+  key:'dev',display:'开发模式',icon:'开',color:'var(--success)',
+  startText:'启动开发模式',
+  running:()=>devRunning(),
+  confirmStart:false,confirmRestart:false,confirmStop:false,
+  descStart:'停生产→清端口→Redis→后端(健康检查)→前端(就绪)',
+  descRestart:'优雅停止后原样恢复（进程树→Redis→端口→重跑）',
+  descStop:'进程树 + Redis + 端口全部释放（开发环境，风险低）',
+  busyStart:'启动中…',busyRestart:'重启中…',busyStop:'停止中…',
+  desc:'启动 = 互斥停生产 → 清端口 → Redis → 后端(健康检查) → 前端(就绪)；重启 = 优雅停止后恢复；关闭 = 全部释放。',
+  exec:{
+    start:()=>devStart(devPanel),
+    restart:()=>devRestart(devPanel),
+    stop:()=>devStop(),
+  },
+};
+const prodSpec={
+  key:'prod',display:'生产模式',icon:'产',color:'var(--brand)',
+  startText:'启动生产服务',
+  running:()=>prodRunning(),
+  confirmStart:false,confirmRestart:false,confirmStop:true,
+  descStart:'互斥停开发→清端口→nssm start→等 RUNNING→健康检查',
+  descRestart:'stop 等 STOPPED → start 等 RUNNING（防自动重启抢端口）',
+  descStop:'将停止 erp-prod / erp-arq（保留 NSSM 注册，可再次一键启动）',
+  busyStart:'启动中…',busyRestart:'重启中…',busyStop:'停止中…',
+  desc:'NSSM 托管：启动 = start→等 RUNNING→健康检查；重启 = 等 STOPPED→start→等 RUNNING；关闭 = stop→等 STOPPED（保留注册）。',
+  exec:{
+    start:()=>prodStart(prodPanel),
+    restart:()=>prodRestart(prodPanel),
+    stop:()=>prodStop(),
+  },
+};
+
+/* ============================================================
+   实例化：同一个组件类渲染两个面板（共享一把锁 → 跨模式互斥）
+   ============================================================ */
+const appFacade={
+  toast,addAlert,pushLog,
+  refresh:()=>updateAll(),   // 控制器收口后刷新全局
+};
+const globalLock=new ActionLock();
+const devPanel=new OneClickPanel($('devPanel'),appFacade,new OneClickController(appFacade,devSpec,globalLock),devSpec);
+const prodPanel=new OneClickPanel($('prodPanel'),appFacade,new OneClickController(appFacade,prodSpec,globalLock),prodSpec);
+
+/* ============================================================
+   全局刷新：徽章 / 统计卡 / 状态栏 / 面板同步 / 告警
+   ============================================================ */
+function tagCls(mode){
+  const map={
+    'dev_running':['mt-dev','开发模式 · 运行中'],'prod_running':['mt-prod','生产模式 · 运行中'],
+    'dev_starting':['mt-devbusy','开发模式 · 启动中'],'dev_stopping':['mt-devbusy','开发模式 · 停止中'],'dev_restarting':['mt-devbusy','开发模式 · 重启中'],
+    'prod_starting':['mt-prodbusy','生产模式 · 启动中'],'prod_stopping':['mt-prodbusy','生产模式 · 停止中'],'prod_restarting':['mt-prodbusy','生产模式 · 重启中'],
+  };
+  return map[mode]||['mt-none','未运行'];
+}
+function updateAll(){
+  const [cls,txt]=tagCls(S.mode);
+  $('modeTag').className='mode-tag '+cls;$('modeTagTxt').textContent=txt;
+  $('sbMode').className='mode-tag '+cls;$('sbModeTxt').textContent=txt;
+  $('ovApi').textContent=devRunning()?'运行中':'已停止';
+  $('ovWeb').textContent=devRunning()?'运行中':'已停止';
+  $('ovRedis').textContent=(devRunning()||S.redisPid)?'运行中':'已停止';
+  $('ovMode').textContent=txt;
+  if(busy()){$('statusMsg').textContent=txt+' · 操作进行中，按钮已锁定';}
+  else if(devRunning()){$('statusMsg').textContent='就绪 · 开发模式运行中';}
+  else if(prodRunning()){$('statusMsg').textContent='就绪 · 生产服务运行中';}
+  else{$('statusMsg').textContent='就绪 · 等待操作';}
+  devPanel.sync();prodPanel.sync();
+  renderAlerts();
+}
+
+/* 导航 / 主题 */
+const PAGES={overview:'运行监控',services:'服务管理',logs:'日志中心',config:'配置管理',deploy:'部署发布',alerts:'告警中心'};
+function goPage(p){
+  document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.p===p));
+  document.querySelectorAll('.page').forEach(x=>x.classList.toggle('active',x.id==='pg-'+p));
+  $('crumbCur').textContent=PAGES[p];
+}
+document.querySelector('.side-nav').addEventListener('click',e=>{
+  const b=e.target.closest('.nav-item');if(b)goPage(b.dataset.p);
+});
+$('collapseBtn').onclick=()=>$('side').classList.toggle('collapsed');
+$('themeBtn').onclick=()=>{
+  const dark=document.body.classList.toggle('dark');
+  $('themeIco').innerHTML=dark
+    ?'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'
+    :'<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>';
+};
+
+/* 紧急停止 */
+function openKillModal(){$('killModal').classList.add('open');$('killMask').classList.add('open');}
+function closeKill(){$('killModal').classList.remove('open');$('killMask').classList.remove('open');}
+function doKill(){
+  closeKill();
+  S.mode='none';S.prodUp=false;S.apiPid=S.webPid=S.redisPid=0;
+  setRow('row-api','stopped');setRow('row-web','stopped');setRow('row-redis','stopped');
+  setRow('row-prod','stopped');setRow('row-arq','stopped');
+  toast('fail','已紧急停止','已终止全部相关进程并释放端口 5002/3000/6379');
+  pushLog('WARNING','紧急停止：已终止全部进程并清理残留');
+  addAlert('warn','已执行紧急停止','手动触发：终止全部进程并释放端口');
+  updateAll();
+}
+
+/* 初始化 */
+renderLogs();renderAlerts();updateAll();
+</script>
+</body>
+</html>

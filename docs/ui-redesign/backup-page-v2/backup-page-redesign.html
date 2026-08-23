@@ -1,0 +1,1143 @@
+<!DOCTYPE html>
+<!--
+  滨发 ERP · 数据备份中心 — 重设计高保真视觉稿（单文件自包含）
+  设计系统：A 全局体系 "Plush Cute"（来源 frontend-vite/src/styles/app.css）
+  语义规范：B 备份业务语义（来源 docs/ui-redesign/backup-center/DESIGN.md，色值映射到 A 色板）
+  模块结构：C 当前备份页模块（来源 frontend-vite/src/views/backup/BackupView.vue）
+  说明：纯视觉稿，内联 CSS + 内联 JS、无外部依赖、离线可开；不接真实后端，不含业务逻辑改动。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数据备份中心 · 滨发 ERP</title>
+<style>
+/* ============================================================
+   A. 全局设计体系 · Plush Cute 令牌（对齐 app.css）
+   ============================================================ */
+:root{
+  /* 品牌蓝 */
+  --primary-100:#d6e4ff; --primary-300:#8babf5; --primary-400:#6d95f0;
+  --primary-500:#5b8def; --primary-600:#3a6bd6; --primary-700:#2d5ab8;
+  /* 语义色 */
+  --success-500:#28c76f; --success-600:#1e9e55;
+  --warning-500:#ff9f43; --warning-600:#e88e2e; --warning-700:#c47820;
+  --danger-500:#ea5455; --danger-600:#d44042; --danger-700:#b33335;
+  --info-500:#00cfe8;
+  --ocean:#b0e0e6; --ocean-light:#d4f1f4; --ocean-deep:#87ceeb; --ocean-text:#02669e;
+  /* 中性色 */
+  --surface:#f4f6fc; --surface-card:#ffffff;
+  --border:#e4e7ed; --border-light:#f0f2f5;
+  --text:#1a1a2e; --text-secondary:#475569; --text-tertiary:#595959; --text-muted:#64748b; --text-inverse:#ffffff;
+  /* 圆角（Plush Cute 大圆角） */
+  --radius-sm:10px; --radius-md:14px; --radius-lg:24px; --radius-xl:28px;
+  --radius-card:24px; --radius-modal:28px; --radius-button:14px; --radius-input:12px; --radius-nav-item:14px;
+  /* 阴影（蓝调） */
+  --shadow-sm:0 2px 8px rgba(176,224,230,0.15);
+  --shadow-md:0 4px 16px rgba(176,224,230,0.22);
+  --shadow-lg:0 8px 32px rgba(135,206,235,0.28);
+  --shadow-xl:0 12px 48px rgba(135,206,235,0.32);
+  /* 渐变（品牌强调，非状态装饰） */
+  --gradient-primary:linear-gradient(135deg,#5b8def 0%,#3a6bd6 100%);
+  --gradient-success:linear-gradient(135deg,#3dc97a 0%,#28c76f 100%);
+  --gradient-warning:linear-gradient(135deg,#ffa53d 0%,#ff9f43 100%);
+  --gradient-danger:linear-gradient(135deg,#ed5657 0%,#ea5455 100%);
+  --gradient-ocean:linear-gradient(135deg,#d4f1f4 0%,#b0e0e6 100%);
+  --gradient-ocean-deep:linear-gradient(135deg,#b0e0e6 0%,#87ceeb 100%);
+  /* 字体 */
+  --font-sans:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hiragino Sans GB','Microsoft YaHei',Roboto,sans-serif;
+  --font-mono:ui-monospace,'SF Mono','Cascadia Mono',Consolas,'Courier New',monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{font-family:var(--font-sans);background:linear-gradient(135deg,#f4f6fc,#f0f2f5);color:var(--text);font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+button,input,select{font-family:inherit}
+svg{display:block;flex:none}
+[hidden]{display:none!important}
+.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+
+/* ============================================================
+   页面骨架：侧边栏 230px 白卡 + 主内容区渐变底
+   ============================================================ */
+.app-shell{display:flex;min-height:100vh}
+.sidebar{position:fixed;top:16px;left:16px;bottom:16px;width:230px;background:var(--surface-card);border-radius:18px;border:1px solid var(--border-light);box-shadow:var(--shadow-md);display:flex;flex-direction:column;padding:16px 12px;z-index:20}
+.main{margin-left:262px;flex:1;min-width:0;padding:16px 24px 32px}
+
+.brand{display:flex;align-items:center;gap:10px;padding:8px 10px 16px;border-bottom:1px solid var(--border-light);margin-bottom:14px}
+.brand-logo{width:40px;height:40px;border-radius:12px;background:var(--gradient-primary);color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800;box-shadow:0 4px 12px rgba(91,141,239,.35);flex:none}
+.brand-name{font-size:16px;font-weight:800;color:var(--text);line-height:1.2}
+.brand-sub{font-size:11px;color:var(--text-muted)}
+.side-nav{flex:1;display:flex;flex-direction:column;gap:4px;overflow-y:auto}
+.nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:var(--radius-nav-item);color:var(--text-secondary);font-size:14px;font-weight:500;text-decoration:none;cursor:pointer;transition:background .2s ease,color .2s ease}
+.nav-item svg{width:17px;height:17px;flex:none}
+.nav-item:hover{background:rgba(91,141,239,.08);color:var(--primary-600)}
+.nav-item.active{background:linear-gradient(135deg,rgba(91,141,239,.16),rgba(58,107,214,.16));color:var(--primary-600);font-weight:600;box-shadow:inset 3px 0 0 var(--primary-500)}
+.nav-item .nav-right{margin-left:auto;display:flex;align-items:center}
+.side-foot{display:flex;align-items:center;gap:10px;padding:12px 10px 4px;border-top:1px solid var(--border-light)}
+.user-avatar{width:34px;height:34px;border-radius:50%;background:var(--gradient-ocean-deep);color:var(--ocean-text);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;flex:none}
+.user-name{font-size:13px;font-weight:600;color:var(--text);line-height:1.3}
+.user-role{font-size:11px;color:var(--text-muted)}
+
+/* 通知红点计数（A 组件 notification-badge） */
+.notification-badge{display:inline-flex;align-items:center;justify-content:center;padding:1px 6px;background:var(--danger-500);color:var(--text-inverse);font-size:11px;font-weight:600;border-radius:10px;min-width:18px;text-align:center;line-height:1.5}
+
+/* ============================================================
+   页面头部
+   ============================================================ */
+.page-head{margin-bottom:20px;padding:6px 2px 0}
+.page-title{font-size:1.5rem;font-weight:800;color:var(--primary-700);line-height:1.3;letter-spacing:-0.02em}
+.page-sub{margin-top:6px;font-size:0.875rem;font-weight:500;color:var(--text-secondary);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sync-dot{width:8px;height:8px;border-radius:50%;background:var(--success-500);box-shadow:0 0 0 4px rgba(40,199,111,.15);flex:none}
+
+/* ============================================================
+   区块 / page-card 容器（A 组件）
+   ============================================================ */
+.bk-section{margin-bottom:24px;animation:fadeIn .35s ease}
+.bk-grid-two{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
+.page-card{background:var(--surface-card);border-radius:18px;border:1px solid var(--border-light);box-shadow:0 1px 3px rgba(0,0,0,.04),0 4px 12px rgba(0,0,0,.06);transition:box-shadow .4s cubic-bezier(.4,0,.2,1),transform .4s cubic-bezier(.4,0,.2,1)}
+.page-card:hover{box-shadow:0 4px 12px rgba(0,0,0,.06);transform:translateY(-2px)}
+.page-card-header{display:flex;flex-wrap:nowrap;justify-content:space-between;align-items:center;padding:14px 24px;border-bottom:1px solid var(--border-light);background:rgba(255,255,255,.95);gap:12px}
+.page-card-body{padding:20px 24px}
+.card-title{font-size:1.0625rem;font-weight:700;color:#1e293b;line-height:1.4}
+.card-desc{font-size:0.75rem;font-weight:400;color:var(--text-muted);line-height:1.4;margin-top:2px}
+.card-hover{transition:all .4s cubic-bezier(.4,0,.2,1)}
+.card-hover:hover{transform:translateY(-2px) scale(1.01);box-shadow:0 8px 25px rgba(135,206,235,.35)}
+
+/* ============================================================
+   模块1 · 概览四卡
+   ============================================================ */
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:20px}
+.stat-card{background:var(--surface-card);border-radius:18px;border:1px solid var(--border-light);box-shadow:0 1px 3px rgba(0,0,0,.04),0 4px 12px rgba(0,0,0,.06);padding:18px 20px;transition:all .4s cubic-bezier(.4,0,.2,1)}
+.stat-card:hover{transform:translateY(-2px) scale(1.01);box-shadow:0 8px 25px rgba(135,206,235,.35)}
+.stat-head{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.stat-label{font-size:0.75rem;font-weight:600;color:var(--text-muted);letter-spacing:.02em}
+.dot{width:9px;height:9px;border-radius:50%;flex:none}
+.dot-success{background:var(--success-500);box-shadow:0 0 0 4px rgba(40,199,111,.15)}
+.dot-primary{background:var(--primary-500);box-shadow:0 0 0 4px rgba(91,141,239,.15)}
+.dot-info{background:var(--info-500);box-shadow:0 0 0 4px rgba(0,207,232,.15)}
+.dot-warning{background:var(--warning-500);box-shadow:0 0 0 4px rgba(255,159,67,.15)}
+.dot-danger{background:var(--danger-500);box-shadow:0 0 0 4px rgba(234,84,85,.15)}
+.dot-muted{background:#cbd5e1}
+.stat-value{font-size:24px;font-weight:700;line-height:1.3;color:var(--text);font-variant-numeric:tabular-nums}
+.stat-value .unit{font-size:13px;font-weight:500;color:var(--text-tertiary);margin-left:2px;font-family:var(--font-sans)}
+.stat-desc{margin-top:6px;font-size:13px;color:var(--text-secondary);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+
+/* 主色渐变胶囊（A 组件 count-badge） */
+.count-badge{display:inline-flex;align-items:center;padding:3px 12px;background:linear-gradient(135deg,var(--primary-500),var(--primary-700));color:var(--text-inverse);border-radius:20px;font-size:12px;font-weight:600;white-space:nowrap}
+.count-badge-subtle{display:inline-flex;align-items:center;font-size:12px;padding:2px 9px;border-radius:8px;background:var(--border-light);color:var(--text-secondary)}
+
+/* 进度条（始终带百分比文本） */
+.progress{height:10px;background:var(--border-light);border-radius:999px;overflow:hidden;margin-top:12px}
+.progress-bar{height:100%;width:0;border-radius:999px;background:var(--gradient-primary);transition:width .2s ease}
+.progress-bar.success{background:var(--gradient-success)}
+.progress-bar.danger{background:var(--gradient-danger)}
+.progress-row{display:flex;align-items:center;gap:12px}
+.progress-row .progress{flex:1;margin-top:0}
+.progress-text{font-family:var(--font-mono);font-size:14px;font-weight:600;color:var(--text-secondary);white-space:nowrap;min-width:46px;text-align:right}
+
+/* ============================================================
+   模块2 · 备份操作
+   ============================================================ */
+.section-actions{display:flex;gap:12px;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 24px;border-radius:var(--radius-button);border:1px solid transparent;font-size:15px;font-weight:600;line-height:1;white-space:nowrap;cursor:pointer;transition:all .2s ease;text-decoration:none}
+.btn svg{width:16px;height:16px}
+.btn-primary{background:var(--gradient-primary);color:#fff;box-shadow:0 4px 14px rgba(91,141,239,.35)}
+.btn-primary:hover{box-shadow:0 6px 20px rgba(91,141,239,.45);transform:translateY(-1px)}
+.btn-primary:active{transform:none}
+.btn-outline{background:#fff;border-color:var(--border);color:var(--primary-600)}
+.btn-outline:hover{border-color:var(--primary-500);color:var(--primary-500);background:rgba(91,141,239,.05)}
+.btn-danger{background:var(--gradient-danger);color:#fff;box-shadow:0 4px 14px rgba(234,84,85,.3)}
+.btn-danger:hover{box-shadow:0 6px 20px rgba(234,84,85,.4);transform:translateY(-1px)}
+.btn-sm{height:34px;padding:0 16px;border-radius:var(--radius-button);font-size:14px}
+.btn:disabled,.btn.is-disabled{background:var(--border-light);color:#b6bdc9;border-color:transparent;box-shadow:none;cursor:not-allowed;transform:none}
+.btn .amber{color:var(--warning-500)}
+
+/* tooltip（互斥禁用提示） */
+.tooltip-wrap{position:relative;display:inline-flex}
+.tooltip-wrap[data-tooltip]:hover::after{content:attr(data-tooltip);position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);background:var(--text);color:#fff;font-size:11px;font-weight:500;line-height:1.4;padding:6px 10px;border-radius:8px;white-space:nowrap;box-shadow:var(--shadow-md);z-index:100;pointer-events:none}
+.tooltip-wrap[data-tooltip]:hover::before{content:'';position:absolute;bottom:calc(100% + 3px);left:50%;transform:translateX(-50%);border:5px solid transparent;border-top-color:var(--text);z-index:100;pointer-events:none}
+
+/* 任务执行卡片 */
+.task-card{margin-top:16px;border:1px solid rgba(91,141,239,.28);border-radius:16px;background:linear-gradient(135deg,#f8fafe,#f2f6ff);padding:16px 18px;animation:slideUp .35s ease}
+.task-head{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.task-title{font-size:14px;font-weight:600;color:var(--text);flex:1}
+.task-meta{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-top:8px}
+.task-stage{font-size:13px;color:var(--text-secondary)}
+.task-remain{font-size:13px;color:var(--text-muted);font-family:var(--font-mono)}
+
+/* ============================================================
+   模块3+4 · 定时任务配置 / 备份路径设置
+   ============================================================ */
+.form-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 0;border-bottom:1px solid var(--border-light)}
+.form-row:first-of-type{padding-top:2px}
+.form-row:last-of-type{border-bottom:none}
+.form-label{font-size:14px;color:var(--text);font-weight:500}
+.form-hint{font-size:0.75rem;color:var(--text-muted);margin-top:2px}
+.form-actions{display:flex;gap:12px;margin-top:16px;flex-wrap:wrap}
+.input{height:36px;padding:0 12px;border:1px solid var(--border);border-radius:var(--radius-input);background:#fff;font-size:14px;color:var(--text);outline:none;transition:border-color .2s ease,box-shadow .2s ease}
+.input::placeholder{color:var(--text-muted)}
+.input:focus{border-color:var(--primary-500);box-shadow:0 0 0 3px rgba(91,141,239,.18)}
+.input.error{border-color:var(--danger-500);box-shadow:0 0 0 3px rgba(234,84,85,.16)}
+.select{height:36px;padding:0 32px 0 12px;border:1px solid var(--border);border-radius:var(--radius-input);background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 10px center;font-size:14px;color:var(--text);outline:none;cursor:pointer;appearance:none;-webkit-appearance:none}
+.select:focus{border-color:var(--primary-500);box-shadow:0 0 0 3px rgba(91,141,239,.18)}
+.switch{position:relative;width:42px;height:24px;border-radius:999px;background:#d7dce4;border:none;cursor:pointer;transition:background .2s ease;flex:none}
+.switch::after{content:'';position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:var(--shadow-sm);transition:left .2s ease}
+.switch.on{background:var(--gradient-primary)}
+.switch.on::after{left:21px}
+
+.radio-row{padding:8px 0}
+.radio{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text);cursor:pointer}
+.radio input{accent-color:var(--primary-500);width:15px;height:15px;cursor:pointer;flex:none}
+.path-box{margin-top:8px;margin-left:22px;background:var(--border-light);border-radius:10px;padding:8px 12px;font-family:var(--font-mono);font-size:13px;color:var(--text-secondary);overflow-x:auto;white-space:nowrap}
+.path-input-row{margin-left:22px;margin-top:8px}
+.path-input-row .input{width:100%}
+.path-feedback{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:12px}
+.path-feedback .ok{color:var(--success-600);font-weight:500}
+.path-feedback .err{color:var(--danger-600);font-weight:500}
+.path-feedback svg{width:14px;height:14px}
+.path-current{margin-top:16px;border-top:1px solid var(--border-light);padding-top:16px}
+.path-current .path-label{font-size:0.75rem;font-weight:600;color:var(--text-muted)}
+.path-space{margin-top:6px;font-size:13px;color:var(--text-secondary);font-family:var(--font-mono)}
+
+/* ============================================================
+   模块5 · 还原入口
+   ============================================================ */
+.restore-entry-card{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 24px;flex-wrap:wrap}
+.restore-entry-actions{display:flex;gap:12px;flex-wrap:wrap}
+
+/* ============================================================
+   模块6 · 备份记录表格（A data-table）
+   ============================================================ */
+.filter-bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+.search{position:relative;display:flex;align-items:center}
+.search svg{position:absolute;left:10px;width:14px;height:14px;color:var(--text-muted)}
+.search .input{padding-left:32px;width:220px}
+.table-wrap{border:1px solid var(--border-light);border-radius:14px;overflow-x:auto;background:#fff}
+table{width:100%;border-collapse:collapse;min-width:760px}
+.data-table thead th{background:var(--surface);padding:10px 14px;text-align:center;font-weight:600;color:var(--text-secondary);font-size:12px;text-transform:uppercase;letter-spacing:.05em;border-bottom:2px solid var(--border);white-space:nowrap}
+.data-table tbody td{padding:11px 14px;border-bottom:1px solid var(--border-light);color:var(--text);vertical-align:middle;text-align:center;white-space:nowrap;font-variant-numeric:tabular-nums}
+.data-table tbody tr:last-child td{border-bottom:none}
+.data-table tbody tr:hover{background:rgba(244,246,252,.6)}
+td .fname{font-family:var(--font-mono);font-size:13px;color:var(--text);font-weight:500}
+
+/* 状态徽章（B 语义 → A 色板；状态色只表达状态） */
+.badge{display:inline-flex;align-items:center;gap:5px;padding:3px 12px;border-radius:999px;font-size:12px;font-weight:600;line-height:20px;white-space:nowrap}
+.badge-success{background:rgba(40,199,111,.12);color:var(--success-600);border:1px solid rgba(40,199,111,.25)}
+.badge-primary{background:rgba(91,141,239,.12);color:var(--primary-600);border:1px solid rgba(91,141,239,.25)}
+.badge-warning{background:rgba(255,159,67,.14);color:var(--warning-700);border:1px solid rgba(255,159,67,.28)}
+.badge-danger{background:rgba(234,84,85,.12);color:var(--danger-600);border:1px solid rgba(234,84,85,.25)}
+.badge-neutral{background:var(--border-light);color:var(--text-muted)}
+
+/* 操作列链接 */
+.link{background:none;border:none;padding:0;font-size:14px;font-weight:600;color:var(--primary-600);cursor:pointer;transition:color .2s ease}
+.link:hover{color:var(--primary-500);text-decoration:underline}
+.link-danger{color:var(--danger-600)}
+.link-danger:hover{color:var(--danger-500);text-decoration:underline}
+.link + .link{margin-left:16px}
+.link:disabled,.link[disabled]{color:#c0c6cf;cursor:not-allowed;text-decoration:none}
+
+/* 分页 */
+.pagination{display:flex;align-items:center;justify-content:flex-end;gap:12px;margin-top:16px;font-size:13px;color:var(--text-secondary)}
+.page-btn{height:32px;padding:0 14px;border:1px solid var(--border);border-radius:10px;background:#fff;color:var(--text-secondary);font-size:13px;font-weight:500;cursor:pointer;transition:all .2s ease}
+.page-btn:hover:not(:disabled){border-color:var(--primary-500);color:var(--primary-600)}
+.page-btn:disabled{color:#c0c6cf;background:var(--border-light);cursor:not-allowed}
+
+/* ============================================================
+   还原向导浮层（radius-modal 28px）
+   ============================================================ */
+.overlay{position:fixed;inset:0;background:rgba(26,26,46,.45);z-index:300;display:flex;align-items:center;justify-content:center;padding:16px}
+.restore-dialog{width:100%;max-width:860px;max-height:calc(100vh - 32px);background:#fff;border-radius:var(--radius-modal);box-shadow:var(--shadow-xl);display:flex;flex-direction:column;overflow:hidden;animation:slideUp .3s ease}
+.restore-head{display:flex;align-items:center;justify-content:space-between;padding:22px 28px 0}
+.icon-btn{width:34px;height:34px;border:1px solid var(--border-light);border-radius:10px;background:#fff;color:var(--text-secondary);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:all .2s ease}
+.icon-btn:hover{border-color:var(--primary-500);color:var(--primary-600)}
+.icon-btn svg{width:16px;height:16px}
+.icon-btn:disabled{opacity:.5;cursor:not-allowed}
+.stepper{display:flex;align-items:center;padding:22px 28px 10px;overflow-x:auto}
+.step{display:flex;align-items:center;flex:none}
+.step-dot{width:30px;height:30px;border-radius:50%;border:2px solid var(--border);background:#fff;color:var(--text-muted);font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;flex:none;transition:all .2s ease}
+.step-dot svg{width:14px;height:14px}
+.step-label{margin-left:10px;font-size:14px;font-weight:600;color:var(--text-muted);white-space:nowrap}
+.step.done .step-dot{background:var(--gradient-success);border-color:transparent;color:#fff}
+.step.done .step-label{color:var(--text)}
+.step.current .step-dot{background:var(--gradient-primary);border-color:transparent;color:#fff;box-shadow:0 0 0 4px rgba(91,141,239,.18)}
+.step.current .step-label{color:var(--primary-600)}
+.step-line{width:36px;height:2px;background:var(--border-light);margin:0 10px;flex:none;border-radius:1px}
+.step-line.done{background:var(--gradient-success)}
+.step-body{padding:10px 28px 24px;overflow-y:auto}
+.panel{animation:fadeIn .25s ease}
+.panel-desc{font-size:14px;color:var(--text-secondary);margin-bottom:16px}
+
+.point-list{display:flex;flex-direction:column;gap:10px}
+.point{display:flex;align-items:center;gap:12px;border:1px solid var(--border-light);border-radius:14px;padding:12px 16px;cursor:pointer;transition:all .2s ease;background:#fff}
+.point:hover{border-color:var(--primary-500)}
+.point.checked{border-color:var(--primary-500);box-shadow:0 0 0 3px rgba(91,141,239,.14);background:rgba(91,141,239,.04)}
+.point input{accent-color:var(--primary-500);width:15px;height:15px;flex:none}
+.point-name{font-family:var(--font-mono);font-size:13px;color:var(--text);font-weight:500}
+.point-meta{font-family:var(--font-mono);font-size:13px;color:var(--text-muted);margin-left:auto;white-space:nowrap}
+
+.impact-list{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px}
+.impact-item{display:flex;align-items:center;gap:8px;border:1px solid rgba(234,84,85,.22);background:rgba(234,84,85,.06);border-radius:14px;padding:10px 16px;font-size:14px;color:var(--danger-600)}
+.impact-item svg{width:16px;height:16px}
+.impact-item b{font-family:var(--font-mono);font-size:15px;font-weight:700}
+.diff-summary{margin-top:12px;font-size:13px;font-weight:500;color:var(--warning-700);display:flex;align-items:center;gap:6px;background:rgba(255,159,67,.1);border:1px solid rgba(255,159,67,.25);border-radius:12px;padding:8px 14px}
+
+.check-list{list-style:none;display:flex;flex-direction:column;gap:12px;margin-bottom:16px}
+.check-item{display:flex;align-items:center;gap:12px;border:1px solid var(--border-light);border-radius:14px;padding:12px 16px;font-size:14px;color:var(--text-secondary);background:#fff}
+.check-item .check-state{margin-left:auto;font-size:12px;color:var(--text-muted);font-family:var(--font-mono)}
+.check-icon{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex:none}
+.check-icon svg{width:12px;height:12px}
+.check-icon.pending{border:2px solid var(--border);color:var(--text-muted)}
+.check-icon.running{border:2px solid var(--primary-500);color:var(--primary-500)}
+.check-icon.running svg{animation:spin .8s linear infinite}
+.check-icon.ok{background:var(--gradient-success);color:#fff;border:none}
+.check-result{font-size:14px;font-weight:600;color:var(--success-600);display:flex;align-items:center;gap:8px;background:rgba(40,199,111,.08);border:1px solid rgba(40,199,111,.2);border-radius:12px;padding:10px 14px}
+
+.report-success{text-align:center;padding:16px 0 8px}
+.report-icon{width:56px;height:56px;border-radius:50%;background:var(--gradient-success);color:#fff;display:inline-flex;align-items:center;justify-content:center;margin-bottom:14px;box-shadow:0 6px 18px rgba(40,199,111,.35)}
+.report-icon svg{width:26px;height:26px}
+.report-title{font-size:18px;font-weight:700;color:var(--text)}
+.report-sub{margin-top:6px;font-size:14px;color:var(--text-secondary)}
+.report-sub b{font-family:var(--font-mono);color:var(--text);font-weight:600}
+.suggest{margin-top:20px;border-top:1px solid var(--border-light);padding-top:16px}
+.suggest-title{font-size:0.75rem;font-weight:600;color:var(--text-muted);margin-bottom:8px}
+.suggest ul{list-style:none;display:flex;flex-direction:column;gap:6px}
+.suggest li{font-size:14px;color:var(--text-secondary);padding-left:16px;position:relative}
+.suggest li::before{content:'';position:absolute;left:0;top:9px;width:6px;height:6px;border-radius:2px;background:var(--primary-500)}
+
+.restore-foot{display:flex;align-items:center;justify-content:space-between;padding:16px 28px;border-top:1px solid var(--border-light)}
+.restore-foot .right{display:flex;gap:12px;margin-left:auto}
+
+/* ============================================================
+   危险确认弹层（B 危险域：红底警示 + 二次校验，radius-modal 28px）
+   ============================================================ */
+.modal-overlay{position:fixed;inset:0;background:rgba(26,26,46,.5);z-index:400;display:flex;align-items:center;justify-content:center;padding:16px}
+.danger-modal{width:100%;max-width:500px;background:#fff;border-radius:var(--radius-modal);box-shadow:var(--shadow-xl);overflow:hidden;animation:slideUp .3s ease;border-top:4px solid var(--danger-500)}
+.danger-bar{display:flex;align-items:center;gap:8px;background:rgba(234,84,85,.08);padding:10px 24px;font-size:12px;font-weight:600;color:var(--danger-600)}
+.danger-bar svg{width:16px;height:16px}
+.danger-body{padding:24px}
+.danger-title{font-size:20px;font-weight:700;color:var(--danger-700);line-height:1.4}
+.danger-sub{margin-top:8px;font-size:14px;color:var(--text-secondary)}
+.danger-list{list-style:none;margin:16px 0;display:flex;flex-direction:column;gap:10px}
+.danger-list li{display:flex;align-items:flex-start;gap:8px;font-size:14px;color:var(--danger-600)}
+.danger-list li::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--danger-500);margin-top:8px;flex:none}
+.danger-input-row{margin:18px 0}
+.danger-input-row .input{width:100%;border-color:rgba(234,84,85,.4)}
+.danger-input-row .input:focus{border-color:var(--danger-500);box-shadow:0 0 0 3px rgba(234,84,85,.16)}
+.danger-actions{display:flex;justify-content:flex-end;gap:12px}
+
+/* ============================================================
+   Toast / 动效
+   ============================================================ */
+.toast-container{position:fixed;top:20px;right:20px;z-index:500;display:flex;flex-direction:column;gap:8px;align-items:flex-end}
+.toast{display:flex;align-items:center;gap:8px;background:var(--text);color:#fff;font-size:14px;padding:10px 16px;border-radius:12px;box-shadow:var(--shadow-lg);animation:toastIn .25s ease;max-width:340px}
+.toast svg{width:16px;height:16px}
+.toast.success svg{color:var(--success-500)}
+.toast.error svg{color:var(--danger-500)}
+.toast.out{opacity:0;transform:translateY(-6px);transition:all .25s ease}
+.animate-spin-slow{animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes slideUp{from{opacity:0;transform:translateY(20px) scale(.96)}to{opacity:1;transform:none}}
+@keyframes toastIn{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:none}}
+
+/* ============================================================
+   响应式：≥1280 4列 / 768-1279 2列 / <768 单列；表格横向滚动
+   ============================================================ */
+@media (max-width:1279px){
+  .stats-grid{grid-template-columns:repeat(2,1fr)}
+}
+@media (max-width:1023px){
+  .sidebar{display:none}
+  .main{margin-left:0;padding:16px}
+  .bk-grid-two{grid-template-columns:1fr}
+}
+@media (max-width:767px){
+  .stats-grid{grid-template-columns:1fr}
+  .page-card-header{flex-wrap:wrap;padding:12px 16px}
+  .page-card-body{padding:16px}
+  .section-actions{width:100%}
+  .section-actions .btn{flex:1}
+  .search .input{width:100%}
+  .restore-dialog{max-width:calc(100vw - 24px)}
+  .restore-foot{flex-wrap:wrap;gap:8px}
+  .progress-text{min-width:40px}
+  .restore-entry-card{padding:14px 16px}
+}
+</style>
+</head>
+<body>
+
+<!-- 内联图标库 -->
+<svg style="display:none" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="14" y="3" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="3" y="14" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="14" y="14" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24"><path d="M9 5h6M9 5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 12h6M9 16h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s-7-5.5-7-11a7 7 0 0 1 14 0c0 5.5-7 11-7 11z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.6" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+  <symbol id="i-check-sq" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8.5 12l2.5 2.5 4.5-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.7a7 7 0 0 0-2 1.2l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.7a7 7 0 0 0 2-1.2l2.3 1 2-3.4-2-1.5c.1-.4.2-.8.2-1.2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+  <symbol id="i-save" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M17 21v-8H7v8M7 3v5h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2 20h20L12 3z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 10v5M12 18h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M20 20l-4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m0 0 5-5m-5 5-5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M4 19h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4m0 0 5 5m-5-5-5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M4 19h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="i-restore" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 4v4h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+  <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14m0 0-6-6m6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.4 8.4 8 9 4.6-.6 8-4 8-9V6l-8-3z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8.5 12l2.5 2.5 4.5-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 7v5l3.5 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+</svg>
+
+<div class="app-shell">
+  <!-- ============ 侧边栏（230px 白卡） ============ -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-logo">滨</div>
+      <div>
+        <div class="brand-name">滨发 ERP</div>
+        <div class="brand-sub">生产管理系统</div>
+      </div>
+    </div>
+    <nav class="side-nav">
+      <a class="nav-item"><svg><use href="#i-grid"/></svg><span>仪表盘</span></a>
+      <a class="nav-item"><svg><use href="#i-clip"/></svg><span>客户订单</span></a>
+      <a class="nav-item"><svg><use href="#i-pin"/></svg><span>湖北订单</span></a>
+      <a class="nav-item"><svg><use href="#i-check-sq"/></svg><span>审批中心</span><span class="nav-right"><span class="notification-badge">3</span></span></a>
+      <a class="nav-item active"><svg><use href="#i-db"/></svg><span>数据备份中心</span></a>
+      <a class="nav-item"><svg><use href="#i-gear"/></svg><span>系统设置</span></a>
+    </nav>
+    <div class="side-foot">
+      <div class="user-avatar">管</div>
+      <div>
+        <div class="user-name">管理员</div>
+        <div class="user-role">系统管理员</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ 主内容区 ============ -->
+  <main class="main">
+    <!-- 页面标题 -->
+    <header class="page-head">
+      <h1 class="page-title">数据备份中心</h1>
+      <div class="page-sub"><span class="sync-dot"></span>生产环境 · 数据备份与恢复&nbsp;｜&nbsp;上次同步：<span class="mono">08-21 04:58</span></div>
+    </header>
+
+    <!-- ============ 模块1 · 概览四卡 ============ -->
+    <section class="bk-section">
+      <div class="stats-grid">
+        <div class="stat-card card-hover">
+          <div class="stat-head"><span class="dot dot-success"></span><span class="stat-label">上次备份</span></div>
+          <div class="stat-value mono" id="lastBackupTime">08-21 02:00</div>
+          <div class="stat-desc" id="lastBackupDesc">18 小时前 · 全量备份</div>
+        </div>
+        <div class="stat-card card-hover">
+          <div class="stat-head"><span class="dot dot-primary"></span><span class="stat-label">备份总数</span></div>
+          <div class="stat-value">128<span class="unit">个</span></div>
+          <div class="stat-desc"><span class="count-badge-subtle">全量 46</span><span class="count-badge-subtle">增量 82</span></div>
+        </div>
+        <div class="stat-card card-hover">
+          <div class="stat-head"><span class="dot dot-info"></span><span class="stat-label">空间占用</span></div>
+          <div class="stat-value">128.6<span class="unit">GB</span></div>
+          <div class="progress"><div class="progress-bar" style="width:64%"></div></div>
+          <div class="stat-desc">已用 <span class="mono">64%</span> · 共 200 GB</div>
+        </div>
+        <div class="stat-card card-hover">
+          <div class="stat-head"><span class="dot dot-success"></span><span class="stat-label">健康度</span></div>
+          <div class="stat-value">96<span class="unit">%</span></div>
+          <div class="stat-desc"><span class="badge badge-success">状态良好</span>最近 7 次全量备份成功</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 模块2 · 备份操作 ============ -->
+    <section class="bk-section">
+      <div class="page-card">
+        <div class="page-card-header">
+          <div>
+            <div class="card-title">一键备份</div>
+            <div class="card-desc">同一时刻至多执行一个备份任务，任务执行中其余操作自动禁用</div>
+          </div>
+          <div class="section-actions">
+            <span class="tooltip-wrap" id="wrapFull">
+              <button class="btn btn-primary" id="btnFull"><svg><use href="#i-save"/></svg>全量备份</button>
+            </span>
+            <span class="tooltip-wrap" id="wrapIncr">
+              <button class="btn btn-outline" id="btnIncr"><svg class="amber"><use href="#i-plus"/></svg>增量备份</button>
+            </span>
+          </div>
+        </div>
+        <div class="page-card-body">
+          <!-- 任务执行卡片 -->
+          <div class="task-card" id="taskCard" hidden>
+            <div class="task-head">
+              <span class="badge badge-primary" id="taskBadge">进行中</span>
+              <span class="task-title" id="taskTitle">全量备份 · 正在执行</span>
+              <button class="btn btn-outline btn-sm" id="taskCancel">取消</button>
+            </div>
+            <div class="progress-row">
+              <div class="progress"><div class="progress-bar" id="taskBar"></div></div>
+              <span class="progress-text" id="taskPct">0%</span>
+            </div>
+            <div class="task-meta">
+              <span class="task-stage" id="taskStage">正在初始化备份任务…</span>
+              <span class="task-remain" id="taskRemain">预计剩余 —</span>
+            </div>
+          </div>
+          <div class="task-hint" style="font-size:13px;color:var(--text-muted)">选择全量或增量，同一时刻至多执行一个任务</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 模块3+4 · 定时任务配置 / 备份路径设置 ============ -->
+    <section class="bk-section">
+      <div class="bk-grid-two">
+        <!-- 定时任务配置 -->
+        <div class="page-card">
+          <div class="page-card-header">
+            <div>
+              <div class="card-title">定时任务配置</div>
+              <div class="card-desc">设置自动备份的执行计划</div>
+            </div>
+          </div>
+          <div class="page-card-body">
+            <div class="form-row">
+              <div><div class="form-label">启用定时备份</div><div class="form-hint">关闭后不再自动执行</div></div>
+              <button class="switch on" id="switchEnable" role="switch" aria-checked="true" title="启用/停用定时备份"></button>
+            </div>
+            <div class="form-row">
+              <div class="form-label">备份周期</div>
+              <select class="select" id="selectPeriod">
+                <option value="每日" selected>每日</option>
+                <option value="每周">每周</option>
+                <option value="每月">每月</option>
+                <option value="自定义">自定义 cron</option>
+              </select>
+            </div>
+            <div class="form-row" id="cronRow" hidden>
+              <div class="form-label">cron 表达式</div>
+              <input class="input mono" id="cronInput" value="0 2 * * *" style="width:160px">
+            </div>
+            <div class="form-row">
+              <div class="form-label">执行时间</div>
+              <input type="time" class="input" id="timeInput" value="02:00" style="width:120px">
+            </div>
+            <div class="form-row">
+              <div class="form-label">最近执行结果</div>
+              <span class="badge badge-success">成功 · <span class="mono">08-21 02:00</span></span>
+            </div>
+            <div class="form-actions">
+              <button class="btn btn-primary btn-sm" id="btnSaveConfig">保存配置</button>
+              <button class="btn btn-outline btn-sm" id="btnTriggerNow">立即触发一次</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 备份路径设置 -->
+        <div class="page-card">
+          <div class="page-card-header">
+            <div>
+              <div class="card-title">备份路径设置</div>
+              <div class="card-desc">备份文件的存储位置</div>
+            </div>
+          </div>
+          <div class="page-card-body">
+            <div class="radio-row">
+              <label class="radio"><input type="radio" name="pathMode" value="default" checked><span>默认系统路径</span></label>
+              <div class="path-box">D:\erp_data\backups</div>
+            </div>
+            <div class="radio-row">
+              <label class="radio"><input type="radio" name="pathMode" value="custom"><span>自定义路径</span></label>
+            </div>
+            <div class="path-input-row" id="customRow" hidden>
+              <input class="input mono" id="pathInput" placeholder="D:\erp_data\backups\custom">
+              <div class="path-feedback" id="pathFeedback"></div>
+            </div>
+            <div class="form-actions">
+              <button class="btn btn-outline btn-sm" id="btnCheckPath">校验路径</button>
+              <button class="btn btn-primary btn-sm" id="btnSavePath">保存设置</button>
+            </div>
+            <div class="path-current">
+              <div class="path-label">当前备份存储路径</div>
+              <div class="path-box" id="currentPath">D:\erp_data\backups</div>
+              <div class="path-space" id="pathSpace">可用空间 71.4 GB</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 模块5 · 还原入口 ============ -->
+    <section class="bk-section">
+      <div class="page-card restore-entry-card">
+        <div>
+          <div class="card-title">还原入口</div>
+          <div class="card-desc">将数据库恢复到指定备份点，或从上传文件还原</div>
+        </div>
+        <div class="restore-entry-actions">
+          <button class="btn btn-primary" id="btnOpenWizard"><svg><use href="#i-restore"/></svg>一键还原向导</button>
+          <label class="btn btn-outline tooltip-wrap" id="uploadLabel" for="uploadInput">
+            <svg><use href="#i-upload"/></svg>从文件上传还原
+            <input type="file" id="uploadInput" accept=".zip,.json,.gz" hidden>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 模块6 · 备份记录表格 ============ -->
+    <section class="bk-section">
+      <div class="page-card">
+        <div class="page-card-header">
+          <div>
+            <div class="card-title">备份记录</div>
+            <div class="card-desc">历史备份任务明细，可执行还原 / 下载</div>
+          </div>
+        </div>
+        <div class="page-card-body">
+          <div class="filter-bar">
+            <select class="select" id="filterType">
+              <option value="">全部类型</option><option value="全量">全量</option><option value="增量">增量</option>
+            </select>
+            <select class="select" id="filterStatus">
+              <option value="">全部状态</option><option value="成功">成功</option><option value="失败">失败</option><option value="进行中">进行中</option>
+            </select>
+            <select class="select" id="filterRange">
+              <option value="7">近 7 天</option><option value="30" selected>近 30 天</option><option value="all">全部时间</option>
+            </select>
+            <div class="search">
+              <svg><use href="#i-search"/></svg>
+              <input class="input" id="searchInput" placeholder="搜索备份名称">
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr><th>备份名称</th><th>类型</th><th>大小</th><th>创建时间</th><th>状态</th><th>操作</th></tr>
+              </thead>
+              <tbody id="recordBody">
+                <tr data-type="增量" data-status="进行中" data-name="incr-20250821-0400">
+                  <td><span class="fname">incr-20250821-0400</span></td>
+                  <td><span class="badge badge-warning">增量</span></td>
+                  <td class="mono">0.6 GB</td>
+                  <td class="mono">08-21 04:00</td>
+                  <td><span class="badge badge-primary">进行中</span></td>
+                  <td><button class="link link-danger restore-link" disabled>还原</button><button class="link link-download">下载</button></td>
+                </tr>
+                <tr data-type="全量" data-status="成功" data-name="full-20250821-0200">
+                  <td><span class="fname">full-20250821-0200</span></td>
+                  <td><span class="badge badge-neutral">全量</span></td>
+                  <td class="mono">128.6 GB</td>
+                  <td class="mono">08-21 02:00</td>
+                  <td><span class="badge badge-success">成功</span></td>
+                  <td><span class="tooltip-wrap"><button class="link link-danger restore-link">还原</button></span><button class="link link-download">下载</button></td>
+                </tr>
+                <tr data-type="增量" data-status="成功" data-name="incr-20250821-0300">
+                  <td><span class="fname">incr-20250821-0300</span></td>
+                  <td><span class="badge badge-warning">增量</span></td>
+                  <td class="mono">2.4 GB</td>
+                  <td class="mono">08-21 03:00</td>
+                  <td><span class="badge badge-success">成功</span></td>
+                  <td><span class="tooltip-wrap"><button class="link link-danger restore-link">还原</button></span><button class="link link-download">下载</button></td>
+                </tr>
+                <tr data-type="全量" data-status="成功" data-name="full-20250820-0200">
+                  <td><span class="fname">full-20250820-0200</span></td>
+                  <td><span class="badge badge-neutral">全量</span></td>
+                  <td class="mono">127.9 GB</td>
+                  <td class="mono">08-20 02:00</td>
+                  <td><span class="badge badge-success">成功</span></td>
+                  <td><span class="tooltip-wrap"><button class="link link-danger restore-link">还原</button></span><button class="link link-download">下载</button></td>
+                </tr>
+                <tr data-type="增量" data-status="失败" data-name="incr-20250820-0300">
+                  <td><span class="fname">incr-20250820-0300</span></td>
+                  <td><span class="badge badge-warning">增量</span></td>
+                  <td class="mono">1.8 GB</td>
+                  <td class="mono">08-20 03:00</td>
+                  <td><span class="badge badge-danger">失败</span></td>
+                  <td><span class="tooltip-wrap"><button class="link link-danger restore-link">还原</button></span><button class="link link-download">下载</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="pagination">
+            <span>共 128 条</span>
+            <button class="page-btn" id="pagePrev" disabled>上一页</button>
+            <span class="mono">第 1 / 26 页</span>
+            <button class="page-btn" id="pageNext">下一页</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- ============ 还原向导浮层 ============ -->
+<div class="overlay" id="restoreOverlay" hidden>
+  <div class="restore-dialog">
+    <div class="restore-head">
+      <div class="card-title">还原向导</div>
+      <button class="icon-btn" id="btnCloseWizard" title="关闭"><svg><use href="#i-x"/></svg></button>
+    </div>
+    <div class="stepper" id="stepper"></div>
+    <div class="step-body">
+      <!-- 第1步 选择备份点 -->
+      <div class="panel" id="panel1">
+        <p class="panel-desc">选择一个备份点用于还原。还原将把该备份点数据覆盖到当前数据库。</p>
+        <div class="point-list">
+          <label class="point checked"><input type="radio" name="point" value="full-20250821-0200" checked>
+            <span class="point-name">full-20250821-0200</span><span class="badge badge-neutral">全量</span>
+            <span class="point-meta">128.6 GB · 08-21 02:00</span>
+          </label>
+          <label class="point"><input type="radio" name="point" value="full-20250820-0200">
+            <span class="point-name">full-20250820-0200</span><span class="badge badge-neutral">全量</span>
+            <span class="point-meta">127.9 GB · 08-20 02:00</span>
+          </label>
+          <label class="point"><input type="radio" name="point" value="incr-20250821-0300">
+            <span class="point-name">incr-20250821-0300</span><span class="badge badge-warning">增量</span>
+            <span class="point-meta">2.4 GB · 08-21 03:00</span>
+          </label>
+        </div>
+      </div>
+      <!-- 第2步 差异预览 -->
+      <div class="panel" id="panel2" hidden>
+        <p class="panel-desc">还原将覆盖以下数据，请确认影响范围。</p>
+        <div class="impact-list">
+          <div class="impact-item"><svg><use href="#i-db"/></svg>将覆盖 <b>12</b> 张表</div>
+          <div class="impact-item"><svg><use href="#i-db"/></svg>共 <b>1,286,400</b> 条记录</div>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>表名</th><th>备份记录数</th><th>当前记录数</th><th>差异</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">users</td><td class="mono">128,640</td><td class="mono">128,640</td><td>—</td></tr>
+              <tr><td class="mono">orders</td><td class="mono">512,300</td><td class="mono">518,900</td><td><span class="badge badge-warning">+6,600</span></td></tr>
+              <tr><td class="mono">products</td><td class="mono">45,120</td><td class="mono">45,120</td><td>—</td></tr>
+              <tr><td class="mono">inventory</td><td class="mono">88,400</td><td class="mono">92,150</td><td><span class="badge badge-warning">+3,750</span></td></tr>
+              <tr><td class="mono">audit_logs</td><td class="mono">511,940</td><td class="mono">511,940</td><td>—</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="diff-summary"><svg width="14" height="14"><use href="#i-alert"/></svg>检测到 2 张表存在差异，还原后这些表的未备份数据将丢失。</div>
+      </div>
+      <!-- 第3步 一致性校验 -->
+      <div class="panel" id="panel3" hidden>
+        <p class="panel-desc">对备份点执行一致性校验，全部通过后方可继续。</p>
+        <ul class="check-list" id="checkList">
+          <li class="check-item"><span class="check-icon pending"></span>表结构一致性<span class="check-state">等待校验</span></li>
+          <li class="check-item"><span class="check-icon pending"></span>记录数一致性<span class="check-state">等待校验</span></li>
+          <li class="check-item"><span class="check-icon pending"></span>路由数据哈希<span class="check-state">等待校验</span></li>
+          <li class="check-item"><span class="check-icon pending"></span>索引完整性<span class="check-state">等待校验</span></li>
+        </ul>
+        <div class="check-result" id="checkResult" hidden><svg width="14" height="14"><use href="#i-check"/></svg>全部校验通过，可以安全执行还原。</div>
+      </div>
+      <!-- 第4步 还原完成 -->
+      <div class="panel" id="panel4" hidden>
+        <div class="report-success">
+          <div class="report-icon"><svg><use href="#i-check"/></svg></div>
+          <div class="report-title">还原完成</div>
+          <p class="report-sub">已还原 <b>12</b> 张表 · <b>1,286,400</b> 条记录，耗时 <b>4 分 12 秒</b></p>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>表名</th><th>还原后记录数</th><th>校验结果</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">users</td><td class="mono">128,640</td><td><span class="badge badge-success">一致</span></td></tr>
+              <tr><td class="mono">orders</td><td class="mono">512,300</td><td><span class="badge badge-success">一致</span></td></tr>
+              <tr><td class="mono">products</td><td class="mono">45,120</td><td><span class="badge badge-success">一致</span></td></tr>
+              <tr><td class="mono">inventory</td><td class="mono">88,400</td><td><span class="badge badge-success">一致</span></td></tr>
+              <tr><td class="mono">audit_logs</td><td class="mono">511,940</td><td><span class="badge badge-success">一致</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="suggest">
+          <div class="suggest-title">建议操作</div>
+          <ul>
+            <li>还原后建议立即执行一次全量备份，固化当前状态</li>
+            <li>检查 orders / inventory 表新增记录是否已重新备份</li>
+            <li>确认应用连接串已指向还原后的数据库</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <div class="restore-foot">
+      <button class="btn btn-outline btn-sm" id="wizPrev">上一步</button>
+      <div class="right">
+        <button class="btn btn-primary btn-sm" id="wizNext">下一步</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 危险确认弹层（红色危险域 + 二次校验） ============ -->
+<div class="modal-overlay" id="dangerModal" hidden>
+  <div class="danger-modal">
+    <div class="danger-bar"><svg><use href="#i-alert"/></svg>高危操作 · 二次确认</div>
+    <div class="danger-body">
+      <h3 class="danger-title">确认执行还原？</h3>
+      <p class="danger-sub">此操作将覆盖当前数据库全部数据，且无法撤销。</p>
+      <ul class="danger-list">
+        <li>将覆盖当前数据库全部数据</li>
+        <li>执行期间系统停止写入</li>
+        <li>未备份的新增数据将丢失</li>
+      </ul>
+      <div class="danger-input-row">
+        <input class="input" id="confirmInput" placeholder="输入「确认还原」以继续" autocomplete="off">
+      </div>
+      <div class="danger-actions">
+        <button class="btn btn-outline btn-sm" id="btnCancelDanger">取消</button>
+        <button class="btn btn-danger btn-sm" id="btnConfirmRestore" disabled>确认还原</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast 容器 -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+(function(){
+  'use strict';
+  var $ = function(s){ return document.querySelector(s); };
+  var $$ = function(s){ return Array.prototype.slice.call(document.querySelectorAll(s)); };
+
+  /* ---------- Toast ---------- */
+  function toast(msg, type){
+    type = type || 'info';
+    var box = $('#toastContainer');
+    var el = document.createElement('div');
+    el.className = 'toast ' + (type==='success' ? 'success' : type==='error' ? 'error' : '');
+    var icon = type==='success'
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>'
+      : type==='error'
+        ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>'
+        : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 8v5M12 17h.01"/></svg>';
+    el.innerHTML = icon;
+    el.appendChild(document.createTextNode(msg));
+    box.appendChild(el);
+    setTimeout(function(){ el.classList.add('out'); setTimeout(function(){ el.remove(); }, 250); }, 2600);
+  }
+
+  /* ---------- 模块2 · 一键备份（任务模拟 + 互斥） ---------- */
+  var runningTask = null;
+  var uiLock = 0;
+
+  function lockAll(locked){
+    uiLock = Math.max(0, uiLock + (locked ? 1 : -1));
+    var lockedUI = uiLock > 0;
+    ['btnFull','btnIncr','btnTriggerNow','btnOpenWizard'].forEach(function(id){
+      var b = $('#' + id);
+      if(b) b.disabled = lockedUI;
+    });
+    ['wrapFull','wrapIncr'].forEach(function(id){
+      var w = $('#' + id);
+      if(w){ if(lockedUI){ w.setAttribute('data-tooltip','有任务执行中'); } else { w.removeAttribute('data-tooltip'); } }
+    });
+    var up = $('#uploadLabel');
+    if(up){
+      up.classList.toggle('is-disabled', lockedUI);
+      if(lockedUI){ up.setAttribute('data-tooltip','有任务执行中'); } else { up.removeAttribute('data-tooltip'); }
+    }
+    $$('.restore-link').forEach(function(b){
+      b.disabled = lockedUI;
+      var w = b.closest('.tooltip-wrap');
+      if(w){ if(lockedUI){ w.setAttribute('data-tooltip','有任务执行中'); } else { w.removeAttribute('data-tooltip'); } }
+    });
+  }
+
+  function fullStage(p){
+    if(p<8) return '正在初始化备份任务…';
+    if(p<30) return '正在备份 users 表 3/12';
+    if(p<55) return '正在备份 orders 表 7/12';
+    if(p<78) return '正在备份 inventory 表 10/12';
+    if(p<94) return '正在压缩并校验数据…';
+    return '正在写入备份元数据…';
+  }
+  function incrStage(p){
+    if(p<12) return '正在扫描增量变更…';
+    if(p<50) return '正在备份增量数据 1/4';
+    if(p<86) return '正在校验增量记录…';
+    return '正在写入备份元数据…';
+  }
+  function fmtRemain(s){
+    var m = Math.floor(s/60), ss = s%60;
+    return (m>0 ? m+' 分 ' : '') + ss + ' 秒';
+  }
+  function renderTask(pct, isFull, totalSec){
+    $('#taskBar').style.width = pct + '%';
+    $('#taskPct').textContent = Math.round(pct) + '%';
+    $('#taskStage').textContent = isFull ? fullStage(pct) : incrStage(pct);
+    var remain = Math.max(0, Math.round((100-pct)/100*totalSec));
+    $('#taskRemain').textContent = '预计剩余 ' + fmtRemain(remain);
+  }
+  function startBackup(type){
+    if(runningTask || uiLock > 0) return;
+    var isFull = type === 'full';
+    $('#taskCard').hidden = false;
+    $('#taskBadge').className = 'badge badge-primary';
+    $('#taskBadge').textContent = '进行中';
+    $('#taskBar').className = 'progress-bar';
+    $('#taskBar').style.width = '0%';
+    $('#taskPct').textContent = '0%';
+    $('#taskStage').textContent = isFull ? '正在初始化备份任务…' : '正在扫描增量变更…';
+    $('#taskRemain').textContent = '预计剩余 —';
+    $('#taskTitle').textContent = (isFull ? '全量备份' : '增量备份') + ' · 正在执行';
+    lockAll(true);
+    var pct = 0, totalSec = isFull ? 200 : 70, start = Date.now();
+    var task = { type: type, cancelled: false };
+    runningTask = task;
+    task.timer = setInterval(function(){
+      if(task.cancelled) return;
+      pct += Math.random()*2.2 + 1.1;
+      if(pct >= 100) pct = 100;
+      renderTask(pct, isFull, totalSec);
+      if(pct >= 100){
+        clearInterval(task.timer);
+        finishTask(isFull, start);
+      }
+    }, 120);
+    $('#taskCancel').onclick = function(){ cancelTask(isFull); };
+  }
+  function finishTask(isFull, start){
+    $('#taskBar').className = 'progress-bar success';
+    $('#taskBadge').className = 'badge badge-success';
+    $('#taskBadge').textContent = '成功';
+    $('#taskStage').textContent = (isFull ? '全量' : '增量') + '备份完成';
+    $('#taskRemain').textContent = '耗时 ' + fmtRemain(Math.round((Date.now()-start)/1000));
+    $('#taskTitle').textContent = (isFull ? '全量备份' : '增量备份') + ' · 已完成';
+    runningTask = null;
+    lockAll(false);
+    var now = new Date();
+    var pad = function(n){ return String(n).padStart(2,'0'); };
+    $('#lastBackupTime').textContent = pad(now.getMonth()+1) + '-' + pad(now.getDate()) + ' ' + pad(now.getHours()) + ':' + pad(now.getMinutes());
+    $('#lastBackupDesc').textContent = '刚刚 · ' + (isFull ? '全量' : '增量') + '备份';
+    toast((isFull ? '全量' : '增量') + '备份已完成', 'success');
+  }
+  function cancelTask(isFull){
+    if(!runningTask) return;
+    runningTask.cancelled = true;
+    clearInterval(runningTask.timer);
+    $('#taskBadge').className = 'badge badge-neutral';
+    $('#taskBadge').textContent = '已取消';
+    $('#taskStage').textContent = (isFull ? '全量' : '增量') + '备份任务已取消';
+    $('#taskRemain').textContent = '';
+    $('#taskTitle').textContent = (isFull ? '全量备份' : '增量备份') + ' · 已取消';
+    runningTask = null;
+    lockAll(false);
+    toast('备份任务已取消');
+  }
+  $('#btnFull').addEventListener('click', function(){ startBackup('full'); });
+  $('#btnIncr').addEventListener('click', function(){ startBackup('incr'); });
+  $('#btnTriggerNow').addEventListener('click', function(){ startBackup('incr'); });
+
+  /* ---------- 模块3 · 定时任务配置 ---------- */
+  $('#switchEnable').addEventListener('click', function(){
+    this.classList.toggle('on');
+    this.setAttribute('aria-checked', this.classList.contains('on'));
+    toast(this.classList.contains('on') ? '已启用定时备份' : '已停用定时备份');
+  });
+  $('#selectPeriod').addEventListener('change', function(){
+    $('#cronRow').hidden = this.value !== '自定义';
+  });
+  $('#btnSaveConfig').addEventListener('click', function(){ toast('配置已保存', 'success'); });
+
+  /* ---------- 模块4 · 备份路径设置 ---------- */
+  var pathInput = $('#pathInput'), pathFeedback = $('#pathFeedback');
+  function validatePath(){
+    var v = pathInput.value.trim();
+    pathInput.classList.remove('error');
+    if(!v){ pathFeedback.innerHTML = ''; return {ok:false, reason:'empty'}; }
+    var ok = true, reason = '';
+    if(!/^(d|c):\\/i.test(v)){ ok = false; reason = '路径需以 D:\\ 或 C:\\ 开头'; }
+    else if(/[<>:"|?*\u0000-\u001f]/.test(v)){ ok = false; reason = '包含非法字符（<>:"|?*）'; }
+    else if(v.length > 240){ ok = false; reason = '路径过长'; }
+    if(ok){
+      pathFeedback.innerHTML = '<svg class="ok" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg><span class="ok">路径可写</span>';
+    } else {
+      pathInput.classList.add('error');
+      pathFeedback.innerHTML = '<svg class="err" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg><span class="err">' + reason + '</span>';
+    }
+    return {ok:ok, reason:reason};
+  }
+  pathInput.addEventListener('input', validatePath);
+  $$('input[name="pathMode"]').forEach(function(r){
+    r.addEventListener('change', function(){
+      var custom = this.value === 'custom';
+      $('#customRow').hidden = !custom;
+      if(!custom){ pathInput.value = ''; pathInput.classList.remove('error'); pathFeedback.innerHTML = ''; }
+    });
+  });
+  $('#btnCheckPath').addEventListener('click', function(){
+    var r = validatePath();
+    if(r.ok && r.reason !== 'empty'){ toast('路径校验通过，路径可写', 'success'); }
+    else if(r.reason === 'empty'){ toast('请输入自定义路径', 'error'); }
+    else { toast('路径校验失败：' + r.reason, 'error'); }
+  });
+  $('#btnSavePath').addEventListener('click', function(){
+    var r = validatePath();
+    if(r.ok && r.reason !== 'empty'){
+      $('#currentPath').textContent = pathInput.value.trim();
+      $('#pathSpace').textContent = '可用空间 — GB（模拟）';
+      toast('路径设置已保存', 'success');
+    } else if(r.reason === 'empty'){ toast('请先输入自定义路径', 'error'); }
+    else { toast('路径不合法，无法保存', 'error'); }
+  });
+
+  /* ---------- 模块5 · 还原入口 / 上传还原 ---------- */
+  $('#uploadInput').addEventListener('change', function(){
+    if(this.files && this.files[0]){
+      if($('#uploadLabel').classList.contains('is-disabled')){
+        toast('有任务执行中，请稍后再试', 'error');
+      } else {
+        toast('已选择文件，开始上传还原（模拟）');
+      }
+      this.value = '';
+    }
+  });
+
+  /* ---------- 模块6 · 备份记录筛选 ---------- */
+  function applyFilters(){
+    var t = $('#filterType').value, s = $('#filterStatus').value, q = $('#searchInput').value.trim().toLowerCase();
+    $$('#recordBody tr').forEach(function(tr){
+      var show = true;
+      if(t && tr.dataset.type !== t) show = false;
+      if(s && tr.dataset.status !== s) show = false;
+      if(q && tr.dataset.name.indexOf(q) < 0) show = false;
+      tr.hidden = !show;
+    });
+  }
+  $('#filterType').addEventListener('change', applyFilters);
+  $('#filterStatus').addEventListener('change', applyFilters);
+  $('#searchInput').addEventListener('input', applyFilters);
+  $('#pagePrev').addEventListener('click', function(){ toast('已是第一页'); });
+  $('#pageNext').addEventListener('click', function(){ toast('已跳转到第 2 页'); });
+  $$('#recordBody .link-download').forEach(function(btn){
+    btn.addEventListener('click', function(){ toast('开始下载备份文件'); });
+  });
+
+  /* ---------- 还原向导 ---------- */
+  var steps = ['选择备份点','差异预览','一致性校验','还原完成'];
+  var wizStep = 1, checksPassed = false, checkTimers = [];
+
+  function openWizard(){
+    wizStep = 1; checksPassed = false;
+    $('#restoreOverlay').hidden = false;
+    $('#btnCloseWizard').disabled = false;
+    lockAll(true);
+    renderStepper(); showPanel(1);
+  }
+  function closeWizard(){
+    $('#restoreOverlay').hidden = true;
+    lockAll(false);
+  }
+  function renderStepper(){
+    var el = $('#stepper'), html = '';
+    steps.forEach(function(s, i){
+      var n = i + 1;
+      var cls = n < wizStep ? 'done' : (n === wizStep ? 'current' : '');
+      var icon = cls === 'done'
+        ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>'
+        : n;
+      html += '<div class="step '+cls+'"><span class="step-dot">'+icon+'</span><span class="step-label">'+s+'</span></div>';
+      if(i < steps.length-1) html += '<div class="step-line '+(n<wizStep?'done':'')+'"></div>';
+    });
+    el.innerHTML = html;
+  }
+  function showPanel(n){
+    for(var i=1; i<=4; i++) $('#panel'+i).hidden = (i !== n);
+    $('#wizPrev').hidden = (n === 1 || n === 4);
+    var next = $('#wizNext');
+    next.hidden = false;
+    if(n === 4){
+      next.className = 'btn btn-primary btn-sm';
+      next.textContent = '完成';
+    } else if(n === 3){
+      next.className = 'btn btn-danger btn-sm';
+      next.textContent = '确认还原';
+    } else {
+      next.className = 'btn btn-primary btn-sm';
+      next.textContent = '下一步';
+    }
+  }
+  function goStep(n){
+    wizStep = n;
+    renderStepper(); showPanel(n);
+    if(n === 3) runChecks();
+  }
+  function setCheck(item, state, text){
+    var icon = item.querySelector('.check-icon'), st = item.querySelector('.check-state');
+    icon.className = 'check-icon ' + state;
+    if(state === 'ok'){ icon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>'; }
+    else if(state === 'running'){ icon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-dasharray="40 60" stroke-linecap="round"><circle cx="12" cy="12" r="9"/></svg>'; }
+    else { icon.innerHTML = ''; }
+    st.textContent = text;
+  }
+  function runChecks(){
+    checksPassed = false;
+    $('#checkResult').hidden = true;
+    var items = $$('#checkList .check-item');
+    checkTimers.forEach(clearTimeout); checkTimers = [];
+    items.forEach(function(it){ setCheck(it, 'pending', '等待校验'); });
+    items.forEach(function(it, i){
+      checkTimers.push(setTimeout(function(){ setCheck(it,'running','校验中…'); }, 300 + i*700));
+      checkTimers.push(setTimeout(function(){ setCheck(it,'ok','通过'); }, 950 + i*700));
+    });
+    checkTimers.push(setTimeout(function(){
+      checksPassed = true;
+      $('#checkResult').hidden = false;
+      toast('一致性校验通过', 'success');
+    }, 950 + items.length*700));
+  }
+  $('#btnCloseWizard').addEventListener('click', closeWizard);
+  $('#wizPrev').addEventListener('click', function(){
+    if(wizStep === 4) return;
+    goStep(wizStep - 1);
+  });
+  $('#wizNext').addEventListener('click', function(){
+    if(wizStep === 3){
+      if(!checksPassed){ toast('请等待一致性校验完成', 'error'); return; }
+      openDangerModal(); return;
+    }
+    if(wizStep === 4){ closeWizard(); return; }
+    goStep(wizStep + 1);
+  });
+  $$('input[name="point"]').forEach(function(r){
+    r.addEventListener('change', function(){
+      $$('.point').forEach(function(p){ p.classList.remove('checked'); });
+      this.closest('.point').classList.add('checked');
+    });
+  });
+  $$('.restore-link').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      if(btn.disabled) return;
+      openWizard();
+    });
+  });
+  $('#btnOpenWizard').addEventListener('click', openWizard);
+
+  /* ---------- 危险确认弹层（红色危险域 + 输入「确认还原」二次校验） ---------- */
+  function openDangerModal(){
+    $('#dangerModal').hidden = false;
+    $('#confirmInput').value = '';
+    $('#btnConfirmRestore').disabled = true;
+    $('#confirmInput').focus();
+  }
+  function closeDangerModal(){ $('#dangerModal').hidden = true; }
+  $('#confirmInput').addEventListener('input', function(){
+    $('#btnConfirmRestore').disabled = this.value !== '确认还原';
+  });
+  $('#btnCancelDanger').addEventListener('click', closeDangerModal);
+  $('#btnConfirmRestore').addEventListener('click', function(){
+    if(this.disabled) return;
+    closeDangerModal();
+    goStep(4);
+    toast('还原执行完成', 'success');
+  });
+  // 遮罩点击 / Esc 不关闭危险弹层（强制走取消按钮，避免误触）
+  document.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && !$('#dangerModal').hidden) e.preventDefault();
+  });
+})();
+</script>
+</body>
+</html>

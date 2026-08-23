@@ -1,0 +1,1352 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=1280" />
+<title>ERP 服务器管理器 · V3 大厂级 UI 原型</title>
+<style>
+/* =========================================================
+   ERP Server Manager V3 · Prototype
+   Design language: Ant Design Pro 5 × Arco Design 2 × Apple HIG
+   ========================================================= */
+
+/* === Design Tokens (完整内嵌,可独立运行) === */
+:root {
+  /* brand blue scale */
+  --blue-50:#E6F0FF; --blue-100:#C2D8FF; --blue-200:#9DBEFF; --blue-300:#76A3FF;
+  --blue-400:#5490FF; --blue-500:#2F7BFF; --blue-600:#1F66E6; --blue-700:#1853BF;
+  --blue-800:#114199; --blue-900:#0A2E73;
+  /* semantic */
+  --green-500:#10B981; --amber-500:#F59E0B; --red-500:#EF4444; --cyan-500:#06B6D4;
+  --violet-500:#8B5CF6; --indigo-500:#6366F1;
+  /* gray 10 step */
+  --gray-50:#F7F8FA; --gray-100:#F2F3F5; --gray-200:#E5E6EB; --gray-300:#C9CDD4;
+  --gray-400:#86909C; --gray-500:#6B7785; --gray-600:#4E5969; --gray-700:#272E3B;
+  --gray-800:#1D2129; --gray-900:#121417;
+
+  /* dark theme surface */
+  --bg-page:#0B0E14; --bg-sider:#0F1320; --bg-header:#11151F; --bg-panel:#161B26;
+  --bg-panel-hover:#1B2230; --bg-elevated:#1E2533; --bg-input:#0E1219;
+  --border:#232A39; --border-strong:#2F3849;
+  /* text */
+  --t1:rgba(255,255,255,.96); --t2:rgba(255,255,255,.72); --t3:rgba(255,255,255,.48);
+  --t4:rgba(255,255,255,.30); --ton-b:#fff;
+  /* soft tints */
+  --brand-soft:rgba(47,123,255,.14); --success-soft:rgba(16,185,129,.14);
+  --warning-soft:rgba(245,158,11,.16); --danger-soft:rgba(239,68,68,.14);
+  --info-soft:rgba(6,182,212,.14); --processing-soft:rgba(99,102,241,.16);
+  --purple-soft:rgba(139,92,246,.14);
+  /* font */
+  --f-sans:"PingFang SC","Microsoft YaHei UI",-apple-system,BlinkMacSystemFont,"Segoe UI","Helvetica Neue",Arial,sans-serif;
+  --f-mono:"JetBrains Mono","Cascadia Mono","Microsoft YaHei Mono","SF Mono",Consolas,Menlo,monospace;
+  --f-num:"DIN Pro","Inter","Helvetica Neue","PingFang SC",sans-serif;
+  /* radius */
+  --r-xs:4px; --r-sm:6px; --r-md:8px; --r-lg:12px; --r-xl:16px; --r-pill:999px;
+  /* spacing */
+  --s-1:4px; --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px; --s-6:24px;
+  --s-7:28px; --s-8:32px; --s-10:40px; --s-12:48px;
+  /* shadow */
+  --sh-xs:0 1px 2px rgba(0,0,0,.16);
+  --sh-sm:0 2px 6px rgba(0,0,0,.20), 0 0 0 1px var(--border);
+  --sh-md:0 6px 16px rgba(0,0,0,.28), 0 0 0 1px var(--border);
+  --sh-lg:0 12px 32px rgba(0,0,0,.36), 0 0 0 1px var(--border);
+  --sh-focus:0 0 0 3px rgba(47,123,255,.25);
+  /* motion */
+  --ease:cubic-bezier(.16,1,.3,1);
+  --t-fast:120ms; --t-base:200ms; --t-slow:320ms;
+  /* layout */
+  --sider-w:232px; --sider-w-c:64px; --header-h:56px; --footer-h:40px;
+}
+[data-theme="light"]{
+  --bg-page:#F5F7FA; --bg-sider:#FFFFFF; --bg-header:#FFFFFF; --bg-panel:#FFFFFF;
+  --bg-panel-hover:#F7F8FA; --bg-elevated:#FFFFFF; --bg-input:#F2F3F5;
+  --border:#E5E6EB; --border-strong:#C9CDD4;
+  --t1:rgba(29,33,41,.96); --t2:rgba(29,33,41,.72); --t3:rgba(29,33,41,.50);
+  --t4:rgba(29,33,41,.32); --ton-b:#fff;
+  --brand-soft:rgba(22,104,220,.10); --success-soft:rgba(0,168,112,.10);
+  --warning-soft:rgba(255,136,0,.12); --danger-soft:rgba(213,73,65,.10);
+  --info-soft:rgba(15,198,194,.10); --processing-soft:rgba(99,102,241,.10);
+  --purple-soft:rgba(114,46,209,.10);
+  --sh-xs:0 1px 2px rgba(0,0,0,.04);
+  --sh-sm:0 2px 8px rgba(0,0,0,.06), 0 0 0 1px var(--border);
+  --sh-md:0 6px 20px rgba(0,0,0,.10), 0 0 0 1px var(--border);
+  --sh-lg:0 16px 40px rgba(0,0,0,.14), 0 0 0 1px var(--border);
+}
+
+/* === Reset === */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{
+  font-family:var(--f-sans);
+  font-size:var(--fs-body,14px);
+  color:var(--t1);
+  background:var(--bg-page);
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+input,select{font-family:inherit;font-size:inherit;color:inherit}
+a{color:inherit;text-decoration:none}
+svg{display:block}
+::selection{background:var(--brand-soft);color:var(--t1)}
+
+/* === App shell === */
+.app{display:grid;grid-template-columns:var(--sider-w) 1fr;grid-template-rows:var(--header-h) 1fr var(--footer-h);grid-template-areas:"sider header" "sider main" "sider footer";height:100vh;background:var(--bg-page);transition:grid-template-columns var(--t-base) var(--ease)}
+.app.collapsed{grid-template-columns:var(--sider-w-c) 1fr}
+
+/* === Sider === */
+.sider{grid-area:sider;background:var(--bg-sider);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.brand{display:flex;align-items:center;gap:var(--s-3);padding:0 var(--s-5);height:var(--header-h);border-bottom:1px solid var(--border);flex-shrink:0}
+.brand-mark{width:32px;height:32px;border-radius:var(--r-md);background:linear-gradient(135deg,var(--blue-500),var(--blue-700));display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:15px;box-shadow:0 4px 12px rgba(47,123,255,.32)}
+.brand-text{display:flex;flex-direction:column;line-height:1.2;min-width:0}
+.brand-text strong{font-size:14px;font-weight:600;letter-spacing:.2px}
+.brand-text small{font-size:11px;color:var(--t3);font-family:var(--f-mono);letter-spacing:.5px;text-transform:uppercase}
+
+.nav{flex:1;padding:var(--s-3) var(--s-2);overflow-y:auto;overflow-x:hidden}
+.nav::-webkit-scrollbar{width:6px}
+.nav::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+.nav-group{margin-bottom:var(--s-4)}
+.nav-group-label{font-size:11px;color:var(--t3);text-transform:uppercase;letter-spacing:1px;padding:var(--s-2) var(--s-3) var(--s-1);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nav-item{display:flex;align-items:center;gap:var(--s-3);padding:var(--s-2) var(--s-3);border-radius:var(--r-md);color:var(--t2);font-size:13px;font-weight:500;cursor:pointer;user-select:none;transition:background var(--t-fast) var(--ease),color var(--t-fast) var(--ease);position:relative;margin-bottom:2px;white-space:nowrap}
+.nav-item:hover{background:var(--bg-panel-hover);color:var(--t1)}
+.nav-item.active{background:var(--brand-soft);color:var(--blue-400)}
+[data-theme="light"] .nav-item.active{color:var(--blue-500)}
+.nav-item.active::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;background:var(--blue-500);border-radius:0 2px 2px 0}
+.nav-item svg{width:18px;height:18px;flex-shrink:0;stroke-width:1.6}
+.nav-item .badge{margin-left:auto;background:var(--danger);color:#fff;font-size:10px;padding:1px 6px;border-radius:var(--r-pill);font-weight:600;line-height:1.4}
+.sider-foot{padding:var(--s-3) var(--s-4);border-top:1px solid var(--border);font-size:11px;color:var(--t3);font-family:var(--f-mono);display:flex;align-items:center;gap:var(--s-2);white-space:nowrap;overflow:hidden}
+.sider-foot .dot{width:6px;height:6px;border-radius:50%;background:var(--green-500);box-shadow:0 0 6px var(--green-500)}
+.app.collapsed .brand-text,.app.collapsed .nav-group-label,.app.collapsed .nav-item span,.app.collapsed .nav-item .badge,.app.collapsed .sider-foot span{display:none}
+.app.collapsed .nav-item{justify-content:center;padding:var(--s-3) 0}
+.app.collapsed .sider-foot{justify-content:center}
+
+/* === Header === */
+.header{grid-area:header;background:var(--bg-header);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 var(--s-6);gap:var(--s-4)}
+.crumb{display:flex;align-items:center;gap:var(--s-2);color:var(--t2);font-size:13px;min-width:0}
+.crumb .crumb-sep{color:var(--t3)}
+.crumb .crumb-cur{color:var(--t1);font-weight:600}
+.crumb svg{width:14px;height:14px;color:var(--t3)}
+.header-right{margin-left:auto;display:flex;align-items:center;gap:var(--s-3)}
+
+/* status pills */
+.pill{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:var(--r-sm);font-size:12px;font-weight:500;line-height:1;background:var(--bg-panel);border:1px solid var(--border);color:var(--t2);white-space:nowrap}
+.pill .dot{width:6px;height:6px;border-radius:50%;background:var(--t3)}
+.pill.brand{background:var(--brand-soft);border-color:transparent;color:var(--blue-400)}
+[data-theme="light"] .pill.brand{color:var(--blue-500)}
+.pill.brand .dot{background:var(--blue-500);box-shadow:0 0 0 3px rgba(47,123,255,.2)}
+.pill.success{background:var(--success-soft);border-color:transparent;color:var(--green-500)}
+.pill.success .dot{background:var(--green-500);box-shadow:0 0 0 3px var(--success-soft);animation:pulse 2s infinite}
+.pill.warning{background:var(--warning-soft);border-color:transparent;color:var(--amber-500)}
+.pill.warning .dot{background:var(--amber-500)}
+.pill.danger{background:var(--danger-soft);border-color:transparent;color:var(--red-500)}
+.pill.danger .dot{background:var(--red-500);box-shadow:0 0 0 3px var(--danger-soft);animation:pulse 2s infinite}
+.pill.info .dot{background:var(--cyan-500)}
+.pill.muted{color:var(--t3)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* icon button */
+.icon-btn{width:32px;height:32px;border-radius:var(--r-md);display:inline-flex;align-items:center;justify-content:center;color:var(--t2);transition:background var(--t-fast) var(--ease),color var(--t-fast) var(--ease)}
+.icon-btn:hover{background:var(--bg-panel-hover);color:var(--t1)}
+.icon-btn svg{width:18px;height:18px;stroke-width:1.6}
+
+/* avatar */
+.avatar{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#f59e0b,#ef4444);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:13px;cursor:pointer}
+.avatar.online::after{content:"";position:relative;display:block;width:8px;height:8px;border-radius:50%;background:var(--green-500);border:2px solid var(--bg-header);margin-top:-8px;margin-left:22px}
+
+/* search */
+.search{display:flex;align-items:center;gap:var(--s-2);height:32px;width:240px;padding:0 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--r-md);color:var(--t3);font-size:13px;transition:border-color var(--t-fast) var(--ease),box-shadow var(--t-fast) var(--ease)}
+.search:focus-within{border-color:var(--border-focus);box-shadow:var(--sh-focus);color:var(--t2)}
+.search svg{width:14px;height:14px}
+.search .kbd{margin-left:auto;font-family:var(--f-mono);font-size:11px;color:var(--t3);background:var(--bg-panel);padding:1px 6px;border-radius:var(--r-xs);border:1px solid var(--border)}
+
+/* === Main === */
+.main{grid-area:main;overflow-y:auto;background:var(--bg-page);position:relative}
+.main::-webkit-scrollbar{width:8px;height:8px}
+.main::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+.main::-webkit-scrollbar-thumb:hover{background:var(--border-strong)}
+
+/* view transition */
+.view{display:none;padding:var(--s-6) var(--s-8);max-width:1440px;margin:0 auto;animation:fadein var(--t-slow) var(--ease)}
+.view.active{display:block}
+@keyframes fadein{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+/* page header */
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:var(--s-6);gap:var(--s-4);flex-wrap:wrap}
+.page-title{display:flex;flex-direction:column;gap:var(--s-1)}
+.page-title h1{font-size:22px;font-weight:600;letter-spacing:-.2px;line-height:30px}
+.page-title .desc{color:var(--t3);font-size:13px;line-height:18px}
+.page-actions{display:flex;align-items:center;gap:var(--s-2)}
+
+/* === Button === */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 14px;border-radius:var(--r-md);font-size:13px;font-weight:500;line-height:1;transition:all var(--t-fast) var(--ease);white-space:nowrap;cursor:pointer;border:1px solid transparent}
+.btn svg{width:14px;height:14px;stroke-width:2}
+.btn-primary{background:var(--blue-500);color:#fff;box-shadow:0 1px 0 rgba(255,255,255,.08) inset, 0 2px 6px rgba(47,123,255,.32)}
+.btn-primary:hover{background:var(--blue-400);box-shadow:0 1px 0 rgba(255,255,255,.08) inset, 0 4px 12px rgba(47,123,255,.40)}
+.btn-primary:active{background:var(--blue-600)}
+.btn-default{background:var(--bg-panel);color:var(--t1);border-color:var(--border)}
+.btn-default:hover{background:var(--bg-panel-hover);border-color:var(--border-strong)}
+.btn-ghost{background:transparent;color:var(--t2)}
+.btn-ghost:hover{background:var(--bg-panel-hover);color:var(--t1)}
+.btn-danger{background:var(--danger-soft);color:var(--red-500);border-color:transparent}
+.btn-danger:hover{background:var(--red-500);color:#fff}
+.btn-sm{height:26px;padding:0 10px;font-size:12px;border-radius:var(--r-sm)}
+.btn-lg{height:38px;padding:0 18px;font-size:14px}
+.btn .kbd{font-family:var(--f-mono);font-size:10px;background:rgba(255,255,255,.18);padding:1px 5px;border-radius:3px;margin-left:4px}
+.btn-primary .kbd{background:rgba(255,255,255,.2)}
+
+/* === Card === */
+.card{background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;transition:border-color var(--t-fast) var(--ease),box-shadow var(--t-fast) var(--ease)}
+.card:hover{border-color:var(--border-strong)}
+.card-head{padding:var(--s-5) var(--s-6);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:var(--s-3);min-height:56px}
+.card-head h3{font-size:15px;font-weight:600;letter-spacing:-.1px}
+.card-head .sub{font-size:12px;color:var(--t3);margin-left:auto;font-family:var(--f-mono)}
+.card-body{padding:var(--s-6)}
+.card-body.tight{padding:var(--s-4) var(--s-5)}
+.card-body.flush{padding:0}
+
+/* === Grid === */
+.grid{display:grid;gap:var(--s-4)}
+.grid-cols-4{grid-template-columns:repeat(4,1fr)}
+.grid-cols-3{grid-template-columns:repeat(3,1fr)}
+.grid-cols-2{grid-template-columns:repeat(2,1fr)}
+@media(max-width:1180px){.grid-cols-4{grid-template-columns:repeat(2,1fr)}.grid-cols-3{grid-template-columns:1fr}}
+
+/* === Metric card === */
+.metric{padding:var(--s-5) var(--s-6);display:flex;flex-direction:column;gap:var(--s-2)}
+.metric-head{display:flex;align-items:center;justify-content:space-between}
+.metric-label{font-size:12px;color:var(--t3);text-transform:uppercase;letter-spacing:.6px;font-weight:600}
+.metric-trend{font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:2px;font-family:var(--f-num)}
+.metric-trend.up{color:var(--green-500)}
+.metric-trend.down{color:var(--red-500)}
+.metric-value{font-family:var(--f-num);font-size:30px;font-weight:600;line-height:36px;letter-spacing:-.5px}
+.metric-unit{font-size:14px;color:var(--t3);margin-left:2px;font-weight:500}
+.metric-foot{display:flex;align-items:center;gap:var(--s-2);font-size:12px;color:var(--t3)}
+.metric-foot .dot{width:6px;height:6px;border-radius:50%}
+
+/* mini sparkline */
+.spark{height:32px;width:100%}
+
+/* === Progress bar === */
+.bar{height:6px;border-radius:var(--r-pill);background:var(--bg-input);overflow:hidden;position:relative}
+.bar-fill{height:100%;border-radius:inherit;transition:width var(--t-slow) var(--ease);position:relative}
+.bar-fill::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,.18) 0%,transparent 50%);border-radius:inherit}
+.bar-fill.brand{background:linear-gradient(90deg,var(--blue-600),var(--blue-400))}
+.bar-fill.success{background:linear-gradient(90deg,#0E9F6E,var(--green-500))}
+.bar-fill.warning{background:linear-gradient(90deg,#D97706,var(--amber-500))}
+.bar-fill.danger{background:linear-gradient(90deg,#DC2626,var(--red-500))}
+.bar-fill.info{background:linear-gradient(90deg,#0891B2,var(--cyan-500))}
+
+/* === Tabs === */
+.tabs{display:flex;align-items:center;gap:var(--s-1);border-bottom:1px solid var(--border);padding:0 var(--s-1)}
+.tab{padding:var(--s-3) var(--s-4);font-size:13px;font-weight:500;color:var(--t2);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;transition:all var(--t-fast) var(--ease);display:inline-flex;align-items:center;gap:6px}
+.tab:hover{color:var(--t1)}
+.tab.active{color:var(--blue-500);border-bottom-color:var(--blue-500)}
+.tab .count{font-size:11px;background:var(--bg-input);padding:1px 6px;border-radius:var(--r-pill);color:var(--t3)}
+.tab.active .count{background:var(--brand-soft);color:var(--blue-500)}
+
+/* === Table === */
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl thead th{text-align:left;padding:var(--s-3) var(--s-4);font-weight:500;font-size:12px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px;background:var(--bg-header);border-bottom:1px solid var(--border);white-space:nowrap}
+.tbl tbody td{padding:var(--s-4);border-bottom:1px solid var(--border);vertical-align:middle}
+.tbl tbody tr{transition:background var(--t-fast) var(--ease)}
+.tbl tbody tr:hover{background:var(--bg-panel-hover)}
+.tbl tbody tr:last-child td{border-bottom:none}
+.tbl .mono{font-family:var(--f-mono);font-size:12px;color:var(--t2)}
+
+/* service icon container (unified) */
+.svc-ico{width:36px;height:36px;border-radius:var(--r-md);display:inline-flex;align-items:center;justify-content:center;background:var(--brand-soft);color:var(--blue-500);flex-shrink:0}
+.svc-ico.green{background:var(--success-soft);color:var(--green-500)}
+.svc-ico.amber{background:var(--warning-soft);color:var(--amber-500)}
+.svc-ico.red{background:var(--danger-soft);color:var(--red-500)}
+.svc-ico.violet{background:var(--purple-soft);color:var(--violet-500)}
+.svc-ico.cyan{background:var(--info-soft);color:var(--cyan-500)}
+.svc-ico.gray{background:var(--bg-input);color:var(--t3)}
+.svc-ico svg{width:18px;height:18px;stroke-width:1.8}
+
+/* === Empty state === */
+.empty{padding:var(--s-12) var(--s-6);text-align:center;color:var(--t3)}
+.empty .empty-ico{width:56px;height:56px;border-radius:var(--r-lg);background:var(--bg-input);color:var(--t3);display:inline-flex;align-items:center;justify-content:center;margin-bottom:var(--s-3)}
+.empty .empty-ico svg{width:28px;height:28px;stroke-width:1.4}
+.empty h4{font-size:15px;font-weight:500;color:var(--t1);margin-bottom:var(--s-1)}
+.empty p{font-size:13px;color:var(--t3);margin-bottom:var(--s-4)}
+
+/* === Code / log === */
+.log{font-family:var(--f-mono);font-size:12px;line-height:22px;background:var(--bg-input);padding:var(--s-4);border-radius:var(--r-md);color:var(--t2);overflow:auto;max-height:480px;white-space:pre-wrap;word-break:break-all}
+.log .ts{color:var(--t3);margin-right:var(--s-2)}
+.log .lvl{font-weight:600;margin-right:6px;padding:0 4px;border-radius:3px;font-size:10px}
+.log .lvl.info{color:var(--cyan-500)}
+.log .lvl.warn{color:var(--amber-500);background:var(--warning-soft)}
+.log .lvl.error{color:var(--red-500);background:var(--danger-soft)}
+.log .lvl.success{color:var(--green-500)}
+.log .lvl.debug{color:var(--t3)}
+
+/* === Switch === */
+.switch{position:relative;width:32px;height:18px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--r-pill);cursor:pointer;transition:all var(--t-base) var(--ease)}
+.switch::after{content:"";position:absolute;top:1px;left:1px;width:12px;height:12px;border-radius:50%;background:var(--t2);transition:all var(--t-base) var(--ease)}
+.switch.on{background:var(--blue-500);border-color:var(--blue-500)}
+.switch.on::after{left:17px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+
+/* === Tooltip hint === */
+.hint{position:relative}
+.hint:hover::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:var(--bg-elevated);color:var(--t1);font-size:12px;padding:5px 9px;border-radius:var(--r-sm);border:1px solid var(--border-strong);box-shadow:var(--sh-md);white-space:nowrap;z-index:99;pointer-events:none}
+
+/* === Alert banner === */
+.alert{display:flex;align-items:flex-start;gap:var(--s-3);padding:var(--s-3) var(--s-4);border-radius:var(--r-md);border:1px solid;font-size:13px;line-height:20px}
+.alert .ico{flex-shrink:0;margin-top:1px}
+.alert .ico svg{width:16px;height:16px;stroke-width:2}
+.alert .alert-body{flex:1}
+.alert .alert-body strong{display:block;font-weight:600;margin-bottom:2px}
+.alert.danger{background:var(--danger-soft);border-color:rgba(239,68,68,.3);color:var(--t1)}
+.alert.danger .ico{color:var(--red-500)}
+.alert.warning{background:var(--warning-soft);border-color:rgba(245,158,11,.3);color:var(--t1)}
+.alert.warning .ico{color:var(--amber-500)}
+.alert.info{background:var(--info-soft);border-color:rgba(6,182,212,.3);color:var(--t1)}
+.alert.info .ico{color:var(--cyan-500)}
+.alert .close{color:var(--t3);cursor:pointer}
+.alert .close:hover{color:var(--t1)}
+
+/* === Modal preview === */
+.modal-mask{position:fixed;inset:0;background:var(--bg-mask);display:none;align-items:center;justify-content:center;z-index:100}
+.modal-mask.show{display:flex;animation:fadein var(--t-base) var(--ease)}
+.modal{background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--r-lg);box-shadow:var(--sh-lg);width:480px;max-width:90vw;overflow:hidden}
+.modal-head{padding:var(--s-5) var(--s-6);border-bottom:1px solid var(--border)}
+.modal-head h3{font-size:16px;font-weight:600}
+.modal-body{padding:var(--s-6);color:var(--t2);font-size:14px;line-height:22px}
+.modal-foot{padding:var(--s-4) var(--s-6);border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:var(--s-2)}
+
+/* === Footer === */
+.footer{grid-area:footer;background:var(--bg-sider);border-top:1px solid var(--border);display:flex;align-items:center;padding:0 var(--s-5);gap:var(--s-4);font-size:12px;color:var(--t3);font-family:var(--f-mono)}
+.footer .item{display:inline-flex;align-items:center;gap:6px}
+.footer .item .dot{width:6px;height:6px;border-radius:50%}
+.footer .grow{flex:1}
+.footer .brand-name{color:var(--t1);font-weight:600;font-family:var(--f-sans);letter-spacing:.2px}
+.footer kbd{font-family:var(--f-mono);font-size:10px;background:var(--bg-panel);border:1px solid var(--border);border-radius:3px;padding:1px 5px}
+
+/* === Sticky action bar (deploy page) === */
+.sticky-actions{position:sticky;top:0;z-index:10;background:var(--bg-page);padding:var(--s-4) 0;margin-bottom:var(--s-5);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:var(--s-3)}
+
+/* === Process list === */
+.proc-row{display:grid;grid-template-columns:1fr 60px 1fr 50px;gap:var(--s-3);align-items:center;padding:var(--s-3) 0}
+.proc-row:not(:last-child){border-bottom:1px solid var(--border)}
+.proc-name{font-size:13px;color:var(--t1);display:flex;align-items:center;gap:var(--s-2);min-width:0}
+.proc-name .pid{font-family:var(--f-mono);color:var(--t3);font-size:11px}
+.proc-pct{font-family:var(--f-num);font-weight:600;font-size:13px;text-align:right}
+
+/* === Token reference panel === */
+.token-panel{background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--r-lg);padding:var(--s-5);margin-top:var(--s-4)}
+.token-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:var(--s-3)}
+.token-card{background:var(--bg-input);border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden}
+.token-swatch{height:48px;display:flex;align-items:center;justify-content:center;font-family:var(--f-mono);font-size:10px;color:var(--t3)}
+.token-meta{padding:var(--s-2) var(--s-3);font-size:11px}
+.token-meta .nm{color:var(--t1);font-weight:600;margin-bottom:2px}
+.token-meta .vl{color:var(--t3);font-family:var(--f-mono)}
+
+/* === View switch (for theme / view toggles) === */
+.theme-toggle{position:fixed;top:14px;right:14px;z-index:50;display:flex;gap:6px;background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--r-pill);padding:4px;box-shadow:var(--sh-md)}
+.theme-toggle button{height:24px;padding:0 10px;border-radius:var(--r-pill);font-size:11px;font-weight:500;color:var(--t3);display:inline-flex;align-items:center;gap:4px}
+.theme-toggle button.active{background:var(--brand-soft);color:var(--blue-500)}
+.theme-toggle button svg{width:12px;height:12px}
+</style>
+</head>
+<body>
+
+<!-- ============== Theme toggle (demo only) ============== -->
+<div class="theme-toggle">
+  <button id="t-dark" class="active" onclick="setTheme('dark')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+    暗色
+  </button>
+  <button id="t-light" onclick="setTheme('light')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+    亮色
+  </button>
+  <button id="t-collapse" onclick="toggleSider()" title="折叠侧边栏">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+  </button>
+</div>
+
+<div class="app" id="app">
+
+  <!-- ============== Sider ============== -->
+  <aside class="sider">
+    <div class="brand">
+      <div class="brand-mark">E</div>
+      <div class="brand-text">
+        <strong>ERP 控制台</strong>
+        <small>SERVER MANAGER</small>
+      </div>
+    </div>
+    <nav class="nav">
+      <div class="nav-group">
+        <div class="nav-group-label">运行</div>
+        <div class="nav-item active" data-view="overview">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 3v18h18"/><path d="M7 12l3-3 4 4 5-5"/></svg>
+          <span>运行监控</span>
+        </div>
+        <div class="nav-item" data-view="services">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><circle cx="7" cy="7" r="1" fill="currentColor"/><circle cx="7" cy="17" r="1" fill="currentColor"/></svg>
+          <span>服务管理</span>
+        </div>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-label">运维</div>
+        <div class="nav-item" data-view="logs">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg>
+          <span>日志中心</span>
+        </div>
+        <div class="nav-item" data-view="config">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h0a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v0a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+          <span>配置管理</span>
+        </div>
+        <div class="nav-item" data-view="deploy">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>
+          <span>部署发布</span>
+        </div>
+        <div class="nav-item" data-view="alerts">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+          <span>告警中心</span>
+          <span class="badge">3</span>
+        </div>
+      </div>
+    </nav>
+    <div class="sider-foot">
+      <span class="dot"></span>
+      <span>v6.0.0 · v3 设计</span>
+    </div>
+  </aside>
+
+  <!-- ============== Header ============== -->
+  <header class="header">
+    <div class="crumb">
+      <span>工作台</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+      <span class="crumb-cur" id="crumb-cur">运行监控</span>
+    </div>
+    <div class="header-right">
+      <div class="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <span>搜索服务、命令或日志</span>
+        <span class="kbd">⌘ K</span>
+      </div>
+      <span class="pill brand"><span class="dot"></span>生产模式</span>
+      <span class="pill success hint" data-tip="Redis 6379 健康"><span class="dot"></span>Redis 6379</span>
+      <span class="pill success hint" data-tip="API 5002 健康"><span class="dot"></span>API 5002</span>
+      <span class="pill success hint" data-tip="WEB 3000 健康"><span class="dot"></span>WEB 3000</span>
+      <button class="icon-btn" title="通知"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></button>
+      <button class="icon-btn" title="帮助"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><circle cx="12" cy="17" r=".5" fill="currentColor"/></svg></button>
+      <div class="avatar online" title="管理员">A</div>
+    </div>
+  </header>
+
+  <!-- ============== Main ============== -->
+  <main class="main">
+
+    <!-- ========== 1. 运行监控 ========== -->
+    <section class="view active" id="v-overview">
+      <div class="page-head">
+        <div class="page-title">
+          <h1>运行监控</h1>
+          <div class="desc">实时掌握服务器健康状态 · 2s 采样 · 120s 窗口</div>
+        </div>
+        <div class="page-actions">
+          <button class="btn btn-default"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.65 4.36A9 9 0 0 0 20.5 15"/></svg>刷新</button>
+          <button class="btn btn-primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>一键启动开发</button>
+        </div>
+      </div>
+
+      <!-- Alert banner -->
+      <div class="alert warning" style="margin-bottom:var(--s-5)">
+        <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M10.3 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg></span>
+        <div class="alert-body">
+          <strong>磁盘使用率 83.9% 接近阈值</strong>
+          建议清理 <code class="mono" style="font-family:var(--f-mono);color:var(--amber-500)">logs/</code> 与 <code class="mono" style="font-family:var(--f-mono);color:var(--amber-500)">backups/</code> 中早于 30 天的归档,或扩展 D 盘容量。
+        </div>
+        <span class="close">×</span>
+      </div>
+
+      <!-- Metric cards -->
+      <div class="grid grid-cols-4" style="margin-bottom:var(--s-4)">
+        <div class="card metric">
+          <div class="metric-head">
+            <span class="metric-label">开发模式</span>
+          </div>
+          <div style="display:flex;align-items:baseline;gap:6px">
+            <span class="metric-value" style="color:var(--t3)">未运行</span>
+          </div>
+          <div class="metric-foot"><span class="dot" style="background:var(--t3)"></span>已停止 · 2 分钟前关闭</div>
+        </div>
+        <div class="card metric">
+          <div class="metric-head">
+            <span class="metric-label">生产服务</span>
+            <span class="pill success" style="height:20px;font-size:10px"><span class="dot"></span>运行中</span>
+          </div>
+          <div style="display:flex;align-items:baseline;gap:6px">
+            <span class="metric-value">服务运行</span>
+          </div>
+          <div class="metric-foot"><span class="dot" style="background:var(--green-500)"></span>erp-prod · 2 个进程</div>
+        </div>
+        <div class="card metric">
+          <div class="metric-head">
+            <span class="metric-label">Redis</span>
+            <span class="pill success" style="height:20px;font-size:10px"><span class="dot"></span>运行中</span>
+          </div>
+          <div style="display:flex;align-items:baseline;gap:6px">
+            <span class="metric-value">6379<span class="metric-unit">port</span></span>
+          </div>
+          <div class="metric-foot"><span class="dot" style="background:var(--green-500)"></span>21 客户端 · 8.4 MB</div>
+        </div>
+        <div class="card metric">
+          <div class="metric-head">
+            <span class="metric-label">管理器运行时长</span>
+          </div>
+          <div style="display:flex;align-items:baseline;gap:6px">
+            <span class="metric-value" style="font-family:var(--f-num)">00:08:42</span>
+          </div>
+          <div class="metric-foot"><span class="dot" style="background:var(--blue-500)"></span>本次会话</div>
+        </div>
+      </div>
+
+      <!-- Big chart + sidebar -->
+      <div class="grid" style="grid-template-columns:1fr 360px;gap:var(--s-4)">
+        <div class="card">
+          <div class="card-head">
+            <h3>性能总览</h3>
+            <span class="sub">120s 窗口 · 2s 采样</span>
+            <div style="display:flex;gap:2px;background:var(--bg-input);border-radius:var(--r-sm);padding:2px">
+              <button class="btn btn-sm" style="background:var(--bg-panel);height:22px">CPU</button>
+              <button class="btn btn-sm btn-ghost" style="height:22px">内存</button>
+              <button class="btn btn-sm btn-ghost" style="height:22px">网络</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <!-- area chart -->
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--s-4)">
+              <div>
+                <div class="metric-label">CPU 使用率</div>
+                <div style="display:flex;align-items:baseline;gap:var(--s-3)">
+                  <span class="metric-value" style="font-size:36px">36.0<span class="metric-unit">%</span></span>
+                  <span class="metric-trend up">▲ 4.2%</span>
+                </div>
+              </div>
+              <div style="text-align:right">
+                <div class="metric-label">8 核 · x86_64</div>
+                <div style="font-family:var(--f-mono);color:var(--t2);font-size:12px">avg 24.1% · max 78%</div>
+              </div>
+            </div>
+            <svg viewBox="0 0 600 180" style="width:100%;height:180px">
+              <defs>
+                <linearGradient id="g1" x1="0" x2="0" y1="0" y2="1">
+                  <stop offset="0%" stop-color="#2F7BFF" stop-opacity=".4"/>
+                  <stop offset="100%" stop-color="#2F7BFF" stop-opacity="0"/>
+                </linearGradient>
+                <linearGradient id="g2" x1="0" x2="0" y1="0" y2="1">
+                  <stop offset="0%" stop-color="#10B981" stop-opacity=".3"/>
+                  <stop offset="100%" stop-color="#10B981" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <!-- grid -->
+              <g stroke="var(--border)" stroke-dasharray="2 4" opacity=".5">
+                <line x1="0" y1="45" x2="600" y2="45"/>
+                <line x1="0" y1="90" x2="600" y2="90"/>
+                <line x1="0" y1="135" x2="600" y2="135"/>
+              </g>
+              <!-- CPU area -->
+              <path d="M0,120 L25,110 L50,115 L75,90 L100,95 L125,80 L150,85 L175,70 L200,75 L225,55 L250,60 L275,50 L300,55 L325,40 L350,45 L375,35 L400,40 L425,30 L450,35 L475,25 L500,30 L525,20 L550,25 L575,15 L600,20 L600,180 L0,180 Z" fill="url(#g1)"/>
+              <path d="M0,120 L25,110 L50,115 L75,90 L100,95 L125,80 L150,85 L175,70 L200,75 L225,55 L250,60 L275,50 L300,55 L325,40 L350,45 L375,35 L400,40 L425,30 L450,35 L475,25 L500,30 L525,20 L550,25 L575,15 L600,20" fill="none" stroke="#2F7BFF" stroke-width="2"/>
+              <!-- Memory area -->
+              <path d="M0,150 L50,148 L100,145 L150,142 L200,140 L250,138 L300,135 L350,133 L400,130 L450,128 L500,126 L550,125 L600,124 L600,180 L0,180 Z" fill="url(#g2)"/>
+              <path d="M0,150 L50,148 L100,145 L150,142 L200,140 L250,138 L300,135 L350,133 L400,130 L450,128 L500,126 L550,125 L600,124" fill="none" stroke="#10B981" stroke-width="2"/>
+              <!-- x labels -->
+              <g fill="var(--t3)" font-family="var(--f-mono)" font-size="10">
+                <text x="0" y="178">-120s</text>
+                <text x="150" y="178">-80s</text>
+                <text x="300" y="178">-40s</text>
+                <text x="460" y="178">now</text>
+              </g>
+              <g fill="var(--t3)" font-family="var(--f-mono)" font-size="10" text-anchor="end">
+                <text x="595" y="48">100%</text>
+                <text x="595" y="93">50%</text>
+                <text x="595" y="138">0%</text>
+              </g>
+              <!-- legend -->
+              <g font-family="var(--f-sans)" font-size="11">
+                <rect x="20" y="10" width="10" height="2" fill="#2F7BFF"/>
+                <text x="36" y="14" fill="var(--t2)">CPU</text>
+                <rect x="70" y="10" width="10" height="2" fill="#10B981"/>
+                <text x="86" y="14" fill="var(--t2)">内存</text>
+              </g>
+            </svg>
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:var(--s-4)">
+          <div class="card">
+            <div class="card-head" style="padding:var(--s-4) var(--s-5)">
+              <h3>网络流量</h3>
+              <span class="sub">实时速率</span>
+            </div>
+            <div class="card-body tight">
+              <div style="display:flex;justify-content:space-between;margin-bottom:var(--s-3)">
+                <div>
+                  <div class="metric-label">下载</div>
+                  <div style="font-family:var(--f-num);font-size:18px;font-weight:600;color:var(--cyan-500)">0.01 MB/s</div>
+                </div>
+                <div style="text-align:right">
+                  <div class="metric-label">上传</div>
+                  <div style="font-family:var(--f-num);font-size:18px;font-weight:600;color:var(--violet-500)">4 KB/s</div>
+                </div>
+              </div>
+              <svg viewBox="0 0 320 80" style="width:100%;height:60px">
+                <g stroke="var(--border)" stroke-dasharray="2 4" opacity=".5">
+                  <line x1="0" y1="20" x2="320" y2="20"/><line x1="0" y1="40" x2="320" y2="40"/>
+                </g>
+                <path d="M0,60 L20,55 L40,58 L60,40 L80,45 L100,30 L120,35 L140,20 L160,25 L180,15 L200,20 L220,12 L240,18 L260,10 L280,15 L300,8 L320,12" fill="none" stroke="#06B6D4" stroke-width="1.5"/>
+                <path d="M0,70 L40,68 L80,66 L120,64 L160,62 L200,60 L240,58 L280,55 L320,52" fill="none" stroke="#8B5CF6" stroke-width="1.5"/>
+              </svg>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head" style="padding:var(--s-4) var(--s-5)">
+              <h3>进程快照</h3>
+              <span class="sub">Top 5 · CPU</span>
+            </div>
+            <div class="card-body tight">
+              <div class="proc-row">
+                <div class="proc-name">System Idle Process <span class="pid">(0)</span></div>
+                <div class="bar"><div class="bar-fill brand" style="width:96%"></div></div>
+                <div style="font-family:var(--f-mono);color:var(--t3);font-size:11px">96%</div>
+                <div class="proc-pct">96%</div>
+              </div>
+              <div class="proc-row">
+                <div class="proc-name">System <span class="pid">(4)</span></div>
+                <div class="bar"><div class="bar-fill info" style="width:2%"></div></div>
+                <div style="font-family:var(--f-mono);color:var(--t3);font-size:11px">2%</div>
+                <div class="proc-pct">2%</div>
+              </div>
+              <div class="proc-row">
+                <div class="proc-name">svchost.exe <span class="pid">(124)</span></div>
+                <div class="bar"><div class="bar-fill success" style="width:1.4%"></div></div>
+                <div style="font-family:var(--f-mono);color:var(--t3);font-size:11px">1.4%</div>
+                <div class="proc-pct">1.4%</div>
+              </div>
+              <div class="proc-row">
+                <div class="proc-name">Registry <span class="pid">(144)</span></div>
+                <div class="bar"><div class="bar-fill warning" style="width:0.8%"></div></div>
+                <div style="font-family:var(--f-mono);color:var(--t3);font-size:11px">0.8%</div>
+                <div class="proc-pct">0.8%</div>
+              </div>
+              <div class="proc-row">
+                <div class="proc-name">ZCode.exe <span class="pid">(272)</span></div>
+                <div class="bar"><div class="bar-fill violet" style="width:0.6%"></div></div>
+                <div style="font-family:var(--f-mono);color:var(--t3);font-size:11px">0.6%</div>
+                <div class="proc-pct">0.6%</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Token preview (only shown on overview for design reference) -->
+      <details class="card" style="margin-top:var(--s-4)">
+        <summary class="card-head" style="cursor:pointer;user-select:none">
+          <h3>🎨 设计 Token 速览</h3>
+          <span class="sub">点击展开 · CSS 变量驱动全界面</span>
+        </summary>
+        <div class="card-body">
+          <div class="token-grid">
+            <div class="token-card"><div class="token-swatch" style="background:var(--blue-500);color:#fff">--brand</div><div class="token-meta"><div class="nm">品牌主色</div><div class="vl">#2F7BFF</div></div></div>
+            <div class="token-card"><div class="token-swatch" style="background:var(--green-500)"></div><div class="token-meta"><div class="nm">成功</div><div class="vl">#10B981</div></div></div>
+            <div class="token-card"><div class="token-swatch" style="background:var(--amber-500)"></div><div class="token-meta"><div class="nm">警告</div><div class="vl">#F59E0B</div></div></div>
+            <div class="token-card"><div class="token-swatch" style="background:var(--red-500)"></div><div class="token-meta"><div class="nm">错误</div><div class="vl">#EF4444</div></div></div>
+            <div class="token-card"><div class="token-swatch" style="background:var(--bg-panel);border:1px solid var(--border)"></div><div class="token-meta"><div class="nm">卡片表面</div><div class="vl">--bg-panel</div></div></div>
+            <div class="token-card"><div class="token-swatch" style="background:var(--bg-page)"></div><div class="token-meta"><div class="nm">页面底色</div><div class="vl">--bg-page</div></div></div>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <!-- ========== 2. 服务管理 ========== -->
+    <section class="view" id="v-services">
+      <div class="page-head">
+        <div class="page-title">
+          <h1>服务管理</h1>
+          <div class="desc">开发 / 生产 一键启停 · 互斥托管(启动一方将自动停止另一方)</div>
+        </div>
+        <div class="page-actions">
+          <button class="btn btn-default"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>全部重启</button>
+          <button class="btn btn-danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>全部停止</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="tabs">
+          <div class="tab active">全部 <span class="count">5</span></div>
+          <div class="tab">运行中 <span class="count">3</span></div>
+          <div class="tab">已停止 <span class="count">2</span></div>
+          <div class="tab">故障 <span class="count">0</span></div>
+        </div>
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th style="padding-left:var(--s-6)">服务</th>
+              <th>状态</th>
+              <th>模式</th>
+              <th>端口 / PID</th>
+              <th>运行时长</th>
+              <th style="padding-right:var(--s-6);text-align:right">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="padding-left:var(--s-6)">
+                <div style="display:flex;align-items:center;gap:var(--s-3)">
+                  <div class="svc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 17l6-6-4-4M12 19h8"/></svg></div>
+                  <div>
+                    <div style="font-weight:600">FastAPI 后端</div>
+                    <div style="font-size:11px;color:var(--t3);font-family:var(--f-mono)">backend · 开发模式</div>
+                  </div>
+                </div>
+              </td>
+              <td><span class="pill muted"><span class="dot"></span>已停止</span></td>
+              <td><span style="color:var(--t2)">开发</span></td>
+              <td><span class="mono">— / —</span></td>
+              <td><span class="mono" style="color:var(--t3)">—</span></td>
+              <td style="padding-right:var(--s-6);text-align:right"><button class="btn btn-sm btn-primary">启动</button></td>
+            </tr>
+            <tr>
+              <td style="padding-left:var(--s-6)">
+                <div style="display:flex;align-items:center;gap:var(--s-3)">
+                  <div class="svc-ico violet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5"/></svg></div>
+                  <div>
+                    <div style="font-weight:600">Vite 前端</div>
+                    <div style="font-size:11px;color:var(--t3);font-family:var(--f-mono)">frontend-vite · 开发模式</div>
+                  </div>
+                </div>
+              </td>
+              <td><span class="pill muted"><span class="dot"></span>已停止</span></td>
+              <td><span style="color:var(--t2)">开发</span></td>
+              <td><span class="mono">— / —</span></td>
+              <td><span class="mono" style="color:var(--t3)">—</span></td>
+              <td style="padding-right:var(--s-6);text-align:right"><button class="btn btn-sm btn-primary">启动</button></td>
+            </tr>
+            <tr>
+              <td style="padding-left:var(--s-6)">
+                <div style="display:flex;align-items:center;gap:var(--s-3)">
+                  <div class="svc-ico red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v6c0 1.7 4 3 9 3s9-1.3 9-3V5M3 11v6c0 1.7 4 3 9 3s9-1.3 9-3v-6"/></svg></div>
+                  <div>
+                    <div style="font-weight:600">Redis</div>
+                    <div style="font-size:11px;color:var(--t3);font-family:var(--f-mono)">缓存 · 独立进程</div>
+                  </div>
+                </div>
+              </td>
+              <td><span class="pill success"><span class="dot"></span>运行中</span></td>
+              <td><span style="color:var(--t2)">独立</span></td>
+              <td><span class="mono">6379 / 4212</span></td>
+              <td><span class="mono">1d 04h</span></td>
+              <td style="padding-right:var(--s-6);text-align:right">
+                <button class="btn btn-sm btn-ghost">日志</button>
+                <button class="btn btn-sm btn-danger">停止</button>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding-left:var(--s-6)">
+                <div style="display:flex;align-items:center;gap:var(--s-3)">
+                  <div class="svc-ico green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg></div>
+                  <div>
+                    <div style="font-weight:600">erp-prod 服务</div>
+                    <div style="font-size:11px;color:var(--t3);font-family:var(--f-mono)">生产环境 · NSSM 托管</div>
+                  </div>
+                </div>
+              </td>
+              <td><span class="pill success"><span class="dot"></span>运行中</span></td>
+              <td><span style="color:var(--t2)">生产</span></td>
+              <td><span class="mono">5002 / 8820</span></td>
+              <td><span class="mono">2h 18m</span></td>
+              <td style="padding-right:var(--s-6);text-align:right">
+                <button class="btn btn-sm btn-ghost">日志</button>
+                <button class="btn btn-sm btn-danger">停止</button>
+                <button class="btn btn-sm btn-default">重启</button>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding-left:var(--s-6)">
+                <div style="display:flex;align-items:center;gap:var(--s-3)">
+                  <div class="svc-ico green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+                  <div>
+                    <div style="font-weight:600">erp-arq 服务</div>
+                    <div style="font-size:11px;color:var(--t3);font-family:var(--f-mono)">队列 Worker · NSSM 托管</div>
+                  </div>
+                </div>
+              </td>
+              <td><span class="pill success"><span class="dot"></span>运行中</span></td>
+              <td><span style="color:var(--t2)">生产</span></td>
+              <td><span class="mono">— / 8841</span></td>
+              <td><span class="mono">2h 18m</span></td>
+              <td style="padding-right:var(--s-6);text-align:right">
+                <button class="btn btn-sm btn-ghost">日志</button>
+                <button class="btn btn-sm btn-danger">停止</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- ===== 一键操作双卡:开发模式 / 生产模式(共用 OneClick 组件 · 跨模式互斥) ===== -->
+      <div style="display:flex;align-items:center;gap:var(--s-2);margin-top:var(--s-5);margin-bottom:var(--s-3)">
+        <span class="pill brand" style="height:22px"><span class="dot"></span>一键操作</span>
+        <span style="font-size:12px;color:var(--t3)"><strong style="color:var(--t2);font-weight:500">一键重启 / 一键关闭为开发·生产共用通用按钮</strong>(OneClickButtonGroup),双卡对称复用同一设计</span>
+      </div>
+      <div class="grid grid-cols-2">
+
+        <!-- ============ 开发模式卡 ============ -->
+        <div class="card">
+          <div class="card-head">
+            <div class="svc-ico green" style="width:32px;height:32px;border-radius:var(--r-md)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+            </div>
+            <h3>开发模式</h3>
+            <span class="pill muted" style="height:22px;font-size:11px;margin-left:auto"><span class="dot"></span>未运行</span>
+          </div>
+          <div class="card-body" style="padding:var(--s-5) var(--s-5) var(--s-4)">
+            <!-- 段 1:主操作(全宽大按钮) -->
+            <button class="btn btn-primary btn-lg hint" data-tip="启动后将自动停止生产模式(互斥托管)" style="width:100%;background:var(--green-500);box-shadow:0 4px 14px rgba(16,185,129,.32),inset 0 1px 0 rgba(255,255,255,.15);font-size:14px;height:42px" onmouseover="this.style.background='#0E9F6E'" onmouseout="this.style.background='var(--green-500)'">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+              启动开发模式
+            </button>
+            <!-- 段 2:次操作(通用按钮组 · 一行 2 个等宽) -->
+            <div style="margin-top:var(--s-3);display:grid;grid-template-columns:1fr 1fr;gap:var(--s-2)">
+              <button class="btn btn-default hint" data-tip="优雅重启当前模式服务 · 开发/生产共用通用按钮" style="height:36px;font-size:13px;justify-content:center">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.65 4.36A9 9 0 0 0 20.5 15"/></svg>
+                重启
+              </button>
+              <button class="btn btn-danger hint" data-tip="优雅关闭当前模式服务,保留服务注册 · 开发/生产共用通用按钮" style="height:36px;font-size:13px;justify-content:center">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>
+                关闭
+              </button>
+            </div>
+            <!-- 段 3:状态卡片(开发独有) -->
+            <div style="margin-top:var(--s-4);background:var(--bg-input);border-radius:var(--r-md);padding:var(--s-3) var(--s-4)">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                <span style="font-family:var(--f-mono);font-size:10.5px;color:var(--t3);text-transform:uppercase;letter-spacing:.6px;font-weight:600">启动流程</span>
+                <span style="font-family:var(--f-num);font-size:11.5px;font-weight:600;color:var(--green-500)">4 / 5</span>
+              </div>
+              <div class="bar" style="height:5px"><div class="bar-fill success" style="width:80%"></div></div>
+              <div style="margin-top:var(--s-3);display:flex;align-items:center;gap:var(--s-2);padding-top:var(--s-3);border-top:1px solid var(--border)">
+                <span style="font-size:11px;color:var(--t3);flex:1">后端健康检查 · Redis 已就绪</span>
+                <button class="btn btn-sm btn-danger" style="height:24px">全部停止</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ============ 生产模式卡 ============ -->
+        <div class="card">
+          <div class="card-head">
+            <div class="svc-ico" style="width:32px;height:32px;border-radius:var(--r-md)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="3" width="20" height="6" rx="1.5"/><rect x="2" y="15" width="20" height="6" rx="1.5"/><circle cx="6" cy="6" r="1" fill="currentColor"/><circle cx="6" cy="18" r="1" fill="currentColor"/></svg>
+            </div>
+            <h3>生产模式</h3>
+            <span class="pill success" style="height:22px;font-size:11px;margin-left:auto"><span class="dot"></span>服务运行</span>
+          </div>
+          <div class="card-body" style="padding:var(--s-5) var(--s-5) var(--s-4)">
+            <!-- 段 1:主操作(全宽大按钮) -->
+            <button class="btn btn-primary btn-lg hint" data-tip="启动后将自动停止开发模式(互斥托管)" style="width:100%;background:var(--blue-500);box-shadow:0 4px 14px rgba(47,123,255,.32),inset 0 1px 0 rgba(255,255,255,.15);font-size:14px;height:42px">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+              启动生产服务
+            </button>
+            <!-- 段 2:次操作(通用按钮组 · 与开发卡完全一致) -->
+            <div style="margin-top:var(--s-3);display:grid;grid-template-columns:1fr 1fr;gap:var(--s-2)">
+              <button class="btn btn-default hint" data-tip="优雅重启当前模式服务 · 开发/生产共用通用按钮" style="height:36px;font-size:13px;justify-content:center">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.65 4.36A9 9 0 0 0 20.5 15"/></svg>
+                重启
+              </button>
+              <button class="btn btn-danger hint" data-tip="优雅关闭当前模式服务,保留服务注册 · 开发/生产共用通用按钮" style="height:36px;font-size:13px;justify-content:center">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>
+                关闭
+              </button>
+            </div>
+            <!-- 段 3:状态卡片(生产独有 · NSSM 服务明细) -->
+            <div style="margin-top:var(--s-4);background:var(--bg-input);border-radius:var(--r-md);padding:var(--s-3) var(--s-4)">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--s-2)">
+                <span style="font-family:var(--f-mono);font-size:10.5px;color:var(--t3);text-transform:uppercase;letter-spacing:.6px;font-weight:600">服务明细 · NSSM 5s 轮询</span>
+                <span class="pill success" style="height:18px;font-size:10px"><span class="dot"></span>全部就绪</span>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 14px">
+                <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px"><span style="color:var(--t2)">后端</span><span class="pill success" style="height:18px;font-size:10px"><span class="dot"></span>运行</span></div>
+                <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px"><span style="color:var(--t2)">ARQ 队列</span><span class="pill success" style="height:18px;font-size:10px"><span class="dot"></span>运行</span></div>
+                <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px"><span style="color:var(--t2)">前端</span><span class="pill success" style="height:18px;font-size:10px"><span class="dot"></span>运行</span></div>
+                <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px"><span style="color:var(--t2)">Redis</span><span class="pill success" style="height:18px;font-size:10px"><span class="dot"></span>运行</span></div>
+                <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px"><span style="color:var(--t2)">调度</span><span class="pill success" style="height:18px;font-size:10px"><span class="dot"></span>运行</span></div>
+                <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px"><span style="color:var(--t2)">就绪</span><span class="pill success" style="height:18px;font-size:10px"><span class="dot"></span>就绪</span></div>
+              </div>
+              <div style="font-size:10px;color:var(--t3);font-family:var(--f-mono);margin-top:var(--s-2);padding-top:var(--s-2);border-top:1px solid var(--border)">
+                logs/prod_runner.json · 更新 14:24:18
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 互斥托管说明 ===== -->
+      <div class="alert info" style="margin-top:var(--s-4)">
+        <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></span>
+        <div class="alert-body">
+          <strong>互斥托管</strong>
+          开发模式与生产模式共享同一把操作锁(ActionLock):任一模式执行 <code style="font-family:var(--f-mono)">启动 / 重启 / 关闭</code> 时,另一方自动停止;在途操作期间所有按钮锁定,杜绝并发冲突。
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 3. 日志中心 ========== -->
+    <section class="view" id="v-logs">
+      <div class="page-head">
+        <div class="page-title">
+          <h1>日志中心</h1>
+          <div class="desc">实时日志流 · 队列化写入 · 主线程零阻塞</div>
+        </div>
+        <div class="page-actions">
+          <div class="search" style="width:240px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><span>过滤关键字…</span></div>
+          <button class="btn btn-default"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>下载</button>
+          <button class="btn btn-default"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>清空</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="tabs">
+          <div class="tab active">全部 <span class="count">128</span></div>
+          <div class="tab">信息 <span class="count">102</span></div>
+          <div class="tab">警告 <span class="count">18</span></div>
+          <div class="tab">错误 <span class="count">6</span></div>
+          <div class="tab">调试 <span class="count">2</span></div>
+        </div>
+        <div class="card-body" style="padding:0">
+          <div class="log" style="border-radius:0;max-height:none">
+<span class="ts">14:24:18.421</span><span class="lvl info">INFO</span> api          Server starting on <span style="color:var(--blue-400)">http://0.0.0.0:5002</span>
+<span class="ts">14:24:18.438</span><span class="lvl info">INFO</span> api          Connected to Redis pool · 21 clients
+<span class="ts">14:24:18.512</span><span class="lvl success">OK</span>   worker       arq worker.ProdWorker starting, pid 8841
+<span class="ts">14:24:19.001</span><span class="lvl info">INFO</span> api          Database pool initialized · 10 connections
+<span class="ts">14:24:19.142</span><span class="lvl info">INFO</span> vite         Vite dev server listening on <span style="color:var(--blue-400)">http://0.0.0.0:3000</span>
+<span class="ts">14:24:20.330</span><span class="lvl warn">WARN</span> api          Slow query detected · 1.4s · SELECT * FROM order_headers WHERE ...
+<span class="ts">14:24:21.502</span><span class="lvl info">INFO</span> api          GET /api/v1/dashboard/overview 200 · 87ms
+<span class="ts">14:24:22.014</span><span class="lvl info">INFO</span> api          GET /api/v1/inventory/list?warehouse=main 200 · 142ms
+<span class="ts">14:24:23.711</span><span class="lvl info">INFO</span> worker       job 8a3f processed · order_import · 412ms
+<span class="ts">14:24:24.002</span><span class="lvl error">ERR </span> api          redis.exceptions.ConnectionError: timeout 5s · key=session:42
+<span class="ts">14:24:24.018</span><span class="lvl warn">WARN</span> api          Retrying connection to Redis (attempt 1/3)
+<span class="ts">14:24:24.142</span><span class="lvl success">OK</span>   api          Redis reconnected · latency 3ms
+<span class="ts">14:24:25.200</span><span class="lvl info">INFO</span> api          GET /api/v1/sales/orders?page=1 200 · 64ms
+<span class="ts">14:24:26.503</span><span class="lvl info">INFO</span> api          POST /api/v1/sales/orders 201 · 184ms
+<span class="ts">14:24:27.812</span><span class="lvl debug">DBG</span> api          cache miss for key=product:list:p=1:s=20
+<span class="ts">14:24:28.114</span><span class="lvl info">INFO</span> worker       job 8a4 finished · customer_export · 1.2s
+<span class="ts">14:24:29.401</span><span class="lvl warn">WARN</span> api          Memory usage 78% on worker 8841 · 234MB / 300MB
+<span class="ts">14:24:30.000</span><span class="lvl info">INFO</span> api          Heartbeat · 30 services checked · 0 anomalies
+<span class="ts">14:24:31.224</span><span class="lvl info">INFO</span> api          GET /api/v1/reports/monthly 200 · 612ms
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 4. 配置管理 ========== -->
+    <section class="view" id="v-config">
+      <div class="page-head">
+        <div class="page-title">
+          <h1>配置管理</h1>
+          <div class="desc">服务端口、路径与环境变量 · 修改后需重启服务生效</div>
+        </div>
+        <div class="page-actions">
+          <button class="btn btn-default"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>从文件重载</button>
+          <button class="btn btn-primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>保存配置</button>
+        </div>
+      </div>
+
+      <div class="grid" style="grid-template-columns:240px 1fr;gap:var(--s-4)">
+        <div class="card">
+          <div class="card-body tight" style="padding:var(--s-3)">
+            <div class="nav-item active" style="margin-bottom:2px">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg><span>基础</span>
+            </div>
+            <div class="nav-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg><span>端口与监听</span>
+            </div>
+            <div class="nav-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 17l6-6-4-4M12 19h8"/></svg><span>服务路径</span>
+            </div>
+            <div class="nav-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg><span>环境变量</span>
+            </div>
+            <div class="nav-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h0a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v0a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span>高级</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h3>基础设置</h3><span class="sub">server_manager_config.json</span></div>
+          <div class="card-body">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--s-4)">
+              <div>
+                <label style="font-size:12px;color:var(--t3);font-weight:500;display:block;margin-bottom:6px">主题</label>
+                <div style="display:flex;gap:var(--s-2)">
+                  <button class="btn btn-default" style="flex:1;justify-content:flex-start"><span style="width:14px;height:14px;border-radius:50%;background:#0B0E14;border:1px solid var(--border-strong)"></span>暗色</button>
+                  <button class="btn btn-default" style="flex:1;justify-content:flex-start"><span style="width:14px;height:14px;border-radius:50%;background:#fff;border:1px solid var(--border)"></span>亮色</button>
+                </div>
+              </div>
+              <div>
+                <label style="font-size:12px;color:var(--t3);font-weight:500;display:block;margin-bottom:6px">默认启动模式</label>
+                <div style="display:flex;gap:var(--s-2)">
+                  <button class="btn btn-default" style="flex:1;justify-content:center">开发</button>
+                  <button class="btn btn-primary" style="flex:1;justify-content:center">生产</button>
+                </div>
+              </div>
+              <div>
+                <label style="font-size:12px;color:var(--t3);font-weight:500;display:block;margin-bottom:6px">API 端口</label>
+                <div style="position:relative"><input class="search" style="width:100%;height:36px;background:var(--bg-input);color:var(--t1)" value="5002" readonly><span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:11px;color:var(--t3);font-family:var(--f-mono)">TCP</span></div>
+              </div>
+              <div>
+                <label style="font-size:12px;color:var(--t3);font-weight:500;display:block;margin-bottom:6px">Web 端口</label>
+                <div style="position:relative"><input class="search" style="width:100%;height:36px;background:var(--bg-input);color:var(--t1)" value="3000" readonly><span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:11px;color:var(--t3);font-family:var(--f-mono)">TCP</span></div>
+              </div>
+              <div>
+                <label style="font-size:12px;color:var(--t3);font-weight:500;display:block;margin-bottom:6px">Redis 端口</label>
+                <div style="position:relative"><input class="search" style="width:100%;height:36px;background:var(--bg-input);color:var(--t1)" value="6379" readonly><span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:11px;color:var(--t3);font-family:var(--f-mono)">TCP</span></div>
+              </div>
+              <div>
+                <label style="font-size:12px;color:var(--t3);font-weight:500;display:block;margin-bottom:6px">采样频率</label>
+                <div style="position:relative"><input class="search" style="width:100%;height:36px;background:var(--bg-input);color:var(--t1)" value="2s" readonly><span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:11px;color:var(--t3);font-family:var(--f-mono)">interval</span></div>
+              </div>
+            </div>
+
+            <div style="border-top:1px solid var(--border);margin-top:var(--s-6);padding-top:var(--s-5)">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--s-3)">
+                <div>
+                  <div style="font-size:14px;font-weight:500">开机自启动</div>
+                  <div style="font-size:12px;color:var(--t3)">随 Windows 启动自动运行管理器</div>
+                </div>
+                <div class="switch on"></div>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--s-3)">
+                <div>
+                  <div style="font-size:14px;font-weight:500">最小化到托盘</div>
+                  <div style="font-size:12px;color:var(--t3)">关闭主窗口时保留后台运行</div>
+                </div>
+                <div class="switch on"></div>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--s-3)">
+                <div>
+                  <div style="font-size:14px;font-weight:500">单实例锁定</div>
+                  <div style="font-size:12px;color:var(--t3)">禁止重复启动管理器</div>
+                </div>
+                <div class="switch on"></div>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between">
+                <div>
+                  <div style="font-size:14px;font-weight:500">DPI 感知</div>
+                  <div style="font-size:12px;color:var(--t3)">适配高分辨率屏幕,避免界面模糊</div>
+                </div>
+                <div class="switch on"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 5. 部署发布 ========== -->
+    <section class="view" id="v-deploy">
+      <div class="page-head">
+        <div class="page-title">
+          <h1>部署发布</h1>
+          <div class="desc">构建 → 备份 → 发布 → 验证 · 一键完成全流程</div>
+        </div>
+      </div>
+
+      <div class="sticky-actions">
+        <span class="pill brand"><span class="dot"></span>目标环境:生产</span>
+        <span class="pill muted" style="font-family:var(--f-mono)">commit a1b2c3d · main · 14:18</span>
+        <span style="flex:1"></span>
+        <button class="btn btn-default">查看变更</button>
+        <button class="btn btn-default">仅构建</button>
+        <button class="btn btn-primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/></svg>开始部署</button>
+      </div>
+
+      <div class="card">
+        <div class="card-body">
+          <ol style="list-style:none;padding:0">
+            <li style="display:flex;gap:var(--s-4);padding:var(--s-4) 0;border-bottom:1px solid var(--border)">
+              <div style="width:32px;height:32px;border-radius:50%;background:var(--success-soft);color:var(--green-500);display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></div>
+              <div style="flex:1">
+                <div style="display:flex;align-items:center;gap:var(--s-2);margin-bottom:4px"><strong style="font-size:15px">代码检出</strong><span class="pill success" style="height:18px;font-size:10px"><span class="dot"></span>完成</span></div>
+                <div style="color:var(--t3);font-size:13px">已拉取 main 分支最新代码 · 4 个文件变更</div>
+              </div>
+              <div style="font-family:var(--f-mono);color:var(--t3);font-size:12px">14:18:02</div>
+            </li>
+            <li style="display:flex;gap:var(--s-4);padding:var(--s-4) 0;border-bottom:1px solid var(--border)">
+              <div style="width:32px;height:32px;border-radius:50%;background:var(--success-soft);color:var(--green-500);display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></div>
+              <div style="flex:1">
+                <div style="display:flex;align-items:center;gap:var(--s-2);margin-bottom:4px"><strong style="font-size:15px">依赖安装</strong><span class="pill success" style="height:18px;font-size:10px"><span class="dot"></span>完成</span></div>
+                <div style="color:var(--t3);font-size:13px">pip install · npm ci · 184 个依赖,42s</div>
+              </div>
+              <div style="font-family:var(--f-mono);color:var(--t3);font-size:12px">14:18:44</div>
+            </li>
+            <li style="display:flex;gap:var(--s-4);padding:var(--s-4) 0;border-bottom:1px solid var(--border)">
+              <div style="width:32px;height:32px;border-radius:50%;background:var(--processing-soft);color:var(--indigo-500);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" style="animation:spin 1.4s linear infinite">
+                  <path d="M21 12a9 9 0 1 1-6.22-8.56" stroke-linecap="round"/>
+                </svg>
+              </div>
+              <div style="flex:1">
+                <div style="display:flex;align-items:center;gap:var(--s-2);margin-bottom:4px"><strong style="font-size:15px">构建产物</strong><span class="pill" style="height:18px;font-size:10px;background:var(--processing-soft);color:var(--indigo-500)"><span class="dot" style="background:var(--indigo-500)"></span>进行中 68%</span></div>
+                <div style="color:var(--t3);font-size:13px;margin-bottom:6px">vite build · pyinstaller --onefile</div>
+                <div class="bar"><div class="bar-fill" style="width:68%;background:linear-gradient(90deg,var(--indigo-500),var(--indigo-500))"></div></div>
+              </div>
+              <div style="font-family:var(--f-mono);color:var(--t3);font-size:12px">14:24:01</div>
+            </li>
+            <li style="display:flex;gap:var(--s-4);padding:var(--s-4) 0;border-bottom:1px solid var(--border);opacity:.55">
+              <div style="width:32px;height:32px;border-radius:50%;background:var(--bg-input);color:var(--t3);display:flex;align-items:center;justify-content:center;flex-shrink:0;border:1px dashed var(--border-strong)">4</div>
+              <div style="flex:1">
+                <div style="display:flex;align-items:center;gap:var(--s-2);margin-bottom:4px"><strong style="font-size:15px">备份当前版本</strong></div>
+                <div style="color:var(--t3);font-size:13px">打包 backups/2026-08-22_v6.0.0.zip</div>
+              </div>
+              <div style="font-family:var(--f-mono);color:var(--t3);font-size:12px">—</div>
+            </li>
+            <li style="display:flex;gap:var(--s-4);padding:var(--s-4) 0;border-bottom:1px solid var(--border);opacity:.55">
+              <div style="width:32px;height:32px;border-radius:50%;background:var(--bg-input);color:var(--t3);display:flex;align-items:center;justify-content:center;flex-shrink:0;border:1px dashed var(--border-strong)">5</div>
+              <div style="flex:1">
+                <div style="display:flex;align-items:center;gap:var(--s-2);margin-bottom:4px"><strong style="font-size:15px">停止服务并替换</strong></div>
+                <div style="color:var(--t3);font-size:13px">NSSM stop erp-prod → 替换二进制 → start</div>
+              </div>
+              <div style="font-family:var(--f-mono);color:var(--t3);font-size:12px">—</div>
+            </li>
+            <li style="display:flex;gap:var(--s-4);padding:var(--s-4) 0;opacity:.55">
+              <div style="width:32px;height:32px;border-radius:50%;background:var(--bg-input);color:var(--t3);display:flex;align-items:center;justify-content:center;flex-shrink:0;border:1px dashed var(--border-strong)">6</div>
+              <div style="flex:1">
+                <div style="display:flex;align-items:center;gap:var(--s-2);margin-bottom:4px"><strong style="font-size:15px">健康检查</strong></div>
+                <div style="color:var(--t3);font-size:13px">等待 30s 后探测 /health,3 次失败回滚</div>
+              </div>
+              <div style="font-family:var(--f-mono);color:var(--t3);font-size:12px">—</div>
+            </li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 6. 告警中心 ========== -->
+    <section class="view" id="v-alerts">
+      <div class="page-head">
+        <div class="page-title">
+          <h1>告警中心</h1>
+          <div class="desc">规则触发与通知历史 · 当前未处理 3 条</div>
+        </div>
+        <div class="page-actions">
+          <button class="btn btn-default"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg>全部归档</button>
+          <button class="btn btn-primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 5v14M5 12h14"/></svg>新建规则</button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-4" style="margin-bottom:var(--s-4)">
+        <div class="card metric">
+          <span class="metric-label">未处理</span>
+          <span class="metric-value" style="color:var(--red-500)">3</span>
+          <div class="metric-foot"><span class="dot" style="background:var(--red-500)"></span>1 严重 · 2 警告</div>
+        </div>
+        <div class="card metric">
+          <span class="metric-label">本周触发</span>
+          <span class="metric-value">28</span>
+          <div class="metric-foot"><span class="dot" style="background:var(--amber-500)"></span>较上周 ↑ 12%</div>
+        </div>
+        <div class="card metric">
+          <span class="metric-label">MTTR 平均</span>
+          <span class="metric-value">4.2<span class="metric-unit">分</span></span>
+          <div class="metric-foot"><span class="dot" style="background:var(--green-500)"></span>较上周 ↓ 1.8 分</div>
+        </div>
+        <div class="card metric">
+          <span class="metric-label">通知渠道</span>
+          <span class="metric-value">2<span class="metric-unit">/4</span></span>
+          <div class="metric-foot"><span class="dot" style="background:var(--blue-500)"></span>邮件 + 钉钉</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="tabs">
+          <div class="tab active">活跃 <span class="count">3</span></div>
+          <div class="tab">已确认 <span class="count">5</span></div>
+          <div class="tab">已解决 <span class="count">42</span></div>
+          <div class="tab">规则 <span class="count">12</span></div>
+        </div>
+        <table class="tbl">
+          <thead><tr>
+            <th style="padding-left:var(--s-6)">级别</th>
+            <th>告警</th>
+            <th>来源</th>
+            <th>触发时间</th>
+            <th>状态</th>
+            <th style="padding-right:var(--s-6);text-align:right">操作</th>
+          </tr></thead>
+          <tbody>
+            <tr>
+              <td style="padding-left:var(--s-6)"><span class="pill danger" style="height:22px"><span class="dot"></span>严重</span></td>
+              <td>
+                <div style="font-weight:500">API 服务无响应</div>
+                <div style="font-size:12px;color:var(--t3)">连续 3 次健康检查失败,触发自动重启</div>
+              </td>
+              <td><span style="font-family:var(--f-mono);color:var(--t2)">erp-prod</span></td>
+              <td><span class="mono" style="color:var(--t3)">14:21:14</span></td>
+              <td><span class="pill warning" style="height:22px"><span class="dot"></span>处理中</span></td>
+              <td style="padding-right:var(--s-6);text-align:right"><button class="btn btn-sm btn-default">查看</button></td>
+            </tr>
+            <tr>
+              <td style="padding-left:var(--s-6)"><span class="pill warning" style="height:22px"><span class="dot"></span>警告</span></td>
+              <td>
+                <div style="font-weight:500">磁盘使用率超过 80%</div>
+                <div style="font-size:12px;color:var(--t3)">D:\erp_system 当前 83.9% · 阈值 80%</div>
+              </td>
+              <td><span style="font-family:var(--f-mono);color:var(--t2)">host:disk</span></td>
+              <td><span class="mono" style="color:var(--t3)">14:18:00</span></td>
+              <td><span class="pill danger" style="height:22px"><span class="dot"></span>未确认</span></td>
+              <td style="padding-right:var(--s-6);text-align:right"><button class="btn btn-sm btn-default">确认</button> <button class="btn btn-sm btn-default">查看</button></td>
+            </tr>
+            <tr>
+              <td style="padding-left:var(--s-6)"><span class="pill warning" style="height:22px"><span class="dot"></span>警告</span></td>
+              <td>
+                <div style="font-weight:500">Worker 内存使用过高</div>
+                <div style="font-size:12px;color:var(--t3)">arq worker 8841 内存 234MB / 300MB · 阈值 75%</div>
+              </td>
+              <td><span style="font-family:var(--f-mono);color:var(--t2)">erp-arq:8841</span></td>
+              <td><span class="mono" style="color:var(--t3)">14:14:32</span></td>
+              <td><span class="pill danger" style="height:22px"><span class="dot"></span>未确认</span></td>
+              <td style="padding-right:var(--s-6);text-align:right"><button class="btn btn-sm btn-default">确认</button> <button class="btn btn-sm btn-default">查看</button></td>
+            </tr>
+            <tr>
+              <td style="padding-left:var(--s-6)"><span class="pill info" style="height:22px"><span class="dot"></span>信息</span></td>
+              <td>
+                <div style="font-weight:500">Redis 连接恢复</div>
+                <div style="font-size:12px;color:var(--t3)">短暂超时后自动重连,延迟 3ms</div>
+              </td>
+              <td><span style="font-family:var(--f-mono);color:var(--t2)">redis:6379</span></td>
+              <td><span class="mono" style="color:var(--t3)">14:24:24</span></td>
+              <td><span class="pill success" style="height:22px"><span class="dot"></span>已恢复</span></td>
+              <td style="padding-right:var(--s-6);text-align:right"><button class="btn btn-sm btn-default">查看</button></td>
+            </tr>
+            <tr>
+              <td style="padding-left:var(--s-6)"><span class="pill info" style="height:22px"><span class="dot"></span>信息</span></td>
+              <td>
+                <div style="font-weight:500">定时备份完成</div>
+                <div style="font-size:12px;color:var(--t3)">backups/2026-08-22_daily.zip · 142MB</div>
+              </td>
+              <td><span style="font-family:var(--f-mono);color:var(--t2)">scheduler</span></td>
+              <td><span class="mono" style="color:var(--t3)">04:00:00</span></td>
+              <td><span class="pill success" style="height:22px"><span class="dot"></span>已恢复</span></td>
+              <td style="padding-right:var(--s-6);text-align:right"><button class="btn btn-sm btn-default">查看</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ============== Footer ============== -->
+  <footer class="footer">
+    <div class="item"><span class="dot" style="background:var(--green-500)"></span>生产模式</div>
+    <div class="item">就绪</div>
+    <div class="item">上次刷新 14:24:18</div>
+    <div class="item">采样 2s · 窗口 120s</div>
+    <div class="grow"></div>
+    <div class="item"><kbd>Ctrl</kbd>+<kbd>K</kbd> 搜索</div>
+    <div class="item"><kbd>Ctrl</kbd>+<kbd>R</kbd> 刷新</div>
+    <div class="item brand-name">ERP 控制台</div>
+  </footer>
+
+</div>
+
+<script>
+  // view switcher
+  const items = document.querySelectorAll('.nav-item[data-view]');
+  const views = document.querySelectorAll('.view');
+  const crumb = document.getElementById('crumb-cur');
+  const navLabels = {
+    overview: '运行监控',
+    services: '服务管理',
+    logs: '日志中心',
+    config: '配置管理',
+    deploy: '部署发布',
+    alerts: '告警中心',
+  };
+  items.forEach(it => {
+    it.addEventListener('click', () => {
+      items.forEach(x => x.classList.remove('active'));
+      it.classList.add('active');
+      const v = it.dataset.view;
+      views.forEach(x => x.classList.remove('active'));
+      document.getElementById('v-' + v).classList.add('active');
+      crumb.textContent = navLabels[v] || v;
+      // scroll main to top
+      document.querySelector('.main').scrollTop = 0;
+      // sync hash for shareable URLs
+      history.replaceState(null, '', '#' + v);
+    });
+  });
+
+  // hash router: open prototype.html#services
+  function applyHash() {
+    const v = (location.hash || '#overview').slice(1);
+    if (navLabels[v]) {
+      const target = document.querySelector(`.nav-item[data-view="${v}"]`);
+      if (target) target.click();
+    }
+  }
+  window.addEventListener('hashchange', applyHash);
+  applyHash();
+
+  // theme switch
+  function setTheme(t) {
+    document.documentElement.setAttribute('data-theme', t);
+    document.getElementById('t-dark').classList.toggle('active', t === 'dark');
+    document.getElementById('t-light').classList.toggle('active', t === 'light');
+  }
+  function toggleSider() {
+    document.getElementById('app').classList.toggle('collapsed');
+  }
+
+  // tiny keyframes
+  const style = document.createElement('style');
+  style.textContent = '@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}';
+  document.head.appendChild(style);
+
+  // ===== 服务管理 · 一键操作交互演示(启动/重启/关闭 → loading → 顶栏模式切换) =====
+  function setModeActive(mode) {
+    // mode: 'dev' 表示开发模式运行中, 'prod' 表示生产模式运行中
+    const label = mode === 'dev' ? '生产模式' : '开发模式'; // 另一模式转为当前运行
+    let pill = document.querySelector('.header .pill.mode-pill');
+    if (!pill) {
+      pill = document.createElement('span');
+      pill.className = 'pill success mode-pill';
+      pill.innerHTML = '<span class="dot"></span>';
+      document.querySelector('.header-right').insertBefore(pill, document.querySelector('.header-right').firstChild);
+    }
+    pill.childNodes[1].textContent = label;
+  }
+  function demoOneClick(btn, doneCb) {
+    const old = btn.innerHTML;
+    btn.style.pointerEvents = 'none';
+    btn.style.opacity = '.85';
+    btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" style="animation:spin 1s linear infinite"><path d="M21 12a9 9 0 1 1-6.22-8.56" stroke-linecap="round"/></svg>处理中…';
+    setTimeout(() => {
+      btn.innerHTML = old;
+      btn.style.pointerEvents = '';
+      btn.style.opacity = '';
+      if (doneCb) doneCb();
+    }, 1600);
+  }
+  document.querySelectorAll('#v-services .btn').forEach(b => {
+    b.addEventListener('click', () => {
+      const txt = b.textContent.trim();
+      if (txt.includes('启动')) {
+        demoOneClick(b, () => setModeActive(b.textContent.includes('生产') ? 'dev' : 'prod'));
+      } else {
+        demoOneClick(b);
+      }
+    });
+  });
+</script>
+</body>
+</html>
