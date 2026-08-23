@@ -346,6 +346,8 @@ class BackupFullRequest(BaseModel):
     remark: str = Field(default="", max_length=200, description="备份备注")
     encrypt: bool = Field(default=True, description="是否启用加密(未配置密码时降级为不加密)")
     password: str | None = Field(default=None, description="加密密码,为空时依次使用请求头/环境变量")
+    tables: list[str] | None = Field(default=None, description="表级备份:仅备份指定表(与 exclude_tables 互斥)")
+    exclude_tables: list[str] | None = Field(default=None, description="表级备份:排除指定表(与 tables 互斥)")
 
 
 class BackupIncrementalRequest(BaseModel):

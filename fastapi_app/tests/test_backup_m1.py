@@ -372,7 +372,8 @@ async def test_manual_full_task_uses_passed_task_id(monkeypatch, tmp_path):
     async def fake_ensure_backup_dir(*args, **kwargs):
         return None
 
-    async def fake_create_full_backup(db, user, remark, encrypt_password=None, encrypt=True):
+    async def fake_create_full_backup(db, user, remark, encrypt_password=None, encrypt=True, **kwargs):
+        # M6 起任务还会透传 tables/exclude_tables/progress_cb（表级范围与 8 阶段进度）
         return (b'zip-bytes', {'table_count': 1, 'total_rows': 5, 'encrypted': False})
 
     async def fake_write_backup_record(db, **kwargs):

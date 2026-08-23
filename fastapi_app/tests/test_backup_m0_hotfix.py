@@ -157,7 +157,8 @@ async def test_verifier_adapter_delegates(monkeypatch):
     result = await ExistingRestoreVerifierAdapter().verify(db, {'users': {}}, None)
 
     assert result == {'overall': 'ok'}
-    fake.assert_awaited_once_with(db, {'users': {}}, None)
+    # P1-3: verify 端口透传 schema_snapshot（第 4 参，默认 None）
+    fake.assert_awaited_once_with(db, {'users': {}}, None, None)
 
 
 @pytest.mark.asyncio

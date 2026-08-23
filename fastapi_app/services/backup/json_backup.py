@@ -155,8 +155,15 @@ async def _retry_batch_rowwise(db, qtname, batch, batch_start, columns, type_map
     return skipped
 
 
-async def execute_legacy_backup_to_bytes(user, remark: str, db: AsyncSession) -> bytes:
-    """Legacy JSON 备份 (v1.0)，用于无 pg_dump 环境"""
+async def execute_legacy_backup_to_bytes(
+    user, remark: str, db: AsyncSession,
+    tables: list[str] | None = None,
+    exclude_tables: list[str] | None = None,
+) -> bytes:
+    """Legacy JSON 备份 (v1.0)，用于无 pg_dump 环境。
+
+    tables / exclude_tables（P1-2）：表级过滤，二选一；默认全表。
+    """
     from fastapi_app.shared_models import Base
     backup_data = {
         'version': '1.0',
@@ -171,8 +178,14 @@ async def execute_legacy_backup_to_bytes(user, remark: str, db: AsyncSession) ->
     )
     existing_tables = {r[0] for r in existing_result.fetchall()}
 
+    include_set = set(tables) if tables else None
+    exclude_set = set(exclude_tables) if exclude_tables else None
     for table in Base.metadata.sorted_tables:
         name = str(table.name)
+        if include_set is not None and name not in include_set:
+            continue
+        if exclude_set is not None and name in exclude_set:
+            continue
         if name not in existing_tables:
             logger.warning(f'跳过不存在的表: {name}')
             backup_data['tables'][name] = {'error': '表不存在', 'count': 0, 'rows': []}

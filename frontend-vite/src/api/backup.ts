@@ -107,6 +107,7 @@ export const backupApi = {
     if (opts?.password) q.set('password', opts.password)
     return post(`/backup/restore-by-name/${encodeURIComponent(filename)}?${q.toString()}`)
   },
+  downloadByName: (filename: string) => download(`/backup/download/${encodeURIComponent(filename)}`, filename),
   deleteServerBackup: (filename: string) => del(`/backup/delete-by-name/${encodeURIComponent(filename)}`),
   saveIncremental: (remark: string, since?: string) =>
     post<{ success: boolean; filename?: string; total_rows?: number }>(`/backup/save-incremental?remark=${encodeURIComponent(remark)}${since ? '&since=' + encodeURIComponent(since) : ''}`),
@@ -129,7 +130,7 @@ export const backupApi = {
   getRecords: (page: number = 1, pageSize: number = 20) =>
     get<ApiResponse>(`/backup/records?page=${page}&page_size=${pageSize}`),
   // --- M4 六模块新增绑定（任务化 / 调度 / settings / 概览 / 差异预览） ---
-  triggerFull: (payload?: { remark?: string; encrypt?: boolean; password?: string }) =>
+  triggerFull: (payload?: { remark?: string; encrypt?: boolean; password?: string; tables?: string[]; exclude_tables?: string[] }) =>
     post<{ success: boolean; task_id: string; task_name: string; message?: string }>('/backup/full', payload ?? {}),
   triggerIncremental: (payload?: { remark?: string; since?: string }) =>
     post<{ success: boolean; task_id: string; task_name: string; message?: string }>('/backup/incremental', payload ?? {}),

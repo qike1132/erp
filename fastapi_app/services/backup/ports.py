@@ -153,8 +153,9 @@ class RestoreVerifier(Protocol):
         db: AsyncSession,
         expected_tables: dict[str, dict[str, Any]],
         fingerprints: dict[str, Any] | None,
+        schema_snapshot: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """执行恢复后数据完整性验证。"""
+        """执行恢复后数据完整性验证（含 L4 DDL 比对，P1-3 起透传 schema 快照）。"""
         ...
 
 

@@ -169,6 +169,43 @@ async def _export_backup_to_response(
 
 
 # ---------------------------------------------------------------------------
+# GET /download/{filename}
+# ---------------------------------------------------------------------------
+@router.get('/download/{filename}')
+async def download_server_backup(
+    filename: str,
+    request: Request,
+    user: User = Depends(require_backup_permission('download_server_backup')),
+):
+    """按文件名下载服务器上已有的备份文件（P2-1：备份记录表下载入口接通）
+
+    与 GET /export（每次现场生成新备份）不同，本端点直接回放既有文件；
+    整库文件属高敏读操作，与 /export 一致显式写 EXPORT 审计。
+    """
+    safe_name = Path(filename).name
+    if safe_name != filename:
+        raise HTTPException(status_code=400, detail='无效的文件名')
+    filepath = backup_service.BACKUP_DIR / safe_name
+    if not filepath.is_file():
+        raise HTTPException(status_code=404, detail='备份文件不存在')
+    try:
+        size = filepath.stat().st_size
+    except OSError as e:
+        raise HTTPException(status_code=400, detail=f'读取备份文件失败: {e}') from e
+
+    await _audit_export_download(
+        request, user, filename=safe_name, format='file',
+        encrypted=safe_name.endswith('.enc'), size=size, remark='download-by-name',
+    )
+    media_type = (
+        'application/zip' if safe_name.endswith('.zip')
+        else 'application/json' if safe_name.endswith('.json')
+        else 'application/octet-stream'
+    )
+    return FileResponse(path=str(filepath), filename=safe_name, media_type=media_type)
+
+
+# ---------------------------------------------------------------------------
 # GET /export
 # ---------------------------------------------------------------------------
 @router.get('/export')

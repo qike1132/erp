@@ -135,6 +135,7 @@ class DatabaseRestoreOrchestrator:
 
                 # 阶段 2：打开并验证归档
                 archive, manifest = await self._open_and_validate_archive(ctx, reporter)
+                outcome.manifest = ctx.runtime.get("manifest_dict", {})
 
                 # 阶段 3：数据库恢复（psql 或 JSON 策略）
                 outcome.database = await self._restore_database(ctx, archive, manifest, reporter)
@@ -212,6 +213,7 @@ class DatabaseRestoreOrchestrator:
             fingerprints=manifest_dict.get("fingerprints"),
             checksums=manifest_dict.get("checksums", {}),
             encrypted=manifest_dict.get("encrypted", False),
+            schema_snapshot=manifest_dict.get("schema_snapshot"),
         )
 
         # 校验数据库文件 checksum
@@ -403,13 +405,19 @@ class DatabaseRestoreOrchestrator:
                     db,
                     manifest.tables,
                     manifest.fingerprints,
+                    manifest.schema_snapshot,
                 )
+                _known_keys = {
+                    "overall_pass", "l0_global_checksum", "l1_row_count",
+                    "l2_fingerprint", "l3_id_sampling",
+                }
                 verification = VerificationResult(
                     overall_pass=verify_dict.get("overall_pass", False),
                     l0_global_checksum=verify_dict.get("l0_global_checksum", {}),
                     l1_row_count=verify_dict.get("l1_row_count", {}),
                     l2_fingerprint=verify_dict.get("l2_fingerprint", {}),
                     l3_id_sampling=verify_dict.get("l3_id_sampling", {}),
+                    extras={k: v for k, v in verify_dict.items() if k not in _known_keys},
                 )
                 ctx.log(
                     RestorePhase.VERIFY,

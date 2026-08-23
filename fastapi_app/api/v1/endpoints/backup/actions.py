@@ -102,6 +102,8 @@ async def trigger_full_backup(
             remark=payload.remark,
             encrypt=payload.encrypt,
             password=password,
+            tables=payload.tables,
+            exclude_tables=payload.exclude_tables,
         )
     except (RuntimeError, OSError, ConnectionError) as e:
         logger.error('入队全量备份任务失败: %s', e)

@@ -24,6 +24,8 @@ TASK_TYPE_TO_FUNC: dict[str, str] = {
     'incremental': 'auto_incremental_backup_task',
     'integrity_check': 'backup_integrity_check_task',
     'cleanup': 'backup_cleanup_task',
+    # P1-4: 灾备演练月度例行化（迁移 037 种子 '30 3 1 * *'）
+    'disaster_recovery_test': 'disaster_recovery_test_task',
 }
 VALID_TASK_TYPES = tuple(TASK_TYPE_TO_FUNC)
 

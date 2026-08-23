@@ -68,6 +68,7 @@
         :on-page-change="loadRecords"
         @restore="onRecordRestore"
         @download="onRecordDownload"
+        @delete="onRecordDelete"
       />
     </section>
     </div>
@@ -169,13 +170,20 @@ async function loadServerBackups() {
   } catch { serverBackups.value = [] }
 }
 
-async function triggerFull() {
+async function triggerFull(opts?: { password?: string; tables?: string[]; excludeTables?: string[] }) {
   busy.value = true
   taskKind.value = '备份'
+  const partial = !!(opts?.tables?.length || opts?.excludeTables?.length)
   try {
-    const res = await backupApi.triggerFull({ remark: '手动全量备份' })
+    const res = await backupApi.triggerFull({
+      remark: partial ? '手动表级备份' : '手动全量备份',
+      encrypt: true,
+      password: opts?.password,
+      tables: opts?.tables?.length ? opts.tables : undefined,
+      exclude_tables: opts?.excludeTables?.length ? opts.excludeTables : undefined,
+    })
     activeTaskId.value = res.task_id
-    toast.info('全量备份任务已触发')
+    toast.info(partial ? '表级备份任务已触发' : '全量备份任务已触发')
   } catch (e) {
     busy.value = false
     activeTaskId.value = null
@@ -248,8 +256,25 @@ function onRecordRestore(filename: string) {
   wizardOpen.value = true
   previewPlan(filename)
 }
-function onRecordDownload(filename: string) {
-  // 下载沿用后端按名导出；此处仅保留入口占位
+async function onRecordDownload(filename: string) {
+  try {
+    await backupApi.downloadByName(filename)
+  } catch (e) {
+    toast.error(errText(e, '下载失败，请稍后重试'))
+  }
+}
+
+async function onRecordDelete(filename: string) {
+  if (!window.confirm(`确定删除备份文件「${filename}」？该操作不可恢复。`)) return
+  try {
+    await backupApi.deleteServerBackup(filename)
+    toast.success('备份文件已删除')
+    void loadRecords()
+    void loadServerBackups()
+    void loadStatus()
+  } catch (e) {
+    toast.error(errText(e, '删除失败，请稍后重试'))
+  }
 }
 
 function openWizard() {

@@ -173,10 +173,41 @@ class ExistingRestoreVerifierAdapter(RestoreVerifier):
         db: AsyncSession,
         expected_tables: dict[str, dict[str, Any]],
         fingerprints: dict[str, Any] | None,
+        schema_snapshot: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         from fastapi_app.services.backup.verify.core import verify_restore
 
-        return await verify_restore(db, expected_tables, fingerprints)
+        return await verify_restore(db, expected_tables, fingerprints, schema_snapshot)
+
+
+class NoOpAdvisoryLockAdapter:
+    """no-op 锁适配器（P1-3 接线用）。
+
+    调用方（端点层）已持有 Redis 还原锁时注入本适配器，
+    避免内核二次加锁导致死锁。
+    """
+
+    async def __aenter__(self) -> NoOpAdvisoryLockAdapter:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> bool | None:
+        return None
+
+
+class NoOpSafetyBackupAdapter(SafetyBackupProvider):
+    """no-op 安全备份适配器（P1-3 接线用）。
+
+    调用方（端点层）已创建 pre-restore 安全备份时注入本适配器，
+    避免内核重复执行一次全量备份。
+    """
+
+    async def create(self) -> dict[str, Any]:
+        return {"success": True, "skipped": True, "reason": "endpoint-owned"}
 
 
 class BackupProgressReporterAdapter(ProgressReporter):

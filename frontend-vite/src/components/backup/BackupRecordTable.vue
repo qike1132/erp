@@ -26,6 +26,7 @@
             <td class="brt-right">
               <button class="brt-link brt-link-danger" :disabled="r.status === 'running'" @click="$emit('restore', r.filename)">还原</button>
               <button class="brt-link" @click="$emit('download', r.filename)">下载</button>
+              <button class="brt-link brt-link-danger" @click="$emit('delete', r.filename)">删除</button>
             </td>
           </tr>
           <tr v-if="loading || rows.length === 0">
@@ -67,6 +68,7 @@ const props = defineProps<{
 defineEmits<{
   'restore': [filename: string]
   'download': [filename: string]
+  'delete': [filename: string]
   'page-change': [page: number]
 }>()
 

@@ -48,6 +48,7 @@ def _get_backup_permission(endpoint_name: str) -> str:  # log-context: internal 
         'export_backup_enhanced': 'backup_create',
         'save_backup_to_server': 'backup_create',
         'save_incremental_backup': 'backup_create',
+        'download_server_backup': 'backup_create',
 
         # M1 任务化触发
         'trigger_full_backup': 'backup_create',

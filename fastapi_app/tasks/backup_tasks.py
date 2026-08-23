@@ -30,8 +30,13 @@ logger = logging.getLogger(__name__)
 _MAX_TRIES = 3
 
 
-async def manual_full_backup_task(ctx, *, task_id: str | None = None, remark: str = '', encrypt: bool = True, password: str | None = None):
-    """手动全量备份（ARQ 异步任务，M1 新增）。
+async def manual_full_backup_task(
+    ctx, *, task_id: str | None = None, remark: str = '', encrypt: bool = True,
+    password: str | None = None,
+    tables: list[str] | None = None,
+    exclude_tables: list[str] | None = None,
+):
+    """手动全量备份（ARQ 异步任务，M1 新增；P1-2 起支持表级范围）。
 
     由 POST /api/v1/backup/full 入队触发；写 Redis 进度(8 阶段)，
     完成后落 backup_record(trigger_type='manual', encrypted 反映实际加密)。
@@ -70,10 +75,18 @@ async def manual_full_backup_task(ctx, *, task_id: str | None = None, remark: st
                         '请求加密全量备份但未配置密码（参数/环境变量均无），本次备份将以未加密形式保存'
                     )
             await update_progress(task_id, 'export_db', 0.1, '导出数据库')
+
+            async def _svc_progress(phase: str, sub: float, detail: str):
+                # P2-2: 服务层 8 阶段进度透传到 Redis（此前任务只报 3 个阶段）
+                await update_progress(task_id, phase, sub, detail)
+
             zip_bytes, manifest = await backup_service.create_full_backup(
                 db, dummy_user, remark or '手动全量备份',
                 encrypt_password=effective_password,
                 encrypt=bool(effective_password),
+                tables=tables,
+                exclude_tables=exclude_tables,
+                progress_cb=_svc_progress,
             )
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             # P0-1: 加密备份扩展名带 .enc；P0-4: 同步写 .meta sidecar

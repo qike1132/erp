@@ -295,33 +295,44 @@ async def health_check(
 # ---------------------------------------------------------------------------
 
 class ValidationCache:
-    """备份验证结果缓存"""
+    """备份验证结果缓存（P2: Redis 共享版）
+
+    旧实现为进程内 dict——4 worker 各自缓存互不可见、且无容量上限。
+    改为 Redis 后多 worker 共享、TTL 由 Redis 管理；Redis 不可用时
+    降级为无缓存（每次直读），不阻塞验证主流程。
+    """
+
+    _KEY_PREFIX = 'erp:backup_validation:'
 
     def __init__(self, ttl_seconds: int = 3600):  # 默认1小时缓存
-        self.cache = {}
         self.ttl = ttl_seconds
 
-    def get(self, cache_key: str):
-        """获取缓存项"""
-        if cache_key in self.cache:
-            entry = self.cache[cache_key]
-            if time.time() - entry['timestamp'] < self.ttl:
-                return entry['data']
-            else:
-                # 缓存过期
-                del self.cache[cache_key]
-        return None
+    async def get(self, cache_key: str):
+        """获取缓存项（Redis 不可用/未命中返回 None）"""
+        try:
+            from fastapi_app.core.backup_progress import _get_redis
+            client = await _get_redis()
+            if client is None:
+                return None
+            raw = await client.get(self._KEY_PREFIX + cache_key)
+            return json.loads(raw) if raw else None
+        except Exception:  # broad-except: 缓存读取失败降级为直读
+            return None
 
-    def set(self, cache_key: str, data):
-        """设置缓存项"""
-        self.cache[cache_key] = {
-            'data': data,
-            'timestamp': time.time()
-        }
-
-    def clear(self):
-        """清空缓存"""
-        self.cache.clear()
+    async def set(self, cache_key: str, data):
+        """设置缓存项（失败仅告警）"""
+        try:
+            from fastapi_app.core.backup_progress import _get_redis
+            client = await _get_redis()
+            if client is None:
+                return
+            await client.set(
+                self._KEY_PREFIX + cache_key,
+                json.dumps(data, ensure_ascii=False, default=str),
+                ex=self.ttl,
+            )
+        except Exception as e:  # broad-except: 缓存写入失败不影响验证结果返回
+            logger.warning(f'验证缓存写入失败: {e}')
 
 
 # 全局验证缓存实例
@@ -362,7 +373,7 @@ async def validate_backup_file(
 
     # 检查缓存
     cache_key = _get_validation_cache_key(filename, password or x_backup_password)
-    cached_result = _validation_cache.get(cache_key)
+    cached_result = await _validation_cache.get(cache_key)
     if cached_result:
         cached_result['cache_hit'] = True
         return cached_result
@@ -512,7 +523,7 @@ async def validate_backup_file(
 
         # 缓存验证结果（仅当验证成功时）
         if valid:
-            _validation_cache.set(cache_key, result)
+            await _validation_cache.set(cache_key, result)
 
         return result
 
@@ -554,7 +565,7 @@ async def validate_backup_integrity(
             usedforsecurity=False
         ).hexdigest()
 
-        cached_result = _validation_cache.get(cache_key)
+        cached_result = await _validation_cache.get(cache_key)
         if cached_result:
             cached_result['cache_hit'] = True
             return cached_result
@@ -678,7 +689,7 @@ async def validate_backup_integrity(
         }
 
         # 缓存结果
-        _validation_cache.set(cache_key, result)
+        await _validation_cache.set(cache_key, result)
 
         return result
 

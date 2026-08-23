@@ -42,6 +42,7 @@ class RestoreManifest:
     fingerprints: dict[str, Any] | None
     checksums: dict[str, str]
     encrypted: bool
+    schema_snapshot: dict[str, Any] | None = None  # P1-3: L4 DDL 验证所需
 
 
 @dataclass
@@ -76,6 +77,8 @@ class VerificationResult:
     l2_fingerprint: dict[str, Any] = field(default_factory=dict)
     l3_id_sampling: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
+    # P1-3: verify_restore 返回的其余层级（如 l4_ddl）原样透传，避免接线丢层
+    extras: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -92,6 +95,7 @@ class RestoreOutcome:
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     journal: list[dict[str, Any]] = field(default_factory=list)
+    manifest: dict[str, Any] = field(default_factory=dict)  # P1-3: 原始 manifest 字典（结果映射用）
 
 
 @dataclass

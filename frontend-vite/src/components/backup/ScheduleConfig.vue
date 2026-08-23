@@ -5,6 +5,16 @@
       <button class="sc-switch" :class="{ on: form.enabled }" role="switch" :aria-checked="form.enabled" @click="form.enabled = !form.enabled"></button>
     </div>
     <div class="sc-row">
+      <div class="sc-label">任务类型</div>
+      <select v-model="taskType" class="sc-select">
+        <option value="incremental">增量备份</option>
+        <option value="full">全量备份</option>
+        <option value="integrity_check">完整性巡检</option>
+        <option value="cleanup">智能清理</option>
+        <option value="disaster_recovery_test">灾备恢复演练</option>
+      </select>
+    </div>
+    <div class="sc-row">
       <div class="sc-label">备份周期</div>
       <select v-model="period" class="sc-select">
         <option value="daily">每日</option>
@@ -51,7 +61,16 @@ const props = defineProps<{
 
 const period = ref<'daily' | 'weekly' | 'monthly' | 'custom'>('daily')
 const timeInput = ref('02:00')
+const taskType = ref('incremental')
 const form = reactive({ enabled: true, cron_expr: '0 2 * * *' })
+
+const TASK_TYPE_LABELS: Record<string, string> = {
+  incremental: '增量备份',
+  full: '全量备份',
+  integrity_check: '完整性巡检',
+  cleanup: '智能清理',
+  disaster_recovery_test: '灾备恢复演练',
+}
 
 watch(period, (p) => {
   if (p === 'daily') form.cron_expr = `0 ${timeInput.value.split(':')[0]} * * *`
@@ -63,7 +82,8 @@ function handleSave() {
     : period.value === 'weekly' ? `0 ${hour} * * 1`
     : period.value === 'monthly' ? `0 ${hour} 1 * *`
     : form.cron_expr.trim() || '0 2 * * *'
-  props.onSave({ name: '自定义备份', task_type: 'incremental', cron_expr: cron, enabled: form.enabled })
+  const typeLabel = TASK_TYPE_LABELS[taskType.value] ?? '自定义'
+  props.onSave({ name: `自定义${typeLabel}`, task_type: taskType.value, cron_expr: cron, enabled: form.enabled })
 }
 </script>
 

@@ -130,19 +130,37 @@ async def test_restore_from_zip_passes_confirm_sensitive(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_restore_from_zip_decrypts_envelope(monkeypatch):
-    """加密 ZIP（裸信封）带密码可还原到 manifest。"""
+    """加密 ZIP（裸信封）经内核解密后还原（P1-3 起走 DatabaseRestoreOrchestrator）。"""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w') as zf:
         zf.writestr('manifest.json', json.dumps({
             'version': '2.0', 'type': 'full', 'tables': {}, 'checksums': {},
             'remark': 'encrypted-p0', 'encrypted': True,
         }))
+        zf.writestr('database/dump.json', json.dumps({'version': '1.0', 'tables': {}}))
     envelope, _ = enc.encrypt_backup(buf.getvalue(), 'pw1')
 
-    async def _fake_verify(*args, **kwargs):
+    # 策略/验证器打桩，避免真实数据库会话（解密路径在内核阶段 2 已覆盖）
+    from fastapi_app.services.backup.strategies import JsonRestoreStrategy
+    from fastapi_app.services.backup.types import DatabaseRestoreResult
+
+    async def _fake_strategy_restore(self, archive, manifest, engine_lifecycle, reporter=None, task_id=None):
+        return DatabaseRestoreResult(status='ok', message='ok', strategy='json')
+
+    monkeypatch.setattr(JsonRestoreStrategy, 'restore', _fake_strategy_restore)
+
+    from fastapi_app.services.backup.adapters import (
+        ExistingEngineLifecycleAdapter,
+        ExistingRestoreVerifierAdapter,
+    )
+
+    async def _fake_verify(self, db, tables, fingerprints, schema_snapshot=None):
         return {'overall_pass': True}
 
-    monkeypatch.setattr(restore_mod, 'verify_restore', _fake_verify)
+    monkeypatch.setattr(ExistingRestoreVerifierAdapter, 'verify', _fake_verify)
+    # 测试环境无全局会话工厂，验证阶段会话打桩
+    monkeypatch.setattr(ExistingEngineLifecycleAdapter, 'new_session', AsyncMock(return_value=AsyncMock()))
+
     from unittest.mock import MagicMock
     db = MagicMock()
     db.commit = AsyncMock()
@@ -150,6 +168,7 @@ async def test_restore_from_zip_decrypts_envelope(monkeypatch):
     result = await restore_mod.restore_from_zip(envelope, db, decrypt_password='pw1')
     assert result['remark'] == 'encrypted-p0'
     assert result['verification']['overall_pass'] is True
+    assert result['database']['status'] == 'ok'
 
     # 无密码 → 明确报错
     with pytest.raises(restore_mod.RestoreError):

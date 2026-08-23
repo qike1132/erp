@@ -69,6 +69,31 @@ async def release_backup_lock(db: AsyncSession) -> None:
         logger.warning('释放备份 advisory_lock 失败: %s', e)
 
 
+def resolve_backup_table_scope(
+    tables: list[str] | None,
+    exclude_tables: list[str] | None,
+) -> tuple[set[str] | None, set[str] | None]:
+    """校验并归一化表级备份范围（P1-2，对标 Frappe include/exclude doctypes）。
+
+    返回 (include_set | None, exclude_set | None)；非法组合或未知表名抛 BackupError。
+    """
+    if tables and exclude_tables:
+        raise BackupError('tables 与 exclude_tables 不能同时指定')
+    if not tables and not exclude_tables:
+        return None, None
+    from fastapi_app.shared_models import Base
+    known = {str(t.name) for t in Base.metadata.sorted_tables}
+    if tables:
+        unknown = sorted(set(tables) - known)
+        if unknown:
+            raise BackupError(f'未知的表名: {", ".join(unknown)}（仅允许 ORM 已定义的表）')
+        return set(tables), None
+    unknown = sorted(set(exclude_tables) - known)
+    if unknown:
+        raise BackupError(f'未知的表名: {", ".join(unknown)}（仅允许 ORM 已定义的表）')
+    return None, set(exclude_tables)
+
+
 async def create_full_backup(
     db: AsyncSession,
     user,
@@ -76,8 +101,17 @@ async def create_full_backup(
     encrypt_password: str | bytearray | None = None,
     use_snapshot: bool = True,
     encrypt: bool | None = None,
+    tables: list[str] | None = None,
+    exclude_tables: list[str] | None = None,
+    progress_cb=None,
 ) -> tuple[bytes, dict]:
-    """执行全量备份并返回 (zip_bytes, manifest_dict)。"""
+    """执行全量备份并返回 (zip_bytes, manifest_dict)。
+
+    tables / exclude_tables（P1-2）：表级备份范围，二选一；
+    指定后固定走 JSON 路径（还原时按表 upsert，不整库重建）。
+    progress_cb（P2-2）：可选异步回调 (phase, sub, detail)，用于任务层上报
+    8 阶段进度（导出/附件/配置/Redis/索引/校验和）。
+    """
     if _backup_in_progress.locked():
         raise BackupLockError('已有备份任务正在执行中，请稍后重试')
 
@@ -88,7 +122,11 @@ async def create_full_backup(
     async with _backup_in_progress:
         try:
             return await asyncio.wait_for(
-                _do_create_full_backup(db, user, remark, encrypt_password, use_snapshot, encrypt),
+                _do_create_full_backup(
+                    db, user, remark, encrypt_password, use_snapshot, encrypt,
+                    tables=tables, exclude_tables=exclude_tables,
+                    progress_cb=progress_cb,
+                ),
                 timeout=BACKUP_OPERATION_TIMEOUT,
             )
         except TimeoutError as e:
@@ -104,8 +142,14 @@ async def _do_create_full_backup(
     encrypt_password: str | bytearray | None,
     use_snapshot: bool,
     encrypt: bool | None = None,
+    tables: list[str] | None = None,
+    exclude_tables: list[str] | None = None,
+    progress_cb=None,
 ) -> tuple[bytes, dict]:
     """create_full_backup 的实际实现，由锁和超时控制包裹。"""
+    include_set, exclude_set = resolve_backup_table_scope(tables, exclude_tables)
+    partial = include_set is not None or exclude_set is not None
+
     snapshot_id = None
     if use_snapshot:
         try:
@@ -119,24 +163,45 @@ async def _do_create_full_backup(
         dump_path = tmpdir_path / 'database' / 'dump.sql.gz'
         dump_info: dict = {}
         pg_dump_available = False
-        try:
-            dump_info = await run_pg_dump(dump_path, snapshot_id)
-            pg_dump_available = True
-        except (TimeoutError, OSError, RuntimeError) as e:
-            logger.warning(f'pg_dump 不可用，使用 JSON 格式备份数据库: {e}')
+        if partial:
+            # 表级备份固定走 JSON 路径：还原时按表 upsert（psql 路径会整库重建，与表级语义冲突）
             json_path = tmpdir_path / 'database'
             json_path.mkdir(parents=True, exist_ok=True)
-            json_bytes = await execute_legacy_backup_to_bytes(user, remark, db)
+            json_bytes = await execute_legacy_backup_to_bytes(
+                user, remark, db, tables=tables, exclude_tables=exclude_tables,
+            )
             json_path_file = json_path / 'dump.json'
             json_path_file.write_bytes(json_bytes)
             dump_info = {
                 'pg_version': '', 'db_name': os.getenv('DB_NAME', 'erp_system'),
                 'dump_size': len(json_bytes), 'duration_seconds': 0, 'format': 'json',
             }
+        else:
+            try:
+                dump_info = await run_pg_dump(dump_path, snapshot_id)
+                pg_dump_available = True
+            except (TimeoutError, OSError, RuntimeError) as e:
+                logger.warning(f'pg_dump 不可用，使用 JSON 格式备份数据库: {e}')
+                json_path = tmpdir_path / 'database'
+                json_path.mkdir(parents=True, exist_ok=True)
+                json_bytes = await execute_legacy_backup_to_bytes(user, remark, db)
+                json_path_file = json_path / 'dump.json'
+                json_path_file.write_bytes(json_bytes)
+                dump_info = {
+                    'pg_version': '', 'db_name': os.getenv('DB_NAME', 'erp_system'),
+                    'dump_size': len(json_bytes), 'duration_seconds': 0, 'format': 'json',
+                }
 
         from fastapi_app.shared_models import Base
 
+        if progress_cb:
+            await progress_cb('export_db', 1.0, '数据库导出完成')
+
         table_names = [str(t.name) for t in Base.metadata.sorted_tables]
+        if include_set is not None:
+            table_names = [n for n in table_names if n in include_set]
+        if exclude_set is not None:
+            table_names = [n for n in table_names if n not in exclude_set]
 
         existing_result = await db.execute(
             text("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
@@ -168,8 +233,11 @@ async def _do_create_full_backup(
             checksums[db_dump_name] = sha256_file(db_dump_file)  # REV-14
 
         fingerprints = {}
+        scope_name_set = set(table_names)
         for table in Base.metadata.sorted_tables:
             tname = str(table.name)
+            if tname not in scope_name_set:
+                continue
             if tname not in get_checksum_tables():
                 continue
             if tname not in existing_tables:
@@ -205,7 +273,7 @@ async def _do_create_full_backup(
             logger.warning(f'采集表结构快照失败，schema_snapshot 置空: {e}')
 
         manifest = {
-            'version': BACKUP_FORMAT_VERSION, 'type': 'full', 'app_version': '2.0',
+            'version': BACKUP_FORMAT_VERSION, 'type': 'partial' if partial else 'full', 'app_version': '2.0',
             'pg_version': dump_info.get('pg_version', ''),
             'db_name': dump_info.get('db_name', ''),
             'exported_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -220,6 +288,11 @@ async def _do_create_full_backup(
             'includes': {}, 'checksums': checksums, 'fingerprints': fingerprints,
             'schema_snapshot': snapshot_schema,
         }
+        if partial:
+            manifest['tables_scope'] = {
+                'include': sorted(include_set) if include_set else None,
+                'exclude': sorted(exclude_set) if exclude_set else None,
+            }
 
         zip_path = tmpdir_path / 'backup.zip'
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=3) as zf:
@@ -236,6 +309,8 @@ async def _do_create_full_backup(
                         zf.write(fp, arcname)
                         file_count += 1
                 manifest['includes']['filestore_count'] = file_count
+                if progress_cb:
+                    await progress_cb('pack_filestore', 1.0, f'附件 {file_count} 个')
 
             config_files_added = []
             config_files_excluded = []
@@ -258,10 +333,14 @@ async def _do_create_full_backup(
             manifest['includes']['config_files'] = config_files_added
             if config_files_excluded:
                 manifest['includes']['config_files_excluded'] = config_files_excluded
+            if progress_cb:
+                await progress_cb('backup_config', 1.0, f'配置 {len(config_files_added)} 个')
 
             if REDIS_DUMP.is_file():
                 zf.write(REDIS_DUMP, 'redis/dump.rdb')
                 manifest['includes']['redis_rdb'] = True
+                if progress_cb:
+                    await progress_cb('backup_redis', 1.0, 'Redis RDB 已打包')
 
             try:
                 import httpx
@@ -297,12 +376,16 @@ async def _do_create_full_backup(
                             )
             except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
                 logger.warning('MeiliSearch 索引导出失败（可忽略）: %s', e)
+            if progress_cb:
+                await progress_cb('backup_meilisearch', 1.0, '搜索索引处理完成')
 
             manifest_bytes = json.dumps(manifest, ensure_ascii=False, indent=2).encode('utf-8')
             zf.writestr('manifest.json', manifest_bytes)
 
         zip_bytes = zip_path.read_bytes()
         manifest['zip_size'] = len(zip_bytes)
+        if progress_cb:
+            await progress_cb('generate_checksum', 1.0, '校验和已生成')
 
         # P0-1 加密决策单点化：服务层只认显式入参 + 环境变量，绝不生成随机密钥。
         # - encrypt=False / None（未显式要求加密）：环境变量有密码则加密，否则明文+告警
