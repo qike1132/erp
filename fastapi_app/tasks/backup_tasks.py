@@ -260,7 +260,7 @@ async def scheduler_poller(ctx):
                 if not func_name:
                     logger.warning('调度任务 id=%s 类型 %s 无映射任务函数，跳过', sch.id, sch.task_type)
                     continue
-                await pool.enqueue_job(func_name, _job_timeout=1800)
+                await pool.enqueue_job(func_name)
                 sch.last_run_at = now
                 sch.last_status = 'running'
                 await db.commit()

@@ -1,10 +1,20 @@
 <template>
-  <div class="bk-center">
-    <div class="bk-head">
-      <div class="bk-head-title">数据备份中心</div>
-      <div class="bk-head-sub">生产环境 · 数据备份与恢复</div>
+  <div class="page-card page-card-main bk-root">
+    <div class="page-card-header">
+      <div class="bk-head">
+        <div class="bk-head-title">数据备份中心</div>
+        <div class="bk-head-sub">生产环境 · 数据备份与恢复</div>
+      </div>
+      <div class="bk-header-actions">
+        <button class="bk-btn bk-btn-primary" @click="openWizard">一键还原向导</button>
+        <label class="bk-btn bk-btn-outline">
+          从文件上传还原
+          <input type="file" accept=".zip,.json,.gz" hidden @change="onUploadRestore" />
+        </label>
+      </div>
     </div>
 
+    <div class="page-card-body">
     <section class="bk-section">
       <BackupOverviewCards :status="status" :loading="statusLoading" />
     </section>
@@ -45,13 +55,6 @@
         :on-execute="executeRestore"
         @close="wizardOpen = false"
       />
-      <div class="bk-actions-row">
-        <button class="bk-btn-primary" @click="openWizard">一键还原向导</button>
-        <label class="bk-btn-outline">
-          从文件上传还原
-          <input type="file" accept=".zip,.json,.gz" hidden @change="onUploadRestore" />
-        </label>
-      </div>
       <div v-if="uploadRestoring" class="bk-upload-note">上传文件还原中：{{ (taskState?.phaseLabel) || '处理中…' }}</div>
     </section>
 
@@ -67,6 +70,7 @@
         @download="onRecordDownload"
       />
     </section>
+    </div>
   </div>
 </template>
 
@@ -74,6 +78,7 @@
 import { onMounted, ref } from 'vue'
 import { backupApi } from '@/api'
 import type { BackupRestorePlan, BackupScheduleItem, BackupSettings } from '@/api/backup'
+import { toast } from '@/composables/useToast'
 import BackupOverviewCards from '@/components/backup/BackupOverviewCards.vue'
 import BackupActions from '@/components/backup/BackupActions.vue'
 import ScheduleConfig from '@/components/backup/ScheduleConfig.vue'
@@ -92,10 +97,33 @@ const saving = ref(false)
 /* ---------- 任务进度（备份 + 还原 + 上传共用统一轮询） ---------- */
 const activeTaskId = ref<string | null>(null)
 const busy = ref(false)
+const uploadRestoring = ref(false)
+/** 当前任务类型，用于终态 toast 文案（备份/还原共用同一轮询） */
+const taskKind = ref<'备份' | '还原'>('备份')
+
+/** 后端 409/500 的 detail 形如 {code, message}，取不到时回退默认文案 */
+function errText(e: unknown, fallback: string): string {
+  const detail = (e as { response?: { data?: { detail?: { message?: string } | string } } })?.response?.data?.detail
+  if (typeof detail === 'string') return detail
+  if (detail?.message) return detail.message
+  return fallback
+}
+
 const { state: taskState } = useBackupTask(
   () => activeTaskId.value,
-  () => { busy.value = false },
-  () => { busy.value = false },
+  () => {
+    busy.value = false
+    uploadRestoring.value = false
+    toast.success(`${taskKind.value}任务已完成`)
+    void loadStatus()
+    void loadRecords()
+  },
+  (error: string) => {
+    busy.value = false
+    uploadRestoring.value = false
+    toast.error(`${taskKind.value}任务失败：${error || '请查看服务器日志'}`)
+    void loadStatus()
+  },
 )
 
 /* ---------- 记录 ---------- */
@@ -109,7 +137,6 @@ const recordsLoading = ref(false)
 const wizardOpen = ref(false)
 const serverBackups = ref<ServerBackupSummary[]>([])
 const plan = ref<BackupRestorePlan | null>(null)
-const uploadRestoring = ref(false)
 
 async function loadStatus() {
   statusLoading.value = true
@@ -144,17 +171,29 @@ async function loadServerBackups() {
 
 async function triggerFull() {
   busy.value = true
+  taskKind.value = '备份'
   try {
     const res = await backupApi.triggerFull({ remark: '手动全量备份' })
     activeTaskId.value = res.task_id
-  } catch { busy.value = false; activeTaskId.value = null }
+    toast.info('全量备份任务已触发')
+  } catch (e) {
+    busy.value = false
+    activeTaskId.value = null
+    toast.error(errText(e, '触发全量备份失败，请稍后重试'))
+  }
 }
 async function triggerIncremental() {
   busy.value = true
+  taskKind.value = '备份'
   try {
     const res = await backupApi.triggerIncremental({ remark: '手动增量备份' })
     activeTaskId.value = res.task_id
-  } catch { busy.value = false; activeTaskId.value = null }
+    toast.info('增量备份任务已触发')
+  } catch (e) {
+    busy.value = false
+    activeTaskId.value = null
+    toast.error(errText(e, '触发增量备份失败，请稍后重试'))
+  }
 }
 
 async function saveSchedule(data: { name: string; task_type: string; cron_expr: string; enabled: boolean }) {
@@ -225,10 +264,14 @@ async function previewPlan(filename: string) {
 }
 async function executeRestore(filename: string) {
   busy.value = true
+  taskKind.value = '还原'
   try {
     const res = await backupApi.asyncRestoreByName(filename)
     activeTaskId.value = res.task_id ?? null
-  } catch { busy.value = false }
+  } catch (e) {
+    busy.value = false
+    toast.error(errText(e, '触发还原失败，请稍后重试'))
+  }
 }
 async function onUploadRestore(e: Event) {
   const input = e.target as HTMLInputElement
@@ -238,12 +281,14 @@ async function onUploadRestore(e: Event) {
   fd.append('file', file)
   uploadRestoring.value = true
   busy.value = true
+  taskKind.value = '还原'
   try {
     const res = await backupApi.asyncImport(fd)
     activeTaskId.value = res.task_id ?? null
-  } catch {
+  } catch (err) {
     uploadRestoring.value = false
     busy.value = false
+    toast.error(errText(err, '上传还原请求失败'))
   }
 }
 
@@ -257,15 +302,77 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.bk-center { max-width: 1440px; margin: 0 auto; padding: 24px; }
-.bk-head { margin-bottom: 24px; }
-.bk-head-title { font-size: 28px; font-weight: 600; line-height: 36px; }
-.bk-head-sub { margin-top: 6px; font-size: 13px; color: var(--color-text-secondary, #4e5969); }
-.bk-section { margin-bottom: 24px; }
-.bk-grid-two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+/* ============ 骨架：套用全局 Plush Cute page-card 体系 ============ */
+.bk-root {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  color: var(--color-text);
+}
+
+/* 标题区（对齐采购页 .page-card-header 布局） */
+.bk-head { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.bk-head-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-text);
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+}
+.bk-head-sub {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+.bk-header-actions { display: flex; gap: 10px; align-items: center; flex-shrink: 0; }
+
+/* ============ 统一按钮（对齐采购页 .pc-btn：描边 + Plush Cute 语义色） ============ */
+.bk-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 16px;
+  border: 2px solid var(--color-border-light);
+  border-radius: var(--radius-button, 14px);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  line-height: 1.2;
+  cursor: pointer;
+  background: #ffffff;
+  transition: border-color 0.3s ease, color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+}
+.bk-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.bk-btn-primary {
+  color: #fff;
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-700));
+  box-shadow: 0 4px 12px rgba(91, 141, 239, 0.24);
+}
+.bk-btn-primary:hover:not(:disabled) {
+  box-shadow: 0 6px 18px rgba(91, 141, 239, 0.32);
+  transform: translateY(-1px);
+}
+.bk-btn-outline { color: var(--color-primary-600); }
+.bk-btn-outline:hover:not(:disabled) {
+  border-color: var(--color-primary-300);
+  background: var(--color-primary-50);
+  color: var(--color-primary-700);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  transform: translateY(-1px);
+}
+
+.bk-upload-note { margin-top: 8px; font-size: 13px; color: var(--color-text-muted); }
+.bk-section { margin-bottom: 20px; }
+.bk-grid-two { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
 @media (max-width: 1023px) { .bk-grid-two { grid-template-columns: 1fr; } }
-.bk-actions-row { display: flex; gap: 12px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
-.bk-btn-primary { height: 40px; padding: 0 24px; border-radius: 8px; border: none; background: var(--color-primary, #2f7bff); color: #fff; font-size: 15px; font-weight: 500; cursor: pointer; }
-.bk-btn-outline { height: 40px; padding: 0 24px; border-radius: 8px; border: 1px solid var(--color-border-strong, #c9cdd4); background: var(--color-surface, #fff); color: var(--color-primary, #2f7bff); font-size: 15px; cursor: pointer; display: inline-flex; align-items: center; }
-.bk-upload-note { margin-top: 8px; font-size: 13px; color: var(--color-text-tertiary, #86909c); }
+
+/* 入场动效，对齐全局 animate-fade-in */
+.bk-section { animation: fadeIn 0.3s ease; }
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 </style>

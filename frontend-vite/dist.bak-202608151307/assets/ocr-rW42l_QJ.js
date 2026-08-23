@@ -1,1 +1,0 @@
-import{g as s,c as p,p as a}from"./index-DW_OskF1.js";const e={createTask:()=>a("/ocr-import/create-task"),upload:(o,r)=>p("/ocr-import/upload",r),progress:o=>s(`/ocr-import/progress/${o}`)};export{e as o};

@@ -125,7 +125,7 @@ class WorkerSettings:
     cron_jobs = cron_jobs
     redis_settings = redis_settings
     max_jobs = 10
-    job_timeout = 600
+    job_timeout = 1800
     max_tries = 3
     on_job_started = on_job_started
     on_job_end = on_job_end

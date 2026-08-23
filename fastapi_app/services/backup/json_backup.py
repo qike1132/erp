@@ -41,6 +41,8 @@ def serialize_value(val):
         return str(val)
     if isinstance(val, (bytes, bytearray)):
         return val.hex()
+    if isinstance(val, (dict, list)):
+        return json.dumps(val, ensure_ascii=False, default=str)
     if hasattr(val, 'isoformat'):
         return val.isoformat()
     return str(val)
@@ -94,6 +96,9 @@ def deserialize_value(val, col_type):
             return Decimal(str(val))
         return val
     if isinstance(col_type, JSON):
+        if isinstance(val, str):
+            with contextlib.suppress(ValueError, TypeError):
+                return json.loads(val)  # REV-JSON: 备份时 dict/list 以合法 JSON 字符串落盘，还原时转回结构
         return val
     if isinstance(col_type, ARRAY):
         return val
@@ -102,6 +107,52 @@ def deserialize_value(val, col_type):
             return UUID(val)
         return val
     return val
+
+
+async def _retry_batch_rowwise(db, qtname, batch, batch_start, columns, type_map, table_col_names, pk_cols) -> list:
+    """batch 恢复失败时降级为逐行插入，跳过因唯一约束冲突而无法写入的行。
+
+    返回被跳过行的索引区间标记（用于报告）。返回 None 表示整批未完成（异常而非冲突）。
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    skipped = []
+    for offset, row in enumerate(batch):
+        idx = batch_start + offset
+        if not row:
+            continue
+        valid_cols = [c for c in columns if c in type_map and c in row and c in table_col_names]
+        if not valid_cols:
+            continue
+        col_str = ', '.join(f'"{c}"' for c in valid_cols)
+        val_str = ', '.join(f':{c}__row{idx}' for c in valid_cols)
+        params = {}
+        for c in valid_cols:
+            raw_val = row[c]
+            col_type = type_map.get(c)
+            deserialized = deserialize_value(raw_val, col_type) if col_type else raw_val
+            params[f'{c}__row{idx}'] = deserialized
+        update_cols = [c for c in valid_cols if c not in pk_cols]
+        try:
+            if pk_cols and update_cols:
+                update_str = ', '.join(f'"{c}" = EXCLUDED."{c}"' for c in update_cols)
+                await db.execute(text(  # batch-loop: 逐表备份/恢复,无法批量
+                    f'INSERT INTO {qtname} ({col_str}) VALUES ({val_str}) ON CONFLICT ({", ".join(pk_cols)}) DO UPDATE SET {update_str}'  # nosec B608 — qtname 经 quote_table 白名单校验
+                ), params)
+            else:
+                await db.execute(text(  # batch-loop: 逐表备份/恢复,无法批量
+                    f'INSERT INTO {qtname} ({col_str}) VALUES ({val_str}) ON CONFLICT DO NOTHING'  # nosec B608 — qtname 经 quote_table 白名单校验
+                ), params)
+        except IntegrityError:
+            await db.rollback()  # manual-tx: 单行冲突放弃，跳过后继续
+            skipped.append(row)
+            continue
+        except (SQLAlchemyError, ValueError, TypeError):
+            await db.rollback()  # manual-tx: 单行不可恢复错误，放弃该行
+            skipped.append(row)
+            continue
+    # 本函数仅负责逐行、会跳过失败行，因此这里不统一 flush —— 由外层事务负责
+    return skipped
 
 
 async def execute_legacy_backup_to_bytes(user, remark: str, db: AsyncSession) -> bytes:
@@ -261,8 +312,18 @@ async def restore_legacy_json(backup_data: dict, db: AsyncSession, task_id: str 
                     await nested.commit()  # manual-tx: savepoint 嵌套事务管理
                 except (SQLAlchemyError, ValueError, TypeError) as e:
                     await nested.rollback()  # manual-tx: savepoint 嵌套事务管理
-                    batch_errors.append(f'批次 {batch_start // BATCH_SIZE + 1}: {e}')
-                    logger.warning(f'恢复表 {table_name} 批次 {batch_start // BATCH_SIZE + 1} 失败: {e}')
+                    # 降级：batch 因非主键唯一约束冲突整体失败，逐行重试，跳过冲突行（REV-DO32）
+                    skip = await _retry_batch_rowwise(
+                        db, qtname, batch, batch_start, columns, type_map, table_col_names, pk_cols)
+                    if skip:
+                        batch_errors.append(
+                            f'批次 {batch_start // BATCH_SIZE + 1}: 降级跳过 {len(skip)} 行（唯一约束冲突）: {skip[:5]}')
+                        logger.warning(
+                            f'恢复表 {table_name} 批次 {batch_start // BATCH_SIZE + 1} '
+                            f'降级，跳过 {len(skip)} 行唯一约束冲突')
+                    else:
+                        batch_errors.append(f'批次 {batch_start // BATCH_SIZE + 1}: {e}')
+                        logger.warning(f'恢复表 {table_name} 批次 {batch_start // BATCH_SIZE + 1} 失败: {e}')
             if batch_errors:
                 results[table_name] = {'status': 'partial', 'inserted': inserted, 'batch_errors': batch_errors}
                 errors.append(f'{table_name}: {len(batch_errors)} 个批次失败')

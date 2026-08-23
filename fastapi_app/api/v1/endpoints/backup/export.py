@@ -11,22 +11,25 @@
 import asyncio
 import contextlib
 import hashlib
+import json
 import logging
 import os
 import tempfile
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.requests import Request
 
 from fastapi_app.api.v1.endpoints.backup._deps import (
     _encrypt_backup_data,
     _resolve_encryption,
     require_backup_permission,
 )
+from fastapi_app.core.audit_middleware import _buffer_audit_entry
 from fastapi_app.core.database import get_async_db
 from fastapi_app.schemas.backup import (
     BackupChunkInfo,
@@ -41,7 +44,51 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+async def _audit_export_download(
+    request: Request,
+    user: User,
+    *,
+    filename: str,
+    format: str,
+    encrypted: bool,
+    size: int,
+    remark: str,
+) -> None:
+    """下载整库备份属高敏读操作，显式写审计记录。
+
+    AuditLogMiddleware 只审计写方法（POST/PUT/PATCH/DELETE），GET /export
+    下载整库备份若无显式审计将不可追溯。审计失败仅告警，不影响下载。
+    """
+    try:
+        client_ip = request.client.host if request.client else None
+        if forwarded := request.headers.get('x-forwarded-for'):
+            client_ip = forwarded.split(',')[0].strip()
+        entry = {
+            'user_id': getattr(user, 'id', None),
+            'username': getattr(user, 'username', None),
+            'action': 'EXPORT',
+            'resource_type': 'backup',
+            'resource_id': None,
+            'detail': json.dumps({
+                'filename': filename,
+                'format': format,
+                'encrypted': encrypted,
+                'size': size,
+                'remark': remark,
+            }, ensure_ascii=False),
+            'ip_address': client_ip,
+            'user_agent': request.headers.get('user-agent', '')[:500],
+            'request_id': getattr(request.state, 'request_id', None),
+            'status_code': 200,
+            'created_at': datetime.now(UTC).replace(tzinfo=None),
+        }
+        await _buffer_audit_entry(entry)
+    except Exception as e:  # defensive: 审计失败不能阻断下载
+        logger.warning('备份导出审计记录失败: %s', e)
+
+
 async def _export_backup_to_response(
+    request: Request,
     db: AsyncSession,
     user: User,
     remark: str,
@@ -79,6 +126,10 @@ async def _export_backup_to_response(
         tmp_path_obj = register_temp(Path(tmp_path))
         await asyncio.to_thread(tmp_path_obj.write_bytes, json_bytes)
 
+        await _audit_export_download(
+            request, user, filename=filename, format='json',
+            encrypted=effective_encrypt, size=len(json_bytes), remark=remark,
+        )
         return FileResponse(
             path=str(tmp_path_obj),
             filename=filename,
@@ -105,6 +156,10 @@ async def _export_backup_to_response(
         filename = f'erp_backup_{timestamp}.zip'
         media_type = 'application/zip'
 
+    await _audit_export_download(
+        request, user, filename=filename, format='zip',
+        encrypted=effective_encrypt, size=zip_path.stat().st_size, remark=remark,
+    )
     return FileResponse(
         path=str(zip_path),
         filename=filename,
@@ -118,6 +173,7 @@ async def _export_backup_to_response(
 @router.get('/export')
 async def export_backup(
     background_tasks: BackgroundTasks,
+    request: Request,
     remark: str = '',
     format: str = 'zip',
     encrypt: bool = Query(True, description="是否启用加密"),
@@ -157,7 +213,7 @@ async def export_backup(
 
     background_tasks.add_task(_cleanup_temp_files)
     return await _export_backup_to_response(
-        db, user, remark, format, encrypt, password, x_backup_password, _register_temp_file,
+        request, db, user, remark, format, encrypt, password, x_backup_password, _register_temp_file,
     )
 
 
@@ -397,6 +453,7 @@ async def export_backup_chunk(
 @router.get('/export-enhanced')
 async def export_backup_enhanced(
     background_tasks: BackgroundTasks,
+    request: Request,
     remark: str = '',
     format: str = 'zip',
     encrypt: bool = Query(True, description="是否启用加密"),
@@ -418,5 +475,5 @@ async def export_backup_enhanced(
 
     background_tasks.add_task(lambda: [os.unlink(p) for p in temp_files if os.path.exists(p)])
     return await _export_backup_to_response(
-        db, user, remark, format, encrypt, password, x_backup_password, _register_temp_file,
+        request, db, user, remark, format, encrypt, password, x_backup_password, _register_temp_file,
     )

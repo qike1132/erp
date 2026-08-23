@@ -144,11 +144,21 @@ async def override_deps(mock_db, mock_current_user):
         'fastapi_app.core.database.verify_db_connectivity',
         side_effect=_fake_verify_db_connectivity,
     ), patch(
-        'fastapi_app.services.notification_service._get_async_redis_client',
+        # 批次1-4 客户端上提后 patch 目标同步更新（旧 notification_service 路径已失效）
+        'fastapi_app.core.redis_client.get_async_redis_client',
         side_effect=_fake_get_async_redis_client,
     ), patch(
         'fastapi_app.core.audit_middleware._write_audit_direct',
         side_effect=_noop_write_audit_direct,
+    ), patch(
+        # 终极防护：阻止任何代码路径通过 async_engine 创建真实 asyncpg 连接。
+        # 连接池在 teardown 时尝试优雅关闭已创建的连接，但 event loop 已关闭
+        # → "'NoneType' object has no attribute 'send'" teardown 竞态。
+        'fastapi_app.core.database.async_engine',
+        None,
+    ), patch(
+        'fastapi_app.core.database._AsyncSessionLocal',
+        None,
     ):
         yield
 

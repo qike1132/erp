@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import shutil
 import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -130,9 +131,15 @@ def get_backup_status() -> dict:  # log-context: internal helper 无请求上下
     total_backups = 0
     total_size = 0
     if BACKUP_DIR.exists():
-        for f in sorted(BACKUP_DIR.iterdir(), reverse=True):
-            if not f.is_file() or not (f.name.endswith('.zip') or f.name.endswith('.json')):
-                continue
+        # 按 mtime 取最近：文件名字典序会把 m5_fix_verify_* 等演练件排在
+        # erp_backup_* 手动件之前，导致"上次备份"选中错误文件
+        backup_files = sorted(
+            (f for f in BACKUP_DIR.iterdir()
+             if f.is_file() and (f.name.endswith('.zip') or f.name.endswith('.json'))),
+            key=lambda f: f.stat().st_mtime,
+            reverse=True,
+        )
+        for f in backup_files:
             total_backups += 1
             total_size += f.stat().st_size
             if last_full:
@@ -145,6 +152,8 @@ def get_backup_status() -> dict:  # log-context: internal helper 无请求上下
                             if mf.get('type') == 'full':
                                 last_full = {
                                     'filename': f.name, 'size': f.stat().st_size,
+                                    'created_at': datetime.fromtimestamp(
+                                        f.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
                                     'exported_at': mf.get('exported_at', ''),
                                     'exported_by': mf.get('exported_by', ''),
                                     'remark': mf.get('remark', ''), 'type': 'full',
@@ -154,10 +163,16 @@ def get_backup_status() -> dict:  # log-context: internal helper 无请求上下
             except (json.JSONDecodeError, OSError, ValueError) as e:
                 logger.warning(f'解析备份清单失败: {e}')
                 continue
+    try:
+        du = shutil.disk_usage(str(BACKUP_DIR))
+        disk_usage_percent = round(du.used / du.total * 100, 1)
+    except OSError:
+        disk_usage_percent = None
     return {
         'success': True, 'backup_dir': str(BACKUP_DIR),
         'total_backups': total_backups, 'total_size_bytes': total_size,
         'last_full_backup': last_full,
+        'disk_usage_percent': disk_usage_percent,
         'checksum_tables': sorted(get_checksum_tables()),
         'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
     }

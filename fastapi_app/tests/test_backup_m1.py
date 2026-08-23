@@ -223,7 +223,7 @@ class TestTriggerEndpoints:
         assert body['task_name'] == 'manual_full_backup_task'
         # 入队参数校验
         call_kwargs = fake_pool.enqueue_job.call_args.kwargs
-        assert call_kwargs['_job_timeout'] == 1800
+        assert not any(k.startswith('_') for k in call_kwargs)
         assert call_kwargs['remark'] == '手动测试'
         assert call_kwargs['task_id'] == body['task_id']
 

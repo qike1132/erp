@@ -55,15 +55,13 @@ async def _check_task_mutex(db: AsyncSession) -> None:
 
 async def _enqueue_task(
     func_name: str,
-    *,
-    timeout: int = 1800,
     **kwargs,
 ) -> str:
     """入队 ARQ 任务,返回 task_id。"""
     from fastapi_app.core.arq_app import get_arq_pool
 
     pool = await get_arq_pool()
-    await pool.enqueue_job(func_name, _job_timeout=timeout, **kwargs)
+    await pool.enqueue_job(func_name, **kwargs)
     return kwargs.get('task_id', '')
 
 
@@ -96,7 +94,6 @@ async def trigger_full_backup(
     try:
         await _enqueue_task(
             'manual_full_backup_task',
-            timeout=1800,
             task_id=task_id,
             remark=payload.remark,
             encrypt=payload.encrypt,
@@ -140,7 +137,6 @@ async def trigger_incremental_backup(
     try:
         await _enqueue_task(
             'manual_incremental_backup_task',
-            timeout=1800,
             task_id=task_id,
             remark=payload.remark,
             since=payload.since,
