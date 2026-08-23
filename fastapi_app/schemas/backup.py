@@ -260,6 +260,7 @@ class BackupChunkInfo(BaseModel):
     total_chunks: int
     encrypted: bool
     checksum: str | None = None
+    bundle_id: str | None = None
     created_at: str
 
 

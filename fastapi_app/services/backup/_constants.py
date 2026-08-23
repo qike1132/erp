@@ -32,10 +32,12 @@ _TIMESTAMP_CANDIDATES = ('updated_at', 'modified_at', 'created_at', 'deleted_at'
 _CHECKSUM_EXCLUDE_TABLES = {'alembic_version'}
 
 # 备份加密配置
+# P0-1(2026-08-23): FALLBACK_TO_GENERATED 默认改 false——随机密钥无人能找回,
+# 曾导致 /save 产出永久不可还原的 .zip。显式设 true 仅兼容旧部署,新代码禁止依赖。
 BACKUP_ENCRYPTION_ENABLED = os.environ.get('BACKUP_ENCRYPTION_ENABLED', 'true').lower() == 'true'
 BACKUP_ENCRYPTION_PASSWORD = os.environ.get('BACKUP_ENCRYPTION_PASSWORD', '')
 BACKUP_ENCRYPTION_KEY = os.environ.get('BACKUP_ENCRYPTION_KEY', '')
-BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED = os.environ.get('BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED', 'true').lower() == 'true'
+BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED = os.environ.get('BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED', 'false').lower() == 'true'
 
 # 大文件分片配置
 BACKUP_CHUNK_SIZE = int(os.environ.get('BACKUP_CHUNK_SIZE', '104857600'))  # 默认 100MB

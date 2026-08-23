@@ -42,9 +42,9 @@ async def create_incremental_backup(
     """执行增量备份
 
     如果提供 encrypt_password 或配置了环境变量，则使用 AES-256-GCM 加密备份。
-    encrypt 参数(M1 新增,向后兼容):
-    - None(默认):保持原有行为(encrypt_password 或环境变量,无则随机密钥回退)
-    - True:必须提供密码,否则抛错
+    encrypt 参数(M1 新增;P0-1 统一 fail-safe 语义,不再有随机密钥回退):
+    - None(默认):encrypt_password 或环境变量,均无则不加密+告警
+    - True:必须提供密码(参数/环境变量),否则抛错
     - False:强制不加密(即使有环境变量)——手动任务 fail-safe 用
     """
     ensure_backup_dir()
@@ -95,13 +95,16 @@ async def create_incremental_backup(
             zf.writestr('manifest.json', json.dumps(manifest, ensure_ascii=False, indent=2).encode('utf-8'))
         zip_bytes = zip_path.read_bytes()
 
-        # 默认加密（根据环境变量配置）
+        # P0-1 统一加密语义：与 create_full_backup 一致，无随机密钥回退
+        if encrypt is True and not (encrypt_password or get_backup_encryption_password()):
+            raise BackupError('请求加密增量备份但未配置密码（encrypt_password 参数 / BACKUP_ENCRYPTION_PASSWORD 环境变量均未提供）')
         if encrypt is False:
             encryption_password = None
-        elif encrypt is True and not (encrypt_password or get_backup_encryption_password()):
-            raise BackupError('请求加密增量备份但未配置密码（encrypt=True 必须提供密码）')
         else:
             encryption_password = encrypt_password or get_backup_encryption_password()
+            if encrypt is None and not encryption_password:
+                logger.warning("增量备份未显式指定 encrypt，且无可用密码，本次备份不加密")
+        encrypted = False
         if encryption_password:
             from fastapi_app.core.backup_encryption import encrypt_backup
             try:
@@ -109,29 +112,28 @@ async def create_incremental_backup(
                 # 更新 manifest 以标记加密
                 manifest['encrypted'] = True
                 manifest['encryption'] = meta_dict
-                # 记录加密信息
                 if encrypt_password:
                     logger.info("使用用户提供的密码进行增量备份加密")
-                elif BACKUP_ENCRYPTION_PASSWORD or BACKUP_ENCRYPTION_KEY:
-                    logger.info("使用环境变量配置的密钥进行增量备份加密")
                 else:
-                    logger.warning("使用生成的随机密钥进行增量备份加密，密钥已记录在日志中")
+                    logger.info("使用环境变量配置的密钥进行增量备份加密")
                 zip_bytes = encrypted_bytes
+                encrypted = True
             except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
                 logger.error(f"增量备份加密失败: {e}")
-                if BACKUP_ENCRYPTION_ENABLED and not BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED:
-                    raise BackupError(f"增量备份加密失败且不允许回退到未加密备份: {e}") from e
-                logger.warning("加密失败，使用未加密的增量备份文件")
+                raise BackupError(f"增量备份加密失败: {e}") from e
 
-    filename = f'erp_incremental_{timestamp}.zip'
+    # P0-1: 加密备份落盘扩展名带 .enc；P0-4: 同步写 .meta sidecar
+    filename = f'erp_incremental_{timestamp}.zip.enc' if encrypted else f'erp_incremental_{timestamp}.zip'
     filepath = BACKUP_DIR / filename
     filepath.write_bytes(zip_bytes)
+    from .records import write_backup_meta_file
+    write_backup_meta_file(filepath, manifest, record_type='incremental')
     return {
         'success': True, 'filename': filename, 'size': len(zip_bytes),
         'format': 'incremental', 'table_count': len(incremental_tables),
         'total_rows': total_rows, 'exported_at': backup_data['exported_at'],
         'base_timestamp': effective_since, 'remark': remark,
-        'encrypted': 'encryption_password' in locals() and encryption_password is not None,
+        'encrypted': encrypted,
     }
 
 
@@ -235,22 +237,19 @@ async def create_wal_incremental_backup(
             backup_info['encrypted'] = True
             backup_info['encryption'] = meta_dict
 
-            # 记录加密信息
+            # 记录加密信息（P0-1: get_backup_encryption_password 已无随机回退，
+            # 能走到这里密码必然来自入参或环境变量）
             if encrypt_password:
                 logger.info("使用用户提供的密码进行 WAL 增量备份加密")
-            elif BACKUP_ENCRYPTION_PASSWORD or BACKUP_ENCRYPTION_KEY:
-                logger.info("使用环境变量配置的密钥进行 WAL 增量备份加密")
             else:
-                logger.warning("使用生成的随机密钥进行 WAL 增量备份加密，密钥已记录在日志中")
+                logger.info("使用环境变量配置的密钥进行 WAL 增量备份加密")
 
             # 注意：不再重新写入明文 JSON，避免覆盖加密数据
             # 加密后的元数据信息记录在 backup_info 字典中返回给调用方
 
         except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
             logger.error(f"WAL 增量备份加密失败: {e}")
-            if BACKUP_ENCRYPTION_ENABLED and not BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED:
-                raise BackupError(f"WAL 增量备份加密失败且不允许回退到未加密备份: {e}") from e
-            logger.warning("加密失败，使用未加密的 WAL 增量备份")
+            raise BackupError(f"WAL 增量备份加密失败: {e}") from e
 
     return {
         'success': True,

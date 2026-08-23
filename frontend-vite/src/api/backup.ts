@@ -72,6 +72,25 @@ export interface BackupRestorePlan {
   error?: string | null
 }
 
+/** 还原附加选项（P0-2：敏感配置确认 + 加密包解密密码） */
+export interface RestoreOptions {
+  confirmSensitive?: boolean
+  password?: string
+}
+
+/** 分片导出信息（P0-3：bundle_id 命中缓存后各片来自同一份文件） */
+export interface BackupChunkInfoDto {
+  success: boolean
+  filename: string
+  total_size: number
+  chunk_size: number
+  total_chunks: number
+  encrypted: boolean
+  checksum?: string | null
+  bundle_id?: string | null
+  created_at: string
+}
+
 export const backupApi = {
   tables: () => get<{ success: boolean; tables: { name: string; rows: number }[]; total: number }>('/backup/tables'),
   exportBackup: (remark: string, format: string = 'zip') =>
@@ -82,14 +101,29 @@ export const backupApi = {
   },
   saveToServer: (remark: string) => post<BackupSaveResult>(`/backup/save?remark=${encodeURIComponent(remark)}`),
   listServerBackups: () => get<{ success: boolean; backups: { filename: string; size: number; created_at: string }[]; total: number }>('/backup/list'),
-  restoreServerBackup: (filename: string) => post(`/backup/restore-by-name/${encodeURIComponent(filename)}?confirm=true`),
+  restoreServerBackup: (filename: string, opts?: RestoreOptions) => {
+    const q = new URLSearchParams({ confirm: 'true' })
+    if (opts?.confirmSensitive) q.set('confirm_sensitive', 'true')
+    if (opts?.password) q.set('password', opts.password)
+    return post(`/backup/restore-by-name/${encodeURIComponent(filename)}?${q.toString()}`)
+  },
   deleteServerBackup: (filename: string) => del(`/backup/delete-by-name/${encodeURIComponent(filename)}`),
   saveIncremental: (remark: string, since?: string) =>
     post<{ success: boolean; filename?: string; total_rows?: number }>(`/backup/save-incremental?remark=${encodeURIComponent(remark)}${since ? '&since=' + encodeURIComponent(since) : ''}`),
   restoreIncremental: (filename: string) =>
     post<{ success: boolean; total_upserted?: number }>(`/backup/restore-incremental/${encodeURIComponent(filename)}?confirm=true`),
-  asyncImport: (formData: FormData) => upload<{ success: boolean; task_id?: string }>('/backup/async-import?confirm=true', formData),
-  asyncRestoreByName: (filename: string) => post<{ success: boolean; task_id?: string }>(`/backup/async-restore-by-name/${encodeURIComponent(filename)}?confirm=true`),
+  asyncImport: (formData: FormData, opts?: RestoreOptions) => {
+    const q = new URLSearchParams({ confirm: 'true' })
+    if (opts?.confirmSensitive) q.set('confirm_sensitive', 'true')
+    if (opts?.password) q.set('password', opts.password)
+    return upload<{ success: boolean; task_id?: string }>(`/backup/async-import?${q.toString()}`, formData)
+  },
+  asyncRestoreByName: (filename: string, opts?: RestoreOptions) => {
+    const q = new URLSearchParams({ confirm: 'true' })
+    if (opts?.confirmSensitive) q.set('confirm_sensitive', 'true')
+    if (opts?.password) q.set('password', opts.password)
+    return post<{ success: boolean; task_id?: string }>(`/backup/async-restore-by-name/${encodeURIComponent(filename)}?${q.toString()}`)
+  },
   getProgress: (taskId: string) => get(`/backup/progress/${taskId}`),
   integrityCheck: () => post<{ success: boolean } & ApiResponse>('/backup/integrity-check'),
   getRecords: (page: number = 1, pageSize: number = 20) =>
@@ -112,4 +146,9 @@ export const backupApi = {
     post<BackupSettings>('/backup/settings', body),
   validatePath: (path: string) => post<BackupPathValidate>('/backup/settings/validate-path', { path }),
   restorePlan: (filename: string) => post<BackupRestorePlan>('/backup/restore/plan', { filename }),
+  // --- 分片导出（P0-3：先取 bundle_id，再逐片下载，各片与整包 checksum 一致） ---
+  getExportInfo: (remark: string, encrypt: boolean) =>
+    get<BackupChunkInfoDto>(`/backup/export-info?remark=${encodeURIComponent(remark)}&encrypt=${encrypt ? 'true' : 'false'}`),
+  getExportChunk: (chunkIndex: number, bundleId?: string | null) =>
+    get(`/backup/export-chunk/${chunkIndex}${bundleId ? `?bundle_id=${encodeURIComponent(bundleId)}` : ''}`),
 }

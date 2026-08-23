@@ -3,10 +3,6 @@
     <span><FontAwesomeIcon icon="list" aria-hidden="true" /> 产品列表</span>
     <div class="pd-col-actions">
       <UiSearchInput :model-value="searchTerm" placeholder="搜索产品名称或69码..." @search="onSearchInput" @update:model-value="searchTerm = $event" />
-      <select :value="`${sortBy}-${sortOrder}`" class="pd-sort" aria-label="select输入" @change="onSortChange">
-        <option value="name-asc">名称 A-Z</option>
-        <option value="name-desc">名称 Z-A</option>
-      </select>
     </div>
   </div>
   <div class="pd-col-scroll">
@@ -89,7 +85,7 @@ const emit = defineEmits<{
 // 产品列表
 const {
   items: paginatedProducts, total, search: searchTerm,
-  isLoading, sortBy, sortOrder, handleSort,
+  isLoading,
   perPage, handlePageChange: goToPage, handleSizeChange, handleSearch: setSearchTerm,
 } = useEnhancedList<Product>({
   key: 'products-list',
@@ -100,12 +96,6 @@ const {
 
 function onSearchInput(q: string) {
   setSearchTerm(q)
-}
-
-function onSortChange(e: Event) {
-  const val = (e.target as HTMLSelectElement).value
-  const [field, order] = val.split('-')
-  handleSort(field ?? '', order === 'asc' ? 'ascending' : 'descending')
 }
 
 /** UiDataTable 列定义 */
@@ -161,22 +151,6 @@ function handleImageError(row: Product) {
   padding: 16px 20px;
 }
 
-.pd-sort {
-  padding: 8px 12px;
-  font-size: 13px;
-  background: var(--color-surface, #f8fafc);
-  border: 2px solid var(--color-border-light, #e2e8f0);
-  border-radius: 9px;
-  min-width: 120px;
-  transition: border-color 0.3s ease, box-shadow 0.3s ease;
-  outline: none;
-}
-.pd-sort:focus {
-  background: white;
-  border-color: var(--color-primary-400);
-  box-shadow: 0 0 0 4px rgba(0, 148, 191, 0.1);
-}
-
 /* ===== 表格 ===== */
 .pd-table-wrap {
   overflow: hidden;
@@ -185,8 +159,8 @@ function handleImageError(row: Product) {
 }
 .pd-factory { font-size: 13px; font-weight: 500; color: var(--color-text); }
 .pd-thumb-box {
-  width: 60px;
-  height: 60px;
+  width: 120px;
+  height: 120px;
   border-radius: 10px;
   overflow: hidden;
   cursor: pointer;
@@ -208,7 +182,7 @@ function handleImageError(row: Product) {
   justify-content: center;
   background: var(--color-surface, #f8fafc);
   color: var(--color-text-secondary);
-  font-size: 18px;
+  font-size: 36px;
   opacity: 0.5;
 }
 .pd-name { font-size: 14px; font-weight: 500; color: var(--color-text); line-height: 1.5; }

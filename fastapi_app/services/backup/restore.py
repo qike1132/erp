@@ -101,24 +101,38 @@ async def restore_from_zip(
     db: AsyncSession,
     decrypt_password: str | bytearray | None = None,
     task_id: str | None = None,
+    confirm_sensitive: bool = False,
 ) -> dict:
-    """从 ZIP 备份恢复全部数据。"""
+    """从 ZIP 备份恢复全部数据。
+
+    P0-2: confirm_sensitive 透传到组件恢复——还原敏感配置文件需显式确认，
+    默认 False（fail-safe，跳过敏感文件）。
+    P0-1: 解密走 decrypt_backup_auto，兼容裸信封与 meta 前缀两种历史格式。
+    """
     async def _prog(phase: str, sub: float = 0.0, detail: str = ''):
         if task_id:
             from fastapi_app.core.backup_progress import update_progress
             await update_progress(task_id, phase, sub, detail)
 
+    def _try_decrypt() -> None:
+        """就地解密 zip_bytes（两种信封格式自适应），失败抛 RestoreError。"""
+        nonlocal zip_bytes
+        from fastapi_app.core.backup_encryption import BackupFileError as EncFileError
+        from fastapi_app.core.backup_encryption import decrypt_backup_auto
+        try:
+            zip_bytes, _meta = decrypt_backup_auto(zip_bytes, decrypt_password)
+        except EncFileError as e:
+            raise RestoreError(f'解密失败: {e}') from e
+
     try:
         zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
     except zipfile.BadZipFile:
         if decrypt_password:
-            from fastapi_app.core.backup_encryption import BackupFileError as EncFileError
-            from fastapi_app.core.backup_encryption import decrypt_backup
+            _try_decrypt()
             try:
-                zip_bytes = decrypt_backup(zip_bytes, decrypt_password)
                 zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
-            except EncFileError as e:
-                raise RestoreError(f'解密失败: {e}') from e
+            except zipfile.BadZipFile as e:
+                raise RestoreError(f'解密后仍非有效 ZIP: {e}') from e
         else:
             try:
                 if zip_bytes[:4] != b'PK\x03\x04':
@@ -134,17 +148,13 @@ async def restore_from_zip(
     if manifest.get('encrypted'):
         if not decrypt_password:
             raise RestoreError('备份文件已加密，需要提供解密密码')
-        if zip_bytes[:4] == b'PK\x03\x04':
-            pass
-        else:
-            from fastapi_app.core.backup_encryption import BackupFileError as EncFileError
-            from fastapi_app.core.backup_encryption import decrypt_backup
+        if zip_bytes[:4] != b'PK\x03\x04':
+            _try_decrypt()
             try:
-                zip_bytes = decrypt_backup(zip_bytes, decrypt_password)
                 zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
                 manifest = json.loads(zf.read('manifest.json'))
-            except EncFileError as e:
-                raise RestoreError(f'解密失败: {e}') from e
+            except zipfile.BadZipFile as e:
+                raise RestoreError(f'解密后仍非有效 ZIP: {e}') from e
     manifest_tables = manifest.get('tables', {})
     results = {
         'version': manifest.get('version'),
@@ -194,7 +204,7 @@ async def restore_from_zip(
         has_meilisearch = any(n.startswith('meilisearch/') for n in zf.namelist())
 
         if has_filestore or has_config or has_redis or has_meilisearch:
-            components_result = await restore_non_dependent_components(zf, confirm_sensitive=False)
+            components_result = await restore_non_dependent_components(zf, confirm_sensitive=confirm_sensitive)
 
             if 'filestore' in components_result:
                 results['filestore'] = components_result['filestore']

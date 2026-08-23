@@ -59,6 +59,21 @@
             <li>执行期间系统停止写入</li>
             <li>未备份的新增数据将丢失</li>
           </ul>
+          <div v-if="plan?.encrypted" class="rw-pw-row">
+            <label class="rw-pw-label" for="rw-decrypt-pw">解密密码</label>
+            <input
+              id="rw-decrypt-pw"
+              v-model="decryptPassword"
+              class="rw-confirm-input"
+              type="password"
+              placeholder="该备份已加密，请输入解密密码"
+              autocomplete="new-password"
+            />
+          </div>
+          <label class="rw-sensitive-check">
+            <input v-model="confirmSensitive" type="checkbox" />
+            <span>同时还原敏感配置文件（.env.production / jwt 密钥）——默认跳过，仅确有需要时勾选</span>
+          </label>
           <input v-model="confirmText" class="rw-confirm-input" placeholder="输入「确认还原」以继续" autocomplete="off" />
         </div>
 
@@ -105,13 +120,19 @@ export interface ServerBackupSummary {
   created_at?: string | null
 }
 
+/** 还原执行选项（P0-2：敏感配置确认 + 加密包解密密码） */
+export interface RestoreExecuteOptions {
+  confirmSensitive: boolean
+  password?: string
+}
+
 const props = defineProps<{
   open: boolean
   serverBackups: ServerBackupSummary[]
   plan: BackupRestorePlan | null
   task: BackupTaskState | null
   onPreview: (filename: string) => void
-  onExecute: (filename: string) => void
+  onExecute: (filename: string, opts: RestoreExecuteOptions) => void
 }>()
 
 const emit = defineEmits<{ close: [] }>()
@@ -120,8 +141,17 @@ const steps = ['选择备份点', '差异预览', '还原确认', '执行还原'
 const step = ref(1)
 const selected = ref('')
 const confirmText = ref('')
+const confirmSensitive = ref(false)
+const decryptPassword = ref('')
 
-watch(() => props.open, (o) => { if (o) { step.value = 1; confirmText.value = '' } })
+watch(() => props.open, (o) => {
+  if (o) {
+    step.value = 1
+    confirmText.value = ''
+    confirmSensitive.value = false
+    decryptPassword.value = ''
+  }
+})
 
 watch(() => props.task, (t) => {
   if (!t) return
@@ -158,7 +188,10 @@ function prev() {
 function doExecute() {
   if (confirmText.value === '确认还原' && selected.value) {
     step.value = 4
-    props.onExecute(selected.value)
+    props.onExecute(selected.value, {
+      confirmSensitive: confirmSensitive.value,
+      password: decryptPassword.value || undefined,
+    })
   }
 }
 function close() {
@@ -216,6 +249,11 @@ function fmtSize(n?: number) {
 .rw-danger-list li::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--color-danger-500); }
 .rw-confirm-input { width: 100%; height: 36px; padding: 0 12px; border: 1px solid var(--color-border-light); border-radius: var(--radius-input, 12px); font-size: 14px; font-family: inherit; color: var(--color-text); background: #ffffff; transition: border-color 0.2s ease, box-shadow 0.2s ease; }
 .rw-confirm-input:focus { outline: none; border-color: var(--color-primary-300); box-shadow: 0 0 0 3px var(--color-primary-50); }
+.rw-pw-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.rw-pw-label { font-size: 13px; color: var(--color-text-secondary); white-space: nowrap; }
+.rw-pw-row .rw-confirm-input { flex: 1; }
+.rw-sensitive-check { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0 16px; font-size: 13px; color: var(--color-text-secondary); cursor: pointer; }
+.rw-sensitive-check input { accent-color: var(--color-primary-600); margin-top: 2px; }
 .rw-progress-row { display: flex; align-items: center; gap: 12px; margin: 16px 0; }
 .rw-progress { flex: 1; height: 8px; background: var(--color-border-light); border-radius: 999px; overflow: hidden; }
 .rw-progress-fill { height: 100%; border-radius: 999px; transition: width .2s ease; }

@@ -16,7 +16,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .._constants import (
     BACKUP_ENCRYPTION_ENABLED,
-    BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED,
     BACKUP_ENCRYPTION_KEY,
     BACKUP_ENCRYPTION_PASSWORD,
     BACKUP_FORMAT_VERSION,
@@ -305,10 +304,17 @@ async def _do_create_full_backup(
         zip_bytes = zip_path.read_bytes()
         manifest['zip_size'] = len(zip_bytes)
 
+        # P0-1 加密决策单点化：服务层只认显式入参 + 环境变量，绝不生成随机密钥。
+        # - encrypt=False / None（未显式要求加密）：环境变量有密码则加密，否则明文+告警
+        # - encrypt=True：必须有密码（入参或环境变量），否则直接报错（宁可失败不可造出打不开的备份）
+        if encrypt is True and not (encrypt_password or get_backup_encryption_password()):
+            raise BackupError('请求加密全量备份但未配置密码（encrypt_password 参数 / BACKUP_ENCRYPTION_PASSWORD 环境变量均未提供）')
         if encrypt is False:
             effective_encryption_password = None
         else:
             effective_encryption_password = encrypt_password or get_backup_encryption_password()
+            if encrypt is None and not effective_encryption_password:
+                logger.warning("create_full_backup 未显式指定 encrypt，且无可用密码，本次备份不加密")
         if effective_encryption_password:
             from fastapi_app.core.backup_encryption import encrypt_backup
             try:
@@ -317,16 +323,12 @@ async def _do_create_full_backup(
                 manifest['encryption'] = meta_dict
                 if encrypt_password:
                     logger.info("使用用户提供的密码进行备份加密")
-                elif BACKUP_ENCRYPTION_PASSWORD or BACKUP_ENCRYPTION_KEY:
-                    logger.info("使用环境变量配置的密钥进行备份加密")
                 else:
-                    logger.warning("使用生成的随机密钥进行备份加密，密钥已记录在日志中")
+                    logger.info("使用环境变量配置的密钥进行备份加密")
                 return encrypted_bytes, manifest
             except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
                 logger.error(f"备份加密失败: {e}")
-                if BACKUP_ENCRYPTION_ENABLED and not BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED:
-                    raise BackupError(f"备份加密失败且不允许回退到未加密备份: {e}") from e
-                logger.warning("加密失败，返回未加密的备份文件")
+                raise BackupError(f"备份加密失败: {e}") from e
 
     return zip_bytes, manifest
 
@@ -366,7 +368,7 @@ async def create_pre_restore_backup(db: AsyncSession) -> dict:
         dummy_user = UserModel()
         dummy_user.username = 'system'
         dummy_user.id = 0
-        zip_bytes, _manifest = await create_full_backup(db, dummy_user, '恢复前自动安全备份')
+        zip_bytes, _manifest = await create_full_backup(db, dummy_user, '恢复前自动安全备份', encrypt=False)
         filepath.write_bytes(zip_bytes)
         cleanup_pre_restore_backups()
         return {'success': True, 'filename': filename, 'filepath': str(filepath), 'size': len(zip_bytes)}

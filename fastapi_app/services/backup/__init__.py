@@ -276,5 +276,6 @@ __all__ = [
     "split_backup_into_chunks",
     "validate_backup_file",
     "verify_restore",
+    "write_backup_meta_file",
     "write_backup_record",
 ]

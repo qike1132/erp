@@ -242,9 +242,12 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
     try:
         await _report(0.20, '开始导入数据库数据')
         await asyncio.sleep(0)
+        # P0-5: 单事务导入 + 遇错即停——任一语句失败则整体回滚，不再产生
+        # 半还原态数据库（旧实现 ON_ERROR_STOP=0 会吞错继续，残留部分表数据）。
         proc = await asyncio.create_subprocess_exec(
             'psql', '-h', db_host, '-p', db_port, '-U', db_user, '-d', db_name,
-            '-v', 'ON_ERROR_STOP=0',
+            '--single-transaction',
+            '-v', 'ON_ERROR_STOP=1',
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE, env=env
         )
@@ -300,8 +303,15 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
         await _report(0.95, '数据导入完成，验证结果')
 
         if proc.returncode != 0:
+            # 单事务模式：导入已整体回滚，目标库为空库；旧数据在 DROP 阶段已被替换，
+            # 需要用还原前安全备份（pre_restore_*）恢复——错误信息中明确指引用户
             logger.warning(f'psql restore failed (returncode={proc.returncode}): {stderr_text[:2000]}')  # sql-safe: escape_like/绑定参数/常量片段
-            return {'status': 'error', 'message': '数据库恢复失败', 'errors': stderr_text[:2000]}
+            return {
+                'status': 'error',
+                'message': '数据库恢复失败（已整体回滚，当前为空库）',
+                'errors': stderr_text[:2000],
+                'recovery_hint': '可使用还原前安全备份（backups/server/pre_restore/pre_restore_*.zip）恢复原数据',
+            }
         if error_count > 0:
             logger.warning(f'psql restore completed with {error_count} errors: {stderr_text[:2000]}')  # sql-safe: escape_like/绑定参数/常量片段
             return {'status': 'partial', 'message': f'数据库已恢复，但有 {error_count} 个语句执行失败', 'errors': stderr_text[:2000]}  # sql-safe: escape_like/绑定参数/常量片段

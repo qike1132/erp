@@ -36,6 +36,10 @@ async def _check_task_mutex(db: AsyncSession) -> None:
 
     - 备份进行中:PG advisory lock(BACKUP_LOCK_ID)被持有 → 409
     - 还原进行中:Redis 还原锁存在 → 409
+
+    注意(P0-5):本检查是 UX 级预检——"探测后释放、任务真正执行时再取锁"之间存在
+    固定 TOCTOU 窗口。强互斥由任务内部的锁保证(备份取 advisory 锁、还原取 Redis
+    锁),此处仅用于在入队前给用户快速反馈,不作为正确性依据。
     """
     backup_busy = await backup_service.acquire_backup_lock(db)
     if not backup_busy:

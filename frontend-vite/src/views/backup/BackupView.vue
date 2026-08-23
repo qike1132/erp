@@ -262,11 +262,14 @@ async function previewPlan(filename: string) {
     plan.value = { success: false, filename, error: '预览失败' }
   }
 }
-async function executeRestore(filename: string) {
+async function executeRestore(filename: string, opts?: { confirmSensitive?: boolean; password?: string }) {
   busy.value = true
   taskKind.value = '还原'
   try {
-    const res = await backupApi.asyncRestoreByName(filename)
+    const res = await backupApi.asyncRestoreByName(filename, {
+      confirmSensitive: opts?.confirmSensitive ?? false,
+      password: opts?.password,
+    })
     activeTaskId.value = res.task_id ?? null
   } catch (e) {
     busy.value = false

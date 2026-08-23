@@ -19,7 +19,7 @@ from ._constants import (
     BACKUP_RETENTION_DAYS,
     PRE_RESTORE_DIR,
 )
-from .crypto import sha256_bytes
+from .crypto import sha256_bytes, sha256_file
 from .exceptions import BackupFileError
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,49 @@ def ensure_backup_dir():  # log-context: internal helper 无请求上下文
 def ensure_pre_restore_dir():  # log-context: internal helper 无请求上下文
     """确保恢复前安全备份目录存在"""
     PRE_RESTORE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def write_backup_meta_file(filepath, manifest: dict, *, record_type: str = 'full'):  # log-context: internal helper 无请求上下文
+    """为备份文件写入 .meta sidecar（P0-4 落地）。
+
+    - created_at 与 _backup_created_time 的读取约定对齐（'%Y-%m-%d %H:%M:%S'），
+      文件被复制/移动后保留策略不再依赖不可靠的 mtime；
+    - 加密备份（.zip.enc）无法直接读 manifest，列表/状态展示依赖本 sidecar；
+    - 写入失败仅告警，不阻塞备份主流程。
+    """
+    try:
+        from fastapi_app.core.backup_encryption import create_meta_file
+        fp = Path(filepath)
+        meta = {
+            'created_at': manifest.get('exported_at') or datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'filename': fp.name,
+            'size': fp.stat().st_size,
+            'type': manifest.get('type', record_type),
+            'encrypted': bool(manifest.get('encrypted', False)),
+            'format_version': manifest.get('version'),
+            'table_count': manifest.get('table_count'),
+            'total_rows': manifest.get('total_rows'),
+            'exported_by': manifest.get('exported_by'),
+            'remark': manifest.get('remark', ''),
+            'checksum': sha256_file(fp),
+        }
+        meta_path = fp.parent / (fp.name + '.meta')
+        meta_path.write_bytes(create_meta_file(meta))
+        return meta_path
+    except (OSError, ValueError, AttributeError, TypeError) as e:
+        logger.warning(f'写入备份 .meta 失败（不阻塞主流程）: {e}')
+        return None
+
+
+def _read_backup_meta(f: Path) -> dict | None:  # log-context: internal helper 无请求上下文
+    """读取备份文件的 .meta sidecar，不存在或损坏时返回 None。"""
+    meta_path = f.parent / (f.name + '.meta')
+    if not meta_path.exists():
+        return None
+    try:
+        return json.loads(meta_path.read_text(encoding='utf-8'))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
 
 
 async def write_backup_record(
@@ -84,7 +127,7 @@ def list_backup_files() -> list[dict]:  # log-context: internal helper 无请求
             if not f.is_file():
                 continue
             if not ((f.name.startswith('erp_backup_') or f.name.startswith('erp_incremental_') or f.name.startswith('erp_auto_'))
-                    and (f.name.endswith('.zip') or f.name.endswith('.json'))):
+                    and (f.name.endswith('.zip') or f.name.endswith('.json') or f.name.endswith('.zip.enc'))):
                 continue
             entry: dict = {'filename': f.name, 'size': f.stat().st_size}
             if f.name.endswith('.zip'):
@@ -106,6 +149,18 @@ def list_backup_files() -> list[dict]:  # log-context: internal helper 无请求
                 except (OSError, zipfile.BadZipFile, ValueError) as e:
                     logger.warning(f'读取 ZIP 备份 {f.name} 失败: {e}')
                     entry['error'] = str(e)
+            elif f.name.endswith('.zip.enc'):
+                # 加密备份无法直接读 manifest，展示信息来自 .meta sidecar（P0-4）
+                entry.update({'format': 'zip', 'encrypted': True})
+                if meta := _read_backup_meta(f):
+                    entry.update({
+                        'type': meta.get('type', 'full'),
+                        'exported_at': meta.get('created_at', ''),
+                        'exported_by': meta.get('exported_by', ''),
+                        'remark': meta.get('remark', ''),
+                        'table_count': meta.get('table_count', 0),
+                        'total_rows': meta.get('total_rows', 0),
+                    })
             elif f.name.endswith('.json'):
                 try:
                     data = json.loads(f.read_text(encoding='utf-8'))
@@ -135,7 +190,7 @@ def get_backup_status() -> dict:  # log-context: internal helper 无请求上下
         # erp_backup_* 手动件之前，导致"上次备份"选中错误文件
         backup_files = sorted(
             (f for f in BACKUP_DIR.iterdir()
-             if f.is_file() and (f.name.endswith('.zip') or f.name.endswith('.json'))),
+             if f.is_file() and (f.name.endswith('.zip') or f.name.endswith('.json') or f.name.endswith('.zip.enc'))),
             key=lambda f: f.stat().st_mtime,
             reverse=True,
         )
@@ -145,7 +200,21 @@ def get_backup_status() -> dict:  # log-context: internal helper 无请求上下
             if last_full:
                 continue
             try:
-                if f.name.endswith('.zip'):
+                if f.name.endswith('.zip.enc'):
+                    # 加密备份从 .meta sidecar 取类型与时间（P0-4）
+                    meta = _read_backup_meta(f) or {}
+                    if meta.get('type') == 'full' or (not meta and f.name.startswith('erp_backup_')):
+                        last_full = {
+                            'filename': f.name, 'size': f.stat().st_size,
+                            'created_at': meta.get('created_at', ''),
+                            'exported_at': meta.get('created_at', ''),
+                            'exported_by': meta.get('exported_by', ''),
+                            'remark': meta.get('remark', ''), 'type': 'full',
+                            'table_count': meta.get('table_count', 0),
+                            'total_rows': meta.get('total_rows', 0),
+                            'encrypted': True,
+                        }
+                elif f.name.endswith('.zip'):
                     with zipfile.ZipFile(f, 'r') as zf:
                         if 'manifest.json' in zf.namelist():
                             mf = json.loads(zf.read('manifest.json'))
@@ -259,6 +328,13 @@ def delete_backup_file(filename: str) -> str:  # log-context: internal helper �
         filepath.unlink()
     except (OSError, ValueError) as e:
         raise BackupFileError(f'删除备份文件失败: {e}') from e
+    # 同步清理 .meta sidecar（P0-4），残留无害但会干扰列表/保留策略展示
+    meta_path = BACKUP_DIR / (safe_name + '.meta')
+    if meta_path.exists():
+        try:
+            meta_path.unlink()
+        except OSError as e:
+            logger.warning(f'清理 .meta 失败: {meta_path.name}: {e}')
     return safe_name
 
 
@@ -389,6 +465,9 @@ def cleanup_old_backups() -> dict:  # log-context: internal helper 无请求上�
             filepath.unlink()
             deleted.append(name)
             logger.info(f'已清理过期备份: {name}')
+            meta_path = BACKUP_DIR / (name + '.meta')
+            if meta_path.exists():
+                meta_path.unlink()
         except OSError as e:
             errors.append(f'{name}: {e}')
             logger.warning(f'清理备份失败: {name}: {e}')

@@ -136,6 +136,53 @@ def decrypt_backup(
     return plaintext
 
 
+# ---------------------------------------------------------------------------
+# Dual-format support (P0-1)
+# ---------------------------------------------------------------------------
+# 历史上有两种加密落盘格式：
+#   A. 裸信封  salt|nonce|ciphertext|tag          —— create_full_backup / incremental 内部加密
+#   B. 前缀信封 4B-meta-len|JSON meta|裸信封       —— 旧 /save 端点 _encrypt_backup_data
+# P0-1 起新备份统一为格式 A；还原需兼容两种历史文件。
+
+def _strip_meta_prefix(encrypted_bytes: bytes) -> bytes:
+    """若数据以 4 字节长度前缀 + JSON meta 开头（格式 B），剥离前缀返回裸信封。
+
+    非前缀格式（格式 A）原样返回。解析失败视为格式 A，交给 decrypt_backup 报错。
+    """
+    try:
+        if len(encrypted_bytes) < 4:
+            return encrypted_bytes
+        meta_len = int.from_bytes(encrypted_bytes[:4], "big")
+        if meta_len <= 0 or len(encrypted_bytes) < 4 + meta_len:
+            return encrypted_bytes
+        meta = json.loads(encrypted_bytes[4 : 4 + meta_len].decode("utf-8"))
+        if isinstance(meta, dict) and meta.get("encrypted") is True:
+            return encrypted_bytes[4 + meta_len :]
+    except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
+        pass
+    return encrypted_bytes
+
+
+def decrypt_backup_auto(
+    encrypted_bytes: bytes,
+    password: str | bytearray,
+) -> tuple[bytes, dict | None]:
+    """自适应解密：自动识别格式 A/B 并解密。
+
+    Returns ``(plaintext, meta_dict_or_None)``。
+    """
+    payload = _strip_meta_prefix(encrypted_bytes)
+    plaintext = decrypt_backup(payload, password)
+    meta = None
+    if payload is not encrypted_bytes:
+        try:
+            meta_len = int.from_bytes(encrypted_bytes[:4], "big")
+            meta = json.loads(encrypted_bytes[4 : 4 + meta_len].decode("utf-8"))
+        except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
+            meta = None
+    return plaintext, meta
+
+
 def create_meta_file(meta_dict: dict) -> bytes:
     """Serialise *meta_dict* as pretty-printed UTF-8 JSON bytes suitable for
     writing to a ``.meta`` sidecar file."""

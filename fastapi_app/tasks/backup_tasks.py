@@ -76,11 +76,16 @@ async def manual_full_backup_task(ctx, *, task_id: str | None = None, remark: st
                 encrypt=bool(effective_password),
             )
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            filename = f'erp_backup_{timestamp}.zip'
+            # P0-1: 加密备份扩展名带 .enc；P0-4: 同步写 .meta sidecar
+            filename = (
+                f'erp_backup_{timestamp}.zip.enc' if manifest.get('encrypted')
+                else f'erp_backup_{timestamp}.zip'
+            )
             filepath = backup_service.BACKUP_DIR / filename
 
             await update_progress(task_id, 'write_file', 0.5, f'写入 {filename}')
             filepath.write_bytes(zip_bytes)
+            backup_service.write_backup_meta_file(filepath, manifest, record_type='full')
 
             # 写入 BackupRecord
             await backup_service.write_backup_record(
@@ -579,11 +584,24 @@ async def _do_auto_backup(backup_type: str) -> dict:
         dummy_user.id = 0
 
         if backup_type == 'daily':
-            zip_bytes, manifest = await backup_service.create_full_backup(db, dummy_user, '每日自动全量备份')
+            # P0-1: 自动备份加密决策显式化——仅环境变量配置了密码才加密，
+            # 绝不随机回退（旧路径在无密码时会用一次性随机密钥，产出不可还原备份）
+            auto_password = backup_service.BACKUP_ENCRYPTION_PASSWORD or None
+            if not auto_password:
+                logger.info('自动全量备份未配置 BACKUP_ENCRYPTION_PASSWORD，本次备份不加密')
+            zip_bytes, manifest = await backup_service.create_full_backup(
+                db, dummy_user, '每日自动全量备份',
+                encrypt_password=auto_password,
+                encrypt=bool(auto_password),
+            )
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            filename = f'erp_auto_daily_{timestamp}.zip'
+            filename = (
+                f'erp_auto_daily_{timestamp}.zip.enc' if manifest.get('encrypted')
+                else f'erp_auto_daily_{timestamp}.zip'
+            )
             filepath = backup_service.BACKUP_DIR / filename
             filepath.write_bytes(zip_bytes)
+            backup_service.write_backup_meta_file(filepath, manifest, record_type='full')
 
             # 写入 BackupRecord
             await backup_service.write_backup_record(
@@ -592,6 +610,7 @@ async def _do_auto_backup(backup_type: str) -> dict:
                 table_count=manifest.get('table_count'),
                 total_rows=manifest.get('total_rows'),
                 operator='system_auto', remark='每日自动全量备份',
+                encrypted=manifest.get('encrypted', False),
             )
             return {
                 'status': 'ok', 'type': 'daily', 'filename': filename,

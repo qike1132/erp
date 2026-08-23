@@ -33,6 +33,7 @@ from fastapi_app.core.audit_middleware import _buffer_audit_entry
 from fastapi_app.core.database import get_async_db
 from fastapi_app.schemas.backup import (
     BackupChunkInfo,
+    BackupChunkResponse,
     BackupSaveResponse,
     IncrementalBackupResponse,
 )
@@ -249,38 +250,45 @@ async def save_backup_to_server(
     backup_service.ensure_backup_dir()
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
+    # P0-1 加密决策单点化：端点先解析意图，加密由服务层一次性完成。
+    # 旧路径服务层可能用随机密钥自行加密、端点又降级明文把密文存成 .zip
+    # （双重加密/不可还原两种缺陷并存），此改动后加密层唯一、语义与 M1 任务路径一致。
+    effective_encrypt, encryption_password = _resolve_encryption(encrypt, password, x_backup_password)
     try:
-        zip_bytes, manifest = await backup_service.create_full_backup(db, user, remark)
+        zip_bytes, manifest = await backup_service.create_full_backup(
+            db, user, remark,
+            encrypt=effective_encrypt,
+            encrypt_password=encryption_password,
+        )
     except (BackupError, RuntimeError, OSError) as e:
         logger.error(f'服务端备份失败: {e}')
         raise HTTPException(status_code=500, detail='备份失败，请查看服务器日志') from e
 
-    # 应用加密（未配置密码时降级为不加密，禁止随机密码）
-    effective_encrypt, encryption_password = _resolve_encryption(encrypt, password, x_backup_password)
-    if effective_encrypt:
-        encrypted_bytes = _encrypt_backup_data(zip_bytes, encryption_password)
+    if manifest.get('encrypted'):
         filename = f'erp_backup_{timestamp}.zip.enc'
-        file_bytes = encrypted_bytes
     else:
         filename = f'erp_backup_{timestamp}.zip'
-        file_bytes = zip_bytes
+    file_bytes = zip_bytes
 
     filepath = backup_service.BACKUP_DIR / filename
     await asyncio.to_thread(filepath.write_bytes, file_bytes)
+    backup_service.write_backup_meta_file(filepath, manifest, record_type='full')
 
     # 写入 BackupRecord
     await backup_service.write_backup_record(
         db, record_type='full', trigger_type='manual',
-        filename=filename, size=manifest.get('zip_size', len(file_bytes)),
+        filename=filename, size=len(file_bytes),
         table_count=manifest.get('table_count', 0),
         total_rows=manifest.get('total_rows', 0),
         operator=user.username if hasattr(user, 'username') else str(user.id),
         remark=remark,
+        encrypted=manifest.get('encrypted', False),
     )
 
     return {
         'success': True, 'format': 'zip', 'filename': filename,
-        'size': manifest.get('zip_size', len(file_bytes)),
+        'size': len(file_bytes),
+        'encrypted': manifest.get('encrypted', False),
         'table_count': manifest.get('table_count', 0),
         'total_rows': manifest.get('total_rows', 0),
         'exported_at': manifest.get('exported_at'),
@@ -315,6 +323,77 @@ async def save_incremental_backup(
 def _get_chunk_size() -> int:
     """获取分片大小，默认为10MB"""
     return 10 * 1024 * 1024  # 10MB
+
+
+# P0-3: 分片下载会话缓存。
+# 旧实现每个 export-chunk 请求都重新执行一次完整备份再切片——N 片 = N 次全量
+# 导出，且各片数据来自不同时刻、与 export-info 的整包 checksum 对不上。
+# 现在 export-info 生成一次并登记 bundle（Redis 共享、跨 worker），export-chunk
+# 按 bundle_id 从磁盘缓存切片；Redis 不可用或 bundle 过期时回退旧行为（重新生成）。
+_CHUNK_BUNDLE_TTL_SECONDS = 30 * 60
+_CHUNK_BUNDLE_DIR = Path(tempfile.gettempdir()) / 'erp_export_bundles'
+
+
+def _bundle_redis_key(bundle_id: str) -> str:
+    return f'erp:backup_export_bundle:{bundle_id}'
+
+
+async def _register_chunk_bundle(path: Path, *, filename: str, total_size: int,
+                                 chunk_size: int, total_chunks: int, checksum: str) -> str | None:
+    """将生成好的备份文件登记为分片下载 bundle，返回 bundle_id；Redis 不可用时返回 None。"""
+    import secrets
+
+    bundle_id = secrets.token_urlsafe(12)
+    payload = {
+        'path': str(path), 'filename': filename, 'total_size': total_size,
+        'chunk_size': chunk_size, 'total_chunks': total_chunks, 'checksum': checksum,
+    }
+    try:
+        from fastapi_app.core.backup_progress import _get_redis
+        client = await _get_redis()
+        if client is None:
+            return None
+        await client.set(_bundle_redis_key(bundle_id), json.dumps(payload), ex=_CHUNK_BUNDLE_TTL_SECONDS)
+        return bundle_id
+    except Exception as e:  # broad-except: 缓存登记失败降级为旧分片行为
+        logger.warning(f'登记分片 bundle 失败（回退逐片生成）: {e}')
+        return None
+
+
+async def _load_chunk_bundle(bundle_id: str) -> dict | None:
+    """读取 bundle 登记信息；不存在/过期/Redis 不可用返回 None。"""
+    try:
+        from fastapi_app.core.backup_progress import _get_redis
+        client = await _get_redis()
+        if client is None:
+            return None
+        raw = await client.get(_bundle_redis_key(bundle_id))
+        if not raw:
+            return None
+        return json.loads(raw)
+    except Exception as e:  # broad-except: 缓存读取失败降级为旧分片行为
+        logger.warning(f'读取分片 bundle 失败（回退逐片生成）: {e}')
+        return None
+
+
+async def _sweep_chunk_bundle_files() -> None:
+    """清理 bundle 目录中超过 TTL 的残留文件（多 worker 共享磁盘，任一 worker 清扫均安全）。"""
+    def _sweep() -> None:
+        import time as _time
+        if not _CHUNK_BUNDLE_DIR.is_dir():
+            return
+        cutoff = _time.time() - _CHUNK_BUNDLE_TTL_SECONDS
+        for f in _CHUNK_BUNDLE_DIR.iterdir():
+            try:
+                if f.is_file() and f.stat().st_mtime < cutoff:
+                    f.unlink()
+            except OSError:
+                continue
+    try:
+        _CHUNK_BUNDLE_DIR.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(_sweep)
+    except OSError as e:
+        logger.warning(f'清扫分片 bundle 目录失败: {e}')
 
 
 # ---------------------------------------------------------------------------
@@ -352,8 +431,6 @@ async def get_backup_info(
         logger.error(f'获取备份信息失败: {e}')
         raise HTTPException(status_code=500, detail='获取备份信息失败') from e
 
-    background_tasks.add_task(lambda p=backup_path: p.exists() and os.unlink(p))
-
     try:
         total_size = os.path.getsize(backup_path)
         chunk_size = _get_chunk_size()
@@ -369,6 +446,24 @@ async def get_backup_info(
         f'erp_backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.zip'
     )
 
+    # P0-3: 登记分片 bundle（文件移入专用目录，TTL 后由惰性清扫回收），
+    # 后续 export-chunk 直接切片同一份文件，保证各片与整包 checksum 一致
+    bundle_id = None
+    try:
+        await _sweep_chunk_bundle_files()
+        bundle_dest = _CHUNK_BUNDLE_DIR / f'{os.path.basename(backup_path)}.bundle'
+        backup_path.rename(bundle_dest)
+        bundle_id = await _register_chunk_bundle(
+            bundle_dest, filename=filename, total_size=total_size,
+            chunk_size=chunk_size, total_chunks=total_chunks, checksum=checksum,
+        )
+        if bundle_id is None:
+            # Redis 不可用：文件交给请求结束清理，分片回退逐片生成
+            background_tasks.add_task(lambda p=bundle_dest: p.exists() and os.unlink(p))
+    except OSError as e:
+        logger.warning(f'登记分片 bundle 失败（回退逐片生成）: {e}')
+        bundle_id = None
+
     return {
         'filename': filename,
         'total_size': total_size,
@@ -376,6 +471,7 @@ async def get_backup_info(
         'total_chunks': total_chunks,
         'encrypted': effective_encrypt,
         'checksum': checksum,
+        'bundle_id': bundle_id,
         'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
     }
 
@@ -387,6 +483,7 @@ async def get_backup_info(
 async def export_backup_chunk(
     chunk_index: int,
     background_tasks: BackgroundTasks,
+    bundle_id: str | None = Query(None, description="export-info 返回的分片会话 ID，命中缓存则直接切片，避免每片重新全量备份"),
     remark: str = '',
     encrypt: bool = Query(True, description="是否启用加密"),
     password: str | None = Query(None, description="加密密码，为空时依次使用请求头/环境变量，均未配置时不加密"),
@@ -400,6 +497,41 @@ async def export_backup_chunk(
     if chunk_index < 0:
         raise HTTPException(status_code=400, detail='分片索引不能为负数')
 
+    # P0-3: 优先从 bundle 缓存切片（export-info 已生成好的同一份文件）
+    if bundle_id and (bundle := await _load_chunk_bundle(bundle_id)):
+        bundle_path = Path(bundle['path'])
+        if bundle_path.is_file():
+            total_size = bundle['total_size']
+            chunk_size = bundle['chunk_size']
+            total_chunks = bundle['total_chunks']
+            if chunk_index >= total_chunks:
+                raise HTTPException(status_code=416, detail=f'分片索引超出范围，最大索引为{total_chunks - 1}')
+
+            start = chunk_index * chunk_size
+            end = min(start + chunk_size, total_size) - 1
+
+            def _read_cached_chunk(path: Path, _start: int, length: int) -> bytes:
+                with open(path, 'rb') as f:
+                    f.seek(_start)
+                    return f.read(length)
+
+            try:
+                chunk_data = await asyncio.to_thread(_read_cached_chunk, bundle_path, start, end - start + 1)
+            except OSError as e:
+                logger.warning(f'读取分片 bundle 失败（回退逐片生成）: {e}')
+            else:
+                return BackupChunkResponse(
+                    success=True,
+                    chunk_index=chunk_index,
+                    chunk_data=chunk_data,
+                    total_chunks=total_chunks,
+                    chunk_size=len(chunk_data),
+                    is_last=(chunk_index == total_chunks - 1),
+                )
+        else:
+            logger.warning(f'分片 bundle 文件已不存在: {bundle_id}')
+
+    # 回退路径（无 bundle_id / 缓存未命中）：保持旧行为，现场生成
     effective_encrypt, encryption_password = _resolve_encryption(encrypt, password, x_backup_password)
     try:
         backup_path, _manifest = await backup_service.create_full_backup_to_file(

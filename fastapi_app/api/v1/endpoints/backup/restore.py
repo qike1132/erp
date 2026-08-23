@@ -15,12 +15,13 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.api.v1.endpoints.backup._deps import (
     _background_tasks,
+    _get_encryption_password,
     require_backup_permission,
 )
 from fastapi_app.core.database import get_async_db
@@ -45,6 +46,29 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+async def _redis_unavailable() -> bool:
+    """探测 Redis 是否可用（用于区分 409 锁被占与 503 锁服务故障）。"""
+    try:
+        from fastapi_app.core.backup_progress import _get_redis
+        return await _get_redis() is None
+    except Exception:  # broad-except: 探测失败按不可用处理（fail-closed）
+        return True
+
+
+async def _acquire_sync_restore_lock(purpose: str) -> None:
+    """同步还原路径统一获取 Redis 还原锁（P0-5 锁统一）。
+
+    - 与异步任务路径共用同一把锁（erp:restore_lock），消除旧实现"同步走 PG
+      advisory、异步走 Redis，可各持一种锁并发还原"的窗口；
+    - fail-closed：Redis 不可用时 503 拒绝还原。
+    """
+    if not await backup_service.acquire_restore_lock(purpose):
+        if await _redis_unavailable():
+            logger.error('Redis 不可用，拒绝执行恢复操作（fail-closed）')
+            raise HTTPException(status_code=503, detail='恢复锁服务暂时不可用，请稍后重试')
+        raise HTTPException(status_code=409, detail='另一个恢复操作正在执行中，请稍后重试')
+
+
 async def _read_backup_file(file: UploadFile) -> tuple[bytes, bool, str]:
     """读取并校验备份上传文件，返回 (content, is_zip, filename)。
 
@@ -53,8 +77,8 @@ async def _read_backup_file(file: UploadFile) -> tuple[bytes, bool, str]:
     """
     filename = file.filename or ''
     ext = os.path.splitext(filename)[1].lower()
-    if ext not in ('.zip', '.json', '.gz'):
-        raise HTTPException(status_code=400, detail=f'不支持的文件类型: {ext}，仅支持 .zip / .json / .gz')
+    if ext not in ('.zip', '.json', '.gz', '.enc'):
+        raise HTTPException(status_code=400, detail=f'不支持的文件类型: {ext}，仅支持 .zip / .zip.enc / .json / .gz')
     try:
         content = await file.read()
         if len(content) > backup_service.MAX_BACKUP_FILE_SIZE:
@@ -65,7 +89,7 @@ async def _read_backup_file(file: UploadFile) -> tuple[bytes, bool, str]:
         raise HTTPException(status_code=400, detail=f'读取文件失败: {e}') from e
     if not content:
         raise HTTPException(status_code=400, detail='备份文件内容为空')
-    is_zip = filename.endswith('.zip') or content[:4] == b'PK\x03\x04'
+    is_zip = filename.endswith('.zip') or filename.endswith('.zip.enc') or content[:4] == b'PK\x03\x04'
     is_json = filename.endswith('.json') or filename.endswith('.gz') or (content[:1] == b'{' and content.strip().endswith(b'}'))
     if not is_zip and not is_json:
         raise HTTPException(status_code=400, detail='无法识别的备份文件格式')
@@ -79,6 +103,9 @@ async def _read_backup_file(file: UploadFile) -> tuple[bytes, bool, str]:
 async def import_backup(
     file: UploadFile = File(...),
     confirm: bool = False,
+    confirm_sensitive: bool = Query(False, description='确认同时还原敏感配置文件（.env.production / jwt 密钥），默认跳过'),
+    password: str | None = Query(None, description='加密备份解密密码，为空时依次使用请求头/环境变量'),
+    x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('import_backup')),
     db: AsyncSession = Depends(get_async_db),
 ):
@@ -86,29 +113,23 @@ async def import_backup(
     if not confirm:
         raise HTTPException(status_code=400, detail='恢复操作需要二次确认，请传入 confirm=true')
     content, is_zip, _ = await _read_backup_file(file)
+    decrypt_password = _get_encryption_password(password, x_backup_password)
 
     try:
         pre_restore_info = await backup_service.create_pre_restore_backup(db)
     except (BackupError, OSError):
         pre_restore_info = {'success': False, 'error': '创建安全备份失败'}
 
-    from fastapi_app.services.backup.verify import query_service as backup_query_service
-    lock_acquired = False
-    try:
-        if not await backup_query_service.try_acquire_restore_lock(db):
-            raise HTTPException(status_code=409, detail='另一个恢复操作正在执行中，请稍后重试')
-        lock_acquired = True
-    except HTTPException:
-        raise
-    except (RuntimeError, OSError) as e:
-        # fail-closed：锁服务不可用时拒绝恢复，防止并发恢复导致数据损坏
-        logger.error('获取恢复锁失败，拒绝执行恢复操作: %s', e)
-        raise HTTPException(status_code=503, detail='恢复锁服务暂时不可用，请稍后重试') from e
-
+    # P0-5: 同步路径统一 Redis 还原锁（fail-closed），与异步任务共用
+    await _acquire_sync_restore_lock('sync_import')
     try:
         if is_zip:
             try:
-                result = await backup_service.restore_from_zip(content, db)
+                result = await backup_service.restore_from_zip(
+                    content, db,
+                    decrypt_password=decrypt_password,
+                    confirm_sensitive=confirm_sensitive,
+                )
             except RestoreError as e:
                 raise HTTPException(status_code=500, detail=str(e)) from e
             result['pre_restore_backup'] = pre_restore_info
@@ -141,8 +162,7 @@ async def import_backup(
             'restored_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         }
     finally:
-        if lock_acquired:
-            await backup_query_service.release_restore_lock(db)
+        await backup_service.release_restore_lock()
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +172,9 @@ async def import_backup(
 async def restore_server_backup(
     filename: str,
     confirm: bool = Query(False),
+    confirm_sensitive: bool = Query(False, description='确认同时还原敏感配置文件（.env.production / jwt 密钥），默认跳过'),
+    password: str | None = Query(None, description='加密备份解密密码，为空时依次使用请求头/环境变量'),
+    x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('restore_server_backup')),
     db: AsyncSession = Depends(get_async_db),
 ):
@@ -164,17 +187,40 @@ async def restore_server_backup(
     filepath = backup_service.BACKUP_DIR / safe_name
     if not filepath.exists():
         raise HTTPException(status_code=404, detail='备份文件不存在')
+    # P0-5: 与上传路径一致的大小上限，防超大文件整体读入内存
     try:
+        if filepath.stat().st_size > backup_service.MAX_BACKUP_FILE_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail=f'备份文件超过大小限制({backup_service.MAX_BACKUP_FILE_SIZE // 1024 // 1024}MB)，请使用分片或异步方式',
+            )
         content = filepath.read_bytes()
+    except HTTPException:
+        raise
     except (OSError, ValueError) as e:
         raise HTTPException(status_code=400, detail=f'读取备份文件失败: {e}') from e
 
-    is_zip = safe_name.endswith('.zip') or content[:4] == b'PK\x03\x04'
+    decrypt_password = _get_encryption_password(password, x_backup_password)
+    is_zip = safe_name.endswith('.zip') or safe_name.endswith('.zip.enc') or content[:4] == b'PK\x03\x04'
     if is_zip:
+        # P0-5: 补齐还原前安全备份 + Redis 还原锁（旧实现此路径两者皆无）
         try:
-            result = await backup_service.restore_from_zip(content, db)
-        except RestoreError as e:
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            pre_restore_info = await backup_service.create_pre_restore_backup(db)
+        except (BackupError, OSError):
+            pre_restore_info = {'success': False, 'error': '创建安全备份失败'}
+        await _acquire_sync_restore_lock('sync_restore_by_name')
+        try:
+            try:
+                result = await backup_service.restore_from_zip(
+                    content, db,
+                    decrypt_password=decrypt_password,
+                    confirm_sensitive=confirm_sensitive,
+                )
+            except RestoreError as e:
+                raise HTTPException(status_code=500, detail=str(e)) from e
+        finally:
+            await backup_service.release_restore_lock()
+        result['pre_restore_backup'] = pre_restore_info
         total_rows = sum(td.get('rows', 0) for td in result.get('_manifest_tables', {}).values())
         result.pop('_manifest_tables', None)
         verification_ok = result.get('verification', {}).get('overall_pass', True)
@@ -191,18 +237,7 @@ async def restore_server_backup(
     if 'tables' not in backup_data:
         raise HTTPException(status_code=400, detail='JSON 备份文件缺少 tables 字段')
 
-    from fastapi_app.services.backup.verify import query_service as backup_query_service
-    lock_acquired = False
-    try:
-        if not await backup_query_service.try_acquire_restore_lock(db):
-            raise HTTPException(status_code=409, detail='另一个恢复操作正在执行中，请稍后重试')
-        lock_acquired = True
-    except HTTPException:
-        raise
-    except (RuntimeError, OSError) as e:
-        # fail-closed：锁服务不可用时拒绝恢复，防止并发恢复导致数据损坏
-        logger.error('获取恢复锁失败，拒绝执行恢复操作: %s', e)
-        raise HTTPException(status_code=503, detail='恢复锁服务暂时不可用，请稍后重试') from e
+    await _acquire_sync_restore_lock('sync_restore_by_name_json')
     try:
         result = await backup_service.restore_legacy_json(backup_data, db)
         await db.commit()
@@ -210,8 +245,7 @@ async def restore_server_backup(
         await db.rollback()
         raise
     finally:
-        if lock_acquired:
-            await backup_query_service.release_restore_lock(db)
+        await backup_service.release_restore_lock()
     verification_ok = result.get('verification', {}).get('overall_pass', True)
     return {
         'success': verification_ok, 'format': 'json', 'filename': safe_name,
@@ -241,10 +275,17 @@ async def restore_incremental_backup(
     if not filepath.exists():
         raise HTTPException(status_code=404, detail='备份文件不存在')
     try:
+        if filepath.stat().st_size > backup_service.MAX_BACKUP_FILE_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail=f'备份文件超过大小限制({backup_service.MAX_BACKUP_FILE_SIZE // 1024 // 1024}MB)',
+            )
         content = filepath.read_bytes()
+    except HTTPException:
+        raise
     except OSError as e:
         raise HTTPException(status_code=400, detail=f'读取备份文件失败: {e}') from e
-    is_zip = safe_name.endswith('.zip') or content[:4] == b'PK\x03\x04'
+    is_zip = safe_name.endswith('.zip') or safe_name.endswith('.zip.enc') or content[:4] == b'PK\x03\x04'
     if not is_zip:
         raise HTTPException(status_code=400, detail='增量备份文件必须是 ZIP 格式')
     try:
@@ -279,12 +320,16 @@ async def get_restore_progress(
 async def async_import_backup(
     file: UploadFile = File(...),
     confirm: bool = False,
+    confirm_sensitive: bool = Query(False, description='确认同时还原敏感配置文件，默认跳过'),
+    password: str | None = Query(None, description='加密备份解密密码，为空时依次使用请求头/环境变量'),
+    x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('async_import_backup')),
 ):
     """异步恢复：从上传文件恢复"""
     if not confirm:
         raise HTTPException(status_code=400, detail='恢复操作需要二次确认，请传入 confirm=true')
     content, is_zip, filename = await _read_backup_file(file)
+    decrypt_password = _get_encryption_password(password, x_backup_password)
 
     # 并发检查：避免同时启动多个恢复任务
     if await backup_service.is_restore_in_progress():
@@ -295,7 +340,10 @@ async def async_import_backup(
     await create_progress(task_id, 'file_import')
     await backup_service.acquire_restore_lock(task_id)
 
-    task = asyncio.create_task(_run_async_file_restore(task_id, content, is_zip, filename))
+    task = asyncio.create_task(_run_async_file_restore(
+        task_id, content, is_zip, filename,
+        confirm_sensitive=confirm_sensitive, decrypt_password=decrypt_password,
+    ))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
     return {'success': True, 'task_id': task_id, 'message': '恢复任务已启动'}
@@ -308,6 +356,9 @@ async def async_import_backup(
 async def async_restore_server_backup(
     filename: str,
     confirm: bool = Query(False),
+    confirm_sensitive: bool = Query(False, description='确认同时还原敏感配置文件，默认跳过'),
+    password: str | None = Query(None, description='加密备份解密密码，为空时依次使用请求头/环境变量'),
+    x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('async_restore_server_backup')),
 ):
     """异步恢复：从服务器文件恢复"""
@@ -324,17 +375,28 @@ async def async_restore_server_backup(
     if not filepath.exists():
         raise HTTPException(status_code=404, detail='备份文件不存在')
     try:
+        if filepath.stat().st_size > backup_service.MAX_BACKUP_FILE_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail=f'备份文件超过大小限制({backup_service.MAX_BACKUP_FILE_SIZE // 1024 // 1024}MB)',
+            )
         content = filepath.read_bytes()
+    except HTTPException:
+        raise
     except (OSError, ValueError) as e:
         raise HTTPException(status_code=400, detail=f'读取备份文件失败: {e}') from e
 
+    decrypt_password = _get_encryption_password(password, x_backup_password)
     from fastapi_app.core.backup_progress import create_progress, generate_task_id
     task_id = generate_task_id()
     await create_progress(task_id, 'server_restore')
     await backup_service.acquire_restore_lock(task_id)
 
-    is_zip = safe_name.endswith('.zip') or content[:4] == b'PK\x03\x04'
-    task = asyncio.create_task(_run_async_file_restore(task_id, content, is_zip, safe_name))
+    is_zip = safe_name.endswith('.zip') or safe_name.endswith('.zip.enc') or content[:4] == b'PK\x03\x04'
+    task = asyncio.create_task(_run_async_file_restore(
+        task_id, content, is_zip, safe_name,
+        confirm_sensitive=confirm_sensitive, decrypt_password=decrypt_password,
+    ))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
     return {'success': True, 'task_id': task_id, 'message': '恢复任务已启动'}
@@ -343,7 +405,10 @@ async def async_restore_server_backup(
 # ---------------------------------------------------------------------------
 # 异步恢复后台任务
 # ---------------------------------------------------------------------------
-async def _run_async_file_restore(task_id: str, content: bytes, is_zip: bool, filename: str):
+async def _run_async_file_restore(
+    task_id: str, content: bytes, is_zip: bool, filename: str,
+    *, confirm_sensitive: bool = False, decrypt_password: str | None = None,
+):
     """异步恢复后台执行"""
     from fastapi_app.core.backup_progress import (
         complete_progress,
@@ -364,7 +429,12 @@ async def _run_async_file_restore(task_id: str, content: bytes, is_zip: bool, fi
                 await update_progress(task_id, 'pre_backup', 1.0, '安全备份完成')
 
                 if is_zip:
-                    result = await backup_service.restore_from_zip(content, db, task_id=task_id)
+                    result = await backup_service.restore_from_zip(
+                        content, db,
+                        decrypt_password=decrypt_password,
+                        task_id=task_id,
+                        confirm_sensitive=confirm_sensitive,
+                    )
                 else:
                     try:
                         backup_data = await asyncio.to_thread(json.loads, content)
@@ -374,25 +444,9 @@ async def _run_async_file_restore(task_id: str, content: bytes, is_zip: bool, fi
                     if 'tables' not in backup_data:
                         await fail_progress(task_id, 'JSON 备份文件缺少 tables 字段')
                         return
-                    # JSON 恢复路径（带进度报告的简化版）
-                    from fastapi_app.services.backup.verify import query_service as backup_query_service
-                    lock_acquired = False
-                    try:
-                        if not await backup_query_service.try_acquire_restore_lock(db):
-                            await fail_progress(task_id, '另一个恢复操作正在执行中，请稍后重试')
-                            return
-                        lock_acquired = True
-                    except (RuntimeError, OSError) as e:
-                        # fail-closed：锁服务不可用时拒绝恢复，防止并发恢复导致数据损坏
-                        logger.error('获取恢复锁失败，拒绝执行恢复操作: %s', e)
-                        await fail_progress(task_id, '恢复锁服务暂时不可用，请稍后重试')
-                        return
+                    # JSON 恢复路径（Redis 还原锁已由入口端点获取，见 finally 统一释放）
                     await update_progress(task_id, 'restore_db', 0.0, '通过 JSON 恢复数据库')
-                    try:
-                        result = await backup_service.restore_legacy_json(backup_data, db)
-                    finally:
-                        if lock_acquired:
-                            await backup_query_service.release_restore_lock(db)
+                    result = await backup_service.restore_legacy_json(backup_data, db)
 
                 result['pre_restore_backup'] = pre_restore_info
                 result['restored_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')

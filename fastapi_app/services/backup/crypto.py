@@ -37,14 +37,23 @@ def generate_encryption_key() -> str:
 
 
 def get_backup_encryption_password() -> str | None:  # log-context: internal helper 无请求上下文
-    """获取备份加密密码
+    """获取备份加密密码（仅环境变量链，P0-1 起不再生成随机密钥）
 
     优先级：
     1. BACKUP_ENCRYPTION_PASSWORD 环境变量
     2. BACKUP_ENCRYPTION_KEY 环境变量
-    3. 如果 BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED 为 True，则生成随机密钥
-    4. 返回 None（不加密）
+    3. 返回 None（由调用方决定降级为不加密或显式报错）
+
+    历史:曾支持 FALLBACK_TO_GENERATED 随机密钥回退,但随机密钥只输出预览+摘要、
+    无人能找回完整值,等价于把备份销毁。P0-1(2026-08-23) 移除该分支;
+    FALLBACK_TO_GENERATED 显式设 true 时仅记录告警,不再生效。
     """
+    if BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED:
+        logger.warning(
+            "BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED 已被弃用并忽略：随机密钥无法找回，"
+            "请配置 BACKUP_ENCRYPTION_PASSWORD 或接受不加密备份"
+        )
+
     if not BACKUP_ENCRYPTION_ENABLED:
         return None
 
@@ -56,13 +65,5 @@ def get_backup_encryption_password() -> str | None:  # log-context: internal hel
         logger.info("使用环境变量 BACKUP_ENCRYPTION_KEY 进行备份加密")
         return BACKUP_ENCRYPTION_KEY
 
-    if BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED:
-        generated_key = generate_encryption_key()
-        _key_preview = generated_key[:8] + "..." if len(generated_key) > 8 else "***"
-        _key_digest = hashlib.sha256(generated_key.encode()).hexdigest()[:16]
-        logger.warning("备份加密密钥已生成（预览: %s, 摘要: %s），请安全保存完整密钥用于恢复", _key_preview, _key_digest)
-        logger.warning("建议设置 BACKUP_ENCRYPTION_PASSWORD 环境变量以使用固定密钥")
-        return generated_key
-
-    logger.warning("备份加密已启用但未配置加密密码，且不允许生成随机密钥，备份将不加密")
+    logger.warning("备份加密已启用但未配置加密密码，备份将不加密")
     return None
