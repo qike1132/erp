@@ -17,6 +17,8 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # task_type 原为 VARCHAR(20)，容不下 'disaster_recovery_test'(22 字符)，先扩列
+    op.execute("ALTER TABLE backup_schedule ALTER COLUMN task_type TYPE VARCHAR(30)")
     # 幂等种子：不重复插入同名调度
     op.execute(
         "INSERT INTO backup_schedule (name, task_type, cron_expr, enabled) "
@@ -27,3 +29,5 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute("DELETE FROM backup_schedule WHERE name = '月度灾备恢复演练'")
+    # 回滚列宽（种子已删，剩余 task_type 值均 ≤10 字符）
+    op.execute("ALTER TABLE backup_schedule ALTER COLUMN task_type TYPE VARCHAR(20)")
