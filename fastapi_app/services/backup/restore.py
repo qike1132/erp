@@ -110,7 +110,8 @@ class _KernelProgressReporter:
         'pre_restore_backup': 'pre_backup',
         'decrypt_archive': 'read_backup',
         'restore_database': 'restore_db',
-        'restore_components': 'restore_components',
+        # 内核只有一个聚合组件阶段，映射到 10 阶段的首个子段（55%-90% 区间起推）
+        'restore_components': 'restore_filestore',
         'rebuild_pool': 'rebuild_pool',
         'verify': 'verify',
     }

@@ -160,7 +160,8 @@ class ExistingCacheInvalidatorAdapter(CacheInvalidator):
         try:
             from fastapi_app.core.purchase_cache import invalidate_purchase_caches
 
-            invalidate_purchase_caches()
+            # 2026-08-24 审计修正: 该函数为协程，此前未 await 导致采购缓存从未真正失效
+            await invalidate_purchase_caches()
         except Exception as exc:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
             logger.warning("恢复后采购缓存清除失败: %s", exc)
 

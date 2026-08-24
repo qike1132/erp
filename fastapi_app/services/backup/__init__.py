@@ -106,13 +106,6 @@ from .incremental import *  # noqa: F403
 from .json_backup import *  # noqa: F403
 from .orchestration import *  # noqa: F403
 from .records import *  # noqa: F403
-from .restore import (
-    acquire_restore_lock,
-    is_restore_in_progress,
-    release_restore_lock,
-    restore_from_zip,
-    restore_non_dependent_components,
-)
 from .settings_service import (
     BackupSettingsError,
     get_settings,
@@ -121,6 +114,17 @@ from .settings_service import (
 )
 from .snapshot import *  # noqa: F403
 from .verify import *  # noqa: F403
+
+# P0 审计修正(2026-08-24): Redis 还原锁三件套必须放在所有星号导入之后——
+# .verify 经星号导入会带入 query_service 的同名 advisory 版
+# release_restore_lock(db)，曾遮蔽 Redis 版导致端点 finally TypeError。
+from .restore import (  # noqa: E402,F811
+    acquire_restore_lock,
+    is_restore_in_progress,
+    release_restore_lock,
+    restore_from_zip,
+    restore_non_dependent_components,
+)
 
 __all__ = [
     "BACKUP_CHUNK_SIZE",

@@ -311,6 +311,32 @@ class TestSourceGuards:
         src = Path('fastapi_app/api/v1/endpoints/backup/restore.py').read_text(encoding='utf-8')
         assert 'try_acquire_restore_lock' not in src
 
+    def test_package_restore_lock_resolves_to_redis_version(self):
+        """2026-08-24 审计实测发现的遮蔽缺陷回归锁：包级还原锁必须解析到
+        restore.py 的 Redis 版本（.verify 星号导入曾带入 query_service 的
+        同名 advisory release_restore_lock(db)，导致端点 finally TypeError）。"""
+        from fastapi_app.services import backup as pkg
+        from fastapi_app.services.backup import restore as restore_mod
+        assert pkg.release_restore_lock is restore_mod.release_restore_lock
+        assert pkg.acquire_restore_lock is restore_mod.acquire_restore_lock
+        assert pkg.is_restore_in_progress is restore_mod.is_restore_in_progress
+
+    @pytest.mark.asyncio
+    async def test_cache_invalidator_awaits_purchase_caches(self, monkeypatch):
+        """采购缓存失效协程必须被 await（审计实测：未 await 时静默失效）。"""
+        from fastapi_app.core import purchase_cache as pc
+        from fastapi_app.services.backup.adapters import ExistingCacheInvalidatorAdapter
+        from unittest.mock import AsyncMock
+
+        fake = AsyncMock()
+        monkeypatch.setattr(pc, 'invalidate_purchase_caches', fake)
+        # invalidate_related_caches 同步容错路径维持原样
+        try:
+            await ExistingCacheInvalidatorAdapter().invalidate_all()
+        except Exception:
+            pass
+        fake.assert_awaited()
+
     def test_save_endpoint_no_double_encryption(self):
         """旧 /save 的端点二次加密包装（_encrypt_backup_data）不得回流到该端点。"""
         src = Path('fastapi_app/api/v1/endpoints/backup/export.py').read_text(encoding='utf-8')
