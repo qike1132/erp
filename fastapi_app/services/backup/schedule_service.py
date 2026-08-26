@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -98,6 +98,53 @@ def _period(dt: datetime) -> tuple[int, int, int, int]:
     return (dt.year, dt.month, dt.day, dt.hour)
 
 
+def _last_match_before(cron_expr: str, now: datetime, max_days: int = 370) -> datetime | None:
+    """返回 now 之前（含 now）最近一次命中 cron 的时刻；无则 None。
+
+    - 逐天回溯（最多 max_days 天，覆盖月度/年度 cron），先匹配 日/月/周 字段；
+    - 命中日在当天取「不大于 now 时分」的最大 时/分 组合；
+    - 与 scheduler_poller 的 5 分钟采样解耦：只要窗口已过，后续任意采样都能发现。
+    """
+    fields = parse_cron(cron_expr)
+    if fields is None:
+        return None
+    min_f, hour_f, dom_f, mon_f, dow_f = fields
+    minutes = sorted(min_f, reverse=True) if min_f is not None else list(range(59, -1, -1))
+    hours = sorted(hour_f, reverse=True) if hour_f is not None else list(range(23, -1, -1))
+    for offset in range(max_days + 1):
+        day = now - timedelta(days=offset)
+        if not (
+            _match(dom_f, day.day)
+            and _match(mon_f, day.month)
+            and _match(dow_f, day.isoweekday())
+        ):
+            continue
+        # offset=0 时受 now 的时分限制：取「不大于 now」的最大匹配时分。
+        if offset == 0:
+            for h in hours:
+                if h > now.hour:
+                    continue
+                if h < now.hour:
+                    # 该小时已完全过去 → 取该小时最大匹配分钟（最近一次）。
+                    return day.replace(hour=h, minute=minutes[0])
+                for m in minutes:
+                    if m <= now.minute:
+                        return day.replace(hour=h, minute=m)
+                break  # 当前小时无匹配分钟，当天无更早命中 → 回溯前一天
+        else:
+            return day.replace(hour=hours[0], minute=minutes[0])
+    return None
+
+
+def _as_local_naive(dt: datetime | None) -> datetime | None:
+    """DB timestamptz 读出为 aware（UTC），归一为服务器本地 naive 以便与本地 cron 时间比较。"""
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        return dt.astimezone().replace(tzinfo=None)
+    return dt
+
+
 # ---------------------------------------------------------------------------
 # CRUD
 # ---------------------------------------------------------------------------
@@ -181,14 +228,22 @@ async def delete_schedule(db: AsyncSession, schedule_id: int) -> bool:
 
 
 async def due_schedules(db: AsyncSession, now: datetime) -> list[BackupSchedule]:
-    """返回 enabled 且 cron 命中当前时刻且未在本小时窗口执行过的调度。"""
+    """返回 enabled 且「存在已过期未执行的 cron 窗口」的调度。
+
+    判定：最近一次（<= now）命中 cron 的时刻 last_due 已产生，
+    且该调度未在 last_due 之后执行过 → 触发（补跑错过的窗口）。
+    与旧「当前分钟精确匹配」不同：worker 重启/采样错位错过窗口后，
+    后续任意 poller 采样都会补跑，避免任务永久丢失。
+    """
     out: list[BackupSchedule] = []
     for row in await list_schedules(db):
         if not row.enabled:
             continue
-        if not cron_matches(row.cron_expr, now):
+        last_due = _last_match_before(row.cron_expr, now)
+        if last_due is None:
             continue
-        if row.last_run_at is not None and _period(row.last_run_at) == _period(now):
+        last_run = _as_local_naive(row.last_run_at)
+        if last_run is not None and last_run >= last_due:
             continue
         out.append(row)
     return out

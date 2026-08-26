@@ -18,7 +18,7 @@
         </thead>
         <tbody>
           <tr v-for="r in paged" :key="r.id ?? r.filename">
-            <td class="mono">{{ r.filename }}</td>
+            <td>{{ displayName(r) }}</td>
             <td><span class="brt-badge" :class="r.type === 'incremental' ? 'brt-badge-warning' : 'brt-badge-neutral'">{{ typeLabel(r.type) }}</span></td>
             <td class="mono">{{ r.size != null ? fmtSize(r.size) : '—' }}</td>
             <td class="mono">{{ r.created_at?.slice(0, 16) ?? '—' }}</td>
@@ -86,7 +86,7 @@ const filtered = computed(() => {
   return props.rows.filter((r) => {
     if (typeFilter.value && (r.type ?? '') !== typeFilter.value) return false
     if (statusFilter.value && (r.status ?? '') !== statusFilter.value) return false
-    if (kw && !r.filename.toLowerCase().includes(kw)) return false
+    if (kw && !r.filename.toLowerCase().includes(kw) && !displayName(r).toLowerCase().includes(kw)) return false
     return true
   })
 })
@@ -99,6 +99,19 @@ const paged = computed(() => {
 function typeLabel(t?: string) {
   if (t === 'incremental') return '增量'
   return '全量'
+}
+
+/** 友好备份名称：如 全量备份2026-08-26 21:31（磁盘文件名保持不变） */
+function displayName(r: BackupRecordRow): string {
+  const isInc = r.type === 'incremental' || /^erp_incremental_/.test(r.filename)
+  const label = isInc ? '增量备份' : '全量备份'
+  const m = r.filename.match(/(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})/)
+  if (m) {
+    const [, y, mo, d, h, mi] = m
+    return `${label}${y}-${mo}-${d} ${h}:${mi}`
+  }
+  const dt = r.created_at?.replace('T', ' ').slice(0, 16)
+  return dt ? `${label}${dt}` : r.filename
 }
 function fmtSize(bytes?: number | null) {
   if (bytes == null) return '—'

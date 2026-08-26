@@ -14,7 +14,7 @@ ARQ 任务为原生 async，原先在 Celery 同步 worker 中用 _run_async 包
 现在直接 await。重试由 ARQ max_tries 控制（job_try < 3 时 raise 触发重试）。
 """
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi_app.core.backup_progress import (
     complete_progress,
@@ -279,7 +279,8 @@ async def scheduler_poller(ctx):
                     logger.warning('调度任务 id=%s 类型 %s 无映射任务函数，跳过', sch.id, sch.task_type)
                     continue
                 await pool.enqueue_job(func_name)
-                sch.last_run_at = now
+                # last_run_at 写入 aware UTC：避免 naive 本地时间写 timestamptz 列读回后时区错位
+                sch.last_run_at = datetime.now(UTC)
                 sch.last_status = 'running'
                 await db.commit()
                 logger.info('调度入队 schedule_id=%s name=%s -> %s', sch.id, sch.name, func_name)

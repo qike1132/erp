@@ -55,9 +55,13 @@
               :can-print="canPrint"
               :roles="roleHook.roles.value"
               :current-role-id="roleHook.currentRoleId.value"
+              :editing-part-id="editingPartId"
+              :edit-form="editForm"
               @set-final-version="onSetFinalVersion"
               @copy-version="onCopyPartVersion"
               @delete-version="onDeleteVersion"
+              @start-edit="onStartEdit"
+              @cancel-edit="onCancelEdit"
               @save-edit="onSaveEdit"
               @select-role="onSelectRole"
               @add-role="onAddRole"
@@ -251,11 +255,15 @@ const {
 const {
   partFormVisible,
   versionCreateVisible,
+  editingPartId,
+  editForm,
   openCreatePartDialog,
   onPartSubmitBatch,
   onSetFinalVersion,
   onCopyPartVersion,
   onSaveEdit,
+  onStartEdit,
+  onCancelEdit,
   onDeleteVersion,
   onVersionCreateConfirm,
   onSelectRole,

@@ -11,6 +11,7 @@ import type { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { patternRoomApi } from '@/api/patternRoom'
 import type { BatchPartCreateRequest, PartDetail, PartUpdateRequest } from '@/api/patternRoom'
 import { getErrorMessage } from '@/types/errors'
+import { usePartInlineEdit } from './usePartInlineEdit'
 import type { useSamplingProject } from './useSamplingProject'
 import type { useSamplingPart } from './useSamplingPart'
 import type { useSamplingVersion } from './useSamplingVersion'
@@ -156,8 +157,50 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
     }
   }
 
-  /** 保存内联编辑 */
-  async function onSaveEdit(
+  /**
+   * 内联编辑状态（editingPartId / editForm）与 start/save/cancel 编排。
+   * 行组件 PartsVersionRowV2 仅 emit (part)，表单数据从 editForm 读取。
+   */
+  const {
+    editingPartId,
+    editForm,
+    startEdit,
+    saveEdit,
+    cancelEdit,
+  } = usePartInlineEdit(
+    partHook.partsByVersion,
+    selectedProjectId,
+    roleHook.currentRoleId,
+    onSaveEditData,
+  )
+
+  function onStartEdit(part: PartDetail) {
+    if (!canManage.value) {
+      toast.warning('无操作权限')
+      return
+    }
+    startEdit(part)
+  }
+
+  function onCancelEdit() {
+    cancelEdit()
+  }
+
+  /** 保存内联编辑：退出编辑态并将当前表单数据提交到 onSaveEditData */
+  function onSaveEdit(part: PartDetail) {
+    if (!canManage.value) {
+      toast.warning('无操作权限')
+      return
+    }
+    if (part.id == null) {
+      toast.warning('该记录为历史快照，无法编辑')
+      return
+    }
+    saveEdit(part)
+  }
+
+  /** 保存内联编辑的载荷处理（表单数据由 usePartInlineEdit 注入） */
+  async function onSaveEditData(
     part: PartDetail,
     data: { supplier_name: string; fabric_name: string; fabric_color_no: string },
   ) {
@@ -328,11 +371,15 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
   return {
     partFormVisible,
     versionCreateVisible,
+    editingPartId,
+    editForm,
     openCreatePartDialog,
     onPartSubmitBatch,
     onSetFinalVersion,
     onCopyPartVersion,
     onSaveEdit,
+    onStartEdit,
+    onCancelEdit,
     onDeleteVersion,
     openCreateVersionDialog,
     isCurrentVersion,
