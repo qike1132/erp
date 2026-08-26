@@ -13,6 +13,7 @@ from typing import ClassVar
 
 from arq import create_pool, cron
 from arq.connections import RedisSettings
+from arq.constants import default_queue_name, health_check_key_suffix
 
 from fastapi_app.core.arq_callbacks import on_job_end, on_job_failed, on_job_started
 from fastapi_app.core.config import settings
@@ -142,6 +143,9 @@ class WorkerSettings:
     max_jobs = 10
     job_timeout = 1800
     max_tries = 3
+    # 哨兵键刷新周期（秒）：默认 3600 意味着 worker 硬崩溃后健康检查
+    # 最长 1 小时内仍误报在线；缩短到 60s 使 TTL=61s，掉线约 1 分钟即可检出
+    health_check_interval = 60
     on_job_started = on_job_started
     on_job_end = on_job_end
     on_job_failed = on_job_failed
@@ -167,22 +171,21 @@ async def get_arq_pool():
 async def check_worker_health() -> tuple[bool, str]:
     """检测 ARQ Worker 是否在线（入队前预检）。
 
-    通过 ARQ 连接池的 health() 命令查询 broker 上的 worker 心跳。
-    ARQ Worker 启动后会定期在 Redis broker 上注册自身，
-    若无 worker 注册则 health() 返回空 workers 列表。
+    通过读取 ARQ 官方健康检查哨兵键（queue_name + ':health-check'）判定：
+    Worker 存活期间周期性刷新该键（TTL = health_check_interval + 1s），
+    正常退出时会删除；进程硬崩溃后键在 TTL 内自然过期。
+    注：arq 0.28 的 ArqRedis 无 health() 方法，不能通过连接池查询。
 
     Returns:
         (is_healthy, message):
-        - (True, 'ARQ Worker 在线，N 个 worker 就绪')
+        - (True, 'ARQ Worker 在线')
         - (False, 'ARQ Worker 未运行，请启动 erp-arq 服务')
     """
     try:
         pool = await get_arq_pool()
-        health = await pool.health()
-        # health 返回 dict，包含 'workers' 键（worker 心跳列表）
-        workers = health.get('workers', []) if isinstance(health, dict) else []
-        if workers:
-            return True, f'ARQ Worker 在线，{len(workers)} 个 worker 就绪'
+        health = await pool.get(default_queue_name + health_check_key_suffix)
+        if health:
+            return True, 'ARQ Worker 在线'
         return False, 'ARQ Worker 未运行，请启动 erp-arq 服务'
     except Exception as e:
         logger.warning('ARQ Worker 健康检测失败: %s', e)
