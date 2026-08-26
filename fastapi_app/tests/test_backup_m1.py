@@ -105,6 +105,7 @@ class TestSettingsService:
         result = await get_settings(db)
         assert result['initialized'] is False
         assert result['backup_dir']  # 非空
+        assert result['default_backup_dir'] == result['backup_dir']
         assert result['retention_days'] == 30
 
     @pytest.mark.asyncio
@@ -120,6 +121,7 @@ class TestSettingsService:
         result = await get_settings(db)
         assert result['initialized'] is True
         assert result['backup_dir'] == 'D:\\erp_data\\backups'
+        assert result['default_backup_dir']  # 默认系统路径与当前生效路径可不同
         assert result['retention_days'] == 60
         assert result['max_count'] == 20
 
@@ -128,6 +130,17 @@ class TestSettingsService:
         db = _fake_db_with_settings(None)
         with pytest.raises(BackupSettingsError):
             await save_settings(db, backup_dir='relative/path')
+
+    @pytest.mark.asyncio
+    async def test_save_settings_empty_dir_resets_default(self):
+        """backup_dir 传空字符串 → 恢复默认系统路径(savePath('') 场景)"""
+        row = MagicMock()
+        row.backup_dir = 'D:\\erp_data\\backups\\custom'
+        db = _fake_db_with_settings(row)
+        result = await save_settings(db, backup_dir='')
+        assert row.backup_dir == str(settings_service.BACKUP_DIR)
+        assert result['backup_dir'] == str(settings_service.BACKUP_DIR)
+        assert result['backup_dir'] == result['default_backup_dir']
 
     @pytest.mark.asyncio
     async def test_save_settings_creates_row(self, tmp_path):

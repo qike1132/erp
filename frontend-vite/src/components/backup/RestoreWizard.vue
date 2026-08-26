@@ -203,7 +203,10 @@ function onTryClose() {
 function fmtSize(n?: number) {
   if (n == null) return '—'
   const gb = n / 1024 / 1024 / 1024
-  return gb >= 1 ? `${gb.toFixed(1)} GB` : `${Math.round(n / 1024 / 1024)} MB`
+  const mb = n / 1024 / 1024
+  if (gb >= 1) return `${gb.toFixed(1)} GB`
+  if (mb >= 1) return `${Math.round(mb)} MB`
+  return `${Math.round(n / 1024)} KB`
 }
 </script>
 

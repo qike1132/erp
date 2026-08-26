@@ -234,6 +234,24 @@ def _check_disk_space() -> tuple[dict, list[str]]:
         return {'status': 'warning', 'message': f'磁盘空间检查失败: {e!s}', 'error': str(e)}, issues
 
 
+async def _check_arq_worker() -> tuple[dict, list[str]]:
+    """检查 ARQ Worker 运行状态（备份任务能否被消费）"""
+    issues: list[str] = []
+    try:
+        from fastapi_app.core.arq_app import check_worker_health
+        is_healthy, message = await check_worker_health()
+        if not is_healthy:
+            issues.append(f'ARQ Worker 未运行: {message}')
+        return {
+            'status': 'healthy' if is_healthy else 'unhealthy',
+            'message': message,
+            'workers_online': is_healthy,
+        }, issues
+    except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
+        issues.append(f'ARQ Worker 检查失败: {e!s}')
+        return {'status': 'unhealthy', 'message': f'ARQ Worker 检查失败: {e!s}', 'workers_online': False}, issues
+
+
 def _aggregate_health_status(checks: dict) -> str:
     """根据各项检查结果聚合总体健康状态"""
     status_priority = {'unhealthy': 3, 'degraded': 2, 'warning': 1, 'healthy': 0}
@@ -258,6 +276,7 @@ async def health_check(
     4. 最近备份时间（不超过24小时）
     5. 备份文件完整性
     6. 磁盘空间
+    7. ARQ Worker 运行状态（备份任务能否被消费）
     """
     checks: dict = {}
     issues: list[str] = []
@@ -279,6 +298,9 @@ async def health_check(
 
     checks['disk_space'], disk_issues = _check_disk_space()
     issues.extend(disk_issues)
+
+    checks['arq_worker'], arq_issues = await _check_arq_worker()
+    issues.extend(arq_issues)
 
     overall_status = _aggregate_health_status(checks)
 

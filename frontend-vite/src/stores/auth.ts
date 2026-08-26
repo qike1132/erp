@@ -134,9 +134,11 @@ export const useAuthStore = defineStore('auth', () => {
           const snapshot = force ? null : readUserSnapshot()
           if (snapshot) {
             setUserInfo(snapshot)
-            // 后台静默刷新用户信息（校验会话有效性/权限变更），
+            // 静默刷新用户信息（校验会话有效性/权限变更）：
+            // 必须 await 结算后再拉取导航，否则 setUserInfo 递增 authGeneration，
+            // 会把并发 fetchNavSections 的响应误判为过期而丢弃 → 侧边栏偶发空白。
             // 失败（如 401）由 request 拦截器的 auth:expired 统一登出处理
-            void fetchUser()
+            await fetchUser()
               .then((u) => writeUserSnapshot(u))
               .catch(() => {
                 /* 静默：路线转移给 auth:expired 事件 */

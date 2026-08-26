@@ -7,6 +7,7 @@ ARQ 是原生 async 任务队列，与 FastAPI async 架构一致，
 - Web 进程入队：`await get_arq_pool().enqueue_job(func_name, *args)`
 - 定时任务：cron_jobs（内置于 worker，无需独立 beat 进程）
 """
+import logging
 import os
 from typing import ClassVar
 
@@ -15,6 +16,8 @@ from arq.connections import RedisSettings
 
 from fastapi_app.core.arq_callbacks import on_job_end, on_job_failed, on_job_started
 from fastapi_app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 # 队列名称（保持与 Celery 一致的路由语义，供 _queue_name 使用）
 QUEUE_BATCH = 'io.batch'
@@ -56,7 +59,10 @@ from fastapi_app.tasks.batch_tasks import (
     batch_import_orders_task,
     batch_import_stockins_task,
 )
-from fastapi_app.tasks.maintenance_tasks import refresh_dashboard_mv_task
+from fastapi_app.tasks.maintenance_tasks import (
+    ensure_readonly_grants_task,
+    refresh_dashboard_mv_task,
+)
 from fastapi_app.tasks.plan_tasks import (
     batch_import_plans_task,
     sync_shipment_records_task,
@@ -92,6 +98,14 @@ cron_schedules = [
         'cron': {'minute': set(range(0, 60, 5))},
         'schedule': 'every 5m',
     },
+    {
+        # 只读副本授权对账：数据库恢复会清空 erp_readonly 授权（只读接口 500），
+        # 此处周期自愈兜底（与恢复完成即自愈双保险）。10 分钟一次，幂等低开销。
+        'name': 'readonly-grants-reconcile',
+        'func': ensure_readonly_grants_task,
+        'cron': {'minute': set(range(0, 60, 10))},
+        'schedule': 'every 10m',
+    },
 ]
 
 cron_jobs = [
@@ -121,6 +135,7 @@ class WorkerSettings:
         sync_shipment_records_task,
         batch_import_plans_task,
         refresh_dashboard_mv_task,
+        ensure_readonly_grants_task,
     ]
     cron_jobs = cron_jobs
     redis_settings = redis_settings
@@ -147,3 +162,28 @@ async def get_arq_pool():
     if _arq_pool is None:
         _arq_pool = await create_pool(redis_settings)
     return _arq_pool
+
+
+async def check_worker_health() -> tuple[bool, str]:
+    """检测 ARQ Worker 是否在线（入队前预检）。
+
+    通过 ARQ 连接池的 health() 命令查询 broker 上的 worker 心跳。
+    ARQ Worker 启动后会定期在 Redis broker 上注册自身，
+    若无 worker 注册则 health() 返回空 workers 列表。
+
+    Returns:
+        (is_healthy, message):
+        - (True, 'ARQ Worker 在线，N 个 worker 就绪')
+        - (False, 'ARQ Worker 未运行，请启动 erp-arq 服务')
+    """
+    try:
+        pool = await get_arq_pool()
+        health = await pool.health()
+        # health 返回 dict，包含 'workers' 键（worker 心跳列表）
+        workers = health.get('workers', []) if isinstance(health, dict) else []
+        if workers:
+            return True, f'ARQ Worker 在线，{len(workers)} 个 worker 就绪'
+        return False, 'ARQ Worker 未运行，请启动 erp-arq 服务'
+    except Exception as e:
+        logger.warning('ARQ Worker 健康检测失败: %s', e)
+        return False, f'ARQ Worker 健康检测失败: {type(e).__name__}'

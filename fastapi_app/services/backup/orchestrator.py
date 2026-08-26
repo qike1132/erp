@@ -148,6 +148,16 @@ class DatabaseRestoreOrchestrator:
                 # 阶段 5：重建连接池（仅 psql 策略需要）
                 await self._rebuild_pool_if_needed(ctx, outcome.database, reporter)
 
+                # 自愈只读角色授权：psql/JSON 恢复会重建表或重放备份，导致 erp_readonly 的
+                # SELECT 授权被清空（只读接口 500）。置于连接池重建之后，确保拿到全新连接
+                # 而非指向被恢复库的陈旧连接。此处幂等补授，失败仅记录、不中断恢复主流程。
+                try:
+                    from fastapi_app.services.backup.ro_grants import ensure_readonly_grants
+                    if await ensure_readonly_grants():
+                        logger.warning("恢复完成后已自愈只读角色 %s 权限", "erp_readonly")
+                except Exception as exc:  # broad-except: 自愈为尽力而为，不影响恢复结果
+                    logger.warning("恢复后只读授权自愈失败（可忽略）: %s", exc)
+
                 # 阶段 6：缓存失效
                 await self._invalidate_caches(ctx, reporter)
 
@@ -401,10 +411,16 @@ class DatabaseRestoreOrchestrator:
         try:
             db = await self._engine_lifecycle.new_session()
             try:
+                # JSON 策略：值经 JSON 序列化往返，COALESCE(col::text) 精确定文本
+                # 表示（float/JSON 格式化/timestamptz/字节等）已改变，L2 指纹必然
+                # 假阴性；退化为跳过 L2（match=None 不计 mismatch），overall_pass
+                # 依赖真实可验证的 L1 行数 + L4 表结构。psql 策略（二进制精确）仍完整校验 L2。
+                strategy = ctx.runtime.get("strategy")
+                fingerprints = None if strategy == "json" else manifest.fingerprints
                 verify_dict = await self._verifier.verify(
                     db,
                     manifest.tables,
-                    manifest.fingerprints,
+                    fingerprints,
                     manifest.schema_snapshot,
                 )
                 _known_keys = {

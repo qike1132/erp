@@ -69,6 +69,20 @@ async def _enqueue_task(
     return kwargs.get('task_id', '')
 
 
+async def _check_worker_online() -> None:
+    """入队前检测 ARQ Worker 是否在线，未运行时返回 503 明确错误。
+
+    避免任务入队后无人消费、前端进度永久卡在"初始化中"。
+    """
+    from fastapi_app.core.arq_app import check_worker_health
+    is_healthy, message = await check_worker_health()
+    if not is_healthy:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={'code': 'WORKER_OFFLINE', 'message': f'备份 Worker 未运行，无法执行备份任务。{message}'},
+        )
+
+
 # ---------------------------------------------------------------------------
 # POST /full
 # ---------------------------------------------------------------------------
@@ -89,11 +103,15 @@ async def trigger_full_backup(
     返回 202 + task_id,前端轮询 GET /progress/{task_id} 获取进度。
     权限:backup_create
     """
-    from fastapi_app.core.backup_progress import generate_task_id
+    from fastapi_app.core.backup_progress import create_progress, generate_task_id
 
     await _check_task_mutex(db)
+    await _check_worker_online()
 
     task_id = generate_task_id()
+    # 入队即建进度键：task_id 返回前端后轮询即可查到"pending"，
+    # 避免 worker 未消费/消费延迟期间轮询 /progress/{task_id} 返回 404 → 前端误报任务失败
+    await create_progress(task_id, operation_type='full', progress_type='backup')
     password = payload.password or x_backup_password
     try:
         await _enqueue_task(
@@ -135,11 +153,14 @@ async def trigger_incremental_backup(
     返回 202 + task_id,前端轮询 GET /progress/{task_id} 获取进度。
     权限:backup_create
     """
-    from fastapi_app.core.backup_progress import generate_task_id
+    from fastapi_app.core.backup_progress import create_progress, generate_task_id
 
     await _check_task_mutex(db)
+    await _check_worker_online()
 
     task_id = generate_task_id()
+    # 入队即建进度键，保证前端拿到 task_id 后轮询必有进度（同 /full）
+    await create_progress(task_id, operation_type='incremental', progress_type='backup')
     try:
         await _enqueue_task(
             'manual_incremental_backup_task',

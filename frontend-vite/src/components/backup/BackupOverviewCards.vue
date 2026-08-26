@@ -35,7 +35,7 @@ const cards = computed(() => {
   return [
     { label: '上次备份', dotClass: 'boc-dot-success', value: lastFull?.created_at?.slice(0, 16) ?? (props.loading ? '—' : '暂无'), unit: '', desc: lastFull?.filename ? '全量备份' : '尚未生成备份', barPct: null, barClass: '' },
     { label: '备份总数', dotClass: 'boc-dot-muted', value: s.total_backups ?? 0, unit: ' 个', desc: '服务器默认目录历史备份', barPct: null, barClass: '' },
-    { label: '空间占用', dotClass: 'boc-dot-muted', value: usedPct != null ? usedPct : '—', unit: '%', desc: '备份盘空间（读 /backup/status）', barPct: usedPct ?? 0, barClass: usedPct != null && usedPct >= 90 ? 'boc-fill-danger' : 'boc-fill-primary' },
+    { label: '空间占用', dotClass: 'boc-dot-muted', value: usedPct != null ? usedPct : '—', unit: '%', desc: '服务器磁盘已用空间', barPct: usedPct ?? 0, barClass: usedPct != null && usedPct >= 90 ? 'boc-fill-danger' : 'boc-fill-primary' },
     { label: '健康度', dotClass: healthy ? 'boc-dot-success' : 'boc-dot-warning', value: usedPct != null ? (healthy ? '良好' : '偏高') : '—', unit: '', desc: '磁盘占用 < 90% 视为良好', barPct: null, barClass: '' },
   ]
 })

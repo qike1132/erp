@@ -237,7 +237,8 @@ async function validatePath(path: string) {
 async function savePath(path: string) {
   saving.value = true
   try {
-    await backupApi.saveSettings({ backup_dir: path || undefined })
+    // 空字符串表示恢复默认系统路径(后端据此重置 backup_dir)
+    await backupApi.saveSettings({ backup_dir: path })
     await loadSettings()
   } finally { saving.value = false }
 }

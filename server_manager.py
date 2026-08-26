@@ -3170,6 +3170,7 @@ class ServerManagerApp:
         self._last_hosting = {}
         self._sampler = None
         self._shutting_down = False
+        self._arq_down_since = 0.0          # erp-arq 服务停止起始时间戳（0=正在运行或未检测）
         self.setup_logging()
         self.alerts = AlertEngine(self)
         self._build_ui()
@@ -4644,6 +4645,19 @@ class ServerManagerApp:
                     if not data.get('redis_ok'):
                         self.alerts.raise_alert('redis_down_prod', 'warn', 'Redis 不可用（生产运行中）',
                                                 '生产后端依赖 Redis，当前 PING 失败')
+                # 告警：erp-arq 服务停止超过 5 分钟（独立于 erp-prod 运行状态，避免备份任务无人消费）
+                arq_running = data.get('arq_running', False)
+                if not arq_running:
+                    if self._arq_down_since == 0:
+                        self._arq_down_since = time.time()
+                    elif time.time() - self._arq_down_since > 300:  # 5 分钟
+                        self.alerts.raise_alert(
+                            'arq_worker_down', 'error',
+                            'ARQ Worker 服务未运行',
+                            'erp-arq 服务已停止超过 5 分钟，备份/定时任务将无法执行。请在服务管理页启动 erp-arq 服务。',
+                        )
+                else:
+                    self._arq_down_since = 0.0
             self._update_all_ui()
         finally:
             self._hosting_collecting = False

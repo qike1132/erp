@@ -24,6 +24,22 @@ from .exceptions import BackupFileError
 
 logger = logging.getLogger(__name__)
 
+# 模块级记录写入失败计数器（P1+P2）：每累计 3 次失败发送一次告警，避免告警风暴
+_record_write_fail_count: int = 0
+
+# 正式备份文件命名约定：m5_fix_verify_*/erp_m3drill_* 等演练/测试件不计入统计与列表
+_BACKUP_NAME_PREFIXES = ('erp_backup_', 'erp_incremental_', 'erp_auto_')
+_BACKUP_FILE_SUFFIXES = ('.zip', '.json', '.zip.enc')
+
+
+def _is_backup_file(f: Path) -> bool:  # log-context: internal helper 无请求上下文
+    """是否为正式备份文件(按命名约定排除演练/测试临时件)"""
+    return (
+        f.is_file()
+        and f.name.startswith(_BACKUP_NAME_PREFIXES)
+        and f.name.endswith(_BACKUP_FILE_SUFFIXES)
+    )
+
 
 def ensure_backup_dir():  # log-context: internal helper 无请求上下文
     """确保备份目录存在"""
@@ -116,7 +132,28 @@ async def write_backup_record(
         db.add(record)
         await db.flush()
     except (SQLAlchemyError, OSError) as e:
+        global _record_write_fail_count
+        _record_write_fail_count += 1
         logger.warning(f'写入备份记录失败（不阻塞主流程）: {e}')
+        # 每累计3次失败发送一次告警，避免告警风暴
+        if _record_write_fail_count % 3 == 0:
+            try:
+                import asyncio
+                from fastapi_app.services.backup.metrics.alert_service import alert_service
+                # 尝试获取事件循环，有则发送告警，无则跳过（同步上下文无法 await）
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = None
+                if loop:
+                    loop.create_task(alert_service.send_alert(
+                        task_name='backup_record_write',
+                        error=f'备份记录写入已连续失败 {_record_write_fail_count} 次: {e}',
+                        task_type='backup',
+                        severity='error',
+                    ))
+            except Exception:
+                pass  # 告警失败不影响主流程
 
 
 def list_backup_files() -> list[dict]:  # log-context: internal helper 无请求上下文
@@ -124,10 +161,7 @@ def list_backup_files() -> list[dict]:  # log-context: internal helper 无请求
     backups = []
     if BACKUP_DIR.exists():
         for f in sorted(BACKUP_DIR.iterdir(), reverse=True):
-            if not f.is_file():
-                continue
-            if not ((f.name.startswith('erp_backup_') or f.name.startswith('erp_incremental_') or f.name.startswith('erp_auto_'))
-                    and (f.name.endswith('.zip') or f.name.endswith('.json') or f.name.endswith('.zip.enc'))):
+            if not _is_backup_file(f):
                 continue
             entry: dict = {'filename': f.name, 'size': f.stat().st_size}
             if f.name.endswith('.zip'):
@@ -186,11 +220,10 @@ def get_backup_status() -> dict:  # log-context: internal helper 无请求上下
     total_backups = 0
     total_size = 0
     if BACKUP_DIR.exists():
-        # 按 mtime 取最近：文件名字典序会把 m5_fix_verify_* 等演练件排在
-        # erp_backup_* 手动件之前，导致"上次备份"选中错误文件
+        # 按 mtime 取最近：文件名字典序会把 erp_auto_* 排到 erp_backup_* 之前，
+        # 导致"上次备份"选中错误文件；同时只统计正式备份件，演练件不计入
         backup_files = sorted(
-            (f for f in BACKUP_DIR.iterdir()
-             if f.is_file() and (f.name.endswith('.zip') or f.name.endswith('.json') or f.name.endswith('.zip.enc'))),
+            (f for f in BACKUP_DIR.iterdir() if _is_backup_file(f)),
             key=lambda f: f.stat().st_mtime,
             reverse=True,
         )
@@ -478,3 +511,125 @@ def cleanup_old_backups() -> dict:  # log-context: internal helper 无请求上�
         'deleted_files': deleted,
         'errors': errors,
     }
+
+
+async def sync_backup_records() -> dict:
+    """启动时同步文件系统与数据库备份记录（双向）。
+
+    - 补录：文件存在但 DB 无记录 → 根据 manifest/.meta 补写 BackupRecord
+    - 清理孤立：DB 有记录但文件不存在 → 删除记录
+    - 修正僵尸：status='running' 但文件已存在且进程已结束 → 更新为 'success'
+
+    幂等保证：多次运行结果一致（已存在的记录跳过，已删除的孤立不再出现，
+    已修正的僵尸状态不再为 running）。
+
+    Returns:
+        dict: {'backfilled': N, 'orphaned': N, 'zombie_fixed': N, 'errors': [...]}
+    """
+    # 延迟导入避免循环依赖
+    from fastapi_app.core.database import get_async_db_context
+    from fastapi_app.shared_models.backup_record import BackupRecord
+    from sqlalchemy import select, delete as sa_delete
+    from fastapi_app.services.backup.verify.query_service import (
+        _infer_type_from_filename,
+        _infer_trigger_type_from_filename,
+        _parse_exported_at,
+        _parse_timestamp_from_filename,
+    )
+
+    result: dict = {'backfilled': 0, 'orphaned': 0, 'zombie_fixed': 0, 'errors': []}
+
+    # 1. 扫描文件系统所有备份文件
+    try:
+        fs_files = list_backup_files()
+    except Exception as e:  # defensive: 文件系统扫描失败不阻塞同步
+        result['errors'].append(f'list_backup_files 失败: {e}')
+        return result
+
+    fs_filenames = {f['filename'] for f in fs_files if f.get('filename')}
+
+    # 2. 自建数据库会话执行双向同步
+    try:
+        async with get_async_db_context() as db:
+            # 查询所有 BackupRecord，构建 filename → record 映射
+            try:
+                rows = (await db.execute(select(BackupRecord))).scalars().all()
+            except Exception as e:
+                result['errors'].append(f'查询 BackupRecord 失败: {e}')
+                return result
+
+            record_by_filename: dict[str, object] = {}
+            for r in rows:
+                if r.filename:
+                    record_by_filename[r.filename] = r
+
+            # 2a. 补录：文件存在但 DB 无记录
+            for fs_entry in fs_files:
+                fname = fs_entry.get('filename')
+                if not fname or fname in record_by_filename:
+                    continue
+                try:
+                    # 推断备份类型：优先用 .meta 中的 type，其次文件名推断
+                    record_type = fs_entry.get('type') or _infer_type_from_filename(fname)
+                    trigger_type = _infer_trigger_type_from_filename(fname)
+                    # 解析创建时间：优先 exported_at，其次文件名时间戳
+                    created_at = _parse_exported_at(fs_entry.get('exported_at'))
+                    if created_at is None:
+                        created_at = _parse_timestamp_from_filename(fname)
+                    record = BackupRecord(
+                        type=record_type,
+                        trigger_type=trigger_type,
+                        filename=fname,
+                        size=fs_entry.get('size'),
+                        table_count=fs_entry.get('table_count'),
+                        total_rows=fs_entry.get('total_rows'),
+                        operator=fs_entry.get('exported_by') or 'system_sync',
+                        remark=fs_entry.get('remark', ''),
+                        status='success',
+                        encrypted=fs_entry.get('encrypted', False),
+                        created_at=created_at,
+                    )
+                    db.add(record)
+                    await db.flush()
+                    await db.commit()  # 每条补录成功后立即提交，避免后续失败回滚已成功记录
+                    result['backfilled'] += 1
+                except Exception as e:
+                    result['errors'].append(f'补录 {fname} 失败: {e}')
+                    try:
+                        await db.rollback()
+                    except Exception:
+                        pass  # defensive: rollback 失败不阻塞后续同步
+
+            # 2b. 清理孤立：DB 有记录但文件不存在
+            for r in rows:
+                if r.filename and r.filename not in fs_filenames:
+                    try:
+                        await db.execute(sa_delete(BackupRecord).where(BackupRecord.id == r.id))
+                        await db.commit()  # 每条删除成功后立即提交，避免后续失败回滚已成功记录
+                        result['orphaned'] += 1
+                    except Exception as e:
+                        result['errors'].append(f'清理孤立记录 {r.filename} 失败: {e}')
+                        try:
+                            await db.rollback()
+                        except Exception:
+                            pass  # defensive: rollback 失败不阻塞后续同步
+
+            # 2c. 修正僵尸：status='running' 且对应文件存在 → 更新为 'success'
+            #     （进程已结束，文件已落盘，running 状态为历史中断残留）
+            for r in rows:
+                if r.status == 'running' and r.filename and r.filename in fs_filenames:
+                    try:
+                        r.status = 'success'
+                        await db.flush()
+                        await db.commit()  # 每条修正成功后立即提交，避免后续失败回滚已成功记录
+                        result['zombie_fixed'] += 1
+                    except Exception as e:
+                        result['errors'].append(f'修正僵尸记录 {r.filename} 失败: {e}')
+                        try:
+                            await db.rollback()
+                        except Exception:
+                            pass  # defensive: rollback 失败不阻塞后续同步
+    except Exception as e:
+        result['errors'].append(f'同步过程异常: {e}')
+
+    return result

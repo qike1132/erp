@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import ast
 import contextlib
 import json
 import logging
@@ -19,6 +20,14 @@ from .exceptions import RestoreError
 from .verify import quote_table
 
 logger = logging.getLogger(__name__)
+
+
+class JsonRestoreFatalError(RuntimeError):
+    """JSON 还原遇非主键约束错误（外键违规等）时的中止信号。
+
+    fail-fast（M5）:区别于可跳过的唯一主键冲突,此类错误表示备份数据与
+    目标库约束不一致,继续还原只会悄无声息丢数据,必须中止并上报前端。
+    """
 
 
 def serialize_value(val):
@@ -96,9 +105,26 @@ def deserialize_value(val, col_type):
             return Decimal(str(val))
         return val
     if isinstance(col_type, JSON):
+        # JSON/JSONB：还原时必须交给 asyncpg 的 jsonb codec 一个**合法 JSON 字符串**。
+        # 备份侧 serialize_value 已对 dict/list 做 json.dumps，正常路径返回 str 即可。
+        # 但兼容历史 dump 的两种非标形态，统一归一为合法 JSON 字符串：
+        #   1) 值本身是 dict/list（旧 dump 直接存 python 对象）→ asyncpg 会报
+        #      'dict' object has no attribute 'encode'，须 json.dumps。
+        #   2) 值是 Python repr()/str() 输出的单引号字符串（如 "[{'k': 'v'}]"），
+        #      非合法 JSON → PG 报 'invalid input syntax for type json'（Token "'" is invalid），
+        #      须 ast.literal_eval 还原后 json.dumps。
+        if isinstance(val, (dict, list)):
+            return json.dumps(val, ensure_ascii=False, default=str)
         if isinstance(val, str):
-            with contextlib.suppress(ValueError, TypeError):
-                return json.loads(val)  # REV-JSON: 备份时 dict/list 以合法 JSON 字符串落盘，还原时转回结构
+            try:
+                json.loads(val)  # 已是合法 JSON，原样返回
+                return val
+            except (ValueError, TypeError):
+                pass
+            try:
+                return json.dumps(ast.literal_eval(val), ensure_ascii=False, default=str)
+            except (ValueError, SyntaxError):
+                return val  # 无法安全还原时保持原样，交由 asyncpg 报错，不静默改错
         return val
     if isinstance(col_type, ARRAY):
         return val
@@ -109,14 +135,107 @@ def deserialize_value(val, col_type):
     return val
 
 
+def _topo_sort_self_referencing(table, rows: list) -> list:
+    """对含自引用外键的表做整表拓扑排序（父行先于子行）。
+
+    JSON 备份按 ``SELECT *`` 行序导出，不保证父节点 id 小于子节点 id；
+    ``sorted_tables`` 只保证表间顺序（父表先于子表），无法约束表内行序。
+    当自引用 FK 的父行 id 大于子行（如 permission.parent_id / pattern_room_bom_item.parent_id）
+    时，子行先插入会触发外键违规。此处用 DFS 拓扑排序，把父行排到子行前，
+    使批作业切分（BATCH_SIZE=500）也在排序后的行上执行，父子跨批也能正确落在先后批。
+
+    仅对含自引用外键的表生效；无自引用外键或无法排序（环/孤儿）时维持原序，
+    残留的孤儿行仍会走 fail-fast 显式中止（不静默丢数据）。
+    """
+    # 收集引用本表自身的外键本地列（如 permission.parent_id 引用 permission.id）
+    self_ref_local: list[str] = []
+    for constraint in getattr(table, 'foreign_key_constraints', ()):
+        if getattr(constraint, 'referred_table', None) is table:
+            for local_col in constraint.columns:
+                self_ref_local.append(str(local_col.name))
+    if not self_ref_local:
+        return rows
+    pk_cols = [str(c.name) for c in table.primary_key.columns]
+    if not pk_cols:
+        return rows
+
+    def pk_key(row):
+        if len(pk_cols) == 1:
+            return row.get(pk_cols[0])
+        return tuple(row.get(c) for c in pk_cols)
+
+    def ref_key(row):
+        # 与 pk_key 保持一致：单列返回标量、多列返回元组，避免类型不匹配
+        vals = tuple(row.get(c) for c in self_ref_local)
+        if all(v is None for v in vals):
+            return None
+        return vals[0] if len(vals) == 1 else vals
+
+    # 主键 -> 行索引，用于定位子行的父行
+    pk_index = {}
+    for i, row in enumerate(rows):
+        key = pk_key(row)
+        if key is None:
+            continue
+        pk_index.setdefault(key, i)
+
+    order: list[int] = []
+    state = [0] * len(rows)  # 0=未访问 1=访问中(环检测) 2=已排定
+
+    def visit(i: int) -> None:
+        if state[i] == 2:
+            return
+        if state[i] == 1:  # 自引用成环：放弃该依赖，维持原序由 fail-fast 兜底
+            return
+        state[i] = 1
+        row = rows[i]
+        dep = ref_key(row)
+        if dep is not None:
+            j = pk_index.get(dep)
+            if j is not None and j != i:
+                visit(j)
+        state[i] = 2
+        order.append(i)
+
+    for i in range(len(rows)):
+        visit(i)
+
+    if len(order) != len(rows):
+        logger.warning(
+            f'表 "{table.name}" 自引用拓扑排序异常（环），部分行维持原序')
+
+    return [rows[i] for i in order]
+
+
+def _is_pk_conflict(exc) -> bool:
+    """判断异常是否为「主键唯一冲突」（PostgreSQL SQLSTATE 23505）。
+
+    JSON 还原当前依赖扩展的 dbapi 异常溯源：asyncpg 用 ``orig.sqlstate``，
+    psycopg3 用 ``sqlstate``。能取到且非 23505 的约束错误一律视为外键/其他
+    约束违规（fail-fast，不得静默跳过）。
+    """
+    orig = getattr(exc, 'orig', None)
+    sqlstate = None
+    if orig is not None:
+        sqlstate = getattr(orig, 'sqlstate', None) or getattr(orig, 'pgcode', None)
+    if not sqlstate:
+        return False
+    return str(sqlstate) == '23505'
+
+
 async def _retry_batch_rowwise(db, qtname, batch, batch_start, columns, type_map, table_col_names, pk_cols) -> list:
-    """batch 恢复失败时降级为逐行插入，跳过因唯一约束冲突而无法写入的行。
+    """batch 恢复失败时降级为逐行插入。
+
+    fail-fast（M5 还原修复）:仅跳过「主键唯一冲突(23505)」的行；外键违规
+    (23503) 或其他错误必须中止还原,不得静默丢弃数据——否则还原被标记成功
+    却丢数据（如 customer_sampling_fabric_version 丢 3331 行）。
 
     返回被跳过行的索引区间标记（用于报告）。返回 None 表示整批未完成（异常而非冲突）。
     """
     from sqlalchemy.exc import IntegrityError
 
     skipped = []
+    fatal_errors: dict[int, str] = {}
     for offset, row in enumerate(batch):
         idx = batch_start + offset
         if not row:
@@ -143,15 +262,29 @@ async def _retry_batch_rowwise(db, qtname, batch, batch_start, columns, type_map
                 await db.execute(text(  # batch-loop: 逐表备份/恢复,无法批量
                     f'INSERT INTO {qtname} ({col_str}) VALUES ({val_str}) ON CONFLICT DO NOTHING'  # nosec B608 — qtname 经 quote_table 白名单校验
                 ), params)
-        except IntegrityError:
-            await db.rollback()  # manual-tx: 单行冲突放弃，跳过后继续
-            skipped.append(row)
+        except IntegrityError as e:
+            await db.rollback()  # manual-tx: 单行冲突,须先回滚才能继续
+            if _is_pk_conflict(e):
+                skipped.append(row)
+                continue
+            # 外键违规等非主键冲突:记录并继续循环,最后统一 fail-fast
+            fatal_errors[idx] = str(e.__cause__ or e.orig or e)[:300]
             continue
-        except (SQLAlchemyError, ValueError, TypeError):
-            await db.rollback()  # manual-tx: 单行不可恢复错误，放弃该行
-            skipped.append(row)
+        except (SQLAlchemyError, ValueError, TypeError) as e:
+            await db.rollback()  # manual-tx: 单行不可恢复错误
+            fatal_errors[idx] = str(e)[:300]
             continue
-    # 本函数仅负责逐行、会跳过失败行，因此这里不统一 flush —— 由外层事务负责
+    if fatal_errors:
+        first_row_idx, first_msg = next(iter(fatal_errors.items()))
+        logger.error(
+            f'JSON 还原 fail-fast: {qtname} 存在 {len(fatal_errors)} 行非主键约束错误'
+            f'（首行 idx={first_row_idx}: {first_msg}），中止还原'
+        )
+        raise JsonRestoreFatalError(
+            f'还原中止: 表 "{qtname}" 有 {len(fatal_errors)} 行数据因外键/约束违规无法写入'
+            f'（首行: {first_msg}）。'
+        )
+    # 本函数仅负责逐行、会跳过主键冲突行，因此这里不统一 flush —— 由外层事务负责
     return skipped
 
 
@@ -266,6 +399,7 @@ async def restore_legacy_json(backup_data: dict, db: AsyncSession, task_id: str 
             logger.warning(f'禁用外键约束失败: {e}')
 
         await _report(0.05, '清空现有数据...')
+        delete_failed: list[str] = []  # F7: 清空失败的表必须显式上报，不能再静默合并
         for table in reversed(Base.metadata.sorted_tables):
             table_name = str(table.name)
             if table_name not in backup_data.get('tables', {}):
@@ -277,6 +411,7 @@ async def restore_legacy_json(backup_data: dict, db: AsyncSession, task_id: str 
                 await nested.commit()  # manual-tx: savepoint 嵌套事务管理
             except (SQLAlchemyError, ValueError, OSError) as e:
                 await nested.rollback()  # manual-tx: savepoint 嵌套事务管理
+                delete_failed.append(table_name)
                 logger.warning(f'清空表 {table_name} 失败（外键约束）: {e}')
 
         processed_tables = 0
@@ -291,6 +426,9 @@ async def restore_legacy_json(backup_data: dict, db: AsyncSession, task_id: str 
             inserted = 0
             batch_errors = []
             qtname = quote_table(table_name)  # REV-08
+            # 自引用外键（如 permission.parent_id）需父行先于子行插入，
+            # 否则主键行序导致子行先插触发外键违规。整表排序后再切分批。
+            rows = _topo_sort_self_referencing(table, rows)
             for batch_start in range(0, len(rows), BATCH_SIZE):
                 batch = rows[batch_start:batch_start + BATCH_SIZE]
                 nested = await db.begin_nested()
@@ -363,7 +501,7 @@ async def restore_legacy_json(backup_data: dict, db: AsyncSession, task_id: str 
             logger.warning(f'恢复后缓存清除失败: {e}')
         try:
             from fastapi_app.core.purchase_cache import invalidate_purchase_caches
-            invalidate_purchase_caches()
+            await invalidate_purchase_caches()  # 2026-08-24 审计修正: 协程必须 await
         except (RuntimeError, OSError, ValueError) as e:
             logger.warning(f'恢复后采购缓存清除失败: {e}')
 
@@ -378,9 +516,14 @@ async def restore_legacy_json(backup_data: dict, db: AsyncSession, task_id: str 
             if _AsyncSessionLocal is not None:
                 verify_db = _AsyncSessionLocal()
             try:
+                # JSON 路径不传 manifest_fingerprints：JSON 序列化会改变列的精确定文本
+                # 表示（float/字节/JSON 格式化/timestamptz 等），即便数据逻辑等价，基于
+                # COALESCE(col::text) 的 L2 指纹也必然假阴性。故 L2 对 JSON 路径退化为
+                # 跳过（match=None，不计 mismatch），overall_pass 依赖真实可验证的
+                # L1 行数 + L4 表结构。psql 路径（二进制级精确）仍完整校验 L2。
                 verification = await verify_restore(
                     verify_db or db, manifest_tables,
-                    manifest_fingerprints=backup_data.get('fingerprints'),
+                    manifest_fingerprints=None,
                     manifest_schema=backup_data.get('schema_snapshot'),
                 )
             finally:
@@ -399,6 +542,10 @@ async def restore_legacy_json(backup_data: dict, db: AsyncSession, task_id: str 
         'total_inserted': total_inserted, 'results': results, 'errors': errors,
         'verification': verification,
     }
+    # F7: 清空失败的表以"合并"而非"回滚"语义恢复——快照之后新增/变更的旧行会残留，
+    # 必须进入 errors 让端点报 partial，避免用户误以为已精确回滚到备份点
+    for t in delete_failed:
+        result_dict['errors'].append(f'{t}: 清空失败，本表为合并恢复（备份点之后的旧行可能残留）')
     if not verification.get('overall_pass', True):
         result_dict['_verification_failed'] = True
     return result_dict

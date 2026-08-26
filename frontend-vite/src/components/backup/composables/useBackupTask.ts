@@ -15,6 +15,7 @@ export interface BackupTaskState {
   phaseLabel: string
   error: string | null
   result: unknown
+  staleWarning: string | null
 }
 
 export interface BackupTaskProgress {
@@ -34,6 +35,8 @@ const TERMINAL: ReadonlySet<string> = new Set(['completed', 'completed_with_warn
 const INTERVAL_MS = 800
 /** 任务创建后 Redis 写入存在短暂竞态，404 先容忍再判失败 */
 const MAX_NOT_FOUND = 3
+/** 超时兜底：超过 60 秒仍停留在 pending/init 时提示 Worker 可能未运行 */
+const STALE_TIMEOUT_MS = 60_000
 
 const INITIAL: BackupTaskState = {
   taskId: '',
@@ -43,6 +46,7 @@ const INITIAL: BackupTaskState = {
   phaseLabel: '',
   error: null,
   result: null,
+  staleWarning: null,
 }
 
 export function useBackupTask(
@@ -56,12 +60,15 @@ export function useBackupTask(
   status: Ref<BackupTaskStatus | ''>
   error: Ref<string | null>
   result: Ref<unknown>
+  staleWarning: Ref<string | null>
 } {
   const state = ref<BackupTaskState>({ ...INITIAL })
   let timer: ReturnType<typeof setInterval> | null = null
   let fetching = false
   let notFoundCount = 0
   let finished = false
+  let startTime: number | null = null
+  let staleWarned = false
 
   function stop() {
     if (timer !== null) {
@@ -76,6 +83,9 @@ export function useBackupTask(
     try {
       const res = (await backupApi.getProgress(taskId)) as BackupTaskProgress
       notFoundCount = 0
+      const isPendingOrInit =
+        (res.status === 'pending' || res.status === undefined) &&
+        (!res.phase || res.phase === 'init')
       state.value = {
         taskId,
         status: (res.status as BackupTaskStatus) || 'pending',
@@ -84,10 +94,25 @@ export function useBackupTask(
         phaseLabel: res.phase_label || '',
         error: res.error || null,
         result: res.result ?? null,
+        // 脱离 pending/init 后清除超时提示，终态分支亦会清空
+        staleWarning: isPendingOrInit ? state.value.staleWarning : null,
+      }
+      // 超时兜底：60秒仍停留在 pending/init 时提示 Worker 可能未运行
+      if (startTime && !staleWarned) {
+        const elapsed = Date.now() - startTime
+        const isStale = elapsed > STALE_TIMEOUT_MS
+        if (isStale && isPendingOrInit) {
+          staleWarned = true
+          state.value = {
+            ...state.value,
+            staleWarning: '备份 Worker 可能未运行（超过60秒仍未开始执行），请检查 erp-arq 服务是否启动',
+          }
+        }
       }
       if (TERMINAL.has(res.status || '')) {
         finished = true
         stop()
+        state.value = { ...state.value, staleWarning: null }
         if (res.status === 'failed') {
           onFailed?.(res.error || '任务失败')
         } else {
@@ -120,8 +145,12 @@ export function useBackupTask(
       const isEnabled = typeof enabled === 'function' ? enabled() : enabled.value
       if (!taskId || !isEnabled) {
         state.value = { ...INITIAL }
+        startTime = null
+        staleWarned = false
         return
       }
+      startTime = Date.now()
+      staleWarned = false
       state.value = { ...INITIAL, taskId, status: 'pending', phaseLabel: '等待任务启动…' }
       void pollOnce(taskId)
       timer = setInterval(() => void pollOnce(taskId), INTERVAL_MS)
@@ -137,5 +166,6 @@ export function useBackupTask(
     status: computed(() => state.value.status),
     error: computed(() => state.value.error),
     result: computed(() => state.value.result),
+    staleWarning: computed(() => state.value.staleWarning),
   }
 }

@@ -282,6 +282,7 @@ __all__ = [
     "verify_restore",
     "write_backup_meta_file",
     "write_backup_record",
+    "sync_backup_records",
     # P1-2 表级备份范围校验
     "resolve_backup_table_scope",
 ]

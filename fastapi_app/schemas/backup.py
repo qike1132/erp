@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 class BackupRecordOut(BaseModel):
     """备份记录响应"""
-    id: int
+    id: int | None = None
     type: str = Field(description="备份类型: full/incremental/restore")
     trigger_type: str = Field(description="触发方式: manual/auto")
     filename: str | None = None
@@ -28,6 +28,8 @@ class BackupRecordOut(BaseModel):
     parent_record_id: int | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    source: str = Field(default='db', description="记录来源: db=数据库记录, fs=文件系统补录")
+    encrypted: bool | None = None
 
 
 class BackupRecordListOut(BaseModel):
@@ -360,6 +362,7 @@ class BackupSettingsOut(BaseModel):
     """备份设置响应"""
     success: bool = True
     backup_dir: str = Field(default="", description="当前生效的备份路径")
+    default_backup_dir: str = Field(default="", description="系统默认备份路径(恢复默认时使用)")
     retention_days: int = Field(default=30, description="保留天数")
     max_count: int = Field(default=50, description="最大备份数量")
     encryption_mode: str = Field(default="env", description="加密模式: off/password/key/env")

@@ -5,7 +5,7 @@
         <input type="radio" value="default" :checked="mode === 'default'" @change="mode = 'default'" />
         <span>默认系统路径</span>
       </label>
-      <div class="ps-path mono">{{ settings?.backup_dir || 'backups/server' }}</div>
+      <div class="ps-path mono">{{ settings?.default_backup_dir || 'backups/server' }}</div>
     </div>
     <div class="ps-radio-row">
       <label class="ps-radio">
@@ -38,6 +38,16 @@ const props = defineProps<{
 const mode = ref<'default' | 'custom'>('default')
 const customPath = ref('')
 const feedback = ref<{ tone: string; text: string }>({ tone: '', text: '' })
+
+// 加载设置后同步单选状态:当前生效路径与默认一致 → default,否则回显自定义路径
+watch(() => props.settings, (s) => {
+  if (!s) return
+  const dft = s.default_backup_dir || ''
+  const usingDefault = !s.backup_dir || !dft || s.backup_dir === dft
+  mode.value = usingDefault ? 'default' : 'custom'
+  if (!usingDefault) customPath.value = s.backup_dir
+  feedback.value = { tone: '', text: '' }
+}, { immediate: true })
 
 watch(mode, (m) => {
   if (m === 'default') customPath.value = ''

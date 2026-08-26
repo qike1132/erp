@@ -158,6 +158,18 @@ async def lifespan(application: FastAPI):
     from fastapi_app.core.cache import start_l1_broadcast_listener
     await start_l1_broadcast_listener()
 
+    # 启动时同步备份记录与文件系统（P1+P2：补录缺失/清理孤立/修正僵尸状态）
+    try:
+        from fastapi_app.services.backup.records import sync_backup_records
+        sync_result = await sync_backup_records()
+        if sync_result.get('backfilled', 0) > 0 or sync_result.get('orphaned', 0) > 0:
+            logger.info(
+                '备份记录同步完成: 补录 %d 条, 清理孤立 %d 条, 修正僵尸 %d 条',
+                sync_result['backfilled'], sync_result['orphaned'], sync_result.get('zombie_fixed', 0),
+            )
+    except Exception as e:
+        logger.warning('启动时备份记录同步失败（不影响启动）: %s', e)
+
     # 预热库存缓存（后台执行，不阻塞启动）
     background_tasks = []
     task = asyncio.create_task(_warm_inventory_cache())

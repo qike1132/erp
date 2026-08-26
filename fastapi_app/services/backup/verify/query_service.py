@@ -10,10 +10,13 @@
 事务边界保持在端点请求事务内，不自行 commit/rollback。
 """
 import logging
+import re
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+
 
 from fastapi_app.services.backup._constants import RESTORE_LOCK_ID
 from fastapi_app.services.backup.verify.core import quote_table
@@ -21,6 +24,58 @@ from fastapi_app.shared_models import Base
 from fastapi_app.shared_models.backup_record import BackupRecord
 
 logger = logging.getLogger(__name__)
+
+# 文件名时间戳解析正则：erp_*_YYYYMMDD_HHMMSS.{zip,json,zip.enc}
+_FILENAME_TIMESTAMP_RE = re.compile(r'_(\d{8})_(\d{6})\.(?:zip|json|enc)$')
+
+
+def _parse_exported_at(value: str | None) -> datetime | None:
+    """将 'YYYY-MM-DD HH:MM:SS' 格式字符串解析为 datetime，失败返回 None"""
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, '%Y-%m-%d %H:%M:%S')
+    except (ValueError, TypeError):
+        return None
+
+
+def _parse_timestamp_from_filename(filename: str) -> datetime | None:
+    """从文件名提取时间戳（格式 erp_*_YYYYMMDD_HHMMSS.zip），失败返回 None"""
+    if not filename:
+        return None
+    m = _FILENAME_TIMESTAMP_RE.search(filename)
+    if not m:
+        return None
+    try:
+        return datetime.strptime(f'{m.group(1)}{m.group(2)}', '%Y%m%d%H%M%S')
+    except (ValueError, TypeError):
+        return None
+
+
+def _infer_type_from_filename(filename: str) -> str:
+    """从文件名推断备份类型：erp_incremental_→incremental，erp_auto_/erp_backup_→full"""
+    if not filename:
+        return 'full'
+    if filename.startswith('erp_incremental_'):
+        return 'incremental'
+    return 'full'
+
+
+def _infer_trigger_type_from_filename(filename: str) -> str:
+    """从文件名推断触发方式：erp_auto_→auto，其他→manual"""
+    if not filename:
+        return 'manual'
+    if filename.startswith('erp_auto_'):
+        return 'auto'
+    return 'manual'
+
+
+def _resolve_created_at(fs_entry: dict, filename: str) -> datetime | None:
+    """解析记录创建时间：优先 exported_at，其次文件名时间戳"""
+    created_at = _parse_exported_at(fs_entry.get('exported_at'))
+    if created_at is not None:
+        return created_at
+    return _parse_timestamp_from_filename(filename)
 
 
 async def get_backup_table_info(db: AsyncSession) -> list[dict]:
@@ -107,3 +162,104 @@ async def get_backup_type_distribution_since(db: AsyncSession, since) -> dict[st
 
     result_dist = await db.execute(stmt_dist)
     return {row.type: row.count for row in result_dist}
+
+
+async def get_merged_backup_records(
+    db: AsyncSession, page: int, page_size: int,
+) -> tuple[list[dict], int]:
+    """合并查询备份记录：以文件系统扫描为基准，左连接数据库记录。
+
+    返回 (记录列表, 总数)。每条记录包含 source 字段标记来源：
+    - source='db'：文件系统存在且数据库有匹配记录，合并数据库专属字段
+    - source='fs'：文件系统存在但数据库无匹配记录，从文件系统信息构建
+
+    排序：按 created_at 倒序；分页：page 从1开始。
+    """
+    # 1) 扫描文件系统所有备份文件（list_backup_files 已按文件名倒序排序）
+    # 延迟导入避免循环依赖：backup.__init__ → incremental → json_backup → verify → query_service
+    from fastapi_app.services.backup import list_backup_files
+
+    fs_entries = list_backup_files()
+    filenames = [e.get('filename') for e in fs_entries if e.get('filename')]
+
+    # 2) 批量查询数据库匹配记录，构建 filename → BackupRecord 映射（避免 N+1）
+    db_map: dict[str, BackupRecord] = {}
+    if filenames:
+        stmt = select(BackupRecord).where(BackupRecord.filename.in_(filenames))
+        result = await db.execute(stmt)
+        for rec in result.scalars().all():
+            if rec.filename:
+                db_map[rec.filename] = rec
+
+    # 3) 以文件系统列表为基准合并记录
+    merged: list[dict] = []
+    for fs_entry in fs_entries:
+        filename = fs_entry.get('filename') or ''
+        db_rec = db_map.get(filename)
+
+        if db_rec is not None:
+            # 数据库有匹配记录：合并数据库专属字段
+            merged.append({
+                'id': db_rec.id,
+                'type': db_rec.type,
+                'trigger_type': db_rec.trigger_type,
+                'filename': db_rec.filename or filename,
+                'size': db_rec.size if db_rec.size is not None else fs_entry.get('size'),
+                'table_count': db_rec.table_count if db_rec.table_count is not None else fs_entry.get('table_count'),
+                'total_rows': db_rec.total_rows if db_rec.total_rows is not None else fs_entry.get('total_rows'),
+                'operator': db_rec.operator,
+                'remark': db_rec.remark or fs_entry.get('remark'),
+                'status': db_rec.status,
+                'error_message': db_rec.error_message,
+                'duration_seconds': db_rec.duration_seconds,
+                'ip_address': db_rec.ip_address,
+                'user_agent': db_rec.user_agent,
+                'parent_record_id': db_rec.parent_record_id,
+                'created_at': db_rec.created_at,
+                'updated_at': db_rec.updated_at,
+                'source': 'db',
+                'encrypted': db_rec.encrypted if db_rec.encrypted is not None else fs_entry.get('encrypted'),
+            })
+        else:
+            # 数据库无匹配记录：从文件系统信息构建（文件存在即视为成功）
+            created_at = _resolve_created_at(fs_entry, filename)
+            merged.append({
+                'id': None,
+                'type': _infer_type_from_filename(filename),
+                'trigger_type': _infer_trigger_type_from_filename(filename),
+                'filename': filename,
+                'size': fs_entry.get('size'),
+                'table_count': fs_entry.get('table_count'),
+                'total_rows': fs_entry.get('total_rows'),
+                'operator': fs_entry.get('exported_by'),
+                'remark': fs_entry.get('remark'),
+                'status': 'success',
+                'error_message': fs_entry.get('error'),
+                'duration_seconds': None,
+                'ip_address': None,
+                'user_agent': None,
+                'parent_record_id': None,
+                'created_at': created_at,
+                'updated_at': None,
+                'source': 'fs',
+                'encrypted': fs_entry.get('encrypted'),
+            })
+
+    # 4) 按创建时间倒序排序（统一转为 aware datetime，避免 naive/aware 混合比较抛 TypeError）
+    def _sort_key(r: dict) -> datetime:
+        """排序 key：统一转为 aware datetime，避免 naive/aware 混合比较抛 TypeError"""
+        ca = r.get('created_at')
+        if ca is None:
+            return datetime.min.replace(tzinfo=UTC)
+        if isinstance(ca, datetime) and ca.tzinfo is None:
+            return ca.replace(tzinfo=UTC)
+        return ca
+
+    merged.sort(key=_sort_key, reverse=True)
+
+    # 5) 分页截取
+    total = len(merged)
+    offset = (page - 1) * page_size
+    page_records = merged[offset:offset + page_size]
+
+    return page_records, total

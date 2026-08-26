@@ -8,6 +8,7 @@ import os
 import shutil
 
 from ._constants import MEILI_HOST, MEILI_MASTER_KEY, REDIS_DUMP
+from ._proc import run_proc
 
 logger = logging.getLogger(__name__)
 
@@ -33,43 +34,29 @@ async def _reload_redis() -> bool:
             if parsed.password:
                 cli_env['REDISCLI_AUTH'] = parsed.password
         cmd.extend(['DEBUG', 'RELOAD'])
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=cli_env
-        )
         try:
-            _stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
+            proc = await run_proc(cmd, env=cli_env, timeout=10)
         except TimeoutError:
-            proc.kill()
-            await proc.wait()
             logger.warning('Redis DEBUG RELOAD 超时')
             return False
         if proc.returncode == 0:
             logger.info('Redis DEBUG RELOAD 成功')
             return True
-        stderr_text = stderr.decode(errors='replace')
+        stderr_text = (proc.stderr or b'').decode(errors='replace')
         logger.warning('Redis DEBUG RELOAD 失败: %s', stderr_text)
         try:
             shutdown_cmd = [*cmd[:-2], 'SHUTDOWN', 'NOSAVE']
-            shutdown_proc = await asyncio.create_subprocess_exec(
-                *shutdown_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=cli_env
-            )
             try:
-                await asyncio.wait_for(shutdown_proc.communicate(), timeout=5)
+                await run_proc(shutdown_cmd, env=cli_env, timeout=5)
             except TimeoutError:
-                shutdown_proc.kill()
-                await shutdown_proc.wait()
+                pass
             logger.info('Redis SHUTDOWN NOSAVE 已发送，等待自动重启')
             await asyncio.sleep(2)
             ping_cmd = [*cmd[:-2], 'PING']
             for _ in range(5):
-                ping_proc = await asyncio.create_subprocess_exec(
-                    *ping_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=cli_env
-                )
                 try:
-                    await asyncio.wait_for(ping_proc.communicate(), timeout=3)
+                    ping_proc = await run_proc(ping_cmd, env=cli_env, timeout=3)
                 except TimeoutError:
-                    ping_proc.kill()
-                    await ping_proc.wait()
                     await asyncio.sleep(1)
                     continue
                 if ping_proc.returncode == 0:

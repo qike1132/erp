@@ -201,3 +201,18 @@ _fix*.js
 temp/
 build_v6/
 dist_v6/
+
+# === 2026-08-26 提交治理：临时探测脚本/运行产物不入库 ===
+# M5 验收临时探测脚本
+/.m5_*.py
+# 备份指标与恢复测试产物
+/backups/server/metrics/
+/backups/server/recovery_tests/
+# 探测用静态站点
+/backup_site_main.css
+/backup_site_probe.html
+# 工具报告/验证目录
+/.qoder/
+/.resultverify/
+# 运行时上传文件
+/static/uploads/

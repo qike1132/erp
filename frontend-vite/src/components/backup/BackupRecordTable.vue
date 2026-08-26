@@ -13,7 +13,7 @@
       <table class="brt-table">
         <thead>
           <tr>
-            <th>备份名称</th><th>类型</th><th>大小</th><th>时间</th><th>状态</th><th class="brt-right">操作</th>
+            <th>备份名称</th><th>类型</th><th>大小</th><th>时间</th><th>状态</th><th>来源</th><th class="brt-right">操作</th>
           </tr>
         </thead>
         <tbody>
@@ -23,6 +23,7 @@
             <td class="mono">{{ r.size != null ? fmtSize(r.size) : '—' }}</td>
             <td class="mono">{{ r.created_at?.slice(0, 16) ?? '—' }}</td>
             <td><span class="brt-badge" :class="r.status === 'success' ? 'brt-badge-success' : r.status === 'failed' ? 'brt-badge-danger' : 'brt-badge-processing'">{{ r.status || '—' }}</span></td>
+            <td><span class="brt-badge" :class="r.source === 'fs' ? 'brt-badge-warning' : 'brt-badge-neutral'">{{ r.source === 'fs' ? '文件系统' : '数据库' }}</span></td>
             <td class="brt-right">
               <button class="brt-link brt-link-danger" :disabled="r.status === 'running'" @click="$emit('restore', r.filename)">还原</button>
               <button class="brt-link" @click="$emit('download', r.filename)">下载</button>
@@ -30,7 +31,7 @@
             </td>
           </tr>
           <tr v-if="loading || rows.length === 0">
-            <td colspan="6" class="brt-empty">{{ loading ? '加载中…' : '暂无备份记录' }}</td>
+            <td colspan="7" class="brt-empty">{{ loading ? '加载中…' : '暂无备份记录' }}</td>
           </tr>
         </tbody>
       </table>
@@ -54,6 +55,8 @@ export interface BackupRecordRow {
   size?: number | null
   created_at?: string | null
   status?: string
+  source?: string  // 'db'=数据库记录 | 'fs'=文件系统补录
+  encrypted?: boolean | null
 }
 
 const props = defineProps<{
@@ -100,7 +103,10 @@ function typeLabel(t?: string) {
 function fmtSize(bytes?: number | null) {
   if (bytes == null) return '—'
   const gb = bytes / 1024 / 1024 / 1024
-  return gb >= 1 ? `${gb.toFixed(1)} GB` : `${Math.round(bytes / 1024 / 1024)} MB`
+  const mb = bytes / 1024 / 1024
+  if (gb >= 1) return `${gb.toFixed(1)} GB`
+  if (mb >= 1) return `${Math.round(mb)} MB`
+  return `${Math.round(bytes / 1024)} KB`
 }
 </script>
 

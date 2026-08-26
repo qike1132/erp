@@ -182,6 +182,7 @@ import {
   faTrash,
   faTrashAlt,
   faTruckRampBox,
+  faVanShuttle,
   faHashtag,
   faSliders,
 } from '@fortawesome/free-solid-svg-icons'
@@ -373,6 +374,7 @@ const SOLID_ICONS = [
   faTrash,
   faTrashAlt,
   faTruckRampBox,
+  faVanShuttle,
   faHashtag,
   faSliders,
 ]
@@ -382,6 +384,7 @@ library.add(...SOLID_ICONS)
 const FA5_ALIASES: { fa5Name: string; icon: IconDefinition }[] = [
   { fa5Name: 'sync-alt', icon: faArrowsRotate },
   { fa5Name: 'truck-loading', icon: faTruckRampBox },
+  { fa5Name: 'shuttle-van', icon: faVanShuttle },
   { fa5Name: 'shipping-fast', icon: faTruckFast },
   { fa5Name: 'cloud-upload-alt', icon: faCloudArrowUp },
   { fa5Name: 'calendar-alt', icon: faCalendarAlt },

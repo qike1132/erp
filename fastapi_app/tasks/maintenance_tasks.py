@@ -66,3 +66,21 @@ async def refresh_dashboard_mv_task(ctx) -> dict:
     except Exception as exc:  # broad-except: 定时任务容错，异常不传播以避免调度器崩溃
         logger.exception("refresh_dashboard_mv_task 失败")
         raise exc
+
+
+async def ensure_readonly_grants_task(ctx) -> dict:
+    """ARQ 任务：对账只读副本 erp_readonly 授权，缺失时自愈。
+
+    数据库恢复会清空只读授权（只读接口 500），此处周期对账兜底，
+    与「恢复完成即自愈」形成双保险。
+    """
+    from fastapi_app.services.backup.ro_grants import ensure_readonly_grants
+
+    try:
+        healed = await ensure_readonly_grants()
+        if healed:
+            logger.warning("只读授权对账：检测到缺失并已重新授予 erp_readonly")
+        return {"success": True, "healed": healed}
+    except Exception as exc:  # broad-except: 定时任务容错，避免调度器崩溃
+        logger.exception("ensure_readonly_grants_task 失败")
+        raise exc

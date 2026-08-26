@@ -36,6 +36,7 @@ export interface BackupScheduleItem {
 export interface BackupSettings {
   success?: boolean
   backup_dir: string
+  default_backup_dir?: string
   retention_days: number
   max_count: number
   encryption_mode: string

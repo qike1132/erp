@@ -44,12 +44,13 @@ class DisasterRecoveryTestService:
             # M3: 加密备份演练密码（也可逐次传入），用于解密历史 .enc 包
             'test_password': os.environ.get('BACKUP_TEST_PASSWORD', ''),
 
-            # 测试数据库配置
-            'test_db_host': os.environ.get('BACKUP_TEST_DB_HOST', 'localhost'),
-            'test_db_port': int(os.environ.get('BACKUP_TEST_DB_PORT', '5432')),
+            # 测试数据库配置（F5: 凭据缺省回落主库配置——此前默认 postgres/空密码
+            # 在本机必然认证失败，演练从未真正连通过）
+            'test_db_host': os.environ.get('BACKUP_TEST_DB_HOST', os.environ.get('DB_HOST', 'localhost')),
+            'test_db_port': int(os.environ.get('BACKUP_TEST_DB_PORT', os.environ.get('DB_PORT', '5432'))),
             'test_db_name': os.environ.get('BACKUP_TEST_DB_NAME', 'erp_backup_test'),
-            'test_db_user': os.environ.get('BACKUP_TEST_DB_USER', 'postgres'),
-            'test_db_password': os.environ.get('BACKUP_TEST_DB_PASSWORD', ''),
+            'test_db_user': os.environ.get('BACKUP_TEST_DB_USER', os.environ.get('DB_USER', 'erp_app')),
+            'test_db_password': os.environ.get('BACKUP_TEST_DB_PASSWORD', os.environ.get('DB_PASSWORD', '')),
 
             # 测试设置
             'test_sample_size': int(os.environ.get('BACKUP_TEST_SAMPLE_SIZE', '100')),
@@ -454,12 +455,17 @@ class DisasterRecoveryTestService:
 
                 test_engine = create_async_engine(test_db_url, poolclass=NullPool)
 
-                async with test_engine.begin() as conn:
-                    # 创建表结构（简化版本，实际应该使用完整的DDL）
-                    await self._create_test_schema(conn, backup_data)
-
-                    # 导入数据
-                    import_result = await self._import_test_data(conn, backup_data)
+                if data_path_sql_gz.exists():
+                    # F5: SQL 物理备份走 psql 真实导入（与生产还原同参数）
+                    import_result = await self._psql_import(test_env, data_path_sql_gz)
+                    import_result['format'] = 'sql'
+                else:
+                    from sqlalchemy.ext.asyncio import AsyncSession
+                    async with test_engine.begin() as conn:
+                        await self._create_test_schema(conn, backup_data)
+                    async with AsyncSession(test_engine, expire_on_commit=False) as session:
+                        import_result = await self._import_test_data(session, backup_data)
+                    import_result['format'] = 'json'
 
                 await test_engine.dispose()
 
@@ -493,98 +499,27 @@ class DisasterRecoveryTestService:
             }
 
     async def _create_test_schema(self, conn, backup_data: dict[str, Any]) -> None:
-        """创建测试数据库表结构。
+        """按 ORM 元数据在测试库创建真实业务 schema（F5：替换原 dummy 表 stub）。"""
+        from fastapi_app.shared_models import Base
+        await conn.run_sync(Base.metadata.create_all)
 
-        当前为简化实现，仅创建用于记录测试元数据的 dummy 表，未根据备份数据
-        恢复真实业务 schema。这会导致后续 _validate_schema 等验证无法评估
-        真实备份的可恢复性。TODO: 实现基于备份 manifest / SQL dump 的真实
-        schema 重建（如使用 Base.metadata.create_all 或执行备份中的 DDL）。
+    async def _import_test_data(self, session, backup_data: dict[str, Any]) -> dict[str, Any]:
+        """把 dump.json 导入测试库（F5：复用生产导入器 restore_legacy_json）。
+
+        与"一键还原"走完全相同的数据写入路径（DELETE+upsert+批次降级），
+        演练结论因此对生产还原路径具有直接代表性。
         """
-        try:
-            # 这里简化处理，实际应该根据备份数据创建完整的表结构
-            # 对于真实场景，应该使用完整的DDL语句
+        from fastapi_app.services.backup.json_backup import restore_legacy_json
 
-            # 创建简单的测试表
-            create_table_sql = """
-            CREATE TABLE IF NOT EXISTS backup_test_verification (
-                id SERIAL PRIMARY KEY,
-                test_timestamp TIMESTAMP NOT NULL,
-                backup_type VARCHAR(50),
-                table_count INTEGER,
-                total_rows BIGINT,
-                test_result VARCHAR(20)
-            )
-            """
-
-            await conn.execute(text(create_table_sql))
-
-        except Exception as e:  # defensive: log any schema creation failure before re-raising
-            logger.error(f"创建测试表结构失败: {e}")
-            raise
-
-    async def _import_test_data(self, conn, backup_data: dict[str, Any]) -> dict[str, Any]:
-        """导入测试数据"""
-        try:
-            tables = backup_data.get('tables', {})
-            imported_rows = 0
-            failed_rows = 0
-            details = {}
-
-            # 这里简化处理，实际应该导入所有表数据
-            # 对于测试目的，我们只导入少量样本数据
-
-            sample_size = self.test_config['test_sample_size']
-
-            for table_name, table_data in tables.items():
-                if table_name.startswith('_') or table_name in ['alembic_version']:
-                    continue  # 跳过系统表
-
-                rows = table_data.get('rows', [])
-                row_count = len(rows)
-
-                if row_count == 0:
-                    details[table_name] = {'imported': 0, 'failed': 0, 'status': 'empty'}
-                    continue
-
-                # 只导入样本数据
-                sample_rows = rows[:min(sample_size, row_count)]
-
-                try:
-                    # 这里简化处理，实际应该根据表结构动态生成INSERT语句
-                    # 对于测试目的，我们只记录数据统计
-                    imported_rows += len(sample_rows)
-                    details[table_name] = {
-                        'imported': len(sample_rows),
-                        'failed': 0,
-                        'status': 'success',
-                        'sample_count': len(sample_rows),
-                        'total_count': row_count
-                    }
-
-                except Exception as e:  # defensive: per-table import failures should not abort test
-                    failed_rows += len(sample_rows)
-                    details[table_name] = {
-                        'imported': 0,
-                        'failed': len(sample_rows),
-                        'status': 'failed',
-                        'error': str(e)
-                    }
-                    logger.warning(f"导入表 {table_name} 数据失败: {e}")
-
-            return {
-                'imported_rows': imported_rows,
-                'failed_rows': failed_rows,
-                'details': details
-            }
-
-        except (ValueError, TypeError, AttributeError) as e:
-            logger.error(f"导入测试数据失败: {e}")
-            return {
-                'imported_rows': 0,
-                'failed_rows': 0,
-                'details': {'error': str(e)},
-                'error': str(e)
-            }
+        result = await restore_legacy_json(backup_data, session)
+        await session.commit()  # manual-tx: 与生产 JsonRestoreStrategy 一致，导入后显式提交
+        errors = result.get('errors') or []
+        return {
+            'success': not errors,
+            'imported_rows': result.get('total_inserted', 0),
+            'failed_rows': len(errors),
+            'details': {'per_table': result.get('results', {}), 'errors': errors[:10]},
+        }
 
     async def _validate_recovery(self,
                                test_id: str,

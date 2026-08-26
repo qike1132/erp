@@ -78,6 +78,7 @@ async def get_settings(db: AsyncSession) -> dict:
     if row is None:
         return {
             'backup_dir': str(BACKUP_DIR),
+            'default_backup_dir': str(BACKUP_DIR),
             'retention_days': 30,
             'max_count': 50,
             'encryption_mode': 'env',
@@ -86,6 +87,7 @@ async def get_settings(db: AsyncSession) -> dict:
 
     return {
         'backup_dir': row.backup_dir,
+        'default_backup_dir': str(BACKUP_DIR),
         'retention_days': row.retention_days,
         'max_count': row.max_count,
         'encryption_mode': row.encryption_mode,
@@ -118,11 +120,15 @@ async def save_settings(
         db.add(row)
 
     if backup_dir is not None:
-        # 写入前兜底校验(防御:调用方应已在前端/端点层校验)
-        validation = validate_path(backup_dir)
-        if not validation['valid']:
-            raise BackupSettingsError(validation['error'])
-        row.backup_dir = backup_dir
+        if not backup_dir.strip():
+            # 空字符串表示恢复默认系统路径
+            row.backup_dir = str(BACKUP_DIR)
+        else:
+            # 写入前兜底校验(防御:调用方应已在前端/端点层校验)
+            validation = validate_path(backup_dir)
+            if not validation['valid']:
+                raise BackupSettingsError(validation['error'])
+            row.backup_dir = backup_dir
     if retention_days is not None:
         if retention_days < 1 or retention_days > 3650:
             raise BackupSettingsError('保留天数必须在 1-3650 之间')

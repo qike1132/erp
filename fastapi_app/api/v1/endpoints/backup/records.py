@@ -90,12 +90,27 @@ async def list_server_backups(user: User = Depends(require_backup_permission('li
 async def delete_server_backup(
     filename: str,
     user: User = Depends(require_backup_permission('delete_server_backup')),
+    db: AsyncSession = Depends(get_async_db),
 ):
-    """删除服务器默认路径上的指定备份文件"""
+    """删除服务器默认路径上的指定备份文件
+
+    幂等删除：文件若已被保留策略清理，不再报 404，而是仅清理同名备份记录，
+    避免记录列表残留"幽灵"备份导致重复删除报错；文件存在时同时清理记录，
+    保持记录列表与磁盘文件一致。
+    """
+    deleted = ''
     try:
         deleted = backup_service.delete_backup_file(filename)
     except BackupFileError as e:
-        raise HTTPException(status_code=404 if '不存在' in str(e) else 400, detail=str(e)) from e
+        if '不存在' not in str(e):
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        # 文件已不存在（例如被保留策略清理）——幂等处理，继续清理同名记录
+    try:
+        from fastapi_app.shared_models.backup_record import BackupRecord
+        from sqlalchemy import delete as _sa_delete
+        await db.execute(_sa_delete(BackupRecord).where(BackupRecord.filename == filename))
+    except SQLAlchemyError as e:
+        logger.error(f'清理备份记录 {filename} 失败: {e}')
     return {'success': True, 'deleted': deleted}
 
 
@@ -118,21 +133,36 @@ async def get_backup_records(
     user: User = Depends(require_backup_permission('get_backup_records')),
     db: AsyncSession = Depends(get_async_read_db),
 ):
-    """备份记录分页列表"""
-    records, total = await backup_query_service.get_backup_records_page(db, page, page_size)
+    """备份记录分页列表
+
+    以文件系统扫描为基准，左连接数据库 backup_record 表补充元信息，
+    确保管理列表与还原向导(/backup/list)数据源一致。
+    """
+    records, total = await backup_query_service.get_merged_backup_records(db, page, page_size)
 
     return {
         'success': True,
         'records': [
             {
-                'id': r.id, 'type': r.type, 'trigger_type': r.trigger_type,
-                'filename': r.filename, 'size': r.size, 'table_count': r.table_count,
-                'total_rows': r.total_rows, 'operator': r.operator, 'remark': r.remark,
-                'status': r.status, 'error_message': r.error_message,
-                'duration_seconds': r.duration_seconds, 'ip_address': r.ip_address,
-                'user_agent': r.user_agent, 'parent_record_id': r.parent_record_id,
-                'created_at': r.created_at.isoformat() if r.created_at else None,
-                'updated_at': r.updated_at.isoformat() if r.updated_at else None,
+                'id': r.get('id'),
+                'type': r.get('type'),
+                'trigger_type': r.get('trigger_type'),
+                'filename': r.get('filename'),
+                'size': r.get('size'),
+                'table_count': r.get('table_count'),
+                'total_rows': r.get('total_rows'),
+                'operator': r.get('operator'),
+                'remark': r.get('remark'),
+                'status': r.get('status'),
+                'error_message': r.get('error_message'),
+                'duration_seconds': r.get('duration_seconds'),
+                'ip_address': r.get('ip_address'),
+                'user_agent': r.get('user_agent'),
+                'parent_record_id': r.get('parent_record_id'),
+                'created_at': r['created_at'].isoformat() if isinstance(r.get('created_at'), datetime) else r.get('created_at'),
+                'updated_at': r['updated_at'].isoformat() if isinstance(r.get('updated_at'), datetime) else r.get('updated_at'),
+                'source': r.get('source', 'db'),
+                'encrypted': r.get('encrypted'),
             }
             for r in records
         ],

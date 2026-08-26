@@ -5,14 +5,48 @@ import asyncio
 import gzip
 import logging
 import os
+import shutil
+import subprocess
+import threading
+import time
 from pathlib import Path
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ._proc import run_proc
 from .snapshot import get_pg_version
 
 logger = logging.getLogger(__name__)
+
+# PG 客户端工具自动发现候选目录（F6：pg_dump/psql 常不在服务进程 PATH 上）
+_PG_BIN_CANDIDATE_GLOBS = (
+    r'C:\Program Files\PostgreSQL\*\bin',
+    r'D:\PostgreSQL\bin',
+    r'C:\PostgreSQL\bin',
+)
+
+
+def resolve_pg_tool(tool: str) -> str:
+    """解析 pg_dump/psql 可执行文件路径（F6，2026-08-24 审计整改）。
+
+    优先级：PG_TOOLS_BIN 环境变量指定目录 > 系统 PATH > 常见安装目录探测。
+    找不到时返回原名（保持旧行为：由 FileNotFoundError 提示客户端工具缺失，
+    上层回退 JSON 备份路径）。
+    """
+    env_dir = os.environ.get('PG_TOOLS_BIN', '').strip()
+    search_dirs: list[str] = []
+    if env_dir:
+        search_dirs.append(env_dir)
+    for pattern in _PG_BIN_CANDIDATE_GLOBS:
+        search_dirs.extend(str(d) for d in __import__('glob').glob(pattern))
+
+    for d in search_dirs:
+        for exe in (f'{tool}.exe', tool):
+            candidate = Path(d) / exe
+            if candidate.is_file():
+                return str(candidate)
+    return shutil.which(tool) or tool
 
 
 async def run_pg_dump(output_path: Path, snapshot_id: str | None = None) -> dict:
@@ -24,7 +58,6 @@ async def run_pg_dump(output_path: Path, snapshot_id: str | None = None) -> dict
 
     Returns: dict with pg_version, db_name, dump_size, duration_seconds, snapshot_id
     """
-    import time
     start = time.monotonic()
     db_host = os.getenv('DB_HOST', 'localhost')
     db_port = os.getenv('DB_PORT', '5432')
@@ -38,7 +71,7 @@ async def run_pg_dump(output_path: Path, snapshot_id: str | None = None) -> dict
     try:
         # 构建 pg_dump 命令参数
         pg_dump_args = [
-            'pg_dump', '-h', db_host, '-p', db_port, '-U', db_user, '-d', db_name,
+            resolve_pg_tool('pg_dump'), '-h', db_host, '-p', db_port, '-U', db_user, '-d', db_name,
             '--no-owner', '--no-privileges'
         ]
 
@@ -47,26 +80,22 @@ async def run_pg_dump(output_path: Path, snapshot_id: str | None = None) -> dict
             pg_dump_args.extend(['--snapshot', snapshot_id])
             logger.info(f"使用数据库快照 {snapshot_id} 进行备份")
 
-        proc = await asyncio.create_subprocess_exec(
-            *pg_dump_args,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env
-        )
-        gzip_proc = await asyncio.create_subprocess_exec(
-            'gzip', '-1', stdin=proc.stdout,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        stdout, _ = await gzip_proc.communicate()
-        await proc.wait()
+        proc = await run_proc(pg_dump_args, env=env)
         if proc.returncode != 0:
-            stderr_data = await proc.stderr.read() if proc.stderr else b''
+            stderr_data = proc.stderr or b''
             raise RuntimeError(f"pg_dump failed (rc={proc.returncode}): {stderr_data.decode(errors='replace')}")
+        # F6/M5: 用 Python 内置 gzip 压缩,不再依赖外部 gzip 可执行文件
+        # （Windows 上 gzip 常不在 PATH,导致 create_subprocess_exec('gzip') 抛
+        # FileNotFoundError,使 pg_dump 备份静默回退到 JSON 格式）
+        compressed = gzip.compress(proc.stdout, compresslevel=1)
+        del proc
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_bytes(stdout)
+        output_path.write_bytes(compressed)
         duration = time.monotonic() - start
         return {
             'pg_version': await get_pg_version(db_host, db_port, db_user, db_password, env),
             'db_name': db_name,
-            'dump_size': len(stdout),
+            'dump_size': len(compressed),
             'duration_seconds': round(duration, 2),
             'snapshot_id': snapshot_id,
         }
@@ -145,20 +174,15 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
     for _retry in range(3):
         await asyncio.sleep(1)
         try:
-            check_proc = await asyncio.create_subprocess_exec(
-                'psql', '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres', '-t', '-c',
-                f"SELECT COUNT(*) FROM pg_stat_activity WHERE datname = '{db_name}';",  # nosec B608 — db_name 经 isidentifier() 白名单校验
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env
+            check_proc = await run_proc(
+                [
+                    resolve_pg_tool('psql'), '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres', '-t', '-c',
+                    f"SELECT COUNT(*) FROM pg_stat_activity WHERE datname = '{db_name}';",  # nosec B608 — db_name 经 isidentifier() 白名单校验
+                ],
+                env=env, timeout=10,
             )
-            try:
-                check_stdout, _ = await asyncio.wait_for(check_proc.communicate(), timeout=10)
-            except TimeoutError:
-                check_proc.kill()
-                await check_proc.wait()
-                logger.warning(f'检查活跃连接超时，重试 {_retry + 1}/3')
-                continue
             if check_proc.returncode == 0:
-                active_count = int(check_stdout.decode(errors='replace').strip() or '0')
+                active_count = int((check_proc.stdout or b'').decode(errors='replace').strip() or '0')
                 if active_count == 0:
                     break
                 logger.warning(f'仍有 {active_count} 个活跃连接，重试 {_retry + 1}/3')
@@ -168,18 +192,14 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
     await _report(0.10, '终止残留数据库连接')
     await asyncio.sleep(0)
     try:
-        term_proc = await asyncio.create_subprocess_exec(
-            'psql', '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres', '-c',
-            f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{db_name}' AND pid <> pg_backend_pid();",  # nosec B608 — db_name 经 isidentifier() 白名单校验
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env
+        term_proc = await run_proc(
+            [
+                resolve_pg_tool('psql'), '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres', '-c',
+                f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{db_name}' AND pid <> pg_backend_pid();",  # nosec B608 — db_name 经 isidentifier() 白名单校验
+            ],
+            env=env, timeout=30,
         )
-        try:
-            await asyncio.wait_for(term_proc.wait(), timeout=30)
-        except TimeoutError:
-            term_proc.kill()
-            await term_proc.wait()
-            logger.warning('终止连接超时，已强制终止')
-    except (TimeoutError, OSError, ValueError) as e:
+    except (TimeoutError, OSError) as e:
         logger.warning(f'终止现有连接失败: {e}')
 
     await _report(0.14, '重建数据库')
@@ -187,19 +207,15 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
     try:
         pg_major = 13
         try:
-            ver_proc = await asyncio.create_subprocess_exec(
-                'psql', '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres', '-t', '-c',
-                'SHOW server_version;',
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env
+            ver_proc = await run_proc(
+                [
+                    resolve_pg_tool('psql'), '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres', '-t', '-c',
+                    'SHOW server_version;',
+                ],
+                env=env, timeout=10,
             )
-            try:
-                ver_stdout, _ = await asyncio.wait_for(ver_proc.communicate(), timeout=10)
-            except TimeoutError:
-                ver_proc.kill()
-                await ver_proc.wait()
-                ver_stdout = b''
             if ver_proc.returncode == 0:
-                ver_str = ver_stdout.decode(errors='replace').strip()
+                ver_str = (ver_proc.stdout or b'').decode(errors='replace').strip()
                 pg_major = int(ver_str.split('.')[0])
         except (TimeoutError, OSError, ValueError):
             pass  # defensive: 异常静默处理,不影响主流程
@@ -207,33 +223,21 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
             drop_cmd = f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE);'
         else:
             drop_cmd = f'DROP DATABASE IF EXISTS "{db_name}";'
-        drop_proc = await asyncio.create_subprocess_exec(
-            'psql', '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres', '-c', drop_cmd,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env
-        )
-        try:
-            _, stderr = await asyncio.wait_for(drop_proc.communicate(), timeout=60)
-        except TimeoutError:
-            drop_proc.kill()
-            await drop_proc.wait()
-            logger.warning('DROP DATABASE 超时')
-            stderr = b'Timeout'
-        if drop_proc.returncode != 0:
-            logger.warning(f"DROP DATABASE: {stderr.decode(errors='replace')}")
-        create_proc = await asyncio.create_subprocess_exec(
-            'psql', '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres', '-c',
-            f'CREATE DATABASE "{db_name}" OWNER "{db_user}";',
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env
+        drop_proc = await run_proc(
+            [resolve_pg_tool('psql'), '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres', '-c', drop_cmd],
+            env=env, timeout=60,
         )  # nosec
-        try:
-            _, stderr = await asyncio.wait_for(create_proc.communicate(), timeout=30)
-        except TimeoutError:
-            create_proc.kill()
-            await create_proc.wait()
-            logger.warning('CREATE DATABASE 超时')
-            stderr = b'Timeout'
+        if drop_proc.returncode != 0:
+            logger.warning(f"DROP DATABASE: {(drop_proc.stderr or b'').decode(errors='replace')}")
+        create_proc = await run_proc(
+            [
+                resolve_pg_tool('psql'), '-h', db_host, '-p', db_port, '-U', db_user, '-d', 'postgres', '-c',
+                f'CREATE DATABASE "{db_name}" OWNER "{db_user}";',
+            ],
+            env=env, timeout=30,
+        )  # nosec
         if create_proc.returncode != 0:
-            logger.warning(f"CREATE DATABASE: {stderr.decode(errors='replace')}")  # nosec
+            logger.warning(f"CREATE DATABASE: {(create_proc.stderr or b'').decode(errors='replace')}")  # nosec
     except (TimeoutError, OSError, ValueError) as e:
         return {'status': 'error', 'error': f'数据库重建失败: {e}'}
 
@@ -244,68 +248,92 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
         await asyncio.sleep(0)
         # P0-5: 单事务导入 + 遇错即停——任一语句失败则整体回滚，不再产生
         # 半还原态数据库（旧实现 ON_ERROR_STOP=0 会吞错继续，残留部分表数据）。
-        proc = await asyncio.create_subprocess_exec(
-            'psql', '-h', db_host, '-p', db_port, '-U', db_user, '-d', db_name,
+        psql_args = [
+            resolve_pg_tool('psql'), '-h', db_host, '-p', db_port, '-U', db_user, '-d', db_name,
             '--single-transaction',
             '-v', 'ON_ERROR_STOP=1',
-            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE, env=env
-        )
-        try:
-            total_size = len(dump_sql)
-            written = 0
-            chunk_size = 256 * 1024
+        ]
+        total_size = len(dump_sql)
+        state: dict = {'written': 0}
+        result: dict = {}
 
-            async def _write_stdin():
-                nonlocal written
+        def _drain(stream, sink: list) -> None:
+            while True:
+                chunk = stream.read(65536)
+                if not chunk:
+                    break
+                sink.append(chunk)
+
+        def _psql_import() -> None:
+            """工作线程：Popen 分块写 stdin，排空 stdout/stderr 防管道死锁。"""
+            try:
+                proc_ = subprocess.Popen(  # noqa: S603 — 参数为白名单校验后的固定列表
+                    psql_args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, env=env,
+                )
+            except FileNotFoundError:
+                result['no_psql'] = True
+                return
+            except OSError as e:
+                result['spawn_error'] = str(e)
+                return
+            out_chunks: list[bytes] = []
+            err_chunks: list[bytes] = []
+            t_out = threading.Thread(target=_drain, args=(proc_.stdout, out_chunks), daemon=True)
+            t_err = threading.Thread(target=_drain, args=(proc_.stderr, err_chunks), daemon=True)
+            t_out.start()
+            t_err.start()
+            try:
+                view = memoryview(dump_sql)
+                written = 0
+                step = 256 * 1024
                 while written < total_size:
-                    end = min(written + chunk_size, total_size)
-                    proc.stdin.write(dump_sql[written:end])
-                    await proc.stdin.drain()
+                    end = min(written + step, total_size)
+                    proc_.stdin.write(view[written:end])
                     written = end
-                    sub = 0.20 + 0.30 * (written / total_size)
-                    elapsed = int(time_mod.monotonic() - psql_start_time)
-                    await _report(sub, f'写入数据 {written * 100 // total_size}% ({elapsed}s)')
-                proc.stdin.close()
+                    state['written'] = written
+                proc_.stdin.close()
+                try:
+                    proc_.wait(timeout=600)
+                    result['rc'] = proc_.returncode
+                except subprocess.TimeoutExpired:
+                    proc_.kill()
+                    proc_.wait()
+                    result['timeout'] = True
+            finally:
+                t_out.join(timeout=30)
+                t_err.join(timeout=30)
+                result['stderr'] = b''.join(err_chunks)
 
-            async def _read_stream(stream, chunks):
-                while True:
-                    chunk = await stream.read(65536)
-                    if not chunk:
-                        break
-                    chunks.append(chunk)
+        worker = threading.Thread(target=_psql_import, daemon=True)
+        worker.start()
+        while worker.is_alive():
+            await asyncio.sleep(2)
+            elapsed = int(time_mod.monotonic() - psql_start_time)
+            if total_size and state['written'] < total_size:
+                pct = state['written'] * 100 // total_size
+                await _report(0.20 + 0.30 * (state['written'] / total_size),
+                              f'写入数据 {pct}% ({elapsed}s)')
+            else:
+                await _report(0.70, f'等待 psql 完成... ({elapsed}s)')
+        worker.join()
 
-            stdout_chunks = []
-            stderr_chunks = []
-            write_task = asyncio.create_task(_write_stdin())
-            read_out_task = asyncio.create_task(_read_stream(proc.stdout, stdout_chunks))
-            read_err_task = asyncio.create_task(_read_stream(proc.stderr, stderr_chunks))
-
-            await asyncio.wait_for(write_task, timeout=600)
-
-            while not read_out_task.done() or not read_err_task.done():
-                await asyncio.sleep(2)
-                elapsed = int(time_mod.monotonic() - psql_start_time)
-                await _report(0.70, f'等待 psql 完成... ({elapsed}s)')  # sql-safe: escape_like/绑定参数/常量片段
-
-            await asyncio.wait_for(asyncio.gather(read_out_task, read_err_task), timeout=600)
-            await proc.wait()
-
-            b''.join(stdout_chunks)
-            stderr = b''.join(stderr_chunks)
-        except TimeoutError:
-            proc.kill()
-            await proc.wait()
+        if result.get('no_psql'):
+            return {'status': 'error', 'error': 'psql 命令未找到，请确保 PostgreSQL 客户端工具已安装'}
+        if 'spawn_error' in result:
+            return {'status': 'error', 'error': f"数据库恢复失败: {result['spawn_error']}"}
+        if result.get('timeout'):
             return {'status': 'error', 'error': '数据库恢复超时（超过 600 秒），进程已终止'}
 
-        stderr_text = stderr.decode(errors='replace')
+        stderr_text = (result.get('stderr') or b'').decode(errors='replace')
         error_count = stderr_text.lower().count('error:')
         await _report(0.95, '数据导入完成，验证结果')
 
-        if proc.returncode != 0:
+        rc = result.get('rc')
+        if rc != 0:
             # 单事务模式：导入已整体回滚，目标库为空库；旧数据在 DROP 阶段已被替换，
             # 需要用还原前安全备份（pre_restore_*）恢复——错误信息中明确指引用户
-            logger.warning(f'psql restore failed (returncode={proc.returncode}): {stderr_text[:2000]}')  # sql-safe: escape_like/绑定参数/常量片段
+            logger.warning(f'psql restore failed (returncode={rc}): {stderr_text[:2000]}')  # sql-safe: escape_like/绑定参数/常量片段
             return {
                 'status': 'error',
                 'message': '数据库恢复失败（已整体回滚，当前为空库）',
@@ -316,8 +344,6 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
             logger.warning(f'psql restore completed with {error_count} errors: {stderr_text[:2000]}')  # sql-safe: escape_like/绑定参数/常量片段
             return {'status': 'partial', 'message': f'数据库已恢复，但有 {error_count} 个语句执行失败', 'errors': stderr_text[:2000]}  # sql-safe: escape_like/绑定参数/常量片段
         return {'status': 'ok', 'message': '数据库恢复成功'}
-    except FileNotFoundError:
-        return {'status': 'error', 'error': 'psql 命令未找到，请确保 PostgreSQL 客户端工具已安装'}
     except (TimeoutError, OSError, ValueError) as e:
         return {'status': 'error', 'error': f'数据库恢复失败: {e}'}
 
