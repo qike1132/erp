@@ -240,8 +240,8 @@ export function del<T>(url: string): Promise<T> {
   return executeWriteWithRetry(() => service.delete(url) as Promise<T>)
 }
 
-export function upload<T>(url: string, formData: FormData): Promise<T> {
-  return service.post(url, formData) as Promise<T>
+export function upload<T>(url: string, formData: FormData, headers?: Record<string, string>): Promise<T> {
+  return service.post(url, formData, { headers }) as Promise<T>
 }
 
 /** POST 请求下载文件（用于需要 POST body 的文件下载场景） */

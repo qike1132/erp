@@ -98,6 +98,48 @@ async def _get_redis():
 
 
 # ---------------------------------------------------------------------------
+# Task password side-channel (H3)
+# ---------------------------------------------------------------------------
+# ARQ 任务参数会被序列化进 Redis 队列（任何能读 Redis 的人可见）。加密密码
+# 不进队列，改存到以 task_id 命名的一次性短 TTL 键中，任务消费时原子取走。
+_TASK_PASSWORD_PREFIX = "erp:backup_task_pwd:"
+_TASK_PASSWORD_TTL = 600  # 10 分钟内未被消费即过期，覆盖 worker 最长启动延迟
+
+
+async def store_task_password(task_id: str, password: str) -> bool:
+    """将任务加密密码写入一次性侧信道键（TTL 10 分钟）。
+
+    写入失败返回 False，由调用方决定是否继续（fail-closed 更安全，
+    但加密密码缺失只导致备份降级为不加密，与旧行为一致）。
+    """
+    try:
+        client = await _get_redis()
+        if client is None:
+            return False
+        await client.set(_TASK_PASSWORD_PREFIX + task_id, password, ex=_TASK_PASSWORD_TTL)
+        return True
+    except Exception as e:  # broad-except: 密码写入失败不应阻断任务入队
+        logger.warning("写入任务密码侧信道失败（task_id=%s）: %s", task_id, e)
+        return False
+
+
+async def get_task_password(task_id: str) -> str | None:
+    """读取任务密码（不删除，靠 TTL 自动过期清理）。
+
+    不做一次性删除的原因：任务失败重试（ARQ job_try>1）时仍需密码，
+    删除会导致重试静默降级为不加密备份。键 10 分钟后由 Redis 过期回收。
+    """
+    try:
+        client = await _get_redis()
+        if client is None:
+            return None
+        return await client.get(_TASK_PASSWORD_PREFIX + task_id)
+    except Exception as e:  # broad-except: 读取失败按无密码处理（降级不加密）
+        logger.warning("读取任务密码侧信道失败（task_id=%s）: %s", task_id, e)
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 def _resolve_key(task_id: str, progress_type: str | None = None) -> str:

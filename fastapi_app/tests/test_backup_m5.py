@@ -150,7 +150,8 @@ class TestExportEndpointAudit:
         ):
             resp = await client.get(
                 '/api/v1/backup/export',
-                params={'encrypt': True, 'format': 'zip', 'password': 'secret-pw'},
+                params={'encrypt': True, 'format': 'zip'},
+                headers={'X-Backup-Password': 'secret-pw'},  # H3：密码经请求头，不再走 URL query
             )
 
         assert resp.status_code == 200
@@ -234,24 +235,26 @@ class TestJsonColumnRoundTrip:
         from fastapi_app.services.backup.json_backup import deserialize_value
         from sqlalchemy.dialects.postgresql import JSONB
 
+        # REV-JSON 契约：合法 JSON 字符串原样透传——asyncpg jsonb codec
+        # 需要的是合法 JSON 字符串（而非 Python dict）
         s = '{"new": "cancelled", "old": "in_progress"}'
         out = deserialize_value(s, JSONB())
-        assert isinstance(out, dict)
-        assert out['new'] == 'cancelled'
+        assert out == s
+        assert json.loads(out)['new'] == 'cancelled'
 
     def test_deserialize_json_non_string_passthrough(self):
         from fastapi_app.services.backup.json_backup import deserialize_value
         from sqlalchemy.dialects.postgresql import JSONB
 
-        # 已是结构体则原样返回
+        # dict/list 归一为合法 JSON 字符串（旧 dump 直接存 python 对象的兼容路径）
         out = deserialize_value({'a': 1}, JSONB())
-        assert out == {'a': 1}
+        assert out == '{"a": 1}'
 
     def test_deserialize_invalid_json_string_returns_str(self):
         from fastapi_app.services.backup.json_backup import deserialize_value
         from sqlalchemy.dialects.postgresql import JSONB
 
-        # 旧备份的 Python 字面量无法解析,降级原样返回(保持向后兼容)
+        # 旧备份的 Python 单引号字面量 → ast.literal_eval 还原后 json.dumps
         legacy = "{'new': 'cancelled', 'old': 'in_progress'}"
         out = deserialize_value(legacy, JSONB())
-        assert out == legacy
+        assert out == '{"new": "cancelled", "old": "in_progress"}'

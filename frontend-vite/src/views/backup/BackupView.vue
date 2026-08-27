@@ -51,6 +51,7 @@
         :server-backups="serverBackups"
         :plan="plan"
         :task="taskState"
+        :initial-filename="wizardInitialFilename"
         :on-preview="previewPlan"
         :on-execute="executeRestore"
         @close="wizardOpen = false"
@@ -115,6 +116,9 @@ const { state: taskState } = useBackupTask(
   () => {
     busy.value = false
     uploadRestoring.value = false
+    // B7 修复：终态清空 activeTaskId，否则备份按钮终身禁用（task?.taskId
+    // 恒真），必须刷新页面才能再次备份
+    activeTaskId.value = null
     toast.success(`${taskKind.value}任务已完成`)
     void loadStatus()
     void loadRecords()
@@ -122,6 +126,7 @@ const { state: taskState } = useBackupTask(
   (error: string) => {
     busy.value = false
     uploadRestoring.value = false
+    activeTaskId.value = null
     toast.error(`${taskKind.value}任务失败：${error || '请查看服务器日志'}`)
     void loadStatus()
   },
@@ -136,6 +141,7 @@ const recordsLoading = ref(false)
 
 /* ---------- 还原向导 ---------- */
 const wizardOpen = ref(false)
+const wizardInitialFilename = ref('')
 const serverBackups = ref<ServerBackupSummary[]>([])
 const plan = ref<BackupRestorePlan | null>(null)
 
@@ -254,6 +260,7 @@ async function loadRecords(page = recordsPage.value) {
   } catch { records.value = [] } finally { recordsLoading.value = false }
 }
 function onRecordRestore(filename: string) {
+  wizardInitialFilename.value = filename
   wizardOpen.value = true
   previewPlan(filename)
 }
@@ -279,6 +286,7 @@ async function onRecordDelete(filename: string) {
 }
 
 function openWizard() {
+  wizardInitialFilename.value = ''
   wizardOpen.value = true
 }
 async function previewPlan(filename: string) {

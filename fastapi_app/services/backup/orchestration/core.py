@@ -115,6 +115,13 @@ async def create_full_backup(
     if _backup_in_progress.locked():
         raise BackupLockError('已有备份任务正在执行中，请稍后重试')
 
+    # B4 修复：备份与还原互斥——还原期间拒绝启动备份。全量 psql 还原会
+    # pg_terminate_backend 杀掉正在运行的 pg_dump；反向场景下还原中表的
+    # DROP/重建也会让备份产出部分表缺失的损坏包。
+    from ..restore import is_restore_in_progress
+    if await is_restore_in_progress():
+        raise BackupLockError('还原操作正在执行中，请等待还原完成后再备份')
+
     db_lock_acquired = await acquire_backup_lock(db)
     if not db_lock_acquired:
         raise BackupLockError('其他进程正在执行备份，请稍后重试')

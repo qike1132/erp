@@ -48,6 +48,10 @@ async def create_incremental_backup(
     - False:强制不加密(即使有环境变量)——手动任务 fail-safe 用
     """
     ensure_backup_dir()
+    # B4 修复：增量备份与还原互斥（与全量备份入口一致）
+    from .restore import is_restore_in_progress
+    if await is_restore_in_progress():
+        raise BackupLockError('还原操作正在执行中，请等待还原完成后再备份')
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     from fastapi_app.shared_models import Base
     incremental_tables = {}

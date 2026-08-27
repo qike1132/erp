@@ -13,6 +13,7 @@
 ARQ 任务为原生 async，原先在 Celery 同步 worker 中用 _run_async 包装的协程，
 现在直接 await。重试由 ARQ max_tries 控制（job_try < 3 时 raise 触发重试）。
 """
+import asyncio
 import logging
 from datetime import UTC, datetime
 
@@ -32,7 +33,6 @@ _MAX_TRIES = 3
 
 async def manual_full_backup_task(
     ctx, *, task_id: str | None = None, remark: str = '', encrypt: bool = True,
-    password: str | None = None,
     tables: list[str] | None = None,
     exclude_tables: list[str] | None = None,
 ):
@@ -44,6 +44,9 @@ async def manual_full_backup_task(
 
     注意:task_id 由入口端点生成并传入(与前端 POST /full 返回的 task_id 一致),
     任务不再自行生成,否则前端轮询 GET /progress/{task_id} 将取不到进度。
+
+    H3: 加密密码不作为任务参数入队（ARQ 参数会被序列化进 Redis 队列明文可见），
+    入口端点将其写入一次性短 TTL 侧信道键，此处按 task_id 原子取走。
     """
     task_id = task_id or generate_task_id()
     await create_progress(task_id, operation_type='full', progress_type='backup')
@@ -53,11 +56,14 @@ async def manual_full_backup_task(
 
     try:
         await update_progress(task_id, 'init', 0.1, '开始全量备份')
+        from fastapi_app.core.backup_progress import get_task_password
         from fastapi_app.core.database import get_async_db_context
         from fastapi_app.services import backup as backup_service
         from fastapi_app.shared_models import User as UserModel
 
         backup_service.ensure_backup_dir()
+        # 读取入口端点预置的密码（短 TTL 键，重试期间仍可读，到期自动回收）
+        password = await get_task_password(task_id)
 
         async with get_async_db_context() as db:
             dummy_user = UserModel()
@@ -97,7 +103,8 @@ async def manual_full_backup_task(
             filepath = backup_service.BACKUP_DIR / filename
 
             await update_progress(task_id, 'write_file', 0.5, f'写入 {filename}')
-            filepath.write_bytes(zip_bytes)
+            # H5: 大文件写盘为阻塞 IO，移入线程池避免卡住事件循环
+            await asyncio.to_thread(filepath.write_bytes, zip_bytes)
             backup_service.write_backup_meta_file(filepath, manifest, record_type='full')
 
             # 写入 BackupRecord
@@ -614,7 +621,8 @@ async def _do_auto_backup(backup_type: str) -> dict:
                 else f'erp_auto_daily_{timestamp}.zip'
             )
             filepath = backup_service.BACKUP_DIR / filename
-            filepath.write_bytes(zip_bytes)
+            # H5: 大文件写盘为阻塞 IO，移入线程池避免卡住事件循环
+            await asyncio.to_thread(filepath.write_bytes, zip_bytes)
             backup_service.write_backup_meta_file(filepath, manifest, record_type='full')
 
             # 写入 BackupRecord

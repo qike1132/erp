@@ -105,8 +105,9 @@ export const backupApi = {
   restoreServerBackup: (filename: string, opts?: RestoreOptions) => {
     const q = new URLSearchParams({ confirm: 'true' })
     if (opts?.confirmSensitive) q.set('confirm_sensitive', 'true')
-    if (opts?.password) q.set('password', opts.password)
-    return post(`/backup/restore-by-name/${encodeURIComponent(filename)}?${q.toString()}`)
+    // H3：密码经 JSON body 传递，不再进 URL（避免进入访问日志/浏览器历史）
+    const body = opts?.password ? { password: opts.password } : undefined
+    return post(`/backup/restore-by-name/${encodeURIComponent(filename)}?${q.toString()}`, body)
   },
   downloadByName: (filename: string) => download(`/backup/download/${encodeURIComponent(filename)}`, filename),
   deleteServerBackup: (filename: string) => del(`/backup/delete-by-name/${encodeURIComponent(filename)}`),
@@ -117,14 +118,16 @@ export const backupApi = {
   asyncImport: (formData: FormData, opts?: RestoreOptions) => {
     const q = new URLSearchParams({ confirm: 'true' })
     if (opts?.confirmSensitive) q.set('confirm_sensitive', 'true')
-    if (opts?.password) q.set('password', opts.password)
-    return upload<{ success: boolean; task_id?: string }>(`/backup/async-import?${q.toString()}`, formData)
+    // H3：multipart 上传场景密码经 X-Backup-Password 请求头传递，不进 URL
+    const headers = opts?.password ? { 'X-Backup-Password': opts.password } : undefined
+    return upload<{ success: boolean; task_id?: string }>(`/backup/async-import?${q.toString()}`, formData, headers)
   },
   asyncRestoreByName: (filename: string, opts?: RestoreOptions) => {
     const q = new URLSearchParams({ confirm: 'true' })
     if (opts?.confirmSensitive) q.set('confirm_sensitive', 'true')
-    if (opts?.password) q.set('password', opts.password)
-    return post<{ success: boolean; task_id?: string }>(`/backup/async-restore-by-name/${encodeURIComponent(filename)}?${q.toString()}`)
+    // H3：密码经 JSON body 传递，不再进 URL（避免进入访问日志/浏览器历史）
+    const body = opts?.password ? { password: opts.password } : undefined
+    return post<{ success: boolean; task_id?: string }>(`/backup/async-restore-by-name/${encodeURIComponent(filename)}?${q.toString()}`, body)
   },
   getProgress: (taskId: string) => get(`/backup/progress/${taskId}`),
   integrityCheck: () => post<{ success: boolean } & ApiResponse>('/backup/integrity-check'),

@@ -113,13 +113,18 @@ async def trigger_full_backup(
     # 避免 worker 未消费/消费延迟期间轮询 /progress/{task_id} 返回 404 → 前端误报任务失败
     await create_progress(task_id, operation_type='full', progress_type='backup')
     password = payload.password or x_backup_password
+    # H3: 密码不进 ARQ 队列（任务参数会被序列化到 Redis 队列、对任何能读 Redis
+    # 的人可见），改写入一次性短 TTL 侧信道键，任务消费时原子取走。
+    # 写入失败继续入队：任务侧拿不到密码时按既有 fail-safe 降级为不加密。
+    if password:
+        from fastapi_app.core.backup_progress import store_task_password
+        await store_task_password(task_id, password)
     try:
         await _enqueue_task(
             'manual_full_backup_task',
             task_id=task_id,
             remark=payload.remark,
             encrypt=payload.encrypt,
-            password=password,
             tables=payload.tables,
             exclude_tables=payload.exclude_tables,
         )

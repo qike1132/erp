@@ -19,7 +19,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Header, HTTPException, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
@@ -215,7 +215,6 @@ async def export_backup(
     remark: str = '',
     format: str = 'zip',
     encrypt: bool = Query(True, description="是否启用加密"),
-    password: str | None = Query(None, description="加密密码，为空时依次使用请求头/环境变量，均未配置时不加密"),
     x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('export_backup')),
     db: AsyncSession = Depends(get_async_db),
@@ -227,14 +226,12 @@ async def export_backup(
     - remark: 备份备注
     - format: 备份格式，支持 'zip' 或 'json'
     - encrypt: 是否启用加密，默认True
-    - password: 加密密码（查询参数）
-    - x_backup_password: 加密密码（请求头）
+    - x_backup_password: 加密密码（请求头，H3：已移除 URL query 形式，避免密码进入访问日志/浏览器历史）
 
     加密密码获取优先级：
-    1. password查询参数
-    2. X-Backup-Password请求头
-    3. BACKUP_ENCRYPTION_PASSWORD环境变量
-    4. 均未配置时不加密（记录告警日志）
+    1. X-Backup-Password请求头
+    2. BACKUP_ENCRYPTION_PASSWORD环境变量
+    3. 均未配置时不加密（记录告警日志）
 
     权限：backup_create
     """
@@ -250,8 +247,9 @@ async def export_backup(
                 os.unlink(p)
 
     background_tasks.add_task(_cleanup_temp_files)
+    # H3：GET 端点密码仅走 X-Backup-Password 头/环境变量
     return await _export_backup_to_response(
-        request, db, user, remark, format, encrypt, password, x_backup_password, _register_temp_file,
+        request, db, user, remark, format, encrypt, None, x_backup_password, _register_temp_file,
     )
 
 
@@ -262,7 +260,7 @@ async def export_backup(
 async def save_backup_to_server(
     remark: str = '',
     encrypt: bool = Query(True, description="是否启用加密"),
-    password: str | None = Query(None, description="加密密码，为空时依次使用请求头/环境变量，均未配置时不加密"),
+    password: str | None = Body(None, description="加密密码（H3：经 body 传递，避免进入访问日志/浏览器历史；为空时依次使用请求头/环境变量，均未配置时不加密）"),
     x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('save_backup_to_server')),
     db: AsyncSession = Depends(get_async_db),
@@ -441,7 +439,6 @@ async def get_backup_info(
     background_tasks: BackgroundTasks,
     remark: str = '',
     encrypt: bool = Query(True, description="是否启用加密"),
-    password: str | None = Query(None, description="加密密码，为空时依次使用请求头/环境变量，均未配置时不加密"),
     x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('get_backup_info')),
     db: AsyncSession = Depends(get_async_db),
@@ -457,7 +454,7 @@ async def get_backup_info(
                 h.update(chunk)
         return h.hexdigest()
 
-    effective_encrypt, encryption_password = _resolve_encryption(encrypt, password, x_backup_password)
+    effective_encrypt, encryption_password = _resolve_encryption(encrypt, None, x_backup_password)
     try:
         backup_path, _manifest = await backup_service.create_full_backup_to_file(
             db, user, remark,
@@ -523,7 +520,6 @@ async def export_backup_chunk(
     bundle_id: str | None = Query(None, description="export-info 返回的分片会话 ID，命中缓存则直接切片，避免每片重新全量备份"),
     remark: str = '',
     encrypt: bool = Query(True, description="是否启用加密"),
-    password: str | None = Query(None, description="加密密码，为空时依次使用请求头/环境变量，均未配置时不加密"),
     x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('export_backup_chunk')),
     db: AsyncSession = Depends(get_async_db),
@@ -569,7 +565,7 @@ async def export_backup_chunk(
             logger.warning(f'分片 bundle 文件已不存在: {bundle_id}')
 
     # 回退路径（无 bundle_id / 缓存未命中）：保持旧行为，现场生成
-    effective_encrypt, encryption_password = _resolve_encryption(encrypt, password, x_backup_password)
+    effective_encrypt, encryption_password = _resolve_encryption(encrypt, None, x_backup_password)
     try:
         backup_path, _manifest = await backup_service.create_full_backup_to_file(
             db, user, remark,
@@ -626,7 +622,6 @@ async def export_backup_enhanced(
     remark: str = '',
     format: str = 'zip',
     encrypt: bool = Query(True, description="是否启用加密"),
-    password: str | None = Query(None, description="加密密码，为空时依次使用请求头/环境变量，均未配置时不加密"),
     x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('export_backup_enhanced')),
     db: AsyncSession = Depends(get_async_db),
@@ -643,6 +638,7 @@ async def export_backup_enhanced(
         return path
 
     background_tasks.add_task(lambda: [os.unlink(p) for p in temp_files if os.path.exists(p)])
+    # H3：GET 端点密码仅走 X-Backup-Password 头/环境变量
     return await _export_backup_to_response(
-        request, db, user, remark, format, encrypt, password, x_backup_password, _register_temp_file,
+        request, db, user, remark, format, encrypt, None, x_backup_password, _register_temp_file,
     )

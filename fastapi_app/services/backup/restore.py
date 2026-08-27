@@ -306,15 +306,57 @@ async def acquire_restore_lock(task_id: str) -> bool:
         return False
 
 
-async def release_restore_lock():
-    """释放恢复锁"""
+# Lua: 仅当锁 value 等于传入的 task_id 时才删除，防止误删他人持有的锁
+_RELEASE_LOCK_LUA = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    return redis.call('DEL', KEYS[1])
+end
+return 0
+"""
+
+
+async def release_restore_lock(task_id: str | None = None):
+    """释放恢复锁（B1 修复：仅当锁仍由 task_id 持有时才删除）。
+
+    task_id 为 None 时保持旧语义（无条件删除，向后兼容旧调用方）；
+    传入 task_id 时经 Lua 比对 value，避免后启动的任务误删前者仍持有的锁。
+    """
     try:
         from fastapi_app.core.backup_progress import _get_redis
         client = await _get_redis()
         if client is not None:
-            await client.delete(_RESTORE_LOCK_KEY)
+            if task_id is None:
+                await client.delete(_RESTORE_LOCK_KEY)
+            else:
+                await client.eval(_RELEASE_LOCK_LUA, 1, _RESTORE_LOCK_KEY, task_id)
     except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
         logger.warning(f'释放恢复锁失败: {e}')
+
+
+async def renew_restore_lock(task_id: str) -> bool:
+    """还原长任务续期恢复锁（B1 修复：防止大库还原超 TTL 后锁被抢占）。
+
+    仅当锁仍由该 task_id 持有时刷新 TTL，返回是否续期成功；
+    失败（锁已易主/Redis 不可用）返回 False，调用方应记录告警。
+    """
+    try:
+        from fastapi_app.core.backup_progress import _get_redis
+        client = await _get_redis()
+        if client is None:
+            return False
+        result = await client.eval(
+            """
+            if redis.call('GET', KEYS[1]) == ARGV[1] then
+                return redis.call('EXPIRE', KEYS[1], ARGV[2])
+            end
+            return 0
+            """,
+            1, _RESTORE_LOCK_KEY, task_id, str(_RESTORE_LOCK_TTL),
+        )
+        return bool(result)
+    except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
+        logger.warning(f'续期恢复锁失败: {e}')
+        return False
 
 
 async def is_restore_in_progress() -> bool:

@@ -80,22 +80,69 @@ async def run_pg_dump(output_path: Path, snapshot_id: str | None = None) -> dict
             pg_dump_args.extend(['--snapshot', snapshot_id])
             logger.info(f"使用数据库快照 {snapshot_id} 进行备份")
 
-        proc = await run_proc(pg_dump_args, env=env)
-        if proc.returncode != 0:
-            stderr_data = proc.stderr or b''
-            raise RuntimeError(f"pg_dump failed (rc={proc.returncode}): {stderr_data.decode(errors='replace')}")
-        # F6/M5: 用 Python 内置 gzip 压缩,不再依赖外部 gzip 可执行文件
-        # （Windows 上 gzip 常不在 PATH,导致 create_subprocess_exec('gzip') 抛
-        # FileNotFoundError,使 pg_dump 备份静默回退到 JSON 格式）
-        compressed = gzip.compress(proc.stdout, compresslevel=1)
-        del proc
+        # H4 流式导出：旧实现 capture_output 整体缓冲未压缩 SQL，再 gzip.compress
+        # 生成第二份全量副本（峰值内存 ≈ SQL + 压缩后副本）；现改为 stdout 分块
+        # 直接写入 gzip 文件，峰值内存 ≈ 单个分块（1MB）。
+        # F6/M5: 仍用 Python 内置 gzip，不依赖外部 gzip 可执行文件。
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_bytes(compressed)
+        stderr_chunks: list[bytes] = []
+
+        def _stream_dump_to_gzip() -> None:
+            """工作线程：pg_dump stdout 分块流式压缩落盘。
+
+            与 _proc.run_proc 一样走同步 subprocess（Windows SelectorEventLoop
+            不支持 asyncio 子进程 transport）。
+            """
+            proc_ = subprocess.Popen(  # noqa: S603 — 参数为白名单校验后的固定列表
+                pg_dump_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+            )
+
+            def _drain_err() -> None:
+                while True:
+                    chunk = proc_.stderr.read(65536)
+                    if not chunk:
+                        break
+                    stderr_chunks.append(chunk)
+
+            t_err = threading.Thread(target=_drain_err, daemon=True)
+            t_err.start()
+            try:
+                with open(output_path, 'wb') as raw_f, gzip.GzipFile(
+                    fileobj=raw_f, mode='wb', compresslevel=1,
+                ) as gz_f:
+                    while True:
+                        chunk = proc_.stdout.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        gz_f.write(chunk)
+                proc_.stdout.close()
+                proc_.wait()
+                if proc_.returncode != 0:
+                    stderr_text = b''.join(stderr_chunks).decode(errors='replace')
+                    raise RuntimeError(
+                        f"pg_dump failed (rc={proc_.returncode}): {stderr_text}"
+                    )
+            except BaseException:
+                # WARN-1 修复：写盘/gzip 异常（磁盘满、权限等）时终止 pg_dump，
+                # 否则子进程成为孤儿——stdout 管道无人排空会阻塞在 write 上，
+                # 且持续占用一个数据库连接
+                proc_.terminate()
+                try:
+                    proc_.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc_.kill()
+                    proc_.wait()
+                raise
+            finally:
+                t_err.join(timeout=30)
+                proc_.stderr.close()
+
+        await asyncio.to_thread(_stream_dump_to_gzip)
         duration = time.monotonic() - start
         return {
             'pg_version': await get_pg_version(db_host, db_port, db_user, db_password, env),
             'db_name': db_name,
-            'dump_size': len(compressed),
+            'dump_size': output_path.stat().st_size,
             'duration_seconds': round(duration, 2),
             'snapshot_id': snapshot_id,
         }
@@ -117,33 +164,47 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
         if task_id:
             await _upd_prog(task_id, 'restore_db', sub, detail)
 
-    # 分步读取和解压，添加进度报告
+    # H4 流式还原：旧实现 zf.read + gzip.decompress 在内存中同时持有压缩与解压
+    # 两份全量副本（峰值 ≈ dump.gz + dump.sql）；现打开 gzip 流，由 psql 导入
+    # 线程边解压边写 stdin，峰值内存 ≈ 单个分块（256KB）。
     await _report(0.0, '读取备份文件...')
     await asyncio.sleep(0)  # 让出控制权，确保前端能收到更新
 
-    # 获取压缩文件大小用于进度计算
     try:
-        info = zf.getinfo('database/dump.sql.gz')
-        compressed_size = info.file_size
+        total_compressed = zf.getinfo('database/dump.sql.gz').compress_size
     except KeyError:
-        compressed_size = 0
+        total_compressed = 0
 
-    # 读取压缩数据
-    await _report(0.005, f'读取压缩数据 ({compressed_size // 1024 // 1024}MB)...')
-    await asyncio.sleep(0)
-    dump_gz = zf.read('database/dump.sql.gz')
+    class _CountingReader:
+        """包装 ZIP 成员原始流，统计已消费的压缩字节数（进度分母）。
 
-    # 解压数据
-    await _report(0.01, '解压数据库备份...')
-    await asyncio.sleep(0)
-    dump_sql = gzip.decompress(dump_gz)
-    del dump_gz  # 释放压缩数据内存
+        gzip 解压流无法预知解压后总量，但已消费的压缩字节是单调递增的
+        真实进度信号（compress_size 为分母），远优于按固定 1GB 估算。
+        """
 
-    if not dump_sql or not dump_sql.strip():
+        def __init__(self, raw):
+            self._raw = raw
+            self.consumed = 0
+
+        def read(self, size: int = -1) -> bytes:
+            data = self._raw.read(size)
+            self.consumed += len(data)
+            return data
+
+        def close(self) -> None:
+            self._raw.close()
+
+    try:
+        counter = _CountingReader(zf.open('database/dump.sql.gz'))
+        gz_stream = gzip.GzipFile(fileobj=counter)
+        first_chunk = gz_stream.read(256 * 1024)
+    except (OSError, EOFError, KeyError) as e:
+        return {'status': 'error', 'error': f'数据库备份文件读取失败: {e}'}
+    if not first_chunk:
+        gz_stream.close()
         return {'status': 'error', 'error': '数据库备份文件为空，无法恢复'}
 
-    sql_size_mb = len(dump_sql) // 1024 // 1024
-    await _report(0.015, f'解压完成 ({sql_size_mb}MB)，准备恢复...')  # sql-safe: escape_like/绑定参数/常量片段
+    await _report(0.015, '解压并准备恢复...')  # sql-safe: escape_like/绑定参数/常量片段
     await asyncio.sleep(0)
 
     db_host = os.getenv('DB_HOST', 'localhost')
@@ -253,8 +314,7 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
             '--single-transaction',
             '-v', 'ON_ERROR_STOP=1',
         ]
-        total_size = len(dump_sql)
-        state: dict = {'written': 0}
+        state: dict = {'written': 0, 'stream_done': False}
         result: dict = {}
 
         def _drain(stream, sink: list) -> None:
@@ -265,7 +325,7 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
                 sink.append(chunk)
 
         def _psql_import() -> None:
-            """工作线程：Popen 分块写 stdin，排空 stdout/stderr 防管道死锁。"""
+            """工作线程：边解压边分块写 stdin，排空 stdout/stderr 防管道死锁。"""
             try:
                 proc_ = subprocess.Popen(  # noqa: S603 — 参数为白名单校验后的固定列表
                     psql_args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -284,15 +344,24 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
             t_out.start()
             t_err.start()
             try:
-                view = memoryview(dump_sql)
-                written = 0
-                step = 256 * 1024
-                while written < total_size:
-                    end = min(written + step, total_size)
-                    proc_.stdin.write(view[written:end])
-                    written = end
-                    state['written'] = written
-                proc_.stdin.close()
+                try:
+                    proc_.stdin.write(first_chunk)
+                    state['written'] += len(first_chunk)
+                    while True:
+                        chunk = gz_stream.read(256 * 1024)
+                        if not chunk:
+                            break
+                        proc_.stdin.write(chunk)
+                        state['written'] += len(chunk)
+                except BrokenPipeError:
+                    pass  # psql 提前退出（如 SQL 致命错误），结果由 rc/stderr 判定
+                except (OSError, EOFError) as e:
+                    result['stream_error'] = f'解压备份数据流失败: {e}'
+                state['stream_done'] = True
+                try:
+                    proc_.stdin.close()
+                except BrokenPipeError:
+                    pass
                 try:
                     proc_.wait(timeout=600)
                     result['rc'] = proc_.returncode
@@ -307,21 +376,33 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
 
         worker = threading.Thread(target=_psql_import, daemon=True)
         worker.start()
-        while worker.is_alive():
-            await asyncio.sleep(2)
-            elapsed = int(time_mod.monotonic() - psql_start_time)
-            if total_size and state['written'] < total_size:
-                pct = state['written'] * 100 // total_size
-                await _report(0.20 + 0.30 * (state['written'] / total_size),
-                              f'写入数据 {pct}% ({elapsed}s)')
-            else:
-                await _report(0.70, f'等待 psql 完成... ({elapsed}s)')
-        worker.join()
+        try:
+            while worker.is_alive():
+                await asyncio.sleep(2)
+                elapsed = int(time_mod.monotonic() - psql_start_time)
+                written_mb = state['written'] // 1024 // 1024
+                if not state['stream_done']:
+                    if total_compressed:
+                        # WARN-2 修复：已消费压缩字节 / compress_size 为真实进度
+                        frac = min(1.0, counter.consumed / total_compressed)
+                        await _report(0.20 + 0.30 * frac,
+                                      f'写入数据 {int(frac * 100)}%（已解压 {written_mb}MB, {elapsed}s）')
+                    else:
+                        # 无压缩大小信息时退化为诚实的 MB 计数（不再伪造百分比）
+                        await _report(0.20 + 0.30 * min(1.0, written_mb / 1024),
+                                      f'写入数据 {written_mb}MB ({elapsed}s)')
+                else:
+                    await _report(0.70, f'等待 psql 完成... ({elapsed}s)')
+            worker.join()
+        finally:
+            gz_stream.close()
 
         if result.get('no_psql'):
             return {'status': 'error', 'error': 'psql 命令未找到，请确保 PostgreSQL 客户端工具已安装'}
         if 'spawn_error' in result:
             return {'status': 'error', 'error': f"数据库恢复失败: {result['spawn_error']}"}
+        if 'stream_error' in result:
+            return {'status': 'error', 'error': result['stream_error']}
         if result.get('timeout'):
             return {'status': 'error', 'error': '数据库恢复超时（超过 600 秒），进程已终止'}
 

@@ -69,6 +69,9 @@ export function useBackupTask(
   let finished = false
   let startTime: number | null = null
   let staleWarned = false
+  // B6 修复：轮询代数——切换任务后旧任务在途响应一律丢弃，防止旧任务
+  // 终态误停新任务轮询并触发错误的 onCompleted/onFailed 回调
+  let generation = 0
 
   function stop() {
     if (timer !== null) {
@@ -77,11 +80,13 @@ export function useBackupTask(
     }
   }
 
-  async function pollOnce(taskId: string) {
+  async function pollOnce(taskId: string, gen: number) {
     if (fetching || finished) return
     fetching = true
     try {
       const res = (await backupApi.getProgress(taskId)) as BackupTaskProgress
+      // 响应返回时任务已切换（或已重置），丢弃过期响应
+      if (gen !== generation) return
       notFoundCount = 0
       const isPendingOrInit =
         (res.status === 'pending' || res.status === undefined) &&
@@ -120,6 +125,7 @@ export function useBackupTask(
         }
       }
     } catch (e) {
+      if (gen !== generation) return
       const status = (e as { response?: { status?: number } })?.response?.status
       if (status === 404) {
         notFoundCount += 1
@@ -142,6 +148,8 @@ export function useBackupTask(
       stop()
       finished = false
       notFoundCount = 0
+      generation += 1
+      const gen = generation
       const isEnabled = typeof enabled === 'function' ? enabled() : enabled.value
       if (!taskId || !isEnabled) {
         state.value = { ...INITIAL }
@@ -152,8 +160,8 @@ export function useBackupTask(
       startTime = Date.now()
       staleWarned = false
       state.value = { ...INITIAL, taskId, status: 'pending', phaseLabel: '等待任务启动…' }
-      void pollOnce(taskId)
-      timer = setInterval(() => void pollOnce(taskId), INTERVAL_MS)
+      void pollOnce(taskId, gen)
+      timer = setInterval(() => void pollOnce(taskId, gen), INTERVAL_MS)
     },
     { immediate: true },
   )

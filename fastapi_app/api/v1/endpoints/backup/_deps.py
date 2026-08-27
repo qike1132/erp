@@ -182,8 +182,10 @@ def _encrypt_backup_data(zip_bytes: bytes, password: str) -> bytes:  # log-conte
         meta_len = len(meta_json).to_bytes(4, 'big')
         return meta_len + meta_json + encrypted_bytes
     except ImportError:
-        logger.error('加密模块不可用，备份数据将不加密')
-        return zip_bytes
+        # H2 修复：fail-closed——旧实现静默返回明文且文件名仍标 .enc，
+        # 整库备份以明文落盘/外发却按加密件保管，属敏感数据泄露风险
+        logger.error('加密模块不可用，拒绝导出（fail-closed）')
+        raise HTTPException(status_code=503, detail='加密模块不可用，无法生成加密备份，请联系管理员') from None
     except (ValueError, RuntimeError, OSError) as e:
         logger.exception('备份加密失败')
         raise HTTPException(status_code=500, detail='备份加密失败，请查看服务器日志') from e
@@ -208,8 +210,10 @@ def _decrypt_backup_data(encrypted_bytes: bytes, password: str) -> bytes:  # log
         encrypted_data = encrypted_bytes[4 + meta_len:]
         return decrypt_backup(encrypted_data, password)
     except ImportError:
-        logger.error('加密模块不可用，假设数据未加密')
-        return encrypted_bytes
+        # H2 修复：fail-closed——解密模块不可用时无法确认数据形态，
+        # 返回原始字节会把密文当明文喂给下游解析器产生误导性错误
+        logger.error('加密模块不可用，拒绝解密（fail-closed）')
+        raise HTTPException(status_code=503, detail='解密模块不可用，无法处理该备份，请联系管理员') from None
     except BackupFileError as e:
         raise HTTPException(status_code=400, detail=f'解密失败: {e!s}') from e
     except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应

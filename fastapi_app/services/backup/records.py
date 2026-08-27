@@ -163,7 +163,16 @@ def list_backup_files() -> list[dict]:  # log-context: internal helper 无请求
         for f in sorted(BACKUP_DIR.iterdir(), reverse=True):
             if not _is_backup_file(f):
                 continue
-            entry: dict = {'filename': f.name, 'size': f.stat().st_size}
+            # H1 修复：统一补 name/mtime——validation.py 4 处调用点读取
+            # x.get('name')/x.get('mtime')，旧实现缺这两个键导致健康检查
+            # "最近备份时间"恒为 1970、完整性抽样全部误报、/stats 数据全错
+            st = f.stat()
+            entry: dict = {
+                'filename': f.name,
+                'name': f.name,
+                'size': st.st_size,
+                'mtime': st.st_mtime,
+            }
             if f.name.endswith('.zip'):
                 try:
                     with zipfile.ZipFile(f, 'r') as zf:

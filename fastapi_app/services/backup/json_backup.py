@@ -252,6 +252,11 @@ async def _retry_batch_rowwise(db, qtname, batch, batch_start, columns, type_map
             deserialized = deserialize_value(raw_val, col_type) if col_type else raw_val
             params[f'{c}__row{idx}'] = deserialized
         update_cols = [c for c in valid_cols if c not in pk_cols]
+        # B3 修复：每行包 savepoint——行级失败只回滚该行，外层已成功批次
+        # 不受影响。旧实现 db.rollback() 会回滚整个外层事务，把此前所有
+        # 批次已插入的行一并清除（重复导入主键冲突场景高频触发），最终
+        # "恢复完成 N 条"与库中实际行数严重不符（虚假成功）。
+        row_nested = await db.begin_nested()
         try:
             if pk_cols and update_cols:
                 update_str = ', '.join(f'"{c}" = EXCLUDED."{c}"' for c in update_cols)
@@ -262,8 +267,9 @@ async def _retry_batch_rowwise(db, qtname, batch, batch_start, columns, type_map
                 await db.execute(text(  # batch-loop: 逐表备份/恢复,无法批量
                     f'INSERT INTO {qtname} ({col_str}) VALUES ({val_str}) ON CONFLICT DO NOTHING'  # nosec B608 — qtname 经 quote_table 白名单校验
                 ), params)
+            await row_nested.commit()  # manual-tx: savepoint 嵌套事务管理
         except IntegrityError as e:
-            await db.rollback()  # manual-tx: 单行冲突,须先回滚才能继续
+            await row_nested.rollback()  # manual-tx: 只回滚本行 savepoint
             if _is_pk_conflict(e):
                 skipped.append(row)
                 continue
@@ -271,7 +277,7 @@ async def _retry_batch_rowwise(db, qtname, batch, batch_start, columns, type_map
             fatal_errors[idx] = str(e.__cause__ or e.orig or e)[:300]
             continue
         except (SQLAlchemyError, ValueError, TypeError) as e:
-            await db.rollback()  # manual-tx: 单行不可恢复错误
+            await row_nested.rollback()  # manual-tx: 只回滚本行 savepoint
             fatal_errors[idx] = str(e)[:300]
             continue
     if fatal_errors:

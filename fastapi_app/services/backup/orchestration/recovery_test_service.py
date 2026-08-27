@@ -83,6 +83,8 @@ class DisasterRecoveryTestService:
         test_start_time = datetime.now()
         test_id = test_start_time.strftime('%Y%m%d_%H%M%S')
 
+        test_env: dict[str, Any] | None = None
+        cleanup_result: dict[str, Any] | None = None
         try:
             # 1. 准备测试环境
             test_env = await self._prepare_test_environment(test_id)
@@ -109,13 +111,10 @@ class DisasterRecoveryTestService:
                 test_id, test_env, selected_backup
             )
 
-            # 5. 清理测试环境
-            cleanup_result = await self._cleanup_test_environment(test_env)
-
             # 6. 生成测试报告
             test_report = await self._generate_test_report(
                 test_id, test_start_time, selected_backup,
-                recovery_result, validation_result, cleanup_result
+                recovery_result, validation_result, cleanup_result or {'cleaned': False, 'message': '清理在 finally 中执行'}
             )
 
             # 7. 保存测试结果
@@ -150,6 +149,14 @@ class DisasterRecoveryTestService:
                 'end_time': datetime.now().isoformat(),
                 'duration_seconds': (datetime.now() - test_start_time).total_seconds()
             }
+        finally:
+            # B5 修复：无论成功/失败/异常都必须清理测试环境，否则每次演练
+            # 都会在 PostgreSQL 泄漏一个 erp_backup_test_* 数据库及目录
+            if test_env is not None:
+                try:
+                    cleanup_result = await self._cleanup_test_environment(test_env)
+                except Exception as cleanup_err:  # broad-except: 清理失败不能掩盖主流程结果
+                    logger.error(f"清理测试环境异常（{test_id}）: {cleanup_err}")
 
     async def _prepare_test_environment(self, test_id: str) -> dict[str, Any]:
         """准备测试环境"""
@@ -459,6 +466,14 @@ class DisasterRecoveryTestService:
                     # F5: SQL 物理备份走 psql 真实导入（与生产还原同参数）
                     import_result = await self._psql_import(test_env, data_path_sql_gz)
                     import_result['format'] = 'sql'
+                    if not import_result.get('success'):
+                        # 导入失败即整体失败，跳过后续验证（测试库无有效数据）
+                        return {
+                            'success': False,
+                            'test_id': test_id,
+                            'error': f"SQL 导入失败: {import_result.get('error', 'unknown')}",
+                            'recovery_duration_seconds': round((datetime.now() - recovery_start_time).total_seconds(), 2)
+                        }
                 else:
                     from sqlalchemy.ext.asyncio import AsyncSession
                     async with test_engine.begin() as conn:
@@ -497,6 +512,47 @@ class DisasterRecoveryTestService:
                 'error': str(e),
                 'recovery_duration_seconds': round((datetime.now() - recovery_start_time).total_seconds(), 2)
             }
+
+    async def _psql_import(self, test_env: dict[str, Any], sql_gz_path: Path) -> dict[str, Any]:
+        """把 dump.sql.gz 通过 psql 导入测试数据库（B5 修复）。
+
+        与生产还原同参数：--single-transaction + ON_ERROR_STOP=1。
+        返回 {'success', 'imported_rows', 'error'}，异常转为失败结果而非向上抛。
+        """
+        import gzip as gzip_mod
+        import subprocess
+
+        from fastapi_app.services.backup.dump import resolve_pg_tool
+
+        try:
+            with gzip_mod.open(sql_gz_path, 'rb') as f:
+                dump_sql = f.read()
+
+            env = os.environ.copy()
+            env['PGPASSWORD'] = test_env['test_db_password']
+            psql_args = [
+                resolve_pg_tool('psql'),
+                '-h', test_env['test_db_host'],
+                '-p', str(test_env['test_db_port']),
+                '-U', test_env['test_db_user'],
+                '-d', test_env['test_db_name'],
+                '--single-transaction',
+                '-v', 'ON_ERROR_STOP=1',
+            ]
+            proc = subprocess.run(  # noqa: S603 — 参数为固定白名单列表
+                psql_args, input=dump_sql,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                env=env, timeout=600,
+            )
+            if proc.returncode != 0:
+                stderr = (proc.stderr or b'').decode(errors='replace')[:500]
+                logger.error(f"psql 演练导入失败 (rc={proc.returncode}): {stderr}")
+                return {'success': False, 'imported_rows': 0, 'error': f'psql rc={proc.returncode}: {stderr}'}
+            # psql 不返回行计数，用语句数近似（-q 模式无逐行统计）
+            return {'success': True, 'imported_rows': -1, 'details': {'note': 'sql 格式不统计行数'}}
+        except (TimeoutError, OSError, ValueError) as e:
+            logger.error(f"psql 演练导入异常: {e}")
+            return {'success': False, 'imported_rows': 0, 'error': str(e)}
 
     async def _create_test_schema(self, conn, backup_data: dict[str, Any]) -> None:
         """按 ORM 元数据在测试库创建真实业务 schema（F5：替换原 dummy 表 stub）。"""
@@ -644,8 +700,9 @@ class DisasterRecoveryTestService:
     async def _validate_data_integrity(self, conn, backup_info: dict[str, Any]) -> dict[str, Any]:
         """验证数据完整性"""
         try:
-            # 检查关键表的数据量
-            tables = backup_info.get('tables', {})
+            # B5 修复：tables 只存在于 manifest（_get_backup_info 从不设置顶层
+            # 'tables' 键），旧实现恒取空 dict → 0 表 → 0% 通过率 → 演练恒失败
+            tables = backup_info.get('tables') or backup_info.get('manifest', {}).get('tables', {})
             validation_results = {}
 
             for table_name, table_data in tables.items():
