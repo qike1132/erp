@@ -21,6 +21,16 @@
             v-if="canManage"
             type="button"
             class="pdp-head-btn"
+            title="基于当前部位布料信息快照创建新版本"
+            @click="$emit('create-version')"
+          >
+            <FontAwesomeIcon icon="layer-group" aria-hidden="true" />
+            创建新版本
+          </button>
+          <button
+            v-if="canManage"
+            type="button"
+            class="pdp-head-btn"
             @click="$emit('add-part')"
           >
             录入信息
@@ -68,9 +78,7 @@ import type { PartEditData } from '../composables/usePartInlineEdit'
 defineProps<{
   project: ProjectDetailResponse | null
   partsByVersion: PartDetail[]
-  versionList: string[]
   finalVersion: string
-  versionLoading: boolean
   partLoading: boolean
   canManage: boolean
   canPrint: boolean
@@ -83,7 +91,6 @@ defineProps<{
 defineEmits<{
   'set-final-version': [versionNo: string]
   'copy-version': [part: PartDetail]
-  'edit-version': [part: PartDetail]
   'delete-version': [part: PartDetail]
   'start-edit': [part: PartDetail]
   'cancel-edit': []
@@ -92,6 +99,7 @@ defineEmits<{
   'add-role': [roleName: string]
   'remove-role': [role: RoleBrief]
   'add-part': []
+  'create-version': []
   'print': []
 }>()
 </script>

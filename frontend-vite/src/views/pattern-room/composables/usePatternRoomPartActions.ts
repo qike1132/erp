@@ -73,6 +73,9 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
 
   async function onPartSubmitBatch(data: BatchPartCreateRequest) {
     if (!selectedProjectId.value) return
+    // 提交守卫：防止请求进行中重复提交（PartFormDialog 的提交按钮依赖该状态禁用）
+    if (partHook.submitting.value) return
+    partHook.submitting.value = true
     try {
       const res = await patternRoomApi.batchCreateParts(
         selectedProjectId.value,
@@ -97,6 +100,8 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
     } catch (e) {
       console.error('[PatternRoomView] 批量创建部位失败:', e)
       toast.error('批量创建部位失败')
+    } finally {
+      partHook.submitting.value = false
     }
   }
 
@@ -226,6 +231,8 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
           supplier_name: data.supplier_name || '',
           fabric_name: data.fabric_name || '',
           fabric_color_no: data.fabric_color_no || '',
+          // 回写乐观锁新版本号，避免第二次编辑携带旧 version 触发 409
+          version: res.version ?? (part.version + 1),
         })
       } else {
         toast.error(res.message || '保存失败')

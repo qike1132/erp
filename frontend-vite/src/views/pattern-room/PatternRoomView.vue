@@ -47,9 +47,7 @@
             <ProjectDetailPanel
               :project="projectHook.currentProject.value"
               :parts-by-version="partHook.partsByVersion.value"
-              :version-list="partHook.versionList.value"
               :final-version="partHook.finalVersion.value"
-              :version-loading="versionHook.loading.value"
               :part-loading="partHook.loading.value"
               :can-manage="canManage"
               :can-print="canPrint"
@@ -67,6 +65,7 @@
               @add-role="onAddRole"
               @remove-role="onRemoveRole"
               @add-part="openCreatePartDialog"
+              @create-version="openCreateVersionDialog"
               @print="handlePrint"
             />
           </template>
@@ -258,6 +257,7 @@ const {
   editingPartId,
   editForm,
   openCreatePartDialog,
+  openCreateVersionDialog,
   onPartSubmitBatch,
   onSetFinalVersion,
   onCopyPartVersion,

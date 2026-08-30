@@ -37,6 +37,7 @@
         v-model="editForm.supplier_name"
         class="pvt-inline-input"
         placeholder="供应商"
+        maxlength="200"
       />
       <template v-else>{{ part.supplier_name || '-' }}</template>
     </td>
@@ -46,6 +47,7 @@
         v-model="editForm.fabric_name"
         class="pvt-inline-input"
         placeholder="布料名称"
+        maxlength="200"
       />
       <template v-else>{{ part.fabric_name || '-' }}</template>
     </td>
@@ -55,6 +57,7 @@
         v-model="editForm.fabric_color_no"
         class="pvt-inline-input"
         placeholder="色号"
+        maxlength="50"
       />
       <template v-else>{{ part.fabric_color_no || '-' }}</template>
     </td>

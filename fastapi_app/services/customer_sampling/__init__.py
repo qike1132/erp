@@ -43,7 +43,9 @@ from .roles import (
 from .upload import (
     _batch_get_image_urls,
     _get_product_image_urls,
+    _register_project_image_cleanup,
     upload_project_image,
+    validate_project_image,
 )
 from .version_diff import (
     _SNAPSHOT_FIELDS,
@@ -71,6 +73,7 @@ __all__ = [
     '_next_version',
     '_normalize_value',
     '_project_to_summary',
+    '_register_project_image_cleanup',
     '_resolve_pattern_maker_name',
     '_resolve_supplier_name',
     '_version_num',
@@ -99,4 +102,5 @@ __all__ = [
     'update_project_status',
     'update_role',
     'upload_project_image',
+    'validate_project_image',
 ]

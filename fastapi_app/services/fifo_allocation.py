@@ -107,6 +107,8 @@ async def _build_fifo_plan_id_to_customer(db: AsyncSession, customer_name_map: d
             select(PurchasePlan.id, PurchasePlan.customer_name)
             .where(
                 PurchasePlan.customer_name.in_(customers),
+                # 字符串比较 "YYYY-MM" >= "YYYY-MM" 依赖字典序，
+                # 在固定位数（年4位+月2位）格式下等价于日期比较，安全可用
                 PurchasePlan.plan_month >= f"{earliest_plan_date.year - 1}-{earliest_plan_date.month:02d}",
             )
         )

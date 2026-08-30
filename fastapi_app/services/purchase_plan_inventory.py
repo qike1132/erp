@@ -10,6 +10,7 @@
 从 purchase_plan_crud.py 拆分而来，保持函数签名不变。
 """
 import asyncio
+import json
 import logging
 
 from sqlalchemy import select
@@ -34,7 +35,7 @@ async def _get_inventory_map(db: AsyncSession) -> dict:
     """
     cached = await safe_get(f'{INVENTORY_CACHE_PREFIX}:map', context='库存映射缓存')  # sql-safe: escape_like/绑定参数/常量片段
     if cached is not None:
-        return {tuple(k.split('||')): v for k, v in cached.items()}
+        return {tuple(json.loads(k)): v for k, v in cached.items()}
     try:
         async with asyncio.timeout(8):
             from fastapi_app.services import stock_service
@@ -46,7 +47,7 @@ async def _get_inventory_map(db: AsyncSession) -> dict:
     except (ValueError, TypeError, OSError) as e:
         logger.warning(f'获取库存数据失败: {e}')
         return {}
-    cacheable = {f'{k[0]}||{k[1]}': v for k, v in mapping.items()}
+    cacheable = {json.dumps(k): v for k, v in mapping.items()}
     await safe_set(f'{INVENTORY_CACHE_PREFIX}:map', cacheable, timeout=INVENTORY_CACHE_TTL, context='库存映射缓存')  # sql-safe: escape_like/绑定参数/常量片段
     return mapping
 

@@ -121,6 +121,7 @@ function closeDialog() {
               class="batch-part-input"
               placeholder="如 身体，头部"
               type="text"
+              maxlength="100"
             />
           </div>
 
@@ -130,6 +131,7 @@ function closeDialog() {
               class="batch-part-input"
               placeholder="供应商"
               type="text"
+              maxlength="100"
             />
           </div>
 
@@ -139,6 +141,7 @@ function closeDialog() {
               class="batch-part-input"
               placeholder="布料名称"
               type="text"
+              maxlength="200"
             />
           </div>
 
@@ -148,6 +151,7 @@ function closeDialog() {
               class="batch-part-input"
               placeholder="色号"
               type="text"
+              maxlength="50"
             />
           </div>
 
@@ -176,6 +180,7 @@ function closeDialog() {
         <UiButton variant="ghost" @click="closeDialog">取消</UiButton>
         <UiButton
           variant="primary"
+          :loading="submitting"
           :disabled="!canSubmit"
           @click="handleSubmit"
         >

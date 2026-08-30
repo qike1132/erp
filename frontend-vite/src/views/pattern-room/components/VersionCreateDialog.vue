@@ -15,6 +15,7 @@
           v-model="reason"
           class="vc-textarea"
           rows="3"
+          maxlength="500"
           placeholder="请描述本次版本变更的原因..."
         />
       </div>

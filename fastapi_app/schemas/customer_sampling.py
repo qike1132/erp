@@ -13,17 +13,28 @@ from pydantic import BaseModel, ConfigDict, Field
 
 ChangeType = Literal['add', 'modify', 'delete']
 
+# 版本号格式（T1/T2/.../T999）
+_VERSION_NO_PATTERN = r'^T\d{1,3}$'
+
+# 单价上限（DB 列 Numeric(12, 2)，超出会触发数据库异常返回 500）
+_UNIT_PRICE_MAX = 9999999999.99
+
 
 # ==================== 通用响应 ====================
 
 class ActionResponse(BaseModel):
-    """操作响应（创建/更新/删除）"""
+    """操作响应（创建/更新/删除）
+
+    version 字段：带乐观锁的更新操作（部位/角色/项目）返回更新后的新版本号，
+    供前端局部回写，避免第二次编辑携带旧 version 触发 409。
+    """
     success: bool = True
     message: str = '操作成功'
     id: int | None = None
     sequence_no: str | None = None
     version_id: int | None = None
     version_no: str | None = None
+    version: int | None = None
     file_id: int | None = None
     url: str | None = None
     thumbnail_url: str | None = None
@@ -101,7 +112,10 @@ class RoleCreateRequest(BaseModel):
 class RoleUpdateRequest(BaseModel):
     """编辑角色请求（role_name 可改，is_default 不可改）"""
     role_name: str | None = Field(None, min_length=1, max_length=100, description='角色名称')
-    current_version: str | None = Field(None, max_length=8, description='当前最终版本 T1/T2/T3...')
+    current_version: str | None = Field(
+        None, max_length=8, pattern=_VERSION_NO_PATTERN,
+        description='当前最终版本 T1/T2/T3...',
+    )
     version: int = Field(..., description='乐观锁版本号')
 
 
@@ -303,12 +317,17 @@ class ProjectUpdateRequest(BaseModel):
 
     序列号与历史版本快照不可修改。
     version 为乐观锁版本号，必填。
+    clear_image=True 时清除产品图片（None 语义为"不修改"，无法表达清空）。
     """
     product_name: str | None = Field(None, min_length=1, max_length=200)
     pattern_maker_id: int | None = None
     remark: str | None = Field(None, max_length=2000)
     product_image_file_id: int | None = None
-    current_version: str | None = Field(None, max_length=8, description='当前版本/最终版本 T1/T2/T3...')
+    clear_image: bool = Field(False, description='清除产品图片（默认 False）')
+    current_version: str | None = Field(
+        None, max_length=8, pattern=_VERSION_NO_PATTERN,
+        description='当前版本/最终版本 T1/T2/T3...',
+    )
     version: int = Field(..., description='乐观锁版本号')
 
 
@@ -322,7 +341,7 @@ class PartCreateRequest(BaseModel):
     supplier_id: int | None = None
     contact_person: str | None = Field(None, max_length=100, description='联系人')
     contact_phone: str | None = Field(None, max_length=50, description='联系电话')
-    unit_price: float | None = Field(None, ge=0, description='单价')
+    unit_price: float | None = Field(None, ge=0, le=_UNIT_PRICE_MAX, description='单价')
     delivery_days: int | None = Field(None, ge=0, description='交期(天)')
     remark: str | None = Field(None, max_length=2000, description='备注')
 
@@ -341,7 +360,7 @@ class PartUpdateRequest(BaseModel):
     supplier_name: str | None = Field(None, max_length=200, description='供应商名称(文本)')
     contact_person: str | None = Field(None, max_length=100)
     contact_phone: str | None = Field(None, max_length=50)
-    unit_price: float | None = Field(None, ge=0)
+    unit_price: float | None = Field(None, ge=0, le=_UNIT_PRICE_MAX)
     delivery_days: int | None = Field(None, ge=0)
     remark: str | None = Field(None, max_length=2000)
     version: int = Field(..., description='乐观锁版本号')
@@ -359,7 +378,7 @@ class BatchPartItem(BaseModel):
     supplier_name: str | None = Field(None, max_length=100, description='供应商名称（手动输入）')
     fabric_name: str | None = Field(None, max_length=200, description='布料名称')
     fabric_color_no: str | None = Field(None, max_length=50, description='色号')
-    version_no: str = Field('T1', max_length=8, description='版本号')
+    version_no: str = Field('T1', max_length=8, pattern=_VERSION_NO_PATTERN, description='版本号')
 
 
 class BatchPartCreateRequest(BaseModel):

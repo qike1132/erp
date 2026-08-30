@@ -3,7 +3,7 @@
  * 避免 window.open 弹窗被拦截，且无需离开当前页面。
  */
 
-function escapeHtml(str: string): string {
+export function escapeHtml(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 

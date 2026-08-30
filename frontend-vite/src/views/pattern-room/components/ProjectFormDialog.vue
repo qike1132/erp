@@ -13,6 +13,7 @@
             v-model="form.product_name"
             class="pjf-input"
             placeholder="请输入产品名称"
+            maxlength="200"
           />
         </div>
 
@@ -29,7 +30,7 @@
 
         <div class="pjf-field pjf-full">
           <label class="pjf-label">备注</label>
-          <textarea v-model="form.remark" class="pjf-textarea" rows="3" placeholder="项目备注..." aria-label="项目备注..." />
+          <textarea v-model="form.remark" class="pjf-textarea" rows="3" maxlength="2000" placeholder="项目备注..." aria-label="项目备注..." />
         </div>
 
         <div class="pjf-field pjf-full">

@@ -591,6 +591,83 @@ class TestServiceIntegration:
         assert result_all['total_projects'] == 2
         assert len(result_all['groups']) == 1
 
+    async def test_grouped_list_pagination_over_groups(self, cs_db):
+        """分组查询：分页按"分组"而非项目，同一版师的项目不跨页拆分"""
+        maker1 = await _create_pattern_maker(cs_db, '页内版师甲')
+        maker2 = await _create_pattern_maker(cs_db, '页内版师乙')
+        # 版师甲 3 个项目 + 版师乙 2 个项目 + 未分类 1 个 → 3 个分组
+        await create_project(cs_db, product_name='甲-1', pattern_maker_id=maker1.id)
+        await create_project(cs_db, product_name='甲-2', pattern_maker_id=maker1.id)
+        await create_project(cs_db, product_name='甲-3', pattern_maker_id=maker1.id)
+        await create_project(cs_db, product_name='乙-1', pattern_maker_id=maker2.id)
+        await create_project(cs_db, product_name='乙-2', pattern_maker_id=maker2.id)
+        await create_project(cs_db, product_name='未分类项目')
+        await cs_db.flush()
+
+        # 每页 2 个分组（远小于按项目分页时的数量），重点验证分组完整性
+        result = await get_grouped_list(cs_db, page=1, per_page=2)
+        assert result['total_projects'] == 6
+        assert result['total'] == 3  # 分组数（分页单位）
+        assert result['pages'] == 2
+        assert len(result['groups']) == 2
+
+        # 各分组内的项目保持完整，页面之间不出现同一分组被拆散
+        page1_ids = {p['id'] for g in result['groups'] for p in g['projects']}
+        page1_counts = {g['pattern_maker_name']: g['project_count'] for g in result['groups']}
+        assert len(page1_ids) == sum(page1_counts.values())
+
+        result2 = await get_grouped_list(cs_db, page=2, per_page=2)
+        assert len(result2['groups']) == 1
+        page2_ids = {p['id'] for g in result2['groups'] for p in g['projects']}
+        # 两页并集 = 全部项目（无重复、无遗漏）
+        assert len(page1_ids | page2_ids) == 6
+        assert len(page1_ids & page2_ids) == 0
+
+    async def test_grouped_list_unclassified_last(self, cs_db):
+        """分组查询："未分类"分组恒在最后，即使其项目更新最晚"""
+        from datetime import UTC, datetime, timedelta
+
+        from fastapi_app.shared_models import CustomerSamplingProject
+
+        maker = await _create_pattern_maker(cs_db, '有版师组')
+        id_maker = (await create_project(cs_db, product_name='版师项目', pattern_maker_id=maker.id))['id']
+        id_unclassified = (await create_project(cs_db, product_name='未分类-最新更新'))['id']
+        # 显式让"未分类"项目更新最晚，验证其最后位置不依赖更新时间
+        proj_maker = await cs_db.get(CustomerSamplingProject, id_maker)
+        proj_unclassified = await cs_db.get(CustomerSamplingProject, id_unclassified)
+        now = datetime.now(UTC)
+        proj_unclassified.updated_at = now
+        proj_maker.updated_at = now - timedelta(minutes=10)
+        await cs_db.flush()
+
+        result = await get_grouped_list(cs_db)
+        names = [g['pattern_maker_name'] for g in result['groups']]
+        assert names == ['有版师组', '未分类']  # "未分类"始终为最后一个分组
+
+    async def test_grouped_list_truncation_warning(self, cs_db, monkeypatch, caplog):
+        """分组查询：命中拉取上限时截断并告警，总数统计仍为真实全量"""
+        import logging
+
+        import fastapi_app.services.customer_sampling.grouping as grouping_mod
+
+        maker = await _create_pattern_maker(cs_db, '大组版师')
+        for i in range(5):
+            await create_project(cs_db, product_name=f'大组-{i}', pattern_maker_id=maker.id)
+        # "未分类"更新最晚排首位，截断后必然保留，用于验证分组完整性
+        await create_project(cs_db, product_name='未分类项目')
+        await cs_db.flush()
+
+        monkeypatch.setattr(grouping_mod, '_GROUPED_LIST_MAX_PROJECTS', 3)
+        with caplog.at_level(logging.WARNING, logger='fastapi_app.services.customer_sampling.grouping'):
+            result = await get_grouped_list(cs_db)
+
+        # 总数统计为真实全量（前端据此展示统计信息），不受截断影响
+        assert result['total_projects'] == 6
+        counts = {g['pattern_maker_name']: g['project_count'] for g in result['groups']}
+        assert counts['未分类'] == 1  # 完整分组不被截断拆散
+        assert counts['大组版师'] == 2  # 2 条来自截断加载（上限 3 条扣掉未分类 1 条）
+        assert any('truncated' in r.message for r in caplog.records)
+
     async def test_project_create_auto_t1(self, cs_db):
         """创建项目：自动生成序列号 + T1 基线版本"""
         result = await create_project(cs_db, product_name='T1基线测试')

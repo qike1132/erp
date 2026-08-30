@@ -31,53 +31,10 @@ export default defineConfig(({ mode }) => {
             }),
             VitePWA({
                 registerType: 'autoUpdate',
+                // 完全禁用 PWA：ERP 系统无需离线缓存，Service Worker 会让旧资源无法更新
+                disable: true,
                 workbox: {
                     globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
-                    runtimeCaching: [
-                        {
-                            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
-                            handler: 'CacheFirst',
-                            options: {
-                                cacheName: 'google-fonts-cache',
-                                expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 365 },
-                                cacheableResponse: { statuses: [0, 200] },
-                            },
-                        },
-                        {
-                            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
-                            handler: 'CacheFirst',
-                            options: {
-                                cacheName: 'gstatic-fonts-cache',
-                                expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 365 },
-                                cacheableResponse: { statuses: [0, 200] },
-                            },
-                        },
-                        {
-                            urlPattern: /\/api\/v1\/(dashboard|products|stock|report|customer)\/.*/i,
-                            method: 'GET',
-                            handler: 'StaleWhileRevalidate',
-                            options: {
-                                cacheName: 'api-read-cache',
-                                expiration: { maxEntries: 200, maxAgeSeconds: 60 * 2 },
-                                cacheableResponse: { statuses: [0, 200] },
-                            },
-                        },
-                        {
-                            urlPattern: /\/api\/v1\/(order|stock|batch|purchase)\/.*/i,
-                            handler: 'NetworkOnly',
-                        },
-                        {
-                            urlPattern: /\/api\/v1\//i,
-                            handler: 'NetworkFirst',
-                            options: {
-                                cacheName: 'api-cache',
-                                expiration: { maxEntries: 50, maxAgeSeconds: 60 },
-                                cacheableResponse: { statuses: [0, 200] },
-                                // 后端故障时 1.5s 内回退到缓存，避免停留在"加载中"等待过久
-                                networkTimeoutSeconds: 1.5,
-                            },
-                        },
-                    ],
                 },
                 manifest: {
                     name: '滨发协同系统',
@@ -92,9 +49,20 @@ export default defineConfig(({ mode }) => {
                         { src: '/logo_plush.png', sizes: '512x512', type: 'image/png' },
                     ],
                 },
-                // Capacitor 构建禁用 PWA，开发模式也禁用
-                disable: isCapacitor || mode === 'development',
             }),
+            // 注入旧 Service Worker 清理脚本：卸载旧的 SW 并清空缓存
+            {
+                name: 'sw-cleanup',
+                transformIndexHtml() {
+                    return [
+                        {
+                            tag: 'script',
+                            injectTo: 'head',
+                            children: `(function(){if('serviceWorker'in navigator){navigator.serviceWorker.getRegistrations().then(function(r){r.forEach(function(reg){reg.unregister()})});caches.keys().then(function(k){k.forEach(function(key){caches.delete(key)})})}})()`,
+                        },
+                    ];
+                },
+            },
         ],
         resolve: {
             alias: {
@@ -142,7 +110,7 @@ export default defineConfig(({ mode }) => {
         },
         server: {
             host: '0.0.0.0',
-            port: 3000,
+            port: 5173, // 开发服务器端口 5173（Vite 默认），避免与生产 nginx 3000 端口冲突
             allowedHosts: true,
             headers: {
                 'Content-Security-Policy': [

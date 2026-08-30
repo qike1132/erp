@@ -146,9 +146,17 @@ export function usePurchaseActions(deps: PurchaseActionDeps) {
       showToast('请先选择订单', 'error')
       return
     }
+    // 订单时间 = 选中订单中最晚的下单时间（create_time，回退 order_date）。
+    // 时间字符串格式为 'YYYY-MM-DD HH:mm:ss' / 'YYYY-MM-DD'，字典序升序排序后取末位即最晚。
+    const times = purchaseOrders.orders
+      .filter((o) => purchaseOrders.selectedIds.includes(o.id))
+      .map((o) => o.create_time || o.order_date || '')
+      .filter(Boolean)
+      .sort()
+    const orderTime = times.length > 0 ? times[times.length - 1]! : ''
     showToast('正在汇总订单数据...', 'info')
     try {
-      await summary.openSummary([...purchaseOrders.selectedIds])
+      await summary.openSummary([...purchaseOrders.selectedIds], orderTime)
     } catch (err: unknown) {
       showToast((err as Error).message || '汇总失败', 'error')
     }

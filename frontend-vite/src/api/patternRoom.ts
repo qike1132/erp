@@ -17,7 +17,10 @@ export type ChangeType = 'add' | 'modify' | 'delete'
 
 // ==================== 通用响应 ====================
 
-/** 操作响应（创建/更新/删除/上传） */
+/** 操作响应（创建/更新/删除/上传）
+ * version：带乐观锁的更新操作（部位/角色/项目）返回更新后的新版本号，
+ * 供前端局部回写，避免第二次编辑携带旧 version 触发 409。
+ */
 export interface ActionResponse {
   success: boolean
   message: string
@@ -25,6 +28,7 @@ export interface ActionResponse {
   sequence_no?: string
   version_id?: number
   version_no?: string
+  version?: number
   file_id?: number
   url?: string
   thumbnail_url?: string

@@ -115,11 +115,13 @@ async def _resolve_pattern_maker_name(db: AsyncSession, pattern_maker_id: int | 
 
 
 
-async def _get_default_role_id(db: AsyncSession, project_id: int) -> int:
+async def _get_default_role_id(db: AsyncSession, project_id: int, *, create: bool = True) -> int | None:
     """获取项目的默认角色 ID（is_default=True）
 
-    若项目尚无默认角色（仅迁移前的旧项目可能发生，迁移已确保存在），
-    则主动创建一个默认角色并返回其 ID（防御性兜底）。
+    若项目尚无默认角色（仅迁移前的旧项目可能发生，迁移已确保存在）：
+    - create=True（写路径）：主动创建一个默认角色并返回其 ID（防御性兜底）
+    - create=False（读路径）：返回 None，由调用方返回空数据，
+      避免只读会话（get_read_db 副本）上发生隐式写
     """
     result = await db.execute(
         select(CustomerSamplingRole.id).where(
@@ -130,6 +132,9 @@ async def _get_default_role_id(db: AsyncSession, project_id: int) -> int:
     role_id = result.scalar_one_or_none()
     if role_id is not None:
         return role_id
+
+    if not create:
+        return None
 
     # 防御性兜底：旧库未跑迁移时主动补一个默认角色
     role = CustomerSamplingRole(

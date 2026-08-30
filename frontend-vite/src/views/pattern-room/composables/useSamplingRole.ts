@@ -130,10 +130,15 @@ export function useSamplingRole(projectId: Ref<number | null>) {
     error.value = null
     try {
       const res = await patternRoomApi.updateRole(roleId, { current_version: versionNo, version })
-      // 局部 patch：仅更新对应角色的 current_version，避免全量 fetchRoles 闪烁
+      // 局部 patch：仅更新对应角色的 current_version 与乐观锁版本号，避免全量 fetchRoles 闪烁。
+      // version 回写用于二次设置最终版本时携带新版本号，避免 409。
       const idx = roles.value.findIndex((r) => r.id === roleId)
       if (idx > -1) {
-        roles.value[idx] = { ...roles.value[idx]!, current_version: versionNo }
+        roles.value[idx] = {
+          ...roles.value[idx]!,
+          current_version: versionNo,
+          version: res.version ?? (roles.value[idx]!.version + 1),
+        }
       }
       return res
     } catch (e) {

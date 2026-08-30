@@ -158,11 +158,15 @@ async def update_role(
 ) -> dict:
     """编辑角色（乐观锁校验，is_default 不可改）
 
+    - SELECT ... FOR UPDATE 行锁 + 乐观锁，防止并发更新丢失
     - role_name 修改时仍需保证项目内唯一
     - current_version 修改用于"设置最终版本"场景
+    - 返回更新后的乐观锁版本号，供前端局部回写
     """
     result = await db.execute(
-        select(CustomerSamplingRole).where(CustomerSamplingRole.id == role_id)
+        select(CustomerSamplingRole)
+        .where(CustomerSamplingRole.id == role_id)
+        .with_for_update()
     )
     role = result.scalar_one_or_none()
     if role is None:
@@ -203,4 +207,4 @@ async def update_role(
     )
 
     logger.info('编辑角色: role_id=%s, field_diffs=%s', role_id, field_diffs)
-    return {'id': role.id}
+    return {'id': role.id, 'version': role.version}

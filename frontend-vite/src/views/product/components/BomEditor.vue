@@ -60,8 +60,8 @@
                         <th style="width:200px">物料名称 <span class="required">*</span></th>
                         <th style="width:180px">规格型号 <span class="required">*</span></th>
                         <th style="width:120px">计量单位 <span class="required">*</span></th>
-                        <th style="width:200px">默认供应商 <span class="required">*</span></th>
-                        <th style="width:140px">单SKU用量</th>
+                        <th style="width:200px">供应商 <span class="required">*</span></th>
+                        <th style="width:140px">单个用量</th>
                         <th style="width:200px">备注</th>
                         <th style="width:80px">操作</th>
                       </tr>

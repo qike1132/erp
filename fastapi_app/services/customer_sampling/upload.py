@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.exceptions import BusinessError, NotFoundError
@@ -33,6 +33,98 @@ _SNAPSHOT_FIELDS = (
 )
 
 from .common import _ensure_project_exists, _get_user_name, _write_change_log
+
+# 产品图片大小上限（与 storage_service 安全策略一致）
+_IMAGE_MAX_SIZE = 10 * 1024 * 1024
+
+# 允许的图片格式（PIL format 名称 → 声明 content-type 映射）
+_IMAGE_FORMATS = {'JPEG', 'PNG', 'WEBP'}
+
+
+def validate_project_image(content: bytes, content_type: str | None = None) -> None:
+    """产品图片内容校验（魔数 + 解码 + 大小），在进入事务前快速失败。
+
+    仅校验 Content-Type 可被伪造绕过（curl 自定义 header 即可上传任意内容，
+    借 image/* content-type 被浏览器内联执行），因此必须用 PIL 实际解码验证：
+    - Image.open 依据文件头魔数识别真实格式（JPEG/PNG/WebP）
+    - verify() 完整性校验，拦截截断/损坏文件
+    """
+    from io import BytesIO
+
+    if not content:
+        raise BusinessError('图片内容为空')
+
+    if content_type and content_type not in {'image/jpeg', 'image/png', 'image/webp'}:
+        raise BusinessError('图片格式不支持，仅支持 JPEG/PNG/WebP')
+
+    if len(content) > _IMAGE_MAX_SIZE:
+        raise BusinessError('图片大小不能超过 10MB')
+
+    from PIL import Image, UnidentifiedImageError
+
+    try:
+        # 与 storage_service 保持一致的解压炸弹阈值（受信用户上传）
+        Image.MAX_IMAGE_PIXELS = 200_000_000
+        with Image.open(BytesIO(content)) as im:
+            fmt = (im.format or '').upper()
+            if fmt not in _IMAGE_FORMATS:
+                raise BusinessError('图片格式不支持，仅支持 JPEG/PNG/WebP')
+            im.verify()
+    except UnidentifiedImageError:
+        raise BusinessError('文件内容不是有效的图片') from None
+    except BusinessError:
+        raise
+    except Exception as e:  # broad-except: verify() 对损坏文件抛出的各类 PIL 异常统一转为业务错误
+        raise BusinessError(f'图片校验失败: {e}') from e
+
+
+async def _register_project_image_cleanup(db: AsyncSession, file_id: int | None) -> None:
+    """注册产品图片清理（配合 db_transaction 的 post-commit 回调机制）
+
+    - 引用检查：FileRecord 仍被其他打样项目引用时跳过（产品图片理论上单项目独占，
+      防御同一 file_id 被多处引用的极端情况）
+    - FileRecord 行在当前事务内删除（事务回滚时一并回滚）
+    - 存储对象（原图 + 缩略图 + 模糊占位图）在 commit 成功后异步删除，
+      避免事务持有期间执行网络 IO，也避免回滚后存储对象被误删
+    """
+    if file_id is None:
+        return
+
+    result = await db.execute(
+        select(FileRecord.storage_key).where(FileRecord.id == file_id)
+    )
+    storage_key = result.scalar_one_or_none()
+    if storage_key is None:
+        return
+
+    refs = await db.execute(
+        select(func.count()).select_from(CustomerSamplingProject).where(
+            CustomerSamplingProject.product_image_file_id == file_id,
+        )
+    )
+    if refs.scalar_one() > 0:
+        return
+
+    record = await db.get(FileRecord, file_id)
+    if record is not None:
+        await db.delete(record)
+        await db.flush()
+
+    async def _delete_storage_objects() -> None:
+        from fastapi_app.services.storage_service import (
+            get_blur_key,
+            get_storage,
+            get_thumbnail_key,
+        )
+        storage = get_storage()
+        for key in (storage_key, get_thumbnail_key(storage_key), get_blur_key(storage_key)):
+            try:
+                await storage.delete(key)
+            except Exception as e:  # broad-except: 清理失败仅记录，不影响主流程
+                logger.warning('清理产品图片存储对象失败: key=%s, error=%s', key, e)
+
+    callbacks = db.info.setdefault('post_commit_callbacks', [])
+    callbacks.append(_delete_storage_objects)
 
 
 async def upload_project_image(
@@ -82,8 +174,13 @@ async def upload_project_image(
     project = result.scalar_one_or_none()
     if project is None:
         raise NotFoundError('打样项目不存在')
+    old_image_file_id = project.product_image_file_id
     project.product_image_file_id = upload_result['id']
     await db.flush()
+
+    # 旧图片不再被引用时清理（FileRecord 行事务内删除，存储对象 commit 后删除）
+    if old_image_file_id is not None and old_image_file_id != upload_result['id']:
+        await _register_project_image_cleanup(db, old_image_file_id)
 
     # 写审计日志
     operator_name = await _get_user_name(db, user_id)

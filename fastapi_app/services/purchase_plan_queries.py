@@ -204,6 +204,46 @@ async def get_shipment_records_by_date(db: AsyncSession, target_date: str) -> li
         })
     return out
 
+async def _build_fifo_shipped_map_from_rows(
+    db: AsyncSession,
+    rows: list,
+    plan_month: str = '',
+) -> tuple[dict[int, int], bool, dict[int, str]]:
+    """从 SQL 查询结果行构建 FIFO 出货映射
+
+    提取自 get_monthly_calendar / get_monthly_aggregated / get_day_details 的公共逻辑，
+    消除三处 ~20 行代码重复。
+
+    Args:
+        rows: SQL 查询结果行（必须包含 detail_id, plan_id, customer_name 字段）
+        plan_month: 计划月份，用于缓存键
+
+    Returns:
+        (detail_shipped_map, fifo_degraded, customer_name_map)
+    """
+    if not rows:
+        return {}, False, {}
+    detail_ids = list({row.detail_id for row in rows})
+    detail_result = await db.execute(
+        select(PurchasePlanDetail)
+        .options(load_only(
+            PurchasePlanDetail.id, PurchasePlanDetail.plan_id,
+            PurchasePlanDetail.product_name, PurchasePlanDetail.product_id,
+            PurchasePlanDetail.plan_date, PurchasePlanDetail.quantity,
+        ))
+        .where(PurchasePlanDetail.id.in_(detail_ids))
+        .order_by(PurchasePlanDetail.plan_date, PurchasePlanDetail.id)
+    )
+    all_details = detail_result.scalars().all()
+    customer_name_map: dict[int, str] = {}
+    for row in rows:
+        if row.plan_id not in customer_name_map:
+            customer_name_map[row.plan_id] = row.customer_name
+    shipped_fifo_map, fifo_degraded = await _get_shipped_fifo_map_safe(db, all_details, customer_name_map, plan_month=plan_month)
+    detail_shipped_map = {d.id: shipped_fifo_map.get(d.id, 0) for d in all_details}
+    return detail_shipped_map, fifo_degraded, customer_name_map
+
+
 @cache_result(
     key_prefix="pp:monthly",
     ttl=120,
@@ -243,27 +283,7 @@ async def get_monthly_calendar(db: AsyncSession, year: int, month: int, customer
     result = await db.execute(sql, params)
     rows = result.all()
 
-    detail_shipped_map: dict[int, int] = {}
-    fifo_degraded = False
-    if rows:
-        detail_ids = list({row.detail_id for row in rows})
-        detail_result = await db.execute(
-            select(PurchasePlanDetail)
-            .options(load_only(
-                PurchasePlanDetail.id, PurchasePlanDetail.plan_id,
-                PurchasePlanDetail.product_name, PurchasePlanDetail.product_id,
-                PurchasePlanDetail.plan_date, PurchasePlanDetail.quantity,
-            ))
-            .where(PurchasePlanDetail.id.in_(detail_ids))
-            .order_by(PurchasePlanDetail.plan_date, PurchasePlanDetail.id)
-        )
-        all_details = detail_result.scalars().all()
-        customer_name_map = {}
-        for row in rows:
-            if row.plan_id not in customer_name_map:
-                customer_name_map[row.plan_id] = row.customer_name
-        shipped_fifo_map, fifo_degraded = await _get_shipped_fifo_map_safe(db, all_details, customer_name_map, plan_month=plan_month)
-        detail_shipped_map = {d.id: shipped_fifo_map.get(d.id, 0) for d in all_details}
+    detail_shipped_map, fifo_degraded, _customer_name_map = await _build_fifo_shipped_map_from_rows(db, rows, plan_month)
 
     plans_by_date: dict[str, list[dict]] = {}
     customer_set: dict[int, dict] = {}
@@ -402,27 +422,7 @@ async def get_monthly_aggregated(db: AsyncSession, year: int, month: int, custom
     result = await db.execute(sql, params)
     rows = result.all()
 
-    detail_shipped_map: dict[int, int] = {}
-    fifo_degraded = False
-    if rows:
-        detail_ids = list({row.detail_id for row in rows})
-        detail_result = await db.execute(
-            select(PurchasePlanDetail)
-            .options(load_only(
-                PurchasePlanDetail.id, PurchasePlanDetail.plan_id,
-                PurchasePlanDetail.product_name, PurchasePlanDetail.product_id,
-                PurchasePlanDetail.plan_date, PurchasePlanDetail.quantity,
-            ))
-            .where(PurchasePlanDetail.id.in_(detail_ids))
-            .order_by(PurchasePlanDetail.plan_date, PurchasePlanDetail.id)
-        )
-        all_details = detail_result.scalars().all()
-        customer_name_map: dict[int, str] = {}
-        for row in rows:
-            if row.plan_id not in customer_name_map:
-                customer_name_map[row.plan_id] = row.customer_name
-        shipped_fifo_map, fifo_degraded = await _get_shipped_fifo_map_safe(db, all_details, customer_name_map, plan_month=plan_month)
-        detail_shipped_map = {d.id: shipped_fifo_map.get(d.id, 0) for d in all_details}
+    detail_shipped_map, fifo_degraded, _customer_name_map = await _build_fifo_shipped_map_from_rows(db, rows, plan_month)
 
     inventory_map = await _get_inventory_map(db)
 
@@ -588,26 +588,7 @@ async def get_day_details(db: AsyncSession, year: int, month: int, day: int, cus
     result = await db.execute(sql, params)
     rows = result.all()
 
-    detail_shipped_map: dict[int, int] = {}
-    fifo_degraded = False
-    if rows:
-        detail_ids = list({row.detail_id for row in rows})
-        detail_result = await db.execute(
-            select(PurchasePlanDetail)
-            .options(load_only(
-                PurchasePlanDetail.id, PurchasePlanDetail.plan_id,
-                PurchasePlanDetail.product_name, PurchasePlanDetail.product_id,
-                PurchasePlanDetail.plan_date, PurchasePlanDetail.quantity,
-            ))
-            .where(PurchasePlanDetail.id.in_(detail_ids))
-        )
-        all_details = detail_result.scalars().all()
-        customer_name_map: dict[int, str] = {}
-        for row in rows:
-            if row.plan_id not in customer_name_map:
-                customer_name_map[row.plan_id] = row.customer_name
-        shipped_fifo_map, fifo_degraded = await _get_shipped_fifo_map_safe(db, all_details, customer_name_map, plan_month=plan_month)
-        detail_shipped_map = {d.id: shipped_fifo_map.get(d.id, 0) for d in all_details}
+    detail_shipped_map, fifo_degraded, _customer_name_map = await _build_fifo_shipped_map_from_rows(db, rows, plan_month)
 
     plans = []
     by_customer: dict[str, list] = {}

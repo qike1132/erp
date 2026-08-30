@@ -49,18 +49,21 @@ export function usePatternRoomPrint(options: UsePatternRoomPrintOptions) {
     const projectId = selectedProjectId.value
     const allRoles = roles.value
     printRoles.value = allRoles
-    // 后端不支持不传 role_id 返回全部角色，需逐个角色加载
+    // 后端不支持不传 role_id 返回全部角色，需逐个角色加载（并行请求，避免多角色串行等待）
     try {
+      const results = await Promise.all(
+        allRoles.map((role) => patternRoomApi.getPartsByVersion(projectId, role.id)),
+      )
       const allParts: PartDetail[] = []
-      for (const role of allRoles) {
-        const res = await patternRoomApi.getPartsByVersion(projectId, role.id)
+      results.forEach((res, idx) => {
+        const role = allRoles[idx]!
         const items = res.items ?? []
         // 确保每条数据带 role_id（用于 PrintDialog 按角色分组）
         for (const item of items) {
           if (item.role_id == null) item.role_id = role.id
           allParts.push(item)
         }
-      }
+      })
       printParts.value = allParts
     } catch {
       // 降级：使用当前角色的数据

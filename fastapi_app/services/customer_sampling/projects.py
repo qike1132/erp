@@ -40,7 +40,7 @@ from .common import (
     _write_change_log,
 )
 from .grouping import _project_to_summary
-from .upload import _batch_get_image_urls, _get_product_image_urls
+from .upload import _batch_get_image_urls, _get_product_image_urls, _register_project_image_cleanup
 from .version_diff import _version_num
 
 
@@ -152,18 +152,23 @@ async def update_project(
     pattern_maker_id: int | None = None,
     remark: str | None = None,
     product_image_file_id: int | None = None,
+    clear_image: bool = False,
     current_version: str | None = None,
     version: int,
     user_id: int | None = None,
 ) -> dict:
     """编辑打样项目
 
-    - 乐观锁校验（version 不匹配抛 ConflictError 409）
+    - 乐观锁校验（version 不匹配抛 ConflictError 409，SELECT ... FOR UPDATE 行锁防并发丢失更新）
     - 可修改：product_name、pattern_maker_id、pattern_maker_name、remark、product_image_file_id
+    - clear_image=True 时清除产品图片（优先级低于 product_image_file_id）
     - 序列号与历史版本快照不可修改
+    - 返回更新后的乐观锁版本号，供前端局部回写
     """
     result = await db.execute(
-        select(CustomerSamplingProject).where(CustomerSamplingProject.id == project_id)
+        select(CustomerSamplingProject)
+        .where(CustomerSamplingProject.id == project_id)
+        .with_for_update()
     )
     project = result.scalar_one_or_none()
     if project is None:
@@ -175,6 +180,7 @@ async def update_project(
 
     # 收集字段变更用于审计
     field_diffs = []
+    old_image_file_id = project.product_image_file_id
 
     if product_name is not None and product_name != project.product_name:
         field_diffs.append({'field': 'product_name', 'old': project.product_name, 'new': product_name})
@@ -197,6 +203,9 @@ async def update_project(
     if product_image_file_id is not None and product_image_file_id != project.product_image_file_id:
         field_diffs.append({'field': 'product_image_file_id', 'old': project.product_image_file_id, 'new': product_image_file_id})
         project.product_image_file_id = product_image_file_id
+    elif clear_image and project.product_image_file_id is not None:
+        field_diffs.append({'field': 'product_image_file_id', 'old': project.product_image_file_id, 'new': None})
+        project.product_image_file_id = None
 
     if current_version is not None and current_version != project.current_version:
         field_diffs.append({'field': 'current_version', 'old': project.current_version, 'new': current_version})
@@ -215,6 +224,10 @@ async def update_project(
     project.version += 1
     await db.flush()
 
+    # 旧图片不再被引用时清理（FileRecord 行事务内删除，存储对象 commit 后删除）
+    if old_image_file_id is not None and old_image_file_id != project.product_image_file_id:
+        await _register_project_image_cleanup(db, old_image_file_id)
+
     # 写审计日志
     operator_name = await _get_user_name(db, user_id)
     await _write_change_log(
@@ -223,7 +236,7 @@ async def update_project(
     )
 
     logger.info('编辑打样项目: id=%s, field_diffs=%s', project_id, field_diffs)
-    return {'id': project.id}
+    return {'id': project.id, 'version': project.version}
 
 async def delete_project(
     db: AsyncSession,
@@ -233,10 +246,11 @@ async def delete_project(
 ) -> dict:
     """删除打样项目
 
-    - 先写审计日志（确保删除操作可追溯）
+    - 先写审计日志（确保删除操作可追溯；因 project_id 外键 SET NULL，
+      日志中冗余记录 sequence_no/product_name，删除后仍可辨识被删项目）
     - ORM cascade 级联删除部位/版本
     - 变更日志不级联删除：project_id 外键 SET NULL，日志保留可追溯
-    - product_image_file_id 外键 SET NULL，FileRecord 保留
+    - 产品图片文件随项目删除一并清理（不再有引用时）
     """
     result = await db.execute(
         select(CustomerSamplingProject).where(CustomerSamplingProject.id == project_id)
@@ -245,10 +259,16 @@ async def delete_project(
     if project is None:
         raise NotFoundError('打样项目不存在')
 
-    # 先写审计日志（在级联删除前）
+    image_file_id = project.product_image_file_id
+
+    # 先写审计日志（在级联删除前，含被删项目标识信息）
     operator_name = await _get_user_name(db, user_id)
     await _write_change_log(
         db, project_id, 'delete_project', user_id, operator_name,
+        field_diffs=[
+            {'field': 'sequence_no', 'old': project.sequence_no, 'new': None},
+            {'field': 'product_name', 'old': project.product_name, 'new': None},
+        ],
     )
     await db.flush()
 
@@ -256,6 +276,10 @@ async def delete_project(
     # 注：change_logs relationship 已去掉 cascade，日志不级联删除（project_id SET NULL）
     await db.delete(project)
     await db.flush()
+
+    # 产品图片不再被引用时清理（FileRecord 行事务内删除，存储对象 commit 后删除）
+    if image_file_id is not None:
+        await _register_project_image_cleanup(db, image_file_id)
 
     logger.info('删除打样项目: id=%s', project_id)
     return {'id': project_id}

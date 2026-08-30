@@ -33,7 +33,7 @@ _SNAPSHOT_FIELDS = (
     'unit_price', 'delivery_days', 'remark',
 )
 
-_GROUPED_LIST_MAX_PROJECTS = 2000
+_GROUPED_LIST_MAX_PROJECTS = 5000
 
 
 from .upload import _batch_get_image_urls
@@ -68,7 +68,8 @@ async def get_grouped_list(
     - 组内项目按 updated_at 倒序
     - status 缺省（None）时默认仅返回"进行中"项目（前端漏传状态时的兜底）
     - 显式传 'all' 返回全部状态的项目；传 in_progress/completed/cancelled 按对应状态过滤
-    - page/per_page 控制分页，对全部项目全局分页后再按版师分组
+    - page/per_page 按"分组"分页（每页返回完整分组，组内项目不拆分）：
+      先对全部匹配项目按版师全量分组，再对分组列表分页
 
     Returns:
         GroupedListResponse dict
@@ -92,27 +93,31 @@ async def get_grouped_list(
     if status != 'all':
         conditions.append(CustomerSamplingProject.status == status)
 
-    # 计算总数
+    # 统计符合筛选条件的项目总数（供前端展示统计信息）
     count_query = select(func.count()).select_from(CustomerSamplingProject)
     for cond in conditions:
         count_query = count_query.where(cond)
-    total = (await db.execute(count_query)).scalar_one()
+    total_projects = (await db.execute(count_query)).scalar_one()
 
-    # 分页
-    pages = max(1, (total + per_page - 1) // per_page)
-    page = max(1, min(page, pages))
-
-    # 查询当前页项目（含版师关联，避免 N+1）
+    # 一次性拉取全部匹配项目（含版师关联，避免 N+1），按 updated_at 倒序；
+    # 上限防护截断，避免极端数据量下全量序列化。
     query = select(CustomerSamplingProject).options(
         selectinload(CustomerSamplingProject.pattern_maker),
         *_LIST_NOLOAD,
     )
     for cond in conditions:
         query = query.where(cond)
-    query = query.order_by(CustomerSamplingProject.updated_at.desc()).offset((page - 1) * per_page).limit(per_page)
+    query = query.order_by(CustomerSamplingProject.updated_at.desc()).limit(_GROUPED_LIST_MAX_PROJECTS)
 
     result = await db.execute(query)
     projects = result.scalars().all()
+
+    # 命中上限截断时告警，便于定位分组统计与项目总数不一致的问题
+    if len(projects) < total_projects:
+        logger.warning(
+            "Grouped list truncated: total_projects=%s, loaded=%s, max_limit=%s",
+            total_projects, len(projects), _GROUPED_LIST_MAX_PROJECTS,
+        )
 
     # 批量预取产品图片 URL（单次 SQL，消除逐项目查询的 N+1）
     image_url_map = await _batch_get_image_urls(
@@ -120,14 +125,14 @@ async def get_grouped_list(
     )
     summary_map = {p.id: _project_to_summary(p, image_url_map) for p in projects}
 
-    # 应用层按 pattern_maker_id 分组
+    # 应用层按 pattern_maker_id 全量分组（同一版师的项目不再被分页拆散）
     groups_map: dict[int | None, list[CustomerSamplingProject]] = {}
     for p in projects:
         key = p.pattern_maker_id
         groups_map.setdefault(key, []).append(p)
 
-    # 构建分组响应
-    groups = []
+    # 构建全部分组（"未分类"最后处理）
+    all_groups = []
     for pmid, proj_list in groups_map.items():
         if pmid is None:
             # "未分类"分组最后处理
@@ -137,7 +142,7 @@ async def get_grouped_list(
         if not pattern_maker_name and proj_list[0].pattern_maker:
             pattern_maker_name = proj_list[0].pattern_maker.name
         latest_update = max(p.updated_at for p in proj_list)
-        groups.append({
+        all_groups.append({
             'pattern_maker_id': pmid,
             'pattern_maker_name': pattern_maker_name or '未命名版师',
             'project_count': len(proj_list),
@@ -146,13 +151,13 @@ async def get_grouped_list(
         })
 
     # 分组间按组内最新更新时间倒序
-    groups.sort(key=lambda g: g['latest_update_time'], reverse=True)
+    all_groups.sort(key=lambda g: g['latest_update_time'], reverse=True)
 
     # "未分类"分组始终最后
     unclassified = groups_map.get(None, [])
     if unclassified:
         latest_update = max(p.updated_at for p in unclassified)
-        groups.append({
+        all_groups.append({
             'pattern_maker_id': None,
             'pattern_maker_name': '未分类',
             'project_count': len(unclassified),
@@ -160,11 +165,18 @@ async def get_grouped_list(
             'projects': [summary_map[p.id] for p in unclassified],
         })
 
+    # 分组级分页：分页单位是"版师分组"而非项目，保证每个分组完整、不跨页拆散
+    total_groups = len(all_groups)
+    pages = max(1, (total_groups + per_page - 1) // per_page)
+    page = max(1, min(page, pages))
+    start = (page - 1) * per_page
+    groups = all_groups[start:start + per_page]
+
     return {
         'success': True,
         'groups': groups,
-        'total_projects': len(projects),
-        'total': total,
+        'total_projects': total_projects,
+        'total': total_groups,
         'pages': pages,
         'current_page': page,
     }
@@ -262,13 +274,18 @@ async def get_completed_table(
 
     # 查询操作人：取每个项目最近一次状态更新（update_project_status）的操作人
     # 已完成项目最近一次状态更新通常即标记完成操作，符合报表口径
+    # DISTINCT ON 每项目仅返回最新一条，避免全量拉取历史状态日志
     operator_query = (
         select(CustomerSamplingChangeLog.project_id, CustomerSamplingChangeLog.operator_name)
         .where(
             CustomerSamplingChangeLog.project_id.in_(project_ids),
             CustomerSamplingChangeLog.action == 'update_project_status',
         )
-        .order_by(CustomerSamplingChangeLog.created_at.desc())
+        .distinct(CustomerSamplingChangeLog.project_id)
+        .order_by(
+            CustomerSamplingChangeLog.project_id,
+            CustomerSamplingChangeLog.created_at.desc(),
+        )
     )
     op_result = await db.execute(operator_query)
     operator_map: dict[int, str] = {}

@@ -81,11 +81,12 @@
                 <th class="w-[9%]">客户</th>
                 <th class="w-[15%]">产品名称</th>
                 <th class="w-[7%]">订单数量</th>
+                <th class="w-[7%]">备品数量</th>
                 <th class="w-[10%]">供应商</th>
-                <th class="w-[24%]">布料名称</th>
-                <th class="w-[17%]">规格型号</th>
-                <th class="w-[10%]">数量</th>
-                <th class="w-[8%]">单位</th>
+                <th class="w-[22%]">布料名称</th>
+                <th class="w-[15%]">规格型号</th>
+                <th class="w-[8%]">数量</th>
+                <th class="w-[7%]">单位</th>
               </tr>
             </thead>
             <tbody>
@@ -97,7 +98,10 @@
                   {{ row.group.product_name }}
                 </td>
                 <td v-if="row.isFirstFabricRow" :rowspan="row.groupFabricCount">
-                  {{ formatQty(row.group.product_quantity || row.group.order_quantity) }}
+                  {{ formatQty(getGroupOrderQty(row.group)) }}
+                </td>
+                <td v-if="row.isFirstFabricRow" :rowspan="row.groupFabricCount">
+                  {{ formatQty(calcSpareQuantity(getGroupOrderQty(row.group), lossRate)) }}
                 </td>
                 <td v-if="row.isFirstSupplier" :rowspan="row.supplierFabricCount">
                   {{ row.supplier.supplier_name }}
@@ -122,7 +126,11 @@
                 <td>{{ row.fabric.unit || '' }}</td>
               </tr>
               <tr class="bg-border-light font-bold">
-                <td colspan="6" class="text-center">合计</td>
+                <td colspan="3" class="text-center">合计</td>
+                <td>
+                  {{ formatQty(spareQuantityGrandTotal) }}
+                </td>
+                <td colspan="3" />
                 <td>
                   {{ formatQty(factoryGrandTotal) }}
                 </td>
@@ -240,6 +248,7 @@ import { ref, computed } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import { fmtQty as formatQty } from '@/utils/formatQty'
+import { calcSpareQuantity, getGroupOrderQty } from '../composables/useSummaryModal'
 import type { FactorySummaryData, SupplierSummaryData, MaterialItem, FactoryGroup, SupplierGroup, FabricItem } from '../composables/useSummaryModal'
 
 const props = defineProps<{
@@ -283,6 +292,15 @@ const factoryGrandTotal = computed(() => {
   props.factoryData?.groups?.forEach((g) =>
     g.suppliers?.forEach((s) => s.fabrics?.forEach((f) => (t += parseFloat(String(f.quantity)) || 0))),
   )
+  return t
+})
+
+// 备品数量合计 = 各产品备品数量之和（每个产品均按 ceil 后的值累加，与列展示口径一致）
+const spareQuantityGrandTotal = computed(() => {
+  let t = 0
+  props.factoryData?.groups?.forEach((g) => {
+    t += calcSpareQuantity(getGroupOrderQty(g), props.lossRate)
+  })
   return t
 })
 

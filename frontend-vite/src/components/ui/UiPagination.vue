@@ -82,24 +82,26 @@ function jumpToPage() {
 </script>
 
 <style scoped>
-/* 单行统一分页栏：所有控件同高、同边框、同字号，整体居中成一组 */
+/* 单行紧凑分页栏：所有控件同高、同边框、同字号，整体居中成一组 */
 .ui-pagination {
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 12px 16px 10px;
+  flex-wrap: nowrap;
+  gap: 6px;
+  padding: 4px 12px;
   border-top: 1px solid var(--color-border-light, #f1f5f9);
+  font-size: 12px;
+  line-height: 1;
 }
 
 /* 控件统一样式（下拉 / 按钮 / 输入框） */
 .ui-page-size,
 .ui-page-btn,
 .ui-page-jump-input {
-  height: 28px;
+  height: 24px;
   border: 1px solid var(--color-border-light, #e2e8f0);
-  border-radius: 6px;
+  border-radius: 4px;
   background: white;
   font-size: 12px;
   color: var(--color-text-secondary);
@@ -107,7 +109,7 @@ function jumpToPage() {
   box-sizing: border-box;
 }
 .ui-page-size {
-  padding: 0 8px;
+  padding: 0 4px;
   cursor: pointer;
 }
 .ui-page-size:hover {
@@ -115,13 +117,16 @@ function jumpToPage() {
 }
 
 .ui-page-btn {
-  width: 30px;
+  width: 24px;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   transition: border-color 0.2s, color 0.2s;
+  /* 保持最小可点击热区 24×24，兼顾触控与鼠标 */
+  min-width: 24px;
+  min-height: 24px;
 }
 .ui-page-btn:hover:not(:disabled) {
   border-color: var(--color-primary-300);
@@ -140,14 +145,14 @@ function jumpToPage() {
 }
 
 .ui-page-nav {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 4px;
 }
 
 .ui-page-info {
-  min-width: 44px;
-  padding: 0 4px;
+  min-width: 36px;
+  padding: 0 2px;
   text-align: center;
   font-size: 12px;
   font-weight: 600;
@@ -172,7 +177,7 @@ function jumpToPage() {
   white-space: nowrap;
 }
 .ui-page-jump-input {
-  width: 44px;
+  width: 36px;
   padding: 0 4px;
   text-align: center;
   color: var(--color-text);
@@ -183,5 +188,13 @@ function jumpToPage() {
 .ui-page-jump-input::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
+}
+
+/* 移动端：极端窄屏下仅压缩容器间距，控件热区保持 24×24 不变 */
+@media (max-width: 480px) {
+  .ui-pagination {
+    gap: 4px;
+    padding: 4px 8px;
+  }
 }
 </style>

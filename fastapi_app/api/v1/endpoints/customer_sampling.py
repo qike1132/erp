@@ -167,20 +167,21 @@ async def api_update_project(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permission(PERM)),
 ) -> dict[str, Any]:
-    """编辑打样项目（乐观锁校验）"""
+    """编辑打样项目（乐观锁校验，返回新版本号供前端回写）"""
     async with db_transaction(db):
-        await svc.update_project(
+        result = await svc.update_project(
             db,
             project_id,
             product_name=data.product_name,
             pattern_maker_id=data.pattern_maker_id,
             remark=data.remark,
             product_image_file_id=data.product_image_file_id,
+            clear_image=data.clear_image,
             current_version=data.current_version,
             version=data.version,
             user_id=current_user.id,
         )
-    return {'success': True, 'message': '更新成功'}
+    return {'success': True, 'message': '更新成功', **result}
 
 
 # ==================== 5b. 更新项目状态（完成/进行中/取消） ====================
@@ -228,6 +229,10 @@ async def api_upload_project_image(
 ) -> dict[str, Any]:
     """上传产品图片（复用 storage_service，限制 JPEG/PNG/WebP ≤ 10MB）"""
     content = await file.read()
+    # 项目存在性优先（404 语义先于文件校验 400），
+    # 魔数 + 解码校验在进入事务前执行（快速失败，不占用数据库连接）
+    await svc._ensure_project_exists(db, project_id)
+    svc.validate_project_image(content, content_type=file.content_type)
     async with db_transaction(db):
         result = await svc.upload_project_image(
             db,
@@ -260,10 +265,11 @@ async def api_list_parts(
 async def api_create_part(
     project_id: int,
     data: PartCreateRequest,
+    role_id: int | None = Query(None, description='归属角色ID（未传时默认指向默认角色）'),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permission(PERM)),
 ) -> dict[str, Any]:
-    """新增部位（部位名称同项目下唯一）"""
+    """新增部位（部位名称同项目下唯一，可指定归属角色）"""
     async with db_transaction(db):
         result = await svc.create_part(
             db,
@@ -279,6 +285,7 @@ async def api_create_part(
             unit_price=data.unit_price,
             delivery_days=data.delivery_days,
             remark=data.remark,
+            role_id=role_id,
             user_id=current_user.id,
         )
     return {'success': True, 'message': '创建成功', **result}
@@ -331,9 +338,9 @@ async def api_update_part(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permission(PERM)),
 ) -> dict[str, Any]:
-    """编辑部位布料（乐观锁校验，历史版本快照不变）"""
+    """编辑部位布料（乐观锁校验，历史版本快照不变，返回新版本号供前端回写）"""
     async with db_transaction(db):
-        await svc.update_part(
+        result = await svc.update_part(
             db,
             part_id,
             part_name=data.part_name,
@@ -351,7 +358,7 @@ async def api_update_part(
             version=data.version,
             user_id=current_user.id,
         )
-    return {'success': True, 'message': '更新成功'}
+    return {'success': True, 'message': '更新成功', **result}
 
 
 # ==================== 11. 删除部位 ====================
@@ -487,16 +494,16 @@ async def api_update_role(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permission(PERM)),
 ) -> dict[str, Any]:
-    """编辑角色（乐观锁校验，is_default 不可改，可改名或设置最终版本）"""
+    """编辑角色（乐观锁校验，is_default 不可改，可改名或设置最终版本，返回新版本号供前端回写）"""
     async with db_transaction(db):
-        await svc.update_role(
+        result = await svc.update_role(
             db, role_id,
             role_name=data.role_name,
             current_version=data.current_version,
             version=data.version,
             user_id=current_user.id,
         )
-    return {'success': True, 'message': '更新成功'}
+    return {'success': True, 'message': '更新成功', **result}
 
 
 # ==================== 20. 删除角色 ====================

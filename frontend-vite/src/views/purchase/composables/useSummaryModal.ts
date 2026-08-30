@@ -1,6 +1,6 @@
 import { ref, computed, reactive, toRaw } from 'vue'
 import { purchaseApi } from '@/api'
-import { printHtml } from '@/utils/print'
+import { escapeHtml, printHtml } from '@/utils/print'
 import { fmtQty } from '@/utils/formatQty'
 
 // structuredClone 无法克隆 Vue 响应式 Proxy（报 "could not be cloned"）。
@@ -9,18 +9,71 @@ function cloneRaw<T>(v: T): T {
   return structuredClone(toRaw(v) as T)
 }
 
-// 打印时间标签（本地时间，YYYY-MM-DD HH:mm:ss）
-function formatNowTime(): string {
-  const d = new Date()
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+/**
+ * 订单时间标签：展示实际下单时间（选中订单中最晚的 create_time，回退 order_date）。
+ * 时间值由调用方（usePurchaseActions.handleSummary）从订单列表计算后传入 openSummary。
+ */
+function orderTimeLabel(orderTime: string): string {
+  const value = orderTime ? escapeHtml(orderTime) : '—'
+  return `<div style="text-align:right;font-size:12px;color:#555;margin-bottom:10px;">订单时间：${value}</div>`
 }
 
-function printTimeLabel(): string {
-  return `<div style="text-align:right;font-size:12px;color:#555;margin-bottom:10px;">打印时间：${formatNowTime()}</div>`
+/**
+ * 备品数量 = ceil(订单数量 × 损耗率‰)。
+ * 损耗率 ≤ 0 或 qty 非法/非正时返回 0。屏幕表格、打印预览、Excel 导出共用这一处来源。
+ */
+export function calcSpareQuantity(qty: number, lossRate: number): number {
+  if (!lossRate || lossRate <= 0 || !Number.isFinite(qty) || qty <= 0) return 0
+  return Math.ceil(qty * (lossRate / 1000))
 }
 
-function buildFactoryHtml(data: FactorySummaryData): string {
+/**
+ * 订单数量取数：产品数量优先，缺失时回退订单数量。
+ * 与 calcSpareQuantity 共用同一防御口径：非法/缺失输入兜底 0。
+ * 屏幕表格、打印预览、Excel 导出共用这一处来源。
+ */
+export function getGroupOrderQty(group: FactoryGroup): number {
+  const v = parseFloat(String(group.product_quantity || group.order_quantity || 0))
+  return Number.isNaN(v) ? 0 : v
+}
+
+/**
+ * 汇总下单打印专用样式（A4 零页边距 + 单行不换行 + 全格居中）。
+ *
+ * 设计要点（保证打印预览与实际打印输出一致、跨浏览器稳定）：
+ * 1. @page margin:0 —— 上下左右页边距全部置 0，最大化利用 A4 打印区域；
+ *    同时 html/body margin/padding 归零兜底，避免部分浏览器忽略 @page 规则。
+ * 2. th/td white-space:nowrap —— 每行数据强制单行显示，禁止折行；
+ *    word-break/overflow-wrap 归 normal，杜绝 CJK 断词导致的意外换行。
+ * 3. th/td text-align:center —— 所有单元格内容居中对齐。
+ * 4. 样式只保留一处来源（stylesheets），单元格不设内联对齐/边框样式，
+ *    预览与打印渲染同一份文档、同一套规则，天然一致。
+ * 5. print-color-adjust:exact —— 表头灰底在物理打印时不丢失。
+ * 6. 字号 12px + 紧凑内边距，保证 9 列内容在 A4 纵向宽度内完整落纸。
+ */
+const SUMMARY_PRINT_STYLE = `
+  @page { size: A4; margin: 0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: SimSun, 宋体, serif; color: #000; }
+  h2 { margin: 0 0 10px; font-size: 18px; line-height: 1.4; }
+  table { width: 100%; border-collapse: collapse; table-layout: auto; }
+  th, td {
+    border: 1px solid #333;
+    padding: 6px 8px;
+    font-size: 12px;
+    text-align: center;
+    vertical-align: middle;
+    white-space: nowrap;
+    overflow-wrap: normal;
+    word-break: normal;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  thead th { background: #e6e6e6; font-weight: bold; }
+`
+
+export function buildFactoryHtml(data: FactorySummaryData, lossRate: number): string {
   let tableHtml = ''
   data.groups?.forEach((group) => {
     const suppliers: SupplierGroup[] = group.suppliers || []
@@ -30,16 +83,17 @@ function buildFactoryHtml(data: FactorySummaryData): string {
         tableHtml += '<tr>'
         if (globalFabricIdx === 0) {
           const rowCount = suppliers.reduce((s: number, sup: SupplierGroup) => s + (sup.fabrics?.length || 0), 0)
-          tableHtml += `<td rowspan="${rowCount}" style="border:1px solid #333;padding:8px;text-align:center;font-weight:bold;">${group.customer_name}</td>`
-          tableHtml += `<td rowspan="${rowCount}" style="border:1px solid #333;padding:8px;text-align:center;">${group.product_name}</td>`
-          const qty = parseFloat(String(group.product_quantity || group.order_quantity || 0))
-          const qtyStr = fmtQty(qty)
-          tableHtml += `<td rowspan="${rowCount}" style="border:1px solid #333;padding:8px;text-align:center;">${qtyStr}</td>`
+          tableHtml += `<td rowspan="${rowCount}" style="font-weight:bold;">${escapeHtml(group.customer_name)}</td>`
+          tableHtml += `<td rowspan="${rowCount}">${escapeHtml(group.product_name)}</td>`
+          const qty = getGroupOrderQty(group)
+          tableHtml += `<td rowspan="${rowCount}">${escapeHtml(fmtQty(qty))}</td>`
+          tableHtml += `<td rowspan="${rowCount}">${escapeHtml(fmtQty(calcSpareQuantity(qty, lossRate)))}</td>`
         }
-        tableHtml += `<td style="border:1px solid #333;padding:8px;text-align:center;">${supplier.supplier_name}</td>`
-        tableHtml += `<td style="border:1px solid #333;padding:8px;">${fabric.fabric_name}</td>`
-        tableHtml += `<td style="border:1px solid #333;padding:8px;">${fabric.specification || ''}</td>`
-        tableHtml += `<td style="border:1px solid #333;padding:8px;text-align:right;">${fmtQty(fabric.quantity)} ${fabric.unit || ''}</td>`
+        tableHtml += `<td style="font-weight:bold;">${escapeHtml(supplier.supplier_name)}</td>`
+        tableHtml += `<td>${escapeHtml(fabric.fabric_name)}</td>`
+        tableHtml += `<td>${escapeHtml(fabric.specification || '')}</td>`
+        tableHtml += `<td>${escapeHtml(fmtQty(fabric.quantity))}</td>`
+        tableHtml += `<td>${escapeHtml(fabric.unit || '')}</td>`
         tableHtml += '</tr>'
         globalFabricIdx++
       })
@@ -54,10 +108,10 @@ function buildSupplierHtml(groups: { supplierName: string; materials: MaterialIt
     g.materials.forEach((m: MaterialItem, mi: number) => {
       tableHtml += '<tr>'
       if (mi === 0)
-        tableHtml += `<td rowspan="${g.materials.length}" style="border:1px solid #333;padding:8px;text-align:center;font-weight:bold;">${g.supplierName}</td>`
-      tableHtml += `<td style="border:1px solid #333;padding:8px;">${m.material_name}</td>`
-      tableHtml += `<td style="border:1px solid #333;padding:8px;">${m.specification || ''}</td>`
-      tableHtml += `<td style="border:1px solid #333;padding:8px;text-align:right;">${fmtQty(m.total_quantity)} ${m.unit || ''}</td>`
+        tableHtml += `<td rowspan="${g.materials.length}" style="font-weight:bold;">${escapeHtml(g.supplierName)}</td>`
+      tableHtml += `<td>${escapeHtml(m.material_name)}</td>`
+      tableHtml += `<td>${escapeHtml(m.specification || '')}</td>`
+      tableHtml += `<td>${escapeHtml(fmtQty(m.total_quantity))} ${escapeHtml(m.unit || '')}</td>`
       tableHtml += '</tr>'
     })
   })
@@ -144,6 +198,8 @@ export function useSummaryModal() {
   const lossRate = ref(0)
   const orderIds = ref<number[]>([])
   const supplierOrder = ref<string[]>([])
+  /** 订单时间（选中订单中最晚 create_time，回退 order_date；由 openSummary 调用方传入） */
+  const orderTime = ref('')
 
   const supplierGroups = computed(() => {
     if (!supplierData.value?.materials) return []
@@ -168,22 +224,9 @@ export function useSummaryModal() {
     return groups
   })
 
-  const supplierGrandTotal = computed(() => {
-    let t = 0
-    supplierGroups.value.forEach((g) => g.materials.forEach((m) => (t += parseFloat(String(m.total_quantity)) || 0)))
-    return t
-  })
-
-  const factoryGrandTotal = computed(() => {
-    let t = 0
-    factoryData.value?.groups?.forEach((g) =>
-      g.suppliers?.forEach((s) => s.fabrics?.forEach((f) => (t += parseFloat(String(f.quantity)) || 0))),
-    )
-    return t
-  })
-
-  async function openSummary(ids: number[]) {
+  async function openSummary(ids: number[], orderTimeValue?: string) {
     orderIds.value = ids
+    orderTime.value = orderTimeValue || ''
     const [fRes, sRes] = await Promise.all([
       purchaseApi.factorySummary(ids) as unknown as FactorySummaryData,
       purchaseApi.supplierSummary(ids) as unknown as SupplierSummaryData,
@@ -318,24 +361,33 @@ export function useSummaryModal() {
     open.value = false
     orderIds.value = []
     supplierOrder.value = []
+    orderTime.value = ''
   }
 
   function printFactory() {
     if (!factoryData.value) return
-    const tableHtml = buildFactoryHtml(factoryData.value)
-    printHtml('工厂内部采购订单汇总', `${printTimeLabel()}<table><thead><tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>数量</th></tr></thead><tbody>${tableHtml}</tbody></table>`)
+    const tableHtml = buildFactoryHtml(factoryData.value, lossRate.value)
+    printHtml(
+      '工厂内部采购订单汇总',
+      `${orderTimeLabel(orderTime.value)}<table><thead><tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>备品数量</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>数量</th><th>单位</th></tr></thead><tbody>${tableHtml}</tbody></table>`,
+      SUMMARY_PRINT_STYLE,
+    )
   }
 
   function printSupplier() {
     if (!supplierData.value) return
     const tableHtml = buildSupplierHtml(supplierGroups.value)
-    printHtml('供应商采购订单汇总', `${printTimeLabel()}<table><thead><tr><th>供应商</th><th>物料名称</th><th>规格型号</th><th>数量</th></tr></thead><tbody>${tableHtml}</tbody></table>`)
+    printHtml(
+      '供应商采购订单汇总',
+      `${orderTimeLabel(orderTime.value)}<table><thead><tr><th>供应商</th><th>物料名称</th><th>规格型号</th><th>数量</th></tr></thead><tbody>${tableHtml}</tbody></table>`,
+      SUMMARY_PRINT_STYLE,
+    )
   }
 
   function exportFactory() {
     if (!factoryData.value) return
-    const tableHtml = buildFactoryHtml(factoryData.value)
-    const html = `<div style="text-align:center;margin-bottom:20px"><h2>工厂内部采购订单汇总</h2></div><table><thead><tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>数量</th></tr></thead><tbody>${tableHtml}</tbody></table>`
+    const tableHtml = buildFactoryHtml(factoryData.value, lossRate.value)
+    const html = `<div style="text-align:center;margin-bottom:20px"><h2>工厂内部采购订单汇总</h2></div><table><thead><tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>备品数量</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>数量</th><th>单位</th></tr></thead><tbody>${tableHtml}</tbody></table>`
     downloadAsXls(html, '工厂内部采购汇总.xls')
   }
 
@@ -358,8 +410,6 @@ export function useSummaryModal() {
     lossRate,
     orderIds,
     supplierGroups,
-    supplierGrandTotal,
-    factoryGrandTotal,
     openSummary,
     close,
     toggleEditMode,

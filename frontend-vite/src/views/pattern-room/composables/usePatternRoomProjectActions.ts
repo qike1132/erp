@@ -119,7 +119,9 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
       const res = await patternRoomApi.updateProjectStatus(id, 'completed')
       if (res.success) {
         toast.success('已标记为完成')
-        await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, true)
+        // 静默刷新分组列表：状态变更是增量更新，不能用 loading 全面板交换
+        // （v-if 摘除重挂载会丢失虚拟列表滚动位置与组内分页状态，视觉上等同整页刷新）
+        await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, true, true)
       } else {
         toast.error(res.message || '标记完成失败')
       }
@@ -144,7 +146,8 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
       const res = await patternRoomApi.updateProjectStatus(id, 'cancelled')
       if (res.success) {
         toast.success('已取消')
-        await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, true)
+        // 静默刷新分组列表：同完成操作，避免 loading 全面板交换丢失页面状态与滚动位置
+        await groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, true, true)
       } else {
         toast.error(res.message || '取消失败')
       }

@@ -110,7 +110,7 @@ function openImagePreview(url: string) {
   overflow: hidden;
 }
 .cgl-container > :deep(.ui-pagination) {
-  padding: 4px 12px;
+  padding: 2px 8px;
   flex-shrink: 0;
 }
 .cgl-loading {

@@ -277,11 +277,14 @@ async def get_parts_by_version(
             'items': [PartDetail + version_no, ...],
             'versions': ['T1', 'T2', ...],
             'final_version': role.current_version,
-        }
+    }
+    （读路径：默认角色缺失时返回空数据，不在只读会话上隐式创建）
     """
     await _ensure_project_exists(db, project_id)
     if role_id is None:
-        role_id = await _get_default_role_id(db, project_id)
+        role_id = await _get_default_role_id(db, project_id, create=False)
+        if role_id is None:
+            return {'success': True, 'items': [], 'versions': [], 'final_version': 'T1'}
     else:
         await _ensure_role_belongs_to_project(db, role_id, project_id)
 
@@ -400,7 +403,22 @@ async def create_version(
 
     # 获取该角色当前最大版本号
     current_version = role.current_version or 'T1'
-    new_version_no = _next_version(current_version)
+    # 版本号推算基于该角色全部已存在版本（快照表 + 部位表 + current_version 取最大），
+    # 防止 current_version 被回拨（如"设置最终版本"为 T1）后生成与既有版本冲突的编号
+    ver_rows = (await db.execute(
+        select(CustomerSamplingFabricVersion.version_no).where(
+            CustomerSamplingFabricVersion.role_id == role_id,
+        )
+    )).all()
+    part_ver_rows = (await db.execute(
+        select(CustomerSamplingPart.version_no).where(
+            CustomerSamplingPart.role_id == role_id,
+        )
+    )).all()
+    all_nums = [_version_num(v) for (v,) in ver_rows]
+    all_nums += [_version_num(v) for (v,) in part_ver_rows]
+    all_nums.append(_version_num(current_version))
+    new_version_no = f'T{max(all_nums, default=0) + 1}'
 
     # 快照该角色当前所有部位布料信息
     parts_result = await db.execute(
