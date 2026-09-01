@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ERP 服务器管理器 v8</title>
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div class="shell">
+
+  <!-- ============ 侧栏 ============ -->
+  <aside class="sidebar">
+    <div class="sidebar__brand">
+      <span class="mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/>
+          <path d="M6.5 6.5h.01M6.5 17.5h.01"/>
+        </svg>
+      </span>
+      <span>
+        <div class="name">ERP 服务器管理器</div>
+        <div class="sub">SERVER MANAGER v8</div>
+      </span>
+    </div>
+    <nav class="nav">
+      <button class="nav__item active" data-page="overview">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/>
+          <rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>
+        </svg>
+        <span class="lbl">总览</span>
+      </button>
+      <button class="nav__item" data-page="services">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/>
+          <circle cx="7" cy="7" r="1" fill="currentColor"/><circle cx="7" cy="17" r="1" fill="currentColor"/>
+        </svg>
+        <span class="lbl">服务编排</span>
+      </button>
+      <button class="nav__item" data-page="alerts">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 8a6 6 0 1 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M10.3 21a2 2 0 0 0 3.4 0"/>
+        </svg>
+        <span class="lbl">监控告警</span>
+        <span class="badge" id="alert-badge" style="display:none">0</span>
+      </button>
+      <button class="nav__item" data-page="logs">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/>
+        </svg>
+        <span class="lbl">日志中心</span>
+      </button>
+      <button class="nav__item" data-page="config">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 7 19.4l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3 14.9a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9l-.3-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 9 4.6V3a2 2 0 1 1 4 0v.1A1.7 1.7 0 0 0 14.2 6l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0 1.2 2.9H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1.6z"/>
+        </svg>
+        <span class="lbl">配置中心</span>
+      </button>
+      <button class="nav__item" data-page="access">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/>
+        </svg>
+        <span class="lbl">权限与审计</span>
+      </button>
+    </nav>
+  </aside>
+
+  <!-- ============ 主区 ============ -->
+  <div class="main">
+    <header class="topbar">
+      <button class="btn btn--ghost btn--sm" id="btn-collapse" title="折叠侧栏">☰</button>
+      <span class="topbar__title">ERP 服务器管理器 <span style="color:var(--brand-2);font-size:12px">v8</span></span>
+      <span class="topbar__spacer"></span>
+      <span class="chip" id="mode-chip">—</span>
+      <span class="chip" id="redis-chip">—</span>
+      <button class="chip" id="btn-degrade" title="立即降权" style="border-color:var(--line-2)">降权</button>
+      <button class="btn btn--ghost btn--sm" id="btn-theme" title="切换主题">◐</button>
+    </header>
+
+    <div class="content">
+
+      <!-- 总览 -->
+      <section class="page active" id="page-overview">
+        <div class="kpis">
+          <div class="kpi"><div class="kpi__label">运行模式</div><div class="kpi__value" id="ov-mode">—</div>
+            <div class="kpi__delta flat" id="ov-handles" style="font-size:11px;color:var(--ink-4)">—</div></div>
+          <div class="kpi"><div class="kpi__label">Redis</div><div class="kpi__value" id="ov-redis" style="font-size:20px">—</div>
+            <div class="kpi__delta flat">端口 6379</div></div>
+          <div class="kpi"><div class="kpi__label">未确认告警</div><div class="kpi__value" id="ov-alerts" style="color:var(--p1)">0</div>
+            <div class="kpi__delta flat">告警中心查看</div></div>
+          <div class="kpi"><div class="kpi__label">服务运行</div><div class="kpi__value" id="ov-services">0/0</div>
+            <div class="kpi__delta flat">erp-prod / erp-arq</div></div>
+        </div>
+        <div class="card">
+          <div class="card__hd"><h3>资源指标（2s 采样）</h3>
+            <button class="btn btn--ghost btn--sm" id="btn-refresh-ov">刷新</button></div>
+          <div class="kpis">
+            <div class="kpi"><div class="kpi__label">CPU</div><div class="kpi__value" id="ov-cpu" style="font-size:20px">—</div></div>
+            <div class="kpi"><div class="kpi__label">内存</div><div class="kpi__value" id="ov-mem" style="font-size:20px">—</div></div>
+            <div class="kpi"><div class="kpi__label">饱和度（黄金四指标）</div><div class="kpi__value" id="ov-sat" style="font-size:20px">—</div></div>
+            <div class="kpi"><div class="kpi__label">下行速率</div><div class="kpi__value" id="ov-net" style="font-size:20px">—</div></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card__hd"><h3>一键操作（互斥状态机）</h3>
+            <div id="ov-mode-hint" style="font-size:12px;color:var(--ink-4)">期望态收敛：声明目标模式，平台自动停对侧</div></div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <button class="btn btn--primary" data-action="start_dev" id="btn-start-dev">启动开发模式</button>
+            <button class="btn btn--danger" data-action="start_prod" id="btn-start-prod">启动生产模式</button>
+            <button class="btn btn--ghost" data-action="stop_all" id="btn-stop-all">停止全部</button>
+            <button class="btn btn--ghost" data-action="install_services" id="btn-install" style="margin-left:auto">安装服务</button>
+            <button class="btn btn--ghost" data-action="uninstall_services" id="btn-uninstall">卸载服务</button>
+          </div>
+        </div>
+        <div class="card" id="ov-stepper-card" style="display:none">
+          <div class="card__hd"><h3 id="ov-stepper-name">Pipeline</h3>
+            <span class="sub" id="ov-stepper-progress">—</span></div>
+          <div id="ov-stepper" class="stepper"></div>
+        </div>
+        <div class="card">
+          <div class="card__hd"><h3>进程快照 · Top 5</h3></div>
+          <div id="ov-procs" style="font-family:ui-monospace,Consolas,monospace;font-size:12.5px;display:grid;gap:6px">—</div>
+        </div>
+      </section>
+
+      <!-- 服务编排 -->
+      <section class="page" id="page-services">
+        <div class="card">
+          <div class="card__hd"><h3>期望态收敛</h3>
+            <div id="svc-flow" style="display:flex;gap:8px;align-items:center"></div></div>
+          <div style="display:flex;gap:10px;margin-bottom:14px">
+            <button class="btn btn--primary" data-action="switch_mode" data-target="dev" id="btn-svc-dev">切换到开发</button>
+            <button class="btn btn--danger" data-action="switch_mode" data-target="prod" id="btn-svc-prod">切换到生产</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card__hd"><h3>服务清单</h3></div>
+          <table>
+            <thead><tr><th>服务</th><th>状态</th><th>PID</th><th>托管</th></tr></thead>
+            <tbody id="svc-tbody"><tr><td colspan="4" class="empty">加载中…</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 监控告警 -->
+      <section class="page" id="page-alerts">
+        <div class="card">
+          <div class="card__hd"><h3>告警列表</h3>
+            <div style="display:flex;gap:8px;align-items:center">
+              <div id="alert-stats" style="display:flex;gap:6px"></div>
+              <button class="btn btn--ghost btn--sm" data-action="alerts_ack_all" id="btn-ack-all">全部确认</button>
+            </div></div>
+          <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
+            <div id="alert-filters" class="filters"></div>
+            <input id="silence-svc" placeholder="静默服务名（如 api）" style="background:var(--bg-0);border:1px solid var(--line-2);border-radius:var(--r-sm);padding:7px 10px;color:var(--ink-1);font-size:12.5px;width:160px">
+            <input id="silence-dur" type="number" value="900" style="background:var(--bg-0);border:1px solid var(--line-2);border-radius:var(--r-sm);padding:7px 10px;color:var(--ink-1);font-size:12.5px;width:80px" title="时长（秒）">
+            <button class="btn btn--ghost btn--sm" data-action="silence_add" id="btn-silence">静默 15min</button>
+          </div>
+          <div id="alert-list"></div>
+        </div>
+      </section>
+
+      <!-- 日志中心 -->
+      <section class="page" id="page-logs">
+        <div class="card">
+          <div class="card__hd"><h3>日志流</h3>
+            <div style="display:flex;gap:8px;align-items:center">
+              <div id="log-tabs" class="filters"></div>
+              <label style="font-size:12px;color:var(--ink-4);display:flex;gap:5px;align-items:center">
+                <input type="checkbox" id="log-live" checked> 实时跟随
+              </label>
+              <button class="btn btn--ghost btn--sm" id="btn-log-refresh">刷新</button>
+            </div></div>
+          <div class="log-view" id="log-view" data-live="1">加载中…</div>
+        </div>
+      </section>
+
+      <!-- 配置中心 -->
+      <section class="page" id="page-config">
+        <div class="card">
+          <div class="card__hd"><h3>配置（schema v2）</h3>
+            <div style="display:flex;gap:8px;align-items:center">
+              <div id="cfg-tabs" class="filters"></div>
+              <button class="btn btn--ghost btn--sm" data-action="config_migrate" id="btn-cfg-migrate">版本迁移</button>
+              <button class="btn btn--primary btn--sm" data-action="config_save" id="btn-cfg-save">保存</button>
+            </div></div>
+          <div id="cfg-form" class="cfg-form" style="display:none"></div>
+          <pre id="cfg-json" style="background:var(--bg-0);border:1px solid var(--line);border-radius:var(--r-sm);padding:14px;font-size:12.5px;font-family:ui-monospace,Consolas,monospace;overflow:auto;max-height:60vh;white-space:pre-wrap">加载中…</pre>
+        </div>
+      </section>
+
+      <!-- 权限与审计 -->
+      <section class="page" id="page-access">
+        <div class="card">
+          <div class="card__hd"><h3>当前会话</h3></div>
+          <div id="acc-session" style="display:flex;gap:10px"></div>
+          <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
+            <select id="elevate-role" style="background:var(--bg-0);border:1px solid var(--line-2);border-radius:var(--r-sm);padding:6px 10px;color:var(--ink-1)">
+              <option value="operator">提权至 Operator</option>
+              <option value="admin">提权至 Admin</option>
+            </select>
+            <button class="btn btn--primary btn--sm" data-action="elevate" id="btn-elevate">PIN 提权</button>
+            <button class="btn btn--ghost btn--sm" data-action="degrade" id="btn-degrade-acc">立即降权</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card__hd"><h3>高危操作矩阵（L0–L3）</h3>
+            <span class="sub">按钮置灰 = 当前角色无权限；标签显示危险等级</span></div>
+          <div id="acc-matrix" style="font-size:12.5px"></div>
+        </div>
+        <div class="card">
+          <div class="card__hd"><h3>审计流水（append-only 哈希链）</h3></div>
+          <table>
+            <thead><tr><th>时间</th><th>操作人</th><th>角色</th><th>操作</th><th>目标</th><th>结果</th></tr></thead>
+            <tbody id="acc-audit"></tbody>
+          </table>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<script src="js/api.js"></script>
+<script src="js/pages/overview.js"></script>
+<script src="js/pages/services.js"></script>
+<script src="js/pages/ops.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
