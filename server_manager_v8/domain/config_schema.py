@@ -13,7 +13,7 @@ SCHEMA_VERSION = 2
 CONFIG_V2_DEFAULTS: dict = {
     'schema_version': SCHEMA_VERSION,
     'app': {
-        'theme': 'light',
+        'theme': 'dark',
         'nav_collapsed': False,
         'reduced_motion': 'auto',
     },

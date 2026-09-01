@@ -28,3 +28,29 @@
   --sidebar-w: 220px; --sidebar-w-collapsed: 64px; --topbar-h: 56px;
   --ease: cubic-bezier(.4, 0, .2, 1); --dur: .28s;
 }
+
+/* ============ 亮色主题（设计文档 5.1「深色优先、亮色可选」） ============ */
+:root[data-theme="light"] {
+  /* 背景层次 */
+  --bg-0: #F4F6FB; --bg-1: #F8FAFD; --bg-2: #FFFFFF; --bg-3: #EEF2F8;
+  --bg-glass: rgba(255, 255, 255, .72); --bg-glass-2: rgba(248, 250, 253, .92);
+
+  /* 描边 */
+  --line: #E2E8F0; --line-2: #CBD5E1; --line-3: #94A3B8;
+
+  /* 文本 */
+  --ink-1: #0F172A; --ink-2: #334155; --ink-3: #64748B; --ink-4: #94A3B8;
+
+  /* 品牌 & 语义（设计文档 5.1 亮色对应） */
+  --brand: #1677FF; --brand-2: #13C2C2; --violet: #722ED1; --ok: #00A870;
+  --p0: #F5222D; --p1: #FA8C16; --p2: #FAAD14; --p3: #1890FF; --p4: #8C8C8C;
+
+  /* 渐变（亮色下略降饱和） */
+  --grad-brand: linear-gradient(135deg, #1677FF 0%, #13C2C2 100%);
+  --grad-ink: linear-gradient(120deg, #0F172A 0%, #13C2C2 46%, #722ED1 100%);
+
+  /* 阴影（亮色底用深阴影表达层级） */
+  --sh-1: 0 1px 2px rgba(15, 23, 42, .12);
+  --sh-2: 0 4px 16px rgba(15, 23, 42, .14);
+  --sh-3: 0 12px 32px rgba(15, 23, 42, .18);
+}

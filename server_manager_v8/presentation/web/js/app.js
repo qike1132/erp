@@ -39,6 +39,7 @@ const App = (() => {
     overview: window.PagesOverview, services: window.PagesServices,
     alerts: window.PagesAlerts, logs: window.PagesLogs,
     config: window.PagesConfig, access: window.PagesAccess,
+    settings: window.PagesSettings,
   };
   function navTo(name) {
     current = name;
@@ -192,18 +193,18 @@ const App = (() => {
   }
 
   /* ---- 主题 ---- */
+  function applyTheme(theme) {
+    if (theme === 'light') document.documentElement.dataset.theme = 'light';
+    else delete document.documentElement.dataset.theme;  // 默认暗色（:root 即暗色变量）
+  }
+  function getTheme() {
+    return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+  }
   function toggleTheme() {
-    const light = document.body.classList.toggle('light');
-    const root = document.documentElement.style;
-    root.setProperty('--bg-0', light ? '#F4F6FB' : '#060A12');
-    root.setProperty('--bg-1', light ? '#F8FAFD' : '#0A0F1C');
-    root.setProperty('--bg-2', light ? '#FFFFFF' : '#0F1626');
-    root.setProperty('--ink-1', light ? '#0F172A' : '#EAF0FA');
-    root.setProperty('--ink-2', light ? '#334155' : '#A6B4CE');
-    root.setProperty('--ink-3', light ? '#64748B' : '#6B7C9E');
-    root.setProperty('--ink-4', light ? '#94A3B8' : '#495A78');
-    root.setProperty('--line', light ? '#E2E8F0' : '#1C2740');
-    root.setProperty('--line-2', light ? '#CBD5E1' : '#28364F');
+    const next = getTheme() === 'light' ? 'dark' : 'light';
+    applyTheme(next);
+    // 持久化到配置（best-effort，权限不足时降级为仅本次会话生效）
+    try { API.config_save({ app: { theme: next } }); } catch (e) { /* 忽略 */ }
   }
 
   /* ---- 引导 ---- */
@@ -217,6 +218,11 @@ const App = (() => {
       await API.degrade(); refreshGuard(); refreshTopbar(); App.toast('ok', '已降权');
     });
     window.__push = onPush;
+    // 应用已保存主题（配置驱动页面，消解 theme 字段与 GUI 实际暗色的冲突）
+    try {
+      const cfg = await API.config();
+      if (cfg && cfg.app) applyTheme(cfg.app.theme === 'light' ? 'light' : 'dark');
+    } catch (e) { /* 配置未就绪，沿用默认暗色 */ }
     Object.values(pages).forEach((p) => { if (p && p.bind) p.bind(); });
     await refreshTopbar();
     await refreshGuard();
@@ -225,7 +231,8 @@ const App = (() => {
   }
 
   return { boot, navTo, toast, refreshTopbar, refreshGuard, callAction,
-           esc, fmtTs, onPush, current: () => current, pipeline: () => pipeline };
+           esc, fmtTs, onPush, current: () => current, pipeline: () => pipeline,
+           applyTheme, getTheme };
 })();
 
 document.addEventListener('DOMContentLoaded', () => App.boot());
