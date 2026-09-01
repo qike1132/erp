@@ -14,13 +14,14 @@ ERP 服务器管理器 v8 GUI 打包配置（PyInstaller）
 import os
 from pathlib import Path
 
-# 仓库根
-ROOT = Path(__file__).resolve().parents[1]
+# 仓库根（用 PyInstaller 保证注入的 SPECPATH，兼容 `pyinstaller` 与 `python -m PyInstaller`）
+# SPECPATH = <repo>/packaging，其上级目录即仓库根
+ROOT = Path(SPECPATH).resolve().parent
 SRV = ROOT / 'server_manager_v8'
 
 # 资源：前端 web 目录（HTML/CSS/JS）
 datas = [
-    (str(SRV / 'presentation' / 'web'), 'server_manager_v8' / 'presentation' / 'web'),
+    (str(SRV / 'presentation' / 'web'), str(Path('server_manager_v8') / 'presentation' / 'web')),
 ]
 
 # 隐藏导入（v8 实际使用）
