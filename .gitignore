@@ -217,6 +217,18 @@ dist_v6/
 # 运行时上传文件
 /static/uploads/
 
+# === 2026-09-11 排障调试脚本/备份治理：本地临时生成物不入库 ===
+# 排障临时调试脚本（非源码；以 _check / _e2e_check 结尾的为回归脚本，保留不忽略）
+_dbg_*.py
+_probe_*.py
+_mc_calc_repro.py
+_mc_contract_diff.py
+_mc_contract_probe.py
+# 系统自动生成的备份归档（*.zip 已覆盖 server/pre_restore 等；此处显式屏蔽整个 backups/ 防新产物入库）
+# 注：backups/material-calculator-rollback-20260911、backups/stale-restore-20260911 为已入库的
+#     回滚源副本，因已被跟踪不会被本规则移除；如需从版本库移除请单独 git rm --cached。
+/backups/
+
 # Redis 生产配置含真实密码，禁止入库（模板见 redis.production.conf.template）
 config/redis.production.conf
 
