@@ -70,6 +70,8 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
   }
 
   const currentScopeKey = computed(() => scopeKeyOf(selectedRole.value))
+  /** 产品级默认 BOM 自定义名称（可双击改名并持久化，默认"默认BOM"） */
+  const defaultScopeName = ref('默认BOM')
   /** 产品级默认 BOM 是否存在物料（存在时角色栏展示"默认BOM"标签，保证存量数据可编辑） */
   const defaultScopeHasItems = computed(() => {
     const scope = bomByScope['default']
@@ -80,8 +82,8 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
     return scope ? scope[currentBomCategory.value] : []
   })
   const currentBomTabLabel = computed(() => bomTabs.find(tab => tab.key === currentBomCategory.value)?.label || '')
-  /** 汇总栏标题后缀：当前角色名或"默认BOM" */
-  const currentScopeLabel = computed(() => (selectedRole.value ? selectedRole.value.name : '默认BOM'))
+  /** 汇总栏标题后缀：当前角色名或默认 BOM 名称 */
+  const currentScopeLabel = computed(() => (selectedRole.value ? selectedRole.value.name : defaultScopeName.value))
   /** 当前作用域物料总数 */
   const currentScopeCount = computed(() => {
     const scope = bomByScope[currentScopeKey.value]
@@ -104,15 +106,17 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
   async function loadBomData(productId: number) {
     bomRoles.value = []
     selectedRole.value = null
+    defaultScopeName.value = '默认BOM'
     Object.keys(bomByScope).forEach(key => delete bomByScope[key])
     try {
       const res = (await productApi.loadBom(productId)) as {
         success: boolean
-        product?: { roles?: { id: number; name: string }[] }
+        product?: { roles?: { id: number; name: string }[]; default_bom_label?: string | null }
         materials?: BomMaterialRecord[]
       }
       if (res.success) {
         bomRoles.value = (res.product?.roles || []).map(r => ({ id: r.id, name: r.name }))
+        defaultScopeName.value = res.product?.default_bom_label?.trim() || '默认BOM'
         const materialsList = res.materials || []
         materialsList.forEach((item) => {
           const category = item.category || 'accessory'
@@ -184,6 +188,13 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
     const trimmed = (newName || '').trim()
     if (!trimmed || role.name === trimmed) return
     role.name = trimmed
+  }
+
+  /** 重命名默认 BOM（空名/同名忽略，保持原名称） */
+  function renameDefaultScope(newName: string) {
+    const trimmed = (newName || '').trim()
+    if (!trimmed || defaultScopeName.value === trimmed) return
+    defaultScopeName.value = trimmed
   }
 
   async function removeRole(role: Role) {
@@ -274,6 +285,7 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
         fillings,
         roles: rolesPayload,
         packagings: [],
+        default_bom_label: defaultScopeName.value === '默认BOM' ? null : defaultScopeName.value,
       }
       const res = (await productApi.saveBom(currentProductId.value!, payload)) as { success: boolean; error?: string }
       if (res.success) {
@@ -318,10 +330,12 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
     // 角色
     bomRoles,
     selectedRole,
+    defaultScopeName,
     defaultScopeHasItems,
     selectRole,
     addRole,
     renameRole,
+    renameDefaultScope,
     removeRole,
     // Quick copy
     ...quickCopy,

@@ -103,6 +103,7 @@ async def get_bom(db: AsyncSession, product_id: int) -> dict:
         'id': product.id,
         'name': product.name,
         'barcode': product.barcode,
+        'default_bom_label': product.default_bom_label,
         'roles': [{'id': r.id, 'name': r.role_name} for r in product.roles],
         'materials': all_materials,
     }
@@ -207,6 +208,19 @@ async def save_bom(db: AsyncSession, product_id: int, data: dict, username: str)
     product = result.scalars().first()
     if not product:
         raise ValueError('产品不存在')
+
+    # ===== 默认 BOM 自定义名称（default_bom_label 键存在才更新，旧客户端不传则保持原状） =====
+    if 'default_bom_label' in data:
+        label = (data.get('default_bom_label') or '').strip() or None
+        if label != product.default_bom_label:
+            if label is not None:
+                db.add(ModificationLog(
+                    target_type='product', target_id=product.id,
+                    field_name='default_bom_label',
+                    old_value=product.default_bom_label or '', new_value=label,
+                    modifier_name=username,
+                ))
+            product.default_bom_label = label
 
     # ===== 角色保存（roles 键存在才执行全量替换，旧客户端不传则保持原状） =====
     temp_role_map: dict = {}  # 客户端临时 role_key -> 新建角色真实 id

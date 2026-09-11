@@ -35,6 +35,7 @@ class Product(Base):
     factory: Mapped[str | None] = mapped_column(String(50), comment='所属工厂')
     initial_stock: Mapped[int] = mapped_column(Integer, default=0, comment='初始库存')
     current_stock: Mapped[int] = mapped_column(Integer, default=0, comment='当前库存')
+    default_bom_label: Mapped[str | None] = mapped_column(String(50), comment='默认BOM自定义名称(NULL=显示"默认BOM")')
     version: Mapped[int] = mapped_column(Integer, default=0, server_default='0', comment='乐观锁版本号')
     create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True, comment='创建时间')
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')

@@ -109,6 +109,7 @@ class BomSaveRequest(BaseModel):
     packagings: list[PackagingItem] = []
     roles: list[RoleItem] = []
     fillings: list[FillingItem] = []
+    default_bom_label: str | None = None
 
 class BomCopyRequest(BaseModel):
     """复制BOM请求"""

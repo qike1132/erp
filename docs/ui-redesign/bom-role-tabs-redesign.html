@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BOM 角色 · 页签式交互重设计</title>
+<style>
+  :root {
+    --primary-50:#eff6ff; --primary-100:#dbeafe; --primary-200:#bfdbfe;
+    --primary-400:#60a5fa; --primary-500:#3b82f6; --primary-600:#2563eb; --primary-700:#1d4ed8;
+    --danger-50:#fef2f2; --danger-100:#fee2e2; --danger-600:#dc2626; --danger-700:#b91c1c;
+    --surface:#f8fafc; --border:#e2e8f0; --border-soft:#f1f5f9;
+    --text:#1e293b; --text-2:#64748b;
+    --radius:12px;
+    --shadow-sm:0 1px 2px rgba(15,23,42,.05), 0 4px 12px rgba(15,23,42,.06);
+    --shadow-lg:0 12px 32px rgba(15,23,42,.16);
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family:"Microsoft YaHei","PingFang SC","Segoe UI",sans-serif;
+    background:#eef2f7; color:var(--text); min-height:100vh; padding:48px 24px;
+  }
+  .wrap { max-width:960px; margin:0 auto; }
+  .intro { margin-bottom:28px; }
+  .intro h1 { font-size:20px; font-weight:700; margin-bottom:10px; }
+  .intro p { font-size:13px; color:var(--text-2); line-height:1.8; }
+  .intro p b { color:var(--primary-600); }
+
+  /* ===== 弹窗 ===== */
+  .modal {
+    background:#fff; border-radius:18px; box-shadow:var(--shadow-lg);
+    overflow:hidden;
+  }
+  .modal-head {
+    display:flex; justify-content:space-between; align-items:center;
+    padding:18px 24px; border-bottom:1px solid var(--border);
+  }
+  .modal-head h2 { font-size:15px; font-weight:700; display:flex; align-items:center; gap:8px; }
+  .modal-head h2 .dot { width:8px; height:8px; border-radius:50%; background:var(--primary-500); }
+  .modal-head .close { width:32px; height:32px; border:none; border-radius:50%; background:var(--surface); color:var(--text-2); cursor:pointer; font-size:14px; }
+  .modal-body { padding:20px 24px; background:var(--surface); }
+
+  /* ===== 角色页签区（核心重构） ===== */
+  .role-section-title {
+    display:flex; align-items:center; gap:8px;
+    font-size:13px; font-weight:700; color:var(--text-2); margin-bottom:10px;
+  }
+  .role-section-title .ic { color:var(--primary-500); }
+  .role-tabs {
+    display:flex; align-items:stretch; gap:6px; flex-wrap:wrap;
+    background:#fff; border:1px solid var(--border); border-radius:var(--radius);
+    padding:8px; box-shadow:var(--shadow-sm);
+  }
+  .role-tab {
+    display:inline-flex; align-items:center; gap:6px;
+    padding:8px 10px 8px 14px; border-radius:9px; cursor:pointer;
+    font-size:13px; font-weight:600; color:var(--text-2);
+    border:1px solid transparent; position:relative;
+    transition:background .18s ease, color .18s ease, border-color .18s ease;
+    user-select:none;
+  }
+  .role-tab:hover { background:var(--primary-50); color:var(--primary-600); }
+  .role-tab.active {
+    background:linear-gradient(135deg, var(--primary-500), var(--primary-600));
+    color:#fff; box-shadow:0 4px 12px rgba(59,130,246,.28);
+  }
+  .role-tab.default-tab {
+    border-style:dashed; border-color:var(--border); color:var(--text-2);
+  }
+  .role-tab.default-tab.active {
+    background:#f1f5f9; color:var(--text); border-color:var(--border); border-style:solid;
+    box-shadow:none;
+  }
+  .role-tab .badge {
+    font-size:10px; font-weight:600; padding:1px 6px; border-radius:6px;
+    background:rgba(255,255,255,.25); color:inherit;
+  }
+  .role-tab.default-tab .badge { background:var(--border-soft); color:var(--text-2); }
+  /* 角色名可进入内联编辑 */
+  .role-tab .name { white-space:nowrap; }
+  .role-tab .edit-input {
+    width:96px; padding:2px 8px; border:1px solid #fff; border-radius:6px;
+    font-size:13px; font-weight:600; outline:none;
+  }
+  .role-tab.active .edit-input { border-color:transparent; }
+  /* ⋯ 菜单触发器 */
+  .role-tab .more {
+    width:20px; height:20px; border:none; border-radius:6px; background:transparent;
+    color:inherit; cursor:pointer; font-size:14px; line-height:1; opacity:.55;
+    display:flex; align-items:center; justify-content:center;
+    transition:opacity .15s ease, background .15s ease;
+  }
+  .role-tab .more:hover { opacity:1; background:rgba(0,0,0,.12); }
+  .add-tab {
+    display:inline-flex; align-items:center; gap:4px;
+    padding:8px 14px; border-radius:9px; cursor:pointer;
+    font-size:13px; font-weight:600; color:var(--primary-600);
+    border:2px dashed var(--primary-200); background:var(--primary-50);
+    transition:background .18s ease, border-color .18s ease;
+  }
+  .add-tab:hover { background:var(--primary-100); border-color:var(--primary-400); }
+  .add-input {
+    width:120px; padding:6px 10px; border:1px solid var(--primary-400); border-radius:9px;
+    font-size:13px; outline:none; box-shadow:0 0 0 3px rgba(59,130,246,.12);
+  }
+
+  /* ===== ⋯ 下拉菜单 ===== */
+  .menu-wrap { position:relative; }
+  .menu {
+    position:absolute; top:calc(100% + 6px); right:0; z-index:20; min-width:150px;
+    background:#fff; border:1px solid var(--border); border-radius:10px;
+    box-shadow:var(--shadow-lg); padding:5px; display:none;
+  }
+  .menu.open { display:block; animation:pop .15s ease; }
+  @keyframes pop { from { transform:scale(.96) translateY(-4px); opacity:0; } to { transform:scale(1) translateY(0); opacity:1; } }
+  .menu-item {
+    display:flex; align-items:center; gap:8px; width:100%;
+    padding:8px 10px; border:none; border-radius:7px; background:transparent;
+    font-size:13px; font-weight:600; color:var(--text); cursor:pointer; text-align:left;
+    transition:background .14s ease;
+  }
+  .menu-item:hover { background:var(--primary-50); }
+  .menu-item.danger { color:var(--danger-600); }
+  .menu-item.danger:hover { background:var(--danger-50); }
+  .menu-divider { height:1px; background:var(--border-soft); margin:4px 0; }
+
+  /* ===== 物料汇总栏 ===== */
+  .summary {
+    display:flex; justify-content:space-between; align-items:center;
+    background:#fff; border:1px solid var(--border); border-radius:var(--radius);
+    padding:12px 16px; margin-top:14px; box-shadow:var(--shadow-sm);
+  }
+  .summary .left { display:flex; align-items:center; gap:14px; }
+  .summary .label { font-size:13px; font-weight:700; }
+  .summary .label .scope { color:var(--primary-600); }
+  .summary .count { font-size:12px; color:var(--text-2); }
+  .summary .count b { font-size:15px; color:var(--primary-600); }
+  .btn {
+    padding:8px 14px; border-radius:9px; font-size:13px; font-weight:600; cursor:pointer;
+    border:2px solid transparent; display:inline-flex; align-items:center; gap:6px;
+    transition:transform .15s ease, box-shadow .15s ease;
+  }
+  .btn:hover { transform:translateY(-1px); }
+  .btn-primary { background:var(--primary-500); color:#fff; }
+  .btn-outline { background:#fff; color:var(--text); border-color:var(--border); }
+
+  /* ===== 删除确认弹窗 ===== */
+  .confirm-mask {
+    position:fixed; inset:0; z-index:50; background:rgba(15,23,42,.45);
+    display:none; align-items:center; justify-content:center;
+  }
+  .confirm-mask.show { display:flex; }
+  .confirm {
+    width:360px; background:#fff; border-radius:14px; padding:22px;
+    box-shadow:var(--shadow-lg); animation:pop .18s ease;
+  }
+  .confirm h4 { font-size:15px; font-weight:700; margin-bottom:8px; }
+  .confirm p { font-size:13px; color:var(--text-2); line-height:1.7; margin-bottom:20px; }
+  .confirm .actions { display:flex; justify-content:flex-end; gap:10px; }
+  .btn-danger { background:var(--danger-600); color:#fff; }
+  .toast {
+    position:fixed; top:24px; left:50%; transform:translateX(-50%) translateY(-80px);
+    background:#16a34a; color:#fff; padding:10px 20px; border-radius:10px; font-size:13px;
+    font-weight:600; box-shadow:0 8px 24px rgba(22,163,74,.3); z-index:60; opacity:0;
+    transition:transform .3s ease, opacity .3s ease;
+  }
+  .toast.show { transform:translateX(-50%) translateY(0); opacity:1; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="intro">
+    <h1>BOM 角色管理 · 页签式重设计</h1>
+    <p>
+      把角色从「胶囊 chip」重构为 <b>页签（Tab）</b> —— 因为它本质是「在一组变体之间切换浏览，各自有独立物料」，
+      与浏览器标签页/Excel 多 sheet 心智一致。<br>
+      <b>单一规则：点 tab 切换，点「⋯」管理</b>（重命名 / 删除），不再有双击、不再散落多个入口。
+    </p>
+  </div>
+
+  <div class="modal">
+    <div class="modal-head">
+      <h2><span class="dot"></span> BOM表配置 · Nommi糯米儿-宝藏收藏家系列毛绒盲盒</h2>
+      <button class="close">✕</button>
+    </div>
+    <div class="modal-body">
+      <!-- 角色页签区 -->
+      <div class="role-section-title"><span class="ic">◈</span> 角色 / 变体</div>
+      <div class="role-tabs" id="tabs"></div>
+
+      <!-- 物料汇总栏 -->
+      <div class="summary">
+        <div class="left">
+          <span class="label">面料类 · <span class="scope" id="scopeLabel">呼汇</span></span>
+          <span class="count">物料总数 <b>1</b></span>
+        </div>
+        <div>
+          <button class="btn btn-outline">复制BOM</button>
+          <button class="btn btn-primary">＋ 添加物料</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 确认弹窗 -->
+<div class="confirm-mask" id="confirmMask">
+  <div class="confirm">
+    <h4>删除角色「<span id="delName"></span>」？</h4>
+    <p>该角色的全部物料将一并删除，此操作不可恢复。</p>
+    <div class="actions">
+      <button class="btn btn-outline" onclick="closeConfirm()">取消</button>
+      <button class="btn btn-danger" onclick="doDelete()">删除</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+  const roles = [
+    { id: 1, name: '呼汇', isDefault: false },
+    { id: 2, name: '黄蛋', isDefault: false },
+    { id: 0, name: '默认BOM', isDefault: true },
+  ];
+  let activeId = 1; // 当前选中
+  let editingId = null; // 正在重命名
+  let menuId = null; // 展开⋯菜单
+  let pendingDelete = null;
+  let adding = false;
+
+  const scopeNames = { 1: '呼汇', 2: '黄蛋', 0: '默认BOM' };
+  const counts = { 1: 1, 2: 3, 0: 9 };
+
+  function render() {
+    const tabs = document.getElementById('tabs');
+    tabs.innerHTML = '';
+    roles.forEach(r => {
+      const tab = document.createElement('div');
+      tab.className = 'role-tab ' + (r.isDefault ? 'default-tab' : '') + (activeId === r.id ? ' active' : '');
+      tab.onclick = () => { activeId = r.id; closeMenu(); render(); };
+
+      if (editingId === r.id) {
+        const inp = document.createElement('input');
+        inp.className = 'edit-input';
+        inp.value = r.name;
+        inp.maxLength = 50;
+        inp.onclick = e => e.stopPropagation();
+        inp.onkeydown = e => {
+          if (e.key === 'Enter') { r.name = inp.value.trim() || r.name; editingId = null; render(); }
+          if (e.key === 'Escape') { editingId = null; render(); }
+        };
+        inp.onblur = () => { r.name = inp.value.trim() || r.name; editingId = null; render(); };
+        tab.appendChild(inp);
+        setTimeout(() => inp.focus(), 0);
+      } else {
+        const name = document.createElement('span');
+        name.className = 'name';
+        name.textContent = r.name;
+        tab.appendChild(name);
+        if (r.isDefault) {
+          const badge = document.createElement('span'); badge.className = 'badge'; badge.textContent = '基础';
+          tab.appendChild(badge);
+        }
+      }
+
+      // ⋯ 按钮
+      const wrap = document.createElement('span');
+      wrap.className = 'menu-wrap';
+      const more = document.createElement('button');
+      more.className = 'more'; more.textContent = '⋯'; more.title = '更多操作';
+      more.onclick = e => { e.stopPropagation(); if (menuId === r.id) { closeMenu(); } else { menuId = r.id; render(); } };
+      wrap.appendChild(more);
+
+      const menu = document.createElement('div');
+      menu.className = 'menu' + (menuId === r.id ? ' open' : '');
+      menu.innerHTML = `
+        <button class="menu-item" data-a="rename">✎ 重命名</button>
+        <div class="menu-divider"></div>
+        <button class="menu-item danger" data-a="delete">🗑 删除</button>`;
+      menu.querySelector('[data-a=rename]').onclick = e => { e.stopPropagation(); editingId = r.id; menuId = null; render(); };
+      menu.querySelector('[data-a=delete]').onclick = e => { e.stopPropagation(); pendingDelete = r.id; document.getElementById('delName').textContent = r.name; document.getElementById('confirmMask').classList.add('show'); menuId = null; render(); };
+      wrap.appendChild(menu);
+      tab.appendChild(wrap);
+      tabs.appendChild(tab);
+    });
+
+    // 添加角色
+    if (adding) {
+      const inp = document.createElement('input');
+      inp.className = 'add-input';
+      inp.placeholder = '角色名，回车确认';
+      inp.maxLength = 50;
+      inp.onkeydown = e => {
+        if (e.key === 'Enter') { const v = inp.value.trim(); if (v) { const id = Date.now(); roles.push({ id, name: v, isDefault: false }); activeId = id; } adding = false; render(); }
+        if (e.key === 'Escape') { adding = false; render(); }
+      };
+      inp.onblur = () => { const v = inp.value.trim(); if (v) { const id = Date.now(); roles.push({ id, name: v, isDefault: false }); activeId = id; } adding = false; render(); };
+      tabs.appendChild(inp);
+      setTimeout(() => inp.focus(), 0);
+    } else {
+      const add = document.createElement('div');
+      add.className = 'add-tab'; add.textContent = '＋ 添加角色';
+      add.onclick = () => { adding = true; closeMenu(); render(); };
+      tabs.appendChild(add);
+    }
+
+    document.getElementById('scopeLabel').textContent = scopeNames[activeId] || roles.find(r => r.id === activeId)?.name || '';
+  }
+
+  function closeMenu() { menuId = null; }
+  function closeConfirm() { document.getElementById('confirmMask').classList.remove('show'); pendingDelete = null; }
+  function doDelete() {
+    const i = roles.findIndex(r => r.id === pendingDelete);
+    if (i >= 0) roles.splice(i, 1);
+    if (activeId === pendingDelete) activeId = roles[0]?.id ?? 0;
+    const name = document.getElementById('delName').textContent;
+    document.getElementById('confirmMask').classList.remove('show');
+    pendingDelete = null;
+    render();
+    const t = document.getElementById('toast'); t.textContent = `已删除角色「${name}」`; t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2000);
+  }
+
+  // 关闭菜单：点击空白
+  document.addEventListener('click', () => { closeMenu(); render(); });
+
+  render();
+</script>
+</body>
+</html>

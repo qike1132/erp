@@ -49,8 +49,10 @@ def _mock_product(roles=None, materials=None, has_bom=True):
     product.barcode = '6901234567890'
     product.roles = roles or []
     product.material = None
+    product.material_rows = None
     product.fabrics = []
     product.accessories = []
+    product.default_bom_label = None
     product.has_bom = MagicMock(return_value=has_bom)
     product.get_all_materials = MagicMock(return_value=materials or [])
     return product
@@ -90,6 +92,15 @@ class TestGetBom:
         result = await bom_service.get_bom(mock_db, 1)
 
         assert result['roles'] == []
+
+    async def test_get_bom_returns_default_bom_label(self, mock_db):
+        product = _mock_product(roles=[])
+        product.default_bom_label = '基础款BOM'
+        mock_db.execute = AsyncMock(return_value=_mock_execute_result(product))
+
+        result = await bom_service.get_bom(mock_db, 1)
+
+        assert result['default_bom_label'] == '基础款BOM'
 
 
 class TestSaveBom:
@@ -174,6 +185,27 @@ class TestSaveBom:
 
         assert mock_db.delete.call_count == 0
         assert self._added_of(mock_db, bom_service.ProductRole) == []
+
+    async def test_save_default_bom_label(self, mock_db):
+        product = _mock_product(roles=[])
+        self._setup_db(mock_db, product)
+
+        await bom_service.save_bom(
+            mock_db, 1,
+            {'default_bom_label': '基础款BOM', 'roles': [], 'filling': None, 'fabrics': [], 'accessories': []},
+            'tester',
+        )
+
+        assert product.default_bom_label == '基础款BOM'
+
+    async def test_save_without_label_keeps_unchanged(self, mock_db):
+        product = _mock_product(roles=[])
+        product.default_bom_label = '原有名称'
+        self._setup_db(mock_db, product)
+
+        await bom_service.save_bom(mock_db, 1, {'roles': [], 'filling': None, 'fabrics': [], 'accessories': []}, 'tester')
+
+        assert product.default_bom_label == '原有名称'
 
     async def test_fabric_created_with_role_id(self, mock_db):
         product = _mock_product(roles=[])

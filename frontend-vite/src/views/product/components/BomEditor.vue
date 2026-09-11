@@ -50,56 +50,70 @@
                 <button class="bom-btn-add-v2" @click="addBomItem"><FontAwesomeIcon icon="plus" aria-hidden="true" />添加物料</button>
               </div>
             </div>
-            <!-- 角色栏：物料表格上方，点击角色标签切换到对应角色的 BOM -->
+            <!-- 角色页签：点 tab 切换BOM，点「⋯」管理（重命名/删除） -->
             <div class="bom-role-bar">
-              <span class="bom-role-label"><FontAwesomeIcon icon="user" aria-hidden="true" /> 角色：</span>
-              <div v-if="bomRoles.length" class="bom-role-chips">
-                <span
+              <span class="bom-role-label"><FontAwesomeIcon icon="tags" aria-hidden="true" /> 角色：</span>
+              <div class="bom-role-tabs">
+                <!-- 默认BOM 页签（产品级，可重命名、不可删除） -->
+                <div
                   v-if="defaultScopeHasItems"
-                  class="bom-role-chip"
+                  class="bom-role-tab default-tab"
                   :class="{ active: selectedRole === null }"
-                  title="产品级默认BOM（无角色归属的存量物料）"
-                  @click="selectRole(null)"
+                  @click="selectRole(null); openMenu = null"
                 >
-                  默认BOM
-                </span>
-                <span
+                  <template v-if="renamingTarget === 'default'">
+                    <input ref="renameInputRef" v-model="renameInput" class="bom-role-edit-input" maxlength="50"
+                      @keydown.enter="commitRename" @keydown.esc="cancelRename" @blur="commitRename" @click.stop />
+                  </template>
+                  <template v-else>
+                    <span class="bom-role-name">{{ defaultScopeName }}</span>
+                  </template>
+                  <span class="bom-role-more-wrap">
+                    <button class="bom-role-more" title="更多操作" @click.stop="toggleMenu('default')">⋯</button>
+                    <div v-if="openMenu === 'default'" class="bom-role-menu">
+                      <button class="bom-menu-item" @click.stop="startRename('default', defaultScopeName)"><FontAwesomeIcon icon="pencil-alt" aria-hidden="true" /> 重命名</button>
+                    </div>
+                  </span>
+                </div>
+                <!-- 角色页签 -->
+                <div
                   v-for="role in bomRoles"
                   :key="role.id ?? role.role_key"
-                  class="bom-role-chip"
+                  class="bom-role-tab"
                   :class="{ active: selectedRole === role }"
-                  :title="'点击切换BOM，双击重命名'"
-                  @click="selectRole(role)"
-                  @dblclick="startRename(role)"
+                  @click="selectRole(role); openMenu = null"
                 >
-                  <input
-                    v-if="renamingRole === role"
-                    v-model="renameInput"
-                    class="bom-role-rename-input"
-                    maxlength="100"
-                    @keydown.enter="commitRename"
-                    @keydown.esc="cancelRename"
-                    @blur="commitRename"
-                    @click.stop
-                  />
-                  <template v-else>{{ role.name }}</template>
-                  <button class="bom-role-rm" title="删除角色" @click.stop="removeRole(role)"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
-                </span>
-              </div>
-              <span v-else class="bom-role-empty">尚未配置角色（当前为产品级默认BOM），点击"＋ 添加角色"开始</span>
-              <span v-if="addingRole" class="bom-role-add-wrap">
+                  <template v-if="renamingTarget === role">
+                    <input ref="renameInputRef" v-model="renameInput" class="bom-role-edit-input" maxlength="50"
+                      @keydown.enter="commitRename" @keydown.esc="cancelRename" @blur="commitRename" @click.stop />
+                  </template>
+                  <template v-else>
+                    <span class="bom-role-name">{{ role.name }}</span>
+                  </template>
+                  <span class="bom-role-more-wrap">
+                    <button class="bom-role-more" title="更多操作" @click.stop="toggleMenu(role)">⋯</button>
+                    <div v-if="openMenu === role" class="bom-role-menu">
+                      <button class="bom-menu-item" @click.stop="startRename(role, role.name)"><FontAwesomeIcon icon="pencil-alt" aria-hidden="true" /> 重命名</button>
+                      <div class="bom-menu-divider"></div>
+                      <button class="bom-menu-item danger" @click.stop="removeRole(role); openMenu = null"><FontAwesomeIcon icon="trash-alt" aria-hidden="true" /> 删除</button>
+                    </div>
+                  </span>
+                </div>
+                <!-- 添加角色 -->
                 <input
+                  v-if="addingRole"
                   ref="roleAddInputRef"
                   v-model="newRoleName"
                   class="bom-role-add-input"
-                  maxlength="100"
-                  placeholder="输入角色名称，回车确认"
+                  maxlength="50"
+                  placeholder="角色名，回车确认"
                   @keydown.enter="commitAddRole"
                   @keydown.esc="cancelAddRole"
                   @blur="commitAddRole"
                 />
-              </span>
-              <button v-else class="bom-role-add-btn" @click="startAddRole"><FontAwesomeIcon icon="plus" aria-hidden="true" />添加角色</button>
+                <button v-else class="bom-role-add-btn" @click="startAddRole"><FontAwesomeIcon icon="plus" aria-hidden="true" />添加角色</button>
+              </div>
+              <span v-if="!bomRoles.length && !defaultScopeHasItems" class="bom-role-empty">尚未配置角色，点击"＋ 添加角色"开始</span>
             </div>
             <div v-if="quickCopyProgress.visible" class="mb-3">
               <div class="pd-progress"><div class="pd-progress-bar" :style="{ width: quickCopyProgress.percent + '%' }" /></div>
@@ -194,7 +208,7 @@ const {
   bomDialogVisible, bomProductName, currentBomCategory,
   bomTabs, currentBomItems, currentBomTabLabel, currentScopeLabel, currentScopeCount,
   switchBomTab, openBomModal, addBomItem, deleteBomItem, saveBom,
-  bomRoles, selectedRole, defaultScopeHasItems, selectRole, addRole, renameRole, removeRole,
+  bomRoles, selectedRole, defaultScopeName, defaultScopeHasItems, selectRole, addRole, renameRole, renameDefaultScope, removeRole,
   quickCopyKeyword, quickCopyLoading,
   quickCopyProgress,
   searchProductsForBom, selectAutocompleteItem, quickCopyBom,
@@ -203,20 +217,33 @@ const {
   searchProductForCopy, selectCopyBomProduct, confirmCopyBom,
 } = useProductListActions(confirmDialog)
 
-// ===== 角色重命名（双击标签进入内联编辑） =====
-const renamingRole = ref<Role | null>(null)
+// ===== 角色页签管理：⋯ 菜单 + 内联重命名 =====
+type TabKey = Role | 'default'
+const openMenu = ref<TabKey | null>(null)
+const renamingTarget = ref<TabKey | null>(null)
 const renameInput = ref('')
+const renameInputRef = ref<HTMLInputElement | HTMLInputElement[] | null>(null)
 
-function startRename(role: Role) {
-  renamingRole.value = role
-  renameInput.value = role.name
+function toggleMenu(key: TabKey) {
+  openMenu.value = openMenu.value === key ? null : key
+}
+function startRename(key: TabKey, name: string) {
+  renamingTarget.value = key
+  renameInput.value = name
+  openMenu.value = null
+  nextTick(() => {
+    const list = Array.isArray(renameInputRef.value) ? renameInputRef.value : [renameInputRef.value]
+    list[0]?.focus()
+  })
 }
 function commitRename() {
-  if (renamingRole.value) renameRole(renamingRole.value, renameInput.value)
-  renamingRole.value = null
+  if (!renamingTarget.value) return
+  if (renamingTarget.value === 'default') renameDefaultScope(renameInput.value)
+  else renameRole(renamingTarget.value, renameInput.value)
+  renamingTarget.value = null
 }
 function cancelRename() {
-  renamingRole.value = null
+  renamingTarget.value = null
 }
 
 // ===== 添加角色（内联输入，回车确认） =====
@@ -353,51 +380,74 @@ defineExpose({ open: openBomModal })
 .bom-btn-copy-v2:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(59,130,246,0.2); }
 .bom-btn-copy-v2:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
 
-/* ===== 角色栏（物料表格上方，点击角色切换 BOM） ===== */
+/* ===== 角色页签（点 tab 切换 BOM，⋯ 菜单管理） ===== */
 .bom-role-bar {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  background: white; border: 1px solid var(--color-primary-200); border-radius: 12px;
-  padding: 10px 16px; margin-bottom: 12px;
+  background: white; border: 1px solid var(--color-border-light, #e2e8f0); border-radius: 12px;
+  padding: 10px 14px; margin-bottom: 16px;
 }
 .bom-role-label {
   display: flex; align-items: center; gap: 6px;
-  font-size: 14px; font-weight: 700; color: var(--color-text); white-space: nowrap;
+  font-size: 13px; font-weight: 700; color: var(--color-text); white-space: nowrap;
 }
 .bom-role-label i { color: var(--color-primary-500); }
-.bom-role-chips { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: 1; }
-.bom-role-chip {
+.bom-role-tabs { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: 1; }
+.bom-role-tab {
   display: inline-flex; align-items: center; gap: 6px;
-  border: 2px solid var(--color-primary-200); background: white; color: var(--color-primary-600);
-  border-radius: 999px; padding: 4px 8px 4px 14px; font-size: 13px; font-weight: 600;
-  cursor: pointer; transition: background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
-  user-select: none;
+  padding: 7px 8px 7px 14px; border-radius: 9px; cursor: pointer;
+  font-size: 13px; font-weight: 600; color: var(--color-text-secondary);
+  border: 1px solid transparent; position: relative; user-select: none;
+  transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease, transform 0.16s ease;
 }
-.bom-role-chip:hover { background: var(--color-primary-50); transform: translateY(-1px); }
-.bom-role-chip.active {
+.bom-role-tab:hover { background: var(--color-primary-50); color: var(--color-primary-600); }
+.bom-role-tab.active {
   background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-600));
-  border-color: var(--color-primary-500); color: white;
-  box-shadow: 0 4px 12px rgba(59,130,246,0.3);
+  color: #fff; box-shadow: 0 4px 12px rgba(59,130,246,0.28);
 }
-.bom-role-rm {
-  width: 18px; height: 18px; border: none; border-radius: 50%; cursor: pointer;
-  background: transparent; color: inherit; opacity: 0.75; font-size: 12px;
-  display: flex; align-items: center; justify-content: center; transition: background 0.2s ease, opacity 0.2s ease;
+.bom-role-tab.default-tab { border-style: dashed; border-color: var(--color-border-light, #e2e8f0); }
+.bom-role-tab.default-tab.active {
+  background: var(--color-surface, #f8fafc); color: var(--color-text);
+  border-color: var(--color-border-light, #e2e8f0); border-style: solid; box-shadow: none;
 }
-.bom-role-rm:hover { background: var(--color-danger-100); color: var(--color-danger-600); opacity: 1; }
-.bom-role-rename-input {
-  width: 110px; padding: 2px 8px; border: 1px solid var(--color-primary-400); border-radius: 8px;
-  font-size: 13px; outline: none; box-shadow: 0 0 0 3px rgba(0, 148, 191, 0.1);
+.bom-role-name { white-space: nowrap; }
+.bom-role-edit-input {
+  width: 96px; padding: 2px 8px; border: 1px solid var(--color-primary-400); border-radius: 6px;
+  font-size: 13px; font-weight: 600; outline: none;
 }
+.bom-role-more-wrap { position: relative; display: inline-flex; }
+.bom-role-more {
+  width: 20px; height: 20px; border: none; border-radius: 6px; background: transparent;
+  color: inherit; cursor: pointer; font-size: 14px; line-height: 1; opacity: 0.55;
+  display: flex; align-items: center; justify-content: center;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+.bom-role-more:hover { opacity: 1; background: rgba(0,0,0,.12); }
+.bom-role-menu {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; min-width: 140px;
+  background: #fff; border: 1px solid var(--color-border-light, #e2e8f0); border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(15,23,42,.16); padding: 5px;
+  animation: bom-menu-pop 0.15s ease;
+}
+@keyframes bom-menu-pop { from { transform: scale(.96) translateY(-4px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
+.bom-menu-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 8px 10px; border: none; border-radius: 7px; background: transparent;
+  font-size: 13px; font-weight: 600; color: var(--color-text); cursor: pointer; text-align: left;
+  transition: background 0.14s ease;
+}
+.bom-menu-item:hover { background: var(--color-primary-50); }
+.bom-menu-item.danger { color: var(--color-danger-600); }
+.bom-menu-item.danger:hover { background: var(--color-danger-50); }
+.bom-menu-divider { height: 1px; background: var(--color-border-lighter, #f1f5f9); margin: 4px 0; }
 .bom-role-empty { font-size: 13px; color: var(--color-text-secondary); }
-.bom-role-add-wrap { display: inline-flex; }
 .bom-role-add-input {
-  border: 1px solid var(--color-primary-400); border-radius: 999px; padding: 5px 14px;
-  font-size: 13px; width: 180px; outline: none; box-shadow: 0 0 0 3px rgba(0, 148, 191, 0.1);
+  border: 1px solid var(--color-primary-400); border-radius: 9px; padding: 7px 12px;
+  font-size: 13px; width: 140px; outline: none; box-shadow: 0 0 0 3px rgba(59,130,246,.12);
 }
 .bom-role-add-btn {
   display: inline-flex; align-items: center; gap: 6px;
   border: 2px dashed var(--color-primary-200); background: var(--color-primary-50);
-  color: var(--color-primary-600); border-radius: 999px; padding: 5px 14px;
+  color: var(--color-primary-600); border-radius: 9px; padding: 7px 14px;
   font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s ease;
 }
 .bom-role-add-btn:hover { border-color: var(--color-primary-400); background: var(--color-primary-100); }

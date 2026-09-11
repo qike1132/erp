@@ -65,6 +65,7 @@ class BomSaveRequest(BaseModel):
     packagings: list[dict] = []
     roles: list[dict] = []
     fillings: list[dict] = []
+    default_bom_label: str | None = None
 
 
 class MaterialCalculateRequest(BaseModel):
