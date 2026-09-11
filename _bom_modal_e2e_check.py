@@ -13,17 +13,20 @@
   7. 底部「取消」按钮     → 正常关闭
   8. 保存 BOM 成功        → 自动关闭
 
-前置：dev server 运行在 127.0.0.1:5199（npx vite --port 5199 --host 127.0.0.1）。
+前置：目标站点已就绪。默认打 dev server（127.0.0.1:5199）；
+      验证构建产物时用环境变量覆盖，例如 BOM_E2E_BASE=http://127.0.0.1:5200
+      （配合 `vite preview --port 5200` 指向 dist）。
 """
 import json
+import os
 import pathlib
 import sys
 
 from playwright.sync_api import sync_playwright, Route
 
-BASE = 'http://127.0.0.1:5199'
+BASE = os.environ.get('BOM_E2E_BASE', 'http://127.0.0.1:5199').rstrip('/')
 TARGET = f'{BASE}/product'
-SHOT_DIR = pathlib.Path('evidence/bom_modal_e2e')
+SHOT_DIR = pathlib.Path(os.environ.get('BOM_E2E_SHOTS', 'evidence/bom_modal_e2e'))
 SHOT_DIR.mkdir(parents=True, exist_ok=True)
 
 BOM_URL_MARK = '/purchase-center/product/1/bom'
