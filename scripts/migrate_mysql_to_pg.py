@@ -1,4 +1,6 @@
 """数据迁移脚本: MySQL -> PostgreSQL (自动匹配列+类型转换)"""
+import os
+
 import psycopg2
 import pymysql
 from psycopg2.extras import execute_values
@@ -7,7 +9,7 @@ MYSQL_CONFIG = {
     'host': 'localhost',
     'port': 3306,
     'user': 'root',
-    'password': '110110',
+    'password': os.environ.get('MYSQL_PASSWORD', ''),
     'database': 'erp_system',
 }
 
@@ -15,7 +17,7 @@ PG_CONFIG = {
     'host': 'localhost',
     'port': 5432,
     'user': 'erp_app',
-    'password': '110110',
+    'password': os.environ.get('DB_PASSWORD', ''),
     'dbname': 'erp_system',
 }
 

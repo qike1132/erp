@@ -269,7 +269,7 @@ pip install -r requirements.txt
 编辑`.env`文件:
 ```env
 DB_TYPE=mysql
-DB_PASSWORD=110110
+DB_PASSWORD=<redacted-2026-09-11>
 SECRET_KEY=your-secret-key
 ```
 

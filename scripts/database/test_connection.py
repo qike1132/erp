@@ -243,8 +243,8 @@ class DatabaseConnectionTester:
 
         error_tests = [
             ('Wrong password', {'host': 'localhost', 'port': 3306, 'user': 'root', 'password': 'wrong_password', 'database': 'erp_system'}),
-            ('Wrong database', {'host': 'localhost', 'port': 3306, 'user': 'root', 'password': '110110', 'database': 'nonexistent_db'}),
-            ('Wrong host', {'host': 'wrong_host', 'port': 3306, 'user': 'root', 'password': '110110', 'database': 'erp_system'}),
+            ('Wrong database', {'host': 'localhost', 'port': 3306, 'user': 'root', 'password': 'not_a_real_password', 'database': 'nonexistent_db'}),
+            ('Wrong host', {'host': 'wrong_host', 'port': 3306, 'user': 'root', 'password': 'not_a_real_password', 'database': 'erp_system'}),
         ]
 
         all_errors_handled = True

@@ -1,6 +1,6 @@
 import pymysql
 
-conn = pymysql.connect(host='localhost', user='root', password='110110')
+conn = pymysql.connect(host='localhost', user='root', password='<redacted-2026-09-11-use-env>')
 cursor = conn.cursor()
 cursor.execute('SHOW VARIABLES LIKE "datadir"')
 result = cursor.fetchone()

@@ -286,7 +286,7 @@ def api_permission_required(permission_code):
 ```bash
 # 修改前
 FLASK_DEBUG=1
-SECRET_KEY=41c0e9c1286d735f614120651def34a4ec2acbe8a3ff65ba0804488d71fad4fc
+SECRET_KEY=<redacted-2026-09-11>
 
 # 修改后
 FLASK_DEBUG=0

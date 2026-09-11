@@ -11,7 +11,8 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 
 async def main():
-    url = "postgresql+asyncpg://erp_app:110110@localhost:5432/erp_system"
+    import os
+    url = f"postgresql+asyncpg://erp_app:{os.environ.get('DB_PASSWORD', '')}@localhost:5432/erp_system"
     engine = create_async_engine(url, echo=False)
     async with engine.connect() as conn:
         # 1. 查询湖北工厂的备货记录

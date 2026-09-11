@@ -11,7 +11,7 @@ async def main():
     host = os.getenv("DB_HOST", "localhost")
     port = int(os.getenv("DB_PORT", "5432"))
     user = os.getenv("DB_USER", "erp_app")
-    password = os.getenv("DB_PASSWORD", "110110")
+    password = os.getenv("DB_PASSWORD", "")
     database = os.getenv("DB_NAME", "erp_system")
 
     conn = await asyncpg.connect(

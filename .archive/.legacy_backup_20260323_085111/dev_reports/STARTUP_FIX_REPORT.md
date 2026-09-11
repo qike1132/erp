@@ -62,7 +62,7 @@ rm -rf app
 DB_TYPE=sqlite
 
 # Flask安全配置
-SECRET_KEY=41c0e9c1286d735f614120651def34a4ec2acbe8a3ff65ba0804488d71fad4fc
+SECRET_KEY=<redacted-2026-09-11>
 
 # 其他配置
 FLASK_ENV=development

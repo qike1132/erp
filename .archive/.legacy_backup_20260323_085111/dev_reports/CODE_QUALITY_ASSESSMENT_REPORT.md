@@ -491,7 +491,7 @@ for chunk in pd.read_excel(file_path, chunksize=1000):
 app.secret_key = 'erp_secret_key_2025'  # ❌ 不安全
 
 # 硬编码数据库密码 (app.py:30)
-db_password = os.getenv('DB_PASSWORD', '110110')  # ❌ 默认密码不安全
+db_password = os.getenv('DB_PASSWORD', '<weak-password-redacted-2026-09-11>')  # ❌ 默认密码不安全
 ```
 
 **安全风险**:

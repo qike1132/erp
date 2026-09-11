@@ -234,7 +234,7 @@ pip install Flask-WTF==1.2.1
 确保`.env`文件包含以下配置:
 
 ```env
-SECRET_KEY=41c0e9c1286d735f614120651def34a4ec2acbe8a3ff65ba0804488d71fad4fc
+SECRET_KEY=<redacted-2026-09-11>
 DB_PASSWORD=your_secure_password_here
 ```
 

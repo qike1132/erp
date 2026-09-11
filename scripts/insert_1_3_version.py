@@ -10,7 +10,7 @@ db_config = {
     'host': 'localhost',
     'port': '5432',
     'user': 'erp_app',
-    'password': '110110',
+    'password': os.environ.get('DB_PASSWORD', ''),
     'dbname': 'erp_system',
 }
 

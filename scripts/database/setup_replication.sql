@@ -1,20 +1,13 @@
 -- Create replication user for streaming replication
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'replicator') THEN
-    CREATE ROLE replicator WITH REPLICATION LOGIN PASSWORD 'ERP_Replication_2026_Secure';
-  END IF;
-END
-$$;
+-- 密码经 psql 变量注入（禁止硬编码）：
+--   psql -v POSTGRES_PASSWORD=... -v READONLY_PASSWORD=... -f setup_replication.sql
+-- 注：psql 变量在 $$美元引号$$ 内不插值，故用 \gexec 拼接执行
+SELECT 'CREATE ROLE replicator WITH REPLICATION LOGIN PASSWORD ' || quote_literal(:'POSTGRES_PASSWORD')
+WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'replicator') \gexec
 
 -- Create read-only user for application read replica access
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'erp_readonly') THEN
-    CREATE ROLE erp_readonly WITH LOGIN PASSWORD 'ERP_ReadOnly_2026_Secure';
-  END IF;
-END
-$$;
+SELECT 'CREATE ROLE erp_readonly WITH LOGIN PASSWORD ' || quote_literal(:'READONLY_PASSWORD')
+WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'erp_readonly') \gexec
 
 -- Grant read-only permissions
 GRANT CONNECT ON DATABASE erp_system TO erp_readonly;
